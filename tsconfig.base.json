@@ -1,0 +1,32 @@
+{
+  "compilerOptions": {
+    "target": "ES2022",
+    "useDefineForClassFields": true,
+    "lib": ["ES2022", "DOM", "DOM.Iterable"],
+    "module": "ESNext",
+    "moduleResolution": "Bundler",
+    "resolveJsonModule": true,
+    "allowSyntheticDefaultImports": true,
+    "esModuleInterop": true,
+    "strict": true,
+    "noUncheckedIndexedAccess": true,
+    "exactOptionalPropertyTypes": true,
+    "skipLibCheck": true,
+    "forceConsistentCasingInFileNames": true,
+    "declaration": true,
+    "declarationMap": true,
+    "sourceMap": true,
+    "baseUrl": ".",
+    "rootDir": ".",
+    "paths": {
+      "@axis/app-protocol": ["packages/app-protocol/src/index.ts"],
+      "@axis/architecture-rules": ["packages/architecture-rules/src/index.mjs"],
+      "@axis/capability-core": ["packages/capability-core/src/index.ts"],
+      "@axis/capability-runtime": ["packages/capability-runtime/src/index.ts"],
+      "@axis/project-core": ["packages/project-core/src/index.ts"],
+      "@axis/canvas-core": ["packages/canvas-core/src/index.ts"],
+      "@axis/flowmap-core": ["packages/flowmap-core/src/index.ts"],
+      "@axis/app-server": ["apps/app-server/src/index.ts"]
+    }
+  }
+}

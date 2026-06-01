@@ -1,0 +1,370 @@
+import { mkdir, readFile, rename, rm, stat, writeFile } from 'node:fs/promises';
+import { watch } from 'node:fs';
+import { dirname, join, relative } from 'node:path';
+import { randomUUID } from 'node:crypto';
+import {
+  axisHomeDir,
+  isIgnoredProjectFilePath,
+  normalizeProjectRelativePath,
+  resolveProjectPath
+} from './projectPaths.js';
+
+export const AXIS_PROJECT_SCHEMA_VERSION = 1;
+
+export interface ProjectIdentity {
+  id: string;
+  name: string;
+  rootPath: string;
+}
+
+export interface AxisProjectMetadata {
+  schemaVersion: number;
+  project: {
+    id: string;
+    name: string;
+    createdAt: string;
+    updatedAt: string;
+  };
+}
+
+export interface AxisProjectPaths {
+  axisDir: string;
+  projectFile: string;
+  canvasesDir: string;
+  flowmapsDir: string;
+  globalRuntimeDir: string;
+}
+
+export interface ProjectFileEntry {
+  projectRelativePath: string;
+  kind: 'file' | 'directory';
+}
+
+export interface ProjectTextFile {
+  projectRelativePath: string;
+  absolutePath: string;
+  content: string;
+  size: number;
+  mtimeMs: number;
+  revision: string;
+  language: 'yaml' | 'json' | 'markdown' | 'text';
+}
+
+export interface ProjectFileWatchHandle {
+  close(): void;
+}
+
+export interface NormalizedFileWatchEvent {
+  type: 'created' | 'changed' | 'deleted';
+  absolutePath: string;
+  projectRelativePath: string;
+  observedAt?: number;
+  affects: Array<'canvas' | 'flowmap' | 'project-metadata' | 'generated-asset-metadata' | 'content'>;
+}
+
+export function createProjectIdentity(projectRoot: string, name = basenameFromPath(projectRoot)): ProjectIdentity {
+  return {
+    id: randomUUID(),
+    name,
+    rootPath: projectRoot
+  };
+}
+
+export function getAxisProjectPaths(projectRoot: string): AxisProjectPaths {
+  const axisDir = join(projectRoot, '.axis');
+  return {
+    axisDir,
+    projectFile: join(axisDir, 'project.json'),
+    canvasesDir: join(axisDir, 'canvases'),
+    flowmapsDir: join(axisDir, 'flowmaps'),
+    globalRuntimeDir: join(axisHomeDir(), 'runtime')
+  };
+}
+
+export async function initializeBlankProject(projectRoot: string, options: { name?: string } = {}): Promise<AxisProjectMetadata> {
+  const paths = getAxisProjectPaths(projectRoot);
+  await mkdir(paths.canvasesDir, { recursive: true });
+
+  const now = new Date().toISOString();
+  const identity = createProjectIdentity(projectRoot, options.name);
+  const metadata: AxisProjectMetadata = {
+    schemaVersion: AXIS_PROJECT_SCHEMA_VERSION,
+    project: {
+      id: identity.id,
+      name: identity.name,
+      createdAt: now,
+      updatedAt: now
+    }
+  };
+
+  await writeJsonAtomic(paths.projectFile, metadata);
+  return metadata;
+}
+
+export async function readProjectMetadata(projectRoot: string): Promise<AxisProjectMetadata> {
+  const metadata = await readJsonFile<AxisProjectMetadata>(getAxisProjectPaths(projectRoot).projectFile);
+  assertProjectSchema(metadata);
+  return metadata;
+}
+
+export async function listAxisProjectFiles(projectRoot: string): Promise<ProjectFileEntry[]> {
+  const entries = await walkEntries(projectRoot);
+  return entries
+    .filter((entry) => !entry.projectRelativePath.startsWith('.git/'))
+    .filter((entry) => !isIgnoredProjectFilePath(entry.projectRelativePath))
+    .sort((a, b) => a.projectRelativePath.localeCompare(b.projectRelativePath));
+}
+
+export function watchProjectFiles(
+  projectRoot: string,
+  onEvent: (event: NormalizedFileWatchEvent) => void,
+  options: { debounceMs?: number } = {}
+): ProjectFileWatchHandle {
+  const debounceMs = options.debounceMs ?? 40;
+  const timers = new Map<string, NodeJS.Timeout>();
+  const watcher = watch(projectRoot, { recursive: true }, (eventType, fileName) => {
+    if (!fileName) {
+      return;
+    }
+    const projectRelativePath = String(fileName).replaceAll('\\', '/');
+    if (projectRelativePath.startsWith('.git/') || isIgnoredProjectFilePath(projectRelativePath) || projectRelativePath.includes('.tmp')) {
+      return;
+    }
+    const observedAt = Date.now();
+    const absolutePath = join(projectRoot, projectRelativePath);
+    const type = eventType === 'rename' ? 'changed' : 'changed';
+    const key = `${type}:${absolutePath}`;
+    const existing = timers.get(key);
+    if (existing) {
+      clearTimeout(existing);
+    }
+    timers.set(key, setTimeout(() => {
+      timers.delete(key);
+      onEvent(normalizeFileWatchEvent(projectRoot, absolutePath, type, observedAt));
+    }, debounceMs));
+  });
+
+  return {
+    close() {
+      for (const timer of timers.values()) {
+        clearTimeout(timer);
+      }
+      timers.clear();
+      watcher.close();
+    }
+  };
+}
+
+export async function readTextFile(absolutePath: string): Promise<string> {
+  return readFile(absolutePath, 'utf8');
+}
+
+export async function readProjectTextFile(projectRoot: string, projectRelativePath: string, options: { maxBytes?: number } = {}): Promise<ProjectTextFile> {
+  const absolutePath = resolveProjectPath(projectRoot, projectRelativePath);
+  const fileStat = await stat(absolutePath);
+  if (!fileStat.isFile()) {
+    throw new Error(`Project path is not a file: ${projectRelativePath}`);
+  }
+  const maxBytes = options.maxBytes ?? 1024 * 1024;
+  if (fileStat.size > maxBytes) {
+    throw new Error(`Project file is too large to open as text (${fileStat.size} bytes): ${projectRelativePath}`);
+  }
+  const bytes = await readFile(absolutePath);
+  if (isProbablyBinary(bytes)) {
+    throw new Error(`Project file appears to be binary, not text: ${projectRelativePath}`);
+  }
+  const content = bytes.toString('utf8');
+  if (content.includes('\uFFFD')) {
+    throw new Error(`Project file is not valid UTF-8 text: ${projectRelativePath}`);
+  }
+  return {
+    projectRelativePath: normalizeProjectRelativePath(projectRelativePath),
+    absolutePath,
+    content,
+    size: fileStat.size,
+    mtimeMs: fileStat.mtimeMs,
+    revision: projectFileRevision(fileStat.size, fileStat.mtimeMs),
+    language: detectTextLanguage(projectRelativePath)
+  };
+}
+
+export async function readProjectFileBytes(projectRoot: string, projectRelativePath: string, options: { maxBytes?: number } = {}): Promise<Uint8Array> {
+  const absolutePath = resolveProjectPath(projectRoot, projectRelativePath);
+  const fileStat = await stat(absolutePath);
+  if (!fileStat.isFile()) {
+    throw new Error(`Project path is not a file: ${projectRelativePath}`);
+  }
+  const maxBytes = options.maxBytes ?? 20 * 1024 * 1024;
+  if (fileStat.size > maxBytes) {
+    throw new Error(`Project file is too large to read (${fileStat.size} bytes): ${projectRelativePath}`);
+  }
+  return readFile(absolutePath);
+}
+
+export async function writeProjectFile(projectRoot: string, projectRelativePath: string, content: string | Uint8Array): Promise<string> {
+  const absolutePath = resolveProjectPath(projectRoot, projectRelativePath);
+  await mkdir(dirname(absolutePath), { recursive: true });
+  await writeFile(absolutePath, content);
+  return normalizeProjectRelativePath(projectRelativePath);
+}
+
+export async function writeProjectTextFile(projectRoot: string, projectRelativePath: string, content: string): Promise<ProjectTextFile> {
+  await writeProjectFile(projectRoot, projectRelativePath, content);
+  return readProjectTextFile(projectRoot, projectRelativePath);
+}
+
+export async function removeProjectPath(projectRoot: string, projectRelativePath: string): Promise<string> {
+  const absolutePath = resolveProjectPath(projectRoot, projectRelativePath);
+  await rm(absolutePath, { recursive: true, force: true });
+  return normalizeProjectRelativePath(projectRelativePath);
+}
+
+export {
+  copyProjectPath,
+  createProjectDirectory,
+  createProjectFile,
+  deleteProjectPathPermanently,
+  moveProjectPath,
+  nextCopyProjectPathName,
+  renameProjectPath,
+  uniquePasteTargetPath,
+  type CopyOrMoveProjectPathInput,
+  type CreateProjectPathInput,
+  type DeleteProjectPathInput,
+  type ProjectPathKind,
+  type ProjectPathOperationResult,
+  type RenameProjectPathInput
+} from './projectFileOperations.js';
+
+export {
+  assertProjectTreeVisibleMutationPath,
+  axisHomeDir,
+  isIgnoredProjectFilePath,
+  joinProjectPath,
+  normalizeProjectDirectoryPath,
+  normalizeProjectPathBasename,
+  normalizeProjectRelativePath,
+  parentProjectPath,
+  resolveProjectPath,
+  userHomeDir
+} from './projectPaths.js';
+
+export async function readJsonFile<T>(absolutePath: string): Promise<T> {
+  const content = await readTextFile(absolutePath);
+  return JSON.parse(content) as T;
+}
+
+export function projectFileRevision(size: number, mtimeMs: number): string {
+  return `${Math.round(mtimeMs)}:${size}`;
+}
+
+export async function writeJsonAtomic(absolutePath: string, value: unknown): Promise<void> {
+  await mkdir(dirname(absolutePath), { recursive: true });
+  const tempPath = `${absolutePath}.${randomUUID()}.tmp`;
+  await writeFile(tempPath, `${JSON.stringify(value, null, 2)}\n`, 'utf8');
+  await rename(tempPath, absolutePath);
+}
+
+export function normalizeFileWatchEvent(projectRoot: string, absolutePath: string, type: NormalizedFileWatchEvent['type'], observedAt?: number): NormalizedFileWatchEvent {
+  const projectRelativePath = relative(projectRoot, absolutePath).replaceAll('\\', '/');
+  const affects: NormalizedFileWatchEvent['affects'] = [];
+
+  if (isIgnoredProjectFilePath(projectRelativePath)) {
+    return {
+      type,
+      absolutePath,
+      projectRelativePath,
+      ...(observedAt === undefined ? {} : { observedAt }),
+      affects
+    };
+  }
+  if (projectRelativePath.startsWith('.axis/canvases/') && projectRelativePath.endsWith('.json')) {
+    affects.push('canvas');
+  } else if (projectRelativePath.startsWith('.axis/flowmaps/') && projectRelativePath.endsWith('.yaml')) {
+    affects.push('flowmap');
+  } else if (projectRelativePath === '.axis/project.json') {
+    affects.push('project-metadata');
+  } else if (
+    projectRelativePath === '.axis/assets/generated-assets-index.json'
+    || projectRelativePath.startsWith('.axis/assets/generated/')
+    || projectRelativePath === '.axis/cache/file-fingerprints.json'
+  ) {
+    affects.push('generated-asset-metadata');
+  } else {
+    affects.push('content');
+  }
+
+  return {
+    type,
+    absolutePath,
+    projectRelativePath,
+    ...(observedAt === undefined ? {} : { observedAt }),
+    affects
+  };
+}
+
+export function assertProjectSchema(metadata: AxisProjectMetadata): void {
+  if (metadata.schemaVersion !== AXIS_PROJECT_SCHEMA_VERSION) {
+    throw new Error(`Unsupported AXIS project schema ${metadata.schemaVersion}. Expected ${AXIS_PROJECT_SCHEMA_VERSION}.`);
+  }
+}
+
+async function walkEntries(root: string, prefix = ''): Promise<ProjectFileEntry[]> {
+  const fs = await import('node:fs/promises');
+  let directoryEntries;
+  try {
+    directoryEntries = await fs.readdir(join(root, prefix), { withFileTypes: true });
+  } catch (error) {
+    if (isNodeError(error) && error.code === 'ENOENT') {
+      return [];
+    }
+    throw error;
+  }
+
+  const collected: ProjectFileEntry[] = [];
+  for (const entry of directoryEntries) {
+    const projectRelativePath = prefix ? `${prefix}/${entry.name}` : entry.name;
+    if (entry.isDirectory()) {
+      if (isIgnoredProjectFilePath(projectRelativePath)) {
+        continue;
+      }
+      collected.push({ projectRelativePath, kind: 'directory' });
+      collected.push(...await walkEntries(root, projectRelativePath));
+    } else if (entry.isFile()) {
+      collected.push({ projectRelativePath, kind: 'file' });
+    }
+  }
+  return collected;
+}
+
+function basenameFromPath(path: string): string {
+  const normalized = path.replaceAll('\\', '/').replace(/\/$/, '');
+  return normalized.slice(normalized.lastIndexOf('/') + 1) || 'Untitled Project';
+}
+
+function detectTextLanguage(projectRelativePath: string): ProjectTextFile['language'] {
+  if (/\.(yaml|yml)$/i.test(projectRelativePath)) {
+    return 'yaml';
+  }
+  if (/\.json$/i.test(projectRelativePath)) {
+    return 'json';
+  }
+  if (/\.(md|markdown)$/i.test(projectRelativePath)) {
+    return 'markdown';
+  }
+  return 'text';
+}
+
+function isProbablyBinary(bytes: Uint8Array): boolean {
+  const sampleLength = Math.min(bytes.byteLength, 8192);
+  for (let index = 0; index < sampleLength; index += 1) {
+    if (bytes[index] === 0) {
+      return true;
+    }
+  }
+  return false;
+}
+
+function isNodeError(error: unknown): error is NodeJS.ErrnoException {
+  return typeof error === 'object' && error !== null && 'code' in error;
+}

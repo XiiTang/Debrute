@@ -1,0 +1,13 @@
+{
+  "files": [],
+  "references": [
+    { "path": "packages/capability-core" },
+    { "path": "packages/project-core" },
+    { "path": "packages/canvas-core" },
+    { "path": "packages/app-protocol" },
+    { "path": "packages/capability-runtime" },
+    { "path": "packages/flowmap-core" },
+    { "path": "apps/app-server" },
+    { "path": "apps/axis-cli" }
+  ]
+}

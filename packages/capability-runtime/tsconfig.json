@@ -1,0 +1,15 @@
+{
+  "extends": "../../tsconfig.base.json",
+  "compilerOptions": {
+    "composite": true,
+    "outDir": "dist",
+    "rootDir": "src"
+  },
+  "references": [
+    { "path": "../app-protocol" },
+    { "path": "../capability-core" },
+    { "path": "../canvas-core" },
+    { "path": "../project-core" }
+  ],
+  "include": ["src/**/*.ts"]
+}

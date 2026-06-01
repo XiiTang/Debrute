@@ -1,0 +1,307 @@
+import { access, stat } from 'node:fs/promises';
+import {
+  projectFileRevision,
+  resolveProjectPath
+} from '@axis/project-core';
+import {
+  CANVAS_DOCUMENT_SCHEMA_VERSION,
+  projectCanvas,
+  type CanvasDocument,
+  type CanvasMediaKind,
+  type CanvasNodeAvailability,
+  type CanvasNodeElement,
+  type CanvasProjection,
+  type CanvasSelection,
+  type CanvasStructureEdgeProjection,
+  type Diagnostic
+} from '@axis/canvas-core';
+import { canvasImagePreviewSourceInfo } from './CanvasImagePreviewService.js';
+
+export class CanvasProjectionService {
+  async projectCanvasDocument(
+    projectRoot: string,
+    canvas: CanvasDocument,
+    diagnostics: Diagnostic[] = [],
+    structureEdges: CanvasStructureEdgeProjection[] = []
+  ): Promise<CanvasProjection> {
+    const availabilityByPath = new Map(await Promise.all(canvas.nodeElements.map(async (node) => [
+      node.projectRelativePath,
+      await inspectCanvasNodeAvailability(projectRoot, node)
+    ] as const)));
+    return projectCanvas({
+      canvas,
+      diagnostics,
+      structureEdges,
+      nodeAvailability: (node) => availabilityByPath.get(node.projectRelativePath)!
+    });
+  }
+
+  projectCanvasWithKnownAvailability(canvas: CanvasDocument, projection: CanvasProjection): CanvasProjection {
+    const availabilityByPath = new Map(projection.nodes.map((node) => [node.projectRelativePath, node.availability]));
+    return projectCanvas({
+      canvas,
+      diagnostics: projection.diagnostics,
+      structureEdges: projection.edges,
+      nodeAvailability: (node) => {
+        const availability = availabilityByPath.get(node.projectRelativePath);
+        if (!availability) {
+          throw new Error(`Canvas node availability is not loaded: ${node.projectRelativePath}`);
+        }
+        return availability;
+      }
+    });
+  }
+}
+
+export function assertCurrentCanvasDocument(value: unknown, filePath: string): CanvasDocument {
+  if (isCurrentCanvasDocument(value)) {
+    return value;
+  }
+  throw new Error(`Invalid canvas document schema: ${filePath}`);
+}
+
+export function canvasMediaKindFromPath(projectRelativePath: string): CanvasMediaKind {
+  const lowerPath = projectRelativePath.toLowerCase();
+  if (/\.(png|jpe?g|webp|svg|gif)$/.test(lowerPath)) {
+    return 'image';
+  }
+  if (/\.(mp4|webm|mov|m4v)$/.test(lowerPath)) {
+    return 'video';
+  }
+  if (/\.(mp3|wav|wave|ogg|oga|opus|m4a|aac|flac|weba)$/.test(lowerPath)) {
+    return 'audio';
+  }
+  if (/\.(md|markdown|txt|json|ya?ml|html?|css|csv|tsv|xml|js|jsx|ts|tsx|mjs|cjs)$/.test(lowerPath)) {
+    return 'text';
+  }
+  return 'unknown';
+}
+
+async function inspectCanvasNodeAvailability(projectRoot: string, node: CanvasNodeElement): Promise<CanvasNodeAvailability> {
+  let absolutePath: string;
+  try {
+    absolutePath = resolveProjectPath(projectRoot, node.projectRelativePath);
+  } catch (error) {
+    return {
+      state: 'unreadable',
+      message: errorMessage(error)
+    };
+  }
+
+  try {
+    const fileStat = await stat(absolutePath);
+    if (node.nodeKind === 'directory') {
+      if (!fileStat.isDirectory()) {
+        return {
+          state: 'unreadable',
+          message: `Project path is not a directory: ${node.projectRelativePath}`
+        };
+      }
+      return {
+        state: 'available',
+        size: 0,
+        mimeType: 'inode/directory',
+        fileUrl: '',
+        mtimeMs: fileStat.mtimeMs,
+        revision: projectFileRevision(0, fileStat.mtimeMs)
+      };
+    }
+    if (!fileStat.isFile()) {
+      return {
+        state: 'unreadable',
+        message: `Project path is not a file: ${node.projectRelativePath}`
+      };
+    }
+    await access(absolutePath);
+    const revision = projectFileRevision(fileStat.size, fileStat.mtimeMs);
+    const mimeType = mimeTypeFromProjectPath(node.projectRelativePath);
+    const canvasImagePreview = node.mediaKind === 'image'
+      ? await canvasImagePreviewSourceInfo(projectRoot, node.projectRelativePath, fileStat.size)
+      : undefined;
+    return {
+      state: 'available',
+      size: fileStat.size,
+      mimeType,
+      fileUrl: projectFileUrl(node.projectRelativePath, revision),
+      ...(canvasImagePreview ? {
+        canvasImagePreviewable: canvasImagePreview.previewable,
+        ...(canvasImagePreview.sourceWidth === undefined ? {} : { canvasImagePreviewSourceWidth: canvasImagePreview.sourceWidth })
+      } : {}),
+      mtimeMs: fileStat.mtimeMs,
+      revision
+    };
+  } catch (error) {
+    if (isNodeError(error) && error.code === 'ENOENT') {
+      return {
+        state: 'missing',
+        message: `Project path is missing: ${node.projectRelativePath}`
+      };
+    }
+    return {
+      state: 'unreadable',
+      message: errorMessage(error)
+    };
+  }
+}
+
+function isCurrentCanvasDocument(value: unknown): value is CanvasDocument {
+  if (!isRecord(value) || value.schemaVersion !== CANVAS_DOCUMENT_SCHEMA_VERSION) {
+    return false;
+  }
+  return hasOnlyKeys(value, ['schemaVersion', 'id', 'title', 'nodeElements', 'annotations', 'viewport', 'selection', 'preferences'])
+    && typeof value.id === 'string'
+    && typeof value.title === 'string'
+    && Array.isArray(value.nodeElements)
+    && value.nodeElements.every(isCurrentCanvasNodeElement)
+    && Array.isArray(value.annotations)
+    && isRecord(value.viewport)
+    && hasOnlyKeys(value.viewport, ['x', 'y', 'zoom'])
+    && isFiniteNumber(value.viewport.x)
+    && isFiniteNumber(value.viewport.y)
+    && isFiniteNumber(value.viewport.zoom)
+    && value.viewport.zoom > 0
+    && (value.selection === undefined || isCurrentCanvasSelection(value.selection))
+    && isRecord(value.preferences)
+    && hasOnlyKeys(value.preferences, ['showDiagnostics'])
+    && typeof value.preferences.showDiagnostics === 'boolean';
+}
+
+function isCurrentCanvasNodeElement(value: unknown): value is CanvasNodeElement {
+  return isRecord(value)
+    && hasOnlyKeys(value, ['projectRelativePath', 'nodeKind', 'mediaKind', 'x', 'y', 'width', 'height', 'z', 'visible', 'locked', 'layoutMode'])
+    && typeof value.projectRelativePath === 'string'
+    && (value.nodeKind === 'directory' || value.nodeKind === 'file')
+    && (value.mediaKind === undefined || value.mediaKind === 'image' || value.mediaKind === 'video' || value.mediaKind === 'audio' || value.mediaKind === 'text' || value.mediaKind === 'unknown')
+    && typeof value.x === 'number'
+    && typeof value.y === 'number'
+    && typeof value.width === 'number'
+    && typeof value.height === 'number'
+    && typeof value.z === 'number'
+    && typeof value.visible === 'boolean'
+    && typeof value.locked === 'boolean'
+    && (value.layoutMode === undefined || value.layoutMode === 'manual');
+}
+
+function isCurrentCanvasSelection(value: unknown): value is CanvasSelection {
+  if (isCurrentCanvasSelectionItem(value)) {
+    return true;
+  }
+  return isRecord(value)
+    && hasOnlyKeys(value, ['kind', 'items'])
+    && value.kind === 'multi'
+    && Array.isArray(value.items)
+    && value.items.every(isCurrentCanvasSelectionItem);
+}
+
+function isCurrentCanvasSelectionItem(value: unknown): value is Exclude<CanvasSelection, { kind: 'multi' }> {
+  if (!isRecord(value)) {
+    return false;
+  }
+  if (value.kind === 'node') {
+    return hasOnlyKeys(value, ['kind', 'projectRelativePath'])
+      && typeof value.projectRelativePath === 'string'
+      && value.projectRelativePath.length > 0;
+  }
+  if (value.kind === 'diagnostic') {
+    return hasOnlyKeys(value, ['kind', 'id'])
+      && typeof value.id === 'string'
+      && value.id.length > 0;
+  }
+  return false;
+}
+
+function mimeTypeFromProjectPath(projectRelativePath: string): string {
+  const lowerPath = projectRelativePath.toLowerCase();
+  if (lowerPath.endsWith('.png')) {
+    return 'image/png';
+  }
+  if (lowerPath.endsWith('.jpg') || lowerPath.endsWith('.jpeg')) {
+    return 'image/jpeg';
+  }
+  if (lowerPath.endsWith('.webp')) {
+    return 'image/webp';
+  }
+  if (lowerPath.endsWith('.svg')) {
+    return 'image/svg+xml';
+  }
+  if (lowerPath.endsWith('.gif')) {
+    return 'image/gif';
+  }
+  if (lowerPath.endsWith('.mp4')) {
+    return 'video/mp4';
+  }
+  if (lowerPath.endsWith('.webm')) {
+    return 'video/webm';
+  }
+  if (lowerPath.endsWith('.mov')) {
+    return 'video/quicktime';
+  }
+  if (lowerPath.endsWith('.m4v')) {
+    return 'video/x-m4v';
+  }
+  if (lowerPath.endsWith('.mp3')) {
+    return 'audio/mpeg';
+  }
+  if (lowerPath.endsWith('.wav') || lowerPath.endsWith('.wave')) {
+    return 'audio/wav';
+  }
+  if (lowerPath.endsWith('.ogg') || lowerPath.endsWith('.oga') || lowerPath.endsWith('.opus')) {
+    return 'audio/ogg';
+  }
+  if (lowerPath.endsWith('.m4a') || lowerPath.endsWith('.aac')) {
+    return 'audio/mp4';
+  }
+  if (lowerPath.endsWith('.flac')) {
+    return 'audio/flac';
+  }
+  if (lowerPath.endsWith('.weba')) {
+    return 'audio/webm';
+  }
+  if (lowerPath.endsWith('.md') || lowerPath.endsWith('.markdown')) {
+    return 'text/markdown';
+  }
+  if (lowerPath.endsWith('.json')) {
+    return 'application/json';
+  }
+  if (lowerPath.endsWith('.yaml') || lowerPath.endsWith('.yml')) {
+    return 'application/yaml';
+  }
+  if (lowerPath.endsWith('.html') || lowerPath.endsWith('.htm')) {
+    return 'text/html';
+  }
+  if (lowerPath.endsWith('.css')) {
+    return 'text/css';
+  }
+  if (lowerPath.endsWith('.csv')) {
+    return 'text/csv';
+  }
+  return 'text/plain';
+}
+
+function projectFileUrl(projectRelativePath: string, revision: string): string {
+  const encodedPath = projectRelativePath.split('/').map(encodeURIComponent).join('/');
+  const url = new URL(`axis-project-file://project/${encodedPath}`);
+  url.searchParams.set('v', revision);
+  return url.toString();
+}
+
+function hasOnlyKeys(value: Record<string, unknown>, allowed: string[]): boolean {
+  const allowedSet = new Set(allowed);
+  return Object.keys(value).every((key) => allowedSet.has(key));
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null && !Array.isArray(value);
+}
+
+function isFiniteNumber(value: unknown): value is number {
+  return typeof value === 'number' && Number.isFinite(value);
+}
+
+function isNodeError(error: unknown): error is NodeJS.ErrnoException {
+  return typeof error === 'object' && error !== null && 'code' in error;
+}
+
+function errorMessage(error: unknown): string {
+  return error instanceof Error ? error.message : String(error);
+}

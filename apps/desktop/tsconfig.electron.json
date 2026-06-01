@@ -1,0 +1,17 @@
+{
+  "extends": "../../tsconfig.base.json",
+  "compilerOptions": {
+    "outDir": "dist-electron",
+    "rootDir": "src/electron",
+    "module": "NodeNext",
+    "moduleResolution": "NodeNext",
+    "declaration": false,
+    "declarationMap": false,
+    "noEmit": false
+  },
+  "references": [
+    { "path": "../../packages/app-protocol" },
+    { "path": "../../apps/app-server" }
+  ],
+  "include": ["src/electron/**/*.ts"]
+}

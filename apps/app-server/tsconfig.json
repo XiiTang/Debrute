@@ -1,0 +1,17 @@
+{
+  "extends": "../../tsconfig.base.json",
+  "compilerOptions": {
+    "composite": true,
+    "outDir": "dist",
+    "rootDir": "src"
+  },
+  "references": [
+    { "path": "../../packages/app-protocol" },
+    { "path": "../../packages/capability-core" },
+    { "path": "../../packages/capability-runtime" },
+    { "path": "../../packages/project-core" },
+    { "path": "../../packages/canvas-core" },
+    { "path": "../../packages/flowmap-core" }
+  ],
+  "include": ["src/**/*.ts"]
+}

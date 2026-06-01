@@ -1,0 +1,21 @@
+{
+  "name": "@axis/cli",
+  "version": "0.1.0",
+  "license": "Apache-2.0",
+  "type": "module",
+  "bin": {
+    "axis": "dist/index.js"
+  },
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "scripts": {
+    "build": "tsc -b",
+    "check": "tsc -b --pretty false",
+    "dev": "tsx src/index.ts"
+  },
+  "dependencies": {
+    "@axis/app-protocol": "0.1.0",
+    "@axis/app-server": "0.1.0",
+    "@axis/capability-runtime": "0.1.0"
+  }
+}

@@ -1,0 +1,44 @@
+{
+  "name": "axis",
+  "version": "0.1.0",
+  "license": "Apache-2.0",
+  "private": true,
+  "type": "module",
+  "description": "AXIS desktop local-first creative production workbench.",
+  "scripts": {
+    "build": "tsc -b tsconfig.build.json && node scripts/copy-runtime-assets.mjs && npm run build --workspace @axis/desktop",
+    "clean": "node scripts/clean.mjs",
+    "pack": "npm run pack --workspace @axis/desktop",
+    "package:cli": "node scripts/package-axis-cli.mjs",
+    "package:cli:all": "node scripts/package-axis-cli.mjs --all",
+    "dist": "npm run dist --workspace @axis/desktop",
+    "check": "tsc -b tsconfig.build.json --pretty false",
+    "dev": "npm run dev --workspace @axis/desktop",
+    "dev:electron": "npm run dev:electron --workspace @axis/desktop",
+    "preview": "npm run preview --workspace @axis/desktop",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "lint:arch": "node scripts/check-architecture.mjs",
+    "doctor": "node scripts/doctor.mjs",
+    "verify": "npm run doctor && npm run check && npm test && npm run lint:arch && npm run build"
+  },
+  "workspaces": [
+    "apps/*",
+    "packages/*"
+  ],
+  "dependencies": {
+    "@vitejs/plugin-react": "^5.1.1",
+    "tsx": "^4.21.0",
+    "typescript": "^5.9.3",
+    "vite": "^7.3.0",
+    "vitest": "^4.0.16"
+  },
+  "devDependencies": {
+    "@types/adm-zip": "^0.5.8",
+    "@types/node": "^25.6.0",
+    "@yao-pkg/pkg": "^6.20.0",
+    "concurrently": "^9.2.1",
+    "electron-builder": "^26.8.1",
+    "esbuild": "^0.28.0"
+  }
+}

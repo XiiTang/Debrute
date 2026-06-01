@@ -1,0 +1,78 @@
+{
+  "name": "@axis/desktop",
+  "version": "0.1.0",
+  "license": "Apache-2.0",
+  "private": true,
+  "type": "commonjs",
+  "description": "AXIS local-first desktop production workbench.",
+  "author": "AXIS",
+  "main": "dist-electron/main.js",
+  "scripts": {
+    "build": "tsc --noEmit && tsc -p tsconfig.electron.json --noEmit && vite build && node scripts/bundle-electron.mjs",
+    "build:electron": "node scripts/bundle-electron.mjs",
+    "pack": "npm run build && electron-builder --dir",
+    "dist": "npm run build && electron-builder",
+    "dev": "vite --host 127.0.0.1",
+    "dev:electron": "npm run build:electron && concurrently -k \"vite --host 127.0.0.1\" \"wait-on http://127.0.0.1:5173 && electron .\"",
+    "preview": "vite preview --host 127.0.0.1"
+  },
+  "build": {
+    "appId": "dev.axis.desktop",
+    "productName": "AXIS",
+    "electronVersion": "39.2.7",
+    "asar": true,
+    "directories": {
+      "output": "release"
+    },
+    "files": [
+      "dist/**/*",
+      "dist-electron/**/*",
+      "package.json"
+    ],
+    "publish": [
+      {
+        "provider": "github",
+        "owner": "XiiTang",
+        "repo": "AXIS",
+        "releaseType": "release"
+      }
+    ],
+    "mac": {
+      "category": "public.app-category.productivity",
+      "target": [
+        "dir",
+        "dmg"
+      ]
+    },
+    "win": {
+      "target": [
+        "nsis"
+      ]
+    }
+  },
+  "dependencies": {
+    "@axis/app-protocol": "0.1.0",
+    "@axis/app-server": "0.1.0",
+    "@axis/canvas-core": "0.1.0",
+    "@axis/project-core": "0.1.0",
+    "@monaco-editor/react": "^4.7.0",
+    "@vitejs/plugin-react": "^5.1.1",
+    "adm-zip": "^0.5.17",
+    "electron-updater": "^6.8.3",
+    "lucide-react": "^0.561.0",
+    "monaco-editor": "^0.55.1",
+    "react": "^19.2.3",
+    "react-dom": "^19.2.3",
+    "typescript": "^5.9.3",
+    "vite": "^7.3.0"
+  },
+  "devDependencies": {
+    "@types/react": "^19.2.7",
+    "@types/react-dom": "^19.2.3",
+    "concurrently": "^9.2.1",
+    "electron": "39.2.7",
+    "electron-builder": "^26.0.12",
+    "esbuild": "^0.27.2",
+    "wait-on": "^9.0.3"
+  }
+}

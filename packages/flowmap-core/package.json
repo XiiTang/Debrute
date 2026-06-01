@@ -1,0 +1,15 @@
+{
+  "name": "@axis/flowmap-core",
+  "version": "0.1.0",
+  "license": "Apache-2.0",
+  "type": "module",
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "scripts": {
+    "build": "tsc -b",
+    "check": "tsc -b --pretty false"
+  },
+  "dependencies": {
+    "yaml": "^2.9.0"
+  }
+}

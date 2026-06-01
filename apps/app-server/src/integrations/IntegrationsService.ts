@@ -1,0 +1,366 @@
+import {
+  INTEGRATION_CATALOG,
+  type IntegrationBackendStatus,
+  type IntegrationBinaryStatus,
+  type IntegrationCatalogBinary,
+  type IntegrationCatalogItem,
+  type IntegrationOperationStatus,
+  type IntegrationSettingsView,
+  type IntegrationStatus,
+  type IntegrationStatusKind
+} from './IntegrationCatalog.js';
+import {
+  buildIntegrationInstallQueryCommand,
+  buildIntegrationOperationCommand,
+  buildIntegrationQueryCommand,
+  detectPythonCliInstaller,
+  detectSystemPackageManager,
+  parseSystemInstallQueryOutput,
+  parseSystemPackageQueryOutput,
+  queryTimeoutMs,
+  type ResolvedPythonCliInstallerStatus,
+  type ResolvedSystemPackageManagerStatus
+} from './IntegrationBackends.js';
+import { resolveExecutable, runIntegrationCommand, runProbe, tail } from './IntegrationCommandRunner.js';
+
+export interface IntegrationsServiceOptions {
+  envPath?: string;
+  platform?: NodeJS.Platform;
+  pathExt?: string;
+  cacheTtlMs?: number;
+}
+
+interface ResolvedBackends {
+  systemPackageManager: ResolvedSystemPackageManagerStatus;
+  pythonCliInstaller: ResolvedPythonCliInstallerStatus;
+}
+
+export class IntegrationsService {
+  private readonly cacheTtlMs: number;
+  private cached: { createdAt: number; view: IntegrationSettingsView } | undefined;
+
+  constructor(private readonly options: IntegrationsServiceOptions) {
+    this.cacheTtlMs = options.cacheTtlMs ?? 30_000;
+  }
+
+  async listStatus(): Promise<IntegrationSettingsView> {
+    if (this.cached && Date.now() - this.cached.createdAt < this.cacheTtlMs) {
+      return this.cached.view;
+    }
+    return this.rescan();
+  }
+
+  async rescan(): Promise<IntegrationSettingsView> {
+    return this.scanIntegrations();
+  }
+
+  private async scanIntegrations(): Promise<IntegrationSettingsView> {
+    const { view } = await this.inspectIntegrations();
+    this.cached = { createdAt: Date.now(), view };
+    return view;
+  }
+
+  private async inspectIntegrations(): Promise<{
+    view: IntegrationSettingsView;
+    backends: ResolvedBackends;
+  }> {
+    const backendOptions = {
+      ...(this.options.platform ? { platform: this.options.platform } : {}),
+      envPath: this.options.envPath ?? process.env.PATH ?? '',
+      pathExt: this.options.pathExt ?? process.env.PATHEXT ?? ''
+    };
+    const [systemPackageManager, pythonCliInstaller] = await Promise.all([
+      detectSystemPackageManager(backendOptions),
+      detectPythonCliInstaller(backendOptions)
+    ]);
+    const backends = { systemPackageManager, pythonCliInstaller };
+    const integrations = await Promise.all(INTEGRATION_CATALOG.map((integration) => (
+      this.inspectIntegration(integration, backends)
+    )));
+    const view: IntegrationSettingsView = {
+      integrations,
+      backends: [
+        backendView(systemPackageManager),
+        backendView(pythonCliInstaller)
+      ],
+      operationRunning: false
+    };
+    return { view, backends };
+  }
+
+  private async inspectIntegration(
+    integration: IntegrationCatalogItem,
+    backends: ResolvedBackends
+  ): Promise<IntegrationStatus> {
+    const binaries = await Promise.all(integration.binaries.map((binary) => this.inspectBinary(binary)));
+    const status = aggregateIntegrationStatus(binaries);
+    const operationStatus = await this.inspectOperationStatus(integration, status, backends);
+    return {
+      integrationId: integration.id,
+      displayName: integration.displayName,
+      description: integration.description,
+      category: integration.category,
+      status,
+      summary: summarizeIntegrationStatus(status, binaries),
+      binaries,
+      ...(operationStatus ? { operationStatus } : {})
+    };
+  }
+
+  private async inspectOperationStatus(
+    integration: IntegrationCatalogItem,
+    status: IntegrationStatusKind,
+    backends: ResolvedBackends
+  ): Promise<IntegrationOperationStatus> {
+    if (integration.backend === 'python-cli-installer') {
+      return this.inspectPythonCliStatus(integration, status, backends.pythonCliInstaller);
+    }
+    return this.inspectSystemPackageStatus(integration, status, backends.systemPackageManager);
+  }
+
+  private async inspectSystemPackageStatus(
+    integration: Extract<IntegrationCatalogItem, { backend: 'system-package-manager' }>,
+    status: IntegrationStatusKind,
+    backend: ResolvedSystemPackageManagerStatus
+  ): Promise<IntegrationOperationStatus> {
+    const packageName = backend.manager ? integration.packages[backend.manager].packageName : undefined;
+    const base: IntegrationOperationStatus = {
+      backendKind: 'system-package-manager',
+      ...(backend.backend ? { backend: backend.backend } : {}),
+      ...(packageName ? { packageName } : {}),
+      installAvailable: false,
+      updateAvailable: false,
+      uninstallAvailable: false
+    };
+
+    if (!backend.available) {
+      return {
+        ...base,
+        unavailableReason: backend.unavailableReason ?? 'System package manager is unavailable.'
+      };
+    }
+
+    const installCommand = buildIntegrationOperationCommand(integration, backend, 'install');
+    const updateCommand = buildIntegrationOperationCommand(integration, backend, 'update');
+    const uninstallCommand = buildIntegrationOperationCommand(integration, backend, 'uninstall');
+    if (status === 'not_found') {
+      const query = installCommand ? await this.queryInstallPackageStatus(integration, backend) : { updateAvailable: false };
+      return {
+        ...base,
+        ...query,
+        ...(installCommand ? { installCommandPreview: installCommand.preview } : {})
+      };
+    }
+    if (status !== 'ready') {
+      return {
+        ...base,
+        unavailableReason: 'Integration operations require a ready detected integration.'
+      };
+    }
+
+    const query = await this.queryPackageStatus(integration, backend);
+    return {
+      ...base,
+      ...query,
+      ...(updateCommand && query.updateAvailable ? { updateCommandPreview: updateCommand.preview } : {}),
+      ...(uninstallCommand ? { uninstallCommandPreview: uninstallCommand.preview } : {})
+    };
+  }
+
+  private async inspectPythonCliStatus(
+    integration: Extract<IntegrationCatalogItem, { backend: 'python-cli-installer' }>,
+    status: IntegrationStatusKind,
+    backend: ResolvedPythonCliInstallerStatus
+  ): Promise<IntegrationOperationStatus> {
+    const base: IntegrationOperationStatus = {
+      backendKind: 'python-cli-installer',
+      ...(backend.backend ? { backend: backend.backend } : {}),
+      packageName: integration.pythonCli.packageName,
+      installAvailable: false,
+      updateAvailable: false,
+      uninstallAvailable: false
+    };
+
+    if (!backend.available) {
+      return {
+        ...base,
+        unavailableReason: backend.unavailableReason ?? 'Python CLI installer is unavailable.'
+      };
+    }
+
+    const installCommand = buildIntegrationOperationCommand(integration, backend, 'install');
+    const updateCommand = buildIntegrationOperationCommand(integration, backend, 'update');
+    const uninstallCommand = buildIntegrationOperationCommand(integration, backend, 'uninstall');
+    if (status === 'not_found') {
+      return {
+        ...base,
+        ...(installCommand ? { installCommandPreview: installCommand.preview } : {})
+      };
+    }
+    if (status !== 'ready') {
+      return {
+        ...base,
+        unavailableReason: 'Integration operations require a ready detected integration.'
+      };
+    }
+
+    return {
+      ...base,
+      ...(updateCommand ? { updateCommandPreview: updateCommand.preview } : {}),
+      ...(uninstallCommand ? { uninstallCommandPreview: uninstallCommand.preview } : {})
+    };
+  }
+
+  private async queryPackageStatus(
+    integration: Extract<IntegrationCatalogItem, { backend: 'system-package-manager' }>,
+    backend: ResolvedSystemPackageManagerStatus
+  ): Promise<Pick<IntegrationOperationStatus, 'installedVersion' | 'latestVersion' | 'updateAvailable' | 'queryDiagnostic' | 'unavailableReason'>> {
+    const queryCommand = buildIntegrationQueryCommand(integration, backend);
+    if (!queryCommand || !backend.manager) {
+      return { updateAvailable: false };
+    }
+
+    const result = await runIntegrationCommand({
+      file: queryCommand.file,
+      args: queryCommand.args,
+      preview: queryCommand.preview,
+      timeoutMs: queryTimeoutMs()
+    });
+    const brewOutdatedJson = backend.manager === 'brew' && result.stdout.trim();
+    if (!result.ok && !brewOutdatedJson) {
+      return { updateAvailable: false, queryDiagnostic: result.diagnostic };
+    }
+
+    try {
+      return parseSystemPackageQueryOutput(backend.manager, integration.packages[backend.manager].packageName, result.stdout);
+    } catch (error) {
+      return {
+        updateAvailable: false,
+        queryDiagnostic: {
+          commandPreview: queryCommand.preview,
+          errorKind: 'parse_error',
+          stderrTail: error instanceof Error ? error.message : String(error)
+        }
+      };
+    }
+  }
+
+  private async queryInstallPackageStatus(
+    integration: Extract<IntegrationCatalogItem, { backend: 'system-package-manager' }>,
+    backend: ResolvedSystemPackageManagerStatus
+  ): Promise<Pick<IntegrationOperationStatus, 'latestVersion' | 'updateAvailable' | 'queryDiagnostic'>> {
+    const queryCommand = buildIntegrationInstallQueryCommand(integration, backend);
+    if (!queryCommand || !backend.manager) {
+      return { updateAvailable: false };
+    }
+
+    const result = await runIntegrationCommand({
+      file: queryCommand.file,
+      args: queryCommand.args,
+      preview: queryCommand.preview,
+      timeoutMs: queryTimeoutMs()
+    });
+    if (!result.ok) {
+      return { updateAvailable: false, queryDiagnostic: result.diagnostic };
+    }
+
+    try {
+      return parseSystemInstallQueryOutput(backend.manager, integration.packages[backend.manager].packageName, result.stdout);
+    } catch (error) {
+      return {
+        updateAvailable: false,
+        queryDiagnostic: {
+          commandPreview: queryCommand.preview,
+          errorKind: 'parse_error',
+          stderrTail: error instanceof Error ? error.message : String(error)
+        }
+      };
+    }
+  }
+
+  private async inspectBinary(binary: IntegrationCatalogBinary): Promise<IntegrationBinaryStatus> {
+    const path = await this.resolveDefaultBinaryPath(binary);
+    if (!path) {
+      return {
+        binaryId: binary.id,
+        displayName: binary.displayName,
+        status: 'not_found'
+      };
+    }
+
+    const probe = await runProbe(path, binary.probe.args, binary.probe.timeoutMs);
+    if (!probe.ok) {
+      return {
+        binaryId: binary.id,
+        displayName: binary.displayName,
+        status: 'probe_failed',
+        probe: {
+          ...(probe.exitCode !== undefined ? { exitCode: probe.exitCode } : {}),
+          ...(probe.errorKind ? { errorKind: probe.errorKind } : {}),
+          ...(probe.stderr ? { stderrTail: tail(probe.stderr) } : {})
+        }
+      };
+    }
+
+    const version = parseVersion(binary, probe.stdout);
+    return {
+      binaryId: binary.id,
+      displayName: binary.displayName,
+      status: 'ready',
+      ...(version ? { version } : {})
+    };
+  }
+
+  private async resolveDefaultBinaryPath(binary: IntegrationCatalogBinary): Promise<string | undefined> {
+    const platform = this.options.platform ?? process.platform;
+    for (const name of binary.names) {
+      const path = await resolveExecutable(name, this.options.envPath ?? process.env.PATH ?? '', platform, this.options.pathExt ?? process.env.PATHEXT ?? '');
+      if (path) {
+        return path;
+      }
+    }
+    return undefined;
+  }
+}
+
+function aggregateIntegrationStatus(binaries: IntegrationBinaryStatus[]): IntegrationStatusKind {
+  if (binaries.some((binary) => binary.status === 'probe_failed')) {
+    return 'probe_failed';
+  }
+  if (binaries.some((binary) => binary.status === 'not_found')) {
+    return 'not_found';
+  }
+  return 'ready';
+}
+
+function summarizeIntegrationStatus(status: IntegrationStatusKind, binaries: IntegrationBinaryStatus[]): string {
+  if (status === 'ready') {
+    return 'Ready.';
+  }
+  if (status === 'probe_failed') {
+    return `${binaries.find((binary) => binary.status === 'probe_failed')?.displayName ?? 'A required binary'} probe failed.`;
+  }
+  if (status === 'not_found') {
+    return `${binaries.find((binary) => binary.status === 'not_found')?.displayName ?? 'A required binary'} is missing.`;
+  }
+  return '';
+}
+
+function backendView(backend: ResolvedSystemPackageManagerStatus | ResolvedPythonCliInstallerStatus): IntegrationBackendStatus {
+  return {
+    kind: backend.kind,
+    ...(backend.backend ? { backend: backend.backend } : {}),
+    available: backend.available,
+    ...(backend.unavailableReason ? { unavailableReason: backend.unavailableReason } : {})
+  };
+}
+
+function parseVersion(binary: IntegrationCatalogBinary, stdout: string): string | undefined {
+  if (binary.versionParser === 'exiftool' || binary.versionParser === 'mediainfo') {
+    return stdout.match(/(?:^|[^\w])v?(\d+(?:\.\d+)+)\b/i)?.[1];
+  }
+  if (binary.versionParser === 'imagemagick') {
+    return stdout.match(/ImageMagick\s+(\d+(?:\.\d+)+(?:-\d+)?)/i)?.[1];
+  }
+  return stdout.match(/\bversion\s+([^\s,]+)/i)?.[1];
+}

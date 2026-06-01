@@ -1,0 +1,39 @@
+import { mkdir, mkdtemp, rename, rm, writeFile } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+import { describe, expect, it } from 'vitest';
+import { AxisAppServer } from '@axis/app-server';
+
+describe('app-server generated asset metadata', () => {
+  it('records generated asset metadata and looks it up after the file is renamed', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'axis-app-server-generated-metadata-'));
+    let server: AxisAppServer | undefined;
+    try {
+      await mkdir(join(root, 'generated'), { recursive: true });
+      await writeFile(join(root, 'generated/cover.png'), Buffer.from('image-bytes'));
+      server = new AxisAppServer();
+      await server.openProject(root, { initializeIfMissing: true, createDefaultCanvas: true });
+
+      await server.recordGeneratedAssetMetadata({
+        projectRelativePath: 'generated/cover.png',
+        providerCall: { request: { prompt: 'cover' }, output: { ok: true } }
+      });
+      await rename(join(root, 'generated/cover.png'), join(root, 'generated/renamed-cover.png'));
+
+      const lookup = await server.lookupGeneratedAssetMetadata({ projectRelativePath: 'generated/renamed-cover.png' });
+
+      expect(lookup.status).toBe('matched');
+      if (lookup.status === 'matched') {
+        expect(lookup.records[0]).toMatchObject({
+          schemaVersion: 1,
+          providerCall: { request: { prompt: 'cover' }, output: { ok: true } }
+        });
+        expect(JSON.stringify(lookup.records[0])).not.toContain('originalProjectRelativePath');
+        expect(JSON.stringify(lookup.records[0])).not.toContain('"file"');
+      }
+    } finally {
+      server?.close();
+      await rm(root, { recursive: true, force: true });
+    }
+  });
+});

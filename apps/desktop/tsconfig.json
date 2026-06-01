@@ -1,0 +1,14 @@
+{
+  "extends": "../../tsconfig.base.json",
+  "compilerOptions": {
+    "noEmit": true,
+    "jsx": "react-jsx",
+    "rootDir": "."
+  },
+  "include": ["src/main.tsx", "src/types.ts", "src/workbench/**/*.ts", "src/workbench/**/*.tsx", "vite.config.ts"],
+  "references": [
+    { "path": "../../packages/app-protocol" },
+    { "path": "../../packages/project-core" },
+    { "path": "../../packages/canvas-core" }
+  ]
+}

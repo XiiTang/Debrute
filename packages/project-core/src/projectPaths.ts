@@ -1,0 +1,83 @@
+import { basename, isAbsolute, join, resolve, sep } from 'node:path';
+
+export function userHomeDir(): string {
+  const home = process.env.HOME ?? process.env.USERPROFILE;
+  if (!home) {
+    throw new Error('User home directory is not available.');
+  }
+  return home;
+}
+
+export function axisHomeDir(): string {
+  return join(userHomeDir(), '.axis');
+}
+
+export function normalizeProjectPathBasename(name: string): string {
+  const trimmed = name.trim();
+  if (!trimmed) {
+    throw new Error('Project path name must be non-empty.');
+  }
+  if (trimmed === '.' || trimmed === '..' || trimmed !== basename(trimmed) || trimmed.includes('/') || trimmed.includes('\\')) {
+    throw new Error('Project path name must be a basename.');
+  }
+  return trimmed;
+}
+
+export function normalizeProjectRelativePath(projectRelativePath: string): string {
+  return normalizeProjectPath(projectRelativePath, { allowEmpty: false });
+}
+
+export function normalizeProjectDirectoryPath(projectRelativePath: string): string {
+  return normalizeProjectPath(projectRelativePath, { allowEmpty: true });
+}
+
+export function parentProjectPath(projectRelativePath: string): string {
+  const parts = normalizeProjectDirectoryPath(projectRelativePath).split('/').filter(Boolean);
+  return parts.length <= 1 ? '' : parts.slice(0, -1).join('/');
+}
+
+export function joinProjectPath(parentPath: string, name: string): string {
+  const safeName = normalizeProjectPathBasename(name);
+  const normalizedParent = normalizeProjectDirectoryPath(parentPath);
+  return normalizedParent ? `${normalizedParent}/${safeName}` : safeName;
+}
+
+export function resolveProjectPath(projectRoot: string, projectRelativePath: string): string {
+  const normalizedPath = normalizeProjectPath(projectRelativePath, { allowEmpty: true });
+  const root = resolve(projectRoot);
+  const absolutePath = resolve(root, normalizedPath);
+  if (absolutePath !== root && !absolutePath.startsWith(`${root}${sep}`)) {
+    throw new Error(`Project path escapes project root: ${projectRelativePath}`);
+  }
+  return absolutePath;
+}
+
+export function assertProjectTreeVisibleMutationPath(projectRelativePath: string): void {
+  const normalizedPath = normalizeProjectRelativePath(projectRelativePath);
+  if (normalizedPath === '.git' || normalizedPath.startsWith('.git/') || isIgnoredProjectFilePath(normalizedPath)) {
+    throw new Error(`Project path is not visible in the Project Tree: ${projectRelativePath}`);
+  }
+}
+
+export function isIgnoredProjectFilePath(projectRelativePath: string): boolean {
+  return projectRelativePath === '.axis/cache/canvas-image-previews'
+    || projectRelativePath.startsWith('.axis/cache/canvas-image-previews/');
+}
+
+function normalizeProjectPath(projectRelativePath: string, options: { allowEmpty: boolean }): string {
+  if (isAbsolute(projectRelativePath) || /^[A-Za-z]:[\\/]/.test(projectRelativePath)) {
+    throw new Error(`Project path must be relative: ${projectRelativePath}`);
+  }
+  const normalized = projectRelativePath.replaceAll('\\', '/');
+  if (!normalized) {
+    if (options.allowEmpty) {
+      return '';
+    }
+    throw new Error('Project path must be non-empty.');
+  }
+  const parts = normalized.split('/');
+  if (parts.some((part) => part === '' || part === '.' || part === '..')) {
+    throw new Error(`Project path must not contain "." or ".." segments: ${projectRelativePath}`);
+  }
+  return parts.join('/');
+}

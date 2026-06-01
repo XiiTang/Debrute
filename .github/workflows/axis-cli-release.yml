@@ -1,0 +1,28 @@
+name: AXIS CLI Release
+
+on:
+  push:
+    tags:
+      - 'v*.*.*'
+
+permissions:
+  contents: write
+
+jobs:
+  package-cli:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - run: npm run check
+      - run: npm run package:cli:all
+      - uses: softprops/action-gh-release@v2
+        with:
+          files: |
+            release/axis-cli/axis-cli-*.tar.gz
+            release/axis-cli/axis-cli-*.zip
+            release/axis-cli/axis-cli_SHA256SUMS
