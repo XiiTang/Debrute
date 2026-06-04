@@ -2,7 +2,6 @@ export const CANVAS_DOCUMENT_SCHEMA_VERSION = 1;
 export const CANVAS_IMAGE_PREVIEW_WIDTH_BUCKETS = [256, 512, 1024, 2048] as const;
 export const CANVAS_IMAGE_PREVIEW_MIN_SOURCE_BYTES = 1.5 * 1024 * 1024;
 
-export type CanvasEntityKind = 'diagnostic' | 'node';
 export type CanvasImagePreviewWidth = typeof CANVAS_IMAGE_PREVIEW_WIDTH_BUCKETS[number];
 export type CanvasNodeKind = 'directory' | 'file';
 export type CanvasMediaKind = 'image' | 'video' | 'audio' | 'text' | 'unknown';
@@ -26,23 +25,6 @@ export interface CanvasAnnotation {
   x: number;
   y: number;
 }
-
-export interface CanvasViewport {
-  x: number;
-  y: number;
-  zoom: number;
-}
-
-export type CanvasSelectionItem =
-  | { kind: 'diagnostic'; id: string }
-  | { kind: 'node'; projectRelativePath: string };
-
-export type CanvasSelection =
-  | CanvasSelectionItem
-  | {
-      kind: 'multi';
-      items: CanvasSelectionItem[];
-    };
 
 export interface CanvasNodeElement {
   projectRelativePath: string;
@@ -91,8 +73,6 @@ export interface CanvasDocument {
   title: string;
   nodeElements: CanvasNodeElement[];
   annotations: CanvasAnnotation[];
-  viewport: CanvasViewport;
-  selection?: CanvasSelection;
   preferences: {
     showDiagnostics: boolean;
   };
@@ -106,11 +86,6 @@ export interface CanvasStructureEdgeProjection {
 
 export interface ProjectedCanvasNode extends CanvasNodeElement {
   availability: CanvasNodeAvailability;
-}
-
-export interface CanvasPoint {
-  x: number;
-  y: number;
 }
 
 export interface CanvasProjection {
@@ -301,11 +276,6 @@ export function createCanvasDocument(input: { id: string; title: string }): Canv
     title: input.title,
     nodeElements: [],
     annotations: [],
-    viewport: {
-      x: 0,
-      y: 0,
-      zoom: 1
-    },
     preferences: {
       showDiagnostics: true
     }
@@ -322,23 +292,6 @@ export function projectCanvas(input: ProjectCanvasInput): CanvasProjection {
     edges: input.structureEdges ?? [],
     diagnostics: input.diagnostics ?? []
   };
-}
-
-export function setCanvasViewport(canvas: CanvasDocument, viewport: CanvasViewport): CanvasDocument {
-  assertCanvasViewport(viewport);
-  return {
-    ...canvas,
-    viewport
-  };
-}
-
-export function assertCanvasViewport(viewport: CanvasViewport): void {
-  if (!Number.isFinite(viewport.x) || !Number.isFinite(viewport.y)) {
-    throw new Error('Canvas viewport coordinates must be finite numbers.');
-  }
-  if (!Number.isFinite(viewport.zoom) || viewport.zoom <= 0) {
-    throw new Error('Canvas viewport zoom must be a positive finite number.');
-  }
 }
 
 export function updateCanvasNodeLayouts(
@@ -404,17 +357,6 @@ export function canvasNodeLayerOrderTopFirst(canvas: Pick<CanvasDocument, 'nodeE
   return [...canvas.nodeElements]
     .sort((left, right) => compareNodeZ(right, left))
     .map((nodeElement) => nodeElement.projectRelativePath);
-}
-
-export function setCanvasSelection(canvas: CanvasDocument, selection: CanvasSelection | undefined): CanvasDocument {
-  if (!selection) {
-    const { selection: _selection, ...rest } = canvas;
-    return rest;
-  }
-  return {
-    ...canvas,
-    selection
-  };
 }
 
 export function reconcileCanvasNodeElements(input: ReconcileCanvasNodeElementsInput): CanvasNodeElement[] {

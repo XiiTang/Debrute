@@ -17,7 +17,7 @@ async function readJson(path: string): Promise<unknown> {
 }
 
 describe('generated asset metadata service', () => {
-  it('records complete provider provenance in a per-record file and keeps the index lightweight', async () => {
+  it('records complete model run provenance in a per-record file and keeps the index lightweight', async () => {
     const root = await mkdtemp(join(tmpdir(), 'axis-generated-metadata-final-shape-'));
     try {
       await mkdir(join(root, 'generated'), { recursive: true });
@@ -29,9 +29,9 @@ describe('generated asset metadata service', () => {
 
       const record = await service.recordGeneratedAsset(root, {
         projectRelativePath: 'generated/cover.png',
-        providerCall: {
-          request: { method: 'POST', url: 'https://provider.example/images', body: { prompt: 'cover' } },
-          output: { status: 200, body: { data: [{ b64_json: 'full-provider-output' }] } }
+        modelRun: {
+          request: { method: 'POST', url: 'https://model.example/images', body: { prompt: 'cover' } },
+          output: { status: 200, body: { data: [{ b64_json: 'full-model-output' }] } }
         }
       });
 
@@ -40,14 +40,15 @@ describe('generated asset metadata service', () => {
       const recordFile = await readJson(join(paths.recordsDir, 'record-1.json'));
       const cache = await readJson(paths.cacheFile);
 
-      expect(record).toEqual({
-        schemaVersion: 1,
-        recordId: 'record-1',
-        createdAt: '2026-05-24T00:00:00.000Z',
+	      expect(record).toEqual({
+	        schemaVersion: 1,
+	        recordId: 'record-1',
+	        projectRelativePath: 'generated/cover.png',
+	        createdAt: '2026-05-24T00:00:00.000Z',
         fingerprint: { algorithm: 'sha256', hash: sha256('image-bytes') },
-        providerCall: {
-          request: { method: 'POST', url: 'https://provider.example/images', body: { prompt: 'cover' } },
-          output: { status: 200, body: { data: [{ b64_json: 'full-provider-output' }] } }
+        modelRun: {
+          request: { method: 'POST', url: 'https://model.example/images', body: { prompt: 'cover' } },
+          output: { status: 200, body: { data: [{ b64_json: 'full-model-output' }] } }
         }
       });
       expect(index).toEqual({
@@ -61,11 +62,9 @@ describe('generated asset metadata service', () => {
           }
         ]
       });
-      expect(JSON.stringify(index)).not.toContain('providerCall');
-      expect(JSON.stringify(index)).not.toContain('full-provider-output');
+      expect(JSON.stringify(index)).not.toContain('modelRun');
+      expect(JSON.stringify(index)).not.toContain('full-model-output');
       expect(recordFile).toEqual(record);
-      expect(JSON.stringify(recordFile)).not.toContain('originalProjectRelativePath');
-      expect(JSON.stringify(recordFile)).not.toContain('"file"');
       expect(cache).toMatchObject({
         schemaVersion: 1,
         entries: {
@@ -93,7 +92,7 @@ describe('generated asset metadata service', () => {
 
       await service.recordGeneratedAsset(root, {
         projectRelativePath: 'generated/cover.png',
-        providerCall: { request: { prompt: 'cover' }, output: { ok: true, raw: 'complete' } }
+        modelRun: { request: { prompt: 'cover' }, output: { ok: true, raw: 'complete' } }
       });
       await rename(join(root, 'generated/cover.png'), join(root, 'generated/renamed-cover.png'));
 
@@ -103,12 +102,13 @@ describe('generated asset metadata service', () => {
       if (lookup.status === 'matched') {
         expect(lookup.fingerprint.hash).toBe(sha256('image-bytes'));
         expect(lookup.records).toEqual([
-          {
-            schemaVersion: 1,
-            recordId: 'record-1',
-            createdAt: '2026-05-24T00:00:00.000Z',
+	          {
+	            schemaVersion: 1,
+	            recordId: 'record-1',
+	            projectRelativePath: 'generated/cover.png',
+	            createdAt: '2026-05-24T00:00:00.000Z',
             fingerprint: { algorithm: 'sha256', hash: sha256('image-bytes') },
-            providerCall: { request: { prompt: 'cover' }, output: { ok: true, raw: 'complete' } }
+            modelRun: { request: { prompt: 'cover' }, output: { ok: true, raw: 'complete' } }
           }
         ]);
       }
@@ -130,11 +130,11 @@ describe('generated asset metadata service', () => {
 
       await service.recordGeneratedAsset(root, {
         projectRelativePath: 'generated/cover.png',
-        providerCall: { request: { prompt: 'first' }, output: { seed: 1 } }
+        modelRun: { request: { prompt: 'first' }, output: { seed: 1 } }
       });
       await service.recordGeneratedAsset(root, {
         projectRelativePath: 'generated/cover.png',
-        providerCall: { request: { prompt: 'second' }, output: { seed: 2 } }
+        modelRun: { request: { prompt: 'second' }, output: { seed: 2 } }
       });
 
       const lookup = await service.lookupGeneratedAssetMetadata(root, { projectRelativePath: 'generated/cover.png' });
@@ -142,7 +142,7 @@ describe('generated asset metadata service', () => {
       expect(lookup.status).toBe('matched');
       if (lookup.status === 'matched') {
         expect(lookup.records.map((item) => item.recordId)).toEqual(['record-2', 'record-1']);
-        expect(lookup.records.map((item) => item.providerCall.request)).toEqual([{ prompt: 'second' }, { prompt: 'first' }]);
+        expect(lookup.records.map((item) => item.modelRun.request)).toEqual([{ prompt: 'second' }, { prompt: 'first' }]);
       }
     } finally {
       await rm(root, { recursive: true, force: true });
@@ -161,7 +161,7 @@ describe('generated asset metadata service', () => {
 
       await service.recordGeneratedAsset(root, {
         projectRelativePath: 'generated/cover.png',
-        providerCall: { request: { prompt: 'cover' }, output: { ok: true } }
+        modelRun: { request: { prompt: 'cover' }, output: { ok: true } }
       });
       await unlink(join(generatedAssetMetadataPaths(root).recordsDir, 'record-1.json'));
 
@@ -286,12 +286,13 @@ describe('generated asset metadata service', () => {
       await mkdir(join(root, '.axis/assets'), { recursive: true });
       await writeFile(join(root, 'generated/cover.png'), Buffer.from('image-bytes'));
       const fingerprint = { algorithm: 'sha256' as const, hash: sha256('image-bytes') };
-      await writeFile(join(root, 'generated/not-metadata.json'), JSON.stringify({
-        schemaVersion: 1,
-        recordId: 'record-1',
-        createdAt: '2026-05-24T00:00:00.000Z',
+	      await writeFile(join(root, 'generated/not-metadata.json'), JSON.stringify({
+	        schemaVersion: 1,
+	        recordId: 'record-1',
+	        projectRelativePath: 'generated/cover.png',
+	        createdAt: '2026-05-24T00:00:00.000Z',
         fingerprint,
-        providerCall: { request: { prompt: 'outside' }, output: { ok: true } }
+        modelRun: { request: { prompt: 'outside' }, output: { ok: true } }
       }, null, 2), 'utf8');
       await writeFile(join(root, '.axis/assets/generated-assets-index.json'), JSON.stringify({
         schemaVersion: 1,
@@ -324,12 +325,13 @@ describe('generated asset metadata service', () => {
       await mkdir(join(root, 'generated'), { recursive: true });
       await mkdir(join(root, '.axis/assets/generated'), { recursive: true });
       await writeFile(join(root, 'generated/cover.png'), Buffer.from('image-bytes'));
-      await writeFile(join(root, '.axis/assets/generated/record-1.json'), JSON.stringify({
-        schemaVersion: 1,
-        recordId: 'record-1',
-        createdAt: '2026-05-24T00:00:00.000Z',
+	      await writeFile(join(root, '.axis/assets/generated/record-1.json'), JSON.stringify({
+	        schemaVersion: 1,
+	        recordId: 'record-1',
+	        projectRelativePath: 'generated/cover.png',
+	        createdAt: '2026-05-24T00:00:00.000Z',
         fingerprint: { algorithm: 'sha256', hash: sha256('different-image-bytes') },
-        providerCall: { request: { prompt: 'cover' }, output: { ok: true } }
+        modelRun: { request: { prompt: 'cover' }, output: { ok: true } }
       }, null, 2), 'utf8');
       await writeFile(join(root, '.axis/assets/generated-assets-index.json'), JSON.stringify({
         schemaVersion: 1,

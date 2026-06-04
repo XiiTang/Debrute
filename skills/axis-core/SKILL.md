@@ -1,6 +1,6 @@
 ---
 name: axis-core
-description: Use when an external Agent needs AXIS project semantics through axis-cli, including project status, Flowmap publishing, generated assets, and model-backed generation.
+description: Use when an external Agent needs AXIS project semantics through axis-cli, including project status, visual Workbench URLs, Flowmap publishing, generated assets, and model-backed generation.
 metadata:
   axis.managed: "true"
   axis.package: "axis"
@@ -28,6 +28,7 @@ axis runtime doctor
 axis project init /path/to/project
 axis project status /path/to/project
 axis project validate /path/to/project
+axis workbench url /path/to/project
 axis flowmap publish /path/to/project --from .axis/flowmaps/image-production.draft.yaml
 axis generated-asset lookup /path/to/project --path generated/example.png
 axis llm request --input-json '{"prompt":"Summarize this project."}'
@@ -42,6 +43,29 @@ axis commands
 ```
 
 `generate image-batch --manifest` reads a canonical JSON object with a `requests` array.
+
+## Visual Workbench
+
+When the user wants to view AXIS visually, run:
+
+```sh
+axis workbench url /path/to/project
+```
+
+Read `project_url` from stdout. Open that URL with the current agent environment's own GUI/browser capability. AXIS CLI only returns URLs and ports; it does not open browsers.
+
+Agent GUI examples:
+
+```text
+Qoder: /browser Open <project_url>
+Antigravity: /browser Open <project_url>
+Cline: Use the browser to check <project_url>
+Codex app:
+  await (await browser.capabilities.get("visibility")).set(true)
+  await tab.goto(projectUrl)
+```
+
+If the agent cannot control a browser, report `project_url` to the user.
 
 ## Flowmaps
 

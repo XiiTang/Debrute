@@ -10,10 +10,9 @@
     "check": "tsc -b --pretty false"
   },
   "dependencies": {
-    "@axis/app-protocol": "0.1.0",
-    "@axis/canvas-core": "0.1.0",
-    "@axis/capability-core": "0.1.0",
-    "@axis/project-core": "0.1.0",
+    "@axis/app-protocol": "workspace:*",
+    "@axis/capability-core": "workspace:*",
+    "@axis/project-core": "workspace:*",
     "yaml": "^2.9.0"
   }
 }

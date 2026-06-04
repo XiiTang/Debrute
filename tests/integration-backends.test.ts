@@ -4,6 +4,7 @@ import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { describe, expect, it } from 'vitest';
 import { INTEGRATION_CATALOG } from '../apps/app-server/src/integrations/IntegrationCatalog';
+import { runIntegrationCommand } from '../apps/app-server/src/integrations/IntegrationCommandRunner';
 import {
   buildIntegrationInstallQueryCommand,
   buildIntegrationOperationCommand,
@@ -11,8 +12,7 @@ import {
   detectPythonCliInstaller,
   detectSystemPackageManager,
   parseSystemInstallQueryOutput,
-  parseSystemPackageQueryOutput,
-  runIntegrationCommand
+  parseSystemPackageQueryOutput
 } from '../apps/app-server/src/integrations/IntegrationBackends';
 
 const SPAWN_TEST_TIMEOUT_MS = 20_000;

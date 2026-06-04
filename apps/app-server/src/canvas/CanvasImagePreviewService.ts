@@ -1,17 +1,22 @@
 import { createHash, randomUUID } from 'node:crypto';
 import type { Stats } from 'node:fs';
 import { access, mkdir, rename, stat, writeFile } from 'node:fs/promises';
-import { dirname, join } from 'node:path';
+import { dirname } from 'node:path';
 import sharp from 'sharp';
 import {
   CANVAS_IMAGE_PREVIEW_MIN_SOURCE_BYTES,
   CANVAS_IMAGE_PREVIEW_WIDTH_BUCKETS,
   type CanvasImagePreviewWidth
 } from '@axis/canvas-core';
-import { normalizeProjectRelativePath, projectFileRevision, resolveProjectPath } from '@axis/project-core';
+import {
+  normalizeProjectRelativePath,
+  projectFileRevision,
+  resolveExistingProjectPath,
+  resolveProjectPathForWrite
+} from '@axis/project-core';
 
-export const CANVAS_IMAGE_PREVIEW_GENERATION_CONCURRENCY = 2;
-export const CANVAS_IMAGE_PREVIEW_METADATA_CONCURRENCY = 4;
+const CANVAS_IMAGE_PREVIEW_GENERATION_CONCURRENCY = 2;
+const CANVAS_IMAGE_PREVIEW_METADATA_CONCURRENCY = 4;
 export {
   CANVAS_IMAGE_PREVIEW_MIN_SOURCE_BYTES,
   CANVAS_IMAGE_PREVIEW_WIDTH_BUCKETS,
@@ -133,7 +138,7 @@ export async function canvasImagePreviewSourceInfo(
   if (!isPreviewableSourceSize(sourceSizeBytes)) {
     return { previewable: false };
   }
-  const absolutePath = resolveProjectPath(projectRoot, normalizedPath);
+  const absolutePath = await resolveExistingProjectPath(projectRoot, normalizedPath);
   const sourceMetadata = await readCanvasImagePreviewMetadata(absolutePath, projectRelativePath);
   const sourceWidth = sourceMetadata.width;
   if ((sourceMetadata.pages ?? 1) > 1 || typeof sourceWidth !== 'number' || !Number.isFinite(sourceWidth) || sourceWidth <= 0) {
@@ -249,7 +254,7 @@ class LocalCanvasImagePreviewService implements CanvasImagePreviewService {
     if (!isPreviewableRasterImagePath(input.projectRelativePath)) {
       throw new Error(`Canvas image is not previewable: ${input.projectRelativePath}`);
     }
-    const absoluteSourcePath = resolveProjectPath(input.projectRoot, input.projectRelativePath);
+    const absoluteSourcePath = await resolveExistingProjectPath(input.projectRoot, input.projectRelativePath);
     const fileStat = await canvasImageSourceFileStat(input.projectRoot, input.projectRelativePath);
     const actualRevision = projectFileRevision(fileStat.size, fileStat.mtimeMs);
     if (actualRevision !== input.revision) {
@@ -259,7 +264,7 @@ class LocalCanvasImagePreviewService implements CanvasImagePreviewService {
       throw new Error(`Canvas image is not previewable: ${input.projectRelativePath}`);
     }
 
-    const previewBasePath = canvasImagePreviewCacheBasePath(input.projectRoot, {
+    const previewBasePath = await canvasImagePreviewCacheBasePath(input.projectRoot, {
       projectRelativePath: input.projectRelativePath,
       revision: input.revision,
       width: input.width
@@ -311,7 +316,7 @@ class LocalCanvasImagePreviewService implements CanvasImagePreviewService {
 const withMetadataSlot = createCanvasImagePreviewConcurrencyLimiter(CANVAS_IMAGE_PREVIEW_METADATA_CONCURRENCY);
 
 async function canvasImageSourceFileStat(projectRoot: string, projectRelativePath: string): Promise<Stats> {
-  const fileStat = await stat(resolveProjectPath(projectRoot, normalizePreviewProjectRelativePath(projectRelativePath)));
+  const fileStat = await stat(await resolveExistingProjectPath(projectRoot, normalizePreviewProjectRelativePath(projectRelativePath)));
   if (!fileStat.isFile()) {
     throw new Error(`Canvas preview source is not a file: ${projectRelativePath}`);
   }
@@ -330,14 +335,14 @@ function isPreviewableSourceSize(sourceSizeBytes: number): boolean {
   return sourceSizeBytes >= CANVAS_IMAGE_PREVIEW_MIN_SOURCE_BYTES;
 }
 
-function canvasImagePreviewCacheBasePath(
+async function canvasImagePreviewCacheBasePath(
   projectRoot: string,
   input: {
     projectRelativePath: string;
     revision: string;
     width: CanvasImagePreviewWidth;
   }
-): string {
+): Promise<string> {
   const hash = createHash('sha256')
     .update(input.projectRelativePath)
     .update('\0')
@@ -345,7 +350,7 @@ function canvasImagePreviewCacheBasePath(
     .update('\0')
     .update(String(input.width))
     .digest('hex');
-  return join(projectRoot, '.axis/cache/canvas-image-previews', hash);
+  return resolveProjectPathForWrite(projectRoot, `.axis/cache/canvas-image-previews/${hash}`);
 }
 
 async function existingCanvasImagePreviewCachePath(basePath: string): Promise<string | undefined> {

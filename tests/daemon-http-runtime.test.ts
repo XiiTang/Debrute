@@ -1,0 +1,1051 @@
+import { mkdir, mkdtemp, readFile, realpath, rm, symlink, writeFile } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+import { afterEach, describe, expect, it } from 'vitest';
+import { AxisAppServer } from '@axis/app-server';
+import { createAxisDaemonHttpServer } from '@axis/daemon';
+import sharp from 'sharp';
+
+describe('daemon HTTP runtime', () => {
+  const cleanups: Array<() => Promise<void> | void> = [];
+
+  afterEach(async () => {
+    while (cleanups.length > 0) {
+      await cleanups.pop()?.();
+    }
+  });
+
+  it('serves runtime metadata and protects mutating routes with the daemon token', async () => {
+    const daemon = createAxisDaemonHttpServer({
+      host: '127.0.0.1',
+      port: 0,
+      token: 'test-token',
+      webBaseUrl: null
+    });
+    cleanups.push(() => daemon.close());
+    const runtime = await daemon.listen();
+
+    const status = await fetch(`${runtime.daemonUrl}/api/status`).then((response) => response.json());
+    expect(status).toMatchObject({
+      ok: true,
+      runtime: {
+        daemonUrl: runtime.daemonUrl,
+        webBaseUrl: runtime.webBaseUrl
+      }
+    });
+    expect(JSON.stringify(status)).not.toContain('test-token');
+
+    const publicRuntime = await fetch(`${runtime.daemonUrl}/api/runtime`).then((response) => response.json());
+    expect(publicRuntime).toMatchObject({
+      daemonUrl: runtime.daemonUrl,
+      webBaseUrl: runtime.webBaseUrl
+    });
+    expect(publicRuntime).not.toHaveProperty('token');
+
+    const rejectedRuntimeProbe = await fetch(`${runtime.daemonUrl}/api/runtime`, {
+      method: 'POST'
+    });
+    expect(rejectedRuntimeProbe.status).toBe(403);
+
+    const verifiedRuntime = await fetch(`${runtime.daemonUrl}/api/runtime`, {
+      method: 'POST',
+      headers: { 'x-axis-daemon-token': 'test-token' }
+    }).then((response) => response.json());
+    expect(verifiedRuntime).toMatchObject({
+      daemonUrl: runtime.daemonUrl,
+      webBaseUrl: runtime.webBaseUrl
+    });
+    expect(verifiedRuntime).not.toHaveProperty('token');
+
+    const rejected = await fetch(`${runtime.daemonUrl}/api/projects/open`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({})
+    });
+
+    expect(rejected.status).toBe(403);
+    await expect(rejected.json()).resolves.toMatchObject({
+      error: {
+        code: 'forbidden'
+      }
+    });
+
+  });
+
+  it('rejects non-loopback daemon bind hosts before listening', async () => {
+    const daemon = createAxisDaemonHttpServer({
+      host: '0.0.0.0',
+      port: 0,
+      token: 'test-token',
+      webBaseUrl: null
+    });
+    cleanups.push(() => daemon.close());
+
+    await expect(daemon.listen()).rejects.toThrow('AXIS daemon host must be loopback');
+    expect(daemon.runtime()).toBeUndefined();
+  });
+
+  it('allows only daemon and web origins on API requests', async () => {
+    const daemon = createAxisDaemonHttpServer({
+      host: '127.0.0.1',
+      port: 0,
+      token: 'test-token',
+      webBaseUrl: 'http://127.0.0.1:17322'
+    });
+    cleanups.push(() => daemon.close());
+    const runtime = await daemon.listen();
+
+    const allowed = await fetch(`${runtime.daemonUrl}/api/runtime`, {
+      headers: { origin: 'http://127.0.0.1:17322' }
+    });
+    expect(allowed.status).toBe(200);
+    expect(allowed.headers.get('access-control-allow-origin')).toBe('http://127.0.0.1:17322');
+
+    const daemonOrigin = await fetch(`${runtime.daemonUrl}/api/runtime`, {
+      headers: { origin: runtime.daemonUrl }
+    });
+    expect(daemonOrigin.status).toBe(200);
+    expect(daemonOrigin.headers.get('access-control-allow-origin')).toBe(runtime.daemonUrl);
+
+    const preflight = await fetch(`${runtime.daemonUrl}/api/projects/open`, {
+      method: 'OPTIONS',
+      headers: { origin: 'http://127.0.0.1:17322' }
+    });
+    expect(preflight.status).toBe(204);
+    expect(preflight.headers.get('access-control-allow-origin')).toBe('http://127.0.0.1:17322');
+
+    const rejected = await fetch(`${runtime.daemonUrl}/api/runtime`, {
+      headers: { origin: 'http://example.com' }
+    });
+    expect(rejected.status).toBe(403);
+    await expect(rejected.json()).resolves.toMatchObject({
+      error: { code: 'forbidden' }
+    });
+  });
+
+  it('opens a project and exposes text file routes through HTTP', async () => {
+    const projectRoot = await mkdtemp(join(tmpdir(), 'axis-daemon-project-'));
+    await mkdir(join(projectRoot, 'briefs'), { recursive: true });
+    await writeFile(join(projectRoot, 'briefs/outline.md'), '# Outline', 'utf8');
+
+    const daemon = createAxisDaemonHttpServer({
+      host: '127.0.0.1',
+      port: 0,
+      token: 'test-token',
+      webBaseUrl: null
+    });
+    cleanups.push(() => daemon.close(), () => rm(projectRoot, { recursive: true, force: true }));
+    const runtime = await daemon.listen();
+
+    const opened = await requestJson<{
+      projectId: string;
+      snapshot: { files: Array<{ projectRelativePath: string }> };
+    }>(`${runtime.daemonUrl}/api/projects/open`, {
+      method: 'POST',
+      headers: {
+        'content-type': 'application/json',
+        'x-axis-daemon-token': 'test-token'
+      },
+      body: JSON.stringify({ projectRoot })
+    });
+
+    expect(JSON.stringify(opened)).not.toContain(projectRoot);
+    expect(opened.projectId).toMatch(/^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/);
+    expect(opened.projectId).not.toBe(Buffer.from(projectRoot, 'utf8').toString('base64url'));
+    expect(opened.snapshot).not.toHaveProperty('projectRoot');
+    expect(opened.snapshot.files.map((file) => file.projectRelativePath)).toContain('briefs/outline.md');
+
+    const textFile = await requestJson<Record<string, unknown>>(`${runtime.daemonUrl}/api/projects/${opened.projectId}/files/text/briefs/outline.md`);
+    expect(textFile).toMatchObject({
+      projectRelativePath: 'briefs/outline.md',
+      content: '# Outline'
+    });
+    expect(textFile).not.toHaveProperty('absolutePath');
+    expect(JSON.stringify(textFile)).not.toContain(projectRoot);
+
+    await requestJson(`${runtime.daemonUrl}/api/projects/${opened.projectId}/files/text/briefs/outline.md`, {
+      method: 'PUT',
+      headers: {
+        'content-type': 'application/json',
+        'x-axis-daemon-token': 'test-token'
+      },
+      body: JSON.stringify({ content: '# Updated' })
+    });
+
+    await expect(readFile(join(projectRoot, 'briefs/outline.md'), 'utf8')).resolves.toBe('# Updated');
+
+    const unscoped = await fetch(`${runtime.daemonUrl}/not-a-project/files/text/briefs/outline.md`);
+    expect(unscoped.status).toBe(404);
+
+  });
+
+  it('rejects raw project file requests without a revision query', async () => {
+    const projectRoot = await mkdtemp(join(tmpdir(), 'axis-daemon-raw-revision-'));
+    await mkdir(join(projectRoot, 'generated'), { recursive: true });
+    await writeFile(join(projectRoot, 'generated/cover.png'), 'asset-bytes', 'utf8');
+
+    const daemon = createAxisDaemonHttpServer({
+      host: '127.0.0.1',
+      port: 0,
+      token: 'test-token',
+      webBaseUrl: null
+    });
+    cleanups.push(() => daemon.close(), () => rm(projectRoot, { recursive: true, force: true }));
+    const runtime = await daemon.listen();
+    const opened = await requestJson<{ projectId: string }>(`${runtime.daemonUrl}/api/projects/open`, {
+      method: 'POST',
+      headers: {
+        'content-type': 'application/json',
+        'x-axis-daemon-token': 'test-token'
+      },
+      body: JSON.stringify({ projectRoot })
+    });
+
+    const response = await fetch(`${runtime.daemonUrl}/api/projects/${opened.projectId}/files/raw/generated/cover.png`);
+
+    expect(response.status).toBe(400);
+    await expect(response.json()).resolves.toMatchObject({
+      error: { code: 'missing_revision' }
+    });
+  });
+
+  it('resolves desktop project paths only with the daemon token', async () => {
+    const projectRoot = await mkdtemp(join(tmpdir(), 'axis-daemon-desktop-path-'));
+    await writeFile(join(projectRoot, 'brief.md'), 'hello', 'utf8');
+
+    const daemon = createAxisDaemonHttpServer({
+      host: '127.0.0.1',
+      port: 0,
+      token: 'secret'
+    });
+    cleanups.push(() => daemon.close(), () => rm(projectRoot, { recursive: true, force: true }));
+    const runtime = await daemon.listen();
+    const opened = await requestJson<{ projectId: string }>(`${runtime.daemonUrl}/api/projects/open`, {
+      method: 'POST',
+      headers: {
+        'content-type': 'application/json',
+        'x-axis-daemon-token': runtime.token
+      },
+      body: JSON.stringify({ projectRoot })
+    });
+
+    const rejected = await fetch(`${runtime.daemonUrl}/api/projects/${opened.projectId}/desktop/resolve-path`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ projectRelativePath: 'brief.md', kind: 'file' })
+    });
+    expect(rejected.status).toBe(403);
+
+    const canonicalProjectRoot = await realpath(projectRoot);
+    await expect(requestJson<{ absolutePath: string }>(
+      `${runtime.daemonUrl}/api/projects/${opened.projectId}/desktop/resolve-path`,
+      {
+        method: 'POST',
+        headers: {
+          'content-type': 'application/json',
+          'x-axis-daemon-token': runtime.token
+        },
+        body: JSON.stringify({ projectRelativePath: 'brief.md', kind: 'file' })
+      }
+    )).resolves.toEqual({
+      absolutePath: join(canonicalProjectRoot, 'brief.md')
+    });
+  });
+
+  it('honors project ids on project-scoped routes', async () => {
+    const projectRoot = await mkdtemp(join(tmpdir(), 'axis-daemon-project-id-'));
+    await mkdir(join(projectRoot, 'briefs'), { recursive: true });
+    await writeFile(join(projectRoot, 'briefs/outline.md'), '# Outline', 'utf8');
+
+    const daemon = createAxisDaemonHttpServer({
+      host: '127.0.0.1',
+      port: 0,
+      token: 'test-token',
+      webBaseUrl: null
+    });
+    cleanups.push(() => daemon.close(), () => rm(projectRoot, { recursive: true, force: true }));
+    const runtime = await daemon.listen();
+
+    const opened = await requestJson<{ projectId: string }>(`${runtime.daemonUrl}/api/projects/open`, {
+      method: 'POST',
+      headers: {
+        'content-type': 'application/json',
+        'x-axis-daemon-token': 'test-token'
+      },
+      body: JSON.stringify({ projectRoot })
+    });
+
+    await expect(requestJson(`${runtime.daemonUrl}/api/projects/${opened.projectId}/files/text/briefs/outline.md`))
+      .resolves.toMatchObject({ content: '# Outline' });
+
+    const rejected = await fetch(`${runtime.daemonUrl}/api/projects/unknown-project-id/files/text/briefs/outline.md`);
+    expect(rejected.status).toBe(404);
+    await expect(rejected.json()).resolves.toMatchObject({
+      error: { code: 'project_not_open' }
+    });
+  });
+
+  it('opens two live projects at the same time and isolates project routes', async () => {
+    const alphaRoot = await mkdtemp(join(tmpdir(), 'axis-daemon-alpha-'));
+    const betaRoot = await mkdtemp(join(tmpdir(), 'axis-daemon-beta-'));
+    await writeFile(join(alphaRoot, 'brief.md'), '# Alpha', 'utf8');
+    await writeFile(join(betaRoot, 'brief.md'), '# Beta', 'utf8');
+
+    const daemon = createAxisDaemonHttpServer({
+      host: '127.0.0.1',
+      port: 0,
+      token: 'test-token',
+      webBaseUrl: null,
+      projectIdleTtlMs: 1000
+    });
+    cleanups.push(() => daemon.close(), () => rm(alphaRoot, { recursive: true, force: true }), () => rm(betaRoot, { recursive: true, force: true }));
+    const runtime = await daemon.listen();
+
+    const alpha = await requestJson<{ projectId: string }>(`${runtime.daemonUrl}/api/projects/open`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json', 'x-axis-daemon-token': 'test-token' },
+      body: JSON.stringify({ projectRoot: alphaRoot })
+    });
+    const beta = await requestJson<{ projectId: string }>(`${runtime.daemonUrl}/api/projects/open`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json', 'x-axis-daemon-token': 'test-token' },
+      body: JSON.stringify({ projectRoot: betaRoot })
+    });
+
+    expect(alpha.projectId).not.toBe(beta.projectId);
+    await expect(requestJson(`${runtime.daemonUrl}/api/projects/${alpha.projectId}/files/text/brief.md`))
+      .resolves.toMatchObject({ content: '# Alpha' });
+    await expect(requestJson(`${runtime.daemonUrl}/api/projects/${beta.projectId}/files/text/brief.md`))
+      .resolves.toMatchObject({ content: '# Beta' });
+  });
+
+  it('reuses the live project id for the same canonical root', async () => {
+    const projectRoot = await mkdtemp(join(tmpdir(), 'axis-daemon-reuse-root-'));
+    await writeFile(join(projectRoot, 'brief.md'), '# Brief', 'utf8');
+
+    const daemon = createAxisDaemonHttpServer({
+      host: '127.0.0.1',
+      port: 0,
+      token: 'test-token',
+      webBaseUrl: null,
+      projectIdleTtlMs: 1000
+    });
+    cleanups.push(() => daemon.close(), () => rm(projectRoot, { recursive: true, force: true }));
+    const runtime = await daemon.listen();
+
+    const first = await requestJson<{ projectId: string }>(`${runtime.daemonUrl}/api/projects/open`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json', 'x-axis-daemon-token': 'test-token' },
+      body: JSON.stringify({ projectRoot })
+    });
+    const second = await requestJson<{ projectId: string }>(`${runtime.daemonUrl}/api/projects/open`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json', 'x-axis-daemon-token': 'test-token' },
+      body: JSON.stringify({ projectRoot: join(projectRoot, '.') })
+    });
+
+    expect(second.projectId).toBe(first.projectId);
+  });
+
+  it('rejects project files that resolve outside the project through symlinks', async () => {
+    const projectRoot = await mkdtemp(join(tmpdir(), 'axis-daemon-symlink-project-'));
+    const outsideFile = join(tmpdir(), `axis-daemon-symlink-outside-${Date.now()}.txt`);
+    await writeFile(outsideFile, 'outside', 'utf8');
+    await symlink(outsideFile, join(projectRoot, 'linked.txt'));
+
+    const daemon = createAxisDaemonHttpServer({
+      host: '127.0.0.1',
+      port: 0,
+      token: 'test-token',
+      webBaseUrl: null
+    });
+    cleanups.push(
+      () => daemon.close(),
+      () => rm(projectRoot, { recursive: true, force: true }),
+      () => rm(outsideFile, { force: true })
+    );
+    const runtime = await daemon.listen();
+    const opened = await requestJson<{ projectId: string }>(`${runtime.daemonUrl}/api/projects/open`, {
+      method: 'POST',
+      headers: {
+        'content-type': 'application/json',
+        'x-axis-daemon-token': 'test-token'
+      },
+      body: JSON.stringify({ projectRoot })
+    });
+
+    const response = await fetch(`${runtime.daemonUrl}/api/projects/${opened.projectId}/files/text/linked.txt`);
+
+    expect(response.status).toBe(403);
+    await expect(response.json()).resolves.toMatchObject({
+      error: { code: 'project_path_forbidden' }
+    });
+  });
+
+  it('requires an explicit project root when opening a project', async () => {
+    const projectRoot = await mkdtemp(join(tmpdir(), 'axis-daemon-project-open-input-'));
+    await writeFile(join(projectRoot, 'brief.md'), '# Brief', 'utf8');
+
+    const daemon = createAxisDaemonHttpServer({
+      host: '127.0.0.1',
+      port: 0,
+      token: 'test-token',
+      webBaseUrl: null
+    });
+    cleanups.push(() => daemon.close(), () => rm(projectRoot, { recursive: true, force: true }));
+    const runtime = await daemon.listen();
+
+    const response = await fetch(`${runtime.daemonUrl}/api/projects/open`, {
+      method: 'POST',
+      headers: {
+        'content-type': 'application/json',
+        'x-axis-daemon-token': 'test-token'
+      },
+      body: JSON.stringify({})
+    });
+
+    expect(response.status).toBe(400);
+    await expect(response.json()).resolves.toMatchObject({
+      error: { code: 'invalid_input' }
+    });
+    await expect(fetch(`${runtime.daemonUrl}/api/projects`).then((projectsResponse) => projectsResponse.json())).resolves.toEqual({
+      projects: []
+    });
+  });
+
+  it('returns invalid_input for project-open roots that do not resolve to directories', async () => {
+    const filePath = join(tmpdir(), `axis-daemon-project-root-file-${Date.now()}`);
+    await writeFile(filePath, 'not a directory', 'utf8');
+    const missingPath = join(tmpdir(), `axis-daemon-project-root-missing-${Date.now()}`);
+
+    const daemon = createAxisDaemonHttpServer({
+      host: '127.0.0.1',
+      port: 0,
+      token: 'test-token',
+      webBaseUrl: null
+    });
+    cleanups.push(() => daemon.close(), () => rm(filePath, { force: true }));
+    const runtime = await daemon.listen();
+
+    for (const projectRoot of [missingPath, filePath]) {
+      const response = await fetch(`${runtime.daemonUrl}/api/projects/open`, {
+        method: 'POST',
+        headers: {
+          'content-type': 'application/json',
+          'x-axis-daemon-token': 'test-token'
+        },
+        body: JSON.stringify({ projectRoot })
+      });
+
+      expect(response.status, projectRoot).toBe(400);
+      await expect(response.json()).resolves.toMatchObject({
+        error: { code: 'invalid_input' }
+      });
+    }
+
+    await expect(fetch(`${runtime.daemonUrl}/api/projects`).then((projectsResponse) => projectsResponse.json())).resolves.toEqual({
+      projects: []
+    });
+  });
+
+  it('does not expose projects opened outside HTTP project-open routes', async () => {
+    const projectRoot = await mkdtemp(join(tmpdir(), 'axis-daemon-direct-open-'));
+    await writeFile(join(projectRoot, 'brief.md'), '# Brief', 'utf8');
+
+    const daemon = createAxisDaemonHttpServer({
+      host: '127.0.0.1',
+      port: 0,
+      token: 'test-token',
+      webBaseUrl: null
+    });
+    const privateAppServer = new AxisAppServer();
+    cleanups.push(() => daemon.close(), () => privateAppServer.close(), () => rm(projectRoot, { recursive: true, force: true }));
+    const runtime = await daemon.listen();
+
+    await privateAppServer.openProject(projectRoot);
+
+    await expect(fetch(`${runtime.daemonUrl}/api/runtime`).then((response) => response.json())).resolves.toEqual({
+      daemonUrl: runtime.daemonUrl,
+      webBaseUrl: runtime.webBaseUrl
+    });
+    await expect(fetch(`${runtime.daemonUrl}/api/projects`).then((response) => response.json())).resolves.toEqual({
+      projects: []
+    });
+  });
+
+  it('serves generated asset metadata and raw files from browser-facing asset routes', async () => {
+    const projectRoot = await mkdtemp(join(tmpdir(), 'axis-daemon-generated-asset-'));
+    await mkdir(join(projectRoot, 'generated'), { recursive: true });
+    await writeFile(join(projectRoot, 'generated/cover.png'), 'asset-bytes', 'utf8');
+
+    let appServer: AxisAppServer | undefined;
+    const daemon = createAxisDaemonHttpServer({
+      createAppServer: () => {
+        appServer = new AxisAppServer();
+        return appServer;
+      },
+      host: '127.0.0.1',
+      port: 0,
+      token: 'test-token',
+      webBaseUrl: null
+    });
+    cleanups.push(() => daemon.close(), () => rm(projectRoot, { recursive: true, force: true }));
+    const runtime = await daemon.listen();
+    const opened = await requestJson<{ projectId: string }>(`${runtime.daemonUrl}/api/projects/open`, {
+      method: 'POST',
+      headers: {
+        'content-type': 'application/json',
+        'x-axis-daemon-token': 'test-token'
+      },
+      body: JSON.stringify({ projectRoot })
+    });
+    if (!appServer) {
+      throw new Error('Daemon did not create a project app server.');
+    }
+    const record = await appServer.recordGeneratedAssetMetadata({
+      projectRelativePath: 'generated/cover.png',
+      modelRun: {
+        request: { prompt: 'cover' },
+        output: { ok: true }
+      }
+    });
+
+    const list = await requestJson<{
+      assets: Array<{ assetId: string; projectRelativePath: string; rawUrl: string }>;
+    }>(`${runtime.daemonUrl}/api/projects/${opened.projectId}/generated-assets`);
+    expect(list.assets).toEqual([
+      expect.objectContaining({
+        assetId: record.recordId,
+        projectRelativePath: 'generated/cover.png',
+        rawUrl: `${runtime.daemonUrl}/api/projects/${opened.projectId}/generated-assets/${record.recordId}/raw`
+      })
+    ]);
+    expect(JSON.stringify(list)).not.toContain(projectRoot);
+
+    const detail = await requestJson<Record<string, unknown>>(`${runtime.daemonUrl}/api/projects/${opened.projectId}/generated-assets/${record.recordId}`);
+    expect(detail).toMatchObject({
+      assetId: record.recordId,
+      projectRelativePath: 'generated/cover.png',
+      record
+    });
+    expect(JSON.stringify(detail)).not.toContain(projectRoot);
+
+    await expect(fetch(`${runtime.daemonUrl}/api/projects/${opened.projectId}/generated-assets/${record.recordId}/raw`).then((response) => response.text()))
+      .resolves.toBe('asset-bytes');
+  });
+
+  it('rejects generated asset lookup paths that resolve outside the project through symlinks', async () => {
+    const projectRoot = await mkdtemp(join(tmpdir(), 'axis-daemon-generated-asset-symlink-'));
+    const outsideFile = join(tmpdir(), `axis-daemon-generated-asset-outside-${Date.now()}.png`);
+    await mkdir(join(projectRoot, 'generated'), { recursive: true });
+    await writeFile(outsideFile, 'outside', 'utf8');
+    await symlink(outsideFile, join(projectRoot, 'generated/linked.png'));
+
+    const daemon = createAxisDaemonHttpServer({
+      host: '127.0.0.1',
+      port: 0,
+      token: 'test-token',
+      webBaseUrl: null
+    });
+    cleanups.push(
+      () => daemon.close(),
+      () => rm(projectRoot, { recursive: true, force: true }),
+      () => rm(outsideFile, { force: true })
+    );
+    const runtime = await daemon.listen();
+    const opened = await requestJson<{ projectId: string }>(`${runtime.daemonUrl}/api/projects/open`, {
+      method: 'POST',
+      headers: {
+        'content-type': 'application/json',
+        'x-axis-daemon-token': 'test-token'
+      },
+      body: JSON.stringify({ projectRoot })
+    });
+
+    const response = await fetch(`${runtime.daemonUrl}/api/projects/${opened.projectId}/generated-assets/lookup`, {
+      method: 'POST',
+      headers: {
+        'content-type': 'application/json',
+        'x-axis-daemon-token': 'test-token'
+      },
+      body: JSON.stringify({ projectRelativePath: 'generated/linked.png' })
+    });
+
+    expect(response.status).toBe(403);
+    await expect(response.json()).resolves.toMatchObject({
+      error: { code: 'project_path_forbidden' }
+    });
+  });
+
+  it('returns structured client errors for invalid JSON bodies', async () => {
+    const daemon = createAxisDaemonHttpServer({
+      host: '127.0.0.1',
+      port: 0,
+      token: 'test-token',
+      webBaseUrl: null
+    });
+    cleanups.push(() => daemon.close());
+    const runtime = await daemon.listen();
+
+    const response = await fetch(`${runtime.daemonUrl}/api/projects/open`, {
+      method: 'POST',
+      headers: {
+        'content-type': 'application/json',
+        'x-axis-daemon-token': 'test-token'
+      },
+      body: '{'
+    });
+
+    expect(response.status).toBe(400);
+    await expect(response.json()).resolves.toMatchObject({
+      error: { code: 'invalid_json' }
+    });
+  });
+
+  it('streams app-server events as server-sent events', async () => {
+    const projectRoot = await mkdtemp(join(tmpdir(), 'axis-daemon-events-project-'));
+    await writeFile(join(projectRoot, 'brief.md'), '# Brief', 'utf8');
+
+    const daemon = createAxisDaemonHttpServer({
+      host: '127.0.0.1',
+      port: 0,
+      token: 'test-token',
+      webBaseUrl: null
+    });
+    cleanups.push(() => daemon.close(), () => rm(projectRoot, { recursive: true, force: true }));
+    const runtime = await daemon.listen();
+    const opened = await requestJson<{ projectId: string }>(`${runtime.daemonUrl}/api/projects/open`, {
+      method: 'POST',
+      headers: {
+        'content-type': 'application/json',
+        'x-axis-daemon-token': 'test-token'
+      },
+      body: JSON.stringify({ projectRoot })
+    });
+
+    const response = await fetch(`${runtime.daemonUrl}/api/projects/${opened.projectId}/events`);
+    expect(response.status).toBe(200);
+    expect(response.headers.get('content-type')).toContain('text/event-stream');
+
+    await response.body?.cancel();
+  });
+
+  it('does not stream project events from one session to another project session', async () => {
+    const alphaRoot = await mkdtemp(join(tmpdir(), 'axis-daemon-sse-alpha-'));
+    const betaRoot = await mkdtemp(join(tmpdir(), 'axis-daemon-sse-beta-'));
+    await writeFile(join(alphaRoot, 'brief.md'), '# Alpha', 'utf8');
+    await writeFile(join(betaRoot, 'brief.md'), '# Beta', 'utf8');
+
+    const daemon = createAxisDaemonHttpServer({
+      host: '127.0.0.1',
+      port: 0,
+      token: 'test-token',
+      webBaseUrl: null
+    });
+    cleanups.push(() => daemon.close(), () => rm(alphaRoot, { recursive: true, force: true }), () => rm(betaRoot, { recursive: true, force: true }));
+    const runtime = await daemon.listen();
+    const alpha = await requestJson<{ projectId: string }>(`${runtime.daemonUrl}/api/projects/open`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json', 'x-axis-daemon-token': 'test-token' },
+      body: JSON.stringify({ projectRoot: alphaRoot })
+    });
+    const beta = await requestJson<{ projectId: string }>(`${runtime.daemonUrl}/api/projects/open`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json', 'x-axis-daemon-token': 'test-token' },
+      body: JSON.stringify({ projectRoot: betaRoot })
+    });
+
+    const alphaEvents = await fetch(`${runtime.daemonUrl}/api/projects/${alpha.projectId}/events?clientId=alpha-client`);
+    const betaEvents = await fetch(`${runtime.daemonUrl}/api/projects/${beta.projectId}/events?clientId=beta-client`);
+    await requestJson(`${runtime.daemonUrl}/api/projects/${beta.projectId}/files/text/brief.md`, {
+      method: 'PUT',
+      headers: {
+        'content-type': 'application/json',
+        'x-axis-daemon-token': 'test-token'
+      },
+      body: JSON.stringify({ content: '# Beta Updated' })
+    });
+
+    await expect(readNextSseMessage<{ type: string }>(betaEvents)).resolves.toMatchObject({
+      type: 'project.changed'
+    });
+    await expect(readNextSseMessage(alphaEvents)).rejects.toThrow('Timed out waiting for SSE event.');
+  });
+
+  it('streams global settings events to clients attached to different project sessions', async () => {
+    const alphaRoot = await mkdtemp(join(tmpdir(), 'axis-daemon-global-alpha-'));
+    const betaRoot = await mkdtemp(join(tmpdir(), 'axis-daemon-global-beta-'));
+    await writeFile(join(alphaRoot, 'brief.md'), '# Alpha', 'utf8');
+    await writeFile(join(betaRoot, 'brief.md'), '# Beta', 'utf8');
+
+    const daemon = createAxisDaemonHttpServer({
+      host: '127.0.0.1',
+      port: 0,
+      token: 'test-token',
+      webBaseUrl: null
+    });
+    cleanups.push(() => daemon.close(), () => rm(alphaRoot, { recursive: true, force: true }), () => rm(betaRoot, { recursive: true, force: true }));
+    const runtime = await daemon.listen();
+    const alpha = await requestJson<{ projectId: string }>(`${runtime.daemonUrl}/api/projects/open`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json', 'x-axis-daemon-token': 'test-token' },
+      body: JSON.stringify({ projectRoot: alphaRoot })
+    });
+    const beta = await requestJson<{ projectId: string }>(`${runtime.daemonUrl}/api/projects/open`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json', 'x-axis-daemon-token': 'test-token' },
+      body: JSON.stringify({ projectRoot: betaRoot })
+    });
+
+    const alphaEvents = await fetch(`${runtime.daemonUrl}/api/projects/${alpha.projectId}/events?clientId=alpha-client`);
+    const betaEvents = await fetch(`${runtime.daemonUrl}/api/projects/${beta.projectId}/events?clientId=beta-client`);
+    await requestJson(`${runtime.daemonUrl}/api/settings/canvas`, {
+      method: 'PUT',
+      headers: {
+        'content-type': 'application/json',
+        'x-axis-daemon-token': 'test-token'
+      },
+      body: JSON.stringify({ imagePreviewsEnabled: false })
+    });
+
+    await expect(Promise.all([
+      readNextSseMessage<{ type: string; settings: { imagePreviewsEnabled: boolean } }>(alphaEvents),
+      readNextSseMessage<{ type: string; settings: { imagePreviewsEnabled: boolean } }>(betaEvents)
+    ])).resolves.toEqual([
+      { type: 'canvas.settings.changed', settings: { imagePreviewsEnabled: false } },
+      { type: 'canvas.settings.changed', settings: { imagePreviewsEnabled: false } }
+    ]);
+  });
+
+  it('releases a project session after the last event stream closes and idle TTL elapses', async () => {
+    const projectRoot = await mkdtemp(join(tmpdir(), 'axis-daemon-idle-release-project-'));
+    await writeFile(join(projectRoot, 'brief.md'), '# Brief', 'utf8');
+
+    const daemon = createAxisDaemonHttpServer({
+      host: '127.0.0.1',
+      port: 0,
+      token: 'test-token',
+      webBaseUrl: null,
+      projectIdleTtlMs: 25
+    });
+    cleanups.push(() => daemon.close(), () => rm(projectRoot, { recursive: true, force: true }));
+    const runtime = await daemon.listen();
+    const opened = await requestJson<{ projectId: string }>(`${runtime.daemonUrl}/api/projects/open`, {
+      method: 'POST',
+      headers: {
+        'content-type': 'application/json',
+        'x-axis-daemon-token': 'test-token'
+      },
+      body: JSON.stringify({ projectRoot })
+    });
+
+    const events = await fetch(`${runtime.daemonUrl}/api/projects/${opened.projectId}/events?clientId=client-a`);
+    expect(events.status).toBe(200);
+    await expect(fetch(`${runtime.daemonUrl}/api/projects`).then((response) => response.json())).resolves.toMatchObject({
+      projects: [{ projectId: opened.projectId, clients: { liveCount: 1 } }]
+    });
+
+    await events.body?.cancel();
+    await delay(80);
+
+    const released = await fetch(`${runtime.daemonUrl}/api/projects/${opened.projectId}`);
+    expect(released.status).toBe(404);
+    await expect(released.json()).resolves.toMatchObject({
+      error: { code: 'project_not_open' }
+    });
+    await expect(fetch(`${runtime.daemonUrl}/api/projects`).then((response) => response.json())).resolves.toEqual({
+      projects: []
+    });
+  });
+
+  it('keeps a project session live while another event stream remains open', async () => {
+    const projectRoot = await mkdtemp(join(tmpdir(), 'axis-daemon-idle-held-project-'));
+    await writeFile(join(projectRoot, 'brief.md'), '# Brief', 'utf8');
+
+    const daemon = createAxisDaemonHttpServer({
+      host: '127.0.0.1',
+      port: 0,
+      token: 'test-token',
+      webBaseUrl: null,
+      projectIdleTtlMs: 25
+    });
+    cleanups.push(() => daemon.close(), () => rm(projectRoot, { recursive: true, force: true }));
+    const runtime = await daemon.listen();
+    const opened = await requestJson<{ projectId: string }>(`${runtime.daemonUrl}/api/projects/open`, {
+      method: 'POST',
+      headers: {
+        'content-type': 'application/json',
+        'x-axis-daemon-token': 'test-token'
+      },
+      body: JSON.stringify({ projectRoot })
+    });
+
+    const first = await fetch(`${runtime.daemonUrl}/api/projects/${opened.projectId}/events?clientId=client-a`);
+    const second = await fetch(`${runtime.daemonUrl}/api/projects/${opened.projectId}/events?clientId=client-b`);
+    expect(first.status).toBe(200);
+    expect(second.status).toBe(200);
+
+    await first.body?.cancel();
+    await delay(80);
+
+    await expect(requestJson(`${runtime.daemonUrl}/api/projects/${opened.projectId}`))
+      .resolves.toMatchObject({ projectId: opened.projectId });
+    await expect(fetch(`${runtime.daemonUrl}/api/projects`).then((response) => response.json())).resolves.toMatchObject({
+      projects: [{ projectId: opened.projectId, clients: { liveCount: 1 } }]
+    });
+
+    await second.body?.cancel();
+  });
+
+  it('cancels pending idle cleanup while a project request is in flight', async () => {
+    const projectRoot = await mkdtemp(join(tmpdir(), 'axis-daemon-idle-request-project-'));
+    await writeFile(join(projectRoot, 'brief.md'), '# Brief', 'utf8');
+
+    const daemon = createAxisDaemonHttpServer({
+      host: '127.0.0.1',
+      port: 0,
+      token: 'test-token',
+      webBaseUrl: null,
+      projectIdleTtlMs: 80
+    });
+    cleanups.push(() => daemon.close(), () => rm(projectRoot, { recursive: true, force: true }));
+    const runtime = await daemon.listen();
+    const opened = await requestJson<{ projectId: string }>(`${runtime.daemonUrl}/api/projects/open`, {
+      method: 'POST',
+      headers: {
+        'content-type': 'application/json',
+        'x-axis-daemon-token': 'test-token'
+      },
+      body: JSON.stringify({ projectRoot })
+    });
+    const events = await fetch(`${runtime.daemonUrl}/api/projects/${opened.projectId}/events?clientId=client-a`);
+    expect(events.status).toBe(200);
+
+    await events.body?.cancel();
+    await delay(40);
+    await expect(requestJson(`${runtime.daemonUrl}/api/projects/${opened.projectId}`))
+      .resolves.toMatchObject({ projectId: opened.projectId });
+    await delay(50);
+    await expect(requestJson(`${runtime.daemonUrl}/api/projects/${opened.projectId}`))
+      .resolves.toMatchObject({ projectId: opened.projectId });
+
+    await delay(100);
+    const released = await fetch(`${runtime.daemonUrl}/api/projects/${opened.projectId}`);
+    expect(released.status).toBe(404);
+  });
+
+  it('keeps a project session live while an Electron project window is registered', async () => {
+    const projectRoot = await mkdtemp(join(tmpdir(), 'axis-daemon-electron-window-project-'));
+    await writeFile(join(projectRoot, 'brief.md'), '# Brief', 'utf8');
+
+    const daemon = createAxisDaemonHttpServer({
+      host: '127.0.0.1',
+      port: 0,
+      token: 'test-token',
+      webBaseUrl: null,
+      projectIdleTtlMs: 25
+    });
+    cleanups.push(() => daemon.close(), () => rm(projectRoot, { recursive: true, force: true }));
+    const runtime = await daemon.listen();
+    const opened = await requestJson<{ projectId: string }>(`${runtime.daemonUrl}/api/projects/open`, {
+      method: 'POST',
+      headers: {
+        'content-type': 'application/json',
+        'x-axis-daemon-token': 'test-token'
+      },
+      body: JSON.stringify({ projectRoot })
+    });
+
+    const releaseWindow = daemon.registerElectronProjectWindow(opened.projectId, 42);
+    expect(releaseWindow).toBeDefined();
+    await delay(80);
+
+    await expect(requestJson(`${runtime.daemonUrl}/api/projects/${opened.projectId}`))
+      .resolves.toMatchObject({ projectId: opened.projectId });
+
+    releaseWindow!();
+    await delay(80);
+
+    const released = await fetch(`${runtime.daemonUrl}/api/projects/${opened.projectId}`);
+    expect(released.status).toBe(404);
+  });
+
+  it('streams canvas changed events with browser file URLs', async () => {
+    const projectRoot = await mkdtemp(join(tmpdir(), 'axis-daemon-canvas-event-project-'));
+    await mkdir(join(projectRoot, 'image-production/generated'), { recursive: true });
+    await sharp({
+      create: {
+        width: 16,
+        height: 12,
+        channels: 4,
+        background: '#336699ff'
+      }
+    }).png().toFile(join(projectRoot, 'image-production/generated/cover.png'));
+
+    let appServer: AxisAppServer | undefined;
+    const daemon = createAxisDaemonHttpServer({
+      createAppServer: () => {
+        appServer = new AxisAppServer();
+        return appServer;
+      },
+      host: '127.0.0.1',
+      port: 0,
+      token: 'test-token',
+      webBaseUrl: null
+    });
+    cleanups.push(() => daemon.close(), () => rm(projectRoot, { recursive: true, force: true }));
+    const runtime = await daemon.listen();
+    const opened = await requestJson<{ projectId: string }>(`${runtime.daemonUrl}/api/projects/open`, {
+      method: 'POST',
+      headers: {
+        'content-type': 'application/json',
+        'x-axis-daemon-token': 'test-token'
+      },
+      body: JSON.stringify({ projectRoot })
+    });
+    await writeFlowmapDraft(projectRoot, 'image-production', [
+      'schemaVersion: 1',
+      'canvases:',
+      '  - production-map',
+      'include:',
+      '  - "generated/*.png"',
+      ''
+    ]);
+    if (!appServer) {
+      throw new Error('Daemon did not create a project app server.');
+    }
+    await appServer.publishFlowmapDraft({ sourceDraftPath: '.axis/flowmaps/image-production.draft.yaml' });
+    const refreshed = await requestJson<{
+      projections: Array<{ nodes: Array<{ projectRelativePath: string; availability: { state: string; fileUrl?: string } }> }>;
+    }>(`${runtime.daemonUrl}/api/projects/${opened.projectId}/refresh`, {
+      method: 'POST',
+      headers: { 'x-axis-daemon-token': 'test-token' }
+    });
+    const node = refreshed.projections[0]!.nodes.find((item) => item.projectRelativePath === 'image-production/generated/cover.png')!;
+    expect(node.availability.fileUrl).toContain(`/api/projects/${opened.projectId}/files/raw/image-production/generated/cover.png`);
+    if (!node.availability.fileUrl) {
+      throw new Error('Canvas node did not include a browser file URL.');
+    }
+    const rawFileResponse = await fetch(node.availability.fileUrl);
+    expect(rawFileResponse.status).toBe(200);
+    expect(rawFileResponse.headers.get('cache-control')).toBe('public, max-age=31536000, immutable');
+    expect(rawFileResponse.headers.get('content-type')).toBe('image/png');
+    expect(Buffer.from(await rawFileResponse.arrayBuffer()).length).toBeGreaterThan(0);
+
+    const response = await fetch(`${runtime.daemonUrl}/api/projects/${opened.projectId}/events`);
+    await requestJson(`${runtime.daemonUrl}/api/projects/${opened.projectId}/canvases/production-map/node-layers`, {
+      method: 'PATCH',
+      headers: {
+        'content-type': 'application/json',
+        'x-axis-daemon-token': 'test-token'
+      },
+      body: JSON.stringify({ nodeLayers: [{ projectRelativePath: node.projectRelativePath, locked: true }] })
+    });
+
+    const event = await readNextSseMessage<{
+      type: string;
+      projection: { nodes: Array<{ projectRelativePath: string; availability: { state: string; fileUrl?: string } }> };
+    }>(response);
+    const eventNode = event.projection.nodes.find((item) => item.projectRelativePath === node.projectRelativePath)!;
+
+    expect(event.type).toBe('canvas.changed');
+    expect(eventNode.availability.fileUrl).toBe(node.availability.fileUrl);
+  });
+
+  it('rejects unsupported methods on file and preview resource routes', async () => {
+    const projectRoot = await mkdtemp(join(tmpdir(), 'axis-daemon-method-project-'));
+    await mkdir(join(projectRoot, 'generated'), { recursive: true });
+    await writeFile(join(projectRoot, 'generated/cover.png'), 'asset-bytes', 'utf8');
+
+    const daemon = createAxisDaemonHttpServer({
+      host: '127.0.0.1',
+      port: 0,
+      token: 'test-token',
+      webBaseUrl: null
+    });
+    cleanups.push(() => daemon.close(), () => rm(projectRoot, { recursive: true, force: true }));
+    const runtime = await daemon.listen();
+    const opened = await requestJson<{ projectId: string }>(`${runtime.daemonUrl}/api/projects/open`, {
+      method: 'POST',
+      headers: {
+        'content-type': 'application/json',
+        'x-axis-daemon-token': 'test-token'
+      },
+      body: JSON.stringify({ projectRoot })
+    });
+
+    for (const [method, path] of [
+      ['POST', `/api/projects/${opened.projectId}/files/raw/generated/cover.png`],
+      ['POST', `/api/projects/${opened.projectId}/canvas-image-preview?path=generated%2Fcover.png&v=rev&w=512`],
+      ['GET', `/api/projects/${opened.projectId}/generated-assets/lookup?path=generated%2Fcover.png`]
+    ] as const) {
+      const response = await fetch(`${runtime.daemonUrl}${path}`, {
+        method,
+        headers: { 'x-axis-daemon-token': 'test-token' }
+      });
+      expect(response.status, `${method} ${path}`).toBe(405);
+      await expect(response.json()).resolves.toMatchObject({
+        error: { code: 'method_not_allowed' }
+      });
+    }
+  });
+});
+
+async function requestJson<T>(url: string, init?: RequestInit): Promise<T> {
+  const response = await fetch(url, init);
+  expect(response.status).toBeGreaterThanOrEqual(200);
+  expect(response.status).toBeLessThan(300);
+  return response.json() as Promise<T>;
+}
+
+async function writeFlowmapDraft(projectRoot: string, flowmapId: string, lines: string[]): Promise<void> {
+  await mkdir(join(projectRoot, '.axis/flowmaps'), { recursive: true });
+  await writeFile(join(projectRoot, `.axis/flowmaps/${flowmapId}.draft.yaml`), lines.join('\n'), 'utf8');
+}
+
+async function readNextSseMessage<T>(response: Response): Promise<T> {
+  expect(response.status).toBe(200);
+  const reader = response.body?.getReader();
+  if (!reader) {
+    throw new Error('SSE response did not include a body.');
+  }
+  let content = '';
+  try {
+    while (true) {
+      const chunk = await readWithTimeout(reader);
+      if (chunk.done) {
+        break;
+      }
+      content += new TextDecoder().decode(chunk.value);
+      const dataLine = content.split('\n').find((line) => line.startsWith('data: '));
+      if (dataLine) {
+        return JSON.parse(dataLine.slice('data: '.length)) as T;
+      }
+    }
+  } finally {
+    await reader.cancel().catch(() => undefined);
+  }
+  throw new Error('SSE response did not include an event payload.');
+}
+
+async function readWithTimeout(
+  reader: ReadableStreamDefaultReader<Uint8Array>
+): Promise<ReadableStreamReadResult<Uint8Array>> {
+  let timer: NodeJS.Timeout | undefined;
+  try {
+    return await Promise.race([
+      reader.read(),
+      new Promise<never>((_resolve, reject) => {
+        timer = setTimeout(() => reject(new Error('Timed out waiting for SSE event.')), 1000);
+      })
+    ]);
+  } finally {
+    if (timer) {
+      clearTimeout(timer);
+    }
+  }
+}
+
+async function delay(ms: number): Promise<void> {
+  await new Promise((resolve) => setTimeout(resolve, ms));
+}

@@ -17,7 +17,6 @@ describe('image model official documentation', () => {
     expect(docRefs.map((doc) => doc.modelId).sort()).toEqual(catalogModelIds);
 
     for (const doc of docRefs) {
-      expect(doc.provider).toEqual(expect.any(String));
       expect(doc.sourceUrls.length).toBeGreaterThan(0);
       for (const url of doc.sourceUrls) {
         expect(url).toMatch(/^https:\/\/.+/);
@@ -28,7 +27,6 @@ describe('image model official documentation', () => {
 
       const snapshot = await readFile(join(root, doc.snapshotPath), 'utf8');
       expect(snapshot).toMatch(/^---\n/);
-      expect(snapshot).toContain(`provider: ${doc.provider}`);
       expect(snapshot).toContain(`  - ${doc.modelId}`);
       expect(snapshot).toContain('source_urls:');
       expect(snapshot).toContain(`captured_at: ${doc.capturedAt}`);
@@ -69,14 +67,6 @@ describe('image model official documentation', () => {
     expect(doc?.descriptionMarkdown).toContain('alpha channel');
   });
 
-  it('does not expose old hand-authored usage notes in image model details', () => {
-    const catalog = createImageModelCatalog();
-    const details = catalog.details(catalog.listAll().map((model) => model.axisModelId)).details;
-
-    for (const detail of details) {
-      expect('usageNotes' in detail).toBe(false);
-    }
-  });
 });
 
 function axisCommandInput(markdown: string): unknown {

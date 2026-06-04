@@ -1,0 +1,112 @@
+import React from 'react';
+import { Boxes, FolderTree } from 'lucide-react';
+import type { WorkbenchActions, WorkbenchState } from '../../types';
+import type { WorkbenchContextMenuPosition, WorkbenchContextMenuTarget } from '../shell/contextMenu';
+import type { CanvasFeedbackBarTarget } from '../shell/floatingBars';
+import { getCanvasById } from '../services/canvasState';
+import { CanvasSurface } from './CanvasSurface';
+import type { CanvasEditorRuntime } from './runtime/CanvasEditorRuntime';
+import { createCanvasEditorRuntime } from './runtime/CanvasEditorRuntime';
+
+export function CanvasEditor({
+  canvasId,
+  state,
+  actions,
+  runtimeScopeKey,
+  onFeedbackBarTargetChange,
+  onRuntimeChange,
+  onOpenContextMenu
+}: {
+  canvasId: string | undefined;
+  state: WorkbenchState;
+  actions: WorkbenchActions;
+  runtimeScopeKey?: number;
+  onFeedbackBarTargetChange?: ((target: CanvasFeedbackBarTarget | undefined) => void) | undefined;
+  onRuntimeChange?: ((runtime: CanvasEditorRuntime | undefined) => void) | undefined;
+  onOpenContextMenu?: ((target: WorkbenchContextMenuTarget, position: WorkbenchContextMenuPosition) => void) | undefined;
+}): React.ReactElement {
+  const canvas = getCanvasById(state.snapshot, canvasId);
+  const projection = state.snapshot?.projections.find((item) => item.canvasId === canvas?.id);
+  const runtimeKey = canvas && projection
+    ? `${canvas.id}\u001f${projection.canvasId}\u001f${runtimeScopeKey ?? 0}`
+    : undefined;
+  const [runtimeState, setRuntimeState] = React.useState<{
+    key: string;
+    runtime: CanvasEditorRuntime;
+  }>();
+  const runtime = runtimeState && runtimeState.key === runtimeKey ? runtimeState.runtime : undefined;
+
+  React.useEffect(() => {
+    if (!canvas || !projection) {
+      onFeedbackBarTargetChange?.(undefined);
+      onRuntimeChange?.(undefined);
+    }
+  }, [canvas, onFeedbackBarTargetChange, onRuntimeChange, projection]);
+
+  React.useEffect(() => {
+    if (!runtimeKey) {
+      setRuntimeState(undefined);
+      onRuntimeChange?.(undefined);
+      return;
+    }
+    const nextRuntime = createCanvasEditorRuntime();
+    setRuntimeState({
+      key: runtimeKey,
+      runtime: nextRuntime
+    });
+    onRuntimeChange?.(nextRuntime);
+    return () => {
+      onRuntimeChange?.(undefined);
+      nextRuntime.dispose();
+    };
+  }, [onRuntimeChange, runtimeKey]);
+
+  if (!canvas || !projection) {
+    return <EmptyCanvas hasProject={Boolean(state.snapshot)} actions={actions} />;
+  }
+
+  if (!state.canvasSettings) {
+    return <section className="canvas-shell" data-testid="canvas-settings-loading" />;
+  }
+
+  if (!runtime) {
+    return <section className="canvas-shell" data-testid="canvas-runtime-loading" />;
+  }
+
+  return (
+    <section className="canvas-shell">
+      <CanvasSurface
+        canvas={canvas}
+        projection={projection}
+        runtime={runtime}
+        actions={actions}
+        textFileBuffers={state.textFileBuffers}
+        canvasFeedback={state.canvasFeedback}
+        canvasSettings={state.canvasSettings}
+        onFeedbackBarTargetChange={onFeedbackBarTargetChange}
+        onOpenContextMenu={onOpenContextMenu}
+      />
+    </section>
+  );
+}
+
+function EmptyCanvas({ hasProject, actions }: { hasProject: boolean; actions: WorkbenchActions }): React.ReactElement {
+  if (!hasProject) {
+    return (
+      <div className="empty-editor empty-project">
+        <Boxes size={34} />
+        <strong>No project open</strong>
+        <button type="button" className="empty-action" onClick={actions.openProject}>
+          <FolderTree size={15} />
+          Open Project
+        </button>
+      </div>
+    );
+  }
+  return (
+    <div className="empty-editor">
+      <Boxes size={34} />
+      <span>No canvas available.</span>
+    </div>
+  );
+}

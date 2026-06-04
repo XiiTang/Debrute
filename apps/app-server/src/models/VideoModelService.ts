@@ -2,10 +2,10 @@ import {
   createVideoModelSettingsView,
   type VideoModelsConfig
 } from '@axis/capability-runtime';
-import { createVideoModelCatalog, type VideoModelCatalogEntry } from '@axis/capability-runtime';
+import { createVideoModelCatalog } from '@axis/capability-runtime';
 import type { SaveVideoModelSettingInput, VideoModelSettingsView } from '@axis/app-protocol';
 import type { GlobalConfigStore } from '../config/GlobalConfigStore.js';
-import { configuredMediaCatalog, saveMediaModelSetting } from './MediaModelService.js';
+import { saveMediaModelSetting } from './MediaModelService.js';
 
 export class VideoModelService {
   private readonly catalog = createVideoModelCatalog();
@@ -34,13 +34,5 @@ export class VideoModelService {
       saveConfig: (config) => this.input.configStore.saveVideoModels(config as VideoModelsConfig)
     });
     return this.getSettings();
-  }
-
-  async configuredCatalog(): Promise<VideoModelCatalogEntry[]> {
-    return configuredMediaCatalog({
-      configStore: this.input.configStore,
-      catalog: this.catalog,
-      secretKey: 'videoModelApiKeys'
-    });
   }
 }

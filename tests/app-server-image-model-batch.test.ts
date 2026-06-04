@@ -2,7 +2,7 @@ import { access, mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promise
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { AxisAppServer, GlobalConfigStore } from '@axis/app-server';
-import type { ImageProviderFetch } from '@axis/capability-runtime';
+import type { ImageModelFetch } from '@axis/capability-runtime';
 import { describe, expect, test } from 'vitest';
 
 const tinyPngBase64 = 'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADElEQVR42mP8z8AARQAHSQGmK3P7WAAAAABJRU5ErkJggg==';
@@ -19,7 +19,7 @@ describe('AxisAppServer image model batch', () => {
         {
           axisModelId: 'gpt-image-2',
           baseUrlOverride: 'https://api.openai.com/v1',
-          providerModelIdOverride: 'gpt-image-2'
+          requestModelIdOverride: 'gpt-image-2'
         }
       ]
     });
@@ -28,7 +28,7 @@ describe('AxisAppServer image model batch', () => {
       imageModelApiKeys: { 'gpt-image-2': 'sk-image' },
       videoModelApiKeys: {}
     });
-    const fetch: ImageProviderFetch = async (url, init) => {
+    const fetch: ImageModelFetch = async (url, init) => {
       expect(url).toBe('https://api.openai.com/v1/images/generations');
       expect(JSON.parse(String(init?.body))).toMatchObject({
         model: 'gpt-image-2',
@@ -90,7 +90,7 @@ describe('AxisAppServer image model batch', () => {
       if (lookup.status === 'matched') {
         expect(lookup.records).toHaveLength(1);
         expect(lookup.records[0]).toMatchObject({
-          providerCall: {
+          modelRun: {
             request: {
               body: {
                 prompt: 'batch cover'
@@ -113,7 +113,7 @@ describe('AxisAppServer image model batch', () => {
     const server = new AxisAppServer({
       globalConfigStore: new GlobalConfigStore({ axisHome }),
       imageModelFetch: async () => {
-        throw new Error('provider should not run for skipped output');
+        throw new Error('model request should not run for skipped output');
       }
     });
 
@@ -177,7 +177,7 @@ describe('AxisAppServer image model batch', () => {
     const server = new AxisAppServer({
       globalConfigStore: new ThrowingImageConfigStore(),
       imageModelFetch: async () => {
-        throw new Error('provider should not run for skipped output');
+        throw new Error('model request should not run for skipped output');
       }
     });
 
@@ -230,7 +230,7 @@ describe('AxisAppServer image model batch', () => {
         {
           axisModelId: 'gpt-image-2',
           baseUrlOverride: 'https://api.openai.com/v1',
-          providerModelIdOverride: 'gpt-image-2'
+          requestModelIdOverride: 'gpt-image-2'
         }
       ]
     });
@@ -241,7 +241,7 @@ describe('AxisAppServer image model batch', () => {
     });
     const server = new AxisAppServer({
       globalConfigStore: configStore,
-      imageModelFetch: async () => jsonResponse({ error: { message: 'provider rejected request' } }, 500)
+      imageModelFetch: async () => jsonResponse({ error: { message: 'model endpoint rejected request' } }, 500)
     });
 
     try {

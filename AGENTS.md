@@ -2,6 +2,8 @@
 
 This repository is public.
 
+Except for LLM text models, all other generated file assets (images, videos, audio, and similar outputs) are implemented per model, with no provider concept.
+
 Do not create private design docs, implementation plans, notes, or generated Superpowers documents under `docs/`.
 
 When using Superpowers in this project, save generated documents under:

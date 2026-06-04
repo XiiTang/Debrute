@@ -1,5 +1,5 @@
 import { spawn } from 'node:child_process';
-import { resolveProjectPath } from '@axis/project-core';
+import { resolveExistingProjectPath } from '@axis/project-core';
 import type { CanvasLayoutSize, CanvasMediaKind, CanvasNodeKind } from '@axis/canvas-core';
 import sharp from 'sharp';
 
@@ -30,7 +30,7 @@ export async function readCanvasNodeLayoutSize(input: ReadCanvasNodeLayoutSizeIn
   if (input.mediaKind === 'unknown') {
     return UNKNOWN_CANVAS_LAYOUT_SIZE;
   }
-  const absolutePath = resolveProjectPath(input.projectRoot, input.projectRelativePath);
+  const absolutePath = await resolveExistingProjectPath(input.projectRoot, input.projectRelativePath);
   if (input.mediaKind === 'image') {
     return readImageLayoutSize(absolutePath);
   }

@@ -18,8 +18,6 @@ type MediaSecretKey = 'imageModelApiKeys' | 'videoModelApiKeys';
 
 export interface MediaModelCatalogApi<Entry extends { axisModelId: string }> {
   get(modelId: string): Entry | undefined;
-  listAll(): Entry[];
-  listConfigured(modelIds: string[]): Entry[];
 }
 
 export async function saveMediaModelSetting(input: {
@@ -41,29 +39,17 @@ export async function saveMediaModelSetting(input: {
   const secrets = await input.configStore.readSecrets();
   const records = input.recordsFromConfig(config);
   const baseUrlOverride = input.value.baseUrlOverride?.trim() || null;
-  const providerModelIdOverride = input.value.providerModelIdOverride?.trim() || null;
+  const requestModelIdOverride = input.value.requestModelIdOverride?.trim() || null;
   const nextRecords = records.filter((model) => model.axisModelId !== input.modelId);
-  if (baseUrlOverride || providerModelIdOverride) {
+  if (baseUrlOverride || requestModelIdOverride) {
     nextRecords.push({
       axisModelId: input.modelId,
       baseUrlOverride,
-      providerModelIdOverride
+      requestModelIdOverride
     });
   }
   await input.saveConfig(input.configFromRecords(nextRecords.sort((left, right) => left.axisModelId.localeCompare(right.axisModelId))));
   await input.configStore.saveSecrets(patchMediaSecret(secrets, input.modelId, input.value, input.secretKey));
-}
-
-export async function configuredMediaCatalog<Entry extends { axisModelId: string }>(input: {
-  configStore: GlobalConfigStore;
-  catalog: MediaModelCatalogApi<Entry>;
-  secretKey: MediaSecretKey;
-}): Promise<Entry[]> {
-  const secrets = await input.configStore.readSecrets();
-  const configured = new Set(input.catalog.listAll()
-    .filter((model) => secrets[input.secretKey][model.axisModelId]?.trim())
-    .map((model) => model.axisModelId));
-  return input.catalog.listConfigured([...configured]);
 }
 
 function patchMediaSecret(secrets: SecretsConfig, modelId: string, input: MediaSaveInput, secretKey: MediaSecretKey): SecretsConfig {

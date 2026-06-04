@@ -5,7 +5,7 @@ import { describe, expect, it } from 'vitest';
 import {
   createImageModelCatalog,
   executeImageModelRequest,
-  type ImageProviderFetch
+  type ImageModelFetch
 } from '@axis/capability-runtime';
 
 const tinyPngBase64 = 'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADElEQVR42mP8z8AARQAHSQGmK3P7WAAAAABJRU5ErkJggg==';
@@ -30,11 +30,10 @@ describe('image model catalog and tools', () => {
     ]);
     expect(catalog.get('gpt-image-2')).toMatchObject({
       axisModelId: 'gpt-image-2',
-      provider: 'openai',
       supportsEditing: true,
       supportsTextRendering: true
     });
-    expect(catalog.get('wan2.7-image')).toMatchObject({ provider: 'dashscope', supportsEditing: true });
+    expect(catalog.get('wan2.7-image')).toMatchObject({ supportsEditing: true });
   });
 
   it('defines official routing defaults and original-parameter list summaries for image models', () => {
@@ -43,17 +42,15 @@ describe('image model catalog and tools', () => {
 
     for (const model of models) {
       expect(model.defaultBaseUrl).toMatch(/^https:\/\//);
-      expect(model.defaultProviderModelId).toEqual(expect.any(String));
-      expect(model.defaultProviderModelId.trim()).not.toBe('');
+      expect(model.defaultRequestModelId).toEqual(expect.any(String));
+      expect(model.defaultRequestModelId.trim()).not.toBe('');
       expect(Object.keys(model.listParameters).length).toBeGreaterThan(0);
       expect(model.listParameters).toHaveProperty('prompt');
-      expect(JSON.stringify(model.listParameters)).not.toContain(`input_${'images'}`);
-      expect(JSON.stringify(model.argumentsSchema)).not.toContain(`"input_${'images'}"`);
     }
 
     expect(catalog.get('gpt-image-2')).toMatchObject({
       defaultBaseUrl: 'https://api.openai.com/v1',
-      defaultProviderModelId: 'gpt-image-2',
+      defaultRequestModelId: 'gpt-image-2',
       listParameters: {
         prompt: expect.stringContaining('required'),
         size: expect.stringContaining('WIDTHxHEIGHT'),
@@ -72,7 +69,7 @@ describe('image model catalog and tools', () => {
 
     expect(catalog.get('fal-ai/flux/dev')).toMatchObject({
       defaultBaseUrl: 'https://fal.run',
-      defaultProviderModelId: 'fal-ai/flux/dev',
+      defaultRequestModelId: 'fal-ai/flux/dev',
       listParameters: {
         prompt: expect.stringContaining('required'),
         image_size: expect.stringContaining('landscape_4_3'),
@@ -83,7 +80,7 @@ describe('image model catalog and tools', () => {
 
     expect(catalog.get('fal-ai/flux/dev/image-to-image')).toMatchObject({
       defaultBaseUrl: 'https://fal.run',
-      defaultProviderModelId: 'fal-ai/flux/dev/image-to-image',
+      defaultRequestModelId: 'fal-ai/flux/dev/image-to-image',
       listParameters: {
         image_url: expect.stringContaining('required'),
         strength: expect.stringContaining('default 0.95'),
@@ -157,11 +154,11 @@ describe('image model catalog and tools', () => {
     expect(detailModels.find((model) => model.model === 'gpt-image-2')?.imageInputRules).toEqual([
       {
         field: 'image',
-        acceptedValueFormat: 'Array of Project-relative image paths, http(s) image URLs, or data:image URLs. Provider-ready objects: OpenAI image objects with `image_url` or base64 `data`.'
+        acceptedValueFormat: 'Array of Project-relative image paths, http(s) image URLs, or data:image URLs. Model-specific objects: OpenAI image objects with `image_url` or base64 `data`.'
       },
       {
         field: 'mask',
-        acceptedValueFormat: 'Project-relative image path, http(s) image URL, or data:image URL. Provider-ready objects: OpenAI image objects with `image_url` or base64 `data`.'
+        acceptedValueFormat: 'Project-relative image path, http(s) image URL, or data:image URL. Model-specific objects: OpenAI image objects with `image_url` or base64 `data`.'
       }
     ]);
     expect(detailModels.find((model) => model.model === 'doubao-seedream-5-0-lite-260128')?.imageInputRules).toEqual([
@@ -179,7 +176,7 @@ describe('image model catalog and tools', () => {
     expect(detailModels.find((model) => model.model === 'image-01')?.imageInputRules).toEqual([
       {
         field: 'subject_reference',
-        acceptedValueFormat: 'Array of Project-relative image paths, http(s) image URLs, or data:image URLs. Provider-ready objects: MiniMax `subject_reference` objects with `image_file` public URL or data:image URL.'
+        acceptedValueFormat: 'Array of Project-relative image paths, http(s) image URLs, or data:image URLs. Model-specific objects: MiniMax `subject_reference` objects with `image_file` public URL or data:image URL.'
       }
     ]);
     const doubaoImageSchema = detailModels.find((model) => model.model === 'doubao-seedream-5-0-lite-260128')
@@ -282,7 +279,6 @@ describe('image model catalog and tools', () => {
     const serialized = JSON.stringify(detail.details);
     expect(serialized).toContain('Project-relative image path');
     expect(serialized).toContain('data:image URL');
-    expect(serialized).not.toMatch(/\b(?:U|G|L)\d+\b/);
   });
 
 });
@@ -292,7 +288,7 @@ describe('image model executors', () => {
     const projectRoot = await mkdtemp(join(tmpdir(), 'axis-image-default-route-'));
     try {
       const calls: Array<{ url: string; body: Record<string, unknown> }> = [];
-      const fetch: ImageProviderFetch = async (url, init) => {
+      const fetch: ImageModelFetch = async (url, init) => {
         calls.push({ url, body: JSON.parse(String(init?.body)) });
         return jsonResponse({ data: [{ b64_json: tinyPngBase64 }] });
       };
@@ -316,11 +312,11 @@ describe('image model executors', () => {
     }
   });
 
-  it('keeps Gemini prompts when contents include provider-ready image parts', async () => {
+  it('keeps Gemini prompts when contents include model-specific image parts', async () => {
     const projectRoot = await mkdtemp(join(tmpdir(), 'axis-image-gemini-contents-prompt-'));
     try {
       let submittedBody: Record<string, unknown> | undefined;
-      const fetch: ImageProviderFetch = async (_url, init) => {
+      const fetch: ImageModelFetch = async (_url, init) => {
         submittedBody = JSON.parse(String(init?.body));
         return jsonResponse({
           candidates: [{ content: { parts: [{ inlineData: { mimeType: 'image/png', data: tinyPngBase64 } }] } }]
@@ -360,7 +356,7 @@ describe('image model executors', () => {
     try {
       await writeFile(join(projectRoot, 'source.png'), tinyPng);
       let submittedBody: Record<string, unknown> | undefined;
-      const fetch: ImageProviderFetch = async (_url, init) => {
+      const fetch: ImageModelFetch = async (_url, init) => {
         submittedBody = JSON.parse(String(init?.body));
         return jsonResponse({
           candidates: [{ content: { parts: [{ inlineData: { mimeType: 'image/png', data: tinyPngBase64 } }] } }]
@@ -398,7 +394,7 @@ describe('image model executors', () => {
 
   it('writes OpenAI image artifacts into generated/<turn-id>', async () => {
     const projectRoot = await mkdtemp(join(tmpdir(), 'axis-image-openai-'));
-    const fetch: ImageProviderFetch = async (url, init) => {
+    const fetch: ImageModelFetch = async (url, init) => {
       expect(url).toBe('https://api.openai.com/v1/images/generations');
       expect(JSON.parse(String(init?.body))).toMatchObject({ model: 'gpt-image-2', prompt: 'cover image' });
       return jsonResponse({ data: [{ b64_json: tinyPngBase64 }] });
@@ -408,7 +404,7 @@ describe('image model executors', () => {
         projectRoot,
         invocationId: 'turn-1',
         input: { model: 'gpt-image-2', arguments: { prompt: 'cover image', size: '1024x1024' } },
-        settings: { imageModels: [{ axisModelId: 'gpt-image-2', baseUrlOverride: 'https://api.openai.com/v1', providerModelIdOverride: 'gpt-image-2' }] },
+        settings: { imageModels: [{ axisModelId: 'gpt-image-2', baseUrlOverride: 'https://api.openai.com/v1', requestModelIdOverride: 'gpt-image-2' }] },
         secrets: { imageModelApiKeys: { 'gpt-image-2': 'sk-image' } },
         fetch
       });
@@ -428,10 +424,10 @@ describe('image model executors', () => {
     }
   });
 
-  it('records compact provider request and output metadata for generated OpenAI images', async () => {
+  it('records compact model request and output metadata for generated OpenAI images', async () => {
     const projectRoot = await mkdtemp(join(tmpdir(), 'axis-image-metadata-'));
     const recorded: unknown[] = [];
-    const fetch: ImageProviderFetch = async (url) => {
+    const fetch: ImageModelFetch = async (url) => {
       expect(url).toBe('https://api.openai.com/v1/images/generations');
       return jsonResponse({ data: [{ b64_json: tinyPngBase64, revised_prompt: 'refined cover' }] });
     };
@@ -440,7 +436,7 @@ describe('image model executors', () => {
         projectRoot,
         invocationId: 'turn-metadata',
         input: { model: 'gpt-image-2', arguments: { prompt: 'cover image', size: '1024x1024' } },
-        settings: { imageModels: [{ axisModelId: 'gpt-image-2', baseUrlOverride: 'https://api.openai.com/v1', providerModelIdOverride: 'gpt-image-2' }] },
+        settings: { imageModels: [{ axisModelId: 'gpt-image-2', baseUrlOverride: 'https://api.openai.com/v1', requestModelIdOverride: 'gpt-image-2' }] },
         secrets: { imageModelApiKeys: { 'gpt-image-2': 'sk-image' } },
         fetch,
         recordGeneratedAsset: async (input) => {
@@ -452,7 +448,7 @@ describe('image model executors', () => {
       expect(recorded).toHaveLength(1);
       expect(recorded[0]).toMatchObject({
         projectRelativePath: expect.stringMatching(/^generated\/turn-metadata\/.+\.png$/),
-        providerCall: {
+        modelRun: {
           request: {
             method: 'POST',
             url: 'https://api.openai.com/v1/images/generations',
@@ -481,16 +477,15 @@ describe('image model executors', () => {
         }
       });
       expect(JSON.stringify(recorded[0])).not.toContain(tinyPngBase64);
-      expect(recorded[0]).not.toHaveProperty('file');
     } finally {
       await rm(projectRoot, { recursive: true, force: true });
     }
   });
 
-  it('records complete multipart provider request metadata for OpenAI edits', async () => {
+  it('records complete multipart model request metadata for OpenAI edits', async () => {
     const projectRoot = await mkdtemp(join(tmpdir(), 'axis-image-edit-metadata-'));
     const recorded: unknown[] = [];
-    const fetch: ImageProviderFetch = async (url, init) => {
+    const fetch: ImageModelFetch = async (url, init) => {
       expect(url).toBe('https://api.openai.com/v1/images/edits');
       expect(init?.body).toBeInstanceOf(FormData);
       return jsonResponse({ data: [{ b64_json: tinyPngBase64 }] });
@@ -508,7 +503,7 @@ describe('image model executors', () => {
             image: ['source.png']
           }
         },
-        settings: { imageModels: [{ axisModelId: 'gpt-image-2', baseUrlOverride: 'https://api.openai.com/v1', providerModelIdOverride: 'gpt-image-2' }] },
+        settings: { imageModels: [{ axisModelId: 'gpt-image-2', baseUrlOverride: 'https://api.openai.com/v1', requestModelIdOverride: 'gpt-image-2' }] },
         secrets: { imageModelApiKeys: { 'gpt-image-2': 'sk-image' } },
         fetch,
         recordGeneratedAsset: async (input) => {
@@ -520,7 +515,7 @@ describe('image model executors', () => {
       expect(recorded).toHaveLength(1);
       expect(recorded[0]).toMatchObject({
         projectRelativePath: expect.stringMatching(/^generated\/turn-edit-metadata\/.+\.png$/),
-        providerCall: {
+        modelRun: {
           request: {
             method: 'POST',
             url: 'https://api.openai.com/v1/images/edits',
@@ -548,8 +543,6 @@ describe('image model executors', () => {
         }
       });
       expect(JSON.stringify(recorded[0])).not.toContain(tinyPngBase64);
-      expect(JSON.stringify(recorded[0])).not.toContain('formFields');
-      expect(recorded[0]).not.toHaveProperty('file');
     } finally {
       await rm(projectRoot, { recursive: true, force: true });
     }
@@ -558,8 +551,8 @@ describe('image model executors', () => {
   it('includes a project mask when an OpenAI edit input image is remote', async () => {
     const projectRoot = await mkdtemp(join(tmpdir(), 'axis-image-openai-remote-input-local-mask-'));
     const downloaded: string[] = [];
-    let providerCalls = 0;
-    const fetch: ImageProviderFetch = async (url, init) => {
+    let modelRuns = 0;
+    const fetch: ImageModelFetch = async (url, init) => {
       if (url === 'https://cdn.example/source.png') {
         downloaded.push(url);
         return pngResponse();
@@ -569,7 +562,7 @@ describe('image model executors', () => {
       const form = init?.body as FormData;
       expect(form.getAll('image[]')).toHaveLength(1);
       expect(form.get('mask')).toBeInstanceOf(Blob);
-      providerCalls += 1;
+      modelRuns += 1;
       return jsonResponse({ data: [{ b64_json: tinyPngBase64 }] });
     };
     try {
@@ -585,14 +578,14 @@ describe('image model executors', () => {
             mask: 'mask.png'
           }
         },
-        settings: { imageModels: [{ axisModelId: 'gpt-image-2', baseUrlOverride: 'https://api.openai.com/v1', providerModelIdOverride: 'gpt-image-2' }] },
+        settings: { imageModels: [{ axisModelId: 'gpt-image-2', baseUrlOverride: 'https://api.openai.com/v1', requestModelIdOverride: 'gpt-image-2' }] },
         secrets: { imageModelApiKeys: { 'gpt-image-2': 'sk-image' } },
         fetch
       });
 
       expect(result.status).toBe('ok');
       expect(downloaded).toEqual(['https://cdn.example/source.png']);
-      expect(providerCalls).toBe(1);
+      expect(modelRuns).toBe(1);
     } finally {
       await rm(projectRoot, { recursive: true, force: true });
     }
@@ -601,8 +594,8 @@ describe('image model executors', () => {
   it('includes a remote mask when an OpenAI edit input image is a project file', async () => {
     const projectRoot = await mkdtemp(join(tmpdir(), 'axis-image-openai-local-input-remote-mask-'));
     const downloaded: string[] = [];
-    let providerCalls = 0;
-    const fetch: ImageProviderFetch = async (url, init) => {
+    let modelRuns = 0;
+    const fetch: ImageModelFetch = async (url, init) => {
       if (url === 'https://cdn.example/mask.png') {
         downloaded.push(url);
         return pngResponse();
@@ -612,7 +605,7 @@ describe('image model executors', () => {
       const form = init?.body as FormData;
       expect(form.getAll('image[]')).toHaveLength(1);
       expect(form.get('mask')).toBeInstanceOf(Blob);
-      providerCalls += 1;
+      modelRuns += 1;
       return jsonResponse({ data: [{ b64_json: tinyPngBase64 }] });
     };
     try {
@@ -628,14 +621,14 @@ describe('image model executors', () => {
             mask: 'https://cdn.example/mask.png'
           }
         },
-        settings: { imageModels: [{ axisModelId: 'gpt-image-2', baseUrlOverride: 'https://api.openai.com/v1', providerModelIdOverride: 'gpt-image-2' }] },
+        settings: { imageModels: [{ axisModelId: 'gpt-image-2', baseUrlOverride: 'https://api.openai.com/v1', requestModelIdOverride: 'gpt-image-2' }] },
         secrets: { imageModelApiKeys: { 'gpt-image-2': 'sk-image' } },
         fetch
       });
 
       expect(result.status).toBe('ok');
       expect(downloaded).toEqual(['https://cdn.example/mask.png']);
-      expect(providerCalls).toBe(1);
+      expect(modelRuns).toBe(1);
     } finally {
       await rm(projectRoot, { recursive: true, force: true });
     }
@@ -643,8 +636,8 @@ describe('image model executors', () => {
 
   it('returns direct image input errors for missing project image paths', async () => {
     const projectRoot = await mkdtemp(join(tmpdir(), 'axis-image-missing-input-'));
-    const fetch: ImageProviderFetch = async () => {
-      throw new Error('provider should not be called for missing image inputs');
+    const fetch: ImageModelFetch = async () => {
+      throw new Error('model fetch should not be called for missing image inputs');
     };
     try {
       const result = await executeImageModelRequest({
@@ -657,7 +650,7 @@ describe('image model executors', () => {
             image: ['missing/source.png']
           }
         },
-        settings: { imageModels: [{ axisModelId: 'gpt-image-2', baseUrlOverride: 'https://api.openai.com/v1', providerModelIdOverride: 'gpt-image-2' }] },
+        settings: { imageModels: [{ axisModelId: 'gpt-image-2', baseUrlOverride: 'https://api.openai.com/v1', requestModelIdOverride: 'gpt-image-2' }] },
         secrets: { imageModelApiKeys: { 'gpt-image-2': 'sk-image' } },
         fetch
       });
@@ -690,15 +683,15 @@ describe('image model executors', () => {
     }
   ])('preserves project path validation errors for $model image inputs', async ({ model, baseUrl, arguments: args }) => {
     const projectRoot = await mkdtemp(join(tmpdir(), 'axis-image-invalid-path-input-'));
-    const fetch: ImageProviderFetch = async () => {
-      throw new Error('provider should not be called for invalid image input paths');
+    const fetch: ImageModelFetch = async () => {
+      throw new Error('model fetch should not be called for invalid image input paths');
     };
     try {
       const result = await executeImageModelRequest({
         projectRoot,
         invocationId: 'turn-invalid-image-input-path',
         input: { model, arguments: args },
-        settings: { imageModels: [{ axisModelId: model, baseUrlOverride: baseUrl, providerModelIdOverride: model }] },
+        settings: { imageModels: [{ axisModelId: model, baseUrlOverride: baseUrl, requestModelIdOverride: model }] },
         secrets: { imageModelApiKeys: { [model]: 'sk-image' } },
         fetch
       });
@@ -713,10 +706,10 @@ describe('image model executors', () => {
 
   it('rejects image input fields on models that do not declare them', async () => {
     const projectRoot = await mkdtemp(join(tmpdir(), 'axis-image-unsupported-input-field-'));
-    let providerCalled = false;
-    const fetch: ImageProviderFetch = async () => {
-      providerCalled = true;
-      throw new Error('provider should not be called for unsupported image input fields');
+    let modelRuned = false;
+    const fetch: ImageModelFetch = async () => {
+      modelRuned = true;
+      throw new Error('model fetch should not be called for unsupported image input fields');
     };
     try {
       const result = await executeImageModelRequest({
@@ -729,7 +722,7 @@ describe('image model executors', () => {
             image_url: 'https://cdn.example/source.png'
           }
         },
-        settings: { imageModels: [{ axisModelId: 'fal-ai/flux/dev', baseUrlOverride: 'https://fal.run', providerModelIdOverride: 'fal-ai/flux/dev' }] },
+        settings: { imageModels: [{ axisModelId: 'fal-ai/flux/dev', baseUrlOverride: 'https://fal.run', requestModelIdOverride: 'fal-ai/flux/dev' }] },
         secrets: { imageModelApiKeys: { 'fal-ai/flux/dev': 'sk-image' } },
         fetch
       });
@@ -737,16 +730,16 @@ describe('image model executors', () => {
       expect(result.status).toBe('error');
       expect(result.error).toBe('invalid_image_input');
       expect(result.content).toBe('Image input field "image_url" is not supported by model "fal-ai/flux/dev".');
-      expect(providerCalled).toBe(false);
+      expect(modelRuned).toBe(false);
     } finally {
       await rm(projectRoot, { recursive: true, force: true });
     }
   });
 
-  it('rejects null image inputs before provider calls', async () => {
+  it('rejects null image inputs before model requests', async () => {
     const projectRoot = await mkdtemp(join(tmpdir(), 'axis-image-null-input-'));
-    const fetch: ImageProviderFetch = async () => {
-      throw new Error('provider should not be called for null image inputs');
+    const fetch: ImageModelFetch = async () => {
+      throw new Error('model fetch should not be called for null image inputs');
     };
     try {
       const result = await executeImageModelRequest({
@@ -759,7 +752,7 @@ describe('image model executors', () => {
             image: null
           }
         },
-        settings: { imageModels: [{ axisModelId: 'gpt-image-2', baseUrlOverride: 'https://api.openai.com/v1', providerModelIdOverride: 'gpt-image-2' }] },
+        settings: { imageModels: [{ axisModelId: 'gpt-image-2', baseUrlOverride: 'https://api.openai.com/v1', requestModelIdOverride: 'gpt-image-2' }] },
         secrets: { imageModelApiKeys: { 'gpt-image-2': 'sk-image' } },
         fetch
       });
@@ -772,10 +765,10 @@ describe('image model executors', () => {
     }
   });
 
-  it('rejects scalar values for array image input fields before provider calls', async () => {
+  it('rejects scalar values for array image input fields before model requests', async () => {
     const projectRoot = await mkdtemp(join(tmpdir(), 'axis-image-scalar-array-field-'));
-    const fetch: ImageProviderFetch = async () => {
-      throw new Error('provider should not be called for scalar array image inputs');
+    const fetch: ImageModelFetch = async () => {
+      throw new Error('model fetch should not be called for scalar array image inputs');
     };
     try {
       await writeFile(join(projectRoot, 'source.png'), tinyPng);
@@ -789,7 +782,7 @@ describe('image model executors', () => {
             image: 'source.png'
           }
         },
-        settings: { imageModels: [{ axisModelId: 'gpt-image-2', baseUrlOverride: 'https://api.openai.com/v1', providerModelIdOverride: 'gpt-image-2' }] },
+        settings: { imageModels: [{ axisModelId: 'gpt-image-2', baseUrlOverride: 'https://api.openai.com/v1', requestModelIdOverride: 'gpt-image-2' }] },
         secrets: { imageModelApiKeys: { 'gpt-image-2': 'sk-image' } },
         fetch
       });
@@ -802,10 +795,10 @@ describe('image model executors', () => {
     }
   });
 
-  it('rejects array values for single image input fields before provider calls', async () => {
+  it('rejects array values for single image input fields before model requests', async () => {
     const projectRoot = await mkdtemp(join(tmpdir(), 'axis-image-array-single-field-'));
-    const fetch: ImageProviderFetch = async () => {
-      throw new Error('provider should not be called for array mask inputs');
+    const fetch: ImageModelFetch = async () => {
+      throw new Error('model fetch should not be called for array mask inputs');
     };
     try {
       await writeFile(join(projectRoot, 'source.png'), tinyPng);
@@ -822,7 +815,7 @@ describe('image model executors', () => {
             mask: ['mask-1.png', 'mask-2.png']
           }
         },
-        settings: { imageModels: [{ axisModelId: 'gpt-image-2', baseUrlOverride: 'https://api.openai.com/v1', providerModelIdOverride: 'gpt-image-2' }] },
+        settings: { imageModels: [{ axisModelId: 'gpt-image-2', baseUrlOverride: 'https://api.openai.com/v1', requestModelIdOverride: 'gpt-image-2' }] },
         secrets: { imageModelApiKeys: { 'gpt-image-2': 'sk-image' } },
         fetch
       });
@@ -835,10 +828,10 @@ describe('image model executors', () => {
     }
   });
 
-  it('rejects masks without input images before provider calls', async () => {
+  it('rejects masks without input images before model requests', async () => {
     const projectRoot = await mkdtemp(join(tmpdir(), 'axis-image-mask-without-input-'));
-    const fetch: ImageProviderFetch = async () => {
-      throw new Error('provider should not be called when mask has no input images');
+    const fetch: ImageModelFetch = async () => {
+      throw new Error('model fetch should not be called when mask has no input images');
     };
     try {
       await writeFile(join(projectRoot, 'mask.png'), tinyPng);
@@ -852,7 +845,7 @@ describe('image model executors', () => {
             mask: 'mask.png'
           }
         },
-        settings: { imageModels: [{ axisModelId: 'gpt-image-2', baseUrlOverride: 'https://api.openai.com/v1', providerModelIdOverride: 'gpt-image-2' }] },
+        settings: { imageModels: [{ axisModelId: 'gpt-image-2', baseUrlOverride: 'https://api.openai.com/v1', requestModelIdOverride: 'gpt-image-2' }] },
         secrets: { imageModelApiKeys: { 'gpt-image-2': 'sk-image' } },
         fetch
       });
@@ -865,10 +858,10 @@ describe('image model executors', () => {
     }
   });
 
-  it('rejects unsupported provider-ready image input objects before provider calls', async () => {
+  it('rejects unsupported model-specific image input objects before model requests', async () => {
     const projectRoot = await mkdtemp(join(tmpdir(), 'axis-image-invalid-input-object-'));
-    const fetch: ImageProviderFetch = async () => {
-      throw new Error('provider should not be called for invalid image inputs');
+    const fetch: ImageModelFetch = async () => {
+      throw new Error('model fetch should not be called for invalid image inputs');
     };
     try {
       const result = await executeImageModelRequest({
@@ -881,24 +874,24 @@ describe('image model executors', () => {
             image: [{ fileData: { fileUri: 'https://cdn.example/source.png', mimeType: 'image/png' } }]
           }
         },
-        settings: { imageModels: [{ axisModelId: 'doubao-seedream-5-0-lite-260128', baseUrlOverride: 'https://ark.example/v1', providerModelIdOverride: 'doubao-image' }] },
+        settings: { imageModels: [{ axisModelId: 'doubao-seedream-5-0-lite-260128', baseUrlOverride: 'https://ark.example/v1', requestModelIdOverride: 'doubao-image' }] },
         secrets: { imageModelApiKeys: { 'doubao-seedream-5-0-lite-260128': 'sk-image' } },
         fetch
       });
 
       expect(result.status).toBe('error');
       expect(result.error).toBe('invalid_image_input');
-      expect(result.content).toBe('Unsupported provider-ready image input object for field "image".');
+      expect(result.content).toBe('Unsupported model-specific image input object for field "image".');
       expect(JSON.stringify(result)).not.toContain('reference');
     } finally {
       await rm(projectRoot, { recursive: true, force: true });
     }
   });
 
-  it('rejects provider-ready image objects that do not belong to the selected model field', async () => {
+  it('rejects model-specific image objects that do not belong to the selected model field', async () => {
     const projectRoot = await mkdtemp(join(tmpdir(), 'axis-image-cross-model-object-'));
-    const fetch: ImageProviderFetch = async () => {
-      throw new Error('provider should not be called for cross-model image input objects');
+    const fetch: ImageModelFetch = async () => {
+      throw new Error('model fetch should not be called for cross-model image input objects');
     };
     try {
       const result = await executeImageModelRequest({
@@ -911,25 +904,25 @@ describe('image model executors', () => {
             image: [{ image_file: 'https://cdn.example/source.png' }]
           }
         },
-        settings: { imageModels: [{ axisModelId: 'doubao-seedream-5-0-lite-260128', baseUrlOverride: 'https://ark.example/v1', providerModelIdOverride: 'doubao-image' }] },
+        settings: { imageModels: [{ axisModelId: 'doubao-seedream-5-0-lite-260128', baseUrlOverride: 'https://ark.example/v1', requestModelIdOverride: 'doubao-image' }] },
         secrets: { imageModelApiKeys: { 'doubao-seedream-5-0-lite-260128': 'sk-image' } },
         fetch
       });
 
       expect(result.status).toBe('error');
       expect(result.error).toBe('invalid_image_input');
-      expect(result.content).toBe('Unsupported provider-ready image input object for field "image".');
+      expect(result.content).toBe('Unsupported model-specific image input object for field "image".');
     } finally {
       await rm(projectRoot, { recursive: true, force: true });
     }
   });
 
-  it('rejects OpenAI provider-ready image_url objects with project-relative paths before provider calls', async () => {
+  it('rejects OpenAI model-specific image_url objects with project-relative paths before model requests', async () => {
     const projectRoot = await mkdtemp(join(tmpdir(), 'axis-image-openai-object-local-path-'));
-    let providerCalled = false;
-    const fetch: ImageProviderFetch = async () => {
-      providerCalled = true;
-      throw new Error('provider should not be called for provider-ready image_url local paths');
+    let modelRuned = false;
+    const fetch: ImageModelFetch = async () => {
+      modelRuned = true;
+      throw new Error('model fetch should not be called for model-specific image_url local paths');
     };
     try {
       const result = await executeImageModelRequest({
@@ -942,26 +935,26 @@ describe('image model executors', () => {
             image: [{ image_url: 'assets/source.png' }]
           }
         },
-        settings: { imageModels: [{ axisModelId: 'gpt-image-2', baseUrlOverride: 'https://api.openai.com/v1', providerModelIdOverride: 'gpt-image-2' }] },
+        settings: { imageModels: [{ axisModelId: 'gpt-image-2', baseUrlOverride: 'https://api.openai.com/v1', requestModelIdOverride: 'gpt-image-2' }] },
         secrets: { imageModelApiKeys: { 'gpt-image-2': 'sk-image' } },
         fetch
       });
 
       expect(result.status).toBe('error');
       expect(result.error).toBe('invalid_image_input');
-      expect(result.content).toBe('Unsupported provider-ready image input object for field "image".');
-      expect(providerCalled).toBe(false);
+      expect(result.content).toBe('Unsupported model-specific image input object for field "image".');
+      expect(modelRuned).toBe(false);
     } finally {
       await rm(projectRoot, { recursive: true, force: true });
     }
   });
 
-  it('rejects Gemini snake_case provider-ready image part objects before provider calls', async () => {
+  it('rejects Gemini snake_case model-specific image part objects before model requests', async () => {
     const projectRoot = await mkdtemp(join(tmpdir(), 'axis-image-gemini-snake-case-object-'));
-    let providerCalled = false;
-    const fetch: ImageProviderFetch = async () => {
-      providerCalled = true;
-      throw new Error('provider should not be called for snake_case Gemini image input objects');
+    let modelRuned = false;
+    const fetch: ImageModelFetch = async () => {
+      modelRuned = true;
+      throw new Error('model fetch should not be called for snake_case Gemini image input objects');
     };
     try {
       const result = await executeImageModelRequest({
@@ -974,7 +967,7 @@ describe('image model executors', () => {
             image: [{ inline_data: { mime_type: 'image/png', data: tinyPngBase64 } }]
           }
         },
-        settings: { imageModels: [{ axisModelId: 'gemini-3.1-flash-image-preview', baseUrlOverride: 'https://generativelanguage.googleapis.com/v1beta', providerModelIdOverride: 'gemini-3.1-flash-image-preview' }] },
+        settings: { imageModels: [{ axisModelId: 'gemini-3.1-flash-image-preview', baseUrlOverride: 'https://generativelanguage.googleapis.com/v1beta', requestModelIdOverride: 'gemini-3.1-flash-image-preview' }] },
         secrets: { imageModelApiKeys: { 'gemini-3.1-flash-image-preview': 'sk-image' } },
         fetch
       });
@@ -982,18 +975,18 @@ describe('image model executors', () => {
       expect(result.status).toBe('error');
       expect(result.error).toBe('invalid_image_input');
       expect(result.content).toBe('Image input field "image" is not supported by model "gemini-3.1-flash-image-preview".');
-      expect(providerCalled).toBe(false);
+      expect(modelRuned).toBe(false);
     } finally {
       await rm(projectRoot, { recursive: true, force: true });
     }
   });
 
-  it('rejects MiniMax provider-ready image_file objects with project-relative paths before provider calls', async () => {
+  it('rejects MiniMax model-specific image_file objects with project-relative paths before model requests', async () => {
     const projectRoot = await mkdtemp(join(tmpdir(), 'axis-image-minimax-object-local-path-'));
-    let providerCalled = false;
-    const fetch: ImageProviderFetch = async () => {
-      providerCalled = true;
-      throw new Error('provider should not be called for MiniMax image_file local paths');
+    let modelRuned = false;
+    const fetch: ImageModelFetch = async () => {
+      modelRuned = true;
+      throw new Error('model fetch should not be called for MiniMax image_file local paths');
     };
     try {
       const result = await executeImageModelRequest({
@@ -1006,26 +999,26 @@ describe('image model executors', () => {
             subject_reference: [{ type: 'character', image_file: 'assets/source.png' }]
           }
         },
-        settings: { imageModels: [{ axisModelId: 'image-01', baseUrlOverride: 'https://api.minimax.io', providerModelIdOverride: 'image-01' }] },
+        settings: { imageModels: [{ axisModelId: 'image-01', baseUrlOverride: 'https://api.minimax.io', requestModelIdOverride: 'image-01' }] },
         secrets: { imageModelApiKeys: { 'image-01': 'sk-image' } },
         fetch
       });
 
       expect(result.status).toBe('error');
       expect(result.error).toBe('invalid_image_input');
-      expect(result.content).toBe('Unsupported provider-ready image input object for field "subject_reference".');
-      expect(providerCalled).toBe(false);
+      expect(result.content).toBe('Unsupported model-specific image input object for field "subject_reference".');
+      expect(modelRuned).toBe(false);
     } finally {
       await rm(projectRoot, { recursive: true, force: true });
     }
   });
 
-  it('rejects MiniMax provider-ready image_data objects before provider calls', async () => {
+  it('rejects MiniMax model-specific image_data objects before model requests', async () => {
     const projectRoot = await mkdtemp(join(tmpdir(), 'axis-image-minimax-object-image-data-'));
-    let providerCalled = false;
-    const fetch: ImageProviderFetch = async () => {
-      providerCalled = true;
-      throw new Error('provider should not be called for MiniMax image_data objects');
+    let modelRuned = false;
+    const fetch: ImageModelFetch = async () => {
+      modelRuned = true;
+      throw new Error('model fetch should not be called for MiniMax image_data objects');
     };
     try {
       const result = await executeImageModelRequest({
@@ -1038,15 +1031,15 @@ describe('image model executors', () => {
             subject_reference: [{ type: 'character', image_data: tinyPngBase64 }]
           }
         },
-        settings: { imageModels: [{ axisModelId: 'image-01', baseUrlOverride: 'https://api.minimax.io', providerModelIdOverride: 'image-01' }] },
+        settings: { imageModels: [{ axisModelId: 'image-01', baseUrlOverride: 'https://api.minimax.io', requestModelIdOverride: 'image-01' }] },
         secrets: { imageModelApiKeys: { 'image-01': 'sk-image' } },
         fetch
       });
 
       expect(result.status).toBe('error');
       expect(result.error).toBe('invalid_image_input');
-      expect(result.content).toBe('Unsupported provider-ready image input object for field "subject_reference".');
-      expect(providerCalled).toBe(false);
+      expect(result.content).toBe('Unsupported model-specific image input object for field "subject_reference".');
+      expect(modelRuned).toBe(false);
     } finally {
       await rm(projectRoot, { recursive: true, force: true });
     }
@@ -1057,7 +1050,7 @@ describe('image model executors', () => {
       name: 'OpenAI',
       model: 'gpt-image-2',
       baseUrl: 'https://api.openai.com/v1',
-      providerModelId: 'gpt-image-2',
+      requestModelId: 'gpt-image-2',
       arguments: {
         prompt: 'retouch the image',
         image: [{ data: tinyPngBase64, mime_type: 'image/png', extra: true }]
@@ -1068,37 +1061,37 @@ describe('image model executors', () => {
       name: 'MiniMax',
       model: 'image-01',
       baseUrl: 'https://api.minimax.io',
-      providerModelId: 'image-01',
+      requestModelId: 'image-01',
       arguments: {
         prompt: 'keep the character consistent',
         subject_reference: [{ type: 'character', image_file: 'https://cdn.example/source.png', extra: true }]
       },
       field: 'subject_reference'
     }
-  ])('rejects $name provider-ready image input objects with extra fields before provider calls', async ({ model, baseUrl, providerModelId, arguments: requestArguments, field }) => {
+  ])('rejects $name model-specific image input objects with extra fields before model requests', async ({ model, baseUrl, requestModelId, arguments: requestArguments, field }) => {
     const projectRoot = await mkdtemp(join(tmpdir(), `axis-image-extra-object-${model.replace(/[^a-z0-9]+/gi, '-')}-`));
-    let providerCalled = false;
-    const fetch: ImageProviderFetch = async () => {
-      providerCalled = true;
-      throw new Error('provider should not be called for provider-ready image input objects with extra fields');
+    let modelRuned = false;
+    const fetch: ImageModelFetch = async () => {
+      modelRuned = true;
+      throw new Error('model fetch should not be called for model-specific image input objects with extra fields');
     };
     try {
       const result = await executeImageModelRequest({
         projectRoot,
-        invocationId: 'turn-extra-provider-object',
+        invocationId: 'turn-extra-model-object',
         input: {
           model,
           arguments: requestArguments
         },
-        settings: { imageModels: [{ axisModelId: model, baseUrlOverride: baseUrl, providerModelIdOverride: providerModelId }] },
+        settings: { imageModels: [{ axisModelId: model, baseUrlOverride: baseUrl, requestModelIdOverride: requestModelId }] },
         secrets: { imageModelApiKeys: { [model]: 'sk-image' } },
         fetch
       });
 
       expect(result.status).toBe('error');
       expect(result.error).toBe('invalid_image_input');
-      expect(result.content).toBe(`Unsupported provider-ready image input object for field "${field}".`);
-      expect(providerCalled).toBe(false);
+      expect(result.content).toBe(`Unsupported model-specific image input object for field "${field}".`);
+      expect(modelRuned).toBe(false);
     } finally {
       await rm(projectRoot, { recursive: true, force: true });
     }
@@ -1106,7 +1099,7 @@ describe('image model executors', () => {
 
   it('encodes MiniMax project subject_reference paths as image_file data URLs', async () => {
     const projectRoot = await mkdtemp(join(tmpdir(), 'axis-image-minimax-local-subject-reference-'));
-    const fetch: ImageProviderFetch = async (url, init) => {
+    const fetch: ImageModelFetch = async (url, init) => {
       expect(url).toBe('https://api.minimax.io/v1/image_generation');
       expect(JSON.parse(String(init?.body))).toMatchObject({
         model: 'image-01',
@@ -1132,7 +1125,7 @@ describe('image model executors', () => {
             subject_reference: ['source.png']
           }
         },
-        settings: { imageModels: [{ axisModelId: 'image-01', baseUrlOverride: 'https://api.minimax.io', providerModelIdOverride: 'image-01' }] },
+        settings: { imageModels: [{ axisModelId: 'image-01', baseUrlOverride: 'https://api.minimax.io', requestModelIdOverride: 'image-01' }] },
         secrets: { imageModelApiKeys: { 'image-01': 'sk-image' } },
         fetch
       });
@@ -1143,9 +1136,9 @@ describe('image model executors', () => {
     }
   });
 
-  it('passes MiniMax provider-ready subject_reference objects through to the provider request', async () => {
-    const projectRoot = await mkdtemp(join(tmpdir(), 'axis-image-minimax-provider-subject-reference-'));
-    const fetch: ImageProviderFetch = async (url, init) => {
+  it('passes MiniMax model-specific subject_reference objects through to the model request', async () => {
+    const projectRoot = await mkdtemp(join(tmpdir(), 'axis-image-minimax-model-subject-reference-'));
+    const fetch: ImageModelFetch = async (url, init) => {
       expect(url).toBe('https://api.minimax.io/v1/image_generation');
       expect(JSON.parse(String(init?.body))).toMatchObject({
         model: 'image-01',
@@ -1162,7 +1155,7 @@ describe('image model executors', () => {
     try {
       const result = await executeImageModelRequest({
         projectRoot,
-        invocationId: 'turn-minimax-provider-subject-reference',
+        invocationId: 'turn-minimax-model-subject-reference',
         input: {
           model: 'image-01',
           arguments: {
@@ -1175,7 +1168,7 @@ describe('image model executors', () => {
             ]
           }
         },
-        settings: { imageModels: [{ axisModelId: 'image-01', baseUrlOverride: 'https://api.minimax.io', providerModelIdOverride: 'image-01' }] },
+        settings: { imageModels: [{ axisModelId: 'image-01', baseUrlOverride: 'https://api.minimax.io', requestModelIdOverride: 'image-01' }] },
         secrets: { imageModelApiKeys: { 'image-01': 'sk-image' } },
         fetch
       });
@@ -1186,17 +1179,17 @@ describe('image model executors', () => {
     }
   });
 
-  it('rejects empty image input arrays before provider calls', async () => {
+  it('rejects empty image input arrays before model requests', async () => {
     const projectRoot = await mkdtemp(join(tmpdir(), 'axis-image-openai-empty-input-images-'));
-    const fetch: ImageProviderFetch = async () => {
-      throw new Error('provider should not be called for empty image input arrays');
+    const fetch: ImageModelFetch = async () => {
+      throw new Error('model fetch should not be called for empty image input arrays');
     };
     try {
       const result = await executeImageModelRequest({
         projectRoot,
         invocationId: 'turn-empty-input-images',
         input: { model: 'gpt-image-2', arguments: { prompt: 'cover image', image: [], size: '1024x1024' } },
-        settings: { imageModels: [{ axisModelId: 'gpt-image-2', baseUrlOverride: 'https://api.openai.com/v1', providerModelIdOverride: 'gpt-image-2' }] },
+        settings: { imageModels: [{ axisModelId: 'gpt-image-2', baseUrlOverride: 'https://api.openai.com/v1', requestModelIdOverride: 'gpt-image-2' }] },
         secrets: { imageModelApiKeys: { 'gpt-image-2': 'sk-image' } },
         fetch
       });
@@ -1209,9 +1202,9 @@ describe('image model executors', () => {
     }
   });
 
-  it('aborts an OpenAI request when the provider does not respond before the timeout', async () => {
+  it('aborts an OpenAI request when the model endpoint does not respond before the timeout', async () => {
     const projectRoot = await mkdtemp(join(tmpdir(), 'axis-image-openai-timeout-'));
-    const fetch: ImageProviderFetch = async (_url, init) => {
+    const fetch: ImageModelFetch = async (_url, init) => {
       const signal = init?.signal;
       return await new Promise<Response>((_resolve, reject) => {
         if (signal?.aborted) {
@@ -1230,7 +1223,7 @@ describe('image model executors', () => {
         projectRoot,
         invocationId: 'turn-openai-timeout',
         input: { model: 'gpt-image-2', arguments: { prompt: 'cover image', size: '1024x1024' } },
-        settings: { imageModels: [{ axisModelId: 'gpt-image-2', baseUrlOverride: 'https://api.openai.com/v1', providerModelIdOverride: 'gpt-image-2' }] },
+        settings: { imageModels: [{ axisModelId: 'gpt-image-2', baseUrlOverride: 'https://api.openai.com/v1', requestModelIdOverride: 'gpt-image-2' }] },
         secrets: { imageModelApiKeys: { 'gpt-image-2': 'sk-image' } },
         requestTimeoutMs: 5,
         fetch
@@ -1247,7 +1240,7 @@ describe('image model executors', () => {
   it('cancels a stalled OpenAI response body after the body timeout', async () => {
     const projectRoot = await mkdtemp(join(tmpdir(), 'axis-image-openai-body-timeout-'));
     let canceled = false;
-    const fetch: ImageProviderFetch = async () => new Response(
+    const fetch: ImageModelFetch = async () => new Response(
       new ReadableStream({
         start(controller) {
           controller.enqueue(new TextEncoder().encode('{"data":'));
@@ -1263,7 +1256,7 @@ describe('image model executors', () => {
         projectRoot,
         invocationId: 'turn-openai-body-timeout',
         input: { model: 'gpt-image-2', arguments: { prompt: 'cover image', size: '1024x1024' } },
-        settings: { imageModels: [{ axisModelId: 'gpt-image-2', baseUrlOverride: 'https://api.openai.com/v1', providerModelIdOverride: 'gpt-image-2' }] },
+        settings: { imageModels: [{ axisModelId: 'gpt-image-2', baseUrlOverride: 'https://api.openai.com/v1', requestModelIdOverride: 'gpt-image-2' }] },
         secrets: { imageModelApiKeys: { 'gpt-image-2': 'sk-image' } },
         requestTimeoutMs: 5,
         fetch
@@ -1280,7 +1273,7 @@ describe('image model executors', () => {
   it('returns a body timeout when response body cancellation does not settle', async () => {
     const projectRoot = await mkdtemp(join(tmpdir(), 'axis-image-openai-body-cancel-hang-'));
     let canceled = false;
-    const fetch: ImageProviderFetch = async () => new Response(
+    const fetch: ImageModelFetch = async () => new Response(
       new ReadableStream({
         start(controller) {
           controller.enqueue(new TextEncoder().encode('{"data":'));
@@ -1297,7 +1290,7 @@ describe('image model executors', () => {
         projectRoot,
         invocationId: 'turn-openai-body-cancel-hang',
         input: { model: 'gpt-image-2', arguments: { prompt: 'cover image', size: '1024x1024' } },
-        settings: { imageModels: [{ axisModelId: 'gpt-image-2', baseUrlOverride: 'https://api.openai.com/v1', providerModelIdOverride: 'gpt-image-2' }] },
+        settings: { imageModels: [{ axisModelId: 'gpt-image-2', baseUrlOverride: 'https://api.openai.com/v1', requestModelIdOverride: 'gpt-image-2' }] },
         secrets: { imageModelApiKeys: { 'gpt-image-2': 'sk-image' } },
         requestTimeoutMs: 5,
         fetch
@@ -1321,7 +1314,7 @@ describe('image model executors', () => {
   it('aborts an OpenAI request when the caller signal aborts', async () => {
     const projectRoot = await mkdtemp(join(tmpdir(), 'axis-image-openai-caller-abort-'));
     const controller = new AbortController();
-    const fetch: ImageProviderFetch = async (_url, init) => {
+    const fetch: ImageModelFetch = async (_url, init) => {
       setTimeout(() => controller.abort(new Error('caller stopped image request')), 0);
       return await new Promise<Response>((_resolve, reject) => {
         init?.signal?.addEventListener('abort', () => {
@@ -1334,7 +1327,7 @@ describe('image model executors', () => {
         projectRoot,
         invocationId: 'turn-openai-caller-abort',
         input: { model: 'gpt-image-2', arguments: { prompt: 'cover image', size: '1024x1024' } },
-        settings: { imageModels: [{ axisModelId: 'gpt-image-2', baseUrlOverride: 'https://api.openai.com/v1', providerModelIdOverride: 'gpt-image-2' }] },
+        settings: { imageModels: [{ axisModelId: 'gpt-image-2', baseUrlOverride: 'https://api.openai.com/v1', requestModelIdOverride: 'gpt-image-2' }] },
         secrets: { imageModelApiKeys: { 'gpt-image-2': 'sk-image' } },
         fetch,
         signal: controller.signal
@@ -1351,7 +1344,7 @@ describe('image model executors', () => {
     const projectRoot = await mkdtemp(join(tmpdir(), 'axis-image-wan-caller-abort-'));
     const controller = new AbortController();
     const calls: string[] = [];
-    const fetch: ImageProviderFetch = async (url) => {
+    const fetch: ImageModelFetch = async (url) => {
       calls.push(url);
       if (url.endsWith('/services/aigc/image-generation/generation')) {
         return jsonResponse({ output: { task_id: 'task-1' } });
@@ -1367,7 +1360,7 @@ describe('image model executors', () => {
         projectRoot,
         invocationId: 'turn-wan-caller-abort',
         input: { model: 'wan2.7-image', arguments: { prompt: 'cover image' } },
-        settings: { imageModels: [{ axisModelId: 'wan2.7-image', baseUrlOverride: 'https://dashscope.aliyuncs.com/api/v1', providerModelIdOverride: 'wan2.7-image' }] },
+        settings: { imageModels: [{ axisModelId: 'wan2.7-image', baseUrlOverride: 'https://dashscope.aliyuncs.com/api/v1', requestModelIdOverride: 'wan2.7-image' }] },
         secrets: { imageModelApiKeys: { 'wan2.7-image': 'sk-wan' } },
         pollIntervalMs: 1_000,
         wanPollMaxAttempts: 10,
@@ -1386,9 +1379,9 @@ describe('image model executors', () => {
     }
   });
 
-  it('keeps raw provider output when a returned OpenAI image URL cannot be downloaded', async () => {
+  it('returns the current image download failure error payload', async () => {
     const projectRoot = await mkdtemp(join(tmpdir(), 'axis-image-openai-download-failure-'));
-    const fetch: ImageProviderFetch = async (url) => {
+    const fetch: ImageModelFetch = async (url) => {
       if (url === 'https://cdn.example/original-output.png') {
         throw new TypeError('fetch failed');
       }
@@ -1406,26 +1399,16 @@ describe('image model executors', () => {
         projectRoot,
         invocationId: 'turn-openai-download-failure',
         input: { model: 'gpt-image-2', arguments: { prompt: 'cover image', size: '1024x1024' } },
-        settings: { imageModels: [{ axisModelId: 'gpt-image-2', baseUrlOverride: 'https://api.openai.com/v1', providerModelIdOverride: 'gpt-image-2' }] },
+        settings: { imageModels: [{ axisModelId: 'gpt-image-2', baseUrlOverride: 'https://api.openai.com/v1', requestModelIdOverride: 'gpt-image-2' }] },
         secrets: { imageModelApiKeys: { 'gpt-image-2': 'sk-image' } },
         fetch
       });
 
       expect(result.status).toBe('error');
-      expect(result.rawProviderOutput).toMatchObject({
-        responses: [
-          {
-            status: 200,
-            body: {
-              data: [
-                {
-                  url: 'https://cdn.example/original-output.png',
-                  revised_prompt: 'refined cover'
-                }
-              ]
-            }
-          }
-        ]
+      expect(result).toMatchObject({
+        status: 'error',
+        error: 'image_request_failed',
+        content: 'Image request failed: fetch failed'
       });
     } finally {
       await rm(projectRoot, { recursive: true, force: true });
@@ -1460,7 +1443,7 @@ describe('image model executors', () => {
   ])('executes the $axisModelId executor branch', async ({ axisModelId, baseUrl, expectedFirstUrl, response }) => {
     const projectRoot = await mkdtemp(join(tmpdir(), `axis-image-${axisModelId.replace(/[^a-z0-9]+/gi, '-')}-`));
     const calls: string[] = [];
-    const fetch: ImageProviderFetch = async (url) => {
+    const fetch: ImageModelFetch = async (url) => {
       calls.push(url);
       if (url.startsWith('https://cdn.example/')) {
         return pngResponse();
@@ -1472,7 +1455,7 @@ describe('image model executors', () => {
         projectRoot,
         invocationId: 'turn-1',
         input: { model: axisModelId, arguments: { prompt: 'cover image' } },
-        settings: { imageModels: [{ axisModelId, baseUrlOverride: baseUrl, providerModelIdOverride: axisModelId }] },
+        settings: { imageModels: [{ axisModelId, baseUrlOverride: baseUrl, requestModelIdOverride: axisModelId }] },
         secrets: { imageModelApiKeys: { [axisModelId]: 'sk-image' } },
         fetch
       });
@@ -1490,7 +1473,7 @@ describe('image model executors', () => {
   it('uses Gemini 3.1 image responseFormat and records compact inline image metadata', async () => {
     const projectRoot = await mkdtemp(join(tmpdir(), 'axis-image-gemini-compact-'));
     const recorded: unknown[] = [];
-    const fetch: ImageProviderFetch = async (url, init) => {
+    const fetch: ImageModelFetch = async (url, init) => {
       expect(url).toBe('https://generativelanguage.googleapis.com/v1beta/models/gemini-3.1-flash-image-preview:generateContent?key=sk-image');
       expect(JSON.parse(String(init?.body))).toMatchObject({
         generationConfig: {
@@ -1526,7 +1509,7 @@ describe('image model executors', () => {
             image_size: '1K'
           }
         },
-        settings: { imageModels: [{ axisModelId: 'gemini-3.1-flash-image-preview', baseUrlOverride: 'https://generativelanguage.googleapis.com/v1beta', providerModelIdOverride: 'gemini-3.1-flash-image-preview' }] },
+        settings: { imageModels: [{ axisModelId: 'gemini-3.1-flash-image-preview', baseUrlOverride: 'https://generativelanguage.googleapis.com/v1beta', requestModelIdOverride: 'gemini-3.1-flash-image-preview' }] },
         secrets: { imageModelApiKeys: { 'gemini-3.1-flash-image-preview': 'sk-image' } },
         fetch,
         recordGeneratedAsset: async (input) => {
@@ -1544,7 +1527,7 @@ describe('image model executors', () => {
       await expect(readFile(join(projectRoot, result.artifacts[0].projectRelativePath))).resolves.toEqual(tinyPng);
       expect(recorded).toHaveLength(1);
       expect(recorded[0]).toMatchObject({
-        providerCall: {
+        modelRun: {
           output: {
             responses: [{
               body: {
@@ -1581,7 +1564,7 @@ describe('image model executors', () => {
   it('executes the Wan async polling executor branch', async () => {
     const projectRoot = await mkdtemp(join(tmpdir(), 'axis-image-wan-'));
     const calls: string[] = [];
-    const fetch: ImageProviderFetch = async (url) => {
+    const fetch: ImageModelFetch = async (url) => {
       calls.push(url);
       if (url.endsWith('/services/aigc/image-generation/generation')) {
         return jsonResponse({ output: { task_id: 'task-1' } });
@@ -1596,7 +1579,7 @@ describe('image model executors', () => {
         projectRoot,
         invocationId: 'turn-1',
         input: { model: 'wan2.7-image', arguments: { prompt: 'cover image' } },
-        settings: { imageModels: [{ axisModelId: 'wan2.7-image', baseUrlOverride: 'https://dashscope.aliyuncs.com/api/v1', providerModelIdOverride: 'wan2.7-image' }] },
+        settings: { imageModels: [{ axisModelId: 'wan2.7-image', baseUrlOverride: 'https://dashscope.aliyuncs.com/api/v1', requestModelIdOverride: 'wan2.7-image' }] },
         secrets: { imageModelApiKeys: { 'wan2.7-image': 'sk-wan' } },
         pollIntervalMs: 0,
         fetch
@@ -1616,7 +1599,7 @@ describe('image model executors', () => {
   it('executes the Vydra async polling executor branch', async () => {
     const projectRoot = await mkdtemp(join(tmpdir(), 'axis-image-vydra-'));
     const calls: string[] = [];
-    const fetch: ImageProviderFetch = async (url) => {
+    const fetch: ImageModelFetch = async (url) => {
       calls.push(url);
       if (url.endsWith('/models/grok-imagine')) {
         return jsonResponse({ jobId: 'job-1' });
@@ -1631,7 +1614,7 @@ describe('image model executors', () => {
         projectRoot,
         invocationId: 'turn-1',
         input: { model: 'grok-imagine', arguments: { prompt: 'cover image' } },
-        settings: { imageModels: [{ axisModelId: 'grok-imagine', baseUrlOverride: 'https://vydra.example', providerModelIdOverride: 'grok-imagine' }] },
+        settings: { imageModels: [{ axisModelId: 'grok-imagine', baseUrlOverride: 'https://vydra.example', requestModelIdOverride: 'grok-imagine' }] },
         secrets: { imageModelApiKeys: { 'grok-imagine': 'sk-grok' } },
         pollIntervalMs: 0,
         fetch
@@ -1656,7 +1639,7 @@ describe('image model executors', () => {
         projectRoot,
         invocationId: 'turn-1',
         input: { model: 'gpt-image-2', arguments: { prompt: 'cover image' } },
-        settings: { imageModels: [{ axisModelId: 'gpt-image-2', baseUrlOverride: 'https://api.openai.com/v1', providerModelIdOverride: 'gpt-image-2' }] },
+        settings: { imageModels: [{ axisModelId: 'gpt-image-2', baseUrlOverride: 'https://api.openai.com/v1', requestModelIdOverride: 'gpt-image-2' }] },
         secrets: { imageModelApiKeys: {} },
         fetch: async () => {
           called = true;

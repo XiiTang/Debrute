@@ -3,14 +3,20 @@ import { basename, extname } from 'node:path';
 import { readProjectFileBytes, writeProjectFile } from '@axis/project-core';
 import type { ImageModelsConfig, SecretsConfig } from '../config.js';
 import {
+  DEFAULT_REQUEST_TIMEOUT_MS,
+  fetchWithRequestTimeout,
+  readResponseArrayBufferWithTimeout as readResponseArrayBufferBodyWithTimeout,
+  readResponseTextWithTimeout as readResponseTextBodyWithTimeout
+} from '../requestTimeout.js';
+import {
   createImageModelCatalog,
   imageInputFieldsForCatalogEntry,
-  providerReadyImageObjectKindForCatalogEntry,
+  modelSpecificImageObjectKindForCatalogEntry,
   type ImageModelCatalogEntry,
-  type ProviderReadyImageObjectKind
+  type ModelSpecificImageObjectKind
 } from './catalog.js';
 
-export type ImageProviderFetch = (url: string, init?: RequestInit) => Promise<Response>;
+export type ImageModelFetch = (url: string, init?: RequestInit) => Promise<Response>;
 
 export interface ImageModelRequestInput {
   model: string;
@@ -27,20 +33,13 @@ export interface ImageModelRequestArtifact {
   height: number;
 }
 
-export interface ImageProviderRawOutput {
-  responses: Array<{
-    status: number;
-    body: unknown;
-  }>;
-}
-
 export interface ExecuteImageModelRequestInput {
   projectRoot: string;
   invocationId: string;
   input: ImageModelRequestInput;
   settings: ImageModelsConfig;
   secrets: Pick<SecretsConfig, 'imageModelApiKeys'>;
-  fetch?: ImageProviderFetch;
+  fetch?: ImageModelFetch;
   recordGeneratedAsset?: ImageGeneratedAssetRecorder;
   pollIntervalMs?: number;
   requestTimeoutMs?: number;
@@ -51,7 +50,7 @@ export interface ExecuteImageModelRequestInput {
 
 export interface ImageGeneratedAssetRecorderInput {
   projectRelativePath: string;
-  providerCall: {
+  modelRun: {
     request: unknown;
     output: unknown;
   };
@@ -61,7 +60,7 @@ export type ImageGeneratedAssetRecorder = (input: ImageGeneratedAssetRecorderInp
 
 export type ExecuteImageModelRequestResult =
   | { status: 'ok'; content: string; artifacts: ImageModelRequestArtifact[]; logs: Array<Record<string, unknown>> }
-  | { status: 'error'; content: string; error: string; logs: Array<Record<string, unknown>>; rawProviderOutput?: ImageProviderRawOutput };
+  | { status: 'error'; content: string; error: string; logs: Array<Record<string, unknown>> };
 
 interface ImagePayload {
   data: Uint8Array;
@@ -79,11 +78,11 @@ interface RequestState {
   entry: ImageModelCatalogEntry;
   baseUrl: string;
   apiKey: string;
-  providerModelId: string;
+  requestModelId: string;
   args: Record<string, unknown>;
-  fetch: ImageProviderFetch;
+  fetch: ImageModelFetch;
   recordGeneratedAsset?: ImageGeneratedAssetRecorder;
-  providerCall: ProviderCallLog;
+  modelRun: ModelRunLog;
   logs: Array<Record<string, unknown>>;
   pollIntervalMs: number;
   requestTimeoutMs: number;
@@ -92,25 +91,24 @@ interface RequestState {
   signal?: AbortSignal;
 }
 
-interface ProviderCallLog {
+interface ModelRunLog {
   request?: unknown;
-  responses: ProviderResponseLog[];
+  responses: ModelResponseLog[];
 }
 
-interface ProviderResponseLog {
+interface ModelResponseLog {
   status: number;
   headers: Record<string, string>;
   body: unknown;
 }
 
-type ProviderImageSuccess = { status: 'ok'; images: ImagePayload[]; output: Record<string, unknown> | null };
+type ModelImageSuccess = { status: 'ok'; images: ImagePayload[]; output: Record<string, unknown> | null };
 type ImageRequestError = Extract<ExecuteImageModelRequestResult, { status: 'error' }>;
-type ProviderImageResult = ProviderImageSuccess | ImageRequestError;
+type ModelImageResult = ModelImageSuccess | ImageRequestError;
 
 const DEFAULT_WAN_POLL_ATTEMPTS = 60;
 const DEFAULT_VYDRA_POLL_ATTEMPTS = 60;
 const DEFAULT_POLL_INTERVAL_MS = 2_000;
-const DEFAULT_REQUEST_TIMEOUT_MS = 120_000;
 const PNG_SIGNATURE = Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]);
 const JPEG_SIGNATURE = Buffer.from([0xff, 0xd8, 0xff]);
 const CATALOG_IMAGE_INPUT_FIELDS = [...new Set(createImageModelCatalog().listAll().flatMap(imageInputFieldsForCatalogEntry))];
@@ -156,11 +154,11 @@ export async function executeImageModelRequest(input: ExecuteImageModelRequestIn
     entry,
     baseUrl: modelSettings?.baseUrlOverride?.trim() || entry.defaultBaseUrl,
     apiKey,
-    providerModelId: modelSettings?.providerModelIdOverride?.trim() || entry.defaultProviderModelId,
+    requestModelId: modelSettings?.requestModelIdOverride?.trim() || entry.defaultRequestModelId,
     args,
     fetch: input.fetch ?? fetch,
     ...(input.recordGeneratedAsset ? { recordGeneratedAsset: input.recordGeneratedAsset } : {}),
-    providerCall: { responses: [] },
+    modelRun: { responses: [] },
     logs,
     pollIntervalMs: input.pollIntervalMs ?? DEFAULT_POLL_INTERVAL_MS,
     requestTimeoutMs: input.requestTimeoutMs ?? input.input.timeoutMs ?? DEFAULT_REQUEST_TIMEOUT_MS,
@@ -168,15 +166,14 @@ export async function executeImageModelRequest(input: ExecuteImageModelRequestIn
     vydraPollMaxAttempts: input.vydraPollMaxAttempts ?? DEFAULT_VYDRA_POLL_ATTEMPTS,
     ...(input.signal ? { signal: input.signal } : {})
   };
-  log(state, 'resolve_provider', {
-    provider: entry.provider,
+  log(state, 'resolve_model', {
     model: entry.axisModelId,
-    providerModelId: state.providerModelId,
+    requestModelId: state.requestModelId,
     configured: true
   });
 
   try {
-    const result = await executeProviderImageRequest(state);
+    const result = await executeImageRequest(state);
     if (result.status === 'error') {
       return result;
     }
@@ -190,53 +187,46 @@ export async function executeImageModelRequest(input: ExecuteImageModelRequestIn
     };
   } catch (error) {
     log(state, 'error', { message: errorMessage(error) });
-    const rawProviderOutput = providerRawOutput(state);
     return {
       status: 'error',
       content: `Image request failed: ${errorMessage(error)}`,
       error: 'image_request_failed',
-      logs,
-      ...(rawProviderOutput ? { rawProviderOutput } : {})
+      logs
     };
   }
 }
 
-async function executeProviderImageRequest(
+async function executeImageRequest(
   state: RequestState
-): Promise<ProviderImageResult> {
+): Promise<ModelImageResult> {
   switch (state.entry.axisModelId) {
     case 'gemini-3.1-flash-image-preview':
-      return executeGemini31FlashImagePreview(state);
     case 'gemini-3.1-flash-image':
-      return executeGemini31FlashImage(state);
     case 'gemini-3-pro-image-preview':
-      return executeGemini3ProImagePreview(state);
-  }
-
-  switch (state.entry.provider) {
-    case 'openai':
+      return executeGemini(state, { compactModelRun: true });
+    case 'gpt-image-1':
+    case 'gpt-image-2':
       return executeOpenAI(state);
-    case 'volcengine-ark':
+    case 'doubao-seedream-5-0-lite-260128':
       return executeDoubao(state);
-    case 'dashscope':
+    case 'wan2.7-image':
       return executeWan(state);
-    case 'google-gemini':
-      return executeGemini(state);
-    case 'fal':
+    case 'fal-ai/flux/dev':
+    case 'fal-ai/flux/dev/image-to-image':
       return executeFal(state);
-    case 'minimax':
+    case 'image-01':
       return executeMinimax(state);
-    case 'vydra':
+    case 'grok-imagine':
       return executeVydra(state);
     default:
-      return failure(state, 'image_provider_not_supported', { provider: state.entry.provider });
+      return failure(state, 'image_model_not_supported', { model: state.entry.axisModelId });
   }
 }
 
 async function executeOpenAI(state: RequestState) {
   const args = stripOutputArgs(state.args);
   const outputMimeType = openAIOutputMimeType(args.output_format);
-  const body: Record<string, unknown> = { model: state.providerModelId, ...args };
+  const body: Record<string, unknown> = { model: state.requestModelId, ...args };
   const hasInputImages = hasNonEmptyInputImages(args.image);
   delete body.image;
   delete body.mask;
@@ -252,7 +242,7 @@ async function executeOpenAI(state: RequestState) {
     return response.result;
   }
   const parsed = await openAIImagesFromPayload(state, response.payload, outputMimeType);
-  compactGptImage2ProviderCallInPlace(state, outputMimeType);
+  compactGptImage2ModelRunInPlace(state, outputMimeType);
   return { status: 'ok' as const, images: parsed.images, output: parsed.revisedPrompts.length > 0 ? { revised_prompts: parsed.revisedPrompts } : null };
 }
 
@@ -278,7 +268,7 @@ async function executeOpenAIEdit(state: RequestState, body: Record<string, unkno
       return response.result;
     }
     const parsed = await openAIImagesFromPayload(state, response.payload, outputMimeType);
-    compactGptImage2ProviderCallInPlace(state, outputMimeType);
+    compactGptImage2ModelRunInPlace(state, outputMimeType);
     return { status: 'ok' as const, images: parsed.images, output: parsed.revisedPrompts.length > 0 ? { revised_prompts: parsed.revisedPrompts } : null };
   }
 
@@ -302,25 +292,25 @@ async function executeOpenAIEdit(state: RequestState, body: Record<string, unkno
     multipartBody.files.push(multipartFileLog('mask', filename, payload));
   }
   log(state, 'build_request', { url, body: multipartBody });
-  recordProviderRequest(state, {
+  recordModelRequest(state, {
     method: 'POST',
     url,
     headers: authorizationHeaders(state),
     body: multipartBody
   });
   const response = await fetchWithTimeout(state, url, { method: 'POST', headers: authorizationHeaders(state), body: form });
-  const parsedResponse = await parseProviderResponse(state, response);
+  const parsedResponse = await parseModelResponse(state, response);
   if (!parsedResponse.ok) {
     return parsedResponse.result;
   }
   const parsed = await openAIImagesFromPayload(state, parsedResponse.payload, outputMimeType);
-  compactGptImage2ProviderCallInPlace(state, outputMimeType);
+  compactGptImage2ModelRunInPlace(state, outputMimeType);
   return { status: 'ok' as const, images: parsed.images, output: parsed.revisedPrompts.length > 0 ? { revised_prompts: parsed.revisedPrompts } : null };
 }
 
 async function executeDoubao(state: RequestState) {
   const args = stripOutputArgs(state.args);
-  const body: Record<string, unknown> = { model: state.providerModelId, ...args };
+  const body: Record<string, unknown> = { model: state.requestModelId, ...args };
   if (args.image !== undefined) {
     const images = imageInputArray(args.image).map(toImageUrlOrDataUrl);
     body.image = images.length === 1 ? images[0] : images;
@@ -351,7 +341,7 @@ async function executeWan(state: RequestState) {
     content.push({ text: prompt });
   }
   const body = {
-    model: state.providerModelId,
+    model: state.requestModelId,
     input: { messages: [{ role: 'user', content }] },
     parameters: args
   };
@@ -388,7 +378,7 @@ async function executeWan(state: RequestState) {
   return failure(state, 'response_parse_failed', { reason: 'timeout', taskId });
 }
 
-async function executeGemini(state: RequestState) {
+async function executeGemini(state: RequestState, options: { compactModelRun?: boolean } = {}) {
   const args = stripOutputArgs(state.args);
   const prompt = args.prompt;
   const aspectRatio = args.aspect_ratio;
@@ -417,7 +407,7 @@ async function executeGemini(state: RequestState) {
     generationConfig,
     ...args
   };
-  const url = new URL(joinUrl(state.baseUrl, `models/${state.providerModelId}:generateContent`));
+  const url = new URL(joinUrl(state.baseUrl, `models/${state.requestModelId}:generateContent`));
   url.searchParams.set('key', state.apiKey);
   log(state, 'build_request', { url: url.toString(), imageConfig });
   const response = await postJson(state, url.toString(), { 'content-type': 'application/json' }, body);
@@ -425,60 +415,9 @@ async function executeGemini(state: RequestState) {
     return response.result;
   }
   const images = extractGeminiImages(response.payload);
-  log(state, 'parse_response', { imageCount: images.length });
-  return { status: 'ok' as const, images, output: null };
-}
-
-async function executeGemini31FlashImagePreview(state: RequestState) {
-  return executeGemini31ImageModel(state);
-}
-
-async function executeGemini31FlashImage(state: RequestState) {
-  return executeGemini31ImageModel(state);
-}
-
-async function executeGemini3ProImagePreview(state: RequestState) {
-  return executeGemini31ImageModel(state);
-}
-
-async function executeGemini31ImageModel(state: RequestState) {
-  const args = stripOutputArgs(state.args);
-  const prompt = args.prompt;
-  const aspectRatio = args.aspect_ratio;
-  const imageSize = args.image_size;
-  const contents = args.contents;
-  delete args.prompt;
-  delete args.contents;
-  delete args.aspect_ratio;
-  delete args.image_size;
-  const requestContents = buildGeminiRequestContents(contents, prompt);
-  const imageConfig: Record<string, unknown> = {};
-  if (aspectRatio !== undefined) {
-    imageConfig.aspectRatio = aspectRatio;
+  if (options.compactModelRun) {
+    compactGemini31ModelRunInPlace(state);
   }
-  if (imageSize !== undefined) {
-    imageConfig.imageSize = imageSize;
-  }
-  const generationConfig: Record<string, unknown> = {
-    responseModalities: ['TEXT', 'IMAGE']
-  };
-  if (Object.keys(imageConfig).length > 0) {
-    generationConfig.responseFormat = { image: imageConfig };
-  }
-  const body = {
-    contents: requestContents,
-    generationConfig,
-    ...args
-  };
-  const url = new URL(joinUrl(state.baseUrl, `models/${state.providerModelId}:generateContent`));
-  url.searchParams.set('key', state.apiKey);
-  log(state, 'build_request', { url: url.toString(), imageConfig });
-  const response = await postJson(state, url.toString(), { 'content-type': 'application/json' }, body);
-  if (!response.ok) {
-    return response.result;
-  }
-  const images = extractGeminiImages(response.payload);
-  compactGemini31ProviderCallInPlace(state);
   log(state, 'parse_response', { imageCount: images.length });
   return { status: 'ok' as const, images, output: null };
 }
@@ -488,7 +427,7 @@ async function executeFal(state: RequestState) {
   if (imageInputFieldsForCatalogEntry(state.entry).includes('image_url') && args.image_url !== undefined) {
     args.image_url = toImageUrlOrDataUrl(imageInputArray(args.image_url)[0]!);
   }
-  const url = joinUrl(state.baseUrl, state.providerModelId);
+  const url = joinUrl(state.baseUrl, state.requestModelId);
   log(state, 'build_request', { url, body: args });
   const response = await postJson(state, url, { authorization: `Key ${state.apiKey}`, 'content-type': 'application/json' }, args);
   if (!response.ok) {
@@ -508,7 +447,7 @@ async function executeMinimax(state: RequestState) {
       image_file: image.image_file ?? toImageUrlOrDataUrl(image)
     }));
   }
-  const body = { model: state.providerModelId, ...args };
+  const body = { model: state.requestModelId, ...args };
   const url = joinUrl(state.baseUrl, 'v1/image_generation');
   log(state, 'build_request', { url, body });
   const response = await postJson(state, url, authorizationHeaders(state), body);
@@ -532,7 +471,7 @@ async function executeMinimax(state: RequestState) {
 async function executeVydra(state: RequestState) {
   const args = stripOutputArgs(state.args);
   const body = { ...args, model: 'text-to-image' };
-  const submitUrl = joinUrl(state.baseUrl, `models/${state.providerModelId}`);
+  const submitUrl = joinUrl(state.baseUrl, `models/${state.requestModelId}`);
   log(state, 'build_request', { url: submitUrl, body });
   const submit = await postJson(state, submitUrl, authorizationHeaders(state), body);
   if (!submit.ok) {
@@ -574,7 +513,7 @@ async function postJson(
   body: unknown
 ): Promise<{ ok: true; payload: Record<string, unknown> } | { ok: false; result: ImageRequestError }> {
   const requestHeaders = { 'content-type': 'application/json', ...headers };
-  recordProviderRequest(state, {
+  recordModelRequest(state, {
     method: 'POST',
     url,
     headers: requestHeaders,
@@ -585,7 +524,7 @@ async function postJson(
     headers: requestHeaders,
     body: JSON.stringify(body)
   });
-  return parseProviderResponse(state, response);
+  return parseModelResponse(state, response);
 }
 
 async function getJson(
@@ -593,38 +532,31 @@ async function getJson(
   url: string,
   headers: Record<string, string>
 ): Promise<{ ok: true; payload: Record<string, unknown> } | { ok: false; result: ImageRequestError }> {
-  recordProviderRequest(state, {
+  recordModelRequest(state, {
     method: 'GET',
     url,
     headers
   });
   const response = await fetchWithTimeout(state, url, { method: 'GET', headers });
-  return parseProviderResponse(state, response);
+  return parseModelResponse(state, response);
 }
 
 async function fetchWithTimeout(state: RequestState, url: string, init: RequestInit): Promise<Response> {
-  if (state.signal?.aborted) {
-    throw state.signal.reason ?? new Error('Image request aborted.');
-  }
-  const controller = new AbortController();
-  const timeout = setTimeout(() => controller.abort(new Error(`Image request timed out after ${state.requestTimeoutMs}ms`)), state.requestTimeoutMs);
-  const onAbort = () => controller.abort(state.signal?.reason ?? new Error('Image request aborted.'));
-  state.signal?.addEventListener('abort', onAbort, { once: true });
-  try {
-    return await state.fetch(url, { ...init, signal: controller.signal });
-  } finally {
-    clearTimeout(timeout);
-    state.signal?.removeEventListener('abort', onAbort);
+  return fetchWithRequestTimeout(state.fetch, url, init, {
+    signal: state.signal,
+    timeoutMs: state.requestTimeoutMs,
+    timeoutMessage: `Image request timed out after ${state.requestTimeoutMs}ms`,
+    abortMessage: 'Image request aborted.'
+  });
+}
+
+function recordModelRequest(state: RequestState, request: unknown): void {
+  if (state.modelRun.request === undefined) {
+    state.modelRun.request = request;
   }
 }
 
-function recordProviderRequest(state: RequestState, request: unknown): void {
-  if (state.providerCall.request === undefined) {
-    state.providerCall.request = request;
-  }
-}
-
-async function parseProviderResponse(
+async function parseModelResponse(
   state: RequestState,
   response: Response
 ): Promise<{ ok: true; payload: Record<string, unknown> } | { ok: false; result: ImageRequestError }> {
@@ -634,7 +566,7 @@ async function parseProviderResponse(
     payload = parseJsonObject(rawBody);
   } catch (error) {
     const body = rawBody.trim() ? { raw: truncateString(rawBody) } : { raw: '' };
-    state.providerCall.responses.push({
+    state.modelRun.responses.push({
       status: response.status,
       headers: Object.fromEntries(response.headers.entries()),
       body
@@ -642,14 +574,22 @@ async function parseProviderResponse(
     log(state, 'execute_request', { status: response.status, payloadShape: summarizeJsonShape(body) });
     return { ok: false, result: failure(state, 'response_parse_failed', { reason: errorMessage(error), status: response.status }) };
   }
-  state.providerCall.responses.push({
+  state.modelRun.responses.push({
     status: response.status,
     headers: Object.fromEntries(response.headers.entries()),
     body: payload
   });
   log(state, 'execute_request', { status: response.status, payloadShape: summarizeJsonShape(payload) });
   if (!response.ok) {
-    return { ok: false, result: failure(state, 'request_failed', { status: response.status, payloadShape: summarizeJsonShape(payload) }) };
+    return {
+      ok: false,
+      result: failure(
+        state,
+        'request_failed',
+        { status: response.status, payloadShape: summarizeJsonShape(payload) },
+        `Image request failed: model endpoint responded with HTTP ${response.status}.`
+      )
+    };
   }
   return { ok: true, payload };
 }
@@ -711,10 +651,10 @@ async function storeImagePayload(
   const [width, height] = detectDimensions(Buffer.from(payload.data), payload.mimeType);
   await state.recordGeneratedAsset?.({
     projectRelativePath: normalizedPath,
-    providerCall: {
-      request: state.providerCall.request ?? null,
+    modelRun: {
+      request: state.modelRun.request ?? null,
       output: {
-        responses: [...state.providerCall.responses],
+        responses: [...state.modelRun.responses],
         parsed: output,
         artifactIndex: index
       }
@@ -883,13 +823,13 @@ async function resolveImageInputs(
   field: string
 ): Promise<Array<Record<string, unknown>>> {
   const resolved: Array<Record<string, unknown>> = [];
-  const providerReadyObjectKind = providerReadyImageObjectKindForCatalogEntry(entry, field);
+  const modelSpecificObjectKind = modelSpecificImageObjectKindForCatalogEntry(entry, field);
   for (const input of inputs) {
     if (typeof input !== 'string') {
       if (input && typeof input === 'object') {
         const imageInput = input as Record<string, unknown>;
-        if (!providerReadyObjectKind || !isSupportedProviderReadyImageInputObject(imageInput, providerReadyObjectKind)) {
-          throw new Error(`Unsupported provider-ready image input object for field "${field}".`);
+        if (!modelSpecificObjectKind || !isSupportedModelSpecificImageInputObject(imageInput, modelSpecificObjectKind)) {
+          throw new Error(`Unsupported model-specific image input object for field "${field}".`);
         }
         resolved.push(imageInput);
         continue;
@@ -913,13 +853,13 @@ async function resolveGptImage2ImageInputs(
   field: string
 ): Promise<Array<Record<string, unknown>>> {
   const resolved: Array<Record<string, unknown>> = [];
-  const providerReadyObjectKind = providerReadyImageObjectKindForCatalogEntry(entry, field);
+  const modelSpecificObjectKind = modelSpecificImageObjectKindForCatalogEntry(entry, field);
   for (const input of inputs) {
     if (typeof input !== 'string') {
       if (input && typeof input === 'object') {
         const imageInput = input as Record<string, unknown>;
-        if (!providerReadyObjectKind || !isSupportedProviderReadyImageInputObject(imageInput, providerReadyObjectKind)) {
-          throw new Error(`Unsupported provider-ready image input object for field "${field}".`);
+        if (!modelSpecificObjectKind || !isSupportedModelSpecificImageInputObject(imageInput, modelSpecificObjectKind)) {
+          throw new Error(`Unsupported model-specific image input object for field "${field}".`);
         }
         resolved.push(imageInput);
         continue;
@@ -978,93 +918,21 @@ async function downloadImage(state: RequestState, url: string): Promise<ImagePay
 }
 
 async function readResponseTextWithTimeout(state: RequestState, response: Response): Promise<string> {
-  return new TextDecoder().decode(await readResponseBytesWithTimeout(state, response));
-}
-
-async function readResponseArrayBufferWithTimeout(state: RequestState, response: Response): Promise<ArrayBuffer> {
-  return arrayBufferFor(await readResponseBytesWithTimeout(state, response));
-}
-
-async function readResponseBytesWithTimeout(state: RequestState, response: Response): Promise<Uint8Array> {
-  const reader = response.body?.getReader();
-  if (!reader) {
-    return new Uint8Array(await response.arrayBuffer());
-  }
-  const chunks: Uint8Array[] = [];
-  let totalLength = 0;
-  let settled = false;
-  let timeout: ReturnType<typeof setTimeout> | undefined;
-
-  return await new Promise<Uint8Array>((resolve, reject) => {
-    const cleanup = () => {
-      if (timeout) {
-        clearTimeout(timeout);
-      }
-      state.signal?.removeEventListener('abort', onAbort);
-    };
-    const fail = (error: unknown) => {
-      if (settled) {
-        return;
-      }
-      settled = true;
-      cleanup();
-      void reader.cancel().catch(() => undefined);
-      reject(error);
-    };
-    const succeed = () => {
-      if (settled) {
-        return;
-      }
-      settled = true;
-      cleanup();
-      resolve(concatBytes(chunks, totalLength));
-    };
-    const onAbort = () => fail(state.signal?.reason ?? new Error('Image request aborted.'));
-
-    if (state.signal?.aborted) {
-      onAbort();
-      return;
-    }
-    state.signal?.addEventListener('abort', onAbort, { once: true });
-    timeout = setTimeout(() => {
-      fail(new Error(`Image response body timed out after ${state.requestTimeoutMs}ms`));
-    }, state.requestTimeoutMs);
-
-    const pump = async () => {
-      try {
-        while (true) {
-          const { done, value } = await reader.read();
-          if (done) {
-            break;
-          }
-          if (value) {
-            chunks.push(value);
-            totalLength += value.byteLength;
-          }
-        }
-        succeed();
-      } catch (error) {
-        fail(error);
-      } finally {
-        try {
-          reader.releaseLock();
-        } catch {
-          // The reader may already be released after cancellation.
-        }
-      }
-    };
-    void pump();
+  return readResponseTextBodyWithTimeout(response, {
+    signal: state.signal,
+    timeoutMs: state.requestTimeoutMs,
+    timeoutMessage: `Image response body timed out after ${state.requestTimeoutMs}ms`,
+    abortMessage: 'Image request aborted.'
   });
 }
 
-function concatBytes(chunks: Uint8Array[], totalLength: number): Uint8Array {
-  const result = new Uint8Array(totalLength);
-  let offset = 0;
-  for (const chunk of chunks) {
-    result.set(chunk, offset);
-    offset += chunk.byteLength;
-  }
-  return result;
+async function readResponseArrayBufferWithTimeout(state: RequestState, response: Response): Promise<ArrayBuffer> {
+  return readResponseArrayBufferBodyWithTimeout(response, {
+    signal: state.signal,
+    timeoutMs: state.requestTimeoutMs,
+    timeoutMessage: `Image response body timed out after ${state.requestTimeoutMs}ms`,
+    abortMessage: 'Image request aborted.'
+  });
 }
 
 function createMultipartRequestBodyLog(): {
@@ -1216,7 +1084,6 @@ function stripOutputArgs(args: Record<string, unknown>): Record<string, unknown>
   const next = { ...args };
   delete next.output_path;
   delete next.output_directory;
-  delete next.provider_model_id;
   return next;
 }
 
@@ -1242,12 +1109,12 @@ function openAIDataItems(payload: Record<string, unknown>): Array<Record<string,
 
 function parseJsonObject(text: string): Record<string, unknown> {
   if (!text.trim()) {
-    throw new Error('Provider response must be a non-empty JSON object.');
+    throw new Error('Model response must be a non-empty JSON object.');
   }
   const parsed = JSON.parse(text) as unknown;
   const record = objectAt(parsed);
   if (!record) {
-    throw new Error('Provider response must be a JSON object.');
+    throw new Error('Model response must be a JSON object.');
   }
   return record;
 }
@@ -1416,7 +1283,7 @@ function isGemini31ImageModel(model: string): boolean {
     || model === 'gemini-3-pro-image-preview';
 }
 
-function isSupportedProviderReadyImageInputObject(image: Record<string, unknown>, kind: ProviderReadyImageObjectKind): boolean {
+function isSupportedModelSpecificImageInputObject(image: Record<string, unknown>, kind: ModelSpecificImageObjectKind): boolean {
   if (kind === 'openai-image') {
     return hasOnlyKeys(image, ['image_url', 'data', 'mime_type'])
       && (!('mime_type' in image) || typeof image.mime_type === 'string')
@@ -1443,14 +1310,14 @@ function hasHttpOrDataImageStringPayload(image: Record<string, unknown>, key: st
   return value !== undefined && (/^https?:\/\//.test(value) || value.startsWith('data:image/'));
 }
 
-function compactGptImage2ProviderCallInPlace(state: RequestState, mimeType: string): void {
+function compactGptImage2ModelRunInPlace(state: RequestState, mimeType: string): void {
   if (!isGptImage2Model(state.entry.axisModelId)) {
     return;
   }
-  if (state.providerCall.request !== undefined) {
-    state.providerCall.request = compactGptImage2Value(state.providerCall.request, mimeType);
+  if (state.modelRun.request !== undefined) {
+    state.modelRun.request = compactGptImage2Value(state.modelRun.request, mimeType);
   }
-  state.providerCall.responses = state.providerCall.responses.map((response) => ({
+  state.modelRun.responses = state.modelRun.responses.map((response) => ({
     ...response,
     body: compactGptImage2Value(response.body, mimeType)
   }));
@@ -1479,14 +1346,14 @@ function compactGptImage2Value(value: unknown, mimeType: string, key = ''): unkn
   ]));
 }
 
-function compactGemini31ProviderCallInPlace(state: RequestState): void {
+function compactGemini31ModelRunInPlace(state: RequestState): void {
   if (!isGemini31ImageModel(state.entry.axisModelId)) {
     return;
   }
-  if (state.providerCall.request !== undefined) {
-    state.providerCall.request = compactGemini31Value(state.providerCall.request);
+  if (state.modelRun.request !== undefined) {
+    state.modelRun.request = compactGemini31Value(state.modelRun.request);
   }
-  state.providerCall.responses = state.providerCall.responses.map((response) => ({
+  state.modelRun.responses = state.modelRun.responses.map((response) => ({
     ...response,
     body: compactGemini31Value(response.body)
   }));
@@ -1534,33 +1401,20 @@ function omittedDataUrlImage(value: string): Record<string, unknown> {
   return omittedBase64Image(payload, mimeType);
 }
 
-function providerRawOutput(state: Pick<RequestState, 'providerCall'>): ImageProviderRawOutput | undefined {
-  if (state.providerCall.responses.length === 0) {
-    return undefined;
-  }
-  return {
-    responses: state.providerCall.responses.map((response) => ({
-      status: response.status,
-      body: response.body
-    }))
-  };
-}
-
 function failure(
-  state: Pick<RequestState, 'entry' | 'logs' | 'providerCall'>,
+  state: Pick<RequestState, 'logs'>,
   error: string,
-  raw?: Record<string, unknown>
+  raw?: Record<string, unknown>,
+  content = `Image request failed: ${error}`
 ): ImageRequestError {
   if (raw) {
     state.logs.push({ stage: 'error', ...sanitizeLog(raw) });
   }
-  const rawProviderOutput = providerRawOutput(state);
   return {
     status: 'error',
-    content: `Image request failed: ${error}`,
+    content,
     error,
-    logs: state.logs,
-    ...(rawProviderOutput ? { rawProviderOutput } : {})
+    logs: state.logs
   };
 }
 

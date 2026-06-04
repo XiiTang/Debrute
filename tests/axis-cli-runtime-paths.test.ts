@@ -1,5 +1,5 @@
 import { mkdir, writeFile } from 'node:fs/promises';
-import { join } from 'node:path';
+import { delimiter, join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { mkdtempSync } from 'node:fs';
 import { describe, expect, it } from 'vitest';
@@ -8,6 +8,7 @@ import {
   resolveCliBundledSkillsRoot,
   resolvePkgExecutableEntryDir
 } from '../apps/axis-cli/src/runtime/createCliSkillsRuntime';
+import { packagedExecutablePath, packagedNodeModulesPath, packagedNodePathValue } from '../apps/axis-cli/src/runtime/packagedNodeModules';
 
 describe('Axis CLI runtime paths', () => {
   it('resolves bundled skills and package metadata from a release payload next to the executable', async () => {
@@ -23,6 +24,13 @@ describe('Axis CLI runtime paths', () => {
   it('resolves pkg entry directories from process.execPath', () => {
     expect(resolvePkgExecutableEntryDir('/Users/test/.axis/cli/current/axis')).toBe('/Users/test/.axis/cli/current');
     expect(resolvePkgExecutableEntryDir('C:\\Users\\test\\.axis\\cli\\current\\axis.exe')).toBe('C:\\Users\\test\\.axis\\cli\\current');
+  });
+
+  it('adds release payload node_modules before existing NODE_PATH entries', () => {
+    expect(packagedExecutablePath('/payload/axis')).toBe('/payload/axis');
+    expect(packagedNodeModulesPath('/Users/test/.axis/cli/current/axis')).toBe('/Users/test/.axis/cli/current/node_modules');
+    expect(packagedNodePathValue('/payload/axis', '/existing')).toBe(`/payload/node_modules${delimiter}/existing`);
+    expect(packagedNodePathValue('/payload/axis', `/payload/node_modules${delimiter}/existing`)).toBe(`/payload/node_modules${delimiter}/existing`);
   });
 
   it('resolves bundled skills from the local source checkout layout', async () => {

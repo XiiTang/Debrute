@@ -15,6 +15,7 @@ export type AxisCliCommand =
   | 'project.init'
   | 'project.status'
   | 'project.validate'
+  | 'workbench.url'
   | 'flowmap.publish'
   | 'generated-asset.lookup'
   | 'generate.image'
@@ -45,6 +46,7 @@ const POSITIONAL_COUNTS: Record<AxisCliCommand, { min: number; max: number }> = 
   'project.init': { min: 1, max: 1 },
   'project.status': { min: 1, max: 1 },
   'project.validate': { min: 1, max: 1 },
+  'workbench.url': { min: 1, max: 1 },
   'flowmap.publish': { min: 1, max: 1 },
   'generated-asset.lookup': { min: 1, max: 1 },
   'generate.image': { min: 1, max: 1 },
@@ -67,6 +69,7 @@ const ALLOWED_OPTIONS: Record<AxisCliCommand, Set<string>> = {
   'project.init': new Set(),
   'project.status': new Set(),
   'project.validate': new Set(),
+  'workbench.url': new Set(),
   'flowmap.publish': new Set(['from']),
   'generated-asset.lookup': new Set(['path']),
   'generate.image': new Set(['input-json']),
@@ -84,6 +87,7 @@ const PROJECT_COMMANDS = new Set<AxisCliCommand>([
   'project.init',
   'project.status',
   'project.validate',
+  'workbench.url',
   'flowmap.publish',
   'generated-asset.lookup',
   'generate.image',

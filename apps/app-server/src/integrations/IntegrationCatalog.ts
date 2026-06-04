@@ -1,9 +1,7 @@
 import type {
   IntegrationBackendId,
   IntegrationBinaryId,
-  IntegrationBinaryStatus,
   IntegrationId,
-  PythonCliInstallerId,
   SystemPackageManagerId
 } from '@axis/app-protocol';
 
@@ -16,7 +14,6 @@ export type {
   IntegrationId,
   IntegrationInstallBackendKind,
   IntegrationOperationDiagnostic,
-  IntegrationOperationKind,
   IntegrationOperationStatus,
   IntegrationProbeErrorKind,
   IntegrationSettingsView,
@@ -72,8 +69,6 @@ export interface PythonCliIntegrationCatalogItem extends IntegrationCatalogBase 
 }
 
 export type IntegrationCatalogItem = SystemPackageIntegrationCatalogItem | PythonCliIntegrationCatalogItem;
-
-export type IntegrationProbeDiagnostic = NonNullable<IntegrationBinaryStatus['probe']>;
 
 export const INTEGRATION_CATALOG: IntegrationCatalogItem[] = [
   {

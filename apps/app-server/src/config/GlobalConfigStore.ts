@@ -142,7 +142,7 @@ function normalizeImageModelsConfig(config: ImageModelsConfig): ImageModelsConfi
     imageModels: config.imageModels.map((model) => ({
       axisModelId: model.axisModelId.trim(),
       baseUrlOverride: model.baseUrlOverride?.trim() || null,
-      providerModelIdOverride: model.providerModelIdOverride?.trim() || null
+      requestModelIdOverride: model.requestModelIdOverride?.trim() || null
     })).filter((model) => model.axisModelId.length > 0)
   };
 }
@@ -152,7 +152,7 @@ function normalizeVideoModelsConfig(config: VideoModelsConfig): VideoModelsConfi
     videoModels: config.videoModels.map((model) => ({
       axisModelId: model.axisModelId.trim(),
       baseUrlOverride: model.baseUrlOverride?.trim() || null,
-      providerModelIdOverride: model.providerModelIdOverride?.trim() || null
+      requestModelIdOverride: model.requestModelIdOverride?.trim() || null
     })).filter((model) => model.axisModelId.length > 0)
   };
 }

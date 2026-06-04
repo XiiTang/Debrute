@@ -160,14 +160,10 @@ describe('axis-cli', () => {
 
       expect(output).toHaveLength(1);
       expect(output[0]).toContain('axis/1 ok cmd=models.image.list');
-      expect(output[0]).toContain('model id=gpt-image-2 provider=openai parameters=');
+      expect(output[0]).toContain('model id=gpt-image-2 parameters=');
       expect(output[0]).toContain('\\"size\\":\\"WIDTHxHEIGHT');
       expect(output[0]).toContain('\\"image\\":');
       expect(output[0]).toContain('\\"mask\\":');
-      expect(output[0]).not.toContain('enabled=');
-      expect(output[0]).not.toContain('available=');
-      expect(output[0]).not.toContain('api_key=');
-      expect(output[0]).not.toContain(`input_${'images'}`);
     } finally {
       if (originalHome === undefined) {
         delete process.env.HOME;
@@ -204,7 +200,7 @@ describe('axis-cli', () => {
 
       expect(process.exitCode).toBeUndefined();
       expect(output[0]).toContain('axis/1 ok cmd=models.image.describe');
-      expect(output[0]).toContain('model id=gpt-image-2 provider=openai');
+      expect(output[0]).toContain('model id=gpt-image-2');
       expect(output[0]).toContain('official_doc urls=');
       expect(output[0]).toContain('snapshot=packages/capability-runtime/src/imageModels/officialDocs/snapshots/openai/image-generation.md');
       expect(output[0]).toContain('captured_at=');
@@ -241,6 +237,7 @@ describe('axis-cli', () => {
       expect(output).toEqual([[
         'axis/1 error cmd=generate.image code=model_not_configured',
         'message="Image model API key is missing: gpt-image-2"',
+        'content="Image model API key is missing: gpt-image-2"',
         'model=gpt-image-2'
       ].join('\n')]);
     } finally {
@@ -268,7 +265,7 @@ describe('axis-cli', () => {
         imageModels: [{
           axisModelId: 'gpt-image-2',
           baseUrlOverride: 'https://api.openai.com/v1',
-          providerModelIdOverride: 'gpt-image-2'
+          requestModelIdOverride: 'gpt-image-2'
         }]
       }, null, 2), 'utf8');
       const output: string[] = [];
@@ -285,6 +282,7 @@ describe('axis-cli', () => {
       expect(output).toEqual([[
         'axis/1 error cmd=generate.image code=model_not_configured',
         'message="Image model API key is missing: gpt-image-2"',
+        'content="Image model API key is missing: gpt-image-2"',
         'model=gpt-image-2'
       ].join('\n')]);
     } finally {

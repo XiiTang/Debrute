@@ -7,7 +7,10 @@
     { "path": "packages/app-protocol" },
     { "path": "packages/capability-runtime" },
     { "path": "packages/flowmap-core" },
+    { "path": "packages/workbench-runtime" },
     { "path": "apps/app-server" },
+    { "path": "apps/daemon" },
+    { "path": "apps/web" },
     { "path": "apps/axis-cli" }
   ]
 }

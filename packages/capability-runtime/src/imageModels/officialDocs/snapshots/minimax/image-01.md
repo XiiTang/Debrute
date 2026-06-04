@@ -1,5 +1,4 @@
 ---
-provider: minimax
 models:
   - image-01
 source_urls:
@@ -10,7 +9,7 @@ captured_at: 2026-05-31
 source_type: official_docs
 cleanup:
   - removed page chrome and duplicated documentation index text
-  - removed raw provider command snippets
+  - removed raw source API command snippets
 ---
 
 # MiniMax image-01
@@ -51,7 +50,7 @@ The image-to-image API generates images from image input. It uses the same endpo
 
 Official image-to-image request fields used by AXIS:
 
-- `model`: `image-01` or `image-01-live` in the provider API; AXIS exposes `image-01`.
+- `model`: `image-01` or `image-01-live` in the source API; AXIS exposes `image-01`.
 - `prompt`: required text description, maximum 1500 characters.
 - `subject_reference`: object array for image-to-image generation.
 - `aspect_ratio`, `width`, `height`, `response_format`, `seed`, `n`, and `prompt_optimizer` as in text-to-image.

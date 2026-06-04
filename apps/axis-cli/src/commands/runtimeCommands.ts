@@ -158,11 +158,9 @@ function skillsStatusResult(command: string, snapshot: SkillsStatusSnapshot): Ax
       diagnostics: snapshot.diagnostics.length,
       source_root: snapshot.sharedSkillsRoot,
       state_path: snapshot.statePath,
-      state_version: snapshot.stateVersion,
       axis_version: snapshot.currentAxisVersion,
       bundled_root: snapshot.bundledSkillsRoot,
-      missing_bundled_skills: snapshot.missingBundledSkillCount,
-      outdated_state: snapshot.outdatedState
+      missing_bundled_skills: snapshot.missingBundledSkillCount
     }
   };
 }
@@ -180,10 +178,6 @@ function skillsSyncResult(command: string, snapshot: SkillsSyncSnapshot): AxisAg
           path: skill.skillPath
         }
       })),
-      ...snapshot.skippedSkills.map((name): AgentNamedRecord => ({
-        name: 'skipped_skill',
-        fields: { name }
-      })),
       ...snapshot.diagnostics.map((diagnostic): AgentNamedRecord => ({
         name: 'diagnostic',
         fields: {
@@ -196,7 +190,6 @@ function skillsSyncResult(command: string, snapshot: SkillsSyncSnapshot): AxisAg
     ],
     fields: {
       updated: snapshot.updatedSkills.length,
-      skipped: snapshot.skippedSkills.length,
       diagnostics: snapshot.diagnostics.length,
       state_path: snapshot.statePath,
       force: snapshot.force
@@ -235,16 +228,13 @@ function skillsDoctorDiagnostics(snapshot: SkillsStatusSnapshot): CliRuntimeDiag
 }
 
 function skillsDoctorMessage(code: string, fallback: string): string {
-  if (code === 'skills_state_outdated') {
-    return 'AXIS Skills state is older than the running AXIS CLI version. Run: axis skills sync --force.';
-  }
   if (code === 'skills_bundle_unavailable') {
     return 'Bundled AXIS Skills are unavailable. Reinstall AXIS CLI or run from a complete development checkout.';
   }
   return fallback;
 }
 
-function imageModelListResult(command: string, models: Array<{ id: string; provider: string; parameters: Record<string, string> }>): AxisAgentResult {
+function imageModelListResult(command: string, models: Array<{ id: string; parameters: Record<string, string> }>): AxisAgentResult {
   return {
     status: 'ok',
     command,
@@ -252,7 +242,6 @@ function imageModelListResult(command: string, models: Array<{ id: string; provi
       name: 'model',
       fields: {
         id: model.id,
-        provider: model.provider,
         parameters: JSON.stringify(model.parameters)
       }
     })),
@@ -262,15 +251,14 @@ function imageModelListResult(command: string, models: Array<{ id: string; provi
   };
 }
 
-function modelListResult(command: string, models: Array<{ id: string; provider: string }>): AxisAgentResult {
+function modelListResult(command: string, models: Array<{ id: string }>): AxisAgentResult {
   return {
     status: 'ok',
     command,
     records: models.map((model) => ({
       name: 'model',
       fields: {
-        id: model.id,
-        provider: model.provider
+        id: model.id
       }
     })),
     fields: {
@@ -283,7 +271,6 @@ function modelDetailResult(
   command: string,
   model: {
     id: string;
-    provider: string;
     summary: string;
     argumentsSchema: Record<string, unknown>;
     capabilities: Record<string, unknown>;
@@ -296,8 +283,7 @@ function modelDetailResult(
     records: [{
       name: 'model',
       fields: {
-        id: model.id,
-        provider: model.provider
+        id: model.id
       }
     }],
     fields: {
@@ -317,8 +303,7 @@ function imageModelDetailResult(command: string, model: CliImageModelDetail): Ax
       {
         name: 'model',
         fields: {
-          id: model.id,
-          provider: model.provider
+          id: model.id
         }
       },
       {

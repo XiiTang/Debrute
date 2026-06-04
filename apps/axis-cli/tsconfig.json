@@ -8,7 +8,9 @@
   "references": [
     { "path": "../../packages/app-protocol" },
     { "path": "../../apps/app-server" },
-    { "path": "../../packages/capability-runtime" }
+    { "path": "../../apps/daemon" },
+    { "path": "../../packages/capability-runtime" },
+    { "path": "../../packages/workbench-runtime" }
   ],
   "include": ["src/**/*.ts"]
 }

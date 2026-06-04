@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { AxisCliError, exitCodeForCliError, normalizeServiceErrorCode } from '../apps/axis-cli/src/errors/cliErrors';
+import { AxisCliError, exitCodeForCliError } from '../apps/axis-cli/src/errors/cliErrors';
 import { commandSpecs, specForCommandPath } from '../apps/axis-cli/src/commands/helpSpec';
 import { parseAxisArgs } from '../apps/axis-cli/src/parser/parseAxisArgs';
 import { renderAgentRecord } from '../apps/axis-cli/src/output/renderAgentRecord';
@@ -37,6 +37,7 @@ describe('axis cli parser and renderer', () => {
         log: 'results.jsonl'
       }
     });
+    expect(() => parseAxisArgs(['daemon', 'status', '--daemon-url', 'http://127.0.0.1:17321'])).toThrow(AxisCliError);
   });
 
   it('renders compact axis/1 success and error records', () => {
@@ -45,13 +46,13 @@ describe('axis cli parser and renderer', () => {
       command: 'models.image.list',
       fields: { count: 2 },
       records: [
-        { name: 'model', fields: { id: 'gpt-image-2', provider: 'openai', parameters: '{"prompt":"required","size":"WIDTHxHEIGHT"}' } },
-        { name: 'model', fields: { id: 'gemini preview', provider: 'google-gemini', parameters: '{"prompt":"required","image_size":"1K|2K"}' } }
+        { name: 'model', fields: { id: 'gpt-image-2', parameters: '{"prompt":"required","size":"WIDTHxHEIGHT"}' } },
+        { name: 'model', fields: { id: 'gemini preview', parameters: '{"prompt":"required","image_size":"1K|2K"}' } }
       ]
     })).toEqual([
       'axis/1 ok cmd=models.image.list',
-      'model id=gpt-image-2 provider=openai parameters="{\\"prompt\\":\\"required\\",\\"size\\":\\"WIDTHxHEIGHT\\"}"',
-      'model id="gemini preview" provider=google-gemini parameters="{\\"prompt\\":\\"required\\",\\"image_size\\":\\"1K|2K\\"}"',
+      'model id=gpt-image-2 parameters="{\\"prompt\\":\\"required\\",\\"size\\":\\"WIDTHxHEIGHT\\"}"',
+      'model id="gemini preview" parameters="{\\"prompt\\":\\"required\\",\\"image_size\\":\\"1K|2K\\"}"',
       'count=2'
     ].join('\n'));
 
@@ -83,6 +84,7 @@ describe('axis cli parser and renderer', () => {
       'project.init',
       'project.status',
       'project.validate',
+      'workbench.url',
       'flowmap.publish',
       'generated-asset.lookup',
       'generate.image',
@@ -99,6 +101,13 @@ describe('axis cli parser and renderer', () => {
       writes: 'assets'
     });
     expect(specForCommandPath(['project', 'status'])?.errors).toContain('project_not_found');
+    expect(specForCommandPath(['workbench', 'url'])).toMatchObject({
+      command: 'workbench.url',
+      scope: 'runtime',
+      risk: 'write',
+      requires: 'project',
+      writes: 'axis-project'
+    });
     expect(specForCommandPath(['flowmap', 'publish'])?.errors).toEqual(expect.arrayContaining([
       'flowmap_invalid_draft_path',
       'flowmap_draft_read_failed',
@@ -115,13 +124,7 @@ describe('axis cli parser and renderer', () => {
       'invalid_json_input',
       'model_not_configured',
       'model_unavailable',
-      'provider_request_failed',
-      'generated_asset_write_failed'
+      'model_request_failed'
     ]);
-  });
-
-  it('does not preserve mappings for removed service error codes', () => {
-    expect(normalizeServiceErrorCode('no_available_image_model')).toBe('internal_error');
-    expect(normalizeServiceErrorCode('generated_asset_record_failed')).toBe('internal_error');
   });
 });

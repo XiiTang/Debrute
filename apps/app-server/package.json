@@ -10,12 +10,12 @@
     "check": "tsc -b --pretty false"
   },
   "dependencies": {
-    "@axis/app-protocol": "0.1.0",
-    "@axis/canvas-core": "0.1.0",
-    "@axis/capability-core": "0.1.0",
-    "@axis/capability-runtime": "0.1.0",
-    "@axis/flowmap-core": "0.1.0",
-    "@axis/project-core": "0.1.0",
+    "@axis/app-protocol": "workspace:*",
+    "@axis/canvas-core": "workspace:*",
+    "@axis/capability-core": "workspace:*",
+    "@axis/capability-runtime": "workspace:*",
+    "@axis/flowmap-core": "workspace:*",
+    "@axis/project-core": "workspace:*",
     "sharp": "^0.34.5"
   }
 }

@@ -5,7 +5,6 @@ import { createImageModelCatalog, type ImageModelCatalogEntry } from '../catalog
 
 export interface ImageModelOfficialDocReference {
   modelId: string;
-  provider: string;
   sourceUrls: string[];
   snapshotPath: string;
   capturedAt: string;
@@ -35,7 +34,6 @@ const SNAPSHOT_ROOT = 'packages/capability-runtime/src/imageModels/officialDocs/
 const DOCS: InternalImageModelOfficialDocReference[] = [
   {
     modelId: 'doubao-seedream-5-0-lite-260128',
-    provider: 'volcengine-ark',
     sourceUrls: [
       'https://www.volcengine.com/docs/82379/1541523',
       'https://www.volcengine.com/docs/82379/1824692'
@@ -46,7 +44,6 @@ const DOCS: InternalImageModelOfficialDocReference[] = [
   },
   {
     modelId: 'fal-ai/flux/dev',
-    provider: 'fal',
     sourceUrls: ['https://fal.ai/models/fal-ai/flux/dev/api'],
     snapshotPath: `${SNAPSHOT_ROOT}/fal/flux-dev.md`,
     capturedAt: CAPTURED_AT,
@@ -54,7 +51,6 @@ const DOCS: InternalImageModelOfficialDocReference[] = [
   },
   {
     modelId: 'fal-ai/flux/dev/image-to-image',
-    provider: 'fal',
     sourceUrls: ['https://fal.ai/models/fal-ai/flux/dev/image-to-image/api'],
     snapshotPath: `${SNAPSHOT_ROOT}/fal/flux-dev-image-to-image.md`,
     capturedAt: CAPTURED_AT,
@@ -62,7 +58,6 @@ const DOCS: InternalImageModelOfficialDocReference[] = [
   },
   {
     modelId: 'gemini-3-pro-image-preview',
-    provider: 'google-gemini',
     sourceUrls: [
       'https://ai.google.dev/gemini-api/docs/image-generation',
       'https://deepmind.google/models/model-cards/gemini-3-1-flash-image/'
@@ -73,7 +68,6 @@ const DOCS: InternalImageModelOfficialDocReference[] = [
   },
   {
     modelId: 'gemini-3.1-flash-image',
-    provider: 'google-gemini',
     sourceUrls: [
       'https://ai.google.dev/gemini-api/docs/image-generation',
       'https://deepmind.google/models/model-cards/gemini-3-1-flash-image/'
@@ -84,7 +78,6 @@ const DOCS: InternalImageModelOfficialDocReference[] = [
   },
   {
     modelId: 'gemini-3.1-flash-image-preview',
-    provider: 'google-gemini',
     sourceUrls: [
       'https://ai.google.dev/gemini-api/docs/image-generation',
       'https://deepmind.google/models/model-cards/gemini-3-1-flash-image/'
@@ -95,7 +88,6 @@ const DOCS: InternalImageModelOfficialDocReference[] = [
   },
   {
     modelId: 'gpt-image-1',
-    provider: 'openai',
     sourceUrls: [
       'https://developers.openai.com/api/docs/guides/image-generation',
       'https://developers.openai.com/api/docs/models/gpt-image-1'
@@ -106,7 +98,6 @@ const DOCS: InternalImageModelOfficialDocReference[] = [
   },
   {
     modelId: 'gpt-image-2',
-    provider: 'openai',
     sourceUrls: [
       'https://developers.openai.com/api/docs/guides/image-generation',
       'https://developers.openai.com/api/docs/models/gpt-image-2'
@@ -117,7 +108,6 @@ const DOCS: InternalImageModelOfficialDocReference[] = [
   },
   {
     modelId: 'grok-imagine',
-    provider: 'vydra',
     sourceUrls: [
       'https://www.vydra.ai/docs/models/grok-imagine',
       'https://docs.x.ai/developers/model-capabilities/images/generation?campaign=imagine-ads-generation'
@@ -128,7 +118,6 @@ const DOCS: InternalImageModelOfficialDocReference[] = [
   },
   {
     modelId: 'image-01',
-    provider: 'minimax',
     sourceUrls: [
       'https://platform.minimax.io/docs/api-reference/image-generation-t2i',
       'https://platform.minimax.io/docs/api-reference/image-generation-i2i',
@@ -140,7 +129,6 @@ const DOCS: InternalImageModelOfficialDocReference[] = [
   },
   {
     modelId: 'wan2.7-image',
-    provider: 'dashscope',
     sourceUrls: ['https://help.aliyun.com/zh/model-studio/wan-image-generation-and-editing-api-reference'],
     snapshotPath: `${SNAPSHOT_ROOT}/dashscope/wan2.7-image.md`,
     capturedAt: CAPTURED_AT,
@@ -177,7 +165,6 @@ export async function describeImageModelOfficialDoc(modelId: string): Promise<Im
 function publicDocReference(doc: InternalImageModelOfficialDocReference): ImageModelOfficialDocReference {
   return {
     modelId: doc.modelId,
-    provider: doc.provider,
     sourceUrls: [...doc.sourceUrls],
     snapshotPath: doc.snapshotPath,
     capturedAt: doc.capturedAt,

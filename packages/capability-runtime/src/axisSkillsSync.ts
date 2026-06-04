@@ -29,8 +29,7 @@ export type AxisSkillsSyncErrorCode =
 export type AxisSkillsDiagnosticCode =
   | AxisSkillsSyncErrorCode
   | SkillDiagnostic['code']
-  | 'skills_not_installed'
-  | 'skills_state_outdated';
+  | 'skills_not_installed';
 
 type AxisSkillsSnapshot = Omit<SkillsSnapshot, 'diagnostics'> & { diagnostics: AxisSkillsDiagnostic[] };
 
@@ -81,45 +80,27 @@ class DefaultAxisSkillsSyncService implements AxisSkillsSyncService {
     const missingBundledSkillCount = bundled.snapshot
       ? bundledNames.filter((name) => !installedNames.has(name)).length
       : undefined;
-    const outdatedState = stateResult.state?.axisVersion !== undefined && stateResult.state.axisVersion !== this.input.axisVersion;
-    if (outdatedState) {
-      diagnostics.push({
-        source: 'axis-sync',
-        root: dirname(statePath),
-        path: statePath,
-        code: 'skills_state_outdated',
-        message: `AXIS Skills were last synced by AXIS ${stateResult.state!.axisVersion}; running AXIS ${this.input.axisVersion}.`
-      });
-    }
-
     return {
       ...installed,
       diagnostics,
       statePath,
-      ...(stateResult.state ? { state: stateResult.state, stateVersion: stateResult.state.schemaVersion } : {}),
+      ...(stateResult.state ? { state: stateResult.state } : {}),
       currentAxisVersion: this.input.axisVersion,
       sharedSkillsRoot: sharedRoot,
       ...(this.input.bundledSkillsRoot ? { bundledSkillsRoot: resolve(this.input.bundledSkillsRoot) } : {}),
       bundledRootAvailable: bundled.snapshot !== undefined,
       bundledSkills: bundledNames,
-      ...(missingBundledSkillCount === undefined ? {} : { missingBundledSkillCount }),
-      outdatedState
+      ...(missingBundledSkillCount === undefined ? {} : { missingBundledSkillCount })
     };
   }
 
   async sync(input: SkillsSyncInput): Promise<SkillsSyncSnapshot> {
     const bundled = await loadBundled(this.requireBundledRoot());
-    const stateResult = await readState(this.statePath());
     const installedBefore = await loadInstalled(this.sharedRoot());
-    const planned = planSync({
-      force: input.force,
-      bundledSkills: bundled.skills,
-      installedSkills: installedBefore.skills,
-      ...(stateResult.state ? { previousState: stateResult.state } : {})
-    });
+    const planned = planSync(bundled.skills);
     const updatedSkills: SkillRecord[] = [];
 
-    for (const skill of planned.update) {
+    for (const skill of planned) {
       await replaceSkillDirectory({
         sourceDir: skill.skillDir,
         destinationDir: join(this.sharedRoot(), skill.name),
@@ -130,7 +111,6 @@ class DefaultAxisSkillsSyncService implements AxisSkillsSyncService {
 
     const syncDiagnostics = [
       ...bundled.diagnostics,
-      ...stateResult.diagnostics,
       ...installedBefore.diagnostics
     ];
     await writeStateOrThrow(this.statePath(), {
@@ -138,7 +118,6 @@ class DefaultAxisSkillsSyncService implements AxisSkillsSyncService {
       axisVersion: this.input.axisVersion,
       bundledSkills: bundled.skills.map((skill) => skill.name).sort((left, right) => left.localeCompare(right)),
       updatedSkills: updatedSkills.map((skill) => skill.name).sort((left, right) => left.localeCompare(right)),
-      skippedSkills: planned.skip,
       diagnostics: syncDiagnostics.map((diagnostic) => ({
         code: diagnostic.code,
         message: diagnostic.message,
@@ -152,8 +131,7 @@ class DefaultAxisSkillsSyncService implements AxisSkillsSyncService {
     return {
       ...status,
       force: input.force,
-      updatedSkills: updatedSkills.map((skill) => installedByName.get(skill.name) ?? skill),
-      skippedSkills: planned.skip
+      updatedSkills: updatedSkills.map((skill) => installedByName.get(skill.name) ?? skill)
     };
   }
 
@@ -267,24 +245,8 @@ function normalizeBundledDiagnostics(diagnostics: SkillDiagnostic[], bundledRoot
   ];
 }
 
-function planSync(input: {
-  force: boolean;
-  bundledSkills: SkillRecord[];
-  installedSkills: SkillRecord[];
-  previousState?: AxisSkillsState;
-}): { update: SkillRecord[]; skip: string[] } {
-  const installed = new Set(input.installedSkills.map((skill) => skill.name));
-  const previous = new Set(input.previousState?.bundledSkills ?? []);
-  const update: SkillRecord[] = [];
-  const skip: string[] = [];
-  for (const skill of [...input.bundledSkills].sort((left, right) => left.name.localeCompare(right.name))) {
-    if (input.force || installed.has(skill.name) || !previous.has(skill.name)) {
-      update.push(skill);
-    } else {
-      skip.push(skill.name);
-    }
-  }
-  return { update, skip };
+function planSync(bundledSkills: SkillRecord[]): SkillRecord[] {
+  return [...bundledSkills].sort((left, right) => left.name.localeCompare(right.name));
 }
 
 async function replaceSkillDirectory(input: { sourceDir: string; destinationDir: string; tempDir: string }): Promise<void> {
@@ -354,7 +316,6 @@ function isAxisSkillsState(value: unknown): value is AxisSkillsState {
   }
   return stringArray(value.bundledSkills)
     && stringArray(value.updatedSkills)
-    && stringArray(value.skippedSkills)
     && Array.isArray(value.diagnostics)
     && value.diagnostics.every((diagnostic) => isRecord(diagnostic)
       && typeof diagnostic.code === 'string'

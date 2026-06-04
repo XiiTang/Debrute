@@ -3,8 +3,6 @@ import type {
   CanvasFeedbackDocument,
   CanvasNodeLayerPatch,
   CanvasProjection,
-  CanvasSelection,
-  CanvasViewport,
   Diagnostic,
   UpdateCanvasFeedbackEntryInput
 } from '@axis/canvas-core';
@@ -17,8 +15,6 @@ import type {
 } from '@axis/project-core';
 
 export type { ProjectTextFile } from '@axis/project-core';
-
-export const APP_PROTOCOL_SCHEMA_VERSION = 1;
 
 export interface ProjectHealthSummary {
   projectName: string;
@@ -42,8 +38,85 @@ export interface ProjectSessionSnapshot {
   health: ProjectHealthSummary;
 }
 
+export type WorkbenchProjectSessionSnapshot = Omit<ProjectSessionSnapshot, 'projectRoot'>;
+export type WorkbenchProjectTextFile = Omit<ProjectTextFile, 'absolutePath'>;
+
+export interface AxisRuntimeInfo {
+  daemonUrl: string;
+  webBaseUrl: string | null;
+}
+
+export interface LiveProjectView {
+  projectId: string;
+  snapshot: WorkbenchProjectSessionSnapshot;
+  clients: {
+    liveCount: number;
+  };
+}
+
+export interface LiveProjectsView {
+  projects: LiveProjectView[];
+}
+
+export type AxisWorkbenchRoute =
+  | { kind: 'workbench' }
+  | {
+      kind: 'project';
+      projectId: string;
+    };
+
+export interface AxisHttpErrorBody {
+  error: {
+    code: string;
+    message: string;
+    details?: Record<string, unknown>;
+  };
+}
+
+export function isAxisMutatingMethod(method: string): boolean {
+  const normalized = method.toUpperCase();
+  return normalized === 'POST' || normalized === 'PUT' || normalized === 'PATCH' || normalized === 'DELETE';
+}
+
+export function normalizeAxisRuntimeInfo(input: {
+  daemonUrl: string;
+  webBaseUrl?: string | null;
+}): AxisRuntimeInfo {
+  return {
+    daemonUrl: trimTrailingSlash(input.daemonUrl),
+    webBaseUrl: input.webBaseUrl ? trimTrailingSlash(input.webBaseUrl) : null
+  };
+}
+
+export function parseAxisWorkbenchPath(pathname: string): AxisWorkbenchRoute {
+  const segments = pathname
+    .split('/')
+    .filter((segment) => segment.length > 0)
+    .map(decodeURIComponent);
+  if (segments.length === 2 && segments[0] === 'projects' && segments[1]) {
+    return {
+      kind: 'project',
+      projectId: segments[1]
+    };
+  }
+  return { kind: 'workbench' };
+}
+
+function trimTrailingSlash(value: string): string {
+  return value.endsWith('/') ? value.slice(0, -1) : value;
+}
+
 export interface ProjectFileOperationResult extends ProjectPathOperationResult {
   snapshot: ProjectSessionSnapshot;
+}
+
+export interface WorkbenchProjectFileOperationResult extends ProjectPathOperationResult {
+  snapshot: WorkbenchProjectSessionSnapshot;
+}
+
+export interface WorkbenchProjectOpenResult {
+  projectId: string;
+  snapshot: WorkbenchProjectSessionSnapshot;
 }
 
 export type CanvasSettingsView = {
@@ -94,14 +167,13 @@ export interface DiscoverProviderModelsOutput {
 
 export interface ImageModelSettingRecord {
   axisModelId: string;
-  provider: string;
   summary: string;
   supportsEditing: boolean;
   supportsTextRendering: boolean;
   defaultBaseUrl: string;
-  defaultProviderModelId: string;
+  defaultRequestModelId: string;
   baseUrlOverride: string | null;
-  providerModelIdOverride: string | null;
+  requestModelIdOverride: string | null;
   apiKeySet: boolean;
 }
 
@@ -111,13 +183,12 @@ export interface ImageModelSettingsView {
 
 export interface SaveImageModelSettingInput {
   baseUrlOverride: string | null;
-  providerModelIdOverride: string | null;
+  requestModelIdOverride: string | null;
   apiKey?: string;
 }
 
 export interface VideoModelSettingRecord {
   axisModelId: string;
-  provider: string;
   summary: string;
   supportsTextToVideo: boolean;
   supportsImageReferences: boolean;
@@ -125,9 +196,9 @@ export interface VideoModelSettingRecord {
   supportsAudioReferences: boolean;
   supportsGeneratedAudio: boolean;
   defaultBaseUrl: string;
-  defaultProviderModelId: string;
+  defaultRequestModelId: string;
   baseUrlOverride: string | null;
-  providerModelIdOverride: string | null;
+  requestModelIdOverride: string | null;
   apiKeySet: boolean;
 }
 
@@ -137,7 +208,7 @@ export interface VideoModelSettingsView {
 
 export interface SaveVideoModelSettingInput {
   baseUrlOverride: string | null;
-  providerModelIdOverride: string | null;
+  requestModelIdOverride: string | null;
   apiKey?: string;
 }
 
@@ -183,7 +254,6 @@ export type SystemPackageManagerId = 'brew' | 'winget' | 'apt';
 export type PythonCliInstallerId = 'uv' | 'pipx';
 export type IntegrationBackendId = SystemPackageManagerId | PythonCliInstallerId;
 export type IntegrationInstallBackendKind = 'system-package-manager' | 'python-cli-installer';
-export type IntegrationOperationKind = 'install' | 'update' | 'uninstall';
 
 export interface IntegrationOperationDiagnostic {
   commandPreview: string;
@@ -204,9 +274,6 @@ export interface IntegrationOperationStatus {
   backendKind: IntegrationInstallBackendKind;
   backend?: IntegrationBackendId;
   packageName?: string;
-  installAvailable: boolean;
-  updateAvailable: boolean;
-  uninstallAvailable: boolean;
   installCommandPreview?: string;
   updateCommandPreview?: string;
   uninstallCommandPreview?: string;
@@ -242,101 +309,6 @@ export interface IntegrationStatus {
 export interface IntegrationSettingsView {
   integrations: IntegrationStatus[];
   backends: IntegrationBackendStatus[];
-  operationRunning: boolean;
-}
-
-export const AXIS_CLI_OPERATION_KINDS = [
-  'install',
-  'update',
-  'repair',
-  'uninstall',
-  'refresh-status',
-  'refresh-development-link'
-] as const;
-
-export type AxisCliMode = 'missing' | 'release' | 'source-linked' | 'broken';
-export type AxisCliPathState = 'configured' | 'configured-pending-terminal' | 'not-configured' | 'write-failed';
-export type AxisCliOperationKind = typeof AXIS_CLI_OPERATION_KINDS[number];
-
-export type AxisCliDiagnosticCode =
-  | 'network_unavailable'
-  | 'release_not_found'
-  | 'unsupported_platform'
-  | 'download_failed'
-  | 'checksum_missing'
-  | 'checksum_mismatch'
-  | 'archive_extract_failed'
-  | 'binary_missing'
-  | 'version_probe_failed'
-  | 'install_root_unwritable'
-  | 'path_profile_unwritable'
-  | 'windows_path_update_failed'
-  | 'operation_already_running'
-  | 'managed_command_conflict'
-  | 'source_checkout_missing'
-  | 'source_dependency_missing'
-  | 'skills_sync_failed'
-  | 'internal_error';
-
-export const AXIS_CLI_DIAGNOSTIC_CODES = [
-  'network_unavailable',
-  'release_not_found',
-  'unsupported_platform',
-  'download_failed',
-  'checksum_missing',
-  'checksum_mismatch',
-  'archive_extract_failed',
-  'binary_missing',
-  'version_probe_failed',
-  'install_root_unwritable',
-  'path_profile_unwritable',
-  'windows_path_update_failed',
-  'operation_already_running',
-  'managed_command_conflict',
-  'source_checkout_missing',
-  'source_dependency_missing',
-  'skills_sync_failed',
-  'internal_error'
-] as const satisfies readonly AxisCliDiagnosticCode[];
-
-export function isAxisCliDiagnosticCode(code: string): code is AxisCliDiagnosticCode {
-  return (AXIS_CLI_DIAGNOSTIC_CODES as readonly string[]).includes(code);
-}
-
-export interface AxisCliDiagnostic {
-  operation?: AxisCliOperationKind;
-  code: AxisCliDiagnosticCode;
-  path?: string;
-  message: string;
-}
-
-export interface AxisCliConflict {
-  managedPath: string;
-  resolvedPath: string;
-  resolvedVersion?: string;
-  message: string;
-}
-
-export interface AxisCliOperationState {
-  kind: AxisCliOperationKind;
-  running: boolean;
-  startedAt: string;
-}
-
-export interface AxisCliStatus {
-  mode: AxisCliMode;
-  managed: boolean;
-  installedVersion?: string;
-  latestVersion?: string;
-  updateAvailable: boolean;
-  commandPath: string;
-  resolvedPath?: string;
-  binDir: string;
-  installRoot: string;
-  pathState: AxisCliPathState;
-  conflict?: AxisCliConflict;
-  operation?: AxisCliOperationState;
-  diagnostic?: AxisCliDiagnostic;
 }
 
 export type SkillSourceKind = 'shared-agents' | 'axis-repository';
@@ -365,7 +337,6 @@ export interface AxisSkillsState {
   axisVersion: string;
   bundledSkills: string[];
   updatedSkills: string[];
-  skippedSkills: string[];
   diagnostics: Array<{ code: string; message: string; path?: string }>;
   updatedAt: string;
 }
@@ -376,14 +347,12 @@ export interface SkillsStatusSnapshot {
   diagnostics: AxisSkillsDiagnostic[];
   statePath: string;
   state?: AxisSkillsState;
-  stateVersion?: number;
   currentAxisVersion: string;
   sharedSkillsRoot: string;
   bundledSkillsRoot?: string;
   bundledRootAvailable: boolean;
   bundledSkills: string[];
   missingBundledSkillCount?: number;
-  outdatedState: boolean;
 }
 
 export interface SkillsSyncInput {
@@ -393,18 +362,18 @@ export interface SkillsSyncInput {
 export interface SkillsSyncSnapshot extends SkillsStatusSnapshot {
   force: boolean;
   updatedSkills: SkillRecord[];
-  skippedSkills: string[];
 }
 
 export interface GeneratedAssetRecord {
   schemaVersion: 1;
   recordId: string;
+  projectRelativePath: string;
   createdAt: string;
   fingerprint: {
     algorithm: 'sha256';
     hash: string;
   };
-  providerCall: {
+  modelRun: {
     request: unknown;
     output: unknown;
   };
@@ -442,6 +411,17 @@ export type GeneratedAssetMetadataLookup =
       diagnostics?: GeneratedAssetMetadataDiagnostic[];
     };
 
+export interface GeneratedAssetView {
+  assetId: string;
+  projectRelativePath: string;
+  rawUrl: string;
+  record: GeneratedAssetRecord;
+}
+
+export interface GeneratedAssetsView {
+  assets: GeneratedAssetView[];
+}
+
 export type AppServerEvent =
   | { type: 'project.opened'; snapshot: ProjectSessionSnapshot }
   | { type: 'project.changed'; snapshot: ProjectSessionSnapshot }
@@ -453,80 +433,42 @@ export type AppServerEvent =
   | { type: 'integrations.settings.changed'; settings: IntegrationSettingsView }
   | { type: 'canvas.settings.changed'; settings: CanvasSettingsView };
 
-export type DesktopUpdateState =
-  | { type: 'disabled'; reason: 'development' | 'unsupported-platform' | 'missing-config' }
-  | { type: 'idle'; currentVersion: string; lastCheckedAt?: string; notAvailable?: boolean; lastError?: string }
-  | { type: 'checking'; currentVersion: string; explicit: boolean }
-  | { type: 'available'; currentVersion: string; updateVersion: string; releaseName?: string; releaseDate?: string; lastError?: string }
-  | { type: 'downloading'; currentVersion: string; updateVersion: string; percent?: number }
-  | { type: 'installing'; currentVersion: string; updateVersion: string };
+export type WorkbenchFileWatchEvent = Omit<NormalizedFileWatchEvent, 'absolutePath'>;
 
-export interface DesktopHotExitSnapshot {
-  schemaVersion: 1;
-  createdAt: string;
-  projectRoot?: string;
-  activeCanvasId?: string;
-  explorerSelection?: string;
-  selection?: CanvasSelection;
-  textFileBuffers: DesktopHotExitTextBuffer[];
-  textEditorWindows: DesktopHotExitTextEditorWindow[];
-}
-
-export interface DesktopHotExitTextBuffer {
-  projectRelativePath: string;
-  content: string;
-  language: string;
-  wordWrap: boolean;
-  diskRevision?: string;
-  lastSavedRevision?: string;
-}
-
-export interface DesktopHotExitTextEditorWindow {
-  projectRelativePath: string;
-  open: boolean;
-  x: number;
-  y: number;
-  width: number;
-  height: number;
-}
-
-export type DesktopEvent =
-  | AppServerEvent
-  | { type: 'desktop.updateState.changed'; state: DesktopUpdateState }
-  | { type: 'desktop.axisCli.changed'; status: AxisCliStatus };
-
-export interface DesktopState {
-  recentProjectRoots: string[];
-  lastProjectRoot?: string;
-  setupCompleted: boolean;
-}
+export type WorkbenchEvent =
+  | { type: 'project.opened'; snapshot: WorkbenchProjectSessionSnapshot }
+  | { type: 'project.changed'; snapshot: WorkbenchProjectSessionSnapshot }
+  | { type: 'project.fileChanged'; event: WorkbenchFileWatchEvent; snapshot: WorkbenchProjectSessionSnapshot }
+  | { type: 'canvas.changed'; canvas: CanvasDocument; projection: CanvasProjection }
+  | { type: 'llm.settings.changed'; settings: LlmProviderSettingsView }
+  | { type: 'imageModel.settings.changed'; settings: ImageModelSettingsView }
+  | { type: 'videoModel.settings.changed'; settings: VideoModelSettingsView }
+  | { type: 'integrations.settings.changed'; settings: IntegrationSettingsView }
+  | { type: 'canvas.settings.changed'; settings: CanvasSettingsView };
 
 export interface WorkbenchApiClient {
-  readonly mode: 'desktop';
-  getDesktopState(): Promise<DesktopState>;
-  setSetupCompleted(input: { completed: boolean }): Promise<DesktopState>;
+  readonly mode: 'web' | 'desktop';
   chooseProjectRoot(): Promise<string | undefined>;
-  openProject(projectRoot?: string): Promise<ProjectSessionSnapshot | undefined>;
-  getSnapshot(): Promise<ProjectSessionSnapshot>;
+  openProject(input: { projectRoot: string } | { projectId: string }): Promise<WorkbenchProjectOpenResult>;
+  getSnapshot(): Promise<WorkbenchProjectSessionSnapshot>;
   getProjectHealth(): Promise<ProjectHealthSummary>;
-  readProjectTextFile(projectRelativePath: string): Promise<ProjectTextFile>;
-  writeProjectTextFile(projectRelativePath: string, content: string): Promise<ProjectTextFile>;
+  readProjectTextFile(projectRelativePath: string): Promise<WorkbenchProjectTextFile>;
+  writeProjectTextFile(projectRelativePath: string, content: string): Promise<WorkbenchProjectTextFile>;
   getDesktopPlatform(): Promise<NodeJS.Platform>;
-  resolveProjectAbsolutePath(projectRelativePath: string): Promise<string>;
-  createProjectFile(input: { parentProjectRelativePath: string; name: string }): Promise<ProjectFileOperationResult>;
-  createProjectDirectory(input: { parentProjectRelativePath: string; name: string }): Promise<ProjectFileOperationResult>;
-  renameProjectPath(input: { projectRelativePath: string; name: string }): Promise<ProjectFileOperationResult>;
-  copyProjectPath(input: { sourceProjectRelativePath: string; targetDirectoryProjectRelativePath: string }): Promise<ProjectFileOperationResult>;
-  moveProjectPath(input: { sourceProjectRelativePath: string; targetDirectoryProjectRelativePath: string }): Promise<ProjectFileOperationResult>;
-  trashProjectPath(input: { projectRelativePath: string }): Promise<{ projectRelativePath: string; snapshot: ProjectSessionSnapshot }>;
-  deleteProjectPathPermanently(input: { projectRelativePath: string }): Promise<ProjectFileOperationResult | undefined>;
+  createProjectFile(input: { parentProjectRelativePath: string; name: string }): Promise<WorkbenchProjectFileOperationResult>;
+  createProjectDirectory(input: { parentProjectRelativePath: string; name: string }): Promise<WorkbenchProjectFileOperationResult>;
+  renameProjectPath(input: { projectRelativePath: string; name: string }): Promise<WorkbenchProjectFileOperationResult>;
+  copyProjectPath(input: { sourceProjectRelativePath: string; targetDirectoryProjectRelativePath: string }): Promise<WorkbenchProjectFileOperationResult>;
+  moveProjectPath(input: { sourceProjectRelativePath: string; targetDirectoryProjectRelativePath: string }): Promise<WorkbenchProjectFileOperationResult>;
+  trashProjectPath(input: { projectRelativePath: string }): Promise<{ projectRelativePath: string; snapshot: WorkbenchProjectSessionSnapshot }>;
+  deleteProjectPathPermanently(input: { projectRelativePath: string }): Promise<WorkbenchProjectFileOperationResult>;
   revealProjectPathInSystemFileManager(input: { projectRelativePath: string; kind: 'file' | 'directory' }): Promise<{ ok: true }>;
   lookupGeneratedAssetMetadata(input: { projectRelativePath: string }): Promise<GeneratedAssetMetadataLookup>;
+  listGeneratedAssets(): Promise<GeneratedAssetsView>;
+  readGeneratedAsset(assetId: string): Promise<GeneratedAssetView>;
   readCanvasFeedback(): Promise<CanvasFeedbackDocument>;
   updateCanvasFeedbackEntry(input: UpdateCanvasFeedbackEntryInput): Promise<CanvasFeedbackDocument>;
-  refreshProject(): Promise<ProjectSessionSnapshot>;
-  updateCanvasViewport(canvasId: string, viewport: CanvasViewport): Promise<CanvasDocument>;
-  updateCanvasSelection(canvasId: string, selection: CanvasSelection | undefined): Promise<CanvasDocument>;
+  refreshProject(): Promise<WorkbenchProjectSessionSnapshot>;
   updateCanvasNodeLayouts(input: {
     canvasId: string;
     nodeLayouts?: Array<{ projectRelativePath: string; x: number; y: number; width?: number; height?: number }>;
@@ -549,18 +491,5 @@ export interface WorkbenchApiClient {
   integrationsRescan(): Promise<IntegrationSettingsView>;
   canvasSettingsGet(): Promise<CanvasSettingsView>;
   canvasSettingsSave(input: CanvasSettingsView): Promise<CanvasSettingsView>;
-  axisCliGetStatus(): Promise<AxisCliStatus>;
-  axisCliInstall(): Promise<AxisCliStatus>;
-  axisCliUpdate(): Promise<AxisCliStatus>;
-  axisCliRepair(): Promise<AxisCliStatus>;
-  axisCliUninstall(): Promise<AxisCliStatus>;
-  axisCliRefreshDevelopmentLink(): Promise<AxisCliStatus>;
-  getUpdateState(): Promise<DesktopUpdateState>;
-  updateNow(): Promise<DesktopUpdateState>;
-  getHotExitSnapshot(): Promise<DesktopHotExitSnapshot | undefined>;
-  clearHotExitSnapshot(): Promise<void>;
-  onHotExitSnapshotRequest(listener: () => DesktopHotExitSnapshot | Promise<DesktopHotExitSnapshot>): () => void;
-  onEvent(listener: (event: DesktopEvent) => void): () => void;
+  onEvent(listener: (event: WorkbenchEvent) => void): () => void;
 }
-
-export type DesktopWorkbenchApiClient = Omit<WorkbenchApiClient, 'mode'>;

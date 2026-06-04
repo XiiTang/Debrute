@@ -6,7 +6,13 @@ import { dirname, normalize } from 'node:path/posix';
 export const architectureScopes = [
   'packages',
   'apps/desktop/src',
-  'apps/desktop/vite.config.ts',
+  'apps/web/src',
+  'apps/web/vite.config.ts',
+  'apps/web/package.json',
+  'apps/web/tsconfig.json',
+  'apps/daemon/src',
+  'apps/daemon/package.json',
+  'apps/daemon/tsconfig.json',
   'apps/app-server/src',
   'apps/axis-cli/src',
   'apps/axis-cli/package.json',
@@ -27,9 +33,9 @@ export const importMatrix = [
     forbiddenImports: [/^@axis\/app-server$/, /^@axis\/capability-core$/, /^@axis\/capability-runtime$/, /^electron$/, /^react$/, /^node:/]
   },
   {
-    name: 'capability-runtime does not depend on app-server or desktop renderer',
+    name: 'capability-runtime does not depend on app-server or workbench renderer',
     match: (file) => file.startsWith('packages/capability-runtime/src/'),
-    forbiddenImports: [/^@axis\/app-server$/, /apps\/desktop/, /^electron$/, /^react$/]
+    forbiddenImports: [/^@axis\/app-server$/, /apps\/desktop/, /apps\/web/, /^electron$/, /^react$/]
   },
   {
     name: 'project-core stays independent of app and runtime layers',
@@ -49,27 +55,32 @@ export const importMatrix = [
   {
     name: 'canvas-core does not depend on renderer or app-server',
     match: (file) => file.startsWith('packages/canvas-core/src/'),
-    forbiddenImports: [/^@axis\/app-protocol$/, /^@axis\/capability-runtime$/, /^@axis\/app-server$/, /apps\/desktop/, /^electron$/, /^react$/]
+    forbiddenImports: [/^@axis\/app-protocol$/, /^@axis\/capability-runtime$/, /^@axis\/app-server$/, /apps\/desktop/, /apps\/web/, /^electron$/, /^react$/]
   },
   {
-    name: 'desktop renderer does not import app-server',
-    match: (file) => file.startsWith('apps/desktop/src/') && !file.startsWith('apps/desktop/src/electron/'),
+    name: 'workbench-runtime stays launch-free and app-independent',
+    match: (file) => file.startsWith('packages/workbench-runtime/src/'),
+    forbiddenImports: [/^@axis\/daemon$/, /^@axis\/app-server$/, /^electron$/]
+  },
+  {
+    name: 'web workbench does not import app-server',
+    match: (file) => file.startsWith('apps/web/src/'),
     forbiddenImports: [/^@axis\/app-server$/, /^apps\/app-server\//, /^@axis\/capability-runtime$/, /^@axis\/capability-core$/]
   },
   {
-    name: 'desktop renderer does not import electron or node filesystem',
-    match: (file) => file.startsWith('apps/desktop/src/') && !file.startsWith('apps/desktop/src/electron/'),
+    name: 'web workbench does not import electron or node filesystem',
+    match: (file) => file.startsWith('apps/web/src/'),
     forbiddenImports: [/^electron$/, /^node:fs$/, /^node:fs\/promises$/, /^fs$/, /^fs\/promises$/]
   },
   {
-    name: 'desktop electron does not import workbench renderer internals',
+    name: 'desktop electron does not import web workbench internals',
     match: (file) => file.startsWith('apps/desktop/src/electron/'),
-    forbiddenImports: [/apps\/desktop\/src\/workbench/, /^\.\.\/workbench\//, /^react$/, /^react-dom/]
+    forbiddenImports: [/apps\/web\/src\/workbench/, /^\.\.\/\.\.\/\.\.\/web\/src\/workbench/, /^react$/, /^react-dom/]
   },
   {
-    name: 'app-server does not import desktop or react',
+    name: 'app-server does not import UI runtimes or react',
     match: (file) => file.startsWith('apps/app-server/src/'),
-    forbiddenImports: [/apps\/desktop/, /^@axis\/desktop$/, /^react$/]
+    forbiddenImports: [/apps\/desktop/, /apps\/web/, /^@axis\/desktop$/, /^@axis\/web$/, /^react$/]
   },
   {
     name: 'cli stays behind app-server and protocol boundaries',
@@ -102,6 +113,7 @@ export const publicBarrelRules = [
     maxNonEmptyLines: 120,
     allowedExportSources: [
       './server/AxisAppServer.js',
+      './server/AxisGlobalRuntimeServer.js',
       './config/GlobalConfigStore.js',
       '@axis/app-protocol',
       '@axis/canvas-core'
@@ -231,14 +243,14 @@ function tsconfigViolations(file, text) {
 }
 
 function viteAliasViolations(file, text) {
-  if (file !== 'apps/desktop/vite.config.ts') {
+  if (file !== 'apps/web/vite.config.ts') {
     return [];
   }
   const aliases = [...text.matchAll(/['"](@axis\/[^'"]+)['"]\s*:/g)].map((match) => match[1]);
   const allowedAliases = new Set(['@axis/app-protocol', '@axis/project-core', '@axis/canvas-core']);
   return aliases
     .filter((alias) => !allowedAliases.has(alias))
-    .map((alias) => `desktop renderer Vite aliases stay renderer-safe: ${file} aliases ${alias}`);
+    .map((alias) => `web workbench Vite aliases stay renderer-safe: ${file} aliases ${alias}`);
 }
 
 function barrelViolations(rule, file, text) {

@@ -1,0 +1,22 @@
+{
+  "name": "@axis/daemon",
+  "version": "0.1.0",
+  "license": "Apache-2.0",
+  "private": true,
+  "type": "module",
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "bin": {
+    "axis-daemon": "dist/cli.js"
+  },
+  "scripts": {
+    "build": "tsc -b",
+    "check": "tsc -b --pretty false",
+    "dev": "tsx src/cli.ts"
+  },
+  "dependencies": {
+    "@axis/app-protocol": "workspace:*",
+    "@axis/app-server": "workspace:*",
+    "@axis/project-core": "workspace:*"
+  }
+}

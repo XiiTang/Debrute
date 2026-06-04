@@ -14,9 +14,13 @@ export type AxisCliErrorCode =
   | 'flowmap_invalid_yaml'
   | 'model_not_configured'
   | 'model_unavailable'
-  | 'provider_request_failed'
-  | 'generated_asset_write_failed'
+  | 'model_request_failed'
   | 'runtime_config_error'
+  | 'runtime_launch_failed'
+  | 'runtime_health_failed'
+  | 'runtime_state_unreadable'
+  | 'runtime_state_write_failed'
+  | 'runtime_lock_timeout'
   | 'skills_bundle_unavailable'
   | 'skills_bundle_invalid'
   | 'skills_shared_root_unreadable'
@@ -66,6 +70,11 @@ export function exitCodeForCliError(error: unknown): AxisCliExitCode {
   }
   if (
     error.code === 'runtime_config_error'
+    || error.code === 'runtime_launch_failed'
+    || error.code === 'runtime_health_failed'
+    || error.code === 'runtime_state_unreadable'
+    || error.code === 'runtime_state_write_failed'
+    || error.code === 'runtime_lock_timeout'
     || error.code === 'model_not_configured'
     || error.code === 'skills_bundle_unavailable'
     || error.code === 'skills_shared_root_unreadable'
@@ -73,7 +82,7 @@ export function exitCodeForCliError(error: unknown): AxisCliExitCode {
   ) {
     return 3;
   }
-  if (error.code === 'provider_request_failed' || error.code === 'model_unavailable') {
+  if (error.code === 'model_request_failed' || error.code === 'model_unavailable') {
     return 4;
   }
   if (error.code === 'internal_error') {
@@ -111,7 +120,7 @@ export function normalizeServiceErrorCode(code: string): AxisCliErrorCode {
     || code === 'request_failed'
     || code === 'response_parse_failed'
   ) {
-    return 'provider_request_failed';
+    return 'model_request_failed';
   }
   if (code === 'invalid_image_input' || code === 'llm_invalid_json') {
     return 'invalid_input';
@@ -145,9 +154,13 @@ function isAxisCliErrorCode(code: string): code is AxisCliErrorCode {
     'flowmap_invalid_yaml',
     'model_not_configured',
     'model_unavailable',
-    'provider_request_failed',
-    'generated_asset_write_failed',
+    'model_request_failed',
     'runtime_config_error',
+    'runtime_launch_failed',
+    'runtime_health_failed',
+    'runtime_state_unreadable',
+    'runtime_state_write_failed',
+    'runtime_lock_timeout',
     'skills_bundle_unavailable',
     'skills_bundle_invalid',
     'skills_shared_root_unreadable',

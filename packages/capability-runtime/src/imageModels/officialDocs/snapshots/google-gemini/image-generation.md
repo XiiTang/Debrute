@@ -1,5 +1,4 @@
 ---
-provider: google-gemini
 models:
   - gemini-3-pro-image-preview
   - gemini-3.1-flash-image
@@ -11,7 +10,7 @@ captured_at: 2026-05-31
 source_type: official_docs
 cleanup:
   - removed page chrome and duplicate table of contents
-  - removed SDK setup and raw provider command snippets
+  - removed SDK setup and raw source API command snippets
 ---
 
 # Gemini image generation

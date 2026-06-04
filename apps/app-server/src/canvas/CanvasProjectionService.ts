@@ -1,7 +1,7 @@
 import { access, stat } from 'node:fs/promises';
 import {
   projectFileRevision,
-  resolveProjectPath
+  resolveExistingProjectPath
 } from '@axis/project-core';
 import {
   CANVAS_DOCUMENT_SCHEMA_VERSION,
@@ -11,7 +11,6 @@ import {
   type CanvasNodeAvailability,
   type CanvasNodeElement,
   type CanvasProjection,
-  type CanvasSelection,
   type CanvasStructureEdgeProjection,
   type Diagnostic
 } from '@axis/canvas-core';
@@ -80,7 +79,7 @@ export function canvasMediaKindFromPath(projectRelativePath: string): CanvasMedi
 async function inspectCanvasNodeAvailability(projectRoot: string, node: CanvasNodeElement): Promise<CanvasNodeAvailability> {
   let absolutePath: string;
   try {
-    absolutePath = resolveProjectPath(projectRoot, node.projectRelativePath);
+    absolutePath = await resolveExistingProjectPath(projectRoot, node.projectRelativePath);
   } catch (error) {
     return {
       state: 'unreadable',
@@ -122,7 +121,7 @@ async function inspectCanvasNodeAvailability(projectRoot: string, node: CanvasNo
       state: 'available',
       size: fileStat.size,
       mimeType,
-      fileUrl: projectFileUrl(node.projectRelativePath, revision),
+      fileUrl: '',
       ...(canvasImagePreview ? {
         canvasImagePreviewable: canvasImagePreview.previewable,
         ...(canvasImagePreview.sourceWidth === undefined ? {} : { canvasImagePreviewSourceWidth: canvasImagePreview.sourceWidth })
@@ -148,19 +147,12 @@ function isCurrentCanvasDocument(value: unknown): value is CanvasDocument {
   if (!isRecord(value) || value.schemaVersion !== CANVAS_DOCUMENT_SCHEMA_VERSION) {
     return false;
   }
-  return hasOnlyKeys(value, ['schemaVersion', 'id', 'title', 'nodeElements', 'annotations', 'viewport', 'selection', 'preferences'])
+  return hasOnlyKeys(value, ['schemaVersion', 'id', 'title', 'nodeElements', 'annotations', 'preferences'])
     && typeof value.id === 'string'
     && typeof value.title === 'string'
     && Array.isArray(value.nodeElements)
     && value.nodeElements.every(isCurrentCanvasNodeElement)
     && Array.isArray(value.annotations)
-    && isRecord(value.viewport)
-    && hasOnlyKeys(value.viewport, ['x', 'y', 'zoom'])
-    && isFiniteNumber(value.viewport.x)
-    && isFiniteNumber(value.viewport.y)
-    && isFiniteNumber(value.viewport.zoom)
-    && value.viewport.zoom > 0
-    && (value.selection === undefined || isCurrentCanvasSelection(value.selection))
     && isRecord(value.preferences)
     && hasOnlyKeys(value.preferences, ['showDiagnostics'])
     && typeof value.preferences.showDiagnostics === 'boolean';
@@ -180,34 +172,6 @@ function isCurrentCanvasNodeElement(value: unknown): value is CanvasNodeElement 
     && typeof value.visible === 'boolean'
     && typeof value.locked === 'boolean'
     && (value.layoutMode === undefined || value.layoutMode === 'manual');
-}
-
-function isCurrentCanvasSelection(value: unknown): value is CanvasSelection {
-  if (isCurrentCanvasSelectionItem(value)) {
-    return true;
-  }
-  return isRecord(value)
-    && hasOnlyKeys(value, ['kind', 'items'])
-    && value.kind === 'multi'
-    && Array.isArray(value.items)
-    && value.items.every(isCurrentCanvasSelectionItem);
-}
-
-function isCurrentCanvasSelectionItem(value: unknown): value is Exclude<CanvasSelection, { kind: 'multi' }> {
-  if (!isRecord(value)) {
-    return false;
-  }
-  if (value.kind === 'node') {
-    return hasOnlyKeys(value, ['kind', 'projectRelativePath'])
-      && typeof value.projectRelativePath === 'string'
-      && value.projectRelativePath.length > 0;
-  }
-  if (value.kind === 'diagnostic') {
-    return hasOnlyKeys(value, ['kind', 'id'])
-      && typeof value.id === 'string'
-      && value.id.length > 0;
-  }
-  return false;
 }
 
 function mimeTypeFromProjectPath(projectRelativePath: string): string {
@@ -276,13 +240,6 @@ function mimeTypeFromProjectPath(projectRelativePath: string): string {
     return 'text/csv';
   }
   return 'text/plain';
-}
-
-function projectFileUrl(projectRelativePath: string, revision: string): string {
-  const encodedPath = projectRelativePath.split('/').map(encodeURIComponent).join('/');
-  const url = new URL(`axis-project-file://project/${encodedPath}`);
-  url.searchParams.set('v', revision);
-  return url.toString();
 }
 
 function hasOnlyKeys(value: Record<string, unknown>, allowed: string[]): boolean {

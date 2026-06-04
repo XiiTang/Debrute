@@ -14,8 +14,10 @@
     "dev": "tsx src/index.ts"
   },
   "dependencies": {
-    "@axis/app-protocol": "0.1.0",
-    "@axis/app-server": "0.1.0",
-    "@axis/capability-runtime": "0.1.0"
+    "@axis/app-protocol": "workspace:*",
+    "@axis/app-server": "workspace:*",
+    "@axis/capability-runtime": "workspace:*",
+    "@axis/daemon": "workspace:*",
+    "@axis/workbench-runtime": "workspace:*"
   }
 }

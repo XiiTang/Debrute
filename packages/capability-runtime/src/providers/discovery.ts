@@ -1,5 +1,6 @@
 import type { DiscoverProviderModelsOutput, LlmProviderType } from '../config.js';
 import type { ProviderFetch } from '../providers.js';
+import { createRequestTimeoutSignal } from '../requestTimeout.js';
 
 export interface ProviderModelDiscoveryInput {
   providerType: LlmProviderType;
@@ -124,11 +125,10 @@ function parseJsonPayload(text: string): unknown {
 }
 
 async function callWithTimeout(fetchImpl: ProviderFetch, timeoutMs: number, url: string, init: RequestInit): Promise<Response> {
-  const controller = new AbortController();
-  const timer = setTimeout(() => controller.abort(), timeoutMs);
+  const timeout = createRequestTimeoutSignal(undefined, timeoutMs, `Model discovery timed out after ${timeoutMs}ms`);
   try {
-    return await fetchImpl(url, { ...init, signal: controller.signal });
+    return await fetchImpl(url, { ...init, signal: timeout.signal });
   } finally {
-    clearTimeout(timer);
+    timeout.dispose();
   }
 }

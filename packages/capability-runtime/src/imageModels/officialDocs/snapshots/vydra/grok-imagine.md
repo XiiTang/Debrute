@@ -1,5 +1,4 @@
 ---
-provider: vydra
 models:
   - grok-imagine
 source_urls:
@@ -9,16 +8,16 @@ captured_at: 2026-05-31
 source_type: official_docs
 cleanup:
   - removed page chrome and unrelated model links
-  - removed raw provider command snippets and SDK imports
+  - removed raw source API command snippets and SDK imports
 ---
 
 # Grok Imagine via Vydra
 
-Vydra documents `grok-imagine` as image and video generation powered by xAI's official Grok Imagine API. AXIS uses the Vydra provider-facing API source for this model. Vydra states that image generation returns instantly with a result URL, while video jobs are asynchronous and require polling.
+Vydra documents `grok-imagine` as image and video generation powered by xAI's official Grok Imagine API. AXIS uses Vydra's API source for this model. Vydra states that image generation returns instantly with a result URL, while video jobs are asynchronous and require polling.
 
 ## Vydra endpoint
 
-The provider-facing endpoint is `POST /api/v1/models/grok-imagine` under Vydra's API base URL.
+The source API endpoint is `POST /api/v1/models/grok-imagine` under Vydra's API base URL.
 
 For image generation, Vydra documents the `text-to-image` sub-model:
 

@@ -1,5 +1,9 @@
 import type { MenuItemConstructorOptions } from 'electron';
+import { readFileSync } from 'node:fs';
+import { join } from 'node:path';
 import { describe, expect, it, vi } from 'vitest';
+import type { AxisDaemonRuntime } from '@axis/daemon';
+import { openProjectThroughDaemon, projectWebShellUrl } from '../apps/desktop/src/electron/daemonProjectOpen';
 import { buildApplicationMenuTemplate } from '../apps/desktop/src/electron/menu/applicationMenu';
 
 describe('desktop application menu', () => {
@@ -70,4 +74,86 @@ describe('desktop application menu', () => {
     const speechItems = speech?.submenu as MenuItemConstructorOptions[];
     expect(speechItems.map((item) => item.role)).toEqual(['startSpeaking', 'stopSpeaking']);
   });
+
+  it('opens menu-selected projects through the daemon route', async () => {
+    const requests: Array<{ url: string; init?: RequestInit }> = [];
+    const runtime = daemonRuntimeFixture();
+    expect(projectWebShellUrl(runtime, '123e4567-e89b-42d3-a456-426614174000')).toBe(
+      'http://127.0.0.1:17322/projects/123e4567-e89b-42d3-a456-426614174000?axis-token=secret'
+    );
+
+    await expect(openProjectThroughDaemon(runtime, '/tmp/axis-project', async (url, init) => {
+      requests.push({ url: String(url), init });
+      return new Response(JSON.stringify({
+        projectId: '123e4567-e89b-42d3-a456-426614174000',
+        snapshot: { canvases: [] }
+      }), { status: 200, headers: { 'content-type': 'application/json' } });
+    })).resolves.toEqual({
+      projectId: '123e4567-e89b-42d3-a456-426614174000',
+      url: 'http://127.0.0.1:17322/projects/123e4567-e89b-42d3-a456-426614174000?axis-token=secret'
+    });
+
+    expect(requests).toEqual([{
+      url: 'http://127.0.0.1:17321/api/projects/open',
+      init: {
+        method: 'POST',
+        headers: {
+          'content-type': 'application/json',
+          'x-axis-daemon-token': 'secret'
+        },
+        body: JSON.stringify({ projectRoot: '/tmp/axis-project' })
+      }
+    }]);
+  });
+
+  it('keeps Electron main from opening menu projects directly through app-server', () => {
+    const main = readFileSync(join(process.cwd(), 'apps/desktop/src/electron/main.ts'), 'utf8');
+
+    expect(main).toContain('openProjectFromShell');
+    expect(main).toContain('requireRuntimeClient().openProject(projectRoot)');
+    expect(main).not.toContain('const appServer = new AxisAppServer');
+    expect(main).not.toContain('appServer.openProject(projectRoot)');
+  });
+
+  it('keeps Electron project windows scoped by daemon project id', () => {
+    const main = readFileSync(join(process.cwd(), 'apps/desktop/src/electron/main.ts'), 'utf8');
+
+    expect(main).toContain('projectWindowsByProjectId');
+    expect(main).toContain('registerElectronProjectWindow');
+    expect(main).toContain("ipcMain.handle('axis-shell:bindProjectWindowToProject'");
+    expect(main).toContain('BrowserWindow.fromWebContents');
+    expect(main).not.toContain('loadProjectRouteInShell');
+    expect(main).not.toContain('Promise.all(windows.map((window) => window.loadURL(url)))');
+  });
+
+  it('resolves desktop reveal requests through daemon project lookup', () => {
+    const main = readFileSync(join(process.cwd(), 'apps/desktop/src/electron/main.ts'), 'utf8');
+
+    expect(main).toContain('resolveProjectPath');
+    expect(main).toContain('requireRuntimeClient');
+    expect(main).not.toContain('projectRootForProjectId(input.projectId)');
+    expect(main).not.toContain('appServer.getSnapshot()');
+  });
+
+  it('participates in the shared Workbench runtime registry', () => {
+    const main = readFileSync(join(process.cwd(), 'apps/desktop/src/electron/main.ts'), 'utf8');
+
+    expect(main).toContain('ensureRegisteredWorkbenchRuntime');
+    expect(main).toContain('runtimeKind: desktopRuntimeKind()');
+    expect(main).toContain("'desktop-packaged'");
+    expect(main).toContain("processControl: 'external'");
+    expect(main).toContain('createAttachedDesktopRuntimeClient');
+    expect(main).toContain('createHostedDesktopRuntimeClient');
+    expect(main).toContain("process.env.AXIS_WORKBENCH_RUNTIME_MODE === 'hosted'");
+    expect(main).toContain('await rememberProjectRootAndRefreshMenu(projectRoot)');
+    expect(main).not.toContain('desktopStateStore:');
+  });
 });
+
+function daemonRuntimeFixture(): AxisDaemonRuntime {
+  return {
+    daemonUrl: 'http://127.0.0.1:17321',
+    webBaseUrl: 'http://127.0.0.1:17322',
+    token: 'secret'
+  };
+}

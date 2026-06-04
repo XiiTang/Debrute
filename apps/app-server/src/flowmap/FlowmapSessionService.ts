@@ -5,8 +5,9 @@ import {
   getAxisProjectPaths,
   normalizeProjectRelativePath,
   readProjectMetadata,
-  readTextFile,
-  resolveProjectPath
+  readProjectTextFile,
+  resolveProjectPath,
+  resolveProjectPathForWrite
 } from '@axis/project-core';
 import {
   reconcileCanvasNodeElements,
@@ -48,11 +49,10 @@ export class FlowmapSessionService {
     if (normalizeProjectRelativePath(input.sourceDraftPath) !== expectedDraftPath) {
       throw new FlowmapError(`Flowmap draft path must be "${expectedDraftPath}".`, 'flowmap_invalid_draft_path');
     }
-    const draftPath = resolveProjectPath(projectRoot, expectedDraftPath);
-    const activePath = resolveProjectPath(projectRoot, activeFlowmapPath(flowmapId));
+    const activePath = await resolveProjectPathForWrite(projectRoot, activeFlowmapPath(flowmapId));
     let draftYaml: string;
     try {
-      draftYaml = await readTextFile(draftPath);
+      draftYaml = (await readProjectTextFile(projectRoot, expectedDraftPath)).content;
     } catch {
       throw new FlowmapError('Flowmap draft could not be read.', 'flowmap_draft_read_failed');
     }
@@ -60,7 +60,7 @@ export class FlowmapSessionService {
       sourceDraftPath: expectedDraftPath,
       content: draftYaml
     });
-    const publishedRootPath = resolveProjectPath(projectRoot, published.rootProjectRelativePath);
+    const publishedRootPath = await resolveProjectPathForWrite(projectRoot, published.rootProjectRelativePath);
     this.options.suppressInternalProjectPathEvent(publishedRootPath);
     await mkdir(publishedRootPath, { recursive: true });
     for (const canvasId of published.canvasIds) {
@@ -92,7 +92,10 @@ export class FlowmapSessionService {
     for (const file of activeFlowmaps) {
       const flowmapId = basename(file.projectRelativePath, '.yaml');
       const activePath = join(projectRoot, file.projectRelativePath);
-      const integrity = assertPublishedFlowmap(await readTextFile(activePath), file.projectRelativePath);
+      const integrity = assertPublishedFlowmap(
+        (await readProjectTextFile(projectRoot, file.projectRelativePath)).content,
+        file.projectRelativePath
+      );
       if (!integrity.ok || !integrity.map) {
         diagnostics.push({
           id: `flowmap.invalid:${flowmapId}`,

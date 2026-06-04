@@ -5,10 +5,13 @@ const paths = [
   'apps/desktop/dist',
   'apps/desktop/dist-electron',
   'apps/desktop/release',
+  'packages/app-protocol/dist',
   'packages/capability-core/dist',
   'packages/capability-runtime/dist',
-  'packages/project-core/dist',
   'packages/canvas-core/dist',
+  'packages/flowmap-core/dist',
+  'packages/project-core/dist',
+  'packages/workbench-runtime/dist',
   'apps/app-server/dist',
   'apps/axis-cli/dist'
 ];

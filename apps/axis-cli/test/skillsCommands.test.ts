@@ -1,10 +1,10 @@
 import { describe, expect, it } from 'vitest';
 import type { AxisAppServer } from '@axis/app-server';
 import type {
-  AxisSkillsSyncService,
   SkillsStatusSnapshot,
   SkillsSyncSnapshot
-} from '@axis/capability-runtime';
+} from '@axis/app-protocol';
+import type { AxisSkillsSyncService } from '@axis/capability-runtime';
 import { parseAxisArgs } from '../src/parser/parseAxisArgs';
 import { runRuntimeCommand } from '../src/commands/runtimeCommands';
 import { resolveCliAxisVersion } from '../src/runtime/createCliSkillsRuntime';
@@ -30,8 +30,7 @@ describe('axis skills CLI commands', () => {
         diagnostics: 0,
         source_root: '/home/user/.agents/skills',
         state_path: '/home/user/.axis/skills-state.json',
-        axis_version: '1.2.3',
-        outdated_state: false
+        axis_version: '1.2.3'
       }
     });
     expect(result.records).toContainEqual(expect.objectContaining({
@@ -40,7 +39,7 @@ describe('axis skills CLI commands', () => {
     }));
   });
 
-  it('renders sync updated and skipped records', async () => {
+  it('renders sync updated records', async () => {
     const result = await runRuntimeCommand(parseAxisArgs(['skills', 'sync', '--force']), {
       skillsService: fakeSkillsService()
     });
@@ -50,12 +49,10 @@ describe('axis skills CLI commands', () => {
       command: 'skills.sync',
       fields: {
         updated: 1,
-        skipped: 1,
         force: true
       }
     });
     expect(result.records).toContainEqual(expect.objectContaining({ name: 'updated_skill' }));
-    expect(result.records).toContainEqual(expect.objectContaining({ name: 'skipped_skill' }));
   });
 
   it('adds CLI-owned Skills status to runtime status output', async () => {
@@ -138,21 +135,18 @@ function fakeSkillsService(overrides: Partial<SkillsStatusSnapshot> = {}): AxisS
     }],
     diagnostics: [],
     statePath: '/home/user/.axis/skills-state.json',
-    stateVersion: 1,
     currentAxisVersion: '1.2.3',
     sharedSkillsRoot: '/home/user/.agents/skills',
     bundledSkillsRoot: '/AXIS/skills',
     bundledRootAvailable: true,
     bundledSkills: ['axis-core', 'axis-image-director'],
     missingBundledSkillCount: 1,
-    outdatedState: false,
     ...overrides
   };
   const sync: SkillsSyncSnapshot = {
     ...status,
     force: true,
-    updatedSkills: status.skills,
-    skippedSkills: ['axis-image-director']
+    updatedSkills: status.skills
   };
   return {
     status: async () => status,

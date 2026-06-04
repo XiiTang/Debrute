@@ -1,4 +1,5 @@
-import { basename, isAbsolute, join, resolve, sep } from 'node:path';
+import { realpath } from 'node:fs/promises';
+import { basename, dirname, isAbsolute, join, resolve, sep } from 'node:path';
 
 export function userHomeDir(): string {
   const home = process.env.HOME ?? process.env.USERPROFILE;
@@ -52,6 +53,30 @@ export function resolveProjectPath(projectRoot: string, projectRelativePath: str
   return absolutePath;
 }
 
+export async function resolveExistingProjectPath(projectRoot: string, projectRelativePath: string): Promise<string> {
+  const absolutePath = resolveProjectPath(projectRoot, projectRelativePath);
+  const [rootRealPath, targetRealPath] = await Promise.all([
+    realpath(projectRoot),
+    realpath(absolutePath)
+  ]);
+  assertRealPathInsideProjectRoot(rootRealPath, targetRealPath, projectRelativePath);
+  return targetRealPath;
+}
+
+export async function resolveProjectPathForWrite(projectRoot: string, projectRelativePath: string): Promise<string> {
+  const absolutePath = resolveProjectPath(projectRoot, projectRelativePath);
+  const rootRealPath = await realpath(projectRoot);
+  const existingTarget = await realpathOrUndefined(absolutePath);
+  if (existingTarget) {
+    assertRealPathInsideProjectRoot(rootRealPath, existingTarget, projectRelativePath);
+    return absolutePath;
+  }
+
+  const existingParent = await nearestExistingParentRealPath(projectRoot, dirname(absolutePath));
+  assertRealPathInsideProjectRoot(rootRealPath, existingParent, projectRelativePath);
+  return absolutePath;
+}
+
 export function assertProjectTreeVisibleMutationPath(projectRelativePath: string): void {
   const normalizedPath = normalizeProjectRelativePath(projectRelativePath);
   if (normalizedPath === '.git' || normalizedPath.startsWith('.git/') || isIgnoredProjectFilePath(normalizedPath)) {
@@ -80,4 +105,38 @@ function normalizeProjectPath(projectRelativePath: string, options: { allowEmpty
     throw new Error(`Project path must not contain "." or ".." segments: ${projectRelativePath}`);
   }
   return parts.join('/');
+}
+
+async function nearestExistingParentRealPath(projectRoot: string, absoluteParentPath: string): Promise<string> {
+  const root = resolve(projectRoot);
+  let current = resolve(absoluteParentPath);
+  while (current !== root && current.startsWith(`${root}${sep}`)) {
+    const realParent = await realpathOrUndefined(current);
+    if (realParent) {
+      return realParent;
+    }
+    current = dirname(current);
+  }
+  return realpath(root);
+}
+
+async function realpathOrUndefined(path: string): Promise<string | undefined> {
+  try {
+    return await realpath(path);
+  } catch (error) {
+    if (isNodeError(error) && error.code === 'ENOENT') {
+      return undefined;
+    }
+    throw error;
+  }
+}
+
+function assertRealPathInsideProjectRoot(rootRealPath: string, targetRealPath: string, projectRelativePath: string): void {
+  if (targetRealPath !== rootRealPath && !targetRealPath.startsWith(`${rootRealPath}${sep}`)) {
+    throw new Error(`Project path escapes project root through a symlink: ${projectRelativePath}`);
+  }
+}
+
+function isNodeError(error: unknown): error is NodeJS.ErrnoException {
+  return typeof error === 'object' && error !== null && 'code' in error;
 }

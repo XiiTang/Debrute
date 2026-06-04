@@ -1,11 +1,8 @@
 import type {
-  ImageModelSettingRecord,
   ImageModelSettingsView,
   LlmProviderConfig,
-  LlmProviderSettingRecord,
   LlmProviderSettingsView,
   LlmProviderType,
-  VideoModelSettingRecord,
   VideoModelSettingsView
 } from '@axis/app-protocol';
 
@@ -47,7 +44,7 @@ export interface ImageModelsConfig {
 export interface ImageModelConfig {
   axisModelId: string;
   baseUrlOverride: string | null;
-  providerModelIdOverride: string | null;
+  requestModelIdOverride: string | null;
 }
 
 export interface VideoModelsConfig {
@@ -57,7 +54,7 @@ export interface VideoModelsConfig {
 export interface VideoModelConfig {
   axisModelId: string;
   baseUrlOverride: string | null;
-  providerModelIdOverride: string | null;
+  requestModelIdOverride: string | null;
 }
 
 export interface SecretsConfig {
@@ -68,17 +65,15 @@ export interface SecretsConfig {
 
 export interface ImageModelCatalogViewEntry {
   axisModelId: string;
-  provider: string;
   summary: string;
   supportsEditing: boolean;
   supportsTextRendering: boolean;
   defaultBaseUrl: string;
-  defaultProviderModelId: string;
+  defaultRequestModelId: string;
 }
 
 export interface VideoModelCatalogViewEntry {
   axisModelId: string;
-  provider: string;
   summary: string;
   supportsTextToVideo: boolean;
   supportsImageReferences: boolean;
@@ -86,7 +81,7 @@ export interface VideoModelCatalogViewEntry {
   supportsAudioReferences: boolean;
   supportsGeneratedAudio: boolean;
   defaultBaseUrl: string;
-  defaultProviderModelId: string;
+  defaultRequestModelId: string;
 }
 
 export function createImageModelSettingsView(
@@ -100,9 +95,14 @@ export function createImageModelSettingsView(
       const configured = configuredById.get(entry.axisModelId);
       const apiKeySet = Boolean(secrets.imageModelApiKeys[entry.axisModelId]?.trim());
       return {
-        ...entry,
+        axisModelId: entry.axisModelId,
+        summary: entry.summary,
+        supportsEditing: entry.supportsEditing,
+        supportsTextRendering: entry.supportsTextRendering,
+        defaultBaseUrl: entry.defaultBaseUrl,
+        defaultRequestModelId: entry.defaultRequestModelId,
         baseUrlOverride: configured?.baseUrlOverride ?? null,
-        providerModelIdOverride: configured?.providerModelIdOverride ?? null,
+        requestModelIdOverride: configured?.requestModelIdOverride ?? null,
         apiKeySet
       };
     })
@@ -120,9 +120,17 @@ export function createVideoModelSettingsView(
       const configured = configuredById.get(entry.axisModelId);
       const apiKeySet = Boolean(secrets.videoModelApiKeys[entry.axisModelId]?.trim());
       return {
-        ...entry,
+        axisModelId: entry.axisModelId,
+        summary: entry.summary,
+        supportsTextToVideo: entry.supportsTextToVideo,
+        supportsImageReferences: entry.supportsImageReferences,
+        supportsVideoReferences: entry.supportsVideoReferences,
+        supportsAudioReferences: entry.supportsAudioReferences,
+        supportsGeneratedAudio: entry.supportsGeneratedAudio,
+        defaultBaseUrl: entry.defaultBaseUrl,
+        defaultRequestModelId: entry.defaultRequestModelId,
         baseUrlOverride: configured?.baseUrlOverride ?? null,
-        providerModelIdOverride: configured?.providerModelIdOverride ?? null,
+        requestModelIdOverride: configured?.requestModelIdOverride ?? null,
         apiKeySet
       };
     })

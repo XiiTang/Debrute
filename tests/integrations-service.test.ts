@@ -70,7 +70,7 @@ describe('IntegrationsService', () => {
     expect((mediainfo?.binaries[0]?.probe as Record<string, unknown> | undefined)?.commandPreview).toBeUndefined();
   }, INTEGRATION_SCAN_TEST_TIMEOUT_MS);
 
-  it('exposes install availability for missing media integrations when the system package manager is present', async () => {
+  it('exposes install command previews for missing media integrations when the system package manager is present', async () => {
     const binDir = await mkdtemp(join(tmpdir(), 'axis-integrations-install-available-'));
     await writeFakePackageManager(binDir, 'brew', [
       'if [ "$1" = "info" ]; then',
@@ -87,16 +87,13 @@ describe('IntegrationsService', () => {
       backendKind: 'system-package-manager',
       backend: 'brew',
       packageName: 'imagemagick',
-      installAvailable: false,
-      updateAvailable: false,
-      uninstallAvailable: false,
       latestVersion: '7.1.2-23',
       installCommandPreview: 'brew install --formula imagemagick'
     });
     expect((imagemagick?.operationStatus as Record<string, unknown>).installCommand).toBeUndefined();
   }, INTEGRATION_SCAN_TEST_TIMEOUT_MS);
 
-  it('exposes update availability for ready media integrations when a newer package version exists', async () => {
+  it('exposes update command previews for ready media integrations when a newer package version exists', async () => {
     const binDir = await mkdtemp(join(tmpdir(), 'axis-integrations-update-available-'));
     await writeFakeBinary(binDir, 'ffmpeg', 'ffmpeg version 7.1.1');
     await writeFakeBinary(binDir, 'ffprobe', 'ffprobe version 7.1.1');
@@ -116,9 +113,6 @@ describe('IntegrationsService', () => {
       packageName: 'ffmpeg',
       installedVersion: '7.1.1',
       latestVersion: '8.0',
-      installAvailable: false,
-      updateAvailable: true,
-      uninstallAvailable: false,
       updateCommandPreview: 'brew upgrade --formula ffmpeg'
     });
   }, INTEGRATION_SCAN_TEST_TIMEOUT_MS);
@@ -139,9 +133,6 @@ describe('IntegrationsService', () => {
       backendKind: 'python-cli-installer',
       backend: 'uv',
       packageName: 'remove-ai-watermarks',
-      installAvailable: false,
-      updateAvailable: false,
-      uninstallAvailable: false,
       updateCommandPreview: 'uv tool upgrade remove-ai-watermarks',
       uninstallCommandPreview: 'uv tool uninstall remove-ai-watermarks'
     });
@@ -160,14 +151,11 @@ describe('IntegrationsService', () => {
     expect(integration?.operationStatus).toMatchObject({
       backendKind: 'python-cli-installer',
       backend: 'uv',
-      installAvailable: false,
-      updateAvailable: false,
-      uninstallAvailable: false,
       installCommandPreview: 'uv tool install git+https://github.com/wiltodelta/remove-ai-watermarks.git'
     });
   });
 
-  it('only exposes command previews and never reports active install operations', async () => {
+  it('only exposes command previews for integration operations', async () => {
     const binDir = await mkdtemp(join(tmpdir(), 'axis-integrations-preview-only-'));
     await writeFakePackageManager(binDir, 'brew', [
       'if [ "$1" = "info" ]; then',
@@ -179,11 +167,7 @@ describe('IntegrationsService', () => {
     const view = await service.rescan();
     const imagemagick = view.integrations.find((integration) => integration.integrationId === 'imagemagick');
 
-    expect(view.operationRunning).toBe(false);
     expect(imagemagick?.operationStatus).toMatchObject({
-      installAvailable: false,
-      updateAvailable: false,
-      uninstallAvailable: false,
       installCommandPreview: 'brew install --formula imagemagick'
     });
   });

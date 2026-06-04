@@ -1,5 +1,5 @@
 import type { Menu, MenuItemConstructorOptions } from 'electron';
-import type { DesktopState } from '@axis/app-protocol';
+import type { DesktopState } from '../desktop-state/desktopStateStore.js';
 import { buildApplicationMenuTemplate } from './applicationMenu.js';
 
 interface ElectronMenuModule {

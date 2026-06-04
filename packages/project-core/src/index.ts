@@ -1,4 +1,4 @@
-import { mkdir, readFile, rename, rm, stat, writeFile } from 'node:fs/promises';
+import { mkdir, readFile, readdir, rename, stat, writeFile } from 'node:fs/promises';
 import { watch } from 'node:fs';
 import { dirname, join, relative } from 'node:path';
 import { randomUUID } from 'node:crypto';
@@ -6,6 +6,8 @@ import {
   axisHomeDir,
   isIgnoredProjectFilePath,
   normalizeProjectRelativePath,
+  resolveExistingProjectPath,
+  resolveProjectPathForWrite,
   resolveProjectPath
 } from './projectPaths.js';
 
@@ -55,7 +57,7 @@ export interface ProjectFileWatchHandle {
 }
 
 export interface NormalizedFileWatchEvent {
-  type: 'created' | 'changed' | 'deleted';
+  type: 'changed';
   absolutePath: string;
   projectRelativePath: string;
   observedAt?: number;
@@ -122,7 +124,7 @@ export function watchProjectFiles(
 ): ProjectFileWatchHandle {
   const debounceMs = options.debounceMs ?? 40;
   const timers = new Map<string, NodeJS.Timeout>();
-  const watcher = watch(projectRoot, { recursive: true }, (eventType, fileName) => {
+  const watcher = watch(projectRoot, { recursive: true }, (_eventType, fileName) => {
     if (!fileName) {
       return;
     }
@@ -132,7 +134,7 @@ export function watchProjectFiles(
     }
     const observedAt = Date.now();
     const absolutePath = join(projectRoot, projectRelativePath);
-    const type = eventType === 'rename' ? 'changed' : 'changed';
+    const type = 'changed';
     const key = `${type}:${absolutePath}`;
     const existing = timers.get(key);
     if (existing) {
@@ -160,7 +162,7 @@ export async function readTextFile(absolutePath: string): Promise<string> {
 }
 
 export async function readProjectTextFile(projectRoot: string, projectRelativePath: string, options: { maxBytes?: number } = {}): Promise<ProjectTextFile> {
-  const absolutePath = resolveProjectPath(projectRoot, projectRelativePath);
+  const absolutePath = await resolveExistingProjectPath(projectRoot, projectRelativePath);
   const fileStat = await stat(absolutePath);
   if (!fileStat.isFile()) {
     throw new Error(`Project path is not a file: ${projectRelativePath}`);
@@ -189,7 +191,7 @@ export async function readProjectTextFile(projectRoot: string, projectRelativePa
 }
 
 export async function readProjectFileBytes(projectRoot: string, projectRelativePath: string, options: { maxBytes?: number } = {}): Promise<Uint8Array> {
-  const absolutePath = resolveProjectPath(projectRoot, projectRelativePath);
+  const absolutePath = await resolveExistingProjectPath(projectRoot, projectRelativePath);
   const fileStat = await stat(absolutePath);
   if (!fileStat.isFile()) {
     throw new Error(`Project path is not a file: ${projectRelativePath}`);
@@ -202,7 +204,7 @@ export async function readProjectFileBytes(projectRoot: string, projectRelativeP
 }
 
 export async function writeProjectFile(projectRoot: string, projectRelativePath: string, content: string | Uint8Array): Promise<string> {
-  const absolutePath = resolveProjectPath(projectRoot, projectRelativePath);
+  const absolutePath = await resolveProjectPathForWrite(projectRoot, projectRelativePath);
   await mkdir(dirname(absolutePath), { recursive: true });
   await writeFile(absolutePath, content);
   return normalizeProjectRelativePath(projectRelativePath);
@@ -211,12 +213,6 @@ export async function writeProjectFile(projectRoot: string, projectRelativePath:
 export async function writeProjectTextFile(projectRoot: string, projectRelativePath: string, content: string): Promise<ProjectTextFile> {
   await writeProjectFile(projectRoot, projectRelativePath, content);
   return readProjectTextFile(projectRoot, projectRelativePath);
-}
-
-export async function removeProjectPath(projectRoot: string, projectRelativePath: string): Promise<string> {
-  const absolutePath = resolveProjectPath(projectRoot, projectRelativePath);
-  await rm(absolutePath, { recursive: true, force: true });
-  return normalizeProjectRelativePath(projectRelativePath);
 }
 
 export {
@@ -245,6 +241,8 @@ export {
   normalizeProjectPathBasename,
   normalizeProjectRelativePath,
   parentProjectPath,
+  resolveExistingProjectPath,
+  resolveProjectPathForWrite,
   resolveProjectPath,
   userHomeDir
 } from './projectPaths.js';
@@ -310,10 +308,9 @@ export function assertProjectSchema(metadata: AxisProjectMetadata): void {
 }
 
 async function walkEntries(root: string, prefix = ''): Promise<ProjectFileEntry[]> {
-  const fs = await import('node:fs/promises');
   let directoryEntries;
   try {
-    directoryEntries = await fs.readdir(join(root, prefix), { withFileTypes: true });
+    directoryEntries = await readdir(join(root, prefix), { withFileTypes: true });
   } catch (error) {
     if (isNodeError(error) && error.code === 'ENOENT') {
       return [];

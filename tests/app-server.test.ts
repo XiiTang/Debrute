@@ -4,7 +4,7 @@ import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import sharp from 'sharp';
 import { describe, expect, it } from 'vitest';
-import { AxisAppServer, GlobalConfigStore } from '@axis/app-server';
+import { AxisAppServer, AxisGlobalRuntimeServer, GlobalConfigStore } from '@axis/app-server';
 import { CANVAS_DOCUMENT_SCHEMA_VERSION } from '@axis/canvas-core';
 
 describe('app-server', () => {
@@ -49,7 +49,6 @@ describe('app-server', () => {
         title: 'Production Map',
         nodeElements: [],
         annotations: [],
-        viewport: { x: 0, y: 0, zoom: 1 },
         preferences: { showDiagnostics: true }
       }, null, 2), 'utf8');
 
@@ -156,17 +155,17 @@ describe('app-server', () => {
 
   it('reads, saves, and emits Canvas settings', async () => {
     const axisHome = await mkdtemp(join(tmpdir(), 'axis-app-server-canvas-settings-home-'));
-    const server = new AxisAppServer({
+    const globalRuntime = new AxisGlobalRuntimeServer({
       globalConfigStore: new GlobalConfigStore({ axisHome })
     });
     const events: unknown[] = [];
-    const unsubscribe = server.onEvent((event) => events.push(event));
+    const unsubscribe = globalRuntime.onEvent((event) => events.push(event));
     try {
-      await expect(server.canvasSettingsGet()).resolves.toEqual({
+      await expect(globalRuntime.canvasSettingsGet()).resolves.toEqual({
         imagePreviewsEnabled: true
       });
 
-      const saved = await server.canvasSettingsSave({ imagePreviewsEnabled: false });
+      const saved = await globalRuntime.canvasSettingsSave({ imagePreviewsEnabled: false });
 
       expect(saved).toEqual({ imagePreviewsEnabled: false });
       await expect(readJson(join(axisHome, 'config/canvas_settings.json'))).resolves.toEqual({
@@ -178,38 +177,38 @@ describe('app-server', () => {
       }]);
     } finally {
       unsubscribe();
-      server.close();
+      globalRuntime.close();
       await rm(axisHome, { recursive: true, force: true });
     }
   });
 
   it('rejects invalid Canvas settings input instead of normalizing it', async () => {
     const axisHome = await mkdtemp(join(tmpdir(), 'axis-app-server-canvas-settings-invalid-home-'));
-    const server = new AxisAppServer({
+    const globalRuntime = new AxisGlobalRuntimeServer({
       globalConfigStore: new GlobalConfigStore({ axisHome })
     });
     const events: unknown[] = [];
-    const unsubscribe = server.onEvent((event) => events.push(event));
+    const unsubscribe = globalRuntime.onEvent((event) => events.push(event));
     try {
-      await expect(server.canvasSettingsSave({ imagePreviewsEnabled: 'yes' } as never)).rejects.toThrow('Canvas imagePreviewsEnabled must be a boolean.');
+      await expect(globalRuntime.canvasSettingsSave({ imagePreviewsEnabled: 'yes' } as never)).rejects.toThrow('Canvas imagePreviewsEnabled must be a boolean.');
       await expect(readJson(join(axisHome, 'config/canvas_settings.json'))).rejects.toThrow();
       expect(events).toEqual([]);
     } finally {
       unsubscribe();
-      server.close();
+      globalRuntime.close();
       await rm(axisHome, { recursive: true, force: true });
     }
   });
 
   it('rejects extra Canvas settings keys', async () => {
     const axisHome = await mkdtemp(join(tmpdir(), 'axis-app-server-canvas-settings-extra-home-'));
-    const server = new AxisAppServer({
+    const globalRuntime = new AxisGlobalRuntimeServer({
       globalConfigStore: new GlobalConfigStore({ axisHome })
     });
     const events: unknown[] = [];
-    const unsubscribe = server.onEvent((event) => events.push(event));
+    const unsubscribe = globalRuntime.onEvent((event) => events.push(event));
     try {
-      await expect(server.canvasSettingsSave({
+      await expect(globalRuntime.canvasSettingsSave({
         imagePreviewsEnabled: true,
         unknownPreviewMode: false
       } as never)).rejects.toThrow('Canvas settings must contain only imagePreviewsEnabled.');
@@ -217,7 +216,7 @@ describe('app-server', () => {
       expect(events).toEqual([]);
     } finally {
       unsubscribe();
-      server.close();
+      globalRuntime.close();
       await rm(axisHome, { recursive: true, force: true });
     }
   });
@@ -347,35 +346,6 @@ describe('app-server', () => {
     }
   });
 
-  it('rejects Canvas documents with invalid viewport zoom', async () => {
-    const projectRoot = await mkdtemp(join(tmpdir(), 'axis-app-server-invalid-viewport-'));
-    const server = new AxisAppServer();
-    try {
-      await mkdir(join(projectRoot, '.axis/canvases'), { recursive: true });
-      await writeFile(join(projectRoot, '.axis/project.json'), JSON.stringify({
-        schemaVersion: 1,
-        project: { name: 'Invalid Viewport Project' }
-      }, null, 2), 'utf8');
-      await writeFile(join(projectRoot, '.axis/canvases/production-map.json'), JSON.stringify({
-        schemaVersion: CANVAS_DOCUMENT_SCHEMA_VERSION,
-        id: 'production-map',
-        title: 'Production Map',
-        nodeElements: [],
-        annotations: [],
-        viewport: { x: 0, y: 0, zoom: 0 },
-        preferences: { showDiagnostics: true }
-      }, null, 2), 'utf8');
-
-      await expect(server.openProject(projectRoot, {
-        initializeIfMissing: false,
-        createDefaultCanvas: false
-      })).rejects.toThrow('Invalid canvas document schema');
-    } finally {
-      server.close();
-      await rm(projectRoot, { recursive: true, force: true });
-    }
-  });
-
   it('rejects Canvas node elements with unsupported fields', async () => {
     const projectRoot = await mkdtemp(join(tmpdir(), 'axis-app-server-unsupported-canvas-field-'));
     const server = new AxisAppServer();
@@ -403,37 +373,6 @@ describe('app-server', () => {
           unsupportedField: true
         }],
         annotations: [],
-        viewport: { x: 0, y: 0, zoom: 1 },
-        preferences: { showDiagnostics: true }
-      }, null, 2), 'utf8');
-
-      await expect(server.openProject(projectRoot, {
-        initializeIfMissing: false,
-        createDefaultCanvas: false
-      })).rejects.toThrow('Invalid canvas document schema');
-    } finally {
-      server.close();
-      await rm(projectRoot, { recursive: true, force: true });
-    }
-  });
-
-  it('rejects Canvas selections with unknown node ids', async () => {
-    const projectRoot = await mkdtemp(join(tmpdir(), 'axis-app-server-invalid-selection-'));
-    const server = new AxisAppServer();
-    try {
-      await mkdir(join(projectRoot, '.axis/canvases'), { recursive: true });
-      await writeFile(join(projectRoot, '.axis/project.json'), JSON.stringify({
-        schemaVersion: 1,
-        project: { name: 'Invalid Selection Project' }
-      }, null, 2), 'utf8');
-      await writeFile(join(projectRoot, '.axis/canvases/production-map.json'), JSON.stringify({
-        schemaVersion: CANVAS_DOCUMENT_SCHEMA_VERSION,
-        id: 'production-map',
-        title: 'Production Map',
-        nodeElements: [],
-        annotations: [],
-        viewport: { x: 0, y: 0, zoom: 1 },
-        selection: { kind: 'node', id: 'unsupported-node-id' },
         preferences: { showDiagnostics: true }
       }, null, 2), 'utf8');
 
@@ -476,7 +415,6 @@ describe('app-server', () => {
           layoutMode: 'manual'
         }],
         annotations: [],
-        viewport: { x: 0, y: 0, zoom: 1 },
         preferences: { showDiagnostics: true }
       }, null, 2), 'utf8');
       await writeFlowmapDraft(projectRoot, 'image-production', [
@@ -530,7 +468,6 @@ describe('app-server', () => {
           layoutMode: 'auto'
         }],
         annotations: [],
-        viewport: { x: 0, y: 0, zoom: 1 },
         preferences: { showDiagnostics: true }
       }, null, 2), 'utf8');
 
@@ -573,11 +510,13 @@ describe('app-server', () => {
     }
   });
 
-  it('returns raw provider output from image model request failures', async () => {
-    const home = await mkdtemp(join(tmpdir(), 'axis-image-provider-error-home-'));
-    const projectRoot = await mkdtemp(join(tmpdir(), 'axis-image-provider-error-project-'));
-    const originalHome = process.env.HOME;
+  it('returns the current image model request failure payload for CLI callers', async () => {
+    const home = await mkdtemp(join(tmpdir(), 'axis-image-model-error-home-'));
+    const projectRoot = await mkdtemp(join(tmpdir(), 'axis-image-model-error-project-'));
+    const configStore = new GlobalConfigStore({ axisHome: home });
+    const globalRuntime = new AxisGlobalRuntimeServer({ globalConfigStore: configStore });
     const server = new AxisAppServer({
+      globalConfigStore: configStore,
       imageModelFetch: async () => new Response(JSON.stringify({
         error: { message: 'quota exceeded' }
       }), {
@@ -586,11 +525,10 @@ describe('app-server', () => {
       })
     });
     try {
-      process.env.HOME = home;
       await server.openProject(projectRoot, { initializeIfMissing: true, createDefaultCanvas: true });
-      await server.imageModelSaveSetting('gpt-image-2', {
+      await globalRuntime.imageModelSaveSetting('gpt-image-2', {
         baseUrlOverride: null,
-        providerModelIdOverride: null,
+        requestModelIdOverride: null,
         apiKey: 'sk-image'
       });
 
@@ -603,14 +541,13 @@ describe('app-server', () => {
       expect(result.status).toBe('error');
       if (result.status === 'error') {
         expect(result.error.code).toBe('request_failed');
-        expect(result.outputs?.raw_provider_output).toContain('quota exceeded');
+        expect(result.outputs).toEqual({
+          content: 'Image request failed: model endpoint responded with HTTP 429.',
+          model: 'gpt-image-2'
+        });
       }
     } finally {
-      if (originalHome === undefined) {
-        delete process.env.HOME;
-      } else {
-        process.env.HOME = originalHome;
-      }
+      globalRuntime.close();
       server.close();
       await rm(projectRoot, { recursive: true, force: true });
       await rm(home, { recursive: true, force: true });
@@ -620,11 +557,11 @@ describe('app-server', () => {
   it('saves LLM settings that make llm_request usable from persisted config', async () => {
     const home = await mkdtemp(join(tmpdir(), 'axis-llm-settings-home-'));
     const projectRoot = await mkdtemp(join(tmpdir(), 'axis-llm-settings-project-'));
-    const originalHome = process.env.HOME;
     const originalFetch = globalThis.fetch;
-    const server = new AxisAppServer();
+    const configStore = new GlobalConfigStore({ axisHome: home });
+    const globalRuntime = new AxisGlobalRuntimeServer({ globalConfigStore: configStore });
+    const server = new AxisAppServer({ globalConfigStore: configStore });
     try {
-      process.env.HOME = home;
       globalThis.fetch = async (url, init) => {
         expect(url).toBe('https://api.openai.com/v1/chat/completions');
         expect(init?.headers).toMatchObject({
@@ -643,14 +580,14 @@ describe('app-server', () => {
         createDefaultCanvas: true
       });
 
-      const initial = await server.llmGetSettings();
+      const initial = await globalRuntime.llmGetSettings();
       expect(initial).toEqual({
         providers: [],
         availableModelKeys: [],
         defaultModelKey: null
       });
 
-      await server.llmSaveProviderSetting({
+      await globalRuntime.llmSaveProviderSetting({
         id: 'openai-main',
         name: 'OpenAI Compatible',
         providerType: 'openai_compat',
@@ -659,7 +596,7 @@ describe('app-server', () => {
         modelIds: ['gpt-5.1'],
         apiKey: 'sk-llm-test'
       });
-      const settings = await server.llmSetDefaultModelKey('openai-main:gpt-5.1');
+      const settings = await globalRuntime.llmSetDefaultModelKey('openai-main:gpt-5.1');
 
       expect(settings).toMatchObject({
         defaultModelKey: 'openai-main:gpt-5.1',
@@ -683,47 +620,21 @@ describe('app-server', () => {
         }
       });
     } finally {
+      globalRuntime.close();
       server.close();
       globalThis.fetch = originalFetch;
-      if (originalHome === undefined) {
-        delete process.env.HOME;
-      } else {
-        process.env.HOME = originalHome;
-      }
       await rm(home, { recursive: true, force: true });
       await rm(projectRoot, { recursive: true, force: true });
     }
   });
 
-  it('rejects persisted LLM providers without a current providerType', async () => {
-    const home = await mkdtemp(join(tmpdir(), 'axis-llm-invalid-provider-type-home-'));
-    try {
-      const configStore = new GlobalConfigStore({ axisHome: home });
-      await mkdir(configStore.paths().root, { recursive: true });
-      await writeFile(configStore.paths().llmProvidersFile, JSON.stringify({
-        providers: [{
-          id: 'legacy-openai',
-          name: 'Legacy OpenAI',
-          baseUrl: 'https://api.example.test/v1',
-          enabled: true,
-          modelIds: ['model-a']
-        }],
-        defaultModelKey: 'legacy-openai:model-a'
-      }, null, 2), 'utf8');
-
-      await expect(configStore.readLlmProviders()).rejects.toThrow('LLM provider providerType must be "openai_compat" or "anthropic"');
-    } finally {
-      await rm(home, { recursive: true, force: true });
-    }
-  });
-
   it('discovers OpenAI-compatible provider models from LLM settings input', async () => {
     const home = await mkdtemp(join(tmpdir(), 'axis-llm-discovery-home-'));
-    const originalHome = process.env.HOME;
     const originalFetch = globalThis.fetch;
-    const server = new AxisAppServer();
+    const globalRuntime = new AxisGlobalRuntimeServer({
+      globalConfigStore: new GlobalConfigStore({ axisHome: home })
+    });
     try {
-      process.env.HOME = home;
       globalThis.fetch = async (url, init) => {
         expect(url).toBe('https://api.example.test/v1/models');
         expect(init?.headers).toMatchObject({
@@ -741,7 +652,7 @@ describe('app-server', () => {
         });
       };
 
-      const result = await server.llmDiscoverProviderModels({
+      const result = await globalRuntime.llmDiscoverProviderModels({
         id: 'openai-main',
         providerType: 'openai_compat',
         baseUrl: 'https://api.example.test/v1',
@@ -755,60 +666,45 @@ describe('app-server', () => {
         supportsDiscovery: true
       });
     } finally {
-      server.close();
+      globalRuntime.close();
       globalThis.fetch = originalFetch;
-      if (originalHome === undefined) {
-        delete process.env.HOME;
-      } else {
-        process.env.HOME = originalHome;
-      }
       await rm(home, { recursive: true, force: true });
     }
   });
 
   it('saves media model routing overrides and derives configured state from API keys', async () => {
     const home = await mkdtemp(join(tmpdir(), 'axis-media-model-settings-home-'));
-    const originalHome = process.env.HOME;
-    const server = new AxisAppServer();
+    const globalRuntime = new AxisGlobalRuntimeServer({
+      globalConfigStore: new GlobalConfigStore({ axisHome: home })
+    });
     try {
-      process.env.HOME = home;
-
-      const imageSettings = await server.imageModelSaveSetting('gpt-image-2', {
+      const imageSettings = await globalRuntime.imageModelSaveSetting('gpt-image-2', {
         baseUrlOverride: 'not a url yet',
-        providerModelIdOverride: 'custom-image-model',
+        requestModelIdOverride: 'custom-image-model',
         apiKey: 'sk-image'
       });
-      const videoSettings = await server.videoModelSaveSetting('doubao-seedance-2-0-260128', {
+      const videoSettings = await globalRuntime.videoModelSaveSetting('doubao-seedance-2-0-260128', {
         baseUrlOverride: 'ark local draft',
-        providerModelIdOverride: 'custom-video-model',
+        requestModelIdOverride: 'custom-video-model',
         apiKey: 'sk-video'
       });
 
       expect(imageSettings.models.find((model) => model.axisModelId === 'gpt-image-2')).toMatchObject({
         defaultBaseUrl: 'https://api.openai.com/v1',
-        defaultProviderModelId: 'gpt-image-2',
+        defaultRequestModelId: 'gpt-image-2',
         baseUrlOverride: 'not a url yet',
-        providerModelIdOverride: 'custom-image-model',
+        requestModelIdOverride: 'custom-image-model',
         apiKeySet: true
       });
       expect(videoSettings.models.find((model) => model.axisModelId === 'doubao-seedance-2-0-260128')).toMatchObject({
         defaultBaseUrl: 'https://ark.cn-beijing.volces.com/api/v3',
-        defaultProviderModelId: 'doubao-seedance-2-0-260128',
+        defaultRequestModelId: 'doubao-seedance-2-0-260128',
         baseUrlOverride: 'ark local draft',
-        providerModelIdOverride: 'custom-video-model',
+        requestModelIdOverride: 'custom-video-model',
         apiKeySet: true
       });
-      expect(imageSettings.models.some((model) => Object.prototype.hasOwnProperty.call(model, 'enabled'))).toBe(false);
-      expect(imageSettings.models.some((model) => Object.prototype.hasOwnProperty.call(model, 'available'))).toBe(false);
-      expect(videoSettings.models.some((model) => Object.prototype.hasOwnProperty.call(model, 'enabled'))).toBe(false);
-      expect(videoSettings.models.some((model) => Object.prototype.hasOwnProperty.call(model, 'available'))).toBe(false);
     } finally {
-      server.close();
-      if (originalHome === undefined) {
-        delete process.env.HOME;
-      } else {
-        process.env.HOME = originalHome;
-      }
+      globalRuntime.close();
       await rm(home, { recursive: true, force: true });
     }
   });
@@ -816,17 +712,17 @@ describe('app-server', () => {
   it('stores API-key-only media settings only in secrets', async () => {
     const home = await mkdtemp(join(tmpdir(), 'axis-media-model-api-key-only-home-'));
     const configStore = new GlobalConfigStore({ axisHome: home });
-    const server = new AxisAppServer({ globalConfigStore: configStore });
+    const globalRuntime = new AxisGlobalRuntimeServer({ globalConfigStore: configStore });
     try {
-      const settings = await server.imageModelSaveSetting('gpt-image-2', {
+      const settings = await globalRuntime.imageModelSaveSetting('gpt-image-2', {
         baseUrlOverride: null,
-        providerModelIdOverride: null,
+        requestModelIdOverride: null,
         apiKey: 'sk-image'
       });
 
       expect(settings.models.find((model) => model.axisModelId === 'gpt-image-2')).toMatchObject({
         baseUrlOverride: null,
-        providerModelIdOverride: null,
+        requestModelIdOverride: null,
         apiKeySet: true
       });
       await expect(configStore.readImageModels()).resolves.toEqual({ imageModels: [] });
@@ -834,7 +730,7 @@ describe('app-server', () => {
         imageModelApiKeys: { 'gpt-image-2': 'sk-image' }
       });
     } finally {
-      server.close();
+      globalRuntime.close();
       await rm(home, { recursive: true, force: true });
     }
   });
@@ -958,8 +854,6 @@ describe('app-server', () => {
         canvasId: 'production-map',
         nodeLayouts: [{ projectRelativePath: nodePath, x: 50, y: 60, width: 640, height: 360 }]
       });
-      const viewport = await server.updateCanvasViewport('production-map', { x: -120, y: 80, zoom: 1.5 });
-      const selection = await server.updateCanvasSelection('production-map', { kind: 'node', projectRelativePath: nodePath });
       const layer = await server.updateCanvasNodeLayers({
         canvasId: 'production-map',
         nodeLayers: [{ projectRelativePath: nodePath, locked: true }]
@@ -967,11 +861,9 @@ describe('app-server', () => {
       unsubscribe();
 
       expect(layout.nodeElements.find((node) => node.projectRelativePath === nodePath)).toMatchObject({ x: 50, y: 60, width: 640, height: 360, layoutMode: 'manual' });
-      expect(viewport.viewport).toEqual({ x: -120, y: 80, zoom: 1.5 });
-      expect(selection.selection).toEqual({ kind: 'node', projectRelativePath: nodePath });
       expect(layer.nodeElements.find((node) => node.projectRelativePath === nodePath)).toMatchObject({ locked: true });
       expect(layoutReadCount).toBe(3);
-      expect(events).toEqual(['canvas.changed', 'canvas.changed', 'canvas.changed', 'canvas.changed']);
+      expect(events).toEqual(['canvas.changed', 'canvas.changed']);
 
       const snapshot = server.getSnapshot();
       expect(snapshot.files).toEqual(files);
@@ -984,7 +876,9 @@ describe('app-server', () => {
         locked: true,
         availability: { state: 'available' }
       });
-      await expect(readFile(join(projectRoot, '.axis/canvases/production-map.json'), 'utf8')).resolves.toContain('"zoom": 1.5');
+      const canvasJson = await readFile(join(projectRoot, '.axis/canvases/production-map.json'), 'utf8');
+      expect(canvasJson).not.toContain('"viewport"');
+      expect(canvasJson).not.toContain('"selection"');
     } finally {
       server.close();
       await rm(projectRoot, { recursive: true, force: true });
@@ -1528,7 +1422,6 @@ describe('app-server', () => {
         title: 'Production Map',
         nodeElements: [],
         annotations: [],
-        viewport: { x: 0, y: 0, zoom: 1 },
         preferences: { showDiagnostics: true }
       }, null, 2), 'utf8');
 

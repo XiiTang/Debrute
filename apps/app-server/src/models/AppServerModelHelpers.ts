@@ -14,16 +14,14 @@ import type { ImageModelBatchExecutionResult } from './ImageModelBatchService.js
 
 export interface CliModelSummary {
   id: string;
-  provider: string;
   summary: string;
   apiKeySet: boolean;
   baseUrlOverride: string | null;
-  providerModelIdOverride: string | null;
+  requestModelIdOverride: string | null;
 }
 
 export interface CliImageModelListEntry {
   id: string;
-  provider: string;
   parameters: Record<string, string>;
 }
 
@@ -67,18 +65,16 @@ export interface ModelReadinessFailure {
 export function cliModelSummary(model: ImageModelSettingRecord | VideoModelSettingRecord): CliModelSummary {
   return {
     id: model.axisModelId,
-    provider: model.provider,
     summary: model.summary,
     apiKeySet: model.apiKeySet,
     baseUrlOverride: model.baseUrlOverride,
-    providerModelIdOverride: model.providerModelIdOverride
+    requestModelIdOverride: model.requestModelIdOverride
   };
 }
 
 export function cliImageModelListEntry(entry: ImageModelCatalogEntry): CliImageModelListEntry {
   return {
     id: entry.axisModelId,
-    provider: entry.provider,
     parameters: { ...entry.listParameters }
   };
 }
@@ -127,25 +123,6 @@ export function imageModelReadinessFailure(modelId: string, models: ImageModelSe
   return undefined;
 }
 
-export function videoModelReadinessFailure(modelId: string, models: VideoModelSettingRecord[]): ModelReadinessFailure | undefined {
-  const model = models.find((item) => item.axisModelId === modelId);
-  if (!model) {
-    return {
-      code: 'model_unavailable',
-      message: `Video model is unavailable: ${modelId}`,
-      stage: 'resolve_model'
-    };
-  }
-  if (!model.apiKeySet) {
-    return {
-      code: 'video_model_not_configured',
-      message: `Video model API key is missing: ${modelId}`,
-      stage: 'resolve_model_auth'
-    };
-  }
-  return undefined;
-}
-
 export function imageModelBatchResultFromExecution(result: ExecuteImageModelRequestResult): ImageModelBatchExecutionResult {
   if (result.status === 'ok') {
     return {
@@ -157,8 +134,7 @@ export function imageModelBatchResultFromExecution(result: ExecuteImageModelRequ
     status: 'failed',
     error: {
       code: result.error,
-      message: result.content,
-      ...(result.rawProviderOutput ? { rawProviderOutput: result.rawProviderOutput } : {})
+      message: result.content
     }
   };
 }

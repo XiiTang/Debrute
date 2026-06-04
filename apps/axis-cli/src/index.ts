@@ -10,11 +10,14 @@ import {
   primitiveErrorFields
 } from './errors/cliErrors.js';
 import { runGenerationCommand } from './commands/generationCommands.js';
+import { runWorkbenchCommand } from './commands/workbenchCommands.js';
 import { parseAxisArgs, commandNameFromArgv, type ParsedAxisArgs } from './parser/parseAxisArgs.js';
 import { runProjectCommand } from './commands/projectCommands.js';
 import { renderAgentRecord, type AxisAgentResult } from './output/renderAgentRecord.js';
 import { runRuntimeCommand } from './commands/runtimeCommands.js';
 import { createCliSkillsRuntime, resolveCliAxisVersion } from './runtime/createCliSkillsRuntime.js';
+import { configurePackagedNodeModules } from './runtime/packagedNodeModules.js';
+import { INTERNAL_WORKBENCH_RUNTIME_CHILD_COMMAND } from './workbench/workbenchRuntimeChildEntrypoint.js';
 
 export async function runCli(argv: string[], output: (text: string) => void = console.log): Promise<void> {
   process.exitCode = undefined;
@@ -47,6 +50,9 @@ export async function runCli(argv: string[], output: (text: string) => void = co
 async function runParsedCli(args: ParsedAxisArgs): Promise<AxisAgentResult> {
   if (args.command === 'commands' || args.command === 'help') {
     return runRuntimeCommand(args);
+  }
+  if (args.command === 'workbench.url') {
+    return runWorkbenchCommand(args);
   }
 
   const { AxisAppServer } = await import('@axis/app-server');
@@ -95,10 +101,21 @@ function publicErrorFields(fields: AxisCliError['fields']): AxisCliError['fields
 }
 
 if (isCliEntrypoint()) {
-  runCli(process.argv.slice(2)).catch((error) => {
-    console.error(messageFromUnknown(error));
-    process.exit(5);
-  });
+  configurePackagedNodeModules();
+  const argv = process.argv.slice(2);
+  if (argv[0] === INTERNAL_WORKBENCH_RUNTIME_CHILD_COMMAND) {
+    void import('./workbench/internalWorkbenchRuntimeChild.js')
+      .then(({ runInternalWorkbenchRuntimeChild }) => runInternalWorkbenchRuntimeChild())
+      .catch((error) => {
+        console.error(messageFromUnknown(error));
+        process.exit(5);
+      });
+  } else {
+    runCli(argv).catch((error) => {
+      console.error(messageFromUnknown(error));
+      process.exit(5);
+    });
+  }
 }
 
 function isCliEntrypoint(): boolean {

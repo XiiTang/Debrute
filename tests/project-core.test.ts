@@ -1,5 +1,5 @@
 import { existsSync } from 'node:fs';
-import { chmod, mkdir, mkdtemp, readFile, rm, stat, writeFile } from 'node:fs/promises';
+import { chmod, mkdir, mkdtemp, readFile, rm, stat, symlink, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { describe, expect, it } from 'vitest';
@@ -16,8 +16,10 @@ import {
   normalizeFileWatchEvent,
   nextCopyProjectPathName,
   projectFileRevision,
+  readProjectTextFile,
   renameProjectPath,
   resolveProjectPath,
+  writeProjectTextFile,
   watchProjectFiles
 } from '@axis/project-core';
 
@@ -277,6 +279,24 @@ describe('project-core', () => {
       expect(() => resolveProjectPath(root, '../escape.md')).toThrow('Project path must not contain "." or ".." segments');
     } finally {
       await rm(root, { recursive: true, force: true });
+    }
+  });
+
+  it('rejects text file access through symlinks that escape the project root', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'axis-project-symlink-boundary-'));
+    const outside = join(tmpdir(), `axis-project-outside-${Date.now()}.txt`);
+    try {
+      await writeFile(outside, 'outside', 'utf8');
+      await symlink(outside, join(root, 'linked.txt'));
+
+      await expect(readProjectTextFile(root, 'linked.txt'))
+        .rejects.toThrow('Project path escapes project root through a symlink');
+      await expect(writeProjectTextFile(root, 'linked.txt', 'changed'))
+        .rejects.toThrow('Project path escapes project root through a symlink');
+      await expect(readFile(outside, 'utf8')).resolves.toBe('outside');
+    } finally {
+      await rm(root, { recursive: true, force: true });
+      await rm(outside, { force: true });
     }
   });
 });

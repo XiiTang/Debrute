@@ -2,6 +2,7 @@ import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
 import {
+  axisCliPayloadEntries,
   axisCliArchiveName,
   axisCliReleaseTargets,
   checksumManifestName
@@ -18,6 +19,19 @@ describe('Axis CLI release packaging', () => {
       'axis-cli-0.2.0-windows-x64.zip'
     ]);
     expect(checksumManifestName).toBe('axis-cli_SHA256SUMS');
+  });
+
+  it('includes skills and web dist payload entries', () => {
+    expect(axisCliPayloadEntries('/repo', axisCliReleaseTargets[0])).toEqual([
+      { from: '/repo/skills', to: 'skills', recursive: true },
+      { from: '/repo/apps/web/dist', to: 'web', recursive: true },
+      { from: '/repo/node_modules/sharp', to: 'node_modules/sharp', recursive: true, dereference: true, excludeNestedNodeModules: true },
+      { from: '/repo/node_modules/@img/colour', to: 'node_modules/@img/colour', recursive: true, dereference: true },
+      { from: '/repo/node_modules/detect-libc', to: 'node_modules/detect-libc', recursive: true, dereference: true },
+      { from: '/repo/node_modules/semver', to: 'node_modules/semver', recursive: true, dereference: true },
+      { from: '/repo/node_modules/@img/sharp-darwin-arm64', to: 'node_modules/@img/sharp-darwin-arm64', recursive: true, dereference: true },
+      { from: '/repo/node_modules/@img/sharp-libvips-darwin-arm64', to: 'node_modules/@img/sharp-libvips-darwin-arm64', recursive: true, dereference: true }
+    ]);
   });
 
   it('keeps Desktop packages free of CLI binaries and Skills bundles and publishes from the public AXIS repo', () => {

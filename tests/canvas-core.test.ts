@@ -8,8 +8,6 @@ import {
   normalizeCanvasFeedbackDocument,
   projectCanvas,
   reconcileCanvasNodeElements,
-  setCanvasSelection,
-  setCanvasViewport,
   updateCanvasFeedbackEntry,
   updateCanvasNodeLayers,
   updateCanvasNodeLayouts,
@@ -29,7 +27,6 @@ describe('canvas-core', () => {
       title: 'Main',
       nodeElements: [],
       annotations: [],
-      viewport: { x: 0, y: 0, zoom: 1 },
       preferences: { showDiagnostics: true }
     });
   });
@@ -59,29 +56,6 @@ describe('canvas-core', () => {
       sourceProjectRelativePath: 'image-production',
       targetProjectRelativePath: 'image-production/cover.md'
     }]);
-  });
-
-  it('stores node selections by projectRelativePath', () => {
-    const canvas = createCanvasWithNodes([
-      { projectRelativePath: 'flow/a.md', nodeKind: 'file', mediaKind: 'text', x: 0, y: 0, width: 420, height: 280 },
-      { projectRelativePath: 'flow/b.md', nodeKind: 'file', mediaKind: 'text', x: 500, y: 0, width: 420, height: 280 }
-    ]);
-
-    const selected = setCanvasSelection(canvas, {
-      kind: 'multi',
-      items: [
-        { kind: 'node', projectRelativePath: 'flow/a.md' },
-        { kind: 'node', projectRelativePath: 'flow/b.md' }
-      ]
-    });
-
-    expect(selected.selection).toEqual({
-      kind: 'multi',
-      items: [
-        { kind: 'node', projectRelativePath: 'flow/a.md' },
-        { kind: 'node', projectRelativePath: 'flow/b.md' }
-      ]
-    });
   });
 
   it('marks moved and resized nodes manual and uses projectRelativePath identity', () => {
@@ -414,16 +388,6 @@ describe('canvas-core', () => {
     expect(reconciled.map((item) => item.projectRelativePath)).toEqual(['flow/a.md']);
   });
 
-  it('rejects invalid Canvas viewport zoom values', () => {
-    const canvas = createCanvasDocument({
-      id: 'viewport',
-      title: 'Viewport'
-    });
-
-    expect(() => setCanvasViewport(canvas, { x: 0, y: 0, zoom: 0 }))
-      .toThrow('Canvas viewport zoom must be a positive finite number.');
-  });
-
   it('normalizes Canvas feedback marks as selected-only fixed-order values', () => {
     const normalized = normalizeCanvasFeedbackDocument({
       schemaVersion: 1,
@@ -557,7 +521,7 @@ function availableNode(): CanvasNodeAvailability {
     state: 'available',
     size: 0,
     mimeType: 'text/plain',
-    fileUrl: 'axis-project-file://project/flow',
+    fileUrl: '/api/projects/123e4567-e89b-42d3-a456-426614174000/files/raw/flow?v=rev',
     revision: '1'
   };
 }

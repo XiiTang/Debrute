@@ -1,5 +1,4 @@
 ---
-provider: fal
 models:
   - fal-ai/flux/dev
 source_urls:
@@ -8,7 +7,7 @@ captured_at: 2026-05-31
 source_type: official_docs
 cleanup:
   - removed page chrome and footer links
-  - removed client installation, SDK imports, and raw provider command snippets
+  - removed client installation, SDK imports, and raw source API command snippets
 ---
 
 # fal-ai/flux/dev

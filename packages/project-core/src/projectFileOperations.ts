@@ -6,6 +6,8 @@ import {
   normalizeProjectDirectoryPath,
   normalizeProjectPathBasename,
   parentProjectPath,
+  resolveExistingProjectPath,
+  resolveProjectPathForWrite,
   resolveProjectPath
 } from './projectPaths.js';
 
@@ -40,9 +42,9 @@ export async function createProjectFile(projectRoot: string, input: CreateProjec
   const parentPath = normalizeProjectDirectoryPath(input.parentProjectRelativePath);
   const projectRelativePath = joinProjectPath(parentPath, name);
   assertProjectTreeVisibleMutationPath(projectRelativePath);
-  const absolutePath = resolveProjectPath(projectRoot, projectRelativePath);
   await assertProjectDirectory(projectRoot, parentPath);
   await assertProjectPathMissing(projectRoot, projectRelativePath);
+  const absolutePath = await resolveProjectPathForWrite(projectRoot, projectRelativePath);
   await writeFile(absolutePath, '', 'utf8');
   return { projectRelativePath, kind: 'file' };
 }
@@ -54,7 +56,7 @@ export async function createProjectDirectory(projectRoot: string, input: CreateP
   assertProjectTreeVisibleMutationPath(projectRelativePath);
   await assertProjectDirectory(projectRoot, parentPath);
   await assertProjectPathMissing(projectRoot, projectRelativePath);
-  await mkdir(resolveProjectPath(projectRoot, projectRelativePath));
+  await mkdir(await resolveProjectPathForWrite(projectRoot, projectRelativePath));
   return { projectRelativePath, kind: 'directory' };
 }
 
@@ -114,7 +116,7 @@ export async function deleteProjectPathPermanently(projectRoot: string, input: D
 
 export async function uniquePasteTargetPath(projectRoot: string, targetDirectoryProjectRelativePath: string, sourceName: string): Promise<string> {
   const targetDirectory = normalizeProjectDirectoryPath(targetDirectoryProjectRelativePath);
-  const entries = await readdir(resolveProjectPath(projectRoot, targetDirectory), { withFileTypes: true });
+  const entries = await readdir(await resolveExistingProjectPath(projectRoot, targetDirectory), { withFileTypes: true });
   return joinProjectPath(
     targetDirectory,
     nextCopyProjectPathName(new Set(entries.map((entry) => entry.name)), normalizeProjectPathBasename(sourceName))
@@ -139,8 +141,9 @@ export function nextCopyProjectPathName(existingNames: Set<string>, sourceName: 
 }
 
 async function assertProjectPathMissing(projectRoot: string, projectRelativePath: string): Promise<void> {
+  const absolutePath = await resolveProjectPathForWrite(projectRoot, projectRelativePath);
   try {
-    await stat(resolveProjectPath(projectRoot, projectRelativePath));
+    await stat(absolutePath);
   } catch (error) {
     if (isNodeError(error) && error.code === 'ENOENT') {
       return;
@@ -151,14 +154,14 @@ async function assertProjectPathMissing(projectRoot: string, projectRelativePath
 }
 
 async function assertProjectDirectory(projectRoot: string, projectRelativePath: string): Promise<void> {
-  const pathStat = await stat(resolveProjectPath(projectRoot, projectRelativePath));
+  const pathStat = await stat(await resolveExistingProjectPath(projectRoot, projectRelativePath));
   if (!pathStat.isDirectory()) {
     throw new Error(`Project path is not a directory: ${projectRelativePath}`);
   }
 }
 
 async function projectPathKind(projectRoot: string, projectRelativePath: string): Promise<ProjectPathKind> {
-  const pathStat = await stat(resolveProjectPath(projectRoot, projectRelativePath));
+  const pathStat = await stat(await resolveExistingProjectPath(projectRoot, projectRelativePath));
   if (pathStat.isDirectory()) {
     return 'directory';
   }

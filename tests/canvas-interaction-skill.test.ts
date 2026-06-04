@@ -13,7 +13,14 @@ describe('AXIS repository Skill', () => {
     expect(skill).toContain('axis.package: "axis"');
     expect(skill).toContain('axis.version: "0.1.0"');
     expect(skill).toContain('axis commands');
+    expect(skill).toContain('## Visual Workbench');
+    expect(skill).toContain('axis workbench url /path/to/project');
+    expect(skill).toContain('AXIS CLI only returns URLs and ports; it does not open browsers.');
+    expect(skill).toContain('Qoder: /browser Open <project_url>');
+    expect(skill).toContain('Antigravity: /browser Open <project_url>');
+    expect(skill).toContain('Cline: Use the browser to check <project_url>');
+    expect(skill).toContain('Codex app:');
+    expect(skill).toContain('await (await browser.capabilities.get("visibility")).set(true)');
     expect(skill).toContain('generate image-batch --manifest');
-    expect(skill).not.toContain('--json');
   });
 });

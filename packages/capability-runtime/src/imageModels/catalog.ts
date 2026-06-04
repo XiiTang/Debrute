@@ -1,13 +1,12 @@
 export interface ImageModelCatalogEntry {
   axisModelId: string;
-  provider: string;
   summary: string;
   chooseWhen: string;
   avoidWhen: string;
   supportsTextRendering: boolean;
   supportsEditing: boolean;
   defaultBaseUrl: string;
-  defaultProviderModelId: string;
+  defaultRequestModelId: string;
   listParameters: Record<string, string>;
   capabilities: Record<string, unknown>;
   argumentsSchema: Record<string, unknown>;
@@ -22,7 +21,6 @@ export interface ImageModelCatalogEntry {
 
 export interface ImageModelOverviewEntry {
   model: string;
-  provider: string;
   summary: string;
   chooseWhen: string;
   avoidWhen: string;
@@ -42,19 +40,19 @@ export interface ImageModelDetailEntry extends ImageModelOverviewEntry {
   requestExample: ImageModelCatalogEntry['requestExample'];
 }
 
-export type ProviderReadyImageObjectKind = 'openai-image' | 'minimax-subject-reference';
+export type ModelSpecificImageObjectKind = 'openai-image' | 'minimax-subject-reference';
 
-interface ProviderReadyImageObjectMetadata {
-  kind: ProviderReadyImageObjectKind;
+interface ModelSpecificImageObjectMetadata {
+  kind: ModelSpecificImageObjectKind;
   acceptedValueFormat: string;
   schema: Record<string, unknown>;
 }
 
 const IMAGE_INPUT_ARRAY_ACCEPTED_VALUE_FORMAT = 'Array of Project-relative image paths, http(s) image URLs, or data:image URLs.';
-const IMAGE_INPUT_ARRAY_WITH_OBJECT_ACCEPTED_VALUE_FORMAT = 'Array of Project-relative image paths, http(s) image URLs, data:image URLs, or model-supported provider-ready image objects.';
+const IMAGE_INPUT_ARRAY_WITH_OBJECT_ACCEPTED_VALUE_FORMAT = 'Array of Project-relative image paths, http(s) image URLs, data:image URLs, or model-specific image objects.';
 const IMAGE_INPUT_VALUE_ACCEPTED_VALUE_FORMAT = 'Project-relative image path, http(s) image URL, or data:image URL.';
-const IMAGE_INPUT_VALUE_WITH_OBJECT_ACCEPTED_VALUE_FORMAT = 'Project-relative image path, http(s) image URL, data:image URL, or model-supported provider-ready image object.';
-const PROVIDER_READY_IMAGE_OBJECTS: Record<ProviderReadyImageObjectKind, ProviderReadyImageObjectMetadata> = {
+const IMAGE_INPUT_VALUE_WITH_OBJECT_ACCEPTED_VALUE_FORMAT = 'Project-relative image path, http(s) image URL, data:image URL, or model-specific image object.';
+const MODEL_SPECIFIC_IMAGE_OBJECTS: Record<ModelSpecificImageObjectKind, ModelSpecificImageObjectMetadata> = {
   'openai-image': {
     kind: 'openai-image',
     acceptedValueFormat: 'OpenAI image objects with `image_url` or base64 `data`',
@@ -87,50 +85,50 @@ const PROVIDER_READY_IMAGE_OBJECTS: Record<ProviderReadyImageObjectKind, Provide
   }
 };
 
-const DEFAULT_IMAGE_ROUTES: Record<string, { baseUrl: string; providerModelId: string }> = {
+const DEFAULT_IMAGE_ROUTES: Record<string, { baseUrl: string; requestModelId: string }> = {
   'doubao-seedream-5-0-lite-260128': {
     baseUrl: 'https://ark.cn-beijing.volces.com/api/v3',
-    providerModelId: 'doubao-seedream-5-0-lite-260128'
+    requestModelId: 'doubao-seedream-5-0-lite-260128'
   },
   'wan2.7-image': {
     baseUrl: 'https://dashscope.aliyuncs.com/api/v1',
-    providerModelId: 'wan2.7-image'
+    requestModelId: 'wan2.7-image'
   },
   'gemini-3.1-flash-image-preview': {
     baseUrl: 'https://generativelanguage.googleapis.com/v1beta',
-    providerModelId: 'gemini-3.1-flash-image-preview'
+    requestModelId: 'gemini-3.1-flash-image-preview'
   },
   'gemini-3-pro-image-preview': {
     baseUrl: 'https://generativelanguage.googleapis.com/v1beta',
-    providerModelId: 'gemini-3-pro-image-preview'
+    requestModelId: 'gemini-3-pro-image-preview'
   },
   'gpt-image-1': {
     baseUrl: 'https://api.openai.com/v1',
-    providerModelId: 'gpt-image-1'
+    requestModelId: 'gpt-image-1'
   },
   'gpt-image-2': {
     baseUrl: 'https://api.openai.com/v1',
-    providerModelId: 'gpt-image-2'
+    requestModelId: 'gpt-image-2'
   },
   'image-01': {
     baseUrl: 'https://api.minimax.io',
-    providerModelId: 'image-01'
+    requestModelId: 'image-01'
   },
   'fal-ai/flux/dev': {
     baseUrl: 'https://fal.run',
-    providerModelId: 'fal-ai/flux/dev'
+    requestModelId: 'fal-ai/flux/dev'
   },
   'fal-ai/flux/dev/image-to-image': {
     baseUrl: 'https://fal.run',
-    providerModelId: 'fal-ai/flux/dev/image-to-image'
+    requestModelId: 'fal-ai/flux/dev/image-to-image'
   },
   'gemini-3.1-flash-image': {
     baseUrl: 'https://generativelanguage.googleapis.com/v1beta',
-    providerModelId: 'gemini-3.1-flash-image'
+    requestModelId: 'gemini-3.1-flash-image'
   },
   'grok-imagine': {
     baseUrl: 'https://api.vydra.ai/api/v1',
-    providerModelId: 'grok-imagine'
+    requestModelId: 'grok-imagine'
   }
 };
 
@@ -148,7 +146,7 @@ const IMAGE_LIST_PARAMETERS: Record<string, Record<string, string>> = {
     'optimize_prompt_options.mode': 'standard supported for Seedream 5.0 Lite'
   },
   'wan2.7-image': {
-    prompt: 'required text prompt; AXIS forwards as provider message text',
+    prompt: 'required text prompt; AXIS forwards as request message text',
     image: '0..9 input images; JPEG/JPG/PNG without alpha/BMP/WEBP; width and height 240..8000; aspect ratio 1:8..8:1; file size <=20MB',
     size: '1K|2K or explicit pixels with total pixels 768*768..2048*2048 and aspect ratio 1:8..8:1',
     n: '1..4 when group mode is disabled; 1..12 maximum generated count when group mode is enabled',
@@ -236,14 +234,13 @@ function geminiListParameters(): Record<string, string> {
 const ENTRIES: ImageModelCatalogEntry[] = [
   {
     axisModelId: 'doubao-seedream-5-0-lite-260128',
-    provider: 'volcengine-ark',
     summary: 'Volcengine Ark Doubao Seedream image generation.',
     chooseWhen: 'Chinese prompts, bilingual text inside images, multi-image composition, large outputs',
     avoidWhen: 'you need seed control exposed in AXIS',
     supportsTextRendering: true,
     supportsEditing: true,
     defaultBaseUrl: DEFAULT_IMAGE_ROUTES['doubao-seedream-5-0-lite-260128']!.baseUrl,
-    defaultProviderModelId: DEFAULT_IMAGE_ROUTES['doubao-seedream-5-0-lite-260128']!.providerModelId,
+    defaultRequestModelId: DEFAULT_IMAGE_ROUTES['doubao-seedream-5-0-lite-260128']!.requestModelId,
     listParameters: IMAGE_LIST_PARAMETERS['doubao-seedream-5-0-lite-260128']!,
     capabilities: { supports_image_inputs: true, output_formats: ['png', 'jpeg'] },
     argumentsSchema: objectSchema({
@@ -268,14 +265,13 @@ const ENTRIES: ImageModelCatalogEntry[] = [
   },
   {
     axisModelId: 'wan2.7-image',
-    provider: 'dashscope',
     summary: 'Aliyun DashScope Wan 2.7 image generation.',
     chooseWhen: 'Chinese-first prompting, image-input generation or editing, simple reproducibility via `seed`, one endpoint for generation and editing',
     avoidWhen: "you need more than AXIS's exposed feature subset",
     supportsTextRendering: false,
     supportsEditing: true,
     defaultBaseUrl: DEFAULT_IMAGE_ROUTES['wan2.7-image']!.baseUrl,
-    defaultProviderModelId: DEFAULT_IMAGE_ROUTES['wan2.7-image']!.providerModelId,
+    defaultRequestModelId: DEFAULT_IMAGE_ROUTES['wan2.7-image']!.requestModelId,
     listParameters: IMAGE_LIST_PARAMETERS['wan2.7-image']!,
     capabilities: { supports_image_inputs: true, async_polling: true },
     argumentsSchema: objectSchema({
@@ -293,14 +289,13 @@ const ENTRIES: ImageModelCatalogEntry[] = [
   },
   {
     axisModelId: 'gemini-3.1-flash-image-preview',
-    provider: 'google-gemini',
     summary: 'Google Gemini 3.1 Flash image preview channel.',
     chooseWhen: 'fast single-image generation, extreme aspect ratios, Gemini image-input flows',
     avoidWhen: 'you need multiple outputs per call',
     supportsTextRendering: false,
     supportsEditing: true,
     defaultBaseUrl: DEFAULT_IMAGE_ROUTES['gemini-3.1-flash-image-preview']!.baseUrl,
-    defaultProviderModelId: DEFAULT_IMAGE_ROUTES['gemini-3.1-flash-image-preview']!.providerModelId,
+    defaultRequestModelId: DEFAULT_IMAGE_ROUTES['gemini-3.1-flash-image-preview']!.requestModelId,
     listParameters: IMAGE_LIST_PARAMETERS['gemini-3.1-flash-image-preview']!,
     capabilities: { supports_image_inputs: true },
     argumentsSchema: geminiArgumentsSchema(),
@@ -308,14 +303,13 @@ const ENTRIES: ImageModelCatalogEntry[] = [
   },
   {
     axisModelId: 'gemini-3-pro-image-preview',
-    provider: 'google-gemini',
     summary: 'Google Gemini 3 Pro image preview channel.',
     chooseWhen: 'highest Gemini quality tier, more complex edits/compositions, better detail than Flash',
     avoidWhen: 'you need the cheapest / fastest Gemini path',
     supportsTextRendering: false,
     supportsEditing: true,
     defaultBaseUrl: DEFAULT_IMAGE_ROUTES['gemini-3-pro-image-preview']!.baseUrl,
-    defaultProviderModelId: DEFAULT_IMAGE_ROUTES['gemini-3-pro-image-preview']!.providerModelId,
+    defaultRequestModelId: DEFAULT_IMAGE_ROUTES['gemini-3-pro-image-preview']!.requestModelId,
     listParameters: IMAGE_LIST_PARAMETERS['gemini-3-pro-image-preview']!,
     capabilities: { supports_image_inputs: true },
     argumentsSchema: geminiArgumentsSchema(),
@@ -323,14 +317,13 @@ const ENTRIES: ImageModelCatalogEntry[] = [
   },
   {
     axisModelId: 'gpt-image-1',
-    provider: 'openai',
     summary: 'OpenAI gpt-image-1 text-to-image and image edits.',
     chooseWhen: 'strong instruction following, strong text rendering, OpenAI edit flow, multiple image inputs',
     avoidWhen: 'you need seed / diffusion knobs',
     supportsTextRendering: true,
     supportsEditing: true,
     defaultBaseUrl: DEFAULT_IMAGE_ROUTES['gpt-image-1']!.baseUrl,
-    defaultProviderModelId: DEFAULT_IMAGE_ROUTES['gpt-image-1']!.providerModelId,
+    defaultRequestModelId: DEFAULT_IMAGE_ROUTES['gpt-image-1']!.requestModelId,
     listParameters: IMAGE_LIST_PARAMETERS['gpt-image-1']!,
     capabilities: {
       supports_image_inputs: true,
@@ -349,14 +342,13 @@ const ENTRIES: ImageModelCatalogEntry[] = [
   },
   {
     axisModelId: 'gpt-image-2',
-    provider: 'openai',
     summary: 'OpenAI gpt-image-2 text-to-image and image edits.',
     chooseWhen: 'latest OpenAI image quality tier, strong prompt adherence, text rendering, and OpenAI-native editing',
     avoidWhen: 'you need seed / diffusion knobs or a non-OpenAI image stack',
     supportsTextRendering: true,
     supportsEditing: true,
     defaultBaseUrl: DEFAULT_IMAGE_ROUTES['gpt-image-2']!.baseUrl,
-    defaultProviderModelId: DEFAULT_IMAGE_ROUTES['gpt-image-2']!.providerModelId,
+    defaultRequestModelId: DEFAULT_IMAGE_ROUTES['gpt-image-2']!.requestModelId,
     listParameters: IMAGE_LIST_PARAMETERS['gpt-image-2']!,
     capabilities: {
       supports_image_inputs: true,
@@ -390,14 +382,13 @@ const ENTRIES: ImageModelCatalogEntry[] = [
   },
   {
     axisModelId: 'image-01',
-    provider: 'minimax',
     summary: 'MiniMax image-01 image generation.',
     chooseWhen: 'cheapest large batch in AXIS, character-style subject image input, up to 9 outputs per call',
     avoidWhen: 'you need arbitrary edit controls or masks',
     supportsTextRendering: false,
     supportsEditing: false,
     defaultBaseUrl: DEFAULT_IMAGE_ROUTES['image-01']!.baseUrl,
-    defaultProviderModelId: DEFAULT_IMAGE_ROUTES['image-01']!.providerModelId,
+    defaultRequestModelId: DEFAULT_IMAGE_ROUTES['image-01']!.requestModelId,
     listParameters: IMAGE_LIST_PARAMETERS['image-01']!,
     capabilities: { supports_image_inputs: true, aspect_ratios: ['1:1', '16:9', '4:3', '3:2', '2:3', '3:4', '9:16', '21:9'] },
     argumentsSchema: objectSchema({
@@ -415,14 +406,13 @@ const ENTRIES: ImageModelCatalogEntry[] = [
   },
   {
     axisModelId: 'fal-ai/flux/dev',
-    provider: 'fal',
     summary: 'Fal.ai FLUX.1 [dev] text-to-image.',
     chooseWhen: 'plain text-to-image with `seed`, `guidance_scale`, `num_inference_steps`',
     avoidWhen: 'you need image inputs',
     supportsTextRendering: false,
     supportsEditing: false,
     defaultBaseUrl: DEFAULT_IMAGE_ROUTES['fal-ai/flux/dev']!.baseUrl,
-    defaultProviderModelId: DEFAULT_IMAGE_ROUTES['fal-ai/flux/dev']!.providerModelId,
+    defaultRequestModelId: DEFAULT_IMAGE_ROUTES['fal-ai/flux/dev']!.requestModelId,
     listParameters: IMAGE_LIST_PARAMETERS['fal-ai/flux/dev']!,
     capabilities: { supports_image_inputs: false, output_formats: ['png', 'jpeg'] },
     argumentsSchema: falArgumentsSchema(false),
@@ -430,14 +420,13 @@ const ENTRIES: ImageModelCatalogEntry[] = [
   },
   {
     axisModelId: 'fal-ai/flux/dev/image-to-image',
-    provider: 'fal',
     summary: 'Fal.ai FLUX.1 [dev] image-to-image.',
     chooseWhen: 'image-to-image restyling with a `strength` dial and FLUX controls',
     avoidWhen: 'you need more than one image input',
     supportsTextRendering: false,
     supportsEditing: true,
     defaultBaseUrl: DEFAULT_IMAGE_ROUTES['fal-ai/flux/dev/image-to-image']!.baseUrl,
-    defaultProviderModelId: DEFAULT_IMAGE_ROUTES['fal-ai/flux/dev/image-to-image']!.providerModelId,
+    defaultRequestModelId: DEFAULT_IMAGE_ROUTES['fal-ai/flux/dev/image-to-image']!.requestModelId,
     listParameters: IMAGE_LIST_PARAMETERS['fal-ai/flux/dev/image-to-image']!,
     capabilities: { supports_image_inputs: true, output_formats: ['png', 'jpeg'] },
     argumentsSchema: falArgumentsSchema(true),
@@ -445,14 +434,13 @@ const ENTRIES: ImageModelCatalogEntry[] = [
   },
   {
     axisModelId: 'gemini-3.1-flash-image',
-    provider: 'google-gemini',
     summary: 'Google Gemini 3.1 Flash image generation.',
     chooseWhen: 'the production (non-preview) Gemini 3.1 Flash image channel when your account has it enabled',
     avoidWhen: 'you need the preview channel features',
     supportsTextRendering: false,
     supportsEditing: true,
     defaultBaseUrl: DEFAULT_IMAGE_ROUTES['gemini-3.1-flash-image']!.baseUrl,
-    defaultProviderModelId: DEFAULT_IMAGE_ROUTES['gemini-3.1-flash-image']!.providerModelId,
+    defaultRequestModelId: DEFAULT_IMAGE_ROUTES['gemini-3.1-flash-image']!.requestModelId,
     listParameters: IMAGE_LIST_PARAMETERS['gemini-3.1-flash-image']!,
     capabilities: { supports_image_inputs: true },
     argumentsSchema: geminiArgumentsSchema(),
@@ -460,14 +448,13 @@ const ENTRIES: ImageModelCatalogEntry[] = [
   },
   {
     axisModelId: 'grok-imagine',
-    provider: 'vydra',
     summary: 'xAI Grok Imagine via Vydra.',
     chooseWhen: 'one fast, simple single-image call with minimal controls',
     avoidWhen: 'you need image inputs, batch outputs, or precise edit controls',
     supportsTextRendering: false,
     supportsEditing: false,
     defaultBaseUrl: DEFAULT_IMAGE_ROUTES['grok-imagine']!.baseUrl,
-    defaultProviderModelId: DEFAULT_IMAGE_ROUTES['grok-imagine']!.providerModelId,
+    defaultRequestModelId: DEFAULT_IMAGE_ROUTES['grok-imagine']!.requestModelId,
     listParameters: IMAGE_LIST_PARAMETERS['grok-imagine']!,
     capabilities: { supports_image_inputs: false, async_polling: true },
     argumentsSchema: objectSchema({
@@ -520,7 +507,6 @@ export function createImageModelCatalog() {
 function toOverview(entry: ImageModelCatalogEntry): ImageModelOverviewEntry {
   return {
     model: entry.axisModelId,
-    provider: entry.provider,
     summary: entry.summary,
     chooseWhen: entry.chooseWhen,
     avoidWhen: entry.avoidWhen,
@@ -548,11 +534,11 @@ export function imageInputFieldsForCatalogEntry(entry: ImageModelCatalogEntry): 
   return imageInputFields(entry.argumentsSchema);
 }
 
-export function providerReadyImageObjectKindForCatalogEntry(
+export function modelSpecificImageObjectKindForCatalogEntry(
   entry: ImageModelCatalogEntry,
   field: string
-): ProviderReadyImageObjectKind | undefined {
-  const metadata = providerReadyImageObjectMetadataForSchema(imageInputSchemaForField(entry.argumentsSchema, field));
+): ModelSpecificImageObjectKind | undefined {
+  const metadata = modelSpecificImageObjectMetadataForSchema(imageInputSchemaForField(entry.argumentsSchema, field));
   return metadata?.kind;
 }
 
@@ -570,8 +556,8 @@ function imageInputAcceptedValueFormat(entry: ImageModelCatalogEntry, field: str
   const base = imageInputFieldIsArray(entry.argumentsSchema, field)
     ? IMAGE_INPUT_ARRAY_ACCEPTED_VALUE_FORMAT
     : IMAGE_INPUT_VALUE_ACCEPTED_VALUE_FORMAT;
-  const objectFormat = providerReadyImageObjectMetadataForSchema(imageInputSchemaForField(entry.argumentsSchema, field))?.acceptedValueFormat;
-  return objectFormat ? `${base} Provider-ready objects: ${objectFormat}.` : base;
+  const objectFormat = modelSpecificImageObjectMetadataForSchema(imageInputSchemaForField(entry.argumentsSchema, field))?.acceptedValueFormat;
+  return objectFormat ? `${base} Model-specific objects: ${objectFormat}.` : base;
 }
 
 function imageInputFieldIsArray(schema: Record<string, unknown>, field: string): boolean {
@@ -593,14 +579,14 @@ function imageInputSchemaForField(schema: Record<string, unknown>, field: string
   return undefined;
 }
 
-function providerReadyImageObjectMetadataForSchema(schema: Record<string, unknown> | undefined): ProviderReadyImageObjectMetadata | undefined {
-  const metadata = schema?.axisProviderReadyImageObject;
+function modelSpecificImageObjectMetadataForSchema(schema: Record<string, unknown> | undefined): ModelSpecificImageObjectMetadata | undefined {
+  const metadata = schema?.axisModelSpecificImageObject;
   if (!metadata || typeof metadata !== 'object') {
     return undefined;
   }
   const kind = (metadata as { kind?: unknown }).kind;
-  return typeof kind === 'string' && kind in PROVIDER_READY_IMAGE_OBJECTS
-    ? PROVIDER_READY_IMAGE_OBJECTS[kind as ProviderReadyImageObjectKind]
+  return typeof kind === 'string' && kind in MODEL_SPECIFIC_IMAGE_OBJECTS
+    ? MODEL_SPECIFIC_IMAGE_OBJECTS[kind as ModelSpecificImageObjectKind]
     : undefined;
 }
 
@@ -627,40 +613,40 @@ function objectSchema(properties: Record<string, Record<string, unknown>>): Reco
   };
 }
 
-function imageInputArraySchema(providerReadyObjectKind?: ProviderReadyImageObjectKind): Record<string, unknown> {
-  const providerReadyObject = providerReadyObjectKind
-    ? PROVIDER_READY_IMAGE_OBJECTS[providerReadyObjectKind]
+function imageInputArraySchema(modelSpecificObjectKind?: ModelSpecificImageObjectKind): Record<string, unknown> {
+  const modelSpecificObject = modelSpecificObjectKind
+    ? MODEL_SPECIFIC_IMAGE_OBJECTS[modelSpecificObjectKind]
     : undefined;
   return {
     type: 'array',
-    items: providerReadyObject
+    items: modelSpecificObject
       ? {
           anyOf: [
             { type: 'string' },
-            providerReadyObject.schema
+            modelSpecificObject.schema
           ]
         }
       : { type: 'string' },
     axisImageInput: true,
-    ...(providerReadyObject ? { axisProviderReadyImageObject: providerReadyImageObjectMarker(providerReadyObject.kind) } : {}),
-    description: providerReadyObjectKind
+    ...(modelSpecificObject ? { axisModelSpecificImageObject: modelSpecificImageObjectMarker(modelSpecificObject.kind) } : {}),
+    description: modelSpecificObjectKind
       ? IMAGE_INPUT_ARRAY_WITH_OBJECT_ACCEPTED_VALUE_FORMAT
       : IMAGE_INPUT_ARRAY_ACCEPTED_VALUE_FORMAT
   };
 }
 
-function imageInputValueSchema(description: string, providerReadyObjectKind?: ProviderReadyImageObjectKind): Record<string, unknown> {
-  const providerReadyObject = providerReadyObjectKind
-    ? PROVIDER_READY_IMAGE_OBJECTS[providerReadyObjectKind]
+function imageInputValueSchema(description: string, modelSpecificObjectKind?: ModelSpecificImageObjectKind): Record<string, unknown> {
+  const modelSpecificObject = modelSpecificObjectKind
+    ? MODEL_SPECIFIC_IMAGE_OBJECTS[modelSpecificObjectKind]
     : undefined;
-  return providerReadyObject
+  return modelSpecificObject
     ? {
         anyOf: [
           { type: 'string' },
-          providerReadyObject.schema
+          modelSpecificObject.schema
         ],
         axisImageInput: true,
-        axisProviderReadyImageObject: providerReadyImageObjectMarker(providerReadyObject.kind),
+        axisModelSpecificImageObject: modelSpecificImageObjectMarker(modelSpecificObject.kind),
         description: IMAGE_INPUT_VALUE_WITH_OBJECT_ACCEPTED_VALUE_FORMAT
       }
     : {
@@ -676,7 +662,7 @@ function geminiArgumentsSchema(): Record<string, unknown> {
     contents: {
       type: 'array',
       items: { type: 'object', additionalProperties: true },
-      description: 'Official Gemini contents array. Use provider-ready text and image parts.'
+      description: 'Official Gemini contents array. Use model-specific text and image parts.'
     },
     aspect_ratio: { type: 'string', default: '1:1' },
     image_size: { type: 'string', default: '1K', enum: ['1K', '2K', '4K'] }
@@ -707,9 +693,9 @@ function example(model: string, args: Record<string, unknown>): ImageModelCatalo
   return { command: 'generate.image', input: { model, arguments: args } };
 }
 
-function providerReadyImageObjectMarker(kind: ProviderReadyImageObjectKind): Omit<ProviderReadyImageObjectMetadata, 'schema'> {
+function modelSpecificImageObjectMarker(kind: ModelSpecificImageObjectKind): Omit<ModelSpecificImageObjectMetadata, 'schema'> {
   return {
     kind,
-    acceptedValueFormat: PROVIDER_READY_IMAGE_OBJECTS[kind].acceptedValueFormat
+    acceptedValueFormat: MODEL_SPECIFIC_IMAGE_OBJECTS[kind].acceptedValueFormat
   };
 }

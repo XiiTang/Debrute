@@ -1,6 +1,5 @@
 export interface VideoModelCatalogEntry {
   axisModelId: string;
-  provider: string;
   summary: string;
   chooseWhen: string;
   avoidWhen: string;
@@ -10,7 +9,7 @@ export interface VideoModelCatalogEntry {
   supportsAudioReferences: boolean;
   supportsGeneratedAudio: boolean;
   defaultBaseUrl: string;
-  defaultProviderModelId: string;
+  defaultRequestModelId: string;
   capabilities: Record<string, unknown>;
   argumentsSchema: Record<string, unknown>;
   usageNotes: string;
@@ -25,7 +24,6 @@ export interface VideoModelCatalogEntry {
 
 export interface VideoModelOverviewEntry {
   model: string;
-  provider: string;
   summary: string;
   chooseWhen: string;
   avoidWhen: string;
@@ -114,7 +112,6 @@ export function createVideoModelCatalog() {
 function seedanceEntry(axisModelId: string, input: { summary: string; chooseWhen: string; avoidWhen: string; resolutions: string[] }): VideoModelCatalogEntry {
   return {
     axisModelId,
-    provider: 'volcengine-ark',
     summary: input.summary,
     chooseWhen: input.chooseWhen,
     avoidWhen: input.avoidWhen,
@@ -124,7 +121,7 @@ function seedanceEntry(axisModelId: string, input: { summary: string; chooseWhen
     supportsAudioReferences: true,
     supportsGeneratedAudio: true,
     defaultBaseUrl: 'https://ark.cn-beijing.volces.com/api/v3',
-    defaultProviderModelId: axisModelId,
+    defaultRequestModelId: axisModelId,
     capabilities: {
       supports_multimodal_references: true,
       supports_generated_audio: true,
@@ -155,7 +152,6 @@ function seedanceEntry(axisModelId: string, input: { summary: string; chooseWhen
 function toOverview(entry: VideoModelCatalogEntry): VideoModelOverviewEntry {
   return {
     model: entry.axisModelId,
-    provider: entry.provider,
     summary: entry.summary,
     chooseWhen: entry.chooseWhen,
     avoidWhen: entry.avoidWhen,

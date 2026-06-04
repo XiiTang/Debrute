@@ -1,5 +1,4 @@
 ---
-provider: dashscope
 models:
   - wan2.7-image
 source_urls:
@@ -8,7 +7,7 @@ captured_at: 2026-05-31
 source_type: official_docs
 cleanup:
   - removed page chrome and support widgets
-  - removed raw provider command snippets
+  - removed raw source API command snippets
 ---
 
 # Wan 2.7 image generation and editing

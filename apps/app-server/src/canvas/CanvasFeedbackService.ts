@@ -5,7 +5,7 @@ import {
   type CanvasFeedbackDocument,
   type UpdateCanvasFeedbackEntryInput
 } from '@axis/canvas-core';
-import { readJsonFile, resolveProjectPath, writeJsonAtomic } from '@axis/project-core';
+import { readJsonFile, resolveExistingProjectPath, resolveProjectPath, resolveProjectPathForWrite, writeJsonAtomic } from '@axis/project-core';
 
 const CANVAS_FEEDBACK_PROJECT_PATH = '.axis/reviews/canvas-feedback.json';
 
@@ -24,7 +24,9 @@ export function createCanvasFeedbackService(options: CanvasFeedbackServiceOption
   const service: CanvasFeedbackService = {
     async readCanvasFeedback(projectRoot) {
       try {
-        return normalizeCanvasFeedbackDocument(await readJsonFile<unknown>(canvasFeedbackPaths(projectRoot).feedbackFile));
+        return normalizeCanvasFeedbackDocument(await readJsonFile<unknown>(
+          await resolveExistingProjectPath(projectRoot, CANVAS_FEEDBACK_PROJECT_PATH)
+        ));
       } catch (error) {
         if (isNotFoundError(error)) {
           return createEmptyCanvasFeedbackDocument(now());
@@ -34,7 +36,7 @@ export function createCanvasFeedbackService(options: CanvasFeedbackServiceOption
     },
 
     async updateCanvasFeedbackEntry(projectRoot, input) {
-      const feedbackFile = canvasFeedbackPaths(projectRoot).feedbackFile;
+      const feedbackFile = await resolveProjectPathForWrite(projectRoot, CANVAS_FEEDBACK_PROJECT_PATH);
       const previous = updateQueues.get(feedbackFile) ?? Promise.resolve();
       const run = previous.then(async () => {
         const current = await service.readCanvasFeedback(projectRoot);

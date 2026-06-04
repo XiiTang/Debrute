@@ -35,6 +35,14 @@ interface ResolvedBackends {
   pythonCliInstaller: ResolvedPythonCliInstallerStatus;
 }
 
+interface IntegrationPackageQueryStatus {
+  installedVersion?: string;
+  latestVersion?: string;
+  updateAvailable: boolean;
+  queryDiagnostic?: IntegrationOperationStatus['queryDiagnostic'];
+  unavailableReason?: string;
+}
+
 export class IntegrationsService {
   private readonly cacheTtlMs: number;
   private cached: { createdAt: number; view: IntegrationSettingsView } | undefined;
@@ -82,8 +90,7 @@ export class IntegrationsService {
       backends: [
         backendView(systemPackageManager),
         backendView(pythonCliInstaller)
-      ],
-      operationRunning: false
+      ]
     };
     return { view, backends };
   }
@@ -127,10 +134,7 @@ export class IntegrationsService {
     const base: IntegrationOperationStatus = {
       backendKind: 'system-package-manager',
       ...(backend.backend ? { backend: backend.backend } : {}),
-      ...(packageName ? { packageName } : {}),
-      installAvailable: false,
-      updateAvailable: false,
-      uninstallAvailable: false
+      ...(packageName ? { packageName } : {})
     };
 
     if (!backend.available) {
@@ -147,7 +151,7 @@ export class IntegrationsService {
       const query = installCommand ? await this.queryInstallPackageStatus(integration, backend) : { updateAvailable: false };
       return {
         ...base,
-        ...query,
+        ...operationQueryFields(query),
         ...(installCommand ? { installCommandPreview: installCommand.preview } : {})
       };
     }
@@ -161,7 +165,7 @@ export class IntegrationsService {
     const query = await this.queryPackageStatus(integration, backend);
     return {
       ...base,
-      ...query,
+      ...operationQueryFields(query),
       ...(updateCommand && query.updateAvailable ? { updateCommandPreview: updateCommand.preview } : {}),
       ...(uninstallCommand ? { uninstallCommandPreview: uninstallCommand.preview } : {})
     };
@@ -175,10 +179,7 @@ export class IntegrationsService {
     const base: IntegrationOperationStatus = {
       backendKind: 'python-cli-installer',
       ...(backend.backend ? { backend: backend.backend } : {}),
-      packageName: integration.pythonCli.packageName,
-      installAvailable: false,
-      updateAvailable: false,
-      uninstallAvailable: false
+      packageName: integration.pythonCli.packageName
     };
 
     if (!backend.available) {
@@ -214,7 +215,7 @@ export class IntegrationsService {
   private async queryPackageStatus(
     integration: Extract<IntegrationCatalogItem, { backend: 'system-package-manager' }>,
     backend: ResolvedSystemPackageManagerStatus
-  ): Promise<Pick<IntegrationOperationStatus, 'installedVersion' | 'latestVersion' | 'updateAvailable' | 'queryDiagnostic' | 'unavailableReason'>> {
+  ): Promise<IntegrationPackageQueryStatus> {
     const queryCommand = buildIntegrationQueryCommand(integration, backend);
     if (!queryCommand || !backend.manager) {
       return { updateAvailable: false };
@@ -248,7 +249,7 @@ export class IntegrationsService {
   private async queryInstallPackageStatus(
     integration: Extract<IntegrationCatalogItem, { backend: 'system-package-manager' }>,
     backend: ResolvedSystemPackageManagerStatus
-  ): Promise<Pick<IntegrationOperationStatus, 'latestVersion' | 'updateAvailable' | 'queryDiagnostic'>> {
+  ): Promise<IntegrationPackageQueryStatus> {
     const queryCommand = buildIntegrationInstallQueryCommand(integration, backend);
     if (!queryCommand || !backend.manager) {
       return { updateAvailable: false };
@@ -352,6 +353,15 @@ function backendView(backend: ResolvedSystemPackageManagerStatus | ResolvedPytho
     ...(backend.backend ? { backend: backend.backend } : {}),
     available: backend.available,
     ...(backend.unavailableReason ? { unavailableReason: backend.unavailableReason } : {})
+  };
+}
+
+function operationQueryFields(query: IntegrationPackageQueryStatus): Pick<IntegrationOperationStatus, 'installedVersion' | 'latestVersion' | 'queryDiagnostic' | 'unavailableReason'> {
+  return {
+    ...(query.installedVersion !== undefined ? { installedVersion: query.installedVersion } : {}),
+    ...(query.latestVersion !== undefined ? { latestVersion: query.latestVersion } : {}),
+    ...(query.queryDiagnostic !== undefined ? { queryDiagnostic: query.queryDiagnostic } : {}),
+    ...(query.unavailableReason !== undefined ? { unavailableReason: query.unavailableReason } : {})
   };
 }
 

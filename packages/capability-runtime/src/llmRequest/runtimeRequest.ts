@@ -1,6 +1,6 @@
 import { capabilityError, capabilityOk, type AxisCapabilityResult } from '@axis/capability-core';
 import type { ChatProvider, ProviderRequest } from '../providers.js';
-import { DEFAULT_PROVIDER_REQUEST_TIMEOUT_MS, createProviderRequestTimeoutSignal, isProviderRequestTimeoutError, parseProviderRequestTimeoutMs } from '../providerRequestTimeout.js';
+import { DEFAULT_REQUEST_TIMEOUT_MS, createRequestTimeoutSignal, isRequestTimeoutError, parseRequestTimeoutMs } from '../requestTimeout.js';
 
 export interface LlmProviderResolver {
   providerForModel(modelKey: string): ChatProvider | undefined;
@@ -50,7 +50,7 @@ export async function runLlmRuntimeRequest(input: Record<string, unknown>, optio
     });
   }
 
-  const timeout = createProviderRequestTimeoutSignal(options.signal, parsed.value.timeoutMs);
+  const timeout = createRequestTimeoutSignal(options.signal, parsed.value.timeoutMs);
   let response: Awaited<ReturnType<typeof provider.send>>;
   try {
     response = await provider.send({
@@ -63,7 +63,7 @@ export async function runLlmRuntimeRequest(input: Record<string, unknown>, optio
     if (options.signal?.aborted) {
       throw error;
     }
-    if (timeout.timedOut() || isProviderRequestTimeoutError(error)) {
+    if (timeout.timedOut() || isRequestTimeoutError(error)) {
       const message = `LLM request timed out after ${parsed.value.timeoutMs}ms.`;
       return capabilityError('llm_request_timeout', message, {
         modelKey: parsed.value.modelKey,
@@ -142,7 +142,7 @@ function parseInput(input: Record<string, unknown>, options: LlmRuntimeRequestOp
   if (!messages.ok) {
     return messages;
   }
-  const timeoutMs = parseProviderRequestTimeoutMs(input.timeoutMs, options.defaultTimeoutMs ?? DEFAULT_PROVIDER_REQUEST_TIMEOUT_MS);
+  const timeoutMs = parseRequestTimeoutMs(input.timeoutMs, options.defaultTimeoutMs ?? DEFAULT_REQUEST_TIMEOUT_MS);
   if (!timeoutMs.ok) {
     return { ok: false, result: capabilityError('invalid_input', timeoutMs.message) };
   }

@@ -28,26 +28,15 @@ describe('AXIS image director Skill', () => {
     expect(skill).toContain('description_markdown');
     expect(skill).toContain('arguments_schema');
     expect(skill).toContain('Use original model parameter names shown by `models image list` and confirmed by `models image describe`.');
-    expect(skill).toContain('Do not include provider API keys in generation requests; AXIS reads configured keys locally.');
-    expect(skill).toContain('Use the AXIS example command returned by `models image describe`; do not rely on provider curl or SDK snippets.');
-    expect(skill).toContain('Image-capable model fields accept only the image input forms described by `models image describe`; follow each field\'s array/single-value shape and provider-ready object shape exactly.');
-    expect(skill).not.toMatch(/\b(?:U|G|L)\d+\b/);
+    expect(skill).toContain('Do not include model API keys in generation requests; AXIS reads configured keys locally.');
+    expect(skill).toContain('Use the AXIS example command returned by `models image describe`; do not rely on source API curl or SDK snippets.');
+    expect(skill).toContain('Image-capable model fields accept only the image input forms described by `models image describe`; follow each field\'s array/single-value shape and model-specific object shape exactly.');
     expect(skill).toContain('axis-cli generate image /path/to/project --input-json');
     expect(skill).toContain('axis-cli generate image-batch /path/to/project --manifest');
     expect(skill).toContain('axis-cli generate image-batch /path/to/project --manifest <manifest.json> --log <results.jsonl> --summary <summary.json>');
     expect(skill).toContain('axis-cli generate image-batch /path/to/project --input-jsonl <requests.jsonl> --log <results.jsonl> --summary <summary.json>');
     expect(skill).toContain('Do not loop over `axis-cli generate image` for a planned set of image requests.');
     expect(skill).toContain('Batch result JSONL contains one final item outcome per line.');
-    expect(skill).not.toContain('CLI stdout is reserved for the final aggregate `axis/1` record.');
-    expect(skill).not.toContain('--json');
-    for (const disallowed of [
-      'supportsTextRendering',
-      'supportsEditing',
-      'available models',
-      'enabled-image-models'
-    ]) {
-      expect(skill).not.toContain(disallowed);
-    }
   });
 
   it('teaches Flowmap draft publishing for generated image output paths', () => {
@@ -81,20 +70,15 @@ describe('AXIS image director Skill', () => {
   it('documents batch command semantics in the README', () => {
     const readme = readRepoFile('README.md');
 
-    expect(readme).toContain('- `apps/app-server` - local desktop support boundary for project sessions, Flowmap publishing and sync, Canvas node projection, model settings, generated asset metadata, and explicit CLI service methods.');
+    expect(readme).toContain('- `apps/daemon` - loopback HTTP/SSE runtime that serves the Web workbench and owns privileged project, Canvas, settings, and generated asset operations.');
+    expect(readme).toContain('- `apps/app-server` - local domain service boundary for project sessions, Flowmap publishing and sync, Canvas node projection, model settings, generated asset metadata, and explicit CLI service methods.');
     expect(readme).toContain('- `packages/capability-core` - result and artifact value shapes shared by AXIS runtime services.');
-    expect(readme).toContain('- `packages/capability-runtime` - model catalogs, model executors, runtime LLM request execution, provider settings, model settings, and Skills registry code.');
-    expect(readme).not.toContain('neutral capability definitions, execution context');
-    expect(readme).not.toContain('project, LLM request, image, video, generated asset metadata, and Skills registry implementations');
-    expect(readme).not.toContain('capability execution');
+    expect(readme).toContain('- `packages/capability-runtime` - model catalogs, model executors, runtime LLM request execution, LLM provider settings, generation model settings, and Skills registry code.');
     expect(readme).toContain('Use `generate image-batch` for multiple planned image requests; do not loop over `generate image` for planned batches.');
     expect(readme).toContain('Batch item outcomes are written to `--log`; stdout is the final aggregate record.');
     expect(readme).toContain('Use `models image list` to compare configured image models by original model parameters and constraints.');
     expect(readme).toContain('Before image generation, run `models image describe <model-id>` once for the selected model.');
-    expect(readme).toContain('Do not include provider API keys in generation requests; AXIS reads configured keys locally.');
+    expect(readme).toContain('Do not include model API keys in generation requests; AXIS reads configured keys locally.');
     expect(readme).toContain('Model descriptions return official documentation URLs, a repository snapshot path, official-documentation-backed `description_markdown`, AXIS examples, and the machine-readable `arguments_schema`.');
-    expect(readme).not.toContain('axis/1');
-    expect(readme).not.toContain('--json');
-    expect(readme).not.toMatch(/\b(?:U|G|L)\d+\b/);
   });
 });

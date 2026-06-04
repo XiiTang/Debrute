@@ -8,15 +8,11 @@ import {
 } from '@axis/project-core';
 import {
   createCanvasDocument,
-  setCanvasSelection,
-  setCanvasViewport,
   updateCanvasNodeLayers,
   updateCanvasNodeLayouts,
   type CanvasDocument,
   type CanvasNodeLayerPatch,
-  type CanvasProjection,
-  type CanvasSelection,
-  type CanvasViewport
+  type CanvasProjection
 } from '@axis/canvas-core';
 import type { ProjectSessionSnapshot } from '@axis/app-protocol';
 import { assertCurrentCanvasDocument } from './CanvasProjectionService.js';
@@ -29,22 +25,6 @@ export interface CanvasSessionServiceOptions {
 
 export class CanvasSessionService {
   constructor(private readonly options: CanvasSessionServiceOptions) {}
-
-  async updateCanvasViewport(
-    current: ProjectSessionSnapshot,
-    canvasId: string,
-    viewport: CanvasViewport
-  ): Promise<{ canvas: CanvasDocument; snapshot: ProjectSessionSnapshot; changed: boolean }> {
-    return this.updateVisualCanvas(current, canvasId, (canvas) => setCanvasViewport(canvas, viewport));
-  }
-
-  async updateCanvasSelection(
-    current: ProjectSessionSnapshot,
-    canvasId: string,
-    selection: CanvasSelection | undefined
-  ): Promise<{ canvas: CanvasDocument; snapshot: ProjectSessionSnapshot; changed: boolean }> {
-    return this.updateVisualCanvas(current, canvasId, (canvas) => setCanvasSelection(canvas, selection));
-  }
 
   async updateCanvasNodeLayouts(
     current: ProjectSessionSnapshot,

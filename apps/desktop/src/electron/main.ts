@@ -1,66 +1,45 @@
+import { randomUUID } from 'node:crypto';
 import electron from 'electron';
 import { join, resolve } from 'node:path';
-import { autoUpdater } from 'electron-updater';
-import { createDesktopStateStore } from './desktop-state/desktopStateStore.js';
-import { createAxisCliManager, type AxisCliManager } from './axis-cli/axisCliManager.js';
-import { createDesktopAppServer } from './app-server/createDesktopAppServer.js';
-import { createHotExitStore, type HotExitStore } from './hot-exit/hotExitStore.js';
-import { requestHotExitSnapshot as collectHotExitSnapshot } from './hot-exit/requestHotExitSnapshot.js';
-import { resolveDesktopIntegrationEnvPath } from './integrationEnv.js';
-import { registerWorkbenchIpc } from './ipc/registerWorkbenchIpc.js';
-import { createApplicationMenuController } from './menu/registerApplicationMenu.js';
+import { createAxisDaemonHttpServer, type AxisDaemonHttpServer, type AxisDaemonRuntime } from '@axis/daemon';
 import {
-  CANVAS_PREVIEW_PROTOCOL,
-  PROJECT_FILE_PROTOCOL
-} from './protocols/projectProtocols.js';
-import { registerProjectFileProtocols } from './protocols/registerProjectProtocols.js';
-import { createDesktopUpdateService, type DesktopUpdateService } from './update/updateService.js';
+  deleteWorkbenchRuntimeState,
+  ensureRegisteredWorkbenchRuntime,
+  readWorkbenchRuntimeState,
+  type WorkbenchRuntimePaths,
+  type WorkbenchRuntimeState
+} from '@axis/workbench-runtime';
+import { createDesktopStateStore, type DesktopState } from './desktop-state/desktopStateStore.js';
+import {
+  createAttachedDesktopRuntimeClient,
+  createHostedDesktopRuntimeClient,
+  type DesktopRuntimeClient
+} from './desktopRuntimeClient.js';
+import { resolveDesktopIntegrationEnvPath } from './integrationEnv.js';
+import { createApplicationMenuController } from './menu/registerApplicationMenu.js';
 
-const { app, BrowserWindow, dialog, ipcMain, Menu, net, protocol, shell } = electron;
-const server = createDesktopAppServer({
-  integrationEnvPath: resolveDesktopIntegrationEnvPath()
-});
-let hotExitStore: HotExitStore | undefined;
-let updateService: DesktopUpdateService | undefined;
-let axisCliManager: AxisCliManager | undefined;
+const { app, BrowserWindow, dialog, ipcMain, Menu, shell } = electron;
+let hostedDaemon: AxisDaemonHttpServer | undefined;
+let runtimeClient: DesktopRuntimeClient | undefined;
+let hostedRuntimeState: WorkbenchRuntimeState | undefined;
+let hostedRuntimeStatePath: string | undefined;
+const projectWindowsByProjectId = new Map<string, Electron.BrowserWindow>();
+const projectIdsByWindowId = new Map<number, string>();
+const releaseProjectWindowByWindowId = new Map<number, () => void>();
+
 const applicationMenu = createApplicationMenuController({
   menu: Menu,
   readDesktopState: () => desktopStateStore().readDesktopState(),
   chooseProjectRoot,
   openProject: async (projectRoot) => {
-    const snapshot = await server.openProject(projectRoot);
-    await rememberProjectRootAndRefreshMenu(projectRoot);
-    broadcastDesktopEvent({ type: 'project.opened', snapshot });
+    await openProjectFromShell(projectRoot);
   },
   clearRecentProjectRoots: async () => {
     await desktopStateStore().clearRecentProjectRoots();
   }
 });
 
-protocol.registerSchemesAsPrivileged([
-  {
-    scheme: PROJECT_FILE_PROTOCOL,
-    privileges: {
-      standard: true,
-      secure: true,
-      supportFetchAPI: true,
-      corsEnabled: true,
-      stream: true
-    }
-  },
-  {
-    scheme: CANVAS_PREVIEW_PROTOCOL,
-    privileges: {
-      standard: true,
-      secure: true,
-      supportFetchAPI: true,
-      corsEnabled: true,
-      stream: true
-    }
-  }
-]);
-
-async function createWindow(): Promise<void> {
+async function createWindow(initialUrl?: string, projectId?: string): Promise<Electron.BrowserWindow> {
   const window = new BrowserWindow({
     width: 1440,
     height: 940,
@@ -76,74 +55,23 @@ async function createWindow(): Promise<void> {
     }
   });
 
-  if (!app.isPackaged) {
-    await window.loadURL(process.env.VITE_DEV_SERVER_URL ?? 'http://127.0.0.1:5173');
-  } else {
-    await window.loadFile(resolve(__dirname, '../dist/index.html'));
+  const client = requireRuntimeClient();
+  window.once('closed', () => {
+    releaseProjectWindow(window.id);
+  });
+  if (projectId) {
+    bindProjectWindow(window, projectId);
   }
+  await window.loadURL(initialUrl ?? client.shellUrl());
+  return window;
 }
-
-registerWorkbenchIpc({
-  ipcMain,
-  dialog,
-  shell,
-  server,
-  platform: process.platform,
-  axisCliManager: requireAxisCliManager,
-  readDesktopState: loadDesktopStateFromStore,
-  setSetupCompleted: (completed) => desktopStateStore().setSetupCompleted(completed),
-  chooseProjectRoot,
-  rememberProjectRoot: rememberProjectRootAndRefreshMenu,
-  updateService: requireUpdateService,
-  hotExitStore: requireHotExitStore
-});
-
-server.onEvent((event) => {
-  broadcastDesktopEvent(event);
-});
 
 app.whenReady().then(async () => {
-  registerProjectFileProtocols({ protocol, net, server });
-  axisCliManager = createAxisCliManager({
-    appVersion: app.getVersion(),
-    homeDir: app.getPath('home'),
-    packaged: app.isPackaged,
-    ...(!app.isPackaged ? { repoRoot: resolve(__dirname, '../../..') } : {}),
-    onStatusChange: (status) => broadcastDesktopEvent({ type: 'desktop.axisCli.changed', status }),
-    ...(!app.isPackaged ? {
-      releaseClient: {
-        getLatestVersion: async () => undefined,
-        installLatest: async () => {
-          throw Object.assign(new Error('Release install is unavailable in development mode.'), { code: 'release_not_found' });
-        }
-      }
-    } : {})
-  });
-  if (!app.isPackaged) {
-    await axisCliManager.refreshDevelopmentLink();
-  }
-  hotExitStore = createHotExitStore(app.getPath('userData'));
-  updateService = createDesktopUpdateService({
-    currentVersion: app.getVersion(),
-    packaged: app.isPackaged,
-    platform: process.platform,
-    updater: autoUpdater,
-    requestHotExitSnapshot: () => collectHotExitSnapshot({ browserWindows: BrowserWindow, ipcMain }),
-    writeHotExitSnapshot: (snapshot) => requireHotExitStore().writeHotExitSnapshot(snapshot)
-  });
-  updateService.onStateChange((state) => broadcastDesktopEvent({ type: 'desktop.updateState.changed', state }));
+  runtimeClient = await createDesktopRuntimeClient();
+  registerShellIpc();
   await applicationMenu.refreshApplicationMenu();
   await createWindow();
-  setTimeout(() => {
-    void updateService?.checkForUpdates(false);
-  }, 3000);
 });
-
-function broadcastDesktopEvent(event: unknown): void {
-  for (const window of BrowserWindow.getAllWindows()) {
-    window.webContents.send('axis:event', event);
-  }
-}
 
 app.on('window-all-closed', () => {
   if (process.platform !== 'darwin') {
@@ -157,44 +85,197 @@ app.on('activate', () => {
   }
 });
 
-async function chooseProjectRoot(): Promise<string | undefined> {
-  const result = await dialog.showOpenDialog({
+app.on('before-quit', () => {
+  void closeDesktopRuntime();
+});
+
+function registerShellIpc(): void {
+  ipcMain.handle('axis-shell:chooseProjectRoot', async (event) => (
+    chooseProjectRoot(BrowserWindow.fromWebContents(event.sender) ?? undefined)
+  ));
+  ipcMain.handle('axis-shell:bindProjectWindowToProject', (event, input: { projectId: string }) => {
+    const window = BrowserWindow.fromWebContents(event.sender);
+    if (!window) {
+      throw new Error('AXIS project window is not available.');
+    }
+    bindProjectWindow(window, input.projectId);
+    return { ok: true };
+  });
+  ipcMain.handle('axis-shell:revealProjectPathInSystemFileManager', async (_event, input: {
+    projectId: string;
+    projectRelativePath: string;
+    kind: 'file' | 'directory';
+  }) => {
+    const absolutePath = await requireRuntimeClient().resolveProjectPath(input.projectId, input.projectRelativePath, input.kind);
+    if (input.kind === 'directory') {
+      await shell.openPath(absolutePath);
+    } else {
+      shell.showItemInFolder(absolutePath);
+    }
+    return { ok: true };
+  });
+}
+
+async function chooseProjectRoot(parentWindow?: Electron.BrowserWindow): Promise<string | undefined> {
+  const options: Electron.OpenDialogOptions = {
     title: 'Open AXIS Project',
     properties: ['openDirectory', 'createDirectory']
-  });
+  };
+  const result = parentWindow && !parentWindow.isDestroyed()
+    ? await dialog.showOpenDialog(parentWindow, options)
+    : await dialog.showOpenDialog(options);
   return result.canceled ? undefined : result.filePaths[0];
 }
 
-function loadDesktopStateFromStore() {
-  return desktopStateStore().readDesktopState();
+async function rememberProjectRootAndRefreshMenu(projectRoot: string): Promise<DesktopState> {
+  const desktopState = await desktopStateStore().rememberProjectRoot(projectRoot);
+  await applicationMenu.refreshApplicationMenu();
+  return desktopState;
 }
 
-async function rememberProjectRootAndRefreshMenu(projectRoot: string): Promise<void> {
-  await desktopStateStore().rememberProjectRoot(projectRoot);
-  await applicationMenu.refreshApplicationMenu();
+async function openProjectFromShell(projectRoot: string): Promise<void> {
+  const opened = await requireRuntimeClient().openProject(projectRoot);
+  await rememberProjectRootAndRefreshMenu(projectRoot);
+  const existingWindow = projectWindowsByProjectId.get(opened.projectId);
+  if (existingWindow && !existingWindow.isDestroyed()) {
+    existingWindow.focus();
+    return;
+  }
+  await createWindow(opened.url, opened.projectId);
 }
 
 function desktopStateStore() {
   return createDesktopStateStore(app.getPath('userData'));
 }
 
-function requireUpdateService(): DesktopUpdateService {
-  if (!updateService) {
-    throw new Error('Desktop update service is not ready.');
+function requireRuntimeClient(): DesktopRuntimeClient {
+  if (!runtimeClient) {
+    throw new Error('AXIS desktop runtime client is not ready.');
   }
-  return updateService;
+  return runtimeClient;
 }
 
-function requireHotExitStore(): HotExitStore {
-  if (!hotExitStore) {
-    throw new Error('Desktop Hot Exit store is not ready.');
+async function createDesktopRuntimeClient(): Promise<DesktopRuntimeClient> {
+  if (process.env.AXIS_WORKBENCH_RUNTIME_MODE === 'attached') {
+    return createAttachedDesktopRuntimeClient({
+      daemonUrl: requireEnv('AXIS_DAEMON_URL'),
+      webBaseUrl: requireEnv('AXIS_WEB_URL'),
+      token: requireEnv('AXIS_DAEMON_TOKEN')
+    });
   }
-  return hotExitStore;
+  if (process.env.AXIS_WORKBENCH_RUNTIME_MODE === 'hosted') {
+    await startHostedDesktopDaemon();
+    return createHostedDesktopRuntimeClient(requireHostedDaemon());
+  }
+  const registryResult = await ensureRegisteredWorkbenchRuntime({
+    launch: launchPackagedDesktopRuntime,
+    onRuntimeLaunchFailed: () => {
+      void hostedDaemon?.close();
+    }
+  });
+  if (!registryResult.runtimeStarted) {
+    return createAttachedDesktopRuntimeClient({
+      daemonUrl: registryResult.state.daemonUrl,
+      webBaseUrl: registryResult.state.webUrl,
+      token: registryResult.state.token
+    });
+  }
+  hostedRuntimeState = registryResult.state;
+  hostedRuntimeStatePath = registryResult.statePath;
+  return createHostedDesktopRuntimeClient(requireHostedDaemon());
 }
 
-function requireAxisCliManager(): AxisCliManager {
-  if (!axisCliManager) {
-    throw new Error('AXIS CLI manager is not ready.');
+async function startHostedDesktopDaemon(): Promise<AxisDaemonRuntime> {
+  const token = process.env.AXIS_DAEMON_TOKEN ?? randomUUID();
+  hostedDaemon = createAxisDaemonHttpServer({
+    appServerOptions: {
+      integrationEnvPath: resolveDesktopIntegrationEnvPath()
+    },
+    host: '127.0.0.1',
+    port: process.env.AXIS_DAEMON_PORT ? Number(process.env.AXIS_DAEMON_PORT) : 0,
+    token,
+    webBaseUrl: process.env.AXIS_WEB_URL ?? null,
+    webDistDir: resolve(__dirname, '../dist')
+  });
+  return hostedDaemon.listen();
+}
+
+async function launchPackagedDesktopRuntime(paths: WorkbenchRuntimePaths): Promise<WorkbenchRuntimeState> {
+  const runtime = await startHostedDesktopDaemon();
+  const now = new Date().toISOString();
+  return {
+    schemaVersion: 1,
+    runtimeKind: desktopRuntimeKind(),
+    processControl: 'external',
+    daemonUrl: runtime.daemonUrl,
+    webUrl: runtime.webBaseUrl ?? runtime.daemonUrl,
+    token: runtime.token,
+    daemonPid: process.pid,
+    daemonLogPath: paths.daemonLogPath,
+    webLogPath: paths.webLogPath,
+    startedAt: now,
+    updatedAt: now
+  };
+}
+
+function requireEnv(name: string): string {
+  const value = process.env[name];
+  if (!value) {
+    throw new Error(`${name} is required.`);
   }
-  return axisCliManager;
+  return value;
+}
+
+function desktopRuntimeKind(): 'desktop-dev' | 'desktop-packaged' {
+  return process.env.AXIS_WORKBENCH_RUNTIME_KIND === 'desktop-dev'
+    ? 'desktop-dev'
+    : 'desktop-packaged';
+}
+
+function requireHostedDaemon(): AxisDaemonHttpServer {
+  if (!hostedDaemon) {
+    throw new Error('AXIS hosted daemon is not ready.');
+  }
+  return hostedDaemon;
+}
+
+async function closeDesktopRuntime(): Promise<void> {
+  await runtimeClient?.close();
+  await deleteHostedRuntimeState();
+}
+
+async function deleteHostedRuntimeState(): Promise<void> {
+  if (!hostedRuntimeState || !hostedRuntimeStatePath) {
+    return;
+  }
+  const current = await readWorkbenchRuntimeState(hostedRuntimeStatePath).catch(() => undefined);
+  if (
+    current?.daemonUrl === hostedRuntimeState.daemonUrl
+    && current.webUrl === hostedRuntimeState.webUrl
+    && current.token === hostedRuntimeState.token
+  ) {
+    await deleteWorkbenchRuntimeState(hostedRuntimeStatePath);
+  }
+}
+
+function bindProjectWindow(window: Electron.BrowserWindow, projectId: string): void {
+  const currentProjectId = projectIdsByWindowId.get(window.id);
+  if (currentProjectId === projectId && releaseProjectWindowByWindowId.has(window.id)) {
+    return;
+  }
+  releaseProjectWindow(window.id);
+  const release = requireRuntimeClient().registerElectronProjectWindow(projectId, window.id);
+  projectWindowsByProjectId.set(projectId, window);
+  projectIdsByWindowId.set(window.id, projectId);
+  releaseProjectWindowByWindowId.set(window.id, release);
+}
+
+function releaseProjectWindow(windowId: number): void {
+  const projectId = projectIdsByWindowId.get(windowId);
+  if (projectId && projectWindowsByProjectId.get(projectId)?.id === windowId) {
+    projectWindowsByProjectId.delete(projectId);
+  }
+  projectIdsByWindowId.delete(windowId);
+  releaseProjectWindowByWindowId.get(windowId)?.();
+  releaseProjectWindowByWindowId.delete(windowId);
 }

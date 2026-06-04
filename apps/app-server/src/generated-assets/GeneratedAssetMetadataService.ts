@@ -2,7 +2,13 @@ import { createHash, randomUUID } from 'node:crypto';
 import { createReadStream } from 'node:fs';
 import { mkdir, stat } from 'node:fs/promises';
 import { dirname, join } from 'node:path';
-import { normalizeProjectRelativePath, readJsonFile, resolveProjectPath, writeJsonAtomic } from '@axis/project-core';
+import {
+  normalizeProjectRelativePath,
+  readJsonFile,
+  resolveExistingProjectPath,
+  resolveProjectPathForWrite,
+  writeJsonAtomic
+} from '@axis/project-core';
 import type {
   GeneratedAssetMetadataDiagnostic,
   GeneratedAssetMetadataLookup,
@@ -38,7 +44,7 @@ export interface FileFingerprintCacheEntry {
 
 export interface RecordGeneratedAssetInput {
   projectRelativePath: string;
-  providerCall: {
+  modelRun: {
     request: unknown;
     output: unknown;
   };
@@ -47,6 +53,9 @@ export interface RecordGeneratedAssetInput {
 export interface GeneratedAssetMetadataService {
   recordGeneratedAsset(projectRoot: string, input: RecordGeneratedAssetInput): Promise<GeneratedAssetRecord>;
   lookupGeneratedAssetMetadata(projectRoot: string, input: { projectRelativePath: string }): Promise<GeneratedAssetMetadataLookup>;
+  listGeneratedAssets(projectRoot: string): Promise<GeneratedAssetRecord[]>;
+  readGeneratedAsset(projectRoot: string, recordId: string): Promise<GeneratedAssetRecord>;
+  resolveGeneratedAssetRawPath(projectRoot: string, recordId: string): Promise<string>;
 }
 
 export interface GeneratedAssetMetadataServiceOptions {
@@ -56,6 +65,9 @@ export interface GeneratedAssetMetadataServiceOptions {
 
 const GENERATED_ASSET_METADATA_SCHEMA_VERSION = 1;
 const FILE_FINGERPRINT_CACHE_SCHEMA_VERSION = 1;
+const GENERATED_ASSET_INDEX_PROJECT_PATH = '.axis/assets/generated-assets-index.json';
+const GENERATED_ASSET_RECORDS_PROJECT_DIR = '.axis/assets/generated';
+const FINGERPRINT_CACHE_PROJECT_PATH = '.axis/cache/file-fingerprints.json';
 
 export function createGeneratedAssetMetadataService(options: GeneratedAssetMetadataServiceOptions = {}): GeneratedAssetMetadataService {
   const now = options.now ?? (() => new Date().toISOString());
@@ -64,7 +76,7 @@ export function createGeneratedAssetMetadataService(options: GeneratedAssetMetad
   return {
     async recordGeneratedAsset(projectRoot, input) {
       const projectRelativePath = normalizeProjectRelativePath(input.projectRelativePath);
-      const absolutePath = resolveProjectPath(projectRoot, projectRelativePath);
+      const absolutePath = await resolveExistingProjectPath(projectRoot, projectRelativePath);
       const fileStat = await stat(absolutePath);
       if (!fileStat.isFile()) {
         throw new Error(`Generated asset path is not a file: ${projectRelativePath}`);
@@ -75,12 +87,13 @@ export function createGeneratedAssetMetadataService(options: GeneratedAssetMetad
       const record: GeneratedAssetRecord = {
         schemaVersion: GENERATED_ASSET_METADATA_SCHEMA_VERSION,
         recordId,
+        projectRelativePath,
         createdAt,
         fingerprint: {
           algorithm: 'sha256',
           hash
         },
-        providerCall: input.providerCall
+        modelRun: input.modelRun
       };
 
       await writeGeneratedAssetRecord(projectRoot, record);
@@ -111,7 +124,14 @@ export function createGeneratedAssetMetadataService(options: GeneratedAssetMetad
       let absolutePath: string;
       let fileStat: Awaited<ReturnType<typeof stat>>;
       try {
-        absolutePath = resolveProjectPath(projectRoot, projectRelativePath);
+        absolutePath = await resolveExistingProjectPath(projectRoot, projectRelativePath);
+      } catch (error) {
+        if (isNotFoundError(error)) {
+          return unavailableResult(error, projectRelativePath);
+        }
+        throw error;
+      }
+      try {
         fileStat = await stat(absolutePath);
       } catch (error) {
         return unavailableResult(error, projectRelativePath);
@@ -171,25 +191,42 @@ export function createGeneratedAssetMetadataService(options: GeneratedAssetMetad
       return records.length
         ? { status: 'matched', fingerprint: { algorithm: 'sha256', hash }, records, ...diagnosticOutput }
         : { status: 'unmatched', fingerprint: { algorithm: 'sha256', hash }, ...diagnosticOutput };
+    },
+
+    async listGeneratedAssets(projectRoot) {
+      const index = await readGeneratedAssetMetadataIndex(projectRoot);
+      const records = await Promise.all(index.records.map((entry) => readGeneratedAssetRecord(projectRoot, entry)));
+      return records.sort((left, right) => right.createdAt.localeCompare(left.createdAt) || right.recordId.localeCompare(left.recordId));
+    },
+
+    async readGeneratedAsset(projectRoot, recordId) {
+      return readGeneratedAssetById(projectRoot, recordId);
+    },
+
+    async resolveGeneratedAssetRawPath(projectRoot, recordId) {
+      const record = await readGeneratedAssetById(projectRoot, recordId);
+      return resolveExistingProjectPath(projectRoot, record.projectRelativePath);
     }
   };
 }
 
 export function generatedAssetMetadataPaths(projectRoot: string): { indexFile: string; recordsDir: string; cacheFile: string } {
   return {
-    indexFile: join(projectRoot, '.axis/assets/generated-assets-index.json'),
-    recordsDir: join(projectRoot, '.axis/assets/generated'),
-    cacheFile: join(projectRoot, '.axis/cache/file-fingerprints.json')
+    indexFile: join(projectRoot, GENERATED_ASSET_INDEX_PROJECT_PATH),
+    recordsDir: join(projectRoot, GENERATED_ASSET_RECORDS_PROJECT_DIR),
+    cacheFile: join(projectRoot, FINGERPRINT_CACHE_PROJECT_PATH)
   };
 }
 
 function generatedAssetMetadataRecordProjectPath(recordId: string): string {
-  return `.axis/assets/generated/${recordId}.json`;
+  return `${GENERATED_ASSET_RECORDS_PROJECT_DIR}/${recordId}.json`;
 }
 
 async function readGeneratedAssetMetadataIndex(projectRoot: string): Promise<GeneratedAssetMetadataIndex> {
   try {
-    return assertGeneratedAssetMetadataIndex(await readJsonFile<unknown>(generatedAssetMetadataPaths(projectRoot).indexFile));
+    return assertGeneratedAssetMetadataIndex(await readJsonFile<unknown>(
+      await resolveExistingProjectPath(projectRoot, GENERATED_ASSET_INDEX_PROJECT_PATH)
+    ));
   } catch (error) {
     if (isNotFoundError(error)) {
       return { schemaVersion: GENERATED_ASSET_METADATA_SCHEMA_VERSION, records: [] };
@@ -221,19 +258,19 @@ function assertGeneratedAssetMetadataIndex(value: unknown): GeneratedAssetMetada
 }
 
 async function writeGeneratedAssetMetadataIndex(projectRoot: string, index: GeneratedAssetMetadataIndex): Promise<void> {
-  const path = generatedAssetMetadataPaths(projectRoot).indexFile;
+  const path = await resolveProjectPathForWrite(projectRoot, GENERATED_ASSET_INDEX_PROJECT_PATH);
   await mkdir(dirname(path), { recursive: true });
   await writeJsonAtomic(path, index);
 }
 
 async function writeGeneratedAssetRecord(projectRoot: string, record: GeneratedAssetRecord): Promise<void> {
-  const absolutePath = resolveProjectPath(projectRoot, generatedAssetMetadataRecordProjectPath(record.recordId));
+  const absolutePath = await resolveProjectPathForWrite(projectRoot, generatedAssetMetadataRecordProjectPath(record.recordId));
   await mkdir(dirname(absolutePath), { recursive: true });
   await writeJsonAtomic(absolutePath, record);
 }
 
 async function readGeneratedAssetRecord(projectRoot: string, entry: GeneratedAssetMetadataIndexEntry): Promise<GeneratedAssetRecord> {
-  const absolutePath = resolveProjectPath(projectRoot, entry.metadataPath);
+  const absolutePath = await resolveExistingProjectPath(projectRoot, entry.metadataPath);
   const record = await readJsonFile<unknown>(absolutePath);
   if (!isGeneratedAssetRecord(record)
     || record.recordId !== entry.recordId
@@ -244,22 +281,34 @@ async function readGeneratedAssetRecord(projectRoot: string, entry: GeneratedAss
   return record;
 }
 
+async function readGeneratedAssetById(projectRoot: string, recordId: string): Promise<GeneratedAssetRecord> {
+  const index = await readGeneratedAssetMetadataIndex(projectRoot);
+  const entry = index.records.find((item) => item.recordId === recordId);
+  if (!entry) {
+    throw new Error(`Generated asset was not found: ${recordId}`);
+  }
+  return readGeneratedAssetRecord(projectRoot, entry);
+}
+
 function isGeneratedAssetRecord(value: unknown): value is GeneratedAssetRecord {
   return isRecord(value)
     && value.schemaVersion === GENERATED_ASSET_METADATA_SCHEMA_VERSION
     && typeof value.recordId === 'string'
+    && typeof value.projectRelativePath === 'string'
     && typeof value.createdAt === 'string'
     && isRecord(value.fingerprint)
     && value.fingerprint.algorithm === 'sha256'
     && isSha256Hash(value.fingerprint.hash)
-    && isRecord(value.providerCall)
-    && 'request' in value.providerCall
-    && 'output' in value.providerCall;
+    && isRecord(value.modelRun)
+    && 'request' in value.modelRun
+    && 'output' in value.modelRun;
 }
 
 async function readFingerprintCache(projectRoot: string): Promise<FileFingerprintCache> {
   try {
-    return assertFingerprintCache(await readJsonFile<unknown>(generatedAssetMetadataPaths(projectRoot).cacheFile));
+    return assertFingerprintCache(await readJsonFile<unknown>(
+      await resolveExistingProjectPath(projectRoot, FINGERPRINT_CACHE_PROJECT_PATH)
+    ));
   } catch (error) {
     if (isNotFoundError(error)) {
       return { schemaVersion: FILE_FINGERPRINT_CACHE_SCHEMA_VERSION, entries: {} };
@@ -287,7 +336,7 @@ function assertFingerprintCache(value: unknown): FileFingerprintCache {
 
 async function updateFingerprintCache(projectRoot: string, projectRelativePath: string, entry: FileFingerprintCacheEntry): Promise<void> {
   const cache = await readFingerprintCache(projectRoot);
-  const path = generatedAssetMetadataPaths(projectRoot).cacheFile;
+  const path = await resolveProjectPathForWrite(projectRoot, FINGERPRINT_CACHE_PROJECT_PATH);
   await mkdir(dirname(path), { recursive: true });
   await writeJsonAtomic(path, {
     schemaVersion: FILE_FINGERPRINT_CACHE_SCHEMA_VERSION,

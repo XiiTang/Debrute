@@ -2,10 +2,10 @@ import {
   createImageModelSettingsView,
   type ImageModelsConfig
 } from '@axis/capability-runtime';
-import { createImageModelCatalog, type ImageModelCatalogEntry } from '@axis/capability-runtime';
+import { createImageModelCatalog } from '@axis/capability-runtime';
 import type { ImageModelSettingsView, SaveImageModelSettingInput } from '@axis/app-protocol';
 import type { GlobalConfigStore } from '../config/GlobalConfigStore.js';
-import { configuredMediaCatalog, saveMediaModelSetting } from './MediaModelService.js';
+import { saveMediaModelSetting } from './MediaModelService.js';
 
 export class ImageModelService {
   private readonly catalog = createImageModelCatalog();
@@ -34,13 +34,5 @@ export class ImageModelService {
       saveConfig: (config) => this.input.configStore.saveImageModels(config as ImageModelsConfig)
     });
     return this.getSettings();
-  }
-
-  async configuredCatalog(): Promise<ImageModelCatalogEntry[]> {
-    return configuredMediaCatalog({
-      configStore: this.input.configStore,
-      catalog: this.catalog,
-      secretKey: 'imageModelApiKeys'
-    });
   }
 }

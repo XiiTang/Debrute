@@ -1,5 +1,4 @@
 ---
-provider: openai
 models:
   - gpt-image-1
   - gpt-image-2
@@ -11,7 +10,7 @@ captured_at: 2026-05-31
 source_type: official_docs
 cleanup:
   - removed page chrome and footer text
-  - removed SDK setup and raw provider command snippets
+  - removed SDK setup and raw source API command snippets
 ---
 
 # OpenAI GPT Image models

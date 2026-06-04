@@ -1,5 +1,4 @@
 ---
-provider: volcengine-ark
 models:
   - doubao-seedream-5-0-lite-260128
 source_urls:
@@ -9,7 +8,7 @@ captured_at: 2026-05-31
 source_type: official_docs
 cleanup:
   - removed page chrome and debugging UI text
-  - removed SDK setup and raw provider command snippets
+  - removed SDK setup and raw source API command snippets
 ---
 
 # Doubao Seedream 5.0 Lite

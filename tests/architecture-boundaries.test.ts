@@ -1,3 +1,4 @@
+import { execFileSync } from 'node:child_process';
 import { existsSync, mkdtempSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -11,9 +12,8 @@ import {
 const root = process.cwd();
 
 describe('AXIS architecture boundaries', () => {
-  it('has a dedicated app protocol package for cross-app DTOs', async () => {
+  it('keeps server internals out of the app protocol package', async () => {
     const protocol = await import('@axis/app-protocol');
-    expect(protocol.APP_PROTOCOL_SCHEMA_VERSION).toBe(1);
     expect('serviceError' in protocol).toBe(false);
   });
 
@@ -38,13 +38,13 @@ describe('AXIS architecture boundaries', () => {
       );
       writeFileSync(
         join(fixtureRoot, 'apps/desktop/src/electron/ipc/violates-electron-boundary.ts'),
-        "import '../../workbench/WorkbenchApp.js';\n",
+        "import '../../../../../apps/web/src/workbench/WorkbenchApp.js';\n",
         'utf8'
       );
-      mkdirSync(join(fixtureRoot, 'apps/desktop/src/workbench'), { recursive: true });
+      mkdirSync(join(fixtureRoot, 'apps/web/src/workbench'), { recursive: true });
       writeFileSync(
-        join(fixtureRoot, 'apps/desktop/src/workbench/violates-renderer-app-server-boundary.ts'),
-        "import '../../../app-server/src/index.js';\n",
+        join(fixtureRoot, 'apps/web/src/workbench/violates-renderer-app-server-boundary.ts'),
+        "import '../../../../apps/app-server/src/index.js';\n",
         'utf8'
       );
       writeFileSync(
@@ -56,12 +56,12 @@ describe('AXIS architecture boundaries', () => {
       await expect(architectureBoundaryViolations(fixtureRoot, [
         'packages/project-core/src/violates-package-boundary.ts',
         'apps/desktop/src/electron/ipc/violates-electron-boundary.ts',
-        'apps/desktop/src/workbench/violates-renderer-app-server-boundary.ts',
+        'apps/web/src/workbench/violates-renderer-app-server-boundary.ts',
         'apps/axis-cli/src/commands/violates-cli-package-boundary.ts'
       ])).resolves.toEqual([
         'packages do not import apps: packages/project-core/src/violates-package-boundary.ts imports "apps/app-server/src/index.js"',
-        'desktop electron does not import workbench renderer internals: apps/desktop/src/electron/ipc/violates-electron-boundary.ts imports "apps/desktop/src/workbench/WorkbenchApp.js"',
-        'desktop renderer does not import app-server: apps/desktop/src/workbench/violates-renderer-app-server-boundary.ts imports "apps/app-server/src/index.js"',
+        'desktop electron does not import web workbench internals: apps/desktop/src/electron/ipc/violates-electron-boundary.ts imports "apps/web/src/workbench/WorkbenchApp.js"',
+        'web workbench does not import app-server: apps/web/src/workbench/violates-renderer-app-server-boundary.ts imports "apps/app-server/src/index.js"',
         'cli stays behind app-server and protocol boundaries: apps/axis-cli/src/commands/violates-cli-package-boundary.ts imports "packages/project-core/src/index.js"'
       ]);
     } finally {
@@ -92,7 +92,7 @@ describe('AXIS architecture boundaries', () => {
 
   it('keeps protocol, App Server, and runtime imports in the intended direction', () => {
     expect(architectureImportSpecifiers(
-      'apps/desktop/src/workbench/example.ts',
+      'apps/web/src/workbench/example.ts',
       "import type { ProjectSessionSnapshot } from '@axis/app-protocol';\n"
     )).toEqual(['@axis/app-protocol']);
   });
@@ -111,43 +111,151 @@ describe('AXIS architecture boundaries', () => {
     }
   });
 
-  it('keeps Workbench state helpers and shell views out of the renderer composition root', () => {
+  it('keeps integration command execution out of backend detection exports', () => {
+    const text = readFileSync(join(root, 'apps/app-server/src/integrations/IntegrationBackends.ts'), 'utf8');
+
+    expect(text).not.toContain("export { runIntegrationCommand");
+    expect(text).not.toContain('IntegrationCommandInput');
+    expect(text).not.toContain('IntegrationCommandResult');
+  });
+
+  it('keeps Workbench state helpers and shell views out of the web composition root', () => {
     for (const file of [
-      'apps/desktop/src/workbench/services/projectSessionState.ts',
-      'apps/desktop/src/workbench/services/hotExitRestore.ts',
-      'apps/desktop/src/workbench/services/appServerEvents.ts',
-      'apps/desktop/src/workbench/services/canvasState.ts',
-      'apps/desktop/src/workbench/services/textEditorWindows.ts',
-      'apps/desktop/src/workbench/services/textFileBufferActions.ts',
-      'apps/desktop/src/workbench/services/workbenchContextMenuCommands.ts',
-      'apps/desktop/src/workbench/shell/NotificationStack.tsx',
-      'apps/desktop/src/workbench/shell/FloatingDock.tsx',
-      'apps/desktop/src/workbench/shell/FloatingPanel.tsx',
-      'apps/desktop/src/workbench/shell/FloatingTextEditorWindow.tsx',
-      'apps/desktop/src/workbench/shell/Inspector.tsx',
-      'apps/desktop/src/workbench/shell/workbenchLayers.ts'
+      'apps/web/src/workbench/services/projectSessionState.ts',
+      'apps/web/src/workbench/services/appServerEvents.ts',
+      'apps/web/src/workbench/services/canvasState.ts',
+      'apps/web/src/workbench/services/textEditorWindows.ts',
+      'apps/web/src/workbench/services/textFileBufferActions.ts',
+      'apps/web/src/workbench/services/workbenchContextMenuCommands.ts',
+      'apps/web/src/workbench/shell/NotificationStack.tsx',
+      'apps/web/src/workbench/shell/FloatingDock.tsx',
+      'apps/web/src/workbench/shell/FloatingPanel.tsx',
+      'apps/web/src/workbench/shell/FloatingTextEditorWindow.tsx',
+      'apps/web/src/workbench/shell/Inspector.tsx',
+      'apps/web/src/workbench/shell/workbenchLayers.ts'
     ]) {
       expect(existsSync(join(root, file)), file).toBe(true);
     }
   });
 
-  it('keeps Electron main free of protocol, desktop-state, and Hot Exit request implementations', () => {
+  it('keeps Electron main as a daemon-loading shell', () => {
     for (const file of [
       'apps/desktop/src/electron/desktop-state/desktopStateStore.ts',
-      'apps/desktop/src/electron/protocols/registerProjectProtocols.ts',
-      'apps/desktop/src/electron/hot-exit/requestHotExitSnapshot.ts'
+      'apps/desktop/src/electron/preload.ts'
     ]) {
       expect(existsSync(join(root, file)), file).toBe(true);
     }
 
     const text = readFileSync(join(root, 'apps/desktop/src/electron/main.ts'), 'utf8');
-    expect(architectureImportSpecifiers('apps/desktop/src/electron/main.ts', text)).toContain('apps/desktop/src/electron/ipc/registerWorkbenchIpc.js');
+    expect(architectureImportSpecifiers('apps/desktop/src/electron/main.ts', text)).toContain('@axis/daemon');
+    expect(text).toContain("resolve(__dirname, '../dist')");
+    expect(text).not.toContain("../../../web/dist");
+    expect(text).not.toContain('registerWorkbenchIpc');
+    expect(text).not.toContain('registerProjectFileProtocols');
   });
 
-  it('keeps Flowmap source package output out of src', () => {
-    expect(existsSync(join(root, 'packages/flowmap-core/src/index.js'))).toBe(false);
-    expect(existsSync(join(root, 'packages/flowmap-core/src/index.js.map'))).toBe(false);
-    expect(existsSync(join(root, 'packages/flowmap-core/src/index.d.ts'))).toBe(false);
-    expect(existsSync(join(root, 'packages/flowmap-core/src/index.d.ts.map'))).toBe(false);
+  it('keeps daemon project session registry behind the daemon HTTP boundary', () => {
+    expect(existsSync(join(root, 'apps/daemon/src/http/ProjectSessionRegistry.ts'))).toBe(true);
+
+    const webClient = readFileSync(join(root, 'apps/web/src/api/httpWorkbenchApiClient.ts'), 'utf8');
+    const desktopMain = readFileSync(join(root, 'apps/desktop/src/electron/main.ts'), 'utf8');
+
+    expect(webClient).not.toContain('ProjectSessionRegistry');
+    expect(desktopMain).not.toContain('ProjectSessionRegistry');
+  });
+
+  it('allows apps to depend on the shared Workbench runtime registry package', () => {
+    const cliPackage = readFileSync(join(root, 'apps/axis-cli/package.json'), 'utf8');
+    const desktopPackage = readFileSync(join(root, 'apps/desktop/package.json'), 'utf8');
+
+    expect(cliPackage).toContain('"@axis/workbench-runtime"');
+    expect(desktopPackage).toContain('"@axis/workbench-runtime"');
+  });
+
+  it('cleans generated output from the shared Workbench runtime package', () => {
+    const cleanScript = readFileSync(join(root, 'scripts/clean.mjs'), 'utf8');
+
+    expect(cleanScript).toContain("'packages/workbench-runtime/dist'");
+  });
+
+  it('keeps the Workbench runtime package out of app-specific launch ownership', () => {
+    const files = execFileSync('rg', ['--files', 'packages/workbench-runtime/src'], {
+      cwd: root,
+      encoding: 'utf8'
+    }).trim().split('\n');
+    const text = files.map((file) => readFileSync(join(root, file), 'utf8')).join('\n');
+
+    expect(text).not.toContain('@axis/daemon');
+    expect(text).not.toContain('electron');
+    expect(text).not.toContain('@axis/app-server');
+    expect(text).not.toContain('spawn(');
+  });
+
+
+  it('keeps daemon global runtime routes out of project App Server sessions', () => {
+    const text = readFileSync(join(root, 'apps/daemon/src/http/createAxisDaemonHttpServer.ts'), 'utf8');
+
+    expect(text).toContain('AxisGlobalRuntimeServer');
+    expect(text).not.toContain('runtimeAppServer');
+    expect(text).not.toContain('new AxisAppServer(appServerOptions)');
+  });
+
+  it('keeps project App Server sessions free of global runtime forwarding methods', () => {
+    const text = readFileSync(join(root, 'apps/app-server/src/server/AxisAppServer.ts'), 'utf8');
+
+    expect(text).not.toContain('getGlobalRuntime');
+    for (const method of [
+      'canvasSettingsGet',
+      'canvasSettingsSave',
+      'llmGetSettings',
+      'llmSaveProviderSetting',
+      'llmDeleteProviderSetting',
+      'llmSetDefaultModelKey',
+      'llmDiscoverProviderModels',
+      'imageModelGetSettings',
+      'imageModelSaveSetting',
+      'videoModelGetSettings',
+      'videoModelSaveSetting',
+      'integrationsListStatus',
+      'integrationsRescan'
+    ]) {
+      expect(text).not.toContain(`async ${method}(`);
+    }
+  });
+
+  it('does not keep stale optional project-open result guards in the Web workbench', () => {
+    const text = readFileSync(join(root, 'apps/web/src/workbench/WorkbenchApp.tsx'), 'utf8');
+
+    expect(text).not.toContain('if (!opened)');
+    expect(text).not.toContain('opened?.');
+  });
+
+  it('keeps Electron multi-window project ownership in the daemon', () => {
+    const text = readFileSync(join(root, 'apps/desktop/src/electron/main.ts'), 'utf8');
+
+    expect(text).toContain('registerElectronProjectWindow');
+    expect(text).toContain('requireRuntimeClient().registerElectronProjectWindow');
+    expect(text).toContain('resolveProjectPath');
+    expect(text).not.toContain('appServer.openProject');
+    expect(text).not.toContain('appServer.getSnapshot');
+  });
+
+  it('keeps generated TypeScript output out of source directories', () => {
+    for (const file of [
+      'packages/flowmap-core/src/index.js',
+      'packages/flowmap-core/src/index.js.map',
+      'packages/flowmap-core/src/index.d.ts',
+      'packages/flowmap-core/src/index.d.ts.map',
+      'apps/daemon/src/index.js',
+      'apps/daemon/src/index.js.map',
+      'apps/daemon/src/index.d.ts',
+      'apps/daemon/src/index.d.ts.map',
+      'apps/daemon/src/http/createAxisDaemonHttpServer.js',
+      'apps/daemon/src/http/createAxisDaemonHttpServer.js.map',
+      'apps/daemon/src/http/createAxisDaemonHttpServer.d.ts',
+      'apps/daemon/src/http/createAxisDaemonHttpServer.d.ts.map'
+    ]) {
+      expect(existsSync(join(root, file)), file).toBe(false);
+    }
   });
 });

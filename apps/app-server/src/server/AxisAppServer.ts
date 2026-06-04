@@ -7,6 +7,7 @@ import {
   initializeBlankProject,
   readProjectMetadata,
   readProjectTextFile,
+  resolveExistingProjectPath,
   resolveProjectPath,
   watchProjectFiles,
   writeProjectTextFile,
@@ -24,9 +25,6 @@ import {
   type CanvasFeedbackDocument,
   type CanvasLayoutSize,
   type CanvasNodeLayerPatch,
-  type CanvasSelection,
-  type CanvasViewport,
-  type Diagnostic,
   type UpdateCanvasFeedbackEntryInput
 } from '@axis/canvas-core';
 import {
@@ -39,44 +37,32 @@ import {
   ProviderRegistry,
   createImageModelCatalog,
   createImageModelSettingsView,
+  createLlmProviderSettingsView,
   createVideoModelCatalog,
+  createVideoModelSettingsView,
   describeImageModelOfficialDoc,
   runLlmRuntimeRequest,
   executeImageModelRequest,
   executeVideoModelRequest,
   type ExecuteImageModelRequestResult,
   type ImageModelCatalogEntry,
-  type ImageProviderFetch,
+  type ImageModelFetch,
   type ImageModelRequestInput,
   type VideoModelRequestInput,
-  type VideoProviderFetch
+  type VideoModelFetch
 } from '@axis/capability-runtime';
 import { FlowmapError } from '@axis/flowmap-core';
 import type {
   AppServerEvent,
-  CanvasSettingsView,
-  DiscoverLlmProviderModelsInput,
-  DiscoverProviderModelsOutput,
   GeneratedAssetMetadataLookup,
   GeneratedAssetRecord,
-  ImageModelSettingsView,
-  IntegrationSettingsView,
-  LlmProviderSettingsView,
   ProjectFileOperationResult,
   ProjectHealthSummary,
   ProjectSessionSnapshot,
   RunImageModelBatchInput,
-  SaveImageModelSettingInput,
-  SaveLlmProviderSettingInput,
-  SaveVideoModelSettingInput,
-  VideoModelSettingsView,
   ImageModelBatchSummary
 } from '@axis/app-protocol';
-import { GlobalConfigStore, type CanvasSettingsConfig } from '../config/GlobalConfigStore.js';
-import { ImageModelService } from '../models/ImageModelService.js';
-import { LlmService } from '../models/LlmService.js';
-import { VideoModelService } from '../models/VideoModelService.js';
-import { IntegrationsService, type IntegrationsServiceOptions } from '../integrations/IntegrationsService.js';
+import { GlobalConfigStore } from '../config/GlobalConfigStore.js';
 import {
   readCanvasNodeLayoutSize,
   type ReadCanvasNodeLayoutSizeInput
@@ -116,8 +102,7 @@ import {
 } from '../project-session/projectWatchEvents.js';
 import { serviceError } from './ServiceErrors.js';
 import {
-  runImageModelBatch as runNativeImageModelBatch,
-  type ImageModelBatchExecutionResult
+  runImageModelBatch as runNativeImageModelBatch
 } from '../models/ImageModelBatchService.js';
 import {
   cliImageModelDetail,
@@ -126,7 +111,6 @@ import {
   cliVideoModelDetail,
   imageModelBatchResultFromExecution,
   imageModelReadinessFailure,
-  videoModelReadinessFailure,
   type CliImageModelDetail,
   type CliImageModelListEntry,
   type CliModelDetail,
@@ -143,8 +127,8 @@ export interface OpenProjectOptions {
 
 export interface AxisAppServerOptions {
   globalConfigStore?: GlobalConfigStore;
-  imageModelFetch?: ImageProviderFetch;
-  videoModelFetch?: VideoProviderFetch;
+  imageModelFetch?: ImageModelFetch;
+  videoModelFetch?: VideoModelFetch;
   integrationEnvPath?: string;
   integrationPathExt?: string;
   integrationPlatform?: NodeJS.Platform;
@@ -171,10 +155,6 @@ const INTERNAL_PROJECT_FILE_WRITE_SUPPRESSION_MS = 2000;
 export class AxisAppServer {
   private readonly events = new EventEmitter();
   private readonly configStore: GlobalConfigStore;
-  private readonly llmService: LlmService;
-  private readonly imageModelService: ImageModelService;
-  private readonly videoModelService: VideoModelService;
-  private readonly integrationsService: IntegrationsService;
   private readonly generatedAssetMetadataService: GeneratedAssetMetadataService;
   private readonly canvasFeedbackService: CanvasFeedbackService;
   private readonly canvasImagePreviewService: CanvasImagePreviewService;
@@ -189,14 +169,6 @@ export class AxisAppServer {
 
   constructor(private readonly options: AxisAppServerOptions = {}) {
     this.configStore = options.globalConfigStore ?? new GlobalConfigStore();
-    this.llmService = new LlmService({ configStore: this.configStore });
-    this.imageModelService = new ImageModelService({ configStore: this.configStore });
-    this.videoModelService = new VideoModelService({ configStore: this.configStore });
-    this.integrationsService = new IntegrationsService({
-      ...(options.integrationEnvPath !== undefined ? { envPath: options.integrationEnvPath } : {}),
-      ...(options.integrationPathExt !== undefined ? { pathExt: options.integrationPathExt } : {}),
-      ...(options.integrationPlatform !== undefined ? { platform: options.integrationPlatform } : {})
-    });
     this.generatedAssetMetadataService = createGeneratedAssetMetadataService();
     this.canvasFeedbackService = createCanvasFeedbackService();
     this.canvasImagePreviewService = createCanvasImagePreviewService();
@@ -224,6 +196,10 @@ export class AxisAppServer {
     if (!this.snapshot) {
       throw new Error('No project session is open.');
     }
+    return this.snapshot;
+  }
+
+  currentSnapshot(): ProjectSessionSnapshot | undefined {
     return this.snapshot;
   }
 
@@ -276,7 +252,7 @@ export class AxisAppServer {
     const [configuredImageModels, videoModels, llmSettings] = await Promise.all([
       this.listImageModelsForCli(),
       this.listVideoModelsForCli(),
-      this.llmGetSettings()
+      this.readLlmProviderSettings()
     ]);
     return {
       ok: true,
@@ -318,7 +294,7 @@ export class AxisAppServer {
     }
     const current = this.getSnapshot();
     try {
-      const fileStat = await stat(resolveProjectPath(current.projectRoot, input.projectRelativePath));
+      const fileStat = await stat(await resolveExistingProjectPath(current.projectRoot, input.projectRelativePath));
       return fileStat.isFile() && fileStat.size > 0;
     } catch (error) {
       if (isNodeError(error) && error.code === 'ENOENT') {
@@ -374,6 +350,21 @@ export class AxisAppServer {
     return this.generatedAssetMetadataService.lookupGeneratedAssetMetadata(current.projectRoot, input);
   }
 
+  async listGeneratedAssets(): Promise<GeneratedAssetRecord[]> {
+    const current = this.getSnapshot();
+    return this.generatedAssetMetadataService.listGeneratedAssets(current.projectRoot);
+  }
+
+  async readGeneratedAsset(recordId: string): Promise<GeneratedAssetRecord> {
+    const current = this.getSnapshot();
+    return this.generatedAssetMetadataService.readGeneratedAsset(current.projectRoot, recordId);
+  }
+
+  async resolveGeneratedAssetRawPath(recordId: string): Promise<string> {
+    const current = this.getSnapshot();
+    return this.generatedAssetMetadataService.resolveGeneratedAssetRawPath(current.projectRoot, recordId);
+  }
+
   async lookupGeneratedAssetMetadataForCli(projectRoot: string, input: { projectRelativePath: string }): Promise<GeneratedAssetMetadataLookup> {
     await readProjectMetadata(projectRoot);
     return this.generatedAssetMetadataService.lookupGeneratedAssetMetadata(projectRoot, input);
@@ -389,17 +380,6 @@ export class AxisAppServer {
     return this.canvasFeedbackService.updateCanvasFeedbackEntry(current.projectRoot, input);
   }
 
-  async canvasSettingsGet(): Promise<CanvasSettingsView> {
-    return this.configStore.readCanvasSettings();
-  }
-
-  async canvasSettingsSave(input: CanvasSettingsConfig): Promise<CanvasSettingsView> {
-    await this.configStore.saveCanvasSettings(input);
-    const settings = await this.configStore.readCanvasSettings();
-    this.emit({ type: 'canvas.settings.changed', settings });
-    return settings;
-  }
-
   async resolveCanvasImagePreview(
     input: Omit<ResolveCanvasImagePreviewInput, 'projectRoot'>
   ): Promise<CanvasImagePreviewResult> {
@@ -408,18 +388,6 @@ export class AxisAppServer {
       projectRoot: current.projectRoot,
       ...input
     });
-  }
-
-  async updateCanvasViewport(canvasId: string, viewport: CanvasViewport): Promise<CanvasDocument> {
-    return this.enqueueSessionOperation(async () => (
-      this.applyCanvasSessionUpdate(await this.canvasSessionService.updateCanvasViewport(this.getSnapshot(), canvasId, viewport))
-    ));
-  }
-
-  async updateCanvasSelection(canvasId: string, selection: CanvasSelection | undefined): Promise<CanvasDocument> {
-    return this.enqueueSessionOperation(async () => (
-      this.applyCanvasSessionUpdate(await this.canvasSessionService.updateCanvasSelection(this.getSnapshot(), canvasId, selection))
-    ));
   }
 
   async publishFlowmapDraft(input: { sourceDraftPath: string }): Promise<{ ok: true; command: 'flowmap.publish' }> {
@@ -467,32 +435,6 @@ export class AxisAppServer {
     ));
   }
 
-  async llmGetSettings(): Promise<LlmProviderSettingsView> {
-    return this.llmService.getSettings();
-  }
-
-  async llmSaveProviderSetting(input: SaveLlmProviderSettingInput, providerId?: string): Promise<LlmProviderSettingsView> {
-    const settings = await this.llmService.saveProviderSetting(input, providerId);
-    this.emit({ type: 'llm.settings.changed', settings });
-    return settings;
-  }
-
-  async llmDeleteProviderSetting(providerId: string): Promise<LlmProviderSettingsView> {
-    const settings = await this.llmService.deleteProviderSetting(providerId);
-    this.emit({ type: 'llm.settings.changed', settings });
-    return settings;
-  }
-
-  async llmSetDefaultModelKey(modelKey: string | null): Promise<LlmProviderSettingsView> {
-    const settings = await this.llmService.setDefaultModelKey(modelKey);
-    this.emit({ type: 'llm.settings.changed', settings });
-    return settings;
-  }
-
-  async llmDiscoverProviderModels(input: DiscoverLlmProviderModelsInput, providerId?: string): Promise<DiscoverProviderModelsOutput> {
-    return this.llmService.discoverProviderModels(input, providerId);
-  }
-
   async runLlmRequestForCli(input: Record<string, unknown>): Promise<AxisCapabilityResult> {
     const llmProviderSettings = await this.configStore.readLlmProviders();
     const providers = new ProviderRegistry(llmProviderSettings, await this.configStore.readSecrets());
@@ -502,12 +444,8 @@ export class AxisAppServer {
     });
   }
 
-  async imageModelGetSettings(): Promise<ImageModelSettingsView> {
-    return this.imageModelService.getSettings();
-  }
-
   async listImageModelsForCli(): Promise<CliImageModelListEntry[]> {
-    const settings = await this.imageModelGetSettings();
+    const settings = await this.readImageModelSettings();
     const configured = new Set(settings.models.filter((model) => model.apiKeySet).map((model) => model.axisModelId));
     return createImageModelCatalog().listAll()
       .filter((entry) => configured.has(entry.axisModelId))
@@ -515,7 +453,7 @@ export class AxisAppServer {
   }
 
   async describeImageModelForCli(modelId: string): Promise<CliImageModelDetail> {
-    const settings = await this.imageModelGetSettings();
+    const settings = await this.readImageModelSettings();
     const setting = settings.models.find((model) => model.axisModelId === modelId);
     const catalog = createImageModelCatalog();
     const detail = catalog.details([modelId], catalog.listAll()).details[0];
@@ -527,12 +465,6 @@ export class AxisAppServer {
       throw serviceError('image_model_official_doc_missing', `Official image model documentation is missing: ${modelId}`, { model: modelId });
     }
     return cliImageModelDetail(setting, detail, officialDescription);
-  }
-
-  async imageModelSaveSetting(modelId: string, input: SaveImageModelSettingInput): Promise<ImageModelSettingsView> {
-    const settings = await this.imageModelService.saveSetting(modelId, input);
-    this.emit({ type: 'imageModel.settings.changed', settings });
-    return settings;
   }
 
   async runImageModelBatch(input: RunImageModelBatchInput): Promise<ImageModelBatchSummary> {
@@ -554,36 +486,24 @@ export class AxisAppServer {
 
   async runImageModelRequestForCli(input: ImageModelRequestInput): Promise<AxisCapabilityResult> {
     const current = this.getSnapshot();
-    const readinessFailure = imageModelReadinessFailure(input.model, (await this.imageModelGetSettings()).models);
-    if (readinessFailure) {
-      return capabilityError(readinessFailure.code, readinessFailure.message, undefined, {
-        outputs: {
-          model: input.model
-        },
-        logs: [{ stage: readinessFailure.stage, model: input.model }]
-      });
-    }
     const executor = await this.createImageModelRequestExecutor(current.projectRoot);
-    const entry = executor.catalog.find((item) => item.axisModelId === input.model);
-    if (!entry) {
-      return capabilityError('model_unavailable', `Image model is unavailable: ${input.model}`);
-    }
     const result = await executor.execute(input, { invocationId: `image-${randomUUID()}` });
+    const entry = executor.catalog.find((item) => item.axisModelId === input.model);
     if (result.status === 'error') {
       return capabilityError(result.error, result.content, undefined, {
         outputs: {
           content: result.content,
-          provider: entry.provider,
-          model: entry.axisModelId,
-          ...(result.rawProviderOutput ? { raw_provider_output: JSON.stringify(result.rawProviderOutput) } : {})
+          model: input.model
         },
         logs: result.logs
       });
     }
+    if (!entry) {
+      throw new Error(`Image model execution succeeded without a catalog entry: ${input.model}`);
+    }
     await this.refreshProject();
     return capabilityOk({
       content: result.content,
-      provider: entry.provider,
       model: entry.axisModelId
     }, {
       artifacts: projectArtifactPointers(result.artifacts),
@@ -591,16 +511,12 @@ export class AxisAppServer {
     });
   }
 
-  async videoModelGetSettings(): Promise<VideoModelSettingsView> {
-    return this.videoModelService.getSettings();
-  }
-
   async listVideoModelsForCli(): Promise<CliModelSummary[]> {
-    return (await this.videoModelGetSettings()).models.map(cliModelSummary);
+    return (await this.readVideoModelSettings()).models.map(cliModelSummary);
   }
 
   async describeVideoModelForCli(modelId: string): Promise<CliModelDetail> {
-    const settings = await this.videoModelGetSettings();
+    const settings = await this.readVideoModelSettings();
     const setting = settings.models.find((model) => model.axisModelId === modelId);
     const catalog = createVideoModelCatalog();
     const detail = catalog.details([modelId], catalog.listAll()).details[0];
@@ -610,34 +526,17 @@ export class AxisAppServer {
     return cliVideoModelDetail(setting, detail);
   }
 
-  async videoModelSaveSetting(modelId: string, input: SaveVideoModelSettingInput): Promise<VideoModelSettingsView> {
-    const settings = await this.videoModelService.saveSetting(modelId, input);
-    this.emit({ type: 'videoModel.settings.changed', settings });
-    return settings;
-  }
-
   async runVideoModelRequestForCli(input: VideoModelRequestInput): Promise<AxisCapabilityResult> {
     const current = this.getSnapshot();
-    const readinessFailure = videoModelReadinessFailure(input.model, (await this.videoModelGetSettings()).models);
-    if (readinessFailure) {
-      return capabilityError(readinessFailure.code, readinessFailure.message, undefined, {
-        outputs: {
-          model: input.model
-        },
-        logs: [{ stage: readinessFailure.stage, model: input.model }]
-      });
-    }
-    const catalog = await this.videoModelService.configuredCatalog();
-    const entry = catalog.find((item) => item.axisModelId === input.model);
-    if (!entry) {
-      return capabilityError('model_unavailable', `Video model is unavailable: ${input.model}`);
-    }
-    const secrets = await this.configStore.readSecrets();
+    const [settings, secrets] = await Promise.all([
+      this.configStore.readVideoModels(),
+      this.configStore.readSecrets()
+    ]);
     const result = await executeVideoModelRequest({
       projectRoot: current.projectRoot,
       invocationId: `video-${randomUUID()}`,
       input,
-      settings: await this.configStore.readVideoModels(),
+      settings,
       secrets: { videoModelApiKeys: secrets.videoModelApiKeys },
       recordGeneratedAsset: (metadata) => this.generatedAssetMetadataService.recordGeneratedAsset(current.projectRoot, metadata).then(() => undefined),
       ...(this.options.videoModelFetch ? { fetch: this.options.videoModelFetch } : {})
@@ -646,32 +545,23 @@ export class AxisAppServer {
       return capabilityError(result.error, result.content, undefined, {
         outputs: {
           content: result.content,
-          provider: entry.provider,
-          model: entry.axisModelId,
-          ...(result.providerResponse ? { provider_response: JSON.stringify(result.providerResponse) } : {})
+          model: input.model
         },
         logs: result.logs
       });
     }
+    const entry = createVideoModelCatalog().get(input.model);
+    if (!entry) {
+      throw new Error(`Video model execution succeeded without a catalog entry: ${input.model}`);
+    }
     await this.refreshProject();
     return capabilityOk({
       content: result.content,
-      provider: entry.provider,
       model: entry.axisModelId
     }, {
       artifacts: projectArtifactPointers(result.artifacts),
       logs: result.logs
     });
-  }
-
-  async integrationsListStatus(): Promise<IntegrationSettingsView> {
-    return this.integrationsService.listStatus();
-  }
-
-  async integrationsRescan(): Promise<IntegrationSettingsView> {
-    const settings = await this.integrationsService.rescan();
-    this.emit({ type: 'integrations.settings.changed', settings });
-    return settings;
   }
 
   close(): void {
@@ -850,6 +740,29 @@ export class AxisAppServer {
 
   private emit(event: AppServerEvent): void {
     this.events.emit('event', event);
+  }
+
+  private async readLlmProviderSettings() {
+    return createLlmProviderSettingsView(
+      await this.configStore.readLlmProviders(),
+      await this.configStore.readSecrets()
+    );
+  }
+
+  private async readImageModelSettings() {
+    return createImageModelSettingsView(
+      await this.configStore.readImageModels(),
+      await this.configStore.readSecrets(),
+      createImageModelCatalog().listAll()
+    );
+  }
+
+  private async readVideoModelSettings() {
+    return createVideoModelSettingsView(
+      await this.configStore.readVideoModels(),
+      await this.configStore.readSecrets(),
+      createVideoModelCatalog().listAll()
+    );
   }
 
   private async refreshProjectUnlocked(): Promise<ProjectSessionSnapshot> {

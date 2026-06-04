@@ -5,7 +5,7 @@ import { describe, expect, it } from 'vitest';
 import {
   createVideoModelCatalog,
   executeVideoModelRequest,
-  type VideoProviderFetch
+  type VideoModelFetch
 } from '@axis/capability-runtime';
 
 const tinyPngBase64 = 'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADElEQVR42mP8z8AARQAHSQGmK3P7WAAAAABJRU5ErkJggg==';
@@ -22,7 +22,6 @@ describe('video model catalog and tools', () => {
       'doubao-seedance-2-0-fast-260128'
     ]);
     expect(catalog.get('doubao-seedance-2-0-fast-260128')).toMatchObject({
-      provider: 'volcengine-ark',
       supportsGeneratedAudio: true,
       capabilities: expect.objectContaining({ resolutions: ['480p', '720p'] })
     });
@@ -33,7 +32,7 @@ describe('video model catalog and tools', () => {
 
     for (const model of catalog.listAll()) {
       expect(model.defaultBaseUrl).toBe('https://ark.cn-beijing.volces.com/api/v3');
-      expect(model.defaultProviderModelId).toBe(model.axisModelId);
+      expect(model.defaultRequestModelId).toBe(model.axisModelId);
     }
   });
 
@@ -58,7 +57,7 @@ describe('video model executor', () => {
   it('submits, polls, downloads, and writes a Seedance mp4 artifact', async () => {
     const projectRoot = await mkdtemp(join(tmpdir(), 'axis-video-seedance-'));
     const calls: string[] = [];
-    const fetch: VideoProviderFetch = async (url, init) => {
+    const fetch: VideoModelFetch = async (url, init) => {
       calls.push(url);
       if (url.endsWith('/contents/generations/tasks') && init?.method === 'POST') {
         const body = JSON.parse(String(init.body));
@@ -106,7 +105,7 @@ describe('video model executor', () => {
           videoModels: [{
             axisModelId: 'doubao-seedance-2-0-260128',
             baseUrlOverride: 'https://ark.example/api/v3',
-            providerModelIdOverride: null
+            requestModelIdOverride: null
           }]
         },
         secrets: { videoModelApiKeys: { 'doubao-seedance-2-0-260128': 'sk-video' } },
@@ -140,7 +139,7 @@ describe('video model executor', () => {
     const projectRoot = await mkdtemp(join(tmpdir(), 'axis-video-default-route-'));
     try {
       const calls: string[] = [];
-      const fetch: VideoProviderFetch = async (url, init) => {
+      const fetch: VideoModelFetch = async (url, init) => {
         calls.push(url);
         const body = init?.body ? JSON.parse(String(init.body)) : {};
         if (String(url).endsWith('/contents/generations/tasks')) {
@@ -170,10 +169,10 @@ describe('video model executor', () => {
     }
   });
 
-  it('records raw provider request and output metadata for generated video artifacts', async () => {
+  it('records model request and output metadata for generated video artifacts', async () => {
     const projectRoot = await mkdtemp(join(tmpdir(), 'axis-video-metadata-'));
     const recorded: unknown[] = [];
-    const fetch: VideoProviderFetch = async (url, init) => {
+    const fetch: VideoModelFetch = async (url, init) => {
       if (url.endsWith('/contents/generations/tasks') && init?.method === 'POST') {
         return jsonResponse({ id: 'task-metadata', status: 'queued' });
       }
@@ -197,7 +196,7 @@ describe('video model executor', () => {
           }
         },
         settings: {
-          videoModels: [{ axisModelId: 'doubao-seedance-2-0-260128', baseUrlOverride: 'https://ark.example/api/v3', providerModelIdOverride: null }]
+          videoModels: [{ axisModelId: 'doubao-seedance-2-0-260128', baseUrlOverride: 'https://ark.example/api/v3', requestModelIdOverride: null }]
         },
         secrets: { videoModelApiKeys: { 'doubao-seedance-2-0-260128': 'sk-video' } },
         pollIntervalMs: 0,
@@ -211,7 +210,7 @@ describe('video model executor', () => {
       expect(recorded).toHaveLength(1);
       expect(recorded[0]).toMatchObject({
         projectRelativePath: expect.stringMatching(/^generated\/turn-video-metadata\/.+\.mp4$/),
-        providerCall: {
+        modelRun: {
           request: {
             method: 'POST',
             url: 'https://ark.example/api/v3/contents/generations/tasks',
@@ -232,7 +231,6 @@ describe('video model executor', () => {
           }
         }
       });
-      expect(recorded[0]).not.toHaveProperty('file');
     } finally {
       await rm(projectRoot, { recursive: true, force: true });
     }
@@ -246,7 +244,7 @@ describe('video model executor', () => {
       await writeFile(join(projectRoot, 'clip.mp4'), tinyMp4);
 
       let submittedContent: unknown;
-      const fetch: VideoProviderFetch = async (url, init) => {
+      const fetch: VideoModelFetch = async (url, init) => {
         if (url.endsWith('/contents/generations/tasks') && init?.method === 'POST') {
           submittedContent = JSON.parse(String(init.body)).content;
           return jsonResponse({ id: 'task-2', status: 'queued' });
@@ -271,7 +269,7 @@ describe('video model executor', () => {
           }
         },
         settings: {
-          videoModels: [{ axisModelId: 'doubao-seedance-2-0-260128', baseUrlOverride: 'https://ark.example/api/v3', providerModelIdOverride: null }]
+          videoModels: [{ axisModelId: 'doubao-seedance-2-0-260128', baseUrlOverride: 'https://ark.example/api/v3', requestModelIdOverride: null }]
         },
         secrets: { videoModelApiKeys: { 'doubao-seedance-2-0-260128': 'sk-video' } },
         pollIntervalMs: 0,
@@ -292,7 +290,7 @@ describe('video model executor', () => {
           }
         },
         settings: {
-          videoModels: [{ axisModelId: 'doubao-seedance-2-0-260128', baseUrlOverride: 'https://ark.example/api/v3', providerModelIdOverride: null }]
+          videoModels: [{ axisModelId: 'doubao-seedance-2-0-260128', baseUrlOverride: 'https://ark.example/api/v3', requestModelIdOverride: null }]
         },
         secrets: { videoModelApiKeys: { 'doubao-seedance-2-0-260128': 'sk-video' } },
         fetch
@@ -306,8 +304,108 @@ describe('video model executor', () => {
     }
   });
 
-  it('returns redacted provider details for failed provider responses', async () => {
-    const projectRoot = await mkdtemp(join(tmpdir(), 'axis-video-provider-error-'));
+  it('cancels a stalled model JSON response body after the body timeout', async () => {
+    const projectRoot = await mkdtemp(join(tmpdir(), 'axis-video-json-body-timeout-'));
+    let canceled = false;
+    const fetch: VideoModelFetch = async () => new Response(
+      new ReadableStream({
+        start(controller) {
+          controller.enqueue(new TextEncoder().encode('{"id":'));
+        },
+        cancel() {
+          canceled = true;
+        }
+      }),
+      { status: 200, headers: { 'content-type': 'application/json' } }
+    );
+    try {
+      const pending = executeVideoModelRequest({
+        projectRoot,
+        invocationId: 'turn-video-json-body-timeout',
+        input: {
+          model: 'doubao-seedance-2-0-260128',
+          arguments: { content: [{ type: 'text', text: 'cover video' }] }
+        },
+        settings: {
+          videoModels: [{ axisModelId: 'doubao-seedance-2-0-260128', baseUrlOverride: 'https://ark.example/api/v3', requestModelIdOverride: null }]
+        },
+        secrets: { videoModelApiKeys: { 'doubao-seedance-2-0-260128': 'sk-video' } },
+        requestTimeoutMs: 5,
+        fetch
+      });
+      const outcome = await Promise.race([
+        pending.then((result) => ({ type: 'result' as const, result })),
+        sleep(100).then(() => ({ type: 'pending' as const }))
+      ]);
+
+      expect(canceled).toBe(true);
+      expect(outcome.type).toBe('result');
+      if (outcome.type === 'result') {
+        expect(outcome.result.status).toBe('error');
+        expect(outcome.result.error).toBe('video_request_failed');
+        expect(outcome.result.content).toContain('timed out');
+      }
+    } finally {
+      await rm(projectRoot, { recursive: true, force: true });
+    }
+  });
+
+  it('cancels a stalled video artifact response body after the body timeout', async () => {
+    const projectRoot = await mkdtemp(join(tmpdir(), 'axis-video-artifact-body-timeout-'));
+    let canceled = false;
+    const fetch: VideoModelFetch = async (url, init) => {
+      if (url.endsWith('/contents/generations/tasks') && init?.method === 'POST') {
+        return jsonResponse({ id: 'task-body-timeout', status: 'queued' });
+      }
+      if (url.endsWith('/contents/generations/tasks/task-body-timeout')) {
+        return jsonResponse({ id: 'task-body-timeout', status: 'succeeded', content: { video_url: 'https://cdn.example/video.mp4' } });
+      }
+      return new Response(
+        new ReadableStream({
+          start(controller) {
+            controller.enqueue(tinyMp4);
+          },
+          cancel() {
+            canceled = true;
+          }
+        }),
+        { status: 200, headers: { 'content-type': 'video/mp4' } }
+      );
+    };
+    try {
+      const pending = executeVideoModelRequest({
+        projectRoot,
+        invocationId: 'turn-video-artifact-body-timeout',
+        input: {
+          model: 'doubao-seedance-2-0-260128',
+          arguments: { content: [{ type: 'text', text: 'cover video' }] }
+        },
+        settings: {
+          videoModels: [{ axisModelId: 'doubao-seedance-2-0-260128', baseUrlOverride: 'https://ark.example/api/v3', requestModelIdOverride: null }]
+        },
+        secrets: { videoModelApiKeys: { 'doubao-seedance-2-0-260128': 'sk-video' } },
+        requestTimeoutMs: 5,
+        fetch
+      });
+      const outcome = await Promise.race([
+        pending.then((result) => ({ type: 'result' as const, result })),
+        sleep(100).then(() => ({ type: 'pending' as const }))
+      ]);
+
+      expect(canceled).toBe(true);
+      expect(outcome.type).toBe('result');
+      if (outcome.type === 'result') {
+        expect(outcome.result.status).toBe('error');
+        expect(outcome.result.error).toBe('video_request_failed');
+        expect(outcome.result.content).toContain('timed out');
+      }
+    } finally {
+      await rm(projectRoot, { recursive: true, force: true });
+    }
+  });
+
+  it('returns a redacted model response error when the endpoint rejects a video request', async () => {
+    const projectRoot = await mkdtemp(join(tmpdir(), 'axis-video-model-error-'));
     try {
       const result = await executeVideoModelRequest({
         projectRoot,
@@ -317,7 +415,7 @@ describe('video model executor', () => {
           arguments: { content: [{ type: 'text', text: 'bad prompt' }] }
         },
         settings: {
-          videoModels: [{ axisModelId: 'doubao-seedance-2-0-260128', baseUrlOverride: 'https://ark.example/api/v3', providerModelIdOverride: null }]
+          videoModels: [{ axisModelId: 'doubao-seedance-2-0-260128', baseUrlOverride: 'https://ark.example/api/v3', requestModelIdOverride: null }]
         },
         secrets: { videoModelApiKeys: { 'doubao-seedance-2-0-260128': 'sk-video' } },
         fetch: async () => new Response(JSON.stringify({ error: { code: 'BadRequest', message: 'prompt rejected', apiKey: 'sk-video' } }), {
@@ -328,13 +426,17 @@ describe('video model executor', () => {
 
       expect(result.status).toBe('error');
       expect(result.error).toBe('video_request_failed');
-      expect(result.providerResponse).toMatchObject({ status: 400, body: expect.objectContaining({ error: expect.objectContaining({ message: 'prompt rejected' }) }) });
+      expect(result.content).toBe('Video request failed: model endpoint responded with HTTP 400.');
       expect(JSON.stringify(result)).not.toContain('sk-video');
     } finally {
       await rm(projectRoot, { recursive: true, force: true });
     }
   });
 });
+
+function sleep(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
 
 function jsonResponse(value: unknown): Response {
   return new Response(JSON.stringify(value), { status: 200, headers: { 'content-type': 'application/json' } });

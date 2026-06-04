@@ -2,9 +2,15 @@ import { randomUUID } from 'node:crypto';
 import { basename } from 'node:path';
 import { readProjectFileBytes, writeProjectFile } from '@axis/project-core';
 import type { SecretsConfig, VideoModelsConfig } from '../config.js';
+import {
+  DEFAULT_REQUEST_TIMEOUT_MS,
+  fetchWithRequestTimeout,
+  readResponseArrayBufferWithTimeout as readResponseArrayBufferBodyWithTimeout,
+  readResponseTextWithTimeout as readResponseTextBodyWithTimeout
+} from '../requestTimeout.js';
 import { createVideoModelCatalog, type VideoModelCatalogEntry } from './catalog.js';
 
-export type VideoProviderFetch = (url: string, init?: RequestInit) => Promise<Response>;
+export type VideoModelFetch = (url: string, init?: RequestInit) => Promise<Response>;
 
 export interface VideoModelRequestInput {
   model: string;
@@ -27,7 +33,7 @@ export interface ExecuteVideoModelRequestInput {
   input: VideoModelRequestInput;
   settings: VideoModelsConfig;
   secrets: Pick<SecretsConfig, 'videoModelApiKeys'>;
-  fetch?: VideoProviderFetch;
+  fetch?: VideoModelFetch;
   recordGeneratedAsset?: VideoGeneratedAssetRecorder;
   pollIntervalMs?: number;
   requestTimeoutMs?: number;
@@ -37,7 +43,7 @@ export interface ExecuteVideoModelRequestInput {
 
 export interface VideoGeneratedAssetRecorderInput {
   projectRelativePath: string;
-  providerCall: {
+  modelRun: {
     request: unknown;
     output: unknown;
   };
@@ -45,14 +51,14 @@ export interface VideoGeneratedAssetRecorderInput {
 
 export type VideoGeneratedAssetRecorder = (input: VideoGeneratedAssetRecorderInput) => Promise<void>;
 
-export type VideoProviderResponseSummary = {
+type ModelEndpointResponse = {
   status?: number;
   body: unknown;
 };
 
 export type ExecuteVideoModelRequestResult =
   | { status: 'ok'; content: string; artifacts: VideoModelRequestArtifact[]; logs: Array<Record<string, unknown>> }
-  | { status: 'error'; content: string; error: 'invalid_input' | 'model_unavailable' | 'video_model_not_configured' | 'video_request_failed'; logs: Array<Record<string, unknown>>; providerResponse?: VideoProviderResponseSummary };
+  | { status: 'error'; content: string; error: 'invalid_input' | 'model_unavailable' | 'video_model_not_configured' | 'video_request_failed'; logs: Array<Record<string, unknown>> };
 
 interface RequestState {
   projectRoot: string;
@@ -60,11 +66,11 @@ interface RequestState {
   entry: VideoModelCatalogEntry;
   baseUrl: string;
   apiKey: string;
-  providerModelId: string;
+  requestModelId: string;
   args: Record<string, unknown>;
-  fetch: VideoProviderFetch;
+  fetch: VideoModelFetch;
   recordGeneratedAsset?: VideoGeneratedAssetRecorder;
-  providerCall: ProviderCallLog;
+  modelRun: ModelRunLog;
   logs: Array<Record<string, unknown>>;
   pollIntervalMs: number;
   requestTimeoutMs: number;
@@ -72,24 +78,23 @@ interface RequestState {
   signal?: AbortSignal;
 }
 
-interface ProviderCallLog {
+interface ModelRunLog {
   request?: unknown;
-  responses: ProviderResponseLog[];
+  responses: ModelResponseLog[];
 }
 
-interface ProviderResponseLog {
+interface ModelResponseLog {
   status: number;
   headers: Record<string, string>;
   body: unknown;
 }
 
 type VideoRequestError = Extract<ExecuteVideoModelRequestResult, { status: 'error' }>;
-type JsonResponseResult = { ok: true; payload: Record<string, unknown>; providerResponse: VideoProviderResponseSummary } | { ok: false; result: VideoRequestError };
+type JsonResponseResult = { ok: true; payload: Record<string, unknown>; endpointResponse: ModelEndpointResponse } | { ok: false; result: VideoRequestError };
 type VideoTaskStatus = 'queued' | 'running' | 'succeeded' | 'failed' | 'expired' | 'canceled';
 
 const DEFAULT_POLL_ATTEMPTS = 180;
 const DEFAULT_POLL_INTERVAL_MS = 2_000;
-const DEFAULT_REQUEST_TIMEOUT_MS = 120_000;
 
 export async function executeVideoModelRequest(input: ExecuteVideoModelRequestInput): Promise<ExecuteVideoModelRequestResult> {
   const logs: Array<Record<string, unknown>> = [];
@@ -132,21 +137,20 @@ export async function executeVideoModelRequest(input: ExecuteVideoModelRequestIn
     entry,
     baseUrl: modelSettings?.baseUrlOverride?.trim() || entry.defaultBaseUrl,
     apiKey,
-    providerModelId: modelSettings?.providerModelIdOverride?.trim() || entry.defaultProviderModelId,
+    requestModelId: modelSettings?.requestModelIdOverride?.trim() || entry.defaultRequestModelId,
     args,
     fetch: input.fetch ?? fetch,
     ...(input.recordGeneratedAsset ? { recordGeneratedAsset: input.recordGeneratedAsset } : {}),
-    providerCall: { responses: [] },
+    modelRun: { responses: [] },
     logs,
     pollIntervalMs: input.pollIntervalMs ?? DEFAULT_POLL_INTERVAL_MS,
     requestTimeoutMs: input.requestTimeoutMs ?? input.input.timeoutMs ?? DEFAULT_REQUEST_TIMEOUT_MS,
     pollMaxAttempts: input.pollMaxAttempts ?? DEFAULT_POLL_ATTEMPTS,
     ...(input.signal ? { signal: input.signal } : {})
   };
-  log(state, 'resolve_provider', {
-    provider: entry.provider,
+  log(state, 'resolve_model', {
     model: entry.axisModelId,
-    providerModelId: state.providerModelId,
+    requestModelId: state.requestModelId,
     configured: true
   });
 
@@ -175,7 +179,7 @@ export async function executeVideoModelRequest(input: ExecuteVideoModelRequestIn
 async function executeVolcengineArk(
   state: RequestState
 ): Promise<{ status: 'ok'; artifacts: VideoModelRequestArtifact[] } | VideoRequestError> {
-  const body = { model: state.providerModelId, ...stripOutputArgs(state.args) };
+  const body = { model: state.requestModelId, ...stripOutputArgs(state.args) };
   const submitUrl = joinUrl(state.baseUrl, 'contents/generations/tasks');
   log(state, 'build_request', { url: submitUrl, argumentKeys: Object.keys(state.args).sort(), contentTypes: contentTypes(state.args.content) });
   const submit = await postJson(state, submitUrl, authorizationHeaders(state), body);
@@ -184,7 +188,7 @@ async function executeVolcengineArk(
   }
   const taskId = extractTaskId(submit.payload);
   if (!taskId) {
-    return providerFailure(state, 'Video request failed: provider response did not include a task id.', submit.providerResponse);
+    return modelFailure(state, 'Video request failed: model response did not include a task id.', submit.endpointResponse);
   }
 
   const pollUrl = joinUrl(state.baseUrl, `contents/generations/tasks/${encodeURIComponent(taskId)}`);
@@ -195,13 +199,13 @@ async function executeVolcengineArk(
     }
     const taskStatus = taskStatusFromPayload(poll.payload);
     if (!taskStatus) {
-      return providerFailure(state, 'Video request failed: provider returned an unknown task status.', poll.providerResponse);
+      return modelFailure(state, 'Video request failed: model endpoint returned an unknown task status.', poll.endpointResponse);
     }
     log(state, 'execute_request', { phase: 'poll', taskId, taskStatus });
     if (taskStatus === 'succeeded') {
       const videoUrl = extractOutputUrl(poll.payload, 'video_url');
       if (!videoUrl) {
-        return providerFailure(state, 'Video request failed: provider response did not include content.video_url.', poll.providerResponse);
+        return modelFailure(state, 'Video request failed: model response did not include content.video_url.', poll.endpointResponse);
       }
       const artifacts: VideoModelRequestArtifact[] = [await storeDownloadedArtifact(state, videoUrl, 0, 'video/mp4')];
       if (state.args.return_last_frame === true) {
@@ -214,11 +218,11 @@ async function executeVolcengineArk(
       return { status: 'ok', artifacts };
     }
     if (taskStatus === 'failed' || taskStatus === 'expired' || taskStatus === 'canceled') {
-      return providerFailure(state, `Video request failed: provider task ${taskStatus}.`, poll.providerResponse);
+      return modelFailure(state, `Video request failed: model task ${taskStatus}.`, poll.endpointResponse);
     }
     await delay(state.pollIntervalMs, state.signal);
   }
-  return providerFailure(state, 'Video request failed: provider task polling timed out.', { body: { taskId, pollMaxAttempts: state.pollMaxAttempts } });
+  return modelFailure(state, 'Video request failed: model task polling timed out.', { body: { taskId, pollMaxAttempts: state.pollMaxAttempts } });
 }
 
 async function resolveContentReferences(args: Record<string, unknown>, projectRoot: string): Promise<Record<string, unknown>> {
@@ -273,7 +277,7 @@ async function readLocalReference(projectRoot: string, path: string, label: stri
 
 async function postJson(state: RequestState, url: string, headers: Record<string, string>, body: unknown): Promise<JsonResponseResult> {
   const requestHeaders = { 'content-type': 'application/json', ...headers };
-  recordProviderRequest(state, {
+  recordModelRequest(state, {
     method: 'POST',
     url,
     headers: requestHeaders,
@@ -284,69 +288,80 @@ async function postJson(state: RequestState, url: string, headers: Record<string
     headers: requestHeaders,
     body: JSON.stringify(body)
   });
-  return parseProviderResponse(state, response);
+  return parseModelResponse(state, response);
 }
 
 async function getJson(state: RequestState, url: string, headers: Record<string, string>): Promise<JsonResponseResult> {
-  recordProviderRequest(state, {
+  recordModelRequest(state, {
     method: 'GET',
     url,
     headers
   });
   const response = await fetchWithTimeout(state, url, { method: 'GET', headers });
-  return parseProviderResponse(state, response);
+  return parseModelResponse(state, response);
 }
 
-async function parseProviderResponse(state: RequestState, response: Response): Promise<JsonResponseResult> {
-  const rawBody = await response.text();
+async function parseModelResponse(state: RequestState, response: Response): Promise<JsonResponseResult> {
+  const rawBody = await readResponseTextWithTimeout(state, response);
   let body: Record<string, unknown>;
   try {
     body = parseJsonObject(rawBody);
   } catch (error) {
-    const providerResponse = {
+    const endpointResponse = {
       status: response.status,
       body: rawBody.trim() ? { raw: truncateString(rawBody) } : { raw: '' }
     };
-    state.providerCall.responses.push({
+    state.modelRun.responses.push({
       status: response.status,
       headers: Object.fromEntries(response.headers.entries()),
-      body: providerResponse.body
+      body: endpointResponse.body
     });
-    log(state, 'execute_request', { status: response.status, payloadShape: summarizeJsonShape(providerResponse.body) });
-    return { ok: false, result: providerFailure(state, `Video request failed: ${errorMessage(error)}`, providerResponse) };
+    log(state, 'execute_request', { status: response.status, payloadShape: summarizeJsonShape(endpointResponse.body) });
+    return { ok: false, result: modelFailure(state, `Video request failed: ${errorMessage(error)}`, endpointResponse) };
   }
-  state.providerCall.responses.push({
+  state.modelRun.responses.push({
     status: response.status,
     headers: Object.fromEntries(response.headers.entries()),
     body
   });
-  const providerResponse = { status: response.status, body: redactProviderValue(body, state.apiKey) };
+  const endpointResponse = { status: response.status, body: redactModelResponseValue(body, state.apiKey) };
   log(state, 'execute_request', { status: response.status, payloadShape: summarizeJsonShape(body) });
   if (!response.ok) {
-    return { ok: false, result: providerFailure(state, `Video request failed: provider responded with HTTP ${response.status}.`, providerResponse) };
+    return { ok: false, result: modelFailure(state, `Video request failed: model endpoint responded with HTTP ${response.status}.`, endpointResponse) };
   }
-  return { ok: true, payload: body, providerResponse };
+  return { ok: true, payload: body, endpointResponse };
 }
 
 async function fetchWithTimeout(state: RequestState, url: string, init: RequestInit): Promise<Response> {
-  if (state.signal?.aborted) {
-    throw state.signal.reason ?? new Error('Video request aborted.');
-  }
-  const controller = new AbortController();
-  const timeout = setTimeout(() => controller.abort(new Error(`Video request timed out after ${state.requestTimeoutMs}ms`)), state.requestTimeoutMs);
-  const onAbort = () => controller.abort(state.signal?.reason ?? new Error('Video request aborted.'));
-  state.signal?.addEventListener('abort', onAbort, { once: true });
-  try {
-    return await state.fetch(url, { ...init, signal: controller.signal });
-  } finally {
-    clearTimeout(timeout);
-    state.signal?.removeEventListener('abort', onAbort);
-  }
+  return fetchWithRequestTimeout(state.fetch, url, init, {
+    signal: state.signal,
+    timeoutMs: state.requestTimeoutMs,
+    timeoutMessage: `Video request timed out after ${state.requestTimeoutMs}ms`,
+    abortMessage: 'Video request aborted.'
+  });
+}
+
+async function readResponseTextWithTimeout(state: RequestState, response: Response): Promise<string> {
+  return readResponseTextBodyWithTimeout(response, {
+    signal: state.signal,
+    timeoutMs: state.requestTimeoutMs,
+    timeoutMessage: `Video response body timed out after ${state.requestTimeoutMs}ms`,
+    abortMessage: 'Video request aborted.'
+  });
+}
+
+async function readResponseArrayBufferWithTimeout(state: RequestState, response: Response): Promise<ArrayBuffer> {
+  return readResponseArrayBufferBodyWithTimeout(response, {
+    signal: state.signal,
+    timeoutMs: state.requestTimeoutMs,
+    timeoutMessage: `Video response body timed out after ${state.requestTimeoutMs}ms`,
+    abortMessage: 'Video request aborted.'
+  });
 }
 
 async function storeDownloadedArtifact(state: RequestState, url: string, index: number, fallbackMimeType: string): Promise<VideoModelRequestArtifact> {
   const response = await fetchWithTimeout(state, url, { method: 'GET' });
-  const bytes = new Uint8Array(await response.arrayBuffer());
+  const bytes = new Uint8Array(await readResponseArrayBufferWithTimeout(state, response));
   if (!response.ok) {
     throw new Error(`Video artifact download failed: ${response.status}`);
   }
@@ -361,10 +376,10 @@ async function storeDownloadedArtifact(state: RequestState, url: string, index: 
   const normalizedPath = await writeProjectFile(state.projectRoot, projectRelativePath, bytes);
   await state.recordGeneratedAsset?.({
     projectRelativePath: normalizedPath,
-    providerCall: {
-      request: state.providerCall.request ?? null,
+    modelRun: {
+      request: state.modelRun.request ?? null,
       output: {
-        responses: [...state.providerCall.responses],
+        responses: [...state.modelRun.responses],
         artifactIndex: index,
         sourceUrl: url
       }
@@ -378,24 +393,23 @@ async function storeDownloadedArtifact(state: RequestState, url: string, index: 
   };
 }
 
-function recordProviderRequest(state: RequestState, request: unknown): void {
-  if (state.providerCall.request === undefined) {
-    state.providerCall.request = request;
+function recordModelRequest(state: RequestState, request: unknown): void {
+  if (state.modelRun.request === undefined) {
+    state.modelRun.request = request;
   }
 }
 
-function providerFailure(state: RequestState, content: string, providerResponse?: VideoProviderResponseSummary): VideoRequestError {
-  log(state, 'provider_failure', {
+function modelFailure(state: RequestState, content: string, endpointResponse?: ModelEndpointResponse): VideoRequestError {
+  log(state, 'model_failure', {
     message: content,
-    providerStatus: providerResponse?.status ?? null,
-    payloadShape: summarizeJsonShape(providerResponse?.body)
+    endpointStatus: endpointResponse?.status ?? null,
+    payloadShape: summarizeJsonShape(endpointResponse?.body)
   });
   return {
     status: 'error',
     content,
     error: 'video_request_failed',
-    logs: state.logs,
-    ...(providerResponse ? { providerResponse } : {})
+    logs: state.logs
   };
 }
 
@@ -455,7 +469,6 @@ function stripOutputArgs(args: Record<string, unknown>): Record<string, unknown>
   const next = { ...args };
   delete next.output_path;
   delete next.output_directory;
-  delete next.provider_model_id;
   return next;
 }
 
@@ -521,11 +534,11 @@ function extensionForMimeType(mimeType: string): string {
 
 function parseJsonObject(rawBody: string): Record<string, unknown> {
   if (!rawBody.trim()) {
-    throw new Error('provider returned an empty response.');
+    throw new Error('model endpoint returned an empty response.');
   }
   const parsed = JSON.parse(rawBody) as unknown;
   if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
-    throw new Error('provider returned a non-object JSON response.');
+    throw new Error('model endpoint returned a non-object JSON response.');
   }
   return parsed as Record<string, unknown>;
 }
@@ -534,14 +547,14 @@ function objectAt(value: unknown): Record<string, unknown> | undefined {
   return value && typeof value === 'object' && !Array.isArray(value) ? value as Record<string, unknown> : undefined;
 }
 
-function redactProviderValue(value: unknown, apiKey: string): unknown {
+function redactModelResponseValue(value: unknown, apiKey: string): unknown {
   if (Array.isArray(value)) {
-    return value.map((item) => redactProviderValue(item, apiKey));
+    return value.map((item) => redactModelResponseValue(item, apiKey));
   }
   if (value && typeof value === 'object') {
     return Object.fromEntries(Object.entries(value as Record<string, unknown>).map(([key, item]) => [
       key,
-      /authorization|token|secret|api[-_]?key|apikey/i.test(key) ? '[redacted]' : redactProviderValue(item, apiKey)
+      /authorization|token|secret|api[-_]?key|apikey/i.test(key) ? '[redacted]' : redactModelResponseValue(item, apiKey)
     ]));
   }
   if (typeof value === 'string') {

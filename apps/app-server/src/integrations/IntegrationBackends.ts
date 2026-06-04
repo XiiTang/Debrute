@@ -1,17 +1,12 @@
 import type {
   IntegrationCatalogItem,
   IntegrationCommand,
-  IntegrationOperationDiagnostic,
-  IntegrationOperationKind,
-  IntegrationProbeErrorKind,
   PythonCliInstallerId,
   PythonCliIntegrationCatalogItem,
   SystemPackageIntegrationCatalogItem,
   SystemPackageManagerId
 } from './IntegrationCatalog.js';
-import { resolveExecutable, runIntegrationCommand, type IntegrationCommandInput, type IntegrationCommandResult } from './IntegrationCommandRunner.js';
-
-export { runIntegrationCommand, type IntegrationCommandInput, type IntegrationCommandResult } from './IntegrationCommandRunner.js';
+import { resolveExecutable } from './IntegrationCommandRunner.js';
 
 export interface DetectIntegrationBackendOptions {
   platform?: NodeJS.Platform;
@@ -44,6 +39,8 @@ export interface ParsedIntegrationQuery {
   updateAvailable: boolean;
   unavailableReason?: string;
 }
+
+type IntegrationOperationKind = 'install' | 'update' | 'uninstall';
 
 const QUERY_TIMEOUT_MS = 20_000;
 const PACKAGE_NOT_INSTALLED_REASON = 'Package manager does not report this package as installed.';

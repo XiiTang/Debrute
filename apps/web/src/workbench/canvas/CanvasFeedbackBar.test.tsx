@@ -1,0 +1,19 @@
+import React from 'react';
+import { renderToStaticMarkup } from 'react-dom/server';
+import { describe, expect, it } from 'vitest';
+import { CanvasFeedbackBar } from './CanvasFeedbackBar';
+
+describe('CanvasFeedbackBar', () => {
+  it('keeps wheel input local to the feedback note field', () => {
+    const html = renderToStaticMarkup(
+      <CanvasFeedbackBar
+        projectRelativePath="flow/cover.png"
+        entry={undefined}
+        onUpdate={async () => undefined}
+      />
+    );
+
+    expect(html).toContain('class="canvas-feedback-note"');
+    expect(html).toContain('data-canvas-local-wheel="true"');
+  });
+});

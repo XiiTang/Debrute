@@ -22,13 +22,11 @@ vi.mock('@axis/app-server', () => {
       status: 'error',
       error: {
         code: 'request_failed',
-        message: 'Image request failed: provider responded with HTTP 429.'
+        message: 'Image request failed: model endpoint responded with HTTP 429.'
       },
       outputs: {
-        content: 'Image request failed: provider responded with HTTP 429.',
-        provider: 'openai',
-        model: 'gpt-image-2',
-        raw_provider_output: '{"error":{"message":"quota exceeded"}}'
+        content: 'Image request failed: model endpoint responded with HTTP 429.',
+        model: 'gpt-image-2'
       },
       logs: [{ stage: 'execute_request', status: 429 }]
     }));
@@ -174,7 +172,7 @@ describe('axis cli image generation batch', () => {
     ].join('\n')]);
   });
 
-  test('returns provider request failures with upstream raw response fields', async () => {
+  test('prints the current model request failure payload', async () => {
     const lines: string[] = [];
 
     await runCli([
@@ -192,12 +190,10 @@ describe('axis cli image generation batch', () => {
       arguments: { prompt: 'cover' }
     });
     expect(lines).toEqual([[
-      'axis/1 error cmd=generate.image code=provider_request_failed',
-      'message="Image request failed: provider responded with HTTP 429."',
-      'content="Image request failed: provider responded with HTTP 429."',
-      'provider=openai',
-      'model=gpt-image-2',
-      'raw_provider_output="{\\"error\\":{\\"message\\":\\"quota exceeded\\"}}"'
+      'axis/1 error cmd=generate.image code=model_request_failed',
+      'message="Image request failed: model endpoint responded with HTTP 429."',
+      'content="Image request failed: model endpoint responded with HTTP 429."',
+      'model=gpt-image-2'
     ].join('\n')]);
   });
 });

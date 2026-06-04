@@ -10,6 +10,11 @@ export {
 } from './server/AxisAppServer.js';
 
 export {
+  AxisGlobalRuntimeServer,
+  type AxisGlobalRuntimeServerOptions
+} from './server/AxisGlobalRuntimeServer.js';
+
+export {
   GlobalConfigStore,
   type CanvasSettingsConfig,
   type GlobalConfigPaths
@@ -23,7 +28,6 @@ export type {
   IntegrationId,
   IntegrationInstallBackendKind,
   IntegrationOperationDiagnostic,
-  IntegrationOperationKind,
   IntegrationOperationStatus,
   IntegrationSettingsView,
   IntegrationStatus,

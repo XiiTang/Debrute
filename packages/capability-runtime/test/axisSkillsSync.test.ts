@@ -50,23 +50,6 @@ describe('Axis Skills sync service', () => {
     }
   });
 
-  it('does not expose old Skill file preview APIs or payload fields', async () => {
-    const fixture = await createFixture();
-    try {
-      await writeSkill(fixture.shared, 'axis-core', { extraFiles: { 'references/guide.md': 'guide' } });
-      const service = createService(fixture);
-
-      const snapshot = await service.status();
-
-      expect('readFile' in service).toBe(false);
-      expect(snapshot).not.toHaveProperty('catalogSkills');
-      expect(snapshot.skills[0]).not.toHaveProperty('body');
-      expect(snapshot.skills[0]).not.toHaveProperty('files');
-    } finally {
-      await cleanupFixture(fixture);
-    }
-  });
-
   it('reports invalid installed AXIS-managed Skills as diagnostics', async () => {
     const fixture = await createFixture();
     try {
@@ -82,35 +65,25 @@ describe('Axis Skills sync service', () => {
     }
   });
 
-  it('normal sync updates installed Skills, installs new bundled Skills, and skips absent previously known Skills', async () => {
+  it('normal sync installs the current bundled AXIS Skills payload', async () => {
     const fixture = await createFixture();
     try {
       await writeSkill(fixture.bundle, 'axis-core', { body: 'new core' });
       await writeSkill(fixture.bundle, 'axis-new', { body: 'new skill' });
       await writeSkill(fixture.bundle, 'axis-optional', { body: 'optional skill' });
       await writeSkill(fixture.shared, 'axis-core', { body: 'old core' });
-      await writeState(fixture, {
-        schemaVersion: 1,
-        axisVersion: '1.0.0',
-        bundledSkills: ['axis-core', 'axis-optional'],
-        updatedSkills: ['axis-core'],
-        skippedSkills: [],
-        diagnostics: [],
-        updatedAt: '2026-05-30T00:00:00.000Z'
-      });
       const service = createService(fixture);
 
       const sync = await service.sync({ force: false });
 
-      expect(sync.updatedSkills.map((skill) => skill.name)).toEqual(['axis-core', 'axis-new']);
-      expect(sync.skippedSkills).toEqual(['axis-optional']);
+      expect(sync.updatedSkills.map((skill) => skill.name)).toEqual(['axis-core', 'axis-new', 'axis-optional']);
       await expect(readFile(join(fixture.shared, 'axis-core', 'SKILL.md'), 'utf8')).resolves.toContain('new core');
       await expect(readFile(join(fixture.shared, 'axis-new', 'SKILL.md'), 'utf8')).resolves.toContain('new skill');
-      await expect(pathExists(join(fixture.shared, 'axis-optional'))).resolves.toBe(false);
-      const state = JSON.parse(await readFile(fixture.statePath, 'utf8')) as { axisVersion: string; bundledSkills: string[]; skippedSkills: string[] };
+      await expect(readFile(join(fixture.shared, 'axis-optional', 'SKILL.md'), 'utf8')).resolves.toContain('optional skill');
+      const state = JSON.parse(await readFile(fixture.statePath, 'utf8')) as { axisVersion: string; bundledSkills: string[]; updatedSkills: string[] };
       expect(state.axisVersion).toBe('1.2.3');
       expect(state.bundledSkills).toEqual(['axis-core', 'axis-new', 'axis-optional']);
-      expect(state.skippedSkills).toEqual(['axis-optional']);
+      expect(state.updatedSkills).toEqual(['axis-core', 'axis-new', 'axis-optional']);
     } finally {
       await cleanupFixture(fixture);
     }
@@ -128,7 +101,6 @@ describe('Axis Skills sync service', () => {
       const sync = await service.sync({ force: true });
 
       expect(sync.updatedSkills.map((skill) => skill.name)).toEqual(['axis-core', 'axis-optional']);
-      expect(sync.skippedSkills).toEqual([]);
       await expect(readFile(join(fixture.shared, 'axis-core', 'SKILL.md'), 'utf8')).resolves.toContain('force core');
       await expect(readFile(join(fixture.shared, 'axis-optional', 'SKILL.md'), 'utf8')).resolves.toContain('force optional');
       await expect(readFile(join(fixture.shared, 'custom-skill', 'SKILL.md'), 'utf8')).resolves.toContain('custom stays');
@@ -234,11 +206,6 @@ async function writeSkill(
     await mkdir(join(absolutePath, '..'), { recursive: true });
     await writeFile(absolutePath, content, 'utf8');
   }
-}
-
-async function writeState(fixture: Fixture, state: unknown): Promise<void> {
-  await mkdir(join(fixture.home, '.axis'), { recursive: true });
-  await writeFile(fixture.statePath, `${JSON.stringify(state, null, 2)}\n`, 'utf8');
 }
 
 async function pathExists(path: string): Promise<boolean> {
