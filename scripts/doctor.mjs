@@ -21,8 +21,8 @@ const requiredPackages = [
 const failures = [];
 const nodeMajor = Number.parseInt(process.versions.node.split('.')[0] ?? '0', 10);
 
-if (nodeMajor < 22) {
-  failures.push(`Node.js 22 or newer is required. Current: ${process.version}`);
+if (nodeMajor !== 24) {
+  failures.push(`Node.js 24 is required. Current: ${process.version}`);
 }
 
 for (const path of requiredPaths) {

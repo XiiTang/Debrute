@@ -32,6 +32,13 @@ describe('GitHub release workflow contract', () => {
     expect(buildDesktopBlock).not.toContain('- run: pnpm --filter @debrute/desktop build');
   });
 
+  it('runs every Node-backed release job under Node.js 24', () => {
+    const configuredNodeVersions = [...workflow.matchAll(/node-version:\s*(\d+)/g)].map((match) => match[1]);
+
+    expect(configuredNodeVersions).toEqual(['24', '24', '24', '24']);
+    expect(workflow).not.toContain('node-version: 22');
+  });
+
   it('documents unsigned Desktop releases, Debrute CLI install, and Skills sync', () => {
     expect(readme).toContain('GitHub Releases');
     expect(readme).toContain('unsigned');

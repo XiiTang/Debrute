@@ -1,9 +1,15 @@
+import { execFileSync } from 'node:child_process';
 import { readFileSync } from 'node:fs';
+import { createRequire } from 'node:module';
 import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
 
 interface PackageJson {
   scripts: Record<string, string>;
+  build: {
+    electronVersion: string;
+  };
+  devDependencies: Record<string, string>;
 }
 
 describe('Electron development scripts', () => {
@@ -31,4 +37,30 @@ describe('Electron development scripts', () => {
 
     expect(script).toContain("external: ['electron', 'sharp']");
   });
+
+  it('targets Node.js 24 for Electron main and preload bundles', () => {
+    const script = readFileSync(join(process.cwd(), 'apps/desktop/scripts/bundle-electron.mjs'), 'utf8');
+
+    expect(script).toContain("target: 'node24'");
+    expect(script).not.toContain("target: 'node22'");
+  });
+
+  it('runs Electron main and preload bundles on embedded Node.js 24', () => {
+    const root = process.cwd();
+    const desktopPackage = JSON.parse(
+      readFileSync(join(root, 'apps/desktop/package.json'), 'utf8')
+    ) as PackageJson;
+    const desktopRequire = createRequire(join(root, 'apps/desktop/package.json'));
+    const electronExecutable = desktopRequire('electron') as string;
+    const embeddedNodeVersion = execFileSync(electronExecutable, ['-p', 'process.versions.node'], {
+      encoding: 'utf8',
+      env: {
+        ...process.env,
+        ELECTRON_RUN_AS_NODE: '1'
+      }
+    }).trim();
+
+    expect(desktopPackage.build.electronVersion).toBe(desktopPackage.devDependencies.electron);
+    expect(embeddedNodeVersion).toMatch(/^24\./);
+  }, 60_000);
 });

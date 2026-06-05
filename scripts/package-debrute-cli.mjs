@@ -19,12 +19,12 @@ const workspaceRoot = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 const pkgBin = join(workspaceRoot, 'node_modules/@yao-pkg/pkg/lib-es5/bin.js');
 
 export const debruteCliReleaseTargets = [
-  target('darwin-arm64', 'node22-macos-arm64', 'debrute', 'tar.gz'),
-  target('darwin-x64', 'node22-macos-x64', 'debrute', 'tar.gz'),
-  target('linux-arm64', 'node22-linux-arm64', 'debrute', 'tar.gz'),
-  target('linux-x64', 'node22-linux-x64', 'debrute', 'tar.gz'),
-  target('windows-arm64', 'node22-win-arm64', 'debrute.exe', 'zip'),
-  target('windows-x64', 'node22-win-x64', 'debrute.exe', 'zip')
+  target('darwin-arm64', 'node24-macos-arm64', 'debrute', 'tar.gz'),
+  target('darwin-x64', 'node24-macos-x64', 'debrute', 'tar.gz'),
+  target('linux-arm64', 'node24-linux-arm64', 'debrute', 'tar.gz'),
+  target('linux-x64', 'node24-linux-x64', 'debrute', 'tar.gz'),
+  target('windows-arm64', 'node24-win-arm64', 'debrute.exe', 'zip'),
+  target('windows-x64', 'node24-win-x64', 'debrute.exe', 'zip')
 ];
 
 export const debruteCliPkgFlags = ['--public', '--public-packages', '*', '--no-bytecode'];
@@ -63,7 +63,7 @@ export async function packageDebruteCliRelease({ all = false, outDir = join(work
     bundle: true,
     platform: 'node',
     format: 'cjs',
-    target: 'node22',
+    target: 'node24',
     external: ['sharp'],
     logOverride: {
       'empty-import-meta': 'silent'

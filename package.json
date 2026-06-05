@@ -7,7 +7,7 @@
   "description": "Debrute browser-first local creative production workbench.",
   "packageManager": "pnpm@11.2.2",
   "engines": {
-    "node": ">=22",
+    "node": ">=24 <25",
     "pnpm": ">=11.2.2 <12"
   },
   "scripts": {
@@ -35,7 +35,7 @@
   "devDependencies": {
     "@debrute/architecture-rules": "workspace:*",
     "@types/adm-zip": "^0.5.8",
-    "@types/node": "^25.6.0",
+    "@types/node": "^24.0.0",
     "@vitejs/plugin-react": "^5.1.1",
     "@yao-pkg/pkg": "^6.20.0",
     "adm-zip": "^0.5.17",

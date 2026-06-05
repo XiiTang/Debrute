@@ -9,7 +9,7 @@ const common = {
   bundle: true,
   platform: 'node',
   format: 'cjs',
-  target: 'node22',
+  target: 'node24',
   sourcemap: true,
   logOverride: {
     'empty-import-meta': 'silent'

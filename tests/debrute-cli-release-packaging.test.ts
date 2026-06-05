@@ -34,6 +34,21 @@ describe('Debrute CLI release packaging', () => {
     expect(debruteCliPkgFlags).toContain('--no-bytecode');
   });
 
+  it('embeds Node.js 24 in every CLI package target', () => {
+    expect(debruteCliReleaseTargets.map((target) => target.pkgTarget)).toEqual([
+      'node24-macos-arm64',
+      'node24-macos-x64',
+      'node24-linux-arm64',
+      'node24-linux-x64',
+      'node24-win-arm64',
+      'node24-win-x64'
+    ]);
+
+    const packagingScript = readFileSync(join(process.cwd(), 'scripts/package-debrute-cli.mjs'), 'utf8');
+    expect(packagingScript).toContain("target: 'node24'");
+    expect(packagingScript).not.toContain('node22');
+  });
+
   it('builds workspace references before packaging web assets', () => {
     const packagingScript = readFileSync(join(process.cwd(), 'scripts/package-debrute-cli.mjs'), 'utf8');
     const workspaceBuild = "['check']";
