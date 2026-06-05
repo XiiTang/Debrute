@@ -9,6 +9,8 @@ describe('GitHub release workflow contract', () => {
   it('uses a full release workflow with preflight, CLI, Desktop, and final publish jobs', () => {
     expect(workflow).toContain('preflight:');
     expect(workflow).toContain('node scripts/validate-release-version-contract.mjs');
+    expect(workflow).toContain('Install ripgrep');
+    expect(workflow).toContain('sudo apt-get update && sudo apt-get install -y ripgrep');
     expect(workflow).toContain('build-cli:');
     expect(workflow).toContain('build-desktop:');
     expect(workflow).toContain('publish-release:');

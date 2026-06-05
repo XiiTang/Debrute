@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises';
+import { mkdir, mkdtemp, rm, utimes, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import type { NormalizedFileWatchEvent } from '@axis/project-core';
@@ -59,13 +59,16 @@ describe('App Server project watch events', () => {
       });
       await server.refreshProject();
 
-      await writeFile(join(projectRoot, 'image-production/generated/a.png'), 'fake', 'utf8');
+      const changedFilePath = join(projectRoot, 'image-production/generated/a.png');
+      const observedAt = Date.now() + 1000;
+      await writeFile(changedFilePath, 'fake', 'utf8');
+      await utimes(changedFilePath, new Date(observedAt), new Date(observedAt));
       blockLayoutRead = true;
       const watchedRefresh = callWatchedFileEvent(server, {
         type: 'changed',
-        absolutePath: join(projectRoot, 'image-production/generated/a.png'),
+        absolutePath: changedFilePath,
         projectRelativePath: 'image-production/generated/a.png',
-        observedAt: Date.now() + 1000,
+        observedAt,
         affects: ['content']
       });
       await watcherLayoutStarted.promise;
