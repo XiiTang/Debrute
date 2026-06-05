@@ -25,4 +25,10 @@ describe('Electron development scripts', () => {
     expect(script).toContain("AXIS_WORKBENCH_RUNTIME_MODE: 'attached'");
     expect(script).not.toContain('pid ?? process.pid');
   });
+
+  it('keeps sharp external so its native optional packages resolve from pnpm', () => {
+    const script = readFileSync(join(process.cwd(), 'apps/desktop/scripts/bundle-electron.mjs'), 'utf8');
+
+    expect(script).toContain("external: ['electron', 'sharp']");
+  });
 });
