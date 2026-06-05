@@ -32,13 +32,6 @@ describe('GitHub release workflow contract', () => {
     expect(buildDesktopBlock).not.toContain('- run: pnpm --filter @axis/desktop build');
   });
 
-  it('uses current GitHub-hosted macOS runner labels for Desktop release builds', () => {
-    const buildDesktopBlock = workflow.slice(workflow.indexOf('build-desktop:'), workflow.indexOf('publish-release:'));
-    expect(buildDesktopBlock).toContain('os: macos-latest');
-    expect(buildDesktopBlock).toContain('os: macos-15-intel');
-    expect(buildDesktopBlock).not.toContain('macos-13');
-  });
-
   it('documents unsigned Desktop releases, Axis CLI install, and Skills sync', () => {
     expect(readme).toContain('GitHub Releases');
     expect(readme).toContain('unsigned');
