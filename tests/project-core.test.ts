@@ -93,6 +93,7 @@ describe('project-core', () => {
   it('emits debounced watcher events for project-visible files', async () => {
     const root = await mkdtemp(join(tmpdir(), 'axis-watch-'));
     try {
+      await mkdir(join(root, 'notes'), { recursive: true });
       const eventPromise = new Promise<string>((resolve) => {
         const handle = watchProjectFiles(root, (event) => {
           if (event.projectRelativePath === 'notes/brief.md') {
@@ -101,7 +102,6 @@ describe('project-core', () => {
           }
         }, { debounceMs: 5 });
       });
-      await mkdir(join(root, 'notes'), { recursive: true });
       await writeFile(join(root, 'notes/brief.md'), 'hello\n', 'utf8');
       await expect(eventPromise).resolves.toBe('notes/brief.md');
     } finally {

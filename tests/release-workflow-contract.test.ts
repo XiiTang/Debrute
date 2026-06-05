@@ -26,6 +26,12 @@ describe('GitHub release workflow contract', () => {
     expect(buildDesktopBlock).not.toContain('softprops/action-gh-release');
   });
 
+  it('builds Desktop release assets from the workspace root in fresh matrix jobs', () => {
+    const buildDesktopBlock = workflow.slice(workflow.indexOf('build-desktop:'), workflow.indexOf('publish-release:'));
+    expect(buildDesktopBlock).toContain('- run: pnpm build');
+    expect(buildDesktopBlock).not.toContain('- run: pnpm --filter @axis/desktop build');
+  });
+
   it('documents unsigned Desktop releases, Axis CLI install, and Skills sync', () => {
     expect(readme).toContain('GitHub Releases');
     expect(readme).toContain('unsigned');

@@ -49,6 +49,7 @@ export async function packageAxisCliRelease({ all = false, outDir = join(workspa
     throw new Error(`No AXIS CLI release target for ${process.platform}-${process.arch}.`);
   }
 
+  await execFileAsync(pnpmExecutable(), ['check'], { cwd: workspaceRoot });
   await execFileAsync(pnpmExecutable(), ['--filter', '@axis/web', 'build'], { cwd: workspaceRoot });
 
   const buildRoot = join(workspaceRoot, 'build', 'axis-cli-release');

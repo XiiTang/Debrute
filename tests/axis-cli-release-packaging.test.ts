@@ -33,6 +33,15 @@ describe('Axis CLI release packaging', () => {
     expect(axisCliPkgFlags).toContain('--no-bytecode');
   });
 
+  it('builds workspace references before packaging web assets', () => {
+    const packagingScript = readFileSync(join(process.cwd(), 'scripts/package-axis-cli.mjs'), 'utf8');
+    const workspaceBuild = "['check']";
+    const webBuild = "['--filter', '@axis/web', 'build']";
+
+    expect(packagingScript).toContain(workspaceBuild);
+    expect(packagingScript.indexOf(workspaceBuild)).toBeLessThan(packagingScript.indexOf(webBuild));
+  });
+
   it('resolves payload packages from pnpm hoisted node_modules', () => {
     const root = join(tmpdir(), `axis-pnpm-hoist-${process.pid}-${Date.now()}`);
     const packageRoot = join(root, 'node_modules', '.pnpm', 'node_modules', '@img', 'sharp-darwin-x64');

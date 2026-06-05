@@ -93,7 +93,7 @@ jobs:
           node-version: 22
           cache: pnpm
       - run: pnpm install --frozen-lockfile
-      - run: pnpm --filter @axis/desktop build
+      - run: pnpm build
       - run: pnpm --filter @axis/desktop exec electron-builder --${{ matrix.arch }} --publish never
       - name: Rename Desktop assets
         shell: bash
