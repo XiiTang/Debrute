@@ -1,6 +1,6 @@
 import React, { useEffect, useState } from 'react';
 import { AlertTriangle, File, FileText, Folder, Image as ImageIcon, Maximize2, Music2, RefreshCw, Save, Video } from 'lucide-react';
-import type { ProjectedCanvasNode } from '@axis/canvas-core';
+import type { ProjectedCanvasNode } from '@debrute/canvas-core';
 import type { TextFileBuffer, WorkbenchActions } from '../../types';
 import { CanvasMonacoEditor } from './CanvasMonacoEditor';
 import { useCanvasImageResource } from './CanvasImageResourceContext';

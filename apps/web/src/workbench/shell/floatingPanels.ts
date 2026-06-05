@@ -19,7 +19,7 @@ export interface FloatingPanelState {
   panels: Record<FloatingPanelId, FloatingPanelLayout>;
 }
 
-export const FLOATING_PANEL_STORAGE_KEY = 'axis.workbench.floatingPanels';
+export const FLOATING_PANEL_STORAGE_KEY = 'debrute.workbench.floatingPanels';
 
 export const FLOATING_PANEL_DEFINITIONS: Record<FloatingPanelId, FloatingPanelDefinition> = {
   explorer: { id: 'explorer', title: 'Explorer', width: 320, height: 620, defaultX: 18, defaultY: 72 },

@@ -11,7 +11,7 @@ function trackedFiles(): string[] {
     .split('\n')
     .filter(Boolean)
     .filter((path) => path !== 'tests/debrute-rename-contract.test.ts')
-    .filter((path) => !path.startsWith('axis-docs-private/'))
+    .filter((path) => !path.startsWith('debrute-docs-private/'))
     .filter((path) => !path.includes('/officialDocs/snapshots/'));
 }
 
@@ -57,31 +57,31 @@ describe('Debrute rename contract', () => {
     }
   });
 
-  it('has no stale AXIS product paths, package scopes, release names, or command records in tracked text files', () => {
+  it('has no stale previous product paths, package scopes, release names, or command records in tracked text files', () => {
     const forbidden = [
       'AX' + 'IS',
-      'Axis CLI',
+      'Ax' + 'is CLI',
       '@' + 'axis/',
-      'apps/' + 'axis-cli',
+      'apps/' + 'axis' + '-cli',
       'axis' + '-cli',
       'axis' + '-desktop',
       'axis' + '_SHA256SUMS',
-      'XiiTang/' + 'AXIS',
+      'XiiTang/' + 'AX' + 'IS',
       'axis' + '-docs-private',
       'axis' + '/1',
       'AX' + 'IS_',
       'x-' + 'axis-daemon-token',
       'x-' + 'axis-daemon-url',
-      '.axis/',
-      '~/.axis',
-      'axis.managed',
-      'axis.package',
-      'axis.version',
-      'axisVersion',
-      'currentAxisVersion',
-      'axisModelId',
-      'axisImageInput',
-      'axisModelSpecificImageObject'
+      '.' + 'axis/',
+      '~/.' + 'axis',
+      'axis' + '.managed',
+      'axis' + '.package',
+      'axis' + '.version',
+      'axis' + 'Version',
+      'current' + 'AxisVersion',
+      'axis' + 'ModelId',
+      'axis' + 'ImageInput',
+      'axis' + 'ModelSpecificImageObject'
     ];
 
     const failures: string[] = [];
@@ -95,18 +95,18 @@ describe('Debrute rename contract', () => {
     expect(failures).toEqual([]);
   });
 
-  it('has no stale AXIS product paths in tracked file names', () => {
+  it('has no stale previous product paths in tracked file names', () => {
     const failures = trackedFiles().filter((path) => [
-      'axis-cli',
-      'axis-docs-private',
-      'axis-core',
-      'axis-image-director',
-      'AxisCli',
-      'axisCli',
-      'AxisAppServer',
-      'AxisGlobalRuntimeServer',
-      'createAxisDaemonHttpServer',
-      'axisSkillsSync'
+      'axis' + '-cli',
+      'axis' + '-docs-private',
+      'axis' + '-core',
+      'axis' + '-image-director',
+      'Ax' + 'isCli',
+      'axis' + 'Cli',
+      'Ax' + 'isAppServer',
+      'Ax' + 'isGlobalRuntimeServer',
+      'create' + 'AxisDaemonHttpServer',
+      'axis' + 'SkillsSync'
     ].some((term) => path.includes(term)));
 
     expect(failures).toEqual([]);

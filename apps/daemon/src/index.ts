@@ -1,6 +1,6 @@
 export {
-  createAxisDaemonHttpServer,
-  type AxisDaemonHttpServer,
-  type AxisDaemonHttpServerOptions,
-  type AxisDaemonRuntime
-} from './http/createAxisDaemonHttpServer.js';
+  createDebruteDaemonHttpServer,
+  type DebruteDaemonHttpServer,
+  type DebruteDaemonHttpServerOptions,
+  type DebruteDaemonRuntime
+} from './http/createDebruteDaemonHttpServer.js';

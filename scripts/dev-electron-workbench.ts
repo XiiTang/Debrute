@@ -12,7 +12,7 @@ import {
   readWorkbenchRuntimeState,
   resolveWorkbenchRuntimePaths,
   type WorkbenchRuntimeState
-} from '@axis/workbench-runtime';
+} from '@debrute/workbench-runtime';
 
 const workspaceRoot = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 const desktopRoot = join(workspaceRoot, 'apps/desktop');
@@ -28,7 +28,7 @@ for (const signal of ['SIGINT', 'SIGTERM'] as const) {
   });
 }
 
-const build = spawnSync(pnpmExecutable(), ['--filter', '@axis/desktop', 'build:electron:dev'], {
+const build = spawnSync(pnpmExecutable(), ['--filter', '@debrute/desktop', 'build:electron:dev'], {
   cwd: workspaceRoot,
   stdio: 'inherit'
 });
@@ -64,7 +64,7 @@ async function launchDesktopDevRuntime(): Promise<WorkbenchRuntimeState> {
   const webUrl = `http://127.0.0.1:${webPort}`;
   const web = spawnPnpm([
     '--filter',
-    '@axis/web',
+    '@debrute/web',
     'dev',
     '--',
     '--host',
@@ -73,14 +73,14 @@ async function launchDesktopDevRuntime(): Promise<WorkbenchRuntimeState> {
     String(webPort),
     '--strictPort'
   ], {
-    AXIS_DAEMON_URL: daemonUrl
+    DEBRUTE_DAEMON_URL: daemonUrl
   });
   const electron = spawnElectron({
-    AXIS_WORKBENCH_RUNTIME_MODE: 'hosted',
-    AXIS_WEB_URL: webUrl,
-    AXIS_DAEMON_PORT: String(daemonPort),
-    AXIS_DAEMON_TOKEN: token,
-    AXIS_WORKBENCH_RUNTIME_KIND: 'desktop-dev'
+    DEBRUTE_WORKBENCH_RUNTIME_MODE: 'hosted',
+    DEBRUTE_WEB_URL: webUrl,
+    DEBRUTE_DAEMON_PORT: String(daemonPort),
+    DEBRUTE_DAEMON_TOKEN: token,
+    DEBRUTE_WORKBENCH_RUNTIME_KIND: 'desktop-dev'
   });
   currentElectronChild = electron;
   children.push(web, electron);
@@ -106,10 +106,10 @@ async function launchDesktopDevRuntime(): Promise<WorkbenchRuntimeState> {
 
 function launchElectronAttached(state: WorkbenchRuntimeState): ChildProcess {
   return spawnElectron({
-    AXIS_WORKBENCH_RUNTIME_MODE: 'attached',
-    AXIS_DAEMON_URL: state.daemonUrl,
-    AXIS_WEB_URL: state.webUrl,
-    AXIS_DAEMON_TOKEN: state.token
+    DEBRUTE_WORKBENCH_RUNTIME_MODE: 'attached',
+    DEBRUTE_DAEMON_URL: state.daemonUrl,
+    DEBRUTE_WEB_URL: state.webUrl,
+    DEBRUTE_DAEMON_TOKEN: state.token
   });
 }
 
@@ -131,7 +131,7 @@ function spawnPnpm(args: string[], env: Record<string, string>): ChildProcess {
 
 function requirePid(child: ChildProcess, label: string): number {
   if (!child.pid) {
-    throw new Error(`AXIS ${label} process did not report a pid.`);
+    throw new Error(`Debrute ${label} process did not report a pid.`);
   }
   return child.pid;
 }

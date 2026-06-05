@@ -1,11 +1,11 @@
 import { mkdir } from 'node:fs/promises';
 import { join } from 'node:path';
 import {
-  getAxisProjectPaths,
-  listAxisProjectFiles,
+  getDebruteProjectPaths,
+  listDebruteProjectFiles,
   readJsonFile,
   writeJsonAtomic
-} from '@axis/project-core';
+} from '@debrute/project-core';
 import {
   createCanvasDocument,
   updateCanvasNodeLayers,
@@ -13,8 +13,8 @@ import {
   type CanvasDocument,
   type CanvasNodeLayerPatch,
   type CanvasProjection
-} from '@axis/canvas-core';
-import type { ProjectSessionSnapshot } from '@axis/app-protocol';
+} from '@debrute/canvas-core';
+import type { ProjectSessionSnapshot } from '@debrute/app-protocol';
 import { assertCurrentCanvasDocument } from './CanvasProjectionService.js';
 
 export interface CanvasSessionServiceOptions {
@@ -60,7 +60,7 @@ export class CanvasSessionService {
   }
 
   async ensureDefaultCanvas(projectRoot: string): Promise<void> {
-    const paths = getAxisProjectPaths(projectRoot);
+    const paths = getDebruteProjectPaths(projectRoot);
     await mkdir(paths.canvasesDir, { recursive: true });
     const existingCanvasFiles = await this.currentCanvasFiles(projectRoot);
     if (existingCanvasFiles.length > 0) {
@@ -75,7 +75,7 @@ export class CanvasSessionService {
   }
 
   async ensureCanvas(projectRoot: string, canvasId: string, fileExists: (absolutePath: string) => Promise<boolean>): Promise<void> {
-    const paths = getAxisProjectPaths(projectRoot);
+    const paths = getDebruteProjectPaths(projectRoot);
     await mkdir(paths.canvasesDir, { recursive: true });
     const canvasPath = join(paths.canvasesDir, `${canvasId}.json`);
     if (await fileExists(canvasPath)) {
@@ -94,8 +94,8 @@ export class CanvasSessionService {
   }
 
   async currentCanvasFiles(projectRoot: string): Promise<string[]> {
-    return (await listAxisProjectFiles(projectRoot))
-      .filter((file) => file.projectRelativePath.startsWith('.axis/canvases/') && file.projectRelativePath.endsWith('.json'))
+    return (await listDebruteProjectFiles(projectRoot))
+      .filter((file) => file.projectRelativePath.startsWith('.debrute/canvases/') && file.projectRelativePath.endsWith('.json'))
       .map((file) => join(projectRoot, file.projectRelativePath));
   }
 
@@ -113,7 +113,7 @@ export class CanvasSessionService {
       throw new Error(`Canvas projection is not loaded: ${canvasId}`);
     }
 
-    const paths = getAxisProjectPaths(current.projectRoot);
+    const paths = getDebruteProjectPaths(current.projectRoot);
     const canvasPath = join(paths.canvasesDir, `${canvasId}.json`);
     const next = mutate(existing);
     if (JSON.stringify(next) === JSON.stringify(existing)) {

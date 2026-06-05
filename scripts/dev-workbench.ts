@@ -12,7 +12,7 @@ import {
   readWorkbenchRuntimeState,
   resolveWorkbenchRuntimePaths,
   type WorkbenchRuntimeState
-} from '@axis/workbench-runtime';
+} from '@debrute/workbench-runtime';
 
 const workspaceRoot = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 const paths = resolveWorkbenchRuntimePaths();
@@ -34,7 +34,7 @@ const result = await ensureRegisteredWorkbenchRuntime({
 currentRuntimeState = result.state;
 deleteOwnState = result.runtimeStarted;
 
-process.stdout.write(`AXIS Workbench: ${result.state.webUrl}\n`);
+process.stdout.write(`Debrute Workbench: ${result.state.webUrl}\n`);
 
 if (!deleteOwnState) {
   process.exit(0);
@@ -55,7 +55,7 @@ async function launchSourceDevRuntime(): Promise<WorkbenchRuntimeState> {
   const webUrl = `http://127.0.0.1:${webPort}`;
   const daemon = spawnPnpm([
     '--filter',
-    '@axis/daemon',
+    '@debrute/daemon',
     'dev',
     '--',
     '--port',
@@ -65,13 +65,13 @@ async function launchSourceDevRuntime(): Promise<WorkbenchRuntimeState> {
     '--web-base-url',
     webUrl
   ], {
-    AXIS_DAEMON_PORT: String(daemonPort),
-    AXIS_DAEMON_TOKEN: token,
-    AXIS_WEB_BASE_URL: webUrl
+    DEBRUTE_DAEMON_PORT: String(daemonPort),
+    DEBRUTE_DAEMON_TOKEN: token,
+    DEBRUTE_WEB_BASE_URL: webUrl
   });
   const web = spawnPnpm([
     '--filter',
-    '@axis/web',
+    '@debrute/web',
     'dev',
     '--',
     '--host',
@@ -80,7 +80,7 @@ async function launchSourceDevRuntime(): Promise<WorkbenchRuntimeState> {
     String(webPort),
     '--strictPort'
   ], {
-    AXIS_DAEMON_URL: daemonUrl
+    DEBRUTE_DAEMON_URL: daemonUrl
   });
   children.push(daemon, web);
   const now = new Date().toISOString();
@@ -113,7 +113,7 @@ function spawnPnpm(args: string[], env: Record<string, string>): ChildProcess {
 
 function requirePid(child: ChildProcess, label: string): number {
   if (!child.pid) {
-    throw new Error(`AXIS ${label} process did not report a pid.`);
+    throw new Error(`Debrute ${label} process did not report a pid.`);
   }
   return child.pid;
 }

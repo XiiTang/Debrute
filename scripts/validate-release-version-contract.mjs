@@ -8,7 +8,7 @@ export async function releaseVersionContract(root = process.cwd()) {
   const entries = [
     { label: 'root package', path: 'package.json', version },
     { label: 'Desktop package', path: 'apps/desktop/package.json', version: await readPackageVersion(root, 'apps/desktop/package.json') },
-    { label: 'Axis CLI package', path: 'apps/axis-cli/package.json', version: await readPackageVersion(root, 'apps/axis-cli/package.json') },
+    { label: 'Debrute CLI package', path: 'apps/debrute-cli/package.json', version: await readPackageVersion(root, 'apps/debrute-cli/package.json') },
     ...await readSkillVersionEntries(root)
   ];
   return { version, entries };
@@ -37,21 +37,21 @@ async function readPackageVersion(root, relativePath) {
 async function readSkillVersionEntries(root) {
   const skillsRoot = join(root, 'skills');
   const entries = await readdir(skillsRoot, { withFileTypes: true });
-  const axisSkillDirs = entries
-    .filter((entry) => entry.isDirectory() && entry.name.startsWith('axis-'))
+  const debruteSkillDirs = entries
+    .filter((entry) => entry.isDirectory() && entry.name.startsWith('debrute-'))
     .map((entry) => entry.name)
     .sort((left, right) => left.localeCompare(right));
-  return Promise.all(axisSkillDirs.map(async (dirName) => {
+  return Promise.all(debruteSkillDirs.map(async (dirName) => {
     const relativePath = `skills/${dirName}/SKILL.md`;
     return {
       label: `${dirName} Skill`,
       path: relativePath,
-      version: skillAxisVersion(await readFile(join(root, relativePath), 'utf8'), relativePath)
+      version: skillDebruteVersion(await readFile(join(root, relativePath), 'utf8'), relativePath)
     };
   }));
 }
 
-function skillAxisVersion(content, relativePath) {
+function skillDebruteVersion(content, relativePath) {
   const normalized = content.replace(/\r\n/g, '\n');
   const match = /^---\n([\s\S]*?)\n---(?:\n|$)/.exec(normalized);
   if (!match) {
@@ -62,10 +62,10 @@ function skillAxisVersion(content, relativePath) {
     throw new Error(`${relativePath} frontmatter must be a mapping.`);
   }
   const metadata = frontmatter.metadata;
-  if (!metadata || typeof metadata !== 'object' || Array.isArray(metadata) || typeof metadata['axis.version'] !== 'string') {
-    throw new Error(`${relativePath} must declare metadata.axis.version.`);
+  if (!metadata || typeof metadata !== 'object' || Array.isArray(metadata) || typeof metadata['debrute.version'] !== 'string') {
+    throw new Error(`${relativePath} must declare metadata.debrute.version.`);
   }
-  return metadata['axis.version'];
+  return metadata['debrute.version'];
 }
 
 if (process.argv[1] && fileURLToPath(import.meta.url) === process.argv[1]) {

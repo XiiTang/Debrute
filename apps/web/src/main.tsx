@@ -5,12 +5,12 @@ import './styles.css';
 
 declare global {
   interface Window {
-    __axisReactRoot?: Root;
+    __debruteReactRoot?: Root;
   }
 }
 
-window.__axisReactRoot ??= createRoot(document.getElementById('root')!);
-window.__axisReactRoot.render(
+window.__debruteReactRoot ??= createRoot(document.getElementById('root')!);
+window.__debruteReactRoot.render(
   <React.StrictMode>
     <WorkbenchApp />
   </React.StrictMode>

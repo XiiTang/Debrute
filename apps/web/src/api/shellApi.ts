@@ -1,24 +1,24 @@
 import type {
-  AxisCliInstallResult,
-  AxisCliManualCommand,
-  AxisCliPathRepairResult,
-  AxisCliSkillsSyncResult,
-  AxisCliStatus
-} from '@axis/app-protocol';
+  DebruteCliInstallResult,
+  DebruteCliManualCommand,
+  DebruteCliPathRepairResult,
+  DebruteCliSkillsSyncResult,
+  DebruteCliStatus
+} from '@debrute/app-protocol';
 
-export interface AxisShellApi {
+export interface DebruteShellApi {
   chooseProjectRoot(): Promise<string | undefined>;
   bindProjectWindowToProject?(input: { projectId: string }): Promise<{ ok: true }>;
   revealProjectPathInSystemFileManager?(input: { projectId: string; projectRelativePath: string; kind: 'file' | 'directory' }): Promise<{ ok: true }>;
-  getAxisCliStatus?(): Promise<AxisCliStatus>;
-  installAxisCli?(): Promise<AxisCliInstallResult>;
-  updateAxisCli?(): Promise<AxisCliInstallResult>;
-  syncAxisCliSkills?(): Promise<AxisCliSkillsSyncResult>;
-  restoreAxisCliSkills?(): Promise<AxisCliSkillsSyncResult>;
-  repairAxisCliPath?(): Promise<AxisCliPathRepairResult>;
-  getAxisCliManualInstallCommand?(): Promise<AxisCliManualCommand>;
+  getDebruteCliStatus?(): Promise<DebruteCliStatus>;
+  installDebruteCli?(): Promise<DebruteCliInstallResult>;
+  updateDebruteCli?(): Promise<DebruteCliInstallResult>;
+  syncDebruteCliSkills?(): Promise<DebruteCliSkillsSyncResult>;
+  restoreDebruteCliSkills?(): Promise<DebruteCliSkillsSyncResult>;
+  repairDebruteCliPath?(): Promise<DebruteCliPathRepairResult>;
+  getDebruteCliManualInstallCommand?(): Promise<DebruteCliManualCommand>;
 }
 
-export function getAxisShellApi(): AxisShellApi | undefined {
-  return typeof window === 'undefined' ? undefined : window.axisShell;
+export function getDebruteShellApi(): DebruteShellApi | undefined {
+  return typeof window === 'undefined' ? undefined : window.debruteShell;
 }

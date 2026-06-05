@@ -1,4 +1,4 @@
-import type { CanvasProjection } from '@axis/canvas-core';
+import type { CanvasProjection } from '@debrute/canvas-core';
 import type { CanvasCamera } from './runtime/canvasCamera';
 import type { CanvasPoint, CanvasRect } from './runtime/canvasGeometry';
 import { finiteNumber, pointInRect, rectCenter } from './runtime/canvasGeometry';

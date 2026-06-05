@@ -33,7 +33,7 @@ When `sequential_image_generation` is `auto`, the API generates an associated gr
 
 ## Request fields
 
-Official request fields used by AXIS:
+Official request fields used by Debrute:
 
 - `model`: the Ark model id, including `doubao-seedream-5-0-260128` and the Lite id `doubao-seedream-5-0-lite-260128`.
 - `prompt`: text instruction for generation or editing.

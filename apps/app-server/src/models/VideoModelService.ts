@@ -1,9 +1,9 @@
 import {
   createVideoModelSettingsView,
   type VideoModelsConfig
-} from '@axis/capability-runtime';
-import { createVideoModelCatalog } from '@axis/capability-runtime';
-import type { SaveVideoModelSettingInput, VideoModelSettingsView } from '@axis/app-protocol';
+} from '@debrute/capability-runtime';
+import { createVideoModelCatalog } from '@debrute/capability-runtime';
+import type { SaveVideoModelSettingInput, VideoModelSettingsView } from '@debrute/app-protocol';
 import type { GlobalConfigStore } from '../config/GlobalConfigStore.js';
 import { saveMediaModelSetting } from './MediaModelService.js';
 

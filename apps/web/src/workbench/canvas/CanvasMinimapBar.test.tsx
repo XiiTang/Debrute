@@ -1,6 +1,6 @@
 import { renderToStaticMarkup } from 'react-dom/server';
 import { describe, expect, it } from 'vitest';
-import { createCanvasDocument, type CanvasProjection } from '@axis/canvas-core';
+import { createCanvasDocument, type CanvasProjection } from '@debrute/canvas-core';
 import { CanvasMinimapBar } from './CanvasMinimapBar';
 import type { CanvasEditorRuntime } from './runtime/CanvasEditorRuntime';
 import { createCanvasEditorRuntime } from './runtime/CanvasEditorRuntime';

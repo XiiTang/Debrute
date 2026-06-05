@@ -2,7 +2,7 @@ import { access, stat } from 'node:fs/promises';
 import {
   projectFileRevision,
   resolveExistingProjectPath
-} from '@axis/project-core';
+} from '@debrute/project-core';
 import {
   CANVAS_DOCUMENT_SCHEMA_VERSION,
   projectCanvas,
@@ -13,7 +13,7 @@ import {
   type CanvasProjection,
   type CanvasStructureEdgeProjection,
   type Diagnostic
-} from '@axis/canvas-core';
+} from '@debrute/canvas-core';
 import { canvasImagePreviewSourceInfo } from './CanvasImagePreviewService.js';
 
 export class CanvasProjectionService {

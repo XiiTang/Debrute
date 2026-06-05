@@ -1,6 +1,6 @@
 import { spawn } from 'node:child_process';
-import { resolveExistingProjectPath } from '@axis/project-core';
-import type { CanvasLayoutSize, CanvasMediaKind, CanvasNodeKind } from '@axis/canvas-core';
+import { resolveExistingProjectPath } from '@debrute/project-core';
+import type { CanvasLayoutSize, CanvasMediaKind, CanvasNodeKind } from '@debrute/canvas-core';
 import sharp from 'sharp';
 
 export interface ReadCanvasNodeLayoutSizeInput {

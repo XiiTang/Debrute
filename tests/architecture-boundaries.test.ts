@@ -7,13 +7,13 @@ import {
   architectureBoundaryViolations,
   architectureImportSpecifiers,
   architectureRuleKinds
-} from '@axis/architecture-rules';
+} from '@debrute/architecture-rules';
 
 const root = process.cwd();
 
-describe('AXIS architecture boundaries', () => {
+describe('Debrute architecture boundaries', () => {
   it('keeps server internals out of the app protocol package', async () => {
-    const protocol = await import('@axis/app-protocol');
+    const protocol = await import('@debrute/app-protocol');
     expect('serviceError' in protocol).toBe(false);
   });
 
@@ -26,11 +26,11 @@ describe('AXIS architecture boundaries', () => {
   });
 
   it('resolves relative imports before applying source boundary rules', async () => {
-    const fixtureRoot = mkdtempSync(join(tmpdir(), 'axis-architecture-relative-imports-'));
+    const fixtureRoot = mkdtempSync(join(tmpdir(), 'debrute-architecture-relative-imports-'));
     try {
       mkdirSync(join(fixtureRoot, 'packages/project-core/src'), { recursive: true });
       mkdirSync(join(fixtureRoot, 'apps/desktop/src/electron/ipc'), { recursive: true });
-      mkdirSync(join(fixtureRoot, 'apps/axis-cli/src/commands'), { recursive: true });
+      mkdirSync(join(fixtureRoot, 'apps/debrute-cli/src/commands'), { recursive: true });
       writeFileSync(
         join(fixtureRoot, 'packages/project-core/src/violates-package-boundary.ts'),
         "import '../../../apps/app-server/src/index.js';\n",
@@ -48,7 +48,7 @@ describe('AXIS architecture boundaries', () => {
         'utf8'
       );
       writeFileSync(
-        join(fixtureRoot, 'apps/axis-cli/src/commands/violates-cli-package-boundary.ts'),
+        join(fixtureRoot, 'apps/debrute-cli/src/commands/violates-cli-package-boundary.ts'),
         "import '../../../../packages/project-core/src/index.js';\n",
         'utf8'
       );
@@ -57,12 +57,12 @@ describe('AXIS architecture boundaries', () => {
         'packages/project-core/src/violates-package-boundary.ts',
         'apps/desktop/src/electron/ipc/violates-electron-boundary.ts',
         'apps/web/src/workbench/violates-renderer-app-server-boundary.ts',
-        'apps/axis-cli/src/commands/violates-cli-package-boundary.ts'
+        'apps/debrute-cli/src/commands/violates-cli-package-boundary.ts'
       ])).resolves.toEqual([
         'packages do not import apps: packages/project-core/src/violates-package-boundary.ts imports "apps/app-server/src/index.js"',
         'desktop electron does not import web workbench internals: apps/desktop/src/electron/ipc/violates-electron-boundary.ts imports "apps/web/src/workbench/WorkbenchApp.js"',
         'web workbench does not import app-server: apps/web/src/workbench/violates-renderer-app-server-boundary.ts imports "apps/app-server/src/index.js"',
-        'cli stays behind app-server and protocol boundaries: apps/axis-cli/src/commands/violates-cli-package-boundary.ts imports "packages/project-core/src/index.js"'
+        'cli stays behind app-server and protocol boundaries: apps/debrute-cli/src/commands/violates-cli-package-boundary.ts imports "packages/project-core/src/index.js"'
       ]);
     } finally {
       rmSync(fixtureRoot, { recursive: true, force: true });
@@ -70,7 +70,7 @@ describe('AXIS architecture boundaries', () => {
   });
 
   it('keeps runtime model config entries out of app-protocol', async () => {
-    const fixtureRoot = mkdtempSync(join(tmpdir(), 'axis-architecture-protocol-exports-'));
+    const fixtureRoot = mkdtempSync(join(tmpdir(), 'debrute-architecture-protocol-exports-'));
     try {
       mkdirSync(join(fixtureRoot, 'packages/app-protocol/src'), { recursive: true });
       writeFileSync(
@@ -93,8 +93,8 @@ describe('AXIS architecture boundaries', () => {
   it('keeps protocol, App Server, and runtime imports in the intended direction', () => {
     expect(architectureImportSpecifiers(
       'apps/web/src/workbench/example.ts',
-      "import type { ProjectSessionSnapshot } from '@axis/app-protocol';\n"
-    )).toEqual(['@axis/app-protocol']);
+      "import type { ProjectSessionSnapshot } from '@debrute/app-protocol';\n"
+    )).toEqual(['@debrute/app-protocol']);
   });
 
   it('keeps App Server project, Flowmap, and Canvas ownership out of the coordinator', () => {
@@ -147,7 +147,7 @@ describe('AXIS architecture boundaries', () => {
     }
 
     const text = readFileSync(join(root, 'apps/desktop/src/electron/main.ts'), 'utf8');
-    expect(architectureImportSpecifiers('apps/desktop/src/electron/main.ts', text)).toContain('@axis/daemon');
+    expect(architectureImportSpecifiers('apps/desktop/src/electron/main.ts', text)).toContain('@debrute/daemon');
     expect(text).toContain("resolve(__dirname, '../dist')");
     expect(text).not.toContain("../../../web/dist");
     expect(text).not.toContain('registerWorkbenchIpc');
@@ -165,11 +165,11 @@ describe('AXIS architecture boundaries', () => {
   });
 
   it('allows apps to depend on the shared Workbench runtime registry package', () => {
-    const cliPackage = readFileSync(join(root, 'apps/axis-cli/package.json'), 'utf8');
+    const cliPackage = readFileSync(join(root, 'apps/debrute-cli/package.json'), 'utf8');
     const desktopPackage = readFileSync(join(root, 'apps/desktop/package.json'), 'utf8');
 
-    expect(cliPackage).toContain('"@axis/workbench-runtime"');
-    expect(desktopPackage).toContain('"@axis/workbench-runtime"');
+    expect(cliPackage).toContain('"@debrute/workbench-runtime"');
+    expect(desktopPackage).toContain('"@debrute/workbench-runtime"');
   });
 
   it('cleans generated output from the shared Workbench runtime package', () => {
@@ -185,23 +185,23 @@ describe('AXIS architecture boundaries', () => {
     }).trim().split('\n');
     const text = files.map((file) => readFileSync(join(root, file), 'utf8')).join('\n');
 
-    expect(text).not.toContain('@axis/daemon');
+    expect(text).not.toContain('@debrute/daemon');
     expect(text).not.toContain('electron');
-    expect(text).not.toContain('@axis/app-server');
+    expect(text).not.toContain('@debrute/app-server');
     expect(text).not.toContain('spawn(');
   });
 
 
   it('keeps daemon global runtime routes out of project App Server sessions', () => {
-    const text = readFileSync(join(root, 'apps/daemon/src/http/createAxisDaemonHttpServer.ts'), 'utf8');
+    const text = readFileSync(join(root, 'apps/daemon/src/http/createDebruteDaemonHttpServer.ts'), 'utf8');
 
-    expect(text).toContain('AxisGlobalRuntimeServer');
+    expect(text).toContain('DebruteGlobalRuntimeServer');
     expect(text).not.toContain('runtimeAppServer');
-    expect(text).not.toContain('new AxisAppServer(appServerOptions)');
+    expect(text).not.toContain('new DebruteAppServer(appServerOptions)');
   });
 
   it('keeps project App Server sessions free of global runtime forwarding methods', () => {
-    const text = readFileSync(join(root, 'apps/app-server/src/server/AxisAppServer.ts'), 'utf8');
+    const text = readFileSync(join(root, 'apps/app-server/src/server/DebruteAppServer.ts'), 'utf8');
 
     expect(text).not.toContain('getGlobalRuntime');
     for (const method of [
@@ -250,10 +250,10 @@ describe('AXIS architecture boundaries', () => {
       'apps/daemon/src/index.js.map',
       'apps/daemon/src/index.d.ts',
       'apps/daemon/src/index.d.ts.map',
-      'apps/daemon/src/http/createAxisDaemonHttpServer.js',
-      'apps/daemon/src/http/createAxisDaemonHttpServer.js.map',
-      'apps/daemon/src/http/createAxisDaemonHttpServer.d.ts',
-      'apps/daemon/src/http/createAxisDaemonHttpServer.d.ts.map'
+      'apps/daemon/src/http/createDebruteDaemonHttpServer.js',
+      'apps/daemon/src/http/createDebruteDaemonHttpServer.js.map',
+      'apps/daemon/src/http/createDebruteDaemonHttpServer.d.ts',
+      'apps/daemon/src/http/createDebruteDaemonHttpServer.d.ts.map'
     ]) {
       expect(existsSync(join(root, file)), file).toBe(false);
     }

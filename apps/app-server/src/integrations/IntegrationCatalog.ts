@@ -3,7 +3,7 @@ import type {
   IntegrationBinaryId,
   IntegrationId,
   SystemPackageManagerId
-} from '@axis/app-protocol';
+} from '@debrute/app-protocol';
 
 export type {
   IntegrationBackendId,
@@ -21,7 +21,7 @@ export type {
   IntegrationStatusKind,
   PythonCliInstallerId,
   SystemPackageManagerId
-} from '@axis/app-protocol';
+} from '@debrute/app-protocol';
 
 const INTEGRATION_PROBE_TIMEOUT_MS = 10_000;
 

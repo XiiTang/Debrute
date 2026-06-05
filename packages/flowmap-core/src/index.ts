@@ -5,7 +5,7 @@ export const FLOWMAP_SCHEMA_VERSION = 1;
 
 export interface FlowmapDocument {
   schemaVersion: 1;
-  axis?: {
+  debrute?: {
     managed?: boolean;
     publishedAt?: string;
     sourceDraft?: string;
@@ -114,10 +114,10 @@ export class FlowmapError extends Error {
 
 export function inferFlowmapIdFromDraftPath(sourceDraftPath: string): string {
   const normalized = normalizeStrictProjectPath(sourceDraftPath);
-  const match = /^\.axis\/flowmaps\/([^/]+)\.draft\.yaml$/.exec(normalized);
+  const match = /^\.debrute\/flowmaps\/([^/]+)\.draft\.yaml$/.exec(normalized);
   if (!match) {
     throw new FlowmapError(
-      'Flowmap draft path must be ".axis/flowmaps/<flowmap-id>.draft.yaml".',
+      'Flowmap draft path must be ".debrute/flowmaps/<flowmap-id>.draft.yaml".',
       'flowmap_invalid_draft_path'
     );
   }
@@ -127,9 +127,9 @@ export function inferFlowmapIdFromDraftPath(sourceDraftPath: string): string {
 
 export function inferFlowmapIdFromActivePath(activePath: string): string {
   const normalized = normalizeStrictProjectPath(activePath);
-  const match = /^\.axis\/flowmaps\/([^/]+)\.yaml$/.exec(normalized);
+  const match = /^\.debrute\/flowmaps\/([^/]+)\.yaml$/.exec(normalized);
   if (!match || normalized.endsWith('.draft.yaml')) {
-    throw new FlowmapError('Flowmap active path must be ".axis/flowmaps/<flowmap-id>.yaml".', 'flowmap_invalid_draft_path');
+    throw new FlowmapError('Flowmap active path must be ".debrute/flowmaps/<flowmap-id>.yaml".', 'flowmap_invalid_draft_path');
   }
   assertValidFlowmapId(match[1]!);
   return match[1]!;
@@ -137,12 +137,12 @@ export function inferFlowmapIdFromActivePath(activePath: string): string {
 
 export function activeFlowmapPath(flowmapId: string): string {
   assertValidFlowmapId(flowmapId);
-  return `.axis/flowmaps/${flowmapId}.yaml`;
+  return `.debrute/flowmaps/${flowmapId}.yaml`;
 }
 
 export function draftFlowmapPath(flowmapId: string): string {
   assertValidFlowmapId(flowmapId);
-  return `.axis/flowmaps/${flowmapId}.draft.yaml`;
+  return `.debrute/flowmaps/${flowmapId}.draft.yaml`;
 }
 
 export function assertValidFlowmapId(value: string): void {
@@ -169,7 +169,7 @@ export function publishFlowmap(input: FlowmapPublishInput): PublishedFlowmap {
   const draft = parseFlowmapDraft(input);
   const withoutHash: FlowmapDocument = {
     schemaVersion: FLOWMAP_SCHEMA_VERSION,
-    axis: {
+    debrute: {
       managed: true,
       publishedAt: input.now?.() ?? new Date().toISOString(),
       sourceDraft: draftFlowmapPath(draft.flowmapId)
@@ -181,8 +181,8 @@ export function publishFlowmap(input: FlowmapPublishInput): PublishedFlowmap {
   };
   const published: FlowmapDocument = {
     ...withoutHash,
-    axis: {
-      ...withoutHash.axis,
+    debrute: {
+      ...withoutHash.debrute,
       contentHash: flowmapContentHash(withoutHash)
     }
   };
@@ -215,10 +215,10 @@ export function assertPublishedFlowmap(content: string, activePath: string): Flo
     }
     return { ok: false, error: { code: 'flowmap_invalid_yaml', message: errorMessage(error) } };
   }
-  if (map.axis?.managed !== true) {
-    return { ok: false, error: { code: 'flowmap_unmanaged', message: 'Flowmap is not AXIS-managed.' } };
+  if (map.debrute?.managed !== true) {
+    return { ok: false, error: { code: 'flowmap_unmanaged', message: 'Flowmap is not Debrute-managed.' } };
   }
-  if (map.axis.sourceDraft !== draftFlowmapPath(map.flowmapId)) {
+  if (map.debrute.sourceDraft !== draftFlowmapPath(map.flowmapId)) {
     return {
       ok: false,
       error: {
@@ -227,14 +227,14 @@ export function assertPublishedFlowmap(content: string, activePath: string): Flo
       }
     };
   }
-  const actualHash = map.axis.contentHash;
+  const actualHash = map.debrute.contentHash;
   if (!actualHash) {
     return { ok: false, error: { code: 'flowmap_hash_mismatch', message: 'Flowmap content hash is missing.' } };
   }
-  const { contentHash: _contentHash, ...axisWithoutHash } = map.axis;
+  const { contentHash: _contentHash, ...debruteWithoutHash } = map.debrute;
   const expectedHash = flowmapContentHash({
     ...map,
-    axis: axisWithoutHash
+    debrute: debruteWithoutHash
   });
   if (actualHash !== expectedHash) {
     return { ok: false, error: { code: 'flowmap_hash_mismatch', message: 'Flowmap content hash does not match.' } };
@@ -274,7 +274,7 @@ function validateFlowmapDocument(value: unknown, flowmapId: string): FlowmapDocu
   if (!isRecord(value)) {
     throw invalid('Flowmap YAML must be an object.');
   }
-  assertOnlyKeys(value, ['schemaVersion', 'axis', 'canvases', 'include', 'layout']);
+  assertOnlyKeys(value, ['schemaVersion', 'debrute', 'canvases', 'include', 'layout']);
   if (value.schemaVersion !== FLOWMAP_SCHEMA_VERSION) {
     throw invalid(`Unsupported Flowmap schemaVersion ${String(value.schemaVersion)}.`);
   }
@@ -288,11 +288,11 @@ function validateFlowmapDocument(value: unknown, flowmapId: string): FlowmapDocu
   for (const canvasId of canvases) {
     assertValidCanvasId(canvasId);
   }
-  const axis = value.axis === undefined ? undefined : validateAxis(value.axis);
+  const debrute = value.debrute === undefined ? undefined : validateDebrute(value.debrute);
   const layout = value.layout === undefined ? undefined : validateLayout(value.layout);
   return {
     schemaVersion: FLOWMAP_SCHEMA_VERSION,
-    ...(axis ? { axis } : {}),
+    ...(debrute ? { debrute } : {}),
     flowmapId,
     canvases: canvases.map((item) => item),
     include: value.include.map((item) => item),
@@ -348,26 +348,26 @@ function normalizeLayoutGroupInclude(value: string): string {
   return normalized;
 }
 
-function validateAxis(value: unknown): FlowmapDocument['axis'] {
+function validateDebrute(value: unknown): FlowmapDocument['debrute'] {
   if (!isRecord(value)) {
-    throw invalid('Flowmap axis metadata must be an object.');
+    throw invalid('Flowmap debrute metadata must be an object.');
   }
-  assertOnlyKeys(value, ['managed', 'publishedAt', 'sourceDraft', 'contentHash'], 'axis');
+  assertOnlyKeys(value, ['managed', 'publishedAt', 'sourceDraft', 'contentHash'], 'debrute');
   if (value.managed !== undefined && typeof value.managed !== 'boolean') {
-    throw invalid('Flowmap axis.managed must be a boolean.');
+    throw invalid('Flowmap debrute.managed must be a boolean.');
   }
   return {
     ...(value.managed === undefined ? {} : { managed: value.managed }),
-    ...(value.publishedAt === undefined ? {} : { publishedAt: stringField(value.publishedAt, 'axis.publishedAt') }),
-    ...(value.sourceDraft === undefined ? {} : { sourceDraft: stringField(value.sourceDraft, 'axis.sourceDraft') }),
-    ...(value.contentHash === undefined ? {} : { contentHash: stringField(value.contentHash, 'axis.contentHash') })
+    ...(value.publishedAt === undefined ? {} : { publishedAt: stringField(value.publishedAt, 'debrute.publishedAt') }),
+    ...(value.sourceDraft === undefined ? {} : { sourceDraft: stringField(value.sourceDraft, 'debrute.sourceDraft') }),
+    ...(value.contentHash === undefined ? {} : { contentHash: stringField(value.contentHash, 'debrute.contentHash') })
   };
 }
 
 function flowmapYamlShape(map: FlowmapDocument): Record<string, unknown> {
   return {
     schemaVersion: map.schemaVersion,
-    ...(map.axis ? { axis: map.axis } : {}),
+    ...(map.debrute ? { debrute: map.debrute } : {}),
     canvases: map.canvases,
     include: map.include,
     ...(map.layout ? { layout: map.layout } : {})

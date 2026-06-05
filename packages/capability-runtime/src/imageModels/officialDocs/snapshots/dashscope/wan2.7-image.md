@@ -25,7 +25,7 @@ Beijing and Singapore use independent API keys and request URLs.
 
 ## Request body
 
-Official request body fields used by AXIS:
+Official request body fields used by Debrute:
 
 - `model`: `wan2.7-image` or `wan2.7-image-pro`.
 - `input.messages`: an array of request messages. The current API supports a single round of conversation.
@@ -47,7 +47,7 @@ Input image limits:
 
 ## Parameters
 
-Documented parameters relevant to AXIS:
+Documented parameters relevant to Debrute:
 
 - `bbox_list`: optional bounding boxes for interactive editing. The list length must match the number of input images; pass `[]` for an image without boxes. A box is `[x1, y1, x2, y2]` in absolute pixels, and one image supports up to two boxes.
 - `enable_sequential`: controls group image output. `false` is default; `true` enables group output.

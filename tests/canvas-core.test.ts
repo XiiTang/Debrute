@@ -15,7 +15,7 @@ import {
   type CanvasDocument,
   type CanvasNodeAvailability,
   type CanvasNodeElement
-} from '@axis/canvas-core';
+} from '@debrute/canvas-core';
 
 describe('canvas-core', () => {
   it('creates Canvas documents with nodeElements', () => {

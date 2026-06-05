@@ -84,12 +84,12 @@ try {
 }
 
 if (process.platform !== 'darwin') {
-  console.warn(`AXIS packaging is currently configured for macOS. Current platform: ${process.platform}`);
+  console.warn(`Debrute packaging is currently configured for macOS. Current platform: ${process.platform}`);
 }
 
 if (failures.length > 0) {
-  console.error(['AXIS doctor failed:', ...failures.map((failure) => `- ${failure}`)].join('\n'));
+  console.error(['Debrute doctor failed:', ...failures.map((failure) => `- ${failure}`)].join('\n'));
   process.exit(1);
 }
 
-console.log(`AXIS doctor passed. Node ${process.version}, pnpm ${pnpmVersion}, platform ${process.platform}.`);
+console.log(`Debrute doctor passed. Node ${process.version}, pnpm ${pnpmVersion}, platform ${process.platform}.`);

@@ -1,4 +1,4 @@
-import type { WorkbenchEvent, WorkbenchProjectSessionSnapshot } from '@axis/app-protocol';
+import type { WorkbenchEvent, WorkbenchProjectSessionSnapshot } from '@debrute/app-protocol';
 
 export function nextSnapshotFromAppServerEvent(
   event: WorkbenchEvent,

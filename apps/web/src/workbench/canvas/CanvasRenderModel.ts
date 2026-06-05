@@ -1,4 +1,4 @@
-import type { CanvasProjection, ProjectedCanvasNode } from '@axis/canvas-core';
+import type { CanvasProjection, ProjectedCanvasNode } from '@debrute/canvas-core';
 import {
   createCanvasVirtualizationIndex,
   nodeRect,

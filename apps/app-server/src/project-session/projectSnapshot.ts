@@ -1,16 +1,16 @@
 import {
-  getAxisProjectPaths,
-  listAxisProjectFiles,
+  getDebruteProjectPaths,
+  listDebruteProjectFiles,
   readProjectMetadata,
   type ProjectFileEntry
-} from '@axis/project-core';
+} from '@debrute/project-core';
 import type {
   CanvasDocument,
   CanvasProjection,
   CanvasStructureEdgeProjection,
   Diagnostic
-} from '@axis/canvas-core';
-import type { ProjectSessionSnapshot } from '@axis/app-protocol';
+} from '@debrute/canvas-core';
+import type { ProjectSessionSnapshot } from '@debrute/app-protocol';
 import { createProjectHealthSummary } from './projectHealth.js';
 
 export interface LoadProjectSnapshotInput {
@@ -32,9 +32,9 @@ export interface LoadProjectSnapshotInput {
 }
 
 export async function loadProjectSnapshot(input: LoadProjectSnapshotInput): Promise<ProjectSessionSnapshot> {
-  const paths = getAxisProjectPaths(input.projectRoot);
+  const paths = getDebruteProjectPaths(input.projectRoot);
   const metadata = await readProjectMetadata(input.projectRoot);
-  const files = await listAxisProjectFiles(input.projectRoot);
+  const files = await listDebruteProjectFiles(input.projectRoot);
   const canvases = await input.loadCanvases(input.projectRoot);
   const synchronized = await input.synchronizeFlowmaps(input.projectRoot, canvases, files, {
     writeCanvasChanges: input.writeFlowmapCanvasChanges ?? true

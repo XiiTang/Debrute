@@ -1,4 +1,4 @@
-import { architectureBoundaryViolations } from '@axis/architecture-rules';
+import { architectureBoundaryViolations } from '@debrute/architecture-rules';
 
 const violations = await architectureBoundaryViolations(process.cwd());
 

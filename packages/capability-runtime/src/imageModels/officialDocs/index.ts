@@ -138,7 +138,7 @@ const DOCS: InternalImageModelOfficialDocReference[] = [
 
 const DOCS_BY_MODEL_ID = new Map(DOCS.map((doc) => [doc.modelId, doc]));
 const CATALOG_REQUEST_EXAMPLES_BY_MODEL_ID = new Map(
-  createImageModelCatalog().listAll().map((entry) => [entry.axisModelId, entry.requestExample.input])
+  createImageModelCatalog().listAll().map((entry) => [entry.debruteModelId, entry.requestExample.input])
 );
 
 export function listImageModelOfficialDocs(): ImageModelOfficialDocReference[] {
@@ -175,7 +175,7 @@ function publicDocReference(doc: InternalImageModelOfficialDocReference): ImageM
 function descriptionMarkdown(doc: InternalImageModelOfficialDocReference, snapshot: string): string {
   const officialUrls = doc.sourceUrls.map((url) => `- ${url}`).join('\n');
   const body = stripFrontmatter(snapshot).trim();
-  const axisInputJson = JSON.stringify(axisExampleInput(doc));
+  const debruteInputJson = JSON.stringify(debruteExampleInput(doc));
 
   return [
     `# ${doc.modelId}`,
@@ -188,15 +188,15 @@ function descriptionMarkdown(doc: InternalImageModelOfficialDocReference, snapsh
     '',
     body,
     '',
-    '## AXIS command',
+    '## Debrute command',
     '',
     '```sh',
-    `axis generate image <project> --input-json '${axisInputJson}'`,
+    `debrute generate image <project> --input-json '${debruteInputJson}'`,
     '```'
   ].join('\n');
 }
 
-function axisExampleInput(doc: InternalImageModelOfficialDocReference): ImageModelCatalogEntry['requestExample']['input'] {
+function debruteExampleInput(doc: InternalImageModelOfficialDocReference): ImageModelCatalogEntry['requestExample']['input'] {
   const exampleInput = CATALOG_REQUEST_EXAMPLES_BY_MODEL_ID.get(doc.modelId);
   if (!exampleInput) {
     throw new Error(`Image model catalog request example is missing: ${doc.modelId}`);

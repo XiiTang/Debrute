@@ -36,7 +36,7 @@ describe('canvas image preview active aborts', () => {
       canvasImageSourceRevision,
       createCanvasImagePreviewService
     } = await import('../apps/app-server/src/canvas/CanvasImagePreviewService');
-    const projectRoot = await mkdtemp(join(tmpdir(), 'axis-canvas-preview-active-abort-'));
+    const projectRoot = await mkdtemp(join(tmpdir(), 'debrute-canvas-preview-active-abort-'));
     try {
       await mkdir(join(projectRoot, 'images'), { recursive: true });
       await writeFile(join(projectRoot, 'images/cover.png'), Buffer.alloc(1_600_000, 1));

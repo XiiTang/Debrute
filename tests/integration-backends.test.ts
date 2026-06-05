@@ -19,7 +19,7 @@ const SPAWN_TEST_TIMEOUT_MS = 20_000;
 
 describe('integration backends', () => {
   it('detects Homebrew and prefers uv for Python CLI integrations', async () => {
-    const binDir = await mkdtemp(join(tmpdir(), 'axis-integrations-backends-'));
+    const binDir = await mkdtemp(join(tmpdir(), 'debrute-integrations-backends-'));
     const brew = await writeExecutable(binDir, 'brew', '#!/bin/sh\nexit 0\n');
     const uv = await writeExecutable(binDir, 'uv', '#!/bin/sh\nexit 0\n');
     await writeExecutable(binDir, 'pipx', '#!/bin/sh\nexit 0\n');
@@ -41,7 +41,7 @@ describe('integration backends', () => {
   });
 
   it('requires apt-get and apt-cache on Linux', async () => {
-    const binDir = await mkdtemp(join(tmpdir(), 'axis-integrations-apt-missing-cache-'));
+    const binDir = await mkdtemp(join(tmpdir(), 'debrute-integrations-apt-missing-cache-'));
     await writeExecutable(binDir, 'apt-get', '#!/bin/sh\nexit 0\n');
 
     await expect(detectSystemPackageManager({ platform: 'linux', envPath: binDir })).resolves.toEqual({
@@ -54,7 +54,7 @@ describe('integration backends', () => {
   });
 
   it('reports Python CLI installer unavailable when uv and pipx are absent', async () => {
-    const binDir = await mkdtemp(join(tmpdir(), 'axis-integrations-no-python-installer-'));
+    const binDir = await mkdtemp(join(tmpdir(), 'debrute-integrations-no-python-installer-'));
 
     await expect(detectPythonCliInstaller({ envPath: binDir })).resolves.toEqual({
       kind: 'python-cli-installer',
@@ -147,7 +147,7 @@ describe('integration backends', () => {
   });
 
   it('runs commands with file and args without shell execution', async () => {
-    const binDir = await mkdtemp(join(tmpdir(), 'axis-integration-command-runner-'));
+    const binDir = await mkdtemp(join(tmpdir(), 'debrute-integration-command-runner-'));
     const logPath = join(binDir, 'argv.log');
     const command = await writeExecutable(binDir, 'runner', [
       '#!/bin/sh',
@@ -167,7 +167,7 @@ describe('integration backends', () => {
   }, SPAWN_TEST_TIMEOUT_MS);
 
   it('bounds output and kills timed-out commands', async () => {
-    const binDir = await mkdtemp(join(tmpdir(), 'axis-integration-command-limits-'));
+    const binDir = await mkdtemp(join(tmpdir(), 'debrute-integration-command-limits-'));
     const large = await writeExecutable(binDir, 'large-output', [
       '#!/bin/sh',
       'printf "%0200000d\\n" 0',

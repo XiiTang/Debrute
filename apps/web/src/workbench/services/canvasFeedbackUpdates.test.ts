@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import type { CanvasFeedbackDocument, UpdateCanvasFeedbackEntryInput } from '@axis/canvas-core';
+import type { CanvasFeedbackDocument, UpdateCanvasFeedbackEntryInput } from '@debrute/canvas-core';
 import { createCanvasFeedbackEntryUpdater } from './canvasFeedbackUpdates';
 
 describe('canvas feedback updates', () => {

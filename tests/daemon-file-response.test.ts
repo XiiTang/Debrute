@@ -8,7 +8,7 @@ import { writeRevisionedFileResponse } from '../apps/daemon/src/http/fileRespons
 
 describe('daemon revisioned file responses', () => {
   it('writes immutable cache headers for revisioned files', async () => {
-    const dir = await mkdtemp(join(tmpdir(), 'axis-file-response-'));
+    const dir = await mkdtemp(join(tmpdir(), 'debrute-file-response-'));
     try {
       const path = join(dir, 'image.png');
       await writeFile(path, Buffer.from('image-bytes'));
@@ -35,7 +35,7 @@ describe('daemon revisioned file responses', () => {
   });
 
   it('settles cleanly when the request closes before the stream finishes', async () => {
-    const dir = await mkdtemp(join(tmpdir(), 'axis-file-response-close-'));
+    const dir = await mkdtemp(join(tmpdir(), 'debrute-file-response-close-'));
     try {
       const path = join(dir, 'large.bin');
       await writeFile(path, Buffer.alloc(1024 * 1024, 1));

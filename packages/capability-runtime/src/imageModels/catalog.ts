@@ -1,5 +1,5 @@
 export interface ImageModelCatalogEntry {
-  axisModelId: string;
+  debruteModelId: string;
   summary: string;
   chooseWhen: string;
   avoidWhen: string;
@@ -146,7 +146,7 @@ const IMAGE_LIST_PARAMETERS: Record<string, Record<string, string>> = {
     'optimize_prompt_options.mode': 'standard supported for Seedream 5.0 Lite'
   },
   'wan2.7-image': {
-    prompt: 'required text prompt; AXIS forwards as request message text',
+    prompt: 'required text prompt; Debrute forwards as request message text',
     image: '0..9 input images; JPEG/JPG/PNG without alpha/BMP/WEBP; width and height 240..8000; aspect ratio 1:8..8:1; file size <=20MB',
     size: '1K|2K or explicit pixels with total pixels 768*768..2048*2048 and aspect ratio 1:8..8:1',
     n: '1..4 when group mode is disabled; 1..12 maximum generated count when group mode is enabled',
@@ -233,10 +233,10 @@ function geminiListParameters(): Record<string, string> {
 
 const ENTRIES: ImageModelCatalogEntry[] = [
   {
-    axisModelId: 'doubao-seedream-5-0-lite-260128',
+    debruteModelId: 'doubao-seedream-5-0-lite-260128',
     summary: 'Volcengine Ark Doubao Seedream image generation.',
     chooseWhen: 'Chinese prompts, bilingual text inside images, multi-image composition, large outputs',
-    avoidWhen: 'you need seed control exposed in AXIS',
+    avoidWhen: 'you need seed control exposed in Debrute',
     supportsTextRendering: true,
     supportsEditing: true,
     defaultBaseUrl: DEFAULT_IMAGE_ROUTES['doubao-seedream-5-0-lite-260128']!.baseUrl,
@@ -264,10 +264,10 @@ const ENTRIES: ImageModelCatalogEntry[] = [
     })
   },
   {
-    axisModelId: 'wan2.7-image',
+    debruteModelId: 'wan2.7-image',
     summary: 'Aliyun DashScope Wan 2.7 image generation.',
     chooseWhen: 'Chinese-first prompting, image-input generation or editing, simple reproducibility via `seed`, one endpoint for generation and editing',
-    avoidWhen: "you need more than AXIS's exposed feature subset",
+    avoidWhen: "you need more than Debrute's exposed feature subset",
     supportsTextRendering: false,
     supportsEditing: true,
     defaultBaseUrl: DEFAULT_IMAGE_ROUTES['wan2.7-image']!.baseUrl,
@@ -288,7 +288,7 @@ const ENTRIES: ImageModelCatalogEntry[] = [
     requestExample: example('wan2.7-image', { prompt: 'A quiet Jiangnan canal town in misty morning light', size: '1440*1024', n: 2, seed: 123 })
   },
   {
-    axisModelId: 'gemini-3.1-flash-image-preview',
+    debruteModelId: 'gemini-3.1-flash-image-preview',
     summary: 'Google Gemini 3.1 Flash image preview channel.',
     chooseWhen: 'fast single-image generation, extreme aspect ratios, Gemini image-input flows',
     avoidWhen: 'you need multiple outputs per call',
@@ -302,7 +302,7 @@ const ENTRIES: ImageModelCatalogEntry[] = [
     requestExample: example('gemini-3.1-flash-image-preview', { prompt: 'A minimalist storefront facade, strong geometry, bright midday sun', aspect_ratio: '16:9', image_size: '1K' })
   },
   {
-    axisModelId: 'gemini-3-pro-image-preview',
+    debruteModelId: 'gemini-3-pro-image-preview',
     summary: 'Google Gemini 3 Pro image preview channel.',
     chooseWhen: 'highest Gemini quality tier, more complex edits/compositions, better detail than Flash',
     avoidWhen: 'you need the cheapest / fastest Gemini path',
@@ -316,7 +316,7 @@ const ENTRIES: ImageModelCatalogEntry[] = [
     requestExample: example('gemini-3-pro-image-preview', { prompt: 'A high-detail architectural interior concept with natural light', aspect_ratio: '4:3', image_size: '2K' })
   },
   {
-    axisModelId: 'gpt-image-1',
+    debruteModelId: 'gpt-image-1',
     summary: 'OpenAI gpt-image-1 text-to-image and image edits.',
     chooseWhen: 'strong instruction following, strong text rendering, OpenAI edit flow, multiple image inputs',
     avoidWhen: 'you need seed / diffusion knobs',
@@ -338,10 +338,10 @@ const ENTRIES: ImageModelCatalogEntry[] = [
       image: imageInputArraySchema('openai-image'),
       mask: imageInputValueSchema('Optional direct image input for edit masks.', 'openai-image')
     }),
-    requestExample: example('gpt-image-1', { prompt: 'A clean app icon with readable AXIS lettering', size: '1024x1024', quality: 'high' })
+    requestExample: example('gpt-image-1', { prompt: 'A clean app icon with readable Debrute lettering', size: '1024x1024', quality: 'high' })
   },
   {
-    axisModelId: 'gpt-image-2',
+    debruteModelId: 'gpt-image-2',
     summary: 'OpenAI gpt-image-2 text-to-image and image edits.',
     chooseWhen: 'latest OpenAI image quality tier, strong prompt adherence, text rendering, and OpenAI-native editing',
     avoidWhen: 'you need seed / diffusion knobs or a non-OpenAI image stack',
@@ -381,9 +381,9 @@ const ENTRIES: ImageModelCatalogEntry[] = [
     })
   },
   {
-    axisModelId: 'image-01',
+    debruteModelId: 'image-01',
     summary: 'MiniMax image-01 image generation.',
-    chooseWhen: 'cheapest large batch in AXIS, character-style subject image input, up to 9 outputs per call',
+    chooseWhen: 'cheapest large batch in Debrute, character-style subject image input, up to 9 outputs per call',
     avoidWhen: 'you need arbitrary edit controls or masks',
     supportsTextRendering: false,
     supportsEditing: false,
@@ -405,7 +405,7 @@ const ENTRIES: ImageModelCatalogEntry[] = [
     requestExample: example('image-01', { prompt: 'A character poster with consistent costume and confident pose', aspect_ratio: '3:4', n: 4 })
   },
   {
-    axisModelId: 'fal-ai/flux/dev',
+    debruteModelId: 'fal-ai/flux/dev',
     summary: 'Fal.ai FLUX.1 [dev] text-to-image.',
     chooseWhen: 'plain text-to-image with `seed`, `guidance_scale`, `num_inference_steps`',
     avoidWhen: 'you need image inputs',
@@ -419,7 +419,7 @@ const ENTRIES: ImageModelCatalogEntry[] = [
     requestExample: example('fal-ai/flux/dev', { prompt: 'A cinematic product render on a black acrylic surface', image_size: 'landscape_4_3', num_images: 1, output_format: 'png' })
   },
   {
-    axisModelId: 'fal-ai/flux/dev/image-to-image',
+    debruteModelId: 'fal-ai/flux/dev/image-to-image',
     summary: 'Fal.ai FLUX.1 [dev] image-to-image.',
     chooseWhen: 'image-to-image restyling with a `strength` dial and FLUX controls',
     avoidWhen: 'you need more than one image input',
@@ -433,7 +433,7 @@ const ENTRIES: ImageModelCatalogEntry[] = [
     requestExample: example('fal-ai/flux/dev/image-to-image', { prompt: 'Restyle this product photo as a glossy studio render', image_url: 'assets/product.png', strength: 0.65 })
   },
   {
-    axisModelId: 'gemini-3.1-flash-image',
+    debruteModelId: 'gemini-3.1-flash-image',
     summary: 'Google Gemini 3.1 Flash image generation.',
     chooseWhen: 'the production (non-preview) Gemini 3.1 Flash image channel when your account has it enabled',
     avoidWhen: 'you need the preview channel features',
@@ -447,7 +447,7 @@ const ENTRIES: ImageModelCatalogEntry[] = [
     requestExample: example('gemini-3.1-flash-image', { prompt: 'A minimalist storefront facade, strong geometry, bright midday sun', aspect_ratio: '16:9', image_size: '1K' })
   },
   {
-    axisModelId: 'grok-imagine',
+    debruteModelId: 'grok-imagine',
     summary: 'xAI Grok Imagine via Vydra.',
     chooseWhen: 'one fast, simple single-image call with minimal controls',
     avoidWhen: 'you need image inputs, batch outputs, or precise edit controls',
@@ -471,15 +471,15 @@ export function createImageModelCatalog() {
     listAll(): ImageModelCatalogEntry[] {
       return sortedEntries(ENTRIES);
     },
-    listConfigured(axisModelIds: string[]): ImageModelCatalogEntry[] {
-      const selected = new Set(axisModelIds);
-      return sortedEntries(ENTRIES.filter((entry) => selected.has(entry.axisModelId)));
+    listConfigured(debruteModelIds: string[]): ImageModelCatalogEntry[] {
+      const selected = new Set(debruteModelIds);
+      return sortedEntries(ENTRIES.filter((entry) => selected.has(entry.debruteModelId)));
     },
     listOverviews(entries: ImageModelCatalogEntry[] = ENTRIES): ImageModelOverviewEntry[] {
       return sortedEntries(entries).map(toOverview);
     },
     details(modelIds: string[], entries: ImageModelCatalogEntry[] = ENTRIES): { details: ImageModelDetailEntry[]; unavailableModels: string[] } {
-      const byId = new Map(entries.map((entry) => [entry.axisModelId, entry]));
+      const byId = new Map(entries.map((entry) => [entry.debruteModelId, entry]));
       const seen = new Set<string>();
       const details: ImageModelDetailEntry[] = [];
       const unavailableModels: string[] = [];
@@ -498,15 +498,15 @@ export function createImageModelCatalog() {
       }
       return { details, unavailableModels };
     },
-    get(axisModelId: string): ImageModelCatalogEntry | undefined {
-      return ENTRIES.find((entry) => entry.axisModelId === axisModelId);
+    get(debruteModelId: string): ImageModelCatalogEntry | undefined {
+      return ENTRIES.find((entry) => entry.debruteModelId === debruteModelId);
     }
   };
 }
 
 function toOverview(entry: ImageModelCatalogEntry): ImageModelOverviewEntry {
   return {
-    model: entry.axisModelId,
+    model: entry.debruteModelId,
     summary: entry.summary,
     chooseWhen: entry.chooseWhen,
     avoidWhen: entry.avoidWhen,
@@ -548,7 +548,7 @@ function imageInputFields(schema: Record<string, unknown>): string[] {
     return [];
   }
   return Object.entries(properties as Record<string, unknown>)
-    .filter(([, value]) => typeof value === 'object' && value !== null && (value as Record<string, unknown>).axisImageInput === true)
+    .filter(([, value]) => typeof value === 'object' && value !== null && (value as Record<string, unknown>).debruteImageInput === true)
     .map(([key]) => key);
 }
 
@@ -573,14 +573,14 @@ function imageInputSchemaForField(schema: Record<string, unknown>, field: string
   const fieldSchema = (properties as Record<string, unknown>)[field];
   if (typeof fieldSchema === 'object'
     && fieldSchema !== null
-    && (fieldSchema as Record<string, unknown>).axisImageInput === true) {
+    && (fieldSchema as Record<string, unknown>).debruteImageInput === true) {
     return fieldSchema as Record<string, unknown>;
   }
   return undefined;
 }
 
 function modelSpecificImageObjectMetadataForSchema(schema: Record<string, unknown> | undefined): ModelSpecificImageObjectMetadata | undefined {
-  const metadata = schema?.axisModelSpecificImageObject;
+  const metadata = schema?.debruteModelSpecificImageObject;
   if (!metadata || typeof metadata !== 'object') {
     return undefined;
   }
@@ -591,7 +591,7 @@ function modelSpecificImageObjectMetadataForSchema(schema: Record<string, unknow
 }
 
 function sortedEntries(entries: ImageModelCatalogEntry[]): ImageModelCatalogEntry[] {
-  return [...entries].sort((left, right) => left.axisModelId.localeCompare(right.axisModelId));
+  return [...entries].sort((left, right) => left.debruteModelId.localeCompare(right.debruteModelId));
 }
 
 function objectSchema(properties: Record<string, Record<string, unknown>>): Record<string, unknown> {
@@ -601,7 +601,7 @@ function objectSchema(properties: Record<string, Record<string, unknown>>): Reco
       ...properties,
       output_path: {
         type: 'string',
-        description: 'Optional project-relative output file path for the first generated image. AXIS writes the file inside the open Project folder.'
+        description: 'Optional project-relative output file path for the first generated image. Debrute writes the file inside the open Project folder.'
       },
       output_directory: {
         type: 'string',
@@ -627,8 +627,8 @@ function imageInputArraySchema(modelSpecificObjectKind?: ModelSpecificImageObjec
           ]
         }
       : { type: 'string' },
-    axisImageInput: true,
-    ...(modelSpecificObject ? { axisModelSpecificImageObject: modelSpecificImageObjectMarker(modelSpecificObject.kind) } : {}),
+    debruteImageInput: true,
+    ...(modelSpecificObject ? { debruteModelSpecificImageObject: modelSpecificImageObjectMarker(modelSpecificObject.kind) } : {}),
     description: modelSpecificObjectKind
       ? IMAGE_INPUT_ARRAY_WITH_OBJECT_ACCEPTED_VALUE_FORMAT
       : IMAGE_INPUT_ARRAY_ACCEPTED_VALUE_FORMAT
@@ -645,13 +645,13 @@ function imageInputValueSchema(description: string, modelSpecificObjectKind?: Mo
           { type: 'string' },
           modelSpecificObject.schema
         ],
-        axisImageInput: true,
-        axisModelSpecificImageObject: modelSpecificImageObjectMarker(modelSpecificObject.kind),
+        debruteImageInput: true,
+        debruteModelSpecificImageObject: modelSpecificImageObjectMarker(modelSpecificObject.kind),
         description: IMAGE_INPUT_VALUE_WITH_OBJECT_ACCEPTED_VALUE_FORMAT
       }
     : {
         type: 'string',
-        axisImageInput: true,
+        debruteImageInput: true,
         description
       };
 }

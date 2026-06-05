@@ -9,8 +9,8 @@ export function userHomeDir(): string {
   return home;
 }
 
-export function axisHomeDir(): string {
-  return join(userHomeDir(), '.axis');
+export function debruteHomeDir(): string {
+  return join(userHomeDir(), '.debrute');
 }
 
 export function normalizeProjectPathBasename(name: string): string {
@@ -85,8 +85,8 @@ export function assertProjectTreeVisibleMutationPath(projectRelativePath: string
 }
 
 export function isIgnoredProjectFilePath(projectRelativePath: string): boolean {
-  return projectRelativePath === '.axis/cache/canvas-image-previews'
-    || projectRelativePath.startsWith('.axis/cache/canvas-image-previews/');
+  return projectRelativePath === '.debrute/cache/canvas-image-previews'
+    || projectRelativePath.startsWith('.debrute/cache/canvas-image-previews/');
 }
 
 function normalizeProjectPath(projectRelativePath: string, options: { allowEmpty: boolean }): string {

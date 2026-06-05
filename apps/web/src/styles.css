@@ -1583,32 +1583,32 @@ small {
   color: oklch(0.78 0.12 25);
 }
 
-.axis-cli-settings-page {
+.debrute-cli-settings-page {
   gap: 14px;
 }
 
-.axis-cli-status-card {
+.debrute-cli-status-card {
   gap: 14px;
 }
 
-.axis-cli-status-grid {
+.debrute-cli-status-grid {
   display: grid;
   gap: 8px;
 }
 
-.axis-cli-status-grid small {
+.debrute-cli-status-grid small {
   display: grid;
   gap: 3px;
   overflow-wrap: anywhere;
 }
 
-.axis-cli-status-grid span {
+.debrute-cli-status-grid span {
   color: var(--muted);
   font-size: 11px;
   text-transform: uppercase;
 }
 
-.axis-cli-status-card pre {
+.debrute-cli-status-card pre {
   margin: 0;
   max-width: 100%;
   overflow: auto;

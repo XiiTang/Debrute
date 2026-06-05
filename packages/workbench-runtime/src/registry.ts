@@ -96,7 +96,7 @@ async function waitForRuntimeHealth(
     }
     await sleep(RUNTIME_HEALTH_INTERVAL_MS);
   }
-  throw registryError('runtime_health_failed', 'AXIS workbench runtime did not become healthy.');
+  throw registryError('runtime_health_failed', 'Debrute workbench runtime did not become healthy.');
 }
 
 function sleep(ms: number): Promise<void> {
@@ -104,7 +104,7 @@ function sleep(ms: number): Promise<void> {
 }
 
 function isInvalidStateError(error: unknown): boolean {
-  return error instanceof Error && error.message.startsWith('Invalid AXIS workbench runtime state:');
+  return error instanceof Error && error.message.startsWith('Invalid Debrute workbench runtime state:');
 }
 
 function messageFromUnknown(error: unknown): string {

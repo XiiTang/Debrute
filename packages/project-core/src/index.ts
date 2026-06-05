@@ -3,7 +3,7 @@ import { watch } from 'node:fs';
 import { dirname, join, relative } from 'node:path';
 import { randomUUID } from 'node:crypto';
 import {
-  axisHomeDir,
+  debruteHomeDir,
   isIgnoredProjectFilePath,
   normalizeProjectRelativePath,
   resolveExistingProjectPath,
@@ -11,7 +11,7 @@ import {
   resolveProjectPath
 } from './projectPaths.js';
 
-export const AXIS_PROJECT_SCHEMA_VERSION = 1;
+export const DEBRUTE_PROJECT_SCHEMA_VERSION = 1;
 
 export interface ProjectIdentity {
   id: string;
@@ -19,7 +19,7 @@ export interface ProjectIdentity {
   rootPath: string;
 }
 
-export interface AxisProjectMetadata {
+export interface DebruteProjectMetadata {
   schemaVersion: number;
   project: {
     id: string;
@@ -29,8 +29,8 @@ export interface AxisProjectMetadata {
   };
 }
 
-export interface AxisProjectPaths {
-  axisDir: string;
+export interface DebruteProjectPaths {
+  debruteDir: string;
   projectFile: string;
   canvasesDir: string;
   flowmapsDir: string;
@@ -72,25 +72,25 @@ export function createProjectIdentity(projectRoot: string, name = basenameFromPa
   };
 }
 
-export function getAxisProjectPaths(projectRoot: string): AxisProjectPaths {
-  const axisDir = join(projectRoot, '.axis');
+export function getDebruteProjectPaths(projectRoot: string): DebruteProjectPaths {
+  const debruteDir = join(projectRoot, '.debrute');
   return {
-    axisDir,
-    projectFile: join(axisDir, 'project.json'),
-    canvasesDir: join(axisDir, 'canvases'),
-    flowmapsDir: join(axisDir, 'flowmaps'),
-    globalRuntimeDir: join(axisHomeDir(), 'runtime')
+    debruteDir,
+    projectFile: join(debruteDir, 'project.json'),
+    canvasesDir: join(debruteDir, 'canvases'),
+    flowmapsDir: join(debruteDir, 'flowmaps'),
+    globalRuntimeDir: join(debruteHomeDir(), 'runtime')
   };
 }
 
-export async function initializeBlankProject(projectRoot: string, options: { name?: string } = {}): Promise<AxisProjectMetadata> {
-  const paths = getAxisProjectPaths(projectRoot);
+export async function initializeBlankProject(projectRoot: string, options: { name?: string } = {}): Promise<DebruteProjectMetadata> {
+  const paths = getDebruteProjectPaths(projectRoot);
   await mkdir(paths.canvasesDir, { recursive: true });
 
   const now = new Date().toISOString();
   const identity = createProjectIdentity(projectRoot, options.name);
-  const metadata: AxisProjectMetadata = {
-    schemaVersion: AXIS_PROJECT_SCHEMA_VERSION,
+  const metadata: DebruteProjectMetadata = {
+    schemaVersion: DEBRUTE_PROJECT_SCHEMA_VERSION,
     project: {
       id: identity.id,
       name: identity.name,
@@ -103,13 +103,13 @@ export async function initializeBlankProject(projectRoot: string, options: { nam
   return metadata;
 }
 
-export async function readProjectMetadata(projectRoot: string): Promise<AxisProjectMetadata> {
-  const metadata = await readJsonFile<AxisProjectMetadata>(getAxisProjectPaths(projectRoot).projectFile);
+export async function readProjectMetadata(projectRoot: string): Promise<DebruteProjectMetadata> {
+  const metadata = await readJsonFile<DebruteProjectMetadata>(getDebruteProjectPaths(projectRoot).projectFile);
   assertProjectSchema(metadata);
   return metadata;
 }
 
-export async function listAxisProjectFiles(projectRoot: string): Promise<ProjectFileEntry[]> {
+export async function listDebruteProjectFiles(projectRoot: string): Promise<ProjectFileEntry[]> {
   const entries = await walkEntries(projectRoot);
   return entries
     .filter((entry) => !entry.projectRelativePath.startsWith('.git/'))
@@ -234,7 +234,7 @@ export {
 
 export {
   assertProjectTreeVisibleMutationPath,
-  axisHomeDir,
+  debruteHomeDir,
   isIgnoredProjectFilePath,
   joinProjectPath,
   normalizeProjectDirectoryPath,
@@ -276,16 +276,16 @@ export function normalizeFileWatchEvent(projectRoot: string, absolutePath: strin
       affects
     };
   }
-  if (projectRelativePath.startsWith('.axis/canvases/') && projectRelativePath.endsWith('.json')) {
+  if (projectRelativePath.startsWith('.debrute/canvases/') && projectRelativePath.endsWith('.json')) {
     affects.push('canvas');
-  } else if (projectRelativePath.startsWith('.axis/flowmaps/') && projectRelativePath.endsWith('.yaml')) {
+  } else if (projectRelativePath.startsWith('.debrute/flowmaps/') && projectRelativePath.endsWith('.yaml')) {
     affects.push('flowmap');
-  } else if (projectRelativePath === '.axis/project.json') {
+  } else if (projectRelativePath === '.debrute/project.json') {
     affects.push('project-metadata');
   } else if (
-    projectRelativePath === '.axis/assets/generated-assets-index.json'
-    || projectRelativePath.startsWith('.axis/assets/generated/')
-    || projectRelativePath === '.axis/cache/file-fingerprints.json'
+    projectRelativePath === '.debrute/assets/generated-assets-index.json'
+    || projectRelativePath.startsWith('.debrute/assets/generated/')
+    || projectRelativePath === '.debrute/cache/file-fingerprints.json'
   ) {
     affects.push('generated-asset-metadata');
   } else {
@@ -301,9 +301,9 @@ export function normalizeFileWatchEvent(projectRoot: string, absolutePath: strin
   };
 }
 
-export function assertProjectSchema(metadata: AxisProjectMetadata): void {
-  if (metadata.schemaVersion !== AXIS_PROJECT_SCHEMA_VERSION) {
-    throw new Error(`Unsupported AXIS project schema ${metadata.schemaVersion}. Expected ${AXIS_PROJECT_SCHEMA_VERSION}.`);
+export function assertProjectSchema(metadata: DebruteProjectMetadata): void {
+  if (metadata.schemaVersion !== DEBRUTE_PROJECT_SCHEMA_VERSION) {
+    throw new Error(`Unsupported Debrute project schema ${metadata.schemaVersion}. Expected ${DEBRUTE_PROJECT_SCHEMA_VERSION}.`);
   }
 }
 

@@ -2,8 +2,8 @@ import { mkdir, mkdtemp, readFile, realpath, rm, symlink, writeFile } from 'node
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
-import { AxisAppServer } from '@axis/app-server';
-import { createAxisDaemonHttpServer } from '@axis/daemon';
+import { DebruteAppServer } from '@debrute/app-server';
+import { createDebruteDaemonHttpServer } from '@debrute/daemon';
 import sharp from 'sharp';
 
 describe('daemon HTTP runtime', () => {
@@ -16,7 +16,7 @@ describe('daemon HTTP runtime', () => {
   });
 
   it('serves runtime metadata and protects mutating routes with the daemon token', async () => {
-    const daemon = createAxisDaemonHttpServer({
+    const daemon = createDebruteDaemonHttpServer({
       host: '127.0.0.1',
       port: 0,
       token: 'test-token',
@@ -49,7 +49,7 @@ describe('daemon HTTP runtime', () => {
 
     const verifiedRuntime = await fetch(`${runtime.daemonUrl}/api/runtime`, {
       method: 'POST',
-      headers: { 'x-axis-daemon-token': 'test-token' }
+      headers: { 'x-debrute-daemon-token': 'test-token' }
     }).then((response) => response.json());
     expect(verifiedRuntime).toMatchObject({
       daemonUrl: runtime.daemonUrl,
@@ -73,7 +73,7 @@ describe('daemon HTTP runtime', () => {
   });
 
   it('rejects non-loopback daemon bind hosts before listening', async () => {
-    const daemon = createAxisDaemonHttpServer({
+    const daemon = createDebruteDaemonHttpServer({
       host: '0.0.0.0',
       port: 0,
       token: 'test-token',
@@ -81,12 +81,12 @@ describe('daemon HTTP runtime', () => {
     });
     cleanups.push(() => daemon.close());
 
-    await expect(daemon.listen()).rejects.toThrow('AXIS daemon host must be loopback');
+    await expect(daemon.listen()).rejects.toThrow('Debrute daemon host must be loopback');
     expect(daemon.runtime()).toBeUndefined();
   });
 
   it('allows only daemon and web origins on API requests', async () => {
-    const daemon = createAxisDaemonHttpServer({
+    const daemon = createDebruteDaemonHttpServer({
       host: '127.0.0.1',
       port: 0,
       token: 'test-token',
@@ -124,11 +124,11 @@ describe('daemon HTTP runtime', () => {
   });
 
   it('opens a project and exposes text file routes through HTTP', async () => {
-    const projectRoot = await mkdtemp(join(tmpdir(), 'axis-daemon-project-'));
+    const projectRoot = await mkdtemp(join(tmpdir(), 'debrute-daemon-project-'));
     await mkdir(join(projectRoot, 'briefs'), { recursive: true });
     await writeFile(join(projectRoot, 'briefs/outline.md'), '# Outline', 'utf8');
 
-    const daemon = createAxisDaemonHttpServer({
+    const daemon = createDebruteDaemonHttpServer({
       host: '127.0.0.1',
       port: 0,
       token: 'test-token',
@@ -144,7 +144,7 @@ describe('daemon HTTP runtime', () => {
       method: 'POST',
       headers: {
         'content-type': 'application/json',
-        'x-axis-daemon-token': 'test-token'
+        'x-debrute-daemon-token': 'test-token'
       },
       body: JSON.stringify({ projectRoot })
     });
@@ -167,7 +167,7 @@ describe('daemon HTTP runtime', () => {
       method: 'PUT',
       headers: {
         'content-type': 'application/json',
-        'x-axis-daemon-token': 'test-token'
+        'x-debrute-daemon-token': 'test-token'
       },
       body: JSON.stringify({ content: '# Updated' })
     });
@@ -180,11 +180,11 @@ describe('daemon HTTP runtime', () => {
   });
 
   it('rejects raw project file requests without a revision query', async () => {
-    const projectRoot = await mkdtemp(join(tmpdir(), 'axis-daemon-raw-revision-'));
+    const projectRoot = await mkdtemp(join(tmpdir(), 'debrute-daemon-raw-revision-'));
     await mkdir(join(projectRoot, 'generated'), { recursive: true });
     await writeFile(join(projectRoot, 'generated/cover.png'), 'asset-bytes', 'utf8');
 
-    const daemon = createAxisDaemonHttpServer({
+    const daemon = createDebruteDaemonHttpServer({
       host: '127.0.0.1',
       port: 0,
       token: 'test-token',
@@ -196,7 +196,7 @@ describe('daemon HTTP runtime', () => {
       method: 'POST',
       headers: {
         'content-type': 'application/json',
-        'x-axis-daemon-token': 'test-token'
+        'x-debrute-daemon-token': 'test-token'
       },
       body: JSON.stringify({ projectRoot })
     });
@@ -210,10 +210,10 @@ describe('daemon HTTP runtime', () => {
   });
 
   it('resolves desktop project paths only with the daemon token', async () => {
-    const projectRoot = await mkdtemp(join(tmpdir(), 'axis-daemon-desktop-path-'));
+    const projectRoot = await mkdtemp(join(tmpdir(), 'debrute-daemon-desktop-path-'));
     await writeFile(join(projectRoot, 'brief.md'), 'hello', 'utf8');
 
-    const daemon = createAxisDaemonHttpServer({
+    const daemon = createDebruteDaemonHttpServer({
       host: '127.0.0.1',
       port: 0,
       token: 'secret'
@@ -224,7 +224,7 @@ describe('daemon HTTP runtime', () => {
       method: 'POST',
       headers: {
         'content-type': 'application/json',
-        'x-axis-daemon-token': runtime.token
+        'x-debrute-daemon-token': runtime.token
       },
       body: JSON.stringify({ projectRoot })
     });
@@ -243,7 +243,7 @@ describe('daemon HTTP runtime', () => {
         method: 'POST',
         headers: {
           'content-type': 'application/json',
-          'x-axis-daemon-token': runtime.token
+          'x-debrute-daemon-token': runtime.token
         },
         body: JSON.stringify({ projectRelativePath: 'brief.md', kind: 'file' })
       }
@@ -253,11 +253,11 @@ describe('daemon HTTP runtime', () => {
   });
 
   it('honors project ids on project-scoped routes', async () => {
-    const projectRoot = await mkdtemp(join(tmpdir(), 'axis-daemon-project-id-'));
+    const projectRoot = await mkdtemp(join(tmpdir(), 'debrute-daemon-project-id-'));
     await mkdir(join(projectRoot, 'briefs'), { recursive: true });
     await writeFile(join(projectRoot, 'briefs/outline.md'), '# Outline', 'utf8');
 
-    const daemon = createAxisDaemonHttpServer({
+    const daemon = createDebruteDaemonHttpServer({
       host: '127.0.0.1',
       port: 0,
       token: 'test-token',
@@ -270,7 +270,7 @@ describe('daemon HTTP runtime', () => {
       method: 'POST',
       headers: {
         'content-type': 'application/json',
-        'x-axis-daemon-token': 'test-token'
+        'x-debrute-daemon-token': 'test-token'
       },
       body: JSON.stringify({ projectRoot })
     });
@@ -286,12 +286,12 @@ describe('daemon HTTP runtime', () => {
   });
 
   it('opens two live projects at the same time and isolates project routes', async () => {
-    const alphaRoot = await mkdtemp(join(tmpdir(), 'axis-daemon-alpha-'));
-    const betaRoot = await mkdtemp(join(tmpdir(), 'axis-daemon-beta-'));
+    const alphaRoot = await mkdtemp(join(tmpdir(), 'debrute-daemon-alpha-'));
+    const betaRoot = await mkdtemp(join(tmpdir(), 'debrute-daemon-beta-'));
     await writeFile(join(alphaRoot, 'brief.md'), '# Alpha', 'utf8');
     await writeFile(join(betaRoot, 'brief.md'), '# Beta', 'utf8');
 
-    const daemon = createAxisDaemonHttpServer({
+    const daemon = createDebruteDaemonHttpServer({
       host: '127.0.0.1',
       port: 0,
       token: 'test-token',
@@ -303,12 +303,12 @@ describe('daemon HTTP runtime', () => {
 
     const alpha = await requestJson<{ projectId: string }>(`${runtime.daemonUrl}/api/projects/open`, {
       method: 'POST',
-      headers: { 'content-type': 'application/json', 'x-axis-daemon-token': 'test-token' },
+      headers: { 'content-type': 'application/json', 'x-debrute-daemon-token': 'test-token' },
       body: JSON.stringify({ projectRoot: alphaRoot })
     });
     const beta = await requestJson<{ projectId: string }>(`${runtime.daemonUrl}/api/projects/open`, {
       method: 'POST',
-      headers: { 'content-type': 'application/json', 'x-axis-daemon-token': 'test-token' },
+      headers: { 'content-type': 'application/json', 'x-debrute-daemon-token': 'test-token' },
       body: JSON.stringify({ projectRoot: betaRoot })
     });
 
@@ -320,10 +320,10 @@ describe('daemon HTTP runtime', () => {
   });
 
   it('reuses the live project id for the same canonical root', async () => {
-    const projectRoot = await mkdtemp(join(tmpdir(), 'axis-daemon-reuse-root-'));
+    const projectRoot = await mkdtemp(join(tmpdir(), 'debrute-daemon-reuse-root-'));
     await writeFile(join(projectRoot, 'brief.md'), '# Brief', 'utf8');
 
-    const daemon = createAxisDaemonHttpServer({
+    const daemon = createDebruteDaemonHttpServer({
       host: '127.0.0.1',
       port: 0,
       token: 'test-token',
@@ -335,12 +335,12 @@ describe('daemon HTTP runtime', () => {
 
     const first = await requestJson<{ projectId: string }>(`${runtime.daemonUrl}/api/projects/open`, {
       method: 'POST',
-      headers: { 'content-type': 'application/json', 'x-axis-daemon-token': 'test-token' },
+      headers: { 'content-type': 'application/json', 'x-debrute-daemon-token': 'test-token' },
       body: JSON.stringify({ projectRoot })
     });
     const second = await requestJson<{ projectId: string }>(`${runtime.daemonUrl}/api/projects/open`, {
       method: 'POST',
-      headers: { 'content-type': 'application/json', 'x-axis-daemon-token': 'test-token' },
+      headers: { 'content-type': 'application/json', 'x-debrute-daemon-token': 'test-token' },
       body: JSON.stringify({ projectRoot: join(projectRoot, '.') })
     });
 
@@ -348,12 +348,12 @@ describe('daemon HTTP runtime', () => {
   });
 
   it('rejects project files that resolve outside the project through symlinks', async () => {
-    const projectRoot = await mkdtemp(join(tmpdir(), 'axis-daemon-symlink-project-'));
-    const outsideFile = join(tmpdir(), `axis-daemon-symlink-outside-${Date.now()}.txt`);
+    const projectRoot = await mkdtemp(join(tmpdir(), 'debrute-daemon-symlink-project-'));
+    const outsideFile = join(tmpdir(), `debrute-daemon-symlink-outside-${Date.now()}.txt`);
     await writeFile(outsideFile, 'outside', 'utf8');
     await symlink(outsideFile, join(projectRoot, 'linked.txt'));
 
-    const daemon = createAxisDaemonHttpServer({
+    const daemon = createDebruteDaemonHttpServer({
       host: '127.0.0.1',
       port: 0,
       token: 'test-token',
@@ -369,7 +369,7 @@ describe('daemon HTTP runtime', () => {
       method: 'POST',
       headers: {
         'content-type': 'application/json',
-        'x-axis-daemon-token': 'test-token'
+        'x-debrute-daemon-token': 'test-token'
       },
       body: JSON.stringify({ projectRoot })
     });
@@ -383,10 +383,10 @@ describe('daemon HTTP runtime', () => {
   });
 
   it('requires an explicit project root when opening a project', async () => {
-    const projectRoot = await mkdtemp(join(tmpdir(), 'axis-daemon-project-open-input-'));
+    const projectRoot = await mkdtemp(join(tmpdir(), 'debrute-daemon-project-open-input-'));
     await writeFile(join(projectRoot, 'brief.md'), '# Brief', 'utf8');
 
-    const daemon = createAxisDaemonHttpServer({
+    const daemon = createDebruteDaemonHttpServer({
       host: '127.0.0.1',
       port: 0,
       token: 'test-token',
@@ -399,7 +399,7 @@ describe('daemon HTTP runtime', () => {
       method: 'POST',
       headers: {
         'content-type': 'application/json',
-        'x-axis-daemon-token': 'test-token'
+        'x-debrute-daemon-token': 'test-token'
       },
       body: JSON.stringify({})
     });
@@ -414,11 +414,11 @@ describe('daemon HTTP runtime', () => {
   });
 
   it('returns invalid_input for project-open roots that do not resolve to directories', async () => {
-    const filePath = join(tmpdir(), `axis-daemon-project-root-file-${Date.now()}`);
+    const filePath = join(tmpdir(), `debrute-daemon-project-root-file-${Date.now()}`);
     await writeFile(filePath, 'not a directory', 'utf8');
-    const missingPath = join(tmpdir(), `axis-daemon-project-root-missing-${Date.now()}`);
+    const missingPath = join(tmpdir(), `debrute-daemon-project-root-missing-${Date.now()}`);
 
-    const daemon = createAxisDaemonHttpServer({
+    const daemon = createDebruteDaemonHttpServer({
       host: '127.0.0.1',
       port: 0,
       token: 'test-token',
@@ -432,7 +432,7 @@ describe('daemon HTTP runtime', () => {
         method: 'POST',
         headers: {
           'content-type': 'application/json',
-          'x-axis-daemon-token': 'test-token'
+          'x-debrute-daemon-token': 'test-token'
         },
         body: JSON.stringify({ projectRoot })
       });
@@ -449,16 +449,16 @@ describe('daemon HTTP runtime', () => {
   });
 
   it('does not expose projects opened outside HTTP project-open routes', async () => {
-    const projectRoot = await mkdtemp(join(tmpdir(), 'axis-daemon-direct-open-'));
+    const projectRoot = await mkdtemp(join(tmpdir(), 'debrute-daemon-direct-open-'));
     await writeFile(join(projectRoot, 'brief.md'), '# Brief', 'utf8');
 
-    const daemon = createAxisDaemonHttpServer({
+    const daemon = createDebruteDaemonHttpServer({
       host: '127.0.0.1',
       port: 0,
       token: 'test-token',
       webBaseUrl: null
     });
-    const privateAppServer = new AxisAppServer();
+    const privateAppServer = new DebruteAppServer();
     cleanups.push(() => daemon.close(), () => privateAppServer.close(), () => rm(projectRoot, { recursive: true, force: true }));
     const runtime = await daemon.listen();
 
@@ -474,14 +474,14 @@ describe('daemon HTTP runtime', () => {
   });
 
   it('serves generated asset metadata and raw files from browser-facing asset routes', async () => {
-    const projectRoot = await mkdtemp(join(tmpdir(), 'axis-daemon-generated-asset-'));
+    const projectRoot = await mkdtemp(join(tmpdir(), 'debrute-daemon-generated-asset-'));
     await mkdir(join(projectRoot, 'generated'), { recursive: true });
     await writeFile(join(projectRoot, 'generated/cover.png'), 'asset-bytes', 'utf8');
 
-    let appServer: AxisAppServer | undefined;
-    const daemon = createAxisDaemonHttpServer({
+    let appServer: DebruteAppServer | undefined;
+    const daemon = createDebruteDaemonHttpServer({
       createAppServer: () => {
-        appServer = new AxisAppServer();
+        appServer = new DebruteAppServer();
         return appServer;
       },
       host: '127.0.0.1',
@@ -495,7 +495,7 @@ describe('daemon HTTP runtime', () => {
       method: 'POST',
       headers: {
         'content-type': 'application/json',
-        'x-axis-daemon-token': 'test-token'
+        'x-debrute-daemon-token': 'test-token'
       },
       body: JSON.stringify({ projectRoot })
     });
@@ -535,13 +535,13 @@ describe('daemon HTTP runtime', () => {
   });
 
   it('rejects generated asset lookup paths that resolve outside the project through symlinks', async () => {
-    const projectRoot = await mkdtemp(join(tmpdir(), 'axis-daemon-generated-asset-symlink-'));
-    const outsideFile = join(tmpdir(), `axis-daemon-generated-asset-outside-${Date.now()}.png`);
+    const projectRoot = await mkdtemp(join(tmpdir(), 'debrute-daemon-generated-asset-symlink-'));
+    const outsideFile = join(tmpdir(), `debrute-daemon-generated-asset-outside-${Date.now()}.png`);
     await mkdir(join(projectRoot, 'generated'), { recursive: true });
     await writeFile(outsideFile, 'outside', 'utf8');
     await symlink(outsideFile, join(projectRoot, 'generated/linked.png'));
 
-    const daemon = createAxisDaemonHttpServer({
+    const daemon = createDebruteDaemonHttpServer({
       host: '127.0.0.1',
       port: 0,
       token: 'test-token',
@@ -557,7 +557,7 @@ describe('daemon HTTP runtime', () => {
       method: 'POST',
       headers: {
         'content-type': 'application/json',
-        'x-axis-daemon-token': 'test-token'
+        'x-debrute-daemon-token': 'test-token'
       },
       body: JSON.stringify({ projectRoot })
     });
@@ -566,7 +566,7 @@ describe('daemon HTTP runtime', () => {
       method: 'POST',
       headers: {
         'content-type': 'application/json',
-        'x-axis-daemon-token': 'test-token'
+        'x-debrute-daemon-token': 'test-token'
       },
       body: JSON.stringify({ projectRelativePath: 'generated/linked.png' })
     });
@@ -578,7 +578,7 @@ describe('daemon HTTP runtime', () => {
   });
 
   it('returns structured client errors for invalid JSON bodies', async () => {
-    const daemon = createAxisDaemonHttpServer({
+    const daemon = createDebruteDaemonHttpServer({
       host: '127.0.0.1',
       port: 0,
       token: 'test-token',
@@ -591,7 +591,7 @@ describe('daemon HTTP runtime', () => {
       method: 'POST',
       headers: {
         'content-type': 'application/json',
-        'x-axis-daemon-token': 'test-token'
+        'x-debrute-daemon-token': 'test-token'
       },
       body: '{'
     });
@@ -603,10 +603,10 @@ describe('daemon HTTP runtime', () => {
   });
 
   it('streams app-server events as server-sent events', async () => {
-    const projectRoot = await mkdtemp(join(tmpdir(), 'axis-daemon-events-project-'));
+    const projectRoot = await mkdtemp(join(tmpdir(), 'debrute-daemon-events-project-'));
     await writeFile(join(projectRoot, 'brief.md'), '# Brief', 'utf8');
 
-    const daemon = createAxisDaemonHttpServer({
+    const daemon = createDebruteDaemonHttpServer({
       host: '127.0.0.1',
       port: 0,
       token: 'test-token',
@@ -618,7 +618,7 @@ describe('daemon HTTP runtime', () => {
       method: 'POST',
       headers: {
         'content-type': 'application/json',
-        'x-axis-daemon-token': 'test-token'
+        'x-debrute-daemon-token': 'test-token'
       },
       body: JSON.stringify({ projectRoot })
     });
@@ -631,12 +631,12 @@ describe('daemon HTTP runtime', () => {
   });
 
   it('does not stream project events from one session to another project session', async () => {
-    const alphaRoot = await mkdtemp(join(tmpdir(), 'axis-daemon-sse-alpha-'));
-    const betaRoot = await mkdtemp(join(tmpdir(), 'axis-daemon-sse-beta-'));
+    const alphaRoot = await mkdtemp(join(tmpdir(), 'debrute-daemon-sse-alpha-'));
+    const betaRoot = await mkdtemp(join(tmpdir(), 'debrute-daemon-sse-beta-'));
     await writeFile(join(alphaRoot, 'brief.md'), '# Alpha', 'utf8');
     await writeFile(join(betaRoot, 'brief.md'), '# Beta', 'utf8');
 
-    const daemon = createAxisDaemonHttpServer({
+    const daemon = createDebruteDaemonHttpServer({
       host: '127.0.0.1',
       port: 0,
       token: 'test-token',
@@ -646,12 +646,12 @@ describe('daemon HTTP runtime', () => {
     const runtime = await daemon.listen();
     const alpha = await requestJson<{ projectId: string }>(`${runtime.daemonUrl}/api/projects/open`, {
       method: 'POST',
-      headers: { 'content-type': 'application/json', 'x-axis-daemon-token': 'test-token' },
+      headers: { 'content-type': 'application/json', 'x-debrute-daemon-token': 'test-token' },
       body: JSON.stringify({ projectRoot: alphaRoot })
     });
     const beta = await requestJson<{ projectId: string }>(`${runtime.daemonUrl}/api/projects/open`, {
       method: 'POST',
-      headers: { 'content-type': 'application/json', 'x-axis-daemon-token': 'test-token' },
+      headers: { 'content-type': 'application/json', 'x-debrute-daemon-token': 'test-token' },
       body: JSON.stringify({ projectRoot: betaRoot })
     });
 
@@ -661,7 +661,7 @@ describe('daemon HTTP runtime', () => {
       method: 'PUT',
       headers: {
         'content-type': 'application/json',
-        'x-axis-daemon-token': 'test-token'
+        'x-debrute-daemon-token': 'test-token'
       },
       body: JSON.stringify({ content: '# Beta Updated' })
     });
@@ -673,12 +673,12 @@ describe('daemon HTTP runtime', () => {
   });
 
   it('streams global settings events to clients attached to different project sessions', async () => {
-    const alphaRoot = await mkdtemp(join(tmpdir(), 'axis-daemon-global-alpha-'));
-    const betaRoot = await mkdtemp(join(tmpdir(), 'axis-daemon-global-beta-'));
+    const alphaRoot = await mkdtemp(join(tmpdir(), 'debrute-daemon-global-alpha-'));
+    const betaRoot = await mkdtemp(join(tmpdir(), 'debrute-daemon-global-beta-'));
     await writeFile(join(alphaRoot, 'brief.md'), '# Alpha', 'utf8');
     await writeFile(join(betaRoot, 'brief.md'), '# Beta', 'utf8');
 
-    const daemon = createAxisDaemonHttpServer({
+    const daemon = createDebruteDaemonHttpServer({
       host: '127.0.0.1',
       port: 0,
       token: 'test-token',
@@ -688,12 +688,12 @@ describe('daemon HTTP runtime', () => {
     const runtime = await daemon.listen();
     const alpha = await requestJson<{ projectId: string }>(`${runtime.daemonUrl}/api/projects/open`, {
       method: 'POST',
-      headers: { 'content-type': 'application/json', 'x-axis-daemon-token': 'test-token' },
+      headers: { 'content-type': 'application/json', 'x-debrute-daemon-token': 'test-token' },
       body: JSON.stringify({ projectRoot: alphaRoot })
     });
     const beta = await requestJson<{ projectId: string }>(`${runtime.daemonUrl}/api/projects/open`, {
       method: 'POST',
-      headers: { 'content-type': 'application/json', 'x-axis-daemon-token': 'test-token' },
+      headers: { 'content-type': 'application/json', 'x-debrute-daemon-token': 'test-token' },
       body: JSON.stringify({ projectRoot: betaRoot })
     });
 
@@ -703,7 +703,7 @@ describe('daemon HTTP runtime', () => {
       method: 'PUT',
       headers: {
         'content-type': 'application/json',
-        'x-axis-daemon-token': 'test-token'
+        'x-debrute-daemon-token': 'test-token'
       },
       body: JSON.stringify({ imagePreviewsEnabled: false })
     });
@@ -718,10 +718,10 @@ describe('daemon HTTP runtime', () => {
   });
 
   it('releases a project session after the last event stream closes and idle TTL elapses', async () => {
-    const projectRoot = await mkdtemp(join(tmpdir(), 'axis-daemon-idle-release-project-'));
+    const projectRoot = await mkdtemp(join(tmpdir(), 'debrute-daemon-idle-release-project-'));
     await writeFile(join(projectRoot, 'brief.md'), '# Brief', 'utf8');
 
-    const daemon = createAxisDaemonHttpServer({
+    const daemon = createDebruteDaemonHttpServer({
       host: '127.0.0.1',
       port: 0,
       token: 'test-token',
@@ -734,7 +734,7 @@ describe('daemon HTTP runtime', () => {
       method: 'POST',
       headers: {
         'content-type': 'application/json',
-        'x-axis-daemon-token': 'test-token'
+        'x-debrute-daemon-token': 'test-token'
       },
       body: JSON.stringify({ projectRoot })
     });
@@ -759,10 +759,10 @@ describe('daemon HTTP runtime', () => {
   });
 
   it('keeps a project session live while another event stream remains open', async () => {
-    const projectRoot = await mkdtemp(join(tmpdir(), 'axis-daemon-idle-held-project-'));
+    const projectRoot = await mkdtemp(join(tmpdir(), 'debrute-daemon-idle-held-project-'));
     await writeFile(join(projectRoot, 'brief.md'), '# Brief', 'utf8');
 
-    const daemon = createAxisDaemonHttpServer({
+    const daemon = createDebruteDaemonHttpServer({
       host: '127.0.0.1',
       port: 0,
       token: 'test-token',
@@ -775,7 +775,7 @@ describe('daemon HTTP runtime', () => {
       method: 'POST',
       headers: {
         'content-type': 'application/json',
-        'x-axis-daemon-token': 'test-token'
+        'x-debrute-daemon-token': 'test-token'
       },
       body: JSON.stringify({ projectRoot })
     });
@@ -798,10 +798,10 @@ describe('daemon HTTP runtime', () => {
   });
 
   it('cancels pending idle cleanup while a project request is in flight', async () => {
-    const projectRoot = await mkdtemp(join(tmpdir(), 'axis-daemon-idle-request-project-'));
+    const projectRoot = await mkdtemp(join(tmpdir(), 'debrute-daemon-idle-request-project-'));
     await writeFile(join(projectRoot, 'brief.md'), '# Brief', 'utf8');
 
-    const daemon = createAxisDaemonHttpServer({
+    const daemon = createDebruteDaemonHttpServer({
       host: '127.0.0.1',
       port: 0,
       token: 'test-token',
@@ -814,7 +814,7 @@ describe('daemon HTTP runtime', () => {
       method: 'POST',
       headers: {
         'content-type': 'application/json',
-        'x-axis-daemon-token': 'test-token'
+        'x-debrute-daemon-token': 'test-token'
       },
       body: JSON.stringify({ projectRoot })
     });
@@ -835,10 +835,10 @@ describe('daemon HTTP runtime', () => {
   });
 
   it('keeps a project session live while an Electron project window is registered', async () => {
-    const projectRoot = await mkdtemp(join(tmpdir(), 'axis-daemon-electron-window-project-'));
+    const projectRoot = await mkdtemp(join(tmpdir(), 'debrute-daemon-electron-window-project-'));
     await writeFile(join(projectRoot, 'brief.md'), '# Brief', 'utf8');
 
-    const daemon = createAxisDaemonHttpServer({
+    const daemon = createDebruteDaemonHttpServer({
       host: '127.0.0.1',
       port: 0,
       token: 'test-token',
@@ -851,7 +851,7 @@ describe('daemon HTTP runtime', () => {
       method: 'POST',
       headers: {
         'content-type': 'application/json',
-        'x-axis-daemon-token': 'test-token'
+        'x-debrute-daemon-token': 'test-token'
       },
       body: JSON.stringify({ projectRoot })
     });
@@ -871,7 +871,7 @@ describe('daemon HTTP runtime', () => {
   });
 
   it('streams canvas changed events with browser file URLs', async () => {
-    const projectRoot = await mkdtemp(join(tmpdir(), 'axis-daemon-canvas-event-project-'));
+    const projectRoot = await mkdtemp(join(tmpdir(), 'debrute-daemon-canvas-event-project-'));
     await mkdir(join(projectRoot, 'image-production/generated'), { recursive: true });
     await sharp({
       create: {
@@ -882,10 +882,10 @@ describe('daemon HTTP runtime', () => {
       }
     }).png().toFile(join(projectRoot, 'image-production/generated/cover.png'));
 
-    let appServer: AxisAppServer | undefined;
-    const daemon = createAxisDaemonHttpServer({
+    let appServer: DebruteAppServer | undefined;
+    const daemon = createDebruteDaemonHttpServer({
       createAppServer: () => {
-        appServer = new AxisAppServer();
+        appServer = new DebruteAppServer();
         return appServer;
       },
       host: '127.0.0.1',
@@ -899,7 +899,7 @@ describe('daemon HTTP runtime', () => {
       method: 'POST',
       headers: {
         'content-type': 'application/json',
-        'x-axis-daemon-token': 'test-token'
+        'x-debrute-daemon-token': 'test-token'
       },
       body: JSON.stringify({ projectRoot })
     });
@@ -914,12 +914,12 @@ describe('daemon HTTP runtime', () => {
     if (!appServer) {
       throw new Error('Daemon did not create a project app server.');
     }
-    await appServer.publishFlowmapDraft({ sourceDraftPath: '.axis/flowmaps/image-production.draft.yaml' });
+    await appServer.publishFlowmapDraft({ sourceDraftPath: '.debrute/flowmaps/image-production.draft.yaml' });
     const refreshed = await requestJson<{
       projections: Array<{ nodes: Array<{ projectRelativePath: string; availability: { state: string; fileUrl?: string } }> }>;
     }>(`${runtime.daemonUrl}/api/projects/${opened.projectId}/refresh`, {
       method: 'POST',
-      headers: { 'x-axis-daemon-token': 'test-token' }
+      headers: { 'x-debrute-daemon-token': 'test-token' }
     });
     const node = refreshed.projections[0]!.nodes.find((item) => item.projectRelativePath === 'image-production/generated/cover.png')!;
     expect(node.availability.fileUrl).toContain(`/api/projects/${opened.projectId}/files/raw/image-production/generated/cover.png`);
@@ -937,7 +937,7 @@ describe('daemon HTTP runtime', () => {
       method: 'PATCH',
       headers: {
         'content-type': 'application/json',
-        'x-axis-daemon-token': 'test-token'
+        'x-debrute-daemon-token': 'test-token'
       },
       body: JSON.stringify({ nodeLayers: [{ projectRelativePath: node.projectRelativePath, locked: true }] })
     });
@@ -953,11 +953,11 @@ describe('daemon HTTP runtime', () => {
   });
 
   it('rejects unsupported methods on file and preview resource routes', async () => {
-    const projectRoot = await mkdtemp(join(tmpdir(), 'axis-daemon-method-project-'));
+    const projectRoot = await mkdtemp(join(tmpdir(), 'debrute-daemon-method-project-'));
     await mkdir(join(projectRoot, 'generated'), { recursive: true });
     await writeFile(join(projectRoot, 'generated/cover.png'), 'asset-bytes', 'utf8');
 
-    const daemon = createAxisDaemonHttpServer({
+    const daemon = createDebruteDaemonHttpServer({
       host: '127.0.0.1',
       port: 0,
       token: 'test-token',
@@ -969,7 +969,7 @@ describe('daemon HTTP runtime', () => {
       method: 'POST',
       headers: {
         'content-type': 'application/json',
-        'x-axis-daemon-token': 'test-token'
+        'x-debrute-daemon-token': 'test-token'
       },
       body: JSON.stringify({ projectRoot })
     });
@@ -981,7 +981,7 @@ describe('daemon HTTP runtime', () => {
     ] as const) {
       const response = await fetch(`${runtime.daemonUrl}${path}`, {
         method,
-        headers: { 'x-axis-daemon-token': 'test-token' }
+        headers: { 'x-debrute-daemon-token': 'test-token' }
       });
       expect(response.status, `${method} ${path}`).toBe(405);
       await expect(response.json()).resolves.toMatchObject({
@@ -999,8 +999,8 @@ async function requestJson<T>(url: string, init?: RequestInit): Promise<T> {
 }
 
 async function writeFlowmapDraft(projectRoot: string, flowmapId: string, lines: string[]): Promise<void> {
-  await mkdir(join(projectRoot, '.axis/flowmaps'), { recursive: true });
-  await writeFile(join(projectRoot, `.axis/flowmaps/${flowmapId}.draft.yaml`), lines.join('\n'), 'utf8');
+  await mkdir(join(projectRoot, '.debrute/flowmaps'), { recursive: true });
+  await writeFile(join(projectRoot, `.debrute/flowmaps/${flowmapId}.draft.yaml`), lines.join('\n'), 'utf8');
 }
 
 async function readNextSseMessage<T>(response: Response): Promise<T> {

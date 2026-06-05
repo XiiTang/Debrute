@@ -9,9 +9,9 @@ import {
   createProjectDirectory,
   createProjectFile,
   deleteProjectPathPermanently,
-  getAxisProjectPaths,
+  getDebruteProjectPaths,
   initializeBlankProject,
-  listAxisProjectFiles,
+  listDebruteProjectFiles,
   moveProjectPath,
   normalizeFileWatchEvent,
   nextCopyProjectPathName,
@@ -21,14 +21,14 @@ import {
   resolveProjectPath,
   writeProjectTextFile,
   watchProjectFiles
-} from '@axis/project-core';
+} from '@debrute/project-core';
 
 describe('project-core', () => {
   it('initializes project metadata and canvases', async () => {
-    const root = await mkdtemp(join(tmpdir(), 'axis-project-'));
+    const root = await mkdtemp(join(tmpdir(), 'debrute-project-'));
     try {
-      await initializeBlankProject(root, { name: 'AXIS Project' });
-      const paths = getAxisProjectPaths(root);
+      await initializeBlankProject(root, { name: 'Debrute Project' });
+      const paths = getDebruteProjectPaths(root);
       const projectFile = await stat(paths.projectFile);
       const canvasesDir = await stat(paths.canvasesDir);
 
@@ -39,13 +39,13 @@ describe('project-core', () => {
     }
   });
 
-  it('classifies project file watch events by current AXIS boundaries', () => {
-    expect(normalizeFileWatchEvent('/project', '/project/.axis/canvases/main.json', 'changed').affects).toEqual(['canvas']);
-    expect(normalizeFileWatchEvent('/project', '/project/.axis/project.json', 'changed').affects).toEqual(['project-metadata']);
-    expect(normalizeFileWatchEvent('/project', '/project/.axis/assets/generated-assets-index.json', 'changed').affects).toEqual(['generated-asset-metadata']);
-    expect(normalizeFileWatchEvent('/project', '/project/.axis/assets/generated/record-1.json', 'changed').affects).toEqual(['generated-asset-metadata']);
-    expect(normalizeFileWatchEvent('/project', '/project/.axis/cache/file-fingerprints.json', 'changed').affects).toEqual(['generated-asset-metadata']);
-    expect(normalizeFileWatchEvent('/project', '/project/.axis/cache/canvas-image-previews/preview.jpg', 'changed').affects).toEqual([]);
+  it('classifies project file watch events by current Debrute boundaries', () => {
+    expect(normalizeFileWatchEvent('/project', '/project/.debrute/canvases/main.json', 'changed').affects).toEqual(['canvas']);
+    expect(normalizeFileWatchEvent('/project', '/project/.debrute/project.json', 'changed').affects).toEqual(['project-metadata']);
+    expect(normalizeFileWatchEvent('/project', '/project/.debrute/assets/generated-assets-index.json', 'changed').affects).toEqual(['generated-asset-metadata']);
+    expect(normalizeFileWatchEvent('/project', '/project/.debrute/assets/generated/record-1.json', 'changed').affects).toEqual(['generated-asset-metadata']);
+    expect(normalizeFileWatchEvent('/project', '/project/.debrute/cache/file-fingerprints.json', 'changed').affects).toEqual(['generated-asset-metadata']);
+    expect(normalizeFileWatchEvent('/project', '/project/.debrute/cache/canvas-image-previews/preview.jpg', 'changed').affects).toEqual([]);
     expect(normalizeFileWatchEvent('/project', '/project/work/items.json', 'changed').affects).toEqual(['content']);
   });
 
@@ -54,36 +54,36 @@ describe('project-core', () => {
   });
 
   it('keeps Canvas image preview cache files out of project-visible files', async () => {
-    const root = await mkdtemp(join(tmpdir(), 'axis-project-preview-cache-'));
+    const root = await mkdtemp(join(tmpdir(), 'debrute-project-preview-cache-'));
     try {
-      await mkdir(join(root, '.axis/cache/canvas-image-previews'), { recursive: true });
+      await mkdir(join(root, '.debrute/cache/canvas-image-previews'), { recursive: true });
       await mkdir(join(root, 'images'), { recursive: true });
-      await writeFile(join(root, '.axis/cache/canvas-image-previews/preview.jpg'), 'cache', 'utf8');
+      await writeFile(join(root, '.debrute/cache/canvas-image-previews/preview.jpg'), 'cache', 'utf8');
       await writeFile(join(root, 'images/source.png'), 'source', 'utf8');
 
-      const paths = (await listAxisProjectFiles(root)).map((file) => file.projectRelativePath);
+      const paths = (await listDebruteProjectFiles(root)).map((file) => file.projectRelativePath);
 
       expect(paths).toContain('images/source.png');
-      expect(paths).not.toContain('.axis/cache/canvas-image-previews');
-      expect(paths).not.toContain('.axis/cache/canvas-image-previews/preview.jpg');
+      expect(paths).not.toContain('.debrute/cache/canvas-image-previews');
+      expect(paths).not.toContain('.debrute/cache/canvas-image-previews/preview.jpg');
     } finally {
       await rm(root, { recursive: true, force: true });
     }
   });
 
   it('does not recurse into Canvas image preview cache directories', async () => {
-    const root = await mkdtemp(join(tmpdir(), 'axis-project-preview-cache-skip-'));
-    const unreadableCacheDir = join(root, '.axis/cache/canvas-image-previews/unreadable');
+    const root = await mkdtemp(join(tmpdir(), 'debrute-project-preview-cache-skip-'));
+    const unreadableCacheDir = join(root, '.debrute/cache/canvas-image-previews/unreadable');
     try {
       await mkdir(unreadableCacheDir, { recursive: true });
       await mkdir(join(root, 'images'), { recursive: true });
       await writeFile(join(root, 'images/source.png'), 'source', 'utf8');
       await chmod(unreadableCacheDir, 0o000);
 
-      const paths = (await listAxisProjectFiles(root)).map((file) => file.projectRelativePath);
+      const paths = (await listDebruteProjectFiles(root)).map((file) => file.projectRelativePath);
 
       expect(paths).toContain('images/source.png');
-      expect(paths.some((path) => path.startsWith('.axis/cache/canvas-image-previews'))).toBe(false);
+      expect(paths.some((path) => path.startsWith('.debrute/cache/canvas-image-previews'))).toBe(false);
     } finally {
       await chmod(unreadableCacheDir, 0o700).catch(() => undefined);
       await rm(root, { recursive: true, force: true });
@@ -91,7 +91,7 @@ describe('project-core', () => {
   });
 
   it('emits debounced watcher events for project-visible files', async () => {
-    const root = await mkdtemp(join(tmpdir(), 'axis-watch-'));
+    const root = await mkdtemp(join(tmpdir(), 'debrute-watch-'));
     try {
       await mkdir(join(root, 'notes'), { recursive: true });
       const eventPromise = new Promise<string>((resolve) => {
@@ -110,7 +110,7 @@ describe('project-core', () => {
   });
 
   it('creates files and directories from safe basenames', async () => {
-    const root = await mkdtemp(join(tmpdir(), 'axis-project-file-ops-create-'));
+    const root = await mkdtemp(join(tmpdir(), 'debrute-project-file-ops-create-'));
     try {
       const directory = await createProjectDirectory(root, { parentProjectRelativePath: '', name: 'briefs' });
       const file = await createProjectFile(root, { parentProjectRelativePath: 'briefs', name: 'concept.md' });
@@ -125,7 +125,7 @@ describe('project-core', () => {
   });
 
   it('renames project files without overwriting siblings', async () => {
-    const root = await mkdtemp(join(tmpdir(), 'axis-project-file-ops-rename-'));
+    const root = await mkdtemp(join(tmpdir(), 'debrute-project-file-ops-rename-'));
     try {
       await mkdir(join(root, 'briefs'), { recursive: true });
       await writeFile(join(root, 'briefs/draft.md'), 'draft', 'utf8');
@@ -145,7 +145,7 @@ describe('project-core', () => {
   });
 
   it('copies project paths with VSCode-style conflict names', async () => {
-    const root = await mkdtemp(join(tmpdir(), 'axis-project-file-ops-copy-'));
+    const root = await mkdtemp(join(tmpdir(), 'debrute-project-file-ops-copy-'));
     try {
       await mkdir(join(root, 'assets'), { recursive: true });
       await writeFile(join(root, 'assets/cover.png'), 'cover', 'utf8');
@@ -164,7 +164,7 @@ describe('project-core', () => {
   });
 
   it('moves project paths and rejects moving a directory into itself', async () => {
-    const root = await mkdtemp(join(tmpdir(), 'axis-project-file-ops-move-'));
+    const root = await mkdtemp(join(tmpdir(), 'debrute-project-file-ops-move-'));
     try {
       await mkdir(join(root, 'assets/pages'), { recursive: true });
       await writeFile(join(root, 'assets/pages/page-1.png'), 'page', 'utf8');
@@ -188,7 +188,7 @@ describe('project-core', () => {
   });
 
   it('keeps cut-paste into the current parent as a no-op move', async () => {
-    const root = await mkdtemp(join(tmpdir(), 'axis-project-file-ops-move-same-parent-'));
+    const root = await mkdtemp(join(tmpdir(), 'debrute-project-file-ops-move-same-parent-'));
     try {
       await mkdir(join(root, 'assets'), { recursive: true });
       await writeFile(join(root, 'assets/cover.png'), 'cover', 'utf8');
@@ -207,7 +207,7 @@ describe('project-core', () => {
   });
 
   it('deletes project paths permanently inside the project root only', async () => {
-    const root = await mkdtemp(join(tmpdir(), 'axis-project-file-ops-delete-'));
+    const root = await mkdtemp(join(tmpdir(), 'debrute-project-file-ops-delete-'));
     try {
       await mkdir(join(root, 'assets/pages'), { recursive: true });
       await writeFile(join(root, 'assets/pages/page-1.png'), 'page', 'utf8');
@@ -224,23 +224,23 @@ describe('project-core', () => {
   });
 
   it('rejects mutations for project-internal cache paths hidden from the Project Tree', async () => {
-    const root = await mkdtemp(join(tmpdir(), 'axis-project-file-ops-hidden-cache-'));
+    const root = await mkdtemp(join(tmpdir(), 'debrute-project-file-ops-hidden-cache-'));
     try {
-      await mkdir(join(root, '.axis/cache/canvas-image-previews'), { recursive: true });
-      await writeFile(join(root, '.axis/cache/canvas-image-previews/preview.jpg'), 'cache', 'utf8');
+      await mkdir(join(root, '.debrute/cache/canvas-image-previews'), { recursive: true });
+      await writeFile(join(root, '.debrute/cache/canvas-image-previews/preview.jpg'), 'cache', 'utf8');
 
       await expect(createProjectFile(root, {
-        parentProjectRelativePath: '.axis/cache/canvas-image-previews',
+        parentProjectRelativePath: '.debrute/cache/canvas-image-previews',
         name: 'created.jpg'
       })).rejects.toThrow('Project path is not visible in the Project Tree');
       await expect(copyProjectPath(root, {
-        sourceProjectRelativePath: '.axis/cache/canvas-image-previews/preview.jpg',
+        sourceProjectRelativePath: '.debrute/cache/canvas-image-previews/preview.jpg',
         targetDirectoryProjectRelativePath: ''
       })).rejects.toThrow('Project path is not visible in the Project Tree');
       await expect(deleteProjectPathPermanently(root, {
-        projectRelativePath: '.axis/cache/canvas-image-previews'
+        projectRelativePath: '.debrute/cache/canvas-image-previews'
       })).rejects.toThrow('Project path is not visible in the Project Tree');
-      await expect(readFile(join(root, '.axis/cache/canvas-image-previews/preview.jpg'), 'utf8')).resolves.toBe('cache');
+      await expect(readFile(join(root, '.debrute/cache/canvas-image-previews/preview.jpg'), 'utf8')).resolves.toBe('cache');
     } finally {
       await rm(root, { recursive: true, force: true });
     }
@@ -248,7 +248,7 @@ describe('project-core', () => {
 
   it('exposes the Project Tree mutation visibility boundary for desktop actions', () => {
     expect(() => assertProjectTreeVisibleMutationPath('assets/cover.png')).not.toThrow();
-    expect(() => assertProjectTreeVisibleMutationPath('.axis/cache/canvas-image-previews/preview.jpg'))
+    expect(() => assertProjectTreeVisibleMutationPath('.debrute/cache/canvas-image-previews/preview.jpg'))
       .toThrow('Project path is not visible in the Project Tree');
     expect(() => assertProjectTreeVisibleMutationPath('.git/config'))
       .toThrow('Project path is not visible in the Project Tree');
@@ -261,7 +261,7 @@ describe('project-core', () => {
   });
 
   it('rejects unsafe basenames for create and rename', async () => {
-    const root = await mkdtemp(join(tmpdir(), 'axis-project-file-ops-unsafe-name-'));
+    const root = await mkdtemp(join(tmpdir(), 'debrute-project-file-ops-unsafe-name-'));
     try {
       await mkdir(join(root, 'briefs'), { recursive: true });
       await writeFile(join(root, 'briefs/draft.md'), 'draft', 'utf8');
@@ -283,8 +283,8 @@ describe('project-core', () => {
   });
 
   it('rejects text file access through symlinks that escape the project root', async () => {
-    const root = await mkdtemp(join(tmpdir(), 'axis-project-symlink-boundary-'));
-    const outside = join(tmpdir(), `axis-project-outside-${Date.now()}.txt`);
+    const root = await mkdtemp(join(tmpdir(), 'debrute-project-symlink-boundary-'));
+    const outside = join(tmpdir(), `debrute-project-outside-${Date.now()}.txt`);
     try {
       await writeFile(outside, 'outside', 'utf8');
       await symlink(outside, join(root, 'linked.txt'));

@@ -1,12 +1,12 @@
 import { randomUUID } from 'node:crypto';
 import { realpath } from 'node:fs/promises';
 import { resolve } from 'node:path';
-import { AxisAppServer, GlobalConfigStore, type AxisAppServerOptions } from '@axis/app-server';
-import type { ProjectSessionSnapshot } from '@axis/app-protocol';
+import { DebruteAppServer, GlobalConfigStore, type DebruteAppServerOptions } from '@debrute/app-server';
+import type { ProjectSessionSnapshot } from '@debrute/app-protocol';
 
 export interface ProjectSessionRegistryOptions {
-  appServerOptions?: AxisAppServerOptions;
-  createAppServer?: () => AxisAppServer;
+  appServerOptions?: DebruteAppServerOptions;
+  createAppServer?: () => DebruteAppServer;
   idleTtlMs?: number;
 }
 
@@ -20,7 +20,7 @@ export interface ProjectSessionClient {
 export interface ProjectSessionRecord {
   projectId: string;
   projectRoot: string;
-  appServer: AxisAppServer;
+  appServer: DebruteAppServer;
   clients: Map<string, ProjectSessionClient>;
   activeRequests: number;
   snapshot: ProjectSessionSnapshot;
@@ -33,7 +33,7 @@ export class ProjectSessionRegistry {
   private readonly projectIdsByRoot = new Map<string, string>();
   private readonly openingByRoot = new Map<string, Promise<ProjectSessionRecord>>();
   private readonly idleTtlMs: number;
-  private readonly createAppServer: () => AxisAppServer;
+  private readonly createAppServer: () => DebruteAppServer;
   private closed = false;
 
   constructor(options: ProjectSessionRegistryOptions = {}) {
@@ -44,7 +44,7 @@ export class ProjectSessionRegistry {
     }
 
     const sharedConfigStore = options.appServerOptions?.globalConfigStore ?? new GlobalConfigStore();
-    this.createAppServer = () => new AxisAppServer({
+    this.createAppServer = () => new DebruteAppServer({
       ...options.appServerOptions,
       globalConfigStore: sharedConfigStore
     });
@@ -90,7 +90,7 @@ export class ProjectSessionRegistry {
     }
     if (this.closed) {
       appServer.close();
-      throw new Error('AXIS project session registry is closed.');
+      throw new Error('Debrute project session registry is closed.');
     }
     const projectId = randomUUID();
     const record: ProjectSessionRecord = {
@@ -187,7 +187,7 @@ export class ProjectSessionRegistry {
 
   private assertOpen(): void {
     if (this.closed) {
-      throw new Error('AXIS project session registry is closed.');
+      throw new Error('Debrute project session registry is closed.');
     }
   }
 

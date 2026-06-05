@@ -1,4 +1,4 @@
-import { capabilityError, capabilityOk, type AxisCapabilityResult } from '@axis/capability-core';
+import { capabilityError, capabilityOk, type DebruteCapabilityResult } from '@debrute/capability-core';
 import type { ChatProvider, ProviderRequest } from '../providers.js';
 import { DEFAULT_REQUEST_TIMEOUT_MS, createRequestTimeoutSignal, isRequestTimeoutError, parseRequestTimeoutMs } from '../requestTimeout.js';
 
@@ -25,7 +25,7 @@ type ParsedInput =
         timeoutMs: number;
       };
     }
-  | { ok: false; result: AxisCapabilityResult };
+  | { ok: false; result: DebruteCapabilityResult };
 
 const LLM_REQUEST_INPUT_FIELDS = new Set([
   'modelKey',
@@ -37,7 +37,7 @@ const LLM_REQUEST_INPUT_FIELDS = new Set([
   'timeoutMs'
 ]);
 
-export async function runLlmRuntimeRequest(input: Record<string, unknown>, options: LlmRuntimeRequestOptions): Promise<AxisCapabilityResult> {
+export async function runLlmRuntimeRequest(input: Record<string, unknown>, options: LlmRuntimeRequestOptions): Promise<DebruteCapabilityResult> {
   const parsed = parseInput(input, options);
   if (!parsed.ok) {
     return parsed.result;
@@ -151,7 +151,7 @@ function parseInput(input: Record<string, unknown>, options: LlmRuntimeRequestOp
     ok: true,
     value: {
       modelKey,
-      systemPrompt: stringValue(input.systemPrompt) ?? options.systemPrompt ?? 'You are AXIS LLM Request. Return exactly what the caller requested.',
+      systemPrompt: stringValue(input.systemPrompt) ?? options.systemPrompt ?? 'You are Debrute LLM Request. Return exactly what the caller requested.',
       messages: requireJson ? appendJsonInstruction(messages.value, input.resultSchema) : messages.value,
       requireJson,
       timeoutMs: timeoutMs.value
@@ -159,7 +159,7 @@ function parseInput(input: Record<string, unknown>, options: LlmRuntimeRequestOp
   };
 }
 
-function messagesFromInput(input: Record<string, unknown>): { ok: true; value: ProviderRequest['messages'] } | { ok: false; result: AxisCapabilityResult } {
+function messagesFromInput(input: Record<string, unknown>): { ok: true; value: ProviderRequest['messages'] } | { ok: false; result: DebruteCapabilityResult } {
   if (Array.isArray(input.messages)) {
     const messages: ProviderRequest['messages'] = [];
     for (const [index, raw] of input.messages.entries()) {

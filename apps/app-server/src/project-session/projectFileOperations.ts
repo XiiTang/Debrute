@@ -3,7 +3,7 @@ import type {
   CreateProjectPathInput,
   DeleteProjectPathInput,
   RenameProjectPathInput
-} from '@axis/project-core';
+} from '@debrute/project-core';
 import {
   copyProjectPath,
   createProjectDirectory,
@@ -11,8 +11,8 @@ import {
   deleteProjectPathPermanently,
   moveProjectPath,
   renameProjectPath
-} from '@axis/project-core';
-import type { ProjectFileOperationResult, ProjectSessionSnapshot } from '@axis/app-protocol';
+} from '@debrute/project-core';
+import type { ProjectFileOperationResult, ProjectSessionSnapshot } from '@debrute/app-protocol';
 
 export interface ProjectFileOperationContext {
   snapshot: ProjectSessionSnapshot;

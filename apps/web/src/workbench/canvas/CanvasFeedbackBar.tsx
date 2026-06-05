@@ -13,7 +13,7 @@ import {
   CANVAS_FEEDBACK_MARKS,
   type CanvasFeedbackEntry,
   type CanvasFeedbackMark
-} from '@axis/canvas-core';
+} from '@debrute/canvas-core';
 import type { WorkbenchActions } from '../../types';
 
 const NOTE_SAVE_DELAY_MS = 350;

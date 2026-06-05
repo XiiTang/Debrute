@@ -1,16 +1,16 @@
 import type React from 'react';
-import { parseAxisWorkbenchPath, type AxisWorkbenchRoute, type WorkbenchApiClient, type WorkbenchProjectSessionSnapshot } from '@axis/app-protocol';
+import { parseDebruteWorkbenchPath, type DebruteWorkbenchRoute, type WorkbenchApiClient, type WorkbenchProjectSessionSnapshot } from '@debrute/app-protocol';
 import type { WorkbenchState } from '../../types';
 
 export interface OpenInitialProjectResult {
   projectId?: string;
   snapshot: WorkbenchProjectSessionSnapshot | undefined;
-  route: AxisWorkbenchRoute;
+  route: DebruteWorkbenchRoute;
 }
 
 export async function openInitialProject(
   api: WorkbenchApiClient,
-  route: AxisWorkbenchRoute = currentAxisWorkbenchRoute()
+  route: DebruteWorkbenchRoute = currentDebruteWorkbenchRoute()
 ): Promise<OpenInitialProjectResult> {
   if (route.kind === 'project') {
     const opened = await api.openProject({ projectId: route.projectId });
@@ -44,11 +44,11 @@ function errorMessage(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
 }
 
-function currentAxisWorkbenchRoute(): AxisWorkbenchRoute {
+function currentDebruteWorkbenchRoute(): DebruteWorkbenchRoute {
   if (typeof window === 'undefined') {
     return { kind: 'workbench' };
   }
-  return parseAxisWorkbenchPath(window.location.pathname);
+  return parseDebruteWorkbenchPath(window.location.pathname);
 }
 
 export function replaceWorkbenchProjectRoute(projectId: string): void {

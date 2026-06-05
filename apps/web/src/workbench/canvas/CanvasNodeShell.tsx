@@ -1,5 +1,5 @@
 import React, { useLayoutEffect, useRef } from 'react';
-import type { ProjectedCanvasNode } from '@axis/canvas-core';
+import type { ProjectedCanvasNode } from '@debrute/canvas-core';
 import type { TextFileBuffer, WorkbenchActions } from '../../types';
 import type { ResizeHandle } from '../services/canvasInteraction';
 import type { CanvasLayerRuntime } from './runtime/CanvasLayerRuntime';

@@ -2,8 +2,8 @@ import { mkdtemp, rm, symlink, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
-import type { AxisAppServer } from '@axis/app-server';
-import type { ProjectSessionSnapshot } from '@axis/app-protocol';
+import type { DebruteAppServer } from '@debrute/app-server';
+import type { ProjectSessionSnapshot } from '@debrute/app-protocol';
 import { ProjectSessionRegistry } from '../apps/daemon/src/http/ProjectSessionRegistry';
 
 describe('ProjectSessionRegistry', () => {
@@ -16,7 +16,7 @@ describe('ProjectSessionRegistry', () => {
   });
 
   it('deduplicates concurrent opens for the same canonical project root', async () => {
-    const projectRoot = await mkdtemp(join(tmpdir(), 'axis-registry-concurrent-root-'));
+    const projectRoot = await mkdtemp(join(tmpdir(), 'debrute-registry-concurrent-root-'));
     cleanups.push(() => rm(projectRoot, { recursive: true, force: true }));
     let createdAppServers = 0;
 
@@ -43,7 +43,7 @@ describe('ProjectSessionRegistry', () => {
   });
 
   it('deduplicates symlinked project roots by real canonical path', async () => {
-    const projectRoot = await mkdtemp(join(tmpdir(), 'axis-registry-real-root-'));
+    const projectRoot = await mkdtemp(join(tmpdir(), 'debrute-registry-real-root-'));
     const linkedRoot = `${projectRoot}-link`;
     await writeFile(join(projectRoot, 'brief.md'), '# Brief', 'utf8');
     await symlink(projectRoot, linkedRoot, 'dir');
@@ -66,7 +66,7 @@ describe('ProjectSessionRegistry', () => {
   });
 
   it('tracks duplicate client ids as independent live leases', async () => {
-    const projectRoot = await mkdtemp(join(tmpdir(), 'axis-registry-duplicate-client-'));
+    const projectRoot = await mkdtemp(join(tmpdir(), 'debrute-registry-duplicate-client-'));
     cleanups.push(() => rm(projectRoot, { recursive: true, force: true }));
     const registry = new ProjectSessionRegistry({
       idleTtlMs: 1000,
@@ -86,7 +86,7 @@ describe('ProjectSessionRegistry', () => {
   });
 
   it('releases a never-attached project session after the idle TTL', async () => {
-    const projectRoot = await mkdtemp(join(tmpdir(), 'axis-registry-never-attached-'));
+    const projectRoot = await mkdtemp(join(tmpdir(), 'debrute-registry-never-attached-'));
     cleanups.push(() => rm(projectRoot, { recursive: true, force: true }));
     let closeCount = 0;
     const registry = new ProjectSessionRegistry({
@@ -105,7 +105,7 @@ describe('ProjectSessionRegistry', () => {
   });
 
   it('closes a session that finishes opening after the registry is closed', async () => {
-    const projectRoot = await mkdtemp(join(tmpdir(), 'axis-registry-close-during-open-'));
+    const projectRoot = await mkdtemp(join(tmpdir(), 'debrute-registry-close-during-open-'));
     cleanups.push(() => rm(projectRoot, { recursive: true, force: true }));
     let closeCount = 0;
     let releaseOpen!: () => void;
@@ -133,13 +133,13 @@ describe('ProjectSessionRegistry', () => {
     await registry.close();
     releaseOpen();
 
-    await expect(opening).rejects.toThrow('AXIS project session registry is closed.');
+    await expect(opening).rejects.toThrow('Debrute project session registry is closed.');
     expect(registry.list()).toEqual([]);
     expect(closeCount).toBe(1);
   });
 
   it('rejects new project opens after the registry is closed', async () => {
-    const projectRoot = await mkdtemp(join(tmpdir(), 'axis-registry-open-after-close-'));
+    const projectRoot = await mkdtemp(join(tmpdir(), 'debrute-registry-open-after-close-'));
     cleanups.push(() => rm(projectRoot, { recursive: true, force: true }));
     const registry = new ProjectSessionRegistry({
       createAppServer: () => appServerFixture(async (root) => snapshotFixture(root))
@@ -147,7 +147,7 @@ describe('ProjectSessionRegistry', () => {
 
     await registry.close();
 
-    await expect(registry.openProject(projectRoot)).rejects.toThrow('AXIS project session registry is closed.');
+    await expect(registry.openProject(projectRoot)).rejects.toThrow('Debrute project session registry is closed.');
     expect(registry.list()).toEqual([]);
   });
 });
@@ -155,11 +155,11 @@ describe('ProjectSessionRegistry', () => {
 function appServerFixture(
   openProject: (projectRoot: string) => Promise<ProjectSessionSnapshot>,
   close: () => void = () => undefined
-): AxisAppServer {
+): DebruteAppServer {
   return {
     openProject,
     close
-  } as unknown as AxisAppServer;
+  } as unknown as DebruteAppServer;
 }
 
 function snapshotFixture(projectRoot: string): ProjectSessionSnapshot {
@@ -182,7 +182,7 @@ function snapshotFixture(projectRoot: string): ProjectSessionSnapshot {
       projectName: 'Test Project',
       canvasCount: 0,
       diagnosticCounts: { errors: 0, warnings: 0, infos: 0 },
-      runtimeDataLocation: 'axis-home',
+      runtimeDataLocation: 'debrute-home',
       checkedAt: '2026-06-03T00:00:00.000Z'
     }
   };

@@ -20,7 +20,7 @@ Some fal model attributes accept file URLs. fal documents hosted URLs and Base64
 
 ## Input schema
 
-Official input fields used by AXIS:
+Official input fields used by Debrute:
 
 - `prompt`: required string prompt to generate an image from.
 - `image_size`: generated image size. Default is `landscape_4_3`.

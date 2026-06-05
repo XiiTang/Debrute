@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from 'vitest';
-import type { ProjectedCanvasNode } from '@axis/canvas-core';
+import type { ProjectedCanvasNode } from '@debrute/canvas-core';
 import { createCanvasImageResourceController } from './CanvasImageResourceController';
 import type { CanvasImageLoadingPlanItem } from './canvasImageLoading';
 

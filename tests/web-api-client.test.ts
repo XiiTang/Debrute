@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import type { WorkbenchProjectSessionSnapshot } from '@axis/app-protocol';
+import type { WorkbenchProjectSessionSnapshot } from '@debrute/app-protocol';
 import { createHttpWorkbenchApiClient } from '../apps/web/src/api/httpWorkbenchApiClient';
 
 const projectId = '123e4567-e89b-42d3-a456-426614174000';
@@ -36,7 +36,7 @@ describe('HTTP workbench API client', () => {
       ['PUT', `http://127.0.0.1:17456/api/projects/${projectId}/files/text/briefs/outline.md`],
       ['GET', `http://127.0.0.1:17456/api/projects/${projectId}/generated-assets/asset-1`]
     ]);
-    expect(requests[0]!.init?.headers).toMatchObject({ 'x-axis-daemon-token': 'secret' });
+    expect(requests[0]!.init?.headers).toMatchObject({ 'x-debrute-daemon-token': 'secret' });
   });
 
   it('opens the project event stream after the daemon returns an opaque project id', async () => {
@@ -166,7 +166,7 @@ function workbenchSnapshot(): WorkbenchProjectSessionSnapshot {
         warnings: 0,
         infos: 0
       },
-      runtimeDataLocation: 'axis-home',
+      runtimeDataLocation: 'debrute-home',
       checkedAt: '2026-06-02T00:00:00.000Z'
     }
   };

@@ -1,4 +1,4 @@
-import type { ProjectedCanvasNode } from '@axis/canvas-core';
+import type { ProjectedCanvasNode } from '@debrute/canvas-core';
 import { MAX_CANVAS_CAMERA_Z, MIN_CANVAS_CAMERA_Z, type CanvasCamera } from './runtime/canvasCamera';
 import type { CanvasRect, CanvasSize } from './runtime/canvasGeometry';
 import { clamp, rectCenter } from './runtime/canvasGeometry';

@@ -2,7 +2,7 @@ import type { Dirent } from 'node:fs';
 import { readFile, readdir } from 'node:fs/promises';
 import { join, resolve } from 'node:path';
 import { parse as parseYaml } from 'yaml';
-import type { SkillRecord, SkillSourceKind } from '@axis/app-protocol';
+import type { SkillRecord, SkillSourceKind } from '@debrute/app-protocol';
 
 export interface SkillSourceRoot {
   source: SkillSourceKind;
@@ -20,9 +20,9 @@ export interface SkillDiagnostic {
     | 'skill_invalid_name'
     | 'skill_missing_description'
     | 'skill_invalid_description'
-    | 'axis_skill_name_mismatch'
-    | 'axis_skill_missing_metadata'
-    | 'axis_skill_invalid_metadata'
+    | 'debrute_skill_name_mismatch'
+    | 'debrute_skill_missing_metadata'
+    | 'debrute_skill_invalid_metadata'
     | 'skill_root_io_failed'
     | 'skill_package_io_failed';
   message: string;
@@ -62,7 +62,7 @@ export async function loadSkillsSnapshot(input: { sources: SkillSourceRoot[] }):
     }
 
     for (const entry of entries.filter((item) => item.isDirectory()).sort((left, right) => left.name.localeCompare(right.name))) {
-      if (!entry.name.startsWith('axis-')) {
+      if (!entry.name.startsWith('debrute-')) {
         continue;
       }
       const result = await loadSkillPackage({ source: source.source, root }, entry.name);
@@ -112,9 +112,9 @@ async function loadSkillPackage(source: SkillSourceRoot, dirName: string): Promi
 
   const fieldDiagnostics = validateSkillFields(source, skillPath, parsed.frontmatter);
   diagnostics.push(...fieldDiagnostics);
-  const axisDiagnostics = validateAxisSkillFields(source, skillPath, dirName, parsed.frontmatter);
-  diagnostics.push(...axisDiagnostics);
-  if (fieldDiagnostics.length > 0 || axisDiagnostics.length > 0) {
+  const debruteDiagnostics = validateDebruteSkillFields(source, skillPath, dirName, parsed.frontmatter);
+  diagnostics.push(...debruteDiagnostics);
+  if (fieldDiagnostics.length > 0 || debruteDiagnostics.length > 0) {
     return { diagnostics };
   }
 
@@ -131,21 +131,21 @@ async function loadSkillPackage(source: SkillSourceRoot, dirName: string): Promi
       root: source.root,
       skillDir,
       skillPath,
-      ...(typeof metadata['axis.version'] === 'string' ? { axisVersion: metadata['axis.version'] } : {})
+      ...(typeof metadata['debrute.version'] === 'string' ? { debruteVersion: metadata['debrute.version'] } : {})
     },
     diagnostics
   };
 }
 
-function validateAxisSkillFields(source: SkillSourceRoot, skillPath: string, dirName: string, frontmatter: Record<string, unknown>): SkillDiagnostic[] {
+function validateDebruteSkillFields(source: SkillSourceRoot, skillPath: string, dirName: string, frontmatter: Record<string, unknown>): SkillDiagnostic[] {
   const diagnostics: SkillDiagnostic[] = [];
   if (frontmatter.name !== dirName) {
     diagnostics.push({
       source: source.source,
       root: source.root,
       path: skillPath,
-      code: 'axis_skill_name_mismatch',
-      message: `AXIS Skill directory "${dirName}" must match frontmatter name "${String(frontmatter.name ?? '')}".`
+      code: 'debrute_skill_name_mismatch',
+      message: `Debrute Skill directory "${dirName}" must match frontmatter name "${String(frontmatter.name ?? '')}".`
     });
   }
   const metadata = frontmatter.metadata;
@@ -154,18 +154,18 @@ function validateAxisSkillFields(source: SkillSourceRoot, skillPath: string, dir
       source: source.source,
       root: source.root,
       path: skillPath,
-      code: 'axis_skill_missing_metadata',
-      message: 'AXIS Skill frontmatter requires metadata with axis.managed and axis.package.'
+      code: 'debrute_skill_missing_metadata',
+      message: 'Debrute Skill frontmatter requires metadata with debrute.managed and debrute.package.'
     });
     return diagnostics;
   }
-  if (metadata['axis.managed'] !== 'true' || metadata['axis.package'] !== 'axis') {
+  if (metadata['debrute.managed'] !== 'true' || metadata['debrute.package'] !== 'debrute') {
     diagnostics.push({
       source: source.source,
       root: source.root,
       path: skillPath,
-      code: 'axis_skill_invalid_metadata',
-      message: 'AXIS Skill metadata must declare axis.managed: "true" and axis.package: "axis".'
+      code: 'debrute_skill_invalid_metadata',
+      message: 'Debrute Skill metadata must declare debrute.managed: "true" and debrute.package: "debrute".'
     });
   }
   return diagnostics;

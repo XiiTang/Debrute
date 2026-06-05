@@ -1,6 +1,6 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import { FilePlus2, Files, FolderPlus, FolderTree } from 'lucide-react';
-import type { WorkbenchProjectSessionSnapshot } from '@axis/app-protocol';
+import type { WorkbenchProjectSessionSnapshot } from '@debrute/app-protocol';
 import type { WorkbenchActions } from '../../types';
 import type { WorkbenchContextMenuPosition, WorkbenchContextMenuTarget } from '../shell/contextMenu';
 import { buildProjectFileTree, expandedProjectTreePaths, type ProjectFileTreeNode } from './projectFileTree';

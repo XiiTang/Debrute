@@ -1,9 +1,9 @@
-import type { ProjectHealthSummary } from '@axis/app-protocol';
-import type { AxisProjectMetadata } from '@axis/project-core';
-import type { Diagnostic } from '@axis/canvas-core';
+import type { ProjectHealthSummary } from '@debrute/app-protocol';
+import type { DebruteProjectMetadata } from '@debrute/project-core';
+import type { Diagnostic } from '@debrute/canvas-core';
 
 export function createProjectHealthSummary(input: {
-  metadata: AxisProjectMetadata;
+  metadata: DebruteProjectMetadata;
   canvasCount: number;
   diagnostics: Diagnostic[];
   runtimeDataLocation: string;

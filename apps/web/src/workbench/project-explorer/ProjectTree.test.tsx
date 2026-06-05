@@ -1,6 +1,6 @@
 import { renderToStaticMarkup } from 'react-dom/server';
 import { describe, expect, it } from 'vitest';
-import type { WorkbenchProjectSessionSnapshot } from '@axis/app-protocol';
+import type { WorkbenchProjectSessionSnapshot } from '@debrute/app-protocol';
 import type { WorkbenchActions } from '../../types';
 import { ProjectTree } from './ProjectTree';
 

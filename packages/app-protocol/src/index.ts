@@ -5,16 +5,16 @@ import type {
   CanvasProjection,
   Diagnostic,
   UpdateCanvasFeedbackEntryInput
-} from '@axis/canvas-core';
+} from '@debrute/canvas-core';
 import type {
-  AxisProjectMetadata,
+  DebruteProjectMetadata,
   NormalizedFileWatchEvent,
   ProjectFileEntry,
   ProjectPathOperationResult,
   ProjectTextFile
-} from '@axis/project-core';
+} from '@debrute/project-core';
 
-export type { ProjectTextFile } from '@axis/project-core';
+export type { ProjectTextFile } from '@debrute/project-core';
 
 export interface ProjectHealthSummary {
   projectName: string;
@@ -30,7 +30,7 @@ export interface ProjectHealthSummary {
 
 export interface ProjectSessionSnapshot {
   projectRoot: string;
-  metadata: AxisProjectMetadata;
+  metadata: DebruteProjectMetadata;
   files: ProjectFileEntry[];
   canvases: CanvasDocument[];
   projections: CanvasProjection[];
@@ -41,7 +41,7 @@ export interface ProjectSessionSnapshot {
 export type WorkbenchProjectSessionSnapshot = Omit<ProjectSessionSnapshot, 'projectRoot'>;
 export type WorkbenchProjectTextFile = Omit<ProjectTextFile, 'absolutePath'>;
 
-export interface AxisRuntimeInfo {
+export interface DebruteRuntimeInfo {
   daemonUrl: string;
   webBaseUrl: string | null;
 }
@@ -58,14 +58,14 @@ export interface LiveProjectsView {
   projects: LiveProjectView[];
 }
 
-export type AxisWorkbenchRoute =
+export type DebruteWorkbenchRoute =
   | { kind: 'workbench' }
   | {
       kind: 'project';
       projectId: string;
     };
 
-export interface AxisHttpErrorBody {
+export interface DebruteHttpErrorBody {
   error: {
     code: string;
     message: string;
@@ -73,22 +73,22 @@ export interface AxisHttpErrorBody {
   };
 }
 
-export function isAxisMutatingMethod(method: string): boolean {
+export function isDebruteMutatingMethod(method: string): boolean {
   const normalized = method.toUpperCase();
   return normalized === 'POST' || normalized === 'PUT' || normalized === 'PATCH' || normalized === 'DELETE';
 }
 
-export function normalizeAxisRuntimeInfo(input: {
+export function normalizeDebruteRuntimeInfo(input: {
   daemonUrl: string;
   webBaseUrl?: string | null;
-}): AxisRuntimeInfo {
+}): DebruteRuntimeInfo {
   return {
     daemonUrl: trimTrailingSlash(input.daemonUrl),
     webBaseUrl: input.webBaseUrl ? trimTrailingSlash(input.webBaseUrl) : null
   };
 }
 
-export function parseAxisWorkbenchPath(pathname: string): AxisWorkbenchRoute {
+export function parseDebruteWorkbenchPath(pathname: string): DebruteWorkbenchRoute {
   const segments = pathname
     .split('/')
     .filter((segment) => segment.length > 0)
@@ -166,7 +166,7 @@ export interface DiscoverProviderModelsOutput {
 }
 
 export interface ImageModelSettingRecord {
-  axisModelId: string;
+  debruteModelId: string;
   summary: string;
   supportsEditing: boolean;
   supportsTextRendering: boolean;
@@ -188,7 +188,7 @@ export interface SaveImageModelSettingInput {
 }
 
 export interface VideoModelSettingRecord {
-  axisModelId: string;
+  debruteModelId: string;
   summary: string;
   supportsTextToVideo: boolean;
   supportsImageReferences: boolean;
@@ -311,7 +311,7 @@ export interface IntegrationSettingsView {
   backends: IntegrationBackendStatus[];
 }
 
-export type SkillSourceKind = 'shared-agents' | 'axis-repository';
+export type SkillSourceKind = 'shared-agents' | 'debrute-repository';
 
 export interface SkillRecord {
   name: string;
@@ -321,11 +321,11 @@ export interface SkillRecord {
   root: string;
   skillDir: string;
   skillPath: string;
-  axisVersion?: string;
+  debruteVersion?: string;
 }
 
-export interface AxisSkillsDiagnostic {
-  source?: SkillSourceKind | 'axis-sync';
+export interface DebruteSkillsDiagnostic {
+  source?: SkillSourceKind | 'debrute-sync';
   root?: string;
   path?: string;
   code: string;
@@ -333,24 +333,24 @@ export interface AxisSkillsDiagnostic {
   message: string;
 }
 
-export interface AxisSkillsState {
+export interface DebruteSkillsState {
   schemaVersion: 1;
-  axisVersion: string;
+  debruteVersion: string;
   bundledSkills: string[];
   updatedSkills: string[];
   addedBundledSkills: string[];
   skippedDeletedSkills: string[];
-  diagnostics: AxisSkillsDiagnostic[];
+  diagnostics: DebruteSkillsDiagnostic[];
   updatedAt: string;
 }
 
 export interface SkillsStatusSnapshot {
   sources: Array<{ source: SkillSourceKind; root: string }>;
   skills: SkillRecord[];
-  diagnostics: AxisSkillsDiagnostic[];
+  diagnostics: DebruteSkillsDiagnostic[];
   statePath: string;
-  state?: AxisSkillsState;
-  currentAxisVersion: string;
+  state?: DebruteSkillsState;
+  currentDebruteVersion: string;
   sharedSkillsRoot: string;
   bundledSkillsRoot?: string;
   bundledRootAvailable: boolean;
@@ -371,13 +371,13 @@ export interface SkillsSyncSnapshot extends SkillsStatusSnapshot {
   skippedDeletedSkills: string[];
 }
 
-export type AxisCliSkillsStatus =
-  | { kind: 'in_sync'; axisVersion: string }
-  | { kind: 'out_of_sync'; cliVersion: string; stateAxisVersion: string | null }
+export type DebruteCliSkillsStatus =
+  | { kind: 'in_sync'; debruteVersion: string }
+  | { kind: 'out_of_sync'; cliVersion: string; stateDebruteVersion: string | null }
   | { kind: 'partially_removed'; skippedDeletedSkills: string[] }
   | { kind: 'error'; code: string; message: string };
 
-export type AxisCliStatus =
+export type DebruteCliStatus =
   | { kind: 'not_installed'; desktopVersion: string; manualCommand: string }
   | {
       kind: 'installed';
@@ -386,21 +386,21 @@ export type AxisCliStatus =
       managedPath: string;
       resolvedPath: string | null;
       onPath: boolean;
-      skills: AxisCliSkillsStatus;
+      skills: DebruteCliSkillsStatus;
     }
   | {
       kind: 'update_available';
       desktopVersion: string;
       cliVersion: string;
       managedPath: string;
-      skills: AxisCliSkillsStatus;
+      skills: DebruteCliSkillsStatus;
     }
   | {
       kind: 'external_newer';
       desktopVersion: string;
       cliVersion: string;
       managedPath: string;
-      skills: AxisCliSkillsStatus;
+      skills: DebruteCliSkillsStatus;
     }
   | {
       kind: 'installed_but_not_on_path';
@@ -408,26 +408,26 @@ export type AxisCliStatus =
       cliVersion: string;
       managedPath: string;
       repairCommand: string;
-      skills: AxisCliSkillsStatus;
+      skills: DebruteCliSkillsStatus;
     }
   | { kind: 'error'; desktopVersion: string; code: string; message: string; manualCommand: string };
 
-export interface AxisCliInstallResult {
+export interface DebruteCliInstallResult {
   ok: boolean;
-  status: AxisCliStatus;
+  status: DebruteCliStatus;
 }
 
-export interface AxisCliSkillsSyncResult {
+export interface DebruteCliSkillsSyncResult {
   ok: boolean;
-  status: AxisCliSkillsStatus;
+  status: DebruteCliSkillsStatus;
 }
 
-export interface AxisCliPathRepairResult {
+export interface DebruteCliPathRepairResult {
   ok: boolean;
-  status: AxisCliStatus;
+  status: DebruteCliStatus;
 }
 
-export interface AxisCliManualCommand {
+export interface DebruteCliManualCommand {
   platform: 'macos' | 'linux' | 'windows';
   command: string;
 }

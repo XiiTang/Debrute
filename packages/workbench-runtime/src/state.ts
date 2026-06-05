@@ -28,7 +28,7 @@ export async function readWorkbenchRuntimeState(statePath: string): Promise<Work
       return undefined;
     }
     if (error instanceof SyntaxError) {
-      throw new Error(`Invalid AXIS workbench runtime state: ${error.message}`);
+      throw new Error(`Invalid Debrute workbench runtime state: ${error.message}`);
     }
     throw error;
   }
@@ -117,7 +117,7 @@ function isPid(value: unknown): value is number {
 }
 
 function invalidState(message: string): Error {
-  return new Error(`Invalid AXIS workbench runtime state: ${message}.`);
+  return new Error(`Invalid Debrute workbench runtime state: ${message}.`);
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {

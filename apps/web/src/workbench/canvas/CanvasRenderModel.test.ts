@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import type { CanvasProjection, ProjectedCanvasNode } from '@axis/canvas-core';
+import type { CanvasProjection, ProjectedCanvasNode } from '@debrute/canvas-core';
 import { createCanvasRenderModel } from './CanvasRenderModel';
 
 describe('CanvasRenderModel', () => {

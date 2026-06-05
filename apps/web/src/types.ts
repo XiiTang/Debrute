@@ -14,12 +14,12 @@ import type {
   WorkbenchProjectFileOperationResult,
   WorkbenchProjectSessionSnapshot,
   WorkbenchProjectTextFile
-} from '@axis/app-protocol';
+} from '@debrute/app-protocol';
 import type {
   CanvasFeedbackDocument,
   CanvasNodeLayerPatch,
   UpdateCanvasFeedbackEntryInput
-} from '@axis/canvas-core';
+} from '@debrute/canvas-core';
 
 export interface WorkbenchState {
   snapshot: WorkbenchProjectSessionSnapshot | undefined;
@@ -99,11 +99,11 @@ export interface WorkbenchActions {
 export type {
   WorkbenchEvent,
   WorkbenchApiClient
-} from '@axis/app-protocol';
-import type { AxisShellApi } from './api/shellApi';
+} from '@debrute/app-protocol';
+import type { DebruteShellApi } from './api/shellApi';
 
 declare global {
   interface Window {
-    axisShell?: AxisShellApi;
+    debruteShell?: DebruteShellApi;
   }
 }

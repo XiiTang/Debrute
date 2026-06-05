@@ -18,19 +18,19 @@ import type {
   WorkbenchProjectFileOperationResult,
   WorkbenchProjectSessionSnapshot,
   WorkbenchProjectTextFile
-} from '@axis/app-protocol';
+} from '@debrute/app-protocol';
 import type {
   CanvasFeedbackDocument,
   CanvasNodeLayerPatch,
   UpdateCanvasFeedbackEntryInput
-} from '@axis/canvas-core';
-import { getAxisShellApi, type AxisShellApi } from './shellApi';
+} from '@debrute/canvas-core';
+import { getDebruteShellApi, type DebruteShellApi } from './shellApi';
 
 export interface HttpWorkbenchApiClientOptions {
   daemonUrl?: string;
   token?: string;
   fetch?: typeof fetch;
-  shell?: AxisShellApi;
+  shell?: DebruteShellApi;
 }
 
 interface OpenProjectResponse {
@@ -42,7 +42,7 @@ export function createHttpWorkbenchApiClient(options: HttpWorkbenchApiClientOpti
   const daemonUrl = trimTrailingSlash(options.daemonUrl ?? browserDaemonUrl());
   const token = options.token ?? browserToken();
   const transportFetch = options.fetch ?? fetch;
-  const shell = () => options.shell ?? getAxisShellApi();
+  const shell = () => options.shell ?? getDebruteShellApi();
   const eventClientId = browserEventClientId();
 
   const request = async <T>(method: string, path: string, body?: unknown): Promise<T> => {
@@ -51,7 +51,7 @@ export function createHttpWorkbenchApiClient(options: HttpWorkbenchApiClientOpti
       headers['content-type'] = 'application/json';
     }
     if (token) {
-      headers['x-axis-daemon-token'] = token;
+      headers['x-debrute-daemon-token'] = token;
     }
     const response = await transportFetch(`${daemonUrl}${path}`, {
       method,
@@ -73,7 +73,7 @@ export function createHttpWorkbenchApiClient(options: HttpWorkbenchApiClientOpti
   const projectPathFor = (projectId: string, path: string) => `/api/projects/${encodeURIComponent(projectId)}${path}`;
   const projectPath = (path: string) => {
     if (!currentProjectId) {
-      throw new Error('AXIS project is not open.');
+      throw new Error('Debrute project is not open.');
     }
     return projectPathFor(currentProjectId, path);
   };
@@ -102,11 +102,11 @@ export function createHttpWorkbenchApiClient(options: HttpWorkbenchApiClientOpti
   return {
     mode: 'web',
     chooseProjectRoot: async () => {
-      const axisShell = shell();
-      if (!axisShell) {
-        throw new Error('AXIS desktop shell is unavailable.');
+      const debruteShell = shell();
+      if (!debruteShell) {
+        throw new Error('Debrute desktop shell is unavailable.');
       }
-      return axisShell.chooseProjectRoot();
+      return debruteShell.chooseProjectRoot();
     },
     openProject: async (input) => {
       if ('projectId' in input) {
@@ -143,14 +143,14 @@ export function createHttpWorkbenchApiClient(options: HttpWorkbenchApiClientOpti
     },
     deleteProjectPathPermanently: (input) => request<WorkbenchProjectFileOperationResult>('DELETE', projectPath(`/files/path/${encodeProjectPath(input.projectRelativePath)}`)),
     revealProjectPathInSystemFileManager: async (input) => {
-      const axisShell = shell();
-      if (!axisShell?.revealProjectPathInSystemFileManager) {
-        throw new Error('System file manager reveal requires the AXIS desktop shell.');
+      const debruteShell = shell();
+      if (!debruteShell?.revealProjectPathInSystemFileManager) {
+        throw new Error('System file manager reveal requires the Debrute desktop shell.');
       }
       if (!currentProjectId) {
-        throw new Error('AXIS project is not open.');
+        throw new Error('Debrute project is not open.');
       }
-      return axisShell.revealProjectPathInSystemFileManager({ ...input, projectId: currentProjectId });
+      return debruteShell.revealProjectPathInSystemFileManager({ ...input, projectId: currentProjectId });
     },
     lookupGeneratedAssetMetadata: (input) => request<GeneratedAssetMetadataLookup>('POST', projectPath('/generated-assets/lookup'), input),
     listGeneratedAssets: () => request<GeneratedAssetsView>('GET', projectPath('/generated-assets')),
@@ -204,7 +204,7 @@ export function createHttpWorkbenchApiClient(options: HttpWorkbenchApiClientOpti
 
 function browserDaemonUrl(): string {
   if (typeof window === 'undefined') {
-    throw new Error('AXIS daemon URL must be provided outside a browser window.');
+    throw new Error('Debrute daemon URL must be provided outside a browser window.');
   }
   return window.location.origin;
 }
@@ -214,9 +214,9 @@ function browserToken(): string | undefined {
     return undefined;
   }
   const params = new URLSearchParams(window.location.search);
-  const fromUrl = params.get('axis-token') ?? undefined;
+  const fromUrl = params.get('debrute-token') ?? undefined;
   if (fromUrl) {
-    params.delete('axis-token');
+    params.delete('debrute-token');
     const nextSearch = params.toString();
     const nextUrl = `${window.location.pathname}${nextSearch ? `?${nextSearch}` : ''}${window.location.hash}`;
     window.history.replaceState(null, '', nextUrl);
@@ -227,7 +227,7 @@ function browserToken(): string | undefined {
 
 function browserPlatform(): NodeJS.Platform {
   if (typeof navigator === 'undefined') {
-    throw new Error('AXIS browser platform requires navigator.');
+    throw new Error('Debrute browser platform requires navigator.');
   }
   const platform = navigator.platform.toLowerCase();
   if (platform.includes('mac')) return 'darwin';
@@ -236,7 +236,7 @@ function browserPlatform(): NodeJS.Platform {
 }
 
 function browserEventClientId(): string {
-  const key = 'axis.webClientId';
+  const key = 'debrute.webClientId';
   if (typeof window === 'undefined') {
     return `web:${crypto.randomUUID()}`;
   }
@@ -256,7 +256,7 @@ function encodeProjectPath(projectRelativePath: string): string {
 async function responseErrorMessage(response: Response): Promise<string> {
   const text = await response.text();
   if (!text) {
-    return `AXIS daemon request failed: ${response.status}`;
+    return `Debrute daemon request failed: ${response.status}`;
   }
   try {
     const parsed = JSON.parse(text) as { error?: { message?: string } };

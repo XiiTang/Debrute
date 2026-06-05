@@ -1,4 +1,4 @@
-import type { CanvasMediaKind } from '@axis/canvas-core';
+import type { CanvasMediaKind } from '@debrute/canvas-core';
 import type { CanvasPoint, CanvasRect, ResizeHandle } from '../canvas/runtime/canvasGeometry';
 import { rectsIntersect } from '../canvas/runtime/canvasGeometry';
 

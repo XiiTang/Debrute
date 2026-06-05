@@ -1,4 +1,4 @@
-export const checksumManifestName = 'axis_SHA256SUMS';
+export const checksumManifestName = 'debrute_SHA256SUMS';
 
 export const desktopReleaseTargets = [
   { platform: 'macos', arch: 'arm64', extension: 'dmg' },
@@ -21,22 +21,22 @@ export function cliReleaseAssetName(version, releaseTarget) {
   if (!publicId) {
     throw new Error(`No public CLI release id for ${releaseTarget.id}.`);
   }
-  return `axis-cli-${version}-${publicId}.${releaseTarget.archiveExtension}`;
+  return `debrute-cli-${version}-${publicId}.${releaseTarget.archiveExtension}`;
 }
 
 export function desktopReleaseAssetName(version, platform, arch, extension) {
-  return `axis-desktop-${version}-${platform}-${arch}.${extension}`;
+  return `debrute-desktop-${version}-${platform}-${arch}.${extension}`;
 }
 
 export function expectedReleaseAssets(version) {
   return [
     ...desktopReleaseTargets.map((target) => desktopReleaseAssetName(version, target.platform, target.arch, target.extension)),
-    `axis-cli-${version}-macos-arm64.tar.gz`,
-    `axis-cli-${version}-macos-x64.tar.gz`,
-    `axis-cli-${version}-linux-arm64.tar.gz`,
-    `axis-cli-${version}-linux-x64.tar.gz`,
-    `axis-cli-${version}-windows-arm64.zip`,
-    `axis-cli-${version}-windows-x64.zip`,
+    `debrute-cli-${version}-macos-arm64.tar.gz`,
+    `debrute-cli-${version}-macos-x64.tar.gz`,
+    `debrute-cli-${version}-linux-arm64.tar.gz`,
+    `debrute-cli-${version}-linux-x64.tar.gz`,
+    `debrute-cli-${version}-windows-arm64.zip`,
+    `debrute-cli-${version}-windows-x64.zip`,
     checksumManifestName
   ];
 }

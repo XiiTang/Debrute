@@ -25,7 +25,7 @@ export async function checkWorkbenchRuntimeHealth(
     daemon = await fetchImpl(new URL('/api/runtime', state.daemonUrl).toString(), {
       method: 'POST',
       headers: {
-        'x-axis-daemon-token': state.token
+        'x-debrute-daemon-token': state.token
       },
       signal: AbortSignal.timeout(1500)
     });

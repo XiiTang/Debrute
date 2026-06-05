@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { runLlmRuntimeRequest, type ChatProvider, type ProviderRequest, type ProviderResponse } from '@axis/capability-runtime';
+import { runLlmRuntimeRequest, type ChatProvider, type ProviderRequest, type ProviderResponse } from '@debrute/capability-runtime';
 
 describe('runtime LLM request', () => {
   it('uses the default model and returns raw text', async () => {

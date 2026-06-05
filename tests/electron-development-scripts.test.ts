@@ -21,8 +21,8 @@ describe('Electron development scripts', () => {
   it('starts fresh Electron development runtimes in hosted mode and reused runtimes in attached mode', () => {
     const script = readFileSync(join(process.cwd(), 'scripts/dev-electron-workbench.ts'), 'utf8');
 
-    expect(script).toContain("AXIS_WORKBENCH_RUNTIME_MODE: 'hosted'");
-    expect(script).toContain("AXIS_WORKBENCH_RUNTIME_MODE: 'attached'");
+    expect(script).toContain("DEBRUTE_WORKBENCH_RUNTIME_MODE: 'hosted'");
+    expect(script).toContain("DEBRUTE_WORKBENCH_RUNTIME_MODE: 'attached'");
     expect(script).not.toContain('pid ?? process.pid');
   });
 

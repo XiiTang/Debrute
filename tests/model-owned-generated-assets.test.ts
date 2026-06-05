@@ -4,8 +4,8 @@ import {
   createImageModelSettingsView,
   createVideoModelCatalog,
   createVideoModelSettingsView
-} from '@axis/capability-runtime';
-import type { GeneratedAssetRecord } from '@axis/app-protocol';
+} from '@debrute/capability-runtime';
+import type { GeneratedAssetRecord } from '@debrute/app-protocol';
 
 describe('model-owned generated asset contracts', () => {
   it('exposes image and video settings without provider-shaped fields', () => {
@@ -13,27 +13,27 @@ describe('model-owned generated asset contracts', () => {
     const videoEntry = createVideoModelCatalog().get('doubao-seedance-2-0-260128')!;
 
     expect(imageEntry).toMatchObject({
-      axisModelId: 'gpt-image-2',
+      debruteModelId: 'gpt-image-2',
       defaultRequestModelId: 'gpt-image-2'
     });
     expect(videoEntry).toMatchObject({
-      axisModelId: 'doubao-seedance-2-0-260128',
+      debruteModelId: 'doubao-seedance-2-0-260128',
       defaultRequestModelId: 'doubao-seedance-2-0-260128'
     });
 
     const imageSettings = createImageModelSettingsView(
-      { imageModels: [{ axisModelId: 'gpt-image-2', baseUrlOverride: null, requestModelIdOverride: 'gpt-image-2-custom' }] },
+      { imageModels: [{ debruteModelId: 'gpt-image-2', baseUrlOverride: null, requestModelIdOverride: 'gpt-image-2-custom' }] },
       { llmProviderApiKeys: {}, imageModelApiKeys: { 'gpt-image-2': 'sk-image' }, videoModelApiKeys: {} },
       [imageEntry]
     );
     const videoSettings = createVideoModelSettingsView(
-      { videoModels: [{ axisModelId: 'doubao-seedance-2-0-260128', baseUrlOverride: null, requestModelIdOverride: 'seedance-custom' }] },
+      { videoModels: [{ debruteModelId: 'doubao-seedance-2-0-260128', baseUrlOverride: null, requestModelIdOverride: 'seedance-custom' }] },
       { llmProviderApiKeys: {}, imageModelApiKeys: {}, videoModelApiKeys: { 'doubao-seedance-2-0-260128': 'sk-video' } },
       [videoEntry]
     );
 
     expect(imageSettings.models[0]).toEqual({
-      axisModelId: 'gpt-image-2',
+      debruteModelId: 'gpt-image-2',
       summary: expect.any(String),
       supportsEditing: expect.any(Boolean),
       supportsTextRendering: expect.any(Boolean),
@@ -44,7 +44,7 @@ describe('model-owned generated asset contracts', () => {
       apiKeySet: true
     });
     expect(videoSettings.models[0]).toEqual({
-      axisModelId: 'doubao-seedance-2-0-260128',
+      debruteModelId: 'doubao-seedance-2-0-260128',
       summary: expect.any(String),
       supportsTextToVideo: expect.any(Boolean),
       supportsImageReferences: expect.any(Boolean),

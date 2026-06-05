@@ -2,8 +2,8 @@ import { describe, expect, it } from 'vitest';
 import { mkdir, mkdtemp, rm, utimes, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import type { NormalizedFileWatchEvent } from '@axis/project-core';
-import { AxisAppServer } from '../apps/app-server/src/server/AxisAppServer';
+import type { NormalizedFileWatchEvent } from '@debrute/project-core';
+import { DebruteAppServer } from '../apps/app-server/src/server/DebruteAppServer';
 import { shouldIgnoreInternalProjectFileEvent } from '../apps/app-server/src/project-session/projectWatchEvents';
 
 describe('App Server project watch events', () => {
@@ -23,11 +23,11 @@ describe('App Server project watch events', () => {
   });
 
   it('serializes watched refreshes with manual Canvas layout updates', async () => {
-    const projectRoot = await mkdtemp(join(tmpdir(), 'axis-watch-layout-race-'));
+    const projectRoot = await mkdtemp(join(tmpdir(), 'debrute-watch-layout-race-'));
     const watcherLayoutStarted = deferred<void>();
     const releaseWatcherLayout = deferred<void>();
     let blockLayoutRead = false;
-    const server = new AxisAppServer({
+    const server = new DebruteAppServer({
       canvasNodeLayoutSizeReader: async (input) => {
         if (input.nodeKind === 'directory') {
           return { width: 240, height: 96 };
@@ -55,7 +55,7 @@ describe('App Server project watch events', () => {
         ''
       ]);
       await server.publishFlowmapDraft({
-        sourceDraftPath: '.axis/flowmaps/image-production.draft.yaml'
+        sourceDraftPath: '.debrute/flowmaps/image-production.draft.yaml'
       });
       await server.refreshProject();
 
@@ -96,15 +96,15 @@ describe('App Server project watch events', () => {
   });
 });
 
-async function callWatchedFileEvent(server: AxisAppServer, event: NormalizedFileWatchEvent): Promise<void> {
+async function callWatchedFileEvent(server: DebruteAppServer, event: NormalizedFileWatchEvent): Promise<void> {
   await (server as unknown as {
     handleWatchedFileEvent(event: NormalizedFileWatchEvent): Promise<void>;
   }).handleWatchedFileEvent(event);
 }
 
 async function writeFlowmapDraft(projectRoot: string, flowmapId: string, lines: string[]): Promise<void> {
-  await mkdir(join(projectRoot, '.axis/flowmaps'), { recursive: true });
-  await writeFile(join(projectRoot, `.axis/flowmaps/${flowmapId}.draft.yaml`), lines.join('\n'), 'utf8');
+  await mkdir(join(projectRoot, '.debrute/flowmaps'), { recursive: true });
+  await writeFile(join(projectRoot, `.debrute/flowmaps/${flowmapId}.draft.yaml`), lines.join('\n'), 'utf8');
 }
 
 function deferred<T>(): { promise: Promise<T>; resolve(value: T): void } {

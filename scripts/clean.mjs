@@ -13,7 +13,7 @@ const paths = [
   'packages/project-core/dist',
   'packages/workbench-runtime/dist',
   'apps/app-server/dist',
-  'apps/axis-cli/dist'
+  'apps/debrute-cli/dist'
 ];
 
 for (const path of paths) {

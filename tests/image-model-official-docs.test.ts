@@ -5,13 +5,14 @@ import {
   createImageModelCatalog,
   describeImageModelOfficialDoc,
   listImageModelOfficialDocs
-} from '@axis/capability-runtime';
+} from '@debrute/capability-runtime';
 
 const root = process.cwd();
+const staleProductNamePattern = new RegExp(`\\b${'AX' + 'IS'}\\b`);
 
 describe('image model official documentation', () => {
   it('covers every current image catalog model with official docs and snapshots', async () => {
-    const catalogModelIds = createImageModelCatalog().listAll().map((model) => model.axisModelId).sort();
+    const catalogModelIds = createImageModelCatalog().listAll().map((model) => model.debruteModelId).sort();
     const docRefs = listImageModelOfficialDocs();
 
     expect(docRefs.map((doc) => doc.modelId).sort()).toEqual(catalogModelIds);
@@ -32,12 +33,13 @@ describe('image model official documentation', () => {
       expect(snapshot).toContain(`captured_at: ${doc.capturedAt}`);
       expect(snapshot).toContain('cleanup:');
       expect(snapshot).not.toMatch(/cookie banner|advertisement|site navigation|login prompt/i);
+      expect(snapshot).not.toMatch(staleProductNamePattern);
     }
   });
 
-  it('returns model-level markdown with source metadata and AXIS command examples', async () => {
+  it('returns model-level markdown with source metadata and Debrute command examples', async () => {
     const catalogModels = createImageModelCatalog().listAll();
-    const docs = await Promise.all(catalogModels.map((model) => describeImageModelOfficialDoc(model.axisModelId)));
+    const docs = await Promise.all(catalogModels.map((model) => describeImageModelOfficialDoc(model.debruteModelId)));
 
     for (let index = 0; index < docs.length; index += 1) {
       const maybeDoc = docs[index];
@@ -50,9 +52,9 @@ describe('image model official documentation', () => {
       expect(maybeDoc.descriptionMarkdown).toContain('Official documentation:');
       expect(maybeDoc.descriptionMarkdown).toContain('Repository snapshot:');
       expect(maybeDoc.descriptionMarkdown).toContain(maybeDoc.snapshotPath);
-      expect(maybeDoc.descriptionMarkdown).toContain('axis generate image <project> --input-json');
+      expect(maybeDoc.descriptionMarkdown).toContain('debrute generate image <project> --input-json');
       expect(maybeDoc.descriptionMarkdown).toContain(`"model":"${maybeDoc.modelId}"`);
-      expect(axisCommandInput(maybeDoc.descriptionMarkdown)).toEqual(catalogModel.requestExample.input);
+      expect(debruteCommandInput(maybeDoc.descriptionMarkdown)).toEqual(catalogModel.requestExample.input);
       expect(maybeDoc.descriptionMarkdown).not.toMatch(/curl\s+https:\/\/api\./i);
       expect(maybeDoc.descriptionMarkdown).not.toMatch(/npm install|pip install|import OpenAI|from openai import/i);
     }
@@ -69,10 +71,10 @@ describe('image model official documentation', () => {
 
 });
 
-function axisCommandInput(markdown: string): unknown {
-  const match = markdown.match(/axis generate image <project> --input-json '([^']+)'/);
+function debruteCommandInput(markdown: string): unknown {
+  const match = markdown.match(/debrute generate image <project> --input-json '([^']+)'/);
   if (!match) {
-    throw new Error('Expected model description to contain an AXIS command input JSON payload.');
+    throw new Error('Expected model description to contain an Debrute command input JSON payload.');
   }
   return JSON.parse(match[1]!);
 }

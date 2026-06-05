@@ -4,10 +4,10 @@ import {
   updateCanvasFeedbackEntry,
   type CanvasFeedbackDocument,
   type UpdateCanvasFeedbackEntryInput
-} from '@axis/canvas-core';
-import { readJsonFile, resolveExistingProjectPath, resolveProjectPath, resolveProjectPathForWrite, writeJsonAtomic } from '@axis/project-core';
+} from '@debrute/canvas-core';
+import { readJsonFile, resolveExistingProjectPath, resolveProjectPath, resolveProjectPathForWrite, writeJsonAtomic } from '@debrute/project-core';
 
-const CANVAS_FEEDBACK_PROJECT_PATH = '.axis/reviews/canvas-feedback.json';
+const CANVAS_FEEDBACK_PROJECT_PATH = '.debrute/reviews/canvas-feedback.json';
 
 export interface CanvasFeedbackService {
   readCanvasFeedback(projectRoot: string): Promise<CanvasFeedbackDocument>;

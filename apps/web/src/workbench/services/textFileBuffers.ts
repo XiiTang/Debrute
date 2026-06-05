@@ -1,4 +1,4 @@
-import type { WorkbenchProjectTextFile } from '@axis/app-protocol';
+import type { WorkbenchProjectTextFile } from '@debrute/app-protocol';
 import type { TextFileBuffer } from '../../types';
 
 export function textBufferFromFile(file: WorkbenchProjectTextFile, current: TextFileBuffer | undefined): TextFileBuffer {

@@ -20,7 +20,7 @@ describe('floating panel state', () => {
   });
 
   it('uses the persisted layout key', () => {
-    expect(FLOATING_PANEL_STORAGE_KEY).toBe('axis.workbench.floatingPanels');
+    expect(FLOATING_PANEL_STORAGE_KEY).toBe('debrute.workbench.floatingPanels');
   });
 
   it('opens a closed panel from the dock without assigning z-index', () => {

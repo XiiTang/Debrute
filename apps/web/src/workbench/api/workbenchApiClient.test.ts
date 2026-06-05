@@ -46,7 +46,7 @@ describe('workbench API client', () => {
     const setItem = vi.fn();
     const replaceState = vi.fn();
     (globalThis as { window?: unknown }).window = {
-      location: { origin: 'http://127.0.0.1:17321', search: '?axis-token=secret&view=canvas', pathname: '/', hash: '' },
+      location: { origin: 'http://127.0.0.1:17321', search: '?debrute-token=secret&view=canvas', pathname: '/', hash: '' },
       localStorage: { getItem: () => undefined, setItem },
       sessionStorage: { getItem: () => undefined, setItem: () => undefined },
       history: { replaceState }
@@ -62,7 +62,7 @@ describe('workbench API client', () => {
 
     await createWorkbenchApiClient().openProject({ projectRoot: '/tmp/project' });
 
-    expect(requests[0]!.headers).toMatchObject({ 'x-axis-daemon-token': 'secret' });
+    expect(requests[0]!.headers).toMatchObject({ 'x-debrute-daemon-token': 'secret' });
     expect(setItem).not.toHaveBeenCalled();
     expect(replaceState).toHaveBeenCalledWith(null, '', '/?view=canvas');
   });

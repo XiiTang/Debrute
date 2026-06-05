@@ -8,11 +8,11 @@ importers:
 
   .:
     dependencies:
-      '@axis/workbench-runtime':
+      '@debrute/workbench-runtime':
         specifier: workspace:*
         version: link:packages/workbench-runtime
     devDependencies:
-      '@axis/architecture-rules':
+      '@debrute/architecture-rules':
         specifier: workspace:*
         version: link:packages/architecture-rules
       '@types/adm-zip':
@@ -63,73 +63,73 @@ importers:
 
   apps/app-server:
     dependencies:
-      '@axis/app-protocol':
+      '@debrute/app-protocol':
         specifier: workspace:*
         version: link:../../packages/app-protocol
-      '@axis/canvas-core':
+      '@debrute/canvas-core':
         specifier: workspace:*
         version: link:../../packages/canvas-core
-      '@axis/capability-core':
+      '@debrute/capability-core':
         specifier: workspace:*
         version: link:../../packages/capability-core
-      '@axis/capability-runtime':
+      '@debrute/capability-runtime':
         specifier: workspace:*
         version: link:../../packages/capability-runtime
-      '@axis/flowmap-core':
+      '@debrute/flowmap-core':
         specifier: workspace:*
         version: link:../../packages/flowmap-core
-      '@axis/project-core':
+      '@debrute/project-core':
         specifier: workspace:*
         version: link:../../packages/project-core
       sharp:
         specifier: ^0.34.5
         version: 0.34.5
 
-  apps/axis-cli:
+  apps/daemon:
     dependencies:
-      '@axis/app-protocol':
+      '@debrute/app-protocol':
         specifier: workspace:*
         version: link:../../packages/app-protocol
-      '@axis/app-server':
+      '@debrute/app-server':
         specifier: workspace:*
         version: link:../app-server
-      '@axis/capability-runtime':
+      '@debrute/project-core':
+        specifier: workspace:*
+        version: link:../../packages/project-core
+
+  apps/debrute-cli:
+    dependencies:
+      '@debrute/app-protocol':
+        specifier: workspace:*
+        version: link:../../packages/app-protocol
+      '@debrute/app-server':
+        specifier: workspace:*
+        version: link:../app-server
+      '@debrute/capability-runtime':
         specifier: workspace:*
         version: link:../../packages/capability-runtime
-      '@axis/daemon':
+      '@debrute/daemon':
         specifier: workspace:*
         version: link:../daemon
-      '@axis/workbench-runtime':
+      '@debrute/workbench-runtime':
         specifier: workspace:*
         version: link:../../packages/workbench-runtime
 
-  apps/daemon:
-    dependencies:
-      '@axis/app-protocol':
-        specifier: workspace:*
-        version: link:../../packages/app-protocol
-      '@axis/app-server':
-        specifier: workspace:*
-        version: link:../app-server
-      '@axis/project-core':
-        specifier: workspace:*
-        version: link:../../packages/project-core
-
   apps/desktop:
     dependencies:
-      '@axis/app-protocol':
+      '@debrute/app-protocol':
         specifier: workspace:*
         version: link:../../packages/app-protocol
-      '@axis/app-server':
+      '@debrute/app-server':
         specifier: workspace:*
         version: link:../app-server
-      '@axis/daemon':
+      '@debrute/daemon':
         specifier: workspace:*
         version: link:../daemon
-      '@axis/project-core':
+      '@debrute/project-core':
         specifier: workspace:*
         version: link:../../packages/project-core
-      '@axis/workbench-runtime':
+      '@debrute/workbench-runtime':
         specifier: workspace:*
         version: link:../../packages/workbench-runtime
     devDependencies:
@@ -151,13 +151,13 @@ importers:
 
   apps/web:
     dependencies:
-      '@axis/app-protocol':
+      '@debrute/app-protocol':
         specifier: workspace:*
         version: link:../../packages/app-protocol
-      '@axis/canvas-core':
+      '@debrute/canvas-core':
         specifier: workspace:*
         version: link:../../packages/canvas-core
-      '@axis/project-core':
+      '@debrute/project-core':
         specifier: workspace:*
         version: link:../../packages/project-core
       '@monaco-editor/react':
@@ -194,10 +194,10 @@ importers:
 
   packages/app-protocol:
     dependencies:
-      '@axis/canvas-core':
+      '@debrute/canvas-core':
         specifier: workspace:*
         version: link:../canvas-core
-      '@axis/project-core':
+      '@debrute/project-core':
         specifier: workspace:*
         version: link:../project-core
 
@@ -209,13 +209,13 @@ importers:
 
   packages/capability-runtime:
     dependencies:
-      '@axis/app-protocol':
+      '@debrute/app-protocol':
         specifier: workspace:*
         version: link:../app-protocol
-      '@axis/capability-core':
+      '@debrute/capability-core':
         specifier: workspace:*
         version: link:../capability-core
-      '@axis/project-core':
+      '@debrute/project-core':
         specifier: workspace:*
         version: link:../project-core
       yaml:

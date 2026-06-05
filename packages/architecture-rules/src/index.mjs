@@ -14,9 +14,9 @@ export const architectureScopes = [
   'apps/daemon/package.json',
   'apps/daemon/tsconfig.json',
   'apps/app-server/src',
-  'apps/axis-cli/src',
-  'apps/axis-cli/package.json',
-  'apps/axis-cli/tsconfig.json',
+  'apps/debrute-cli/src',
+  'apps/debrute-cli/package.json',
+  'apps/debrute-cli/tsconfig.json',
   'scripts',
   'tests'
 ];
@@ -25,47 +25,47 @@ export const importMatrix = [
   {
     name: 'packages do not import apps',
     match: (file) => file.startsWith('packages/') && !file.startsWith('packages/architecture-rules/'),
-    forbiddenImports: [/^@axis\/app-server$/, /^apps\//, /^\.\.\/\.\.\/apps\//]
+    forbiddenImports: [/^@debrute\/app-server$/, /^apps\//, /^\.\.\/\.\.\/apps\//]
   },
   {
     name: 'app-protocol stays free of orchestration and runtime execution',
     match: (file) => file.startsWith('packages/app-protocol/src/'),
-    forbiddenImports: [/^@axis\/app-server$/, /^@axis\/capability-core$/, /^@axis\/capability-runtime$/, /^electron$/, /^react$/, /^node:/]
+    forbiddenImports: [/^@debrute\/app-server$/, /^@debrute\/capability-core$/, /^@debrute\/capability-runtime$/, /^electron$/, /^react$/, /^node:/]
   },
   {
     name: 'capability-runtime does not depend on app-server or workbench renderer',
     match: (file) => file.startsWith('packages/capability-runtime/src/'),
-    forbiddenImports: [/^@axis\/app-server$/, /apps\/desktop/, /apps\/web/, /^electron$/, /^react$/]
+    forbiddenImports: [/^@debrute\/app-server$/, /apps\/desktop/, /apps\/web/, /^electron$/, /^react$/]
   },
   {
     name: 'project-core stays independent of app and runtime layers',
     match: (file) => file.startsWith('packages/project-core/src/'),
-    forbiddenImports: [/^@axis\/app-protocol$/, /^@axis\/capability-runtime$/, /^@axis\/app-server$/, /apps\//, /^electron$/, /^react$/]
+    forbiddenImports: [/^@debrute\/app-protocol$/, /^@debrute\/capability-runtime$/, /^@debrute\/app-server$/, /apps\//, /^electron$/, /^react$/]
   },
   {
     name: 'flowmap-core stays independent of app and runtime layers',
     match: (file) => file.startsWith('packages/flowmap-core/src/'),
-    forbiddenImports: [/^@axis\/app-protocol$/, /^@axis\/capability-runtime$/, /^@axis\/app-server$/, /apps\//, /^electron$/, /^react$/]
+    forbiddenImports: [/^@debrute\/app-protocol$/, /^@debrute\/capability-runtime$/, /^@debrute\/app-server$/, /apps\//, /^electron$/, /^react$/]
   },
   {
     name: 'capability-core stays dependency-light',
     match: (file) => file.startsWith('packages/capability-core/src/'),
-    forbiddenImports: [/^@axis\/app-protocol$/, /^@axis\/capability-runtime$/, /^@axis\/app-server$/, /apps\//, /^electron$/, /^react$/]
+    forbiddenImports: [/^@debrute\/app-protocol$/, /^@debrute\/capability-runtime$/, /^@debrute\/app-server$/, /apps\//, /^electron$/, /^react$/]
   },
   {
     name: 'canvas-core does not depend on renderer or app-server',
     match: (file) => file.startsWith('packages/canvas-core/src/'),
-    forbiddenImports: [/^@axis\/app-protocol$/, /^@axis\/capability-runtime$/, /^@axis\/app-server$/, /apps\/desktop/, /apps\/web/, /^electron$/, /^react$/]
+    forbiddenImports: [/^@debrute\/app-protocol$/, /^@debrute\/capability-runtime$/, /^@debrute\/app-server$/, /apps\/desktop/, /apps\/web/, /^electron$/, /^react$/]
   },
   {
     name: 'workbench-runtime stays launch-free and app-independent',
     match: (file) => file.startsWith('packages/workbench-runtime/src/'),
-    forbiddenImports: [/^@axis\/daemon$/, /^@axis\/app-server$/, /^electron$/]
+    forbiddenImports: [/^@debrute\/daemon$/, /^@debrute\/app-server$/, /^electron$/]
   },
   {
     name: 'web workbench does not import app-server',
     match: (file) => file.startsWith('apps/web/src/'),
-    forbiddenImports: [/^@axis\/app-server$/, /^apps\/app-server\//, /^@axis\/capability-runtime$/, /^@axis\/capability-core$/]
+    forbiddenImports: [/^@debrute\/app-server$/, /^apps\/app-server\//, /^@debrute\/capability-runtime$/, /^@debrute\/capability-core$/]
   },
   {
     name: 'web workbench does not import electron or node filesystem',
@@ -80,16 +80,16 @@ export const importMatrix = [
   {
     name: 'app-server does not import UI runtimes or react',
     match: (file) => file.startsWith('apps/app-server/src/'),
-    forbiddenImports: [/apps\/desktop/, /apps\/web/, /^@axis\/desktop$/, /^@axis\/web$/, /^react$/]
+    forbiddenImports: [/apps\/desktop/, /apps\/web/, /^@debrute\/desktop$/, /^@debrute\/web$/, /^react$/]
   },
   {
     name: 'cli stays behind app-server and protocol boundaries',
-    match: (file) => file.startsWith('apps/axis-cli/src/'),
+    match: (file) => file.startsWith('apps/debrute-cli/src/'),
     forbiddenImports: [
-      /^@axis\/flowmap-core$/,
-      /^@axis\/project-core$/,
-      /^@axis\/canvas-core$/,
-      /^@axis\/capability-core$/,
+      /^@debrute\/flowmap-core$/,
+      /^@debrute\/project-core$/,
+      /^@debrute\/canvas-core$/,
+      /^@debrute\/capability-core$/,
       /^packages\/flowmap-core\/src\//,
       /^packages\/project-core\/src\//,
       /^packages\/canvas-core\/src\//,
@@ -112,11 +112,11 @@ export const publicBarrelRules = [
     file: 'apps/app-server/src/index.ts',
     maxNonEmptyLines: 120,
     allowedExportSources: [
-      './server/AxisAppServer.js',
-      './server/AxisGlobalRuntimeServer.js',
+      './server/DebruteAppServer.js',
+      './server/DebruteGlobalRuntimeServer.js',
       './config/GlobalConfigStore.js',
-      '@axis/app-protocol',
-      '@axis/canvas-core'
+      '@debrute/app-protocol',
+      '@debrute/canvas-core'
     ]
   }
 ];
@@ -221,18 +221,18 @@ function exportViolations(file, text) {
 }
 
 function packageJsonViolations(file, text) {
-  if (file !== 'apps/axis-cli/package.json') {
+  if (file !== 'apps/debrute-cli/package.json') {
     return [];
   }
   const pkg = JSON.parse(text);
   const dependencies = new Set(Object.keys(pkg.dependencies ?? {}));
-  return ['@axis/project-core', '@axis/flowmap-core', '@axis/canvas-core', '@axis/capability-core']
+  return ['@debrute/project-core', '@debrute/flowmap-core', '@debrute/canvas-core', '@debrute/capability-core']
     .filter((dependency) => dependencies.has(dependency))
     .map((dependency) => `cli stays behind app-server and protocol boundaries: ${file} depends on ${dependency}`);
 }
 
 function tsconfigViolations(file, text) {
-  if (file !== 'apps/axis-cli/tsconfig.json') {
+  if (file !== 'apps/debrute-cli/tsconfig.json') {
     return [];
   }
   const config = JSON.parse(text);
@@ -246,8 +246,8 @@ function viteAliasViolations(file, text) {
   if (file !== 'apps/web/vite.config.ts') {
     return [];
   }
-  const aliases = [...text.matchAll(/['"](@axis\/[^'"]+)['"]\s*:/g)].map((match) => match[1]);
-  const allowedAliases = new Set(['@axis/app-protocol', '@axis/project-core', '@axis/canvas-core']);
+  const aliases = [...text.matchAll(/['"](@debrute\/[^'"]+)['"]\s*:/g)].map((match) => match[1]);
+  const allowedAliases = new Set(['@debrute/app-protocol', '@debrute/project-core', '@debrute/canvas-core']);
   return aliases
     .filter((alias) => !allowedAliases.has(alias))
     .map((alias) => `web workbench Vite aliases stay renderer-safe: ${file} aliases ${alias}`);

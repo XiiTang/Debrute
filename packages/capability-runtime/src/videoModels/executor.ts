@@ -1,6 +1,6 @@
 import { randomUUID } from 'node:crypto';
 import { basename } from 'node:path';
-import { readProjectFileBytes, writeProjectFile } from '@axis/project-core';
+import { readProjectFileBytes, writeProjectFile } from '@debrute/project-core';
 import type { SecretsConfig, VideoModelsConfig } from '../config.js';
 import {
   DEFAULT_REQUEST_TIMEOUT_MS,
@@ -100,7 +100,7 @@ export async function executeVideoModelRequest(input: ExecuteVideoModelRequestIn
   const logs: Array<Record<string, unknown>> = [];
   const catalog = createVideoModelCatalog();
   const entry = catalog.get(input.input.model);
-  const modelSettings = input.settings.videoModels.find((model) => model.axisModelId === input.input.model);
+  const modelSettings = input.settings.videoModels.find((model) => model.debruteModelId === input.input.model);
   const apiKey = input.secrets.videoModelApiKeys[input.input.model]?.trim() ?? '';
   if (!entry) {
     return {
@@ -149,7 +149,7 @@ export async function executeVideoModelRequest(input: ExecuteVideoModelRequestIn
     ...(input.signal ? { signal: input.signal } : {})
   };
   log(state, 'resolve_model', {
-    model: entry.axisModelId,
+    model: entry.debruteModelId,
     requestModelId: state.requestModelId,
     configured: true
   });

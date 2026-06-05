@@ -1,28 +1,28 @@
 {
-  "name": "axis",
-  "version": "0.1.0",
+  "name": "debrute",
+  "version": "0.0.1",
   "license": "Apache-2.0",
   "private": true,
   "type": "module",
-  "description": "AXIS browser-first local creative production workbench.",
+  "description": "Debrute browser-first local creative production workbench.",
   "packageManager": "pnpm@11.2.2",
   "engines": {
     "node": ">=22",
     "pnpm": ">=11.2.2 <12"
   },
   "scripts": {
-    "build": "tsc -b tsconfig.build.json && node scripts/copy-runtime-assets.mjs && pnpm --filter @axis/desktop build",
+    "build": "tsc -b tsconfig.build.json && node scripts/copy-runtime-assets.mjs && pnpm --filter @debrute/desktop build",
     "clean": "node scripts/clean.mjs",
-    "pack": "pnpm --filter @axis/desktop pack",
-    "package:cli": "node scripts/package-axis-cli.mjs",
-    "package:cli:all": "node scripts/package-axis-cli.mjs --all",
-    "dist": "pnpm --filter @axis/desktop dist",
+    "pack": "pnpm --filter @debrute/desktop pack",
+    "package:cli": "node scripts/package-debrute-cli.mjs",
+    "package:cli:all": "node scripts/package-debrute-cli.mjs --all",
+    "dist": "pnpm --filter @debrute/desktop dist",
     "check": "tsc -b tsconfig.build.json --pretty false",
     "dev": "tsx scripts/dev-workbench.ts",
-    "dev:web": "pnpm --filter @axis/web dev",
-    "dev:daemon": "pnpm --filter @axis/daemon dev",
-    "dev:electron": "pnpm --filter @axis/desktop dev:electron",
-    "preview": "pnpm --filter @axis/web preview",
+    "dev:web": "pnpm --filter @debrute/web dev",
+    "dev:daemon": "pnpm --filter @debrute/daemon dev",
+    "dev:electron": "pnpm --filter @debrute/desktop dev:electron",
+    "preview": "pnpm --filter @debrute/web preview",
     "test": "vitest run",
     "test:watch": "vitest",
     "lint:arch": "node scripts/check-architecture.mjs",
@@ -30,10 +30,10 @@
     "verify": "pnpm doctor && pnpm check && pnpm test && pnpm lint:arch && pnpm build"
   },
   "dependencies": {
-    "@axis/workbench-runtime": "workspace:*"
+    "@debrute/workbench-runtime": "workspace:*"
   },
   "devDependencies": {
-    "@axis/architecture-rules": "workspace:*",
+    "@debrute/architecture-rules": "workspace:*",
     "@types/adm-zip": "^0.5.8",
     "@types/node": "^25.6.0",
     "@vitejs/plugin-react": "^5.1.1",

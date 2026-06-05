@@ -2,7 +2,7 @@ import type { MenuItemConstructorOptions } from 'electron';
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { describe, expect, it, vi } from 'vitest';
-import type { AxisDaemonRuntime } from '@axis/daemon';
+import type { DebruteDaemonRuntime } from '@debrute/daemon';
 import { openProjectThroughDaemon, projectWebShellUrl } from '../apps/desktop/src/electron/daemonProjectOpen';
 import { buildApplicationMenuTemplate } from '../apps/desktop/src/electron/menu/applicationMenu';
 
@@ -79,10 +79,10 @@ describe('desktop application menu', () => {
     const requests: Array<{ url: string; init?: RequestInit }> = [];
     const runtime = daemonRuntimeFixture();
     expect(projectWebShellUrl(runtime, '123e4567-e89b-42d3-a456-426614174000')).toBe(
-      'http://127.0.0.1:17322/projects/123e4567-e89b-42d3-a456-426614174000?axis-token=secret'
+      'http://127.0.0.1:17322/projects/123e4567-e89b-42d3-a456-426614174000?debrute-token=secret'
     );
 
-    await expect(openProjectThroughDaemon(runtime, '/tmp/axis-project', async (url, init) => {
+    await expect(openProjectThroughDaemon(runtime, '/tmp/debrute-project', async (url, init) => {
       requests.push({ url: String(url), init });
       return new Response(JSON.stringify({
         projectId: '123e4567-e89b-42d3-a456-426614174000',
@@ -90,7 +90,7 @@ describe('desktop application menu', () => {
       }), { status: 200, headers: { 'content-type': 'application/json' } });
     })).resolves.toEqual({
       projectId: '123e4567-e89b-42d3-a456-426614174000',
-      url: 'http://127.0.0.1:17322/projects/123e4567-e89b-42d3-a456-426614174000?axis-token=secret'
+      url: 'http://127.0.0.1:17322/projects/123e4567-e89b-42d3-a456-426614174000?debrute-token=secret'
     });
 
     expect(requests).toEqual([{
@@ -99,9 +99,9 @@ describe('desktop application menu', () => {
         method: 'POST',
         headers: {
           'content-type': 'application/json',
-          'x-axis-daemon-token': 'secret'
+          'x-debrute-daemon-token': 'secret'
         },
-        body: JSON.stringify({ projectRoot: '/tmp/axis-project' })
+        body: JSON.stringify({ projectRoot: '/tmp/debrute-project' })
       }
     }]);
   });
@@ -111,7 +111,7 @@ describe('desktop application menu', () => {
 
     expect(main).toContain('openProjectFromShell');
     expect(main).toContain('requireRuntimeClient().openProject(projectRoot)');
-    expect(main).not.toContain('const appServer = new AxisAppServer');
+    expect(main).not.toContain('const appServer = new DebruteAppServer');
     expect(main).not.toContain('appServer.openProject(projectRoot)');
   });
 
@@ -120,7 +120,7 @@ describe('desktop application menu', () => {
 
     expect(main).toContain('projectWindowsByProjectId');
     expect(main).toContain('registerElectronProjectWindow');
-    expect(main).toContain("ipcMain.handle('axis-shell:bindProjectWindowToProject'");
+    expect(main).toContain("ipcMain.handle('debrute-shell:bindProjectWindowToProject'");
     expect(main).toContain('BrowserWindow.fromWebContents');
     expect(main).not.toContain('loadProjectRouteInShell');
     expect(main).not.toContain('Promise.all(windows.map((window) => window.loadURL(url)))');
@@ -144,13 +144,13 @@ describe('desktop application menu', () => {
     expect(main).toContain("processControl: 'external'");
     expect(main).toContain('createAttachedDesktopRuntimeClient');
     expect(main).toContain('createHostedDesktopRuntimeClient');
-    expect(main).toContain("process.env.AXIS_WORKBENCH_RUNTIME_MODE === 'hosted'");
+    expect(main).toContain("process.env.DEBRUTE_WORKBENCH_RUNTIME_MODE === 'hosted'");
     expect(main).toContain('await rememberProjectRootAndRefreshMenu(projectRoot)');
     expect(main).not.toContain('desktopStateStore:');
   });
 });
 
-function daemonRuntimeFixture(): AxisDaemonRuntime {
+function daemonRuntimeFixture(): DebruteDaemonRuntime {
   return {
     daemonUrl: 'http://127.0.0.1:17321',
     webBaseUrl: 'http://127.0.0.1:17322',

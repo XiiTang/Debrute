@@ -1,6 +1,6 @@
 import React from 'react';
 import { RefreshCw } from 'lucide-react';
-import type { CanvasDocument, CanvasProjection } from '@axis/canvas-core';
+import type { CanvasDocument, CanvasProjection } from '@debrute/canvas-core';
 import type { CanvasEditorRuntime, CanvasRuntimeSnapshot } from './runtime/CanvasEditorRuntime';
 import { cameraForCanvasContent, canvasContentBounds } from './CanvasCameraBounds';
 

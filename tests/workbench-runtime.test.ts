@@ -17,11 +17,11 @@ import {
   terminateManagedWorkbenchRuntime,
   writeWorkbenchRuntimeState,
   type WorkbenchRuntimeState
-} from '@axis/workbench-runtime';
+} from '@debrute/workbench-runtime';
 
-describe('@axis/workbench-runtime state', () => {
+describe('@debrute/workbench-runtime state', () => {
   it('accepts only the current runtime state schema', async () => {
-    const root = await mkdtemp(join(tmpdir(), 'axis-runtime-state-'));
+    const root = await mkdtemp(join(tmpdir(), 'debrute-runtime-state-'));
     try {
       const paths = resolveWorkbenchRuntimePaths(root);
       const state = runtimeState({ daemonLogPath: paths.daemonLogPath, webLogPath: paths.webLogPath });
@@ -36,7 +36,7 @@ describe('@axis/workbench-runtime state', () => {
   });
 
   it('rejects malformed state instead of adapting it', async () => {
-    const root = await mkdtemp(join(tmpdir(), 'axis-runtime-state-invalid-'));
+    const root = await mkdtemp(join(tmpdir(), 'debrute-runtime-state-invalid-'));
     try {
       const paths = resolveWorkbenchRuntimePaths(root);
       await mkdir(paths.runtimeDir, { recursive: true });
@@ -46,14 +46,14 @@ describe('@axis/workbench-runtime state', () => {
         daemonUrl: 'http://127.0.0.1:17321'
       }), 'utf8');
 
-      await expect(readWorkbenchRuntimeState(paths.statePath)).rejects.toThrow(/Invalid AXIS workbench runtime state/);
+      await expect(readWorkbenchRuntimeState(paths.statePath)).rejects.toThrow(/Invalid Debrute workbench runtime state/);
     } finally {
       await rm(root, { recursive: true, force: true });
     }
   });
 
   it('rejects non-loopback URLs', async () => {
-    const root = await mkdtemp(join(tmpdir(), 'axis-runtime-state-network-'));
+    const root = await mkdtemp(join(tmpdir(), 'debrute-runtime-state-network-'));
     try {
       const paths = resolveWorkbenchRuntimePaths(root);
       await mkdir(paths.runtimeDir, { recursive: true });
@@ -69,12 +69,12 @@ describe('@axis/workbench-runtime state', () => {
   });
 
   it('rejects project URLs in runtime base URL fields', async () => {
-    const root = await mkdtemp(join(tmpdir(), 'axis-runtime-state-project-url-'));
+    const root = await mkdtemp(join(tmpdir(), 'debrute-runtime-state-project-url-'));
     try {
       const paths = resolveWorkbenchRuntimePaths(root);
       await mkdir(paths.runtimeDir, { recursive: true });
       await writeFile(paths.statePath, JSON.stringify(runtimeState({
-        webUrl: 'http://127.0.0.1:17322/projects/project-1?axis-token=secret'
+        webUrl: 'http://127.0.0.1:17322/projects/project-1?debrute-token=secret'
       })), 'utf8');
 
       await expect(readWorkbenchRuntimeState(paths.statePath)).rejects.toThrow(/origin/);
@@ -84,7 +84,7 @@ describe('@axis/workbench-runtime state', () => {
   });
 });
 
-describe('@axis/workbench-runtime health', () => {
+describe('@debrute/workbench-runtime health', () => {
   it('requires daemon runtime metadata, token, and web URL to match recorded state', async () => {
     const requests: Array<{ url: string; init?: RequestInit }> = [];
     await expect(checkWorkbenchRuntimeHealth(runtimeState(), {
@@ -100,7 +100,7 @@ describe('@axis/workbench-runtime health', () => {
     })).resolves.toBe('healthy');
     expect(requests[0]?.url).toBe('http://127.0.0.1:17321/api/runtime');
     expect(requests[0]?.init?.method).toBe('POST');
-    expect((requests[0]?.init?.headers as Record<string, string>)['x-axis-daemon-token']).toBe('secret');
+    expect((requests[0]?.init?.headers as Record<string, string>)['x-debrute-daemon-token']).toBe('secret');
 
     await expect(checkWorkbenchRuntimeHealth(runtimeState(), {
       fetch: async (url) => new Response(
@@ -131,7 +131,7 @@ describe('@axis/workbench-runtime health', () => {
   });
 });
 
-describe('@axis/workbench-runtime registry', () => {
+describe('@debrute/workbench-runtime registry', () => {
   const kill = vi.fn(() => true);
 
   afterEach(() => {
@@ -139,7 +139,7 @@ describe('@axis/workbench-runtime registry', () => {
   });
 
   it('reuses healthy state without launching', async () => {
-    const root = await mkdtemp(join(tmpdir(), 'axis-runtime-reuse-'));
+    const root = await mkdtemp(join(tmpdir(), 'debrute-runtime-reuse-'));
     try {
       const paths = resolveWorkbenchRuntimePaths(root);
       const state = runtimeState({ daemonLogPath: paths.daemonLogPath, webLogPath: paths.webLogPath });
@@ -160,7 +160,7 @@ describe('@axis/workbench-runtime registry', () => {
   });
 
   it('deletes invalid state and launches fresh state', async () => {
-    const root = await mkdtemp(join(tmpdir(), 'axis-runtime-invalid-launch-'));
+    const root = await mkdtemp(join(tmpdir(), 'debrute-runtime-invalid-launch-'));
     try {
       const paths = resolveWorkbenchRuntimePaths(root);
       await mkdir(paths.runtimeDir, { recursive: true });
@@ -189,7 +189,7 @@ describe('@axis/workbench-runtime registry', () => {
   });
 
   it('serializes publishers with the startup lock', async () => {
-    const root = await mkdtemp(join(tmpdir(), 'axis-runtime-lock-'));
+    const root = await mkdtemp(join(tmpdir(), 'debrute-runtime-lock-'));
     try {
       const paths = resolveWorkbenchRuntimePaths(root);
       const events: string[] = [];
@@ -209,7 +209,7 @@ describe('@axis/workbench-runtime registry', () => {
   });
 });
 
-describe('@axis/workbench-runtime ports', () => {
+describe('@debrute/workbench-runtime ports', () => {
   it('keeps preferred ports as preferences only', async () => {
     const server = await listenOnLoopback(0);
     try {
@@ -237,8 +237,8 @@ function runtimeState(overrides: Partial<WorkbenchRuntimeState> = {}): Workbench
     token: 'secret',
     daemonPid: 10,
     webPid: 11,
-    daemonLogPath: '/home/user/.axis/runtime/workbench-daemon.log',
-    webLogPath: '/home/user/.axis/runtime/workbench-web.log',
+    daemonLogPath: '/home/user/.debrute/runtime/workbench-daemon.log',
+    webLogPath: '/home/user/.debrute/runtime/workbench-web.log',
     startedAt: '2026-06-03T00:00:00.000Z',
     updatedAt: '2026-06-03T00:00:00.000Z',
     ...overrides

@@ -1,4 +1,4 @@
-import type { CanvasProjection } from '@axis/canvas-core';
+import type { CanvasProjection } from '@debrute/canvas-core';
 import type { WorkbenchActions } from '../../types';
 import type { CanvasEditorRuntime } from '../canvas/runtime/CanvasEditorRuntime';
 import {

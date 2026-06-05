@@ -8,8 +8,8 @@ export interface WorkbenchRuntimePaths {
   webLogPath: string;
 }
 
-export function resolveWorkbenchRuntimePaths(axisHome = resolveAxisHomeDir()): WorkbenchRuntimePaths {
-  const runtimeDir = join(axisHome, 'runtime');
+export function resolveWorkbenchRuntimePaths(debruteHome = resolveDebruteHomeDir()): WorkbenchRuntimePaths {
+  const runtimeDir = join(debruteHome, 'runtime');
   return {
     runtimeDir,
     statePath: join(runtimeDir, 'workbench-runtime.json'),
@@ -19,10 +19,10 @@ export function resolveWorkbenchRuntimePaths(axisHome = resolveAxisHomeDir()): W
   };
 }
 
-function resolveAxisHomeDir(): string {
+function resolveDebruteHomeDir(): string {
   const home = process.env.HOME ?? process.env.USERPROFILE;
   if (!home) {
     throw new Error('User home directory is not available.');
   }
-  return join(home, '.axis');
+  return join(home, '.debrute');
 }

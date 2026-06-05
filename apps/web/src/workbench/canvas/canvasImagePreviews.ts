@@ -1,4 +1,4 @@
-import { CANVAS_IMAGE_PREVIEW_WIDTH_BUCKETS, type ProjectedCanvasNode } from '@axis/canvas-core';
+import { CANVAS_IMAGE_PREVIEW_WIDTH_BUCKETS, type ProjectedCanvasNode } from '@debrute/canvas-core';
 
 export const CANVAS_IMAGE_PREVIEW_RESOURCE_SETTLE_MS = 500;
 

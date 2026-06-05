@@ -13,7 +13,7 @@ cleanup:
 
 # Grok Imagine via Vydra
 
-Vydra documents `grok-imagine` as image and video generation powered by xAI's official Grok Imagine API. AXIS uses Vydra's API source for this model. Vydra states that image generation returns instantly with a result URL, while video jobs are asynchronous and require polling.
+Vydra documents `grok-imagine` as image and video generation powered by xAI's official Grok Imagine API. Debrute uses Vydra's API source for this model. Vydra states that image generation returns instantly with a result URL, while video jobs are asynchronous and require polling.
 
 ## Vydra endpoint
 
@@ -28,7 +28,7 @@ For image generation, Vydra documents the `text-to-image` sub-model:
 
 ## Request body
 
-Official Vydra request fields used by AXIS:
+Official Vydra request fields used by Debrute:
 
 - `prompt`: required text description for generation, maximum 5000 characters.
 - `model`: sub-model. Vydra documents `text-to-video` as default and `text-to-image` for image generation.
@@ -49,4 +49,4 @@ Relevant xAI documented parameters include:
 - `n`: number of generated images.
 - `aspect_ratio`: output ratio. Documented ratios include `1:1`, `16:9`, `9:16`, `4:3`, `3:4`, `3:2`, `2:3`, `2:1`, `1:2`, `19.5:9`, `9:19.5`, `20:9`, `9:20`, and `auto`.
 
-For AXIS `grok-imagine`, the exposed control surface is the Vydra text-to-image shape with `prompt`, optional `aspect_ratio`, and optional `seed`.
+For Debrute `grok-imagine`, the exposed control surface is the Vydra text-to-image shape with `prompt`, optional `aspect_ratio`, and optional `seed`.

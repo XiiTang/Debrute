@@ -4,14 +4,14 @@ interface OpenProjectResponse {
   projectId: string;
 }
 
-export interface AxisDaemonRuntimeLike {
+export interface DebruteDaemonRuntimeLike {
   daemonUrl: string;
   webBaseUrl: string | null;
   token: string;
 }
 
 export async function openProjectThroughDaemon(
-  runtime: AxisDaemonRuntimeLike,
+  runtime: DebruteDaemonRuntimeLike,
   projectRoot: string,
   fetchImpl: DesktopProjectOpenFetch = fetch
 ): Promise<{ projectId: string; url: string }> {
@@ -19,12 +19,12 @@ export async function openProjectThroughDaemon(
     method: 'POST',
     headers: {
       'content-type': 'application/json',
-      'x-axis-daemon-token': runtime.token
+      'x-debrute-daemon-token': runtime.token
     },
     body: JSON.stringify({ projectRoot })
   });
   if (!response.ok) {
-    throw new Error(`AXIS daemon project open failed: ${response.status}`);
+    throw new Error(`Debrute daemon project open failed: ${response.status}`);
   }
   const opened = await response.json() as OpenProjectResponse;
   return {
@@ -33,11 +33,11 @@ export async function openProjectThroughDaemon(
   };
 }
 
-export function projectWebShellUrl(runtime: AxisDaemonRuntimeLike, projectId?: string): string {
+export function projectWebShellUrl(runtime: DebruteDaemonRuntimeLike, projectId?: string): string {
   const url = new URL(runtime.webBaseUrl ?? runtime.daemonUrl);
   if (projectId) {
     url.pathname = `/projects/${encodeURIComponent(projectId)}`;
   }
-  url.searchParams.set('axis-token', runtime.token);
+  url.searchParams.set('debrute-token', runtime.token);
   return url.toString();
 }

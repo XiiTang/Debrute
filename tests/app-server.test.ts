@@ -4,13 +4,13 @@ import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import sharp from 'sharp';
 import { describe, expect, it } from 'vitest';
-import { AxisAppServer, AxisGlobalRuntimeServer, GlobalConfigStore } from '@axis/app-server';
-import { CANVAS_DOCUMENT_SCHEMA_VERSION } from '@axis/canvas-core';
+import { DebruteAppServer, DebruteGlobalRuntimeServer, GlobalConfigStore } from '@debrute/app-server';
+import { CANVAS_DOCUMENT_SCHEMA_VERSION } from '@debrute/canvas-core';
 
 describe('app-server', () => {
   it('opens a project with current Canvas snapshot and health fields', async () => {
-    const projectRoot = await mkdtemp(join(tmpdir(), 'axis-app-server-'));
-    const server = new AxisAppServer();
+    const projectRoot = await mkdtemp(join(tmpdir(), 'debrute-app-server-'));
+    const server = new DebruteAppServer();
     try {
       const snapshot = await server.openProject(projectRoot, {
         initializeIfMissing: true,
@@ -35,15 +35,15 @@ describe('app-server', () => {
   });
 
   it('rejects invalid canvas state without deleting or rewriting it', async () => {
-    const projectRoot = await mkdtemp(join(tmpdir(), 'axis-app-server-invalid-canvas-'));
-    const server = new AxisAppServer();
+    const projectRoot = await mkdtemp(join(tmpdir(), 'debrute-app-server-invalid-canvas-'));
+    const server = new DebruteAppServer();
     try {
-      await mkdir(join(projectRoot, '.axis/canvases'), { recursive: true });
-      await writeFile(join(projectRoot, '.axis/project.json'), JSON.stringify({
+      await mkdir(join(projectRoot, '.debrute/canvases'), { recursive: true });
+      await writeFile(join(projectRoot, '.debrute/project.json'), JSON.stringify({
         schemaVersion: 1,
         project: { name: 'Broken Canvas Project' }
       }, null, 2), 'utf8');
-      await writeFile(join(projectRoot, '.axis/canvases/production-map.json'), JSON.stringify({
+      await writeFile(join(projectRoot, '.debrute/canvases/production-map.json'), JSON.stringify({
         schemaVersion: 3,
         id: 'production-map',
         title: 'Production Map',
@@ -56,7 +56,7 @@ describe('app-server', () => {
         initializeIfMissing: false,
         createDefaultCanvas: false
       })).rejects.toThrow('Invalid canvas document schema');
-      await expect(readFile(join(projectRoot, '.axis/canvases/production-map.json'), 'utf8')).resolves.toContain('"schemaVersion": 3');
+      await expect(readFile(join(projectRoot, '.debrute/canvases/production-map.json'), 'utf8')).resolves.toContain('"schemaVersion": 3');
     } finally {
       server.close();
       await rm(projectRoot, { recursive: true, force: true });
@@ -64,8 +64,8 @@ describe('app-server', () => {
   });
 
   it('reads missing Canvas feedback as an empty current-state document', async () => {
-    const projectRoot = await mkdtemp(join(tmpdir(), 'axis-app-server-feedback-empty-'));
-    const server = new AxisAppServer();
+    const projectRoot = await mkdtemp(join(tmpdir(), 'debrute-app-server-feedback-empty-'));
+    const server = new DebruteAppServer();
     try {
       await server.openProject(projectRoot, {
         initializeIfMissing: true,
@@ -86,8 +86,8 @@ describe('app-server', () => {
   });
 
   it('checks non-empty project files through the app-server boundary', async () => {
-    const projectRoot = await mkdtemp(join(tmpdir(), 'axis-app-server-project-file-exists-'));
-    const server = new AxisAppServer();
+    const projectRoot = await mkdtemp(join(tmpdir(), 'debrute-app-server-project-file-exists-'));
+    const server = new DebruteAppServer();
     try {
       await server.openProject(projectRoot, {
         initializeIfMissing: true,
@@ -108,8 +108,8 @@ describe('app-server', () => {
   });
 
   it('mutates project files and returns refreshed snapshots', async () => {
-    const projectRoot = await mkdtemp(join(tmpdir(), 'axis-app-server-file-ops-'));
-    const server = new AxisAppServer();
+    const projectRoot = await mkdtemp(join(tmpdir(), 'debrute-app-server-file-ops-'));
+    const server = new DebruteAppServer();
     try {
       await server.openProject(projectRoot, {
         initializeIfMissing: true,
@@ -154,9 +154,9 @@ describe('app-server', () => {
   });
 
   it('reads, saves, and emits Canvas settings', async () => {
-    const axisHome = await mkdtemp(join(tmpdir(), 'axis-app-server-canvas-settings-home-'));
-    const globalRuntime = new AxisGlobalRuntimeServer({
-      globalConfigStore: new GlobalConfigStore({ axisHome })
+    const debruteHome = await mkdtemp(join(tmpdir(), 'debrute-app-server-canvas-settings-home-'));
+    const globalRuntime = new DebruteGlobalRuntimeServer({
+      globalConfigStore: new GlobalConfigStore({ debruteHome })
     });
     const events: unknown[] = [];
     const unsubscribe = globalRuntime.onEvent((event) => events.push(event));
@@ -168,7 +168,7 @@ describe('app-server', () => {
       const saved = await globalRuntime.canvasSettingsSave({ imagePreviewsEnabled: false });
 
       expect(saved).toEqual({ imagePreviewsEnabled: false });
-      await expect(readJson(join(axisHome, 'config/canvas_settings.json'))).resolves.toEqual({
+      await expect(readJson(join(debruteHome, 'config/canvas_settings.json'))).resolves.toEqual({
         imagePreviewsEnabled: false
       });
       expect(events).toEqual([{
@@ -178,32 +178,32 @@ describe('app-server', () => {
     } finally {
       unsubscribe();
       globalRuntime.close();
-      await rm(axisHome, { recursive: true, force: true });
+      await rm(debruteHome, { recursive: true, force: true });
     }
   });
 
   it('rejects invalid Canvas settings input instead of normalizing it', async () => {
-    const axisHome = await mkdtemp(join(tmpdir(), 'axis-app-server-canvas-settings-invalid-home-'));
-    const globalRuntime = new AxisGlobalRuntimeServer({
-      globalConfigStore: new GlobalConfigStore({ axisHome })
+    const debruteHome = await mkdtemp(join(tmpdir(), 'debrute-app-server-canvas-settings-invalid-home-'));
+    const globalRuntime = new DebruteGlobalRuntimeServer({
+      globalConfigStore: new GlobalConfigStore({ debruteHome })
     });
     const events: unknown[] = [];
     const unsubscribe = globalRuntime.onEvent((event) => events.push(event));
     try {
       await expect(globalRuntime.canvasSettingsSave({ imagePreviewsEnabled: 'yes' } as never)).rejects.toThrow('Canvas imagePreviewsEnabled must be a boolean.');
-      await expect(readJson(join(axisHome, 'config/canvas_settings.json'))).rejects.toThrow();
+      await expect(readJson(join(debruteHome, 'config/canvas_settings.json'))).rejects.toThrow();
       expect(events).toEqual([]);
     } finally {
       unsubscribe();
       globalRuntime.close();
-      await rm(axisHome, { recursive: true, force: true });
+      await rm(debruteHome, { recursive: true, force: true });
     }
   });
 
   it('rejects extra Canvas settings keys', async () => {
-    const axisHome = await mkdtemp(join(tmpdir(), 'axis-app-server-canvas-settings-extra-home-'));
-    const globalRuntime = new AxisGlobalRuntimeServer({
-      globalConfigStore: new GlobalConfigStore({ axisHome })
+    const debruteHome = await mkdtemp(join(tmpdir(), 'debrute-app-server-canvas-settings-extra-home-'));
+    const globalRuntime = new DebruteGlobalRuntimeServer({
+      globalConfigStore: new GlobalConfigStore({ debruteHome })
     });
     const events: unknown[] = [];
     const unsubscribe = globalRuntime.onEvent((event) => events.push(event));
@@ -212,18 +212,18 @@ describe('app-server', () => {
         imagePreviewsEnabled: true,
         unknownPreviewMode: false
       } as never)).rejects.toThrow('Canvas settings must contain only imagePreviewsEnabled.');
-      await expect(readJson(join(axisHome, 'config/canvas_settings.json'))).rejects.toThrow();
+      await expect(readJson(join(debruteHome, 'config/canvas_settings.json'))).rejects.toThrow();
       expect(events).toEqual([]);
     } finally {
       unsubscribe();
       globalRuntime.close();
-      await rm(axisHome, { recursive: true, force: true });
+      await rm(debruteHome, { recursive: true, force: true });
     }
   });
 
   it('writes, preserves, and clears Canvas feedback entries', async () => {
-    const projectRoot = await mkdtemp(join(tmpdir(), 'axis-app-server-feedback-write-'));
-    const server = new AxisAppServer();
+    const projectRoot = await mkdtemp(join(tmpdir(), 'debrute-app-server-feedback-write-'));
+    const server = new DebruteAppServer();
     try {
       await server.openProject(projectRoot, {
         initializeIfMissing: true,
@@ -262,7 +262,7 @@ describe('app-server', () => {
         marks: ['needs_revision'],
         note: ''
       });
-      expect(await readJson(join(projectRoot, '.axis/reviews/canvas-feedback.json'))).toEqual(cleared);
+      expect(await readJson(join(projectRoot, '.debrute/reviews/canvas-feedback.json'))).toEqual(cleared);
     } finally {
       server.close();
       await rm(projectRoot, { recursive: true, force: true });
@@ -270,8 +270,8 @@ describe('app-server', () => {
   });
 
   it('preserves all Canvas feedback entries from overlapping writes', async () => {
-    const projectRoot = await mkdtemp(join(tmpdir(), 'axis-app-server-feedback-concurrent-'));
-    const server = new AxisAppServer();
+    const projectRoot = await mkdtemp(join(tmpdir(), 'debrute-app-server-feedback-concurrent-'));
+    const server = new DebruteAppServer();
     try {
       await server.openProject(projectRoot, {
         initializeIfMissing: true,
@@ -305,15 +305,15 @@ describe('app-server', () => {
   });
 
   it('does not overwrite invalid Canvas feedback files', async () => {
-    const projectRoot = await mkdtemp(join(tmpdir(), 'axis-app-server-feedback-invalid-'));
-    const server = new AxisAppServer();
+    const projectRoot = await mkdtemp(join(tmpdir(), 'debrute-app-server-feedback-invalid-'));
+    const server = new DebruteAppServer();
     try {
       await server.openProject(projectRoot, {
         initializeIfMissing: true,
         createDefaultCanvas: true
       });
-      const feedbackPath = join(projectRoot, '.axis/reviews/canvas-feedback.json');
-      await mkdir(join(projectRoot, '.axis/reviews'), { recursive: true });
+      const feedbackPath = join(projectRoot, '.debrute/reviews/canvas-feedback.json');
+      await mkdir(join(projectRoot, '.debrute/reviews'), { recursive: true });
       await writeFile(feedbackPath, '{"schemaVersion":1,"entries":', 'utf8');
 
       await expect(server.updateCanvasFeedbackEntry({
@@ -330,14 +330,14 @@ describe('app-server', () => {
   });
 
   it('rejects invalid Canvas feedback storage paths', async () => {
-    const projectRoot = await mkdtemp(join(tmpdir(), 'axis-app-server-feedback-invalid-path-'));
-    const server = new AxisAppServer();
+    const projectRoot = await mkdtemp(join(tmpdir(), 'debrute-app-server-feedback-invalid-path-'));
+    const server = new DebruteAppServer();
     try {
       await server.openProject(projectRoot, {
         initializeIfMissing: true,
         createDefaultCanvas: true
       });
-      await writeFile(join(projectRoot, '.axis/reviews'), 'not a directory', 'utf8');
+      await writeFile(join(projectRoot, '.debrute/reviews'), 'not a directory', 'utf8');
 
       await expect(server.readCanvasFeedback()).rejects.toThrow();
     } finally {
@@ -347,15 +347,15 @@ describe('app-server', () => {
   });
 
   it('rejects Canvas node elements with unsupported fields', async () => {
-    const projectRoot = await mkdtemp(join(tmpdir(), 'axis-app-server-unsupported-canvas-field-'));
-    const server = new AxisAppServer();
+    const projectRoot = await mkdtemp(join(tmpdir(), 'debrute-app-server-unsupported-canvas-field-'));
+    const server = new DebruteAppServer();
     try {
-      await mkdir(join(projectRoot, '.axis/canvases'), { recursive: true });
-      await writeFile(join(projectRoot, '.axis/project.json'), JSON.stringify({
+      await mkdir(join(projectRoot, '.debrute/canvases'), { recursive: true });
+      await writeFile(join(projectRoot, '.debrute/project.json'), JSON.stringify({
         schemaVersion: 1,
         project: { name: 'Unsupported Canvas Field Project' }
       }, null, 2), 'utf8');
-      await writeFile(join(projectRoot, '.axis/canvases/production-map.json'), JSON.stringify({
+      await writeFile(join(projectRoot, '.debrute/canvases/production-map.json'), JSON.stringify({
         schemaVersion: CANVAS_DOCUMENT_SCHEMA_VERSION,
         id: 'production-map',
         title: 'Production Map',
@@ -387,17 +387,17 @@ describe('app-server', () => {
   });
 
   it('accepts manual Canvas node layout mode in current Canvas JSON', async () => {
-    const projectRoot = await mkdtemp(join(tmpdir(), 'axis-app-server-manual-layout-'));
-    const server = new AxisAppServer();
+    const projectRoot = await mkdtemp(join(tmpdir(), 'debrute-app-server-manual-layout-'));
+    const server = new DebruteAppServer();
     try {
-      await mkdir(join(projectRoot, '.axis/canvases'), { recursive: true });
+      await mkdir(join(projectRoot, '.debrute/canvases'), { recursive: true });
       await mkdir(join(projectRoot, 'image-production/generated'), { recursive: true });
       await writeFile(join(projectRoot, 'image-production/generated/a.md'), 'fake', 'utf8');
-      await writeFile(join(projectRoot, '.axis/project.json'), JSON.stringify({
+      await writeFile(join(projectRoot, '.debrute/project.json'), JSON.stringify({
         schemaVersion: 1,
         project: { name: 'Manual Layout Project' }
       }, null, 2), 'utf8');
-      await writeFile(join(projectRoot, '.axis/canvases/production-map.json'), JSON.stringify({
+      await writeFile(join(projectRoot, '.debrute/canvases/production-map.json'), JSON.stringify({
         schemaVersion: CANVAS_DOCUMENT_SCHEMA_VERSION,
         id: 'production-map',
         title: 'Production Map',
@@ -426,7 +426,7 @@ describe('app-server', () => {
         ''
       ]);
       await server.publishFlowmapDraftForProject(projectRoot, {
-        sourceDraftPath: '.axis/flowmaps/image-production.draft.yaml'
+        sourceDraftPath: '.debrute/flowmaps/image-production.draft.yaml'
       });
 
       const snapshot = await server.openProject(projectRoot, {
@@ -442,15 +442,15 @@ describe('app-server', () => {
   });
 
   it('rejects auto Canvas node layout mode in current Canvas JSON', async () => {
-    const projectRoot = await mkdtemp(join(tmpdir(), 'axis-app-server-auto-layout-mode-'));
-    const server = new AxisAppServer();
+    const projectRoot = await mkdtemp(join(tmpdir(), 'debrute-app-server-auto-layout-mode-'));
+    const server = new DebruteAppServer();
     try {
-      await mkdir(join(projectRoot, '.axis/canvases'), { recursive: true });
-      await writeFile(join(projectRoot, '.axis/project.json'), JSON.stringify({
+      await mkdir(join(projectRoot, '.debrute/canvases'), { recursive: true });
+      await writeFile(join(projectRoot, '.debrute/project.json'), JSON.stringify({
         schemaVersion: 1,
         project: { name: 'Auto Layout Mode Project' }
       }, null, 2), 'utf8');
-      await writeFile(join(projectRoot, '.axis/canvases/production-map.json'), JSON.stringify({
+      await writeFile(join(projectRoot, '.debrute/canvases/production-map.json'), JSON.stringify({
         schemaVersion: CANVAS_DOCUMENT_SCHEMA_VERSION,
         id: 'production-map',
         title: 'Production Map',
@@ -482,11 +482,11 @@ describe('app-server', () => {
   });
 
   it('creates the default Canvas based only on current Canvas JSON files', async () => {
-    const projectRoot = await mkdtemp(join(tmpdir(), 'axis-app-server-default-canvas-json-only-'));
-    const server = new AxisAppServer();
+    const projectRoot = await mkdtemp(join(tmpdir(), 'debrute-app-server-default-canvas-json-only-'));
+    const server = new DebruteAppServer();
     try {
-      await mkdir(join(projectRoot, '.axis/canvases'), { recursive: true });
-      await writeFile(join(projectRoot, '.axis/project.json'), JSON.stringify({
+      await mkdir(join(projectRoot, '.debrute/canvases'), { recursive: true });
+      await writeFile(join(projectRoot, '.debrute/project.json'), JSON.stringify({
         schemaVersion: 1,
         project: {
           id: 'project-default-canvas-json-only',
@@ -495,7 +495,7 @@ describe('app-server', () => {
           updatedAt: '2026-05-25T10:30:00.000Z'
         }
       }, null, 2), 'utf8');
-      await writeFile(join(projectRoot, '.axis/canvases/old.yaml'), 'not a Canvas JSON file\n', 'utf8');
+      await writeFile(join(projectRoot, '.debrute/canvases/old.yaml'), 'not a Canvas JSON file\n', 'utf8');
 
       const snapshot = await server.openProject(projectRoot, {
         initializeIfMissing: false,
@@ -503,7 +503,7 @@ describe('app-server', () => {
       });
 
       expect(snapshot.canvases.map((canvas) => canvas.id)).toEqual(['production-map']);
-      await expect(readFile(join(projectRoot, '.axis/canvases/production-map.json'), 'utf8')).resolves.toContain('"nodeElements": []');
+      await expect(readFile(join(projectRoot, '.debrute/canvases/production-map.json'), 'utf8')).resolves.toContain('"nodeElements": []');
     } finally {
       server.close();
       await rm(projectRoot, { recursive: true, force: true });
@@ -511,11 +511,11 @@ describe('app-server', () => {
   });
 
   it('returns the current image model request failure payload for CLI callers', async () => {
-    const home = await mkdtemp(join(tmpdir(), 'axis-image-model-error-home-'));
-    const projectRoot = await mkdtemp(join(tmpdir(), 'axis-image-model-error-project-'));
-    const configStore = new GlobalConfigStore({ axisHome: home });
-    const globalRuntime = new AxisGlobalRuntimeServer({ globalConfigStore: configStore });
-    const server = new AxisAppServer({
+    const home = await mkdtemp(join(tmpdir(), 'debrute-image-model-error-home-'));
+    const projectRoot = await mkdtemp(join(tmpdir(), 'debrute-image-model-error-project-'));
+    const configStore = new GlobalConfigStore({ debruteHome: home });
+    const globalRuntime = new DebruteGlobalRuntimeServer({ globalConfigStore: configStore });
+    const server = new DebruteAppServer({
       globalConfigStore: configStore,
       imageModelFetch: async () => new Response(JSON.stringify({
         error: { message: 'quota exceeded' }
@@ -555,12 +555,12 @@ describe('app-server', () => {
   });
 
   it('saves LLM settings that make llm_request usable from persisted config', async () => {
-    const home = await mkdtemp(join(tmpdir(), 'axis-llm-settings-home-'));
-    const projectRoot = await mkdtemp(join(tmpdir(), 'axis-llm-settings-project-'));
+    const home = await mkdtemp(join(tmpdir(), 'debrute-llm-settings-home-'));
+    const projectRoot = await mkdtemp(join(tmpdir(), 'debrute-llm-settings-project-'));
     const originalFetch = globalThis.fetch;
-    const configStore = new GlobalConfigStore({ axisHome: home });
-    const globalRuntime = new AxisGlobalRuntimeServer({ globalConfigStore: configStore });
-    const server = new AxisAppServer({ globalConfigStore: configStore });
+    const configStore = new GlobalConfigStore({ debruteHome: home });
+    const globalRuntime = new DebruteGlobalRuntimeServer({ globalConfigStore: configStore });
+    const server = new DebruteAppServer({ globalConfigStore: configStore });
     try {
       globalThis.fetch = async (url, init) => {
         expect(url).toBe('https://api.openai.com/v1/chat/completions');
@@ -629,10 +629,10 @@ describe('app-server', () => {
   });
 
   it('discovers OpenAI-compatible provider models from LLM settings input', async () => {
-    const home = await mkdtemp(join(tmpdir(), 'axis-llm-discovery-home-'));
+    const home = await mkdtemp(join(tmpdir(), 'debrute-llm-discovery-home-'));
     const originalFetch = globalThis.fetch;
-    const globalRuntime = new AxisGlobalRuntimeServer({
-      globalConfigStore: new GlobalConfigStore({ axisHome: home })
+    const globalRuntime = new DebruteGlobalRuntimeServer({
+      globalConfigStore: new GlobalConfigStore({ debruteHome: home })
     });
     try {
       globalThis.fetch = async (url, init) => {
@@ -642,9 +642,9 @@ describe('app-server', () => {
         });
         return new Response(JSON.stringify({
           data: [
-            { id: 'gpt-axis-a' },
-            { id: 'gpt-axis-b' },
-            { id: 'gpt-axis-a' }
+            { id: 'gpt-debrute-a' },
+            { id: 'gpt-debrute-b' },
+            { id: 'gpt-debrute-a' }
           ]
         }), {
           status: 200,
@@ -661,7 +661,7 @@ describe('app-server', () => {
 
       expect(result).toEqual({
         endpoint: 'https://api.example.test/v1/models',
-        models: ['gpt-axis-a', 'gpt-axis-b'],
+        models: ['gpt-debrute-a', 'gpt-debrute-b'],
         modelsCount: 2,
         supportsDiscovery: true
       });
@@ -673,9 +673,9 @@ describe('app-server', () => {
   });
 
   it('saves media model routing overrides and derives configured state from API keys', async () => {
-    const home = await mkdtemp(join(tmpdir(), 'axis-media-model-settings-home-'));
-    const globalRuntime = new AxisGlobalRuntimeServer({
-      globalConfigStore: new GlobalConfigStore({ axisHome: home })
+    const home = await mkdtemp(join(tmpdir(), 'debrute-media-model-settings-home-'));
+    const globalRuntime = new DebruteGlobalRuntimeServer({
+      globalConfigStore: new GlobalConfigStore({ debruteHome: home })
     });
     try {
       const imageSettings = await globalRuntime.imageModelSaveSetting('gpt-image-2', {
@@ -689,14 +689,14 @@ describe('app-server', () => {
         apiKey: 'sk-video'
       });
 
-      expect(imageSettings.models.find((model) => model.axisModelId === 'gpt-image-2')).toMatchObject({
+      expect(imageSettings.models.find((model) => model.debruteModelId === 'gpt-image-2')).toMatchObject({
         defaultBaseUrl: 'https://api.openai.com/v1',
         defaultRequestModelId: 'gpt-image-2',
         baseUrlOverride: 'not a url yet',
         requestModelIdOverride: 'custom-image-model',
         apiKeySet: true
       });
-      expect(videoSettings.models.find((model) => model.axisModelId === 'doubao-seedance-2-0-260128')).toMatchObject({
+      expect(videoSettings.models.find((model) => model.debruteModelId === 'doubao-seedance-2-0-260128')).toMatchObject({
         defaultBaseUrl: 'https://ark.cn-beijing.volces.com/api/v3',
         defaultRequestModelId: 'doubao-seedance-2-0-260128',
         baseUrlOverride: 'ark local draft',
@@ -710,9 +710,9 @@ describe('app-server', () => {
   });
 
   it('stores API-key-only media settings only in secrets', async () => {
-    const home = await mkdtemp(join(tmpdir(), 'axis-media-model-api-key-only-home-'));
-    const configStore = new GlobalConfigStore({ axisHome: home });
-    const globalRuntime = new AxisGlobalRuntimeServer({ globalConfigStore: configStore });
+    const home = await mkdtemp(join(tmpdir(), 'debrute-media-model-api-key-only-home-'));
+    const configStore = new GlobalConfigStore({ debruteHome: home });
+    const globalRuntime = new DebruteGlobalRuntimeServer({ globalConfigStore: configStore });
     try {
       const settings = await globalRuntime.imageModelSaveSetting('gpt-image-2', {
         baseUrlOverride: null,
@@ -720,7 +720,7 @@ describe('app-server', () => {
         apiKey: 'sk-image'
       });
 
-      expect(settings.models.find((model) => model.axisModelId === 'gpt-image-2')).toMatchObject({
+      expect(settings.models.find((model) => model.debruteModelId === 'gpt-image-2')).toMatchObject({
         baseUrlOverride: null,
         requestModelIdOverride: null,
         apiKeySet: true
@@ -736,14 +736,14 @@ describe('app-server', () => {
   });
 
   it('reads, writes, and projects Flowmap nodes on Canvas', async () => {
-    const projectRoot = await mkdtemp(join(tmpdir(), 'axis-app-server-flowmap-assets-'));
-    const server = new AxisAppServer();
+    const projectRoot = await mkdtemp(join(tmpdir(), 'debrute-app-server-flowmap-assets-'));
+    const server = new DebruteAppServer();
     try {
       await server.openProject(projectRoot, {
         initializeIfMissing: true,
         createDefaultCanvas: true
       });
-      await mkdir(join(projectRoot, '.axis/flowmaps'), { recursive: true });
+      await mkdir(join(projectRoot, '.debrute/flowmaps'), { recursive: true });
       await mkdir(join(projectRoot, 'image-production/notes'), { recursive: true });
       await writeFile(join(projectRoot, 'image-production/notes/brief.md'), '# Brief\n', 'utf8');
 
@@ -758,7 +758,7 @@ describe('app-server', () => {
         ''
       ]);
       await server.publishFlowmapDraft({
-        sourceDraftPath: '.axis/flowmaps/image-production.draft.yaml'
+        sourceDraftPath: '.debrute/flowmaps/image-production.draft.yaml'
       });
       const snapshot = await server.refreshProject();
 
@@ -786,8 +786,8 @@ describe('app-server', () => {
   });
 
   it('refreshes project-visible ordinary file changes without requiring a Flowmap', async () => {
-    const projectRoot = await mkdtemp(join(tmpdir(), 'axis-app-server-refresh-'));
-    const server = new AxisAppServer();
+    const projectRoot = await mkdtemp(join(tmpdir(), 'debrute-app-server-refresh-'));
+    const server = new DebruteAppServer();
     try {
       await server.openProject(projectRoot, {
         initializeIfMissing: true,
@@ -808,10 +808,10 @@ describe('app-server', () => {
   });
 
   it('applies visual-only Canvas updates without synchronizing Flowmaps', async () => {
-    const projectRoot = await mkdtemp(join(tmpdir(), 'axis-app-server-visual-canvas-'));
+    const projectRoot = await mkdtemp(join(tmpdir(), 'debrute-app-server-visual-canvas-'));
     let layoutReadsAllowed = true;
     let layoutReadCount = 0;
-    const server = new AxisAppServer({
+    const server = new DebruteAppServer({
       canvasNodeLayoutSizeReader: async (input) => {
         layoutReadCount += 1;
         if (!layoutReadsAllowed) {
@@ -827,7 +827,7 @@ describe('app-server', () => {
       }
     });
     try {
-      await mkdir(join(projectRoot, '.axis/flowmaps'), { recursive: true });
+      await mkdir(join(projectRoot, '.debrute/flowmaps'), { recursive: true });
       await mkdir(join(projectRoot, 'image-production/generated'), { recursive: true });
       await writeFile(join(projectRoot, 'image-production/generated/a.png'), Buffer.from([0x89, 0x50, 0x4e, 0x47]));
       await server.openProject(projectRoot, { initializeIfMissing: true, createDefaultCanvas: true, watchFiles: false });
@@ -840,7 +840,7 @@ describe('app-server', () => {
         ''
       ]);
       await server.publishFlowmapDraft({
-        sourceDraftPath: '.axis/flowmaps/image-production.draft.yaml'
+        sourceDraftPath: '.debrute/flowmaps/image-production.draft.yaml'
       });
       const synced = await server.refreshProject();
       const nodePath = 'image-production/generated/a.png';
@@ -876,7 +876,7 @@ describe('app-server', () => {
         locked: true,
         availability: { state: 'available' }
       });
-      const canvasJson = await readFile(join(projectRoot, '.axis/canvases/production-map.json'), 'utf8');
+      const canvasJson = await readFile(join(projectRoot, '.debrute/canvases/production-map.json'), 'utf8');
       expect(canvasJson).not.toContain('"viewport"');
       expect(canvasJson).not.toContain('"selection"');
     } finally {
@@ -886,8 +886,8 @@ describe('app-server', () => {
   });
 
   it('publishes Flowmap drafts to generated active YAML and leaves draft source editable', async () => {
-    const projectRoot = await mkdtemp(join(tmpdir(), 'axis-app-server-flowmap-publish-'));
-    const server = new AxisAppServer();
+    const projectRoot = await mkdtemp(join(tmpdir(), 'debrute-app-server-flowmap-publish-'));
+    const server = new DebruteAppServer();
     try {
       await server.openProject(projectRoot, { initializeIfMissing: true, createDefaultCanvas: false });
       await writeFlowmapDraft(projectRoot, 'image-production', [
@@ -898,21 +898,21 @@ describe('app-server', () => {
         '  - "generated/**/*.png"',
         ''
       ]);
-      const draftBefore = await readFile(join(projectRoot, '.axis/flowmaps/image-production.draft.yaml'), 'utf8');
+      const draftBefore = await readFile(join(projectRoot, '.debrute/flowmaps/image-production.draft.yaml'), 'utf8');
 
       await expect(server.publishFlowmapDraft({
-        sourceDraftPath: '.axis/flowmaps/image-production.draft.yaml'
+        sourceDraftPath: '.debrute/flowmaps/image-production.draft.yaml'
       })).resolves.toEqual({ ok: true, command: 'flowmap.publish' });
 
-      const active = await readFile(join(projectRoot, '.axis/flowmaps/image-production.yaml'), 'utf8');
-      const draft = await readFile(join(projectRoot, '.axis/flowmaps/image-production.draft.yaml'), 'utf8');
+      const active = await readFile(join(projectRoot, '.debrute/flowmaps/image-production.yaml'), 'utf8');
+      const draft = await readFile(join(projectRoot, '.debrute/flowmaps/image-production.draft.yaml'), 'utf8');
       expect(draft).toBe(draftBefore);
       expect(active).not.toBe(draft);
       expect(active).toContain('managed: true');
-      expect(active).toContain('sourceDraft: .axis/flowmaps/image-production.draft.yaml');
+      expect(active).toContain('sourceDraft: .debrute/flowmaps/image-production.draft.yaml');
       expect(active).toContain('contentHash: sha256:');
       expect(draft).not.toContain('contentHash: sha256:');
-      expect(await readJson(join(projectRoot, '.axis/canvases/main.json'))).toMatchObject({
+      expect(await readJson(join(projectRoot, '.debrute/canvases/main.json'))).toMatchObject({
         id: 'main',
         nodeElements: []
       });
@@ -924,16 +924,16 @@ describe('app-server', () => {
   });
 
   it('rejects Flowmap publish when the draft is missing', async () => {
-    const projectRoot = await mkdtemp(join(tmpdir(), 'axis-app-server-flowmap-create-default-'));
-    const server = new AxisAppServer();
+    const projectRoot = await mkdtemp(join(tmpdir(), 'debrute-app-server-flowmap-create-default-'));
+    const server = new DebruteAppServer();
     try {
       await server.openProject(projectRoot, { initializeIfMissing: true, createDefaultCanvas: false });
 
       await expect(server.publishFlowmapDraftForProject(projectRoot, {
-        sourceDraftPath: '.axis/flowmaps/new-map.draft.yaml'
+        sourceDraftPath: '.debrute/flowmaps/new-map.draft.yaml'
       })).rejects.toMatchObject({ code: 'flowmap_draft_read_failed' });
 
-      await expect(readFile(join(projectRoot, '.axis/flowmaps/new-map.yaml'), 'utf8')).rejects.toThrow();
+      await expect(readFile(join(projectRoot, '.debrute/flowmaps/new-map.yaml'), 'utf8')).rejects.toThrow();
       expect(await directoryExists(join(projectRoot, 'new-map'))).toBe(false);
     } finally {
       server.close();
@@ -942,8 +942,8 @@ describe('app-server', () => {
   });
 
   it('rejects missing Flowmap drafts when active YAML already exists', async () => {
-    const projectRoot = await mkdtemp(join(tmpdir(), 'axis-app-server-flowmap-active-without-draft-'));
-    const server = new AxisAppServer();
+    const projectRoot = await mkdtemp(join(tmpdir(), 'debrute-app-server-flowmap-active-without-draft-'));
+    const server = new DebruteAppServer();
     try {
       await server.openProject(projectRoot, { initializeIfMissing: true, createDefaultCanvas: false });
       await writeFlowmapDraft(projectRoot, 'image-production', [
@@ -953,15 +953,15 @@ describe('app-server', () => {
         ''
       ]);
       await server.publishFlowmapDraftForProject(projectRoot, {
-        sourceDraftPath: '.axis/flowmaps/image-production.draft.yaml'
+        sourceDraftPath: '.debrute/flowmaps/image-production.draft.yaml'
       });
-      await rm(join(projectRoot, '.axis/flowmaps/image-production.draft.yaml'), { force: true });
-      const activeBefore = await readFile(join(projectRoot, '.axis/flowmaps/image-production.yaml'), 'utf8');
+      await rm(join(projectRoot, '.debrute/flowmaps/image-production.draft.yaml'), { force: true });
+      const activeBefore = await readFile(join(projectRoot, '.debrute/flowmaps/image-production.yaml'), 'utf8');
 
       await expect(server.publishFlowmapDraftForProject(projectRoot, {
-        sourceDraftPath: '.axis/flowmaps/image-production.draft.yaml'
+        sourceDraftPath: '.debrute/flowmaps/image-production.draft.yaml'
       })).rejects.toMatchObject({ code: 'flowmap_draft_read_failed' });
-      await expect(readFile(join(projectRoot, '.axis/flowmaps/image-production.yaml'), 'utf8')).resolves.toBe(activeBefore);
+      await expect(readFile(join(projectRoot, '.debrute/flowmaps/image-production.yaml'), 'utf8')).resolves.toBe(activeBefore);
     } finally {
       server.close();
       await rm(projectRoot, { recursive: true, force: true });
@@ -969,8 +969,8 @@ describe('app-server', () => {
   });
 
   it('rejects Flowmap publish from non-canonical draft paths', async () => {
-    const projectRoot = await mkdtemp(join(tmpdir(), 'axis-app-server-flowmap-draft-path-'));
-    const server = new AxisAppServer();
+    const projectRoot = await mkdtemp(join(tmpdir(), 'debrute-app-server-flowmap-draft-path-'));
+    const server = new DebruteAppServer();
     try {
       await server.openProject(projectRoot, { initializeIfMissing: true, createDefaultCanvas: true });
       await mkdir(join(projectRoot, 'drafts'), { recursive: true });
@@ -993,14 +993,14 @@ describe('app-server', () => {
   });
 
   it('syncs active Flowmaps into Canvas JSON when matching files appear', async () => {
-    const projectRoot = await mkdtemp(join(tmpdir(), 'axis-app-server-flowmap-sync-'));
-    const server = new AxisAppServer({
+    const projectRoot = await mkdtemp(join(tmpdir(), 'debrute-app-server-flowmap-sync-'));
+    const server = new DebruteAppServer({
       canvasNodeLayoutSizeReader: canvasLayoutSizeReader({
         'image-production/generated/a.png': { width: 320, height: 180 }
       })
     });
     try {
-      await mkdir(join(projectRoot, '.axis/flowmaps'), { recursive: true });
+      await mkdir(join(projectRoot, '.debrute/flowmaps'), { recursive: true });
       await mkdir(join(projectRoot, 'image-production/generated'), { recursive: true });
       await writeFile(join(projectRoot, 'image-production/generated/a.png'), Buffer.from([0x89, 0x50, 0x4e, 0x47]));
       await server.openProject(projectRoot, { initializeIfMissing: true, createDefaultCanvas: true });
@@ -1013,7 +1013,7 @@ describe('app-server', () => {
         ''
       ]);
       await server.publishFlowmapDraft({
-        sourceDraftPath: '.axis/flowmaps/image-production.draft.yaml'
+        sourceDraftPath: '.debrute/flowmaps/image-production.draft.yaml'
       });
       const snapshot = await server.refreshProject();
 
@@ -1029,8 +1029,8 @@ describe('app-server', () => {
   });
 
   it('marks only large still raster images as Canvas-previewable in node availability', async () => {
-    const projectRoot = await mkdtemp(join(tmpdir(), 'axis-app-server-image-previewability-'));
-    const server = new AxisAppServer({
+    const projectRoot = await mkdtemp(join(tmpdir(), 'debrute-app-server-image-previewability-'));
+    const server = new DebruteAppServer({
       canvasNodeLayoutSizeReader: canvasLayoutSizeReader({
         'image-production/generated/large-still.png': { width: 900, height: 700 },
         'image-production/generated/small-still.png': { width: 320, height: 180 },
@@ -1063,7 +1063,7 @@ describe('app-server', () => {
         ''
       ]);
       await server.publishFlowmapDraft({
-        sourceDraftPath: '.axis/flowmaps/image-production.draft.yaml'
+        sourceDraftPath: '.debrute/flowmaps/image-production.draft.yaml'
       });
 
       const nodes = (await server.refreshProject()).projections[0]!.nodes;
@@ -1084,8 +1084,8 @@ describe('app-server', () => {
   });
 
   it('surfaces large raster metadata failures instead of falling back to original image mode', async () => {
-    const projectRoot = await mkdtemp(join(tmpdir(), 'axis-app-server-image-preview-metadata-error-'));
-    const server = new AxisAppServer({
+    const projectRoot = await mkdtemp(join(tmpdir(), 'debrute-app-server-image-preview-metadata-error-'));
+    const server = new DebruteAppServer({
       canvasNodeLayoutSizeReader: canvasLayoutSizeReader({
         'image-production/generated/broken.png': { width: 900, height: 700 }
       })
@@ -1103,7 +1103,7 @@ describe('app-server', () => {
         ''
       ]);
       await server.publishFlowmapDraft({
-        sourceDraftPath: '.axis/flowmaps/image-production.draft.yaml'
+        sourceDraftPath: '.debrute/flowmaps/image-production.draft.yaml'
       });
 
       const nodes = (await server.refreshProject()).projections[0]!.nodes;
@@ -1121,8 +1121,8 @@ describe('app-server', () => {
   });
 
   it('syncs Flowmap horizontal layout groups into Canvas JSON', async () => {
-    const projectRoot = await mkdtemp(join(tmpdir(), 'axis-app-server-flowmap-horizontal-groups-'));
-    const server = new AxisAppServer({
+    const projectRoot = await mkdtemp(join(tmpdir(), 'debrute-app-server-flowmap-horizontal-groups-'));
+    const server = new DebruteAppServer({
       canvasNodeLayoutSizeReader: canvasLayoutSizeReader({
         'image-production/outputs/4k/a.png': { width: 100, height: 100 },
         'image-production/outputs/4k/b.png': { width: 200, height: 50 },
@@ -1149,7 +1149,7 @@ describe('app-server', () => {
         ''
       ]);
       await server.publishFlowmapDraft({
-        sourceDraftPath: '.axis/flowmaps/image-production.draft.yaml'
+        sourceDraftPath: '.debrute/flowmaps/image-production.draft.yaml'
       });
 
       const snapshot = await server.refreshProject();
@@ -1168,8 +1168,8 @@ describe('app-server', () => {
   });
 
   it('preserves manual node layout and removes absent Flowmap nodes', async () => {
-    const projectRoot = await mkdtemp(join(tmpdir(), 'axis-app-server-flowmap-manual-'));
-    const server = new AxisAppServer({
+    const projectRoot = await mkdtemp(join(tmpdir(), 'debrute-app-server-flowmap-manual-'));
+    const server = new DebruteAppServer({
       canvasNodeLayoutSizeReader: canvasLayoutSizeReader({
         'image-production/generated/a.png': { width: 100, height: 100 },
         'image-production/generated/b.png': { width: 200, height: 50 },
@@ -1177,7 +1177,7 @@ describe('app-server', () => {
       })
     });
     try {
-      await mkdir(join(projectRoot, '.axis/flowmaps'), { recursive: true });
+      await mkdir(join(projectRoot, '.debrute/flowmaps'), { recursive: true });
       await mkdir(join(projectRoot, 'image-production/generated'), { recursive: true });
       await writeFile(join(projectRoot, 'image-production/generated/b.png'), 'fake', 'utf8');
       await writeFile(join(projectRoot, 'image-production/generated/c.png'), 'fake', 'utf8');
@@ -1191,7 +1191,7 @@ describe('app-server', () => {
         ''
       ]);
       await server.publishFlowmapDraft({
-        sourceDraftPath: '.axis/flowmaps/image-production.draft.yaml'
+        sourceDraftPath: '.debrute/flowmaps/image-production.draft.yaml'
       });
       await server.refreshProject();
       await server.updateCanvasNodeLayouts({
@@ -1216,8 +1216,8 @@ describe('app-server', () => {
   });
 
   it('reports duplicate Flowmap layout group matches and preserves the last valid Canvas state', async () => {
-    const projectRoot = await mkdtemp(join(tmpdir(), 'axis-app-server-flowmap-horizontal-duplicate-'));
-    const server = new AxisAppServer({
+    const projectRoot = await mkdtemp(join(tmpdir(), 'debrute-app-server-flowmap-horizontal-duplicate-'));
+    const server = new DebruteAppServer({
       canvasNodeLayoutSizeReader: canvasLayoutSizeReader({
         'image-production/outputs/a.png': { width: 100, height: 100 }
       })
@@ -1240,7 +1240,7 @@ describe('app-server', () => {
         ''
       ]);
       await server.publishFlowmapDraft({
-        sourceDraftPath: '.axis/flowmaps/image-production.draft.yaml'
+        sourceDraftPath: '.debrute/flowmaps/image-production.draft.yaml'
       });
       const validSnapshot = await server.refreshProject();
       expect(validSnapshot.canvases[0]?.nodeElements.map((node) => node.projectRelativePath)).toEqual([
@@ -1266,7 +1266,7 @@ describe('app-server', () => {
         ''
       ]);
       await server.publishFlowmapDraft({
-        sourceDraftPath: '.axis/flowmaps/image-production.draft.yaml'
+        sourceDraftPath: '.debrute/flowmaps/image-production.draft.yaml'
       });
 
       const snapshot = await server.refreshProject();
@@ -1291,10 +1291,10 @@ describe('app-server', () => {
   });
 
   it('reports invalid active Flowmaps and skips their nodes', async () => {
-    const projectRoot = await mkdtemp(join(tmpdir(), 'axis-app-server-flowmap-invalid-'));
-    const server = new AxisAppServer();
+    const projectRoot = await mkdtemp(join(tmpdir(), 'debrute-app-server-flowmap-invalid-'));
+    const server = new DebruteAppServer();
     try {
-      await mkdir(join(projectRoot, '.axis/flowmaps'), { recursive: true });
+      await mkdir(join(projectRoot, '.debrute/flowmaps'), { recursive: true });
       await mkdir(join(projectRoot, 'image-production/generated'), { recursive: true });
       await writeFile(join(projectRoot, 'image-production/generated/a.png'), 'fake', 'utf8');
       await server.openProject(projectRoot, { initializeIfMissing: true, createDefaultCanvas: true });
@@ -1307,9 +1307,9 @@ describe('app-server', () => {
         ''
       ]);
       await server.publishFlowmapDraft({
-        sourceDraftPath: '.axis/flowmaps/image-production.draft.yaml'
+        sourceDraftPath: '.debrute/flowmaps/image-production.draft.yaml'
       });
-      await writeFile(join(projectRoot, '.axis/flowmaps/image-production.yaml'), `${await readFile(join(projectRoot, '.axis/flowmaps/image-production.yaml'), 'utf8')}unknown: true\n`, 'utf8');
+      await writeFile(join(projectRoot, '.debrute/flowmaps/image-production.yaml'), `${await readFile(join(projectRoot, '.debrute/flowmaps/image-production.yaml'), 'utf8')}unknown: true\n`, 'utf8');
 
       const snapshot = await server.refreshProject();
 
@@ -1327,10 +1327,10 @@ describe('app-server', () => {
   });
 
   it('reports unreadable media layout diagnostics without dropping valid Flowmap nodes', async () => {
-    const projectRoot = await mkdtemp(join(tmpdir(), 'axis-app-server-flowmap-bad-media-'));
-    const server = new AxisAppServer();
+    const projectRoot = await mkdtemp(join(tmpdir(), 'debrute-app-server-flowmap-bad-media-'));
+    const server = new DebruteAppServer();
     try {
-      await mkdir(join(projectRoot, '.axis/flowmaps'), { recursive: true });
+      await mkdir(join(projectRoot, '.debrute/flowmaps'), { recursive: true });
       await mkdir(join(projectRoot, 'image-production'), { recursive: true });
       await writeFile(join(projectRoot, 'image-production/bad.png'), 'not a png', 'utf8');
       await writeFile(join(projectRoot, 'image-production/notes.txt'), 'usable text\n', 'utf8');
@@ -1344,7 +1344,7 @@ describe('app-server', () => {
         ''
       ]);
       await server.publishFlowmapDraft({
-        sourceDraftPath: '.axis/flowmaps/image-production.draft.yaml'
+        sourceDraftPath: '.debrute/flowmaps/image-production.draft.yaml'
       });
 
       const snapshot = await server.refreshProject();
@@ -1367,10 +1367,10 @@ describe('app-server', () => {
   });
 
   it('reports missing Flowmap roots and missing mounted Canvas JSON', async () => {
-    const projectRoot = await mkdtemp(join(tmpdir(), 'axis-app-server-flowmap-missing-'));
-    const server = new AxisAppServer();
+    const projectRoot = await mkdtemp(join(tmpdir(), 'debrute-app-server-flowmap-missing-'));
+    const server = new DebruteAppServer();
     try {
-      await mkdir(join(projectRoot, '.axis/flowmaps'), { recursive: true });
+      await mkdir(join(projectRoot, '.debrute/flowmaps'), { recursive: true });
       await server.openProject(projectRoot, { initializeIfMissing: true, createDefaultCanvas: true });
       await writeFlowmapDraft(projectRoot, 'image-production', [
         'schemaVersion: 1',
@@ -1381,7 +1381,7 @@ describe('app-server', () => {
         ''
       ]);
       await server.publishFlowmapDraft({
-        sourceDraftPath: '.axis/flowmaps/image-production.draft.yaml'
+        sourceDraftPath: '.debrute/flowmaps/image-production.draft.yaml'
       });
       await rm(join(projectRoot, 'image-production'), { recursive: true, force: true });
 
@@ -1391,7 +1391,7 @@ describe('app-server', () => {
       ]));
 
       await mkdir(join(projectRoot, 'image-production'), { recursive: true });
-      await rm(join(projectRoot, '.axis/canvases/missing-canvas.json'), { force: true });
+      await rm(join(projectRoot, '.debrute/canvases/missing-canvas.json'), { force: true });
       const missingCanvas = await server.refreshProject();
       expect(missingCanvas.diagnostics).toEqual(expect.arrayContaining([
         expect.objectContaining({ code: 'flowmap_canvas_missing' })
@@ -1403,11 +1403,11 @@ describe('app-server', () => {
   });
 
   it('accepts JSON-only Canvas projects as empty Canvas views', async () => {
-    const projectRoot = await mkdtemp(join(tmpdir(), 'axis-app-server-json-only-canvas-'));
-    const server = new AxisAppServer();
+    const projectRoot = await mkdtemp(join(tmpdir(), 'debrute-app-server-json-only-canvas-'));
+    const server = new DebruteAppServer();
     try {
-      await mkdir(join(projectRoot, '.axis/canvases'), { recursive: true });
-      await writeFile(join(projectRoot, '.axis/project.json'), JSON.stringify({
+      await mkdir(join(projectRoot, '.debrute/canvases'), { recursive: true });
+      await writeFile(join(projectRoot, '.debrute/project.json'), JSON.stringify({
         schemaVersion: 1,
         project: {
           id: 'project-json-only',
@@ -1416,7 +1416,7 @@ describe('app-server', () => {
           updatedAt: '2026-05-23T10:30:00.000Z'
         }
       }, null, 2), 'utf8');
-      await writeFile(join(projectRoot, '.axis/canvases/production-map.json'), JSON.stringify({
+      await writeFile(join(projectRoot, '.debrute/canvases/production-map.json'), JSON.stringify({
         schemaVersion: CANVAS_DOCUMENT_SCHEMA_VERSION,
         id: 'production-map',
         title: 'Production Map',
@@ -1441,8 +1441,8 @@ describe('app-server', () => {
 });
 
 async function writeFlowmapDraft(projectRoot: string, flowmapId: string, lines: string[]): Promise<void> {
-  await mkdir(join(projectRoot, '.axis/flowmaps'), { recursive: true });
-  await writeFile(join(projectRoot, `.axis/flowmaps/${flowmapId}.draft.yaml`), lines.join('\n'), 'utf8');
+  await mkdir(join(projectRoot, '.debrute/flowmaps'), { recursive: true });
+  await writeFile(join(projectRoot, `.debrute/flowmaps/${flowmapId}.draft.yaml`), lines.join('\n'), 'utf8');
 }
 
 async function readJson(path: string): Promise<unknown> {

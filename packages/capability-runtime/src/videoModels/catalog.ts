@@ -1,5 +1,5 @@
 export interface VideoModelCatalogEntry {
-  axisModelId: string;
+  debruteModelId: string;
   summary: string;
   chooseWhen: string;
   avoidWhen: string;
@@ -51,7 +51,7 @@ const SEEDANCE_USAGE_NOTES = [
   '`content` is required and uses the official Volcengine Ark content array.',
   'Image inputs accept http(s), data:image, asset://, or Project-relative image paths.',
   'Audio inputs accept http(s), data:audio, asset://, or Project-relative audio paths.',
-  'Video inputs accept only http(s) or asset:// in AXIS V1; local video upload is out of scope.',
+  'Video inputs accept only http(s) or asset:// in Debrute V1; local video upload is out of scope.',
   'When audio input is present, include at least one reference image or reference video.',
   '`service_tier: flex` is not supported for the Seedance 2.0 series.'
 ].join(' ');
@@ -76,15 +76,15 @@ export function createVideoModelCatalog() {
     listAll(): VideoModelCatalogEntry[] {
       return sortedEntries(ENTRIES);
     },
-    listConfigured(axisModelIds: string[]): VideoModelCatalogEntry[] {
-      const selected = new Set(axisModelIds);
-      return sortedEntries(ENTRIES.filter((entry) => selected.has(entry.axisModelId)));
+    listConfigured(debruteModelIds: string[]): VideoModelCatalogEntry[] {
+      const selected = new Set(debruteModelIds);
+      return sortedEntries(ENTRIES.filter((entry) => selected.has(entry.debruteModelId)));
     },
     listOverviews(entries: VideoModelCatalogEntry[] = ENTRIES): VideoModelOverviewEntry[] {
       return sortedEntries(entries).map(toOverview);
     },
     details(modelIds: string[], entries: VideoModelCatalogEntry[] = ENTRIES): { details: VideoModelDetailEntry[]; unavailableModels: string[] } {
-      const byId = new Map(entries.map((entry) => [entry.axisModelId, entry]));
+      const byId = new Map(entries.map((entry) => [entry.debruteModelId, entry]));
       const seen = new Set<string>();
       const details: VideoModelDetailEntry[] = [];
       const unavailableModels: string[] = [];
@@ -103,15 +103,15 @@ export function createVideoModelCatalog() {
       }
       return { details, unavailableModels };
     },
-    get(axisModelId: string): VideoModelCatalogEntry | undefined {
-      return ENTRIES.find((entry) => entry.axisModelId === axisModelId);
+    get(debruteModelId: string): VideoModelCatalogEntry | undefined {
+      return ENTRIES.find((entry) => entry.debruteModelId === debruteModelId);
     }
   };
 }
 
-function seedanceEntry(axisModelId: string, input: { summary: string; chooseWhen: string; avoidWhen: string; resolutions: string[] }): VideoModelCatalogEntry {
+function seedanceEntry(debruteModelId: string, input: { summary: string; chooseWhen: string; avoidWhen: string; resolutions: string[] }): VideoModelCatalogEntry {
   return {
-    axisModelId,
+    debruteModelId,
     summary: input.summary,
     chooseWhen: input.chooseWhen,
     avoidWhen: input.avoidWhen,
@@ -121,7 +121,7 @@ function seedanceEntry(axisModelId: string, input: { summary: string; chooseWhen
     supportsAudioReferences: true,
     supportsGeneratedAudio: true,
     defaultBaseUrl: 'https://ark.cn-beijing.volces.com/api/v3',
-    defaultRequestModelId: axisModelId,
+    defaultRequestModelId: debruteModelId,
     capabilities: {
       supports_multimodal_references: true,
       supports_generated_audio: true,
@@ -135,7 +135,7 @@ function seedanceEntry(axisModelId: string, input: { summary: string; chooseWhen
     requestExample: {
       command: 'generate.video',
       input: {
-        model: axisModelId,
+        model: debruteModelId,
         arguments: {
           content: [{ type: 'text', text: 'A quiet product launch video with slow camera movement and synchronized ambient audio.' }],
           resolution: input.resolutions.includes('1080p') ? '1080p' : '720p',
@@ -151,7 +151,7 @@ function seedanceEntry(axisModelId: string, input: { summary: string; chooseWhen
 
 function toOverview(entry: VideoModelCatalogEntry): VideoModelOverviewEntry {
   return {
-    model: entry.axisModelId,
+    model: entry.debruteModelId,
     summary: entry.summary,
     chooseWhen: entry.chooseWhen,
     avoidWhen: entry.avoidWhen,
@@ -172,7 +172,7 @@ function toDetail(entry: VideoModelCatalogEntry): VideoModelDetailEntry {
     referenceArgumentRules: [
       { field: 'content[].image_url.url', acceptedValueFormat: 'http(s), data:image, asset://, or Project-relative image path' },
       { field: 'content[].audio_url.url', acceptedValueFormat: 'http(s), data:audio, asset://, or Project-relative audio path' },
-      { field: 'content[].video_url.url', acceptedValueFormat: 'http(s) or asset:// only; local video files are not uploaded by AXIS V1' }
+      { field: 'content[].video_url.url', acceptedValueFormat: 'http(s) or asset:// only; local video files are not uploaded by Debrute V1' }
     ],
     usageNotes: entry.usageNotes,
     requestExample: entry.requestExample
@@ -180,7 +180,7 @@ function toDetail(entry: VideoModelCatalogEntry): VideoModelDetailEntry {
 }
 
 function sortedEntries(entries: VideoModelCatalogEntry[]): VideoModelCatalogEntry[] {
-  return [...entries].sort((left, right) => left.axisModelId.localeCompare(right.axisModelId));
+  return [...entries].sort((left, right) => left.debruteModelId.localeCompare(right.debruteModelId));
 }
 
 function objectSchema(resolutions: string[]): Record<string, unknown> {

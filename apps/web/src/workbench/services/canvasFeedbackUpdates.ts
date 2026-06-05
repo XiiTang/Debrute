@@ -1,4 +1,4 @@
-import type { CanvasFeedbackDocument, UpdateCanvasFeedbackEntryInput } from '@axis/canvas-core';
+import type { CanvasFeedbackDocument, UpdateCanvasFeedbackEntryInput } from '@debrute/canvas-core';
 
 export function createCanvasFeedbackEntryUpdater(options: {
   requestUpdate: (input: UpdateCanvasFeedbackEntryInput) => Promise<CanvasFeedbackDocument>;

@@ -7,13 +7,13 @@ import {
   CANVAS_IMAGE_PREVIEW_MIN_SOURCE_BYTES,
   CANVAS_IMAGE_PREVIEW_WIDTH_BUCKETS,
   type CanvasImagePreviewWidth
-} from '@axis/canvas-core';
+} from '@debrute/canvas-core';
 import {
   normalizeProjectRelativePath,
   projectFileRevision,
   resolveExistingProjectPath,
   resolveProjectPathForWrite
-} from '@axis/project-core';
+} from '@debrute/project-core';
 
 const CANVAS_IMAGE_PREVIEW_GENERATION_CONCURRENCY = 2;
 const CANVAS_IMAGE_PREVIEW_METADATA_CONCURRENCY = 4;
@@ -21,7 +21,7 @@ export {
   CANVAS_IMAGE_PREVIEW_MIN_SOURCE_BYTES,
   CANVAS_IMAGE_PREVIEW_WIDTH_BUCKETS,
   type CanvasImagePreviewWidth
-} from '@axis/canvas-core';
+} from '@debrute/canvas-core';
 
 export interface ResolveCanvasImagePreviewInput {
   projectRoot: string;
@@ -350,7 +350,7 @@ async function canvasImagePreviewCacheBasePath(
     .update('\0')
     .update(String(input.width))
     .digest('hex');
-  return resolveProjectPathForWrite(projectRoot, `.axis/cache/canvas-image-previews/${hash}`);
+  return resolveProjectPathForWrite(projectRoot, `.debrute/cache/canvas-image-previews/${hash}`);
 }
 
 async function existingCanvasImagePreviewCachePath(basePath: string): Promise<string | undefined> {

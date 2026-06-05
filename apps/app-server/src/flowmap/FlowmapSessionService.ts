@@ -2,13 +2,13 @@ import { randomUUID } from 'node:crypto';
 import { mkdir, rename, rm, writeFile } from 'node:fs/promises';
 import { basename, dirname, join } from 'node:path';
 import {
-  getAxisProjectPaths,
+  getDebruteProjectPaths,
   normalizeProjectRelativePath,
   readProjectMetadata,
   readProjectTextFile,
   resolveProjectPath,
   resolveProjectPathForWrite
-} from '@axis/project-core';
+} from '@debrute/project-core';
 import {
   reconcileCanvasNodeElements,
   type CanvasDesiredLayoutGroup,
@@ -17,7 +17,7 @@ import {
   type CanvasLayoutSize,
   type CanvasStructureEdgeProjection,
   type Diagnostic
-} from '@axis/canvas-core';
+} from '@debrute/canvas-core';
 import {
   FlowmapError,
   activeFlowmapPath,
@@ -27,8 +27,8 @@ import {
   inferFlowmapIdFromDraftPath,
   publishFlowmap,
   type ExpandedFlowmap
-} from '@axis/flowmap-core';
-import type { ProjectFileEntry } from '@axis/project-core';
+} from '@debrute/flowmap-core';
+import type { ProjectFileEntry } from '@debrute/project-core';
 import { canvasMediaKindFromPath } from '../canvas/CanvasProjectionService.js';
 
 export interface FlowmapSessionServiceOptions {
@@ -77,9 +77,9 @@ export class FlowmapSessionService {
     options: { writeCanvasChanges: boolean }
   ): Promise<{ diagnostics: Diagnostic[]; canvases: CanvasDocument[]; structureEdgesByCanvasId: Map<string, CanvasStructureEdgeProjection[]> }> {
     const diagnostics: Diagnostic[] = [];
-    const paths = getAxisProjectPaths(projectRoot);
+    const paths = getDebruteProjectPaths(projectRoot);
     const activeFlowmaps = files.filter((file) => file.kind === 'file'
-      && file.projectRelativePath.startsWith('.axis/flowmaps/')
+      && file.projectRelativePath.startsWith('.debrute/flowmaps/')
       && file.projectRelativePath.endsWith('.yaml')
       && !file.projectRelativePath.endsWith('.draft.yaml'));
     const synchronizedCanvasById = new Map(canvases.map((canvas) => [canvas.id, canvas]));
@@ -147,7 +147,7 @@ export class FlowmapSessionService {
             source: 'flowmap',
             severity: 'error',
             code: 'flowmap_canvas_missing',
-            message: `Canvas JSON is missing: .axis/canvases/${canvasId}.json`,
+            message: `Canvas JSON is missing: .debrute/canvases/${canvasId}.json`,
             filePath: activePath
           });
           continue;

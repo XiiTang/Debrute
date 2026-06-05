@@ -1,12 +1,12 @@
 import { describe, expect, it } from 'vitest';
 import {
-  isAxisMutatingMethod,
-  normalizeAxisRuntimeInfo,
-  parseAxisWorkbenchPath,
+  isDebruteMutatingMethod,
+  normalizeDebruteRuntimeInfo,
+  parseDebruteWorkbenchPath,
   type LiveProjectsView,
   type WorkbenchApiClient,
   type WorkbenchProjectOpenResult
-} from '@axis/app-protocol';
+} from '@debrute/app-protocol';
 
 type IsExactType<Actual, Expected> =
   (<Value>() => Value extends Actual ? 1 : 2) extends
@@ -21,7 +21,7 @@ type OpenProjectReturnIsExact = AssertTrue<IsExactType<
 
 describe('app-protocol runtime metadata', () => {
   it('normalizes runtime info without active project state', () => {
-    const runtime = normalizeAxisRuntimeInfo({
+    const runtime = normalizeDebruteRuntimeInfo({
       daemonUrl: 'http://127.0.0.1:17456/',
       webBaseUrl: 'http://127.0.0.1:17573/'
     });
@@ -33,13 +33,13 @@ describe('app-protocol runtime metadata', () => {
   });
 
   it('parses only project-level Workbench routes', () => {
-    expect(parseAxisWorkbenchPath('/projects/123e4567-e89b-42d3-a456-426614174000')).toEqual({
+    expect(parseDebruteWorkbenchPath('/projects/123e4567-e89b-42d3-a456-426614174000')).toEqual({
       kind: 'project',
       projectId: '123e4567-e89b-42d3-a456-426614174000'
     });
 
-    expect(parseAxisWorkbenchPath('/projects/123e4567-e89b-42d3-a456-426614174000/files/briefs/cover%20art.png')).toEqual({ kind: 'workbench' });
-    expect(parseAxisWorkbenchPath('/settings')).toEqual({ kind: 'workbench' });
+    expect(parseDebruteWorkbenchPath('/projects/123e4567-e89b-42d3-a456-426614174000/files/briefs/cover%20art.png')).toEqual({ kind: 'workbench' });
+    expect(parseDebruteWorkbenchPath('/settings')).toEqual({ kind: 'workbench' });
   });
 
   it('models live projects as a collection instead of an active project alias', () => {
@@ -64,7 +64,7 @@ describe('app-protocol runtime metadata', () => {
             projectName: 'Alpha',
             canvasCount: 0,
             diagnosticCounts: { errors: 0, warnings: 0, infos: 0 },
-            runtimeDataLocation: 'axis-home',
+            runtimeDataLocation: 'debrute-home',
             checkedAt: '2026-06-03T00:00:00.000Z'
           }
         },
@@ -82,11 +82,11 @@ describe('app-protocol runtime metadata', () => {
   });
 
   it('classifies mutating HTTP methods', () => {
-    expect(isAxisMutatingMethod('GET')).toBe(false);
-    expect(isAxisMutatingMethod('HEAD')).toBe(false);
-    expect(isAxisMutatingMethod('POST')).toBe(true);
-    expect(isAxisMutatingMethod('PUT')).toBe(true);
-    expect(isAxisMutatingMethod('PATCH')).toBe(true);
-    expect(isAxisMutatingMethod('DELETE')).toBe(true);
+    expect(isDebruteMutatingMethod('GET')).toBe(false);
+    expect(isDebruteMutatingMethod('HEAD')).toBe(false);
+    expect(isDebruteMutatingMethod('POST')).toBe(true);
+    expect(isDebruteMutatingMethod('PUT')).toBe(true);
+    expect(isDebruteMutatingMethod('PATCH')).toBe(true);
+    expect(isDebruteMutatingMethod('DELETE')).toBe(true);
   });
 });

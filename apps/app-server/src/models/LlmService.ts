@@ -3,13 +3,13 @@ import {
   discoverProviderModels,
   type LlmProvidersConfig,
   type SecretsConfig
-} from '@axis/capability-runtime';
+} from '@debrute/capability-runtime';
 import type {
   DiscoverLlmProviderModelsInput,
   DiscoverProviderModelsOutput,
   LlmProviderSettingsView,
   SaveLlmProviderSettingInput
-} from '@axis/app-protocol';
+} from '@debrute/app-protocol';
 import type { GlobalConfigStore } from '../config/GlobalConfigStore.js';
 
 export class LlmService {

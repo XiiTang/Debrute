@@ -33,7 +33,7 @@ export function projectArtifactPointers(artifacts: ProjectArtifactPointerInput[]
   return artifacts.map(projectArtifactPointer);
 }
 
-export type AxisCapabilityResult =
+export type DebruteCapabilityResult =
   | {
       status: 'ok';
       outputs: Record<string, unknown>;
@@ -55,7 +55,7 @@ export type AxisCapabilityResult =
 export function capabilityOk(
   outputs: Record<string, unknown>,
   options: { artifacts?: ArtifactPointer[]; logs?: Array<Record<string, unknown>> } = {}
-): AxisCapabilityResult {
+): DebruteCapabilityResult {
   return {
     status: 'ok',
     outputs,
@@ -69,7 +69,7 @@ export function capabilityError(
   message: string,
   details?: Record<string, unknown>,
   options: { outputs?: Record<string, unknown>; artifacts?: ArtifactPointer[]; logs?: Array<Record<string, unknown>> } = {}
-): AxisCapabilityResult {
+): DebruteCapabilityResult {
   return {
     status: 'error',
     error: {

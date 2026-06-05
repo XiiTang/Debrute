@@ -1,11 +1,11 @@
 #!/usr/bin/env node
-import { createAxisDaemonHttpServer } from './http/createAxisDaemonHttpServer.js';
+import { createDebruteDaemonHttpServer } from './http/createDebruteDaemonHttpServer.js';
 
-const port = numberArg('--port') ?? numberEnv('AXIS_DAEMON_PORT') ?? 0;
-const token = stringArg('--token') ?? process.env.AXIS_DAEMON_TOKEN;
-const webBaseUrl = stringArg('--web-base-url') ?? process.env.AXIS_WEB_BASE_URL;
+const port = numberArg('--port') ?? numberEnv('DEBRUTE_DAEMON_PORT') ?? 0;
+const token = stringArg('--token') ?? process.env.DEBRUTE_DAEMON_TOKEN;
+const webBaseUrl = stringArg('--web-base-url') ?? process.env.DEBRUTE_WEB_BASE_URL;
 
-const daemon = createAxisDaemonHttpServer({
+const daemon = createDebruteDaemonHttpServer({
   port,
   ...(token ? { token } : {}),
   ...(webBaseUrl ? { webBaseUrl } : {})

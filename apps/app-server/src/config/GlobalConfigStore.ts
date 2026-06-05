@@ -1,9 +1,9 @@
 import { randomUUID } from 'node:crypto';
 import { mkdir, readFile, rename, writeFile } from 'node:fs/promises';
 import { dirname, join } from 'node:path';
-import { axisHomeDir } from '@axis/project-core';
-import type { ImageModelsConfig, LlmProvidersConfig, SecretsConfig, VideoModelsConfig } from '@axis/capability-runtime';
-import type { LlmProviderType } from '@axis/app-protocol';
+import { debruteHomeDir } from '@debrute/project-core';
+import type { ImageModelsConfig, LlmProvidersConfig, SecretsConfig, VideoModelsConfig } from '@debrute/capability-runtime';
+import type { LlmProviderType } from '@debrute/app-protocol';
 
 export interface GlobalConfigPaths {
   root: string;
@@ -19,11 +19,11 @@ export interface CanvasSettingsConfig {
 }
 
 export class GlobalConfigStore {
-  constructor(private readonly options: { axisHome?: string } = {}) {}
+  constructor(private readonly options: { debruteHome?: string } = {}) {}
 
   paths(): GlobalConfigPaths {
-    const axisHome = this.options.axisHome ?? axisHomeDir();
-    const root = join(axisHome, 'config');
+    const debruteHome = this.options.debruteHome ?? debruteHomeDir();
+    const root = join(debruteHome, 'config');
     return {
       root,
       llmProvidersFile: join(root, 'llm_providers.json'),
@@ -140,20 +140,20 @@ function requireStringArrayProperty(value: Record<string, unknown>, key: string,
 function normalizeImageModelsConfig(config: ImageModelsConfig): ImageModelsConfig {
   return {
     imageModels: config.imageModels.map((model) => ({
-      axisModelId: model.axisModelId.trim(),
+      debruteModelId: model.debruteModelId.trim(),
       baseUrlOverride: model.baseUrlOverride?.trim() || null,
       requestModelIdOverride: model.requestModelIdOverride?.trim() || null
-    })).filter((model) => model.axisModelId.length > 0)
+    })).filter((model) => model.debruteModelId.length > 0)
   };
 }
 
 function normalizeVideoModelsConfig(config: VideoModelsConfig): VideoModelsConfig {
   return {
     videoModels: config.videoModels.map((model) => ({
-      axisModelId: model.axisModelId.trim(),
+      debruteModelId: model.debruteModelId.trim(),
       baseUrlOverride: model.baseUrlOverride?.trim() || null,
       requestModelIdOverride: model.requestModelIdOverride?.trim() || null
-    })).filter((model) => model.axisModelId.length > 0)
+    })).filter((model) => model.debruteModelId.length > 0)
   };
 }
 

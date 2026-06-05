@@ -1,9 +1,9 @@
 import {
   createImageModelSettingsView,
   type ImageModelsConfig
-} from '@axis/capability-runtime';
-import { createImageModelCatalog } from '@axis/capability-runtime';
-import type { ImageModelSettingsView, SaveImageModelSettingInput } from '@axis/app-protocol';
+} from '@debrute/capability-runtime';
+import { createImageModelCatalog } from '@debrute/capability-runtime';
+import type { ImageModelSettingsView, SaveImageModelSettingInput } from '@debrute/app-protocol';
 import type { GlobalConfigStore } from '../config/GlobalConfigStore.js';
 import { saveMediaModelSetting } from './MediaModelService.js';
 

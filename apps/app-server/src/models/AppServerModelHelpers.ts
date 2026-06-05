@@ -1,15 +1,15 @@
-import { projectArtifactPointers } from '@axis/capability-core';
+import { projectArtifactPointers } from '@debrute/capability-core';
 import type {
   ExecuteImageModelRequestResult,
   ImageModelOfficialDescription,
   ImageModelCatalogEntry,
   ImageModelDetailEntry,
   VideoModelDetailEntry
-} from '@axis/capability-runtime';
+} from '@debrute/capability-runtime';
 import type {
   ImageModelSettingRecord,
   VideoModelSettingRecord
-} from '@axis/app-protocol';
+} from '@debrute/app-protocol';
 import type { ImageModelBatchExecutionResult } from './ImageModelBatchService.js';
 
 export interface CliModelSummary {
@@ -64,7 +64,7 @@ export interface ModelReadinessFailure {
 
 export function cliModelSummary(model: ImageModelSettingRecord | VideoModelSettingRecord): CliModelSummary {
   return {
-    id: model.axisModelId,
+    id: model.debruteModelId,
     summary: model.summary,
     apiKeySet: model.apiKeySet,
     baseUrlOverride: model.baseUrlOverride,
@@ -74,7 +74,7 @@ export function cliModelSummary(model: ImageModelSettingRecord | VideoModelSetti
 
 export function cliImageModelListEntry(entry: ImageModelCatalogEntry): CliImageModelListEntry {
   return {
-    id: entry.axisModelId,
+    id: entry.debruteModelId,
     parameters: { ...entry.listParameters }
   };
 }
@@ -105,7 +105,7 @@ export function cliVideoModelDetail(model: VideoModelSettingRecord, detail: Vide
 }
 
 export function imageModelReadinessFailure(modelId: string, models: ImageModelSettingRecord[]): ModelReadinessFailure | undefined {
-  const model = models.find((item) => item.axisModelId === modelId);
+  const model = models.find((item) => item.debruteModelId === modelId);
   if (!model) {
     return {
       code: 'model_unavailable',

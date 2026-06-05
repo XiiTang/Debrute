@@ -1,6 +1,6 @@
 import { randomUUID } from 'node:crypto';
 import { basename, extname } from 'node:path';
-import { readProjectFileBytes, writeProjectFile } from '@axis/project-core';
+import { readProjectFileBytes, writeProjectFile } from '@debrute/project-core';
 import type { ImageModelsConfig, SecretsConfig } from '../config.js';
 import {
   DEFAULT_REQUEST_TIMEOUT_MS,
@@ -117,7 +117,7 @@ export async function executeImageModelRequest(input: ExecuteImageModelRequestIn
   const logs: Array<Record<string, unknown>> = [];
   const catalog = createImageModelCatalog();
   const entry = catalog.get(input.input.model);
-  const modelSettings = input.settings.imageModels.find((model) => model.axisModelId === input.input.model);
+  const modelSettings = input.settings.imageModels.find((model) => model.debruteModelId === input.input.model);
   const apiKey = input.secrets.imageModelApiKeys[input.input.model]?.trim() ?? '';
   if (!entry) {
     return {
@@ -167,7 +167,7 @@ export async function executeImageModelRequest(input: ExecuteImageModelRequestIn
     ...(input.signal ? { signal: input.signal } : {})
   };
   log(state, 'resolve_model', {
-    model: entry.axisModelId,
+    model: entry.debruteModelId,
     requestModelId: state.requestModelId,
     configured: true
   });
@@ -199,7 +199,7 @@ export async function executeImageModelRequest(input: ExecuteImageModelRequestIn
 async function executeImageRequest(
   state: RequestState
 ): Promise<ModelImageResult> {
-  switch (state.entry.axisModelId) {
+  switch (state.entry.debruteModelId) {
     case 'gemini-3.1-flash-image-preview':
     case 'gemini-3.1-flash-image':
     case 'gemini-3-pro-image-preview':
@@ -219,7 +219,7 @@ async function executeImageRequest(
     case 'grok-imagine':
       return executeVydra(state);
     default:
-      return failure(state, 'image_model_not_supported', { model: state.entry.axisModelId });
+      return failure(state, 'image_model_not_supported', { model: state.entry.debruteModelId });
   }
 }
 
@@ -683,12 +683,12 @@ async function resolveImageInputArguments(
       continue;
     }
     const values = imageInputValuesForField(next[field], entry, field);
-    const inputs = isGptImage2Model(entry.axisModelId)
+    const inputs = isGptImage2Model(entry.debruteModelId)
       ? await resolveGptImage2ImageInputs(values, projectRoot, entry, field)
       : await resolveImageInputs(values, projectRoot, entry, field);
     next[field] = imageInputFieldAcceptsMultiple(entry, field) ? inputs : inputs[0];
   }
-  if (isGemini31ImageModel(entry.axisModelId) && next.contents !== undefined) {
+  if (isGemini31ImageModel(entry.debruteModelId) && next.contents !== undefined) {
     next.contents = await normalizeGeminiContents(next.contents, projectRoot);
   }
   assertImageInputFieldCombinations(next);
@@ -779,7 +779,7 @@ function assertImageInputFieldsAreSupported(args: Record<string, unknown>, entry
   const supportedFields = new Set(imageInputFields);
   for (const field of CATALOG_IMAGE_INPUT_FIELDS) {
     if (!supportedFields.has(field) && args[field] !== undefined) {
-      throw new Error(`Image input field "${field}" is not supported by model "${entry.axisModelId}".`);
+      throw new Error(`Image input field "${field}" is not supported by model "${entry.debruteModelId}".`);
     }
   }
 }
@@ -813,7 +813,7 @@ function imageInputValuesForField(value: unknown, entry: ImageModelCatalogEntry,
 function imageInputFieldAcceptsMultiple(entry: ImageModelCatalogEntry, field: string): boolean {
   const properties = objectAt(entry.argumentsSchema.properties);
   const schema = objectAt(properties?.[field]);
-  return schema?.axisImageInput === true && schema.type === 'array';
+  return schema?.debruteImageInput === true && schema.type === 'array';
 }
 
 async function resolveImageInputs(
@@ -1311,7 +1311,7 @@ function hasHttpOrDataImageStringPayload(image: Record<string, unknown>, key: st
 }
 
 function compactGptImage2ModelRunInPlace(state: RequestState, mimeType: string): void {
-  if (!isGptImage2Model(state.entry.axisModelId)) {
+  if (!isGptImage2Model(state.entry.debruteModelId)) {
     return;
   }
   if (state.modelRun.request !== undefined) {
@@ -1347,7 +1347,7 @@ function compactGptImage2Value(value: unknown, mimeType: string, key = ''): unkn
 }
 
 function compactGemini31ModelRunInPlace(state: RequestState): void {
-  if (!isGemini31ImageModel(state.entry.axisModelId)) {
+  if (!isGemini31ImageModel(state.entry.debruteModelId)) {
     return;
   }
   if (state.modelRun.request !== undefined) {

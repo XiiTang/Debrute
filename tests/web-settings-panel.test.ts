@@ -3,21 +3,21 @@ import { renderToStaticMarkup } from 'react-dom/server';
 import { describe, expect, it } from 'vitest';
 import { CanvasSettingsPage, SettingsPanel } from '../apps/web/src/workbench/settings/SettingsPanel';
 import {
-  AxisCliSettingsPage,
-  axisCliSkillsStatusFromActionResult,
-  axisCliStatusFromActionResult
-} from '../apps/web/src/workbench/settings/axis-cli/AxisCliSettingsPage';
-import type { AxisCliStatus } from '@axis/app-protocol';
+  DebruteCliSettingsPage,
+  debruteCliSkillsStatusFromActionResult,
+  debruteCliStatusFromActionResult
+} from '../apps/web/src/workbench/settings/debrute-cli/DebruteCliSettingsPage';
+import type { DebruteCliStatus } from '@debrute/app-protocol';
 import type { WorkbenchActions, WorkbenchState } from '../apps/web/src/types';
 
 describe('web Settings pages', () => {
-  it('uses a directory layout with Axis CLI settings', () => {
+  it('uses a directory layout with Debrute CLI settings', () => {
     const html = renderToStaticMarkup(React.createElement(SettingsPanel, {
       state: {
         llmSettings: { providers: [], availableModelKeys: [], defaultModelKey: null },
         imageModelSettings: {
           models: [{
-            axisModelId: 'gpt-image-2',
+            debruteModelId: 'gpt-image-2',
             summary: 'Image generation',
             defaultBaseUrl: 'https://api.openai.com/v1',
             defaultRequestModelId: 'gpt-image-2',
@@ -25,7 +25,7 @@ describe('web Settings pages', () => {
             requestModelIdOverride: null,
             apiKeySet: true
           }, {
-            axisModelId: 'missing-image',
+            debruteModelId: 'missing-image',
             summary: 'Missing configuration',
             defaultBaseUrl: 'https://api.openai.com/v1',
             defaultRequestModelId: 'missing-image',
@@ -50,7 +50,7 @@ describe('web Settings pages', () => {
     expect(html).toContain('Canvas rendering resources');
     expect(html).toContain('Integrations');
     expect(html).toContain('Optional local capabilities');
-    expect(html).toContain('Axis CLI');
+    expect(html).toContain('Debrute CLI');
     expect(html).toContain('Command install and Skills sync');
     expect(html).not.toContain('Updates');
     expect(html).toContain('Image Models');
@@ -75,84 +75,84 @@ describe('web Settings pages', () => {
     expect(html).not.toContain('checked=""');
   });
 
-  it('renders browser-only manual Axis CLI instructions when Desktop shell is unavailable', () => {
-    const html = renderToStaticMarkup(React.createElement(AxisCliSettingsPage, {
+  it('renders browser-only manual Debrute CLI instructions when Desktop shell is unavailable', () => {
+    const html = renderToStaticMarkup(React.createElement(DebruteCliSettingsPage, {
       shell: undefined
     }));
 
-    expect(html).toContain('Axis CLI');
+    expect(html).toContain('Debrute CLI');
     expect(html).toContain('Manual install');
-    expect(html).toContain('https://github.com/XiiTang/AXIS/releases');
-    expect(html).toContain('axis_SHA256SUMS');
+    expect(html).toContain('https://github.com/XiiTang/Debrute/releases');
+    expect(html).toContain('debrute_SHA256SUMS');
     expect(html).toContain('README');
-    expect(html).toContain('axis skills sync');
-    expect(html).not.toContain('Install Axis CLI</button>');
+    expect(html).toContain('debrute skills sync');
+    expect(html).not.toContain('Install Debrute CLI</button>');
   });
 
-  it('renders one-click Axis CLI actions from Desktop shell status', () => {
-    const html = renderToStaticMarkup(React.createElement(AxisCliSettingsPage, {
+  it('renders one-click Debrute CLI actions from Desktop shell status', () => {
+    const html = renderToStaticMarkup(React.createElement(DebruteCliSettingsPage, {
       initialStatus: {
         kind: 'update_available',
         desktopVersion: '0.2.0',
         cliVersion: '0.1.0',
-        managedPath: '/Users/me/.axis/bin/axis',
-        skills: { kind: 'partially_removed', skippedDeletedSkills: ['axis-example'] }
+        managedPath: '/Users/me/.debrute/bin/debrute',
+        skills: { kind: 'partially_removed', skippedDeletedSkills: ['debrute-example'] }
       },
       shell: {
         chooseProjectRoot: async () => undefined,
-        getAxisCliStatus: async () => ({ kind: 'not_installed', desktopVersion: '0.2.0', manualCommand: 'curl ...' }),
-        installAxisCli: async () => ({ ok: true, status: { kind: 'not_installed', desktopVersion: '0.2.0', manualCommand: 'curl ...' } }),
-        updateAxisCli: async () => ({ ok: true, status: { kind: 'not_installed', desktopVersion: '0.2.0', manualCommand: 'curl ...' } }),
-        syncAxisCliSkills: async () => ({ ok: true, status: { kind: 'in_sync', axisVersion: '0.2.0' } }),
-        restoreAxisCliSkills: async () => ({ ok: true, status: { kind: 'in_sync', axisVersion: '0.2.0' } }),
-        repairAxisCliPath: async () => ({ ok: true, status: { kind: 'not_installed', desktopVersion: '0.2.0', manualCommand: 'curl ...' } }),
-        getAxisCliManualInstallCommand: async () => ({ platform: 'macos', command: 'curl ...' })
+        getDebruteCliStatus: async () => ({ kind: 'not_installed', desktopVersion: '0.2.0', manualCommand: 'curl ...' }),
+        installDebruteCli: async () => ({ ok: true, status: { kind: 'not_installed', desktopVersion: '0.2.0', manualCommand: 'curl ...' } }),
+        updateDebruteCli: async () => ({ ok: true, status: { kind: 'not_installed', desktopVersion: '0.2.0', manualCommand: 'curl ...' } }),
+        syncDebruteCliSkills: async () => ({ ok: true, status: { kind: 'in_sync', debruteVersion: '0.2.0' } }),
+        restoreDebruteCliSkills: async () => ({ ok: true, status: { kind: 'in_sync', debruteVersion: '0.2.0' } }),
+        repairDebruteCliPath: async () => ({ ok: true, status: { kind: 'not_installed', desktopVersion: '0.2.0', manualCommand: 'curl ...' } }),
+        getDebruteCliManualInstallCommand: async () => ({ platform: 'macos', command: 'curl ...' })
       }
     }));
 
-    expect(html).toContain('Update Axis CLI');
+    expect(html).toContain('Update Debrute CLI');
     expect(html).toContain('Copy Manual Install Command');
-    expect(html).toContain('Restore All Axis Skills');
-    expect(html).toContain('axis-example');
+    expect(html).toContain('Restore All Debrute Skills');
+    expect(html).toContain('debrute-example');
   });
 
   it('uses failed one-click action status instead of hiding it behind a refresh', () => {
-    const failedStatus: AxisCliStatus = {
+    const failedStatus: DebruteCliStatus = {
       kind: 'error',
       desktopVersion: '0.2.0',
-      code: 'axis_cli_install_failed',
-      message: 'Checksum mismatch for axis-cli-0.2.0-macos-arm64.tar.gz.',
+      code: 'debrute_cli_install_failed',
+      message: 'Checksum mismatch for debrute-cli-0.2.0-macos-arm64.tar.gz.',
       manualCommand: 'curl ...'
     };
 
-    expect(axisCliStatusFromActionResult({ ok: false, status: failedStatus })).toEqual(failedStatus);
-    expect(axisCliStatusFromActionResult({ ok: true, status: { kind: 'in_sync', axisVersion: '0.2.0' } })).toBeUndefined();
-    expect(axisCliSkillsStatusFromActionResult({
+    expect(debruteCliStatusFromActionResult({ ok: false, status: failedStatus })).toEqual(failedStatus);
+    expect(debruteCliStatusFromActionResult({ ok: true, status: { kind: 'in_sync', debruteVersion: '0.2.0' } })).toBeUndefined();
+    expect(debruteCliSkillsStatusFromActionResult({
       ok: false,
-      status: { kind: 'error', code: 'skills_sync_failed', message: 'Axis Skills sync failed.' }
-    })).toEqual({ kind: 'error', code: 'skills_sync_failed', message: 'Axis Skills sync failed.' });
-    expect(axisCliSkillsStatusFromActionResult({ ok: true, status: { kind: 'not_checked' } })).toBeUndefined();
+      status: { kind: 'error', code: 'skills_sync_failed', message: 'Debrute Skills sync failed.' }
+    })).toEqual({ kind: 'error', code: 'skills_sync_failed', message: 'Debrute Skills sync failed.' });
+    expect(debruteCliSkillsStatusFromActionResult({ ok: true, status: { kind: 'not_checked' } })).toBeUndefined();
   });
 
-  it('renders Axis CLI Skills status details and errors', () => {
-    const html = renderToStaticMarkup(React.createElement(AxisCliSettingsPage, {
+  it('renders Debrute CLI Skills status details and errors', () => {
+    const html = renderToStaticMarkup(React.createElement(DebruteCliSettingsPage, {
       initialStatus: {
         kind: 'installed',
         desktopVersion: '0.2.0',
         cliVersion: '0.2.0',
-        managedPath: '/Users/me/.axis/bin/axis',
-        resolvedPath: '/Users/me/.axis/bin/axis',
+        managedPath: '/Users/me/.debrute/bin/debrute',
+        resolvedPath: '/Users/me/.debrute/bin/debrute',
         onPath: true,
-        skills: { kind: 'error', code: 'skills_sync_failed', message: 'Axis Skills sync failed.' }
+        skills: { kind: 'error', code: 'skills_sync_failed', message: 'Debrute Skills sync failed.' }
       },
       shell: {
         chooseProjectRoot: async () => undefined,
-        getAxisCliStatus: async () => ({ kind: 'not_installed', desktopVersion: '0.2.0', manualCommand: 'curl ...' })
+        getDebruteCliStatus: async () => ({ kind: 'not_installed', desktopVersion: '0.2.0', manualCommand: 'curl ...' })
       }
     }));
 
     expect(html).toContain('Error skills_sync_failed');
-    expect(html).toContain('Axis Skills sync failed.');
+    expect(html).toContain('Debrute Skills sync failed.');
   });
 
 });

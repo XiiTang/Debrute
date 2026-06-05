@@ -1,6 +1,6 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Loader2 } from 'lucide-react';
-import type { WorkbenchProjectSessionSnapshot } from '@axis/app-protocol';
+import type { WorkbenchProjectSessionSnapshot } from '@debrute/app-protocol';
 import { createWorkbenchApiClient } from './api/workbenchApiClient';
 import { CanvasEditor } from './canvas/CanvasEditor';
 import { CanvasFeedbackBar } from './canvas/CanvasFeedbackBar';
@@ -219,7 +219,7 @@ export function WorkbenchApp(): React.ReactElement {
       }
       if (event.type === 'project.fileChanged') {
         void refreshTextFileBuffer(event.event.projectRelativePath);
-        if (event.event.projectRelativePath === '.axis/reviews/canvas-feedback.json') {
+        if (event.event.projectRelativePath === '.debrute/reviews/canvas-feedback.json') {
           void loadCanvasFeedback(api, setCanvasFeedback, setNotifications);
         }
       }
@@ -641,7 +641,7 @@ export function WorkbenchApp(): React.ReactElement {
     return (
       <div className="boot-screen">
         <Loader2 className="spin" size={22} />
-        <span>Opening AXIS workbench</span>
+        <span>Opening Debrute workbench</span>
       </div>
     );
   }

@@ -1,5 +1,5 @@
-import type { AxisDaemonHttpServer, AxisDaemonRuntime } from '@axis/daemon';
-import { openProjectThroughDaemon, projectWebShellUrl, type AxisDaemonRuntimeLike } from './daemonProjectOpen.js';
+import type { DebruteDaemonHttpServer, DebruteDaemonRuntime } from '@debrute/daemon';
+import { openProjectThroughDaemon, projectWebShellUrl, type DebruteDaemonRuntimeLike } from './daemonProjectOpen.js';
 
 type DesktopRuntimeFetch = (url: string, init?: RequestInit) => Promise<Response>;
 
@@ -7,7 +7,7 @@ const releaseWindow = () => undefined;
 
 export interface DesktopRuntimeClient {
   readonly mode: 'hosted' | 'attached';
-  runtime(): AxisDaemonRuntime;
+  runtime(): DebruteDaemonRuntime;
   shellUrl(projectId?: string): string;
   openProject(projectRoot: string): Promise<{ projectId: string; url: string }>;
   resolveProjectPath(projectId: string, projectRelativePath: string, kind: 'file' | 'directory'): Promise<string>;
@@ -16,10 +16,10 @@ export interface DesktopRuntimeClient {
 }
 
 export function createAttachedDesktopRuntimeClient(
-  runtime: AxisDaemonRuntimeLike,
+  runtime: DebruteDaemonRuntimeLike,
   fetchImpl: DesktopRuntimeFetch = fetch
 ): DesktopRuntimeClient {
-  const daemonRuntime: AxisDaemonRuntime = {
+  const daemonRuntime: DebruteDaemonRuntime = {
     daemonUrl: runtime.daemonUrl,
     webBaseUrl: runtime.webBaseUrl,
     token: runtime.token
@@ -35,11 +35,11 @@ export function createAttachedDesktopRuntimeClient(
   };
 }
 
-export function createHostedDesktopRuntimeClient(daemon: AxisDaemonHttpServer): DesktopRuntimeClient {
+export function createHostedDesktopRuntimeClient(daemon: DebruteDaemonHttpServer): DesktopRuntimeClient {
   const requireRuntime = () => {
     const runtime = daemon.runtime();
     if (!runtime) {
-      throw new Error('AXIS daemon runtime is not ready.');
+      throw new Error('Debrute daemon runtime is not ready.');
     }
     return runtime;
   };
@@ -55,7 +55,7 @@ export function createHostedDesktopRuntimeClient(daemon: AxisDaemonHttpServer): 
 }
 
 async function resolveProjectPathThroughDaemon(
-  runtime: AxisDaemonRuntime,
+  runtime: DebruteDaemonRuntime,
   projectId: string,
   projectRelativePath: string,
   kind: 'file' | 'directory',
@@ -65,16 +65,16 @@ async function resolveProjectPathThroughDaemon(
     method: 'POST',
     headers: {
       'content-type': 'application/json',
-      'x-axis-daemon-token': runtime.token
+      'x-debrute-daemon-token': runtime.token
     },
     body: JSON.stringify({ projectRelativePath, kind })
   });
   if (!response.ok) {
-    throw new Error(`AXIS daemon project path resolution failed: ${response.status}`);
+    throw new Error(`Debrute daemon project path resolution failed: ${response.status}`);
   }
   const parsed = await response.json() as { absolutePath?: unknown };
   if (typeof parsed.absolutePath !== 'string') {
-    throw new Error('AXIS daemon project path response did not include absolutePath.');
+    throw new Error('Debrute daemon project path response did not include absolutePath.');
   }
   return parsed.absolutePath;
 }

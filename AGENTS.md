@@ -8,7 +8,7 @@ Do not create private design docs, implementation plans, notes, or generated Sup
 
 When using Superpowers in this project, save generated documents under:
 
-- `axis-docs-private/superpowers/specs/YYYY-MM-DD-<topic>-design.md`
-- `axis-docs-private/superpowers/plans/YYYY-MM-DD-<feature-name>.md`
+- `debrute-docs-private/superpowers/specs/YYYY-MM-DD-<topic>-design.md`
+- `debrute-docs-private/superpowers/plans/YYYY-MM-DD-<feature-name>.md`
 
-`axis-docs-private/` is a separate private Git repository.
+`debrute-docs-private/` is a separate private Git repository.

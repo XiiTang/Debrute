@@ -1,5 +1,5 @@
 import { useCallback, type Dispatch, type MutableRefObject, type SetStateAction } from 'react';
-import type { WorkbenchApiClient } from '@axis/app-protocol';
+import type { WorkbenchApiClient } from '@debrute/app-protocol';
 import type { FloatingTextEditorWindowState, TextFileBuffer } from '../../types';
 import { textBufferFromFile } from './textFileBuffers';
 import { clearTextBufferError } from './textEditorWindows';

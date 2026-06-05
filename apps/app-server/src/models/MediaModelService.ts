@@ -4,11 +4,11 @@ import type {
   SecretsConfig,
   VideoModelConfig,
   VideoModelsConfig
-} from '@axis/capability-runtime';
+} from '@debrute/capability-runtime';
 import type {
   SaveImageModelSettingInput,
   SaveVideoModelSettingInput
-} from '@axis/app-protocol';
+} from '@debrute/app-protocol';
 import type { GlobalConfigStore } from '../config/GlobalConfigStore.js';
 
 type MediaModelConfig = ImageModelConfig | VideoModelConfig;
@@ -16,7 +16,7 @@ type MediaModelsConfig = ImageModelsConfig | VideoModelsConfig;
 type MediaSaveInput = SaveImageModelSettingInput | SaveVideoModelSettingInput;
 type MediaSecretKey = 'imageModelApiKeys' | 'videoModelApiKeys';
 
-export interface MediaModelCatalogApi<Entry extends { axisModelId: string }> {
+export interface MediaModelCatalogApi<Entry extends { debruteModelId: string }> {
   get(modelId: string): Entry | undefined;
 }
 
@@ -25,7 +25,7 @@ export async function saveMediaModelSetting(input: {
   modelKind: 'image' | 'video';
   modelId: string;
   value: MediaSaveInput;
-  catalog: MediaModelCatalogApi<{ axisModelId: string }>;
+  catalog: MediaModelCatalogApi<{ debruteModelId: string }>;
   secretKey: MediaSecretKey;
   readConfig: () => Promise<MediaModelsConfig>;
   recordsFromConfig: (config: MediaModelsConfig) => MediaModelConfig[];
@@ -40,15 +40,15 @@ export async function saveMediaModelSetting(input: {
   const records = input.recordsFromConfig(config);
   const baseUrlOverride = input.value.baseUrlOverride?.trim() || null;
   const requestModelIdOverride = input.value.requestModelIdOverride?.trim() || null;
-  const nextRecords = records.filter((model) => model.axisModelId !== input.modelId);
+  const nextRecords = records.filter((model) => model.debruteModelId !== input.modelId);
   if (baseUrlOverride || requestModelIdOverride) {
     nextRecords.push({
-      axisModelId: input.modelId,
+      debruteModelId: input.modelId,
       baseUrlOverride,
       requestModelIdOverride
     });
   }
-  await input.saveConfig(input.configFromRecords(nextRecords.sort((left, right) => left.axisModelId.localeCompare(right.axisModelId))));
+  await input.saveConfig(input.configFromRecords(nextRecords.sort((left, right) => left.debruteModelId.localeCompare(right.debruteModelId))));
   await input.configStore.saveSecrets(patchMediaSecret(secrets, input.modelId, input.value, input.secretKey));
 }
 

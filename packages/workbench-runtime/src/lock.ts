@@ -33,7 +33,7 @@ export async function acquireWorkbenchRuntimeStartupLock(
     await removeDeadOwnerLock(paths.lockPath);
     await sleep(pollMs);
   }
-  throw registryError('runtime_lock_timeout', 'AXIS workbench runtime startup lock timed out.');
+  throw registryError('runtime_lock_timeout', 'Debrute workbench runtime startup lock timed out.');
 }
 
 export async function withWorkbenchRuntimeStartupLock<T>(

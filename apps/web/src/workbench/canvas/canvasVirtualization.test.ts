@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import type { CanvasProjection } from '@axis/canvas-core';
+import type { CanvasProjection } from '@debrute/canvas-core';
 import {
   CANVAS_VIRTUAL_REFRESH_MARGIN_SCREEN_PX,
   CANVAS_VIRTUAL_OVERSCAN_SCREEN_PX,

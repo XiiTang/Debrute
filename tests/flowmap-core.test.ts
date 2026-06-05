@@ -5,19 +5,19 @@ import {
   inferFlowmapIdFromDraftPath,
   parseFlowmapDraft,
   publishFlowmap
-} from '@axis/flowmap-core';
+} from '@debrute/flowmap-core';
 
 describe('flowmap core', () => {
   it('infers flowmap ids from canonical draft paths', () => {
-    expect(inferFlowmapIdFromDraftPath('.axis/flowmaps/image-production.draft.yaml')).toBe('image-production');
-    expect(() => inferFlowmapIdFromDraftPath('.axis/canvases/image-production.draft.yaml'))
-      .toThrow('Flowmap draft path must be ".axis/flowmaps/<flowmap-id>.draft.yaml".');
-    expect(() => inferFlowmapIdFromDraftPath('.axis/flowmaps/../bad.draft.yaml')).toThrow('Flowmap path must be a safe relative project path.');
+    expect(inferFlowmapIdFromDraftPath('.debrute/flowmaps/image-production.draft.yaml')).toBe('image-production');
+    expect(() => inferFlowmapIdFromDraftPath('.debrute/canvases/image-production.draft.yaml'))
+      .toThrow('Flowmap draft path must be ".debrute/flowmaps/<flowmap-id>.draft.yaml".');
+    expect(() => inferFlowmapIdFromDraftPath('.debrute/flowmaps/../bad.draft.yaml')).toThrow('Flowmap path must be a safe relative project path.');
   });
 
   it('publishes canonical include-only Flowmap YAML with managed metadata', () => {
     const published = publishFlowmap({
-      sourceDraftPath: '.axis/flowmaps/image-production.draft.yaml',
+      sourceDraftPath: '.debrute/flowmaps/image-production.draft.yaml',
       now: () => '2026-05-25T10:30:00.000Z',
       content: [
         'schemaVersion: 1',
@@ -31,21 +31,21 @@ describe('flowmap core', () => {
     });
 
     expect(published.flowmapId).toBe('image-production');
-    expect(published.activePath).toBe('.axis/flowmaps/image-production.yaml');
-    expect(published.sourceDraftPath).toBe('.axis/flowmaps/image-production.draft.yaml');
+    expect(published.activePath).toBe('.debrute/flowmaps/image-production.yaml');
+    expect(published.sourceDraftPath).toBe('.debrute/flowmaps/image-production.draft.yaml');
     expect(published.rootProjectRelativePath).toBe('image-production');
     expect(published.canvasIds).toEqual(['main']);
     expect(published.yaml).toContain('managed: true');
-    expect(published.yaml).toContain('sourceDraft: .axis/flowmaps/image-production.draft.yaml');
+    expect(published.yaml).toContain('sourceDraft: .debrute/flowmaps/image-production.draft.yaml');
     expect(published.yaml).toContain('contentHash: sha256:');
     expect(published.yaml).toContain('include:');
     expect(published.yaml).not.toContain('flowmapId:');
-    expect(assertPublishedFlowmap(published.yaml, '.axis/flowmaps/image-production.yaml').ok).toBe(true);
+    expect(assertPublishedFlowmap(published.yaml, '.debrute/flowmaps/image-production.yaml').ok).toBe(true);
   });
 
   it('publishes canonical Flowmap YAML with horizontal layout groups', () => {
     const published = publishFlowmap({
-      sourceDraftPath: '.axis/flowmaps/image-production.draft.yaml',
+      sourceDraftPath: '.debrute/flowmaps/image-production.draft.yaml',
       now: () => '2026-05-26T10:30:00.000Z',
       content: [
         'schemaVersion: 1',
@@ -71,12 +71,12 @@ describe('flowmap core', () => {
     expect(published.yaml).toContain('layout:');
     expect(published.yaml).toContain('groups:');
     expect(published.yaml).toContain('directory: outputs/gpt-image-2/2000x2000/high');
-    expect(assertPublishedFlowmap(published.yaml, '.axis/flowmaps/image-production.yaml').ok).toBe(true);
+    expect(assertPublishedFlowmap(published.yaml, '.debrute/flowmaps/image-production.yaml').ok).toBe(true);
   });
 
   it('rejects published Flowmap YAML when the active filename no longer matches the source draft', () => {
     const published = publishFlowmap({
-      sourceDraftPath: '.axis/flowmaps/image-production.draft.yaml',
+      sourceDraftPath: '.debrute/flowmaps/image-production.draft.yaml',
       now: () => '2026-05-25T10:30:00.000Z',
       content: [
         'schemaVersion: 1',
@@ -86,8 +86,8 @@ describe('flowmap core', () => {
       ].join('\n')
     });
 
-    expect(assertPublishedFlowmap(published.yaml, '.axis/flowmaps/image-production.yaml').ok).toBe(true);
-    expect(assertPublishedFlowmap(published.yaml, '.axis/flowmaps/renamed.yaml')).toMatchObject({
+    expect(assertPublishedFlowmap(published.yaml, '.debrute/flowmaps/image-production.yaml').ok).toBe(true);
+    expect(assertPublishedFlowmap(published.yaml, '.debrute/flowmaps/renamed.yaml')).toMatchObject({
       ok: false,
       error: {
         code: 'flowmap_source_mismatch'
@@ -97,7 +97,7 @@ describe('flowmap core', () => {
 
   it('requires include but accepts empty canvases and empty include', () => {
     const draft = parseFlowmapDraft({
-      sourceDraftPath: '.axis/flowmaps/empty.draft.yaml',
+      sourceDraftPath: '.debrute/flowmaps/empty.draft.yaml',
       content: [
         'schemaVersion: 1',
         'canvases: []',
@@ -112,7 +112,7 @@ describe('flowmap core', () => {
 
   it('rejects unsupported fields and invalid canvas ids', () => {
     expect(() => parseFlowmapDraft({
-      sourceDraftPath: '.axis/flowmaps/broken.draft.yaml',
+      sourceDraftPath: '.debrute/flowmaps/broken.draft.yaml',
       content: [
         'schemaVersion: 1',
         'canvases:',
@@ -123,7 +123,7 @@ describe('flowmap core', () => {
     })).toThrow('Flowmap canvas id must be a valid id.');
 
     expect(() => parseFlowmapDraft({
-      sourceDraftPath: '.axis/flowmaps/broken.draft.yaml',
+      sourceDraftPath: '.debrute/flowmaps/broken.draft.yaml',
       content: [
         'schemaVersion: 1',
         'canvases: []',
@@ -136,7 +136,7 @@ describe('flowmap core', () => {
 
   it('rejects invalid Flowmap layout group YAML', () => {
     expect(() => parseFlowmapDraft({
-      sourceDraftPath: '.axis/flowmaps/broken.draft.yaml',
+      sourceDraftPath: '.debrute/flowmaps/broken.draft.yaml',
       content: [
         'schemaVersion: 1',
         'include: []',
@@ -147,7 +147,7 @@ describe('flowmap core', () => {
     })).toThrow('Unsupported Flowmap layout field "direction".');
 
     expect(() => parseFlowmapDraft({
-      sourceDraftPath: '.axis/flowmaps/broken.draft.yaml',
+      sourceDraftPath: '.debrute/flowmaps/broken.draft.yaml',
       content: [
         'schemaVersion: 1',
         'include: []',
@@ -161,7 +161,7 @@ describe('flowmap core', () => {
     })).toThrow('Flowmap layout group directory must be a safe relative path.');
 
     expect(() => parseFlowmapDraft({
-      sourceDraftPath: '.axis/flowmaps/broken.draft.yaml',
+      sourceDraftPath: '.debrute/flowmaps/broken.draft.yaml',
       content: [
         'schemaVersion: 1',
         'include: []',
@@ -177,7 +177,7 @@ describe('flowmap core', () => {
 
   it('expands include-only file matches into ancestor directory nodes and undirected structure edges', () => {
     const map = parseFlowmapDraft({
-      sourceDraftPath: '.axis/flowmaps/image-production.draft.yaml',
+      sourceDraftPath: '.debrute/flowmaps/image-production.draft.yaml',
       content: [
         'schemaVersion: 1',
         'canvases:',
@@ -216,7 +216,7 @@ describe('flowmap core', () => {
 
   it('sorts file-tree siblings with directories before files', () => {
     const map = parseFlowmapDraft({
-      sourceDraftPath: '.axis/flowmaps/tree.draft.yaml',
+      sourceDraftPath: '.debrute/flowmaps/tree.draft.yaml',
       content: [
         'schemaVersion: 1',
         'include:',
@@ -245,7 +245,7 @@ describe('flowmap core', () => {
 
   it('treats exact include entries as literal file paths before glob matching', () => {
     const map = parseFlowmapDraft({
-      sourceDraftPath: '.axis/flowmaps/literal.draft.yaml',
+      sourceDraftPath: '.debrute/flowmaps/literal.draft.yaml',
       content: [
         'schemaVersion: 1',
         'include:',
@@ -268,7 +268,7 @@ describe('flowmap core', () => {
 
   it('treats brackets in include paths as literal while still allowing glob matching', () => {
     const map = parseFlowmapDraft({
-      sourceDraftPath: '.axis/flowmaps/literal-glob.draft.yaml',
+      sourceDraftPath: '.debrute/flowmaps/literal-glob.draft.yaml',
       content: [
         'schemaVersion: 1',
         'include:',
@@ -292,7 +292,7 @@ describe('flowmap core', () => {
 
   it('expands horizontal layout groups for materialized direct child files only', () => {
     const map = parseFlowmapDraft({
-      sourceDraftPath: '.axis/flowmaps/image-production.draft.yaml',
+      sourceDraftPath: '.debrute/flowmaps/image-production.draft.yaml',
       content: [
         'schemaVersion: 1',
         'include:',
@@ -327,7 +327,7 @@ describe('flowmap core', () => {
 
   it('allows missing or empty horizontal layout groups without changing membership', () => {
     const map = parseFlowmapDraft({
-      sourceDraftPath: '.axis/flowmaps/image-production.draft.yaml',
+      sourceDraftPath: '.debrute/flowmaps/image-production.draft.yaml',
       content: [
         'schemaVersion: 1',
         'include:',
@@ -357,7 +357,7 @@ describe('flowmap core', () => {
 
   it('reports duplicate materialized horizontal layout group matches', () => {
     const map = parseFlowmapDraft({
-      sourceDraftPath: '.axis/flowmaps/image-production.draft.yaml',
+      sourceDraftPath: '.debrute/flowmaps/image-production.draft.yaml',
       content: [
         'schemaVersion: 1',
         'include:',

@@ -3,9 +3,9 @@ import {
   readJsonFile,
   readTextFile,
   type NormalizedFileWatchEvent
-} from '@axis/project-core';
-import type { CanvasDocument, Diagnostic } from '@axis/canvas-core';
-import type { ProjectSessionSnapshot } from '@axis/app-protocol';
+} from '@debrute/project-core';
+import type { CanvasDocument, Diagnostic } from '@debrute/canvas-core';
+import type { ProjectSessionSnapshot } from '@debrute/app-protocol';
 
 export interface InternalProjectFileWrite {
   content?: string;

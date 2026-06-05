@@ -42,7 +42,7 @@ describe('canvas node dimensions', () => {
   });
 
   it('reads intrinsic image dimensions with sharp', async () => {
-    const projectRoot = await mkdtemp(join(tmpdir(), 'axis-canvas-image-dimensions-'));
+    const projectRoot = await mkdtemp(join(tmpdir(), 'debrute-canvas-image-dimensions-'));
     try {
       await mkdir(join(projectRoot, 'generated'), { recursive: true });
       await sharp({

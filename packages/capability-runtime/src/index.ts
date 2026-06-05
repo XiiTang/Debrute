@@ -1,6 +1,6 @@
 export * from './config.js';
 export * from './skillsRegistry.js';
-export * from './axisSkillsSync.js';
+export * from './debruteSkillsSync.js';
 export * from './providers.js';
 export * from './providers/discovery.js';
 export * from './llmRequest/runtimeRequest.js';

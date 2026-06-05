@@ -1,8 +1,8 @@
 import React from 'react';
 import { renderToStaticMarkup } from 'react-dom/server';
 import { describe, expect, it } from 'vitest';
-import { createCanvasDocument, type CanvasFeedbackDocument, type CanvasProjection } from '@axis/canvas-core';
-import type { IntegrationSettingsView } from '@axis/app-protocol';
+import { createCanvasDocument, type CanvasFeedbackDocument, type CanvasProjection } from '@debrute/canvas-core';
+import type { IntegrationSettingsView } from '@debrute/app-protocol';
 import type { WorkbenchActions, WorkbenchState } from '../../types';
 import { CanvasEditor } from './CanvasEditor';
 import { createCanvasImageResourceController } from './CanvasImageResourceController';
@@ -310,8 +310,8 @@ describe('CanvasSurface', () => {
     );
 
     expect(html).toContain('data-testid="canvas-settings-loading"');
-    expect(html).not.toContain('axis-canvas-preview://');
-    expect(html).not.toContain('axis-project-file://');
+    expect(html).not.toContain('debrute-canvas-preview://');
+    expect(html).not.toContain('debrute-project-file://');
   });
 
   it('keeps image node shell props equal for unused action object changes but not event handler changes', () => {

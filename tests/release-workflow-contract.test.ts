@@ -3,7 +3,7 @@ import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
 
 describe('GitHub release workflow contract', () => {
-  const workflow = readFileSync(join(process.cwd(), '.github/workflows/axis-cli-release.yml'), 'utf8');
+  const workflow = readFileSync(join(process.cwd(), '.github/workflows/debrute-release.yml'), 'utf8');
   const readme = readFileSync(join(process.cwd(), 'README.md'), 'utf8');
 
   it('uses a full release workflow with preflight, CLI, Desktop, and final publish jobs', () => {
@@ -15,7 +15,7 @@ describe('GitHub release workflow contract', () => {
     expect(workflow).toContain('build-desktop:');
     expect(workflow).toContain('publish-release:');
     expect(workflow).toContain('CSC_IDENTITY_AUTO_DISCOVERY: false');
-    expect(workflow).toContain('axis_SHA256SUMS');
+    expect(workflow).toContain('debrute_SHA256SUMS');
     expect(workflow).toContain('release-notes.md');
     expect(workflow).toContain('body_path: release-notes.md');
     expect(workflow).toContain('softprops/action-gh-release@v2');
@@ -29,20 +29,20 @@ describe('GitHub release workflow contract', () => {
   it('builds Desktop release assets from the workspace root in fresh matrix jobs', () => {
     const buildDesktopBlock = workflow.slice(workflow.indexOf('build-desktop:'), workflow.indexOf('publish-release:'));
     expect(buildDesktopBlock).toContain('- run: pnpm build');
-    expect(buildDesktopBlock).not.toContain('- run: pnpm --filter @axis/desktop build');
+    expect(buildDesktopBlock).not.toContain('- run: pnpm --filter @debrute/desktop build');
   });
 
-  it('documents unsigned Desktop releases, Axis CLI install, and Skills sync', () => {
+  it('documents unsigned Desktop releases, Debrute CLI install, and Skills sync', () => {
     expect(readme).toContain('GitHub Releases');
     expect(readme).toContain('unsigned');
-    expect(readme).toContain('Axis CLI');
-    expect(readme).toContain('axis skills status');
-    expect(readme).toContain('axis skills sync');
-    expect(readme).toContain('axis skills sync --force');
-    expect(readme).toContain('axis-desktop-X.Y.Z-macos-arm64.dmg');
-    expect(readme).toContain('axis-cli-X.Y.Z-macos-arm64.tar.gz');
-    expect(readme).toContain('axis_SHA256SUMS');
-    expect(readme).toContain('grep "  axis-cli-X.Y.Z-macos-arm64.tar.gz$" axis_SHA256SUMS | shasum -a 256 -c -');
-    expect(readme).toContain('sha256sum -c --ignore-missing axis_SHA256SUMS');
+    expect(readme).toContain('Debrute CLI');
+    expect(readme).toContain('debrute skills status');
+    expect(readme).toContain('debrute skills sync');
+    expect(readme).toContain('debrute skills sync --force');
+    expect(readme).toContain('debrute-desktop-X.Y.Z-macos-arm64.dmg');
+    expect(readme).toContain('debrute-cli-X.Y.Z-macos-arm64.tar.gz');
+    expect(readme).toContain('debrute_SHA256SUMS');
+    expect(readme).toContain('grep "  debrute-cli-X.Y.Z-macos-arm64.tar.gz$" debrute_SHA256SUMS | shasum -a 256 -c -');
+    expect(readme).toContain('sha256sum -c --ignore-missing debrute_SHA256SUMS');
   });
 });

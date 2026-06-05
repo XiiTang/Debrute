@@ -11,6 +11,6 @@
     { "path": "apps/app-server" },
     { "path": "apps/daemon" },
     { "path": "apps/web" },
-    { "path": "apps/axis-cli" }
+    { "path": "apps/debrute-cli" }
   ]
 }

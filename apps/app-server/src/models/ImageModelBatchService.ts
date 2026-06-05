@@ -7,7 +7,7 @@ import type {
   ImageModelBatchSource,
   ImageModelBatchSummary,
   RunImageModelBatchInput
-} from '@axis/app-protocol';
+} from '@debrute/app-protocol';
 
 interface ImageModelBatchPayload {
   model?: unknown;

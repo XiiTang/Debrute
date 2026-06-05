@@ -1,14 +1,14 @@
 {
-  "name": "@axis/desktop",
-  "version": "0.1.0",
+  "name": "@debrute/desktop",
+  "version": "0.0.1",
   "license": "Apache-2.0",
   "private": true,
   "type": "commonjs",
-  "description": "Optional AXIS Electron shell.",
-  "author": "AXIS",
+  "description": "Optional Debrute Electron shell.",
+  "author": "Debrute",
   "main": "dist-electron/main.js",
   "scripts": {
-    "build": "pnpm --filter @axis/web build && tsc -p tsconfig.electron.json --noEmit && node scripts/bundle-electron.mjs",
+    "build": "pnpm --filter @debrute/web build && tsc -p tsconfig.electron.json --noEmit && node scripts/bundle-electron.mjs",
     "build:electron": "node scripts/bundle-electron.mjs",
     "build:electron:dev": "node scripts/bundle-electron.mjs --skip-web-dist",
     "pack": "pnpm build && electron-builder --dir",
@@ -16,8 +16,8 @@
     "dev:electron": "tsx ../../scripts/dev-electron-workbench.ts"
   },
   "build": {
-    "appId": "dev.axis.desktop",
-    "productName": "AXIS",
+    "appId": "dev.debrute.desktop",
+    "productName": "Debrute",
     "electronVersion": "39.2.7",
     "asar": true,
     "directories": {
@@ -48,11 +48,11 @@
     }
   },
   "dependencies": {
-    "@axis/app-protocol": "workspace:*",
-    "@axis/app-server": "workspace:*",
-    "@axis/daemon": "workspace:*",
-    "@axis/project-core": "workspace:*",
-    "@axis/workbench-runtime": "workspace:*"
+    "@debrute/app-protocol": "workspace:*",
+    "@debrute/app-server": "workspace:*",
+    "@debrute/daemon": "workspace:*",
+    "@debrute/project-core": "workspace:*",
+    "@debrute/workbench-runtime": "workspace:*"
   },
   "devDependencies": {
     "electron": "39.2.7",

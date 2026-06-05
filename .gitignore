@@ -56,7 +56,7 @@ Thumbs.db
 .vscode/
 
 # Local runtime data
-.axis-runtime/
+.debrute-runtime/
 
 # Private documentation repository
-/axis-docs-private/
+/debrute-docs-private/

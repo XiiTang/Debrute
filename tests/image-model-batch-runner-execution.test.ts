@@ -9,7 +9,7 @@ import {
 
 describe('image model batch runner execution', () => {
   test('runs a fixed global concurrency queue and writes result JSONL plus summary', async () => {
-    const tempDir = await mkdtemp(join(tmpdir(), 'axis-batch-runner-'));
+    const tempDir = await mkdtemp(join(tmpdir(), 'debrute-batch-runner-'));
     const logPath = join(tempDir, 'results.jsonl');
     const summaryPath = join(tempDir, 'summary.json');
     let active = 0;
@@ -62,7 +62,7 @@ describe('image model batch runner execution', () => {
   });
 
   test('skips existing outputs before executing image requests', async () => {
-    const tempDir = await mkdtemp(join(tmpdir(), 'axis-batch-skip-'));
+    const tempDir = await mkdtemp(join(tmpdir(), 'debrute-batch-skip-'));
     const logPath = join(tempDir, 'results.jsonl');
     let executions = 0;
     const dependencies: ImageModelBatchRunnerDependencies = {
@@ -100,7 +100,7 @@ describe('image model batch runner execution', () => {
   });
 
   test('retries item-local failures and preserves structured final errors', async () => {
-    const tempDir = await mkdtemp(join(tmpdir(), 'axis-batch-retry-'));
+    const tempDir = await mkdtemp(join(tmpdir(), 'debrute-batch-retry-'));
     const logPath = join(tempDir, 'results.jsonl');
     let attempts = 0;
     const dependencies: ImageModelBatchRunnerDependencies = {
@@ -147,7 +147,7 @@ describe('image model batch runner execution', () => {
   });
 
   test('propagates unexpected executor throws without rewriting them as failed item results', async () => {
-    const tempDir = await mkdtemp(join(tmpdir(), 'axis-batch-throw-'));
+    const tempDir = await mkdtemp(join(tmpdir(), 'debrute-batch-throw-'));
     const logPath = join(tempDir, 'results.jsonl');
     const executorError = Object.assign(new Error('project reference is missing'), {
       code: 'project_reference_missing'

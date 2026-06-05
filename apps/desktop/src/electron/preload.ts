@@ -1,42 +1,42 @@
 import electron from 'electron';
 import type {
-  AxisCliInstallResult,
-  AxisCliManualCommand,
-  AxisCliPathRepairResult,
-  AxisCliSkillsSyncResult,
-  AxisCliStatus
-} from '@axis/app-protocol';
+  DebruteCliInstallResult,
+  DebruteCliManualCommand,
+  DebruteCliPathRepairResult,
+  DebruteCliSkillsSyncResult,
+  DebruteCliStatus
+} from '@debrute/app-protocol';
 
 const { contextBridge, ipcRenderer } = electron;
 
-interface AxisShellApi {
+interface DebruteShellApi {
   chooseProjectRoot(): Promise<string | undefined>;
   bindProjectWindowToProject(input: { projectId: string }): Promise<{ ok: true }>;
   revealProjectPathInSystemFileManager(input: { projectId: string; projectRelativePath: string; kind: 'file' | 'directory' }): Promise<{ ok: true }>;
-  getAxisCliStatus(): Promise<AxisCliStatus>;
-  installAxisCli(): Promise<AxisCliInstallResult>;
-  updateAxisCli(): Promise<AxisCliInstallResult>;
-  syncAxisCliSkills(): Promise<AxisCliSkillsSyncResult>;
-  restoreAxisCliSkills(): Promise<AxisCliSkillsSyncResult>;
-  repairAxisCliPath(): Promise<AxisCliPathRepairResult>;
-  getAxisCliManualInstallCommand(): Promise<AxisCliManualCommand>;
+  getDebruteCliStatus(): Promise<DebruteCliStatus>;
+  installDebruteCli(): Promise<DebruteCliInstallResult>;
+  updateDebruteCli(): Promise<DebruteCliInstallResult>;
+  syncDebruteCliSkills(): Promise<DebruteCliSkillsSyncResult>;
+  restoreDebruteCliSkills(): Promise<DebruteCliSkillsSyncResult>;
+  repairDebruteCliPath(): Promise<DebruteCliPathRepairResult>;
+  getDebruteCliManualInstallCommand(): Promise<DebruteCliManualCommand>;
 }
 
-const axisShellApi: AxisShellApi = {
-  chooseProjectRoot: () => ipcRenderer.invoke('axis-shell:chooseProjectRoot') as Promise<string | undefined>,
+const debruteShellApi: DebruteShellApi = {
+  chooseProjectRoot: () => ipcRenderer.invoke('debrute-shell:chooseProjectRoot') as Promise<string | undefined>,
   bindProjectWindowToProject: (input) => (
-    ipcRenderer.invoke('axis-shell:bindProjectWindowToProject', input) as Promise<{ ok: true }>
+    ipcRenderer.invoke('debrute-shell:bindProjectWindowToProject', input) as Promise<{ ok: true }>
   ),
   revealProjectPathInSystemFileManager: (input) => (
-    ipcRenderer.invoke('axis-shell:revealProjectPathInSystemFileManager', input) as Promise<{ ok: true }>
+    ipcRenderer.invoke('debrute-shell:revealProjectPathInSystemFileManager', input) as Promise<{ ok: true }>
   ),
-  getAxisCliStatus: () => ipcRenderer.invoke('axis-shell:getAxisCliStatus') as Promise<AxisCliStatus>,
-  installAxisCli: () => ipcRenderer.invoke('axis-shell:installAxisCli') as Promise<AxisCliInstallResult>,
-  updateAxisCli: () => ipcRenderer.invoke('axis-shell:updateAxisCli') as Promise<AxisCliInstallResult>,
-  syncAxisCliSkills: () => ipcRenderer.invoke('axis-shell:syncAxisCliSkills') as Promise<AxisCliSkillsSyncResult>,
-  restoreAxisCliSkills: () => ipcRenderer.invoke('axis-shell:restoreAxisCliSkills') as Promise<AxisCliSkillsSyncResult>,
-  repairAxisCliPath: () => ipcRenderer.invoke('axis-shell:repairAxisCliPath') as Promise<AxisCliPathRepairResult>,
-  getAxisCliManualInstallCommand: () => ipcRenderer.invoke('axis-shell:getAxisCliManualInstallCommand') as Promise<AxisCliManualCommand>
+  getDebruteCliStatus: () => ipcRenderer.invoke('debrute-shell:getDebruteCliStatus') as Promise<DebruteCliStatus>,
+  installDebruteCli: () => ipcRenderer.invoke('debrute-shell:installDebruteCli') as Promise<DebruteCliInstallResult>,
+  updateDebruteCli: () => ipcRenderer.invoke('debrute-shell:updateDebruteCli') as Promise<DebruteCliInstallResult>,
+  syncDebruteCliSkills: () => ipcRenderer.invoke('debrute-shell:syncDebruteCliSkills') as Promise<DebruteCliSkillsSyncResult>,
+  restoreDebruteCliSkills: () => ipcRenderer.invoke('debrute-shell:restoreDebruteCliSkills') as Promise<DebruteCliSkillsSyncResult>,
+  repairDebruteCliPath: () => ipcRenderer.invoke('debrute-shell:repairDebruteCliPath') as Promise<DebruteCliPathRepairResult>,
+  getDebruteCliManualInstallCommand: () => ipcRenderer.invoke('debrute-shell:getDebruteCliManualInstallCommand') as Promise<DebruteCliManualCommand>
 };
 
-contextBridge.exposeInMainWorld('axisShell', axisShellApi);
+contextBridge.exposeInMainWorld('debruteShell', debruteShellApi);

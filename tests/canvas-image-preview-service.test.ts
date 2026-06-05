@@ -4,7 +4,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import sharp from 'sharp';
 import { describe, expect, it } from 'vitest';
-import { CANVAS_IMAGE_PREVIEW_WIDTH_BUCKETS } from '@axis/canvas-core';
+import { CANVAS_IMAGE_PREVIEW_WIDTH_BUCKETS } from '@debrute/canvas-core';
 import {
   canvasImageSourceRevision,
   createCanvasImagePreviewConcurrencyLimiter,
@@ -13,7 +13,7 @@ import {
 
 describe('canvas image preview service', () => {
   it('generates fixed-width local previews and reuses the cache file', async () => {
-    const projectRoot = await mkdtemp(join(tmpdir(), 'axis-canvas-preview-service-'));
+    const projectRoot = await mkdtemp(join(tmpdir(), 'debrute-canvas-preview-service-'));
     try {
       await mkdir(join(projectRoot, 'images'), { recursive: true });
       await writeFile(join(projectRoot, 'images/cover.png'), await previewablePngBuffer());
@@ -37,7 +37,7 @@ describe('canvas image preview service', () => {
 
       expect(CANVAS_IMAGE_PREVIEW_WIDTH_BUCKETS).toEqual([256, 512, 1024, 2048]);
       expect(Object.keys(first).sort()).toEqual(['absolutePath']);
-      expect(first.absolutePath).toContain('/.axis/cache/canvas-image-previews/');
+      expect(first.absolutePath).toContain('/.debrute/cache/canvas-image-previews/');
       expect(firstMetadata.width).toBe(256);
       expect(firstMetadata.height).toBe(128);
       expect(second.absolutePath).toBe(first.absolutePath);
@@ -48,7 +48,7 @@ describe('canvas image preview service', () => {
   });
 
   it('shares duplicate in-flight requests for the same preview key', async () => {
-    const projectRoot = await mkdtemp(join(tmpdir(), 'axis-canvas-preview-service-dedupe-'));
+    const projectRoot = await mkdtemp(join(tmpdir(), 'debrute-canvas-preview-service-dedupe-'));
     try {
       await mkdir(join(projectRoot, 'images'), { recursive: true });
       await writeFile(join(projectRoot, 'images/cover.png'), await previewablePngBuffer());
@@ -68,7 +68,7 @@ describe('canvas image preview service', () => {
   });
 
   it('does not let an aborted duplicate consumer cancel a later same-key request', async () => {
-    const projectRoot = await mkdtemp(join(tmpdir(), 'axis-canvas-preview-service-dedupe-abort-'));
+    const projectRoot = await mkdtemp(join(tmpdir(), 'debrute-canvas-preview-service-dedupe-abort-'));
     try {
       await mkdir(join(projectRoot, 'images'), { recursive: true });
       await writeFile(join(projectRoot, 'images/cover.png'), await previewablePngBuffer());
@@ -93,7 +93,7 @@ describe('canvas image preview service', () => {
 
       await expect(aborted).rejects.toThrow('Canvas image preview request was aborted.');
       await expect(active).resolves.toMatchObject({
-        absolutePath: expect.stringContaining('/.axis/cache/canvas-image-previews/')
+        absolutePath: expect.stringContaining('/.debrute/cache/canvas-image-previews/')
       });
     } finally {
       await rm(projectRoot, { recursive: true, force: true });
@@ -101,7 +101,7 @@ describe('canvas image preview service', () => {
   });
 
   it('reuses an existing cache file without re-reading source image metadata', async () => {
-    const projectRoot = await mkdtemp(join(tmpdir(), 'axis-canvas-preview-service-cache-first-'));
+    const projectRoot = await mkdtemp(join(tmpdir(), 'debrute-canvas-preview-service-cache-first-'));
     try {
       await mkdir(join(projectRoot, 'images'), { recursive: true });
       const sourcePath = join(projectRoot, 'images/cover.png');
@@ -172,7 +172,7 @@ describe('canvas image preview service', () => {
   });
 
   it('rejects source images that are too small to benefit from Canvas previews', async () => {
-    const projectRoot = await mkdtemp(join(tmpdir(), 'axis-canvas-preview-service-small-source-'));
+    const projectRoot = await mkdtemp(join(tmpdir(), 'debrute-canvas-preview-service-small-source-'));
     try {
       await mkdir(join(projectRoot, 'images'), { recursive: true });
       await writeFile(join(projectRoot, 'images/small.png'), await sharp({
@@ -198,7 +198,7 @@ describe('canvas image preview service', () => {
   });
 
   it('uses a different cache key when the source revision changes', async () => {
-    const projectRoot = await mkdtemp(join(tmpdir(), 'axis-canvas-preview-service-revision-'));
+    const projectRoot = await mkdtemp(join(tmpdir(), 'debrute-canvas-preview-service-revision-'));
     try {
       await mkdir(join(projectRoot, 'images'), { recursive: true });
       await writeFile(join(projectRoot, 'images/cover.png'), await previewablePngBuffer());
@@ -228,7 +228,7 @@ describe('canvas image preview service', () => {
   });
 
   it('does not write a successful cache file when generation fails', async () => {
-    const projectRoot = await mkdtemp(join(tmpdir(), 'axis-canvas-preview-service-failure-'));
+    const projectRoot = await mkdtemp(join(tmpdir(), 'debrute-canvas-preview-service-failure-'));
     try {
       await mkdir(join(projectRoot, 'images'), { recursive: true });
       await writeFile(join(projectRoot, 'images/broken.png'), 'not a png', 'utf8');
@@ -241,14 +241,14 @@ describe('canvas image preview service', () => {
         revision,
         width: 256
       })).rejects.toThrow();
-      await expect(readdir(join(projectRoot, '.axis/cache/canvas-image-previews'))).rejects.toThrow();
+      await expect(readdir(join(projectRoot, '.debrute/cache/canvas-image-previews'))).rejects.toThrow();
     } finally {
       await rm(projectRoot, { recursive: true, force: true });
     }
   });
 
   it('rejects stale revisions, unsupported widths, unsafe paths, and non-previewable images', async () => {
-    const projectRoot = await mkdtemp(join(tmpdir(), 'axis-canvas-preview-service-reject-'));
+    const projectRoot = await mkdtemp(join(tmpdir(), 'debrute-canvas-preview-service-reject-'));
     try {
       await mkdir(join(projectRoot, 'images'), { recursive: true });
       await writeFile(join(projectRoot, 'images/cover.png'), await previewablePngBuffer());

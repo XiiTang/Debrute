@@ -17,15 +17,15 @@ export default defineConfig({
       { find: /^react-dom$/, replacement: resolve(workspaceRoot, 'node_modules/react-dom/index.js') },
       { find: /^react-dom\/server$/, replacement: resolve(workspaceRoot, 'node_modules/react-dom/server.node.js') },
       { find: /^sharp$/, replacement: resolve(workspaceRoot, 'node_modules/sharp/lib/index.js') },
-      { find: '@axis/app-protocol', replacement: resolve(workspaceRoot, 'packages/app-protocol/src/index.ts') },
-      { find: '@axis/capability-core', replacement: resolve(workspaceRoot, 'packages/capability-core/src/index.ts') },
-      { find: '@axis/capability-runtime', replacement: resolve(workspaceRoot, 'packages/capability-runtime/src/index.ts') },
-      { find: '@axis/project-core', replacement: resolve(workspaceRoot, 'packages/project-core/src/index.ts') },
-      { find: '@axis/canvas-core', replacement: resolve(workspaceRoot, 'packages/canvas-core/src/index.ts') },
-      { find: '@axis/flowmap-core', replacement: resolve(workspaceRoot, 'packages/flowmap-core/src/index.ts') },
-      { find: '@axis/workbench-runtime', replacement: resolve(workspaceRoot, 'packages/workbench-runtime/src/index.ts') },
-      { find: '@axis/app-server', replacement: resolve(workspaceRoot, 'apps/app-server/src/index.ts') },
-      { find: '@axis/daemon', replacement: resolve(workspaceRoot, 'apps/daemon/src/index.ts') }
+      { find: '@debrute/app-protocol', replacement: resolve(workspaceRoot, 'packages/app-protocol/src/index.ts') },
+      { find: '@debrute/capability-core', replacement: resolve(workspaceRoot, 'packages/capability-core/src/index.ts') },
+      { find: '@debrute/capability-runtime', replacement: resolve(workspaceRoot, 'packages/capability-runtime/src/index.ts') },
+      { find: '@debrute/project-core', replacement: resolve(workspaceRoot, 'packages/project-core/src/index.ts') },
+      { find: '@debrute/canvas-core', replacement: resolve(workspaceRoot, 'packages/canvas-core/src/index.ts') },
+      { find: '@debrute/flowmap-core', replacement: resolve(workspaceRoot, 'packages/flowmap-core/src/index.ts') },
+      { find: '@debrute/workbench-runtime', replacement: resolve(workspaceRoot, 'packages/workbench-runtime/src/index.ts') },
+      { find: '@debrute/app-server', replacement: resolve(workspaceRoot, 'apps/app-server/src/index.ts') },
+      { find: '@debrute/daemon', replacement: resolve(workspaceRoot, 'apps/daemon/src/index.ts') }
     ]
   }
 });

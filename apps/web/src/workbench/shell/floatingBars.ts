@@ -1,4 +1,4 @@
-import type { CanvasFeedbackEntry } from '@axis/canvas-core';
+import type { CanvasFeedbackEntry } from '@debrute/canvas-core';
 import type { CanvasCamera } from '../canvas/runtime/canvasCamera';
 
 export interface FloatingBarRect {

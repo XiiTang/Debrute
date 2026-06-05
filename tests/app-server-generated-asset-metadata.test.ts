@@ -2,16 +2,16 @@ import { mkdir, mkdtemp, rename, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
-import { AxisAppServer } from '@axis/app-server';
+import { DebruteAppServer } from '@debrute/app-server';
 
 describe('app-server generated asset metadata', () => {
   it('records generated asset metadata and looks it up after the file is renamed', async () => {
-    const root = await mkdtemp(join(tmpdir(), 'axis-app-server-generated-metadata-'));
-    let server: AxisAppServer | undefined;
+    const root = await mkdtemp(join(tmpdir(), 'debrute-app-server-generated-metadata-'));
+    let server: DebruteAppServer | undefined;
     try {
       await mkdir(join(root, 'generated'), { recursive: true });
       await writeFile(join(root, 'generated/cover.png'), Buffer.from('image-bytes'));
-      server = new AxisAppServer();
+      server = new DebruteAppServer();
       await server.openProject(root, { initializeIfMissing: true, createDefaultCanvas: true });
 
       await server.recordGeneratedAssetMetadata({

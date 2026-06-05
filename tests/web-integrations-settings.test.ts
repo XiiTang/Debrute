@@ -23,7 +23,7 @@ describe('web Integrations settings page', () => {
     }));
 
     expect(html).toContain('Optional');
-    expect(html).toContain('AXIS detects optional local capabilities from PATH and shows backend command previews without executing them.');
+    expect(html).toContain('Debrute detects optional local capabilities from PATH and shows backend command previews without executing them.');
     expect(html).toContain('Integration backends: Homebrew, uv');
     expect(html).toContain('<span>FFmpeg</span>');
     expect(html).toContain('7.1.1');

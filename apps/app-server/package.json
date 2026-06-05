@@ -1,6 +1,6 @@
 {
-  "name": "@axis/app-server",
-  "version": "0.1.0",
+  "name": "@debrute/app-server",
+  "version": "0.0.1",
   "license": "Apache-2.0",
   "type": "module",
   "main": "dist/index.js",
@@ -10,12 +10,12 @@
     "check": "tsc -b --pretty false"
   },
   "dependencies": {
-    "@axis/app-protocol": "workspace:*",
-    "@axis/canvas-core": "workspace:*",
-    "@axis/capability-core": "workspace:*",
-    "@axis/capability-runtime": "workspace:*",
-    "@axis/flowmap-core": "workspace:*",
-    "@axis/project-core": "workspace:*",
+    "@debrute/app-protocol": "workspace:*",
+    "@debrute/canvas-core": "workspace:*",
+    "@debrute/capability-core": "workspace:*",
+    "@debrute/capability-runtime": "workspace:*",
+    "@debrute/flowmap-core": "workspace:*",
+    "@debrute/project-core": "workspace:*",
     "sharp": "^0.34.5"
   }
 }

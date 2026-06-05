@@ -4,7 +4,7 @@ import type {
   LlmProviderSettingsView,
   LlmProviderType,
   VideoModelSettingsView
-} from '@axis/app-protocol';
+} from '@debrute/app-protocol';
 
 export type {
   DiscoverLlmProviderModelsInput,
@@ -20,7 +20,7 @@ export type {
   SaveVideoModelSettingInput,
   VideoModelSettingRecord,
   VideoModelSettingsView
-} from '@axis/app-protocol';
+} from '@debrute/app-protocol';
 
 export interface LlmProvidersConfig {
   providers: LlmProviderConfig[];
@@ -42,7 +42,7 @@ export interface ImageModelsConfig {
 }
 
 export interface ImageModelConfig {
-  axisModelId: string;
+  debruteModelId: string;
   baseUrlOverride: string | null;
   requestModelIdOverride: string | null;
 }
@@ -52,7 +52,7 @@ export interface VideoModelsConfig {
 }
 
 export interface VideoModelConfig {
-  axisModelId: string;
+  debruteModelId: string;
   baseUrlOverride: string | null;
   requestModelIdOverride: string | null;
 }
@@ -64,7 +64,7 @@ export interface SecretsConfig {
 }
 
 export interface ImageModelCatalogViewEntry {
-  axisModelId: string;
+  debruteModelId: string;
   summary: string;
   supportsEditing: boolean;
   supportsTextRendering: boolean;
@@ -73,7 +73,7 @@ export interface ImageModelCatalogViewEntry {
 }
 
 export interface VideoModelCatalogViewEntry {
-  axisModelId: string;
+  debruteModelId: string;
   summary: string;
   supportsTextToVideo: boolean;
   supportsImageReferences: boolean;
@@ -89,13 +89,13 @@ export function createImageModelSettingsView(
   secrets: SecretsConfig,
   catalog: ImageModelCatalogViewEntry[]
 ): ImageModelSettingsView {
-  const configuredById = new Map(config.imageModels.map((model) => [model.axisModelId, model]));
+  const configuredById = new Map(config.imageModels.map((model) => [model.debruteModelId, model]));
   return {
     models: catalog.map((entry) => {
-      const configured = configuredById.get(entry.axisModelId);
-      const apiKeySet = Boolean(secrets.imageModelApiKeys[entry.axisModelId]?.trim());
+      const configured = configuredById.get(entry.debruteModelId);
+      const apiKeySet = Boolean(secrets.imageModelApiKeys[entry.debruteModelId]?.trim());
       return {
-        axisModelId: entry.axisModelId,
+        debruteModelId: entry.debruteModelId,
         summary: entry.summary,
         supportsEditing: entry.supportsEditing,
         supportsTextRendering: entry.supportsTextRendering,
@@ -114,13 +114,13 @@ export function createVideoModelSettingsView(
   secrets: SecretsConfig,
   catalog: VideoModelCatalogViewEntry[]
 ): VideoModelSettingsView {
-  const configuredById = new Map(config.videoModels.map((model) => [model.axisModelId, model]));
+  const configuredById = new Map(config.videoModels.map((model) => [model.debruteModelId, model]));
   return {
     models: catalog.map((entry) => {
-      const configured = configuredById.get(entry.axisModelId);
-      const apiKeySet = Boolean(secrets.videoModelApiKeys[entry.axisModelId]?.trim());
+      const configured = configuredById.get(entry.debruteModelId);
+      const apiKeySet = Boolean(secrets.videoModelApiKeys[entry.debruteModelId]?.trim());
       return {
-        axisModelId: entry.axisModelId,
+        debruteModelId: entry.debruteModelId,
         summary: entry.summary,
         supportsTextToVideo: entry.supportsTextToVideo,
         supportsImageReferences: entry.supportsImageReferences,

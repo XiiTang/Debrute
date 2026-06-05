@@ -9,7 +9,7 @@ const INTEGRATION_SCAN_TEST_TIMEOUT_MS = 20_000;
 
 describe('IntegrationsService', () => {
   it('returns not_found when required binaries are absent', async () => {
-    const envDir = await mkdtemp(join(tmpdir(), 'axis-integrations-empty-'));
+    const envDir = await mkdtemp(join(tmpdir(), 'debrute-integrations-empty-'));
     const service = new IntegrationsService({ envPath: envDir, cacheTtlMs: 0 });
 
     const view = await service.listStatus();
@@ -21,7 +21,7 @@ describe('IntegrationsService', () => {
   });
 
   it('marks media integrations ready when all required probes exit successfully', async () => {
-    const binDir = await mkdtemp(join(tmpdir(), 'axis-integrations-media-ready-'));
+    const binDir = await mkdtemp(join(tmpdir(), 'debrute-integrations-media-ready-'));
     await writeFakeBinary(binDir, 'ffmpeg', 'ffmpeg version 7.1.1');
     await writeFakeBinary(binDir, 'ffprobe', 'ffprobe version 7.1.1');
     const service = new IntegrationsService({ envPath: binDir, cacheTtlMs: 0 });
@@ -36,12 +36,12 @@ describe('IntegrationsService', () => {
   }, INTEGRATION_SCAN_TEST_TIMEOUT_MS);
 
   it('parses ImageMagick and Windows PATHEXT probe versions', async () => {
-    const macDir = await mkdtemp(join(tmpdir(), 'axis-integrations-imagemagick-ready-'));
+    const macDir = await mkdtemp(join(tmpdir(), 'debrute-integrations-imagemagick-ready-'));
     await writeFakeBinary(macDir, 'magick', 'Version: ImageMagick 7.0.0');
     const macService = new IntegrationsService({ envPath: macDir, cacheTtlMs: 0 });
     const macView = await macService.listStatus();
 
-    const winDir = await mkdtemp(join(tmpdir(), 'axis-integrations-windows-'));
+    const winDir = await mkdtemp(join(tmpdir(), 'debrute-integrations-windows-'));
     await writeFakeBinary(winDir, 'mediainfo.EXE', 'MediaInfo Command line, MediaInfoLib - v24.12');
     const winService = new IntegrationsService({
       envPath: winDir,
@@ -56,7 +56,7 @@ describe('IntegrationsService', () => {
   }, INTEGRATION_SCAN_TEST_TIMEOUT_MS);
 
   it('reports probe_failed for nonzero probes without exposing command previews', async () => {
-    const binDir = await mkdtemp(join(tmpdir(), 'axis-integrations-nonzero-'));
+    const binDir = await mkdtemp(join(tmpdir(), 'debrute-integrations-nonzero-'));
     await writeFakeBinary(binDir, 'mediainfo', 'broken', { exitCode: 2, stderr: 'cannot load library' });
     const service = new IntegrationsService({ envPath: binDir, cacheTtlMs: 0 });
 
@@ -71,7 +71,7 @@ describe('IntegrationsService', () => {
   }, INTEGRATION_SCAN_TEST_TIMEOUT_MS);
 
   it('exposes install command previews for missing media integrations when the system package manager is present', async () => {
-    const binDir = await mkdtemp(join(tmpdir(), 'axis-integrations-install-available-'));
+    const binDir = await mkdtemp(join(tmpdir(), 'debrute-integrations-install-available-'));
     await writeFakePackageManager(binDir, 'brew', [
       'if [ "$1" = "info" ]; then',
       '  printf \'{"formulae":[{"name":"imagemagick","versions":{"stable":"7.1.2-23"},"installed":[]}],"casks":[]}\\n\'',
@@ -94,7 +94,7 @@ describe('IntegrationsService', () => {
   }, INTEGRATION_SCAN_TEST_TIMEOUT_MS);
 
   it('exposes update command previews for ready media integrations when a newer package version exists', async () => {
-    const binDir = await mkdtemp(join(tmpdir(), 'axis-integrations-update-available-'));
+    const binDir = await mkdtemp(join(tmpdir(), 'debrute-integrations-update-available-'));
     await writeFakeBinary(binDir, 'ffmpeg', 'ffmpeg version 7.1.1');
     await writeFakeBinary(binDir, 'ffprobe', 'ffprobe version 7.1.1');
     await writeFakePackageManager(binDir, 'brew', [
@@ -118,7 +118,7 @@ describe('IntegrationsService', () => {
   }, INTEGRATION_SCAN_TEST_TIMEOUT_MS);
 
   it('marks remove-ai-watermarks ready and parses its version', async () => {
-    const binDir = await mkdtemp(join(tmpdir(), 'axis-integrations-raiw-ready-'));
+    const binDir = await mkdtemp(join(tmpdir(), 'debrute-integrations-raiw-ready-'));
     await writeFakeBinary(binDir, 'remove-ai-watermarks', 'remove-ai-watermarks, version 0.5.4');
     await writeFakeBinary(binDir, 'uv', 'uv 0.9.0');
     const service = new IntegrationsService({ envPath: binDir, cacheTtlMs: 0, platform: 'darwin' });
@@ -140,7 +140,7 @@ describe('IntegrationsService', () => {
   });
 
   it('exposes remove-ai-watermarks install availability through uv when missing', async () => {
-    const binDir = await mkdtemp(join(tmpdir(), 'axis-integrations-raiw-install-'));
+    const binDir = await mkdtemp(join(tmpdir(), 'debrute-integrations-raiw-install-'));
     await writeFakeBinary(binDir, 'uv', 'uv 0.9.0');
     const service = new IntegrationsService({ envPath: binDir, cacheTtlMs: 0, platform: 'darwin' });
 
@@ -156,7 +156,7 @@ describe('IntegrationsService', () => {
   });
 
   it('only exposes command previews for integration operations', async () => {
-    const binDir = await mkdtemp(join(tmpdir(), 'axis-integrations-preview-only-'));
+    const binDir = await mkdtemp(join(tmpdir(), 'debrute-integrations-preview-only-'));
     await writeFakePackageManager(binDir, 'brew', [
       'if [ "$1" = "info" ]; then',
       '  printf \'{"formulae":[{"name":"imagemagick","versions":{"stable":"7.1.2-23"},"installed":[]}],"casks":[]}\\n\'',

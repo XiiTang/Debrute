@@ -18,7 +18,7 @@ async function readJson(path: string): Promise<unknown> {
 
 describe('generated asset metadata service', () => {
   it('records complete model run provenance in a per-record file and keeps the index lightweight', async () => {
-    const root = await mkdtemp(join(tmpdir(), 'axis-generated-metadata-final-shape-'));
+    const root = await mkdtemp(join(tmpdir(), 'debrute-generated-metadata-final-shape-'));
     try {
       await mkdir(join(root, 'generated'), { recursive: true });
       await writeFile(join(root, 'generated/cover.png'), Buffer.from('image-bytes'));
@@ -58,7 +58,7 @@ describe('generated asset metadata service', () => {
             recordId: 'record-1',
             createdAt: '2026-05-24T00:00:00.000Z',
             fingerprint: { algorithm: 'sha256', hash: sha256('image-bytes') },
-            metadataPath: '.axis/assets/generated/record-1.json'
+            metadataPath: '.debrute/assets/generated/record-1.json'
           }
         ]
       });
@@ -81,7 +81,7 @@ describe('generated asset metadata service', () => {
   });
 
   it('matches metadata by SHA-256 after the generated file is renamed', async () => {
-    const root = await mkdtemp(join(tmpdir(), 'axis-generated-metadata-rename-'));
+    const root = await mkdtemp(join(tmpdir(), 'debrute-generated-metadata-rename-'));
     try {
       await mkdir(join(root, 'generated'), { recursive: true });
       await writeFile(join(root, 'generated/cover.png'), Buffer.from('image-bytes'));
@@ -118,7 +118,7 @@ describe('generated asset metadata service', () => {
   });
 
   it('returns every matching metadata record newest first', async () => {
-    const root = await mkdtemp(join(tmpdir(), 'axis-generated-metadata-duplicates-'));
+    const root = await mkdtemp(join(tmpdir(), 'debrute-generated-metadata-duplicates-'));
     try {
       await mkdir(join(root, 'generated'), { recursive: true });
       await writeFile(join(root, 'generated/cover.png'), Buffer.from('same-output'));
@@ -150,7 +150,7 @@ describe('generated asset metadata service', () => {
   });
 
   it('skips a missing matching record file and returns diagnostics', async () => {
-    const root = await mkdtemp(join(tmpdir(), 'axis-generated-metadata-missing-record-'));
+    const root = await mkdtemp(join(tmpdir(), 'debrute-generated-metadata-missing-record-'));
     try {
       await mkdir(join(root, 'generated'), { recursive: true });
       await writeFile(join(root, 'generated/cover.png'), Buffer.from('image-bytes'));
@@ -174,7 +174,7 @@ describe('generated asset metadata service', () => {
           {
             code: 'generated_asset_metadata_record_unreadable',
             recordId: 'record-1',
-            metadataPath: '.axis/assets/generated/record-1.json'
+            metadataPath: '.debrute/assets/generated/record-1.json'
           }
         ]
       });
@@ -184,7 +184,7 @@ describe('generated asset metadata service', () => {
   });
 
   it('treats a missing metadata index and fingerprint cache as empty', async () => {
-    const root = await mkdtemp(join(tmpdir(), 'axis-generated-metadata-empty-index-'));
+    const root = await mkdtemp(join(tmpdir(), 'debrute-generated-metadata-empty-index-'));
     try {
       await mkdir(join(root, 'generated'), { recursive: true });
       await writeFile(join(root, 'generated/cover.png'), Buffer.from('image-bytes'));
@@ -214,12 +214,12 @@ describe('generated asset metadata service', () => {
   });
 
   it('rejects a corrupt fingerprint cache instead of silently rebuilding it', async () => {
-    const root = await mkdtemp(join(tmpdir(), 'axis-generated-metadata-corrupt-cache-'));
+    const root = await mkdtemp(join(tmpdir(), 'debrute-generated-metadata-corrupt-cache-'));
     try {
       await mkdir(join(root, 'generated'), { recursive: true });
-      await mkdir(join(root, '.axis/cache'), { recursive: true });
+      await mkdir(join(root, '.debrute/cache'), { recursive: true });
       await writeFile(join(root, 'generated/cover.png'), Buffer.from('image-bytes'));
-      await writeFile(join(root, '.axis/cache/file-fingerprints.json'), '{not-json', 'utf8');
+      await writeFile(join(root, '.debrute/cache/file-fingerprints.json'), '{not-json', 'utf8');
       const service = createGeneratedAssetMetadataService();
 
       await expect(service.lookupGeneratedAssetMetadata(root, { projectRelativePath: 'generated/cover.png' }))
@@ -230,13 +230,13 @@ describe('generated asset metadata service', () => {
   });
 
   it('rejects invalid fingerprint cache entries instead of dropping them', async () => {
-    const root = await mkdtemp(join(tmpdir(), 'axis-generated-metadata-invalid-cache-entry-'));
+    const root = await mkdtemp(join(tmpdir(), 'debrute-generated-metadata-invalid-cache-entry-'));
     try {
       await mkdir(join(root, 'generated'), { recursive: true });
-      await mkdir(join(root, '.axis/cache'), { recursive: true });
+      await mkdir(join(root, '.debrute/cache'), { recursive: true });
       await writeFile(join(root, 'generated/cover.png'), Buffer.from('image-bytes'));
       const fileStat = await stat(join(root, 'generated/cover.png'));
-      await writeFile(join(root, '.axis/cache/file-fingerprints.json'), JSON.stringify({
+      await writeFile(join(root, '.debrute/cache/file-fingerprints.json'), JSON.stringify({
         schemaVersion: 1,
         entries: {
           'generated/cover.png': {
@@ -259,12 +259,12 @@ describe('generated asset metadata service', () => {
   });
 
   it('returns metadata_unreadable when the metadata index is corrupt', async () => {
-    const root = await mkdtemp(join(tmpdir(), 'axis-generated-metadata-corrupt-index-'));
+    const root = await mkdtemp(join(tmpdir(), 'debrute-generated-metadata-corrupt-index-'));
     try {
       await mkdir(join(root, 'generated'), { recursive: true });
-      await mkdir(join(root, '.axis/assets'), { recursive: true });
+      await mkdir(join(root, '.debrute/assets'), { recursive: true });
       await writeFile(join(root, 'generated/cover.png'), Buffer.from('image-bytes'));
-      await writeFile(join(root, '.axis/assets/generated-assets-index.json'), '{not-json', 'utf8');
+      await writeFile(join(root, '.debrute/assets/generated-assets-index.json'), '{not-json', 'utf8');
       const service = createGeneratedAssetMetadataService();
 
       const lookup = await service.lookupGeneratedAssetMetadata(root, { projectRelativePath: 'generated/cover.png' });
@@ -280,10 +280,10 @@ describe('generated asset metadata service', () => {
   });
 
   it('returns metadata_unreadable when an index metadataPath is outside the generated metadata directory', async () => {
-    const root = await mkdtemp(join(tmpdir(), 'axis-generated-metadata-invalid-path-'));
+    const root = await mkdtemp(join(tmpdir(), 'debrute-generated-metadata-invalid-path-'));
     try {
       await mkdir(join(root, 'generated'), { recursive: true });
-      await mkdir(join(root, '.axis/assets'), { recursive: true });
+      await mkdir(join(root, '.debrute/assets'), { recursive: true });
       await writeFile(join(root, 'generated/cover.png'), Buffer.from('image-bytes'));
       const fingerprint = { algorithm: 'sha256' as const, hash: sha256('image-bytes') };
 	      await writeFile(join(root, 'generated/not-metadata.json'), JSON.stringify({
@@ -294,7 +294,7 @@ describe('generated asset metadata service', () => {
         fingerprint,
         modelRun: { request: { prompt: 'outside' }, output: { ok: true } }
       }, null, 2), 'utf8');
-      await writeFile(join(root, '.axis/assets/generated-assets-index.json'), JSON.stringify({
+      await writeFile(join(root, '.debrute/assets/generated-assets-index.json'), JSON.stringify({
         schemaVersion: 1,
         records: [
           {
@@ -320,12 +320,12 @@ describe('generated asset metadata service', () => {
   });
 
   it('skips a matching index entry when the record fingerprint does not match the entry', async () => {
-    const root = await mkdtemp(join(tmpdir(), 'axis-generated-metadata-record-fingerprint-mismatch-'));
+    const root = await mkdtemp(join(tmpdir(), 'debrute-generated-metadata-record-fingerprint-mismatch-'));
     try {
       await mkdir(join(root, 'generated'), { recursive: true });
-      await mkdir(join(root, '.axis/assets/generated'), { recursive: true });
+      await mkdir(join(root, '.debrute/assets/generated'), { recursive: true });
       await writeFile(join(root, 'generated/cover.png'), Buffer.from('image-bytes'));
-	      await writeFile(join(root, '.axis/assets/generated/record-1.json'), JSON.stringify({
+	      await writeFile(join(root, '.debrute/assets/generated/record-1.json'), JSON.stringify({
 	        schemaVersion: 1,
 	        recordId: 'record-1',
 	        projectRelativePath: 'generated/cover.png',
@@ -333,14 +333,14 @@ describe('generated asset metadata service', () => {
         fingerprint: { algorithm: 'sha256', hash: sha256('different-image-bytes') },
         modelRun: { request: { prompt: 'cover' }, output: { ok: true } }
       }, null, 2), 'utf8');
-      await writeFile(join(root, '.axis/assets/generated-assets-index.json'), JSON.stringify({
+      await writeFile(join(root, '.debrute/assets/generated-assets-index.json'), JSON.stringify({
         schemaVersion: 1,
         records: [
           {
             recordId: 'record-1',
             createdAt: '2026-05-24T00:00:00.000Z',
             fingerprint: { algorithm: 'sha256', hash: sha256('image-bytes') },
-            metadataPath: '.axis/assets/generated/record-1.json'
+            metadataPath: '.debrute/assets/generated/record-1.json'
           }
         ]
       }, null, 2), 'utf8');
@@ -355,7 +355,7 @@ describe('generated asset metadata service', () => {
           {
             code: 'generated_asset_metadata_record_unreadable',
             recordId: 'record-1',
-            metadataPath: '.axis/assets/generated/record-1.json'
+            metadataPath: '.debrute/assets/generated/record-1.json'
           }
         ]
       });
@@ -365,7 +365,7 @@ describe('generated asset metadata service', () => {
   });
 
   it('treats missing and unreadable selected files as unavailable lookup results', async () => {
-    const root = await mkdtemp(join(tmpdir(), 'axis-generated-metadata-missing-file-'));
+    const root = await mkdtemp(join(tmpdir(), 'debrute-generated-metadata-missing-file-'));
     try {
       const service = createGeneratedAssetMetadataService();
 

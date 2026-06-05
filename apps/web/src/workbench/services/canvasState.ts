@@ -1,9 +1,9 @@
-import type { WorkbenchProjectSessionSnapshot } from '@axis/app-protocol';
+import type { WorkbenchProjectSessionSnapshot } from '@debrute/app-protocol';
 import type {
   CanvasDocument,
   Diagnostic,
   ProjectedCanvasNode
-} from '@axis/canvas-core';
+} from '@debrute/canvas-core';
 import type { WorkbenchState } from '../../types';
 import type { CanvasSelection, CanvasSelectionItem } from '../canvas/runtime/canvasSelection';
 

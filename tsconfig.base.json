@@ -19,16 +19,16 @@
     "baseUrl": ".",
     "rootDir": ".",
     "paths": {
-      "@axis/app-protocol": ["packages/app-protocol/src/index.ts"],
-      "@axis/architecture-rules": ["packages/architecture-rules/src/index.mjs"],
-      "@axis/capability-core": ["packages/capability-core/src/index.ts"],
-      "@axis/capability-runtime": ["packages/capability-runtime/src/index.ts"],
-      "@axis/project-core": ["packages/project-core/src/index.ts"],
-      "@axis/canvas-core": ["packages/canvas-core/src/index.ts"],
-      "@axis/flowmap-core": ["packages/flowmap-core/src/index.ts"],
-      "@axis/workbench-runtime": ["packages/workbench-runtime/src/index.ts"],
-      "@axis/app-server": ["apps/app-server/src/index.ts"],
-      "@axis/daemon": ["apps/daemon/src/index.ts"]
+      "@debrute/app-protocol": ["packages/app-protocol/src/index.ts"],
+      "@debrute/architecture-rules": ["packages/architecture-rules/src/index.mjs"],
+      "@debrute/capability-core": ["packages/capability-core/src/index.ts"],
+      "@debrute/capability-runtime": ["packages/capability-runtime/src/index.ts"],
+      "@debrute/project-core": ["packages/project-core/src/index.ts"],
+      "@debrute/canvas-core": ["packages/canvas-core/src/index.ts"],
+      "@debrute/flowmap-core": ["packages/flowmap-core/src/index.ts"],
+      "@debrute/workbench-runtime": ["packages/workbench-runtime/src/index.ts"],
+      "@debrute/app-server": ["apps/app-server/src/index.ts"],
+      "@debrute/daemon": ["apps/daemon/src/index.ts"]
     }
   }
 }

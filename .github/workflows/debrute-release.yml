@@ -1,0 +1,154 @@
+name: Debrute Release
+
+on:
+  push:
+    tags:
+      - 'v*.*.*'
+
+permissions:
+  contents: write
+
+env:
+  CSC_IDENTITY_AUTO_DISCOVERY: false
+
+jobs:
+  preflight:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 11.2.2
+          run_install: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+      - name: Install ripgrep
+        run: sudo apt-get update && sudo apt-get install -y ripgrep
+      - run: pnpm install --frozen-lockfile
+      - name: Validate tag version
+        run: |
+          VERSION="$(node -p "require('./package.json').version")"
+          test "${GITHUB_REF_NAME}" = "v${VERSION}"
+      - run: node scripts/validate-release-version-contract.mjs
+      - run: pnpm doctor
+      - run: pnpm check
+      - run: pnpm test
+      - run: pnpm lint:arch
+
+  build-cli:
+    needs: preflight
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 11.2.2
+          run_install: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm package:cli:all
+      - uses: actions/upload-artifact@v4
+        with:
+          name: debrute-cli-release-assets
+          path: |
+            release/debrute-cli/debrute-cli-*.tar.gz
+            release/debrute-cli/debrute-cli-*.zip
+
+  build-desktop:
+    needs: preflight
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: macos-latest
+            platform: darwin
+            publicPlatform: macos
+            arch: arm64
+          - os: macos-15-intel
+            platform: darwin
+            publicPlatform: macos
+            arch: x64
+          - os: windows-latest
+            platform: win32
+            publicPlatform: windows
+            arch: x64
+          - os: ubuntu-latest
+            platform: linux
+            publicPlatform: linux
+            arch: x64
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 11.2.2
+          run_install: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm build
+      - run: pnpm --filter @debrute/desktop exec electron-builder --${{ matrix.arch }} --publish never
+      - name: Rename Desktop assets
+        shell: bash
+        run: |
+          VERSION="$(node -p "require('./package.json').version")"
+          node scripts/desktop-release-assets.mjs --release-dir apps/desktop/release --version "$VERSION" --platform "${{ matrix.platform }}" --arch "${{ matrix.arch }}"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: debrute-desktop-${{ matrix.publicPlatform }}-${{ matrix.arch }}
+          path: apps/desktop/release/debrute-desktop-*
+
+  publish-release:
+    needs:
+      - build-cli
+      - build-desktop
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          path: release-assets
+      - name: Flatten assets and checksums
+        run: |
+          mkdir -p release-upload
+          find release-assets -type f -print -exec cp {} release-upload/ \;
+          cd release-upload
+          sha256sum debrute-* > debrute_SHA256SUMS
+      - name: Verify expected assets
+        run: |
+          VERSION="$(node -p "require('./package.json').version")"
+          node -e "import('./scripts/release-asset-contract.mjs').then(({expectedReleaseAssets}) => { const fs = require('fs'); const expected = expectedReleaseAssets(process.argv[1]); const missing = expected.filter((name) => !fs.existsSync('release-upload/' + name)); if (missing.length) { console.error('Missing release assets:', missing.join(', ')); process.exit(1); } })" "$VERSION"
+      - name: Write release notes
+        run: |
+          VERSION="$(node -p "require('./package.json').version")"
+          cat > release-notes.md <<EOF
+          # Debrute ${VERSION}
+
+          Debrute Desktop builds in this release are unsigned and unnotarized. Verify downloaded files against debrute_SHA256SUMS from this same release before installing.
+
+          Desktop assets:
+          - macOS may require right-click Open or Privacy & Security approval.
+          - Windows may show Microsoft Defender SmartScreen.
+          - Linux AppImage builds may require chmod +x.
+
+          Debrute CLI is managed from Debrute Desktop Settings under Debrute CLI. Manual CLI installs should download the matching debrute-cli asset, verify it with debrute_SHA256SUMS, then run:
+
+          debrute --version
+          debrute skills sync
+
+          Skills commands:
+          - debrute skills status
+          - debrute skills sync
+          - debrute skills sync --force
+          EOF
+      - uses: softprops/action-gh-release@v2
+        with:
+          body_path: release-notes.md
+          files: release-upload/*

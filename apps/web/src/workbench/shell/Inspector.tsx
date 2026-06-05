@@ -14,8 +14,8 @@ import {
 import {
   canvasNodeLayerOrderTopFirst,
   type Diagnostic
-} from '@axis/canvas-core';
-import type { GeneratedAssetMetadataLookup, GeneratedAssetRecord } from '@axis/app-protocol';
+} from '@debrute/canvas-core';
+import type { GeneratedAssetMetadataLookup, GeneratedAssetRecord } from '@debrute/app-protocol';
 import type { WorkbenchActions, WorkbenchState } from '../../types';
 import type { CanvasSelection } from '../canvas/runtime/canvasSelection';
 import {

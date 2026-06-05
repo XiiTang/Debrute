@@ -1,4 +1,4 @@
-import type { CanvasProjection, ProjectedCanvasNode } from '@axis/canvas-core';
+import type { CanvasProjection, ProjectedCanvasNode } from '@debrute/canvas-core';
 import type { CanvasCamera } from '../canvas/runtime/canvasCamera';
 import { cameraCenteredOnCanvasPoint } from '../canvas/runtime/canvasCamera';
 

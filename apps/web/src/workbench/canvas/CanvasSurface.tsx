@@ -1,6 +1,6 @@
 import React, { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
-import type { CanvasSettingsView } from '@axis/app-protocol';
-import type { CanvasDocument, CanvasFeedbackDocument, CanvasProjection, ProjectedCanvasNode } from '@axis/canvas-core';
+import type { CanvasSettingsView } from '@debrute/app-protocol';
+import type { CanvasDocument, CanvasFeedbackDocument, CanvasProjection, ProjectedCanvasNode } from '@debrute/canvas-core';
 import type { TextFileBuffer, WorkbenchActions } from '../../types';
 import type { WorkbenchContextMenuPosition, WorkbenchContextMenuTarget } from '../shell/contextMenu';
 import {

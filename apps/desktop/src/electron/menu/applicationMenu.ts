@@ -32,7 +32,7 @@ export function buildApplicationMenuTemplate({
 
   return [
     {
-      label: 'AXIS',
+      label: 'Debrute',
       submenu: [
         { role: 'about' },
         { type: 'separator' },

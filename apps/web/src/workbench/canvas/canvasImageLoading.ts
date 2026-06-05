@@ -1,4 +1,4 @@
-import type { ProjectedCanvasNode } from '@axis/canvas-core';
+import type { ProjectedCanvasNode } from '@debrute/canvas-core';
 import { canvasImageSourceUrl, type CanvasLoadedImage } from './canvasImagePreviews';
 import { nodeRect } from './canvasVirtualization';
 import type { CanvasCameraState } from './runtime/canvasCamera';

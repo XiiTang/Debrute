@@ -8,12 +8,12 @@ import {
   resolveExistingProjectPath,
   resolveProjectPathForWrite,
   writeJsonAtomic
-} from '@axis/project-core';
+} from '@debrute/project-core';
 import type {
   GeneratedAssetMetadataDiagnostic,
   GeneratedAssetMetadataLookup,
   GeneratedAssetRecord
-} from '@axis/app-protocol';
+} from '@debrute/app-protocol';
 
 export interface GeneratedAssetMetadataIndex {
   schemaVersion: 1;
@@ -65,9 +65,9 @@ export interface GeneratedAssetMetadataServiceOptions {
 
 const GENERATED_ASSET_METADATA_SCHEMA_VERSION = 1;
 const FILE_FINGERPRINT_CACHE_SCHEMA_VERSION = 1;
-const GENERATED_ASSET_INDEX_PROJECT_PATH = '.axis/assets/generated-assets-index.json';
-const GENERATED_ASSET_RECORDS_PROJECT_DIR = '.axis/assets/generated';
-const FINGERPRINT_CACHE_PROJECT_PATH = '.axis/cache/file-fingerprints.json';
+const GENERATED_ASSET_INDEX_PROJECT_PATH = '.debrute/assets/generated-assets-index.json';
+const GENERATED_ASSET_RECORDS_PROJECT_DIR = '.debrute/assets/generated';
+const FINGERPRINT_CACHE_PROJECT_PATH = '.debrute/cache/file-fingerprints.json';
 
 export function createGeneratedAssetMetadataService(options: GeneratedAssetMetadataServiceOptions = {}): GeneratedAssetMetadataService {
   const now = options.now ?? (() => new Date().toISOString());
@@ -380,7 +380,7 @@ function unavailableResult(error: unknown, projectRelativePath: string): Extract
 }
 
 function isGeneratedAssetMetadataRecordProjectPath(metadataPath: string): boolean {
-  return metadataPath.startsWith('.axis/assets/generated/')
+  return metadataPath.startsWith('.debrute/assets/generated/')
     && metadataPath.endsWith('.json')
     && !metadataPath.includes('..')
     && !metadataPath.includes('\\');

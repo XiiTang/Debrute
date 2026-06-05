@@ -1,18 +1,18 @@
 export {
-  AxisAppServer,
-  type AxisAppServerOptions,
+  DebruteAppServer,
+  type DebruteAppServerOptions,
   type CliImageModelDetail,
   type CliModelDetail,
   type CliModelSummary,
   type CliRuntimeDiagnostic,
   type CliRuntimeStatus,
   type OpenProjectOptions
-} from './server/AxisAppServer.js';
+} from './server/DebruteAppServer.js';
 
 export {
-  AxisGlobalRuntimeServer,
-  type AxisGlobalRuntimeServerOptions
-} from './server/AxisGlobalRuntimeServer.js';
+  DebruteGlobalRuntimeServer,
+  type DebruteGlobalRuntimeServerOptions
+} from './server/DebruteGlobalRuntimeServer.js';
 
 export {
   GlobalConfigStore,
@@ -33,7 +33,7 @@ export type {
   IntegrationStatus,
   PythonCliInstallerId,
   SystemPackageManagerId
-} from '@axis/app-protocol';
+} from '@debrute/app-protocol';
 
 export type {
   AppServerEvent,
@@ -57,11 +57,11 @@ export type {
   SaveVideoModelSettingInput,
   VideoModelSettingRecord,
   VideoModelSettingsView
-} from '@axis/app-protocol';
+} from '@debrute/app-protocol';
 
 export type {
   CanvasFeedbackDocument,
   CanvasFeedbackEntry,
   CanvasFeedbackMark,
   UpdateCanvasFeedbackEntryInput
-} from '@axis/canvas-core';
+} from '@debrute/canvas-core';

@@ -1,6 +1,6 @@
 {
-  "name": "@axis/app-protocol",
-  "version": "0.1.0",
+  "name": "@debrute/app-protocol",
+  "version": "0.0.1",
   "license": "Apache-2.0",
   "type": "module",
   "main": "dist/index.js",
@@ -10,7 +10,7 @@
     "check": "tsc -b --pretty false"
   },
   "dependencies": {
-    "@axis/canvas-core": "workspace:*",
-    "@axis/project-core": "workspace:*"
+    "@debrute/canvas-core": "workspace:*",
+    "@debrute/project-core": "workspace:*"
   }
 }

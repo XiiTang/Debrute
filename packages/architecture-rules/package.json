@@ -1,6 +1,6 @@
 {
-  "name": "@axis/architecture-rules",
-  "version": "0.1.0",
+  "name": "@debrute/architecture-rules",
+  "version": "0.0.1",
   "license": "Apache-2.0",
   "type": "module",
   "main": "src/index.mjs",
@@ -8,6 +8,6 @@
     ".": "./src/index.mjs"
   },
   "scripts": {
-    "check": "node -e \"import('@axis/architecture-rules').then(() => console.log('architecture rules package ok'))\""
+    "check": "node -e \"import('@debrute/architecture-rules').then(() => console.log('architecture rules package ok'))\""
   }
 }

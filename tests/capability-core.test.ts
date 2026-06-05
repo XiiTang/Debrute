@@ -3,7 +3,7 @@ import {
   capabilityError,
   capabilityOk,
   projectArtifactPointers
-} from '@axis/capability-core';
+} from '@debrute/capability-core';
 
 describe('capability-core', () => {
   it('creates structured capability results without a public registry layer', () => {

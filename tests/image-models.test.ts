@@ -6,7 +6,7 @@ import {
   createImageModelCatalog,
   executeImageModelRequest,
   type ImageModelFetch
-} from '@axis/capability-runtime';
+} from '@debrute/capability-runtime';
 
 const tinyPngBase64 = 'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADElEQVR42mP8z8AARQAHSQGmK3P7WAAAAABJRU5ErkJggg==';
 const tinyPng = Buffer.from(tinyPngBase64, 'base64');
@@ -15,7 +15,7 @@ describe('image model catalog and tools', () => {
   it('restores the full model-keyed image catalog from the reference implementation', () => {
     const catalog = createImageModelCatalog();
 
-    expect(catalog.listAll().map((model) => model.axisModelId)).toEqual([
+    expect(catalog.listAll().map((model) => model.debruteModelId)).toEqual([
       'doubao-seedream-5-0-lite-260128',
       'fal-ai/flux/dev',
       'fal-ai/flux/dev/image-to-image',
@@ -29,7 +29,7 @@ describe('image model catalog and tools', () => {
       'wan2.7-image'
     ]);
     expect(catalog.get('gpt-image-2')).toMatchObject({
-      axisModelId: 'gpt-image-2',
+      debruteModelId: 'gpt-image-2',
       supportsEditing: true,
       supportsTextRendering: true
     });
@@ -100,7 +100,7 @@ describe('image model catalog and tools', () => {
         .map((key) => key.split('.')[0]!)
         .filter((key, index, keys) => !schemaKeys.has(key) && keys.indexOf(key) === index);
 
-      expect(missing, model.axisModelId).toEqual([]);
+      expect(missing, model.debruteModelId).toEqual([]);
     }
   });
 
@@ -285,7 +285,7 @@ describe('image model catalog and tools', () => {
 
 describe('image model executors', () => {
   it('uses catalog defaults when an image model has only an API key configured', async () => {
-    const projectRoot = await mkdtemp(join(tmpdir(), 'axis-image-default-route-'));
+    const projectRoot = await mkdtemp(join(tmpdir(), 'debrute-image-default-route-'));
     try {
       const calls: Array<{ url: string; body: Record<string, unknown> }> = [];
       const fetch: ImageModelFetch = async (url, init) => {
@@ -313,7 +313,7 @@ describe('image model executors', () => {
   });
 
   it('keeps Gemini prompts when contents include model-specific image parts', async () => {
-    const projectRoot = await mkdtemp(join(tmpdir(), 'axis-image-gemini-contents-prompt-'));
+    const projectRoot = await mkdtemp(join(tmpdir(), 'debrute-image-gemini-contents-prompt-'));
     try {
       let submittedBody: Record<string, unknown> | undefined;
       const fetch: ImageModelFetch = async (_url, init) => {
@@ -352,7 +352,7 @@ describe('image model executors', () => {
   });
 
   it('normalizes Gemini local fileData fileUri values into inlineData parts', async () => {
-    const projectRoot = await mkdtemp(join(tmpdir(), 'axis-image-gemini-local-contents-'));
+    const projectRoot = await mkdtemp(join(tmpdir(), 'debrute-image-gemini-local-contents-'));
     try {
       await writeFile(join(projectRoot, 'source.png'), tinyPng);
       let submittedBody: Record<string, unknown> | undefined;
@@ -393,7 +393,7 @@ describe('image model executors', () => {
   });
 
   it('writes OpenAI image artifacts into generated/<turn-id>', async () => {
-    const projectRoot = await mkdtemp(join(tmpdir(), 'axis-image-openai-'));
+    const projectRoot = await mkdtemp(join(tmpdir(), 'debrute-image-openai-'));
     const fetch: ImageModelFetch = async (url, init) => {
       expect(url).toBe('https://api.openai.com/v1/images/generations');
       expect(JSON.parse(String(init?.body))).toMatchObject({ model: 'gpt-image-2', prompt: 'cover image' });
@@ -404,7 +404,7 @@ describe('image model executors', () => {
         projectRoot,
         invocationId: 'turn-1',
         input: { model: 'gpt-image-2', arguments: { prompt: 'cover image', size: '1024x1024' } },
-        settings: { imageModels: [{ axisModelId: 'gpt-image-2', baseUrlOverride: 'https://api.openai.com/v1', requestModelIdOverride: 'gpt-image-2' }] },
+        settings: { imageModels: [{ debruteModelId: 'gpt-image-2', baseUrlOverride: 'https://api.openai.com/v1', requestModelIdOverride: 'gpt-image-2' }] },
         secrets: { imageModelApiKeys: { 'gpt-image-2': 'sk-image' } },
         fetch
       });
@@ -425,7 +425,7 @@ describe('image model executors', () => {
   });
 
   it('records compact model request and output metadata for generated OpenAI images', async () => {
-    const projectRoot = await mkdtemp(join(tmpdir(), 'axis-image-metadata-'));
+    const projectRoot = await mkdtemp(join(tmpdir(), 'debrute-image-metadata-'));
     const recorded: unknown[] = [];
     const fetch: ImageModelFetch = async (url) => {
       expect(url).toBe('https://api.openai.com/v1/images/generations');
@@ -436,7 +436,7 @@ describe('image model executors', () => {
         projectRoot,
         invocationId: 'turn-metadata',
         input: { model: 'gpt-image-2', arguments: { prompt: 'cover image', size: '1024x1024' } },
-        settings: { imageModels: [{ axisModelId: 'gpt-image-2', baseUrlOverride: 'https://api.openai.com/v1', requestModelIdOverride: 'gpt-image-2' }] },
+        settings: { imageModels: [{ debruteModelId: 'gpt-image-2', baseUrlOverride: 'https://api.openai.com/v1', requestModelIdOverride: 'gpt-image-2' }] },
         secrets: { imageModelApiKeys: { 'gpt-image-2': 'sk-image' } },
         fetch,
         recordGeneratedAsset: async (input) => {
@@ -483,7 +483,7 @@ describe('image model executors', () => {
   });
 
   it('records complete multipart model request metadata for OpenAI edits', async () => {
-    const projectRoot = await mkdtemp(join(tmpdir(), 'axis-image-edit-metadata-'));
+    const projectRoot = await mkdtemp(join(tmpdir(), 'debrute-image-edit-metadata-'));
     const recorded: unknown[] = [];
     const fetch: ImageModelFetch = async (url, init) => {
       expect(url).toBe('https://api.openai.com/v1/images/edits');
@@ -503,7 +503,7 @@ describe('image model executors', () => {
             image: ['source.png']
           }
         },
-        settings: { imageModels: [{ axisModelId: 'gpt-image-2', baseUrlOverride: 'https://api.openai.com/v1', requestModelIdOverride: 'gpt-image-2' }] },
+        settings: { imageModels: [{ debruteModelId: 'gpt-image-2', baseUrlOverride: 'https://api.openai.com/v1', requestModelIdOverride: 'gpt-image-2' }] },
         secrets: { imageModelApiKeys: { 'gpt-image-2': 'sk-image' } },
         fetch,
         recordGeneratedAsset: async (input) => {
@@ -549,7 +549,7 @@ describe('image model executors', () => {
   });
 
   it('includes a project mask when an OpenAI edit input image is remote', async () => {
-    const projectRoot = await mkdtemp(join(tmpdir(), 'axis-image-openai-remote-input-local-mask-'));
+    const projectRoot = await mkdtemp(join(tmpdir(), 'debrute-image-openai-remote-input-local-mask-'));
     const downloaded: string[] = [];
     let modelRuns = 0;
     const fetch: ImageModelFetch = async (url, init) => {
@@ -578,7 +578,7 @@ describe('image model executors', () => {
             mask: 'mask.png'
           }
         },
-        settings: { imageModels: [{ axisModelId: 'gpt-image-2', baseUrlOverride: 'https://api.openai.com/v1', requestModelIdOverride: 'gpt-image-2' }] },
+        settings: { imageModels: [{ debruteModelId: 'gpt-image-2', baseUrlOverride: 'https://api.openai.com/v1', requestModelIdOverride: 'gpt-image-2' }] },
         secrets: { imageModelApiKeys: { 'gpt-image-2': 'sk-image' } },
         fetch
       });
@@ -592,7 +592,7 @@ describe('image model executors', () => {
   });
 
   it('includes a remote mask when an OpenAI edit input image is a project file', async () => {
-    const projectRoot = await mkdtemp(join(tmpdir(), 'axis-image-openai-local-input-remote-mask-'));
+    const projectRoot = await mkdtemp(join(tmpdir(), 'debrute-image-openai-local-input-remote-mask-'));
     const downloaded: string[] = [];
     let modelRuns = 0;
     const fetch: ImageModelFetch = async (url, init) => {
@@ -621,7 +621,7 @@ describe('image model executors', () => {
             mask: 'https://cdn.example/mask.png'
           }
         },
-        settings: { imageModels: [{ axisModelId: 'gpt-image-2', baseUrlOverride: 'https://api.openai.com/v1', requestModelIdOverride: 'gpt-image-2' }] },
+        settings: { imageModels: [{ debruteModelId: 'gpt-image-2', baseUrlOverride: 'https://api.openai.com/v1', requestModelIdOverride: 'gpt-image-2' }] },
         secrets: { imageModelApiKeys: { 'gpt-image-2': 'sk-image' } },
         fetch
       });
@@ -635,7 +635,7 @@ describe('image model executors', () => {
   });
 
   it('returns direct image input errors for missing project image paths', async () => {
-    const projectRoot = await mkdtemp(join(tmpdir(), 'axis-image-missing-input-'));
+    const projectRoot = await mkdtemp(join(tmpdir(), 'debrute-image-missing-input-'));
     const fetch: ImageModelFetch = async () => {
       throw new Error('model fetch should not be called for missing image inputs');
     };
@@ -650,7 +650,7 @@ describe('image model executors', () => {
             image: ['missing/source.png']
           }
         },
-        settings: { imageModels: [{ axisModelId: 'gpt-image-2', baseUrlOverride: 'https://api.openai.com/v1', requestModelIdOverride: 'gpt-image-2' }] },
+        settings: { imageModels: [{ debruteModelId: 'gpt-image-2', baseUrlOverride: 'https://api.openai.com/v1', requestModelIdOverride: 'gpt-image-2' }] },
         secrets: { imageModelApiKeys: { 'gpt-image-2': 'sk-image' } },
         fetch
       });
@@ -682,7 +682,7 @@ describe('image model executors', () => {
       }
     }
   ])('preserves project path validation errors for $model image inputs', async ({ model, baseUrl, arguments: args }) => {
-    const projectRoot = await mkdtemp(join(tmpdir(), 'axis-image-invalid-path-input-'));
+    const projectRoot = await mkdtemp(join(tmpdir(), 'debrute-image-invalid-path-input-'));
     const fetch: ImageModelFetch = async () => {
       throw new Error('model fetch should not be called for invalid image input paths');
     };
@@ -691,7 +691,7 @@ describe('image model executors', () => {
         projectRoot,
         invocationId: 'turn-invalid-image-input-path',
         input: { model, arguments: args },
-        settings: { imageModels: [{ axisModelId: model, baseUrlOverride: baseUrl, requestModelIdOverride: model }] },
+        settings: { imageModels: [{ debruteModelId: model, baseUrlOverride: baseUrl, requestModelIdOverride: model }] },
         secrets: { imageModelApiKeys: { [model]: 'sk-image' } },
         fetch
       });
@@ -705,7 +705,7 @@ describe('image model executors', () => {
   });
 
   it('rejects image input fields on models that do not declare them', async () => {
-    const projectRoot = await mkdtemp(join(tmpdir(), 'axis-image-unsupported-input-field-'));
+    const projectRoot = await mkdtemp(join(tmpdir(), 'debrute-image-unsupported-input-field-'));
     let modelRuned = false;
     const fetch: ImageModelFetch = async () => {
       modelRuned = true;
@@ -722,7 +722,7 @@ describe('image model executors', () => {
             image_url: 'https://cdn.example/source.png'
           }
         },
-        settings: { imageModels: [{ axisModelId: 'fal-ai/flux/dev', baseUrlOverride: 'https://fal.run', requestModelIdOverride: 'fal-ai/flux/dev' }] },
+        settings: { imageModels: [{ debruteModelId: 'fal-ai/flux/dev', baseUrlOverride: 'https://fal.run', requestModelIdOverride: 'fal-ai/flux/dev' }] },
         secrets: { imageModelApiKeys: { 'fal-ai/flux/dev': 'sk-image' } },
         fetch
       });
@@ -737,7 +737,7 @@ describe('image model executors', () => {
   });
 
   it('rejects null image inputs before model requests', async () => {
-    const projectRoot = await mkdtemp(join(tmpdir(), 'axis-image-null-input-'));
+    const projectRoot = await mkdtemp(join(tmpdir(), 'debrute-image-null-input-'));
     const fetch: ImageModelFetch = async () => {
       throw new Error('model fetch should not be called for null image inputs');
     };
@@ -752,7 +752,7 @@ describe('image model executors', () => {
             image: null
           }
         },
-        settings: { imageModels: [{ axisModelId: 'gpt-image-2', baseUrlOverride: 'https://api.openai.com/v1', requestModelIdOverride: 'gpt-image-2' }] },
+        settings: { imageModels: [{ debruteModelId: 'gpt-image-2', baseUrlOverride: 'https://api.openai.com/v1', requestModelIdOverride: 'gpt-image-2' }] },
         secrets: { imageModelApiKeys: { 'gpt-image-2': 'sk-image' } },
         fetch
       });
@@ -766,7 +766,7 @@ describe('image model executors', () => {
   });
 
   it('rejects scalar values for array image input fields before model requests', async () => {
-    const projectRoot = await mkdtemp(join(tmpdir(), 'axis-image-scalar-array-field-'));
+    const projectRoot = await mkdtemp(join(tmpdir(), 'debrute-image-scalar-array-field-'));
     const fetch: ImageModelFetch = async () => {
       throw new Error('model fetch should not be called for scalar array image inputs');
     };
@@ -782,7 +782,7 @@ describe('image model executors', () => {
             image: 'source.png'
           }
         },
-        settings: { imageModels: [{ axisModelId: 'gpt-image-2', baseUrlOverride: 'https://api.openai.com/v1', requestModelIdOverride: 'gpt-image-2' }] },
+        settings: { imageModels: [{ debruteModelId: 'gpt-image-2', baseUrlOverride: 'https://api.openai.com/v1', requestModelIdOverride: 'gpt-image-2' }] },
         secrets: { imageModelApiKeys: { 'gpt-image-2': 'sk-image' } },
         fetch
       });
@@ -796,7 +796,7 @@ describe('image model executors', () => {
   });
 
   it('rejects array values for single image input fields before model requests', async () => {
-    const projectRoot = await mkdtemp(join(tmpdir(), 'axis-image-array-single-field-'));
+    const projectRoot = await mkdtemp(join(tmpdir(), 'debrute-image-array-single-field-'));
     const fetch: ImageModelFetch = async () => {
       throw new Error('model fetch should not be called for array mask inputs');
     };
@@ -815,7 +815,7 @@ describe('image model executors', () => {
             mask: ['mask-1.png', 'mask-2.png']
           }
         },
-        settings: { imageModels: [{ axisModelId: 'gpt-image-2', baseUrlOverride: 'https://api.openai.com/v1', requestModelIdOverride: 'gpt-image-2' }] },
+        settings: { imageModels: [{ debruteModelId: 'gpt-image-2', baseUrlOverride: 'https://api.openai.com/v1', requestModelIdOverride: 'gpt-image-2' }] },
         secrets: { imageModelApiKeys: { 'gpt-image-2': 'sk-image' } },
         fetch
       });
@@ -829,7 +829,7 @@ describe('image model executors', () => {
   });
 
   it('rejects masks without input images before model requests', async () => {
-    const projectRoot = await mkdtemp(join(tmpdir(), 'axis-image-mask-without-input-'));
+    const projectRoot = await mkdtemp(join(tmpdir(), 'debrute-image-mask-without-input-'));
     const fetch: ImageModelFetch = async () => {
       throw new Error('model fetch should not be called when mask has no input images');
     };
@@ -845,7 +845,7 @@ describe('image model executors', () => {
             mask: 'mask.png'
           }
         },
-        settings: { imageModels: [{ axisModelId: 'gpt-image-2', baseUrlOverride: 'https://api.openai.com/v1', requestModelIdOverride: 'gpt-image-2' }] },
+        settings: { imageModels: [{ debruteModelId: 'gpt-image-2', baseUrlOverride: 'https://api.openai.com/v1', requestModelIdOverride: 'gpt-image-2' }] },
         secrets: { imageModelApiKeys: { 'gpt-image-2': 'sk-image' } },
         fetch
       });
@@ -859,7 +859,7 @@ describe('image model executors', () => {
   });
 
   it('rejects unsupported model-specific image input objects before model requests', async () => {
-    const projectRoot = await mkdtemp(join(tmpdir(), 'axis-image-invalid-input-object-'));
+    const projectRoot = await mkdtemp(join(tmpdir(), 'debrute-image-invalid-input-object-'));
     const fetch: ImageModelFetch = async () => {
       throw new Error('model fetch should not be called for invalid image inputs');
     };
@@ -874,7 +874,7 @@ describe('image model executors', () => {
             image: [{ fileData: { fileUri: 'https://cdn.example/source.png', mimeType: 'image/png' } }]
           }
         },
-        settings: { imageModels: [{ axisModelId: 'doubao-seedream-5-0-lite-260128', baseUrlOverride: 'https://ark.example/v1', requestModelIdOverride: 'doubao-image' }] },
+        settings: { imageModels: [{ debruteModelId: 'doubao-seedream-5-0-lite-260128', baseUrlOverride: 'https://ark.example/v1', requestModelIdOverride: 'doubao-image' }] },
         secrets: { imageModelApiKeys: { 'doubao-seedream-5-0-lite-260128': 'sk-image' } },
         fetch
       });
@@ -889,7 +889,7 @@ describe('image model executors', () => {
   });
 
   it('rejects model-specific image objects that do not belong to the selected model field', async () => {
-    const projectRoot = await mkdtemp(join(tmpdir(), 'axis-image-cross-model-object-'));
+    const projectRoot = await mkdtemp(join(tmpdir(), 'debrute-image-cross-model-object-'));
     const fetch: ImageModelFetch = async () => {
       throw new Error('model fetch should not be called for cross-model image input objects');
     };
@@ -904,7 +904,7 @@ describe('image model executors', () => {
             image: [{ image_file: 'https://cdn.example/source.png' }]
           }
         },
-        settings: { imageModels: [{ axisModelId: 'doubao-seedream-5-0-lite-260128', baseUrlOverride: 'https://ark.example/v1', requestModelIdOverride: 'doubao-image' }] },
+        settings: { imageModels: [{ debruteModelId: 'doubao-seedream-5-0-lite-260128', baseUrlOverride: 'https://ark.example/v1', requestModelIdOverride: 'doubao-image' }] },
         secrets: { imageModelApiKeys: { 'doubao-seedream-5-0-lite-260128': 'sk-image' } },
         fetch
       });
@@ -918,7 +918,7 @@ describe('image model executors', () => {
   });
 
   it('rejects OpenAI model-specific image_url objects with project-relative paths before model requests', async () => {
-    const projectRoot = await mkdtemp(join(tmpdir(), 'axis-image-openai-object-local-path-'));
+    const projectRoot = await mkdtemp(join(tmpdir(), 'debrute-image-openai-object-local-path-'));
     let modelRuned = false;
     const fetch: ImageModelFetch = async () => {
       modelRuned = true;
@@ -935,7 +935,7 @@ describe('image model executors', () => {
             image: [{ image_url: 'assets/source.png' }]
           }
         },
-        settings: { imageModels: [{ axisModelId: 'gpt-image-2', baseUrlOverride: 'https://api.openai.com/v1', requestModelIdOverride: 'gpt-image-2' }] },
+        settings: { imageModels: [{ debruteModelId: 'gpt-image-2', baseUrlOverride: 'https://api.openai.com/v1', requestModelIdOverride: 'gpt-image-2' }] },
         secrets: { imageModelApiKeys: { 'gpt-image-2': 'sk-image' } },
         fetch
       });
@@ -950,7 +950,7 @@ describe('image model executors', () => {
   });
 
   it('rejects Gemini snake_case model-specific image part objects before model requests', async () => {
-    const projectRoot = await mkdtemp(join(tmpdir(), 'axis-image-gemini-snake-case-object-'));
+    const projectRoot = await mkdtemp(join(tmpdir(), 'debrute-image-gemini-snake-case-object-'));
     let modelRuned = false;
     const fetch: ImageModelFetch = async () => {
       modelRuned = true;
@@ -967,7 +967,7 @@ describe('image model executors', () => {
             image: [{ inline_data: { mime_type: 'image/png', data: tinyPngBase64 } }]
           }
         },
-        settings: { imageModels: [{ axisModelId: 'gemini-3.1-flash-image-preview', baseUrlOverride: 'https://generativelanguage.googleapis.com/v1beta', requestModelIdOverride: 'gemini-3.1-flash-image-preview' }] },
+        settings: { imageModels: [{ debruteModelId: 'gemini-3.1-flash-image-preview', baseUrlOverride: 'https://generativelanguage.googleapis.com/v1beta', requestModelIdOverride: 'gemini-3.1-flash-image-preview' }] },
         secrets: { imageModelApiKeys: { 'gemini-3.1-flash-image-preview': 'sk-image' } },
         fetch
       });
@@ -982,7 +982,7 @@ describe('image model executors', () => {
   });
 
   it('rejects MiniMax model-specific image_file objects with project-relative paths before model requests', async () => {
-    const projectRoot = await mkdtemp(join(tmpdir(), 'axis-image-minimax-object-local-path-'));
+    const projectRoot = await mkdtemp(join(tmpdir(), 'debrute-image-minimax-object-local-path-'));
     let modelRuned = false;
     const fetch: ImageModelFetch = async () => {
       modelRuned = true;
@@ -999,7 +999,7 @@ describe('image model executors', () => {
             subject_reference: [{ type: 'character', image_file: 'assets/source.png' }]
           }
         },
-        settings: { imageModels: [{ axisModelId: 'image-01', baseUrlOverride: 'https://api.minimax.io', requestModelIdOverride: 'image-01' }] },
+        settings: { imageModels: [{ debruteModelId: 'image-01', baseUrlOverride: 'https://api.minimax.io', requestModelIdOverride: 'image-01' }] },
         secrets: { imageModelApiKeys: { 'image-01': 'sk-image' } },
         fetch
       });
@@ -1014,7 +1014,7 @@ describe('image model executors', () => {
   });
 
   it('rejects MiniMax model-specific image_data objects before model requests', async () => {
-    const projectRoot = await mkdtemp(join(tmpdir(), 'axis-image-minimax-object-image-data-'));
+    const projectRoot = await mkdtemp(join(tmpdir(), 'debrute-image-minimax-object-image-data-'));
     let modelRuned = false;
     const fetch: ImageModelFetch = async () => {
       modelRuned = true;
@@ -1031,7 +1031,7 @@ describe('image model executors', () => {
             subject_reference: [{ type: 'character', image_data: tinyPngBase64 }]
           }
         },
-        settings: { imageModels: [{ axisModelId: 'image-01', baseUrlOverride: 'https://api.minimax.io', requestModelIdOverride: 'image-01' }] },
+        settings: { imageModels: [{ debruteModelId: 'image-01', baseUrlOverride: 'https://api.minimax.io', requestModelIdOverride: 'image-01' }] },
         secrets: { imageModelApiKeys: { 'image-01': 'sk-image' } },
         fetch
       });
@@ -1069,7 +1069,7 @@ describe('image model executors', () => {
       field: 'subject_reference'
     }
   ])('rejects $name model-specific image input objects with extra fields before model requests', async ({ model, baseUrl, requestModelId, arguments: requestArguments, field }) => {
-    const projectRoot = await mkdtemp(join(tmpdir(), `axis-image-extra-object-${model.replace(/[^a-z0-9]+/gi, '-')}-`));
+    const projectRoot = await mkdtemp(join(tmpdir(), `debrute-image-extra-object-${model.replace(/[^a-z0-9]+/gi, '-')}-`));
     let modelRuned = false;
     const fetch: ImageModelFetch = async () => {
       modelRuned = true;
@@ -1083,7 +1083,7 @@ describe('image model executors', () => {
           model,
           arguments: requestArguments
         },
-        settings: { imageModels: [{ axisModelId: model, baseUrlOverride: baseUrl, requestModelIdOverride: requestModelId }] },
+        settings: { imageModels: [{ debruteModelId: model, baseUrlOverride: baseUrl, requestModelIdOverride: requestModelId }] },
         secrets: { imageModelApiKeys: { [model]: 'sk-image' } },
         fetch
       });
@@ -1098,7 +1098,7 @@ describe('image model executors', () => {
   });
 
   it('encodes MiniMax project subject_reference paths as image_file data URLs', async () => {
-    const projectRoot = await mkdtemp(join(tmpdir(), 'axis-image-minimax-local-subject-reference-'));
+    const projectRoot = await mkdtemp(join(tmpdir(), 'debrute-image-minimax-local-subject-reference-'));
     const fetch: ImageModelFetch = async (url, init) => {
       expect(url).toBe('https://api.minimax.io/v1/image_generation');
       expect(JSON.parse(String(init?.body))).toMatchObject({
@@ -1125,7 +1125,7 @@ describe('image model executors', () => {
             subject_reference: ['source.png']
           }
         },
-        settings: { imageModels: [{ axisModelId: 'image-01', baseUrlOverride: 'https://api.minimax.io', requestModelIdOverride: 'image-01' }] },
+        settings: { imageModels: [{ debruteModelId: 'image-01', baseUrlOverride: 'https://api.minimax.io', requestModelIdOverride: 'image-01' }] },
         secrets: { imageModelApiKeys: { 'image-01': 'sk-image' } },
         fetch
       });
@@ -1137,7 +1137,7 @@ describe('image model executors', () => {
   });
 
   it('passes MiniMax model-specific subject_reference objects through to the model request', async () => {
-    const projectRoot = await mkdtemp(join(tmpdir(), 'axis-image-minimax-model-subject-reference-'));
+    const projectRoot = await mkdtemp(join(tmpdir(), 'debrute-image-minimax-model-subject-reference-'));
     const fetch: ImageModelFetch = async (url, init) => {
       expect(url).toBe('https://api.minimax.io/v1/image_generation');
       expect(JSON.parse(String(init?.body))).toMatchObject({
@@ -1168,7 +1168,7 @@ describe('image model executors', () => {
             ]
           }
         },
-        settings: { imageModels: [{ axisModelId: 'image-01', baseUrlOverride: 'https://api.minimax.io', requestModelIdOverride: 'image-01' }] },
+        settings: { imageModels: [{ debruteModelId: 'image-01', baseUrlOverride: 'https://api.minimax.io', requestModelIdOverride: 'image-01' }] },
         secrets: { imageModelApiKeys: { 'image-01': 'sk-image' } },
         fetch
       });
@@ -1180,7 +1180,7 @@ describe('image model executors', () => {
   });
 
   it('rejects empty image input arrays before model requests', async () => {
-    const projectRoot = await mkdtemp(join(tmpdir(), 'axis-image-openai-empty-input-images-'));
+    const projectRoot = await mkdtemp(join(tmpdir(), 'debrute-image-openai-empty-input-images-'));
     const fetch: ImageModelFetch = async () => {
       throw new Error('model fetch should not be called for empty image input arrays');
     };
@@ -1189,7 +1189,7 @@ describe('image model executors', () => {
         projectRoot,
         invocationId: 'turn-empty-input-images',
         input: { model: 'gpt-image-2', arguments: { prompt: 'cover image', image: [], size: '1024x1024' } },
-        settings: { imageModels: [{ axisModelId: 'gpt-image-2', baseUrlOverride: 'https://api.openai.com/v1', requestModelIdOverride: 'gpt-image-2' }] },
+        settings: { imageModels: [{ debruteModelId: 'gpt-image-2', baseUrlOverride: 'https://api.openai.com/v1', requestModelIdOverride: 'gpt-image-2' }] },
         secrets: { imageModelApiKeys: { 'gpt-image-2': 'sk-image' } },
         fetch
       });
@@ -1203,7 +1203,7 @@ describe('image model executors', () => {
   });
 
   it('aborts an OpenAI request when the model endpoint does not respond before the timeout', async () => {
-    const projectRoot = await mkdtemp(join(tmpdir(), 'axis-image-openai-timeout-'));
+    const projectRoot = await mkdtemp(join(tmpdir(), 'debrute-image-openai-timeout-'));
     const fetch: ImageModelFetch = async (_url, init) => {
       const signal = init?.signal;
       return await new Promise<Response>((_resolve, reject) => {
@@ -1223,7 +1223,7 @@ describe('image model executors', () => {
         projectRoot,
         invocationId: 'turn-openai-timeout',
         input: { model: 'gpt-image-2', arguments: { prompt: 'cover image', size: '1024x1024' } },
-        settings: { imageModels: [{ axisModelId: 'gpt-image-2', baseUrlOverride: 'https://api.openai.com/v1', requestModelIdOverride: 'gpt-image-2' }] },
+        settings: { imageModels: [{ debruteModelId: 'gpt-image-2', baseUrlOverride: 'https://api.openai.com/v1', requestModelIdOverride: 'gpt-image-2' }] },
         secrets: { imageModelApiKeys: { 'gpt-image-2': 'sk-image' } },
         requestTimeoutMs: 5,
         fetch
@@ -1238,7 +1238,7 @@ describe('image model executors', () => {
   });
 
   it('cancels a stalled OpenAI response body after the body timeout', async () => {
-    const projectRoot = await mkdtemp(join(tmpdir(), 'axis-image-openai-body-timeout-'));
+    const projectRoot = await mkdtemp(join(tmpdir(), 'debrute-image-openai-body-timeout-'));
     let canceled = false;
     const fetch: ImageModelFetch = async () => new Response(
       new ReadableStream({
@@ -1256,7 +1256,7 @@ describe('image model executors', () => {
         projectRoot,
         invocationId: 'turn-openai-body-timeout',
         input: { model: 'gpt-image-2', arguments: { prompt: 'cover image', size: '1024x1024' } },
-        settings: { imageModels: [{ axisModelId: 'gpt-image-2', baseUrlOverride: 'https://api.openai.com/v1', requestModelIdOverride: 'gpt-image-2' }] },
+        settings: { imageModels: [{ debruteModelId: 'gpt-image-2', baseUrlOverride: 'https://api.openai.com/v1', requestModelIdOverride: 'gpt-image-2' }] },
         secrets: { imageModelApiKeys: { 'gpt-image-2': 'sk-image' } },
         requestTimeoutMs: 5,
         fetch
@@ -1271,7 +1271,7 @@ describe('image model executors', () => {
   });
 
   it('returns a body timeout when response body cancellation does not settle', async () => {
-    const projectRoot = await mkdtemp(join(tmpdir(), 'axis-image-openai-body-cancel-hang-'));
+    const projectRoot = await mkdtemp(join(tmpdir(), 'debrute-image-openai-body-cancel-hang-'));
     let canceled = false;
     const fetch: ImageModelFetch = async () => new Response(
       new ReadableStream({
@@ -1290,7 +1290,7 @@ describe('image model executors', () => {
         projectRoot,
         invocationId: 'turn-openai-body-cancel-hang',
         input: { model: 'gpt-image-2', arguments: { prompt: 'cover image', size: '1024x1024' } },
-        settings: { imageModels: [{ axisModelId: 'gpt-image-2', baseUrlOverride: 'https://api.openai.com/v1', requestModelIdOverride: 'gpt-image-2' }] },
+        settings: { imageModels: [{ debruteModelId: 'gpt-image-2', baseUrlOverride: 'https://api.openai.com/v1', requestModelIdOverride: 'gpt-image-2' }] },
         secrets: { imageModelApiKeys: { 'gpt-image-2': 'sk-image' } },
         requestTimeoutMs: 5,
         fetch
@@ -1312,7 +1312,7 @@ describe('image model executors', () => {
   });
 
   it('aborts an OpenAI request when the caller signal aborts', async () => {
-    const projectRoot = await mkdtemp(join(tmpdir(), 'axis-image-openai-caller-abort-'));
+    const projectRoot = await mkdtemp(join(tmpdir(), 'debrute-image-openai-caller-abort-'));
     const controller = new AbortController();
     const fetch: ImageModelFetch = async (_url, init) => {
       setTimeout(() => controller.abort(new Error('caller stopped image request')), 0);
@@ -1327,7 +1327,7 @@ describe('image model executors', () => {
         projectRoot,
         invocationId: 'turn-openai-caller-abort',
         input: { model: 'gpt-image-2', arguments: { prompt: 'cover image', size: '1024x1024' } },
-        settings: { imageModels: [{ axisModelId: 'gpt-image-2', baseUrlOverride: 'https://api.openai.com/v1', requestModelIdOverride: 'gpt-image-2' }] },
+        settings: { imageModels: [{ debruteModelId: 'gpt-image-2', baseUrlOverride: 'https://api.openai.com/v1', requestModelIdOverride: 'gpt-image-2' }] },
         secrets: { imageModelApiKeys: { 'gpt-image-2': 'sk-image' } },
         fetch,
         signal: controller.signal
@@ -1341,7 +1341,7 @@ describe('image model executors', () => {
   });
 
   it('aborts Wan polling delay when the caller signal aborts', async () => {
-    const projectRoot = await mkdtemp(join(tmpdir(), 'axis-image-wan-caller-abort-'));
+    const projectRoot = await mkdtemp(join(tmpdir(), 'debrute-image-wan-caller-abort-'));
     const controller = new AbortController();
     const calls: string[] = [];
     const fetch: ImageModelFetch = async (url) => {
@@ -1360,7 +1360,7 @@ describe('image model executors', () => {
         projectRoot,
         invocationId: 'turn-wan-caller-abort',
         input: { model: 'wan2.7-image', arguments: { prompt: 'cover image' } },
-        settings: { imageModels: [{ axisModelId: 'wan2.7-image', baseUrlOverride: 'https://dashscope.aliyuncs.com/api/v1', requestModelIdOverride: 'wan2.7-image' }] },
+        settings: { imageModels: [{ debruteModelId: 'wan2.7-image', baseUrlOverride: 'https://dashscope.aliyuncs.com/api/v1', requestModelIdOverride: 'wan2.7-image' }] },
         secrets: { imageModelApiKeys: { 'wan2.7-image': 'sk-wan' } },
         pollIntervalMs: 1_000,
         wanPollMaxAttempts: 10,
@@ -1380,7 +1380,7 @@ describe('image model executors', () => {
   });
 
   it('returns the current image download failure error payload', async () => {
-    const projectRoot = await mkdtemp(join(tmpdir(), 'axis-image-openai-download-failure-'));
+    const projectRoot = await mkdtemp(join(tmpdir(), 'debrute-image-openai-download-failure-'));
     const fetch: ImageModelFetch = async (url) => {
       if (url === 'https://cdn.example/original-output.png') {
         throw new TypeError('fetch failed');
@@ -1399,7 +1399,7 @@ describe('image model executors', () => {
         projectRoot,
         invocationId: 'turn-openai-download-failure',
         input: { model: 'gpt-image-2', arguments: { prompt: 'cover image', size: '1024x1024' } },
-        settings: { imageModels: [{ axisModelId: 'gpt-image-2', baseUrlOverride: 'https://api.openai.com/v1', requestModelIdOverride: 'gpt-image-2' }] },
+        settings: { imageModels: [{ debruteModelId: 'gpt-image-2', baseUrlOverride: 'https://api.openai.com/v1', requestModelIdOverride: 'gpt-image-2' }] },
         secrets: { imageModelApiKeys: { 'gpt-image-2': 'sk-image' } },
         fetch
       });
@@ -1417,31 +1417,31 @@ describe('image model executors', () => {
 
   it.each([
     {
-      axisModelId: 'doubao-seedream-5-0-lite-260128',
+      debruteModelId: 'doubao-seedream-5-0-lite-260128',
       baseUrl: 'https://ark.example/v1',
       expectedFirstUrl: 'https://ark.example/v1/images/generations',
       response: { data: [{ url: 'https://cdn.example/doubao.png' }] }
     },
     {
-      axisModelId: 'gemini-3.1-flash-image-preview',
+      debruteModelId: 'gemini-3.1-flash-image-preview',
       baseUrl: 'https://generativelanguage.googleapis.com/v1beta',
       expectedFirstUrl: 'https://generativelanguage.googleapis.com/v1beta/models/gemini-3.1-flash-image-preview:generateContent?key=sk-image',
       response: { candidates: [{ content: { parts: [{ inlineData: { mimeType: 'image/png', data: tinyPngBase64 } }] } }] }
     },
     {
-      axisModelId: 'fal-ai/flux/dev',
+      debruteModelId: 'fal-ai/flux/dev',
       baseUrl: 'https://fal.run',
       expectedFirstUrl: 'https://fal.run/fal-ai/flux/dev',
       response: { images: [{ url: 'https://cdn.example/fal.png' }], seed: 123 }
     },
     {
-      axisModelId: 'image-01',
+      debruteModelId: 'image-01',
       baseUrl: 'https://api.minimax.io',
       expectedFirstUrl: 'https://api.minimax.io/v1/image_generation',
       response: { base_resp: { status_code: 0 }, data: { image_base64: [tinyPngBase64] } }
     }
-  ])('executes the $axisModelId executor branch', async ({ axisModelId, baseUrl, expectedFirstUrl, response }) => {
-    const projectRoot = await mkdtemp(join(tmpdir(), `axis-image-${axisModelId.replace(/[^a-z0-9]+/gi, '-')}-`));
+  ])('executes the $debruteModelId executor branch', async ({ debruteModelId, baseUrl, expectedFirstUrl, response }) => {
+    const projectRoot = await mkdtemp(join(tmpdir(), `debrute-image-${debruteModelId.replace(/[^a-z0-9]+/gi, '-')}-`));
     const calls: string[] = [];
     const fetch: ImageModelFetch = async (url) => {
       calls.push(url);
@@ -1454,9 +1454,9 @@ describe('image model executors', () => {
       const result = await executeImageModelRequest({
         projectRoot,
         invocationId: 'turn-1',
-        input: { model: axisModelId, arguments: { prompt: 'cover image' } },
-        settings: { imageModels: [{ axisModelId, baseUrlOverride: baseUrl, requestModelIdOverride: axisModelId }] },
-        secrets: { imageModelApiKeys: { [axisModelId]: 'sk-image' } },
+        input: { model: debruteModelId, arguments: { prompt: 'cover image' } },
+        settings: { imageModels: [{ debruteModelId, baseUrlOverride: baseUrl, requestModelIdOverride: debruteModelId }] },
+        secrets: { imageModelApiKeys: { [debruteModelId]: 'sk-image' } },
         fetch
       });
 
@@ -1471,7 +1471,7 @@ describe('image model executors', () => {
   });
 
   it('uses Gemini 3.1 image responseFormat and records compact inline image metadata', async () => {
-    const projectRoot = await mkdtemp(join(tmpdir(), 'axis-image-gemini-compact-'));
+    const projectRoot = await mkdtemp(join(tmpdir(), 'debrute-image-gemini-compact-'));
     const recorded: unknown[] = [];
     const fetch: ImageModelFetch = async (url, init) => {
       expect(url).toBe('https://generativelanguage.googleapis.com/v1beta/models/gemini-3.1-flash-image-preview:generateContent?key=sk-image');
@@ -1509,7 +1509,7 @@ describe('image model executors', () => {
             image_size: '1K'
           }
         },
-        settings: { imageModels: [{ axisModelId: 'gemini-3.1-flash-image-preview', baseUrlOverride: 'https://generativelanguage.googleapis.com/v1beta', requestModelIdOverride: 'gemini-3.1-flash-image-preview' }] },
+        settings: { imageModels: [{ debruteModelId: 'gemini-3.1-flash-image-preview', baseUrlOverride: 'https://generativelanguage.googleapis.com/v1beta', requestModelIdOverride: 'gemini-3.1-flash-image-preview' }] },
         secrets: { imageModelApiKeys: { 'gemini-3.1-flash-image-preview': 'sk-image' } },
         fetch,
         recordGeneratedAsset: async (input) => {
@@ -1562,7 +1562,7 @@ describe('image model executors', () => {
   });
 
   it('executes the Wan async polling executor branch', async () => {
-    const projectRoot = await mkdtemp(join(tmpdir(), 'axis-image-wan-'));
+    const projectRoot = await mkdtemp(join(tmpdir(), 'debrute-image-wan-'));
     const calls: string[] = [];
     const fetch: ImageModelFetch = async (url) => {
       calls.push(url);
@@ -1579,7 +1579,7 @@ describe('image model executors', () => {
         projectRoot,
         invocationId: 'turn-1',
         input: { model: 'wan2.7-image', arguments: { prompt: 'cover image' } },
-        settings: { imageModels: [{ axisModelId: 'wan2.7-image', baseUrlOverride: 'https://dashscope.aliyuncs.com/api/v1', requestModelIdOverride: 'wan2.7-image' }] },
+        settings: { imageModels: [{ debruteModelId: 'wan2.7-image', baseUrlOverride: 'https://dashscope.aliyuncs.com/api/v1', requestModelIdOverride: 'wan2.7-image' }] },
         secrets: { imageModelApiKeys: { 'wan2.7-image': 'sk-wan' } },
         pollIntervalMs: 0,
         fetch
@@ -1597,7 +1597,7 @@ describe('image model executors', () => {
   });
 
   it('executes the Vydra async polling executor branch', async () => {
-    const projectRoot = await mkdtemp(join(tmpdir(), 'axis-image-vydra-'));
+    const projectRoot = await mkdtemp(join(tmpdir(), 'debrute-image-vydra-'));
     const calls: string[] = [];
     const fetch: ImageModelFetch = async (url) => {
       calls.push(url);
@@ -1614,7 +1614,7 @@ describe('image model executors', () => {
         projectRoot,
         invocationId: 'turn-1',
         input: { model: 'grok-imagine', arguments: { prompt: 'cover image' } },
-        settings: { imageModels: [{ axisModelId: 'grok-imagine', baseUrlOverride: 'https://vydra.example', requestModelIdOverride: 'grok-imagine' }] },
+        settings: { imageModels: [{ debruteModelId: 'grok-imagine', baseUrlOverride: 'https://vydra.example', requestModelIdOverride: 'grok-imagine' }] },
         secrets: { imageModelApiKeys: { 'grok-imagine': 'sk-grok' } },
         pollIntervalMs: 0,
         fetch
@@ -1633,13 +1633,13 @@ describe('image model executors', () => {
 
   it('returns an error without external fetch when the model is disabled', async () => {
     let called = false;
-    const projectRoot = await mkdtemp(join(tmpdir(), 'axis-image-disabled-'));
+    const projectRoot = await mkdtemp(join(tmpdir(), 'debrute-image-disabled-'));
     try {
       const result = await executeImageModelRequest({
         projectRoot,
         invocationId: 'turn-1',
         input: { model: 'gpt-image-2', arguments: { prompt: 'cover image' } },
-        settings: { imageModels: [{ axisModelId: 'gpt-image-2', baseUrlOverride: 'https://api.openai.com/v1', requestModelIdOverride: 'gpt-image-2' }] },
+        settings: { imageModels: [{ debruteModelId: 'gpt-image-2', baseUrlOverride: 'https://api.openai.com/v1', requestModelIdOverride: 'gpt-image-2' }] },
         secrets: { imageModelApiKeys: {} },
         fetch: async () => {
           called = true;

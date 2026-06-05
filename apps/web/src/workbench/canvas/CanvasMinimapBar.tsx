@@ -1,6 +1,6 @@
 import React from 'react';
 import { Map } from 'lucide-react';
-import type { CanvasDocument, CanvasProjection } from '@axis/canvas-core';
+import type { CanvasDocument, CanvasProjection } from '@debrute/canvas-core';
 import type { CanvasMinimapPanelPlacement } from '../shell/floatingBars';
 import { CANVAS_MINIMAP_PANEL_SIZE } from '../shell/floatingBars';
 import type { CanvasPoint, CanvasRect } from '../services/canvasInteraction';

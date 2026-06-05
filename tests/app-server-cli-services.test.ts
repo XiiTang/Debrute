@@ -2,8 +2,8 @@ import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
-import { AxisAppServer, AxisGlobalRuntimeServer, GlobalConfigStore } from '../apps/app-server/src/index';
-import { createImageModelCatalog, type SecretsConfig, type VideoModelsConfig } from '@axis/capability-runtime';
+import { DebruteAppServer, DebruteGlobalRuntimeServer, GlobalConfigStore } from '../apps/app-server/src/index';
+import { createImageModelCatalog, type SecretsConfig, type VideoModelsConfig } from '@debrute/capability-runtime';
 
 class CountingGlobalConfigStore extends GlobalConfigStore {
   readVideoModelsCount = 0;
@@ -25,11 +25,11 @@ class CountingGlobalConfigStore extends GlobalConfigStore {
   }
 }
 
-describe('AxisAppServer CLI service methods', () => {
+describe('DebruteAppServer CLI service methods', () => {
   it('exposes runtime model summaries without opening a project', async () => {
-    const home = await mkdtemp(join(tmpdir(), 'axis-cli-model-summaries-home-'));
-    const server = new AxisAppServer({
-      globalConfigStore: new GlobalConfigStore({ axisHome: home })
+    const home = await mkdtemp(join(tmpdir(), 'debrute-cli-model-summaries-home-'));
+    const server = new DebruteAppServer({
+      globalConfigStore: new GlobalConfigStore({ debruteHome: home })
     });
     try {
       const imageModels = await server.listImageModelsForCli();
@@ -52,10 +52,10 @@ describe('AxisAppServer CLI service methods', () => {
   });
 
   it('lists only API-key configured image models with original parameter summaries', async () => {
-    const home = await mkdtemp(join(tmpdir(), 'axis-cli-image-list-parameters-home-'));
-    const configStore = new GlobalConfigStore({ axisHome: home });
-    const globalRuntime = new AxisGlobalRuntimeServer({ globalConfigStore: configStore });
-    const server = new AxisAppServer({ globalConfigStore: configStore });
+    const home = await mkdtemp(join(tmpdir(), 'debrute-cli-image-list-parameters-home-'));
+    const configStore = new GlobalConfigStore({ debruteHome: home });
+    const globalRuntime = new DebruteGlobalRuntimeServer({ globalConfigStore: configStore });
+    const server = new DebruteAppServer({ globalConfigStore: configStore });
     try {
       await globalRuntime.imageModelSaveSetting('gpt-image-2', { baseUrlOverride: null, requestModelIdOverride: null, apiKey: 'sk-image' });
       const imageModels = await server.listImageModelsForCli();
@@ -77,10 +77,10 @@ describe('AxisAppServer CLI service methods', () => {
   });
 
   it('reports catalog image model count separately from API-key configured image models', async () => {
-    const home = await mkdtemp(join(tmpdir(), 'axis-cli-runtime-status-image-count-home-'));
-    const configStore = new GlobalConfigStore({ axisHome: home });
-    const globalRuntime = new AxisGlobalRuntimeServer({ globalConfigStore: configStore });
-    const server = new AxisAppServer({ globalConfigStore: configStore });
+    const home = await mkdtemp(join(tmpdir(), 'debrute-cli-runtime-status-image-count-home-'));
+    const configStore = new GlobalConfigStore({ debruteHome: home });
+    const globalRuntime = new DebruteGlobalRuntimeServer({ globalConfigStore: configStore });
+    const server = new DebruteAppServer({ globalConfigStore: configStore });
     try {
       const catalogCount = createImageModelCatalog().listAll().length;
       await expect(server.runtimeStatusForCli()).resolves.toMatchObject({
@@ -107,7 +107,7 @@ describe('AxisAppServer CLI service methods', () => {
   });
 
   it('describes image models with official documentation details without opening a project', async () => {
-    const server = new AxisAppServer();
+    const server = new DebruteAppServer();
     try {
       const detail = await server.describeImageModelForCli('gpt-image-2');
 
@@ -116,7 +116,7 @@ describe('AxisAppServer CLI service methods', () => {
       expect(detail.officialSnapshotPath).toBe('packages/capability-runtime/src/imageModels/officialDocs/snapshots/openai/image-generation.md');
       expect(detail.officialCapturedAt).toMatch(/^\d{4}-\d{2}-\d{2}$/);
       expect(detail.descriptionMarkdown).toContain('# gpt-image-2');
-      expect(detail.descriptionMarkdown).toContain('axis generate image <project> --input-json');
+      expect(detail.descriptionMarkdown).toContain('debrute generate image <project> --input-json');
       expect(detail.descriptionMarkdown).toContain('"model":"gpt-image-2"');
       expect(detail.argumentsSchema).toHaveProperty('properties');
     } finally {
@@ -125,8 +125,8 @@ describe('AxisAppServer CLI service methods', () => {
   });
 
   it('initializes projects only through the explicit CLI init method', async () => {
-    const root = await mkdtemp(join(tmpdir(), 'axis-app-server-cli-init-'));
-    const server = new AxisAppServer();
+    const root = await mkdtemp(join(tmpdir(), 'debrute-app-server-cli-init-'));
+    const server = new DebruteAppServer();
     try {
       await expect(server.projectStatusForCli(root)).rejects.toThrow();
 
@@ -145,14 +145,14 @@ describe('AxisAppServer CLI service methods', () => {
   });
 
   it('does not synchronize Flowmaps into Canvas files for CLI project status reads', async () => {
-    const root = await mkdtemp(join(tmpdir(), 'axis-app-server-cli-readonly-status-'));
-    const server = new AxisAppServer();
+    const root = await mkdtemp(join(tmpdir(), 'debrute-app-server-cli-readonly-status-'));
+    const server = new DebruteAppServer();
     try {
       await server.initProjectForCli(root);
       await mkdir(join(root, 'production'), { recursive: true });
       await writeFile(join(root, 'production/story.md'), '# Story\n', 'utf8');
-      await mkdir(join(root, '.axis/flowmaps'), { recursive: true });
-      await writeFile(join(root, '.axis/flowmaps/production.draft.yaml'), [
+      await mkdir(join(root, '.debrute/flowmaps'), { recursive: true });
+      await writeFile(join(root, '.debrute/flowmaps/production.draft.yaml'), [
         'schemaVersion: 1',
         'canvases:',
         '  - production-map',
@@ -161,10 +161,10 @@ describe('AxisAppServer CLI service methods', () => {
         ''
       ].join('\n'), 'utf8');
       await server.publishFlowmapDraftForProject(root, {
-        sourceDraftPath: '.axis/flowmaps/production.draft.yaml'
+        sourceDraftPath: '.debrute/flowmaps/production.draft.yaml'
       });
 
-      const canvasPath = join(root, '.axis/canvases/production-map.json');
+      const canvasPath = join(root, '.debrute/canvases/production-map.json');
       const before = await readFile(canvasPath, 'utf8');
 
       await server.projectStatusForCli(root);
@@ -177,10 +177,10 @@ describe('AxisAppServer CLI service methods', () => {
   });
 
   it('separates missing image model configuration from unknown image models', async () => {
-    const home = await mkdtemp(join(tmpdir(), 'axis-cli-image-config-home-'));
-    const projectRoot = await mkdtemp(join(tmpdir(), 'axis-cli-image-config-project-'));
-    const server = new AxisAppServer({
-      globalConfigStore: new GlobalConfigStore({ axisHome: home })
+    const home = await mkdtemp(join(tmpdir(), 'debrute-cli-image-config-home-'));
+    const projectRoot = await mkdtemp(join(tmpdir(), 'debrute-cli-image-config-project-'));
+    const server = new DebruteAppServer({
+      globalConfigStore: new GlobalConfigStore({ debruteHome: home })
     });
     try {
       await server.openProject(projectRoot, { initializeIfMissing: true, createDefaultCanvas: true });
@@ -208,11 +208,11 @@ describe('AxisAppServer CLI service methods', () => {
   });
 
   it('returns configuration errors when image model API keys are missing', async () => {
-    const home = await mkdtemp(join(tmpdir(), 'axis-cli-image-auth-home-'));
-    const projectRoot = await mkdtemp(join(tmpdir(), 'axis-cli-image-auth-project-'));
-    const configStore = new GlobalConfigStore({ axisHome: home });
-    const globalRuntime = new AxisGlobalRuntimeServer({ globalConfigStore: configStore });
-    const server = new AxisAppServer({ globalConfigStore: configStore });
+    const home = await mkdtemp(join(tmpdir(), 'debrute-cli-image-auth-home-'));
+    const projectRoot = await mkdtemp(join(tmpdir(), 'debrute-cli-image-auth-project-'));
+    const configStore = new GlobalConfigStore({ debruteHome: home });
+    const globalRuntime = new DebruteGlobalRuntimeServer({ globalConfigStore: configStore });
+    const server = new DebruteAppServer({ globalConfigStore: configStore });
     try {
       await server.openProject(projectRoot, { initializeIfMissing: true, createDefaultCanvas: true });
       await globalRuntime.imageModelSaveSetting('gpt-image-2', {
@@ -236,10 +236,10 @@ describe('AxisAppServer CLI service methods', () => {
   });
 
   it('separates missing video model configuration from unknown video models', async () => {
-    const home = await mkdtemp(join(tmpdir(), 'axis-cli-video-config-home-'));
-    const projectRoot = await mkdtemp(join(tmpdir(), 'axis-cli-video-config-project-'));
-    const server = new AxisAppServer({
-      globalConfigStore: new GlobalConfigStore({ axisHome: home })
+    const home = await mkdtemp(join(tmpdir(), 'debrute-cli-video-config-home-'));
+    const projectRoot = await mkdtemp(join(tmpdir(), 'debrute-cli-video-config-project-'));
+    const server = new DebruteAppServer({
+      globalConfigStore: new GlobalConfigStore({ debruteHome: home })
     });
     try {
       await server.openProject(projectRoot, { initializeIfMissing: true, createDefaultCanvas: true });
@@ -267,11 +267,11 @@ describe('AxisAppServer CLI service methods', () => {
   });
 
   it('returns configuration errors when video model API keys are missing', async () => {
-    const home = await mkdtemp(join(tmpdir(), 'axis-cli-video-auth-home-'));
-    const projectRoot = await mkdtemp(join(tmpdir(), 'axis-cli-video-auth-project-'));
-    const configStore = new GlobalConfigStore({ axisHome: home });
-    const globalRuntime = new AxisGlobalRuntimeServer({ globalConfigStore: configStore });
-    const server = new AxisAppServer({ globalConfigStore: configStore });
+    const home = await mkdtemp(join(tmpdir(), 'debrute-cli-video-auth-home-'));
+    const projectRoot = await mkdtemp(join(tmpdir(), 'debrute-cli-video-auth-project-'));
+    const configStore = new GlobalConfigStore({ debruteHome: home });
+    const globalRuntime = new DebruteGlobalRuntimeServer({ globalConfigStore: configStore });
+    const server = new DebruteAppServer({ globalConfigStore: configStore });
     try {
       await server.openProject(projectRoot, { initializeIfMissing: true, createDefaultCanvas: true });
       await globalRuntime.videoModelSaveSetting('doubao-seedance-2-0-260128', {
@@ -295,11 +295,11 @@ describe('AxisAppServer CLI service methods', () => {
   });
 
   it('runs video generation through one executor-level configuration read', async () => {
-    const home = await mkdtemp(join(tmpdir(), 'axis-cli-video-single-config-read-home-'));
-    const projectRoot = await mkdtemp(join(tmpdir(), 'axis-cli-video-single-config-read-project-'));
-    const configStore = new CountingGlobalConfigStore({ axisHome: home });
-    const globalRuntime = new AxisGlobalRuntimeServer({ globalConfigStore: configStore });
-    const server = new AxisAppServer({
+    const home = await mkdtemp(join(tmpdir(), 'debrute-cli-video-single-config-read-home-'));
+    const projectRoot = await mkdtemp(join(tmpdir(), 'debrute-cli-video-single-config-read-project-'));
+    const configStore = new CountingGlobalConfigStore({ debruteHome: home });
+    const globalRuntime = new DebruteGlobalRuntimeServer({ globalConfigStore: configStore });
+    const server = new DebruteAppServer({
       globalConfigStore: configStore,
       videoModelFetch: async (url) => {
         if (url.endsWith('/contents/generations/tasks')) {
@@ -345,10 +345,10 @@ describe('AxisAppServer CLI service methods', () => {
   });
 
   it('runs runtime LLM requests without project output fields', async () => {
-    const home = await mkdtemp(join(tmpdir(), 'axis-cli-llm-runtime-home-'));
-    const configStore = new GlobalConfigStore({ axisHome: home });
-    const globalRuntime = new AxisGlobalRuntimeServer({ globalConfigStore: configStore });
-    const server = new AxisAppServer({ globalConfigStore: configStore });
+    const home = await mkdtemp(join(tmpdir(), 'debrute-cli-llm-runtime-home-'));
+    const configStore = new GlobalConfigStore({ debruteHome: home });
+    const globalRuntime = new DebruteGlobalRuntimeServer({ globalConfigStore: configStore });
+    const server = new DebruteAppServer({ globalConfigStore: configStore });
     try {
       await globalRuntime.llmSaveProviderSetting({
         id: 'openai-main',
@@ -356,10 +356,10 @@ describe('AxisAppServer CLI service methods', () => {
         providerType: 'openai_compat',
         baseUrl: 'https://api.openai.com/v1',
         enabled: true,
-        modelIds: ['gpt-axis'],
+        modelIds: ['gpt-debrute'],
         apiKey: 'sk-test'
       });
-      await globalRuntime.llmSetDefaultModelKey('openai-main:gpt-axis');
+      await globalRuntime.llmSetDefaultModelKey('openai-main:gpt-debrute');
 
       const result = await server.runLlmRequestForCli({
         prompt: 'write',

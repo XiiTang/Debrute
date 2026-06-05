@@ -6,10 +6,10 @@ import type {
   LlmProviderSettingRecord,
   SaveLlmProviderSettingInput,
   VideoModelSettingRecord
-} from '@axis/app-protocol';
+} from '@debrute/app-protocol';
 import type { WorkbenchActions, WorkbenchState } from '../../types';
-import { getAxisShellApi } from '../../api/shellApi';
-import { AxisCliSettingsPage } from './axis-cli/AxisCliSettingsPage';
+import { getDebruteShellApi } from '../../api/shellApi';
+import { DebruteCliSettingsPage } from './debrute-cli/DebruteCliSettingsPage';
 import { IntegrationsSettingsPage } from './integrations/IntegrationsSettingsPage';
 
 interface LlmProviderDraft {
@@ -39,7 +39,7 @@ const SETTINGS_NAV_ITEMS = [
   { id: 'models', label: 'Models', description: 'Generation endpoints and API keys', icon: Cpu },
   { id: 'canvas', label: 'Canvas', description: 'Canvas rendering resources', icon: ImageIcon },
   { id: 'integrations', label: 'Integrations', description: 'Optional local capabilities', icon: Wrench },
-  { id: 'axis-cli', label: 'Axis CLI', description: 'Command install and Skills sync', icon: Terminal }
+  { id: 'debrute-cli', label: 'Debrute CLI', description: 'Command install and Skills sync', icon: Terminal }
 ] as const;
 
 type SettingsPageId = typeof SETTINGS_NAV_ITEMS[number]['id'];
@@ -79,8 +79,8 @@ export function SettingsPanel({ state, actions }: { state: WorkbenchState; actio
           <CanvasSettingsPage settings={state.canvasSettings} onSave={actions.saveCanvasSettings} />
         ) : activePage === 'integrations' ? (
           <IntegrationsSettingsPage state={state} actions={actions} />
-        ) : activePage === 'axis-cli' ? (
-          <AxisCliSettingsPage shell={getAxisShellApi()} />
+        ) : activePage === 'debrute-cli' ? (
+          <DebruteCliSettingsPage shell={getDebruteShellApi()} />
         ) : null}
       </div>
     </div>
@@ -257,9 +257,9 @@ function ImageModelSettings({ state, actions }: { state: WorkbenchState; actions
       <div className="settings-grid">
         {models.map((model) => (
           <MediaModelCard
-            key={model.axisModelId}
+            key={model.debruteModelId}
             model={model}
-            onSave={(draft) => actions.saveImageModelSetting(model.axisModelId, modelDraftToSaveInput(draft))}
+            onSave={(draft) => actions.saveImageModelSetting(model.debruteModelId, modelDraftToSaveInput(draft))}
           />
         ))}
       </div>
@@ -276,9 +276,9 @@ function VideoModelSettings({ state, actions }: { state: WorkbenchState; actions
       <div className="settings-grid">
         {models.map((model) => (
           <MediaModelCard
-            key={model.axisModelId}
+            key={model.debruteModelId}
             model={model}
-            onSave={(draft) => actions.saveVideoModelSetting(model.axisModelId, modelDraftToSaveInput(draft))}
+            onSave={(draft) => actions.saveVideoModelSetting(model.debruteModelId, modelDraftToSaveInput(draft))}
           />
         ))}
       </div>
@@ -335,7 +335,7 @@ function MediaModelCard({
     <article className="settings-card settings-model-card">
       <div className="settings-model-card-header">
         <div>
-          <strong>{model.axisModelId}</strong>
+          <strong>{model.debruteModelId}</strong>
           <small>{model.apiKeySet ? 'configured' : 'no key'}</small>
         </div>
       </div>

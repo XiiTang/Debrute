@@ -20,7 +20,7 @@ Input file fields accept hosted URLs or Base64 data URIs. Hosted URLs must be pu
 
 ## Input schema
 
-Official input fields used by AXIS:
+Official input fields used by Debrute:
 
 - `image_url`: required string URL of the image used as the generation source.
 - `strength`: float strength of the initial image. Higher strength values are better for this model. Default is `0.95`.

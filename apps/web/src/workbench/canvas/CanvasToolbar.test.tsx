@@ -1,6 +1,6 @@
 import React from 'react';
 import { describe, expect, it, vi } from 'vitest';
-import { createCanvasDocument, type CanvasProjection } from '@axis/canvas-core';
+import { createCanvasDocument, type CanvasProjection } from '@debrute/canvas-core';
 import { CanvasToolbar } from './CanvasToolbar';
 import { createCanvasEditorRuntime } from './runtime/CanvasEditorRuntime';
 

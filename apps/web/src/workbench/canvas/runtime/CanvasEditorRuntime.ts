@@ -1,4 +1,4 @@
-import type { ProjectedCanvasNode } from '@axis/canvas-core';
+import type { ProjectedCanvasNode } from '@debrute/canvas-core';
 import {
   getCanvasResizePreserveAspect,
   normalizeCanvasWheelDelta,

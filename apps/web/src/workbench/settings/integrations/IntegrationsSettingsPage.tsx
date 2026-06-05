@@ -4,7 +4,7 @@ import type {
   IntegrationBackendStatus,
   IntegrationOperationDiagnostic,
   IntegrationStatus
-} from '@axis/app-protocol';
+} from '@debrute/app-protocol';
 import type { WorkbenchActions, WorkbenchState } from '../../../types';
 
 type IntegrationActionKind = 'install' | 'update' | 'uninstall';
@@ -38,7 +38,7 @@ export function IntegrationsSettingsPage({
       <header className="settings-section-header integrations-settings-header">
         <span>Optional</span>
         <h2>Integrations</h2>
-        <p>AXIS detects optional local capabilities from PATH and shows backend command previews without executing them.</p>
+        <p>Debrute detects optional local capabilities from PATH and shows backend command previews without executing them.</p>
         <div className="settings-actions">
           <button type="button" disabled={rescanRunning} onClick={() => void rescan()}>
             <RefreshCw size={14} />

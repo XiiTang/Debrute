@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import type { WorkbenchApiClient, WorkbenchProjectSessionSnapshot } from '@axis/app-protocol';
+import type { WorkbenchApiClient, WorkbenchProjectSessionSnapshot } from '@debrute/app-protocol';
 import { openInitialProject } from './projectSessionState';
 
 describe('project session startup', () => {

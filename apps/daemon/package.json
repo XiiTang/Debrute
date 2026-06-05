@@ -1,13 +1,13 @@
 {
-  "name": "@axis/daemon",
-  "version": "0.1.0",
+  "name": "@debrute/daemon",
+  "version": "0.0.1",
   "license": "Apache-2.0",
   "private": true,
   "type": "module",
   "main": "dist/index.js",
   "types": "dist/index.d.ts",
   "bin": {
-    "axis-daemon": "dist/cli.js"
+    "debrute-daemon": "dist/cli.js"
   },
   "scripts": {
     "build": "tsc -b",
@@ -15,8 +15,8 @@
     "dev": "tsx src/cli.ts"
   },
   "dependencies": {
-    "@axis/app-protocol": "workspace:*",
-    "@axis/app-server": "workspace:*",
-    "@axis/project-core": "workspace:*"
+    "@debrute/app-protocol": "workspace:*",
+    "@debrute/app-server": "workspace:*",
+    "@debrute/project-core": "workspace:*"
   }
 }
