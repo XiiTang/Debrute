@@ -82,6 +82,9 @@ describe('web Settings pages', () => {
 
     expect(html).toContain('Axis CLI');
     expect(html).toContain('Manual install');
+    expect(html).toContain('https://github.com/XiiTang/AXIS/releases');
+    expect(html).toContain('axis_SHA256SUMS');
+    expect(html).toContain('README');
     expect(html).toContain('axis skills sync');
     expect(html).not.toContain('Install Axis CLI</button>');
   });
@@ -128,6 +131,7 @@ describe('web Settings pages', () => {
       ok: false,
       status: { kind: 'error', code: 'skills_sync_failed', message: 'Axis Skills sync failed.' }
     })).toEqual({ kind: 'error', code: 'skills_sync_failed', message: 'Axis Skills sync failed.' });
+    expect(axisCliSkillsStatusFromActionResult({ ok: true, status: { kind: 'not_checked' } })).toBeUndefined();
   });
 
   it('renders Axis CLI Skills status details and errors', () => {

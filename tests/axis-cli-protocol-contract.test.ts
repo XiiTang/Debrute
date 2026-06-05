@@ -45,7 +45,7 @@ describe('Axis CLI protocol contracts', () => {
         cliVersion: '0.2.0',
         managedPath: '/Users/me/.axis/bin/axis',
         repairCommand: 'export PATH="$HOME/.axis/bin:$PATH"',
-        skills: { kind: 'not_checked' }
+        skills: { kind: 'in_sync', axisVersion: '0.2.0' }
       },
       { kind: 'error', desktopVersion: '0.2.0', code: 'download_failed', message: 'download failed', manualCommand: 'curl ...' }
     ];

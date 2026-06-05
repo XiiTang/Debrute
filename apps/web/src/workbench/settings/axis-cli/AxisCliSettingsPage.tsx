@@ -72,7 +72,12 @@ export function AxisCliSettingsPage({
         </header>
         <div className="settings-card axis-cli-status-card">
           <strong>Manual install</strong>
-          <pre><code>Download Axis CLI from GitHub Releases, then run axis skills sync.</code></pre>
+          <p>
+            Download the matching Axis CLI archive from{' '}
+            <a href="https://github.com/XiiTang/AXIS/releases" target="_blank" rel="noreferrer">GitHub Releases</a>,
+            verify it with axis_SHA256SUMS, then use the README manual install command for your platform.
+          </p>
+          <pre><code>axis --version{'\n'}axis skills sync</code></pre>
         </div>
       </section>
     );
@@ -162,7 +167,6 @@ function statusLabel(status: AxisCliStatus | undefined): string {
 }
 
 function skillsStatusLabel(status: AxisCliSkillsStatus): string {
-  if (status.kind === 'not_checked') return 'Not checked';
   if (status.kind === 'in_sync') return `In sync ${status.axisVersion}`;
   if (status.kind === 'out_of_sync') {
     return status.stateAxisVersion
@@ -207,8 +211,7 @@ function isAxisCliSkillsStatus(status: unknown): status is AxisCliSkillsStatus {
     return false;
   }
   const kind = (status as { kind: unknown }).kind;
-  return kind === 'not_checked'
-    || kind === 'in_sync'
+  return kind === 'in_sync'
     || kind === 'out_of_sync'
     || kind === 'partially_removed'
     || kind === 'error';

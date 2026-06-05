@@ -202,6 +202,36 @@ describe('Desktop Axis CLI installer', () => {
     }
   });
 
+  it('does not synthesize a Skills status when Desktop status has no installed CLI', async () => {
+    const home = await mkdtemp(join(tmpdir(), 'axis-cli-sync-no-status-'));
+    try {
+      const installer = createAxisCliInstaller({
+        desktopVersion: '0.2.0',
+        userHome: home,
+        platform: 'darwin',
+        arch: 'arm64',
+        runAxis: async () => ({
+          stdout: 'axis/1 ok cmd=skills.sync\n',
+          stderr: '',
+          exitCode: 0
+        })
+      });
+
+      const result = await installer.syncSkills();
+
+      expect(result).toEqual({
+        ok: false,
+        status: {
+          kind: 'error',
+          code: 'axis_cli_status_unavailable',
+          message: 'Axis CLI status does not include Skills state.'
+        }
+      });
+    } finally {
+      await rm(home, { recursive: true, force: true });
+    }
+  });
+
   it('builds POSIX manual install commands that verify the downloaded archive in /tmp', () => {
     const command = manualInstallCommand({ version: '0.2.0', platform: 'darwin', arch: 'arm64' }).command;
 

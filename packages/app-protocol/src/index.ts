@@ -372,7 +372,6 @@ export interface SkillsSyncSnapshot extends SkillsStatusSnapshot {
 }
 
 export type AxisCliSkillsStatus =
-  | { kind: 'not_checked' }
   | { kind: 'in_sync'; axisVersion: string }
   | { kind: 'out_of_sync'; cliVersion: string; stateAxisVersion: string | null }
   | { kind: 'partially_removed'; skippedDeletedSkills: string[] }

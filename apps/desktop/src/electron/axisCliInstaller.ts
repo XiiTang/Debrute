@@ -122,11 +122,12 @@ export function createAxisCliInstaller(input: AxisCliInstallerInput): AxisCliIns
       const status = await getStatusForEnvPath(pathRepairFailed
         ? input.envPath
         : envPathWithManagedBin(paths.binDir, input.envPath ?? process.env.PATH ?? '', platform));
-      const statusWithSkills = withSkillsStatus(status, skillsResult.exitCode === 0
-        ? skillsStatusFromCliStatus(status)
-        : { kind: 'error', code: 'skills_sync_failed', message: skillsResult.stderr || 'Axis Skills sync failed.' });
+      const statusWithSkills = skillsResult.exitCode === 0
+        ? status
+        : withSkillsStatus(status, { kind: 'error', code: 'skills_sync_failed', message: skillsResult.stderr || 'Axis Skills sync failed.' });
 
-      if (pathRepairFailed && 'cliVersion' in statusWithSkills) {
+      const skills = skillsStatusFromCliStatus(statusWithSkills);
+      if (pathRepairFailed && 'cliVersion' in statusWithSkills && skills) {
         return {
           ok: true,
           status: {
@@ -135,7 +136,7 @@ export function createAxisCliInstaller(input: AxisCliInstallerInput): AxisCliIns
             cliVersion: statusWithSkills.cliVersion,
             managedPath: paths.shimPath,
             repairCommand: pathRepairCommand({ userHome: input.userHome, platform }),
-            skills: skillsStatusFromCliStatus(statusWithSkills)
+            skills
           }
         };
       }
@@ -172,7 +173,18 @@ export function createAxisCliInstaller(input: AxisCliInstallerInput): AxisCliIns
       if (result.exitCode !== 0) {
         return { ok: false, status: { kind: 'error', code: 'skills_sync_failed', message: result.stderr || 'Axis Skills sync failed.' } };
       }
-      return { ok: true, status: skillsStatusFromCliStatus(await getStatus()) };
+      const skills = skillsStatusFromCliStatus(await getStatus());
+      if (!skills) {
+        return {
+          ok: false,
+          status: {
+            kind: 'error',
+            code: 'axis_cli_status_unavailable',
+            message: 'Axis CLI status does not include Skills state.'
+          }
+        };
+      }
+      return { ok: true, status: skills };
     },
     getManualInstallCommand: async () => manual()
   };
@@ -203,8 +215,8 @@ function parseAxisVersion(stdout: string): string | undefined {
   return /(\d+\.\d+\.\d+)/.exec(stdout)?.[1];
 }
 
-function skillsStatusFromCliStatus(status: AxisCliStatus): AxisCliSkillsStatus {
-  return 'skills' in status ? status.skills : { kind: 'not_checked' };
+function skillsStatusFromCliStatus(status: AxisCliStatus): AxisCliSkillsStatus | undefined {
+  return 'skills' in status ? status.skills : undefined;
 }
 
 function withSkillsStatus(status: AxisCliStatus, skills: AxisCliSkillsStatus): AxisCliStatus {
