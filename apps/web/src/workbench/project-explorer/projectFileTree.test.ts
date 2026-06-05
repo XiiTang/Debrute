@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { buildProjectFileTree, expandedProjectTreePaths } from './projectFileTree';
+import { buildProjectFileTree, expandedProjectTreePaths, findProjectFileTreeNode } from './projectFileTree';
 
 describe('project file tree', () => {
   it('builds nested directory and file nodes from project-relative paths', () => {
@@ -87,5 +87,17 @@ describe('project file tree', () => {
       'assets/pages',
       'rules'
     ]);
+  });
+
+  it('finds file and directory nodes by project-relative path', () => {
+    const tree = buildProjectFileTree([
+      { kind: 'file', projectRelativePath: 'assets/pages/page-1.png' },
+      { kind: 'file', projectRelativePath: 'briefs/concept.md' }
+    ]);
+
+    expect(findProjectFileTreeNode(tree, 'assets')).toMatchObject({ kind: 'directory', path: 'assets' });
+    expect(findProjectFileTreeNode(tree, 'assets/pages')).toMatchObject({ kind: 'directory', path: 'assets/pages' });
+    expect(findProjectFileTreeNode(tree, 'assets/pages/page-1.png')).toMatchObject({ kind: 'file', path: 'assets/pages/page-1.png' });
+    expect(findProjectFileTreeNode(tree, 'missing.md')).toBeUndefined();
   });
 });

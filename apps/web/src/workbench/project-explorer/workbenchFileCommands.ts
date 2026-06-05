@@ -5,6 +5,18 @@ export function clearClipboardAfterPaste(clipboard: WorkbenchFileClipboard): Wor
   return clipboard.operation === 'cut' ? undefined : clipboard;
 }
 
+export function clearClipboardAfterDeletedPath(
+  clipboard: WorkbenchFileClipboard | undefined,
+  deletedProjectRelativePath: string
+): WorkbenchFileClipboard | undefined {
+  if (!clipboard) {
+    return undefined;
+  }
+  return isProjectPathContainedByDeletedPath(clipboard.projectRelativePath, deletedProjectRelativePath)
+    ? undefined
+    : clipboard;
+}
+
 export function nearestExistingParentSelection(
   deletedProjectRelativePath: string,
   existingProjectRelativePaths: Set<string>
@@ -41,10 +53,21 @@ export function notificationMessageForFileCommandError(prefix: string, error: un
   return `${prefix}: ${error instanceof Error ? error.message : String(error)}`;
 }
 
+export function permanentDeleteConfirmationMessage(input: {
+  projectRelativePath: string;
+  kind: 'file' | 'directory';
+}): string {
+  return `Permanently delete ${input.kind} "${input.projectRelativePath}"? This cannot be undone.`;
+}
+
 function isDeletedNodeSelection(
   selection: CanvasSelection,
   deletedProjectRelativePath: string
 ): boolean {
   return selection.kind === 'node'
-    && (selection.projectRelativePath === deletedProjectRelativePath || selection.projectRelativePath.startsWith(`${deletedProjectRelativePath}/`));
+    && isProjectPathContainedByDeletedPath(selection.projectRelativePath, deletedProjectRelativePath);
+}
+
+function isProjectPathContainedByDeletedPath(projectRelativePath: string, deletedProjectRelativePath: string): boolean {
+  return projectRelativePath === deletedProjectRelativePath || projectRelativePath.startsWith(`${deletedProjectRelativePath}/`);
 }

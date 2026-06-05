@@ -17,6 +17,7 @@ import {
 } from './desktopRuntimeClient.js';
 import { createDebruteCliInstaller } from './debruteCliInstaller.js';
 import { registerDebruteCliShellIpc } from './debruteCliShell.js';
+import { trashProjectPathWithDesktopShell } from './desktopProjectTrash.js';
 import { resolveDesktopIntegrationEnvPath } from './integrationEnv.js';
 import { createApplicationMenuController } from './menu/registerApplicationMenu.js';
 
@@ -116,6 +117,16 @@ function registerShellIpc(): void {
     }
     return { ok: true };
   });
+  ipcMain.handle('debrute-shell:trashProjectPath', async (_event, input: {
+    projectId: string;
+    projectRelativePath: string;
+    kind: 'file' | 'directory';
+  }) => (
+    trashProjectPathWithDesktopShell({
+      runtimeClient: requireRuntimeClient(),
+      shell
+    }, input)
+  ));
   registerDebruteCliShellIpc({
     ipcMain,
     installer: createDebruteCliInstaller({

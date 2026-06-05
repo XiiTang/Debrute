@@ -27,9 +27,12 @@ import {
   type WorkbenchContextMenuTarget
 } from './shell/contextMenu';
 import { validateInlineProjectName, type ProjectTreeInlineEditState } from './project-explorer/projectTreeEditing';
+import type { ProjectTreeFileKeyboardCommand } from './project-explorer/projectTreeKeyboardCommands';
 import {
   clearCanvasSelectionAfterDeletedPath,
-  nearestExistingParentSelection
+  clearClipboardAfterDeletedPath,
+  nearestExistingParentSelection,
+  permanentDeleteConfirmationMessage
 } from './project-explorer/workbenchFileCommands';
 import {
   canvasMinimapButtonRect,
@@ -459,6 +462,7 @@ export function WorkbenchApp(): React.ReactElement {
           ? nearestExistingParentSelection(current, existingPaths)
           : current
       ));
+      setFileClipboard((current) => clearClipboardAfterDeletedPath(current, input.projectRelativePath));
       return result;
     },
     deleteProjectPathPermanently: async (input) => {
@@ -474,6 +478,7 @@ export function WorkbenchApp(): React.ReactElement {
           ? nearestExistingParentSelection(current, existingPaths)
           : current
       ));
+      setFileClipboard((current) => clearClipboardAfterDeletedPath(current, input.projectRelativePath));
       return result;
     },
     revealProjectPathInSystemFileManager: (input) => api.revealProjectPathInSystemFileManager(input),
@@ -599,6 +604,9 @@ export function WorkbenchApp(): React.ReactElement {
   const notify = useCallback((message: string) => {
     setNotifications((current) => [message, ...current].slice(0, 4));
   }, []);
+  const confirmPermanentDelete = useCallback((input: { projectRelativePath: string; kind: 'file' | 'directory' }) => (
+    window.confirm(permanentDeleteConfirmationMessage(input))
+  ), []);
   const handleWorkbenchContextMenuCommand = useCallback((command: WorkbenchContextMenuCommand) => {
     runWorkbenchContextMenuCommand({
       command,
@@ -612,7 +620,8 @@ export function WorkbenchApp(): React.ReactElement {
       copyText: copyProjectRelativePath,
       notify,
       closeContextMenu: closeWorkbenchContextMenu,
-      openInspectorPanel
+      openInspectorPanel,
+      confirmPermanentDelete
     });
   }, [
     actions,
@@ -620,6 +629,37 @@ export function WorkbenchApp(): React.ReactElement {
     activeProjection,
     closeWorkbenchContextMenu,
     contextMenu,
+    copyProjectRelativePath,
+    confirmPermanentDelete,
+    fileClipboard,
+    notify,
+    openInspectorPanel
+  ]);
+  const handleProjectTreeKeyboardFileCommand = useCallback((command: ProjectTreeFileKeyboardCommand, target: WorkbenchContextMenuTarget) => {
+    runWorkbenchContextMenuCommand({
+      command,
+      contextMenu: {
+        target,
+        position: { x: 0, y: 0 }
+      },
+      activeProjection,
+      activeCanvasRuntime,
+      fileClipboard,
+      actions,
+      setInlineProjectTreeEdit,
+      setFileClipboard,
+      copyText: copyProjectRelativePath,
+      notify,
+      closeContextMenu: closeWorkbenchContextMenu,
+      openInspectorPanel,
+      confirmPermanentDelete
+    });
+  }, [
+    actions,
+    activeCanvasRuntime,
+    activeProjection,
+    closeWorkbenchContextMenu,
+    confirmPermanentDelete,
     copyProjectRelativePath,
     fileClipboard,
     notify,
@@ -730,6 +770,8 @@ export function WorkbenchApp(): React.ReactElement {
                 onEditSubmit={() => void submitInlineProjectTreeEdit()}
                 onEditCancel={() => setInlineProjectTreeEdit(undefined)}
                 onClearCut={() => setFileClipboard((current) => current?.operation === 'cut' ? undefined : current)}
+                desktopPlatform={desktopPlatform}
+                onKeyboardFileCommand={handleProjectTreeKeyboardFileCommand}
               />
             </FloatingPanel>
           ) : null

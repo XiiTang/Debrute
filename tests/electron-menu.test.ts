@@ -135,6 +135,16 @@ describe('desktop application menu', () => {
     expect(main).not.toContain('appServer.getSnapshot()');
   });
 
+  it('registers Electron trash requests through the desktop shell IPC bridge', () => {
+    const main = readFileSync(join(process.cwd(), 'apps/desktop/src/electron/main.ts'), 'utf8');
+    const preload = readFileSync(join(process.cwd(), 'apps/desktop/src/electron/preload.ts'), 'utf8');
+
+    expect(main).toContain("ipcMain.handle('debrute-shell:trashProjectPath'");
+    expect(main).toContain('trashProjectPathWithDesktopShell');
+    expect(preload).toContain('trashProjectPath');
+    expect(preload).toContain("ipcRenderer.invoke('debrute-shell:trashProjectPath'");
+  });
+
   it('participates in the shared Workbench runtime registry', () => {
     const main = readFileSync(join(process.cwd(), 'apps/desktop/src/electron/main.ts'), 'utf8');
 

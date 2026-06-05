@@ -3,8 +3,13 @@ import { FilePlus2, Files, FolderPlus, FolderTree } from 'lucide-react';
 import type { WorkbenchProjectSessionSnapshot } from '@debrute/app-protocol';
 import type { WorkbenchActions } from '../../types';
 import type { WorkbenchContextMenuPosition, WorkbenchContextMenuTarget } from '../shell/contextMenu';
-import { buildProjectFileTree, expandedProjectTreePaths, type ProjectFileTreeNode } from './projectFileTree';
+import { buildProjectFileTree, expandedProjectTreePaths, findProjectFileTreeNode, type ProjectFileTreeNode } from './projectFileTree';
 import type { ProjectTreeInlineEditState } from './projectTreeEditing';
+import {
+  projectTreeKeyboardCommandFromEvent,
+  type ProjectTreeFileKeyboardCommand,
+  type ProjectTreeKeyboardEventLike
+} from './projectTreeKeyboardCommands';
 
 export function ProjectTree({
   snapshot,
@@ -16,7 +21,9 @@ export function ProjectTree({
   onEditValueChange,
   onEditSubmit,
   onEditCancel,
-  onClearCut
+  onClearCut,
+  desktopPlatform,
+  onKeyboardFileCommand
 }: {
   snapshot: WorkbenchProjectSessionSnapshot | undefined;
   selectedPath: string | undefined;
@@ -28,9 +35,12 @@ export function ProjectTree({
   onEditSubmit?: (() => void) | undefined;
   onEditCancel?: (() => void) | undefined;
   onClearCut?: (() => void) | undefined;
+  desktopPlatform?: NodeJS.Platform | undefined;
+  onKeyboardFileCommand?: ((command: ProjectTreeFileKeyboardCommand, target: WorkbenchContextMenuTarget) => void) | undefined;
 }): React.ReactElement {
   const tree = useMemo(() => buildProjectFileTree(snapshot?.files ?? []), [snapshot?.files]);
   const defaultExpanded = useMemo(() => expandedProjectTreePaths(tree, selectedPath), [tree, selectedPath]);
+  const selectedNode = useMemo(() => findProjectFileTreeNode(tree, selectedPath), [selectedPath, tree]);
   const [expanded, setExpanded] = useState<Set<string>>(defaultExpanded);
   const rootCreateEditing = editing && isCreatingInlineEditState(editing) && editing.parentProjectRelativePath === ''
     ? editing
@@ -57,16 +67,15 @@ export function ProjectTree({
         role="tree"
         aria-label="Project files"
         tabIndex={0}
-        onKeyDown={(event) => {
-          if (event.key !== 'Escape') {
-            return;
-          }
-          if (editing) {
-            onEditCancel?.();
-            return;
-          }
-          onClearCut?.();
-        }}
+        onKeyDown={(event) => handleProjectTreeKeyboardEvent({
+          event,
+          editing,
+          selectedNode,
+          desktopPlatform: desktopPlatform ?? 'linux',
+          onEditCancel,
+          onClearCut,
+          onKeyboardFileCommand
+        })}
       >
         {rootCreateEditing ? (
           <ProjectTreeInlineEditRow
@@ -105,6 +114,42 @@ export function ProjectTree({
       </div>
     </div>
   );
+}
+
+export function handleProjectTreeKeyboardEvent(input: {
+  event: ProjectTreeKeyboardEventLike & {
+    preventDefault(): void;
+    stopPropagation(): void;
+  };
+  editing: ProjectTreeInlineEditState | undefined;
+  selectedNode: ProjectFileTreeNode | undefined;
+  desktopPlatform: NodeJS.Platform;
+  onEditCancel?: (() => void) | undefined;
+  onClearCut?: (() => void) | undefined;
+  onKeyboardFileCommand?: ((command: ProjectTreeFileKeyboardCommand, target: WorkbenchContextMenuTarget) => void) | undefined;
+}): void {
+  if (input.event.key === 'Escape' && input.editing) {
+    input.onEditCancel?.();
+    return;
+  }
+  const command = projectTreeKeyboardCommandFromEvent(input.event, input.desktopPlatform);
+  if (!command) {
+    return;
+  }
+  input.event.preventDefault();
+  input.event.stopPropagation();
+  if (command === 'cancel-cut') {
+    input.onClearCut?.();
+    return;
+  }
+  if (!input.selectedNode) {
+    return;
+  }
+  input.onKeyboardFileCommand?.(command, {
+    source: 'explorer',
+    kind: input.selectedNode.kind,
+    projectRelativePath: input.selectedNode.path
+  });
 }
 
 function ProjectTreeRow({

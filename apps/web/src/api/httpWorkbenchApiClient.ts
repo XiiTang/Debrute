@@ -138,8 +138,22 @@ export function createHttpWorkbenchApiClient(options: HttpWorkbenchApiClientOpti
       targetDirectoryProjectRelativePath: input.targetDirectoryProjectRelativePath
     }),
     trashProjectPath: async (input) => {
-      const result = await request<WorkbenchProjectFileOperationResult>('DELETE', projectPath(`/files/path/${encodeProjectPath(input.projectRelativePath)}`));
-      return { projectRelativePath: result.projectRelativePath, snapshot: result.snapshot };
+      const debruteShell = shell();
+      if (!debruteShell?.trashProjectPath) {
+        throw new Error('Delete requires the Debrute desktop shell.');
+      }
+      if (!currentProjectId) {
+        throw new Error('Debrute project is not open.');
+      }
+      await debruteShell.trashProjectPath({
+        projectId: currentProjectId,
+        projectRelativePath: input.projectRelativePath,
+        kind: input.kind
+      });
+      return {
+        projectRelativePath: input.projectRelativePath,
+        snapshot: await request<WorkbenchProjectSessionSnapshot>('POST', projectPath('/refresh'))
+      };
     },
     deleteProjectPathPermanently: (input) => request<WorkbenchProjectFileOperationResult>('DELETE', projectPath(`/files/path/${encodeProjectPath(input.projectRelativePath)}`)),
     revealProjectPathInSystemFileManager: async (input) => {

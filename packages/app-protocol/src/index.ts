@@ -528,7 +528,7 @@ export interface WorkbenchApiClient {
   renameProjectPath(input: { projectRelativePath: string; name: string }): Promise<WorkbenchProjectFileOperationResult>;
   copyProjectPath(input: { sourceProjectRelativePath: string; targetDirectoryProjectRelativePath: string }): Promise<WorkbenchProjectFileOperationResult>;
   moveProjectPath(input: { sourceProjectRelativePath: string; targetDirectoryProjectRelativePath: string }): Promise<WorkbenchProjectFileOperationResult>;
-  trashProjectPath(input: { projectRelativePath: string }): Promise<{ projectRelativePath: string; snapshot: WorkbenchProjectSessionSnapshot }>;
+  trashProjectPath(input: { projectRelativePath: string; kind: 'file' | 'directory' }): Promise<{ projectRelativePath: string; snapshot: WorkbenchProjectSessionSnapshot }>;
   deleteProjectPathPermanently(input: { projectRelativePath: string }): Promise<WorkbenchProjectFileOperationResult>;
   revealProjectPathInSystemFileManager(input: { projectRelativePath: string; kind: 'file' | 'directory' }): Promise<{ ok: true }>;
   lookupGeneratedAssetMetadata(input: { projectRelativePath: string }): Promise<GeneratedAssetMetadataLookup>;

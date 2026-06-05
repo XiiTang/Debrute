@@ -65,10 +65,12 @@ describe('workbench context menu', () => {
       'reveal-in-system-file-manager:enabled',
       '---',
       'rename:enabled',
-      'move-to-trash:enabled',
-      'delete-permanently:enabled'
+      'delete:enabled'
     ]);
     expect(actionLabels(items)).toContain('Reveal in Finder');
+    expect(actionLabels(items)).toContain('Delete');
+    expect(actionLabels(items)).not.toContain('Move to Trash');
+    expect(actionLabels(items)).not.toContain('Delete Permanently');
   });
 
   it('enables Project Tree paste when the internal clipboard has a source', () => {
@@ -96,6 +98,10 @@ describe('workbench context menu', () => {
 
     expect(actionCommands(items)).not.toContain('create-file');
     expect(actionCommands(items)).not.toContain('create-directory');
+    expect(actionCommands(items)).toContain('delete');
+    expect(actionCommands(items)).not.toContain('delete-permanently');
+    expect(actionCommands(items)).not.toContain('move-to-trash');
+    expect(actionLabels(items)).toContain('Delete');
   });
 
   it('keeps Canvas node menus free of file-management commands', () => {

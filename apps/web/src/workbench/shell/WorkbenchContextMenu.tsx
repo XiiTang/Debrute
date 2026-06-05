@@ -146,7 +146,7 @@ function contextMenuIcon(command: WorkbenchContextMenuCommand): React.ReactEleme
   if (command === 'rename') {
     return <Edit3 size={14} />;
   }
-  if (command === 'move-to-trash' || command === 'delete-permanently') {
+  if (command === 'delete' || command === 'delete-permanently') {
     return <Trash2 size={14} />;
   }
   return <Copy size={14} />;

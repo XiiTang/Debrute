@@ -15,7 +15,7 @@ export type WorkbenchContextMenuCommand =
   | 'paste'
   | 'reveal-in-system-file-manager'
   | 'rename'
-  | 'move-to-trash'
+  | 'delete'
   | 'delete-permanently'
   | 'copy-relative-path';
 
@@ -78,8 +78,7 @@ export function buildWorkbenchContextMenuItems(input: {
     action('reveal-in-system-file-manager', projectSystemFileManagerLabel(input.desktopPlatform ?? 'linux')),
     separator('modify'),
     action('rename', 'Rename'),
-    action('move-to-trash', 'Move to Trash'),
-    action('delete-permanently', 'Delete Permanently')
+    action('delete', 'Delete')
   ];
 }
 

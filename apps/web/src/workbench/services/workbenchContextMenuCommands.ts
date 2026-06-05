@@ -34,6 +34,7 @@ export function runWorkbenchContextMenuCommand(input: {
   notify: (message: string) => void;
   closeContextMenu: () => void;
   openInspectorPanel: () => void;
+  confirmPermanentDelete: (input: { projectRelativePath: string; kind: WorkbenchContextMenuTarget['kind'] }) => boolean;
 }): void {
   const target = input.contextMenu?.target;
   if (!target) {
@@ -121,13 +122,17 @@ function runExplorerCommand(
     input.closeContextMenu();
     return true;
   }
-  if (input.command === 'move-to-trash') {
-    void input.actions.trashProjectPath({ projectRelativePath })
-      .catch((error) => input.notify(notificationMessageForFileCommandError('Move to trash failed', error)));
+  if (input.command === 'delete') {
+    void input.actions.trashProjectPath({ projectRelativePath, kind: target.kind })
+      .catch((error) => input.notify(notificationMessageForFileCommandError('Delete failed', error)));
     input.closeContextMenu();
     return true;
   }
   if (input.command === 'delete-permanently') {
+    if (!input.confirmPermanentDelete({ projectRelativePath, kind: target.kind })) {
+      input.closeContextMenu();
+      return true;
+    }
     void input.actions.deleteProjectPathPermanently({ projectRelativePath })
       .catch((error) => input.notify(notificationMessageForFileCommandError('Delete failed', error)));
     input.closeContextMenu();

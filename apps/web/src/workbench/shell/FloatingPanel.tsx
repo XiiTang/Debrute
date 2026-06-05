@@ -3,6 +3,7 @@ import { X } from 'lucide-react';
 import { SettingsPanel } from '../settings/SettingsPanel';
 import { ProjectTree } from '../project-explorer/ProjectTree';
 import type { ProjectTreeInlineEditState } from '../project-explorer/projectTreeEditing';
+import type { ProjectTreeFileKeyboardCommand } from '../project-explorer/projectTreeKeyboardCommands';
 import {
   FLOATING_PANEL_DEFINITIONS,
   type FloatingPanelId,
@@ -93,7 +94,9 @@ export function FloatingPanelContent({
   onEditValueChange,
   onEditSubmit,
   onEditCancel,
-  onClearCut
+  onClearCut,
+  desktopPlatform,
+  onKeyboardFileCommand
 }: {
   panelId: FloatingPanelId;
   state: WorkbenchState;
@@ -107,6 +110,8 @@ export function FloatingPanelContent({
   onEditSubmit?: (() => void) | undefined;
   onEditCancel?: (() => void) | undefined;
   onClearCut?: (() => void) | undefined;
+  desktopPlatform?: NodeJS.Platform | undefined;
+  onKeyboardFileCommand?: ((command: ProjectTreeFileKeyboardCommand, target: WorkbenchContextMenuTarget) => void) | undefined;
 }): React.ReactElement {
   if (panelId === 'explorer') {
     return (
@@ -121,6 +126,8 @@ export function FloatingPanelContent({
         onEditSubmit={onEditSubmit}
         onEditCancel={onEditCancel}
         onClearCut={onClearCut}
+        desktopPlatform={desktopPlatform}
+        onKeyboardFileCommand={onKeyboardFileCommand}
       />
     );
   }

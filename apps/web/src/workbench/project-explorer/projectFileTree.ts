@@ -88,6 +88,42 @@ export function expandedProjectTreePaths(tree: ProjectFileTreeNode[], selectedPa
   return expanded;
 }
 
+export function findProjectFileTreeNode(
+  tree: ProjectFileTreeNode[],
+  projectRelativePath: string | undefined
+): ProjectFileTreeNode | undefined {
+  if (!projectRelativePath) {
+    return undefined;
+  }
+  const normalizedPath = normalizeProjectPath(projectRelativePath);
+  for (const node of tree) {
+    const found = findProjectFileTreeNodeInNode(node, normalizedPath);
+    if (found) {
+      return found;
+    }
+  }
+  return undefined;
+}
+
+function findProjectFileTreeNodeInNode(
+  node: ProjectFileTreeNode,
+  projectRelativePath: string
+): ProjectFileTreeNode | undefined {
+  if (node.path === projectRelativePath) {
+    return node;
+  }
+  if (node.kind === 'file') {
+    return undefined;
+  }
+  for (const child of node.children) {
+    const found = findProjectFileTreeNodeInNode(child, projectRelativePath);
+    if (found) {
+      return found;
+    }
+  }
+  return undefined;
+}
+
 function finalizeDirectory(directory: MutableDirectory): ProjectFileTreeDirectory {
   const directories = [...directory.directories.values()]
     .sort(compareByName)
