@@ -2,8 +2,7 @@ import { describe, expect, it } from 'vitest';
 import type { ProjectedCanvasNode } from '@debrute/canvas-core';
 import {
   canvasImagePreviewBucket,
-  canvasImageSourceUrl,
-  shouldUpdateCanvasImageResourceZoom
+  canvasImageSourceUrl
 } from './canvasImagePreviews';
 
 describe('canvas image preview URLs', () => {
@@ -81,32 +80,9 @@ describe('canvas image preview URLs', () => {
     })).toBe(previewUrl('flow/small.png', 512));
   });
 
-  it('rejects invalid target widths instead of selecting a fallback bucket', () => {
+  it('rejects invalid target widths', () => {
     expect(() => canvasImagePreviewBucket(0)).toThrow('Canvas image preview target width must be a positive finite number.');
     expect(() => canvasImagePreviewBucket(Number.NaN)).toThrow('Canvas image preview target width must be a positive finite number.');
-  });
-
-  it('does not settle image resource zoom while previews are disabled', () => {
-    expect(shouldUpdateCanvasImageResourceZoom({
-      imagePreviewsEnabled: false,
-      nextZoom: 0.25,
-      currentResourceZoom: 1,
-      hasPendingTimer: false
-    })).toBe(false);
-
-    expect(shouldUpdateCanvasImageResourceZoom({
-      imagePreviewsEnabled: true,
-      nextZoom: 0.25,
-      currentResourceZoom: 1,
-      hasPendingTimer: false
-    })).toBe(true);
-
-    expect(shouldUpdateCanvasImageResourceZoom({
-      imagePreviewsEnabled: true,
-      nextZoom: 1,
-      currentResourceZoom: 1,
-      hasPendingTimer: false
-    })).toBe(false);
   });
 
   it('keeps preview URLs limited to path, revision, and width', () => {

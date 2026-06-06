@@ -11,8 +11,10 @@ import {
   type CanvasPendingImage
 } from './canvasImageLoading';
 import type { CanvasLoadedImage } from './canvasImagePreviews';
+import { nodeRect } from './canvasVirtualization';
 import type { CanvasCameraState } from './runtime/canvasCamera';
 import type { CanvasRect } from './runtime/canvasGeometry';
+import { rectsIntersect } from './runtime/canvasGeometry';
 
 export interface CanvasImageResourceViewport {
   visibleRect: CanvasRect;
@@ -57,6 +59,7 @@ export function createCanvasImageResourceController(input: {
   const nodeStates = new Map<string, CanvasImageNodeRenderState>();
 
   let viewport: CanvasImageResourceViewport | undefined;
+  let viewportSignature: string | undefined;
   let plan = new Map<string, CanvasImageLoadingPlanItem>();
   let disposed = false;
 
@@ -72,6 +75,7 @@ export function createCanvasImageResourceController(input: {
       records.delete(projectRelativePath);
     }
     retryKeys.set(projectRelativePath, (retryKeys.get(projectRelativePath) ?? 0) + 1);
+    viewportSignature = undefined;
     rebuildPlan();
     publishIfChanged(projectRelativePath);
     pump();
@@ -233,10 +237,17 @@ export function createCanvasImageResourceController(input: {
           publish(path);
         }
       }
+      viewportSignature = undefined;
       rebuildPlan();
       pump();
     },
     setViewport: (nextViewport) => {
+      const nextSignature = canvasImageResourceViewportSignature(nextViewport, nodes);
+      if (viewportSignature === nextSignature) {
+        viewport = nextViewport;
+        return;
+      }
+      viewportSignature = nextSignature;
       viewport = nextViewport;
       rebuildPlan();
       pump();
@@ -277,6 +288,7 @@ export function createCanvasImageResourceController(input: {
       nodeStates.clear();
       plan.clear();
       viewport = undefined;
+      viewportSignature = undefined;
     }
   };
 }
@@ -330,4 +342,55 @@ function sameCanvasImageNodeRenderState(
     && previous.pending?.src === next.pending?.src
     && previous.error?.loadKey === next.error?.loadKey
     && previous.error?.message === next.error?.message;
+}
+
+export function canvasImageResourceViewportSignature(
+  viewport: CanvasImageResourceViewport,
+  nodes: ReadonlyMap<string, ProjectedCanvasNode>
+): string {
+  return [
+    viewport.cameraState,
+    viewport.cameraState === 'moving'
+      ? movingViewportImageCandidateSignature(viewport, nodes)
+      : `${rectSignature(viewport.visibleRect)}:${mountedImagePathSignature(viewport.mountedNodePaths, nodes)}`,
+    String(viewport.imageResourceZoom),
+    String(viewport.devicePixelRatio),
+    String(viewport.imagePreviewsEnabled)
+  ].join('\u001e');
+}
+
+function rectSignature(rect: CanvasRect): string {
+  return `${rect.x}:${rect.y}:${rect.width}:${rect.height}`;
+}
+
+function movingViewportImageCandidateSignature(
+  viewport: CanvasImageResourceViewport,
+  nodes: ReadonlyMap<string, ProjectedCanvasNode>
+): string {
+  return [...viewport.mountedNodePaths]
+    .filter((path) => !viewport.culledNodePaths.has(path))
+    .filter((path) => {
+      const node = nodes.get(path);
+      return isAvailableVisibleImageNode(node) && rectsIntersect(viewport.visibleRect, nodeRect(node));
+    })
+    .map((path) => path)
+    .join('\u001f');
+}
+
+function mountedImagePathSignature(paths: ReadonlySet<string>, nodes: ReadonlyMap<string, ProjectedCanvasNode>): string {
+  return [...paths]
+    .filter((path) => isImageNode(nodes.get(path)))
+    .join('\u001f');
+}
+
+function isImageNode(node: ProjectedCanvasNode | undefined): node is ProjectedCanvasNode {
+  return node?.nodeKind === 'file' && node.mediaKind === 'image';
+}
+
+function isAvailableVisibleImageNode(node: ProjectedCanvasNode | undefined): node is ProjectedCanvasNode {
+  return node?.nodeKind === 'file'
+    && node.mediaKind === 'image'
+    && node.visible !== false
+    && node.availability.state === 'available'
+    && Boolean(node.availability.fileUrl);
 }

@@ -88,7 +88,10 @@ export interface CanvasEditorRuntime {
   subscribe(listener: (snapshot: CanvasRuntimeSnapshot) => void): () => void;
   subscribeCamera(listener: (camera: CanvasCamera) => void): () => void;
   subscribeCameraState(listener: (state: CanvasCameraState) => void): () => void;
+  subscribeSelection(listener: (selection: CanvasSelection | undefined) => void): () => void;
+  subscribeSurfaceSize(listener: (size: CanvasSize | undefined) => void): () => void;
   subscribeDragState(listener: (state: CanvasRuntimeDragState | undefined) => void): () => void;
+  subscribeImageResourceZoom(listener: (zoom: number) => void): () => void;
   getSnapshot(): CanvasRuntimeSnapshot;
   bindSurface(elements: CanvasSurfaceElements): () => void;
   setSelection(selection: CanvasSelection | undefined): void;
@@ -149,7 +152,10 @@ export function createCanvasEditorRuntime(initial?: {
   const listeners = new Set<(snapshot: CanvasRuntimeSnapshot) => void>();
   const cameraListeners = new Set<(camera: CanvasCamera) => void>();
   const cameraStateListeners = new Set<(state: CanvasCameraState) => void>();
+  const selectionListeners = new Set<(selection: CanvasSelection | undefined) => void>();
+  const surfaceSizeListeners = new Set<(size: CanvasSize | undefined) => void>();
   const dragStateListeners = new Set<(state: CanvasRuntimeDragState | undefined) => void>();
+  const imageResourceZoomListeners = new Set<(zoom: number) => void>();
   const state: RuntimeState = {
     camera: initial?.camera ?? canvasCameraReset(),
     cameraState: 'idle',
@@ -197,11 +203,30 @@ export function createCanvasEditorRuntime(initial?: {
     }
   };
 
+  const flushSelectionListeners = (selection: CanvasSelection | undefined) => {
+    for (const listener of selectionListeners) {
+      listener(selection);
+    }
+  };
+
+  const flushSurfaceSizeListeners = (size: CanvasSize | undefined) => {
+    for (const listener of surfaceSizeListeners) {
+      listener(size);
+    }
+  };
+
+  const flushImageResourceZoomListeners = (zoom: number) => {
+    for (const listener of imageResourceZoomListeners) {
+      listener(zoom);
+    }
+  };
+
   const setCameraState = (cameraState: CanvasCameraState) => {
     if (state.cameraState === cameraState) {
       return;
     }
     state.cameraState = cameraState;
+    invalidateSnapshot();
     flushCameraStateListeners(cameraState);
     notify();
   };
@@ -495,10 +520,28 @@ export function createCanvasEditorRuntime(initial?: {
         cameraStateListeners.delete(listener);
       };
     },
+    subscribeSelection: (listener) => {
+      selectionListeners.add(listener);
+      return () => {
+        selectionListeners.delete(listener);
+      };
+    },
+    subscribeSurfaceSize: (listener) => {
+      surfaceSizeListeners.add(listener);
+      return () => {
+        surfaceSizeListeners.delete(listener);
+      };
+    },
     subscribeDragState: (listener) => {
       dragStateListeners.add(listener);
       return () => {
         dragStateListeners.delete(listener);
+      };
+    },
+    subscribeImageResourceZoom: (listener) => {
+      imageResourceZoomListeners.add(listener);
+      return () => {
+        imageResourceZoomListeners.delete(listener);
       };
     },
     getSnapshot: snapshot,
@@ -509,6 +552,8 @@ export function createCanvasEditorRuntime(initial?: {
         height: elements.surface.getBoundingClientRect().height
       };
       state.surfaceSize = nextSize;
+      invalidateSnapshot();
+      flushSurfaceSizeListeners(nextSize);
       notify();
       detachWindowInput();
       detachWindowInput = attachWindowInput();
@@ -527,6 +572,8 @@ export function createCanvasEditorRuntime(initial?: {
             return;
           }
           state.surfaceSize = size;
+          invalidateSnapshot();
+          flushSurfaceSizeListeners(size);
           notify();
         });
         resizeObserver.observe(elements.surface);
@@ -542,7 +589,12 @@ export function createCanvasEditorRuntime(initial?: {
       };
     },
     setSelection: (selection) => {
+      if (state.selection === selection) {
+        return;
+      }
       state.selection = selection;
+      invalidateSnapshot();
+      flushSelectionListeners(selection);
       notify();
     },
     setImageResourceZoom: (zoom) => {
@@ -553,6 +605,8 @@ export function createCanvasEditorRuntime(initial?: {
         return;
       }
       state.imageResourceZoom = zoom;
+      invalidateSnapshot();
+      flushImageResourceZoomListeners(zoom);
       notify();
     },
     dispose: () => {
@@ -565,7 +619,10 @@ export function createCanvasEditorRuntime(initial?: {
       listeners.clear();
       cameraListeners.clear();
       cameraStateListeners.clear();
+      selectionListeners.clear();
+      surfaceSizeListeners.clear();
       dragStateListeners.clear();
+      imageResourceZoomListeners.clear();
       boundElements = undefined;
     }
   };

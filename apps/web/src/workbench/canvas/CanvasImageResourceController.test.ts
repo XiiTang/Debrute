@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from 'vitest';
 import type { ProjectedCanvasNode } from '@debrute/canvas-core';
-import { createCanvasImageResourceController } from './CanvasImageResourceController';
+import { canvasImageResourceViewportSignature, createCanvasImageResourceController } from './CanvasImageResourceController';
 import type { CanvasImageLoadingPlanItem } from './canvasImageLoading';
 
 describe('CanvasImageResourceController', () => {
@@ -166,6 +166,119 @@ describe('CanvasImageResourceController', () => {
       loaded: { loadKey: expect.any(String) }
     });
   });
+
+  it('keeps loaded visible images while moving and upgrades them after idle', async () => {
+    const loaded: string[] = [];
+    const controller = createCanvasImageResourceController({
+      concurrency: 4,
+      loadImage: async (item) => {
+        loaded.push(item.src);
+        return { src: item.src, loadKey: item.loadKey };
+      }
+    });
+    const node = largeImageNode('flow/large.png', 0, 0);
+
+    controller.setNodes(new Map([[node.projectRelativePath, node]]));
+    controller.setViewport({
+      ...viewport({ cameraState: 'idle', mountedNodePaths: new Set([node.projectRelativePath]) }),
+      imageResourceZoom: 0.1
+    });
+    await flushPromises();
+
+    expect(loaded).toHaveLength(1);
+    expect(loaded[0]).toContain('w=256');
+
+    controller.setViewport({
+      ...viewport({ cameraState: 'moving', mountedNodePaths: new Set([node.projectRelativePath]) }),
+      imageResourceZoom: 1
+    });
+    await flushPromises();
+
+    expect(loaded).toHaveLength(1);
+    expect(controller.getNodeState(node.projectRelativePath)).toMatchObject({
+      kind: 'image',
+      loaded: { src: expect.stringContaining('w=256') }
+    });
+
+    controller.setViewport({
+      ...viewport({ cameraState: 'idle', mountedNodePaths: new Set([node.projectRelativePath]) }),
+      imageResourceZoom: 1
+    });
+    await flushPromises();
+
+    expect(loaded).toHaveLength(2);
+    expect(loaded[1]).toContain('w=2048');
+  });
+
+  it('does not publish unchanged node state for repeated viewport signatures', () => {
+    const controller = createCanvasImageResourceController({
+      loadImage: () => new Promise(() => undefined)
+    });
+    const node = imageNode('flow/cover.png', 0, 0);
+    const cover = vi.fn();
+    controller.subscribeNode(node.projectRelativePath, cover);
+    controller.setNodes(new Map([[node.projectRelativePath, node]]));
+    controller.setViewport(viewport({
+      cameraState: 'moving',
+      mountedNodePaths: new Set([node.projectRelativePath])
+    }));
+
+    cover.mockClear();
+    controller.setViewport(viewport({
+      cameraState: 'moving',
+      mountedNodePaths: new Set([node.projectRelativePath])
+    }));
+
+    expect(cover).not.toHaveBeenCalled();
+  });
+
+  it('keeps moving viewport signatures stable while the effective visible image set is unchanged', () => {
+    const nodes = new Map([
+      ['flow/cover.png', { ...largeImageNode('flow/cover.png', 0, 0), width: 1200 }],
+      ['flow/other.png', imageNode('flow/other.png', 1800, 0)]
+    ]);
+    const first = canvasImageResourceViewportSignature({
+      ...viewport({
+        cameraState: 'moving',
+        mountedNodePaths: new Set(['flow/cover.png', 'flow/other.png'])
+      }),
+      visibleRect: { x: 0, y: 0, width: 400, height: 300 }
+    }, nodes);
+    const shifted = canvasImageResourceViewportSignature({
+      ...viewport({
+        cameraState: 'moving',
+        mountedNodePaths: new Set(['flow/cover.png', 'flow/other.png'])
+      }),
+      visibleRect: { x: 80, y: 0, width: 400, height: 300 }
+    }, nodes);
+    const changed = canvasImageResourceViewportSignature({
+      ...viewport({
+        cameraState: 'moving',
+        mountedNodePaths: new Set(['flow/cover.png', 'flow/other.png'])
+      }),
+      visibleRect: { x: 1700, y: 0, width: 400, height: 300 }
+    }, nodes);
+
+    expect(shifted).toBe(first);
+    expect(changed).not.toBe(first);
+  });
+
+  it('keeps viewport signatures scoped to viewport inputs instead of source metadata', () => {
+    const viewportInput = viewport({
+      cameraState: 'idle',
+      mountedNodePaths: new Set(['flow/cover.png'])
+    });
+    const first = canvasImageResourceViewportSignature(
+      viewportInput,
+      new Map([['flow/cover.png', imageNode('flow/cover.png', 0, 0, 'rev-a')]])
+    );
+    const revised = canvasImageResourceViewportSignature(
+      viewportInput,
+      new Map([['flow/cover.png', imageNode('flow/cover.png', 0, 0, 'rev-b')]])
+    );
+
+    expect(revised).toBe(first);
+  });
 });
 
 function imageNode(path: string, x: number, y: number, revision = 'rev'): ProjectedCanvasNode {
@@ -188,6 +301,20 @@ function imageNode(path: string, x: number, y: number, revision = 'rev'): Projec
       canvasImagePreviewSourceWidth: 200,
       fileUrl: rawUrl(path, revision),
       revision
+    }
+  };
+}
+
+function largeImageNode(path: string, x: number, y: number): ProjectedCanvasNode {
+  const node = imageNode(path, x, y);
+  const availability = node.availability as Extract<ProjectedCanvasNode['availability'], { state: 'available' }>;
+  return {
+    ...node,
+    width: 2400,
+    height: 1200,
+    availability: {
+      ...availability,
+      canvasImagePreviewSourceWidth: 2400
     }
   };
 }

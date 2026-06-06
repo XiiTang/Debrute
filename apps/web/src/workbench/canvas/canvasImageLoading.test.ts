@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import type { ProjectedCanvasNode } from '@debrute/canvas-core';
-import { createCanvasImageLoadingPlan } from './canvasImageLoading';
+import { createCanvasImageLoadingPlan, selectCanvasImageLoadingCandidates } from './canvasImageLoading';
 import type { CanvasLoadedImage } from './canvasImagePreviews';
 
 describe('canvas image loading plan', () => {
@@ -118,6 +118,44 @@ describe('canvas image loading plan', () => {
 
     expect(plan.get('flow/missing.png')).toMatchObject({ eligible: false, reason: 'unavailable' });
     expect(plan.has('flow/readme.md')).toBe(false);
+  });
+
+  it('selects only visible empty loads while moving and includes upgrades plus overscan while idle', () => {
+    const visibleEmpty = imageNode('flow/visible-empty.png', 0, 0, 2400, 1200);
+    const visibleUpgrade = imageNode('flow/visible-upgrade.png', 220, 0, 2400, 1200);
+    const overscanEmpty = imageNode('flow/overscan-empty.png', 900, 0, 2400, 1200);
+    const overscanUpgrade = imageNode('flow/overscan-upgrade.png', 1000, 0, 2400, 1200);
+    const visibleUpgradeUrl = 'http://127.0.0.1:17321/api/projects/p/canvas-image-preview?path=flow%2Fvisible-upgrade.png&v=rev&w=256';
+    const overscanUpgradeUrl = 'http://127.0.0.1:17321/api/projects/p/canvas-image-preview?path=flow%2Foverscan-upgrade.png&v=rev&w=256';
+    const plan = createCanvasImageLoadingPlan({
+      nodes: [visibleEmpty, visibleUpgrade, overscanEmpty, overscanUpgrade],
+      visibleRect: { x: 0, y: 0, width: 500, height: 300 },
+      imageResourceZoom: 1,
+      devicePixelRatio: 1,
+      imagePreviewsEnabled: true,
+      existingImages: new Map([
+        ['flow/visible-upgrade.png', loadedImage(visibleUpgradeUrl)],
+        ['flow/overscan-upgrade.png', loadedImage(overscanUpgradeUrl)]
+      ]),
+      retryKeys: new Map()
+    });
+
+    expect(selectCanvasImageLoadingCandidates({
+      plan,
+      cameraState: 'moving',
+      activeLoadKeys: new Set()
+    }).map((item) => item.projectRelativePath)).toEqual(['flow/visible-empty.png']);
+
+    expect(selectCanvasImageLoadingCandidates({
+      plan,
+      cameraState: 'idle',
+      activeLoadKeys: new Set()
+    }).map((item) => item.projectRelativePath)).toEqual([
+      'flow/visible-empty.png',
+      'flow/visible-upgrade.png',
+      'flow/overscan-empty.png',
+      'flow/overscan-upgrade.png'
+    ]);
   });
 });
 

@@ -7,16 +7,6 @@ export interface CanvasLoadedImage {
   loadKey: string;
 }
 
-export function shouldUpdateCanvasImageResourceZoom(input: {
-  imagePreviewsEnabled: boolean;
-  nextZoom: number;
-  currentResourceZoom: number;
-  hasPendingTimer: boolean;
-}): boolean {
-  return input.imagePreviewsEnabled
-    && (input.nextZoom !== input.currentResourceZoom || input.hasPendingTimer);
-}
-
 export function canvasImageSourceUrl(input: {
   node: ProjectedCanvasNode;
   imagePreviewsEnabled: boolean;

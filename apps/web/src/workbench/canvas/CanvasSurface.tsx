@@ -11,11 +11,11 @@ import {
 } from '../services/canvasInteraction';
 import type { CanvasFeedbackBarTarget, FloatingBarRect } from '../shell/floatingBars';
 import { cameraForCanvasContent } from './CanvasCameraBounds';
-import { CANVAS_IMAGE_PREVIEW_RESOURCE_SETTLE_MS, shouldUpdateCanvasImageResourceZoom } from './canvasImagePreviews';
+import { CANVAS_IMAGE_PREVIEW_RESOURCE_SETTLE_MS } from './canvasImagePreviews';
 import { createCanvasImageResourceController, type CanvasImageResourceController } from './CanvasImageResourceController';
 import { CanvasImageResourceProvider } from './CanvasImageResourceContext';
 import { CanvasNodeShell } from './CanvasNodeShell';
-import { createCanvasRenderModel, type CanvasRenderModelSnapshot } from './CanvasRenderModel';
+import { createCanvasRenderModel, type CanvasRenderModelSnapshot, type CanvasRenderModelUpdateInput } from './CanvasRenderModel';
 import { nodeRect } from './canvasVirtualization';
 import type {
   CanvasEditorRuntime,
@@ -27,7 +27,12 @@ import { createCanvasLayerRuntime, type CanvasLayerRuntime } from './runtime/Can
 import { rectsIntersect, type CanvasRect } from './runtime/canvasGeometry';
 import type { CanvasSelection } from './runtime/canvasSelection';
 import { isCanvasItemSelected, toggleCanvasSelectionItem } from './runtime/canvasSelection';
-import { useCanvasRuntimeSnapshot } from './runtime/useCanvasRuntimeSnapshot';
+import {
+  useCanvasDragState,
+  useCanvasImageResourceZoom,
+  useCanvasSelection,
+  useCanvasSurfaceSize
+} from './runtime/useCanvasRuntimeSnapshot';
 
 interface CanvasSurfaceProps {
   canvas: CanvasDocument;
@@ -117,12 +122,10 @@ function CanvasSurfaceRuntime({
 }): React.ReactElement {
   const surfaceRef = useRef<HTMLDivElement | null>(null);
   const stageRef = useRef<HTMLDivElement | null>(null);
-  const runtimeSnapshot = useCanvasRuntimeSnapshot(runtime);
-  const selection = runtimeSnapshot.selection;
-  const camera = runtimeSnapshot.camera;
-  const surfaceSize = runtimeSnapshot.surfaceSize;
-  const imageResourceZoom = runtimeSnapshot.imageResourceZoom;
-  const dragState = runtimeSnapshot.dragState;
+  const selection = useCanvasSelection(runtime);
+  const surfaceSize = useCanvasSurfaceSize(runtime);
+  const imageResourceZoom = useCanvasImageResourceZoom(runtime);
+  const dragState = useCanvasDragState(runtime);
   const selectionRef = useRef<CanvasSelection | undefined>(selection);
   const surfaceSizeRef = useRef(surfaceSize);
   const renderSnapshotRef = useRef<CanvasRenderModelSnapshot | undefined>(undefined);
@@ -162,6 +165,9 @@ function CanvasSurfaceRuntime({
     renderSnapshotRef.current = next;
     setRenderSnapshot(next);
   }, [renderModel]);
+  const renderSnapshotScheduler = useMemo(() => createCanvasRenderSnapshotScheduler({
+    commit: commitRenderSnapshot
+  }), [commitRenderSnapshot]);
 
   const syncImageResourceViewport = useCallback((cameraState = runtime.getSnapshot().cameraState) => {
     syncCanvasImageResourceViewport({
@@ -197,6 +203,10 @@ function CanvasSurfaceRuntime({
   useEffect(() => () => {
     imageResourceViewportScheduler.dispose();
   }, [imageResourceViewportScheduler]);
+
+  useEffect(() => () => {
+    renderSnapshotScheduler.dispose();
+  }, [renderSnapshotScheduler]);
 
   useLayoutEffect(() => {
     const surface = surfaceRef.current;
@@ -252,32 +262,33 @@ function CanvasSurfaceRuntime({
   }, [canvas.id, projectedNodes, runtime, surfaceSize]);
 
   useLayoutEffect(() => runtime.subscribeCamera((liveCamera) => {
-    layerRuntime.setCamera(liveCamera);
-    syncCanvasLayerNodeVisibility({
+    syncCanvasMovingCameraFrame({
+      liveCamera,
       layerRuntime,
-      visibleRect: runtime.coordinates.visibleCanvasRect(),
-      nodesByPath: renderSnapshotRef.current?.nodesByPath ?? renderSnapshot.nodesByPath
-    });
-    const snapshot = runtime.getSnapshot();
-    commitRenderSnapshot({
-      camera: liveCamera,
-      cameraState: snapshot.cameraState,
+      runtime,
+      nodesByPath: renderSnapshotRef.current?.nodesByPath ?? renderSnapshot.nodesByPath,
       surfaceSize: surfaceSizeRef.current,
       selection: selectionRef.current,
-      activeNodePaths: activeNodePathsRef.current
+      activeNodePaths: activeNodePathsRef.current,
+      renderSnapshotScheduler,
+      imageResourceViewportScheduler
     });
-    imageResourceViewportScheduler.request(snapshot.cameraState);
-  }), [commitRenderSnapshot, imageResourceViewportScheduler, layerRuntime, renderSnapshot.nodesByPath, runtime]);
+  }), [
+    imageResourceViewportScheduler,
+    layerRuntime,
+    renderSnapshot.nodesByPath,
+    renderSnapshotScheduler,
+    runtime
+  ]);
 
   useEffect(() => {
     return runtime.subscribeCameraState((cameraState) => {
       if (cameraState !== 'idle') {
-        imageResourceViewportScheduler.request(cameraState);
         return;
       }
       imageResourceViewportScheduler.flush(cameraState);
       const snapshot = runtime.getSnapshot();
-      commitRenderSnapshot({
+      renderSnapshotScheduler.flush({
         camera: snapshot.camera,
         cameraState,
         surfaceSize: surfaceSizeRef.current,
@@ -285,7 +296,7 @@ function CanvasSurfaceRuntime({
         activeNodePaths: activeNodePathsRef.current
       });
     });
-  }, [commitRenderSnapshot, imageResourceViewportScheduler, runtime]);
+  }, [imageResourceViewportScheduler, renderSnapshotScheduler, runtime]);
 
   useEffect(() => {
     layerRuntime.applyDragPreview(runtime.getSnapshot().dragState);
@@ -314,7 +325,7 @@ function CanvasSurfaceRuntime({
       window.clearTimeout(imageResourceZoomTimerRef.current);
       imageResourceZoomTimerRef.current = undefined;
     }
-    runtime.setImageResourceZoom(camera.z);
+    runtime.setImageResourceZoom(runtime.getSnapshot().camera.z);
   }, [canvas.id, runtime]);
 
   useEffect(() => () => {
@@ -324,28 +335,20 @@ function CanvasSurfaceRuntime({
   }, []);
 
   useEffect(() => {
-    if (!canvasSettings.imagePreviewsEnabled) {
-      if (imageResourceZoom !== camera.z) {
-        runtime.setImageResourceZoom(camera.z);
-      }
-      return;
-    }
-    if (!shouldUpdateCanvasImageResourceZoom({
-      imagePreviewsEnabled: canvasSettings.imagePreviewsEnabled,
-      nextZoom: camera.z,
-      currentResourceZoom: imageResourceZoom,
-      hasPendingTimer: imageResourceZoomTimerRef.current !== undefined
-    })) {
-      return;
-    }
-    if (imageResourceZoomTimerRef.current !== undefined) {
-      window.clearTimeout(imageResourceZoomTimerRef.current);
-    }
-    imageResourceZoomTimerRef.current = window.setTimeout(() => {
-      imageResourceZoomTimerRef.current = undefined;
-      runtime.setImageResourceZoom(runtime.getSnapshot().camera.z);
-    }, CANVAS_IMAGE_PREVIEW_RESOURCE_SETTLE_MS);
-  }, [camera.z, canvasSettings.imagePreviewsEnabled, imageResourceZoom, runtime]);
+    return runtime.subscribeCameraState((cameraState) => {
+      const snapshot = runtime.getSnapshot();
+      syncCanvasImageResourceZoomForCameraState({
+        cameraState,
+        imagePreviewsEnabled: canvasSettings.imagePreviewsEnabled,
+        currentImageResourceZoom: snapshot.imageResourceZoom,
+        liveCameraZoom: snapshot.camera.z,
+        timerRef: imageResourceZoomTimerRef,
+        setImageResourceZoom: (zoom) => runtime.setImageResourceZoom(zoom),
+        setTimeout: (callback, delay) => window.setTimeout(callback, delay),
+        clearTimeout: (handle) => window.clearTimeout(handle)
+      });
+    });
+  }, [canvasSettings.imagePreviewsEnabled, runtime]);
 
   useEffect(() => {
     imageResourceController.setNodes(renderSnapshot.nodesByPath);
@@ -663,6 +666,78 @@ export function syncCanvasLayerNodeVisibility(input: {
   }
 }
 
+export function syncCanvasMovingCameraFrame(input: {
+  liveCamera: CanvasRuntimeSnapshot['camera'];
+  layerRuntime: Pick<CanvasLayerRuntime, 'setCamera' | 'setNodeVisible'>;
+  runtime: Pick<CanvasEditorRuntime, 'coordinates' | 'getSnapshot'>;
+  nodesByPath: ReadonlyMap<string, ProjectedCanvasNode>;
+  surfaceSize: CanvasRuntimeSnapshot['surfaceSize'];
+  selection: CanvasRuntimeSnapshot['selection'];
+  activeNodePaths: readonly string[];
+  renderSnapshotScheduler: Pick<ReturnType<typeof createCanvasRenderSnapshotScheduler<CanvasRenderModelUpdateInput>>, 'requestMoving'>;
+  imageResourceViewportScheduler: Pick<ReturnType<typeof createCanvasImageResourceViewportSyncScheduler>, 'request'>;
+}): void {
+  input.layerRuntime.setCamera(input.liveCamera);
+  syncCanvasLayerNodeVisibility({
+    layerRuntime: input.layerRuntime,
+    visibleRect: input.runtime.coordinates.visibleCanvasRect(),
+    nodesByPath: input.nodesByPath
+  });
+  const snapshot = input.runtime.getSnapshot();
+  input.renderSnapshotScheduler.requestMoving({
+    camera: input.liveCamera,
+    cameraState: snapshot.cameraState,
+    surfaceSize: input.surfaceSize,
+    selection: input.selection,
+    activeNodePaths: input.activeNodePaths
+  });
+  input.imageResourceViewportScheduler.request(snapshot.cameraState);
+}
+
+export function syncCanvasImageResourceZoomForCameraState(input: {
+  cameraState: CanvasRuntimeSnapshot['cameraState'];
+  imagePreviewsEnabled: boolean;
+  currentImageResourceZoom: number;
+  liveCameraZoom: number;
+  timerRef: { current: number | undefined };
+  setImageResourceZoom: (zoom: number) => void;
+  setTimeout: (callback: () => void, delay: number) => number;
+  clearTimeout: (handle: number) => void;
+  settleMs?: number | undefined;
+}): void {
+  const clearPendingTimer = () => {
+    if (input.timerRef.current === undefined) {
+      return;
+    }
+    input.clearTimeout(input.timerRef.current);
+    input.timerRef.current = undefined;
+  };
+
+  if (!input.imagePreviewsEnabled) {
+    clearPendingTimer();
+    if (input.currentImageResourceZoom !== input.liveCameraZoom) {
+      input.setImageResourceZoom(input.liveCameraZoom);
+    }
+    return;
+  }
+
+  if (input.cameraState !== 'idle') {
+    clearPendingTimer();
+    return;
+  }
+
+  if (input.currentImageResourceZoom === input.liveCameraZoom) {
+    clearPendingTimer();
+    return;
+  }
+
+  clearPendingTimer();
+  input.timerRef.current = input.setTimeout(() => {
+    input.timerRef.current = undefined;
+    input.setImageResourceZoom(input.liveCameraZoom);
+  }, input.settleMs ?? CANVAS_IMAGE_PREVIEW_RESOURCE_SETTLE_MS);
+}
+
 export function createCanvasImageResourceViewportSyncScheduler(input: {
   sync: (cameraState?: CanvasRuntimeSnapshot['cameraState']) => void;
   requestFrame?: ((callback: FrameRequestCallback) => number) | undefined;
@@ -721,6 +796,67 @@ export function createCanvasImageResourceViewportSyncScheduler(input: {
       }
       pendingFrame = undefined;
       pendingCameraState = undefined;
+    }
+  };
+}
+
+export function createCanvasRenderSnapshotScheduler<T>(input: {
+  commit: (next: T) => void;
+  requestFrame?: ((callback: FrameRequestCallback) => number) | undefined;
+  cancelFrame?: ((handle: number) => void) | undefined;
+}): {
+  requestMoving(next: T): void;
+  flush(next: T): void;
+  dispose(): void;
+} {
+  const requestFrame = input.requestFrame ?? globalThis.window?.requestAnimationFrame?.bind(globalThis.window);
+  const cancelFrame = input.cancelFrame ?? globalThis.window?.cancelAnimationFrame?.bind(globalThis.window);
+  let pendingFrame: number | undefined;
+  let pendingInput: T | undefined;
+  let frameGeneration = 0;
+
+  const run = (generation: number) => {
+    if (generation !== frameGeneration || pendingFrame === undefined) {
+      return;
+    }
+    pendingFrame = undefined;
+    const next = pendingInput;
+    pendingInput = undefined;
+    if (next !== undefined) {
+      input.commit(next);
+    }
+  };
+
+  return {
+    requestMoving(next) {
+      pendingInput = next;
+      if (pendingFrame !== undefined) {
+        return;
+      }
+      if (!requestFrame) {
+        pendingInput = undefined;
+        input.commit(next);
+        return;
+      }
+      const generation = frameGeneration;
+      pendingFrame = requestFrame(() => run(generation));
+    },
+    flush(next) {
+      pendingInput = undefined;
+      if (pendingFrame !== undefined) {
+        frameGeneration += 1;
+        cancelFrame?.(pendingFrame);
+        pendingFrame = undefined;
+      }
+      input.commit(next);
+    },
+    dispose() {
+      if (pendingFrame !== undefined) {
+        frameGeneration += 1;
+        cancelFrame?.(pendingFrame);
+      }
+      pendingFrame = undefined;
+      pendingInput = undefined;
     }
   };
 }

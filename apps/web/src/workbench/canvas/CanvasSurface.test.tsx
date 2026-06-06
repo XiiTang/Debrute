@@ -11,6 +11,9 @@ import { areCanvasNodeShellPropsEqual, CanvasNodeShell, type CanvasNodeShellProp
 import {
   CanvasSurface,
   createCanvasImageResourceViewportSyncScheduler,
+  createCanvasRenderSnapshotScheduler,
+  syncCanvasMovingCameraFrame,
+  syncCanvasImageResourceZoomForCameraState,
   syncCanvasImageResourceViewport,
   syncCanvasLayerNodeVisibility
 } from './CanvasSurface';
@@ -448,6 +451,178 @@ describe('CanvasSurface', () => {
 
     expect(canceled).toEqual([1]);
     expect(calls).toEqual(['idle']);
+  });
+
+  it('clears pending image resource zoom settlement when the camera starts moving', () => {
+    const timerRef = { current: 7 };
+    const cleared: number[] = [];
+    const updates: number[] = [];
+
+    syncCanvasImageResourceZoomForCameraState({
+      cameraState: 'moving',
+      imagePreviewsEnabled: true,
+      currentImageResourceZoom: 1,
+      liveCameraZoom: 2,
+      timerRef,
+      setImageResourceZoom: (zoom) => updates.push(zoom),
+      setTimeout: () => {
+        throw new Error('moving camera must not schedule image resource zoom work');
+      },
+      clearTimeout: (handle) => cleared.push(handle)
+    });
+
+    expect(cleared).toEqual([7]);
+    expect(timerRef.current).toBeUndefined();
+    expect(updates).toEqual([]);
+  });
+
+  it('does not schedule idle image resource zoom settlement when zoom is already current', () => {
+    const timerRef = { current: 11 };
+    const cleared: number[] = [];
+    const updates: number[] = [];
+
+    syncCanvasImageResourceZoomForCameraState({
+      cameraState: 'idle',
+      imagePreviewsEnabled: true,
+      currentImageResourceZoom: 1.5,
+      liveCameraZoom: 1.5,
+      timerRef,
+      setImageResourceZoom: (zoom) => updates.push(zoom),
+      setTimeout: () => {
+        throw new Error('matching resource zoom must not schedule a settle timer');
+      },
+      clearTimeout: (handle) => cleared.push(handle)
+    });
+
+    expect(cleared).toEqual([11]);
+    expect(timerRef.current).toBeUndefined();
+    expect(updates).toEqual([]);
+  });
+
+  it('coalesces moving render snapshot refreshes onto one animation frame', () => {
+    const frames: FrameRequestCallback[] = [];
+    const commits: unknown[] = [];
+    const scheduler = createCanvasRenderSnapshotScheduler({
+      commit: (input) => commits.push(input),
+      requestFrame: (callback) => {
+        frames.push(callback);
+        return frames.length;
+      },
+      cancelFrame: () => undefined
+    });
+
+    scheduler.requestMoving({ camera: { x: 1, y: 0, z: 1 } });
+    scheduler.requestMoving({ camera: { x: 2, y: 0, z: 1 } });
+
+    expect(commits).toEqual([]);
+    expect(frames).toHaveLength(1);
+
+    frames[0]?.(0);
+
+    expect(commits).toEqual([{ camera: { x: 2, y: 0, z: 1 } }]);
+  });
+
+  it('flushes idle render snapshot refreshes immediately and cancels pending moving refreshes', () => {
+    const frames: FrameRequestCallback[] = [];
+    const canceled: number[] = [];
+    const commits: unknown[] = [];
+    const scheduler = createCanvasRenderSnapshotScheduler({
+      commit: (input) => commits.push(input),
+      requestFrame: (callback) => {
+        frames.push(callback);
+        return frames.length;
+      },
+      cancelFrame: (handle) => canceled.push(handle)
+    });
+
+    scheduler.requestMoving({ camera: { x: 1, y: 0, z: 1 } });
+    scheduler.flush({ camera: { x: 5, y: 0, z: 1 } });
+    frames[0]?.(0);
+
+    expect(canceled).toEqual([1]);
+    expect(commits).toEqual([{ camera: { x: 5, y: 0, z: 1 } }]);
+  });
+
+  it('keeps moving render refreshes separate from image viewport flushing', () => {
+    const renderFrames: FrameRequestCallback[] = [];
+    const renderCommits: unknown[] = [];
+    const imageCalls: unknown[] = [];
+    const renderScheduler = createCanvasRenderSnapshotScheduler({
+      commit: (input) => renderCommits.push(input),
+      requestFrame: (callback) => {
+        renderFrames.push(callback);
+        return renderFrames.length;
+      },
+      cancelFrame: () => undefined
+    });
+    const imageScheduler = createCanvasImageResourceViewportSyncScheduler({
+      sync: (cameraState) => imageCalls.push(cameraState),
+      requestFrame: (callback) => {
+        throw new Error(`moving camera should not schedule image viewport work: ${String(callback)}`);
+      },
+      cancelFrame: () => undefined
+    });
+
+    renderScheduler.requestMoving({ cameraState: 'moving' });
+
+    expect(renderCommits).toEqual([]);
+    expect(imageCalls).toEqual([]);
+
+    renderFrames[0]?.(0);
+    imageScheduler.flush('idle');
+
+    expect(renderCommits).toEqual([{ cameraState: 'moving' }]);
+    expect(imageCalls).toEqual(['idle']);
+  });
+
+  it('syncs live shell visibility and schedules moving image viewport work for moving camera frames', () => {
+    const stale = nodeFixture('flow/stale-visible.png', 0, 0);
+    const live = nodeFixture('flow/live-visible.png', 500, 0);
+    const cameras: unknown[] = [];
+    const visibility: Array<{ path: string; visible: boolean }> = [];
+    const renderInputs: unknown[] = [];
+    const imageStates: unknown[] = [];
+
+    syncCanvasMovingCameraFrame({
+      liveCamera: { x: -350, y: 0, z: 1 },
+      layerRuntime: {
+        setCamera: (camera) => cameras.push(camera),
+        setNodeVisible: (path, visible) => visibility.push({ path, visible })
+      },
+      runtime: {
+        getSnapshot: () => ({ cameraState: 'moving' }) as ReturnType<CanvasEditorRuntime['getSnapshot']>,
+        coordinates: {
+          visibleCanvasRect: () => ({ x: 350, y: 0, width: 400, height: 300 })
+        } as CanvasEditorRuntime['coordinates']
+      },
+      nodesByPath: new Map([
+        [stale.projectRelativePath, stale],
+        [live.projectRelativePath, live]
+      ]),
+      surfaceSize: { width: 400, height: 300 },
+      selection: { kind: 'node', projectRelativePath: live.projectRelativePath },
+      activeNodePaths: [live.projectRelativePath],
+      renderSnapshotScheduler: {
+        requestMoving: (input) => renderInputs.push(input)
+      },
+      imageResourceViewportScheduler: {
+        request: (cameraState) => imageStates.push(cameraState)
+      }
+    });
+
+    expect(cameras).toEqual([{ x: -350, y: 0, z: 1 }]);
+    expect(visibility).toEqual([
+      { path: 'flow/stale-visible.png', visible: false },
+      { path: 'flow/live-visible.png', visible: true }
+    ]);
+    expect(renderInputs).toEqual([{
+      camera: { x: -350, y: 0, z: 1 },
+      cameraState: 'moving',
+      surfaceSize: { width: 400, height: 300 },
+      selection: { kind: 'node', projectRelativePath: live.projectRelativePath },
+      activeNodePaths: [live.projectRelativePath]
+    }]);
+    expect(imageStates).toEqual(['moving']);
   });
 });
 
