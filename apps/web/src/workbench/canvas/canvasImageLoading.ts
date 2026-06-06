@@ -34,8 +34,8 @@ export type CanvasImageNodeRenderState =
   | { kind: 'placeholder'; retry?: () => void }
   | {
       kind: 'image';
-      loaded?: CanvasLoadedImage;
-      pending?: CanvasPendingImage;
+      visible?: CanvasLoadedImage;
+      next?: CanvasPendingImage;
       error?: CanvasImageLoadError;
       retry: () => void;
     };

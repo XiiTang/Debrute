@@ -3,7 +3,7 @@ import { AlertTriangle, File, FileText, Folder, Image as ImageIcon, Maximize2, M
 import type { ProjectedCanvasNode } from '@debrute/canvas-core';
 import type { TextFileBuffer, WorkbenchActions } from '../../types';
 import { CanvasMonacoEditor } from './CanvasMonacoEditor';
-import { useCanvasImageResource } from './CanvasImageResourceContext';
+import { useCanvasImageAsset, useCanvasImageAssetRuntime } from './CanvasImageResourceContext';
 
 export interface CanvasNodeContentProps {
   node: ProjectedCanvasNode;
@@ -140,14 +140,16 @@ function CanvasImageNodeContent({
 }: {
   node: ProjectedCanvasNode;
 }): React.ReactElement {
-  const imageState = useCanvasImageResource(node.projectRelativePath);
+  const imageState = useCanvasImageAsset(node.projectRelativePath);
+  const imageAssetRuntime = useCanvasImageAssetRuntime();
   if (imageState.kind === 'image') {
     return (
       <>
-        {imageState.loaded ? (
+        {imageState.visible ? (
           <img
-            key={imageState.loaded.loadKey}
-            src={imageState.loaded.src}
+            key={imageState.visible.loadKey}
+            data-canvas-image-layer="visible"
+            src={imageState.visible.src}
             alt={node.projectRelativePath}
             draggable={false}
             decoding="async"
@@ -160,6 +162,20 @@ function CanvasImageNodeContent({
           <CanvasNodeMediaErrorOverlay
             message={imageState.error.message}
             onRetry={imageState.retry}
+          />
+        ) : null}
+        {imageState.next ? (
+          <img
+            key={imageState.next.loadKey}
+            data-canvas-image-layer="next"
+            src={imageState.next.src}
+            alt=""
+            draggable={false}
+            decoding="async"
+            aria-hidden="true"
+            onLoad={() => imageAssetRuntime.resolvePending(node.projectRelativePath, imageState.next!.loadKey)}
+            onError={() => imageAssetRuntime.rejectPending(node.projectRelativePath, imageState.next!.loadKey)}
+            style={{ objectFit: 'fill', opacity: 0 }}
           />
         ) : null}
       </>

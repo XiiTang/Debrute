@@ -572,6 +572,7 @@ small {
   cursor: crosshair;
   user-select: none;
   -webkit-user-select: none;
+  contain: strict;
 }
 
 .canvas-world-stage {
@@ -709,6 +710,10 @@ small {
   height: 100%;
   display: block;
   pointer-events: none;
+}
+
+.canvas-node-preview img[data-canvas-image-layer='next'] {
+  opacity: 0;
 }
 
 .canvas-node-preview video {

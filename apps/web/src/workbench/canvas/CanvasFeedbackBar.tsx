@@ -1,4 +1,4 @@
-import React, { useEffect, useRef, useState } from 'react';
+import React, { useEffect, useLayoutEffect, useRef, useState } from 'react';
 import {
   AlertCircle,
   Check,
@@ -15,6 +15,7 @@ import {
   type CanvasFeedbackMark
 } from '@debrute/canvas-core';
 import type { WorkbenchActions } from '../../types';
+import type { CanvasOverlayRuntime } from './CanvasOverlayRuntime';
 
 const NOTE_SAVE_DELAY_MS = 350;
 
@@ -32,17 +33,18 @@ export function CanvasFeedbackBar({
   projectRelativePath,
   entry,
   onUpdate,
-  style,
+  overlayRuntime,
   onPointerEnter,
   onPointerLeave
 }: {
   projectRelativePath: string;
   entry: CanvasFeedbackEntry | undefined;
   onUpdate: WorkbenchActions['updateCanvasFeedbackEntry'];
-  style?: React.CSSProperties;
+  overlayRuntime: CanvasOverlayRuntime;
   onPointerEnter?: () => void;
   onPointerLeave?: () => void;
 }): React.ReactElement {
+  const elementRef = useRef<HTMLDivElement | null>(null);
   const [marks, setMarks] = useState<CanvasFeedbackMark[]>(entry?.marks ?? []);
   const [note, setNote] = useState(entry?.note ?? '');
   const saveTimerRef = useRef<number | undefined>(undefined);
@@ -66,6 +68,13 @@ export function CanvasFeedbackBar({
       window.clearTimeout(saveTimerRef.current);
     }
   }, []);
+
+  useLayoutEffect(() => {
+    if (!elementRef.current) {
+      return;
+    }
+    return overlayRuntime.bindFeedbackBar(elementRef.current);
+  }, [overlayRuntime]);
 
   const saveFeedback = (next: { marks: CanvasFeedbackMark[]; note: string }) => {
     latestSaveRef.current = next;
@@ -115,8 +124,8 @@ export function CanvasFeedbackBar({
 
   return (
     <div
+      ref={elementRef}
       className="canvas-feedback-bar"
-      style={style}
       data-canvas-feedback-bar="true"
       onPointerDown={stopCanvasFeedbackBarEvent}
       onPointerMove={stopCanvasFeedbackBarEvent}

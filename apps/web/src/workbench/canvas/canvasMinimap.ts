@@ -31,6 +31,16 @@ export interface CanvasMinimapModel {
   nodeRects: CanvasMinimapNodeRect[];
 }
 
+export interface CanvasMinimapStaticModel {
+  transform: CanvasMinimapTransform;
+  nodeRects: CanvasMinimapNodeRect[];
+}
+
+export interface CanvasMinimapViewportModel {
+  visibleRect: CanvasRect;
+  viewportRect: CanvasRect;
+}
+
 export interface CanvasMinimapDragState {
   pointerId: number;
   transform: CanvasMinimapTransform;
@@ -47,6 +57,28 @@ export function buildCanvasMinimapModel(input: {
   minimapSize: CanvasSize;
   padding?: number;
 }): CanvasMinimapModel | undefined {
+  const staticModel = buildCanvasMinimapStaticModel(input);
+  if (!staticModel) {
+    return undefined;
+  }
+  const viewportModel = buildCanvasMinimapViewportModel({
+    transform: staticModel.transform,
+    camera: input.camera,
+    surfaceSize: input.surfaceSize
+  });
+  return viewportModel
+    ? { ...staticModel, ...viewportModel }
+    : undefined;
+}
+
+export function buildCanvasMinimapStaticModel(input: {
+  nodes: CanvasProjection['nodes'];
+  selection: CanvasSelection | undefined;
+  camera: CanvasCamera;
+  surfaceSize: CanvasSize | undefined;
+  minimapSize: CanvasSize;
+  padding?: number;
+}): CanvasMinimapStaticModel | undefined {
   if (!validCamera(input.camera) || !validSize(input.surfaceSize)) {
     return undefined;
   }
@@ -69,14 +101,30 @@ export function buildCanvasMinimapModel(input: {
   const selectedPaths = new Set(selectedNodeProjectRelativePaths(input.selection));
 
   return {
-    visibleRect,
-    viewportRect: canvasRectToMinimapRect(visibleRect, transform),
     transform,
     nodeRects: nodes.map((node) => ({
       projectRelativePath: node.projectRelativePath,
       rect: canvasRectToMinimapRect(nodeRect(node), transform),
       selected: selectedPaths.has(node.projectRelativePath)
     }))
+  };
+}
+
+export function buildCanvasMinimapViewportModel(input: {
+  transform: CanvasMinimapTransform;
+  camera: CanvasCamera;
+  surfaceSize: CanvasSize | undefined;
+}): CanvasMinimapViewportModel | undefined {
+  if (!validCamera(input.camera) || !validSize(input.surfaceSize)) {
+    return undefined;
+  }
+  const visibleRect = canvasVisibleRect({
+    camera: input.camera,
+    surfaceSize: input.surfaceSize
+  });
+  return {
+    visibleRect,
+    viewportRect: canvasRectToMinimapRect(visibleRect, input.transform)
   };
 }
 

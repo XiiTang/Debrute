@@ -23,7 +23,7 @@ interface RegisteredCanvasNode {
   lastDisplay?: string;
 }
 
-export interface CanvasLayerRuntime {
+export interface CanvasStageRuntime {
   bindStage(stage: HTMLElement): () => void;
   setCamera(camera: CanvasCamera): void;
   registerNodeShell(path: string, element: HTMLElement): () => void;
@@ -34,7 +34,7 @@ export interface CanvasLayerRuntime {
   dispose(): void;
 }
 
-export function createCanvasLayerRuntime(): CanvasLayerRuntime {
+export function createCanvasStageRuntime(): CanvasStageRuntime {
   const nodes = new Map<string, RegisteredCanvasNode>();
   let stage: HTMLElement | undefined;
   let camera: CanvasCamera | undefined;

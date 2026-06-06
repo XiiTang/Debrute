@@ -5,6 +5,7 @@ import { createWorkbenchApiClient } from './api/workbenchApiClient';
 import { CanvasEditor } from './canvas/CanvasEditor';
 import { CanvasFeedbackBar } from './canvas/CanvasFeedbackBar';
 import { CanvasMinimapBar } from './canvas/CanvasMinimapBar';
+import { createCanvasOverlayRuntime } from './canvas/CanvasOverlayRuntime';
 import { CanvasToolbar } from './canvas/CanvasToolbar';
 import type { CanvasEditorRuntime, CanvasRuntimeSnapshot } from './canvas/runtime/CanvasEditorRuntime';
 import { createCanvasFeedbackEntryUpdater } from './services/canvasFeedbackUpdates';
@@ -36,8 +37,6 @@ import {
 } from './project-explorer/workbenchFileCommands';
 import {
   canvasMinimapButtonRect,
-  canvasNodeToViewportRect,
-  placeCanvasFeedbackBar,
   placeCanvasMinimapPanel,
   type CanvasFeedbackBarTarget,
   type FloatingBarRect
@@ -103,6 +102,7 @@ export function WorkbenchApp(): React.ReactElement {
   const [inlineProjectTreeEdit, setInlineProjectTreeEdit] = useState<ProjectTreeInlineEditState>();
   const [notifications, setNotifications] = useState<string[]>([]);
   const [isLoading, setIsLoading] = useState(true);
+  const canvasOverlayRuntime = useMemo(() => createCanvasOverlayRuntime(), []);
   const textFileBuffersRef = useRef(textFileBuffers);
   const textEditorWindowsRef = useRef(textEditorWindows);
   const feedbackBarClearTimerRef = useRef<number | undefined>(undefined);
@@ -134,6 +134,10 @@ export function WorkbenchApp(): React.ReactElement {
       window.clearTimeout(feedbackBarClearTimerRef.current);
     }
   }, []);
+
+  useEffect(() => () => {
+    canvasOverlayRuntime.dispose();
+  }, [canvasOverlayRuntime]);
 
   useEffect(() => {
     let disposed = false;
@@ -666,18 +670,6 @@ export function WorkbenchApp(): React.ReactElement {
     notify,
     openInspectorPanel
   ]);
-  const feedbackBarPlacement = feedbackBarTarget
-    ? placeCanvasFeedbackBar({
-        nodeViewportRect: canvasNodeToViewportRect({
-          nodeRect: feedbackBarTarget.nodeRect,
-          surfaceRect: feedbackBarTarget.surfaceRect,
-          camera: feedbackBarTarget.camera
-        }),
-        viewportRect: workbenchViewportRect,
-        reservedRects: floatingBarReservedRects
-      })
-    : undefined;
-
   if (isLoading) {
     return (
       <div className="boot-screen">
@@ -695,6 +687,12 @@ export function WorkbenchApp(): React.ReactElement {
           state={state}
           actions={actions}
           runtimeScopeKey={canvasRuntimeScopeKey}
+          overlayRuntime={canvasOverlayRuntime}
+          minimapOpen={canvasMinimapOpen}
+          feedbackPlacementContext={{
+            viewportRect: workbenchViewportRect,
+            reservedRects: floatingBarReservedRects
+          }}
           onFeedbackBarTargetChange={handleFeedbackBarTargetChange}
           onRuntimeChange={setActiveCanvasRuntime}
           onOpenContextMenu={openWorkbenchContextMenu}
@@ -723,23 +721,19 @@ export function WorkbenchApp(): React.ReactElement {
           canvas={activeCanvas}
           projection={activeProjection}
           runtime={activeCanvasRuntime}
+          overlayRuntime={canvasOverlayRuntime}
           open={canvasMinimapOpen}
           onOpenChange={setCanvasMinimapOpen}
           panelPlacement={minimapPanelPlacement}
         />
-        {feedbackBarTarget && feedbackBarPlacement ? (
+        {feedbackBarTarget ? (
           <CanvasFeedbackBar
             projectRelativePath={feedbackBarTarget.projectRelativePath}
             entry={feedbackBarTarget.entry}
             onUpdate={actions.updateCanvasFeedbackEntry}
+            overlayRuntime={canvasOverlayRuntime}
             onPointerEnter={handleFeedbackBarPointerEnter}
             onPointerLeave={handleFeedbackBarPointerLeave}
-            style={{
-              left: feedbackBarPlacement.x,
-              top: feedbackBarPlacement.y,
-              width: feedbackBarPlacement.width,
-              height: feedbackBarPlacement.height
-            }}
           />
         ) : null}
       </div>

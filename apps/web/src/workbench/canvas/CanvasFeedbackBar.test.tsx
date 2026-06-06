@@ -2,6 +2,7 @@ import React from 'react';
 import { renderToStaticMarkup } from 'react-dom/server';
 import { describe, expect, it } from 'vitest';
 import { CanvasFeedbackBar } from './CanvasFeedbackBar';
+import { createCanvasOverlayRuntime } from './CanvasOverlayRuntime';
 
 describe('CanvasFeedbackBar', () => {
   it('keeps wheel input local to the feedback note field', () => {
@@ -10,6 +11,7 @@ describe('CanvasFeedbackBar', () => {
         projectRelativePath="flow/cover.png"
         entry={undefined}
         onUpdate={async () => undefined}
+        overlayRuntime={createCanvasOverlayRuntime()}
       />
     );
 

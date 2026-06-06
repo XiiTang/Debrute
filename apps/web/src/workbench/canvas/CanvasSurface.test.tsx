@@ -5,20 +5,23 @@ import { createCanvasDocument, type CanvasFeedbackDocument, type CanvasProjectio
 import type { IntegrationSettingsView } from '@debrute/app-protocol';
 import type { WorkbenchActions, WorkbenchState } from '../../types';
 import { CanvasEditor } from './CanvasEditor';
-import { createCanvasImageResourceController } from './CanvasImageResourceController';
-import { CanvasImageResourceProvider } from './CanvasImageResourceContext';
+import { createCanvasImageAssetRuntime, type CanvasImageAssetRuntime } from './CanvasImageAssetRuntime';
+import { CanvasImageAssetProvider } from './CanvasImageResourceContext';
+import type { CanvasImageNodeRenderState } from './canvasImageLoading';
+import { CanvasNodeContent } from './CanvasNodeContent';
+import { createCanvasOverlayRuntime } from './CanvasOverlayRuntime';
 import { areCanvasNodeShellPropsEqual, CanvasNodeShell, type CanvasNodeShellProps } from './CanvasNodeShell';
 import {
   CanvasSurface,
-  createCanvasImageResourceViewportSyncScheduler,
+  createCanvasImageAssetViewportSyncScheduler,
   createCanvasRenderSnapshotScheduler,
   syncCanvasMovingCameraFrame,
   syncCanvasImageResourceZoomForCameraState,
-  syncCanvasImageResourceViewport,
-  syncCanvasLayerNodeVisibility
+  syncCanvasImageAssetViewport,
+  syncCanvasStageNodeVisibility
 } from './CanvasSurface';
 import type { CanvasCamera } from './runtime/canvasCamera';
-import { createCanvasLayerRuntime } from './runtime/CanvasLayerRuntime';
+import { createCanvasStageRuntime } from './runtime/CanvasStageRuntime';
 import type { CanvasSelection } from './runtime/canvasSelection';
 import { createCanvasEditorRuntime, type CanvasEditorRuntime } from './runtime/CanvasEditorRuntime';
 
@@ -245,7 +248,7 @@ describe('CanvasSurface', () => {
     expect(html).not.toContain('class="canvas-feedback-bar"');
   });
 
-  it('does not eagerly render image src attributes before the image resource controller publishes image state', () => {
+  it('does not eagerly render image src attributes before the image asset runtime publishes image state', () => {
     const canvas = createCanvasDocument({ id: 'resource-previews', title: 'Resource Previews' });
     const projection: CanvasProjection = {
       canvasId: canvas.id,
@@ -269,13 +272,13 @@ describe('CanvasSurface', () => {
     expect(html).not.toContain('/files/raw/flow/image-0.png');
   });
 
-  it('does not render pending image resource src attributes before load and decode complete', () => {
-    const controller = createCanvasImageResourceController({
+  it('keeps a placeholder visible while the first next image loads', () => {
+    const runtime = createCanvasImageAssetRuntime({
       loadImage: () => new Promise(() => undefined)
     });
     const node = nodeFixture('flow/cover.png', 0, 0);
-    controller.setNodes(new Map([[node.projectRelativePath, node]]));
-    controller.setViewport({
+    runtime.setNodes(new Map([[node.projectRelativePath, node]]));
+    runtime.setViewport({
       visibleRect: { x: 0, y: 0, width: 400, height: 300 },
       mountedNodePaths: new Set([node.projectRelativePath]),
       culledNodePaths: new Set(),
@@ -286,14 +289,29 @@ describe('CanvasSurface', () => {
     });
 
     const html = renderToStaticMarkup(
-      <CanvasImageResourceProvider controller={controller}>
+      <CanvasImageAssetProvider runtime={runtime}>
         <CanvasNodeShell {...nodeShellProps(node)} />
-      </CanvasImageResourceProvider>
+      </CanvasImageAssetProvider>
     );
 
-    expect(html).not.toContain('<img');
-    expect(html).not.toContain('/canvas-image-preview?path=flow%2Fcover.png');
+    expect(html).toContain('class="canvas-node-placeholder"');
+    expect(html).toContain('data-canvas-image-layer="next"');
+    expect(html).not.toContain('data-canvas-image-layer="visible"');
     expect(html).toContain('flow/cover.png');
+  });
+
+  it('keeps the visible image mounted while the next image is loading', () => {
+    const html = renderCanvasSurfaceWithImageState({
+      kind: 'image',
+      visible: { src: '/preview/low.jpg', loadKey: 'low' },
+      next: { src: '/preview/high.jpg', loadKey: 'high' },
+      retry: () => undefined
+    });
+
+    expect(html).toContain('src="/preview/low.jpg"');
+    expect(html).toContain('src="/preview/high.jpg"');
+    expect(html).toContain('data-canvas-image-layer="visible"');
+    expect(html).toContain('data-canvas-image-layer="next"');
   });
 
   it('waits for Canvas settings before rendering image nodes', () => {
@@ -309,6 +327,8 @@ describe('CanvasSurface', () => {
         canvasId={canvas.id}
         state={workbenchStateFixture(canvas, projection, undefined)}
         actions={actions}
+        overlayRuntime={createCanvasOverlayRuntime()}
+        feedbackPlacementContext={feedbackPlacementContextFixture()}
       />
     );
 
@@ -348,11 +368,11 @@ describe('CanvasSurface', () => {
     const live = nodeFixture('flow/live-visible.png', 500, 0);
     const viewports: unknown[] = [];
 
-    syncCanvasImageResourceViewport({
-      controller: {
+    syncCanvasImageAssetViewport({
+      imageAssetRuntime: {
         setViewport: (viewport) => viewports.push(viewport)
       },
-      runtime: {
+      editorRuntime: {
         getSnapshot: () => ({ cameraState: 'moving' }) as ReturnType<CanvasEditorRuntime['getSnapshot']>,
         coordinates: {
           visibleCanvasRect: () => ({ x: 350, y: 0, width: 400, height: 300 })
@@ -390,8 +410,8 @@ describe('CanvasSurface', () => {
     const hidden = { ...nodeFixture('flow/hidden.png', 500, 0), visible: false };
     const visibility: Array<{ path: string; visible: boolean }> = [];
 
-    syncCanvasLayerNodeVisibility({
-      layerRuntime: {
+    syncCanvasStageNodeVisibility({
+      stageRuntime: {
         setNodeVisible: (path, visible) => visibility.push({ path, visible })
       },
       visibleRect: { x: 350, y: 0, width: 400, height: 300 },
@@ -412,7 +432,7 @@ describe('CanvasSurface', () => {
   it('defers moving image resource viewport sync until an animation frame', () => {
     const frames: FrameRequestCallback[] = [];
     const calls: unknown[] = [];
-    const scheduler = createCanvasImageResourceViewportSyncScheduler({
+    const scheduler = createCanvasImageAssetViewportSyncScheduler({
       sync: (cameraState) => calls.push(cameraState),
       requestFrame: (callback) => {
         frames.push(callback);
@@ -436,7 +456,7 @@ describe('CanvasSurface', () => {
     const frames: FrameRequestCallback[] = [];
     const canceled: number[] = [];
     const calls: unknown[] = [];
-    const scheduler = createCanvasImageResourceViewportSyncScheduler({
+    const scheduler = createCanvasImageAssetViewportSyncScheduler({
       sync: (cameraState) => calls.push(cameraState),
       requestFrame: (callback) => {
         frames.push(callback);
@@ -555,7 +575,7 @@ describe('CanvasSurface', () => {
       },
       cancelFrame: () => undefined
     });
-    const imageScheduler = createCanvasImageResourceViewportSyncScheduler({
+    const imageScheduler = createCanvasImageAssetViewportSyncScheduler({
       sync: (cameraState) => imageCalls.push(cameraState),
       requestFrame: (callback) => {
         throw new Error(`moving camera should not schedule image viewport work: ${String(callback)}`);
@@ -575,17 +595,16 @@ describe('CanvasSurface', () => {
     expect(imageCalls).toEqual(['idle']);
   });
 
-  it('syncs live shell visibility and schedules moving image viewport work for moving camera frames', () => {
+  it('keeps moving camera frames on the stage and render runtimes only', () => {
     const stale = nodeFixture('flow/stale-visible.png', 0, 0);
     const live = nodeFixture('flow/live-visible.png', 500, 0);
     const cameras: unknown[] = [];
     const visibility: Array<{ path: string; visible: boolean }> = [];
     const renderInputs: unknown[] = [];
-    const imageStates: unknown[] = [];
 
     syncCanvasMovingCameraFrame({
       liveCamera: { x: -350, y: 0, z: 1 },
-      layerRuntime: {
+      stageRuntime: {
         setCamera: (camera) => cameras.push(camera),
         setNodeVisible: (path, visible) => visibility.push({ path, visible })
       },
@@ -604,9 +623,6 @@ describe('CanvasSurface', () => {
       activeNodePaths: [live.projectRelativePath],
       renderSnapshotScheduler: {
         requestMoving: (input) => renderInputs.push(input)
-      },
-      imageResourceViewportScheduler: {
-        request: (cameraState) => imageStates.push(cameraState)
       }
     });
 
@@ -622,7 +638,6 @@ describe('CanvasSurface', () => {
       selection: { kind: 'node', projectRelativePath: live.projectRelativePath },
       activeNodePaths: [live.projectRelativePath]
     }]);
-    expect(imageStates).toEqual(['moving']);
   });
 });
 
@@ -650,8 +665,46 @@ function surface(
       textFileBuffers={input.textFileBuffers ?? {}}
       canvasFeedback={input.canvasFeedback}
       canvasSettings={input.canvasSettings ?? { imagePreviewsEnabled: true }}
-      imageResourceController={createCanvasImageResourceController()}
+      imageAssetRuntime={createCanvasImageAssetRuntime()}
+      overlayRuntime={createCanvasOverlayRuntime()}
+      feedbackPlacementContext={feedbackPlacementContextFixture()}
     />
+  );
+}
+
+function feedbackPlacementContextFixture(): Parameters<typeof CanvasSurface>[0]['feedbackPlacementContext'] {
+  return {
+    viewportRect: { x: 0, y: 0, width: 1280, height: 720 },
+    reservedRects: []
+  };
+}
+
+function renderCanvasSurfaceWithImageState(imageState: CanvasImageNodeRenderState): string {
+  const runtime = {
+    setNodes: () => undefined,
+    setViewport: () => undefined,
+    getNodeState: () => imageState,
+    subscribeNode: () => () => undefined,
+    resolvePending: () => undefined,
+    rejectPending: () => undefined,
+    retry: () => undefined,
+    stats: () => ({ activeLoadCount: 0, pendingImageCount: 0, decodedImageCount: 0 }),
+    dispose: () => undefined
+  } satisfies CanvasImageAssetRuntime;
+
+  return renderToStaticMarkup(
+    <CanvasImageAssetProvider runtime={runtime}>
+      <CanvasNodeContent
+        node={nodeFixture('flow/a.png', 0, 0)}
+        selected={false}
+        actions={actions}
+        textBuffer={undefined}
+        onSelectNode={() => undefined}
+        onTitlePointerDown={() => undefined}
+        onTitlePointerMove={() => undefined}
+        onTitlePointerUp={() => undefined}
+      />
+    </CanvasImageAssetProvider>
   );
 }
 
@@ -684,7 +737,8 @@ function nodeShellProps(node = nodeFixture('flow/cover.png', 0, 0)): CanvasNodeS
     node,
     selected: false,
     hovered: false,
-    layerRuntime: createCanvasLayerRuntime(),
+    zIndex: node.z,
+    stageRuntime: createCanvasStageRuntime(),
     actions,
     textBuffer: undefined,
     onPointerDown: () => undefined,

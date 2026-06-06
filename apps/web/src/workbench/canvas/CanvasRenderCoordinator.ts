@@ -11,17 +11,23 @@ import type { CanvasRect, CanvasSize } from './runtime/canvasGeometry';
 import { rectsIntersect } from './runtime/canvasGeometry';
 import { selectedNodeProjectRelativePaths, type CanvasSelection } from './runtime/canvasSelection';
 
-export interface CanvasRenderModelSnapshot {
+export interface CanvasNodeLayerView {
+  domOrder: string;
+  zIndex: number;
+}
+
+export interface CanvasRenderCoordinatorSnapshot {
   visibleRect: CanvasRect;
   virtualRect: CanvasRect;
   culledNodePaths: ReadonlySet<string>;
   nodesByPath: ReadonlyMap<string, ProjectedCanvasNode>;
+  nodeLayers: ReadonlyMap<string, CanvasNodeLayerView>;
   edges: CanvasEdgeSegment[];
   svgBounds: CanvasRect;
   svgViewBox: string;
 }
 
-export interface CanvasRenderModelUpdateInput {
+export interface CanvasRenderCoordinatorUpdateInput {
   camera: CanvasCamera;
   cameraState: CanvasCameraState;
   surfaceSize: CanvasSize | undefined;
@@ -29,28 +35,29 @@ export interface CanvasRenderModelUpdateInput {
   activeNodePaths: readonly string[];
 }
 
-export interface CanvasRenderModel {
-  update(input: CanvasRenderModelUpdateInput): CanvasRenderModelSnapshot;
+export interface CanvasRenderCoordinator {
+  update(input: CanvasRenderCoordinatorUpdateInput): CanvasRenderCoordinatorSnapshot;
 }
 
-export function createCanvasRenderModel(projection: CanvasProjection): CanvasRenderModel {
+export function createCanvasRenderCoordinator(projection: CanvasProjection): CanvasRenderCoordinator {
   const index = createCanvasVirtualizationIndex({
     nodes: projection.nodes,
     edges: projection.edges
   });
-  let snapshot: CanvasRenderModelSnapshot | undefined;
+  let snapshot: CanvasRenderCoordinatorSnapshot | undefined;
   let mountedInputPathKey: string | undefined;
 
-  const buildSnapshot = (input: CanvasRenderModelUpdateInput): CanvasRenderModelSnapshot => {
+  const buildSnapshot = (input: CanvasRenderCoordinatorUpdateInput): CanvasRenderCoordinatorSnapshot => {
     const rendered: VirtualizedCanvasRenderState = index.render({
       camera: input.camera,
       surfaceSize: input.surfaceSize,
       selection: input.selection,
       activeNodeProjectRelativePaths: input.activeNodePaths
     });
-    const nodesByPath = new Map(rendered.nodes.map((node) => [node.projectRelativePath, node]));
+    const nodes = [...rendered.nodes].sort((left, right) => left.projectRelativePath.localeCompare(right.projectRelativePath));
+    const nodesByPath = new Map(nodes.map((node) => [node.projectRelativePath, node]));
     const culledNodePaths = new Set(
-      rendered.nodes
+      nodes
         .filter((node) => !rectsIntersect(rendered.visibleRect, nodeRect(node)))
         .map((node) => node.projectRelativePath)
     );
@@ -59,6 +66,7 @@ export function createCanvasRenderModel(projection: CanvasProjection): CanvasRen
       virtualRect: rendered.virtualRect,
       culledNodePaths,
       nodesByPath,
+      nodeLayers: nodeLayersFor(nodes),
       edges: rendered.edges,
       svgBounds: rendered.svgBounds,
       svgViewBox: rendered.svgViewBox
@@ -67,7 +75,7 @@ export function createCanvasRenderModel(projection: CanvasProjection): CanvasRen
 
   return {
     update(input) {
-      const nextMountedInputPathKey = canvasRenderModelMountedInputPathKey(input);
+      const nextMountedInputPathKey = canvasRenderCoordinatorMountedInputPathKey(input);
       if (
         input.cameraState === 'moving'
         && snapshot
@@ -87,9 +95,20 @@ export function createCanvasRenderModel(projection: CanvasProjection): CanvasRen
   };
 }
 
-function canvasRenderModelMountedInputPathKey(input: CanvasRenderModelUpdateInput): string {
+function canvasRenderCoordinatorMountedInputPathKey(input: CanvasRenderCoordinatorUpdateInput): string {
   return [...new Set([
     ...selectedNodeProjectRelativePaths(input.selection),
     ...input.activeNodePaths
   ])].sort().join('\u001f');
+}
+
+function nodeLayersFor(nodes: ProjectedCanvasNode[]): Map<string, CanvasNodeLayerView> {
+  const layers = new Map<string, CanvasNodeLayerView>();
+  for (const node of nodes) {
+    layers.set(node.projectRelativePath, {
+      domOrder: node.projectRelativePath,
+      zIndex: node.z
+    });
+  }
+  return layers;
 }

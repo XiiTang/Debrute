@@ -2,6 +2,7 @@ import { renderToStaticMarkup } from 'react-dom/server';
 import { describe, expect, it } from 'vitest';
 import { createCanvasDocument, type CanvasProjection } from '@debrute/canvas-core';
 import { CanvasMinimapBar } from './CanvasMinimapBar';
+import { createCanvasOverlayRuntime } from './CanvasOverlayRuntime';
 import type { CanvasEditorRuntime } from './runtime/CanvasEditorRuntime';
 import { createCanvasEditorRuntime } from './runtime/CanvasEditorRuntime';
 import { CANVAS_MINIMAP_PANEL_SIZE, canvasMinimapButtonRect, placeCanvasMinimapPanel } from '../shell/floatingBars';
@@ -13,6 +14,7 @@ describe('CanvasMinimapBar', () => {
         canvas={undefined}
         projection={undefined}
         runtime={undefined}
+        overlayRuntime={createCanvasOverlayRuntime()}
         open={false}
         onOpenChange={() => undefined}
         panelPlacement={panelPlacementFixture}
@@ -50,6 +52,7 @@ describe('CanvasMinimapBar', () => {
         canvas={canvas}
         projection={projection}
         runtime={runtime}
+        overlayRuntime={createCanvasOverlayRuntime()}
         open={true}
         onOpenChange={() => undefined}
         panelPlacement={placement}

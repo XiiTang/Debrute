@@ -16,7 +16,7 @@ import type { CanvasCameraState } from './runtime/canvasCamera';
 import type { CanvasRect } from './runtime/canvasGeometry';
 import { rectsIntersect } from './runtime/canvasGeometry';
 
-export interface CanvasImageResourceViewport {
+export interface CanvasImageAssetViewport {
   visibleRect: CanvasRect;
   mountedNodePaths: ReadonlySet<string>;
   culledNodePaths: ReadonlySet<string>;
@@ -26,31 +26,40 @@ export interface CanvasImageResourceViewport {
   cameraState: CanvasCameraState;
 }
 
-export interface CanvasImageResourceController {
+export interface CanvasImageAssetRuntime {
   setNodes(nodes: ReadonlyMap<string, ProjectedCanvasNode>): void;
-  setViewport(viewport: CanvasImageResourceViewport): void;
+  setViewport(viewport: CanvasImageAssetViewport): void;
   getNodeState(projectRelativePath: string): CanvasImageNodeRenderState;
   subscribeNode(projectRelativePath: string, listener: () => void): () => void;
+  resolvePending(projectRelativePath: string, loadKey: string): void;
+  rejectPending(projectRelativePath: string, loadKey: string): void;
   retry(projectRelativePath: string): void;
+  stats(): CanvasImageAssetRuntimeStats;
   dispose(): void;
 }
 
-export type CanvasImageLoader = (item: CanvasImageLoadingPlanItem) => Promise<CanvasLoadedImage>;
+export interface CanvasImageAssetRuntimeStats {
+  activeLoadCount: number;
+  pendingImageCount: number;
+  decodedImageCount: number;
+}
 
-interface CanvasImageResourceRecord {
-  loaded?: CanvasLoadedImage;
-  pending?: CanvasPendingImage;
+export type CanvasImageAssetLoader = (item: CanvasImageLoadingPlanItem) => Promise<CanvasLoadedImage>;
+
+interface CanvasImageAssetRecord {
+  visible?: CanvasLoadedImage;
+  next?: CanvasPendingImage;
   error?: CanvasImageLoadError;
 }
 
-export function createCanvasImageResourceController(input: {
-  loadImage?: CanvasImageLoader;
+export function createCanvasImageAssetRuntime(input: {
+  loadImage?: CanvasImageAssetLoader;
   concurrency?: number;
-} = {}): CanvasImageResourceController {
-  const loadImage = input.loadImage ?? loadCanvasImageElement;
+} = {}): CanvasImageAssetRuntime {
+  const loadImage = input.loadImage;
   const concurrency = input.concurrency ?? CANVAS_IMAGE_LOAD_CONCURRENCY;
   const nodes = new Map<string, ProjectedCanvasNode>();
-  const records = new Map<string, CanvasImageResourceRecord>();
+  const records = new Map<string, CanvasImageAssetRecord>();
   const retryKeys = new Map<string, number>();
   const activeLoads = new Map<string, ActiveCanvasImageLoad>();
   const failedLoadKeys = new Set<string>();
@@ -58,10 +67,11 @@ export function createCanvasImageResourceController(input: {
   const retryCallbacks = new Map<string, () => void>();
   const nodeStates = new Map<string, CanvasImageNodeRenderState>();
 
-  let viewport: CanvasImageResourceViewport | undefined;
+  let viewport: CanvasImageAssetViewport | undefined;
   let viewportSignature: string | undefined;
   let plan = new Map<string, CanvasImageLoadingPlanItem>();
   let disposed = false;
+  let decodedImageCount = 0;
 
   const retry = (projectRelativePath: string) => {
     const previous = records.get(projectRelativePath);
@@ -69,8 +79,8 @@ export function createCanvasImageResourceController(input: {
     if (currentPlanItem) {
       failedLoadKeys.delete(currentPlanItem.loadKey);
     }
-    if (previous?.loaded) {
-      records.set(projectRelativePath, { loaded: previous.loaded });
+    if (previous?.visible) {
+      records.set(projectRelativePath, { visible: previous.visible });
     } else {
       records.delete(projectRelativePath);
     }
@@ -99,13 +109,13 @@ export function createCanvasImageResourceController(input: {
       return { kind: 'not-eligible' };
     }
     const record = records.get(projectRelativePath);
-    if (!record?.loaded && !record?.pending && !record?.error) {
+    if (!record?.visible && !record?.next && !record?.error) {
       return { kind: 'placeholder', retry: retryForPath(projectRelativePath) };
     }
     return {
       kind: 'image',
-      ...(record.loaded ? { loaded: record.loaded } : {}),
-      ...(record.pending ? { pending: record.pending } : {}),
+      ...(record.visible ? { visible: record.visible } : {}),
+      ...(record.next ? { next: record.next } : {}),
       ...(record.error ? { error: record.error } : {}),
       retry: retryForPath(projectRelativePath)
     };
@@ -149,12 +159,16 @@ export function createCanvasImageResourceController(input: {
         retryKeys
       })
       : new Map();
+    for (const path of pruneStaleImageWork()) {
+      affectedPaths.add(path);
+    }
     for (const path of affectedPaths) {
       publishIfChanged(path);
     }
   }
 
-  function clearUnmountedNodeResourceState(projectRelativePath: string): void {
+  function clearUnmountedNodeAssetState(projectRelativePath: string): void {
+    cancelActiveLoadsForPath(projectRelativePath);
     const currentPlanItem = plan.get(projectRelativePath);
     if (currentPlanItem) {
       failedLoadKeys.delete(currentPlanItem.loadKey);
@@ -169,41 +183,132 @@ export function createCanvasImageResourceController(input: {
     nodeStates.delete(projectRelativePath);
   }
 
+  function cancelActiveLoadsForPath(projectRelativePath: string): void {
+    for (const [loadKey, active] of [...activeLoads]) {
+      if (active.item.projectRelativePath === projectRelativePath) {
+        activeLoads.delete(loadKey);
+      }
+    }
+  }
+
+  function pruneStaleImageWork(): Set<string> {
+    const affectedPaths = new Set<string>();
+    const currentLoadKeys = new Set(
+      [...plan.values()]
+        .filter((item) => item.eligible)
+        .map((item) => item.loadKey)
+    );
+
+    for (const [loadKey, active] of [...activeLoads]) {
+      const current = plan.get(active.item.projectRelativePath);
+      if (current?.loadKey !== active.item.loadKey) {
+        activeLoads.delete(loadKey);
+        affectedPaths.add(active.item.projectRelativePath);
+      }
+    }
+
+    for (const [path, record] of [...records]) {
+      const current = plan.get(path);
+      const nextRecord: CanvasImageAssetRecord = {
+        ...(record.visible ? { visible: record.visible } : {})
+      };
+      if (record.next && current?.loadKey === record.next.loadKey) {
+        nextRecord.next = record.next;
+      } else if (record.next) {
+        affectedPaths.add(path);
+      }
+      if (record.error && current?.loadKey === record.error.loadKey) {
+        nextRecord.error = record.error;
+      } else if (record.error) {
+        failedLoadKeys.delete(record.error.loadKey);
+        affectedPaths.add(path);
+      }
+
+      if (nextRecord.visible || nextRecord.next || nextRecord.error) {
+        records.set(path, nextRecord);
+      } else {
+        records.delete(path);
+      }
+    }
+
+    for (const loadKey of [...failedLoadKeys]) {
+      if (!currentLoadKeys.has(loadKey)) {
+        failedLoadKeys.delete(loadKey);
+      }
+    }
+
+    return affectedPaths;
+  }
+
   function startLoad(item: CanvasImageLoadingPlanItem): void {
     const active: ActiveCanvasImageLoad = { item };
     activeLoads.set(item.loadKey, active);
     const previous = records.get(item.projectRelativePath);
     records.set(item.projectRelativePath, {
-      ...(previous?.loaded ? { loaded: previous.loaded } : {}),
-      pending: { src: item.src, loadKey: item.loadKey }
+      ...(previous?.visible ? { visible: previous.visible } : {}),
+      next: { src: item.src, loadKey: item.loadKey }
     });
     publishIfChanged(item.projectRelativePath);
 
-    void loadImage(item).then((loaded) => {
-      if (!isCanvasImageLoadResultCurrent(active, plan)) {
-        return;
-      }
-      failedLoadKeys.delete(item.loadKey);
-      records.set(item.projectRelativePath, { loaded });
-      rebuildPlan();
-    }).catch(() => {
-      if (!isCanvasImageLoadResultCurrent(active, plan)) {
-        return;
-      }
-      failedLoadKeys.add(item.loadKey);
-      const current = records.get(item.projectRelativePath);
-      records.set(item.projectRelativePath, {
-        ...(current?.loaded ? { loaded: current.loaded } : {}),
-        error: {
-          loadKey: item.loadKey,
-          message: `Unable to load ${item.projectRelativePath}.`
-        }
-      });
-      rebuildPlan();
-    }).finally(() => {
-      activeLoads.delete(item.loadKey);
+    if (!loadImage) {
+      return;
+    }
+
+    void loadImage(item)
+      .then((loaded) => finishLoaded(active, loaded))
+      .catch(() => finishRejected(active));
+  }
+
+  function finishLoaded(active: ActiveCanvasImageLoad, loaded: CanvasLoadedImage): void {
+    const activeLoad = activeLoads.get(active.item.loadKey);
+    if (activeLoad !== active) {
+      return;
+    }
+    activeLoads.delete(active.item.loadKey);
+    if (!isCanvasImageLoadResultCurrent(active, plan)) {
       pump();
+      return;
+    }
+    failedLoadKeys.delete(active.item.loadKey);
+    decodedImageCount += 1;
+    records.set(active.item.projectRelativePath, { visible: loaded });
+    rebuildPlan();
+    pump();
+  }
+
+  function finishRejected(active: ActiveCanvasImageLoad): void {
+    const activeLoad = activeLoads.get(active.item.loadKey);
+    if (activeLoad !== active) {
+      return;
+    }
+    activeLoads.delete(active.item.loadKey);
+    if (!isCanvasImageLoadResultCurrent(active, plan)) {
+      pump();
+      return;
+    }
+    failedLoadKeys.add(active.item.loadKey);
+    const current = records.get(active.item.projectRelativePath);
+    records.set(active.item.projectRelativePath, {
+      ...(current?.visible ? { visible: current.visible } : {}),
+      error: {
+        loadKey: active.item.loadKey,
+        message: `Unable to load ${active.item.projectRelativePath}.`
+      }
     });
+    rebuildPlan();
+    pump();
+  }
+
+  function finishPendingFromDom(projectRelativePath: string, loadKey: string, status: 'loaded' | 'rejected'): void {
+    const active = activeLoads.get(loadKey);
+    if (!active || active.item.projectRelativePath !== projectRelativePath) {
+      return;
+    }
+    if (status === 'loaded') {
+      finishLoaded(active, { src: active.item.src, loadKey: active.item.loadKey });
+    } else {
+      finishRejected(active);
+    }
   }
 
   function pump(): void {
@@ -217,7 +322,10 @@ export function createCanvasImageResourceController(input: {
       activeLoadKeys: new Set([...activeLoads.keys(), ...failedLoadKeys])
     }).filter((item) => (
       currentViewport.cameraState !== 'moving'
-      || !currentViewport.culledNodePaths.has(item.projectRelativePath)
+      || (
+        !currentViewport.culledNodePaths.has(item.projectRelativePath)
+        && !records.get(item.projectRelativePath)?.visible
+      )
     ));
     const openSlots = Math.max(0, concurrency - activeLoads.size);
     for (const item of candidates.slice(0, openSlots)) {
@@ -233,7 +341,7 @@ export function createCanvasImageResourceController(input: {
       }
       for (const path of [...records.keys()]) {
         if (!nodes.has(path)) {
-          clearUnmountedNodeResourceState(path);
+          clearUnmountedNodeAssetState(path);
           publish(path);
         }
       }
@@ -242,7 +350,7 @@ export function createCanvasImageResourceController(input: {
       pump();
     },
     setViewport: (nextViewport) => {
-      const nextSignature = canvasImageResourceViewportSignature(nextViewport, nodes);
+      const nextSignature = canvasImageAssetViewportSignature(nextViewport, nodes);
       if (viewportSignature === nextSignature) {
         viewport = nextViewport;
         return;
@@ -275,7 +383,14 @@ export function createCanvasImageResourceController(input: {
         }
       };
     },
+    resolvePending: (projectRelativePath, loadKey) => finishPendingFromDom(projectRelativePath, loadKey, 'loaded'),
+    rejectPending: (projectRelativePath, loadKey) => finishPendingFromDom(projectRelativePath, loadKey, 'rejected'),
     retry,
+    stats: () => ({
+      activeLoadCount: activeLoads.size,
+      pendingImageCount: [...records.values()].filter((record) => record.next).length,
+      decodedImageCount
+    }),
     dispose: () => {
       disposed = true;
       nodes.clear();
@@ -289,37 +404,19 @@ export function createCanvasImageResourceController(input: {
       plan.clear();
       viewport = undefined;
       viewportSignature = undefined;
+      decodedImageCount = 0;
     }
   };
 }
 
-function loadedImagesFromRecords(records: ReadonlyMap<string, CanvasImageResourceRecord>): Map<string, CanvasLoadedImage> {
+function loadedImagesFromRecords(records: ReadonlyMap<string, CanvasImageAssetRecord>): Map<string, CanvasLoadedImage> {
   const loadedImages = new Map<string, CanvasLoadedImage>();
   for (const [path, record] of records) {
-    if (record.loaded) {
-      loadedImages.set(path, record.loaded);
+    if (record.visible) {
+      loadedImages.set(path, record.visible);
     }
   }
   return loadedImages;
-}
-
-async function loadCanvasImageElement(item: CanvasImageLoadingPlanItem): Promise<CanvasLoadedImage> {
-  const image = new Image();
-  image.decoding = 'async';
-  image.draggable = false;
-  const loaded = new Promise<void>((resolve, reject) => {
-    image.onload = () => resolve();
-    image.onerror = () => reject(new Error(`Unable to load ${item.projectRelativePath}.`));
-  });
-  image.src = item.src;
-  await loaded;
-  if (typeof image.decode === 'function') {
-    await image.decode();
-  }
-  return {
-    src: item.src,
-    loadKey: item.loadKey
-  };
 }
 
 function sameCanvasImageNodeRenderState(
@@ -336,16 +433,16 @@ function sameCanvasImageNodeRenderState(
     return previous.kind === next.kind && previous.retry === next.retry;
   }
   return previous.retry === next.retry
-    && previous.loaded?.loadKey === next.loaded?.loadKey
-    && previous.loaded?.src === next.loaded?.src
-    && previous.pending?.loadKey === next.pending?.loadKey
-    && previous.pending?.src === next.pending?.src
+    && previous.visible?.loadKey === next.visible?.loadKey
+    && previous.visible?.src === next.visible?.src
+    && previous.next?.loadKey === next.next?.loadKey
+    && previous.next?.src === next.next?.src
     && previous.error?.loadKey === next.error?.loadKey
     && previous.error?.message === next.error?.message;
 }
 
-export function canvasImageResourceViewportSignature(
-  viewport: CanvasImageResourceViewport,
+export function canvasImageAssetViewportSignature(
+  viewport: CanvasImageAssetViewport,
   nodes: ReadonlyMap<string, ProjectedCanvasNode>
 ): string {
   return [
@@ -364,7 +461,7 @@ function rectSignature(rect: CanvasRect): string {
 }
 
 function movingViewportImageCandidateSignature(
-  viewport: CanvasImageResourceViewport,
+  viewport: CanvasImageAssetViewport,
   nodes: ReadonlyMap<string, ProjectedCanvasNode>
 ): string {
   return [...viewport.mountedNodePaths]

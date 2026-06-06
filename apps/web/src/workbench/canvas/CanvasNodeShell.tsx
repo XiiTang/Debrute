@@ -2,7 +2,7 @@ import React, { useLayoutEffect, useRef } from 'react';
 import type { ProjectedCanvasNode } from '@debrute/canvas-core';
 import type { TextFileBuffer, WorkbenchActions } from '../../types';
 import type { ResizeHandle } from '../services/canvasInteraction';
-import type { CanvasLayerRuntime } from './runtime/CanvasLayerRuntime';
+import type { CanvasStageRuntime } from './runtime/CanvasStageRuntime';
 import { CanvasNodeContent } from './CanvasNodeContent';
 
 const RESIZE_HANDLES: ResizeHandle[] = ['nw', 'n', 'ne', 'w', 'e', 'sw', 's', 'se'];
@@ -11,7 +11,8 @@ export interface CanvasNodeShellProps {
   node: ProjectedCanvasNode;
   selected: boolean;
   hovered: boolean;
-  layerRuntime: CanvasLayerRuntime;
+  zIndex: number;
+  stageRuntime: CanvasStageRuntime;
   actions: WorkbenchActions;
   textBuffer: TextFileBuffer | undefined;
   onPointerDown: (node: ProjectedCanvasNode, event: React.PointerEvent<Element>) => void;
@@ -28,7 +29,8 @@ function CanvasNodeShellComponent({
   node,
   selected,
   hovered,
-  layerRuntime,
+  zIndex,
+  stageRuntime,
   actions,
   textBuffer,
   onPointerDown,
@@ -49,18 +51,18 @@ function CanvasNodeShellComponent({
     if (!element) {
       return;
     }
-    return layerRuntime.registerNodeShell(node.projectRelativePath, element);
-  }, [layerRuntime, node.projectRelativePath]);
+    return stageRuntime.registerNodeShell(node.projectRelativePath, element);
+  }, [stageRuntime, node.projectRelativePath]);
 
   useLayoutEffect(() => {
-    layerRuntime.setNodeLayout(node.projectRelativePath, {
+    stageRuntime.setNodeLayout(node.projectRelativePath, {
       x: node.x,
       y: node.y,
       width: node.width,
       height: node.height,
-      z: node.z
+      z: zIndex
     });
-  }, [layerRuntime, node.height, node.projectRelativePath, node.width, node.x, node.y, node.z]);
+  }, [stageRuntime, node.height, node.projectRelativePath, node.width, node.x, node.y, zIndex]);
 
   const className = [
     'canvas-node-element',
@@ -138,7 +140,8 @@ export function areCanvasNodeShellPropsEqual(
   return previous.node === next.node
     && previous.selected === next.selected
     && previous.hovered === next.hovered
-    && previous.layerRuntime === next.layerRuntime
+    && previous.zIndex === next.zIndex
+    && previous.stageRuntime === next.stageRuntime
     && (previous.node.mediaKind === 'text' ? previous.actions === next.actions : true)
     && previous.textBuffer === next.textBuffer
     && previous.onPointerDown === next.onPointerDown

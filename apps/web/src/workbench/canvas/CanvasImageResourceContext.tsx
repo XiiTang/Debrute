@@ -1,32 +1,35 @@
 import React, { createContext, useContext, useSyncExternalStore } from 'react';
 import type { CanvasImageNodeRenderState } from './canvasImageLoading';
-import type { CanvasImageResourceController } from './CanvasImageResourceController';
+import type { CanvasImageAssetRuntime } from './CanvasImageAssetRuntime';
 
-const CanvasImageResourceContext = createContext<CanvasImageResourceController | undefined>(undefined);
-const SERVER_IMAGE_PLACEHOLDER_STATE: CanvasImageNodeRenderState = { kind: 'placeholder' };
-
-export function CanvasImageResourceProvider({
-  controller,
+const CanvasImageAssetContext = createContext<CanvasImageAssetRuntime | undefined>(undefined);
+export function CanvasImageAssetProvider({
+  runtime,
   children
 }: {
-  controller: CanvasImageResourceController;
+  runtime: CanvasImageAssetRuntime;
   children: React.ReactNode;
 }): React.ReactElement {
   return (
-    <CanvasImageResourceContext.Provider value={controller}>
+    <CanvasImageAssetContext.Provider value={runtime}>
       {children}
-    </CanvasImageResourceContext.Provider>
+    </CanvasImageAssetContext.Provider>
   );
 }
 
-export function useCanvasImageResource(projectRelativePath: string): CanvasImageNodeRenderState {
-  const controller = useContext(CanvasImageResourceContext);
-  if (!controller) {
-    throw new Error('CanvasImageResourceProvider is required.');
-  }
+export function useCanvasImageAsset(projectRelativePath: string): CanvasImageNodeRenderState {
+  const runtime = useCanvasImageAssetRuntime();
   return useSyncExternalStore(
-    (listener) => controller.subscribeNode(projectRelativePath, listener),
-    () => controller.getNodeState(projectRelativePath),
-    () => SERVER_IMAGE_PLACEHOLDER_STATE
+    (listener) => runtime.subscribeNode(projectRelativePath, listener),
+    () => runtime.getNodeState(projectRelativePath),
+    () => runtime.getNodeState(projectRelativePath)
   );
+}
+
+export function useCanvasImageAssetRuntime(): CanvasImageAssetRuntime {
+  const runtime = useContext(CanvasImageAssetContext);
+  if (!runtime) {
+    throw new Error('CanvasImageAssetProvider is required.');
+  }
+  return runtime;
 }

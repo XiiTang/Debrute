@@ -7,19 +7,23 @@ import type { CanvasPoint, CanvasRect } from '../services/canvasInteraction';
 import type { CanvasMinimapDragState, CanvasSize } from './canvasMinimap';
 import {
   beginCanvasMinimapDrag,
-  buildCanvasMinimapModel,
+  buildCanvasMinimapStaticModel,
+  buildCanvasMinimapViewportModel,
   clientPointToMinimapPoint,
   hasValidMinimapNodes,
   updateCanvasMinimapDrag,
+  type CanvasMinimapStaticModel,
   type CanvasMinimapModel
 } from './canvasMinimap';
 import type { CanvasEditorRuntime, CanvasRuntimeSnapshot } from './runtime/CanvasEditorRuntime';
-import { DEFAULT_CANVAS_CAMERA, type CanvasCamera } from './runtime/canvasCamera';
+import { DEFAULT_CANVAS_CAMERA } from './runtime/canvasCamera';
+import type { CanvasOverlayRuntime } from './CanvasOverlayRuntime';
 
 export function CanvasMinimapBar({
   canvas,
   projection,
   runtime,
+  overlayRuntime,
   open,
   onOpenChange,
   panelPlacement
@@ -27,6 +31,7 @@ export function CanvasMinimapBar({
   canvas: CanvasDocument | undefined;
   projection: CanvasProjection | undefined;
   runtime: CanvasEditorRuntime | undefined;
+  overlayRuntime: CanvasOverlayRuntime;
   open: boolean;
   onOpenChange: (open: boolean) => void;
   panelPlacement: CanvasMinimapPanelPlacement;
@@ -34,22 +39,7 @@ export function CanvasMinimapBar({
   const barRef = React.useRef<HTMLButtonElement | null>(null);
   const panelRef = React.useRef<HTMLDivElement | null>(null);
   const runtimeSnapshot = useOptionalRuntimeSnapshot(runtime);
-  const [liveCamera, setLiveCamera] = React.useState<CanvasCamera>(runtimeSnapshot?.camera ?? DEFAULT_CANVAS_CAMERA);
-  React.useEffect(() => {
-    if (runtimeSnapshot) {
-      setLiveCamera(runtimeSnapshot.camera);
-    }
-  }, [runtimeSnapshot]);
-  React.useEffect(() => {
-    if (!runtime || !open) {
-      return;
-    }
-    setLiveCamera(runtime.getSnapshot().camera);
-    return runtime.subscribeCamera((camera) => {
-      setLiveCamera((current) => sameCanvasCamera(current, camera) ? current : camera);
-    });
-  }, [open, runtime]);
-  const modelCamera = open ? liveCamera : runtimeSnapshot?.camera ?? DEFAULT_CANVAS_CAMERA;
+  const modelCamera = runtimeSnapshot?.camera ?? DEFAULT_CANVAS_CAMERA;
   const enabled = Boolean(
     canvas
     && projection
@@ -57,9 +47,9 @@ export function CanvasMinimapBar({
     && hasValidMinimapNodes(projection.nodes)
     && runtimeSnapshot?.surfaceSize
   );
-  const model = React.useMemo(() => (
+  const staticModel = React.useMemo(() => (
     open && enabled && projection && runtimeSnapshot?.surfaceSize
-      ? buildCanvasMinimapModel({
+      ? buildCanvasMinimapStaticModel({
           nodes: projection.nodes,
           selection: runtimeSnapshot.selection,
           camera: modelCamera,
@@ -68,6 +58,15 @@ export function CanvasMinimapBar({
         })
       : undefined
   ), [enabled, modelCamera, open, projection, runtimeSnapshot?.selection, runtimeSnapshot?.surfaceSize]);
+  const initialViewport = React.useMemo(() => (
+    open && runtimeSnapshot?.surfaceSize && staticModel
+      ? buildCanvasMinimapViewportModel({
+          transform: staticModel.transform,
+          camera: modelCamera,
+          surfaceSize: runtimeSnapshot.surfaceSize
+        })
+      : undefined
+  ), [modelCamera, open, runtimeSnapshot?.surfaceSize, staticModel]);
 
   React.useEffect(() => {
     if (!enabled && open) {
@@ -125,11 +124,13 @@ export function CanvasMinimapBar({
       >
         <Map size={13} />
       </button>
-      {open && enabled && model && runtime ? (
+      {open && enabled && staticModel && initialViewport && runtime ? (
         <CanvasMinimapPanel
           ref={panelRef}
-          model={model}
+          staticModel={staticModel}
+          initialViewportRect={initialViewport.viewportRect}
           runtime={runtime}
+          overlayRuntime={overlayRuntime}
           panelPlacement={panelPlacement}
         />
       ) : null}
@@ -138,15 +139,43 @@ export function CanvasMinimapBar({
 }
 
 const CanvasMinimapPanel = React.forwardRef<HTMLDivElement, {
-  model: CanvasMinimapModel;
+  staticModel: CanvasMinimapStaticModel;
+  initialViewportRect: CanvasRect;
   runtime: CanvasEditorRuntime;
+  overlayRuntime: CanvasOverlayRuntime;
   panelPlacement: CanvasMinimapPanelPlacement;
 }>(function CanvasMinimapPanel({
-  model,
+  staticModel,
+  initialViewportRect,
   runtime,
+  overlayRuntime,
   panelPlacement
 }, ref): React.ReactElement {
   const dragStateRef = React.useRef<CanvasMinimapDragState | undefined>(undefined);
+  const viewportRef = React.useRef<SVGRectElement | null>(null);
+
+  React.useLayoutEffect(() => {
+    if (!viewportRef.current) {
+      return;
+    }
+    return overlayRuntime.bindMinimapViewport(viewportRef.current);
+  }, [overlayRuntime]);
+
+  React.useEffect(() => {
+    const sync = () => {
+      const snapshot = runtime.getSnapshot();
+      const viewport = buildCanvasMinimapViewportModel({
+        transform: staticModel.transform,
+        camera: snapshot.camera,
+        surfaceSize: snapshot.surfaceSize
+      });
+      if (viewport) {
+        overlayRuntime.setMinimapViewport(viewport.viewportRect);
+      }
+    };
+    sync();
+    return runtime.subscribeCamera(sync);
+  }, [overlayRuntime, runtime, staticModel]);
 
   const beginDrag = (event: React.PointerEvent<SVGSVGElement>) => {
     const dragState = requestCanvasMinimapPointerDownCameraChange({
@@ -154,7 +183,7 @@ const CanvasMinimapPanel = React.forwardRef<HTMLDivElement, {
       pointerId: event.pointerId,
       clientPoint: { x: event.clientX, y: event.clientY },
       minimapRect: minimapEventRect(event),
-      model,
+      staticModel,
       runtime
     });
     if (!dragState) {
@@ -219,7 +248,7 @@ const CanvasMinimapPanel = React.forwardRef<HTMLDivElement, {
         onPointerUp={endDrag}
         onPointerCancel={endDrag}
       >
-        {model.nodeRects.map((node) => (
+        {staticModel.nodeRects.map((node) => (
           <rect
             key={node.projectRelativePath}
             data-minimap-node-path={node.projectRelativePath}
@@ -232,11 +261,12 @@ const CanvasMinimapPanel = React.forwardRef<HTMLDivElement, {
           />
         ))}
         <rect
+          ref={viewportRef}
           className="canvas-minimap-viewport"
-          x={model.viewportRect.x}
-          y={model.viewportRect.y}
-          width={Math.max(2, model.viewportRect.width)}
-          height={Math.max(2, model.viewportRect.height)}
+          x={initialViewportRect.x}
+          y={initialViewportRect.y}
+          width={Math.max(2, initialViewportRect.width)}
+          height={Math.max(2, initialViewportRect.height)}
           rx="3"
         />
       </svg>
@@ -249,7 +279,7 @@ function requestCanvasMinimapPointerDownCameraChange(input: {
   pointerId: number;
   clientPoint: CanvasPoint;
   minimapRect: CanvasRect;
-  model: CanvasMinimapModel;
+  staticModel: CanvasMinimapStaticModel;
   runtime: CanvasEditorRuntime;
   minimapSize?: CanvasSize;
 }): CanvasMinimapDragState | undefined {
@@ -260,6 +290,18 @@ function requestCanvasMinimapPointerDownCameraChange(input: {
   if (!runtimeSnapshot.surfaceSize) {
     return undefined;
   }
+  const viewport = buildCanvasMinimapViewportModel({
+    transform: input.staticModel.transform,
+    camera: runtimeSnapshot.camera,
+    surfaceSize: runtimeSnapshot.surfaceSize
+  });
+  if (!viewport) {
+    return undefined;
+  }
+  const model: CanvasMinimapModel = {
+    ...input.staticModel,
+    ...viewport
+  };
   const next = beginCanvasMinimapDrag({
     pointerId: input.pointerId,
     minimapPoint: clientPointToMinimapPoint({
@@ -267,7 +309,7 @@ function requestCanvasMinimapPointerDownCameraChange(input: {
       minimapRect: input.minimapRect,
       minimapSize: input.minimapSize ?? CANVAS_MINIMAP_PANEL_SIZE
     }),
-    model: input.model,
+    model,
     camera: runtimeSnapshot.camera,
     surfaceSize: runtimeSnapshot.surfaceSize
   });
@@ -317,10 +359,6 @@ function emptySubscribe(): () => void {
 
 function undefinedRuntimeSnapshot(): undefined {
   return undefined;
-}
-
-function sameCanvasCamera(left: CanvasCamera, right: CanvasCamera): boolean {
-  return left.x === right.x && left.y === right.y && left.z === right.z;
 }
 
 function stopCanvasMinimapEvent(event: Pick<React.SyntheticEvent, 'stopPropagation'>): void {

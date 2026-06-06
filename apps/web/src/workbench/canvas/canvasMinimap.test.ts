@@ -2,7 +2,9 @@ import { describe, expect, it } from 'vitest';
 import type { CanvasProjection } from '@debrute/canvas-core';
 import {
   beginCanvasMinimapDrag,
+  buildCanvasMinimapStaticModel,
   buildCanvasMinimapModel,
+  buildCanvasMinimapViewportModel,
   canvasPointToMinimapPoint,
   canvasCameraForMinimapCenter,
   clientPointToMinimapPoint,
@@ -38,6 +40,36 @@ describe('canvasMinimap geometry', () => {
     expect(model?.viewportRect.y).toBeCloseTo(34.0909, 4);
     expect(model?.viewportRect.width).toBeCloseTo(181.8182, 4);
     expect(model?.viewportRect.height).toBeCloseTo(90.9091, 4);
+  });
+
+  it('splits static node geometry from dynamic viewport geometry', () => {
+    const staticModel = buildCanvasMinimapStaticModel({
+      nodes: [
+        nodeFixture('flow/a.png', 0, 0, 100, 100),
+        nodeFixture('flow/selected.png', 800, 400, 200, 100)
+      ],
+      selection: { kind: 'node', projectRelativePath: 'flow/selected.png' },
+      camera: { x: -100, y: -50, z: 0.5 },
+      surfaceSize: { width: 1000, height: 500 },
+      minimapSize: { width: 220, height: 150 },
+      padding: 10
+    });
+
+    expect(staticModel?.nodeRects.map((node) => node.projectRelativePath)).toEqual([
+      'flow/a.png',
+      'flow/selected.png'
+    ]);
+    expect(staticModel?.nodeRects.find((node) => node.projectRelativePath === 'flow/selected.png')?.selected).toBe(true);
+
+    const viewport = buildCanvasMinimapViewportModel({
+      transform: staticModel!.transform,
+      camera: { x: -200, y: -100, z: 0.5 },
+      surfaceSize: { width: 1000, height: 500 }
+    });
+
+    expect(viewport?.visibleRect).toEqual({ x: 400, y: 200, width: 2000, height: 1000 });
+    expect(viewport?.viewportRect.x).toBeCloseTo(46.3636, 4);
+    expect(viewport?.viewportRect.y).toBeCloseTo(43.1818, 4);
   });
 
   it('round trips Canvas and minimap points through the model transform', () => {

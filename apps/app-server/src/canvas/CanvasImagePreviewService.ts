@@ -255,7 +255,9 @@ class LocalCanvasImagePreviewService implements CanvasImagePreviewService {
       throw new Error(`Canvas image is not previewable: ${input.projectRelativePath}`);
     }
     const absoluteSourcePath = await resolveExistingProjectPath(input.projectRoot, input.projectRelativePath);
+    throwIfCanvasPreviewAborted(input.abortSignal);
     const fileStat = await canvasImageSourceFileStat(input.projectRoot, input.projectRelativePath);
+    throwIfCanvasPreviewAborted(input.abortSignal);
     const actualRevision = projectFileRevision(fileStat.size, fileStat.mtimeMs);
     if (actualRevision !== input.revision) {
       throw new Error(`Canvas preview revision does not match source: ${input.projectRelativePath}`);
@@ -269,6 +271,7 @@ class LocalCanvasImagePreviewService implements CanvasImagePreviewService {
       revision: input.revision,
       width: input.width
     });
+    throwIfCanvasPreviewAborted(input.abortSignal);
     const existingPreviewPath = await existingCanvasImagePreviewCachePath(previewBasePath);
     if (existingPreviewPath) {
       return {
@@ -276,7 +279,8 @@ class LocalCanvasImagePreviewService implements CanvasImagePreviewService {
       };
     }
 
-    const sourceMetadata = await readCanvasImagePreviewMetadata(absoluteSourcePath, input.projectRelativePath);
+    const sourceMetadata = await readCanvasImagePreviewMetadata(absoluteSourcePath, input.projectRelativePath, input.abortSignal);
+    throwIfCanvasPreviewAborted(input.abortSignal);
     if ((sourceMetadata.pages ?? 1) > 1) {
       throw new Error(`Canvas image is not previewable: ${input.projectRelativePath}`);
     }
@@ -323,10 +327,20 @@ async function canvasImageSourceFileStat(projectRoot: string, projectRelativePat
   return fileStat;
 }
 
-async function readCanvasImagePreviewMetadata(absolutePath: string, projectRelativePath: string): Promise<sharp.Metadata> {
+async function readCanvasImagePreviewMetadata(
+  absolutePath: string,
+  projectRelativePath: string,
+  abortSignal?: AbortSignal
+): Promise<sharp.Metadata> {
   try {
-    return await withMetadataSlot(() => sharp(absolutePath).metadata());
-  } catch {
+    return await withMetadataSlot(() => {
+      throwIfCanvasPreviewAborted(abortSignal);
+      return sharp(absolutePath).metadata();
+    }, abortSignal);
+  } catch (error) {
+    if (abortSignal?.aborted) {
+      throw error;
+    }
     throw new Error(`Canvas image preview metadata could not be read: ${projectRelativePath}`);
   }
 }

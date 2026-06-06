@@ -910,6 +910,95 @@ describe('daemon HTTP runtime', () => {
     expect(released.status).toBe(404);
   });
 
+  it('aborts queued canvas preview work when the client closes the request', async () => {
+    const projectRoot = await mkdtemp(join(tmpdir(), 'debrute-daemon-preview-abort-'));
+    const aborts: string[] = [];
+    let resolveEntered: (() => void) | undefined;
+    const entered = new Promise<void>((resolve) => {
+      resolveEntered = resolve;
+    });
+    const appServer = {
+      openProject: async (root: string) => projectSnapshotFixture(root),
+      currentSnapshot: () => undefined,
+      close: () => undefined,
+      resolveCanvasImagePreview: async (input: { abortSignal?: AbortSignal }) => {
+        input.abortSignal?.addEventListener('abort', () => aborts.push('aborted'), { once: true });
+        resolveEntered?.();
+        await delay(40);
+        throw new Error('preview should have been aborted before completion');
+      }
+    } as unknown as DebruteAppServer;
+    const daemon = createDebruteDaemonHttpServer({
+      host: '127.0.0.1',
+      port: 0,
+      token: 'test-token',
+      webBaseUrl: null,
+      createAppServer: () => appServer
+    });
+    cleanups.push(() => daemon.close(), () => rm(projectRoot, { recursive: true, force: true }));
+    const runtime = await daemon.listen();
+    const opened = await requestJson<{ projectId: string }>(`${runtime.daemonUrl}/api/projects/open`, {
+      method: 'POST',
+      headers: {
+        'content-type': 'application/json',
+        'x-debrute-daemon-token': 'test-token'
+      },
+      body: JSON.stringify({ projectRoot })
+    });
+    const abortController = new AbortController();
+    const request = fetch(
+      `${runtime.daemonUrl}/api/projects/${opened.projectId}/canvas-image-preview?path=flow%2Fa.png&v=1&w=256`,
+      { signal: abortController.signal }
+    ).catch((error) => error);
+
+    await entered;
+    abortController.abort();
+    await request;
+    await delay(20);
+
+    expect(aborts).toEqual(['aborted']);
+  });
+
+  it('does not abort normal slow canvas preview requests before the response finishes', async () => {
+    const projectRoot = await mkdtemp(join(tmpdir(), 'debrute-daemon-preview-normal-'));
+    const previewPath = join(projectRoot, 'preview.png');
+    await writeFile(previewPath, 'preview', 'utf8');
+    const aborts: string[] = [];
+    const appServer = {
+      openProject: async (root: string) => projectSnapshotFixture(root),
+      currentSnapshot: () => undefined,
+      close: () => undefined,
+      resolveCanvasImagePreview: async (input: { abortSignal?: AbortSignal }) => {
+        input.abortSignal?.addEventListener('abort', () => aborts.push('aborted'), { once: true });
+        await delay(40);
+        return { absolutePath: previewPath };
+      }
+    } as unknown as DebruteAppServer;
+    const daemon = createDebruteDaemonHttpServer({
+      host: '127.0.0.1',
+      port: 0,
+      token: 'test-token',
+      webBaseUrl: null,
+      createAppServer: () => appServer
+    });
+    cleanups.push(() => daemon.close(), () => rm(projectRoot, { recursive: true, force: true }));
+    const runtime = await daemon.listen();
+    const opened = await requestJson<{ projectId: string }>(`${runtime.daemonUrl}/api/projects/open`, {
+      method: 'POST',
+      headers: {
+        'content-type': 'application/json',
+        'x-debrute-daemon-token': 'test-token'
+      },
+      body: JSON.stringify({ projectRoot })
+    });
+
+    const response = await fetch(`${runtime.daemonUrl}/api/projects/${opened.projectId}/canvas-image-preview?path=flow%2Fa.png&v=1&w=256`);
+
+    expect(response.status).toBe(200);
+    await expect(response.text()).resolves.toBe('preview');
+    expect(aborts).toEqual([]);
+  });
+
   it('keeps a project session live while an Electron project window is registered', async () => {
     const projectRoot = await mkdtemp(join(tmpdir(), 'debrute-daemon-electron-window-project-'));
     await writeFile(join(projectRoot, 'brief.md'), '# Brief', 'utf8');
@@ -1120,6 +1209,32 @@ async function readWithTimeout(
       clearTimeout(timer);
     }
   }
+}
+
+function projectSnapshotFixture(projectRoot: string) {
+  return {
+    metadata: {
+      schemaVersion: 1,
+      project: {
+        id: 'project',
+        name: 'Project',
+        createdAt: '2026-05-26T00:00:00.000Z',
+        updatedAt: '2026-05-26T00:00:00.000Z'
+      }
+    },
+    projectRoot,
+    files: [],
+    canvases: [],
+    projections: [],
+    diagnostics: [],
+    health: {
+      projectName: 'Project',
+      canvasCount: 0,
+      diagnosticCounts: { errors: 0, warnings: 0, infos: 0 },
+      runtimeDataLocation: '/runtime',
+      checkedAt: '2026-05-26T00:00:00.000Z'
+    }
+  };
 }
 
 async function delay(ms: number): Promise<void> {

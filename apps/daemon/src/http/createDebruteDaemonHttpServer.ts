@@ -578,7 +578,7 @@ async function handleCanvasImagePreviewRoute(context: ProjectRequestContext): Pr
     projectRelativePath,
     revision,
     width,
-    abortSignal: AbortSignal.timeout(30_000)
+    abortSignal: requestAbortSignal(context.request, context.response, 30_000)
   });
   await writeRevisionedFileResponse({
     request: context.request,
@@ -586,6 +586,30 @@ async function handleCanvasImagePreviewRoute(context: ProjectRequestContext): Pr
     absolutePath: preview.absolutePath,
     contentType: contentTypeFromPath(preview.absolutePath)
   });
+}
+
+function requestAbortSignal(request: IncomingMessage, response: ServerResponse, timeoutMs: number): AbortSignal {
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), timeoutMs);
+  const abort = () => {
+    controller.abort();
+  };
+  const abortIfResponseClosedEarly = () => {
+    if (!response.writableEnded) {
+      abort();
+    }
+  };
+  const cleanup = () => {
+    request.off('aborted', abort);
+    response.off('close', abortIfResponseClosedEarly);
+    response.off('finish', cleanup);
+    clearTimeout(timeout);
+  };
+  request.once('aborted', abort);
+  response.once('close', abortIfResponseClosedEarly);
+  response.once('finish', cleanup);
+  controller.signal.addEventListener('abort', cleanup, { once: true });
+  return controller.signal;
 }
 
 async function handleGeneratedAssetRoute(context: ProjectRequestContext, projectId: string, tail: string): Promise<void> {

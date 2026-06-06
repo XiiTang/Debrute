@@ -2,9 +2,10 @@ import React from 'react';
 import { Boxes, FolderTree } from 'lucide-react';
 import type { WorkbenchActions, WorkbenchState } from '../../types';
 import type { WorkbenchContextMenuPosition, WorkbenchContextMenuTarget } from '../shell/contextMenu';
-import type { CanvasFeedbackBarTarget } from '../shell/floatingBars';
+import type { CanvasFeedbackBarTarget, FloatingBarRect } from '../shell/floatingBars';
 import { getCanvasById } from '../services/canvasState';
 import { CanvasSurface } from './CanvasSurface';
+import type { CanvasOverlayRuntime } from './CanvasOverlayRuntime';
 import type { CanvasEditorRuntime } from './runtime/CanvasEditorRuntime';
 import { createCanvasEditorRuntime } from './runtime/CanvasEditorRuntime';
 
@@ -13,6 +14,9 @@ export function CanvasEditor({
   state,
   actions,
   runtimeScopeKey,
+  overlayRuntime,
+  minimapOpen,
+  feedbackPlacementContext,
   onFeedbackBarTargetChange,
   onRuntimeChange,
   onOpenContextMenu
@@ -21,6 +25,12 @@ export function CanvasEditor({
   state: WorkbenchState;
   actions: WorkbenchActions;
   runtimeScopeKey?: number;
+  overlayRuntime: CanvasOverlayRuntime;
+  minimapOpen?: boolean | undefined;
+  feedbackPlacementContext: {
+    viewportRect: FloatingBarRect;
+    reservedRects: readonly FloatingBarRect[];
+  };
   onFeedbackBarTargetChange?: ((target: CanvasFeedbackBarTarget | undefined) => void) | undefined;
   onRuntimeChange?: ((runtime: CanvasEditorRuntime | undefined) => void) | undefined;
   onOpenContextMenu?: ((target: WorkbenchContextMenuTarget, position: WorkbenchContextMenuPosition) => void) | undefined;
@@ -83,6 +93,9 @@ export function CanvasEditor({
         textFileBuffers={state.textFileBuffers}
         canvasFeedback={state.canvasFeedback}
         canvasSettings={state.canvasSettings}
+        overlayRuntime={overlayRuntime}
+        minimapOpen={minimapOpen}
+        feedbackPlacementContext={feedbackPlacementContext}
         onFeedbackBarTargetChange={onFeedbackBarTargetChange}
         onOpenContextMenu={onOpenContextMenu}
       />
