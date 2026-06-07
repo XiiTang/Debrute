@@ -770,11 +770,17 @@ describe('daemon HTTP runtime', () => {
       },
       body: JSON.stringify({})
     });
+    const aggregateResponse = await fetch(`${runtime.daemonUrl}/api/settings`, {
+      headers: { 'connection': 'close', 'x-debrute-daemon-token': 'test-token' }
+    });
     await getResponse.text();
     await putResponse.text();
+    const aggregate = await aggregateResponse.json() as Record<string, unknown>;
 
     expect(getResponse.status).toBe(404);
     expect(putResponse.status).toBe(404);
+    expect(aggregateResponse.status).toBe(200);
+    expect(aggregate).not.toHaveProperty('canvas');
   });
 
   it('releases a project session after the last event stream closes and idle TTL elapses', async () => {
