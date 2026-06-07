@@ -21,7 +21,16 @@ import { createCanvasImageAssetRuntime, type CanvasImageAssetRuntime } from './C
 import { CanvasImageAssetProvider } from './CanvasImageResourceContext';
 import { CanvasNodeShell } from './CanvasNodeShell';
 import type { CanvasOverlayRuntime } from './CanvasOverlayRuntime';
-import { createCanvasPerfMonitor, type CanvasPerfMonitor } from './CanvasPerfMonitor';
+import { createCanvasPerfBrowserAdapter } from './CanvasPerfBrowserAdapter';
+import {
+  CANVAS_PERF_INTERACTION_SESSION_TYPES,
+  createCanvasPerfMonitor,
+  type CanvasPerfCounterName,
+  type CanvasPerfCounterTotals,
+  type CanvasPerfFinalState,
+  type CanvasPerfMonitor,
+  type CanvasPerfSessionId
+} from './CanvasPerfMonitor';
 import { createCanvasRenderCoordinator, type CanvasRenderCoordinatorSnapshot, type CanvasRenderCoordinatorUpdateInput } from './CanvasRenderCoordinator';
 import { nodeRect } from './canvasVirtualization';
 import type {
@@ -79,13 +88,33 @@ export function CanvasSurface({
     canvasId: string;
     runtime: CanvasImageAssetRuntime;
   }>();
+  const perfMonitorEnabled = canvasPerfMonitorEnabled();
+  const perfMonitorRef = useRef<CanvasPerfMonitor | undefined>(undefined);
+  const perfBrowserAdapter = useMemo(() => (
+    perfMonitorEnabled
+      ? createCanvasPerfBrowserAdapter({
+        onLongAnimationFrame: (entry) => {
+          perfMonitorRef.current?.recordLongAnimationFrame(entry);
+        }
+      })
+      : undefined
+  ), [perfMonitorEnabled]);
+  const perfMonitor = useMemo(() => createCanvasPerfMonitor({
+    enabled: perfMonitorEnabled,
+    onEvent: (event) => perfBrowserAdapter?.recordEvent(event)
+  }), [perfBrowserAdapter, perfMonitorEnabled]);
+  perfMonitorRef.current = perfMonitor;
+
+  useEffect(() => () => {
+    perfBrowserAdapter?.dispose();
+  }, [perfBrowserAdapter]);
 
   useEffect(() => {
     if (imageAssetRuntime) {
       setImageAssetRuntimeState(undefined);
       return;
     }
-    const runtime = createCanvasImageAssetRuntime();
+    const runtime = createCanvasImageAssetRuntime({ perfMonitor });
     setImageAssetRuntimeState({
       canvasId: canvas.id,
       runtime
@@ -93,7 +122,7 @@ export function CanvasSurface({
     return () => {
       runtime.dispose();
     };
-  }, [canvas.id, imageAssetRuntime]);
+  }, [canvas.id, imageAssetRuntime, perfMonitor]);
 
   const activeImageAssetRuntime = imageAssetRuntime
     ?? (imageAssetRuntimeState?.canvasId === canvas.id ? imageAssetRuntimeState.runtime : undefined);
@@ -116,6 +145,7 @@ export function CanvasSurface({
       canvasFeedback={canvasFeedback}
       canvasSettings={canvasSettings}
       imageAssetRuntime={activeImageAssetRuntime}
+      perfMonitor={perfMonitor}
       overlayRuntime={overlayRuntime}
       minimapOpen={minimapOpen}
       feedbackPlacementContext={feedbackPlacementContext}
@@ -134,6 +164,7 @@ function CanvasSurfaceRuntime({
   canvasFeedback,
   canvasSettings,
   imageAssetRuntime,
+  perfMonitor,
   overlayRuntime,
   minimapOpen,
   feedbackPlacementContext,
@@ -141,6 +172,7 @@ function CanvasSurfaceRuntime({
   onOpenContextMenu
 }: CanvasSurfaceProps & {
   imageAssetRuntime: CanvasImageAssetRuntime;
+  perfMonitor: CanvasPerfMonitor;
 }): React.ReactElement {
   const surfaceRef = useRef<HTMLDivElement | null>(null);
   const stageRef = useRef<HTMLDivElement | null>(null);
@@ -156,15 +188,15 @@ function CanvasSurfaceRuntime({
   const imageResourceZoomTimerRef = useRef<number | undefined>(undefined);
   const fittedCanvasIdRef = useRef<string | undefined>(undefined);
   const canvasPerfSessionRef = useRef<CanvasPerfRuntimeSession | undefined>(undefined);
+  const canvasPerfDragSessionRef = useRef<CanvasPerfRuntimeSession | undefined>(undefined);
   const reactCommitCountRef = useRef(0);
   const [hoveredNodePath, setHoveredNodePath] = useState<string>();
 
   const projectedNodes = projection.nodes;
   const devicePixelRatio = devicePixelRatioValue();
   const perfMonitorEnabled = canvasPerfMonitorEnabled();
-  const stageRuntime = useMemo(() => createCanvasStageRuntime(), [runtime]);
-  const perfMonitor = useMemo(() => createCanvasPerfMonitor({ enabled: perfMonitorEnabled }), [perfMonitorEnabled]);
-  const renderCoordinator = useMemo(() => createCanvasRenderCoordinator(projection), [projection]);
+  const stageRuntime = useMemo(() => createCanvasStageRuntime({ perfMonitor }), [perfMonitor]);
+  const renderCoordinator = useMemo(() => createCanvasRenderCoordinator({ projection, perfMonitor }), [perfMonitor]);
   const initialRenderSnapshot = useMemo(() => renderCoordinator.update({
     camera: runtime.getSnapshot().camera,
     cameraState: runtime.getSnapshot().cameraState,
@@ -196,8 +228,9 @@ function CanvasSurfaceRuntime({
     setRenderSnapshot(next);
   }, [renderCoordinator]);
   const renderSnapshotScheduler = useMemo(() => createCanvasRenderSnapshotScheduler({
+    perfMonitor,
     commit: commitRenderSnapshot
-  }), [commitRenderSnapshot]);
+  }), [commitRenderSnapshot, perfMonitor]);
 
   const syncImageAssetViewport = useCallback((cameraState = runtime.getSnapshot().cameraState) => {
     syncCanvasImageAssetViewport({
@@ -218,8 +251,21 @@ function CanvasSurfaceRuntime({
     runtime
   ]);
   const imageAssetViewportScheduler = useMemo(() => createCanvasImageAssetViewportSyncScheduler({
+    perfMonitor,
     sync: syncImageAssetViewport
-  }), [syncImageAssetViewport]);
+  }), [perfMonitor, syncImageAssetViewport]);
+
+  useEffect(() => {
+    renderCoordinator.setProjection(projection);
+    const snapshot = runtime.getSnapshot();
+    commitRenderSnapshot({
+      camera: snapshot.camera,
+      cameraState: snapshot.cameraState,
+      surfaceSize: snapshot.surfaceSize,
+      selection: snapshot.selection,
+      activeNodePaths: activeNodePathsRef.current
+    });
+  }, [commitRenderSnapshot, projection, renderCoordinator, runtime]);
 
   useEffect(() => {
     renderSnapshotRef.current = initialRenderSnapshot;
@@ -300,12 +346,14 @@ function CanvasSurfaceRuntime({
       surfaceSize: surfaceSizeRef.current,
       selection: selectionRef.current,
       activeNodePaths: activeNodePathsRef.current,
-      renderSnapshotScheduler
+      renderSnapshotScheduler,
+      imageAssetViewportScheduler
     });
-    recordCanvasPerfCameraFrame({
+    recordCanvasPerfFrame({
       enabled: perfMonitorEnabled,
       perfMonitor,
       sessionRef: canvasPerfSessionRef,
+      cameraState: runtime.getSnapshot().cameraState,
       renderSnapshot: renderSnapshotRef.current ?? renderSnapshot,
       imageAssetRuntime,
       reactCommitCountRef
@@ -317,25 +365,29 @@ function CanvasSurfaceRuntime({
     stageRuntime,
     renderSnapshot,
     renderSnapshot.nodesByPath,
+    imageAssetViewportScheduler,
     renderSnapshotScheduler,
     runtime
   ]);
 
   useEffect(() => {
     return runtime.subscribeCameraState((cameraState) => {
-      syncCanvasPerfCameraSessionState({
+      const snapshot = runtime.getSnapshot();
+      syncCanvasPerfSessionState({
         enabled: perfMonitorEnabled,
         perfMonitor,
         sessionRef: canvasPerfSessionRef,
         reactCommitCountRef,
-        cameraState,
+        snapshot: {
+          cameraState,
+          camera: snapshot.camera
+        },
         minimapOpen: minimapOpen === true
       });
       if (cameraState !== 'idle') {
         return;
       }
       imageAssetViewportScheduler.flush(cameraState);
-      const snapshot = runtime.getSnapshot();
       renderSnapshotScheduler.flush({
         camera: snapshot.camera,
         cameraState,
@@ -354,9 +406,59 @@ function CanvasSurfaceRuntime({
   ]);
 
   useEffect(() => {
-    stageRuntime.applyDragPreview(runtime.getSnapshot().dragState);
+    const initialSnapshot = runtime.getSnapshot();
+    syncCanvasPerfDragSessionState({
+      enabled: perfMonitorEnabled,
+      perfMonitor,
+      sessionRef: canvasPerfDragSessionRef,
+      reactCommitCountRef,
+      dragState: initialSnapshot.dragState,
+      snapshot: initialSnapshot,
+      finalState: canvasPerfFinalState({
+        snapshot: initialSnapshot,
+        renderSnapshot: renderSnapshotRef.current ?? renderSnapshot,
+        imageAssetRuntime
+      })
+    });
+    stageRuntime.applyDragPreview(initialSnapshot.dragState);
+    if (initialSnapshot.dragState) {
+      recordCanvasPerfFrame({
+        enabled: perfMonitorEnabled,
+        perfMonitor,
+        sessionRef: canvasPerfDragSessionRef,
+        cameraState: initialSnapshot.cameraState,
+        renderSnapshot: renderSnapshotRef.current ?? renderSnapshot,
+        imageAssetRuntime,
+        reactCommitCountRef
+      });
+    }
     return runtime.subscribeDragState((nextDragState) => {
+      const snapshot = runtime.getSnapshot();
+      syncCanvasPerfDragSessionState({
+        enabled: perfMonitorEnabled,
+        perfMonitor,
+        sessionRef: canvasPerfDragSessionRef,
+        reactCommitCountRef,
+        dragState: nextDragState,
+        snapshot,
+        finalState: canvasPerfFinalState({
+          snapshot,
+          renderSnapshot: renderSnapshotRef.current ?? renderSnapshot,
+          imageAssetRuntime
+        })
+      });
       stageRuntime.applyDragPreview(nextDragState);
+      if (nextDragState) {
+        recordCanvasPerfFrame({
+          enabled: perfMonitorEnabled,
+          perfMonitor,
+          sessionRef: canvasPerfDragSessionRef,
+          cameraState: snapshot.cameraState,
+          renderSnapshot: renderSnapshotRef.current ?? renderSnapshot,
+          imageAssetRuntime,
+          reactCommitCountRef
+        });
+      }
       const nextActivePaths = activeNodeProjectRelativePaths(nextDragState);
       const nextKey = nextActivePaths.join('\u001f');
       if (nextKey === activeNodePathKeyRef.current) {
@@ -364,7 +466,6 @@ function CanvasSurfaceRuntime({
       }
       activeNodePathKeyRef.current = nextKey;
       activeNodePathsRef.current = nextActivePaths;
-      const snapshot = runtime.getSnapshot();
       commitRenderSnapshot({
         camera: snapshot.camera,
         cameraState: snapshot.cameraState,
@@ -373,7 +474,7 @@ function CanvasSurfaceRuntime({
         activeNodePaths: nextActivePaths
       });
     });
-  }, [commitRenderSnapshot, stageRuntime, runtime]);
+  }, [commitRenderSnapshot, imageAssetRuntime, perfMonitor, perfMonitorEnabled, stageRuntime, runtime]);
 
   useEffect(() => {
     if (imageResourceZoomTimerRef.current !== undefined) {
@@ -725,47 +826,135 @@ function pointerEventModifiers(event: Pick<React.PointerEvent<Element>, 'shiftKe
   };
 }
 
-interface CanvasPerfRuntimeSession {
+export interface CanvasPerfRuntimeSession {
+  sessionId: CanvasPerfSessionId;
   lastFrameTimestamp: number;
   reactCommitCount: number;
+  counterTotals: CanvasPerfCounterTotals;
 }
 
-function syncCanvasPerfCameraSessionState(input: {
+const STAGE_WRITE_COUNTERS = [
+  'stage-camera-write',
+  'stage-node-layout-write',
+  'stage-node-visibility-write',
+  'stage-drag-preview-write'
+] as const satisfies readonly CanvasPerfCounterName[];
+
+const IMAGE_RUNTIME_WORK_COUNTERS = [
+  'image-viewport-sync',
+  'image-moving-queued',
+  'image-idle-flush',
+  'image-plan-rebuild',
+  'image-pump',
+  'image-load-start',
+  'image-load-resolve',
+  'image-load-reject',
+  'image-load-stale-result',
+  'image-node-publish'
+] as const satisfies readonly CanvasPerfCounterName[];
+
+export function syncCanvasPerfSessionState(input: {
   enabled: boolean;
   perfMonitor: CanvasPerfMonitor;
   sessionRef: { current: CanvasPerfRuntimeSession | undefined };
   reactCommitCountRef: { current: number };
-  cameraState: CanvasRuntimeSnapshot['cameraState'];
+  snapshot: Pick<CanvasRuntimeSnapshot, 'cameraState' | 'camera'>;
   minimapOpen: boolean;
 }): void {
   if (!input.enabled) {
     return;
   }
   const timestamp = canvasPerfTimestamp();
-  if (input.cameraState === 'moving') {
+  if (input.snapshot.cameraState === 'moving') {
     if (!input.sessionRef.current) {
-      input.sessionRef.current = {
-        lastFrameTimestamp: timestamp,
-        reactCommitCount: input.reactCommitCountRef.current
-      };
-      input.perfMonitor.startCameraSession({
-        type: input.minimapOpen ? 'minimap' : 'panning',
+      const sessionId = input.perfMonitor.startSession({
+        type: input.minimapOpen ? 'camera-minimap' : 'camera-pan',
         timestamp,
-        minimapOpen: input.minimapOpen
+        source: 'CanvasSurface',
+        detail: {
+          minimapOpen: input.minimapOpen,
+          zoomLevel: input.snapshot.camera.z
+        }
       });
+      if (sessionId) {
+        input.sessionRef.current = {
+          sessionId,
+          lastFrameTimestamp: timestamp,
+          reactCommitCount: input.reactCommitCountRef.current,
+          counterTotals: input.perfMonitor.getCounterTotals()
+        };
+      }
     }
     return;
   }
-  if (input.sessionRef.current) {
-    input.perfMonitor.endCameraSession({ timestamp });
+  const session = input.sessionRef.current;
+  if (session) {
+    input.perfMonitor.endSession({
+      sessionId: session.sessionId,
+      timestamp,
+      source: 'CanvasSurface',
+      finalState: {
+        zoomLevel: input.snapshot.camera.z,
+        cameraState: input.snapshot.cameraState
+      }
+    });
     input.sessionRef.current = undefined;
   }
 }
 
-function recordCanvasPerfCameraFrame(input: {
+export function syncCanvasPerfDragSessionState(input: {
   enabled: boolean;
   perfMonitor: CanvasPerfMonitor;
   sessionRef: { current: CanvasPerfRuntimeSession | undefined };
+  reactCommitCountRef: { current: number };
+  dragState: CanvasRuntimeDragState | undefined;
+  snapshot: Pick<CanvasRuntimeSnapshot, 'cameraState' | 'camera'>;
+  finalState?: Partial<CanvasPerfFinalState> | undefined;
+}): void {
+  if (!input.enabled) {
+    return;
+  }
+  const timestamp = canvasPerfTimestamp();
+  if (input.dragState) {
+    if (!input.sessionRef.current) {
+      const sessionId = input.perfMonitor.startSession({
+        type: input.dragState.kind === 'move-node' ? 'drag-move-node' : 'drag-resize-node',
+        timestamp,
+        source: 'CanvasSurface',
+        detail: canvasPerfDragSessionDetail(input.dragState)
+      });
+      if (sessionId) {
+        input.sessionRef.current = {
+          sessionId,
+          lastFrameTimestamp: timestamp,
+          reactCommitCount: input.reactCommitCountRef.current,
+          counterTotals: input.perfMonitor.getCounterTotals()
+        };
+      }
+    }
+    return;
+  }
+  const session = input.sessionRef.current;
+  if (session) {
+    input.perfMonitor.endSession({
+      sessionId: session.sessionId,
+      timestamp,
+      source: 'CanvasSurface',
+      finalState: {
+        zoomLevel: input.snapshot.camera.z,
+        cameraState: input.snapshot.cameraState,
+        ...input.finalState
+      }
+    });
+    input.sessionRef.current = undefined;
+  }
+}
+
+export function recordCanvasPerfFrame(input: {
+  enabled: boolean;
+  perfMonitor: CanvasPerfMonitor;
+  sessionRef: { current: CanvasPerfRuntimeSession | undefined };
+  cameraState: CanvasRuntimeSnapshot['cameraState'];
   renderSnapshot: CanvasRenderCoordinatorSnapshot;
   imageAssetRuntime: Pick<CanvasImageAssetRuntime, 'stats'>;
   reactCommitCountRef: { current: number };
@@ -780,16 +969,82 @@ function recordCanvasPerfCameraFrame(input: {
   const imageStats = input.imageAssetRuntime.stats();
   session.lastFrameTimestamp = timestamp;
   session.reactCommitCount = input.reactCommitCountRef.current;
+  if (reactCommitCount > 0) {
+    input.perfMonitor.recordCounter({
+      timestamp,
+      source: 'CanvasSurface',
+      sessionTypes: CANVAS_PERF_INTERACTION_SESSION_TYPES,
+      name: 'react-commit',
+      value: reactCommitCount
+    });
+  }
+  const counterTotals = input.perfMonitor.getCounterTotals();
   input.perfMonitor.recordFrame({
+    timestamp,
+    source: 'CanvasSurface',
     elapsedMs,
+    cameraState: input.cameraState,
     mountedNodeCount: input.renderSnapshot.nodesByPath.size,
     visibleNodeCount: Math.max(0, input.renderSnapshot.nodesByPath.size - input.renderSnapshot.culledNodePaths.size),
     culledNodeCount: input.renderSnapshot.culledNodePaths.size,
     activeImageLoadCount: imageStats.activeLoadCount,
     pendingImageCount: imageStats.pendingImageCount,
     decodedImageCount: imageStats.decodedImageCount,
-    reactCommitCount
+    reactCommitCount,
+    renderSnapshotBuildCount: counterDelta(counterTotals, session.counterTotals, 'render-snapshot-build'),
+    renderSnapshotReuseCount: counterDelta(counterTotals, session.counterTotals, 'render-snapshot-reuse'),
+    stageWriteCount: counterDeltaSum(counterTotals, session.counterTotals, STAGE_WRITE_COUNTERS),
+    imageRuntimeWorkCount: counterDeltaSum(counterTotals, session.counterTotals, IMAGE_RUNTIME_WORK_COUNTERS)
   });
+  session.counterTotals = counterTotals;
+}
+
+function counterDelta(
+  current: CanvasPerfCounterTotals,
+  previous: CanvasPerfCounterTotals,
+  name: CanvasPerfCounterName
+): number {
+  return Math.max(0, (current[name] ?? 0) - (previous[name] ?? 0));
+}
+
+function counterDeltaSum(
+  current: CanvasPerfCounterTotals,
+  previous: CanvasPerfCounterTotals,
+  names: readonly CanvasPerfCounterName[]
+): number {
+  return names.reduce((total, name) => total + counterDelta(current, previous, name), 0);
+}
+
+function canvasPerfDragSessionDetail(state: CanvasRuntimeDragState): Record<string, unknown> {
+  if (state.kind === 'move-node') {
+    return {
+      pointerId: state.pointerId,
+      nodeCount: state.origins.length
+    };
+  }
+  return {
+    pointerId: state.pointerId,
+    projectRelativePath: state.node.projectRelativePath,
+    handle: state.handle
+  };
+}
+
+function canvasPerfFinalState(input: {
+  snapshot: Pick<CanvasRuntimeSnapshot, 'cameraState' | 'camera'>;
+  renderSnapshot: CanvasRenderCoordinatorSnapshot;
+  imageAssetRuntime: Pick<CanvasImageAssetRuntime, 'stats'>;
+}): CanvasPerfFinalState {
+  const imageStats = input.imageAssetRuntime.stats();
+  return {
+    mountedNodeCount: input.renderSnapshot.nodesByPath.size,
+    visibleNodeCount: Math.max(0, input.renderSnapshot.nodesByPath.size - input.renderSnapshot.culledNodePaths.size),
+    culledNodeCount: input.renderSnapshot.culledNodePaths.size,
+    activeImageLoadCount: imageStats.activeLoadCount,
+    pendingImageCount: imageStats.pendingImageCount,
+    decodedImageCount: imageStats.decodedImageCount,
+    zoomLevel: input.snapshot.camera.z,
+    cameraState: input.snapshot.cameraState
+  };
 }
 
 function canvasPerfTimestamp(): number {
@@ -855,6 +1110,7 @@ export function syncCanvasMovingCameraFrame(input: {
   selection: CanvasRuntimeSnapshot['selection'];
   activeNodePaths: readonly string[];
   renderSnapshotScheduler: Pick<ReturnType<typeof createCanvasRenderSnapshotScheduler<CanvasRenderCoordinatorUpdateInput>>, 'requestMoving'>;
+  imageAssetViewportScheduler: Pick<ReturnType<typeof createCanvasImageAssetViewportSyncScheduler>, 'request'>;
 }): void {
   input.stageRuntime.setCamera(input.liveCamera);
   syncCanvasStageNodeVisibility({
@@ -870,6 +1126,7 @@ export function syncCanvasMovingCameraFrame(input: {
     selection: input.selection,
     activeNodePaths: input.activeNodePaths
   });
+  input.imageAssetViewportScheduler.request('moving');
 }
 
 export function syncCanvasImageResourceZoomForCameraState(input: {
@@ -918,6 +1175,7 @@ export function syncCanvasImageResourceZoomForCameraState(input: {
 
 export function createCanvasImageAssetViewportSyncScheduler(input: {
   sync: (cameraState?: CanvasRuntimeSnapshot['cameraState']) => void;
+  perfMonitor?: Pick<CanvasPerfMonitor, 'recordCounter'> | undefined;
   requestFrame?: ((callback: FrameRequestCallback) => number) | undefined;
   cancelFrame?: ((handle: number) => void) | undefined;
 }): {
@@ -947,6 +1205,15 @@ export function createCanvasImageAssetViewportSyncScheduler(input: {
       if (pendingFrame !== undefined) {
         return;
       }
+      if (cameraState === 'moving') {
+        input.perfMonitor?.recordCounter({
+          sessionTypes: CANVAS_PERF_INTERACTION_SESSION_TYPES,
+          timestamp: canvasPerfTimestamp(),
+          source: 'CanvasImageAssetViewportScheduler',
+          name: 'image-moving-queued',
+          value: 1
+        });
+      }
       if (!requestFrame) {
         const currentCameraState = pendingCameraState;
         pendingCameraState = undefined;
@@ -957,6 +1224,13 @@ export function createCanvasImageAssetViewportSyncScheduler(input: {
       pendingFrame = requestFrame(() => run(generation));
     },
     flush(cameraState) {
+      input.perfMonitor?.recordCounter({
+        sessionTypes: CANVAS_PERF_INTERACTION_SESSION_TYPES,
+        timestamp: canvasPerfTimestamp(),
+        source: 'CanvasImageAssetViewportScheduler',
+        name: 'image-idle-flush',
+        value: 1
+      });
       pendingCameraState = cameraState;
       if (pendingFrame !== undefined) {
         frameGeneration += 1;
@@ -980,6 +1254,7 @@ export function createCanvasImageAssetViewportSyncScheduler(input: {
 
 export function createCanvasRenderSnapshotScheduler<T>(input: {
   commit: (next: T) => void;
+  perfMonitor?: Pick<CanvasPerfMonitor, 'recordCounter'> | undefined;
   requestFrame?: ((callback: FrameRequestCallback) => number) | undefined;
   cancelFrame?: ((handle: number) => void) | undefined;
 }): {
@@ -1011,6 +1286,13 @@ export function createCanvasRenderSnapshotScheduler<T>(input: {
       if (pendingFrame !== undefined) {
         return;
       }
+      input.perfMonitor?.recordCounter({
+        sessionTypes: CANVAS_PERF_INTERACTION_SESSION_TYPES,
+        timestamp: canvasPerfTimestamp(),
+        source: 'CanvasRenderSnapshotScheduler',
+        name: 'render-moving-queued',
+        value: 1
+      });
       if (!requestFrame) {
         pendingInput = undefined;
         input.commit(next);
@@ -1020,6 +1302,13 @@ export function createCanvasRenderSnapshotScheduler<T>(input: {
       pendingFrame = requestFrame(() => run(generation));
     },
     flush(next) {
+      input.perfMonitor?.recordCounter({
+        sessionTypes: CANVAS_PERF_INTERACTION_SESSION_TYPES,
+        timestamp: canvasPerfTimestamp(),
+        source: 'CanvasRenderSnapshotScheduler',
+        name: 'render-idle-flush',
+        value: 1
+      });
       pendingInput = undefined;
       if (pendingFrame !== undefined) {
         frameGeneration += 1;

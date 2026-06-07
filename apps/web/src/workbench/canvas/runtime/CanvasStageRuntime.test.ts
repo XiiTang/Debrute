@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'vitest';
+import { createCanvasPerfMonitor, type CanvasPerfTraceEvent } from '../CanvasPerfMonitor';
 import { createCanvasStageRuntime } from './CanvasStageRuntime';
 
 describe('CanvasStageRuntime', () => {
@@ -53,7 +54,103 @@ describe('CanvasStageRuntime', () => {
 
     expect(element.style.transform).toBe('translate(10px, 20px)');
   });
+
+  it('records camera write and no-op counters', () => {
+    const monitor = createCanvasPerfMonitor({ enabled: true });
+    const sessionId = monitor.startSession({ type: 'camera-pan', timestamp: 0, source: 'CanvasSurface' });
+    if (!sessionId) {
+      throw new Error('Expected enabled monitor session.');
+    }
+    const runtime = createCanvasStageRuntime({ perfMonitor: monitor });
+    const stage = fakeElement();
+
+    runtime.bindStage(stage as unknown as HTMLElement);
+    runtime.setCamera({ x: 12, y: 8, z: 1.5 });
+    runtime.setCamera({ x: 12, y: 8, z: 1.5 });
+
+    monitor.endSession({ sessionId, timestamp: 20, source: 'CanvasSurface' });
+
+    expect(counterNames(monitor.getTrace().events)).toEqual([
+      'stage-camera-write',
+      'stage-camera-noop'
+    ]);
+    expect(monitor.getLastSession()?.counters).toMatchObject({
+      'stage-camera-write': 1,
+      'stage-camera-noop': 1
+    });
+  });
+
+  it('records layout, visibility, and drag preview counters', () => {
+    const monitor = createCanvasPerfMonitor({ enabled: true });
+    const sessionId = monitor.startSession({ type: 'drag-move-node', timestamp: 0, source: 'CanvasSurface' });
+    if (!sessionId) {
+      throw new Error('Expected enabled monitor session.');
+    }
+    const runtime = createCanvasStageRuntime({ perfMonitor: monitor });
+    const element = fakeElement();
+
+    runtime.registerNodeShell('flow/a.png', element as unknown as HTMLElement);
+    runtime.setNodeLayout('flow/a.png', { x: 10, y: 20, width: 320, height: 180, z: 7 });
+    runtime.setNodeLayout('flow/a.png', { x: 10, y: 20, width: 320, height: 180, z: 7 });
+    runtime.setNodeVisible('flow/a.png', false);
+    runtime.setNodeVisible('flow/a.png', false);
+    runtime.applyDragPreview({
+      kind: 'move-node',
+      pointerId: 1,
+      start: { x: 0, y: 0 },
+      current: { x: 15, y: 25 },
+      origins: [{ projectRelativePath: 'flow/a.png', x: 10, y: 20, width: 320, height: 180, locked: false }]
+    });
+
+    monitor.endSession({ sessionId, timestamp: 20, source: 'CanvasSurface' });
+
+    expect(monitor.getLastSession()?.counters).toMatchObject({
+      'stage-node-layout-write': 1,
+      'stage-node-layout-noop': 1,
+      'stage-node-visibility-write': 1,
+      'stage-node-visibility-noop': 1,
+      'stage-drag-preview-write': 1
+    });
+  });
+
+  it('records resize preview writes for transform and size updates', () => {
+    const monitor = createCanvasPerfMonitor({ enabled: true });
+    const sessionId = monitor.startSession({ type: 'drag-resize-node', timestamp: 0, source: 'CanvasSurface' });
+    if (!sessionId) {
+      throw new Error('Expected enabled monitor session.');
+    }
+    const runtime = createCanvasStageRuntime({ perfMonitor: monitor });
+    const element = fakeElement();
+
+    runtime.registerNodeShell('flow/a.png', element as unknown as HTMLElement);
+    runtime.setNodeLayout('flow/a.png', { x: 10, y: 20, width: 320, height: 180, z: 7 });
+    runtime.applyDragPreview({
+      kind: 'resize-node',
+      pointerId: 1,
+      handle: 'se',
+      start: { x: 0, y: 0 },
+      current: { x: 20, y: 10 },
+      node: { projectRelativePath: 'flow/a.png' },
+      origin: { x: 10, y: 20, width: 320, height: 180 },
+      preserveAspect: false
+    });
+
+    monitor.endSession({ sessionId, timestamp: 20, source: 'CanvasSurface' });
+
+    expect(element.style.transform).toBe('translate(10px, 20px)');
+    expect(element.style.properties.get('width')).toBe('340px');
+    expect(element.style.properties.get('height')).toBe('190px');
+    expect(monitor.getLastSession()?.counters).toMatchObject({
+      'stage-drag-preview-write': 1
+    });
+  });
 });
+
+function counterNames(events: readonly CanvasPerfTraceEvent[]): string[] {
+  return events
+    .filter((event) => event.kind === 'counter')
+    .map((event) => event.name);
+}
 
 function fakeElement(): {
   style: {

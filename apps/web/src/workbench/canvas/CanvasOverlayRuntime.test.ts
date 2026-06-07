@@ -28,6 +28,41 @@ describe('CanvasOverlayRuntime', () => {
     expect(element.style.top).toBe('20px');
     expect(element.style.width).toBe('240px');
     expect(element.style.height).toBe('32px');
+    expect(element.style.visibility).toBe('visible');
+  });
+
+  it('applies an existing feedback bar placement when the element binds', () => {
+    const runtime = createCanvasOverlayRuntime();
+    const element = fakeElement();
+
+    runtime.setFeedbackBarPlacement({ x: 10, y: 20, width: 240, height: 32 });
+    runtime.bindFeedbackBar(element as unknown as HTMLElement);
+
+    expect(element.style.left).toBe('10px');
+    expect(element.style.top).toBe('20px');
+    expect(element.style.width).toBe('240px');
+    expect(element.style.height).toBe('32px');
+    expect(element.style.visibility).toBe('visible');
+  });
+
+  it('keeps the feedback bar hidden while no placement is available', () => {
+    const runtime = createCanvasOverlayRuntime();
+    const element = fakeElement();
+
+    runtime.clearFeedbackBarPlacement();
+    runtime.bindFeedbackBar(element as unknown as HTMLElement);
+
+    expect(element.style.visibility).toBe('hidden');
+
+    runtime.setFeedbackBarPlacement({ x: 10, y: 20, width: 240, height: 32 });
+    expect(element.style.visibility).toBe('visible');
+
+    runtime.clearFeedbackBarPlacement();
+    expect(element.style.left).toBe('');
+    expect(element.style.top).toBe('');
+    expect(element.style.width).toBe('');
+    expect(element.style.height).toBe('');
+    expect(element.style.visibility).toBe('hidden');
   });
 });
 
@@ -52,6 +87,7 @@ function fakeElement(): {
     top: string;
     width: string;
     height: string;
+    visibility: string;
     removeProperty(name: string): void;
   };
 } {
@@ -61,8 +97,9 @@ function fakeElement(): {
       top: '',
       width: '',
       height: '',
+      visibility: '',
       removeProperty(name) {
-        if (name === 'left' || name === 'top' || name === 'width' || name === 'height') {
+        if (name === 'left' || name === 'top' || name === 'width' || name === 'height' || name === 'visibility') {
           this[name] = '';
         }
       }

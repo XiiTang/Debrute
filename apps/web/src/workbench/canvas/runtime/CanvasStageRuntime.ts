@@ -1,4 +1,5 @@
 import { buildResizeGeometry } from '../../services/canvasInteraction';
+import { CANVAS_PERF_INTERACTION_SESSION_TYPES, type CanvasPerfCounterName, type CanvasPerfMonitor } from '../CanvasPerfMonitor';
 import { canvasCameraTransform, canvasChromeScale, type CanvasCamera } from './canvasCamera';
 import type { CanvasRect } from './canvasGeometry';
 import type { CanvasRuntimeDragState } from './CanvasEditorRuntime';
@@ -34,7 +35,11 @@ export interface CanvasStageRuntime {
   dispose(): void;
 }
 
-export function createCanvasStageRuntime(): CanvasStageRuntime {
+export interface CanvasStageRuntimeInput {
+  perfMonitor?: Pick<CanvasPerfMonitor, 'recordCounter'> | undefined;
+}
+
+export function createCanvasStageRuntime(input: CanvasStageRuntimeInput = {}): CanvasStageRuntime {
   const nodes = new Map<string, RegisteredCanvasNode>();
   let stage: HTMLElement | undefined;
   let camera: CanvasCamera | undefined;
@@ -43,6 +48,15 @@ export function createCanvasStageRuntime(): CanvasStageRuntime {
   let lastChromeScale: string | undefined;
   let activePreviewPaths = new Set<string>();
 
+  const recordCounter = (name: CanvasPerfCounterName) => {
+    input.perfMonitor?.recordCounter({
+      sessionTypes: CANVAS_PERF_INTERACTION_SESSION_TYPES,
+      timestamp: canvasStagePerfTimestamp(),
+      source: 'CanvasStageRuntime',
+      name
+    });
+  };
+
   const writeStageCamera = (nextCamera: CanvasCamera) => {
     if (!stage) {
       return;
@@ -50,18 +64,23 @@ export function createCanvasStageRuntime(): CanvasStageRuntime {
     const transform = canvasCameraTransform(nextCamera);
     const zoom = String(nextCamera.z);
     const chromeScale = String(canvasChromeScale(nextCamera));
+    let wrote = false;
     if (lastZoom !== zoom) {
       stage.style.setProperty('--canvas-zoom', zoom);
       lastZoom = zoom;
+      wrote = true;
     }
     if (lastChromeScale !== chromeScale) {
       stage.style.setProperty('--canvas-chrome-scale', chromeScale);
       lastChromeScale = chromeScale;
+      wrote = true;
     }
     if (lastCameraTransform !== transform) {
       stage.style.transform = transform;
       lastCameraTransform = transform;
+      wrote = true;
     }
+    recordCounter(wrote ? 'stage-camera-write' : 'stage-camera-noop');
   };
 
   const writeNodeLayout = (node: RegisteredCanvasNode, layout: CanvasNodeLayout) => {
@@ -69,10 +88,13 @@ export function createCanvasStageRuntime(): CanvasStageRuntime {
     if (!node.element || node.previewing) {
       return;
     }
-    writeNodeTransform(node, transformForRect(layout));
-    writeStyleProperty(node, 'width', `${layout.width}px`, 'lastWidth');
-    writeStyleProperty(node, 'height', `${layout.height}px`, 'lastHeight');
-    writeStyleProperty(node, 'z-index', String(layout.z), 'lastZIndex');
+    const wrote = [
+      writeNodeTransform(node, transformForRect(layout)),
+      writeStyleProperty(node, 'width', `${layout.width}px`, 'lastWidth'),
+      writeStyleProperty(node, 'height', `${layout.height}px`, 'lastHeight'),
+      writeStyleProperty(node, 'z-index', String(layout.z), 'lastZIndex')
+    ].some(Boolean);
+    recordCounter(wrote ? 'stage-node-layout-write' : 'stage-node-layout-noop');
   };
 
   const clearPreviewPath = (path: string) => {
@@ -113,7 +135,7 @@ export function createCanvasStageRuntime(): CanvasStageRuntime {
         writeNodeLayout(record, record.layout);
       }
       if (record.visible !== undefined) {
-        writeNodeDisplay(record, record.visible);
+        recordCounter(writeNodeDisplay(record, record.visible) ? 'stage-node-visibility-write' : 'stage-node-visibility-noop');
       }
       return () => {
         const current = nodes.get(path);
@@ -137,7 +159,7 @@ export function createCanvasStageRuntime(): CanvasStageRuntime {
         return;
       }
       node.visible = visible;
-      writeNodeDisplay(node, visible);
+      recordCounter(writeNodeDisplay(node, visible) ? 'stage-node-visibility-write' : 'stage-node-visibility-noop');
     },
     applyDragPreview: (state) => {
       const previousPreviewPaths = activePreviewPaths;
@@ -150,6 +172,7 @@ export function createCanvasStageRuntime(): CanvasStageRuntime {
       }
       if (state.kind === 'move-node') {
         const delta = dragStateDelta(state);
+        let wrote = false;
         for (const origin of state.origins) {
           const node = nodes.get(origin.projectRelativePath);
           if (!node) {
@@ -157,7 +180,10 @@ export function createCanvasStageRuntime(): CanvasStageRuntime {
           }
           activePreviewPaths.add(origin.projectRelativePath);
           node.previewing = true;
-          writeNodeTransform(node, `translate(${origin.x + delta.dx}px, ${origin.y + delta.dy}px)`);
+          wrote = writeNodeTransform(node, `translate(${origin.x + delta.dx}px, ${origin.y + delta.dy}px)`) || wrote;
+        }
+        if (wrote) {
+          recordCounter('stage-drag-preview-write');
         }
       } else {
         const node = nodes.get(state.node.projectRelativePath);
@@ -171,9 +197,14 @@ export function createCanvasStageRuntime(): CanvasStageRuntime {
           );
           activePreviewPaths.add(state.node.projectRelativePath);
           node.previewing = true;
-          writeNodeTransform(node, transformForRect(next));
-          writeStyleProperty(node, 'width', `${next.width}px`, 'lastWidth');
-          writeStyleProperty(node, 'height', `${next.height}px`, 'lastHeight');
+          const wrote = [
+            writeNodeTransform(node, transformForRect(next)),
+            writeStyleProperty(node, 'width', `${next.width}px`, 'lastWidth'),
+            writeStyleProperty(node, 'height', `${next.height}px`, 'lastHeight')
+          ].some(Boolean);
+          if (wrote) {
+            recordCounter('stage-drag-preview-write');
+          }
         }
       }
       for (const path of previousPreviewPaths) {
@@ -197,15 +228,16 @@ export function createCanvasStageRuntime(): CanvasStageRuntime {
   };
 }
 
-function writeNodeTransform(node: RegisteredCanvasNode, transform: string): void {
+function writeNodeTransform(node: RegisteredCanvasNode, transform: string): boolean {
   if (!node.element) {
-    return;
+    return false;
   }
   if (node.lastTransform === transform) {
-    return;
+    return false;
   }
   node.lastTransform = transform;
   node.element.style.transform = transform;
+  return true;
 }
 
 function writeStyleProperty(
@@ -213,27 +245,29 @@ function writeStyleProperty(
   property: 'width' | 'height' | 'z-index',
   value: string,
   cacheKey: 'lastWidth' | 'lastHeight' | 'lastZIndex'
-): void {
+): boolean {
   if (!node.element) {
-    return;
+    return false;
   }
   if (node[cacheKey] === value) {
-    return;
+    return false;
   }
   node[cacheKey] = value;
   node.element.style.setProperty(property, value);
+  return true;
 }
 
-function writeNodeDisplay(node: RegisteredCanvasNode, visible: boolean): void {
+function writeNodeDisplay(node: RegisteredCanvasNode, visible: boolean): boolean {
   if (!node.element) {
-    return;
+    return false;
   }
   const display = visible ? 'block' : 'none';
   if (node.lastDisplay === display) {
-    return;
+    return false;
   }
   node.lastDisplay = display;
   node.element.style.setProperty('display', display);
+  return true;
 }
 
 function transformForRect(rect: Pick<CanvasRect, 'x' | 'y'>): string {
@@ -246,4 +280,8 @@ function dragStateDelta(state: CanvasRuntimeDragState): { dx: number; dy: number
     dx: current.x - state.start.x,
     dy: current.y - state.start.y
   };
+}
+
+function canvasStagePerfTimestamp(): number {
+  return globalThis.performance?.now?.() ?? Date.now();
 }

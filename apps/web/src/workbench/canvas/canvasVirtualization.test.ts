@@ -288,6 +288,37 @@ describe('canvas virtualization geometry', () => {
     expect(second.nodes.map((node) => node.projectRelativePath)).toEqual(['flow/visible-a.png', 'flow/visible-b.png']);
   });
 
+  it('matches fresh culling after incremental camera movement', () => {
+    const projection = projectionFixture([
+      nodeFixture('flow/a.png', 0, 0),
+      nodeFixture('flow/b.png', 600, 0),
+      nodeFixture('flow/c.png', 1400, 0),
+      nodeFixture('flow/d.png', 2400, 0)
+    ]);
+    const index = createCanvasVirtualizationIndex({ nodes: projection.nodes, edges: [] });
+
+    const incremental = index.render({
+      camera: { x: -900, y: 0, z: 1 },
+      surfaceSize: { width: 800, height: 600 },
+      selection: undefined,
+      activeNodeProjectRelativePaths: []
+    });
+    const fresh = buildVirtualizedCanvasRenderState({
+      nodes: projection.nodes,
+      edges: [],
+      camera: { x: -900, y: 0, z: 1 },
+      surfaceSize: { width: 800, height: 600 },
+      selection: undefined,
+      activeNodeProjectRelativePaths: []
+    });
+
+    expect(incremental.nodes.map((node) => node.projectRelativePath)).toEqual(
+      fresh.nodes.map((node) => node.projectRelativePath)
+    );
+    expect(incremental.edges).toEqual(fresh.edges);
+    expect(incremental.svgViewBox).toBe(fresh.svgViewBox);
+  });
+
 });
 
 function projectionFixture(

@@ -1,4 +1,5 @@
 import type { ProjectedCanvasNode } from '@debrute/canvas-core';
+import { CANVAS_PERF_INTERACTION_SESSION_TYPES, type CanvasPerfCounterName, type CanvasPerfFinalState, type CanvasPerfMonitor, type CanvasPerfSessionId } from './CanvasPerfMonitor';
 import {
   CANVAS_IMAGE_LOAD_CONCURRENCY,
   createCanvasImageLoadingPlan,
@@ -55,6 +56,7 @@ interface CanvasImageAssetRecord {
 export function createCanvasImageAssetRuntime(input: {
   loadImage?: CanvasImageAssetLoader;
   concurrency?: number;
+  perfMonitor?: Pick<CanvasPerfMonitor, 'startSession' | 'endSession' | 'recordCounter'> | undefined;
 } = {}): CanvasImageAssetRuntime {
   const loadImage = input.loadImage;
   const concurrency = input.concurrency ?? CANVAS_IMAGE_LOAD_CONCURRENCY;
@@ -66,12 +68,64 @@ export function createCanvasImageAssetRuntime(input: {
   const subscribers = new Map<string, Set<() => void>>();
   const retryCallbacks = new Map<string, () => void>();
   const nodeStates = new Map<string, CanvasImageNodeRenderState>();
+  const loadSessionIds = new Map<string, CanvasPerfSessionId>();
 
   let viewport: CanvasImageAssetViewport | undefined;
   let viewportSignature: string | undefined;
   let plan = new Map<string, CanvasImageLoadingPlanItem>();
   let disposed = false;
   let decodedImageCount = 0;
+
+  const recordCanvasSessionCounter = (name: CanvasPerfCounterName, detail?: Record<string, unknown>) => {
+    input.perfMonitor?.recordCounter({
+      sessionTypes: CANVAS_PERF_INTERACTION_SESSION_TYPES,
+      timestamp: canvasImagePerfTimestamp(),
+      source: 'CanvasImageAssetRuntime',
+      name,
+      detail
+    });
+  };
+
+  const recordImageLoadCounter = (
+    sessionId: CanvasPerfSessionId | undefined,
+    name: CanvasPerfCounterName,
+    detail?: Record<string, unknown>
+  ) => {
+    input.perfMonitor?.recordCounter({
+      ...(sessionId ? { sessionId } : {}),
+      sessionTypes: CANVAS_PERF_INTERACTION_SESSION_TYPES,
+      timestamp: canvasImagePerfTimestamp(),
+      source: 'CanvasImageAssetRuntime',
+      name,
+      detail
+    });
+  };
+
+  const endImageLoadSession = (
+    item: CanvasImageLoadingPlanItem,
+    counter: Extract<CanvasPerfCounterName, 'image-load-resolve' | 'image-load-reject' | 'image-load-stale-result'>
+  ) => {
+    const sessionId = loadSessionIds.get(item.loadKey);
+    if (!sessionId) {
+      return;
+    }
+    recordImageLoadCounter(sessionId, counter, {
+      projectRelativePath: item.projectRelativePath,
+      loadKey: item.loadKey
+    });
+    input.perfMonitor?.endSession({
+      sessionId,
+      timestamp: canvasImagePerfTimestamp(),
+      source: 'CanvasImageAssetRuntime',
+      finalState: imageLoadFinalState(),
+      detail: {
+        projectRelativePath: item.projectRelativePath,
+        loadKey: item.loadKey,
+        result: counter
+      }
+    });
+    loadSessionIds.delete(item.loadKey);
+  };
 
   const retry = (projectRelativePath: string) => {
     const previous = records.get(projectRelativePath);
@@ -121,10 +175,12 @@ export function createCanvasImageAssetRuntime(input: {
     };
   };
 
-  const publish = (projectRelativePath: string) => {
-    for (const listener of subscribers.get(projectRelativePath) ?? []) {
+  const publish = (projectRelativePath: string): number => {
+    const listeners = subscribers.get(projectRelativePath);
+    for (const listener of listeners ?? []) {
       listener();
     }
+    return listeners?.size ?? 0;
   };
 
   function publishIfChanged(projectRelativePath: string): void {
@@ -137,10 +193,13 @@ export function createCanvasImageAssetRuntime(input: {
       return;
     }
     nodeStates.set(projectRelativePath, next);
-    publish(projectRelativePath);
+    if (publish(projectRelativePath) > 0) {
+      recordCanvasSessionCounter('image-node-publish', { projectRelativePath });
+    }
   }
 
   function rebuildPlan(): void {
+    recordCanvasSessionCounter('image-plan-rebuild');
     const affectedPaths = new Set([
       ...plan.keys(),
       ...nodes.keys(),
@@ -187,6 +246,7 @@ export function createCanvasImageAssetRuntime(input: {
     for (const [loadKey, active] of [...activeLoads]) {
       if (active.item.projectRelativePath === projectRelativePath) {
         activeLoads.delete(loadKey);
+        endImageLoadSession(active.item, 'image-load-stale-result');
       }
     }
   }
@@ -203,6 +263,7 @@ export function createCanvasImageAssetRuntime(input: {
       const current = plan.get(active.item.projectRelativePath);
       if (current?.loadKey !== active.item.loadKey) {
         activeLoads.delete(loadKey);
+        endImageLoadSession(active.item, 'image-load-stale-result');
         affectedPaths.add(active.item.projectRelativePath);
       }
     }
@@ -241,6 +302,24 @@ export function createCanvasImageAssetRuntime(input: {
   }
 
   function startLoad(item: CanvasImageLoadingPlanItem): void {
+    const sessionId = input.perfMonitor?.startSession({
+      type: 'image-load',
+      timestamp: canvasImagePerfTimestamp(),
+      source: 'CanvasImageAssetRuntime',
+      detail: {
+        projectRelativePath: item.projectRelativePath,
+        loadKey: item.loadKey,
+        reason: item.reason,
+        priority: item.priority
+      }
+    });
+    if (sessionId) {
+      loadSessionIds.set(item.loadKey, sessionId);
+    }
+    recordImageLoadCounter(sessionId, 'image-load-start', {
+      projectRelativePath: item.projectRelativePath,
+      loadKey: item.loadKey
+    });
     const active: ActiveCanvasImageLoad = { item };
     activeLoads.set(item.loadKey, active);
     const previous = records.get(item.projectRelativePath);
@@ -262,16 +341,19 @@ export function createCanvasImageAssetRuntime(input: {
   function finishLoaded(active: ActiveCanvasImageLoad, loaded: CanvasLoadedImage): void {
     const activeLoad = activeLoads.get(active.item.loadKey);
     if (activeLoad !== active) {
+      endImageLoadSession(active.item, 'image-load-stale-result');
       return;
     }
     activeLoads.delete(active.item.loadKey);
     if (!isCanvasImageLoadResultCurrent(active, plan)) {
+      endImageLoadSession(active.item, 'image-load-stale-result');
       pump();
       return;
     }
     failedLoadKeys.delete(active.item.loadKey);
     decodedImageCount += 1;
     records.set(active.item.projectRelativePath, { visible: loaded });
+    endImageLoadSession(active.item, 'image-load-resolve');
     rebuildPlan();
     pump();
   }
@@ -279,10 +361,12 @@ export function createCanvasImageAssetRuntime(input: {
   function finishRejected(active: ActiveCanvasImageLoad): void {
     const activeLoad = activeLoads.get(active.item.loadKey);
     if (activeLoad !== active) {
+      endImageLoadSession(active.item, 'image-load-stale-result');
       return;
     }
     activeLoads.delete(active.item.loadKey);
     if (!isCanvasImageLoadResultCurrent(active, plan)) {
+      endImageLoadSession(active.item, 'image-load-stale-result');
       pump();
       return;
     }
@@ -295,6 +379,7 @@ export function createCanvasImageAssetRuntime(input: {
         message: `Unable to load ${active.item.projectRelativePath}.`
       }
     });
+    endImageLoadSession(active.item, 'image-load-reject');
     rebuildPlan();
     pump();
   }
@@ -312,6 +397,7 @@ export function createCanvasImageAssetRuntime(input: {
   }
 
   function pump(): void {
+    recordCanvasSessionCounter('image-pump');
     const currentViewport = viewport;
     if (disposed || !currentViewport) {
       return;
@@ -331,6 +417,22 @@ export function createCanvasImageAssetRuntime(input: {
     for (const item of candidates.slice(0, openSlots)) {
       startLoad(item);
     }
+  }
+
+  function imageLoadFinalState(): CanvasPerfFinalState | undefined {
+    if (!viewport) {
+      return undefined;
+    }
+    return {
+      mountedNodeCount: viewport.mountedNodePaths.size,
+      visibleNodeCount: Math.max(0, viewport.mountedNodePaths.size - viewport.culledNodePaths.size),
+      culledNodeCount: viewport.culledNodePaths.size,
+      activeImageLoadCount: activeLoads.size,
+      pendingImageCount: [...records.values()].filter((record) => record.next).length,
+      decodedImageCount,
+      zoomLevel: viewport.imageResourceZoom,
+      cameraState: viewport.cameraState
+    };
   }
 
   return {
@@ -353,10 +455,13 @@ export function createCanvasImageAssetRuntime(input: {
       const nextSignature = canvasImageAssetViewportSignature(nextViewport, nodes);
       if (viewportSignature === nextSignature) {
         viewport = nextViewport;
+        recordCanvasSessionCounter('image-viewport-noop');
+        recordCanvasSessionCounter('image-plan-reuse');
         return;
       }
       viewportSignature = nextSignature;
       viewport = nextViewport;
+      recordCanvasSessionCounter('image-viewport-sync');
       rebuildPlan();
       pump();
     },
@@ -392,12 +497,17 @@ export function createCanvasImageAssetRuntime(input: {
       decodedImageCount
     }),
     dispose: () => {
+      for (const [loadKey, active] of [...activeLoads]) {
+        activeLoads.delete(loadKey);
+        endImageLoadSession(active.item, 'image-load-stale-result');
+      }
       disposed = true;
       nodes.clear();
       records.clear();
       retryKeys.clear();
       failedLoadKeys.clear();
       activeLoads.clear();
+      loadSessionIds.clear();
       subscribers.clear();
       retryCallbacks.clear();
       nodeStates.clear();
@@ -490,4 +600,8 @@ function isAvailableVisibleImageNode(node: ProjectedCanvasNode | undefined): nod
     && node.visible !== false
     && node.availability.state === 'available'
     && Boolean(node.availability.fileUrl);
+}
+
+function canvasImagePerfTimestamp(): number {
+  return globalThis.performance?.now?.() ?? Date.now();
 }

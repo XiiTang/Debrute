@@ -15,11 +15,16 @@ import {
   CanvasSurface,
   createCanvasImageAssetViewportSyncScheduler,
   createCanvasRenderSnapshotScheduler,
+  recordCanvasPerfFrame,
+  syncCanvasPerfDragSessionState,
   syncCanvasMovingCameraFrame,
+  syncCanvasPerfSessionState,
   syncCanvasImageResourceZoomForCameraState,
   syncCanvasImageAssetViewport,
-  syncCanvasStageNodeVisibility
+  syncCanvasStageNodeVisibility,
+  type CanvasPerfRuntimeSession
 } from './CanvasSurface';
+import { createCanvasPerfMonitor, type CanvasPerfTraceEvent } from './CanvasPerfMonitor';
 import type { CanvasCamera } from './runtime/canvasCamera';
 import { createCanvasStageRuntime } from './runtime/CanvasStageRuntime';
 import type { CanvasSelection } from './runtime/canvasSelection';
@@ -563,9 +568,10 @@ describe('CanvasSurface', () => {
     expect(commits).toEqual([{ camera: { x: 5, y: 0, z: 1 } }]);
   });
 
-  it('keeps moving render refreshes separate from image viewport flushing', () => {
+  it('coalesces moving image viewport sync separately from render refreshes', () => {
     const renderFrames: FrameRequestCallback[] = [];
     const renderCommits: unknown[] = [];
+    const imageFrames: FrameRequestCallback[] = [];
     const imageCalls: unknown[] = [];
     const renderScheduler = createCanvasRenderSnapshotScheduler({
       commit: (input) => renderCommits.push(input),
@@ -578,29 +584,34 @@ describe('CanvasSurface', () => {
     const imageScheduler = createCanvasImageAssetViewportSyncScheduler({
       sync: (cameraState) => imageCalls.push(cameraState),
       requestFrame: (callback) => {
-        throw new Error(`moving camera should not schedule image viewport work: ${String(callback)}`);
+        imageFrames.push(callback);
+        return imageFrames.length;
       },
       cancelFrame: () => undefined
     });
 
     renderScheduler.requestMoving({ cameraState: 'moving' });
+    imageScheduler.request('moving');
 
     expect(renderCommits).toEqual([]);
     expect(imageCalls).toEqual([]);
+    expect(renderFrames).toHaveLength(1);
+    expect(imageFrames).toHaveLength(1);
 
     renderFrames[0]?.(0);
-    imageScheduler.flush('idle');
+    imageFrames[0]?.(0);
 
     expect(renderCommits).toEqual([{ cameraState: 'moving' }]);
-    expect(imageCalls).toEqual(['idle']);
+    expect(imageCalls).toEqual(['moving']);
   });
 
-  it('keeps moving camera frames on the stage and render runtimes only', () => {
+  it('keeps moving camera frames on the stage and schedules render and image viewport work', () => {
     const stale = nodeFixture('flow/stale-visible.png', 0, 0);
     const live = nodeFixture('flow/live-visible.png', 500, 0);
     const cameras: unknown[] = [];
     const visibility: Array<{ path: string; visible: boolean }> = [];
     const renderInputs: unknown[] = [];
+    const imageCameraStates: unknown[] = [];
 
     syncCanvasMovingCameraFrame({
       liveCamera: { x: -350, y: 0, z: 1 },
@@ -623,6 +634,9 @@ describe('CanvasSurface', () => {
       activeNodePaths: [live.projectRelativePath],
       renderSnapshotScheduler: {
         requestMoving: (input) => renderInputs.push(input)
+      },
+      imageAssetViewportScheduler: {
+        request: (cameraState) => imageCameraStates.push(cameraState)
       }
     });
 
@@ -638,8 +652,193 @@ describe('CanvasSurface', () => {
       selection: { kind: 'node', projectRelativePath: live.projectRelativePath },
       activeNodePaths: [live.projectRelativePath]
     }]);
+    expect(imageCameraStates).toEqual(['moving']);
+  });
+
+  it('records render and image scheduler counters separately', () => {
+    const monitor = createCanvasPerfMonitor({ enabled: true });
+    const renderFrames: FrameRequestCallback[] = [];
+    const imageFrames: FrameRequestCallback[] = [];
+    const renderScheduler = createCanvasRenderSnapshotScheduler({
+      perfMonitor: monitor,
+      commit: () => undefined,
+      requestFrame: (callback) => {
+        renderFrames.push(callback);
+        return renderFrames.length;
+      },
+      cancelFrame: () => undefined
+    });
+    const imageScheduler = createCanvasImageAssetViewportSyncScheduler({
+      perfMonitor: monitor,
+      sync: () => undefined,
+      requestFrame: (callback) => {
+        imageFrames.push(callback);
+        return imageFrames.length;
+      },
+      cancelFrame: () => undefined
+    });
+
+    renderScheduler.requestMoving({ cameraState: 'moving' });
+    renderScheduler.requestMoving({ cameraState: 'moving' });
+    imageScheduler.request('moving');
+    imageScheduler.request('moving');
+    renderFrames[0]?.(0);
+    imageFrames[0]?.(0);
+    renderScheduler.flush({ cameraState: 'idle' });
+    imageScheduler.flush('idle');
+
+    expect(counterNames(monitor.getTrace().events)).toEqual([
+      'render-moving-queued',
+      'image-moving-queued',
+      'render-idle-flush',
+      'image-idle-flush'
+    ]);
+  });
+
+  it('starts, frames, and ends a camera session from camera state changes', () => {
+    const monitor = createCanvasPerfMonitor({ enabled: true });
+    const sessionRef = { current: undefined as CanvasPerfRuntimeSession | undefined };
+    const reactCommitCountRef = { current: 0 };
+
+    syncCanvasPerfSessionState({
+      enabled: true,
+      perfMonitor: monitor,
+      sessionRef,
+      reactCommitCountRef,
+      snapshot: { cameraState: 'moving', camera: { x: 0, y: 0, z: 1 } },
+      minimapOpen: false
+    });
+    monitor.recordCounter({ timestamp: 5, source: 'CanvasRenderCoordinator', name: 'render-snapshot-build' });
+    monitor.recordCounter({ timestamp: 6, source: 'CanvasRenderCoordinator', name: 'render-snapshot-reuse' });
+    monitor.recordCounter({ timestamp: 7, source: 'CanvasStageRuntime', name: 'stage-camera-write' });
+    monitor.recordCounter({ timestamp: 8, source: 'CanvasImageAssetRuntime', name: 'image-plan-rebuild' });
+    reactCommitCountRef.current = 1;
+    recordCanvasPerfFrame({
+      enabled: true,
+      perfMonitor: monitor,
+      sessionRef,
+      cameraState: 'moving',
+      renderSnapshot: {
+        nodesByPath: new Map([
+          ['flow/a.png', nodeFixture('flow/a.png', 0, 0)],
+          ['flow/b.png', nodeFixture('flow/b.png', 5000, 0)]
+        ]),
+        culledNodePaths: new Set(['flow/b.png']),
+        visibleRect: { x: 0, y: 0, width: 400, height: 300 },
+        virtualRect: { x: -768, y: -768, width: 1936, height: 1836 },
+        nodeLayers: new Map(),
+        edges: [],
+        svgBounds: { x: 0, y: 0, width: 400, height: 300 },
+        svgViewBox: '0 0 400 300'
+      },
+      imageAssetRuntime: { stats: () => ({ activeLoadCount: 1, pendingImageCount: 2, decodedImageCount: 3 }) },
+      reactCommitCountRef
+    });
+    syncCanvasPerfSessionState({
+      enabled: true,
+      perfMonitor: monitor,
+      sessionRef,
+      reactCommitCountRef,
+      snapshot: { cameraState: 'idle', camera: { x: 0, y: 0, z: 1 } },
+      minimapOpen: false
+    });
+
+    expect(monitor.getLastSession()).toMatchObject({
+      type: 'camera-pan',
+      frameCount: 1,
+      mountedNodeCount: 2,
+      visibleNodeCount: 1,
+      culledNodeCount: 1,
+      activeImageLoadCount: 1,
+      pendingImageCount: 2,
+      decodedImageCount: 3
+    });
+    expect(monitor.getTrace().events.find((event) => event.kind === 'frame')).toMatchObject({
+      kind: 'frame',
+      renderSnapshotBuildCount: 1,
+      renderSnapshotReuseCount: 1,
+      stageWriteCount: 1,
+      imageRuntimeWorkCount: 1
+    });
+  });
+
+  it('starts, frames, and ends a drag session with stage counters', () => {
+    const monitor = createCanvasPerfMonitor({ enabled: true });
+    const sessionRef = { current: undefined as CanvasPerfRuntimeSession | undefined };
+    const reactCommitCountRef = { current: 0 };
+    const activeNode = nodeFixture('flow/a.png', 0, 0);
+
+    syncCanvasPerfDragSessionState({
+      enabled: true,
+      perfMonitor: monitor,
+      sessionRef,
+      reactCommitCountRef,
+      dragState: {
+        kind: 'move-node',
+        pointerId: 42,
+        start: { x: 0, y: 0 },
+        current: { x: 12, y: 8 },
+        origins: [activeNode]
+      },
+      snapshot: { cameraState: 'idle', camera: { x: 0, y: 0, z: 1 } }
+    });
+    monitor.recordCounter({
+      timestamp: 10,
+      source: 'CanvasStageRuntime',
+      name: 'stage-drag-preview-write'
+    });
+    reactCommitCountRef.current = 1;
+    recordCanvasPerfFrame({
+      enabled: true,
+      perfMonitor: monitor,
+      sessionRef,
+      cameraState: 'idle',
+      renderSnapshot: {
+        nodesByPath: new Map([[activeNode.projectRelativePath, activeNode]]),
+        culledNodePaths: new Set(),
+        visibleRect: { x: 0, y: 0, width: 400, height: 300 },
+        virtualRect: { x: -768, y: -768, width: 1936, height: 1836 },
+        nodeLayers: new Map(),
+        edges: [],
+        svgBounds: { x: 0, y: 0, width: 400, height: 300 },
+        svgViewBox: '0 0 400 300'
+      },
+      imageAssetRuntime: { stats: () => ({ activeLoadCount: 0, pendingImageCount: 0, decodedImageCount: 1 }) },
+      reactCommitCountRef
+    });
+    syncCanvasPerfDragSessionState({
+      enabled: true,
+      perfMonitor: monitor,
+      sessionRef,
+      reactCommitCountRef,
+      dragState: undefined,
+      snapshot: { cameraState: 'idle', camera: { x: 0, y: 0, z: 1 } }
+    });
+
+    expect(monitor.getLastSession()).toMatchObject({
+      type: 'drag-move-node',
+      frameCount: 1,
+      mountedNodeCount: 1,
+      visibleNodeCount: 1,
+      culledNodeCount: 0,
+      decodedImageCount: 1,
+      counters: {
+        'stage-drag-preview-write': 1,
+        'react-commit': 1
+      }
+    });
+    expect(monitor.getTrace().events.find((event) => event.kind === 'frame')).toMatchObject({
+      kind: 'frame',
+      cameraState: 'idle'
+    });
   });
 });
+
+function counterNames(events: readonly CanvasPerfTraceEvent[]): string[] {
+  return events
+    .filter((event) => event.kind === 'counter')
+    .map((event) => event.name);
+}
 
 function surface(
   canvas: ReturnType<typeof createCanvasDocument>,

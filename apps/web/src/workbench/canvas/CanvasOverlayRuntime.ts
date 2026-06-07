@@ -48,8 +48,11 @@ export function createCanvasOverlayRuntime(): CanvasOverlayRuntime {
       feedbackBar = element;
       lastFeedbackRect = '';
       if (currentFeedbackRect) {
+        showFeedbackBar(element);
         writeFeedbackBarPlacement(element, currentFeedbackRect);
         lastFeedbackRect = rectSignature(currentFeedbackRect);
+      } else {
+        hideFeedbackBar(element);
       }
       return () => {
         if (feedbackBar === element) {
@@ -67,6 +70,7 @@ export function createCanvasOverlayRuntime(): CanvasOverlayRuntime {
         return;
       }
       lastFeedbackRect = signature;
+      showFeedbackBar(feedbackBar);
       writeFeedbackBarPlacement(feedbackBar, rect);
     },
     clearFeedbackBarPlacement() {
@@ -79,6 +83,7 @@ export function createCanvasOverlayRuntime(): CanvasOverlayRuntime {
       feedbackBar.style.removeProperty('top');
       feedbackBar.style.removeProperty('width');
       feedbackBar.style.removeProperty('height');
+      hideFeedbackBar(feedbackBar);
     },
     dispose() {
       minimapViewport = undefined;
@@ -107,4 +112,12 @@ function writeFeedbackBarPlacement(element: HTMLElement, rect: FloatingBarRect):
   element.style.top = `${rect.y}px`;
   element.style.width = `${rect.width}px`;
   element.style.height = `${rect.height}px`;
+}
+
+function showFeedbackBar(element: HTMLElement): void {
+  element.style.visibility = 'visible';
+}
+
+function hideFeedbackBar(element: HTMLElement): void {
+  element.style.visibility = 'hidden';
 }
