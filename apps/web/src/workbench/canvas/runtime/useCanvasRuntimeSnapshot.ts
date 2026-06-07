@@ -1,5 +1,5 @@
 import { useSyncExternalStore } from 'react';
-import type { CanvasEditorRuntime, CanvasRuntimeDragState, CanvasRuntimeSnapshot } from './CanvasEditorRuntime';
+import type { CanvasEditorRuntime, CanvasRuntimeSnapshot } from './CanvasEditorRuntime';
 import type { CanvasSize } from './canvasGeometry';
 import type { CanvasSelection } from './canvasSelection';
 
@@ -28,13 +28,5 @@ export function useCanvasImageResourceZoom(runtime: CanvasEditorRuntime): number
     runtime.subscribeImageResourceZoom,
     () => runtime.getSnapshot().imageResourceZoom,
     () => runtime.getSnapshot().imageResourceZoom
-  );
-}
-
-export function useCanvasDragState(runtime: CanvasEditorRuntime): CanvasRuntimeDragState | undefined {
-  return useSyncExternalStore(
-    runtime.subscribeDragState,
-    () => runtime.getSnapshot().dragState,
-    () => runtime.getSnapshot().dragState
   );
 }

@@ -16,12 +16,12 @@ import {
   createCanvasImageAssetViewportSyncScheduler,
   createCanvasRenderSnapshotScheduler,
   recordCanvasPerfFrame,
+  shouldUseEfficientImageResourceZoom,
   syncCanvasPerfDragSessionState,
   syncCanvasMovingCameraFrame,
   syncCanvasPerfSessionState,
   syncCanvasImageResourceZoomForCameraState,
   syncCanvasImageAssetViewport,
-  syncCanvasStageNodeVisibility,
   type CanvasPerfRuntimeSession
 } from './CanvasSurface';
 import { createCanvasPerfMonitor, type CanvasPerfTraceEvent } from './CanvasPerfMonitor';
@@ -409,31 +409,6 @@ describe('CanvasSurface', () => {
     ]));
   });
 
-  it('syncs mounted node shell visibility from the live viewport', () => {
-    const stale = nodeFixture('flow/stale-visible.png', 0, 0);
-    const live = nodeFixture('flow/live-visible.png', 500, 0);
-    const hidden = { ...nodeFixture('flow/hidden.png', 500, 0), visible: false };
-    const visibility: Array<{ path: string; visible: boolean }> = [];
-
-    syncCanvasStageNodeVisibility({
-      stageRuntime: {
-        setNodeVisible: (path, visible) => visibility.push({ path, visible })
-      },
-      visibleRect: { x: 350, y: 0, width: 400, height: 300 },
-      nodesByPath: new Map([
-        [stale.projectRelativePath, stale],
-        [live.projectRelativePath, live],
-        [hidden.projectRelativePath, hidden]
-      ])
-    });
-
-    expect(visibility).toEqual([
-      { path: 'flow/stale-visible.png', visible: false },
-      { path: 'flow/live-visible.png', visible: true },
-      { path: 'flow/hidden.png', visible: false }
-    ]);
-  });
-
   it('defers moving image resource viewport sync until an animation frame', () => {
     const frames: FrameRequestCallback[] = [];
     const calls: unknown[] = [];
@@ -486,6 +461,7 @@ describe('CanvasSurface', () => {
     syncCanvasImageResourceZoomForCameraState({
       cameraState: 'moving',
       imagePreviewsEnabled: true,
+      useEfficientImageResourceZoom: true,
       currentImageResourceZoom: 1,
       liveCameraZoom: 2,
       timerRef,
@@ -501,6 +477,97 @@ describe('CanvasSurface', () => {
     expect(updates).toEqual([]);
   });
 
+  it('keeps image resource zoom stable while a large preview canvas is moving', () => {
+    const timerRef = { current: undefined as number | undefined };
+    const updates: number[] = [];
+
+    syncCanvasImageResourceZoomForCameraState({
+      cameraState: 'moving',
+      imagePreviewsEnabled: true,
+      useEfficientImageResourceZoom: true,
+      currentImageResourceZoom: 1,
+      liveCameraZoom: 2,
+      timerRef,
+      setImageResourceZoom: (zoom) => updates.push(zoom),
+      setTimeout: () => {
+        throw new Error('moving camera must not schedule image zoom settlement');
+      },
+      clearTimeout: () => undefined
+    });
+
+    expect(updates).toEqual([]);
+    expect(timerRef.current).toBeUndefined();
+  });
+
+  it('updates image resource zoom immediately for small canvases', () => {
+    const timerRef = { current: 11 };
+    const cleared: number[] = [];
+    const updates: number[] = [];
+
+    syncCanvasImageResourceZoomForCameraState({
+      cameraState: 'moving',
+      imagePreviewsEnabled: true,
+      useEfficientImageResourceZoom: false,
+      currentImageResourceZoom: 1,
+      liveCameraZoom: 2,
+      timerRef,
+      setImageResourceZoom: (zoom) => updates.push(zoom),
+      setTimeout: () => {
+        throw new Error('small canvas must not debounce image resource zoom');
+      },
+      clearTimeout: (handle) => cleared.push(handle)
+    });
+
+    expect(cleared).toEqual([11]);
+    expect(timerRef.current).toBeUndefined();
+    expect(updates).toEqual([2]);
+  });
+
+  it('settles efficient image resource zoom after idle', () => {
+    const timerRef = { current: undefined as number | undefined };
+    const updates: number[] = [];
+    const timers: Array<() => void> = [];
+
+    syncCanvasImageResourceZoomForCameraState({
+      cameraState: 'idle',
+      imagePreviewsEnabled: true,
+      useEfficientImageResourceZoom: true,
+      currentImageResourceZoom: 1,
+      liveCameraZoom: 2,
+      timerRef,
+      setImageResourceZoom: (zoom) => updates.push(zoom),
+      setTimeout: (callback) => {
+        timers.push(callback);
+        return 17;
+      },
+      clearTimeout: () => undefined,
+      settleMs: 500
+    });
+
+    expect(timerRef.current).toBe(17);
+    expect(updates).toEqual([]);
+
+    timers[0]?.();
+
+    expect(timerRef.current).toBeUndefined();
+    expect(updates).toEqual([2]);
+  });
+
+  it('uses efficient image resource zoom only when previews are enabled and the canvas is large', () => {
+    expect(shouldUseEfficientImageResourceZoom({
+      imagePreviewsEnabled: true,
+      nodeCount: 501
+    })).toBe(true);
+    expect(shouldUseEfficientImageResourceZoom({
+      imagePreviewsEnabled: true,
+      nodeCount: 500
+    })).toBe(false);
+    expect(shouldUseEfficientImageResourceZoom({
+      imagePreviewsEnabled: false,
+      nodeCount: 1000
+    })).toBe(false);
+  });
+
   it('does not schedule idle image resource zoom settlement when zoom is already current', () => {
     const timerRef = { current: 11 };
     const cleared: number[] = [];
@@ -509,6 +576,7 @@ describe('CanvasSurface', () => {
     syncCanvasImageResourceZoomForCameraState({
       cameraState: 'idle',
       imagePreviewsEnabled: true,
+      useEfficientImageResourceZoom: true,
       currentImageResourceZoom: 1.5,
       liveCameraZoom: 1.5,
       timerRef,
@@ -605,54 +673,78 @@ describe('CanvasSurface', () => {
     expect(imageCalls).toEqual(['moving']);
   });
 
-  it('keeps moving camera frames on the stage and schedules render and image viewport work', () => {
-    const stale = nodeFixture('flow/stale-visible.png', 0, 0);
-    const live = nodeFixture('flow/live-visible.png', 500, 0);
+  it('keeps moving camera sync visibility work out of the live camera callback and queues image viewport sync', () => {
     const cameras: unknown[] = [];
-    const visibility: Array<{ path: string; visible: boolean }> = [];
     const renderInputs: unknown[] = [];
     const imageCameraStates: unknown[] = [];
 
     syncCanvasMovingCameraFrame({
       liveCamera: { x: -350, y: 0, z: 1 },
       stageRuntime: {
-        setCamera: (camera) => cameras.push(camera),
-        setNodeVisible: (path, visible) => visibility.push({ path, visible })
+        setCamera: (camera) => cameras.push(camera)
       },
       runtime: {
-        getSnapshot: () => ({ cameraState: 'moving' }) as ReturnType<CanvasEditorRuntime['getSnapshot']>,
-        coordinates: {
-          visibleCanvasRect: () => ({ x: 350, y: 0, width: 400, height: 300 })
-        } as CanvasEditorRuntime['coordinates']
+        getSnapshot: () => ({ cameraState: 'moving' }) as ReturnType<CanvasEditorRuntime['getSnapshot']>
       },
-      nodesByPath: new Map([
-        [stale.projectRelativePath, stale],
-        [live.projectRelativePath, live]
-      ]),
       surfaceSize: { width: 400, height: 300 },
-      selection: { kind: 'node', projectRelativePath: live.projectRelativePath },
-      activeNodePaths: [live.projectRelativePath],
+      selection: { kind: 'node', projectRelativePath: 'flow/live-visible.png' },
+      activeNodePaths: ['flow/live-visible.png'],
       renderSnapshotScheduler: {
         requestMoving: (input) => renderInputs.push(input)
       },
       imageAssetViewportScheduler: {
         request: (cameraState) => imageCameraStates.push(cameraState)
-      }
+      },
+      syncImageResourceZoom: () => undefined
     });
 
     expect(cameras).toEqual([{ x: -350, y: 0, z: 1 }]);
-    expect(visibility).toEqual([
-      { path: 'flow/stale-visible.png', visible: false },
-      { path: 'flow/live-visible.png', visible: true }
-    ]);
+    expect(imageCameraStates).toEqual(['moving']);
     expect(renderInputs).toEqual([{
       camera: { x: -350, y: 0, z: 1 },
       cameraState: 'moving',
       surfaceSize: { width: 400, height: 300 },
-      selection: { kind: 'node', projectRelativePath: live.projectRelativePath },
-      activeNodePaths: [live.projectRelativePath]
+      selection: { kind: 'node', projectRelativePath: 'flow/live-visible.png' },
+      activeNodePaths: ['flow/live-visible.png']
     }]);
-    expect(imageCameraStates).toEqual(['moving']);
+  });
+
+  it('passes the live moving snapshot to image resource zoom sync', () => {
+    const zoomSnapshots: unknown[] = [];
+
+    syncCanvasMovingCameraFrame({
+      liveCamera: { x: 0, y: 0, z: 2 },
+      stageRuntime: {
+        setCamera: () => undefined
+      },
+      runtime: {
+        getSnapshot: () => ({
+          cameraState: 'moving',
+          camera: { x: 0, y: 0, z: 2 },
+          imageResourceZoom: 1
+        }) as ReturnType<CanvasEditorRuntime['getSnapshot']>
+      },
+      surfaceSize: { width: 400, height: 300 },
+      selection: undefined,
+      activeNodePaths: [],
+      renderSnapshotScheduler: {
+        requestMoving: () => undefined
+      },
+      imageAssetViewportScheduler: {
+        request: () => undefined
+      },
+      syncImageResourceZoom: (snapshot) => zoomSnapshots.push({
+        cameraState: snapshot.cameraState,
+        camera: snapshot.camera,
+        imageResourceZoom: snapshot.imageResourceZoom
+      })
+    });
+
+    expect(zoomSnapshots).toEqual([{
+      cameraState: 'moving',
+      camera: { x: 0, y: 0, z: 2 },
+      imageResourceZoom: 1
+    }]);
   });
 
   it('records render and image scheduler counters separately', () => {
@@ -759,6 +851,112 @@ describe('CanvasSurface', () => {
       renderSnapshotReuseCount: 1,
       stageWriteCount: 1,
       imageRuntimeWorkCount: 1
+    });
+  });
+
+  it('records moving camera frames without image runtime work when image viewport sync is unchanged', () => {
+    const monitor = createCanvasPerfMonitor({ enabled: true });
+    const sessionRef = { current: undefined as CanvasPerfRuntimeSession | undefined };
+    const reactCommitCountRef = { current: 0 };
+
+    syncCanvasPerfSessionState({
+      enabled: true,
+      perfMonitor: monitor,
+      sessionRef,
+      reactCommitCountRef,
+      snapshot: {
+        cameraState: 'moving',
+        camera: { x: 0, y: 0, z: 1 }
+      },
+      minimapOpen: false
+    });
+    recordCanvasPerfFrame({
+      enabled: true,
+      perfMonitor: monitor,
+      sessionRef,
+      cameraState: 'moving',
+      renderSnapshot: {
+        nodesByPath: new Map([
+          ['flow/a.png', nodeFixture('flow/a.png', 0, 0)]
+        ]),
+        culledNodePaths: new Set(),
+        visibleRect: { x: 0, y: 0, width: 400, height: 300 },
+        virtualRect: { x: -100, y: -100, width: 600, height: 500 },
+        nodeLayers: new Map(),
+        edges: [],
+        svgBounds: { x: 0, y: 0, width: 1, height: 1 },
+        svgViewBox: '0 0 1 1'
+      },
+      imageAssetRuntime: {
+        stats: () => ({
+          activeLoadCount: 0,
+          pendingImageCount: 0,
+          decodedImageCount: 1
+        })
+      },
+      reactCommitCountRef
+    });
+
+    expect(monitor.getTrace().events.find((event) => event.kind === 'frame')).toMatchObject({
+      kind: 'frame',
+      cameraState: 'moving',
+      reactCommitCount: 0,
+      renderSnapshotBuildCount: 0,
+      imageRuntimeWorkCount: 0
+    });
+  });
+
+  it('does not count moving image viewport queue signals as image runtime work', () => {
+    const monitor = createCanvasPerfMonitor({ enabled: true });
+    const sessionRef = { current: undefined as CanvasPerfRuntimeSession | undefined };
+    const reactCommitCountRef = { current: 0 };
+
+    syncCanvasPerfSessionState({
+      enabled: true,
+      perfMonitor: monitor,
+      sessionRef,
+      reactCommitCountRef,
+      snapshot: {
+        cameraState: 'moving',
+        camera: { x: 0, y: 0, z: 1 }
+      },
+      minimapOpen: false
+    });
+    monitor.recordCounter({
+      timestamp: 5,
+      source: 'CanvasImageAssetViewportScheduler',
+      name: 'image-moving-queued'
+    });
+    recordCanvasPerfFrame({
+      enabled: true,
+      perfMonitor: monitor,
+      sessionRef,
+      cameraState: 'moving',
+      renderSnapshot: {
+        nodesByPath: new Map([
+          ['flow/a.png', nodeFixture('flow/a.png', 0, 0)]
+        ]),
+        culledNodePaths: new Set(),
+        visibleRect: { x: 0, y: 0, width: 400, height: 300 },
+        virtualRect: { x: -100, y: -100, width: 600, height: 500 },
+        nodeLayers: new Map(),
+        edges: [],
+        svgBounds: { x: 0, y: 0, width: 1, height: 1 },
+        svgViewBox: '0 0 1 1'
+      },
+      imageAssetRuntime: {
+        stats: () => ({
+          activeLoadCount: 0,
+          pendingImageCount: 0,
+          decodedImageCount: 1
+        })
+      },
+      reactCommitCountRef
+    });
+
+    expect(monitor.getTrace().events.find((event) => event.kind === 'frame')).toMatchObject({
+      kind: 'frame',
+      imageRuntimeWorkCount: 0
     });
   });
 

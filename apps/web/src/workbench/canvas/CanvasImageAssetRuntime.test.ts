@@ -251,6 +251,32 @@ describe('CanvasImageAssetRuntime', () => {
     expect(changed).not.toBe(first);
   });
 
+  it('keeps moving viewport signatures stable while only already loaded visible images change', () => {
+    const nodes = new Map([
+      ['flow/loaded-a.png', imageNode('flow/loaded-a.png', 0, 0)],
+      ['flow/loaded-b.png', imageNode('flow/loaded-b.png', 1800, 0)],
+      ['flow/blank.png', imageNode('flow/blank.png', 3600, 0)]
+    ]);
+    const loadedImagePaths = new Set(['flow/loaded-a.png', 'flow/loaded-b.png']);
+    const mountedNodePaths = new Set(['flow/loaded-a.png', 'flow/loaded-b.png', 'flow/blank.png']);
+
+    const first = canvasImageAssetViewportSignature({
+      ...viewport({ cameraState: 'moving', mountedNodePaths }),
+      visibleRect: { x: 0, y: 0, width: 400, height: 300 }
+    }, nodes, { loadedImagePaths });
+    const loadedOnlyShift = canvasImageAssetViewportSignature({
+      ...viewport({ cameraState: 'moving', mountedNodePaths }),
+      visibleRect: { x: 1700, y: 0, width: 400, height: 300 }
+    }, nodes, { loadedImagePaths });
+    const blankShift = canvasImageAssetViewportSignature({
+      ...viewport({ cameraState: 'moving', mountedNodePaths }),
+      visibleRect: { x: 3500, y: 0, width: 400, height: 300 }
+    }, nodes, { loadedImagePaths });
+
+    expect(loadedOnlyShift).toBe(first);
+    expect(blankShift).not.toBe(first);
+  });
+
   it('records image-load sessions for start and DOM resolve', () => {
     const monitor = createCanvasPerfMonitor({ enabled: true });
     const runtime = createCanvasImageAssetRuntime({ concurrency: 1, perfMonitor: monitor });
@@ -435,6 +461,86 @@ describe('CanvasImageAssetRuntime', () => {
 
     expect(counterNames(monitor.getTrace().events)).toContain('image-viewport-noop');
     expect(counterNames(monitor.getTrace().events).filter((name) => name === 'image-plan-rebuild')).toHaveLength(firstPlanRebuildCount);
+  });
+
+  it('does not rebuild the moving image plan when the newly visible image is already loaded', () => {
+    const monitor = createCanvasPerfMonitor({ enabled: true });
+    const runtime = createCanvasImageAssetRuntime({ concurrency: 2, perfMonitor: monitor });
+    const nodes = new Map([
+      ['flow/a.png', largeImageNode('flow/a.png', 0, 0)],
+      ['flow/b.png', largeImageNode('flow/b.png', 1800, 0)]
+    ]);
+    runtime.setNodes(nodes);
+    runtime.setViewport({
+      ...viewport({
+        cameraState: 'idle',
+        mountedNodePaths: new Set(['flow/a.png', 'flow/b.png'])
+      }),
+      visibleRect: { x: 0, y: 0, width: 3000, height: 1200 },
+      imageResourceZoom: 0.1
+    });
+
+    const pendingA = runtime.getNodeState('flow/a.png');
+    const pendingB = runtime.getNodeState('flow/b.png');
+    if (pendingA.kind !== 'image' || !pendingA.next || pendingB.kind !== 'image' || !pendingB.next) {
+      throw new Error('Expected both images to start loading.');
+    }
+    runtime.resolvePending('flow/a.png', pendingA.next.loadKey);
+    runtime.resolvePending('flow/b.png', pendingB.next.loadKey);
+
+    runtime.setViewport({
+      ...viewport({
+        cameraState: 'moving',
+        mountedNodePaths: new Set(['flow/a.png', 'flow/b.png'])
+      }),
+      visibleRect: { x: 0, y: 0, width: 400, height: 300 },
+      imageResourceZoom: 0.1
+    });
+    const rebuildCount = counterNames(monitor.getTrace().events)
+      .filter((name) => name === 'image-plan-rebuild')
+      .length;
+
+    runtime.setViewport({
+      ...viewport({
+        cameraState: 'moving',
+        mountedNodePaths: new Set(['flow/a.png', 'flow/b.png'])
+      }),
+      visibleRect: { x: 1700, y: 0, width: 400, height: 300 },
+      imageResourceZoom: 0.1
+    });
+
+    expect(counterNames(monitor.getTrace().events)).toContain('image-viewport-noop');
+    expect(counterNames(monitor.getTrace().events).filter((name) => name === 'image-plan-rebuild')).toHaveLength(rebuildCount);
+  });
+
+  it('does not start image upgrades while moving when an image is already visible', () => {
+    const runtime = createCanvasImageAssetRuntime({ concurrency: 1 });
+    runtime.setNodes(new Map([['flow/a.png', largeImageNode('flow/a.png', 0, 0)]]));
+    runtime.setViewport({
+      ...viewport({ cameraState: 'idle', mountedNodePaths: new Set(['flow/a.png']) }),
+      imageResourceZoom: 0.1
+    });
+    const pending = runtime.getNodeState('flow/a.png');
+    if (pending.kind !== 'image' || !pending.next) {
+      throw new Error('Expected initial image to be pending.');
+    }
+    runtime.resolvePending('flow/a.png', pending.next.loadKey);
+
+    runtime.setViewport({
+      ...viewport({ cameraState: 'moving', mountedNodePaths: new Set(['flow/a.png']) }),
+      imageResourceZoom: 1
+    });
+
+    const moving = runtime.getNodeState('flow/a.png');
+    expect(moving.kind === 'image' ? moving.next : undefined).toBeUndefined();
+
+    runtime.setViewport({
+      ...viewport({ cameraState: 'idle', mountedNodePaths: new Set(['flow/a.png']) }),
+      imageResourceZoom: 1
+    });
+
+    const idle = runtime.getNodeState('flow/a.png');
+    expect(idle.kind === 'image' ? idle.next : undefined).toBeDefined();
   });
 
   it('ends pending image-load sessions when disposed', () => {

@@ -246,6 +246,28 @@ describe('CanvasEditorRuntime', () => {
     expect(snapshots).toHaveLength(2);
     expect(snapshots.at(-1)).toBeUndefined();
   });
+
+  it('does not notify broad snapshot subscribers for pointer move drag previews', () => {
+    const runtime = createCanvasEditorRuntime();
+    const snapshots: unknown[] = [];
+    runtime.subscribe((snapshot) => snapshots.push(snapshot));
+    runtime.input.beginNodeMove({
+      pointerId: 7,
+      start: { x: 0, y: 0 },
+      node: moveNode('flow/a.png', 0, 0),
+      selection: { kind: 'node', projectRelativePath: 'flow/a.png' },
+      nodes: [moveNode('flow/a.png', 0, 0)]
+    });
+    snapshots.length = 0;
+
+    const updated = runtime.input.updatePointer({
+      pointerId: 7,
+      point: { x: 20, y: 30 }
+    });
+
+    expect(updated).toBe(true);
+    expect(snapshots).toEqual([]);
+  });
 });
 
 function fakeElement(rect = { left: 0, top: 0, width: 1, height: 1 }): {

@@ -452,7 +452,9 @@ export function createCanvasImageAssetRuntime(input: {
       pump();
     },
     setViewport: (nextViewport) => {
-      const nextSignature = canvasImageAssetViewportSignature(nextViewport, nodes);
+      const nextSignature = canvasImageAssetViewportSignature(nextViewport, nodes, {
+        loadedImagePaths: loadedImagePathsFromRecords(records)
+      });
       if (viewportSignature === nextSignature) {
         viewport = nextViewport;
         recordCanvasSessionCounter('image-viewport-noop');
@@ -529,6 +531,16 @@ function loadedImagesFromRecords(records: ReadonlyMap<string, CanvasImageAssetRe
   return loadedImages;
 }
 
+function loadedImagePathsFromRecords(records: ReadonlyMap<string, CanvasImageAssetRecord>): Set<string> {
+  const paths = new Set<string>();
+  for (const [path, record] of records) {
+    if (record.visible) {
+      paths.add(path);
+    }
+  }
+  return paths;
+}
+
 function sameCanvasImageNodeRenderState(
   previous: CanvasImageNodeRenderState | undefined,
   next: CanvasImageNodeRenderState
@@ -553,12 +565,13 @@ function sameCanvasImageNodeRenderState(
 
 export function canvasImageAssetViewportSignature(
   viewport: CanvasImageAssetViewport,
-  nodes: ReadonlyMap<string, ProjectedCanvasNode>
+  nodes: ReadonlyMap<string, ProjectedCanvasNode>,
+  input: { loadedImagePaths?: ReadonlySet<string> } = {}
 ): string {
   return [
     viewport.cameraState,
     viewport.cameraState === 'moving'
-      ? movingViewportImageCandidateSignature(viewport, nodes)
+      ? movingViewportBlankImageCandidateSignature(viewport, nodes, input.loadedImagePaths ?? new Set())
       : `${rectSignature(viewport.visibleRect)}:${mountedImagePathSignature(viewport.mountedNodePaths, nodes)}`,
     String(viewport.imageResourceZoom),
     String(viewport.devicePixelRatio),
@@ -570,17 +583,19 @@ function rectSignature(rect: CanvasRect): string {
   return `${rect.x}:${rect.y}:${rect.width}:${rect.height}`;
 }
 
-function movingViewportImageCandidateSignature(
+function movingViewportBlankImageCandidateSignature(
   viewport: CanvasImageAssetViewport,
-  nodes: ReadonlyMap<string, ProjectedCanvasNode>
+  nodes: ReadonlyMap<string, ProjectedCanvasNode>,
+  loadedImagePaths: ReadonlySet<string>
 ): string {
   return [...viewport.mountedNodePaths]
+    .filter((path) => !loadedImagePaths.has(path))
     .filter((path) => !viewport.culledNodePaths.has(path))
     .filter((path) => {
       const node = nodes.get(path);
       return isAvailableVisibleImageNode(node) && rectsIntersect(viewport.visibleRect, nodeRect(node));
     })
-    .map((path) => path)
+    .sort()
     .join('\u001f');
 }
 
