@@ -156,6 +156,27 @@ describe('CanvasPerfMonitor', () => {
     expect(cameraSummary?.counters).toEqual({ 'image-load-resolve': 1 });
   });
 
+  it('records image budget and resource cleanup counters in totals and summaries', () => {
+    const monitor = createCanvasPerfMonitor({ enabled: true });
+    const sessionId = monitor.startSession({ type: 'camera-pan', timestamp: 0, source: 'CanvasSurface' });
+    if (!sessionId) {
+      throw new Error('Expected enabled monitor to start a session.');
+    }
+
+    monitor.recordCounter({ sessionId, timestamp: 1, source: 'CanvasImageAssetRuntime', name: 'image-budget-block' });
+    monitor.recordCounter({ sessionId, timestamp: 2, source: 'CanvasImageAssetRuntime', name: 'image-next-cancel' });
+    monitor.recordCounter({ sessionId, timestamp: 3, source: 'CanvasImageAssetRuntime', name: 'image-visible-evict' });
+
+    const summary = monitor.endSession({ sessionId, timestamp: 10, source: 'CanvasSurface' });
+
+    expect(monitor.getCounterTotals()).toEqual({
+      'image-budget-block': 1,
+      'image-next-cancel': 1,
+      'image-visible-evict': 1
+    });
+    expect(summary?.counters).toEqual(monitor.getCounterTotals());
+  });
+
   it('is inert when disabled', () => {
     const listener = vi.fn();
     const monitor = createCanvasPerfMonitor({ enabled: false, onEvent: listener });

@@ -5,7 +5,7 @@ import { createCanvasDocument, type CanvasFeedbackDocument, type CanvasProjectio
 import type { IntegrationSettingsView } from '@debrute/app-protocol';
 import type { WorkbenchActions, WorkbenchState } from '../../types';
 import { CanvasEditor } from './CanvasEditor';
-import { createCanvasImageAssetRuntime, type CanvasImageAssetRuntime } from './CanvasImageAssetRuntime';
+import { createCanvasImageAssetRuntime, type CanvasImageAssetRuntime, type CanvasImageAssetRuntimeStats } from './CanvasImageAssetRuntime';
 import { CanvasImageAssetProvider } from './CanvasImageResourceContext';
 import type { CanvasImageNodeRenderState } from './canvasImageLoading';
 import { CanvasNodeContent } from './CanvasNodeContent';
@@ -276,7 +276,7 @@ describe('CanvasSurface', () => {
     expect(html).not.toContain('/files/raw/flow/image-0.png');
   });
 
-  it('keeps a placeholder visible while the first next image loads', () => {
+  it('keeps the first pending image slot reserved without flashing a loading placeholder', () => {
     const runtime = createCanvasImageAssetRuntime({
       loadImage: () => new Promise(() => undefined)
     });
@@ -297,17 +297,17 @@ describe('CanvasSurface', () => {
       </CanvasImageAssetProvider>
     );
 
-    expect(html).toContain('class="canvas-node-placeholder"');
+    expect(html).toContain('class="canvas-node-image-reserved"');
     expect(html).toContain('data-canvas-image-layer="next"');
     expect(html).not.toContain('data-canvas-image-layer="visible"');
-    expect(html).toContain('flow/cover.png');
+    expect(html).not.toContain('class="canvas-node-placeholder"');
   });
 
   it('keeps the visible image mounted while the next image is loading', () => {
     const html = renderCanvasSurfaceWithImageState({
       kind: 'image',
-      visible: { src: '/preview/low.jpg', loadKey: 'low' },
-      next: { src: '/preview/high.jpg', loadKey: 'high' },
+      visible: { src: '/preview/low.jpg', loadKey: 'low', previewWidth: 256 },
+      next: { src: '/preview/high.jpg', loadKey: 'high', previewWidth: 1024 },
       retry: () => undefined
     });
 
@@ -322,11 +322,13 @@ describe('CanvasSurface', () => {
       kind: 'image',
       visible: {
         src: '/api/projects/p/canvas-image-preview?path=flow%2Fcover.png&v=rev&w=256',
-        loadKey: 'preview'
+        loadKey: 'preview',
+        previewWidth: 256
       },
       next: {
         src: '/api/projects/p/canvas-image-preview?path=flow%2Fcover.png&v=rev&w=512',
-        loadKey: 'preview-next'
+        loadKey: 'preview-next',
+        previewWidth: 512
       },
       retry: () => undefined
     });
@@ -571,12 +573,12 @@ describe('CanvasSurface', () => {
       nodeCount: 501
     })).toBe(true);
     expect(shouldUseEfficientImageResourceZoom({
-      nodeCount: 144,
-      imageNodeCount: 144
+      nodeCount: 92,
+      imageNodeCount: 60
     })).toBe(true);
     expect(shouldUseEfficientImageResourceZoom({
       nodeCount: 144,
-      imageNodeCount: 20
+      imageNodeCount: 24
     })).toBe(false);
     expect(shouldUseEfficientImageResourceZoom({
       nodeCount: 500
@@ -864,7 +866,7 @@ describe('CanvasSurface', () => {
         svgBounds: { x: 0, y: 0, width: 400, height: 300 },
         svgViewBox: '0 0 400 300'
       },
-      imageAssetRuntime: { stats: () => ({ activeLoadCount: 1, pendingImageCount: 2, decodedImageCount: 3 }) },
+      imageAssetRuntime: { stats: () => imageStats({ activeLoadCount: 1, pendingImageCount: 2, decodedImageCount: 3 }) },
       reactCommitCountRef
     });
     syncCanvasPerfSessionState({
@@ -929,11 +931,7 @@ describe('CanvasSurface', () => {
         svgViewBox: '0 0 1 1'
       },
       imageAssetRuntime: {
-        stats: () => ({
-          activeLoadCount: 0,
-          pendingImageCount: 0,
-          decodedImageCount: 1
-        })
+        stats: () => imageStats({ decodedImageCount: 1 })
       },
       reactCommitCountRef
     });
@@ -986,11 +984,7 @@ describe('CanvasSurface', () => {
         svgViewBox: '0 0 1 1'
       },
       imageAssetRuntime: {
-        stats: () => ({
-          activeLoadCount: 0,
-          pendingImageCount: 0,
-          decodedImageCount: 1
-        })
+        stats: () => imageStats({ decodedImageCount: 1 })
       },
       reactCommitCountRef
     });
@@ -1042,7 +1036,7 @@ describe('CanvasSurface', () => {
         svgBounds: { x: 0, y: 0, width: 400, height: 300 },
         svgViewBox: '0 0 400 300'
       },
-      imageAssetRuntime: { stats: () => ({ activeLoadCount: 0, pendingImageCount: 0, decodedImageCount: 1 }) },
+      imageAssetRuntime: { stats: () => imageStats({ activeLoadCount: 0, pendingImageCount: 0, decodedImageCount: 1 }) },
       reactCommitCountRef
     });
     syncCanvasPerfDragSessionState({
@@ -1115,6 +1109,20 @@ function feedbackPlacementContextFixture(): Parameters<typeof CanvasSurface>[0][
   };
 }
 
+function imageStats(overrides: Partial<CanvasImageAssetRuntimeStats> = {}): CanvasImageAssetRuntimeStats {
+  return {
+    activeLoadCount: 0,
+    pendingImageCount: 0,
+    decodedImageCount: 0,
+    visiblePreviewWidths: {},
+    nextPreviewWidths: {},
+    imageWorkIntentCounts: {},
+    imageCancellationReasons: {},
+    imageEvictionReasons: {},
+    ...overrides
+  };
+}
+
 function renderCanvasSurfaceWithImageState(imageState: CanvasImageNodeRenderState): string {
   const runtime = {
     setNodes: () => undefined,
@@ -1124,7 +1132,7 @@ function renderCanvasSurfaceWithImageState(imageState: CanvasImageNodeRenderStat
     resolvePending: () => undefined,
     rejectPending: () => undefined,
     retry: () => undefined,
-    stats: () => ({ activeLoadCount: 0, pendingImageCount: 0, decodedImageCount: 0 }),
+    stats: () => imageStats(),
     dispose: () => undefined
   } satisfies CanvasImageAssetRuntime;
 

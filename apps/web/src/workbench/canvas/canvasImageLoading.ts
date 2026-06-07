@@ -1,5 +1,5 @@
 import type { ProjectedCanvasNode } from '@debrute/canvas-core';
-import { canvasImageSourceUrl, type CanvasLoadedImage } from './canvasImagePreviews';
+import { canvasImageSource, type CanvasLoadedImage } from './canvasImagePreviews';
 import { nodeRect } from './canvasVirtualization';
 import type { CanvasCameraState } from './runtime/canvasCamera';
 import type { CanvasRect } from './runtime/canvasGeometry';
@@ -8,21 +8,15 @@ import { expandCanvasRect, rectCenter, rectsIntersect } from './runtime/canvasGe
 export const CANVAS_IMAGE_NEAR_OVERSCAN_SCREEN_PX = 512;
 export const CANVAS_IMAGE_LOAD_CONCURRENCY = 3;
 
-export type CanvasImageLoadPriority = 0 | 1 | 2 | 3 | 4;
-
-export type CanvasImageLoadingPlanReason =
-  | 'viewport-empty'
-  | 'viewport-upgrade'
-  | 'overscan-empty'
-  | 'overscan-upgrade'
+export type CanvasImageLoadingIntent =
+  | 'display-critical'
+  | 'prefetch-near'
+  | 'upgrade-idle'
   | 'deferred'
   | 'not-previewable'
   | 'unavailable';
 
-export interface CanvasPendingImage {
-  src: string;
-  loadKey: string;
-}
+export type CanvasPendingImage = CanvasLoadedImage;
 
 export interface CanvasImageLoadError {
   message: string;
@@ -53,10 +47,10 @@ export interface CanvasImageLoadingPlanItem {
   projectRelativePath: string;
   src: string;
   loadKey: string;
-  priority: CanvasImageLoadPriority;
+  previewWidth: number;
+  intent: CanvasImageLoadingIntent;
   distanceToVisibleCenter: number;
   eligible: boolean;
-  reason: CanvasImageLoadingPlanReason;
 }
 
 export interface ActiveCanvasImageLoad {
@@ -84,23 +78,23 @@ export function createCanvasImageLoadingPlan(input: CanvasImageLoadingPlanInput)
       continue;
     }
 
-    const src = canvasImageSourceUrl({
+    const source = canvasImageSource({
       node,
       cameraZoom: input.imageResourceZoom,
       devicePixelRatio: input.devicePixelRatio
     });
-    if (!src) {
+    if (!source) {
       result.set(node.projectRelativePath, ineligibleItem(node, 'not-previewable'));
       continue;
     }
 
     const retryKey = input.retryKeys.get(node.projectRelativePath) ?? 0;
-    const loadKey = `${src}:${retryKey}`;
+    const loadKey = `${source.src}:${retryKey}`;
     const loaded = input.existingImages.get(node.projectRelativePath);
     const bounds = nodeRect(node);
     const inVisible = rectsIntersect(input.visibleRect, bounds);
     const inNearOverscan = !inVisible && rectsIntersect(nearOverscanRect, bounds);
-    const priority = priorityForNode({
+    const intent = intentForNode({
       inVisible,
       inNearOverscan,
       hasLoadedImage: loaded !== undefined,
@@ -109,12 +103,12 @@ export function createCanvasImageLoadingPlan(input: CanvasImageLoadingPlanInput)
 
     result.set(node.projectRelativePath, {
       projectRelativePath: node.projectRelativePath,
-      src,
+      src: source.src,
       loadKey,
-      priority: priority.priority,
+      previewWidth: source.previewWidth,
+      intent,
       distanceToVisibleCenter: pointDistance(visibleCenter, rectCenter(bounds)),
-      eligible: true,
-      reason: priority.reason
+      eligible: true
     });
   }
 
@@ -125,16 +119,35 @@ export function selectCanvasImageLoadingCandidates(input: {
   plan: ReadonlyMap<string, CanvasImageLoadingPlanItem>;
   cameraState: CanvasCameraState;
   activeLoadKeys: ReadonlySet<string>;
+  movingPrefetchLimit?: number | undefined;
 }): CanvasImageLoadingPlanItem[] {
-  return [...input.plan.values()]
+  const candidates = [...input.plan.values()]
     .filter((item) => item.eligible)
     .filter((item) => !input.activeLoadKeys.has(item.loadKey))
-    .filter((item) => input.cameraState === 'moving' ? item.priority === 0 : item.priority <= 3)
+    .filter((item) => item.intent !== 'deferred')
     .sort((left, right) => (
-      left.priority - right.priority
+      intentSortOrder(left.intent) - intentSortOrder(right.intent)
       || left.distanceToVisibleCenter - right.distanceToVisibleCenter
       || left.projectRelativePath.localeCompare(right.projectRelativePath)
     ));
+  if (input.cameraState !== 'moving') {
+    return candidates;
+  }
+  const movingPrefetchLimit = Math.max(0, input.movingPrefetchLimit ?? 1);
+  let prefetchCount = 0;
+  return candidates.filter((item) => {
+    if (item.intent === 'display-critical') {
+      return true;
+    }
+    if (item.intent !== 'prefetch-near') {
+      return false;
+    }
+    if (prefetchCount >= movingPrefetchLimit) {
+      return false;
+    }
+    prefetchCount += 1;
+    return true;
+  });
 }
 
 export function isCanvasImageLoadResultCurrent(
@@ -145,39 +158,54 @@ export function isCanvasImageLoadResultCurrent(
   return current?.loadKey === active.item.loadKey;
 }
 
-function priorityForNode(input: {
+function intentForNode(input: {
   inVisible: boolean;
   inNearOverscan: boolean;
   hasLoadedImage: boolean;
   upgradeNeeded: boolean;
-}): { priority: CanvasImageLoadPriority; reason: CanvasImageLoadingPlanReason } {
+}): CanvasImageLoadingIntent {
   if (input.inVisible && !input.hasLoadedImage) {
-    return { priority: 0, reason: 'viewport-empty' };
-  }
-  if (input.inVisible && input.upgradeNeeded) {
-    return { priority: 1, reason: 'viewport-upgrade' };
+    return 'display-critical';
   }
   if (input.inNearOverscan && !input.hasLoadedImage) {
-    return { priority: 2, reason: 'overscan-empty' };
+    return 'prefetch-near';
   }
-  if (input.inNearOverscan && input.upgradeNeeded) {
-    return { priority: 3, reason: 'overscan-upgrade' };
+  if ((input.inVisible || input.inNearOverscan) && input.upgradeNeeded) {
+    return 'upgrade-idle';
   }
-  return { priority: 4, reason: 'deferred' };
+  return 'deferred';
+}
+
+function intentSortOrder(intent: CanvasImageLoadingIntent): number {
+  switch (intent) {
+    case 'display-critical':
+      return 0;
+    case 'prefetch-near':
+      return 1;
+    case 'upgrade-idle':
+      return 2;
+    case 'deferred':
+      return 3;
+    case 'not-previewable':
+    case 'unavailable':
+      return 4;
+  }
+  const exhaustive: never = intent;
+  return exhaustive;
 }
 
 function ineligibleItem(
   node: ProjectedCanvasNode,
-  reason: Extract<CanvasImageLoadingPlanReason, 'not-previewable' | 'unavailable'>
+  intent: Extract<CanvasImageLoadingIntent, 'not-previewable' | 'unavailable'>
 ): CanvasImageLoadingPlanItem {
   return {
     projectRelativePath: node.projectRelativePath,
     src: '',
     loadKey: '',
-    priority: 4,
+    previewWidth: 0,
+    intent,
     distanceToVisibleCenter: Number.POSITIVE_INFINITY,
-    eligible: false,
-    reason
+    eligible: false
   };
 }
 

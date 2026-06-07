@@ -2,6 +2,7 @@ import type { ProjectedCanvasNode } from '@debrute/canvas-core';
 import { CANVAS_PERF_INTERACTION_SESSION_TYPES, type CanvasPerfCounterName, type CanvasPerfFinalState, type CanvasPerfMonitor, type CanvasPerfSessionId } from './CanvasPerfMonitor';
 import {
   CANVAS_IMAGE_LOAD_CONCURRENCY,
+  CANVAS_IMAGE_NEAR_OVERSCAN_SCREEN_PX,
   createCanvasImageLoadingPlan,
   isCanvasImageLoadResultCurrent,
   selectCanvasImageLoadingCandidates,
@@ -15,7 +16,7 @@ import type { CanvasLoadedImage } from './canvasImagePreviews';
 import { nodeRect } from './canvasVirtualization';
 import type { CanvasCameraState } from './runtime/canvasCamera';
 import type { CanvasRect } from './runtime/canvasGeometry';
-import { rectsIntersect } from './runtime/canvasGeometry';
+import { expandCanvasRect, rectCenter, rectsIntersect } from './runtime/canvasGeometry';
 
 export interface CanvasImageAssetViewport {
   visibleRect: CanvasRect;
@@ -42,9 +43,29 @@ export interface CanvasImageAssetRuntimeStats {
   activeLoadCount: number;
   pendingImageCount: number;
   decodedImageCount: number;
+  visiblePreviewWidths: Record<string, number>;
+  nextPreviewWidths: Record<string, number>;
+  imageWorkIntentCounts: Record<string, number>;
+  imageCancellationReasons: Record<string, number>;
+  imageEvictionReasons: Record<string, number>;
 }
 
 export type CanvasImageAssetLoader = (item: CanvasImageLoadingPlanItem) => Promise<CanvasLoadedImage>;
+
+export interface CanvasImageAssetRuntimeBudget {
+  maxPendingImages: number;
+  maxHighResolutionPendingImages: number;
+  highResolutionPreviewWidth: number;
+  movingPrefetchLimit: number;
+}
+
+export const CANVAS_IMAGE_VISIBLE_RETAIN_OVERSCAN_SCREEN_PX = 1536;
+export const CANVAS_IMAGE_ASSET_DEFAULT_BUDGET: CanvasImageAssetRuntimeBudget = {
+  maxPendingImages: 3,
+  maxHighResolutionPendingImages: 2,
+  highResolutionPreviewWidth: 1024,
+  movingPrefetchLimit: 1
+};
 
 interface CanvasImageAssetRecord {
   visible?: CanvasLoadedImage;
@@ -55,10 +76,15 @@ interface CanvasImageAssetRecord {
 export function createCanvasImageAssetRuntime(input: {
   loadImage?: CanvasImageAssetLoader;
   concurrency?: number;
+  budget?: Partial<CanvasImageAssetRuntimeBudget> | undefined;
   perfMonitor?: Pick<CanvasPerfMonitor, 'startSession' | 'endSession' | 'recordCounter'> | undefined;
 } = {}): CanvasImageAssetRuntime {
   const loadImage = input.loadImage;
   const concurrency = input.concurrency ?? CANVAS_IMAGE_LOAD_CONCURRENCY;
+  const budget: CanvasImageAssetRuntimeBudget = {
+    ...CANVAS_IMAGE_ASSET_DEFAULT_BUDGET,
+    ...input.budget
+  };
   const nodes = new Map<string, ProjectedCanvasNode>();
   const records = new Map<string, CanvasImageAssetRecord>();
   const retryKeys = new Map<string, number>();
@@ -68,6 +94,8 @@ export function createCanvasImageAssetRuntime(input: {
   const retryCallbacks = new Map<string, () => void>();
   const nodeStates = new Map<string, CanvasImageNodeRenderState>();
   const loadSessionIds = new Map<string, CanvasPerfSessionId>();
+  const imageCancellationReasons = new Map<string, number>();
+  const imageEvictionReasons = new Map<string, number>();
 
   let viewport: CanvasImageAssetViewport | undefined;
   let viewportSignature: string | undefined;
@@ -111,7 +139,9 @@ export function createCanvasImageAssetRuntime(input: {
     }
     recordImageLoadCounter(sessionId, counter, {
       projectRelativePath: item.projectRelativePath,
-      loadKey: item.loadKey
+      loadKey: item.loadKey,
+      intent: item.intent,
+      previewWidth: item.previewWidth
     });
     input.perfMonitor?.endSession({
       sessionId,
@@ -121,6 +151,8 @@ export function createCanvasImageAssetRuntime(input: {
       detail: {
         projectRelativePath: item.projectRelativePath,
         loadKey: item.loadKey,
+        intent: item.intent,
+        previewWidth: item.previewWidth,
         result: counter
       }
     });
@@ -224,9 +256,8 @@ export function createCanvasImageAssetRuntime(input: {
     for (const path of pruneStaleImageWork()) {
       affectedPaths.add(path);
     }
-    if (currentViewport?.cameraState === 'moving') {
-      const pruned = pruneMovingDeferredImageWork(currentViewport);
-      for (const path of pruned.affectedPaths) {
+    if (currentViewport) {
+      for (const path of pruneImageResourceState(currentViewport)) {
         affectedPaths.add(path);
       }
     }
@@ -272,14 +303,14 @@ export function createCanvasImageAssetRuntime(input: {
         recordCanvasSessionCounter('image-viewport-noop');
       }
       recordCanvasSessionCounter('image-plan-reuse');
-      const pruned = pruneMovingDeferredImageWork(currentViewport);
-      for (const path of pruned.affectedPaths) {
+      const pruned = pruneImageResourceState(currentViewport);
+      for (const path of pruned) {
         affectedPaths.add(path);
       }
       for (const path of affectedPaths) {
         publishIfChanged(path);
       }
-      if (pruned.openedLoadSlot) {
+      if (pruned.size > 0) {
         pump();
       }
       return;
@@ -383,39 +414,41 @@ export function createCanvasImageAssetRuntime(input: {
     return affectedPaths;
   }
 
-  function pruneMovingDeferredImageWork(currentViewport: CanvasImageAssetViewport): {
-    affectedPaths: Set<string>;
-    openedLoadSlot: boolean;
-  } {
+  function pruneImageResourceState(currentViewport: CanvasImageAssetViewport): Set<string> {
     const affectedPaths = new Set<string>();
-    let openedLoadSlot = false;
-    if (currentViewport.cameraState !== 'moving') {
-      return { affectedPaths, openedLoadSlot };
-    }
 
     for (const [loadKey, active] of [...activeLoads]) {
       const record = records.get(active.item.projectRelativePath);
-      if (isMovingImageWorkAllowed(active.item, currentViewport, record)) {
+      if (record?.next?.loadKey === loadKey && isPendingImageWorkAllowed(active.item, currentViewport, record)) {
         continue;
       }
       activeLoads.delete(loadKey);
       endImageLoadSession(active.item, 'image-load-stale-result');
       affectedPaths.add(active.item.projectRelativePath);
-      openedLoadSlot = true;
     }
 
     for (const [path, record] of [...records]) {
       const current = plan.get(path);
-      const allowMovingWork = isMovingImageWorkAllowed(current, currentViewport, record);
       const nextRecord: CanvasImageAssetRecord = {
         ...(record.visible ? { visible: record.visible } : {})
       };
-      if (record.next && allowMovingWork) {
+      const nextBlockedReason = record.next && current?.loadKey === record.next.loadKey
+        ? pendingImageWorkBlockedReason(current, currentViewport, record)
+        : 'stale-plan';
+      if (record.next && nextBlockedReason === undefined) {
         nextRecord.next = record.next;
       } else if (record.next) {
+        incrementReasonCount(imageCancellationReasons, nextBlockedReason ?? 'cancelled');
+        recordCanvasSessionCounter('image-next-cancel', {
+          projectRelativePath: path,
+          loadKey: record.next.loadKey,
+          intent: current?.intent,
+          previewWidth: record.next.previewWidth,
+          reason: nextBlockedReason ?? 'cancelled'
+        });
         affectedPaths.add(path);
       }
-      if (record.error && allowMovingWork) {
+      if (record.error && current?.loadKey === record.error.loadKey && isErrorStateAllowed(current, currentViewport)) {
         nextRecord.error = record.error;
       } else if (record.error) {
         failedLoadKeys.delete(record.error.loadKey);
@@ -429,23 +462,192 @@ export function createCanvasImageAssetRuntime(input: {
       }
     }
 
-    return { affectedPaths, openedLoadSlot };
+    for (const path of enforcePendingImageBudget()) {
+      affectedPaths.add(path);
+    }
+    for (const path of evictFarVisibleImages(currentViewport)) {
+      affectedPaths.add(path);
+    }
+
+    return affectedPaths;
   }
 
-  function isMovingImageWorkAllowed(
+  function isPendingImageWorkAllowed(
     item: CanvasImageLoadingPlanItem | undefined,
     currentViewport: CanvasImageAssetViewport,
     record: CanvasImageAssetRecord | undefined
   ): boolean {
-    if (!item?.eligible || item.priority !== 0 || record?.visible) {
-      return false;
+    return pendingImageWorkBlockedReason(item, currentViewport, record) === undefined;
+  }
+
+  function pendingImageWorkBlockedReason(
+    item: CanvasImageLoadingPlanItem | undefined,
+    currentViewport: CanvasImageAssetViewport,
+    record: CanvasImageAssetRecord | undefined
+  ): string | undefined {
+    if (!item?.eligible) {
+      return 'ineligible';
     }
-    if (currentViewport.culledNodePaths.has(item.projectRelativePath)) {
-      return false;
+    if (item.intent === 'display-critical') {
+      if (currentViewport.culledNodePaths.has(item.projectRelativePath)) {
+        return 'culled-display-critical';
+      }
+      return record?.visible ? 'visible-loaded' : undefined;
     }
-    const node = nodes.get(item.projectRelativePath);
-    return isAvailableVisibleImageNode(node)
-      && rectsIntersect(currentViewport.visibleRect, nodeRect(node));
+    if (item.intent === 'prefetch-near') {
+      return record?.visible ? 'visible-loaded' : undefined;
+    }
+    if (item.intent === 'upgrade-idle') {
+      if (currentViewport.cameraState !== 'idle') {
+        return 'moving-upgrade';
+      }
+      return record?.visible ? undefined : 'missing-visible-upgrade';
+    }
+    return item.intent;
+  }
+
+  function isErrorStateAllowed(
+    item: CanvasImageLoadingPlanItem | undefined,
+    _currentViewport: CanvasImageAssetViewport
+  ): boolean {
+    return item?.eligible === true
+      && item.intent !== 'deferred';
+  }
+
+  function enforcePendingImageBudget(): Set<string> {
+    const affectedPaths = new Set<string>();
+    const pending = [...records.entries()]
+      .flatMap(([path, record]) => {
+        if (!record.next) {
+          return [];
+        }
+        const item = plan.get(path);
+        if (!item || item.loadKey !== record.next.loadKey) {
+          return [];
+        }
+        return [{ path, record, item }];
+      })
+      .sort((left, right) => (
+        imageIntentBudgetOrder(left.item.intent) - imageIntentBudgetOrder(right.item.intent)
+        || left.item.distanceToVisibleCenter - right.item.distanceToVisibleCenter
+        || left.path.localeCompare(right.path)
+      ));
+
+    let pendingCount = 0;
+    let highResolutionPendingCount = 0;
+    for (const pendingItem of pending) {
+      const isHighResolution = pendingItem.record.next!.previewWidth >= budget.highResolutionPreviewWidth;
+      const overTotalBudget = pendingCount >= budget.maxPendingImages;
+      const overHighResolutionBudget = isHighResolution
+        && highResolutionPendingCount >= budget.maxHighResolutionPendingImages;
+      if (overTotalBudget || overHighResolutionBudget) {
+        removeNextImage(pendingItem.path, pendingItem.record, overTotalBudget ? 'total' : 'high-resolution');
+        affectedPaths.add(pendingItem.path);
+        continue;
+      }
+      pendingCount += 1;
+      if (isHighResolution) {
+        highResolutionPendingCount += 1;
+      }
+    }
+
+    for (const [loadKey, active] of [...activeLoads]) {
+      const record = records.get(active.item.projectRelativePath);
+      if (record?.next?.loadKey === loadKey) {
+        continue;
+      }
+      activeLoads.delete(loadKey);
+      endImageLoadSession(active.item, 'image-load-stale-result');
+      affectedPaths.add(active.item.projectRelativePath);
+    }
+
+    return affectedPaths;
+  }
+
+  function removeNextImage(
+    path: string,
+    record: CanvasImageAssetRecord,
+    reason: 'total' | 'high-resolution'
+  ): void {
+    if (!record.next) {
+      return;
+    }
+    const next = record.next;
+    const active = activeLoads.get(next.loadKey);
+    if (active) {
+      activeLoads.delete(next.loadKey);
+      endImageLoadSession(active.item, 'image-load-stale-result');
+    }
+    recordCanvasSessionCounter('image-budget-block', {
+      projectRelativePath: path,
+      loadKey: next.loadKey,
+      previewWidth: next.previewWidth,
+      reason
+    });
+    incrementReasonCount(imageCancellationReasons, `budget-${reason}`);
+    const nextRecord: CanvasImageAssetRecord = {
+      ...(record.visible ? { visible: record.visible } : {}),
+      ...(record.error ? { error: record.error } : {})
+    };
+    if (nextRecord.visible || nextRecord.error) {
+      records.set(path, nextRecord);
+    } else {
+      records.delete(path);
+    }
+  }
+
+  function evictFarVisibleImages(currentViewport: CanvasImageAssetViewport): Set<string> {
+    const affectedPaths = new Set<string>();
+    const retainRect = expandCanvasRect(
+      currentViewport.visibleRect,
+      CANVAS_IMAGE_VISIBLE_RETAIN_OVERSCAN_SCREEN_PX / currentViewport.imageResourceZoom
+    );
+    for (const [path, record] of [...records]) {
+      const visible = record.visible;
+      if (!visible || visible.previewWidth < budget.highResolutionPreviewWidth) {
+        continue;
+      }
+      const node = nodes.get(path);
+      if (!isAvailableVisibleImageNode(node) || rectsIntersect(retainRect, nodeRect(node))) {
+        continue;
+      }
+      recordCanvasSessionCounter('image-visible-evict', {
+        projectRelativePath: path,
+        loadKey: visible.loadKey,
+        previewWidth: visible.previewWidth,
+        reason: 'far-high-resolution'
+      });
+      incrementReasonCount(imageEvictionReasons, 'far-high-resolution');
+      const nextRecord: CanvasImageAssetRecord = {
+        ...(record.next ? { next: record.next } : {}),
+        ...(record.error ? { error: record.error } : {})
+      };
+      if (nextRecord.next || nextRecord.error) {
+        records.set(path, nextRecord);
+      } else {
+        records.delete(path);
+      }
+      affectedPaths.add(path);
+    }
+    return affectedPaths;
+  }
+
+  function imageIntentBudgetOrder(intent: CanvasImageLoadingPlanItem['intent']): number {
+    switch (intent) {
+      case 'display-critical':
+        return 0;
+      case 'prefetch-near':
+        return 1;
+      case 'upgrade-idle':
+        return 2;
+      case 'deferred':
+        return 3;
+      case 'not-previewable':
+      case 'unavailable':
+        return 4;
+    }
+    const exhaustive: never = intent;
+    return exhaustive;
   }
 
   function startLoad(item: CanvasImageLoadingPlanItem): void {
@@ -456,8 +658,8 @@ export function createCanvasImageAssetRuntime(input: {
       detail: {
         projectRelativePath: item.projectRelativePath,
         loadKey: item.loadKey,
-        reason: item.reason,
-        priority: item.priority
+        intent: item.intent,
+        previewWidth: item.previewWidth
       }
     });
     if (sessionId) {
@@ -465,14 +667,16 @@ export function createCanvasImageAssetRuntime(input: {
     }
     recordImageLoadCounter(sessionId, 'image-load-start', {
       projectRelativePath: item.projectRelativePath,
-      loadKey: item.loadKey
+      loadKey: item.loadKey,
+      intent: item.intent,
+      previewWidth: item.previewWidth
     });
     const active: ActiveCanvasImageLoad = { item };
     activeLoads.set(item.loadKey, active);
     const previous = records.get(item.projectRelativePath);
     records.set(item.projectRelativePath, {
       ...(previous?.visible ? { visible: previous.visible } : {}),
-      next: { src: item.src, loadKey: item.loadKey }
+      next: { src: item.src, loadKey: item.loadKey, previewWidth: item.previewWidth }
     });
     publishIfChanged(item.projectRelativePath);
 
@@ -537,7 +741,11 @@ export function createCanvasImageAssetRuntime(input: {
       return;
     }
     if (status === 'loaded') {
-      finishLoaded(active, { src: active.item.src, loadKey: active.item.loadKey });
+      finishLoaded(active, {
+        src: active.item.src,
+        loadKey: active.item.loadKey,
+        previewWidth: active.item.previewWidth
+      });
     } else {
       finishRejected(active);
     }
@@ -552,18 +760,48 @@ export function createCanvasImageAssetRuntime(input: {
     const candidates = selectCanvasImageLoadingCandidates({
       plan,
       cameraState: currentViewport.cameraState,
-      activeLoadKeys: new Set([...activeLoads.keys(), ...failedLoadKeys])
-    }).filter((item) => (
-      currentViewport.cameraState !== 'moving'
-      || (
-        !currentViewport.culledNodePaths.has(item.projectRelativePath)
-        && !records.get(item.projectRelativePath)?.visible
+      activeLoadKeys: new Set([...activeLoads.keys(), ...failedLoadKeys]),
+      movingPrefetchLimit: budget.movingPrefetchLimit
+    }).filter((item) => isPendingImageWorkAllowed(item, currentViewport, records.get(item.projectRelativePath)));
+    const openSlots = Math.max(
+      0,
+      Math.min(
+        concurrency - activeLoads.size,
+        budget.maxPendingImages - pendingImageCount(records)
       )
-    ));
-    const openSlots = Math.max(0, concurrency - activeLoads.size);
-    for (const item of candidates.slice(0, openSlots)) {
+    );
+    let startedCount = 0;
+    for (const item of candidates) {
+      if (startedCount >= openSlots || activeLoads.size >= concurrency || pendingImageCount(records) >= budget.maxPendingImages) {
+        break;
+      }
+      if (!canStartWithinPendingBudget(item, records)) {
+        recordCanvasSessionCounter('image-budget-block', {
+          projectRelativePath: item.projectRelativePath,
+          loadKey: item.loadKey,
+          intent: item.intent,
+          previewWidth: item.previewWidth,
+          reason: 'high-resolution'
+        });
+        continue;
+      }
       startLoad(item);
+      startedCount += 1;
     }
+  }
+
+  function canStartWithinPendingBudget(
+    item: CanvasImageLoadingPlanItem,
+    currentRecords: ReadonlyMap<string, CanvasImageAssetRecord>
+  ): boolean {
+    if (pendingImageCount(currentRecords) >= budget.maxPendingImages) {
+      return false;
+    }
+    if (item.previewWidth < budget.highResolutionPreviewWidth) {
+      return true;
+    }
+    return highResolutionPendingImageCount(currentRecords, budget.highResolutionPreviewWidth)
+      < budget.maxHighResolutionPendingImages;
   }
 
   function imageLoadFinalState(): CanvasPerfFinalState | undefined {
@@ -575,7 +813,7 @@ export function createCanvasImageAssetRuntime(input: {
       visibleNodeCount: Math.max(0, viewport.mountedNodePaths.size - viewport.culledNodePaths.size),
       culledNodeCount: viewport.culledNodePaths.size,
       activeImageLoadCount: activeLoads.size,
-      pendingImageCount: [...records.values()].filter((record) => record.next).length,
+      pendingImageCount: pendingImageCount(records),
       decodedImageCount,
       zoomLevel: viewport.imageResourceZoom,
       cameraState: viewport.cameraState
@@ -634,8 +872,13 @@ export function createCanvasImageAssetRuntime(input: {
     retry,
     stats: () => ({
       activeLoadCount: activeLoads.size,
-      pendingImageCount: [...records.values()].filter((record) => record.next).length,
-      decodedImageCount
+      pendingImageCount: pendingImageCount(records),
+      decodedImageCount,
+      visiblePreviewWidths: imagePreviewWidthCounts(records, 'visible'),
+      nextPreviewWidths: imagePreviewWidthCounts(records, 'next'),
+      imageWorkIntentCounts: imageWorkIntentCounts(plan),
+      imageCancellationReasons: reasonCounts(imageCancellationReasons),
+      imageEvictionReasons: reasonCounts(imageEvictionReasons)
     }),
     dispose: () => {
       for (const [loadKey, active] of [...activeLoads]) {
@@ -649,6 +892,8 @@ export function createCanvasImageAssetRuntime(input: {
       failedLoadKeys.clear();
       activeLoads.clear();
       loadSessionIds.clear();
+      imageCancellationReasons.clear();
+      imageEvictionReasons.clear();
       subscribers.clear();
       retryCallbacks.clear();
       nodeStates.clear();
@@ -681,6 +926,61 @@ function loadedImagePathsFromRecords(records: ReadonlyMap<string, CanvasImageAss
   return paths;
 }
 
+function pendingImageCount(records: ReadonlyMap<string, CanvasImageAssetRecord>): number {
+  let count = 0;
+  for (const record of records.values()) {
+    if (record.next) {
+      count += 1;
+    }
+  }
+  return count;
+}
+
+function highResolutionPendingImageCount(
+  records: ReadonlyMap<string, CanvasImageAssetRecord>,
+  highResolutionPreviewWidth: number
+): number {
+  let count = 0;
+  for (const record of records.values()) {
+    if (record.next && record.next.previewWidth >= highResolutionPreviewWidth) {
+      count += 1;
+    }
+  }
+  return count;
+}
+
+function imagePreviewWidthCounts(
+  records: ReadonlyMap<string, CanvasImageAssetRecord>,
+  field: 'visible' | 'next'
+): Record<string, number> {
+  const counts: Record<string, number> = {};
+  for (const record of records.values()) {
+    const image = record[field];
+    if (!image) {
+      continue;
+    }
+    const key = String(image.previewWidth);
+    counts[key] = (counts[key] ?? 0) + 1;
+  }
+  return counts;
+}
+
+function imageWorkIntentCounts(plan: ReadonlyMap<string, CanvasImageLoadingPlanItem>): Record<string, number> {
+  const counts: Record<string, number> = {};
+  for (const item of plan.values()) {
+    counts[item.intent] = (counts[item.intent] ?? 0) + 1;
+  }
+  return counts;
+}
+
+function incrementReasonCount(counts: Map<string, number>, reason: string): void {
+  counts.set(reason, (counts.get(reason) ?? 0) + 1);
+}
+
+function reasonCounts(counts: ReadonlyMap<string, number>): Record<string, number> {
+  return Object.fromEntries([...counts.entries()].sort(([left], [right]) => left.localeCompare(right)));
+}
+
 function sameCanvasImageNodeRenderState(
   previous: CanvasImageNodeRenderState | undefined,
   next: CanvasImageNodeRenderState
@@ -697,8 +997,10 @@ function sameCanvasImageNodeRenderState(
   return previous.retry === next.retry
     && previous.visible?.loadKey === next.visible?.loadKey
     && previous.visible?.src === next.visible?.src
+    && previous.visible?.previewWidth === next.visible?.previewWidth
     && previous.next?.loadKey === next.next?.loadKey
     && previous.next?.src === next.next?.src
+    && previous.next?.previewWidth === next.next?.previewWidth
     && previous.error?.loadKey === next.error?.loadKey
     && previous.error?.message === next.error?.message;
 }
@@ -711,7 +1013,7 @@ export function canvasImageAssetViewportSignature(
   if (viewport.cameraState === 'moving') {
     return [
       viewport.cameraState,
-      movingViewportBlankImageCandidateSignature(viewport, nodes, input.loadedImagePaths ?? new Set())
+      movingViewportImageCandidateSignature(viewport, nodes, input.loadedImagePaths ?? new Set())
     ].join('\u001e');
   }
 
@@ -741,24 +1043,44 @@ function rectSignature(rect: CanvasRect): string {
   return `${rect.x}:${rect.y}:${rect.width}:${rect.height}`;
 }
 
-function movingViewportBlankImageCandidateSignature(
+function movingViewportImageCandidateSignature(
   viewport: CanvasImageAssetViewport,
   nodes: ReadonlyMap<string, ProjectedCanvasNode>,
   loadedImagePaths: ReadonlySet<string>
 ): string {
+  const nearRect = expandCanvasRect(
+    viewport.visibleRect,
+    CANVAS_IMAGE_NEAR_OVERSCAN_SCREEN_PX / viewport.imageResourceZoom
+  );
+  const visibleCenter = rectCenter(viewport.visibleRect);
   return [...viewport.mountedNodePaths]
     .filter((path) => !loadedImagePaths.has(path))
-    .filter((path) => !viewport.culledNodePaths.has(path))
-    .map((path) => {
+    .flatMap((path) => {
       const node = nodes.get(path);
-      if (!isAvailableVisibleImageNode(node) || !rectsIntersect(viewport.visibleRect, nodeRect(node))) {
-        return undefined;
+      if (!isAvailableVisibleImageNode(node) || !rectsIntersect(nearRect, nodeRect(node))) {
+        return [];
       }
-      return imageNodeSourceSignature(node);
+      const bounds = nodeRect(node);
+      const intent: 'display-critical' | 'prefetch-near' = rectsIntersect(viewport.visibleRect, bounds)
+        ? 'display-critical'
+        : 'prefetch-near';
+      return [{
+        intent,
+        distanceToVisibleCenter: pointDistance(visibleCenter, rectCenter(bounds)),
+        sourceSignature: imageNodeSourceSignature(node)
+      }];
     })
-    .filter((entry): entry is string => entry !== undefined)
-    .sort()
+    .sort((left, right) => (
+      movingImageIntentOrder(left.intent) - movingImageIntentOrder(right.intent)
+      || left.distanceToVisibleCenter - right.distanceToVisibleCenter
+      || (left.sourceSignature ?? '').localeCompare(right.sourceSignature ?? '')
+    ))
+    .map((entry) => `${entry.intent}\u001c${entry.sourceSignature ?? ''}`)
     .join('\u001f');
+}
+
+function movingImageIntentOrder(intent: 'display-critical' | 'prefetch-near'): number {
+  return intent === 'display-critical' ? 0 : 1;
 }
 
 function mountedImageSourceSignature(paths: ReadonlySet<string>, nodes: ReadonlyMap<string, ProjectedCanvasNode>): string {
@@ -805,6 +1127,10 @@ function isAvailableVisibleImageNode(
     && node.visible !== false
     && node.availability.state === 'available'
     && Boolean(node.availability.fileUrl);
+}
+
+function pointDistance(left: { x: number; y: number }, right: { x: number; y: number }): number {
+  return Math.hypot(left.x - right.x, left.y - right.y);
 }
 
 function canvasImagePerfTimestamp(): number {

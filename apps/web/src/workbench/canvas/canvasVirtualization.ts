@@ -9,6 +9,7 @@ import { selectedNodeProjectRelativePaths } from './runtime/canvasSelection';
 
 export const CANVAS_VIRTUAL_OVERSCAN_SCREEN_PX = 768;
 export const CANVAS_VIRTUAL_REFRESH_MARGIN_SCREEN_PX = CANVAS_VIRTUAL_OVERSCAN_SCREEN_PX / 2;
+export const CANVAS_VIRTUAL_MAX_STALE_AREA_RATIO = 4;
 export { canvasRectContainsRect, expandCanvasRect } from './runtime/canvasGeometry';
 
 const SPATIAL_INDEX_CELL_SIZE = 1024;
@@ -162,7 +163,11 @@ export function shouldRefreshVirtualizedRenderState(input: {
     visibleRect,
     CANVAS_VIRTUAL_REFRESH_MARGIN_SCREEN_PX / input.camera.z
   );
-  return !canvasRectContainsRect(input.currentVirtualRect, refreshRect);
+  if (!canvasRectContainsRect(input.currentVirtualRect, refreshRect)) {
+    return true;
+  }
+  const nextVirtualRect = canvasVirtualRenderRect(input);
+  return rectArea(input.currentVirtualRect) > rectArea(nextVirtualRect) * CANVAS_VIRTUAL_MAX_STALE_AREA_RATIO;
 }
 
 export function nodeRect(node: Pick<ProjectedCanvasNode, 'x' | 'y' | 'width' | 'height'>): CanvasRect {
@@ -204,6 +209,10 @@ function uniqueNodes(nodes: ProjectedCanvasNode[]): ProjectedCanvasNode[] {
     result.push(node);
   }
   return result;
+}
+
+function rectArea(rect: CanvasRect): number {
+  return Math.max(0, rect.width) * Math.max(0, rect.height);
 }
 
 class CanvasNodeSpatialIndex {

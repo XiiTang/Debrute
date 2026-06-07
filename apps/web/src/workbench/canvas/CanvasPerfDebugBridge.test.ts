@@ -368,6 +368,22 @@ function snapshot(): DebruteCanvasPerfCanvasSnapshot {
     activeImageLoadCount: 1,
     pendingImageCount: 2,
     decodedImageCount: 4,
+    imageResourceZoom: 0.75,
+    visiblePreviewWidths: { 256: 2, 1024: 2 },
+    nextPreviewWidths: { 512: 1, 2048: 1 },
+    imageWorkIntentCounts: {
+      'display-critical': 1,
+      'prefetch-near': 2,
+      'upgrade-idle': 1,
+      deferred: 4
+    },
+    imageCancellationReasons: {
+      'moving-upgrade': 1,
+      'budget-high-resolution': 2
+    },
+    imageEvictionReasons: {
+      'far-high-resolution': 1
+    },
     imageLayers: {
       visible: 4,
       next: 2,

@@ -53,6 +53,32 @@ describe('CanvasRenderCoordinator', () => {
     expect(moving.nodesByPath.has('flow/far.png')).toBe(true);
   });
 
+  it('refreshes while moving when zoom-in makes the previous virtual rect too broad', () => {
+    const coordinator = createCanvasRenderCoordinator({ projection: projection([
+      imageNode('flow/a.png', 0, 0, 1),
+      imageNode('flow/far.png', 5000, 0, 2)
+    ]) });
+
+    const first = coordinator.update({
+      camera: { x: 0, y: 0, z: 0.1 },
+      cameraState: 'idle',
+      surfaceSize: { width: 800, height: 600 },
+      selection: undefined,
+      activeNodePaths: []
+    });
+    const moving = coordinator.update({
+      camera: { x: 0, y: 0, z: 1 },
+      cameraState: 'moving',
+      surfaceSize: { width: 800, height: 600 },
+      selection: undefined,
+      activeNodePaths: []
+    });
+
+    expect(moving).not.toBe(first);
+    expect(moving.virtualRect.width).toBeLessThan(first.virtualRect.width);
+  });
+
+
   it('reconciles from the final camera when movement becomes idle', () => {
     const coordinator = createCanvasRenderCoordinator({ projection: projection([
       imageNode('flow/a.png', 0, 0, 1),

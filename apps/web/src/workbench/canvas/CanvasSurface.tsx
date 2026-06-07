@@ -69,7 +69,7 @@ interface CanvasSurfaceProps {
 }
 
 const CANVAS_EFFICIENT_IMAGE_RESOURCE_ZOOM_NODE_THRESHOLD = 500;
-const CANVAS_EFFICIENT_IMAGE_RESOURCE_ZOOM_IMAGE_NODE_THRESHOLD = 100;
+const CANVAS_EFFICIENT_IMAGE_RESOURCE_ZOOM_IMAGE_NODE_THRESHOLD = 24;
 
 export function CanvasSurface({
   canvas,
@@ -925,6 +925,9 @@ const IMAGE_RUNTIME_WORK_COUNTERS = [
   'image-load-resolve',
   'image-load-reject',
   'image-load-stale-result',
+  'image-budget-block',
+  'image-next-cancel',
+  'image-visible-evict',
   'image-node-publish'
 ] as const satisfies readonly CanvasPerfCounterName[];
 
@@ -1137,6 +1140,12 @@ function canvasPerfDebugSnapshot(input: CanvasPerfDebugSnapshotContext): Debrute
     activeImageLoadCount: imageStats.activeLoadCount,
     pendingImageCount: imageStats.pendingImageCount,
     decodedImageCount: imageStats.decodedImageCount,
+    imageResourceZoom: snapshot.imageResourceZoom,
+    visiblePreviewWidths: imageStats.visiblePreviewWidths,
+    nextPreviewWidths: imageStats.nextPreviewWidths,
+    imageWorkIntentCounts: imageStats.imageWorkIntentCounts,
+    imageCancellationReasons: imageStats.imageCancellationReasons,
+    imageEvictionReasons: imageStats.imageEvictionReasons,
     imageLayers: canvasImageLayerDebugCounts(input.surfaceElement)
   };
 }

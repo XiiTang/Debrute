@@ -2,29 +2,37 @@ import { CANVAS_IMAGE_PREVIEW_WIDTH_BUCKETS, type ProjectedCanvasNode } from '@d
 
 export const CANVAS_IMAGE_PREVIEW_RESOURCE_SETTLE_MS = 500;
 
-export interface CanvasLoadedImage {
+export interface CanvasImageSource {
   src: string;
+  previewWidth: number;
+}
+
+export interface CanvasLoadedImage extends CanvasImageSource {
   loadKey: string;
 }
 
-export function canvasImageSourceUrl(input: {
+export function canvasImageSource(input: {
   node: ProjectedCanvasNode;
   cameraZoom: number;
   devicePixelRatio: number;
-}): string | undefined {
+}): CanvasImageSource | undefined {
   if (input.node.availability.state !== 'available' || !input.node.availability.fileUrl) {
     return undefined;
   }
   if (!isPreviewableImageNode(input.node)) {
     return undefined;
   }
-  const bucket = canvasImagePreviewBucketForNode(input.node, input.cameraZoom, input.devicePixelRatio);
-  return canvasImagePreviewUrl(
+  const previewWidth = canvasImagePreviewBucketForNode(input.node, input.cameraZoom, input.devicePixelRatio);
+  const src = canvasImagePreviewUrl(
     input.node.availability.fileUrl,
     input.node.projectRelativePath,
     input.node.availability.revision,
-    bucket
+    previewWidth
   ).toString();
+  return {
+    src,
+    previewWidth
+  };
 }
 
 export function canvasImagePreviewBucket(targetWidth: number): number {

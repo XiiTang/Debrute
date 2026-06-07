@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 import type { CanvasProjection } from '@debrute/canvas-core';
 import {
   CANVAS_VIRTUAL_REFRESH_MARGIN_SCREEN_PX,
+  CANVAS_VIRTUAL_MAX_STALE_AREA_RATIO,
   CANVAS_VIRTUAL_OVERSCAN_SCREEN_PX,
   buildVirtualizedCanvasRenderState,
   canvasRectContainsRect,
@@ -52,6 +53,26 @@ describe('canvas virtualization geometry', () => {
     expect(shouldRefreshVirtualizedRenderState({
       currentVirtualRect,
       camera: { x: -CANVAS_VIRTUAL_REFRESH_MARGIN_SCREEN_PX - 1, y: 0, z: 1 },
+      surfaceSize: { width: 1000, height: 600 }
+    })).toBe(true);
+  });
+
+  it('refreshes moving render state when zoom-in leaves the previous virtual rect too broad', () => {
+    const currentVirtualRect = canvasVirtualRenderRect({
+      camera: { x: 0, y: 0, z: 0.1 },
+      surfaceSize: { width: 1000, height: 600 }
+    });
+    const nextVirtualRect = canvasVirtualRenderRect({
+      camera: { x: 0, y: 0, z: 1 },
+      surfaceSize: { width: 1000, height: 600 }
+    });
+
+    expect(currentVirtualRect.width * currentVirtualRect.height).toBeGreaterThan(
+      nextVirtualRect.width * nextVirtualRect.height * CANVAS_VIRTUAL_MAX_STALE_AREA_RATIO
+    );
+    expect(shouldRefreshVirtualizedRenderState({
+      currentVirtualRect,
+      camera: { x: 0, y: 0, z: 1 },
       surfaceSize: { width: 1000, height: 600 }
     })).toBe(true);
   });

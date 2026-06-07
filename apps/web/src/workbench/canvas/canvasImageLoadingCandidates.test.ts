@@ -6,40 +6,43 @@ import {
 } from './canvasImageLoading';
 
 describe('canvas image loading candidates', () => {
-  it('starts only viewport-empty work while the camera is moving', () => {
+  it('starts display-critical and bounded prefetch-near work while moving', () => {
     const candidates = selectCanvasImageLoadingCandidates({
       plan: new Map([
-        ['visible-empty', planItem('visible-empty', 0, 30)],
-        ['visible-upgrade', planItem('visible-upgrade', 1, 10)],
-        ['overscan-empty', planItem('overscan-empty', 2, 1)]
+        ['critical', planItem('critical', 'display-critical', 30)],
+        ['prefetch-a', planItem('prefetch-a', 'prefetch-near', 1)],
+        ['prefetch-b', planItem('prefetch-b', 'prefetch-near', 2)],
+        ['upgrade', planItem('upgrade', 'upgrade-idle', 0)]
       ]),
       cameraState: 'moving',
-      activeLoadKeys: new Set()
+      activeLoadKeys: new Set(),
+      movingPrefetchLimit: 1
     });
 
-    expect(candidates.map((item) => item.projectRelativePath)).toEqual(['visible-empty']);
+    expect(candidates.map((item) => item.projectRelativePath)).toEqual(['critical', 'prefetch-a']);
   });
 
-  it('sorts idle candidates by priority, distance, and path', () => {
+  it('sorts idle candidates by intent, distance, and path', () => {
     const candidates = selectCanvasImageLoadingCandidates({
       plan: new Map([
-        ['b', planItem('b', 2, 1)],
-        ['a', planItem('a', 2, 1)],
-        ['upgrade', planItem('upgrade', 1, 500)],
-        ['deferred', planItem('deferred', 4, 0)]
+        ['b', planItem('b', 'prefetch-near', 1)],
+        ['a', planItem('a', 'prefetch-near', 1)],
+        ['upgrade', planItem('upgrade', 'upgrade-idle', 0)],
+        ['critical', planItem('critical', 'display-critical', 500)],
+        ['deferred', planItem('deferred', 'deferred', 0)]
       ]),
       cameraState: 'idle',
       activeLoadKeys: new Set()
     });
 
-    expect(candidates.map((item) => item.projectRelativePath)).toEqual(['upgrade', 'a', 'b']);
+    expect(candidates.map((item) => item.projectRelativePath)).toEqual(['critical', 'a', 'b', 'upgrade']);
   });
 
   it('does not return already active load keys', () => {
     const candidates = selectCanvasImageLoadingCandidates({
       plan: new Map([
-        ['a', planItem('a', 0, 1)],
-        ['b', planItem('b', 0, 2)]
+        ['a', planItem('a', 'display-critical', 1)],
+        ['b', planItem('b', 'display-critical', 2)]
       ]),
       cameraState: 'idle',
       activeLoadKeys: new Set(['http://image/a:0'])
@@ -50,33 +53,34 @@ describe('canvas image loading candidates', () => {
 
   it('rejects stale load results', () => {
     expect(isCanvasImageLoadResultCurrent({
-      item: planItem('a', 0, 1, 'http://image/a:1')
-    }, new Map([['a', planItem('a', 0, 1, 'http://image/a:1')]]))).toBe(true);
+      item: planItem('a', 'display-critical', 1, 'http://image/a:1')
+    }, new Map([['a', planItem('a', 'display-critical', 1, 'http://image/a:1')]]))).toBe(true);
 
     expect(isCanvasImageLoadResultCurrent({
-      item: planItem('a', 0, 1, 'http://image/a:1')
+      item: planItem('a', 'display-critical', 1, 'http://image/a:1')
     }, new Map())).toBe(false);
 
     expect(isCanvasImageLoadResultCurrent({
-      item: planItem('a', 0, 1, 'http://image/a:1')
-    }, new Map([['a', planItem('a', 0, 1, 'http://image/a:2')]]))).toBe(false);
+      item: planItem('a', 'display-critical', 1, 'http://image/a:1')
+    }, new Map([['a', planItem('a', 'display-critical', 1, 'http://image/a:2')]]))).toBe(false);
   });
 
 });
 
 function planItem(
   path: string,
-  priority: CanvasImageLoadingPlanItem['priority'],
+  intent: CanvasImageLoadingPlanItem['intent'],
   distanceToVisibleCenter: number,
-  loadKey = `http://image/${path}:0`
+  loadKey = `http://image/${path}:0`,
+  previewWidth = 256
 ): CanvasImageLoadingPlanItem {
   return {
     projectRelativePath: path,
     src: loadKey.split(':').slice(0, -1).join(':'),
     loadKey,
-    priority,
+    previewWidth,
+    intent,
     distanceToVisibleCenter,
-    eligible: true,
-    reason: priority === 0 ? 'viewport-empty' : priority === 1 ? 'viewport-upgrade' : priority === 2 ? 'overscan-empty' : priority === 3 ? 'overscan-upgrade' : 'deferred'
+    eligible: true
   };
 }

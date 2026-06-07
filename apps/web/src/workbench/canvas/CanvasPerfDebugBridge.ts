@@ -17,6 +17,12 @@ export interface DebruteCanvasPerfCanvasSnapshot {
   activeImageLoadCount: number;
   pendingImageCount: number;
   decodedImageCount: number;
+  imageResourceZoom: number;
+  visiblePreviewWidths: Record<string, number>;
+  nextPreviewWidths: Record<string, number>;
+  imageWorkIntentCounts: Record<string, number>;
+  imageCancellationReasons: Record<string, number>;
+  imageEvictionReasons: Record<string, number>;
   imageLayers: {
     visible: number;
     next: number;
@@ -221,6 +227,12 @@ function cloneCanvasSnapshot(snapshot: DebruteCanvasPerfCanvasSnapshot): Debrute
     activeImageLoadCount: snapshot.activeImageLoadCount,
     pendingImageCount: snapshot.pendingImageCount,
     decodedImageCount: snapshot.decodedImageCount,
+    imageResourceZoom: snapshot.imageResourceZoom,
+    visiblePreviewWidths: { ...snapshot.visiblePreviewWidths },
+    nextPreviewWidths: { ...snapshot.nextPreviewWidths },
+    imageWorkIntentCounts: { ...snapshot.imageWorkIntentCounts },
+    imageCancellationReasons: { ...snapshot.imageCancellationReasons },
+    imageEvictionReasons: { ...snapshot.imageEvictionReasons },
     imageLayers: { ...snapshot.imageLayers }
   };
 }

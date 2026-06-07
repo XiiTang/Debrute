@@ -155,6 +155,8 @@ function CanvasImageNodeContent({
             decoding="async"
             style={{ objectFit: 'fill' }}
           />
+        ) : imageState.next ? (
+          <div className="canvas-node-image-reserved" aria-hidden="true" />
         ) : (
           <CanvasImagePlaceholder node={node} />
         )}

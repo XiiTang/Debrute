@@ -19,18 +19,16 @@ describe('canvas image loading plan', () => {
     });
 
     expect(plan.get('flow/visible.png')).toMatchObject({
-      priority: 0,
-      reason: 'viewport-empty',
+      intent: 'display-critical',
+      previewWidth: 256,
       eligible: true
     });
     expect(plan.get('flow/overscan.png')).toMatchObject({
-      priority: 2,
-      reason: 'overscan-empty',
+      intent: 'prefetch-near',
       eligible: true
     });
     expect(plan.get('flow/deferred.png')).toMatchObject({
-      priority: 4,
-      reason: 'deferred',
+      intent: 'deferred',
       eligible: true
     });
   });
@@ -47,9 +45,39 @@ describe('canvas image loading plan', () => {
     });
 
     expect(plan.get('flow/visible.png')).toMatchObject({
-      priority: 1,
-      reason: 'viewport-upgrade'
+      intent: 'upgrade-idle'
     });
+  });
+
+  it('classifies image work by final intent and carries preview width', () => {
+    const lowQualityUrl = previewUrl('flow/visible-upgrade.png', 256);
+    const plan = createCanvasImageLoadingPlan({
+      nodes: [
+        imageNode('flow/visible-empty.png', 0, 0, 2400, 1200),
+        imageNode('flow/visible-upgrade.png', 220, 0, 2400, 1200),
+        imageNode('flow/prefetch-empty.png', 900, 0, 2400, 1200),
+        imageNode('flow/prefetch-upgrade.png', 1000, 0, 2400, 1200),
+        imageNode('flow/deferred.png', 5000, 0, 2400, 1200)
+      ],
+      visibleRect: { x: 0, y: 0, width: 500, height: 300 },
+      imageResourceZoom: 1,
+      devicePixelRatio: 1,
+      existingImages: new Map([
+        ['flow/visible-upgrade.png', loadedImage(lowQualityUrl, 256)],
+        ['flow/prefetch-upgrade.png', loadedImage(previewUrl('flow/prefetch-upgrade.png', 256), 256)]
+      ]),
+      retryKeys: new Map()
+    });
+
+    expect(plan.get('flow/visible-empty.png')).toMatchObject({
+      intent: 'display-critical',
+      previewWidth: 2048,
+      eligible: true
+    });
+    expect(plan.get('flow/visible-upgrade.png')).toMatchObject({ intent: 'upgrade-idle' });
+    expect(plan.get('flow/prefetch-empty.png')).toMatchObject({ intent: 'prefetch-near' });
+    expect(plan.get('flow/prefetch-upgrade.png')).toMatchObject({ intent: 'upgrade-idle' });
+    expect(plan.get('flow/deferred.png')).toMatchObject({ intent: 'deferred' });
   });
 
   it('uses preview image URLs for supported visible image nodes', () => {
@@ -64,8 +92,9 @@ describe('canvas image loading plan', () => {
 
     const src = previewUrl('flow/original.png', 256);
     expect(plan.get('flow/original.png')).toMatchObject({
-      priority: 0,
+      intent: 'display-critical',
       src,
+      previewWidth: 256,
       loadKey: `${src}:2`
     });
   });
@@ -84,12 +113,10 @@ describe('canvas image loading plan', () => {
     });
 
     expect(plan.get('flow/visible.png')).toMatchObject({
-      priority: 0,
-      reason: 'viewport-empty'
+      intent: 'display-critical'
     });
     expect(plan.get('flow/overscan.png')).toMatchObject({
-      priority: 2,
-      reason: 'overscan-empty'
+      intent: 'prefetch-near'
     });
   });
 
@@ -112,25 +139,25 @@ describe('canvas image loading plan', () => {
       retryKeys: new Map()
     });
 
-    expect(plan.get('flow/missing.png')).toMatchObject({ eligible: false, reason: 'unavailable' });
+    expect(plan.get('flow/missing.png')).toMatchObject({ eligible: false, intent: 'unavailable' });
     expect(plan.has('flow/readme.md')).toBe(false);
   });
 
-  it('selects only visible empty loads while moving and includes upgrades plus overscan while idle', () => {
+  it('selects display-critical and bounded prefetch while moving and defers upgrades until idle', () => {
     const visibleEmpty = imageNode('flow/visible-empty.png', 0, 0, 2400, 1200);
     const visibleUpgrade = imageNode('flow/visible-upgrade.png', 220, 0, 2400, 1200);
-    const overscanEmpty = imageNode('flow/overscan-empty.png', 900, 0, 2400, 1200);
-    const overscanUpgrade = imageNode('flow/overscan-upgrade.png', 1000, 0, 2400, 1200);
+    const nearPrefetchEmpty = imageNode('flow/near-prefetch-empty.png', 900, 0, 2400, 1200);
+    const nearPrefetchUpgrade = imageNode('flow/near-prefetch-upgrade.png', 1000, 0, 2400, 1200);
     const visibleUpgradeUrl = 'http://127.0.0.1:17321/api/projects/p/canvas-image-preview?path=flow%2Fvisible-upgrade.png&v=rev&w=256';
-    const overscanUpgradeUrl = 'http://127.0.0.1:17321/api/projects/p/canvas-image-preview?path=flow%2Foverscan-upgrade.png&v=rev&w=256';
+    const nearPrefetchUpgradeUrl = 'http://127.0.0.1:17321/api/projects/p/canvas-image-preview?path=flow%2Fnear-prefetch-upgrade.png&v=rev&w=256';
     const plan = createCanvasImageLoadingPlan({
-      nodes: [visibleEmpty, visibleUpgrade, overscanEmpty, overscanUpgrade],
+      nodes: [visibleEmpty, visibleUpgrade, nearPrefetchEmpty, nearPrefetchUpgrade],
       visibleRect: { x: 0, y: 0, width: 500, height: 300 },
       imageResourceZoom: 1,
       devicePixelRatio: 1,
       existingImages: new Map([
         ['flow/visible-upgrade.png', loadedImage(visibleUpgradeUrl)],
-        ['flow/overscan-upgrade.png', loadedImage(overscanUpgradeUrl)]
+        ['flow/near-prefetch-upgrade.png', loadedImage(nearPrefetchUpgradeUrl)]
       ]),
       retryKeys: new Map()
     });
@@ -138,8 +165,12 @@ describe('canvas image loading plan', () => {
     expect(selectCanvasImageLoadingCandidates({
       plan,
       cameraState: 'moving',
-      activeLoadKeys: new Set()
-    }).map((item) => item.projectRelativePath)).toEqual(['flow/visible-empty.png']);
+      activeLoadKeys: new Set(),
+      movingPrefetchLimit: 1
+    }).map((item) => item.projectRelativePath)).toEqual([
+      'flow/visible-empty.png',
+      'flow/near-prefetch-empty.png'
+    ]);
 
     expect(selectCanvasImageLoadingCandidates({
       plan,
@@ -147,9 +178,9 @@ describe('canvas image loading plan', () => {
       activeLoadKeys: new Set()
     }).map((item) => item.projectRelativePath)).toEqual([
       'flow/visible-empty.png',
+      'flow/near-prefetch-empty.png',
       'flow/visible-upgrade.png',
-      'flow/overscan-empty.png',
-      'flow/overscan-upgrade.png'
+      'flow/near-prefetch-upgrade.png'
     ]);
   });
 });
@@ -190,6 +221,6 @@ function previewUrl(path: string, width: number): string {
   return url.toString();
 }
 
-function loadedImage(src: string): CanvasLoadedImage {
-  return { src, loadKey: `${src}:0` };
+function loadedImage(src: string, previewWidth = 256): CanvasLoadedImage {
+  return { src, loadKey: `${src}:0`, previewWidth };
 }

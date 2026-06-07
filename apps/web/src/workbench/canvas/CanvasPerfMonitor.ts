@@ -39,6 +39,9 @@ export type CanvasPerfCounterName =
   | 'image-load-resolve'
   | 'image-load-reject'
   | 'image-load-stale-result'
+  | 'image-budget-block'
+  | 'image-next-cancel'
+  | 'image-visible-evict'
   | 'image-node-publish';
 
 export type CanvasPerfSessionId = `${CanvasPerfSessionType}:${number}`;
