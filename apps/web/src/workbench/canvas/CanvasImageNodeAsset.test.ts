@@ -173,6 +173,28 @@ describe('CanvasImageNodeAsset', () => {
     });
   });
 
+  it('warms the first preview for culled images while the camera is idle', () => {
+    const source = resolveCanvasImageNodeSource({
+      node: imageNode('flow/far.png', 2400, 1200, 2400, 'rev-a'),
+      imageResourceZoom: 0.1,
+      devicePixelRatio: 1,
+      retryKey: 0
+    });
+
+    const next = canvasImageNodeAssetReducer(emptyState(), {
+      type: 'source-resolved',
+      source,
+      cameraState: 'idle',
+      culled: true,
+      prefetch: false
+    });
+
+    expect(next.next).toMatchObject({
+      src: previewUrl('flow/far.png', 'rev-a', 300),
+      previewWidth: 300
+    });
+  });
+
   it('still skips new work for far culled images', () => {
     const source = resolveCanvasImageNodeSource({
       node: imageNode('flow/far.png', 2400, 1200, 2400, 'rev-a'),

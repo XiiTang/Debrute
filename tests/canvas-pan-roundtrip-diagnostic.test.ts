@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import {
+  dispatchCanvasWheelSequence,
   parseCliArgs,
   summarizePanRoundTripResult
 } from '../scripts/canvas-pan-roundtrip-diagnostic.mjs';
@@ -195,6 +196,53 @@ describe('canvas pan round-trip diagnostic CLI args', () => {
 
   it('parses summary-only output mode', () => {
     expect(parseCliArgs(['--summary-only'])).toMatchObject({ summaryOnly: true });
+  });
+});
+
+describe('canvas pan round-trip diagnostic input dispatch', () => {
+  it('sends wheel input through CDP instead of waiting inside the page main thread', async () => {
+    const sent: Array<{ method: string; params: Record<string, unknown> }> = [];
+    const client = {
+      send: async (method: string, params: Record<string, unknown>) => {
+        sent.push({ method, params });
+        return method === 'Runtime.evaluate'
+          ? { result: { value: { x: 100, y: 200 } } }
+          : {};
+      },
+      evaluate: async () => {
+        throw new Error('dispatch should not evaluate in the page context');
+      }
+    };
+
+    await dispatchCanvasWheelSequence({
+      client,
+      labelPrefix: 'pan-away',
+      distance: 120,
+      steps: 2,
+      stepSettleMs: 1,
+      setPhase: () => undefined,
+      captureSnapshot: async (label: string) => ({
+        label,
+        camera: null,
+        imageLayers: { visible: 0, next: 0, previewSources: 0, rawSources: 0 },
+        visibleImages: [],
+        visibleImageNodePaths: [],
+        blankVisibleImageNodePaths: [],
+        nextOnlyImageNodePaths: [],
+        resourceCount: 0
+      })
+    });
+
+    expect(sent.map((item) => item.method)).toEqual([
+      'Runtime.evaluate',
+      'Input.dispatchMouseEvent',
+      'Runtime.evaluate',
+      'Input.dispatchMouseEvent'
+    ]);
+    expect(sent[1]?.params).toMatchObject({
+      type: 'mouseWheel',
+      deltaY: 60
+    });
   });
 });
 

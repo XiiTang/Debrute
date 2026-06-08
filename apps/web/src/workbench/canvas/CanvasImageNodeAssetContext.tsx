@@ -197,7 +197,10 @@ function recordSourceCounter(input: {
     });
     return;
   }
-  if (input.culled && !input.prefetch) {
+  const shouldSkipCulledWork = input.culled
+    && !input.prefetch
+    && (input.cameraState !== 'idle' || input.loadedLoadKey !== undefined);
+  if (shouldSkipCulledWork) {
     recordImageNodeCounter(input.context, 'image-node-upgrade-skip-culled', {
       projectRelativePath: input.node.projectRelativePath,
       loadKey: input.source.image.loadKey

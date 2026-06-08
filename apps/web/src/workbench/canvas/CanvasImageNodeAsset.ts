@@ -183,7 +183,10 @@ function reduceResolvedSource(
     };
   }
 
-  if ((event.culled && !event.prefetch) || (event.cameraState === 'moving' && base.loaded)) {
+  const shouldSkipCulledWork = event.culled
+    && !event.prefetch
+    && (event.cameraState !== 'idle' || base.loaded !== undefined);
+  if (shouldSkipCulledWork || (event.cameraState === 'moving' && base.loaded)) {
     return {
       ...base,
       next: undefined

@@ -374,39 +374,65 @@ async function capturePageSnapshot(client, label) {
   })()`);
 }
 
-async function dispatchCanvasWheelSequence(input) {
+export async function dispatchCanvasWheelSequence(input) {
   const samples = [];
   const stepDelta = input.distance / input.steps;
+  const captureSnapshot = input.captureSnapshot ?? ((label) => capturePageSnapshot(input.client, label));
   for (let step = 1; step <= input.steps; step += 1) {
     const phase = `${input.labelPrefix}-step-${step}`;
     input.setPhase(phase);
     await dispatchCanvasWheel(input.client, stepDelta, input.stepSettleMs);
-    samples.push(await capturePageSnapshot(input.client, phase));
+    samples.push(await captureSnapshot(phase));
   }
   input.setPhase(input.labelPrefix);
   return samples;
 }
 
 async function dispatchCanvasWheel(client, deltaY, settleMs) {
-  await client.evaluate(`(async () => {
-    const surface = document.querySelector('.canvas-surface');
-    if (!surface) {
-      throw new Error('No .canvas-surface element found.');
-    }
-    const rect = surface.getBoundingClientRect();
-    surface.dispatchEvent(new WheelEvent('wheel', {
-      bubbles: true,
-      cancelable: true,
-      clientX: rect.left + rect.width / 2,
-      clientY: rect.top + rect.height / 2,
-      deltaY: ${JSON.stringify(deltaY)}
-    }));
-    await new Promise((resolve) => setTimeout(resolve, ${JSON.stringify(settleMs)}));
-  })()`, settleMs + 5000);
+  const point = await canvasSurfaceCenterPoint(client);
+  await client.send('Input.dispatchMouseEvent', {
+    type: 'mouseWheel',
+    x: point.x,
+    y: point.y,
+    deltaX: 0,
+    deltaY
+  });
+  await waitInNode(settleMs);
+}
+
+async function canvasSurfaceCenterPoint(client) {
+  const result = await client.send('Runtime.evaluate', {
+    expression: `(() => {
+      const surface = document.querySelector('.canvas-surface');
+      if (!surface) {
+        throw new Error('No .canvas-surface element found.');
+      }
+      const rect = surface.getBoundingClientRect();
+      return {
+        x: rect.left + rect.width / 2,
+        y: rect.top + rect.height / 2
+      };
+    })()`,
+    returnByValue: true,
+    awaitPromise: false,
+    userGesture: true
+  });
+  if (result.exceptionDetails) {
+    throw new Error(result.exceptionDetails.exception?.description ?? result.exceptionDetails.text);
+  }
+  const point = result.result?.value;
+  if (!point || !Number.isFinite(point.x) || !Number.isFinite(point.y)) {
+    throw new Error('Unable to resolve the canvas surface center point.');
+  }
+  return point;
 }
 
 async function waitInPage(client, settleMs) {
   await client.evaluate(`new Promise((resolve) => setTimeout(resolve, ${JSON.stringify(settleMs)}))`, settleMs + 5000);
+}
+
+async function waitInNode(settleMs) {
+  await new Promise((resolve) => setTimeout(resolve, settleMs));
 }
 
 function parsePreviewRequest(url) {
