@@ -156,6 +156,27 @@ describe('CanvasRenderCoordinator', () => {
     expect(snapshot.culledNodePaths.has('flow/offscreen.png')).toBe(true);
   });
 
+  it('keeps mounted nodes display-visible inside the virtual rect before they cross the viewport', () => {
+    const coordinator = createCanvasRenderCoordinator({ projection: projection([
+      imageNode('flow/visible.png', 0, 0, 1),
+      imageNode('flow/near-image.png', 900, 0, 2),
+      textNode('flow/near-notes.txt', 900, 0, 3)
+    ]) });
+
+    const snapshot = coordinator.update({
+      camera: { x: 0, y: 0, z: 1 },
+      cameraState: 'idle',
+      surfaceSize: { width: 300, height: 200 },
+      selection: undefined,
+      activeNodePaths: []
+    });
+
+    expect(snapshot.nodesByPath.has('flow/near-image.png')).toBe(true);
+    expect(snapshot.nodesByPath.has('flow/near-notes.txt')).toBe(true);
+    expect(snapshot.culledNodePaths.has('flow/near-image.png')).toBe(false);
+    expect(snapshot.culledNodePaths.has('flow/near-notes.txt')).toBe(false);
+  });
+
   it('keeps image nodes mounted while culling toggles during a pan out and back', () => {
     const coordinator = createCanvasRenderCoordinator({ projection: projection([
       imageNode('flow/a.png', 0, 0, 1),

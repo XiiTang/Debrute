@@ -172,7 +172,8 @@ describe('canvas pan round-trip diagnostic CLI args', () => {
       '--settle-ms', '1200',
       '--initial-settle-ms', '2400',
       '--steps', '6',
-      '--step-settle-ms', '48'
+      '--step-settle-ms', '48',
+      '--input-mode', 'dom'
     ])).toEqual({
       targetUrl: 'http://127.0.0.1:17322/projects/project-id',
       cdpUrl: 'http://127.0.0.1:9333',
@@ -180,7 +181,8 @@ describe('canvas pan round-trip diagnostic CLI args', () => {
       settleMs: 1200,
       initialSettleMs: 2400,
       steps: 6,
-      stepSettleMs: 48
+      stepSettleMs: 48,
+      inputMode: 'dom'
     });
   });
 
@@ -188,6 +190,7 @@ describe('canvas pan round-trip diagnostic CLI args', () => {
     expect(() => parseCliArgs(['--distance', '0'])).toThrow('--distance must be a positive number.');
     expect(() => parseCliArgs(['--initial-settle-ms', '0'])).toThrow('--initial-settle-ms must be a positive number.');
     expect(() => parseCliArgs(['--steps', '0'])).toThrow('--steps must be a positive integer.');
+    expect(() => parseCliArgs(['--input-mode', 'native'])).toThrow('--input-mode must be one of: cdp, dom.');
   });
 
   it('ignores the pnpm argument separator', () => {
@@ -243,6 +246,44 @@ describe('canvas pan round-trip diagnostic input dispatch', () => {
       type: 'mouseWheel',
       deltaY: 60
     });
+  });
+
+  it('can dispatch wheel input through a DOM event when CDP input is unreliable', async () => {
+    const sent: Array<{ method: string; params: Record<string, unknown> }> = [];
+    const client = {
+      send: async (method: string, params: Record<string, unknown>) => {
+        sent.push({ method, params });
+        return {};
+      },
+      evaluate: async (expression: string) => {
+        sent.push({ method: 'Runtime.evaluate-wrapper', params: { expression } });
+        return {};
+      }
+    };
+
+    await dispatchCanvasWheelSequence({
+      client,
+      labelPrefix: 'pan-away',
+      distance: 120,
+      steps: 1,
+      stepSettleMs: 1,
+      inputMode: 'dom',
+      setPhase: () => undefined,
+      captureSnapshot: async (label: string) => ({
+        label,
+        camera: null,
+        imageLayers: { visible: 0, next: 0, previewSources: 0, rawSources: 0 },
+        visibleImages: [],
+        visibleImageNodePaths: [],
+        blankVisibleImageNodePaths: [],
+        nextOnlyImageNodePaths: [],
+        resourceCount: 0
+      })
+    });
+
+    expect(sent).toHaveLength(1);
+    expect(sent[0]?.method).toBe('Runtime.evaluate-wrapper');
+    expect(String(sent[0]?.params.expression)).toContain('new WheelEvent');
   });
 });
 

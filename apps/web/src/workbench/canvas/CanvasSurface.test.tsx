@@ -13,7 +13,6 @@ import {
   canvasImageResourceZoomPreviewSignature,
   createCanvasRenderSnapshotScheduler,
   recordCanvasPerfFrame,
-  shouldPrefetchCanvasImageNode,
   shouldUseEfficientImageResourceZoom,
   syncCanvasPerfDragSessionState,
   syncCanvasMovingCameraFrame,
@@ -369,37 +368,6 @@ describe('CanvasSurface', () => {
       hovered: true
     })).toBe(false);
 
-    expect(areCanvasNodeShellPropsEqual(props, {
-      ...props,
-      prefetch: true
-    })).toBe(false);
-  });
-
-  it('prefetches only culled image nodes inside the render virtual rect', () => {
-    const nearImage = nodeFixture('flow/near.png', 900, 0);
-    const farImage = nodeFixture('flow/far.png', 5000, 0);
-    const visibleImage = nodeFixture('flow/visible.png', 0, 0);
-    const nearText = {
-      ...nearImage,
-      projectRelativePath: 'flow/near.md',
-      mediaKind: 'text' as const,
-      availability: {
-        state: 'available' as const,
-        size: 64,
-        mimeType: 'text/markdown',
-        fileUrl: 'http://127.0.0.1/text',
-        revision: 'rev'
-      }
-    };
-    const snapshot = {
-      virtualRect: { x: -100, y: -100, width: 2000, height: 800 },
-      culledNodePaths: new Set(['flow/near.png', 'flow/far.png', 'flow/near.md'])
-    };
-
-    expect(shouldPrefetchCanvasImageNode({ node: nearImage, renderSnapshot: snapshot })).toBe(true);
-    expect(shouldPrefetchCanvasImageNode({ node: farImage, renderSnapshot: snapshot })).toBe(false);
-    expect(shouldPrefetchCanvasImageNode({ node: visibleImage, renderSnapshot: snapshot })).toBe(false);
-    expect(shouldPrefetchCanvasImageNode({ node: nearText, renderSnapshot: snapshot })).toBe(false);
   });
 
   it('clears pending image resource zoom settlement when the camera starts moving', () => {
@@ -1037,7 +1005,6 @@ function nodeShellProps(node = nodeFixture('flow/cover.png', 0, 0)): CanvasNodeS
     selected: false,
     hovered: false,
     culled: false,
-    prefetch: false,
     zIndex: node.z,
     stageRuntime: createCanvasStageRuntime(),
     actions,

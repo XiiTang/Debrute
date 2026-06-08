@@ -46,7 +46,6 @@ export type CanvasImageNodeAssetEvent =
       source: CanvasImageNodeResolvedSource;
       cameraState: CanvasCameraState;
       culled: boolean;
-      prefetch?: boolean | undefined;
     }
   | { type: 'next-loaded'; loadKey: string }
   | { type: 'next-failed'; loadKey: string; message: string }
@@ -184,7 +183,6 @@ function reduceResolvedSource(
   }
 
   const shouldSkipCulledWork = event.culled
-    && !event.prefetch
     && (event.cameraState !== 'idle' || base.loaded !== undefined);
   if (shouldSkipCulledWork || (event.cameraState === 'moving' && base.loaded)) {
     return {

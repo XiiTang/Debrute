@@ -151,7 +151,7 @@ describe('CanvasImageNodeAsset', () => {
     expect(next.next).toBeUndefined();
   });
 
-  it('prefetches a culled image when the render coordinator marks it near the viewport', () => {
+  it('loads the first preview while moving once the image is display-visible', () => {
     const source = resolveCanvasImageNodeSource({
       node: imageNode('flow/near.png', 2400, 1200, 2400, 'rev-a'),
       imageResourceZoom: 0.1,
@@ -163,8 +163,7 @@ describe('CanvasImageNodeAsset', () => {
       type: 'source-resolved',
       source,
       cameraState: 'moving',
-      culled: true,
-      prefetch: true
+      culled: false
     });
 
     expect(next.next).toMatchObject({
@@ -185,8 +184,7 @@ describe('CanvasImageNodeAsset', () => {
       type: 'source-resolved',
       source,
       cameraState: 'idle',
-      culled: true,
-      prefetch: false
+      culled: true
     });
 
     expect(next.next).toMatchObject({
@@ -207,8 +205,7 @@ describe('CanvasImageNodeAsset', () => {
       type: 'source-resolved',
       source,
       cameraState: 'moving',
-      culled: true,
-      prefetch: false
+      culled: true
     });
 
     expect(next.next).toBeUndefined();

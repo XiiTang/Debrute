@@ -32,7 +32,6 @@ import {
 } from './CanvasPerfMonitor';
 import { createCanvasRenderCoordinator, type CanvasRenderCoordinatorSnapshot, type CanvasRenderCoordinatorUpdateInput } from './CanvasRenderCoordinator';
 import { createCanvasVisibilityController } from './CanvasVisibilityController';
-import { nodeRect } from './canvasVirtualization';
 import type {
   CanvasEditorRuntime,
   CanvasRuntimeDragState,
@@ -40,7 +39,6 @@ import type {
   CanvasRuntimeSnapshot
 } from './runtime/CanvasEditorRuntime';
 import { createCanvasStageRuntime, type CanvasStageRuntime } from './runtime/CanvasStageRuntime';
-import { rectsIntersect, type CanvasRect } from './runtime/canvasGeometry';
 import type { CanvasSelection } from './runtime/canvasSelection';
 import { isCanvasItemSelected, selectedNodeProjectRelativePaths, toggleCanvasSelectionItem } from './runtime/canvasSelection';
 import {
@@ -796,7 +794,6 @@ function CanvasSurfaceRuntime({
               selected={isCanvasItemSelected(selection, { kind: 'node', projectRelativePath: node.projectRelativePath })}
               hovered={hoveredNodePath === node.projectRelativePath}
               culled={renderSnapshot.culledNodePaths.has(node.projectRelativePath)}
-              prefetch={shouldPrefetchCanvasImageNode({ node, renderSnapshot })}
               zIndex={renderSnapshot.nodeLayers.get(node.projectRelativePath)?.zIndex ?? node.z}
               stageRuntime={stageRuntime}
               actions={actions}
@@ -1230,16 +1227,6 @@ export function shouldUseEfficientImageResourceZoom(input: {
 }): boolean {
   return input.nodeCount > CANVAS_EFFICIENT_IMAGE_RESOURCE_ZOOM_NODE_THRESHOLD
     || (input.imageNodeCount ?? 0) > CANVAS_EFFICIENT_IMAGE_RESOURCE_ZOOM_IMAGE_NODE_THRESHOLD;
-}
-
-export function shouldPrefetchCanvasImageNode(input: {
-  node: ProjectedCanvasNode;
-  renderSnapshot: Pick<CanvasRenderCoordinatorSnapshot, 'culledNodePaths' | 'virtualRect'>;
-}): boolean {
-  return input.node.nodeKind === 'file'
-    && input.node.mediaKind === 'image'
-    && input.renderSnapshot.culledNodePaths.has(input.node.projectRelativePath)
-    && rectsIntersect(input.renderSnapshot.virtualRect, nodeRect(input.node));
 }
 
 export function createCanvasRenderSnapshotScheduler<T>(input: {

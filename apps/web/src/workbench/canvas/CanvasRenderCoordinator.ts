@@ -78,7 +78,7 @@ export function createCanvasRenderCoordinator(input: CanvasRenderCoordinatorInpu
     const nodesByPath = new Map(nodes.map((node) => [node.projectRelativePath, node]));
     const culledNodePaths = new Set(
       nodes
-        .filter((node) => !rectsIntersect(rendered.visibleRect, nodeRect(node)))
+        .filter((node) => !rectsIntersect(rendered.virtualRect, nodeRect(node)))
         .map((node) => node.projectRelativePath)
     );
     return {

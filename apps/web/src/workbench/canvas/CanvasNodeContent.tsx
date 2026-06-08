@@ -9,7 +9,6 @@ export interface CanvasNodeContentProps {
   node: ProjectedCanvasNode;
   selected: boolean;
   culled: boolean;
-  prefetch?: boolean | undefined;
   actions: WorkbenchActions;
   textBuffer: TextFileBuffer | undefined;
   onSelectNode: () => void;
@@ -22,7 +21,6 @@ export function CanvasNodeContent({
   node,
   selected,
   culled,
-  prefetch,
   actions,
   textBuffer,
   onSelectNode,
@@ -104,7 +102,7 @@ export function CanvasNodeContent({
       {canRenderMediaPreview ? (
         <div className="canvas-node-preview">
           {node.mediaKind === 'image' ? (
-            <CanvasImageNodeContent node={node} culled={culled} prefetch={prefetch} />
+            <CanvasImageNodeContent node={node} culled={culled} />
           ) : node.mediaKind === 'video' ? (
             <video
               key={`${mediaSrc}:${mediaRetryNonce}`}
@@ -171,14 +169,12 @@ export function canvasTextBufferEnsureKey(
 
 function CanvasImageNodeContent({
   node,
-  culled,
-  prefetch
+  culled
 }: {
   node: ProjectedCanvasNode;
   culled: boolean;
-  prefetch?: boolean | undefined;
 }): React.ReactElement {
-  const imageState = useCanvasImageNodeAsset({ node, culled, prefetch });
+  const imageState = useCanvasImageNodeAsset({ node, culled });
 
   return <CanvasImageNodePreview node={node} imageState={imageState} />;
 }

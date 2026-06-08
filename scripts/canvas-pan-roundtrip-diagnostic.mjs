@@ -7,6 +7,7 @@ const DEFAULT_SETTLE_MS = 1800;
 const DEFAULT_INITIAL_SETTLE_MS = 1800;
 const DEFAULT_STEPS = 1;
 const DEFAULT_STEP_SETTLE_MS = 48;
+const DEFAULT_INPUT_MODE = 'cdp';
 
 export function summarizePanRoundTripResult(result) {
   const before = snapshotByLabel(result, 'before-pan');
@@ -75,7 +76,8 @@ export function parseCliArgs(argv) {
     settleMs: DEFAULT_SETTLE_MS,
     initialSettleMs: DEFAULT_INITIAL_SETTLE_MS,
     steps: DEFAULT_STEPS,
-    stepSettleMs: DEFAULT_STEP_SETTLE_MS
+    stepSettleMs: DEFAULT_STEP_SETTLE_MS,
+    inputMode: DEFAULT_INPUT_MODE
   };
 
   for (let index = 0; index < argv.length; index += 1) {
@@ -103,6 +105,9 @@ export function parseCliArgs(argv) {
     } else if (arg === '--step-settle-ms') {
       args.stepSettleMs = positiveNumber(requiredValue(argv, index, arg), arg);
       index += 1;
+    } else if (arg === '--input-mode') {
+      args.inputMode = inputMode(requiredValue(argv, index, arg), arg);
+      index += 1;
     } else if (arg === '--help' || arg === '-h') {
       args.help = true;
     } else if (arg === '--summary-only') {
@@ -122,6 +127,7 @@ export async function runPanRoundTripDiagnostic(options = {}) {
   const initialSettleMs = options.initialSettleMs ?? DEFAULT_INITIAL_SETTLE_MS;
   const steps = options.steps ?? DEFAULT_STEPS;
   const stepSettleMs = options.stepSettleMs ?? DEFAULT_STEP_SETTLE_MS;
+  const inputMode = options.inputMode ?? DEFAULT_INPUT_MODE;
   const client = await connectToPageTarget(cdpUrl, options.targetUrl);
   let phase = 'setup';
   const requestById = new Map();
@@ -190,6 +196,7 @@ export async function runPanRoundTripDiagnostic(options = {}) {
       distance,
       steps,
       stepSettleMs,
+      inputMode,
       setPhase: (nextPhase) => {
         phase = nextPhase;
       }
@@ -204,6 +211,7 @@ export async function runPanRoundTripDiagnostic(options = {}) {
       distance: -distance,
       steps,
       stepSettleMs,
+      inputMode,
       setPhase: (nextPhase) => {
         phase = nextPhase;
       }
@@ -381,14 +389,19 @@ export async function dispatchCanvasWheelSequence(input) {
   for (let step = 1; step <= input.steps; step += 1) {
     const phase = `${input.labelPrefix}-step-${step}`;
     input.setPhase(phase);
-    await dispatchCanvasWheel(input.client, stepDelta, input.stepSettleMs);
+    await dispatchCanvasWheel(input.client, stepDelta, input.stepSettleMs, input.inputMode ?? DEFAULT_INPUT_MODE);
     samples.push(await captureSnapshot(phase));
   }
   input.setPhase(input.labelPrefix);
   return samples;
 }
 
-async function dispatchCanvasWheel(client, deltaY, settleMs) {
+async function dispatchCanvasWheel(client, deltaY, settleMs, inputMode) {
+  if (inputMode === 'dom') {
+    await dispatchCanvasDomWheel(client, deltaY);
+    await waitInNode(settleMs);
+    return;
+  }
   const point = await canvasSurfaceCenterPoint(client);
   await client.send('Input.dispatchMouseEvent', {
     type: 'mouseWheel',
@@ -398,6 +411,23 @@ async function dispatchCanvasWheel(client, deltaY, settleMs) {
     deltaY
   });
   await waitInNode(settleMs);
+}
+
+async function dispatchCanvasDomWheel(client, deltaY) {
+  await client.evaluate(`(() => {
+    const surface = document.querySelector('.canvas-surface');
+    if (!surface) {
+      throw new Error('No .canvas-surface element found.');
+    }
+    const rect = surface.getBoundingClientRect();
+    surface.dispatchEvent(new WheelEvent('wheel', {
+      bubbles: true,
+      cancelable: true,
+      clientX: rect.left + rect.width / 2,
+      clientY: rect.top + rect.height / 2,
+      deltaY: ${JSON.stringify(deltaY)}
+    }));
+  })()`);
 }
 
 async function canvasSurfaceCenterPoint(client) {
@@ -509,6 +539,13 @@ function positiveInteger(value, flag) {
   return number;
 }
 
+function inputMode(value, flag) {
+  if (value !== 'cdp' && value !== 'dom') {
+    throw new Error(`${flag} must be one of: cdp, dom.`);
+  }
+  return value;
+}
+
 function usage() {
   return `Usage:
   node scripts/canvas-pan-roundtrip-diagnostic.mjs --target-url http://127.0.0.1:17322/projects/<id>
@@ -522,6 +559,7 @@ Options:
                        Wait before starting capture so initial page loads do not pollute the run. Default: ${DEFAULT_INITIAL_SETTLE_MS}
   --steps <count>       Split each pan leg into sampled wheel steps. Default: ${DEFAULT_STEPS}
   --step-settle-ms <ms> Wait after each sampled wheel step. Default: ${DEFAULT_STEP_SETTLE_MS}
+  --input-mode <mode>   Wheel dispatch mode: cdp or dom. Default: ${DEFAULT_INPUT_MODE}
   --summary-only        Print only the pass/fail summary.
 `;
 }
