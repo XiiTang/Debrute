@@ -82,6 +82,7 @@ export function createCanvasVirtualizationIndex(input: {
   edges: CanvasProjection['edges'];
 }): CanvasVirtualizationIndex {
   const visibleNodes = input.nodes.filter((node) => node.visible !== false);
+  const visibleImageNodes = visibleNodes.filter((node) => node.nodeKind === 'file' && node.mediaKind === 'image');
   const visibleNodeByPath = new Map(visibleNodes.map((node) => [node.projectRelativePath, node]));
   const nodeIndex = new CanvasNodeSpatialIndex(visibleNodes);
   const nodeByPath = visibleNodeByPath;
@@ -96,6 +97,7 @@ export function createCanvasVirtualizationIndex(input: {
     render: (query) => buildVirtualizedCanvasRenderStateFromIndex({
       ...query,
       visibleNodeByPath,
+      visibleImageNodes,
       nodeIndex,
       edgeIndex
     })
@@ -123,6 +125,7 @@ export function buildVirtualizedCanvasRenderState(input: {
 
 function buildVirtualizedCanvasRenderStateFromIndex(input: CanvasVirtualizationQueryInput & {
   visibleNodeByPath: Map<string, ProjectedCanvasNode>;
+  visibleImageNodes: readonly ProjectedCanvasNode[];
   nodeIndex: CanvasNodeSpatialIndex;
   edgeIndex: CanvasEdgeSpatialIndex;
 }): VirtualizedCanvasRenderState {
@@ -132,6 +135,7 @@ function buildVirtualizedCanvasRenderStateFromIndex(input: CanvasVirtualizationQ
   const activePaths = [...input.activeNodeProjectRelativePaths];
   const nodes = uniqueNodes([
     ...input.nodeIndex.query(virtualRect),
+    ...input.visibleImageNodes,
     ...selectedPaths.flatMap((path) => input.visibleNodeByPath.get(path) ?? []),
     ...activePaths.flatMap((path) => input.visibleNodeByPath.get(path) ?? [])
   ]);

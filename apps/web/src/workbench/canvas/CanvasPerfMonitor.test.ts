@@ -53,9 +53,6 @@ describe('CanvasPerfMonitor', () => {
         mountedNodeCount: 8,
         visibleNodeCount: 5,
         culledNodeCount: 3,
-        activeImageLoadCount: 1,
-        pendingImageCount: 2,
-        decodedImageCount: 4,
         zoomLevel: 1.25,
         cameraState: 'idle'
       }
@@ -75,9 +72,6 @@ describe('CanvasPerfMonitor', () => {
       mountedNodeCount: 8,
       visibleNodeCount: 5,
       culledNodeCount: 3,
-      activeImageLoadCount: 1,
-      pendingImageCount: 2,
-      decodedImageCount: 4,
       zoomLevel: 1.25,
       cameraState: 'idle',
       counters: {
@@ -133,52 +127,47 @@ describe('CanvasPerfMonitor', () => {
   it('targets an explicit session plus matching active session types', () => {
     const monitor = createCanvasPerfMonitor({ enabled: true });
     const camera = monitor.startSession({ type: 'camera-pan', timestamp: 0, source: 'CanvasSurface' });
-    const imageA = monitor.startSession({ type: 'image-load', timestamp: 1, source: 'CanvasImageAssetRuntime' });
-    const imageB = monitor.startSession({ type: 'image-load', timestamp: 2, source: 'CanvasImageAssetRuntime' });
-    if (!camera || !imageA || !imageB) {
+    const drag = monitor.startSession({ type: 'drag-move-node', timestamp: 2, source: 'CanvasSurface' });
+    if (!camera || !drag) {
       throw new Error('Expected enabled monitor to start sessions.');
     }
 
     monitor.recordCounter({
-      sessionId: imageA,
+      sessionId: drag,
       sessionTypes: ['camera-pan'],
       timestamp: 10,
-      source: 'CanvasImageAssetRuntime',
-      name: 'image-load-resolve'
+      source: 'CanvasImageNodeAsset',
+      name: 'image-node-handoff-promote'
     });
 
-    const imageASummary = monitor.endSession({ sessionId: imageA, timestamp: 20, source: 'CanvasImageAssetRuntime' });
-    const imageBSummary = monitor.endSession({ sessionId: imageB, timestamp: 25, source: 'CanvasImageAssetRuntime' });
+    const dragSummary = monitor.endSession({ sessionId: drag, timestamp: 20, source: 'CanvasSurface' });
     const cameraSummary = monitor.endSession({ sessionId: camera, timestamp: 30, source: 'CanvasSurface' });
 
-    expect(imageASummary?.counters).toEqual({ 'image-load-resolve': 1 });
-    expect(imageBSummary?.counters).toEqual({});
-    expect(cameraSummary?.counters).toEqual({ 'image-load-resolve': 1 });
+    expect(dragSummary?.counters).toEqual({ 'image-node-handoff-promote': 1 });
+    expect(cameraSummary?.counters).toEqual({ 'image-node-handoff-promote': 1 });
   });
 
-  it('records image budget and resource cleanup counters in totals and summaries', () => {
+  it('records image node asset counters in totals and summaries', () => {
     const monitor = createCanvasPerfMonitor({ enabled: true });
     const sessionId = monitor.startSession({ type: 'camera-pan', timestamp: 0, source: 'CanvasSurface' });
     if (!sessionId) {
       throw new Error('Expected enabled monitor to start a session.');
     }
 
-    monitor.recordCounter({ sessionId, timestamp: 1, source: 'CanvasImageAssetRuntime', name: 'image-budget-block' });
-    monitor.recordCounter({ sessionId, timestamp: 2, source: 'CanvasImageAssetRuntime', name: 'image-next-cancel' });
-    monitor.recordCounter({ sessionId, timestamp: 3, source: 'CanvasImageAssetRuntime', name: 'image-visible-evict' });
-    monitor.recordCounter({ sessionId, timestamp: 4, source: 'CanvasImageAssetRuntime', name: 'image-downshift-start' });
-    monitor.recordCounter({ sessionId, timestamp: 5, source: 'CanvasImageAssetRuntime', name: 'image-downshift-resolve' });
-    monitor.recordCounter({ sessionId, timestamp: 6, source: 'CanvasImageAssetRuntime', name: 'image-retention-budget-evict' });
+    monitor.recordCounter({ sessionId, timestamp: 1, source: 'CanvasImageNodeAsset', name: 'image-node-url-resolve' });
+    monitor.recordCounter({ sessionId, timestamp: 2, source: 'CanvasImageNodeAsset', name: 'image-node-next-load-start' });
+    monitor.recordCounter({ sessionId, timestamp: 3, source: 'CanvasImageNodeAsset', name: 'image-node-next-load-resolve' });
+    monitor.recordCounter({ sessionId, timestamp: 4, source: 'CanvasImageNodeAsset', name: 'image-node-handoff-promote' });
+    monitor.recordCounter({ sessionId, timestamp: 5, source: 'CanvasImageNodeAsset', name: 'image-node-upgrade-skip-culled' });
 
     const summary = monitor.endSession({ sessionId, timestamp: 10, source: 'CanvasSurface' });
 
     expect(monitor.getCounterTotals()).toEqual({
-      'image-budget-block': 1,
-      'image-next-cancel': 1,
-      'image-visible-evict': 1,
-      'image-downshift-start': 1,
-      'image-downshift-resolve': 1,
-      'image-retention-budget-evict': 1
+      'image-node-url-resolve': 1,
+      'image-node-next-load-start': 1,
+      'image-node-next-load-resolve': 1,
+      'image-node-handoff-promote': 1,
+      'image-node-upgrade-skip-culled': 1
     });
     expect(summary?.counters).toEqual(monitor.getCounterTotals());
   });
@@ -236,12 +225,12 @@ describe('CanvasPerfMonitor', () => {
 
   it('does not invent final canvas state when a session has no frame or final state', () => {
     const monitor = createCanvasPerfMonitor({ enabled: true });
-    const sessionId = monitor.startSession({ type: 'image-load', timestamp: 0, source: 'CanvasImageAssetRuntime' });
+    const sessionId = monitor.startSession({ type: 'drag-resize-node', timestamp: 0, source: 'CanvasSurface' });
     if (!sessionId) {
       throw new Error('Expected enabled monitor to start a session.');
     }
 
-    const summary = monitor.endSession({ sessionId, timestamp: 10, source: 'CanvasImageAssetRuntime' });
+    const summary = monitor.endSession({ sessionId, timestamp: 10, source: 'CanvasSurface' });
 
     expect(summary).not.toHaveProperty('mountedNodeCount');
     expect(summary).not.toHaveProperty('zoomLevel');
@@ -262,14 +251,11 @@ function frame(
     mountedNodeCount: 8,
     visibleNodeCount: 5,
     culledNodeCount: 3,
-    activeImageLoadCount: 1,
-    pendingImageCount: 2,
-    decodedImageCount: 4,
     reactCommitCount: 0,
     renderSnapshotBuildCount: 0,
     renderSnapshotReuseCount: 0,
     stageWriteCount: 0,
-    imageRuntimeWorkCount: 0,
+    imageNodeWorkCount: 0,
     ...overrides
   };
 }

@@ -175,14 +175,11 @@ describe('CanvasPerfBrowserAdapter', () => {
       mountedNodeCount: 1,
       visibleNodeCount: 1,
       culledNodeCount: 0,
-      activeImageLoadCount: 0,
-      pendingImageCount: 0,
-      decodedImageCount: 0,
       reactCommitCount: 0,
       renderSnapshotBuildCount: 0,
       renderSnapshotReuseCount: 0,
       stageWriteCount: 0,
-      imageRuntimeWorkCount: 0
+      imageNodeWorkCount: 0
     });
 
     expect(mark).not.toHaveBeenCalled();
@@ -219,9 +216,6 @@ function sessionEnd(sessionId: 'camera-pan:1', sessionType: 'camera-pan'): Canva
       mountedNodeCount: 8,
       visibleNodeCount: 5,
       culledNodeCount: 3,
-      activeImageLoadCount: 1,
-      pendingImageCount: 2,
-      decodedImageCount: 4,
       zoomLevel: 1.25,
       cameraState: 'idle',
       counters: {}

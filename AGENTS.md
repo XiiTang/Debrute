@@ -20,7 +20,7 @@ pnpm exec vitest run \
   apps/web/src/workbench/canvas/CanvasPerfDebugBridge.test.ts \
   apps/web/src/workbench/canvas/CanvasPerfMonitor.test.ts \
   apps/web/src/workbench/canvas/CanvasPerfBrowserAdapter.test.ts \
-  apps/web/src/workbench/canvas/CanvasImageAssetRuntime.test.ts \
+  apps/web/src/workbench/canvas/CanvasImageNodeAsset.test.ts \
   apps/web/src/workbench/canvas/CanvasRenderCoordinator.test.ts \
   apps/web/src/workbench/canvas/runtime/CanvasStageRuntime.test.ts \
   apps/web/src/workbench/canvas/CanvasSurface.test.tsx \

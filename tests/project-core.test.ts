@@ -92,19 +92,23 @@ describe('project-core', () => {
 
   it('emits debounced watcher events for project-visible files', async () => {
     const root = await mkdtemp(join(tmpdir(), 'debrute-watch-'));
+    let handle: ReturnType<typeof watchProjectFiles> | undefined;
     try {
       await mkdir(join(root, 'notes'), { recursive: true });
       const eventPromise = new Promise<string>((resolve) => {
-        const handle = watchProjectFiles(root, (event) => {
+        handle = watchProjectFiles(root, (event) => {
           if (event.projectRelativePath === 'notes/brief.md') {
-            handle.close();
             resolve(event.projectRelativePath);
           }
         }, { debounceMs: 5 });
       });
+      await new Promise<void>((resolve) => {
+        setTimeout(resolve, 0);
+      });
       await writeFile(join(root, 'notes/brief.md'), 'hello\n', 'utf8');
       await expect(eventPromise).resolves.toBe('notes/brief.md');
     } finally {
+      handle?.close();
       await rm(root, { recursive: true, force: true });
     }
   });

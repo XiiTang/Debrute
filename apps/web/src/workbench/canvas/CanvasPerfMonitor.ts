@@ -2,15 +2,13 @@ export type CanvasPerfSessionType =
   | 'camera-pan'
   | 'camera-minimap'
   | 'drag-move-node'
-  | 'drag-resize-node'
-  | 'image-load';
+  | 'drag-resize-node';
 
 export type CanvasPerfEventSource =
   | 'CanvasSurface'
   | 'CanvasStageRuntime'
   | 'CanvasRenderCoordinator'
-  | 'CanvasImageAssetRuntime'
-  | 'CanvasImageAssetViewportScheduler'
+  | 'CanvasImageNodeAsset'
   | 'CanvasRenderSnapshotScheduler'
   | 'CanvasPerfBrowserAdapter';
 
@@ -28,24 +26,17 @@ export type CanvasPerfCounterName =
   | 'render-virtual-refresh'
   | 'render-moving-queued'
   | 'render-idle-flush'
-  | 'image-viewport-sync'
-  | 'image-viewport-noop'
-  | 'image-moving-queued'
-  | 'image-idle-flush'
-  | 'image-plan-rebuild'
-  | 'image-plan-reuse'
-  | 'image-pump'
-  | 'image-load-start'
-  | 'image-load-resolve'
-  | 'image-load-reject'
-  | 'image-load-stale-result'
-  | 'image-budget-block'
-  | 'image-next-cancel'
-  | 'image-visible-evict'
-  | 'image-downshift-start'
-  | 'image-downshift-resolve'
-  | 'image-retention-budget-evict'
-  | 'image-node-publish';
+  | 'image-node-url-resolve'
+  | 'image-node-url-unchanged'
+  | 'image-node-url-unavailable'
+  | 'image-node-next-load-start'
+  | 'image-node-next-load-resolve'
+  | 'image-node-next-load-reject'
+  | 'image-node-handoff-promote'
+  | 'image-node-upgrade-skip-culled'
+  | 'image-node-upgrade-skip-moving'
+  | 'image-node-source-reset'
+  | 'image-node-retry';
 
 export type CanvasPerfSessionId = `${CanvasPerfSessionType}:${number}`;
 
@@ -73,9 +64,6 @@ export interface CanvasPerfFinalState {
   mountedNodeCount: number;
   visibleNodeCount: number;
   culledNodeCount: number;
-  activeImageLoadCount: number;
-  pendingImageCount: number;
-  decodedImageCount: number;
   zoomLevel: number;
   cameraState: 'idle' | 'moving';
 }
@@ -88,14 +76,11 @@ export interface CanvasPerfFrameInput {
   mountedNodeCount: number;
   visibleNodeCount: number;
   culledNodeCount: number;
-  activeImageLoadCount: number;
-  pendingImageCount: number;
-  decodedImageCount: number;
   reactCommitCount: number;
   renderSnapshotBuildCount: number;
   renderSnapshotReuseCount: number;
   stageWriteCount: number;
-  imageRuntimeWorkCount: number;
+  imageNodeWorkCount: number;
 }
 
 export interface CanvasPerfSessionStartInput {
@@ -342,9 +327,6 @@ function summarizeSession(active: ActiveCanvasPerfSession, end: CanvasPerfSessio
       mountedNodeCount: lastFrame.mountedNodeCount,
       visibleNodeCount: lastFrame.visibleNodeCount,
       culledNodeCount: lastFrame.culledNodeCount,
-      activeImageLoadCount: lastFrame.activeImageLoadCount,
-      pendingImageCount: lastFrame.pendingImageCount,
-      decodedImageCount: lastFrame.decodedImageCount,
       cameraState: lastFrame.cameraState
     } : {}),
     ...end.finalState

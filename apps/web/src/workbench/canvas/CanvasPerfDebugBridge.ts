@@ -14,20 +14,7 @@ export interface DebruteCanvasPerfCanvasSnapshot {
   mountedNodeCount: number;
   visibleNodeCount: number;
   culledNodeCount: number;
-  activeImageLoadCount: number;
-  pendingImageCount: number;
-  decodedImageCount: number;
-  retainedDecodedImagePixels: number;
-  oversizedRetainedImageCount: number;
-  downshiftStartCount: number;
-  downshiftResolveCount: number;
-  highResolutionEvictionCount: number;
   imageResourceZoom: number;
-  visiblePreviewWidths: Record<string, number>;
-  nextPreviewWidths: Record<string, number>;
-  imageWorkIntentCounts: Record<string, number>;
-  imageCancellationReasons: Record<string, number>;
-  imageEvictionReasons: Record<string, number>;
   imageLayers: {
     visible: number;
     next: number;
@@ -229,20 +216,7 @@ function cloneCanvasSnapshot(snapshot: DebruteCanvasPerfCanvasSnapshot): Debrute
     mountedNodeCount: snapshot.mountedNodeCount,
     visibleNodeCount: snapshot.visibleNodeCount,
     culledNodeCount: snapshot.culledNodeCount,
-    activeImageLoadCount: snapshot.activeImageLoadCount,
-    pendingImageCount: snapshot.pendingImageCount,
-    decodedImageCount: snapshot.decodedImageCount,
-    retainedDecodedImagePixels: snapshot.retainedDecodedImagePixels,
-    oversizedRetainedImageCount: snapshot.oversizedRetainedImageCount,
-    downshiftStartCount: snapshot.downshiftStartCount,
-    downshiftResolveCount: snapshot.downshiftResolveCount,
-    highResolutionEvictionCount: snapshot.highResolutionEvictionCount,
     imageResourceZoom: snapshot.imageResourceZoom,
-    visiblePreviewWidths: { ...snapshot.visiblePreviewWidths },
-    nextPreviewWidths: { ...snapshot.nextPreviewWidths },
-    imageWorkIntentCounts: { ...snapshot.imageWorkIntentCounts },
-    imageCancellationReasons: { ...snapshot.imageCancellationReasons },
-    imageEvictionReasons: { ...snapshot.imageEvictionReasons },
     imageLayers: { ...snapshot.imageLayers }
   };
 }

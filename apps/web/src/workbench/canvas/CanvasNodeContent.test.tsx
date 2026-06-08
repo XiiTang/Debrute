@@ -1,7 +1,60 @@
 import { describe, expect, it } from 'vitest';
+import React from 'react';
+import { renderToStaticMarkup } from 'react-dom/server';
 import type { ProjectedCanvasNode } from '@debrute/canvas-core';
 import type { TextFileBuffer } from '../../types';
-import { canvasTextBufferEnsureKey } from './CanvasNodeContent';
+import { CanvasImageNodePreview, canvasTextBufferEnsureKey } from './CanvasNodeContent';
+import type { CanvasImageNodeAssetHookState } from './CanvasImageNodeAssetContext';
+
+describe('CanvasImageNodePreview', () => {
+  it('keeps the visible image mounted while the next image loads', () => {
+    const html = renderImagePreview({
+      kind: 'image',
+      visible: { src: '/preview/low.jpg', loadKey: 'low', previewWidth: 256 },
+      next: { src: '/preview/high.jpg', loadKey: 'high', previewWidth: 1024 },
+      retry: () => undefined,
+      resolveNext: () => undefined,
+      rejectNext: () => undefined
+    });
+
+    expect(html).toContain('src="/preview/low.jpg"');
+    expect(html).toContain('src="/preview/high.jpg"');
+    expect(html).toContain('data-canvas-image-layer="visible"');
+    expect(html).toContain('data-canvas-image-layer="next"');
+    expect(html).not.toContain('opacity:0');
+    expect(html).not.toContain('opacity: 0');
+  });
+
+  it('reserves the first pending image slot without flashing a placeholder', () => {
+    const html = renderImagePreview({
+      kind: 'image',
+      next: { src: '/preview/first.jpg', loadKey: 'first', previewWidth: 512 },
+      retry: () => undefined,
+      resolveNext: () => undefined,
+      rejectNext: () => undefined
+    });
+
+    expect(html).toContain('class="canvas-node-image-reserved"');
+    expect(html).toContain('data-canvas-image-layer="next"');
+    expect(html).not.toContain('data-canvas-image-layer="visible"');
+    expect(html).not.toContain('class="canvas-node-placeholder"');
+  });
+
+  it('keeps visible image markup when next load error exists', () => {
+    const html = renderImagePreview({
+      kind: 'image',
+      visible: { src: '/preview/low.jpg', loadKey: 'low', previewWidth: 256 },
+      error: { loadKey: 'high', message: 'Unable to load flow/cover.png.' },
+      retry: () => undefined,
+      resolveNext: () => undefined,
+      rejectNext: () => undefined
+    });
+
+    expect(html).toContain('src="/preview/low.jpg"');
+    expect(html).toContain('Unable to load flow/cover.png.');
+    expect(html).not.toContain('class="canvas-node-placeholder"');
+  });
+});
 
 describe('CanvasNodeContent text buffer ensure keys', () => {
   it('returns one stable key for an available text node revision', () => {
@@ -50,5 +103,38 @@ function textBuffer(path: string, revision: string): TextFileBuffer {
     diskRevision: revision,
     lastSavedRevision: revision,
     externalChange: false
+  };
+}
+
+function renderImagePreview(imageState: CanvasImageNodeAssetHookState): string {
+  return renderToStaticMarkup(
+    <CanvasImageNodePreview
+      node={imageNode('flow/cover.png', 'rev-a')}
+      imageState={imageState}
+    />
+  );
+}
+
+function imageNode(path: string, revision: string): ProjectedCanvasNode {
+  return {
+    projectRelativePath: path,
+    nodeKind: 'file',
+    mediaKind: 'image',
+    x: 0,
+    y: 0,
+    width: 320,
+    height: 180,
+    z: 0,
+    visible: true,
+    locked: false,
+    availability: {
+      state: 'available',
+      revision,
+      size: 10_000,
+      mimeType: 'image/png',
+      fileUrl: `http://127.0.0.1:17321/api/projects/p/files/raw/${path}?v=${revision}`,
+      canvasImagePreviewable: true,
+      canvasImagePreviewSourceWidth: 1600
+    }
   };
 }

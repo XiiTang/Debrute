@@ -154,25 +154,22 @@ describe('CanvasPerfDebugBridge', () => {
       }, {
         kind: 'counter',
         timestamp: 111,
-        source: 'CanvasImageAssetViewportScheduler',
-        name: 'image-moving-queued',
+        source: 'CanvasImageNodeAsset',
+        name: 'image-node-url-resolve',
         value: 1
       }],
       sessions: []
     };
     fakeMonitor.counters = {
       'stage-camera-write': 12,
-      'image-moving-queued': 1
+      'image-node-url-resolve': 1
     };
     const capture = bridge.api.stopCapture();
 
     expect(capture.counterTotals).toEqual({
       'stage-camera-write': 12,
-      'image-moving-queued': 1
+      'image-node-url-resolve': 1
     });
-    expect(capture.counterTotals).not.toHaveProperty('image-plan-rebuild');
-    expect(capture.counterTotals).not.toHaveProperty('image-pump');
-    expect(capture.counterTotals).not.toHaveProperty('image-node-publish');
   });
 
   it('returns the latest export when stopCapture is called while inactive', () => {
@@ -365,32 +362,7 @@ function snapshot(): DebruteCanvasPerfCanvasSnapshot {
     mountedNodeCount: 8,
     visibleNodeCount: 5,
     culledNodeCount: 3,
-    activeImageLoadCount: 1,
-    pendingImageCount: 2,
-    decodedImageCount: 4,
-    retainedDecodedImagePixels: 64_000_000,
-    oversizedRetainedImageCount: 3,
-    downshiftStartCount: 4,
-    downshiftResolveCount: 3,
-    highResolutionEvictionCount: 2,
     imageResourceZoom: 0.75,
-    visiblePreviewWidths: { 300: 2, 1200: 2 },
-    nextPreviewWidths: { 600: 1, 2400: 1 },
-    imageWorkIntentCounts: {
-      'display-critical': 1,
-      'downshift-visible': 1,
-      'evict-oversized': 1,
-      'prefetch-near': 2,
-      'upgrade-idle': 1,
-      deferred: 4
-    },
-    imageCancellationReasons: {
-      'moving-upgrade': 1,
-      'budget-high-resolution': 2
-    },
-    imageEvictionReasons: {
-      'far-high-resolution': 1
-    },
     imageLayers: {
       visible: 4,
       next: 2,

@@ -3,11 +3,12 @@ import { AlertTriangle, File, FileText, Folder, Image as ImageIcon, Maximize2, M
 import type { ProjectedCanvasNode } from '@debrute/canvas-core';
 import type { TextFileBuffer, WorkbenchActions } from '../../types';
 import { CanvasMonacoEditor } from './CanvasMonacoEditor';
-import { useCanvasImageAsset, useCanvasImageAssetRuntime } from './CanvasImageResourceContext';
+import { useCanvasImageNodeAsset, type CanvasImageNodeAssetHookState } from './CanvasImageNodeAssetContext';
 
 export interface CanvasNodeContentProps {
   node: ProjectedCanvasNode;
   selected: boolean;
+  culled: boolean;
   actions: WorkbenchActions;
   textBuffer: TextFileBuffer | undefined;
   onSelectNode: () => void;
@@ -19,6 +20,7 @@ export interface CanvasNodeContentProps {
 export function CanvasNodeContent({
   node,
   selected,
+  culled,
   actions,
   textBuffer,
   onSelectNode,
@@ -100,7 +102,7 @@ export function CanvasNodeContent({
       {canRenderMediaPreview ? (
         <div className="canvas-node-preview">
           {node.mediaKind === 'image' ? (
-            <CanvasImageNodeContent node={node} />
+            <CanvasImageNodeContent node={node} culled={culled} />
           ) : node.mediaKind === 'video' ? (
             <video
               key={`${mediaSrc}:${mediaRetryNonce}`}
@@ -166,12 +168,24 @@ export function canvasTextBufferEnsureKey(
 }
 
 function CanvasImageNodeContent({
-  node
+  node,
+  culled
 }: {
   node: ProjectedCanvasNode;
+  culled: boolean;
 }): React.ReactElement {
-  const imageState = useCanvasImageAsset(node.projectRelativePath);
-  const imageAssetRuntime = useCanvasImageAssetRuntime();
+  const imageState = useCanvasImageNodeAsset({ node, culled });
+
+  return <CanvasImageNodePreview node={node} imageState={imageState} />;
+}
+
+export function CanvasImageNodePreview({
+  node,
+  imageState
+}: {
+  node: ProjectedCanvasNode;
+  imageState: CanvasImageNodeAssetHookState;
+}): React.ReactElement {
   const pendingHandoffCancelRef = useRef<(() => void) | undefined>(undefined);
   const nextImageRef = useRef<HTMLImageElement | null>(null);
   const nextLoadKey = imageState.kind === 'image' ? imageState.next?.loadKey : undefined;
@@ -179,14 +193,14 @@ function CanvasImageNodeContent({
     pendingHandoffCancelRef.current?.();
     pendingHandoffCancelRef.current = scheduleCanvasImageHandoffAfterPaint(() => {
       pendingHandoffCancelRef.current = undefined;
-      imageAssetRuntime.resolvePending(node.projectRelativePath, loadKey);
+      imageState.resolveNext(loadKey);
     });
-  }, [imageAssetRuntime, node.projectRelativePath]);
+  }, [imageState]);
   const rejectLoadedNext = useCallback((loadKey: string) => {
     pendingHandoffCancelRef.current?.();
     pendingHandoffCancelRef.current = undefined;
-    imageAssetRuntime.rejectPending(node.projectRelativePath, loadKey);
-  }, [imageAssetRuntime, node.projectRelativePath]);
+    imageState.rejectNext(loadKey);
+  }, [imageState]);
 
   useEffect(() => () => {
     pendingHandoffCancelRef.current?.();

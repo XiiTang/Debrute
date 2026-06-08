@@ -1,4 +1,3 @@
-import { readFileSync } from 'node:fs';
 import React from 'react';
 import { renderToStaticMarkup } from 'react-dom/server';
 import { describe, expect, it, vi } from 'vitest';
@@ -6,16 +5,12 @@ import { createCanvasDocument, type CanvasFeedbackDocument, type CanvasProjectio
 import type { IntegrationSettingsView } from '@debrute/app-protocol';
 import type { WorkbenchActions, WorkbenchState } from '../../types';
 import { CanvasEditor } from './CanvasEditor';
-import { createCanvasImageAssetRuntime, type CanvasImageAssetRuntime, type CanvasImageAssetRuntimeStats } from './CanvasImageAssetRuntime';
-import { CanvasImageAssetProvider } from './CanvasImageResourceContext';
-import type { CanvasImageNodeRenderState } from './canvasImageLoading';
-import { CanvasNodeContent, scheduleCanvasImageHandoffAfterPaint, syncCompletedCanvasImageHandoff } from './CanvasNodeContent';
+import { scheduleCanvasImageHandoffAfterPaint, syncCompletedCanvasImageHandoff } from './CanvasNodeContent';
 import { createCanvasOverlayRuntime } from './CanvasOverlayRuntime';
 import { areCanvasNodeShellPropsEqual, CanvasNodeShell, type CanvasNodeShellProps } from './CanvasNodeShell';
 import {
   CanvasSurface,
   canvasImageResourceZoomPreviewSignature,
-  createCanvasImageAssetViewportSyncScheduler,
   createCanvasRenderSnapshotScheduler,
   recordCanvasPerfFrame,
   shouldUseEfficientImageResourceZoom,
@@ -23,7 +18,6 @@ import {
   syncCanvasMovingCameraFrame,
   syncCanvasPerfSessionState,
   syncCanvasImageResourceZoomForCameraState,
-  syncCanvasImageAssetViewport,
   type CanvasPerfRuntimeSession
 } from './CanvasSurface';
 import { createCanvasPerfMonitor, type CanvasPerfTraceEvent } from './CanvasPerfMonitor';
@@ -67,14 +61,25 @@ describe('CanvasSurface', () => {
     expect(html).not.toContain('Delete');
   });
 
-  it('renders only viewport and selected projected nodes', () => {
+  it('keeps image nodes mounted while still virtualizing offscreen non-image nodes', () => {
     const canvas = createCanvasDocument({ id: 'virtual-nodes', title: 'Virtual Nodes' });
     const projection: CanvasProjection = {
       canvasId: canvas.id,
       nodes: [
         nodeFixture('flow/visible.png', 0, 0),
         nodeFixture('flow/offscreen.png', 6000, 0),
-        nodeFixture('flow/selected.png', 6000, 6000)
+        nodeFixture('flow/selected.png', 6000, 6000),
+        {
+          ...nodeFixture('flow/offscreen.txt', 8000, 0),
+          mediaKind: 'text',
+          availability: {
+            state: 'available',
+            size: 100,
+            mimeType: 'text/plain',
+            fileUrl: 'http://127.0.0.1:17321/api/projects/123e4567-e89b-42d3-a456-426614174000/files/raw/flow/offscreen.txt?v=rev-text',
+            revision: 'rev-text'
+          }
+        }
       ],
       edges: [],
       diagnostics: []
@@ -85,8 +90,9 @@ describe('CanvasSurface', () => {
     }));
 
     expect(html).toContain('data-canvas-node-path="flow/visible.png"');
+    expect(html).toContain('data-canvas-node-path="flow/offscreen.png"');
     expect(html).toContain('data-canvas-node-path="flow/selected.png"');
-    expect(html).not.toContain('data-canvas-node-path="flow/offscreen.png"');
+    expect(html).not.toContain('data-canvas-node-path="flow/offscreen.txt"');
   });
 
   it('keeps camera transforms out of React stage markup', () => {
@@ -255,7 +261,7 @@ describe('CanvasSurface', () => {
     expect(html).not.toContain('class="canvas-feedback-bar"');
   });
 
-  it('does not eagerly render image src attributes before the image asset runtime publishes image state', () => {
+  it('does not eagerly render image src attributes before node-local image state publishes image state', () => {
     const canvas = createCanvasDocument({ id: 'resource-previews', title: 'Resource Previews' });
     const projection: CanvasProjection = {
       canvasId: canvas.id,
@@ -276,57 +282,6 @@ describe('CanvasSurface', () => {
     expect(html).not.toContain('<img');
     expect(html).not.toContain('/canvas-image-preview?path=flow%2Fimage-0.png');
     expect(html).not.toContain('/files/raw/flow/image-0.png');
-  });
-
-  it('keeps the first pending image slot reserved without flashing a loading placeholder', () => {
-    const runtime = createCanvasImageAssetRuntime({
-      loadImage: () => new Promise(() => undefined)
-    });
-    const node = nodeFixture('flow/cover.png', 0, 0);
-    runtime.setNodes(new Map([[node.projectRelativePath, node]]));
-    runtime.setViewport({
-      visibleRect: { x: 0, y: 0, width: 400, height: 300 },
-      mountedNodePaths: new Set([node.projectRelativePath]),
-      culledNodePaths: new Set(),
-      imageResourceZoom: 1,
-      retentionResourceZoom: 1,
-      devicePixelRatio: 1,
-      cameraState: 'idle',
-      imageHeavyEfficientMode: false
-    });
-
-    const html = renderToStaticMarkup(
-      <CanvasImageAssetProvider runtime={runtime}>
-        <CanvasNodeShell {...nodeShellProps(node)} />
-      </CanvasImageAssetProvider>
-    );
-
-    expect(html).toContain('class="canvas-node-image-reserved"');
-    expect(html).toContain('data-canvas-image-layer="next"');
-    expect(html).not.toContain('data-canvas-image-layer="visible"');
-    expect(html).not.toContain('class="canvas-node-placeholder"');
-  });
-
-  it('keeps the visible image mounted while the next image is loading', () => {
-    const html = renderCanvasSurfaceWithImageState({
-      kind: 'image',
-      visible: { src: '/preview/low.jpg', loadKey: 'low', previewWidth: 256 },
-      next: { src: '/preview/high.jpg', loadKey: 'high', previewWidth: 1024 },
-      retry: () => undefined
-    });
-
-    expect(html).toContain('src="/preview/low.jpg"');
-    expect(html).toContain('src="/preview/high.jpg"');
-    expect(html).toContain('data-canvas-image-layer="visible"');
-    expect(html).toContain('data-canvas-image-layer="next"');
-    expect(html).not.toContain('opacity:0');
-    expect(html).not.toContain('opacity: 0');
-  });
-
-  it('does not globally hide next image preview layers in CSS', () => {
-    const css = readFileSync(new URL('../../styles.css', import.meta.url), 'utf8');
-
-    expect(css).not.toMatch(/data-canvas-image-layer=['"]next['"][^{]*{[^}]*opacity\s*:\s*0\b/s);
   });
 
   it('resolves a loaded next image only after a paint opportunity', () => {
@@ -362,28 +317,6 @@ describe('CanvasSurface', () => {
     expect(handled).toBe(true);
     expect(resolveLoaded).toHaveBeenCalledWith('next');
     expect(rejectLoaded).not.toHaveBeenCalled();
-  });
-
-  it('renders preview-only image layers without raw image sources', () => {
-    const html = renderCanvasSurfaceWithImageState({
-      kind: 'image',
-      visible: {
-        src: '/api/projects/p/canvas-image-preview?path=flow%2Fcover.png&v=rev&w=300',
-        loadKey: 'preview',
-        previewWidth: 300
-      },
-      next: {
-        src: '/api/projects/p/canvas-image-preview?path=flow%2Fcover.png&v=rev&w=2400',
-        loadKey: 'preview-next',
-        previewWidth: 2400
-      },
-      retry: () => undefined
-    });
-
-    expect(html).toContain('data-canvas-image-layer="visible"');
-    expect(html).toContain('data-canvas-image-layer="next"');
-    expect(html).toContain('/canvas-image-preview?path=flow%2Fcover.png');
-    expect(html).not.toContain('/files/raw/');
   });
 
   it('does not wait for Canvas settings before rendering the Canvas shell', () => {
@@ -434,120 +367,6 @@ describe('CanvasSurface', () => {
       ...props,
       hovered: true
     })).toBe(false);
-  });
-
-  it('syncs image resources from the live runtime viewport instead of the render snapshot viewport', () => {
-    const stale = nodeFixture('flow/stale-visible.png', 0, 0);
-    const live = nodeFixture('flow/live-visible.png', 500, 0);
-    const viewports: unknown[] = [];
-
-    syncCanvasImageAssetViewport({
-      imageAssetRuntime: {
-        setViewport: (viewport) => viewports.push(viewport)
-      },
-      editorRuntime: {
-        getSnapshot: () => ({
-          camera: { x: 0, y: 0, z: 1 },
-          cameraState: 'moving'
-        }) as ReturnType<CanvasEditorRuntime['getSnapshot']>,
-        coordinates: {
-          visibleCanvasRect: () => ({ x: 350, y: 0, width: 400, height: 300 })
-        } as CanvasEditorRuntime['coordinates']
-      },
-      nodesByPath: new Map([
-        [stale.projectRelativePath, stale],
-        [live.projectRelativePath, live]
-      ]),
-      imageResourceZoom: 1,
-      devicePixelRatio: 1,
-      imageHeavyEfficientMode: false
-    });
-
-    expect(viewports).toHaveLength(1);
-    expect(viewports[0]).toMatchObject({
-      visibleRect: { x: 350, y: 0, width: 400, height: 300 },
-      imageResourceZoom: 1,
-      devicePixelRatio: 1,
-      cameraState: 'moving',
-      imageHeavyEfficientMode: false
-    });
-    expect((viewports[0] as { mountedNodePaths: ReadonlySet<string> }).mountedNodePaths).toEqual(new Set([
-      'flow/stale-visible.png',
-      'flow/live-visible.png'
-    ]));
-    expect((viewports[0] as { culledNodePaths: ReadonlySet<string> }).culledNodePaths).toEqual(new Set([
-      'flow/stale-visible.png'
-    ]));
-  });
-
-  it('passes live zoom-out pressure as retention resource zoom', () => {
-    const viewports: unknown[] = [];
-    const runtime = createCanvasEditorRuntime({
-      camera: { x: 0, y: 0, z: 0.1 }
-    });
-    runtime.setImageResourceZoom(1);
-
-    syncCanvasImageAssetViewport({
-      imageAssetRuntime: {
-        setViewport: (viewport) => viewports.push(viewport)
-      },
-      editorRuntime: runtime,
-      nodesByPath: new Map(),
-      imageResourceZoom: 1,
-      devicePixelRatio: 1,
-      imageHeavyEfficientMode: true
-    });
-
-    expect(viewports).toEqual([
-      expect.objectContaining({
-        imageResourceZoom: 1,
-        retentionResourceZoom: 0.1
-      })
-    ]);
-  });
-
-  it('defers moving image resource viewport sync until an animation frame', () => {
-    const frames: FrameRequestCallback[] = [];
-    const calls: unknown[] = [];
-    const scheduler = createCanvasImageAssetViewportSyncScheduler({
-      sync: (cameraState) => calls.push(cameraState),
-      requestFrame: (callback) => {
-        frames.push(callback);
-        return frames.length;
-      },
-      cancelFrame: () => undefined
-    });
-
-    scheduler.request('moving');
-    scheduler.request('moving');
-
-    expect(calls).toEqual([]);
-    expect(frames).toHaveLength(1);
-
-    frames[0]?.(0);
-
-    expect(calls).toEqual(['moving']);
-  });
-
-  it('flushes idle image resource viewport sync immediately and cancels pending moving work', () => {
-    const frames: FrameRequestCallback[] = [];
-    const canceled: number[] = [];
-    const calls: unknown[] = [];
-    const scheduler = createCanvasImageAssetViewportSyncScheduler({
-      sync: (cameraState) => calls.push(cameraState),
-      requestFrame: (callback) => {
-        frames.push(callback);
-        return frames.length;
-      },
-      cancelFrame: (handle) => canceled.push(handle)
-    });
-
-    scheduler.request('moving');
-    scheduler.flush('idle');
-    frames[0]?.(0);
-
-    expect(canceled).toEqual([1]);
-    expect(calls).toEqual(['idle']);
   });
 
   it('clears pending image resource zoom settlement when the camera starts moving', () => {
@@ -834,47 +653,10 @@ describe('CanvasSurface', () => {
     expect(commits).toEqual([{ camera: { x: 5, y: 0, z: 1 } }]);
   });
 
-  it('coalesces moving image viewport sync separately from render refreshes', () => {
-    const renderFrames: FrameRequestCallback[] = [];
-    const renderCommits: unknown[] = [];
-    const imageFrames: FrameRequestCallback[] = [];
-    const imageCalls: unknown[] = [];
-    const renderScheduler = createCanvasRenderSnapshotScheduler({
-      commit: (input) => renderCommits.push(input),
-      requestFrame: (callback) => {
-        renderFrames.push(callback);
-        return renderFrames.length;
-      },
-      cancelFrame: () => undefined
-    });
-    const imageScheduler = createCanvasImageAssetViewportSyncScheduler({
-      sync: (cameraState) => imageCalls.push(cameraState),
-      requestFrame: (callback) => {
-        imageFrames.push(callback);
-        return imageFrames.length;
-      },
-      cancelFrame: () => undefined
-    });
-
-    renderScheduler.requestMoving({ cameraState: 'moving' });
-    imageScheduler.request('moving');
-
-    expect(renderCommits).toEqual([]);
-    expect(imageCalls).toEqual([]);
-    expect(renderFrames).toHaveLength(1);
-    expect(imageFrames).toHaveLength(1);
-
-    renderFrames[0]?.(0);
-    imageFrames[0]?.(0);
-
-    expect(renderCommits).toEqual([{ cameraState: 'moving' }]);
-    expect(imageCalls).toEqual(['moving']);
-  });
-
-  it('keeps moving camera sync visibility work out of the live camera callback and queues image viewport sync', () => {
+  it('keeps moving camera sync limited to stage transform, image zoom context, and render scheduling', () => {
     const cameras: unknown[] = [];
     const renderInputs: unknown[] = [];
-    const imageCameraStates: unknown[] = [];
+    const zoomSnapshots: unknown[] = [];
 
     syncCanvasMovingCameraFrame({
       liveCamera: { x: -350, y: 0, z: 1 },
@@ -890,14 +672,11 @@ describe('CanvasSurface', () => {
       renderSnapshotScheduler: {
         requestMoving: (input) => renderInputs.push(input)
       },
-      imageAssetViewportScheduler: {
-        request: (cameraState) => imageCameraStates.push(cameraState)
-      },
-      syncImageResourceZoom: () => undefined
+      syncImageResourceZoom: (snapshot) => zoomSnapshots.push(snapshot.cameraState)
     });
 
     expect(cameras).toEqual([{ x: -350, y: 0, z: 1 }]);
-    expect(imageCameraStates).toEqual(['moving']);
+    expect(zoomSnapshots).toEqual(['moving']);
     expect(renderInputs).toEqual([{
       camera: { x: -350, y: 0, z: 1 },
       cameraState: 'moving',
@@ -928,9 +707,6 @@ describe('CanvasSurface', () => {
       renderSnapshotScheduler: {
         requestMoving: () => undefined
       },
-      imageAssetViewportScheduler: {
-        request: () => undefined
-      },
       syncImageResourceZoom: (snapshot) => zoomSnapshots.push({
         cameraState: snapshot.cameraState,
         camera: snapshot.camera,
@@ -945,10 +721,9 @@ describe('CanvasSurface', () => {
     }]);
   });
 
-  it('records render and image scheduler counters separately', () => {
+  it('records render scheduler counters', () => {
     const monitor = createCanvasPerfMonitor({ enabled: true });
     const renderFrames: FrameRequestCallback[] = [];
-    const imageFrames: FrameRequestCallback[] = [];
     const renderScheduler = createCanvasRenderSnapshotScheduler({
       perfMonitor: monitor,
       commit: () => undefined,
@@ -958,58 +733,16 @@ describe('CanvasSurface', () => {
       },
       cancelFrame: () => undefined
     });
-    const imageScheduler = createCanvasImageAssetViewportSyncScheduler({
-      perfMonitor: monitor,
-      sync: () => undefined,
-      requestFrame: (callback) => {
-        imageFrames.push(callback);
-        return imageFrames.length;
-      },
-      cancelFrame: () => undefined
-    });
 
     renderScheduler.requestMoving({ cameraState: 'moving' });
     renderScheduler.requestMoving({ cameraState: 'moving' });
-    imageScheduler.request('moving');
-    imageScheduler.request('moving');
     renderFrames[0]?.(0);
-    imageFrames[0]?.(0);
     renderScheduler.flush({ cameraState: 'idle' });
-    imageScheduler.flush('idle');
 
     expect(counterNames(monitor.getTrace().events)).toEqual([
       'render-moving-queued',
-      'image-moving-queued',
-      'render-idle-flush',
-      'image-idle-flush'
+      'render-idle-flush'
     ]);
-  });
-
-  it('records moving queue counters separately from actual image runtime work counters', () => {
-    const monitor = createCanvasPerfMonitor({ enabled: true });
-    const frames: FrameRequestCallback[] = [];
-    const imageScheduler = createCanvasImageAssetViewportSyncScheduler({
-      perfMonitor: monitor,
-      sync: () => undefined,
-      requestFrame: (callback) => {
-        frames.push(callback);
-        return frames.length;
-      },
-      cancelFrame: () => undefined
-    });
-
-    imageScheduler.request('moving');
-    imageScheduler.request('moving');
-
-    expect(monitor.getCounterTotals()).toEqual({
-      'image-moving-queued': 1
-    });
-
-    frames[0]?.(0);
-
-    expect(monitor.getCounterTotals()).toEqual({
-      'image-moving-queued': 1
-    });
   });
 
   it('starts, frames, and ends a camera session from camera state changes', () => {
@@ -1028,7 +761,7 @@ describe('CanvasSurface', () => {
     monitor.recordCounter({ timestamp: 5, source: 'CanvasRenderCoordinator', name: 'render-snapshot-build' });
     monitor.recordCounter({ timestamp: 6, source: 'CanvasRenderCoordinator', name: 'render-snapshot-reuse' });
     monitor.recordCounter({ timestamp: 7, source: 'CanvasStageRuntime', name: 'stage-camera-write' });
-    monitor.recordCounter({ timestamp: 8, source: 'CanvasImageAssetRuntime', name: 'image-plan-rebuild' });
+    monitor.recordCounter({ timestamp: 8, source: 'CanvasImageNodeAsset', name: 'image-node-url-resolve' });
     reactCommitCountRef.current = 1;
     recordCanvasPerfFrame({
       enabled: true,
@@ -1046,7 +779,6 @@ describe('CanvasSurface', () => {
         nodeLayers: new Map(),
         edges: []
       },
-      imageAssetRuntime: { stats: () => imageStats({ activeLoadCount: 1, pendingImageCount: 2, decodedImageCount: 3 }) },
       reactCommitCountRef
     });
     syncCanvasPerfSessionState({
@@ -1063,21 +795,18 @@ describe('CanvasSurface', () => {
       frameCount: 1,
       mountedNodeCount: 2,
       visibleNodeCount: 1,
-      culledNodeCount: 1,
-      activeImageLoadCount: 1,
-      pendingImageCount: 2,
-      decodedImageCount: 3
+      culledNodeCount: 1
     });
     expect(monitor.getTrace().events.find((event) => event.kind === 'frame')).toMatchObject({
       kind: 'frame',
       renderSnapshotBuildCount: 1,
       renderSnapshotReuseCount: 1,
       stageWriteCount: 1,
-      imageRuntimeWorkCount: 1
+      imageNodeWorkCount: 1
     });
   });
 
-  it('records moving camera frames without image runtime work when image viewport sync is unchanged', () => {
+  it('records moving camera frames without image node work when no image node counter fired', () => {
     const monitor = createCanvasPerfMonitor({ enabled: true });
     const sessionRef = { current: undefined as CanvasPerfRuntimeSession | undefined };
     const reactCommitCountRef = { current: 0 };
@@ -1107,9 +836,6 @@ describe('CanvasSurface', () => {
         virtualRect: { x: -100, y: -100, width: 600, height: 500 },
         nodeLayers: new Map(),
         edges: []
-      },
-      imageAssetRuntime: {
-        stats: () => imageStats({ decodedImageCount: 1 })
       },
       reactCommitCountRef
     });
@@ -1119,55 +845,7 @@ describe('CanvasSurface', () => {
       cameraState: 'moving',
       reactCommitCount: 0,
       renderSnapshotBuildCount: 0,
-      imageRuntimeWorkCount: 0
-    });
-  });
-
-  it('does not count moving image viewport queue signals as image runtime work', () => {
-    const monitor = createCanvasPerfMonitor({ enabled: true });
-    const sessionRef = { current: undefined as CanvasPerfRuntimeSession | undefined };
-    const reactCommitCountRef = { current: 0 };
-
-    syncCanvasPerfSessionState({
-      enabled: true,
-      perfMonitor: monitor,
-      sessionRef,
-      reactCommitCountRef,
-      snapshot: {
-        cameraState: 'moving',
-        camera: { x: 0, y: 0, z: 1 }
-      },
-      minimapOpen: false
-    });
-    monitor.recordCounter({
-      timestamp: 5,
-      source: 'CanvasImageAssetViewportScheduler',
-      name: 'image-moving-queued'
-    });
-    recordCanvasPerfFrame({
-      enabled: true,
-      perfMonitor: monitor,
-      sessionRef,
-      cameraState: 'moving',
-      renderSnapshot: {
-        nodesByPath: new Map([
-          ['flow/a.png', nodeFixture('flow/a.png', 0, 0)]
-        ]),
-        culledNodePaths: new Set(),
-        visibleRect: { x: 0, y: 0, width: 400, height: 300 },
-        virtualRect: { x: -100, y: -100, width: 600, height: 500 },
-        nodeLayers: new Map(),
-        edges: []
-      },
-      imageAssetRuntime: {
-        stats: () => imageStats({ decodedImageCount: 1 })
-      },
-      reactCommitCountRef
-    });
-
-    expect(monitor.getTrace().events.find((event) => event.kind === 'frame')).toMatchObject({
-      kind: 'frame',
-      imageRuntimeWorkCount: 0
+      imageNodeWorkCount: 0
     });
   });
 
@@ -1210,7 +888,6 @@ describe('CanvasSurface', () => {
         nodeLayers: new Map(),
         edges: []
       },
-      imageAssetRuntime: { stats: () => imageStats({ activeLoadCount: 0, pendingImageCount: 0, decodedImageCount: 1 }) },
       reactCommitCountRef
     });
     syncCanvasPerfDragSessionState({
@@ -1228,7 +905,6 @@ describe('CanvasSurface', () => {
       mountedNodeCount: 1,
       visibleNodeCount: 1,
       culledNodeCount: 0,
-      decodedImageCount: 1,
       counters: {
         'stage-drag-preview-write': 1,
         'react-commit': 1
@@ -1269,7 +945,6 @@ function surface(
       actions={actions}
       textFileBuffers={input.textFileBuffers ?? {}}
       canvasFeedback={input.canvasFeedback}
-      imageAssetRuntime={createCanvasImageAssetRuntime()}
       overlayRuntime={createCanvasOverlayRuntime()}
       feedbackPlacementContext={feedbackPlacementContextFixture()}
     />
@@ -1281,54 +956,6 @@ function feedbackPlacementContextFixture(): Parameters<typeof CanvasSurface>[0][
     viewportRect: { x: 0, y: 0, width: 1280, height: 720 },
     reservedRects: []
   };
-}
-
-function imageStats(overrides: Partial<CanvasImageAssetRuntimeStats> = {}): CanvasImageAssetRuntimeStats {
-  return {
-    activeLoadCount: 0,
-    pendingImageCount: 0,
-    decodedImageCount: 0,
-    retainedDecodedImagePixels: 0,
-    oversizedRetainedImageCount: 0,
-    downshiftStartCount: 0,
-    downshiftResolveCount: 0,
-    highResolutionEvictionCount: 0,
-    visiblePreviewWidths: {},
-    nextPreviewWidths: {},
-    imageWorkIntentCounts: {},
-    imageCancellationReasons: {},
-    imageEvictionReasons: {},
-    ...overrides
-  };
-}
-
-function renderCanvasSurfaceWithImageState(imageState: CanvasImageNodeRenderState): string {
-  const runtime = {
-    setNodes: () => undefined,
-    setViewport: () => undefined,
-    getNodeState: () => imageState,
-    subscribeNode: () => () => undefined,
-    resolvePending: () => undefined,
-    rejectPending: () => undefined,
-    retry: () => undefined,
-    stats: () => imageStats(),
-    dispose: () => undefined
-  } satisfies CanvasImageAssetRuntime;
-
-  return renderToStaticMarkup(
-    <CanvasImageAssetProvider runtime={runtime}>
-      <CanvasNodeContent
-        node={nodeFixture('flow/a.png', 0, 0)}
-        selected={false}
-        actions={actions}
-        textBuffer={undefined}
-        onSelectNode={() => undefined}
-        onTitlePointerDown={() => undefined}
-        onTitlePointerMove={() => undefined}
-        onTitlePointerUp={() => undefined}
-      />
-    </CanvasImageAssetProvider>
-  );
 }
 
 function nodeFixture(path: string, x: number, y: number): CanvasProjection['nodes'][number] {
@@ -1376,6 +1003,7 @@ function nodeShellProps(node = nodeFixture('flow/cover.png', 0, 0)): CanvasNodeS
     node,
     selected: false,
     hovered: false,
+    culled: false,
     zIndex: node.z,
     stageRuntime: createCanvasStageRuntime(),
     actions,

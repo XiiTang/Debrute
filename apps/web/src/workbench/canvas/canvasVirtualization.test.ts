@@ -90,12 +90,13 @@ describe('canvas virtualization geometry', () => {
     })).toThrow('Canvas camera z must be a positive finite number.');
   });
 
-  it('renders visible, selected, and active nodes without rendering unrelated offscreen nodes', () => {
+  it('renders visible image nodes, selected nodes, and active nodes without rendering unrelated offscreen non-image nodes', () => {
     const projection = projectionFixture([
       nodeFixture('flow/visible.png', 0, 0),
       nodeFixture('flow/selected-offscreen.png', 6000, 0),
       nodeFixture('flow/active-offscreen.png', 0, 6000),
-      nodeFixture('flow/far.png', 6000, 6000)
+      nodeFixture('flow/far.png', 6000, 6000),
+      textNodeFixture('flow/far.txt', 7000, 7000)
     ]);
 
     const state = buildVirtualizedCanvasRenderState({
@@ -110,7 +111,8 @@ describe('canvas virtualization geometry', () => {
     expect(state.nodes.map((node) => node.projectRelativePath)).toEqual([
       'flow/visible.png',
       'flow/selected-offscreen.png',
-      'flow/active-offscreen.png'
+      'flow/active-offscreen.png',
+      'flow/far.png'
     ]);
   });
 
@@ -176,17 +178,17 @@ describe('canvas virtualization geometry', () => {
   it('virtualizes edges independently of mounted endpoint nodes', () => {
     const projection = projectionFixture([
       nodeFixture('flow/source.png', 0, 0),
-      nodeFixture('flow/target.png', 5000, 0),
-      nodeFixture('flow/outside-a.png', 0, -5000),
-      nodeFixture('flow/outside-b.png', 5000, -5000)
+      textNodeFixture('flow/target.txt', 5000, 0),
+      textNodeFixture('flow/outside-a.txt', 0, -5000),
+      textNodeFixture('flow/outside-b.txt', 5000, -5000)
     ], [{
       id: 'source-to-target',
       sourceProjectRelativePath: 'flow/source.png',
-      targetProjectRelativePath: 'flow/target.png'
+      targetProjectRelativePath: 'flow/target.txt'
     }, {
       id: 'outside',
-      sourceProjectRelativePath: 'flow/outside-a.png',
-      targetProjectRelativePath: 'flow/outside-b.png'
+      sourceProjectRelativePath: 'flow/outside-a.txt',
+      targetProjectRelativePath: 'flow/outside-b.txt'
     }]);
 
     const state = buildVirtualizedCanvasRenderState({
@@ -270,12 +272,12 @@ describe('canvas virtualization geometry', () => {
 
   it('keeps routed edges visible when only an orthogonal trunk segment intersects the camera', () => {
     const projection = projectionFixture([
-      nodeFixture('flow/source.png', 0, -5000),
-      nodeFixture('flow/target.png', 5000, 5000)
+      textNodeFixture('flow/source.txt', 0, -5000),
+      textNodeFixture('flow/target.txt', 5000, 5000)
     ], [{
       id: 'vertical-trunk',
-      sourceProjectRelativePath: 'flow/source.png',
-      targetProjectRelativePath: 'flow/target.png'
+      sourceProjectRelativePath: 'flow/source.txt',
+      targetProjectRelativePath: 'flow/target.txt'
     }]);
 
     const state = buildVirtualizedCanvasRenderState({
@@ -301,7 +303,7 @@ describe('canvas virtualization geometry', () => {
     const projection = projectionFixture([
       nodeFixture('flow/visible-a.png', 0, 0),
       nodeFixture('flow/visible-b.png', 300, 0),
-      nodeFixture('flow/far.png', 8000, 0)
+      textNodeFixture('flow/far.txt', 8000, 0)
     ], [{
       id: 'visible-edge',
       sourceProjectRelativePath: 'flow/visible-a.png',
@@ -309,7 +311,7 @@ describe('canvas virtualization geometry', () => {
     }, {
       id: 'far-edge',
       sourceProjectRelativePath: 'flow/visible-a.png',
-      targetProjectRelativePath: 'flow/far.png'
+      targetProjectRelativePath: 'flow/far.txt'
     }]);
     const index = createCanvasVirtualizationIndex({
       nodes: projection.nodes,
@@ -395,6 +397,28 @@ function nodeFixture(projectRelativePath: string, x: number, y: number): CanvasP
       mimeType: 'image/png',
       canvasImagePreviewable: true,
       canvasImagePreviewSourceWidth: 200,
+      fileUrl: `http://127.0.0.1:17321/api/projects/123e4567-e89b-42d3-a456-426614174000/files/raw/${projectRelativePath}?v=rev`,
+      revision: 'rev'
+    }
+  };
+}
+
+function textNodeFixture(projectRelativePath: string, x: number, y: number): CanvasProjection['nodes'][number] {
+  return {
+    projectRelativePath,
+    nodeKind: 'file',
+    mediaKind: 'text',
+    x,
+    y,
+    width: 200,
+    height: 120,
+    z: 0,
+    visible: true,
+    locked: false,
+    availability: {
+      state: 'available',
+      size: 100,
+      mimeType: 'text/plain',
       fileUrl: `http://127.0.0.1:17321/api/projects/123e4567-e89b-42d3-a456-426614174000/files/raw/${projectRelativePath}?v=rev`,
       revision: 'rev'
     }

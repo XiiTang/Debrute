@@ -133,6 +133,29 @@ describe('CanvasRenderCoordinator', () => {
     expect(snapshot.culledNodePaths.has('flow/active.png')).toBe(true);
   });
 
+  it('keeps offscreen image nodes mounted and marks them culled', () => {
+    const coordinator = createCanvasRenderCoordinator({ projection: projection([
+      imageNode('flow/visible.png', 0, 0, 1),
+      imageNode('flow/offscreen.png', 5000, 0, 2),
+      textNode('flow/offscreen.txt', 6000, 0, 3)
+    ]) });
+
+    const snapshot = coordinator.update({
+      camera: { x: 0, y: 0, z: 1 },
+      cameraState: 'idle',
+      surfaceSize: { width: 300, height: 200 },
+      selection: undefined,
+      activeNodePaths: []
+    });
+
+    expect([...snapshot.nodesByPath.keys()]).toEqual([
+      'flow/offscreen.png',
+      'flow/visible.png'
+    ]);
+    expect(snapshot.nodesByPath.has('flow/offscreen.txt')).toBe(false);
+    expect(snapshot.culledNodePaths.has('flow/offscreen.png')).toBe(true);
+  });
+
   it('records snapshot build, reuse, and virtual refresh counters', () => {
     const monitor = createCanvasPerfMonitor({ enabled: true });
     const coordinator = createCanvasRenderCoordinator({
@@ -344,6 +367,28 @@ function imageNode(path: string, x: number, y: number, z: number, visible = true
       mimeType: 'image/png',
       canvasImagePreviewable: true,
       canvasImagePreviewSourceWidth: 100
+    }
+  };
+}
+
+function textNode(path: string, x: number, y: number, z: number): ProjectedCanvasNode {
+  return {
+    nodeKind: 'file',
+    mediaKind: 'text',
+    projectRelativePath: path,
+    x,
+    y,
+    width: 100,
+    height: 100,
+    z,
+    locked: false,
+    visible: true,
+    availability: {
+      state: 'available',
+      fileUrl: `/api/projects/p/files/${path}`,
+      revision: '1',
+      size: 1000,
+      mimeType: 'text/plain'
     }
   };
 }
