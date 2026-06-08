@@ -12,7 +12,7 @@ import {
   type CanvasImageNodeRenderState,
   type CanvasPendingImage
 } from './canvasImageLoading';
-import type { CanvasLoadedImage } from './canvasImagePreviews';
+import { canvasImageSource, type CanvasLoadedImage } from './canvasImagePreviews';
 import { nodeRect } from './canvasVirtualization';
 import type { CanvasCameraState } from './runtime/canvasCamera';
 import type { CanvasRect } from './runtime/canvasGeometry';
@@ -23,6 +23,7 @@ export interface CanvasImageAssetViewport {
   mountedNodePaths: ReadonlySet<string>;
   culledNodePaths: ReadonlySet<string>;
   imageResourceZoom: number;
+  retentionResourceZoom: number;
   devicePixelRatio: number;
   cameraState: CanvasCameraState;
   imageHeavyEfficientMode: boolean;
@@ -44,6 +45,11 @@ export interface CanvasImageAssetRuntimeStats {
   activeLoadCount: number;
   pendingImageCount: number;
   decodedImageCount: number;
+  retainedDecodedImagePixels: number;
+  oversizedRetainedImageCount: number;
+  downshiftStartCount: number;
+  downshiftResolveCount: number;
+  highResolutionEvictionCount: number;
   visiblePreviewWidths: Record<string, number>;
   nextPreviewWidths: Record<string, number>;
   imageWorkIntentCounts: Record<string, number>;
@@ -57,8 +63,11 @@ export interface CanvasImageAssetRuntimeBudget {
   maxPendingImages: number;
   maxHighResolutionPendingImages: number;
   maxSourceWidthUpgradePendingImages: number;
+  maxDownshiftPendingImages: number;
   highResolutionPreviewWidth: number;
   movingPrefetchLimit: number;
+  maxRetainedDecodedImagePixels: number;
+  hardRetainedDecodedImagePixels: number;
 }
 
 export const CANVAS_IMAGE_VISIBLE_RETAIN_OVERSCAN_SCREEN_PX = 1536;
@@ -66,8 +75,11 @@ export const CANVAS_IMAGE_ASSET_DEFAULT_BUDGET: CanvasImageAssetRuntimeBudget = 
   maxPendingImages: 3,
   maxHighResolutionPendingImages: 2,
   maxSourceWidthUpgradePendingImages: 1,
+  maxDownshiftPendingImages: 6,
   highResolutionPreviewWidth: 1024,
-  movingPrefetchLimit: 1
+  movingPrefetchLimit: 1,
+  maxRetainedDecodedImagePixels: 3_000_000,
+  hardRetainedDecodedImagePixels: 4_000_000
 };
 
 interface CanvasImageAssetRecord {
@@ -106,6 +118,9 @@ export function createCanvasImageAssetRuntime(input: {
   let plan = new Map<string, CanvasImageLoadingPlanItem>();
   let disposed = false;
   let decodedImageCount = 0;
+  let downshiftStartCount = 0;
+  let downshiftResolveCount = 0;
+  let highResolutionEvictionCount = 0;
 
   const recordCanvasSessionCounter = (name: CanvasPerfCounterName, detail?: Record<string, unknown>) => {
     input.perfMonitor?.recordCounter({
@@ -251,9 +266,11 @@ export function createCanvasImageAssetRuntime(input: {
         nodes: [...nodes.values()].filter((node) => currentViewport.mountedNodePaths.has(node.projectRelativePath)),
         visibleRect: currentViewport.visibleRect,
         imageResourceZoom: currentViewport.imageResourceZoom,
+        retentionResourceZoom: currentViewport.retentionResourceZoom,
         devicePixelRatio: currentViewport.devicePixelRatio,
         existingImages: loadedImagesFromRecords(records),
-        retryKeys
+        retryKeys,
+        culledNodePaths: currentViewport.culledNodePaths
       })
       : new Map();
     for (const path of pruneStaleImageWork()) {
@@ -290,7 +307,7 @@ export function createCanvasImageAssetRuntime(input: {
     }
 
     const nextSignatures = canvasImageAssetViewportSignatures(currentViewport, nodes, {
-      loadedImagePaths: loadedImagePathsFromRecords(records)
+      loadedImages: loadedImagesFromRecords(records)
     });
     const currentSignature = currentViewport.cameraState === 'moving'
       ? movingViewportSignature
@@ -336,7 +353,7 @@ export function createCanvasImageAssetRuntime(input: {
       return;
     }
     const nextSignatures = canvasImageAssetViewportSignatures(currentViewport, nodes, {
-      loadedImagePaths: loadedImagePathsFromRecords(records)
+      loadedImages: loadedImagesFromRecords(records)
     });
     viewportSignature = nextSignatures.current;
     movingViewportSignature = nextSignatures.moving;
@@ -468,6 +485,12 @@ export function createCanvasImageAssetRuntime(input: {
     for (const path of enforcePendingImageBudget(currentViewport)) {
       affectedPaths.add(path);
     }
+    for (const path of evictOversizedVisibleImages(currentViewport)) {
+      affectedPaths.add(path);
+    }
+    for (const path of enforceRetainedPreviewBudget(currentViewport)) {
+      affectedPaths.add(path);
+    }
     for (const path of evictFarVisibleImages(currentViewport)) {
       affectedPaths.add(path);
     }
@@ -498,7 +521,22 @@ export function createCanvasImageAssetRuntime(input: {
       return record?.visible ? 'visible-loaded' : undefined;
     }
     if (item.intent === 'prefetch-near') {
+      if (
+        currentViewport.culledNodePaths.has(item.projectRelativePath)
+        && item.previewWidth >= budget.highResolutionPreviewWidth
+      ) {
+        return 'culled-high-resolution-prefetch';
+      }
       return record?.visible ? 'visible-loaded' : undefined;
+    }
+    if (item.intent === 'downshift-visible') {
+      if (currentViewport.culledNodePaths.has(item.projectRelativePath)) {
+        return 'culled-downshift';
+      }
+      return record?.visible ? undefined : 'missing-visible-downshift';
+    }
+    if (item.intent === 'evict-oversized') {
+      return 'eviction-not-load-work';
     }
     if (item.intent === 'upgrade-idle') {
       if (currentViewport.cameraState !== 'idle') {
@@ -517,7 +555,7 @@ export function createCanvasImageAssetRuntime(input: {
       && item.intent !== 'deferred';
   }
 
-  type CanvasImagePendingBudgetBlockReason = 'total' | 'high-resolution' | 'source-width-upgrade';
+  type CanvasImagePendingBudgetBlockReason = 'total' | 'high-resolution' | 'source-width-upgrade' | 'downshift' | 'retained-preview';
 
   function enforcePendingImageBudget(currentViewport: CanvasImageAssetViewport): Set<string> {
     const affectedPaths = new Set<string>();
@@ -541,7 +579,9 @@ export function createCanvasImageAssetRuntime(input: {
     let pendingCount = 0;
     let highResolutionPendingCount = 0;
     let sourceWidthUpgradePendingCount = 0;
+    let downshiftPendingCount = 0;
     for (const pendingItem of pending) {
+      const isDownshift = pendingItem.item.intent === 'downshift-visible';
       const isHighResolution = pendingItem.record.next!.previewWidth >= budget.highResolutionPreviewWidth;
       const isSourceWidthUpgrade = isSourceWidthUpgradeItem(
         pendingItem.item,
@@ -549,20 +589,27 @@ export function createCanvasImageAssetRuntime(input: {
         currentViewport,
         nodes
       );
-      const overTotalBudget = pendingCount >= budget.maxPendingImages;
-      const overHighResolutionBudget = isHighResolution
+      const overDownshiftBudget = isDownshift && downshiftPendingCount >= budget.maxDownshiftPendingImages;
+      const overTotalBudget = !isDownshift && pendingCount >= budget.maxPendingImages;
+      const overHighResolutionBudget = !isDownshift && isHighResolution
         && highResolutionPendingCount >= budget.maxHighResolutionPendingImages;
-      const overSourceWidthUpgradeBudget = isSourceWidthUpgrade
+      const overSourceWidthUpgradeBudget = !isDownshift && isSourceWidthUpgrade
         && sourceWidthUpgradePendingCount >= budget.maxSourceWidthUpgradePendingImages;
-      if (overTotalBudget || overHighResolutionBudget || overSourceWidthUpgradeBudget) {
+      if (overDownshiftBudget || overTotalBudget || overHighResolutionBudget || overSourceWidthUpgradeBudget) {
         removeNextImage(
           pendingItem.path,
           pendingItem.record,
-          overTotalBudget
+          overDownshiftBudget
+            ? 'downshift'
+            : overTotalBudget
             ? 'total'
             : overHighResolutionBudget ? 'high-resolution' : 'source-width-upgrade'
         );
         affectedPaths.add(pendingItem.path);
+        continue;
+      }
+      if (isDownshift) {
+        downshiftPendingCount += 1;
         continue;
       }
       pendingCount += 1;
@@ -634,40 +681,130 @@ export function createCanvasImageAssetRuntime(input: {
       if (!isAvailableVisibleImageNode(node) || rectsIntersect(retainRect, nodeRect(node))) {
         continue;
       }
-      recordCanvasSessionCounter('image-visible-evict', {
-        projectRelativePath: path,
-        loadKey: visible.loadKey,
-        previewWidth: visible.previewWidth,
-        reason: 'far-high-resolution'
-      });
-      incrementReasonCount(imageEvictionReasons, 'far-high-resolution');
-      const nextRecord: CanvasImageAssetRecord = {
-        ...(record.next ? { next: record.next } : {}),
-        ...(record.error ? { error: record.error } : {})
-      };
-      if (nextRecord.next || nextRecord.error) {
-        records.set(path, nextRecord);
-      } else {
-        records.delete(path);
-      }
+      evictVisibleRecord(path, record, visible, 'far-high-resolution');
       affectedPaths.add(path);
     }
     return affectedPaths;
+  }
+
+  function evictOversizedVisibleImages(currentViewport: CanvasImageAssetViewport): Set<string> {
+    const affectedPaths = new Set<string>();
+    for (const [path, record] of [...records]) {
+      const visible = record.visible;
+      const item = plan.get(path);
+      if (!visible || item?.intent !== 'evict-oversized') {
+        continue;
+      }
+      const reason = currentViewport.culledNodePaths.has(path)
+        ? 'oversized-culled'
+        : 'oversized-off-visible';
+      evictVisibleRecord(path, record, visible, reason);
+      affectedPaths.add(path);
+    }
+    return affectedPaths;
+  }
+
+  function enforceRetainedPreviewBudget(currentViewport: CanvasImageAssetViewport): Set<string> {
+    const affectedPaths = new Set<string>();
+    if (!currentViewport.imageHeavyEfficientMode) {
+      return affectedPaths;
+    }
+    let retainedPixels = retainedDecodedImagePixels(records, nodes);
+    if (retainedPixels <= budget.hardRetainedDecodedImagePixels) {
+      return affectedPaths;
+    }
+    const candidates = [...records.entries()]
+      .flatMap(([path, record]) => {
+        if (!record.visible) {
+          return [];
+        }
+        const node = nodes.get(path);
+        if (!node || rectsIntersect(currentViewport.visibleRect, nodeRect(node))) {
+          return [];
+        }
+        return [{
+          path,
+          record,
+          visible: record.visible,
+          pixels: estimatedDecodedImagePixels(record.visible, node)
+        }];
+      })
+      .sort((left, right) => (
+        right.pixels - left.pixels
+        || right.visible.previewWidth - left.visible.previewWidth
+        || left.path.localeCompare(right.path)
+      ));
+    for (const candidate of candidates) {
+      if (retainedPixels <= budget.maxRetainedDecodedImagePixels) {
+        break;
+      }
+      recordCanvasSessionCounter('image-retention-budget-evict', {
+        projectRelativePath: candidate.path,
+        loadKey: candidate.visible.loadKey,
+        previewWidth: candidate.visible.previewWidth,
+        estimatedDecodedImagePixels: candidate.pixels
+      });
+      evictVisibleRecord(candidate.path, candidate.record, candidate.visible, 'retained-preview-budget');
+      retainedPixels -= candidate.pixels;
+      affectedPaths.add(candidate.path);
+    }
+    return affectedPaths;
+  }
+
+  function evictVisibleRecord(
+    path: string,
+    record: CanvasImageAssetRecord,
+    visible: CanvasLoadedImage,
+    reason: string
+  ): void {
+    if (record.next) {
+      const active = activeLoads.get(record.next.loadKey);
+      if (active) {
+        activeLoads.delete(record.next.loadKey);
+        endImageLoadSession(active.item, 'image-load-stale-result');
+      }
+      incrementReasonCount(imageCancellationReasons, `evict-${reason}`);
+      recordCanvasSessionCounter('image-next-cancel', {
+        projectRelativePath: path,
+        loadKey: record.next.loadKey,
+        previewWidth: record.next.previewWidth,
+        reason: `evict-${reason}`
+      });
+    }
+    recordCanvasSessionCounter('image-visible-evict', {
+      projectRelativePath: path,
+      loadKey: visible.loadKey,
+      previewWidth: visible.previewWidth,
+      reason
+    });
+    incrementReasonCount(imageEvictionReasons, reason);
+    if (visible.previewWidth >= budget.highResolutionPreviewWidth) {
+      highResolutionEvictionCount += 1;
+    }
+    if (record.error) {
+      records.set(path, { error: record.error });
+    } else {
+      records.delete(path);
+    }
   }
 
   function imageIntentBudgetOrder(intent: CanvasImageLoadingPlanItem['intent']): number {
     switch (intent) {
       case 'display-critical':
         return 0;
-      case 'prefetch-near':
+      case 'downshift-visible':
         return 1;
-      case 'upgrade-idle':
+      case 'evict-oversized':
         return 2;
-      case 'deferred':
+      case 'upgrade-idle':
         return 3;
+      case 'prefetch-near':
+        return 4;
+      case 'deferred':
+        return 5;
       case 'not-previewable':
       case 'unavailable':
-        return 4;
+        return 6;
     }
     const exhaustive: never = intent;
     return exhaustive;
@@ -694,6 +831,14 @@ export function createCanvasImageAssetRuntime(input: {
       intent: item.intent,
       previewWidth: item.previewWidth
     });
+    if (item.intent === 'downshift-visible') {
+      downshiftStartCount += 1;
+      recordCanvasSessionCounter('image-downshift-start', {
+        projectRelativePath: item.projectRelativePath,
+        loadKey: item.loadKey,
+        previewWidth: item.previewWidth
+      });
+    }
     const active: ActiveCanvasImageLoad = { item };
     activeLoads.set(item.loadKey, active);
     const previous = records.get(item.projectRelativePath);
@@ -726,6 +871,14 @@ export function createCanvasImageAssetRuntime(input: {
     }
     failedLoadKeys.delete(active.item.loadKey);
     decodedImageCount += 1;
+    if (active.item.intent === 'downshift-visible') {
+      downshiftResolveCount += 1;
+      recordCanvasSessionCounter('image-downshift-resolve', {
+        projectRelativePath: active.item.projectRelativePath,
+        loadKey: active.item.loadKey,
+        previewWidth: active.item.previewWidth
+      });
+    }
     records.set(active.item.projectRelativePath, { visible: loaded });
     endImageLoadSession(active.item, 'image-load-resolve');
     rebuildPlan();
@@ -788,14 +941,11 @@ export function createCanvasImageAssetRuntime(input: {
     }).filter((item) => isPendingImageWorkAllowed(item, currentViewport, records.get(item.projectRelativePath)));
     const openSlots = Math.max(
       0,
-      Math.min(
-        concurrency - activeLoads.size,
-        budget.maxPendingImages - pendingImageCount(records)
-      )
+      concurrency - activeLoads.size
     );
     let startedCount = 0;
     for (const item of candidates) {
-      if (startedCount >= openSlots || activeLoads.size >= concurrency || pendingImageCount(records) >= budget.maxPendingImages) {
+      if (startedCount >= openSlots || activeLoads.size >= concurrency) {
         break;
       }
       const budgetBlockReason = pendingImageBudgetBlockReason(item, records, currentViewport);
@@ -819,8 +969,24 @@ export function createCanvasImageAssetRuntime(input: {
     currentRecords: ReadonlyMap<string, CanvasImageAssetRecord>,
     currentViewport: CanvasImageAssetViewport
   ): CanvasImagePendingBudgetBlockReason | undefined {
-    if (pendingImageCount(currentRecords) >= budget.maxPendingImages) {
+    if (item.intent === 'downshift-visible') {
+      return downshiftPendingImageCount(currentRecords, plan) >= budget.maxDownshiftPendingImages
+        ? 'downshift'
+        : undefined;
+    }
+    if (pendingImageCountExcludingDownshift(currentRecords, plan) >= budget.maxPendingImages) {
       return 'total';
+    }
+    if (
+      item.intent !== 'display-critical'
+      && !isScreenVisibleImageWork(item, currentViewport, nodes)
+      && currentViewport.imageHeavyEfficientMode
+      && item.previewWidth >= budget.highResolutionPreviewWidth
+      && reservedDecodedImagePixels(currentRecords, nodes)
+        + estimatedDecodedImagePixels({ src: item.src, loadKey: item.loadKey, previewWidth: item.previewWidth }, nodes.get(item.projectRelativePath))
+        > budget.hardRetainedDecodedImagePixels
+    ) {
+      return 'retained-preview';
     }
     if (
       item.previewWidth >= budget.highResolutionPreviewWidth
@@ -840,6 +1006,16 @@ export function createCanvasImageAssetRuntime(input: {
       return 'source-width-upgrade';
     }
     return undefined;
+  }
+
+  function isScreenVisibleImageWork(
+    item: CanvasImageLoadingPlanItem,
+    currentViewport: CanvasImageAssetViewport,
+    nodes: ReadonlyMap<string, ProjectedCanvasNode>
+  ): boolean {
+    const node = nodes.get(item.projectRelativePath);
+    return isAvailableVisibleImageNode(node)
+      && rectsIntersect(currentViewport.visibleRect, nodeRect(node));
   }
 
   function isSourceWidthUpgradeItem(
@@ -940,6 +1116,11 @@ export function createCanvasImageAssetRuntime(input: {
       activeLoadCount: activeLoads.size,
       pendingImageCount: pendingImageCount(records),
       decodedImageCount,
+      retainedDecodedImagePixels: retainedDecodedImagePixels(records, nodes),
+      oversizedRetainedImageCount: oversizedRetainedImageCount(records, plan),
+      downshiftStartCount,
+      downshiftResolveCount,
+      highResolutionEvictionCount,
       visiblePreviewWidths: imagePreviewWidthCounts(records, 'visible'),
       nextPreviewWidths: imagePreviewWidthCounts(records, 'next'),
       imageWorkIntentCounts: imageWorkIntentCounts(plan),
@@ -968,6 +1149,9 @@ export function createCanvasImageAssetRuntime(input: {
       viewportSignature = undefined;
       movingViewportSignature = undefined;
       decodedImageCount = 0;
+      downshiftStartCount = 0;
+      downshiftResolveCount = 0;
+      highResolutionEvictionCount = 0;
     }
   };
 }
@@ -982,20 +1166,38 @@ function loadedImagesFromRecords(records: ReadonlyMap<string, CanvasImageAssetRe
   return loadedImages;
 }
 
-function loadedImagePathsFromRecords(records: ReadonlyMap<string, CanvasImageAssetRecord>): Set<string> {
-  const paths = new Set<string>();
-  for (const [path, record] of records) {
-    if (record.visible) {
-      paths.add(path);
-    }
-  }
-  return paths;
-}
-
 function pendingImageCount(records: ReadonlyMap<string, CanvasImageAssetRecord>): number {
   let count = 0;
   for (const record of records.values()) {
     if (record.next) {
+      count += 1;
+    }
+  }
+  return count;
+}
+
+function pendingImageCountExcludingDownshift(
+  records: ReadonlyMap<string, CanvasImageAssetRecord>,
+  plan: ReadonlyMap<string, CanvasImageLoadingPlanItem>
+): number {
+  let count = 0;
+  for (const [path, record] of records) {
+    const item = plan.get(path);
+    if (record.next && item?.loadKey === record.next.loadKey && item.intent !== 'downshift-visible') {
+      count += 1;
+    }
+  }
+  return count;
+}
+
+function downshiftPendingImageCount(
+  records: ReadonlyMap<string, CanvasImageAssetRecord>,
+  plan: ReadonlyMap<string, CanvasImageLoadingPlanItem>
+): number {
+  let count = 0;
+  for (const [path, record] of records) {
+    const item = plan.get(path);
+    if (record.next && item?.loadKey === record.next.loadKey && item.intent === 'downshift-visible') {
       count += 1;
     }
   }
@@ -1058,6 +1260,60 @@ function imagePreviewWidthCounts(
   return counts;
 }
 
+function retainedDecodedImagePixels(
+  records: ReadonlyMap<string, CanvasImageAssetRecord>,
+  nodes: ReadonlyMap<string, ProjectedCanvasNode>
+): number {
+  let total = 0;
+  for (const [path, record] of records) {
+    if (record.visible) {
+      total += estimatedDecodedImagePixels(record.visible, nodes.get(path));
+    }
+  }
+  return total;
+}
+
+function reservedDecodedImagePixels(
+  records: ReadonlyMap<string, CanvasImageAssetRecord>,
+  nodes: ReadonlyMap<string, ProjectedCanvasNode>
+): number {
+  let total = 0;
+  for (const [path, record] of records) {
+    const node = nodes.get(path);
+    if (record.visible) {
+      total += estimatedDecodedImagePixels(record.visible, node);
+    }
+    if (record.next) {
+      total += estimatedDecodedImagePixels(record.next, node);
+    }
+  }
+  return total;
+}
+
+function estimatedDecodedImagePixels(
+  image: CanvasLoadedImage,
+  node: ProjectedCanvasNode | undefined
+): number {
+  const ratio = node && node.width > 0 && node.height > 0
+    ? node.height / node.width
+    : 1;
+  return Math.max(1, image.previewWidth) * Math.max(1, Math.ceil(image.previewWidth * ratio));
+}
+
+function oversizedRetainedImageCount(
+  records: ReadonlyMap<string, CanvasImageAssetRecord>,
+  plan: ReadonlyMap<string, CanvasImageLoadingPlanItem>
+): number {
+  let count = 0;
+  for (const [path, record] of records) {
+    const item = plan.get(path);
+    if (record.visible && item && record.visible.previewWidth > item.previewWidth) {
+      count += 1;
+    }
+  }
+  return count;
+}
+
 function imageWorkIntentCounts(plan: ReadonlyMap<string, CanvasImageLoadingPlanItem>): Record<string, number> {
   const counts: Record<string, number> = {};
   for (const item of plan.values()) {
@@ -1101,12 +1357,14 @@ function sameCanvasImageNodeRenderState(
 export function canvasImageAssetViewportSignature(
   viewport: CanvasImageAssetViewport,
   nodes: ReadonlyMap<string, ProjectedCanvasNode>,
-  input: { loadedImagePaths?: ReadonlySet<string> } = {}
+  input: { loadedImages?: ReadonlyMap<string, CanvasLoadedImage> } = {}
 ): string {
   if (viewport.cameraState === 'moving') {
+    const loadedImages = input.loadedImages ?? new Map();
     return [
       viewport.cameraState,
-      movingViewportImageCandidateSignature(viewport, nodes, input.loadedImagePaths ?? new Set())
+      movingViewportImageCandidateSignature(viewport, nodes, loadedImages),
+      retentionPreviewWidthSignature(viewport, nodes, loadedImages)
     ].join('\u001e');
   }
 
@@ -1114,6 +1372,7 @@ export function canvasImageAssetViewportSignature(
     viewport.cameraState,
     `${rectSignature(viewport.visibleRect)}:${mountedImageSourceSignature(viewport.mountedNodePaths, nodes)}`,
     String(viewport.imageResourceZoom),
+    String(viewport.retentionResourceZoom),
     String(viewport.devicePixelRatio)
   ].join('\u001e');
 }
@@ -1121,7 +1380,7 @@ export function canvasImageAssetViewportSignature(
 function canvasImageAssetViewportSignatures(
   viewport: CanvasImageAssetViewport,
   nodes: ReadonlyMap<string, ProjectedCanvasNode>,
-  input: { loadedImagePaths: ReadonlySet<string> }
+  input: { loadedImages: ReadonlyMap<string, CanvasLoadedImage> }
 ): { current: string; moving: string } {
   return {
     current: canvasImageAssetViewportSignature(viewport, nodes, input),
@@ -1139,7 +1398,7 @@ function rectSignature(rect: CanvasRect): string {
 function movingViewportImageCandidateSignature(
   viewport: CanvasImageAssetViewport,
   nodes: ReadonlyMap<string, ProjectedCanvasNode>,
-  loadedImagePaths: ReadonlySet<string>
+  loadedImages: ReadonlyMap<string, CanvasLoadedImage>
 ): string {
   const nearRect = expandCanvasRect(
     viewport.visibleRect,
@@ -1147,7 +1406,7 @@ function movingViewportImageCandidateSignature(
   );
   const visibleCenter = rectCenter(viewport.visibleRect);
   return [...viewport.mountedNodePaths]
-    .filter((path) => !loadedImagePaths.has(path))
+    .filter((path) => !loadedImages.has(path))
     .flatMap((path) => {
       const node = nodes.get(path);
       if (!isAvailableVisibleImageNode(node) || !rectsIntersect(nearRect, nodeRect(node))) {
@@ -1169,6 +1428,31 @@ function movingViewportImageCandidateSignature(
       || (left.sourceSignature ?? '').localeCompare(right.sourceSignature ?? '')
     ))
     .map((entry) => `${entry.intent}\u001c${entry.sourceSignature ?? ''}`)
+    .join('\u001f');
+}
+
+function retentionPreviewWidthSignature(
+  viewport: CanvasImageAssetViewport,
+  nodes: ReadonlyMap<string, ProjectedCanvasNode>,
+  loadedImages: ReadonlyMap<string, CanvasLoadedImage>
+): string {
+  return [...loadedImages.entries()]
+    .flatMap(([path, loaded]) => {
+      const node = nodes.get(path);
+      if (!isAvailableVisibleImageNode(node) || !viewport.mountedNodePaths.has(path)) {
+        return [];
+      }
+      const source = canvasImageSource({
+        node,
+        cameraZoom: viewport.retentionResourceZoom,
+        devicePixelRatio: viewport.devicePixelRatio
+      });
+      if (!source || loaded.previewWidth <= source.previewWidth) {
+        return [];
+      }
+      return [`${path}\u001c${source.previewWidth}\u001c${String(viewport.culledNodePaths.has(path))}`];
+    })
+    .sort()
     .join('\u001f');
 }
 

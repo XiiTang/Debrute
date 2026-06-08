@@ -14,6 +14,7 @@ import { createCanvasOverlayRuntime } from './CanvasOverlayRuntime';
 import { areCanvasNodeShellPropsEqual, CanvasNodeShell, type CanvasNodeShellProps } from './CanvasNodeShell';
 import {
   CanvasSurface,
+  canvasImageResourceZoomPreviewSignature,
   createCanvasImageAssetViewportSyncScheduler,
   createCanvasRenderSnapshotScheduler,
   recordCanvasPerfFrame,
@@ -288,6 +289,7 @@ describe('CanvasSurface', () => {
       mountedNodePaths: new Set([node.projectRelativePath]),
       culledNodePaths: new Set(),
       imageResourceZoom: 1,
+      retentionResourceZoom: 1,
       devicePixelRatio: 1,
       cameraState: 'idle',
       imageHeavyEfficientMode: false
@@ -444,7 +446,10 @@ describe('CanvasSurface', () => {
         setViewport: (viewport) => viewports.push(viewport)
       },
       editorRuntime: {
-        getSnapshot: () => ({ cameraState: 'moving' }) as ReturnType<CanvasEditorRuntime['getSnapshot']>,
+        getSnapshot: () => ({
+          camera: { x: 0, y: 0, z: 1 },
+          cameraState: 'moving'
+        }) as ReturnType<CanvasEditorRuntime['getSnapshot']>,
         coordinates: {
           visibleCanvasRect: () => ({ x: 350, y: 0, width: 400, height: 300 })
         } as CanvasEditorRuntime['coordinates']
@@ -473,6 +478,32 @@ describe('CanvasSurface', () => {
     expect((viewports[0] as { culledNodePaths: ReadonlySet<string> }).culledNodePaths).toEqual(new Set([
       'flow/stale-visible.png'
     ]));
+  });
+
+  it('passes live zoom-out pressure as retention resource zoom', () => {
+    const viewports: unknown[] = [];
+    const runtime = createCanvasEditorRuntime({
+      camera: { x: 0, y: 0, z: 0.1 }
+    });
+    runtime.setImageResourceZoom(1);
+
+    syncCanvasImageAssetViewport({
+      imageAssetRuntime: {
+        setViewport: (viewport) => viewports.push(viewport)
+      },
+      editorRuntime: runtime,
+      nodesByPath: new Map(),
+      imageResourceZoom: 1,
+      devicePixelRatio: 1,
+      imageHeavyEfficientMode: true
+    });
+
+    expect(viewports).toEqual([
+      expect.objectContaining({
+        imageResourceZoom: 1,
+        retentionResourceZoom: 0.1
+      })
+    ]);
   });
 
   it('defers moving image resource viewport sync until an animation frame', () => {
@@ -538,6 +569,33 @@ describe('CanvasSurface', () => {
     });
 
     expect(cleared).toEqual([7]);
+    expect(timerRef.current).toBeUndefined();
+    expect(updates).toEqual([]);
+  });
+
+  it('records movement time and clears pending efficient image resource upgrades while moving', () => {
+    const timerRef = { current: 7 };
+    const movementRef = { current: undefined as number | undefined };
+    const cleared: number[] = [];
+    const updates: number[] = [];
+
+    syncCanvasImageResourceZoomForCameraState({
+      cameraState: 'moving',
+      useEfficientImageResourceZoom: true,
+      currentImageResourceZoom: 0.1,
+      liveCameraZoom: 1,
+      timerRef,
+      lastCameraMovementAtRef: movementRef,
+      now: () => 2222,
+      setImageResourceZoom: (zoom) => updates.push(zoom),
+      setTimeout: () => {
+        throw new Error('moving camera must not schedule image resource zoom work');
+      },
+      clearTimeout: (handle) => cleared.push(handle)
+    });
+
+    expect(cleared).toEqual([7]);
+    expect(movementRef.current).toBe(2222);
     expect(timerRef.current).toBeUndefined();
     expect(updates).toEqual([]);
   });
@@ -613,6 +671,83 @@ describe('CanvasSurface', () => {
 
     expect(timerRef.current).toBeUndefined();
     expect(updates).toEqual([2]);
+  });
+
+  it('waits for the stable post-movement window before upgrading efficient image resource zoom', () => {
+    const timerRef = { current: undefined as number | undefined };
+    const movementRef = { current: 1000 };
+    const updates: number[] = [];
+    const timers: Array<() => void> = [];
+    const delays: number[] = [];
+
+    syncCanvasImageResourceZoomForCameraState({
+      cameraState: 'idle',
+      useEfficientImageResourceZoom: true,
+      currentImageResourceZoom: 0.1,
+      liveCameraZoom: 1,
+      timerRef,
+      lastCameraMovementAtRef: movementRef,
+      now: () => 1300,
+      setImageResourceZoom: (zoom) => updates.push(zoom),
+      setTimeout: (callback, delay) => {
+        timers.push(callback);
+        delays.push(delay);
+        return 23;
+      },
+      clearTimeout: () => undefined,
+      settleMs: 900
+    });
+
+    expect(delays).toEqual([600]);
+    expect(updates).toEqual([]);
+
+    timers[0]?.();
+
+    expect(updates).toEqual([1]);
+  });
+
+  it('does not publish efficient image resource zoom when preview-width classes are unchanged', () => {
+    const timerRef = { current: undefined as number | undefined };
+    const updates: number[] = [];
+
+    syncCanvasImageResourceZoomForCameraState({
+      cameraState: 'idle',
+      useEfficientImageResourceZoom: true,
+      currentImageResourceZoom: 0.11,
+      liveCameraZoom: 0.12,
+      timerRef,
+      resourceZoomSignature: (zoom) => zoom < 0.2 ? 'same-preview-width' : 'larger-preview-width',
+      setImageResourceZoom: (zoom) => updates.push(zoom),
+      setTimeout: () => {
+        throw new Error('same preview-width class must not schedule image resource zoom work');
+      },
+      clearTimeout: () => undefined,
+      settleMs: 900
+    });
+
+    expect(timerRef.current).toBeUndefined();
+    expect(updates).toEqual([]);
+  });
+
+  it('builds image resource zoom signatures from preview-width classes', () => {
+    expect(canvasImageResourceZoomPreviewSignature({
+      nodes: [largePreviewNodeFixture('flow/a.png')],
+      imageResourceZoom: 0.11,
+      devicePixelRatio: 1
+    })).toBe(canvasImageResourceZoomPreviewSignature({
+      nodes: [largePreviewNodeFixture('flow/a.png')],
+      imageResourceZoom: 0.12,
+      devicePixelRatio: 1
+    }));
+    expect(canvasImageResourceZoomPreviewSignature({
+      nodes: [largePreviewNodeFixture('flow/a.png')],
+      imageResourceZoom: 0.11,
+      devicePixelRatio: 1
+    })).not.toBe(canvasImageResourceZoomPreviewSignature({
+      nodes: [largePreviewNodeFixture('flow/a.png')],
+      imageResourceZoom: 0.3,
+      devicePixelRatio: 1
+    }));
   });
 
   it('uses efficient image resource zoom only when the canvas is large or image-heavy', () => {
@@ -909,9 +1044,7 @@ describe('CanvasSurface', () => {
         visibleRect: { x: 0, y: 0, width: 400, height: 300 },
         virtualRect: { x: -768, y: -768, width: 1936, height: 1836 },
         nodeLayers: new Map(),
-        edges: [],
-        svgBounds: { x: 0, y: 0, width: 400, height: 300 },
-        svgViewBox: '0 0 400 300'
+        edges: []
       },
       imageAssetRuntime: { stats: () => imageStats({ activeLoadCount: 1, pendingImageCount: 2, decodedImageCount: 3 }) },
       reactCommitCountRef
@@ -973,9 +1106,7 @@ describe('CanvasSurface', () => {
         visibleRect: { x: 0, y: 0, width: 400, height: 300 },
         virtualRect: { x: -100, y: -100, width: 600, height: 500 },
         nodeLayers: new Map(),
-        edges: [],
-        svgBounds: { x: 0, y: 0, width: 1, height: 1 },
-        svgViewBox: '0 0 1 1'
+        edges: []
       },
       imageAssetRuntime: {
         stats: () => imageStats({ decodedImageCount: 1 })
@@ -1026,9 +1157,7 @@ describe('CanvasSurface', () => {
         visibleRect: { x: 0, y: 0, width: 400, height: 300 },
         virtualRect: { x: -100, y: -100, width: 600, height: 500 },
         nodeLayers: new Map(),
-        edges: [],
-        svgBounds: { x: 0, y: 0, width: 1, height: 1 },
-        svgViewBox: '0 0 1 1'
+        edges: []
       },
       imageAssetRuntime: {
         stats: () => imageStats({ decodedImageCount: 1 })
@@ -1079,9 +1208,7 @@ describe('CanvasSurface', () => {
         visibleRect: { x: 0, y: 0, width: 400, height: 300 },
         virtualRect: { x: -768, y: -768, width: 1936, height: 1836 },
         nodeLayers: new Map(),
-        edges: [],
-        svgBounds: { x: 0, y: 0, width: 400, height: 300 },
-        svgViewBox: '0 0 400 300'
+        edges: []
       },
       imageAssetRuntime: { stats: () => imageStats({ activeLoadCount: 0, pendingImageCount: 0, decodedImageCount: 1 }) },
       reactCommitCountRef
@@ -1161,6 +1288,11 @@ function imageStats(overrides: Partial<CanvasImageAssetRuntimeStats> = {}): Canv
     activeLoadCount: 0,
     pendingImageCount: 0,
     decodedImageCount: 0,
+    retainedDecodedImagePixels: 0,
+    oversizedRetainedImageCount: 0,
+    downshiftStartCount: 0,
+    downshiftResolveCount: 0,
+    highResolutionEvictionCount: 0,
     visiblePreviewWidths: {},
     nextPreviewWidths: {},
     imageWorkIntentCounts: {},
@@ -1219,6 +1351,22 @@ function nodeFixture(path: string, x: number, y: number): CanvasProjection['node
       canvasImagePreviewSourceWidth: 200,
       fileUrl: `http://127.0.0.1:17321/api/projects/123e4567-e89b-42d3-a456-426614174000/files/raw/${path}?v=rev`,
       revision: 'rev'
+    }
+  };
+}
+
+function largePreviewNodeFixture(path: string): CanvasProjection['nodes'][number] {
+  const node = nodeFixture(path, 0, 0);
+  if (node.availability.state !== 'available') {
+    throw new Error('Expected an available image fixture.');
+  }
+  return {
+    ...node,
+    width: 2400,
+    height: 1200,
+    availability: {
+      ...node.availability,
+      canvasImagePreviewSourceWidth: 2400
     }
   };
 }

@@ -16,6 +16,25 @@ export interface CanvasFeedbackBarTarget {
   entry: CanvasFeedbackEntry | undefined;
 }
 
+export function sameCanvasFeedbackBarTarget(
+  left: CanvasFeedbackBarTarget | undefined,
+  right: CanvasFeedbackBarTarget | undefined
+): boolean {
+  if (left === right) {
+    return true;
+  }
+  if (!left || !right) {
+    return false;
+  }
+  return left.projectRelativePath === right.projectRelativePath
+    && sameFloatingBarRect(left.nodeRect, right.nodeRect)
+    && sameFloatingBarRect(left.surfaceRect, right.surfaceRect)
+    && left.camera.x === right.camera.x
+    && left.camera.y === right.camera.y
+    && left.camera.z === right.camera.z
+    && sameCanvasFeedbackEntry(left.entry, right.entry);
+}
+
 export interface FloatingBarPlacement extends FloatingBarRect {
   placement: 'below' | 'above';
 }
@@ -129,4 +148,27 @@ function rectsIntersect(a: FloatingBarRect, b: FloatingBarRect): boolean {
 
 function clamp(value: number, min: number, max: number): number {
   return Math.min(max, Math.max(min, value));
+}
+
+function sameFloatingBarRect(left: FloatingBarRect, right: FloatingBarRect): boolean {
+  return left.x === right.x
+    && left.y === right.y
+    && left.width === right.width
+    && left.height === right.height;
+}
+
+function sameCanvasFeedbackEntry(
+  left: CanvasFeedbackEntry | undefined,
+  right: CanvasFeedbackEntry | undefined
+): boolean {
+  if (left === right) {
+    return true;
+  }
+  if (!left || !right || left.marks.length !== right.marks.length) {
+    return false;
+  }
+  return left.projectRelativePath === right.projectRelativePath
+    && left.note === right.note
+    && left.updatedAt === right.updatedAt
+    && left.marks.every((mark, index) => mark === right.marks[index]);
 }

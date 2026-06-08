@@ -38,6 +38,7 @@ import {
 import {
   canvasMinimapButtonRect,
   placeCanvasMinimapPanel,
+  sameCanvasFeedbackBarTarget,
   type CanvasFeedbackBarTarget,
   type FloatingBarRect
 } from './shell/floatingBars';
@@ -279,7 +280,9 @@ export function WorkbenchApp(): React.ReactElement {
   const handleFeedbackBarTargetChange = useCallback((target: CanvasFeedbackBarTarget | undefined) => {
     clearFeedbackBarHideTimer();
     if (target) {
-      setFeedbackBarTarget(target);
+      setFeedbackBarTarget((current) => (
+        sameCanvasFeedbackBarTarget(current, target) ? current : target
+      ));
       return;
     }
     feedbackBarClearTimerRef.current = window.setTimeout(() => {

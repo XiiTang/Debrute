@@ -28,13 +28,17 @@ export function CanvasNodeContent({
 }: CanvasNodeContentProps): React.ReactElement {
   const [mediaError, setMediaError] = useState<string>();
   const [mediaRetryNonce, setMediaRetryNonce] = useState(0);
-  const ensureTextFileBuffer = actions.ensureTextFileBuffer;
+  const requestedTextBufferKeyRef = useRef<string | undefined>(undefined);
+  const ensureTextFileBufferRef = useRef(actions.ensureTextFileBuffer);
   const nodeRevision = node.availability.state === 'available' ? node.availability.revision : undefined;
+  const textBufferEnsureKey = canvasTextBufferEnsureKey(node, textBuffer);
   const mediaSrc = node.mediaKind === 'image'
     ? undefined
     : node.availability.state === 'available'
       ? node.availability.fileUrl
       : undefined;
+
+  ensureTextFileBufferRef.current = actions.ensureTextFileBuffer;
 
   useEffect(() => {
     setMediaError(undefined);
@@ -42,11 +46,20 @@ export function CanvasNodeContent({
   }, [mediaSrc, node.mediaKind]);
 
   useEffect(() => {
-    if (node.mediaKind !== 'text' || node.availability.state !== 'available') {
+    if (!textBufferEnsureKey) {
+      requestedTextBufferKeyRef.current = undefined;
       return;
     }
-    void ensureTextFileBuffer(node.projectRelativePath, nodeRevision);
-  }, [node.mediaKind, node.projectRelativePath, nodeRevision, ensureTextFileBuffer]);
+    if (requestedTextBufferKeyRef.current === textBufferEnsureKey) {
+      return;
+    }
+    requestedTextBufferKeyRef.current = textBufferEnsureKey;
+    void ensureTextFileBufferRef.current(node.projectRelativePath, nodeRevision);
+  }, [
+    node.projectRelativePath,
+    nodeRevision,
+    textBufferEnsureKey
+  ]);
 
   const availabilityProblem = node.availability.state === 'available'
     ? undefined
@@ -133,6 +146,23 @@ export function CanvasNodeContent({
       ) : null}
     </>
   );
+}
+
+export function canvasTextBufferEnsureKey(
+  node: ProjectedCanvasNode,
+  textBuffer: TextFileBuffer | undefined
+): string | undefined {
+  if (node.mediaKind !== 'text' || node.availability.state !== 'available') {
+    return undefined;
+  }
+  if (
+    textBuffer
+    && textBuffer.projectRelativePath === node.projectRelativePath
+    && textBuffer.diskRevision === node.availability.revision
+  ) {
+    return undefined;
+  }
+  return `${node.projectRelativePath}\u001f${node.availability.revision}`;
 }
 
 function CanvasImageNodeContent({

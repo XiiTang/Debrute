@@ -49,6 +49,76 @@ describe('canvas image loading plan', () => {
     });
   });
 
+  it('classifies visible oversized previews as downshift work', () => {
+    const visibleHighRes = previewUrl('flow/visible.png', 2400);
+    const plan = createCanvasImageLoadingPlan({
+      nodes: [imageNode('flow/visible.png', 0, 0, 2400, 1200)],
+      visibleRect: { x: 0, y: 0, width: 400, height: 300 },
+      imageResourceZoom: 1,
+      retentionResourceZoom: 0.1,
+      devicePixelRatio: 1,
+      existingImages: new Map([
+        ['flow/visible.png', loadedImage(visibleHighRes, 2400)]
+      ]),
+      retryKeys: new Map(),
+      culledNodePaths: new Set()
+    });
+
+    expect(plan.get('flow/visible.png')).toMatchObject({
+      intent: 'downshift-visible',
+      src: previewUrl('flow/visible.png', 300),
+      previewWidth: 300,
+      eligible: true
+    });
+  });
+
+  it('classifies off-visible oversized previews as eviction work', () => {
+    const farHighRes = previewUrl('flow/far.png', 2400);
+    const plan = createCanvasImageLoadingPlan({
+      nodes: [imageNode('flow/far.png', 5000, 0, 2400, 1200)],
+      visibleRect: { x: 0, y: 0, width: 400, height: 300 },
+      imageResourceZoom: 1,
+      retentionResourceZoom: 0.1,
+      devicePixelRatio: 1,
+      existingImages: new Map([
+        ['flow/far.png', loadedImage(farHighRes, 2400)]
+      ]),
+      retryKeys: new Map(),
+      culledNodePaths: new Set(['flow/far.png'])
+    });
+
+    expect(plan.get('flow/far.png')).toMatchObject({
+      intent: 'evict-oversized',
+      previewWidth: 300,
+      eligible: true
+    });
+  });
+
+  it('selects memory-reducing downshift work while moving but excludes evictions from load candidates', () => {
+    const plan = createCanvasImageLoadingPlan({
+      nodes: [
+        imageNode('flow/visible.png', 0, 0, 2400, 1200),
+        imageNode('flow/far.png', 5000, 0, 2400, 1200)
+      ],
+      visibleRect: { x: 0, y: 0, width: 400, height: 300 },
+      imageResourceZoom: 1,
+      retentionResourceZoom: 0.1,
+      devicePixelRatio: 1,
+      existingImages: new Map([
+        ['flow/visible.png', loadedImage(previewUrl('flow/visible.png', 2400), 2400)],
+        ['flow/far.png', loadedImage(previewUrl('flow/far.png', 2400), 2400)]
+      ]),
+      retryKeys: new Map(),
+      culledNodePaths: new Set(['flow/far.png'])
+    });
+
+    expect(selectCanvasImageLoadingCandidates({
+      plan,
+      cameraState: 'moving',
+      activeLoadKeys: new Set()
+    }).map((item) => item.projectRelativePath)).toEqual(['flow/visible.png']);
+  });
+
   it('classifies image work by final intent and carries preview width', () => {
     const lowQualityUrl = previewUrl('flow/visible-upgrade.png', 300);
     const plan = createCanvasImageLoadingPlan({
@@ -178,9 +248,9 @@ describe('canvas image loading plan', () => {
       activeLoadKeys: new Set()
     }).map((item) => item.projectRelativePath)).toEqual([
       'flow/visible-empty.png',
-      'flow/near-prefetch-empty.png',
       'flow/visible-upgrade.png',
-      'flow/near-prefetch-upgrade.png'
+      'flow/near-prefetch-upgrade.png',
+      'flow/near-prefetch-empty.png'
     ]);
   });
 });

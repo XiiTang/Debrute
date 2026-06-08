@@ -24,8 +24,6 @@ export interface CanvasRenderCoordinatorSnapshot {
   nodesByPath: ReadonlyMap<string, ProjectedCanvasNode>;
   nodeLayers: ReadonlyMap<string, CanvasNodeLayerView>;
   edges: CanvasEdgeSegment[];
-  svgBounds: CanvasRect;
-  svgViewBox: string;
 }
 
 export interface CanvasRenderCoordinatorUpdateInput {
@@ -89,9 +87,7 @@ export function createCanvasRenderCoordinator(input: CanvasRenderCoordinatorInpu
       culledNodePaths,
       nodesByPath,
       nodeLayers: nodeLayersFor(nodes),
-      edges: rendered.edges,
-      svgBounds: rendered.svgBounds,
-      svgViewBox: rendered.svgViewBox
+      edges: rendered.edges
     };
   };
 

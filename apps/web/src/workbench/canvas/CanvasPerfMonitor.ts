@@ -42,6 +42,9 @@ export type CanvasPerfCounterName =
   | 'image-budget-block'
   | 'image-next-cancel'
   | 'image-visible-evict'
+  | 'image-downshift-start'
+  | 'image-downshift-resolve'
+  | 'image-retention-budget-evict'
   | 'image-node-publish';
 
 export type CanvasPerfSessionId = `${CanvasPerfSessionType}:${number}`;

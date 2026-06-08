@@ -583,7 +583,6 @@ small {
   height: 1px;
   transform-origin: 0 0;
   overflow: visible;
-  will-change: transform;
 }
 
 .canvas-edge-layer {

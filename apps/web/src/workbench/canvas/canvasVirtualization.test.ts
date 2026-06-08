@@ -200,7 +200,31 @@ describe('canvas virtualization geometry', () => {
 
     expect(state.nodes.map((node) => node.projectRelativePath)).toEqual(['flow/source.png']);
     expect(state.edges.map((edge) => edge.id)).toEqual(['source-to-target']);
-    expect(state.svgViewBox).not.toBe('-100000 -100000 200000 200000');
+    expect(state.edges[0]?.svgViewBox).not.toBe('-100000 -100000 200000 200000');
+  });
+
+  it('keeps edge svg bounds tight at low zoom', () => {
+    const projection = projectionFixture([
+      nodeFixture('flow/source.png', 0, 0),
+      nodeFixture('flow/target.png', 300, 0)
+    ], [{
+      id: 'source-to-target',
+      sourceProjectRelativePath: 'flow/source.png',
+      targetProjectRelativePath: 'flow/target.png'
+    }]);
+
+    const state = buildVirtualizedCanvasRenderState({
+      nodes: projection.nodes,
+      edges: projection.edges,
+      camera: { x: 0, y: 0, z: 0.03 },
+      surfaceSize: { width: 1440, height: 1000 },
+      selection: undefined,
+      activeNodeProjectRelativePaths: []
+    });
+
+    expect(state.virtualRect.width).toBeGreaterThan(49000);
+    expect(state.edges[0]?.svgBounds.width).toBeLessThan(400);
+    expect(state.edges[0]?.svgBounds.height).toBeLessThan(130);
   });
 
   it('routes structure edges from parent right edge to child left edge through a shared trunk', () => {
@@ -337,7 +361,6 @@ describe('canvas virtualization geometry', () => {
       fresh.nodes.map((node) => node.projectRelativePath)
     );
     expect(incremental.edges).toEqual(fresh.edges);
-    expect(incremental.svgViewBox).toBe(fresh.svgViewBox);
   });
 
 });

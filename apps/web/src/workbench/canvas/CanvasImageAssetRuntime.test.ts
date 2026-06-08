@@ -148,7 +148,7 @@ describe('CanvasImageAssetRuntime', () => {
     expect(loads).toHaveLength(1);
   });
 
-  it('starts display-critical and bounded near prefetch loads while moving even when near nodes are culled', () => {
+  it('blocks culled high-resolution prefetch while keeping display-critical loads moving', () => {
     const runtime = createCanvasImageAssetRuntime({ concurrency: 3 });
     runtime.setNodes(new Map([
       ['flow/visible.png', largeImageNode('flow/visible.png', 0, 0)],
@@ -167,17 +167,17 @@ describe('CanvasImageAssetRuntime', () => {
     });
 
     expect(runtime.getNodeState('flow/visible.png')).toMatchObject({ kind: 'image', next: expect.any(Object) });
-    expect(runtime.getNodeState('flow/prefetch-a.png')).toMatchObject({ kind: 'image', next: expect.any(Object) });
+    expect(runtime.getNodeState('flow/prefetch-a.png')).toMatchObject({ kind: 'placeholder' });
     expect(runtime.getNodeState('flow/prefetch-b.png')).toMatchObject({ kind: 'placeholder' });
     expect(runtime.stats()).toMatchObject({
-      activeLoadCount: 2,
-      pendingImageCount: 2,
+      activeLoadCount: 1,
+      pendingImageCount: 1,
       imageWorkIntentCounts: {
         'display-critical': 1,
         'prefetch-near': 1,
         deferred: 1
       },
-      nextPreviewWidths: { 2400: 2 }
+      nextPreviewWidths: { 2400: 1 }
     });
   });
 
@@ -351,24 +351,80 @@ describe('CanvasImageAssetRuntime', () => {
       ['flow/loaded-b.png', imageNode('flow/loaded-b.png', 1800, 0)],
       ['flow/blank.png', imageNode('flow/blank.png', 3600, 0)]
     ]);
-    const loadedImagePaths = new Set(['flow/loaded-a.png', 'flow/loaded-b.png']);
+    const loadedImages = new Map([
+      ['flow/loaded-a.png', {
+        src: rawPreviewUrl('flow/loaded-a.png', 200, 'rev'),
+        loadKey: `${rawPreviewUrl('flow/loaded-a.png', 200, 'rev')}:0`,
+        previewWidth: 200
+      }],
+      ['flow/loaded-b.png', {
+        src: rawPreviewUrl('flow/loaded-b.png', 200, 'rev'),
+        loadKey: `${rawPreviewUrl('flow/loaded-b.png', 200, 'rev')}:0`,
+        previewWidth: 200
+      }]
+    ]);
     const mountedNodePaths = new Set(['flow/loaded-a.png', 'flow/loaded-b.png', 'flow/blank.png']);
 
     const first = canvasImageAssetViewportSignature({
       ...viewport({ cameraState: 'moving', mountedNodePaths }),
       visibleRect: { x: 0, y: 0, width: 400, height: 300 }
-    }, nodes, { loadedImagePaths });
+    }, nodes, { loadedImages });
     const loadedOnlyShift = canvasImageAssetViewportSignature({
       ...viewport({ cameraState: 'moving', mountedNodePaths }),
       visibleRect: { x: 1700, y: 0, width: 400, height: 300 }
-    }, nodes, { loadedImagePaths });
+    }, nodes, { loadedImages });
     const blankShift = canvasImageAssetViewportSignature({
       ...viewport({ cameraState: 'moving', mountedNodePaths }),
       visibleRect: { x: 3500, y: 0, width: 400, height: 300 }
-    }, nodes, { loadedImagePaths });
+    }, nodes, { loadedImages });
 
     expect(loadedOnlyShift).toBe(first);
     expect(blankShift).not.toBe(first);
+  });
+
+  it('changes the moving viewport signature only when retention preview width changes for loaded images', () => {
+    const node = largeImageNode('flow/a.png', 0, 0);
+    const loadedHigh = {
+      src: rawPreviewUrl('flow/a.png', 2400, 'rev'),
+      loadKey: `${rawPreviewUrl('flow/a.png', 2400, 'rev')}:0`,
+      previewWidth: 2400
+    };
+    const baseViewport = {
+      ...viewport({
+        cameraState: 'moving',
+        mountedNodePaths: new Set(['flow/a.png'])
+      }),
+      imageResourceZoom: 1,
+      retentionResourceZoom: 0.11
+    };
+    const sameBucketViewport = {
+      ...baseViewport,
+      retentionResourceZoom: 0.12
+    };
+    const lowerBucketViewport = {
+      ...baseViewport,
+      retentionResourceZoom: 0.04
+    };
+
+    expect(canvasImageAssetViewportSignature(
+      baseViewport,
+      new Map([['flow/a.png', node]]),
+      { loadedImages: new Map([['flow/a.png', loadedHigh]]) }
+    )).toBe(canvasImageAssetViewportSignature(
+      sameBucketViewport,
+      new Map([['flow/a.png', node]]),
+      { loadedImages: new Map([['flow/a.png', loadedHigh]]) }
+    ));
+
+    expect(canvasImageAssetViewportSignature(
+      baseViewport,
+      new Map([['flow/a.png', node]]),
+      { loadedImages: new Map([['flow/a.png', loadedHigh]]) }
+    )).not.toBe(canvasImageAssetViewportSignature(
+      lowerBucketViewport,
+      new Map([['flow/a.png', node]]),
+      { loadedImages: new Map([['flow/a.png', loadedHigh]]) }
+    ));
   });
 
   it('records image-load sessions for start and DOM resolve', () => {
@@ -1025,6 +1081,105 @@ describe('CanvasImageAssetRuntime', () => {
     expect(counterNames(monitor.getTrace().events)).toContain('image-budget-block');
   });
 
+  it('does not block screen-visible high-resolution upgrades on retained preview budget', () => {
+    const monitor = createCanvasPerfMonitor({ enabled: true });
+    const runtime = createCanvasImageAssetRuntime({
+      concurrency: 3,
+      budget: {
+        hardRetainedDecodedImagePixels: 4_000_000,
+        maxHighResolutionPendingImages: 3,
+        maxSourceWidthUpgradePendingImages: 3
+      },
+      perfMonitor: monitor
+    });
+    runtime.setNodes(new Map([
+      ['flow/a.png', largeImageNode('flow/a.png', 0, 0)],
+      ['flow/b.png', largeImageNode('flow/b.png', 2600, 0)]
+    ]));
+    const lowResolutionViewport = {
+      ...viewport({
+        cameraState: 'idle',
+        mountedNodePaths: new Set(['flow/a.png', 'flow/b.png'])
+      }),
+      visibleRect: { x: 0, y: 0, width: 6000, height: 2000 },
+      imageResourceZoom: 0.1,
+      retentionResourceZoom: 0.1,
+      imageHeavyEfficientMode: true
+    };
+    runtime.setViewport(lowResolutionViewport);
+    for (const path of ['flow/a.png', 'flow/b.png']) {
+      const state = runtime.getNodeState(path);
+      if (state.kind !== 'image' || !state.next) {
+        throw new Error(`Expected ${path} low-resolution load.`);
+      }
+      runtime.resolvePending(path, state.next.loadKey);
+    }
+
+    runtime.setViewport({
+      ...lowResolutionViewport,
+      imageResourceZoom: 1,
+      retentionResourceZoom: 1
+    });
+
+    expect(runtime.stats()).toMatchObject({
+      activeLoadCount: 2,
+      pendingImageCount: 2,
+      visiblePreviewWidths: { 300: 2 },
+      nextPreviewWidths: { 2400: 2 }
+    });
+    expect(counterNames(monitor.getTrace().events)).not.toContain('image-budget-block');
+  });
+
+  it('keeps retained preview budget blocking near high-resolution upgrades after visible upgrades are scheduled', () => {
+    const monitor = createCanvasPerfMonitor({ enabled: true });
+    const runtime = createCanvasImageAssetRuntime({
+      concurrency: 3,
+      budget: {
+        hardRetainedDecodedImagePixels: 4_000_000,
+        maxHighResolutionPendingImages: 3,
+        maxSourceWidthUpgradePendingImages: 3
+      },
+      perfMonitor: monitor
+    });
+    runtime.setNodes(new Map([
+      ['flow/visible.png', largeImageNode('flow/visible.png', 0, 0)],
+      ['flow/near.png', largeImageNode('flow/near.png', 700, 0)]
+    ]));
+    const lowResolutionViewport = {
+      ...viewport({
+        cameraState: 'idle',
+        mountedNodePaths: new Set(['flow/visible.png', 'flow/near.png'])
+      }),
+      visibleRect: { x: 0, y: 0, width: 3600, height: 2000 },
+      imageResourceZoom: 0.1,
+      retentionResourceZoom: 0.1,
+      imageHeavyEfficientMode: true
+    };
+    runtime.setViewport(lowResolutionViewport);
+    for (const path of ['flow/visible.png', 'flow/near.png']) {
+      const state = runtime.getNodeState(path);
+      if (state.kind !== 'image' || !state.next) {
+        throw new Error(`Expected ${path} low-resolution load.`);
+      }
+      runtime.resolvePending(path, state.next.loadKey);
+    }
+
+    runtime.setViewport({
+      ...lowResolutionViewport,
+      visibleRect: { x: 0, y: 0, width: 400, height: 300 },
+      imageResourceZoom: 1,
+      retentionResourceZoom: 1
+    });
+
+    expect(runtime.stats()).toMatchObject({
+      activeLoadCount: 1,
+      pendingImageCount: 1,
+      visiblePreviewWidths: { 300: 2 },
+      nextPreviewWidths: { 2400: 1 }
+    });
+    expect(counterNames(monitor.getTrace().events)).toContain('image-budget-block');
+  });
+
   it('evicts far high-resolution visible images from mounted records', () => {
     const monitor = createCanvasPerfMonitor({ enabled: true });
     const runtime = createCanvasImageAssetRuntime({ concurrency: 2, perfMonitor: monitor });
@@ -1122,6 +1277,248 @@ describe('CanvasImageAssetRuntime', () => {
     expect(idle.kind === 'image' ? idle.next : undefined).toBeDefined();
   });
 
+  it('downshifts visible oversized images through next while keeping visible mounted', () => {
+    const runtime = createCanvasImageAssetRuntime({ concurrency: 2 });
+    runtime.setNodes(new Map([['flow/a.png', largeImageNode('flow/a.png', 0, 0)]]));
+    runtime.setViewport({
+      ...viewport({
+        cameraState: 'idle',
+        mountedNodePaths: new Set(['flow/a.png'])
+      }),
+      imageResourceZoom: 1,
+      retentionResourceZoom: 1
+    });
+
+    const initial = runtime.getNodeState('flow/a.png');
+    if (initial.kind !== 'image' || !initial.next) {
+      throw new Error('Expected high-resolution initial pending image.');
+    }
+    runtime.resolvePending('flow/a.png', initial.next.loadKey);
+
+    runtime.setViewport({
+      ...viewport({
+        cameraState: 'moving',
+        mountedNodePaths: new Set(['flow/a.png'])
+      }),
+      imageResourceZoom: 1,
+      retentionResourceZoom: 0.1
+    });
+
+    const downshift = runtime.getNodeState('flow/a.png');
+    expect(downshift.kind === 'image' ? downshift.visible?.previewWidth : undefined).toBe(2400);
+    expect(downshift.kind === 'image' ? downshift.next?.previewWidth : undefined).toBe(300);
+    expect(runtime.stats()).toMatchObject({
+      visiblePreviewWidths: { 2400: 1 },
+      nextPreviewWidths: { 300: 1 },
+      imageWorkIntentCounts: { 'downshift-visible': 1 },
+      downshiftStartCount: 1
+    });
+  });
+
+  it('evicts culled oversized visible images without starting replacement loads', () => {
+    const runtime = createCanvasImageAssetRuntime({ concurrency: 2 });
+    runtime.setNodes(new Map([['flow/far.png', largeImageNode('flow/far.png', 5000, 0)]]));
+    runtime.setViewport({
+      ...viewport({
+        cameraState: 'idle',
+        mountedNodePaths: new Set(['flow/far.png'])
+      }),
+      visibleRect: { x: 0, y: 0, width: 8000, height: 2000 },
+      imageResourceZoom: 1,
+      retentionResourceZoom: 1
+    });
+
+    const initial = runtime.getNodeState('flow/far.png');
+    if (initial.kind !== 'image' || !initial.next) {
+      throw new Error('Expected high-resolution initial pending image.');
+    }
+    runtime.resolvePending('flow/far.png', initial.next.loadKey);
+
+    runtime.setViewport({
+      ...viewport({
+        cameraState: 'moving',
+        mountedNodePaths: new Set(['flow/far.png']),
+        culledNodePaths: new Set(['flow/far.png'])
+      }),
+      visibleRect: { x: 0, y: 0, width: 400, height: 300 },
+      imageResourceZoom: 1,
+      retentionResourceZoom: 0.1
+    });
+
+    expect(runtime.getNodeState('flow/far.png')).toMatchObject({ kind: 'placeholder' });
+    expect(runtime.stats()).toMatchObject({
+      activeLoadCount: 0,
+      pendingImageCount: 0,
+      visiblePreviewWidths: {},
+      imageEvictionReasons: { 'oversized-culled': 1 },
+      highResolutionEvictionCount: 1
+    });
+  });
+
+  it('lets downshift work bypass source-width upgrade limits', () => {
+    const runtime = createCanvasImageAssetRuntime({
+      concurrency: 3,
+      budget: {
+        maxSourceWidthUpgradePendingImages: 0,
+        maxDownshiftPendingImages: 3
+      }
+    });
+    runtime.setNodes(new Map([
+      ['flow/a.png', largeImageNode('flow/a.png', 0, 0)],
+      ['flow/b.png', largeImageNode('flow/b.png', 2600, 0)]
+    ]));
+    runtime.setViewport({
+      ...viewport({
+        cameraState: 'idle',
+        mountedNodePaths: new Set(['flow/a.png', 'flow/b.png'])
+      }),
+      visibleRect: { x: 0, y: 0, width: 6000, height: 2000 },
+      imageResourceZoom: 1,
+      retentionResourceZoom: 1
+    });
+    for (const path of ['flow/a.png', 'flow/b.png']) {
+      const state = runtime.getNodeState(path);
+      if (state.kind === 'image' && state.next) {
+        runtime.resolvePending(path, state.next.loadKey);
+      }
+    }
+
+    runtime.setViewport({
+      ...viewport({
+        cameraState: 'moving',
+        mountedNodePaths: new Set(['flow/a.png', 'flow/b.png'])
+      }),
+      visibleRect: { x: 0, y: 0, width: 6000, height: 2000 },
+      imageResourceZoom: 1,
+      retentionResourceZoom: 0.1
+    });
+
+    expect(runtime.stats()).toMatchObject({
+      pendingImageCount: 2,
+      nextPreviewWidths: { 300: 2 },
+      downshiftStartCount: 2
+    });
+  });
+
+  it('evicts off-visible high-resolution records before visible lower-resolution records when retained pixels exceed the hard budget', () => {
+    const runtime = createCanvasImageAssetRuntime({
+      concurrency: 3,
+      budget: {
+        maxRetainedDecodedImagePixels: 2_000_000,
+        hardRetainedDecodedImagePixels: 2_500_000
+      }
+    });
+    runtime.setNodes(new Map([
+      ['flow/visible.png', largeImageNode('flow/visible.png', 0, 0)],
+      ['flow/far.png', largeImageNode('flow/far.png', 5000, 0)]
+    ]));
+    runtime.setViewport({
+      ...viewport({
+        cameraState: 'idle',
+        mountedNodePaths: new Set(['flow/visible.png', 'flow/far.png'])
+      }),
+      visibleRect: { x: 0, y: 0, width: 8000, height: 2000 },
+      imageResourceZoom: 1,
+      retentionResourceZoom: 1
+    });
+
+    for (const path of ['flow/visible.png', 'flow/far.png']) {
+      const state = runtime.getNodeState(path);
+      if (state.kind !== 'image' || !state.next) {
+        throw new Error(`Expected ${path} to start loading.`);
+      }
+      runtime.resolvePending(path, state.next.loadKey);
+    }
+
+    runtime.setViewport({
+      ...viewport({
+        cameraState: 'idle',
+        mountedNodePaths: new Set(['flow/visible.png', 'flow/far.png'])
+      }),
+      visibleRect: { x: 0, y: 0, width: 400, height: 300 },
+      imageResourceZoom: 1,
+      retentionResourceZoom: 1,
+      imageHeavyEfficientMode: true
+    });
+
+    expect(runtime.getNodeState('flow/visible.png')).toMatchObject({ kind: 'image' });
+    expect(runtime.getNodeState('flow/far.png')).toMatchObject({ kind: 'placeholder' });
+    expect(runtime.stats()).toMatchObject({
+      visiblePreviewWidths: { 2400: 1 },
+      imageEvictionReasons: { 'retained-preview-budget': 1 },
+      highResolutionEvictionCount: 1
+    });
+  });
+
+  it('cancels in-flight high-resolution replacements when retained budget evicts the visible record', () => {
+    const runtime = createCanvasImageAssetRuntime({
+      concurrency: 1,
+      budget: {
+        maxRetainedDecodedImagePixels: 1,
+        hardRetainedDecodedImagePixels: 40_000,
+        maxHighResolutionPendingImages: 1
+      }
+    });
+    runtime.setNodes(new Map([
+      ['flow/near.png', largeImageNode('flow/near.png', 500, 0)]
+    ]));
+    runtime.setViewport({
+      ...viewport({
+        cameraState: 'idle',
+        mountedNodePaths: new Set(['flow/near.png'])
+      }),
+      visibleRect: { x: 0, y: 0, width: 4000, height: 2000 },
+      imageResourceZoom: 0.1,
+      retentionResourceZoom: 0.1
+    });
+    const low = runtime.getNodeState('flow/near.png');
+    if (low.kind !== 'image' || !low.next) {
+      throw new Error('Expected low-resolution visible load.');
+    }
+    runtime.resolvePending('flow/near.png', low.next.loadKey);
+
+    runtime.setViewport({
+      ...viewport({
+        cameraState: 'idle',
+        mountedNodePaths: new Set(['flow/near.png'])
+      }),
+      visibleRect: { x: 0, y: 0, width: 400, height: 300 },
+      imageResourceZoom: 1,
+      retentionResourceZoom: 1,
+      imageHeavyEfficientMode: false
+    });
+    const high = runtime.getNodeState('flow/near.png');
+    if (high.kind !== 'image' || !high.next) {
+      throw new Error('Expected high-resolution replacement load.');
+    }
+    const highLoadKey = high.next.loadKey;
+
+    runtime.setViewport({
+      ...viewport({
+        cameraState: 'idle',
+        mountedNodePaths: new Set(['flow/near.png'])
+      }),
+      visibleRect: { x: 0, y: 0, width: 400, height: 300 },
+      imageResourceZoom: 1,
+      retentionResourceZoom: 1,
+      imageHeavyEfficientMode: true
+    });
+
+    expect(runtime.getNodeState('flow/near.png')).toMatchObject({ kind: 'placeholder' });
+    expect(runtime.stats()).toMatchObject({
+      activeLoadCount: 0,
+      pendingImageCount: 0,
+      visiblePreviewWidths: {},
+      nextPreviewWidths: {},
+      imageEvictionReasons: { 'retained-preview-budget': 1 }
+    });
+
+    runtime.resolvePending('flow/near.png', highLoadKey);
+
+    expect(runtime.getNodeState('flow/near.png')).toMatchObject({ kind: 'placeholder' });
+    expect(runtime.stats().visiblePreviewWidths).toEqual({});
+  });
+
   it('ends pending image-load sessions when disposed', () => {
     const monitor = createCanvasPerfMonitor({ enabled: true });
     const runtime = createCanvasImageAssetRuntime({ concurrency: 1, perfMonitor: monitor });
@@ -1204,6 +1601,7 @@ function viewport(input: {
     mountedNodePaths: input.mountedNodePaths ?? new Set(['flow/visible.png', 'flow/overscan.png', 'flow/cover.png', 'flow/other.png', 'flow/stale-visible.png']),
     culledNodePaths: input.culledNodePaths ?? new Set(),
     imageResourceZoom: 1,
+    retentionResourceZoom: 1,
     devicePixelRatio: 1,
     cameraState: input.cameraState,
     imageHeavyEfficientMode: input.imageHeavyEfficientMode ?? false

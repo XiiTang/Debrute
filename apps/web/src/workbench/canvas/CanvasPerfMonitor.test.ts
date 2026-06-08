@@ -166,13 +166,19 @@ describe('CanvasPerfMonitor', () => {
     monitor.recordCounter({ sessionId, timestamp: 1, source: 'CanvasImageAssetRuntime', name: 'image-budget-block' });
     monitor.recordCounter({ sessionId, timestamp: 2, source: 'CanvasImageAssetRuntime', name: 'image-next-cancel' });
     monitor.recordCounter({ sessionId, timestamp: 3, source: 'CanvasImageAssetRuntime', name: 'image-visible-evict' });
+    monitor.recordCounter({ sessionId, timestamp: 4, source: 'CanvasImageAssetRuntime', name: 'image-downshift-start' });
+    monitor.recordCounter({ sessionId, timestamp: 5, source: 'CanvasImageAssetRuntime', name: 'image-downshift-resolve' });
+    monitor.recordCounter({ sessionId, timestamp: 6, source: 'CanvasImageAssetRuntime', name: 'image-retention-budget-evict' });
 
     const summary = monitor.endSession({ sessionId, timestamp: 10, source: 'CanvasSurface' });
 
     expect(monitor.getCounterTotals()).toEqual({
       'image-budget-block': 1,
       'image-next-cancel': 1,
-      'image-visible-evict': 1
+      'image-visible-evict': 1,
+      'image-downshift-start': 1,
+      'image-downshift-resolve': 1,
+      'image-retention-budget-evict': 1
     });
     expect(summary?.counters).toEqual(monitor.getCounterTotals());
   });

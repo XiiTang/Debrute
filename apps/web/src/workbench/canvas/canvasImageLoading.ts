@@ -10,6 +10,8 @@ export const CANVAS_IMAGE_LOAD_CONCURRENCY = 3;
 
 export type CanvasImageLoadingIntent =
   | 'display-critical'
+  | 'downshift-visible'
+  | 'evict-oversized'
   | 'prefetch-near'
   | 'upgrade-idle'
   | 'deferred'
@@ -38,9 +40,11 @@ export interface CanvasImageLoadingPlanInput {
   nodes: ProjectedCanvasNode[];
   visibleRect: CanvasRect;
   imageResourceZoom: number;
+  retentionResourceZoom?: number | undefined;
   devicePixelRatio: number;
   existingImages: ReadonlyMap<string, CanvasLoadedImage>;
   retryKeys: ReadonlyMap<string, number>;
+  culledNodePaths?: ReadonlySet<string> | undefined;
 }
 
 export interface CanvasImageLoadingPlanItem {
@@ -59,6 +63,9 @@ export interface ActiveCanvasImageLoad {
 
 export function createCanvasImageLoadingPlan(input: CanvasImageLoadingPlanInput): Map<string, CanvasImageLoadingPlanItem> {
   assertPositiveFinite(input.imageResourceZoom, 'Canvas image resource zoom must be a positive finite number.');
+  if (input.retentionResourceZoom !== undefined) {
+    assertPositiveFinite(input.retentionResourceZoom, 'Canvas image retention resource zoom must be a positive finite number.');
+  }
   assertPositiveFinite(input.devicePixelRatio, 'Canvas image devicePixelRatio must be a positive finite number.');
 
   const result = new Map<string, CanvasImageLoadingPlanItem>();
@@ -78,34 +85,50 @@ export function createCanvasImageLoadingPlan(input: CanvasImageLoadingPlanInput)
       continue;
     }
 
-    const source = canvasImageSource({
+    const upgradeSource = canvasImageSource({
       node,
       cameraZoom: input.imageResourceZoom,
       devicePixelRatio: input.devicePixelRatio
     });
-    if (!source) {
+    if (!upgradeSource) {
       result.set(node.projectRelativePath, ineligibleItem(node, 'not-previewable'));
       continue;
     }
 
+    const retentionSource = canvasImageSource({
+      node,
+      cameraZoom: input.retentionResourceZoom ?? input.imageResourceZoom,
+      devicePixelRatio: input.devicePixelRatio
+    });
+    if (!retentionSource) {
+      result.set(node.projectRelativePath, ineligibleItem(node, 'not-previewable'));
+      continue;
+    }
     const retryKey = input.retryKeys.get(node.projectRelativePath) ?? 0;
-    const loadKey = `${source.src}:${retryKey}`;
     const loaded = input.existingImages.get(node.projectRelativePath);
     const bounds = nodeRect(node);
     const inVisible = rectsIntersect(input.visibleRect, bounds);
     const inNearOverscan = !inVisible && rectsIntersect(nearOverscanRect, bounds);
+    const isCulled = input.culledNodePaths?.has(node.projectRelativePath) === true;
+    const oversized = loaded !== undefined && loaded.previewWidth > retentionSource.previewWidth;
     const intent = intentForNode({
       inVisible,
       inNearOverscan,
+      isCulled,
       hasLoadedImage: loaded !== undefined,
-      upgradeNeeded: loaded !== undefined && loaded.loadKey !== loadKey
+      upgradeNeeded: loaded !== undefined && loaded.loadKey !== `${upgradeSource.src}:${retryKey}`,
+      oversized
     });
+    const selectedSource = intent === 'downshift-visible' || intent === 'evict-oversized'
+      ? retentionSource
+      : upgradeSource;
+    const loadKey = `${selectedSource.src}:${retryKey}`;
 
     result.set(node.projectRelativePath, {
       projectRelativePath: node.projectRelativePath,
-      src: source.src,
+      src: selectedSource.src,
       loadKey,
-      previewWidth: source.previewWidth,
+      previewWidth: selectedSource.previewWidth,
       intent,
       distanceToVisibleCenter: pointDistance(visibleCenter, rectCenter(bounds)),
       eligible: true
@@ -125,6 +148,7 @@ export function selectCanvasImageLoadingCandidates(input: {
     .filter((item) => item.eligible)
     .filter((item) => !input.activeLoadKeys.has(item.loadKey))
     .filter((item) => item.intent !== 'deferred')
+    .filter((item) => item.intent !== 'evict-oversized')
     .sort((left, right) => (
       intentSortOrder(left.intent) - intentSortOrder(right.intent)
       || left.distanceToVisibleCenter - right.distanceToVisibleCenter
@@ -136,7 +160,7 @@ export function selectCanvasImageLoadingCandidates(input: {
   const movingPrefetchLimit = Math.max(0, input.movingPrefetchLimit ?? 1);
   let prefetchCount = 0;
   return candidates.filter((item) => {
-    if (item.intent === 'display-critical') {
+    if (item.intent === 'display-critical' || item.intent === 'downshift-visible') {
       return true;
     }
     if (item.intent !== 'prefetch-near') {
@@ -161,17 +185,28 @@ export function isCanvasImageLoadResultCurrent(
 function intentForNode(input: {
   inVisible: boolean;
   inNearOverscan: boolean;
+  isCulled: boolean;
   hasLoadedImage: boolean;
   upgradeNeeded: boolean;
+  oversized: boolean;
 }): CanvasImageLoadingIntent {
   if (input.inVisible && !input.hasLoadedImage) {
     return 'display-critical';
+  }
+  if (input.inVisible && input.oversized) {
+    return 'downshift-visible';
+  }
+  if (!input.inVisible && input.oversized) {
+    return 'evict-oversized';
   }
   if (input.inNearOverscan && !input.hasLoadedImage) {
     return 'prefetch-near';
   }
   if ((input.inVisible || input.inNearOverscan) && input.upgradeNeeded) {
     return 'upgrade-idle';
+  }
+  if (input.isCulled) {
+    return 'deferred';
   }
   return 'deferred';
 }
@@ -180,15 +215,19 @@ function intentSortOrder(intent: CanvasImageLoadingIntent): number {
   switch (intent) {
     case 'display-critical':
       return 0;
-    case 'prefetch-near':
+    case 'downshift-visible':
       return 1;
-    case 'upgrade-idle':
+    case 'evict-oversized':
       return 2;
-    case 'deferred':
+    case 'upgrade-idle':
       return 3;
+    case 'prefetch-near':
+      return 4;
+    case 'deferred':
+      return 5;
     case 'not-previewable':
     case 'unavailable':
-      return 4;
+      return 6;
   }
   const exhaustive: never = intent;
   return exhaustive;

@@ -37,6 +37,8 @@ export interface CanvasEdgeSegment {
   y2: number;
   points: CanvasPoint[];
   path: string;
+  svgBounds: CanvasRect;
+  svgViewBox: string;
 }
 
 export interface VirtualizedCanvasRenderState {
@@ -44,8 +46,6 @@ export interface VirtualizedCanvasRenderState {
   virtualRect: CanvasRect;
   nodes: ProjectedCanvasNode[];
   edges: CanvasEdgeSegment[];
-  svgBounds: CanvasRect;
-  svgViewBox: string;
 }
 
 export interface CanvasVirtualizationIndex {
@@ -136,15 +136,12 @@ function buildVirtualizedCanvasRenderStateFromIndex(input: CanvasVirtualizationQ
     ...activePaths.flatMap((path) => input.visibleNodeByPath.get(path) ?? [])
   ]);
   const edges = input.edgeIndex.query(virtualRect);
-  const svgBounds = svgBoundsForEdges(virtualRect, edges);
 
   return {
     visibleRect,
     virtualRect,
     nodes,
-    edges,
-    svgBounds,
-    svgViewBox: rectViewBox(svgBounds)
+    edges
   };
 }
 
@@ -364,6 +361,7 @@ function edgeRouteFromNodes(edge: ResolvedCanvasEdge, trunkX: number): IndexedCa
     { x: trunkX, y: targetAnchor.y },
     targetAnchor
   ];
+  const svgBounds = svgBoundsForPoints(points);
   return {
     id: edge.id,
     sourceProjectRelativePath: edge.sourceProjectRelativePath,
@@ -374,6 +372,8 @@ function edgeRouteFromNodes(edge: ResolvedCanvasEdge, trunkX: number): IndexedCa
     y2: targetAnchor.y,
     points,
     path: svgPathFromPoints(points),
+    svgBounds,
+    svgViewBox: rectViewBox(svgBounds),
     order: edge.order
   };
 }
@@ -409,18 +409,20 @@ function edgeIntersectsRect(edge: Pick<CanvasEdgeSegment, 'points'>, rect: Canva
   return false;
 }
 
-function svgBoundsForEdges(virtualRect: CanvasRect, edges: CanvasEdgeSegment[]): CanvasRect {
-  let minX = virtualRect.x;
-  let minY = virtualRect.y;
-  let maxX = virtualRect.x + virtualRect.width;
-  let maxY = virtualRect.y + virtualRect.height;
-  for (const edge of edges) {
-    for (const point of edge.points) {
-      minX = Math.min(minX, point.x);
-      minY = Math.min(minY, point.y);
-      maxX = Math.max(maxX, point.x);
-      maxY = Math.max(maxY, point.y);
-    }
+function svgBoundsForPoints(points: CanvasPoint[]): CanvasRect {
+  const firstPoint = points[0];
+  if (!firstPoint) {
+    return { x: 0, y: 0, width: 1, height: 1 };
+  }
+  let minX = firstPoint.x;
+  let minY = firstPoint.y;
+  let maxX = firstPoint.x;
+  let maxY = firstPoint.y;
+  for (const point of points.slice(1)) {
+    minX = Math.min(minX, point.x);
+    minY = Math.min(minY, point.y);
+    maxX = Math.max(maxX, point.x);
+    maxY = Math.max(maxY, point.y);
   }
   return {
     x: minX - SVG_EDGE_PADDING,

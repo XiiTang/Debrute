@@ -15,7 +15,7 @@ import {
   type FloatingBarRect
 } from '../shell/floatingBars';
 import { cameraForCanvasContent } from './CanvasCameraBounds';
-import { CANVAS_IMAGE_PREVIEW_RESOURCE_SETTLE_MS } from './canvasImagePreviews';
+import { CANVAS_IMAGE_PREVIEW_RESOURCE_SETTLE_MS, canvasImageSource } from './canvasImagePreviews';
 import { createCanvasImageAssetRuntime, type CanvasImageAssetRuntime } from './CanvasImageAssetRuntime';
 import { CanvasImageAssetProvider } from './CanvasImageResourceContext';
 import { CanvasNodeShell } from './CanvasNodeShell';
@@ -185,6 +185,7 @@ function CanvasSurfaceRuntime({
   const activeNodePathsRef = useRef<string[]>(activeNodeProjectRelativePaths(initialDragState));
   const activeNodePathKeyRef = useRef(activeNodePathsRef.current.join('\u001f'));
   const imageResourceZoomTimerRef = useRef<number | undefined>(undefined);
+  const lastCameraMovementAtRef = useRef<number | undefined>(undefined);
   const fittedCanvasIdRef = useRef<string | undefined>(undefined);
   const canvasPerfSessionRef = useRef<CanvasPerfRuntimeSession | undefined>(undefined);
   const canvasPerfDragSessionRef = useRef<CanvasPerfRuntimeSession | undefined>(undefined);
@@ -314,11 +315,18 @@ function CanvasSurfaceRuntime({
       currentImageResourceZoom: snapshot.imageResourceZoom,
       liveCameraZoom: snapshot.camera.z,
       timerRef: imageResourceZoomTimerRef,
+      lastCameraMovementAtRef,
+      now: () => window.performance?.now?.() ?? Date.now(),
+      resourceZoomSignature: (zoom) => canvasImageResourceZoomPreviewSignature({
+        nodes: projectedNodes,
+        imageResourceZoom: zoom,
+        devicePixelRatio
+      }),
       setImageResourceZoom: (zoom) => runtime.setImageResourceZoom(zoom),
       setTimeout: (callback, delay) => window.setTimeout(callback, delay),
       clearTimeout: (handle) => window.clearTimeout(handle)
     });
-  }, [projectedImageNodeCount, projectedNodes.length, runtime]);
+  }, [devicePixelRatio, projectedImageNodeCount, projectedNodes, runtime]);
 
   useEffect(() => {
     renderCoordinator.setProjection(projection);
@@ -560,6 +568,7 @@ function CanvasSurfaceRuntime({
       window.clearTimeout(imageResourceZoomTimerRef.current);
       imageResourceZoomTimerRef.current = undefined;
     }
+    lastCameraMovementAtRef.current = undefined;
     runtime.setImageResourceZoom(runtime.getSnapshot().camera.z);
   }, [canvas.id, runtime]);
 
@@ -829,26 +838,26 @@ function CanvasSurfaceRuntime({
         ref={stageRef}
         className="canvas-world-stage"
       >
-        <svg
-          className="canvas-edge-layer"
-          aria-hidden="true"
-          viewBox={renderSnapshot.svgViewBox}
-          style={{
-            left: renderSnapshot.svgBounds.x,
-            top: renderSnapshot.svgBounds.y,
-            width: renderSnapshot.svgBounds.width,
-            height: renderSnapshot.svgBounds.height
-          }}
-        >
-          {renderSnapshot.edges.map((edge) => (
+        {renderSnapshot.edges.map((edge) => (
+          <svg
+            key={edge.id}
+            className="canvas-edge-layer"
+            aria-hidden="true"
+            viewBox={edge.svgViewBox}
+            style={{
+              left: edge.svgBounds.x,
+              top: edge.svgBounds.y,
+              width: edge.svgBounds.width,
+              height: edge.svgBounds.height
+            }}
+          >
             <path
-              key={edge.id}
               data-canvas-edge-id={edge.id}
               className="canvas-edge"
               d={edge.path}
             />
-          ))}
-        </svg>
+          </svg>
+        ))}
         <CanvasImageAssetProvider runtime={imageAssetRuntime}>
           {renderedNodes.map((node) => (
             <CanvasNodeShell
@@ -930,6 +939,9 @@ const IMAGE_RUNTIME_WORK_COUNTERS = [
   'image-budget-block',
   'image-next-cancel',
   'image-visible-evict',
+  'image-downshift-start',
+  'image-downshift-resolve',
+  'image-retention-budget-evict',
   'image-node-publish'
 ] as const satisfies readonly CanvasPerfCounterName[];
 
@@ -1142,6 +1154,11 @@ function canvasPerfDebugSnapshot(input: CanvasPerfDebugSnapshotContext): Debrute
     activeImageLoadCount: imageStats.activeLoadCount,
     pendingImageCount: imageStats.pendingImageCount,
     decodedImageCount: imageStats.decodedImageCount,
+    retainedDecodedImagePixels: imageStats.retainedDecodedImagePixels,
+    oversizedRetainedImageCount: imageStats.oversizedRetainedImageCount,
+    downshiftStartCount: imageStats.downshiftStartCount,
+    downshiftResolveCount: imageStats.downshiftResolveCount,
+    highResolutionEvictionCount: imageStats.highResolutionEvictionCount,
     imageResourceZoom: snapshot.imageResourceZoom,
     visiblePreviewWidths: imageStats.visiblePreviewWidths,
     nextPreviewWidths: imageStats.nextPreviewWidths,
@@ -1199,6 +1216,7 @@ export function syncCanvasImageAssetViewport(input: {
   imageHeavyEfficientMode: boolean;
   cameraState?: CanvasRuntimeSnapshot['cameraState'];
 }): void {
+  const snapshot = input.editorRuntime.getSnapshot();
   const visibleRect = input.editorRuntime.coordinates.visibleCanvasRect();
   const mountedNodePaths = new Set(input.nodesByPath.keys());
   const culledNodePaths = new Set(
@@ -1211,9 +1229,10 @@ export function syncCanvasImageAssetViewport(input: {
     mountedNodePaths,
     culledNodePaths,
     imageResourceZoom: input.imageResourceZoom,
+    retentionResourceZoom: Math.min(input.imageResourceZoom, snapshot.camera.z),
     devicePixelRatio: input.devicePixelRatio,
     imageHeavyEfficientMode: input.imageHeavyEfficientMode,
-    cameraState: input.cameraState ?? input.editorRuntime.getSnapshot().cameraState
+    cameraState: input.cameraState ?? snapshot.cameraState
   });
 }
 
@@ -1247,11 +1266,16 @@ export function syncCanvasImageResourceZoomForCameraState(input: {
   currentImageResourceZoom: number;
   liveCameraZoom: number;
   timerRef: { current: number | undefined };
+  lastCameraMovementAtRef?: { current: number | undefined } | undefined;
+  now?: (() => number) | undefined;
+  resourceZoomSignature?: ((zoom: number) => string) | undefined;
   setImageResourceZoom: (zoom: number) => void;
   setTimeout: (callback: () => void, delay: number) => number;
   clearTimeout: (handle: number) => void;
   settleMs?: number | undefined;
 }): void {
+  const now = input.now ?? canvasPerfTimestamp;
+  const settleMs = input.settleMs ?? CANVAS_IMAGE_PREVIEW_RESOURCE_SETTLE_MS;
   const clearPendingTimer = () => {
     if (input.timerRef.current === undefined) {
       return;
@@ -1262,6 +1286,9 @@ export function syncCanvasImageResourceZoomForCameraState(input: {
 
   if (!input.useEfficientImageResourceZoom) {
     clearPendingTimer();
+    if (input.lastCameraMovementAtRef) {
+      input.lastCameraMovementAtRef.current = undefined;
+    }
     if (input.currentImageResourceZoom !== input.liveCameraZoom) {
       input.setImageResourceZoom(input.liveCameraZoom);
     }
@@ -1269,20 +1296,62 @@ export function syncCanvasImageResourceZoomForCameraState(input: {
   }
 
   if (input.cameraState !== 'idle') {
+    if (input.lastCameraMovementAtRef) {
+      input.lastCameraMovementAtRef.current = now();
+    }
     clearPendingTimer();
     return;
   }
 
-  if (input.currentImageResourceZoom === input.liveCameraZoom) {
+  if (sameEfficientImageResourceZoomSelection(input)) {
     clearPendingTimer();
     return;
   }
 
   clearPendingTimer();
+  const elapsedSinceMovement = input.lastCameraMovementAtRef?.current === undefined
+    ? settleMs
+    : Math.max(0, now() - input.lastCameraMovementAtRef.current);
+  const delay = Math.max(0, settleMs - elapsedSinceMovement);
   input.timerRef.current = input.setTimeout(() => {
     input.timerRef.current = undefined;
+    if (input.lastCameraMovementAtRef) {
+      input.lastCameraMovementAtRef.current = undefined;
+    }
     input.setImageResourceZoom(input.liveCameraZoom);
-  }, input.settleMs ?? CANVAS_IMAGE_PREVIEW_RESOURCE_SETTLE_MS);
+  }, delay);
+}
+
+function sameEfficientImageResourceZoomSelection(input: {
+  currentImageResourceZoom: number;
+  liveCameraZoom: number;
+  resourceZoomSignature?: ((zoom: number) => string) | undefined;
+}): boolean {
+  if (input.currentImageResourceZoom === input.liveCameraZoom) {
+    return true;
+  }
+  if (!input.resourceZoomSignature) {
+    return false;
+  }
+  return input.resourceZoomSignature(input.currentImageResourceZoom) === input.resourceZoomSignature(input.liveCameraZoom);
+}
+
+export function canvasImageResourceZoomPreviewSignature(input: {
+  nodes: readonly ProjectedCanvasNode[];
+  imageResourceZoom: number;
+  devicePixelRatio: number;
+}): string {
+  return input.nodes
+    .flatMap((node) => {
+      const source = canvasImageSource({
+        node,
+        cameraZoom: input.imageResourceZoom,
+        devicePixelRatio: input.devicePixelRatio
+      });
+      return source ? [`${node.projectRelativePath}\u001f${source.previewWidth}`] : [];
+    })
+    .sort()
+    .join('\u001e');
 }
 
 export function shouldUseEfficientImageResourceZoom(input: {
