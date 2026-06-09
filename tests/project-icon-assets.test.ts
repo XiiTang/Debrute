@@ -55,6 +55,12 @@ describe('project icon assets', () => {
     expect(await alphaAt(join(root, 'apps/desktop/build/logo.png'), 0, 0)).toBe(255);
     expect(await alphaAt(join(root, 'apps/desktop/build/icon.png'), 0, 0)).toBe(0);
     expect(await alphaAt(join(root, 'apps/desktop/build/icon.png'), 512, 512)).toBeGreaterThan(0);
+    expect(await alphaEdgeMargins(join(root, 'apps/desktop/build/icon.png'))).toEqual({
+      left: 82,
+      top: 82,
+      right: 82,
+      bottom: 82
+    });
     expect(await alphaAt(join(root, 'apps/desktop/build/tray_icon.png'), 0, 0)).toBe(0);
     expect(await alphaAt(join(root, 'apps/desktop/build/tray_icon.png'), 33, 33)).toBeGreaterThan(0);
 
@@ -105,4 +111,33 @@ async function alphaAt(path: string, x: number, y: number): Promise<number> {
     .raw()
     .toBuffer({ resolveWithObject: true });
   return data[(y * info.width + x) * info.channels + 3];
+}
+
+async function alphaEdgeMargins(path: string): Promise<{ left: number; top: number; right: number; bottom: number }> {
+  const { data, info } = await sharp(path)
+    .ensureAlpha()
+    .raw()
+    .toBuffer({ resolveWithObject: true });
+  const alpha = (x: number, y: number) => data[(y * info.width + x) * info.channels + 3];
+  const hasAlphaInColumn = (x: number) => {
+    for (let y = 0; y < info.height; y += 1) {
+      if (alpha(x, y) > 0) return true;
+    }
+    return false;
+  };
+  const hasAlphaInRow = (y: number) => {
+    for (let x = 0; x < info.width; x += 1) {
+      if (alpha(x, y) > 0) return true;
+    }
+    return false;
+  };
+  let left = 0;
+  while (left < info.width && !hasAlphaInColumn(left)) left += 1;
+  let right = 0;
+  while (right < info.width && !hasAlphaInColumn(info.width - 1 - right)) right += 1;
+  let top = 0;
+  while (top < info.height && !hasAlphaInRow(top)) top += 1;
+  let bottom = 0;
+  while (bottom < info.height && !hasAlphaInRow(info.height - 1 - bottom)) bottom += 1;
+  return { left, top, right, bottom };
 }

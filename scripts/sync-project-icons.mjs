@@ -21,6 +21,7 @@ const icoIconSizes = [16, 32, 48, 256];
 const neutralIconRadiusRatio = 0.2;
 const macIconRadiusRatio = 0.225;
 const windowsIconRadiusRatio = 0.12;
+const appIconInsetRatio = 0.08;
 const trayIconSize = 66;
 const trayIconContentSize = 56;
 
@@ -90,13 +91,26 @@ async function writeAppIconPng(svg, target, size, radiusRatio) {
 }
 
 async function appIconPng(svg, size, radiusRatio) {
+  const inset = Math.round(size * appIconInsetRatio);
+  const contentSize = size - inset * 2;
   const rendered = await sharp(Buffer.from(svg))
-    .resize(size, size, { fit: 'fill' })
+    .resize(contentSize, contentSize, { fit: 'fill' })
     .png()
     .toBuffer();
-  return sharp(rendered)
+  const iconBody = await sharp(rendered)
     .ensureAlpha()
-    .composite([{ input: await roundedRectangleMask(size, radiusRatio), blend: 'dest-in' }])
+    .composite([{ input: await roundedRectangleMask(contentSize, radiusRatio), blend: 'dest-in' }])
+    .png()
+    .toBuffer();
+  return sharp({
+    create: {
+      width: size,
+      height: size,
+      channels: 4,
+      background: { r: 0, g: 0, b: 0, alpha: 0 }
+    }
+  })
+    .composite([{ input: iconBody, left: inset, top: inset }])
     .png()
     .toBuffer();
 }
