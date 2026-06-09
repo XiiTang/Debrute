@@ -43,7 +43,8 @@ describe('project icon assets', () => {
     expect(rootPackage.scripts['icons:sync']).toBe('node scripts/sync-project-icons.mjs');
     expect(webHtml).toContain('<link rel="icon" type="image/svg+xml" href="/debrute.svg" />');
     expect(desktopPackage.build.icon).toBe('build/icon.png');
-    expect(electronMain).toContain("const projectIconPath = join(__dirname, 'icon.svg')");
+    expect(electronMain).toContain("const projectIconPath = join(__dirname, 'icon.png')");
     expect(electronMain).toContain('icon: projectIconPath');
+    expect(electronMain).toContain('app.dock.setIcon(projectIconPath)');
   });
 });

@@ -49,6 +49,7 @@ describe('Electron development scripts', () => {
     const script = readFileSync(join(process.cwd(), 'apps/desktop/scripts/bundle-electron.mjs'), 'utf8');
 
     expect(script).toContain("await cp('build/icon.svg', 'dist-electron/icon.svg')");
+    expect(script).toContain("await cp('build/icon.png', 'dist-electron/icon.png')");
   });
 
   it('runs Electron main and preload bundles on embedded Node.js 24', () => {

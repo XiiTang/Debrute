@@ -41,3 +41,4 @@ await cp(
 );
 
 await cp('build/icon.svg', 'dist-electron/icon.svg');
+await cp('build/icon.png', 'dist-electron/icon.png');
