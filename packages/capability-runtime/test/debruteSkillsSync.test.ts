@@ -115,12 +115,21 @@ describe('Debrute Skills sync service', () => {
     try {
       await writeSkill(fixture.bundle, 'debrute-core');
       await writeSkill(fixture.bundle, 'debrute-image-director');
+      await writeSkill(fixture.bundle, 'debrute-video-director');
       const service = createService(fixture);
 
       const sync = await service.sync({ force: false });
 
-      expect(sync.updatedSkills.map((skill) => skill.name)).toEqual(['debrute-core', 'debrute-image-director']);
-      expect(sync.addedBundledSkills.map((skill) => skill.name)).toEqual(['debrute-core', 'debrute-image-director']);
+      expect(sync.updatedSkills.map((skill) => skill.name)).toEqual([
+        'debrute-core',
+        'debrute-image-director',
+        'debrute-video-director'
+      ]);
+      expect(sync.addedBundledSkills.map((skill) => skill.name)).toEqual([
+        'debrute-core',
+        'debrute-image-director',
+        'debrute-video-director'
+      ]);
       expect(sync.skippedDeletedSkills).toEqual([]);
       expect(sync.missingBundledSkills).toEqual([]);
     } finally {

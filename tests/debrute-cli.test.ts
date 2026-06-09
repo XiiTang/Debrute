@@ -128,9 +128,44 @@ describe('debrute-cli', () => {
       expect(output[1]).toContain('debrute/1 ok cmd=models.image.list');
       expect(output[1]).toContain('count=0');
       expect(output[2]).toContain('debrute/1 ok cmd=models.video.list');
-      expect(output[2]).toContain('model id=');
+      expect(output[2]).toContain('count=0');
       expect(output[3]).toContain('debrute/1 error cmd=llm.request code=model_not_configured');
       expect(output.join('\n')).not.toContain('projectRoot');
+    } finally {
+      if (originalHome === undefined) {
+        delete process.env.HOME;
+      } else {
+        process.env.HOME = originalHome;
+      }
+      process.exitCode = originalExitCode;
+      await rm(home, { recursive: true, force: true });
+    }
+  });
+
+  it('prints configured video model parameter summaries without config status fields', async () => {
+    const home = await mkdtemp(join(tmpdir(), 'debrute-cli-video-list-params-home-'));
+    const originalHome = process.env.HOME;
+    const originalExitCode = process.exitCode;
+    try {
+      process.env.HOME = home;
+      await mkdir(join(home, '.debrute/config'), { recursive: true });
+      await writeFile(join(home, '.debrute/config/secrets.json'), JSON.stringify({
+        llmProviderApiKeys: {},
+        imageModelApiKeys: {},
+        videoModelApiKeys: { 'doubao-seedance-2-0-260128': 'sk-video' }
+      }, null, 2), 'utf8');
+      const output: string[] = [];
+
+      await runCli(['models', 'video', 'list'], (text) => output.push(text));
+
+      expect(output).toHaveLength(1);
+      expect(output[0]).toContain('debrute/1 ok cmd=models.video.list');
+      expect(output[0]).toContain('model id=doubao-seedance-2-0-260128 parameters=');
+      expect(output[0]).toContain('\\"prompt\\":\\"required text brief');
+      expect(output[0]).toContain('\\"intent\\":');
+      expect(output[0]).toContain('\\"references\\":');
+      expect(output[0]).not.toContain('api_key=');
+      expect(output[0]).not.toContain('enabled=');
     } finally {
       if (originalHome === undefined) {
         delete process.env.HOME;
@@ -215,6 +250,29 @@ describe('debrute-cli', () => {
     }
   });
 
+  it('prints official video model documentation in model describe output', async () => {
+    const output: string[] = [];
+    const originalExitCode = process.exitCode;
+    try {
+      await runCli(['models', 'video', 'describe', 'doubao-seedance-2-0-260128'], (text) => output.push(text));
+
+      expect(process.exitCode).toBeUndefined();
+      expect(output[0]).toContain('debrute/1 ok cmd=models.video.describe');
+      expect(output[0]).toContain('model id=doubao-seedance-2-0-260128');
+      expect(output[0]).toContain('official_doc urls=');
+      expect(output[0]).toContain('snapshot=packages/capability-runtime/src/videoModels/officialDocs/snapshots/volcengine-ark/seedance-2.md');
+      expect(output[0]).toContain('captured_at=');
+      expect(output[0]).toContain('arguments_schema=');
+      expect(output[0]).toContain('description_markdown=');
+      expect(output[0]).toContain('Official documentation:');
+      expect(output[0]).toContain('debrute generate video <project> --input-json');
+      expect(output[0]).toContain('\\"prompt\\":');
+      expect(output[0]).not.toContain('\\"content\\":[');
+    } finally {
+      process.exitCode = originalExitCode;
+    }
+  });
+
   it('returns configuration exit codes for known generation models without config', async () => {
     const root = await mkdtemp(join(tmpdir(), 'debrute-cli-generate-config-'));
     const home = await mkdtemp(join(tmpdir(), 'debrute-cli-generate-config-home-'));
@@ -284,6 +342,43 @@ describe('debrute-cli', () => {
         'message="Image model API key is missing: gpt-image-2"',
         'content="Image model API key is missing: gpt-image-2"',
         'model=gpt-image-2'
+      ].join('\n')]);
+    } finally {
+      if (originalHome === undefined) {
+        delete process.env.HOME;
+      } else {
+        process.env.HOME = originalHome;
+      }
+      process.exitCode = originalExitCode;
+      await rm(root, { recursive: true, force: true });
+      await rm(home, { recursive: true, force: true });
+    }
+  });
+
+  it('returns configuration exit codes for known video generation models without config', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'debrute-cli-generate-video-config-'));
+    const home = await mkdtemp(join(tmpdir(), 'debrute-cli-generate-video-config-home-'));
+    const originalHome = process.env.HOME;
+    const originalExitCode = process.exitCode;
+    try {
+      process.env.HOME = home;
+      await runCli(['project', 'init', root], () => {});
+      const output: string[] = [];
+
+      await runCli([
+        'generate',
+        'video',
+        root,
+        '--input-json',
+        '{"model":"doubao-seedance-2-0-260128","arguments":{"prompt":"camera move"}}'
+      ], (text) => output.push(text));
+
+      expect(process.exitCode).toBe(3);
+      expect(output).toEqual([[
+        'debrute/1 error cmd=generate.video code=model_not_configured',
+        'message="Video model API key is missing: doubao-seedance-2-0-260128"',
+        'content="Video model API key is missing: doubao-seedance-2-0-260128"',
+        'model=doubao-seedance-2-0-260128'
       ].join('\n')]);
     } finally {
       if (originalHome === undefined) {

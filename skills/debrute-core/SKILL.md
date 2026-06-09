@@ -38,7 +38,7 @@ debrute generate image /path/to/project --input-json '{"model":"gpt-image-2","ar
 debrute generate image-batch /path/to/project --manifest image-requests.json --log image-results.jsonl --summary image-summary.json
 debrute models video list
 debrute models video describe doubao-seedance-2-0-260128
-debrute generate video /path/to/project --input-json '{"model":"doubao-seedance-2-0-260128","arguments":{"content":[{"type":"text","text":"Short video brief"}]}}'
+debrute generate video /path/to/project --input-json '{"model":"doubao-seedance-2-0-260128","arguments":{"prompt":"Short video brief","intent":"generate"}}'
 debrute commands
 ```
 

@@ -96,9 +96,9 @@ describe('Debrute CLI protocol contracts', () => {
     const state: DebruteSkillsState = {
       schemaVersion: 1,
       debruteVersion: '0.2.0',
-      bundledSkills: ['debrute-core', 'debrute-image-director'],
+      bundledSkills: ['debrute-core', 'debrute-image-director', 'debrute-video-director'],
       updatedSkills: ['debrute-core'],
-      addedBundledSkills: ['debrute-image-director'],
+      addedBundledSkills: ['debrute-image-director', 'debrute-video-director'],
       skippedDeletedSkills: ['debrute-example'],
       diagnostics: [{
         code: 'skills_out_of_sync',
@@ -117,7 +117,7 @@ describe('Debrute CLI protocol contracts', () => {
       sharedSkillsRoot: '/Users/me/.agents/skills',
       bundledSkillsRoot: '/Debrute/skills',
       bundledRootAvailable: true,
-      bundledSkills: ['debrute-core', 'debrute-image-director'],
+      bundledSkills: ['debrute-core', 'debrute-image-director', 'debrute-video-director'],
       missingBundledSkills: ['debrute-example'],
       missingBundledSkillCount: 1,
       skippedDeletedSkills: ['debrute-example']

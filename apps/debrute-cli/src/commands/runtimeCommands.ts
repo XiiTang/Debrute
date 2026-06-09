@@ -1,4 +1,4 @@
-import type { DebruteAppServer, CliImageModelDetail, CliRuntimeDiagnostic } from '@debrute/app-server';
+import type { DebruteAppServer, CliImageModelDetail, CliRuntimeDiagnostic, CliVideoModelDetail } from '@debrute/app-server';
 import type { SkillsStatusSnapshot, SkillsSyncSnapshot } from '@debrute/app-protocol';
 import type { DebruteSkillsSyncService } from '@debrute/capability-runtime';
 import { cliError, normalizeServiceErrorCode } from '../errors/cliErrors.js';
@@ -95,7 +95,7 @@ export async function runRuntimeCommand(args: ParsedDebruteArgs, services: Runti
 
   if (args.command === 'models.video.list') {
     const models = await requiredServer(services.server, args.command).listVideoModelsForCli();
-    return modelListResult(args.command, models);
+    return videoModelListResult(args.command, models);
   }
 
   if (args.command === 'models.image.describe') {
@@ -105,7 +105,7 @@ export async function runRuntimeCommand(args: ParsedDebruteArgs, services: Runti
 
   if (args.command === 'models.video.describe') {
     const model = await requiredServer(services.server, args.command).describeVideoModelForCli(args.positional[0]!);
-    return modelDetailResult(args.command, model);
+    return videoModelDetailResult(args.command, model);
   }
 
   if (args.command === 'llm.request') {
@@ -288,14 +288,15 @@ function imageModelListResult(command: string, models: Array<{ id: string; param
   };
 }
 
-function modelListResult(command: string, models: Array<{ id: string }>): DebruteAgentResult {
+function videoModelListResult(command: string, models: Array<{ id: string; parameters: Record<string, string> }>): DebruteAgentResult {
   return {
     status: 'ok',
     command,
     records: models.map((model) => ({
       name: 'model',
       fields: {
-        id: model.id
+        id: model.id,
+        parameters: JSON.stringify(model.parameters)
       }
     })),
     fields: {
@@ -304,30 +305,31 @@ function modelListResult(command: string, models: Array<{ id: string }>): Debrut
   };
 }
 
-function modelDetailResult(
-  command: string,
-  model: {
-    id: string;
-    summary: string;
-    argumentsSchema: Record<string, unknown>;
-    capabilities: Record<string, unknown>;
-    usageNotes: string;
-  }
-): DebruteAgentResult {
+function videoModelDetailResult(command: string, model: CliVideoModelDetail): DebruteAgentResult {
   return {
     status: 'ok',
     command,
-    records: [{
-      name: 'model',
-      fields: {
-        id: model.id
+    records: [
+      {
+        name: 'model',
+        fields: {
+          id: model.id
+        }
+      },
+      {
+        name: 'official_doc',
+        fields: {
+          urls: JSON.stringify(model.officialDocUrls),
+          snapshot: model.officialSnapshotPath,
+          captured_at: model.officialCapturedAt
+        }
       }
-    }],
+    ],
     fields: {
       summary: model.summary,
       capabilities: JSON.stringify(model.capabilities),
       arguments_schema: JSON.stringify(model.argumentsSchema),
-      usage: model.usageNotes
+      description_markdown: model.descriptionMarkdown
     }
   };
 }

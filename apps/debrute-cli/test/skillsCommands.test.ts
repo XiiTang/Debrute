@@ -49,7 +49,7 @@ describe('debrute skills CLI commands', () => {
       command: 'skills.sync',
       fields: {
         updated: 1,
-        added: 1,
+        added: 2,
         skipped_deleted: 1,
         force: false
       }
@@ -174,9 +174,9 @@ function fakeSkillsService(overrides: Partial<SkillsStatusSnapshot> = {}): Debru
     sharedSkillsRoot: '/home/user/.agents/skills',
     bundledSkillsRoot: '/Debrute/skills',
     bundledRootAvailable: true,
-    bundledSkills: ['debrute-core', 'debrute-image-director'],
-    missingBundledSkills: ['debrute-image-director'],
-    missingBundledSkillCount: 1,
+    bundledSkills: ['debrute-core', 'debrute-image-director', 'debrute-video-director'],
+    missingBundledSkills: ['debrute-image-director', 'debrute-video-director'],
+    missingBundledSkillCount: 2,
     skippedDeletedSkills: ['debrute-example'],
     ...overrides
   };
@@ -184,11 +184,18 @@ function fakeSkillsService(overrides: Partial<SkillsStatusSnapshot> = {}): Debru
     ...status,
     force: false,
     updatedSkills: status.skills,
-    addedBundledSkills: [{
-      ...status.skills[0]!,
-      name: 'debrute-image-director',
-      description: 'Image Director'
-    }],
+    addedBundledSkills: [
+      {
+        ...status.skills[0]!,
+        name: 'debrute-image-director',
+        description: 'Image Director'
+      },
+      {
+        ...status.skills[0]!,
+        name: 'debrute-video-director',
+        description: 'Video Director'
+      }
+    ],
     skippedDeletedSkills: ['debrute-example']
   };
   return {

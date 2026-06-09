@@ -4,7 +4,9 @@ import type {
   ImageModelOfficialDescription,
   ImageModelCatalogEntry,
   ImageModelDetailEntry,
-  VideoModelDetailEntry
+  VideoModelCatalogEntry,
+  VideoModelDetailEntry,
+  VideoModelOfficialDescription
 } from '@debrute/capability-runtime';
 import type {
   ImageModelSettingRecord,
@@ -25,6 +27,11 @@ export interface CliImageModelListEntry {
   parameters: Record<string, string>;
 }
 
+export interface CliVideoModelListEntry {
+  id: string;
+  parameters: Record<string, string>;
+}
+
 export interface CliModelDetail extends CliModelSummary {
   capabilities: Record<string, unknown>;
   argumentsSchema: Record<string, unknown>;
@@ -32,6 +39,15 @@ export interface CliModelDetail extends CliModelSummary {
 }
 
 export interface CliImageModelDetail extends CliModelSummary {
+  capabilities: Record<string, unknown>;
+  argumentsSchema: Record<string, unknown>;
+  officialDocUrls: string[];
+  officialSnapshotPath: string;
+  officialCapturedAt: string;
+  descriptionMarkdown: string;
+}
+
+export interface CliVideoModelDetail extends CliModelSummary {
   capabilities: Record<string, unknown>;
   argumentsSchema: Record<string, unknown>;
   officialDocUrls: string[];
@@ -79,6 +95,13 @@ export function cliImageModelListEntry(entry: ImageModelCatalogEntry): CliImageM
   };
 }
 
+export function cliVideoModelListEntry(entry: VideoModelCatalogEntry): CliVideoModelListEntry {
+  return {
+    id: entry.debruteModelId,
+    parameters: { ...entry.listParameters }
+  };
+}
+
 export function cliImageModelDetail(
   model: ImageModelSettingRecord,
   detail: ImageModelDetailEntry,
@@ -95,12 +118,19 @@ export function cliImageModelDetail(
   };
 }
 
-export function cliVideoModelDetail(model: VideoModelSettingRecord, detail: VideoModelDetailEntry): CliModelDetail {
+export function cliVideoModelDetail(
+  model: VideoModelSettingRecord,
+  detail: VideoModelDetailEntry,
+  officialDescription: VideoModelOfficialDescription
+): CliVideoModelDetail {
   return {
     ...cliModelSummary(model),
     capabilities: detail.capabilities,
     argumentsSchema: detail.argumentsSchema,
-    usageNotes: detail.usageNotes
+    officialDocUrls: officialDescription.sourceUrls,
+    officialSnapshotPath: officialDescription.snapshotPath,
+    officialCapturedAt: officialDescription.capturedAt,
+    descriptionMarkdown: officialDescription.descriptionMarkdown
   };
 }
 

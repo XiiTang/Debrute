@@ -1,6 +1,6 @@
 import { randomUUID } from 'node:crypto';
 import { basename } from 'node:path';
-import { readProjectFileBytes, writeProjectFile } from '@debrute/project-core';
+import { writeProjectFile } from '@debrute/project-core';
 import type { SecretsConfig, VideoModelsConfig } from '../config.js';
 import {
   DEFAULT_REQUEST_TIMEOUT_MS,
@@ -9,6 +9,12 @@ import {
   readResponseTextWithTimeout as readResponseTextBodyWithTimeout
 } from '../requestTimeout.js';
 import { createVideoModelCatalog, type VideoModelCatalogEntry } from './catalog.js';
+import {
+  normalizeSeedanceVideoArguments,
+  stripVideoOutputArgs,
+  VideoArgumentError,
+  type VideoReferenceUploadService
+} from './normalizer.js';
 
 export type VideoModelFetch = (url: string, init?: RequestInit) => Promise<Response>;
 
@@ -35,6 +41,7 @@ export interface ExecuteVideoModelRequestInput {
   secrets: Pick<SecretsConfig, 'videoModelApiKeys'>;
   fetch?: VideoModelFetch;
   recordGeneratedAsset?: VideoGeneratedAssetRecorder;
+  uploadVideoReference?: VideoReferenceUploadService;
   pollIntervalMs?: number;
   requestTimeoutMs?: number;
   pollMaxAttempts?: number;
@@ -58,7 +65,21 @@ type ModelEndpointResponse = {
 
 export type ExecuteVideoModelRequestResult =
   | { status: 'ok'; content: string; artifacts: VideoModelRequestArtifact[]; logs: Array<Record<string, unknown>> }
-  | { status: 'error'; content: string; error: 'invalid_input' | 'model_unavailable' | 'video_model_not_configured' | 'video_request_failed'; logs: Array<Record<string, unknown>> };
+  | {
+      status: 'error';
+      content: string;
+      error:
+        | 'video_argument_invalid'
+        | 'model_unavailable'
+        | 'video_model_not_configured'
+        | 'video_reference_missing'
+        | 'video_reference_type_unsupported'
+        | 'video_reference_count_invalid'
+        | 'video_reference_upload_unavailable'
+        | 'video_reference_too_large'
+        | 'video_request_failed';
+      logs: Array<Record<string, unknown>>;
+    };
 
 interface RequestState {
   projectRoot: string;
@@ -68,6 +89,7 @@ interface RequestState {
   apiKey: string;
   requestModelId: string;
   args: Record<string, unknown>;
+  redactedDebruteArgs: Record<string, unknown>;
   fetch: VideoModelFetch;
   recordGeneratedAsset?: VideoGeneratedAssetRecorder;
   modelRun: ModelRunLog;
@@ -119,14 +141,27 @@ export async function executeVideoModelRequest(input: ExecuteVideoModelRequestIn
     };
   }
 
-  let args: Record<string, unknown>;
+  let normalized: Awaited<ReturnType<typeof normalizeSeedanceVideoArguments>>;
   try {
-    args = await resolveContentReferences(input.input.arguments, input.projectRoot);
+    normalized = await normalizeSeedanceVideoArguments({
+      projectRoot: input.projectRoot,
+      catalogEntry: entry,
+      args: input.input.arguments,
+      ...(input.uploadVideoReference ? { uploadVideoReference: input.uploadVideoReference } : {})
+    });
   } catch (error) {
+    if (error instanceof VideoArgumentError) {
+      return {
+        status: 'error',
+        content: error.message,
+        error: error.code,
+        logs
+      };
+    }
     return {
       status: 'error',
       content: errorMessage(error),
-      error: 'invalid_input',
+      error: 'video_argument_invalid',
       logs
     };
   }
@@ -138,7 +173,8 @@ export async function executeVideoModelRequest(input: ExecuteVideoModelRequestIn
     baseUrl: modelSettings?.baseUrlOverride?.trim() || entry.defaultBaseUrl,
     apiKey,
     requestModelId: modelSettings?.requestModelIdOverride?.trim() || entry.defaultRequestModelId,
-    args,
+    args: normalized.upstreamArgs,
+    redactedDebruteArgs: normalized.redactedDebruteArgs,
     fetch: input.fetch ?? fetch,
     ...(input.recordGeneratedAsset ? { recordGeneratedAsset: input.recordGeneratedAsset } : {}),
     modelRun: { responses: [] },
@@ -179,7 +215,7 @@ export async function executeVideoModelRequest(input: ExecuteVideoModelRequestIn
 async function executeVolcengineArk(
   state: RequestState
 ): Promise<{ status: 'ok'; artifacts: VideoModelRequestArtifact[] } | VideoRequestError> {
-  const body = { model: state.requestModelId, ...stripOutputArgs(state.args) };
+  const body = { model: state.requestModelId, ...stripVideoOutputArgs(state.args) };
   const submitUrl = joinUrl(state.baseUrl, 'contents/generations/tasks');
   log(state, 'build_request', { url: submitUrl, argumentKeys: Object.keys(state.args).sort(), contentTypes: contentTypes(state.args.content) });
   const submit = await postJson(state, submitUrl, authorizationHeaders(state), body);
@@ -225,56 +261,6 @@ async function executeVolcengineArk(
   return modelFailure(state, 'Video request failed: model task polling timed out.', { body: { taskId, pollMaxAttempts: state.pollMaxAttempts } });
 }
 
-async function resolveContentReferences(args: Record<string, unknown>, projectRoot: string): Promise<Record<string, unknown>> {
-  const content = args.content;
-  if (!Array.isArray(content) || content.length === 0) {
-    throw new Error('Video request arguments.content must be a non-empty official Volcengine Ark content array.');
-  }
-  const resolvedContent = [];
-  for (const item of content) {
-    if (!item || typeof item !== 'object' || Array.isArray(item)) {
-      throw new Error('Video request content items must be objects.');
-    }
-    const next = { ...(item as Record<string, unknown>) };
-    if (next.type === 'image_url') {
-      next.image_url = { ...urlContainer(next.image_url, 'image_url'), url: await resolveImageUrl(urlString(next.image_url, 'image_url'), projectRoot) };
-    } else if (next.type === 'audio_url') {
-      next.audio_url = { ...urlContainer(next.audio_url, 'audio_url'), url: await resolveAudioUrl(urlString(next.audio_url, 'audio_url'), projectRoot) };
-    } else if (next.type === 'video_url') {
-      const url = urlString(next.video_url, 'video_url');
-      if (!isHttpUrl(url) && !url.startsWith('asset://')) {
-        throw new Error(`Local video input requires a public URL or asset:// reference: ${url}`);
-      }
-    }
-    resolvedContent.push(next);
-  }
-  return { ...args, content: resolvedContent };
-}
-
-async function resolveImageUrl(url: string, projectRoot: string): Promise<string> {
-  if (isHttpUrl(url) || url.startsWith('data:image/') || url.startsWith('asset://')) {
-    return url;
-  }
-  const bytes = await readLocalReference(projectRoot, url, 'Image');
-  return `data:${imageMimeType(Buffer.from(bytes), url)};base64,${Buffer.from(bytes).toString('base64')}`;
-}
-
-async function resolveAudioUrl(url: string, projectRoot: string): Promise<string> {
-  if (isHttpUrl(url) || url.startsWith('data:audio/') || url.startsWith('asset://')) {
-    return url;
-  }
-  const bytes = await readLocalReference(projectRoot, url, 'Audio');
-  return `data:${audioMimeType(url)};base64,${Buffer.from(bytes).toString('base64')}`;
-}
-
-async function readLocalReference(projectRoot: string, path: string, label: string): Promise<Uint8Array> {
-  try {
-    return await readProjectFileBytes(projectRoot, path);
-  } catch {
-    throw new Error(`${label} reference not found in project: ${path}`);
-  }
-}
-
 async function postJson(state: RequestState, url: string, headers: Record<string, string>, body: unknown): Promise<JsonResponseResult> {
   const requestHeaders = { 'content-type': 'application/json', ...headers };
   recordModelRequest(state, {
@@ -314,17 +300,17 @@ async function parseModelResponse(state: RequestState, response: Response): Prom
     state.modelRun.responses.push({
       status: response.status,
       headers: Object.fromEntries(response.headers.entries()),
-      body: endpointResponse.body
+      body: redactModelResponseValue(endpointResponse.body, state.apiKey)
     });
     log(state, 'execute_request', { status: response.status, payloadShape: summarizeJsonShape(endpointResponse.body) });
     return { ok: false, result: modelFailure(state, `Video request failed: ${errorMessage(error)}`, endpointResponse) };
   }
+  const endpointResponse = { status: response.status, body: redactModelResponseValue(body, state.apiKey) };
   state.modelRun.responses.push({
     status: response.status,
     headers: Object.fromEntries(response.headers.entries()),
-    body
+    body: endpointResponse.body
   });
-  const endpointResponse = { status: response.status, body: redactModelResponseValue(body, state.apiKey) };
   log(state, 'execute_request', { status: response.status, payloadShape: summarizeJsonShape(body) });
   if (!response.ok) {
     return { ok: false, result: modelFailure(state, `Video request failed: model endpoint responded with HTTP ${response.status}.`, endpointResponse) };
@@ -395,7 +381,10 @@ async function storeDownloadedArtifact(state: RequestState, url: string, index: 
 
 function recordModelRequest(state: RequestState, request: unknown): void {
   if (state.modelRun.request === undefined) {
-    state.modelRun.request = request;
+    state.modelRun.request = {
+      debrute: state.redactedDebruteArgs,
+      upstream: redactModelResponseValue(request, state.apiKey)
+    };
   }
 }
 
@@ -403,7 +392,8 @@ function modelFailure(state: RequestState, content: string, endpointResponse?: M
   log(state, 'model_failure', {
     message: content,
     endpointStatus: endpointResponse?.status ?? null,
-    payloadShape: summarizeJsonShape(endpointResponse?.body)
+    payloadShape: summarizeJsonShape(endpointResponse?.body),
+    ...(endpointResponse ? { endpointResponse: redactModelResponseValue(endpointResponse, state.apiKey) } : {})
   });
   return {
     status: 'error',
@@ -411,22 +401,6 @@ function modelFailure(state: RequestState, content: string, endpointResponse?: M
     error: 'video_request_failed',
     logs: state.logs
   };
-}
-
-function urlContainer(value: unknown, field: string): Record<string, unknown> {
-  if (!value || typeof value !== 'object' || Array.isArray(value)) {
-    throw new Error(`Video request content item ${field} must be an object with a url field.`);
-  }
-  return value as Record<string, unknown>;
-}
-
-function urlString(value: unknown, field: string): string {
-  const container = urlContainer(value, field);
-  const url = typeof container.url === 'string' ? container.url.trim() : '';
-  if (!url) {
-    throw new Error(`Video request content item ${field}.url must be a non-empty string.`);
-  }
-  return url;
 }
 
 function extractTaskId(payload: Record<string, unknown>): string | null {
@@ -465,13 +439,6 @@ function authorizationHeaders(state: Pick<RequestState, 'apiKey'>): Record<strin
   return { authorization: `Bearer ${state.apiKey}` };
 }
 
-function stripOutputArgs(args: Record<string, unknown>): Record<string, unknown> {
-  const next = { ...args };
-  delete next.output_path;
-  delete next.output_directory;
-  return next;
-}
-
 function stringArg(args: Record<string, unknown>, key: string): string | undefined {
   const value = args[key];
   return typeof value === 'string' && value.trim() ? value.trim() : undefined;
@@ -479,42 +446,6 @@ function stringArg(args: Record<string, unknown>, key: string): string | undefin
 
 function joinUrl(baseUrl: string, path: string): string {
   return `${baseUrl.replace(/\/$/, '')}/${path.replace(/^\//, '')}`;
-}
-
-function isHttpUrl(value: string): boolean {
-  return /^https?:\/\//.test(value);
-}
-
-function imageMimeType(bytes: Buffer, path: string): string {
-  if (bytes.subarray(0, 8).equals(Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]))) {
-    return 'image/png';
-  }
-  if (bytes[0] === 0xff && bytes[1] === 0xd8) {
-    return 'image/jpeg';
-  }
-  if (/\.webp$/i.test(path)) {
-    return 'image/webp';
-  }
-  if (/\.gif$/i.test(path)) {
-    return 'image/gif';
-  }
-  return 'image/png';
-}
-
-function audioMimeType(path: string): string {
-  if (/\.mp3$/i.test(path)) {
-    return 'audio/mpeg';
-  }
-  if (/\.m4a$/i.test(path)) {
-    return 'audio/mp4';
-  }
-  if (/\.ogg$/i.test(path)) {
-    return 'audio/ogg';
-  }
-  if (/\.flac$/i.test(path)) {
-    return 'audio/flac';
-  }
-  return 'audio/wav';
 }
 
 function extensionForMimeType(mimeType: string): string {
@@ -562,7 +493,7 @@ function redactModelResponseValue(value: unknown, apiKey: string): unknown {
     if (apiKey) {
       next = next.split(apiKey).join('[redacted]');
     }
-    if (/^data:(image|audio)\//.test(next)) {
+    if (/^data:(image|audio|video)\//.test(next)) {
       return `${next.slice(0, next.indexOf(',') + 1)}[redacted]`;
     }
     return truncateString(next);

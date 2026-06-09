@@ -3,7 +3,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
 import { DebruteAppServer, DebruteGlobalRuntimeServer, GlobalConfigStore } from '../apps/app-server/src/index';
-import { createImageModelCatalog, type SecretsConfig, type VideoModelsConfig } from '@debrute/capability-runtime';
+import { createImageModelCatalog, createVideoModelCatalog, type SecretsConfig, type VideoModelsConfig } from '@debrute/capability-runtime';
 
 class CountingGlobalConfigStore extends GlobalConfigStore {
   readVideoModelsCount = 0;
@@ -36,16 +36,40 @@ describe('DebruteAppServer CLI service methods', () => {
       const videoModels = await server.listVideoModelsForCli();
 
       expect(imageModels).toEqual([]);
-      expect(videoModels.length).toBeGreaterThan(0);
+      expect(videoModels).toEqual([]);
       expect(() => server.getSnapshot()).toThrow('No project session is open.');
-      expect(videoModels[0]).toEqual({
-        id: expect.any(String),
-        summary: expect.any(String),
-        apiKeySet: expect.any(Boolean),
-        baseUrlOverride: null,
-        requestModelIdOverride: null
-      });
     } finally {
+      server.close();
+      await rm(home, { recursive: true, force: true });
+    }
+  });
+
+  it('lists only API-key configured video models with native parameter summaries', async () => {
+    const home = await mkdtemp(join(tmpdir(), 'debrute-cli-video-list-parameters-home-'));
+    const configStore = new GlobalConfigStore({ debruteHome: home });
+    const globalRuntime = new DebruteGlobalRuntimeServer({ globalConfigStore: configStore });
+    const server = new DebruteAppServer({ globalConfigStore: configStore });
+    try {
+      await expect(server.listVideoModelsForCli()).resolves.toEqual([]);
+      await globalRuntime.videoModelSaveSetting('doubao-seedance-2-0-260128', {
+        baseUrlOverride: null,
+        requestModelIdOverride: null,
+        apiKey: 'sk-video'
+      });
+
+      const videoModels = await server.listVideoModelsForCli();
+
+      expect(videoModels).toEqual([expect.objectContaining({
+        id: 'doubao-seedance-2-0-260128',
+        parameters: expect.objectContaining({
+          prompt: expect.stringContaining('required'),
+          intent: expect.stringContaining('reference'),
+          references: expect.stringContaining('project file path'),
+          resolution: expect.stringContaining('1080p')
+        })
+      })]);
+    } finally {
+      globalRuntime.close();
       server.close();
       await rm(home, { recursive: true, force: true });
     }
@@ -106,6 +130,35 @@ describe('DebruteAppServer CLI service methods', () => {
     }
   });
 
+  it('reports catalog video model count separately from API-key configured video models', async () => {
+    const home = await mkdtemp(join(tmpdir(), 'debrute-cli-runtime-status-video-count-home-'));
+    const configStore = new GlobalConfigStore({ debruteHome: home });
+    const globalRuntime = new DebruteGlobalRuntimeServer({ globalConfigStore: configStore });
+    const server = new DebruteAppServer({ globalConfigStore: configStore });
+    try {
+      const catalogCount = createVideoModelCatalog().listAll().length;
+      await expect(server.runtimeStatusForCli()).resolves.toMatchObject({
+        videoModels: catalogCount,
+        availableVideoModels: 0
+      });
+
+      await globalRuntime.videoModelSaveSetting('doubao-seedance-2-0-260128', {
+        baseUrlOverride: null,
+        requestModelIdOverride: null,
+        apiKey: 'sk-video'
+      });
+
+      await expect(server.runtimeStatusForCli()).resolves.toMatchObject({
+        videoModels: catalogCount,
+        availableVideoModels: 1
+      });
+    } finally {
+      globalRuntime.close();
+      server.close();
+      await rm(home, { recursive: true, force: true });
+    }
+  });
+
   it('describes image models with official documentation details without opening a project', async () => {
     const server = new DebruteAppServer();
     try {
@@ -119,6 +172,24 @@ describe('DebruteAppServer CLI service methods', () => {
       expect(detail.descriptionMarkdown).toContain('debrute generate image <project> --input-json');
       expect(detail.descriptionMarkdown).toContain('"model":"gpt-image-2"');
       expect(detail.argumentsSchema).toHaveProperty('properties');
+    } finally {
+      server.close();
+    }
+  });
+
+  it('describes video models with official documentation details without opening a project', async () => {
+    const server = new DebruteAppServer();
+    try {
+      const detail = await server.describeVideoModelForCli('doubao-seedance-2-0-260128');
+
+      expect(() => server.getSnapshot()).toThrow('No project session is open.');
+      expect(detail.officialDocUrls).toContain('https://www.volcengine.com/docs/82379/2291680');
+      expect(detail.officialSnapshotPath).toBe('packages/capability-runtime/src/videoModels/officialDocs/snapshots/volcengine-ark/seedance-2.md');
+      expect(detail.officialCapturedAt).toMatch(/^\d{4}-\d{2}-\d{2}$/);
+      expect(detail.descriptionMarkdown).toContain('# doubao-seedance-2-0-260128');
+      expect(detail.descriptionMarkdown).toContain('debrute generate video <project> --input-json');
+      expect(detail.descriptionMarkdown).toContain('"prompt"');
+      expect(JSON.stringify(detail.argumentsSchema)).not.toContain('"content"');
     } finally {
       server.close();
     }
@@ -246,7 +317,7 @@ describe('DebruteAppServer CLI service methods', () => {
 
       await expect(server.runVideoModelRequestForCli({
         model: '__missing_model__',
-        arguments: { content: [{ type: 'text', text: 'camera move' }] }
+        arguments: { prompt: 'camera move' }
       })).resolves.toMatchObject({
         status: 'error',
         error: { code: 'model_unavailable' }
@@ -254,7 +325,7 @@ describe('DebruteAppServer CLI service methods', () => {
 
       await expect(server.runVideoModelRequestForCli({
         model: 'doubao-seedance-2-0-260128',
-        arguments: { content: [{ type: 'text', text: 'camera move' }] }
+        arguments: { prompt: 'camera move' }
       })).resolves.toMatchObject({
         status: 'error',
         error: { code: 'video_model_not_configured' }
@@ -281,7 +352,7 @@ describe('DebruteAppServer CLI service methods', () => {
 
       await expect(server.runVideoModelRequestForCli({
         model: 'doubao-seedance-2-0-260128',
-        arguments: { content: [{ type: 'text', text: 'camera move' }] }
+        arguments: { prompt: 'camera move' }
       })).resolves.toMatchObject({
         status: 'error',
         error: { code: 'video_model_not_configured' }
@@ -301,8 +372,14 @@ describe('DebruteAppServer CLI service methods', () => {
     const globalRuntime = new DebruteGlobalRuntimeServer({ globalConfigStore: configStore });
     const server = new DebruteAppServer({
       globalConfigStore: configStore,
-      videoModelFetch: async (url) => {
+      videoModelFetch: async (url, init) => {
         if (url.endsWith('/contents/generations/tasks')) {
+          const body = init?.body ? JSON.parse(String(init.body)) : {};
+          expect(body).toMatchObject({
+            model: 'doubao-seedance-2-0-260128',
+            content: [{ type: 'text', text: 'camera move' }],
+            watermark: false
+          });
           return jsonResponse({ id: 'task-1' });
         }
         if (url.endsWith('/contents/generations/tasks/task-1')) {
@@ -328,7 +405,7 @@ describe('DebruteAppServer CLI service methods', () => {
 
       await expect(server.runVideoModelRequestForCli({
         model: 'doubao-seedance-2-0-260128',
-        arguments: { content: [{ type: 'text', text: 'camera move' }], watermark: false }
+        arguments: { prompt: 'camera move', watermark: false }
       })).resolves.toMatchObject({
         status: 'ok',
         outputs: { model: 'doubao-seedance-2-0-260128' }

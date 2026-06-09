@@ -74,4 +74,14 @@ describe('model-owned generated asset contracts', () => {
 
     expect(record.modelRun.request).toEqual({ model: 'gpt-image-2', prompt: 'cover' });
   });
+
+  it('keeps video model catalog entries model-owned without provider fields', () => {
+    for (const entry of createVideoModelCatalog().listAll()) {
+      expect(entry).toHaveProperty('debruteModelId');
+      expect(entry).not.toHaveProperty('provider');
+      expect(entry).not.toHaveProperty('providerType');
+      expect(entry.requestExample.input.model).toBe(entry.debruteModelId);
+      expect(JSON.stringify(entry.requestExample.input.arguments)).not.toContain('"content"');
+    }
+  });
 });

@@ -18,7 +18,8 @@ describe('release version contract', () => {
       'Desktop package',
       'Debrute CLI package',
       'debrute-core Skill',
-      'debrute-image-director Skill'
+      'debrute-image-director Skill',
+      'debrute-video-director Skill'
     ]);
     expect(contract.entries.every((entry) => entry.version === contract.version)).toBe(true);
   });

@@ -2,6 +2,8 @@ export {
   DebruteAppServer,
   type DebruteAppServerOptions,
   type CliImageModelDetail,
+  type CliVideoModelDetail,
+  type CliVideoModelListEntry,
   type CliModelDetail,
   type CliModelSummary,
   type CliRuntimeDiagnostic,

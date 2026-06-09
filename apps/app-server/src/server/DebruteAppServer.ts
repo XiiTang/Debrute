@@ -41,6 +41,7 @@ import {
   createVideoModelCatalog,
   createVideoModelSettingsView,
   describeImageModelOfficialDoc,
+  describeVideoModelOfficialDoc,
   runLlmRuntimeRequest,
   executeImageModelRequest,
   executeVideoModelRequest,
@@ -107,13 +108,15 @@ import {
 import {
   cliImageModelDetail,
   cliImageModelListEntry,
-  cliModelSummary,
   cliVideoModelDetail,
+  cliVideoModelListEntry,
   imageModelBatchResultFromExecution,
   imageModelReadinessFailure,
   type CliImageModelDetail,
   type CliImageModelListEntry,
   type CliModelDetail,
+  type CliVideoModelDetail,
+  type CliVideoModelListEntry,
   type CliModelSummary,
   type CliRuntimeDiagnostic,
   type CliRuntimeStatus
@@ -135,7 +138,7 @@ export interface DebruteAppServerOptions {
   canvasNodeLayoutSizeReader?: (input: ReadCanvasNodeLayoutSizeInput) => Promise<CanvasLayoutSize>;
 }
 
-export type { CliImageModelDetail, CliImageModelListEntry, CliModelDetail, CliModelSummary, CliRuntimeDiagnostic, CliRuntimeStatus };
+export type { CliImageModelDetail, CliImageModelListEntry, CliModelDetail, CliModelSummary, CliRuntimeDiagnostic, CliRuntimeStatus, CliVideoModelDetail, CliVideoModelListEntry };
 
 interface AppServerImageModelRequestExecutor {
   catalog: ImageModelCatalogEntry[];
@@ -249,7 +252,7 @@ export class DebruteAppServer {
   }
 
   async runtimeStatusForCli(): Promise<CliRuntimeStatus> {
-    const [configuredImageModels, videoModels, llmSettings] = await Promise.all([
+    const [configuredImageModels, configuredVideoModels, llmSettings] = await Promise.all([
       this.listImageModelsForCli(),
       this.listVideoModelsForCli(),
       this.readLlmProviderSettings()
@@ -258,8 +261,8 @@ export class DebruteAppServer {
       ok: true,
       imageModels: createImageModelCatalog().listAll().length,
       availableImageModels: configuredImageModels.length,
-      videoModels: videoModels.length,
-      availableVideoModels: videoModels.filter((model) => model.apiKeySet).length,
+      videoModels: createVideoModelCatalog().listAll().length,
+      availableVideoModels: configuredVideoModels.length,
       availableLlmModels: llmSettings.availableModelKeys.length,
       diagnostics: 0
     };
@@ -511,11 +514,15 @@ export class DebruteAppServer {
     });
   }
 
-  async listVideoModelsForCli(): Promise<CliModelSummary[]> {
-    return (await this.readVideoModelSettings()).models.map(cliModelSummary);
+  async listVideoModelsForCli(): Promise<CliVideoModelListEntry[]> {
+    const settings = await this.readVideoModelSettings();
+    const configured = new Set(settings.models.filter((model) => model.apiKeySet).map((model) => model.debruteModelId));
+    return createVideoModelCatalog().listAll()
+      .filter((entry) => configured.has(entry.debruteModelId))
+      .map(cliVideoModelListEntry);
   }
 
-  async describeVideoModelForCli(modelId: string): Promise<CliModelDetail> {
+  async describeVideoModelForCli(modelId: string): Promise<CliVideoModelDetail> {
     const settings = await this.readVideoModelSettings();
     const setting = settings.models.find((model) => model.debruteModelId === modelId);
     const catalog = createVideoModelCatalog();
@@ -523,7 +530,11 @@ export class DebruteAppServer {
     if (!setting || !detail) {
       throw serviceError('model_unavailable', `Video model is unknown: ${modelId}`, { model: modelId });
     }
-    return cliVideoModelDetail(setting, detail);
+    const officialDescription = await describeVideoModelOfficialDoc(modelId);
+    if (!officialDescription) {
+      throw serviceError('video_model_official_doc_missing', `Official video model documentation is missing: ${modelId}`, { model: modelId });
+    }
+    return cliVideoModelDetail(setting, detail, officialDescription);
   }
 
   async runVideoModelRequestForCli(input: VideoModelRequestInput): Promise<DebruteCapabilityResult> {
