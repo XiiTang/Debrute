@@ -12,6 +12,7 @@ const iconTargets = [
 ];
 const desktopBuildDir = 'apps/desktop/build';
 const desktopPngTarget = `${desktopBuildDir}/icon.png`;
+const desktopDockTarget = `${desktopBuildDir}/dock_icon.png`;
 const desktopLogoTarget = `${desktopBuildDir}/logo.png`;
 const desktopIcnsTarget = `${desktopBuildDir}/icon.icns`;
 const desktopIcoTarget = `${desktopBuildDir}/icon.ico`;
@@ -19,9 +20,11 @@ const desktopTrayTarget = `${desktopBuildDir}/tray_icon.png`;
 const appIconSizes = [16, 24, 32, 48, 64, 128, 256, 512, 1024];
 const icoIconSizes = [16, 32, 48, 256];
 const neutralIconRadiusRatio = 0.2;
-const macIconRadiusRatio = 0.225;
+const macIconRadiusRatio = 0.2;
 const windowsIconRadiusRatio = 0.12;
 const appIconInsetRatio = 0.08;
+const macIconInsetRatio = 0.1;
+const macIconForegroundRatio = 0.9;
 const trayIconSize = 66;
 const trayIconContentSize = 56;
 
@@ -31,6 +34,7 @@ export async function syncProjectIcons({ root = defaultRoot } = {}) {
   const generatedTargets = [
     desktopLogoTarget,
     desktopPngTarget,
+    desktopDockTarget,
     desktopIcnsTarget,
     desktopIcoTarget,
     desktopTrayTarget,
@@ -45,6 +49,7 @@ export async function syncProjectIcons({ root = defaultRoot } = {}) {
   await removeStaleIconOutputs(root);
   await writePng(svg, resolve(root, desktopLogoTarget), 1024);
   await writeAppIconPng(svg, resolve(root, desktopPngTarget), 1024, neutralIconRadiusRatio);
+  await writeMacAppIconPng(svg, resolve(root, desktopDockTarget), 1024);
 
   const macIconPngs = new Map();
   const windowsIconPngs = new Map();
@@ -53,7 +58,7 @@ export async function syncProjectIcons({ root = defaultRoot } = {}) {
     const target = resolve(root, `${desktopBuildDir}/icons/${size}x${size}.png`);
     await mkdir(dirname(target), { recursive: true });
     await writeFile(target, neutralPng);
-    macIconPngs.set(size, await appIconPng(svg, size, macIconRadiusRatio));
+    macIconPngs.set(size, await macAppIconPng(svg, size));
     if (icoIconSizes.includes(size)) {
       windowsIconPngs.set(size, await appIconPng(svg, size, windowsIconRadiusRatio));
     }
@@ -91,7 +96,51 @@ async function writeAppIconPng(svg, target, size, radiusRatio) {
 }
 
 async function appIconPng(svg, size, radiusRatio) {
-  const inset = Math.round(size * appIconInsetRatio);
+  return maskedIconPng(svg, size, appIconInsetRatio, (contentSize) => (
+    roundedRectangleMask(contentSize, radiusRatio)
+  ));
+}
+
+async function writeMacAppIconPng(svg, target, size) {
+  await mkdir(dirname(target), { recursive: true });
+  await writeFile(target, await macAppIconPng(svg, size));
+}
+
+async function macAppIconPng(svg, size) {
+  const inset = Math.round(size * macIconInsetRatio);
+  const contentSize = size - inset * 2;
+  const background = sourceBackgroundColor(svg);
+  const foregroundSize = Math.round(contentSize * macIconForegroundRatio);
+  const foreground = await foregroundIconPng(svg, foregroundSize);
+  const iconBody = await sharp({
+    create: {
+      width: contentSize,
+      height: contentSize,
+      channels: 4,
+      background: { ...background, alpha: 1 }
+    }
+  })
+    .composite([
+      { input: foreground, gravity: 'center' },
+      { input: await roundedRectangleMask(contentSize, macIconRadiusRatio), blend: 'dest-in' }
+    ])
+    .png()
+    .toBuffer();
+  return sharp({
+    create: {
+      width: size,
+      height: size,
+      channels: 4,
+      background: { r: 0, g: 0, b: 0, alpha: 0 }
+    }
+  })
+    .composite([{ input: iconBody, left: inset, top: inset }])
+    .png()
+    .toBuffer();
+}
+
+async function maskedIconPng(svg, size, insetRatio, maskForContentSize) {
+  const inset = Math.round(size * insetRatio);
   const contentSize = size - inset * 2;
   const rendered = await sharp(Buffer.from(svg))
     .resize(contentSize, contentSize, { fit: 'fill' })
@@ -99,7 +148,7 @@ async function appIconPng(svg, size, radiusRatio) {
     .toBuffer();
   const iconBody = await sharp(rendered)
     .ensureAlpha()
-    .composite([{ input: await roundedRectangleMask(contentSize, radiusRatio), blend: 'dest-in' }])
+    .composite([{ input: await maskForContentSize(contentSize), blend: 'dest-in' }])
     .png()
     .toBuffer();
   return sharp({
@@ -142,6 +191,19 @@ async function trayIconPng(svg) {
     .toBuffer();
 }
 
+async function foregroundIconPng(svg, size) {
+  const cutout = removeBackgroundLayer(svg);
+  const trimmed = await sharp(Buffer.from(cutout))
+    .resize(1024, 1024, { fit: 'fill' })
+    .png()
+    .trim({ background: { r: 0, g: 0, b: 0, alpha: 0 } })
+    .toBuffer();
+  return sharp(trimmed)
+    .resize(size, size, { fit: 'inside' })
+    .png()
+    .toBuffer();
+}
+
 async function roundedRectangleMask(size, radiusRatio) {
   const radius = Math.round(size * radiusRatio);
   const pixels = Buffer.alloc(size * size * 4);
@@ -172,6 +234,21 @@ async function roundedRectangleMask(size, radiusRatio) {
 
 function removeBackgroundLayer(svg) {
   return svg.replace(/(<svg\b[^>]*>)(\s*)(?:<path\b[^>]*\/>|<rect\b[^>]*\/>)/, '$1$2');
+}
+
+function sourceBackgroundColor(svg) {
+  const firstShape = svg.match(/<svg\b[^>]*>\s*(<path\b[^>]*\/>|<rect\b[^>]*\/>)/);
+  const shape = firstShape?.[1] ?? '';
+  const fill = shape.match(/\bfill=["'](#[0-9a-fA-F]{6})["']/)?.[1]
+    ?? shape.match(/\bstyle=["'][^"']*\bfill:\s*(#[0-9a-fA-F]{6})\b/)?.[1];
+  if (!fill) {
+    throw new Error('Canonical project icon background layer must declare a hex fill color.');
+  }
+  return {
+    r: Number.parseInt(fill.slice(1, 3), 16),
+    g: Number.parseInt(fill.slice(3, 5), 16),
+    b: Number.parseInt(fill.slice(5, 7), 16)
+  };
 }
 
 function icnsBuffer(pngsBySize) {

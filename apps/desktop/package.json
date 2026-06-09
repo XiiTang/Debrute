@@ -21,8 +21,8 @@
     "electronVersion": "42.3.3",
     "asar": true,
     "afterPack": "scripts/package-sharp-runtime.mjs",
-    "icon": "build/icon.png",
     "directories": {
+      "buildResources": "build",
       "output": "release"
     },
     "files": [

@@ -42,6 +42,7 @@ const applicationMenu = createApplicationMenuController({
   }
 });
 const projectIconPath = join(__dirname, 'icon.png');
+const dockIconPath = join(__dirname, 'dock_icon.png');
 
 async function createWindow(initialUrl?: string, projectId?: string): Promise<Electron.BrowserWindow> {
   const window = new BrowserWindow({
@@ -73,7 +74,7 @@ async function createWindow(initialUrl?: string, projectId?: string): Promise<El
 
 app.whenReady().then(async () => {
   if (process.platform === 'darwin') {
-    app.dock.setIcon(projectIconPath);
+    app.dock.setIcon(dockIconPath);
   }
   runtimeClient = await createDesktopRuntimeClient();
   registerShellIpc();

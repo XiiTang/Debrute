@@ -1,5 +1,6 @@
 import { mkdtemp, mkdir, readFile, writeFile } from 'node:fs/promises';
 import { readFileSync } from 'node:fs';
+import { spawnSync } from 'node:child_process';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import sharp from 'sharp';
@@ -26,6 +27,7 @@ describe('project icon assets', () => {
     await expect(readFile(join(root, 'apps/web/public/debrute.svg'), 'utf8')).resolves.toBe(svg);
     await expect(readFile(join(root, 'apps/desktop/build/icon.svg'), 'utf8')).resolves.toBe(svg);
     expect(result.targets.map((target) => target.replace(`${root}/`, '')).sort()).toEqual([
+      'apps/desktop/build/dock_icon.png',
       'apps/desktop/build/icon.icns',
       'apps/desktop/build/icon.ico',
       'apps/desktop/build/icon.png',
@@ -45,6 +47,7 @@ describe('project icon assets', () => {
     ]);
 
     await expectPngDimensions(join(root, 'apps/desktop/build/logo.png'), 1024, 1024);
+    await expectPngDimensions(join(root, 'apps/desktop/build/dock_icon.png'), 1024, 1024);
     await expectPngDimensions(join(root, 'apps/desktop/build/icon.png'), 1024, 1024);
     await expectPngDimensions(join(root, 'apps/desktop/build/tray_icon.png'), 66, 66);
     for (const size of [16, 24, 32, 48, 64, 128, 256, 512, 1024]) {
@@ -61,6 +64,23 @@ describe('project icon assets', () => {
       right: 82,
       bottom: 82
     });
+    expect(await alphaEdgeMargins(join(root, 'apps/desktop/build/dock_icon.png'))).toEqual({
+      left: 102,
+      top: 102,
+      right: 102,
+      bottom: 102
+    });
+    expect(await alphaAt(join(root, 'apps/desktop/build/dock_icon.png'), 0, 0)).toBe(0);
+    expect(await alphaAt(join(root, 'apps/desktop/build/dock_icon.png'), 0, 512)).toBe(0);
+    expect(await alphaAt(join(root, 'apps/desktop/build/dock_icon.png'), 512, 0)).toBe(0);
+    expect(await firstOpaqueXAtY(join(root, 'apps/desktop/build/dock_icon.png'), 102)).toBe(253);
+    expect(await firstOpaqueXAtY(join(root, 'apps/desktop/build/dock_icon.png'), 114)).toBe(203);
+    expect(await firstOpaqueXAtY(join(root, 'apps/desktop/build/dock_icon.png'), 159)).toBe(141);
+    expect(await firstOpaqueXAtY(join(root, 'apps/desktop/build/dock_icon.png'), 358)).toBe(102);
+    expect(await firstOpaqueXAtY(join(root, 'apps/desktop/build/dock_icon.png'), 512)).toBe(102);
+    expect(await dockAlphaCoverage(join(root, 'apps/desktop/build/dock_icon.png'))).toBeCloseTo(0.635, 2);
+    expect(await darkPixelCoverage(join(root, 'apps/desktop/build/dock_icon.png'))).toBeLessThan(0.3);
+    expect(await brightPixelCoverage(join(root, 'apps/desktop/build/dock_icon.png'))).toBeGreaterThan(0.35);
     expect(await alphaAt(join(root, 'apps/desktop/build/tray_icon.png'), 0, 0)).toBe(0);
     expect(await alphaAt(join(root, 'apps/desktop/build/tray_icon.png'), 33, 33)).toBeGreaterThan(0);
 
@@ -78,23 +98,38 @@ describe('project icon assets', () => {
     await expect(syncProjectIcons({ root })).rejects.toThrow('Missing canonical project icon');
   });
 
+  it('keeps generated desktop icon build resources available to Git', () => {
+    for (const asset of [
+      'apps/desktop/build/dock_icon.png',
+      'apps/desktop/build/icon.png',
+      'apps/desktop/build/icon.icns',
+      'apps/desktop/build/icons/1024x1024.png',
+      'apps/desktop/build/tray_icon.png'
+    ]) {
+      const result = spawnSync('git', ['check-ignore', '-q', asset], { cwd: process.cwd() });
+      expect(result.status, asset).toBe(1);
+    }
+  });
+
   it('wires the project icon into Web and Electron consumers', () => {
     const root = process.cwd();
     const rootPackage = JSON.parse(readFileSync(join(root, 'package.json'), 'utf8')) as {
       scripts: Record<string, string>;
     };
     const desktopPackage = JSON.parse(readFileSync(join(root, 'apps/desktop/package.json'), 'utf8')) as {
-      build: { icon: string };
+      build: { icon?: string; directories: { buildResources: string } };
     };
     const webHtml = readFileSync(join(root, 'apps/web/index.html'), 'utf8');
     const electronMain = readFileSync(join(root, 'apps/desktop/src/electron/main.ts'), 'utf8');
 
     expect(rootPackage.scripts['icons:sync']).toBe('node scripts/sync-project-icons.mjs');
     expect(webHtml).toContain('<link rel="icon" type="image/svg+xml" href="/debrute.svg" />');
-    expect(desktopPackage.build.icon).toBe('build/icon.png');
+    expect(desktopPackage.build.directories.buildResources).toBe('build');
+    expect(desktopPackage.build).not.toHaveProperty('icon');
     expect(electronMain).toContain("const projectIconPath = join(__dirname, 'icon.png')");
+    expect(electronMain).toContain("const dockIconPath = join(__dirname, 'dock_icon.png')");
     expect(electronMain).toContain('icon: projectIconPath');
-    expect(electronMain).toContain('app.dock.setIcon(projectIconPath)');
+    expect(electronMain).toContain('app.dock.setIcon(dockIconPath)');
   });
 });
 
@@ -140,4 +175,61 @@ async function alphaEdgeMargins(path: string): Promise<{ left: number; top: numb
   let bottom = 0;
   while (bottom < info.height && !hasAlphaInRow(info.height - 1 - bottom)) bottom += 1;
   return { left, top, right, bottom };
+}
+
+async function firstOpaqueXAtY(path: string, y: number): Promise<number> {
+  const { data, info } = await sharp(path)
+    .ensureAlpha()
+    .raw()
+    .toBuffer({ resolveWithObject: true });
+  for (let x = 0; x < info.width; x += 1) {
+    if (data[(y * info.width + x) * info.channels + 3] > 0) {
+      return x;
+    }
+  }
+  return -1;
+}
+
+async function dockAlphaCoverage(path: string): Promise<number> {
+  const { data, info } = await sharp(path)
+    .resize(128, 128)
+    .ensureAlpha()
+    .raw()
+    .toBuffer({ resolveWithObject: true });
+  let pixels = 0;
+  for (let y = 0; y < info.height; y += 1) {
+    for (let x = 0; x < info.width; x += 1) {
+      if (data[(y * info.width + x) * info.channels + 3] > 16) {
+        pixels += 1;
+      }
+    }
+  }
+  return pixels / (info.width * info.height);
+}
+
+async function darkPixelCoverage(path: string): Promise<number> {
+  return luminanceCoverage(path, (luminance) => luminance < 45);
+}
+
+async function brightPixelCoverage(path: string): Promise<number> {
+  return luminanceCoverage(path, (luminance) => luminance > 170);
+}
+
+async function luminanceCoverage(path: string, predicate: (luminance: number) => boolean): Promise<number> {
+  const { data, info } = await sharp(path)
+    .ensureAlpha()
+    .raw()
+    .toBuffer({ resolveWithObject: true });
+  let pixels = 0;
+  for (let y = 0; y < info.height; y += 1) {
+    for (let x = 0; x < info.width; x += 1) {
+      const offset = (y * info.width + x) * info.channels;
+      if (data[offset + 3] === 0) continue;
+      const luminance = 0.2126 * data[offset] + 0.7152 * data[offset + 1] + 0.0722 * data[offset + 2];
+      if (predicate(luminance)) {
+        pixels += 1;
+      }
+    }
+  }
+  return pixels / (info.width * info.height);
 }

@@ -50,6 +50,7 @@ describe('Electron development scripts', () => {
 
     expect(script).toContain("await cp('build/icon.svg', 'dist-electron/icon.svg')");
     expect(script).toContain("await cp('build/icon.png', 'dist-electron/icon.png')");
+    expect(script).toContain("await cp('build/dock_icon.png', 'dist-electron/dock_icon.png')");
     expect(script).toContain("await cp('build/tray_icon.png', 'dist-electron/tray_icon.png')");
   });
 
