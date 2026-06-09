@@ -1,7 +1,12 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Loader2 } from 'lucide-react';
-import type { WorkbenchProjectSessionSnapshot } from '@debrute/app-protocol';
+import type {
+  WorkbenchProjectFileBatchOperationResult,
+  WorkbenchProjectPathEntry,
+  WorkbenchProjectSessionSnapshot
+} from '@debrute/app-protocol';
 import { createWorkbenchApiClient } from './api/workbenchApiClient';
+import { getDebruteShellApi } from '../api/shellApi';
 import { CanvasEditor } from './canvas/CanvasEditor';
 import { CanvasFeedbackBar } from './canvas/CanvasFeedbackBar';
 import { CanvasMinimapBar } from './canvas/CanvasMinimapBar';
@@ -22,19 +27,29 @@ import { runWorkbenchContextMenuCommand } from './services/workbenchContextMenuC
 import { WorkbenchContextMenu } from './shell/WorkbenchContextMenu';
 import {
   buildWorkbenchContextMenuItems,
+  cameraCenteredOnNode,
   type WorkbenchContextMenuCommand,
   type WorkbenchFileClipboard,
   type WorkbenchContextMenuPosition,
   type WorkbenchContextMenuTarget
 } from './shell/contextMenu';
-import { validateInlineProjectName, type ProjectTreeInlineEditState } from './project-explorer/projectTreeEditing';
+import { createInlineEditState, validateInlineProjectName, type ProjectTreeInlineEditState } from './project-explorer/projectTreeEditing';
 import type { ProjectTreeFileKeyboardCommand } from './project-explorer/projectTreeKeyboardCommands';
 import {
   clearCanvasSelectionAfterDeletedPath,
   clearClipboardAfterDeletedPath,
+  batchResultSelectionPaths,
   nearestExistingParentSelection,
-  permanentDeleteConfirmationMessage
+  permanentDeleteConfirmationMessageForEntries
 } from './project-explorer/workbenchFileCommands';
+import {
+  createEmptyProjectTreeSelection,
+  isProjectTreeMoveNoop,
+  projectTreeBatchMoveHasConflict,
+  projectTreeBasename,
+  type ProjectTreeSelectionState
+} from './project-explorer/projectTreeInteraction';
+import { createProjectTreeExternalDropPlan } from './project-explorer/projectTreeExternalDrop';
 import {
   canvasMinimapButtonRect,
   placeCanvasMinimapPanel,
@@ -78,7 +93,7 @@ export function WorkbenchApp(): React.ReactElement {
   const [activeCanvasRuntime, setActiveCanvasRuntime] = useState<CanvasEditorRuntime>();
   const [activeCanvasRuntimeSnapshot, setActiveCanvasRuntimeSnapshot] = useState<CanvasRuntimeSnapshot>();
   const [canvasRuntimeScopeKey, setCanvasRuntimeScopeKey] = useState(0);
-  const [explorerSelection, setExplorerSelection] = useState<string>();
+  const [explorerSelection, setExplorerSelection] = useState<ProjectTreeSelectionState>(() => createEmptyProjectTreeSelection());
   const [floatingPanels, setFloatingPanels] = useState<FloatingPanelState>(() => {
     const raw = globalThis.localStorage?.getItem(FLOATING_PANEL_STORAGE_KEY);
     return raw ? loadFloatingPanelState(raw) : DEFAULT_FLOATING_PANEL_STATE;
@@ -210,7 +225,7 @@ export function WorkbenchApp(): React.ReactElement {
       setSnapshot((current) => nextSnapshotFromAppServerEvent(event, current));
       if (event.type === 'project.opened') {
         setActiveCanvasId(event.snapshot.canvases[0]?.id);
-        setExplorerSelection(undefined);
+        setExplorerSelection(createEmptyProjectTreeSelection());
         setContextMenu(undefined);
         setFileClipboard(undefined);
         setInlineProjectTreeEdit(undefined);
@@ -336,6 +351,24 @@ export function WorkbenchApp(): React.ReactElement {
     }
   }, []);
 
+  const activeCanvas = getCanvasById(snapshot, activeCanvasId);
+  const activeProjection = activeCanvas
+    ? snapshot?.projections.find((item) => item.canvasId === activeCanvas.id)
+    : undefined;
+  const locateProjectFileInCanvas = useCallback((projectRelativePath: string) => {
+    const node = activeProjection?.nodes.find((item) => item.projectRelativePath === projectRelativePath);
+    const runtimeSnapshot = activeCanvasRuntime?.getSnapshot();
+    if (!node || !activeCanvasRuntime || !runtimeSnapshot?.surfaceSize) {
+      return;
+    }
+    activeCanvasRuntime.setSelection({ kind: 'node', projectRelativePath });
+    activeCanvasRuntime.camera.setCamera(cameraCenteredOnNode({
+      node,
+      surfaceSize: runtimeSnapshot.surfaceSize,
+      camera: runtimeSnapshot.camera
+    }));
+  }, [activeCanvasRuntime, activeProjection]);
+
   const state: WorkbenchState = {
     snapshot,
     explorerSelection,
@@ -350,7 +383,6 @@ export function WorkbenchApp(): React.ReactElement {
   };
 
   const actions: WorkbenchActions = useMemo(() => ({
-    selectExplorerPath: setExplorerSelection,
     openProject: async () => {
       let opened: Awaited<ReturnType<typeof api.openProject>>;
       try {
@@ -368,7 +400,7 @@ export function WorkbenchApp(): React.ReactElement {
       setActiveCanvasId(opened.snapshot.canvases[0]?.id);
       setActiveCanvasRuntime(undefined);
       setCanvasRuntimeScopeKey((current) => current + 1);
-      setExplorerSelection(undefined);
+      setExplorerSelection(createEmptyProjectTreeSelection());
       setFileClipboard(undefined);
       setInlineProjectTreeEdit(undefined);
       setTextFileBuffers({});
@@ -416,64 +448,60 @@ export function WorkbenchApp(): React.ReactElement {
     createProjectFile: async (input) => {
       const result = await api.createProjectFile(input);
       setSnapshot(result.snapshot);
-      setExplorerSelection(result.projectRelativePath);
+      setExplorerSelection(projectTreeSelectionFromPaths([result.projectRelativePath]));
       return result;
     },
     createProjectDirectory: async (input) => {
       const result = await api.createProjectDirectory(input);
       setSnapshot(result.snapshot);
-      setExplorerSelection(result.projectRelativePath);
+      setExplorerSelection(projectTreeSelectionFromPaths([result.projectRelativePath]));
       return result;
     },
     renameProjectPath: async (input) => {
       const result = await api.renameProjectPath(input);
       setSnapshot(result.snapshot);
-      setExplorerSelection(result.projectRelativePath);
+      setExplorerSelection(projectTreeSelectionFromPaths([result.projectRelativePath]));
       return result;
     },
-    copyProjectPath: async (input) => {
-      const result = await api.copyProjectPath(input);
+    copyProjectPaths: async (input) => {
+      const result = await api.copyProjectPaths(input);
       setSnapshot(result.snapshot);
-      setExplorerSelection(result.projectRelativePath);
+      const selectedPaths = batchResultSelectionPaths(result.results);
+      setExplorerSelection(projectTreeSelectionFromPaths(selectedPaths));
+      locateSingleFileBatchResult(result.results, locateProjectFileInCanvas);
       return result;
     },
-    moveProjectPath: async (input) => {
-      const result = await api.moveProjectPath(input);
+    moveProjectPaths: async (input) => {
+      const result = await api.moveProjectPaths(input);
       setSnapshot(result.snapshot);
-      setExplorerSelection(result.projectRelativePath);
+      const selectedPaths = batchResultSelectionPaths(result.results);
+      setExplorerSelection(projectTreeSelectionFromPaths(selectedPaths));
+      locateSingleFileBatchResult(result.results, locateProjectFileInCanvas);
       return result;
     },
-    copyProjectAbsolutePath: (input) => api.copyProjectAbsolutePath(input),
-    trashProjectPath: async (input) => {
-      const result = await api.trashProjectPath(input);
-      const existingPaths = new Set(result.snapshot.files.map((file) => file.projectRelativePath));
+    copyProjectAbsolutePaths: (input) => api.copyProjectAbsolutePaths(input),
+    trashProjectPaths: async (input) => {
+      const result = await api.trashProjectPaths(input);
       setSnapshot(result.snapshot);
-      activeCanvasRuntime?.setSelection(clearCanvasSelectionAfterDeletedPath(
-        activeCanvasRuntime.getSnapshot().selection,
-        input.projectRelativePath
-      ));
-      setExplorerSelection((current) => (
-        current === input.projectRelativePath || current?.startsWith(`${input.projectRelativePath}/`)
-          ? nearestExistingParentSelection(current, existingPaths)
-          : current
-      ));
-      setFileClipboard((current) => clearClipboardAfterDeletedPath(current, input.projectRelativePath));
+      applyDeletedProjectEntries({
+        entries: input.entries,
+        snapshot: result.snapshot,
+        activeCanvasRuntime,
+        setExplorerSelection,
+        setFileClipboard
+      });
       return result;
     },
-    deleteProjectPathPermanently: async (input) => {
-      const result = await api.deleteProjectPathPermanently(input);
-      const existingPaths = new Set(result.snapshot.files.map((file) => file.projectRelativePath));
+    deleteProjectPathsPermanently: async (input) => {
+      const result = await api.deleteProjectPathsPermanently(input);
       setSnapshot(result.snapshot);
-      activeCanvasRuntime?.setSelection(clearCanvasSelectionAfterDeletedPath(
-        activeCanvasRuntime.getSnapshot().selection,
-        input.projectRelativePath
-      ));
-      setExplorerSelection((current) => (
-        current === input.projectRelativePath || current?.startsWith(`${input.projectRelativePath}/`)
-          ? nearestExistingParentSelection(current, existingPaths)
-          : current
-      ));
-      setFileClipboard((current) => clearClipboardAfterDeletedPath(current, input.projectRelativePath));
+      applyDeletedProjectEntries({
+        entries: input.entries,
+        snapshot: result.snapshot,
+        activeCanvasRuntime,
+        setExplorerSelection,
+        setFileClipboard
+      });
       return result;
     },
     revealProjectPathInSystemFileManager: (input) => api.revealProjectPathInSystemFileManager(input),
@@ -499,6 +527,7 @@ export function WorkbenchApp(): React.ReactElement {
   }), [
     activeCanvasId,
     activeCanvasRuntime,
+    locateProjectFileInCanvas,
     ensureTextFileBuffer,
     lookupGeneratedAssetMetadata,
     openTextEditorWindow,
@@ -566,10 +595,6 @@ export function WorkbenchApp(): React.ReactElement {
     [openWorkbenchWindows, windowOrder]
   );
 
-  const activeCanvas = getCanvasById(snapshot, activeCanvasId);
-  const activeProjection = activeCanvas
-    ? snapshot?.projections.find((item) => item.canvasId === activeCanvas.id)
-    : undefined;
   const workbenchViewportRect: FloatingBarRect = {
     x: 0,
     y: 0,
@@ -599,8 +624,14 @@ export function WorkbenchApp(): React.ReactElement {
   const notify = useCallback((message: string) => {
     setNotifications((current) => [message, ...current].slice(0, 4));
   }, []);
-  const confirmPermanentDelete = useCallback((input: { projectRelativePath: string; kind: 'file' | 'directory' }) => (
-    window.confirm(permanentDeleteConfirmationMessage(input))
+  const confirmPermanentDelete = useCallback((input: { entries: Array<{ projectRelativePath: string; kind: 'file' | 'directory' }> }) => (
+    window.confirm(permanentDeleteConfirmationMessageForEntries(input))
+  ), []);
+  const confirmMoveOverwrite = useCallback((input: {
+    entries: WorkbenchProjectPathEntry[];
+    targetDirectoryProjectRelativePath: string;
+  }) => (
+    window.confirm(`Overwrite existing project item${input.entries.length === 1 ? '' : 's'} in "${input.targetDirectoryProjectRelativePath || 'project root'}"?`)
   ), []);
   const handleWorkbenchContextMenuCommand = useCallback((command: WorkbenchContextMenuCommand) => {
     runWorkbenchContextMenuCommand({
@@ -616,19 +647,23 @@ export function WorkbenchApp(): React.ReactElement {
       notify,
       closeContextMenu: closeWorkbenchContextMenu,
       openInspectorPanel,
-      confirmPermanentDelete
+      confirmPermanentDelete,
+      projectSnapshot: snapshot,
+      confirmMoveOverwrite
     });
   }, [
     actions,
     activeCanvasRuntime,
     activeProjection,
     closeWorkbenchContextMenu,
+    confirmMoveOverwrite,
     contextMenu,
     copyProjectRelativePath,
     confirmPermanentDelete,
     fileClipboard,
     notify,
-    openInspectorPanel
+    openInspectorPanel,
+    snapshot
   ]);
   const handleProjectTreeKeyboardFileCommand = useCallback((command: ProjectTreeFileKeyboardCommand, target: WorkbenchContextMenuTarget) => {
     runWorkbenchContextMenuCommand({
@@ -647,19 +682,103 @@ export function WorkbenchApp(): React.ReactElement {
       notify,
       closeContextMenu: closeWorkbenchContextMenu,
       openInspectorPanel,
-      confirmPermanentDelete
+      confirmPermanentDelete,
+      projectSnapshot: snapshot,
+      confirmMoveOverwrite
     });
   }, [
     actions,
     activeCanvasRuntime,
     activeProjection,
     closeWorkbenchContextMenu,
+    confirmMoveOverwrite,
     confirmPermanentDelete,
     copyProjectRelativePath,
     fileClipboard,
     notify,
-    openInspectorPanel
+    openInspectorPanel,
+    snapshot
   ]);
+  const handleProjectTreeInternalDrop = useCallback((input: {
+    entries: WorkbenchProjectPathEntry[];
+    targetDirectoryProjectRelativePath: string;
+    operation: 'copy' | 'move';
+  }) => {
+    if (input.operation === 'copy') {
+      void actions.copyProjectPaths({
+        entries: input.entries,
+        targetDirectoryProjectRelativePath: input.targetDirectoryProjectRelativePath
+      }).catch((error) => notify(`Copy failed: ${errorMessage(error)}`));
+      return;
+    }
+    if (isProjectTreeMoveNoop({
+      entries: input.entries,
+      targetDirectoryProjectRelativePath: input.targetDirectoryProjectRelativePath
+    })) {
+      return;
+    }
+    const overwrite = projectTreeBatchMoveHasConflict({
+      existingProjectRelativePaths: new Set(snapshot?.files.map((file) => file.projectRelativePath) ?? []),
+      entries: input.entries,
+      targetDirectoryProjectRelativePath: input.targetDirectoryProjectRelativePath
+    });
+    const confirmed = window.confirm(overwrite
+      ? `Overwrite existing project item${input.entries.length === 1 ? '' : 's'} in "${input.targetDirectoryProjectRelativePath || 'project root'}"?`
+      : `Move ${input.entries.length} item${input.entries.length === 1 ? '' : 's'} to "${input.targetDirectoryProjectRelativePath || 'project root'}"?`);
+    if (!confirmed) {
+      return;
+    }
+    void actions.moveProjectPaths({
+      entries: input.entries,
+      targetDirectoryProjectRelativePath: input.targetDirectoryProjectRelativePath,
+      ...(overwrite ? { overwrite: true } : {})
+    }).catch((error) => notify(`Move failed: ${errorMessage(error)}`));
+  }, [actions, notify, snapshot]);
+  const handleProjectTreeExternalDrop = useCallback((input: {
+    dataTransfer: DataTransfer;
+    targetDirectoryProjectRelativePath: string;
+  }) => {
+    void createProjectTreeExternalDropPlan({
+      dataTransfer: input.dataTransfer,
+      shell: getDebruteShellApi(),
+      targetDirectoryProjectRelativePath: input.targetDirectoryProjectRelativePath
+    }).then(async (plan) => {
+      const overwrite = externalDropPlanHasConflict({
+        snapshot,
+        localPaths: plan.localPaths,
+        uploads: plan.uploads,
+        targetDirectoryProjectRelativePath: plan.targetDirectoryProjectRelativePath
+      });
+      if (overwrite && !window.confirm(`Overwrite existing project item${plan.localPaths.length + plan.uploads.length === 1 ? '' : 's'} in "${plan.targetDirectoryProjectRelativePath || 'project root'}"?`)) {
+        return;
+      }
+      if (plan.localPaths.length > 0) {
+        const result = await api.importExternalLocalProjectPaths({
+          sources: plan.localPaths,
+          targetDirectoryProjectRelativePath: plan.targetDirectoryProjectRelativePath,
+          ...(overwrite ? { overwrite: true } : {})
+        });
+        setSnapshot(result.snapshot);
+        const selectedPaths = batchResultSelectionPaths(result.results);
+        setExplorerSelection(projectTreeSelectionFromPaths(selectedPaths));
+        locateSingleFileBatchResult(result.results, locateProjectFileInCanvas);
+        return;
+      }
+      const result = await api.importExternalProjectUploads({
+        entries: plan.uploads.map((upload) => (
+          upload.kind === 'file'
+            ? { kind: 'file', projectRelativePath: upload.projectRelativePath, file: upload.file }
+            : upload
+        )),
+        targetDirectoryProjectRelativePath: plan.targetDirectoryProjectRelativePath,
+        ...(overwrite ? { overwrite: true } : {})
+      });
+      setSnapshot(result.snapshot);
+      const selectedPaths = batchResultSelectionPaths(result.results);
+      setExplorerSelection(projectTreeSelectionFromPaths(selectedPaths));
+      locateSingleFileBatchResult(result.results, locateProjectFileInCanvas);
+    }).catch((error) => notify(`Import failed: ${errorMessage(error)}`));
+  }, [locateProjectFileInCanvas, notify, snapshot]);
   if (isLoading) {
     return (
       <div className="boot-screen">
@@ -755,6 +874,11 @@ export function WorkbenchApp(): React.ReactElement {
                 onEditSubmit={() => void submitInlineProjectTreeEdit()}
                 onEditCancel={() => setInlineProjectTreeEdit(undefined)}
                 onClearCut={() => setFileClipboard((current) => current?.operation === 'cut' ? undefined : current)}
+                onExplorerSelectionChange={setExplorerSelection}
+                onLocateFileInCanvas={locateProjectFileInCanvas}
+                onProjectTreeInternalDrop={handleProjectTreeInternalDrop}
+                onProjectTreeExternalDrop={handleProjectTreeExternalDrop}
+                onCreateRootFile={() => setInlineProjectTreeEdit(createInlineEditState('creating-file', ''))}
                 desktopPlatform={desktopPlatform}
                 onKeyboardFileCommand={handleProjectTreeKeyboardFileCommand}
               />
@@ -790,6 +914,115 @@ export function WorkbenchApp(): React.ReactElement {
       <NotificationStack notifications={notifications} />
     </div>
   );
+}
+
+type SetState<T> = (value: T | ((current: T) => T)) => void;
+
+function projectTreeSelectionFromPaths(paths: string[]): ProjectTreeSelectionState {
+  const selectedPaths = [...paths];
+  const focusedPath = selectedPaths.at(-1) ?? null;
+  return {
+    selectedPaths,
+    focusedPath,
+    anchorPath: focusedPath
+  };
+}
+
+type WorkbenchProjectFileBatchItemResult = WorkbenchProjectFileBatchOperationResult['results'][number];
+
+function locateSingleFileBatchResult(
+  results: WorkbenchProjectFileBatchItemResult[],
+  locateProjectFileInCanvas: (projectRelativePath: string) => void
+): void {
+  const completed = results.filter((result) => result.status === 'ok');
+  if (completed.length === 1 && completed[0]!.kind === 'file') {
+    locateProjectFileInCanvas(completed[0]!.projectRelativePath);
+  }
+}
+
+function applyDeletedProjectEntries(input: {
+  entries: WorkbenchProjectPathEntry[];
+  snapshot: WorkbenchProjectSessionSnapshot;
+  activeCanvasRuntime: CanvasEditorRuntime | undefined;
+  setExplorerSelection: SetState<ProjectTreeSelectionState>;
+  setFileClipboard: SetState<WorkbenchFileClipboard | undefined>;
+}): void {
+  const deletedPaths = input.entries.map((entry) => entry.projectRelativePath);
+  if (input.activeCanvasRuntime) {
+    const currentSelection = input.activeCanvasRuntime.getSnapshot().selection;
+    input.activeCanvasRuntime.setSelection(deletedPaths.reduce(
+      (selection, deletedPath) => clearCanvasSelectionAfterDeletedPath(selection, deletedPath),
+      currentSelection
+    ));
+  }
+  const existingPaths = new Set(input.snapshot.files.map((file) => file.projectRelativePath));
+  input.setExplorerSelection((current) => {
+    if (!current.selectedPaths.some((path) => deletedPaths.some((deletedPath) => isProjectPathContainedByDeletedPath(path, deletedPath)))) {
+      return current;
+    }
+    const fallback = current.focusedPath
+      ? nearestExistingParentSelection(current.focusedPath, existingPaths)
+      : undefined;
+    return projectTreeSelectionFromPaths(fallback ? [fallback] : []);
+  });
+  input.setFileClipboard((current) => deletedPaths.reduce(
+    (clipboard, deletedPath) => clearClipboardAfterDeletedPath(clipboard, deletedPath),
+    current
+  ));
+}
+
+function externalDropPlanHasConflict(input: {
+  snapshot: WorkbenchProjectSessionSnapshot | undefined;
+  localPaths: string[];
+  uploads: Array<{ projectRelativePath: string }>;
+  targetDirectoryProjectRelativePath: string;
+}): boolean {
+  const existingPaths = new Set(input.snapshot?.files.map((file) => file.projectRelativePath) ?? []);
+  return [
+    ...input.localPaths.map((path) => (
+      input.targetDirectoryProjectRelativePath
+        ? `${input.targetDirectoryProjectRelativePath}/${nativePathBasename(path)}`
+        : nativePathBasename(path)
+    )),
+    ...externalUploadTopLevelProjectPaths(input.uploads, input.targetDirectoryProjectRelativePath)
+  ].some((path) => existingPaths.has(path));
+}
+
+function externalUploadTopLevelProjectPaths(
+  uploads: Array<{ projectRelativePath: string }>,
+  targetDirectoryProjectRelativePath: string
+): string[] {
+  return [...new Set(uploads.map((upload) => {
+    const relativePath = externalUploadPathRelativeToTarget(upload.projectRelativePath, targetDirectoryProjectRelativePath);
+    const topLevelName = relativePath.split('/')[0]!;
+    return targetDirectoryProjectRelativePath ? `${targetDirectoryProjectRelativePath}/${topLevelName}` : topLevelName;
+  }))];
+}
+
+function externalUploadPathRelativeToTarget(projectRelativePath: string, targetDirectoryProjectRelativePath: string): string {
+  if (!targetDirectoryProjectRelativePath) {
+    if (!projectRelativePath) {
+      throw new Error('Upload import path is empty.');
+    }
+    return projectRelativePath;
+  }
+  if (!projectRelativePath.startsWith(`${targetDirectoryProjectRelativePath}/`)) {
+    throw new Error(`Upload import path is outside the target directory: ${projectRelativePath}`);
+  }
+  const relativePath = projectRelativePath.slice(targetDirectoryProjectRelativePath.length + 1);
+  if (!relativePath) {
+    throw new Error(`Upload import path is outside the target directory: ${projectRelativePath}`);
+  }
+  return relativePath;
+}
+
+function nativePathBasename(path: string): string {
+  const normalized = path.replaceAll('\\', '/').replace(/\/$/, '');
+  return normalized.slice(normalized.lastIndexOf('/') + 1);
+}
+
+function isProjectPathContainedByDeletedPath(projectRelativePath: string, deletedProjectRelativePath: string): boolean {
+  return projectRelativePath === deletedProjectRelativePath || projectRelativePath.startsWith(`${deletedProjectRelativePath}/`);
 }
 
 function sameWorkbenchRuntimeSnapshot(

@@ -5,14 +5,16 @@ import { tmpdir } from 'node:os';
 import { describe, expect, it } from 'vitest';
 import {
   assertProjectTreeVisibleMutationPath,
-  copyProjectPath,
+  copyProjectPaths,
   createProjectDirectory,
   createProjectFile,
-  deleteProjectPathPermanently,
+  deleteProjectPathsPermanently,
   getDebruteProjectPaths,
+  importExternalLocalProjectPaths,
+  importExternalUploadProjectEntries,
   initializeBlankProject,
   listDebruteProjectFiles,
-  moveProjectPath,
+  moveProjectPaths,
   normalizeFileWatchEvent,
   nextCopyProjectPathName,
   projectFileRevision,
@@ -155,12 +157,14 @@ describe('project-core', () => {
       await writeFile(join(root, 'assets/cover.png'), 'cover', 'utf8');
       await writeFile(join(root, 'assets/cover copy.png'), 'existing', 'utf8');
 
-      const copied = await copyProjectPath(root, {
-        sourceProjectRelativePath: 'assets/cover.png',
+      const copied = await copyProjectPaths(root, {
+        entries: [{ projectRelativePath: 'assets/cover.png', kind: 'file' }],
         targetDirectoryProjectRelativePath: 'assets'
       });
 
-      expect(copied).toEqual({ projectRelativePath: 'assets/cover copy 2.png', kind: 'file' });
+      expect(copied.results).toEqual([
+        { sourceProjectRelativePath: 'assets/cover.png', projectRelativePath: 'assets/cover copy 2.png', kind: 'file', status: 'ok' }
+      ]);
       await expect(readFile(join(root, 'assets/cover copy 2.png'), 'utf8')).resolves.toBe('cover');
     } finally {
       await rm(root, { recursive: true, force: true });
@@ -173,17 +177,19 @@ describe('project-core', () => {
       await mkdir(join(root, 'assets/pages'), { recursive: true });
       await writeFile(join(root, 'assets/pages/page-1.png'), 'page', 'utf8');
 
-      await expect(moveProjectPath(root, {
-        sourceProjectRelativePath: 'assets',
+      await expect(moveProjectPaths(root, {
+        entries: [{ projectRelativePath: 'assets', kind: 'directory' }],
         targetDirectoryProjectRelativePath: 'assets/pages'
       })).rejects.toThrow('Cannot move a directory into itself or one of its descendants.');
 
-      const moved = await moveProjectPath(root, {
-        sourceProjectRelativePath: 'assets/pages/page-1.png',
+      const moved = await moveProjectPaths(root, {
+        entries: [{ projectRelativePath: 'assets/pages/page-1.png', kind: 'file' }],
         targetDirectoryProjectRelativePath: ''
       });
 
-      expect(moved).toEqual({ projectRelativePath: 'page-1.png', kind: 'file' });
+      expect(moved.results).toEqual([
+        { sourceProjectRelativePath: 'assets/pages/page-1.png', projectRelativePath: 'page-1.png', kind: 'file', status: 'ok' }
+      ]);
       await expect(readFile(join(root, 'page-1.png'), 'utf8')).resolves.toBe('page');
       expect(existsSync(join(root, 'assets/pages/page-1.png'))).toBe(false);
     } finally {
@@ -197,14 +203,339 @@ describe('project-core', () => {
       await mkdir(join(root, 'assets'), { recursive: true });
       await writeFile(join(root, 'assets/cover.png'), 'cover', 'utf8');
 
-      const moved = await moveProjectPath(root, {
-        sourceProjectRelativePath: 'assets/cover.png',
+      const moved = await moveProjectPaths(root, {
+        entries: [{ projectRelativePath: 'assets/cover.png', kind: 'file' }],
         targetDirectoryProjectRelativePath: 'assets'
       });
 
-      expect(moved).toEqual({ projectRelativePath: 'assets/cover.png', kind: 'file' });
+      expect(moved.results).toEqual([
+        { sourceProjectRelativePath: 'assets/cover.png', projectRelativePath: 'assets/cover.png', kind: 'file', status: 'skipped' }
+      ]);
       await expect(readFile(join(root, 'assets/cover.png'), 'utf8')).resolves.toBe('cover');
       expect(existsSync(join(root, 'assets/cover copy.png'))).toBe(false);
+    } finally {
+      await rm(root, { recursive: true, force: true });
+    }
+  });
+
+  it('copies project path batches with unique names in order', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'debrute-project-file-ops-copy-batch-'));
+    try {
+      await mkdir(join(root, 'assets'), { recursive: true });
+      await writeFile(join(root, 'cover.png'), 'cover', 'utf8');
+      await writeFile(join(root, 'assets/cover.png'), 'existing', 'utf8');
+      await writeFile(join(root, 'brief.md'), 'brief', 'utf8');
+
+      const copied = await copyProjectPaths(root, {
+        entries: [
+          { projectRelativePath: 'cover.png', kind: 'file' },
+          { projectRelativePath: 'brief.md', kind: 'file' }
+        ],
+        targetDirectoryProjectRelativePath: 'assets'
+      });
+
+      expect(copied.results).toEqual([
+        { sourceProjectRelativePath: 'cover.png', projectRelativePath: 'assets/cover copy.png', kind: 'file', status: 'ok' },
+        { sourceProjectRelativePath: 'brief.md', projectRelativePath: 'assets/brief.md', kind: 'file', status: 'ok' }
+      ]);
+      await expect(readFile(join(root, 'assets/cover copy.png'), 'utf8')).resolves.toBe('cover');
+      await expect(readFile(join(root, 'assets/brief.md'), 'utf8')).resolves.toBe('brief');
+    } finally {
+      await rm(root, { recursive: true, force: true });
+    }
+  });
+
+  it('copies only top-level selected project paths', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'debrute-project-file-ops-copy-top-level-'));
+    try {
+      await mkdir(join(root, 'assets'), { recursive: true });
+      await writeFile(join(root, 'assets/cover.png'), 'cover', 'utf8');
+
+      const copied = await copyProjectPaths(root, {
+        entries: [
+          { projectRelativePath: 'assets', kind: 'directory' },
+          { projectRelativePath: 'assets/cover.png', kind: 'file' }
+        ],
+        targetDirectoryProjectRelativePath: ''
+      });
+
+      expect(copied.results).toEqual([
+        { sourceProjectRelativePath: 'assets', projectRelativePath: 'assets copy', kind: 'directory', status: 'ok' }
+      ]);
+      await expect(readFile(join(root, 'assets copy/cover.png'), 'utf8')).resolves.toBe('cover');
+      expect(existsSync(join(root, 'cover.png'))).toBe(false);
+    } finally {
+      await rm(root, { recursive: true, force: true });
+    }
+  });
+
+  it('rejects copying a directory into itself or one of its descendants before mutating the project', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'debrute-project-file-ops-copy-descendant-'));
+    try {
+      await mkdir(join(root, 'assets/pages'), { recursive: true });
+      await writeFile(join(root, 'assets/pages/page.txt'), 'page', 'utf8');
+
+      await expect(copyProjectPaths(root, {
+        entries: [{ projectRelativePath: 'assets', kind: 'directory' }],
+        targetDirectoryProjectRelativePath: 'assets/pages'
+      })).rejects.toThrow('Cannot copy a directory into itself or one of its descendants.');
+
+      await expect(readFile(join(root, 'assets/pages/page.txt'), 'utf8')).resolves.toBe('page');
+      expect(existsSync(join(root, 'assets/pages/assets'))).toBe(false);
+    } finally {
+      await rm(root, { recursive: true, force: true });
+    }
+  });
+
+  it('moves project path batches with overwrite support', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'debrute-project-file-ops-move-batch-'));
+    try {
+      await mkdir(join(root, 'assets'), { recursive: true });
+      await writeFile(join(root, 'cover.png'), 'new cover', 'utf8');
+      await writeFile(join(root, 'assets/cover.png'), 'old cover', 'utf8');
+      await writeFile(join(root, 'assets/skip.md'), 'skip', 'utf8');
+
+      await expect(moveProjectPaths(root, {
+        entries: [{ projectRelativePath: 'cover.png', kind: 'file' }],
+        targetDirectoryProjectRelativePath: 'assets'
+      })).rejects.toThrow('Project path already exists: assets/cover.png');
+
+      const moved = await moveProjectPaths(root, {
+        entries: [
+          { projectRelativePath: 'cover.png', kind: 'file' },
+          { projectRelativePath: 'assets/skip.md', kind: 'file' }
+        ],
+        targetDirectoryProjectRelativePath: 'assets',
+        overwrite: true
+      });
+
+      expect(moved.results).toEqual([
+        { sourceProjectRelativePath: 'cover.png', projectRelativePath: 'assets/cover.png', kind: 'file', status: 'ok' },
+        { sourceProjectRelativePath: 'assets/skip.md', projectRelativePath: 'assets/skip.md', kind: 'file', status: 'skipped' }
+      ]);
+      await expect(readFile(join(root, 'assets/cover.png'), 'utf8')).resolves.toBe('new cover');
+      expect(existsSync(join(root, 'cover.png'))).toBe(false);
+    } finally {
+      await rm(root, { recursive: true, force: true });
+    }
+  });
+
+  it('rejects duplicate batch move targets before modifying sources or targets', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'debrute-project-file-ops-move-duplicate-targets-'));
+    try {
+      await mkdir(join(root, 'a'), { recursive: true });
+      await mkdir(join(root, 'b'), { recursive: true });
+      await mkdir(join(root, 'target'), { recursive: true });
+      await writeFile(join(root, 'a/item.txt'), 'from-a', 'utf8');
+      await writeFile(join(root, 'b/item.txt'), 'from-b', 'utf8');
+      await writeFile(join(root, 'target/item.txt'), 'existing', 'utf8');
+
+      await expect(moveProjectPaths(root, {
+        entries: [
+          { projectRelativePath: 'a/item.txt', kind: 'file' },
+          { projectRelativePath: 'b/item.txt', kind: 'file' }
+        ],
+        targetDirectoryProjectRelativePath: 'target',
+        overwrite: true
+      })).rejects.toThrow('Duplicate project path target in batch: target/item.txt');
+
+      await expect(readFile(join(root, 'a/item.txt'), 'utf8')).resolves.toBe('from-a');
+      await expect(readFile(join(root, 'b/item.txt'), 'utf8')).resolves.toBe('from-b');
+      await expect(readFile(join(root, 'target/item.txt'), 'utf8')).resolves.toBe('existing');
+    } finally {
+      await rm(root, { recursive: true, force: true });
+    }
+  });
+
+  it('deletes project path batches permanently', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'debrute-project-file-ops-delete-batch-'));
+    try {
+      await mkdir(join(root, 'assets/pages'), { recursive: true });
+      await writeFile(join(root, 'assets/pages/page-1.png'), 'page', 'utf8');
+      await writeFile(join(root, 'brief.md'), 'brief', 'utf8');
+
+      const deleted = await deleteProjectPathsPermanently(root, {
+        entries: [
+          { projectRelativePath: 'assets', kind: 'directory' },
+          { projectRelativePath: 'assets/pages/page-1.png', kind: 'file' },
+          { projectRelativePath: 'brief.md', kind: 'file' }
+        ]
+      });
+
+      expect(deleted.results).toEqual([
+        { sourceProjectRelativePath: 'assets', projectRelativePath: 'assets', kind: 'directory', status: 'ok' },
+        { sourceProjectRelativePath: 'brief.md', projectRelativePath: 'brief.md', kind: 'file', status: 'ok' }
+      ]);
+      expect(existsSync(join(root, 'assets'))).toBe(false);
+      expect(existsSync(join(root, 'brief.md'))).toBe(false);
+    } finally {
+      await rm(root, { recursive: true, force: true });
+    }
+  });
+
+  it('imports external local paths by copying them into the target directory', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'debrute-project-file-ops-import-local-'));
+    const externalRoot = await mkdtemp(join(tmpdir(), 'debrute-project-external-'));
+    try {
+      await mkdir(join(root, 'assets'), { recursive: true });
+      await writeFile(join(root, 'assets/cover.png'), 'old', 'utf8');
+      await writeFile(join(externalRoot, 'cover.png'), 'new', 'utf8');
+
+      await expect(importExternalLocalProjectPaths(root, {
+        sources: [join(externalRoot, 'cover.png')],
+        targetDirectoryProjectRelativePath: 'assets'
+      })).rejects.toThrow('Project path already exists: assets/cover.png');
+
+      const imported = await importExternalLocalProjectPaths(root, {
+        sources: [join(externalRoot, 'cover.png')],
+        targetDirectoryProjectRelativePath: 'assets',
+        overwrite: true
+      });
+
+      expect(imported.results).toEqual([
+        { sourceProjectRelativePath: join(externalRoot, 'cover.png'), projectRelativePath: 'assets/cover.png', kind: 'file', status: 'ok' }
+      ]);
+      await expect(readFile(join(root, 'assets/cover.png'), 'utf8')).resolves.toBe('new');
+    } finally {
+      await rm(root, { recursive: true, force: true });
+      await rm(externalRoot, { recursive: true, force: true });
+    }
+  });
+
+  it('rejects project-internal local imports that resolve to the import target before deleting files', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'debrute-project-file-ops-import-local-self-'));
+    try {
+      await mkdir(join(root, 'assets'), { recursive: true });
+      await writeFile(join(root, 'assets/cover.png'), 'original', 'utf8');
+
+      await expect(importExternalLocalProjectPaths(root, {
+        sources: [join(root, 'assets/cover.png')],
+        targetDirectoryProjectRelativePath: 'assets',
+        overwrite: true
+      })).rejects.toThrow('External source path resolves to its project import target');
+
+      await expect(readFile(join(root, 'assets/cover.png'), 'utf8')).resolves.toBe('original');
+    } finally {
+      await rm(root, { recursive: true, force: true });
+    }
+  });
+
+  it('rejects project-internal directory imports into their own descendants', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'debrute-project-file-ops-import-local-descendant-'));
+    try {
+      await mkdir(join(root, 'assets/pages'), { recursive: true });
+      await writeFile(join(root, 'assets/pages/page.png'), 'page', 'utf8');
+
+      await expect(importExternalLocalProjectPaths(root, {
+        sources: [join(root, 'assets')],
+        targetDirectoryProjectRelativePath: 'assets',
+        overwrite: true
+      })).rejects.toThrow('Cannot import a project directory into itself or one of its descendants.');
+
+      await expect(readFile(join(root, 'assets/pages/page.png'), 'utf8')).resolves.toBe('page');
+      expect(existsSync(join(root, 'assets/assets'))).toBe(false);
+    } finally {
+      await rm(root, { recursive: true, force: true });
+    }
+  });
+
+  it('rejects symbolic link local imports before mutating the project', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'debrute-project-file-ops-import-local-symlink-'));
+    const externalRoot = await mkdtemp(join(tmpdir(), 'debrute-project-external-symlink-'));
+    try {
+      await mkdir(join(root, 'assets'), { recursive: true });
+      await writeFile(join(externalRoot, 'real.txt'), 'real', 'utf8');
+      await symlink(join(externalRoot, 'real.txt'), join(externalRoot, 'link.txt'));
+
+      await expect(importExternalLocalProjectPaths(root, {
+        sources: [join(externalRoot, 'link.txt')],
+        targetDirectoryProjectRelativePath: 'assets'
+      })).rejects.toThrow('External source path must not be a symbolic link');
+
+      expect(existsSync(join(root, 'assets/link.txt'))).toBe(false);
+    } finally {
+      await rm(root, { recursive: true, force: true });
+      await rm(externalRoot, { recursive: true, force: true });
+    }
+  });
+
+  it('rejects duplicate external import targets before modifying the project', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'debrute-project-file-ops-import-duplicate-targets-'));
+    const firstExternalRoot = await mkdtemp(join(tmpdir(), 'debrute-project-external-a-'));
+    const secondExternalRoot = await mkdtemp(join(tmpdir(), 'debrute-project-external-b-'));
+    try {
+      await mkdir(join(root, 'assets'), { recursive: true });
+      await writeFile(join(root, 'assets/item.txt'), 'existing', 'utf8');
+      await writeFile(join(firstExternalRoot, 'item.txt'), 'from-a', 'utf8');
+      await writeFile(join(secondExternalRoot, 'item.txt'), 'from-b', 'utf8');
+
+      await expect(importExternalLocalProjectPaths(root, {
+        sources: [join(firstExternalRoot, 'item.txt'), join(secondExternalRoot, 'item.txt')],
+        targetDirectoryProjectRelativePath: 'assets',
+        overwrite: true
+      })).rejects.toThrow('Duplicate project path target in batch: assets/item.txt');
+
+      await expect(readFile(join(root, 'assets/item.txt'), 'utf8')).resolves.toBe('existing');
+    } finally {
+      await rm(root, { recursive: true, force: true });
+      await rm(firstExternalRoot, { recursive: true, force: true });
+      await rm(secondExternalRoot, { recursive: true, force: true });
+    }
+  });
+
+  it('imports browser upload entries as one batch with directories and file bytes', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'debrute-project-file-ops-upload-batch-'));
+    try {
+      await mkdir(join(root, 'assets'), { recursive: true });
+      await writeFile(join(root, 'assets/pages'), 'old-file-conflict', 'utf8');
+
+      await expect(importExternalUploadProjectEntries(root, {
+        targetDirectoryProjectRelativePath: 'assets',
+        entries: [
+          { kind: 'directory', projectRelativePath: 'assets/pages' },
+          { kind: 'directory', projectRelativePath: 'assets/pages/empty' },
+          { kind: 'file', projectRelativePath: 'assets/pages/page.png', content: Buffer.from('new') }
+        ]
+      })).rejects.toThrow('Project path already exists: assets/pages');
+
+      const imported = await importExternalUploadProjectEntries(root, {
+        targetDirectoryProjectRelativePath: 'assets',
+        entries: [
+          { kind: 'directory', projectRelativePath: 'assets/pages' },
+          { kind: 'directory', projectRelativePath: 'assets/pages/empty' },
+          { kind: 'file', projectRelativePath: 'assets/pages/page.png', content: Buffer.from('new') }
+        ],
+        overwrite: true
+      });
+
+      expect(imported.results).toEqual([
+        { sourceProjectRelativePath: 'assets/pages', projectRelativePath: 'assets/pages', kind: 'directory', status: 'ok' },
+        { sourceProjectRelativePath: 'assets/pages/empty', projectRelativePath: 'assets/pages/empty', kind: 'directory', status: 'ok' },
+        { sourceProjectRelativePath: 'assets/pages/page.png', projectRelativePath: 'assets/pages/page.png', kind: 'file', status: 'ok' }
+      ]);
+      await expect(stat(join(root, 'assets/pages/empty'))).resolves.toMatchObject({});
+      await expect(readFile(join(root, 'assets/pages/page.png'), 'utf8')).resolves.toBe('new');
+    } finally {
+      await rm(root, { recursive: true, force: true });
+    }
+  });
+
+  it('rejects duplicate browser upload targets before modifying the project', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'debrute-project-file-ops-upload-duplicates-'));
+    try {
+      await mkdir(join(root, 'assets'), { recursive: true });
+      await writeFile(join(root, 'assets/existing.txt'), 'existing', 'utf8');
+
+      await expect(importExternalUploadProjectEntries(root, {
+        targetDirectoryProjectRelativePath: 'assets',
+        entries: [
+          { kind: 'file', projectRelativePath: 'assets/item.txt', content: Buffer.from('first') },
+          { kind: 'file', projectRelativePath: 'assets/item.txt', content: Buffer.from('second') }
+        ],
+        overwrite: true
+      })).rejects.toThrow('Duplicate project path target in batch: assets/item.txt');
+
+      await expect(readFile(join(root, 'assets/existing.txt'), 'utf8')).resolves.toBe('existing');
     } finally {
       await rm(root, { recursive: true, force: true });
     }
@@ -216,11 +547,17 @@ describe('project-core', () => {
       await mkdir(join(root, 'assets/pages'), { recursive: true });
       await writeFile(join(root, 'assets/pages/page-1.png'), 'page', 'utf8');
 
-      const deleted = await deleteProjectPathPermanently(root, { projectRelativePath: 'assets' });
+      const deleted = await deleteProjectPathsPermanently(root, {
+        entries: [{ projectRelativePath: 'assets', kind: 'directory' }]
+      });
 
-      expect(deleted).toEqual({ projectRelativePath: 'assets', kind: 'directory' });
+      expect(deleted.results).toEqual([
+        { sourceProjectRelativePath: 'assets', projectRelativePath: 'assets', kind: 'directory', status: 'ok' }
+      ]);
       expect(existsSync(join(root, 'assets'))).toBe(false);
-      await expect(deleteProjectPathPermanently(root, { projectRelativePath: '../outside' }))
+      await expect(deleteProjectPathsPermanently(root, {
+        entries: [{ projectRelativePath: '../outside', kind: 'file' }]
+      }))
         .rejects.toThrow('Project path must not contain "." or ".." segments');
     } finally {
       await rm(root, { recursive: true, force: true });
@@ -237,12 +574,12 @@ describe('project-core', () => {
         parentProjectRelativePath: '.debrute/cache/canvas-image-previews',
         name: 'created.jpg'
       })).rejects.toThrow('Project path is not visible in the Project Tree');
-      await expect(copyProjectPath(root, {
-        sourceProjectRelativePath: '.debrute/cache/canvas-image-previews/preview.jpg',
+      await expect(copyProjectPaths(root, {
+        entries: [{ projectRelativePath: '.debrute/cache/canvas-image-previews/preview.jpg', kind: 'file' }],
         targetDirectoryProjectRelativePath: ''
       })).rejects.toThrow('Project path is not visible in the Project Tree');
-      await expect(deleteProjectPathPermanently(root, {
-        projectRelativePath: '.debrute/cache/canvas-image-previews'
+      await expect(deleteProjectPathsPermanently(root, {
+        entries: [{ projectRelativePath: '.debrute/cache/canvas-image-previews', kind: 'directory' }]
       })).rejects.toThrow('Project path is not visible in the Project Tree');
       await expect(readFile(join(root, '.debrute/cache/canvas-image-previews/preview.jpg'), 'utf8')).resolves.toBe('cache');
     } finally {
@@ -278,7 +615,9 @@ describe('project-core', () => {
         .rejects.toThrow('Project path name must be a basename.');
       await expect(createProjectFile(root, { parentProjectRelativePath: join(root, 'briefs'), name: 'absolute.md' }))
         .rejects.toThrow('Project path must be relative');
-      await expect(deleteProjectPathPermanently(root, { projectRelativePath: join(root, 'briefs/draft.md') }))
+      await expect(deleteProjectPathsPermanently(root, {
+        entries: [{ projectRelativePath: join(root, 'briefs/draft.md'), kind: 'file' }]
+      }))
         .rejects.toThrow('Project path must be relative');
       expect(() => resolveProjectPath(root, '../escape.md')).toThrow('Project path must not contain "." or ".." segments');
     } finally {

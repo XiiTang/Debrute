@@ -216,18 +216,27 @@ export async function writeProjectTextFile(projectRoot: string, projectRelativeP
 }
 
 export {
-  copyProjectPath,
+  copyProjectPaths,
   createProjectDirectory,
   createProjectFile,
-  deleteProjectPathPermanently,
-  moveProjectPath,
+  deleteProjectPathsPermanently,
+  importExternalLocalProjectPaths,
+  importExternalUploadProjectEntries,
+  moveProjectPaths,
   nextCopyProjectPathName,
   renameProjectPath,
   uniquePasteTargetPath,
-  type CopyOrMoveProjectPathInput,
+  type CopyProjectPathsInput,
   type CreateProjectPathInput,
-  type DeleteProjectPathInput,
+  type DeleteProjectPathsInput,
+  type ImportExternalLocalProjectPathsInput,
+  type ImportExternalUploadProjectEntriesInput,
+  type MoveProjectPathsInput,
+  type ProjectPathBatchEntry,
+  type ProjectPathBatchItemResult,
+  type ProjectPathBatchOperationResult,
   type ProjectPathKind,
+  type ProjectUploadImportEntry,
   type ProjectPathOperationResult,
   type RenameProjectPathInput
 } from './projectFileOperations.js';

@@ -142,6 +142,8 @@ describe('desktop application menu', () => {
 
     expect(preload).not.toContain('revealProjectPathInSystemFileManager');
     expect(preload).not.toContain('trashProjectPath');
+    expect(preload).toContain('getDroppedFilePath');
+    expect(preload).toContain('webUtils.getPathForFile');
     expect(preload).toContain('chooseProjectRoot');
     expect(preload).toContain('bindProjectWindowToProject');
   });

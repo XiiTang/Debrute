@@ -4,6 +4,7 @@ export type ProjectTreeKeyboardCommand =
   | 'paste'
   | 'delete'
   | 'delete-permanently'
+  | 'rename'
   | 'cancel-cut';
 export type ProjectTreeFileKeyboardCommand = Exclude<ProjectTreeKeyboardCommand, 'cancel-cut'>;
 
@@ -26,6 +27,9 @@ export function projectTreeKeyboardCommandFromEvent(
   if (event.key === 'Escape') {
     return 'cancel-cut';
   }
+  if (event.key === 'F2' && !event.ctrlKey && !event.metaKey && !event.altKey && !event.shiftKey) {
+    return 'rename';
+  }
   const key = event.key.toLowerCase();
   const primaryModifier = platform === 'darwin' ? event.metaKey === true : event.ctrlKey === true;
   if (primaryModifier && !event.altKey && !event.shiftKey && key === 'c') {
@@ -39,6 +43,9 @@ export function projectTreeKeyboardCommandFromEvent(
   }
   if (platform === 'darwin' && event.metaKey === true && event.altKey === true && key === 'backspace') {
     return 'delete-permanently';
+  }
+  if (platform === 'darwin' && event.metaKey === true && !event.ctrlKey && !event.altKey && !event.shiftKey && key === 'backspace') {
+    return 'delete';
   }
   if (
     platform !== 'darwin'

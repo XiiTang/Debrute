@@ -1,23 +1,51 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import { FilePlus2, Files, FolderPlus, FolderTree } from 'lucide-react';
 import type { WorkbenchProjectSessionSnapshot } from '@debrute/app-protocol';
-import type { WorkbenchActions } from '../../types';
-import type { WorkbenchContextMenuPosition, WorkbenchContextMenuTarget } from '../shell/contextMenu';
-import { buildProjectFileTree, expandedProjectTreePaths, findProjectFileTreeNode, type ProjectFileTreeNode } from './projectFileTree';
+import type {
+  WorkbenchContextMenuPosition,
+  WorkbenchContextMenuTarget,
+  WorkbenchExplorerContextMenuTarget,
+  WorkbenchProjectPathEntry
+} from '../shell/contextMenu';
+import { buildProjectFileTree, expandedProjectTreePaths, type ProjectFileTreeNode } from './projectFileTree';
 import type { ProjectTreeInlineEditState } from './projectTreeEditing';
 import {
   projectTreeKeyboardCommandFromEvent,
   type ProjectTreeFileKeyboardCommand,
   type ProjectTreeKeyboardEventLike
 } from './projectTreeKeyboardCommands';
+import {
+  clearProjectTreeSelection,
+  flattenProjectTree,
+  normalizeProjectTreeSelection,
+  isProjectTreeDropRejected,
+  isProjectTreeMoveNoop,
+  projectTreeParentPath,
+  projectTreeDragEntries,
+  projectTreeDropOperation,
+  projectTreeDropTargetDirectory,
+  projectTreePathEntriesFromSelection,
+  updateProjectTreeContextSelection,
+  updateProjectTreeSelection,
+  type ProjectTreePointerModifiers,
+  type ProjectTreeSelectionState,
+  type ProjectTreeVisibleItem
+} from './projectTreeInteraction';
+import { hasProjectTreeExternalDrag } from './projectTreeExternalDrop';
+
+const PROJECT_TREE_DRAG_MIME = 'application/x-debrute-project-tree-paths';
 
 export function ProjectTree({
   snapshot,
-  selectedPath,
-  cutPath,
+  selection,
+  cutPaths,
   editing,
-  actions,
+  onSelectionChange,
+  onLocateFileInCanvas,
+  onInternalDrop,
+  onExternalDrop,
   onOpenContextMenu,
+  onCreateRootFile,
   onEditValueChange,
   onEditSubmit,
   onEditCancel,
@@ -26,11 +54,22 @@ export function ProjectTree({
   onKeyboardFileCommand
 }: {
   snapshot: WorkbenchProjectSessionSnapshot | undefined;
-  selectedPath: string | undefined;
-  cutPath?: string | undefined;
+  selection: ProjectTreeSelectionState;
+  cutPaths: string[];
   editing?: ProjectTreeInlineEditState | undefined;
-  actions: WorkbenchActions;
+  onSelectionChange: (selection: ProjectTreeSelectionState) => void;
+  onLocateFileInCanvas?: ((projectRelativePath: string) => void) | undefined;
+  onInternalDrop?: ((input: {
+    entries: WorkbenchProjectPathEntry[];
+    targetDirectoryProjectRelativePath: string;
+    operation: 'copy' | 'move';
+  }) => void) | undefined;
+  onExternalDrop?: ((input: {
+    dataTransfer: DataTransfer;
+    targetDirectoryProjectRelativePath: string;
+  }) => void) | undefined;
   onOpenContextMenu?: ((target: WorkbenchContextMenuTarget, position: WorkbenchContextMenuPosition) => void) | undefined;
+  onCreateRootFile?: (() => void) | undefined;
   onEditValueChange?: ((value: string) => void) | undefined;
   onEditSubmit?: (() => void) | undefined;
   onEditCancel?: (() => void) | undefined;
@@ -39,9 +78,12 @@ export function ProjectTree({
   onKeyboardFileCommand?: ((command: ProjectTreeFileKeyboardCommand, target: WorkbenchContextMenuTarget) => void) | undefined;
 }): React.ReactElement {
   const tree = useMemo(() => buildProjectFileTree(snapshot?.files ?? []), [snapshot?.files]);
-  const defaultExpanded = useMemo(() => expandedProjectTreePaths(tree, selectedPath), [tree, selectedPath]);
-  const selectedNode = useMemo(() => findProjectFileTreeNode(tree, selectedPath), [selectedPath, tree]);
+  const defaultExpanded = useMemo(() => expandedProjectTreePaths(tree, selection.selectedPaths), [selection.selectedPaths, tree]);
   const [expanded, setExpanded] = useState<Set<string>>(defaultExpanded);
+  const [dragOverPath, setDragOverPath] = useState<string | null>(null);
+  const visibleItems = useMemo(() => flattenProjectTree(tree, expanded), [expanded, tree]);
+  const normalizedSelection = useMemo(() => normalizeProjectTreeSelection(selection, visibleItems), [selection, visibleItems]);
+  const cutPathSet = useMemo(() => new Set(cutPaths), [cutPaths]);
   const rootCreateEditing = editing && isCreatingInlineEditState(editing) && editing.parentProjectRelativePath === ''
     ? editing
     : undefined;
@@ -56,10 +98,6 @@ export function ProjectTree({
     }
   }, [editing]);
 
-  if (tree.length === 0) {
-    return <div className="empty-line"><Files size={15} />No project files</div>;
-  }
-
   return (
     <div className="project-tree-shell">
       <div
@@ -67,13 +105,95 @@ export function ProjectTree({
         role="tree"
         aria-label="Project files"
         tabIndex={0}
+        onClick={(event) => {
+          if (!isRootBlankAreaEventTarget(event)) {
+            return;
+          }
+          onSelectionChange(clearProjectTreeSelection());
+        }}
+        onDoubleClick={(event) => {
+          if (isRootBlankAreaEventTarget(event)) {
+            onCreateRootFile?.();
+          }
+        }}
+        onContextMenu={(event) => {
+          if (!isRootBlankAreaEventTarget(event)) {
+            return;
+          }
+          event.preventDefault();
+          onSelectionChange(clearProjectTreeSelection());
+          onOpenContextMenu?.(rootExplorerTarget(), {
+            x: event.clientX,
+            y: event.clientY
+          });
+        }}
+        onDragOver={(event) => {
+          if (!isRootBlankAreaEventTarget(event)) {
+            return;
+          }
+          const targetDirectoryProjectRelativePath = '';
+          if (!hasInternalProjectTreeDrag(event.dataTransfer) && !hasProjectTreeExternalDrag(event.dataTransfer)) {
+            return;
+          }
+          if (hasInternalProjectTreeDrag(event.dataTransfer)) {
+            const entries = readInternalProjectTreeDragEntries(event.dataTransfer);
+            if (!isAcceptedInternalProjectTreeDrop({
+              entries,
+              targetDirectoryProjectRelativePath,
+              operation: projectTreeDropOperation({ platform: desktopPlatform ?? 'linux', event })
+            })) {
+              return;
+            }
+          }
+          event.preventDefault();
+          setDragOverPath('');
+        }}
+        onDragLeave={(event) => {
+          if (isRootBlankAreaEventTarget(event)) {
+            setDragOverPath(null);
+          }
+        }}
+        onDrop={(event) => {
+          if (!isRootBlankAreaEventTarget(event)) {
+            return;
+          }
+          const targetDirectoryProjectRelativePath = '';
+          event.preventDefault();
+          setDragOverPath(null);
+          if (!hasInternalProjectTreeDrag(event.dataTransfer)) {
+            if (hasProjectTreeExternalDrag(event.dataTransfer)) {
+              onExternalDrop?.({
+                dataTransfer: event.dataTransfer,
+                targetDirectoryProjectRelativePath
+              });
+            }
+            return;
+          }
+          const entries = readInternalProjectTreeDragEntries(event.dataTransfer);
+          const operation = projectTreeDropOperation({ platform: desktopPlatform ?? 'linux', event });
+          if (entries.length > 0 && isAcceptedInternalProjectTreeDrop({
+            entries,
+            targetDirectoryProjectRelativePath,
+            operation
+          })) {
+            onInternalDrop?.({
+              entries,
+              targetDirectoryProjectRelativePath,
+              operation
+            });
+          }
+        }}
         onKeyDown={(event) => handleProjectTreeKeyboardEvent({
           event,
           editing,
-          selectedNode,
+          selection: normalizedSelection,
+          visibleItems,
+          expanded,
           desktopPlatform: desktopPlatform ?? 'linux',
           onEditCancel,
           onClearCut,
+          onSelectionChange,
+          onExpandedChange: setExpanded,
           onKeyboardFileCommand
         })}
       >
@@ -86,15 +206,19 @@ export function ProjectTree({
             onEditCancel={onEditCancel}
           />
         ) : null}
+        {tree.length === 0 ? <div className="empty-line" data-project-tree-empty-line><Files size={15} />No project files</div> : null}
         {tree.map((node) => (
           <ProjectTreeRow
             key={node.path}
             node={node}
             depth={0}
-            selectedPath={selectedPath}
-            cutPath={cutPath}
+            selection={normalizedSelection}
+            cutPaths={cutPathSet}
+            visibleItems={visibleItems}
             editing={editing}
             expanded={expanded}
+            desktopPlatform={desktopPlatform ?? 'linux'}
+            dragOverPath={dragOverPath}
             onToggle={(path) => setExpanded((current) => {
               const next = new Set(current);
               if (next.has(path)) {
@@ -104,7 +228,11 @@ export function ProjectTree({
               }
               return next;
             })}
-            onSelect={actions.selectExplorerPath}
+            onSelectionChange={onSelectionChange}
+            onLocateFileInCanvas={onLocateFileInCanvas}
+            onInternalDrop={onInternalDrop}
+            onExternalDrop={onExternalDrop}
+            setDragOverPath={setDragOverPath}
             onOpenContextMenu={onOpenContextMenu}
             onEditValueChange={onEditValueChange}
             onEditSubmit={onEditSubmit}
@@ -122,45 +250,140 @@ export function handleProjectTreeKeyboardEvent(input: {
     stopPropagation(): void;
   };
   editing: ProjectTreeInlineEditState | undefined;
-  selectedNode: ProjectFileTreeNode | undefined;
+  selection: ProjectTreeSelectionState;
+  visibleItems: ProjectTreeVisibleItem[];
+  expanded?: Set<string> | undefined;
   desktopPlatform: NodeJS.Platform;
   onEditCancel?: (() => void) | undefined;
   onClearCut?: (() => void) | undefined;
+  onSelectionChange?: ((selection: ProjectTreeSelectionState) => void) | undefined;
+  onExpandedChange?: ((expanded: Set<string>) => void) | undefined;
   onKeyboardFileCommand?: ((command: ProjectTreeFileKeyboardCommand, target: WorkbenchContextMenuTarget) => void) | undefined;
 }): void {
   if (input.event.key === 'Escape' && input.editing) {
     input.onEditCancel?.();
     return;
   }
+  if (!input.editing) {
+    const navigation = projectTreeKeyboardNavigation({
+      key: input.event.key,
+      selection: input.selection,
+      visibleItems: input.visibleItems,
+      expanded: input.expanded ?? new Set()
+    });
+    if (navigation) {
+      input.event.preventDefault();
+      input.event.stopPropagation();
+      if (navigation.selection) {
+        input.onSelectionChange?.(navigation.selection);
+      }
+      if (navigation.expanded) {
+        input.onExpandedChange?.(navigation.expanded);
+      }
+      return;
+    }
+  }
   const command = projectTreeKeyboardCommandFromEvent(input.event, input.desktopPlatform);
   if (!command) {
     return;
   }
-  input.event.preventDefault();
-  input.event.stopPropagation();
   if (command === 'cancel-cut') {
+    input.event.preventDefault();
+    input.event.stopPropagation();
     input.onClearCut?.();
     return;
   }
-  if (!input.selectedNode) {
+  const target = explorerTargetFromSelection(input.selection, input.visibleItems);
+  if (target.targetKind === 'root' && command !== 'paste') {
     return;
   }
-  input.onKeyboardFileCommand?.(command, {
-    source: 'explorer',
-    kind: input.selectedNode.kind,
-    projectRelativePath: input.selectedNode.path
-  });
+  input.event.preventDefault();
+  input.event.stopPropagation();
+  input.onKeyboardFileCommand?.(command, target);
+}
+
+export function isRootBlankAreaEventTarget(input: { target: unknown; currentTarget: unknown }): boolean {
+  if (input.target === input.currentTarget) {
+    return true;
+  }
+  if (typeof input.target !== 'object' || input.target === null) {
+    return false;
+  }
+  const closest = (input.target as { closest?: unknown }).closest;
+  return typeof closest === 'function' && Boolean(closest.call(input.target, '[data-project-tree-empty-line]'));
+}
+
+function projectTreeKeyboardNavigation(input: {
+  key: string;
+  selection: ProjectTreeSelectionState;
+  visibleItems: ProjectTreeVisibleItem[];
+  expanded: Set<string>;
+}): { selection?: ProjectTreeSelectionState; expanded?: Set<string> } | undefined {
+  if (input.visibleItems.length === 0) {
+    return undefined;
+  }
+  const focusedIndex = input.selection.focusedPath
+    ? input.visibleItems.findIndex((item) => item.path === input.selection.focusedPath)
+    : -1;
+  if (input.key === 'ArrowDown') {
+    const nextIndex = focusedIndex < 0 ? 0 : Math.min(input.visibleItems.length - 1, focusedIndex + 1);
+    return nextIndex === focusedIndex ? undefined : { selection: projectTreeSelectionForPath(input.visibleItems[nextIndex]!.path) };
+  }
+  if (input.key === 'ArrowUp') {
+    const nextIndex = focusedIndex < 0 ? input.visibleItems.length - 1 : Math.max(0, focusedIndex - 1);
+    return nextIndex === focusedIndex ? undefined : { selection: projectTreeSelectionForPath(input.visibleItems[nextIndex]!.path) };
+  }
+  if (focusedIndex < 0) {
+    return undefined;
+  }
+  const focusedItem = input.visibleItems[focusedIndex]!;
+  if (input.key === 'ArrowRight' && focusedItem.kind === 'directory') {
+    if (!input.expanded.has(focusedItem.path)) {
+      return { expanded: new Set([...input.expanded, focusedItem.path]) };
+    }
+    const child = input.visibleItems[focusedIndex + 1];
+    if (child && child.depth > focusedItem.depth) {
+      return { selection: projectTreeSelectionForPath(child.path) };
+    }
+  }
+  if (input.key === 'ArrowLeft') {
+    if (focusedItem.kind === 'directory' && input.expanded.has(focusedItem.path)) {
+      const nextExpanded = new Set(input.expanded);
+      nextExpanded.delete(focusedItem.path);
+      return { expanded: nextExpanded };
+    }
+    if (focusedItem.parentPath) {
+      const parent = input.visibleItems.find((item) => item.path === focusedItem.parentPath);
+      return parent ? { selection: projectTreeSelectionForPath(parent.path) } : undefined;
+    }
+  }
+  return undefined;
+}
+
+function projectTreeSelectionForPath(projectRelativePath: string): ProjectTreeSelectionState {
+  return {
+    selectedPaths: [projectRelativePath],
+    focusedPath: projectRelativePath,
+    anchorPath: projectRelativePath
+  };
 }
 
 function ProjectTreeRow({
   node,
   depth,
-  selectedPath,
-  cutPath,
+  selection,
+  cutPaths,
+  visibleItems,
   editing,
   expanded,
+  desktopPlatform,
+  dragOverPath,
   onToggle,
-  onSelect,
+  onSelectionChange,
+  onLocateFileInCanvas,
+  onInternalDrop,
+  onExternalDrop,
+  setDragOverPath,
   onOpenContextMenu,
   onEditValueChange,
   onEditSubmit,
@@ -168,23 +391,40 @@ function ProjectTreeRow({
 }: {
   node: ProjectFileTreeNode;
   depth: number;
-  selectedPath: string | undefined;
-  cutPath: string | undefined;
+  selection: ProjectTreeSelectionState;
+  cutPaths: Set<string>;
+  visibleItems: ProjectTreeVisibleItem[];
   editing: ProjectTreeInlineEditState | undefined;
   expanded: Set<string>;
+  desktopPlatform: NodeJS.Platform;
+  dragOverPath: string | null;
   onToggle: (path: string) => void;
-  onSelect: (path: string) => void;
+  onSelectionChange: (selection: ProjectTreeSelectionState) => void;
+  onLocateFileInCanvas?: ((projectRelativePath: string) => void) | undefined;
+  onInternalDrop?: ((input: {
+    entries: WorkbenchProjectPathEntry[];
+    targetDirectoryProjectRelativePath: string;
+    operation: 'copy' | 'move';
+  }) => void) | undefined;
+  onExternalDrop?: ((input: {
+    dataTransfer: DataTransfer;
+    targetDirectoryProjectRelativePath: string;
+  }) => void) | undefined;
+  setDragOverPath: (path: string | null) => void;
   onOpenContextMenu?: ((target: WorkbenchContextMenuTarget, position: WorkbenchContextMenuPosition) => void) | undefined;
   onEditValueChange?: ((value: string) => void) | undefined;
   onEditSubmit?: (() => void) | undefined;
   onEditCancel?: (() => void) | undefined;
 }): React.ReactElement {
-  const selected = selectedPath === node.path;
+  const selected = selection.selectedPaths.includes(node.path);
+  const focused = selection.focusedPath === node.path;
   const style = { '--tree-indent': `${depth * 14}px` } as React.CSSProperties;
   const rowClassName = [
     'project-tree-row',
     selected ? 'selected' : '',
-    cutPath === node.path ? 'cut' : ''
+    focused ? 'focused' : '',
+    dragOverPath === node.path ? 'drag-over' : '',
+    cutPaths.has(node.path) ? 'cut' : ''
   ].filter(Boolean).join(' ');
   const renameEditing = editing?.kind === 'renaming' && editing.projectRelativePath === node.path ? editing : undefined;
   const createEditing = editing && isCreatingInlineEditState(editing) && editing.parentProjectRelativePath === node.path
@@ -193,14 +433,117 @@ function ProjectTreeRow({
   const openContextMenu = (event: React.MouseEvent<HTMLButtonElement>) => {
     event.preventDefault();
     event.stopPropagation();
-    onSelect(node.path);
-    onOpenContextMenu?.({
-      source: 'explorer',
-      kind: node.kind,
-      projectRelativePath: node.path
-    }, {
+    const nextSelection = updateProjectTreeContextSelection({
+      state: selection,
+      visibleItems,
+      path: node.path
+    });
+    onSelectionChange(nextSelection);
+    onOpenContextMenu?.(explorerTargetFromSelection(nextSelection, visibleItems), {
       x: event.clientX,
       y: event.clientY
+    });
+  };
+  const selectRow = (event: React.MouseEvent<HTMLButtonElement>) => {
+    event.stopPropagation();
+    const togglesDirectory = node.kind === 'directory'
+      && selection.selectedPaths.length === 1
+      && selection.selectedPaths[0] === node.path
+      && !isSelectionModifierEvent(event, desktopPlatform);
+    const nextSelection = updateProjectTreeSelection({
+      state: selection,
+      visibleItems,
+      path: node.path,
+      platform: desktopPlatform,
+      event
+    });
+    onSelectionChange(nextSelection);
+    if (togglesDirectory) {
+      onToggle(node.path);
+    }
+    if (node.kind === 'file' && !isSelectionModifierEvent(event, desktopPlatform)) {
+      onLocateFileInCanvas?.(node.path);
+    }
+  };
+  const dragStart = (event: React.DragEvent<HTMLButtonElement>) => {
+    event.stopPropagation();
+    const entries = projectTreeDragEntries({
+      selection,
+      visibleItems,
+      path: node.path
+    });
+    if (entries.length === 0) {
+      event.preventDefault();
+      return;
+    }
+    if (!selection.selectedPaths.includes(node.path)) {
+      onSelectionChange(updateProjectTreeSelection({
+        state: selection,
+        visibleItems,
+        path: node.path,
+        platform: desktopPlatform,
+        event: {}
+      }));
+    }
+    event.dataTransfer.effectAllowed = 'copyMove';
+    event.dataTransfer.setData(PROJECT_TREE_DRAG_MIME, JSON.stringify(entries));
+  };
+  const dragOver = (event: React.DragEvent<HTMLButtonElement>) => {
+    if (!hasInternalProjectTreeDrag(event.dataTransfer) && !hasProjectTreeExternalDrag(event.dataTransfer)) {
+      return;
+    }
+    const targetDirectoryProjectRelativePath = projectTreeDropTargetDirectory({
+      visibleItems,
+      path: node.path
+    });
+    if (hasInternalProjectTreeDrag(event.dataTransfer)) {
+      const entries = readInternalProjectTreeDragEntries(event.dataTransfer);
+      if (!isAcceptedInternalProjectTreeDrop({
+        entries,
+        targetDirectoryProjectRelativePath,
+        operation: projectTreeDropOperation({ platform: desktopPlatform, event })
+      })) {
+        return;
+      }
+    }
+    event.preventDefault();
+    event.stopPropagation();
+    setDragOverPath(node.path);
+  };
+  const drop = (event: React.DragEvent<HTMLButtonElement>) => {
+    if (!hasInternalProjectTreeDrag(event.dataTransfer) && !hasProjectTreeExternalDrag(event.dataTransfer)) {
+      return;
+    }
+    event.preventDefault();
+    event.stopPropagation();
+    setDragOverPath(null);
+    const targetDirectoryProjectRelativePath = projectTreeDropTargetDirectory({
+      visibleItems,
+      path: node.path
+    });
+    if (!hasInternalProjectTreeDrag(event.dataTransfer)) {
+      onExternalDrop?.({
+        dataTransfer: event.dataTransfer,
+        targetDirectoryProjectRelativePath
+      });
+      return;
+    }
+    const entries = readInternalProjectTreeDragEntries(event.dataTransfer);
+    if (entries.length === 0) {
+      return;
+    }
+    const operation = projectTreeDropOperation({ platform: desktopPlatform, event });
+    if (!isAcceptedInternalProjectTreeDrop({
+      entries,
+      targetDirectoryProjectRelativePath,
+      operation
+    })) {
+      return;
+    }
+    onInternalDrop?.({
+      entries,
+      targetDirectoryProjectRelativePath,
+      operation
     });
   };
 
@@ -226,13 +569,21 @@ function ProjectTreeRow({
             style={style}
             title={node.path}
             data-project-tree-context-path={node.path}
-            onClick={() => {
-              onSelect(node.path);
-              onToggle(node.path);
-            }}
+            draggable
+            onClick={selectRow}
             onContextMenu={openContextMenu}
+            onDragStart={dragStart}
+            onDragOver={dragOver}
+            onDragLeave={() => setDragOverPath(null)}
+            onDrop={drop}
           >
-            <span className={open ? 'tree-chevron open' : 'tree-chevron'} />
+            <span
+              className={open ? 'tree-chevron open' : 'tree-chevron'}
+              onClick={(event) => {
+                event.stopPropagation();
+                onToggle(node.path);
+              }}
+            />
             <FolderTree size={14} />
             <span>{node.name}</span>
           </button>
@@ -253,12 +604,19 @@ function ProjectTreeRow({
                 key={child.path}
                 node={child}
                 depth={depth + 1}
-                selectedPath={selectedPath}
-                cutPath={cutPath}
+                selection={selection}
+                cutPaths={cutPaths}
+                visibleItems={visibleItems}
                 editing={editing}
                 expanded={expanded}
+                desktopPlatform={desktopPlatform}
+                dragOverPath={dragOverPath}
                 onToggle={onToggle}
-                onSelect={onSelect}
+                onSelectionChange={onSelectionChange}
+                onLocateFileInCanvas={onLocateFileInCanvas}
+                onInternalDrop={onInternalDrop}
+                onExternalDrop={onExternalDrop}
+                setDragOverPath={setDragOverPath}
                 onOpenContextMenu={onOpenContextMenu}
                 onEditValueChange={onEditValueChange}
                 onEditSubmit={onEditSubmit}
@@ -294,14 +652,98 @@ function ProjectTreeRow({
       style={style}
       title={node.path}
       data-project-tree-context-path={node.path}
-      onClick={() => onSelect(node.path)}
+      draggable
+      onClick={selectRow}
       onContextMenu={openContextMenu}
+      onDragStart={dragStart}
+      onDragOver={dragOver}
+      onDragLeave={() => setDragOverPath(null)}
+      onDrop={drop}
     >
       <span className="tree-chevron-spacer" />
       <Files size={14} />
       <span>{node.name}</span>
     </button>
   );
+}
+
+function hasInternalProjectTreeDrag(dataTransfer: DataTransfer): boolean {
+  return Array.from(dataTransfer.types).includes(PROJECT_TREE_DRAG_MIME);
+}
+
+function readInternalProjectTreeDragEntries(dataTransfer: DataTransfer): WorkbenchProjectPathEntry[] {
+  const raw = dataTransfer.getData(PROJECT_TREE_DRAG_MIME);
+  if (!raw) {
+    return [];
+  }
+  const parsed = JSON.parse(raw) as WorkbenchProjectPathEntry[];
+  return parsed.filter((entry) => (
+    typeof entry.projectRelativePath === 'string' && (entry.kind === 'file' || entry.kind === 'directory')
+  ));
+}
+
+function isAcceptedInternalProjectTreeDrop(input: {
+  entries: WorkbenchProjectPathEntry[];
+  targetDirectoryProjectRelativePath: string;
+  operation: 'copy' | 'move';
+}): boolean {
+  if (input.entries.length === 0 || isProjectTreeDropRejected({
+    entries: input.entries,
+    targetDirectoryProjectRelativePath: input.targetDirectoryProjectRelativePath
+  })) {
+    return false;
+  }
+  return input.operation !== 'move' || !isProjectTreeMoveNoop({
+    entries: input.entries,
+    targetDirectoryProjectRelativePath: input.targetDirectoryProjectRelativePath
+  });
+}
+
+function explorerTargetFromSelection(
+  selection: ProjectTreeSelectionState,
+  visibleItems: ProjectTreeVisibleItem[]
+): WorkbenchExplorerContextMenuTarget {
+  const entries = projectTreePathEntriesFromSelection({ selection, visibleItems });
+  if (entries.length === 0) {
+    return rootExplorerTarget();
+  }
+  if (entries.length === 1) {
+    return itemExplorerTarget(entries[0]!);
+  }
+  return {
+    source: 'explorer',
+    targetKind: 'selection',
+    paths: entries,
+    primaryPath: entries[0]!.projectRelativePath,
+    targetDirectoryPath: projectTreeDropTargetDirectory({
+      visibleItems,
+      path: selection.focusedPath ?? entries[0]!.projectRelativePath
+    })
+  };
+}
+
+function itemExplorerTarget(entry: WorkbenchProjectPathEntry): WorkbenchExplorerContextMenuTarget {
+  return {
+    source: 'explorer',
+    targetKind: 'item',
+    paths: [entry],
+    primaryPath: entry.projectRelativePath,
+    targetDirectoryPath: entry.kind === 'directory' ? entry.projectRelativePath : projectTreeParentPath(entry.projectRelativePath)
+  };
+}
+
+function rootExplorerTarget(): WorkbenchExplorerContextMenuTarget {
+  return {
+    source: 'explorer',
+    targetKind: 'root',
+    paths: [],
+    primaryPath: null,
+    targetDirectoryPath: ''
+  };
+}
+
+function isSelectionModifierEvent(event: ProjectTreePointerModifiers, platform: NodeJS.Platform): boolean {
+  return event.shiftKey === true || (platform === 'darwin' ? event.metaKey === true : event.ctrlKey === true);
 }
 
 function ProjectTreeInlineEditRow({

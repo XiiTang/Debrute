@@ -1,14 +1,18 @@
 import { randomUUID } from 'node:crypto';
-import { createReadStream } from 'node:fs';
-import { readFile, stat } from 'node:fs/promises';
+import { createReadStream, createWriteStream } from 'node:fs';
+import { mkdtemp, readFile, rm, stat } from 'node:fs/promises';
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from 'node:http';
-import { extname, resolve } from 'node:path';
+import { tmpdir } from 'node:os';
+import { extname, join as joinFileSystemPath, resolve } from 'node:path';
+import { pipeline } from 'node:stream/promises';
 import { fileURLToPath } from 'node:url';
+import Busboy from 'busboy';
 import { DebruteGlobalRuntimeServer, GlobalConfigStore, type DebruteAppServer, type DebruteAppServerOptions } from '@debrute/app-server';
 import {
   isDebruteMutatingMethod,
   normalizeDebruteRuntimeInfo,
   type AppServerEvent,
+  type DaemonProjectUploadImportPlan,
   type DebruteHttpErrorBody,
   type DebruteRuntimeInfo,
   type GeneratedAssetRecord,
@@ -17,17 +21,18 @@ import {
   type ProjectSessionSnapshot,
   type WorkbenchEvent,
   type WorkbenchFileWatchEvent,
+  type WorkbenchProjectPathEntry,
   type WorkbenchProjectSessionSnapshot,
   type WorkbenchProjectTextFile
 } from '@debrute/app-protocol';
-import { projectFileRevision, resolveExistingProjectPath } from '@debrute/project-core';
+import { projectFileRevision, resolveExistingProjectPath, type ProjectUploadImportEntry } from '@debrute/project-core';
 import { ProjectSessionRegistry, type ProjectSessionRecord } from './ProjectSessionRegistry.js';
 import { writeRevisionedFileResponse } from './fileResponse.js';
 import { createNodeNativeShell, type DebruteNativeShell } from './nativeShell.js';
 import {
-  copyProjectAbsolutePath,
+  copyProjectAbsolutePaths,
   revealProjectPathInSystemFileManager,
-  trashProjectPathWithNativeShell
+  trashProjectPathsWithNativeShell
 } from './projectNativeFileOperations.js';
 
 export interface DebruteDaemonRuntime extends DebruteRuntimeInfo {
@@ -78,6 +83,16 @@ interface ProjectApiRoute {
 const DEFAULT_HOST = '127.0.0.1';
 const DEFAULT_PORT = 0;
 const BODY_LIMIT_BYTES = 2 * 1024 * 1024;
+
+interface MultipartUploadFilePart {
+  temporaryPath: string;
+}
+
+interface MultipartUploadParts {
+  fields: Map<string, string>;
+  files: Map<string, MultipartUploadFilePart>;
+  cleanup(): Promise<void>;
+}
 
 export function createDebruteDaemonHttpServer(options: DebruteDaemonHttpServerOptions = {}): DebruteDaemonHttpServer {
   const host = options.host ?? DEFAULT_HOST;
@@ -297,6 +312,22 @@ export function createDebruteDaemonHttpServer(options: DebruteDaemonHttpServerOp
       await handleCreateFileRoute(context, session);
       return;
     }
+    if (tail === '/files/import/local') {
+      await handleExternalLocalImportRoute(context, session);
+      return;
+    }
+    if (tail === '/files/import/uploads') {
+      await handleExternalUploadImportRoute(context, session);
+      return;
+    }
+    if (tail.startsWith('/files/batch/')) {
+      await handleProjectPathBatchRoute(context, routeTail(tail, '/files/batch/'), session);
+      return;
+    }
+    if (tail.startsWith('/files/path/batch/')) {
+      await handleNativeProjectPathBatchRoute(context, routeTail(tail, '/files/path/batch/'), session, nativeShell);
+      return;
+    }
     const nativeProjectPathRoute = method === 'POST'
       ? parseNativeProjectPathRoute(tail)
       : undefined;
@@ -445,8 +476,40 @@ async function handleCreateFileRoute(context: ProjectRequestContext, session: Pr
   writeJson(context.response, 200, withHttpSnapshot(result, context.runtime.daemonUrl, session));
 }
 
+async function handleExternalLocalImportRoute(context: ProjectRequestContext, session: ProjectSessionRecord): Promise<void> {
+  if (context.request.method !== 'POST') {
+    writeError(context.response, 405, 'method_not_allowed', 'Unsupported external local import method.');
+    return;
+  }
+  const body = await readJsonBody<Record<string, unknown>>(context.request);
+  const sources = stringArrayField(body.sources, 'sources');
+  writeJson(context.response, 200, withHttpSnapshot(await daemonAppServer(context).importExternalLocalProjectPaths({
+    sources,
+    targetDirectoryProjectRelativePath: stringField(body.targetDirectoryProjectRelativePath, 'targetDirectoryProjectRelativePath'),
+    ...(typeof body.overwrite === 'boolean' ? { overwrite: body.overwrite } : {})
+  }), context.runtime.daemonUrl, session));
+}
+
+async function handleExternalUploadImportRoute(context: ProjectRequestContext, session: ProjectSessionRecord): Promise<void> {
+  if (context.request.method !== 'POST') {
+    writeError(context.response, 405, 'method_not_allowed', 'Unsupported external upload import method.');
+    return;
+  }
+  const parts = await readMultipartUploadParts(context.request);
+  try {
+    const plan = daemonUploadImportPlan(parts.fields.get('plan'));
+    writeJson(context.response, 200, withHttpSnapshot(await daemonAppServer(context).importExternalUploadProjectEntries({
+      entries: uploadImportEntriesFromMultipartParts(plan, parts.files),
+      targetDirectoryProjectRelativePath: plan.targetDirectoryProjectRelativePath,
+      ...(plan.overwrite === true ? { overwrite: true } : {})
+    }), context.runtime.daemonUrl, session));
+  } finally {
+    await parts.cleanup();
+  }
+}
+
 interface NativeProjectPathRoute {
-  operation: 'copy-path' | 'reveal' | 'trash';
+  operation: 'reveal';
   projectRelativePath: string;
 }
 
@@ -455,7 +518,7 @@ function parseNativeProjectPathRoute(tail: string): NativeProjectPathRoute | und
   if (!tail.startsWith(prefix)) {
     return undefined;
   }
-  for (const operation of ['copy-path', 'reveal', 'trash'] as const) {
+  for (const operation of ['reveal'] as const) {
     const suffix = `/${operation}`;
     if (tail.endsWith(suffix)) {
       return {
@@ -488,22 +551,76 @@ async function handleNativeProjectPathRoute(
     projectRelativePath: route.projectRelativePath,
     kind
   };
-  if (route.operation === 'copy-path') {
-    writeJson(context.response, 200, await copyProjectAbsolutePath(input));
+  writeJson(context.response, 200, await revealProjectPathInSystemFileManager({
+    ...input,
+    nativeShell
+  }));
+}
+
+async function handleNativeProjectPathBatchRoute(
+  context: ProjectRequestContext,
+  operation: string,
+  session: ProjectSessionRecord,
+  nativeShell: DebruteNativeShell
+): Promise<void> {
+  if (context.request.method !== 'POST') {
+    writeError(context.response, 405, 'method_not_allowed', 'Unsupported native project path batch method.');
     return;
   }
-  if (route.operation === 'reveal') {
-    writeJson(context.response, 200, await revealProjectPathInSystemFileManager({
-      ...input,
-      nativeShell
+  const body = await readJsonBody<{ entries?: unknown }>(context.request);
+  const entries = projectPathEntriesField(body.entries);
+  if (operation === 'copy-path') {
+    writeJson(context.response, 200, await copyProjectAbsolutePaths({
+      projectRoot: session.projectRoot,
+      entries
     }));
     return;
   }
-  writeJson(context.response, 200, withHttpSnapshot(await trashProjectPathWithNativeShell({
-    ...input,
-    nativeShell,
-    refreshProject: () => daemonAppServer(context).refreshProject()
-  }), context.runtime.daemonUrl, session));
+  if (operation === 'trash') {
+    writeJson(context.response, 200, withHttpSnapshot(await trashProjectPathsWithNativeShell({
+      projectRoot: session.projectRoot,
+      entries,
+      nativeShell,
+      refreshProject: () => daemonAppServer(context).refreshProject()
+    }), context.runtime.daemonUrl, session));
+    return;
+  }
+  writeError(context.response, 404, 'not_found', `Unknown native project path batch operation: ${operation}`);
+}
+
+async function handleProjectPathBatchRoute(
+  context: ProjectRequestContext,
+  operation: string,
+  session: ProjectSessionRecord
+): Promise<void> {
+  if (context.request.method !== 'POST') {
+    writeError(context.response, 405, 'method_not_allowed', 'Unsupported project path batch method.');
+    return;
+  }
+  const body = await readJsonBody<Record<string, unknown>>(context.request);
+  const server = daemonAppServer(context);
+  if (operation === 'copy') {
+    writeJson(context.response, 200, withHttpSnapshot(await server.copyProjectPaths({
+      entries: projectPathEntriesField(body.entries),
+      targetDirectoryProjectRelativePath: stringField(body.targetDirectoryProjectRelativePath, 'targetDirectoryProjectRelativePath')
+    }), context.runtime.daemonUrl, session));
+    return;
+  }
+  if (operation === 'move') {
+    writeJson(context.response, 200, withHttpSnapshot(await server.moveProjectPaths({
+      entries: projectPathEntriesField(body.entries),
+      targetDirectoryProjectRelativePath: stringField(body.targetDirectoryProjectRelativePath, 'targetDirectoryProjectRelativePath'),
+      ...(typeof body.overwrite === 'boolean' ? { overwrite: body.overwrite } : {})
+    }), context.runtime.daemonUrl, session));
+    return;
+  }
+  if (operation === 'delete-permanently') {
+    writeJson(context.response, 200, withHttpSnapshot(await server.deleteProjectPathsPermanently({
+      entries: projectPathEntriesField(body.entries)
+    }), context.runtime.daemonUrl, session));
+    return;
+  }
+  writeError(context.response, 404, 'not_found', `Unknown project path batch operation: ${operation}`);
 }
 
 async function handleProjectPathRoute(context: ProjectRequestContext, path: string, session: ProjectSessionRecord): Promise<void> {
@@ -518,24 +635,6 @@ async function handleProjectPathRoute(context: ProjectRequestContext, path: stri
       }), context.runtime.daemonUrl, session));
       return;
     }
-    if (operation === 'copy') {
-      writeJson(context.response, 200, withHttpSnapshot(await server.copyProjectPath({
-        sourceProjectRelativePath: path,
-        targetDirectoryProjectRelativePath: stringField(body.targetDirectoryProjectRelativePath, 'targetDirectoryProjectRelativePath')
-      }), context.runtime.daemonUrl, session));
-      return;
-    }
-    if (operation === 'move') {
-      writeJson(context.response, 200, withHttpSnapshot(await server.moveProjectPath({
-        sourceProjectRelativePath: path,
-        targetDirectoryProjectRelativePath: stringField(body.targetDirectoryProjectRelativePath, 'targetDirectoryProjectRelativePath')
-      }), context.runtime.daemonUrl, session));
-      return;
-    }
-  }
-  if (context.request.method === 'DELETE') {
-    writeJson(context.response, 200, withHttpSnapshot(await server.deleteProjectPathPermanently({ projectRelativePath: path }), context.runtime.daemonUrl, session));
-    return;
   }
   writeError(context.response, 405, 'method_not_allowed', 'Unsupported project path method.');
 }
@@ -967,6 +1066,119 @@ async function readJsonBody<T>(request: IncomingMessage): Promise<T> {
   }
 }
 
+async function readMultipartUploadParts(request: IncomingMessage): Promise<MultipartUploadParts> {
+  const temporaryDirectory = await mkdtemp(joinFileSystemPath(tmpdir(), 'debrute-upload-'));
+  const cleanup = async () => rm(temporaryDirectory, { recursive: true, force: true });
+  const fields = new Map<string, string>();
+  const files = new Map<string, MultipartUploadFilePart>();
+  const writes: Array<Promise<void>> = [];
+
+  return new Promise((resolveParts, rejectParts) => {
+    let settled = false;
+    const rejectOnce = (error: unknown) => {
+      if (settled) {
+        return;
+      }
+      settled = true;
+      void cleanup().finally(() => rejectParts(error));
+    };
+    let parser: NodeJS.WritableStream;
+    try {
+      parser = Busboy({ headers: request.headers });
+    } catch (error) {
+      rejectOnce(error);
+      return;
+    }
+
+    parser.on('field', (name, value) => {
+      fields.set(name, value);
+    });
+    parser.on('file', (name, stream) => {
+      const temporaryPath = joinFileSystemPath(temporaryDirectory, `${randomUUID()}.upload`);
+      files.set(name, {
+        temporaryPath
+      });
+      const write = pipeline(stream, createWriteStream(temporaryPath, { flags: 'wx' }));
+      writes.push(write);
+      write.catch(rejectOnce);
+    });
+    parser.on('error', rejectOnce);
+    parser.on('finish', () => {
+      void Promise.all(writes).then(() => {
+        if (settled) {
+          return;
+        }
+        settled = true;
+        resolveParts({ fields, files, cleanup });
+      }, rejectOnce);
+    });
+    request.pipe(parser);
+  });
+}
+
+function daemonUploadImportPlan(value: string | undefined): DaemonProjectUploadImportPlan {
+  if (typeof value !== 'string') {
+    throw new DebruteDaemonHttpError(400, 'invalid_input', 'Upload import plan is required.');
+  }
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(value);
+  } catch {
+    throw new DebruteDaemonHttpError(400, 'invalid_json', 'Upload import plan is not valid JSON.');
+  }
+  if (typeof parsed !== 'object' || parsed === null || Array.isArray(parsed)) {
+    throw new DebruteDaemonHttpError(400, 'invalid_input', 'Upload import plan must be an object.');
+  }
+  const record = parsed as Record<string, unknown>;
+  if (!Array.isArray(record.entries)) {
+    throw new DebruteDaemonHttpError(400, 'invalid_input', 'Upload import plan entries must be an array.');
+  }
+  return {
+    entries: record.entries.map((entry, index) => daemonUploadImportPlanEntry(entry, index)),
+    targetDirectoryProjectRelativePath: stringField(record.targetDirectoryProjectRelativePath, 'targetDirectoryProjectRelativePath'),
+    ...(typeof record.overwrite === 'boolean' ? { overwrite: record.overwrite } : {})
+  };
+}
+
+function daemonUploadImportPlanEntry(value: unknown, index: number): DaemonProjectUploadImportPlan['entries'][number] {
+  if (typeof value !== 'object' || value === null || Array.isArray(value)) {
+    throw new DebruteDaemonHttpError(400, 'invalid_input', `entries[${index}] must be an object.`);
+  }
+  const record = value as Record<string, unknown>;
+  const projectRelativePath = stringField(record.projectRelativePath, `entries[${index}].projectRelativePath`);
+  if (record.kind === 'directory') {
+    return { kind: 'directory', projectRelativePath };
+  }
+  if (record.kind === 'file') {
+    return {
+      kind: 'file',
+      projectRelativePath,
+      fileField: stringField(record.fileField, `entries[${index}].fileField`)
+    };
+  }
+  throw new DebruteDaemonHttpError(400, 'invalid_input', `entries[${index}].kind must be file or directory.`);
+}
+
+function uploadImportEntriesFromMultipartParts(
+  plan: DaemonProjectUploadImportPlan,
+  files: Map<string, MultipartUploadFilePart>
+): ProjectUploadImportEntry[] {
+  return plan.entries.map((entry): ProjectUploadImportEntry => {
+    if (entry.kind === 'directory') {
+      return { kind: 'directory', projectRelativePath: entry.projectRelativePath };
+    }
+    const file = files.get(entry.fileField);
+    if (!file) {
+      throw new DebruteDaemonHttpError(400, 'invalid_input', `Upload file field is missing: ${entry.fileField}`);
+    }
+    return {
+      kind: 'file',
+      projectRelativePath: entry.projectRelativePath,
+      content: createReadStream(file.temporaryPath)
+    };
+  });
+}
+
 function writeJson(response: ServerResponse, statusCode: number, body: unknown): void {
   response.writeHead(statusCode, { 'content-type': 'application/json; charset=utf-8' });
   response.end(JSON.stringify(body));
@@ -1009,6 +1221,30 @@ function stringField(value: unknown, name: string): string {
     throw new DebruteDaemonHttpError(400, 'invalid_input', `${name} must be a string.`);
   }
   return value;
+}
+
+function stringArrayField(value: unknown, name: string): string[] {
+  if (!Array.isArray(value)) {
+    throw new DebruteDaemonHttpError(400, 'invalid_input', `${name} must be an array.`);
+  }
+  return value.map((item, index) => stringField(item, `${name}[${index}]`));
+}
+
+function projectPathEntriesField(value: unknown): WorkbenchProjectPathEntry[] {
+  if (!Array.isArray(value)) {
+    throw new DebruteDaemonHttpError(400, 'invalid_input', 'entries must be an array.');
+  }
+  return value.map((entry, index) => {
+    if (typeof entry !== 'object' || entry === null) {
+      throw new DebruteDaemonHttpError(400, 'invalid_input', `entries[${index}] must be an object.`);
+    }
+    const record = entry as Record<string, unknown>;
+    const projectRelativePath = stringField(record.projectRelativePath, `entries[${index}].projectRelativePath`);
+    if (record.kind !== 'file' && record.kind !== 'directory') {
+      throw new DebruteDaemonHttpError(400, 'invalid_input', `entries[${index}].kind must be file or directory.`);
+    }
+    return { projectRelativePath, kind: record.kind };
+  });
 }
 
 async function isDirectoryProjectRoot(projectRoot: string): Promise<boolean> {

@@ -1,5 +1,6 @@
 import type {
   DebruteRuntimeInfo,
+  DaemonProjectUploadImportPlan,
   DiscoverLlmProviderModelsInput,
   DiscoverProviderModelsOutput,
   GeneratedAssetView,
@@ -15,9 +16,11 @@ import type {
   VideoModelSettingsView,
   WorkbenchEvent,
   WorkbenchApiClient,
+  WorkbenchProjectFileBatchOperationResult,
   WorkbenchProjectFileOperationResult,
   WorkbenchProjectSessionSnapshot,
-  WorkbenchProjectTextFile
+  WorkbenchProjectTextFile,
+  WorkbenchProjectUploadImportInput
 } from '@debrute/app-protocol';
 import type {
   CanvasFeedbackDocument,
@@ -63,6 +66,21 @@ export function createHttpWorkbenchApiClient(options: HttpWorkbenchApiClientOpti
     }
     if (response.status === 204) {
       return undefined as T;
+    }
+    return response.json() as Promise<T>;
+  };
+  const requestFormData = async <T>(method: string, path: string, body: FormData): Promise<T> => {
+    const headers: Record<string, string> = {};
+    if (token) {
+      headers['x-debrute-daemon-token'] = token;
+    }
+    const response = await transportFetch(`${daemonUrl}${path}`, {
+      method,
+      headers,
+      body
+    });
+    if (!response.ok) {
+      throw new Error(await responseErrorMessage(response));
     }
     return response.json() as Promise<T>;
   };
@@ -131,25 +149,25 @@ export function createHttpWorkbenchApiClient(options: HttpWorkbenchApiClientOpti
       operation: 'rename',
       name: input.name
     }),
-    copyProjectPath: (input) => request<WorkbenchProjectFileOperationResult>('PATCH', projectPath(`/files/path/${encodeProjectPath(input.sourceProjectRelativePath)}`), {
-      operation: 'copy',
-      targetDirectoryProjectRelativePath: input.targetDirectoryProjectRelativePath
-    }),
-    moveProjectPath: (input) => request<WorkbenchProjectFileOperationResult>('PATCH', projectPath(`/files/path/${encodeProjectPath(input.sourceProjectRelativePath)}`), {
-      operation: 'move',
-      targetDirectoryProjectRelativePath: input.targetDirectoryProjectRelativePath
-    }),
-    copyProjectAbsolutePath: (input) => request<{ absolutePath: string }>(
+    copyProjectPaths: (input) => request<WorkbenchProjectFileBatchOperationResult>('POST', projectPath('/files/batch/copy'), input),
+    moveProjectPaths: (input) => request<WorkbenchProjectFileBatchOperationResult>('POST', projectPath('/files/batch/move'), input),
+    copyProjectAbsolutePaths: (input) => request<{ paths: string[] }>(
       'POST',
-      projectPath(`/files/path/${encodeProjectPath(input.projectRelativePath)}/copy-path`),
-      { kind: input.kind }
+      projectPath('/files/path/batch/copy-path'),
+      input
     ),
-    trashProjectPath: (input) => request<{ projectRelativePath: string; snapshot: WorkbenchProjectSessionSnapshot }>(
+    trashProjectPaths: (input) => request<WorkbenchProjectFileBatchOperationResult>(
       'POST',
-      projectPath(`/files/path/${encodeProjectPath(input.projectRelativePath)}/trash`),
-      { kind: input.kind }
+      projectPath('/files/path/batch/trash'),
+      input
     ),
-    deleteProjectPathPermanently: (input) => request<WorkbenchProjectFileOperationResult>('DELETE', projectPath(`/files/path/${encodeProjectPath(input.projectRelativePath)}`)),
+    deleteProjectPathsPermanently: (input) => request<WorkbenchProjectFileBatchOperationResult>('POST', projectPath('/files/batch/delete-permanently'), input),
+    importExternalLocalProjectPaths: (input) => request<WorkbenchProjectFileBatchOperationResult>('POST', projectPath('/files/import/local'), input),
+    importExternalProjectUploads: (input) => requestFormData<WorkbenchProjectFileBatchOperationResult>(
+      'POST',
+      projectPath('/files/import/uploads'),
+      uploadImportFormData(input)
+    ),
     revealProjectPathInSystemFileManager: (input) => request<{ ok: true }>(
       'POST',
       projectPath(`/files/path/${encodeProjectPath(input.projectRelativePath)}/reveal`),
@@ -242,6 +260,33 @@ function browserEventClientId(): string {
 
 function encodeProjectPath(projectRelativePath: string): string {
   return projectRelativePath.split('/').map(encodeURIComponent).join('/');
+}
+
+function uploadImportFormData(input: WorkbenchProjectUploadImportInput): FormData {
+  const formData = new FormData();
+  const plan: DaemonProjectUploadImportPlan = {
+    targetDirectoryProjectRelativePath: input.targetDirectoryProjectRelativePath,
+    entries: input.entries.map((entry, index) => (
+      entry.kind === 'file'
+        ? {
+            kind: 'file',
+            projectRelativePath: entry.projectRelativePath,
+            fileField: `file:${index}`
+          }
+        : {
+            kind: 'directory',
+            projectRelativePath: entry.projectRelativePath
+          }
+    )),
+    ...(input.overwrite === undefined ? {} : { overwrite: input.overwrite })
+  };
+  formData.append('plan', JSON.stringify(plan));
+  input.entries.forEach((entry, index) => {
+    if (entry.kind === 'file') {
+      formData.append(`file:${index}`, entry.file);
+    }
+  });
+  return formData;
 }
 
 async function responseErrorMessage(response: Response): Promise<string> {

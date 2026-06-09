@@ -6,12 +6,14 @@ describe('project tree keyboard commands', () => {
     expect(projectTreeKeyboardCommandFromEvent({ key: 'c', metaKey: true }, 'darwin')).toBe('copy');
     expect(projectTreeKeyboardCommandFromEvent({ key: 'x', ctrlKey: true }, 'win32')).toBe('cut');
     expect(projectTreeKeyboardCommandFromEvent({ key: 'v', ctrlKey: true }, 'linux')).toBe('paste');
+    expect(projectTreeKeyboardCommandFromEvent({ key: 'F2' }, 'linux')).toBe('rename');
     expect(projectTreeKeyboardCommandFromEvent({ key: 'Escape' }, 'darwin')).toBe('cancel-cut');
   });
 
   it('maps recoverable and permanent delete shortcuts', () => {
     expect(projectTreeKeyboardCommandFromEvent({ key: 'Delete' }, 'linux')).toBe('delete');
     expect(projectTreeKeyboardCommandFromEvent({ key: 'Backspace' }, 'darwin')).toBeUndefined();
+    expect(projectTreeKeyboardCommandFromEvent({ key: 'Backspace', metaKey: true }, 'darwin')).toBe('delete');
     expect(projectTreeKeyboardCommandFromEvent({ key: 'Delete', shiftKey: true }, 'win32')).toBe('delete-permanently');
     expect(projectTreeKeyboardCommandFromEvent({ key: 'Delete', shiftKey: true }, 'darwin')).toBeUndefined();
     expect(projectTreeKeyboardCommandFromEvent({ key: 'Backspace', metaKey: true, altKey: true }, 'darwin')).toBe('delete-permanently');
@@ -27,5 +29,6 @@ describe('project tree keyboard commands', () => {
     const input = { tagName: 'INPUT', isContentEditable: false };
     expect(projectTreeKeyboardCommandFromEvent({ key: 'c', metaKey: true, target: input }, 'darwin')).toBeUndefined();
     expect(projectTreeKeyboardCommandFromEvent({ key: 'Delete', target: input }, 'linux')).toBeUndefined();
+    expect(projectTreeKeyboardCommandFromEvent({ key: 'F2', target: input }, 'linux')).toBeUndefined();
   });
 });

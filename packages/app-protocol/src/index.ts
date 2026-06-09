@@ -10,6 +10,8 @@ import type {
   DebruteProjectMetadata,
   NormalizedFileWatchEvent,
   ProjectFileEntry,
+  ProjectPathBatchEntry,
+  ProjectPathBatchOperationResult,
   ProjectPathOperationResult,
   ProjectTextFile
 } from '@debrute/project-core';
@@ -115,6 +117,72 @@ export interface ProjectFileOperationResult extends ProjectPathOperationResult {
 
 export interface WorkbenchProjectFileOperationResult extends ProjectPathOperationResult {
   snapshot: WorkbenchProjectSessionSnapshot;
+}
+
+export type WorkbenchProjectPathEntry = ProjectPathBatchEntry;
+
+export interface ProjectFileBatchOperationResult extends ProjectPathBatchOperationResult {
+  snapshot: ProjectSessionSnapshot;
+}
+
+export interface WorkbenchProjectFileBatchOperationResult extends ProjectPathBatchOperationResult {
+  snapshot: WorkbenchProjectSessionSnapshot;
+}
+
+export interface WorkbenchProjectCopyPathsInput {
+  entries: WorkbenchProjectPathEntry[];
+  targetDirectoryProjectRelativePath: string;
+}
+
+export interface WorkbenchProjectMovePathsInput extends WorkbenchProjectCopyPathsInput {
+  overwrite?: boolean;
+}
+
+export interface WorkbenchProjectDeletePathsInput {
+  entries: WorkbenchProjectPathEntry[];
+}
+
+export interface WorkbenchProjectAbsolutePathsResult {
+  paths: string[];
+}
+
+export interface WorkbenchProjectExternalLocalImportInput {
+  sources: string[];
+  targetDirectoryProjectRelativePath: string;
+  overwrite?: boolean;
+}
+
+export type WorkbenchProjectUploadImportEntry =
+  | {
+      kind: 'directory';
+      projectRelativePath: string;
+    }
+  | {
+      kind: 'file';
+      projectRelativePath: string;
+      file: Blob;
+    };
+
+export interface WorkbenchProjectUploadImportInput {
+  entries: WorkbenchProjectUploadImportEntry[];
+  targetDirectoryProjectRelativePath: string;
+  overwrite?: boolean;
+}
+
+export interface DaemonProjectUploadImportPlan {
+  entries: Array<
+    | {
+        kind: 'directory';
+        projectRelativePath: string;
+      }
+    | {
+        kind: 'file';
+        projectRelativePath: string;
+        fileField: string;
+      }
+  >;
+  targetDirectoryProjectRelativePath: string;
+  overwrite?: boolean;
 }
 
 export interface WorkbenchProjectOpenResult {
@@ -523,11 +591,13 @@ export interface WorkbenchApiClient {
   createProjectFile(input: { parentProjectRelativePath: string; name: string }): Promise<WorkbenchProjectFileOperationResult>;
   createProjectDirectory(input: { parentProjectRelativePath: string; name: string }): Promise<WorkbenchProjectFileOperationResult>;
   renameProjectPath(input: { projectRelativePath: string; name: string }): Promise<WorkbenchProjectFileOperationResult>;
-  copyProjectPath(input: { sourceProjectRelativePath: string; targetDirectoryProjectRelativePath: string }): Promise<WorkbenchProjectFileOperationResult>;
-  moveProjectPath(input: { sourceProjectRelativePath: string; targetDirectoryProjectRelativePath: string }): Promise<WorkbenchProjectFileOperationResult>;
-  copyProjectAbsolutePath(input: { projectRelativePath: string; kind: 'file' | 'directory' }): Promise<{ absolutePath: string }>;
-  trashProjectPath(input: { projectRelativePath: string; kind: 'file' | 'directory' }): Promise<{ projectRelativePath: string; snapshot: WorkbenchProjectSessionSnapshot }>;
-  deleteProjectPathPermanently(input: { projectRelativePath: string }): Promise<WorkbenchProjectFileOperationResult>;
+  copyProjectPaths(input: WorkbenchProjectCopyPathsInput): Promise<WorkbenchProjectFileBatchOperationResult>;
+  moveProjectPaths(input: WorkbenchProjectMovePathsInput): Promise<WorkbenchProjectFileBatchOperationResult>;
+  copyProjectAbsolutePaths(input: WorkbenchProjectDeletePathsInput): Promise<WorkbenchProjectAbsolutePathsResult>;
+  trashProjectPaths(input: WorkbenchProjectDeletePathsInput): Promise<WorkbenchProjectFileBatchOperationResult>;
+  deleteProjectPathsPermanently(input: WorkbenchProjectDeletePathsInput): Promise<WorkbenchProjectFileBatchOperationResult>;
+  importExternalLocalProjectPaths(input: WorkbenchProjectExternalLocalImportInput): Promise<WorkbenchProjectFileBatchOperationResult>;
+  importExternalProjectUploads(input: WorkbenchProjectUploadImportInput): Promise<WorkbenchProjectFileBatchOperationResult>;
   revealProjectPathInSystemFileManager(input: { projectRelativePath: string; kind: 'file' | 'directory' }): Promise<{ ok: true }>;
   lookupGeneratedAssetMetadata(input: { projectRelativePath: string }): Promise<GeneratedAssetMetadataLookup>;
   listGeneratedAssets(): Promise<GeneratedAssetsView>;

@@ -95,6 +95,11 @@ export function FloatingPanelContent({
   onEditSubmit,
   onEditCancel,
   onClearCut,
+  onExplorerSelectionChange,
+  onLocateFileInCanvas,
+  onProjectTreeInternalDrop,
+  onProjectTreeExternalDrop,
+  onCreateRootFile,
   desktopPlatform,
   onKeyboardFileCommand
 }: {
@@ -110,6 +115,18 @@ export function FloatingPanelContent({
   onEditSubmit?: (() => void) | undefined;
   onEditCancel?: (() => void) | undefined;
   onClearCut?: (() => void) | undefined;
+  onExplorerSelectionChange: (selection: WorkbenchState['explorerSelection']) => void;
+  onLocateFileInCanvas?: ((projectRelativePath: string) => void) | undefined;
+  onProjectTreeInternalDrop?: ((input: {
+    entries: Array<{ projectRelativePath: string; kind: 'file' | 'directory' }>;
+    targetDirectoryProjectRelativePath: string;
+    operation: 'copy' | 'move';
+  }) => void) | undefined;
+  onProjectTreeExternalDrop?: ((input: {
+    dataTransfer: DataTransfer;
+    targetDirectoryProjectRelativePath: string;
+  }) => void) | undefined;
+  onCreateRootFile?: (() => void) | undefined;
   desktopPlatform?: NodeJS.Platform | undefined;
   onKeyboardFileCommand?: ((command: ProjectTreeFileKeyboardCommand, target: WorkbenchContextMenuTarget) => void) | undefined;
 }): React.ReactElement {
@@ -117,11 +134,15 @@ export function FloatingPanelContent({
     return (
       <ProjectTree
         snapshot={state.snapshot}
-        selectedPath={state.explorerSelection}
-        cutPath={fileClipboard?.operation === 'cut' ? fileClipboard.projectRelativePath : undefined}
+        selection={state.explorerSelection}
+        cutPaths={fileClipboard?.operation === 'cut' ? fileClipboard.entries.map((entry) => entry.projectRelativePath) : []}
         editing={inlineProjectTreeEdit}
-        actions={actions}
+        onSelectionChange={onExplorerSelectionChange}
+        onLocateFileInCanvas={onLocateFileInCanvas}
+        onInternalDrop={onProjectTreeInternalDrop}
+        onExternalDrop={onProjectTreeExternalDrop}
         onOpenContextMenu={onOpenContextMenu}
+        onCreateRootFile={onCreateRootFile}
         onEditValueChange={onEditValueChange}
         onEditSubmit={onEditSubmit}
         onEditCancel={onEditCancel}

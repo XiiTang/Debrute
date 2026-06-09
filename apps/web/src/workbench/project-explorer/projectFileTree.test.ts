@@ -75,17 +75,16 @@ describe('project file tree', () => {
     ]);
   });
 
-  it('expands root directories and selected path ancestors', () => {
+  it('expands selected path ancestors', () => {
     const tree = buildProjectFileTree([
       { kind: 'file', projectRelativePath: 'assets/pages/page-1.png' },
       { kind: 'file', projectRelativePath: 'assets/references/ref.png' },
       { kind: 'file', projectRelativePath: 'rules/main.md' }
     ]);
 
-    expect([...expandedProjectTreePaths(tree, 'assets/pages/page-1.png')].sort()).toEqual([
+    expect([...expandedProjectTreePaths(tree, ['assets/pages/page-1.png'])].sort()).toEqual([
       'assets',
-      'assets/pages',
-      'rules'
+      'assets/pages'
     ]);
   });
 

@@ -1,5 +1,9 @@
 import { stat } from 'node:fs/promises';
-import type { ProjectFileOperationResult, ProjectSessionSnapshot } from '@debrute/app-protocol';
+import type {
+  ProjectFileBatchOperationResult,
+  ProjectSessionSnapshot,
+  WorkbenchProjectPathEntry
+} from '@debrute/app-protocol';
 import { resolveExistingProjectPath } from '@debrute/project-core';
 import type { DebruteNativeShell } from './nativeShell.js';
 
@@ -11,12 +15,19 @@ export interface ProjectNativePathInput {
   kind: ProjectNativePathKind;
 }
 
-export async function copyProjectAbsolutePath(
-  input: ProjectNativePathInput
-): Promise<{ absolutePath: string }> {
-  return {
-    absolutePath: await resolveProjectNativePath(input)
-  };
+export async function copyProjectAbsolutePaths(input: {
+  projectRoot: string;
+  entries: WorkbenchProjectPathEntry[];
+}): Promise<{ paths: string[] }> {
+  const paths: string[] = [];
+  for (const entry of input.entries) {
+    paths.push(await resolveProjectNativePath({
+      projectRoot: input.projectRoot,
+      projectRelativePath: entry.projectRelativePath,
+      kind: entry.kind
+    }));
+  }
+  return { paths };
 }
 
 export async function revealProjectPathInSystemFileManager(
@@ -31,17 +42,30 @@ export async function revealProjectPathInSystemFileManager(
   return { ok: true };
 }
 
-export async function trashProjectPathWithNativeShell(
-  input: ProjectNativePathInput & {
-    nativeShell: DebruteNativeShell;
-    refreshProject(): Promise<ProjectSessionSnapshot>;
+export async function trashProjectPathsWithNativeShell(input: {
+  projectRoot: string;
+  entries: WorkbenchProjectPathEntry[];
+  nativeShell: DebruteNativeShell;
+  refreshProject(): Promise<ProjectSessionSnapshot>;
+}): Promise<ProjectFileBatchOperationResult> {
+  const entries = topLevelProjectPathEntries(input.entries);
+  const results: ProjectFileBatchOperationResult['results'] = [];
+  for (const entry of entries) {
+    const absolutePath = await resolveProjectNativePath({
+      projectRoot: input.projectRoot,
+      projectRelativePath: entry.projectRelativePath,
+      kind: entry.kind
+    });
+    await input.nativeShell.trashItem(absolutePath);
+    results.push({
+      sourceProjectRelativePath: entry.projectRelativePath,
+      projectRelativePath: entry.projectRelativePath,
+      kind: entry.kind,
+      status: 'ok'
+    });
   }
-): Promise<ProjectFileOperationResult> {
-  const absolutePath = await resolveProjectNativePath(input);
-  await input.nativeShell.trashItem(absolutePath);
   return {
-    projectRelativePath: input.projectRelativePath,
-    kind: input.kind,
+    results,
     snapshot: await input.refreshProject()
   };
 }
@@ -56,4 +80,24 @@ export async function resolveProjectNativePath(input: ProjectNativePathInput): P
     throw new Error('Resolved project path is not a directory.');
   }
   return absolutePath;
+}
+
+function topLevelProjectPathEntries(entries: WorkbenchProjectPathEntry[]): WorkbenchProjectPathEntry[] {
+  const result: WorkbenchProjectPathEntry[] = [];
+  for (const entry of entries) {
+    if (result.some((candidate) => isSameOrChildProjectPath(entry.projectRelativePath, candidate.projectRelativePath))) {
+      continue;
+    }
+    for (let index = result.length - 1; index >= 0; index -= 1) {
+      if (isSameOrChildProjectPath(result[index]!.projectRelativePath, entry.projectRelativePath)) {
+        result.splice(index, 1);
+      }
+    }
+    result.push(entry);
+  }
+  return result;
+}
+
+function isSameOrChildProjectPath(projectRelativePath: string, parentPath: string): boolean {
+  return projectRelativePath === parentPath || projectRelativePath.startsWith(`${parentPath}/`);
 }

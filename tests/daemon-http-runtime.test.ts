@@ -1,4 +1,4 @@
-import { mkdir, mkdtemp, readFile, realpath, rm, symlink, writeFile } from 'node:fs/promises';
+import { mkdir, mkdtemp, readFile, realpath, rm, stat, symlink, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, describe, expect, it, vi } from 'vitest';
@@ -240,26 +240,34 @@ describe('daemon HTTP runtime', () => {
       body: JSON.stringify({ projectRoot })
     });
 
-    const rejectedCopy = await fetch(`${runtime.daemonUrl}/api/projects/${opened.projectId}/files/path/briefs/outline.md/copy-path`, {
+    const rejectedCopy = await fetch(`${runtime.daemonUrl}/api/projects/${opened.projectId}/files/path/batch/copy-path`, {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({ kind: 'file' })
+      body: JSON.stringify({ entries: [{ projectRelativePath: 'briefs/outline.md', kind: 'file' }] })
     });
     expect(rejectedCopy.status).toBe(403);
 
     const canonicalProjectRoot = await realpath(projectRoot);
-    await expect(requestJson<{ absolutePath: string }>(
-      `${runtime.daemonUrl}/api/projects/${opened.projectId}/files/path/briefs/outline.md/copy-path`,
+    await expect(requestJson<{ paths: string[] }>(
+      `${runtime.daemonUrl}/api/projects/${opened.projectId}/files/path/batch/copy-path`,
       {
         method: 'POST',
         headers: {
           'content-type': 'application/json',
           'x-debrute-daemon-token': runtime.token
         },
-        body: JSON.stringify({ kind: 'file' })
+        body: JSON.stringify({
+          entries: [
+            { projectRelativePath: 'briefs/outline.md', kind: 'file' },
+            { projectRelativePath: 'briefs', kind: 'directory' }
+          ]
+        })
       }
     )).resolves.toEqual({
-      absolutePath: join(canonicalProjectRoot, 'briefs/outline.md')
+      paths: [
+        join(canonicalProjectRoot, 'briefs/outline.md'),
+        join(canonicalProjectRoot, 'briefs')
+      ]
     });
 
     await expect(requestJson(
@@ -276,27 +284,31 @@ describe('daemon HTTP runtime', () => {
     expect(nativeShell.showItemInFolder).toHaveBeenCalledWith(join(canonicalProjectRoot, 'briefs/outline.md'));
 
     const trashResult = await requestJson<{
-      projectRelativePath: string;
+      results: Array<{ projectRelativePath: string; kind: 'file' | 'directory'; status: string }>;
       snapshot: { files: Array<{ projectRelativePath: string }> };
     }>(
-      `${runtime.daemonUrl}/api/projects/${opened.projectId}/files/path/briefs/outline.md/trash`,
+      `${runtime.daemonUrl}/api/projects/${opened.projectId}/files/path/batch/trash`,
       {
         method: 'POST',
         headers: {
           'content-type': 'application/json',
           'x-debrute-daemon-token': runtime.token
         },
-        body: JSON.stringify({ kind: 'file' })
+        body: JSON.stringify({ entries: [{ projectRelativePath: 'briefs/outline.md', kind: 'file' }] })
       }
     );
-    expect(trashResult.projectRelativePath).toBe('briefs/outline.md');
+    expect(trashResult.results).toMatchObject([
+      { projectRelativePath: 'briefs/outline.md', kind: 'file', status: 'ok' }
+    ]);
     expect(JSON.stringify(trashResult)).not.toContain(projectRoot);
     expect(nativeShell.trashItem).toHaveBeenCalledWith(join(canonicalProjectRoot, 'briefs/outline.md'));
   });
 
-  it('keeps generic project path routes available when filenames match native operation suffixes', async () => {
-    const projectRoot = await mkdtemp(join(tmpdir(), 'debrute-daemon-native-suffix-name-'));
-    await writeFile(join(projectRoot, 'trash'), 'remove me', 'utf8');
+  it('serves batch project file operation routes', async () => {
+    const projectRoot = await mkdtemp(join(tmpdir(), 'debrute-daemon-batch-file-ops-'));
+    await mkdir(join(projectRoot, 'briefs'), { recursive: true });
+    await writeFile(join(projectRoot, 'briefs/outline.md'), '# Outline', 'utf8');
+    await writeFile(join(projectRoot, 'cover.png'), 'cover', 'utf8');
 
     const daemon = createDebruteDaemonHttpServer({
       host: '127.0.0.1',
@@ -313,18 +325,218 @@ describe('daemon HTTP runtime', () => {
       },
       body: JSON.stringify({ projectRoot })
     });
+    const headers = {
+      'content-type': 'application/json',
+      'x-debrute-daemon-token': runtime.token
+    };
 
-    await expect(requestJson<{ projectRelativePath: string }>(
-      `${runtime.daemonUrl}/api/projects/${opened.projectId}/files/path/trash`,
-      {
-        method: 'DELETE',
-        headers: {
-          'x-debrute-daemon-token': runtime.token
-        }
-      }
-    )).resolves.toMatchObject({
-      projectRelativePath: 'trash'
+    const copied = await requestJson<{
+      results: Array<{ projectRelativePath: string; status: string }>;
+      snapshot: { files: Array<{ projectRelativePath: string }> };
+    }>(`${runtime.daemonUrl}/api/projects/${opened.projectId}/files/batch/copy`, {
+      method: 'POST',
+      headers,
+      body: JSON.stringify({
+        entries: [{ projectRelativePath: 'cover.png', kind: 'file' }],
+        targetDirectoryProjectRelativePath: 'briefs'
+      })
     });
+    expect(copied.results).toMatchObject([
+      { projectRelativePath: 'briefs/cover.png', status: 'ok' }
+    ]);
+    expect(JSON.stringify(copied)).not.toContain(projectRoot);
+
+    const moved = await requestJson<{
+      results: Array<{ projectRelativePath: string; status: string }>;
+      snapshot: { files: Array<{ projectRelativePath: string }> };
+    }>(`${runtime.daemonUrl}/api/projects/${opened.projectId}/files/batch/move`, {
+      method: 'POST',
+      headers,
+      body: JSON.stringify({
+        entries: [{ projectRelativePath: 'briefs/cover.png', kind: 'file' }],
+        targetDirectoryProjectRelativePath: '',
+        overwrite: true
+      })
+    });
+    expect(moved.results).toMatchObject([
+      { projectRelativePath: 'cover.png', status: 'ok' }
+    ]);
+
+    const deleted = await requestJson<{
+      results: Array<{ projectRelativePath: string; status: string }>;
+      snapshot: { files: Array<{ projectRelativePath: string }> };
+    }>(`${runtime.daemonUrl}/api/projects/${opened.projectId}/files/batch/delete-permanently`, {
+      method: 'POST',
+      headers,
+      body: JSON.stringify({
+        entries: [{ projectRelativePath: 'cover.png', kind: 'file' }]
+      })
+    });
+    expect(deleted.results).toMatchObject([
+      { projectRelativePath: 'cover.png', status: 'ok' }
+    ]);
+    expect(deleted.snapshot.files.map((file) => file.projectRelativePath)).not.toContain('cover.png');
+  });
+
+  it('serves external import routes for local paths and browser uploads', async () => {
+    const projectRoot = await mkdtemp(join(tmpdir(), 'debrute-daemon-external-import-'));
+    const externalRoot = await mkdtemp(join(tmpdir(), 'debrute-daemon-external-source-'));
+    await mkdir(join(projectRoot, 'assets'), { recursive: true });
+    await writeFile(join(externalRoot, 'cover.png'), 'cover', 'utf8');
+
+    const daemon = createDebruteDaemonHttpServer({
+      host: '127.0.0.1',
+      port: 0,
+      token: 'secret'
+    });
+    cleanups.push(
+      () => daemon.close(),
+      () => rm(projectRoot, { recursive: true, force: true }),
+      () => rm(externalRoot, { recursive: true, force: true })
+    );
+    const runtime = await daemon.listen();
+    const opened = await requestJson<{ projectId: string }>(`${runtime.daemonUrl}/api/projects/open`, {
+      method: 'POST',
+      headers: {
+        'content-type': 'application/json',
+        'x-debrute-daemon-token': runtime.token
+      },
+      body: JSON.stringify({ projectRoot })
+    });
+
+    const localImport = await requestJson<{
+      results: Array<{ projectRelativePath: string; status: string }>;
+      snapshot: { files: Array<{ projectRelativePath: string }> };
+    }>(`${runtime.daemonUrl}/api/projects/${opened.projectId}/files/import/local`, {
+      method: 'POST',
+      headers: {
+        'content-type': 'application/json',
+        'x-debrute-daemon-token': runtime.token
+      },
+      body: JSON.stringify({
+        sources: [join(externalRoot, 'cover.png')],
+        targetDirectoryProjectRelativePath: 'assets'
+      })
+    });
+    expect(localImport.results).toMatchObject([
+      { projectRelativePath: 'assets/cover.png', status: 'ok' }
+    ]);
+    expect(JSON.stringify(localImport)).not.toContain(projectRoot);
+
+    const uploadForm = new FormData();
+    uploadForm.append('plan', JSON.stringify({
+      targetDirectoryProjectRelativePath: 'assets',
+      entries: [
+        { kind: 'directory', projectRelativePath: 'assets/pages' },
+        { kind: 'file', projectRelativePath: 'assets/pages/page.png', fileField: 'file:1' }
+      ]
+    }));
+    uploadForm.append('file:1', new File(['page'], 'page.png'));
+    const upload = await requestJson<{
+      results: Array<{ projectRelativePath: string; status: string }>;
+      snapshot: { files: Array<{ projectRelativePath: string }> };
+    }>(`${runtime.daemonUrl}/api/projects/${opened.projectId}/files/import/uploads`, {
+      method: 'POST',
+      headers: {
+        'x-debrute-daemon-token': runtime.token
+      },
+      body: uploadForm
+    });
+    expect(upload.results).toMatchObject([
+      { projectRelativePath: 'assets/pages', status: 'ok' },
+      { projectRelativePath: 'assets/pages/page.png', status: 'ok' }
+    ]);
+    await expect(readFile(join(projectRoot, 'assets/pages/page.png'), 'utf8')).resolves.toBe('page');
+  });
+
+  it('streams browser upload request bodies beyond the previous 100MB limit', async () => {
+    const projectRoot = await mkdtemp(join(tmpdir(), 'debrute-daemon-upload-stream-'));
+    await mkdir(join(projectRoot, 'assets'), { recursive: true });
+    const daemon = createDebruteDaemonHttpServer({
+      host: '127.0.0.1',
+      port: 0,
+      token: 'secret'
+    });
+    cleanups.push(
+      () => daemon.close(),
+      () => rm(projectRoot, { recursive: true, force: true })
+    );
+    const runtime = await daemon.listen();
+    const opened = await requestJson<{ projectId: string }>(`${runtime.daemonUrl}/api/projects/open`, {
+      method: 'POST',
+      headers: {
+        'content-type': 'application/json',
+        'x-debrute-daemon-token': runtime.token
+      },
+      body: JSON.stringify({ projectRoot })
+    });
+
+    const byteLength = 100 * 1024 * 1024 + 1;
+    const uploadForm = new FormData();
+    uploadForm.append('plan', JSON.stringify({
+      targetDirectoryProjectRelativePath: 'assets',
+      entries: [{ kind: 'file', projectRelativePath: 'assets/large.bin', fileField: 'file:0' }]
+    }));
+    uploadForm.append('file:0', new File([new Uint8Array(byteLength)], 'large.bin'));
+    const response = await fetch(`${runtime.daemonUrl}/api/projects/${opened.projectId}/files/import/uploads`, {
+      method: 'POST',
+      headers: {
+        'x-debrute-daemon-token': runtime.token
+      },
+      body: uploadForm
+    });
+
+    expect(response.status).toBe(200);
+    const upload = await response.json() as { results: Array<{ projectRelativePath: string; kind: 'file' }> };
+    expect(upload.results).toMatchObject([{ projectRelativePath: 'assets/large.bin', kind: 'file' }]);
+    await expect(stat(join(projectRoot, 'assets/large.bin')).then((fileStat) => fileStat.size)).resolves.toBe(byteLength);
+  });
+
+  it('does not parse upload bodies through Request.formData buffering', async () => {
+    const projectRoot = await mkdtemp(join(tmpdir(), 'debrute-daemon-upload-no-formdata-'));
+    await mkdir(join(projectRoot, 'assets'), { recursive: true });
+    const daemon = createDebruteDaemonHttpServer({
+      host: '127.0.0.1',
+      port: 0,
+      token: 'secret'
+    });
+    const originalFormData = Request.prototype.formData;
+    Request.prototype.formData = async function blockedFormData(): Promise<FormData> {
+      throw new Error('Request.formData must not be used for upload imports.');
+    };
+    cleanups.push(
+      () => {
+        Request.prototype.formData = originalFormData;
+      },
+      () => daemon.close(),
+      () => rm(projectRoot, { recursive: true, force: true })
+    );
+    const runtime = await daemon.listen();
+    const opened = await requestJson<{ projectId: string }>(`${runtime.daemonUrl}/api/projects/open`, {
+      method: 'POST',
+      headers: {
+        'content-type': 'application/json',
+        'x-debrute-daemon-token': runtime.token
+      },
+      body: JSON.stringify({ projectRoot })
+    });
+
+    const uploadForm = new FormData();
+    uploadForm.append('plan', JSON.stringify({
+      targetDirectoryProjectRelativePath: 'assets',
+      entries: [{ kind: 'file', projectRelativePath: 'assets/page.png', fileField: 'file:0' }]
+    }));
+    uploadForm.append('file:0', new File(['page'], 'page.png'));
+    const response = await fetch(`${runtime.daemonUrl}/api/projects/${opened.projectId}/files/import/uploads`, {
+      method: 'POST',
+      headers: {
+        'x-debrute-daemon-token': runtime.token
+      },
+      body: uploadForm
+    });
+
+    expect(response.status).toBe(200);
+    await expect(readFile(join(projectRoot, 'assets/page.png'), 'utf8')).resolves.toBe('page');
   });
 
   it('honors project ids on project-scoped routes', async () => {

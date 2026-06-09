@@ -1,3 +1,4 @@
+import type { WorkbenchProjectFileBatchOperationResult } from '@debrute/app-protocol';
 import type { CanvasSelection } from '../canvas/runtime/canvasSelection';
 import type { WorkbenchFileClipboard } from '../shell/contextMenu';
 
@@ -12,9 +13,17 @@ export function clearClipboardAfterDeletedPath(
   if (!clipboard) {
     return undefined;
   }
-  return isProjectPathContainedByDeletedPath(clipboard.projectRelativePath, deletedProjectRelativePath)
-    ? undefined
-    : clipboard;
+  const entries = clipboard.entries.filter((entry) => !isProjectPathContainedByDeletedPath(entry.projectRelativePath, deletedProjectRelativePath));
+  if (entries.length === clipboard.entries.length) {
+    return clipboard;
+  }
+  return entries.length > 0 ? { ...clipboard, entries } : undefined;
+}
+
+export function batchResultSelectionPaths(results: WorkbenchProjectFileBatchOperationResult['results']): string[] {
+  return results
+    .filter((result) => result.status === 'ok' || result.status === 'skipped')
+    .map((result) => result.projectRelativePath);
 }
 
 export function nearestExistingParentSelection(
@@ -58,6 +67,15 @@ export function permanentDeleteConfirmationMessage(input: {
   kind: 'file' | 'directory';
 }): string {
   return `Permanently delete ${input.kind} "${input.projectRelativePath}"? This cannot be undone.`;
+}
+
+export function permanentDeleteConfirmationMessageForEntries(input: {
+  entries: Array<{ projectRelativePath: string; kind: 'file' | 'directory' }>;
+}): string {
+  if (input.entries.length === 1) {
+    return permanentDeleteConfirmationMessage(input.entries[0]!);
+  }
+  return `Permanently delete ${input.entries.length} selected items? This cannot be undone.`;
 }
 
 function isDeletedNodeSelection(

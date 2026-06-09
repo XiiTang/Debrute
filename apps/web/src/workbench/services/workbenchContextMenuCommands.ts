@@ -1,3 +1,4 @@
+import type { WorkbenchProjectSessionSnapshot } from '@debrute/app-protocol';
 import type { CanvasProjection } from '@debrute/canvas-core';
 import type { WorkbenchActions } from '../../types';
 import type { CanvasEditorRuntime } from '../canvas/runtime/CanvasEditorRuntime';
@@ -6,16 +7,21 @@ import {
   projectTreePasteTargetDirectory,
   type ProjectTreeInlineEditState
 } from '../project-explorer/projectTreeEditing';
+import { projectTreeBatchMoveHasConflict } from '../project-explorer/projectTreeInteraction';
 import {
   clearClipboardAfterPaste,
   notificationMessageForFileCommandError
 } from '../project-explorer/workbenchFileCommands';
 import {
   cameraCenteredOnNode,
+  explorerContextMenuEntries,
+  explorerContextMenuPrimaryEntry,
+  explorerContextMenuProjectRelativePaths,
   projectedContextMenuNode,
   type WorkbenchContextMenuCommand,
   type WorkbenchContextMenuPosition,
   type WorkbenchContextMenuTarget,
+  type WorkbenchProjectPathEntry,
   type WorkbenchFileClipboard
 } from '../shell/contextMenu';
 
@@ -34,18 +40,27 @@ export function runWorkbenchContextMenuCommand(input: {
   notify: (message: string) => void;
   closeContextMenu: () => void;
   openInspectorPanel: () => void;
-  confirmPermanentDelete: (input: { projectRelativePath: string; kind: WorkbenchContextMenuTarget['kind'] }) => boolean;
+  confirmPermanentDelete: (input: { entries: WorkbenchProjectPathEntry[] }) => boolean;
+  projectSnapshot?: WorkbenchProjectSessionSnapshot | undefined;
+  confirmMoveOverwrite: (input: {
+    entries: WorkbenchProjectPathEntry[];
+    targetDirectoryProjectRelativePath: string;
+  }) => boolean;
 }): void {
   const target = input.contextMenu?.target;
   if (!target) {
     return;
   }
-  const projectRelativePath = target.projectRelativePath;
 
-  if (target.source === 'explorer' && runExplorerCommand(input, target, projectRelativePath)) {
+  if (target.source === 'explorer') {
+    if (runExplorerCommand(input, target)) {
+      return;
+    }
+    input.closeContextMenu();
     return;
   }
 
+  const projectRelativePath = target.projectRelativePath;
   if (input.command === 'copy-relative-path') {
     void input.copyText(projectRelativePath);
     input.closeContextMenu();
@@ -78,9 +93,18 @@ export function runWorkbenchContextMenuCommand(input: {
 
 function runExplorerCommand(
   input: Parameters<typeof runWorkbenchContextMenuCommand>[0],
-  target: WorkbenchContextMenuTarget,
-  projectRelativePath: string
+  target: Extract<WorkbenchContextMenuTarget, { source: 'explorer' }>
 ): boolean {
+  const entries = explorerContextMenuEntries(target);
+  const primaryEntry = explorerContextMenuPrimaryEntry(target);
+  if (
+    target.targetKind === 'root'
+    && input.command !== 'create-file'
+    && input.command !== 'create-directory'
+    && input.command !== 'paste'
+  ) {
+    return false;
+  }
   if (input.command === 'create-file') {
     input.setInlineProjectTreeEdit(createInlineEditState('creating-file', projectTreePasteTargetDirectory(target)));
     input.closeContextMenu();
@@ -92,17 +116,19 @@ function runExplorerCommand(
     return true;
   }
   if (input.command === 'rename') {
-    input.setInlineProjectTreeEdit(createInlineEditState('renaming', projectRelativePath));
+    if (primaryEntry && entries.length === 1) {
+      input.setInlineProjectTreeEdit(createInlineEditState('renaming', primaryEntry.projectRelativePath));
+    }
     input.closeContextMenu();
     return true;
   }
   if (input.command === 'cut') {
-    input.setFileClipboard({ operation: 'cut', projectRelativePath, kind: target.kind });
+    input.setFileClipboard({ operation: 'cut', entries });
     input.closeContextMenu();
     return true;
   }
   if (input.command === 'copy') {
-    input.setFileClipboard({ operation: 'copy', projectRelativePath, kind: target.kind });
+    input.setFileClipboard({ operation: 'copy', entries });
     input.closeContextMenu();
     return true;
   }
@@ -112,35 +138,37 @@ function runExplorerCommand(
     return true;
   }
   if (input.command === 'copy-path') {
-    void input.actions.copyProjectAbsolutePath({ projectRelativePath, kind: target.kind })
-      .then((result) => input.copyText(result.absolutePath))
+    void input.actions.copyProjectAbsolutePaths({ entries })
+      .then((result) => input.copyText(result.paths.join('\n')))
       .catch((error) => input.notify(notificationMessageForFileCommandError('Copy Path failed', error)));
     input.closeContextMenu();
     return true;
   }
   if (input.command === 'copy-relative-path') {
-    void input.copyText(projectRelativePath);
+    void input.copyText(explorerContextMenuProjectRelativePaths(target).join('\n'));
     input.closeContextMenu();
     return true;
   }
   if (input.command === 'reveal-in-system-file-manager') {
-    void input.actions.revealProjectPathInSystemFileManager({ projectRelativePath, kind: target.kind })
-      .catch((error) => input.notify(notificationMessageForFileCommandError('Reveal failed', error)));
+    if (primaryEntry) {
+      void input.actions.revealProjectPathInSystemFileManager(primaryEntry)
+        .catch((error) => input.notify(notificationMessageForFileCommandError('Reveal failed', error)));
+    }
     input.closeContextMenu();
     return true;
   }
   if (input.command === 'delete') {
-    void input.actions.trashProjectPath({ projectRelativePath, kind: target.kind })
+    void input.actions.trashProjectPaths({ entries })
       .catch((error) => input.notify(notificationMessageForFileCommandError('Delete failed', error)));
     input.closeContextMenu();
     return true;
   }
   if (input.command === 'delete-permanently') {
-    if (!input.confirmPermanentDelete({ projectRelativePath, kind: target.kind })) {
+    if (!input.confirmPermanentDelete({ entries })) {
       input.closeContextMenu();
       return true;
     }
-    void input.actions.deleteProjectPathPermanently({ projectRelativePath })
+    void input.actions.deleteProjectPathsPermanently({ entries })
       .catch((error) => input.notify(notificationMessageForFileCommandError('Delete failed', error)));
     input.closeContextMenu();
     return true;
@@ -153,15 +181,36 @@ function runPasteCommand(
   target: WorkbenchContextMenuTarget
 ): void {
   const fileClipboard = input.fileClipboard;
-  if (!fileClipboard) {
+  if (!fileClipboard || fileClipboard.entries.length === 0) {
     return;
   }
-  const paste = fileClipboard.operation === 'cut'
-    ? input.actions.moveProjectPath
-    : input.actions.copyProjectPath;
-  void paste({
-    sourceProjectRelativePath: fileClipboard.projectRelativePath,
-    targetDirectoryProjectRelativePath: projectTreePasteTargetDirectory(target)
+  const targetDirectoryProjectRelativePath = projectTreePasteTargetDirectory(target);
+  if (fileClipboard.operation === 'cut') {
+    const overwrite = input.projectSnapshot && projectTreeBatchMoveHasConflict({
+      existingProjectRelativePaths: new Set(input.projectSnapshot.files.map((file) => file.projectRelativePath)),
+      entries: fileClipboard.entries,
+      targetDirectoryProjectRelativePath
+    });
+    if (overwrite && !input.confirmMoveOverwrite({
+      entries: fileClipboard.entries,
+      targetDirectoryProjectRelativePath
+    })) {
+      return;
+    }
+    void input.actions.moveProjectPaths({
+      entries: fileClipboard.entries,
+      targetDirectoryProjectRelativePath,
+      ...(overwrite ? { overwrite: true } : {})
+    }).then(() => {
+      input.setFileClipboard(clearClipboardAfterPaste(fileClipboard));
+    }).catch((error) => {
+      input.notify(notificationMessageForFileCommandError('Paste failed', error));
+    });
+    return;
+  }
+  void input.actions.copyProjectPaths({
+    entries: fileClipboard.entries,
+    targetDirectoryProjectRelativePath
   }).then(() => {
     input.setFileClipboard(clearClipboardAfterPaste(fileClipboard));
   }).catch((error) => {

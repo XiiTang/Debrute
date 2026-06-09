@@ -93,7 +93,7 @@ describe('HTTP workbench API client', () => {
     }
   });
 
-  it('uses the daemon route to copy absolute project paths', async () => {
+  it('uses the daemon route to copy absolute project path batches', async () => {
     const requests: Array<{ method: string; path: string; body?: unknown }> = [];
     const client = createHttpWorkbenchApiClient({
       daemonUrl: 'http://127.0.0.1:17456/',
@@ -110,21 +110,28 @@ describe('HTTP workbench API client', () => {
     });
 
     await client.openProject({ projectRoot: '/tmp/project' });
-    await expect(client.copyProjectAbsolutePath({
-      projectRelativePath: 'briefs/outline.md',
-      kind: 'file'
+    await expect(client.copyProjectAbsolutePaths({
+      entries: [
+        { projectRelativePath: 'briefs/outline.md', kind: 'file' },
+        { projectRelativePath: 'assets', kind: 'directory' }
+      ]
     })).resolves.toEqual({
-      absolutePath: '/tmp/project/briefs/outline.md'
+      paths: ['/tmp/project/briefs/outline.md', '/tmp/project/assets']
     });
 
     expect(requests).toContainEqual({
       method: 'POST',
-      path: `/api/projects/${projectId}/files/path/briefs/outline.md/copy-path`,
-      body: { kind: 'file' }
+      path: `/api/projects/${projectId}/files/path/batch/copy-path`,
+      body: {
+        entries: [
+          { projectRelativePath: 'briefs/outline.md', kind: 'file' },
+          { projectRelativePath: 'assets', kind: 'directory' }
+        ]
+      }
     });
   });
 
-  it('uses daemon native routes for reveal and trash', async () => {
+  it('uses daemon native routes for reveal and batch trash', async () => {
     const requests: Array<{ method: string; path: string; body?: unknown }> = [];
     const client = createHttpWorkbenchApiClient({
       daemonUrl: 'http://127.0.0.1:17456/',
@@ -145,11 +152,10 @@ describe('HTTP workbench API client', () => {
       projectRelativePath: 'briefs/outline.md',
       kind: 'file'
     })).resolves.toEqual({ ok: true });
-    await expect(client.trashProjectPath({
-      projectRelativePath: 'assets/cover.png',
-      kind: 'file'
+    await expect(client.trashProjectPaths({
+      entries: [{ projectRelativePath: 'assets/cover.png', kind: 'file' }]
     })).resolves.toMatchObject({
-      projectRelativePath: 'assets/cover.png',
+      results: [{ projectRelativePath: 'assets/cover.png', kind: 'file', status: 'ok' }],
       snapshot: { metadata: { name: 'Test Project' } }
     });
 
@@ -160,8 +166,79 @@ describe('HTTP workbench API client', () => {
     });
     expect(requests).toContainEqual({
       method: 'POST',
-      path: `/api/projects/${projectId}/files/path/assets/cover.png/trash`,
-      body: { kind: 'file' }
+      path: `/api/projects/${projectId}/files/path/batch/trash`,
+      body: { entries: [{ projectRelativePath: 'assets/cover.png', kind: 'file' }] }
+    });
+  });
+
+  it('uses daemon import routes for external local paths and browser uploads', async () => {
+    const requests: Array<{ method: string; path: string; body?: unknown }> = [];
+    const uploadBody = new File(['page'], 'page.png');
+    const client = createHttpWorkbenchApiClient({
+      daemonUrl: 'http://127.0.0.1:17456/',
+      token: 'secret',
+      fetch: async (url, init) => {
+        const parsed = new URL(String(url));
+        requests.push({
+          method: init?.method ?? 'GET',
+          path: parsed.pathname,
+          body: init?.body instanceof FormData
+            ? formDataSummary(init.body)
+            : init?.body instanceof ArrayBuffer || init?.body instanceof Uint8Array
+            ? '<bytes>'
+            : init?.body
+              ? JSON.parse(String(init.body))
+              : undefined
+        });
+        return jsonResponse(routeResponse(String(url), init));
+      }
+    });
+
+    await client.openProject({ projectRoot: '/tmp/project' });
+    await expect(client.importExternalLocalProjectPaths({
+      sources: ['/external/cover.png'],
+      targetDirectoryProjectRelativePath: 'assets',
+      overwrite: true
+    })).resolves.toMatchObject({
+      results: [{ projectRelativePath: 'assets/cover.png', kind: 'file', status: 'ok' }]
+    });
+    await expect(client.importExternalProjectUploads({
+      targetDirectoryProjectRelativePath: 'assets',
+      entries: [
+        { kind: 'directory', projectRelativePath: 'assets/pages' },
+        { kind: 'file', projectRelativePath: 'assets/pages/page.png', file: uploadBody }
+      ],
+      overwrite: true
+    })).resolves.toMatchObject({
+      results: [
+        { projectRelativePath: 'assets/pages', kind: 'directory', status: 'ok' },
+        { projectRelativePath: 'assets/pages/page.png', kind: 'file', status: 'ok' }
+      ]
+    });
+
+    expect(requests).toContainEqual({
+      method: 'POST',
+      path: `/api/projects/${projectId}/files/import/local`,
+      body: {
+        sources: ['/external/cover.png'],
+        targetDirectoryProjectRelativePath: 'assets',
+        overwrite: true
+      }
+    });
+    expect(requests).toContainEqual({
+      method: 'POST',
+      path: `/api/projects/${projectId}/files/import/uploads`,
+      body: {
+        plan: {
+          targetDirectoryProjectRelativePath: 'assets',
+          overwrite: true,
+          entries: [
+            { kind: 'directory', projectRelativePath: 'assets/pages' },
+            { kind: 'file', projectRelativePath: 'assets/pages/page.png', fileField: 'file:1' }
+          ]
+        },
+        files: [{ field: 'file:1', name: 'page.png', size: 4 }]
+      }
     });
   });
 
@@ -187,6 +264,17 @@ describe('HTTP workbench API client', () => {
   });
 });
 
+function formDataSummary(formData: FormData): unknown {
+  const plan = JSON.parse(String(formData.get('plan')));
+  const files = Array.from(formData.entries())
+    .filter(([field]) => field !== 'plan')
+    .map(([field, value]) => {
+      const file = value as File;
+      return { field, name: file.name, size: file.size };
+    });
+  return { plan, files };
+}
+
 function routeResponse(url: string, init?: RequestInit): unknown {
   const path = new URL(url).pathname;
   if (path === '/api/runtime') {
@@ -206,14 +294,32 @@ function routeResponse(url: string, init?: RequestInit): unknown {
   if (path === `/api/projects/${projectId}/refresh`) {
     return workbenchSnapshot();
   }
-  if (path === `/api/projects/${projectId}/files/path/briefs/outline.md/copy-path`) {
-    return { absolutePath: '/tmp/project/briefs/outline.md' };
+  if (path === `/api/projects/${projectId}/files/path/batch/copy-path`) {
+    return { paths: ['/tmp/project/briefs/outline.md', '/tmp/project/assets'] };
   }
   if (path === `/api/projects/${projectId}/files/path/briefs/outline.md/reveal`) {
     return { ok: true };
   }
-  if (path === `/api/projects/${projectId}/files/path/assets/cover.png/trash`) {
-    return { projectRelativePath: 'assets/cover.png', snapshot: workbenchSnapshot() };
+  if (path === `/api/projects/${projectId}/files/path/batch/trash`) {
+    return {
+      results: [{ sourceProjectRelativePath: 'assets/cover.png', projectRelativePath: 'assets/cover.png', kind: 'file', status: 'ok' }],
+      snapshot: workbenchSnapshot()
+    };
+  }
+  if (path === `/api/projects/${projectId}/files/import/local`) {
+    return {
+      results: [{ sourceProjectRelativePath: '/external/cover.png', projectRelativePath: 'assets/cover.png', kind: 'file', status: 'ok' }],
+      snapshot: workbenchSnapshot()
+    };
+  }
+  if (path === `/api/projects/${projectId}/files/import/uploads`) {
+    return {
+      results: [
+        { sourceProjectRelativePath: 'assets/pages', projectRelativePath: 'assets/pages', kind: 'directory', status: 'ok' },
+        { sourceProjectRelativePath: 'assets/pages/page.png', projectRelativePath: 'assets/pages/page.png', kind: 'file', status: 'ok' }
+      ],
+      snapshot: workbenchSnapshot()
+    };
   }
   if (path.endsWith('/files/text/briefs/outline.md') && (init?.method ?? 'GET') === 'GET') {
     return { projectRelativePath: 'briefs/outline.md', content: '# Outline', language: 'markdown', revision: 'rev' };

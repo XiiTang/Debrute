@@ -11,9 +11,12 @@ import {
   resolveProjectPath,
   watchProjectFiles,
   writeProjectTextFile,
-  type CopyOrMoveProjectPathInput,
+  type CopyProjectPathsInput,
   type CreateProjectPathInput,
-  type DeleteProjectPathInput,
+  type DeleteProjectPathsInput,
+  type ImportExternalLocalProjectPathsInput,
+  type ImportExternalUploadProjectEntriesInput,
+  type MoveProjectPathsInput,
   type NormalizedFileWatchEvent,
   type ProjectFileWatchHandle,
   type RenameProjectPathInput,
@@ -55,6 +58,7 @@ import {
 import { FlowmapError } from '@debrute/flowmap-core';
 import type {
   AppServerEvent,
+  ProjectFileBatchOperationResult,
   GeneratedAssetMetadataLookup,
   GeneratedAssetRecord,
   ProjectFileOperationResult,
@@ -88,11 +92,13 @@ import { CanvasSessionService } from '../canvas/CanvasSessionService.js';
 import { FlowmapSessionService } from '../flowmap/FlowmapSessionService.js';
 import { loadProjectSnapshot } from '../project-session/projectSnapshot.js';
 import {
-  copyProjectPathWithSnapshot,
+  copyProjectPathsWithSnapshot,
   createProjectDirectoryWithSnapshot,
   createProjectFileWithSnapshot,
-  deleteProjectPathPermanentlyWithSnapshot,
-  moveProjectPathWithSnapshot,
+  deleteProjectPathsPermanentlyWithSnapshot,
+  importExternalLocalProjectPathsWithSnapshot,
+  importExternalUploadProjectEntriesWithSnapshot,
+  moveProjectPathsWithSnapshot,
   renameProjectPathWithSnapshot
 } from '../project-session/projectFileOperations.js';
 import {
@@ -331,16 +337,24 @@ export class DebruteAppServer {
     return this.enqueueSessionOperation(() => renameProjectPathWithSnapshot(this.projectFileOperationContext(), input));
   }
 
-  async copyProjectPath(input: CopyOrMoveProjectPathInput): Promise<ProjectFileOperationResult> {
-    return this.enqueueSessionOperation(() => copyProjectPathWithSnapshot(this.projectFileOperationContext(), input));
+  async copyProjectPaths(input: CopyProjectPathsInput): Promise<ProjectFileBatchOperationResult> {
+    return this.enqueueSessionOperation(() => copyProjectPathsWithSnapshot(this.projectFileOperationContext(), input));
   }
 
-  async moveProjectPath(input: CopyOrMoveProjectPathInput): Promise<ProjectFileOperationResult> {
-    return this.enqueueSessionOperation(() => moveProjectPathWithSnapshot(this.projectFileOperationContext(), input));
+  async moveProjectPaths(input: MoveProjectPathsInput): Promise<ProjectFileBatchOperationResult> {
+    return this.enqueueSessionOperation(() => moveProjectPathsWithSnapshot(this.projectFileOperationContext(), input));
   }
 
-  async deleteProjectPathPermanently(input: DeleteProjectPathInput): Promise<ProjectFileOperationResult> {
-    return this.enqueueSessionOperation(() => deleteProjectPathPermanentlyWithSnapshot(this.projectFileOperationContext(), input));
+  async deleteProjectPathsPermanently(input: DeleteProjectPathsInput): Promise<ProjectFileBatchOperationResult> {
+    return this.enqueueSessionOperation(() => deleteProjectPathsPermanentlyWithSnapshot(this.projectFileOperationContext(), input));
+  }
+
+  async importExternalLocalProjectPaths(input: ImportExternalLocalProjectPathsInput): Promise<ProjectFileBatchOperationResult> {
+    return this.enqueueSessionOperation(() => importExternalLocalProjectPathsWithSnapshot(this.projectFileOperationContext(), input));
+  }
+
+  async importExternalUploadProjectEntries(input: ImportExternalUploadProjectEntriesInput): Promise<ProjectFileBatchOperationResult> {
+    return this.enqueueSessionOperation(() => importExternalUploadProjectEntriesWithSnapshot(this.projectFileOperationContext(), input));
   }
 
   async recordGeneratedAssetMetadata(input: RecordGeneratedAssetInput): Promise<GeneratedAssetRecord> {

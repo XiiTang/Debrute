@@ -1076,7 +1076,7 @@ function workbenchStateFixture(
         checkedAt: '2026-05-26T00:00:00.000Z'
       }
     },
-    explorerSelection: undefined,
+    explorerSelection: { selectedPaths: [], focusedPath: null, anchorPath: null },
     llmSettings: undefined,
     imageModelSettings: undefined,
     videoModelSettings: undefined,
@@ -1089,7 +1089,6 @@ function workbenchStateFixture(
 }
 
 const actions: WorkbenchActions = {
-  selectExplorerPath: () => undefined,
   saveLlmProviderSetting: async () => undefined,
   deleteLlmProviderSetting: async () => undefined,
   setDefaultLlmModelKey: async () => undefined,
@@ -1118,19 +1117,19 @@ const actions: WorkbenchActions = {
   renameProjectPath: async () => {
     throw new Error('not used');
   },
-  copyProjectPath: async () => {
+  copyProjectPaths: async () => {
     throw new Error('not used');
   },
-  moveProjectPath: async () => {
+  moveProjectPaths: async () => {
     throw new Error('not used');
   },
-  copyProjectAbsolutePath: async () => {
+  copyProjectAbsolutePaths: async () => {
     throw new Error('not used');
   },
-  trashProjectPath: async () => {
+  trashProjectPaths: async () => {
     throw new Error('not used');
   },
-  deleteProjectPathPermanently: async () => {
+  deleteProjectPathsPermanently: async () => {
     throw new Error('not used');
   },
   revealProjectPathInSystemFileManager: async () => {

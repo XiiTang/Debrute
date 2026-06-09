@@ -4,6 +4,7 @@ import { cameraCenteredOnCanvasPoint } from '../canvas/runtime/canvasCamera';
 
 export type WorkbenchContextMenuSource = 'canvas' | 'explorer';
 export type WorkbenchContextMenuTargetKind = 'file' | 'directory';
+export type WorkbenchExplorerContextMenuTargetKind = 'root' | 'item' | 'selection';
 
 export type WorkbenchContextMenuCommand =
   | 'show-details'
@@ -20,11 +21,34 @@ export type WorkbenchContextMenuCommand =
   | 'delete-permanently'
   | 'copy-relative-path';
 
-export interface WorkbenchContextMenuTarget {
-  source: WorkbenchContextMenuSource;
+export interface WorkbenchProjectPathEntry {
+  projectRelativePath: string;
+  kind: WorkbenchContextMenuTargetKind;
+}
+
+export interface WorkbenchCanvasContextMenuTarget {
+  source: 'canvas';
   kind: WorkbenchContextMenuTargetKind;
   projectRelativePath: string;
 }
+
+export type WorkbenchExplorerContextMenuTarget =
+  | {
+      source: 'explorer';
+      targetKind: 'root';
+      paths: [];
+      primaryPath: null;
+      targetDirectoryPath: string;
+    }
+  | {
+      source: 'explorer';
+      targetKind: 'item' | 'selection';
+      paths: WorkbenchProjectPathEntry[];
+      primaryPath: string;
+      targetDirectoryPath: string;
+    };
+
+export type WorkbenchContextMenuTarget = WorkbenchCanvasContextMenuTarget | WorkbenchExplorerContextMenuTarget;
 
 export interface WorkbenchContextMenuPosition {
   x: number;
@@ -33,8 +57,7 @@ export interface WorkbenchContextMenuPosition {
 
 export interface WorkbenchFileClipboard {
   operation: 'copy' | 'cut';
-  projectRelativePath: string;
-  kind: WorkbenchContextMenuTargetKind;
+  entries: WorkbenchProjectPathEntry[];
 }
 
 export type WorkbenchContextMenuItem =
@@ -65,15 +88,36 @@ export function buildWorkbenchContextMenuItems(input: {
     ]);
   }
 
+  if (input.target.targetKind === 'root') {
+    return [
+      action('create-file', 'New File'),
+      action('create-directory', 'New Folder'),
+      action('paste', 'Paste', { disabled: !input.fileClipboard?.entries.length })
+    ];
+  }
+
+  if (input.target.targetKind === 'selection') {
+    return [
+      action('cut', 'Cut'),
+      action('copy', 'Copy'),
+      action('copy-path', 'Copy Path'),
+      action('copy-relative-path', 'Copy Relative Path'),
+      action('delete', 'Delete')
+    ];
+  }
+
+  const targetEntry = explorerContextMenuPrimaryEntry(input.target);
   return [
-    ...(input.target.kind === 'directory' ? [
+    ...(targetEntry?.kind === 'directory' ? [
       action('create-file', 'New File'),
       action('create-directory', 'New Folder'),
       separator('new')
     ] : []),
     action('cut', 'Cut'),
     action('copy', 'Copy'),
-    action('paste', 'Paste', { disabled: !input.fileClipboard }),
+    ...(targetEntry?.kind === 'directory' ? [
+      action('paste', 'Paste', { disabled: !input.fileClipboard?.entries.length })
+    ] : []),
     separator('path-actions'),
     action('copy-path', 'Copy Path'),
     action('copy-relative-path', 'Copy Relative Path'),
@@ -82,6 +126,21 @@ export function buildWorkbenchContextMenuItems(input: {
     action('rename', 'Rename'),
     action('delete', 'Delete')
   ];
+}
+
+export function explorerContextMenuEntries(target: WorkbenchContextMenuTarget): WorkbenchProjectPathEntry[] {
+  return target.source === 'explorer' ? target.paths : [{
+    projectRelativePath: target.projectRelativePath,
+    kind: target.kind
+  }];
+}
+
+export function explorerContextMenuPrimaryEntry(target: WorkbenchContextMenuTarget): WorkbenchProjectPathEntry | undefined {
+  return explorerContextMenuEntries(target)[0];
+}
+
+export function explorerContextMenuProjectRelativePaths(target: WorkbenchContextMenuTarget): string[] {
+  return explorerContextMenuEntries(target).map((entry) => entry.projectRelativePath);
 }
 
 export function projectSystemFileManagerLabel(platform: NodeJS.Platform): string {

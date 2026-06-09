@@ -7,11 +7,12 @@ import type {
   DebruteCliStatus
 } from '@debrute/app-protocol';
 
-const { contextBridge, ipcRenderer } = electron;
+const { contextBridge, ipcRenderer, webUtils } = electron;
 
 interface DebruteShellApi {
   chooseProjectRoot(): Promise<string | undefined>;
   bindProjectWindowToProject(input: { projectId: string }): Promise<{ ok: true }>;
+  getDroppedFilePath(file: File): string | undefined;
   getDebruteCliStatus(): Promise<DebruteCliStatus>;
   installDebruteCli(): Promise<DebruteCliInstallResult>;
   updateDebruteCli(): Promise<DebruteCliInstallResult>;
@@ -26,6 +27,7 @@ const debruteShellApi: DebruteShellApi = {
   bindProjectWindowToProject: (input) => (
     ipcRenderer.invoke('debrute-shell:bindProjectWindowToProject', input) as Promise<{ ok: true }>
   ),
+  getDroppedFilePath: (file) => webUtils.getPathForFile(file) || undefined,
   getDebruteCliStatus: () => ipcRenderer.invoke('debrute-shell:getDebruteCliStatus') as Promise<DebruteCliStatus>,
   installDebruteCli: () => ipcRenderer.invoke('debrute-shell:installDebruteCli') as Promise<DebruteCliInstallResult>,
   updateDebruteCli: () => ipcRenderer.invoke('debrute-shell:updateDebruteCli') as Promise<DebruteCliInstallResult>,

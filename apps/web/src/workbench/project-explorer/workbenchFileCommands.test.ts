@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import type { WorkbenchFileClipboard } from '../shell/contextMenu';
 import {
+  batchResultSelectionPaths,
   clearClipboardAfterDeletedPath,
   clearClipboardAfterPaste,
   clearCanvasSelectionAfterDeletedPath,
@@ -11,8 +12,8 @@ import {
 
 describe('workbench file command helpers', () => {
   it('clears only completed cut clipboards after paste', () => {
-    const copy: WorkbenchFileClipboard = { operation: 'copy', projectRelativePath: 'a.md', kind: 'file' };
-    const cut: WorkbenchFileClipboard = { operation: 'cut', projectRelativePath: 'a.md', kind: 'file' };
+    const copy: WorkbenchFileClipboard = { operation: 'copy', entries: [{ projectRelativePath: 'a.md', kind: 'file' }] };
+    const cut: WorkbenchFileClipboard = { operation: 'cut', entries: [{ projectRelativePath: 'a.md', kind: 'file' }] };
 
     expect(clearClipboardAfterPaste(copy)).toBe(copy);
     expect(clearClipboardAfterPaste(cut)).toBeUndefined();
@@ -43,13 +44,42 @@ describe('workbench file command helpers', () => {
   it('clears clipboard sources affected by deleted paths', () => {
     const source: WorkbenchFileClipboard = {
       operation: 'copy',
-      projectRelativePath: 'assets/pages/page.png',
-      kind: 'file'
+      entries: [
+        { projectRelativePath: 'assets/pages/page.png', kind: 'file' },
+        { projectRelativePath: 'briefs/concept.md', kind: 'file' }
+      ]
     };
 
-    expect(clearClipboardAfterDeletedPath(source, 'assets')).toBeUndefined();
-    expect(clearClipboardAfterDeletedPath(source, 'assets/pages/page.png')).toBeUndefined();
-    expect(clearClipboardAfterDeletedPath(source, 'briefs')).toBe(source);
+    expect(clearClipboardAfterDeletedPath(source, 'assets')).toEqual({
+      operation: 'copy',
+      entries: [
+        { projectRelativePath: 'briefs/concept.md', kind: 'file' }
+      ]
+    });
+    expect(clearClipboardAfterDeletedPath(source, 'assets/pages/page.png')).toEqual({
+      operation: 'copy',
+      entries: [
+        { projectRelativePath: 'briefs/concept.md', kind: 'file' }
+      ]
+    });
+    expect(clearClipboardAfterDeletedPath(source, 'rules')).toBe(source);
+  });
+
+  it('keeps successful and skipped batch result paths selected', () => {
+    expect(batchResultSelectionPaths([
+      {
+        sourceProjectRelativePath: 'cover.png',
+        projectRelativePath: 'assets/cover.png',
+        kind: 'file',
+        status: 'ok'
+      },
+      {
+        sourceProjectRelativePath: 'assets/skip.md',
+        projectRelativePath: 'assets/skip.md',
+        kind: 'file',
+        status: 'skipped'
+      }
+    ])).toEqual(['assets/cover.png', 'assets/skip.md']);
   });
 
   it('formats permanent delete confirmations by target kind', () => {

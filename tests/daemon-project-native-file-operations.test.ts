@@ -4,24 +4,31 @@ import { join } from 'node:path';
 import { describe, expect, it, vi } from 'vitest';
 import type { ProjectSessionSnapshot } from '@debrute/app-protocol';
 import {
-  copyProjectAbsolutePath,
+  copyProjectAbsolutePaths,
   revealProjectPathInSystemFileManager,
-  trashProjectPathWithNativeShell
+  trashProjectPathsWithNativeShell
 } from '../apps/daemon/src/http/projectNativeFileOperations';
 
 describe('daemon project native file operations', () => {
-  it('returns validated absolute paths for Copy Path', async () => {
-    const projectRoot = await mkdtemp(join(tmpdir(), 'debrute-copy-path-'));
+  it('returns validated absolute paths for Copy Path batches', async () => {
+    const projectRoot = await mkdtemp(join(tmpdir(), 'debrute-copy-path-batch-'));
     try {
       await mkdir(join(projectRoot, 'briefs'), { recursive: true });
       await writeFile(join(projectRoot, 'briefs/outline.md'), '# Outline', 'utf8');
+      await writeFile(join(projectRoot, 'cover.png'), 'cover', 'utf8');
+      const canonicalRoot = await realpath(projectRoot);
 
-      await expect(copyProjectAbsolutePath({
+      await expect(copyProjectAbsolutePaths({
         projectRoot,
-        projectRelativePath: 'briefs/outline.md',
-        kind: 'file'
+        entries: [
+          { projectRelativePath: 'briefs/outline.md', kind: 'file' },
+          { projectRelativePath: 'cover.png', kind: 'file' }
+        ]
       })).resolves.toEqual({
-        absolutePath: join(await realpath(projectRoot), 'briefs/outline.md')
+        paths: [
+          join(canonicalRoot, 'briefs/outline.md'),
+          join(canonicalRoot, 'cover.png')
+        ]
       });
     } finally {
       await rm(projectRoot, { recursive: true, force: true });
@@ -35,10 +42,9 @@ describe('daemon project native file operations', () => {
       await writeFile(outside, 'outside', 'utf8');
       await symlink(outside, join(projectRoot, 'linked.txt'));
 
-      await expect(copyProjectAbsolutePath({
+      await expect(copyProjectAbsolutePaths({
         projectRoot,
-        projectRelativePath: 'linked.txt',
-        kind: 'file'
+        entries: [{ projectRelativePath: 'linked.txt', kind: 'file' }]
       })).rejects.toThrow('escapes project root through a symlink');
     } finally {
       await rm(projectRoot, { recursive: true, force: true });
@@ -94,11 +100,14 @@ describe('daemon project native file operations', () => {
     }
   });
 
-  it('trashes paths after validation and returns a refreshed snapshot', async () => {
-    const projectRoot = await mkdtemp(join(tmpdir(), 'debrute-native-trash-'));
+  it('trashes path batches after validation and refreshes once', async () => {
+    const projectRoot = await mkdtemp(join(tmpdir(), 'debrute-native-trash-batch-'));
     try {
+      await mkdir(join(projectRoot, 'assets/pages'), { recursive: true });
+      await writeFile(join(projectRoot, 'assets/pages/page.png'), 'page', 'utf8');
       await writeFile(join(projectRoot, 'brief.md'), '# Brief', 'utf8');
       const shell = nativeShellFixture();
+      let refreshCount = 0;
       const refreshedSnapshot: ProjectSessionSnapshot = {
         projectRoot,
         metadata: {
@@ -122,19 +131,28 @@ describe('daemon project native file operations', () => {
         }
       };
 
-      await expect(trashProjectPathWithNativeShell({
+      await expect(trashProjectPathsWithNativeShell({
         projectRoot,
-        projectRelativePath: 'brief.md',
-        kind: 'file',
+        entries: [
+          { projectRelativePath: 'assets', kind: 'directory' },
+          { projectRelativePath: 'assets/pages/page.png', kind: 'file' },
+          { projectRelativePath: 'brief.md', kind: 'file' }
+        ],
         nativeShell: shell,
-        refreshProject: async () => refreshedSnapshot
+        refreshProject: async () => {
+          refreshCount += 1;
+          return refreshedSnapshot;
+        }
       })).resolves.toEqual({
-        projectRelativePath: 'brief.md',
-        kind: 'file',
+        results: [
+          { sourceProjectRelativePath: 'assets', projectRelativePath: 'assets', kind: 'directory', status: 'ok' },
+          { sourceProjectRelativePath: 'brief.md', projectRelativePath: 'brief.md', kind: 'file', status: 'ok' }
+        ],
         snapshot: refreshedSnapshot
       });
 
-      expect(shell.trashItem).toHaveBeenCalledWith(join(await realpath(projectRoot), 'brief.md'));
+      expect(shell.trashItem).toHaveBeenCalledTimes(2);
+      expect(refreshCount).toBe(1);
     } finally {
       await rm(projectRoot, { recursive: true, force: true });
     }

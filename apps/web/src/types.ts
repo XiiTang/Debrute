@@ -10,7 +10,9 @@ import type {
   SaveVideoModelSettingInput,
   IntegrationSettingsView,
   VideoModelSettingsView,
+  WorkbenchProjectFileBatchOperationResult,
   WorkbenchProjectFileOperationResult,
+  WorkbenchProjectPathEntry,
   WorkbenchProjectSessionSnapshot,
   WorkbenchProjectTextFile
 } from '@debrute/app-protocol';
@@ -19,10 +21,11 @@ import type {
   CanvasNodeLayerPatch,
   UpdateCanvasFeedbackEntryInput
 } from '@debrute/canvas-core';
+import type { ProjectTreeSelectionState } from './workbench/project-explorer/projectTreeInteraction';
 
 export interface WorkbenchState {
   snapshot: WorkbenchProjectSessionSnapshot | undefined;
-  explorerSelection: string | undefined;
+  explorerSelection: ProjectTreeSelectionState;
   llmSettings: LlmProviderSettingsView | undefined;
   imageModelSettings: ImageModelSettingsView | undefined;
   videoModelSettings: VideoModelSettingsView | undefined;
@@ -56,7 +59,6 @@ export interface FloatingTextEditorWindowState {
 }
 
 export interface WorkbenchActions {
-  selectExplorerPath: (projectRelativePath: string) => void;
   saveLlmProviderSetting: (input: SaveLlmProviderSettingInput, providerId?: string) => Promise<void>;
   deleteLlmProviderSetting: (providerId: string) => Promise<void>;
   setDefaultLlmModelKey: (modelKey: string | null) => Promise<void>;
@@ -71,11 +73,11 @@ export interface WorkbenchActions {
   createProjectFile: (input: { parentProjectRelativePath: string; name: string }) => Promise<WorkbenchProjectFileOperationResult>;
   createProjectDirectory: (input: { parentProjectRelativePath: string; name: string }) => Promise<WorkbenchProjectFileOperationResult>;
   renameProjectPath: (input: { projectRelativePath: string; name: string }) => Promise<WorkbenchProjectFileOperationResult>;
-  copyProjectPath: (input: { sourceProjectRelativePath: string; targetDirectoryProjectRelativePath: string }) => Promise<WorkbenchProjectFileOperationResult>;
-  moveProjectPath: (input: { sourceProjectRelativePath: string; targetDirectoryProjectRelativePath: string }) => Promise<WorkbenchProjectFileOperationResult>;
-  copyProjectAbsolutePath: (input: { projectRelativePath: string; kind: 'file' | 'directory' }) => Promise<{ absolutePath: string }>;
-  trashProjectPath: (input: { projectRelativePath: string; kind: 'file' | 'directory' }) => Promise<{ projectRelativePath: string; snapshot: WorkbenchProjectSessionSnapshot }>;
-  deleteProjectPathPermanently: (input: { projectRelativePath: string }) => Promise<WorkbenchProjectFileOperationResult>;
+  copyProjectPaths: (input: { entries: WorkbenchProjectPathEntry[]; targetDirectoryProjectRelativePath: string }) => Promise<WorkbenchProjectFileBatchOperationResult>;
+  moveProjectPaths: (input: { entries: WorkbenchProjectPathEntry[]; targetDirectoryProjectRelativePath: string; overwrite?: boolean }) => Promise<WorkbenchProjectFileBatchOperationResult>;
+  copyProjectAbsolutePaths: (input: { entries: WorkbenchProjectPathEntry[] }) => Promise<{ paths: string[] }>;
+  trashProjectPaths: (input: { entries: WorkbenchProjectPathEntry[] }) => Promise<WorkbenchProjectFileBatchOperationResult>;
+  deleteProjectPathsPermanently: (input: { entries: WorkbenchProjectPathEntry[] }) => Promise<WorkbenchProjectFileBatchOperationResult>;
   revealProjectPathInSystemFileManager: (input: { projectRelativePath: string; kind: 'file' | 'directory' }) => Promise<{ ok: true }>;
   ensureTextFileBuffer: (projectRelativePath: string, diskRevision?: string) => Promise<void>;
   updateTextFileBuffer: (projectRelativePath: string, content: string) => void;

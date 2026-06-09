@@ -71,18 +71,20 @@ export function buildProjectFileTree(entries: ProjectFileEntryLike[]): ProjectFi
   return finalizeDirectory(root).children;
 }
 
-export function expandedProjectTreePaths(tree: ProjectFileTreeNode[], selectedPath: string | undefined): Set<string> {
+export function expandedProjectTreePaths(tree: ProjectFileTreeNode[], selectedPaths: readonly string[]): Set<string> {
   const expanded = new Set<string>();
-  for (const node of tree) {
-    if (node.kind === 'directory') {
-      expanded.add(node.path);
-    }
-  }
+  const knownPaths = collectProjectTreePaths(tree);
 
-  let current = selectedPath ? parentProjectPath(normalizeProjectPath(selectedPath)) : undefined;
-  while (current) {
-    expanded.add(current);
-    current = parentProjectPath(current);
+  for (const selectedPath of selectedPaths) {
+    const normalizedPath = normalizeProjectPath(selectedPath);
+    if (!knownPaths.has(normalizedPath)) {
+      continue;
+    }
+    let current = parentProjectPath(normalizedPath);
+    while (current) {
+      expanded.add(current);
+      current = parentProjectPath(current);
+    }
   }
 
   return expanded;
@@ -122,6 +124,23 @@ function findProjectFileTreeNodeInNode(
     }
   }
   return undefined;
+}
+
+function collectProjectTreePaths(tree: ProjectFileTreeNode[]): Set<string> {
+  const paths = new Set<string>();
+  for (const node of tree) {
+    collectProjectTreeNodePath(node, paths);
+  }
+  return paths;
+}
+
+function collectProjectTreeNodePath(node: ProjectFileTreeNode, paths: Set<string>): void {
+  paths.add(node.path);
+  if (node.kind === 'directory') {
+    for (const child of node.children) {
+      collectProjectTreeNodePath(child, paths);
+    }
+  }
 }
 
 function finalizeDirectory(directory: MutableDirectory): ProjectFileTreeDirectory {

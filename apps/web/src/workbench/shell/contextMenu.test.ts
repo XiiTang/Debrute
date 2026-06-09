@@ -44,9 +44,15 @@ describe('workbench context menu', () => {
     ]);
   });
 
-  it('builds VSCode-style Project Tree menu groups for directories with an empty file clipboard', () => {
+  it('builds VS Code-style Project Tree menu groups for directories with an empty file clipboard', () => {
     const items = buildWorkbenchContextMenuItems({
-      target: { source: 'explorer', kind: 'directory', projectRelativePath: 'assets' },
+      target: {
+        source: 'explorer',
+        targetKind: 'item',
+        paths: [{ projectRelativePath: 'assets', kind: 'directory' }],
+        primaryPath: 'assets',
+        targetDirectoryPath: 'assets'
+      },
       projection: projectionWithNodes([]),
       canRevealInCanvas: false,
       fileClipboard: undefined,
@@ -78,21 +84,57 @@ describe('workbench context menu', () => {
 
   it('enables Project Tree paste when the internal clipboard has a source', () => {
     const items = buildWorkbenchContextMenuItems({
-      target: { source: 'explorer', kind: 'file', projectRelativePath: 'assets/cover.png' },
+      target: {
+        source: 'explorer',
+        targetKind: 'root',
+        paths: [],
+        primaryPath: null,
+        targetDirectoryPath: ''
+      },
       projection: projectionWithNodes([]),
       canRevealInCanvas: false,
-      fileClipboard: { operation: 'copy', projectRelativePath: 'briefs/concept.md', kind: 'file' },
+      fileClipboard: {
+        operation: 'copy',
+        entries: [{ projectRelativePath: 'briefs/concept.md', kind: 'file' }]
+      },
       desktopPlatform: 'win32'
     });
 
     expect(actionCommands(items)).toContain('paste');
     expect(items.find((item) => item.kind === 'action' && item.command === 'paste')).toMatchObject({ disabled: false });
-    expect(actionLabels(items)).toContain('Reveal in File Explorer');
+    expect(actionLabels(items)).not.toContain('Reveal in File Explorer');
+  });
+
+  it('keeps Project Tree paste disabled when the internal clipboard has no entries', () => {
+    const items = buildWorkbenchContextMenuItems({
+      target: {
+        source: 'explorer',
+        targetKind: 'root',
+        paths: [],
+        primaryPath: null,
+        targetDirectoryPath: ''
+      },
+      projection: projectionWithNodes([]),
+      canRevealInCanvas: false,
+      fileClipboard: {
+        operation: 'copy',
+        entries: []
+      },
+      desktopPlatform: 'linux'
+    });
+
+    expect(items.find((item) => item.kind === 'action' && item.command === 'paste')).toMatchObject({ disabled: true });
   });
 
   it('hides folder-only creation actions for Project Tree file targets', () => {
     const items = buildWorkbenchContextMenuItems({
-      target: { source: 'explorer', kind: 'file', projectRelativePath: 'assets/cover.png' },
+      target: {
+        source: 'explorer',
+        targetKind: 'item',
+        paths: [{ projectRelativePath: 'assets/cover.png', kind: 'file' }],
+        primaryPath: 'assets/cover.png',
+        targetDirectoryPath: 'assets'
+      },
       projection: projectionWithNodes([]),
       canRevealInCanvas: false,
       fileClipboard: undefined,
@@ -109,12 +151,61 @@ describe('workbench context menu', () => {
     expect(actionLabels(items)).toContain('Copy Path');
   });
 
+  it('shows only root-level creation and paste actions for blank Project Tree targets', () => {
+    const items = buildWorkbenchContextMenuItems({
+      target: {
+        source: 'explorer',
+        targetKind: 'root',
+        paths: [],
+        primaryPath: null,
+        targetDirectoryPath: ''
+      },
+      projection: projectionWithNodes([]),
+      canRevealInCanvas: false,
+      fileClipboard: undefined,
+      desktopPlatform: 'linux'
+    });
+
+    expect(actionCommands(items)).toEqual(['create-file', 'create-directory', 'paste']);
+    expect(items.find((item) => item.kind === 'action' && item.command === 'paste')).toMatchObject({ disabled: true });
+  });
+
+  it('uses the restricted multi-selection Project Tree menu', () => {
+    const items = buildWorkbenchContextMenuItems({
+      target: {
+        source: 'explorer',
+        targetKind: 'selection',
+        paths: [
+          { projectRelativePath: 'assets/cover.png', kind: 'file' },
+          { projectRelativePath: 'briefs', kind: 'directory' }
+        ],
+        primaryPath: 'assets/cover.png',
+        targetDirectoryPath: ''
+      },
+      projection: projectionWithNodes([]),
+      canRevealInCanvas: false,
+      fileClipboard: undefined,
+      desktopPlatform: 'linux'
+    });
+
+    expect(actionCommands(items)).toEqual([
+      'cut',
+      'copy',
+      'copy-path',
+      'copy-relative-path',
+      'delete'
+    ]);
+  });
+
   it('keeps Canvas node menus free of file-management commands', () => {
     const items = buildWorkbenchContextMenuItems({
       target: { source: 'canvas', kind: 'file', projectRelativePath: 'flow/cover.png' },
       projection: projectionWithNodes(['flow/cover.png']),
       canRevealInCanvas: true,
-      fileClipboard: { operation: 'cut', projectRelativePath: 'briefs/concept.md', kind: 'file' },
+      fileClipboard: {
+        operation: 'cut',
+        entries: [{ projectRelativePath: 'briefs/concept.md', kind: 'file' }]
+      },
       desktopPlatform: 'linux'
     });
 

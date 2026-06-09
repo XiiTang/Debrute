@@ -1,18 +1,23 @@
 import type {
-  CopyOrMoveProjectPathInput,
+  CopyProjectPathsInput,
   CreateProjectPathInput,
-  DeleteProjectPathInput,
+  DeleteProjectPathsInput,
+  ImportExternalLocalProjectPathsInput,
+  ImportExternalUploadProjectEntriesInput,
+  MoveProjectPathsInput,
   RenameProjectPathInput
 } from '@debrute/project-core';
 import {
-  copyProjectPath,
+  copyProjectPaths,
   createProjectDirectory,
   createProjectFile,
-  deleteProjectPathPermanently,
-  moveProjectPath,
+  deleteProjectPathsPermanently,
+  importExternalLocalProjectPaths,
+  importExternalUploadProjectEntries,
+  moveProjectPaths,
   renameProjectPath
 } from '@debrute/project-core';
-import type { ProjectFileOperationResult, ProjectSessionSnapshot } from '@debrute/app-protocol';
+import type { ProjectFileBatchOperationResult, ProjectFileOperationResult, ProjectSessionSnapshot } from '@debrute/app-protocol';
 
 export interface ProjectFileOperationContext {
   snapshot: ProjectSessionSnapshot;
@@ -43,26 +48,42 @@ export async function renameProjectPathWithSnapshot(
   return { ...result, snapshot: await context.refreshProject() };
 }
 
-export async function copyProjectPathWithSnapshot(
+export async function copyProjectPathsWithSnapshot(
   context: ProjectFileOperationContext,
-  input: CopyOrMoveProjectPathInput
-): Promise<ProjectFileOperationResult> {
-  const result = await copyProjectPath(context.snapshot.projectRoot, input);
+  input: CopyProjectPathsInput
+): Promise<ProjectFileBatchOperationResult> {
+  const result = await copyProjectPaths(context.snapshot.projectRoot, input);
   return { ...result, snapshot: await context.refreshProject() };
 }
 
-export async function moveProjectPathWithSnapshot(
+export async function moveProjectPathsWithSnapshot(
   context: ProjectFileOperationContext,
-  input: CopyOrMoveProjectPathInput
-): Promise<ProjectFileOperationResult> {
-  const result = await moveProjectPath(context.snapshot.projectRoot, input);
+  input: MoveProjectPathsInput
+): Promise<ProjectFileBatchOperationResult> {
+  const result = await moveProjectPaths(context.snapshot.projectRoot, input);
   return { ...result, snapshot: await context.refreshProject() };
 }
 
-export async function deleteProjectPathPermanentlyWithSnapshot(
+export async function deleteProjectPathsPermanentlyWithSnapshot(
   context: ProjectFileOperationContext,
-  input: DeleteProjectPathInput
-): Promise<ProjectFileOperationResult> {
-  const result = await deleteProjectPathPermanently(context.snapshot.projectRoot, input);
+  input: DeleteProjectPathsInput
+): Promise<ProjectFileBatchOperationResult> {
+  const result = await deleteProjectPathsPermanently(context.snapshot.projectRoot, input);
+  return { ...result, snapshot: await context.refreshProject() };
+}
+
+export async function importExternalLocalProjectPathsWithSnapshot(
+  context: ProjectFileOperationContext,
+  input: ImportExternalLocalProjectPathsInput
+): Promise<ProjectFileBatchOperationResult> {
+  const result = await importExternalLocalProjectPaths(context.snapshot.projectRoot, input);
+  return { ...result, snapshot: await context.refreshProject() };
+}
+
+export async function importExternalUploadProjectEntriesWithSnapshot(
+  context: ProjectFileOperationContext,
+  input: ImportExternalUploadProjectEntriesInput
+): Promise<ProjectFileBatchOperationResult> {
+  const result = await importExternalUploadProjectEntries(context.snapshot.projectRoot, input);
   return { ...result, snapshot: await context.refreshProject() };
 }

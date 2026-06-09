@@ -1,4 +1,4 @@
-import type { WorkbenchContextMenuTargetKind } from '../shell/contextMenu';
+import type { WorkbenchContextMenuTarget, WorkbenchContextMenuTargetKind } from '../shell/contextMenu';
 
 export type ProjectTreeInlineEditState =
   | {
@@ -45,11 +45,11 @@ export function validateInlineProjectName(value: string): { ok: true; name: stri
   return { ok: true, name };
 }
 
-export function projectTreePasteTargetDirectory(target: {
-  kind: WorkbenchContextMenuTargetKind;
-  projectRelativePath: string;
-}): string {
-  return target.kind === 'directory' ? target.projectRelativePath : parentProjectPath(target.projectRelativePath);
+export function projectTreePasteTargetDirectory(target: WorkbenchContextMenuTarget): string {
+  if (target.source === 'canvas') {
+    return target.kind === 'directory' ? target.projectRelativePath : parentProjectPath(target.projectRelativePath);
+  }
+  return target.targetDirectoryPath;
 }
 
 export function parentProjectPath(projectRelativePath: string): string {

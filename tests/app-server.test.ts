@@ -130,21 +130,30 @@ describe('app-server', () => {
       expect(renamed.projectRelativePath).toBe('briefs/outline.md');
       expect(renamed.snapshot.files.map((entry) => entry.projectRelativePath)).toContain('briefs/outline.md');
 
-      const copied = await server.copyProjectPath({
-        sourceProjectRelativePath: 'briefs/outline.md',
+      const copied = await server.copyProjectPaths({
+        entries: [{ projectRelativePath: 'briefs/outline.md', kind: 'file' }],
         targetDirectoryProjectRelativePath: 'briefs'
       });
-      expect(copied.projectRelativePath).toBe('briefs/outline copy.md');
+      expect(copied.results).toEqual([
+        { sourceProjectRelativePath: 'briefs/outline.md', projectRelativePath: 'briefs/outline copy.md', kind: 'file', status: 'ok' }
+      ]);
+      expect(copied.snapshot.files.map((entry) => entry.projectRelativePath)).toContain('briefs/outline copy.md');
 
-      const moved = await server.moveProjectPath({
-        sourceProjectRelativePath: 'briefs/outline copy.md',
+      const moved = await server.moveProjectPaths({
+        entries: [{ projectRelativePath: 'briefs/outline copy.md', kind: 'file' }],
         targetDirectoryProjectRelativePath: ''
       });
-      expect(moved.projectRelativePath).toBe('outline copy.md');
+      expect(moved.results).toEqual([
+        { sourceProjectRelativePath: 'briefs/outline copy.md', projectRelativePath: 'outline copy.md', kind: 'file', status: 'ok' }
+      ]);
       expect(moved.snapshot.files.map((entry) => entry.projectRelativePath)).toContain('outline copy.md');
 
-      const deleted = await server.deleteProjectPathPermanently({ projectRelativePath: 'outline copy.md' });
-      expect(deleted.projectRelativePath).toBe('outline copy.md');
+      const deleted = await server.deleteProjectPathsPermanently({
+        entries: [{ projectRelativePath: 'outline copy.md', kind: 'file' }]
+      });
+      expect(deleted.results).toEqual([
+        { sourceProjectRelativePath: 'outline copy.md', projectRelativePath: 'outline copy.md', kind: 'file', status: 'ok' }
+      ]);
       expect(deleted.snapshot.files.map((entry) => entry.projectRelativePath)).not.toContain('outline copy.md');
       await expect(stat(join(projectRoot, 'outline copy.md'))).rejects.toThrow();
     } finally {

@@ -9,6 +9,7 @@ import type {
 export interface DebruteShellApi {
   chooseProjectRoot(): Promise<string | undefined>;
   bindProjectWindowToProject?(input: { projectId: string }): Promise<{ ok: true }>;
+  getDroppedFilePath?(file: File): string | undefined;
   getDebruteCliStatus?(): Promise<DebruteCliStatus>;
   installDebruteCli?(): Promise<DebruteCliInstallResult>;
   updateDebruteCli?(): Promise<DebruteCliInstallResult>;

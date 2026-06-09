@@ -98,7 +98,7 @@ describe('web Integrations settings page', () => {
 function createState(overrides: Partial<WorkbenchState> = {}): WorkbenchState {
   return {
     snapshot: undefined,
-    explorerSelection: undefined,
+    explorerSelection: { selectedPaths: [], focusedPath: null, anchorPath: null },
     llmSettings: { providers: [], availableModelKeys: [], defaultModelKey: null },
     imageModelSettings: { models: [] },
     videoModelSettings: { models: [] },
