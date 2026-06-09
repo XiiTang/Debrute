@@ -1,7 +1,7 @@
 import { execFileSync } from 'node:child_process';
-import { readFileSync } from 'node:fs';
+import { existsSync, readFileSync } from 'node:fs';
 import { createRequire } from 'node:module';
-import { join } from 'node:path';
+import { dirname, join } from 'node:path';
 import { describe, expect, it } from 'vitest';
 
 interface PackageJson {
@@ -57,7 +57,12 @@ describe('Electron development scripts', () => {
       readFileSync(join(root, 'apps/desktop/package.json'), 'utf8')
     ) as PackageJson;
     const desktopRequire = createRequire(join(root, 'apps/desktop/package.json'));
-    const electronExecutable = desktopRequire('electron') as string;
+    const electronPackageDir = dirname(desktopRequire.resolve('electron/package.json'));
+    const electronPathFile = join(electronPackageDir, 'path.txt');
+    if (!existsSync(electronPathFile)) {
+      execFileSync(process.execPath, [join(electronPackageDir, 'install.js')], { stdio: 'inherit' });
+    }
+    const electronExecutable = join(electronPackageDir, 'dist', readFileSync(electronPathFile, 'utf8'));
     const embeddedNodeVersion = execFileSync(electronExecutable, ['-p', 'process.versions.node'], {
       encoding: 'utf8',
       env: {
