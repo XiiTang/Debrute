@@ -37,6 +37,12 @@ describe('debrute cli parser and renderer', () => {
         log: 'results.jsonl'
       }
     });
+    expect(parseDebruteArgs(['canvas-map', 'publish', '/tmp/project', 'production-map'])).toMatchObject({
+      command: 'canvas-map.publish',
+      scope: 'project',
+      projectRoot: '/tmp/project',
+      positional: ['/tmp/project', 'production-map']
+    });
     expect(() => parseDebruteArgs(['daemon', 'status', '--daemon-url', 'http://127.0.0.1:17321'])).toThrow(DebruteCliError);
   });
 
@@ -115,6 +121,7 @@ describe('debrute cli parser and renderer', () => {
       'canvas_map_invalid_yaml',
       'canvas_map_canvas_missing'
     ]));
+    expect(specForCommandPath(['canvas-map', 'publish'])?.input).toBe('<project> <canvas-id>');
     expect(specForCommandPath(['generate', 'image'])?.errors).toEqual([
       'invalid_command',
       'invalid_argument',

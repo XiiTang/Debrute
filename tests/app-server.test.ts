@@ -698,10 +698,7 @@ describe('app-server', () => {
 
       const textFile = await server.readProjectTextFile('notes/brief.md');
       const written = await server.writeProjectTextFile('notes/output.md', 'done\n');
-      await writeCanvasMap(projectRoot, 'production-map', [
-        '- notes/*.md',
-        ''
-      ]);
+      await writeCanvasMap(projectRoot, 'production-map', canvasMapSource(['notes/*.md']));
       await server.publishCanvasMapForProject(projectRoot, { canvasId: 'production-map' });
       const snapshot = await server.refreshProject();
 
@@ -771,10 +768,7 @@ describe('app-server', () => {
       await mkdir(join(projectRoot, 'image-production/generated'), { recursive: true });
       await writeFile(join(projectRoot, 'image-production/generated/a.png'), await largePreviewablePngBuffer());
       await server.openProject(projectRoot, { initializeIfMissing: true, createDefaultCanvas: true, watchFiles: false });
-      await writeCanvasMap(projectRoot, 'production-map', [
-        '- image-production/generated/*.png',
-        ''
-      ]);
+      await writeCanvasMap(projectRoot, 'production-map', canvasMapSource(['image-production/generated/*.png']));
       await server.publishCanvasMapForProject(projectRoot, { canvasId: 'production-map' });
       const synced = await server.refreshProject();
       const nodePath = 'image-production/generated/a.png';
@@ -832,10 +826,7 @@ describe('app-server', () => {
       await writeFile(join(projectRoot, 'outputs/gpt/a.png'), 'fake', 'utf8');
       await writeFile(join(projectRoot, 'outputs/gpt/b.png'), 'fake', 'utf8');
       await server.openProject(projectRoot, { initializeIfMissing: true, createDefaultCanvas: true });
-      await writeCanvasMap(projectRoot, 'production-map', [
-        '- outputs/gpt/',
-        ''
-      ]);
+      await writeCanvasMap(projectRoot, 'production-map', canvasMapSource(['outputs/gpt/']));
 
       await expect(server.publishCanvasMapForProject(projectRoot, { canvasId: 'production-map' }))
         .resolves.toEqual({ ok: true, command: 'canvas-map.publish', canvasId: 'production-map' });
@@ -844,10 +835,7 @@ describe('app-server', () => {
         canvasId: 'production-map',
         nodeLayouts: [{ projectRelativePath: 'outputs/gpt/b.png', x: 999, y: 888, width: 777, height: 666 }]
       });
-      await writeCanvasMap(projectRoot, 'production-map', [
-        '- outputs/gpt/b.png',
-        ''
-      ]);
+      await writeCanvasMap(projectRoot, 'production-map', canvasMapSource(['outputs/gpt/b.png']));
       await server.publishCanvasMapForProject(projectRoot, { canvasId: 'production-map' });
 
       const snapshot = await server.refreshProject();
@@ -869,16 +857,57 @@ describe('app-server', () => {
     }
   });
 
+  it('applies Canvas Map layout rows when publishing into Canvas JSON', async () => {
+    const projectRoot = await mkdtemp(join(tmpdir(), 'debrute-app-server-canvas-map-rows-'));
+    const server = new DebruteAppServer({
+      canvasNodeLayoutSizeReader: canvasLayoutSizeReader({
+        'outputs/gemini/high/a.png': { width: 100, height: 100 },
+        'outputs/gemini/high/b.png': { width: 140, height: 80 },
+        'outputs/gpt/high/a.png': { width: 100, height: 100 },
+        'outputs/gpt/high/b.png': { width: 140, height: 80 }
+      })
+    });
+    try {
+      await mkdir(join(projectRoot, 'outputs/gemini/high'), { recursive: true });
+      await mkdir(join(projectRoot, 'outputs/gpt/high'), { recursive: true });
+      await writeFile(join(projectRoot, 'outputs/gemini/high/a.png'), 'fake', 'utf8');
+      await writeFile(join(projectRoot, 'outputs/gemini/high/b.png'), 'fake', 'utf8');
+      await writeFile(join(projectRoot, 'outputs/gpt/high/a.png'), 'fake', 'utf8');
+      await writeFile(join(projectRoot, 'outputs/gpt/high/b.png'), 'fake', 'utf8');
+      await server.openProject(projectRoot, { initializeIfMissing: true, createDefaultCanvas: true });
+      await writeCanvasMap(projectRoot, 'production-map', canvasMapSource(
+        ['outputs/**/*.png'],
+        ['outputs/**/high/*.png']
+      ));
+
+      await server.publishCanvasMapForProject(projectRoot, { canvasId: 'production-map' });
+
+      const nodes = (await server.refreshProject()).canvases[0]!.nodeElements;
+      const geminiA = nodes.find((node) => node.projectRelativePath === 'outputs/gemini/high/a.png')!;
+      const geminiB = nodes.find((node) => node.projectRelativePath === 'outputs/gemini/high/b.png')!;
+      const gptA = nodes.find((node) => node.projectRelativePath === 'outputs/gpt/high/a.png')!;
+      const gptB = nodes.find((node) => node.projectRelativePath === 'outputs/gpt/high/b.png')!;
+
+      expect(geminiB.x).toBeGreaterThan(geminiA.x);
+      expect(geminiA.y + geminiA.height / 2).toBe(geminiB.y + geminiB.height / 2);
+      expect(gptB.x).toBeGreaterThan(gptA.x);
+      expect(gptA.y + gptA.height / 2).toBe(gptB.y + gptB.height / 2);
+    } finally {
+      server.close();
+      await rm(projectRoot, { recursive: true, force: true });
+    }
+  });
+
   it('leaves Canvas JSON unchanged when Canvas Map publish fails', async () => {
     const projectRoot = await mkdtemp(join(tmpdir(), 'debrute-app-server-canvas-map-invalid-'));
     const server = new DebruteAppServer();
     try {
       await server.openProject(projectRoot, { initializeIfMissing: true, createDefaultCanvas: true });
-      await writeCanvasMap(projectRoot, 'production-map', ['- missing/file.md', '']);
+      await writeCanvasMap(projectRoot, 'production-map', canvasMapSource(['missing/file.md']));
       await server.publishCanvasMapForProject(projectRoot, { canvasId: 'production-map' });
       const before = await readFile(join(projectRoot, '.debrute/canvases/production-map.json'), 'utf8');
       await mkdir(join(projectRoot, 'outputs/gpt'), { recursive: true });
-      await writeCanvasMap(projectRoot, 'production-map', ['- outputs/gpt', '']);
+      await writeCanvasMap(projectRoot, 'production-map', canvasMapSource(['outputs/gpt']));
 
       await expect(server.publishCanvasMapForProject(projectRoot, { canvasId: 'production-map' }))
         .rejects.toMatchObject({ code: 'canvas_map_invalid_path' });
@@ -930,11 +959,10 @@ describe('app-server', () => {
       }).png().toFile(join(projectRoot, 'image-production/generated/small-still.png'));
       await writeFile(join(projectRoot, 'image-production/generated/animated.gif'), 'gif placeholder', 'utf8');
       await server.openProject(projectRoot, { initializeIfMissing: true, createDefaultCanvas: true });
-      await writeCanvasMap(projectRoot, 'production-map', [
-        '- image-production/generated/*.png',
-        '- image-production/generated/*.gif',
-        ''
-      ]);
+      await writeCanvasMap(projectRoot, 'production-map', canvasMapSource([
+        'image-production/generated/*.png',
+        'image-production/generated/*.gif'
+      ]));
       await server.publishCanvasMapForProject(projectRoot, { canvasId: 'production-map' });
 
       const nodes = (await server.refreshProject()).projections[0]!.nodes;
@@ -965,10 +993,7 @@ describe('app-server', () => {
       await mkdir(join(projectRoot, 'image-production/generated'), { recursive: true });
       await writeFile(join(projectRoot, 'image-production/generated/broken.png'), Buffer.alloc(1_600_000, 1));
       await server.openProject(projectRoot, { initializeIfMissing: true, createDefaultCanvas: true });
-      await writeCanvasMap(projectRoot, 'production-map', [
-        '- image-production/generated/*.png',
-        ''
-      ]);
+      await writeCanvasMap(projectRoot, 'production-map', canvasMapSource(['image-production/generated/*.png']));
       await server.publishCanvasMapForProject(projectRoot, { canvasId: 'production-map' });
 
       const nodes = (await server.refreshProject()).projections[0]!.nodes;
@@ -999,10 +1024,7 @@ describe('app-server', () => {
       await writeFile(join(projectRoot, 'image-production/generated/b.png'), 'fake', 'utf8');
       await writeFile(join(projectRoot, 'image-production/generated/c.png'), 'fake', 'utf8');
       await server.openProject(projectRoot, { initializeIfMissing: true, createDefaultCanvas: true });
-      await writeCanvasMap(projectRoot, 'production-map', [
-        '- image-production/generated/*.png',
-        ''
-      ]);
+      await writeCanvasMap(projectRoot, 'production-map', canvasMapSource(['image-production/generated/*.png']));
       await server.publishCanvasMapForProject(projectRoot, { canvasId: 'production-map' });
       await server.refreshProject();
       await server.updateCanvasNodeLayouts({
@@ -1041,7 +1063,7 @@ describe('app-server', () => {
       await writeFile(join(projectRoot, 'outputs/gpt/a.png'), 'fake', 'utf8');
       await writeFile(join(projectRoot, 'prompts/cover.md'), '# Cover\n', 'utf8');
       await server.openProject(projectRoot, { initializeIfMissing: true, createDefaultCanvas: true });
-      await writeCanvasMap(projectRoot, 'production-map', ['- prompts/cover.md', '']);
+      await writeCanvasMap(projectRoot, 'production-map', canvasMapSource(['prompts/cover.md']));
       await server.publishCanvasMapForProject(projectRoot, { canvasId: 'production-map' });
 
       const result = await server.addProjectPathToCanvasMap({
@@ -1050,14 +1072,16 @@ describe('app-server', () => {
       });
 
       expect(result.centerProjectRelativePath).toBe('outputs/gpt');
-      await expect(readFile(join(projectRoot, '.debrute/canvas-maps/production-map.yaml'), 'utf8')).resolves.toBe([
-        '- prompts/cover.md',
-        '- outputs/gpt/',
-        ''
-      ].join('\n'));
+      await expect(readFile(join(projectRoot, '.debrute/canvas-maps/production-map.yaml'), 'utf8')).resolves.toBe(canvasMapSource([
+        'prompts/cover.md',
+        'outputs/gpt/'
+      ]));
       expect(result.snapshot.canvases[0]?.nodeElements.map((node) => node.projectRelativePath)).toContain('outputs/gpt/a.png');
 
-      await writeFile(join(projectRoot, '.debrute/canvas-maps/production-map.yaml'), '- prompts/cover.md\n- external/edit.md\n', 'utf8');
+      await writeFile(join(projectRoot, '.debrute/canvas-maps/production-map.yaml'), canvasMapSource([
+        'prompts/cover.md',
+        'external/edit.md'
+      ]), 'utf8');
       await expect(server.addProjectPathToCanvasMap({
         canvasId: 'production-map',
         projectRelativePath: 'outputs/gpt/a.png'
@@ -1077,7 +1101,7 @@ describe('app-server', () => {
       await writeFile(join(projectRoot, 'prompts/cover.md'), '# Cover\n', 'utf8');
       await writeFile(join(projectRoot, 'prompts/alt.md'), '# Alt\n', 'utf8');
       await publisher.openProject(projectRoot, { initializeIfMissing: true, createDefaultCanvas: true });
-      await writeCanvasMap(projectRoot, 'production-map', ['- prompts/cover.md', '']);
+      await writeCanvasMap(projectRoot, 'production-map', canvasMapSource(['prompts/cover.md']));
       await publisher.publishCanvasMapForProject(projectRoot, { canvasId: 'production-map' });
       publisher.close();
 
@@ -1093,11 +1117,59 @@ describe('app-server', () => {
         'prompts/cover.md',
         'prompts/alt.md'
       ]));
-      await expect(readFile(join(projectRoot, '.debrute/canvas-maps/production-map.yaml'), 'utf8')).resolves.toBe([
-        '- prompts/cover.md',
-        '- prompts/alt.md',
-        ''
-      ].join('\n'));
+      await expect(readFile(join(projectRoot, '.debrute/canvas-maps/production-map.yaml'), 'utf8')).resolves.toBe(canvasMapSource([
+        'prompts/cover.md',
+        'prompts/alt.md'
+      ]));
+    } finally {
+      publisher.close();
+      workbench.close();
+      await rm(projectRoot, { recursive: true, force: true });
+    }
+  });
+
+  it('rejects fresh-session drag when Canvas Map layout rows are unpublished', async () => {
+    const projectRoot = await mkdtemp(join(tmpdir(), 'debrute-app-server-canvas-map-fresh-drag-row-conflict-'));
+    const publisher = new DebruteAppServer({
+      canvasNodeLayoutSizeReader: canvasLayoutSizeReader({
+        'prompts/cover.md': { width: 420, height: 280 },
+        'prompts/alt.md': { width: 420, height: 280 },
+        'prompts/extra.md': { width: 420, height: 280 }
+      })
+    });
+    const workbench = new DebruteAppServer({
+      canvasNodeLayoutSizeReader: canvasLayoutSizeReader({
+        'prompts/cover.md': { width: 420, height: 280 },
+        'prompts/alt.md': { width: 420, height: 280 },
+        'prompts/extra.md': { width: 420, height: 280 }
+      })
+    });
+    try {
+      await mkdir(join(projectRoot, 'prompts'), { recursive: true });
+      await writeFile(join(projectRoot, 'prompts/cover.md'), '# Cover\n', 'utf8');
+      await writeFile(join(projectRoot, 'prompts/alt.md'), '# Alt\n', 'utf8');
+      await writeFile(join(projectRoot, 'prompts/extra.md'), '# Extra\n', 'utf8');
+      await publisher.openProject(projectRoot, { initializeIfMissing: true, createDefaultCanvas: true });
+      await writeCanvasMap(projectRoot, 'production-map', canvasMapSource([
+        'prompts/cover.md',
+        'prompts/alt.md'
+      ]));
+      await publisher.publishCanvasMapForProject(projectRoot, { canvasId: 'production-map' });
+      publisher.close();
+      const unpublishedSource = canvasMapSource([
+        'prompts/cover.md',
+        'prompts/alt.md'
+      ], ['prompts/*.md']);
+      await writeCanvasMap(projectRoot, 'production-map', unpublishedSource);
+
+      await workbench.openProject(projectRoot, { initializeIfMissing: false, createDefaultCanvas: false });
+      await expect(workbench.addProjectPathToCanvasMap({
+        canvasId: 'production-map',
+        projectRelativePath: 'prompts/extra.md'
+      })).rejects.toMatchObject({ code: 'canvas_map_conflict' });
+
+      await expect(readFile(join(projectRoot, '.debrute/canvas-maps/production-map.yaml'), 'utf8')).resolves.toBe(unpublishedSource);
+      await expect(readFile(join(projectRoot, '.debrute/canvases/production-map.json'), 'utf8')).resolves.not.toContain('prompts/extra.md');
     } finally {
       publisher.close();
       workbench.close();
@@ -1118,7 +1190,7 @@ describe('app-server', () => {
       await writeFile(join(projectRoot, 'prompts/cover.md'), '# Cover\n', 'utf8');
       await writeFile(join(projectRoot, 'outputs/bad.png'), 'not a png', 'utf8');
       await server.openProject(projectRoot, { initializeIfMissing: true, createDefaultCanvas: true });
-      await writeCanvasMap(projectRoot, 'production-map', ['- prompts/cover.md', '']);
+      await writeCanvasMap(projectRoot, 'production-map', canvasMapSource(['prompts/cover.md']));
       await server.publishCanvasMapForProject(projectRoot, { canvasId: 'production-map' });
 
       await expect(server.addProjectPathToCanvasMap({
@@ -1126,7 +1198,7 @@ describe('app-server', () => {
         projectRelativePath: 'outputs/bad.png'
       })).rejects.toMatchObject({ code: 'canvas_map_invalid_path' });
 
-      await expect(readFile(join(projectRoot, '.debrute/canvas-maps/production-map.yaml'), 'utf8')).resolves.toBe('- prompts/cover.md\n');
+      await expect(readFile(join(projectRoot, '.debrute/canvas-maps/production-map.yaml'), 'utf8')).resolves.toBe(canvasMapSource(['prompts/cover.md']));
       expect(server.getSnapshot().canvases[0]?.nodeElements.map((node) => node.projectRelativePath)).not.toContain('outputs/bad.png');
     } finally {
       server.close();
@@ -1172,9 +1244,24 @@ describe('app-server', () => {
   });
 });
 
-async function writeCanvasMap(projectRoot: string, canvasId: string, lines: string[]): Promise<void> {
+async function writeCanvasMap(projectRoot: string, canvasId: string, content: string): Promise<void> {
   await mkdir(join(projectRoot, '.debrute/canvas-maps'), { recursive: true });
-  await writeFile(join(projectRoot, `.debrute/canvas-maps/${canvasId}.yaml`), lines.join('\n'), 'utf8');
+  await writeFile(join(projectRoot, `.debrute/canvas-maps/${canvasId}.yaml`), content, 'utf8');
+}
+
+function canvasMapSource(paths: string[], layoutRows: string[] = []): string {
+  return [
+    'paths:',
+    ...paths.map((path) => `  - ${path}`),
+    ...(layoutRows.length === 0
+      ? []
+      : [
+          'layout:',
+          '  rows:',
+          ...layoutRows.map((row) => `    - ${row}`)
+        ]),
+    ''
+  ].join('\n');
 }
 
 async function readJson(path: string): Promise<unknown> {

@@ -203,7 +203,7 @@ describe('canvas-core', () => {
     });
   });
 
-  it('lays out grouped direct child files in one horizontal row', () => {
+  it('lays out row-controlled direct child files in one horizontal row', () => {
     const desired: CanvasDesiredNode[] = [
       { projectRelativePath: 'flow', nodeKind: 'directory' },
       { projectRelativePath: 'flow/outputs', nodeKind: 'directory' },
@@ -215,7 +215,7 @@ describe('canvas-core', () => {
     const reconciled = reconcileCanvasNodeElements({
       existing: [],
       desired,
-      layoutGroups: [{
+      layoutRows: [{
         parentProjectRelativePath: 'flow/outputs',
         memberProjectRelativePaths: [
           'flow/outputs/a.png',
@@ -231,7 +231,7 @@ describe('canvas-core', () => {
     expect(reconciled.find((node) => node.projectRelativePath === 'flow/outputs/c.png')).toMatchObject({ x: 2120, y: 0 });
   });
 
-  it('vertically centers different-height grouped direct child files in one horizontal row', () => {
+  it('vertically centers different-height row-controlled direct child files in one horizontal row', () => {
     const desired: CanvasDesiredNode[] = [
       { projectRelativePath: 'flow', nodeKind: 'directory' },
       { projectRelativePath: 'flow/outputs', nodeKind: 'directory' },
@@ -244,7 +244,7 @@ describe('canvas-core', () => {
     const reconciled = reconcileCanvasNodeElements({
       existing: [],
       desired,
-      layoutGroups: [{
+      layoutRows: [{
         parentProjectRelativePath: 'flow/outputs',
         memberProjectRelativePaths: [
           'flow/outputs/a.png',
@@ -280,7 +280,7 @@ describe('canvas-core', () => {
     expect(notes).toMatchObject({ x: 680, y: 440, width: 420, height: 280 });
   });
 
-  it('places ungrouped children below horizontal group blocks', () => {
+  it('places non-row children below horizontal row blocks', () => {
     const desired: CanvasDesiredNode[] = [
       { projectRelativePath: 'flow', nodeKind: 'directory' },
       { projectRelativePath: 'flow/outputs', nodeKind: 'directory' },
@@ -292,7 +292,7 @@ describe('canvas-core', () => {
     const reconciled = reconcileCanvasNodeElements({
       existing: [],
       desired,
-      layoutGroups: [{
+      layoutRows: [{
         parentProjectRelativePath: 'flow/outputs',
         memberProjectRelativePaths: [
           'flow/outputs/a.png',
@@ -307,7 +307,7 @@ describe('canvas-core', () => {
     expect(reconciled.find((node) => node.projectRelativePath === 'flow/outputs/notes.md')).toMatchObject({ x: 680, y: 440 });
   });
 
-  it('keeps manual grouped nodes at their actual layout while reserving their theoretical slot', () => {
+  it('keeps manual row nodes at their actual layout while reserving their theoretical slot', () => {
     const existing = [{
       projectRelativePath: 'flow/outputs/b.png',
       nodeKind: 'file' as const,
@@ -332,7 +332,7 @@ describe('canvas-core', () => {
     const reconciled = reconcileCanvasNodeElements({
       existing,
       desired,
-      layoutGroups: [{
+      layoutRows: [{
         parentProjectRelativePath: 'flow/outputs',
         memberProjectRelativePaths: [
           'flow/outputs/a.png',

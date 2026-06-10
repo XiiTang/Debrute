@@ -74,7 +74,7 @@ async function createWindow(initialUrl?: string, projectId?: string): Promise<El
 
 app.whenReady().then(async () => {
   if (process.platform === 'darwin') {
-    app.dock.setIcon(dockIconPath);
+    app.dock!.setIcon(dockIconPath);
   }
   runtimeClient = await createDesktopRuntimeClient();
   registerShellIpc();

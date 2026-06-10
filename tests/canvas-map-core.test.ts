@@ -9,14 +9,18 @@ import {
 } from '@debrute/canvas-map-core';
 
 describe('canvas-map core', () => {
-  it('parses top-level sequence path rules', () => {
+  it('parses top-level object paths and layout rows', () => {
     const map = parseCanvasMap({
       canvasId: 'production-map',
       sourcePath: '.debrute/canvas-maps/production-map.yaml',
       content: [
-        '- prompts/cover.md',
-        '- outputs/gpt/',
-        '- outputs/**/*.png',
+        'paths:',
+        '  - prompts/cover.md',
+        '  - outputs/gpt/',
+        '  - outputs/**/*.png',
+        'layout:',
+        '  rows:',
+        '    - outputs/**/high/*.png',
         ''
       ].join('\n')
     });
@@ -24,50 +28,81 @@ describe('canvas-map core', () => {
     expect(map).toEqual({
       canvasId: 'production-map',
       sourcePath: '.debrute/canvas-maps/production-map.yaml',
-      rules: [
+      paths: [
         { raw: 'prompts/cover.md', pattern: 'prompts/cover.md', kind: 'exact-file' },
         { raw: 'outputs/gpt/', pattern: 'outputs/gpt', kind: 'recursive-directory' },
         { raw: 'outputs/**/*.png', pattern: 'outputs/**/*.png', kind: 'file-glob' }
+      ],
+      layoutRows: [
+        { raw: 'outputs/**/high/*.png', pattern: 'outputs/**/high/*.png' }
       ]
     });
     expect(canvasMapPath('production-map')).toBe('.debrute/canvas-maps/production-map.yaml');
   });
 
-  it('rejects non-sequence YAML, non-string items, unsafe paths, and negative rules', () => {
+  it('rejects non-object YAML, unknown fields, invalid paths, and invalid rows', () => {
     expect(() => parseCanvasMap({
       canvasId: 'main',
       sourcePath: '.debrute/canvas-maps/main.yaml',
-      content: 'items:\n  - a.md\n'
-    })).toThrow('Canvas Map YAML must be a top-level sequence.');
+      content: '- prompts/cover.md\n'
+    })).toThrow('Canvas Map YAML must be a top-level object.');
 
     expect(() => parseCanvasMap({
       canvasId: 'main',
       sourcePath: '.debrute/canvas-maps/main.yaml',
-      content: '- 1\n'
-    })).toThrow('Canvas Map rule must be a non-empty string.');
+      content: 'paths:\n  - a.md\nitems: []\n'
+    })).toThrow('Unsupported Canvas Map field "items".');
 
     expect(() => parseCanvasMap({
       canvasId: 'main',
       sourcePath: '.debrute/canvas-maps/main.yaml',
-      content: '- ../outside.md\n'
+      content: 'paths:\n  - 1\n'
+    })).toThrow('Canvas Map path rule must be a non-empty string.');
+
+    expect(() => parseCanvasMap({
+      canvasId: 'main',
+      sourcePath: '.debrute/canvas-maps/main.yaml',
+      content: 'paths:\n  - ../outside.md\n'
     })).toThrow('Canvas Map path must be a safe relative project path.');
 
     expect(() => parseCanvasMap({
       canvasId: 'main',
       sourcePath: '.debrute/canvas-maps/main.yaml',
-      content: '- "!outputs/tmp/"\n'
+      content: 'paths:\n  - "!outputs/tmp/"\n'
     })).toThrow('Canvas Map negative rules are not supported.');
+
+    expect(() => parseCanvasMap({
+      canvasId: 'main',
+      sourcePath: '.debrute/canvas-maps/main.yaml',
+      content: 'paths:\n  - outputs/**/*.png\nlayout:\n  rows:\n    - outputs/high/\n'
+    })).toThrow('Canvas Map row rules must be file globs.');
+
+    expect(() => parseCanvasMap({
+      canvasId: 'main',
+      sourcePath: '.debrute/canvas-maps/main.yaml',
+      content: 'paths:\n  - outputs/**/*.png\nlayout:\n  rows:\n'
+    })).toThrow('Canvas Map layout.rows must be an array.');
+
+    expect(() => parseCanvasMap({
+      canvasId: 'main',
+      sourcePath: '.debrute/canvas-maps/main.yaml',
+      content: 'paths:\n  - outputs/**/*.png\nlayout:\n  columns: []\n'
+    })).toThrow('Unsupported Canvas Map layout field "columns".');
   });
 
-  it('expands exact files, recursive folders, file-only globs, and ancestor folders', () => {
+  it('expands exact files, recursive folders, file-only globs, ancestor folders, and rows', () => {
     const map = parseCanvasMap({
       canvasId: 'main',
       sourcePath: '.debrute/canvas-maps/main.yaml',
       content: [
-        '- prompts/cover.md',
-        '- outputs/gpt/',
-        '- outputs/**/*.png',
-        '- missing/future.md',
+        'paths:',
+        '  - prompts/cover.md',
+        '  - outputs/gpt/',
+        '  - outputs/**/*.png',
+        '  - missing/future.md',
+        'layout:',
+        '  rows:',
+        '    - outputs/**/high/*.png',
         ''
       ].join('\n')
     });
@@ -76,9 +111,15 @@ describe('canvas-map core', () => {
       { projectRelativePath: 'prompts/cover.md', kind: 'file' },
       { projectRelativePath: 'outputs', kind: 'directory' },
       { projectRelativePath: 'outputs/gpt', kind: 'directory' },
-      { projectRelativePath: 'outputs/gpt/a.png', kind: 'file' },
-      { projectRelativePath: 'outputs/gpt/nested', kind: 'directory' },
-      { projectRelativePath: 'outputs/gpt/nested/b.txt', kind: 'file' },
+      { projectRelativePath: 'outputs/gpt/high', kind: 'directory' },
+      { projectRelativePath: 'outputs/gpt/high/a.png', kind: 'file' },
+      { projectRelativePath: 'outputs/gpt/high/b.png', kind: 'file' },
+      { projectRelativePath: 'outputs/gpt/high/readme.md', kind: 'file' },
+      { projectRelativePath: 'outputs/gemini', kind: 'directory' },
+      { projectRelativePath: 'outputs/gemini/high', kind: 'directory' },
+      { projectRelativePath: 'outputs/gemini/high/a.png', kind: 'file' },
+      { projectRelativePath: 'outputs/gemini/high/nested', kind: 'directory' },
+      { projectRelativePath: 'outputs/gemini/high/nested/deep.png', kind: 'file' },
       { projectRelativePath: 'outputs/manual', kind: 'directory' },
       { projectRelativePath: 'outputs/manual/c.png', kind: 'file' },
       { projectRelativePath: 'outputs/manual/folder.png', kind: 'directory' }
@@ -89,23 +130,71 @@ describe('canvas-map core', () => {
       sourcePath: '.debrute/canvas-maps/main.yaml',
       nodes: [
         { projectRelativePath: 'outputs', nodeKind: 'directory' },
+        { projectRelativePath: 'outputs/gemini', nodeKind: 'directory' },
+        { projectRelativePath: 'outputs/gemini/high', nodeKind: 'directory' },
+        { projectRelativePath: 'outputs/gemini/high/nested', nodeKind: 'directory' },
+        { projectRelativePath: 'outputs/gemini/high/nested/deep.png', nodeKind: 'file' },
+        { projectRelativePath: 'outputs/gemini/high/a.png', nodeKind: 'file' },
         { projectRelativePath: 'outputs/gpt', nodeKind: 'directory' },
-        { projectRelativePath: 'outputs/gpt/nested', nodeKind: 'directory' },
-        { projectRelativePath: 'outputs/gpt/nested/b.txt', nodeKind: 'file' },
-        { projectRelativePath: 'outputs/gpt/a.png', nodeKind: 'file' },
+        { projectRelativePath: 'outputs/gpt/high', nodeKind: 'directory' },
+        { projectRelativePath: 'outputs/gpt/high/a.png', nodeKind: 'file' },
+        { projectRelativePath: 'outputs/gpt/high/b.png', nodeKind: 'file' },
+        { projectRelativePath: 'outputs/gpt/high/readme.md', nodeKind: 'file' },
         { projectRelativePath: 'outputs/manual', nodeKind: 'directory' },
         { projectRelativePath: 'outputs/manual/c.png', nodeKind: 'file' },
         { projectRelativePath: 'prompts', nodeKind: 'directory' },
         { projectRelativePath: 'prompts/cover.md', nodeKind: 'file' }
+      ],
+      layoutRows: [
+        {
+          parentProjectRelativePath: 'outputs/gemini/high',
+          memberProjectRelativePaths: ['outputs/gemini/high/a.png']
+        },
+        {
+          parentProjectRelativePath: 'outputs/gpt/high',
+          memberProjectRelativePaths: [
+            'outputs/gpt/high/a.png',
+            'outputs/gpt/high/b.png'
+          ]
+        }
       ]
     });
+  });
+
+  it('accepts quiet future row rules and rejects duplicate row control', () => {
+    expect(expandCanvasMap(parseCanvasMap({
+      canvasId: 'main',
+      sourcePath: '.debrute/canvas-maps/main.yaml',
+      content: 'paths:\n  - future/**/*.png\nlayout:\n  rows:\n    - future/**/high/*.png\n'
+    }), [])).toMatchObject({
+      nodes: [],
+      layoutRows: []
+    });
+
+    expect(() => expandCanvasMap(parseCanvasMap({
+      canvasId: 'main',
+      sourcePath: '.debrute/canvas-maps/main.yaml',
+      content: [
+        'paths:',
+        '  - outputs/**/*.png',
+        'layout:',
+        '  rows:',
+        '    - outputs/**/*.png',
+        '    - outputs/gpt/*.png',
+        ''
+      ].join('\n')
+    }), [
+      { projectRelativePath: 'outputs', kind: 'directory' },
+      { projectRelativePath: 'outputs/gpt', kind: 'directory' },
+      { projectRelativePath: 'outputs/gpt/a.png', kind: 'file' }
+    ])).toThrow('Canvas Map row rules match the same file more than once: outputs/gpt/a.png');
   });
 
   it('accepts missing future paths and rejects rules that contradict existing file kinds', () => {
     expect(() => expandCanvasMap(parseCanvasMap({
       canvasId: 'main',
       sourcePath: '.debrute/canvas-maps/main.yaml',
-      content: '- outputs\n'
+      content: 'paths:\n  - outputs\n'
     }), [
       { projectRelativePath: 'outputs', kind: 'directory' }
     ])).toThrow('Canvas Map file rule currently resolves to a directory. Use a trailing slash for recursive folders: outputs/');
@@ -113,7 +202,7 @@ describe('canvas-map core', () => {
     expect(() => expandCanvasMap(parseCanvasMap({
       canvasId: 'main',
       sourcePath: '.debrute/canvas-maps/main.yaml',
-      content: '- prompts/cover.md/\n'
+      content: 'paths:\n  - prompts/cover.md/\n'
     }), [
       { projectRelativePath: 'prompts/cover.md', kind: 'file' }
     ])).toThrow('Canvas Map folder rule currently resolves to a file: prompts/cover.md');
@@ -121,9 +210,10 @@ describe('canvas-map core', () => {
     expect(expandCanvasMap(parseCanvasMap({
       canvasId: 'main',
       sourcePath: '.debrute/canvas-maps/main.yaml',
-      content: '- future/path.md\n- future/folder/\n- future/**/*.png\n'
+      content: 'paths:\n  - future/path.md\n  - future/folder/\n  - future/**/*.png\n'
     }), [])).toMatchObject({
-      nodes: []
+      nodes: [],
+      layoutRows: []
     });
   });
 
@@ -132,21 +222,36 @@ describe('canvas-map core', () => {
       expandCanvasMap(parseCanvasMap({
         canvasId: 'main',
         sourcePath: '.debrute/canvas-maps/main.yaml',
-        content: '- outputs/[z-a].png\n'
+        content: 'paths:\n  - outputs/[z-a].png\n'
       }), [
         { projectRelativePath: 'outputs/a.png', kind: 'file' }
       ]);
       throw new Error('Expected glob validation to fail.');
     } catch (error) {
       expect(error).toBeInstanceOf(CanvasMapError);
-      expect((error as CanvasMapError).code).toBe('canvas_map_invalid_path');
       expect(error).toMatchObject({ code: 'canvas_map_invalid_path' });
     }
   });
 
-  it('serializes drag-added rules without duplicates', () => {
-    expect(serializeCanvasMapWithRule('- prompts/cover.md\n', 'outputs/gpt/')).toBe('- prompts/cover.md\n- outputs/gpt/\n');
-    expect(serializeCanvasMapWithRule('- prompts/cover.md\n', 'prompts/cover.md')).toBe('- prompts/cover.md\n');
+  it('serializes drag-added path rules without duplicates while preserving rows', () => {
+    const source = [
+      'paths:',
+      '  - prompts/cover.md',
+      'layout:',
+      '  rows:',
+      '    - outputs/**/high/*.png',
+      ''
+    ].join('\n');
+    expect(serializeCanvasMapWithRule(source, 'outputs/gpt/')).toBe([
+      'paths:',
+      '  - prompts/cover.md',
+      '  - outputs/gpt/',
+      'layout:',
+      '  rows:',
+      '    - outputs/**/high/*.png',
+      ''
+    ].join('\n'));
+    expect(serializeCanvasMapWithRule(source, 'prompts/cover.md')).toBe(source);
   });
 
   it('surfaces YAML parse positions on CanvasMapError', () => {
@@ -154,12 +259,11 @@ describe('canvas-map core', () => {
       parseCanvasMap({
         canvasId: 'main',
         sourcePath: '.debrute/canvas-maps/main.yaml',
-        content: '- [broken\n'
+        content: 'paths:\n  - [broken\n'
       });
       throw new Error('Expected parse to fail.');
     } catch (error) {
       expect(error).toBeInstanceOf(CanvasMapError);
-      expect((error as CanvasMapError).code).toBe('canvas_map_invalid_yaml');
       expect(error).toMatchObject({ code: 'canvas_map_invalid_yaml' });
     }
   });

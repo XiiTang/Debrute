@@ -29,7 +29,7 @@ debrute project init /path/to/project
 debrute project status /path/to/project
 debrute project validate /path/to/project
 debrute workbench url /path/to/project
-debrute canvas-map publish /path/to/project --canvas production-map
+debrute canvas-map publish /path/to/project production-map
 debrute generated-asset lookup /path/to/project --path generated/example.png
 debrute llm request --input-json '{"prompt":"Summarize this project."}'
 debrute models image list
@@ -80,22 +80,28 @@ Edit the Canvas Map whose filename matches the Canvas id:
 Publish it:
 
 ```sh
-debrute canvas-map publish /path/to/project --canvas <canvas-id>
+debrute canvas-map publish /path/to/project <canvas-id>
 ```
 
-The YAML file is a top-level sequence of positive project-relative rules:
+The YAML file is a top-level object. `paths` is the complete positive membership rule list. `layout.rows` is optional and controls horizontal rows for files already included by `paths`.
 
 ```yaml
-- outputs/gpt/
-- outputs/gpt/*.png
-- prompts/cover.md
+paths:
+  - outputs/gpt/
+  - outputs/gpt/*.png
+  - prompts/cover.md
+layout:
+  rows:
+    - outputs/**/high/*.png
 ```
 
-Folder rules must end with `/`, for example `outputs/gpt/`. A folder node appears automatically when matching files exist below that folder. Exact file rules and glob rules match files. Missing future files are allowed and do not produce diagnostics.
+Folder rules under `paths` must end with `/`, for example `outputs/gpt/`. A folder node appears automatically when matching files exist below that folder. Exact file rules and glob rules match files. Missing future files are allowed and do not produce diagnostics.
+
+Rows never add files to the Canvas. Each `layout.rows` glob matches included files, then splits matches into one horizontal row per direct parent directory.
 
 Do not use CLI commands to add, remove, inspect, or modify Canvas nodes or edges.
 Maintain the Canvas Map while creating file-producing scripts, prompts, llm requests, image requests, or video requests.
-When output paths are known before generation starts, add matching file, folder, or glob rules to the Canvas Map and publish before running generation.
+When output paths are known before generation starts, add matching file, folder, or glob entries under `paths` and publish before running generation.
 
 ## Canvas Feedback
 

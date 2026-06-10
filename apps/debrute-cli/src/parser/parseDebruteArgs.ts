@@ -47,7 +47,7 @@ const POSITIONAL_COUNTS: Record<DebruteCliCommand, { min: number; max: number }>
   'project.status': { min: 1, max: 1 },
   'project.validate': { min: 1, max: 1 },
   'workbench.url': { min: 1, max: 1 },
-  'canvas-map.publish': { min: 1, max: 1 },
+  'canvas-map.publish': { min: 2, max: 2 },
   'generated-asset.lookup': { min: 1, max: 1 },
   'generate.image': { min: 1, max: 1 },
   'generate.image-batch': { min: 1, max: 1 },
@@ -70,7 +70,7 @@ const ALLOWED_OPTIONS: Record<DebruteCliCommand, Set<string>> = {
   'project.status': new Set(),
   'project.validate': new Set(),
   'workbench.url': new Set(),
-  'canvas-map.publish': new Set(['canvas']),
+  'canvas-map.publish': new Set(),
   'generated-asset.lookup': new Set(['path']),
   'generate.image': new Set(['input-json']),
   'generate.image-batch': new Set(['manifest', 'input-jsonl', 'log', 'summary', 'concurrency', 'retries', 'timeout-ms']),
@@ -208,9 +208,6 @@ function validateRequiredOptions(command: DebruteCliCommand, options: Record<str
   if ((command === 'llm.request' || command === 'generate.image' || command === 'generate.video') && !options['input-json']) {
     throw cliError('missing_argument', '--input-json is required.', { command });
   }
-  if (command === 'canvas-map.publish' && !options.canvas) {
-    throw cliError('missing_argument', '--canvas is required.', { command });
-  }
   if (command === 'generated-asset.lookup' && !options.path) {
     throw cliError('missing_argument', '--path is required.', { command });
   }
@@ -231,6 +228,9 @@ function requiredPositionals(command: DebruteCliCommand): string {
   }
   if (command === 'models.image.describe' || command === 'models.video.describe') {
     return '<model-id>';
+  }
+  if (command === 'canvas-map.publish') {
+    return '<project> <canvas-id>';
   }
   return '<project>';
 }

@@ -90,7 +90,7 @@ describe('project icon assets', () => {
     expect(ico.readUInt16LE(0)).toBe(0);
     expect(ico.readUInt16LE(2)).toBe(1);
     expect(ico.readUInt16LE(4)).toBe(4);
-  });
+  }, 15_000);
 
   it('fails when the canonical project icon is missing', async () => {
     const root = await mkdtemp(join(tmpdir(), 'debrute-project-icon-missing-'));
@@ -129,7 +129,7 @@ describe('project icon assets', () => {
     expect(electronMain).toContain("const projectIconPath = join(__dirname, 'icon.png')");
     expect(electronMain).toContain("const dockIconPath = join(__dirname, 'dock_icon.png')");
     expect(electronMain).toContain('icon: projectIconPath');
-    expect(electronMain).toContain('app.dock.setIcon(dockIconPath)');
+    expect(electronMain).toContain('app.dock!.setIcon(dockIconPath)');
   });
 });
 

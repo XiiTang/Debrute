@@ -18,7 +18,7 @@
   "build": {
     "appId": "dev.debrute.desktop",
     "productName": "Debrute",
-    "electronVersion": "42.3.3",
+    "electronVersion": "42.4.0",
     "asar": true,
     "afterPack": "scripts/package-sharp-runtime.mjs",
     "directories": {
@@ -57,10 +57,10 @@
     "@debrute/workbench-runtime": "workspace:*"
   },
   "devDependencies": {
-    "electron": "42.3.3",
-    "electron-builder": "^26.0.12",
-    "esbuild": "^0.27.2",
-    "typescript": "^5.9.3",
-    "vite": "^7.3.0"
+    "electron": "42.4.0",
+    "electron-builder": "^26.15.2",
+    "esbuild": "^0.28.0",
+    "typescript": "^6.0.3",
+    "vite": "^8.0.16"
   }
 }

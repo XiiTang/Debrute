@@ -9,10 +9,16 @@ export interface CanvasMapRule {
   kind: CanvasMapRuleKind;
 }
 
+export interface CanvasMapRowRule {
+  raw: string;
+  pattern: string;
+}
+
 export interface CanvasMapDocument {
   canvasId: string;
   sourcePath: string;
-  rules: CanvasMapRule[];
+  paths: CanvasMapRule[];
+  layoutRows: CanvasMapRowRule[];
 }
 
 export interface CanvasMapParseInput {
@@ -33,10 +39,16 @@ export interface CanvasMapNodeProjection {
   nodeKind: CanvasMapNodeKind;
 }
 
+export interface ExpandedCanvasMapLayoutRow {
+  parentProjectRelativePath: string;
+  memberProjectRelativePaths: string[];
+}
+
 export interface ExpandedCanvasMap {
   canvasId: string;
   sourcePath: string;
   nodes: CanvasMapNodeProjection[];
+  layoutRows: ExpandedCanvasMapLayoutRow[];
 }
 
 export class CanvasMapError extends Error {
@@ -46,6 +58,7 @@ export class CanvasMapError extends Error {
       | 'canvas_map_invalid_yaml'
       | 'canvas_map_invalid_path'
       | 'canvas_map_invalid_canvas_id'
+      | 'canvas_map_layout_conflict'
       | 'canvas_map_read_failed'
       | 'canvas_map_write_failed'
       | 'canvas_map_conflict'
@@ -81,13 +94,15 @@ export function parseCanvasMap(input: CanvasMapParseInput): CanvasMapDocument {
     throw new CanvasMapError(`Canvas Map path must be "${expectedSourcePath}".`, 'canvas_map_invalid_path');
   }
   const value = parseYaml(input.content);
-  if (!Array.isArray(value)) {
-    throw new CanvasMapError('Canvas Map YAML must be a top-level sequence.', 'canvas_map_invalid_yaml');
+  if (!isRecord(value)) {
+    throw new CanvasMapError('Canvas Map YAML must be a top-level object.', 'canvas_map_invalid_yaml');
   }
+  assertOnlyKeys(value, ['paths', 'layout'], 'Canvas Map');
   return {
     canvasId: input.canvasId,
     sourcePath: expectedSourcePath,
-    rules: value.map(normalizeRule)
+    paths: normalizePathRules(value.paths),
+    layoutRows: normalizeLayoutRows(value.layout)
   };
 }
 
@@ -102,7 +117,7 @@ export function expandCanvasMap(map: CanvasMapDocument, entries: CanvasMapProjec
     .sort(compareProjectPath);
   const matchedFiles = new Set<string>();
 
-  for (const rule of map.rules) {
+  for (const rule of map.paths) {
     const currentKind = entryByPath.get(rule.pattern);
     if (rule.kind === 'exact-file') {
       if (currentKind === 'directory') {
@@ -135,8 +150,9 @@ export function expandCanvasMap(map: CanvasMapDocument, entries: CanvasMapProjec
     }
   }
 
+  const matchedFileList = [...matchedFiles].sort(compareProjectPath);
   const nodeByPath = new Map<string, CanvasMapNodeProjection>();
-  for (const filePath of [...matchedFiles].sort(compareProjectPath)) {
+  for (const filePath of matchedFileList) {
     addAncestors(nodeByPath, filePath);
     nodeByPath.set(filePath, { projectRelativePath: filePath, nodeKind: 'file' });
   }
@@ -144,24 +160,37 @@ export function expandCanvasMap(map: CanvasMapDocument, entries: CanvasMapProjec
   return {
     canvasId: map.canvasId,
     sourcePath: map.sourcePath,
-    nodes
+    nodes,
+    layoutRows: expandLayoutRows(map.layoutRows, matchedFileList)
   };
 }
 
 export function serializeCanvasMapWithRule(content: string, rule: string): string {
   const parsed = parseYaml(content);
-  if (!Array.isArray(parsed) || !parsed.every((item) => typeof item === 'string')) {
-    throw new CanvasMapError('Canvas Map YAML must be a top-level sequence.', 'canvas_map_invalid_yaml');
+  if (!isRecord(parsed)) {
+    throw new CanvasMapError('Canvas Map YAML must be a top-level object.', 'canvas_map_invalid_yaml');
   }
-  const existing = parsed.map((item) => normalizeRule(item).raw);
-  const normalized = normalizeRule(rule).raw;
-  const next = existing.includes(normalized) ? existing : [...existing, normalized];
-  return ensureTrailingNewline(stringify(next, { sortMapEntries: false }));
+  assertOnlyKeys(parsed, ['paths', 'layout'], 'Canvas Map');
+  normalizeLayoutRows(parsed.layout);
+  const existing = normalizePathRules(parsed.paths).map((item) => item.raw);
+  const normalized = normalizePathRule(rule).raw;
+  const nextPaths = existing.includes(normalized) ? existing : [...existing, normalized];
+  return ensureTrailingNewline(stringify({
+    paths: nextPaths,
+    ...(parsed.layout === undefined ? {} : { layout: parsed.layout })
+  }, { sortMapEntries: false }));
 }
 
-function normalizeRule(value: unknown): CanvasMapRule {
+function normalizePathRules(value: unknown): CanvasMapRule[] {
+  if (!Array.isArray(value)) {
+    throw new CanvasMapError('Canvas Map paths must be an array.', 'canvas_map_invalid_yaml');
+  }
+  return value.map(normalizePathRule);
+}
+
+function normalizePathRule(value: unknown): CanvasMapRule {
   if (typeof value !== 'string' || value.trim().length === 0) {
-    throw new CanvasMapError('Canvas Map rule must be a non-empty string.', 'canvas_map_invalid_yaml');
+    throw new CanvasMapError('Canvas Map path rule must be a non-empty string.', 'canvas_map_invalid_yaml');
   }
   const raw = value.trim().replaceAll('\\', '/');
   if (raw.startsWith('!')) {
@@ -177,6 +206,79 @@ function normalizeRule(value: unknown): CanvasMapRule {
     pattern,
     kind: hasGlobSyntax(pattern) ? 'file-glob' : 'exact-file'
   };
+}
+
+function normalizeLayoutRows(value: unknown): CanvasMapRowRule[] {
+  if (value === undefined) {
+    return [];
+  }
+  if (!isRecord(value)) {
+    throw new CanvasMapError('Canvas Map layout must be an object.', 'canvas_map_invalid_yaml');
+  }
+  assertOnlyKeys(value, ['rows'], 'Canvas Map layout');
+  if (!('rows' in value)) {
+    return [];
+  }
+  const rows = value.rows;
+  if (!Array.isArray(rows)) {
+    throw new CanvasMapError('Canvas Map layout.rows must be an array.', 'canvas_map_invalid_yaml');
+  }
+  return rows.map(normalizeRowRule);
+}
+
+function normalizeRowRule(value: unknown): CanvasMapRowRule {
+  if (typeof value !== 'string' || value.trim().length === 0) {
+    throw new CanvasMapError('Canvas Map row rule must be a non-empty string.', 'canvas_map_invalid_yaml');
+  }
+  const raw = value.trim().replaceAll('\\', '/');
+  if (raw.startsWith('!')) {
+    throw new CanvasMapError('Canvas Map negative rules are not supported.', 'canvas_map_invalid_path');
+  }
+  if (raw.endsWith('/')) {
+    throw new CanvasMapError('Canvas Map row rules must be file globs.', 'canvas_map_invalid_path');
+  }
+  const pattern = normalizeStrictProjectPath(raw);
+  if (!hasGlobSyntax(pattern)) {
+    throw new CanvasMapError('Canvas Map row rules must be file globs.', 'canvas_map_invalid_path');
+  }
+  return { raw: pattern, pattern };
+}
+
+function expandLayoutRows(rowRules: CanvasMapRowRule[], matchedFilePaths: string[]): ExpandedCanvasMapLayoutRow[] {
+  const matchedByFile = new Map<string, number>();
+  const rows: ExpandedCanvasMapLayoutRow[] = [];
+  for (const [rowIndex, rowRule] of rowRules.entries()) {
+    const matches = controlledGlobMatcher(rowRule.pattern);
+    const pathsByParent = new Map<string, string[]>();
+    for (const filePath of matchedFilePaths) {
+      if (!matches(filePath)) {
+        continue;
+      }
+      const previousRow = matchedByFile.get(filePath);
+      if (previousRow !== undefined && previousRow !== rowIndex) {
+        throw new CanvasMapError(
+          `Canvas Map row rules match the same file more than once: ${filePath}`,
+          'canvas_map_layout_conflict'
+        );
+      }
+      matchedByFile.set(filePath, rowIndex);
+      const parent = parentPath(filePath);
+      if (!parent) {
+        continue;
+      }
+      pathsByParent.set(parent, [
+        ...(pathsByParent.get(parent) ?? []),
+        filePath
+      ]);
+    }
+    for (const parent of [...pathsByParent.keys()].sort(compareProjectPath)) {
+      rows.push({
+        parentProjectRelativePath: parent,
+        memberProjectRelativePaths: pathsByParent.get(parent)!.sort(compareProjectPath)
+      });
+    }
+  }
+  return rows;
 }
 
 function parseYaml(content: string): unknown {
@@ -300,6 +402,24 @@ function compareProjectPath(left: string, right: string): number {
     }
   }
   return leftParts.length - rightParts.length;
+}
+
+function parentPath(path: string): string | undefined {
+  const index = path.lastIndexOf('/');
+  return index > 0 ? path.slice(0, index) : undefined;
+}
+
+function assertOnlyKeys(value: Record<string, unknown>, allowedKeys: string[], label: string): void {
+  const allowed = new Set(allowedKeys);
+  for (const key of Object.keys(value)) {
+    if (!allowed.has(key)) {
+      throw new CanvasMapError(`Unsupported ${label} field "${key}".`, 'canvas_map_invalid_yaml');
+    }
+  }
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return Boolean(value) && typeof value === 'object' && !Array.isArray(value);
 }
 
 function escapeRegExp(value: string): string {

@@ -2,6 +2,9 @@ packages:
   - apps/*
   - packages/*
 
+overrides:
+  "@types/node": 24.13.1
+
 supportedArchitectures:
   os:
     - darwin
@@ -24,3 +27,6 @@ onlyBuiltDependencies:
   - electron-winstaller
   - esbuild
   - sharp
+
+minimumReleaseAgeExclude:
+  - electron@42.4.0

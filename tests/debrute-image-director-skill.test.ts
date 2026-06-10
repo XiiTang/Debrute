@@ -45,12 +45,14 @@ describe('Debrute image director Skill', () => {
     const imageDirector = readRepoFile('skills/debrute-image-director/SKILL.md');
 
     expect(core).toContain('.debrute/canvas-maps/<canvas-id>.yaml');
-    expect(core).toContain('debrute canvas-map publish /path/to/project --canvas <canvas-id>');
-    expect(core).toContain('- outputs/gpt/');
-    expect(core).toContain('Folder rules must end with `/`, for example `outputs/gpt/`.');
-    expect(core).toContain('Maintain the Canvas Map while creating file-producing scripts, prompts, llm requests, image requests, or video requests.');
+    expect(core).toContain('debrute canvas-map publish /path/to/project <canvas-id>');
+    expect(core).toContain('paths:');
+    expect(core).toContain('layout:');
+    expect(core).toContain('rows:');
+    expect(core).toContain('Folder rules under `paths` must end with `/`, for example `outputs/gpt/`.');
+    expect(core).toContain('add matching file, folder, or glob entries under `paths` and publish before running generation.');
     expect(imageDirector).toContain('Update the Canvas Map when planning image output paths.');
-    expect(imageDirector).toContain('Add exact file, folder, or glob rules to `.debrute/canvas-maps/<canvas-id>.yaml`; folder rules must end with `/`.');
+    expect(imageDirector).toContain('Add exact file, folder, or glob entries under `paths` in `.debrute/canvas-maps/<canvas-id>.yaml`; folder rules must end with `/`.');
     expect(imageDirector).toContain('Publish the Canvas Map with `debrute canvas-map publish');
   });
 

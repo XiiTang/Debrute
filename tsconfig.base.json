@@ -16,19 +16,19 @@
     "declaration": true,
     "declarationMap": true,
     "sourceMap": true,
-    "baseUrl": ".",
+    "types": ["node"],
     "rootDir": ".",
     "paths": {
-      "@debrute/app-protocol": ["packages/app-protocol/src/index.ts"],
-      "@debrute/architecture-rules": ["packages/architecture-rules/src/index.mjs"],
-      "@debrute/capability-core": ["packages/capability-core/src/index.ts"],
-      "@debrute/capability-runtime": ["packages/capability-runtime/src/index.ts"],
-      "@debrute/project-core": ["packages/project-core/src/index.ts"],
-      "@debrute/canvas-core": ["packages/canvas-core/src/index.ts"],
-      "@debrute/canvas-map-core": ["packages/canvas-map-core/src/index.ts"],
-      "@debrute/workbench-runtime": ["packages/workbench-runtime/src/index.ts"],
-      "@debrute/app-server": ["apps/app-server/src/index.ts"],
-      "@debrute/daemon": ["apps/daemon/src/index.ts"]
+      "@debrute/app-protocol": ["./packages/app-protocol/src/index.ts"],
+      "@debrute/architecture-rules": ["./packages/architecture-rules/src/index.mjs"],
+      "@debrute/capability-core": ["./packages/capability-core/src/index.ts"],
+      "@debrute/capability-runtime": ["./packages/capability-runtime/src/index.ts"],
+      "@debrute/project-core": ["./packages/project-core/src/index.ts"],
+      "@debrute/canvas-core": ["./packages/canvas-core/src/index.ts"],
+      "@debrute/canvas-map-core": ["./packages/canvas-map-core/src/index.ts"],
+      "@debrute/workbench-runtime": ["./packages/workbench-runtime/src/index.ts"],
+      "@debrute/app-server": ["./apps/app-server/src/index.ts"],
+      "@debrute/daemon": ["./apps/daemon/src/index.ts"]
     }
   }
 }

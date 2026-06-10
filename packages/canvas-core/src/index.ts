@@ -109,7 +109,7 @@ export interface CanvasDesiredNode {
   mediaKind?: CanvasMediaKind;
 }
 
-export interface CanvasDesiredLayoutGroup {
+export interface CanvasDesiredLayoutRow {
   parentProjectRelativePath: string;
   memberProjectRelativePaths: string[];
 }
@@ -117,7 +117,7 @@ export interface CanvasDesiredLayoutGroup {
 export interface ReconcileCanvasNodeElementsInput {
   existing: CanvasNodeElement[];
   desired: CanvasDesiredNode[];
-  layoutGroups?: CanvasDesiredLayoutGroup[];
+  layoutRows?: CanvasDesiredLayoutRow[];
   layoutSizeForNode: (node: CanvasDesiredNode) => CanvasLayoutSize;
 }
 
@@ -160,12 +160,12 @@ const CANVAS_FEEDBACK_MARK_ORDER = new Map<string, number>(
 
 const HORIZONTAL_TREE_GAP = 100;
 const VERTICAL_GAP = 80;
-const HORIZONTAL_GROUP_GAP = VERTICAL_GAP;
+const HORIZONTAL_ROW_GAP = VERTICAL_GAP;
 const ROOT_HORIZONTAL_GAP = 180;
 
 type CanvasLayoutBlock =
   | { kind: 'node'; node: CanvasDesiredNode }
-  | { kind: 'horizontal-group'; members: CanvasDesiredNode[] };
+  | { kind: 'horizontal-row'; members: CanvasDesiredNode[] };
 
 interface CanvasLayoutBounds {
   maxDepth: number;
@@ -358,7 +358,7 @@ export function canvasNodeLayerOrderTopFirst(canvas: Pick<CanvasDocument, 'nodeE
 
 export function reconcileCanvasNodeElements(input: ReconcileCanvasNodeElementsInput): CanvasNodeElement[] {
   const desired = sortDesiredNodes(input.desired);
-  const layoutByPath = compactTreeLayout(desired, input.layoutSizeForNode, input.layoutGroups ?? []);
+  const layoutByPath = compactTreeLayout(desired, input.layoutSizeForNode, input.layoutRows ?? []);
   const existingByPath = new Map(input.existing.map((node) => [node.projectRelativePath, node]));
   const desiredPaths = new Set(desired.map((node) => node.projectRelativePath));
   const usedZ = new Set<number>();
@@ -477,7 +477,7 @@ function structureEdgesForCanvasNodes(nodes: CanvasNodeElement[]): CanvasStructu
 function compactTreeLayout(
   desired: CanvasDesiredNode[],
   layoutSizeForNode: (node: CanvasDesiredNode) => CanvasLayoutSize,
-  layoutGroups: CanvasDesiredLayoutGroup[]
+  layoutRows: CanvasDesiredLayoutRow[]
 ): Map<string, CanvasLayoutSize & { x: number; y: number }> {
   const layoutByPath = new Map<string, CanvasLayoutSize & { x: number; y: number }>();
   const desiredByPath = new Map(desired.map((node) => [node.projectRelativePath, node]));
@@ -498,14 +498,14 @@ function compactTreeLayout(
   }
   roots.sort(compareDesiredSibling);
 
-  const groupsByParent = buildLayoutGroupsByParent(layoutGroups, desiredByPath);
+  const rowsByParent = buildLayoutRowsByParent(layoutRows, desiredByPath);
   let rootOffset = 0;
   for (const root of roots) {
     let cursorY = 0;
-    const columnOffsets = canvasColumnOffsets(root, rootOffset, childrenByPath, groupsByParent, layoutSizeForNode);
+    const columnOffsets = canvasColumnOffsets(root, rootOffset, childrenByPath, rowsByParent, layoutSizeForNode);
     const bounds = layoutSubtree(root, columnOffsets, 0, () => cursorY, (value) => {
       cursorY = value;
-    }, childrenByPath, groupsByParent, layoutSizeForNode, layoutByPath);
+    }, childrenByPath, rowsByParent, layoutSizeForNode, layoutByPath);
     rootOffset = Math.max(
       bounds.rightEdge + ROOT_HORIZONTAL_GAP,
       rootOffset + (bounds.maxDepth + 1) * HORIZONTAL_TREE_GAP + ROOT_HORIZONTAL_GAP
@@ -514,17 +514,17 @@ function compactTreeLayout(
   return layoutByPath;
 }
 
-function buildLayoutGroupsByParent(
-  layoutGroups: CanvasDesiredLayoutGroup[],
+function buildLayoutRowsByParent(
+  layoutRows: CanvasDesiredLayoutRow[],
   desiredByPath: Map<string, CanvasDesiredNode>
 ): Map<string, CanvasDesiredNode[][]> {
-  const groupsByParent = new Map<string, CanvasDesiredNode[][]>();
+  const rowsByParent = new Map<string, CanvasDesiredNode[][]>();
   const used = new Set<string>();
-  for (const group of layoutGroups) {
-    const directMembers = group.memberProjectRelativePaths
+  for (const row of layoutRows) {
+    const directMembers = row.memberProjectRelativePaths
       .map((path) => desiredByPath.get(path))
       .filter((node): node is CanvasDesiredNode => Boolean(node))
-      .filter((node) => parentPath(node.projectRelativePath) === group.parentProjectRelativePath && !used.has(node.projectRelativePath))
+      .filter((node) => parentPath(node.projectRelativePath) === row.parentProjectRelativePath && !used.has(node.projectRelativePath))
       .sort(compareDesiredPath);
     if (directMembers.length === 0) {
       continue;
@@ -532,12 +532,12 @@ function buildLayoutGroupsByParent(
     for (const member of directMembers) {
       used.add(member.projectRelativePath);
     }
-    groupsByParent.set(group.parentProjectRelativePath, [
-      ...(groupsByParent.get(group.parentProjectRelativePath) ?? []),
+    rowsByParent.set(row.parentProjectRelativePath, [
+      ...(rowsByParent.get(row.parentProjectRelativePath) ?? []),
       directMembers
     ]);
   }
-  return groupsByParent;
+  return rowsByParent;
 }
 
 function layoutSubtree(
@@ -547,12 +547,12 @@ function layoutSubtree(
   getCursorY: () => number,
   setCursorY: (value: number) => void,
   childrenByPath: Map<string, CanvasDesiredNode[]>,
-  groupsByParent: Map<string, CanvasDesiredNode[][]>,
+  rowsByParent: Map<string, CanvasDesiredNode[][]>,
   layoutSizeForNode: (node: CanvasDesiredNode) => CanvasLayoutSize,
   layoutByPath: Map<string, CanvasLayoutSize & { x: number; y: number }>
 ): CanvasLayoutBounds {
   const size = layoutSizeForNode(node);
-  const blocks = childBlocksForNode(node, childrenByPath, groupsByParent);
+  const blocks = childBlocksForNode(node, childrenByPath, rowsByParent);
   const x = columnOffsets[depth]!;
   if (blocks.length === 0) {
     const y = getCursorY();
@@ -573,17 +573,17 @@ function layoutSubtree(
   const childCenters: number[] = [];
   for (const block of blocks) {
     if (block.kind === 'node') {
-      const childBounds = layoutSubtree(block.node, columnOffsets, depth + 1, getCursorY, setCursorY, childrenByPath, groupsByParent, layoutSizeForNode, layoutByPath);
+      const childBounds = layoutSubtree(block.node, columnOffsets, depth + 1, getCursorY, setCursorY, childrenByPath, rowsByParent, layoutSizeForNode, layoutByPath);
       maxDepth = Math.max(maxDepth, childBounds.maxDepth);
       rightEdge = Math.max(rightEdge, childBounds.rightEdge);
       const childLayout = layoutByPath.get(block.node.projectRelativePath)!;
       childCenters.push(childLayout.y + childLayout.height / 2);
       continue;
     }
-    const groupLayout = layoutHorizontalGroup(block.members, columnOffsets, depth + 1, getCursorY, setCursorY, layoutSizeForNode, layoutByPath);
-    maxDepth = Math.max(maxDepth, groupLayout.maxDepth);
-    rightEdge = Math.max(rightEdge, groupLayout.rightEdge);
-    childCenters.push(groupLayout.y + groupLayout.height / 2);
+    const rowLayout = layoutHorizontalRow(block.members, columnOffsets, depth + 1, getCursorY, setCursorY, layoutSizeForNode, layoutByPath);
+    maxDepth = Math.max(maxDepth, rowLayout.maxDepth);
+    rightEdge = Math.max(rightEdge, rowLayout.rightEdge);
+    childCenters.push(rowLayout.y + rowLayout.height / 2);
   }
   const first = childCenters[0]!;
   const last = childCenters[childCenters.length - 1]!;
@@ -601,21 +601,21 @@ function layoutSubtree(
 function childBlocksForNode(
   node: CanvasDesiredNode,
   childrenByPath: Map<string, CanvasDesiredNode[]>,
-  groupsByParent: Map<string, CanvasDesiredNode[][]>
+  rowsByParent: Map<string, CanvasDesiredNode[][]>
 ): CanvasLayoutBlock[] {
-  const groups = groupsByParent.get(node.projectRelativePath) ?? [];
-  const groupedPaths = new Set(groups.flat().map((member) => member.projectRelativePath));
-  const groupBlocks: CanvasLayoutBlock[] = groups.map((members) => ({
-    kind: 'horizontal-group',
+  const rows = rowsByParent.get(node.projectRelativePath) ?? [];
+  const rowPaths = new Set(rows.flat().map((member) => member.projectRelativePath));
+  const rowBlocks: CanvasLayoutBlock[] = rows.map((members) => ({
+    kind: 'horizontal-row',
     members
   }));
   const childBlocks: CanvasLayoutBlock[] = (childrenByPath.get(node.projectRelativePath) ?? [])
-    .filter((child) => !groupedPaths.has(child.projectRelativePath))
+    .filter((child) => !rowPaths.has(child.projectRelativePath))
     .map((child) => ({ kind: 'node', node: child }));
-  return [...groupBlocks, ...childBlocks];
+  return [...rowBlocks, ...childBlocks];
 }
 
-function layoutHorizontalGroup(
+function layoutHorizontalRow(
   members: CanvasDesiredNode[],
   columnOffsets: number[],
   depth: number,
@@ -639,7 +639,7 @@ function layoutHorizontalGroup(
       ...size
     });
     rightEdge = cursorX + size.width;
-    cursorX = rightEdge + HORIZONTAL_GROUP_GAP;
+    cursorX = rightEdge + HORIZONTAL_ROW_GAP;
   }
   setCursorY(rowTop + rowHeight + VERTICAL_GAP);
   return {
@@ -654,11 +654,11 @@ function canvasColumnOffsets(
   root: CanvasDesiredNode,
   rootOffset: number,
   childrenByPath: Map<string, CanvasDesiredNode[]>,
-  groupsByParent: Map<string, CanvasDesiredNode[][]>,
+  rowsByParent: Map<string, CanvasDesiredNode[][]>,
   layoutSizeForNode: (node: CanvasDesiredNode) => CanvasLayoutSize
 ): number[] {
   const widthsByDepth: number[] = [];
-  collectCanvasColumnWidths(root, 0, childrenByPath, groupsByParent, layoutSizeForNode, widthsByDepth);
+  collectCanvasColumnWidths(root, 0, childrenByPath, rowsByParent, layoutSizeForNode, widthsByDepth);
   const offsets: number[] = [rootOffset];
   for (let depth = 1; depth < widthsByDepth.length; depth += 1) {
     offsets[depth] = offsets[depth - 1]! + (widthsByDepth[depth - 1] ?? 0) + HORIZONTAL_TREE_GAP;
@@ -670,15 +670,15 @@ function collectCanvasColumnWidths(
   node: CanvasDesiredNode,
   depth: number,
   childrenByPath: Map<string, CanvasDesiredNode[]>,
-  groupsByParent: Map<string, CanvasDesiredNode[][]>,
+  rowsByParent: Map<string, CanvasDesiredNode[][]>,
   layoutSizeForNode: (node: CanvasDesiredNode) => CanvasLayoutSize,
   widthsByDepth: number[]
 ): void {
   const size = layoutSizeForNode(node);
   widthsByDepth[depth] = Math.max(widthsByDepth[depth] ?? 0, size.width);
-  for (const block of childBlocksForNode(node, childrenByPath, groupsByParent)) {
+  for (const block of childBlocksForNode(node, childrenByPath, rowsByParent)) {
     if (block.kind === 'node') {
-      collectCanvasColumnWidths(block.node, depth + 1, childrenByPath, groupsByParent, layoutSizeForNode, widthsByDepth);
+      collectCanvasColumnWidths(block.node, depth + 1, childrenByPath, rowsByParent, layoutSizeForNode, widthsByDepth);
       continue;
     }
     for (const member of block.members) {

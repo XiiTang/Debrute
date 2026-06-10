@@ -61,7 +61,8 @@ describe('debrute-cli', () => {
       await mkdir(join(root, 'prompts'), { recursive: true });
       await writeFile(join(root, 'prompts/cover.md'), '# Cover\n', 'utf8');
       await writeFile(join(root, '.debrute/canvas-maps/production-map.yaml'), [
-        '- prompts/cover.md',
+        'paths:',
+        '  - prompts/cover.md',
         ''
       ].join('\n'), 'utf8');
 
@@ -70,7 +71,6 @@ describe('debrute-cli', () => {
         'canvas-map',
         'publish',
         root,
-        '--canvas',
         'production-map'
       ], (text) => output.push(text));
 
@@ -93,7 +93,6 @@ describe('debrute-cli', () => {
         'canvas-map',
         'publish',
         root,
-        '--canvas',
         'new-map'
       ], (text) => output.push(text));
 

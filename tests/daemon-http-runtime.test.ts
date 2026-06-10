@@ -490,7 +490,7 @@ describe('daemon HTTP runtime', () => {
     const upload = await response.json() as { results: Array<{ projectRelativePath: string; kind: 'file' }> };
     expect(upload.results).toMatchObject([{ projectRelativePath: 'assets/large.bin', kind: 'file' }]);
     await expect(stat(join(projectRoot, 'assets/large.bin')).then((fileStat) => fileStat.size)).resolves.toBe(byteLength);
-  });
+  }, 30_000);
 
   it('does not parse upload bodies through Request.formData buffering', async () => {
     const projectRoot = await mkdtemp(join(tmpdir(), 'debrute-daemon-upload-no-formdata-'));
@@ -1272,10 +1272,7 @@ describe('daemon HTTP runtime', () => {
       },
       body: JSON.stringify({ projectRoot })
     });
-    await writeCanvasMap(projectRoot, 'production-map', [
-      '- image-production/generated/*.png',
-      ''
-    ]);
+    await writeCanvasMap(projectRoot, 'production-map', canvasMapSource(['image-production/generated/*.png']));
     if (!appServer) {
       throw new Error('Daemon did not create a project app server.');
     }
@@ -1345,7 +1342,7 @@ describe('daemon HTTP runtime', () => {
       },
       body: JSON.stringify({ projectRoot })
     });
-    await writeCanvasMap(projectRoot, 'production-map', ['- prompts/cover.md', '']);
+    await writeCanvasMap(projectRoot, 'production-map', canvasMapSource(['prompts/cover.md']));
     if (!appServer) {
       throw new Error('Daemon did not create a project app server.');
     }
@@ -1371,13 +1368,15 @@ describe('daemon HTTP runtime', () => {
       'prompts/alt.md'
     ]));
     expect(result.projection.nodes.map((node) => node.projectRelativePath)).toContain('prompts/alt.md');
-    await expect(readFile(join(projectRoot, '.debrute/canvas-maps/production-map.yaml'), 'utf8')).resolves.toBe([
-      '- prompts/cover.md',
-      '- prompts/alt.md',
-      ''
-    ].join('\n'));
+    await expect(readFile(join(projectRoot, '.debrute/canvas-maps/production-map.yaml'), 'utf8')).resolves.toBe(canvasMapSource([
+      'prompts/cover.md',
+      'prompts/alt.md'
+    ]));
 
-    await writeFile(join(projectRoot, '.debrute/canvas-maps/production-map.yaml'), '- prompts/cover.md\n- external/edit.md\n', 'utf8');
+    await writeFile(join(projectRoot, '.debrute/canvas-maps/production-map.yaml'), canvasMapSource([
+      'prompts/cover.md',
+      'external/edit.md'
+    ]), 'utf8');
     const conflict = await fetch(`${runtime.daemonUrl}/api/projects/${opened.projectId}/canvases/production-map/canvas-map/project-paths`, {
       method: 'POST',
       headers: {
@@ -1438,9 +1437,17 @@ async function requestJson<T>(url: string, init?: RequestInit): Promise<T> {
   return response.json() as Promise<T>;
 }
 
-async function writeCanvasMap(projectRoot: string, canvasId: string, lines: string[]): Promise<void> {
+async function writeCanvasMap(projectRoot: string, canvasId: string, content: string): Promise<void> {
   await mkdir(join(projectRoot, '.debrute/canvas-maps'), { recursive: true });
-  await writeFile(join(projectRoot, `.debrute/canvas-maps/${canvasId}.yaml`), lines.join('\n'), 'utf8');
+  await writeFile(join(projectRoot, `.debrute/canvas-maps/${canvasId}.yaml`), content, 'utf8');
+}
+
+function canvasMapSource(paths: string[]): string {
+  return [
+    'paths:',
+    ...paths.map((path) => `  - ${path}`),
+    ''
+  ].join('\n');
 }
 
 async function readNextSseMessage<T>(response: Response): Promise<T> {

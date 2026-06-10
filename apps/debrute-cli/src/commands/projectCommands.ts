@@ -36,8 +36,9 @@ export async function runProjectCommand(args: ParsedDebruteArgs, server: Debrute
   }
 
   if (args.command === 'canvas-map.publish') {
+    const canvasId = args.positional[1]!;
     try {
-      await server.publishCanvasMapForProject(args.projectRoot, { canvasId: args.options.canvas! });
+      await server.publishCanvasMapForProject(args.projectRoot, { canvasId });
     } catch (error) {
       if (isServiceError(error)) {
         throw cliError(normalizeServiceErrorCode(error.code), error.message, primitiveErrorFields(error.fields));
@@ -47,7 +48,7 @@ export async function runProjectCommand(args: ParsedDebruteArgs, server: Debrute
     return {
       status: 'ok',
       command: args.command,
-      fields: { canvas: args.options.canvas! }
+      fields: { canvas: canvasId }
     };
   }
 

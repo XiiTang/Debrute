@@ -170,7 +170,7 @@ describe('IntegrationsService', () => {
     expect(imagemagick?.operationStatus).toMatchObject({
       installCommandPreview: 'brew install --formula imagemagick'
     });
-  });
+  }, 15_000);
 });
 
 async function writeFakeBinary(

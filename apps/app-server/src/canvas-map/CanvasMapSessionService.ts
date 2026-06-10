@@ -12,6 +12,7 @@ import {
 } from '@debrute/project-core';
 import {
   reconcileCanvasNodeElements,
+  type CanvasDesiredLayoutRow,
   type CanvasDesiredNode,
   type CanvasDocument,
   type CanvasLayoutSize
@@ -51,7 +52,6 @@ interface PreparedCanvasMapPublish {
   sourceHash: string;
   currentCanvas: CanvasDocument;
   nextCanvas: CanvasDocument;
-  desired: CanvasDesiredNode[];
 }
 
 export class CanvasMapSessionService {
@@ -156,10 +156,10 @@ export class CanvasMapSessionService {
         nodeElements: reconcileCanvasNodeElements({
           existing: currentCanvas.nodeElements,
           desired: prepared.desired,
+          layoutRows: prepared.layoutRows,
           layoutSizeForNode: (node) => requiredLayoutSize(prepared.layoutSizes, node.projectRelativePath)
         })
-      },
-      desired: prepared.desired
+      }
     };
   }
 
@@ -181,7 +181,7 @@ export class CanvasMapSessionService {
       sourceContent,
       createCanvasIfMissing: false
     });
-    if (!canvasHasExactlyDesiredNodes(prepared.currentCanvas, prepared.desired)) {
+    if (!canvasHasExactlyPublishedNodeElements(prepared.currentCanvas, prepared.nextCanvas.nodeElements)) {
       throwCanvasMapConflict();
     }
     this.sourceHashByCanvasId.set(canvasId, sourceHash);
@@ -190,7 +190,7 @@ export class CanvasMapSessionService {
   private async prepareExpandedCanvasMapProjection(
     projectRoot: string,
     expanded: ExpandedCanvasMap
-  ): Promise<{ desired: CanvasDesiredNode[]; layoutSizes: Map<string, CanvasLayoutSize> }> {
+  ): Promise<{ desired: CanvasDesiredNode[]; layoutRows: CanvasDesiredLayoutRow[]; layoutSizes: Map<string, CanvasLayoutSize> }> {
     const candidates = expanded.nodes.map((node): CanvasDesiredNode => ({
       projectRelativePath: node.projectRelativePath,
       nodeKind: node.nodeKind,
@@ -209,6 +209,7 @@ export class CanvasMapSessionService {
     }
     return {
       desired: candidates,
+      layoutRows: expanded.layoutRows,
       layoutSizes
     };
   }
@@ -255,15 +256,30 @@ function errorMessage(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
 }
 
-function canvasHasExactlyDesiredNodes(canvas: CanvasDocument, desired: CanvasDesiredNode[]): boolean {
-  const current = canvas.nodeElements.map(canvasNodeSignature).sort();
-  const expected = desired.map(canvasNodeSignature).sort();
+function canvasHasExactlyPublishedNodeElements(
+  canvas: CanvasDocument,
+  nextNodeElements: CanvasDocument['nodeElements']
+): boolean {
+  const current = canvas.nodeElements.map(canvasNodeElementSignature).sort();
+  const expected = nextNodeElements.map(canvasNodeElementSignature).sort();
   return current.length === expected.length
     && current.every((signature, index) => signature === expected[index]);
 }
 
-function canvasNodeSignature(node: Pick<CanvasDesiredNode, 'projectRelativePath' | 'nodeKind' | 'mediaKind'>): string {
-  return `${node.projectRelativePath}\u0000${node.nodeKind}\u0000${node.mediaKind ?? ''}`;
+function canvasNodeElementSignature(node: CanvasDocument['nodeElements'][number]): string {
+  return [
+    node.projectRelativePath,
+    node.nodeKind,
+    node.mediaKind ?? '',
+    node.x,
+    node.y,
+    node.width,
+    node.height,
+    node.z,
+    node.visible ? '1' : '0',
+    node.locked ? '1' : '0',
+    node.layoutMode ?? ''
+  ].join('\u0000');
 }
 
 function throwCanvasMapConflict(): never {
