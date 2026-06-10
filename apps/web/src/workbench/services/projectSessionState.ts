@@ -59,5 +59,5 @@ export function replaceWorkbenchProjectRoute(projectId: string): void {
   if (window.location.pathname === nextPath) {
     return;
   }
-  window.history.replaceState(null, '', `${nextPath}${window.location.search}${window.location.hash}`);
+  window.history.replaceState(window.history.state ?? null, '', `${nextPath}${window.location.search}${window.location.hash}`);
 }

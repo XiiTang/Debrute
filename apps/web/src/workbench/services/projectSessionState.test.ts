@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import type { WorkbenchApiClient, WorkbenchProjectSessionSnapshot } from '@debrute/app-protocol';
-import { openInitialProject } from './projectSessionState';
+import { openInitialProject, replaceWorkbenchProjectRoute } from './projectSessionState';
 
 describe('project session startup', () => {
   const originalWindow = (globalThis as { window?: unknown }).window;
@@ -66,5 +66,22 @@ describe('project session startup', () => {
     await openInitialProject(api, { kind: 'workbench' });
 
     expect(replaceState).not.toHaveBeenCalled();
+  });
+
+  it('preserves browser history state when replacing the active project route', () => {
+    const replaceState = vi.fn();
+    const state = { debruteDaemonToken: 'secret' };
+    (globalThis as { window?: unknown }).window = {
+      location: { pathname: '/', search: '?view=canvas', hash: '#selection' },
+      history: { state, replaceState }
+    };
+
+    replaceWorkbenchProjectRoute('123e4567-e89b-42d3-a456-426614174000');
+
+    expect(replaceState).toHaveBeenCalledWith(
+      state,
+      '',
+      '/projects/123e4567-e89b-42d3-a456-426614174000?view=canvas#selection'
+    );
   });
 });

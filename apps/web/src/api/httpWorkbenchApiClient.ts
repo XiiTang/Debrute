@@ -238,10 +238,30 @@ function browserToken(): string | undefined {
     params.delete('debrute-token');
     const nextSearch = params.toString();
     const nextUrl = `${window.location.pathname}${nextSearch ? `?${nextSearch}` : ''}${window.location.hash}`;
-    window.history.replaceState(null, '', nextUrl);
+    window.history.replaceState(historyStateWithDaemonToken(fromUrl), '', nextUrl);
     return fromUrl;
   }
-  return undefined;
+  return daemonTokenFromHistoryState();
+}
+
+function daemonTokenFromHistoryState(): string | undefined {
+  const state = (window as { history?: { state?: unknown } }).history?.state;
+  if (!state || typeof state !== 'object' || Array.isArray(state)) {
+    return undefined;
+  }
+  const token = (state as { debruteDaemonToken?: unknown }).debruteDaemonToken;
+  return typeof token === 'string' && token.length > 0 ? token : undefined;
+}
+
+function historyStateWithDaemonToken(token: string): Record<string, unknown> {
+  const state = (window as { history?: { state?: unknown } }).history?.state;
+  const current = state && typeof state === 'object' && !Array.isArray(state)
+    ? state as Record<string, unknown>
+    : {};
+  return {
+    ...current,
+    debruteDaemonToken: token
+  };
 }
 
 function browserEventClientId(): string {

@@ -49,7 +49,7 @@ describe('workbench API client', () => {
       location: { origin: 'http://127.0.0.1:17321', search: '?debrute-token=secret&view=canvas', pathname: '/', hash: '' },
       localStorage: { getItem: () => undefined, setItem },
       sessionStorage: { getItem: () => undefined, setItem: () => undefined },
-      history: { replaceState }
+      history: { state: { existing: true }, replaceState }
     };
     const requests: RequestInit[] = [];
     vi.stubGlobal('fetch', async (_url: string, init: RequestInit) => {
@@ -64,6 +64,32 @@ describe('workbench API client', () => {
 
     expect(requests[0]!.headers).toMatchObject({ 'x-debrute-daemon-token': 'secret' });
     expect(setItem).not.toHaveBeenCalled();
-    expect(replaceState).toHaveBeenCalledWith(null, '', '/?view=canvas');
+    expect(replaceState).toHaveBeenCalledWith({ existing: true, debruteDaemonToken: 'secret' }, '', '/?view=canvas');
+  });
+
+  it('recovers the daemon token from browser history state after URL cleanup', async () => {
+    (globalThis as { window?: unknown }).window = {
+      location: {
+        origin: 'http://127.0.0.1:17321',
+        search: '',
+        pathname: `/projects/${projectId}`,
+        hash: ''
+      },
+      localStorage: { getItem: () => undefined, setItem: () => undefined },
+      sessionStorage: { getItem: () => undefined, setItem: () => undefined },
+      history: { state: { debruteDaemonToken: 'secret' }, replaceState: vi.fn() }
+    };
+    const requests: RequestInit[] = [];
+    vi.stubGlobal('fetch', async (_url: string, init: RequestInit) => {
+      requests.push(init);
+      return new Response(JSON.stringify({ projectId, snapshot: { canvases: [] } }), {
+        status: 200,
+        headers: { 'content-type': 'application/json' }
+      });
+    });
+
+    await createWorkbenchApiClient().openProject({ projectId });
+
+    expect(requests[0]!.headers).toMatchObject({ 'x-debrute-daemon-token': 'secret' });
   });
 });
