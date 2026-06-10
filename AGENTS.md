@@ -31,4 +31,6 @@ pnpm check
 
 Prefer `pnpm exec vitest run <files>` over `pnpm test -- <files>` for focused verification.
 
+Do not run real browser tests or real browser diagnostics unless the user explicitly asks for them.
+
 For real browser Canvas diagnostics in a dev/test workbench, use `window.__debruteCanvasPerf.startCapture()` before the interaction and `window.__debruteCanvasPerf.stopCapture()` after it, then inspect `trace.events`, `trace.sessions`, `counterTotals`, and `canvas`.

@@ -292,6 +292,11 @@ export function WorkbenchApp(): React.ReactElement {
     }
   }, []);
 
+  const clearFeedbackBarTarget = useCallback(() => {
+    canvasOverlayRuntime.clearFeedbackBarPlacement();
+    setFeedbackBarTarget(undefined);
+  }, [canvasOverlayRuntime]);
+
   const handleFeedbackBarTargetChange = useCallback((target: CanvasFeedbackBarTarget | undefined) => {
     clearFeedbackBarHideTimer();
     if (target) {
@@ -303,10 +308,10 @@ export function WorkbenchApp(): React.ReactElement {
     feedbackBarClearTimerRef.current = window.setTimeout(() => {
       feedbackBarClearTimerRef.current = undefined;
       if (!feedbackBarHoveredRef.current) {
-        setFeedbackBarTarget(undefined);
+        clearFeedbackBarTarget();
       }
     }, 120);
-  }, [clearFeedbackBarHideTimer]);
+  }, [clearFeedbackBarHideTimer, clearFeedbackBarTarget]);
 
   const handleFeedbackBarPointerEnter = useCallback(() => {
     feedbackBarHoveredRef.current = true;
@@ -315,8 +320,9 @@ export function WorkbenchApp(): React.ReactElement {
 
   const handleFeedbackBarPointerLeave = useCallback(() => {
     feedbackBarHoveredRef.current = false;
-    setFeedbackBarTarget(undefined);
-  }, []);
+    clearFeedbackBarHideTimer();
+    clearFeedbackBarTarget();
+  }, [clearFeedbackBarHideTimer, clearFeedbackBarTarget]);
 
   const openWorkbenchContextMenu = useCallback((target: WorkbenchContextMenuTarget, position: WorkbenchContextMenuPosition) => {
     setContextMenu({ target, position });

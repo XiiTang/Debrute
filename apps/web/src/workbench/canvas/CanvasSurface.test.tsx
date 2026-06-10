@@ -18,6 +18,7 @@ import {
   syncCanvasMovingCameraFrame,
   syncCanvasPerfSessionState,
   syncCanvasImageResourceZoomForCameraState,
+  shouldClearFeedbackBarPlacementForFeedbackTarget,
   type CanvasPerfRuntimeSession
 } from './CanvasSurface';
 import { createCanvasPerfMonitor, type CanvasPerfTraceEvent } from './CanvasPerfMonitor';
@@ -341,6 +342,38 @@ describe('CanvasSurface', () => {
     expect(html).toContain('data-testid="canvas-runtime-loading"');
     expect(html).not.toContain('debrute-canvas-preview://');
     expect(html).not.toContain('debrute-project-file://');
+  });
+
+  it('keeps feedback bar placement while node hover transfers to the floating bar', () => {
+    expect(shouldClearFeedbackBarPlacementForFeedbackTarget({
+      hasFeedbackTargetHandler: true,
+      hasCanvasFeedback: true,
+      hoveredNodePath: undefined,
+      hasRenderableFeedbackTarget: false
+    })).toBe(false);
+  });
+
+  it('clears feedback bar placement when the feedback target cannot remain valid', () => {
+    expect(shouldClearFeedbackBarPlacementForFeedbackTarget({
+      hasFeedbackTargetHandler: false,
+      hasCanvasFeedback: true,
+      hoveredNodePath: undefined,
+      hasRenderableFeedbackTarget: false
+    })).toBe(true);
+
+    expect(shouldClearFeedbackBarPlacementForFeedbackTarget({
+      hasFeedbackTargetHandler: true,
+      hasCanvasFeedback: false,
+      hoveredNodePath: 'flow/cover.png',
+      hasRenderableFeedbackTarget: false
+    })).toBe(true);
+
+    expect(shouldClearFeedbackBarPlacementForFeedbackTarget({
+      hasFeedbackTargetHandler: true,
+      hasCanvasFeedback: true,
+      hoveredNodePath: 'flow/cover.png',
+      hasRenderableFeedbackTarget: false
+    })).toBe(true);
   });
 
   it('keeps image node shell props equal for unused action object changes but not event handler changes', () => {

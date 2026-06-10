@@ -687,9 +687,17 @@ function CanvasSurfaceRuntime({
   }, [feedbackPlacementContext.reservedRects, feedbackPlacementContext.viewportRect, overlayRuntime]);
 
   const emitFeedbackBarTarget = useCallback(() => {
+    const hasFeedbackTargetHandler = Boolean(onFeedbackBarTargetChange);
     if (!onFeedbackBarTargetChange || !canvasFeedback || !hoveredNodePath) {
       onFeedbackBarTargetChange?.(undefined);
-      overlayRuntime.clearFeedbackBarPlacement();
+      if (shouldClearFeedbackBarPlacementForFeedbackTarget({
+        hasFeedbackTargetHandler,
+        hasCanvasFeedback: Boolean(canvasFeedback),
+        hoveredNodePath,
+        hasRenderableFeedbackTarget: false
+      })) {
+        overlayRuntime.clearFeedbackBarPlacement();
+      }
       return;
     }
 
@@ -697,7 +705,14 @@ function CanvasSurfaceRuntime({
     const surfaceRect = surfaceRef.current?.getBoundingClientRect();
     if (!node || node.nodeKind !== 'file' || node.visible === false || !surfaceRect) {
       onFeedbackBarTargetChange(undefined);
-      overlayRuntime.clearFeedbackBarPlacement();
+      if (shouldClearFeedbackBarPlacementForFeedbackTarget({
+        hasFeedbackTargetHandler,
+        hasCanvasFeedback: true,
+        hoveredNodePath,
+        hasRenderableFeedbackTarget: false
+      })) {
+        overlayRuntime.clearFeedbackBarPlacement();
+      }
       return;
     }
 
@@ -817,6 +832,21 @@ function CanvasSurfaceRuntime({
       ) : null}
     </div>
   );
+}
+
+export function shouldClearFeedbackBarPlacementForFeedbackTarget(input: {
+  hasFeedbackTargetHandler: boolean;
+  hasCanvasFeedback: boolean;
+  hoveredNodePath: string | undefined;
+  hasRenderableFeedbackTarget: boolean;
+}): boolean {
+  if (!input.hasFeedbackTargetHandler || !input.hasCanvasFeedback) {
+    return true;
+  }
+  if (!input.hoveredNodePath) {
+    return false;
+  }
+  return !input.hasRenderableFeedbackTarget;
 }
 
 function activeNodeProjectRelativePaths(state: CanvasRuntimeDragState | undefined): string[] {
