@@ -840,6 +840,7 @@ async function resolveImageInputs(
         if (!modelSpecificObjectKind || !isSupportedModelSpecificImageInputObject(imageInput, modelSpecificObjectKind)) {
           throw new Error(`Unsupported model-specific image input object for field "${field}".`);
         }
+        assertModelSpecificImageInputUrlsArePublic(imageInput);
         resolved.push(imageInput);
         continue;
       }
@@ -875,6 +876,7 @@ async function resolveGptImage2ImageInputs(
         if (!modelSpecificObjectKind || !isSupportedModelSpecificImageInputObject(imageInput, modelSpecificObjectKind)) {
           throw new Error(`Unsupported model-specific image input object for field "${field}".`);
         }
+        assertModelSpecificImageInputUrlsArePublic(imageInput);
         resolved.push(imageInput);
         continue;
       }
@@ -1338,6 +1340,15 @@ function isSupportedModelSpecificImageInputObject(image: Record<string, unknown>
   return hasOnlyKeys(image, ['type', 'image_file'])
     && stringValueAt(image, 'type') === 'character'
     && hasHttpOrDataImageStringPayload(image, 'image_file');
+}
+
+function assertModelSpecificImageInputUrlsArePublic(image: Record<string, unknown>): void {
+  for (const key of ['image_url', 'image_file']) {
+    const value = stringValueAt(image, key);
+    if (value && /^https?:\/\//.test(value)) {
+      assertPublicHttpUrl(value, 'Remote image URLs');
+    }
+  }
 }
 
 function hasOnlyKeys(image: Record<string, unknown>, allowedKeys: string[]): boolean {

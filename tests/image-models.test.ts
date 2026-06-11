@@ -812,6 +812,38 @@ describe('image model executors', () => {
     }
   });
 
+  it('rejects loopback OpenAI object image URLs before upstream requests', async () => {
+    const projectRoot = await mkdtemp(join(tmpdir(), 'debrute-image-openai-object-loopback-input-'));
+    let modelRuned = false;
+    const fetch: ImageModelFetch = async () => {
+      modelRuned = true;
+      throw new Error('model fetch should not be called for unsafe object image URLs');
+    };
+    try {
+      const result = await executeImageModelRequest({
+        projectRoot,
+        invocationId: 'turn-openai-object-loopback-input',
+        input: {
+          model: 'gpt-image-2',
+          arguments: {
+            prompt: 'retouch the image',
+            image: [{ image_url: 'http://127.0.0.1/private.png' }]
+          }
+        },
+        settings: { imageModels: [{ debruteModelId: 'gpt-image-2', baseUrlOverride: 'https://api.openai.com/v1', requestModelIdOverride: 'gpt-image-2' }] },
+        secrets: { imageModelApiKeys: { 'gpt-image-2': 'sk-image' } },
+        fetch
+      });
+
+      expect(result.status).toBe('error');
+      expect(result.error).toBe('invalid_image_input');
+      expect(result.content).toBe('Remote image URLs must not target local or private network hosts: http://127.0.0.1/private.png');
+      expect(modelRuned).toBe(false);
+    } finally {
+      await rm(projectRoot, { recursive: true, force: true });
+    }
+  });
+
   it('returns direct image input errors for missing project image paths', async () => {
     const projectRoot = await mkdtemp(join(tmpdir(), 'debrute-image-missing-input-'));
     const fetch: ImageModelFetch = async () => {

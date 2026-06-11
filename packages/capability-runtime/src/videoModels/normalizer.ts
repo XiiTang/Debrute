@@ -1,5 +1,6 @@
 import { extname } from 'node:path';
 import { readProjectFileBytes } from '@debrute/project-core';
+import { assertPublicHttpUrl } from '../remoteFetchPolicy.js';
 import type { VideoModelCatalogEntry } from './catalog.js';
 
 export type VideoIntent = 'generate' | 'reference' | 'audio_driven' | 'extend' | 'edit';
@@ -135,6 +136,9 @@ async function normalizeReference(input: {
     throw new VideoArgumentError('video_reference_type_unsupported', `Video reference media type cannot be inferred: ${source}`);
   }
   if (isHttpUrl(source) || source.startsWith('asset://')) {
+    if (isHttpUrl(source)) {
+      assertPublicHttpUrl(source, 'Remote video reference URLs');
+    }
     return { source, mediaType, url: source };
   }
   if (source.startsWith('data:')) {

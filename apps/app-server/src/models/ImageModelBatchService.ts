@@ -69,8 +69,6 @@ export interface ImageModelBatchProgressSnapshot {
 
 export type ImageModelBatchProgressEvent =
   | { type: 'started'; snapshot: ImageModelBatchProgressSnapshot }
-  | { type: 'item_started'; index: number; attempt: number; snapshot: ImageModelBatchProgressSnapshot }
-  | { type: 'item_retry'; index: number; nextAttempt: number; snapshot: ImageModelBatchProgressSnapshot }
   | { type: 'item_finished'; result: ImageModelBatchResult; snapshot: ImageModelBatchProgressSnapshot };
 
 export interface ImageModelBatchRunOptions {
@@ -148,10 +146,8 @@ export async function runImageModelBatch(
               overwriteExisting: input.overwriteExisting === true,
               dependencies,
               timeoutMs: batchTimeoutMs,
-              onAttemptStart: (attempt) => emitProgress({ type: 'item_started', index: index + 1, attempt, snapshot: snapshot() }),
-              onRetry: (nextAttempt) => {
+              onRetry: () => {
                 retryCount += 1;
-                emitProgress({ type: 'item_retry', index: index + 1, nextAttempt, snapshot: snapshot() });
               }
             });
           } finally {
@@ -225,8 +221,7 @@ async function runOneImageModelBatchItem(input: {
   timeoutMs?: number;
   overwriteExisting: boolean;
   dependencies: ImageModelBatchRunnerDependencies;
-  onAttemptStart?: (attempt: number) => void;
-  onRetry?: (nextAttempt: number) => void;
+  onRetry?: () => void;
 }): Promise<ImageModelBatchResult> {
   const base = imageModelBatchResultBase(input.request, input.index);
   if (!input.overwriteExisting && input.request.outputPath && await input.dependencies.projectFileExistsWithContent({ projectRelativePath: input.request.outputPath })) {
@@ -234,7 +229,6 @@ async function runOneImageModelBatchItem(input: {
   }
 
   for (let attempt = 1; ; attempt += 1) {
-    input.onAttemptStart?.(attempt);
     const started = Date.now();
     const timeoutMs = input.request.timeoutMs ?? input.timeoutMs ?? IMAGE_BATCH_DEFAULT_TIMEOUT_MS;
     const result = await executeBatchItemAttemptWithTimeout(
@@ -266,7 +260,7 @@ async function runOneImageModelBatchItem(input: {
         error: result.error
       };
     }
-    input.onRetry?.(attempt + 1);
+    input.onRetry?.();
     await sleep(100 * attempt);
   }
 }

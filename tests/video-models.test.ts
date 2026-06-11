@@ -549,6 +549,40 @@ describe('video model executor', () => {
     }
   });
 
+  it('rejects loopback video reference URLs before upstream requests', async () => {
+    const projectRoot = await mkdtemp(join(tmpdir(), 'debrute-video-loopback-reference-'));
+    let modelRuned = false;
+    try {
+      const result = await executeVideoModelRequest({
+        projectRoot,
+        invocationId: 'turn-video-loopback-reference',
+        input: {
+          model: 'doubao-seedance-2-0-260128',
+          arguments: {
+            prompt: 'use this frame',
+            intent: 'generate',
+            references: [{ source: 'http://127.0.0.1/private.png' }]
+          }
+        },
+        settings: {
+          videoModels: [{ debruteModelId: 'doubao-seedance-2-0-260128', baseUrlOverride: 'https://ark.example/api/v3', requestModelIdOverride: null }]
+        },
+        secrets: { videoModelApiKeys: { 'doubao-seedance-2-0-260128': 'sk-video' } },
+        fetch: async () => {
+          modelRuned = true;
+          throw new Error('upstream request should not run for unsafe reference URLs');
+        }
+      });
+
+      expect(result.status).toBe('error');
+      expect(result.error).toBe('video_argument_invalid');
+      expect(result.content).toBe('Remote video reference URLs must not target local or private network hosts: http://127.0.0.1/private.png');
+      expect(modelRuned).toBe(false);
+    } finally {
+      await rm(projectRoot, { recursive: true, force: true });
+    }
+  });
+
   it('rejects unsupported public video arguments before upstream execution', async () => {
     const projectRoot = await mkdtemp(join(tmpdir(), 'debrute-video-unsupported-argument-'));
     try {
