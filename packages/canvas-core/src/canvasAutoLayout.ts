@@ -51,7 +51,7 @@ interface PlacedBlock {
 export function layoutCanvasDesiredNodes(input: CanvasAutoLayoutInput): Map<string, CanvasResolvedLayout> {
   const desired = sortDesiredNodes(input.desired);
   const tree = buildLayoutTree(desired);
-  const rowsByParent = buildLayoutRowsByParent(input.layoutRows, tree.byPath, input.manualPaths);
+  const rowsByParent = buildLayoutRowsByParent(input.layoutRows, tree.byPath);
   const columnOffsets = canvasColumnOffsets(tree.roots, rowsByParent, input.manualPaths, input.layoutSizeForNode);
   const layoutByPath = new Map<string, CanvasResolvedLayout>();
   let cursorY = 0;
@@ -206,24 +206,33 @@ function buildLayoutTree(desired: CanvasDesiredNode[]): { roots: LayoutTreeNode[
 
 function buildLayoutRowsByParent(
   layoutRows: CanvasDesiredLayoutRow[],
-  desiredByPath: Map<string, LayoutTreeNode>,
-  manualPaths: Set<string>
+  desiredByPath: Map<string, LayoutTreeNode>
 ): Map<string, LayoutTreeNode[][]> {
   const rowsByParent = new Map<string, LayoutTreeNode[][]>();
   const used = new Set<string>();
 
   for (const row of layoutRows) {
-    const directMembers = row.memberProjectRelativePaths
-      .map((path) => desiredByPath.get(path))
-      .filter((node): node is LayoutTreeNode => Boolean(node))
-      .filter((node) => node.node.nodeKind === 'file')
-      .filter((node) => !manualPaths.has(node.node.projectRelativePath))
-      .filter((node) => parentPath(node.node.projectRelativePath) === row.parentProjectRelativePath)
-      .filter((node) => !used.has(node.node.projectRelativePath))
-      .sort(compareTreeNode);
+    const directMembers: LayoutTreeNode[] = [];
+    for (const path of row.memberProjectRelativePaths) {
+      const node = desiredByPath.get(path);
+      if (!node) {
+        throw new Error(`Canvas layout row member is missing: ${path}`);
+      }
+      if (node.node.nodeKind !== 'file') {
+        throw new Error(`Canvas layout row member must be a file: ${path}`);
+      }
+      if (parentPath(node.node.projectRelativePath) !== row.parentProjectRelativePath) {
+        throw new Error(`Canvas layout row member is not a direct child of its row parent: ${path}`);
+      }
+      if (used.has(node.node.projectRelativePath)) {
+        throw new Error(`Canvas layout row member is controlled by more than one row: ${path}`);
+      }
+      directMembers.push(node);
+    }
     if (directMembers.length === 0) {
       continue;
     }
+    directMembers.sort(compareTreeNode);
     for (const member of directMembers) {
       used.add(member.node.projectRelativePath);
     }
@@ -248,15 +257,18 @@ function childBlocksForNode(
     members,
     sortKey: members[0]?.node.projectRelativePath ?? treeNode.node.projectRelativePath
   }));
-  const nodeBlocks: LayoutBlock[] = treeNode.children
+  const nodeBlocks: Array<Extract<LayoutBlock, { kind: 'node' }>> = treeNode.children
     .filter((child) => !rowPaths.has(child.node.projectRelativePath))
     .map((child) => ({ kind: 'node', node: child }));
 
-  return [...rowBlocks, ...nodeBlocks]
-    .filter((block) => block.kind === 'horizontal-row'
-      || !manualPaths.has(block.node.node.projectRelativePath)
+  const visibleNodeBlocks = nodeBlocks
+    .filter((block) => !manualPaths.has(block.node.node.projectRelativePath)
       || block.node.children.length > 0)
     .sort(compareLayoutBlock);
+  return [
+    ...rowBlocks.sort(compareLayoutBlock),
+    ...visibleNodeBlocks
+  ];
 }
 
 function canvasColumnOffsets(

@@ -313,13 +313,13 @@ describe('canvas-core', () => {
     expect(notes).toMatchObject({ x: 680, y: 440, width: 420, height: 280 });
   });
 
-  it('places non-row children below horizontal row blocks', () => {
+  it('places non-row children below horizontal row blocks regardless of path order', () => {
     const desired: CanvasDesiredNode[] = [
       { projectRelativePath: 'flow', nodeKind: 'directory' },
       { projectRelativePath: 'flow/outputs', nodeKind: 'directory' },
+      { projectRelativePath: 'flow/outputs/0-notes.md', nodeKind: 'file', mediaKind: 'text' },
       { projectRelativePath: 'flow/outputs/a.png', nodeKind: 'file', mediaKind: 'image' },
-      { projectRelativePath: 'flow/outputs/b.png', nodeKind: 'file', mediaKind: 'image' },
-      { projectRelativePath: 'flow/outputs/notes.md', nodeKind: 'file', mediaKind: 'text' }
+      { projectRelativePath: 'flow/outputs/b.png', nodeKind: 'file', mediaKind: 'image' }
     ];
 
     const reconciled = reconcileCanvasNodeElements({
@@ -337,10 +337,10 @@ describe('canvas-core', () => {
 
     expect(reconciled.find((node) => node.projectRelativePath === 'flow/outputs/a.png')).toMatchObject({ x: 680, y: 0 });
     expect(reconciled.find((node) => node.projectRelativePath === 'flow/outputs/b.png')).toMatchObject({ x: 1400, y: 0 });
-    expect(reconciled.find((node) => node.projectRelativePath === 'flow/outputs/notes.md')).toMatchObject({ x: 680, y: 440 });
+    expect(reconciled.find((node) => node.projectRelativePath === 'flow/outputs/0-notes.md')).toMatchObject({ x: 680, y: 440 });
   });
 
-  it('excludes manual row nodes from automatic row slots and overlap checks', () => {
+  it('keeps manual row nodes at their actual layout while reserving their theoretical slot', () => {
     const existing = [{
       projectRelativePath: 'flow/outputs/b.png',
       nodeKind: 'file' as const,
@@ -377,7 +377,7 @@ describe('canvas-core', () => {
     });
 
     expect(nodeByPath(reconciled, 'flow/outputs/a.png')).toMatchObject({ x: 680, y: 0 });
-    expect(nodeByPath(reconciled, 'flow/outputs/c.png')).toMatchObject({ x: 1400, y: 0 });
+    expect(nodeByPath(reconciled, 'flow/outputs/c.png')).toMatchObject({ x: 2120, y: 0 });
     expect(nodeByPath(reconciled, 'flow/outputs/b.png')).toMatchObject({
       x: 999,
       y: 888,
@@ -388,16 +388,17 @@ describe('canvas-core', () => {
     expectNoAutomaticOverlaps(reconciled);
   });
 
-  it('keeps directory nodes out of horizontal row layout', () => {
+  it('rejects invalid horizontal row members instead of silently filtering them', () => {
     const desired: CanvasDesiredNode[] = [
       { projectRelativePath: 'flow', nodeKind: 'directory' },
       { projectRelativePath: 'flow/assets', nodeKind: 'directory' },
       { projectRelativePath: 'flow/assets/a.png', nodeKind: 'file', mediaKind: 'image' },
       { projectRelativePath: 'flow/assets/b.png', nodeKind: 'file', mediaKind: 'image' },
-      { projectRelativePath: 'flow/assets/folder.png', nodeKind: 'directory' }
+      { projectRelativePath: 'flow/assets/folder.png', nodeKind: 'directory' },
+      { projectRelativePath: 'flow/other/c.png', nodeKind: 'file', mediaKind: 'image' }
     ];
 
-    const reconciled = reconcileCanvasNodeElements({
+    expect(() => reconcileCanvasNodeElements({
       existing: [],
       desired,
       layoutRows: [{
@@ -409,12 +410,17 @@ describe('canvas-core', () => {
         ]
       }],
       layoutSizeForNode: layoutSize
-    });
+    })).toThrow('Canvas layout row member must be a file: flow/assets/folder.png');
 
-    expect(nodeByPath(reconciled, 'flow/assets/a.png')).toMatchObject({ x: 680, y: 0 });
-    expect(nodeByPath(reconciled, 'flow/assets/b.png')).toMatchObject({ x: 1400, y: 0 });
-    expect(nodeByPath(reconciled, 'flow/assets/folder.png')).toMatchObject({ x: 680, y: 440 });
-    expectNoAutomaticOverlaps(reconciled);
+    expect(() => reconcileCanvasNodeElements({
+      existing: [],
+      desired,
+      layoutRows: [{
+        parentProjectRelativePath: 'flow/assets',
+        memberProjectRelativePaths: ['flow/other/c.png']
+      }],
+      layoutSizeForNode: layoutSize
+    })).toThrow('Canvas layout row member is not a direct child of its row parent: flow/other/c.png');
   });
 
   it('assigns unique layer values when new automatic nodes are inserted before existing nodes', () => {
