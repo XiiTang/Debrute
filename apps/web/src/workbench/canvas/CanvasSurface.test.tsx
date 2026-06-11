@@ -14,6 +14,8 @@ import {
   isCanvasMapProjectTreeDragOver,
   canvasMapProjectTreeDropEntry,
   canvasMapProjectTreeDropInput,
+  canvasSurfaceNextPendingLayoutDraft,
+  canvasSurfaceShouldClearPendingLayoutDraft,
   createCanvasRenderSnapshotScheduler,
   recordCanvasPerfFrame,
   shouldUseEfficientImageResourceZoom,
@@ -78,6 +80,68 @@ describe('CanvasSurface', () => {
 
     expect(isCanvasMapProjectTreeDragOver(dataTransfer)).toBe(true);
     expect(dataTransfer.getData).not.toHaveBeenCalled();
+  });
+
+  it('creates a pending local layout draft from a finished move-node drag', () => {
+    expect(canvasSurfaceNextPendingLayoutDraft({
+      canvasId: 'canvas-1',
+      dragState: {
+        kind: 'move-node',
+        pointerId: 1,
+        start: { x: 5, y: 6 },
+        origins: [nodeFixture('flow/a.png', 10, 20)]
+      },
+      point: { x: 25, y: 36 }
+    })).toEqual({
+      canvasId: 'canvas-1',
+      nodeLayouts: [
+        { projectRelativePath: 'flow/a.png', x: 30, y: 50, width: 200, height: 120 }
+      ]
+    });
+  });
+
+  it('does not create a pending local layout draft for resize drags', () => {
+    expect(canvasSurfaceNextPendingLayoutDraft({
+      canvasId: 'canvas-1',
+      dragState: {
+        kind: 'resize-node',
+        pointerId: 1,
+        handle: 'se',
+        start: { x: 0, y: 0 },
+        node: { projectRelativePath: 'flow/a.png', mediaKind: 'image' },
+        origin: { x: 10, y: 20, width: 200, height: 120 },
+        preserveAspect: false
+      },
+      point: { x: 20, y: 10 }
+    })).toBeUndefined();
+  });
+
+  it('clears pending local layout only after durable projection matches it', () => {
+    const pending = {
+      canvasId: 'canvas-1',
+      nodeLayouts: [
+        { projectRelativePath: 'flow/a.png', x: 30, y: 50, width: 200, height: 120 }
+      ]
+    };
+
+    expect(canvasSurfaceShouldClearPendingLayoutDraft({
+      pending,
+      projection: {
+        canvasId: 'canvas-1',
+        nodes: [nodeFixture('flow/a.png', 30, 50)],
+        edges: [],
+        diagnostics: []
+      }
+    })).toBe(true);
+    expect(canvasSurfaceShouldClearPendingLayoutDraft({
+      pending,
+      projection: {
+        canvasId: 'canvas-1',
+        nodes: [nodeFixture('flow/a.png', 29, 50)],
+        edges: [],
+        diagnostics: []
+      }
+    })).toBe(false);
   });
 
   it('renders projected nodes without delete controls', () => {
@@ -920,7 +984,7 @@ describe('CanvasSurface', () => {
     });
   });
 
-  it('starts, frames, and ends a drag session with stage counters', () => {
+  it('starts, frames, and ends a move drag session with render commits', () => {
     const monitor = createCanvasPerfMonitor({ enabled: true });
     const sessionRef = { current: undefined as CanvasPerfRuntimeSession | undefined };
     const reactCommitCountRef = { current: 0 };
@@ -939,11 +1003,6 @@ describe('CanvasSurface', () => {
         origins: [activeNode]
       },
       snapshot: { cameraState: 'idle', camera: { x: 0, y: 0, z: 1 } }
-    });
-    monitor.recordCounter({
-      timestamp: 10,
-      source: 'CanvasStageRuntime',
-      name: 'stage-drag-preview-write'
     });
     reactCommitCountRef.current = 1;
     recordCanvasPerfFrame({
@@ -977,7 +1036,6 @@ describe('CanvasSurface', () => {
       visibleNodeCount: 1,
       culledNodeCount: 0,
       counters: {
-        'stage-drag-preview-write': 1,
         'react-commit': 1
       }
     });

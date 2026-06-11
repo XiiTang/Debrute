@@ -5,6 +5,7 @@ import {
   CANVAS_VIRTUAL_MAX_STALE_AREA_RATIO,
   CANVAS_VIRTUAL_OVERSCAN_SCREEN_PX,
   buildVirtualizedCanvasRenderState,
+  canvasEdgeSegmentsForProjectionEdges,
   canvasRectContainsRect,
   canvasVirtualRenderRect,
   canvasVisibleRect,
@@ -268,6 +269,29 @@ describe('canvas virtualization geometry', () => {
     ]);
     expect(state.edges[0]?.path).toBe('M 200 100 L 296 100 L 296 60 L 500 60');
     expect(state.edges[0]?.points[1]?.x).toBe(state.edges[1]?.points[1]?.x);
+  });
+
+  it('routes projection edges from the supplied node geometry', () => {
+    const projection = projectionFixture([
+      nodeFixture('flow/source.png', 120, 50),
+      nodeFixture('flow/target.png', 300, 0)
+    ], [{
+      id: 'source-to-target',
+      sourceProjectRelativePath: 'flow/source.png',
+      targetProjectRelativePath: 'flow/target.png'
+    }]);
+
+    const edges = canvasEdgeSegmentsForProjectionEdges({
+      nodes: projection.nodes,
+      edges: projection.edges
+    });
+
+    expect(edges[0]?.points).toEqual([
+      { x: 320, y: 110 },
+      { x: 368, y: 110 },
+      { x: 368, y: 60 },
+      { x: 300, y: 60 }
+    ]);
   });
 
   it('keeps routed edges visible when only an orthogonal trunk segment intersects the camera', () => {

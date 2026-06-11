@@ -16,6 +16,7 @@ import { CanvasToolbar } from './canvas/CanvasToolbar';
 import type { CanvasEditorRuntime, CanvasRuntimeSnapshot } from './canvas/runtime/CanvasEditorRuntime';
 import { createCanvasFeedbackEntryUpdater } from './services/canvasFeedbackUpdates';
 import { nextSnapshotFromAppServerEvent } from './services/appServerEvents';
+import { applyCanvasDocumentToWorkbenchSnapshot } from './services/canvasSnapshotUpdates';
 import { getCanvasById } from './services/canvasState';
 import { activeCanvasStorageKey, chooseInitialActiveCanvasId } from './canvas/canvasCardBarState';
 import { loadCanvasFeedback, openInitialProject, replaceWorkbenchProjectRoute } from './services/projectSessionState';
@@ -122,10 +123,15 @@ export function WorkbenchApp(): React.ReactElement {
   const [notifications, setNotifications] = useState<string[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const canvasOverlayRuntime = useMemo(() => createCanvasOverlayRuntime(), []);
+  const snapshotRef = useRef(snapshot);
   const textFileBuffersRef = useRef(textFileBuffers);
   const textEditorWindowsRef = useRef(textEditorWindows);
   const feedbackBarClearTimerRef = useRef<number | undefined>(undefined);
   const feedbackBarHoveredRef = useRef(false);
+
+  useEffect(() => {
+    snapshotRef.current = snapshot;
+  }, [snapshot]);
 
   useEffect(() => {
     textFileBuffersRef.current = textFileBuffers;
@@ -559,10 +565,22 @@ export function WorkbenchApp(): React.ReactElement {
     openTextEditorWindow,
     toggleTextFileWordWrap,
     updateCanvasNodeLayouts: async (canvasId, input) => {
-      await api.updateCanvasNodeLayouts({
-        canvasId,
-        ...input
-      });
+      try {
+        const canvas = await api.updateCanvasNodeLayouts({
+          canvasId,
+          ...input
+        });
+        const current = snapshotRef.current;
+        if (!current) {
+          throw new Error(`Cannot apply Canvas document ${canvas.id} without a current snapshot.`);
+        }
+        const next = applyCanvasDocumentToWorkbenchSnapshot(current, canvas);
+        snapshotRef.current = next;
+        setSnapshot(next);
+      } catch (error) {
+        setNotifications((current) => [`Update Canvas layout failed: ${errorMessage(error)}`, ...current].slice(0, 4));
+        throw error;
+      }
     },
     updateCanvasNodeLayers: async (canvasId, input) => {
       await api.updateCanvasNodeLayers({

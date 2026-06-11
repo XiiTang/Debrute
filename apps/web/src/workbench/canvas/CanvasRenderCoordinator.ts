@@ -1,12 +1,14 @@
 import type { CanvasProjection, ProjectedCanvasNode } from '@debrute/canvas-core';
 import { CANVAS_PERF_INTERACTION_SESSION_TYPES, type CanvasPerfCounterName, type CanvasPerfMonitor } from './CanvasPerfMonitor';
 import {
+  canvasEdgeSegmentsForProjectionEdges,
   createCanvasVirtualizationIndex,
   nodeRect,
   shouldRefreshVirtualizedRenderState,
   type CanvasEdgeSegment,
   type VirtualizedCanvasRenderState
 } from './canvasVirtualization';
+import type { CanvasLayoutOverride } from './canvasLocalLayoutDraft';
 import type { CanvasCamera, CanvasCameraState } from './runtime/canvasCamera';
 import type { CanvasRect, CanvasSize } from './runtime/canvasGeometry';
 import { rectsIntersect } from './runtime/canvasGeometry';
@@ -32,6 +34,7 @@ export interface CanvasRenderCoordinatorUpdateInput {
   surfaceSize: CanvasSize | undefined;
   selection: CanvasSelection | undefined;
   activeNodePaths: readonly string[];
+  layoutOverrides?: readonly CanvasLayoutOverride[];
 }
 
 export interface CanvasRenderCoordinator {
@@ -53,7 +56,7 @@ export function createCanvasRenderCoordinator(input: CanvasRenderCoordinatorInpu
     edges: projection.edges
   });
   let snapshot: CanvasRenderCoordinatorSnapshot | undefined;
-  let mountedInputPathKey: string | undefined;
+  let mountedInputKey: string | undefined;
 
   const recordCounter = (name: CanvasPerfCounterName, detail?: Record<string, unknown>) => {
     input.perfMonitor?.recordCounter({
@@ -72,8 +75,15 @@ export function createCanvasRenderCoordinator(input: CanvasRenderCoordinatorInpu
       selection: input.selection,
       activeNodeProjectRelativePaths: input.activeNodePaths
     });
+    const layoutOverrides = input.layoutOverrides ?? [];
+    const draftAwareNodesByPath = draftAwareNodesByPathFor(latestNodesByPath, layoutOverrides);
+    const overrideNodes = layoutOverrides
+      .map((layout) => draftAwareNodesByPath.get(layout.projectRelativePath))
+      .filter((node): node is ProjectedCanvasNode => Boolean(node));
     const nodes = rendered.nodes
-      .map((node) => latestNodesByPath.get(node.projectRelativePath) ?? node)
+      .map((node) => draftAwareNodesByPath.get(node.projectRelativePath) ?? node)
+      .concat(overrideNodes)
+      .filter(uniqueNodePathPredicate())
       .sort((left, right) => left.projectRelativePath.localeCompare(right.projectRelativePath));
     const nodesByPath = new Map(nodes.map((node) => [node.projectRelativePath, node]));
     const culledNodePaths = new Set(
@@ -81,13 +91,19 @@ export function createCanvasRenderCoordinator(input: CanvasRenderCoordinatorInpu
         .filter((node) => !rectsIntersect(rendered.virtualRect, nodeRect(node)))
         .map((node) => node.projectRelativePath)
     );
+    const edges = renderSnapshotEdges({
+      projectionEdges: projection.edges,
+      renderedEdges: rendered.edges,
+      draftAwareNodes: [...draftAwareNodesByPath.values()],
+      layoutOverrides
+    });
     return {
       visibleRect: rendered.visibleRect,
       virtualRect: rendered.virtualRect,
       culledNodePaths,
       nodesByPath,
       nodeLayers: nodeLayersFor(nodes),
-      edges: rendered.edges
+      edges
     };
   };
 
@@ -103,20 +119,21 @@ export function createCanvasRenderCoordinator(input: CanvasRenderCoordinatorInpu
           edges: projection.edges
         });
         snapshot = undefined;
-        mountedInputPathKey = undefined;
+        mountedInputKey = undefined;
         recordCounter('render-virtual-refresh', { reason: 'projection-membership-change' });
         return;
       }
       if (snapshot) {
-        snapshot = remapSnapshotNodes(snapshot, latestNodesByPath);
+        snapshot = undefined;
+        mountedInputKey = undefined;
       }
     },
     update(input) {
-      const nextMountedInputPathKey = canvasRenderCoordinatorMountedInputPathKey(input);
+      const nextMountedInputKey = canvasRenderCoordinatorMountedInputKey(input);
       if (
         input.cameraState === 'moving'
         && snapshot
-        && nextMountedInputPathKey === mountedInputPathKey
+        && nextMountedInputKey === mountedInputKey
         && !shouldRefreshVirtualizedRenderState({
           currentVirtualRect: snapshot.virtualRect,
           camera: input.camera,
@@ -130,7 +147,7 @@ export function createCanvasRenderCoordinator(input: CanvasRenderCoordinatorInpu
         recordCounter('render-virtual-refresh', { reason: 'moving-refresh-margin' });
       }
       snapshot = buildSnapshot(input);
-      mountedInputPathKey = nextMountedInputPathKey;
+      mountedInputKey = nextMountedInputKey;
       recordCounter('render-snapshot-build', {
         cameraState: input.cameraState,
         mountedNodeCount: snapshot.nodesByPath.size,
@@ -165,25 +182,86 @@ export function canvasRenderProjectionMembershipKey(projection: CanvasProjection
   ].join('\u001d');
 }
 
-function remapSnapshotNodes(
-  snapshot: CanvasRenderCoordinatorSnapshot,
-  nodesByLatestPath: ReadonlyMap<string, ProjectedCanvasNode>
-): CanvasRenderCoordinatorSnapshot {
-  const nodes = [...snapshot.nodesByPath.keys()]
-    .flatMap((path) => nodesByLatestPath.get(path) ?? [])
-    .sort((left, right) => left.projectRelativePath.localeCompare(right.projectRelativePath));
-  return {
-    ...snapshot,
-    nodesByPath: new Map(nodes.map((node) => [node.projectRelativePath, node])),
-    nodeLayers: nodeLayersFor(nodes)
-  };
+function canvasRenderCoordinatorMountedInputKey(input: CanvasRenderCoordinatorUpdateInput): string {
+  const mountedPaths = [...new Set([
+    ...selectedNodeProjectRelativePaths(input.selection),
+    ...input.activeNodePaths,
+    ...(input.layoutOverrides ?? []).map((layout) => layout.projectRelativePath)
+  ])].sort().join('\u001f');
+  const layoutKey = [...(input.layoutOverrides ?? [])]
+    .map((layout) => [
+      layout.projectRelativePath,
+      layout.x,
+      layout.y,
+      layout.width,
+      layout.height
+    ].join('\u001f'))
+    .sort()
+    .join('\u001e');
+  return [mountedPaths, layoutKey].join('\u001d');
 }
 
-function canvasRenderCoordinatorMountedInputPathKey(input: CanvasRenderCoordinatorUpdateInput): string {
-  return [...new Set([
-    ...selectedNodeProjectRelativePaths(input.selection),
-    ...input.activeNodePaths
-  ])].sort().join('\u001f');
+function draftAwareNodesByPathFor(
+  nodesByPath: ReadonlyMap<string, ProjectedCanvasNode>,
+  layoutOverrides: readonly CanvasLayoutOverride[]
+): Map<string, ProjectedCanvasNode> {
+  const next = new Map(nodesByPath);
+  for (const layout of layoutOverrides) {
+    const node = nodesByPath.get(layout.projectRelativePath);
+    if (!node) {
+      continue;
+    }
+    next.set(layout.projectRelativePath, {
+      ...node,
+      x: layout.x,
+      y: layout.y,
+      width: layout.width,
+      height: layout.height
+    });
+  }
+  return next;
+}
+
+function renderSnapshotEdges(input: {
+  projectionEdges: CanvasProjection['edges'];
+  renderedEdges: CanvasEdgeSegment[];
+  draftAwareNodes: ProjectedCanvasNode[];
+  layoutOverrides: readonly CanvasLayoutOverride[];
+}): CanvasEdgeSegment[] {
+  if (input.layoutOverrides.length === 0) {
+    return input.renderedEdges;
+  }
+  const overridePaths = new Set(input.layoutOverrides.map((layout) => layout.projectRelativePath));
+  const connectedEdges = input.projectionEdges.filter((edge) => (
+    overridePaths.has(edge.sourceProjectRelativePath) || overridePaths.has(edge.targetProjectRelativePath)
+  ));
+  if (connectedEdges.length === 0) {
+    return input.renderedEdges;
+  }
+  const connectedEdgeIds = new Set(connectedEdges.map((edge) => edge.id));
+  const edgeById = new Map(
+    input.renderedEdges
+      .filter((edge) => !connectedEdgeIds.has(edge.id))
+      .map((edge) => [edge.id, edge])
+  );
+  for (const edge of canvasEdgeSegmentsForProjectionEdges({
+    nodes: input.draftAwareNodes,
+    edges: connectedEdges
+  })) {
+    edgeById.set(edge.id, edge);
+  }
+  return input.projectionEdges.flatMap((edge) => edgeById.get(edge.id) ?? []);
+}
+
+function uniqueNodePathPredicate(): (node: ProjectedCanvasNode) => boolean {
+  const seen = new Set<string>();
+  return (node) => {
+    if (seen.has(node.projectRelativePath)) {
+      return false;
+    }
+    seen.add(node.projectRelativePath);
+    return true;
+  };
 }
 
 function nodeLayersFor(nodes: ProjectedCanvasNode[]): Map<string, CanvasNodeLayerView> {

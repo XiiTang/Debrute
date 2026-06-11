@@ -51,7 +51,7 @@ describe('CanvasStageRuntime', () => {
     expect(element.style.properties.get('display')).toBe('block');
   });
 
-  it('applies drag previews without mutating stored final layout', () => {
+  it('ignores move-node drag previews because move layout comes from render snapshots', () => {
     const runtime = createCanvasStageRuntime();
     const element = fakeElement();
 
@@ -65,7 +65,7 @@ describe('CanvasStageRuntime', () => {
       origins: [{ projectRelativePath: 'flow/a.png', x: 10, y: 20, width: 320, height: 180, locked: false }]
     });
 
-    expect(element.style.transform).toBe('translate(25px, 45px)');
+    expect(element.style.transform).toBe('translate(10px, 20px)');
 
     runtime.clearDragPreview();
 
@@ -97,7 +97,7 @@ describe('CanvasStageRuntime', () => {
     });
   });
 
-  it('records layout, visibility, and drag preview counters', () => {
+  it('records layout and visibility counters without move preview writes', () => {
     const monitor = createCanvasPerfMonitor({ enabled: true });
     const sessionId = monitor.startSession({ type: 'drag-move-node', timestamp: 0, source: 'CanvasSurface' });
     if (!sessionId) {
@@ -125,9 +125,9 @@ describe('CanvasStageRuntime', () => {
       'stage-node-layout-write': 1,
       'stage-node-layout-noop': 1,
       'stage-node-visibility-write': 1,
-      'stage-node-visibility-noop': 1,
-      'stage-drag-preview-write': 1
+      'stage-node-visibility-noop': 1
     });
+    expect(monitor.getLastSession()?.counters).not.toHaveProperty('stage-drag-preview-write');
   });
 
   it('records resize preview writes for transform and size updates', () => {

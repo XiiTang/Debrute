@@ -220,6 +220,93 @@ describe('CanvasRenderCoordinator', () => {
     expect(backAtA.culledNodePaths.has('flow/b.png')).toBe(true);
   });
 
+  it('applies local layout overrides to rendered nodes and connected edges', () => {
+    const coordinator = createCanvasRenderCoordinator({ projection: projection([
+      imageNode('flow/source.png', 0, 0, 1),
+      imageNode('flow/target.png', 300, 0, 2)
+    ], [{
+      id: 'source-to-target',
+      sourceProjectRelativePath: 'flow/source.png',
+      targetProjectRelativePath: 'flow/target.png'
+    }]) });
+
+    const snapshot = coordinator.update({
+      camera: { x: 0, y: 0, z: 1 },
+      cameraState: 'idle',
+      surfaceSize: { width: 800, height: 600 },
+      selection: undefined,
+      activeNodePaths: [],
+      layoutOverrides: [
+        { projectRelativePath: 'flow/source.png', x: 120, y: 50, width: 100, height: 100 }
+      ]
+    });
+
+    expect(snapshot.nodesByPath.get('flow/source.png')).toMatchObject({ x: 120, y: 50 });
+    expect(snapshot.edges[0]?.points).toEqual([
+      { x: 220, y: 100 },
+      { x: 260, y: 100 },
+      { x: 260, y: 50 },
+      { x: 300, y: 50 }
+    ]);
+  });
+
+  it('routes edges from draft geometry when both endpoints are moved', () => {
+    const coordinator = createCanvasRenderCoordinator({ projection: projection([
+      imageNode('flow/source.png', 0, 0, 1),
+      imageNode('flow/target.png', 300, 0, 2)
+    ], [{
+      id: 'source-to-target',
+      sourceProjectRelativePath: 'flow/source.png',
+      targetProjectRelativePath: 'flow/target.png'
+    }]) });
+
+    const snapshot = coordinator.update({
+      camera: { x: 0, y: 0, z: 1 },
+      cameraState: 'idle',
+      surfaceSize: { width: 800, height: 600 },
+      selection: undefined,
+      activeNodePaths: [],
+      layoutOverrides: [
+        { projectRelativePath: 'flow/source.png', x: 120, y: 50, width: 100, height: 100 },
+        { projectRelativePath: 'flow/target.png', x: 500, y: 80, width: 100, height: 100 }
+      ]
+    });
+
+    expect(snapshot.edges[0]?.points).toEqual([
+      { x: 220, y: 100 },
+      { x: 316, y: 100 },
+      { x: 316, y: 130 },
+      { x: 500, y: 130 }
+    ]);
+  });
+
+  it('does not reuse moving snapshots when layout overrides change', () => {
+    const coordinator = createCanvasRenderCoordinator({ projection: projection([
+      imageNode('flow/a.png', 0, 0, 1)
+    ]) });
+
+    const first = coordinator.update({
+      camera: { x: 0, y: 0, z: 1 },
+      cameraState: 'idle',
+      surfaceSize: { width: 800, height: 600 },
+      selection: undefined,
+      activeNodePaths: []
+    });
+    const moved = coordinator.update({
+      camera: { x: -40, y: 0, z: 1 },
+      cameraState: 'moving',
+      surfaceSize: { width: 800, height: 600 },
+      selection: undefined,
+      activeNodePaths: [],
+      layoutOverrides: [
+        { projectRelativePath: 'flow/a.png', x: 40, y: 0, width: 100, height: 100 }
+      ]
+    });
+
+    expect(moved).not.toBe(first);
+    expect(moved.nodesByPath.get('flow/a.png')?.x).toBe(40);
+  });
+
   it('records snapshot build, reuse, and virtual refresh counters', () => {
     const monitor = createCanvasPerfMonitor({ enabled: true });
     const coordinator = createCanvasRenderCoordinator({
@@ -402,11 +489,14 @@ function counterNames(events: readonly CanvasPerfTraceEvent[]): string[] {
     .map((event) => event.name);
 }
 
-function projection(nodes: ProjectedCanvasNode[]): CanvasProjection {
+function projection(
+  nodes: ProjectedCanvasNode[],
+  edges: CanvasProjection['edges'] = []
+): CanvasProjection {
   return {
     canvasId: 'canvas',
     nodes,
-    edges: [],
+    edges,
     diagnostics: []
   };
 }

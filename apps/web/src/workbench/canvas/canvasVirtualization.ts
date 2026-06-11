@@ -85,12 +85,10 @@ export function createCanvasVirtualizationIndex(input: {
   const visibleImageNodes = visibleNodes.filter((node) => node.nodeKind === 'file' && node.mediaKind === 'image');
   const visibleNodeByPath = new Map(visibleNodes.map((node) => [node.projectRelativePath, node]));
   const nodeIndex = new CanvasNodeSpatialIndex(visibleNodes);
-  const nodeByPath = visibleNodeByPath;
-  const resolvedEdges = input.edges.flatMap((edge, order) => {
-    const resolved = resolveEdgeNodes(edge, nodeByPath, order);
-    return resolved ? [resolved] : [];
+  const edgeSegments = indexedCanvasEdgeSegmentsForProjectionEdges({
+    nodes: visibleNodes,
+    edges: input.edges
   });
-  const edgeSegments = routedEdges(resolvedEdges);
   const edgeIndex = new CanvasEdgeSpatialIndex(edgeSegments);
 
   return {
@@ -102,6 +100,14 @@ export function createCanvasVirtualizationIndex(input: {
       edgeIndex
     })
   };
+}
+
+export function canvasEdgeSegmentsForProjectionEdges(input: {
+  nodes: ProjectedCanvasNode[];
+  edges: CanvasProjection['edges'];
+}): CanvasEdgeSegment[] {
+  return indexedCanvasEdgeSegmentsForProjectionEdges(input)
+    .map(({ order: _order, ...edge }) => edge);
 }
 
 export function buildVirtualizedCanvasRenderState(input: {
@@ -147,6 +153,22 @@ function buildVirtualizedCanvasRenderStateFromIndex(input: CanvasVirtualizationQ
     nodes,
     edges
   };
+}
+
+function indexedCanvasEdgeSegmentsForProjectionEdges(input: {
+  nodes: ProjectedCanvasNode[];
+  edges: CanvasProjection['edges'];
+}): IndexedCanvasEdgeSegment[] {
+  const nodeByPath = new Map(
+    input.nodes
+      .filter((node) => node.visible !== false)
+      .map((node) => [node.projectRelativePath, node])
+  );
+  const resolvedEdges = input.edges.flatMap((edge, order) => {
+    const resolved = resolveEdgeNodes(edge, nodeByPath, order);
+    return resolved ? [resolved] : [];
+  });
+  return routedEdges(resolvedEdges);
 }
 
 export function shouldRefreshVirtualizedRenderState(input: {

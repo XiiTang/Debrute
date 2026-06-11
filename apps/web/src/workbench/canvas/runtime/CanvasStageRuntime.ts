@@ -171,40 +171,29 @@ export function createCanvasStageRuntime(input: CanvasStageRuntimeInput = {}): C
         return;
       }
       if (state.kind === 'move-node') {
-        const delta = dragStateDelta(state);
-        let wrote = false;
-        for (const origin of state.origins) {
-          const node = nodes.get(origin.projectRelativePath);
-          if (!node) {
-            continue;
-          }
-          activePreviewPaths.add(origin.projectRelativePath);
-          node.previewing = true;
-          wrote = writeNodeTransform(node, `translate(${origin.x + delta.dx}px, ${origin.y + delta.dy}px)`) || wrote;
+        for (const path of previousPreviewPaths) {
+          clearPreviewPath(path);
         }
+        return;
+      }
+      const node = nodes.get(state.node.projectRelativePath);
+      if (node) {
+        const delta = dragStateDelta(state);
+        const next = buildResizeGeometry(
+          state.handle,
+          state.origin,
+          { x: delta.dx, y: delta.dy },
+          state.preserveAspect
+        );
+        activePreviewPaths.add(state.node.projectRelativePath);
+        node.previewing = true;
+        const wrote = [
+          writeNodeTransform(node, transformForRect(next)),
+          writeStyleProperty(node, 'width', `${next.width}px`, 'lastWidth'),
+          writeStyleProperty(node, 'height', `${next.height}px`, 'lastHeight')
+        ].some(Boolean);
         if (wrote) {
           recordCounter('stage-drag-preview-write');
-        }
-      } else {
-        const node = nodes.get(state.node.projectRelativePath);
-        if (node) {
-          const delta = dragStateDelta(state);
-          const next = buildResizeGeometry(
-            state.handle,
-            state.origin,
-            { x: delta.dx, y: delta.dy },
-            state.preserveAspect
-          );
-          activePreviewPaths.add(state.node.projectRelativePath);
-          node.previewing = true;
-          const wrote = [
-            writeNodeTransform(node, transformForRect(next)),
-            writeStyleProperty(node, 'width', `${next.width}px`, 'lastWidth'),
-            writeStyleProperty(node, 'height', `${next.height}px`, 'lastHeight')
-          ].some(Boolean);
-          if (wrote) {
-            recordCounter('stage-drag-preview-write');
-          }
         }
       }
       for (const path of previousPreviewPaths) {
