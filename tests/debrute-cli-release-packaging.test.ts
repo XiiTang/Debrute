@@ -99,6 +99,8 @@ describe('Debrute CLI release packaging', () => {
       expect(debruteCliPayloadEntries(root, debruteCliReleaseTargets[0])).toEqual([
         { from: join(root, 'skills'), to: 'skills', recursive: true, dereference: false },
         { from: join(root, 'apps/web/dist'), to: 'web', recursive: true, dereference: false },
+        { from: join(root, 'packages/capability-runtime/src/imageModels/officialDocs/snapshots'), to: 'official-docs/imageModels/snapshots', recursive: true, dereference: false },
+        { from: join(root, 'packages/capability-runtime/src/videoModels/officialDocs/snapshots'), to: 'official-docs/videoModels/snapshots', recursive: true, dereference: false },
         { from: join(root, 'node_modules/sharp'), to: 'node_modules/sharp', recursive: true, dereference: true, excludeNestedNodeModules: true },
         { from: join(root, 'node_modules/@img/colour'), to: 'node_modules/@img/colour', recursive: true, dereference: true },
         { from: join(root, 'node_modules/detect-libc'), to: 'node_modules/detect-libc', recursive: true, dereference: true },

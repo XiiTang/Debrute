@@ -1,6 +1,6 @@
 import { readFile } from 'node:fs/promises';
-import { dirname, resolve, sep } from 'node:path';
-import { fileURLToPath } from 'node:url';
+import { resolve } from 'node:path';
+import { runtimeOfficialDocSnapshotRoot } from '../../officialDocs/runtimeSnapshotRoot.js';
 import { createVideoModelCatalog, type VideoModelCatalogEntry } from '../catalog.js';
 
 export interface VideoModelOfficialDocReference {
@@ -129,8 +129,9 @@ async function readSnapshot(doc: VideoModelOfficialDocReference): Promise<string
 }
 
 function runtimeSnapshotRoot(): string {
-  if (typeof __dirname === 'string' && __dirname.endsWith(`${sep}dist-electron`)) {
-    return resolve(__dirname, 'snapshots');
-  }
-  return resolve(dirname(fileURLToPath(import.meta.url)), 'snapshots');
+  return runtimeOfficialDocSnapshotRoot({
+    modelKind: 'videoModels',
+    importMetaUrl: import.meta.url,
+    ...(typeof __dirname === 'string' ? { moduleDir: __dirname } : {})
+  });
 }

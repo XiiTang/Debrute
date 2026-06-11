@@ -34,11 +34,18 @@ if (!skipWebDist) {
   await cp('../web/dist', 'dist', { recursive: true });
 }
 
-await cp(
-  '../../packages/capability-runtime/src/imageModels/officialDocs/snapshots',
-  'dist-electron/snapshots',
-  { recursive: true }
-);
+await Promise.all([
+  cp(
+    '../../packages/capability-runtime/src/imageModels/officialDocs/snapshots',
+    'dist-electron/official-docs/imageModels/snapshots',
+    { recursive: true }
+  ),
+  cp(
+    '../../packages/capability-runtime/src/videoModels/officialDocs/snapshots',
+    'dist-electron/official-docs/videoModels/snapshots',
+    { recursive: true }
+  )
+]);
 
 await cp('build/icon.svg', 'dist-electron/icon.svg');
 await cp('build/icon.png', 'dist-electron/icon.png');

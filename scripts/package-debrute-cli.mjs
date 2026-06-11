@@ -37,6 +37,8 @@ export function debruteCliPayloadEntries(root, releaseTarget = releaseTargetForH
   return [
     { from: join(root, 'skills'), to: 'skills', recursive: true, dereference: false },
     { from: join(root, 'apps/web/dist'), to: 'web', recursive: true, dereference: false },
+    { from: join(root, 'packages/capability-runtime/src/imageModels/officialDocs/snapshots'), to: 'official-docs/imageModels/snapshots', recursive: true, dereference: false },
+    { from: join(root, 'packages/capability-runtime/src/videoModels/officialDocs/snapshots'), to: 'official-docs/videoModels/snapshots', recursive: true, dereference: false },
     ...sharpRuntimePayloadEntries(root, releaseTarget)
   ];
 }
