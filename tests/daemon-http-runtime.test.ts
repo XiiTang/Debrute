@@ -75,6 +75,43 @@ describe('daemon HTTP runtime', () => {
 
   });
 
+  it('protects project read routes with the daemon token', async () => {
+    const projectRoot = await mkdtemp(join(tmpdir(), 'debrute-daemon-read-token-'));
+    await writeFile(join(projectRoot, 'brief.md'), '# Brief', 'utf8');
+
+    const daemon = createDebruteDaemonHttpServer({
+      host: '127.0.0.1',
+      port: 0,
+      token: 'test-token',
+      webBaseUrl: null
+    });
+    cleanups.push(() => daemon.close(), () => rm(projectRoot, { recursive: true, force: true }));
+    const runtime = await daemon.listen();
+    const opened = await requestJson<{ projectId: string }>(`${runtime.daemonUrl}/api/projects/open`, {
+      method: 'POST',
+      headers: {
+        'content-type': 'application/json',
+        'x-debrute-daemon-token': 'test-token'
+      },
+      body: JSON.stringify({ projectRoot })
+    });
+
+    const tokenlessText = await fetch(`${runtime.daemonUrl}/api/projects/${opened.projectId}/files/text/brief.md`);
+    expect(tokenlessText.status).toBe(403);
+
+    const authorizedText = await requestJson<{ content: string }>(`${runtime.daemonUrl}/api/projects/${opened.projectId}/files/text/brief.md`, {
+      headers: { 'x-debrute-daemon-token': 'test-token' }
+    });
+    expect(authorizedText.content).toBe('# Brief');
+
+    const tokenlessEvents = await fetch(`${runtime.daemonUrl}/api/projects/${opened.projectId}/events?clientId=security-test`);
+    expect(tokenlessEvents.status).toBe(403);
+
+    const authorizedEvents = await fetch(`${runtime.daemonUrl}/api/projects/${opened.projectId}/events?clientId=security-test&debrute-token=test-token`);
+    expect(authorizedEvents.status).toBe(200);
+    await authorizedEvents.body?.cancel();
+  });
+
   it('rejects non-loopback daemon bind hosts before listening', async () => {
     const daemon = createDebruteDaemonHttpServer({
       host: '0.0.0.0',
@@ -204,7 +241,7 @@ describe('daemon HTTP runtime', () => {
       body: JSON.stringify({ projectRoot })
     });
 
-    const response = await fetch(`${runtime.daemonUrl}/api/projects/${opened.projectId}/files/raw/generated/cover.png`);
+    const response = await apiFetch(`${runtime.daemonUrl}/api/projects/${opened.projectId}/files/raw/generated/cover.png`);
 
     expect(response.status).toBe(400);
     await expect(response.json()).resolves.toMatchObject({
@@ -565,7 +602,7 @@ describe('daemon HTTP runtime', () => {
     await expect(requestJson(`${runtime.daemonUrl}/api/projects/${opened.projectId}/files/text/briefs/outline.md`))
       .resolves.toMatchObject({ content: '# Outline' });
 
-    const rejected = await fetch(`${runtime.daemonUrl}/api/projects/unknown-project-id/files/text/briefs/outline.md`);
+    const rejected = await apiFetch(`${runtime.daemonUrl}/api/projects/unknown-project-id/files/text/briefs/outline.md`);
     expect(rejected.status).toBe(404);
     await expect(rejected.json()).resolves.toMatchObject({
       error: { code: 'project_not_open' }
@@ -661,7 +698,7 @@ describe('daemon HTTP runtime', () => {
       body: JSON.stringify({ projectRoot })
     });
 
-    const response = await fetch(`${runtime.daemonUrl}/api/projects/${opened.projectId}/files/text/linked.txt`);
+    const response = await apiFetch(`${runtime.daemonUrl}/api/projects/${opened.projectId}/files/text/linked.txt`);
 
     expect(response.status).toBe(403);
     await expect(response.json()).resolves.toMatchObject({
@@ -695,7 +732,7 @@ describe('daemon HTTP runtime', () => {
     await expect(response.json()).resolves.toMatchObject({
       error: { code: 'invalid_input' }
     });
-    await expect(fetch(`${runtime.daemonUrl}/api/projects`).then((projectsResponse) => projectsResponse.json())).resolves.toEqual({
+    await expect(apiFetch(`${runtime.daemonUrl}/api/projects`).then((projectsResponse) => projectsResponse.json())).resolves.toEqual({
       projects: []
     });
   });
@@ -730,7 +767,7 @@ describe('daemon HTTP runtime', () => {
       });
     }
 
-    await expect(fetch(`${runtime.daemonUrl}/api/projects`).then((projectsResponse) => projectsResponse.json())).resolves.toEqual({
+    await expect(apiFetch(`${runtime.daemonUrl}/api/projects`).then((projectsResponse) => projectsResponse.json())).resolves.toEqual({
       projects: []
     });
   });
@@ -756,7 +793,7 @@ describe('daemon HTTP runtime', () => {
       webBaseUrl: runtime.webBaseUrl,
       platform: process.platform
     });
-    await expect(fetch(`${runtime.daemonUrl}/api/projects`).then((response) => response.json())).resolves.toEqual({
+    await expect(apiFetch(`${runtime.daemonUrl}/api/projects`).then((response) => response.json())).resolves.toEqual({
       projects: []
     });
   });
@@ -805,7 +842,7 @@ describe('daemon HTTP runtime', () => {
       expect.objectContaining({
         assetId: record.recordId,
         projectRelativePath: 'generated/cover.png',
-        rawUrl: `${runtime.daemonUrl}/api/projects/${opened.projectId}/generated-assets/${record.recordId}/raw`
+        rawUrl: `${runtime.daemonUrl}/api/projects/${opened.projectId}/generated-assets/${record.recordId}/raw?debrute-token=test-token`
       })
     ]);
     expect(JSON.stringify(list)).not.toContain(projectRoot);
@@ -818,7 +855,7 @@ describe('daemon HTTP runtime', () => {
     });
     expect(JSON.stringify(detail)).not.toContain(projectRoot);
 
-    await expect(fetch(`${runtime.daemonUrl}/api/projects/${opened.projectId}/generated-assets/${record.recordId}/raw`).then((response) => response.text()))
+    await expect(fetch(list.assets[0]!.rawUrl).then((response) => response.text()))
       .resolves.toBe('asset-bytes');
   });
 
@@ -911,7 +948,7 @@ describe('daemon HTTP runtime', () => {
       body: JSON.stringify({ projectRoot })
     });
 
-    const response = await fetch(`${runtime.daemonUrl}/api/projects/${opened.projectId}/events`);
+    const response = await fetch(`${runtime.daemonUrl}/api/projects/${opened.projectId}/events?debrute-token=test-token`);
     expect(response.status).toBe(200);
     expect(response.headers.get('content-type')).toContain('text/event-stream');
 
@@ -943,8 +980,8 @@ describe('daemon HTTP runtime', () => {
       body: JSON.stringify({ projectRoot: betaRoot })
     });
 
-    const alphaEvents = await fetch(`${runtime.daemonUrl}/api/projects/${alpha.projectId}/events?clientId=alpha-client`);
-    const betaEvents = await fetch(`${runtime.daemonUrl}/api/projects/${beta.projectId}/events?clientId=beta-client`);
+    const alphaEvents = await fetch(`${runtime.daemonUrl}/api/projects/${alpha.projectId}/events?clientId=alpha-client&debrute-token=test-token`);
+    const betaEvents = await fetch(`${runtime.daemonUrl}/api/projects/${beta.projectId}/events?clientId=beta-client&debrute-token=test-token`);
     await requestJson(`${runtime.daemonUrl}/api/projects/${beta.projectId}/files/text/brief.md`, {
       method: 'PUT',
       headers: {
@@ -1019,21 +1056,21 @@ describe('daemon HTTP runtime', () => {
       body: JSON.stringify({ projectRoot })
     });
 
-    const events = await fetch(`${runtime.daemonUrl}/api/projects/${opened.projectId}/events?clientId=client-a`);
+    const events = await fetch(`${runtime.daemonUrl}/api/projects/${opened.projectId}/events?clientId=client-a&debrute-token=test-token`);
     expect(events.status).toBe(200);
-    await expect(fetch(`${runtime.daemonUrl}/api/projects`).then((response) => response.json())).resolves.toMatchObject({
+    await expect(apiFetch(`${runtime.daemonUrl}/api/projects`).then((response) => response.json())).resolves.toMatchObject({
       projects: [{ projectId: opened.projectId, clients: { liveCount: 1 } }]
     });
 
     await events.body?.cancel();
     await delay(80);
 
-    const released = await fetch(`${runtime.daemonUrl}/api/projects/${opened.projectId}`);
+    const released = await apiFetch(`${runtime.daemonUrl}/api/projects/${opened.projectId}`);
     expect(released.status).toBe(404);
     await expect(released.json()).resolves.toMatchObject({
       error: { code: 'project_not_open' }
     });
-    await expect(fetch(`${runtime.daemonUrl}/api/projects`).then((response) => response.json())).resolves.toEqual({
+    await expect(apiFetch(`${runtime.daemonUrl}/api/projects`).then((response) => response.json())).resolves.toEqual({
       projects: []
     });
   });
@@ -1060,8 +1097,8 @@ describe('daemon HTTP runtime', () => {
       body: JSON.stringify({ projectRoot })
     });
 
-    const first = await fetch(`${runtime.daemonUrl}/api/projects/${opened.projectId}/events?clientId=client-a`);
-    const second = await fetch(`${runtime.daemonUrl}/api/projects/${opened.projectId}/events?clientId=client-b`);
+    const first = await fetch(`${runtime.daemonUrl}/api/projects/${opened.projectId}/events?clientId=client-a&debrute-token=test-token`);
+    const second = await fetch(`${runtime.daemonUrl}/api/projects/${opened.projectId}/events?clientId=client-b&debrute-token=test-token`);
     expect(first.status).toBe(200);
     expect(second.status).toBe(200);
 
@@ -1070,7 +1107,7 @@ describe('daemon HTTP runtime', () => {
 
     await expect(requestJson(`${runtime.daemonUrl}/api/projects/${opened.projectId}`))
       .resolves.toMatchObject({ projectId: opened.projectId });
-    await expect(fetch(`${runtime.daemonUrl}/api/projects`).then((response) => response.json())).resolves.toMatchObject({
+    await expect(apiFetch(`${runtime.daemonUrl}/api/projects`).then((response) => response.json())).resolves.toMatchObject({
       projects: [{ projectId: opened.projectId, clients: { liveCount: 1 } }]
     });
 
@@ -1098,7 +1135,7 @@ describe('daemon HTTP runtime', () => {
       },
       body: JSON.stringify({ projectRoot })
     });
-    const events = await fetch(`${runtime.daemonUrl}/api/projects/${opened.projectId}/events?clientId=client-a`);
+    const events = await fetch(`${runtime.daemonUrl}/api/projects/${opened.projectId}/events?clientId=client-a&debrute-token=test-token`);
     expect(events.status).toBe(200);
 
     await events.body?.cancel();
@@ -1110,7 +1147,7 @@ describe('daemon HTTP runtime', () => {
       .resolves.toMatchObject({ projectId: opened.projectId });
 
     await delay(100);
-    const released = await fetch(`${runtime.daemonUrl}/api/projects/${opened.projectId}`);
+    const released = await apiFetch(`${runtime.daemonUrl}/api/projects/${opened.projectId}`);
     expect(released.status).toBe(404);
   });
 
@@ -1152,7 +1189,10 @@ describe('daemon HTTP runtime', () => {
     const abortController = new AbortController();
     const request = fetch(
       `${runtime.daemonUrl}/api/projects/${opened.projectId}/canvas-image-preview?path=flow%2Fa.png&v=1&w=256`,
-      { signal: abortController.signal }
+      {
+        headers: { 'x-debrute-daemon-token': 'test-token' },
+        signal: abortController.signal
+      }
     ).catch((error) => error);
 
     await entered;
@@ -1196,7 +1236,7 @@ describe('daemon HTTP runtime', () => {
       body: JSON.stringify({ projectRoot })
     });
 
-    const response = await fetch(`${runtime.daemonUrl}/api/projects/${opened.projectId}/canvas-image-preview?path=flow%2Fa.png&v=1&w=256`);
+    const response = await apiFetch(`${runtime.daemonUrl}/api/projects/${opened.projectId}/canvas-image-preview?path=flow%2Fa.png&v=1&w=256`);
 
     expect(response.status).toBe(200);
     await expect(response.text()).resolves.toBe('preview');
@@ -1235,7 +1275,7 @@ describe('daemon HTTP runtime', () => {
     releaseWindow!();
     await delay(80);
 
-    const released = await fetch(`${runtime.daemonUrl}/api/projects/${opened.projectId}`);
+    const released = await apiFetch(`${runtime.daemonUrl}/api/projects/${opened.projectId}`);
     expect(released.status).toBe(404);
   });
 
@@ -1294,7 +1334,7 @@ describe('daemon HTTP runtime', () => {
     expect(rawFileResponse.headers.get('content-type')).toBe('image/png');
     expect(Buffer.from(await rawFileResponse.arrayBuffer()).length).toBeGreaterThan(0);
 
-    const response = await fetch(`${runtime.daemonUrl}/api/projects/${opened.projectId}/events`);
+    const response = await fetch(`${runtime.daemonUrl}/api/projects/${opened.projectId}/events?debrute-token=test-token`);
     await requestJson(`${runtime.daemonUrl}/api/projects/${opened.projectId}/canvases/production-map/node-layers`, {
       method: 'PATCH',
       headers: {
@@ -1431,10 +1471,21 @@ describe('daemon HTTP runtime', () => {
 });
 
 async function requestJson<T>(url: string, init?: RequestInit): Promise<T> {
-  const response = await fetch(url, init);
+  const response = await apiFetch(url, init);
   expect(response.status).toBeGreaterThanOrEqual(200);
   expect(response.status).toBeLessThan(300);
   return response.json() as Promise<T>;
+}
+
+async function apiFetch(url: string, init: RequestInit = {}, token = 'test-token'): Promise<Response> {
+  const headers = new Headers(init.headers);
+  if (!headers.has('x-debrute-daemon-token')) {
+    headers.set('x-debrute-daemon-token', token);
+  }
+  return fetch(url, {
+    ...init,
+    headers
+  });
 }
 
 async function writeCanvasMap(projectRoot: string, canvasId: string, content: string): Promise<void> {

@@ -63,6 +63,34 @@ describe('app-server', () => {
     }
   });
 
+  it('rejects Canvas documents with filesystem-unsafe ids', async () => {
+    const projectRoot = await mkdtemp(join(tmpdir(), 'debrute-app-server-unsafe-canvas-id-'));
+    const server = new DebruteAppServer();
+    try {
+      await mkdir(join(projectRoot, '.debrute/canvases'), { recursive: true });
+      await writeFile(join(projectRoot, '.debrute/project.json'), JSON.stringify({
+        schemaVersion: 1,
+        project: { name: 'Unsafe Canvas Project' }
+      }, null, 2), 'utf8');
+      await writeFile(join(projectRoot, '.debrute/canvases/production-map.json'), JSON.stringify({
+        schemaVersion: CANVAS_DOCUMENT_SCHEMA_VERSION,
+        id: '../../../escape',
+        title: 'Production Map',
+        nodeElements: [],
+        annotations: [],
+        preferences: { showDiagnostics: true }
+      }, null, 2), 'utf8');
+
+      await expect(server.openProject(projectRoot, {
+        initializeIfMissing: false,
+        createDefaultCanvas: false
+      })).rejects.toThrow('Invalid canvas document id');
+    } finally {
+      server.close();
+      await rm(projectRoot, { recursive: true, force: true });
+    }
+  });
+
   it('reads missing Canvas feedback as an empty current-state document', async () => {
     const projectRoot = await mkdtemp(join(tmpdir(), 'debrute-app-server-feedback-empty-'));
     const server = new DebruteAppServer();

@@ -85,7 +85,26 @@ describe('@debrute/workbench-runtime state', () => {
 });
 
 describe('@debrute/workbench-runtime health', () => {
-  it('requires daemon runtime metadata, token, and web URL to match recorded state', async () => {
+  it('does not send runtime tokens during the health probe', async () => {
+    const requests: Array<{ url: string; init?: RequestInit }> = [];
+    await checkWorkbenchRuntimeHealth(runtimeState(), {
+      fetch: async (url, init) => {
+        requests.push({ url: String(url), init });
+        return new Response(
+          String(url).includes('/api/runtime')
+            ? JSON.stringify({ daemonUrl: 'http://127.0.0.1:17321', webBaseUrl: 'http://127.0.0.1:17322' })
+            : 'ok',
+          { status: 200, headers: { 'content-type': 'application/json' } }
+        );
+      }
+    });
+
+    expect(requests[0]?.url).toBe('http://127.0.0.1:17321/api/runtime');
+    expect(requests[0]?.init?.method).toBe('GET');
+    expect(JSON.stringify(requests[0]?.init ?? {})).not.toContain('secret');
+  });
+
+  it('requires daemon runtime metadata and web URL to match recorded state', async () => {
     const requests: Array<{ url: string; init?: RequestInit }> = [];
     await expect(checkWorkbenchRuntimeHealth(runtimeState(), {
       fetch: async (url, init) => {
@@ -99,8 +118,8 @@ describe('@debrute/workbench-runtime health', () => {
       }
     })).resolves.toBe('healthy');
     expect(requests[0]?.url).toBe('http://127.0.0.1:17321/api/runtime');
-    expect(requests[0]?.init?.method).toBe('POST');
-    expect((requests[0]?.init?.headers as Record<string, string>)['x-debrute-daemon-token']).toBe('secret');
+    expect(requests[0]?.init?.method).toBe('GET');
+    expect(JSON.stringify(requests[0]?.init ?? {})).not.toContain('secret');
 
     await expect(checkWorkbenchRuntimeHealth(runtimeState(), {
       fetch: async (url) => new Response(

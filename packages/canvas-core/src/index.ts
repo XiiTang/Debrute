@@ -77,6 +77,17 @@ export interface CanvasDocument {
   };
 }
 
+export function isCanvasDocumentId(id: string): boolean {
+  return /^[A-Za-z0-9][A-Za-z0-9_-]*$/.test(id);
+}
+
+export function assertCanvasDocumentId(id: string): string {
+  if (!isCanvasDocumentId(id)) {
+    throw new Error(`Invalid canvas document id: ${id}`);
+  }
+  return id;
+}
+
 export interface CanvasStructureEdgeProjection {
   id: string;
   sourceProjectRelativePath: string;
@@ -254,9 +265,10 @@ export function normalizeCanvasFeedbackProjectRelativePath(projectRelativePath: 
 }
 
 export function createCanvasDocument(input: { id: string; title: string }): CanvasDocument {
+  const id = assertCanvasDocumentId(input.id);
   return {
     schemaVersion: CANVAS_DOCUMENT_SCHEMA_VERSION,
-    id: input.id,
+    id,
     title: input.title,
     nodeElements: [],
     annotations: [],

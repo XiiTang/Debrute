@@ -23,10 +23,7 @@ export async function checkWorkbenchRuntimeHealth(
   let daemon: Response;
   try {
     daemon = await fetchImpl(new URL('/api/runtime', state.daemonUrl).toString(), {
-      method: 'POST',
-      headers: {
-        'x-debrute-daemon-token': state.token
-      },
+      method: 'GET',
       signal: AbortSignal.timeout(1500)
     });
   } catch {

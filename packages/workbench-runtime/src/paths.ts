@@ -4,6 +4,7 @@ export interface WorkbenchRuntimePaths {
   runtimeDir: string;
   statePath: string;
   lockPath: string;
+  tokenPath: string;
   daemonLogPath: string;
   webLogPath: string;
 }
@@ -14,6 +15,7 @@ export function resolveWorkbenchRuntimePaths(debruteHome = resolveDebruteHomeDir
     runtimeDir,
     statePath: join(runtimeDir, 'workbench-runtime.json'),
     lockPath: join(runtimeDir, 'workbench-runtime.lock'),
+    tokenPath: join(runtimeDir, 'workbench-runtime.token'),
     daemonLogPath: join(runtimeDir, 'workbench-daemon.log'),
     webLogPath: join(runtimeDir, 'workbench-web.log')
   };

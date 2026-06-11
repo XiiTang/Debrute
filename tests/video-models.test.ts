@@ -151,6 +151,55 @@ describe('video model executor', () => {
     }
   });
 
+  it('rejects loopback provider artifact URLs before download', async () => {
+    const projectRoot = await mkdtemp(join(tmpdir(), 'debrute-video-loopback-artifact-'));
+    const calls: string[] = [];
+    const fetch: VideoModelFetch = async (url, init) => {
+      calls.push(url);
+      if (url.endsWith('/contents/generations/tasks') && init?.method === 'POST') {
+        return jsonResponse({ id: 'task-loopback', status: 'queued' });
+      }
+      if (url.endsWith('/contents/generations/tasks/task-loopback')) {
+        return jsonResponse({
+          id: 'task-loopback',
+          status: 'succeeded',
+          content: { video_url: 'http://127.0.0.1:54321/private.mp4' }
+        });
+      }
+      return new Response(tinyMp4, { status: 200, headers: { 'content-type': 'video/mp4' } });
+    };
+    try {
+      const result = await executeVideoModelRequest({
+        projectRoot,
+        invocationId: 'turn-video-loopback-artifact',
+        input: {
+          model: 'doubao-seedance-2-0-260128',
+          arguments: { prompt: 'camera slowly moves across a desk' }
+        },
+        settings: {
+          videoModels: [{
+            debruteModelId: 'doubao-seedance-2-0-260128',
+            baseUrlOverride: 'https://ark.example/api/v3',
+            requestModelIdOverride: null
+          }]
+        },
+        secrets: { videoModelApiKeys: { 'doubao-seedance-2-0-260128': 'sk-video' } },
+        pollIntervalMs: 0,
+        fetch
+      });
+
+      expect(result.status).toBe('error');
+      expect(result.error).toBe('video_request_failed');
+      expect(result.content).toBe('Video request failed: Remote artifact URLs must not target local or private network hosts: http://127.0.0.1:54321/private.mp4');
+      expect(calls).toEqual([
+        'https://ark.example/api/v3/contents/generations/tasks',
+        'https://ark.example/api/v3/contents/generations/tasks/task-loopback'
+      ]);
+    } finally {
+      await rm(projectRoot, { recursive: true, force: true });
+    }
+  });
+
   it('uses catalog defaults when a video model has only an API key configured', async () => {
     const projectRoot = await mkdtemp(join(tmpdir(), 'debrute-video-default-route-'));
     try {
@@ -196,9 +245,9 @@ describe('video model executor', () => {
         return jsonResponse({ id: 'task-metadata', status: 'queued' });
       }
       if (url.endsWith('/contents/generations/tasks/task-metadata')) {
-        return jsonResponse({ id: 'task-metadata', status: 'succeeded', content: { video_url: 'https://cdn.example/video.mp4' } });
+        return jsonResponse({ id: 'task-metadata', status: 'succeeded', content: { video_url: 'https://cdn.example/video.mp4?token=SIGNED' } });
       }
-      if (url === 'https://cdn.example/video.mp4') {
+      if (url === 'https://cdn.example/video.mp4?token=SIGNED') {
         return new Response(tinyMp4, { status: 200, headers: { 'content-type': 'video/mp4' } });
       }
       throw new Error(`unexpected URL: ${url}`);
@@ -249,10 +298,10 @@ describe('video model executor', () => {
           output: {
             responses: [
               expect.objectContaining({ status: 200, body: { id: 'task-metadata', status: 'queued' } }),
-              expect.objectContaining({ status: 200, body: { id: 'task-metadata', status: 'succeeded', content: { video_url: 'https://cdn.example/video.mp4' } } })
+              expect.objectContaining({ status: 200, body: { id: 'task-metadata', status: 'succeeded', content: { video_url: 'https://cdn.example/video.mp4?token=SIGNED' } } })
             ],
             artifactIndex: 0,
-            sourceUrl: 'https://cdn.example/video.mp4'
+            sourceUrl: 'https://cdn.example/video.mp4?token=%5Bredacted%5D'
           }
         }
       });

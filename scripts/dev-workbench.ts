@@ -1,6 +1,7 @@
 #!/usr/bin/env tsx
 import { spawn, type ChildProcess } from 'node:child_process';
 import { randomUUID } from 'node:crypto';
+import { mkdir, writeFile } from 'node:fs/promises';
 import { dirname, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import {
@@ -51,6 +52,7 @@ async function launchSourceDevRuntime(): Promise<WorkbenchRuntimeState> {
   const daemonPort = await chooseLoopbackPort(DEFAULT_WORKBENCH_DAEMON_PORT);
   const webPort = await chooseLoopbackPort(DEFAULT_WORKBENCH_WEB_PORT, new Set([daemonPort]));
   const token = randomUUID();
+  await writeRuntimeTokenFile(token);
   const daemonUrl = `http://127.0.0.1:${daemonPort}`;
   const webUrl = `http://127.0.0.1:${webPort}`;
   const daemon = spawnPnpm([
@@ -59,13 +61,13 @@ async function launchSourceDevRuntime(): Promise<WorkbenchRuntimeState> {
     'dev',
     '--port',
     String(daemonPort),
-    '--token',
-    token,
+    '--token-file',
+    paths.tokenPath,
     '--web-base-url',
     webUrl
   ], {
     DEBRUTE_DAEMON_PORT: String(daemonPort),
-    DEBRUTE_DAEMON_TOKEN: token,
+    DEBRUTE_DAEMON_TOKEN_FILE: paths.tokenPath,
     DEBRUTE_WEB_BASE_URL: webUrl
   });
   const web = spawnPnpm([
@@ -99,6 +101,11 @@ async function launchSourceDevRuntime(): Promise<WorkbenchRuntimeState> {
   currentRuntimeState = state;
   deleteOwnState = true;
   return state;
+}
+
+async function writeRuntimeTokenFile(token: string): Promise<void> {
+  await mkdir(paths.runtimeDir, { recursive: true, mode: 0o700 });
+  await writeFile(paths.tokenPath, `${token}\n`, { encoding: 'utf8', mode: 0o600 });
 }
 
 function spawnPnpm(args: string[], env: Record<string, string>): ChildProcess {

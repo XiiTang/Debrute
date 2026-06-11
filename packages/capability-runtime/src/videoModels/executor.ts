@@ -8,6 +8,7 @@ import {
   readResponseArrayBufferWithTimeout as readResponseArrayBufferBodyWithTimeout,
   readResponseTextWithTimeout as readResponseTextBodyWithTimeout
 } from '../requestTimeout.js';
+import { assertPublicHttpUrl, publicHttpRedirectUrl } from '../remoteFetchPolicy.js';
 import { createVideoModelCatalog, type VideoModelCatalogEntry } from './catalog.js';
 import {
   normalizeSeedanceVideoArguments,
@@ -346,7 +347,7 @@ async function readResponseArrayBufferWithTimeout(state: RequestState, response:
 }
 
 async function storeDownloadedArtifact(state: RequestState, url: string, index: number, fallbackMimeType: string): Promise<VideoModelRequestArtifact> {
-  const response = await fetchWithTimeout(state, url, { method: 'GET' });
+  const response = await fetchRemoteArtifact(state, url);
   const bytes = new Uint8Array(await readResponseArrayBufferWithTimeout(state, response));
   if (!response.ok) {
     throw new Error(`Video artifact download failed: ${response.status}`);
@@ -367,7 +368,7 @@ async function storeDownloadedArtifact(state: RequestState, url: string, index: 
       output: {
         responses: [...state.modelRun.responses],
         artifactIndex: index,
-        sourceUrl: url
+        sourceUrl: sanitizeArtifactSourceUrl(url)
       }
     }
   });
@@ -377,6 +378,22 @@ async function storeDownloadedArtifact(state: RequestState, url: string, index: 
     projectRelativePath: normalizedPath,
     mimeType
   };
+}
+
+async function fetchRemoteArtifact(state: RequestState, url: string, redirectCount = 0): Promise<Response> {
+  assertPublicHttpUrl(url, 'Remote artifact URLs');
+  const response = await fetchWithTimeout(state, url, { method: 'GET', redirect: 'manual' });
+  if (!isHttpRedirect(response.status)) {
+    return response;
+  }
+  if (redirectCount >= 5) {
+    throw new Error('Remote artifact URLs redirected too many times.');
+  }
+  return fetchRemoteArtifact(state, publicHttpRedirectUrl(url, response.headers.get('location'), 'Remote artifact URLs'), redirectCount + 1);
+}
+
+function isHttpRedirect(status: number): boolean {
+  return status >= 300 && status < 400;
 }
 
 function recordModelRequest(state: RequestState, request: unknown): void {
@@ -499,6 +516,16 @@ function redactModelResponseValue(value: unknown, apiKey: string): unknown {
     return truncateString(next);
   }
   return value;
+}
+
+function sanitizeArtifactSourceUrl(value: string): string {
+  const url = new URL(value);
+  for (const key of [...url.searchParams.keys()]) {
+    if (/key|token|secret/i.test(key)) {
+      url.searchParams.set(key, '[redacted]');
+    }
+  }
+  return url.toString();
 }
 
 function truncateString(value: string): string {

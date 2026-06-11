@@ -3,6 +3,7 @@ import { watch } from 'node:fs';
 import { dirname, join, relative } from 'node:path';
 import { randomUUID } from 'node:crypto';
 import {
+  assertProjectTreeVisibleMutationPath,
   debruteHomeDir,
   isIgnoredProjectFilePath,
   normalizeProjectRelativePath,
@@ -204,6 +205,7 @@ export async function readProjectFileBytes(projectRoot: string, projectRelativeP
 }
 
 export async function writeProjectFile(projectRoot: string, projectRelativePath: string, content: string | Uint8Array): Promise<string> {
+  assertProjectTreeVisibleMutationPath(projectRelativePath);
   const absolutePath = await resolveProjectPathForWrite(projectRoot, projectRelativePath);
   await mkdir(dirname(absolutePath), { recursive: true });
   await writeFile(absolutePath, content);

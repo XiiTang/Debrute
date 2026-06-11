@@ -4,7 +4,7 @@ import type {
   ProjectSessionSnapshot,
   WorkbenchProjectPathEntry
 } from '@debrute/app-protocol';
-import { resolveExistingProjectPath } from '@debrute/project-core';
+import { assertProjectTreeVisibleMutationPath, resolveExistingProjectPath } from '@debrute/project-core';
 import type { DebruteNativeShell } from './nativeShell.js';
 
 export type ProjectNativePathKind = 'file' | 'directory';
@@ -56,6 +56,7 @@ export async function trashProjectPathsWithNativeShell(input: {
   const entries = topLevelProjectPathEntries(input.entries);
   const resolvedEntries: ResolvedNativeTrashEntry[] = [];
   for (const entry of entries) {
+    assertProjectTreeVisibleMutationPath(entry.projectRelativePath);
     resolvedEntries.push({
       entry,
       absolutePath: await resolveProjectNativePath({

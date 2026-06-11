@@ -58,6 +58,7 @@ describe('HTTP workbench API client', () => {
     const eventSourceUrls: string[] = [];
     const client = createHttpWorkbenchApiClient({
       daemonUrl: 'http://127.0.0.1:17456/',
+      token: 'secret',
       fetch: async (url, init) => {
         const body = routeResponse(String(url), init);
         if (new URL(String(url)).pathname === '/api/projects/open') {
@@ -86,6 +87,7 @@ describe('HTTP workbench API client', () => {
       const clientId = eventUrl.searchParams.get('clientId');
       expect(clientId).not.toBeNull();
       expect(clientId!).toMatch(/^web:/);
+      expect(eventUrl.searchParams.get('debrute-token')).toBe('secret');
 
       unsubscribe();
     } finally {

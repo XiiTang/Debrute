@@ -634,6 +634,41 @@ describe('image model executors', () => {
     }
   });
 
+  it('rejects loopback OpenAI edit image URLs before external fetches', async () => {
+    const projectRoot = await mkdtemp(join(tmpdir(), 'debrute-image-openai-loopback-input-'));
+    const fetched: string[] = [];
+    const fetch: ImageModelFetch = async (url) => {
+      fetched.push(url);
+      if (url === 'http://127.0.0.1/private.png') {
+        return pngResponse();
+      }
+      return jsonResponse({ data: [{ b64_json: tinyPngBase64 }] });
+    };
+    try {
+      const result = await executeImageModelRequest({
+        projectRoot,
+        invocationId: 'turn-openai-loopback-input',
+        input: {
+          model: 'gpt-image-2',
+          arguments: {
+            prompt: 'retouch the image',
+            image: ['http://127.0.0.1/private.png']
+          }
+        },
+        settings: { imageModels: [{ debruteModelId: 'gpt-image-2', baseUrlOverride: 'https://api.openai.com/v1', requestModelIdOverride: 'gpt-image-2' }] },
+        secrets: { imageModelApiKeys: { 'gpt-image-2': 'sk-image' } },
+        fetch
+      });
+
+      expect(result.status).toBe('error');
+      expect(result.error).toBe('invalid_image_input');
+      expect(result.content).toBe('Remote image URLs must not target local or private network hosts: http://127.0.0.1/private.png');
+      expect(fetched).toEqual([]);
+    } finally {
+      await rm(projectRoot, { recursive: true, force: true });
+    }
+  });
+
   it('returns direct image input errors for missing project image paths', async () => {
     const projectRoot = await mkdtemp(join(tmpdir(), 'debrute-image-missing-input-'));
     const fetch: ImageModelFetch = async () => {

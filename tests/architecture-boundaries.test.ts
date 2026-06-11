@@ -191,6 +191,19 @@ describe('Debrute architecture boundaries', () => {
     expect(text).not.toContain('spawn(');
   });
 
+  it('keeps workbench runtime bearer tokens out of child argv and environment', () => {
+    const launcherFiles = [
+      'apps/debrute-cli/src/workbench/workbenchRuntimeLauncher.ts',
+      'apps/debrute-cli/src/workbench/internalWorkbenchRuntimeChild.ts',
+      'scripts/dev-workbench.ts'
+    ];
+    const text = launcherFiles.map((file) => readFileSync(join(root, file), 'utf8')).join('\n');
+
+    expect(text).not.toContain("'--token'");
+    expect(text).not.toContain('DEBRUTE_DAEMON_TOKEN: token');
+    expect(text).not.toContain('DEBRUTE_WORKBENCH_RUNTIME_TOKEN: token');
+  });
+
 
   it('keeps daemon global runtime routes out of project App Server sessions', () => {
     const text = readFileSync(join(root, 'apps/daemon/src/http/createDebruteDaemonHttpServer.ts'), 'utf8');

@@ -56,7 +56,8 @@ function formatValue(value: AgentRecordValue): string {
   if (typeof value === 'number' || typeof value === 'boolean') {
     return String(value);
   }
-  return needsQuotes(value) ? `"${escapeValue(value)}"` : value;
+  const escaped = escapeValue(value);
+  return needsQuotes(escaped) ? `"${escaped}"` : escaped;
 }
 
 function needsQuotes(value: string): boolean {
@@ -68,5 +69,8 @@ function escapeValue(value: string): string {
     .replaceAll('\\', '\\\\')
     .replaceAll('\n', '\\n')
     .replaceAll('\r', '\\r')
-    .replaceAll('"', '\\"');
+    .replaceAll('"', '\\"')
+    .replace(/[\u0000-\u0009\u000b\u000c\u000e-\u001f\u007f-\u009f]/g, (character) => (
+      `\\u${character.charCodeAt(0).toString(16).padStart(4, '0')}`
+    ));
 }

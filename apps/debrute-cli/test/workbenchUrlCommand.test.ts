@@ -417,11 +417,11 @@ describe('internal workbench runtime child args', () => {
   it('parses packaged runtime child args from environment variables', () => {
     expect(parseInternalWorkbenchRuntimeChildArgs({
       DEBRUTE_WORKBENCH_RUNTIME_PORT: '17321',
-      DEBRUTE_WORKBENCH_RUNTIME_TOKEN: 'secret',
+      DEBRUTE_WORKBENCH_RUNTIME_TOKEN_FILE: '/runtime/token',
       DEBRUTE_WORKBENCH_RUNTIME_WEB_DIST_DIR: '/payload/web'
     })).toEqual({
       port: 17321,
-      token: 'secret',
+      tokenFile: '/runtime/token',
       webDistDir: '/payload/web'
     });
   });
@@ -429,7 +429,7 @@ describe('internal workbench runtime child args', () => {
   it('rejects missing packaged runtime child args', () => {
     expect(() => parseInternalWorkbenchRuntimeChildArgs({
       DEBRUTE_WORKBENCH_RUNTIME_PORT: '17321'
-    })).toThrow(/token is required/);
+    })).toThrow(/token file is required/);
   });
 });
 

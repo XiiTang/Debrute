@@ -9,7 +9,6 @@ import { fileURLToPath } from 'node:url';
 import Busboy from 'busboy';
 import { DebruteGlobalRuntimeServer, GlobalConfigStore, type DebruteAppServer, type DebruteAppServerOptions } from '@debrute/app-server';
 import {
-  isDebruteMutatingMethod,
   normalizeDebruteRuntimeInfo,
   type AppServerEvent,
   type DaemonProjectUploadImportPlan,
@@ -181,8 +180,8 @@ export function createDebruteDaemonHttpServer(options: DebruteDaemonHttpServerOp
       response.end();
       return;
     }
-    if (isDebruteMutatingMethod(request.method ?? 'GET') && !hasDaemonToken(request, token)) {
-      writeError(response, 403, 'forbidden', 'Debrute daemon token is required for mutating requests.');
+    if (requiresDaemonToken(url.pathname, request.method ?? 'GET') && !hasDaemonToken(request, url, token)) {
+      writeError(response, 403, 'forbidden', 'Debrute daemon token is required for API requests.');
       return;
     }
 
@@ -212,7 +211,7 @@ export function createDebruteDaemonHttpServer(options: DebruteDaemonHttpServerOp
       writeJson(context.response, 200, {
         projects: sessions.list().map((session) => ({
           projectId: session.projectId,
-          snapshot: snapshotForHttp(session.appServer.currentSnapshot() ?? session.snapshot, currentRuntime().daemonUrl, session.projectId),
+          snapshot: snapshotForHttp(session.appServer.currentSnapshot() ?? session.snapshot, currentRuntime().daemonUrl, session.projectId, currentRuntime().token),
           clients: { liveCount: session.clients.size }
         }))
       });
@@ -234,7 +233,7 @@ export function createDebruteDaemonHttpServer(options: DebruteDaemonHttpServerOp
       const session = await sessions.openProject(projectRoot);
       writeJson(context.response, 200, {
         projectId: session.projectId,
-        snapshot: snapshotForHttp(session.appServer.currentSnapshot() ?? session.snapshot, currentRuntime().daemonUrl, session.projectId)
+        snapshot: snapshotForHttp(session.appServer.currentSnapshot() ?? session.snapshot, currentRuntime().daemonUrl, session.projectId, currentRuntime().token)
       });
       return true;
     }
@@ -286,7 +285,7 @@ export function createDebruteDaemonHttpServer(options: DebruteDaemonHttpServerOp
     if (method === 'GET' && tail === '') {
       writeJson(context.response, 200, {
         projectId: session.projectId,
-        snapshot: snapshotForHttp(context.appServer.getSnapshot(), currentRuntime().daemonUrl, session.projectId)
+        snapshot: snapshotForHttp(context.appServer.getSnapshot(), currentRuntime().daemonUrl, session.projectId, currentRuntime().token)
       });
       return;
     }
@@ -297,7 +296,7 @@ export function createDebruteDaemonHttpServer(options: DebruteDaemonHttpServerOp
     if (method === 'POST' && tail === '/refresh') {
       const snapshot = await context.appServer.refreshProject();
       session.snapshot = snapshot;
-      writeJson(context.response, 200, snapshotForHttp(snapshot, currentRuntime().daemonUrl, session.projectId));
+      writeJson(context.response, 200, snapshotForHttp(snapshot, currentRuntime().daemonUrl, session.projectId, currentRuntime().token));
       return;
     }
     if (tail.startsWith('/files/text/')) {
@@ -356,7 +355,8 @@ export function createDebruteDaemonHttpServer(options: DebruteDaemonHttpServerOp
       writeJson(context.response, 200, generatedAssetsForHttp(
         await context.appServer.listGeneratedAssets(),
         currentRuntime().daemonUrl,
-        projectRoute.projectId
+        projectRoute.projectId,
+        currentRuntime().token
       ));
       return;
     }
@@ -473,7 +473,7 @@ async function handleCreateFileRoute(context: ProjectRequestContext, session: Pr
   const result = body.kind === 'directory'
     ? await daemonAppServer(context).createProjectDirectory(input)
     : await daemonAppServer(context).createProjectFile(input);
-  writeJson(context.response, 200, withHttpSnapshot(result, context.runtime.daemonUrl, session));
+  writeJson(context.response, 200, withHttpSnapshot(result, context.runtime.daemonUrl, session, context.runtime.token));
 }
 
 async function handleExternalLocalImportRoute(context: ProjectRequestContext, session: ProjectSessionRecord): Promise<void> {
@@ -487,7 +487,7 @@ async function handleExternalLocalImportRoute(context: ProjectRequestContext, se
     sources,
     targetDirectoryProjectRelativePath: stringField(body.targetDirectoryProjectRelativePath, 'targetDirectoryProjectRelativePath'),
     ...(typeof body.overwrite === 'boolean' ? { overwrite: body.overwrite } : {})
-  }), context.runtime.daemonUrl, session));
+  }), context.runtime.daemonUrl, session, context.runtime.token));
 }
 
 async function handleExternalUploadImportRoute(context: ProjectRequestContext, session: ProjectSessionRecord): Promise<void> {
@@ -502,7 +502,7 @@ async function handleExternalUploadImportRoute(context: ProjectRequestContext, s
       entries: uploadImportEntriesFromMultipartParts(plan, parts.files),
       targetDirectoryProjectRelativePath: plan.targetDirectoryProjectRelativePath,
       ...(plan.overwrite === true ? { overwrite: true } : {})
-    }), context.runtime.daemonUrl, session));
+    }), context.runtime.daemonUrl, session, context.runtime.token));
   } finally {
     await parts.cleanup();
   }
@@ -582,7 +582,7 @@ async function handleNativeProjectPathBatchRoute(
       entries,
       nativeShell,
       refreshProject: () => daemonAppServer(context).refreshProject()
-    }), context.runtime.daemonUrl, session));
+    }), context.runtime.daemonUrl, session, context.runtime.token));
     return;
   }
   writeError(context.response, 404, 'not_found', `Unknown native project path batch operation: ${operation}`);
@@ -603,7 +603,7 @@ async function handleProjectPathBatchRoute(
     writeJson(context.response, 200, withHttpSnapshot(await server.copyProjectPaths({
       entries: projectPathEntriesField(body.entries),
       targetDirectoryProjectRelativePath: stringField(body.targetDirectoryProjectRelativePath, 'targetDirectoryProjectRelativePath')
-    }), context.runtime.daemonUrl, session));
+    }), context.runtime.daemonUrl, session, context.runtime.token));
     return;
   }
   if (operation === 'move') {
@@ -611,13 +611,13 @@ async function handleProjectPathBatchRoute(
       entries: projectPathEntriesField(body.entries),
       targetDirectoryProjectRelativePath: stringField(body.targetDirectoryProjectRelativePath, 'targetDirectoryProjectRelativePath'),
       ...(typeof body.overwrite === 'boolean' ? { overwrite: body.overwrite } : {})
-    }), context.runtime.daemonUrl, session));
+    }), context.runtime.daemonUrl, session, context.runtime.token));
     return;
   }
   if (operation === 'delete-permanently') {
     writeJson(context.response, 200, withHttpSnapshot(await server.deleteProjectPathsPermanently({
       entries: projectPathEntriesField(body.entries)
-    }), context.runtime.daemonUrl, session));
+    }), context.runtime.daemonUrl, session, context.runtime.token));
     return;
   }
   writeError(context.response, 404, 'not_found', `Unknown project path batch operation: ${operation}`);
@@ -632,7 +632,7 @@ async function handleProjectPathRoute(context: ProjectRequestContext, path: stri
       writeJson(context.response, 200, withHttpSnapshot(await server.renameProjectPath({
         projectRelativePath: path,
         name: stringField(body.name, 'name')
-      }), context.runtime.daemonUrl, session));
+      }), context.runtime.daemonUrl, session, context.runtime.token));
       return;
     }
   }
@@ -652,7 +652,7 @@ async function handleCanvasRoute(
     writeJson(context.response, 200, withHttpSnapshot(await server.addProjectPathToCanvasMap({
       canvasId,
       projectRelativePath: stringField(body.projectRelativePath, 'projectRelativePath')
-    }), context.runtime.daemonUrl, session));
+    }), context.runtime.daemonUrl, session, context.runtime.token));
     return;
   }
   if (path.endsWith('/node-layouts') && context.request.method === 'PATCH') {
@@ -762,7 +762,7 @@ async function handleGeneratedAssetRoute(context: ProjectRequestContext, project
     return;
   }
   const record = await daemonAppServer(context).readGeneratedAsset(recordId);
-  writeJson(context.response, 200, generatedAssetForHttp(record, context.runtime.daemonUrl, projectId));
+  writeJson(context.response, 200, generatedAssetForHttp(record, context.runtime.daemonUrl, projectId, context.runtime.token));
 }
 
 async function handleSettingsRoute(context: GlobalRuntimeRequestContext): Promise<void> {
@@ -847,13 +847,13 @@ function writeEventStream(
   context.response.write('\n');
   const unsubscribeProject = session.appServer.onEvent((event) => {
     updateSessionSnapshotFromEvent(session, event);
-    context.response.write(`event: message\ndata: ${JSON.stringify(eventForHttp(event, context.runtime.daemonUrl, session.projectId))}\n\n`);
+    context.response.write(`event: message\ndata: ${JSON.stringify(eventForHttp(event, context.runtime.daemonUrl, session.projectId, context.runtime.token))}\n\n`);
   });
   const unsubscribeGlobal = globalRuntime.onEvent((event) => {
     if (!isGlobalEvent(event)) {
       return;
     }
-    context.response.write(`event: message\ndata: ${JSON.stringify(eventForHttp(event, context.runtime.daemonUrl, session.projectId))}\n\n`);
+    context.response.write(`event: message\ndata: ${JSON.stringify(eventForHttp(event, context.runtime.daemonUrl, session.projectId, context.runtime.token))}\n\n`);
   });
   const keepalive = setInterval(() => {
     context.response.write(': keepalive\n\n');
@@ -913,18 +913,24 @@ async function serveWebAsset(context: RequestContext, configuredWebDistDir: stri
   }
 }
 
-function snapshotForHttp(snapshot: ProjectSessionSnapshot, daemonUrl: string, projectId: string): WorkbenchProjectSessionSnapshot {
+function snapshotForHttp(
+  snapshot: ProjectSessionSnapshot,
+  daemonUrl: string,
+  projectId: string,
+  daemonToken: string
+): WorkbenchProjectSessionSnapshot {
   const { projectRoot: _projectRoot, ...publicSnapshot } = snapshot;
   return {
     ...publicSnapshot,
-    projections: snapshot.projections.map((projection) => projectionForHttp(projection, daemonUrl, projectId))
+    projections: snapshot.projections.map((projection) => projectionForHttp(projection, daemonUrl, projectId, daemonToken))
   };
 }
 
 function projectionForHttp(
   projection: ProjectSessionSnapshot['projections'][number],
   daemonUrl: string,
-  projectId: string
+  projectId: string,
+  daemonToken: string
 ): ProjectSessionSnapshot['projections'][number] {
   return {
     ...projection,
@@ -933,7 +939,7 @@ function projectionForHttp(
       availability: node.availability.state === 'available'
         ? {
             ...node.availability,
-            fileUrl: rawFileUrl(daemonUrl, projectId, node.projectRelativePath, node.availability.revision)
+            fileUrl: rawFileUrl(daemonUrl, projectId, node.projectRelativePath, node.availability.revision, daemonToken)
           }
         : node.availability
     }))
@@ -948,7 +954,8 @@ function textFileForHttp(file: { absolutePath: string } & WorkbenchProjectTextFi
 function eventForHttp(
   event: AppServerEvent,
   daemonUrl: string,
-  projectId: string
+  projectId: string,
+  daemonToken: string
 ): WorkbenchEvent {
   if (event.type === 'project.opened' || event.type === 'project.changed' || event.type === 'project.fileChanged') {
     if (event.type === 'project.fileChanged') {
@@ -956,18 +963,18 @@ function eventForHttp(
       return {
         ...event,
         event: publicEvent satisfies WorkbenchFileWatchEvent,
-        snapshot: snapshotForHttp(event.snapshot, daemonUrl, projectId)
+        snapshot: snapshotForHttp(event.snapshot, daemonUrl, projectId, daemonToken)
       };
     }
     return {
       ...event,
-      snapshot: snapshotForHttp(event.snapshot, daemonUrl, projectId)
+      snapshot: snapshotForHttp(event.snapshot, daemonUrl, projectId, daemonToken)
     };
   }
   if (event.type === 'canvas.changed') {
     return {
       ...event,
-      projection: projectionForHttp(event.projection, daemonUrl, projectId)
+      projection: projectionForHttp(event.projection, daemonUrl, projectId, daemonToken)
     };
   }
   return event;
@@ -976,38 +983,58 @@ function eventForHttp(
 function withHttpSnapshot<T extends { snapshot: ProjectSessionSnapshot }>(
   result: T,
   daemonUrl: string,
-  session: ProjectSessionRecord
+  session: ProjectSessionRecord,
+  daemonToken: string
 ): Omit<T, 'snapshot'> & { snapshot: WorkbenchProjectSessionSnapshot } {
   session.snapshot = result.snapshot;
   return {
     ...result,
-    snapshot: snapshotForHttp(result.snapshot, daemonUrl, session.projectId)
+    snapshot: snapshotForHttp(result.snapshot, daemonUrl, session.projectId, daemonToken)
   };
 }
 
-function generatedAssetsForHttp(records: GeneratedAssetRecord[], daemonUrl: string, projectId: string): GeneratedAssetsView {
+function generatedAssetsForHttp(
+  records: GeneratedAssetRecord[],
+  daemonUrl: string,
+  projectId: string,
+  daemonToken: string
+): GeneratedAssetsView {
   return {
-    assets: records.map((record) => generatedAssetForHttp(record, daemonUrl, projectId))
+    assets: records.map((record) => generatedAssetForHttp(record, daemonUrl, projectId, daemonToken))
   };
 }
 
-function generatedAssetForHttp(record: GeneratedAssetRecord, daemonUrl: string, projectId: string): GeneratedAssetView {
+function generatedAssetForHttp(
+  record: GeneratedAssetRecord,
+  daemonUrl: string,
+  projectId: string,
+  daemonToken: string
+): GeneratedAssetView {
   return {
     assetId: record.recordId,
     projectRelativePath: record.projectRelativePath,
-    rawUrl: generatedAssetRawUrl(daemonUrl, projectId, record.recordId),
+    rawUrl: generatedAssetRawUrl(daemonUrl, projectId, record.recordId, daemonToken),
     record
   };
 }
 
-function generatedAssetRawUrl(daemonUrl: string, projectId: string, recordId: string): string {
-  return new URL(`/api/projects/${encodeURIComponent(projectId)}/generated-assets/${encodeURIComponent(recordId)}/raw`, daemonUrl).toString();
+function generatedAssetRawUrl(daemonUrl: string, projectId: string, recordId: string, daemonToken: string): string {
+  const url = new URL(`/api/projects/${encodeURIComponent(projectId)}/generated-assets/${encodeURIComponent(recordId)}/raw`, daemonUrl);
+  url.searchParams.set('debrute-token', daemonToken);
+  return url.toString();
 }
 
-function rawFileUrl(daemonUrl: string, projectId: string, projectRelativePath: string, revision: string): string {
+function rawFileUrl(
+  daemonUrl: string,
+  projectId: string,
+  projectRelativePath: string,
+  revision: string,
+  daemonToken: string
+): string {
   const encodedPath = projectRelativePath.split('/').map(encodeURIComponent).join('/');
   const url = new URL(`/api/projects/${encodeURIComponent(projectId)}/files/raw/${encodedPath}`, daemonUrl);
   url.searchParams.set('v', revision);
+  url.searchParams.set('debrute-token', daemonToken);
   return url.toString();
 }
 
@@ -1027,8 +1054,18 @@ function applyCorsHeaders(request: IncomingMessage, response: ServerResponse, ru
   return true;
 }
 
-function hasDaemonToken(request: IncomingMessage, token: string): boolean {
-  return request.headers['x-debrute-daemon-token'] === token;
+function requiresDaemonToken(path: string, method: string): boolean {
+  if (!path.startsWith('/api/')) {
+    return false;
+  }
+  if (path === '/api/status') {
+    return false;
+  }
+  return !(method === 'GET' && path === '/api/runtime');
+}
+
+function hasDaemonToken(request: IncomingMessage, url: URL, token: string): boolean {
+  return request.headers['x-debrute-daemon-token'] === token || url.searchParams.get('debrute-token') === token;
 }
 
 function isLoopbackRequest(request: IncomingMessage): boolean {

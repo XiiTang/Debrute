@@ -8,6 +8,7 @@ import {
   readResponseArrayBufferWithTimeout as readResponseArrayBufferBodyWithTimeout,
   readResponseTextWithTimeout as readResponseTextBodyWithTimeout
 } from '../requestTimeout.js';
+import { assertPublicHttpUrl, publicHttpRedirectUrl } from '../remoteFetchPolicy.js';
 import {
   createImageModelCatalog,
   imageInputFieldsForCatalogEntry,
@@ -836,7 +837,12 @@ async function resolveImageInputs(
       }
       throw new Error('Image input values must be strings or objects.');
     }
-    if (/^https?:\/\//.test(input) || input.startsWith('data:image/')) {
+    if (/^https?:\/\//.test(input)) {
+      assertPublicHttpUrl(input, 'Remote image URLs');
+      resolved.push({ image_url: input, mime_type: mimeTypeFromPath(input) });
+      continue;
+    }
+    if (input.startsWith('data:image/')) {
       resolved.push({ image_url: input, mime_type: mimeTypeFromPath(input) });
       continue;
     }
@@ -866,7 +872,12 @@ async function resolveGptImage2ImageInputs(
       }
       throw new Error('Image input values must be strings or objects.');
     }
-    if (/^https?:\/\//.test(input) || input.startsWith('data:image/')) {
+    if (/^https?:\/\//.test(input)) {
+      assertPublicHttpUrl(input, 'Remote image URLs');
+      resolved.push({ image_url: input, mime_type: mimeTypeFromPath(input) });
+      continue;
+    }
+    if (input.startsWith('data:image/')) {
       resolved.push({ image_url: input, mime_type: mimeTypeFromPath(input) });
       continue;
     }
@@ -906,7 +917,7 @@ async function downloadAll(state: RequestState, urls: string[]): Promise<ImagePa
 }
 
 async function downloadImage(state: RequestState, url: string): Promise<ImagePayload> {
-  const response = await fetchWithTimeout(state, url, { method: 'GET' });
+  const response = await fetchRemoteImage(state, url);
   const bytes = new Uint8Array(await readResponseArrayBufferWithTimeout(state, response));
   if (!response.ok) {
     throw new Error(`Image download failed: ${response.status}`);
@@ -915,6 +926,22 @@ async function downloadImage(state: RequestState, url: string): Promise<ImagePay
     data: bytes,
     mimeType: detectMimeType(Buffer.from(bytes), url, response.headers)
   };
+}
+
+async function fetchRemoteImage(state: RequestState, url: string, redirectCount = 0): Promise<Response> {
+  assertPublicHttpUrl(url, 'Remote image URLs');
+  const response = await fetchWithTimeout(state, url, { method: 'GET', redirect: 'manual' });
+  if (!isHttpRedirect(response.status)) {
+    return response;
+  }
+  if (redirectCount >= 5) {
+    throw new Error('Remote image URLs redirected too many times.');
+  }
+  return fetchRemoteImage(state, publicHttpRedirectUrl(url, response.headers.get('location'), 'Remote image URLs'), redirectCount + 1);
+}
+
+function isHttpRedirect(status: number): boolean {
+  return status >= 300 && status < 400;
 }
 
 async function readResponseTextWithTimeout(state: RequestState, response: Response): Promise<string> {

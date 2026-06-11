@@ -587,6 +587,19 @@ describe('project-core', () => {
     }
   });
 
+  it('rejects direct text writes to hidden Project Tree paths', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'debrute-project-direct-hidden-write-'));
+    try {
+      await mkdir(join(root, '.git'), { recursive: true });
+
+      await expect(writeProjectTextFile(root, '.git/config', '[core]\n'))
+        .rejects.toThrow('Project path is not visible in the Project Tree');
+      expect(existsSync(join(root, '.git/config'))).toBe(false);
+    } finally {
+      await rm(root, { recursive: true, force: true });
+    }
+  });
+
   it('exposes the Project Tree mutation visibility boundary for desktop actions', () => {
     expect(() => assertProjectTreeVisibleMutationPath('assets/cover.png')).not.toThrow();
     expect(() => assertProjectTreeVisibleMutationPath('.debrute/cache/canvas-image-previews/preview.jpg'))

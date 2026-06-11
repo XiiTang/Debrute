@@ -5,6 +5,7 @@ import {
 } from '@debrute/project-core';
 import {
   CANVAS_DOCUMENT_SCHEMA_VERSION,
+  isCanvasDocumentId,
   projectCanvas,
   type CanvasDocument,
   type CanvasMediaKind,
@@ -49,6 +50,9 @@ export class CanvasProjectionService {
 }
 
 export function assertCurrentCanvasDocument(value: unknown, filePath: string): CanvasDocument {
+  if (isRecord(value) && typeof value.id === 'string' && !isCanvasDocumentId(value.id)) {
+    throw new Error(`Invalid canvas document id: ${filePath}`);
+  }
   if (isCurrentCanvasDocument(value)) {
     return value;
   }
@@ -145,6 +149,7 @@ function isCurrentCanvasDocument(value: unknown): value is CanvasDocument {
   }
   return hasOnlyKeys(value, ['schemaVersion', 'id', 'title', 'nodeElements', 'annotations', 'preferences'])
     && typeof value.id === 'string'
+    && isCanvasDocumentId(value.id)
     && typeof value.title === 'string'
     && Array.isArray(value.nodeElements)
     && value.nodeElements.every(isCurrentCanvasNodeElement)

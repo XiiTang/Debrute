@@ -161,6 +161,27 @@ describe('daemon project native file operations', () => {
     }
   });
 
+  it('rejects hidden Project Tree paths before native trash', async () => {
+    const projectRoot = await mkdtemp(join(tmpdir(), 'debrute-native-trash-hidden-'));
+    try {
+      await mkdir(join(projectRoot, '.git'), { recursive: true });
+      const shell = nativeShellFixture();
+      const refreshProject = vi.fn(async () => snapshotFixture(projectRoot));
+
+      await expect(trashProjectPathsWithNativeShell({
+        projectRoot,
+        entries: [{ projectRelativePath: '.git', kind: 'directory' }],
+        nativeShell: shell,
+        refreshProject
+      })).rejects.toThrow('Project path is not visible in the Project Tree');
+
+      expect(shell.trashItem).not.toHaveBeenCalled();
+      expect(refreshProject).not.toHaveBeenCalled();
+    } finally {
+      await rm(projectRoot, { recursive: true, force: true });
+    }
+  });
+
   it('refreshes after a native trash failure once mutation has started', async () => {
     const projectRoot = await mkdtemp(join(tmpdir(), 'debrute-native-trash-failure-refresh-'));
     try {

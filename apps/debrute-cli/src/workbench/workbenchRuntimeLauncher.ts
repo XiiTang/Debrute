@@ -1,6 +1,6 @@
 import { randomUUID } from 'node:crypto';
 import { closeSync, openSync } from 'node:fs';
-import { access } from 'node:fs/promises';
+import { access, mkdir, writeFile } from 'node:fs/promises';
 import { dirname, resolve } from 'node:path';
 import { spawn, type ChildProcess } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
@@ -68,6 +68,7 @@ async function launchSourceDevRuntime(sourceRoot: string, paths: WorkbenchRuntim
   const daemonPort = await chooseLoopbackPort(DEFAULT_WORKBENCH_DAEMON_PORT);
   const webPort = await chooseLoopbackPort(DEFAULT_WORKBENCH_WEB_PORT, new Set([daemonPort]));
   const token = randomUUID();
+  await writeRuntimeTokenFile(paths, token);
   const daemonUrl = `http://127.0.0.1:${daemonPort}`;
   const webUrl = `http://127.0.0.1:${webPort}`;
   const now = new Date().toISOString();
@@ -77,13 +78,13 @@ async function launchSourceDevRuntime(sourceRoot: string, paths: WorkbenchRuntim
     'dev',
     '--port',
     String(daemonPort),
-    '--token',
-    token,
+    '--token-file',
+    paths.tokenPath,
     '--web-base-url',
     webUrl
   ], sourceRoot, paths.daemonLogPath, {
     DEBRUTE_DAEMON_PORT: String(daemonPort),
-    DEBRUTE_DAEMON_TOKEN: token,
+    DEBRUTE_DAEMON_TOKEN_FILE: paths.tokenPath,
     DEBRUTE_WEB_BASE_URL: webUrl
   });
   const web = spawnDetached(pnpmExecutable(), [
@@ -119,13 +120,14 @@ async function launchPackagedRuntime(paths: WorkbenchRuntimePaths): Promise<Work
   const executablePath = packagedExecutablePath();
   const daemonPort = await chooseLoopbackPort(DEFAULT_WORKBENCH_DAEMON_PORT);
   const token = randomUUID();
+  await writeRuntimeTokenFile(paths, token);
   const daemonUrl = `http://127.0.0.1:${daemonPort}`;
   const now = new Date().toISOString();
   const daemon = spawnDetached(executablePath, [
     INTERNAL_WORKBENCH_RUNTIME_CHILD_COMMAND
   ], process.cwd(), paths.daemonLogPath, {
     DEBRUTE_WORKBENCH_RUNTIME_PORT: String(daemonPort),
-    DEBRUTE_WORKBENCH_RUNTIME_TOKEN: token,
+    DEBRUTE_WORKBENCH_RUNTIME_TOKEN_FILE: paths.tokenPath,
     DEBRUTE_WORKBENCH_RUNTIME_WEB_DIST_DIR: resolve(dirname(executablePath), 'web'),
     PKG_EXECPATH: ''
   });
@@ -143,6 +145,11 @@ async function launchPackagedRuntime(paths: WorkbenchRuntimePaths): Promise<Work
     startedAt: now,
     updatedAt: now
   };
+}
+
+async function writeRuntimeTokenFile(paths: WorkbenchRuntimePaths, token: string): Promise<void> {
+  await mkdir(paths.runtimeDir, { recursive: true, mode: 0o700 });
+  await writeFile(paths.tokenPath, `${token}\n`, { encoding: 'utf8', mode: 0o600 });
 }
 
 function spawnDetached(

@@ -110,6 +110,9 @@ export function createHttpWorkbenchApiClient(options: HttpWorkbenchApiClientOpti
     }
     const eventUrl = new URL(`${daemonUrl}${projectPath('/events')}`);
     eventUrl.searchParams.set('clientId', eventClientId);
+    if (token) {
+      eventUrl.searchParams.set('debrute-token', token);
+    }
     eventSource = new EventSource(eventUrl.toString());
     eventSource.onmessage = (event) => {
       const parsed = JSON.parse(event.data) as WorkbenchEvent;
