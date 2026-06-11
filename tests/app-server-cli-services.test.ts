@@ -170,6 +170,7 @@ describe('DebruteAppServer CLI service methods', () => {
       expect(detail.officialCapturedAt).toMatch(/^\d{4}-\d{2}-\d{2}$/);
       expect(detail.descriptionMarkdown).toContain('# gpt-image-2');
       expect(detail.descriptionMarkdown).toContain('debrute generate image <project> --input-json');
+      expect(detail.descriptionMarkdown).toContain('--timeout-ms');
       expect(detail.descriptionMarkdown).toContain('"model":"gpt-image-2"');
       expect(detail.argumentsSchema).toHaveProperty('properties');
     } finally {
@@ -188,6 +189,7 @@ describe('DebruteAppServer CLI service methods', () => {
       expect(detail.officialCapturedAt).toMatch(/^\d{4}-\d{2}-\d{2}$/);
       expect(detail.descriptionMarkdown).toContain('# doubao-seedance-2-0-260128');
       expect(detail.descriptionMarkdown).toContain('debrute generate video <project> --input-json');
+      expect(detail.descriptionMarkdown).toContain('--timeout-ms');
       expect(detail.descriptionMarkdown).toContain('"prompt"');
       expect(JSON.stringify(detail.argumentsSchema)).not.toContain('"content"');
     } finally {

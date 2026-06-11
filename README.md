@@ -146,19 +146,23 @@ pnpm exec tsx apps/debrute-cli/src/index.ts generated-asset lookup path/to/proje
 pnpm exec tsx apps/debrute-cli/src/index.ts llm request --input-json '{"prompt":"Summarize this project."}'
 pnpm exec tsx apps/debrute-cli/src/index.ts models image list
 pnpm exec tsx apps/debrute-cli/src/index.ts models image describe gpt-image-2
-pnpm exec tsx apps/debrute-cli/src/index.ts generate image path/to/project --input-json '{"model":"gpt-image-2","arguments":{"prompt":"Cover image","output_path":"generated/cover.png"}}'
-pnpm exec tsx apps/debrute-cli/src/index.ts generate image-batch path/to/project --manifest image-requests.json --concurrency 8 --retries 0 --log image-results.jsonl --summary image-summary.json
+pnpm exec tsx apps/debrute-cli/src/index.ts generate image path/to/project --input-json '{"model":"gpt-image-2","arguments":{"prompt":"Cover image","output_path":"generated/cover.png"}}' --timeout-ms 600000
+pnpm exec tsx apps/debrute-cli/src/index.ts generate image-batch path/to/project --manifest image-requests.json --concurrency 8 --retries 0 --timeout-ms 900000 --log image-results.jsonl --summary image-summary.json
 pnpm exec tsx apps/debrute-cli/src/index.ts models video list
 pnpm exec tsx apps/debrute-cli/src/index.ts models video describe doubao-seedance-2-0-260128
-pnpm exec tsx apps/debrute-cli/src/index.ts generate video path/to/project --input-json '{"model":"doubao-seedance-2-0-260128","arguments":{"prompt":"Short video brief","intent":"generate"}}'
+pnpm exec tsx apps/debrute-cli/src/index.ts generate video path/to/project --input-json '{"model":"doubao-seedance-2-0-260128","arguments":{"prompt":"Short video brief","intent":"generate"}}' --timeout-ms 600000
 pnpm exec tsx apps/debrute-cli/src/index.ts commands
 ```
 
-Use `generate image-batch` for multiple planned image requests; do not loop over `generate image` for planned batches. `--manifest` expects `{ "requests": [...] }`, with each item shaped like a `generate image` input. Batch item outcomes are written to `--log`; stdout is the final aggregate record.
+Use `generate image-batch` for multiple planned image requests; do not loop over `generate image` for planned batches. `--manifest` expects `{ "requests": [...] }`, with each item shaped like a `generate image` input. Batch item outcomes are written to `--log`; stdout emits sparse progress records and the final aggregate record.
 
 Use `models image list` to compare configured image models by original model parameters and constraints. Before image generation, run `models image describe <model-id>` once for the selected model. Model descriptions return official documentation URLs, a repository snapshot path, official-documentation-backed `description_markdown`, Debrute examples, and the machine-readable `arguments_schema`.
 
+Single image `--timeout-ms` defaults to 600000ms; image batch `--timeout-ms` defaults to 900000ms per item attempt. Use `--overwrite-existing` to regenerate batch outputs that would otherwise be skipped. Debrute resolves project files, data URLs, and safe public `http(s)` URLs for image inputs; model-specific file format, size, dimension, alpha, and mask constraints are left to the upstream model.
+
 Use `models video list` to compare configured video models by Debrute-native parameters and constraints. Before video generation, run `models video describe <model-id>` once for the selected model. Video model descriptions return official documentation URLs, a repository snapshot path, official-documentation-backed `description_markdown`, Debrute examples, and the machine-readable `arguments_schema`.
+
+Video `--timeout-ms` defaults to 600000ms and covers task submission, polling, response reads, and artifact download.
 
 Video generation uses `prompt`, `intent`, and `references`; Debrute constructs Seedance `content` internally. Project-local image and audio references can be normalized by Debrute when the selected model supports them. Project-local video references require Debrute upload-server support unless the source is already `http(s)` or `asset://`.
 

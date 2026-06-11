@@ -199,18 +199,22 @@ export async function readProjectFileBytes(projectRoot: string, projectRelativeP
   if (!fileStat.isFile()) {
     throw new Error(`Project path is not a file: ${projectRelativePath}`);
   }
-  const maxBytes = options.maxBytes ?? 20 * 1024 * 1024;
-  if (fileStat.size > maxBytes) {
+  if (options.maxBytes !== undefined && fileStat.size > options.maxBytes) {
     throw new Error(`Project file is too large to read (${fileStat.size} bytes): ${projectRelativePath}`);
   }
   return readFile(absolutePath);
 }
 
-export async function writeProjectFile(projectRoot: string, projectRelativePath: string, content: string | Uint8Array): Promise<string> {
+export async function writeProjectFile(
+  projectRoot: string,
+  projectRelativePath: string,
+  content: string | Uint8Array,
+  options: { signal?: AbortSignal } = {}
+): Promise<string> {
   assertProjectTreeVisibleMutationPath(projectRelativePath);
   const absolutePath = await resolveProjectPathForWrite(projectRoot, projectRelativePath);
   await mkdir(dirname(absolutePath), { recursive: true });
-  await writeFile(absolutePath, content);
+  await writeFile(absolutePath, content, options.signal ? { signal: options.signal } : undefined);
   return normalizeProjectRelativePath(projectRelativePath);
 }
 

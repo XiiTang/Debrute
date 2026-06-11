@@ -190,8 +190,12 @@ function descriptionMarkdown(doc: InternalImageModelOfficialDocReference, snapsh
     '',
     '## Debrute command',
     '',
+    'Single image timeout defaults to 600000ms. Use `--timeout-ms <ms>` to override it for this command.',
+    '',
+    'Debrute resolves project files, data URLs, and safe public `http(s)` URLs for image inputs. Model-specific file format, size, dimension, alpha, and mask constraints are left to the upstream model.',
+    '',
     '```sh',
-    `debrute generate image <project> --input-json '${debruteInputJson}'`,
+    `debrute generate image <project> --input-json '${debruteInputJson}' --timeout-ms 600000`,
     '```'
   ].join('\n');
 }

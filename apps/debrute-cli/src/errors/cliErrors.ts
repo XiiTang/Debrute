@@ -142,7 +142,6 @@ export function normalizeServiceErrorCode(code: string): DebruteCliErrorCode {
     || code === 'video_reference_type_unsupported'
     || code === 'video_reference_count_invalid'
     || code === 'video_reference_upload_unavailable'
-    || code === 'video_reference_too_large'
   ) {
     return 'invalid_input';
   }

@@ -106,8 +106,10 @@ function descriptionMarkdown(doc: VideoModelOfficialDocReference, snapshot: stri
     '',
     '## Debrute command',
     '',
+    'Video request timeout defaults to 600000ms for task submission, polling, response reads, and artifact download. Use `--timeout-ms <ms>` to override it.',
+    '',
     '```sh',
-    `debrute generate video <project> --input-json '${debruteInputJson}'`,
+    `debrute generate video <project> --input-json '${debruteInputJson}' --timeout-ms 600000`,
     '```'
   ].join('\n');
 }

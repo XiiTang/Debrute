@@ -18,6 +18,7 @@ import {
   normalizeFileWatchEvent,
   nextCopyProjectPathName,
   projectFileRevision,
+  readProjectFileBytes,
   readProjectTextFile,
   renameProjectPath,
   resolveProjectPath,
@@ -653,6 +654,21 @@ describe('project-core', () => {
     } finally {
       await rm(root, { recursive: true, force: true });
       await rm(outside, { force: true });
+    }
+  });
+
+  it('reads project binary files without a default size cap', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'debrute-project-large-binary-'));
+    try {
+      const bytes = Buffer.alloc(20 * 1024 * 1024 + 1, 7);
+      await writeFile(join(root, 'large.bin'), bytes);
+
+      const result = await readProjectFileBytes(root, 'large.bin');
+
+      expect(result.byteLength).toBe(bytes.byteLength);
+      expect(result[0]).toBe(7);
+    } finally {
+      await rm(root, { recursive: true, force: true });
     }
   });
 });

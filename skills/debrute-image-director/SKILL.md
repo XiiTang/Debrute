@@ -27,6 +27,12 @@ Use `debrute` as the Debrute execution interface. Debrute Skills describe how to
 - Choose the model and request arguments from the returned `description_markdown` and `arguments_schema`.
 - Submit the request with `debrute generate image /path/to/project --input-json '<json>'`.
 - For multiple planned image requests, submit one process with `debrute generate image-batch /path/to/project --manifest <manifest.json> --log <results.jsonl> --summary <summary.json>` or `debrute generate image-batch /path/to/project --input-jsonl <requests.jsonl> --log <results.jsonl> --summary <summary.json>`.
+- --timeout-ms defaults to 600000ms for single image requests.
+- --timeout-ms defaults to 900000ms per item attempt for image batches.
+- Batch retries are item-local and default to zero; pass `--retries <n>` only when retrying failed items is desired.
+- Batch commands skip existing non-empty `output_path` files by default; pass `--overwrite-existing` when outputs should be regenerated.
+- Debrute resolves project files, data URLs, and safe public `http(s)` URLs for image inputs; model-specific file format, size, dimension, alpha, and mask constraints are left to the upstream model.
+- Batch progress is sparse: start, crossed 10 percent completion boundaries, and final summary.
 - Do not loop over `debrute generate image` for a planned set of image requests. Batch result JSONL contains one final item outcome per line.
 - When project artifacts should be created, use output arguments supported by the selected model so generated files are written inside the project.
 - Update the Canvas Map when planning image output paths. Add exact file, folder, or glob entries under `paths` in `.debrute/canvas-maps/<canvas-id>.yaml`; folder rules must end with `/`.

@@ -3,7 +3,7 @@ import { basename } from 'node:path';
 import { writeProjectFile } from '@debrute/project-core';
 import type { SecretsConfig, VideoModelsConfig } from '../config.js';
 import {
-  DEFAULT_REQUEST_TIMEOUT_MS,
+  createRequestTimeoutSignal,
   fetchWithRequestTimeout,
   readResponseArrayBufferWithTimeout as readResponseArrayBufferBodyWithTimeout,
   readResponseTextWithTimeout as readResponseTextBodyWithTimeout
@@ -77,7 +77,6 @@ export type ExecuteVideoModelRequestResult =
         | 'video_reference_type_unsupported'
         | 'video_reference_count_invalid'
         | 'video_reference_upload_unavailable'
-        | 'video_reference_too_large'
         | 'video_request_failed';
       logs: Array<Record<string, unknown>>;
     };
@@ -118,6 +117,7 @@ type VideoTaskStatus = 'queued' | 'running' | 'succeeded' | 'failed' | 'expired'
 
 const DEFAULT_POLL_ATTEMPTS = 180;
 const DEFAULT_POLL_INTERVAL_MS = 2_000;
+const DEFAULT_VIDEO_REQUEST_TIMEOUT_MS = 600_000;
 
 export async function executeVideoModelRequest(input: ExecuteVideoModelRequestInput): Promise<ExecuteVideoModelRequestResult> {
   const logs: Array<Record<string, unknown>> = [];
@@ -167,6 +167,12 @@ export async function executeVideoModelRequest(input: ExecuteVideoModelRequestIn
     };
   }
 
+  const requestTimeoutMs = input.requestTimeoutMs ?? input.input.timeoutMs ?? DEFAULT_VIDEO_REQUEST_TIMEOUT_MS;
+  const operationTimeout = createRequestTimeoutSignal(
+    input.signal,
+    requestTimeoutMs,
+    `Video request timed out after ${requestTimeoutMs}ms`
+  );
   const state: RequestState = {
     projectRoot: input.projectRoot,
     invocationId: input.invocationId,
@@ -181,9 +187,9 @@ export async function executeVideoModelRequest(input: ExecuteVideoModelRequestIn
     modelRun: { responses: [] },
     logs,
     pollIntervalMs: input.pollIntervalMs ?? DEFAULT_POLL_INTERVAL_MS,
-    requestTimeoutMs: input.requestTimeoutMs ?? input.input.timeoutMs ?? DEFAULT_REQUEST_TIMEOUT_MS,
+    requestTimeoutMs,
     pollMaxAttempts: input.pollMaxAttempts ?? DEFAULT_POLL_ATTEMPTS,
-    ...(input.signal ? { signal: input.signal } : {})
+    signal: operationTimeout.signal
   };
   log(state, 'resolve_model', {
     model: entry.debruteModelId,
@@ -210,6 +216,8 @@ export async function executeVideoModelRequest(input: ExecuteVideoModelRequestIn
       error: 'video_request_failed',
       logs
     };
+  } finally {
+    operationTimeout.dispose();
   }
 }
 
@@ -360,7 +368,12 @@ async function storeDownloadedArtifact(state: RequestState, url: string, index: 
   const projectRelativePath = outputPath && index === 0
     ? outputPath
     : `${outputDirectory.replace(/\/$/, '')}/${artifactId}.${extension}`;
-  const normalizedPath = await writeProjectFile(state.projectRoot, projectRelativePath, bytes);
+  const normalizedPath = await writeProjectFile(
+    state.projectRoot,
+    projectRelativePath,
+    bytes,
+    state.signal ? { signal: state.signal } : undefined
+  );
   await state.recordGeneratedAsset?.({
     projectRelativePath: normalizedPath,
     modelRun: {

@@ -26,6 +26,7 @@ Use `debrute` as the Debrute execution interface. Debrute Skills describe how to
 - Project-local image and audio references can be normalized by Debrute when the selected model supports them.
 - Project-local video references require Debrute upload-server support unless the source is already `http(s)` or `asset://`.
 - Submit the request with `debrute generate video /path/to/project --input-json '<json>'`.
+- --timeout-ms defaults to 600000ms for video requests and covers task submission, polling, response reads, and artifact download.
 - When project artifacts should be created, use output arguments supported by the selected model so generated files are written inside the project.
 - Update the Canvas Map when planning video output paths. Add exact file, folder, or glob entries under `paths` in `.debrute/canvas-maps/<canvas-id>.yaml`; folder rules must end with `/`.
 - Use `layout.rows` when generated video siblings should compare horizontally by direct parent directory.

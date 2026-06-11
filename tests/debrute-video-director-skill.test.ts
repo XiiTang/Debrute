@@ -20,6 +20,7 @@ describe('Debrute video director Skill', () => {
     expect(skill).toContain('Use `prompt`, `intent`, and `references`; do not assemble official Seedance `content` arrays.');
     expect(skill).toContain('Project-local video references require Debrute upload-server support unless the source is already `http(s)` or `asset://`.');
     expect(skill).toContain('debrute generate video /path/to/project --input-json');
+    expect(skill).toContain('--timeout-ms defaults to 600000ms for video requests');
   });
 
   it('updates core Skill video examples to the native request contract', () => {
@@ -36,5 +37,6 @@ describe('Debrute video director Skill', () => {
     expect(readme).toContain('Use `models video list` to compare configured video models by Debrute-native parameters and constraints.');
     expect(readme).toContain('Before video generation, run `models video describe <model-id>` once for the selected model.');
     expect(readme).toContain('Video generation uses `prompt`, `intent`, and `references`; Debrute constructs Seedance `content` internally.');
+    expect(readme).toContain('Video `--timeout-ms` defaults to 600000ms and covers task submission, polling, response reads, and artifact download.');
   });
 });

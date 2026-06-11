@@ -2,6 +2,7 @@ import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
+import sharp from 'sharp';
 import {
   createImageModelCatalog,
   executeImageModelRequest,
@@ -284,6 +285,80 @@ describe('image model catalog and tools', () => {
 });
 
 describe('image model executors', () => {
+  it('passes wan local reference images to upstream without local rewriting', async () => {
+    const projectRoot = await mkdtemp(join(tmpdir(), 'debrute-image-wan-reference-pass-through-'));
+    let requestBody: Record<string, unknown> | undefined;
+    const wideImage = await sharp({
+      create: {
+        width: 9000,
+        height: 100,
+        channels: 3,
+        background: { r: 240, g: 240, b: 240 }
+      }
+    }).jpeg().toBuffer();
+    const fetch: ImageModelFetch = async (url, init) => {
+      if (url === 'https://dashscope.example/api/v1/services/aigc/image-generation/generation') {
+        requestBody = JSON.parse(String(init?.body)) as Record<string, unknown>;
+        return new Response(JSON.stringify({ output: { task_id: 'task-1' } }), { status: 200, headers: { 'content-type': 'application/json' } });
+      }
+      if (url === 'https://dashscope.example/api/v1/tasks/task-1') {
+        return new Response(JSON.stringify({ output: { task_status: 'SUCCEEDED', choices: [{ message: { content: [{ image: 'https://cdn.example/out.png' }] } }] } }), { status: 200, headers: { 'content-type': 'application/json' } });
+      }
+      return new Response(tinyPng, { status: 200, headers: { 'content-type': 'image/png' } });
+    };
+
+    try {
+      await writeFile(join(projectRoot, 'wide.jpg'), wideImage);
+      const result = await executeImageModelRequest({
+        projectRoot,
+        invocationId: 'turn-wan-autofix',
+        input: { model: 'wan2.7-image', arguments: { prompt: 'use this', image: ['wide.jpg'] } },
+        settings: { imageModels: [{ debruteModelId: 'wan2.7-image', baseUrlOverride: 'https://dashscope.example/api/v1', requestModelIdOverride: 'wan2.7-image' }] },
+        secrets: { imageModelApiKeys: { 'wan2.7-image': 'sk-image' } },
+        fetch,
+        pollIntervalMs: 0
+      });
+
+      expect(result.status).toBe('ok');
+      const content = ((requestBody?.input as Record<string, unknown>).messages as Array<Record<string, unknown>>)[0]!.content as Array<Record<string, string>>;
+      const image = content.find((item) => typeof item.image === 'string')!.image;
+      expect(Buffer.from(image.split(',', 2)[1]!, 'base64')).toEqual(wideImage);
+    } finally {
+      await rm(projectRoot, { recursive: true, force: true });
+    }
+  });
+
+  it('passes wan unsupported local reference image types to upstream', async () => {
+    const projectRoot = await mkdtemp(join(tmpdir(), 'debrute-image-wan-reference-type-pass-through-'));
+    let modelRuns = 0;
+    try {
+      await writeFile(join(projectRoot, 'source.gif'), Buffer.from('GIF89a'));
+      const result = await executeImageModelRequest({
+        projectRoot,
+        invocationId: 'turn-wan-type',
+        input: { model: 'wan2.7-image', arguments: { prompt: 'use this', image: ['source.gif'] } },
+        settings: { imageModels: [{ debruteModelId: 'wan2.7-image', baseUrlOverride: 'https://dashscope.example/api/v1', requestModelIdOverride: 'wan2.7-image' }] },
+        secrets: { imageModelApiKeys: { 'wan2.7-image': 'sk-image' } },
+        fetch: async (url) => {
+          if (url === 'https://dashscope.example/api/v1/services/aigc/image-generation/generation') {
+            modelRuns += 1;
+            return new Response(JSON.stringify({ output: { task_id: 'task-1' } }), { status: 200, headers: { 'content-type': 'application/json' } });
+          }
+          if (url === 'https://dashscope.example/api/v1/tasks/task-1') {
+            return new Response(JSON.stringify({ output: { task_status: 'SUCCEEDED', choices: [{ message: { content: [{ image: 'https://cdn.example/out.png' }] } }] } }), { status: 200, headers: { 'content-type': 'application/json' } });
+          }
+          return new Response(tinyPng, { status: 200, headers: { 'content-type': 'image/png' } });
+        },
+        pollIntervalMs: 0
+      });
+
+      expect(result.status).toBe('ok');
+      expect(modelRuns).toBe(1);
+    } finally {
+      await rm(projectRoot, { recursive: true, force: true });
+    }
+  });
+
   it('uses catalog defaults when an image model has only an API key configured', async () => {
     const projectRoot = await mkdtemp(join(tmpdir(), 'debrute-image-default-route-'));
     try {
@@ -585,6 +660,74 @@ describe('image model executors', () => {
 
       expect(result.status).toBe('ok');
       expect(downloaded).toEqual(['https://cdn.example/source.png']);
+      expect(modelRuns).toBe(1);
+    } finally {
+      await rm(projectRoot, { recursive: true, force: true });
+    }
+  });
+
+  it('passes OpenAI local edit masks to upstream without physical validation', async () => {
+    const projectRoot = await mkdtemp(join(tmpdir(), 'debrute-image-openai-mask-pass-through-'));
+    let modelRuns = 0;
+    try {
+      await writeFile(join(projectRoot, 'source.png'), await imageFixture({ width: 16, height: 16, channels: 4, alpha: 1 }));
+      await writeFile(join(projectRoot, 'mask.png'), await imageFixture({ width: 8, height: 8, channels: 3 }));
+      const result = await executeImageModelRequest({
+        projectRoot,
+        invocationId: 'turn-openai-mask-pass-through',
+        input: {
+          model: 'gpt-image-2',
+          arguments: {
+            prompt: 'retouch the image',
+            image: ['source.png'],
+            mask: 'mask.png'
+          }
+        },
+        settings: { imageModels: [{ debruteModelId: 'gpt-image-2', baseUrlOverride: 'https://api.openai.com/v1', requestModelIdOverride: 'gpt-image-2' }] },
+        secrets: { imageModelApiKeys: { 'gpt-image-2': 'sk-image' } },
+        fetch: async (url, init) => {
+          expect(url).toBe('https://api.openai.com/v1/images/edits');
+          expect(init?.body).toBeInstanceOf(FormData);
+          modelRuns += 1;
+          return jsonResponse({ data: [{ b64_json: tinyPngBase64 }] });
+        }
+      });
+
+      expect(result.status).toBe('ok');
+      expect(modelRuns).toBe(1);
+    } finally {
+      await rm(projectRoot, { recursive: true, force: true });
+    }
+  });
+
+  it('passes OpenAI object data edit masks to upstream without physical validation', async () => {
+    const projectRoot = await mkdtemp(join(tmpdir(), 'debrute-image-openai-mask-data-pass-through-'));
+    let modelRuns = 0;
+    try {
+      const image = await imageFixture({ width: 16, height: 16, channels: 4, alpha: 1 });
+      const mask = await imageFixture({ width: 16, height: 16, channels: 4, alpha: 0.5, format: 'webp' });
+      const result = await executeImageModelRequest({
+        projectRoot,
+        invocationId: 'turn-openai-mask-data-validation',
+        input: {
+          model: 'gpt-image-2',
+          arguments: {
+            prompt: 'retouch the image',
+            image: [{ data: image.toString('base64') }],
+            mask: { data: mask.toString('base64') }
+          }
+        },
+        settings: { imageModels: [{ debruteModelId: 'gpt-image-2', baseUrlOverride: 'https://api.openai.com/v1', requestModelIdOverride: 'gpt-image-2' }] },
+        secrets: { imageModelApiKeys: { 'gpt-image-2': 'sk-image' } },
+        fetch: async (url, init) => {
+          expect(url).toBe('https://api.openai.com/v1/images/edits');
+          expect(init?.body).toBeInstanceOf(FormData);
+          modelRuns += 1;
+          return jsonResponse({ data: [{ b64_json: tinyPngBase64 }] });
+        }
+      });
+
+      expect(result.status).toBe('ok');
       expect(modelRuns).toBe(1);
     } finally {
       await rm(projectRoot, { recursive: true, force: true });
@@ -1696,6 +1839,30 @@ function jsonResponse(value: unknown): Response {
 
 function pngResponse(): Response {
   return new Response(tinyPng, { status: 200, headers: { 'content-type': 'image/png' } });
+}
+
+function imageFixture(input: {
+  width: number;
+  height: number;
+  channels: 3 | 4;
+  alpha?: number;
+  format?: 'png' | 'webp';
+}): Promise<Buffer> {
+  const create = input.channels === 4
+    ? {
+        width: input.width,
+        height: input.height,
+        channels: 4 as const,
+        background: { r: 255, g: 255, b: 255, alpha: input.alpha ?? 1 }
+      }
+    : {
+        width: input.width,
+        height: input.height,
+        channels: 3 as const,
+        background: { r: 255, g: 255, b: 255 }
+      };
+  const pipeline = sharp({ create });
+  return input.format === 'webp' ? pipeline.webp().toBuffer() : pipeline.png().toBuffer();
 }
 
 function sleep(ms: number): Promise<void> {

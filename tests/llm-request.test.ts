@@ -1,4 +1,4 @@
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import { runLlmRuntimeRequest, type ChatProvider, type ProviderRequest, type ProviderResponse } from '@debrute/capability-runtime';
 
 describe('runtime LLM request', () => {
@@ -116,6 +116,48 @@ describe('runtime LLM request', () => {
         modelKey: 'fake-main:model-a'
       }
     });
+  });
+
+  it('keeps the LLM default timeout at 120000ms', async () => {
+    vi.useFakeTimers();
+    try {
+      const provider: ChatProvider = {
+        id: 'fake-main',
+        providerType: 'openai_compat',
+        modelKeys: ['fake-main:model-a'],
+        async send(request: ProviderRequest) {
+          await new Promise((_resolve, reject) => {
+            request.signal.addEventListener('abort', () => reject(request.signal.reason), { once: true });
+          });
+          return { type: 'message', modelKey: 'fake-main:model-a', text: 'late result' };
+        }
+      };
+      let settled = false;
+      const promise = runLlmRuntimeRequest({ prompt: 'Slow default request.' }, {
+        providers: fakeProviderRegistry([provider]),
+        defaultModelKey: 'fake-main:model-a'
+      }).finally(() => {
+        settled = true;
+      });
+
+      await vi.advanceTimersByTimeAsync(120_000);
+      const settledAtDefault = settled;
+      if (!settledAtDefault) {
+        await vi.advanceTimersByTimeAsync(480_000);
+      }
+      const result = await promise;
+
+      expect(settledAtDefault).toBe(true);
+      expect(result).toMatchObject({
+        status: 'error',
+        error: {
+          code: 'llm_request_timeout',
+          message: 'LLM request timed out after 120000ms.'
+        }
+      });
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it('parses JSON when a result schema is requested', async () => {

@@ -99,6 +99,54 @@ describe('image model batch runner execution', () => {
     }
   });
 
+  test('overwrites existing outputs when requested and emits progress snapshots', async () => {
+    const tempDir = await mkdtemp(join(tmpdir(), 'debrute-batch-overwrite-progress-'));
+    const logPath = join(tempDir, 'results.jsonl');
+    const progress: unknown[] = [];
+    let executions = 0;
+    const dependencies: ImageModelBatchRunnerDependencies = {
+      projectFileExistsWithContent: async () => true,
+      executeImageModelRequest: async () => {
+        executions += 1;
+        return { status: 'ok', artifacts: [] };
+      }
+    };
+
+    try {
+      const summary = await runImageModelBatch({
+        source: {
+          kind: 'requests',
+          requests: [
+            { model: 'gpt-image-2', arguments: { prompt: 'one', output_path: 'generated/one.png' } },
+            { model: 'gpt-image-2', arguments: { prompt: 'two', output_path: 'generated/two.png' } }
+          ]
+        },
+        concurrency: 1,
+        retries: 0,
+        timeoutMs: 900000,
+        overwriteExisting: true,
+        logPath
+      }, dependencies, {
+        onProgress: (event) => progress.push(event)
+      });
+
+      expect(executions).toBe(2);
+      expect(summary).toMatchObject({ total: 2, okCount: 2, skippedCount: 0, failedCount: 0 });
+      expect(progress).toEqual(expect.arrayContaining([
+        expect.objectContaining({
+          type: 'started',
+          snapshot: expect.objectContaining({ total: 2, done: 0, active: 0 })
+        }),
+        expect.objectContaining({
+          type: 'item_finished',
+          snapshot: expect.objectContaining({ total: 2, done: 2, okCount: 2, skippedCount: 0, failedCount: 0 })
+        })
+      ]));
+    } finally {
+      await rm(tempDir, { recursive: true, force: true });
+    }
+  });
+
   test('retries item-local failures and preserves structured final errors', async () => {
     const tempDir = await mkdtemp(join(tmpdir(), 'debrute-batch-retry-'));
     const logPath = join(tempDir, 'results.jsonl');
@@ -139,6 +187,132 @@ describe('image model batch runner execution', () => {
         error: {
           code: 'image_request_failed',
           message: 'failed attempt 3'
+        }
+      });
+    } finally {
+      await rm(tempDir, { recursive: true, force: true });
+    }
+  });
+
+  test('lets item-level timeout override the batch default timeout', async () => {
+    const tempDir = await mkdtemp(join(tmpdir(), 'debrute-batch-item-timeout-'));
+    const logPath = join(tempDir, 'results.jsonl');
+    const seenTimeouts: Array<number | undefined> = [];
+    const dependencies: ImageModelBatchRunnerDependencies = {
+      projectFileExistsWithContent: async () => false,
+      executeImageModelRequest: async (request) => {
+        seenTimeouts.push(request.timeoutMs);
+        return { status: 'ok', artifacts: [] };
+      }
+    };
+
+    try {
+      await runImageModelBatch({
+        source: {
+          kind: 'requests',
+          requests: [
+            { model: 'gpt-image-2', timeoutMs: 123, arguments: { prompt: 'item timeout' } },
+            { model: 'gpt-image-2', arguments: { prompt: 'batch timeout' } }
+          ]
+        },
+        concurrency: 1,
+        retries: 0,
+        timeoutMs: 900000,
+        logPath
+      }, dependencies);
+
+      expect(seenTimeouts).toEqual([123, 900000]);
+    } finally {
+      await rm(tempDir, { recursive: true, force: true });
+    }
+  });
+
+  test('defaults batch item attempts to 900000ms when no timeout is provided', async () => {
+    const tempDir = await mkdtemp(join(tmpdir(), 'debrute-batch-default-timeout-'));
+    const logPath = join(tempDir, 'results.jsonl');
+    const seenTimeouts: Array<number | undefined> = [];
+    const dependencies: ImageModelBatchRunnerDependencies = {
+      projectFileExistsWithContent: async () => false,
+      executeImageModelRequest: async (request) => {
+        seenTimeouts.push(request.timeoutMs);
+        return { status: 'ok', artifacts: [] };
+      }
+    };
+
+    try {
+      await runImageModelBatch({
+        source: {
+          kind: 'requests',
+          requests: [
+            { model: 'gpt-image-2', arguments: { prompt: 'batch default timeout' } }
+          ]
+        },
+        concurrency: 1,
+        retries: 0,
+        logPath
+      }, dependencies);
+
+      expect(seenTimeouts).toEqual([900000]);
+    } finally {
+      await rm(tempDir, { recursive: true, force: true });
+    }
+  });
+
+  test('aborts each batch item attempt when its timeout expires', async () => {
+    const tempDir = await mkdtemp(join(tmpdir(), 'debrute-batch-attempt-timeout-'));
+    const logPath = join(tempDir, 'results.jsonl');
+    let sawAbort = false;
+    const dependencies: ImageModelBatchRunnerDependencies = {
+      projectFileExistsWithContent: async () => false,
+      executeImageModelRequest: async (request) => {
+        const signal = (request as { signal?: AbortSignal }).signal;
+        if (!signal) {
+          return {
+            status: 'failed',
+            error: {
+              code: 'image_request_failed',
+              message: 'missing batch attempt signal'
+            }
+          };
+        }
+        return await new Promise((resolve) => {
+          signal.addEventListener('abort', () => {
+            sawAbort = true;
+            resolve({
+              status: 'failed',
+              error: {
+                code: 'image_request_failed',
+                message: signal.reason instanceof Error ? signal.reason.message : String(signal.reason)
+              }
+            });
+          }, { once: true });
+        });
+      }
+    };
+
+    try {
+      const summary = await runImageModelBatch({
+        source: {
+          kind: 'requests',
+          requests: [
+            { model: 'gpt-image-2', arguments: { prompt: 'will timeout' } }
+          ]
+        },
+        concurrency: 1,
+        retries: 0,
+        timeoutMs: 5,
+        logPath
+      }, dependencies);
+
+      expect(summary).toMatchObject({ total: 1, okCount: 0, failedCount: 1 });
+      expect(sawAbort).toBe(true);
+      const [result] = (await readFile(logPath, 'utf8')).trim().split('\n').map((line) => JSON.parse(line) as Record<string, unknown>);
+      expect(result).toMatchObject({
+        status: 'failed',
+        attempt: 1,
+        error: {
+          code: 'image_request_failed',
+          message: 'Image batch item 1 attempt 1 timed out after 5ms.'
         }
       });
     } finally {

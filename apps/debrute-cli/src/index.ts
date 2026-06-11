@@ -28,7 +28,7 @@ export async function runCli(argv: string[], output: (text: string) => void = co
   let parsed: ParsedDebruteArgs | undefined;
   try {
     parsed = parseDebruteArgs(argv);
-    const result = await runParsedCli(parsed);
+    const result = await runParsedCli(parsed, { output });
     output(renderAgentRecord(result));
     if (result.status === 'error') {
       process.exitCode = exitCodeForCliError(new DebruteCliError(result.code, result.message));
@@ -47,7 +47,7 @@ export async function runCli(argv: string[], output: (text: string) => void = co
   }
 }
 
-async function runParsedCli(args: ParsedDebruteArgs): Promise<DebruteAgentResult> {
+async function runParsedCli(args: ParsedDebruteArgs, options: { output: (text: string) => void }): Promise<DebruteAgentResult> {
   if (args.command === 'commands' || args.command === 'help') {
     return runRuntimeCommand(args);
   }
@@ -68,7 +68,7 @@ async function runParsedCli(args: ParsedDebruteArgs): Promise<DebruteAgentResult
     if (args.scope === 'project') {
       return await runProjectCommand(args, server);
     }
-    return await runGenerationCommand(args, server);
+    return await runGenerationCommand(args, server, { output: options.output });
   } finally {
     server.close();
   }

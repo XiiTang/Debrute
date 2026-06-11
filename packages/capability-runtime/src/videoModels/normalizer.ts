@@ -25,8 +25,7 @@ export type VideoArgumentErrorCode =
   | 'video_reference_missing'
   | 'video_reference_type_unsupported'
   | 'video_reference_count_invalid'
-  | 'video_reference_upload_unavailable'
-  | 'video_reference_too_large';
+  | 'video_reference_upload_unavailable';
 
 export class VideoArgumentError extends Error {
   constructor(readonly code: VideoArgumentErrorCode, message: string) {
@@ -83,13 +82,6 @@ const PUBLIC_ARGUMENT_KEYS = new Set([
   ...PASSTHROUGH_ARGUMENT_KEYS,
   ...OUTPUT_ARGUMENT_KEYS
 ]);
-const MAX_REFERENCE_BYTES: Record<VideoReferenceMediaType, number> = {
-  image: 10 * 1024 * 1024,
-  mask: 10 * 1024 * 1024,
-  audio: 50 * 1024 * 1024,
-  video: 50 * 1024 * 1024
-};
-
 export async function normalizeSeedanceVideoArguments(input: NormalizeSeedanceVideoArgumentsInput): Promise<NormalizedSeedanceVideoArguments> {
   assertKnownArgumentKeys(input.args);
   const prompt = stringArg(input.args, 'prompt');
@@ -150,7 +142,6 @@ async function normalizeReference(input: {
   }
 
   const bytes = await readLocalReference(input.projectRoot, source);
-  assertReferenceSize(source, mediaType, bytes.byteLength);
   if (mediaType === 'image' || mediaType === 'mask') {
     return { source, mediaType, url: `data:${imageMimeType(Buffer.from(bytes), source)};base64,${Buffer.from(bytes).toString('base64')}` };
   }
@@ -172,16 +163,16 @@ async function normalizeReference(input: {
 async function readLocalReference(projectRoot: string, source: string): Promise<Uint8Array> {
   try {
     return await readProjectFileBytes(projectRoot, source);
-  } catch {
+  } catch (error) {
+    if (!isFileNotFoundError(error)) {
+      throw error;
+    }
     throw new VideoArgumentError('video_reference_missing', `Video reference not found in project: ${source}`);
   }
 }
 
-function assertReferenceSize(source: string, mediaType: VideoReferenceMediaType, byteLength: number): void {
-  const limit = MAX_REFERENCE_BYTES[mediaType];
-  if (byteLength > limit) {
-    throw new VideoArgumentError('video_reference_too_large', `Video reference exceeds ${limit} bytes: ${source}`);
-  }
+function isFileNotFoundError(error: unknown): boolean {
+  return Boolean(error && typeof error === 'object' && (error as { code?: unknown }).code === 'ENOENT');
 }
 
 function validateRuntimeArgs(args: Record<string, unknown>, entry: VideoModelCatalogEntry): void {

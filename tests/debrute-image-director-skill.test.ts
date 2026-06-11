@@ -38,6 +38,10 @@ describe('Debrute image director Skill', () => {
     expect(skill).toContain('debrute generate image-batch /path/to/project --input-jsonl <requests.jsonl> --log <results.jsonl> --summary <summary.json>');
     expect(skill).toContain('Do not loop over `debrute generate image` for a planned set of image requests.');
     expect(skill).toContain('Batch result JSONL contains one final item outcome per line.');
+    expect(skill).toContain('--timeout-ms defaults to 600000ms for single image requests');
+    expect(skill).toContain('--timeout-ms defaults to 900000ms per item attempt for image batches');
+    expect(skill).toContain('--overwrite-existing');
+    expect(skill).toContain('model-specific file format, size, dimension, alpha, and mask constraints are left to the upstream model');
   });
 
   it('teaches Canvas Map publishing for generated image output paths', () => {
@@ -64,9 +68,12 @@ describe('Debrute image director Skill', () => {
     expect(readme).toContain('- `packages/capability-core` - result and artifact value shapes shared by Debrute runtime services.');
     expect(readme).toContain('- `packages/capability-runtime` - model catalogs, model executors, runtime LLM request execution, LLM provider settings, generation model settings, and Skills registry code.');
     expect(readme).toContain('Use `generate image-batch` for multiple planned image requests; do not loop over `generate image` for planned batches.');
-    expect(readme).toContain('Batch item outcomes are written to `--log`; stdout is the final aggregate record.');
+    expect(readme).toContain('Batch item outcomes are written to `--log`; stdout emits sparse progress records and the final aggregate record.');
     expect(readme).toContain('Use `models image list` to compare configured image models by original model parameters and constraints.');
     expect(readme).toContain('Before image generation, run `models image describe <model-id>` once for the selected model.');
+    expect(readme).toContain('Single image `--timeout-ms` defaults to 600000ms; image batch `--timeout-ms` defaults to 900000ms per item attempt.');
+    expect(readme).toContain('Use `--overwrite-existing` to regenerate batch outputs that would otherwise be skipped.');
+    expect(readme).toContain('model-specific file format, size, dimension, alpha, and mask constraints are left to the upstream model.');
     expect(readme).toContain('Do not include model API keys in generation requests; Debrute reads configured keys locally.');
     expect(readme).toContain('Model descriptions return official documentation URLs, a repository snapshot path, official-documentation-backed `description_markdown`, Debrute examples, and the machine-readable `arguments_schema`.');
   });

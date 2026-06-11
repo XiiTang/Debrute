@@ -458,6 +458,44 @@ describe('video model executor', () => {
     }
   });
 
+  it('routes large project-local video references through upload without local size validation', async () => {
+    const projectRoot = await mkdtemp(join(tmpdir(), 'debrute-video-large-upload-boundary-'));
+    try {
+      const largeVideo = Buffer.alloc(20 * 1024 * 1024 + 1, 1);
+      await writeFile(join(projectRoot, 'large.mp4'), largeVideo);
+      const uploads: unknown[] = [];
+
+      const captured = await runVideoRequestAndCaptureBody({
+        projectRoot,
+        invocationId: 'turn-video-large-local-upload',
+        arguments: {
+          prompt: 'use the large local motion reference',
+          intent: 'reference',
+          references: [{ source: 'large.mp4' }]
+        },
+        uploadVideoReference: async (input) => {
+          uploads.push(input);
+          return { url: 'https://uploads.example/large.mp4' };
+        }
+      });
+
+      expect(captured.result.status).toBe('ok');
+      expect(uploads).toEqual([{
+        projectPath: projectRoot,
+        projectRelativePath: 'large.mp4',
+        contentType: 'video/mp4',
+        byteLength: largeVideo.byteLength
+      }]);
+      expect(captured.body?.content).toContainEqual({
+        type: 'video_url',
+        video_url: { url: 'https://uploads.example/large.mp4' },
+        role: 'reference_video'
+      });
+    } finally {
+      await rm(projectRoot, { recursive: true, force: true });
+    }
+  });
+
   it('routes edit masks through image data URLs and rejects unknown reference fields', async () => {
     const projectRoot = await mkdtemp(join(tmpdir(), 'debrute-video-edit-mask-'));
     try {
@@ -606,6 +644,51 @@ describe('video model executor', () => {
       expect(result.error).toBe('video_reference_type_unsupported');
       expect(uploadCalls).toBe(0);
     } finally {
+      await rm(projectRoot, { recursive: true, force: true });
+    }
+  });
+
+  it('applies video timeout to the whole task polling operation', async () => {
+    const projectRoot = await mkdtemp(join(tmpdir(), 'debrute-video-operation-timeout-'));
+    const controller = new AbortController();
+    const cleanupTimer = setTimeout(() => controller.abort(new Error('cleanup abort')), 80);
+    let pollCount = 0;
+    const fetch: VideoModelFetch = async (url, init) => {
+      if (url.endsWith('/contents/generations/tasks') && init?.method === 'POST') {
+        return jsonResponse({ id: 'task-operation-timeout', status: 'queued' });
+      }
+      if (url.endsWith('/contents/generations/tasks/task-operation-timeout')) {
+        pollCount += 1;
+        return jsonResponse({ id: 'task-operation-timeout', status: 'running' });
+      }
+      throw new Error(`unexpected URL: ${url}`);
+    };
+
+    try {
+      const result = await executeVideoModelRequest({
+        projectRoot,
+        invocationId: 'turn-video-operation-timeout',
+        input: {
+          model: 'doubao-seedance-2-0-260128',
+          timeoutMs: 25,
+          arguments: { prompt: 'cover video' }
+        },
+        settings: {
+          videoModels: [{ debruteModelId: 'doubao-seedance-2-0-260128', baseUrlOverride: 'https://ark.example/api/v3', requestModelIdOverride: null }]
+        },
+        secrets: { videoModelApiKeys: { 'doubao-seedance-2-0-260128': 'sk-video' } },
+        pollIntervalMs: 10,
+        pollMaxAttempts: 1000,
+        fetch,
+        signal: controller.signal
+      });
+
+      expect(pollCount).toBeGreaterThan(0);
+      expect(result.status).toBe('error');
+      expect(result.error).toBe('video_request_failed');
+      expect(result.content).toContain('Video request timed out after 25ms');
+    } finally {
+      clearTimeout(cleanupTimer);
       await rm(projectRoot, { recursive: true, force: true });
     }
   });

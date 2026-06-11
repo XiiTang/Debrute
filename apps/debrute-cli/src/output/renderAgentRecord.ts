@@ -42,6 +42,10 @@ export function renderAgentRecord(result: DebruteAgentResult): string {
   return lines.join('\n');
 }
 
+export function renderAgentProgressRecord(command: string, fields: Record<string, AgentRecordValue>): string {
+  return `debrute/1 progress cmd=${formatValue(command)}${formatFields(fields)}`;
+}
+
 function formatFields(fields: Record<string, AgentRecordValue>): string {
   const pairs = Object.entries(fields)
     .filter(([, value]) => value !== undefined)

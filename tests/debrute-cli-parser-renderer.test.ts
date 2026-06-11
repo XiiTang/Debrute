@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest';
 import { DebruteCliError, exitCodeForCliError } from '../apps/debrute-cli/src/errors/cliErrors';
 import { commandSpecs, specForCommandPath } from '../apps/debrute-cli/src/commands/helpSpec';
 import { parseDebruteArgs } from '../apps/debrute-cli/src/parser/parseDebruteArgs';
-import { renderAgentRecord } from '../apps/debrute-cli/src/output/renderAgentRecord';
+import { renderAgentProgressRecord, renderAgentRecord } from '../apps/debrute-cli/src/output/renderAgentRecord';
 
 describe('debrute cli parser and renderer', () => {
   it('rejects --json because the CLI has one output protocol', () => {
@@ -68,6 +68,60 @@ describe('debrute cli parser and renderer', () => {
     expect(() => parseDebruteArgs(['daemon', 'status', '--daemon-url', 'http://127.0.0.1:17321'])).toThrow(DebruteCliError);
   });
 
+  it('parses final generation timeout flags', () => {
+    expect(parseDebruteArgs([
+      'generate',
+      'image',
+      '/tmp/project',
+      '--input-json',
+      '{"model":"gpt-image-2","arguments":{"prompt":"cover"}}',
+      '--timeout-ms',
+      '600000'
+    ])).toMatchObject({
+      command: 'generate.image',
+      options: {
+        'input-json': '{"model":"gpt-image-2","arguments":{"prompt":"cover"}}',
+        'timeout-ms': '600000'
+      }
+    });
+
+    expect(parseDebruteArgs([
+      'generate',
+      'video',
+      '/tmp/project',
+      '--input-json',
+      '{"model":"doubao-seedance-2-0-260128","arguments":{"prompt":"move"}}',
+      '--timeout-ms',
+      '600000'
+    ])).toMatchObject({
+      command: 'generate.video',
+      options: {
+        'timeout-ms': '600000'
+      }
+    });
+
+    expect(parseDebruteArgs([
+      'generate',
+      'image-batch',
+      '/tmp/project',
+      '--input-jsonl',
+      'requests.jsonl',
+      '--log',
+      'results.jsonl',
+      '--timeout-ms',
+      '900000',
+      '--overwrite-existing'
+    ])).toMatchObject({
+      command: 'generate.image-batch',
+      options: {
+        'input-jsonl': 'requests.jsonl',
+        log: 'results.jsonl',
+        'timeout-ms': '900000',
+        'overwrite-existing': 'true'
+      }
+    });
+  });
+
   it('renders compact debrute/1 success and error records', () => {
     expect(renderAgentRecord({
       status: 'ok',
@@ -112,6 +166,17 @@ describe('debrute cli parser and renderer', () => {
     expect(rendered).not.toContain('\u0007');
   });
 
+  it('renders progress records with the same field escaping rules', () => {
+    expect(renderAgentProgressRecord('generate.image-batch', {
+      total: 100,
+      done: 10,
+      ok: 8,
+      failed: 1,
+      skipped: 1,
+      note: 'ten percent'
+    })).toBe('debrute/1 progress cmd=generate.image-batch total=100 done=10 ok=8 failed=1 skipped=1 note="ten percent"');
+  });
+
   it('exposes command metadata for final help commands', () => {
     expect(commandSpecs.map((spec) => spec.command)).toEqual([
       'runtime.status',
@@ -140,13 +205,17 @@ describe('debrute cli parser and renderer', () => {
       'commands',
       'help'
     ]);
-    expect(specForCommandPath(['generate', 'image-batch'])).toMatchObject({
+    const imageBatchSpec = specForCommandPath(['generate', 'image-batch']);
+    expect(imageBatchSpec).toMatchObject({
       command: 'generate.image-batch',
       scope: 'generation',
       risk: 'generate',
       requires: 'project-session',
       writes: 'assets'
     });
+    expect(imageBatchSpec?.input).toContain('--summary <path>');
+    expect(imageBatchSpec?.input).toContain('--concurrency <n>');
+    expect(imageBatchSpec?.input).toContain('--retries <n>');
     expect(specForCommandPath(['project', 'status'])?.errors).toContain('project_not_found');
     expect(specForCommandPath(['workbench', 'url'])).toMatchObject({
       command: 'workbench.url',

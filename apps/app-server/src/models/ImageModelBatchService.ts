@@ -49,12 +49,35 @@ export interface ImageModelBatchRunnerDependencies {
     model: string;
     arguments: Record<string, unknown>;
     timeoutMs?: number;
+    signal?: AbortSignal;
   }): Promise<ImageModelBatchExecutionResult>;
 }
 
 export type ImageModelBatchExecutionResult =
   | { status: 'ok'; artifacts?: unknown[] }
   | { status: 'failed'; error: unknown };
+
+export interface ImageModelBatchProgressSnapshot {
+  total: number;
+  done: number;
+  active: number;
+  okCount: number;
+  skippedCount: number;
+  failedCount: number;
+  retryCount: number;
+}
+
+export type ImageModelBatchProgressEvent =
+  | { type: 'started'; snapshot: ImageModelBatchProgressSnapshot }
+  | { type: 'item_started'; index: number; attempt: number; snapshot: ImageModelBatchProgressSnapshot }
+  | { type: 'item_retry'; index: number; nextAttempt: number; snapshot: ImageModelBatchProgressSnapshot }
+  | { type: 'item_finished'; result: ImageModelBatchResult; snapshot: ImageModelBatchProgressSnapshot };
+
+export interface ImageModelBatchRunOptions {
+  onProgress?: (event: ImageModelBatchProgressEvent) => void;
+}
+
+const IMAGE_BATCH_DEFAULT_TIMEOUT_MS = 900_000;
 
 export async function loadImageModelBatchRequests(source: ImageModelBatchSource): Promise<ImageModelBatchRequest[]> {
   if (source.kind === 'requests') {
@@ -68,7 +91,8 @@ export async function loadImageModelBatchRequests(source: ImageModelBatchSource)
 
 export async function runImageModelBatch(
   input: RunImageModelBatchInput,
-  dependencies: ImageModelBatchRunnerDependencies
+  dependencies: ImageModelBatchRunnerDependencies,
+  options: ImageModelBatchRunOptions = {}
 ): Promise<ImageModelBatchSummary> {
   validateBatchInput(input);
   const requests = await loadImageModelBatchRequests(input.source);
@@ -79,14 +103,31 @@ export async function runImageModelBatch(
   const absoluteLogPath = resolve(input.logPath);
   const absoluteSummaryPath = input.summaryPath ? resolve(input.summaryPath) : undefined;
   const writer = await createBatchResultWriter(absoluteLogPath);
+  const batchTimeoutMs = input.timeoutMs ?? IMAGE_BATCH_DEFAULT_TIMEOUT_MS;
   const started = Date.now();
   const results: ImageModelBatchResult[] = [];
   let nextIndex = 0;
+  let active = 0;
+  let retryCount = 0;
+  const snapshot = (): ImageModelBatchProgressSnapshot => ({
+    total: requests.length,
+    done: results.length,
+    active,
+    okCount: results.filter((result) => result.status === 'ok').length,
+    skippedCount: results.filter((result) => result.status === 'skipped').length,
+    failedCount: results.filter((result) => result.status === 'failed').length,
+    retryCount
+  });
+  const emitProgress = (event: ImageModelBatchProgressEvent): void => {
+    options.onProgress?.(event);
+  };
 
   const writeFinalResult = async (result: ImageModelBatchResult): Promise<void> => {
     results.push(result);
     await writer.write(result);
+    emitProgress({ type: 'item_finished', result, snapshot: snapshot() });
   };
+  emitProgress({ type: 'started', snapshot: snapshot() });
 
   try {
     await Promise.all(Array.from({ length: Math.min(input.concurrency, requests.length) }, async () => {
@@ -97,13 +138,27 @@ export async function runImageModelBatch(
         if (!request) {
           return;
         }
-        await writeFinalResult(await runOneImageModelBatchItem({
-          request,
-          index: index + 1,
-          retries: input.retries,
-          dependencies,
-          ...(input.timeoutMs ? { timeoutMs: input.timeoutMs } : {})
-        }));
+        active += 1;
+        const result = await (async () => {
+          try {
+            return await runOneImageModelBatchItem({
+              request,
+              index: index + 1,
+              retries: input.retries,
+              overwriteExisting: input.overwriteExisting === true,
+              dependencies,
+              timeoutMs: batchTimeoutMs,
+              onAttemptStart: (attempt) => emitProgress({ type: 'item_started', index: index + 1, attempt, snapshot: snapshot() }),
+              onRetry: (nextAttempt) => {
+                retryCount += 1;
+                emitProgress({ type: 'item_retry', index: index + 1, nextAttempt, snapshot: snapshot() });
+              }
+            });
+          } finally {
+            active -= 1;
+          }
+        })();
+        await writeFinalResult(result);
       }
     }));
   } finally {
@@ -168,20 +223,30 @@ async function runOneImageModelBatchItem(input: {
   index: number;
   retries: number;
   timeoutMs?: number;
+  overwriteExisting: boolean;
   dependencies: ImageModelBatchRunnerDependencies;
+  onAttemptStart?: (attempt: number) => void;
+  onRetry?: (nextAttempt: number) => void;
 }): Promise<ImageModelBatchResult> {
   const base = imageModelBatchResultBase(input.request, input.index);
-  if (input.request.outputPath && await input.dependencies.projectFileExistsWithContent({ projectRelativePath: input.request.outputPath })) {
+  if (!input.overwriteExisting && input.request.outputPath && await input.dependencies.projectFileExistsWithContent({ projectRelativePath: input.request.outputPath })) {
     return { ...base, status: 'skipped', reason: 'output_exists' };
   }
 
   for (let attempt = 1; ; attempt += 1) {
+    input.onAttemptStart?.(attempt);
     const started = Date.now();
-    const result = await input.dependencies.executeImageModelRequest({
-      model: input.request.model,
-      arguments: input.request.arguments,
-      ...(input.timeoutMs ?? input.request.timeoutMs ? { timeoutMs: input.timeoutMs ?? input.request.timeoutMs } : {})
-    });
+    const timeoutMs = input.request.timeoutMs ?? input.timeoutMs ?? IMAGE_BATCH_DEFAULT_TIMEOUT_MS;
+    const result = await executeBatchItemAttemptWithTimeout(
+      timeoutMs,
+      `Image batch item ${input.index} attempt ${attempt} timed out after ${timeoutMs}ms.`,
+      (signal) => input.dependencies.executeImageModelRequest({
+        model: input.request.model,
+        arguments: input.request.arguments,
+        timeoutMs,
+        signal
+      })
+    );
     const durationSeconds = roundSeconds(Date.now() - started);
     if (result.status === 'ok') {
       return {
@@ -201,7 +266,38 @@ async function runOneImageModelBatchItem(input: {
         error: result.error
       };
     }
+    input.onRetry?.(attempt + 1);
     await sleep(100 * attempt);
+  }
+}
+
+async function executeBatchItemAttemptWithTimeout(
+  timeoutMs: number,
+  timeoutMessage: string,
+  run: (signal: AbortSignal) => Promise<ImageModelBatchExecutionResult>
+): Promise<ImageModelBatchExecutionResult> {
+  const controller = new AbortController();
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  const timeoutResult = new Promise<ImageModelBatchExecutionResult>((resolve) => {
+    timer = setTimeout(() => {
+      controller.abort(new Error(timeoutMessage));
+      resolve({
+        status: 'failed',
+        error: {
+          code: 'image_request_failed',
+          message: timeoutMessage
+        }
+      });
+    }, timeoutMs);
+  });
+  const attempt = run(controller.signal);
+  void attempt.catch(() => undefined);
+  try {
+    return await Promise.race([attempt, timeoutResult]);
+  } finally {
+    if (timer) {
+      clearTimeout(timer);
+    }
   }
 }
 

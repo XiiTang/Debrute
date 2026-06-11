@@ -116,7 +116,8 @@ import {
 } from '../project-session/projectWatchEvents.js';
 import { serviceError } from './ServiceErrors.js';
 import {
-  runImageModelBatch as runNativeImageModelBatch
+  runImageModelBatch as runNativeImageModelBatch,
+  type ImageModelBatchRunOptions
 } from '../models/ImageModelBatchService.js';
 import {
   cliImageModelDetail,
@@ -562,21 +563,23 @@ export class DebruteAppServer {
     return cliImageModelDetail(setting, detail, officialDescription);
   }
 
-  async runImageModelBatch(input: RunImageModelBatchInput): Promise<ImageModelBatchSummary> {
+  async runImageModelBatch(input: RunImageModelBatchInput, options: ImageModelBatchRunOptions = {}): Promise<ImageModelBatchSummary> {
     const current = this.getSnapshot();
     let imageRequestExecutor: Promise<AppServerImageModelRequestExecutor> | undefined;
     return runNativeImageModelBatch(input, {
       projectFileExistsWithContent: (check) => this.projectFileExistsWithContent(check),
       executeImageModelRequest: async (request) => {
+        const { signal, ...imageRequest } = request;
         imageRequestExecutor ??= this.createImageModelRequestExecutor(current.projectRoot);
         const executor = await imageRequestExecutor;
         return imageModelBatchResultFromExecution(
-          await executor.execute(request, {
-            invocationId: `image-batch-${randomUUID()}`
+          await executor.execute(imageRequest, {
+            invocationId: `image-batch-${randomUUID()}`,
+            ...(signal ? { signal } : {})
           })
         );
       }
-    });
+    }, options);
   }
 
   async runImageModelRequestForCli(input: ImageModelRequestInput): Promise<DebruteCapabilityResult> {

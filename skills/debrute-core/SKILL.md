@@ -34,11 +34,11 @@ debrute generated-asset lookup /path/to/project --path generated/example.png
 debrute llm request --input-json '{"prompt":"Summarize this project."}'
 debrute models image list
 debrute models image describe gpt-image-2
-debrute generate image /path/to/project --input-json '{"model":"gpt-image-2","arguments":{"prompt":"Cover image","output_path":"generated/cover.png"}}'
-debrute generate image-batch /path/to/project --manifest image-requests.json --log image-results.jsonl --summary image-summary.json
+debrute generate image /path/to/project --input-json '{"model":"gpt-image-2","arguments":{"prompt":"Cover image","output_path":"generated/cover.png"}}' --timeout-ms 600000
+debrute generate image-batch /path/to/project --manifest image-requests.json --timeout-ms 900000 --log image-results.jsonl --summary image-summary.json
 debrute models video list
 debrute models video describe doubao-seedance-2-0-260128
-debrute generate video /path/to/project --input-json '{"model":"doubao-seedance-2-0-260128","arguments":{"prompt":"Short video brief","intent":"generate"}}'
+debrute generate video /path/to/project --input-json '{"model":"doubao-seedance-2-0-260128","arguments":{"prompt":"Short video brief","intent":"generate"}}' --timeout-ms 600000
 debrute commands
 ```
 

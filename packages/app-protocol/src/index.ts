@@ -312,6 +312,7 @@ export interface RunImageModelBatchInput {
   concurrency: number;
   retries: number;
   timeoutMs?: number;
+  overwriteExisting?: boolean;
   logPath: string;
   summaryPath?: string;
 }

@@ -4,20 +4,29 @@ import { join } from 'node:path';
 import { beforeEach, describe, expect, test, vi } from 'vitest';
 
 const serverInstances = vi.hoisted(() => [] as FakeDebruteAppServer[]);
+const batchRun = vi.hoisted(() => ({
+  implementation: undefined as undefined | ((input: unknown, options: { onProgress?: (event: unknown) => void } | undefined) => Promise<unknown>)
+}));
 
 vi.mock('@debrute/app-server', () => {
   class DebruteAppServer {
     openProject = vi.fn(async () => fakeSnapshot());
-    runImageModelBatch = vi.fn(async () => ({
-      total: 2,
-      okCount: 2,
-      skippedCount: 0,
-      failedCount: 0,
-      durationSeconds: 1.25,
-      concurrency: 2,
-      retries: 0,
-      logPath: '/tmp/results.jsonl'
-    }));
+    runImageModelBatch = vi.fn(async (input, options) => {
+      if (batchRun.implementation) {
+        return batchRun.implementation(input, options);
+      }
+      options?.onProgress?.({ type: 'started', snapshot: { total: 2, done: 0, active: 0, okCount: 0, skippedCount: 0, failedCount: 0, retryCount: 0 } });
+      return {
+        total: 2,
+        okCount: 2,
+        skippedCount: 0,
+        failedCount: 0,
+        durationSeconds: 1.25,
+        concurrency: 2,
+        retries: 0,
+        logPath: '/tmp/results.jsonl'
+      };
+    });
     runImageModelRequestForCli = vi.fn(async () => ({
       status: 'error',
       error: {
@@ -29,6 +38,11 @@ vi.mock('@debrute/app-server', () => {
         model: 'gpt-image-2'
       },
       logs: [{ stage: 'execute_request', status: 429 }]
+    }));
+    runVideoModelRequestForCli = vi.fn(async () => ({
+      status: 'ok',
+      outputs: { content: 'Generated 1 video artifact(s).', model: 'doubao-seedance-2-0-260128' },
+      artifacts: []
     }));
     close = vi.fn();
 
@@ -44,12 +58,14 @@ interface FakeDebruteAppServer {
   openProject: ReturnType<typeof vi.fn>;
   runImageModelBatch: ReturnType<typeof vi.fn>;
   runImageModelRequestForCli: ReturnType<typeof vi.fn>;
+  runVideoModelRequestForCli: ReturnType<typeof vi.fn>;
   close: ReturnType<typeof vi.fn>;
 }
 
 describe('debrute cli image generation batch', () => {
   beforeEach(() => {
     serverInstances.length = 0;
+    batchRun.implementation = undefined;
     process.exitCode = undefined;
   });
 
@@ -92,10 +108,13 @@ describe('debrute cli image generation batch', () => {
         source: { kind: 'jsonl', path: inputPath },
         concurrency: 2,
         retries: 0,
+        timeoutMs: 900000,
         logPath
-      });
+      }, expect.any(Object));
       expect(serverInstances[0]!.close).toHaveBeenCalledTimes(1);
       expect(lines).toEqual([[
+        'debrute/1 progress cmd=generate.image-batch total=2 done=0 ok=0 failed=0 skipped=0 active=0 retries=0 timeout_ms=900000 log=' + logPath + ' concurrency=2',
+      ].join('\n'), [
         'debrute/1 ok cmd=generate.image-batch',
         'total=2',
         'ok=2',
@@ -147,7 +166,7 @@ describe('debrute cli image generation batch', () => {
         timeoutMs: 900000,
         logPath,
         summaryPath
-      });
+      }, expect.any(Object));
     } finally {
       await rm(tempDir, { recursive: true, force: true });
     }
@@ -195,6 +214,148 @@ describe('debrute cli image generation batch', () => {
       'content="Image request failed: model endpoint responded with HTTP 429."',
       'model=gpt-image-2'
     ].join('\n')]);
+  });
+
+  test('passes single image CLI timeout to app-server', async () => {
+    const lines: string[] = [];
+
+    await runCli([
+      'generate',
+      'image',
+      '/tmp/project',
+      '--input-json',
+      '{"model":"gpt-image-2","timeoutMs":111,"arguments":{"prompt":"cover"}}',
+      '--timeout-ms',
+      '600000'
+    ], (text) => lines.push(text));
+
+    expect(serverInstances[0]!.runImageModelRequestForCli).toHaveBeenCalledWith({
+      model: 'gpt-image-2',
+      arguments: { prompt: 'cover' },
+      timeoutMs: 600000
+    });
+    expect(lines[0]).toContain('cmd=generate.image');
+  });
+
+  test('passes single video CLI timeout to app-server', async () => {
+    await runCli([
+      'generate',
+      'video',
+      '/tmp/project',
+      '--input-json',
+      '{"model":"doubao-seedance-2-0-260128","timeoutMs":111,"arguments":{"prompt":"camera move"}}',
+      '--timeout-ms',
+      '600000'
+    ], () => {});
+
+    expect(serverInstances[0]!.runVideoModelRequestForCli).toHaveBeenCalledWith({
+      model: 'doubao-seedance-2-0-260128',
+      arguments: { prompt: 'camera move' },
+      timeoutMs: 600000
+    });
+  });
+
+  test('passes image batch default timeout and overwrite flag to app-server', async () => {
+    await runCli([
+      'generate',
+      'image-batch',
+      '/tmp/project',
+      '--input-jsonl',
+      '/tmp/requests.jsonl',
+      '--log',
+      '/tmp/results.jsonl',
+      '--overwrite-existing'
+    ], () => {});
+
+    expect(serverInstances[0]!.runImageModelBatch).toHaveBeenCalledWith({
+      source: { kind: 'jsonl', path: '/tmp/requests.jsonl' },
+      concurrency: 4,
+      retries: 0,
+      timeoutMs: 900000,
+      logPath: '/tmp/results.jsonl',
+      overwriteExisting: true
+    }, expect.any(Object));
+  });
+
+  test('prints sparse batch progress at start and crossed 10 percent boundaries', async () => {
+    const lines: string[] = [];
+    batchRun.implementation = async (_input, options) => {
+      options?.onProgress?.({ type: 'started', snapshot: { total: 10, done: 0, active: 0, okCount: 0, skippedCount: 0, failedCount: 0, retryCount: 0 } });
+      options?.onProgress?.({ type: 'item_finished', result: { status: 'ok', index: 1, model: 'gpt-image-2', attempt: 1, durationSeconds: 1 }, snapshot: { total: 10, done: 1, active: 2, okCount: 1, skippedCount: 0, failedCount: 0, retryCount: 0 } });
+      options?.onProgress?.({ type: 'item_finished', result: { status: 'failed', index: 2, model: 'gpt-image-2', attempt: 1, durationSeconds: 1, error: { code: 'request_failed' } }, snapshot: { total: 10, done: 2, active: 2, okCount: 1, skippedCount: 0, failedCount: 1, retryCount: 0 } });
+      return {
+        total: 10,
+        okCount: 9,
+        skippedCount: 0,
+        failedCount: 1,
+        durationSeconds: 1.25,
+        concurrency: 2,
+        retries: 0,
+        logPath: '/tmp/results.jsonl'
+      };
+    };
+
+    await runCli([
+      'generate',
+      'image-batch',
+      '/tmp/project',
+      '--input-jsonl',
+      '/tmp/requests.jsonl',
+      '--concurrency',
+      '2',
+      '--log',
+      '/tmp/results.jsonl'
+    ], (text) => lines.push(text));
+
+    expect(lines).toEqual([
+      'debrute/1 progress cmd=generate.image-batch total=10 done=0 ok=0 failed=0 skipped=0 active=0 retries=0 timeout_ms=900000 log=/tmp/results.jsonl concurrency=2',
+      'debrute/1 progress cmd=generate.image-batch total=10 done=1 ok=1 failed=0 skipped=0 active=2 retries=0',
+      'debrute/1 progress cmd=generate.image-batch total=10 done=2 ok=1 failed=1 skipped=0 active=2 retries=0',
+      [
+        'debrute/1 ok cmd=generate.image-batch',
+        'total=10',
+        'ok=9',
+        'failed=1',
+        'skipped=0',
+        'log=/tmp/results.jsonl',
+        'concurrency=2',
+        'retries=0',
+        'duration_seconds=1.25'
+      ].join('\n')
+    ]);
+  });
+
+  test('prints configured retry budget in the start progress record', async () => {
+    const lines: string[] = [];
+    batchRun.implementation = async (_input, options) => {
+      options?.onProgress?.({ type: 'started', snapshot: { total: 5, done: 0, active: 0, okCount: 0, skippedCount: 0, failedCount: 0, retryCount: 0 } });
+      return {
+        total: 5,
+        okCount: 5,
+        skippedCount: 0,
+        failedCount: 0,
+        durationSeconds: 1.25,
+        concurrency: 2,
+        retries: 2,
+        logPath: '/tmp/results.jsonl'
+      };
+    };
+
+    await runCli([
+      'generate',
+      'image-batch',
+      '/tmp/project',
+      '--input-jsonl',
+      '/tmp/requests.jsonl',
+      '--concurrency',
+      '2',
+      '--retries',
+      '2',
+      '--log',
+      '/tmp/results.jsonl'
+    ], (text) => lines.push(text));
+
+    expect(lines[0]).toBe('debrute/1 progress cmd=generate.image-batch total=5 done=0 ok=0 failed=0 skipped=0 active=0 retries=2 timeout_ms=900000 log=/tmp/results.jsonl concurrency=2');
   });
 });
 

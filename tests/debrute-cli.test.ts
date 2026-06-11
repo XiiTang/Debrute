@@ -295,6 +295,7 @@ describe('debrute-cli', () => {
       expect(output[0]).toContain('description_markdown=');
       expect(output[0]).toContain('Official documentation:');
       expect(output[0]).toContain('debrute generate image <project> --input-json');
+      expect(output[0]).toContain('--timeout-ms');
       expect(output[0]).toContain('\\"model\\":\\"gpt-image-2\\"');
       expect(output[0]).not.toMatch(/curl\s+https:\/\/api\./i);
     } finally {
@@ -318,6 +319,7 @@ describe('debrute-cli', () => {
       expect(output[0]).toContain('description_markdown=');
       expect(output[0]).toContain('Official documentation:');
       expect(output[0]).toContain('debrute generate video <project> --input-json');
+      expect(output[0]).toContain('--timeout-ms');
       expect(output[0]).toContain('\\"prompt\\":');
       expect(output[0]).not.toContain('\\"content\\":[');
     } finally {
@@ -470,6 +472,8 @@ describe('debrute-cli', () => {
     expect(output[0]).toContain('command name=generate.image-batch scope=generation risk=generate requires=project-session writes=assets');
     expect(output[1]).toContain('debrute/1 ok cmd=help');
     expect(output[1]).toContain('command name=generate.image-batch scope=generation risk=generate requires=project-session writes=assets');
+    expect(output[1]).toContain('[--timeout-ms <ms>]');
+    expect(output[1]).toContain('[--overwrite-existing]');
   });
 
   it('rejects --json', async () => {

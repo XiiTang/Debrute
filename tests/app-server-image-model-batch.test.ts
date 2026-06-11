@@ -162,6 +162,58 @@ describe('DebruteAppServer image model batch', () => {
     }
   });
 
+  test('overwrites existing batch outputs through app-server input', async () => {
+    const projectRoot = await mkdtemp(join(tmpdir(), 'debrute-app-server-batch-overwrite-project-'));
+    const debruteHome = await mkdtemp(join(tmpdir(), 'debrute-app-server-batch-overwrite-home-'));
+    const logPath = join(projectRoot, 'batch-results.jsonl');
+    const configStore = new GlobalConfigStore({ debruteHome });
+    await configStore.saveImageModels({
+      imageModels: [{ debruteModelId: 'gpt-image-2', baseUrlOverride: 'https://api.openai.com/v1', requestModelIdOverride: 'gpt-image-2' }]
+    });
+    await configStore.saveSecrets({
+      llmProviderApiKeys: {},
+      imageModelApiKeys: { 'gpt-image-2': 'sk-image' },
+      videoModelApiKeys: {}
+    });
+    let executions = 0;
+    const server = new DebruteAppServer({
+      globalConfigStore: configStore,
+      imageModelFetch: async () => {
+        executions += 1;
+        return jsonResponse({ data: [{ b64_json: tinyPngBase64 }] });
+      }
+    });
+
+    try {
+      await mkdir(join(projectRoot, 'generated'), { recursive: true });
+      await writeFile(join(projectRoot, 'generated/existing.png'), Buffer.from('existing'));
+      await server.openProject(projectRoot, { initializeIfMissing: true, createDefaultCanvas: false });
+
+      const summary = await server.runImageModelBatch({
+        source: {
+          kind: 'requests',
+          requests: [{
+            model: 'gpt-image-2',
+            arguments: { prompt: 'overwrite', output_path: 'generated/existing.png' },
+            outputPath: 'generated/existing.png'
+          }]
+        },
+        concurrency: 1,
+        retries: 0,
+        timeoutMs: 900000,
+        overwriteExisting: true,
+        logPath
+      });
+
+      expect(executions).toBe(1);
+      expect(summary).toMatchObject({ okCount: 1, skippedCount: 0, failedCount: 0 });
+    } finally {
+      server.close();
+      await rm(projectRoot, { recursive: true, force: true });
+      await rm(debruteHome, { recursive: true, force: true });
+    }
+  });
+
   test('does not read image model configuration when every batch output is skipped', async () => {
     const projectRoot = await mkdtemp(join(tmpdir(), 'debrute-app-server-batch-skip-config-project-'));
     const logPath = join(projectRoot, 'batch-results.jsonl');

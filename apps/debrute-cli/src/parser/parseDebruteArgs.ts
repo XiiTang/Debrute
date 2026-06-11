@@ -87,15 +87,16 @@ const ALLOWED_OPTIONS: Record<DebruteCliCommand, Set<string>> = {
   'canvas.reorder': new Set(),
   'canvas.repair-index': new Set(),
   'generated-asset.lookup': new Set(['path']),
-  'generate.image': new Set(['input-json']),
-  'generate.image-batch': new Set(['manifest', 'input-jsonl', 'log', 'summary', 'concurrency', 'retries', 'timeout-ms']),
-  'generate.video': new Set(['input-json']),
+  'generate.image': new Set(['input-json', 'timeout-ms']),
+  'generate.image-batch': new Set(['manifest', 'input-jsonl', 'log', 'summary', 'concurrency', 'retries', 'timeout-ms', 'overwrite-existing']),
+  'generate.video': new Set(['input-json', 'timeout-ms']),
   commands: new Set(),
   help: new Set()
 };
 
 const BOOLEAN_OPTIONS: Partial<Record<DebruteCliCommand, Set<string>>> = {
-  'skills.sync': new Set(['force'])
+  'skills.sync': new Set(['force']),
+  'generate.image-batch': new Set(['overwrite-existing'])
 };
 
 const PROJECT_COMMANDS = new Set<DebruteCliCommand>([

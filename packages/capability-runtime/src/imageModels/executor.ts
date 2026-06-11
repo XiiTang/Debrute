@@ -3,7 +3,6 @@ import { basename, extname } from 'node:path';
 import { readProjectFileBytes, writeProjectFile } from '@debrute/project-core';
 import type { ImageModelsConfig, SecretsConfig } from '../config.js';
 import {
-  DEFAULT_REQUEST_TIMEOUT_MS,
   fetchWithRequestTimeout,
   readResponseArrayBufferWithTimeout as readResponseArrayBufferBodyWithTimeout,
   readResponseTextWithTimeout as readResponseTextBodyWithTimeout
@@ -110,6 +109,7 @@ type ModelImageResult = ModelImageSuccess | ImageRequestError;
 const DEFAULT_WAN_POLL_ATTEMPTS = 60;
 const DEFAULT_VYDRA_POLL_ATTEMPTS = 60;
 const DEFAULT_POLL_INTERVAL_MS = 2_000;
+const DEFAULT_IMAGE_REQUEST_TIMEOUT_MS = 600_000;
 const PNG_SIGNATURE = Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]);
 const JPEG_SIGNATURE = Buffer.from([0xff, 0xd8, 0xff]);
 const CATALOG_IMAGE_INPUT_FIELDS = [...new Set(createImageModelCatalog().listAll().flatMap(imageInputFieldsForCatalogEntry))];
@@ -162,7 +162,7 @@ export async function executeImageModelRequest(input: ExecuteImageModelRequestIn
     modelRun: { responses: [] },
     logs,
     pollIntervalMs: input.pollIntervalMs ?? DEFAULT_POLL_INTERVAL_MS,
-    requestTimeoutMs: input.requestTimeoutMs ?? input.input.timeoutMs ?? DEFAULT_REQUEST_TIMEOUT_MS,
+    requestTimeoutMs: input.requestTimeoutMs ?? input.input.timeoutMs ?? DEFAULT_IMAGE_REQUEST_TIMEOUT_MS,
     wanPollMaxAttempts: input.wanPollMaxAttempts ?? DEFAULT_WAN_POLL_ATTEMPTS,
     vydraPollMaxAttempts: input.vydraPollMaxAttempts ?? DEFAULT_VYDRA_POLL_ATTEMPTS,
     ...(input.signal ? { signal: input.signal } : {})
@@ -648,7 +648,12 @@ async function storeImagePayload(
   const projectRelativePath = outputPath && index === 0
     ? outputPath
     : `${outputDirectory.replace(/\/$/, '')}/${artifactId}.${extension}`;
-  const normalizedPath = await writeProjectFile(state.projectRoot, projectRelativePath, payload.data);
+  const normalizedPath = await writeProjectFile(
+    state.projectRoot,
+    projectRelativePath,
+    payload.data,
+    state.signal ? { signal: state.signal } : undefined
+  );
   const [width, height] = detectDimensions(Buffer.from(payload.data), payload.mimeType);
   await state.recordGeneratedAsset?.({
     projectRelativePath: normalizedPath,
@@ -684,10 +689,13 @@ async function resolveImageInputArguments(
       continue;
     }
     const values = imageInputValuesForField(next[field], entry, field);
-    const inputs = isGptImage2Model(entry.debruteModelId)
+    if (entry.debruteModelId === 'wan2.7-image' && field === 'image' && values.length > 9) {
+      throw new Error('wan2.7-image supports at most 9 reference images.');
+    }
+    const resolvedInputs = isGptImage2Model(entry.debruteModelId)
       ? await resolveGptImage2ImageInputs(values, projectRoot, entry, field)
       : await resolveImageInputs(values, projectRoot, entry, field);
-    next[field] = imageInputFieldAcceptsMultiple(entry, field) ? inputs : inputs[0];
+    next[field] = imageInputFieldAcceptsMultiple(entry, field) ? resolvedInputs : resolvedInputs[0];
   }
   if (isGemini31ImageModel(entry.debruteModelId) && next.contents !== undefined) {
     next.contents = await normalizeGeminiContents(next.contents, projectRoot);
@@ -1179,6 +1187,9 @@ function detectMimeType(content: Buffer, sourceName: string, headers?: Headers):
   if (content.subarray(0, 4).toString('ascii') === 'RIFF' && content.subarray(8, 12).toString('ascii') === 'WEBP') {
     return 'image/webp';
   }
+  if (content.subarray(0, 2).toString('ascii') === 'BM') {
+    return 'image/bmp';
+  }
   return 'application/octet-stream';
 }
 
@@ -1195,6 +1206,9 @@ function mimeTypeFromPath(path: string): string {
   }
   if (extension === '.webp') {
     return 'image/webp';
+  }
+  if (extension === '.bmp') {
+    return 'image/bmp';
   }
   return 'application/octet-stream';
 }
@@ -1245,6 +1259,9 @@ function extensionForMimeType(mimeType: string): string {
   }
   if (mimeType === 'image/png') {
     return 'png';
+  }
+  if (mimeType === 'image/bmp') {
+    return 'bmp';
   }
   return 'bin';
 }
