@@ -13,6 +13,8 @@ export interface CanvasCardBarProps {
 }
 
 const DRAG_DATA_TYPE = 'application/x-debrute-canvas-id';
+const MENU_WIDTH_PX = 176;
+const MENU_VIEWPORT_PADDING_PX = 8;
 
 export function CanvasCardBar({
   canvasOrder,
@@ -30,11 +32,6 @@ export function CanvasCardBar({
           <div
             key={canvasId}
             className="canvas-card-wrap"
-            draggable
-            onDragStart={(event) => {
-              event.dataTransfer.setData(DRAG_DATA_TYPE, canvasId);
-              event.dataTransfer.effectAllowed = 'move';
-            }}
             onDragOver={(event) => {
               event.preventDefault();
               event.dataTransfer.dropEffect = 'move';
@@ -55,18 +52,63 @@ export function CanvasCardBar({
               type="button"
               className="canvas-card"
               aria-pressed={canvasId === activeCanvasId}
+              draggable
+              onDragStart={(event) => {
+                event.dataTransfer.setData(DRAG_DATA_TYPE, canvasId);
+                event.dataTransfer.effectAllowed = 'move';
+              }}
               onClick={() => onActiveCanvasChange(canvasId)}
             >
               {canvasId}
             </button>
-            <details className="canvas-card-menu-details">
+            <details className="canvas-card-menu-details" onToggle={(event) => positionCanvasCardMenu(event.currentTarget)}>
               <summary aria-label="Canvas actions" className="canvas-card-menu-button" role="button">
                 <MoreHorizontal size={14} />
               </summary>
               <div className="canvas-card-menu" role="menu">
-                <button type="button" role="menuitem" onClick={() => { void onCreateCanvas(); }}>New Canvas</button>
-                <button type="button" role="menuitem" onClick={() => renameCanvas(canvasId, onRenameCanvas)}>Rename</button>
-                <button type="button" role="menuitem" onClick={() => deleteCanvas(canvasId, onDeleteCanvas)}>Delete</button>
+                <button
+                  type="button"
+                  role="menuitem"
+                  onClick={(event) => {
+                    closeCanvasCardMenu(event.currentTarget);
+                    void onCreateCanvas();
+                  }}
+                >
+                  New Canvas
+                </button>
+                <form
+                  className="canvas-card-rename-form"
+                  onSubmit={(event) => submitRenameCanvas(event, canvasId, onRenameCanvas)}
+                >
+                  <input
+                    aria-label={`Rename ${canvasId}`}
+                    name="nextCanvasId"
+                    defaultValue={canvasId}
+                    autoComplete="off"
+                    spellCheck={false}
+                  />
+                  <button type="submit" role="menuitem">Rename</button>
+                </form>
+                <button
+                  type="button"
+                  role="menuitem"
+                  data-canvas-delete-request
+                  onClick={(event) => requestDeleteCanvas(event.currentTarget)}
+                >
+                  Delete
+                </button>
+                <button
+                  type="button"
+                  role="menuitem"
+                  data-canvas-delete-confirm
+                  hidden
+                  onClick={(event) => {
+                    closeCanvasCardMenu(event.currentTarget);
+                    void onDeleteCanvas({ canvasId });
+                  }}
+                >
+                  Confirm Delete
+                </button>
               </div>
             </details>
           </div>
@@ -79,15 +121,59 @@ export function CanvasCardBar({
   );
 }
 
-function renameCanvas(canvasId: string, onRenameCanvas: CanvasCardBarProps['onRenameCanvas']): void {
-  const nextCanvasId = globalThis.prompt?.('Rename canvas', canvasId)?.trim();
+function submitRenameCanvas(
+  event: React.FormEvent<HTMLFormElement>,
+  canvasId: string,
+  onRenameCanvas: CanvasCardBarProps['onRenameCanvas']
+): void {
+  event.preventDefault();
+  const control = event.currentTarget.elements.namedItem('nextCanvasId') as { value?: unknown } | null;
+  const nextCanvasId = typeof control?.value === 'string' ? control.value.trim() : '';
   if (nextCanvasId && nextCanvasId !== canvasId) {
+    closeCanvasCardMenu(event.currentTarget);
     void onRenameCanvas({ canvasId, nextCanvasId });
   }
 }
 
-function deleteCanvas(canvasId: string, onDeleteCanvas: CanvasCardBarProps['onDeleteCanvas']): void {
-  if (globalThis.confirm?.(`Delete canvas "${canvasId}"?`) === true) {
-    void onDeleteCanvas({ canvasId });
+function requestDeleteCanvas(button: HTMLButtonElement): void {
+  const menu = button.closest('.canvas-card-menu');
+  const confirmButton = menu?.querySelector<HTMLButtonElement>('[data-canvas-delete-confirm]');
+  if (!confirmButton) {
+    return;
   }
+  button.hidden = true;
+  confirmButton.hidden = false;
+  confirmButton.focus();
+}
+
+function closeCanvasCardMenu(element: Element): void {
+  element.closest('details')?.removeAttribute('open');
+}
+
+function positionCanvasCardMenu(details: HTMLDetailsElement): void {
+  if (!details.open) {
+    return;
+  }
+  const summary = details.querySelector('summary');
+  if (!summary) {
+    return;
+  }
+  const rect = summary.getBoundingClientRect();
+  const viewportWidth = globalThis.window?.innerWidth ?? 1280;
+  const viewportHeight = globalThis.window?.innerHeight ?? 720;
+  const left = Math.round(clamp(
+    rect.right - MENU_WIDTH_PX,
+    MENU_VIEWPORT_PADDING_PX,
+    viewportWidth - MENU_WIDTH_PX - MENU_VIEWPORT_PADDING_PX
+  ));
+  const bottom = Math.round(Math.max(
+    MENU_VIEWPORT_PADDING_PX,
+    viewportHeight - rect.top + 6
+  ));
+  details.style.setProperty('--canvas-card-menu-left', `${left}px`);
+  details.style.setProperty('--canvas-card-menu-bottom', `${bottom}px`);
+}
+
+function clamp(value: number, min: number, max: number): number {
+  return Math.min(max, Math.max(min, value));
 }

@@ -4,9 +4,30 @@ import { CanvasCardBar } from './CanvasCardBar';
 
 interface ButtonProps {
   role?: string;
-  onClick(): void;
+  onClick(event?: { currentTarget: { closest(selector: string): { removeAttribute(name: string): void } | null } }): void;
   'aria-pressed'?: boolean;
+  hidden?: boolean;
   children?: React.ReactNode;
+}
+
+interface FormProps {
+  className?: string;
+  onSubmit(event: {
+    preventDefault(): void;
+    currentTarget: {
+      elements: {
+        namedItem(name: string): { value?: string } | null;
+      };
+      closest(selector: string): { removeAttribute(name: string): void } | null;
+    };
+  }): void;
+  children?: React.ReactNode;
+}
+
+interface InputProps {
+  name?: string;
+  defaultValue?: string;
+  'aria-label'?: string;
 }
 
 describe('CanvasCardBar', () => {
@@ -32,12 +53,14 @@ describe('CanvasCardBar', () => {
     expect(onActiveCanvasChange).toHaveBeenCalledWith('storyboard');
   });
 
-  it('renders canvas menu actions for new rename and delete', () => {
+  it('submits canvas menu actions without browser prompt or confirm dialogs', () => {
     const onCreateCanvas = vi.fn(async () => undefined);
     const onRenameCanvas = vi.fn(async () => undefined);
     const onDeleteCanvas = vi.fn(async () => undefined);
-    vi.stubGlobal('prompt', vi.fn(() => 'renamed'));
-    vi.stubGlobal('confirm', vi.fn(() => true));
+    const prompt = vi.fn(() => 'prompted');
+    const confirm = vi.fn(() => true);
+    vi.stubGlobal('prompt', prompt);
+    vi.stubGlobal('confirm', confirm);
     const element = CanvasCardBar({
       canvasOrder: ['canvas-1'],
       activeCanvasId: 'canvas-1',
@@ -48,13 +71,42 @@ describe('CanvasCardBar', () => {
       onReorderCanvases: async () => undefined
     });
 
-    menuItemByText(element, 'New Canvas').props.onClick();
-    menuItemByText(element, 'Rename').props.onClick();
-    menuItemByText(element, 'Delete').props.onClick();
+    menuItemByText(element, 'New Canvas').props.onClick(clickEvent());
+    renameForm(element).props.onSubmit({
+      preventDefault: vi.fn(),
+      currentTarget: {
+        elements: {
+          namedItem: () => ({ value: 'renamed' })
+        },
+        closest: () => ({ removeAttribute: vi.fn() })
+      }
+    });
+    menuItemByText(element, 'Confirm Delete').props.onClick(clickEvent());
 
     expect(onCreateCanvas).toHaveBeenCalled();
     expect(onRenameCanvas).toHaveBeenCalledWith({ canvasId: 'canvas-1', nextCanvasId: 'renamed' });
     expect(onDeleteCanvas).toHaveBeenCalledWith({ canvasId: 'canvas-1' });
+    expect(prompt).not.toHaveBeenCalled();
+    expect(confirm).not.toHaveBeenCalled();
+  });
+
+  it('renders inline rename and explicit delete confirmation controls in the menu', () => {
+    const element = CanvasCardBar({
+      canvasOrder: ['canvas-1'],
+      activeCanvasId: 'canvas-1',
+      onActiveCanvasChange: () => undefined,
+      onCreateCanvas: async () => undefined,
+      onRenameCanvas: async () => undefined,
+      onDeleteCanvas: async () => undefined,
+      onReorderCanvases: async () => undefined
+    });
+
+    expect(renameInput(element).props).toMatchObject({
+      name: 'nextCanvasId',
+      defaultValue: 'canvas-1',
+      'aria-label': 'Rename canvas-1'
+    });
+    expect(menuItemByText(element, 'Confirm Delete').props.hidden).toBe(true);
   });
 });
 
@@ -81,11 +133,41 @@ function menuItemByText(element: React.ReactElement, text: string): React.ReactE
   return item as React.ReactElement<ButtonProps>;
 }
 
-function elements(node: React.ReactNode): Array<React.ReactElement<{ children?: React.ReactNode; role?: unknown }>> {
+function renameForm(element: React.ReactElement): React.ReactElement<FormProps> {
+  const form = elements(element).find((candidate) => (
+    candidate.type === 'form'
+    && candidate.props.className === 'canvas-card-rename-form'
+  ));
+  if (!form) {
+    throw new Error('Expected rename form');
+  }
+  return form as React.ReactElement<FormProps>;
+}
+
+function renameInput(element: React.ReactElement): React.ReactElement<InputProps> {
+  const input = elements(element).find((candidate) => (
+    candidate.type === 'input'
+    && (candidate.props as InputProps).name === 'nextCanvasId'
+  ));
+  if (!input) {
+    throw new Error('Expected rename input');
+  }
+  return input as React.ReactElement<InputProps>;
+}
+
+function clickEvent() {
+  return {
+    currentTarget: {
+      closest: () => ({ removeAttribute: vi.fn() })
+    }
+  };
+}
+
+function elements(node: React.ReactNode): Array<React.ReactElement<{ children?: React.ReactNode; role?: unknown; className?: string }>> {
   if (!React.isValidElement(node)) {
     return [];
   }
-  const element = node as React.ReactElement<{ children?: React.ReactNode; role?: unknown }>;
+  const element = node as React.ReactElement<{ children?: React.ReactNode; role?: unknown; className?: string }>;
   return [
     element,
     ...React.Children.toArray(element.props.children).flatMap(elements)

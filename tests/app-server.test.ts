@@ -1159,6 +1159,22 @@ describe('app-server', () => {
     }
   });
 
+  it('rejects Canvas Map publish for an unregistered Canvas JSON and YAML pair', async () => {
+    const projectRoot = await mkdtemp(join(tmpdir(), 'debrute-app-server-canvas-map-unregistered-pair-'));
+    const server = new DebruteAppServer();
+    try {
+      await server.openProject(projectRoot, { initializeIfMissing: true, createDefaultCanvas: true });
+      await writeFile(join(projectRoot, '.debrute/canvases/canvas-2.json'), JSON.stringify(emptyCanvasDocument('canvas-2'), null, 2), 'utf8');
+      await writeCanvasMap(projectRoot, 'canvas-2', 'paths: []\n');
+
+      await expect(server.publishCanvasMapForProject(projectRoot, { canvasId: 'canvas-2' }))
+        .rejects.toMatchObject({ code: 'canvas_map_canvas_missing' });
+    } finally {
+      server.close();
+      await rm(projectRoot, { recursive: true, force: true });
+    }
+  });
+
   it('marks still raster images as Canvas-previewable in node availability', async () => {
     const projectRoot = await mkdtemp(join(tmpdir(), 'debrute-app-server-image-previewability-'));
     const server = new DebruteAppServer({

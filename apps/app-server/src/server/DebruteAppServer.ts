@@ -201,7 +201,9 @@ export class DebruteAppServer {
       suppressInternalProjectPathEvent: (absolutePath, content) => this.suppressInternalProjectPathEvent(absolutePath, content)
     });
     this.canvasMapSessionService = new CanvasMapSessionService({
-      loadCanvases: (projectRoot) => this.canvasSessionService.loadCanvases(projectRoot),
+      loadCanvases: async (projectRoot) => (
+        await this.canvasRegistryService.orderedCanvases(projectRoot)
+      ).canvases,
       resolveCanvasNodeLayoutSize: (projectRoot, node) => this.resolveCanvasNodeLayoutSize(projectRoot, node),
       writeCanvasJson: (canvasPath, canvas) => this.canvasSessionService.writeCanvasJson(canvasPath, canvas),
       suppressInternalProjectPathEvent: (absolutePath, content) => this.suppressInternalProjectPathEvent(absolutePath, content),
