@@ -14,5 +14,8 @@ export function nextSnapshotFromAppServerEvent(
       projections: current.projections.map((projection) => projection.canvasId === event.projection.canvasId ? event.projection : projection)
     };
   }
+  if (event.type === 'canvas.feedback.changed') {
+    return current;
+  }
   return current;
 }

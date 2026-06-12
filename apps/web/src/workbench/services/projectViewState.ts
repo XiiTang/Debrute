@@ -1,0 +1,37 @@
+import type { FloatingPanelState } from '../shell/floatingPanels';
+
+export interface ProjectViewState {
+  activeCanvasId?: string;
+  floatingPanels?: FloatingPanelState;
+}
+
+export interface ProjectViewStateStorage {
+  getItem(key: string): string | null | undefined;
+  setItem(key: string, value: string): void;
+}
+
+export function projectViewStateStorageKey(projectId: string, clientId: string): string {
+  return `debrute:project-view:${encodeURIComponent(projectId)}:${encodeURIComponent(clientId)}`;
+}
+
+export function loadProjectViewState(input: {
+  storage: ProjectViewStateStorage | undefined;
+  projectId: string;
+  clientId: string;
+}): ProjectViewState {
+  const raw = input.storage?.getItem(projectViewStateStorageKey(input.projectId, input.clientId));
+  if (!raw) {
+    return {};
+  }
+  const parsed = JSON.parse(raw) as ProjectViewState;
+  return parsed && typeof parsed === 'object' && !Array.isArray(parsed) ? parsed : {};
+}
+
+export function saveProjectViewState(input: {
+  storage: ProjectViewStateStorage | undefined;
+  projectId: string;
+  clientId: string;
+  state: ProjectViewState;
+}): void {
+  input.storage?.setItem(projectViewStateStorageKey(input.projectId, input.clientId), JSON.stringify(input.state));
+}

@@ -17,9 +17,12 @@ import {
 } from './desktopRuntimeClient.js';
 import { createDebruteCliInstaller } from './debruteCliInstaller.js';
 import { registerDebruteCliShellIpc } from './debruteCliShell.js';
+import { loadDebruteProjectShellWindow, waitForDebruteShellUrl } from './desktopShellLoad.js';
 import { createElectronNativeShell } from './electronNativeShell.js';
 import { resolveDesktopIntegrationEnvPath } from './integrationEnv.js';
 import { createApplicationMenuController } from './menu/registerApplicationMenu.js';
+import { parseDesktopOpenIntent, syncNativeRecentProjects, type DesktopOpenIntent } from './nativeRecentProjects.js';
+import { runProjectWindowOpenOnce, selectProjectWindowOpenTarget } from './windowProjectRouting.js';
 
 const { app, BrowserWindow, dialog, ipcMain, Menu, shell } = electron;
 let hostedDaemon: DebruteDaemonHttpServer | undefined;
@@ -29,16 +32,29 @@ let hostedRuntimeStatePath: string | undefined;
 const projectWindowsByProjectId = new Map<string, Electron.BrowserWindow>();
 const projectIdsByWindowId = new Map<number, string>();
 const releaseProjectWindowByWindowId = new Map<number, () => void>();
+const pendingProjectWindowOpens = new Map<string, Promise<void>>();
+const pendingDesktopOpenIntents: DesktopOpenIntent[] = [];
+
+if (!app.requestSingleInstanceLock()) {
+  app.quit();
+}
 
 const applicationMenu = createApplicationMenuController({
   menu: Menu,
   readDesktopState: () => desktopStateStore().readDesktopState(),
   chooseProjectRoot,
-  openProject: async (projectRoot) => {
-    await openProjectFromShell(projectRoot);
+  newWindow: async () => {
+    await createWindow();
+  },
+  openProject: async (projectRoot, sourceWindow, options) => {
+    await openProjectFromShell(projectRoot, {
+      sourceWindow,
+      forceNewWindow: options.forceNewWindow
+    });
   },
   clearRecentProjectRoots: async () => {
-    await desktopStateStore().clearRecentProjectRoots();
+    const desktopState = await desktopStateStore().clearRecentProjectRoots();
+    syncDesktopProjectHistory(desktopState);
   }
 });
 const projectIconPath = join(__dirname, 'icon.png');
@@ -65,12 +81,26 @@ async function createWindow(initialUrl?: string, projectId?: string): Promise<El
   window.once('closed', () => {
     releaseProjectWindow(window.id);
   });
+  const urlToLoad = initialUrl ?? client.shellUrl();
   if (projectId) {
-    bindProjectWindow(window, projectId);
+    await loadDebruteProjectShellWindow(window, urlToLoad, () => {
+      bindProjectWindow(window, projectId);
+    });
+  } else {
+    await waitForDebruteShellUrl(urlToLoad);
+    await window.loadURL(urlToLoad);
   }
-  await window.loadURL(initialUrl ?? client.shellUrl());
   return window;
 }
+
+app.on('open-file', (event, projectRoot) => {
+  event.preventDefault();
+  void handleDesktopOpenIntent({ kind: 'open-project', projectRoot });
+});
+
+app.on('second-instance', (_event, argv) => {
+  void handleDesktopOpenIntent(parseDesktopOpenIntent(argv));
+});
 
 app.whenReady().then(async () => {
   if (process.platform === 'darwin') {
@@ -78,8 +108,15 @@ app.whenReady().then(async () => {
   }
   runtimeClient = await createDesktopRuntimeClient();
   registerShellIpc();
+  syncDesktopProjectHistory(await desktopStateStore().readDesktopState());
   await applicationMenu.refreshApplicationMenu();
-  await createWindow();
+  const initialIntent = parseDesktopOpenIntent(process.argv);
+  if (initialIntent) {
+    await handleDesktopOpenIntent(initialIntent);
+  } else if (pendingDesktopOpenIntents.length === 0) {
+    await createWindow();
+  }
+  await flushPendingDesktopOpenIntents();
 });
 
 app.on('window-all-closed', () => {
@@ -102,6 +139,18 @@ function registerShellIpc(): void {
   ipcMain.handle('debrute-shell:chooseProjectRoot', async (event) => (
     chooseProjectRoot(BrowserWindow.fromWebContents(event.sender) ?? undefined)
   ));
+  ipcMain.handle('debrute-shell:openProject', async (event, input: { forceNewWindow?: boolean } = {}) => {
+    const sourceWindow = BrowserWindow.fromWebContents(event.sender) ?? undefined;
+    const selectedRoot = await chooseProjectRoot(sourceWindow);
+    if (!selectedRoot) {
+      return { opened: false };
+    }
+    await openProjectFromShell(selectedRoot, {
+      sourceWindow,
+      forceNewWindow: input.forceNewWindow === true
+    });
+    return { opened: true };
+  });
   ipcMain.handle('debrute-shell:bindProjectWindowToProject', (event, input: { projectId: string }) => {
     const window = BrowserWindow.fromWebContents(event.sender);
     if (!window) {
@@ -132,17 +181,82 @@ async function chooseProjectRoot(parentWindow?: Electron.BrowserWindow): Promise
 
 async function rememberProjectRootAndRefreshMenu(projectRoot: string): Promise<DesktopState> {
   const desktopState = await desktopStateStore().rememberProjectRoot(projectRoot);
+  syncDesktopProjectHistory(desktopState);
   await applicationMenu.refreshApplicationMenu();
   return desktopState;
 }
 
-async function openProjectFromShell(projectRoot: string): Promise<void> {
+function syncDesktopProjectHistory(desktopState: DesktopState): void {
+  syncNativeRecentProjects(app, process.platform, process.execPath, desktopState.recentProjectRoots);
+}
+
+async function handleDesktopOpenIntent(intent: DesktopOpenIntent | undefined): Promise<void> {
+  if (!intent) {
+    return;
+  }
+  if (!runtimeClient) {
+    pendingDesktopOpenIntents.push(intent);
+    return;
+  }
+  if (intent.kind === 'new-window') {
+    await createWindow();
+    return;
+  }
+  await openProjectFromShell(intent.projectRoot, { forceNewWindow: false });
+}
+
+async function flushPendingDesktopOpenIntents(): Promise<void> {
+  while (pendingDesktopOpenIntents.length > 0) {
+    await handleDesktopOpenIntent(pendingDesktopOpenIntents.shift());
+  }
+}
+
+async function openProjectFromShell(
+  projectRoot: string,
+  options: { sourceWindow?: Electron.BrowserWindow; forceNewWindow?: boolean } = {}
+): Promise<void> {
   const opened = await requireRuntimeClient().openProject(projectRoot);
   await rememberProjectRootAndRefreshMenu(projectRoot);
-  const existingWindow = projectWindowsByProjectId.get(opened.projectId);
-  if (existingWindow && !existingWindow.isDestroyed()) {
-    existingWindow.focus();
+  await runProjectWindowOpenOnce({
+    projectId: opened.projectId,
+    pendingProjectOpens: pendingProjectWindowOpens,
+    open: () => openProjectInWindow(opened, options),
+    reusePending: () => {
+      projectWindowsByProjectId.get(opened.projectId)?.focus();
+    }
+  });
+}
+
+async function openProjectInWindow(
+  opened: { projectId: string; url: string },
+  options: { sourceWindow?: Electron.BrowserWindow; forceNewWindow?: boolean }
+): Promise<void> {
+  const liveWindowIds = new Set(BrowserWindow.getAllWindows().filter((window) => !window.isDestroyed()).map((window) => window.id));
+  const windowIdByProjectId = new Map(
+    [...projectWindowsByProjectId.entries()]
+      .filter(([, window]) => !window.isDestroyed())
+      .map(([projectId, window]) => [projectId, window.id])
+  );
+  const target = selectProjectWindowOpenTarget({
+    projectId: opened.projectId,
+    sourceWindowId: options.sourceWindow?.id,
+    forceNewWindow: options.forceNewWindow === true,
+    windowIdByProjectId,
+    liveWindowIds
+  });
+  if (target.kind === 'focus') {
+    BrowserWindow.fromId(target.windowId)?.focus();
     return;
+  }
+  if (target.kind === 'reuse') {
+    const window = BrowserWindow.fromId(target.windowId);
+    if (window && !window.isDestroyed()) {
+      await loadDebruteProjectShellWindow(window, opened.url, () => {
+        bindProjectWindow(window, opened.projectId);
+      });
+      window.focus();
+      return;
+    }
   }
   await createWindow(opened.url, opened.projectId);
 }

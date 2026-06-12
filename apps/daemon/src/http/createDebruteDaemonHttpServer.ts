@@ -25,7 +25,7 @@ import {
   type WorkbenchProjectTextFile
 } from '@debrute/app-protocol';
 import { projectFileRevision, resolveExistingProjectPath, type ProjectUploadImportEntry } from '@debrute/project-core';
-import { ProjectSessionRegistry, type ProjectSessionRecord } from './ProjectSessionRegistry.js';
+import { ProjectRevisionConflictError, ProjectSessionRegistry, type ProjectSessionRecord } from './ProjectSessionRegistry.js';
 import { writeRevisionedFileResponse } from './fileResponse.js';
 import { createNodeNativeShell, type DebruteNativeShell } from './nativeShell.js';
 import {
@@ -68,6 +68,8 @@ interface RequestContext {
 
 interface ProjectRequestContext extends RequestContext {
   appServer: DebruteAppServer;
+  session: ProjectSessionRecord;
+  sessions: ProjectSessionRegistry;
 }
 
 interface GlobalRuntimeRequestContext extends RequestContext {
@@ -180,7 +182,7 @@ export function createDebruteDaemonHttpServer(options: DebruteDaemonHttpServerOp
       response.end();
       return;
     }
-    if (requiresDaemonToken(url.pathname, request.method ?? 'GET') && !hasDaemonToken(request, url, token)) {
+    if (requiresDaemonToken(url.pathname) && !hasDaemonToken(request, url, token)) {
       writeError(response, 403, 'forbidden', 'Debrute daemon token is required for API requests.');
       return;
     }
@@ -203,14 +205,19 @@ export function createDebruteDaemonHttpServer(options: DebruteDaemonHttpServerOp
       writeJson(context.response, 200, { ok: true, runtime: currentPublicRuntime() });
       return true;
     }
-    if ((method === 'GET' || method === 'POST') && path === '/api/runtime') {
-      writeJson(context.response, 200, currentPublicRuntime());
+    if (path === '/api/runtime') {
+      if (method === 'GET') {
+        writeJson(context.response, 200, currentPublicRuntime());
+      } else {
+        writeError(context.response, 405, 'method_not_allowed', 'Unsupported runtime metadata method.');
+      }
       return true;
     }
     if (method === 'GET' && path === '/api/projects') {
       writeJson(context.response, 200, {
         projects: sessions.list().map((session) => ({
           projectId: session.projectId,
+          projectRevision: session.projectRevision,
           snapshot: snapshotForHttp(session.appServer.currentSnapshot() ?? session.snapshot, currentRuntime().daemonUrl, session.projectId, currentRuntime().token),
           clients: { liveCount: session.clients.size }
         }))
@@ -233,6 +240,7 @@ export function createDebruteDaemonHttpServer(options: DebruteDaemonHttpServerOp
       const session = await sessions.openProject(projectRoot);
       writeJson(context.response, 200, {
         projectId: session.projectId,
+        projectRevision: session.projectRevision,
         snapshot: snapshotForHttp(session.appServer.currentSnapshot() ?? session.snapshot, currentRuntime().daemonUrl, session.projectId, currentRuntime().token)
       });
       return true;
@@ -247,7 +255,7 @@ export function createDebruteDaemonHttpServer(options: DebruteDaemonHttpServerOp
         return true;
       }
       try {
-        await routeProjectApi({ ...context, appServer: session.appServer }, projectRoute, session);
+        await routeProjectApi({ ...context, appServer: session.appServer, session, sessions }, projectRoute, session);
       } finally {
         releaseRequest();
       }
@@ -285,6 +293,7 @@ export function createDebruteDaemonHttpServer(options: DebruteDaemonHttpServerOp
     if (method === 'GET' && tail === '') {
       writeJson(context.response, 200, {
         projectId: session.projectId,
+        projectRevision: session.projectRevision,
         snapshot: snapshotForHttp(context.appServer.getSnapshot(), currentRuntime().daemonUrl, session.projectId, currentRuntime().token)
       });
       return;
@@ -294,9 +303,13 @@ export function createDebruteDaemonHttpServer(options: DebruteDaemonHttpServerOp
       return;
     }
     if (method === 'POST' && tail === '/refresh') {
-      const snapshot = await context.appServer.refreshProject();
-      session.snapshot = snapshot;
-      writeJson(context.response, 200, snapshotForHttp(snapshot, currentRuntime().daemonUrl, session.projectId, currentRuntime().token));
+      const result = await context.sessions.runProjectOperation(session.projectId, async (record) => {
+        const snapshot = await record.appServer.refreshProject();
+        return {
+          snapshot: snapshotForHttp(snapshot, currentRuntime().daemonUrl, session.projectId, currentRuntime().token)
+        };
+      });
+      writeJson(context.response, 200, result);
       return;
     }
     if (tail.startsWith('/files/text/')) {
@@ -370,7 +383,11 @@ export function createDebruteDaemonHttpServer(options: DebruteDaemonHttpServerOp
         return;
       }
       if (method === 'PATCH') {
-        writeJson(context.response, 200, await context.appServer.updateCanvasFeedbackEntry(await readJsonBody(context.request)));
+        const body = await readJsonBody<Record<string, unknown>>(context.request);
+        const result = await runRevisionedMutation(context, baseRevisionField(body), async () => ({
+          feedback: await context.appServer.updateCanvasFeedbackEntry(body as never)
+        }));
+        writeJson(context.response, 200, result);
         return;
       }
     }
@@ -420,15 +437,37 @@ async function handleTextFileRoute(context: ProjectRequestContext, projectRelati
     return;
   }
   if (context.request.method === 'PUT') {
-    const body = await readJsonBody<{ content?: unknown }>(context.request);
+    const body = await readJsonBody<Record<string, unknown>>(context.request);
     if (typeof body.content !== 'string') {
       writeError(context.response, 400, 'invalid_input', 'File content must be a string.');
       return;
     }
-    writeJson(context.response, 200, textFileForHttp(await daemonAppServer(context).writeProjectTextFile(projectRelativePath, body.content)));
+    const result = await runRevisionedMutation(context, baseRevisionField(body), async () => ({
+      file: textFileForHttp(await daemonAppServer(context).writeProjectTextFile(projectRelativePath, body.content as string))
+    }));
+    writeJson(context.response, 200, result);
     return;
   }
   writeError(context.response, 405, 'method_not_allowed', 'Unsupported text file method.');
+}
+
+async function runRevisionedMutation<T extends Record<string, unknown>>(
+  context: ProjectRequestContext,
+  baseRevision: number,
+  mutate: () => Promise<T>
+): Promise<T & { projectId: string; projectRevision: number }> {
+  try {
+    return await context.sessions.runRevisionedMutation(context.session.projectId, baseRevision, async () => mutate());
+  } catch (error) {
+    if (error instanceof ProjectRevisionConflictError) {
+      throw new DebruteDaemonHttpError(409, error.code, error.message, {
+        projectId: error.projectId,
+        projectRevision: error.projectRevision,
+        snapshot: snapshotForHttp(error.snapshot, context.runtime.daemonUrl, context.session.projectId, context.runtime.token)
+      });
+    }
+    throw error;
+  }
 }
 
 async function handleRawFileRoute(context: ProjectRequestContext, projectRelativePath: string): Promise<void> {
@@ -465,15 +504,22 @@ async function handleCreateFileRoute(context: ProjectRequestContext, session: Pr
     writeError(context.response, 405, 'method_not_allowed', 'Unsupported file collection method.');
     return;
   }
-  const body = await readJsonBody<{ kind?: unknown; parentProjectRelativePath?: unknown; name?: unknown }>(context.request);
+  const body = await readJsonBody<Record<string, unknown>>(context.request);
   const input = {
     parentProjectRelativePath: stringField(body.parentProjectRelativePath, 'parentProjectRelativePath'),
     name: stringField(body.name, 'name')
   };
-  const result = body.kind === 'directory'
-    ? await daemonAppServer(context).createProjectDirectory(input)
-    : await daemonAppServer(context).createProjectFile(input);
-  writeJson(context.response, 200, withHttpSnapshot(result, context.runtime.daemonUrl, session, context.runtime.token));
+  const result = await runRevisionedMutation(context, baseRevisionField(body), async () => (
+    withHttpSnapshot(
+      body.kind === 'directory'
+        ? await daemonAppServer(context).createProjectDirectory(input)
+        : await daemonAppServer(context).createProjectFile(input),
+      context.runtime.daemonUrl,
+      session,
+      context.runtime.token
+    )
+  ));
+  writeJson(context.response, 200, result);
 }
 
 async function handleExternalLocalImportRoute(context: ProjectRequestContext, session: ProjectSessionRecord): Promise<void> {
@@ -483,11 +529,14 @@ async function handleExternalLocalImportRoute(context: ProjectRequestContext, se
   }
   const body = await readJsonBody<Record<string, unknown>>(context.request);
   const sources = stringArrayField(body.sources, 'sources');
-  writeJson(context.response, 200, withHttpSnapshot(await daemonAppServer(context).importExternalLocalProjectPaths({
-    sources,
-    targetDirectoryProjectRelativePath: stringField(body.targetDirectoryProjectRelativePath, 'targetDirectoryProjectRelativePath'),
-    ...(typeof body.overwrite === 'boolean' ? { overwrite: body.overwrite } : {})
-  }), context.runtime.daemonUrl, session, context.runtime.token));
+  const result = await runRevisionedMutation(context, baseRevisionField(body), async () => (
+    withHttpSnapshot(await daemonAppServer(context).importExternalLocalProjectPaths({
+      sources,
+      targetDirectoryProjectRelativePath: stringField(body.targetDirectoryProjectRelativePath, 'targetDirectoryProjectRelativePath'),
+      ...(typeof body.overwrite === 'boolean' ? { overwrite: body.overwrite } : {})
+    }), context.runtime.daemonUrl, session, context.runtime.token)
+  ));
+  writeJson(context.response, 200, result);
 }
 
 async function handleExternalUploadImportRoute(context: ProjectRequestContext, session: ProjectSessionRecord): Promise<void> {
@@ -498,11 +547,14 @@ async function handleExternalUploadImportRoute(context: ProjectRequestContext, s
   const parts = await readMultipartUploadParts(context.request);
   try {
     const plan = daemonUploadImportPlan(parts.fields.get('plan'));
-    writeJson(context.response, 200, withHttpSnapshot(await daemonAppServer(context).importExternalUploadProjectEntries({
-      entries: uploadImportEntriesFromMultipartParts(plan, parts.files),
-      targetDirectoryProjectRelativePath: plan.targetDirectoryProjectRelativePath,
-      ...(plan.overwrite === true ? { overwrite: true } : {})
-    }), context.runtime.daemonUrl, session, context.runtime.token));
+    const result = await runRevisionedMutation(context, plan.baseRevision, async () => (
+      withHttpSnapshot(await daemonAppServer(context).importExternalUploadProjectEntries({
+        entries: uploadImportEntriesFromMultipartParts(plan, parts.files),
+        targetDirectoryProjectRelativePath: plan.targetDirectoryProjectRelativePath,
+        ...(plan.overwrite === true ? { overwrite: true } : {})
+      }), context.runtime.daemonUrl, session, context.runtime.token)
+    ));
+    writeJson(context.response, 200, result);
   } finally {
     await parts.cleanup();
   }
@@ -577,12 +629,15 @@ async function handleNativeProjectPathBatchRoute(
     return;
   }
   if (operation === 'trash') {
-    writeJson(context.response, 200, withHttpSnapshot(await trashProjectPathsWithNativeShell({
-      projectRoot: session.projectRoot,
-      entries,
-      nativeShell,
-      refreshProject: () => daemonAppServer(context).refreshProject()
-    }), context.runtime.daemonUrl, session, context.runtime.token));
+    const result = await runRevisionedMutation(context, baseRevisionField(body), async () => (
+      withHttpSnapshot(await trashProjectPathsWithNativeShell({
+        projectRoot: session.projectRoot,
+        entries,
+        nativeShell,
+        refreshProject: () => daemonAppServer(context).refreshProject()
+      }), context.runtime.daemonUrl, session, context.runtime.token)
+    ));
+    writeJson(context.response, 200, result);
     return;
   }
   writeError(context.response, 404, 'not_found', `Unknown native project path batch operation: ${operation}`);
@@ -600,24 +655,33 @@ async function handleProjectPathBatchRoute(
   const body = await readJsonBody<Record<string, unknown>>(context.request);
   const server = daemonAppServer(context);
   if (operation === 'copy') {
-    writeJson(context.response, 200, withHttpSnapshot(await server.copyProjectPaths({
-      entries: projectPathEntriesField(body.entries),
-      targetDirectoryProjectRelativePath: stringField(body.targetDirectoryProjectRelativePath, 'targetDirectoryProjectRelativePath')
-    }), context.runtime.daemonUrl, session, context.runtime.token));
+    const result = await runRevisionedMutation(context, baseRevisionField(body), async () => (
+      withHttpSnapshot(await server.copyProjectPaths({
+        entries: projectPathEntriesField(body.entries),
+        targetDirectoryProjectRelativePath: stringField(body.targetDirectoryProjectRelativePath, 'targetDirectoryProjectRelativePath')
+      }), context.runtime.daemonUrl, session, context.runtime.token)
+    ));
+    writeJson(context.response, 200, result);
     return;
   }
   if (operation === 'move') {
-    writeJson(context.response, 200, withHttpSnapshot(await server.moveProjectPaths({
-      entries: projectPathEntriesField(body.entries),
-      targetDirectoryProjectRelativePath: stringField(body.targetDirectoryProjectRelativePath, 'targetDirectoryProjectRelativePath'),
-      ...(typeof body.overwrite === 'boolean' ? { overwrite: body.overwrite } : {})
-    }), context.runtime.daemonUrl, session, context.runtime.token));
+    const result = await runRevisionedMutation(context, baseRevisionField(body), async () => (
+      withHttpSnapshot(await server.moveProjectPaths({
+        entries: projectPathEntriesField(body.entries),
+        targetDirectoryProjectRelativePath: stringField(body.targetDirectoryProjectRelativePath, 'targetDirectoryProjectRelativePath'),
+        ...(typeof body.overwrite === 'boolean' ? { overwrite: body.overwrite } : {})
+      }), context.runtime.daemonUrl, session, context.runtime.token)
+    ));
+    writeJson(context.response, 200, result);
     return;
   }
   if (operation === 'delete-permanently') {
-    writeJson(context.response, 200, withHttpSnapshot(await server.deleteProjectPathsPermanently({
-      entries: projectPathEntriesField(body.entries)
-    }), context.runtime.daemonUrl, session, context.runtime.token));
+    const result = await runRevisionedMutation(context, baseRevisionField(body), async () => (
+      withHttpSnapshot(await server.deleteProjectPathsPermanently({
+        entries: projectPathEntriesField(body.entries)
+      }), context.runtime.daemonUrl, session, context.runtime.token)
+    ));
+    writeJson(context.response, 200, result);
     return;
   }
   writeError(context.response, 404, 'not_found', `Unknown project path batch operation: ${operation}`);
@@ -629,10 +693,13 @@ async function handleProjectPathRoute(context: ProjectRequestContext, path: stri
     const body = await readJsonBody<Record<string, unknown>>(context.request);
     const operation = stringField(body.operation, 'operation');
     if (operation === 'rename') {
-      writeJson(context.response, 200, withHttpSnapshot(await server.renameProjectPath({
-        projectRelativePath: path,
-        name: stringField(body.name, 'name')
-      }), context.runtime.daemonUrl, session, context.runtime.token));
+      const result = await runRevisionedMutation(context, baseRevisionField(body), async () => (
+        withHttpSnapshot(await server.renameProjectPath({
+          projectRelativePath: path,
+          name: stringField(body.name, 'name')
+        }), context.runtime.daemonUrl, session, context.runtime.token)
+      ));
+      writeJson(context.response, 200, result);
       return;
     }
   }
@@ -648,7 +715,11 @@ async function handleCanvasRoute(
   const path = context.url.pathname;
   if (tail === '/canvases') {
     if (context.request.method === 'POST') {
-      writeJson(context.response, 200, withHttpSnapshot(await server.createCanvas(), context.runtime.daemonUrl, session, context.runtime.token));
+      const body = await readJsonBody<Record<string, unknown>>(context.request);
+      const result = await runRevisionedMutation(context, baseRevisionField(body), async () => (
+        withHttpSnapshot(await server.createCanvas(), context.runtime.daemonUrl, session, context.runtime.token)
+      ));
+      writeJson(context.response, 200, result);
       return;
     }
     writeError(context.response, 405, 'method_not_allowed', 'Unsupported Canvas collection method.');
@@ -657,9 +728,12 @@ async function handleCanvasRoute(
   if (tail === '/canvases/index') {
     if (context.request.method === 'PUT') {
       const body = await readJsonBody<Record<string, unknown>>(context.request);
-      writeJson(context.response, 200, withHttpSnapshot(await server.reorderCanvases({
-        canvasOrder: stringArrayField(body.canvasOrder, 'canvasOrder')
-      }), context.runtime.daemonUrl, session, context.runtime.token));
+      const result = await runRevisionedMutation(context, baseRevisionField(body), async () => (
+        withHttpSnapshot(await server.reorderCanvases({
+          canvasOrder: stringArrayField(body.canvasOrder, 'canvasOrder')
+        }), context.runtime.daemonUrl, session, context.runtime.token)
+      ));
+      writeJson(context.response, 200, result);
       return;
     }
     writeError(context.response, 405, 'method_not_allowed', 'Unsupported Canvas registry method.');
@@ -667,7 +741,11 @@ async function handleCanvasRoute(
   }
   if (tail === '/canvases/index/repair') {
     if (context.request.method === 'POST') {
-      writeJson(context.response, 200, withHttpSnapshot(await server.repairCanvasIndex(), context.runtime.daemonUrl, session, context.runtime.token));
+      const body = await readJsonBody<Record<string, unknown>>(context.request);
+      const result = await runRevisionedMutation(context, baseRevisionField(body), async () => (
+        withHttpSnapshot(await server.repairCanvasIndex(), context.runtime.daemonUrl, session, context.runtime.token)
+      ));
+      writeJson(context.response, 200, result);
       return;
     }
     writeError(context.response, 405, 'method_not_allowed', 'Unsupported Canvas registry repair method.');
@@ -678,37 +756,64 @@ async function handleCanvasRoute(
     const body = await readJsonBody<Record<string, unknown>>(context.request);
     const operation = stringField(body.operation, 'operation');
     if (operation === 'rename') {
-      writeJson(context.response, 200, withHttpSnapshot(await server.renameCanvas({
-        canvasId,
-        nextCanvasId: stringField(body.nextCanvasId, 'nextCanvasId')
-      }), context.runtime.daemonUrl, session, context.runtime.token));
+      const result = await runRevisionedMutation(context, baseRevisionField(body), async () => (
+        withHttpSnapshot(await server.renameCanvas({
+          canvasId,
+          nextCanvasId: stringField(body.nextCanvasId, 'nextCanvasId')
+        }), context.runtime.daemonUrl, session, context.runtime.token)
+      ));
+      writeJson(context.response, 200, result);
       return;
     }
   }
   if (tail === `/canvases/${canvasId}` && context.request.method === 'DELETE') {
-    writeJson(context.response, 200, withHttpSnapshot(await server.deleteCanvas({ canvasId }), context.runtime.daemonUrl, session, context.runtime.token));
+    const body = await readJsonBody<Record<string, unknown>>(context.request);
+    const result = await runRevisionedMutation(context, baseRevisionField(body), async () => (
+      withHttpSnapshot(await server.deleteCanvas({ canvasId }), context.runtime.daemonUrl, session, context.runtime.token)
+    ));
+    writeJson(context.response, 200, result);
     return;
   }
   if (path.endsWith('/canvas-map/project-paths') && context.request.method === 'POST') {
-    const body = await readJsonBody<{ projectRelativePath?: unknown }>(context.request);
-    writeJson(context.response, 200, withHttpSnapshot(await server.addProjectPathToCanvasMap({
-      canvasId,
-      projectRelativePath: stringField(body.projectRelativePath, 'projectRelativePath')
-    }), context.runtime.daemonUrl, session, context.runtime.token));
+    const body = await readJsonBody<Record<string, unknown>>(context.request);
+    const result = await runRevisionedMutation(context, baseRevisionField(body), async () => (
+      withHttpSnapshot(await server.addProjectPathToCanvasMap({
+        canvasId,
+        projectRelativePath: stringField(body.projectRelativePath, 'projectRelativePath')
+      }), context.runtime.daemonUrl, session, context.runtime.token)
+    ));
+    writeJson(context.response, 200, result);
     return;
   }
   if (path.endsWith('/node-layouts') && context.request.method === 'PATCH') {
-    writeJson(context.response, 200, await server.updateCanvasNodeLayouts({
-      canvasId,
-      ...await readJsonBody<object>(context.request)
-    }));
+    const body = await readJsonBody<Record<string, unknown>>(context.request);
+    const result = await runRevisionedMutation(context, baseRevisionField(body), async () => {
+      const updated = await server.updateCanvasNodeLayouts({
+        canvasId,
+        nodeLayouts: body.nodeLayouts as never
+      });
+      return {
+        canvas: updated.canvas,
+        projection: projectionForHttp(updated.projection, context.runtime.daemonUrl, session.projectId, context.runtime.token)
+      };
+    });
+    writeJson(context.response, 200, result);
     return;
   }
   if (path.endsWith('/node-layers') && context.request.method === 'PATCH') {
-    writeJson(context.response, 200, await server.updateCanvasNodeLayers({
-      canvasId,
-      ...await readJsonBody<object>(context.request)
-    }));
+    const body = await readJsonBody<Record<string, unknown>>(context.request);
+    const result = await runRevisionedMutation(context, baseRevisionField(body), async () => {
+      const updated = await server.updateCanvasNodeLayers({
+        canvasId,
+        nodeLayers: body.nodeLayers as never,
+        nodeProjectRelativePathsTopFirst: body.nodeProjectRelativePathsTopFirst as never
+      });
+      return {
+        canvas: updated.canvas,
+        projection: projectionForHttp(updated.projection, context.runtime.daemonUrl, session.projectId, context.runtime.token)
+      };
+    });
+    writeJson(context.response, 200, result);
     return;
   }
   if (context.request.method === 'GET') {
@@ -888,14 +993,25 @@ function writeEventStream(
   });
   context.response.write('\n');
   const unsubscribeProject = session.appServer.onEvent((event) => {
-    updateSessionSnapshotFromEvent(session, event);
-    context.response.write(`event: message\ndata: ${JSON.stringify(eventForHttp(event, context.runtime.daemonUrl, session.projectId, context.runtime.token))}\n\n`);
+    context.response.write(`event: message\ndata: ${JSON.stringify(eventForHttp(
+      event,
+      context.runtime.daemonUrl,
+      session.projectId,
+      session.projectRevision,
+      context.runtime.token
+    ))}\n\n`);
   });
   const unsubscribeGlobal = globalRuntime.onEvent((event) => {
     if (!isGlobalEvent(event)) {
       return;
     }
-    context.response.write(`event: message\ndata: ${JSON.stringify(eventForHttp(event, context.runtime.daemonUrl, session.projectId, context.runtime.token))}\n\n`);
+    context.response.write(`event: message\ndata: ${JSON.stringify(eventForHttp(
+      event,
+      context.runtime.daemonUrl,
+      session.projectId,
+      session.projectRevision,
+      context.runtime.token
+    ))}\n\n`);
   });
   const keepalive = setInterval(() => {
     context.response.write(': keepalive\n\n');
@@ -914,12 +1030,6 @@ function isGlobalEvent(event: AppServerEvent): boolean {
     || event.type === 'imageModel.settings.changed'
     || event.type === 'videoModel.settings.changed'
     || event.type === 'integrations.settings.changed';
-}
-
-function updateSessionSnapshotFromEvent(session: ProjectSessionRecord, event: AppServerEvent): void {
-  if (event.type === 'project.opened' || event.type === 'project.changed' || event.type === 'project.fileChanged') {
-    session.snapshot = event.snapshot;
-  }
 }
 
 async function serveWebAsset(context: RequestContext, configuredWebDistDir: string | undefined): Promise<void> {
@@ -997,6 +1107,7 @@ function eventForHttp(
   event: AppServerEvent,
   daemonUrl: string,
   projectId: string,
+  projectRevision: number,
   daemonToken: string
 ): WorkbenchEvent {
   if (event.type === 'project.opened' || event.type === 'project.changed' || event.type === 'project.fileChanged') {
@@ -1004,19 +1115,32 @@ function eventForHttp(
       const { absolutePath: _absolutePath, ...publicEvent } = event.event;
       return {
         ...event,
+        projectId,
+        projectRevision,
         event: publicEvent satisfies WorkbenchFileWatchEvent,
         snapshot: snapshotForHttp(event.snapshot, daemonUrl, projectId, daemonToken)
       };
     }
     return {
       ...event,
+      projectId,
+      projectRevision,
       snapshot: snapshotForHttp(event.snapshot, daemonUrl, projectId, daemonToken)
     };
   }
   if (event.type === 'canvas.changed') {
     return {
       ...event,
+      projectId,
+      projectRevision,
       projection: projectionForHttp(event.projection, daemonUrl, projectId, daemonToken)
+    };
+  }
+  if (event.type === 'canvas.feedback.changed') {
+    return {
+      ...event,
+      projectId,
+      projectRevision
     };
   }
   return event;
@@ -1028,7 +1152,6 @@ function withHttpSnapshot<T extends { snapshot: ProjectSessionSnapshot }>(
   session: ProjectSessionRecord,
   daemonToken: string
 ): Omit<T, 'snapshot'> & { snapshot: WorkbenchProjectSessionSnapshot } {
-  session.snapshot = result.snapshot;
   return {
     ...result,
     snapshot: snapshotForHttp(result.snapshot, daemonUrl, session.projectId, daemonToken)
@@ -1096,14 +1219,14 @@ function applyCorsHeaders(request: IncomingMessage, response: ServerResponse, ru
   return true;
 }
 
-function requiresDaemonToken(path: string, method: string): boolean {
+function requiresDaemonToken(path: string): boolean {
   if (!path.startsWith('/api/')) {
     return false;
   }
   if (path === '/api/status') {
     return false;
   }
-  return !(method === 'GET' && path === '/api/runtime');
+  return path !== '/api/runtime';
 }
 
 function hasDaemonToken(request: IncomingMessage, url: URL, token: string): boolean {
@@ -1225,6 +1348,7 @@ function daemonUploadImportPlan(value: string | undefined): DaemonProjectUploadI
     throw new DebruteDaemonHttpError(400, 'invalid_input', 'Upload import plan entries must be an array.');
   }
   return {
+    baseRevision: baseRevisionField(record),
     entries: record.entries.map((entry, index) => daemonUploadImportPlanEntry(entry, index)),
     targetDirectoryProjectRelativePath: stringField(record.targetDirectoryProjectRelativePath, 'targetDirectoryProjectRelativePath'),
     ...(typeof record.overwrite === 'boolean' ? { overwrite: record.overwrite } : {})
@@ -1298,7 +1422,7 @@ function writeCaughtError(response: ServerResponse, error: unknown): void {
     return;
   }
   if (error instanceof DebruteDaemonHttpError) {
-    writeError(response, error.statusCode, error.code, error.message);
+    writeError(response, error.statusCode, error.code, error.message, error.details);
     return;
   }
   if (isServiceError(error)) {
@@ -1343,6 +1467,17 @@ function stringField(value: unknown, name: string): string {
     throw new DebruteDaemonHttpError(400, 'invalid_input', `${name} must be a string.`);
   }
   return value;
+}
+
+function numberField(value: unknown, name: string): number {
+  if (typeof value !== 'number' || !Number.isInteger(value) || value < 1) {
+    throw new DebruteDaemonHttpError(400, 'invalid_input', `${name} must be a positive integer.`);
+  }
+  return value;
+}
+
+function baseRevisionField(body: Record<string, unknown>): number {
+  return numberField(body.baseRevision, 'baseRevision');
 }
 
 function stringArrayField(value: unknown, name: string): string[] {
@@ -1428,7 +1563,8 @@ class DebruteDaemonHttpError extends Error {
   constructor(
     readonly statusCode: number,
     readonly code: string,
-    message: string
+    message: string,
+    readonly details?: Record<string, unknown>
   ) {
     super(message);
   }

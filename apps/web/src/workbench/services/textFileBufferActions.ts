@@ -91,7 +91,7 @@ export function useTextFileBufferActions(input: {
       [projectRelativePath]: clearTextBufferError({ ...current, saving: true })
     }));
     try {
-      const saved = await api.writeProjectTextFile(projectRelativePath, current.content);
+      const saved = (await api.writeProjectTextFile(projectRelativePath, current.content)).file;
       setTextFileBuffers((buffers) => ({
         ...buffers,
         [projectRelativePath]: {

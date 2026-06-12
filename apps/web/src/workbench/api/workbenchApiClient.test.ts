@@ -31,7 +31,7 @@ describe('workbench API client', () => {
     };
     vi.stubGlobal('fetch', async (url: string) => {
       responses.push(url);
-      return new Response(JSON.stringify({ projectId, snapshot: { canvases: [] } }), {
+      return new Response(JSON.stringify({ projectId, projectRevision: 1, snapshot: { canvases: [] } }), {
         status: 200,
         headers: { 'content-type': 'application/json' }
       });
@@ -54,7 +54,7 @@ describe('workbench API client', () => {
     const requests: RequestInit[] = [];
     vi.stubGlobal('fetch', async (_url: string, init: RequestInit) => {
       requests.push(init);
-      return new Response(JSON.stringify({ projectId, snapshot: { canvases: [] } }), {
+      return new Response(JSON.stringify({ projectId, projectRevision: 1, snapshot: { canvases: [] } }), {
         status: 200,
         headers: { 'content-type': 'application/json' }
       });
@@ -82,7 +82,7 @@ describe('workbench API client', () => {
     const requests: RequestInit[] = [];
     vi.stubGlobal('fetch', async (_url: string, init: RequestInit) => {
       requests.push(init);
-      return new Response(JSON.stringify({ projectId, snapshot: { canvases: [] } }), {
+      return new Response(JSON.stringify({ projectId, projectRevision: 1, snapshot: { canvases: [] } }), {
         status: 200,
         headers: { 'content-type': 'application/json' }
       });
@@ -114,6 +114,7 @@ describe('workbench API client', () => {
       });
       return new Response(JSON.stringify({
         projectId,
+        projectRevision: requests.length,
         snapshot: {
           canvases: [],
           projections: [],
@@ -134,11 +135,11 @@ describe('workbench API client', () => {
     await client.repairCanvasIndex();
 
     expect(requests.slice(1)).toEqual([
-      { method: 'POST', url: `http://127.0.0.1:17321/api/projects/${projectId}/canvases`, body: {} },
-      { method: 'PATCH', url: `http://127.0.0.1:17321/api/projects/${projectId}/canvases/canvas-1`, body: { operation: 'rename', nextCanvasId: 'storyboard' } },
-      { method: 'DELETE', url: `http://127.0.0.1:17321/api/projects/${projectId}/canvases/storyboard`, body: undefined },
-      { method: 'PUT', url: `http://127.0.0.1:17321/api/projects/${projectId}/canvases/index`, body: { canvasOrder: ['canvas-2', 'canvas-1'] } },
-      { method: 'POST', url: `http://127.0.0.1:17321/api/projects/${projectId}/canvases/index/repair`, body: {} }
+      { method: 'POST', url: `http://127.0.0.1:17321/api/projects/${projectId}/canvases`, body: { baseRevision: 1 } },
+      { method: 'PATCH', url: `http://127.0.0.1:17321/api/projects/${projectId}/canvases/canvas-1`, body: { baseRevision: 2, operation: 'rename', nextCanvasId: 'storyboard' } },
+      { method: 'DELETE', url: `http://127.0.0.1:17321/api/projects/${projectId}/canvases/storyboard`, body: { baseRevision: 3 } },
+      { method: 'PUT', url: `http://127.0.0.1:17321/api/projects/${projectId}/canvases/index`, body: { baseRevision: 4, canvasOrder: ['canvas-2', 'canvas-1'] } },
+      { method: 'POST', url: `http://127.0.0.1:17321/api/projects/${projectId}/canvases/index/repair`, body: { baseRevision: 5 } }
     ]);
   });
 });

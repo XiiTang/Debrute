@@ -32,9 +32,8 @@ describe('WorkbenchApp feedback bar target equality', () => {
 describe('WorkbenchApp canvas registry integration helpers', () => {
   it('restores the stored active canvas for the current project when present', () => {
     expect(chooseInitialActiveCanvasId({
-      projectId: 'project-a',
-      canvasOrder: ['canvas-1', 'canvas-2'],
-      readStoredActiveCanvasId: () => 'canvas-2'
+      storedActiveCanvasId: 'canvas-2',
+      canvasOrder: ['canvas-1', 'canvas-2']
     })).toBe('canvas-2');
   });
 });

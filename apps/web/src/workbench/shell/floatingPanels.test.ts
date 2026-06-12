@@ -1,11 +1,8 @@
 import { describe, expect, it } from 'vitest';
 import {
   DEFAULT_FLOATING_PANEL_STATE,
-  FLOATING_PANEL_STORAGE_KEY,
   closeFloatingPanel,
   dragFloatingPanel,
-  loadFloatingPanelState,
-  serializeFloatingPanelState,
   toggleFloatingPanel
 } from './floatingPanels';
 
@@ -17,10 +14,6 @@ describe('floating panel state', () => {
       y: 72
     });
     expect(DEFAULT_FLOATING_PANEL_STATE.panels.inspector.open).toBe(false);
-  });
-
-  it('uses the persisted layout key', () => {
-    expect(FLOATING_PANEL_STORAGE_KEY).toBe('debrute.workbench.floatingPanels');
   });
 
   it('opens a closed panel from the dock without assigning z-index', () => {
@@ -54,10 +47,4 @@ describe('floating panel state', () => {
     expect(next.panels.settings.y).toBe(DEFAULT_FLOATING_PANEL_STATE.panels.settings.y + 18);
   });
 
-  it('serializes and loads the final panel layout', () => {
-    const persisted = toggleFloatingPanel(DEFAULT_FLOATING_PANEL_STATE, 'settings');
-    const loaded = loadFloatingPanelState(serializeFloatingPanelState(persisted));
-
-    expect(loaded).toEqual(persisted);
-  });
 });

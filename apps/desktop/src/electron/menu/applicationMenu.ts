@@ -1,16 +1,23 @@
-import type { MenuItemConstructorOptions } from 'electron';
+import type { BrowserWindow, MenuItemConstructorOptions } from 'electron';
 
+export interface ProjectOpenMenuOptions {
+  forceNewWindow: boolean;
+}
+
+type ProjectOpenMenuAction = (sourceWindow: BrowserWindow | undefined, options: ProjectOpenMenuOptions) => void | Promise<void>;
 type MenuAction = () => void | Promise<void>;
 
 export interface BuildApplicationMenuOptions {
   recentProjectRoots: string[];
-  onOpenProject: MenuAction;
-  onOpenRecentProject: (projectRoot: string) => void | Promise<void>;
+  onNewWindow: MenuAction;
+  onOpenProject: ProjectOpenMenuAction;
+  onOpenRecentProject: (projectRoot: string, sourceWindow: BrowserWindow | undefined, options: ProjectOpenMenuOptions) => void | Promise<void>;
   onClearRecentProjects: MenuAction;
 }
 
 export function buildApplicationMenuTemplate({
   recentProjectRoots,
+  onNewWindow,
   onOpenProject,
   onOpenRecentProject,
   onClearRecentProjects
@@ -19,7 +26,7 @@ export function buildApplicationMenuTemplate({
     ? [
         ...recentProjectRoots.map((projectRoot) => ({
           label: projectRoot,
-          click: () => onOpenRecentProject(projectRoot)
+          click: (_item, browserWindow) => onOpenRecentProject(projectRoot, browserWindow ?? undefined, { forceNewWindow: false })
         })),
         { type: 'separator' },
         { label: 'Clear Recent', click: () => onClearRecentProjects() }
@@ -49,9 +56,20 @@ export function buildApplicationMenuTemplate({
       label: 'File',
       submenu: [
         {
+          label: 'New Window',
+          accelerator: 'CmdOrCtrl+N',
+          click: () => onNewWindow()
+        },
+        { type: 'separator' },
+        {
           label: 'Open Project...',
           accelerator: 'CmdOrCtrl+O',
-          click: () => onOpenProject()
+          click: (_item, browserWindow) => onOpenProject(browserWindow ?? undefined, { forceNewWindow: false })
+        },
+        {
+          label: 'Open Project in New Window...',
+          accelerator: 'CmdOrCtrl+Shift+O',
+          click: (_item, browserWindow) => onOpenProject(browserWindow ?? undefined, { forceNewWindow: true })
         },
         {
           label: 'Open Recent',

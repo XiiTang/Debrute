@@ -67,8 +67,20 @@ export interface DebruteRuntimeInfo {
   platform: NodeJS.Platform;
 }
 
-export interface LiveProjectView {
+export interface RevisionedProjectResult {
   projectId: string;
+  projectRevision: number;
+}
+
+export interface RevisionedProjectMutation {
+  baseRevision: number;
+}
+
+export interface StaleProjectRevisionDetails extends RevisionedProjectResult {
+  snapshot: WorkbenchProjectSessionSnapshot;
+}
+
+export interface LiveProjectView extends RevisionedProjectResult {
   snapshot: WorkbenchProjectSessionSnapshot;
   clients: {
     liveCount: number;
@@ -133,7 +145,7 @@ export interface ProjectFileOperationResult extends ProjectPathOperationResult {
   snapshot: ProjectSessionSnapshot;
 }
 
-export interface WorkbenchProjectFileOperationResult extends ProjectPathOperationResult {
+export interface WorkbenchProjectFileOperationResult extends ProjectPathOperationResult, RevisionedProjectResult {
   snapshot: WorkbenchProjectSessionSnapshot;
 }
 
@@ -143,7 +155,7 @@ export interface ProjectFileBatchOperationResult extends ProjectPathBatchOperati
   snapshot: ProjectSessionSnapshot;
 }
 
-export interface WorkbenchProjectFileBatchOperationResult extends ProjectPathBatchOperationResult {
+export interface WorkbenchProjectFileBatchOperationResult extends ProjectPathBatchOperationResult, RevisionedProjectResult {
   snapshot: WorkbenchProjectSessionSnapshot;
 }
 
@@ -152,7 +164,7 @@ export interface ProjectCanvasManagementResult {
   activeCanvasId?: string;
 }
 
-export interface WorkbenchCanvasManagementResult {
+export interface WorkbenchCanvasManagementResult extends RevisionedProjectResult {
   snapshot: WorkbenchProjectSessionSnapshot;
   activeCanvasId?: string;
 }
@@ -197,7 +209,7 @@ export interface WorkbenchProjectUploadImportInput {
   overwrite?: boolean;
 }
 
-export interface DaemonProjectUploadImportPlan {
+export interface DaemonProjectUploadImportPlan extends RevisionedProjectMutation {
   entries: Array<
     | {
         kind: 'directory';
@@ -213,9 +225,16 @@ export interface DaemonProjectUploadImportPlan {
   overwrite?: boolean;
 }
 
-export interface WorkbenchProjectOpenResult {
-  projectId: string;
+export interface WorkbenchProjectOpenResult extends RevisionedProjectResult {
   snapshot: WorkbenchProjectSessionSnapshot;
+}
+
+export interface WorkbenchProjectRefreshResult extends RevisionedProjectResult {
+  snapshot: WorkbenchProjectSessionSnapshot;
+}
+
+export interface WorkbenchProjectTextFileWriteResult extends RevisionedProjectResult {
+  file: WorkbenchProjectTextFile;
 }
 
 export type LlmProviderType = 'openai_compat' | 'anthropic';
@@ -598,11 +617,20 @@ export interface ProjectAddProjectPathToCanvasMapResult {
   centerProjectRelativePath: string;
 }
 
-export interface WorkbenchAddProjectPathToCanvasMapResult {
+export interface WorkbenchAddProjectPathToCanvasMapResult extends RevisionedProjectResult {
   snapshot: WorkbenchProjectSessionSnapshot;
   canvas: CanvasDocument;
   projection: CanvasProjection;
   centerProjectRelativePath: string;
+}
+
+export interface WorkbenchCanvasDocumentMutationResult extends RevisionedProjectResult {
+  canvas: CanvasDocument;
+  projection: CanvasProjection;
+}
+
+export interface WorkbenchCanvasFeedbackMutationResult extends RevisionedProjectResult {
+  feedback: CanvasFeedbackDocument;
 }
 
 export type AppServerEvent =
@@ -610,6 +638,7 @@ export type AppServerEvent =
   | { type: 'project.changed'; snapshot: ProjectSessionSnapshot }
   | { type: 'project.fileChanged'; event: NormalizedFileWatchEvent; snapshot: ProjectSessionSnapshot }
   | { type: 'canvas.changed'; canvas: CanvasDocument; projection: CanvasProjection }
+  | { type: 'canvas.feedback.changed'; feedback: CanvasFeedbackDocument }
   | { type: 'llm.settings.changed'; settings: LlmProviderSettingsView }
   | { type: 'imageModel.settings.changed'; settings: ImageModelSettingsView }
   | { type: 'videoModel.settings.changed'; settings: VideoModelSettingsView }
@@ -618,10 +647,11 @@ export type AppServerEvent =
 export type WorkbenchFileWatchEvent = Omit<NormalizedFileWatchEvent, 'absolutePath'>;
 
 export type WorkbenchEvent =
-  | { type: 'project.opened'; snapshot: WorkbenchProjectSessionSnapshot }
-  | { type: 'project.changed'; snapshot: WorkbenchProjectSessionSnapshot }
-  | { type: 'project.fileChanged'; event: WorkbenchFileWatchEvent; snapshot: WorkbenchProjectSessionSnapshot }
-  | { type: 'canvas.changed'; canvas: CanvasDocument; projection: CanvasProjection }
+  | { type: 'project.opened'; projectId: string; projectRevision: number; snapshot: WorkbenchProjectSessionSnapshot }
+  | { type: 'project.changed'; projectId: string; projectRevision: number; snapshot: WorkbenchProjectSessionSnapshot }
+  | { type: 'project.fileChanged'; projectId: string; projectRevision: number; event: WorkbenchFileWatchEvent; snapshot: WorkbenchProjectSessionSnapshot }
+  | { type: 'canvas.changed'; projectId: string; projectRevision: number; canvas: CanvasDocument; projection: CanvasProjection }
+  | { type: 'canvas.feedback.changed'; projectId: string; projectRevision: number; feedback: CanvasFeedbackDocument }
   | { type: 'llm.settings.changed'; settings: LlmProviderSettingsView }
   | { type: 'imageModel.settings.changed'; settings: ImageModelSettingsView }
   | { type: 'videoModel.settings.changed'; settings: VideoModelSettingsView }
@@ -629,12 +659,14 @@ export type WorkbenchEvent =
 
 export interface WorkbenchApiClient {
   readonly mode: 'web' | 'desktop';
+  readonly clientId: string;
   chooseProjectRoot(): Promise<string | undefined>;
+  openProjectFromShell(input: { forceNewWindow: boolean }): Promise<{ opened: boolean }>;
   openProject(input: { projectRoot: string } | { projectId: string }): Promise<WorkbenchProjectOpenResult>;
-  getSnapshot(): Promise<WorkbenchProjectSessionSnapshot>;
+  getSnapshot(): Promise<WorkbenchProjectRefreshResult>;
   getProjectHealth(): Promise<ProjectHealthSummary>;
   readProjectTextFile(projectRelativePath: string): Promise<WorkbenchProjectTextFile>;
-  writeProjectTextFile(projectRelativePath: string, content: string): Promise<WorkbenchProjectTextFile>;
+  writeProjectTextFile(projectRelativePath: string, content: string): Promise<WorkbenchProjectTextFileWriteResult>;
   getDesktopPlatform(): Promise<NodeJS.Platform>;
   createProjectFile(input: { parentProjectRelativePath: string; name: string }): Promise<WorkbenchProjectFileOperationResult>;
   createProjectDirectory(input: { parentProjectRelativePath: string; name: string }): Promise<WorkbenchProjectFileOperationResult>;
@@ -651,8 +683,8 @@ export interface WorkbenchApiClient {
   listGeneratedAssets(): Promise<GeneratedAssetsView>;
   readGeneratedAsset(assetId: string): Promise<GeneratedAssetView>;
   readCanvasFeedback(): Promise<CanvasFeedbackDocument>;
-  updateCanvasFeedbackEntry(input: UpdateCanvasFeedbackEntryInput): Promise<CanvasFeedbackDocument>;
-  refreshProject(): Promise<WorkbenchProjectSessionSnapshot>;
+  updateCanvasFeedbackEntry(input: UpdateCanvasFeedbackEntryInput): Promise<WorkbenchCanvasFeedbackMutationResult>;
+  refreshProject(): Promise<WorkbenchProjectRefreshResult>;
   createCanvas(): Promise<WorkbenchCanvasManagementResult>;
   renameCanvas(input: { canvasId: string; nextCanvasId: string }): Promise<WorkbenchCanvasManagementResult>;
   deleteCanvas(input: { canvasId: string }): Promise<WorkbenchCanvasManagementResult>;
@@ -662,12 +694,12 @@ export interface WorkbenchApiClient {
   updateCanvasNodeLayouts(input: {
     canvasId: string;
     nodeLayouts?: Array<{ projectRelativePath: string; x: number; y: number; width?: number; height?: number }>;
-  }): Promise<CanvasDocument>;
+  }): Promise<WorkbenchCanvasDocumentMutationResult>;
   updateCanvasNodeLayers(input: {
     canvasId: string;
     nodeLayers?: CanvasNodeLayerPatch[];
     nodeProjectRelativePathsTopFirst?: string[];
-  }): Promise<CanvasDocument>;
+  }): Promise<WorkbenchCanvasDocumentMutationResult>;
   llmGetSettings(): Promise<LlmProviderSettingsView>;
   llmSaveProviderSetting(input: SaveLlmProviderSettingInput, providerId?: string): Promise<LlmProviderSettingsView>;
   llmDeleteProviderSetting(providerId: string): Promise<LlmProviderSettingsView>;

@@ -5,6 +5,7 @@ import { tmpdir } from 'node:os';
 import sharp from 'sharp';
 import { describe, expect, it } from 'vitest';
 import { DebruteAppServer, DebruteGlobalRuntimeServer, GlobalConfigStore } from '@debrute/app-server';
+import type { AppServerEvent } from '@debrute/app-protocol';
 import { CANVAS_DOCUMENT_SCHEMA_VERSION } from '@debrute/canvas-core';
 
 describe('app-server', () => {
@@ -418,6 +419,66 @@ describe('app-server', () => {
         note: ''
       });
       expect(await readJson(join(projectRoot, '.debrute/reviews/canvas-feedback.json'))).toEqual(cleared);
+    } finally {
+      server.close();
+      await rm(projectRoot, { recursive: true, force: true });
+    }
+  });
+
+  it('emits Canvas feedback changes as shared project state events', async () => {
+    const projectRoot = await mkdtemp(join(tmpdir(), 'debrute-app-feedback-event-'));
+    const server = new DebruteAppServer();
+    try {
+      await server.openProject(projectRoot, {
+        initializeIfMissing: true,
+        createDefaultCanvas: true
+      });
+      const events: AppServerEvent[] = [];
+      const unsubscribe = server.onEvent((event) => events.push(event));
+
+      await server.updateCanvasFeedbackEntry({
+        projectRelativePath: 'brief.md',
+        marks: ['like'],
+        note: 'Use this direction'
+      });
+      unsubscribe();
+
+      expect(events.find((event) => event.type === 'canvas.feedback.changed')).toMatchObject({
+        type: 'canvas.feedback.changed',
+        feedback: {
+          entries: {
+            'brief.md': {
+              projectRelativePath: 'brief.md',
+              marks: ['like'],
+              note: 'Use this direction'
+            }
+          }
+        }
+      });
+    } finally {
+      server.close();
+      await rm(projectRoot, { recursive: true, force: true });
+    }
+  });
+
+  it('returns Canvas mutation projection data for revisioned HTTP envelopes', async () => {
+    const projectRoot = await mkdtemp(join(tmpdir(), 'debrute-app-canvas-mutation-result-'));
+    const server = new DebruteAppServer();
+    try {
+      await server.openProject(projectRoot, {
+        initializeIfMissing: true,
+        createDefaultCanvas: true
+      });
+
+      const result = await server.updateCanvasNodeLayouts({
+        canvasId: 'canvas-1',
+        nodeLayouts: []
+      });
+
+      expect(result).toMatchObject({
+        canvas: { id: 'canvas-1' },
+        projection: { canvasId: 'canvas-1' }
+      });
     } finally {
       server.close();
       await rm(projectRoot, { recursive: true, force: true });
@@ -986,8 +1047,10 @@ describe('app-server', () => {
       });
       unsubscribe();
 
-      expect(layout.nodeElements.find((node) => node.projectRelativePath === nodePath)).toMatchObject({ x: 50, y: 60, width: 640, height: 360, layoutMode: 'manual' });
-      expect(layer.nodeElements.find((node) => node.projectRelativePath === nodePath)).toMatchObject({ locked: true });
+      expect(layout.canvas.nodeElements.find((node) => node.projectRelativePath === nodePath)).toMatchObject({ x: 50, y: 60, width: 640, height: 360, layoutMode: 'manual' });
+      expect(layer.canvas.nodeElements.find((node) => node.projectRelativePath === nodePath)).toMatchObject({ locked: true });
+      expect(layout.projection.canvasId).toBe('canvas-1');
+      expect(layer.projection.canvasId).toBe('canvas-1');
       expect(layoutReadCount).toBe(3);
       expect(events).toEqual(['canvas.changed', 'canvas.changed']);
 

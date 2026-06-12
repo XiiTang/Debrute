@@ -1,6 +1,7 @@
 import type {
   AddProjectPathToCanvasMapInput,
   DebruteRuntimeInfo,
+  DebruteHttpErrorBody,
   DaemonProjectUploadImportPlan,
   DiscoverLlmProviderModelsInput,
   DiscoverProviderModelsOutput,
@@ -17,11 +18,16 @@ import type {
   VideoModelSettingsView,
   WorkbenchEvent,
   WorkbenchApiClient,
+  WorkbenchCanvasDocumentMutationResult,
+  WorkbenchCanvasFeedbackMutationResult,
   WorkbenchCanvasManagementResult,
+  WorkbenchProjectOpenResult,
   WorkbenchProjectFileBatchOperationResult,
   WorkbenchProjectFileOperationResult,
+  WorkbenchProjectRefreshResult,
   WorkbenchProjectSessionSnapshot,
   WorkbenchProjectTextFile,
+  WorkbenchProjectTextFileWriteResult,
   WorkbenchProjectUploadImportInput,
   WorkbenchAddProjectPathToCanvasMapResult
 } from '@debrute/app-protocol';
@@ -39,9 +45,20 @@ export interface HttpWorkbenchApiClientOptions {
   shell?: DebruteShellApi;
 }
 
-interface OpenProjectResponse {
+interface RevisionedProjectResponse {
   projectId: string;
-  snapshot: WorkbenchProjectSessionSnapshot;
+  projectRevision: number;
+}
+
+class DebruteHttpRequestError extends Error {
+  constructor(
+    readonly status: number,
+    readonly code: string | undefined,
+    message: string,
+    readonly details: Record<string, unknown> | undefined
+  ) {
+    super(message);
+  }
 }
 
 export function createHttpWorkbenchApiClient(options: HttpWorkbenchApiClientOptions = {}): WorkbenchApiClient {
@@ -65,7 +82,7 @@ export function createHttpWorkbenchApiClient(options: HttpWorkbenchApiClientOpti
       ...(body === undefined ? {} : { body: JSON.stringify(body) })
     });
     if (!response.ok) {
-      throw new Error(await responseErrorMessage(response));
+      throw await responseError(response);
     }
     if (response.status === 204) {
       return undefined as T;
@@ -83,12 +100,13 @@ export function createHttpWorkbenchApiClient(options: HttpWorkbenchApiClientOpti
       body
     });
     if (!response.ok) {
-      throw new Error(await responseErrorMessage(response));
+      throw await responseError(response);
     }
     return response.json() as Promise<T>;
   };
 
   let currentProjectId: string | undefined;
+  let currentProjectRevision: number | undefined;
   let eventSource: EventSource | undefined;
   const eventListeners = new Set<(event: WorkbenchEvent) => void>();
   const projectPathFor = (projectId: string, path: string) => `/api/projects/${encodeURIComponent(projectId)}${path}`;
@@ -98,8 +116,45 @@ export function createHttpWorkbenchApiClient(options: HttpWorkbenchApiClientOpti
     }
     return projectPathFor(currentProjectId, path);
   };
-  const setCurrentProjectId = async (projectId: string) => {
+  const rememberProjectRevision = (result: RevisionedProjectResponse): void => {
+    currentProjectId = result.projectId;
+    currentProjectRevision = result.projectRevision;
+  };
+  const rememberStaleProjectRevision = (error: unknown): void => {
+    if (
+      error instanceof DebruteHttpRequestError
+      && error.code === 'stale_project_revision'
+      && isRevisionedProjectResponse(error.details)
+    ) {
+      rememberProjectRevision(error.details);
+    }
+  };
+  const revisionedBody = (body: object = {}): Record<string, unknown> => {
+    if (currentProjectRevision === undefined) {
+      throw new Error('Debrute project revision is not loaded.');
+    }
+    return {
+      baseRevision: currentProjectRevision,
+      ...body
+    };
+  };
+  const requestRevisioned = async <T extends RevisionedProjectResponse>(
+    method: string,
+    path: string,
+    body?: object
+  ): Promise<T> => {
+    try {
+      const result = await request<T>(method, path, revisionedBody(body));
+      rememberProjectRevision(result);
+      return result;
+    } catch (error) {
+      rememberStaleProjectRevision(error);
+      throw error;
+    }
+  };
+  const setCurrentProject = async (projectId: string, projectRevision: number) => {
     currentProjectId = projectId;
+    currentProjectRevision = projectRevision;
     reconnectEventSource();
     await shell()?.bindProjectWindowToProject?.({ projectId });
   };
@@ -117,6 +172,9 @@ export function createHttpWorkbenchApiClient(options: HttpWorkbenchApiClientOpti
     eventSource = new EventSource(eventUrl.toString());
     eventSource.onmessage = (event) => {
       const parsed = JSON.parse(event.data) as WorkbenchEvent;
+      if ('projectId' in parsed && 'projectRevision' in parsed) {
+        rememberProjectRevision(parsed);
+      }
       for (const listener of eventListeners) {
         listener(parsed);
       }
@@ -125,6 +183,7 @@ export function createHttpWorkbenchApiClient(options: HttpWorkbenchApiClientOpti
 
   return {
     mode: 'web',
+    clientId: eventClientId,
     chooseProjectRoot: async () => {
       const debruteShell = shell();
       if (!debruteShell) {
@@ -132,48 +191,71 @@ export function createHttpWorkbenchApiClient(options: HttpWorkbenchApiClientOpti
       }
       return debruteShell.chooseProjectRoot();
     },
+    openProjectFromShell: async (input) => {
+      const debruteShell = shell();
+      if (!debruteShell?.openProject) {
+        throw new Error('Debrute desktop shell project opening is unavailable.');
+      }
+      return debruteShell.openProject(input);
+    },
     openProject: async (input) => {
       if ('projectId' in input) {
-        const opened = await request<OpenProjectResponse>('GET', projectPathFor(input.projectId, ''));
-        await setCurrentProjectId(opened.projectId);
+        const opened = await request<WorkbenchProjectOpenResult>('GET', projectPathFor(input.projectId, ''));
+        await setCurrentProject(opened.projectId, opened.projectRevision);
         return opened;
       }
-      const opened = await request<OpenProjectResponse>('POST', '/api/projects/open', { projectRoot: input.projectRoot });
-      await setCurrentProjectId(opened.projectId);
+      const opened = await request<WorkbenchProjectOpenResult>('POST', '/api/projects/open', { projectRoot: input.projectRoot });
+      await setCurrentProject(opened.projectId, opened.projectRevision);
       return opened;
     },
-    getSnapshot: async () => (await request<OpenProjectResponse>('GET', projectPath(''))).snapshot,
+    getSnapshot: async () => {
+      const result = await request<WorkbenchProjectRefreshResult>('GET', projectPath(''));
+      rememberProjectRevision(result);
+      return result;
+    },
     getProjectHealth: () => request<ProjectHealthSummary>('GET', projectPath('/health')),
     readProjectTextFile: (projectRelativePath) => request<WorkbenchProjectTextFile>('GET', projectPath(`/files/text/${encodeProjectPath(projectRelativePath)}`)),
-    writeProjectTextFile: (projectRelativePath, content) => request<WorkbenchProjectTextFile>('PUT', projectPath(`/files/text/${encodeProjectPath(projectRelativePath)}`), { content }),
+    writeProjectTextFile: (projectRelativePath, content) => requestRevisioned<WorkbenchProjectTextFileWriteResult>('PUT', projectPath(`/files/text/${encodeProjectPath(projectRelativePath)}`), { content }),
     getDesktopPlatform: async () => (
       await request<DebruteRuntimeInfo>('GET', '/api/runtime')
     ).platform,
-    createProjectFile: (input) => request<WorkbenchProjectFileOperationResult>('POST', projectPath('/files'), { ...input, kind: 'file' }),
-    createProjectDirectory: (input) => request<WorkbenchProjectFileOperationResult>('POST', projectPath('/files'), { ...input, kind: 'directory' }),
-    renameProjectPath: (input) => request<WorkbenchProjectFileOperationResult>('PATCH', projectPath(`/files/path/${encodeProjectPath(input.projectRelativePath)}`), {
+    createProjectFile: (input) => requestRevisioned<WorkbenchProjectFileOperationResult>('POST', projectPath('/files'), { ...input, kind: 'file' }),
+    createProjectDirectory: (input) => requestRevisioned<WorkbenchProjectFileOperationResult>('POST', projectPath('/files'), { ...input, kind: 'directory' }),
+    renameProjectPath: (input) => requestRevisioned<WorkbenchProjectFileOperationResult>('PATCH', projectPath(`/files/path/${encodeProjectPath(input.projectRelativePath)}`), {
       operation: 'rename',
       name: input.name
     }),
-    copyProjectPaths: (input) => request<WorkbenchProjectFileBatchOperationResult>('POST', projectPath('/files/batch/copy'), input),
-    moveProjectPaths: (input) => request<WorkbenchProjectFileBatchOperationResult>('POST', projectPath('/files/batch/move'), input),
+    copyProjectPaths: (input) => requestRevisioned<WorkbenchProjectFileBatchOperationResult>('POST', projectPath('/files/batch/copy'), input),
+    moveProjectPaths: (input) => requestRevisioned<WorkbenchProjectFileBatchOperationResult>('POST', projectPath('/files/batch/move'), input),
     copyProjectAbsolutePaths: (input) => request<{ paths: string[] }>(
       'POST',
       projectPath('/files/path/batch/copy-path'),
       input
     ),
-    trashProjectPaths: (input) => request<WorkbenchProjectFileBatchOperationResult>(
+    trashProjectPaths: (input) => requestRevisioned<WorkbenchProjectFileBatchOperationResult>(
       'POST',
       projectPath('/files/path/batch/trash'),
       input
     ),
-    deleteProjectPathsPermanently: (input) => request<WorkbenchProjectFileBatchOperationResult>('POST', projectPath('/files/batch/delete-permanently'), input),
-    importExternalLocalProjectPaths: (input) => request<WorkbenchProjectFileBatchOperationResult>('POST', projectPath('/files/import/local'), input),
-    importExternalProjectUploads: (input) => requestFormData<WorkbenchProjectFileBatchOperationResult>(
-      'POST',
-      projectPath('/files/import/uploads'),
-      uploadImportFormData(input)
-    ),
+    deleteProjectPathsPermanently: (input) => requestRevisioned<WorkbenchProjectFileBatchOperationResult>('POST', projectPath('/files/batch/delete-permanently'), input),
+    importExternalLocalProjectPaths: (input) => requestRevisioned<WorkbenchProjectFileBatchOperationResult>('POST', projectPath('/files/import/local'), input),
+    importExternalProjectUploads: async (input) => {
+      if (currentProjectRevision === undefined) {
+        throw new Error('Debrute project revision is not loaded.');
+      }
+      try {
+        const result = await requestFormData<WorkbenchProjectFileBatchOperationResult>(
+          'POST',
+          projectPath('/files/import/uploads'),
+          uploadImportFormData(input, currentProjectRevision)
+        );
+        rememberProjectRevision(result);
+        return result;
+      } catch (error) {
+        rememberStaleProjectRevision(error);
+        throw error;
+      }
+    },
     revealProjectPathInSystemFileManager: (input) => request<{ ok: true }>(
       'POST',
       projectPath(`/files/path/${encodeProjectPath(input.projectRelativePath)}/reveal`),
@@ -183,33 +265,37 @@ export function createHttpWorkbenchApiClient(options: HttpWorkbenchApiClientOpti
     listGeneratedAssets: () => request<GeneratedAssetsView>('GET', projectPath('/generated-assets')),
     readGeneratedAsset: (assetId) => request<GeneratedAssetView>('GET', projectPath(`/generated-assets/${encodeURIComponent(assetId)}`)),
     readCanvasFeedback: () => request<CanvasFeedbackDocument>('GET', projectPath('/canvas-feedback')),
-    updateCanvasFeedbackEntry: (input) => request<CanvasFeedbackDocument>('PATCH', projectPath('/canvas-feedback'), input),
-    refreshProject: () => request<WorkbenchProjectSessionSnapshot>('POST', projectPath('/refresh')),
-    createCanvas: () => request<WorkbenchCanvasManagementResult>('POST', projectPath('/canvases'), {}),
-    renameCanvas: (input) => request<WorkbenchCanvasManagementResult>(
+    updateCanvasFeedbackEntry: (input) => requestRevisioned<WorkbenchCanvasFeedbackMutationResult>('PATCH', projectPath('/canvas-feedback'), input),
+    refreshProject: async () => {
+      const result = await request<WorkbenchProjectRefreshResult>('POST', projectPath('/refresh'));
+      rememberProjectRevision(result);
+      return result;
+    },
+    createCanvas: () => requestRevisioned<WorkbenchCanvasManagementResult>('POST', projectPath('/canvases')),
+    renameCanvas: (input) => requestRevisioned<WorkbenchCanvasManagementResult>(
       'PATCH',
       projectPath(`/canvases/${encodeURIComponent(input.canvasId)}`),
       { operation: 'rename', nextCanvasId: input.nextCanvasId }
     ),
-    deleteCanvas: (input) => request<WorkbenchCanvasManagementResult>(
+    deleteCanvas: (input) => requestRevisioned<WorkbenchCanvasManagementResult>(
       'DELETE',
       projectPath(`/canvases/${encodeURIComponent(input.canvasId)}`)
     ),
-    reorderCanvases: (input) => request<WorkbenchCanvasManagementResult>(
+    reorderCanvases: (input) => requestRevisioned<WorkbenchCanvasManagementResult>(
       'PUT',
       projectPath('/canvases/index'),
       input
     ),
-    repairCanvasIndex: () => request<WorkbenchCanvasManagementResult>('POST', projectPath('/canvases/index/repair'), {}),
-    addProjectPathToCanvasMap: (input: AddProjectPathToCanvasMapInput) => request<WorkbenchAddProjectPathToCanvasMapResult>(
+    repairCanvasIndex: () => requestRevisioned<WorkbenchCanvasManagementResult>('POST', projectPath('/canvases/index/repair')),
+    addProjectPathToCanvasMap: (input: AddProjectPathToCanvasMapInput) => requestRevisioned<WorkbenchAddProjectPathToCanvasMapResult>(
       'POST',
       projectPath(`/canvases/${encodeURIComponent(input.canvasId)}/canvas-map/project-paths`),
       { projectRelativePath: input.projectRelativePath }
     ),
-    updateCanvasNodeLayouts: (input) => request('PATCH', projectPath(`/canvases/${encodeURIComponent(input.canvasId)}/node-layouts`), {
+    updateCanvasNodeLayouts: (input) => requestRevisioned<WorkbenchCanvasDocumentMutationResult>('PATCH', projectPath(`/canvases/${encodeURIComponent(input.canvasId)}/node-layouts`), {
       nodeLayouts: input.nodeLayouts
     }),
-    updateCanvasNodeLayers: (input) => request('PATCH', projectPath(`/canvases/${encodeURIComponent(input.canvasId)}/node-layers`), {
+    updateCanvasNodeLayers: (input) => requestRevisioned<WorkbenchCanvasDocumentMutationResult>('PATCH', projectPath(`/canvases/${encodeURIComponent(input.canvasId)}/node-layers`), {
       nodeLayers: input.nodeLayers,
       nodeProjectRelativePathsTopFirst: input.nodeProjectRelativePathsTopFirst
     }),
@@ -309,9 +395,10 @@ function encodeProjectPath(projectRelativePath: string): string {
   return projectRelativePath.split('/').map(encodeURIComponent).join('/');
 }
 
-function uploadImportFormData(input: WorkbenchProjectUploadImportInput): FormData {
+function uploadImportFormData(input: WorkbenchProjectUploadImportInput, baseRevision: number): FormData {
   const formData = new FormData();
   const plan: DaemonProjectUploadImportPlan = {
+    baseRevision,
     targetDirectoryProjectRelativePath: input.targetDirectoryProjectRelativePath,
     entries: input.entries.map((entry, index) => (
       entry.kind === 'file'
@@ -336,17 +423,28 @@ function uploadImportFormData(input: WorkbenchProjectUploadImportInput): FormDat
   return formData;
 }
 
-async function responseErrorMessage(response: Response): Promise<string> {
+async function responseError(response: Response): Promise<DebruteHttpRequestError> {
   const text = await response.text();
   if (!text) {
-    return `Debrute daemon request failed: ${response.status}`;
+    return new DebruteHttpRequestError(response.status, undefined, `Debrute daemon request failed: ${response.status}`, undefined);
   }
   try {
-    const parsed = JSON.parse(text) as { error?: { message?: string } };
-    return parsed.error?.message ?? text;
+    const parsed = JSON.parse(text) as Partial<DebruteHttpErrorBody>;
+    if (parsed.error?.message && parsed.error.code) {
+      return new DebruteHttpRequestError(response.status, parsed.error.code, parsed.error.message, parsed.error.details);
+    }
+    return new DebruteHttpRequestError(response.status, undefined, text, undefined);
   } catch {
-    return text;
+    return new DebruteHttpRequestError(response.status, undefined, text, undefined);
   }
+}
+
+function isRevisionedProjectResponse(value: unknown): value is RevisionedProjectResponse {
+  return typeof value === 'object'
+    && value !== null
+    && !Array.isArray(value)
+    && typeof (value as { projectId?: unknown }).projectId === 'string'
+    && typeof (value as { projectRevision?: unknown }).projectRevision === 'number';
 }
 
 function trimTrailingSlash(value: string): string {

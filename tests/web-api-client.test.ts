@@ -39,7 +39,7 @@ describe('HTTP workbench API client', () => {
     expect(client.mode).toBe('web');
     await expect(client.openProject({ projectRoot: '/tmp/project' })).resolves.toMatchObject({
       projectId,
-      snapshot: { metadata: { name: 'Test Project' } }
+      snapshot: { metadata: { project: { name: 'Test Project' } } }
     });
     await client.readProjectTextFile('briefs/outline.md');
     await client.writeProjectTextFile('briefs/outline.md', '# Outline');
@@ -158,7 +158,7 @@ describe('HTTP workbench API client', () => {
       entries: [{ projectRelativePath: 'assets/cover.png', kind: 'file' }]
     })).resolves.toMatchObject({
       results: [{ projectRelativePath: 'assets/cover.png', kind: 'file', status: 'ok' }],
-      snapshot: { metadata: { name: 'Test Project' } }
+      snapshot: { metadata: { project: { name: 'Test Project' } } }
     });
 
     expect(requests).toContainEqual({
@@ -169,7 +169,7 @@ describe('HTTP workbench API client', () => {
     expect(requests).toContainEqual({
       method: 'POST',
       path: `/api/projects/${projectId}/files/path/batch/trash`,
-      body: { entries: [{ projectRelativePath: 'assets/cover.png', kind: 'file' }] }
+      body: { baseRevision: 1, entries: [{ projectRelativePath: 'assets/cover.png', kind: 'file' }] }
     });
   });
 
@@ -222,6 +222,7 @@ describe('HTTP workbench API client', () => {
       method: 'POST',
       path: `/api/projects/${projectId}/files/import/local`,
       body: {
+        baseRevision: 1,
         sources: ['/external/cover.png'],
         targetDirectoryProjectRelativePath: 'assets',
         overwrite: true
@@ -232,6 +233,7 @@ describe('HTTP workbench API client', () => {
       path: `/api/projects/${projectId}/files/import/uploads`,
       body: {
         plan: {
+          baseRevision: 2,
           targetDirectoryProjectRelativePath: 'assets',
           overwrite: true,
           entries: [
@@ -242,6 +244,189 @@ describe('HTTP workbench API client', () => {
         files: [{ field: 'file:1', name: 'page.png', size: 4 }]
       }
     });
+  });
+
+  it('sends the current project revision as baseRevision for shared-state mutations', async () => {
+    const requests: Array<{ method: string; path: string; body?: unknown }> = [];
+    const client = createHttpWorkbenchApiClient({
+      daemonUrl: 'http://127.0.0.1:17456/',
+      token: 'secret',
+      fetch: async (url, init) => {
+        const parsed = new URL(String(url));
+        requests.push({
+          method: init?.method ?? 'GET',
+          path: parsed.pathname,
+          body: init?.body ? JSON.parse(String(init.body)) : undefined
+        });
+        return jsonResponse(routeResponse(String(url), init));
+      }
+    });
+
+    await client.openProject({ projectRoot: '/tmp/project' });
+    await client.createProjectFile({ parentProjectRelativePath: '', name: 'first.md' });
+    await client.renameCanvas({ canvasId: 'canvas-1', nextCanvasId: 'storyboard' });
+
+    expect(requests).toContainEqual({
+      method: 'POST',
+      path: `/api/projects/${projectId}/files`,
+      body: {
+        baseRevision: 1,
+        kind: 'file',
+        parentProjectRelativePath: '',
+        name: 'first.md'
+      }
+    });
+    expect(requests).toContainEqual({
+      method: 'PATCH',
+      path: `/api/projects/${projectId}/canvases/canvas-1`,
+      body: {
+        baseRevision: 2,
+        operation: 'rename',
+        nextCanvasId: 'storyboard'
+      }
+    });
+  });
+
+  it('updates its base revision from project events before the next mutation', async () => {
+    const requests: Array<{ path: string; body?: unknown }> = [];
+    let eventSourceInstance: { onmessage: ((event: MessageEvent) => void) | null; close(): void } | undefined;
+    const originalEventSource = globalThis.EventSource;
+    globalThis.EventSource = class {
+      onmessage: ((event: MessageEvent) => void) | null = null;
+      constructor() {
+        eventSourceInstance = this;
+      }
+      close() {}
+    } as typeof EventSource;
+    try {
+      const client = createHttpWorkbenchApiClient({
+        daemonUrl: 'http://127.0.0.1:17456/',
+        fetch: async (url, init) => {
+          const parsed = new URL(String(url));
+          requests.push({
+            path: parsed.pathname,
+            body: init?.body ? JSON.parse(String(init.body)) : undefined
+          });
+          return jsonResponse(routeResponse(String(url), init));
+        }
+      });
+      client.onEvent(() => undefined);
+      await client.openProject({ projectRoot: '/tmp/project' });
+      eventSourceInstance!.onmessage!(new MessageEvent('message', {
+        data: JSON.stringify({
+          type: 'project.changed',
+          projectId,
+          projectRevision: 7,
+          snapshot: workbenchSnapshot()
+        })
+      }));
+
+      await client.createCanvas();
+
+      expect(requests).toContainEqual({
+        path: `/api/projects/${projectId}/canvases`,
+        body: { baseRevision: 7 }
+      });
+    } finally {
+      globalThis.EventSource = originalEventSource;
+    }
+  });
+
+  it('updates its base revision from stale mutation responses before the next mutation', async () => {
+    const requests: Array<{ path: string; body?: unknown }> = [];
+    let staleResponseSent = false;
+    const client = createHttpWorkbenchApiClient({
+      daemonUrl: 'http://127.0.0.1:17456/',
+      fetch: async (url, init) => {
+        const parsed = new URL(String(url));
+        requests.push({
+          path: parsed.pathname,
+          body: init?.body ? JSON.parse(String(init.body)) : undefined
+        });
+        if (parsed.pathname === `/api/projects/${projectId}/files` && !staleResponseSent) {
+          staleResponseSent = true;
+          return staleRevisionResponse(4);
+        }
+        return jsonResponse(routeResponse(String(url), init));
+      }
+    });
+
+    await client.openProject({ projectRoot: '/tmp/project' });
+    await expect(client.createProjectFile({
+      parentProjectRelativePath: '',
+      name: 'first.md'
+    })).rejects.toThrow('Project revision is stale.');
+    await client.createProjectFile({
+      parentProjectRelativePath: '',
+      name: 'second.md'
+    });
+
+    expect(requests.filter((request) => request.path === `/api/projects/${projectId}/files`).map((request) => request.body)).toEqual([
+      {
+        baseRevision: 1,
+        kind: 'file',
+        parentProjectRelativePath: '',
+        name: 'first.md'
+      },
+      {
+        baseRevision: 4,
+        kind: 'file',
+        parentProjectRelativePath: '',
+        name: 'second.md'
+      }
+    ]);
+  });
+
+  it('updates its base revision from stale upload import responses before the next upload', async () => {
+    const requests: Array<{ path: string; body?: unknown }> = [];
+    let staleResponseSent = false;
+    const client = createHttpWorkbenchApiClient({
+      daemonUrl: 'http://127.0.0.1:17456/',
+      fetch: async (url, init) => {
+        const parsed = new URL(String(url));
+        requests.push({
+          path: parsed.pathname,
+          body: init?.body instanceof FormData
+            ? formDataSummary(init.body)
+            : init?.body
+              ? JSON.parse(String(init.body))
+              : undefined
+        });
+        if (parsed.pathname === `/api/projects/${projectId}/files/import/uploads` && !staleResponseSent) {
+          staleResponseSent = true;
+          return staleRevisionResponse(5);
+        }
+        return jsonResponse(routeResponse(String(url), init));
+      }
+    });
+    const uploadBody = new File(['page'], 'page.png');
+    const input = {
+      targetDirectoryProjectRelativePath: 'assets',
+      entries: [{ kind: 'file' as const, projectRelativePath: 'assets/page.png', file: uploadBody }]
+    };
+
+    await client.openProject({ projectRoot: '/tmp/project' });
+    await expect(client.importExternalProjectUploads(input)).rejects.toThrow('Project revision is stale.');
+    await client.importExternalProjectUploads(input);
+
+    expect(requests.filter((request) => request.path === `/api/projects/${projectId}/files/import/uploads`).map((request) => request.body)).toEqual([
+      {
+        plan: {
+          baseRevision: 1,
+          targetDirectoryProjectRelativePath: 'assets',
+          entries: [{ kind: 'file', projectRelativePath: 'assets/page.png', fileField: 'file:0' }]
+        },
+        files: [{ field: 'file:0', name: 'page.png', size: 4 }]
+      },
+      {
+        plan: {
+          baseRevision: 5,
+          targetDirectoryProjectRelativePath: 'assets',
+          entries: [{ kind: 'file', projectRelativePath: 'assets/page.png', fileField: 'file:0' }]
+        },
+        files: [{ field: 'file:0', name: 'page.png', size: 4 }]
+      }
+    ]);
   });
 
   it('binds the desktop shell window whenever the current project changes', async () => {
@@ -263,6 +448,32 @@ describe('HTTP workbench API client', () => {
     await client.openProject({ projectId: secondProjectId });
 
     expect(boundProjectIds).toEqual([projectId, secondProjectId]);
+  });
+
+  it('delegates Electron-loaded project opening to the desktop shell instead of posting directly to the daemon', async () => {
+    const openedFromShell: Array<{ forceNewWindow: boolean }> = [];
+    const requests: string[] = [];
+    const client = createHttpWorkbenchApiClient({
+      daemonUrl: 'http://127.0.0.1:17456/',
+      fetch: async (url, init) => {
+        requests.push(`${init?.method ?? 'GET'} ${new URL(String(url)).pathname}`);
+        return jsonResponse(routeResponse(String(url), init));
+      },
+      shell: {
+        chooseProjectRoot: async () => {
+          throw new Error('Renderer should not pick project roots for Electron opens.');
+        },
+        openProject: async (input) => {
+          openedFromShell.push({ forceNewWindow: input.forceNewWindow });
+          return { opened: true };
+        }
+      }
+    });
+
+    await expect(client.openProjectFromShell({ forceNewWindow: false })).resolves.toEqual({ opened: true });
+
+    expect(openedFromShell).toEqual([{ forceNewWindow: false }]);
+    expect(requests).toEqual([]);
   });
 });
 
@@ -287,14 +498,24 @@ function routeResponse(url: string, init?: RequestInit): unknown {
     };
   }
   if (path === '/api/projects/open') {
-    return { projectId, snapshot: workbenchSnapshot() };
+    return { projectId, projectRevision: 1, snapshot: workbenchSnapshot() };
   }
   const projectMatch = /^\/api\/projects\/([^/]+)$/.exec(path);
   if (projectMatch?.[1]) {
-    return { projectId: decodeURIComponent(projectMatch[1]), snapshot: workbenchSnapshot() };
+    return { projectId: decodeURIComponent(projectMatch[1]), projectRevision: 1, snapshot: workbenchSnapshot() };
   }
   if (path === `/api/projects/${projectId}/refresh`) {
-    return workbenchSnapshot();
+    return { projectId, projectRevision: 2, snapshot: workbenchSnapshot() };
+  }
+  if (path === `/api/projects/${projectId}/files`) {
+    return {
+      projectId,
+      projectRevision: 2,
+      projectRelativePath: 'first.md',
+      kind: 'file',
+      status: 'ok',
+      snapshot: workbenchSnapshot()
+    };
   }
   if (path === `/api/projects/${projectId}/files/path/batch/copy-path`) {
     return { paths: ['/tmp/project/briefs/outline.md', '/tmp/project/assets'] };
@@ -304,18 +525,24 @@ function routeResponse(url: string, init?: RequestInit): unknown {
   }
   if (path === `/api/projects/${projectId}/files/path/batch/trash`) {
     return {
+      projectId,
+      projectRevision: 2,
       results: [{ sourceProjectRelativePath: 'assets/cover.png', projectRelativePath: 'assets/cover.png', kind: 'file', status: 'ok' }],
       snapshot: workbenchSnapshot()
     };
   }
   if (path === `/api/projects/${projectId}/files/import/local`) {
     return {
+      projectId,
+      projectRevision: 2,
       results: [{ sourceProjectRelativePath: '/external/cover.png', projectRelativePath: 'assets/cover.png', kind: 'file', status: 'ok' }],
       snapshot: workbenchSnapshot()
     };
   }
   if (path === `/api/projects/${projectId}/files/import/uploads`) {
     return {
+      projectId,
+      projectRevision: 3,
       results: [
         { sourceProjectRelativePath: 'assets/pages', projectRelativePath: 'assets/pages', kind: 'directory', status: 'ok' },
         { sourceProjectRelativePath: 'assets/pages/page.png', projectRelativePath: 'assets/pages/page.png', kind: 'file', status: 'ok' }
@@ -327,7 +554,27 @@ function routeResponse(url: string, init?: RequestInit): unknown {
     return { projectRelativePath: 'briefs/outline.md', content: '# Outline', language: 'markdown', revision: 'rev' };
   }
   if (path.endsWith('/files/text/briefs/outline.md') && init?.method === 'PUT') {
-    return { projectRelativePath: 'briefs/outline.md', content: '# Outline', language: 'markdown', revision: 'rev2' };
+    return {
+      projectId,
+      projectRevision: 2,
+      file: { projectRelativePath: 'briefs/outline.md', content: '# Outline', language: 'markdown', revision: 'rev2' }
+    };
+  }
+  if (path === `/api/projects/${projectId}/canvases`) {
+    return {
+      projectId,
+      projectRevision: 8,
+      snapshot: workbenchSnapshot(),
+      activeCanvasId: 'canvas-1'
+    };
+  }
+  if (path === `/api/projects/${projectId}/canvases/canvas-1`) {
+    return {
+      projectId,
+      projectRevision: 3,
+      snapshot: workbenchSnapshot(),
+      activeCanvasId: 'storyboard'
+    };
   }
   if (path.endsWith('/generated-assets/asset-1')) {
     return { assetId: 'asset-1', projectRelativePath: 'generated/cover.png', rawUrl: 'raw', record: { recordId: 'asset-1' } };
@@ -339,12 +586,18 @@ function workbenchSnapshot(): WorkbenchProjectSessionSnapshot {
   return {
     metadata: {
       schemaVersion: 1,
-      name: 'Test Project'
+      project: {
+        id: 'project-record-id',
+        name: 'Test Project',
+        createdAt: '2026-06-12T00:00:00.000Z',
+        updatedAt: '2026-06-12T00:00:00.000Z'
+      }
     },
     files: [],
     canvases: [],
     projections: [],
     diagnostics: [],
+    canvasRegistry: { status: 'ready', canvasOrder: ['canvas-1'] },
     health: {
       projectName: 'Test Project',
       canvasCount: 0,
@@ -362,6 +615,23 @@ function workbenchSnapshot(): WorkbenchProjectSessionSnapshot {
 function jsonResponse(body: unknown): Response {
   return new Response(JSON.stringify(body), {
     status: 200,
+    headers: { 'content-type': 'application/json' }
+  });
+}
+
+function staleRevisionResponse(projectRevision: number): Response {
+  return new Response(JSON.stringify({
+    error: {
+      code: 'stale_project_revision',
+      message: 'Project revision is stale.',
+      details: {
+        projectId,
+        projectRevision,
+        snapshot: workbenchSnapshot()
+      }
+    }
+  }), {
+    status: 409,
     headers: { 'content-type': 'application/json' }
   });
 }

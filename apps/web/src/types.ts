@@ -16,7 +16,8 @@ import type {
   WorkbenchProjectFileOperationResult,
   WorkbenchProjectPathEntry,
   WorkbenchProjectSessionSnapshot,
-  WorkbenchProjectTextFile
+  WorkbenchProjectTextFile,
+  WorkbenchProjectTextFileWriteResult
 } from '@debrute/app-protocol';
 import type {
   CanvasFeedbackDocument,
@@ -71,7 +72,7 @@ export interface WorkbenchActions {
   lookupGeneratedAssetMetadata: (input: { projectRelativePath: string }) => Promise<GeneratedAssetMetadataLookup>;
   readGeneratedAsset: (assetId: string) => Promise<GeneratedAssetView>;
   readProjectTextFile: (projectRelativePath: string) => Promise<WorkbenchProjectTextFile>;
-  writeProjectTextFile: (projectRelativePath: string, content: string) => Promise<WorkbenchProjectTextFile>;
+  writeProjectTextFile: (projectRelativePath: string, content: string) => Promise<WorkbenchProjectTextFileWriteResult>;
   createProjectFile: (input: { parentProjectRelativePath: string; name: string }) => Promise<WorkbenchProjectFileOperationResult>;
   createProjectDirectory: (input: { parentProjectRelativePath: string; name: string }) => Promise<WorkbenchProjectFileOperationResult>;
   renameProjectPath: (input: { projectRelativePath: string; name: string }) => Promise<WorkbenchProjectFileOperationResult>;

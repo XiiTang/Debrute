@@ -4,7 +4,11 @@ import { join } from 'node:path';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { DebruteAppServer } from '@debrute/app-server';
 import { createDebruteDaemonHttpServer } from '@debrute/daemon';
+import type { AppServerEvent } from '@debrute/app-protocol';
 import sharp from 'sharp';
+
+const SHORT_PROJECT_IDLE_TTL_MS = 200;
+const AFTER_SHORT_PROJECT_IDLE_TTL_MS = 260;
 
 describe('daemon HTTP runtime', () => {
   const cleanups: Array<() => Promise<void> | void> = [];
@@ -47,18 +51,18 @@ describe('daemon HTTP runtime', () => {
     const rejectedRuntimeProbe = await fetch(`${runtime.daemonUrl}/api/runtime`, {
       method: 'POST'
     });
-    expect(rejectedRuntimeProbe.status).toBe(403);
+    expect(rejectedRuntimeProbe.status).toBe(405);
+    await expect(rejectedRuntimeProbe.json()).resolves.toMatchObject({
+      error: {
+        code: 'method_not_allowed'
+      }
+    });
 
-    const verifiedRuntime = await fetch(`${runtime.daemonUrl}/api/runtime`, {
+    const rejectedTokenedRuntimeProbe = await fetch(`${runtime.daemonUrl}/api/runtime`, {
       method: 'POST',
       headers: { 'x-debrute-daemon-token': 'test-token' }
-    }).then((response) => response.json());
-    expect(verifiedRuntime).toMatchObject({
-      daemonUrl: runtime.daemonUrl,
-      webBaseUrl: runtime.webBaseUrl,
-      platform: process.platform
     });
-    expect(verifiedRuntime).not.toHaveProperty('token');
+    expect(rejectedTokenedRuntimeProbe.status).toBe(405);
 
     const rejected = await fetch(`${runtime.daemonUrl}/api/projects/open`, {
       method: 'POST',
@@ -87,7 +91,7 @@ describe('daemon HTTP runtime', () => {
     });
     cleanups.push(() => daemon.close(), () => rm(projectRoot, { recursive: true, force: true }));
     const runtime = await daemon.listen();
-    const opened = await requestJson<{ projectId: string }>(`${runtime.daemonUrl}/api/projects/open`, {
+    const opened = await requestJson<{ projectId: string; projectRevision: number }>(`${runtime.daemonUrl}/api/projects/open`, {
       method: 'POST',
       headers: {
         'content-type': 'application/json',
@@ -179,6 +183,7 @@ describe('daemon HTTP runtime', () => {
 
     const opened = await requestJson<{
       projectId: string;
+      projectRevision: number;
       snapshot: { files: Array<{ projectRelativePath: string }> };
     }>(`${runtime.daemonUrl}/api/projects/open`, {
       method: 'POST',
@@ -209,7 +214,7 @@ describe('daemon HTTP runtime', () => {
         'content-type': 'application/json',
         'x-debrute-daemon-token': 'test-token'
       },
-      body: JSON.stringify({ content: '# Updated' })
+      body: JSON.stringify({ baseRevision: opened.projectRevision, content: '# Updated' })
     });
 
     await expect(readFile(join(projectRoot, 'briefs/outline.md'), 'utf8')).resolves.toBe('# Updated');
@@ -217,6 +222,209 @@ describe('daemon HTTP runtime', () => {
     const unscoped = await fetch(`${runtime.daemonUrl}/not-a-project/files/text/briefs/outline.md`);
     expect(unscoped.status).toBe(404);
 
+  });
+
+  it('returns project revisions on project open, live project listing, and mutation responses', async () => {
+    const projectRoot = await mkdtemp(join(tmpdir(), 'debrute-daemon-revision-envelope-'));
+    await writeFile(join(projectRoot, 'brief.md'), '# Brief', 'utf8');
+    const daemon = createDebruteDaemonHttpServer({
+      host: '127.0.0.1',
+      port: 0,
+      token: 'test-token',
+      webBaseUrl: null
+    });
+    cleanups.push(() => daemon.close(), () => rm(projectRoot, { recursive: true, force: true }));
+    const runtime = await daemon.listen();
+
+    const opened = await requestJson<{ projectId: string; projectRevision: number }>(`${runtime.daemonUrl}/api/projects/open`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json', 'x-debrute-daemon-token': 'test-token' },
+      body: JSON.stringify({ projectRoot })
+    });
+    expect(opened.projectRevision).toBe(1);
+
+    await expect(requestJson(`${runtime.daemonUrl}/api/projects`)).resolves.toMatchObject({
+      projects: [{ projectId: opened.projectId, projectRevision: 1 }]
+    });
+
+    const created = await requestJson<{ projectRevision: number; snapshot: { files: unknown[] } }>(`${runtime.daemonUrl}/api/projects/${opened.projectId}/files`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json', 'x-debrute-daemon-token': 'test-token' },
+      body: JSON.stringify({
+        baseRevision: 1,
+        kind: 'file',
+        parentProjectRelativePath: '',
+        name: 'next.md'
+      })
+    });
+
+    expect(created.projectRevision).toBe(2);
+    expect(created.snapshot.files).toEqual(expect.arrayContaining([
+      expect.objectContaining({ projectRelativePath: 'next.md' })
+    ]));
+  });
+
+  it('rejects stale shared-state mutations with the current revision and snapshot', async () => {
+    const projectRoot = await mkdtemp(join(tmpdir(), 'debrute-daemon-stale-revision-'));
+    await writeFile(join(projectRoot, 'brief.md'), '# Brief', 'utf8');
+    const daemon = createDebruteDaemonHttpServer({
+      host: '127.0.0.1',
+      port: 0,
+      token: 'test-token',
+      webBaseUrl: null
+    });
+    cleanups.push(() => daemon.close(), () => rm(projectRoot, { recursive: true, force: true }));
+    const runtime = await daemon.listen();
+    const opened = await requestJson<{ projectId: string; projectRevision: number }>(`${runtime.daemonUrl}/api/projects/open`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json', 'x-debrute-daemon-token': 'test-token' },
+      body: JSON.stringify({ projectRoot })
+    });
+
+    await requestJson(`${runtime.daemonUrl}/api/projects/${opened.projectId}/files`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json', 'x-debrute-daemon-token': 'test-token' },
+      body: JSON.stringify({
+        baseRevision: opened.projectRevision,
+        kind: 'file',
+        parentProjectRelativePath: '',
+        name: 'first.md'
+      })
+    });
+
+    const stale = await fetch(`${runtime.daemonUrl}/api/projects/${opened.projectId}/files`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json', 'x-debrute-daemon-token': 'test-token' },
+      body: JSON.stringify({
+        baseRevision: opened.projectRevision,
+        kind: 'file',
+        parentProjectRelativePath: '',
+        name: 'second.md'
+      })
+    });
+
+    expect(stale.status).toBe(409);
+    await expect(stale.json()).resolves.toMatchObject({
+      error: {
+        code: 'stale_project_revision',
+        details: {
+          projectId: opened.projectId,
+          projectRevision: 2,
+          snapshot: {
+            files: expect.arrayContaining([
+              expect.objectContaining({ projectRelativePath: 'first.md' })
+            ])
+          }
+        }
+      }
+    });
+  });
+
+  it('refreshes after draining queued project changes without stale revision rejection', async () => {
+    const projectRoot = await mkdtemp(join(tmpdir(), 'debrute-daemon-refresh-drain-'));
+    const listeners = new Set<(event: AppServerEvent) => void>();
+    let currentSnapshot = projectSnapshotFixture(projectRoot);
+    const emitChanged = (files: Array<{ projectRelativePath: string; kind: 'file' }>) => {
+      currentSnapshot = {
+        ...projectSnapshotFixture(projectRoot),
+        files
+      };
+      for (const listener of listeners) {
+        listener({ type: 'project.changed', snapshot: currentSnapshot });
+      }
+    };
+    const appServer = {
+      openProject: async (root: string) => {
+        currentSnapshot = projectSnapshotFixture(root);
+        return currentSnapshot;
+      },
+      getSnapshot: () => currentSnapshot,
+      currentSnapshot: () => currentSnapshot,
+      drainSessionOperations: async () => {
+        emitChanged([{ projectRelativePath: 'external.md', kind: 'file' }]);
+      },
+      refreshProject: async () => {
+        emitChanged([
+          { projectRelativePath: 'external.md', kind: 'file' },
+          { projectRelativePath: 'refreshed.md', kind: 'file' }
+        ]);
+        return currentSnapshot;
+      },
+      onEvent: (listener: (event: AppServerEvent) => void) => {
+        listeners.add(listener);
+        return () => listeners.delete(listener);
+      },
+      close: () => undefined
+    } as unknown as DebruteAppServer;
+    const daemon = createDebruteDaemonHttpServer({
+      host: '127.0.0.1',
+      port: 0,
+      token: 'test-token',
+      webBaseUrl: null,
+      createAppServer: () => appServer
+    });
+    cleanups.push(() => daemon.close(), () => rm(projectRoot, { recursive: true, force: true }));
+    const runtime = await daemon.listen();
+    const opened = await requestJson<{ projectId: string; projectRevision: number }>(`${runtime.daemonUrl}/api/projects/open`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json', 'x-debrute-daemon-token': 'test-token' },
+      body: JSON.stringify({ projectRoot })
+    });
+
+    const response = await apiFetch(`${runtime.daemonUrl}/api/projects/${opened.projectId}/refresh`, {
+      method: 'POST',
+      headers: { 'x-debrute-daemon-token': 'test-token' }
+    });
+    const body = await response.text();
+    expect(response.status, body).toBe(200);
+    const refreshed = JSON.parse(body) as {
+      projectRevision: number;
+      snapshot: { files: Array<{ projectRelativePath: string }> };
+    };
+
+    expect(refreshed.projectRevision).toBe(3);
+    expect(refreshed.snapshot.files.map((file) => file.projectRelativePath)).toEqual([
+      'external.md',
+      'refreshed.md'
+    ]);
+  });
+
+  it('emits project-scoped SSE events with project revisions', async () => {
+    const projectRoot = await mkdtemp(join(tmpdir(), 'debrute-daemon-revision-sse-'));
+    await writeFile(join(projectRoot, 'brief.md'), '# Brief', 'utf8');
+    const daemon = createDebruteDaemonHttpServer({
+      host: '127.0.0.1',
+      port: 0,
+      token: 'test-token',
+      webBaseUrl: null
+    });
+    cleanups.push(() => daemon.close(), () => rm(projectRoot, { recursive: true, force: true }));
+    const runtime = await daemon.listen();
+    const opened = await requestJson<{ projectId: string; projectRevision: number }>(`${runtime.daemonUrl}/api/projects/open`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json', 'x-debrute-daemon-token': 'test-token' },
+      body: JSON.stringify({ projectRoot })
+    });
+
+    const events = await fetch(`${runtime.daemonUrl}/api/projects/${opened.projectId}/events?clientId=client-a&debrute-token=test-token`);
+    expect(events.status).toBe(200);
+    await requestJson(`${runtime.daemonUrl}/api/projects/${opened.projectId}/files`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json', 'x-debrute-daemon-token': 'test-token' },
+      body: JSON.stringify({
+        baseRevision: opened.projectRevision,
+        kind: 'file',
+        parentProjectRelativePath: '',
+        name: 'evented.md'
+      })
+    });
+
+    await expect(readNextSseMessage<{ projectId: string; projectRevision: number; type: string }>(events))
+      .resolves.toMatchObject({
+        type: 'project.changed',
+        projectId: opened.projectId,
+        projectRevision: 2
+      });
   });
 
   it('rejects raw project file requests without a revision query', async () => {
@@ -232,7 +440,7 @@ describe('daemon HTTP runtime', () => {
     });
     cleanups.push(() => daemon.close(), () => rm(projectRoot, { recursive: true, force: true }));
     const runtime = await daemon.listen();
-    const opened = await requestJson<{ projectId: string }>(`${runtime.daemonUrl}/api/projects/open`, {
+    const opened = await requestJson<{ projectId: string; projectRevision: number }>(`${runtime.daemonUrl}/api/projects/open`, {
       method: 'POST',
       headers: {
         'content-type': 'application/json',
@@ -268,7 +476,7 @@ describe('daemon HTTP runtime', () => {
     });
     cleanups.push(() => daemon.close(), () => rm(projectRoot, { recursive: true, force: true }));
     const runtime = await daemon.listen();
-    const opened = await requestJson<{ projectId: string }>(`${runtime.daemonUrl}/api/projects/open`, {
+    const opened = await requestJson<{ projectId: string; projectRevision: number }>(`${runtime.daemonUrl}/api/projects/open`, {
       method: 'POST',
       headers: {
         'content-type': 'application/json',
@@ -331,7 +539,10 @@ describe('daemon HTTP runtime', () => {
           'content-type': 'application/json',
           'x-debrute-daemon-token': runtime.token
         },
-        body: JSON.stringify({ entries: [{ projectRelativePath: 'briefs/outline.md', kind: 'file' }] })
+        body: JSON.stringify({
+          baseRevision: opened.projectRevision,
+          entries: [{ projectRelativePath: 'briefs/outline.md', kind: 'file' }]
+        })
       }
     );
     expect(trashResult.results).toMatchObject([
@@ -354,7 +565,7 @@ describe('daemon HTTP runtime', () => {
     });
     cleanups.push(() => daemon.close(), () => rm(projectRoot, { recursive: true, force: true }));
     const runtime = await daemon.listen();
-    const opened = await requestJson<{ projectId: string }>(`${runtime.daemonUrl}/api/projects/open`, {
+    const opened = await requestJson<{ projectId: string; projectRevision: number }>(`${runtime.daemonUrl}/api/projects/open`, {
       method: 'POST',
       headers: {
         'content-type': 'application/json',
@@ -368,12 +579,14 @@ describe('daemon HTTP runtime', () => {
     };
 
     const copied = await requestJson<{
+      projectRevision: number;
       results: Array<{ projectRelativePath: string; status: string }>;
       snapshot: { files: Array<{ projectRelativePath: string }> };
     }>(`${runtime.daemonUrl}/api/projects/${opened.projectId}/files/batch/copy`, {
       method: 'POST',
       headers,
       body: JSON.stringify({
+        baseRevision: opened.projectRevision,
         entries: [{ projectRelativePath: 'cover.png', kind: 'file' }],
         targetDirectoryProjectRelativePath: 'briefs'
       })
@@ -384,12 +597,14 @@ describe('daemon HTTP runtime', () => {
     expect(JSON.stringify(copied)).not.toContain(projectRoot);
 
     const moved = await requestJson<{
+      projectRevision: number;
       results: Array<{ projectRelativePath: string; status: string }>;
       snapshot: { files: Array<{ projectRelativePath: string }> };
     }>(`${runtime.daemonUrl}/api/projects/${opened.projectId}/files/batch/move`, {
       method: 'POST',
       headers,
       body: JSON.stringify({
+        baseRevision: copied.projectRevision,
         entries: [{ projectRelativePath: 'briefs/cover.png', kind: 'file' }],
         targetDirectoryProjectRelativePath: '',
         overwrite: true
@@ -406,6 +621,7 @@ describe('daemon HTTP runtime', () => {
       method: 'POST',
       headers,
       body: JSON.stringify({
+        baseRevision: moved.projectRevision,
         entries: [{ projectRelativePath: 'cover.png', kind: 'file' }]
       })
     });
@@ -432,7 +648,7 @@ describe('daemon HTTP runtime', () => {
       () => rm(externalRoot, { recursive: true, force: true })
     );
     const runtime = await daemon.listen();
-    const opened = await requestJson<{ projectId: string }>(`${runtime.daemonUrl}/api/projects/open`, {
+    const opened = await requestJson<{ projectId: string; projectRevision: number }>(`${runtime.daemonUrl}/api/projects/open`, {
       method: 'POST',
       headers: {
         'content-type': 'application/json',
@@ -442,6 +658,7 @@ describe('daemon HTTP runtime', () => {
     });
 
     const localImport = await requestJson<{
+      projectRevision: number;
       results: Array<{ projectRelativePath: string; status: string }>;
       snapshot: { files: Array<{ projectRelativePath: string }> };
     }>(`${runtime.daemonUrl}/api/projects/${opened.projectId}/files/import/local`, {
@@ -451,6 +668,7 @@ describe('daemon HTTP runtime', () => {
         'x-debrute-daemon-token': runtime.token
       },
       body: JSON.stringify({
+        baseRevision: opened.projectRevision,
         sources: [join(externalRoot, 'cover.png')],
         targetDirectoryProjectRelativePath: 'assets'
       })
@@ -462,6 +680,7 @@ describe('daemon HTTP runtime', () => {
 
     const uploadForm = new FormData();
     uploadForm.append('plan', JSON.stringify({
+      baseRevision: localImport.projectRevision,
       targetDirectoryProjectRelativePath: 'assets',
       entries: [
         { kind: 'directory', projectRelativePath: 'assets/pages' },
@@ -499,7 +718,7 @@ describe('daemon HTTP runtime', () => {
       () => rm(projectRoot, { recursive: true, force: true })
     );
     const runtime = await daemon.listen();
-    const opened = await requestJson<{ projectId: string }>(`${runtime.daemonUrl}/api/projects/open`, {
+    const opened = await requestJson<{ projectId: string; projectRevision: number }>(`${runtime.daemonUrl}/api/projects/open`, {
       method: 'POST',
       headers: {
         'content-type': 'application/json',
@@ -511,6 +730,7 @@ describe('daemon HTTP runtime', () => {
     const byteLength = 100 * 1024 * 1024 + 1;
     const uploadForm = new FormData();
     uploadForm.append('plan', JSON.stringify({
+      baseRevision: opened.projectRevision,
       targetDirectoryProjectRelativePath: 'assets',
       entries: [{ kind: 'file', projectRelativePath: 'assets/large.bin', fileField: 'file:0' }]
     }));
@@ -549,7 +769,7 @@ describe('daemon HTTP runtime', () => {
       () => rm(projectRoot, { recursive: true, force: true })
     );
     const runtime = await daemon.listen();
-    const opened = await requestJson<{ projectId: string }>(`${runtime.daemonUrl}/api/projects/open`, {
+    const opened = await requestJson<{ projectId: string; projectRevision: number }>(`${runtime.daemonUrl}/api/projects/open`, {
       method: 'POST',
       headers: {
         'content-type': 'application/json',
@@ -560,6 +780,7 @@ describe('daemon HTTP runtime', () => {
 
     const uploadForm = new FormData();
     uploadForm.append('plan', JSON.stringify({
+      baseRevision: opened.projectRevision,
       targetDirectoryProjectRelativePath: 'assets',
       entries: [{ kind: 'file', projectRelativePath: 'assets/page.png', fileField: 'file:0' }]
     }));
@@ -590,7 +811,7 @@ describe('daemon HTTP runtime', () => {
     cleanups.push(() => daemon.close(), () => rm(projectRoot, { recursive: true, force: true }));
     const runtime = await daemon.listen();
 
-    const opened = await requestJson<{ projectId: string }>(`${runtime.daemonUrl}/api/projects/open`, {
+    const opened = await requestJson<{ projectId: string; projectRevision: number }>(`${runtime.daemonUrl}/api/projects/open`, {
       method: 'POST',
       headers: {
         'content-type': 'application/json',
@@ -630,7 +851,7 @@ describe('daemon HTTP runtime', () => {
       headers: { 'content-type': 'application/json', 'x-debrute-daemon-token': 'test-token' },
       body: JSON.stringify({ projectRoot: alphaRoot })
     });
-    const beta = await requestJson<{ projectId: string }>(`${runtime.daemonUrl}/api/projects/open`, {
+    const beta = await requestJson<{ projectId: string; projectRevision: number }>(`${runtime.daemonUrl}/api/projects/open`, {
       method: 'POST',
       headers: { 'content-type': 'application/json', 'x-debrute-daemon-token': 'test-token' },
       body: JSON.stringify({ projectRoot: betaRoot })
@@ -988,7 +1209,7 @@ describe('daemon HTTP runtime', () => {
         'content-type': 'application/json',
         'x-debrute-daemon-token': 'test-token'
       },
-      body: JSON.stringify({ content: '# Beta Updated' })
+      body: JSON.stringify({ baseRevision: beta.projectRevision, content: '# Beta Updated' })
     });
 
     await expect(readNextSseMessage<{ type: string }>(betaEvents)).resolves.toMatchObject({
@@ -1043,7 +1264,7 @@ describe('daemon HTTP runtime', () => {
       port: 0,
       token: 'test-token',
       webBaseUrl: null,
-      projectIdleTtlMs: 25
+      projectIdleTtlMs: SHORT_PROJECT_IDLE_TTL_MS
     });
     cleanups.push(() => daemon.close(), () => rm(projectRoot, { recursive: true, force: true }));
     const runtime = await daemon.listen();
@@ -1063,7 +1284,7 @@ describe('daemon HTTP runtime', () => {
     });
 
     await events.body?.cancel();
-    await delay(80);
+    await delay(AFTER_SHORT_PROJECT_IDLE_TTL_MS);
 
     const released = await apiFetch(`${runtime.daemonUrl}/api/projects/${opened.projectId}`);
     expect(released.status).toBe(404);
@@ -1084,7 +1305,7 @@ describe('daemon HTTP runtime', () => {
       port: 0,
       token: 'test-token',
       webBaseUrl: null,
-      projectIdleTtlMs: 25
+      projectIdleTtlMs: SHORT_PROJECT_IDLE_TTL_MS
     });
     cleanups.push(() => daemon.close(), () => rm(projectRoot, { recursive: true, force: true }));
     const runtime = await daemon.listen();
@@ -1103,7 +1324,7 @@ describe('daemon HTTP runtime', () => {
     expect(second.status).toBe(200);
 
     await first.body?.cancel();
-    await delay(80);
+    await delay(AFTER_SHORT_PROJECT_IDLE_TTL_MS);
 
     await expect(requestJson(`${runtime.daemonUrl}/api/projects/${opened.projectId}`))
       .resolves.toMatchObject({ projectId: opened.projectId });
@@ -1161,6 +1382,7 @@ describe('daemon HTTP runtime', () => {
     const appServer = {
       openProject: async (root: string) => projectSnapshotFixture(root),
       currentSnapshot: () => undefined,
+      onEvent: () => () => undefined,
       close: () => undefined,
       resolveCanvasImagePreview: async (input: { abortSignal?: AbortSignal }) => {
         input.abortSignal?.addEventListener('abort', () => aborts.push('aborted'), { once: true });
@@ -1211,6 +1433,7 @@ describe('daemon HTTP runtime', () => {
     const appServer = {
       openProject: async (root: string) => projectSnapshotFixture(root),
       currentSnapshot: () => undefined,
+      onEvent: () => () => undefined,
       close: () => undefined,
       resolveCanvasImagePreview: async (input: { abortSignal?: AbortSignal }) => {
         input.abortSignal?.addEventListener('abort', () => aborts.push('aborted'), { once: true });
@@ -1252,7 +1475,7 @@ describe('daemon HTTP runtime', () => {
       port: 0,
       token: 'test-token',
       webBaseUrl: null,
-      projectIdleTtlMs: 25
+      projectIdleTtlMs: SHORT_PROJECT_IDLE_TTL_MS
     });
     cleanups.push(() => daemon.close(), () => rm(projectRoot, { recursive: true, force: true }));
     const runtime = await daemon.listen();
@@ -1267,13 +1490,13 @@ describe('daemon HTTP runtime', () => {
 
     const releaseWindow = daemon.registerElectronProjectWindow(opened.projectId, 42);
     expect(releaseWindow).toBeDefined();
-    await delay(80);
+    await delay(AFTER_SHORT_PROJECT_IDLE_TTL_MS);
 
     await expect(requestJson(`${runtime.daemonUrl}/api/projects/${opened.projectId}`))
       .resolves.toMatchObject({ projectId: opened.projectId });
 
     releaseWindow!();
-    await delay(80);
+    await delay(AFTER_SHORT_PROJECT_IDLE_TTL_MS);
 
     const released = await apiFetch(`${runtime.daemonUrl}/api/projects/${opened.projectId}`);
     expect(released.status).toBe(404);
@@ -1318,12 +1541,15 @@ describe('daemon HTTP runtime', () => {
     }
     await appServer.publishCanvasMapForProject(projectRoot, { canvasId: 'canvas-1' });
     const refreshed = await requestJson<{
-      projections: Array<{ nodes: Array<{ projectRelativePath: string; availability: { state: string; fileUrl?: string } }> }>;
+      projectRevision: number;
+      snapshot: {
+        projections: Array<{ nodes: Array<{ projectRelativePath: string; availability: { state: string; fileUrl?: string } }> }>;
+      };
     }>(`${runtime.daemonUrl}/api/projects/${opened.projectId}/refresh`, {
       method: 'POST',
       headers: { 'x-debrute-daemon-token': 'test-token' }
     });
-    const node = refreshed.projections[0]!.nodes.find((item) => item.projectRelativePath === 'image-production/generated/cover.png')!;
+    const node = refreshed.snapshot.projections[0]!.nodes.find((item) => item.projectRelativePath === 'image-production/generated/cover.png')!;
     expect(node.availability.fileUrl).toContain(`/api/projects/${opened.projectId}/files/raw/image-production/generated/cover.png`);
     if (!node.availability.fileUrl) {
       throw new Error('Canvas node did not include a browser file URL.');
@@ -1341,7 +1567,10 @@ describe('daemon HTTP runtime', () => {
         'content-type': 'application/json',
         'x-debrute-daemon-token': 'test-token'
       },
-      body: JSON.stringify({ nodeLayers: [{ projectRelativePath: node.projectRelativePath, locked: true }] })
+      body: JSON.stringify({
+        baseRevision: refreshed.projectRevision,
+        nodeLayers: [{ projectRelativePath: node.projectRelativePath, locked: true }]
+      })
     });
 
     const event = await readNextSseMessage<{
@@ -1389,6 +1618,7 @@ describe('daemon HTTP runtime', () => {
     await appServer.publishCanvasMapForProject(projectRoot, { canvasId: 'canvas-1' });
 
     const result = await requestJson<{
+      projectRevision: number;
       snapshot: { canvases: Array<{ id: string; nodeElements: Array<{ projectRelativePath: string }> }> };
       projection: { nodes: Array<{ projectRelativePath: string }> };
       centerProjectRelativePath: string;
@@ -1398,7 +1628,10 @@ describe('daemon HTTP runtime', () => {
         'content-type': 'application/json',
         'x-debrute-daemon-token': 'test-token'
       },
-      body: JSON.stringify({ projectRelativePath: 'prompts/alt.md' })
+      body: JSON.stringify({
+        baseRevision: opened.projectRevision,
+        projectRelativePath: 'prompts/alt.md'
+      })
     });
 
     expect(result.centerProjectRelativePath).toBe('prompts/alt.md');
@@ -1423,7 +1656,10 @@ describe('daemon HTTP runtime', () => {
         'content-type': 'application/json',
         'x-debrute-daemon-token': 'test-token'
       },
-      body: JSON.stringify({ projectRelativePath: 'prompts/conflict.md' })
+      body: JSON.stringify({
+        baseRevision: result.projectRevision,
+        projectRelativePath: 'prompts/conflict.md'
+      })
     });
     expect(conflict.status).toBe(409);
     await expect(conflict.json()).resolves.toMatchObject({
@@ -1441,7 +1677,7 @@ describe('daemon HTTP runtime', () => {
     });
     cleanups.push(() => daemon.close(), () => rm(projectRoot, { recursive: true, force: true }));
     const runtime = await daemon.listen();
-    const opened = await requestJson<{ projectId: string }>(`${runtime.daemonUrl}/api/projects/open`, {
+    const opened = await requestJson<{ projectId: string; projectRevision: number }>(`${runtime.daemonUrl}/api/projects/open`, {
       method: 'POST',
       headers: {
         'content-type': 'application/json',
@@ -1450,17 +1686,18 @@ describe('daemon HTTP runtime', () => {
       body: JSON.stringify({ projectRoot })
     });
 
-    const created = await requestJson<{ activeCanvasId: string; snapshot: { canvasRegistry: { status: string; canvasOrder: string[] } } }>(
+    const created = await requestJson<{ projectRevision: number; activeCanvasId: string; snapshot: { canvasRegistry: { status: string; canvasOrder: string[] } } }>(
       `${runtime.daemonUrl}/api/projects/${opened.projectId}/canvases`,
       {
         method: 'POST',
-        headers: { 'x-debrute-daemon-token': 'test-token' }
+        headers: { 'content-type': 'application/json', 'x-debrute-daemon-token': 'test-token' },
+        body: JSON.stringify({ baseRevision: opened.projectRevision })
       }
     );
     expect(created.activeCanvasId).toBe('canvas-2');
     expect(created.snapshot.canvasRegistry).toEqual({ status: 'ready', canvasOrder: ['canvas-1', 'canvas-2'] });
 
-    const renamed = await requestJson<{ activeCanvasId: string; snapshot: { canvasRegistry: { status: string; canvasOrder: string[] } } }>(
+    const renamed = await requestJson<{ projectRevision: number; activeCanvasId: string; snapshot: { canvasRegistry: { status: string; canvasOrder: string[] } } }>(
       `${runtime.daemonUrl}/api/projects/${opened.projectId}/canvases/canvas-2`,
       {
         method: 'PATCH',
@@ -1468,13 +1705,13 @@ describe('daemon HTTP runtime', () => {
           'content-type': 'application/json',
           'x-debrute-daemon-token': 'test-token'
         },
-        body: JSON.stringify({ operation: 'rename', nextCanvasId: 'storyboard' })
+        body: JSON.stringify({ baseRevision: created.projectRevision, operation: 'rename', nextCanvasId: 'storyboard' })
       }
     );
     expect(renamed.activeCanvasId).toBe('storyboard');
     expect(renamed.snapshot.canvasRegistry).toEqual({ status: 'ready', canvasOrder: ['canvas-1', 'storyboard'] });
 
-    const reordered = await requestJson<{ snapshot: { canvasRegistry: { status: string; canvasOrder: string[] } } }>(
+    const reordered = await requestJson<{ projectRevision: number; snapshot: { canvasRegistry: { status: string; canvasOrder: string[] } } }>(
       `${runtime.daemonUrl}/api/projects/${opened.projectId}/canvases/index`,
       {
         method: 'PUT',
@@ -1482,16 +1719,17 @@ describe('daemon HTTP runtime', () => {
           'content-type': 'application/json',
           'x-debrute-daemon-token': 'test-token'
         },
-        body: JSON.stringify({ canvasOrder: ['storyboard', 'canvas-1'] })
+        body: JSON.stringify({ baseRevision: renamed.projectRevision, canvasOrder: ['storyboard', 'canvas-1'] })
       }
     );
     expect(reordered.snapshot.canvasRegistry).toEqual({ status: 'ready', canvasOrder: ['storyboard', 'canvas-1'] });
 
-    const deleted = await requestJson<{ activeCanvasId: string; snapshot: { canvasRegistry: { status: string; canvasOrder: string[] } } }>(
+    const deleted = await requestJson<{ projectRevision: number; activeCanvasId: string; snapshot: { canvasRegistry: { status: string; canvasOrder: string[] } } }>(
       `${runtime.daemonUrl}/api/projects/${opened.projectId}/canvases/storyboard`,
       {
         method: 'DELETE',
-        headers: { 'x-debrute-daemon-token': 'test-token' }
+        headers: { 'content-type': 'application/json', 'x-debrute-daemon-token': 'test-token' },
+        body: JSON.stringify({ baseRevision: reordered.projectRevision })
       }
     );
     expect(deleted.activeCanvasId).toBe('canvas-1');
@@ -1502,7 +1740,8 @@ describe('daemon HTTP runtime', () => {
       `${runtime.daemonUrl}/api/projects/${opened.projectId}/canvases/index/repair`,
       {
         method: 'POST',
-        headers: { 'x-debrute-daemon-token': 'test-token' }
+        headers: { 'content-type': 'application/json', 'x-debrute-daemon-token': 'test-token' },
+        body: JSON.stringify({ baseRevision: deleted.projectRevision })
       }
     );
     expect(repaired.activeCanvasId).toBe('canvas-1');
@@ -1640,6 +1879,7 @@ function projectSnapshotFixture(projectRoot: string) {
     canvases: [],
     projections: [],
     diagnostics: [],
+    canvasRegistry: { status: 'ready', canvasOrder: [] },
     health: {
       projectName: 'Project',
       canvasCount: 0,

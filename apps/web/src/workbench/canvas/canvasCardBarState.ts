@@ -1,14 +1,10 @@
-export function activeCanvasStorageKey(projectId: string): string {
-  return `debrute:active-canvas:${projectId}`;
-}
-
 export function chooseInitialActiveCanvasId(input: {
-  projectId: string;
+  storedActiveCanvasId: string | undefined;
   canvasOrder: string[];
-  readStoredActiveCanvasId: (key: string) => string | null | undefined;
 }): string | undefined {
-  const stored = input.readStoredActiveCanvasId(activeCanvasStorageKey(input.projectId));
-  return stored && input.canvasOrder.includes(stored) ? stored : input.canvasOrder[0];
+  return input.storedActiveCanvasId && input.canvasOrder.includes(input.storedActiveCanvasId)
+    ? input.storedActiveCanvasId
+    : input.canvasOrder[0];
 }
 
 export function reorderCanvasIds(canvasOrder: string[], draggedCanvasId: string, targetCanvasId: string): string[] {

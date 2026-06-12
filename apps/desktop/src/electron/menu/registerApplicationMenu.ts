@@ -1,5 +1,6 @@
-import type { Menu, MenuItemConstructorOptions } from 'electron';
+import type { BrowserWindow, Menu, MenuItemConstructorOptions } from 'electron';
 import type { DesktopState } from '../desktop-state/desktopStateStore.js';
+import type { ProjectOpenMenuOptions } from './applicationMenu.js';
 import { buildApplicationMenuTemplate } from './applicationMenu.js';
 
 interface ElectronMenuModule {
@@ -14,8 +15,9 @@ export interface ApplicationMenuController {
 export interface CreateApplicationMenuControllerInput {
   menu: ElectronMenuModule;
   readDesktopState(): Promise<DesktopState>;
-  chooseProjectRoot(): Promise<string | undefined>;
-  openProject(projectRoot: string): Promise<void>;
+  chooseProjectRoot(sourceWindow?: BrowserWindow): Promise<string | undefined>;
+  newWindow(): Promise<void>;
+  openProject(projectRoot: string, sourceWindow: BrowserWindow | undefined, options: ProjectOpenMenuOptions): Promise<void>;
   clearRecentProjectRoots(): Promise<void>;
 }
 
@@ -25,15 +27,18 @@ export function createApplicationMenuController(input: CreateApplicationMenuCont
       const desktopState = await input.readDesktopState();
       input.menu.setApplicationMenu(input.menu.buildFromTemplate(buildApplicationMenuTemplate({
         recentProjectRoots: desktopState.recentProjectRoots,
-        onOpenProject: async () => {
-          const selectedRoot = await input.chooseProjectRoot();
+        onNewWindow: async () => {
+          await input.newWindow();
+        },
+        onOpenProject: async (sourceWindow, options) => {
+          const selectedRoot = await input.chooseProjectRoot(sourceWindow);
           if (!selectedRoot) {
             return;
           }
-          await input.openProject(selectedRoot);
+          await input.openProject(selectedRoot, sourceWindow, options);
         },
-        onOpenRecentProject: async (projectRoot) => {
-          await input.openProject(projectRoot);
+        onOpenRecentProject: async (projectRoot, sourceWindow, options) => {
+          await input.openProject(projectRoot, sourceWindow, options);
         },
         onClearRecentProjects: async () => {
           await input.clearRecentProjectRoots();

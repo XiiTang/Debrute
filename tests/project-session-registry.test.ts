@@ -3,7 +3,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
 import type { DebruteAppServer } from '@debrute/app-server';
-import type { ProjectSessionSnapshot } from '@debrute/app-protocol';
+import type { AppServerEvent, ProjectSessionSnapshot } from '@debrute/app-protocol';
 import { ProjectSessionRegistry } from '../apps/daemon/src/http/ProjectSessionRegistry';
 
 describe('ProjectSessionRegistry', () => {
@@ -150,16 +150,158 @@ describe('ProjectSessionRegistry', () => {
     await expect(registry.openProject(projectRoot)).rejects.toThrow('Debrute project session registry is closed.');
     expect(registry.list()).toEqual([]);
   });
+
+  it('tracks project revisions from AppServer shared-state events', async () => {
+    const projectRoot = await mkdtemp(join(tmpdir(), 'debrute-registry-revision-events-'));
+    cleanups.push(() => rm(projectRoot, { recursive: true, force: true }));
+    const registry = new ProjectSessionRegistry({
+      idleTtlMs: 1000,
+      createAppServer: () => appServerFixture(async (root) => snapshotFixture(root))
+    });
+    cleanups.push(() => registry.close());
+
+    const session = await registry.openProject(projectRoot);
+    expect(session.projectRevision).toBe(1);
+    const appServer = session.appServer as DebruteAppServer & { emitForTest(event: AppServerEvent): void };
+
+    appServer.emitForTest({
+      type: 'project.changed',
+      snapshot: {
+        ...snapshotFixture(projectRoot),
+        files: [{ projectRelativePath: 'brief.md', kind: 'file' }]
+      }
+    });
+
+    expect(registry.get(session.projectId)?.projectRevision).toBe(2);
+    expect(registry.get(session.projectId)?.snapshot.files).toHaveLength(1);
+  });
+
+  it('serializes revisioned mutations and rejects stale base revisions', async () => {
+    const projectRoot = await mkdtemp(join(tmpdir(), 'debrute-registry-stale-mutation-'));
+    cleanups.push(() => rm(projectRoot, { recursive: true, force: true }));
+    const registry = new ProjectSessionRegistry({
+      idleTtlMs: 1000,
+      createAppServer: () => appServerFixture(async (root) => snapshotFixture(root))
+    });
+    cleanups.push(() => registry.close());
+    const session = await registry.openProject(projectRoot);
+    const appServer = session.appServer as DebruteAppServer & { emitForTest(event: AppServerEvent): void };
+
+    const first = await registry.runRevisionedMutation(session.projectId, 1, async () => {
+      appServer.emitForTest({
+        type: 'project.changed',
+        snapshot: {
+          ...snapshotFixture(projectRoot),
+          files: [{ projectRelativePath: 'first.md', kind: 'file' }]
+        }
+      });
+      return { ok: true as const };
+    });
+
+    expect(first.projectRevision).toBe(2);
+    await expect(registry.runRevisionedMutation(session.projectId, 1, async () => ({ ok: true as const })))
+      .rejects.toMatchObject({
+        code: 'stale_project_revision',
+        baseRevision: 1,
+        projectRevision: 2
+      });
+  });
+
+  it('drains queued AppServer session events before accepting a base revision', async () => {
+    const projectRoot = await mkdtemp(join(tmpdir(), 'debrute-registry-pending-event-'));
+    cleanups.push(() => rm(projectRoot, { recursive: true, force: true }));
+    let mutationRan = false;
+    let drainCount = 0;
+    const registry = new ProjectSessionRegistry({
+      idleTtlMs: 1000,
+      createAppServer: () => appServerFixture(async (root) => snapshotFixture(root), () => undefined, {
+        drainSessionOperations: async (emit) => {
+          drainCount += 1;
+          emit({
+            type: 'project.changed',
+            snapshot: {
+              ...snapshotFixture(projectRoot),
+              files: [{ projectRelativePath: 'external.md', kind: 'file' }]
+            }
+          });
+        }
+      })
+    });
+    cleanups.push(() => registry.close());
+    const session = await registry.openProject(projectRoot);
+
+    await expect(registry.runRevisionedMutation(session.projectId, 1, async () => {
+      mutationRan = true;
+      return { ok: true as const };
+    })).rejects.toMatchObject({
+      code: 'stale_project_revision',
+      baseRevision: 1,
+      projectRevision: 2
+    });
+    expect(drainCount).toBe(1);
+    expect(mutationRan).toBe(false);
+    expect(registry.get(session.projectId)?.snapshot.files).toEqual([
+      { projectRelativePath: 'external.md', kind: 'file' }
+    ]);
+  });
+
+  it('runs non-revisioned project operations after draining queued AppServer session events', async () => {
+    const projectRoot = await mkdtemp(join(tmpdir(), 'debrute-registry-project-operation-'));
+    cleanups.push(() => rm(projectRoot, { recursive: true, force: true }));
+    let drainCount = 0;
+    const registry = new ProjectSessionRegistry({
+      idleTtlMs: 1000,
+      createAppServer: () => appServerFixture(async (root) => snapshotFixture(root), () => undefined, {
+        drainSessionOperations: async (emit) => {
+          drainCount += 1;
+          emit({
+            type: 'project.changed',
+            snapshot: {
+              ...snapshotFixture(projectRoot),
+              files: [{ projectRelativePath: 'external.md', kind: 'file' }]
+            }
+          });
+        }
+      })
+    });
+    cleanups.push(() => registry.close());
+    const session = await registry.openProject(projectRoot);
+
+    const result = await registry.runProjectOperation(session.projectId, async (record) => ({
+      snapshot: record.snapshot
+    }));
+
+    expect(result.projectRevision).toBe(2);
+    expect(result.snapshot.files).toEqual([{ projectRelativePath: 'external.md', kind: 'file' }]);
+    expect(drainCount).toBe(1);
+  });
 });
 
 function appServerFixture(
   openProject: (projectRoot: string) => Promise<ProjectSessionSnapshot>,
-  close: () => void = () => undefined
-): DebruteAppServer {
+  close: () => void = () => undefined,
+  options: {
+    drainSessionOperations?: (emit: (event: AppServerEvent) => void) => Promise<void> | void;
+  } = {}
+): DebruteAppServer & { emitForTest(event: AppServerEvent): void } {
+  const listeners = new Set<(event: AppServerEvent) => void>();
+  const emitForTest = (event: AppServerEvent) => {
+    for (const listener of listeners) {
+      listener(event);
+    }
+  };
   return {
     openProject,
-    close
-  } as unknown as DebruteAppServer;
+    close,
+    drainSessionOperations: async () => {
+      await options.drainSessionOperations?.(emitForTest);
+    },
+    onEvent: (listener) => {
+      listeners.add(listener);
+      return () => listeners.delete(listener);
+    },
+    emitForTest
+  } as unknown as DebruteAppServer & { emitForTest(event: AppServerEvent): void };
 }
 
 function snapshotFixture(projectRoot: string): ProjectSessionSnapshot {
@@ -178,6 +320,7 @@ function snapshotFixture(projectRoot: string): ProjectSessionSnapshot {
     canvases: [],
     projections: [],
     diagnostics: [],
+    canvasRegistry: { status: 'ready', canvasOrder: [] },
     health: {
       projectName: 'Test Project',
       canvasCount: 0,

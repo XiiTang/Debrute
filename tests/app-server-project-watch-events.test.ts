@@ -65,6 +65,31 @@ describe('App Server project watch events', () => {
       await rm(projectRoot, { recursive: true, force: true });
     }
   });
+
+  it('emits one project revision event for one external watched file change', async () => {
+    const projectRoot = await mkdtemp(join(tmpdir(), 'debrute-watch-single-revision-'));
+    const server = new DebruteAppServer();
+    const events: string[] = [];
+
+    try {
+      await writeFile(join(projectRoot, 'brief.md'), '# Brief', 'utf8');
+      await server.openProject(projectRoot, { initializeIfMissing: true, createDefaultCanvas: true, watchFiles: false });
+      server.onEvent((event) => events.push(event.type));
+      await writeFile(join(projectRoot, 'brief.md'), '# Updated', 'utf8');
+      await callWatchedFileEvent(server, {
+        type: 'changed',
+        absolutePath: join(projectRoot, 'brief.md'),
+        projectRelativePath: 'brief.md',
+        observedAt: Date.now() + 1000,
+        affects: ['content']
+      });
+
+      expect(events).toEqual(['project.fileChanged']);
+    } finally {
+      server.close();
+      await rm(projectRoot, { recursive: true, force: true });
+    }
+  });
 });
 
 async function callWatchedFileEvent(server: DebruteAppServer, event: NormalizedFileWatchEvent): Promise<void> {

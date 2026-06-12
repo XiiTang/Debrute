@@ -1,6 +1,7 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Loader2 } from 'lucide-react';
 import type {
+  WorkbenchCanvasDocumentMutationResult,
   WorkbenchProjectFileBatchOperationResult,
   WorkbenchProjectPathEntry,
   WorkbenchProjectSessionSnapshot
@@ -16,10 +17,10 @@ import { CanvasToolbar } from './canvas/CanvasToolbar';
 import type { CanvasEditorRuntime, CanvasRuntimeSnapshot } from './canvas/runtime/CanvasEditorRuntime';
 import { createCanvasFeedbackEntryUpdater } from './services/canvasFeedbackUpdates';
 import { nextSnapshotFromAppServerEvent } from './services/appServerEvents';
-import { applyCanvasDocumentToWorkbenchSnapshot } from './services/canvasSnapshotUpdates';
 import { getCanvasById } from './services/canvasState';
-import { activeCanvasStorageKey, chooseInitialActiveCanvasId } from './canvas/canvasCardBarState';
+import { chooseInitialActiveCanvasId } from './canvas/canvasCardBarState';
 import { loadCanvasFeedback, openInitialProject, replaceWorkbenchProjectRoute } from './services/projectSessionState';
+import { loadProjectViewState, saveProjectViewState } from './services/projectViewState';
 import {
   closeTextEditorWindowState,
   dragTextEditorWindowState,
@@ -64,11 +65,8 @@ import {
 import {
   DEFAULT_FLOATING_PANEL_STATE,
   FLOATING_PANEL_IDS,
-  FLOATING_PANEL_STORAGE_KEY,
   closeFloatingPanel,
   dragFloatingPanel,
-  loadFloatingPanelState,
-  serializeFloatingPanelState,
   toggleFloatingPanel,
   type FloatingPanelState
 } from './shell/floatingPanels';
@@ -93,16 +91,13 @@ const api = createWorkbenchApiClient();
 
 export function WorkbenchApp(): React.ReactElement {
   const [snapshot, setSnapshot] = useState<WorkbenchProjectSessionSnapshot>();
-  const [projectId, setProjectId] = useState<string>();
+  const [daemonProjectId, setDaemonProjectId] = useState<string>();
   const [activeCanvasId, setActiveCanvasId] = useState<string>();
   const [activeCanvasRuntime, setActiveCanvasRuntime] = useState<CanvasEditorRuntime>();
   const [activeCanvasRuntimeSnapshot, setActiveCanvasRuntimeSnapshot] = useState<CanvasRuntimeSnapshot>();
   const [canvasRuntimeScopeKey, setCanvasRuntimeScopeKey] = useState(0);
   const [explorerSelection, setExplorerSelection] = useState<ProjectTreeSelectionState>(() => createEmptyProjectTreeSelection());
-  const [floatingPanels, setFloatingPanels] = useState<FloatingPanelState>(() => {
-    const raw = globalThis.localStorage?.getItem(FLOATING_PANEL_STORAGE_KEY);
-    return raw ? loadFloatingPanelState(raw) : DEFAULT_FLOATING_PANEL_STATE;
-  });
+  const [floatingPanels, setFloatingPanels] = useState<FloatingPanelState>(DEFAULT_FLOATING_PANEL_STATE);
   const [llmSettings, setLlmSettings] = useState<WorkbenchState['llmSettings']>();
   const [imageModelSettings, setImageModelSettings] = useState<WorkbenchState['imageModelSettings']>();
   const [videoModelSettings, setVideoModelSettings] = useState<WorkbenchState['videoModelSettings']>();
@@ -128,6 +123,32 @@ export function WorkbenchApp(): React.ReactElement {
   const textEditorWindowsRef = useRef(textEditorWindows);
   const feedbackBarClearTimerRef = useRef<number | undefined>(undefined);
   const feedbackBarHoveredRef = useRef(false);
+
+  const chooseActiveCanvasForProject = useCallback((input: {
+    projectId: string;
+    snapshot: WorkbenchProjectSessionSnapshot;
+  }): string | undefined => {
+    const canvasOrder = input.snapshot.canvasRegistry.status === 'ready'
+      ? input.snapshot.canvasRegistry.canvasOrder
+      : [];
+    const viewState = loadProjectViewState({
+      storage: sessionProjectViewStorage(),
+      projectId: input.projectId,
+      clientId: api.clientId
+    });
+    return chooseInitialActiveCanvasId({
+      storedActiveCanvasId: viewState.activeCanvasId,
+      canvasOrder
+    });
+  }, []);
+
+  const loadFloatingPanelsForProject = useCallback((projectId: string): FloatingPanelState => {
+    return loadProjectViewState({
+      storage: sessionProjectViewStorage(),
+      projectId,
+      clientId: api.clientId
+    }).floatingPanels ?? DEFAULT_FLOATING_PANEL_STATE;
+  }, []);
 
   useEffect(() => {
     snapshotRef.current = snapshot;
@@ -181,18 +202,15 @@ export function WorkbenchApp(): React.ReactElement {
       }
     });
     openInitialProject(api)
-      .then(({ projectId: _routeProjectId, snapshot: opened }) => {
-        if (!opened || disposed) {
+      .then(({ projectId: routeProjectId, snapshot: opened }) => {
+        if (!opened || !routeProjectId || disposed) {
           return;
         }
         setSnapshot(opened);
-        setProjectId(opened.metadata.project.id);
+        setDaemonProjectId(routeProjectId);
+        setFloatingPanels(loadFloatingPanelsForProject(routeProjectId));
         void loadCanvasFeedback(api, setCanvasFeedback, setNotifications);
-        setActiveCanvasId(chooseInitialActiveCanvasId({
-          projectId: opened.metadata.project.id,
-          canvasOrder: opened.canvasRegistry.status === 'ready' ? opened.canvasRegistry.canvasOrder : [],
-          readStoredActiveCanvasId: (key) => globalThis.localStorage?.getItem(key)
-        }));
+        setActiveCanvasId(chooseActiveCanvasForProject({ projectId: routeProjectId, snapshot: opened }));
         void api.llmGetSettings().then(setLlmSettings);
         void api.imageModelGetSettings().then(setImageModelSettings);
         void api.videoModelGetSettings().then(setVideoModelSettings);
@@ -210,18 +228,47 @@ export function WorkbenchApp(): React.ReactElement {
     return () => {
       disposed = true;
     };
-  }, []);
+  }, [chooseActiveCanvasForProject, loadFloatingPanelsForProject]);
 
   useEffect(() => {
-    globalThis.localStorage?.setItem(FLOATING_PANEL_STORAGE_KEY, serializeFloatingPanelState(floatingPanels));
-  }, [floatingPanels]);
-
-  useEffect(() => {
-    if (!projectId || !activeCanvasId) {
+    if (!daemonProjectId || !activeCanvasId) {
       return;
     }
-    globalThis.localStorage?.setItem(activeCanvasStorageKey(projectId), activeCanvasId);
-  }, [activeCanvasId, projectId]);
+    const current = loadProjectViewState({
+      storage: sessionProjectViewStorage(),
+      projectId: daemonProjectId,
+      clientId: api.clientId
+    });
+    saveProjectViewState({
+      storage: sessionProjectViewStorage(),
+      projectId: daemonProjectId,
+      clientId: api.clientId,
+      state: {
+        ...current,
+        activeCanvasId
+      }
+    });
+  }, [activeCanvasId, daemonProjectId]);
+
+  useEffect(() => {
+    if (!daemonProjectId) {
+      return;
+    }
+    const current = loadProjectViewState({
+      storage: sessionProjectViewStorage(),
+      projectId: daemonProjectId,
+      clientId: api.clientId
+    });
+    saveProjectViewState({
+      storage: sessionProjectViewStorage(),
+      projectId: daemonProjectId,
+      clientId: api.clientId,
+      state: {
+        ...current,
+        floatingPanels
+      }
+    });
+  }, [daemonProjectId, floatingPanels]);
 
   const readProjectTextFile = useCallback((projectRelativePath: string) => api.readProjectTextFile(projectRelativePath), []);
   const writeProjectTextFile = useCallback((projectRelativePath: string, content: string) => api.writeProjectTextFile(projectRelativePath, content), []);
@@ -245,13 +292,12 @@ export function WorkbenchApp(): React.ReactElement {
   useEffect(() => {
     return api.onEvent((event) => {
       setSnapshot((current) => nextSnapshotFromAppServerEvent(event, current));
+      if ('projectId' in event) {
+        setDaemonProjectId(event.projectId);
+      }
       if (event.type === 'project.opened') {
-        setProjectId(event.snapshot.metadata.project.id);
-        setActiveCanvasId(chooseInitialActiveCanvasId({
-          projectId: event.snapshot.metadata.project.id,
-          canvasOrder: event.snapshot.canvasRegistry.status === 'ready' ? event.snapshot.canvasRegistry.canvasOrder : [],
-          readStoredActiveCanvasId: (key) => globalThis.localStorage?.getItem(key)
-        }));
+        setFloatingPanels(loadFloatingPanelsForProject(event.projectId));
+        setActiveCanvasId(chooseActiveCanvasForProject({ projectId: event.projectId, snapshot: event.snapshot }));
         setExplorerSelection(createEmptyProjectTreeSelection());
         setContextMenu(undefined);
         setFileClipboard(undefined);
@@ -267,6 +313,9 @@ export function WorkbenchApp(): React.ReactElement {
           void loadCanvasFeedback(api, setCanvasFeedback, setNotifications);
         }
       }
+      if (event.type === 'canvas.feedback.changed') {
+        setCanvasFeedback(event.feedback);
+      }
       if (event.type === 'llm.settings.changed') {
         setLlmSettings(event.settings);
       }
@@ -280,7 +329,7 @@ export function WorkbenchApp(): React.ReactElement {
         setIntegrationsSettings(event.settings);
       }
     });
-  }, [refreshTextFileBuffer]);
+  }, [chooseActiveCanvasForProject, loadFloatingPanelsForProject, refreshTextFileBuffer]);
 
   useEffect(() => {
     if (!snapshot || snapshot.canvasRegistry.status !== 'ready') {
@@ -314,7 +363,7 @@ export function WorkbenchApp(): React.ReactElement {
   }, [ensureTextFileBuffer]);
 
   const updateCanvasFeedbackEntry = useMemo(() => createCanvasFeedbackEntryUpdater({
-    requestUpdate: (input) => api.updateCanvasFeedbackEntry(input),
+    requestUpdate: async (input) => (await api.updateCanvasFeedbackEntry(input)).feedback,
     applyFeedback: setCanvasFeedback,
     notifyUnavailable: (message) => {
       setNotifications((current) => [message, ...current].slice(0, 4));
@@ -434,6 +483,10 @@ export function WorkbenchApp(): React.ReactElement {
     openProject: async () => {
       let opened: Awaited<ReturnType<typeof api.openProject>>;
       try {
+        if (getDebruteShellApi()?.openProject) {
+          await api.openProjectFromShell({ forceNewWindow: false });
+          return;
+        }
         const selectedRoot = await api.chooseProjectRoot();
         if (!selectedRoot) {
           return;
@@ -445,12 +498,9 @@ export function WorkbenchApp(): React.ReactElement {
       }
       replaceWorkbenchProjectRoute(opened.projectId);
       setSnapshot(opened.snapshot);
-      setProjectId(opened.snapshot.metadata.project.id);
-      setActiveCanvasId(chooseInitialActiveCanvasId({
-        projectId: opened.snapshot.metadata.project.id,
-        canvasOrder: opened.snapshot.canvasRegistry.status === 'ready' ? opened.snapshot.canvasRegistry.canvasOrder : [],
-        readStoredActiveCanvasId: (key) => globalThis.localStorage?.getItem(key)
-      }));
+      setDaemonProjectId(opened.projectId);
+      setFloatingPanels(loadFloatingPanelsForProject(opened.projectId));
+      setActiveCanvasId(chooseActiveCanvasForProject({ projectId: opened.projectId, snapshot: opened.snapshot }));
       setActiveCanvasRuntime(undefined);
       setCanvasRuntimeScopeKey((current) => current + 1);
       setExplorerSelection(createEmptyProjectTreeSelection());
@@ -566,15 +616,15 @@ export function WorkbenchApp(): React.ReactElement {
     toggleTextFileWordWrap,
     updateCanvasNodeLayouts: async (canvasId, input) => {
       try {
-        const canvas = await api.updateCanvasNodeLayouts({
+        const result = await api.updateCanvasNodeLayouts({
           canvasId,
           ...input
         });
         const current = snapshotRef.current;
         if (!current) {
-          throw new Error(`Cannot apply Canvas document ${canvas.id} without a current snapshot.`);
+          throw new Error(`Cannot apply Canvas document ${result.canvas.id} without a current snapshot.`);
         }
-        const next = applyCanvasDocumentToWorkbenchSnapshot(current, canvas);
+        const next = replaceCanvasMutationInSnapshot(current, result);
         snapshotRef.current = next;
         setSnapshot(next);
       } catch (error) {
@@ -583,10 +633,17 @@ export function WorkbenchApp(): React.ReactElement {
       }
     },
     updateCanvasNodeLayers: async (canvasId, input) => {
-      await api.updateCanvasNodeLayers({
+      const result = await api.updateCanvasNodeLayers({
         canvasId,
         ...input
       });
+      const current = snapshotRef.current;
+      if (!current) {
+        throw new Error(`Cannot apply Canvas document ${result.canvas.id} without a current snapshot.`);
+      }
+      const next = replaceCanvasMutationInSnapshot(current, result);
+      snapshotRef.current = next;
+      setSnapshot(next);
     },
     updateCanvasFeedbackEntry,
     addProjectPathToCanvasMap: async (input) => {
@@ -642,7 +699,9 @@ export function WorkbenchApp(): React.ReactElement {
     activeCanvasRuntime,
     centerCanvasProjectionNode,
     locateProjectFileInCanvas,
+    chooseActiveCanvasForProject,
     ensureTextFileBuffer,
+    loadFloatingPanelsForProject,
     lookupGeneratedAssetMetadata,
     openTextEditorWindow,
     readGeneratedAsset,
@@ -1120,6 +1179,19 @@ function applyDeletedProjectEntries(input: {
   ));
 }
 
+function replaceCanvasMutationInSnapshot(
+  snapshot: WorkbenchProjectSessionSnapshot,
+  result: WorkbenchCanvasDocumentMutationResult
+): WorkbenchProjectSessionSnapshot {
+  return {
+    ...snapshot,
+    canvases: snapshot.canvases.map((canvas) => canvas.id === result.canvas.id ? result.canvas : canvas),
+    projections: snapshot.projections.map((projection) => (
+      projection.canvasId === result.projection.canvasId ? result.projection : projection
+    ))
+  };
+}
+
 function externalDropPlanHasConflict(input: {
   snapshot: WorkbenchProjectSessionSnapshot | undefined;
   localPaths: string[];
@@ -1168,6 +1240,10 @@ function externalUploadPathRelativeToTarget(projectRelativePath: string, targetD
 function nativePathBasename(path: string): string {
   const normalized = path.replaceAll('\\', '/').replace(/\/$/, '');
   return normalized.slice(normalized.lastIndexOf('/') + 1);
+}
+
+function sessionProjectViewStorage(): Storage | undefined {
+  return typeof window === 'undefined' ? undefined : window.sessionStorage;
 }
 
 function isProjectPathContainedByDeletedPath(projectRelativePath: string, deletedProjectRelativePath: string): boolean {

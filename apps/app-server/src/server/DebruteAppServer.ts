@@ -28,6 +28,7 @@ import {
   type CanvasFeedbackDocument,
   type CanvasLayoutSize,
   type CanvasNodeLayerPatch,
+  type CanvasProjection,
   type UpdateCanvasFeedbackEntryInput
 } from '@debrute/canvas-core';
 import {
@@ -228,6 +229,10 @@ export class DebruteAppServer {
     return this.snapshot;
   }
 
+  async drainSessionOperations(): Promise<void> {
+    await this.sessionOperation;
+  }
+
   async openProject(projectRoot: string, options: OpenProjectOptions = { initializeIfMissing: true, createDefaultCanvas: true }): Promise<ProjectSessionSnapshot> {
     return this.enqueueSessionOperation(async () => {
       const paths = getDebruteProjectPaths(projectRoot);
@@ -409,8 +414,12 @@ export class DebruteAppServer {
   }
 
   async updateCanvasFeedbackEntry(input: UpdateCanvasFeedbackEntryInput): Promise<CanvasFeedbackDocument> {
-    const current = this.getSnapshot();
-    return this.canvasFeedbackService.updateCanvasFeedbackEntry(current.projectRoot, input);
+    return this.enqueueSessionOperation(async () => {
+      const current = this.getSnapshot();
+      const feedback = await this.canvasFeedbackService.updateCanvasFeedbackEntry(current.projectRoot, input);
+      this.emit({ type: 'canvas.feedback.changed', feedback });
+      return feedback;
+    });
   }
 
   async resolveCanvasImagePreview(
@@ -515,7 +524,7 @@ export class DebruteAppServer {
       width?: number;
       height?: number;
     }>;
-  }): Promise<CanvasDocument> {
+  }): Promise<{ canvas: CanvasDocument; projection: CanvasProjection }> {
     return this.enqueueSessionOperation(async () => (
       this.applyCanvasSessionUpdate(await this.canvasSessionService.updateCanvasNodeLayouts(this.getSnapshot(), input))
     ));
@@ -525,7 +534,7 @@ export class DebruteAppServer {
     canvasId: string;
     nodeLayers?: CanvasNodeLayerPatch[];
     nodeProjectRelativePathsTopFirst?: string[];
-  }): Promise<CanvasDocument> {
+  }): Promise<{ canvas: CanvasDocument; projection: CanvasProjection }> {
     return this.enqueueSessionOperation(async () => (
       this.applyCanvasSessionUpdate(await this.canvasSessionService.updateCanvasNodeLayers(this.getSnapshot(), input))
     ));
@@ -681,17 +690,16 @@ export class DebruteAppServer {
     };
   }
 
-  private applyCanvasSessionUpdate(result: { canvas: CanvasDocument; snapshot: ProjectSessionSnapshot; changed: boolean }): CanvasDocument {
+  private applyCanvasSessionUpdate(result: { canvas: CanvasDocument; snapshot: ProjectSessionSnapshot; changed: boolean }): { canvas: CanvasDocument; projection: CanvasProjection } {
     this.snapshot = result.snapshot;
-    if (!result.changed) {
-      return result.canvas;
-    }
     const projection = result.snapshot.projections.find((item) => item.canvasId === result.canvas.id);
     if (!projection) {
       throw new Error(`Canvas projection is not loaded: ${result.canvas.id}`);
     }
-    this.emit({ type: 'canvas.changed', canvas: result.canvas, projection });
-    return result.canvas;
+    if (result.changed) {
+      this.emit({ type: 'canvas.changed', canvas: result.canvas, projection });
+    }
+    return { canvas: result.canvas, projection };
   }
 
   private async createImageModelRequestExecutor(projectRoot: string): Promise<AppServerImageModelRequestExecutor> {
@@ -815,7 +823,7 @@ export class DebruteAppServer {
       })) {
         return;
       }
-      const snapshot = await this.refreshProjectUnlocked();
+      const snapshot = await this.loadFreshProjectSnapshotUnlocked();
       this.emit({ type: 'project.fileChanged', event, snapshot });
     } catch (error) {
       const current = this.snapshot;
@@ -861,11 +869,16 @@ export class DebruteAppServer {
   }
 
   private async refreshProjectUnlocked(): Promise<ProjectSessionSnapshot> {
+    const snapshot = await this.loadFreshProjectSnapshotUnlocked();
+    this.emit({ type: 'project.changed', snapshot });
+    return snapshot;
+  }
+
+  private async loadFreshProjectSnapshotUnlocked(): Promise<ProjectSessionSnapshot> {
     const current = this.getSnapshot();
     const snapshot = await this.loadSnapshot(current.projectRoot);
     this.snapshot = snapshot;
     this.snapshotLoadedAt = Date.now();
-    this.emit({ type: 'project.changed', snapshot });
     return snapshot;
   }
 

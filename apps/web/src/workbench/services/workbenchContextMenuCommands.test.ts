@@ -1,13 +1,13 @@
 import { describe, expect, it, vi } from 'vitest';
-import type { WorkbenchProjectSessionSnapshot } from '@debrute/app-protocol';
+import type { WorkbenchProjectFileBatchOperationResult, WorkbenchProjectSessionSnapshot } from '@debrute/app-protocol';
 import type { WorkbenchContextMenuCommand } from '../shell/contextMenu';
 import { runWorkbenchContextMenuCommand } from './workbenchContextMenuCommands';
 
 describe('workbench context menu commands', () => {
   it('confirms permanent delete before deleting', () => {
     const deleteProjectPathsPermanently = vi.fn(async () => ({
-      results: [],
-      snapshot: snapshotFixture()
+      ...batchResult(),
+      results: []
     }));
     runWorkbenchContextMenuCommand(commandInput({
       command: 'delete-permanently',
@@ -22,13 +22,13 @@ describe('workbench context menu commands', () => {
 
   it('runs trash delete for the visible Delete command', () => {
     const trashProjectPaths = vi.fn(async () => ({
+      ...batchResult(),
       results: [{
         sourceProjectRelativePath: 'briefs/concept.md',
         projectRelativePath: 'briefs/concept.md',
         kind: 'file' as const,
         status: 'ok' as const
-      }],
-      snapshot: snapshotFixture()
+      }]
     }));
     runWorkbenchContextMenuCommand(commandInput({
       command: 'delete',
@@ -45,8 +45,8 @@ describe('workbench context menu commands', () => {
   it('does not run item commands for the Project Tree root target', () => {
     const setFileClipboard = vi.fn();
     const trashProjectPaths = vi.fn(async () => ({
-      results: [],
-      snapshot: snapshotFixture()
+      ...batchResult(),
+      results: []
     }));
 
     runWorkbenchContextMenuCommand(commandInput({
@@ -109,8 +109,8 @@ describe('workbench context menu commands', () => {
 
   it('does not paste when the internal clipboard has no entries', async () => {
     const copyProjectPaths = vi.fn(async () => ({
-      results: [],
-      snapshot: snapshotFixture()
+      ...batchResult(),
+      results: []
     }));
 
     runWorkbenchContextMenuCommand(commandInput({
@@ -132,13 +132,13 @@ describe('workbench context menu commands', () => {
 
   it('confirms and overwrites conflicting cut paste targets', async () => {
     const moveProjectPaths = vi.fn(async () => ({
+      ...batchResult(),
       results: [{
         sourceProjectRelativePath: 'cover.png',
         projectRelativePath: 'assets/cover.png',
         kind: 'file' as const,
         status: 'ok' as const
-      }],
-      snapshot: snapshotFixture()
+      }]
     }));
     const confirmMoveOverwrite = vi.fn(() => true);
 
@@ -215,9 +215,9 @@ function commandInput(overrides: {
     fileClipboard: overrides.fileClipboard,
     actions: {
       copyProjectAbsolutePaths: async () => ({ paths: ['/tmp/debrute-project/unused'] }),
-      trashProjectPaths: async () => ({ results: [], snapshot: snapshotFixture() }),
-      deleteProjectPathsPermanently: async () => ({ results: [], snapshot: snapshotFixture() }),
-      moveProjectPaths: async () => ({ results: [], snapshot: snapshotFixture() }),
+      trashProjectPaths: async () => batchResult(),
+      deleteProjectPathsPermanently: async () => batchResult(),
+      moveProjectPaths: async () => batchResult(),
       ...overrides.actions
     } as Parameters<typeof runWorkbenchContextMenuCommand>[0]['actions'],
     setInlineProjectTreeEdit: () => undefined,
@@ -229,6 +229,15 @@ function commandInput(overrides: {
     confirmPermanentDelete: overrides.confirmPermanentDelete ?? (() => true),
     projectSnapshot: overrides.snapshot,
     confirmMoveOverwrite: overrides.confirmMoveOverwrite ?? (() => true)
+  };
+}
+
+function batchResult(): WorkbenchProjectFileBatchOperationResult {
+  return {
+    projectId: 'project-live-id',
+    projectRevision: 2,
+    results: [],
+    snapshot: snapshotFixture()
   };
 }
 

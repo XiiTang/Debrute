@@ -19,8 +19,6 @@ export interface FloatingPanelState {
   panels: Record<FloatingPanelId, FloatingPanelLayout>;
 }
 
-export const FLOATING_PANEL_STORAGE_KEY = 'debrute.workbench.floatingPanels';
-
 export const FLOATING_PANEL_DEFINITIONS: Record<FloatingPanelId, FloatingPanelDefinition> = {
   explorer: { id: 'explorer', title: 'Explorer', width: 320, height: 620, defaultX: 18, defaultY: 72 },
   inspector: { id: 'inspector', title: 'Inspector', width: 340, height: 420, defaultX: 1036, defaultY: 470 },
@@ -93,12 +91,4 @@ export function dragFloatingPanel(
       }
     }
   };
-}
-
-export function loadFloatingPanelState(raw: string | null | undefined): FloatingPanelState {
-  return raw ? JSON.parse(raw) as FloatingPanelState : DEFAULT_FLOATING_PANEL_STATE;
-}
-
-export function serializeFloatingPanelState(state: FloatingPanelState): string {
-  return JSON.stringify(state);
 }
