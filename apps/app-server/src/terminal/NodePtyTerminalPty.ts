@@ -4,7 +4,8 @@ import { dirname, join } from 'node:path';
 import * as pty from 'node-pty';
 import type { TerminalPtyFactory } from './TerminalPty.js';
 
-const nodeRequire = createRequire(import.meta.url);
+// Electron bundles this ESM source into CJS, where esbuild lowers import.meta to an empty object.
+const nodeRequire = createRequire(typeof __filename === 'string' ? __filename : import.meta.url);
 
 export const nodePtyTerminalPtyFactory: TerminalPtyFactory = (input) => {
   ensureNodePtySpawnHelperExecutable();

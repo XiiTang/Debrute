@@ -1,9 +1,10 @@
 import { execFileSync } from 'node:child_process';
-import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { createRequire } from 'node:module';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { pathToFileURL } from 'node:url';
+import { build } from 'esbuild';
 import { describe, expect, it } from 'vitest';
 
 interface PackageJson {
@@ -38,6 +39,44 @@ describe('Electron development scripts', () => {
     const script = readFileSync(join(process.cwd(), 'apps/desktop/scripts/bundle-electron.mjs'), 'utf8');
 
     expect(script).toContain("external: ['electron', 'node-pty', 'sharp']");
+  });
+
+  it('loads app-server terminal pty code after Electron CJS bundling', async () => {
+    const root = mkdtempSync(join(tmpdir(), `debrute-electron-cjs-pty-${process.pid}-`));
+    try {
+      mkdirSync(join(root, 'node_modules/node-pty'), { recursive: true });
+      writeFileSync(
+        join(root, 'node_modules/node-pty/index.js'),
+        "exports.spawn = () => { throw new Error('node-pty stub should not spawn'); };\n"
+      );
+      writeFileSync(join(root, 'node_modules/node-pty/package.json'), '{"name":"node-pty","main":"index.js"}');
+
+      const entry = join(root, 'entry.ts');
+      const outfile = join(root, 'out.cjs');
+      writeFileSync(
+        entry,
+        `import { ensureNodePtySpawnHelperExecutable } from ${JSON.stringify(join(process.cwd(), 'apps/app-server/src/terminal/NodePtyTerminalPty.ts'))};\n`
+        + `ensureNodePtySpawnHelperExecutable({ packageRoot: ${JSON.stringify(root)}, platform: 'darwin', arch: 'arm64' });\n`
+      );
+
+      await build({
+        entryPoints: [entry],
+        outfile,
+        bundle: true,
+        platform: 'node',
+        format: 'cjs',
+        target: 'node24',
+        external: ['node-pty'],
+        logOverride: {
+          'empty-import-meta': 'silent'
+        }
+      });
+
+      execFileSync(process.execPath, [outfile], { stdio: 'pipe' });
+      expect(readFileSync(outfile, 'utf8')).not.toMatch(/createRequire\)\(import_meta\d*\.url\)/);
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
   });
 
   it('packages only the target node-pty runtime payload for Electron', () => {
