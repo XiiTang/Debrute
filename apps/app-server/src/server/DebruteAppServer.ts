@@ -326,7 +326,7 @@ export class DebruteAppServer {
   }
 
   async projectStatusForCli(projectRoot: string): Promise<ProjectSessionSnapshot> {
-    return this.loadSnapshot(projectRoot);
+    return this.loadSnapshot(projectRoot, { writeCanvasMapChanges: false });
   }
 
   async runtimeStatusForCli(): Promise<CliRuntimeStatus> {
@@ -811,10 +811,20 @@ export class DebruteAppServer {
     this.internalProjectFileWrites.delete(absolutePath);
   }
 
-  private async loadSnapshot(projectRoot: string): Promise<ProjectSessionSnapshot> {
+  private async loadSnapshot(
+    projectRoot: string,
+    options: { writeCanvasMapChanges: boolean } = { writeCanvasMapChanges: true }
+  ): Promise<ProjectSessionSnapshot> {
     return loadProjectSnapshot({
       projectRoot,
+      writeCanvasMapChanges: options.writeCanvasMapChanges,
       loadOrderedCanvases: (root) => this.canvasRegistryService.orderedCanvases(root),
+      synchronizeCanvasMaps: (root, canvases, files, syncOptions) => this.canvasMapSessionService.synchronizeCanvasMaps(
+        root,
+        canvases,
+        files,
+        syncOptions
+      ),
       projectCanvasDocument: (root, canvas, diagnostics) => this.canvasProjectionService.projectCanvasDocument(
         root,
         canvas,

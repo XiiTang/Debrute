@@ -8,13 +8,15 @@ import {
   readProjectMetadata,
   readProjectTextFile,
   resolveExistingProjectPath,
-  resolveProjectPathForWrite
+  resolveProjectPathForWrite,
+  type ProjectFileEntry
 } from '@debrute/project-core';
 import {
   reconcileCanvasNodeElements,
   type CanvasDesiredLayoutRow,
   type CanvasDesiredNode,
   type CanvasDocument,
+  type Diagnostic,
   type CanvasLayoutSize
 } from '@debrute/canvas-core';
 import {
@@ -45,6 +47,11 @@ export interface CanvasMapPublishResult {
 export interface AddProjectPathToCanvasMapResult {
   canvas: CanvasDocument;
   centerProjectRelativePath: string;
+}
+
+export interface SynchronizeCanvasMapsResult {
+  canvases: CanvasDocument[];
+  diagnostics: Diagnostic[];
 }
 
 interface PreparedCanvasMapPublish {
@@ -113,6 +120,46 @@ export class CanvasMapSessionService {
     return this.sourceHashByCanvasId.get(canvasId);
   }
 
+  async synchronizeCanvasMaps(
+    projectRoot: string,
+    canvases: CanvasDocument[],
+    files: ProjectFileEntry[],
+    options: { writeCanvasChanges: boolean }
+  ): Promise<SynchronizeCanvasMapsResult> {
+    const diagnostics: Diagnostic[] = [];
+    const synchronizedCanvasById = new Map(canvases.map((canvas) => [canvas.id, canvas]));
+
+    for (const canvas of canvases) {
+      const sourcePath = canvasMapPath(canvas.id);
+      let sourceContent: string;
+      try {
+        sourceContent = (await this.readCanvasMapSource(projectRoot, sourcePath)).content;
+        const prepared = await this.prepareCanvasMapForCanvas(projectRoot, {
+          canvas,
+          sourceContent,
+          projectFiles: files
+        });
+        if (JSON.stringify(prepared.nextCanvas.nodeElements) !== JSON.stringify(canvas.nodeElements)) {
+          if (options.writeCanvasChanges) {
+            await this.options.writeCanvasJson(canvasPathFor(projectRoot, canvas.id), prepared.nextCanvas);
+          }
+          synchronizedCanvasById.set(canvas.id, prepared.nextCanvas);
+        }
+        this.sourceHashByCanvasId.set(canvas.id, prepared.sourceHash);
+      } catch (error) {
+        if (!(error instanceof CanvasMapError)) {
+          throw error;
+        }
+        diagnostics.push(canvasMapDiagnostic(projectRoot, canvas.id, sourcePath, error));
+      }
+    }
+
+    return {
+      canvases: canvases.map((canvas) => synchronizedCanvasById.get(canvas.id)!),
+      diagnostics
+    };
+  }
+
   private async readCanvasMapSource(projectRoot: string, sourcePath: string): Promise<{ content: string }> {
     try {
       return await readProjectTextFile(projectRoot, sourcePath);
@@ -133,22 +180,33 @@ export class CanvasMapSessionService {
     projectRoot: string,
     input: { canvasId: string; sourceContent: string }
   ): Promise<PreparedCanvasMapPublish> {
-    const sourcePath = canvasMapPath(input.canvasId);
+    const currentCanvas = await this.readCanvas(projectRoot, input.canvasId);
+    return this.prepareCanvasMapForCanvas(projectRoot, {
+      canvas: currentCanvas,
+      sourceContent: input.sourceContent,
+      projectFiles: await listDebruteProjectFiles(projectRoot)
+    });
+  }
+
+  private async prepareCanvasMapForCanvas(
+    projectRoot: string,
+    input: { canvas: CanvasDocument; sourceContent: string; projectFiles: ProjectFileEntry[] }
+  ): Promise<PreparedCanvasMapPublish> {
+    const sourcePath = canvasMapPath(input.canvas.id);
     const map = parseCanvasMap({
-      canvasId: input.canvasId,
+      canvasId: input.canvas.id,
       sourcePath,
       content: input.sourceContent
     });
-    const currentCanvas = await this.readCanvas(projectRoot, input.canvasId);
-    const expanded = expandCanvasMap(map, await listDebruteProjectFiles(projectRoot));
+    const expanded = expandCanvasMap(map, input.projectFiles);
     const prepared = await this.prepareExpandedCanvasMapProjection(projectRoot, expanded);
     return {
       sourceHash: canvasMapSourceHash(input.sourceContent),
-      currentCanvas,
+      currentCanvas: input.canvas,
       nextCanvas: {
-        ...currentCanvas,
+        ...input.canvas,
         nodeElements: reconcileCanvasNodeElements({
-          existing: currentCanvas.nodeElements,
+          existing: input.canvas.nodeElements,
           desired: prepared.desired,
           layoutRows: prepared.layoutRows,
           layoutSizeForNode: (node) => requiredLayoutSize(prepared.layoutSizes, node.projectRelativePath)
@@ -243,6 +301,19 @@ function requiredLayoutSize(layoutSizes: Map<string, CanvasLayoutSize>, projectR
 
 function canvasPathFor(projectRoot: string, canvasId: string): string {
   return join(getDebruteProjectPaths(projectRoot).canvasesDir, `${canvasId}.json`);
+}
+
+function canvasMapDiagnostic(projectRoot: string, canvasId: string, sourcePath: string, error: CanvasMapError): Diagnostic {
+  return {
+    id: `canvas-map.invalid:${canvasId}`,
+    source: 'canvas-map',
+    severity: 'error',
+    code: error.code,
+    message: error.message,
+    filePath: join(projectRoot, sourcePath),
+    ...(error.line !== undefined ? { line: error.line } : {}),
+    ...(error.column !== undefined ? { column: error.column } : {})
+  };
 }
 
 function errorMessage(error: unknown): string {

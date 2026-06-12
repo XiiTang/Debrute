@@ -11,7 +11,7 @@ export interface ProjectViewStateStorage {
 }
 
 export function projectViewStateStorageKey(projectId: string, clientId: string): string {
-  return `debrute:project-view:terminal-v1:${encodeURIComponent(projectId)}:${encodeURIComponent(clientId)}`;
+  return `debrute:project-view:${encodeURIComponent(projectId)}:${encodeURIComponent(clientId)}`;
 }
 
 export function loadProjectViewState(input: {

@@ -22,7 +22,7 @@ describe('App Server project watch events', () => {
     })).resolves.toBe(false);
   });
 
-  it('refreshes Canvas Map file changes without compiling Canvas JSON', async () => {
+  it('syncs Canvas Map file changes through watched refreshes', async () => {
     const projectRoot = await mkdtemp(join(tmpdir(), 'debrute-watch-canvas-map-'));
     const server = new DebruteAppServer({
       canvasNodeLayoutSizeReader: async (input) => {
@@ -44,7 +44,6 @@ describe('App Server project watch events', () => {
         ''
       ]);
       await server.publishCanvasMapForProject(projectRoot, { canvasId: 'canvas-1' });
-      const canvasBefore = await readFile(join(projectRoot, '.debrute/canvases/canvas-1.json'), 'utf8');
 
       const mapPath = join(projectRoot, '.debrute/canvas-maps/canvas-1.yaml');
       await writeFile(mapPath, 'paths:\n  - outputs/b.png\n', 'utf8');
@@ -58,8 +57,54 @@ describe('App Server project watch events', () => {
 
       const snapshot = server.getSnapshot();
       expect(snapshot.files.map((file) => file.projectRelativePath)).toContain('.debrute/canvas-maps/canvas-1.yaml');
-      await expect(readFile(join(projectRoot, '.debrute/canvases/canvas-1.json'), 'utf8')).resolves.toBe(canvasBefore);
-      expect(snapshot.canvases[0]?.nodeElements.map((node) => node.projectRelativePath)).toEqual(['outputs', 'outputs/a.png']);
+      await expect(readFile(join(projectRoot, '.debrute/canvases/canvas-1.json'), 'utf8')).resolves.toContain('outputs/b.png');
+      expect(snapshot.canvases[0]?.nodeElements.map((node) => node.projectRelativePath)).toEqual(['outputs', 'outputs/b.png']);
+    } finally {
+      server.close();
+      await rm(projectRoot, { recursive: true, force: true });
+    }
+  });
+
+  it('syncs Canvas Map folder rules when a matching file appears through a watched event', async () => {
+    const projectRoot = await mkdtemp(join(tmpdir(), 'debrute-watch-canvas-map-content-'));
+    const server = new DebruteAppServer({
+      canvasNodeLayoutSizeReader: async (input) => {
+        if (input.nodeKind === 'directory') {
+          return { width: 240, height: 96 };
+        }
+        return { width: 100, height: 100 };
+      }
+    });
+
+    try {
+      await mkdir(join(projectRoot, 'outputs'), { recursive: true });
+      await writeFile(join(projectRoot, 'outputs/a.png'), 'fake', 'utf8');
+      await server.openProject(projectRoot, { initializeIfMissing: true, createDefaultCanvas: true, watchFiles: false });
+      await writeCanvasMap(projectRoot, 'canvas-1', [
+        'paths:',
+        '  - outputs/',
+        ''
+      ]);
+      await server.publishCanvasMapForProject(projectRoot, { canvasId: 'canvas-1' });
+
+      const nextFilePath = join(projectRoot, 'outputs/b.png');
+      await writeFile(nextFilePath, 'fake', 'utf8');
+      await callWatchedFileEvent(server, {
+        type: 'created',
+        absolutePath: nextFilePath,
+        projectRelativePath: 'outputs/b.png',
+        observedAt: Date.now() + 1000,
+        affects: ['content']
+      });
+
+      const snapshot = server.getSnapshot();
+      expect(snapshot.files.map((file) => file.projectRelativePath)).toContain('outputs/b.png');
+      expect(snapshot.canvases[0]?.nodeElements.map((node) => node.projectRelativePath)).toEqual([
+        'outputs',
+        'outputs/a.png',
+        'outputs/b.png'
+      ]);
+      await expect(readFile(join(projectRoot, '.debrute/canvases/canvas-1.json'), 'utf8')).resolves.toContain('outputs/b.png');
     } finally {
       server.close();
       await rm(projectRoot, { recursive: true, force: true });
