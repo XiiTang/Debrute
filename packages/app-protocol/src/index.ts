@@ -639,6 +639,7 @@ export type AppServerEvent =
   | { type: 'project.fileChanged'; event: NormalizedFileWatchEvent; snapshot: ProjectSessionSnapshot }
   | { type: 'canvas.changed'; canvas: CanvasDocument; projection: CanvasProjection }
   | { type: 'canvas.feedback.changed'; feedback: CanvasFeedbackDocument }
+  | { type: 'generatedAsset.metadata.changed'; record: GeneratedAssetRecord }
   | { type: 'llm.settings.changed'; settings: LlmProviderSettingsView }
   | { type: 'imageModel.settings.changed'; settings: ImageModelSettingsView }
   | { type: 'videoModel.settings.changed'; settings: VideoModelSettingsView }
@@ -652,6 +653,7 @@ export type WorkbenchEvent =
   | { type: 'project.fileChanged'; projectId: string; projectRevision: number; event: WorkbenchFileWatchEvent; snapshot: WorkbenchProjectSessionSnapshot }
   | { type: 'canvas.changed'; projectId: string; projectRevision: number; canvas: CanvasDocument; projection: CanvasProjection }
   | { type: 'canvas.feedback.changed'; projectId: string; projectRevision: number; feedback: CanvasFeedbackDocument }
+  | { type: 'generatedAsset.metadata.changed'; projectId: string; projectRevision: number; record: GeneratedAssetRecord }
   | { type: 'llm.settings.changed'; settings: LlmProviderSettingsView }
   | { type: 'imageModel.settings.changed'; settings: ImageModelSettingsView }
   | { type: 'videoModel.settings.changed'; settings: VideoModelSettingsView }

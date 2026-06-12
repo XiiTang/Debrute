@@ -319,7 +319,7 @@ export class ProjectSessionRegistry {
       record.projectRevision += 1;
       return;
     }
-    if (event.type === 'canvas.feedback.changed') {
+    if (event.type === 'canvas.feedback.changed' || event.type === 'generatedAsset.metadata.changed') {
       record.projectRevision += 1;
     }
   }

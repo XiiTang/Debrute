@@ -1136,7 +1136,7 @@ function eventForHttp(
       projection: projectionForHttp(event.projection, daemonUrl, projectId, daemonToken)
     };
   }
-  if (event.type === 'canvas.feedback.changed') {
+  if (event.type === 'canvas.feedback.changed' || event.type === 'generatedAsset.metadata.changed') {
     return {
       ...event,
       projectId,

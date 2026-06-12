@@ -379,8 +379,7 @@ export class DebruteAppServer {
   }
 
   async recordGeneratedAssetMetadata(input: RecordGeneratedAssetInput): Promise<GeneratedAssetRecord> {
-    const current = this.getSnapshot();
-    return this.generatedAssetMetadataService.recordGeneratedAsset(current.projectRoot, input);
+    return this.enqueueSessionOperation(async () => this.recordGeneratedAssetMetadataUnlocked(input));
   }
 
   async lookupGeneratedAssetMetadata(input: { projectRelativePath: string }): Promise<GeneratedAssetMetadataLookup> {
@@ -653,7 +652,7 @@ export class DebruteAppServer {
       input,
       settings,
       secrets: { videoModelApiKeys: secrets.videoModelApiKeys },
-      recordGeneratedAsset: (metadata) => this.generatedAssetMetadataService.recordGeneratedAsset(current.projectRoot, metadata).then(() => undefined),
+      recordGeneratedAsset: (metadata) => this.recordGeneratedAssetMetadata(metadata).then(() => undefined),
       ...(this.options.videoModelFetch ? { fetch: this.options.videoModelFetch } : {})
     });
     if (result.status === 'error') {
@@ -739,9 +738,7 @@ export class DebruteAppServer {
           input: request,
           settings,
           secrets: { imageModelApiKeys: secrets.imageModelApiKeys },
-          recordGeneratedAsset: (metadata) => this.generatedAssetMetadataService
-            .recordGeneratedAsset(projectRoot, metadata)
-            .then(() => undefined),
+          recordGeneratedAsset: (metadata) => this.recordGeneratedAssetMetadata(metadata).then(() => undefined),
           ...(this.options.imageModelFetch ? { fetch: this.options.imageModelFetch } : {}),
           ...(options.signal ? { signal: options.signal } : {})
         });
@@ -804,6 +801,9 @@ export class DebruteAppServer {
       if (event.affects.length === 0) {
         return;
       }
+      if (event.affects.length === 1 && event.affects[0] === 'generated-asset-metadata') {
+        return;
+      }
       if (await shouldIgnoreStaleWatchedEvent({
         snapshotLoadedAt: this.snapshotLoadedAt,
         event
@@ -843,6 +843,13 @@ export class DebruteAppServer {
 
   private emit(event: AppServerEvent): void {
     this.events.emit('event', event);
+  }
+
+  private async recordGeneratedAssetMetadataUnlocked(input: RecordGeneratedAssetInput): Promise<GeneratedAssetRecord> {
+    const current = this.getSnapshot();
+    const record = await this.generatedAssetMetadataService.recordGeneratedAsset(current.projectRoot, input);
+    this.emit({ type: 'generatedAsset.metadata.changed', record });
+    return record;
   }
 
   private async readLlmProviderSettings() {

@@ -1037,7 +1037,7 @@ describe('daemon HTTP runtime', () => {
     });
     cleanups.push(() => daemon.close(), () => rm(projectRoot, { recursive: true, force: true }));
     const runtime = await daemon.listen();
-    const opened = await requestJson<{ projectId: string }>(`${runtime.daemonUrl}/api/projects/open`, {
+    const opened = await requestJson<{ projectId: string; projectRevision: number }>(`${runtime.daemonUrl}/api/projects/open`, {
       method: 'POST',
       headers: {
         'content-type': 'application/json',
@@ -1048,6 +1048,9 @@ describe('daemon HTTP runtime', () => {
     if (!appServer) {
       throw new Error('Daemon did not create a project app server.');
     }
+    expect(opened.projectRevision).toBe(1);
+    const events = await fetch(`${runtime.daemonUrl}/api/projects/${opened.projectId}/events?clientId=generated-assets-client&debrute-token=test-token`);
+    expect(events.status).toBe(200);
     const record = await appServer.recordGeneratedAssetMetadata({
       projectRelativePath: 'generated/cover.png',
       modelRun: {
@@ -1055,6 +1058,28 @@ describe('daemon HTTP runtime', () => {
         output: { ok: true }
       }
     });
+
+    await expect(readNextSseMessage<{
+      type: string;
+      projectId: string;
+      projectRevision: number;
+      record: { recordId: string; projectRelativePath: string };
+    }>(events)).resolves.toMatchObject({
+      type: 'generatedAsset.metadata.changed',
+      projectId: opened.projectId,
+      projectRevision: 2,
+      record: {
+        recordId: record.recordId,
+        projectRelativePath: 'generated/cover.png'
+      }
+    });
+    const liveProjects = await requestJson<{ projects: Array<{ projectId: string; projectRevision: number }> }>(`${runtime.daemonUrl}/api/projects`);
+    expect(liveProjects.projects).toEqual([
+      expect.objectContaining({
+        projectId: opened.projectId,
+        projectRevision: 2
+      })
+    ]);
 
     const list = await requestJson<{
       assets: Array<{ assetId: string; projectRelativePath: string; rawUrl: string }>;
