@@ -27,12 +27,34 @@ describe('Electron development scripts', () => {
     expect(desktopPackage.scripts['dev:electron']).not.toContain('pnpm build:electron &&');
   });
 
-  it('starts fresh Electron development runtimes in hosted mode and reused runtimes in attached mode', () => {
+  it('starts Electron development runtimes as external daemon/web processes and launches Electron attached', () => {
     const script = readFileSync(join(process.cwd(), 'scripts/dev-electron-workbench.ts'), 'utf8');
 
-    expect(script).toContain("DEBRUTE_WORKBENCH_RUNTIME_MODE: 'hosted'");
-    expect(script).toContain("DEBRUTE_WORKBENCH_RUNTIME_MODE: 'attached'");
+    expect(script).toContain("'@debrute/daemon'");
+    expect(script).toContain("'@debrute/web'");
+    expect(script).not.toContain('DEBRUTE_WORKBENCH_RUNTIME_MODE');
+    expect(script).not.toContain('DEBRUTE_WEB_URL');
+    expect(script).not.toContain('DEBRUTE_DAEMON_TOKEN:');
     expect(script).not.toContain('pid ?? process.pid');
+  });
+
+  it('does not attach Electron development to an older CLI/source-dev runtime', () => {
+    const script = readFileSync(join(process.cwd(), 'scripts/dev-electron-workbench.ts'), 'utf8');
+
+    expect(script).toContain('isDesktopDevRuntimeForCurrentSession');
+    expect(script).toContain("state.runtimeKind === 'desktop-dev'");
+    expect(script).toContain("state.owner.kind === 'dev'");
+    expect(script).toContain('state.owner.ownerId === ownerId');
+    expect(script).toContain('isWorkbenchRuntimeHealthy(state)');
+  });
+
+  it('launches Electron only after the development runtime is registered', () => {
+    const script = readFileSync(join(process.cwd(), 'scripts/dev-electron-workbench.ts'), 'utf8');
+
+    expect(script.indexOf('const result = await ensureRegisteredWorkbenchRuntime')).toBeLessThan(
+      script.indexOf('const electron = launchElectron();')
+    );
+    expect(script).not.toContain('currentElectronChild');
   });
 
   it('keeps native Electron runtime modules external so their native packages resolve from pnpm', () => {

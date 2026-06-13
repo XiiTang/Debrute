@@ -5,6 +5,8 @@ import { dirname, normalize } from 'node:path/posix';
 
 export const architectureScopes = [
   'packages',
+  'apps/desktop/package.json',
+  'apps/desktop/tsconfig.electron.json',
   'apps/desktop/src',
   'apps/web/src',
   'apps/web/vite.config.ts',
@@ -73,9 +75,19 @@ export const importMatrix = [
     forbiddenImports: [/^electron$/, /^node:fs$/, /^node:fs\/promises$/, /^fs$/, /^fs\/promises$/]
   },
   {
-    name: 'desktop electron does not import web workbench internals',
+    name: 'desktop electron stays a supervisor and client',
     match: (file) => file.startsWith('apps/desktop/src/electron/'),
-    forbiddenImports: [/apps\/web\/src\/workbench/, /^\.\.\/\.\.\/\.\.\/web\/src\/workbench/, /^react$/, /^react-dom/]
+    forbiddenImports: [
+      /^@debrute\/daemon$/,
+      /^@debrute\/app-server$/,
+      /^@debrute\/capability-runtime$/,
+      /^apps\/app-server\//,
+      /^apps\/daemon\//,
+      /apps\/web\/src\/workbench/,
+      /^\.\.\/\.\.\/\.\.\/web\/src\/workbench/,
+      /^react$/,
+      /^react-dom/
+    ]
   },
   {
     name: 'app-server does not import UI runtimes or react',
@@ -221,6 +233,13 @@ function exportViolations(file, text) {
 }
 
 function packageJsonViolations(file, text) {
+  if (file === 'apps/desktop/package.json') {
+    const pkg = JSON.parse(text);
+    const dependencies = new Set(Object.keys(pkg.dependencies ?? {}));
+    return ['@debrute/daemon', '@debrute/app-server', '@debrute/capability-runtime']
+      .filter((dependency) => dependencies.has(dependency))
+      .map((dependency) => `desktop electron stays a supervisor and client: ${file} depends on ${dependency}`);
+  }
   if (file !== 'apps/debrute-cli/package.json') {
     return [];
   }
@@ -232,6 +251,13 @@ function packageJsonViolations(file, text) {
 }
 
 function tsconfigViolations(file, text) {
+  if (file === 'apps/desktop/tsconfig.electron.json') {
+    const config = JSON.parse(text);
+    const references = (config.references ?? []).map((reference) => reference.path);
+    return ['../../apps/daemon', '../../apps/app-server', '../../packages/capability-runtime']
+      .filter((reference) => references.includes(reference))
+      .map((reference) => `desktop electron stays a supervisor and client: ${file} references ${reference}`);
+  }
   if (file !== 'apps/debrute-cli/tsconfig.json') {
     return [];
   }

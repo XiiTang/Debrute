@@ -18,6 +18,7 @@ import {
 const workspaceRoot = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 const paths = resolveWorkbenchRuntimePaths();
 const children: ChildProcess[] = [];
+const ownerId = randomUUID();
 let currentRuntimeState: WorkbenchRuntimeState | undefined;
 let deleteOwnState = false;
 
@@ -85,9 +86,14 @@ async function launchSourceDevRuntime(): Promise<WorkbenchRuntimeState> {
   children.push(daemon, web);
   const now = new Date().toISOString();
   const state: WorkbenchRuntimeState = {
-    schemaVersion: 1,
+    schemaVersion: 2,
     runtimeKind: 'source-dev',
     processControl: 'external',
+    owner: {
+      kind: 'dev',
+      ownerId,
+      pid: process.pid
+    },
     daemonUrl,
     webUrl,
     token,

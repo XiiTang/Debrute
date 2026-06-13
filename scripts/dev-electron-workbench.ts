@@ -1,6 +1,7 @@
 #!/usr/bin/env tsx
 import { spawn, spawnSync, type ChildProcess } from 'node:child_process';
 import { randomUUID } from 'node:crypto';
+import { mkdir, writeFile } from 'node:fs/promises';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import {
@@ -9,6 +10,7 @@ import {
   chooseLoopbackPort,
   deleteWorkbenchRuntimeState,
   ensureRegisteredWorkbenchRuntime,
+  isWorkbenchRuntimeHealthy,
   readWorkbenchRuntimeState,
   resolveWorkbenchRuntimePaths,
   type WorkbenchRuntimeState
@@ -18,7 +20,7 @@ const workspaceRoot = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 const desktopRoot = join(workspaceRoot, 'apps/desktop');
 const paths = resolveWorkbenchRuntimePaths();
 const children: ChildProcess[] = [];
-let currentElectronChild: ChildProcess | undefined;
+const ownerId = randomUUID();
 let currentRuntimeState: WorkbenchRuntimeState | undefined;
 let deleteOwnState = false;
 
@@ -38,20 +40,15 @@ if (build.status !== 0) {
 
 const result = await ensureRegisteredWorkbenchRuntime({
   paths,
+  isHealthy: async (state) => isDesktopDevRuntimeForCurrentSession(state) && await isWorkbenchRuntimeHealthy(state),
   launch: launchDesktopDevRuntime,
   onRuntimeLaunchFailed: killChildren
 });
 currentRuntimeState = result.state;
 deleteOwnState = result.runtimeStarted;
 
-let electron = currentElectronChild;
-if (!result.runtimeStarted) {
-  electron = launchElectronAttached(result.state);
-  children.push(electron);
-}
-if (!electron) {
-  throw new Error('Electron process was not launched.');
-}
+const electron = launchElectron();
+children.push(electron);
 
 await new Promise((resolveExit) => electron.once('exit', resolveExit));
 await shutdown(currentRuntimeState, deleteOwnState);
@@ -60,8 +57,24 @@ async function launchDesktopDevRuntime(): Promise<WorkbenchRuntimeState> {
   const daemonPort = await chooseLoopbackPort(DEFAULT_WORKBENCH_DAEMON_PORT);
   const webPort = await chooseLoopbackPort(DEFAULT_WORKBENCH_WEB_PORT, new Set([daemonPort]));
   const token = randomUUID();
+  await writeRuntimeTokenFile(token);
   const daemonUrl = `http://127.0.0.1:${daemonPort}`;
   const webUrl = `http://127.0.0.1:${webPort}`;
+  const daemon = spawnPnpm([
+    '--filter',
+    '@debrute/daemon',
+    'dev',
+    '--port',
+    String(daemonPort),
+    '--token-file',
+    paths.tokenPath,
+    '--web-base-url',
+    webUrl
+  ], {
+    DEBRUTE_DAEMON_PORT: String(daemonPort),
+    DEBRUTE_DAEMON_TOKEN_FILE: paths.tokenPath,
+    DEBRUTE_WEB_BASE_URL: webUrl
+  });
   const web = spawnPnpm([
     '--filter',
     '@debrute/web',
@@ -74,49 +87,39 @@ async function launchDesktopDevRuntime(): Promise<WorkbenchRuntimeState> {
   ], {
     DEBRUTE_DAEMON_URL: daemonUrl
   });
-  const electron = spawnElectron({
-    DEBRUTE_WORKBENCH_RUNTIME_MODE: 'hosted',
-    DEBRUTE_WEB_URL: webUrl,
-    DEBRUTE_DAEMON_PORT: String(daemonPort),
-    DEBRUTE_DAEMON_TOKEN: token,
-    DEBRUTE_WORKBENCH_RUNTIME_KIND: 'desktop-dev'
-  });
-  currentElectronChild = electron;
-  children.push(web, electron);
   const now = new Date().toISOString();
   const state: WorkbenchRuntimeState = {
-    schemaVersion: 1,
+    schemaVersion: 2,
     runtimeKind: 'desktop-dev',
     processControl: 'external',
+    owner: {
+      kind: 'dev',
+      ownerId,
+      pid: process.pid
+    },
     daemonUrl,
     webUrl,
     token,
-    daemonPid: requirePid(electron, 'electron'),
+    daemonPid: requirePid(daemon, 'daemon'),
     webPid: requirePid(web, 'web'),
     daemonLogPath: paths.daemonLogPath,
     webLogPath: paths.webLogPath,
     startedAt: now,
     updatedAt: now
   };
-  currentRuntimeState = state;
-  deleteOwnState = true;
+  children.push(daemon, web);
   return state;
 }
 
-function launchElectronAttached(state: WorkbenchRuntimeState): ChildProcess {
-  return spawnElectron({
-    DEBRUTE_WORKBENCH_RUNTIME_MODE: 'attached',
-    DEBRUTE_DAEMON_URL: state.daemonUrl,
-    DEBRUTE_WEB_URL: state.webUrl,
-    DEBRUTE_DAEMON_TOKEN: state.token
-  });
+function launchElectron(): ChildProcess {
+  return spawnElectron();
 }
 
-function spawnElectron(env: Record<string, string>): ChildProcess {
+function spawnElectron(): ChildProcess {
   return spawn(electronExecutable(), ['.'], {
     cwd: desktopRoot,
     stdio: 'inherit',
-    env: { ...process.env, ...env }
+    env: process.env
   });
 }
 
@@ -128,11 +131,22 @@ function spawnPnpm(args: string[], env: Record<string, string>): ChildProcess {
   });
 }
 
+async function writeRuntimeTokenFile(token: string): Promise<void> {
+  await mkdir(paths.runtimeDir, { recursive: true, mode: 0o700 });
+  await writeFile(paths.tokenPath, `${token}\n`, { encoding: 'utf8', mode: 0o600 });
+}
+
 function requirePid(child: ChildProcess, label: string): number {
   if (!child.pid) {
     throw new Error(`Debrute ${label} process did not report a pid.`);
   }
   return child.pid;
+}
+
+function isDesktopDevRuntimeForCurrentSession(state: WorkbenchRuntimeState): boolean {
+  return state.runtimeKind === 'desktop-dev'
+    && state.owner.kind === 'dev'
+    && state.owner.ownerId === ownerId;
 }
 
 async function shutdown(state: WorkbenchRuntimeState | undefined, shouldDeleteState: boolean): Promise<void> {

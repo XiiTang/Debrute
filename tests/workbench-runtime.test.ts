@@ -14,6 +14,7 @@ import {
   isLoopbackHttpUrl,
   readWorkbenchRuntimeState,
   resolveWorkbenchRuntimePaths,
+  terminateOwnedWorkbenchRuntime,
   terminateManagedWorkbenchRuntime,
   writeWorkbenchRuntimeState,
   type WorkbenchRuntimeState
@@ -43,10 +44,26 @@ describe('@debrute/workbench-runtime state', () => {
       await writeFile(paths.statePath, JSON.stringify({
         schemaVersion: 1,
         runtimeKind: 'source-dev',
+        processControl: 'managed',
         daemonUrl: 'http://127.0.0.1:17321'
       }), 'utf8');
 
-      await expect(readWorkbenchRuntimeState(paths.statePath)).rejects.toThrow(/Invalid Debrute workbench runtime state/);
+      await expect(readWorkbenchRuntimeState(paths.statePath)).rejects.toThrow(/schemaVersion must be 2/);
+    } finally {
+      await rm(root, { recursive: true, force: true });
+    }
+  });
+
+  it('requires owner metadata in current runtime state', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'debrute-runtime-owner-'));
+    try {
+      const paths = resolveWorkbenchRuntimePaths(root);
+      const invalid = runtimeState() as unknown as Record<string, unknown>;
+      delete invalid.owner;
+      await mkdir(paths.runtimeDir, { recursive: true });
+      await writeFile(paths.statePath, JSON.stringify(invalid), 'utf8');
+
+      await expect(readWorkbenchRuntimeState(paths.statePath)).rejects.toThrow(/owner/);
     } finally {
       await rm(root, { recursive: true, force: true });
     }
@@ -207,6 +224,32 @@ describe('@debrute/workbench-runtime registry', () => {
     expect(kill).toHaveBeenCalledWith(11, 'SIGTERM');
   });
 
+  it('terminates only runtimes owned by the requested owner', () => {
+    const owner = { kind: 'desktop' as const, ownerId: 'desktop-session-1', pid: 200 };
+    terminateOwnedWorkbenchRuntime(runtimeState({
+      owner,
+      processControl: 'managed',
+      daemonPid: 10,
+      webPid: 11
+    }), owner, kill);
+    terminateOwnedWorkbenchRuntime(runtimeState({
+      owner: { kind: 'desktop', ownerId: 'other-session', pid: 201 },
+      processControl: 'managed',
+      daemonPid: 20,
+      webPid: 21
+    }), owner, kill);
+    terminateOwnedWorkbenchRuntime(runtimeState({
+      owner,
+      processControl: 'external',
+      daemonPid: 30,
+      webPid: 31
+    }), owner, kill);
+
+    expect(kill).toHaveBeenCalledTimes(2);
+    expect(kill).toHaveBeenCalledWith(10, 'SIGTERM');
+    expect(kill).toHaveBeenCalledWith(11, 'SIGTERM');
+  });
+
   it('serializes publishers with the startup lock', async () => {
     const root = await mkdtemp(join(tmpdir(), 'debrute-runtime-lock-'));
     try {
@@ -248,9 +291,14 @@ describe('@debrute/workbench-runtime ports', () => {
 
 function runtimeState(overrides: Partial<WorkbenchRuntimeState> = {}): WorkbenchRuntimeState {
   return {
-    schemaVersion: 1,
+    schemaVersion: 2,
     runtimeKind: 'source-dev',
     processControl: 'managed',
+    owner: {
+      kind: 'cli',
+      ownerId: 'owner-1',
+      pid: 100
+    },
     daemonUrl: 'http://127.0.0.1:17321',
     webUrl: 'http://127.0.0.1:17322',
     token: 'secret',
@@ -258,8 +306,8 @@ function runtimeState(overrides: Partial<WorkbenchRuntimeState> = {}): Workbench
     webPid: 11,
     daemonLogPath: '/home/user/.debrute/runtime/workbench-daemon.log',
     webLogPath: '/home/user/.debrute/runtime/workbench-web.log',
-    startedAt: '2026-06-03T00:00:00.000Z',
-    updatedAt: '2026-06-03T00:00:00.000Z',
+    startedAt: '2026-06-13T00:00:00.000Z',
+    updatedAt: '2026-06-13T00:00:00.000Z',
     ...overrides
   };
 }

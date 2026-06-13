@@ -9,12 +9,12 @@ import {
   normalizeServiceErrorCode,
   primitiveErrorFields
 } from './errors/cliErrors.js';
-import { runGenerationCommand } from './commands/generationCommands.js';
 import { runWorkbenchCommand } from './commands/workbenchCommands.js';
 import { parseDebruteArgs, commandNameFromArgv, type ParsedDebruteArgs } from './parser/parseDebruteArgs.js';
-import { runProjectCommand } from './commands/projectCommands.js';
 import { renderAgentRecord, type DebruteAgentResult } from './output/renderAgentRecord.js';
 import { runRuntimeCommand } from './commands/runtimeCommands.js';
+import { runRuntimeBackedCliCommand } from './runtime/cliRuntimeAccess.js';
+import { runtimePolicyForCommand } from './runtime/cliRuntimePolicy.js';
 import { createCliSkillsRuntime, resolveCliDebruteVersion } from './runtime/createCliSkillsRuntime.js';
 import { configurePackagedNodeModules } from './runtime/packagedNodeModules.js';
 import { INTERNAL_WORKBENCH_RUNTIME_CHILD_COMMAND } from './workbench/workbenchRuntimeChildEntrypoint.js';
@@ -48,30 +48,19 @@ export async function runCli(argv: string[], output: (text: string) => void = co
 }
 
 async function runParsedCli(args: ParsedDebruteArgs, options: { output: (text: string) => void }): Promise<DebruteAgentResult> {
-  if (args.command === 'commands' || args.command === 'help') {
-    return runRuntimeCommand(args);
+  if (runtimePolicyForCommand(args.command) === 'no-runtime') {
+    if (args.command === 'commands' || args.command === 'help') {
+      return runRuntimeCommand(args);
+    }
+    const skillsRuntime = await createCliSkillsRuntime();
+    return runRuntimeCommand(args, {
+      skillsService: skillsRuntime.skillsService
+    });
   }
   if (args.command === 'workbench.url') {
     return runWorkbenchCommand(args);
   }
-
-  const { DebruteAppServer } = await import('@debrute/app-server');
-  const skillsRuntime = await createCliSkillsRuntime();
-  const server = new DebruteAppServer();
-  try {
-    if (args.scope === 'runtime') {
-      return await runRuntimeCommand(args, {
-        server,
-        skillsService: skillsRuntime.skillsService
-      });
-    }
-    if (args.scope === 'project') {
-      return await runProjectCommand(args, server);
-    }
-    return await runGenerationCommand(args, server, { output: options.output });
-  } finally {
-    server.close();
-  }
+  return await runRuntimeBackedCliCommand(args, { output: options.output }) as DebruteAgentResult;
 }
 
 function cliErrorFromUnknown(error: unknown): DebruteCliError {

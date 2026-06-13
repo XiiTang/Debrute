@@ -1491,8 +1491,8 @@ describe('daemon HTTP runtime', () => {
     expect(aborts).toEqual([]);
   });
 
-  it('keeps a project session live while an Electron project window is registered', async () => {
-    const projectRoot = await mkdtemp(join(tmpdir(), 'debrute-daemon-electron-window-project-'));
+  it('keeps a project session live through the Electron window HTTP lease API', async () => {
+    const projectRoot = await mkdtemp(join(tmpdir(), 'debrute-daemon-electron-window-http-project-'));
     await writeFile(join(projectRoot, 'brief.md'), '# Brief', 'utf8');
 
     const daemon = createDebruteDaemonHttpServer({
@@ -1513,14 +1513,17 @@ describe('daemon HTTP runtime', () => {
       body: JSON.stringify({ projectRoot })
     });
 
-    const releaseWindow = daemon.registerElectronProjectWindow(opened.projectId, 42);
-    expect(releaseWindow).toBeDefined();
+    await expect(apiFetch(`${runtime.daemonUrl}/api/projects/${opened.projectId}/electron-windows/42`, {
+      method: 'PUT'
+    })).resolves.toMatchObject({ status: 204 });
     await delay(AFTER_SHORT_PROJECT_IDLE_TTL_MS);
 
     await expect(requestJson(`${runtime.daemonUrl}/api/projects/${opened.projectId}`))
       .resolves.toMatchObject({ projectId: opened.projectId });
 
-    releaseWindow!();
+    await expect(apiFetch(`${runtime.daemonUrl}/api/projects/${opened.projectId}/electron-windows/42`, {
+      method: 'DELETE'
+    })).resolves.toMatchObject({ status: 204 });
     await delay(AFTER_SHORT_PROJECT_IDLE_TTL_MS);
 
     const released = await apiFetch(`${runtime.daemonUrl}/api/projects/${opened.projectId}`);

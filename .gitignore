@@ -11,6 +11,7 @@ dist/
 **/dist/
 apps/desktop/dist-electron/
 apps/desktop/release/
+apps/runtime-host/bundle/
 *.tsbuildinfo
 
 # Test and coverage output

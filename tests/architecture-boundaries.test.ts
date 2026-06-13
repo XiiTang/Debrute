@@ -60,7 +60,7 @@ describe('Debrute architecture boundaries', () => {
         'apps/debrute-cli/src/commands/violates-cli-package-boundary.ts'
       ])).resolves.toEqual([
         'packages do not import apps: packages/project-core/src/violates-package-boundary.ts imports "apps/app-server/src/index.js"',
-        'desktop electron does not import web workbench internals: apps/desktop/src/electron/ipc/violates-electron-boundary.ts imports "apps/web/src/workbench/WorkbenchApp.js"',
+        'desktop electron stays a supervisor and client: apps/desktop/src/electron/ipc/violates-electron-boundary.ts imports "apps/web/src/workbench/WorkbenchApp.js"',
         'web workbench does not import app-server: apps/web/src/workbench/violates-renderer-app-server-boundary.ts imports "apps/app-server/src/index.js"',
         'cli stays behind app-server and protocol boundaries: apps/debrute-cli/src/commands/violates-cli-package-boundary.ts imports "packages/project-core/src/index.js"'
       ]);
@@ -138,7 +138,7 @@ describe('Debrute architecture boundaries', () => {
     }
   });
 
-  it('keeps Electron main as a daemon-loading shell', () => {
+  it('keeps Electron main as a runtime supervisor and client', () => {
     for (const file of [
       'apps/desktop/src/electron/desktop-state/desktopStateStore.ts',
       'apps/desktop/src/electron/preload.ts'
@@ -147,11 +147,52 @@ describe('Debrute architecture boundaries', () => {
     }
 
     const text = readFileSync(join(root, 'apps/desktop/src/electron/main.ts'), 'utf8');
-    expect(architectureImportSpecifiers('apps/desktop/src/electron/main.ts', text)).toContain('@debrute/daemon');
-    expect(text).toContain("resolve(__dirname, '../dist')");
+    const specifiers = architectureImportSpecifiers('apps/desktop/src/electron/main.ts', text);
+
+    expect(specifiers).not.toContain('@debrute/daemon');
+    expect(specifiers).not.toContain('@debrute/app-server');
+    expect(text).toContain('RuntimeSupervisor');
+    expect(text).toContain('TrayController');
+    expect(text).not.toContain('createDebruteDaemonHttpServer');
     expect(text).not.toContain("../../../web/dist");
     expect(text).not.toContain('registerWorkbenchIpc');
     expect(text).not.toContain('registerProjectFileProtocols');
+  });
+
+  it('keeps desktop package dependencies out of runtime server packages', () => {
+    const desktopPackage = JSON.parse(readFileSync(join(root, 'apps/desktop/package.json'), 'utf8')) as {
+      dependencies?: Record<string, string>;
+    };
+    const desktopTsconfigs = [
+      'apps/desktop/tsconfig.json',
+      'apps/desktop/tsconfig.electron.json'
+    ].map((file) => readFileSync(join(root, file), 'utf8')).join('\n');
+
+    expect(desktopPackage.dependencies ?? {}).not.toHaveProperty('@debrute/daemon');
+    expect(desktopPackage.dependencies ?? {}).not.toHaveProperty('@debrute/app-server');
+    expect(desktopTsconfigs).not.toContain('../../apps/daemon');
+    expect(desktopTsconfigs).not.toContain('../../apps/app-server');
+  });
+
+  it('keeps CLI package dependencies out of runtime server packages', () => {
+    const cliPackage = JSON.parse(readFileSync(join(root, 'apps/debrute-cli/package.json'), 'utf8')) as {
+      dependencies?: Record<string, string>;
+    };
+    const cliTsconfig = readFileSync(join(root, 'apps/debrute-cli/tsconfig.json'), 'utf8');
+
+    expect(cliPackage.dependencies ?? {}).not.toHaveProperty('@debrute/daemon');
+    expect(cliPackage.dependencies ?? {}).not.toHaveProperty('@debrute/app-server');
+    expect(cliTsconfig).not.toContain('../../apps/daemon');
+    expect(cliTsconfig).not.toContain('../../apps/app-server');
+  });
+
+  it('keeps runtime host dependencies limited to the packages it imports', () => {
+    const runtimeHostPackage = JSON.parse(readFileSync(join(root, 'apps/runtime-host/package.json'), 'utf8')) as {
+      dependencies?: Record<string, string>;
+    };
+
+    expect(runtimeHostPackage.dependencies ?? {}).toHaveProperty('@debrute/daemon');
+    expect(runtimeHostPackage.dependencies ?? {}).not.toHaveProperty('@debrute/workbench-runtime');
   });
 
   it('keeps daemon project session registry behind the daemon HTTP boundary', () => {
@@ -209,8 +250,9 @@ describe('Debrute architecture boundaries', () => {
     const text = readFileSync(join(root, 'apps/daemon/src/http/createDebruteDaemonHttpServer.ts'), 'utf8');
 
     expect(text).toContain('DebruteGlobalRuntimeServer');
+    expect(text).toContain('/api/cli/run');
+    expect(text).toContain('runDaemonCliCommand');
     expect(text).not.toContain('runtimeAppServer');
-    expect(text).not.toContain('new DebruteAppServer(appServerOptions)');
   });
 
   it('keeps project App Server sessions free of global runtime forwarding methods', () => {
@@ -246,9 +288,17 @@ describe('Debrute architecture boundaries', () => {
 
     expect(text).toContain('registerElectronProjectWindow');
     expect(text).toContain('requireRuntimeClient().registerElectronProjectWindow');
-    expect(text).toContain('nativeShell: createElectronNativeShell(shell)');
+    expect(text).not.toContain('nativeShell: createElectronNativeShell(shell)');
     expect(text).not.toContain('appServer.openProject');
     expect(text).not.toContain('appServer.getSnapshot');
+  });
+
+  it('exposes Electron project-window leases only through daemon HTTP routes', () => {
+    const text = readFileSync(join(root, 'apps/daemon/src/http/createDebruteDaemonHttpServer.ts'), 'utf8');
+
+    expect(text).toContain("'/electron-windows/'");
+    expect(text).not.toContain('registerElectronProjectWindow(projectId');
+    expect(text).not.toContain('registerElectronProjectWindow:');
   });
 
   it('keeps generated TypeScript output out of source directories', () => {

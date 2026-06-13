@@ -51,8 +51,6 @@
   },
   "dependencies": {
     "@debrute/app-protocol": "workspace:*",
-    "@debrute/app-server": "workspace:*",
-    "@debrute/daemon": "workspace:*",
     "@debrute/project-core": "workspace:*",
     "@debrute/workbench-runtime": "workspace:*",
     "node-pty": "^1.1.0"

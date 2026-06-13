@@ -15,9 +15,8 @@
   },
   "dependencies": {
     "@debrute/app-protocol": "workspace:*",
-    "@debrute/app-server": "workspace:*",
     "@debrute/capability-runtime": "workspace:*",
-    "@debrute/daemon": "workspace:*",
+    "@debrute/runtime-host": "workspace:*",
     "@debrute/workbench-runtime": "workspace:*"
   }
 }

@@ -115,15 +115,12 @@ importers:
       '@debrute/app-protocol':
         specifier: workspace:*
         version: link:../../packages/app-protocol
-      '@debrute/app-server':
-        specifier: workspace:*
-        version: link:../app-server
       '@debrute/capability-runtime':
         specifier: workspace:*
         version: link:../../packages/capability-runtime
-      '@debrute/daemon':
+      '@debrute/runtime-host':
         specifier: workspace:*
-        version: link:../daemon
+        version: link:../runtime-host
       '@debrute/workbench-runtime':
         specifier: workspace:*
         version: link:../../packages/workbench-runtime
@@ -133,12 +130,6 @@ importers:
       '@debrute/app-protocol':
         specifier: workspace:*
         version: link:../../packages/app-protocol
-      '@debrute/app-server':
-        specifier: workspace:*
-        version: link:../app-server
-      '@debrute/daemon':
-        specifier: workspace:*
-        version: link:../daemon
       '@debrute/project-core':
         specifier: workspace:*
         version: link:../../packages/project-core
@@ -164,6 +155,19 @@ importers:
       vite:
         specifier: ^8.0.16
         version: 8.0.16(@types/node@24.13.1)(esbuild@0.28.0)(jiti@2.7.0)(tsx@4.22.4)(yaml@2.9.0)
+
+  apps/runtime-host:
+    dependencies:
+      '@debrute/daemon':
+        specifier: workspace:*
+        version: link:../daemon
+    devDependencies:
+      esbuild:
+        specifier: ^0.28.0
+        version: 0.28.0
+      typescript:
+        specifier: ^6.0.3
+        version: 6.0.3
 
   apps/web:
     dependencies:

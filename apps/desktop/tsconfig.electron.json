@@ -11,8 +11,6 @@
   },
   "references": [
     { "path": "../../packages/app-protocol" },
-    { "path": "../../apps/app-server" },
-    { "path": "../../apps/daemon" },
     { "path": "../../packages/workbench-runtime" }
   ],
   "include": ["src/electron/**/*.ts"]

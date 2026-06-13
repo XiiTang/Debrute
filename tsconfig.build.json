@@ -10,6 +10,7 @@
     { "path": "packages/workbench-runtime" },
     { "path": "apps/app-server" },
     { "path": "apps/daemon" },
+    { "path": "apps/runtime-host" },
     { "path": "apps/web" },
     { "path": "apps/debrute-cli" }
   ]

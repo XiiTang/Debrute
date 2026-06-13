@@ -48,13 +48,13 @@ export async function waitForDebruteShellUrl(
 export async function loadDebruteProjectShellWindow(
   window: DebruteShellWindow,
   url: string,
-  bindProjectWindow: () => void,
+  bindProjectWindow: () => void | Promise<void>,
   services: Partial<DebruteShellLoadServices> = {},
   options: Partial<DebruteShellLoadOptions> = {}
 ): Promise<void> {
+  await bindProjectWindow();
   await waitForDebruteShellUrl(url, services, options);
   await window.loadURL(url);
-  bindProjectWindow();
 }
 
 async function canReachDebruteShellUrl(

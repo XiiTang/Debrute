@@ -12,13 +12,17 @@ import {
   DEFAULT_WORKBENCH_WEB_PORT,
   chooseLoopbackPort,
   ensureRegisteredWorkbenchRuntime,
+  isWorkbenchRuntimeOwnedBy,
   isWorkbenchRuntimeHealthy,
   isWorkbenchRuntimeRegistryError,
-  terminateManagedWorkbenchRuntime,
+  resolveWorkbenchRuntimePaths,
+  terminateOwnedWorkbenchRuntime,
   type EnsureRegisteredWorkbenchRuntimeResult,
+  type WorkbenchRuntimeOwner,
   type WorkbenchRuntimePaths,
   type WorkbenchRuntimeState
 } from '@debrute/workbench-runtime';
+import { resolveCliRuntimeOwner } from './cliRuntimeOwner.js';
 
 export {
   DEFAULT_WORKBENCH_DAEMON_PORT,
@@ -40,11 +44,14 @@ export async function ensureWorkbenchRuntime(
   services: EnsureWorkbenchRuntimeServices = {}
 ): Promise<EnsureWorkbenchRuntimeResult> {
   try {
+    const paths = services.paths ?? resolveWorkbenchRuntimePaths();
+    const owner = await resolveCliRuntimeOwner(paths.runtimeDir);
     return await ensureRegisteredWorkbenchRuntime({
-      ...(services.paths ? { paths: services.paths } : {}),
+      paths,
       isHealthy: services.isHealthy ?? isWorkbenchRuntimeHealthy,
-      launch: services.launch ?? launchWorkbenchRuntime,
-      onRuntimeLaunchFailed: terminateManagedWorkbenchRuntime
+      launch: services.launch ?? ((launchPaths) => launchWorkbenchRuntime(launchPaths, owner)),
+      shouldTerminateStaleRuntime: (state) => isWorkbenchRuntimeOwnedBy(state, owner),
+      onRuntimeLaunchFailed: (state) => terminateOwnedWorkbenchRuntime(state, owner)
     });
   } catch (error) {
     if (isDebruteCliError(error)) {
@@ -57,14 +64,21 @@ export async function ensureWorkbenchRuntime(
   }
 }
 
-async function launchWorkbenchRuntime(paths: WorkbenchRuntimePaths): Promise<WorkbenchRuntimeState> {
+async function launchWorkbenchRuntime(
+  paths: WorkbenchRuntimePaths,
+  owner: WorkbenchRuntimeOwner
+): Promise<WorkbenchRuntimeState> {
   const sourceRoot = await resolveSourceCheckoutRoot(resolveWorkbenchRuntimeEntryDir());
   return sourceRoot
-    ? launchSourceDevRuntime(sourceRoot, paths)
-    : launchPackagedRuntime(paths);
+    ? launchSourceDevRuntime(sourceRoot, paths, owner)
+    : launchPackagedRuntime(paths, owner);
 }
 
-async function launchSourceDevRuntime(sourceRoot: string, paths: WorkbenchRuntimePaths): Promise<WorkbenchRuntimeState> {
+async function launchSourceDevRuntime(
+  sourceRoot: string,
+  paths: WorkbenchRuntimePaths,
+  owner: WorkbenchRuntimeOwner
+): Promise<WorkbenchRuntimeState> {
   const daemonPort = await chooseLoopbackPort(DEFAULT_WORKBENCH_DAEMON_PORT);
   const webPort = await chooseLoopbackPort(DEFAULT_WORKBENCH_WEB_PORT, new Set([daemonPort]));
   const token = randomUUID();
@@ -99,16 +113,22 @@ async function launchSourceDevRuntime(sourceRoot: string, paths: WorkbenchRuntim
   ], sourceRoot, paths.webLogPath, {
     DEBRUTE_DAEMON_URL: daemonUrl
   });
+  const daemonPid = requirePid(daemon, 'daemon');
+  const webPid = requirePid(web, 'web');
 
   return {
-    schemaVersion: 1,
+    schemaVersion: 2,
     runtimeKind: 'source-dev',
     processControl: 'managed',
+    owner: {
+      ...owner,
+      pid: daemonPid
+    },
     daemonUrl,
     webUrl,
     token,
-    daemonPid: requirePid(daemon, 'daemon'),
-    webPid: requirePid(web, 'web'),
+    daemonPid,
+    webPid,
     daemonLogPath: paths.daemonLogPath,
     webLogPath: paths.webLogPath,
     startedAt: now,
@@ -116,7 +136,10 @@ async function launchSourceDevRuntime(sourceRoot: string, paths: WorkbenchRuntim
   };
 }
 
-async function launchPackagedRuntime(paths: WorkbenchRuntimePaths): Promise<WorkbenchRuntimeState> {
+async function launchPackagedRuntime(
+  paths: WorkbenchRuntimePaths,
+  owner: WorkbenchRuntimeOwner
+): Promise<WorkbenchRuntimeState> {
   const executablePath = packagedExecutablePath();
   const daemonPort = await chooseLoopbackPort(DEFAULT_WORKBENCH_DAEMON_PORT);
   const token = randomUUID();
@@ -126,20 +149,25 @@ async function launchPackagedRuntime(paths: WorkbenchRuntimePaths): Promise<Work
   const daemon = spawnDetached(executablePath, [
     INTERNAL_WORKBENCH_RUNTIME_CHILD_COMMAND
   ], process.cwd(), paths.daemonLogPath, {
-    DEBRUTE_WORKBENCH_RUNTIME_PORT: String(daemonPort),
-    DEBRUTE_WORKBENCH_RUNTIME_TOKEN_FILE: paths.tokenPath,
-    DEBRUTE_WORKBENCH_RUNTIME_WEB_DIST_DIR: resolve(dirname(executablePath), 'web'),
+    DEBRUTE_RUNTIME_HOST_DAEMON_PORT: String(daemonPort),
+    DEBRUTE_RUNTIME_HOST_TOKEN_FILE: paths.tokenPath,
+    DEBRUTE_RUNTIME_HOST_WEB_DIST_DIR: resolve(dirname(executablePath), 'web'),
     PKG_EXECPATH: ''
   });
+  const daemonPid = requirePid(daemon, 'daemon');
 
   return {
-    schemaVersion: 1,
+    schemaVersion: 2,
     runtimeKind: 'packaged',
     processControl: 'managed',
+    owner: {
+      ...owner,
+      pid: daemonPid
+    },
     daemonUrl,
     webUrl: daemonUrl,
     token,
-    daemonPid: requirePid(daemon, 'daemon'),
+    daemonPid,
     daemonLogPath: paths.daemonLogPath,
     webLogPath: paths.webLogPath,
     startedAt: now,

@@ -17,6 +17,7 @@ export interface EnsureRegisteredWorkbenchRuntimeInput {
   paths?: WorkbenchRuntimePaths;
   isHealthy?: (state: WorkbenchRuntimeState) => Promise<boolean>;
   launch: (paths: WorkbenchRuntimePaths) => Promise<WorkbenchRuntimeState>;
+  shouldTerminateStaleRuntime?: (state: WorkbenchRuntimeState) => boolean;
   onRuntimeLaunchFailed?: (state: WorkbenchRuntimeState) => void;
 }
 
@@ -42,7 +43,9 @@ export async function ensureRegisteredWorkbenchRuntime(
       return { runtimeStarted: false, statePath: paths.statePath, state: lockedExisting };
     }
     if (lockedExisting) {
-      terminateManagedWorkbenchRuntime(lockedExisting);
+      if (input.shouldTerminateStaleRuntime?.(lockedExisting) === true) {
+        terminateManagedWorkbenchRuntime(lockedExisting);
+      }
       await deleteWorkbenchRuntimeState(paths.statePath);
     }
 

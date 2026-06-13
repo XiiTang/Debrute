@@ -25,13 +25,26 @@ export async function openProjectThroughDaemon(
     body: JSON.stringify({ projectRoot })
   });
   if (!response.ok) {
-    throw new Error(`Debrute daemon project open failed: ${response.status}`);
+    throw new Error(`Debrute daemon project open failed for ${projectRoot}: ${response.status}${await daemonErrorMessage(response)}`);
   }
   const opened = await response.json() as OpenProjectResponse;
   return {
     projectId: opened.projectId,
     url: projectWebShellUrl(runtime, opened.projectId)
   };
+}
+
+async function daemonErrorMessage(response: Response): Promise<string> {
+  const text = await response.text().catch(() => '');
+  if (!text) {
+    return '';
+  }
+  try {
+    const body = JSON.parse(text) as { error?: { message?: unknown } };
+    return typeof body.error?.message === 'string' ? ` ${body.error.message}` : ` ${text}`;
+  } catch {
+    return ` ${text}`;
+  }
 }
 
 export function projectWebShellUrl(runtime: DebruteDaemonRuntimeLike, projectId?: string): string {

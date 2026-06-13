@@ -1,16 +1,13 @@
-import type { DebruteDaemonHttpServer, DebruteDaemonRuntime } from '@debrute/daemon';
 import { openProjectThroughDaemon, projectWebShellUrl, type DebruteDaemonRuntimeLike } from './daemonProjectOpen.js';
 
 type DesktopRuntimeFetch = (url: string, init?: RequestInit) => Promise<Response>;
 
-const releaseWindow = () => undefined;
-
 export interface DesktopRuntimeClient {
-  readonly mode: 'hosted' | 'attached';
-  runtime(): DebruteDaemonRuntime;
+  readonly mode: 'attached';
+  runtime(): DebruteDaemonRuntimeLike;
   shellUrl(projectId?: string): string;
   openProject(projectRoot: string): Promise<{ projectId: string; url: string }>;
-  registerElectronProjectWindow(projectId: string, windowId: number): () => void;
+  registerElectronProjectWindow(projectId: string, windowId: number): Promise<() => Promise<void>>;
   close(): Promise<void>;
 }
 
@@ -18,7 +15,7 @@ export function createAttachedDesktopRuntimeClient(
   runtime: DebruteDaemonRuntimeLike,
   fetchImpl: DesktopRuntimeFetch = fetch
 ): DesktopRuntimeClient {
-  const daemonRuntime: DebruteDaemonRuntime = {
+  const attachedRuntime: DebruteDaemonRuntimeLike = {
     daemonUrl: runtime.daemonUrl,
     webBaseUrl: runtime.webBaseUrl,
     platform: runtime.platform ?? process.platform,
@@ -26,28 +23,41 @@ export function createAttachedDesktopRuntimeClient(
   };
   return {
     mode: 'attached',
-    runtime: () => daemonRuntime,
-    shellUrl: (projectId) => projectWebShellUrl(daemonRuntime, projectId),
-    openProject: (projectRoot) => openProjectThroughDaemon(daemonRuntime, projectRoot, fetchImpl),
-    registerElectronProjectWindow: () => releaseWindow,
+    runtime: () => attachedRuntime,
+    shellUrl: (projectId) => projectWebShellUrl(attachedRuntime, projectId),
+    openProject: (projectRoot) => openProjectThroughDaemon(attachedRuntime, projectRoot, fetchImpl),
+    registerElectronProjectWindow: (projectId, windowId) => registerElectronProjectWindow(attachedRuntime, projectId, windowId, fetchImpl),
     close: async () => undefined
   };
 }
 
-export function createHostedDesktopRuntimeClient(daemon: DebruteDaemonHttpServer): DesktopRuntimeClient {
-  const requireRuntime = () => {
-    const runtime = daemon.runtime();
-    if (!runtime) {
-      throw new Error('Debrute daemon runtime is not ready.');
+async function registerElectronProjectWindow(
+  runtime: DebruteDaemonRuntimeLike,
+  projectId: string,
+  windowId: number,
+  fetchImpl: DesktopRuntimeFetch
+): Promise<() => Promise<void>> {
+  const url = new URL(`/api/projects/${encodeURIComponent(projectId)}/electron-windows/${encodeURIComponent(String(windowId))}`, runtime.daemonUrl).toString();
+  const headers = { 'x-debrute-daemon-token': runtime.token };
+  await requestElectronWindowLease(fetchImpl, url, 'PUT', headers);
+  let released = false;
+  return async () => {
+    if (released) {
+      return;
     }
-    return runtime;
+    released = true;
+    await requestElectronWindowLease(fetchImpl, url, 'DELETE', headers);
   };
-  return {
-    mode: 'hosted',
-    runtime: requireRuntime,
-    shellUrl: (projectId) => projectWebShellUrl(requireRuntime(), projectId),
-    openProject: (projectRoot) => openProjectThroughDaemon(requireRuntime(), projectRoot),
-    registerElectronProjectWindow: (projectId, windowId) => daemon.registerElectronProjectWindow(projectId, windowId) ?? releaseWindow,
-    close: () => daemon.close()
-  };
+}
+
+async function requestElectronWindowLease(
+  fetchImpl: DesktopRuntimeFetch,
+  url: string,
+  method: 'PUT' | 'DELETE',
+  headers: Record<string, string>
+): Promise<void> {
+  const response = await fetchImpl(url, { method, headers });
+  if (!response.ok) {
+    throw new Error(`Debrute daemon Electron window lease failed: ${method} ${response.status}`);
+  }
 }

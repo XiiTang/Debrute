@@ -20,9 +20,9 @@ import {
   type WorkbenchRuntimeState
 } from '@debrute/workbench-runtime';
 import { ensureWorkbenchRuntime } from '../src/workbench/workbenchRuntimeLauncher';
-import { parseInternalWorkbenchRuntimeChildArgs } from '../src/workbench/internalWorkbenchRuntimeChild';
 import { INTERNAL_WORKBENCH_RUNTIME_CHILD_COMMAND } from '../src/workbench/workbenchRuntimeChildEntrypoint';
 import * as workbenchRuntimeLauncher from '../src/workbench/workbenchRuntimeLauncher';
+import { parseRuntimeHostConfig } from '../../runtime-host/src/runtimeHostConfig';
 
 describe('debrute workbench url CLI metadata', () => {
   it('parses workbench url with a project path', () => {
@@ -314,13 +314,19 @@ describe('ensureWorkbenchRuntime', () => {
     }
   });
 
-  it('launches fresh state and terminates recorded stale pids when recorded state is stale', async () => {
+  it('launches fresh state and terminates recorded stale pids only for the stable CLI owner', async () => {
     const root = await mkdtemp(join(tmpdir(), 'debrute-runtime-launch-'));
     const kill = vi.spyOn(process, 'kill').mockImplementation(() => true);
     try {
       const paths = resolveWorkbenchRuntimePaths(root);
+      await mkdir(paths.runtimeDir, { recursive: true });
+      await writeFile(join(paths.runtimeDir, 'cli-owner.json'), JSON.stringify({
+        schemaVersion: 1,
+        ownerId: 'cli-owner-1'
+      }), 'utf8');
       const stale = runtimeState({
         token: 'stale',
+        owner: { kind: 'cli', ownerId: 'cli-owner-1', pid: 100 },
         daemonPid: 10,
         webPid: 11,
         daemonLogPath: paths.daemonLogPath,
@@ -328,6 +334,7 @@ describe('ensureWorkbenchRuntime', () => {
       });
       const launched = runtimeState({
         token: 'fresh',
+        owner: { kind: 'cli', ownerId: 'cli-owner-1', pid: 200 },
         daemonPid: 20,
         webPid: 21,
         daemonLogPath: paths.daemonLogPath,
@@ -345,6 +352,13 @@ describe('ensureWorkbenchRuntime', () => {
       expect(result.runtimeStarted).toBe(true);
       expect(result.state).toEqual(launched);
       expect(await readWorkbenchRuntimeState(paths.statePath)).toEqual(launched);
+      expect(await readWorkbenchRuntimeState(paths.statePath)).toMatchObject({
+        schemaVersion: 2,
+        owner: {
+          kind: 'cli',
+          ownerId: 'cli-owner-1'
+        }
+      });
       expect(kill).toHaveBeenCalledWith(10, 'SIGTERM');
       expect(kill).toHaveBeenCalledWith(11, 'SIGTERM');
     } finally {
@@ -374,7 +388,13 @@ describe('ensureWorkbenchRuntime', () => {
     const kill = vi.spyOn(process, 'kill').mockImplementation(() => true);
     try {
       const paths = resolveWorkbenchRuntimePaths(root);
+      await mkdir(paths.runtimeDir, { recursive: true });
+      await writeFile(join(paths.runtimeDir, 'cli-owner.json'), JSON.stringify({
+        schemaVersion: 1,
+        ownerId: 'cli-owner-1'
+      }), 'utf8');
       const launched = runtimeState({
+        owner: { kind: 'cli', ownerId: 'cli-owner-1', pid: 20001 },
         daemonPid: 20001,
         webPid: 20002,
         daemonLogPath: paths.daemonLogPath,
@@ -414,30 +434,39 @@ describe('internal workbench runtime child args', () => {
     expect(INTERNAL_WORKBENCH_RUNTIME_CHILD_COMMAND.startsWith('-')).toBe(false);
   });
 
-  it('parses packaged runtime child args from environment variables', () => {
-    expect(parseInternalWorkbenchRuntimeChildArgs({
-      DEBRUTE_WORKBENCH_RUNTIME_PORT: '17321',
-      DEBRUTE_WORKBENCH_RUNTIME_TOKEN_FILE: '/runtime/token',
-      DEBRUTE_WORKBENCH_RUNTIME_WEB_DIST_DIR: '/payload/web'
-    })).toEqual({
-      port: 17321,
+  it('parses packaged runtime host args from environment variables', () => {
+    expect(parseRuntimeHostConfig({
+      env: {
+        DEBRUTE_RUNTIME_HOST_DAEMON_PORT: '17321',
+        DEBRUTE_RUNTIME_HOST_TOKEN_FILE: '/runtime/token',
+        DEBRUTE_RUNTIME_HOST_WEB_DIST_DIR: '/payload/web'
+      }
+    })).toMatchObject({
+      daemonPort: 17321,
       tokenFile: '/runtime/token',
       webDistDir: '/payload/web'
     });
   });
 
-  it('rejects missing packaged runtime child args', () => {
-    expect(() => parseInternalWorkbenchRuntimeChildArgs({
-      DEBRUTE_WORKBENCH_RUNTIME_PORT: '17321'
-    })).toThrow(/token file is required/);
+  it('rejects missing packaged runtime host args', () => {
+    expect(() => parseRuntimeHostConfig({
+      env: {
+        DEBRUTE_RUNTIME_HOST_DAEMON_PORT: '17321'
+      }
+    })).toThrow(/DEBRUTE_RUNTIME_HOST_TOKEN_FILE/);
   });
 });
 
 function runtimeState(overrides: Partial<WorkbenchRuntimeState> = {}): WorkbenchRuntimeState {
   return {
-    schemaVersion: 1,
+    schemaVersion: 2,
     runtimeKind: 'source-dev',
     processControl: 'managed',
+    owner: {
+      kind: 'cli',
+      ownerId: 'cli-owner-1',
+      pid: 12345
+    },
     daemonUrl: 'http://127.0.0.1:17321',
     webUrl: 'http://127.0.0.1:17322',
     token: 'secret',
@@ -445,8 +474,8 @@ function runtimeState(overrides: Partial<WorkbenchRuntimeState> = {}): Workbench
     webPid: 11,
     daemonLogPath: '/home/user/.debrute/runtime/workbench-daemon.log',
     webLogPath: '/home/user/.debrute/runtime/workbench-web.log',
-    startedAt: '2026-06-03T00:00:00.000Z',
-    updatedAt: '2026-06-03T00:00:00.000Z',
+    startedAt: '2026-06-13T00:00:00.000Z',
+    updatedAt: '2026-06-13T00:00:00.000Z',
     ...overrides
   };
 }

@@ -7,8 +7,7 @@
   },
   "references": [
     { "path": "../../packages/app-protocol" },
-    { "path": "../../apps/app-server" },
-    { "path": "../../apps/daemon" },
+    { "path": "../../apps/runtime-host" },
     { "path": "../../packages/capability-runtime" },
     { "path": "../../packages/workbench-runtime" }
   ],

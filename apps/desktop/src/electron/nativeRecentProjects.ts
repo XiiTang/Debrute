@@ -21,9 +21,12 @@ export function parseDesktopOpenIntent(argv: string[]): DesktopOpenIntent | unde
   if (argv.includes('--new-window')) {
     return { kind: 'new-window' };
   }
-  const openProjectIndex = argv.indexOf('--open-project');
-  const projectRoot = openProjectIndex === -1 ? undefined : argv[openProjectIndex + 1];
-  return projectRoot ? { kind: 'open-project', projectRoot } : undefined;
+  const openProjectValue = argv.findLast((value) => value.startsWith('--open-project='))
+    ?.slice('--open-project='.length);
+  if (openProjectValue) {
+    return { kind: 'open-project', projectRoot: openProjectValue };
+  }
+  return undefined;
 }
 
 export function buildNativeRecentProjectSync(input: NativeRecentProjectSyncInput): { apply(host: NativeRecentProjectHost): void } {
@@ -79,7 +82,7 @@ function windowsJumpList(execPath: string, recentProjectRoots: string[]): JumpLi
         title: projectDisplayName(projectRoot),
         description: projectRoot,
         program: execPath,
-        args: `--open-project "${projectRoot.replace(/"/g, '\\"')}"`,
+        args: `--open-project="${projectRoot.replace(/"/g, '\\"')}"`,
         iconPath: 'explorer.exe',
         iconIndex: 0
       }))

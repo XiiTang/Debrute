@@ -8,8 +8,6 @@
   "references": [
     { "path": "../../packages/app-protocol" },
     { "path": "../../packages/project-core" },
-    { "path": "../../apps/app-server" },
-    { "path": "../../apps/daemon" },
     { "path": "../../packages/workbench-runtime" }
   ]
 }

@@ -12,6 +12,8 @@ export {
   readWorkbenchRuntimeState,
   writeWorkbenchRuntimeState,
   type WorkbenchRuntimeKind,
+  type WorkbenchRuntimeOwner,
+  type WorkbenchRuntimeOwnerKind,
   type WorkbenchRuntimeProcessControl,
   type WorkbenchRuntimeState
 } from './state.js';
@@ -36,7 +38,9 @@ export {
   portFromUrl
 } from './ports.js';
 export {
+  isWorkbenchRuntimeOwnedBy,
   terminateManagedWorkbenchRuntime,
+  terminateOwnedWorkbenchRuntime,
   type WorkbenchRuntimeKill
 } from './processControl.js';
 export {

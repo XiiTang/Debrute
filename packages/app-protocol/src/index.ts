@@ -106,6 +106,33 @@ export interface DebruteHttpErrorBody {
   };
 }
 
+export type DebruteAgentFieldValue = string | number | boolean | null;
+
+export interface DebruteAgentNamedRecord {
+  name: string;
+  fields: Record<string, DebruteAgentFieldValue>;
+}
+
+export interface DebruteAgentCommandResult {
+  status: 'ok' | 'error';
+  command: string;
+  code?: string;
+  message?: string;
+  records?: DebruteAgentNamedRecord[];
+  fields?: Record<string, DebruteAgentFieldValue>;
+}
+
+export interface DaemonCliCommandRequest {
+  command: string;
+  positional: string[];
+  options: Record<string, string>;
+  projectRoot?: string;
+}
+
+export type DaemonCliRunEvent =
+  | { type: 'progress'; command: string; fields: Record<string, DebruteAgentFieldValue> }
+  | { type: 'result'; result: DebruteAgentCommandResult };
+
 export function isDebruteMutatingMethod(method: string): boolean {
   const normalized = method.toUpperCase();
   return normalized === 'POST' || normalized === 'PUT' || normalized === 'PATCH' || normalized === 'DELETE';

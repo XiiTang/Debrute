@@ -7,10 +7,11 @@ import { extname, join as joinFileSystemPath, resolve } from 'node:path';
 import { pipeline } from 'node:stream/promises';
 import { fileURLToPath } from 'node:url';
 import Busboy from 'busboy';
-import { DebruteGlobalRuntimeServer, GlobalConfigStore, type DebruteAppServer, type DebruteAppServerOptions } from '@debrute/app-server';
+import { DebruteAppServer, DebruteGlobalRuntimeServer, GlobalConfigStore, type DebruteAppServerOptions } from '@debrute/app-server';
 import {
   normalizeDebruteRuntimeInfo,
   type AppServerEvent,
+  type DaemonCliCommandRequest,
   type DaemonProjectUploadImportPlan,
   type DebruteHttpErrorBody,
   type DebruteRuntimeInfo,
@@ -34,6 +35,7 @@ import {
   revealProjectPathInSystemFileManager,
   trashProjectPathsWithNativeShell
 } from './projectNativeFileOperations.js';
+import { runDaemonCliCommand } from './cliCommandRoutes.js';
 
 export interface DebruteDaemonRuntime extends DebruteRuntimeInfo {
   token: string;
@@ -57,7 +59,6 @@ export interface DebruteDaemonHttpServer {
   close(): Promise<void>;
   runtime(): DebruteDaemonRuntime | undefined;
   projectRootForProjectId(projectId: string): string | undefined;
-  registerElectronProjectWindow(projectId: string, windowId: number): (() => void) | undefined;
 }
 
 interface RequestContext {
@@ -114,6 +115,7 @@ export function createDebruteDaemonHttpServer(options: DebruteDaemonHttpServerOp
   });
   let runtime: DebruteDaemonRuntime | undefined;
   let server: Server | undefined;
+  const electronWindowLeases = new Map<string, () => void>();
 
   async function listen(): Promise<DebruteDaemonRuntime> {
     if (runtime) {
@@ -152,6 +154,10 @@ export function createDebruteDaemonHttpServer(options: DebruteDaemonHttpServerOp
   }
 
   async function close(): Promise<void> {
+    for (const release of electronWindowLeases.values()) {
+      release();
+    }
+    electronWindowLeases.clear();
     globalRuntime.close();
     await sessions.close();
     if (!server) {
@@ -246,6 +252,23 @@ export function createDebruteDaemonHttpServer(options: DebruteDaemonHttpServerOp
       });
       return true;
     }
+    if (method === 'POST' && path === '/api/cli/run') {
+      const body = await readJsonBody<DaemonCliCommandRequest>(context.request);
+      writeJson(context.response, 200, await runCliCommand(body));
+      return true;
+    }
+    if (method === 'POST' && path === '/api/cli/run-stream') {
+      const body = await readJsonBody<DaemonCliCommandRequest>(context.request);
+      context.response.writeHead(200, { 'content-type': 'application/x-ndjson' });
+      const result = await runCliCommand(body, {
+        onProgress: (command, fields) => {
+          context.response.write(`${JSON.stringify({ type: 'progress', command, fields })}\n`);
+        }
+      });
+      context.response.write(`${JSON.stringify({ type: 'result', result })}\n`);
+      context.response.end();
+      return true;
+    }
 
     const projectRoute = projectApiRoute(path);
     if (projectRoute) {
@@ -279,6 +302,21 @@ export function createDebruteDaemonHttpServer(options: DebruteDaemonHttpServerOp
     return false;
   }
 
+  async function runCliCommand(
+    body: DaemonCliCommandRequest,
+    services: Pick<Parameters<typeof runDaemonCliCommand>[1], 'onProgress'> = {}
+  ) {
+    const cliServer = options.createAppServer?.() ?? new DebruteAppServer(appServerOptions);
+    try {
+      return await runDaemonCliCommand(body, {
+        server: cliServer,
+        ...services
+      });
+    } finally {
+      cliServer.close();
+    }
+  }
+
   async function routeProjectApi(
     context: ProjectRequestContext,
     projectRoute: ProjectApiRoute,
@@ -301,6 +339,10 @@ export function createDebruteDaemonHttpServer(options: DebruteDaemonHttpServerOp
     }
     if (method === 'GET' && tail === '/health') {
       writeJson(context.response, 200, context.appServer.getProjectHealth());
+      return;
+    }
+    if (tail.startsWith('/electron-windows/')) {
+      handleElectronWindowLeaseRoute(context, projectRoute.projectId, routeTail(tail, '/electron-windows/'), electronWindowLeases);
       return;
     }
     if (tail === '/terminals' || tail.startsWith('/terminals/')) {
@@ -428,12 +470,50 @@ export function createDebruteDaemonHttpServer(options: DebruteDaemonHttpServerOp
     listen,
     close,
     runtime: () => runtime ? currentRuntime() : undefined,
-    projectRootForProjectId: (projectId) => sessions.projectRootForProjectId(projectId),
-    registerElectronProjectWindow: (projectId, windowId) => sessions.registerClient(projectId, {
+    projectRootForProjectId: (projectId) => sessions.projectRootForProjectId(projectId)
+  };
+}
+
+function handleElectronWindowLeaseRoute(
+  context: ProjectRequestContext,
+  projectId: string,
+  windowId: string,
+  electronWindowLeases: Map<string, () => void>
+): void {
+  if (!windowId) {
+    writeError(context.response, 404, 'not_found', 'Electron window id is required.');
+    return;
+  }
+  const key = electronWindowLeaseKey(projectId, windowId);
+  if (context.request.method === 'PUT') {
+    electronWindowLeases.get(key)?.();
+    const release = context.sessions.registerClient(projectId, {
       clientId: `electron-window:${windowId}`,
       kind: 'electron-window'
-    })
-  };
+    });
+    if (!release) {
+      writeError(context.response, 404, 'project_not_open', `Debrute project is not open: ${projectId}`);
+      return;
+    }
+    electronWindowLeases.set(key, () => {
+      release();
+      electronWindowLeases.delete(key);
+    });
+    context.response.writeHead(204);
+    context.response.end();
+    return;
+  }
+  if (context.request.method === 'DELETE') {
+    electronWindowLeases.get(key)?.();
+    context.response.writeHead(204);
+    context.response.end();
+    return;
+  }
+  writeError(context.response, 405, 'method_not_allowed', 'Unsupported Electron window lease method.');
+}
+
+function electronWindowLeaseKey(projectId: string, windowId: string): string {
+  return `${projectId}\0${windowId}`;
 }
 
 async function handleTextFileRoute(context: ProjectRequestContext, projectRelativePath: string): Promise<void> {

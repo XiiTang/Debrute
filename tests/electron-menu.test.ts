@@ -2,7 +2,6 @@ import type { MenuItemConstructorOptions } from 'electron';
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { describe, expect, it, vi } from 'vitest';
-import type { DebruteDaemonRuntime } from '@debrute/daemon';
 import { openProjectThroughDaemon, projectWebShellUrl } from '../apps/desktop/src/electron/daemonProjectOpen';
 import { buildApplicationMenuTemplate } from '../apps/desktop/src/electron/menu/applicationMenu';
 
@@ -176,15 +175,13 @@ describe('desktop application menu', () => {
     expect(main).toContain('parseDesktopOpenIntent');
   });
 
-  it('injects Electron shell as the hosted daemon native shell adapter', () => {
+  it('does not host the daemon inside Electron main', () => {
     const main = readFileSync(join(process.cwd(), 'apps/desktop/src/electron/main.ts'), 'utf8');
-    const revealChannel = 'debrute-shell' + ':revealProjectPathInSystemFileManager';
-    const trashChannel = 'debrute-shell' + ':trashProjectPath';
 
-    expect(main).toContain('createElectronNativeShell');
-    expect(main).toContain('nativeShell: createElectronNativeShell(shell)');
-    expect(main).not.toContain(`ipcMain.handle('${revealChannel}'`);
-    expect(main).not.toContain(`ipcMain.handle('${trashChannel}'`);
+    expect(main).not.toContain('createDebruteDaemonHttpServer');
+    expect(main).not.toContain('createHostedDesktopRuntimeClient');
+    expect(main).not.toContain("process.env.DEBRUTE_WORKBENCH_RUNTIME_MODE === 'hosted'");
+    expect(main).not.toContain('createElectronNativeShell');
   });
 
   it('keeps Explorer file operations out of the preload shell API', () => {
@@ -199,22 +196,65 @@ describe('desktop application menu', () => {
     expect(preload).toContain('bindProjectWindowToProject');
   });
 
-  it('participates in the shared Workbench runtime registry', () => {
+  it('uses RuntimeSupervisor and attached runtime client', () => {
     const main = readFileSync(join(process.cwd(), 'apps/desktop/src/electron/main.ts'), 'utf8');
 
-    expect(main).toContain('ensureRegisteredWorkbenchRuntime');
-    expect(main).toContain('runtimeKind: desktopRuntimeKind()');
-    expect(main).toContain("'desktop-packaged'");
-    expect(main).toContain("processControl: 'external'");
+    expect(main).toContain('new RuntimeSupervisor');
     expect(main).toContain('createAttachedDesktopRuntimeClient');
-    expect(main).toContain('createHostedDesktopRuntimeClient');
-    expect(main).toContain("process.env.DEBRUTE_WORKBENCH_RUNTIME_MODE === 'hosted'");
+    expect(main).toContain('new TrayController');
+    expect(main).toContain('runtimeSupervisor.stopOwnedRuntime()');
     expect(main).toContain('await rememberProjectRootAndRefreshMenu(projectRoot)');
+    expect(main).not.toContain('hostedDaemon');
     expect(main).not.toContain('desktopStateStore:');
+  });
+
+  it('reopens project windows by project root after a runtime restart', () => {
+    const main = readFileSync(join(process.cwd(), 'apps/desktop/src/electron/main.ts'), 'utf8');
+    const restartBody = main.slice(
+      main.indexOf('async function restartRuntimeAndReloadWindows'),
+      main.indexOf('async function showRuntimeStatus')
+    );
+
+    expect(main).toContain('projectRootsByWindowId');
+    expect(restartBody).toContain('detachProjectWindowLeasesFromStoppedRuntime()');
+    expect(restartBody).not.toContain('clearProjectWindowBindings()');
+    expect(restartBody).toContain('const projectRoot = projectRootsByWindowId.get(window.id)');
+    expect(restartBody).toContain('await runtimeClient.openProject(projectRoot)');
+    expect(restartBody).not.toContain('shellUrl(projectId)');
+    expect(restartBody).not.toContain('bindProjectWindow(window, projectId)');
+  });
+
+  it('keeps stale renderer project bind IPC from hitting the new runtime during restart', () => {
+    const main = readFileSync(join(process.cwd(), 'apps/desktop/src/electron/main.ts'), 'utf8');
+
+    expect(main).toContain('function detachProjectWindowLeasesFromStoppedRuntime(): void');
+    expect(main).toContain('releaseProjectWindowByWindowId.delete(windowId)');
+    expect(main).toContain('detachedProjectWindowLeaseIds.add(windowId)');
+    expect(main).toContain('detachedProjectWindowLeaseIds.delete(windowId)');
+    expect(main).toContain('function dropProjectWindowBinding(windowId: number): void');
+  });
+
+  it('creates the Runtime Status tray before runtime startup can fail', () => {
+    const main = readFileSync(join(process.cwd(), 'apps/desktop/src/electron/main.ts'), 'utf8');
+
+    expect(main.indexOf('new TrayController')).toBeGreaterThanOrEqual(0);
+    expect(main.indexOf('await runtimeSupervisor.start()')).toBeGreaterThanOrEqual(0);
+    expect(main.indexOf('new TrayController')).toBeLessThan(main.indexOf('await runtimeSupervisor.start()'));
+    expect(main).toContain('catch (error)');
+    expect(main).toContain('await refreshTray()');
+  });
+
+  it('keeps the app alive when windows close and routes true quit through owned runtime shutdown', () => {
+    const main = readFileSync(join(process.cwd(), 'apps/desktop/src/electron/main.ts'), 'utf8');
+
+    expect(main).toContain("app.on('window-all-closed'");
+    expect(main).not.toContain("if (process.platform !== 'darwin') {\n    app.quit();\n  }");
+    expect(main).toContain('requestTrueQuit');
+    expect(main).toContain("window.on('close'");
   });
 });
 
-function daemonRuntimeFixture(): DebruteDaemonRuntime {
+function daemonRuntimeFixture() {
   return {
     daemonUrl: 'http://127.0.0.1:17321',
     webBaseUrl: 'http://127.0.0.1:17322',

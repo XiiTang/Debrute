@@ -43,6 +43,11 @@ describe('project icon assets', () => {
       'apps/desktop/build/icons/64x64.png',
       'apps/desktop/build/logo.png',
       'apps/desktop/build/tray_icon.png',
+      'apps/desktop/build/tray_icon_degraded.png',
+      'apps/desktop/build/tray_icon_error.png',
+      'apps/desktop/build/tray_icon_running.png',
+      'apps/desktop/build/tray_icon_starting.png',
+      'apps/desktop/build/tray_icon_stopped.png',
       'apps/web/public/debrute.svg'
     ]);
 
@@ -50,6 +55,10 @@ describe('project icon assets', () => {
     await expectPngDimensions(join(root, 'apps/desktop/build/dock_icon.png'), 1024, 1024);
     await expectPngDimensions(join(root, 'apps/desktop/build/icon.png'), 1024, 1024);
     await expectPngDimensions(join(root, 'apps/desktop/build/tray_icon.png'), 66, 66);
+    for (const status of ['starting', 'running', 'degraded', 'stopped', 'error']) {
+      await expectPngDimensions(join(root, `apps/desktop/build/tray_icon_${status}.png`), 66, 66);
+      expect(await alphaAt(join(root, `apps/desktop/build/tray_icon_${status}.png`), 53, 53)).toBeGreaterThan(0);
+    }
     for (const size of [16, 24, 32, 48, 64, 128, 256, 512, 1024]) {
       await expectPngDimensions(join(root, `apps/desktop/build/icons/${size}x${size}.png`), size, size);
       expect(await alphaAt(join(root, `apps/desktop/build/icons/${size}x${size}.png`), 0, 0)).toBe(0);
@@ -104,7 +113,12 @@ describe('project icon assets', () => {
       'apps/desktop/build/icon.png',
       'apps/desktop/build/icon.icns',
       'apps/desktop/build/icons/1024x1024.png',
-      'apps/desktop/build/tray_icon.png'
+      'apps/desktop/build/tray_icon.png',
+      'apps/desktop/build/tray_icon_starting.png',
+      'apps/desktop/build/tray_icon_running.png',
+      'apps/desktop/build/tray_icon_degraded.png',
+      'apps/desktop/build/tray_icon_stopped.png',
+      'apps/desktop/build/tray_icon_error.png'
     ]) {
       const result = spawnSync('git', ['check-ignore', '-q', asset], { cwd: process.cwd() });
       expect(result.status, asset).toBe(1);

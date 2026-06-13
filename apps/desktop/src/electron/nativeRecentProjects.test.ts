@@ -44,7 +44,7 @@ describe('native recent projects', () => {
         items: [expect.objectContaining({
           title: 'Alpha Project',
           description: 'C:\\Projects\\Alpha Project',
-          args: '--open-project "C:\\Projects\\Alpha Project"'
+          args: '--open-project="C:\\Projects\\Alpha Project"'
         })]
       }
     ]);
@@ -52,10 +52,15 @@ describe('native recent projects', () => {
 
   it('parses desktop open intents from native launch arguments', () => {
     expect(parseDesktopOpenIntent(['Debrute.exe', '--new-window'])).toEqual({ kind: 'new-window' });
-    expect(parseDesktopOpenIntent(['Debrute.exe', '--open-project', 'C:\\Projects\\Alpha Project'])).toEqual({
+    expect(parseDesktopOpenIntent(['Debrute.exe', '--open-project=C:\\Projects\\Alpha Project'])).toEqual({
       kind: 'open-project',
       projectRoot: 'C:\\Projects\\Alpha Project'
     });
+    expect(parseDesktopOpenIntent(['Electron', '.', '--allow-file-access-from-files', '--open-project=/tmp/Alpha Project'])).toEqual({
+      kind: 'open-project',
+      projectRoot: '/tmp/Alpha Project'
+    });
+    expect(parseDesktopOpenIntent(['Debrute.exe', '--open-project', 'C:\\Projects\\Alpha Project'])).toBeUndefined();
     expect(parseDesktopOpenIntent(['Debrute.exe'])).toBeUndefined();
   });
 });

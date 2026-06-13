@@ -1,5 +1,4 @@
 import { describe, expect, it } from 'vitest';
-import type { DebruteAppServer } from '@debrute/app-server';
 import type {
   SkillsStatusSnapshot,
   SkillsSyncSnapshot
@@ -62,95 +61,6 @@ describe('debrute skills CLI commands', () => {
     }));
   });
 
-  it('adds CLI-owned Skills status to runtime status output', async () => {
-    const result = await runRuntimeCommand(parseDebruteArgs(['runtime', 'status']), {
-      server: {
-        runtimeStatusForCli: async () => ({
-          ok: true,
-          imageModels: 2,
-          availableImageModels: 1,
-          videoModels: 1,
-          availableVideoModels: 1,
-          availableLlmModels: 1,
-          diagnostics: 0
-        })
-      } as unknown as DebruteAppServer,
-      skillsService: fakeSkillsService()
-    });
-
-    expect(result).toMatchObject({
-      status: 'ok',
-      command: 'runtime.status',
-      fields: {
-        image_models: 2,
-        available_image_models: 1,
-        skills: 1,
-        diagnostics: 0
-      }
-    });
-  });
-
-  it('adds CLI-owned Skills diagnostics to runtime doctor output', async () => {
-    const result = await runRuntimeCommand(parseDebruteArgs(['runtime', 'doctor']), {
-      server: {
-        runtimeDoctorForCli: async () => ({
-          diagnostics: [{
-            severity: 'warning',
-            code: 'llm_model_not_configured',
-            message: 'No available LLM model is configured.'
-          }]
-        })
-      } as unknown as DebruteAppServer,
-      skillsService: fakeSkillsService({
-        skills: [],
-        bundledSkillsRoot: undefined,
-        bundledRootAvailable: false,
-        diagnostics: [{
-          source: 'debrute-sync',
-          root: '/Debrute/skills',
-          code: 'skills_bundle_unavailable',
-          severity: 'warning',
-          message: 'Bundled Debrute Skills are unavailable.'
-        }]
-      })
-    });
-
-    expect(result.status).toBe('ok');
-    expect(result.fields).toEqual({ diagnostics: 3 });
-    expect(result.records?.map((record) => record.fields.code)).toEqual([
-      'llm_model_not_configured',
-      'skills_bundle_unavailable',
-      'skills_not_installed'
-    ]);
-  });
-
-  it('reports Skills version drift in runtime doctor from local state', async () => {
-    const originalCi = process.env.CI;
-    process.env.CI = '1';
-    try {
-      const result = await runRuntimeCommand(parseDebruteArgs(['runtime', 'doctor']), {
-        server: {
-          runtimeDoctorForCli: async () => ({ diagnostics: [] })
-        } as unknown as DebruteAppServer,
-        skillsService: fakeSkillsService({
-          state: staleSkillsState(),
-          currentDebruteVersion: '1.2.3'
-        })
-      });
-
-      expect(result.records).toContainEqual(expect.objectContaining({
-        name: 'diagnostic',
-        fields: expect.objectContaining({
-          code: 'skills_out_of_sync',
-          severity: 'warning',
-          message: expect.stringContaining('Run: debrute skills sync')
-        })
-      }));
-    } finally {
-      restoreEnv('CI', originalCi);
-    }
-  });
-
   it('fails version resolution when package metadata is unavailable', async () => {
     await expect(resolveCliDebruteVersion('/tmp/debrute-cli-without-package/dist')).rejects.toThrow(/package metadata/i);
   });
@@ -202,25 +112,4 @@ function fakeSkillsService(overrides: Partial<SkillsStatusSnapshot> = {}): Debru
     status: async () => status,
     sync: async () => sync
   };
-}
-
-function staleSkillsState() {
-  return {
-    schemaVersion: 1 as const,
-    debruteVersion: '1.2.0',
-    bundledSkills: ['debrute-core'],
-    updatedSkills: ['debrute-core'],
-    addedBundledSkills: [],
-    skippedDeletedSkills: [],
-    diagnostics: [],
-    updatedAt: '2026-06-01T00:00:00.000Z'
-  };
-}
-
-function restoreEnv(name: 'CI', value: string | undefined): void {
-  if (value === undefined) {
-    delete process.env[name];
-    return;
-  }
-  process.env[name] = value;
 }

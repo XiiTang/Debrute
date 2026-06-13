@@ -1,0 +1,24 @@
+{
+  "name": "@debrute/runtime-host",
+  "version": "0.0.1",
+  "license": "Apache-2.0",
+  "private": true,
+  "type": "module",
+  "description": "Independent Debrute Workbench runtime host process.",
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "exports": {
+    ".": "./dist/index.js"
+  },
+  "scripts": {
+    "build": "tsc -b && node scripts/bundle-runtime-host.mjs",
+    "check": "tsc -b --pretty false"
+  },
+  "dependencies": {
+    "@debrute/daemon": "workspace:*"
+  },
+  "devDependencies": {
+    "esbuild": "^0.28.0",
+    "typescript": "^6.0.3"
+  }
+}

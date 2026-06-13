@@ -34,7 +34,7 @@ describe('desktop shell loading', () => {
     })).rejects.toThrow('Debrute workbench URL did not become reachable: http://127.0.0.1:17322/');
   });
 
-  it('binds project windows only after Electron loads the project URL', async () => {
+  it('binds project windows before probing and loading the project URL', async () => {
     const events: string[] = [];
 
     await loadDebruteProjectShellWindow({
@@ -55,10 +55,29 @@ describe('desktop shell loading', () => {
       intervalMs: 25
     });
 
-    expect(events).toEqual(['probe', 'loadURL', 'bind']);
+    expect(events).toEqual(['bind', 'probe', 'loadURL']);
   });
 
-  it('keeps project windows unbound when Electron navigation fails', async () => {
+  it('does not load project windows when binding fails', async () => {
+    const loadURL = vi.fn();
+
+    await expect(loadDebruteProjectShellWindow({
+      loadURL
+    }, 'http://127.0.0.1:17322/projects/project-1', () => {
+      throw new Error('lease failed');
+    }, {
+      fetch: async () => new Response('', { status: 200 }),
+      sleep: async () => undefined,
+      now: sequenceNow([0])
+    }, {
+      timeoutMs: 1000,
+      intervalMs: 25
+    })).rejects.toThrow('lease failed');
+
+    expect(loadURL).not.toHaveBeenCalled();
+  });
+
+  it('keeps the project window lease when Electron navigation fails', async () => {
     const bindProjectWindow = vi.fn();
 
     await expect(loadDebruteProjectShellWindow({
@@ -74,7 +93,53 @@ describe('desktop shell loading', () => {
       intervalMs: 25
     })).rejects.toThrow('navigation failed');
 
-    expect(bindProjectWindow).not.toHaveBeenCalled();
+    expect(bindProjectWindow).toHaveBeenCalledTimes(1);
+  });
+
+  it('waits for asynchronous project window binding before resolving', async () => {
+    let finishBind!: () => void;
+    const bindFinished = new Promise<void>((resolve) => {
+      finishBind = resolve;
+    });
+    let resolved = false;
+
+    const load = loadDebruteProjectShellWindow({
+      loadURL: async () => undefined
+    }, 'http://127.0.0.1:17322/projects/project-1', async () => {
+      await bindFinished;
+    }, {
+      fetch: async () => new Response('', { status: 200 }),
+      sleep: async () => undefined,
+      now: sequenceNow([0])
+    }, {
+      timeoutMs: 1000,
+      intervalMs: 25
+    }).then(() => {
+      resolved = true;
+    });
+
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    expect(resolved).toBe(false);
+
+    finishBind();
+    await load;
+    expect(resolved).toBe(true);
+  });
+
+  it('fails when asynchronous project window binding fails', async () => {
+    await expect(loadDebruteProjectShellWindow({
+      loadURL: async () => undefined
+    }, 'http://127.0.0.1:17322/projects/project-1', async () => {
+      await Promise.resolve();
+      throw new Error('lease failed');
+    }, {
+      fetch: async () => new Response('', { status: 200 }),
+      sleep: async () => undefined,
+      now: sequenceNow([0])
+    }, {
+      timeoutMs: 1000,
+      intervalMs: 25
+    })).rejects.toThrow('lease failed');
   });
 });
 
