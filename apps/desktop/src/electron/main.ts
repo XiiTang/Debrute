@@ -83,7 +83,7 @@ async function createWindow(initialUrl?: string, projectId?: string, projectRoot
   const client = requireRuntimeClient();
   const urlToLoad = initialUrl ?? client.shellUrl();
   if (projectId) {
-    await loadDebruteProjectShellWindow(window, urlToLoad, () => bindProjectWindow(window, projectId, projectRoot));
+    await loadDebruteProjectShellWindow(window, urlToLoad, () => prepareProjectWindowBinding(window, projectId, projectRoot));
   } else {
     await waitForDebruteShellUrl(urlToLoad);
     await window.loadURL(urlToLoad);
@@ -297,7 +297,7 @@ async function openProjectInWindow(
   if (target.kind === 'reuse') {
     const window = BrowserWindow.fromId(target.windowId);
     if (window && !window.isDestroyed()) {
-      await loadDebruteProjectShellWindow(window, opened.url, () => bindProjectWindow(window, opened.projectId, opened.projectRoot));
+      await loadDebruteProjectShellWindow(window, opened.url, () => prepareProjectWindowBinding(window, opened.projectId, opened.projectRoot));
       window.focus();
       return;
     }
@@ -356,7 +356,7 @@ async function restartRuntimeAndReloadWindows(): Promise<void> {
     }
     if (projectRoot) {
       const opened = await runtimeClient.openProject(projectRoot);
-      await loadDebruteProjectShellWindow(window, opened.url, () => bindProjectWindow(window, opened.projectId, projectRoot));
+      await loadDebruteProjectShellWindow(window, opened.url, () => prepareProjectWindowBinding(window, opened.projectId, projectRoot));
     } else {
       const url = runtimeClient.shellUrl();
       await waitForDebruteShellUrl(url);
@@ -415,25 +415,57 @@ function messageFromUnknown(error: unknown): string {
 }
 
 async function bindProjectWindow(window: Electron.BrowserWindow, projectId: string, projectRoot?: string): Promise<void> {
+  const binding = await prepareProjectWindowBinding(window, projectId, projectRoot);
+  await binding.commit();
+}
+
+async function prepareProjectWindowBinding(window: Electron.BrowserWindow, projectId: string, projectRoot?: string) {
   const currentProjectId = projectIdsByWindowId.get(window.id);
+  const hasActiveLease = releaseProjectWindowByWindowId.has(window.id);
+  const hasDetachedLease = detachedProjectWindowLeaseIds.has(window.id);
   if (
     currentProjectId === projectId
-    && (releaseProjectWindowByWindowId.has(window.id) || detachedProjectWindowLeaseIds.has(window.id))
+    && (hasActiveLease || (hasDetachedLease && !projectRoot))
   ) {
-    if (projectRoot) {
-      projectRootsByWindowId.set(window.id, projectRoot);
-    }
-    return;
+    return {
+      commit: () => {
+        if (projectRoot) {
+          projectRootsByWindowId.set(window.id, projectRoot);
+        }
+      },
+      rollback: () => undefined
+    };
   }
-  await releaseProjectWindow(window.id);
   const release = await requireRuntimeClient().registerElectronProjectWindow(projectId, window.id);
-  projectWindowsByProjectId.set(projectId, window);
-  projectIdsByWindowId.set(window.id, projectId);
-  if (projectRoot) {
-    projectRootsByWindowId.set(window.id, projectRoot);
-  }
-  detachedProjectWindowLeaseIds.delete(window.id);
-  releaseProjectWindowByWindowId.set(window.id, release);
+  let finalized = false;
+  return {
+    commit: async () => {
+      if (finalized) {
+        return;
+      }
+      finalized = true;
+      try {
+        await releaseProjectWindow(window.id);
+      } catch (error) {
+        await release();
+        throw error;
+      }
+      projectWindowsByProjectId.set(projectId, window);
+      projectIdsByWindowId.set(window.id, projectId);
+      if (projectRoot) {
+        projectRootsByWindowId.set(window.id, projectRoot);
+      }
+      detachedProjectWindowLeaseIds.delete(window.id);
+      releaseProjectWindowByWindowId.set(window.id, release);
+    },
+    rollback: async () => {
+      if (finalized) {
+        return;
+      }
+      finalized = true;
+      await release();
+    }
+  };
 }
 
 async function releaseProjectWindow(windowId: number): Promise<void> {

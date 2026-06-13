@@ -21,6 +21,48 @@ describe('CLI runtime access', () => {
     });
   });
 
+  it('surfaces unreadable runtime state instead of reporting stopped', async () => {
+    const result = await runRuntimeBackedCliCommand(parsed('runtime.status'), {
+      readRuntimeState: vi.fn(async () => {
+        throw new Error('Invalid Debrute workbench runtime state: schemaVersion must be 2.');
+      }),
+      checkHealth: vi.fn(),
+      skillsStatus: vi.fn(async () => skillsSnapshot({ skills: [] })),
+      fetch: vi.fn()
+    });
+
+    expect(result).toMatchObject({
+      status: 'error',
+      command: 'runtime.status',
+      code: 'runtime_state_unreadable',
+      message: 'Debrute workbench runtime state is unreadable: Invalid Debrute workbench runtime state: schemaVersion must be 2.'
+    });
+  });
+
+  it('reports unreadable runtime state as a doctor diagnostic', async () => {
+    const result = await runRuntimeBackedCliCommand(parsed('runtime.doctor'), {
+      readRuntimeState: vi.fn(async () => {
+        throw new Error('Invalid Debrute workbench runtime state: schemaVersion must be 2.');
+      }),
+      checkHealth: vi.fn(),
+      skillsStatus: vi.fn(async () => skillsSnapshot({ skills: [] })),
+      fetch: vi.fn()
+    });
+
+    expect(result).toMatchObject({
+      status: 'ok',
+      command: 'runtime.doctor',
+      fields: {
+        runtime_state: 'unreadable',
+        diagnostics: 2
+      }
+    });
+    expect(result.records?.map((record) => record.fields.code)).toEqual([
+      'runtime_state_unreadable',
+      'skills_not_installed'
+    ]);
+  });
+
   it('reports a stopped-runtime diagnostic for runtime doctor when no state exists', async () => {
     const result = await runRuntimeBackedCliCommand(parsed('runtime.doctor'), {
       readRuntimeState: vi.fn(async () => undefined),

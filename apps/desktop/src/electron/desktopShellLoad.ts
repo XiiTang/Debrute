@@ -14,6 +14,11 @@ export interface DebruteShellWindow {
   loadURL(url: string): Promise<void>;
 }
 
+export interface PreparedDebruteProjectWindowBinding {
+  commit(): void | Promise<void>;
+  rollback(): void | Promise<void>;
+}
+
 const DEFAULT_SHELL_LOAD_OPTIONS: DebruteShellLoadOptions = {
   timeoutMs: 30_000,
   intervalMs: 250,
@@ -48,13 +53,19 @@ export async function waitForDebruteShellUrl(
 export async function loadDebruteProjectShellWindow(
   window: DebruteShellWindow,
   url: string,
-  bindProjectWindow: () => void | Promise<void>,
+  prepareProjectWindowBinding: () => PreparedDebruteProjectWindowBinding | Promise<PreparedDebruteProjectWindowBinding>,
   services: Partial<DebruteShellLoadServices> = {},
   options: Partial<DebruteShellLoadOptions> = {}
 ): Promise<void> {
-  await bindProjectWindow();
-  await waitForDebruteShellUrl(url, services, options);
-  await window.loadURL(url);
+  const binding = await prepareProjectWindowBinding();
+  try {
+    await waitForDebruteShellUrl(url, services, options);
+    await window.loadURL(url);
+    await binding.commit();
+  } catch (error) {
+    await binding.rollback();
+    throw error;
+  }
 }
 
 async function canReachDebruteShellUrl(

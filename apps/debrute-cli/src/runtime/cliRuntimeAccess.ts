@@ -72,7 +72,12 @@ async function observeRuntimeCommand(
   services: CliRuntimeAccessServices
 ): Promise<DebruteAgentCommandResult> {
   const statePath = resolveWorkbenchRuntimePaths().statePath;
-  const state = await (services.readRuntimeState ?? readWorkbenchRuntimeState)(statePath).catch(() => undefined);
+  let state: WorkbenchRuntimeState | undefined;
+  try {
+    state = await (services.readRuntimeState ?? readWorkbenchRuntimeState)(statePath);
+  } catch (error) {
+    return addCliSkillsToObserveResult(args.command, unreadableRuntimeObserveResult(args.command, error), services);
+  }
   if (!state) {
     return addCliSkillsToObserveResult(args.command, stoppedRuntimeObserveResult(args.command), services);
   }
@@ -91,6 +96,34 @@ async function observeRuntimeCommand(
   }
   const result = await postDaemonCliRun(state, args, services.fetch ?? fetch);
   return addCliSkillsToObserveResult(args.command, result, services);
+}
+
+function unreadableRuntimeObserveResult(command: string, error: unknown): DebruteAgentCommandResult {
+  const message = `Debrute workbench runtime state is unreadable: ${messageFromUnknown(error)}`;
+  if (command !== 'runtime.doctor') {
+    return {
+      status: 'error',
+      command,
+      code: 'runtime_state_unreadable',
+      message
+    };
+  }
+  return {
+    status: 'ok',
+    command,
+    records: [{
+      name: 'diagnostic',
+      fields: {
+        code: 'runtime_state_unreadable',
+        severity: 'error',
+        message
+      }
+    }],
+    fields: {
+      runtime_state: 'unreadable',
+      diagnostics: 1
+    }
+  };
 }
 
 function stoppedRuntimeObserveResult(command: string): DebruteAgentCommandResult {
@@ -215,6 +248,10 @@ async function readCliSkillsStatus(services: CliRuntimeAccessServices): Promise<
   }
   const skillsRuntime = await createCliSkillsRuntime();
   return skillsRuntime.skillsService.status();
+}
+
+function messageFromUnknown(error: unknown): string {
+  return error instanceof Error ? error.message : String(error);
 }
 
 async function* ndjsonLines(stream: ReadableStream<Uint8Array>): AsyncGenerator<string> {

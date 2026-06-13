@@ -43,6 +43,14 @@ describe('desktop shell loading', () => {
       }
     }, 'http://127.0.0.1:17322/projects/project-1', () => {
       events.push('bind');
+      return {
+        commit: () => {
+          events.push('commit');
+        },
+        rollback: () => {
+          events.push('rollback');
+        }
+      };
     }, {
       fetch: async () => {
         events.push('probe');
@@ -55,7 +63,7 @@ describe('desktop shell loading', () => {
       intervalMs: 25
     });
 
-    expect(events).toEqual(['bind', 'probe', 'loadURL']);
+    expect(events).toEqual(['bind', 'probe', 'loadURL', 'commit']);
   });
 
   it('does not load project windows when binding fails', async () => {
@@ -77,15 +85,29 @@ describe('desktop shell loading', () => {
     expect(loadURL).not.toHaveBeenCalled();
   });
 
-  it('keeps the project window lease when Electron navigation fails', async () => {
-    const bindProjectWindow = vi.fn();
+  it('rolls back the prepared project window binding when Electron navigation fails', async () => {
+    const events: string[] = [];
 
     await expect(loadDebruteProjectShellWindow({
       loadURL: async () => {
+        events.push('loadURL');
         throw new Error('navigation failed');
       }
-    }, 'http://127.0.0.1:17322/projects/project-1', bindProjectWindow, {
-      fetch: async () => new Response('', { status: 200 }),
+    }, 'http://127.0.0.1:17322/projects/project-1', () => {
+      events.push('bind');
+      return {
+        commit: () => {
+          events.push('commit');
+        },
+        rollback: () => {
+          events.push('rollback');
+        }
+      };
+    }, {
+      fetch: async () => {
+        events.push('probe');
+        return new Response('', { status: 200 });
+      },
       sleep: async () => undefined,
       now: sequenceNow([0])
     }, {
@@ -93,7 +115,39 @@ describe('desktop shell loading', () => {
       intervalMs: 25
     })).rejects.toThrow('navigation failed');
 
-    expect(bindProjectWindow).toHaveBeenCalledTimes(1);
+    expect(events).toEqual(['bind', 'probe', 'loadURL', 'rollback']);
+  });
+
+  it('rolls back the prepared project window binding when the project URL never becomes reachable', async () => {
+    const events: string[] = [];
+
+    await expect(loadDebruteProjectShellWindow({
+      loadURL: async () => {
+        events.push('loadURL');
+      }
+    }, 'http://127.0.0.1:17322/projects/project-1', () => {
+      events.push('bind');
+      return {
+        commit: () => {
+          events.push('commit');
+        },
+        rollback: () => {
+          events.push('rollback');
+        }
+      };
+    }, {
+      fetch: async () => {
+        events.push('probe');
+        return new Response('', { status: 503 });
+      },
+      sleep: async () => undefined,
+      now: sequenceNow([0, 100, 200, 300])
+    }, {
+      timeoutMs: 250,
+      intervalMs: 10
+    })).rejects.toThrow('Debrute workbench URL did not become reachable');
+
+    expect(events).toEqual(['bind', 'probe', 'probe', 'rollback']);
   });
 
   it('waits for asynchronous project window binding before resolving', async () => {
@@ -107,6 +161,10 @@ describe('desktop shell loading', () => {
       loadURL: async () => undefined
     }, 'http://127.0.0.1:17322/projects/project-1', async () => {
       await bindFinished;
+      return {
+        commit: () => undefined,
+        rollback: () => undefined
+      };
     }, {
       fetch: async () => new Response('', { status: 200 }),
       sleep: async () => undefined,

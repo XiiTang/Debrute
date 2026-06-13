@@ -19,14 +19,56 @@ export async function resolveCliRuntimeOwner(runtimeDir = resolveWorkbenchRuntim
 
 async function readOrCreateCliOwnerId(runtimeDir: string): Promise<string> {
   const path = join(runtimeDir, 'cli-owner.json');
-  const existing = await readFile(path, 'utf8')
-    .then((content): CliOwnerState => JSON.parse(content) as CliOwnerState)
-    .catch(() => undefined);
-  if (existing?.schemaVersion === 1 && typeof existing.ownerId === 'string' && existing.ownerId.length > 0) {
+  const existing = await readCliOwnerState(path);
+  if (existing) {
     return existing.ownerId;
   }
   const next: CliOwnerState = { schemaVersion: 1, ownerId: randomUUID() };
   await mkdir(runtimeDir, { recursive: true, mode: 0o700 });
   await writeFile(path, `${JSON.stringify(next, null, 2)}\n`, { encoding: 'utf8', mode: 0o600 });
   return next.ownerId;
+}
+
+async function readCliOwnerState(path: string): Promise<CliOwnerState | undefined> {
+  let content: string;
+  try {
+    content = await readFile(path, 'utf8');
+  } catch (error) {
+    if (isNodeError(error) && error.code === 'ENOENT') {
+      return undefined;
+    }
+    throw error;
+  }
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(content) as unknown;
+  } catch (error) {
+    throw invalidCliOwnerState(error instanceof Error ? error.message : String(error));
+  }
+  return assertCliOwnerState(parsed);
+}
+
+function assertCliOwnerState(value: unknown): CliOwnerState {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) {
+    throw invalidCliOwnerState('expected object');
+  }
+  const state = value as Record<string, unknown>;
+  if (state.schemaVersion !== 1) {
+    throw invalidCliOwnerState('schemaVersion must be 1');
+  }
+  if (typeof state.ownerId !== 'string' || state.ownerId.length === 0) {
+    throw invalidCliOwnerState('ownerId must be a non-empty string');
+  }
+  return {
+    schemaVersion: 1,
+    ownerId: state.ownerId
+  };
+}
+
+function invalidCliOwnerState(message: string): Error {
+  return new Error(`Invalid Debrute CLI runtime owner state: ${message}.`);
+}
+
+function isNodeError(error: unknown): error is NodeJS.ErrnoException {
+  return error instanceof Error && typeof (error as { code?: unknown }).code === 'string';
 }
