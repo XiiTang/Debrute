@@ -37,11 +37,11 @@ const appIconInsetRatio = 0.08;
 const macIconInsetRatio = 0.1;
 const macIconForegroundRatio = 0.9;
 const trayIconSize = 66;
-const trayIconContentSize = 56;
+const trayIconContentSize = 60;
 const trayTemplateIconSize = 18;
-const trayTemplateIconContentSize = 14;
+const trayTemplateIconContentSize = 16;
 const trayTemplateIcon2xSize = 36;
-const trayTemplateIcon2xContentSize = 28;
+const trayTemplateIcon2xContentSize = 32;
 
 export async function syncProjectIcons({ root = defaultRoot } = {}) {
   const source = resolve(root, 'assets/project-icon/debrute.svg');

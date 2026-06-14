@@ -96,19 +96,25 @@ describe('project icon assets', () => {
     expect(await brightPixelCoverage(join(root, 'apps/desktop/build/dock_icon.png'))).toBeGreaterThan(0.35);
     expect(await alphaAt(join(root, 'apps/desktop/build/tray_icon.png'), 0, 0)).toBe(0);
     expect(await alphaAt(join(root, 'apps/desktop/build/tray_icon.png'), 33, 33)).toBeGreaterThan(0);
+    expect(await alphaEdgeMargins(join(root, 'apps/desktop/build/tray_icon.png'))).toEqual({
+      left: 3,
+      top: 3,
+      right: 3,
+      bottom: 3
+    });
     expect(await alphaAt(join(root, 'apps/desktop/build/tray_icon_template.png'), 0, 0)).toBe(0);
     expect(await alphaAt(join(root, 'apps/desktop/build/tray_icon_template.png'), 9, 9)).toBeGreaterThan(0);
     expect(await alphaEdgeMargins(join(root, 'apps/desktop/build/tray_icon_template.png'))).toEqual({
+      left: 1,
+      top: 1,
+      right: 1,
+      bottom: 1
+    });
+    expect(await alphaEdgeMargins(join(root, 'apps/desktop/build/tray_icon_template@2x.png'))).toEqual({
       left: 2,
       top: 2,
       right: 2,
       bottom: 2
-    });
-    expect(await alphaEdgeMargins(join(root, 'apps/desktop/build/tray_icon_template@2x.png'))).toEqual({
-      left: 4,
-      top: 4,
-      right: 4,
-      bottom: 4
     });
     expect(await coloredOpaquePixelCoverage(join(root, 'apps/desktop/build/tray_icon_template.png'))).toBe(0);
     expect(await brightOpaquePixelCoverage(join(root, 'apps/desktop/build/tray_icon_template.png'))).toBeGreaterThan(0.2);
