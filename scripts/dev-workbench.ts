@@ -4,6 +4,7 @@ import { randomUUID } from 'node:crypto';
 import { mkdir, writeFile } from 'node:fs/promises';
 import { dirname, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { packageManagerCommand } from './package-manager-command.mjs';
 import {
   DEFAULT_WORKBENCH_DAEMON_PORT,
   DEFAULT_WORKBENCH_WEB_PORT,
@@ -115,7 +116,8 @@ async function writeRuntimeTokenFile(token: string): Promise<void> {
 }
 
 function spawnPnpm(args: string[], env: Record<string, string>): ChildProcess {
-  return spawn(pnpmExecutable(), args, {
+  const command = packageManagerCommand(workspaceRoot, args);
+  return spawn(command.command, command.args, {
     cwd: workspaceRoot,
     stdio: 'inherit',
     env: { ...process.env, ...env }
@@ -146,8 +148,4 @@ function killChildren(): void {
       child.kill('SIGTERM');
     }
   }
-}
-
-function pnpmExecutable(): string {
-  return process.platform === 'win32' ? 'pnpm.cmd' : 'pnpm';
 }

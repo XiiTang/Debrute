@@ -1,11 +1,14 @@
 import { execFileSync } from 'node:child_process';
 import { cp, rm } from 'node:fs/promises';
 import { build } from 'esbuild';
+import { packageManagerCommand } from '../../../scripts/package-manager-command.mjs';
 
 const skipWebDist = process.argv.includes('--skip-web-dist');
+const workspaceRoot = '../..';
+const runtimeHostBuild = packageManagerCommand(workspaceRoot, ['--filter', '@debrute/runtime-host', 'build']);
 
-execFileSync(process.platform === 'win32' ? 'pnpm.cmd' : 'pnpm', ['--filter', '@debrute/runtime-host', 'build'], {
-  cwd: '../..',
+execFileSync(runtimeHostBuild.command, runtimeHostBuild.args, {
+  cwd: workspaceRoot,
   stdio: 'inherit'
 });
 

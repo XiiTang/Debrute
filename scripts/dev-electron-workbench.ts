@@ -2,8 +2,10 @@
 import { spawn, spawnSync, type ChildProcess } from 'node:child_process';
 import { randomUUID } from 'node:crypto';
 import { mkdir, writeFile } from 'node:fs/promises';
+import { createRequire } from 'node:module';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { packageManagerCommand } from './package-manager-command.mjs';
 import {
   DEFAULT_WORKBENCH_DAEMON_PORT,
   DEFAULT_WORKBENCH_WEB_PORT,
@@ -18,6 +20,7 @@ import {
 
 const workspaceRoot = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 const desktopRoot = join(workspaceRoot, 'apps/desktop');
+const desktopRequire = createRequire(join(desktopRoot, 'package.json'));
 const paths = resolveWorkbenchRuntimePaths();
 const children: ChildProcess[] = [];
 const ownerId = randomUUID();
@@ -30,10 +33,14 @@ for (const signal of ['SIGINT', 'SIGTERM'] as const) {
   });
 }
 
-const build = spawnSync(pnpmExecutable(), ['--filter', '@debrute/desktop', 'build:electron:dev'], {
+const buildCommand = packageManagerCommand(workspaceRoot, ['--filter', '@debrute/desktop', 'build:electron:dev']);
+const build = spawnSync(buildCommand.command, buildCommand.args, {
   cwd: workspaceRoot,
   stdio: 'inherit'
 });
+if (build.error) {
+  console.error(build.error);
+}
 if (build.status !== 0) {
   process.exit(build.status ?? 1);
 }
@@ -124,7 +131,8 @@ function spawnElectron(): ChildProcess {
 }
 
 function spawnPnpm(args: string[], env: Record<string, string>): ChildProcess {
-  return spawn(pnpmExecutable(), args, {
+  const command = packageManagerCommand(workspaceRoot, args);
+  return spawn(command.command, command.args, {
     cwd: workspaceRoot,
     stdio: 'inherit',
     env: { ...process.env, ...env }
@@ -169,11 +177,5 @@ function killChildren(): void {
 }
 
 function electronExecutable(): string {
-  return process.platform === 'win32'
-    ? join(desktopRoot, 'node_modules/.bin/electron.cmd')
-    : join(desktopRoot, 'node_modules/.bin/electron');
-}
-
-function pnpmExecutable(): string {
-  return process.platform === 'win32' ? 'pnpm.cmd' : 'pnpm';
+  return desktopRequire('electron') as string;
 }

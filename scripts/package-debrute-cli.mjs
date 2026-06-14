@@ -11,6 +11,7 @@ import {
   checksumManifestName,
   cliReleaseAssetName
 } from './release-asset-contract.mjs';
+import { packageManagerCommand } from './package-manager-command.mjs';
 import { sharpRuntimePayloadEntries } from './sharp-runtime-payload.mjs';
 export { checksumManifestName } from './release-asset-contract.mjs';
 
@@ -50,8 +51,10 @@ export async function packageDebruteCliRelease({ all = false, outDir = join(work
     throw new Error(`No Debrute CLI release target for ${process.platform}-${process.arch}.`);
   }
 
-  await execFileAsync(pnpmExecutable(), ['check'], { cwd: workspaceRoot });
-  await execFileAsync(pnpmExecutable(), ['--filter', '@debrute/web', 'build'], { cwd: workspaceRoot });
+  const checkCommand = packageManagerCommand(workspaceRoot, ['check']);
+  await execFileAsync(checkCommand.command, checkCommand.args, { cwd: workspaceRoot });
+  const webBuildCommand = packageManagerCommand(workspaceRoot, ['--filter', '@debrute/web', 'build']);
+  await execFileAsync(webBuildCommand.command, webBuildCommand.args, { cwd: workspaceRoot });
 
   const buildRoot = join(workspaceRoot, 'build', 'debrute-cli-release');
   const bundlePath = join(buildRoot, 'debrute-cli.cjs');
@@ -132,10 +135,6 @@ function releaseTargetForHost() {
 function hostTargetId() {
   const platform = process.platform === 'win32' ? 'windows' : process.platform;
   return `${platform}-${process.arch}`;
-}
-
-function pnpmExecutable() {
-  return process.platform === 'win32' ? 'pnpm.cmd' : 'pnpm';
 }
 
 async function sha256File(path) {

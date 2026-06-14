@@ -1,5 +1,5 @@
 import { randomUUID } from 'node:crypto';
-import { closeSync, openSync } from 'node:fs';
+import { closeSync, existsSync, openSync, readFileSync } from 'node:fs';
 import { access, mkdir, writeFile } from 'node:fs/promises';
 import { dirname, resolve } from 'node:path';
 import { spawn, type ChildProcess } from 'node:child_process';
@@ -86,7 +86,7 @@ async function launchSourceDevRuntime(
   const daemonUrl = `http://127.0.0.1:${daemonPort}`;
   const webUrl = `http://127.0.0.1:${webPort}`;
   const now = new Date().toISOString();
-  const daemon = spawnDetached(pnpmExecutable(), [
+  const daemonCommand = packageManagerCommand(sourceRoot, [
     '--filter',
     '@debrute/daemon',
     'dev',
@@ -96,12 +96,13 @@ async function launchSourceDevRuntime(
     paths.tokenPath,
     '--web-base-url',
     webUrl
-  ], sourceRoot, paths.daemonLogPath, {
+  ]);
+  const daemon = spawnDetached(daemonCommand.command, daemonCommand.args, sourceRoot, paths.daemonLogPath, {
     DEBRUTE_DAEMON_PORT: String(daemonPort),
     DEBRUTE_DAEMON_TOKEN_FILE: paths.tokenPath,
     DEBRUTE_WEB_BASE_URL: webUrl
   });
-  const web = spawnDetached(pnpmExecutable(), [
+  const webCommand = packageManagerCommand(sourceRoot, [
     '--filter',
     '@debrute/web',
     'dev',
@@ -110,7 +111,8 @@ async function launchSourceDevRuntime(
     '--port',
     String(webPort),
     '--strictPort'
-  ], sourceRoot, paths.webLogPath, {
+  ]);
+  const web = spawnDetached(webCommand.command, webCommand.args, sourceRoot, paths.webLogPath, {
     DEBRUTE_DAEMON_URL: daemonUrl
   });
   const daemonPid = requirePid(daemon, 'daemon');
@@ -249,6 +251,48 @@ export function resolveWorkbenchRuntimeEntryDir(
     : dirname(packagedExecutablePath(execPath));
 }
 
-function pnpmExecutable(): string {
-  return process.platform === 'win32' ? 'pnpm.cmd' : 'pnpm';
+interface PnpmCommand {
+  command: string;
+  args: string[];
+}
+
+function packageManagerCommand(sourceRoot: string, args: string[]): PnpmCommand {
+  const packageManager = readDeclaredPackageManager(sourceRoot);
+  if (packageManager.name !== 'pnpm') {
+    throw cliError('runtime_launch_failed', `Unsupported package manager: ${packageManager.raw}. Debrute requires pnpm.`);
+  }
+
+  const corepackEntrypoint = resolve(dirname(process.execPath), 'node_modules/corepack/dist/corepack.js');
+  if (existsSync(corepackEntrypoint)) {
+    return {
+      command: process.execPath,
+      args: [corepackEntrypoint, packageManager.name, ...args]
+    };
+  }
+
+  if (process.platform === 'win32') {
+    throw cliError('runtime_launch_failed', 'Corepack is required to launch pnpm from Debrute on Windows.');
+  }
+
+  return {
+    command: packageManager.name,
+    args
+  };
+}
+
+function readDeclaredPackageManager(sourceRoot: string): { raw: string; name: string } {
+  const packageJsonPath = resolve(sourceRoot, 'package.json');
+  const packageJson = JSON.parse(readFileSync(packageJsonPath, 'utf8')) as { packageManager?: unknown };
+  const raw = packageJson.packageManager;
+  if (typeof raw !== 'string') {
+    throw cliError('runtime_launch_failed', `Missing packageManager in ${packageJsonPath}.`);
+  }
+  const match = /^([a-z0-9-]+)@/.exec(raw);
+  if (!match) {
+    throw cliError('runtime_launch_failed', `Invalid packageManager in ${packageJsonPath}: ${raw}`);
+  }
+  return {
+    raw,
+    name: match[1]!
+  };
 }

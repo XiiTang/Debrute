@@ -2,6 +2,7 @@ import { createRequire } from 'node:module';
 import { existsSync } from 'node:fs';
 import { join } from 'node:path';
 import { execFileSync } from 'node:child_process';
+import { packageManagerCommand } from './package-manager-command.mjs';
 
 const root = process.cwd();
 const desktopRequire = createRequire(join(root, 'apps/desktop/package.json'));
@@ -75,12 +76,14 @@ function isPnpmVersionSupported(version) {
 
 let pnpmVersion = 'unknown';
 try {
-  pnpmVersion = execFileSync('pnpm', ['--version'], { encoding: 'utf8' }).trim();
+  const versionCommand = packageManagerCommand(root, ['--version']);
+  pnpmVersion = execFileSync(versionCommand.command, versionCommand.args, { encoding: 'utf8' }).trim();
   if (!isPnpmVersionSupported(pnpmVersion)) {
     failures.push(`pnpm >=11.2.2 <12 is required. Current: ${pnpmVersion}`);
   }
-} catch {
-  failures.push('pnpm is not available on PATH.');
+} catch (error) {
+  const message = error instanceof Error ? error.message : String(error);
+  failures.push(`pnpm could not be launched through the declared packageManager: ${message}`);
 }
 
 if (process.platform !== 'darwin') {
