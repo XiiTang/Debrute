@@ -277,6 +277,7 @@ export interface LlmProviderConfig {
 
 export interface LlmProviderSettingRecord extends LlmProviderConfig {
   apiKeySet: boolean;
+  apiKey: string;
   modelKeys: string[];
 }
 
@@ -316,6 +317,7 @@ export interface ImageModelSettingRecord {
   baseUrlOverride: string | null;
   requestModelIdOverride: string | null;
   apiKeySet: boolean;
+  apiKey: string;
 }
 
 export interface ImageModelSettingsView {
@@ -341,6 +343,7 @@ export interface VideoModelSettingRecord {
   baseUrlOverride: string | null;
   requestModelIdOverride: string | null;
   apiKeySet: boolean;
+  apiKey: string;
 }
 
 export interface VideoModelSettingsView {

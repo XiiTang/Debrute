@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from 'react';
-import { Bot, Cpu, KeyRound, RefreshCw, Save, Search, Terminal, Trash2, Wrench } from 'lucide-react';
+import { Bot, Cpu, Eye, EyeOff, RefreshCw, Save, Search, Terminal, Trash2, Wrench } from 'lucide-react';
 import type {
   ImageModelSettingRecord,
   LlmProviderSettingRecord,
@@ -25,6 +25,16 @@ interface ModelDraft {
   baseUrlOverride: string;
   requestModelIdOverride: string;
   apiKey: string;
+}
+
+interface ApiKeyInputProps {
+  value: string;
+  onChange: (value: string) => void;
+  ariaLabel?: string;
+  label?: string;
+  onBlur?: () => void;
+  placeholder?: string;
+  resetKey?: string;
 }
 
 type DiscoveryState =
@@ -83,7 +93,7 @@ export function SettingsPanel({ state, actions }: { state: WorkbenchState; actio
   );
 }
 
-function LlmSettings({ state, actions }: { state: WorkbenchState; actions: WorkbenchActions }): React.ReactElement {
+export function LlmSettings({ state, actions }: { state: WorkbenchState; actions: WorkbenchActions }): React.ReactElement {
   const settings = state.llmSettings;
   const [editingProviderId, setEditingProviderId] = useState<string>();
   const [draft, setDraft] = useState<LlmProviderDraft>(createEmptyLlmProviderDraft());
@@ -103,7 +113,7 @@ function LlmSettings({ state, actions }: { state: WorkbenchState; actions: Workb
       baseUrl: draft.baseUrl.trim(),
       enabled: draft.enabled,
       modelIds: splitModelIds(draft.modelIdsText),
-      ...(draft.apiKey.trim() ? { apiKey: draft.apiKey.trim() } : {})
+      apiKey: draft.apiKey.trim()
     };
     await actions.saveLlmProviderSetting(input, editingProviderId);
     setEditingProviderId(undefined);
@@ -171,7 +181,14 @@ function LlmSettings({ state, actions }: { state: WorkbenchState; actions: Workb
           <div className="settings-row"><label>Name<input value={draft.name} onChange={(event) => setDraft({ ...draft, name: event.currentTarget.value })} /></label></div>
           <div className="settings-row"><label>Base URL<input value={draft.baseUrl} onChange={(event) => setDraft({ ...draft, baseUrl: event.currentTarget.value })} /></label></div>
           <div className="settings-row"><label>Model IDs<textarea value={draft.modelIdsText} onChange={(event) => setDraft({ ...draft, modelIdsText: event.currentTarget.value })} /></label></div>
-          <div className="settings-row"><label><span><KeyRound size={13} />API Key</span><input type="password" value={draft.apiKey} onChange={(event) => setDraft({ ...draft, apiKey: event.currentTarget.value })} placeholder={editingProviderId ? 'Leave blank to keep existing key' : ''} /></label></div>
+          <div className="settings-row">
+            <ApiKeyInput
+              label="API Key"
+              value={draft.apiKey}
+              onChange={(apiKey) => setDraft({ ...draft, apiKey })}
+              resetKey={editingProviderId ?? 'new'}
+            />
+          </div>
           <label className="settings-toggle"><input type="checkbox" checked={draft.enabled} onChange={(event) => setDraft({ ...draft, enabled: event.currentTarget.checked })} />Enabled</label>
           {discovery.status !== 'idle' ? (
             <small className={discovery.status === 'error' ? 'settings-error' : ''}>
@@ -297,15 +314,14 @@ function MediaModelCard({
         </div>
       </div>
       <div className="settings-model-card-fields">
-        <div className="settings-row settings-key-input">
-          <KeyRound size={13} aria-hidden="true" />
-          <input
-            aria-label="API Key"
-            type="password"
+        <div className="settings-row">
+          <ApiKeyInput
+            ariaLabel="API Key"
             value={draft.apiKey}
-            onChange={(event) => setDraft({ ...draft, apiKey: event.currentTarget.value })}
+            onChange={(apiKey) => setDraft({ ...draft, apiKey })}
             onBlur={() => void saveDraft(draft)}
-            placeholder={model.apiKeySet ? 'Leave blank to keep existing key' : 'API Key'}
+            placeholder="API Key"
+            resetKey={model.debruteModelId}
           />
         </div>
         <div className="settings-model-edit-grid">
@@ -364,11 +380,66 @@ function LlmProviderCard({
   );
 }
 
+function ApiKeyInput({
+  value,
+  onChange,
+  ariaLabel,
+  label,
+  onBlur,
+  placeholder,
+  resetKey
+}: ApiKeyInputProps): React.ReactElement {
+  const [visible, setVisible] = useState(false);
+
+  useEffect(() => {
+    setVisible(false);
+  }, [resetKey]);
+
+  const visibilityLabel = visible ? 'Hide API key' : 'Show API key';
+  const effectivePlaceholder = value ? undefined : placeholder;
+  const input = (
+    <span className="settings-key-input">
+      <input
+        aria-label={ariaLabel}
+        className={visible || !value ? 'settings-key-input-field' : 'settings-key-input-field settings-key-input-field--masked'}
+        type="text"
+        value={value}
+        onChange={(event) => onChange(event.currentTarget.value)}
+        onBlur={onBlur}
+        placeholder={effectivePlaceholder}
+        spellCheck={false}
+      />
+      <button
+        type="button"
+        className="settings-key-visibility"
+        aria-label={visibilityLabel}
+        aria-pressed={visible}
+        title={visibilityLabel}
+        onMouseDown={(event) => event.preventDefault()}
+        onClick={() => setVisible((current) => !current)}
+      >
+        {visible ? <EyeOff size={13} aria-hidden="true" /> : <Eye size={13} aria-hidden="true" />}
+      </button>
+    </span>
+  );
+
+  if (!label) {
+    return input;
+  }
+
+  return (
+    <label>
+      <span>{label}</span>
+      {input}
+    </label>
+  );
+}
+
 function modelToDraft(model: ImageModelSettingRecord | VideoModelSettingRecord): ModelDraft {
   return {
     baseUrlOverride: model.baseUrlOverride ?? '',
     requestModelIdOverride: model.requestModelIdOverride ?? '',
-    apiKey: ''
+    apiKey: model.apiKey
   };
 }
 
@@ -376,14 +447,14 @@ function modelDraftToSaveInput(draft: ModelDraft) {
   return {
     baseUrlOverride: draft.baseUrlOverride.trim() || null,
     requestModelIdOverride: draft.requestModelIdOverride.trim() || null,
-    ...(draft.apiKey.trim() ? { apiKey: draft.apiKey.trim() } : {})
+    apiKey: draft.apiKey.trim()
   };
 }
 
 function modelDraftMatchesPersisted(draft: ModelDraft, model: ImageModelSettingRecord | VideoModelSettingRecord): boolean {
   return draft.baseUrlOverride.trim() === (model.baseUrlOverride ?? '')
     && draft.requestModelIdOverride.trim() === (model.requestModelIdOverride ?? '')
-    && draft.apiKey.trim() === '';
+    && draft.apiKey.trim() === model.apiKey;
 }
 
 function createEmptyLlmProviderDraft(): LlmProviderDraft {
@@ -406,7 +477,7 @@ function llmProviderToDraft(provider: LlmProviderSettingRecord): LlmProviderDraf
     baseUrl: provider.baseUrl,
     modelIdsText: provider.modelIds.join('\n'),
     enabled: provider.enabled,
-    apiKey: ''
+    apiKey: provider.apiKey
   };
 }
 

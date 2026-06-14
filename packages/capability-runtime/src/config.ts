@@ -93,7 +93,7 @@ export function createImageModelSettingsView(
   return {
     models: catalog.map((entry) => {
       const configured = configuredById.get(entry.debruteModelId);
-      const apiKeySet = Boolean(secrets.imageModelApiKeys[entry.debruteModelId]?.trim());
+      const apiKey = secrets.imageModelApiKeys[entry.debruteModelId]?.trim() ?? '';
       return {
         debruteModelId: entry.debruteModelId,
         summary: entry.summary,
@@ -103,7 +103,8 @@ export function createImageModelSettingsView(
         defaultRequestModelId: entry.defaultRequestModelId,
         baseUrlOverride: configured?.baseUrlOverride ?? null,
         requestModelIdOverride: configured?.requestModelIdOverride ?? null,
-        apiKeySet
+        apiKeySet: Boolean(apiKey),
+        apiKey
       };
     })
   };
@@ -118,7 +119,7 @@ export function createVideoModelSettingsView(
   return {
     models: catalog.map((entry) => {
       const configured = configuredById.get(entry.debruteModelId);
-      const apiKeySet = Boolean(secrets.videoModelApiKeys[entry.debruteModelId]?.trim());
+      const apiKey = secrets.videoModelApiKeys[entry.debruteModelId]?.trim() ?? '';
       return {
         debruteModelId: entry.debruteModelId,
         summary: entry.summary,
@@ -131,7 +132,8 @@ export function createVideoModelSettingsView(
         defaultRequestModelId: entry.defaultRequestModelId,
         baseUrlOverride: configured?.baseUrlOverride ?? null,
         requestModelIdOverride: configured?.requestModelIdOverride ?? null,
-        apiKeySet
+        apiKeySet: Boolean(apiKey),
+        apiKey
       };
     })
   };
@@ -142,11 +144,15 @@ export function createLlmProviderSettingsView(
   secrets: SecretsConfig
 ): LlmProviderSettingsView {
   const providers = config.providers
-    .map((provider) => ({
-      ...provider,
-      apiKeySet: Boolean(secrets.llmProviderApiKeys[provider.id]?.trim()),
-      modelKeys: provider.modelIds.map((modelId) => `${provider.id}:${modelId}`)
-    }))
+    .map((provider) => {
+      const apiKey = secrets.llmProviderApiKeys[provider.id]?.trim() ?? '';
+      return {
+        ...provider,
+        apiKeySet: Boolean(apiKey),
+        apiKey,
+        modelKeys: provider.modelIds.map((modelId) => `${provider.id}:${modelId}`)
+      };
+    })
     .sort((left, right) => left.id.localeCompare(right.id));
   const availableModelKeys = providers
     .filter((provider) => provider.enabled && provider.apiKeySet)

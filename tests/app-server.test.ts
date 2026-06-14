@@ -815,7 +815,8 @@ describe('app-server', () => {
             id: 'openai-main',
             providerType: 'openai_compat',
             modelIds: ['gpt-5.1'],
-            apiKeySet: true
+            apiKeySet: true,
+            apiKey: 'sk-llm-test'
           })
         ]
       });
@@ -903,14 +904,16 @@ describe('app-server', () => {
         defaultRequestModelId: 'gpt-image-2',
         baseUrlOverride: 'not a url yet',
         requestModelIdOverride: 'custom-image-model',
-        apiKeySet: true
+        apiKeySet: true,
+        apiKey: 'sk-image'
       });
       expect(videoSettings.models.find((model) => model.debruteModelId === 'doubao-seedance-2-0-260128')).toMatchObject({
         defaultBaseUrl: 'https://ark.cn-beijing.volces.com/api/v3',
         defaultRequestModelId: 'doubao-seedance-2-0-260128',
         baseUrlOverride: 'ark local draft',
         requestModelIdOverride: 'custom-video-model',
-        apiKeySet: true
+        apiKeySet: true,
+        apiKey: 'sk-video'
       });
     } finally {
       globalRuntime.close();
@@ -932,7 +935,8 @@ describe('app-server', () => {
       expect(settings.models.find((model) => model.debruteModelId === 'gpt-image-2')).toMatchObject({
         baseUrlOverride: null,
         requestModelIdOverride: null,
-        apiKeySet: true
+        apiKeySet: true,
+        apiKey: 'sk-image'
       });
       await expect(configStore.readImageModels()).resolves.toEqual({ imageModels: [] });
       await expect(configStore.readSecrets()).resolves.toMatchObject({

@@ -2084,21 +2084,47 @@ small {
 }
 
 .settings-key-input {
+  display: block;
   position: relative;
 }
 
-.settings-key-input svg {
-  position: absolute;
-  left: 9px;
-  top: 50%;
-  z-index: 1;
-  color: var(--subtle);
-  transform: translateY(-50%);
-  pointer-events: none;
+.settings-row .settings-key-input {
+  display: block;
+  gap: 0;
+  align-items: normal;
 }
 
 .settings-key-input input {
-  padding-left: 28px;
+  padding-right: 34px;
+}
+
+.settings-key-input-field--masked {
+  -webkit-text-security: disc;
+}
+
+.settings-card .settings-key-visibility {
+  position: absolute;
+  top: 50%;
+  right: 4px;
+  z-index: 2;
+  width: 24px;
+  min-height: 24px;
+  padding: 0;
+  border-color: transparent;
+  background: transparent;
+  color: var(--muted);
+  transform: translateY(-50%);
+}
+
+.settings-card .settings-key-visibility:hover:not(:disabled),
+.settings-card .settings-key-visibility:focus-visible {
+  border-color: color-mix(in oklch, var(--accent) 38%, transparent);
+  background: color-mix(in oklch, var(--accent) 12%, transparent);
+  color: var(--text);
+}
+
+.settings-key-visibility svg {
+  pointer-events: none;
 }
 
 @media (max-width: 680px) {

@@ -1,7 +1,10 @@
 import React from 'react';
 import { renderToStaticMarkup } from 'react-dom/server';
 import { describe, expect, it } from 'vitest';
-import { SettingsPanel } from '../apps/web/src/workbench/settings/SettingsPanel';
+import {
+  LlmSettings,
+  SettingsPanel
+} from '../apps/web/src/workbench/settings/SettingsPanel';
 import {
   DebruteCliSettingsPage,
   debruteCliSkillsStatusFromActionResult,
@@ -23,7 +26,8 @@ describe('web Settings pages', () => {
             defaultRequestModelId: 'gpt-image-2',
             baseUrlOverride: null,
             requestModelIdOverride: null,
-            apiKeySet: true
+            apiKeySet: true,
+            apiKey: 'sk-image-ui'
           }, {
             debruteModelId: 'missing-image',
             summary: 'Missing configuration',
@@ -58,9 +62,69 @@ describe('web Settings pages', () => {
     expect(html).toContain('aria-label="Base URL override"');
     expect(html).toContain('aria-label="Request model ID override"');
     expect(html).toContain('aria-label="API Key"');
-    expect(html).toContain('Leave blank to keep existing key');
+    expect(html).toContain('value="sk-image-ui"');
+    expect(html).not.toContain('Leave blank to keep existing key');
     expect(html).toContain('configured');
     expect(html).toContain('no key');
+  });
+
+  it('renders visibility controls for every API key input', () => {
+    const state = {
+      llmSettings: {
+        providers: [{
+          id: 'openai',
+          name: 'OpenAI',
+          providerType: 'openai_compat',
+          baseUrl: 'https://api.openai.com/v1',
+          modelIds: ['gpt-4.1'],
+          modelKeys: ['openai:gpt-4.1'],
+          enabled: true,
+          apiKeySet: true,
+          apiKey: 'sk-llm-ui'
+        }],
+        availableModelKeys: ['openai:gpt-4.1'],
+        defaultModelKey: null
+      },
+      imageModelSettings: {
+        models: [{
+          debruteModelId: 'gpt-image-2',
+          summary: 'Image generation',
+          defaultBaseUrl: 'https://api.openai.com/v1',
+          defaultRequestModelId: 'gpt-image-2',
+          baseUrlOverride: null,
+          requestModelIdOverride: null,
+          apiKeySet: true,
+          apiKey: 'sk-image-ui'
+        }]
+      },
+      videoModelSettings: {
+        models: [{
+          debruteModelId: 'sora-2',
+          summary: 'Video generation',
+          defaultBaseUrl: 'https://api.openai.com/v1',
+          defaultRequestModelId: 'sora-2',
+          baseUrlOverride: null,
+          requestModelIdOverride: null,
+          apiKeySet: true,
+          apiKey: 'sk-video-ui'
+        }]
+      }
+    } as unknown as WorkbenchState;
+    const actions = {} as unknown as WorkbenchActions;
+
+    const modelHtml = renderToStaticMarkup(React.createElement(SettingsPanel, { state, actions }));
+    const llmHtml = renderToStaticMarkup(React.createElement(LlmSettings, { state, actions }));
+    const html = `${modelHtml}${llmHtml}`;
+
+    expect(html.match(/type="text"/g)).toHaveLength(3);
+    expect(html).not.toContain('type="password"');
+    expect(html.match(/settings-key-input-field--masked/g)).toHaveLength(2);
+    expect(html.match(/aria-label="Show API key"/g)).toHaveLength(3);
+    expect(html).toContain('value="sk-image-ui"');
+    expect(html).toContain('value="sk-video-ui"');
+    expect(html).not.toContain('settings-key-leading-icon');
+    expect(html).not.toContain('Leave blank to keep existing key');
+    expect(html).not.toContain('aria-label="Hide API key"');
   });
 
   it('does not render Canvas settings or image preview controls', () => {
