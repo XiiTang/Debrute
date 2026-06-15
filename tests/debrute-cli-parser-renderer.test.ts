@@ -37,8 +37,8 @@ describe('debrute cli parser and renderer', () => {
         log: 'results.jsonl'
       }
     });
-    expect(parseDebruteArgs(['canvas-map', 'publish', '/tmp/project', 'canvas-1'])).toMatchObject({
-      command: 'canvas-map.publish',
+    expect(parseDebruteArgs(['canvas-map', 'push', '/tmp/project', 'canvas-1'])).toMatchObject({
+      command: 'canvas-map.push',
       scope: 'project',
       projectRoot: '/tmp/project',
       positional: ['/tmp/project', 'canvas-1']
@@ -192,7 +192,7 @@ describe('debrute cli parser and renderer', () => {
       'project.status',
       'project.validate',
       'workbench.url',
-      'canvas-map.publish',
+      'canvas-map.push',
       'canvas.create',
       'canvas.rename',
       'canvas.delete',
@@ -224,14 +224,14 @@ describe('debrute cli parser and renderer', () => {
       requires: 'project',
       writes: 'debrute-project'
     });
-    expect(specForCommandPath(['canvas-map', 'publish'])?.errors).toEqual(expect.arrayContaining([
+    expect(specForCommandPath(['canvas-map', 'push'])?.errors).toEqual(expect.arrayContaining([
       'canvas_map_invalid_canvas_id',
       'canvas_map_invalid_path',
       'canvas_map_read_failed',
       'canvas_map_invalid_yaml',
       'canvas_map_canvas_missing'
     ]));
-    expect(specForCommandPath(['canvas-map', 'publish'])?.input).toBe('<project> <canvas-id>');
+    expect(specForCommandPath(['canvas-map', 'push'])?.input).toBe('<project> <canvas-id>');
     expect(specForCommandPath(['canvas', 'rename'])?.errors).toEqual(expect.arrayContaining([
       'canvas_registry_conflict',
       'canvas_map_conflict'

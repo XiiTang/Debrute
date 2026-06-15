@@ -44,27 +44,27 @@ describe('Debrute image director Skill', () => {
     expect(skill).toContain('model-specific file format, size, dimension, alpha, and mask constraints are left to the upstream model');
   });
 
-  it('teaches Canvas Map publishing for generated image output paths', () => {
+  it('teaches Canvas Map pushing for generated image output paths', () => {
     const core = readRepoFile('skills/debrute-core/SKILL.md');
     const imageDirector = readRepoFile('skills/debrute-image-director/SKILL.md');
 
     expect(core).toContain('.debrute/canvas-maps/<canvas-id>.yaml');
-    expect(core).toContain('debrute canvas-map publish /path/to/project <canvas-id>');
+    expect(core).toContain('debrute canvas-map push /path/to/project <canvas-id>');
     expect(core).toContain('paths:');
     expect(core).toContain('layout:');
     expect(core).toContain('rows:');
     expect(core).toContain('Folder rules under `paths` must end with `/`, for example `outputs/gpt/`.');
-    expect(core).toContain('add matching file, folder, or glob entries under `paths` and publish before running generation.');
+    expect(core).toContain('add matching file, folder, or glob entries under `paths` and push before running generation.');
     expect(imageDirector).toContain('Update the Canvas Map when planning image output paths.');
     expect(imageDirector).toContain('Add exact file, folder, or glob entries under `paths` in `.debrute/canvas-maps/<canvas-id>.yaml`; folder rules must end with `/`.');
-    expect(imageDirector).toContain('Publish the Canvas Map with `debrute canvas-map publish');
+    expect(imageDirector).toContain('Push the Canvas Map with `debrute canvas-map push');
   });
 
   it('documents batch command semantics in the README', () => {
     const readme = readRepoFile('README.md');
 
     expect(readme).toContain('- `apps/daemon` - loopback HTTP/SSE runtime that serves the Web workbench and owns privileged project, Canvas, settings, and generated asset operations.');
-    expect(readme).toContain('- `apps/app-server` - local domain service boundary for project sessions, Canvas Map publishing and sync, Canvas node projection, model settings, generated asset metadata, and explicit CLI service methods.');
+    expect(readme).toContain('- `apps/app-server` - local domain service boundary for project sessions, Canvas Map pushing and sync, Canvas node projection, model settings, generated asset metadata, and explicit CLI service methods.');
     expect(readme).toContain('- `packages/capability-core` - result and artifact value shapes shared by Debrute runtime services.');
     expect(readme).toContain('- `packages/capability-runtime` - model catalogs, model executors, runtime LLM request execution, LLM provider settings, generation model settings, and Skills registry code.');
     expect(readme).toContain('Use `generate image-batch` for multiple planned image requests; do not loop over `generate image` for planned batches.');

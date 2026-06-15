@@ -253,6 +253,7 @@ export {
   assertProjectTreeVisibleMutationPath,
   debruteHomeDir,
   isIgnoredProjectFilePath,
+  isProtectedProjectDocumentMutationPath,
   joinProjectPath,
   normalizeProjectDirectoryPath,
   normalizeProjectPathBasename,

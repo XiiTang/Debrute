@@ -1,27 +1,30 @@
 import { basename, join } from 'node:path';
+import { readFile } from 'node:fs/promises';
 import {
   getDebruteProjectPaths,
   listDebruteProjectFiles,
-  readJsonFile,
-  writeJsonAtomic
 } from '@debrute/project-core';
 import {
   updateCanvasNodeLayers,
   updateCanvasNodeLayouts,
   type CanvasDocument,
   type CanvasNodeLayerPatch,
-  type CanvasProjection
+  type CanvasProjection,
+  type Diagnostic
 } from '@debrute/canvas-core';
 import type { ProjectSessionSnapshot } from '@debrute/app-protocol';
+import { projectDocumentTextHash } from '../project-documents/ProjectDocumentTransaction.js';
+import { projectDocumentDiagnostic } from '../project-documents/ProjectDocumentDiagnostics.js';
 import { assertCurrentCanvasDocument } from './CanvasProjectionService.js';
 
 export interface CanvasSessionServiceOptions {
-  suppressInternalProjectPathEvent(absolutePath: string, content?: string): void;
-  clearInternalProjectPathEvent(absolutePath: string): void;
+  writeCanvasText(projectRoot: string, canvasPath: string, content: string, expectedHash: string): Promise<void>;
   projectCanvasWithKnownAvailability(canvas: CanvasDocument, projection: CanvasProjection): CanvasProjection;
 }
 
 export class CanvasSessionService {
+  private readonly canvasHashByProjectCanvas = new Map<string, string>();
+
   constructor(private readonly options: CanvasSessionServiceOptions) {}
 
   async updateCanvasNodeLayouts(
@@ -51,23 +54,49 @@ export class CanvasSessionService {
     return this.updateVisualCanvas(current, input.canvasId, (canvas) => updateCanvasNodeLayers(canvas, input));
   }
 
-  async writeCanvasJson(canvasPath: string, canvas: CanvasDocument): Promise<void> {
+  async writeCanvasJson(projectRoot: string, canvasPath: string, canvas: CanvasDocument, expectedHash: string): Promise<void> {
     const serialized = `${JSON.stringify(canvas, null, 2)}\n`;
-    this.options.suppressInternalProjectPathEvent(canvasPath, serialized);
-    await writeJsonAtomic(canvasPath, canvas);
+    await this.options.writeCanvasText(projectRoot, canvasPath, serialized, expectedHash);
   }
 
   async loadCanvases(projectRoot: string): Promise<CanvasDocument[]> {
+    return (await this.loadCanvasDocuments(projectRoot)).canvases;
+  }
+
+  async loadCanvasDocuments(projectRoot: string): Promise<{ canvases: CanvasDocument[]; diagnostics: Diagnostic[] }> {
     const files = await this.currentCanvasFiles(projectRoot);
     const canvases: CanvasDocument[] = [];
+    const diagnostics: Diagnostic[] = [];
     for (const file of files) {
-      const canvas = assertCurrentCanvasDocument(await readJsonFile<unknown>(file), file);
-      if (canvas.id !== canvasFileId(file)) {
-        throw new Error(`Canvas document id must match file name: ${file}`);
+      const canvasId = canvasFileId(file);
+      try {
+        const content = await readFile(file, 'utf8');
+        const canvas = assertCurrentCanvasDocument(JSON.parse(content), file);
+        if (canvas.id !== canvasId) {
+          throw new Error(`Canvas document id must match file name: ${file}`);
+        }
+        this.recordCanvasDocumentTextHash(projectRoot, canvas.id, content);
+        canvases.push(canvas);
+      } catch (error) {
+        diagnostics.push(projectDocumentDiagnostic({
+          id: `document.invalid_pushed:${canvasId}`,
+          severity: 'error',
+          code: 'document_invalid_pushed',
+          message: errorMessage(error),
+          filePath: file,
+          entityId: canvasId
+        }));
       }
-      canvases.push(canvas);
     }
-    return canvases;
+    return { canvases, diagnostics };
+  }
+
+  canvasDocumentHash(projectRoot: string, canvasId: string): string | undefined {
+    return this.canvasHashByProjectCanvas.get(projectCanvasKey(projectRoot, canvasId));
+  }
+
+  recordCanvasDocumentTextHash(projectRoot: string, canvasId: string, content: string): void {
+    this.canvasHashByProjectCanvas.set(projectCanvasKey(projectRoot, canvasId), projectDocumentTextHash(content));
   }
 
   async currentCanvasFiles(projectRoot: string): Promise<string[]> {
@@ -97,12 +126,12 @@ export class CanvasSessionService {
     if (JSON.stringify(next) === JSON.stringify(existing)) {
       return { canvas: existing, snapshot: current, changed: false };
     }
-    try {
-      await this.writeCanvasJson(canvasPath, next);
-    } catch (error) {
-      this.options.clearInternalProjectPathEvent(canvasPath);
-      throw error;
+    const expectedHash = this.canvasDocumentHash(current.projectRoot, canvasId);
+    if (!expectedHash) {
+      throw new Error(`Canvas document hash is not loaded: ${canvasId}`);
     }
+    await this.writeCanvasJson(current.projectRoot, canvasPath, next, expectedHash);
+    this.recordCanvasDocumentTextHash(current.projectRoot, canvasId, `${JSON.stringify(next, null, 2)}\n`);
     const projection = this.options.projectCanvasWithKnownAvailability(next, existingProjection);
     return {
       canvas: next,
@@ -118,4 +147,12 @@ export class CanvasSessionService {
 
 function canvasFileId(filePath: string): string {
   return basename(filePath, '.json');
+}
+
+function projectCanvasKey(projectRoot: string, canvasId: string): string {
+  return `${projectRoot}\u0000${canvasId}`;
+}
+
+function errorMessage(error: unknown): string {
+  return error instanceof Error ? error.message : String(error);
 }

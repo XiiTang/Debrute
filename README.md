@@ -7,7 +7,7 @@ Debrute is a browser-first local creative production workbench for projects, Can
 - `apps/web` - Vite/React browser workbench. It talks to the daemon through HTTP and SSE.
 - `apps/daemon` - loopback HTTP/SSE runtime that serves the Web workbench and owns privileged project, Canvas, settings, and generated asset operations.
 - `apps/desktop` - optional Electron shell for native folder picking, menus, packaging, and loading the Web workbench URL.
-- `apps/app-server` - local domain service boundary for project sessions, Canvas Map publishing and sync, Canvas node projection, model settings, generated asset metadata, and explicit CLI service methods.
+- `apps/app-server` - local domain service boundary for project sessions, Canvas Map pushing and sync, Canvas node projection, model settings, generated asset metadata, and explicit CLI service methods.
 - `apps/debrute-cli` - external Agent interface for invoking Debrute capabilities with structured output.
 - `packages/project-core` - project identity, `.debrute/` path conventions, atomic JSON persistence, project text/binary file access, and file event normalization.
 - `packages/canvas-map-core` - Canvas Map YAML parsing, path and row rule expansion, and file-tree node derivation.
@@ -115,7 +115,7 @@ layout:
 
 `paths` is the complete positive membership rule list. A trailing slash recursively includes files under that folder, a glob includes matching files, and an exact file rule includes one file. `layout.rows` is optional; each row glob affects files already included by `paths`, splitting matches into horizontal rows by direct parent directory.
 
-Canvas is the visual workspace for projected Canvas Map nodes. Canvas JSON under `.debrute/canvases/<canvas-id>.json` stores visual state: node layout, layers, viewport, selection, annotations, and preferences. File and folder hierarchy is derived from the project filesystem. Publish copies the current Canvas Map membership into Canvas JSON, while Canvas display always derives default structure from filesystem paths.
+Canvas is the visual workspace for projected Canvas Map nodes. Canvas JSON under `.debrute/canvases/<canvas-id>.json` stores visual state: node layout, layers, viewport, selection, annotations, and preferences. File and folder hierarchy is derived from the project filesystem. Push copies the current Canvas Map membership into Canvas JSON, while Canvas display always derives default structure from filesystem paths.
 
 Capabilities are discrete operations that the daemon-backed Web workbench or the `debrute` command can invoke: project semantics, LLM requests, image generation, video generation, and generated asset metadata lookup. External Agents use their own filesystem tools for generic file access.
 
@@ -136,7 +136,7 @@ pnpm exec tsx apps/debrute-cli/src/index.ts skills sync
 pnpm exec tsx apps/debrute-cli/src/index.ts project init path/to/project
 pnpm exec tsx apps/debrute-cli/src/index.ts project validate path/to/project
 pnpm exec tsx apps/debrute-cli/src/index.ts workbench url path/to/project
-pnpm exec tsx apps/debrute-cli/src/index.ts canvas-map publish path/to/project canvas-1
+pnpm exec tsx apps/debrute-cli/src/index.ts canvas-map push path/to/project canvas-1
 pnpm exec tsx apps/debrute-cli/src/index.ts canvas create path/to/project
 pnpm exec tsx apps/debrute-cli/src/index.ts canvas rename path/to/project canvas-2 storyboard
 pnpm exec tsx apps/debrute-cli/src/index.ts canvas reorder path/to/project storyboard canvas-1

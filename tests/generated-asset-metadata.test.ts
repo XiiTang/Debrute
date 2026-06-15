@@ -7,6 +7,7 @@ import {
   createGeneratedAssetMetadataService,
   generatedAssetMetadataPaths
 } from '../apps/app-server/src/generated-assets/GeneratedAssetMetadataService';
+import { commitProjectDocumentTransaction } from '../apps/app-server/src/project-documents/ProjectDocumentTransaction';
 
 function sha256(value: Buffer | string): string {
   return createHash('sha256').update(value).digest('hex');
@@ -17,6 +18,27 @@ async function readJson(path: string): Promise<unknown> {
 }
 
 describe('generated asset metadata service', () => {
+  it('keeps generated asset index unchanged when record id validation fails', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'debrute-generated-asset-tx-'));
+    const service = createGeneratedAssetMetadataService({
+      createRecordId: () => '../escape',
+      now: () => '2026-06-15T00:00:00.000Z'
+    });
+    try {
+      await mkdir(join(root, 'generated'), { recursive: true });
+      await writeFile(join(root, 'generated/cover.png'), 'fake', 'utf8');
+
+      await expect(service.recordGeneratedAsset(root, {
+        projectRelativePath: 'generated/cover.png',
+        modelRun: { request: {}, output: {} }
+      })).rejects.toThrow('Invalid generated asset record id');
+
+      await expect(readFile(join(root, '.debrute/assets/generated-assets-index.json'), 'utf8')).rejects.toBeDefined();
+    } finally {
+      await rm(root, { recursive: true, force: true });
+    }
+  });
+
   it('records complete model run provenance in a per-record file and keeps the index lightweight', async () => {
     const root = await mkdtemp(join(tmpdir(), 'debrute-generated-metadata-final-shape-'));
     try {
@@ -75,6 +97,145 @@ describe('generated asset metadata service', () => {
           }
         }
       });
+    } finally {
+      await rm(root, { recursive: true, force: true });
+    }
+  });
+
+  it('aborts generated asset metadata when the index changes before commit', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'debrute-generated-metadata-index-conflict-'));
+    try {
+      await mkdir(join(root, 'generated'), { recursive: true });
+      await writeFile(join(root, 'generated/cover.png'), Buffer.from('image-bytes'));
+      const paths = generatedAssetMetadataPaths(root);
+      let injectedConflict = false;
+      const service = createGeneratedAssetMetadataService({
+        now: () => '2026-05-24T00:00:00.000Z',
+        createRecordId: () => 'record-1',
+        writeStructuredDocuments: async (input) => {
+          if (!injectedConflict) {
+            injectedConflict = true;
+            await mkdir(join(root, '.debrute/assets'), { recursive: true });
+            await writeFile(paths.indexFile, JSON.stringify({
+              schemaVersion: 1,
+              records: [{
+                recordId: 'external-record',
+                createdAt: '2026-05-24T00:00:01.000Z',
+                fingerprint: { algorithm: 'sha256', hash: sha256('external') },
+                metadataPath: '.debrute/assets/generated/external-record.json'
+              }]
+            }, null, 2), 'utf8');
+          }
+          await commitProjectDocumentTransaction({
+            projectRoot: root,
+            owner: 'generated-assets',
+            ...input
+          });
+        }
+      });
+
+      await expect(service.recordGeneratedAsset(root, {
+        projectRelativePath: 'generated/cover.png',
+        modelRun: { request: {}, output: {} }
+      })).rejects.toMatchObject({ code: 'document_push_conflict' });
+      await expect(readFile(join(paths.recordsDir, 'record-1.json'), 'utf8')).rejects.toBeDefined();
+      expect(await readJson(paths.indexFile)).toMatchObject({
+        records: [{ recordId: 'external-record' }]
+      });
+    } finally {
+      await rm(root, { recursive: true, force: true });
+    }
+  });
+
+  it('keeps generated asset record and index when the fingerprint cache write fails', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'debrute-generated-metadata-cache-failure-'));
+    try {
+      await mkdir(join(root, 'generated'), { recursive: true });
+      await writeFile(join(root, 'generated/cover.png'), Buffer.from('image-bytes'));
+      const paths = generatedAssetMetadataPaths(root);
+      const diagnostics: Array<{ code: string; message: string; metadataPath?: string }> = [];
+      const service = createGeneratedAssetMetadataService({
+        now: () => '2026-05-24T00:00:00.000Z',
+        createRecordId: () => 'record-1',
+        onDiagnostic: (diagnostic) => diagnostics.push(diagnostic),
+        writeStructuredDocuments: async (input) => {
+          if (input.writes.some((write) => write.absolutePath === paths.cacheFile)) {
+            throw new Error('cache directory is unavailable');
+          }
+          await commitProjectDocumentTransaction({
+            projectRoot: root,
+            owner: 'generated-assets',
+            ...input
+          });
+        }
+      });
+
+      const record = await service.recordGeneratedAsset(root, {
+        projectRelativePath: 'generated/cover.png',
+        modelRun: { request: {}, output: {} }
+      });
+
+      expect(record.recordId).toBe('record-1');
+      expect(await readJson(join(paths.recordsDir, 'record-1.json'))).toEqual(record);
+      expect(await readJson(paths.indexFile)).toMatchObject({
+        records: [{ recordId: 'record-1' }]
+      });
+      expect(diagnostics).toEqual([
+        {
+          code: 'generated_asset_fingerprint_cache_write_failed',
+          message: 'cache directory is unavailable',
+          metadataPath: '.debrute/cache/file-fingerprints.json'
+        }
+      ]);
+      await expect(readFile(paths.cacheFile, 'utf8')).rejects.toBeDefined();
+    } finally {
+      await rm(root, { recursive: true, force: true });
+    }
+  });
+
+  it('keeps generated asset lookup available when the fingerprint cache write fails', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'debrute-generated-metadata-lookup-cache-failure-'));
+    try {
+      await mkdir(join(root, 'generated'), { recursive: true });
+      await writeFile(join(root, 'generated/cover.png'), Buffer.from('image-bytes'));
+      const paths = generatedAssetMetadataPaths(root);
+      const diagnostics: Array<{ code: string; message: string; metadataPath?: string }> = [];
+      const service = createGeneratedAssetMetadataService({
+        now: () => '2026-05-24T00:00:00.000Z',
+        onDiagnostic: (diagnostic) => diagnostics.push(diagnostic),
+        writeStructuredDocuments: async (input) => {
+          if (input.writes.some((write) => write.absolutePath === paths.cacheFile)) {
+            throw new Error('cache directory is unavailable');
+          }
+          await commitProjectDocumentTransaction({
+            projectRoot: root,
+            owner: 'generated-assets',
+            ...input
+          });
+        }
+      });
+
+      const lookup = await service.lookupGeneratedAssetMetadata(root, { projectRelativePath: 'generated/cover.png' });
+
+      expect(lookup).toMatchObject({
+        status: 'unmatched',
+        fingerprint: { algorithm: 'sha256', hash: sha256('image-bytes') },
+        diagnostics: [
+          {
+            code: 'generated_asset_fingerprint_cache_write_failed',
+            message: 'cache directory is unavailable',
+            metadataPath: '.debrute/cache/file-fingerprints.json'
+          }
+        ]
+      });
+      expect(diagnostics).toEqual([
+        {
+          code: 'generated_asset_fingerprint_cache_write_failed',
+          message: 'cache directory is unavailable',
+          metadataPath: '.debrute/cache/file-fingerprints.json'
+        }
+      ]);
+      await expect(readFile(paths.cacheFile, 'utf8')).rejects.toBeDefined();
     } finally {
       await rm(root, { recursive: true, force: true });
     }

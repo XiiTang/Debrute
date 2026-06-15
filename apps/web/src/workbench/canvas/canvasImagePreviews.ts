@@ -2,7 +2,6 @@ import type { ProjectedCanvasNode } from '@debrute/canvas-core';
 
 export const CANVAS_IMAGE_PREVIEW_MIN_SCALE = 1 / 32;
 export const CANVAS_IMAGE_PREVIEW_MAX_SCALE = 1;
-export const CANVAS_IMAGE_PREVIEW_SCALE_STEP = Math.SQRT2;
 export const CANVAS_IMAGE_PREVIEW_RESOURCE_SETTLE_MS = 500;
 
 export interface CanvasImageSource {

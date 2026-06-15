@@ -1567,7 +1567,7 @@ describe('daemon HTTP runtime', () => {
     if (!appServer) {
       throw new Error('Daemon did not create a project app server.');
     }
-    await appServer.publishCanvasMapForProject(projectRoot, { canvasId: 'canvas-1' });
+    await appServer.pushCanvasMapForProject(projectRoot, { canvasId: 'canvas-1' });
     const refreshed = await requestJson<{
       projectRevision: number;
       snapshot: {
@@ -1643,7 +1643,7 @@ describe('daemon HTTP runtime', () => {
     if (!appServer) {
       throw new Error('Daemon did not create a project app server.');
     }
-    await appServer.publishCanvasMapForProject(projectRoot, { canvasId: 'canvas-1' });
+    await appServer.pushCanvasMapForProject(projectRoot, { canvasId: 'canvas-1' });
 
     const result = await requestJson<{
       projectRevision: number;

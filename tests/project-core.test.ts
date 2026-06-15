@@ -49,6 +49,7 @@ describe('project-core', () => {
     expect(normalizeFileWatchEvent('/project', '/project/.debrute/assets/generated/record-1.json', 'changed').affects).toEqual(['generated-asset-metadata']);
     expect(normalizeFileWatchEvent('/project', '/project/.debrute/cache/file-fingerprints.json', 'changed').affects).toEqual(['generated-asset-metadata']);
     expect(normalizeFileWatchEvent('/project', '/project/.debrute/cache/canvas-image-previews/preview.jpg', 'changed').affects).toEqual([]);
+    expect(normalizeFileWatchEvent('/project', '/project/.debrute/canvases/main.json.lock', 'changed').affects).toEqual([]);
     expect(normalizeFileWatchEvent('/project', '/project/work/items.json', 'changed').affects).toEqual(['content']);
   });
 
@@ -69,6 +70,23 @@ describe('project-core', () => {
       expect(paths).toContain('images/source.png');
       expect(paths).not.toContain('.debrute/cache/canvas-image-previews');
       expect(paths).not.toContain('.debrute/cache/canvas-image-previews/preview.jpg');
+    } finally {
+      await rm(root, { recursive: true, force: true });
+    }
+  });
+
+  it('keeps ProjectDocument lock files out of project-visible files', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'debrute-project-document-locks-'));
+    try {
+      await mkdir(join(root, '.debrute/canvases'), { recursive: true });
+      await mkdir(join(root, 'notes'), { recursive: true });
+      await writeFile(join(root, '.debrute/canvases/canvas-1.json.lock'), '', 'utf8');
+      await writeFile(join(root, 'notes/brief.md'), 'brief', 'utf8');
+
+      const paths = (await listDebruteProjectFiles(root)).map((file) => file.projectRelativePath);
+
+      expect(paths).toContain('notes/brief.md');
+      expect(paths).not.toContain('.debrute/canvases/canvas-1.json.lock');
     } finally {
       await rm(root, { recursive: true, force: true });
     }
@@ -601,10 +619,37 @@ describe('project-core', () => {
     }
   });
 
+  it('rejects generic mutations for structured Project Document paths without hiding them from reads', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'debrute-project-structured-doc-mutation-'));
+    try {
+      await mkdir(join(root, '.debrute/canvases'), { recursive: true });
+      await mkdir(join(root, '.debrute/canvas-maps'), { recursive: true });
+      await writeFile(join(root, '.debrute/canvases/canvas-1.json'), '{}\n', 'utf8');
+      await writeFile(join(root, '.debrute/canvas-maps/canvas-1.yaml'), 'paths: []\n', 'utf8');
+
+      expect((await listDebruteProjectFiles(root)).map((file) => file.projectRelativePath))
+        .toContain('.debrute/canvas-maps/canvas-1.yaml');
+      expect(() => assertProjectTreeVisibleMutationPath('.debrute/canvases/canvas-1.json'))
+        .toThrow('Project path is protected by the Project Document System');
+      expect(() => assertProjectTreeVisibleMutationPath('.debrute/canvas-maps/canvas-1.yaml'))
+        .toThrow('Project path is protected by the Project Document System');
+      await expect(writeProjectTextFile(root, '.debrute/canvases/canvas-1.json', '{"changed":true}\n'))
+        .rejects.toThrow('Project path is protected by the Project Document System');
+      await expect(deleteProjectPathsPermanently(root, {
+        entries: [{ projectRelativePath: '.debrute/canvases/canvas-1.json', kind: 'file' }]
+      })).rejects.toThrow('Project path is protected by the Project Document System');
+      await expect(readFile(join(root, '.debrute/canvases/canvas-1.json'), 'utf8')).resolves.toBe('{}\n');
+    } finally {
+      await rm(root, { recursive: true, force: true });
+    }
+  });
+
   it('exposes the Project Tree mutation visibility boundary for desktop actions', () => {
     expect(() => assertProjectTreeVisibleMutationPath('assets/cover.png')).not.toThrow();
     expect(() => assertProjectTreeVisibleMutationPath('.debrute/cache/canvas-image-previews/preview.jpg'))
       .toThrow('Project path is not visible in the Project Tree');
+    expect(() => assertProjectTreeVisibleMutationPath('.debrute/canvases/canvas-1.json'))
+      .toThrow('Project path is protected by the Project Document System');
     expect(() => assertProjectTreeVisibleMutationPath('.git/config'))
       .toThrow('Project path is not visible in the Project Tree');
   });

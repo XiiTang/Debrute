@@ -1,14 +1,16 @@
 import { randomUUID } from 'node:crypto';
 import { access, mkdir, stat } from 'node:fs/promises';
-import { basename } from 'node:path';
+import { basename, join } from 'node:path';
 import { EventEmitter } from 'node:events';
 import {
   getDebruteProjectPaths,
   initializeBlankProject,
+  normalizeProjectRelativePath,
   readProjectMetadata,
   readProjectTextFile,
   resolveExistingProjectPath,
   resolveProjectPath,
+  resolveProjectPathForWrite,
   watchProjectFiles,
   writeProjectTextFile,
   type CopyProjectPathsInput,
@@ -66,6 +68,7 @@ import type {
   CloseTerminalSessionInput,
   CreateTerminalSessionInput,
   GeneratedAssetMetadataLookup,
+  GeneratedAssetMetadataDiagnostic,
   GeneratedAssetRecord,
   ImageModelBatchSummary,
   ProjectCanvasManagementResult,
@@ -107,7 +110,7 @@ import { CanvasProjectionService } from '../canvas/CanvasProjectionService.js';
 import { CanvasSessionService } from '../canvas/CanvasSessionService.js';
 import { CanvasRegistryService } from '../canvas/CanvasRegistryService.js';
 import { CanvasMapSessionService } from '../canvas-map/CanvasMapSessionService.js';
-import { loadProjectSnapshot } from '../project-session/projectSnapshot.js';
+import { loadProjectSnapshot, type ProjectDocumentPipelineMode } from '../project-session/projectSnapshot.js';
 import {
   copyProjectPathsWithSnapshot,
   createProjectDirectoryWithSnapshot,
@@ -125,6 +128,17 @@ import {
   shouldIgnoreWatchedCanvasEvent
 } from '../project-session/projectWatchEvents.js';
 import { serviceError } from './ServiceErrors.js';
+import {
+  commitProjectDocumentTransaction,
+  projectDocumentFileHash,
+  type ProjectDocumentReadParticipant,
+  type ProjectDocumentTransactionInput
+} from '../project-documents/ProjectDocumentTransaction.js';
+import { documentServiceError, projectDocumentDiagnostic } from '../project-documents/ProjectDocumentDiagnostics.js';
+import {
+  projectDocumentDescriptorForPath
+} from '../project-documents/documentDescriptors.js';
+import type { ProjectDocumentDescriptor } from '../project-documents/ProjectDocumentRegistry.js';
 import {
   runImageModelBatch as runNativeImageModelBatch,
   type ImageModelBatchRunOptions
@@ -201,28 +215,70 @@ export class DebruteAppServer {
 
   constructor(private readonly options: DebruteAppServerOptions = {}) {
     this.configStore = options.globalConfigStore ?? new GlobalConfigStore();
-    this.generatedAssetMetadataService = createGeneratedAssetMetadataService();
-    this.canvasFeedbackService = createCanvasFeedbackService();
+    this.generatedAssetMetadataService = createGeneratedAssetMetadataService({
+      writeStructuredDocuments: (input) => this.writeStructuredDocuments(input),
+      onDiagnostic: (diagnostic) => this.recordGeneratedAssetMetadataDiagnostic(diagnostic)
+    });
+    this.canvasFeedbackService = createCanvasFeedbackService({
+      writeStructuredDocument: (projectRoot, absolutePath, content, expectedHash) => this.writeProjectDocumentText(
+        projectRoot,
+        'canvas-feedback',
+        absolutePath,
+        content,
+        expectedHash
+      )
+    });
     this.canvasImagePreviewService = createCanvasImagePreviewService();
     this.canvasProjectionService = new CanvasProjectionService();
     this.canvasSessionService = new CanvasSessionService({
-      suppressInternalProjectPathEvent: (absolutePath, content) => this.suppressInternalProjectPathEvent(absolutePath, content),
-      clearInternalProjectPathEvent: (absolutePath) => this.clearInternalProjectPathEvent(absolutePath),
+      writeCanvasText: (projectRoot, canvasPath, content, expectedHash) => this.writeProjectDocumentText(
+        projectRoot,
+        'canvas',
+        canvasPath,
+        content,
+        expectedHash
+      ),
       projectCanvasWithKnownAvailability: (canvas, projection) => this.canvasProjectionService.projectCanvasWithKnownAvailability(canvas, projection)
     });
     this.canvasRegistryService = new CanvasRegistryService({
-      loadCanvases: (projectRoot) => this.canvasSessionService.loadCanvases(projectRoot),
-      writeCanvasJson: (canvasPath, canvas) => this.canvasSessionService.writeCanvasJson(canvasPath, canvas),
-      suppressInternalProjectPathEvent: (absolutePath, content) => this.suppressInternalProjectPathEvent(absolutePath, content)
+      loadCanvasDocuments: (projectRoot) => this.canvasSessionService.loadCanvasDocuments(projectRoot),
+      writeStructuredDocuments: (input) => this.writeStructuredDocuments(input)
     });
     this.canvasMapSessionService = new CanvasMapSessionService({
       loadCanvases: async (projectRoot) => (
         await this.canvasRegistryService.orderedCanvases(projectRoot)
       ).canvases,
+      canvasDocumentHash: (projectRoot, canvasId) => this.canvasSessionService.canvasDocumentHash(projectRoot, canvasId),
       resolveCanvasNodeLayoutSize: (projectRoot, node) => this.resolveCanvasNodeLayoutSize(projectRoot, node),
-      writeCanvasJson: (canvasPath, canvas) => this.canvasSessionService.writeCanvasJson(canvasPath, canvas),
-      suppressInternalProjectPathEvent: (absolutePath, content) => this.suppressInternalProjectPathEvent(absolutePath, content),
-      clearInternalProjectPathEvent: (absolutePath) => this.clearInternalProjectPathEvent(absolutePath)
+      writeCanvasMapPush: async (input) => {
+        const canvasContent = `${JSON.stringify(input.canvas, null, 2)}\n`;
+        await this.writeStructuredDocuments({
+          projectRoot: input.projectRoot,
+          owner: 'canvas-map',
+          reads: [
+            { absolutePath: input.sourcePath, expectedHash: input.expectedSourceHash },
+            { absolutePath: input.canvasPath, expectedHash: input.expectedCanvasHash }
+          ],
+          writes: [{ absolutePath: input.canvasPath, content: canvasContent }]
+        });
+        this.canvasSessionService.recordCanvasDocumentTextHash(input.projectRoot, input.canvas.id, canvasContent);
+      },
+      writeCanvasMapAndCanvasJson: async (input) => {
+        const canvasContent = `${JSON.stringify(input.canvas, null, 2)}\n`;
+        await this.writeStructuredDocuments({
+          projectRoot: input.projectRoot,
+          owner: 'canvas-map',
+          reads: [
+            { absolutePath: input.sourcePath, expectedHash: input.expectedSourceHash },
+            { absolutePath: input.canvasPath, expectedHash: input.expectedCanvasHash }
+          ],
+          writes: [
+            { absolutePath: input.sourcePath, content: input.sourceContent },
+            { absolutePath: input.canvasPath, content: canvasContent }
+          ]
+        });
+        this.canvasSessionService.recordCanvasDocumentTextHash(input.projectRoot, input.canvas.id, canvasContent);
+      }
     });
   }
 
@@ -326,7 +382,7 @@ export class DebruteAppServer {
   }
 
   async projectStatusForCli(projectRoot: string): Promise<ProjectSessionSnapshot> {
-    return this.loadSnapshot(projectRoot, { writeCanvasMapChanges: false });
+    return this.loadSnapshot(projectRoot, { mode: 'readOnly' });
   }
 
   async runtimeStatusForCli(): Promise<CliRuntimeStatus> {
@@ -391,10 +447,38 @@ export class DebruteAppServer {
         throw new Error(`Project text content must be a string: ${projectRelativePath}`);
       }
       const current = this.getSnapshot();
-      const written = await writeProjectTextFile(current.projectRoot, projectRelativePath, content);
+      const structuredDocumentWrite = await this.writeProjectDocumentSourceTextFile(current.projectRoot, projectRelativePath, content);
+      const written = structuredDocumentWrite ?? await writeProjectTextFile(current.projectRoot, projectRelativePath, content);
       await this.refreshProjectUnlocked();
       return written;
     });
+  }
+
+  private async writeProjectDocumentSourceTextFile(
+    projectRoot: string,
+    projectRelativePath: string,
+    content: string
+  ): Promise<ProjectTextFile | undefined> {
+    const normalizedProjectRelativePath = normalizeProjectRelativePath(projectRelativePath);
+    const descriptor = projectDocumentDescriptorForPath(normalizedProjectRelativePath);
+    if (!descriptor) {
+      return undefined;
+    }
+    if (descriptor.role !== 'source') {
+      throw documentServiceError('document_descriptor_violation', 'Project document is not directly editable as source text.', {
+        file_path: normalizedProjectRelativePath,
+        document_type: descriptor.type
+      });
+    }
+    const absolutePath = await resolveProjectPathForWrite(projectRoot, normalizedProjectRelativePath);
+    const expectedHash = await projectDocumentFileHash(absolutePath);
+    await this.writeStructuredDocuments({
+      projectRoot,
+      owner: sourceProjectDocumentTextOwner(descriptor),
+      reads: [{ absolutePath, expectedHash }],
+      writes: [{ absolutePath, content }]
+    });
+    return readProjectTextFile(projectRoot, normalizedProjectRelativePath);
   }
 
   async createProjectFile(input: CreateProjectPathInput): Promise<ProjectFileOperationResult> {
@@ -482,9 +566,9 @@ export class DebruteAppServer {
     });
   }
 
-  async publishCanvasMapForProject(projectRoot: string, input: { canvasId: string }): Promise<{ ok: true; command: 'canvas-map.publish'; canvasId: string }> {
+  async pushCanvasMapForProject(projectRoot: string, input: { canvasId: string }): Promise<{ ok: true; command: 'canvas-map.push'; canvasId: string }> {
     try {
-      return await this.canvasMapSessionService.publishCanvasMapForProject(projectRoot, input);
+      return await this.canvasMapSessionService.pushCanvasMapForProject(projectRoot, input);
     } catch (error) {
       if (error instanceof CanvasMapError) {
         throw canvasMapServiceError(error, input.canvasId);
@@ -811,13 +895,57 @@ export class DebruteAppServer {
     this.internalProjectFileWrites.delete(absolutePath);
   }
 
+  private async writeProjectDocumentText(
+    projectRoot: string,
+    owner: string,
+    absolutePath: string,
+    content: string,
+    expectedHash: string | null
+  ): Promise<void> {
+    await this.writeStructuredDocuments({
+      projectRoot,
+      owner,
+      reads: [{ absolutePath, expectedHash }],
+      writes: [{ absolutePath, content }]
+    });
+  }
+
+  private async writeStructuredDocuments(input: {
+    projectRoot: string;
+    owner: string;
+    reads: ProjectDocumentReadParticipant[];
+    writes?: Array<{ absolutePath: string; content: string }>;
+    deletes?: Array<{ absolutePath: string }>;
+  }): Promise<void> {
+    const transactionInput: ProjectDocumentTransactionInput = {
+      projectRoot: input.projectRoot,
+      owner: input.owner,
+      reads: input.reads
+    };
+    if (input.writes) {
+      transactionInput.writes = input.writes.map((write) => ({
+        ...write,
+        suppressInternalEvent: (absolutePath, content) => this.suppressInternalProjectPathEvent(absolutePath, content),
+        clearInternalEvent: (absolutePath) => this.clearInternalProjectPathEvent(absolutePath)
+      }));
+    }
+    if (input.deletes) {
+      transactionInput.deletes = input.deletes.map((deleteItem) => ({
+        ...deleteItem,
+        suppressInternalEvent: (absolutePath) => this.suppressInternalProjectPathEvent(absolutePath),
+        clearInternalEvent: (absolutePath) => this.clearInternalProjectPathEvent(absolutePath)
+      }));
+    }
+    await commitProjectDocumentTransaction(transactionInput);
+  }
+
   private async loadSnapshot(
     projectRoot: string,
-    options: { writeCanvasMapChanges: boolean } = { writeCanvasMapChanges: true }
+    options: { mode: ProjectDocumentPipelineMode } = { mode: 'push' }
   ): Promise<ProjectSessionSnapshot> {
     return loadProjectSnapshot({
       projectRoot,
-      writeCanvasMapChanges: options.writeCanvasMapChanges,
+      mode: options.mode,
       loadOrderedCanvases: (root) => this.canvasRegistryService.orderedCanvases(root),
       synchronizeCanvasMaps: (root, canvases, files, syncOptions) => this.canvasMapSessionService.synchronizeCanvasMaps(
         root,
@@ -922,6 +1050,35 @@ export class DebruteAppServer {
     return record;
   }
 
+  private recordGeneratedAssetMetadataDiagnostic(diagnostic: GeneratedAssetMetadataDiagnostic): void {
+    const current = this.snapshot;
+    if (!current) {
+      return;
+    }
+    const projectDiagnostic = projectDocumentDiagnostic({
+      id: `generated-asset.metadata:${diagnostic.code}:${diagnostic.metadataPath ?? 'metadata'}`,
+      severity: 'warning',
+      code: diagnostic.code,
+      message: diagnostic.message,
+      ...(diagnostic.metadataPath ? { filePath: join(current.projectRoot, diagnostic.metadataPath) } : {}),
+      ...(diagnostic.recordId ? { entityId: diagnostic.recordId } : {})
+    });
+    const snapshot: ProjectSessionSnapshot = {
+      ...current,
+      diagnostics: [projectDiagnostic, ...current.diagnostics],
+      health: {
+        ...current.health,
+        diagnosticCounts: {
+          ...current.health.diagnosticCounts,
+          warnings: current.health.diagnosticCounts.warnings + 1
+        },
+        checkedAt: new Date().toISOString()
+      }
+    };
+    this.snapshot = snapshot;
+    this.emit({ type: 'project.changed', snapshot });
+  }
+
   private async readLlmProviderSettings() {
     return createLlmProviderSettingsView(
       await this.configStore.readLlmProviders(),
@@ -993,4 +1150,14 @@ function canvasMapServiceError(error: CanvasMapError, canvasId: string): Error {
     ...(error.line !== undefined ? { line: error.line } : {}),
     ...(error.column !== undefined ? { column: error.column } : {})
   });
+}
+
+function sourceProjectDocumentTextOwner(descriptor: ProjectDocumentDescriptor): string {
+  const owner = descriptor.owners[0];
+  if (!owner) {
+    throw documentServiceError('document_descriptor_violation', 'Source project document has no owner.', {
+      document_type: descriptor.type
+    });
+  }
+  return owner;
 }

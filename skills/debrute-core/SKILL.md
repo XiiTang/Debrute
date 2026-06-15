@@ -1,6 +1,6 @@
 ---
 name: debrute-core
-description: Use when an external Agent needs Debrute project semantics through the debrute command, including project status, visual Workbench URLs, Canvas Map publishing, generated assets, and model-backed generation.
+description: Use when an external Agent needs Debrute project semantics through the debrute command, including project status, visual Workbench URLs, Canvas Map pushing, generated assets, and model-backed generation.
 metadata:
   debrute.managed: "true"
   debrute.package: "debrute"
@@ -29,7 +29,7 @@ debrute project init /path/to/project
 debrute project status /path/to/project
 debrute project validate /path/to/project
 debrute workbench url /path/to/project
-debrute canvas-map publish /path/to/project canvas-1
+debrute canvas-map push /path/to/project canvas-1
 debrute generated-asset lookup /path/to/project --path generated/example.png
 debrute llm request --input-json '{"prompt":"Summarize this project."}'
 debrute models image list
@@ -77,10 +77,10 @@ Edit the Canvas Map whose filename matches the Canvas id:
 .debrute/canvas-maps/<canvas-id>.yaml
 ```
 
-Publish it:
+Push it:
 
 ```sh
-debrute canvas-map publish /path/to/project <canvas-id>
+debrute canvas-map push /path/to/project <canvas-id>
 ```
 
 The YAML file is a top-level object. `paths` is the complete positive membership rule list. `layout.rows` is optional and controls horizontal rows for files already included by `paths`.
@@ -101,7 +101,7 @@ Rows never add files to the Canvas. Each `layout.rows` glob matches included fil
 
 Do not use CLI commands to add, remove, inspect, or modify Canvas nodes or edges.
 Maintain the Canvas Map while creating file-producing scripts, prompts, llm requests, image requests, or video requests.
-When output paths are known before generation starts, add matching file, folder, or glob entries under `paths` and publish before running generation.
+When output paths are known before generation starts, add matching file, folder, or glob entries under `paths` and push before running generation.
 
 ## Canvas Feedback
 

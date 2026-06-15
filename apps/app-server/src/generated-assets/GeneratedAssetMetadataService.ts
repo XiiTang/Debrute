@@ -1,19 +1,23 @@
 import { createHash, randomUUID } from 'node:crypto';
 import { createReadStream } from 'node:fs';
-import { mkdir, stat } from 'node:fs/promises';
-import { dirname, join } from 'node:path';
+import { readFile, stat } from 'node:fs/promises';
+import { join } from 'node:path';
 import {
   normalizeProjectRelativePath,
   readJsonFile,
   resolveExistingProjectPath,
-  resolveProjectPathForWrite,
-  writeJsonAtomic
+  resolveProjectPathForWrite
 } from '@debrute/project-core';
 import type {
   GeneratedAssetMetadataDiagnostic,
   GeneratedAssetMetadataLookup,
   GeneratedAssetRecord
 } from '@debrute/app-protocol';
+import {
+  commitProjectDocumentTransaction,
+  projectDocumentFileHash,
+  projectDocumentTextHash
+} from '../project-documents/ProjectDocumentTransaction.js';
 
 export interface GeneratedAssetMetadataIndex {
   schemaVersion: 1;
@@ -61,6 +65,13 @@ export interface GeneratedAssetMetadataService {
 export interface GeneratedAssetMetadataServiceOptions {
   now?: () => string;
   createRecordId?: () => string;
+  onDiagnostic?: (diagnostic: GeneratedAssetMetadataDiagnostic) => void;
+  writeStructuredDocuments?: (input: {
+    projectRoot: string;
+    owner: string;
+    reads: Array<{ absolutePath: string; expectedHash: string | null }>;
+    writes: Array<{ absolutePath: string; content: string }>;
+  }) => Promise<void>;
 }
 
 const GENERATED_ASSET_METADATA_SCHEMA_VERSION = 1;
@@ -72,17 +83,25 @@ const FINGERPRINT_CACHE_PROJECT_PATH = '.debrute/cache/file-fingerprints.json';
 export function createGeneratedAssetMetadataService(options: GeneratedAssetMetadataServiceOptions = {}): GeneratedAssetMetadataService {
   const now = options.now ?? (() => new Date().toISOString());
   const createRecordId = options.createRecordId ?? randomUUID;
+  const onDiagnostic = options.onDiagnostic;
+  const writeStructuredDocuments = options.writeStructuredDocuments ?? ((input) => commitProjectDocumentTransaction(input));
 
   return {
     async recordGeneratedAsset(projectRoot, input) {
       const projectRelativePath = normalizeProjectRelativePath(input.projectRelativePath);
       const absolutePath = await resolveExistingProjectPath(projectRoot, projectRelativePath);
-      const fileStat = await stat(absolutePath);
-      if (!fileStat.isFile()) {
+      const initialFileStat = await stat(absolutePath);
+      if (!initialFileStat.isFile()) {
         throw new Error(`Generated asset path is not a file: ${projectRelativePath}`);
       }
-      const hash = await sha256File(absolutePath);
+      const assetFileHash = await projectDocumentFileHash(absolutePath);
+      if (!assetFileHash) {
+        throw new Error(`Generated asset path is missing: ${projectRelativePath}`);
+      }
+      const fileStat = await stat(absolutePath);
+      const hash = sha256FromProjectDocumentHash(assetFileHash);
       const recordId = createRecordId();
+      assertGeneratedAssetRecordId(recordId);
       const createdAt = now();
       const record: GeneratedAssetRecord = {
         schemaVersion: GENERATED_ASSET_METADATA_SCHEMA_VERSION,
@@ -96,12 +115,12 @@ export function createGeneratedAssetMetadataService(options: GeneratedAssetMetad
         modelRun: input.modelRun
       };
 
-      await writeGeneratedAssetRecord(projectRoot, record);
-      const index = await readGeneratedAssetMetadataIndex(projectRoot);
-      await writeGeneratedAssetMetadataIndex(projectRoot, {
+      const index = await readGeneratedAssetMetadataIndexState(projectRoot);
+      const recordPath = await resolveProjectPathForWrite(projectRoot, generatedAssetMetadataRecordProjectPath(record.recordId));
+      const nextIndex: GeneratedAssetMetadataIndex = {
         schemaVersion: GENERATED_ASSET_METADATA_SCHEMA_VERSION,
         records: [
-          ...index.records,
+          ...index.document.records,
           {
             recordId,
             createdAt,
@@ -109,13 +128,32 @@ export function createGeneratedAssetMetadataService(options: GeneratedAssetMetad
             metadataPath: generatedAssetMetadataRecordProjectPath(recordId)
           }
         ]
+      };
+      await writeStructuredDocuments({
+        projectRoot,
+        owner: 'generated-assets',
+        reads: [
+          { absolutePath, expectedHash: assetFileHash },
+          { absolutePath: index.absolutePath, expectedHash: index.expectedHash },
+          { absolutePath: recordPath, expectedHash: null }
+        ],
+        writes: [
+          {
+            absolutePath: recordPath,
+            content: `${JSON.stringify(record, null, 2)}\n`
+          },
+          {
+            absolutePath: index.absolutePath,
+            content: `${JSON.stringify(nextIndex, null, 2)}\n`
+          }
+        ]
       });
-      await updateFingerprintCache(projectRoot, projectRelativePath, {
+      await updateFingerprintCacheBestEffort(projectRoot, projectRelativePath, {
         sizeBytes: fileStat.size,
         mtimeMs: fileStat.mtimeMs,
         sha256: hash,
         computedAt: createdAt
-      });
+      }, writeStructuredDocuments, onDiagnostic);
       return record;
     },
 
@@ -148,13 +186,17 @@ export function createGeneratedAssetMetadataService(options: GeneratedAssetMetad
       const cached = cache.entries[projectRelativePath];
       const cacheHit = cached?.sizeBytes === fileStat.size && cached.mtimeMs === fileStat.mtimeMs;
       const hash = cacheHit ? cached.sha256 : await sha256File(absolutePath);
+      const cacheDiagnostics: GeneratedAssetMetadataDiagnostic[] = [];
       if (!cacheHit) {
-        await updateFingerprintCache(projectRoot, projectRelativePath, {
+        const cacheDiagnostic = await updateFingerprintCacheBestEffort(projectRoot, projectRelativePath, {
           sizeBytes: fileStat.size,
           mtimeMs: fileStat.mtimeMs,
           sha256: hash,
           computedAt: now()
-        });
+        }, writeStructuredDocuments, onDiagnostic);
+        if (cacheDiagnostic) {
+          cacheDiagnostics.push(cacheDiagnostic);
+        }
       }
 
       let index: GeneratedAssetMetadataIndex;
@@ -168,7 +210,7 @@ export function createGeneratedAssetMetadataService(options: GeneratedAssetMetad
         };
       }
 
-      const diagnostics: GeneratedAssetMetadataDiagnostic[] = [];
+      const diagnostics: GeneratedAssetMetadataDiagnostic[] = [...cacheDiagnostics];
       const records: GeneratedAssetRecord[] = [];
       const matchingEntries = index.records
         .filter((record) => record.fingerprint.algorithm === 'sha256' && record.fingerprint.hash === hash)
@@ -223,13 +265,27 @@ function generatedAssetMetadataRecordProjectPath(recordId: string): string {
 }
 
 async function readGeneratedAssetMetadataIndex(projectRoot: string): Promise<GeneratedAssetMetadataIndex> {
+  return (await readGeneratedAssetMetadataIndexState(projectRoot)).document;
+}
+
+async function readGeneratedAssetMetadataIndexState(
+  projectRoot: string
+): Promise<{ absolutePath: string; document: GeneratedAssetMetadataIndex; expectedHash: string | null }> {
+  const absolutePath = await resolveProjectPathForWrite(projectRoot, GENERATED_ASSET_INDEX_PROJECT_PATH);
   try {
-    return assertGeneratedAssetMetadataIndex(await readJsonFile<unknown>(
-      await resolveExistingProjectPath(projectRoot, GENERATED_ASSET_INDEX_PROJECT_PATH)
-    ));
+    const content = await readFile(await resolveExistingProjectPath(projectRoot, GENERATED_ASSET_INDEX_PROJECT_PATH), 'utf8');
+    return {
+      absolutePath,
+      document: assertGeneratedAssetMetadataIndex(JSON.parse(content)),
+      expectedHash: projectDocumentTextHash(content)
+    };
   } catch (error) {
     if (isNotFoundError(error)) {
-      return { schemaVersion: GENERATED_ASSET_METADATA_SCHEMA_VERSION, records: [] };
+      return {
+        absolutePath,
+        document: { schemaVersion: GENERATED_ASSET_METADATA_SCHEMA_VERSION, records: [] },
+        expectedHash: null
+      };
     }
     throw error;
   }
@@ -255,18 +311,6 @@ function assertGeneratedAssetMetadataIndex(value: unknown): GeneratedAssetMetada
     schemaVersion: GENERATED_ASSET_METADATA_SCHEMA_VERSION,
     records: value.records
   };
-}
-
-async function writeGeneratedAssetMetadataIndex(projectRoot: string, index: GeneratedAssetMetadataIndex): Promise<void> {
-  const path = await resolveProjectPathForWrite(projectRoot, GENERATED_ASSET_INDEX_PROJECT_PATH);
-  await mkdir(dirname(path), { recursive: true });
-  await writeJsonAtomic(path, index);
-}
-
-async function writeGeneratedAssetRecord(projectRoot: string, record: GeneratedAssetRecord): Promise<void> {
-  const absolutePath = await resolveProjectPathForWrite(projectRoot, generatedAssetMetadataRecordProjectPath(record.recordId));
-  await mkdir(dirname(absolutePath), { recursive: true });
-  await writeJsonAtomic(absolutePath, record);
 }
 
 async function readGeneratedAssetRecord(projectRoot: string, entry: GeneratedAssetMetadataIndexEntry): Promise<GeneratedAssetRecord> {
@@ -305,13 +349,27 @@ function isGeneratedAssetRecord(value: unknown): value is GeneratedAssetRecord {
 }
 
 async function readFingerprintCache(projectRoot: string): Promise<FileFingerprintCache> {
+  return (await readFingerprintCacheState(projectRoot)).document;
+}
+
+async function readFingerprintCacheState(
+  projectRoot: string
+): Promise<{ absolutePath: string; document: FileFingerprintCache; expectedHash: string | null }> {
+  const absolutePath = await resolveProjectPathForWrite(projectRoot, FINGERPRINT_CACHE_PROJECT_PATH);
   try {
-    return assertFingerprintCache(await readJsonFile<unknown>(
-      await resolveExistingProjectPath(projectRoot, FINGERPRINT_CACHE_PROJECT_PATH)
-    ));
+    const content = await readFile(await resolveExistingProjectPath(projectRoot, FINGERPRINT_CACHE_PROJECT_PATH), 'utf8');
+    return {
+      absolutePath,
+      document: assertFingerprintCache(JSON.parse(content)),
+      expectedHash: projectDocumentTextHash(content)
+    };
   } catch (error) {
     if (isNotFoundError(error)) {
-      return { schemaVersion: FILE_FINGERPRINT_CACHE_SCHEMA_VERSION, entries: {} };
+      return {
+        absolutePath,
+        document: { schemaVersion: FILE_FINGERPRINT_CACHE_SCHEMA_VERSION, entries: {} },
+        expectedHash: null
+      };
     }
     throw error;
   }
@@ -334,17 +392,57 @@ function assertFingerprintCache(value: unknown): FileFingerprintCache {
   };
 }
 
-async function updateFingerprintCache(projectRoot: string, projectRelativePath: string, entry: FileFingerprintCacheEntry): Promise<void> {
-  const cache = await readFingerprintCache(projectRoot);
-  const path = await resolveProjectPathForWrite(projectRoot, FINGERPRINT_CACHE_PROJECT_PATH);
-  await mkdir(dirname(path), { recursive: true });
-  await writeJsonAtomic(path, {
-    schemaVersion: FILE_FINGERPRINT_CACHE_SCHEMA_VERSION,
-    entries: {
-      ...cache.entries,
-      [projectRelativePath]: entry
-    }
-  } satisfies FileFingerprintCache);
+async function updateFingerprintCache(
+  projectRoot: string,
+  projectRelativePath: string,
+  entry: FileFingerprintCacheEntry,
+  writeStructuredDocuments: NonNullable<GeneratedAssetMetadataServiceOptions['writeStructuredDocuments']>
+): Promise<void> {
+  const cache = await readFingerprintCacheState(projectRoot);
+  await writeStructuredDocuments({
+    projectRoot,
+    owner: 'generated-assets',
+    reads: [{ absolutePath: cache.absolutePath, expectedHash: cache.expectedHash }],
+    writes: [
+      {
+        absolutePath: cache.absolutePath,
+        content: `${JSON.stringify({
+          schemaVersion: FILE_FINGERPRINT_CACHE_SCHEMA_VERSION,
+          entries: {
+            ...cache.document.entries,
+            [projectRelativePath]: entry
+          }
+        } satisfies FileFingerprintCache, null, 2)}\n`
+      }
+    ]
+  });
+}
+
+async function updateFingerprintCacheBestEffort(
+  projectRoot: string,
+  projectRelativePath: string,
+  entry: FileFingerprintCacheEntry,
+  writeStructuredDocuments: NonNullable<GeneratedAssetMetadataServiceOptions['writeStructuredDocuments']>,
+  onDiagnostic: GeneratedAssetMetadataServiceOptions['onDiagnostic']
+): Promise<GeneratedAssetMetadataDiagnostic | undefined> {
+  try {
+    await updateFingerprintCache(projectRoot, projectRelativePath, entry, writeStructuredDocuments);
+  } catch (error) {
+    const diagnostic: GeneratedAssetMetadataDiagnostic = {
+      code: 'generated_asset_fingerprint_cache_write_failed',
+      message: errorMessage(error),
+      metadataPath: FINGERPRINT_CACHE_PROJECT_PATH
+    };
+    onDiagnostic?.(diagnostic);
+    return diagnostic;
+  }
+  return undefined;
+}
+
+function assertGeneratedAssetRecordId(recordId: string): void {
+  if (!/^[A-Za-z0-9][A-Za-z0-9_.-]*$/.test(recordId) || recordId === '.' || recordId === '..') {
+    throw new Error(`Invalid generated asset record id: ${recordId}`);
+  }
 }
 
 async function sha256File(absolutePath: string): Promise<string> {
@@ -369,6 +467,10 @@ async function sha256File(absolutePath: string): Promise<string> {
     stream.on('error', (error) => settle(error));
     stream.on('end', () => settle(undefined, hash.digest('hex')));
   });
+}
+
+function sha256FromProjectDocumentHash(hash: string): string {
+  return hash.slice('sha256:'.length);
 }
 
 function unavailableResult(error: unknown, projectRelativePath: string): Extract<GeneratedAssetMetadataLookup, { status: 'unavailable' }> {

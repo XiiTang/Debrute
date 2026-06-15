@@ -12,19 +12,22 @@ import type {
 import type { ProjectSessionSnapshot } from '@debrute/app-protocol';
 import { createProjectHealthSummary } from './projectHealth.js';
 
+export type ProjectDocumentPipelineMode = 'readOnly' | 'push';
+
 export interface LoadProjectSnapshotInput {
   projectRoot: string;
+  mode: ProjectDocumentPipelineMode;
   loadOrderedCanvases(projectRoot: string): Promise<{
     canvases: CanvasDocument[];
     registry: ProjectSessionSnapshot['canvasRegistry'];
+    diagnostics: Diagnostic[];
   }>;
   synchronizeCanvasMaps(
     projectRoot: string,
     canvases: CanvasDocument[],
     files: ProjectFileEntry[],
-    options: { writeCanvasChanges: boolean }
+    options: { writeCanvasChanges: boolean; reportDrift: boolean }
   ): Promise<{ canvases: CanvasDocument[]; diagnostics: Diagnostic[] }>;
-  writeCanvasMapChanges?: boolean;
   projectCanvasDocument(
     projectRoot: string,
     canvas: CanvasDocument,
@@ -36,10 +39,11 @@ export async function loadProjectSnapshot(input: LoadProjectSnapshotInput): Prom
   const paths = getDebruteProjectPaths(input.projectRoot);
   const metadata = await readProjectMetadata(input.projectRoot);
   const files = await listDebruteProjectFiles(input.projectRoot);
-  const { canvases, registry } = await input.loadOrderedCanvases(input.projectRoot);
+  const { canvases, registry, diagnostics: documentDiagnostics } = await input.loadOrderedCanvases(input.projectRoot);
   const synchronized = registry.status === 'ready'
     ? await input.synchronizeCanvasMaps(input.projectRoot, canvases, files, {
-        writeCanvasChanges: input.writeCanvasMapChanges ?? true
+        writeCanvasChanges: input.mode === 'push',
+        reportDrift: input.mode === 'readOnly'
       })
     : { canvases, diagnostics: [] };
   const projections = registry.status === 'ready'
@@ -50,6 +54,7 @@ export async function loadProjectSnapshot(input: LoadProjectSnapshotInput): Prom
       )))
     : [];
   const diagnostics = uniqueDiagnostics([
+    ...documentDiagnostics,
     ...synchronized.diagnostics,
     ...projections.flatMap((projection) => projection.diagnostics)
   ]);

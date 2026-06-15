@@ -34,4 +34,36 @@ describe('app-server generated asset metadata', () => {
       await rm(root, { recursive: true, force: true });
     }
   });
+
+  it('reports fingerprint cache write failure without failing generated asset metadata writes', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'debrute-app-server-generated-cache-diagnostic-'));
+    let server: DebruteAppServer | undefined;
+    try {
+      await mkdir(join(root, 'generated'), { recursive: true });
+      await writeFile(join(root, 'generated/cover.png'), Buffer.from('image-bytes'));
+      server = new DebruteAppServer();
+      await server.openProject(root, { initializeIfMissing: true, createDefaultCanvas: true });
+      await mkdir(join(root, '.debrute/cache/file-fingerprints.json'), { recursive: true });
+
+      const record = await server.recordGeneratedAssetMetadata({
+        projectRelativePath: 'generated/cover.png',
+        modelRun: { request: { prompt: 'cover' }, output: { ok: true } }
+      });
+
+      const snapshot = server.getSnapshot();
+      expect(record).toMatchObject({ projectRelativePath: 'generated/cover.png' });
+      expect(snapshot.diagnostics).toEqual(expect.arrayContaining([
+        expect.objectContaining({
+          source: 'project',
+          severity: 'warning',
+          code: 'generated_asset_fingerprint_cache_write_failed',
+          filePath: join(root, '.debrute/cache/file-fingerprints.json')
+        })
+      ]));
+      expect(snapshot.health.diagnosticCounts.warnings).toBeGreaterThan(0);
+    } finally {
+      server?.close();
+      await rm(root, { recursive: true, force: true });
+    }
+  });
 });

@@ -16,7 +16,7 @@ export type DebruteCliCommand =
   | 'project.status'
   | 'project.validate'
   | 'workbench.url'
-  | 'canvas-map.publish'
+  | 'canvas-map.push'
   | 'canvas.create'
   | 'canvas.rename'
   | 'canvas.delete'
@@ -52,7 +52,7 @@ const POSITIONAL_COUNTS: Record<DebruteCliCommand, { min: number; max: number }>
   'project.status': { min: 1, max: 1 },
   'project.validate': { min: 1, max: 1 },
   'workbench.url': { min: 1, max: 1 },
-  'canvas-map.publish': { min: 2, max: 2 },
+  'canvas-map.push': { min: 2, max: 2 },
   'canvas.create': { min: 1, max: 1 },
   'canvas.rename': { min: 3, max: 3 },
   'canvas.delete': { min: 2, max: 2 },
@@ -80,7 +80,7 @@ const ALLOWED_OPTIONS: Record<DebruteCliCommand, Set<string>> = {
   'project.status': new Set(),
   'project.validate': new Set(),
   'workbench.url': new Set(),
-  'canvas-map.publish': new Set(),
+  'canvas-map.push': new Set(),
   'canvas.create': new Set(),
   'canvas.rename': new Set(),
   'canvas.delete': new Set(),
@@ -104,7 +104,7 @@ const PROJECT_COMMANDS = new Set<DebruteCliCommand>([
   'project.status',
   'project.validate',
   'workbench.url',
-  'canvas-map.publish',
+  'canvas-map.push',
   'canvas.create',
   'canvas.rename',
   'canvas.delete',
@@ -250,7 +250,7 @@ function requiredPositionals(command: DebruteCliCommand): string {
   if (command === 'models.image.describe' || command === 'models.video.describe') {
     return '<model-id>';
   }
-  if (command === 'canvas-map.publish') {
+  if (command === 'canvas-map.push') {
     return '<project> <canvas-id>';
   }
   if (command === 'canvas.rename') {

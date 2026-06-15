@@ -105,10 +105,30 @@ describe('Debrute architecture boundaries', () => {
       'apps/app-server/src/project-session/projectWatchEvents.ts',
       'apps/app-server/src/canvas-map/CanvasMapSessionService.ts',
       'apps/app-server/src/canvas/CanvasProjectionService.ts',
-      'apps/app-server/src/canvas/CanvasSessionService.ts'
+      'apps/app-server/src/canvas/CanvasSessionService.ts',
+      'apps/app-server/src/project-documents/ProjectDocumentRegistry.ts',
+      'apps/app-server/src/project-documents/ProjectDocumentTransaction.ts',
+      'apps/app-server/src/project-documents/ProjectDocumentDiagnostics.ts',
+      'apps/app-server/src/project-documents/documentDescriptors.ts'
     ]) {
       expect(existsSync(join(root, file)), file).toBe(true);
     }
+  });
+
+  it('keeps structured project document writes behind project document transactions', () => {
+    const structuredDocumentServices = [
+      'apps/app-server/src/canvas-map/CanvasMapSessionService.ts',
+      'apps/app-server/src/canvas/CanvasRegistryService.ts',
+      'apps/app-server/src/canvas/CanvasSessionService.ts',
+      'apps/app-server/src/canvas/CanvasFeedbackService.ts',
+      'apps/app-server/src/generated-assets/GeneratedAssetMetadataService.ts'
+    ];
+    const text = structuredDocumentServices.map((file) => readFileSync(join(root, file), 'utf8')).join('\n');
+
+    expect(text).not.toContain('stageFileAtomicText');
+    expect(text).not.toContain('writeInternalCanvasMapTextFile');
+    expect(text).not.toContain('writeJsonAtomic');
+    expect(text).not.toContain('writeFile(');
   });
 
   it('keeps integration command execution out of backend detection exports', () => {

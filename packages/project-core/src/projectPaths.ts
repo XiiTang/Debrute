@@ -82,11 +82,20 @@ export function assertProjectTreeVisibleMutationPath(projectRelativePath: string
   if (normalizedPath === '.git' || normalizedPath.startsWith('.git/') || isIgnoredProjectFilePath(normalizedPath)) {
     throw new Error(`Project path is not visible in the Project Tree: ${projectRelativePath}`);
   }
+  if (isProtectedProjectDocumentMutationPath(normalizedPath)) {
+    throw new Error(`Project path is protected by the Project Document System: ${projectRelativePath}`);
+  }
 }
 
 export function isIgnoredProjectFilePath(projectRelativePath: string): boolean {
   return projectRelativePath === '.debrute/cache/canvas-image-previews'
-    || projectRelativePath.startsWith('.debrute/cache/canvas-image-previews/');
+    || projectRelativePath.startsWith('.debrute/cache/canvas-image-previews/')
+    || (projectRelativePath.startsWith('.debrute/') && projectRelativePath.endsWith('.lock'));
+}
+
+export function isProtectedProjectDocumentMutationPath(projectRelativePath: string): boolean {
+  return projectRelativePath === '.debrute'
+    || projectRelativePath.startsWith('.debrute/');
 }
 
 function normalizeProjectPath(projectRelativePath: string, options: { allowEmpty: boolean }): string {

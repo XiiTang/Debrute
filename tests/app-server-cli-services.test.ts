@@ -230,15 +230,52 @@ describe('DebruteAppServer CLI service methods', () => {
         '  - production/**/*.md',
         ''
       ].join('\n'), 'utf8');
-      await server.publishCanvasMapForProject(root, { canvasId: 'canvas-1' });
+      await server.pushCanvasMapForProject(root, { canvasId: 'canvas-1' });
 
       const canvasPath = join(root, '.debrute/canvases/canvas-1.json');
       const before = await readFile(canvasPath, 'utf8');
-      await writeFile(join(root, '.debrute/canvas-maps/canvas-1.yaml'), 'paths:\n  - missing/future.md\n', 'utf8');
+      await writeFile(join(root, 'production/future.md'), '# Future\n', 'utf8');
+      await writeFile(join(root, '.debrute/canvas-maps/canvas-1.yaml'), 'paths:\n  - production/*.md\n', 'utf8');
 
-      await server.projectStatusForCli(root);
+      const status = await server.projectStatusForCli(root);
 
+      expect(status.diagnostics).toEqual(expect.arrayContaining([
+        expect.objectContaining({
+          source: 'project',
+          severity: 'warning',
+          code: 'document_drift',
+          message: expect.stringContaining('Canvas Map has changes that have not been pushed')
+        })
+      ]));
       await expect(readFile(canvasPath, 'utf8')).resolves.toBe(before);
+    } finally {
+      server.close();
+      await rm(root, { recursive: true, force: true });
+    }
+  });
+
+  it('reports invalid Canvas JSON as a project document diagnostic for CLI status reads', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'debrute-app-server-cli-invalid-canvas-json-'));
+    const server = new DebruteAppServer();
+    try {
+      await server.initProjectForCli(root);
+      const canvasPath = join(root, '.debrute/canvases/canvas-1.json');
+      await writeFile(canvasPath, '{"schemaVersion":1,"id":"canvas-1","nodeElements":"bad"}\n', 'utf8');
+
+      const status = await server.projectStatusForCli(root);
+
+      expect(status.diagnostics).toEqual(expect.arrayContaining([
+        expect.objectContaining({
+          source: 'project',
+          severity: 'error',
+          code: 'document_invalid_pushed',
+          filePath: canvasPath,
+          entityId: 'canvas-1',
+          message: expect.stringContaining('Invalid canvas document schema')
+        })
+      ]));
+      expect(status.health.diagnosticCounts.errors).toBeGreaterThan(0);
+      await expect(readFile(canvasPath, 'utf8')).resolves.toBe('{"schemaVersion":1,"id":"canvas-1","nodeElements":"bad"}\n');
     } finally {
       server.close();
       await rm(root, { recursive: true, force: true });

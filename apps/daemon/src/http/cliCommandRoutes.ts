@@ -129,9 +129,9 @@ async function runDaemonCliCommandUnsafe(
       records: diagnosticRecords(snapshot)
     };
   }
-  if (request.command === 'canvas-map.publish') {
+  if (request.command === 'canvas-map.push') {
     const canvasId = request.positional[1] ?? '';
-    await server.publishCanvasMapForProject(requiredProjectRoot(request), { canvasId });
+    await server.pushCanvasMapForProject(requiredProjectRoot(request), { canvasId });
     return { status: 'ok', command: request.command, fields: { canvas: canvasId } };
   }
   if (request.command === 'canvas.create') {

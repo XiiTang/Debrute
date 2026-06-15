@@ -1,17 +1,16 @@
 import { createHash } from 'node:crypto';
-import { mkdir, readdir, readFile, rename, rm, writeFile } from 'node:fs/promises';
+import { readdir, readFile } from 'node:fs/promises';
 import { join } from 'node:path';
-import {
-  getDebruteProjectPaths,
-  writeJsonAtomic
-} from '@debrute/project-core';
+import { getDebruteProjectPaths } from '@debrute/project-core';
 import {
   assertCanvasDocumentId,
   createCanvasDocument,
+  type Diagnostic,
   type CanvasDocument
 } from '@debrute/canvas-core';
 import type { CanvasRegistryErrorCode, CanvasRegistryState } from '@debrute/app-protocol';
 import { serviceError } from '../server/ServiceErrors.js';
+import { projectDocumentFileHash } from '../project-documents/ProjectDocumentTransaction.js';
 
 export interface CanvasRegistryDocument {
   schemaVersion: 1;
@@ -25,9 +24,14 @@ export interface CanvasRegistryReadResult {
 }
 
 export interface CanvasRegistryServiceOptions {
-  suppressInternalProjectPathEvent(absolutePath: string, content?: string): void;
-  loadCanvases(projectRoot: string): Promise<CanvasDocument[]>;
-  writeCanvasJson(canvasPath: string, canvas: CanvasDocument): Promise<void>;
+  loadCanvasDocuments(projectRoot: string): Promise<{ canvases: CanvasDocument[]; diagnostics: Diagnostic[] }>;
+  writeStructuredDocuments(input: {
+    projectRoot: string;
+    owner: string;
+    reads: Array<{ absolutePath: string; expectedHash: string | null }>;
+    writes?: Array<{ absolutePath: string; content: string }>;
+    deletes?: Array<{ absolutePath: string }>;
+  }): Promise<void>;
 }
 
 const CANVAS_REGISTRY_SCHEMA_VERSION = 1;
@@ -41,20 +45,27 @@ export class CanvasRegistryService {
 
   async ensureDefaultCanvas(projectRoot: string): Promise<void> {
     const paths = getDebruteProjectPaths(projectRoot);
-    await mkdir(paths.canvasesDir, { recursive: true });
-    await mkdir(paths.canvasMapsDir, { recursive: true });
-    const existingCanvases = await this.options.loadCanvases(projectRoot);
-    if (existingCanvases.length > 0 || await fileExists(paths.canvasIndexFile)) {
+    if (await hasCanvasJsonFiles(paths.canvasesDir) || await fileExists(paths.canvasIndexFile)) {
       return;
     }
 
     const canvas = createCanvasDocument({ id: 'canvas-1' });
-    await this.writeCanvasMap(projectRoot, canvas.id, EMPTY_CANVAS_MAP_SOURCE);
-    await this.options.writeCanvasJson(join(paths.canvasesDir, `${canvas.id}.json`), canvas);
-    await this.writeRegistry(projectRoot, {
-      schemaVersion: CANVAS_REGISTRY_SCHEMA_VERSION,
-      canvasOrder: [canvas.id]
+    await this.writeStructuredDocuments(projectRoot, {
+      reads: [
+        { absolutePath: join(paths.canvasMapsDir, `${canvas.id}.yaml`), expectedHash: null },
+        { absolutePath: join(paths.canvasesDir, `${canvas.id}.json`), expectedHash: null },
+        { absolutePath: paths.canvasIndexFile, expectedHash: null }
+      ],
+      writes: [
+        canvasMapWrite(projectRoot, canvas.id, EMPTY_CANVAS_MAP_SOURCE),
+        canvasJsonWrite(projectRoot, canvas.id, canvas),
+        registryWrite(projectRoot, {
+          schemaVersion: CANVAS_REGISTRY_SCHEMA_VERSION,
+          canvasOrder: [canvas.id]
+        })
+      ]
     });
+    this.canvasMapSourceHashByProjectCanvas.set(projectCanvasKey(projectRoot, canvas.id), rawContentHash(EMPTY_CANVAS_MAP_SOURCE));
   }
 
   async readRegistry(projectRoot: string): Promise<CanvasRegistryReadResult> {
@@ -65,43 +76,54 @@ export class CanvasRegistryService {
     return registry;
   }
 
-  async orderedCanvases(projectRoot: string): Promise<{ canvases: CanvasDocument[]; registry: CanvasRegistryState }> {
-    const canvases = await this.options.loadCanvases(projectRoot);
+  async orderedCanvases(projectRoot: string): Promise<{ canvases: CanvasDocument[]; registry: CanvasRegistryState; diagnostics: Diagnostic[] }> {
+    const { canvases, diagnostics } = await this.options.loadCanvasDocuments(projectRoot);
     const mapIds = await this.currentCanvasMapIds(projectRoot);
     const registry = await this.readRegistry(projectRoot);
     if (registry.state.status === 'invalid' || !registry.document) {
-      return { canvases: [], registry: registry.state };
+      return { canvases: [], registry: registry.state, diagnostics };
     }
     const validation = validateRegistryPairs(registry.document.canvasOrder, canvases, mapIds);
     if (validation) {
-      return { canvases: [], registry: validation };
+      return { canvases: [], registry: validation, diagnostics };
     }
 
     const canvasesById = new Map(canvases.map((canvas) => [canvas.id, canvas]));
     await this.recordCanvasMapHashes(projectRoot, registry.document.canvasOrder);
     return {
       canvases: registry.document.canvasOrder.map((id) => canvasesById.get(id)!),
-      registry: registry.state
+      registry: registry.state,
+      diagnostics
     };
   }
 
   async createCanvas(projectRoot: string): Promise<{ canvasId: string }> {
-    const { document } = await this.currentRegistryDocumentForWrite(projectRoot);
+    const { document, sourceHash } = await this.currentRegistryDocumentForWrite(projectRoot);
     const canvasId = nextCanvasId(document.canvasOrder);
     const paths = getDebruteProjectPaths(projectRoot);
-    await this.writeCanvasMap(projectRoot, canvasId, EMPTY_CANVAS_MAP_SOURCE);
-    await this.options.writeCanvasJson(join(paths.canvasesDir, `${canvasId}.json`), createCanvasDocument({ id: canvasId }));
-    await this.writeRegistry(projectRoot, {
-      schemaVersion: CANVAS_REGISTRY_SCHEMA_VERSION,
-      canvasOrder: [...document.canvasOrder, canvasId]
+    await this.writeStructuredDocuments(projectRoot, {
+      reads: [
+        { absolutePath: paths.canvasIndexFile, expectedHash: sourceHash },
+        { absolutePath: join(paths.canvasMapsDir, `${canvasId}.yaml`), expectedHash: null },
+        { absolutePath: join(paths.canvasesDir, `${canvasId}.json`), expectedHash: null }
+      ],
+      writes: [
+        canvasMapWrite(projectRoot, canvasId, EMPTY_CANVAS_MAP_SOURCE),
+        canvasJsonWrite(projectRoot, canvasId, createCanvasDocument({ id: canvasId })),
+        registryWrite(projectRoot, {
+          schemaVersion: CANVAS_REGISTRY_SCHEMA_VERSION,
+          canvasOrder: [...document.canvasOrder, canvasId]
+        })
+      ]
     });
+    this.canvasMapSourceHashByProjectCanvas.set(projectCanvasKey(projectRoot, canvasId), rawContentHash(EMPTY_CANVAS_MAP_SOURCE));
     return { canvasId };
   }
 
   async renameCanvas(projectRoot: string, input: { canvasId: string; nextCanvasId: string }): Promise<{ canvasId: string }> {
     assertCanvasDocumentId(input.canvasId);
     assertCanvasDocumentId(input.nextCanvasId);
-    const { document } = await this.currentRegistryDocumentForWrite(projectRoot);
+    const { document, sourceHash } = await this.currentRegistryDocumentForWrite(projectRoot);
     if (!document.canvasOrder.includes(input.canvasId)) {
       throw serviceError('canvas_registry_invalid', `Canvas is not in registry: ${input.canvasId}`, { canvas_id: input.canvasId });
     }
@@ -115,20 +137,32 @@ export class CanvasRegistryService {
     const nextJsonPath = join(paths.canvasesDir, `${input.nextCanvasId}.json`);
     const oldMapPath = join(paths.canvasMapsDir, `${input.canvasId}.yaml`);
     const nextMapPath = join(paths.canvasMapsDir, `${input.nextCanvasId}.yaml`);
-    const canvas = (await this.options.loadCanvases(projectRoot)).find((item) => item.id === input.canvasId);
+    const canvas = (await this.options.loadCanvasDocuments(projectRoot)).canvases.find((item) => item.id === input.canvasId);
     if (!canvas) {
       throw serviceError('canvas_registry_invalid', `Canvas JSON is missing: ${input.canvasId}`, { canvas_id: input.canvasId });
     }
+    const oldJsonHash = await projectDocumentFileHash(oldJsonPath);
 
-    this.options.suppressInternalProjectPathEvent(oldMapPath);
-    this.options.suppressInternalProjectPathEvent(nextMapPath, sourceMapContent);
-    await rename(oldMapPath, nextMapPath);
-    await this.options.writeCanvasJson(nextJsonPath, { ...canvas, id: input.nextCanvasId });
-    this.options.suppressInternalProjectPathEvent(oldJsonPath);
-    await rm(oldJsonPath, { force: true });
-    await this.writeRegistry(projectRoot, {
-      schemaVersion: CANVAS_REGISTRY_SCHEMA_VERSION,
-      canvasOrder: document.canvasOrder.map((id) => id === input.canvasId ? input.nextCanvasId : id)
+    await this.writeStructuredDocuments(projectRoot, {
+      reads: [
+        { absolutePath: paths.canvasIndexFile, expectedHash: sourceHash },
+        { absolutePath: oldMapPath, expectedHash: rawContentHash(sourceMapContent) },
+        { absolutePath: oldJsonPath, expectedHash: oldJsonHash },
+        { absolutePath: nextMapPath, expectedHash: null },
+        { absolutePath: nextJsonPath, expectedHash: null }
+      ],
+      writes: [
+        { absolutePath: nextMapPath, content: sourceMapContent },
+        { absolutePath: nextJsonPath, content: `${JSON.stringify({ ...canvas, id: input.nextCanvasId }, null, 2)}\n` },
+        registryWrite(projectRoot, {
+          schemaVersion: CANVAS_REGISTRY_SCHEMA_VERSION,
+          canvasOrder: document.canvasOrder.map((id) => id === input.canvasId ? input.nextCanvasId : id)
+        })
+      ],
+      deletes: [
+        { absolutePath: oldMapPath },
+        { absolutePath: oldJsonPath }
+      ]
     });
     this.canvasMapSourceHashByProjectCanvas.delete(projectCanvasKey(projectRoot, input.canvasId));
     this.canvasMapSourceHashByProjectCanvas.set(projectCanvasKey(projectRoot, input.nextCanvasId), rawContentHash(sourceMapContent));
@@ -137,7 +171,7 @@ export class CanvasRegistryService {
 
   async deleteCanvas(projectRoot: string, input: { canvasId: string }): Promise<{ activeCanvasId: string }> {
     assertCanvasDocumentId(input.canvasId);
-    const { document } = await this.currentRegistryDocumentForWrite(projectRoot);
+    const { document, sourceHash } = await this.currentRegistryDocumentForWrite(projectRoot);
     if (document.canvasOrder.length <= 1) {
       throw serviceError('canvas_registry_invalid', 'Cannot delete the final canvas.', { canvas_id: input.canvasId });
     }
@@ -146,17 +180,27 @@ export class CanvasRegistryService {
       throw serviceError('canvas_registry_invalid', `Canvas is not in registry: ${input.canvasId}`, { canvas_id: input.canvasId });
     }
 
-    await this.assertCanvasMapHash(projectRoot, input.canvasId);
+    const sourceMapContent = await this.assertCanvasMapHash(projectRoot, input.canvasId);
     const paths = getDebruteProjectPaths(projectRoot);
     const mapPath = join(paths.canvasMapsDir, `${input.canvasId}.yaml`);
     const jsonPath = join(paths.canvasesDir, `${input.canvasId}.json`);
-    this.options.suppressInternalProjectPathEvent(mapPath);
-    this.options.suppressInternalProjectPathEvent(jsonPath);
-    await rm(mapPath, { force: true });
-    await rm(jsonPath, { force: true });
-    await this.writeRegistry(projectRoot, {
-      schemaVersion: CANVAS_REGISTRY_SCHEMA_VERSION,
-      canvasOrder: document.canvasOrder.filter((id) => id !== input.canvasId)
+    const jsonHash = await projectDocumentFileHash(jsonPath);
+    await this.writeStructuredDocuments(projectRoot, {
+      reads: [
+        { absolutePath: paths.canvasIndexFile, expectedHash: sourceHash },
+        { absolutePath: mapPath, expectedHash: rawContentHash(sourceMapContent) },
+        { absolutePath: jsonPath, expectedHash: jsonHash }
+      ],
+      writes: [
+        registryWrite(projectRoot, {
+          schemaVersion: CANVAS_REGISTRY_SCHEMA_VERSION,
+          canvasOrder: document.canvasOrder.filter((id) => id !== input.canvasId)
+        })
+      ],
+      deletes: [
+        { absolutePath: mapPath },
+        { absolutePath: jsonPath }
+      ]
     });
     this.canvasMapSourceHashByProjectCanvas.delete(projectCanvasKey(projectRoot, input.canvasId));
     return {
@@ -165,16 +209,21 @@ export class CanvasRegistryService {
   }
 
   async reorderCanvases(projectRoot: string, input: { canvasOrder: string[] }): Promise<void> {
-    const { document } = await this.currentRegistryDocumentForWrite(projectRoot);
+    const { document, sourceHash } = await this.currentRegistryDocumentForWrite(projectRoot);
     assertCompletePermutation(input.canvasOrder, document.canvasOrder);
-    await this.writeRegistry(projectRoot, {
-      schemaVersion: CANVAS_REGISTRY_SCHEMA_VERSION,
-      canvasOrder: input.canvasOrder
+    await this.writeStructuredDocuments(projectRoot, {
+      reads: [{ absolutePath: getDebruteProjectPaths(projectRoot).canvasIndexFile, expectedHash: sourceHash }],
+      writes: [
+        registryWrite(projectRoot, {
+          schemaVersion: CANVAS_REGISTRY_SCHEMA_VERSION,
+          canvasOrder: input.canvasOrder
+        })
+      ]
     });
   }
 
   async repairCanvasIndex(projectRoot: string): Promise<{ activeCanvasId: string }> {
-    const canvases = await this.options.loadCanvases(projectRoot);
+    const { canvases } = await this.options.loadCanvasDocuments(projectRoot);
     const mapIds = await this.currentCanvasMapIds(projectRoot);
     const canvasIds = canvases
       .map((canvas) => canvas.id)
@@ -184,15 +233,20 @@ export class CanvasRegistryService {
       throw serviceError('canvas_registry_repair_failed', 'Canvas registry repair found no valid canvas pairs.');
     }
 
-    await this.writeRegistry(projectRoot, {
-      schemaVersion: CANVAS_REGISTRY_SCHEMA_VERSION,
-      canvasOrder: canvasIds
+    await this.writeStructuredDocuments(projectRoot, {
+      reads: [],
+      writes: [
+        registryWrite(projectRoot, {
+          schemaVersion: CANVAS_REGISTRY_SCHEMA_VERSION,
+          canvasOrder: canvasIds
+        })
+      ]
     });
     await this.recordCanvasMapHashes(projectRoot, canvasIds);
     return { activeCanvasId: canvasIds[0]! };
   }
 
-  private async currentRegistryDocumentForWrite(projectRoot: string): Promise<{ document: CanvasRegistryDocument }> {
+  private async currentRegistryDocumentForWrite(projectRoot: string): Promise<{ document: CanvasRegistryDocument; sourceHash: string }> {
     const registry = await this.readRegistryFromDisk(projectRoot);
     if (registry.state.status === 'invalid') {
       throw serviceError(registry.state.code, registry.state.message);
@@ -207,13 +261,13 @@ export class CanvasRegistryService {
 
     const validation = validateRegistryPairs(
       registry.document.canvasOrder,
-      await this.options.loadCanvases(projectRoot),
+      (await this.options.loadCanvasDocuments(projectRoot)).canvases,
       await this.currentCanvasMapIds(projectRoot)
     );
     if (validation) {
       throw serviceError(validation.code, validation.message);
     }
-    return { document: registry.document };
+    return { document: registry.document, sourceHash: registry.sourceHash! };
   }
 
   private async readRegistryFromDisk(projectRoot: string): Promise<CanvasRegistryReadResult> {
@@ -241,19 +295,24 @@ export class CanvasRegistryService {
     }
   }
 
-  private async writeRegistry(projectRoot: string, document: CanvasRegistryDocument): Promise<void> {
-    const path = getDebruteProjectPaths(projectRoot).canvasIndexFile;
-    const serialized = `${JSON.stringify(document, null, 2)}\n`;
-    this.options.suppressInternalProjectPathEvent(path, serialized);
-    await writeJsonAtomic(path, document);
-    this.registrySourceHashByProjectRoot.set(projectRoot, rawContentHash(serialized));
-  }
-
-  private async writeCanvasMap(projectRoot: string, canvasId: string, content: string): Promise<void> {
-    const path = join(getDebruteProjectPaths(projectRoot).canvasMapsDir, `${canvasId}.yaml`);
-    this.options.suppressInternalProjectPathEvent(path, content);
-    await writeFile(path, content, 'utf8');
-    this.canvasMapSourceHashByProjectCanvas.set(projectCanvasKey(projectRoot, canvasId), rawContentHash(content));
+  private async writeStructuredDocuments(
+    projectRoot: string,
+    input: {
+      reads: Array<{ absolutePath: string; expectedHash: string | null }>;
+      writes?: Array<{ absolutePath: string; content: string }>;
+      deletes?: Array<{ absolutePath: string }>;
+    }
+  ): Promise<void> {
+    await this.options.writeStructuredDocuments({
+      projectRoot,
+      owner: 'canvas-registry',
+      ...input
+    });
+    for (const write of input.writes ?? []) {
+      if (write.absolutePath === getDebruteProjectPaths(projectRoot).canvasIndexFile) {
+        this.registrySourceHashByProjectRoot.set(projectRoot, rawContentHash(write.content));
+      }
+    }
   }
 
   private async currentCanvasMapIds(projectRoot: string): Promise<Set<string>> {
@@ -286,7 +345,7 @@ export class CanvasRegistryService {
     const current = rawContentHash(content);
     const expected = this.canvasMapSourceHashByProjectCanvas.get(projectCanvasKey(projectRoot, canvasId));
     if (expected !== current) {
-      throw serviceError('canvas_map_conflict', 'Canvas Map changed on disk. Publish or refresh before retrying.', {
+      throw serviceError('canvas_map_conflict', 'Canvas Map changed on disk. Push or refresh before retrying.', {
         canvas_id: canvasId,
         file_path: `.debrute/canvas-maps/${canvasId}.yaml`
       });
@@ -368,6 +427,27 @@ function invalidRegistry(code: CanvasRegistryErrorCode, message: string): Canvas
   return { state: { status: 'invalid', code, message } };
 }
 
+function registryWrite(projectRoot: string, document: CanvasRegistryDocument): { absolutePath: string; content: string } {
+  return {
+    absolutePath: getDebruteProjectPaths(projectRoot).canvasIndexFile,
+    content: `${JSON.stringify(document, null, 2)}\n`
+  };
+}
+
+function canvasMapWrite(projectRoot: string, canvasId: string, content: string): { absolutePath: string; content: string } {
+  return {
+    absolutePath: join(getDebruteProjectPaths(projectRoot).canvasMapsDir, `${canvasId}.yaml`),
+    content
+  };
+}
+
+function canvasJsonWrite(projectRoot: string, canvasId: string, canvas: CanvasDocument): { absolutePath: string; content: string } {
+  return {
+    absolutePath: join(getDebruteProjectPaths(projectRoot).canvasesDir, `${canvasId}.json`),
+    content: `${JSON.stringify(canvas, null, 2)}\n`
+  };
+}
+
 function rawContentHash(content: string): string {
   return `sha256:${createHash('sha256').update(content).digest('hex')}`;
 }
@@ -386,6 +466,19 @@ async function fileExists(path: string): Promise<boolean> {
     }
     throw error;
   }
+}
+
+async function hasCanvasJsonFiles(dir: string): Promise<boolean> {
+  let entries: string[];
+  try {
+    entries = await readdir(dir);
+  } catch (error) {
+    if (isMissingPathError(error)) {
+      return false;
+    }
+    throw error;
+  }
+  return entries.some((name) => name.endsWith('.json') && name !== 'index.json');
 }
 
 function isMissingPathError(error: unknown): boolean {

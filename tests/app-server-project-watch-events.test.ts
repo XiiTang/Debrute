@@ -43,7 +43,7 @@ describe('App Server project watch events', () => {
         '  - outputs/a.png',
         ''
       ]);
-      await server.publishCanvasMapForProject(projectRoot, { canvasId: 'canvas-1' });
+      await server.pushCanvasMapForProject(projectRoot, { canvasId: 'canvas-1' });
 
       const mapPath = join(projectRoot, '.debrute/canvas-maps/canvas-1.yaml');
       await writeFile(mapPath, 'paths:\n  - outputs/b.png\n', 'utf8');
@@ -85,7 +85,7 @@ describe('App Server project watch events', () => {
         '  - outputs/',
         ''
       ]);
-      await server.publishCanvasMapForProject(projectRoot, { canvasId: 'canvas-1' });
+      await server.pushCanvasMapForProject(projectRoot, { canvasId: 'canvas-1' });
 
       const nextFilePath = join(projectRoot, 'outputs/b.png');
       await writeFile(nextFilePath, 'fake', 'utf8');
@@ -105,6 +105,48 @@ describe('App Server project watch events', () => {
         'outputs/b.png'
       ]);
       await expect(readFile(join(projectRoot, '.debrute/canvases/canvas-1.json'), 'utf8')).resolves.toContain('outputs/b.png');
+    } finally {
+      server.close();
+      await rm(projectRoot, { recursive: true, force: true });
+    }
+  });
+
+  it('keeps previous Canvas JSON when watched Canvas Map source is invalid', async () => {
+    const projectRoot = await mkdtemp(join(tmpdir(), 'debrute-watch-invalid-canvas-map-'));
+    const server = new DebruteAppServer();
+    try {
+      await mkdir(join(projectRoot, 'notes'), { recursive: true });
+      await writeFile(join(projectRoot, 'notes/a.md'), '# A\n', 'utf8');
+      await server.openProject(projectRoot, { initializeIfMissing: true, createDefaultCanvas: true, watchFiles: false });
+      await writeCanvasMap(projectRoot, 'canvas-1', [
+        'paths:',
+        '  - notes/a.md',
+        ''
+      ]);
+      await server.pushCanvasMapForProject(projectRoot, { canvasId: 'canvas-1' });
+      const canvasBefore = await readFile(join(projectRoot, '.debrute/canvases/canvas-1.json'), 'utf8');
+      const mapPath = join(projectRoot, '.debrute/canvas-maps/canvas-1.yaml');
+      await writeFile(mapPath, 'paths:\n  - [broken\n', 'utf8');
+
+      await callWatchedFileEvent(server, {
+        type: 'changed',
+        absolutePath: mapPath,
+        projectRelativePath: '.debrute/canvas-maps/canvas-1.yaml',
+        observedAt: Date.now() + 1000,
+        affects: ['canvas-map']
+      });
+
+      const snapshot = server.getSnapshot();
+      expect(snapshot.diagnostics).toEqual(expect.arrayContaining([
+        expect.objectContaining({
+          source: 'project',
+          severity: 'error',
+          code: 'document_invalid_source',
+          filePath: mapPath,
+          entityId: 'canvas-1'
+        })
+      ]));
+      await expect(readFile(join(projectRoot, '.debrute/canvases/canvas-1.json'), 'utf8')).resolves.toBe(canvasBefore);
     } finally {
       server.close();
       await rm(projectRoot, { recursive: true, force: true });

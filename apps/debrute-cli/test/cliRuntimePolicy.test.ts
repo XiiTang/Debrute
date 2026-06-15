@@ -25,7 +25,7 @@ describe('CLI runtime policy', () => {
       'project.init',
       'project.status',
       'project.validate',
-      'canvas-map.publish',
+      'canvas-map.push',
       'canvas.create',
       'canvas.rename',
       'canvas.delete',
