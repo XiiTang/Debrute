@@ -1,6 +1,6 @@
 import { createHash } from 'node:crypto';
 import { readFileSync } from 'node:fs';
-import { cp, mkdir, readFile, rm, writeFile } from 'node:fs/promises';
+import { chmod, cp, mkdir, readFile, rm, stat, writeFile } from 'node:fs/promises';
 import { execFile } from 'node:child_process';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -13,6 +13,7 @@ import {
 } from './release-asset-contract.mjs';
 import { packageManagerCommand } from './package-manager-command.mjs';
 import { sharpRuntimePayloadEntries } from './sharp-runtime-payload.mjs';
+import { nodePtyRuntimePayloadEntries } from './node-pty-runtime-payload.mjs';
 export { checksumManifestName } from './release-asset-contract.mjs';
 
 const execFileAsync = promisify(execFile);
@@ -40,7 +41,8 @@ export function debruteCliPayloadEntries(root, releaseTarget = releaseTargetForH
     { from: join(root, 'apps/web/dist'), to: 'web', recursive: true, dereference: false },
     { from: join(root, 'packages/capability-runtime/src/imageModels/officialDocs/snapshots'), to: 'official-docs/imageModels/snapshots', recursive: true, dereference: false },
     { from: join(root, 'packages/capability-runtime/src/videoModels/officialDocs/snapshots'), to: 'official-docs/videoModels/snapshots', recursive: true, dereference: false },
-    ...sharpRuntimePayloadEntries(root, releaseTarget)
+    ...sharpRuntimePayloadEntries(root, releaseTarget),
+    ...nodePtyRuntimePayloadEntries(root, releaseTarget)
   ];
 }
 
@@ -69,7 +71,7 @@ export async function packageDebruteCliRelease({ all = false, outDir = join(work
     platform: 'node',
     format: 'cjs',
     target: 'node24',
-    external: ['sharp'],
+    external: ['node-pty', 'sharp'],
     logOverride: {
       'empty-import-meta': 'silent'
     },
@@ -97,10 +99,11 @@ export async function packageDebruteCliRelease({ all = false, outDir = join(work
       await cp(entry.from, destination, {
         recursive: entry.recursive,
         dereference: entry.dereference,
-        filter: entry.excludeNestedNodeModules
-          ? (source) => source === entry.from || !source.startsWith(join(entry.from, 'node_modules'))
-          : undefined
+        filter: payloadEntryFilter(entry)
       });
+      if (entry.executable === true) {
+        await makeExecutable(join(destination, entry.executableRelativePath));
+      }
     }
     await writeFile(join(payloadDir, 'package.json'), `${JSON.stringify({ version }, null, 2)}\n`, 'utf8');
     const archiveName = debruteCliArchiveName(version, releaseTarget);
@@ -141,6 +144,22 @@ async function sha256File(path) {
   const hash = createHash('sha256');
   hash.update(await readFile(path));
   return hash.digest('hex');
+}
+
+async function makeExecutable(path) {
+  const mode = (await stat(path)).mode;
+  if ((mode & 0o111) !== 0o111) {
+    await chmod(path, mode | 0o755);
+  }
+}
+
+function payloadEntryFilter(entry) {
+  return (source) => {
+    if (entry.excludeNestedNodeModules && source !== entry.from && source.startsWith(join(entry.from, 'node_modules'))) {
+      return false;
+    }
+    return entry.filter ? entry.filter(source) : true;
+  };
 }
 
 if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {

@@ -1,4 +1,4 @@
-import { existsSync, mkdirSync, readFileSync, rmSync } from 'node:fs';
+import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { pathToFileURL } from 'node:url';
@@ -58,6 +58,12 @@ describe('Debrute CLI release packaging', () => {
     expect(packagingScript.indexOf(workspaceBuild)).toBeLessThan(packagingScript.indexOf(webBuild));
   });
 
+  it('keeps native runtime packages external to the CLI bundle', () => {
+    const packagingScript = readFileSync(join(process.cwd(), 'scripts/package-debrute-cli.mjs'), 'utf8');
+
+    expect(packagingScript).toContain("external: ['node-pty', 'sharp']");
+  });
+
   it('resolves payload packages from pnpm hoisted node_modules', () => {
     const root = join(tmpdir(), `debrute-pnpm-hoist-${process.pid}-${Date.now()}`);
     const packageRoot = join(root, 'node_modules', '.pnpm', 'node_modules', '@img', 'sharp-darwin-x64');
@@ -87,7 +93,7 @@ describe('Debrute CLI release packaging', () => {
   });
 
   it('includes skills and web dist payload entries', () => {
-    const root = createRootWithNodePackages([
+    const root = createRootWithCliRuntimePackages([
       'sharp',
       '@img/colour',
       'detect-libc',
@@ -106,8 +112,55 @@ describe('Debrute CLI release packaging', () => {
         { from: join(root, 'node_modules/detect-libc'), to: 'node_modules/detect-libc', recursive: true, dereference: true },
         { from: join(root, 'node_modules/semver'), to: 'node_modules/semver', recursive: true, dereference: true },
         { from: join(root, 'node_modules/@img/sharp-darwin-arm64'), to: 'node_modules/@img/sharp-darwin-arm64', recursive: true, dereference: true },
-        { from: join(root, 'node_modules/@img/sharp-libvips-darwin-arm64'), to: 'node_modules/@img/sharp-libvips-darwin-arm64', recursive: true, dereference: true }
+        { from: join(root, 'node_modules/@img/sharp-libvips-darwin-arm64'), to: 'node_modules/@img/sharp-libvips-darwin-arm64', recursive: true, dereference: true },
+        { from: join(root, 'node_modules/node-pty/package.json'), to: 'node_modules/node-pty/package.json', recursive: false, dereference: true },
+        {
+          from: join(root, 'node_modules/node-pty/lib'),
+          to: 'node_modules/node-pty/lib',
+          recursive: true,
+          dereference: true,
+          filter: expect.any(Function)
+        },
+        {
+          from: join(root, 'node_modules/node-pty/prebuilds/darwin-arm64'),
+          to: 'node_modules/node-pty/prebuilds/darwin-arm64',
+          recursive: true,
+          dereference: true,
+          filter: expect.any(Function),
+          executable: true,
+          executableRelativePath: 'spawn-helper'
+        }
       ]);
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+
+  it('filters CLI node-pty payload to the target prebuild and runtime JavaScript files', () => {
+    const root = createRootWithCliRuntimePackages([
+      'sharp',
+      '@img/colour',
+      'detect-libc',
+      'semver',
+      '@img/sharp-darwin-arm64',
+      '@img/sharp-libvips-darwin-arm64'
+    ]);
+    try {
+      const entries = debruteCliPayloadEntries(root, debruteCliReleaseTargets[0]);
+      const libEntry = entries.find((entry) => entry.to === 'node_modules/node-pty/lib');
+      const prebuildEntry = entries.find((entry) => entry.to === 'node_modules/node-pty/prebuilds/darwin-arm64');
+
+      expect(entries.map((entry) => entry.to)).toContain('node_modules/node-pty/package.json');
+      expect(entries.map((entry) => entry.to)).toContain('node_modules/node-pty/lib');
+      expect(entries.map((entry) => entry.to)).toContain('node_modules/node-pty/prebuilds/darwin-arm64');
+      expect(entries.map((entry) => entry.to)).not.toContain('node_modules/node-pty/prebuilds/darwin-x64');
+      expect(prebuildEntry).toMatchObject({ executable: true, executableRelativePath: 'spawn-helper' });
+      expect(libEntry?.filter?.(join(root, 'node_modules/node-pty/lib/index.js'))).toBe(true);
+      expect(libEntry?.filter?.(join(root, 'node_modules/node-pty/lib/terminal.test.js'))).toBe(false);
+      expect(libEntry?.filter?.(join(root, 'node_modules/node-pty/lib/windowsTerminal.js'))).toBe(false);
+      expect(prebuildEntry?.filter?.(join(root, 'node_modules/node-pty/prebuilds/darwin-arm64/pty.node'))).toBe(true);
+      expect(prebuildEntry?.filter?.(join(root, 'node_modules/node-pty/prebuilds/darwin-arm64/spawn-helper'))).toBe(true);
+      expect(prebuildEntry?.filter?.(join(root, 'node_modules/node-pty/prebuilds/darwin-arm64/pty.pdb'))).toBe(false);
     } finally {
       rmSync(root, { recursive: true, force: true });
     }
@@ -116,7 +169,7 @@ describe('Debrute CLI release packaging', () => {
   it('uses the actual sharp Windows native package layout', () => {
     const windowsX64Target = debruteCliReleaseTargets.find((target) => target.id === 'windows-x64');
     expect(windowsX64Target).toBeDefined();
-    const root = createRootWithNodePackages([
+    const root = createRootWithCliRuntimePackages([
       'sharp',
       '@img/colour',
       'detect-libc',
@@ -178,5 +231,22 @@ function createRootWithNodePackages(packageNames: string[]) {
   for (const packageName of packageNames) {
     mkdirSync(join(root, 'node_modules', ...packageName.split('/')), { recursive: true });
   }
+  return root;
+}
+
+function createRootWithCliRuntimePackages(packageNames: string[]) {
+  const root = createRootWithNodePackages([...packageNames, 'node-pty']);
+  const nodePtyRoot = join(root, 'node_modules/node-pty');
+  mkdirSync(join(nodePtyRoot, 'lib'), { recursive: true });
+  mkdirSync(join(nodePtyRoot, 'prebuilds/darwin-arm64'), { recursive: true });
+  mkdirSync(join(nodePtyRoot, 'prebuilds/darwin-x64'), { recursive: true });
+  writeFileSync(join(nodePtyRoot, 'package.json'), '{}');
+  writeFileSync(join(nodePtyRoot, 'lib/index.js'), '');
+  writeFileSync(join(nodePtyRoot, 'lib/terminal.test.js'), '');
+  writeFileSync(join(nodePtyRoot, 'lib/windowsTerminal.js'), '');
+  writeFileSync(join(nodePtyRoot, 'prebuilds/darwin-arm64/pty.node'), '');
+  writeFileSync(join(nodePtyRoot, 'prebuilds/darwin-arm64/spawn-helper'), '');
+  writeFileSync(join(nodePtyRoot, 'prebuilds/darwin-arm64/pty.pdb'), '');
+  writeFileSync(join(nodePtyRoot, 'prebuilds/darwin-x64/pty.node'), '');
   return root;
 }
