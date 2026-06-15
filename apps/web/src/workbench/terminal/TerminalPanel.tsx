@@ -205,12 +205,14 @@ export function TerminalPanel({
         </div>
       </Toolbar>
       {state.error ? <div className="terminal-panel__status">{state.error}</div> : null}
-      {state.isLoading ? <div className="terminal-panel__status">Loading terminal</div> : null}
-      {showEmptyState ? (
+      {state.isLoading && state.sessions.length === 0 ? (
+        <EmptyState className="terminal-panel__empty" data-testid="terminal-panel-loading-state" title="Starting terminal" />
+      ) : null}
+      {!state.isLoading && showEmptyState ? (
         <EmptyState className="terminal-panel__empty" data-testid="terminal-panel-empty-state" title="No terminal sessions" />
-      ) : (
+      ) : !state.isLoading ? (
         <div ref={containerRef} className="terminal-panel__surface" />
-      )}
+      ) : null}
     </div>
   );
 }

@@ -57,10 +57,10 @@ type DiscoveryState =
   | { status: 'error'; message: string };
 
 const SETTINGS_NAV_ITEMS = [
-  { id: 'llm', label: 'LLM', description: 'Model routing and provider credentials', icon: Bot },
-  { id: 'models', label: 'Models', description: 'Generation endpoints and API keys', icon: Cpu },
-  { id: 'integrations', label: 'Integrations', description: 'Optional local capabilities', icon: Wrench },
-  { id: 'debrute-cli', label: 'Debrute CLI', description: 'Command install and Skills sync', icon: Terminal }
+  { id: 'llm', label: 'LLM', icon: Bot },
+  { id: 'models', label: 'Models', icon: Cpu },
+  { id: 'integrations', label: 'Integrations', icon: Wrench },
+  { id: 'debrute-cli', label: 'Debrute CLI', icon: Terminal }
 ] as const;
 
 type SettingsPageId = typeof SETTINGS_NAV_ITEMS[number]['id'];
@@ -81,10 +81,7 @@ export function SettingsPanel({ state, actions }: { state: WorkbenchState; actio
               onClick={() => setActivePage(item.id)}
             >
               <span className="db-settings-nav-button__icon"><Icon size={15} /></span>
-              <span>
-                <strong>{item.label}</strong>
-                <small>{item.description}</small>
-              </span>
+              <strong>{item.label}</strong>
             </button>
           );
         })}
@@ -163,7 +160,7 @@ export function LlmSettings({ state, actions }: { state: WorkbenchState; actions
 
   return (
     <section className="settings-section">
-      <SettingsSectionHeader title="LLM Providers" eyebrow="Runtime" description="Configure chat providers, discovery, and the default model route." />
+      <SettingsSectionHeader title="LLM Providers" />
       <Card>
         <Field label="Default Model">
           <Select
@@ -241,7 +238,7 @@ function ImageModelSettings({ state, actions }: { state: WorkbenchState; actions
 
   return (
     <section className="settings-section">
-      <SettingsSectionHeader title="Image Models" eyebrow="Generation" description="Manage image generation model endpoints and credentials." />
+      <SettingsSectionHeader title="Image Models" />
       <div className="settings-grid">
         {models.map((model) => (
           <MediaModelCard
@@ -260,7 +257,7 @@ function VideoModelSettings({ state, actions }: { state: WorkbenchState; actions
 
   return (
     <section className="settings-section">
-      <SettingsSectionHeader title="Video Models" eyebrow="Generation" description="Manage video generation model endpoints and credentials." />
+      <SettingsSectionHeader title="Video Models" />
       <div className="settings-grid">
         {models.map((model) => (
           <MediaModelCard
@@ -275,19 +272,13 @@ function VideoModelSettings({ state, actions }: { state: WorkbenchState; actions
 }
 
 function SettingsSectionHeader({
-  title,
-  eyebrow,
-  description
+  title
 }: {
   title: string;
-  eyebrow: string;
-  description: string;
 }): React.ReactElement {
   return (
     <header className="settings-section-header">
-      <span>{eyebrow}</span>
       <h2>{title}</h2>
-      <p>{description}</p>
     </header>
   );
 }
@@ -324,7 +315,7 @@ function MediaModelCard({
       <div className="settings-model-card-header">
         <div>
           <strong>{model.debruteModelId}</strong>
-          <StatusPill tone={model.apiKeySet ? 'success' : 'neutral'}>{model.apiKeySet ? 'configured' : 'no key'}</StatusPill>
+          {!model.apiKeySet ? <StatusPill tone="neutral">no key</StatusPill> : null}
         </div>
       </div>
       <div className="settings-model-card-fields">
@@ -384,10 +375,8 @@ function LlmProviderCard({
       <strong>{provider.name}</strong>
       <small>{provider.providerType} / {provider.baseUrl}</small>
       <div className="settings-pills">
-        <StatusPill tone={provider.enabled ? 'success' : 'neutral'}>{provider.enabled ? 'enabled' : 'disabled'}</StatusPill>
-        <StatusPill tone={provider.apiKeySet ? 'success' : 'neutral'}>{provider.apiKeySet ? 'key set' : 'no key'}</StatusPill>
-      </div>
-      <div className="settings-pills">
+        {!provider.enabled ? <StatusPill tone="neutral">disabled</StatusPill> : null}
+        {!provider.apiKeySet ? <StatusPill tone="neutral">no key</StatusPill> : null}
         {provider.modelKeys.map((modelKey) => <StatusPill key={modelKey}>{modelKey}</StatusPill>)}
       </div>
       <Toolbar ariaLabel={`${provider.name} actions`} className="settings-actions">
@@ -418,6 +407,7 @@ function ApiKeyInput({
   const input = (
     <span className="settings-key-input">
       <SecretInput
+        className="settings-key-control"
         aria-label={ariaLabel}
         masked={!visible && Boolean(value)}
         value={value}

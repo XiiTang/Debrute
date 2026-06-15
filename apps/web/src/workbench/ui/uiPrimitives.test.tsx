@@ -99,4 +99,14 @@ describe('Workbench UI primitives', () => {
       disabledIndexes: new Set([1])
     })).toBe(2);
   });
+
+  it('renders pressed IconButton state through aria-pressed only', () => {
+    const html = renderToStaticMarkup(
+      <IconButton label="Mini Map" pressed icon={<span />} />
+    );
+
+    expect(html).toContain('aria-pressed="true"');
+    expect(html).toContain('db-icon-button--ghost');
+    expect(html).not.toContain(' active');
+  });
 });

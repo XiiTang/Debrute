@@ -37,9 +37,7 @@ export function IntegrationsSettingsPage({
   return (
     <section className="settings-section integrations-settings-page">
       <header className="settings-section-header integrations-settings-header">
-        <span>Optional</span>
         <h2>Integrations</h2>
-        <p>Debrute detects optional local capabilities from PATH and shows backend command previews without executing them.</p>
         <Toolbar ariaLabel="Integration actions" className="settings-actions">
           <Button type="button" disabled={rescanRunning} iconStart={<RefreshCw size={14} />} onClick={() => void rescan()}>
             {rescanning ? 'Rescanning' : 'Rescan'}
@@ -93,12 +91,12 @@ function BackendSummary({
 }: {
   backends: IntegrationBackendStatus[] | undefined;
   checking: boolean;
-}): React.ReactElement {
+}): React.ReactElement | null {
   if (checking) {
-    return <small className="integration-backend-summary">Integration backends: checking</small>;
+    return <small className="integration-backend-summary">Checking backends</small>;
   }
   if (!backends?.length) {
-    return <small className="integration-backend-summary">Integration backends: not checked</small>;
+    return null;
   }
   const labels = backends
     .filter((backend) => backend.available && backend.backend)
@@ -106,7 +104,7 @@ function BackendSummary({
   const summary = labels.length > 0
     ? labels.join(', ')
     : backends.map((backend) => backend.unavailableReason ?? 'unavailable').join(', ');
-  return <small className="integration-backend-summary">Integration backends: {summary}</small>;
+  return <small className="integration-backend-summary">{summary}</small>;
 }
 
 function IntegrationRowAction({ integration }: { integration: IntegrationStatus }): React.ReactElement | null {

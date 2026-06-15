@@ -29,8 +29,31 @@ button {
 }
 
 :focus-visible {
-  outline: 1px solid color-mix(in oklch, var(--db-accent) 70%, transparent);
+  outline: 1px solid color-mix(in oklch, var(--db-accent) 76%, transparent);
   outline-offset: 1px;
+}
+
+::selection {
+  background: var(--db-selection-muted);
+  color: var(--db-text);
+}
+
+* {
+  scrollbar-color: color-mix(in oklch, var(--db-text-subtle) 55%, transparent) transparent;
+}
+
+svg {
+  flex: 0 0 auto;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 1ms !important;
+    transition-duration: 1ms !important;
+    scroll-behavior: auto !important;
+  }
 }
 
 .db-button__spinner,

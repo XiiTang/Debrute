@@ -70,16 +70,12 @@ function InspectorDetails({
       <>
         <div className="inspector-section">
           <h2>{context.node.projectRelativePath}</h2>
-          <dl>
-            <dt>Kind</dt><dd>{context.node.nodeKind}</dd>
-            <dt>Media</dt><dd>{context.node.mediaKind ?? 'directory'}</dd>
-            <dt>Path</dt><dd>{context.node.projectRelativePath}</dd>
-            <dt>Position</dt><dd>{Math.round(context.node.x)}, {Math.round(context.node.y)}</dd>
-            <dt>Size</dt><dd>{Math.round(context.node.width)} x {Math.round(context.node.height)}</dd>
-            <dt>Layer</dt><dd>{context.node.z}</dd>
-            <dt>Visible</dt><dd>{context.node.visible !== false ? 'yes' : 'no'}</dd>
-            <dt>Locked</dt><dd>{context.node.locked === true ? 'yes' : 'no'}</dd>
-            <dt>Status</dt><dd>{nodeStatusLabel(context.node)}</dd>
+          <dl className="db-object-properties">
+            {selectedNodeRows(context).map(([label, value]) => (
+              <React.Fragment key={label}>
+                <dt>{label}</dt><dd>{value}</dd>
+              </React.Fragment>
+            ))}
           </dl>
         </div>
         <NodeVisualControls context={context} state={state} actions={actions} />
@@ -95,7 +91,7 @@ function InspectorDetails({
     return (
       <div className="inspector-section">
         <h2>{context.items.length} selected</h2>
-        <dl>
+        <dl className="db-object-properties">
           {Object.entries(counts).map(([kind, count]) => (
             <React.Fragment key={kind}>
               <dt>{kind}</dt><dd>{count}</dd>
@@ -109,7 +105,7 @@ function InspectorDetails({
     return (
       <div className="inspector-section">
         <h2>{context.diagnostic.code}</h2>
-        <dl>
+        <dl className="db-object-properties">
           <dt>Source</dt><dd>{context.diagnostic.source}</dd>
           <dt>Severity</dt><dd>{context.diagnostic.severity}</dd>
           <dt>Entity</dt><dd>{context.diagnostic.entityId ?? 'project'}</dd>
@@ -121,6 +117,25 @@ function InspectorDetails({
   return (
     <EmptyState className="inspector-empty" title="Select a node or diagnostic." />
   );
+}
+
+function selectedNodeRows(context: Extract<SelectionContext, { kind: 'node' }>): Array<[string, string]> {
+  const rows: Array<[string, string]> = [
+    ['Type', context.node.mediaKind ?? context.node.nodeKind],
+    ['Position', `${Math.round(context.node.x)}, ${Math.round(context.node.y)}`],
+    ['Size', `${Math.round(context.node.width)} x ${Math.round(context.node.height)}`],
+    ['Layer', String(context.node.z)]
+  ];
+  if (context.node.visible === false) {
+    rows.push(['Visibility', 'hidden']);
+  }
+  if (context.node.locked === true) {
+    rows.push(['Lock', 'locked']);
+  }
+  if (context.node.availability.state !== 'available') {
+    rows.push(['Status', nodeStatusLabel(context.node)]);
+  }
+  return rows;
 }
 
 function NodeVisualControls({

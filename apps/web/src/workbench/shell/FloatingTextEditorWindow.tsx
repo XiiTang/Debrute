@@ -63,7 +63,7 @@ export function FloatingTextEditorWindow({
         <FileText size={15} />
         <PanelTitle>{basenameFromProjectPath(windowState.projectRelativePath)}</PanelTitle>
         <small>{windowState.projectRelativePath}</small>
-        <StatusPill tone={status.tone}>{status.label}</StatusPill>
+        {status ? <StatusPill tone={status.tone}>{status.label}</StatusPill> : null}
         <IconButton
           label={`Save ${windowState.projectRelativePath}`}
           disabled={!buffer || !buffer.dirty || buffer.saving}

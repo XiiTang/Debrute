@@ -126,7 +126,7 @@ export function CanvasFeedbackBar({
   return (
     <div
       ref={elementRef}
-      className="canvas-feedback-bar"
+      className="db-floating-bar canvas-feedback-bar"
       data-canvas-feedback-bar="true"
       onPointerDown={stopCanvasFeedbackBarEvent}
       onPointerMove={stopCanvasFeedbackBarEvent}

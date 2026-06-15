@@ -8,11 +8,13 @@
 
 .db-field__label {
   color: var(--db-text-muted);
+  font-weight: 600;
 }
 
 .db-field__description {
   color: var(--db-text-subtle);
   font-size: var(--db-font-xs);
+  line-height: 1.35;
 }
 
 .db-field__error {

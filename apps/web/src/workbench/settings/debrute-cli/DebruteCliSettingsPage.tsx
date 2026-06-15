@@ -67,9 +67,7 @@ export function DebruteCliSettingsPage({
     return (
       <section className="settings-section debrute-cli-settings-page">
         <header className="settings-section-header">
-          <span>Tooling</span>
           <h2>Debrute CLI</h2>
-          <p>Manual install</p>
         </header>
         <Card className="debrute-cli-status-card">
           <strong>Manual install</strong>
@@ -89,9 +87,7 @@ export function DebruteCliSettingsPage({
   return (
     <section className="settings-section debrute-cli-settings-page">
       <header className="settings-section-header">
-        <span>Tooling</span>
         <h2>Debrute CLI</h2>
-        <p>Command install and Skills sync</p>
       </header>
       <Card className="debrute-cli-status-card">
         <strong>{statusLabel(status)}</strong>

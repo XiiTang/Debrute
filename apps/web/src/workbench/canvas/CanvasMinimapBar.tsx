@@ -102,7 +102,7 @@ export function CanvasMinimapBar({
     <>
       <IconButton
         ref={barRef}
-        className="canvas-minimap-bar"
+        className="db-floating-bar canvas-minimap-bar"
         data-testid="canvas-minimap-bar"
         data-canvas-local-wheel="true"
         label="Mini Map"
@@ -219,7 +219,7 @@ const CanvasMinimapPanel = React.forwardRef<HTMLDivElement, {
   return (
     <div
       ref={ref}
-      className="canvas-minimap-panel"
+      className="db-floating-bar canvas-minimap-panel"
       data-testid="canvas-minimap-panel"
       data-canvas-local-wheel="true"
       style={{

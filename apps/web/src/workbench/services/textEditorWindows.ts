@@ -60,9 +60,9 @@ export function dragTextEditorWindowState(
   };
 }
 
-export type TextBufferStatusTone = 'neutral' | 'success' | 'warning' | 'danger' | 'info' | 'loading';
+export type TextBufferStatusTone = 'warning' | 'danger' | 'info' | 'loading';
 
-export function textBufferStatus(buffer: TextFileBuffer | undefined): { label: string; tone: TextBufferStatusTone } {
+export function textBufferStatus(buffer: TextFileBuffer | undefined): { label: string; tone: TextBufferStatusTone } | undefined {
   if (!buffer) {
     return { label: 'Loading', tone: 'loading' };
   }
@@ -78,7 +78,7 @@ export function textBufferStatus(buffer: TextFileBuffer | undefined): { label: s
   if (buffer.dirty) {
     return { label: 'Unsaved', tone: 'warning' };
   }
-  return { label: 'Saved', tone: 'success' };
+  return undefined;
 }
 
 export function clearTextBufferError(buffer: TextFileBuffer): TextFileBuffer {

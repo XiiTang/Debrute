@@ -57,6 +57,25 @@ describe('CanvasToolbar', () => {
 
     expect(button.props.disabled).toBe(true);
   });
+
+  it('omits the zero diagnostics stat from normal Canvas toolbar chrome', () => {
+    const canvas = createCanvasDocument({ id: 'canvas' });
+    const html = renderToStaticMarkup(CanvasToolbar({
+      canvas,
+      projection: projectionFixture(canvas.id, [{
+        projectRelativePath: 'flow/a.png',
+        x: 100,
+        y: 80,
+        width: 200,
+        height: 120
+      }]),
+      runtime: undefined,
+      runtimeSnapshot: undefined
+    }));
+
+    expect(html).toContain('1 node');
+    expect(html).not.toContain('0 diagnostics');
+  });
 });
 
 function toolbarButton(element: React.ReactElement | null): React.ReactElement<{

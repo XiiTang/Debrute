@@ -2,7 +2,8 @@ import { describe, expect, it } from 'vitest';
 import {
   closeTextEditorWindowState,
   dragTextEditorWindowState,
-  openTextEditorWindowState
+  openTextEditorWindowState,
+  textBufferStatus
 } from './textEditorWindows';
 
 describe('text editor window state', () => {
@@ -57,5 +58,19 @@ describe('text editor window state', () => {
       x: 8,
       y: 27
     });
+  });
+
+  it('does not surface the default saved text buffer state', () => {
+    expect(textBufferStatus({
+      projectRelativePath: 'notes/brief.md',
+      content: '# Brief',
+      language: 'markdown',
+      wordWrap: false,
+      dirty: false,
+      saving: false,
+      diskRevision: 'rev-a',
+      lastSavedRevision: 'rev-a',
+      externalChange: false
+    })).toBeUndefined();
   });
 });

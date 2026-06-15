@@ -30,7 +30,7 @@ export function FloatingDock({
   };
 
   return (
-    <nav className="floating-dock" data-testid="floating-dock" aria-label="Workbench panels">
+    <nav className="db-floating-bar floating-dock" data-testid="floating-dock" aria-label="Workbench panels">
       {FLOATING_PANEL_IDS.map((panelId) => (
         <IconButton
           key={panelId}

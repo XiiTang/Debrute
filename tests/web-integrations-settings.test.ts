@@ -5,6 +5,8 @@ import { SettingsPanel } from '../apps/web/src/workbench/settings/SettingsPanel'
 import { IntegrationsSettingsPage } from '../apps/web/src/workbench/settings/integrations/IntegrationsSettingsPage';
 import type { WorkbenchActions, WorkbenchState } from '../apps/web/src/types';
 
+const joinText = (...parts: string[]) => parts.join('');
+
 describe('web Integrations settings page', () => {
   it('adds Integrations to the Settings directory', () => {
     const html = renderToStaticMarkup(React.createElement(SettingsPanel, {
@@ -13,7 +15,7 @@ describe('web Integrations settings page', () => {
     }));
 
     expect(html).toContain('Integrations');
-    expect(html).toContain('Optional local capabilities');
+    expect(html).not.toContain(joinText('Optional local', ' capabilities'));
   });
 
   it('renders ready, missing, failed, and Python CLI integration states', () => {
@@ -22,9 +24,10 @@ describe('web Integrations settings page', () => {
       actions: createActions()
     }));
 
-    expect(html).toContain('Optional');
-    expect(html).toContain('Debrute detects optional local capabilities from PATH and shows backend command previews without executing them.');
-    expect(html).toContain('Integration backends: Homebrew, uv');
+    expect(html).toContain('<h2>Integrations</h2>');
+    expect(html).not.toContain(joinText('Debrute detects optional local capabilities from PATH', ' and shows backend command previews without executing them.'));
+    expect(html).toContain('Homebrew, uv');
+    expect(html).not.toContain('Integration backends:');
     expect(html).toContain('<span>FFmpeg</span>');
     expect(html).toContain('7.1.1');
     expect(html).toContain('brew upgrade --formula ffmpeg');
@@ -37,7 +40,8 @@ describe('web Integrations settings page', () => {
     expect(html).toContain('<span>Remove AI Watermarks</span>');
     expect(html).toContain('0.5.4');
     expect(html).toContain('uv tool upgrade remove-ai-watermarks');
-    expect(html).toContain('<span>FFmpeg</span><small>Ready</small><small>7.1.1</small><div class="integration-row-action"><div class="integration-command-preview">');
+    expect(html).toContain('<span>FFmpeg</span>');
+    expect(html).toContain('class="db-status-pill db-status-pill--success">Ready</span>');
   });
 
   it('does not render unknown versions for missing binaries', () => {

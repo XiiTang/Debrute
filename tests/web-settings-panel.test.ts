@@ -13,6 +13,8 @@ import {
 import type { DebruteCliStatus } from '@debrute/app-protocol';
 import type { WorkbenchActions, WorkbenchState } from '../apps/web/src/types';
 
+const joinText = (...parts: string[]) => parts.join('');
+
 describe('web Settings pages', () => {
   it('uses a directory layout with Debrute CLI settings', () => {
     const html = renderToStaticMarkup(React.createElement(SettingsPanel, {
@@ -47,18 +49,20 @@ describe('web Settings pages', () => {
     expect(html).toContain('db-settings-nav-button');
     expect(html).toMatch(/<button[^>]*class="[^"]*db-settings-nav-button[^"]*"[^>]*><span class="db-settings-nav-button__icon">/);
     expect(html).not.toContain('settings-nav-icon');
-    expect(html).toContain('Model routing and provider credentials');
-    expect(html).toContain('Generation endpoints and API keys');
+    expect(html).not.toContain(joinText('Model routing', ' and provider credentials'));
+    expect(html).not.toContain(joinText('Generation endpoints', ' and API keys'));
+    expect(html).not.toContain(joinText('Optional local', ' capabilities'));
+    expect(html).not.toContain(joinText('Command install', ' and Skills sync'));
     expect(html).toContain('LLM');
     expect(html).toContain('Models');
     expect(html).not.toContain('<strong>Canvas</strong>');
     expect(html).not.toContain('Canvas rendering resources');
     expect(html).toContain('Integrations');
-    expect(html).toContain('Optional local capabilities');
     expect(html).toContain('Debrute CLI');
-    expect(html).toContain('Command install and Skills sync');
     expect(html).not.toContain('Updates');
     expect(html).toContain('Image Models');
+    expect(html).not.toContain(joinText('Manage image generation model', ' endpoints and credentials.'));
+    expect(html).not.toContain(joinText('Manage video generation model', ' endpoints and credentials.'));
     expect(html).toContain('placeholder="https://api.openai.com/v1"');
     expect(html).toContain('placeholder="gpt-image-2"');
     expect(html).toContain('aria-label="Base URL override"');
@@ -66,7 +70,7 @@ describe('web Settings pages', () => {
     expect(html).toContain('aria-label="API Key"');
     expect(html).toContain('value="sk-image-ui"');
     expect(html).not.toContain('Leave blank to keep existing key');
-    expect(html).toContain('configured');
+    expect(html).not.toContain('configured');
     expect(html).toContain('no key');
     expect(html).toContain('db-card');
     expect(html).toContain('db-field');

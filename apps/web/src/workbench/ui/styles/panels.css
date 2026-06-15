@@ -1,14 +1,14 @@
 .db-card,
 .db-panel {
   min-width: 0;
-  border: 1px solid color-mix(in oklch, var(--db-border) 88%, transparent);
-  background: color-mix(in oklch, var(--db-surface-2) 94%, transparent);
+  border: 1px solid var(--db-border-muted);
+  background: var(--db-panel-bg);
 }
 
 .db-card {
   display: grid;
   gap: var(--db-space-4);
-  padding: var(--db-space-6);
+  padding: var(--db-space-5);
   border-radius: var(--db-radius-lg);
   box-shadow: var(--db-shadow-inset-subtle);
 }

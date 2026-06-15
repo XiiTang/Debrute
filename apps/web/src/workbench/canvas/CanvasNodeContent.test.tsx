@@ -112,6 +112,25 @@ describe('CanvasNodeContent text chrome', () => {
     expect(html).toContain('db-status-pill--info');
     expect(html).not.toMatch(/\b(?:dirty|external|saved|saving|loading|error)\b(?=[^"]*"[^>]*>External change)/);
   });
+
+  it('does not render the default saved text state as a status pill', () => {
+    const html = renderToStaticMarkup(
+      <CanvasNodeContent
+        node={textNode('flow/readme.md', 'rev-a')}
+        selected
+        culled={false}
+        actions={actionsFixture()}
+        textBuffer={textBuffer('flow/readme.md', 'rev-a')}
+        onSelectNode={() => undefined}
+        onTitlePointerDown={() => undefined}
+        onTitlePointerMove={() => undefined}
+        onTitlePointerUp={() => undefined}
+      />
+    );
+
+    expect(html).not.toContain('Saved');
+    expect(html).not.toContain('db-status-pill--success');
+  });
 });
 
 describe('CanvasNodeContent text buffer ensure keys', () => {

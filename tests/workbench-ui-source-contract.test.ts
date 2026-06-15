@@ -16,6 +16,7 @@ const styleFiles = [
   'apps/web/src/workbench/ui/styles/workbench-patterns.css'
 ];
 const rawColorLiteralPattern = /(?:#[0-9a-fA-F]{3,8}\b|rgb\(|oklch\()/;
+const joinText = (...parts: string[]) => parts.join('');
 
 describe('Workbench UI source contract', () => {
   it('uses only final Workbench UI token names in current stylesheets', () => {
@@ -61,7 +62,7 @@ describe('Workbench UI source contract', () => {
     expect(sources).not.toContain(" active'");
     expect(sources).not.toContain(' active"');
     expect(sources).not.toContain("'active'");
-    expect(terminalPanel).not.toContain('terminal-panel__tab--active');
+    expect(terminalPanel).not.toContain(joinText('terminal-panel__tab', '--active'));
   });
 
   it('keeps Workbench spin animation owned by the UI base stylesheet only', () => {
@@ -101,6 +102,77 @@ describe('Workbench UI source contract', () => {
     }
   });
 
+  it('defines the final visual token families used by Workbench chrome', () => {
+    const tokens = readFileSync('apps/web/src/workbench/ui/styles/tokens.css', 'utf8');
+
+    for (const token of [
+      '--db-canvas-bg',
+      '--db-canvas-grid',
+      '--db-selection',
+      '--db-selection-muted',
+      '--db-floating-bg',
+      '--db-danger-bg',
+      '--db-shadow-floating',
+      '--db-duration-fast',
+      '--db-ease-standard'
+    ]) {
+      expect(tokens).toContain(token);
+    }
+  });
+
+  it('keeps the final neutral Workbench background and white foreground contract', () => {
+    const tokens = readFileSync('apps/web/src/workbench/ui/styles/tokens.css', 'utf8');
+    const controls = readFileSync('apps/web/src/workbench/ui/styles/controls.css', 'utf8');
+
+    for (const declaration of [
+      '--db-bg: #181818;',
+      '--db-surface-1: #1f1f1f;',
+      '--db-surface-2: #262626;',
+      '--db-surface-3: #303030;',
+      '--db-canvas-bg: #181818;',
+      '--db-text: #ffffff;'
+    ]) {
+      expect(tokens).toContain(declaration);
+    }
+
+    expect(tokens).toContain('--db-canvas-grid: color-mix(in srgb, #ffffff 8%, transparent);');
+    expect(tokens).not.toMatch(/--db-canvas-bg:\s*oklch\(0\.9/);
+    expect(controlRule(controls, '.db-button--ghost')).toContain('color: var(--db-text);');
+    expect(controlRule(controls, '.db-icon-button--ghost')).toContain('color: var(--db-text);');
+  });
+
+  it('does not keep success as a text-buffer status tone after saved state stops rendering', () => {
+    const floatingTextEditorStatus = readFileSync('apps/web/src/workbench/services/textEditorWindows.ts', 'utf8');
+    const canvasTextNodeStatus = readFileSync('apps/web/src/workbench/canvas/CanvasNodeContent.tsx', 'utf8');
+
+    expect(floatingTextEditorStatus).not.toMatch(/TextBufferStatusTone\s*=\s*[^;]*'success'/);
+    expect(functionBlock(floatingTextEditorStatus, 'textBufferStatus')).not.toContain("'success'");
+    expect(functionBlock(canvasTextNodeStatus, 'textBufferStatus')).not.toContain("'success'");
+  });
+
+  it('does not keep explanatory Settings chrome copy or decorative eyebrow hooks', () => {
+    const settings = readFileSync('apps/web/src/workbench/settings/SettingsPanel.tsx', 'utf8');
+    const integrations = readFileSync('apps/web/src/workbench/settings/integrations/IntegrationsSettingsPage.tsx', 'utf8');
+    const cli = readFileSync('apps/web/src/workbench/settings/debrute-cli/DebruteCliSettingsPage.tsx', 'utf8');
+    const styles = readFileSync('apps/web/src/styles.css', 'utf8');
+
+    for (const text of [
+      joinText('Model routing', ' and provider credentials'),
+      joinText('Generation endpoints', ' and API keys'),
+      joinText('Optional local', ' capabilities'),
+      joinText('Command install', ' and Skills sync'),
+      'Configure chat providers, discovery, and the default model route.',
+      joinText('Manage image generation model', ' endpoints and credentials.'),
+      joinText('Manage video generation model', ' endpoints and credentials.'),
+      joinText('Debrute detects optional local capabilities from PATH', ' and shows backend command previews without executing them.')
+    ]) {
+      expect(`${settings}\n${integrations}\n${cli}`).not.toContain(text);
+    }
+
+    expect(styles).not.toContain(joinText('.settings-section-header', ' span'));
+    expect(styles).not.toContain(joinText('.settings-section-header', ' p'));
+  });
+
   it('does not keep non-canvas chrome raw colors in the feature stylesheet', () => {
     const styles = readFileSync('apps/web/src/styles.css', 'utf8');
 
@@ -128,6 +200,23 @@ describe('Workbench UI source contract', () => {
         .map(({ line, text }) => `${line}:${rule.selector}:${text.trim()}`));
 
     expect(violations).toEqual([]);
+  });
+
+  it('keeps Canvas node chrome tokenized without raw selection or surface literals', () => {
+    const styles = readFileSync('apps/web/src/styles.css', 'utf8');
+
+    for (const rawCanvasChrome of [
+      joinText('#5e', '8eff'),
+      joinText('#2c', '3036'),
+      joinText('rgb(28 ', '31 36 / 38%)'),
+      joinText('rgb(17 19 23', ' / 96%)'),
+      joinText('rgb(24 ', '27 32 / 96%)'),
+      joinText('rgb(24 ', '18 20 / 92%)'),
+      joinText('rgb(24 ', '17 17 / 88%)'),
+      joinText('rgb(0 0 0', ' / 40%)')
+    ]) {
+      expect(styles, rawCanvasChrome).not.toContain(rawCanvasChrome);
+    }
   });
 
   it('keeps Canvas chrome shadows tokenized and scoped to Workbench stat classes', () => {
@@ -162,6 +251,24 @@ describe('Workbench UI source contract', () => {
     expect(workbenchApp).not.toContain('className="empty-action"');
     expect(styles).not.toMatch(/\.notification\s*\{/);
     expect(notificationStack).not.toContain('className="notification"');
+  });
+
+  it('keeps feature CSS from defining local Workbench control systems', () => {
+    const styles = readFileSync('apps/web/src/styles.css', 'utf8');
+    const localControlSelectors = [
+      joinText('.terminal-panel__actions', ' .db-icon-button'),
+      joinText('.canvas-toolbar', ' .db-button'),
+      joinText('.canvas-text-titlebar', ' .db-icon-button'),
+      joinText('.floating-text-editor-header', ' .db-icon-button'),
+      joinText('.settings-section', ' .db-card strong'),
+      joinText('.settings-section', ' .db-card small'),
+      joinText('.settings-model-edit-grid', ' .db-input'),
+      joinText('.settings-key-input', ' .db-input')
+    ];
+
+    for (const selector of localControlSelectors) {
+      expect(styles).not.toContain(selector);
+    }
   });
 
   it('does not keep unused stylesheet fragments from removed Workbench UI paths', () => {
@@ -207,4 +314,17 @@ function cssRuleBlocks(styles: string): Array<{
     lines.push({ line: index + 1, text });
   });
   return rules;
+}
+
+function controlRule(styles: string, selector: string): string {
+  return cssRuleBlocks(styles).find((rule) => rule.selector === selector)?.lines.map(({ text }) => text.trim()).join('\n') ?? '';
+}
+
+function functionBlock(source: string, name: string): string {
+  const start = source.indexOf(`function ${name}`);
+  if (start < 0) {
+    return '';
+  }
+  const nextFunction = source.indexOf('\nfunction ', start + 1);
+  return source.slice(start, nextFunction < 0 ? undefined : nextFunction);
 }

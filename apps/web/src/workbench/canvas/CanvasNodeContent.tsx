@@ -128,7 +128,7 @@ export function CanvasNodeContent({
           <div className={problem ? 'canvas-node-placeholder problem' : 'canvas-node-placeholder'}>
             {problem ? <AlertTriangle size={22} /> : node.mediaKind === 'video' ? <Video size={22} /> : node.mediaKind === 'audio' ? <Music2 size={22} /> : <ImageIcon size={22} />}
             <strong>{problem?.title ?? (node.mediaKind === 'video' ? 'Video' : node.mediaKind === 'audio' ? 'Audio' : 'Image')}</strong>
-            <span>{problem?.message ?? node.projectRelativePath}</span>
+            <span>{problem?.message ?? nodeDisplayName(node.projectRelativePath)}</span>
             {mediaProblem ? (
               <Button
                 className="canvas-node-retry"
@@ -145,7 +145,7 @@ export function CanvasNodeContent({
       )}
       {node.mediaKind === 'video' || node.mediaKind === 'audio' ? (
         <div className="canvas-node-caption">
-          <span>{node.projectRelativePath}</span>
+          <span>{nodeDisplayName(node.projectRelativePath)}</span>
         </div>
       ) : null}
     </>
@@ -355,12 +355,12 @@ function CanvasGenericNodeContent({
   node: ProjectedCanvasNode;
   problem: { title: string; message: string } | undefined;
 }): React.ReactElement {
-  const label = node.projectRelativePath.split('/').pop() ?? node.projectRelativePath;
+  const label = nodeDisplayName(node.projectRelativePath);
   return (
     <div className={problem ? 'canvas-node-generic problem' : 'canvas-node-generic'}>
       {problem ? <AlertTriangle size={20} /> : node.nodeKind === 'directory' ? <Folder size={20} /> : <File size={20} />}
       <strong>{problem?.title ?? label}</strong>
-      <span>{problem?.message ?? node.projectRelativePath}</span>
+      <span>{problem?.message ?? label}</span>
     </div>
   );
 }
@@ -400,7 +400,7 @@ function CanvasImagePlaceholder({
     <div className="canvas-node-placeholder">
       <ImageIcon size={22} />
       <strong>Image</strong>
-      <span>{node.projectRelativePath}</span>
+      <span>{nodeDisplayName(node.projectRelativePath)}</span>
       {onRetry ? (
         <Button
           className="canvas-node-retry"
@@ -453,8 +453,8 @@ function CanvasTextNodeContent({
         onPointerUp={onTitlePointerUp}
       >
         <FileText size={13} />
-        <strong>{node.projectRelativePath.split('/').pop() ?? node.projectRelativePath}</strong>
-        <StatusPill tone={status.tone}>{status.label}</StatusPill>
+        <strong>{nodeDisplayName(node.projectRelativePath)}</strong>
+        {status ? <StatusPill tone={status.tone}>{status.label}</StatusPill> : null}
         <IconButton
           label={`Save ${node.projectRelativePath}`}
           title="Save"
@@ -504,7 +504,7 @@ function CanvasTextNodeContent({
   );
 }
 
-function textBufferStatus(buffer: TextFileBuffer | undefined, problem: { title: string; message: string } | undefined): { label: string; tone: 'neutral' | 'success' | 'warning' | 'danger' | 'info' | 'loading' } {
+function textBufferStatus(buffer: TextFileBuffer | undefined, problem: { title: string; message: string } | undefined): { label: string; tone: 'warning' | 'danger' | 'info' | 'loading' } | undefined {
   if (problem || buffer?.error) {
     return { label: 'Error', tone: 'danger' };
   }
@@ -520,7 +520,11 @@ function textBufferStatus(buffer: TextFileBuffer | undefined, problem: { title: 
   if (buffer.dirty) {
     return { label: 'Unsaved', tone: 'warning' };
   }
-  return { label: 'Saved', tone: 'success' };
+  return undefined;
+}
+
+function nodeDisplayName(path: string): string {
+  return path.split('/').pop() ?? path;
 }
 
 function nodeAvailabilityTitle(state: ProjectedCanvasNode['availability']['state']): string {

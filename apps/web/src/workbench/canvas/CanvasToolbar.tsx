@@ -21,9 +21,10 @@ export function CanvasToolbar({
   }
   const contentBounds = canvasContentBounds(projection.nodes);
   const canFitCanvas = Boolean(runtime && runtimeSnapshot?.surfaceSize && contentBounds);
+  const nodeCountLabel = `${projection.nodes.length} ${projection.nodes.length === 1 ? 'node' : 'nodes'}`;
 
   return (
-    <Toolbar ariaLabel="Canvas tools" className="canvas-toolbar" data-testid="canvas-toolbar">
+    <Toolbar ariaLabel="Canvas tools" className="db-floating-bar canvas-toolbar" data-testid="canvas-toolbar">
       <Button
         data-testid="fit-active-canvas"
         title="Fit canvas"
@@ -44,8 +45,10 @@ export function CanvasToolbar({
       >
         Fit
       </Button>
-      <span className="canvas-toolbar__stat">{projection.nodes.length} nodes</span>
-      <span className="canvas-toolbar__stat">{projection.diagnostics.length} diagnostics</span>
+      <span className="canvas-toolbar__stat">{nodeCountLabel}</span>
+      {projection.diagnostics.length > 0 ? (
+        <span className="canvas-toolbar__stat">{projection.diagnostics.length} diagnostics</span>
+      ) : null}
     </Toolbar>
   );
 }
