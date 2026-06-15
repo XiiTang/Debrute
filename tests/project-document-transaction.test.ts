@@ -124,6 +124,52 @@ describe('ProjectDocumentTransaction', () => {
     }
   });
 
+  it('releases locks when rollback cleanup fails', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'debrute-doc-tx-rollback-lock-'));
+    try {
+      const first = join(root, '.debrute/canvases/canvas-1.json');
+      const second = join(root, '.debrute/canvases/canvas-2.json');
+      await mkdir(dirname(first), { recursive: true });
+      await writeFile(first, '{"id":"canvas-1","before":true}\n', 'utf8');
+      await writeFile(second, '{"id":"canvas-2","before":true}\n', 'utf8');
+
+      let error: unknown;
+      try {
+        await commitProjectDocumentTransaction({
+          projectRoot: root,
+          owner: 'canvas',
+          reads: [],
+          writes: [
+            {
+              absolutePath: first,
+              content: '{"id":"canvas-1","after":true}\n',
+              suppressInternalEvent: (_path, content) => {
+                if (content === '{"id":"canvas-1","before":true}\n') {
+                  throw new Error('rollback callback failed');
+                }
+              }
+            },
+            {
+              absolutePath: second,
+              content: '{"id":"canvas-2","after":true}\n',
+              suppressInternalEvent: () => {
+                throw new Error('commit callback failed');
+              }
+            }
+          ]
+        });
+      } catch (caught) {
+        error = caught;
+      }
+
+      expect(error).toBeDefined();
+      await expect(readFile(`${first}.lock`, 'utf8')).rejects.toBeDefined();
+      await expect(readFile(`${second}.lock`, 'utf8')).rejects.toBeDefined();
+    } finally {
+      await rm(root, { recursive: true, force: true });
+    }
+  });
+
   it('rejects writes outside the registered project document descriptors', async () => {
     const root = await mkdtemp(join(tmpdir(), 'debrute-doc-tx-descriptor-'));
     try {

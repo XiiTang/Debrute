@@ -18,6 +18,7 @@ import {
   projectDocumentFileHash,
   projectDocumentTextHash
 } from '../project-documents/ProjectDocumentTransaction.js';
+import { projectDocumentDescriptorForPath } from '../project-documents/documentDescriptors.js';
 
 export interface GeneratedAssetMetadataIndex {
   schemaVersion: 1;
@@ -482,10 +483,7 @@ function unavailableResult(error: unknown, projectRelativePath: string): Extract
 }
 
 function isGeneratedAssetMetadataRecordProjectPath(metadataPath: string): boolean {
-  return metadataPath.startsWith('.debrute/assets/generated/')
-    && metadataPath.endsWith('.json')
-    && !metadataPath.includes('..')
-    && !metadataPath.includes('\\');
+  return projectDocumentDescriptorForPath(metadataPath)?.type === 'generated-asset-record';
 }
 
 function isFileFingerprintCacheEntry(value: unknown): value is FileFingerprintCacheEntry {

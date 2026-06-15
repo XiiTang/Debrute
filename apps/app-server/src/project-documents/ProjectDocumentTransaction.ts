@@ -58,67 +58,103 @@ export async function commitProjectDocumentTransaction(input: ProjectDocumentTra
   const backups = new Map<string, Buffer | null>();
   let locks: ProjectDocumentLock[] = [];
   let transactionError: unknown;
-  try {
-    validateProjectDocumentTargets(input.projectRoot, input.owner, writes, deletes);
-    assertUniqueTargets(writes, deletes);
-    locks = await acquireProjectDocumentLocks(input.projectRoot, input.reads, writes, deletes);
-    for (const absolutePath of affectedPaths(writes, deletes)) {
-      backups.set(absolutePath, await readExistingFileForRollback(absolutePath));
-    }
-
-    for (const read of input.reads) {
-      const currentHash = await projectDocumentFileHash(read.absolutePath);
-      if (currentHash !== read.expectedHash) {
-        throw documentServiceError('document_push_conflict', 'Project document changed on disk before push commit.', {
-          file_path: read.absolutePath
-        });
-      }
-    }
-
-    for (const write of writes) {
-      await mkdir(dirname(write.absolutePath), { recursive: true });
-      const tempPath = `${write.absolutePath}.${randomUUID()}.tmp`;
-      await writeFile(tempPath, write.content, 'utf8');
-      stagedWrites.push({ tempPath, finalPath: write.absolutePath });
-    }
-
-    for (const [index, write] of writes.entries()) {
-      write.suppressInternalEvent?.(write.absolutePath, write.content);
-      await rename(stagedWrites[index]!.tempPath, write.absolutePath);
-    }
-
-    for (const deleteItem of deletes) {
-      deleteItem.suppressInternalEvent?.(deleteItem.absolutePath);
-      await rm(deleteItem.absolutePath, { force: true });
-    }
-  } catch (error) {
-    await restoreProjectDocumentBackups(backups, writes, deletes);
-    for (const write of writes) {
-      write.clearInternalEvent?.(write.absolutePath);
-    }
-    for (const deleteItem of deletes) {
-      deleteItem.clearInternalEvent?.(deleteItem.absolutePath);
-    }
-    await Promise.all(stagedWrites.map((item) => rm(item.tempPath, { force: true })));
-    if (isProjectDocumentServiceError(error)) {
-      transactionError = error;
-    } else {
-      transactionError = documentServiceError('document_push_failed', errorMessage(error));
-    }
-  }
-
+  let cleanupError: unknown;
   let releaseError: unknown;
   try {
-    await releaseProjectDocumentLocks(locks);
-  } catch (error) {
-    releaseError = error;
+    try {
+      validateProjectDocumentTargets(input.projectRoot, input.owner, writes, deletes);
+      assertUniqueTargets(writes, deletes);
+      locks = await acquireProjectDocumentLocks(input.projectRoot, input.reads, writes, deletes);
+      for (const absolutePath of affectedPaths(writes, deletes)) {
+        backups.set(absolutePath, await readExistingFileForRollback(absolutePath));
+      }
+
+      for (const read of input.reads) {
+        const currentHash = await projectDocumentFileHash(read.absolutePath);
+        if (currentHash !== read.expectedHash) {
+          throw documentServiceError('document_push_conflict', 'Project document changed on disk before push commit.', {
+            file_path: read.absolutePath
+          });
+        }
+      }
+
+      for (const write of writes) {
+        await mkdir(dirname(write.absolutePath), { recursive: true });
+        const tempPath = `${write.absolutePath}.${randomUUID()}.tmp`;
+        await writeFile(tempPath, write.content, 'utf8');
+        stagedWrites.push({ tempPath, finalPath: write.absolutePath });
+      }
+
+      for (const [index, write] of writes.entries()) {
+        write.suppressInternalEvent?.(write.absolutePath, write.content);
+        await rename(stagedWrites[index]!.tempPath, write.absolutePath);
+      }
+
+      for (const deleteItem of deletes) {
+        deleteItem.suppressInternalEvent?.(deleteItem.absolutePath);
+        await rm(deleteItem.absolutePath, { force: true });
+      }
+    } catch (error) {
+      if (isProjectDocumentServiceError(error)) {
+        transactionError = error;
+      } else {
+        transactionError = documentServiceError('document_push_failed', errorMessage(error));
+      }
+      cleanupError = await abortProjectDocumentTransaction(backups, writes, deletes, stagedWrites);
+    }
+  } finally {
+    try {
+      await releaseProjectDocumentLocks(locks);
+    } catch (error) {
+      releaseError = error;
+    }
   }
   if (transactionError) {
+    if (cleanupError) {
+      throw documentServiceError(
+        'document_push_failed',
+        `${errorMessage(transactionError)} Rollback cleanup failed: ${errorMessage(cleanupError)}`
+      );
+    }
     throw transactionError;
   }
   if (releaseError) {
     throw documentServiceError('document_push_failed', errorMessage(releaseError));
   }
+}
+
+async function abortProjectDocumentTransaction(
+  backups: Map<string, Buffer | null>,
+  writes: ProjectDocumentWrite[],
+  deletes: ProjectDocumentDelete[],
+  stagedWrites: Array<{ tempPath: string }>
+): Promise<unknown> {
+  let cleanupError: unknown;
+  try {
+    await restoreProjectDocumentBackups(backups, writes, deletes);
+  } catch (error) {
+    cleanupError ??= error;
+  }
+  for (const write of writes) {
+    try {
+      write.clearInternalEvent?.(write.absolutePath);
+    } catch (error) {
+      cleanupError ??= error;
+    }
+  }
+  for (const deleteItem of deletes) {
+    try {
+      deleteItem.clearInternalEvent?.(deleteItem.absolutePath);
+    } catch (error) {
+      cleanupError ??= error;
+    }
+  }
+  try {
+    await Promise.all(stagedWrites.map((item) => rm(item.tempPath, { force: true })));
+  } catch (error) {
+    cleanupError ??= error;
+  }
+  return cleanupError;
 }
 
 function projectDocumentBufferHash(content: Buffer): string {

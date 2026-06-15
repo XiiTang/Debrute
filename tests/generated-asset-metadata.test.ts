@@ -480,6 +480,46 @@ describe('generated asset metadata service', () => {
     }
   });
 
+  it('returns metadata_unreadable when an index metadataPath is outside the generated asset record descriptor', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'debrute-generated-metadata-nested-record-path-'));
+    try {
+      await mkdir(join(root, 'generated'), { recursive: true });
+      await mkdir(join(root, '.debrute/assets/generated/nested'), { recursive: true });
+      await writeFile(join(root, 'generated/cover.png'), Buffer.from('image-bytes'));
+      const fingerprint = { algorithm: 'sha256' as const, hash: sha256('image-bytes') };
+      await writeFile(join(root, '.debrute/assets/generated/nested/record-1.json'), JSON.stringify({
+        schemaVersion: 1,
+        recordId: 'record-1',
+        projectRelativePath: 'generated/cover.png',
+        createdAt: '2026-05-24T00:00:00.000Z',
+        fingerprint,
+        modelRun: { request: { prompt: 'nested' }, output: { ok: true } }
+      }, null, 2), 'utf8');
+      await writeFile(join(root, '.debrute/assets/generated-assets-index.json'), JSON.stringify({
+        schemaVersion: 1,
+        records: [
+          {
+            recordId: 'record-1',
+            createdAt: '2026-05-24T00:00:00.000Z',
+            fingerprint,
+            metadataPath: '.debrute/assets/generated/nested/record-1.json'
+          }
+        ]
+      }, null, 2), 'utf8');
+      const service = createGeneratedAssetMetadataService();
+
+      const lookup = await service.lookupGeneratedAssetMetadata(root, { projectRelativePath: 'generated/cover.png' });
+
+      expect(lookup.status).toBe('unavailable');
+      if (lookup.status === 'unavailable') {
+        expect(lookup.reason).toBe('metadata_unreadable');
+        expect(lookup.message).toContain('Invalid generated asset metadata index entry');
+      }
+    } finally {
+      await rm(root, { recursive: true, force: true });
+    }
+  });
+
   it('skips a matching index entry when the record fingerprint does not match the entry', async () => {
     const root = await mkdtemp(join(tmpdir(), 'debrute-generated-metadata-record-fingerprint-mismatch-'));
     try {
