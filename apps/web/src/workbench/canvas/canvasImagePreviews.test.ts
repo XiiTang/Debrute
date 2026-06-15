@@ -7,10 +7,12 @@ import {
 } from './canvasImagePreviews';
 
 describe('canvas image preview URLs', () => {
-  it('rounds screen scale up to tldraw-like powers of two', () => {
+  it('rounds screen scale up to the local sqrt(2) preview scale ladder', () => {
     expect(canvasImagePreviewSteppedScale(0.18)).toBe(0.25);
+    expect(canvasImagePreviewSteppedScale(0.25)).toBe(0.25);
+    expect(canvasImagePreviewSteppedScale(0.26)).toBeCloseTo(Math.SQRT2 / 4);
     expect(canvasImagePreviewSteppedScale(0.5)).toBe(0.5);
-    expect(canvasImagePreviewSteppedScale(0.51)).toBe(1);
+    expect(canvasImagePreviewSteppedScale(0.51)).toBeCloseTo(Math.SQRT2 / 2);
   });
 
   it('calculates dynamic preview widths from source width, display width, zoom, and DPR', () => {
@@ -34,6 +36,13 @@ describe('canvas image preview URLs', () => {
       imageResourceZoom: 1,
       devicePixelRatio: 2
     })).toBe(2400);
+
+    expect(canvasImagePreviewWidth({
+      nodeDisplayWidth: 2400,
+      sourceWidth: 2400,
+      imageResourceZoom: 0.51,
+      devicePixelRatio: 1
+    })).toBe(1698);
   });
 
   it('clamps preview scale to the tldraw minimum and source width maximum', () => {

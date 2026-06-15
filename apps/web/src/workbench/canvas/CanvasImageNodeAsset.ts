@@ -149,6 +149,31 @@ export function deriveCanvasImageNodeRenderState(input: {
   };
 }
 
+export function shouldPublishCanvasImageNodeSourceImmediately(input: {
+  source: CanvasImageNodeResolvedSource;
+  didResolveUrl: boolean;
+  revisionChanged: boolean;
+  retryRequested: boolean;
+  hasLoadedImage: boolean;
+  culled: boolean;
+  cameraState: CanvasCameraState;
+  loadedLoadKey: string | undefined;
+  imageResourceZoomChanged: boolean;
+}): boolean {
+  const sourceLoadKey = input.source.kind === 'source'
+    ? input.source.image.loadKey
+    : undefined;
+  return input.source.kind === 'not-eligible'
+    || !input.didResolveUrl
+    || input.revisionChanged
+    || input.retryRequested
+    || !input.hasLoadedImage
+    || input.culled
+    || input.cameraState === 'moving'
+    || input.imageResourceZoomChanged
+    || input.loadedLoadKey === sourceLoadKey;
+}
+
 function reduceResolvedSource(
   state: CanvasImageNodeAssetState,
   event: Extract<CanvasImageNodeAssetEvent, { type: 'source-resolved' }>

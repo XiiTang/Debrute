@@ -6,6 +6,7 @@ import {
   deriveCanvasImageNodeRenderState,
   initialCanvasImageNodeAssetState,
   resolveCanvasImageNodeSource,
+  shouldPublishCanvasImageNodeSourceImmediately,
   type CanvasImageNodeRenderState,
   type CanvasImageNodeResolvedSource
 } from './CanvasImageNodeAsset';
@@ -49,6 +50,7 @@ export function useCanvasImageNodeAsset(input: {
   const didResolveUrlRef = useRef(false);
   const retryRequestedRef = useRef(false);
   const previousRevisionKeyRef = useRef<string | undefined>(undefined);
+  const previousImageResourceZoomRef = useRef(context.imageResourceZoom);
   const source = useMemo(() => resolveCanvasImageNodeSource({
     node: input.node,
     imageResourceZoom: context.imageResourceZoom,
@@ -64,14 +66,20 @@ export function useCanvasImageNodeAsset(input: {
   useEffect(() => {
     const revisionChanged = previousRevisionKeyRef.current !== source.sourceRevisionKey;
     previousRevisionKeyRef.current = source.sourceRevisionKey;
-    const shouldRunImmediately = source.kind === 'not-eligible'
-      || !didResolveUrlRef.current
-      || revisionChanged
-      || retryRequestedRef.current
-      || !state.loaded
-      || input.culled
-      || context.cameraState === 'moving'
-      || state.loaded.loadKey === (source.kind === 'source' ? source.image.loadKey : undefined);
+    const imageResourceZoomChanged = previousImageResourceZoomRef.current !== context.imageResourceZoom;
+    previousImageResourceZoomRef.current = context.imageResourceZoom;
+    const retryRequested = retryRequestedRef.current;
+    const shouldRunImmediately = shouldPublishCanvasImageNodeSourceImmediately({
+      source,
+      didResolveUrl: didResolveUrlRef.current,
+      revisionChanged,
+      retryRequested,
+      hasLoadedImage: Boolean(state.loaded),
+      culled: input.culled,
+      cameraState: context.cameraState,
+      loadedLoadKey: state.loaded?.loadKey,
+      imageResourceZoomChanged
+    });
     retryRequestedRef.current = false;
 
     const publishSource = () => {

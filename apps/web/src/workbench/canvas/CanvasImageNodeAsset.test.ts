@@ -4,6 +4,7 @@ import {
   canvasImageNodeAssetReducer,
   deriveCanvasImageNodeRenderState,
   resolveCanvasImageNodeSource,
+  shouldPublishCanvasImageNodeSourceImmediately,
   type CanvasImageNodeAssetState
 } from './CanvasImageNodeAsset';
 
@@ -19,9 +20,9 @@ describe('CanvasImageNodeAsset', () => {
     expect(source).toMatchObject({
       kind: 'source',
       image: {
-        src: previewUrl('flow/cover.png', 'rev-a', 300),
-        loadKey: `${previewUrl('flow/cover.png', 'rev-a', 300)}:2`,
-        previewWidth: 300
+        src: previewUrl('flow/cover.png', 'rev-a', 213),
+        loadKey: `${previewUrl('flow/cover.png', 'rev-a', 213)}:2`,
+        previewWidth: 213
       },
       sourceRevisionKey: 'flow/cover.png\u001frev-a'
     });
@@ -52,7 +53,7 @@ describe('CanvasImageNodeAsset', () => {
   });
 
   it('does not create new work for the same loaded URL', () => {
-    const state = loadedState('flow/cover.png', 'rev-a', 300);
+    const state = loadedState('flow/cover.png', 'rev-a', 213);
     const source = resolveCanvasImageNodeSource({
       node: imageNode('flow/cover.png', 200, 120, 2400, 'rev-a'),
       imageResourceZoom: 1,
@@ -74,7 +75,7 @@ describe('CanvasImageNodeAsset', () => {
   });
 
   it('keeps the loaded URL through a culled pan out and unculled pan back without scheduling another image', () => {
-    const loaded = loadedState('flow/cover.png', 'rev-a', 300);
+    const loaded = loadedState('flow/cover.png', 'rev-a', 213);
     const source = resolveCanvasImageNodeSource({
       node: imageNode('flow/cover.png', 200, 120, 2400, 'rev-a'),
       imageResourceZoom: 1,
@@ -212,6 +213,50 @@ describe('CanvasImageNodeAsset', () => {
     expect(next.next).toBeUndefined();
   });
 
+  it('publishes settled resource zoom source changes immediately', () => {
+    const loaded = loadedState('flow/cover.png', 'rev-a', 300);
+    const source = resolveCanvasImageNodeSource({
+      node: imageNode('flow/cover.png', 2400, 1200, 2400, 'rev-a'),
+      imageResourceZoom: 1,
+      devicePixelRatio: 1,
+      retryKey: 0
+    });
+
+    expect(shouldPublishCanvasImageNodeSourceImmediately({
+      source,
+      didResolveUrl: true,
+      revisionChanged: false,
+      retryRequested: false,
+      hasLoadedImage: true,
+      culled: false,
+      cameraState: 'idle',
+      loadedLoadKey: loaded.loaded?.loadKey,
+      imageResourceZoomChanged: true
+    })).toBe(true);
+  });
+
+  it('debounces direct image-node size churn when resource zoom did not change', () => {
+    const loaded = loadedState('flow/cover.png', 'rev-a', 300);
+    const source = resolveCanvasImageNodeSource({
+      node: imageNode('flow/cover.png', 2400, 1200, 2400, 'rev-a'),
+      imageResourceZoom: 1,
+      devicePixelRatio: 1,
+      retryKey: 0
+    });
+
+    expect(shouldPublishCanvasImageNodeSourceImmediately({
+      source,
+      didResolveUrl: true,
+      revisionChanged: false,
+      retryRequested: false,
+      hasLoadedImage: true,
+      culled: false,
+      cameraState: 'idle',
+      loadedLoadKey: loaded.loaded?.loadKey,
+      imageResourceZoomChanged: false
+    })).toBe(false);
+  });
+
   it('promotes matching next loads and ignores stale load events', () => {
     const nextImage = {
       src: previewUrl('flow/cover.png', 'rev-a', 1200),
@@ -275,7 +320,7 @@ describe('CanvasImageNodeAsset', () => {
     expect(next.sourceRevisionKey).toBe('flow/cover.png\u001frev-b');
     expect(next.loaded).toBeUndefined();
     expect(next.error).toBeUndefined();
-    expect(next.next?.src).toBe(previewUrl('flow/cover.png', 'rev-b', 300));
+    expect(next.next?.src).toBe(previewUrl('flow/cover.png', 'rev-b', 213));
   });
 
   it('derives placeholder, not-eligible, and image render states', () => {

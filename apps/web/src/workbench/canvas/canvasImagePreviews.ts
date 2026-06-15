@@ -2,6 +2,7 @@ import type { ProjectedCanvasNode } from '@debrute/canvas-core';
 
 export const CANVAS_IMAGE_PREVIEW_MIN_SCALE = 1 / 32;
 export const CANVAS_IMAGE_PREVIEW_MAX_SCALE = 1;
+export const CANVAS_IMAGE_PREVIEW_SCALE_STEP = Math.SQRT2;
 export const CANVAS_IMAGE_PREVIEW_RESOURCE_SETTLE_MS = 500;
 
 export interface CanvasImageSource {
@@ -39,7 +40,8 @@ export function canvasImageSource(input: {
 
 export function canvasImagePreviewSteppedScale(screenScale: number): number {
   assertPositiveFinite(screenScale, 'Canvas image preview screen scale must be a positive finite number.');
-  return 2 ** Math.ceil(Math.log2(screenScale));
+  const stepIndex = Math.ceil(Math.log2(screenScale) * 2);
+  return 2 ** (stepIndex / 2);
 }
 
 export function canvasImagePreviewWidth(input: {
