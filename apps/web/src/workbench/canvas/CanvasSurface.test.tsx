@@ -98,7 +98,7 @@ describe('CanvasSurface', () => {
     });
   });
 
-  it('does not create a pending local layout draft for resize drags', () => {
+  it('creates a pending local layout draft from a finished resize-node drag', () => {
     expect(canvasSurfaceNextPendingLayoutDraft({
       canvasId: 'canvas-1',
       dragState: {
@@ -111,7 +111,12 @@ describe('CanvasSurface', () => {
         preserveAspect: false
       },
       point: { x: 20, y: 10 }
-    })).toBeUndefined();
+    })).toEqual({
+      canvasId: 'canvas-1',
+      nodeLayouts: [
+        { projectRelativePath: 'flow/a.png', x: 10, y: 20, width: 220, height: 130 }
+      ]
+    });
   });
 
   it('clears pending local layout only after durable projection matches it', () => {

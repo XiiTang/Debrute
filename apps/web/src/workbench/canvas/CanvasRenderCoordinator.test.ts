@@ -278,6 +278,66 @@ describe('CanvasRenderCoordinator', () => {
     ]);
   });
 
+  it('routes edges from resized draft geometry', () => {
+    const coordinator = createCanvasRenderCoordinator({ projection: projection([
+      imageNode('flow/source.png', 0, 0, 1),
+      imageNode('flow/target.png', 400, 40, 2)
+    ], [{
+      id: 'source-to-target',
+      sourceProjectRelativePath: 'flow/source.png',
+      targetProjectRelativePath: 'flow/target.png'
+    }]) });
+
+    const snapshot = coordinator.update({
+      camera: { x: 0, y: 0, z: 1 },
+      cameraState: 'idle',
+      surfaceSize: { width: 800, height: 600 },
+      selection: undefined,
+      activeNodePaths: ['flow/source.png'],
+      layoutOverrides: [
+        { projectRelativePath: 'flow/source.png', x: 0, y: 0, width: 180, height: 140 }
+      ]
+    });
+
+    expect(snapshot.nodesByPath.get('flow/source.png')).toMatchObject({
+      x: 0,
+      y: 0,
+      width: 180,
+      height: 140
+    });
+    expect(snapshot.edges[0]?.points).toEqual([
+      { x: 180, y: 70 },
+      { x: 276, y: 70 },
+      { x: 276, y: 90 },
+      { x: 400, y: 90 }
+    ]);
+  });
+
+  it('keeps a resized draft node mounted when its durable rect is outside the virtual rect', () => {
+    const coordinator = createCanvasRenderCoordinator({ projection: projection([
+      imageNode('flow/a.png', 5000, 0, 1)
+    ]) });
+
+    const snapshot = coordinator.update({
+      camera: { x: 0, y: 0, z: 1 },
+      cameraState: 'idle',
+      surfaceSize: { width: 800, height: 600 },
+      selection: undefined,
+      activeNodePaths: ['flow/a.png'],
+      layoutOverrides: [
+        { projectRelativePath: 'flow/a.png', x: 40, y: 20, width: 180, height: 140 }
+      ]
+    });
+
+    expect(snapshot.nodesByPath.get('flow/a.png')).toMatchObject({
+      x: 40,
+      y: 20,
+      width: 180,
+      height: 140
+    });
+    expect(snapshot.culledNodePaths.has('flow/a.png')).toBe(false);
+  });
+
   it('does not reuse moving snapshots when layout overrides change', () => {
     const coordinator = createCanvasRenderCoordinator({ projection: projection([
       imageNode('flow/a.png', 0, 0, 1)

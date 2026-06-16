@@ -3,7 +3,6 @@ import type { CanvasDocument, CanvasFeedbackDocument, CanvasProjection, Projecte
 import type { TextFileBuffer, WorkbenchActions } from '../../types';
 import type { WorkbenchContextMenuPosition, WorkbenchContextMenuTarget } from '../shell/contextMenu';
 import {
-  buildResizeGeometry,
   isAdditiveCanvasSelectionModifier,
   type CanvasPoint,
   type ResizeHandle
@@ -48,7 +47,7 @@ import {
 } from './runtime/useCanvasRuntimeSnapshot';
 import {
   canvasLayoutOverridesForCanvas,
-  canvasLocalLayoutDraftFromMoveState,
+  canvasLocalLayoutDraftFromDragState,
   canvasLocalLayoutDraftMatchesProjection,
   type CanvasLocalLayoutDraft
 } from './canvasLocalLayoutDraft';
@@ -449,7 +448,6 @@ function CanvasSurfaceRuntime({
         renderSnapshot: renderSnapshotRef.current ?? renderSnapshot
       })
     });
-    stageRuntime.applyResizePreview(canvasResizePreviewDragState(initialSnapshot.dragState));
     if (initialSnapshot.dragState) {
       recordCanvasPerfFrame({
         enabled: perfMonitorEnabled,
@@ -479,7 +477,6 @@ function CanvasSurfaceRuntime({
           renderSnapshot: renderSnapshotRef.current ?? renderSnapshot
         })
       });
-      stageRuntime.applyResizePreview(canvasResizePreviewDragState(nextDragState));
       if (nextDragState) {
         recordCanvasPerfFrame({
           enabled: perfMonitorEnabled,
@@ -492,10 +489,6 @@ function CanvasSurfaceRuntime({
       }
       const nextActivePaths = activeNodeProjectRelativePaths(nextDragState);
       const nextKey = nextActivePaths.join('\u001f');
-      const shouldCommitMoveDraft = nextDragState?.kind === 'move-node' || !nextDragState;
-      if (nextKey === activeNodePathKeyRef.current && !shouldCommitMoveDraft) {
-        return;
-      }
       if (nextKey !== activeNodePathKeyRef.current) {
         activeNodePathKeyRef.current = nextKey;
         activeNodePathsRef.current = nextActivePaths;
@@ -519,7 +512,6 @@ function CanvasSurfaceRuntime({
     perfMonitor,
     perfMonitorEnabled,
     renderSnapshot,
-    stageRuntime,
     syncVisibility,
     runtime
   ]);
@@ -630,46 +622,25 @@ function CanvasSurfaceRuntime({
       }
       return;
     }
-    if (activeDragState.kind === 'move-node') {
-      const nodeLayouts = pendingDraft?.nodeLayouts ?? [];
-      if (nodeLayouts.length > 0) {
-        try {
-          await actions.updateCanvasNodeLayouts(canvas.id, { nodeLayouts });
-        } catch (error) {
-          if (pendingLayoutDraftRef.current === pendingDraft) {
-            pendingLayoutDraftRef.current = undefined;
-          }
-          const snapshot = runtime.getSnapshot();
-          commitRenderSnapshot({
-            camera: snapshot.camera,
-            cameraState: snapshot.cameraState,
-            surfaceSize: surfaceSizeRef.current,
-            selection: selectionRef.current,
-            activeNodePaths: activeNodePathsRef.current
-          });
-          throw error;
-        }
+    const nodeLayouts = pendingDraft?.nodeLayouts ?? [];
+    if (nodeLayouts.length === 0) {
+      return;
+    }
+    try {
+      await actions.updateCanvasNodeLayouts(canvas.id, { nodeLayouts });
+    } catch (error) {
+      if (pendingLayoutDraftRef.current === pendingDraft) {
+        pendingLayoutDraftRef.current = undefined;
       }
-    } else {
-      const delta = {
-        dx: point.x - activeDragState.start.x,
-        dy: point.y - activeDragState.start.y
-      };
-      const next = buildResizeGeometry(
-        activeDragState.handle,
-        activeDragState.origin,
-        { x: delta.dx, y: delta.dy },
-        activeDragState.preserveAspect
-      );
-      await actions.updateCanvasNodeLayouts(canvas.id, {
-        nodeLayouts: [{
-          projectRelativePath: activeDragState.node.projectRelativePath,
-          x: next.x,
-          y: next.y,
-          width: next.width,
-          height: next.height
-        }]
+      const snapshot = runtime.getSnapshot();
+      commitRenderSnapshot({
+        camera: snapshot.camera,
+        cameraState: snapshot.cameraState,
+        surfaceSize: surfaceSizeRef.current,
+        selection: selectionRef.current,
+        activeNodePaths: activeNodePathsRef.current
       });
+      throw error;
     }
   }, [actions, canvas.id, commitRenderSnapshot, pointerCanvasPoint, runtime]);
 
@@ -934,10 +905,10 @@ export function canvasSurfaceNextPendingLayoutDraft(input: {
   dragState: CanvasRuntimeDragState | undefined;
   point: CanvasPoint | undefined;
 }): CanvasLocalLayoutDraft | undefined {
-  if (!input.point || input.dragState?.kind !== 'move-node') {
+  if (!input.point || !input.dragState) {
     return undefined;
   }
-  const draft = canvasLocalLayoutDraftFromMoveState({
+  const draft = canvasLocalLayoutDraftFromDragState({
     canvasId: input.canvasId,
     dragState: input.dragState,
     point: input.point
@@ -960,12 +931,6 @@ export function canvasSurfaceShouldClearPendingLayoutDraft(input: {
   }
   const nodePaths = new Set(input.projection.nodes.map((node) => node.projectRelativePath));
   return input.pending.nodeLayouts.some((layout) => !nodePaths.has(layout.projectRelativePath));
-}
-
-function canvasResizePreviewDragState(
-  state: CanvasRuntimeDragState | undefined
-): Extract<CanvasRuntimeDragState, { kind: 'resize-node' }> | undefined {
-  return state?.kind === 'resize-node' ? state : undefined;
 }
 
 function activeNodeProjectRelativePaths(state: CanvasRuntimeDragState | undefined): string[] {
@@ -1000,8 +965,7 @@ interface CanvasPerfDebugSnapshotContext {
 const STAGE_WRITE_COUNTERS = [
   'stage-camera-write',
   'stage-node-layout-write',
-  'stage-node-visibility-write',
-  'stage-resize-preview-write'
+  'stage-node-visibility-write'
 ] as const satisfies readonly CanvasPerfCounterName[];
 
 const IMAGE_NODE_WORK_COUNTERS = [

@@ -34,6 +34,25 @@ describe('CanvasStageRuntime', () => {
     expect(element.style.properties.get('display')).toBe('none');
   });
 
+  it('resizes node shells through ordinary layout writes', () => {
+    const runtime = createCanvasStageRuntime();
+    const element = fakeElement();
+
+    runtime.registerNodeShell('flow/a.png', element as unknown as HTMLElement);
+    runtime.setNodeLayout('flow/a.png', { x: 10, y: 20, width: 320, height: 180, z: 7 });
+    runtime.setNodeLayout('flow/a.png', { x: 10, y: 20, width: 340, height: 190, z: 7 });
+
+    expect(element.style.transform).toBe('translate(10px, 20px)');
+    expect(element.style.properties.get('width')).toBe('340px');
+    expect(element.style.properties.get('height')).toBe('190px');
+    expect(element.style.properties.get('z-index')).toBe('7');
+  });
+
+  it('does not expose a resize preview API', () => {
+    const previewMethodName = ['apply', 'Resize', 'Preview'].join('');
+    expect(previewMethodName in createCanvasStageRuntime()).toBe(false);
+  });
+
   it('restores a culled node display without clearing its layout during a pan back', () => {
     const runtime = createCanvasStageRuntime();
     const element = fakeElement();
@@ -49,34 +68,6 @@ describe('CanvasStageRuntime', () => {
     expect(element.style.properties.get('height')).toBe('180px');
     expect(element.style.properties.get('z-index')).toBe('7');
     expect(element.style.properties.get('display')).toBe('block');
-  });
-
-  it('applies resize previews through the resize-only preview API', () => {
-    const runtime = createCanvasStageRuntime();
-    const element = fakeElement();
-
-    runtime.registerNodeShell('flow/a.png', element as unknown as HTMLElement);
-    runtime.setNodeLayout('flow/a.png', { x: 10, y: 20, width: 320, height: 180, z: 7 });
-    runtime.applyResizePreview({
-      kind: 'resize-node',
-      pointerId: 1,
-      start: { x: 0, y: 0 },
-      current: { x: 15, y: 25 },
-      handle: 'se',
-      node: { projectRelativePath: 'flow/a.png' },
-      origin: { x: 10, y: 20, width: 320, height: 180 },
-      preserveAspect: false
-    });
-
-    expect(element.style.transform).toBe('translate(10px, 20px)');
-    expect(element.style.properties.get('width')).toBe('335px');
-    expect(element.style.properties.get('height')).toBe('205px');
-
-    runtime.applyResizePreview(undefined);
-
-    expect(element.style.transform).toBe('translate(10px, 20px)');
-    expect(element.style.properties.get('width')).toBe('320px');
-    expect(element.style.properties.get('height')).toBe('180px');
   });
 
   it('records camera write and no-op counters', () => {
@@ -104,7 +95,7 @@ describe('CanvasStageRuntime', () => {
     });
   });
 
-  it('records layout and visibility counters without resize preview writes', () => {
+  it('records layout and visibility counters', () => {
     const monitor = createCanvasPerfMonitor({ enabled: true });
     const sessionId = monitor.startSession({ type: 'drag-move-node', timestamp: 0, source: 'CanvasSurface' });
     if (!sessionId) {
@@ -125,39 +116,6 @@ describe('CanvasStageRuntime', () => {
       'stage-node-layout-noop': 1,
       'stage-node-visibility-write': 1,
       'stage-node-visibility-noop': 1
-    });
-    expect(monitor.getLastSession()?.counters).not.toHaveProperty('stage-resize-preview-write');
-  });
-
-  it('records resize preview writes for transform and size updates', () => {
-    const monitor = createCanvasPerfMonitor({ enabled: true });
-    const sessionId = monitor.startSession({ type: 'drag-resize-node', timestamp: 0, source: 'CanvasSurface' });
-    if (!sessionId) {
-      throw new Error('Expected enabled monitor session.');
-    }
-    const runtime = createCanvasStageRuntime({ perfMonitor: monitor });
-    const element = fakeElement();
-
-    runtime.registerNodeShell('flow/a.png', element as unknown as HTMLElement);
-    runtime.setNodeLayout('flow/a.png', { x: 10, y: 20, width: 320, height: 180, z: 7 });
-    runtime.applyResizePreview({
-      kind: 'resize-node',
-      pointerId: 1,
-      handle: 'se',
-      start: { x: 0, y: 0 },
-      current: { x: 20, y: 10 },
-      node: { projectRelativePath: 'flow/a.png' },
-      origin: { x: 10, y: 20, width: 320, height: 180 },
-      preserveAspect: false
-    });
-
-    monitor.endSession({ sessionId, timestamp: 20, source: 'CanvasSurface' });
-
-    expect(element.style.transform).toBe('translate(10px, 20px)');
-    expect(element.style.properties.get('width')).toBe('340px');
-    expect(element.style.properties.get('height')).toBe('190px');
-    expect(monitor.getLastSession()?.counters).toMatchObject({
-      'stage-resize-preview-write': 1
     });
   });
 });

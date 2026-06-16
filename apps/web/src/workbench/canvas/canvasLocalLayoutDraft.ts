@@ -1,4 +1,5 @@
 import type { CanvasProjection } from '@debrute/canvas-core';
+import { buildResizeGeometry } from '../services/canvasInteraction';
 import type { CanvasRuntimeDragState } from './runtime/CanvasEditorRuntime';
 import type { CanvasPoint } from './runtime/canvasGeometry';
 
@@ -34,6 +35,51 @@ export function canvasLocalLayoutDraftFromMoveState(input: {
       height: origin.height
     }))
   };
+}
+
+export function canvasLocalLayoutDraftFromResizeState(input: {
+  canvasId: string;
+  dragState: Extract<CanvasRuntimeDragState, { kind: 'resize-node' }>;
+  point: CanvasPoint;
+}): CanvasLocalLayoutDraft {
+  const delta = {
+    x: input.point.x - input.dragState.start.x,
+    y: input.point.y - input.dragState.start.y
+  };
+  const next = buildResizeGeometry(
+    input.dragState.handle,
+    input.dragState.origin,
+    delta,
+    input.dragState.preserveAspect
+  );
+  return {
+    canvasId: input.canvasId,
+    nodeLayouts: [{
+      projectRelativePath: input.dragState.node.projectRelativePath,
+      x: next.x,
+      y: next.y,
+      width: next.width,
+      height: next.height
+    }]
+  };
+}
+
+export function canvasLocalLayoutDraftFromDragState(input: {
+  canvasId: string;
+  dragState: CanvasRuntimeDragState;
+  point: CanvasPoint;
+}): CanvasLocalLayoutDraft {
+  return input.dragState.kind === 'move-node'
+    ? canvasLocalLayoutDraftFromMoveState({
+        canvasId: input.canvasId,
+        dragState: input.dragState,
+        point: input.point
+      })
+    : canvasLocalLayoutDraftFromResizeState({
+        canvasId: input.canvasId,
+        dragState: input.dragState,
+        point: input.point
+      });
 }
 
 export function canvasLayoutOverridesForCanvas(input: {

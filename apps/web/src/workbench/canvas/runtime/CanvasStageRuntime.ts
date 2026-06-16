@@ -1,10 +1,6 @@
-import { buildResizeGeometry } from '../../services/canvasInteraction';
 import { CANVAS_PERF_INTERACTION_SESSION_TYPES, type CanvasPerfCounterName, type CanvasPerfMonitor } from '../CanvasPerfMonitor';
 import { canvasCameraTransform, canvasChromeScale, type CanvasCamera } from './canvasCamera';
 import type { CanvasRect } from './canvasGeometry';
-import type { CanvasRuntimeDragState } from './CanvasEditorRuntime';
-
-type CanvasRuntimeResizeDragState = Extract<CanvasRuntimeDragState, { kind: 'resize-node' }>;
 
 export interface CanvasNodeLayout {
   x: number;
@@ -18,7 +14,6 @@ interface RegisteredCanvasNode {
   element?: HTMLElement;
   layout?: CanvasNodeLayout;
   visible?: boolean;
-  previewing?: boolean;
   lastTransform?: string;
   lastWidth?: string;
   lastHeight?: string;
@@ -32,7 +27,6 @@ export interface CanvasStageRuntime {
   registerNodeShell(path: string, element: HTMLElement): () => void;
   setNodeLayout(path: string, layout: CanvasNodeLayout): void;
   setNodeVisible(path: string, visible: boolean): void;
-  applyResizePreview(state: CanvasRuntimeResizeDragState | undefined): void;
   dispose(): void;
 }
 
@@ -47,7 +41,6 @@ export function createCanvasStageRuntime(input: CanvasStageRuntimeInput = {}): C
   let lastCameraTransform: string | undefined;
   let lastZoom: string | undefined;
   let lastChromeScale: string | undefined;
-  let activePreviewPaths = new Set<string>();
 
   const recordCounter = (name: CanvasPerfCounterName) => {
     input.perfMonitor?.recordCounter({
@@ -86,7 +79,7 @@ export function createCanvasStageRuntime(input: CanvasStageRuntimeInput = {}): C
 
   const writeNodeLayout = (node: RegisteredCanvasNode, layout: CanvasNodeLayout) => {
     node.layout = layout;
-    if (!node.element || node.previewing) {
+    if (!node.element) {
       return;
     }
     const wrote = [
@@ -96,17 +89,6 @@ export function createCanvasStageRuntime(input: CanvasStageRuntimeInput = {}): C
       writeStyleProperty(node, 'z-index', String(layout.z), 'lastZIndex')
     ].some(Boolean);
     recordCounter(wrote ? 'stage-node-layout-write' : 'stage-node-layout-noop');
-  };
-
-  const clearPreviewPath = (path: string) => {
-    const node = nodes.get(path);
-    if (!node) {
-      return;
-    }
-    node.previewing = false;
-    if (node.layout) {
-      writeNodeLayout(node, node.layout);
-    }
   };
 
   return {
@@ -162,46 +144,10 @@ export function createCanvasStageRuntime(input: CanvasStageRuntimeInput = {}): C
       node.visible = visible;
       recordCounter(writeNodeDisplay(node, visible) ? 'stage-node-visibility-write' : 'stage-node-visibility-noop');
     },
-    applyResizePreview: (state) => {
-      const previousPreviewPaths = activePreviewPaths;
-      activePreviewPaths = new Set();
-      if (!state) {
-        for (const path of previousPreviewPaths) {
-          clearPreviewPath(path);
-        }
-        return;
-      }
-      const node = nodes.get(state.node.projectRelativePath);
-      if (node) {
-        const delta = dragStateDelta(state);
-        const next = buildResizeGeometry(
-          state.handle,
-          state.origin,
-          { x: delta.dx, y: delta.dy },
-          state.preserveAspect
-        );
-        activePreviewPaths.add(state.node.projectRelativePath);
-        node.previewing = true;
-        const wrote = [
-          writeNodeTransform(node, transformForRect(next)),
-          writeStyleProperty(node, 'width', `${next.width}px`, 'lastWidth'),
-          writeStyleProperty(node, 'height', `${next.height}px`, 'lastHeight')
-        ].some(Boolean);
-        if (wrote) {
-          recordCounter('stage-resize-preview-write');
-        }
-      }
-      for (const path of previousPreviewPaths) {
-        if (!activePreviewPaths.has(path)) {
-          clearPreviewPath(path);
-        }
-      }
-    },
     dispose: () => {
       nodes.clear();
       stage = undefined;
       camera = undefined;
-      activePreviewPaths = new Set();
     }
   };
 }
@@ -250,14 +196,6 @@ function writeNodeDisplay(node: RegisteredCanvasNode, visible: boolean): boolean
 
 function transformForRect(rect: Pick<CanvasRect, 'x' | 'y'>): string {
   return `translate(${rect.x}px, ${rect.y}px)`;
-}
-
-function dragStateDelta(state: CanvasRuntimeDragState): { dx: number; dy: number } {
-  const current = state.current ?? state.start;
-  return {
-    dx: current.x - state.start.x,
-    dy: current.y - state.start.y
-  };
 }
 
 function canvasStagePerfTimestamp(): number {

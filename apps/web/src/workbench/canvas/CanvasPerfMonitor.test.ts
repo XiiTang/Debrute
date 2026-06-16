@@ -113,14 +113,14 @@ describe('CanvasPerfMonitor', () => {
       sessionId: drag,
       timestamp: 10,
       source: 'CanvasStageRuntime',
-      name: 'stage-resize-preview-write',
+      name: 'stage-node-layout-write',
       value: 2
     });
 
     const dragSummary = monitor.endSession({ sessionId: drag, timestamp: 20, source: 'CanvasSurface' });
     const cameraSummary = monitor.endSession({ sessionId: camera, timestamp: 30, source: 'CanvasSurface' });
 
-    expect(dragSummary?.counters).toEqual({ 'stage-resize-preview-write': 2 });
+    expect(dragSummary?.counters).toEqual({ 'stage-node-layout-write': 2 });
     expect(cameraSummary?.counters).toEqual({});
   });
 

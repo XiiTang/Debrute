@@ -20,7 +20,6 @@ export type CanvasPerfCounterName =
   | 'stage-node-layout-noop'
   | 'stage-node-visibility-write'
   | 'stage-node-visibility-noop'
-  | 'stage-resize-preview-write'
   | 'render-snapshot-build'
   | 'render-snapshot-reuse'
   | 'render-virtual-refresh'
