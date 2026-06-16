@@ -9,20 +9,61 @@ import {
 } from '../apps/app-server/src/canvas/CanvasNodeDimensionsService';
 
 describe('canvas node dimensions', () => {
-  it('uses a fixed Canvas size for directory and unknown-file nodes', async () => {
+  it('keeps short directory and unknown-file nodes at their minimum generic Canvas sizes', async () => {
     await expect(readCanvasNodeLayoutSize({
       projectRoot: process.cwd(),
       projectRelativePath: 'image-production',
       nodeKind: 'directory',
       mediaKind: 'unknown'
-    })).resolves.toEqual({ width: 2400, height: 960 });
+    })).resolves.toEqual({ width: 1500, height: 960 });
 
     await expect(readCanvasNodeLayoutSize({
       projectRoot: process.cwd(),
       projectRelativePath: 'image-production/archive.bin',
       nodeKind: 'file',
       mediaKind: 'unknown'
-    })).resolves.toEqual({ width: 2600, height: 1200 });
+    })).resolves.toEqual({ width: 1500, height: 1200 });
+  });
+
+  it('expands directory and unknown-file Canvas widths from long display names', async () => {
+    await expect(readCanvasNodeLayoutSize({
+      projectRoot: process.cwd(),
+      projectRelativePath: 'references/long-folder-name-for-rendering-output-archive',
+      nodeKind: 'directory',
+      mediaKind: 'unknown'
+    })).resolves.toEqual({ width: 3600, height: 960 });
+
+    await expect(readCanvasNodeLayoutSize({
+      projectRoot: process.cwd(),
+      projectRelativePath: 'references/unsupported-reference-render-settings.archive',
+      nodeKind: 'file',
+      mediaKind: 'unknown'
+    })).resolves.toEqual({ width: 3600, height: 1200 });
+  });
+
+  it('caps generic Canvas widths for very long directory and unknown-file names', async () => {
+    await expect(readCanvasNodeLayoutSize({
+      projectRoot: process.cwd(),
+      projectRelativePath: 'outputs/this-is-an-extremely-long-folder-name-that-should-hit-the-generic-node-width-cap',
+      nodeKind: 'directory',
+      mediaKind: 'unknown'
+    })).resolves.toEqual({ width: 4800, height: 960 });
+
+    await expect(readCanvasNodeLayoutSize({
+      projectRoot: process.cwd(),
+      projectRelativePath: 'outputs/this-is-an-extremely-long-unsupported-file-name-that-should-hit-the-generic-node-width-cap.bin',
+      nodeKind: 'file',
+      mediaKind: 'unknown'
+    })).resolves.toEqual({ width: 4800, height: 1200 });
+  });
+
+  it('counts full-width display name characters wider than Latin characters', async () => {
+    await expect(readCanvasNodeLayoutSize({
+      projectRoot: process.cwd(),
+      projectRelativePath: 'references/中文资料归档文件夹名称很长',
+      nodeKind: 'directory',
+      mediaKind: 'unknown'
+    })).resolves.toEqual({ width: 2080, height: 960 });
   });
 
   it('uses fixed intrinsic Canvas sizes for text and audio', async () => {

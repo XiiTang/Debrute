@@ -1062,6 +1062,41 @@ describe('app-server', () => {
     }
   });
 
+  it('materializes dynamic generic node widths during Canvas Map synchronization', async () => {
+    const projectRoot = await mkdtemp(join(tmpdir(), 'debrute-app-server-canvas-map-generic-widths-'));
+    const server = new DebruteAppServer();
+    const directoryPath = 'references/long-folder-name-for-rendering-output-archive';
+    const unknownFilePath = `${directoryPath}/unsupported-reference-render-settings.archive`;
+    try {
+      await server.openProject(projectRoot, {
+        initializeIfMissing: true,
+        createDefaultCanvas: true
+      });
+      await mkdir(join(projectRoot, directoryPath), { recursive: true });
+      await writeFile(join(projectRoot, unknownFilePath), 'settings', 'utf8');
+
+      await writeCanvasMap(projectRoot, 'canvas-1', canvasMapSource([`${directoryPath}/`]));
+      await server.pushCanvasMapForProject(projectRoot, { canvasId: 'canvas-1' });
+      const snapshot = await server.refreshProject();
+      const nodes = snapshot.canvases[0]?.nodeElements ?? [];
+
+      expect(nodes.find((node) => node.projectRelativePath === directoryPath)).toMatchObject({
+        nodeKind: 'directory',
+        width: 3600,
+        height: 960
+      });
+      expect(nodes.find((node) => node.projectRelativePath === unknownFilePath)).toMatchObject({
+        nodeKind: 'file',
+        mediaKind: 'unknown',
+        width: 3600,
+        height: 1200
+      });
+    } finally {
+      server.close();
+      await rm(projectRoot, { recursive: true, force: true });
+    }
+  });
+
   it('routes direct source Project Document text edits through document transactions', async () => {
     const projectRoot = await mkdtemp(join(tmpdir(), 'debrute-app-server-source-doc-text-write-'));
     const server = new DebruteAppServer();

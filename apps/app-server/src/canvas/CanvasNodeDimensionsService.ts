@@ -12,14 +12,22 @@ export interface ReadCanvasNodeLayoutSizeInput {
 }
 
 const FIXED_CANVAS_LAYOUT_SCALE = 10;
-const DIRECTORY_CANVAS_LAYOUT_SIZE = scaledFixedCanvasLayoutSize({ width: 240, height: 96 });
+const GENERIC_NODE_MAX_VISUAL_WIDTH = 480;
+const LATIN_CHARACTER_VISUAL_WIDTH = 8;
+const FULL_WIDTH_CHARACTER_VISUAL_WIDTH = 16;
+const DIRECTORY_CANVAS_LAYOUT_HEIGHT = 96;
+const GENERIC_NODE_MIN_VISUAL_WIDTH = 150;
 const TEXT_CANVAS_LAYOUT_SIZE = scaledFixedCanvasLayoutSize({ width: 420, height: 280 });
 const AUDIO_CANVAS_LAYOUT_SIZE = scaledFixedCanvasLayoutSize({ width: 320, height: 96 });
-const UNKNOWN_CANVAS_LAYOUT_SIZE = scaledFixedCanvasLayoutSize({ width: 260, height: 120 });
+const UNKNOWN_CANVAS_LAYOUT_HEIGHT = 120;
+const PROJECT_ROOT_DISPLAY_NAME = 'Project Root';
 
 export async function readCanvasNodeLayoutSize(input: ReadCanvasNodeLayoutSizeInput): Promise<CanvasLayoutSize> {
   if (input.nodeKind === 'directory') {
-    return DIRECTORY_CANVAS_LAYOUT_SIZE;
+    return genericCanvasLayoutSize({
+      projectRelativePath: input.projectRelativePath,
+      height: DIRECTORY_CANVAS_LAYOUT_HEIGHT
+    });
   }
   if (input.mediaKind === 'text') {
     return TEXT_CANVAS_LAYOUT_SIZE;
@@ -28,7 +36,10 @@ export async function readCanvasNodeLayoutSize(input: ReadCanvasNodeLayoutSizeIn
     return AUDIO_CANVAS_LAYOUT_SIZE;
   }
   if (input.mediaKind === 'unknown') {
-    return UNKNOWN_CANVAS_LAYOUT_SIZE;
+    return genericCanvasLayoutSize({
+      projectRelativePath: input.projectRelativePath,
+      height: UNKNOWN_CANVAS_LAYOUT_HEIGHT
+    });
   }
   const absolutePath = await resolveExistingProjectPath(input.projectRoot, input.projectRelativePath);
   if (input.mediaKind === 'image') {
@@ -125,4 +136,52 @@ function scaledFixedCanvasLayoutSize(size: CanvasLayoutSize): CanvasLayoutSize {
     width: size.width * FIXED_CANVAS_LAYOUT_SCALE,
     height: size.height * FIXED_CANVAS_LAYOUT_SCALE
   };
+}
+
+function genericCanvasLayoutSize(input: {
+  projectRelativePath: string;
+  height: number;
+}): CanvasLayoutSize {
+  return scaledFixedCanvasLayoutSize({
+    width: genericVisualWidthForDisplayName(displayNameForCanvasLayout(input.projectRelativePath)),
+    height: input.height
+  });
+}
+
+function displayNameForCanvasLayout(projectRelativePath: string): string {
+  if (projectRelativePath === '') {
+    return PROJECT_ROOT_DISPLAY_NAME;
+  }
+  return projectRelativePath.split('/').pop() ?? projectRelativePath;
+}
+
+function genericVisualWidthForDisplayName(displayName: string): number {
+  const labelWidth = Array.from(displayName).reduce(
+    (width, character) => width + visualWidthForDisplayNameCharacter(character),
+    0
+  );
+  return Math.min(
+    GENERIC_NODE_MAX_VISUAL_WIDTH,
+    Math.max(GENERIC_NODE_MIN_VISUAL_WIDTH, labelWidth)
+  );
+}
+
+function visualWidthForDisplayNameCharacter(character: string): number {
+  const codePoint = character.codePointAt(0);
+  if (codePoint !== undefined && isFullWidthCodePoint(codePoint)) {
+    return FULL_WIDTH_CHARACTER_VISUAL_WIDTH;
+  }
+  return LATIN_CHARACTER_VISUAL_WIDTH;
+}
+
+function isFullWidthCodePoint(codePoint: number): boolean {
+  return (codePoint >= 0x1100 && codePoint <= 0x115f)
+    || (codePoint >= 0x2e80 && codePoint <= 0xa4cf)
+    || (codePoint >= 0xac00 && codePoint <= 0xd7a3)
+    || (codePoint >= 0xf900 && codePoint <= 0xfaff)
+    || (codePoint >= 0xfe10 && codePoint <= 0xfe19)
+    || (codePoint >= 0xfe30 && codePoint <= 0xfe6f)
+    || (codePoint >= 0xff00 && codePoint <= 0xff60)
+    || (codePoint >= 0xffe0 && codePoint <= 0xffe6)
+    || (codePoint >= 0x1f300 && codePoint <= 0x1faff);
 }

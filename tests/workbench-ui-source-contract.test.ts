@@ -219,6 +219,15 @@ describe('Workbench UI source contract', () => {
     }
   });
 
+  it('keeps Canvas generic node labels single-line and ellipsized', () => {
+    const styles = readFileSync('apps/web/src/styles.css', 'utf8');
+    const labelRule = styles.match(/\.canvas-node-generic strong,\n\.canvas-node-generic span\s*\{[^}]*\}/)?.[0] ?? '';
+
+    expect(labelRule).toContain('overflow: hidden;');
+    expect(labelRule).toContain('text-overflow: ellipsis;');
+    expect(labelRule).toContain('white-space: nowrap;');
+  });
+
   it('keeps Canvas chrome shadows tokenized and scoped to Workbench stat classes', () => {
     const styles = readFileSync('apps/web/src/styles.css', 'utf8');
     const canvasChromeSelectors = new Set([

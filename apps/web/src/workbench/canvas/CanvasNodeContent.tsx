@@ -356,11 +356,21 @@ function CanvasGenericNodeContent({
   problem: { title: string; message: string } | undefined;
 }): React.ReactElement {
   const label = nodeDisplayName(node.projectRelativePath);
+  if (problem) {
+    return (
+      <div className="canvas-node-generic problem">
+        <AlertTriangle size={20} />
+        <strong>{problem.title}</strong>
+        <span>{problem.message}</span>
+        <span>{label}</span>
+      </div>
+    );
+  }
+
   return (
-    <div className={problem ? 'canvas-node-generic problem' : 'canvas-node-generic'}>
-      {problem ? <AlertTriangle size={20} /> : node.nodeKind === 'directory' ? <Folder size={20} /> : <File size={20} />}
-      <strong>{problem?.title ?? label}</strong>
-      <span>{problem?.message ?? label}</span>
+    <div className="canvas-node-generic">
+      {node.nodeKind === 'directory' ? <Folder size={20} /> : <File size={20} />}
+      <strong>{label}</strong>
     </div>
   );
 }

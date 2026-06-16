@@ -91,6 +91,45 @@ describe('CanvasNodeContent text chrome', () => {
     expect(html).toContain('Project Root');
   });
 
+  it('renders a generic node label once in the normal state', () => {
+    const html = renderToStaticMarkup(
+      <CanvasNodeContent
+        node={directoryNode('references/archive')}
+        selected
+        culled={false}
+        actions={actionsFixture()}
+        textBuffer={undefined}
+        onSelectNode={() => undefined}
+        onTitlePointerDown={() => undefined}
+        onTitlePointerMove={() => undefined}
+        onTitlePointerUp={() => undefined}
+      />
+    );
+
+    expect(html).toContain('<strong>archive</strong>');
+    expect(html).not.toContain('<span>archive</span>');
+  });
+
+  it('keeps the generic node label as error context when unavailable', () => {
+    const html = renderToStaticMarkup(
+      <CanvasNodeContent
+        node={unavailableDirectoryNode('references/archive', 'Unable to read references/archive.')}
+        selected
+        culled={false}
+        actions={actionsFixture()}
+        textBuffer={undefined}
+        onSelectNode={() => undefined}
+        onTitlePointerDown={() => undefined}
+        onTitlePointerMove={() => undefined}
+        onTitlePointerUp={() => undefined}
+      />
+    );
+
+    expect(html).toContain('<strong>Missing File</strong>');
+    expect(html).toContain('<span>Unable to read references/archive.</span>');
+    expect(html).toContain('<span>archive</span>');
+  });
+
   it('renders text node titlebar actions through Workbench UI primitives', () => {
     const html = renderToStaticMarkup(
       <CanvasNodeContent
@@ -255,6 +294,16 @@ function directoryNode(path: string): ProjectedCanvasNode {
       mimeType: 'inode/directory',
       fileUrl: '',
       revision: 'rev-a'
+    }
+  };
+}
+
+function unavailableDirectoryNode(path: string, message: string): ProjectedCanvasNode {
+  return {
+    ...directoryNode(path),
+    availability: {
+      state: 'missing',
+      message
     }
   };
 }
