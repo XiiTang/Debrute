@@ -8,7 +8,6 @@ import {
   updateCanvasNodeLayers,
   updateCanvasNodeLayouts,
   type CanvasDocument,
-  type CanvasNodeLayerPatch,
   type CanvasProjection,
   type Diagnostic
 } from '@debrute/canvas-core';
@@ -47,7 +46,6 @@ export class CanvasSessionService {
     current: ProjectSessionSnapshot,
     input: {
       canvasId: string;
-      nodeLayers?: CanvasNodeLayerPatch[];
       nodeProjectRelativePathsTopFirst?: string[];
     }
   ): Promise<{ canvas: CanvasDocument; snapshot: ProjectSessionSnapshot; changed: boolean }> {

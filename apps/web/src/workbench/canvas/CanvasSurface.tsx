@@ -554,9 +554,6 @@ function CanvasSurfaceRuntime({
   ), [runtime]);
 
   const beginNodeMove = useCallback((node: ProjectedCanvasNode, event: React.PointerEvent<Element>) => {
-    if (node.locked) {
-      return;
-    }
     event.currentTarget.setPointerCapture(event.pointerId);
     const item = { kind: 'node' as const, projectRelativePath: node.projectRelativePath };
     const currentSelection = selectionRef.current;
@@ -580,9 +577,6 @@ function CanvasSurfaceRuntime({
   }, [pointerCanvasPoint, projectedNodes, runtime]);
 
   const beginNodeResize = useCallback((node: ProjectedCanvasNode, handle: ResizeHandle, event: React.PointerEvent<HTMLButtonElement>) => {
-    if (node.locked) {
-      return;
-    }
     event.stopPropagation();
     event.currentTarget.setPointerCapture(event.pointerId);
     const resizeNode = node.mediaKind === undefined
@@ -750,7 +744,7 @@ function CanvasSurfaceRuntime({
 
     const node = projectedNodes.find((item) => item.projectRelativePath === hoveredNodePath);
     const surfaceRect = surfaceRef.current?.getBoundingClientRect();
-    if (!node || node.nodeKind !== 'file' || node.visible === false || !surfaceRect) {
+    if (!node || node.nodeKind !== 'file' || !surfaceRect) {
       onFeedbackBarTargetChange(undefined);
       if (shouldClearFeedbackBarPlacementForFeedbackTarget({
         hasFeedbackTargetHandler,
@@ -793,7 +787,7 @@ function CanvasSurfaceRuntime({
     return runtime.subscribeCamera((camera) => {
       const node = projectedNodes.find((item) => item.projectRelativePath === hoveredNodePath);
       const surfaceRect = surfaceRef.current?.getBoundingClientRect();
-      if (!node || node.nodeKind !== 'file' || node.visible === false || !surfaceRect) {
+      if (!node || node.nodeKind !== 'file' || !surfaceRect) {
         overlayRuntime.clearFeedbackBarPlacement();
         return;
       }

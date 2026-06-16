@@ -37,7 +37,6 @@ import type {
 } from '@debrute/app-protocol';
 import type {
   CanvasFeedbackDocument,
-  CanvasNodeLayerPatch,
   UpdateCanvasFeedbackEntryInput
 } from '@debrute/canvas-core';
 import { getDebruteShellApi, type DebruteShellApi } from './shellApi';
@@ -350,7 +349,6 @@ export function createHttpWorkbenchApiClient(options: HttpWorkbenchApiClientOpti
       nodeLayouts: input.nodeLayouts
     }),
     updateCanvasNodeLayers: (input) => requestRevisioned<WorkbenchCanvasDocumentMutationResult>('PATCH', projectPath(`/canvases/${encodeURIComponent(input.canvasId)}/node-layers`), {
-      nodeLayers: input.nodeLayers,
       nodeProjectRelativePathsTopFirst: input.nodeProjectRelativePathsTopFirst
     }),
     llmGetSettings: () => request<LlmProviderSettingsView>('GET', '/api/settings/llm'),

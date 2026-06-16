@@ -44,9 +44,7 @@ describe('Inspector property density', () => {
                 y: 24,
                 width: 320,
                 height: 180,
-                z: 0,
-                visible: true,
-                locked: false
+                z: 0
               }],
               annotations: [],
               preferences: { showDiagnostics: true },
@@ -63,8 +61,6 @@ describe('Inspector property density', () => {
                 width: 320,
                 height: 180,
                 z: 0,
-                visible: true,
-                locked: false,
                 availability: { state: 'available', revision: 'rev', size: 1, mimeType: 'image/png', fileUrl: '/file.png' }
               }],
               edges: [],

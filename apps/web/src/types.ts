@@ -21,7 +21,6 @@ import type {
 } from '@debrute/app-protocol';
 import type {
   CanvasFeedbackDocument,
-  CanvasNodeLayerPatch,
   UpdateCanvasFeedbackEntryInput
 } from '@debrute/canvas-core';
 import type { ProjectTreeSelectionState } from './workbench/project-explorer/projectTreeInteraction';
@@ -92,7 +91,6 @@ export interface WorkbenchActions {
     nodeLayouts?: Array<{ projectRelativePath: string; x: number; y: number; width?: number; height?: number }>;
   }) => Promise<void>;
   updateCanvasNodeLayers: (canvasId: string, input: {
-    nodeLayers?: CanvasNodeLayerPatch[];
     nodeProjectRelativePathsTopFirst?: string[];
   }) => Promise<void>;
   updateCanvasFeedbackEntry: (input: UpdateCanvasFeedbackEntryInput) => Promise<void>;

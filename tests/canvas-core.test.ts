@@ -61,7 +61,7 @@ describe('canvas-core', () => {
   it('marks moved and resized nodes manual and uses projectRelativePath identity', () => {
     const canvas = createCanvasWithNodes([
       { projectRelativePath: 'flow/a.md', nodeKind: 'file', mediaKind: 'text', x: 0, y: 0, width: 420, height: 280 },
-      { projectRelativePath: 'flow/b.md', nodeKind: 'file', mediaKind: 'text', x: 600, y: 0, width: 420, height: 280, locked: true }
+      { projectRelativePath: 'flow/b.md', nodeKind: 'file', mediaKind: 'text', x: 600, y: 0, width: 420, height: 280 }
     ]);
 
     const moved = updateCanvasNodeLayouts(canvas, {
@@ -79,30 +79,26 @@ describe('canvas-core', () => {
       layoutMode: 'manual'
     });
     expect(moved.nodeElements.find((node) => node.projectRelativePath === 'flow/b.md')).toMatchObject({
-      x: 600,
-      y: 0,
-      width: 420,
-      height: 280,
-      locked: true
+      x: 50,
+      y: 60,
+      width: 500,
+      height: 320,
+      layoutMode: 'manual'
     });
   });
 
-  it('assigns deterministic node layer state and projects all nodes by z order', () => {
+  it('assigns deterministic node z-order and projects all nodes by z order', () => {
     const canvas = createCanvasWithNodes([
       { projectRelativePath: 'flow/bottom.png', nodeKind: 'file', mediaKind: 'image', x: 0, y: 0, width: 100, height: 100 },
       { projectRelativePath: 'flow/top.png', nodeKind: 'file', mediaKind: 'image', x: 20, y: 20, width: 100, height: 100 }
     ]);
-    const hidden = updateCanvasNodeLayers(canvas, {
-      nodeLayers: [{ projectRelativePath: 'flow/bottom.png', visible: false }]
-    });
-    const projection = projectCanvas({ canvas: hidden, nodeAvailability: availableNode });
+    const projection = projectCanvas({ canvas, nodeAvailability: availableNode });
 
     expect(canvas.nodeElements).toMatchObject([
-      { projectRelativePath: 'flow/bottom.png', z: 0, visible: true, locked: false },
-      { projectRelativePath: 'flow/top.png', z: 1, visible: true, locked: false }
+      { projectRelativePath: 'flow/bottom.png', z: 0 },
+      { projectRelativePath: 'flow/top.png', z: 1 }
     ]);
     expect(projection.nodes.map((node) => node.projectRelativePath)).toEqual(['flow/bottom.png', 'flow/top.png']);
-    expect(projection.nodes.find((node) => node.projectRelativePath === 'flow/bottom.png')).toMatchObject({ visible: false });
     expect(canvasNodeLayerOrderTopFirst(canvas)).toEqual(['flow/top.png', 'flow/bottom.png']);
   });
 
@@ -139,8 +135,6 @@ describe('canvas-core', () => {
         width: 640,
         height: 360,
         z: 5,
-        visible: true,
-        locked: false,
         layoutMode: 'manual'
       }],
       desired,
@@ -168,6 +162,8 @@ describe('canvas-core', () => {
       height: 360,
       layoutMode: 'manual'
     });
+    expect(reconciled.find((node) => node.projectRelativePath === 'image-production/02-output/final.png')).not.toHaveProperty('visible');
+    expect(reconciled.find((node) => node.projectRelativePath === 'image-production/02-output/final.png')).not.toHaveProperty('locked');
   });
 
   it('spaces automatic file-tree columns by enlarged fixed-size nodes', () => {
@@ -349,8 +345,6 @@ describe('canvas-core', () => {
       width: 777,
       height: 666,
       z: 10,
-      visible: true,
-      locked: false,
       layoutMode: 'manual' as const
     }];
     const desired: CanvasDesiredNode[] = [
@@ -562,8 +556,6 @@ function createCanvasWithNodes(nodes: Array<Partial<CanvasNodeElement> & Pick<Ca
     ...createCanvasDocument({ id: 'main' }),
     nodeElements: nodes.map((item, index) => ({
       z: index,
-      visible: true,
-      locked: false,
       ...item
     }))
   };
@@ -579,8 +571,6 @@ function node(projectRelativePath: string, input: Partial<CanvasNodeElement> = {
     width: input.width ?? 420,
     height: input.height ?? 280,
     z: input.z ?? 0,
-    visible: input.visible ?? true,
-    locked: input.locked ?? false,
     ...(input.layoutMode ? { layoutMode: input.layoutMode } : {})
   };
 }

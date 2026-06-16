@@ -185,8 +185,6 @@ function nodeFixture(
     width,
     height: 400,
     z: 0,
-    visible: true,
-    locked: false,
     availability: {
       state: 'available',
       size: 100,

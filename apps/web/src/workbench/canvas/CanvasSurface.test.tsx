@@ -351,13 +351,12 @@ describe('CanvasSurface', () => {
     expect(html).not.toContain('data-testid="canvas-minimap-panel"');
   });
 
-  it('does not render feedback bars for directory or hidden nodes', () => {
+  it('does not render feedback bars for directory nodes', () => {
     const canvas = createCanvasDocument({ id: 'feedback-exclusions' });
     const projection: CanvasProjection = {
       canvasId: canvas.id,
       nodes: [
-        directoryFixture('image-production', 0, 0),
-        { ...nodeFixture('image-production/hidden.png', 240, 0), visible: false }
+        directoryFixture('image-production', 0, 0)
       ],
       edges: [],
       diagnostics: []
@@ -991,8 +990,6 @@ function nodeFixture(path: string, x: number, y: number): CanvasProjection['node
     width: 200,
     height: 120,
     z: 0,
-    visible: true,
-    locked: false,
     availability: {
       state: 'available',
       size: 100,
@@ -1051,8 +1048,6 @@ function directoryFixture(path: string, x: number, y: number): CanvasProjection[
     width: 200,
     height: 120,
     z: 0,
-    visible: true,
-    locked: false,
     availability: {
       state: 'available',
       size: 0,

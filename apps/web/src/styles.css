@@ -602,16 +602,6 @@ small {
   border-color: var(--db-selection);
 }
 
-.canvas-node-element.hidden {
-  background: transparent;
-  border-color: transparent;
-  outline-color: transparent;
-}
-
-.canvas-node-element.locked {
-  cursor: default;
-}
-
 .canvas-node-presentation {
   width: calc(100% / var(--canvas-node-presentation-scale, 1));
   height: calc(100% / var(--canvas-node-presentation-scale, 1));

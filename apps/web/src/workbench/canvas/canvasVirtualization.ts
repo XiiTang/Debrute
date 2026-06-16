@@ -81,12 +81,11 @@ export function createCanvasVirtualizationIndex(input: {
   nodes: ProjectedCanvasNode[];
   edges: CanvasProjection['edges'];
 }): CanvasVirtualizationIndex {
-  const visibleNodes = input.nodes.filter((node) => node.visible !== false);
-  const visibleImageNodes = visibleNodes.filter((node) => node.nodeKind === 'file' && node.mediaKind === 'image');
-  const visibleNodeByPath = new Map(visibleNodes.map((node) => [node.projectRelativePath, node]));
-  const nodeIndex = new CanvasNodeSpatialIndex(visibleNodes);
+  const imageNodes = input.nodes.filter((node) => node.nodeKind === 'file' && node.mediaKind === 'image');
+  const nodeByPath = new Map(input.nodes.map((node) => [node.projectRelativePath, node]));
+  const nodeIndex = new CanvasNodeSpatialIndex(input.nodes);
   const edgeSegments = indexedCanvasEdgeSegmentsForProjectionEdges({
-    nodes: visibleNodes,
+    nodes: input.nodes,
     edges: input.edges
   });
   const edgeIndex = new CanvasEdgeSpatialIndex(edgeSegments);
@@ -94,8 +93,8 @@ export function createCanvasVirtualizationIndex(input: {
   return {
     render: (query) => buildVirtualizedCanvasRenderStateFromIndex({
       ...query,
-      visibleNodeByPath,
-      visibleImageNodes,
+      nodeByPath,
+      imageNodes,
       nodeIndex,
       edgeIndex
     })
@@ -130,8 +129,8 @@ export function buildVirtualizedCanvasRenderState(input: {
 }
 
 function buildVirtualizedCanvasRenderStateFromIndex(input: CanvasVirtualizationQueryInput & {
-  visibleNodeByPath: Map<string, ProjectedCanvasNode>;
-  visibleImageNodes: readonly ProjectedCanvasNode[];
+  nodeByPath: Map<string, ProjectedCanvasNode>;
+  imageNodes: readonly ProjectedCanvasNode[];
   nodeIndex: CanvasNodeSpatialIndex;
   edgeIndex: CanvasEdgeSpatialIndex;
 }): VirtualizedCanvasRenderState {
@@ -141,9 +140,9 @@ function buildVirtualizedCanvasRenderStateFromIndex(input: CanvasVirtualizationQ
   const activePaths = [...input.activeNodeProjectRelativePaths];
   const nodes = uniqueNodes([
     ...input.nodeIndex.query(virtualRect),
-    ...input.visibleImageNodes,
-    ...selectedPaths.flatMap((path) => input.visibleNodeByPath.get(path) ?? []),
-    ...activePaths.flatMap((path) => input.visibleNodeByPath.get(path) ?? [])
+    ...input.imageNodes,
+    ...selectedPaths.flatMap((path) => input.nodeByPath.get(path) ?? []),
+    ...activePaths.flatMap((path) => input.nodeByPath.get(path) ?? [])
   ]);
   const edges = input.edgeIndex.query(virtualRect);
 
@@ -159,11 +158,7 @@ function indexedCanvasEdgeSegmentsForProjectionEdges(input: {
   nodes: ProjectedCanvasNode[];
   edges: CanvasProjection['edges'];
 }): IndexedCanvasEdgeSegment[] {
-  const nodeByPath = new Map(
-    input.nodes
-      .filter((node) => node.visible !== false)
-      .map((node) => [node.projectRelativePath, node])
-  );
+  const nodeByPath = new Map(input.nodes.map((node) => [node.projectRelativePath, node]));
   const resolvedEdges = input.edges.flatMap((edge, order) => {
     const resolved = resolveEdgeNodes(edge, nodeByPath, order);
     return resolved ? [resolved] : [];

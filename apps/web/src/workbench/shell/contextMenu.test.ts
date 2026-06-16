@@ -268,8 +268,6 @@ function projectionWithNodes(paths: string[]): CanvasProjection {
       width: 200,
       height: 120,
       z: 0,
-      visible: true,
-      locked: false,
       availability: {
         state: 'available',
         size: 100,

@@ -99,7 +99,7 @@ export interface CanvasEditorRuntime {
   dispose(): void;
 }
 
-export type CanvasRuntimeMoveOrigin = Pick<ProjectedCanvasNode, 'projectRelativePath' | 'x' | 'y' | 'width' | 'height' | 'locked'>;
+export type CanvasRuntimeMoveOrigin = Pick<ProjectedCanvasNode, 'projectRelativePath' | 'x' | 'y' | 'width' | 'height'>;
 export type CanvasRuntimeResizeNode = Pick<ProjectedCanvasNode, 'projectRelativePath' | 'mediaKind'>;
 export interface CanvasRuntimePointerModifiers {
   shiftKey: boolean;
@@ -465,7 +465,7 @@ export function createCanvasEditorRuntime(initial?: {
           kind: 'move-node',
           pointerId: input.pointerId,
           start: input.start,
-          origins: input.nodes.filter((node) => selectedPaths.has(node.projectRelativePath) && !node.locked)
+          origins: input.nodes.filter((node) => selectedPaths.has(node.projectRelativePath))
         }, { notifySnapshot: true });
       },
       beginNodeResize: (input) => {

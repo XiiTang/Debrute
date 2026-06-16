@@ -87,9 +87,7 @@ function canvasDocument(canvasId: string, x: number, y: number): CanvasDocument 
       y,
       width: 200,
       height: 120,
-      z: 0,
-      visible: true,
-      locked: false
+      z: 0
     }],
     annotations: [],
     preferences: {

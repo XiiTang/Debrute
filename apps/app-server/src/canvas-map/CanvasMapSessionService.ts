@@ -367,8 +367,6 @@ function canvasNodeElementSignature(node: CanvasDocument['nodeElements'][number]
     node.width,
     node.height,
     node.z,
-    node.visible ? '1' : '0',
-    node.locked ? '1' : '0',
     node.layoutMode ?? ''
   ].join('\u0000');
 }

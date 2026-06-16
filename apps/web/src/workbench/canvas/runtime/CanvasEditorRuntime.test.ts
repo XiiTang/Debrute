@@ -296,8 +296,7 @@ function moveNode(projectRelativePath: string, x: number, y: number) {
     x,
     y,
     width: 100,
-    height: 80,
-    locked: false
+    height: 80
   };
 }
 

@@ -13,12 +13,11 @@ import {
 } from './canvasMinimap';
 
 describe('canvasMinimap geometry', () => {
-  it('builds content bounds from valid visible nodes and the current camera', () => {
+  it('builds content bounds from valid nodes and the current camera', () => {
     const model = buildCanvasMinimapModel({
       nodes: [
         nodeFixture('flow/a.png', 0, 0, 100, 100),
         nodeFixture('flow/selected.png', 800, 400, 200, 100),
-        { ...nodeFixture('flow/hidden.png', -1000, -1000, 100, 100), visible: false },
         nodeFixture('flow/invalid.png', Number.NaN, 0, 100, 100)
       ],
       selection: { kind: 'node', projectRelativePath: 'flow/selected.png' },
@@ -183,9 +182,9 @@ describe('canvasMinimap geometry', () => {
     });
   });
 
-  it('returns undefined when there are no valid visible nodes or camera z is invalid', () => {
+  it('returns undefined when there are no valid nodes or camera z is invalid', () => {
     expect(buildCanvasMinimapModel({
-      nodes: [{ ...nodeFixture('flow/hidden.png', 0, 0, 100, 100), visible: false }],
+      nodes: [nodeFixture('flow/invalid.png', 0, 0, 0, 100)],
       selection: undefined,
       camera: { x: 0, y: 0, z: 1 },
       surfaceSize: { width: 1000, height: 500 },
@@ -218,8 +217,6 @@ function nodeFixture(
     width,
     height,
     z: 0,
-    visible: true,
-    locked: false,
     availability: {
       state: 'available',
       size: 100,

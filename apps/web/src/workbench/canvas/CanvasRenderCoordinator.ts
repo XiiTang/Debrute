@@ -166,8 +166,7 @@ export function canvasRenderProjectionMembershipKey(projection: CanvasProjection
         node.x,
         node.y,
         node.width,
-        node.height,
-        node.visible === false ? 'hidden' : 'visible'
+        node.height
       ].join('\u001f'))
       .sort()
       .join('\u001e'),

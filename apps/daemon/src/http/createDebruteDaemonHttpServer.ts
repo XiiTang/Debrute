@@ -890,7 +890,6 @@ async function handleCanvasRoute(
     const result = await runRevisionedMutation(context, baseRevisionField(body), async () => {
       const updated = await server.updateCanvasNodeLayers({
         canvasId,
-        nodeLayers: body.nodeLayers as never,
         nodeProjectRelativePathsTopFirst: body.nodeProjectRelativePathsTopFirst as never
       });
       return {

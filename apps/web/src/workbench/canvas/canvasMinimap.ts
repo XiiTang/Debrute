@@ -249,8 +249,7 @@ function canvasRectToMinimapRect(rect: CanvasRect, transform: CanvasMinimapTrans
 }
 
 function isValidMinimapNode(node: CanvasProjection['nodes'][number]): boolean {
-  return node.visible !== false
-    && finiteNumber(node.x)
+  return finiteNumber(node.x)
     && finiteNumber(node.y)
     && finiteNumber(node.width)
     && finiteNumber(node.height)

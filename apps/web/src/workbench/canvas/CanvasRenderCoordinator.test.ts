@@ -104,12 +104,11 @@ describe('CanvasRenderCoordinator', () => {
     expect(idle.nodesByPath.has('flow/far.png')).toBe(true);
   });
 
-  it('pins selected and active nodes while excluding hidden nodes', () => {
+  it('pins selected and active nodes', () => {
     const coordinator = createCanvasRenderCoordinator({ projection: projection([
       imageNode('flow/visible.png', 0, 0, 1),
       imageNode('flow/selected.png', 5000, 0, 2),
-      imageNode('flow/active.png', 6000, 0, 3),
-      imageNode('flow/hidden.png', 0, 0, 4, false)
+      imageNode('flow/active.png', 6000, 0, 3)
     ]) });
 
     const snapshot = coordinator.update({
@@ -125,7 +124,6 @@ describe('CanvasRenderCoordinator', () => {
       'flow/selected.png',
       'flow/visible.png'
     ]);
-    expect(snapshot.nodesByPath.has('flow/hidden.png')).toBe(false);
     expect(snapshot.nodeLayers.get('flow/visible.png')).toEqual({ domOrder: 'flow/visible.png', zIndex: 1 });
     expect(snapshot.nodeLayers.get('flow/selected.png')).toEqual({ domOrder: 'flow/selected.png', zIndex: 2 });
     expect(snapshot.nodeLayers.get('flow/active.png')).toEqual({ domOrder: 'flow/active.png', zIndex: 3 });
@@ -428,10 +426,10 @@ describe('CanvasRenderCoordinator', () => {
     expect(counterNames(monitor.getTrace().events).filter((name) => name === 'render-virtual-refresh')).toHaveLength(1);
   });
 
-  it('records one membership refresh when projection visibility changes', () => {
+  it('records one membership refresh when projection layout changes', () => {
     const monitor = createCanvasPerfMonitor({ enabled: true });
     const coordinator = createCanvasRenderCoordinator({
-      projection: projection([imageNode('flow/a.png', 0, 0, 1, false)]),
+      projection: projection([imageNode('flow/a.png', 0, 0, 1)]),
       perfMonitor: monitor
     });
     coordinator.update({
@@ -442,7 +440,7 @@ describe('CanvasRenderCoordinator', () => {
       activeNodePaths: []
     });
 
-    coordinator.setProjection(projection([imageNode('flow/a.png', 0, 0, 1, true)]));
+    coordinator.setProjection(projection([imageNode('flow/a.png', 1200, 0, 1)]));
     const next = coordinator.update({
       camera: { x: 0, y: 0, z: 1 },
       cameraState: 'idle',
@@ -501,7 +499,7 @@ function projection(
   };
 }
 
-function imageNode(path: string, x: number, y: number, z: number, visible = true): ProjectedCanvasNode {
+function imageNode(path: string, x: number, y: number, z: number): ProjectedCanvasNode {
   return {
     nodeKind: 'file',
     mediaKind: 'image',
@@ -511,8 +509,6 @@ function imageNode(path: string, x: number, y: number, z: number, visible = true
     width: 100,
     height: 100,
     z,
-    locked: false,
-    visible,
     availability: {
       state: 'available',
       fileUrl: `/api/projects/p/files/${path}`,
@@ -535,8 +531,6 @@ function textNode(path: string, x: number, y: number, z: number): ProjectedCanva
     width: 100,
     height: 100,
     z,
-    locked: false,
-    visible: true,
     availability: {
       state: 'available',
       fileUrl: `/api/projects/p/files/${path}`,

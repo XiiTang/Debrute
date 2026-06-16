@@ -14,16 +14,15 @@ export function cameraForCanvasContent(input: {
 }
 
 export function canvasContentBounds(nodes: ProjectedCanvasNode[]): CanvasRect | undefined {
-  const visibleNodes = nodes.filter((node) => (
-    node.visible !== false
-    && Number.isFinite(node.x)
+  const validNodes = nodes.filter((node) => (
+    Number.isFinite(node.x)
     && Number.isFinite(node.y)
     && Number.isFinite(node.width)
     && Number.isFinite(node.height)
     && node.width > 0
     && node.height > 0
   ));
-  const first = visibleNodes[0];
+  const first = validNodes[0];
   if (!first) {
     return undefined;
   }
@@ -31,7 +30,7 @@ export function canvasContentBounds(nodes: ProjectedCanvasNode[]): CanvasRect | 
   let minY = first.y;
   let maxX = first.x + first.width;
   let maxY = first.y + first.height;
-  for (const node of visibleNodes.slice(1)) {
+  for (const node of validNodes.slice(1)) {
     minX = Math.min(minX, node.x);
     minY = Math.min(minY, node.y);
     maxX = Math.max(maxX, node.x + node.width);

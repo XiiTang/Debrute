@@ -115,7 +115,7 @@ layout:
 
 `paths` is the complete positive membership rule list. A trailing slash recursively includes files under that folder, a glob includes matching files, and an exact file rule includes one file. `layout.rows` is optional; each row glob affects files already included by `paths`, splitting matches into horizontal rows by direct parent directory.
 
-Canvas is the visual workspace for projected Canvas Map nodes. Canvas JSON under `.debrute/canvases/<canvas-id>.json` stores visual state: node layout, layers, viewport, selection, annotations, and preferences. File and folder hierarchy is derived from the project filesystem. Push copies the current Canvas Map membership into Canvas JSON, while Canvas display always derives default structure from filesystem paths.
+Canvas is the visual workspace for projected Canvas Map nodes. Canvas JSON under `.debrute/canvases/<canvas-id>.json` stores visual state: node layout, z-order, annotations, and preferences. File and folder hierarchy is derived from the project filesystem. Push copies the current Canvas Map membership into Canvas JSON, while Canvas display always derives default structure from filesystem paths.
 
 Capabilities are discrete operations that the daemon-backed Web workbench or the `debrute` command can invoke: project semantics, LLM requests, image generation, video generation, and generated asset metadata lookup. External Agents use their own filesystem tools for generic file access.
 

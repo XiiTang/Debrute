@@ -45,8 +45,6 @@ function CanvasNodeShellComponent({
   onResizePointerDown
 }: CanvasNodeShellProps): React.ReactElement {
   const elementRef = useRef<HTMLDivElement | null>(null);
-  const visible = node.visible !== false;
-  const locked = node.locked === true;
 
   useLayoutEffect(() => {
     const element = elementRef.current;
@@ -73,9 +71,7 @@ function CanvasNodeShellComponent({
     selected ? 'selected' : '',
     hovered ? 'hovered' : '',
     node.nodeKind,
-    usesFixedNodePresentation(node) ? 'fixed-presentation' : '',
-    visible ? '' : 'hidden',
-    locked ? 'locked' : ''
+    usesFixedNodePresentation(node) ? 'fixed-presentation' : ''
   ].filter(Boolean).join(' ');
 
   return (
@@ -119,7 +115,7 @@ function CanvasNodeShellComponent({
           onTitlePointerUp={onPointerUp}
         />
       )}
-      {selected && !locked ? RESIZE_HANDLES.map((handle) => (
+      {selected ? RESIZE_HANDLES.map((handle) => (
         <button
           key={handle}
           type="button"

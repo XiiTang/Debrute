@@ -29,7 +29,6 @@ import {
   type CanvasDocument,
   type CanvasFeedbackDocument,
   type CanvasLayoutSize,
-  type CanvasNodeLayerPatch,
   type CanvasProjection,
   type UpdateCanvasFeedbackEntryInput
 } from '@debrute/canvas-core';
@@ -666,7 +665,6 @@ export class DebruteAppServer {
 
   async updateCanvasNodeLayers(input: {
     canvasId: string;
-    nodeLayers?: CanvasNodeLayerPatch[];
     nodeProjectRelativePathsTopFirst?: string[];
   }): Promise<{ canvas: CanvasDocument; projection: CanvasProjection }> {
     return this.enqueueSessionOperation(async () => (

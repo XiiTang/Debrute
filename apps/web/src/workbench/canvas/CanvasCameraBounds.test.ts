@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import type { ProjectedCanvasNode } from '@debrute/canvas-core';
-import { cameraForCanvasContent } from './CanvasCameraBounds';
+import { cameraForCanvasContent, canvasContentBounds } from './CanvasCameraBounds';
 
 describe('CanvasCameraBounds', () => {
   it('fits visible canvas content that is far from the origin', () => {
@@ -33,10 +33,10 @@ describe('CanvasCameraBounds', () => {
     })).toBe(true);
   });
 
-  it('ignores hidden and invalid nodes when fitting content', () => {
+  it('fits all valid nodes and ignores invalid nodes', () => {
     const camera = cameraForCanvasContent({
       nodes: [
-        { ...imageNode('flow/hidden.png', 100_000, 100_000, 1_000, 1_000), visible: false },
+        imageNode('flow/far.png', 100_000, 100_000, 1_000, 1_000),
         imageNode('flow/visible.png', 1_000, 2_000, 400, 200),
         imageNode('flow/invalid.png', 0, 0, 0, 100)
       ],
@@ -48,7 +48,16 @@ describe('CanvasCameraBounds', () => {
       y: expect.any(Number),
       z: expect.any(Number)
     });
-    expect(camera?.z).toBeGreaterThan(1);
+    expect(canvasContentBounds([
+      imageNode('flow/far.png', 100_000, 100_000, 1_000, 1_000),
+      imageNode('flow/visible.png', 1_000, 2_000, 400, 200),
+      imageNode('flow/invalid.png', 0, 0, 0, 100)
+    ])).toEqual({
+      x: 1_000,
+      y: 2_000,
+      width: 100_000,
+      height: 99_000
+    });
   });
 });
 
@@ -68,8 +77,6 @@ function imageNode(
     width,
     height,
     z: 0,
-    visible: true,
-    locked: false,
     availability: {
       state: 'available',
       size: 1,

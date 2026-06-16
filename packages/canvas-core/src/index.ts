@@ -34,16 +34,7 @@ export interface CanvasNodeElement {
   width: number;
   height: number;
   z: number;
-  visible: boolean;
-  locked: boolean;
   layoutMode?: 'manual';
-}
-
-export interface CanvasNodeLayerPatch {
-  projectRelativePath: string;
-  z?: number;
-  visible?: boolean;
-  locked?: boolean;
 }
 
 export type CanvasNodeAvailability =
@@ -306,7 +297,7 @@ export function updateCanvasNodeLayouts(
     ...canvas,
     nodeElements: canvas.nodeElements.map((nodeElement) => {
       const layout = updatesByPath.get(nodeElement.projectRelativePath);
-      return layout && !nodeElement.locked
+      return layout
         ? {
             ...nodeElement,
             x: layout.x,
@@ -323,28 +314,14 @@ export function updateCanvasNodeLayouts(
 export function updateCanvasNodeLayers(
   canvas: CanvasDocument,
   input: {
-    nodeLayers?: CanvasNodeLayerPatch[];
     nodeProjectRelativePathsTopFirst?: string[];
   }
 ): CanvasDocument {
-  const patchesByPath = new Map((input.nodeLayers ?? []).map((patch) => [patch.projectRelativePath, patch]));
-  const patched = canvas.nodeElements.map((nodeElement) => {
-    const patch = patchesByPath.get(nodeElement.projectRelativePath);
-    if (!patch) {
-      return nodeElement;
-    }
-    return {
-      ...nodeElement,
-      ...(patch.visible === undefined ? {} : { visible: patch.visible }),
-      ...(patch.locked === undefined ? {} : { locked: patch.locked }),
-      ...(patch.z === undefined || nodeElement.locked ? {} : { z: patch.z })
-    };
-  });
   return {
     ...canvas,
     nodeElements: input.nodeProjectRelativePathsTopFirst
-      ? reorderCanvasNodeElementsTopFirst(patched, input.nodeProjectRelativePathsTopFirst)
-      : patched
+      ? reorderCanvasNodeElementsTopFirst(canvas.nodeElements, input.nodeProjectRelativePathsTopFirst)
+      : canvas.nodeElements
   };
 }
 
@@ -391,9 +368,7 @@ export function reconcileCanvasNodeElements(input: ReconcileCanvasNodeElementsIn
       projectRelativePath: desiredNode.projectRelativePath,
       nodeKind: desiredNode.nodeKind,
       ...(desiredNode.mediaKind ? { mediaKind: desiredNode.mediaKind } : {}),
-      z: preservedZByPath.get(desiredNode.projectRelativePath) ?? allocateNewZ(),
-      visible: existing?.visible ?? true,
-      locked: existing?.locked ?? false
+      z: preservedZByPath.get(desiredNode.projectRelativePath) ?? allocateNewZ()
     };
     if (existing?.layoutMode === 'manual') {
       return {
@@ -434,32 +409,22 @@ function reorderCanvasNodeElementsTopFirst(
   nodeElements: CanvasNodeElement[],
   projectRelativePathsTopFirst: string[]
 ): CanvasNodeElement[] {
-  const movablePaths = projectRelativePathsTopFirst.filter((path) => nodeElements.some((node) => node.projectRelativePath === path && !node.locked));
-  if (movablePaths.length === 0) {
+  const existingPaths = new Set(nodeElements.map((node) => node.projectRelativePath));
+  const requested = [...new Set(projectRelativePathsTopFirst.filter((path) => existingPaths.has(path)))];
+  if (requested.length === 0) {
     return nodeElements;
   }
-  const lockedZ = new Set(nodeElements.filter((node) => node.locked).map((node) => node.z));
-  const requested = [...new Set(movablePaths)];
   const requestedSet = new Set(requested);
   const remaining = [...nodeElements]
-    .filter((node) => !node.locked && !requestedSet.has(node.projectRelativePath))
+    .filter((node) => !requestedSet.has(node.projectRelativePath))
     .sort((left, right) => compareNodeZ(right, left))
     .map((node) => node.projectRelativePath);
   const orderedPathsTopFirst = [...requested, ...remaining];
-  const availableZ: number[] = [];
-  for (let nextZ = 0; availableZ.length < orderedPathsTopFirst.length; nextZ += 1) {
-    if (!lockedZ.has(nextZ)) {
-      availableZ.push(nextZ);
-    }
-  }
   const zByPath = new Map<string, number>();
   for (const [index, path] of [...orderedPathsTopFirst].reverse().entries()) {
-    zByPath.set(path, availableZ[index]!);
+    zByPath.set(path, index);
   }
   return nodeElements.map((node) => {
-    if (node.locked) {
-      return node;
-    }
     const z = zByPath.get(node.projectRelativePath);
     return z === undefined ? node : { ...node, z };
   });

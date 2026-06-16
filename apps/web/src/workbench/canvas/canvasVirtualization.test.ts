@@ -117,12 +117,12 @@ describe('canvas virtualization geometry', () => {
     ]);
   });
 
-  it('appends selected and active nodes from the indexed node map without mounting hidden nodes', () => {
+  it('appends selected and active nodes from the indexed node map', () => {
     const projection = projectionFixture([
       nodeFixture('flow/visible.png', 0, 0),
       nodeFixture('flow/selected-offscreen.png', 9000, 0),
       nodeFixture('flow/active-offscreen.png', 0, 9000),
-      { ...nodeFixture('flow/hidden-selected.png', 9000, 9000), visible: false }
+      nodeFixture('flow/selected-and-active.png', 9000, 9000)
     ]);
     const index = createCanvasVirtualizationIndex({
       nodes: projection.nodes,
@@ -136,22 +136,23 @@ describe('canvas virtualization geometry', () => {
         kind: 'multi',
         items: [
           { kind: 'node', projectRelativePath: 'flow/selected-offscreen.png' },
-          { kind: 'node', projectRelativePath: 'flow/hidden-selected.png' }
+          { kind: 'node', projectRelativePath: 'flow/selected-and-active.png' }
         ]
       },
-      activeNodeProjectRelativePaths: ['flow/active-offscreen.png', 'flow/hidden-selected.png']
+      activeNodeProjectRelativePaths: ['flow/active-offscreen.png', 'flow/selected-and-active.png']
     });
 
     expect(state.nodes.map((node) => node.projectRelativePath)).toEqual([
       'flow/visible.png',
       'flow/selected-offscreen.png',
-      'flow/active-offscreen.png'
+      'flow/active-offscreen.png',
+      'flow/selected-and-active.png'
     ]);
   });
 
-  it('does not render hidden nodes even when they intersect the virtual window', () => {
+  it('renders all nodes that intersect the virtual window', () => {
     const projection = projectionFixture([
-      { ...nodeFixture('flow/hidden.png', 0, 0), visible: false },
+      nodeFixture('flow/intersecting.png', 0, 0),
       nodeFixture('flow/visible.png', 300, 0)
     ]);
 
@@ -160,11 +161,11 @@ describe('canvas virtualization geometry', () => {
       edges: [],
       camera: { x: 0, y: 0, z: 1 },
       surfaceSize: undefined,
-      selection: { kind: 'node', projectRelativePath: 'flow/hidden.png' },
-      activeNodeProjectRelativePaths: ['flow/hidden.png']
+      selection: undefined,
+      activeNodeProjectRelativePaths: []
     });
 
-    expect(state.nodes.map((node) => node.projectRelativePath)).toEqual(['flow/visible.png']);
+    expect(state.nodes.map((node) => node.projectRelativePath)).toEqual(['flow/intersecting.png', 'flow/visible.png']);
   });
 
   it('detects endpoint and crossing edge segment intersections', () => {
@@ -413,8 +414,6 @@ function nodeFixture(projectRelativePath: string, x: number, y: number): CanvasP
     width: 200,
     height: 120,
     z: 0,
-    visible: true,
-    locked: false,
     availability: {
       state: 'available',
       size: 100,
@@ -437,8 +436,6 @@ function textNodeFixture(projectRelativePath: string, x: number, y: number): Can
     width: 200,
     height: 120,
     z: 0,
-    visible: true,
-    locked: false,
     availability: {
       state: 'available',
       size: 100,

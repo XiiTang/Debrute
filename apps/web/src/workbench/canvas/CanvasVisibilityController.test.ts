@@ -104,7 +104,7 @@ describe('CanvasVisibilityController', () => {
     ]);
   });
 
-  it('keeps hidden nodes hidden even when selected or active', () => {
+  it('keeps selected and active nodes display-visible even when culled', () => {
     const writes: Array<{ path: string; visible: boolean }> = [];
     const controller = createCanvasVisibilityController({
       stageRuntime: {
@@ -114,17 +114,17 @@ describe('CanvasVisibilityController', () => {
 
     controller.sync({
       nodesByPath: new Map([
-        ['flow/hidden-selected.png', node('flow/hidden-selected.png', false)],
-        ['flow/hidden-active.png', node('flow/hidden-active.png', false)]
+        ['flow/selected.png', node('flow/selected.png')],
+        ['flow/active.png', node('flow/active.png')]
       ]),
-      culledNodePaths: new Set(),
-      selectedNodePaths: ['flow/hidden-selected.png'],
-      activeNodePaths: ['flow/hidden-active.png']
+      culledNodePaths: new Set(['flow/selected.png', 'flow/active.png']),
+      selectedNodePaths: ['flow/selected.png'],
+      activeNodePaths: ['flow/active.png']
     });
 
     expect(writes).toEqual([
-      { path: 'flow/hidden-selected.png', visible: false },
-      { path: 'flow/hidden-active.png', visible: false }
+      { path: 'flow/selected.png', visible: true },
+      { path: 'flow/active.png', visible: true }
     ]);
   });
 
@@ -163,6 +163,6 @@ describe('CanvasVisibilityController', () => {
 
 });
 
-function node(projectRelativePath: string, visible = true): { projectRelativePath: string; visible: boolean } {
-  return { projectRelativePath, visible };
+function node(projectRelativePath: string): { projectRelativePath: string } {
+  return { projectRelativePath };
 }

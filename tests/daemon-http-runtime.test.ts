@@ -1589,7 +1589,7 @@ describe('daemon HTTP runtime', () => {
     expect(Buffer.from(await rawFileResponse.arrayBuffer()).length).toBeGreaterThan(0);
 
     const response = await fetch(`${runtime.daemonUrl}/api/projects/${opened.projectId}/events?debrute-token=test-token`);
-    await requestJson(`${runtime.daemonUrl}/api/projects/${opened.projectId}/canvases/canvas-1/node-layers`, {
+    await requestJson(`${runtime.daemonUrl}/api/projects/${opened.projectId}/canvases/canvas-1/node-layouts`, {
       method: 'PATCH',
       headers: {
         'content-type': 'application/json',
@@ -1597,7 +1597,7 @@ describe('daemon HTTP runtime', () => {
       },
       body: JSON.stringify({
         baseRevision: refreshed.projectRevision,
-        nodeLayers: [{ projectRelativePath: node.projectRelativePath, locked: true }]
+        nodeLayouts: [{ projectRelativePath: node.projectRelativePath, x: node.x + 10, y: node.y }]
       })
     });
 

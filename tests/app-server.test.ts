@@ -641,8 +641,6 @@ describe('app-server', () => {
           width: 100,
           height: 100,
           z: 0,
-          visible: true,
-          locked: false,
           unsupportedField: true
         }],
         annotations: [],
@@ -694,8 +692,6 @@ describe('app-server', () => {
           width: 7,
           height: 6,
           z: 0,
-          visible: true,
-          locked: false,
           layoutMode: 'manual'
         }],
         annotations: [],
@@ -740,8 +736,6 @@ describe('app-server', () => {
           width: 100,
           height: 100,
           z: 0,
-          visible: true,
-          locked: false,
           layoutMode: 'auto'
         }],
         annotations: [],
@@ -1253,12 +1247,12 @@ describe('app-server', () => {
       });
       const layer = await server.updateCanvasNodeLayers({
         canvasId: 'canvas-1',
-        nodeLayers: [{ projectRelativePath: nodePath, locked: true }]
+        nodeProjectRelativePathsTopFirst: ['image-production', 'image-production/generated', nodePath]
       });
       unsubscribe();
 
       expect(layout.canvas.nodeElements.find((node) => node.projectRelativePath === nodePath)).toMatchObject({ x: 50, y: 60, width: 640, height: 360, layoutMode: 'manual' });
-      expect(layer.canvas.nodeElements.find((node) => node.projectRelativePath === nodePath)).toMatchObject({ locked: true });
+      expect(layer.canvas.nodeElements.find((node) => node.projectRelativePath === 'image-production')).toMatchObject({ z: 2 });
       expect(layout.projection.canvasId).toBe('canvas-1');
       expect(layer.projection.canvasId).toBe('canvas-1');
       expect(layoutReadCount).toBe(layoutReadCountBeforeVisualUpdates);
@@ -1272,7 +1266,6 @@ describe('app-server', () => {
         y: 60,
         width: 640,
         height: 360,
-        locked: true,
         availability: { state: 'available' }
       });
       const canvasJson = await readFile(join(projectRoot, '.debrute/canvases/canvas-1.json'), 'utf8');

@@ -107,8 +107,7 @@ function origin(
     x,
     y,
     width,
-    height,
-    locked: false
+    height
   };
 }
 
@@ -137,8 +136,6 @@ function node(
     width,
     height,
     z: 1,
-    visible: true,
-    locked: false,
     availability: {
       state: 'available',
       fileUrl: `/api/projects/p/files/raw/${projectRelativePath}?v=rev`,

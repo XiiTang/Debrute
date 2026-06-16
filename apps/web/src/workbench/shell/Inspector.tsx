@@ -5,11 +5,7 @@ import {
   ArrowUp,
   CheckCircle2,
   CircleDot,
-  Eye,
-  EyeOff,
-  Loader2,
-  Lock,
-  Unlock
+  Loader2
 } from 'lucide-react';
 import {
   canvasNodeLayerOrderTopFirst,
@@ -126,12 +122,6 @@ function selectedNodeRows(context: Extract<SelectionContext, { kind: 'node' }>):
     ['Size', `${Math.round(context.node.width)} x ${Math.round(context.node.height)}`],
     ['Layer', String(context.node.z)]
   ];
-  if (context.node.visible === false) {
-    rows.push(['Visibility', 'hidden']);
-  }
-  if (context.node.locked === true) {
-    rows.push(['Lock', 'locked']);
-  }
   if (context.node.availability.state !== 'available') {
     rows.push(['Status', nodeStatusLabel(context.node)]);
   }
@@ -151,7 +141,7 @@ function NodeVisualControls({
   const nodePath = context.node.projectRelativePath;
   const layerOrderTopFirst = canvas ? canvasNodeLayerOrderTopFirst(canvas) : [];
   const layerIndex = layerOrderTopFirst.indexOf(nodePath);
-  const canMoveLayer = Boolean(canvas) && !context.node.locked && layerIndex >= 0;
+  const canMoveLayer = Boolean(canvas) && layerIndex >= 0;
   const moveLayer = (direction: -1 | 1) => {
     if (!canvas || !canMoveLayer) {
       return;
@@ -171,22 +161,6 @@ function NodeVisualControls({
     <div className="inspector-section">
       <h3>Visual</h3>
       <div className="inspector-node-controls" aria-label="Node visual controls">
-        <IconButton
-          label="Toggle visibility"
-          disabled={!canvas}
-          icon={context.node.visible === false ? <EyeOff size={14} /> : <Eye size={14} />}
-          onClick={() => void actions.updateCanvasNodeLayers(context.canvasId, {
-            nodeLayers: [{ projectRelativePath: nodePath, visible: context.node.visible === false }]
-          })}
-        />
-        <IconButton
-          label="Toggle lock"
-          disabled={!canvas}
-          icon={context.node.locked ? <Lock size={14} /> : <Unlock size={14} />}
-          onClick={() => void actions.updateCanvasNodeLayers(context.canvasId, {
-            nodeLayers: [{ projectRelativePath: nodePath, locked: context.node.locked !== true }]
-          })}
-        />
         <IconButton
           label="Move forward"
           disabled={!canMoveLayer || layerIndex === 0}

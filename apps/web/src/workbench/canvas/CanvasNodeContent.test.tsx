@@ -157,8 +157,6 @@ function textNode(path: string, revision: string): ProjectedCanvasNode {
     width: 320,
     height: 180,
     z: 0,
-    visible: true,
-    locked: false,
     availability: {
       state: 'available',
       size: 64,
@@ -212,8 +210,6 @@ function imageNode(path: string, revision: string): ProjectedCanvasNode {
     width: 320,
     height: 180,
     z: 0,
-    visible: true,
-    locked: false,
     availability: {
       state: 'available',
       revision,

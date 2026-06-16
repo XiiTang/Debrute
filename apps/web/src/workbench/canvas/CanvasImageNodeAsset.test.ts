@@ -382,8 +382,6 @@ function imageNode(
     width,
     height,
     z: 0,
-    visible: true,
-    locked: false,
     availability: {
       state: 'available',
       revision,

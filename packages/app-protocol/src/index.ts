@@ -1,7 +1,6 @@
 import type {
   CanvasDocument,
   CanvasFeedbackDocument,
-  CanvasNodeLayerPatch,
   CanvasProjection,
   Diagnostic,
   UpdateCanvasFeedbackEntryInput
@@ -833,7 +832,6 @@ export interface WorkbenchApiClient {
   }): Promise<WorkbenchCanvasDocumentMutationResult>;
   updateCanvasNodeLayers(input: {
     canvasId: string;
-    nodeLayers?: CanvasNodeLayerPatch[];
     nodeProjectRelativePathsTopFirst?: string[];
   }): Promise<WorkbenchCanvasDocumentMutationResult>;
   llmGetSettings(): Promise<LlmProviderSettingsView>;

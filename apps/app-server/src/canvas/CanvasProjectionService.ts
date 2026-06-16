@@ -160,7 +160,7 @@ function isCurrentCanvasDocument(value: unknown): value is CanvasDocument {
 
 function isCurrentCanvasNodeElement(value: unknown): value is CanvasNodeElement {
   return isRecord(value)
-    && hasOnlyKeys(value, ['projectRelativePath', 'nodeKind', 'mediaKind', 'x', 'y', 'width', 'height', 'z', 'visible', 'locked', 'layoutMode'])
+    && hasOnlyKeys(value, ['projectRelativePath', 'nodeKind', 'mediaKind', 'x', 'y', 'width', 'height', 'z', 'layoutMode'])
     && typeof value.projectRelativePath === 'string'
     && (value.nodeKind === 'directory' || value.nodeKind === 'file')
     && (value.mediaKind === undefined || value.mediaKind === 'image' || value.mediaKind === 'video' || value.mediaKind === 'audio' || value.mediaKind === 'text' || value.mediaKind === 'unknown')
@@ -169,8 +169,6 @@ function isCurrentCanvasNodeElement(value: unknown): value is CanvasNodeElement 
     && typeof value.width === 'number'
     && typeof value.height === 'number'
     && typeof value.z === 'number'
-    && typeof value.visible === 'boolean'
-    && typeof value.locked === 'boolean'
     && (value.layoutMode === undefined || value.layoutMode === 'manual');
 }
 
