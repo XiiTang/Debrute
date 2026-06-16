@@ -52,9 +52,22 @@ describe('Electron development scripts', () => {
     const script = readFileSync(join(process.cwd(), 'scripts/dev-electron-workbench.ts'), 'utf8');
 
     expect(script.indexOf('const result = await ensureRegisteredWorkbenchRuntime')).toBeLessThan(
-      script.indexOf('const electron = launchElectron();')
+      script.indexOf('electron = launchElectron();')
     );
     expect(script).not.toContain('currentElectronChild');
+  });
+
+  it('stops Electron before stopping the external development runtime', () => {
+    const script = readFileSync(join(process.cwd(), 'scripts/dev-electron-workbench.ts'), 'utf8');
+
+    expect(script).toContain('let shutdownPromise: Promise<void> | undefined;');
+    expect(script).toContain('shutdownPromise ??= shutdown(currentRuntimeState, deleteOwnState);');
+    expect(script).toContain("process.once('exit', () => {");
+    expect(script).toContain('deleteOwnRuntimeStateSync();');
+    expect(script).toContain('await stopElectron(electron)');
+    expect(script).toContain('await stopRuntimeChildren();');
+    expect(script.indexOf('await stopElectron(electron)')).toBeLessThan(script.indexOf('await stopRuntimeChildren();'));
+    expect(script).not.toContain('killChildren();');
   });
 
   it('explains duplicate Electron instances before quitting the dev launch', () => {
@@ -63,6 +76,27 @@ describe('Electron development scripts', () => {
     expect(main).toContain('Debrute desktop is already running.');
     expect(main).toContain('pnpm dev:electron');
     expect(main.indexOf('console.error(')).toBeLessThan(main.indexOf('app.quit();'));
+  });
+
+  it('maps process termination signals to true Electron quit', () => {
+    const main = readFileSync(join(process.cwd(), 'apps/desktop/src/electron/main.ts'), 'utf8');
+
+    expect(main).toContain("for (const signal of ['SIGINT', 'SIGTERM'] as const)");
+    expect(main).toContain('process.once(signal, () => {');
+    expect(main).toContain('detachProjectWindowLeasesFromStoppedRuntime();');
+    expect(main).toContain('void requestTrueQuit();');
+    expect(main.indexOf('detachProjectWindowLeasesFromStoppedRuntime();')).toBeLessThan(
+      main.indexOf('void requestTrueQuit();')
+    );
+  });
+
+  it('does not report project-window lease release failures during true quit', () => {
+    const main = readFileSync(join(process.cwd(), 'apps/desktop/src/electron/main.ts'), 'utf8');
+
+    expect(main).toContain('if (trueQuitRequested) {');
+    expect(main.indexOf('if (trueQuitRequested) {')).toBeLessThan(
+      main.indexOf('Debrute Electron window lease release failed')
+    );
   });
 
   it('keeps native Electron runtime modules external so their native packages resolve from pnpm', () => {

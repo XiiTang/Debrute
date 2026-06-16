@@ -107,19 +107,19 @@ describe('canvas interaction', () => {
     const shell = mockElement('workbench-shell');
     const surface = mockElement('canvas-surface', shell);
     const floatingLayer = mockElement('floating-bar-layer', shell);
-    const toolbarButton = mockElement('canvas-toolbar-button', floatingLayer);
+    const floatingActionButton = mockElement('floating-action-button', floatingLayer);
     const localWheelInput = mockElement('canvas-feedback-note', floatingLayer, true);
     const panelLayer = mockElement('panel-layer', shell);
     const panelButton = mockElement('floating-panel-button', panelLayer);
     const otherShell = mockElement('workbench-shell');
     const otherFloatingLayer = mockElement('floating-bar-layer', otherShell);
-    const otherToolbarButton = mockElement('canvas-toolbar-button', otherFloatingLayer);
+    const otherFloatingActionButton = mockElement('floating-action-button', otherFloatingLayer);
 
     expect(shouldCanvasHandleGlobalWheelTarget(surface as unknown as EventTarget, surface as unknown as EventTarget)).toBe(true);
-    expect(shouldCanvasHandleGlobalWheelTarget(toolbarButton as unknown as EventTarget, surface as unknown as EventTarget)).toBe(true);
+    expect(shouldCanvasHandleGlobalWheelTarget(floatingActionButton as unknown as EventTarget, surface as unknown as EventTarget)).toBe(true);
     expect(shouldCanvasHandleGlobalWheelTarget(localWheelInput as unknown as EventTarget, surface as unknown as EventTarget)).toBe(false);
     expect(shouldCanvasHandleGlobalWheelTarget(panelButton as unknown as EventTarget, surface as unknown as EventTarget)).toBe(false);
-    expect(shouldCanvasHandleGlobalWheelTarget(otherToolbarButton as unknown as EventTarget, surface as unknown as EventTarget)).toBe(false);
+    expect(shouldCanvasHandleGlobalWheelTarget(otherFloatingActionButton as unknown as EventTarget, surface as unknown as EventTarget)).toBe(false);
   });
 
   it('builds resize geometry with default aspect-preserving corners', () => {

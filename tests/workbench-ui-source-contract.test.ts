@@ -221,10 +221,8 @@ describe('Workbench UI source contract', () => {
 
   it('keeps Canvas chrome shadows tokenized and scoped to Workbench stat classes', () => {
     const styles = readFileSync('apps/web/src/styles.css', 'utf8');
-    const canvasToolbar = readFileSync('apps/web/src/workbench/canvas/CanvasToolbar.tsx', 'utf8');
     const canvasChromeSelectors = new Set([
       '.canvas-card-bar',
-      '.canvas-toolbar',
       '.canvas-minimap-bar',
       '.canvas-minimap-panel',
       '.canvas-empty-state'
@@ -236,8 +234,6 @@ describe('Workbench UI source contract', () => {
         .map(({ line, text }) => `${line}:${rule.selector}:${text.trim()}`));
 
     expect(violations).toEqual([]);
-    expect(styles).not.toMatch(/\.canvas-toolbar\s+span\b/);
-    expect(canvasToolbar).toContain('canvas-toolbar__stat');
   });
 
   it('keeps empty actions and notifications on shared primitives without duplicate chrome', () => {
@@ -257,7 +253,6 @@ describe('Workbench UI source contract', () => {
     const styles = readFileSync('apps/web/src/styles.css', 'utf8');
     const localControlSelectors = [
       joinText('.terminal-panel__actions', ' .db-icon-button'),
-      joinText('.canvas-toolbar', ' .db-button'),
       joinText('.canvas-text-titlebar', ' .db-icon-button'),
       joinText('.floating-text-editor-header', ' .db-icon-button'),
       joinText('.settings-section', ' .db-card strong'),

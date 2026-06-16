@@ -13,7 +13,6 @@ import { CanvasCardBar } from './canvas/CanvasCardBar';
 import { CanvasFeedbackBar } from './canvas/CanvasFeedbackBar';
 import { CanvasMinimapBar } from './canvas/CanvasMinimapBar';
 import { createCanvasOverlayRuntime } from './canvas/CanvasOverlayRuntime';
-import { CanvasToolbar } from './canvas/CanvasToolbar';
 import type { CanvasEditorRuntime, CanvasRuntimeSnapshot } from './canvas/runtime/CanvasEditorRuntime';
 import { createCanvasFeedbackEntryUpdater } from './services/canvasFeedbackUpdates';
 import { nextSnapshotFromAppServerEvent } from './services/appServerEvents';
@@ -1016,12 +1015,6 @@ export function WorkbenchApp(): React.ReactElement {
         )}
       </div>
       <div className="floating-bar-layer" data-testid="floating-bar-layer">
-        <CanvasToolbar
-          canvas={activeCanvas}
-          projection={activeProjection}
-          runtime={activeCanvasRuntime}
-          runtimeSnapshot={activeCanvasRuntimeSnapshot}
-        />
         <FloatingDock
           panelState={floatingPanels}
           onToggle={(panelId) => {

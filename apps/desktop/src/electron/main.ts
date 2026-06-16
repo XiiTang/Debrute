@@ -32,6 +32,13 @@ if (!app.requestSingleInstanceLock()) {
   app.quit();
 }
 
+for (const signal of ['SIGINT', 'SIGTERM'] as const) {
+  process.once(signal, () => {
+    detachProjectWindowLeasesFromStoppedRuntime();
+    void requestTrueQuit();
+  });
+}
+
 const applicationMenu = createApplicationMenuController({
   menu: Menu,
   readDesktopState: () => desktopStateStore().readDesktopState(),
@@ -79,6 +86,9 @@ async function createWindow(initialUrl?: string, projectId?: string, projectRoot
   });
   window.once('closed', () => {
     void releaseProjectWindow(window.id).catch((error) => {
+      if (trueQuitRequested) {
+        return;
+      }
       console.error(`Debrute Electron window lease release failed: ${messageFromUnknown(error)}`);
     });
   });

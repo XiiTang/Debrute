@@ -424,23 +424,6 @@ small {
   grid-template-rows: minmax(0, 1fr);
 }
 
-.canvas-toolbar {
-  position: absolute;
-  left: 76px;
-  top: 18px;
-  min-height: 38px;
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  padding: 5px;
-  pointer-events: auto;
-}
-
-.canvas-toolbar__stat {
-  color: var(--db-text-muted);
-  font-size: 12px;
-}
-
 .canvas-minimap-bar {
   position: absolute;
   left: 18px;

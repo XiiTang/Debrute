@@ -1,6 +1,7 @@
 #!/usr/bin/env tsx
 import { spawn, spawnSync, type ChildProcess } from 'node:child_process';
 import { randomUUID } from 'node:crypto';
+import { rmSync } from 'node:fs';
 import { mkdir, writeFile } from 'node:fs/promises';
 import { createRequire } from 'node:module';
 import { dirname, join, resolve } from 'node:path';
@@ -22,16 +23,23 @@ const workspaceRoot = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 const desktopRoot = join(workspaceRoot, 'apps/desktop');
 const desktopRequire = createRequire(join(desktopRoot, 'package.json'));
 const paths = resolveWorkbenchRuntimePaths();
-const children: ChildProcess[] = [];
+const runtimeChildren: ChildProcess[] = [];
+const CHILD_EXIT_GRACE_MS = 5_000;
 const ownerId = randomUUID();
 let currentRuntimeState: WorkbenchRuntimeState | undefined;
 let deleteOwnState = false;
+let electron: ChildProcess | undefined;
+let shutdownPromise: Promise<void> | undefined;
 
 for (const signal of ['SIGINT', 'SIGTERM'] as const) {
   process.on(signal, () => {
-    void shutdown(currentRuntimeState, deleteOwnState).finally(() => process.exit(0));
+    void requestShutdown().finally(() => process.exit(0));
   });
 }
+
+process.once('exit', () => {
+  deleteOwnRuntimeStateSync();
+});
 
 const buildCommand = packageManagerCommand(workspaceRoot, ['--filter', '@debrute/desktop', 'build:electron:dev']);
 const build = spawnSync(buildCommand.command, buildCommand.args, {
@@ -49,16 +57,15 @@ const result = await ensureRegisteredWorkbenchRuntime({
   paths,
   isHealthy: async (state) => isDesktopDevRuntimeForCurrentSession(state) && await isWorkbenchRuntimeHealthy(state),
   launch: launchDesktopDevRuntime,
-  onRuntimeLaunchFailed: killChildren
+  onRuntimeLaunchFailed: killRuntimeChildren
 });
 currentRuntimeState = result.state;
 deleteOwnState = result.runtimeStarted;
 
-const electron = launchElectron();
-children.push(electron);
+electron = launchElectron();
 
 await new Promise((resolveExit) => electron.once('exit', resolveExit));
-await shutdown(currentRuntimeState, deleteOwnState);
+await requestShutdown();
 
 async function launchDesktopDevRuntime(): Promise<WorkbenchRuntimeState> {
   const daemonPort = await chooseLoopbackPort(DEFAULT_WORKBENCH_DAEMON_PORT);
@@ -114,7 +121,7 @@ async function launchDesktopDevRuntime(): Promise<WorkbenchRuntimeState> {
     startedAt: now,
     updatedAt: now
   };
-  children.push(daemon, web);
+  runtimeChildren.push(daemon, web);
   return state;
 }
 
@@ -158,7 +165,11 @@ function isDesktopDevRuntimeForCurrentSession(state: WorkbenchRuntimeState): boo
 }
 
 async function shutdown(state: WorkbenchRuntimeState | undefined, shouldDeleteState: boolean): Promise<void> {
-  killChildren();
+  if (electron) {
+    await stopElectron(electron);
+    electron = undefined;
+  }
+  await stopRuntimeChildren();
   if (!state || !shouldDeleteState) {
     return;
   }
@@ -168,12 +179,55 @@ async function shutdown(state: WorkbenchRuntimeState | undefined, shouldDeleteSt
   }
 }
 
-function killChildren(): void {
-  for (const child of children) {
+function requestShutdown(): Promise<void> {
+  shutdownPromise ??= shutdown(currentRuntimeState, deleteOwnState);
+  return shutdownPromise;
+}
+
+function deleteOwnRuntimeStateSync(): void {
+  if (currentRuntimeState && deleteOwnState) {
+    rmSync(paths.statePath, { force: true });
+  }
+}
+
+function killRuntimeChildren(): void {
+  for (const child of runtimeChildren) {
     if (child.pid) {
-      child.kill('SIGTERM');
+      terminateRuntimeChild(child);
     }
   }
+}
+
+async function stopRuntimeChildren(): Promise<void> {
+  await Promise.all(runtimeChildren.map((child) => stopChild(child)));
+}
+
+function terminateRuntimeChild(child: ChildProcess): void {
+  if (!child.pid || child.exitCode !== null || child.signalCode !== null) {
+    return;
+  }
+  child.kill('SIGTERM');
+}
+
+async function stopElectron(child: ChildProcess): Promise<void> {
+  await stopChild(child);
+}
+
+async function stopChild(child: ChildProcess): Promise<void> {
+  if (child.exitCode !== null || child.signalCode !== null) {
+    return;
+  }
+  await new Promise<void>((resolveExit) => {
+    const timeout = setTimeout(() => {
+      child.kill('SIGKILL');
+      resolveExit();
+    }, CHILD_EXIT_GRACE_MS);
+    child.once('exit', () => {
+      clearTimeout(timeout);
+      resolveExit();
+    });
+    child.kill('SIGTERM');
+  });
 }
 
 function electronExecutable(): string {
