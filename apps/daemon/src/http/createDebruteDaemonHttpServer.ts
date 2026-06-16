@@ -870,6 +870,29 @@ async function handleCanvasRoute(
     writeJson(context.response, 200, result);
     return;
   }
+  if (path.endsWith('/reset-layout') && context.request.method === 'POST') {
+    const body = await readJsonBody<Record<string, unknown>>(context.request);
+    const hasAll = body.all === true;
+    const hasPathRules = body.pathRules !== undefined;
+    if (hasAll === hasPathRules) {
+      throw new DebruteDaemonHttpError(400, 'invalid_input', 'reset layout requires exactly one of all or pathRules.');
+    }
+    const result = await runRevisionedMutation(context, baseRevisionField(body), async () => {
+      const updated = await server.resetCanvasNodeLayouts({
+        canvasId,
+        ...(hasAll
+          ? { all: true as const }
+          : { pathRules: stringArrayField(body.pathRules, 'pathRules') })
+      });
+      return {
+        canvas: updated.canvas,
+        projection: projectionForHttp(updated.projection, context.runtime.daemonUrl, session.projectId, context.runtime.token),
+        resetCount: updated.resetCount
+      };
+    });
+    writeJson(context.response, 200, result);
+    return;
+  }
   if (path.endsWith('/node-layouts') && context.request.method === 'PATCH') {
     const body = await readJsonBody<Record<string, unknown>>(context.request);
     const result = await runRevisionedMutation(context, baseRevisionField(body), async () => {

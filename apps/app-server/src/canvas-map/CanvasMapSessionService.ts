@@ -11,6 +11,7 @@ import {
   type ProjectFileEntry
 } from '@debrute/project-core';
 import {
+  clearCanvasNodeManualLayouts,
   reconcileCanvasNodeElements,
   type CanvasDesiredLayoutRow,
   type CanvasDesiredNode,
@@ -23,6 +24,7 @@ import {
   canvasMapPath,
   canvasMapSourceHash,
   expandCanvasMap,
+  expandCanvasMapPathRules,
   parseCanvasMap,
   serializeCanvasMapWithRule,
   type ExpandedCanvasMap
@@ -62,6 +64,11 @@ export interface CanvasMapPushResult {
 export interface AddProjectPathToCanvasMapResult {
   canvas: CanvasDocument;
   centerProjectRelativePath: string;
+}
+
+export interface ResetCanvasNodeLayoutsResult {
+  canvas: CanvasDocument;
+  resetCount: number;
 }
 
 export interface SynchronizeCanvasMapsResult {
@@ -140,6 +147,46 @@ export class CanvasMapSessionService {
     return {
       canvas: prepared.nextCanvas,
       centerProjectRelativePath: normalizedProjectPath
+    };
+  }
+
+  async resetCanvasNodeLayouts(
+    projectRoot: string,
+    input: { canvasId: string } & ({ all: true } | { pathRules: string[] })
+  ): Promise<ResetCanvasNodeLayoutsResult> {
+    const currentCanvas = await this.readCanvas(projectRoot, input.canvasId);
+    let projectFiles: ProjectFileEntry[] | undefined;
+    let clearInput: { all: true } | { projectRelativePaths: string[] };
+    if ('all' in input) {
+      clearInput = { all: true };
+    } else {
+      projectFiles = await listDebruteProjectFiles(projectRoot);
+      clearInput = {
+        projectRelativePaths: expandCanvasMapPathRules(input.pathRules, projectFiles)
+          .map((node) => node.projectRelativePath)
+      };
+    }
+    const cleared = clearCanvasNodeManualLayouts(currentCanvas, clearInput);
+    const sourcePath = canvasMapPath(input.canvasId);
+    const source = await this.readCanvasMapSource(projectRoot, sourcePath);
+    const nextProjectFiles = projectFiles ?? await listDebruteProjectFiles(projectRoot);
+    const prepared = await this.prepareCanvasMapForCanvas(projectRoot, {
+      canvas: cleared.canvas,
+      sourceContent: source.content,
+      projectFiles: nextProjectFiles
+    });
+    await this.options.writeCanvasMapPush({
+      projectRoot,
+      sourcePath: source.absolutePath,
+      expectedSourceHash: prepared.sourceHash,
+      canvasPath: canvasPathFor(projectRoot, input.canvasId),
+      canvas: prepared.nextCanvas,
+      expectedCanvasHash: prepared.currentCanvasHash
+    });
+    this.sourceHashByCanvasId.set(input.canvasId, prepared.sourceHash);
+    return {
+      canvas: prepared.nextCanvas,
+      resetCount: cleared.resetCount
     };
   }
 

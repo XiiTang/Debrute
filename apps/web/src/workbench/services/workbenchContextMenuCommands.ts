@@ -88,7 +88,32 @@ export function runWorkbenchContextMenuCommand(input: {
       camera: liveRuntimeSnapshot.camera
     }));
   }
+  if (input.command === 'reset-auto-layout') {
+    const canvasId = input.activeProjection?.canvasId;
+    if (canvasId) {
+      void input.actions.resetCanvasNodeLayouts(canvasId, {
+        pathRules: [canvasMapResetRuleForTarget(target)]
+      }).then((result) => {
+        const updatedNode = projectedContextMenuNode(result.projection, projectRelativePath);
+        const snapshot = input.activeCanvasRuntime?.getSnapshot();
+        if (!updatedNode || !input.activeCanvasRuntime || !snapshot?.surfaceSize) {
+          return;
+        }
+        input.activeCanvasRuntime.camera.setCamera(cameraCenteredOnNode({
+          node: updatedNode,
+          surfaceSize: snapshot.surfaceSize,
+          camera: snapshot.camera
+        }));
+      }).catch((error) => {
+        input.notify(`Reset auto layout failed: ${errorMessage(error)}`);
+      });
+    }
+  }
   input.closeContextMenu();
+}
+
+function canvasMapResetRuleForTarget(target: Extract<WorkbenchContextMenuTarget, { source: 'canvas' }>): string {
+  return target.kind === 'directory' ? `${target.projectRelativePath}/` : target.projectRelativePath;
 }
 
 function runExplorerCommand(
@@ -237,4 +262,8 @@ function runPasteCommand(
   }).catch((error) => {
     input.notify(notificationMessageForFileCommandError('Paste failed', error));
   });
+}
+
+function errorMessage(error: unknown): string {
+  return error instanceof Error ? error.message : String(error);
 }

@@ -4,9 +4,11 @@ import {
   CANVAS_CARD_BAR_SIZE,
   CANVAS_MINIMAP_BUTTON_SIZE,
   CANVAS_MINIMAP_PANEL_SIZE,
+  CANVAS_RESET_LAYOUT_BUTTON_SIZE,
   canvasCardBarRect,
   canvasMinimapButtonRect,
   canvasNodeToViewportRect,
+  canvasResetLayoutButtonRect,
   placeCanvasFeedbackBar,
   placeCanvasMinimapPanel
 } from './floatingBars';
@@ -98,18 +100,26 @@ describe('floating bar placement', () => {
     });
   });
 
-  it('places the Canvas card bar beside the minimap button', () => {
+  it('places the Canvas card bar after the minimap and reset layout buttons', () => {
     const viewportRect = { x: 0, y: 0, width: 1000, height: 700 };
     const minimapButton = canvasMinimapButtonRect(viewportRect);
+    const resetButton = canvasResetLayoutButtonRect(viewportRect);
     const cardBar = canvasCardBarRect(viewportRect);
 
+    expect(resetButton).toEqual({
+      x: 52,
+      y: 654,
+      width: CANVAS_RESET_LAYOUT_BUTTON_SIZE.width,
+      height: CANVAS_RESET_LAYOUT_BUTTON_SIZE.height
+    });
     expect(cardBar).toEqual({
-      x: 58,
+      x: 88,
       y: 648,
       width: 580,
       height: CANVAS_CARD_BAR_SIZE.height
     });
-    expect(cardBar.x).toBeGreaterThanOrEqual(minimapButton.x + minimapButton.width + 12);
+    expect(resetButton.x).toBeGreaterThanOrEqual(minimapButton.x + minimapButton.width + 6);
+    expect(cardBar.x).toBeGreaterThanOrEqual(resetButton.x + resetButton.width + 8);
   });
 
   it('places the minimap panel above the lower-left button', () => {

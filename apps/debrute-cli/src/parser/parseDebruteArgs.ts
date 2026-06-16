@@ -22,6 +22,7 @@ export type DebruteCliCommand =
   | 'canvas.delete'
   | 'canvas.reorder'
   | 'canvas.repair-index'
+  | 'canvas.reset-layout'
   | 'generated-asset.lookup'
   | 'generate.image'
   | 'generate.image-batch'
@@ -58,6 +59,7 @@ const POSITIONAL_COUNTS: Record<DebruteCliCommand, { min: number; max: number }>
   'canvas.delete': { min: 2, max: 2 },
   'canvas.reorder': { min: 2, max: Number.POSITIVE_INFINITY },
   'canvas.repair-index': { min: 1, max: 1 },
+  'canvas.reset-layout': { min: 2, max: 2 },
   'generated-asset.lookup': { min: 1, max: 1 },
   'generate.image': { min: 1, max: 1 },
   'generate.image-batch': { min: 1, max: 1 },
@@ -86,6 +88,7 @@ const ALLOWED_OPTIONS: Record<DebruteCliCommand, Set<string>> = {
   'canvas.delete': new Set(),
   'canvas.reorder': new Set(),
   'canvas.repair-index': new Set(),
+  'canvas.reset-layout': new Set(['all', 'path']),
   'generated-asset.lookup': new Set(['path']),
   'generate.image': new Set(['input-json', 'timeout-ms']),
   'generate.image-batch': new Set(['manifest', 'input-jsonl', 'log', 'summary', 'concurrency', 'retries', 'timeout-ms', 'overwrite-existing']),
@@ -96,7 +99,12 @@ const ALLOWED_OPTIONS: Record<DebruteCliCommand, Set<string>> = {
 
 const BOOLEAN_OPTIONS: Partial<Record<DebruteCliCommand, Set<string>>> = {
   'skills.sync': new Set(['force']),
+  'canvas.reset-layout': new Set(['all']),
   'generate.image-batch': new Set(['overwrite-existing'])
+};
+
+const REPEATABLE_OPTIONS: Partial<Record<DebruteCliCommand, Set<string>>> = {
+  'canvas.reset-layout': new Set(['path'])
 };
 
 const PROJECT_COMMANDS = new Set<DebruteCliCommand>([
@@ -110,6 +118,7 @@ const PROJECT_COMMANDS = new Set<DebruteCliCommand>([
   'canvas.delete',
   'canvas.reorder',
   'canvas.repair-index',
+  'canvas.reset-layout',
   'generated-asset.lookup',
   'generate.image',
   'generate.image-batch',
@@ -183,7 +192,9 @@ function matchingSpec(argv: string[]) {
 function parsePositionalsAndOptions(command: DebruteCliCommand, args: string[]): { positionals: string[]; options: Record<string, string> } {
   const positionals: string[] = [];
   const options: Record<string, string> = {};
+  const repeatedOptions: Record<string, string[]> = {};
   const allowed = ALLOWED_OPTIONS[command];
+  const repeatable = REPEATABLE_OPTIONS[command] ?? new Set<string>();
 
   for (let index = 0; index < args.length; index += 1) {
     const arg = args[index]!;
@@ -200,7 +211,12 @@ function parsePositionalsAndOptions(command: DebruteCliCommand, args: string[]):
       if (!value || value.startsWith('--')) {
         throw cliError('missing_argument', `--${key} requires a value.`, { command });
       }
-      options[key] = value;
+      if (repeatable.has(key)) {
+        repeatedOptions[key] = [...(repeatedOptions[key] ?? []), value];
+        options[key] = JSON.stringify(repeatedOptions[key]);
+      } else {
+        options[key] = value;
+      }
       index += 1;
       continue;
     }
@@ -232,6 +248,9 @@ function validateRequiredOptions(command: DebruteCliCommand, options: Record<str
   if (command === 'generated-asset.lookup' && !options.path) {
     throw cliError('missing_argument', '--path is required.', { command });
   }
+  if (command === 'canvas.reset-layout' && (options.all === 'true') === Boolean(options.path)) {
+    throw cliError('invalid_input', 'canvas.reset-layout requires exactly one of --all or --path.', { command });
+  }
   if (command === 'generate.image-batch') {
     const sources = ['manifest', 'input-jsonl'].filter((key) => options[key]);
     if (sources.length !== 1) {
@@ -258,6 +277,9 @@ function requiredPositionals(command: DebruteCliCommand): string {
   }
   if (command === 'canvas.delete') {
     return '<project> <canvas-id>';
+  }
+  if (command === 'canvas.reset-layout') {
+    return '<project> <canvas-id> --all | --path <rule>';
   }
   if (command === 'canvas.reorder') {
     return '<project> <canvas-id...>';

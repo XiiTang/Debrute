@@ -21,6 +21,23 @@ describe('workbench context menu', () => {
     ]);
   });
 
+  it('shows Reset Auto Layout for manual Canvas nodes', () => {
+    const items = buildWorkbenchContextMenuItems({
+      target: { source: 'canvas', kind: 'file', projectRelativePath: 'flow/cover.png' },
+      projection: projectionWithNodes(['flow/cover.png'], new Set(['flow/cover.png'])),
+      canRevealInCanvas: true
+    });
+
+    expect(actionCommands(items)).toEqual([
+      'show-details',
+      'reveal-in-canvas',
+      'reset-auto-layout',
+      'copy-relative-path'
+    ]);
+    expect(actionLabels(items)).toContain('Reset Auto Layout');
+  });
+
+
   it('shows only copy path for targets absent from the active Canvas projection', () => {
     const items = buildWorkbenchContextMenuItems({
       target: { source: 'canvas', kind: 'file', projectRelativePath: 'briefs/concept.md' },
@@ -256,7 +273,7 @@ function actionLabels(items: ReturnType<typeof buildWorkbenchContextMenuItems>):
   return items.filter((item) => item.kind === 'action').map((item) => item.label);
 }
 
-function projectionWithNodes(paths: string[]): CanvasProjection {
+function projectionWithNodes(paths: string[], manualPaths = new Set<string>()): CanvasProjection {
   return {
     canvasId: 'main',
     nodes: paths.map((path) => ({
@@ -268,6 +285,7 @@ function projectionWithNodes(paths: string[]): CanvasProjection {
       width: 200,
       height: 120,
       z: 0,
+      ...(manualPaths.has(path) ? { layoutMode: 'manual' as const } : {}),
       availability: {
         state: 'available',
         size: 100,

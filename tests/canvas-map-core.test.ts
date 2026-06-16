@@ -3,6 +3,7 @@ import {
   CanvasMapError,
   canvasMapPath,
   expandCanvasMap,
+  expandCanvasMapPathRules,
   parseCanvasMap,
   serializeCanvasMapWithRule,
   type CanvasMapProjectEntry
@@ -159,6 +160,30 @@ describe('canvas-map core', () => {
         }
       ]
     });
+  });
+
+  it('expands reset path rules without adding file ancestors', () => {
+    const entries: CanvasMapProjectEntry[] = [
+      { projectRelativePath: 'outputs', kind: 'directory' },
+      { projectRelativePath: 'outputs/gpt', kind: 'directory' },
+      { projectRelativePath: 'outputs/gpt/high', kind: 'directory' },
+      { projectRelativePath: 'outputs/gpt/high/a.png', kind: 'file' },
+      { projectRelativePath: 'outputs/gpt/high/b.md', kind: 'file' },
+      { projectRelativePath: 'prompts', kind: 'directory' },
+      { projectRelativePath: 'prompts/cover.md', kind: 'file' }
+    ];
+
+    expect(expandCanvasMapPathRules(['prompts/cover.md', 'outputs/**/*.png'], entries)).toEqual([
+      { projectRelativePath: 'outputs/gpt/high/a.png', nodeKind: 'file' },
+      { projectRelativePath: 'prompts/cover.md', nodeKind: 'file' }
+    ]);
+
+    expect(expandCanvasMapPathRules(['outputs/gpt/'], entries)).toEqual([
+      { projectRelativePath: 'outputs/gpt', nodeKind: 'directory' },
+      { projectRelativePath: 'outputs/gpt/high', nodeKind: 'directory' },
+      { projectRelativePath: 'outputs/gpt/high/a.png', nodeKind: 'file' },
+      { projectRelativePath: 'outputs/gpt/high/b.md', nodeKind: 'file' }
+    ]);
   });
 
   it('keeps row expansion file-only even when a matching project path is a directory', () => {

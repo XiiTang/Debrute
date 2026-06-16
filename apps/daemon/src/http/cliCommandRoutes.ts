@@ -162,6 +162,25 @@ async function runDaemonCliCommandUnsafe(
     const result = await server.repairCanvasIndex();
     return canvasManagementResult(request.command, result.activeCanvasId);
   }
+  if (request.command === 'canvas.reset-layout') {
+    await openCliProject(server, request);
+    const canvasId = request.positional[1] ?? '';
+    const reset = await server.resetCanvasNodeLayouts({
+      canvasId,
+      ...(request.options.all === 'true'
+        ? { all: true as const }
+        : { pathRules: pathRulesOption(request) })
+    });
+    return {
+      status: 'ok',
+      command: request.command,
+      fields: {
+        canvas: canvasId,
+        mode: request.options.all === 'true' ? 'all' : 'paths',
+        reset: reset.resetCount
+      }
+    };
+  }
   if (request.command === 'generated-asset.lookup') {
     const lookup = await server.lookupGeneratedAssetMetadataForCli(requiredProjectRoot(request), {
       projectRelativePath: request.options.path ?? ''
@@ -259,6 +278,23 @@ function requestInput(request: DaemonCliCommandRequest): {
     arguments: input.arguments as Record<string, unknown>,
     ...(timeoutMs !== undefined ? { timeoutMs } : {})
   };
+}
+
+function pathRulesOption(request: DaemonCliCommandRequest): string[] {
+  const raw = request.options.path;
+  if (!raw) {
+    throw cliCommandError('invalid_input', 'canvas.reset-layout requires exactly one of --all or --path.');
+  }
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(raw) as unknown;
+  } catch {
+    throw cliCommandError('invalid_input', '--path must be one or more Canvas Map path rules.');
+  }
+  if (!Array.isArray(parsed) || parsed.some((item) => typeof item !== 'string')) {
+    throw cliCommandError('invalid_input', '--path must be one or more Canvas Map path rules.');
+  }
+  return parsed;
 }
 
 function imageBatchInputFromRequest(request: DaemonCliCommandRequest): RunImageModelBatchInput {

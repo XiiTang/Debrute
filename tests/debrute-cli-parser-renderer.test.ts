@@ -65,7 +65,48 @@ describe('debrute cli parser and renderer', () => {
       command: 'canvas.repair-index',
       positional: ['/tmp/project']
     });
+    expect(parseDebruteArgs(['canvas', 'reset-layout', '/tmp/project', 'canvas-1', '--all'])).toMatchObject({
+      command: 'canvas.reset-layout',
+      positional: ['/tmp/project', 'canvas-1'],
+      options: { all: 'true' }
+    });
+    expect(parseDebruteArgs([
+      'canvas',
+      'reset-layout',
+      '/tmp/project',
+      'canvas-1',
+      '--path',
+      'outputs/gpt/',
+      '--path',
+      'prompts/cover.md'
+    ])).toMatchObject({
+      command: 'canvas.reset-layout',
+      positional: ['/tmp/project', 'canvas-1'],
+      options: { path: '["outputs/gpt/","prompts/cover.md"]' }
+    });
     expect(() => parseDebruteArgs(['daemon', 'status', '--daemon-url', 'http://127.0.0.1:17321'])).toThrow(DebruteCliError);
+  });
+
+  it('validates canvas reset layout target options', () => {
+    expect(() => parseDebruteArgs(['canvas', 'reset-layout', '/tmp/project', 'canvas-1'])).toThrow(DebruteCliError);
+    try {
+      parseDebruteArgs(['canvas', 'reset-layout', '/tmp/project', 'canvas-1']);
+    } catch (error) {
+      expect(error).toMatchObject({
+        code: 'invalid_input',
+        message: 'canvas.reset-layout requires exactly one of --all or --path.'
+      });
+    }
+
+    expect(() => parseDebruteArgs([
+      'canvas',
+      'reset-layout',
+      '/tmp/project',
+      'canvas-1',
+      '--all',
+      '--path',
+      'outputs/gpt/'
+    ])).toThrow(DebruteCliError);
   });
 
   it('parses final generation timeout flags', () => {
@@ -198,6 +239,7 @@ describe('debrute cli parser and renderer', () => {
       'canvas.delete',
       'canvas.reorder',
       'canvas.repair-index',
+      'canvas.reset-layout',
       'generated-asset.lookup',
       'generate.image',
       'generate.image-batch',
@@ -236,6 +278,14 @@ describe('debrute cli parser and renderer', () => {
       'canvas_registry_conflict',
       'canvas_map_conflict'
     ]));
+    expect(specForCommandPath(['canvas', 'reset-layout'])).toMatchObject({
+      command: 'canvas.reset-layout',
+      scope: 'project',
+      risk: 'write',
+      requires: 'project',
+      writes: 'canvas-map',
+      input: '<project> <canvas-id> --all | <project> <canvas-id> --path <rule...>'
+    });
     expect(specForCommandPath(['generate', 'image'])?.errors).toEqual([
       'invalid_command',
       'invalid_argument',

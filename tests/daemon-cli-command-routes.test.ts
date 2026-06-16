@@ -131,6 +131,39 @@ describe('daemon CLI command routes', () => {
     expect(server.runImageModelBatch).not.toHaveBeenCalled();
   });
 
+  it('runs canvas reset layout through the project CLI bridge', async () => {
+    const server = {
+      openProject: vi.fn(async () => undefined),
+      resetCanvasNodeLayouts: vi.fn(async () => ({
+        resetCount: 3
+      }))
+    } as unknown as DebruteAppServer;
+
+    await expect(runDaemonCliCommand({
+      command: 'canvas.reset-layout',
+      positional: ['/tmp/project', 'canvas-1'],
+      projectRoot: '/tmp/project',
+      options: { path: '["outputs/gpt/","prompts/cover.md"]' }
+    }, { server })).resolves.toMatchObject({
+      status: 'ok',
+      command: 'canvas.reset-layout',
+      fields: {
+        canvas: 'canvas-1',
+        mode: 'paths',
+        reset: 3
+      }
+    });
+    expect(server.openProject).toHaveBeenCalledWith('/tmp/project', {
+      initializeIfMissing: false,
+      createDefaultCanvas: false,
+      watchFiles: false
+    });
+    expect(server.resetCanvasNodeLayouts).toHaveBeenCalledWith({
+      canvasId: 'canvas-1',
+      pathRules: ['outputs/gpt/', 'prompts/cover.md']
+    });
+  });
+
   it('isolates concurrent project CLI HTTP commands with a fresh App Server per request', async () => {
     const alphaRoot = '/tmp/debrute-alpha-project';
     const betaRoot = '/tmp/debrute-beta-project';

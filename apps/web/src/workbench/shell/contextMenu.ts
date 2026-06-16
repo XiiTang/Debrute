@@ -9,6 +9,7 @@ export type WorkbenchExplorerContextMenuTargetKind = 'root' | 'item' | 'selectio
 export type WorkbenchContextMenuCommand =
   | 'show-details'
   | 'reveal-in-canvas'
+  | 'reset-auto-layout'
   | 'create-file'
   | 'create-directory'
   | 'cut'
@@ -85,6 +86,7 @@ export function buildWorkbenchContextMenuItems(input: {
     return compactMenuItems([
       node ? action('show-details', 'Show Details') : undefined,
       node && input.canRevealInCanvas ? action('reveal-in-canvas', 'Reveal in Canvas') : undefined,
+      node?.layoutMode === 'manual' ? action('reset-auto-layout', 'Reset Auto Layout') : undefined,
       action('copy-relative-path', 'Copy Relative Path')
     ]);
   }

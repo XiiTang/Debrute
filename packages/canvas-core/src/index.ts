@@ -311,6 +311,34 @@ export function updateCanvasNodeLayouts(
   };
 }
 
+export function clearCanvasNodeManualLayouts(
+  canvas: CanvasDocument,
+  input: { all: true } | { projectRelativePaths: string[] }
+): { canvas: CanvasDocument; resetCount: number } {
+  const resetPaths = 'all' in input
+    ? undefined
+    : new Set(input.projectRelativePaths);
+  let resetCount = 0;
+  const nodeElements = canvas.nodeElements.map((nodeElement) => {
+    if (nodeElement.layoutMode !== 'manual') {
+      return nodeElement;
+    }
+    if (resetPaths && !resetPaths.has(nodeElement.projectRelativePath)) {
+      return nodeElement;
+    }
+    const { layoutMode: _layoutMode, ...automaticNode } = nodeElement;
+    resetCount += 1;
+    return automaticNode;
+  });
+  return {
+    canvas: {
+      ...canvas,
+      nodeElements
+    },
+    resetCount
+  };
+}
+
 export function updateCanvasNodeLayers(
   canvas: CanvasDocument,
   input: {

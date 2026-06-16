@@ -25,6 +25,7 @@ import type {
   WorkbenchCanvasDocumentMutationResult,
   WorkbenchCanvasFeedbackMutationResult,
   WorkbenchCanvasManagementResult,
+  WorkbenchCanvasResetLayoutResult,
   WorkbenchProjectOpenResult,
   WorkbenchProjectFileBatchOperationResult,
   WorkbenchProjectFileOperationResult,
@@ -348,6 +349,11 @@ export function createHttpWorkbenchApiClient(options: HttpWorkbenchApiClientOpti
     updateCanvasNodeLayouts: (input) => requestRevisioned<WorkbenchCanvasDocumentMutationResult>('PATCH', projectPath(`/canvases/${encodeURIComponent(input.canvasId)}/node-layouts`), {
       nodeLayouts: input.nodeLayouts
     }),
+    resetCanvasNodeLayouts: (input) => requestRevisioned<WorkbenchCanvasResetLayoutResult>(
+      'POST',
+      projectPath(`/canvases/${encodeURIComponent(input.canvasId)}/reset-layout`),
+      'all' in input ? { all: true } : { pathRules: input.pathRules }
+    ),
     updateCanvasNodeLayers: (input) => requestRevisioned<WorkbenchCanvasDocumentMutationResult>('PATCH', projectPath(`/canvases/${encodeURIComponent(input.canvasId)}/node-layers`), {
       nodeProjectRelativePathsTopFirst: input.nodeProjectRelativePathsTopFirst
     }),

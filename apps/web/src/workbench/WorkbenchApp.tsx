@@ -12,6 +12,7 @@ import { CanvasEditor } from './canvas/CanvasEditor';
 import { CanvasCardBar } from './canvas/CanvasCardBar';
 import { CanvasFeedbackBar } from './canvas/CanvasFeedbackBar';
 import { CanvasMinimapBar } from './canvas/CanvasMinimapBar';
+import { CanvasResetLayoutButton } from './canvas/CanvasResetLayoutButton';
 import { createCanvasOverlayRuntime } from './canvas/CanvasOverlayRuntime';
 import type { CanvasEditorRuntime, CanvasRuntimeSnapshot } from './canvas/runtime/CanvasEditorRuntime';
 import { createCanvasFeedbackEntryUpdater } from './services/canvasFeedbackUpdates';
@@ -56,6 +57,7 @@ import { createProjectTreeExternalDropPlan } from './project-explorer/projectTre
 import {
   canvasCardBarRect,
   canvasMinimapButtonRect,
+  canvasResetLayoutButtonRect,
   placeCanvasMinimapPanel,
   sameCanvasFeedbackBarTarget,
   type CanvasFeedbackBarTarget,
@@ -642,6 +644,20 @@ export function WorkbenchApp(): React.ReactElement {
         throw error;
       }
     },
+    resetCanvasNodeLayouts: async (canvasId, input) => {
+      const result = await api.resetCanvasNodeLayouts({
+        canvasId,
+        ...input
+      });
+      const current = snapshotRef.current;
+      if (!current) {
+        throw new Error(`Cannot apply Canvas document ${result.canvas.id} without a current snapshot.`);
+      }
+      const next = replaceCanvasMutationInSnapshot(current, result);
+      snapshotRef.current = next;
+      setSnapshot(next);
+      return result;
+    },
     updateCanvasNodeLayers: async (canvasId, input) => {
       const result = await api.updateCanvasNodeLayers({
         canvasId,
@@ -779,6 +795,9 @@ export function WorkbenchApp(): React.ReactElement {
     () => syncOpenWorkbenchWindows(windowOrder, openWorkbenchWindows),
     [openWorkbenchWindows, windowOrder]
   );
+  const notify = useCallback((message: string) => {
+    setNotifications((current) => [message, ...current].slice(0, 4));
+  }, []);
 
   const workbenchViewportRect: FloatingBarRect = {
     x: 0,
@@ -791,15 +810,28 @@ export function WorkbenchApp(): React.ReactElement {
     buttonRect: minimapButtonRect,
     viewportRect: workbenchViewportRect
   });
+  const resetLayoutButtonRect = snapshot?.canvasRegistry.status === 'ready'
+    ? canvasResetLayoutButtonRect(workbenchViewportRect)
+    : undefined;
   const cardBarRect = snapshot?.canvasRegistry.status === 'ready'
     ? canvasCardBarRect(workbenchViewportRect)
     : undefined;
   const floatingBarReservedRects = [
     ...FIXED_TOP_FLOATING_BAR_RECTS,
     minimapButtonRect,
+    ...(resetLayoutButtonRect ? [resetLayoutButtonRect] : []),
     ...(canvasMinimapOpen ? [minimapPanelPlacement] : []),
     ...(cardBarRect ? [cardBarRect] : [])
   ];
+  const canResetActiveCanvasLayout = Boolean(activeProjection?.nodes.some((node) => node.layoutMode === 'manual'));
+  const resetActiveCanvasLayout = useCallback(() => {
+    if (!activeCanvasId) {
+      return;
+    }
+    void actions.resetCanvasNodeLayouts(activeCanvasId, { all: true }).catch((error) => {
+      notify(`Reset canvas layout failed: ${errorMessage(error)}`);
+    });
+  }, [actions, activeCanvasId, notify]);
   const canRevealInCanvas = Boolean(activeCanvasRuntime && activeCanvasRuntimeSnapshot?.surfaceSize);
   const contextMenuItems = useMemo(() => contextMenu
       ? buildWorkbenchContextMenuItems({
@@ -810,9 +842,6 @@ export function WorkbenchApp(): React.ReactElement {
           desktopPlatform
         })
     : [], [activeProjection, canRevealInCanvas, contextMenu, desktopPlatform, fileClipboard]);
-  const notify = useCallback((message: string) => {
-    setNotifications((current) => [message, ...current].slice(0, 4));
-  }, []);
   const canvasOrder = snapshot?.canvasRegistry.status === 'ready'
     ? snapshot.canvasRegistry.canvasOrder
     : [];
@@ -1036,6 +1065,12 @@ export function WorkbenchApp(): React.ReactElement {
           onOpenChange={setCanvasMinimapOpen}
           panelPlacement={minimapPanelPlacement}
         />
+        {snapshot?.canvasRegistry.status === 'ready' ? (
+          <CanvasResetLayoutButton
+            enabled={canResetActiveCanvasLayout}
+            onResetCanvasLayout={resetActiveCanvasLayout}
+          />
+        ) : null}
         {feedbackBarTarget ? (
           <CanvasFeedbackBar
             projectRelativePath={feedbackBarTarget.projectRelativePath}

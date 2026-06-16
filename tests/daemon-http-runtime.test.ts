@@ -1611,6 +1611,74 @@ describe('daemon HTTP runtime', () => {
     expect(eventNode.availability.fileUrl).toBe(node.availability.fileUrl);
   });
 
+  it('resets manual Canvas layout through the HTTP Canvas route', async () => {
+    const projectRoot = await mkdtemp(join(tmpdir(), 'debrute-daemon-canvas-reset-route-project-'));
+    await mkdir(join(projectRoot, 'prompts'), { recursive: true });
+    await writeFile(join(projectRoot, 'prompts/cover.md'), '# Cover\n', 'utf8');
+
+    let appServer: DebruteAppServer | undefined;
+    const daemon = createDebruteDaemonHttpServer({
+      createAppServer: () => {
+        appServer = new DebruteAppServer();
+        return appServer;
+      },
+      host: '127.0.0.1',
+      port: 0,
+      token: 'test-token',
+      webBaseUrl: null
+    });
+    cleanups.push(() => daemon.close(), () => rm(projectRoot, { recursive: true, force: true }));
+    const runtime = await daemon.listen();
+    const opened = await requestJson<{ projectId: string; projectRevision: number }>(`${runtime.daemonUrl}/api/projects/open`, {
+      method: 'POST',
+      headers: {
+        'content-type': 'application/json',
+        'x-debrute-daemon-token': 'test-token'
+      },
+      body: JSON.stringify({ projectRoot })
+    });
+    await writeCanvasMap(projectRoot, 'canvas-1', canvasMapSource(['prompts/cover.md']));
+    if (!appServer) {
+      throw new Error('Daemon did not create a project app server.');
+    }
+    await appServer.pushCanvasMapForProject(projectRoot, { canvasId: 'canvas-1' });
+    const refreshed = await requestJson<{ projectRevision: number }>(`${runtime.daemonUrl}/api/projects/${opened.projectId}/refresh`, {
+      method: 'POST',
+      headers: { 'x-debrute-daemon-token': 'test-token' }
+    });
+    const layout = await requestJson<{ projectRevision: number }>(`${runtime.daemonUrl}/api/projects/${opened.projectId}/canvases/canvas-1/node-layouts`, {
+      method: 'PATCH',
+      headers: {
+        'content-type': 'application/json',
+        'x-debrute-daemon-token': 'test-token'
+      },
+      body: JSON.stringify({
+        baseRevision: refreshed.projectRevision,
+        nodeLayouts: [{ projectRelativePath: 'prompts/cover.md', x: 1000, y: 900 }]
+      })
+    });
+
+    const reset = await requestJson<{
+      resetCount: number;
+      canvas: { nodeElements: Array<{ projectRelativePath: string; layoutMode?: string }> };
+      projection: { nodes: Array<{ projectRelativePath: string }> };
+    }>(`${runtime.daemonUrl}/api/projects/${opened.projectId}/canvases/canvas-1/reset-layout`, {
+      method: 'POST',
+      headers: {
+        'content-type': 'application/json',
+        'x-debrute-daemon-token': 'test-token'
+      },
+      body: JSON.stringify({
+        baseRevision: layout.projectRevision,
+        all: true
+      })
+    });
+
+    expect(reset.resetCount).toBe(1);
+    expect(reset.canvas.nodeElements.find((node) => node.projectRelativePath === 'prompts/cover.md')).not.toHaveProperty('layoutMode');
+    expect(reset.projection.nodes.map((node) => node.projectRelativePath)).toContain('prompts/cover.md');
+  });
+
   it('adds project tree paths to Canvas Maps through the HTTP Canvas route', async () => {
     const projectRoot = await mkdtemp(join(tmpdir(), 'debrute-daemon-canvas-map-route-project-'));
     await mkdir(join(projectRoot, 'prompts'), { recursive: true });

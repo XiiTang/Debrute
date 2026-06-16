@@ -3,6 +3,7 @@ import {
   CANVAS_FEEDBACK_MARKS,
   CANVAS_DOCUMENT_SCHEMA_VERSION,
   canvasNodeLayerOrderTopFirst,
+  clearCanvasNodeManualLayouts,
   createCanvasDocument,
   createEmptyCanvasFeedbackDocument,
   normalizeCanvasFeedbackDocument,
@@ -85,6 +86,28 @@ describe('canvas-core', () => {
       height: 320,
       layoutMode: 'manual'
     });
+  });
+
+  it('clears manual layout for selected paths and all nodes', () => {
+    const canvas = createCanvasWithNodes([
+      { projectRelativePath: 'flow', nodeKind: 'directory', x: 900, y: 800, width: 240, height: 96, layoutMode: 'manual' },
+      { projectRelativePath: 'flow/a.md', nodeKind: 'file', mediaKind: 'text', x: 920, y: 820, width: 420, height: 280, layoutMode: 'manual' },
+      { projectRelativePath: 'flow/b.md', nodeKind: 'file', mediaKind: 'text', x: 940, y: 840, width: 420, height: 280, layoutMode: 'manual' }
+    ]);
+
+    const selected = clearCanvasNodeManualLayouts(canvas, {
+      projectRelativePaths: ['flow/a.md']
+    });
+
+    expect(nodeByPath(selected.canvas.nodeElements, 'flow')).toHaveProperty('layoutMode', 'manual');
+    expect(nodeByPath(selected.canvas.nodeElements, 'flow/a.md')).not.toHaveProperty('layoutMode');
+    expect(nodeByPath(selected.canvas.nodeElements, 'flow/b.md')).toHaveProperty('layoutMode', 'manual');
+    expect(selected.resetCount).toBe(1);
+
+    const all = clearCanvasNodeManualLayouts(canvas, { all: true });
+
+    expect(all.canvas.nodeElements.every((node) => node.layoutMode !== 'manual')).toBe(true);
+    expect(all.resetCount).toBe(3);
   });
 
   it('assigns deterministic node z-order and projects all nodes by z order', () => {

@@ -732,6 +732,13 @@ export interface AddProjectPathToCanvasMapInput {
   projectRelativePath: string;
 }
 
+export type ResetCanvasNodeLayoutsInput = {
+  canvasId: string;
+} & (
+  | { all: true }
+  | { pathRules: string[] }
+);
+
 export interface ProjectAddProjectPathToCanvasMapResult {
   snapshot: ProjectSessionSnapshot;
   canvas: CanvasDocument;
@@ -749,6 +756,10 @@ export interface WorkbenchAddProjectPathToCanvasMapResult extends RevisionedProj
 export interface WorkbenchCanvasDocumentMutationResult extends RevisionedProjectResult {
   canvas: CanvasDocument;
   projection: CanvasProjection;
+}
+
+export interface WorkbenchCanvasResetLayoutResult extends WorkbenchCanvasDocumentMutationResult {
+  resetCount: number;
 }
 
 export interface WorkbenchCanvasFeedbackMutationResult extends RevisionedProjectResult {
@@ -830,6 +841,7 @@ export interface WorkbenchApiClient {
     canvasId: string;
     nodeLayouts?: Array<{ projectRelativePath: string; x: number; y: number; width?: number; height?: number }>;
   }): Promise<WorkbenchCanvasDocumentMutationResult>;
+  resetCanvasNodeLayouts(input: ResetCanvasNodeLayoutsInput): Promise<WorkbenchCanvasResetLayoutResult>;
   updateCanvasNodeLayers(input: {
     canvasId: string;
     nodeProjectRelativePathsTopFirst?: string[];

@@ -12,6 +12,7 @@ import type {
   IntegrationSettingsView,
   VideoModelSettingsView,
   WorkbenchCanvasManagementResult,
+  WorkbenchCanvasResetLayoutResult,
   WorkbenchProjectFileBatchOperationResult,
   WorkbenchProjectFileOperationResult,
   WorkbenchProjectPathEntry,
@@ -90,6 +91,7 @@ export interface WorkbenchActions {
   updateCanvasNodeLayouts: (canvasId: string, input: {
     nodeLayouts?: Array<{ projectRelativePath: string; x: number; y: number; width?: number; height?: number }>;
   }) => Promise<void>;
+  resetCanvasNodeLayouts: (canvasId: string, input: { all: true } | { pathRules: string[] }) => Promise<WorkbenchCanvasResetLayoutResult>;
   updateCanvasNodeLayers: (canvasId: string, input: {
     nodeProjectRelativePathsTopFirst?: string[];
   }) => Promise<void>;

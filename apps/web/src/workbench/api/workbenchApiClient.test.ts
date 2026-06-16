@@ -133,13 +133,17 @@ describe('workbench API client', () => {
     await client.deleteCanvas({ canvasId: 'storyboard' });
     await client.reorderCanvases({ canvasOrder: ['canvas-2', 'canvas-1'] });
     await client.repairCanvasIndex();
+    await client.resetCanvasNodeLayouts({ canvasId: 'canvas-1', all: true });
+    await client.resetCanvasNodeLayouts({ canvasId: 'canvas-1', pathRules: ['outputs/gpt/', 'prompts/cover.md'] });
 
     expect(requests.slice(1)).toEqual([
       { method: 'POST', url: `http://127.0.0.1:17321/api/projects/${projectId}/canvases`, body: { baseRevision: 1 } },
       { method: 'PATCH', url: `http://127.0.0.1:17321/api/projects/${projectId}/canvases/canvas-1`, body: { baseRevision: 2, operation: 'rename', nextCanvasId: 'storyboard' } },
       { method: 'DELETE', url: `http://127.0.0.1:17321/api/projects/${projectId}/canvases/storyboard`, body: { baseRevision: 3 } },
       { method: 'PUT', url: `http://127.0.0.1:17321/api/projects/${projectId}/canvases/index`, body: { baseRevision: 4, canvasOrder: ['canvas-2', 'canvas-1'] } },
-      { method: 'POST', url: `http://127.0.0.1:17321/api/projects/${projectId}/canvases/index/repair`, body: { baseRevision: 5 } }
+      { method: 'POST', url: `http://127.0.0.1:17321/api/projects/${projectId}/canvases/index/repair`, body: { baseRevision: 5 } },
+      { method: 'POST', url: `http://127.0.0.1:17321/api/projects/${projectId}/canvases/canvas-1/reset-layout`, body: { baseRevision: 6, all: true } },
+      { method: 'POST', url: `http://127.0.0.1:17321/api/projects/${projectId}/canvases/canvas-1/reset-layout`, body: { baseRevision: 7, pathRules: ['outputs/gpt/', 'prompts/cover.md'] } }
     ]);
   });
 });

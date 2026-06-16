@@ -31,6 +31,7 @@ describe('CLI runtime policy', () => {
       'canvas.delete',
       'canvas.reorder',
       'canvas.repair-index',
+      'canvas.reset-layout',
       'generated-asset.lookup',
       'generate.image',
       'generate.image-batch',

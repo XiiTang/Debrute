@@ -236,14 +236,14 @@
 
 .canvas-card-bar {
   position: fixed;
-  left: 58px;
+  left: 88px;
   bottom: 14px;
   z-index: 150;
   pointer-events: auto;
   display: flex;
   align-items: center;
   gap: 6px;
-  max-width: min(58vw, 720px);
+  max-width: min(58vw, 720px, calc(100vw - 96px));
   height: 38px;
   padding: 4px;
 }
@@ -313,7 +313,7 @@
 
 .canvas-card-menu {
   position: fixed;
-  left: var(--canvas-card-menu-left, 58px);
+  left: var(--canvas-card-menu-left, 88px);
   bottom: var(--canvas-card-menu-bottom, 56px);
   z-index: 180;
   min-width: 176px;
@@ -450,6 +450,31 @@ small {
 
 .canvas-minimap-bar:disabled {
   cursor: default;
+}
+
+.canvas-reset-layout-button {
+  position: absolute;
+  left: 52px;
+  bottom: 18px;
+  width: 28px;
+  height: 28px;
+  display: grid;
+  place-items: center;
+  padding: 0;
+  pointer-events: auto;
+  color: var(--db-text-muted);
+  cursor: pointer;
+}
+
+.canvas-reset-layout-button:hover {
+  color: var(--db-text);
+  background: var(--db-surface-3);
+}
+
+.canvas-reset-layout-button:disabled {
+  cursor: default;
+  color: var(--db-text-subtle);
+  background: transparent;
 }
 
 .canvas-minimap-panel {

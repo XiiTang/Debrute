@@ -1163,6 +1163,9 @@ const actions: WorkbenchActions = {
   openTextEditorWindow: () => undefined,
   toggleTextFileWordWrap: () => undefined,
   updateCanvasNodeLayouts: async () => undefined,
+  resetCanvasNodeLayouts: async () => {
+    throw new Error('not used');
+  },
   updateCanvasNodeLayers: async () => undefined,
   updateCanvasFeedbackEntry: async () => undefined,
   addProjectPathToCanvasMap: async () => undefined,

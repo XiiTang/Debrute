@@ -1,5 +1,7 @@
 import { describe, expect, it, vi } from 'vitest';
 import type { WorkbenchProjectFileBatchOperationResult, WorkbenchProjectSessionSnapshot } from '@debrute/app-protocol';
+import type { CanvasProjection } from '@debrute/canvas-core';
+import type { CanvasEditorRuntime } from '../canvas/runtime/CanvasEditorRuntime';
 import type { WorkbenchContextMenuCommand } from '../shell/contextMenu';
 import { runWorkbenchContextMenuCommand } from './workbenchContextMenuCommands';
 
@@ -235,6 +237,108 @@ describe('workbench context menu commands', () => {
       overwrite: true
     });
   });
+
+  it('resets a manual Canvas node and centers its updated projection', async () => {
+    const resetCanvasNodeLayouts = vi.fn(async () => ({
+      projectId: 'project-live-id',
+      projectRevision: 2,
+      resetCount: 1,
+      canvas: {
+        schemaVersion: 1 as const,
+        id: 'canvas-1',
+        nodeElements: [],
+        annotations: [],
+        preferences: {
+          showDiagnostics: true
+        }
+      },
+      projection: canvasProjectionFixture('canvas-1', {
+        projectRelativePath: 'flow/cover.png',
+        x: 200,
+        y: 100,
+        width: 100,
+        height: 50
+      })
+    }));
+    const setCamera = vi.fn<CanvasEditorRuntime['camera']['setCamera']>();
+    const setSelection = vi.fn<CanvasEditorRuntime['setSelection']>();
+
+    runWorkbenchContextMenuCommand(commandInput({
+      command: 'reset-auto-layout',
+      target: { source: 'canvas', kind: 'file', projectRelativePath: 'flow/cover.png' },
+      activeProjection: canvasProjectionFixture('canvas-1', {
+        projectRelativePath: 'flow/cover.png',
+        x: 1000,
+        y: 900,
+        width: 100,
+        height: 50,
+        layoutMode: 'manual'
+      }),
+      activeCanvasRuntime: canvasRuntimeFixture({ setSelection, setCamera }),
+      actions: {
+        resetCanvasNodeLayouts
+      }
+    }));
+
+    await Promise.resolve();
+
+    expect(resetCanvasNodeLayouts).toHaveBeenCalledWith('canvas-1', {
+      pathRules: ['flow/cover.png']
+    });
+    expect(setSelection).toHaveBeenCalledWith({ kind: 'node', projectRelativePath: 'flow/cover.png' });
+    expect(setCamera).toHaveBeenCalledWith({ x: 250, y: 175, z: 1 });
+  });
+
+  it('resets a manual Canvas directory with a recursive Canvas Map path rule', async () => {
+    const resetCanvasNodeLayouts = vi.fn(async () => ({
+      projectId: 'project-live-id',
+      projectRevision: 2,
+      resetCount: 1,
+      canvas: {
+        schemaVersion: 1 as const,
+        id: 'canvas-1',
+        nodeElements: [],
+        annotations: [],
+        preferences: {
+          showDiagnostics: true
+        }
+      },
+      projection: canvasProjectionFixture('canvas-1', {
+        projectRelativePath: 'flow',
+        nodeKind: 'directory',
+        x: 200,
+        y: 100,
+        width: 120,
+        height: 80
+      })
+    }));
+    const setCamera = vi.fn<CanvasEditorRuntime['camera']['setCamera']>();
+
+    runWorkbenchContextMenuCommand(commandInput({
+      command: 'reset-auto-layout',
+      target: { source: 'canvas', kind: 'directory', projectRelativePath: 'flow' },
+      activeProjection: canvasProjectionFixture('canvas-1', {
+        projectRelativePath: 'flow',
+        nodeKind: 'directory',
+        x: 1000,
+        y: 900,
+        width: 120,
+        height: 80,
+        layoutMode: 'manual'
+      }),
+      activeCanvasRuntime: canvasRuntimeFixture({ setCamera }),
+      actions: {
+        resetCanvasNodeLayouts
+      }
+    }));
+
+    await Promise.resolve();
+
+    expect(resetCanvasNodeLayouts).toHaveBeenCalledWith('canvas-1', {
+      pathRules: ['flow/']
+    });
+    expect(setCamera).toHaveBeenCalledWith({ x: 240, y: 160, z: 1 });
+  });
 });
 
 function commandInput(overrides: {
@@ -244,7 +348,9 @@ function commandInput(overrides: {
     ? T extends { target: infer U }
       ? U
       : never
-    : never;
+      : never;
+  activeProjection?: Parameters<typeof runWorkbenchContextMenuCommand>[0]['activeProjection'];
+  activeCanvasRuntime?: Partial<Parameters<typeof runWorkbenchContextMenuCommand>[0]['activeCanvasRuntime']>;
   fileClipboard?: Parameters<typeof runWorkbenchContextMenuCommand>[0]['fileClipboard'];
   snapshot?: WorkbenchProjectSessionSnapshot;
   copyText?: Parameters<typeof runWorkbenchContextMenuCommand>[0]['copyText'];
@@ -264,8 +370,8 @@ function commandInput(overrides: {
       },
       position: { x: 0, y: 0 }
     },
-    activeProjection: undefined,
-    activeCanvasRuntime: undefined,
+    activeProjection: overrides.activeProjection,
+    activeCanvasRuntime: overrides.activeCanvasRuntime as Parameters<typeof runWorkbenchContextMenuCommand>[0]['activeCanvasRuntime'],
     fileClipboard: overrides.fileClipboard,
     actions: {
       copyProjectAbsolutePaths: async () => ({ paths: ['/tmp/debrute-project/unused'] }),
@@ -284,6 +390,75 @@ function commandInput(overrides: {
     confirmPermanentDelete: overrides.confirmPermanentDelete ?? (() => true),
     projectSnapshot: overrides.snapshot,
     confirmMoveOverwrite: overrides.confirmMoveOverwrite ?? (() => true)
+  };
+}
+
+function canvasRuntimeFixture(input: {
+  setSelection?: CanvasEditorRuntime['setSelection'];
+  setCamera?: CanvasEditorRuntime['camera']['setCamera'];
+} = {}): Partial<CanvasEditorRuntime> {
+  const setSelection = input.setSelection ?? (() => undefined);
+  const setCamera = input.setCamera ?? (() => undefined);
+  return {
+    setSelection: (selection) => {
+      setSelection(selection);
+    },
+    getSnapshot: () => ({
+      surfaceSize: { width: 1000, height: 600 },
+      camera: { x: 0, y: 0, z: 1 },
+      cameraState: 'idle' as const,
+      selection: undefined,
+      dragState: undefined,
+      imageResourceZoom: 1
+    }),
+    camera: {
+      getCamera: () => ({ x: 0, y: 0, z: 1 }),
+      setCamera: (camera) => {
+        setCamera(camera);
+      },
+      panBy: vi.fn(),
+      zoomByWheel: vi.fn(),
+      zoomByGesture: vi.fn(),
+      centerOn: vi.fn(),
+      reset: vi.fn()
+    }
+  };
+}
+
+function canvasProjectionFixture(
+  canvasId: string,
+  node: {
+    projectRelativePath: string;
+    nodeKind?: 'file' | 'directory';
+    x: number;
+    y: number;
+    width: number;
+    height: number;
+    layoutMode?: 'manual';
+  }
+): CanvasProjection {
+  return {
+    canvasId,
+    nodes: [{
+      projectRelativePath: node.projectRelativePath,
+      nodeKind: node.nodeKind ?? 'file',
+      ...(node.nodeKind === 'directory' ? {} : { mediaKind: 'image' as const }),
+      x: node.x,
+      y: node.y,
+      width: node.width,
+      height: node.height,
+      z: 0,
+      ...(node.layoutMode ? { layoutMode: node.layoutMode } : {}),
+      availability: {
+        state: 'available',
+        size: 100,
+        mimeType: 'image/png',
+        fileUrl: 'http://127.0.0.1/file.png',
+        revision: 'rev'
+      }
+    }],
+    edges: [],
+    diagnostics: []
   };
 }
 

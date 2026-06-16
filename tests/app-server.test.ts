@@ -1327,6 +1327,99 @@ describe('app-server', () => {
     }
   });
 
+  it('resets manual Canvas layout by all nodes and Canvas Map path rules', async () => {
+    const projectRoot = await mkdtemp(join(tmpdir(), 'debrute-app-server-canvas-reset-layout-'));
+    const server = new DebruteAppServer({
+      canvasNodeLayoutSizeReader: canvasLayoutSizeReader({
+        'outputs/gpt/a.png': { width: 100, height: 100 },
+        'outputs/gpt/b.png': { width: 100, height: 100 },
+        'prompts/cover.md': { width: 420, height: 280 }
+      })
+    });
+    try {
+      await mkdir(join(projectRoot, 'outputs/gpt'), { recursive: true });
+      await mkdir(join(projectRoot, 'prompts'), { recursive: true });
+      await writeFile(join(projectRoot, 'outputs/gpt/a.png'), 'fake', 'utf8');
+      await writeFile(join(projectRoot, 'outputs/gpt/b.png'), 'fake', 'utf8');
+      await writeFile(join(projectRoot, 'prompts/cover.md'), '# Cover\n', 'utf8');
+      await server.openProject(projectRoot, { initializeIfMissing: true, createDefaultCanvas: true });
+      await writeCanvasMap(projectRoot, 'canvas-1', canvasMapSource([
+        'outputs/gpt/',
+        'prompts/cover.md'
+      ]));
+      await server.pushCanvasMapForProject(projectRoot, { canvasId: 'canvas-1' });
+      await server.refreshProject();
+      await server.updateCanvasNodeLayouts({
+        canvasId: 'canvas-1',
+        nodeLayouts: [
+          { projectRelativePath: 'outputs', x: 2000, y: 1000 },
+          { projectRelativePath: 'outputs/gpt', x: 2100, y: 1100 },
+          { projectRelativePath: 'outputs/gpt/a.png', x: 2200, y: 1200 },
+          { projectRelativePath: 'outputs/gpt/b.png', x: 2300, y: 1300 },
+          { projectRelativePath: 'prompts/cover.md', x: 2400, y: 1400 }
+        ]
+      });
+
+      const partial = await server.resetCanvasNodeLayouts({
+        canvasId: 'canvas-1',
+        pathRules: ['outputs/gpt/']
+      });
+
+      expect(partial.resetCount).toBe(3);
+      expect(partial.canvas.nodeElements.map((node) => [node.projectRelativePath, node.layoutMode])).toEqual([
+        ['outputs', 'manual'],
+        ['outputs/gpt', undefined],
+        ['outputs/gpt/a.png', undefined],
+        ['outputs/gpt/b.png', undefined],
+        ['prompts', undefined],
+        ['prompts/cover.md', 'manual']
+      ]);
+      expect(partial.canvas.nodeElements.find((node) => node.projectRelativePath === 'outputs/gpt/a.png')).not.toMatchObject({ x: 2200, y: 1200 });
+      expect(partial.canvas.nodeElements.find((node) => node.projectRelativePath === 'prompts/cover.md')).toMatchObject({
+        x: 2400,
+        y: 1400,
+        layoutMode: 'manual'
+      });
+
+      const all = await server.resetCanvasNodeLayouts({
+        canvasId: 'canvas-1',
+        all: true
+      });
+
+      expect(all.resetCount).toBe(2);
+      expect(all.canvas.nodeElements.every((node) => node.layoutMode !== 'manual')).toBe(true);
+      await expect(readFile(join(projectRoot, '.debrute/canvases/canvas-1.json'), 'utf8')).resolves.not.toContain('"layoutMode"');
+    } finally {
+      server.close();
+      await rm(projectRoot, { recursive: true, force: true });
+    }
+  });
+
+  it('validates Canvas Map source when reset layout matches no manual nodes', async () => {
+    const projectRoot = await mkdtemp(join(tmpdir(), 'debrute-app-server-canvas-reset-layout-noop-'));
+    const server = new DebruteAppServer({
+      canvasNodeLayoutSizeReader: canvasLayoutSizeReader({
+        'prompts/cover.md': { width: 420, height: 280 }
+      })
+    });
+    try {
+      await mkdir(join(projectRoot, 'prompts'), { recursive: true });
+      await writeFile(join(projectRoot, 'prompts/cover.md'), '# Cover\n', 'utf8');
+      await server.openProject(projectRoot, { initializeIfMissing: true, createDefaultCanvas: true });
+      await writeCanvasMap(projectRoot, 'canvas-1', canvasMapSource(['prompts/cover.md']));
+      await server.pushCanvasMapForProject(projectRoot, { canvasId: 'canvas-1' });
+      await writeCanvasMap(projectRoot, 'canvas-1', 'paths:\n  - [broken\n');
+
+      await expect(server.resetCanvasNodeLayouts({
+        canvasId: 'canvas-1',
+        pathRules: ['future/missing.md']
+      })).rejects.toMatchObject({ code: 'canvas_map_invalid_yaml' });
+    } finally {
+      server.close();
+      await rm(projectRoot, { recursive: true, force: true });
+    }
+  });
+
   it('applies Canvas Map layout rows when pushing into Canvas JSON', async () => {
     const projectRoot = await mkdtemp(join(tmpdir(), 'debrute-app-server-canvas-map-rows-'));
     const server = new DebruteAppServer({

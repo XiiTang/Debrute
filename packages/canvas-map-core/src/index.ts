@@ -165,6 +165,64 @@ export function expandCanvasMap(map: CanvasMapDocument, entries: CanvasMapProjec
   };
 }
 
+export function expandCanvasMapPathRules(
+  rules: string[],
+  entries: CanvasMapProjectEntry[]
+): CanvasMapNodeProjection[] {
+  const normalizedRules = rules.map(normalizePathRule);
+  const entryByPath = new Map(entries.map((entry) => [
+    normalizeProjectPath(entry.projectRelativePath),
+    entry.kind
+  ]));
+  const filePaths = entries
+    .filter((entry) => entry.kind === 'file')
+    .map((entry) => normalizeProjectPath(entry.projectRelativePath))
+    .sort(compareProjectPath);
+  const resetByPath = new Map<string, CanvasMapNodeProjection>();
+
+  for (const rule of normalizedRules) {
+    const currentKind = entryByPath.get(rule.pattern);
+    if (rule.kind === 'exact-file') {
+      if (currentKind === 'directory') {
+        throw new CanvasMapError(
+          `Canvas Map file rule currently resolves to a directory. Use a trailing slash for recursive folders: ${rule.pattern}/`,
+          'canvas_map_invalid_path'
+        );
+      }
+      if (currentKind === 'file') {
+        resetByPath.set(rule.pattern, { projectRelativePath: rule.pattern, nodeKind: 'file' });
+      }
+      continue;
+    }
+    if (rule.kind === 'recursive-directory') {
+      if (currentKind === 'file') {
+        throw new CanvasMapError(`Canvas Map folder rule currently resolves to a file: ${rule.pattern}`, 'canvas_map_invalid_path');
+      }
+      if (currentKind === 'directory') {
+        resetByPath.set(rule.pattern, { projectRelativePath: rule.pattern, nodeKind: 'directory' });
+      }
+      for (const entry of entries) {
+        const projectRelativePath = normalizeProjectPath(entry.projectRelativePath);
+        if (projectRelativePath.startsWith(`${rule.pattern}/`)) {
+          resetByPath.set(projectRelativePath, {
+            projectRelativePath,
+            nodeKind: entry.kind
+          });
+        }
+      }
+      continue;
+    }
+    const matches = controlledGlobMatcher(rule.pattern);
+    for (const filePath of filePaths) {
+      if (matches(filePath)) {
+        resetByPath.set(filePath, { projectRelativePath: filePath, nodeKind: 'file' });
+      }
+    }
+  }
+
+  return [...resetByPath.values()].sort(compareNodesByTreeOrder);
+}
+
 export function serializeCanvasMapWithRule(content: string, rule: string): string {
   const parsed = parseYaml(content);
   if (!isRecord(parsed)) {

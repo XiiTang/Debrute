@@ -663,6 +663,33 @@ export class DebruteAppServer {
     ));
   }
 
+  async resetCanvasNodeLayouts(
+    input: { canvasId: string } & ({ all: true } | { pathRules: string[] })
+  ): Promise<{ canvas: CanvasDocument; projection: CanvasProjection; resetCount: number }> {
+    return this.enqueueSessionOperation(async () => {
+      let reset: Awaited<ReturnType<CanvasMapSessionService['resetCanvasNodeLayouts']>>;
+      try {
+        reset = await this.canvasMapSessionService.resetCanvasNodeLayouts(this.getSnapshot().projectRoot, input);
+      } catch (error) {
+        if (error instanceof CanvasMapError) {
+          throw canvasMapServiceError(error, input.canvasId);
+        }
+        throw error;
+      }
+      const snapshot = await this.refreshProjectUnlocked();
+      const canvas = snapshot.canvases.find((item) => item.id === input.canvasId);
+      const projection = snapshot.projections.find((item) => item.canvasId === input.canvasId);
+      if (!canvas || !projection) {
+        throw serviceError('canvas_map_canvas_missing', `Canvas is not loaded: ${input.canvasId}`, { canvas_id: input.canvasId });
+      }
+      return {
+        canvas,
+        projection,
+        resetCount: reset.resetCount
+      };
+    });
+  }
+
   async updateCanvasNodeLayers(input: {
     canvasId: string;
     nodeProjectRelativePathsTopFirst?: string[];
