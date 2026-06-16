@@ -91,9 +91,7 @@ export function runWorkbenchContextMenuCommand(input: {
   if (input.command === 'reset-auto-layout') {
     const canvasId = input.activeProjection?.canvasId;
     if (canvasId) {
-      void input.actions.resetCanvasNodeLayouts(canvasId, {
-        pathRules: [canvasMapResetRuleForTarget(target)]
-      }).then((result) => {
+      void input.actions.resetCanvasNodeLayouts(canvasId, canvasLayoutResetInputForTarget(target)).then((result) => {
         const updatedNode = projectedContextMenuNode(result.projection, projectRelativePath);
         const snapshot = input.activeCanvasRuntime?.getSnapshot();
         if (!updatedNode || !input.activeCanvasRuntime || !snapshot?.surfaceSize) {
@@ -112,8 +110,15 @@ export function runWorkbenchContextMenuCommand(input: {
   input.closeContextMenu();
 }
 
-function canvasMapResetRuleForTarget(target: Extract<WorkbenchContextMenuTarget, { source: 'canvas' }>): string {
-  return target.kind === 'directory' ? `${target.projectRelativePath}/` : target.projectRelativePath;
+function canvasLayoutResetInputForTarget(
+  target: Extract<WorkbenchContextMenuTarget, { source: 'canvas' }>
+): Parameters<WorkbenchActions['resetCanvasNodeLayouts']>[1] {
+  if (target.kind === 'directory' && target.projectRelativePath === '') {
+    return { all: true };
+  }
+  return {
+    pathRules: [target.kind === 'directory' ? `${target.projectRelativePath}/` : target.projectRelativePath]
+  };
 }
 
 function runExplorerCommand(

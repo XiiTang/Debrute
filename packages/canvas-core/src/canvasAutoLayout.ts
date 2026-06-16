@@ -19,6 +19,7 @@ export interface CanvasAutoLayoutInput {
 const HORIZONTAL_TREE_GAP = 100;
 const VERTICAL_GAP = 80;
 const HORIZONTAL_ROW_GAP = VERTICAL_GAP;
+const PROJECT_ROOT_PATH = '';
 
 interface LayoutTreeNode {
   node: CanvasDesiredNode;
@@ -177,10 +178,11 @@ function layoutHorizontalRow(input: {
 
 function buildLayoutTree(desired: CanvasDesiredNode[]): { roots: LayoutTreeNode[]; byPath: Map<string, LayoutTreeNode> } {
   const byPath = new Map<string, LayoutTreeNode>();
+  const hasProjectRoot = desired.some((node) => node.projectRelativePath === PROJECT_ROOT_PATH);
   for (const node of desired) {
     byPath.set(node.projectRelativePath, {
       node,
-      depth: node.projectRelativePath.split('/').length - 1,
+      depth: layoutDepth(node.projectRelativePath, hasProjectRoot),
       children: []
     });
   }
@@ -188,7 +190,7 @@ function buildLayoutTree(desired: CanvasDesiredNode[]): { roots: LayoutTreeNode[
   const roots: LayoutTreeNode[] = [];
   for (const treeNode of byPath.values()) {
     const parent = parentPath(treeNode.node.projectRelativePath);
-    const parentNode = parent ? byPath.get(parent) : undefined;
+    const parentNode = parent === undefined ? undefined : byPath.get(parent);
     if (parentNode) {
       parentNode.children.push(treeNode);
     } else {
@@ -365,6 +367,14 @@ function compareDesiredPath(left: CanvasDesiredNode, right: CanvasDesiredNode): 
   return compareProjectPath(left.projectRelativePath, right.projectRelativePath);
 }
 
+function layoutDepth(projectRelativePath: string, hasProjectRoot: boolean): number {
+  if (projectRelativePath === PROJECT_ROOT_PATH) {
+    return 0;
+  }
+  const pathDepth = projectRelativePath.split('/').length - 1;
+  return hasProjectRoot ? pathDepth + 1 : pathDepth;
+}
+
 function compareProjectPath(left: string, right: string): number {
   const leftParts = left.split('/');
   const rightParts = right.split('/');
@@ -384,6 +394,12 @@ function basename(path: string): string {
 }
 
 function parentPath(path: string): string | undefined {
+  if (path === PROJECT_ROOT_PATH) {
+    return undefined;
+  }
   const index = path.lastIndexOf('/');
+  if (index < 0) {
+    return PROJECT_ROOT_PATH;
+  }
   return index > 0 ? path.slice(0, index) : undefined;
 }

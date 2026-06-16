@@ -59,6 +59,34 @@ describe('canvas-core', () => {
     ]);
   });
 
+  it('projects the project root node and derives edges to top-level children', () => {
+    const canvas = createCanvasWithNodes([
+      { projectRelativePath: '', nodeKind: 'directory', x: 0, y: 0, width: 240, height: 96 },
+      { projectRelativePath: 'README.md', nodeKind: 'file', mediaKind: 'text', x: 340, y: 0, width: 420, height: 280 },
+      { projectRelativePath: 'outputs', nodeKind: 'directory', x: 340, y: 360, width: 240, height: 96 }
+    ]);
+
+    const projection = projectCanvas({ canvas, nodeAvailability: availableNode });
+
+    expect(projection.nodes.map((node) => node.projectRelativePath)).toEqual([
+      '',
+      'README.md',
+      'outputs'
+    ]);
+    expect(projection.edges).toEqual([
+      {
+        id: '--README.md',
+        sourceProjectRelativePath: '',
+        targetProjectRelativePath: 'README.md'
+      },
+      {
+        id: '--outputs',
+        sourceProjectRelativePath: '',
+        targetProjectRelativePath: 'outputs'
+      }
+    ]);
+  });
+
   it('marks moved and resized nodes manual and uses projectRelativePath identity', () => {
     const canvas = createCanvasWithNodes([
       { projectRelativePath: 'flow/a.md', nodeKind: 'file', mediaKind: 'text', x: 0, y: 0, width: 420, height: 280 },
@@ -280,6 +308,39 @@ describe('canvas-core', () => {
     expect(reconciled.find((node) => node.projectRelativePath === 'flow/outputs/a.png')).toMatchObject({ x: 680, y: 0 });
     expect(reconciled.find((node) => node.projectRelativePath === 'flow/outputs/b.png')).toMatchObject({ x: 1400, y: 0 });
     expect(reconciled.find((node) => node.projectRelativePath === 'flow/outputs/c.png')).toMatchObject({ x: 2120, y: 0 });
+  });
+
+  it('lays out root-level files in a row under the project root node', () => {
+    const desired: CanvasDesiredNode[] = [
+      { projectRelativePath: '', nodeKind: 'directory' },
+      { projectRelativePath: 'README.md', nodeKind: 'file', mediaKind: 'text' },
+      { projectRelativePath: 'brief.md', nodeKind: 'file', mediaKind: 'text' },
+      { projectRelativePath: 'outputs', nodeKind: 'directory' },
+      { projectRelativePath: 'outputs/a.png', nodeKind: 'file', mediaKind: 'image' }
+    ];
+
+    const reconciled = reconcileCanvasNodeElements({
+      existing: [],
+      desired,
+      layoutRows: [{
+        parentProjectRelativePath: '',
+        memberProjectRelativePaths: ['README.md', 'brief.md']
+      }],
+      layoutSizeForNode: layoutSize
+    });
+
+    const root = nodeByPath(reconciled, '');
+    const readme = nodeByPath(reconciled, 'README.md');
+    const brief = nodeByPath(reconciled, 'brief.md');
+    const outputs = nodeByPath(reconciled, 'outputs');
+
+    expect(root).toMatchObject({ x: 0 });
+    expect(brief.x).toBeGreaterThan(root.x);
+    expect(readme.x).toBeGreaterThan(brief.x);
+    expect(readme.y).toBe(brief.y);
+    expect(readme.y).toBeLessThan(outputs.y);
+    expect(outputs.x).toBe(brief.x);
+    expectNoAutomaticOverlaps(reconciled);
   });
 
   it('vertically centers different-height row-controlled direct child files in one horizontal row', () => {

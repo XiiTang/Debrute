@@ -58,7 +58,7 @@ describe('App Server project watch events', () => {
       const snapshot = server.getSnapshot();
       expect(snapshot.files.map((file) => file.projectRelativePath)).toContain('.debrute/canvas-maps/canvas-1.yaml');
       await expect(readFile(join(projectRoot, '.debrute/canvases/canvas-1.json'), 'utf8')).resolves.toContain('outputs/b.png');
-      expect(snapshot.canvases[0]?.nodeElements.map((node) => node.projectRelativePath)).toEqual(['outputs', 'outputs/b.png']);
+      expect(snapshot.canvases[0]?.nodeElements.map((node) => node.projectRelativePath)).toEqual(['', 'outputs', 'outputs/b.png']);
     } finally {
       server.close();
       await rm(projectRoot, { recursive: true, force: true });
@@ -100,6 +100,7 @@ describe('App Server project watch events', () => {
       const snapshot = server.getSnapshot();
       expect(snapshot.files.map((file) => file.projectRelativePath)).toContain('outputs/b.png');
       expect(snapshot.canvases[0]?.nodeElements.map((node) => node.projectRelativePath)).toEqual([
+        '',
         'outputs',
         'outputs/a.png',
         'outputs/b.png'

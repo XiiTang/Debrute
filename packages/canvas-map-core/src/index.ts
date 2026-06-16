@@ -72,6 +72,8 @@ export class CanvasMapError extends Error {
   }
 }
 
+const PROJECT_ROOT_PATH = '';
+
 export function canvasMapPath(canvasId: string): string {
   assertValidCanvasId(canvasId);
   return `.debrute/canvas-maps/${canvasId}.yaml`;
@@ -152,6 +154,9 @@ export function expandCanvasMap(map: CanvasMapDocument, entries: CanvasMapProjec
 
   const matchedFileList = [...matchedFiles].sort(compareProjectPath);
   const nodeByPath = new Map<string, CanvasMapNodeProjection>();
+  if (matchedFileList.length > 0) {
+    nodeByPath.set(PROJECT_ROOT_PATH, { projectRelativePath: PROJECT_ROOT_PATH, nodeKind: 'directory' });
+  }
   for (const filePath of matchedFileList) {
     addAncestors(nodeByPath, filePath);
     nodeByPath.set(filePath, { projectRelativePath: filePath, nodeKind: 'file' });
@@ -321,7 +326,7 @@ function expandLayoutRows(rowRules: CanvasMapRowRule[], matchedFilePaths: string
       }
       matchedByFile.set(filePath, rowIndex);
       const parent = parentPath(filePath);
-      if (!parent) {
+      if (parent === undefined) {
         continue;
       }
       pathsByParent.set(parent, [
@@ -338,7 +343,7 @@ function expandLayoutRows(rowRules: CanvasMapRowRule[], matchedFilePaths: string
       continue;
     }
     const parent = parentPath(filePath);
-    if (!parent) {
+    if (parent === undefined) {
       continue;
     }
     remainderPathsByParent.set(parent, [
@@ -489,6 +494,9 @@ function compareProjectPath(left: string, right: string): number {
 
 function parentPath(path: string): string | undefined {
   const index = path.lastIndexOf('/');
+  if (index < 0) {
+    return PROJECT_ROOT_PATH;
+  }
   return index > 0 ? path.slice(0, index) : undefined;
 }
 

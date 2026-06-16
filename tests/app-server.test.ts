@@ -1043,6 +1043,7 @@ describe('app-server', () => {
       expect(written.projectRelativePath).toBe('notes/output.md');
       await expect(readFile(join(projectRoot, 'notes/output.md'), 'utf8')).resolves.toBe('done\n');
       expect(snapshot.canvases[0]?.nodeElements.map((node) => [node.projectRelativePath, node.nodeKind, node.mediaKind])).toEqual([
+        ['', 'directory', undefined],
         ['notes', 'directory', undefined],
         ['notes/brief.md', 'file', 'text'],
         ['notes/output.md', 'file', 'text']
@@ -1051,6 +1052,7 @@ describe('app-server', () => {
         availability: { state: 'available', mimeType: 'text/markdown' }
       });
       expect(snapshot.projections[0]?.edges.map((edge) => [edge.sourceProjectRelativePath, edge.targetProjectRelativePath])).toEqual([
+        ['', 'notes'],
         ['notes', 'notes/brief.md'],
         ['notes', 'notes/output.md']
       ]);
@@ -1083,6 +1085,7 @@ describe('app-server', () => {
 
       expect(written.projectRelativePath).toBe('.debrute/canvas-maps/canvas-1.yaml');
       expect(server.getSnapshot().canvases[0]?.nodeElements.map((node) => node.projectRelativePath)).toEqual([
+        '',
         'notes',
         'notes/brief.md'
       ]);
@@ -1161,6 +1164,7 @@ describe('app-server', () => {
       const snapshot = await server.refreshProject();
 
       expect(snapshot.canvases[0]?.nodeElements.map((node) => node.projectRelativePath)).toEqual([
+        '',
         'outputs',
         'outputs/gpt',
         'outputs/gpt/one.md',
@@ -1196,6 +1200,7 @@ describe('app-server', () => {
 
       expect(snapshot.diagnostics.find((diagnostic) => diagnostic.code === 'document_drift')).toBeUndefined();
       expect(snapshot.canvases[0]?.nodeElements.map((node) => node.projectRelativePath)).toEqual([
+        '',
         'notes',
         'notes/a.md',
         'notes/b.md'
@@ -1252,7 +1257,7 @@ describe('app-server', () => {
       unsubscribe();
 
       expect(layout.canvas.nodeElements.find((node) => node.projectRelativePath === nodePath)).toMatchObject({ x: 50, y: 60, width: 640, height: 360, layoutMode: 'manual' });
-      expect(layer.canvas.nodeElements.find((node) => node.projectRelativePath === 'image-production')).toMatchObject({ z: 2 });
+      expect(layer.canvas.nodeElements.find((node) => node.projectRelativePath === 'image-production')).toMatchObject({ z: 3 });
       expect(layout.projection.canvasId).toBe('canvas-1');
       expect(layer.projection.canvasId).toBe('canvas-1');
       expect(layoutReadCount).toBe(layoutReadCountBeforeVisualUpdates);
@@ -1305,12 +1310,14 @@ describe('app-server', () => {
       const snapshot = await server.refreshProject();
 
       expect(snapshot.canvases[0]?.nodeElements.map((node) => node.projectRelativePath)).toEqual([
+        '',
         'outputs',
         'outputs/gpt',
         'outputs/gpt/b.png'
       ]);
       expectNoAutomaticCanvasNodeOverlaps(snapshot.canvases[0]!.nodeElements);
       expect(snapshot.canvases[0]?.nodeElements.map((node) => [node.projectRelativePath, node.layoutMode])).toEqual([
+        ['', undefined],
         ['outputs', undefined],
         ['outputs/gpt', undefined],
         ['outputs/gpt/b.png', 'manual']
@@ -1367,6 +1374,7 @@ describe('app-server', () => {
 
       expect(partial.resetCount).toBe(3);
       expect(partial.canvas.nodeElements.map((node) => [node.projectRelativePath, node.layoutMode])).toEqual([
+        ['', undefined],
         ['outputs', 'manual'],
         ['outputs/gpt', undefined],
         ['outputs/gpt/a.png', undefined],
@@ -1455,6 +1463,7 @@ describe('app-server', () => {
         layoutMode: 'manual'
       });
       expect(reset.canvas.nodeElements.map((node) => node.projectRelativePath)).toEqual([
+        '',
         'prompts',
         'prompts/cover.md'
       ]);
@@ -1502,10 +1511,11 @@ describe('app-server', () => {
       expect(gptB.x).toBeGreaterThan(gptA.x);
       expect(gptA.y + gptA.height / 2).toBe(gptB.y + gptB.height / 2);
       expectNoAutomaticCanvasNodeOverlaps(nodes);
-      expect(nodes.find((node) => node.projectRelativePath === 'outputs')?.x).toBe(0);
-      expect(nodes.find((node) => node.projectRelativePath === 'outputs/gemini')?.x).toBe(340);
-      expect(nodes.find((node) => node.projectRelativePath === 'outputs/gemini/high')?.x).toBe(680);
-      expect(nodes.find((node) => node.projectRelativePath === 'outputs/gemini/high/a.png')?.x).toBe(1020);
+      expect(nodes.find((node) => node.projectRelativePath === '')?.x).toBe(0);
+      expect(nodes.find((node) => node.projectRelativePath === 'outputs')?.x).toBe(340);
+      expect(nodes.find((node) => node.projectRelativePath === 'outputs/gemini')?.x).toBe(680);
+      expect(nodes.find((node) => node.projectRelativePath === 'outputs/gemini/high')?.x).toBe(1020);
+      expect(nodes.find((node) => node.projectRelativePath === 'outputs/gemini/high/a.png')?.x).toBe(1360);
     } finally {
       server.close();
       await rm(projectRoot, { recursive: true, force: true });
@@ -1549,6 +1559,53 @@ describe('app-server', () => {
       expect(b.y).toBeLessThan(a.y);
       expectNoAutomaticCanvasNodeOverlaps(nodes);
       await expect(readFile(join(projectRoot, '.debrute/canvases/canvas-1.json'), 'utf8')).resolves.not.toContain('layoutRows');
+    } finally {
+      server.close();
+      await rm(projectRoot, { recursive: true, force: true });
+    }
+  });
+
+  it('pushes Canvas Map project root nodes and default rows for root-level files', async () => {
+    const projectRoot = await mkdtemp(join(tmpdir(), 'debrute-app-server-canvas-map-root-rows-'));
+    const server = new DebruteAppServer({
+      canvasNodeLayoutSizeReader: canvasLayoutSizeReader({
+        'outputs/gpt/a.png': { width: 100, height: 100 }
+      })
+    });
+    try {
+      await mkdir(join(projectRoot, 'outputs/gpt'), { recursive: true });
+      await writeFile(join(projectRoot, 'README.md'), '# Readme\n', 'utf8');
+      await writeFile(join(projectRoot, 'brief.md'), '# Brief\n', 'utf8');
+      await writeFile(join(projectRoot, 'outputs/gpt/a.png'), 'fake', 'utf8');
+      await server.openProject(projectRoot, { initializeIfMissing: true, createDefaultCanvas: true });
+      await writeCanvasMap(projectRoot, 'canvas-1', canvasMapSource([
+        'README.md',
+        'brief.md',
+        'outputs/gpt/'
+      ]));
+
+      await server.pushCanvasMapForProject(projectRoot, { canvasId: 'canvas-1' });
+
+      const nodes = (await server.refreshProject()).canvases[0]!.nodeElements;
+      const root = nodes.find((node) => node.projectRelativePath === '')!;
+      const readme = nodes.find((node) => node.projectRelativePath === 'README.md')!;
+      const brief = nodes.find((node) => node.projectRelativePath === 'brief.md')!;
+      const outputs = nodes.find((node) => node.projectRelativePath === 'outputs')!;
+
+      expect(nodes.map((node) => node.projectRelativePath)).toEqual([
+        '',
+        'brief.md',
+        'outputs',
+        'outputs/gpt',
+        'outputs/gpt/a.png',
+        'README.md'
+      ]);
+      expect(root).toMatchObject({ nodeKind: 'directory' });
+      expect(brief.x).toBeGreaterThan(root.x);
+      expect(readme.x).toBeGreaterThan(brief.x);
+      expect(readme.y).toBe(brief.y);
+      expect(readme.y).toBeLessThan(outputs.y);
+      expectNoAutomaticCanvasNodeOverlaps(nodes);
     } finally {
       server.close();
       await rm(projectRoot, { recursive: true, force: true });
@@ -1758,6 +1815,7 @@ describe('app-server', () => {
       const snapshot = await server.refreshProject();
 
       expect(snapshot.canvases[0]?.nodeElements.map((node) => [node.projectRelativePath, node.layoutMode])).toEqual([
+        ['', undefined],
         ['image-production', undefined],
         ['image-production/generated', undefined],
         ['image-production/generated/a.png', undefined],
@@ -1898,6 +1956,7 @@ describe('app-server', () => {
       });
 
       expect(result.snapshot.canvases[0]?.nodeElements.map((node) => node.projectRelativePath)).toEqual([
+        '',
         'prompts',
         'prompts/alt.md',
         'prompts/cover.md',

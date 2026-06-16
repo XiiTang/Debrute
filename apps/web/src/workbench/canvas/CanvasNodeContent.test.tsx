@@ -73,6 +73,24 @@ describe('CanvasImageNodePreview', () => {
 });
 
 describe('CanvasNodeContent text chrome', () => {
+  it('renders the project root directory with a non-empty label', () => {
+    const html = renderToStaticMarkup(
+      <CanvasNodeContent
+        node={directoryNode('')}
+        selected
+        culled={false}
+        actions={actionsFixture()}
+        textBuffer={undefined}
+        onSelectNode={() => undefined}
+        onTitlePointerDown={() => undefined}
+        onTitlePointerMove={() => undefined}
+        onTitlePointerUp={() => undefined}
+      />
+    );
+
+    expect(html).toContain('Project Root');
+  });
+
   it('renders text node titlebar actions through Workbench UI primitives', () => {
     const html = renderToStaticMarkup(
       <CanvasNodeContent
@@ -218,6 +236,25 @@ function imageNode(path: string, revision: string): ProjectedCanvasNode {
       fileUrl: `http://127.0.0.1:17321/api/projects/p/files/raw/${path}?v=${revision}`,
       canvasImagePreviewable: true,
       canvasImagePreviewSourceWidth: 1600
+    }
+  };
+}
+
+function directoryNode(path: string): ProjectedCanvasNode {
+  return {
+    projectRelativePath: path,
+    nodeKind: 'directory',
+    x: 0,
+    y: 0,
+    width: 240,
+    height: 96,
+    z: 0,
+    availability: {
+      state: 'available',
+      size: 0,
+      mimeType: 'inode/directory',
+      fileUrl: '',
+      revision: 'rev-a'
     }
   };
 }

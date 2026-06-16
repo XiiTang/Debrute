@@ -160,6 +160,7 @@ export interface UpdateCanvasFeedbackEntryInput {
 const CANVAS_FEEDBACK_MARK_ORDER = new Map<string, number>(
   CANVAS_FEEDBACK_MARKS.map((mark, index) => [mark, index])
 );
+const PROJECT_ROOT_PATH = '';
 
 export function createEmptyCanvasFeedbackDocument(updatedAt: string): CanvasFeedbackDocument {
   assertIsoDateTime(updatedAt, 'Canvas feedback updatedAt must be an ISO date-time string.');
@@ -462,7 +463,7 @@ function structureEdgesForCanvasNodes(nodes: CanvasNodeElement[]): CanvasStructu
   const existing = new Set(nodes.map((node) => node.projectRelativePath));
   return nodes.flatMap((node) => {
     const parent = parentPath(node.projectRelativePath);
-    if (!parent || !existing.has(parent)) {
+    if (parent === undefined || !existing.has(parent)) {
       return [];
     }
     return [{
@@ -491,7 +492,13 @@ function compareDesiredPath(left: CanvasDesiredNode, right: CanvasDesiredNode): 
 }
 
 function parentPath(path: string): string | undefined {
+  if (path === PROJECT_ROOT_PATH) {
+    return undefined;
+  }
   const index = path.lastIndexOf('/');
+  if (index < 0) {
+    return PROJECT_ROOT_PATH;
+  }
   return index > 0 ? path.slice(0, index) : undefined;
 }
 

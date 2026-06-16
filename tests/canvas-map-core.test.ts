@@ -130,6 +130,7 @@ describe('canvas-map core', () => {
       canvasId: 'main',
       sourcePath: '.debrute/canvas-maps/main.yaml',
       nodes: [
+        { projectRelativePath: '', nodeKind: 'directory' },
         { projectRelativePath: 'outputs', nodeKind: 'directory' },
         { projectRelativePath: 'outputs/gemini', nodeKind: 'directory' },
         { projectRelativePath: 'outputs/gemini/high', nodeKind: 'directory' },
@@ -239,6 +240,39 @@ describe('canvas-map core', () => {
     ]);
   });
 
+  it('expands the project root node and default rows for root-level files', () => {
+    const map = parseCanvasMap({
+      canvasId: 'main',
+      sourcePath: '.debrute/canvas-maps/main.yaml',
+      content: [
+        'paths:',
+        '  - "*.md"',
+        ''
+      ].join('\n')
+    });
+
+    const entries: CanvasMapProjectEntry[] = [
+      { projectRelativePath: 'brief.md', kind: 'file' },
+      { projectRelativePath: 'readme.md', kind: 'file' },
+      { projectRelativePath: 'outputs', kind: 'directory' },
+      { projectRelativePath: 'outputs/a.png', kind: 'file' }
+    ];
+
+    expect(expandCanvasMap(map, entries)).toEqual({
+      canvasId: 'main',
+      sourcePath: '.debrute/canvas-maps/main.yaml',
+      nodes: [
+        { projectRelativePath: '', nodeKind: 'directory' },
+        { projectRelativePath: 'brief.md', nodeKind: 'file' },
+        { projectRelativePath: 'readme.md', nodeKind: 'file' }
+      ],
+      layoutRows: [{
+        parentProjectRelativePath: '',
+        memberProjectRelativePaths: ['brief.md', 'readme.md']
+      }]
+    });
+  });
+
   it('expands reset path rules without adding file ancestors', () => {
     const entries: CanvasMapProjectEntry[] = [
       { projectRelativePath: 'outputs', kind: 'directory' },
@@ -285,6 +319,7 @@ describe('canvas-map core', () => {
       { projectRelativePath: 'outputs/gpt/folder.png/nested.png', kind: 'file' }
     ])).toMatchObject({
       nodes: [
+        { projectRelativePath: '', nodeKind: 'directory' },
         { projectRelativePath: 'outputs', nodeKind: 'directory' },
         { projectRelativePath: 'outputs/gpt', nodeKind: 'directory' },
         { projectRelativePath: 'outputs/gpt/folder.png', nodeKind: 'directory' },

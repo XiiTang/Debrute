@@ -524,6 +524,9 @@ function textBufferStatus(buffer: TextFileBuffer | undefined, problem: { title: 
 }
 
 function nodeDisplayName(path: string): string {
+  if (path === '') {
+    return 'Project Root';
+  }
   return path.split('/').pop() ?? path;
 }
 

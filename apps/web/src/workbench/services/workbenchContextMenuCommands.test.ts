@@ -339,6 +339,57 @@ describe('workbench context menu commands', () => {
     });
     expect(setCamera).toHaveBeenCalledWith({ x: 240, y: 160, z: 1 });
   });
+
+  it('resets the Canvas project root with a full Canvas Map layout reset', async () => {
+    const resetCanvasNodeLayouts = vi.fn(async () => ({
+      projectId: 'project-live-id',
+      projectRevision: 2,
+      resetCount: 1,
+      canvas: {
+        schemaVersion: 1 as const,
+        id: 'canvas-1',
+        nodeElements: [],
+        annotations: [],
+        preferences: {
+          showDiagnostics: true
+        }
+      },
+      projection: canvasProjectionFixture('canvas-1', {
+        projectRelativePath: '',
+        nodeKind: 'directory',
+        x: 200,
+        y: 100,
+        width: 120,
+        height: 80
+      })
+    }));
+    const setCamera = vi.fn<CanvasEditorRuntime['camera']['setCamera']>();
+
+    runWorkbenchContextMenuCommand(commandInput({
+      command: 'reset-auto-layout',
+      target: { source: 'canvas', kind: 'directory', projectRelativePath: '' },
+      activeProjection: canvasProjectionFixture('canvas-1', {
+        projectRelativePath: '',
+        nodeKind: 'directory',
+        x: 1000,
+        y: 900,
+        width: 120,
+        height: 80,
+        layoutMode: 'manual'
+      }),
+      activeCanvasRuntime: canvasRuntimeFixture({ setCamera }),
+      actions: {
+        resetCanvasNodeLayouts
+      }
+    }));
+
+    await Promise.resolve();
+
+    expect(resetCanvasNodeLayouts).toHaveBeenCalledWith('canvas-1', {
+      all: true
+    });
+    expect(setCamera).toHaveBeenCalledWith({ x: 240, y: 160, z: 1 });
+  });
 });
 
 function commandInput(overrides: {
