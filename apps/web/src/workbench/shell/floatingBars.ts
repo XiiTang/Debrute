@@ -87,6 +87,23 @@ export function canvasNodeToViewportRect(input: {
   };
 }
 
+export function feedbackBarPlacementForCanvasTarget(input: {
+  target: Pick<CanvasFeedbackBarTarget, 'nodeRect' | 'surfaceRect'>;
+  camera: CanvasCamera;
+  viewportRect: FloatingBarRect;
+  reservedRects: readonly FloatingBarRect[];
+}): FloatingBarPlacement | undefined {
+  return placeCanvasFeedbackBar({
+    nodeViewportRect: canvasNodeToViewportRect({
+      nodeRect: input.target.nodeRect,
+      surfaceRect: input.target.surfaceRect,
+      camera: input.camera
+    }),
+    viewportRect: input.viewportRect,
+    reservedRects: [...input.reservedRects]
+  });
+}
+
 export function placeCanvasFeedbackBar(input: {
   nodeViewportRect: FloatingBarRect;
   viewportRect: FloatingBarRect;

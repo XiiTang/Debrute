@@ -8,6 +8,7 @@ import {
   canvasCardBarRect,
   canvasMinimapButtonRect,
   canvasNodeToViewportRect,
+  feedbackBarPlacementForCanvasTarget,
   canvasResetLayoutButtonRect,
   placeCanvasFeedbackBar,
   placeCanvasMinimapPanel
@@ -83,6 +84,24 @@ describe('floating bar placement', () => {
       y: 160,
       width: 400,
       height: 200
+    });
+  });
+
+  it('places retained feedback targets from the live Canvas camera', () => {
+    expect(feedbackBarPlacementForCanvasTarget({
+      target: {
+        nodeRect: { x: 100, y: 50, width: 200, height: 100 },
+        surfaceRect: { x: 10, y: 20, width: 900, height: 600 }
+      },
+      camera: { x: 30, y: 40, z: 2 },
+      viewportRect: { x: 0, y: 0, width: 1000, height: 700 },
+      reservedRects: []
+    })).toEqual({
+      x: 241,
+      y: 361,
+      width: CANVAS_FEEDBACK_BAR_SIZE.width,
+      height: CANVAS_FEEDBACK_BAR_SIZE.height,
+      placement: 'below'
     });
   });
 

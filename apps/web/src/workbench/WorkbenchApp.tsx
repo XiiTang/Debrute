@@ -56,6 +56,7 @@ import {
 import { createProjectTreeExternalDropPlan } from './project-explorer/projectTreeExternalDrop';
 import {
   canvasCardBarRect,
+  feedbackBarPlacementForCanvasTarget,
   canvasMinimapButtonRect,
   canvasResetLayoutButtonRect,
   placeCanvasMinimapPanel,
@@ -823,6 +824,32 @@ export function WorkbenchApp(): React.ReactElement {
     ...(canvasMinimapOpen ? [minimapPanelPlacement] : []),
     ...(cardBarRect ? [cardBarRect] : [])
   ];
+  useEffect(() => {
+    if (!activeCanvasRuntime || !feedbackBarTarget) {
+      return;
+    }
+    const syncFeedbackBarPlacement = (camera: CanvasRuntimeSnapshot['camera']) => {
+      const placement = feedbackBarPlacementForCanvasTarget({
+        target: feedbackBarTarget,
+        camera,
+        viewportRect: workbenchViewportRect,
+        reservedRects: floatingBarReservedRects
+      });
+      if (placement) {
+        canvasOverlayRuntime.setFeedbackBarPlacement(placement);
+      } else {
+        canvasOverlayRuntime.clearFeedbackBarPlacement();
+      }
+    };
+    syncFeedbackBarPlacement(activeCanvasRuntime.camera.getCamera());
+    return activeCanvasRuntime.subscribeCamera(syncFeedbackBarPlacement);
+  }, [
+    activeCanvasRuntime,
+    canvasOverlayRuntime,
+    feedbackBarTarget,
+    floatingBarReservedRects,
+    workbenchViewportRect
+  ]);
   const canResetActiveCanvasLayout = Boolean(activeProjection?.nodes.some((node) => node.layoutMode === 'manual'));
   const resetActiveCanvasLayout = useCallback(() => {
     if (!activeCanvasId) {
