@@ -1420,6 +1420,48 @@ describe('app-server', () => {
     }
   });
 
+  it('succeeds with reset count zero when reset layout path rules match no manual nodes', async () => {
+    const projectRoot = await mkdtemp(join(tmpdir(), 'debrute-app-server-canvas-reset-layout-zero-'));
+    const server = new DebruteAppServer({
+      canvasNodeLayoutSizeReader: canvasLayoutSizeReader({
+        'prompts/cover.md': { width: 420, height: 280 }
+      })
+    });
+    try {
+      await mkdir(join(projectRoot, 'prompts'), { recursive: true });
+      await writeFile(join(projectRoot, 'prompts/cover.md'), '# Cover\n', 'utf8');
+      await server.openProject(projectRoot, { initializeIfMissing: true, createDefaultCanvas: true });
+      await writeCanvasMap(projectRoot, 'canvas-1', canvasMapSource(['prompts/cover.md']));
+      await server.pushCanvasMapForProject(projectRoot, { canvasId: 'canvas-1' });
+      await server.refreshProject();
+      await server.updateCanvasNodeLayouts({
+        canvasId: 'canvas-1',
+        nodeLayouts: [{ projectRelativePath: 'prompts/cover.md', x: 1200, y: 900 }]
+      });
+
+      const reset = await server.resetCanvasNodeLayouts({
+        canvasId: 'canvas-1',
+        pathRules: ['future/missing.md']
+      });
+
+      expect(reset.resetCount).toBe(0);
+      expect(reset.canvas.nodeElements.find((node) => node.projectRelativePath === 'prompts/cover.md')).toMatchObject({
+        x: 1200,
+        y: 900,
+        layoutMode: 'manual'
+      });
+      expect(reset.canvas.nodeElements.map((node) => node.projectRelativePath)).toEqual([
+        'prompts',
+        'prompts/cover.md'
+      ]);
+      await expect(readFile(join(projectRoot, '.debrute/canvas-maps/canvas-1.yaml'), 'utf8'))
+        .resolves.toBe(canvasMapSource(['prompts/cover.md']));
+    } finally {
+      server.close();
+      await rm(projectRoot, { recursive: true, force: true });
+    }
+  });
+
   it('applies Canvas Map layout rows when pushing into Canvas JSON', async () => {
     const projectRoot = await mkdtemp(join(tmpdir(), 'debrute-app-server-canvas-map-rows-'));
     const server = new DebruteAppServer({
