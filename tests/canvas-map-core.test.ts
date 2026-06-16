@@ -157,9 +157,86 @@ describe('canvas-map core', () => {
             'outputs/gpt/high/a.png',
             'outputs/gpt/high/b.png'
           ]
+        },
+        {
+          parentProjectRelativePath: 'outputs/gemini/high/nested',
+          memberProjectRelativePaths: ['outputs/gemini/high/nested/deep.png']
+        },
+        {
+          parentProjectRelativePath: 'outputs/gpt/high',
+          memberProjectRelativePaths: ['outputs/gpt/high/readme.md']
+        },
+        {
+          parentProjectRelativePath: 'outputs/manual',
+          memberProjectRelativePaths: ['outputs/manual/c.png']
+        },
+        {
+          parentProjectRelativePath: 'prompts',
+          memberProjectRelativePaths: ['prompts/cover.md']
         }
       ]
     });
+  });
+
+  it('expands YAML row splits before default remainder rows for each parent directory', () => {
+    const map = parseCanvasMap({
+      canvasId: 'main',
+      sourcePath: '.debrute/canvas-maps/main.yaml',
+      content: [
+        'paths:',
+        '  - outputs/gpt/',
+        '  - outputs/gemini/',
+        'layout:',
+        '  rows:',
+        '    - outputs/**/[bd].png',
+        '    - outputs/**/notes-*.md',
+        ''
+      ].join('\n')
+    });
+
+    const entries: CanvasMapProjectEntry[] = [
+      { projectRelativePath: 'outputs', kind: 'directory' },
+      { projectRelativePath: 'outputs/gemini', kind: 'directory' },
+      { projectRelativePath: 'outputs/gemini/a.png', kind: 'file' },
+      { projectRelativePath: 'outputs/gemini/b.png', kind: 'file' },
+      { projectRelativePath: 'outputs/gpt', kind: 'directory' },
+      { projectRelativePath: 'outputs/gpt/a.png', kind: 'file' },
+      { projectRelativePath: 'outputs/gpt/b.png', kind: 'file' },
+      { projectRelativePath: 'outputs/gpt/c.png', kind: 'file' },
+      { projectRelativePath: 'outputs/gpt/d.png', kind: 'file' },
+      { projectRelativePath: 'outputs/gpt/notes-1.md', kind: 'file' },
+      { projectRelativePath: 'outputs/gpt/readme.md', kind: 'file' }
+    ];
+
+    expect(expandCanvasMap(map, entries).layoutRows).toEqual([
+      {
+        parentProjectRelativePath: 'outputs/gemini',
+        memberProjectRelativePaths: ['outputs/gemini/b.png']
+      },
+      {
+        parentProjectRelativePath: 'outputs/gpt',
+        memberProjectRelativePaths: [
+          'outputs/gpt/b.png',
+          'outputs/gpt/d.png'
+        ]
+      },
+      {
+        parentProjectRelativePath: 'outputs/gpt',
+        memberProjectRelativePaths: ['outputs/gpt/notes-1.md']
+      },
+      {
+        parentProjectRelativePath: 'outputs/gemini',
+        memberProjectRelativePaths: ['outputs/gemini/a.png']
+      },
+      {
+        parentProjectRelativePath: 'outputs/gpt',
+        memberProjectRelativePaths: [
+          'outputs/gpt/a.png',
+          'outputs/gpt/c.png',
+          'outputs/gpt/readme.md'
+        ]
+      }
+    ]);
   });
 
   it('expands reset path rules without adding file ancestors', () => {
@@ -217,6 +294,10 @@ describe('canvas-map core', () => {
       layoutRows: [{
         parentProjectRelativePath: 'outputs/gpt',
         memberProjectRelativePaths: ['outputs/gpt/a.png']
+      },
+      {
+        parentProjectRelativePath: 'outputs/gpt/folder.png',
+        memberProjectRelativePaths: ['outputs/gpt/folder.png/nested.png']
       }]
     });
   });

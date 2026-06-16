@@ -1375,6 +1375,10 @@ describe('app-server', () => {
         ['prompts/cover.md', 'manual']
       ]);
       expect(partial.canvas.nodeElements.find((node) => node.projectRelativePath === 'outputs/gpt/a.png')).not.toMatchObject({ x: 2200, y: 1200 });
+      const resetA = partial.canvas.nodeElements.find((node) => node.projectRelativePath === 'outputs/gpt/a.png')!;
+      const resetB = partial.canvas.nodeElements.find((node) => node.projectRelativePath === 'outputs/gpt/b.png')!;
+      expect(resetB.x).toBeGreaterThan(resetA.x);
+      expect(resetB.y).toBe(resetA.y);
       expect(partial.canvas.nodeElements.find((node) => node.projectRelativePath === 'prompts/cover.md')).toMatchObject({
         x: 2400,
         y: 1400,
@@ -1502,6 +1506,49 @@ describe('app-server', () => {
       expect(nodes.find((node) => node.projectRelativePath === 'outputs/gemini')?.x).toBe(340);
       expect(nodes.find((node) => node.projectRelativePath === 'outputs/gemini/high')?.x).toBe(680);
       expect(nodes.find((node) => node.projectRelativePath === 'outputs/gemini/high/a.png')?.x).toBe(1020);
+    } finally {
+      server.close();
+      await rm(projectRoot, { recursive: true, force: true });
+    }
+  });
+
+  it('pushes Canvas Map default file rows and explicit row remainders into Canvas JSON', async () => {
+    const projectRoot = await mkdtemp(join(tmpdir(), 'debrute-app-server-canvas-map-default-rows-'));
+    const server = new DebruteAppServer({
+      canvasNodeLayoutSizeReader: canvasLayoutSizeReader({
+        'outputs/gpt/a.png': { width: 100, height: 100 },
+        'outputs/gpt/b.png': { width: 120, height: 80 },
+        'outputs/gpt/c.png': { width: 80, height: 80 },
+        'outputs/gpt/d.png': { width: 140, height: 100 }
+      })
+    });
+    try {
+      await mkdir(join(projectRoot, 'outputs/gpt'), { recursive: true });
+      await writeFile(join(projectRoot, 'outputs/gpt/a.png'), 'fake', 'utf8');
+      await writeFile(join(projectRoot, 'outputs/gpt/b.png'), 'fake', 'utf8');
+      await writeFile(join(projectRoot, 'outputs/gpt/c.png'), 'fake', 'utf8');
+      await writeFile(join(projectRoot, 'outputs/gpt/d.png'), 'fake', 'utf8');
+      await server.openProject(projectRoot, { initializeIfMissing: true, createDefaultCanvas: true });
+      await writeCanvasMap(projectRoot, 'canvas-1', canvasMapSource(
+        ['outputs/gpt/'],
+        ['outputs/gpt/[bd].png']
+      ));
+
+      await server.pushCanvasMapForProject(projectRoot, { canvasId: 'canvas-1' });
+
+      const nodes = (await server.refreshProject()).canvases[0]!.nodeElements;
+      const a = nodes.find((node) => node.projectRelativePath === 'outputs/gpt/a.png')!;
+      const b = nodes.find((node) => node.projectRelativePath === 'outputs/gpt/b.png')!;
+      const c = nodes.find((node) => node.projectRelativePath === 'outputs/gpt/c.png')!;
+      const d = nodes.find((node) => node.projectRelativePath === 'outputs/gpt/d.png')!;
+
+      expect(d.x).toBeGreaterThan(b.x);
+      expect(b.y + b.height / 2).toBe(d.y + d.height / 2);
+      expect(c.x).toBeGreaterThan(a.x);
+      expect(a.y + a.height / 2).toBe(c.y + c.height / 2);
+      expect(b.y).toBeLessThan(a.y);
+      expectNoAutomaticCanvasNodeOverlaps(nodes);
+      await expect(readFile(join(projectRoot, '.debrute/canvases/canvas-1.json'), 'utf8')).resolves.not.toContain('layoutRows');
     } finally {
       server.close();
       await rm(projectRoot, { recursive: true, force: true });

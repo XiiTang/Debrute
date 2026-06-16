@@ -358,6 +358,55 @@ describe('canvas-core', () => {
     expect(reconciled.find((node) => node.projectRelativePath === 'flow/outputs/0-notes.md')).toMatchObject({ x: 680, y: 440 });
   });
 
+  it('preserves layout row order before child directory blocks', () => {
+    const desired: CanvasDesiredNode[] = [
+      { projectRelativePath: 'flow', nodeKind: 'directory' },
+      { projectRelativePath: 'flow/outputs', nodeKind: 'directory' },
+      { projectRelativePath: 'flow/outputs/a.png', nodeKind: 'file', mediaKind: 'image' },
+      { projectRelativePath: 'flow/outputs/b.png', nodeKind: 'file', mediaKind: 'image' },
+      { projectRelativePath: 'flow/outputs/c.png', nodeKind: 'file', mediaKind: 'image' },
+      { projectRelativePath: 'flow/outputs/d.png', nodeKind: 'file', mediaKind: 'image' },
+      { projectRelativePath: 'flow/outputs/nested', nodeKind: 'directory' },
+      { projectRelativePath: 'flow/outputs/nested/e.png', nodeKind: 'file', mediaKind: 'image' }
+    ];
+
+    const reconciled = reconcileCanvasNodeElements({
+      existing: [],
+      desired,
+      layoutRows: [
+        {
+          parentProjectRelativePath: 'flow/outputs',
+          memberProjectRelativePaths: [
+            'flow/outputs/b.png',
+            'flow/outputs/d.png'
+          ]
+        },
+        {
+          parentProjectRelativePath: 'flow/outputs',
+          memberProjectRelativePaths: [
+            'flow/outputs/a.png',
+            'flow/outputs/c.png'
+          ]
+        }
+      ],
+      layoutSizeForNode: layoutSize
+    });
+
+    const a = nodeByPath(reconciled, 'flow/outputs/a.png');
+    const b = nodeByPath(reconciled, 'flow/outputs/b.png');
+    const c = nodeByPath(reconciled, 'flow/outputs/c.png');
+    const d = nodeByPath(reconciled, 'flow/outputs/d.png');
+    const nested = nodeByPath(reconciled, 'flow/outputs/nested');
+
+    expect(d.x).toBeGreaterThan(b.x);
+    expect(b.y).toBe(d.y);
+    expect(c.x).toBeGreaterThan(a.x);
+    expect(a.y).toBe(c.y);
+    expect(b.y).toBeLessThan(a.y);
+    expect(a.y).toBeLessThan(nested.y);
+    expectNoAutomaticOverlaps(reconciled);
+  });
+
   it('keeps manual row nodes at their actual layout while reserving their theoretical slot', () => {
     const existing = [{
       projectRelativePath: 'flow/outputs/b.png',

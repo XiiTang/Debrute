@@ -41,7 +41,6 @@ type LayoutBlock =
   | {
       kind: 'horizontal-row';
       members: LayoutTreeNode[];
-      sortKey: string;
     };
 
 interface PlacedBlock {
@@ -254,8 +253,7 @@ function childBlocksForNode(
   const rowPaths = new Set(rows.flat().map((member) => member.node.projectRelativePath));
   const rowBlocks: LayoutBlock[] = rows.map((members) => ({
     kind: 'horizontal-row',
-    members,
-    sortKey: members[0]?.node.projectRelativePath ?? treeNode.node.projectRelativePath
+    members
   }));
   const nodeBlocks: Array<Extract<LayoutBlock, { kind: 'node' }>> = treeNode.children
     .filter((child) => !rowPaths.has(child.node.projectRelativePath))
@@ -264,9 +262,9 @@ function childBlocksForNode(
   const visibleNodeBlocks = nodeBlocks
     .filter((block) => !manualPaths.has(block.node.node.projectRelativePath)
       || block.node.children.length > 0)
-    .sort(compareLayoutBlock);
+    .sort(compareNodeBlock);
   return [
-    ...rowBlocks.sort(compareLayoutBlock),
+    ...rowBlocks,
     ...visibleNodeBlocks
   ];
 }
@@ -345,10 +343,11 @@ function sortDesiredNodes(nodes: CanvasDesiredNode[]): CanvasDesiredNode[] {
   return [...nodes].sort(compareDesiredPath);
 }
 
-function compareLayoutBlock(left: LayoutBlock, right: LayoutBlock): number {
-  const leftKey = left.kind === 'horizontal-row' ? left.sortKey : left.node.node.projectRelativePath;
-  const rightKey = right.kind === 'horizontal-row' ? right.sortKey : right.node.node.projectRelativePath;
-  return compareProjectPath(leftKey, rightKey);
+function compareNodeBlock(
+  left: Extract<LayoutBlock, { kind: 'node' }>,
+  right: Extract<LayoutBlock, { kind: 'node' }>
+): number {
+  return compareProjectPath(left.node.node.projectRelativePath, right.node.node.projectRelativePath);
 }
 
 function compareTreeNode(left: LayoutTreeNode, right: LayoutTreeNode): number {

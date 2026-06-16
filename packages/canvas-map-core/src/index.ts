@@ -304,7 +304,7 @@ function normalizeRowRule(value: unknown): CanvasMapRowRule {
 
 function expandLayoutRows(rowRules: CanvasMapRowRule[], matchedFilePaths: string[]): ExpandedCanvasMapLayoutRow[] {
   const matchedByFile = new Map<string, number>();
-  const rows: ExpandedCanvasMapLayoutRow[] = [];
+  const explicitRows: ExpandedCanvasMapLayoutRow[] = [];
   for (const [rowIndex, rowRule] of rowRules.entries()) {
     const matches = controlledGlobMatcher(rowRule.pattern);
     const pathsByParent = new Map<string, string[]>();
@@ -329,12 +329,37 @@ function expandLayoutRows(rowRules: CanvasMapRowRule[], matchedFilePaths: string
         filePath
       ]);
     }
-    for (const parent of [...pathsByParent.keys()].sort(compareProjectPath)) {
-      rows.push({
-        parentProjectRelativePath: parent,
-        memberProjectRelativePaths: pathsByParent.get(parent)!.sort(compareProjectPath)
-      });
+    explicitRows.push(...layoutRowsForParents(pathsByParent));
+  }
+
+  const remainderPathsByParent = new Map<string, string[]>();
+  for (const filePath of matchedFilePaths) {
+    if (matchedByFile.has(filePath)) {
+      continue;
     }
+    const parent = parentPath(filePath);
+    if (!parent) {
+      continue;
+    }
+    remainderPathsByParent.set(parent, [
+      ...(remainderPathsByParent.get(parent) ?? []),
+      filePath
+    ]);
+  }
+
+  return [
+    ...explicitRows,
+    ...layoutRowsForParents(remainderPathsByParent)
+  ];
+}
+
+function layoutRowsForParents(pathsByParent: Map<string, string[]>): ExpandedCanvasMapLayoutRow[] {
+  const rows: ExpandedCanvasMapLayoutRow[] = [];
+  for (const parent of [...pathsByParent.keys()].sort(compareProjectPath)) {
+    rows.push({
+      parentProjectRelativePath: parent,
+      memberProjectRelativePaths: pathsByParent.get(parent)!.sort(compareProjectPath)
+    });
   }
   return rows;
 }
