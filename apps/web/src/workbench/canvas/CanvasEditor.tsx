@@ -1,5 +1,6 @@
 import React from 'react';
 import { Boxes, FolderTree } from 'lucide-react';
+import type { ProjectedCanvasNode } from '@debrute/canvas-core';
 import type { WorkbenchActions, WorkbenchState } from '../../types';
 import type { WorkbenchContextMenuPosition, WorkbenchContextMenuTarget } from '../shell/contextMenu';
 import type { CanvasFeedbackBarTarget, FloatingBarRect } from '../shell/floatingBars';
@@ -18,6 +19,7 @@ export function CanvasEditor({
   overlayRuntime,
   minimapOpen,
   feedbackPlacementContext,
+  onCurrentNodesChange,
   onFeedbackBarTargetChange,
   onRuntimeChange,
   onOpenContextMenu
@@ -32,6 +34,7 @@ export function CanvasEditor({
     viewportRect: FloatingBarRect;
     reservedRects: readonly FloatingBarRect[];
   };
+  onCurrentNodesChange?: ((canvasId: string, nodes: ProjectedCanvasNode[] | undefined) => void) | undefined;
   onFeedbackBarTargetChange?: ((target: CanvasFeedbackBarTarget | undefined) => void) | undefined;
   onRuntimeChange?: ((runtime: CanvasEditorRuntime | undefined) => void) | undefined;
   onOpenContextMenu?: ((target: WorkbenchContextMenuTarget, position: WorkbenchContextMenuPosition) => void) | undefined;
@@ -92,6 +95,7 @@ export function CanvasEditor({
         overlayRuntime={overlayRuntime}
         minimapOpen={minimapOpen}
         feedbackPlacementContext={feedbackPlacementContext}
+        onCurrentNodesChange={onCurrentNodesChange}
         onFeedbackBarTargetChange={onFeedbackBarTargetChange}
         onOpenContextMenu={onOpenContextMenu}
       />

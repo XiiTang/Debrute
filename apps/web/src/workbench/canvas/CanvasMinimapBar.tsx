@@ -22,7 +22,7 @@ import { IconButton } from '../ui';
 
 export function CanvasMinimapBar({
   canvas,
-  projection,
+  nodes,
   runtime,
   overlayRuntime,
   open,
@@ -30,7 +30,7 @@ export function CanvasMinimapBar({
   panelPlacement
 }: {
   canvas: CanvasDocument | undefined;
-  projection: CanvasProjection | undefined;
+  nodes: CanvasProjection['nodes'] | undefined;
   runtime: CanvasEditorRuntime | undefined;
   overlayRuntime: CanvasOverlayRuntime;
   open: boolean;
@@ -43,22 +43,22 @@ export function CanvasMinimapBar({
   const modelCamera = runtimeSnapshot?.camera ?? DEFAULT_CANVAS_CAMERA;
   const enabled = Boolean(
     canvas
-    && projection
+    && nodes
     && runtime
-    && hasValidMinimapNodes(projection.nodes)
+    && hasValidMinimapNodes(nodes)
     && runtimeSnapshot?.surfaceSize
   );
   const staticModel = React.useMemo(() => (
-    open && enabled && projection && runtimeSnapshot?.surfaceSize
+    open && enabled && nodes && runtimeSnapshot?.surfaceSize
       ? buildCanvasMinimapStaticModel({
-          nodes: projection.nodes,
+          nodes,
           selection: runtimeSnapshot.selection,
           camera: modelCamera,
           surfaceSize: runtimeSnapshot.surfaceSize,
           minimapSize: CANVAS_MINIMAP_PANEL_SIZE
         })
       : undefined
-  ), [enabled, modelCamera, open, projection, runtimeSnapshot?.selection, runtimeSnapshot?.surfaceSize]);
+  ), [enabled, modelCamera, nodes, open, runtimeSnapshot?.selection, runtimeSnapshot?.surfaceSize]);
   const initialViewport = React.useMemo(() => (
     open && runtimeSnapshot?.surfaceSize && staticModel
       ? buildCanvasMinimapViewportModel({

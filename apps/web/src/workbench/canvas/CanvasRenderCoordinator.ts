@@ -8,7 +8,7 @@ import {
   type CanvasEdgeSegment,
   type VirtualizedCanvasRenderState
 } from './canvasVirtualization';
-import type { CanvasLayoutOverride } from './canvasLocalLayoutDraft';
+import { canvasNodesWithLayoutOverrides, type CanvasLayoutOverride } from './canvasLocalLayoutDraft';
 import type { CanvasCamera, CanvasCameraState } from './runtime/canvasCamera';
 import type { CanvasRect, CanvasSize } from './runtime/canvasGeometry';
 import { rectsIntersect } from './runtime/canvasGeometry';
@@ -76,7 +76,11 @@ export function createCanvasRenderCoordinator(input: CanvasRenderCoordinatorInpu
       activeNodeProjectRelativePaths: input.activeNodePaths
     });
     const layoutOverrides = input.layoutOverrides ?? [];
-    const draftAwareNodesByPath = draftAwareNodesByPathFor(latestNodesByPath, layoutOverrides);
+    const draftAwareNodes = canvasNodesWithLayoutOverrides({
+      nodes: [...latestNodesByPath.values()],
+      layoutOverrides
+    });
+    const draftAwareNodesByPath = new Map(draftAwareNodes.map((node) => [node.projectRelativePath, node]));
     const overrideNodes = layoutOverrides
       .map((layout) => draftAwareNodesByPath.get(layout.projectRelativePath))
       .filter((node): node is ProjectedCanvasNode => Boolean(node));
@@ -94,7 +98,7 @@ export function createCanvasRenderCoordinator(input: CanvasRenderCoordinatorInpu
     const edges = renderSnapshotEdges({
       projectionEdges: projection.edges,
       renderedEdges: rendered.edges,
-      draftAwareNodes: [...draftAwareNodesByPath.values()],
+      draftAwareNodes,
       layoutOverrides
     });
     return {
@@ -198,27 +202,6 @@ function canvasRenderCoordinatorMountedInputKey(input: CanvasRenderCoordinatorUp
     .sort()
     .join('\u001e');
   return [mountedPaths, layoutKey].join('\u001d');
-}
-
-function draftAwareNodesByPathFor(
-  nodesByPath: ReadonlyMap<string, ProjectedCanvasNode>,
-  layoutOverrides: readonly CanvasLayoutOverride[]
-): Map<string, ProjectedCanvasNode> {
-  const next = new Map(nodesByPath);
-  for (const layout of layoutOverrides) {
-    const node = nodesByPath.get(layout.projectRelativePath);
-    if (!node) {
-      continue;
-    }
-    next.set(layout.projectRelativePath, {
-      ...node,
-      x: layout.x,
-      y: layout.y,
-      width: layout.width,
-      height: layout.height
-    });
-  }
-  return next;
 }
 
 function renderSnapshotEdges(input: {

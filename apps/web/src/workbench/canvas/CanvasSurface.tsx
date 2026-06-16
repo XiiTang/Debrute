@@ -49,6 +49,7 @@ import {
   canvasLayoutOverridesForCanvas,
   canvasLocalLayoutDraftFromDragState,
   canvasLocalLayoutDraftMatchesProjection,
+  canvasNodesWithLayoutOverrides,
   type CanvasLocalLayoutDraft
 } from './canvasLocalLayoutDraft';
 import { hasInternalProjectTreeDrag, readInternalProjectTreeDragEntries } from '../project-explorer/ProjectTree';
@@ -66,6 +67,7 @@ interface CanvasSurfaceProps {
     viewportRect: FloatingBarRect;
     reservedRects: readonly FloatingBarRect[];
   };
+  onCurrentNodesChange?: ((canvasId: string, nodes: ProjectedCanvasNode[] | undefined) => void) | undefined;
   onFeedbackBarTargetChange?: ((target: CanvasFeedbackBarTarget | undefined) => void) | undefined;
   onOpenContextMenu?: ((target: WorkbenchContextMenuTarget, position: WorkbenchContextMenuPosition) => void) | undefined;
 }
@@ -80,6 +82,7 @@ export function CanvasSurface({
   overlayRuntime,
   minimapOpen,
   feedbackPlacementContext,
+  onCurrentNodesChange,
   onFeedbackBarTargetChange,
   onOpenContextMenu
 }: CanvasSurfaceProps): React.ReactElement {
@@ -116,6 +119,7 @@ export function CanvasSurface({
       overlayRuntime={overlayRuntime}
       minimapOpen={minimapOpen}
       feedbackPlacementContext={feedbackPlacementContext}
+      onCurrentNodesChange={onCurrentNodesChange}
       onFeedbackBarTargetChange={onFeedbackBarTargetChange}
       onOpenContextMenu={onOpenContextMenu}
     />
@@ -133,6 +137,7 @@ function CanvasSurfaceRuntime({
   overlayRuntime,
   minimapOpen,
   feedbackPlacementContext,
+  onCurrentNodesChange,
   onFeedbackBarTargetChange,
   onOpenContextMenu
 }: CanvasSurfaceProps & {
@@ -149,7 +154,7 @@ function CanvasSurfaceRuntime({
   const selectionRef = useRef<CanvasSelection | undefined>(selection);
   const surfaceSizeRef = useRef(surfaceSize);
   const renderSnapshotRef = useRef<CanvasRenderCoordinatorSnapshot | undefined>(undefined);
-  const activeLayoutDraftRef = useRef<CanvasLocalLayoutDraft | undefined>(canvasSurfaceNextPendingLayoutDraft({
+  const activeLayoutDraftRef = useRef<CanvasLocalLayoutDraft | undefined>(canvasSurfaceLayoutDraftFromDragState({
     canvasId: canvas.id,
     dragState: initialDragState,
     point: initialDragState?.current ?? initialDragState?.start
@@ -171,18 +176,19 @@ function CanvasSurfaceRuntime({
   const stageRuntime = useMemo(() => createCanvasStageRuntime({ perfMonitor }), [perfMonitor]);
   const visibilityController = useMemo(() => createCanvasVisibilityController({ stageRuntime }), [stageRuntime]);
   const renderCoordinator = useMemo(() => createCanvasRenderCoordinator({ projection, perfMonitor }), [perfMonitor]);
+  const currentLayoutOverrides = useCallback(() => canvasLayoutOverridesForCanvas({
+    canvasId: canvas.id,
+    active: activeLayoutDraftRef.current,
+    pending: pendingLayoutDraftRef.current
+  }), [canvas.id]);
   const initialRenderSnapshot = useMemo(() => renderCoordinator.update({
     camera: runtime.getSnapshot().camera,
     cameraState: runtime.getSnapshot().cameraState,
     surfaceSize: runtime.getSnapshot().surfaceSize,
     selection: runtime.getSnapshot().selection,
     activeNodePaths: activeNodePathsRef.current,
-    layoutOverrides: canvasLayoutOverridesForCanvas({
-      canvasId: canvas.id,
-      active: activeLayoutDraftRef.current,
-      pending: pendingLayoutDraftRef.current
-    })
-  }), [canvas.id, renderCoordinator, runtime]);
+    layoutOverrides: currentLayoutOverrides()
+  }), [currentLayoutOverrides, renderCoordinator, runtime]);
   const [renderSnapshot, setRenderSnapshot] = useState(initialRenderSnapshot);
   const canvasPerfDebugContextRef = useRef<CanvasPerfDebugSnapshotContext | undefined>(undefined);
   const imageNodeAssetContext = useMemo<CanvasImageNodeAssetContextValue>(() => ({
@@ -233,11 +239,7 @@ function CanvasSurfaceRuntime({
   }) => {
     const next = renderCoordinator.update({
       ...input,
-      layoutOverrides: canvasLayoutOverridesForCanvas({
-        canvasId: canvas.id,
-        active: activeLayoutDraftRef.current,
-        pending: pendingLayoutDraftRef.current
-      })
+      layoutOverrides: currentLayoutOverrides()
     });
     if (next === renderSnapshotRef.current) {
       return;
@@ -250,7 +252,7 @@ function CanvasSurfaceRuntime({
       activeNodePaths: input.activeNodePaths
     });
     setRenderSnapshot(next);
-  }, [canvas.id, renderCoordinator, visibilityController]);
+  }, [currentLayoutOverrides, renderCoordinator, visibilityController]);
   const renderSnapshotScheduler = useMemo(() => createCanvasRenderSnapshotScheduler({
     perfMonitor,
     commit: commitRenderSnapshot
@@ -307,6 +309,22 @@ function CanvasSurfaceRuntime({
       activeNodePaths: activeNodePathsRef.current
     });
   }, [canvas.id, commitRenderSnapshot, projection, renderCoordinator, runtime]);
+
+  useEffect(() => {
+    if (!onCurrentNodesChange) {
+      return;
+    }
+    return () => {
+      onCurrentNodesChange(canvas.id, undefined);
+    };
+  }, [canvas.id, onCurrentNodesChange]);
+
+  useEffect(() => {
+    onCurrentNodesChange?.(canvas.id, canvasNodesWithLayoutOverrides({
+      nodes: projection.nodes,
+      layoutOverrides: currentLayoutOverrides()
+    }));
+  }, [canvas.id, currentLayoutOverrides, onCurrentNodesChange, projection.nodes, renderSnapshot]);
 
   useEffect(() => {
     renderSnapshotRef.current = initialRenderSnapshot;
@@ -460,7 +478,7 @@ function CanvasSurfaceRuntime({
     }
     return runtime.subscribeDragState((nextDragState) => {
       const snapshot = runtime.getSnapshot();
-      activeLayoutDraftRef.current = canvasSurfaceNextPendingLayoutDraft({
+      activeLayoutDraftRef.current = canvasSurfaceLayoutDraftFromDragState({
         canvasId: canvas.id,
         dragState: nextDragState,
         point: nextDragState?.current ?? nextDragState?.start
@@ -602,7 +620,7 @@ function CanvasSurfaceRuntime({
     const point = pointerCanvasPoint(event);
     const currentDragState = runtime.getSnapshot().dragState;
     const pendingDraft = currentDragState?.pointerId === event.pointerId
-      ? canvasSurfaceNextPendingLayoutDraft({
+      ? canvasSurfaceLayoutDraftFromDragState({
           canvasId: canvas.id,
           dragState: currentDragState,
           point
@@ -900,7 +918,7 @@ export function shouldClearFeedbackBarPlacementForFeedbackTarget(input: {
   return !input.hasRenderableFeedbackTarget;
 }
 
-export function canvasSurfaceNextPendingLayoutDraft(input: {
+export function canvasSurfaceLayoutDraftFromDragState(input: {
   canvasId: string;
   dragState: CanvasRuntimeDragState | undefined;
   point: CanvasPoint | undefined;

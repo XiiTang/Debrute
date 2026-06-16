@@ -13,7 +13,7 @@ import {
   isCanvasMapProjectTreeDragOver,
   canvasMapProjectTreeDropEntry,
   canvasMapProjectTreeDropInput,
-  canvasSurfaceNextPendingLayoutDraft,
+  canvasSurfaceLayoutDraftFromDragState,
   canvasSurfaceShouldClearPendingLayoutDraft,
   createCanvasRenderSnapshotScheduler,
   recordCanvasPerfFrame,
@@ -81,7 +81,7 @@ describe('CanvasSurface', () => {
   });
 
   it('creates a pending local layout draft from a finished move-node drag', () => {
-    expect(canvasSurfaceNextPendingLayoutDraft({
+    expect(canvasSurfaceLayoutDraftFromDragState({
       canvasId: 'canvas-1',
       dragState: {
         kind: 'move-node',
@@ -99,7 +99,7 @@ describe('CanvasSurface', () => {
   });
 
   it('creates a pending local layout draft from a finished resize-node drag', () => {
-    expect(canvasSurfaceNextPendingLayoutDraft({
+    expect(canvasSurfaceLayoutDraftFromDragState({
       canvasId: 'canvas-1',
       dragState: {
         kind: 'resize-node',

@@ -5,7 +5,8 @@ import {
   canvasLocalLayoutDraftFromDragState,
   canvasLocalLayoutDraftFromMoveState,
   canvasLocalLayoutDraftFromResizeState,
-  canvasLocalLayoutDraftMatchesProjection
+  canvasLocalLayoutDraftMatchesProjection,
+  canvasNodesWithLayoutOverrides
 } from './canvasLocalLayoutDraft';
 import type { CanvasRuntimeDragState } from './runtime/CanvasEditorRuntime';
 
@@ -158,6 +159,29 @@ describe('canvas local layout drafts', () => {
         ]
       }
     })).toEqual([]);
+  });
+
+  it('applies local layout overrides to all canvas nodes', () => {
+    const nodes = [
+      node('flow/a.png', 10, 20, 200, 120),
+      node('flow/b.png', 400, 20, 100, 80)
+    ];
+
+    expect(canvasNodesWithLayoutOverrides({
+      nodes,
+      layoutOverrides: [
+        { projectRelativePath: 'flow/a.png', x: 30, y: 40, width: 240, height: 160 }
+      ]
+    })).toEqual([
+      expect.objectContaining({
+        projectRelativePath: 'flow/a.png',
+        x: 30,
+        y: 40,
+        width: 240,
+        height: 160
+      }),
+      nodes[1]
+    ]);
   });
 
   it('matches durable projection only when every pending layout is current', () => {

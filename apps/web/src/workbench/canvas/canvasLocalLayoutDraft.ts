@@ -1,4 +1,4 @@
-import type { CanvasProjection } from '@debrute/canvas-core';
+import type { CanvasProjection, ProjectedCanvasNode } from '@debrute/canvas-core';
 import { buildResizeGeometry } from '../services/canvasInteraction';
 import type { CanvasRuntimeDragState } from './runtime/CanvasEditorRuntime';
 import type { CanvasPoint } from './runtime/canvasGeometry';
@@ -97,6 +97,28 @@ export function canvasLayoutOverridesForCanvas(input: {
     }
   }
   return [...merged.values()];
+}
+
+export function canvasNodesWithLayoutOverrides(input: {
+  nodes: readonly ProjectedCanvasNode[];
+  layoutOverrides: readonly CanvasLayoutOverride[];
+}): ProjectedCanvasNode[] {
+  if (input.layoutOverrides.length === 0) {
+    return [...input.nodes];
+  }
+  const layoutByPath = new Map(input.layoutOverrides.map((layout) => [layout.projectRelativePath, layout]));
+  return input.nodes.map((node) => {
+    const layout = layoutByPath.get(node.projectRelativePath);
+    return layout
+      ? {
+          ...node,
+          x: layout.x,
+          y: layout.y,
+          width: layout.width,
+          height: layout.height
+        }
+      : node;
+  });
 }
 
 export function canvasLocalLayoutDraftMatchesProjection(

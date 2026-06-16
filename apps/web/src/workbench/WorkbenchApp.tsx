@@ -6,6 +6,7 @@ import type {
   WorkbenchProjectPathEntry,
   WorkbenchProjectSessionSnapshot
 } from '@debrute/app-protocol';
+import type { ProjectedCanvasNode } from '@debrute/canvas-core';
 import { createWorkbenchApiClient } from './api/workbenchApiClient';
 import { getDebruteShellApi } from '../api/shellApi';
 import { CanvasEditor } from './canvas/CanvasEditor';
@@ -101,6 +102,10 @@ export function WorkbenchApp(): React.ReactElement {
   const [activeCanvasId, setActiveCanvasId] = useState<string>();
   const [activeCanvasRuntime, setActiveCanvasRuntime] = useState<CanvasEditorRuntime>();
   const [activeCanvasRuntimeSnapshot, setActiveCanvasRuntimeSnapshot] = useState<CanvasRuntimeSnapshot>();
+  const [activeCanvasCurrentNodes, setActiveCanvasCurrentNodes] = useState<{
+    canvasId: string;
+    nodes: ProjectedCanvasNode[];
+  }>();
   const [canvasRuntimeScopeKey, setCanvasRuntimeScopeKey] = useState(0);
   const [explorerSelection, setExplorerSelection] = useState<ProjectTreeSelectionState>(() => createEmptyProjectTreeSelection());
   const [floatingPanels, setFloatingPanels] = useState<FloatingPanelState>(DEFAULT_FLOATING_PANEL_STATE);
@@ -453,6 +458,23 @@ export function WorkbenchApp(): React.ReactElement {
   const activeProjection = activeCanvas
     ? snapshot?.projections.find((item) => item.canvasId === activeCanvas.id)
     : undefined;
+  const currentNodesForActiveCanvas = activeCanvasCurrentNodes?.canvasId === activeCanvas?.id
+    ? activeCanvasCurrentNodes
+    : undefined;
+  const activeCanvasMinimapNodes = currentNodesForActiveCanvas
+    ? currentNodesForActiveCanvas.nodes
+    : undefined;
+  const handleActiveCanvasCurrentNodesChange = useCallback((
+    canvasId: string,
+    nodes: ProjectedCanvasNode[] | undefined
+  ) => {
+    setActiveCanvasCurrentNodes((current) => {
+      if (!nodes) {
+        return current?.canvasId === canvasId ? undefined : current;
+      }
+      return { canvasId, nodes };
+    });
+  }, []);
   const centerCanvasProjectionNode = useCallback((
     projection: WorkbenchProjectSessionSnapshot['projections'][number] | undefined,
     projectRelativePath: string
@@ -1064,6 +1086,7 @@ export function WorkbenchApp(): React.ReactElement {
               viewportRect: workbenchViewportRect,
               reservedRects: floatingBarReservedRects
             }}
+            onCurrentNodesChange={handleActiveCanvasCurrentNodesChange}
             onFeedbackBarTargetChange={handleFeedbackBarTargetChange}
             onRuntimeChange={setActiveCanvasRuntime}
             onOpenContextMenu={openWorkbenchContextMenu}
@@ -1085,7 +1108,7 @@ export function WorkbenchApp(): React.ReactElement {
         />
         <CanvasMinimapBar
           canvas={activeCanvas}
-          projection={activeProjection}
+          nodes={activeCanvasMinimapNodes}
           runtime={activeCanvasRuntime}
           overlayRuntime={canvasOverlayRuntime}
           open={canvasMinimapOpen}

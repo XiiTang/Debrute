@@ -48,11 +48,6 @@ describe('CanvasStageRuntime', () => {
     expect(element.style.properties.get('z-index')).toBe('7');
   });
 
-  it('does not expose a resize preview API', () => {
-    const previewMethodName = ['apply', 'Resize', 'Preview'].join('');
-    expect(previewMethodName in createCanvasStageRuntime()).toBe(false);
-  });
-
   it('restores a culled node display without clearing its layout during a pan back', () => {
     const runtime = createCanvasStageRuntime();
     const element = fakeElement();

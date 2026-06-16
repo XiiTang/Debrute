@@ -12,7 +12,7 @@ describe('CanvasMinimapBar', () => {
     const html = renderToStaticMarkup(
       <CanvasMinimapBar
         canvas={undefined}
-        projection={undefined}
+        nodes={undefined}
         runtime={undefined}
         overlayRuntime={createCanvasOverlayRuntime()}
         open={false}
@@ -51,7 +51,7 @@ describe('CanvasMinimapBar', () => {
     const html = renderToStaticMarkup(
       <CanvasMinimapBar
         canvas={canvas}
-        projection={projection}
+        nodes={projection.nodes}
         runtime={runtime}
         overlayRuntime={createCanvasOverlayRuntime()}
         open={true}
@@ -72,6 +72,36 @@ describe('CanvasMinimapBar', () => {
     expect(html).not.toContain('/api/projects/123e4567-e89b-42d3-a456-426614174000/files/raw/');
     expect(html).not.toContain('canvas-node-element');
     expect(html).not.toContain('flow/a.png</');
+  });
+
+  it('renders current node geometry instead of durable projection geometry', () => {
+    const canvas = createCanvasDocument({ id: 'minimap-draft-canvas' });
+    const durableNode = nodeFixture('flow/a.png', 0, 0);
+    const runtime = createCanvasEditorRuntime({
+      camera: { x: 0, y: 0, z: 1 },
+      selection: { kind: 'node', projectRelativePath: durableNode.projectRelativePath }
+    });
+    runtime.bindSurface({
+      surface: fakeElement({ left: 0, top: 0, width: 1000, height: 500 }) as unknown as HTMLElement
+    });
+
+    const html = renderToStaticMarkup(
+      <CanvasMinimapBar
+        canvas={canvas}
+        nodes={[{ ...durableNode, width: 300, height: 160 }]}
+        runtime={runtime}
+        overlayRuntime={createCanvasOverlayRuntime()}
+        open={true}
+        onOpenChange={() => undefined}
+        panelPlacement={panelPlacementFixture}
+      />
+    );
+
+    expect(html).toContain('data-minimap-node-path="flow/a.png"');
+    expect(html).toContain('width="60"');
+    expect(html).toContain('height="32"');
+    expect(html).not.toContain('width="40"');
+    expect(html).not.toContain('height="24"');
   });
 
 });
