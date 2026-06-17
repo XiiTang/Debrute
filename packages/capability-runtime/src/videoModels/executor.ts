@@ -9,7 +9,7 @@ import {
   readResponseTextWithTimeout as readResponseTextBodyWithTimeout
 } from '../requestTimeout.js';
 import { redactModelRunMetadata } from '../modelRunMetadataRedaction.js';
-import { assertPublicHttpUrl, publicHttpRedirectUrl } from '../remoteFetchPolicy.js';
+import { assertPublicHttpUrl, publicHttpRedirectUrl, type PublicRemoteHostLookup } from '../remoteFetchPolicy.js';
 import { createVideoModelCatalog, type VideoModelCatalogEntry } from './catalog.js';
 import {
   normalizeSeedanceVideoArguments,
@@ -47,6 +47,7 @@ export interface ExecuteVideoModelRequestInput {
   pollIntervalMs?: number;
   requestTimeoutMs?: number;
   pollMaxAttempts?: number;
+  remoteUrlLookup?: PublicRemoteHostLookup;
   signal?: AbortSignal;
 }
 
@@ -98,6 +99,7 @@ interface RequestState {
   pollIntervalMs: number;
   requestTimeoutMs: number;
   pollMaxAttempts: number;
+  remoteUrlLookup?: PublicRemoteHostLookup;
   signal?: AbortSignal;
 }
 
@@ -149,7 +151,8 @@ export async function executeVideoModelRequest(input: ExecuteVideoModelRequestIn
       projectRoot: input.projectRoot,
       catalogEntry: entry,
       args: input.input.arguments,
-      ...(input.uploadVideoReference ? { uploadVideoReference: input.uploadVideoReference } : {})
+      ...(input.uploadVideoReference ? { uploadVideoReference: input.uploadVideoReference } : {}),
+      ...(input.remoteUrlLookup ? { remoteUrlLookup: input.remoteUrlLookup } : {})
     });
   } catch (error) {
     if (error instanceof VideoArgumentError) {
@@ -190,6 +193,7 @@ export async function executeVideoModelRequest(input: ExecuteVideoModelRequestIn
     pollIntervalMs: input.pollIntervalMs ?? DEFAULT_POLL_INTERVAL_MS,
     requestTimeoutMs,
     pollMaxAttempts: input.pollMaxAttempts ?? DEFAULT_POLL_ATTEMPTS,
+    ...(input.remoteUrlLookup ? { remoteUrlLookup: input.remoteUrlLookup } : {}),
     signal: operationTimeout.signal
   };
   log(state, 'resolve_model', {
@@ -395,15 +399,18 @@ async function storeDownloadedArtifact(state: RequestState, url: string, index: 
 }
 
 async function fetchRemoteArtifact(state: RequestState, url: string, redirectCount = 0): Promise<Response> {
-  assertPublicHttpUrl(url, 'Remote artifact URLs');
-  const response = await fetchWithTimeout(state, url, { method: 'GET', redirect: 'manual' });
+  const safeUrl = await assertPublicHttpUrl(url, 'Remote artifact URLs', { lookup: state.remoteUrlLookup });
+  const response = await fetchWithTimeout(state, safeUrl, { method: 'GET', redirect: 'manual' });
   if (!isHttpRedirect(response.status)) {
     return response;
   }
   if (redirectCount >= 5) {
     throw new Error('Remote artifact URLs redirected too many times.');
   }
-  return fetchRemoteArtifact(state, publicHttpRedirectUrl(url, response.headers.get('location'), 'Remote artifact URLs'), redirectCount + 1);
+  const redirectUrl = await publicHttpRedirectUrl(safeUrl, response.headers.get('location'), 'Remote artifact URLs', {
+    lookup: state.remoteUrlLookup
+  });
+  return fetchRemoteArtifact(state, redirectUrl, redirectCount + 1);
 }
 
 function isHttpRedirect(status: number): boolean {

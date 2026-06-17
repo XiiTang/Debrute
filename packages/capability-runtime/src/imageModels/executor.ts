@@ -8,7 +8,7 @@ import {
   readResponseTextWithTimeout as readResponseTextBodyWithTimeout
 } from '../requestTimeout.js';
 import { redactModelRunMetadata } from '../modelRunMetadataRedaction.js';
-import { assertPublicHttpUrl, publicHttpRedirectUrl } from '../remoteFetchPolicy.js';
+import { assertPublicHttpUrl, publicHttpRedirectUrl, type PublicRemoteHostLookup } from '../remoteFetchPolicy.js';
 import {
   createImageModelCatalog,
   imageInputFieldsForCatalogEntry,
@@ -46,6 +46,7 @@ export interface ExecuteImageModelRequestInput {
   requestTimeoutMs?: number;
   wanPollMaxAttempts?: number;
   vydraPollMaxAttempts?: number;
+  remoteUrlLookup?: PublicRemoteHostLookup;
   signal?: AbortSignal;
 }
 
@@ -89,6 +90,7 @@ interface RequestState {
   requestTimeoutMs: number;
   wanPollMaxAttempts: number;
   vydraPollMaxAttempts: number;
+  remoteUrlLookup?: PublicRemoteHostLookup;
   signal?: AbortSignal;
 }
 
@@ -140,7 +142,7 @@ export async function executeImageModelRequest(input: ExecuteImageModelRequestIn
 
   let args: Record<string, unknown>;
   try {
-    args = await resolveImageInputArguments(input.input.arguments, input.projectRoot, entry);
+    args = await resolveImageInputArguments(input.input.arguments, input.projectRoot, entry, input.remoteUrlLookup);
   } catch (error) {
     return {
       status: 'error',
@@ -166,6 +168,7 @@ export async function executeImageModelRequest(input: ExecuteImageModelRequestIn
     requestTimeoutMs: input.requestTimeoutMs ?? input.input.timeoutMs ?? DEFAULT_IMAGE_REQUEST_TIMEOUT_MS,
     wanPollMaxAttempts: input.wanPollMaxAttempts ?? DEFAULT_WAN_POLL_ATTEMPTS,
     vydraPollMaxAttempts: input.vydraPollMaxAttempts ?? DEFAULT_VYDRA_POLL_ATTEMPTS,
+    ...(input.remoteUrlLookup ? { remoteUrlLookup: input.remoteUrlLookup } : {}),
     ...(input.signal ? { signal: input.signal } : {})
   };
   log(state, 'resolve_model', {
@@ -681,7 +684,8 @@ async function storeImagePayload(
 async function resolveImageInputArguments(
   args: Record<string, unknown>,
   projectRoot: string,
-  entry: ImageModelCatalogEntry
+  entry: ImageModelCatalogEntry,
+  remoteUrlLookup: PublicRemoteHostLookup | undefined
 ): Promise<Record<string, unknown>> {
   const next = { ...args };
   const imageInputFields = imageInputFieldsForCatalogEntry(entry);
@@ -695,12 +699,12 @@ async function resolveImageInputArguments(
       throw new Error('wan2.7-image supports at most 9 reference images.');
     }
     const resolvedInputs = isGptImage2Model(entry.debruteModelId)
-      ? await resolveGptImage2ImageInputs(values, projectRoot, entry, field)
-      : await resolveImageInputs(values, projectRoot, entry, field);
+      ? await resolveGptImage2ImageInputs(values, projectRoot, entry, field, remoteUrlLookup)
+      : await resolveImageInputs(values, projectRoot, entry, field, remoteUrlLookup);
     next[field] = imageInputFieldAcceptsMultiple(entry, field) ? resolvedInputs : resolvedInputs[0];
   }
   if (isGemini31ImageModel(entry.debruteModelId) && next.contents !== undefined) {
-    next.contents = await normalizeGeminiContents(next.contents, projectRoot);
+    next.contents = await normalizeGeminiContents(next.contents, projectRoot, remoteUrlLookup);
   }
   assertImageInputFieldCombinations(next);
   return next;
@@ -724,7 +728,11 @@ function buildGeminiRequestContents(contents: unknown, prompt: unknown): Array<R
   }, ...rest];
 }
 
-async function normalizeGeminiContents(contents: unknown, projectRoot: string): Promise<Array<Record<string, unknown>>> {
+async function normalizeGeminiContents(
+  contents: unknown,
+  projectRoot: string,
+  remoteUrlLookup: PublicRemoteHostLookup | undefined
+): Promise<Array<Record<string, unknown>>> {
   if (!Array.isArray(contents)) {
     throw new Error('Gemini contents must be an array.');
   }
@@ -739,14 +747,18 @@ async function normalizeGeminiContents(contents: unknown, projectRoot: string): 
     }
     const parts: Array<Record<string, unknown>> = [];
     for (const part of item.parts) {
-      parts.push(await normalizeGeminiPart(part, projectRoot));
+      parts.push(await normalizeGeminiPart(part, projectRoot, remoteUrlLookup));
     }
     normalized.push({ ...item, parts });
   }
   return normalized;
 }
 
-async function normalizeGeminiPart(part: unknown, projectRoot: string): Promise<Record<string, unknown>> {
+async function normalizeGeminiPart(
+  part: unknown,
+  projectRoot: string,
+  remoteUrlLookup: PublicRemoteHostLookup | undefined
+): Promise<Record<string, unknown>> {
   const item = objectAt(part);
   if (!item) {
     throw new Error('Gemini content parts must be objects.');
@@ -760,6 +772,7 @@ async function normalizeGeminiPart(part: unknown, projectRoot: string): Promise<
     throw new Error('Gemini fileData parts must include fileUri.');
   }
   if (/^https?:\/\//.test(fileUri)) {
+    await assertPublicHttpUrl(fileUri, 'Remote image URLs', { lookup: remoteUrlLookup });
     return item;
   }
   if (fileUri.startsWith('data:image/')) {
@@ -831,7 +844,8 @@ async function resolveImageInputs(
   inputs: unknown[],
   projectRoot: string,
   entry: ImageModelCatalogEntry,
-  field: string
+  field: string,
+  remoteUrlLookup: PublicRemoteHostLookup | undefined
 ): Promise<Array<Record<string, unknown>>> {
   const resolved: Array<Record<string, unknown>> = [];
   const modelSpecificObjectKind = modelSpecificImageObjectKindForCatalogEntry(entry, field);
@@ -842,14 +856,14 @@ async function resolveImageInputs(
         if (!modelSpecificObjectKind || !isSupportedModelSpecificImageInputObject(imageInput, modelSpecificObjectKind)) {
           throw new Error(`Unsupported model-specific image input object for field "${field}".`);
         }
-        assertModelSpecificImageInputUrlsArePublic(imageInput);
+        await assertModelSpecificImageInputUrlsArePublic(imageInput, remoteUrlLookup);
         resolved.push(imageInput);
         continue;
       }
       throw new Error('Image input values must be strings or objects.');
     }
     if (/^https?:\/\//.test(input)) {
-      assertPublicHttpUrl(input, 'Remote image URLs');
+      await assertPublicHttpUrl(input, 'Remote image URLs', { lookup: remoteUrlLookup });
       resolved.push({ image_url: input, mime_type: mimeTypeFromPath(input) });
       continue;
     }
@@ -867,7 +881,8 @@ async function resolveGptImage2ImageInputs(
   inputs: unknown[],
   projectRoot: string,
   entry: ImageModelCatalogEntry,
-  field: string
+  field: string,
+  remoteUrlLookup: PublicRemoteHostLookup | undefined
 ): Promise<Array<Record<string, unknown>>> {
   const resolved: Array<Record<string, unknown>> = [];
   const modelSpecificObjectKind = modelSpecificImageObjectKindForCatalogEntry(entry, field);
@@ -878,14 +893,14 @@ async function resolveGptImage2ImageInputs(
         if (!modelSpecificObjectKind || !isSupportedModelSpecificImageInputObject(imageInput, modelSpecificObjectKind)) {
           throw new Error(`Unsupported model-specific image input object for field "${field}".`);
         }
-        assertModelSpecificImageInputUrlsArePublic(imageInput);
+        await assertModelSpecificImageInputUrlsArePublic(imageInput, remoteUrlLookup);
         resolved.push(imageInput);
         continue;
       }
       throw new Error('Image input values must be strings or objects.');
     }
     if (/^https?:\/\//.test(input)) {
-      assertPublicHttpUrl(input, 'Remote image URLs');
+      await assertPublicHttpUrl(input, 'Remote image URLs', { lookup: remoteUrlLookup });
       resolved.push({ image_url: input, mime_type: mimeTypeFromPath(input) });
       continue;
     }
@@ -941,15 +956,18 @@ async function downloadImage(state: RequestState, url: string): Promise<ImagePay
 }
 
 async function fetchRemoteImage(state: RequestState, url: string, redirectCount = 0): Promise<Response> {
-  assertPublicHttpUrl(url, 'Remote image URLs');
-  const response = await fetchWithTimeout(state, url, { method: 'GET', redirect: 'manual' });
+  const safeUrl = await assertPublicHttpUrl(url, 'Remote image URLs', { lookup: state.remoteUrlLookup });
+  const response = await fetchWithTimeout(state, safeUrl, { method: 'GET', redirect: 'manual' });
   if (!isHttpRedirect(response.status)) {
     return response;
   }
   if (redirectCount >= 5) {
     throw new Error('Remote image URLs redirected too many times.');
   }
-  return fetchRemoteImage(state, publicHttpRedirectUrl(url, response.headers.get('location'), 'Remote image URLs'), redirectCount + 1);
+  const redirectUrl = await publicHttpRedirectUrl(safeUrl, response.headers.get('location'), 'Remote image URLs', {
+    lookup: state.remoteUrlLookup
+  });
+  return fetchRemoteImage(state, redirectUrl, redirectCount + 1);
 }
 
 function isHttpRedirect(status: number): boolean {
@@ -1344,11 +1362,14 @@ function isSupportedModelSpecificImageInputObject(image: Record<string, unknown>
     && hasHttpOrDataImageStringPayload(image, 'image_file');
 }
 
-function assertModelSpecificImageInputUrlsArePublic(image: Record<string, unknown>): void {
+async function assertModelSpecificImageInputUrlsArePublic(
+  image: Record<string, unknown>,
+  remoteUrlLookup: PublicRemoteHostLookup | undefined
+): Promise<void> {
   for (const key of ['image_url', 'image_file']) {
     const value = stringValueAt(image, key);
     if (value && /^https?:\/\//.test(value)) {
-      assertPublicHttpUrl(value, 'Remote image URLs');
+      await assertPublicHttpUrl(value, 'Remote image URLs', { lookup: remoteUrlLookup });
     }
   }
 }

@@ -1,4 +1,3 @@
-import { resolve } from 'node:path';
 import type { DebruteAppServer, CliImageModelDetail, CliRuntimeDiagnostic, CliVideoModelDetail } from '@debrute/app-server';
 import type {
   DaemonCliCommandRequest,
@@ -7,6 +6,7 @@ import type {
   ProjectSessionSnapshot,
   RunImageModelBatchInput
 } from '@debrute/app-protocol';
+import { normalizeProjectRelativePath } from '@debrute/project-core';
 
 export interface DaemonCliCommandServices {
   server: DebruteAppServer;
@@ -299,13 +299,17 @@ function pathRulesOption(request: DaemonCliCommandRequest): string[] {
 
 function imageBatchInputFromRequest(request: DaemonCliCommandRequest): RunImageModelBatchInput {
   const source = imageBatchSourceFromRequest(request);
+  const logPath = requiredProjectRelativePathOption(request, 'log');
+  const summaryPath = request.options.summary === undefined
+    ? undefined
+    : normalizeProjectRelativePathOption('summary', request.options.summary);
   return {
-    source,
+    source: normalizeImageBatchSource(source),
     concurrency: positiveIntegerOption(request, 'concurrency', 4),
     retries: nonNegativeIntegerOption(request, 'retries', 0),
     timeoutMs: optionalPositiveIntegerOption(request, 'timeout-ms') ?? 900_000,
-    logPath: resolve(requiredPathOption(request, 'log')),
-    ...(request.options.summary ? { summaryPath: resolve(request.options.summary) } : {}),
+    logPath,
+    ...(summaryPath ? { summaryPath } : {}),
     ...(request.options['overwrite-existing'] === 'true' ? { overwriteExisting: true } : {})
   };
 }
@@ -317,12 +321,26 @@ function imageBatchSourceFromRequest(request: DaemonCliCommandRequest): RunImage
     if (hasOptionValue(inputJsonlPath)) {
       throw cliCommandError('invalid_input', 'generate.image-batch requires exactly one of --manifest or --input-jsonl.');
     }
-    return { kind: 'manifest', path: resolve(manifestPath) };
+    return { kind: 'manifest', path: manifestPath };
   }
   if (!hasOptionValue(inputJsonlPath)) {
     throw cliCommandError('invalid_input', 'generate.image-batch requires exactly one of --manifest or --input-jsonl.');
   }
-  return { kind: 'jsonl', path: resolve(inputJsonlPath) };
+  return { kind: 'jsonl', path: inputJsonlPath };
+}
+
+function normalizeImageBatchSource(source: RunImageModelBatchInput['source']): RunImageModelBatchInput['source'] {
+  if (source.kind === 'requests') {
+    return source;
+  }
+  return {
+    ...source,
+    path: normalizeProjectRelativePathOption(source.kind === 'manifest' ? 'manifest' : 'input-jsonl', source.path)
+  };
+}
+
+function requiredProjectRelativePathOption(request: DaemonCliCommandRequest, key: string): string {
+  return normalizeProjectRelativePathOption(key, requiredPathOption(request, key));
 }
 
 function requiredPathOption(request: DaemonCliCommandRequest, key: string): string {
@@ -331,6 +349,14 @@ function requiredPathOption(request: DaemonCliCommandRequest, key: string): stri
     throw cliCommandError('missing_argument', `--${key} is required.`);
   }
   return raw;
+}
+
+function normalizeProjectRelativePathOption(key: string, raw: string): string {
+  try {
+    return normalizeProjectRelativePath(raw);
+  } catch {
+    throw cliCommandError('invalid_input', `--${key} must be a project-relative path.`);
+  }
 }
 
 function hasOptionValue(raw: string | undefined): raw is string {

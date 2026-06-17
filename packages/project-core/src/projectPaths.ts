@@ -1,4 +1,4 @@
-import { realpath } from 'node:fs/promises';
+import { lstat, realpath } from 'node:fs/promises';
 import { basename, dirname, isAbsolute, join, resolve, sep } from 'node:path';
 
 export function userHomeDir(): string {
@@ -77,6 +77,42 @@ export async function resolveProjectPathForWrite(projectRoot: string, projectRel
   return absolutePath;
 }
 
+export async function resolveNoSymlinkExistingProjectPath(projectRoot: string, projectRelativePath: string): Promise<string> {
+  const absolutePath = resolveProjectPath(projectRoot, projectRelativePath);
+  const [rootRealPath, targetLinkStat] = await Promise.all([
+    realpath(projectRoot),
+    lstat(absolutePath)
+  ]);
+  if (targetLinkStat.isSymbolicLink()) {
+    throw new Error(`Project path must not be a symbolic link: ${projectRelativePath}`);
+  }
+  const targetRealPath = await realpath(absolutePath);
+  assertRealPathInsideProjectRoot(rootRealPath, targetRealPath, projectRelativePath);
+  return absolutePath;
+}
+
+export async function resolveNoSymlinkProjectPathForWrite(projectRoot: string, projectRelativePath: string): Promise<string> {
+  const absolutePath = resolveProjectPath(projectRoot, projectRelativePath);
+  const rootRealPath = await realpath(projectRoot);
+  try {
+    const targetLinkStat = await lstat(absolutePath);
+    if (targetLinkStat.isSymbolicLink()) {
+      throw new Error(`Project path must not be a symbolic link: ${projectRelativePath}`);
+    }
+    const targetRealPath = await realpath(absolutePath);
+    assertRealPathInsideProjectRoot(rootRealPath, targetRealPath, projectRelativePath);
+    return absolutePath;
+  } catch (error) {
+    if (!isNodeError(error) || error.code !== 'ENOENT') {
+      throw error;
+    }
+  }
+
+  const existingParent = await nearestExistingParentRealPath(projectRoot, dirname(absolutePath));
+  assertRealPathInsideProjectRoot(rootRealPath, existingParent, projectRelativePath);
+  return absolutePath;
+}
+
 export function assertProjectTreeVisibleMutationPath(projectRelativePath: string): void {
   const normalizedPath = normalizeProjectRelativePath(projectRelativePath);
   if (normalizedPath === '.git' || normalizedPath.startsWith('.git/') || isIgnoredProjectFilePath(normalizedPath)) {
@@ -102,14 +138,16 @@ function normalizeProjectPath(projectRelativePath: string, options: { allowEmpty
   if (isAbsolute(projectRelativePath) || /^[A-Za-z]:[\\/]/.test(projectRelativePath)) {
     throw new Error(`Project path must be relative: ${projectRelativePath}`);
   }
-  const normalized = projectRelativePath.replaceAll('\\', '/');
-  if (!normalized) {
+  if (projectRelativePath.includes('\\')) {
+    throw new Error(`Project path must not contain backslashes: ${projectRelativePath}`);
+  }
+  if (!projectRelativePath) {
     if (options.allowEmpty) {
       return '';
     }
     throw new Error('Project path must be non-empty.');
   }
-  const parts = normalized.split('/');
+  const parts = projectRelativePath.split('/');
   if (parts.some((part) => part === '' || part === '.' || part === '..')) {
     throw new Error(`Project path must not contain "." or ".." segments: ${projectRelativePath}`);
   }

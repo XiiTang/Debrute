@@ -356,13 +356,23 @@ export interface RunImageModelBatchInput {
   retries: number;
   timeoutMs?: number;
   overwriteExisting?: boolean;
+  /** Project-relative output path for the result JSONL file. */
   logPath: string;
+  /** Project-relative output path for the optional summary JSON file. */
   summaryPath?: string;
 }
 
 export type ImageModelBatchSource =
-  | { kind: 'manifest'; path: string }
-  | { kind: 'jsonl'; path: string }
+  | {
+      kind: 'manifest';
+      /** Project-relative batch manifest path. */
+      path: string;
+    }
+  | {
+      kind: 'jsonl';
+      /** Project-relative batch JSONL path. */
+      path: string;
+    }
   | { kind: 'requests'; requests: ImageModelBatchRequest[] };
 
 export interface ImageModelBatchRequest {
@@ -380,7 +390,9 @@ export interface ImageModelBatchSummary {
   durationSeconds: number;
   concurrency: number;
   retries: number;
+  /** Project-relative output path reported to callers. */
   logPath: string;
+  /** Project-relative summary path reported to callers. */
   summaryPath?: string;
 }
 

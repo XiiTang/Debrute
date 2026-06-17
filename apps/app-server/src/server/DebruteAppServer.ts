@@ -9,6 +9,7 @@ import {
   readProjectMetadata,
   readProjectTextFile,
   resolveExistingProjectPath,
+  resolveNoSymlinkProjectPathForWrite,
   resolveProjectPath,
   resolveProjectPathForWrite,
   watchProjectFiles,
@@ -140,7 +141,8 @@ import {
 import type { ProjectDocumentDescriptor } from '../project-documents/ProjectDocumentRegistry.js';
 import {
   runImageModelBatch as runNativeImageModelBatch,
-  type ImageModelBatchRunOptions
+  type ImageModelBatchRunOptions,
+  type ResolvedImageModelBatchInput
 } from '../models/ImageModelBatchService.js';
 import {
   cliImageModelDetail,
@@ -733,8 +735,9 @@ export class DebruteAppServer {
 
   async runImageModelBatch(input: RunImageModelBatchInput, options: ImageModelBatchRunOptions = {}): Promise<ImageModelBatchSummary> {
     const current = this.getSnapshot();
+    const resolvedInput = await this.resolveImageModelBatchInput(current.projectRoot, input);
     let imageRequestExecutor: Promise<AppServerImageModelRequestExecutor> | undefined;
-    return runNativeImageModelBatch(input, {
+    return runNativeImageModelBatch(resolvedInput, {
       projectFileExistsWithContent: (check) => this.projectFileExistsWithContent(check),
       executeImageModelRequest: async (request) => {
         const { signal, ...imageRequest } = request;
@@ -748,6 +751,43 @@ export class DebruteAppServer {
         );
       }
     }, options);
+  }
+
+  private async resolveImageModelBatchInput(
+    projectRoot: string,
+    input: RunImageModelBatchInput
+  ): Promise<ResolvedImageModelBatchInput> {
+    const logProjectRelativePath = normalizeProjectRelativePath(input.logPath);
+    const summaryProjectRelativePath = input.summaryPath === undefined
+      ? undefined
+      : normalizeProjectRelativePath(input.summaryPath);
+    const source = await this.resolveImageModelBatchSource(projectRoot, input.source);
+    return {
+      ...input,
+      source,
+      logPath: await resolveNoSymlinkProjectPathForWrite(projectRoot, logProjectRelativePath),
+      logProjectRelativePath,
+      ...(summaryProjectRelativePath
+        ? {
+            summaryPath: await resolveNoSymlinkProjectPathForWrite(projectRoot, summaryProjectRelativePath),
+            summaryProjectRelativePath
+          }
+        : {})
+    };
+  }
+
+  private async resolveImageModelBatchSource(
+    projectRoot: string,
+    source: RunImageModelBatchInput['source']
+  ): Promise<RunImageModelBatchInput['source']> {
+    if (source.kind === 'requests') {
+      return source;
+    }
+    const projectRelativePath = normalizeProjectRelativePath(source.path);
+    return {
+      ...source,
+      path: await resolveExistingProjectPath(projectRoot, projectRelativePath)
+    };
   }
 
   async runImageModelRequestForCli(input: ImageModelRequestInput): Promise<DebruteCapabilityResult> {

@@ -260,6 +260,8 @@ export {
   normalizeProjectRelativePath,
   parentProjectPath,
   resolveExistingProjectPath,
+  resolveNoSymlinkExistingProjectPath,
+  resolveNoSymlinkProjectPathForWrite,
   resolveProjectPathForWrite,
   resolveProjectPath,
   userHomeDir

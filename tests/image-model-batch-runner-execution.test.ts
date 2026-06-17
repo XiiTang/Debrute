@@ -8,6 +8,14 @@ import {
 } from '../apps/app-server/src/models/ImageModelBatchService';
 
 describe('image model batch runner execution', () => {
+  function resolvedBatchOutput(logPath: string, summaryPath?: string) {
+    return {
+      logPath,
+      logProjectRelativePath: 'results.jsonl',
+      ...(summaryPath ? { summaryPath, summaryProjectRelativePath: 'summary.json' } : {})
+    };
+  }
+
   test('runs a fixed global concurrency queue and writes result JSONL plus summary', async () => {
     const tempDir = await mkdtemp(join(tmpdir(), 'debrute-batch-runner-'));
     const logPath = join(tempDir, 'results.jsonl');
@@ -37,8 +45,7 @@ describe('image model batch runner execution', () => {
         },
         concurrency: 2,
         retries: 0,
-        logPath,
-        summaryPath
+        ...resolvedBatchOutput(logPath, summaryPath)
       }, dependencies);
 
       expect(maxActive).toBe(2);
@@ -49,8 +56,8 @@ describe('image model batch runner execution', () => {
         failedCount: 0,
         concurrency: 2,
         retries: 0,
-        logPath,
-        summaryPath
+        logPath: 'results.jsonl',
+        summaryPath: 'summary.json'
       });
       const resultLines = (await readFile(logPath, 'utf8')).trim().split('\n').map((line) => JSON.parse(line) as Record<string, unknown>);
       expect(resultLines).toHaveLength(3);
@@ -84,7 +91,7 @@ describe('image model batch runner execution', () => {
         },
         concurrency: 2,
         retries: 0,
-        logPath
+        ...resolvedBatchOutput(logPath)
       }, dependencies);
 
       expect(executions).toBe(1);
@@ -125,7 +132,7 @@ describe('image model batch runner execution', () => {
         retries: 0,
         timeoutMs: 900000,
         overwriteExisting: true,
-        logPath
+        ...resolvedBatchOutput(logPath)
       }, dependencies, {
         onProgress: (event) => progress.push(event)
       });
@@ -175,7 +182,7 @@ describe('image model batch runner execution', () => {
         },
         concurrency: 1,
         retries: 2,
-        logPath
+        ...resolvedBatchOutput(logPath)
       }, dependencies);
 
       expect(attempts).toBe(3);
@@ -218,7 +225,7 @@ describe('image model batch runner execution', () => {
         concurrency: 1,
         retries: 0,
         timeoutMs: 900000,
-        logPath
+        ...resolvedBatchOutput(logPath)
       }, dependencies);
 
       expect(seenTimeouts).toEqual([123, 900000]);
@@ -249,7 +256,7 @@ describe('image model batch runner execution', () => {
         },
         concurrency: 1,
         retries: 0,
-        logPath
+        ...resolvedBatchOutput(logPath)
       }, dependencies);
 
       expect(seenTimeouts).toEqual([900000]);
@@ -301,7 +308,7 @@ describe('image model batch runner execution', () => {
         concurrency: 1,
         retries: 0,
         timeoutMs: 5,
-        logPath
+        ...resolvedBatchOutput(logPath)
       }, dependencies);
 
       expect(summary).toMatchObject({ total: 1, okCount: 0, failedCount: 1 });
@@ -343,7 +350,7 @@ describe('image model batch runner execution', () => {
         },
         concurrency: 1,
         retries: 0,
-        logPath
+        ...resolvedBatchOutput(logPath)
       }, dependencies)).rejects.toMatchObject({
         code: 'project_reference_missing',
         message: 'project reference is missing'

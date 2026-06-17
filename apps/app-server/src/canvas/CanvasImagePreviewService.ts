@@ -7,7 +7,9 @@ import {
   normalizeProjectRelativePath,
   projectFileRevision,
   resolveExistingProjectPath,
-  resolveProjectPathForWrite
+  resolveNoSymlinkExistingProjectPath,
+  resolveNoSymlinkProjectPathForWrite,
+  resolveProjectPath
 } from '@debrute/project-core';
 
 const CANVAS_IMAGE_PREVIEW_GENERATION_CONCURRENCY = 2;
@@ -267,13 +269,13 @@ class LocalCanvasImagePreviewService implements CanvasImagePreviewService {
     }
     assertCanvasImagePreviewWidthWithinSource(input.width, sourceMetadata.width, input.projectRelativePath);
 
-    const previewBasePath = await canvasImagePreviewCacheBasePath(input.projectRoot, {
+    const previewBaseProjectPath = canvasImagePreviewCacheBaseProjectPath({
       projectRelativePath: input.projectRelativePath,
       revision: input.revision,
       width: input.width
     });
     throwIfCanvasPreviewAborted(input.abortSignal);
-    const existingPreviewPath = await existingCanvasImagePreviewCachePath(previewBasePath);
+    const existingPreviewPath = await existingCanvasImagePreviewCachePath(input.projectRoot, previewBaseProjectPath);
     if (existingPreviewPath) {
       return {
         absolutePath: existingPreviewPath
@@ -283,19 +285,15 @@ class LocalCanvasImagePreviewService implements CanvasImagePreviewService {
     const output = sourceMetadata.hasAlpha === true
       ? { extension: 'png' as const }
       : { extension: 'jpg' as const };
-    const absolutePreviewPath = `${previewBasePath}.${output.extension}`;
-
-    if (await fileExists(absolutePreviewPath)) {
-      return {
-        absolutePath: absolutePreviewPath
-      };
-    }
+    const previewProjectPath = `${previewBaseProjectPath}.${output.extension}`;
+    const absolutePreviewPath = await resolveNoSymlinkProjectPathForWrite(input.projectRoot, previewProjectPath);
 
     return this.withGenerationSlot(async () => {
       input.onGenerationStart?.();
-      if (await fileExists(absolutePreviewPath)) {
+      const generatedByAnotherRequest = await existingCanvasImagePreviewCachePath(input.projectRoot, previewBaseProjectPath);
+      if (generatedByAnotherRequest) {
         return {
-          absolutePath: absolutePreviewPath
+          absolutePath: generatedByAnotherRequest
         };
       }
       const pipeline = sharp(absoluteSourcePath)
@@ -341,14 +339,13 @@ async function readCanvasImagePreviewMetadata(
   }
 }
 
-async function canvasImagePreviewCacheBasePath(
-  projectRoot: string,
+function canvasImagePreviewCacheBaseProjectPath(
   input: {
     projectRelativePath: string;
     revision: string;
     width: number;
   }
-): Promise<string> {
+): string {
   const hash = createHash('sha256')
     .update(input.projectRelativePath)
     .update('\0')
@@ -356,15 +353,21 @@ async function canvasImagePreviewCacheBasePath(
     .update('\0')
     .update(String(input.width))
     .digest('hex');
-  return resolveProjectPathForWrite(projectRoot, `.debrute/cache/canvas-image-previews/${hash}`);
+  return `.debrute/cache/canvas-image-previews/${hash}`;
 }
 
-async function existingCanvasImagePreviewCachePath(basePath: string): Promise<string | undefined> {
+async function existingCanvasImagePreviewCachePath(projectRoot: string, baseProjectPath: string): Promise<string | undefined> {
   for (const extension of ['jpg', 'png'] as const) {
-    const candidate = `${basePath}.${extension}`;
-    if (await fileExists(candidate)) {
-      return candidate;
+    const candidateProjectPath = `${baseProjectPath}.${extension}`;
+    if (!await fileExists(resolveProjectPath(projectRoot, candidateProjectPath))) {
+      continue;
     }
+    const candidate = await resolveNoSymlinkExistingProjectPath(projectRoot, candidateProjectPath);
+    const candidateStat = await stat(candidate);
+    if (!candidateStat.isFile()) {
+      throw new Error(`Canvas preview cache candidate is not a file: ${candidateProjectPath}`);
+    }
+    return candidate;
   }
   return undefined;
 }

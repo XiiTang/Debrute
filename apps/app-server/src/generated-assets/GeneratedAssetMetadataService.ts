@@ -134,7 +134,6 @@ export function createGeneratedAssetMetadataService(options: GeneratedAssetMetad
         projectRoot,
         owner: 'generated-assets',
         reads: [
-          { absolutePath, expectedHash: assetFileHash },
           { absolutePath: index.absolutePath, expectedHash: index.expectedHash },
           { absolutePath: recordPath, expectedHash: null }
         ],

@@ -1,5 +1,5 @@
 import { randomBytes } from 'node:crypto';
-import { mkdir, mkdtemp, readdir, rm, stat, utimes, writeFile } from 'node:fs/promises';
+import { mkdir, mkdtemp, readdir, rm, stat, symlink, unlink, utimes, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import sharp from 'sharp';
@@ -126,6 +126,45 @@ describe('canvas image preview service', () => {
         revision,
         width: 300
       })).rejects.toThrow('Canvas image preview metadata could not be read');
+    } finally {
+      await rm(projectRoot, { recursive: true, force: true });
+    }
+  });
+
+  it('rejects symlinked Canvas preview cache hits instead of serving them', async () => {
+    const projectRoot = await mkdtemp(join(tmpdir(), 'debrute-canvas-preview-service-cache-symlink-'));
+    const externalRoot = await mkdtemp(join(tmpdir(), 'debrute-canvas-preview-service-cache-symlink-external-'));
+    try {
+      await mkdir(join(projectRoot, 'images'), { recursive: true });
+      await writeFile(join(projectRoot, 'images/cover.png'), await previewablePngBuffer());
+      await writeFile(join(externalRoot, 'external.jpg'), await previewablePngBuffer(300, 150));
+      const service = createCanvasImagePreviewService();
+      const revision = await canvasImageSourceRevision(projectRoot, 'images/cover.png');
+      const first = await service.resolve({ projectRoot, projectRelativePath: 'images/cover.png', revision, width: 300 });
+      await unlink(first.absolutePath);
+      await symlink(join(externalRoot, 'external.jpg'), first.absolutePath);
+
+      await expect(service.resolve({ projectRoot, projectRelativePath: 'images/cover.png', revision, width: 300 }))
+        .rejects.toThrow('Project path must not be a symbolic link');
+    } finally {
+      await rm(projectRoot, { recursive: true, force: true });
+      await rm(externalRoot, { recursive: true, force: true });
+    }
+  });
+
+  it('rejects non-file Canvas preview cache hits', async () => {
+    const projectRoot = await mkdtemp(join(tmpdir(), 'debrute-canvas-preview-service-cache-directory-'));
+    try {
+      await mkdir(join(projectRoot, 'images'), { recursive: true });
+      await writeFile(join(projectRoot, 'images/cover.png'), await previewablePngBuffer());
+      const service = createCanvasImagePreviewService();
+      const revision = await canvasImageSourceRevision(projectRoot, 'images/cover.png');
+      const first = await service.resolve({ projectRoot, projectRelativePath: 'images/cover.png', revision, width: 300 });
+      await rm(first.absolutePath, { force: true });
+      await mkdir(first.absolutePath, { recursive: true });
+
+      await expect(service.resolve({ projectRoot, projectRelativePath: 'images/cover.png', revision, width: 300 }))
+        .rejects.toThrow('Canvas preview cache candidate is not a file');
     } finally {
       await rm(projectRoot, { recursive: true, force: true });
     }

@@ -4,8 +4,9 @@ import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
 import {
   createVideoModelCatalog,
-  executeVideoModelRequest,
+  executeVideoModelRequest as executeVideoModelRequestBase,
   type ExecuteVideoModelRequestInput,
+  type PublicRemoteHostLookup,
   type VideoModelFetch
 } from '@debrute/capability-runtime';
 
@@ -13,6 +14,15 @@ const tinyPngBase64 = 'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADElEQVR42
 const tinyPng = Buffer.from(tinyPngBase64, 'base64');
 const tinyMp4 = Buffer.from('00000018667479706d703432000000006d70343269736f6d', 'hex');
 const tinyWav = Buffer.from('524946460000000057415645666d7420', 'hex');
+const publicRemoteLookup: PublicRemoteHostLookup = async () => [{ address: '93.184.216.34', family: 4 }];
+const privateRemoteLookup: PublicRemoteHostLookup = async () => [{ address: '169.254.169.254', family: 4 }];
+
+function executeVideoModelRequest(input: ExecuteVideoModelRequestInput) {
+  return executeVideoModelRequestBase({
+    remoteUrlLookup: publicRemoteLookup,
+    ...input
+  });
+}
 
 describe('video model catalog and tools', () => {
   it('starts with only Seedance 2.0 video models', () => {
@@ -193,6 +203,54 @@ describe('video model executor', () => {
       expect(calls).toEqual([
         'https://ark.cn-beijing.volces.com/api/v3/contents/generations/tasks',
         'https://ark.cn-beijing.volces.com/api/v3/contents/generations/tasks/task-loopback'
+      ]);
+    } finally {
+      await rm(projectRoot, { recursive: true, force: true });
+    }
+  });
+
+  it('rejects DNS-resolved private provider artifact URLs before download', async () => {
+    const projectRoot = await mkdtemp(join(tmpdir(), 'debrute-video-dns-private-artifact-'));
+    const calls: string[] = [];
+    const fetch: VideoModelFetch = async (url, init) => {
+      calls.push(url);
+      if (url.endsWith('/contents/generations/tasks') && init?.method === 'POST') {
+        return jsonResponse({ id: 'task-dns-private', status: 'queued' });
+      }
+      if (url.endsWith('/contents/generations/tasks/task-dns-private')) {
+        return jsonResponse({
+          id: 'task-dns-private',
+          status: 'succeeded',
+          content: { video_url: 'https://private.example/video.mp4' }
+        });
+      }
+      throw new Error(`unexpected URL: ${url}`);
+    };
+    try {
+      const result = await executeVideoModelRequest({
+        projectRoot,
+        invocationId: 'turn-video-dns-private-artifact',
+        input: {
+          model: 'doubao-seedance-2-0-260128',
+          arguments: { prompt: 'camera slowly moves across a desk' }
+        },
+        settings: {
+          videoModels: [{
+            debruteModelId: 'doubao-seedance-2-0-260128',
+            requestModelIdOverride: null
+          }]
+        },
+        secrets: { videoModelApiKeys: { 'doubao-seedance-2-0-260128': 'sk-video' } },
+        pollIntervalMs: 0,
+        fetch,
+        remoteUrlLookup: privateRemoteLookup
+      });
+
+      expect(result.status).toBe('error');
+      expect(result.content).toContain('Remote artifact URLs must not target local or private network hosts');
+      expect(calls).toEqual([
+        'https://ark.cn-beijing.volces.com/api/v3/contents/generations/tasks',
+        'https://ark.cn-beijing.volces.com/api/v3/contents/generations/tasks/task-dns-private'
       ]);
     } finally {
       await rm(projectRoot, { recursive: true, force: true });
@@ -707,6 +765,38 @@ describe('video model executor', () => {
         expect(result.status).toBe('error');
         expect(result.error).toBe('video_argument_invalid');
       }
+    } finally {
+      await rm(projectRoot, { recursive: true, force: true });
+    }
+  });
+
+  it('rejects bracketed IPv6 video reference URLs before upstream requests', async () => {
+    const projectRoot = await mkdtemp(join(tmpdir(), 'debrute-video-ipv6-reference-'));
+    try {
+      const result = await executeVideoModelRequest({
+        projectRoot,
+        invocationId: 'turn-video-ipv6-reference',
+        input: {
+          model: 'doubao-seedance-2-0-260128',
+          arguments: {
+            prompt: 'use unsafe reference',
+            references: [{ source: 'http://[::1]/private.png' }]
+          }
+        },
+        settings: {
+          videoModels: [{
+            debruteModelId: 'doubao-seedance-2-0-260128',
+            requestModelIdOverride: null
+          }]
+        },
+        secrets: { videoModelApiKeys: { 'doubao-seedance-2-0-260128': 'sk-video' } },
+        fetch: async () => {
+          throw new Error('upstream request should not run for unsafe reference URLs');
+        }
+      });
+
+      expect(result.status).toBe('error');
+      expect(result.content).toContain('Remote video reference URLs must not target local or private network hosts');
     } finally {
       await rm(projectRoot, { recursive: true, force: true });
     }

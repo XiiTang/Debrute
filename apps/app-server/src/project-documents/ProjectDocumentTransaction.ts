@@ -1,6 +1,7 @@
 import { createHash, randomUUID } from 'node:crypto';
 import { mkdir, open, readFile, rename, rm, writeFile, type FileHandle } from 'node:fs/promises';
 import { dirname, isAbsolute, relative } from 'node:path';
+import { resolveNoSymlinkProjectPathForWrite } from '@debrute/project-core';
 import { documentServiceError } from './ProjectDocumentDiagnostics.js';
 import { projectDocumentDescriptorForPath } from './documentDescriptors.js';
 
@@ -35,6 +36,18 @@ interface ProjectDocumentLock {
   handle: FileHandle;
 }
 
+interface ResolvedProjectDocumentReadParticipant extends ProjectDocumentReadParticipant {
+  resolvedAbsolutePath: string;
+}
+
+interface ResolvedProjectDocumentWrite extends ProjectDocumentWrite {
+  resolvedAbsolutePath: string;
+}
+
+interface ResolvedProjectDocumentDelete extends ProjectDocumentDelete {
+  resolvedAbsolutePath: string;
+}
+
 export async function projectDocumentFileHash(absolutePath: string): Promise<string | null> {
   try {
     const content = await readFile(absolutePath);
@@ -54,6 +67,9 @@ export function projectDocumentTextHash(content: string): string {
 export async function commitProjectDocumentTransaction(input: ProjectDocumentTransactionInput): Promise<void> {
   const writes = input.writes ?? [];
   const deletes = input.deletes ?? [];
+  let resolvedReads: ResolvedProjectDocumentReadParticipant[] = [];
+  let resolvedWrites: ResolvedProjectDocumentWrite[] = [];
+  let resolvedDeletes: ResolvedProjectDocumentDelete[] = [];
   const stagedWrites: Array<{ tempPath: string; finalPath: string }> = [];
   const backups = new Map<string, Buffer | null>();
   let locks: ProjectDocumentLock[] = [];
@@ -62,15 +78,17 @@ export async function commitProjectDocumentTransaction(input: ProjectDocumentTra
   let releaseError: unknown;
   try {
     try {
-      validateProjectDocumentTargets(input.projectRoot, input.owner, writes, deletes);
-      assertUniqueTargets(writes, deletes);
-      locks = await acquireProjectDocumentLocks(input.projectRoot, input.reads, writes, deletes);
-      for (const absolutePath of affectedPaths(writes, deletes)) {
+      resolvedWrites = await resolveProjectDocumentWrites(input.projectRoot, input.owner, writes);
+      resolvedDeletes = await resolveProjectDocumentDeletes(input.projectRoot, input.owner, deletes);
+      resolvedReads = await resolveProjectDocumentReads(input.projectRoot, input.reads);
+      assertUniqueTargets(resolvedWrites, resolvedDeletes);
+      locks = await acquireProjectDocumentLocks(input.projectRoot, resolvedReads, resolvedWrites, resolvedDeletes);
+      for (const absolutePath of affectedResolvedPaths(resolvedWrites, resolvedDeletes)) {
         backups.set(absolutePath, await readExistingFileForRollback(absolutePath));
       }
 
-      for (const read of input.reads) {
-        const currentHash = await projectDocumentFileHash(read.absolutePath);
+      for (const read of resolvedReads) {
+        const currentHash = await projectDocumentFileHash(read.resolvedAbsolutePath);
         if (currentHash !== read.expectedHash) {
           throw documentServiceError('document_push_conflict', 'Project document changed on disk before push commit.', {
             file_path: read.absolutePath
@@ -78,21 +96,21 @@ export async function commitProjectDocumentTransaction(input: ProjectDocumentTra
         }
       }
 
-      for (const write of writes) {
-        await mkdir(dirname(write.absolutePath), { recursive: true });
-        const tempPath = `${write.absolutePath}.${randomUUID()}.tmp`;
+      for (const write of resolvedWrites) {
+        await mkdir(dirname(write.resolvedAbsolutePath), { recursive: true });
+        const tempPath = `${write.resolvedAbsolutePath}.${randomUUID()}.tmp`;
         await writeFile(tempPath, write.content, 'utf8');
-        stagedWrites.push({ tempPath, finalPath: write.absolutePath });
+        stagedWrites.push({ tempPath, finalPath: write.resolvedAbsolutePath });
       }
 
-      for (const [index, write] of writes.entries()) {
-        write.suppressInternalEvent?.(write.absolutePath, write.content);
-        await rename(stagedWrites[index]!.tempPath, write.absolutePath);
+      for (const [index, write] of resolvedWrites.entries()) {
+        write.suppressInternalEvent?.(write.resolvedAbsolutePath, write.content);
+        await rename(stagedWrites[index]!.tempPath, write.resolvedAbsolutePath);
       }
 
-      for (const deleteItem of deletes) {
-        deleteItem.suppressInternalEvent?.(deleteItem.absolutePath);
-        await rm(deleteItem.absolutePath, { force: true });
+      for (const deleteItem of resolvedDeletes) {
+        deleteItem.suppressInternalEvent?.(deleteItem.resolvedAbsolutePath);
+        await rm(deleteItem.resolvedAbsolutePath, { force: true });
       }
     } catch (error) {
       if (isProjectDocumentServiceError(error)) {
@@ -100,7 +118,7 @@ export async function commitProjectDocumentTransaction(input: ProjectDocumentTra
       } else {
         transactionError = documentServiceError('document_push_failed', errorMessage(error));
       }
-      cleanupError = await abortProjectDocumentTransaction(backups, writes, deletes, stagedWrites);
+      cleanupError = await abortProjectDocumentTransaction(backups, resolvedWrites, resolvedDeletes, stagedWrites);
     }
   } finally {
     try {
@@ -125,8 +143,8 @@ export async function commitProjectDocumentTransaction(input: ProjectDocumentTra
 
 async function abortProjectDocumentTransaction(
   backups: Map<string, Buffer | null>,
-  writes: ProjectDocumentWrite[],
-  deletes: ProjectDocumentDelete[],
+  writes: ResolvedProjectDocumentWrite[],
+  deletes: ResolvedProjectDocumentDelete[],
   stagedWrites: Array<{ tempPath: string }>
 ): Promise<unknown> {
   let cleanupError: unknown;
@@ -137,14 +155,14 @@ async function abortProjectDocumentTransaction(
   }
   for (const write of writes) {
     try {
-      write.clearInternalEvent?.(write.absolutePath);
+      write.clearInternalEvent?.(write.resolvedAbsolutePath);
     } catch (error) {
       cleanupError ??= error;
     }
   }
   for (const deleteItem of deletes) {
     try {
-      deleteItem.clearInternalEvent?.(deleteItem.absolutePath);
+      deleteItem.clearInternalEvent?.(deleteItem.resolvedAbsolutePath);
     } catch (error) {
       cleanupError ??= error;
     }
@@ -161,54 +179,90 @@ function projectDocumentBufferHash(content: Buffer): string {
   return `sha256:${createHash('sha256').update(content).digest('hex')}`;
 }
 
-function validateProjectDocumentTargets(
+async function resolveProjectDocumentWrites(
   projectRoot: string,
   owner: string,
-  writes: ProjectDocumentWrite[],
+  writes: ProjectDocumentWrite[]
+): Promise<ResolvedProjectDocumentWrite[]> {
+  return Promise.all(writes.map(async (write) => ({
+    ...write,
+    resolvedAbsolutePath: await resolveProjectDocumentMutationPath(projectRoot, owner, write.absolutePath)
+  })));
+}
+
+async function resolveProjectDocumentDeletes(
+  projectRoot: string,
+  owner: string,
   deletes: ProjectDocumentDelete[]
-): void {
-  for (const absolutePath of affectedPaths(writes, deletes)) {
-    const projectRelativePath = projectRelativeDocumentPath(projectRoot, absolutePath);
-    const descriptor = projectDocumentDescriptorForPath(projectRelativePath);
-    if (!descriptor) {
-      throw documentServiceError('document_descriptor_violation', 'Project document path is not registered.', {
-        file_path: absolutePath
-      });
-    }
-    if (!descriptor.owners.includes(owner)) {
-      throw documentServiceError('document_descriptor_violation', 'Project document owner is not allowed to write this document.', {
-        file_path: absolutePath,
-        owner,
-        document_type: descriptor.type
-      });
-    }
-  }
+): Promise<ResolvedProjectDocumentDelete[]> {
+  return Promise.all(deletes.map(async (deleteItem) => ({
+    ...deleteItem,
+    resolvedAbsolutePath: await resolveProjectDocumentMutationPath(projectRoot, owner, deleteItem.absolutePath)
+  })));
 }
 
-function assertUniqueTargets(writes: ProjectDocumentWrite[], deletes: ProjectDocumentDelete[]): void {
+async function resolveProjectDocumentMutationPath(projectRoot: string, owner: string, absolutePath: string): Promise<string> {
+  const projectRelativePath = projectRelativeDocumentPath(projectRoot, absolutePath);
+  const descriptor = projectDocumentDescriptorForPath(projectRelativePath);
+  if (!descriptor) {
+    throw documentServiceError('document_descriptor_violation', 'Project document path is not registered.', {
+      file_path: absolutePath
+    });
+  }
+  if (!descriptor.owners.includes(owner)) {
+    throw documentServiceError('document_descriptor_violation', 'Project document owner is not allowed to write this document.', {
+      file_path: absolutePath,
+      owner,
+      document_type: descriptor.type
+    });
+  }
+  return resolveNoSymlinkProjectPathForWrite(projectRoot, projectRelativePath);
+}
+
+async function resolveProjectDocumentReads(
+  projectRoot: string,
+  reads: ProjectDocumentReadParticipant[]
+): Promise<ResolvedProjectDocumentReadParticipant[]> {
+  return Promise.all(reads.map(async (read) => ({
+    ...read,
+    resolvedAbsolutePath: await resolveProjectDocumentReadPath(projectRoot, read.absolutePath)
+  })));
+}
+
+async function resolveProjectDocumentReadPath(projectRoot: string, absolutePath: string): Promise<string> {
+  const relativePath = projectRelativeDocumentPath(projectRoot, absolutePath);
+  if (projectDocumentDescriptorForPath(relativePath) === undefined) {
+    throw documentServiceError('document_descriptor_violation', 'Project document path is not registered.', {
+      file_path: absolutePath
+    });
+  }
+  return resolveNoSymlinkProjectPathForWrite(projectRoot, relativePath);
+}
+
+function assertUniqueTargets(writes: ResolvedProjectDocumentWrite[], deletes: ResolvedProjectDocumentDelete[]): void {
   const seen = new Set<string>();
-  for (const absolutePath of affectedPaths(writes, deletes)) {
-    if (seen.has(absolutePath)) {
+  for (const operation of [...writes, ...deletes]) {
+    if (seen.has(operation.resolvedAbsolutePath)) {
       throw documentServiceError('document_descriptor_violation', 'Project document transaction contains duplicate targets.', {
-        file_path: absolutePath
+        file_path: operation.absolutePath
       });
     }
-    seen.add(absolutePath);
+    seen.add(operation.resolvedAbsolutePath);
   }
 }
 
-function affectedPaths(writes: ProjectDocumentWrite[], deletes: ProjectDocumentDelete[]): string[] {
+function affectedResolvedPaths(writes: ResolvedProjectDocumentWrite[], deletes: ResolvedProjectDocumentDelete[]): string[] {
   return [
-    ...writes.map((write) => write.absolutePath),
-    ...deletes.map((deleteItem) => deleteItem.absolutePath)
+    ...writes.map((write) => write.resolvedAbsolutePath),
+    ...deletes.map((deleteItem) => deleteItem.resolvedAbsolutePath)
   ];
 }
 
 async function acquireProjectDocumentLocks(
   projectRoot: string,
-  reads: ProjectDocumentReadParticipant[],
-  writes: ProjectDocumentWrite[],
-  deletes: ProjectDocumentDelete[]
+  reads: ResolvedProjectDocumentReadParticipant[],
+  writes: ResolvedProjectDocumentWrite[],
+  deletes: ResolvedProjectDocumentDelete[]
 ): Promise<ProjectDocumentLock[]> {
   const locks: ProjectDocumentLock[] = [];
   try {
@@ -236,14 +290,14 @@ async function acquireProjectDocumentLocks(
 
 function lockableDocumentPaths(
   projectRoot: string,
-  reads: ProjectDocumentReadParticipant[],
-  writes: ProjectDocumentWrite[],
-  deletes: ProjectDocumentDelete[]
+  reads: ResolvedProjectDocumentReadParticipant[],
+  writes: ResolvedProjectDocumentWrite[],
+  deletes: ResolvedProjectDocumentDelete[]
 ): string[] {
-  const paths = new Set<string>(affectedPaths(writes, deletes));
+  const paths = new Set<string>(affectedResolvedPaths(writes, deletes));
   for (const read of reads) {
     if (isRegisteredProjectDocumentPath(projectRoot, read.absolutePath)) {
-      paths.add(read.absolutePath);
+      paths.add(read.resolvedAbsolutePath);
     }
   }
   return [...paths].sort((left, right) => left.localeCompare(right));
@@ -286,15 +340,15 @@ async function readExistingFileForRollback(absolutePath: string): Promise<Buffer
 
 async function restoreProjectDocumentBackups(
   backups: Map<string, Buffer | null>,
-  writes: ProjectDocumentWrite[],
-  deletes: ProjectDocumentDelete[]
+  writes: ResolvedProjectDocumentWrite[],
+  deletes: ResolvedProjectDocumentDelete[]
 ): Promise<void> {
-  const operationByPath = new Map<string, ProjectDocumentWrite | ProjectDocumentDelete>();
+  const operationByPath = new Map<string, ResolvedProjectDocumentWrite | ResolvedProjectDocumentDelete>();
   for (const write of writes) {
-    operationByPath.set(write.absolutePath, write);
+    operationByPath.set(write.resolvedAbsolutePath, write);
   }
   for (const deleteItem of deletes) {
-    operationByPath.set(deleteItem.absolutePath, deleteItem);
+    operationByPath.set(deleteItem.resolvedAbsolutePath, deleteItem);
   }
   await Promise.all([...backups.entries()].map(async ([absolutePath, content]) => {
     const operation = operationByPath.get(absolutePath);
@@ -312,7 +366,7 @@ async function restoreProjectDocumentBackups(
 }
 
 function suppressRollbackEvent(
-  operation: ProjectDocumentWrite | ProjectDocumentDelete | undefined,
+  operation: ResolvedProjectDocumentWrite | ResolvedProjectDocumentDelete | undefined,
   absolutePath: string,
   content?: string
 ): void {

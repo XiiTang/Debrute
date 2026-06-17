@@ -5,12 +5,23 @@ import { describe, expect, it } from 'vitest';
 import sharp from 'sharp';
 import {
   createImageModelCatalog,
-  executeImageModelRequest,
-  type ImageModelFetch
+  executeImageModelRequest as executeImageModelRequestBase,
+  type ExecuteImageModelRequestInput,
+  type ImageModelFetch,
+  type PublicRemoteHostLookup
 } from '@debrute/capability-runtime';
 
 const tinyPngBase64 = 'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADElEQVR42mP8z8AARQAHSQGmK3P7WAAAAABJRU5ErkJggg==';
 const tinyPng = Buffer.from(tinyPngBase64, 'base64');
+const publicRemoteLookup: PublicRemoteHostLookup = async () => [{ address: '93.184.216.34', family: 4 }];
+const privateRemoteLookup: PublicRemoteHostLookup = async () => [{ address: '169.254.169.254', family: 4 }];
+
+function executeImageModelRequest(input: ExecuteImageModelRequestInput) {
+  return executeImageModelRequestBase({
+    remoteUrlLookup: publicRemoteLookup,
+    ...input
+  });
+}
 
 describe('image model catalog and tools', () => {
   it('restores the full model-keyed image catalog from the reference implementation', () => {
@@ -809,6 +820,61 @@ describe('image model executors', () => {
       expect(result.error).toBe('invalid_image_input');
       expect(result.content).toBe('Remote image URLs must not target local or private network hosts: http://127.0.0.1/private.png');
       expect(fetched).toEqual([]);
+    } finally {
+      await rm(projectRoot, { recursive: true, force: true });
+    }
+  });
+
+  it('rejects bracketed IPv6 OpenAI image URLs before external fetches', async () => {
+    const projectRoot = await mkdtemp(join(tmpdir(), 'debrute-image-openai-ipv6-input-'));
+    try {
+      const result = await executeImageModelRequest({
+        projectRoot,
+        invocationId: 'turn-openai-ipv6-input',
+        input: {
+          model: 'gpt-image-2',
+          arguments: {
+            prompt: 'use this reference',
+            image: ['http://[::1]/private.png']
+          }
+        },
+        settings: { imageModels: [{ debruteModelId: 'gpt-image-2', requestModelIdOverride: null }] },
+        secrets: { imageModelApiKeys: { 'gpt-image-2': 'sk-image' } },
+        fetch: async () => {
+          throw new Error('external fetch should not run for unsafe reference URLs');
+        }
+      });
+
+      expect(result.status).toBe('error');
+      expect(result.content).toContain('Remote image URLs must not target local or private network hosts');
+    } finally {
+      await rm(projectRoot, { recursive: true, force: true });
+    }
+  });
+
+  it('rejects DNS-resolved private OpenAI image URLs before external fetches', async () => {
+    const projectRoot = await mkdtemp(join(tmpdir(), 'debrute-image-openai-dns-private-input-'));
+    try {
+      const result = await executeImageModelRequest({
+        projectRoot,
+        invocationId: 'turn-openai-dns-private-input',
+        input: {
+          model: 'gpt-image-2',
+          arguments: {
+            prompt: 'use this reference',
+            image: ['https://private.example/reference.png']
+          }
+        },
+        settings: { imageModels: [{ debruteModelId: 'gpt-image-2', requestModelIdOverride: null }] },
+        secrets: { imageModelApiKeys: { 'gpt-image-2': 'sk-image' } },
+        fetch: async () => {
+          throw new Error('external fetch should not run for unsafe reference URLs');
+        },
+        remoteUrlLookup: privateRemoteLookup
+      });
+
+      expect(result.status).toBe('error');
+      expect(result.content).toContain('Remote image URLs must not target local or private network hosts');
     } finally {
       await rm(projectRoot, { recursive: true, force: true });
     }

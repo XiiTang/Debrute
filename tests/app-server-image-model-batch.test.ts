@@ -1,4 +1,4 @@
-import { access, mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
+import { access, mkdir, mkdtemp, readFile, rm, symlink, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { DebruteAppServer, GlobalConfigStore } from '@debrute/app-server';
@@ -11,8 +11,8 @@ describe('DebruteAppServer image model batch', () => {
   test('runs a batch through configured image model execution and records generated metadata', async () => {
     const projectRoot = await mkdtemp(join(tmpdir(), 'debrute-app-server-batch-project-'));
     const debruteHome = await mkdtemp(join(tmpdir(), 'debrute-app-server-batch-home-'));
-    const logPath = join(projectRoot, 'batch-results.jsonl');
-    const summaryPath = join(projectRoot, 'batch-summary.json');
+    const logPath = 'batch-results.jsonl';
+    const summaryPath = 'batch-summary.json';
     const configStore = new GlobalConfigStore({ debruteHome });
     await configStore.saveImageModels({
       imageModels: [
@@ -76,7 +76,7 @@ describe('DebruteAppServer image model batch', () => {
         logPath,
         summaryPath
       });
-      const [result] = (await readFile(logPath, 'utf8')).trim().split('\n').map((line) => JSON.parse(line) as Record<string, unknown>);
+      const [result] = (await readFile(join(projectRoot, logPath), 'utf8')).trim().split('\n').map((line) => JSON.parse(line) as Record<string, unknown>);
       expect(result).toMatchObject({
         status: 'ok',
         index: 1,
@@ -105,10 +105,60 @@ describe('DebruteAppServer image model batch', () => {
     }
   });
 
+  test('rejects image batch absolute and symlinked output paths before creating files', async () => {
+    const projectRoot = await mkdtemp(join(tmpdir(), 'debrute-app-server-batch-boundary-project-'));
+    const debruteHome = await mkdtemp(join(tmpdir(), 'debrute-app-server-batch-boundary-home-'));
+    const externalRoot = await mkdtemp(join(tmpdir(), 'debrute-app-server-batch-boundary-external-'));
+    const server = new DebruteAppServer({
+      globalConfigStore: new GlobalConfigStore({ debruteHome }),
+      imageModelFetch: async () => {
+        throw new Error('model request should not run for invalid batch paths');
+      }
+    });
+
+    try {
+      await mkdir(join(projectRoot, 'batch'), { recursive: true });
+      await symlink(externalRoot, join(projectRoot, 'batch/outside'));
+      await server.openProject(projectRoot, {
+        initializeIfMissing: true,
+        createDefaultCanvas: false
+      });
+
+      const baseInput = {
+        source: { kind: 'requests' as const, requests: [{ model: 'gpt-image-2', arguments: { prompt: 'blocked' } }] },
+        concurrency: 1,
+        retries: 0
+      };
+
+      await expect(server.runImageModelBatch({
+        ...baseInput,
+        logPath: '/tmp/results.jsonl'
+      })).rejects.toThrow('Project path must be relative');
+
+      await expect(server.runImageModelBatch({
+        ...baseInput,
+        logPath: 'batch/outside/results.jsonl'
+      })).rejects.toThrow('Project path escapes project root through a symlink');
+
+      await expect(server.runImageModelBatch({
+        ...baseInput,
+        source: { kind: 'jsonl', path: '/tmp/requests.jsonl' },
+        logPath: 'batch/results.jsonl'
+      })).rejects.toThrow('Project path must be relative');
+
+      await expect(access(join(externalRoot, 'results.jsonl'))).rejects.toBeDefined();
+    } finally {
+      server.close();
+      await rm(projectRoot, { recursive: true, force: true });
+      await rm(debruteHome, { recursive: true, force: true });
+      await rm(externalRoot, { recursive: true, force: true });
+    }
+  });
+
   test('does not record generated asset metadata for skipped batch outputs', async () => {
     const projectRoot = await mkdtemp(join(tmpdir(), 'debrute-app-server-batch-skip-project-'));
     const debruteHome = await mkdtemp(join(tmpdir(), 'debrute-app-server-batch-skip-home-'));
-    const logPath = join(projectRoot, 'batch-results.jsonl');
+    const logPath = 'batch-results.jsonl';
     const server = new DebruteAppServer({
       globalConfigStore: new GlobalConfigStore({ debruteHome }),
       imageModelFetch: async () => {
@@ -164,7 +214,7 @@ describe('DebruteAppServer image model batch', () => {
   test('overwrites existing batch outputs through app-server input', async () => {
     const projectRoot = await mkdtemp(join(tmpdir(), 'debrute-app-server-batch-overwrite-project-'));
     const debruteHome = await mkdtemp(join(tmpdir(), 'debrute-app-server-batch-overwrite-home-'));
-    const logPath = join(projectRoot, 'batch-results.jsonl');
+    const logPath = 'batch-results.jsonl';
     const configStore = new GlobalConfigStore({ debruteHome });
     await configStore.saveImageModels({
       imageModels: [{ debruteModelId: 'gpt-image-2', requestModelIdOverride: 'gpt-image-2' }]
@@ -215,7 +265,7 @@ describe('DebruteAppServer image model batch', () => {
 
   test('does not read image model configuration when every batch output is skipped', async () => {
     const projectRoot = await mkdtemp(join(tmpdir(), 'debrute-app-server-batch-skip-config-project-'));
-    const logPath = join(projectRoot, 'batch-results.jsonl');
+    const logPath = 'batch-results.jsonl';
     class ThrowingImageConfigStore extends GlobalConfigStore {
       override async readImageModels(): ReturnType<GlobalConfigStore['readImageModels']> {
         throw new Error('image model settings should not be read for skipped outputs');
@@ -274,7 +324,7 @@ describe('DebruteAppServer image model batch', () => {
   test('does not record generated asset metadata for failed batch items', async () => {
     const projectRoot = await mkdtemp(join(tmpdir(), 'debrute-app-server-batch-failed-project-'));
     const debruteHome = await mkdtemp(join(tmpdir(), 'debrute-app-server-batch-failed-home-'));
-    const logPath = join(projectRoot, 'batch-results.jsonl');
+    const logPath = 'batch-results.jsonl';
     const configStore = new GlobalConfigStore({ debruteHome });
     await configStore.saveImageModels({
       imageModels: [
@@ -325,7 +375,7 @@ describe('DebruteAppServer image model batch', () => {
         skippedCount: 0,
         failedCount: 1
       });
-      const [result] = (await readFile(logPath, 'utf8')).trim().split('\n').map((line) => JSON.parse(line) as Record<string, unknown>);
+      const [result] = (await readFile(join(projectRoot, logPath), 'utf8')).trim().split('\n').map((line) => JSON.parse(line) as Record<string, unknown>);
       expect(result).toMatchObject({
         status: 'failed',
         outputPath: 'generated/failed.png'

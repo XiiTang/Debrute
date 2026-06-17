@@ -37,7 +37,7 @@ describe('daemon CLI command routes', () => {
           okCount: 19,
           failedCount: 1,
           skippedCount: 0,
-          logPath: '/tmp/results.jsonl',
+          logPath: 'batch/results.jsonl',
           concurrency: 2,
           retries: 0,
           durationSeconds: 1.25
@@ -50,8 +50,8 @@ describe('daemon CLI command routes', () => {
       positional: ['/tmp/project'],
       projectRoot: '/tmp/project',
       options: {
-        'input-jsonl': '/tmp/requests.jsonl',
-        log: '/tmp/results.jsonl',
+        'input-jsonl': 'batch/requests.jsonl',
+        log: 'batch/results.jsonl',
         concurrency: '2'
       }
     }, { server, onProgress });
@@ -129,6 +129,113 @@ describe('daemon CLI command routes', () => {
 
     expect(server.openProject).not.toHaveBeenCalled();
     expect(server.runImageModelBatch).not.toHaveBeenCalled();
+  });
+
+  it('rejects absolute image batch project paths before opening the project', async () => {
+    const server = {
+      openProject: vi.fn(async () => undefined),
+      runImageModelBatch: vi.fn()
+    } as unknown as DebruteAppServer;
+
+    await expect(runDaemonCliCommand({
+      command: 'generate.image-batch',
+      positional: ['/tmp/project'],
+      projectRoot: '/tmp/project',
+      options: {
+        'input-jsonl': 'batch/requests.jsonl',
+        log: '/tmp/results.jsonl'
+      }
+    }, { server })).resolves.toMatchObject({
+      status: 'error',
+      command: 'generate.image-batch',
+      code: 'invalid_input',
+      message: '--log must be a project-relative path.'
+    });
+
+    await expect(runDaemonCliCommand({
+      command: 'generate.image-batch',
+      positional: ['/tmp/project'],
+      projectRoot: '/tmp/project',
+      options: {
+        manifest: 'batch/manifest.json',
+        log: 'batch/results.jsonl',
+        summary: '/tmp/summary.json'
+      }
+    }, { server })).resolves.toMatchObject({
+      status: 'error',
+      command: 'generate.image-batch',
+      code: 'invalid_input',
+      message: '--summary must be a project-relative path.'
+    });
+
+    await expect(runDaemonCliCommand({
+      command: 'generate.image-batch',
+      positional: ['/tmp/project'],
+      projectRoot: '/tmp/project',
+      options: {
+        'input-jsonl': '/tmp/requests.jsonl',
+        log: 'batch/results.jsonl'
+      }
+    }, { server })).resolves.toMatchObject({
+      status: 'error',
+      command: 'generate.image-batch',
+      code: 'invalid_input',
+      message: '--input-jsonl must be a project-relative path.'
+    });
+
+    expect(server.openProject).not.toHaveBeenCalled();
+    expect(server.runImageModelBatch).not.toHaveBeenCalled();
+  });
+
+  it('passes normalized project-relative image batch paths and reports relative progress fields', async () => {
+    const onProgress = vi.fn();
+    const server = {
+      openProject: vi.fn(async () => undefined),
+      runImageModelBatch: vi.fn(async (input, options: { onProgress?: (event: unknown) => void } | undefined) => {
+        expect(input).toMatchObject({
+          source: { kind: 'jsonl', path: 'batch/requests.jsonl' },
+          logPath: 'batch/results.jsonl',
+          summaryPath: 'batch/summary.json'
+        });
+        options?.onProgress?.({ type: 'started', snapshot: snapshot(1, 0, 0) });
+        return {
+          total: 1,
+          okCount: 1,
+          failedCount: 0,
+          skippedCount: 0,
+          logPath: 'batch/results.jsonl',
+          summaryPath: 'batch/summary.json',
+          concurrency: 2,
+          retries: 0,
+          durationSeconds: 1
+        };
+      })
+    } as unknown as DebruteAppServer;
+
+    const result = await runDaemonCliCommand({
+      command: 'generate.image-batch',
+      positional: ['/tmp/project'],
+      projectRoot: '/tmp/project',
+      options: {
+        'input-jsonl': 'batch/requests.jsonl',
+        log: 'batch/results.jsonl',
+        summary: 'batch/summary.json',
+        concurrency: '2'
+      }
+    }, { server, onProgress });
+
+    expect(result).toMatchObject({
+      status: 'ok',
+      command: 'generate.image-batch',
+      fields: {
+        log: 'batch/results.jsonl',
+        summary: 'batch/summary.json'
+      }
+    });
+    expect(onProgress.mock.calls[0]?.[1]).toMatchObject({
+      log: 'batch/results.jsonl',
+      summary: 'batch/summary.json'
+    });
   });
 
   it('runs canvas reset layout through the project CLI bridge', async () => {

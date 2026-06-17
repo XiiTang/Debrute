@@ -1,7 +1,7 @@
 import { once } from 'node:events';
 import { createWriteStream, type WriteStream } from 'node:fs';
 import { mkdir, readFile, writeFile } from 'node:fs/promises';
-import { dirname, resolve } from 'node:path';
+import { dirname } from 'node:path';
 import type {
   ImageModelBatchRequest,
   ImageModelBatchSource,
@@ -75,6 +75,13 @@ export interface ImageModelBatchRunOptions {
   onProgress?: (event: ImageModelBatchProgressEvent) => void;
 }
 
+export interface ResolvedImageModelBatchInput extends Omit<RunImageModelBatchInput, 'logPath' | 'summaryPath'> {
+  logPath: string;
+  logProjectRelativePath: string;
+  summaryPath?: string;
+  summaryProjectRelativePath?: string;
+}
+
 const IMAGE_BATCH_DEFAULT_TIMEOUT_MS = 900_000;
 
 export async function loadImageModelBatchRequests(source: ImageModelBatchSource): Promise<ImageModelBatchRequest[]> {
@@ -82,13 +89,13 @@ export async function loadImageModelBatchRequests(source: ImageModelBatchSource)
     return source.requests.map((request) => imageModelBatchRequestFromPayload(request));
   }
   if (source.kind === 'manifest') {
-    return imageModelBatchRequestsFromManifest(parseJsonObject(await readFile(resolve(source.path), 'utf8'), '--manifest'));
+    return imageModelBatchRequestsFromManifest(parseJsonObject(await readFile(source.path, 'utf8'), '--manifest'));
   }
-  return imageModelBatchRequestsFromJsonl(await readFile(resolve(source.path), 'utf8'));
+  return imageModelBatchRequestsFromJsonl(await readFile(source.path, 'utf8'));
 }
 
 export async function runImageModelBatch(
-  input: RunImageModelBatchInput,
+  input: ResolvedImageModelBatchInput,
   dependencies: ImageModelBatchRunnerDependencies,
   options: ImageModelBatchRunOptions = {}
 ): Promise<ImageModelBatchSummary> {
@@ -98,9 +105,7 @@ export async function runImageModelBatch(
     throw imageModelBatchError('invalid_input', 'Image model batch must include at least one request.');
   }
 
-  const absoluteLogPath = resolve(input.logPath);
-  const absoluteSummaryPath = input.summaryPath ? resolve(input.summaryPath) : undefined;
-  const writer = await createBatchResultWriter(absoluteLogPath);
+  const writer = await createBatchResultWriter(input.logPath);
   const batchTimeoutMs = input.timeoutMs ?? IMAGE_BATCH_DEFAULT_TIMEOUT_MS;
   const started = Date.now();
   const results: ImageModelBatchResult[] = [];
@@ -169,12 +174,12 @@ export async function runImageModelBatch(
     durationSeconds: roundSeconds(Date.now() - started),
     concurrency: input.concurrency,
     retries: input.retries,
-    logPath: absoluteLogPath,
-    ...(absoluteSummaryPath ? { summaryPath: absoluteSummaryPath } : {})
+    logPath: input.logProjectRelativePath,
+    ...(input.summaryProjectRelativePath ? { summaryPath: input.summaryProjectRelativePath } : {})
   };
-  if (absoluteSummaryPath) {
-    await mkdir(dirname(absoluteSummaryPath), { recursive: true });
-    await writeFile(absoluteSummaryPath, `${JSON.stringify(summary, null, 2)}\n`, 'utf8');
+  if (input.summaryPath) {
+    await mkdir(dirname(input.summaryPath), { recursive: true });
+    await writeFile(input.summaryPath, `${JSON.stringify(summary, null, 2)}\n`, 'utf8');
   }
   return summary;
 }
@@ -295,7 +300,7 @@ async function executeBatchItemAttemptWithTimeout(
   }
 }
 
-function validateBatchInput(input: RunImageModelBatchInput): void {
+function validateBatchInput(input: ResolvedImageModelBatchInput): void {
   if (!input.logPath || typeof input.logPath !== 'string' || !input.logPath.trim()) {
     throw imageModelBatchError('invalid_input', 'Image model batch requires --log.');
   }

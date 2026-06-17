@@ -1,6 +1,6 @@
 import { extname } from 'node:path';
 import { readProjectFileBytes } from '@debrute/project-core';
-import { assertPublicHttpUrl } from '../remoteFetchPolicy.js';
+import { assertPublicHttpUrl, type PublicRemoteHostLookup } from '../remoteFetchPolicy.js';
 import type { VideoModelCatalogEntry } from './catalog.js';
 
 export type VideoIntent = 'generate' | 'reference' | 'audio_driven' | 'extend' | 'edit';
@@ -40,6 +40,7 @@ export interface NormalizeSeedanceVideoArgumentsInput {
   catalogEntry: VideoModelCatalogEntry;
   args: Record<string, unknown>;
   uploadVideoReference?: VideoReferenceUploadService;
+  remoteUrlLookup?: PublicRemoteHostLookup;
 }
 
 export interface NormalizedSeedanceVideoArguments {
@@ -96,7 +97,8 @@ export async function normalizeSeedanceVideoArguments(input: NormalizeSeedanceVi
   const normalizedReferences = await Promise.all(references.map((reference) => normalizeReference({
     projectRoot: input.projectRoot,
     reference,
-    ...(input.uploadVideoReference ? { uploadVideoReference: input.uploadVideoReference } : {})
+    ...(input.uploadVideoReference ? { uploadVideoReference: input.uploadVideoReference } : {}),
+    ...(input.remoteUrlLookup ? { remoteUrlLookup: input.remoteUrlLookup } : {})
   })));
 
   const upstreamArgs = {
@@ -129,6 +131,7 @@ async function normalizeReference(input: {
   projectRoot: string;
   reference: VideoReferenceInput;
   uploadVideoReference?: VideoReferenceUploadService;
+  remoteUrlLookup?: PublicRemoteHostLookup;
 }): Promise<NormalizedReference> {
   const source = input.reference.source.trim();
   const mediaType = input.reference.media_type ?? inferMediaType(source);
@@ -137,7 +140,7 @@ async function normalizeReference(input: {
   }
   if (isHttpUrl(source) || source.startsWith('asset://')) {
     if (isHttpUrl(source)) {
-      assertPublicHttpUrl(source, 'Remote video reference URLs');
+      await assertPublicHttpUrl(source, 'Remote video reference URLs', { lookup: input.remoteUrlLookup });
     }
     return { source, mediaType, url: source };
   }

@@ -227,7 +227,7 @@ describe('CLI runtime access', () => {
         result: {
           status: 'ok',
           command: 'generate.image-batch',
-          fields: { total: 2, ok: 1, failed: 1, skipped: 0, log: '/tmp/results.jsonl' }
+          fields: { total: 2, ok: 1, failed: 1, skipped: 0, log: 'batch/results.jsonl' }
         }
       }
     ]), { status: 200, headers: { 'content-type': 'application/x-ndjson' } }));
@@ -235,8 +235,8 @@ describe('CLI runtime access', () => {
 
     try {
       const result = await runRuntimeBackedCliCommand(parsed('generate.image-batch', ['/tmp/project'], {
-        'input-jsonl': '/tmp/requests.jsonl',
-        log: '/tmp/results.jsonl',
+        'input-jsonl': 'batch/requests.jsonl',
+        log: 'batch/results.jsonl',
         concurrency: '2'
       }), {
         ensureRuntime: vi.fn(async () => ({ runtimeStarted: false, statePath: '/tmp/state.json', state })),
@@ -260,8 +260,8 @@ describe('CLI runtime access', () => {
           command: 'generate.image-batch',
           positional: ['/tmp/project'],
           options: {
-            'input-jsonl': '/tmp/requests.jsonl',
-            log: '/tmp/results.jsonl',
+            'input-jsonl': 'batch/requests.jsonl',
+            log: 'batch/results.jsonl',
             concurrency: '2'
           },
           projectRoot: '/tmp/project'

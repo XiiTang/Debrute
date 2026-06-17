@@ -1,5 +1,5 @@
 import { existsSync } from 'node:fs';
-import { chmod, mkdir, mkdtemp, readFile, rm, stat, symlink, writeFile } from 'node:fs/promises';
+import { chmod, lstat, mkdir, mkdtemp, readFile, rm, stat, symlink, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { describe, expect, it } from 'vitest';
@@ -16,11 +16,14 @@ import {
   listDebruteProjectFiles,
   moveProjectPaths,
   normalizeFileWatchEvent,
+  normalizeProjectRelativePath,
   nextCopyProjectPathName,
   projectFileRevision,
   readProjectFileBytes,
   readProjectTextFile,
   renameProjectPath,
+  resolveNoSymlinkExistingProjectPath,
+  resolveNoSymlinkProjectPathForWrite,
   resolveProjectPath,
   writeProjectTextFile,
   watchProjectFiles
@@ -580,6 +583,65 @@ describe('project-core', () => {
         .rejects.toThrow('Project path must not contain "." or ".." segments');
     } finally {
       await rm(root, { recursive: true, force: true });
+    }
+  });
+
+  it('rejects backslash project paths instead of normalizing them into project separators', () => {
+    expect(() => normalizeProjectRelativePath('images\\cover.png'))
+      .toThrow('Project path must not contain backslashes');
+    expect(() => normalizeProjectRelativePath('..\\outside.txt'))
+      .toThrow('Project path must not contain backslashes');
+  });
+
+  it('rejects no-symlink existing targets when the final file is a symbolic link', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'debrute-project-no-symlink-existing-'));
+    const externalRoot = await mkdtemp(join(tmpdir(), 'debrute-project-no-symlink-external-'));
+    try {
+      await mkdir(join(root, '.debrute/cache/canvas-image-previews'), { recursive: true });
+      await writeFile(join(externalRoot, 'preview.jpg'), 'external', 'utf8');
+      await symlink(join(externalRoot, 'preview.jpg'), join(root, '.debrute/cache/canvas-image-previews/cache.jpg'));
+
+      await expect(resolveNoSymlinkExistingProjectPath(root, '.debrute/cache/canvas-image-previews/cache.jpg'))
+        .rejects.toThrow('Project path must not be a symbolic link');
+    } finally {
+      await rm(root, { recursive: true, force: true });
+      await rm(externalRoot, { recursive: true, force: true });
+    }
+  });
+
+  it('rejects no-symlink write targets when the nearest existing parent escapes the project', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'debrute-project-no-symlink-write-'));
+    const externalRoot = await mkdtemp(join(tmpdir(), 'debrute-project-no-symlink-write-external-'));
+    try {
+      await mkdir(join(root, '.debrute'), { recursive: true });
+      await symlink(externalRoot, join(root, '.debrute/canvases'));
+
+      await expect(resolveNoSymlinkProjectPathForWrite(root, '.debrute/canvases/canvas-1.json'))
+        .rejects.toThrow('Project path escapes project root through a symlink');
+      await expect(lstat(join(externalRoot, 'canvas-1.json'))).rejects.toBeDefined();
+    } finally {
+      await rm(root, { recursive: true, force: true });
+      await rm(externalRoot, { recursive: true, force: true });
+    }
+  });
+
+  it('rejects project tree deletes whose resolved target escapes the project', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'debrute-project-delete-symlink-'));
+    const externalRoot = await mkdtemp(join(tmpdir(), 'debrute-project-delete-symlink-external-'));
+    try {
+      await mkdir(join(root, 'assets'), { recursive: true });
+      await writeFile(join(externalRoot, 'outside.txt'), 'outside', 'utf8');
+      await symlink(join(externalRoot, 'outside.txt'), join(root, 'assets/link.txt'));
+
+      await expect(deleteProjectPathsPermanently(root, {
+        entries: [{ projectRelativePath: 'assets/link.txt', kind: 'file' }]
+      })).rejects.toThrow('Project path escapes project root through a symlink');
+
+      await expect(readFile(join(externalRoot, 'outside.txt'), 'utf8')).resolves.toBe('outside');
+      expect(existsSync(join(root, 'assets/link.txt'))).toBe(true);
+    } finally {
+      await rm(root, { recursive: true, force: true });
+      await rm(externalRoot, { recursive: true, force: true });
     }
   });
 

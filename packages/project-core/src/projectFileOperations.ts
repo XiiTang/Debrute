@@ -228,6 +228,7 @@ export async function deleteProjectPathsPermanently(
   const entries = topLevelProjectPathBatchEntries(await normalizedProjectPathBatchEntries(projectRoot, input.entries));
   const results: ProjectPathBatchItemResult[] = [];
   for (const entry of entries) {
+    await resolveExistingProjectPath(projectRoot, entry.projectRelativePath);
     await rm(resolveProjectPath(projectRoot, entry.projectRelativePath), { recursive: true, force: false });
     results.push({
       sourceProjectRelativePath: entry.projectRelativePath,
