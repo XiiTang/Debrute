@@ -43,7 +43,6 @@ export interface ImageModelsConfig {
 
 export interface ImageModelConfig {
   debruteModelId: string;
-  baseUrlOverride: string | null;
   requestModelIdOverride: string | null;
 }
 
@@ -53,7 +52,6 @@ export interface VideoModelsConfig {
 
 export interface VideoModelConfig {
   debruteModelId: string;
-  baseUrlOverride: string | null;
   requestModelIdOverride: string | null;
 }
 
@@ -101,7 +99,6 @@ export function createImageModelSettingsView(
         supportsTextRendering: entry.supportsTextRendering,
         defaultBaseUrl: entry.defaultBaseUrl,
         defaultRequestModelId: entry.defaultRequestModelId,
-        baseUrlOverride: configured?.baseUrlOverride ?? null,
         requestModelIdOverride: configured?.requestModelIdOverride ?? null,
         apiKeySet: Boolean(apiKey),
         apiKey
@@ -130,7 +127,6 @@ export function createVideoModelSettingsView(
         supportsGeneratedAudio: entry.supportsGeneratedAudio,
         defaultBaseUrl: entry.defaultBaseUrl,
         defaultRequestModelId: entry.defaultRequestModelId,
-        baseUrlOverride: configured?.baseUrlOverride ?? null,
         requestModelIdOverride: configured?.requestModelIdOverride ?? null,
         apiKeySet: Boolean(apiKey),
         apiKey

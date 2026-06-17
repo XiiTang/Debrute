@@ -35,7 +35,6 @@ interface LlmProviderDraft {
 }
 
 interface ModelDraft {
-  baseUrlOverride: string;
   requestModelIdOverride: string;
   apiKey: string;
 }
@@ -331,17 +330,6 @@ function MediaModelCard({
         </div>
         <div className="settings-model-edit-grid">
           <div className="settings-row">
-            <Field label="Base URL override">
-            <Input
-              aria-label="Base URL override"
-              value={draft.baseUrlOverride}
-              onChange={(event) => setDraft({ ...draft, baseUrlOverride: event.currentTarget.value })}
-              onBlur={() => void saveDraft(draft)}
-              placeholder={model.defaultBaseUrl}
-            />
-            </Field>
-          </div>
-          <div className="settings-row">
             <Field label="Request model ID override">
             <Input
               aria-label="Request model ID override"
@@ -437,7 +425,6 @@ function ApiKeyInput({
 
 function modelToDraft(model: ImageModelSettingRecord | VideoModelSettingRecord): ModelDraft {
   return {
-    baseUrlOverride: model.baseUrlOverride ?? '',
     requestModelIdOverride: model.requestModelIdOverride ?? '',
     apiKey: model.apiKey
   };
@@ -445,15 +432,13 @@ function modelToDraft(model: ImageModelSettingRecord | VideoModelSettingRecord):
 
 function modelDraftToSaveInput(draft: ModelDraft) {
   return {
-    baseUrlOverride: draft.baseUrlOverride.trim() || null,
     requestModelIdOverride: draft.requestModelIdOverride.trim() || null,
     apiKey: draft.apiKey.trim()
   };
 }
 
 function modelDraftMatchesPersisted(draft: ModelDraft, model: ImageModelSettingRecord | VideoModelSettingRecord): boolean {
-  return draft.baseUrlOverride.trim() === (model.baseUrlOverride ?? '')
-    && draft.requestModelIdOverride.trim() === (model.requestModelIdOverride ?? '')
+  return draft.requestModelIdOverride.trim() === (model.requestModelIdOverride ?? '')
     && draft.apiKey.trim() === model.apiKey;
 }
 

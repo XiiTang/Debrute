@@ -6,7 +6,6 @@ export interface ProviderModelDiscoveryInput {
   providerType: LlmProviderType;
   baseUrl: string;
   apiKey?: string;
-  modelsPath?: string;
   fetch?: ProviderFetch;
   timeoutMs?: number;
 }
@@ -22,7 +21,7 @@ export async function discoverProviderModels(input: ProviderModelDiscoveryInput)
     };
   }
 
-  const endpoint = resolveModelsEndpoint(baseUrl, input.modelsPath);
+  const endpoint = `${baseUrl}/models`;
   const fetchImpl = input.fetch ?? fetch;
   const headers: Record<string, string> = { accept: 'application/json' };
   const apiKey = input.apiKey?.trim();
@@ -100,17 +99,6 @@ function normalizeBaseUrl(value: string): string {
     throw new Error('baseUrl must be a valid HTTP or HTTPS URL');
   }
   return trimmed;
-}
-
-function resolveModelsEndpoint(baseUrl: string, modelsPath?: string): string {
-  const path = modelsPath?.trim();
-  if (!path) {
-    return `${baseUrl}/models`;
-  }
-  if (/^https?:\/\//i.test(path)) {
-    return path;
-  }
-  return `${baseUrl}${path.startsWith('/') ? path : `/${path}`}`;
 }
 
 function parseJsonPayload(text: string): unknown {

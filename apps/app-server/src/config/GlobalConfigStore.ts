@@ -1,5 +1,5 @@
 import { randomUUID } from 'node:crypto';
-import { mkdir, readFile, rename, writeFile } from 'node:fs/promises';
+import { chmod, mkdir, readFile, rename, writeFile } from 'node:fs/promises';
 import { dirname, join } from 'node:path';
 import { debruteHomeDir } from '@debrute/project-core';
 import type { ImageModelsConfig, LlmProvidersConfig, SecretsConfig, VideoModelsConfig } from '@debrute/capability-runtime';
@@ -60,7 +60,7 @@ export class GlobalConfigStore {
   }
 
   async saveSecrets(config: SecretsConfig): Promise<void> {
-    await writeJsonAtomic(this.paths().secretsFile, {
+    await writeSecretJsonAtomic(this.paths().secretsFile, {
       llmProviderApiKeys: { ...config.llmProviderApiKeys },
       imageModelApiKeys: { ...config.imageModelApiKeys },
       videoModelApiKeys: { ...config.videoModelApiKeys }
@@ -126,7 +126,6 @@ function normalizeImageModelsConfig(config: ImageModelsConfig): ImageModelsConfi
   return {
     imageModels: config.imageModels.map((model) => ({
       debruteModelId: model.debruteModelId.trim(),
-      baseUrlOverride: model.baseUrlOverride?.trim() || null,
       requestModelIdOverride: model.requestModelIdOverride?.trim() || null
     })).filter((model) => model.debruteModelId.length > 0)
   };
@@ -136,7 +135,6 @@ function normalizeVideoModelsConfig(config: VideoModelsConfig): VideoModelsConfi
   return {
     videoModels: config.videoModels.map((model) => ({
       debruteModelId: model.debruteModelId.trim(),
-      baseUrlOverride: model.baseUrlOverride?.trim() || null,
       requestModelIdOverride: model.requestModelIdOverride?.trim() || null
     })).filter((model) => model.debruteModelId.length > 0)
   };
@@ -170,4 +168,15 @@ async function writeJsonAtomic(path: string, value: unknown): Promise<void> {
   const tempPath = `${path}.${randomUUID()}.tmp`;
   await writeFile(tempPath, `${JSON.stringify(value, null, 2)}\n`, 'utf8');
   await rename(tempPath, path);
+}
+
+async function writeSecretJsonAtomic(path: string, value: unknown): Promise<void> {
+  const directory = dirname(path);
+  await mkdir(directory, { recursive: true, mode: 0o700 });
+  await chmod(directory, 0o700);
+  const tempPath = `${path}.${randomUUID()}.tmp`;
+  await writeFile(tempPath, `${JSON.stringify(value, null, 2)}\n`, { encoding: 'utf8', mode: 0o600 });
+  await chmod(tempPath, 0o600);
+  await rename(tempPath, path);
+  await chmod(path, 0o600);
 }

@@ -24,7 +24,6 @@ describe('web Settings pages', () => {
             summary: 'Image generation',
             defaultBaseUrl: 'https://api.openai.com/v1',
             defaultRequestModelId: 'gpt-image-2',
-            baseUrlOverride: null,
             requestModelIdOverride: null,
             apiKeySet: true,
             apiKey: 'sk-image-ui'
@@ -33,7 +32,6 @@ describe('web Settings pages', () => {
             summary: 'Missing configuration',
             defaultBaseUrl: 'https://api.openai.com/v1',
             defaultRequestModelId: 'missing-image',
-            baseUrlOverride: null,
             requestModelIdOverride: null,
             apiKeySet: false
           }]
@@ -55,9 +53,9 @@ describe('web Settings pages', () => {
     expect(html).toContain('Image Models');
     expect(html).toContain('<header class="settings-section-header"><h2>Image Models</h2></header>');
     expect(html).toContain('<header class="settings-section-header"><h2>Video Models</h2></header>');
-    expect(html).toContain('placeholder="https://api.openai.com/v1"');
+    expect(html).not.toContain('Base URL override');
+    expect(html).not.toContain('aria-label="Base URL override"');
     expect(html).toContain('placeholder="gpt-image-2"');
-    expect(html).toContain('aria-label="Base URL override"');
     expect(html).toContain('aria-label="Request model ID override"');
     expect(html).toContain('aria-label="API Key"');
     expect(html).toContain('value="sk-image-ui"');
@@ -91,7 +89,6 @@ describe('web Settings pages', () => {
           summary: 'Image generation',
           defaultBaseUrl: 'https://api.openai.com/v1',
           defaultRequestModelId: 'gpt-image-2',
-          baseUrlOverride: null,
           requestModelIdOverride: null,
           apiKeySet: true,
           apiKey: 'sk-image-ui'
@@ -103,7 +100,6 @@ describe('web Settings pages', () => {
           summary: 'Video generation',
           defaultBaseUrl: 'https://api.openai.com/v1',
           defaultRequestModelId: 'sora-2',
-          baseUrlOverride: null,
           requestModelIdOverride: null,
           apiKeySet: true,
           apiKey: 'sk-video-ui'

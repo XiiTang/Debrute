@@ -81,13 +81,21 @@ export class LlmService {
     const normalizedId = normalizeProviderId(providerId ?? input.id ?? '');
     const baseUrl = requireText(input.baseUrl, 'baseUrl');
     assertValidHttpUrl(baseUrl, 'baseUrl');
-    const secrets = await this.input.configStore.readSecrets();
-    const apiKey = input.apiKey?.trim() || (normalizedId ? secrets.llmProviderApiKeys[normalizedId]?.trim() : undefined);
+    let apiKey = input.apiKey?.trim();
+    if (!apiKey && normalizedId) {
+      const providers = await this.input.configStore.readLlmProviders();
+      const provider = providers.providers.find((entry) => entry.id === normalizedId);
+      if (
+        provider?.providerType === input.providerType
+        && normalizeProviderBaseUrl(provider.baseUrl) === normalizeProviderBaseUrl(baseUrl)
+      ) {
+        apiKey = (await this.input.configStore.readSecrets()).llmProviderApiKeys[normalizedId]?.trim();
+      }
+    }
     return discoverProviderModels({
       providerType: input.providerType,
       baseUrl,
       ...(apiKey ? { apiKey } : {}),
-      ...(input.modelsPath?.trim() ? { modelsPath: input.modelsPath.trim() } : {}),
       ...(typeof input.timeoutMs === 'number' ? { timeoutMs: input.timeoutMs } : {})
     });
   }
@@ -143,4 +151,8 @@ function assertValidHttpUrl(value: string, field: string): void {
   if (url.protocol !== 'http:' && url.protocol !== 'https:') {
     throw new Error(`${field} must be a valid HTTP or HTTPS URL`);
   }
+}
+
+function normalizeProviderBaseUrl(value: string): string {
+  return value.trim().replace(/\/+$/, '');
 }

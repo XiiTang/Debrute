@@ -1,5 +1,5 @@
 import { randomBytes } from 'node:crypto';
-import { mkdir, mkdtemp, readFile, rm, stat, writeFile } from 'node:fs/promises';
+import { chmod, mkdir, mkdtemp, readFile, rm, stat, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import sharp from 'sharp';
@@ -810,7 +810,6 @@ describe('app-server', () => {
     try {
       await server.openProject(projectRoot, { initializeIfMissing: true, createDefaultCanvas: true });
       await globalRuntime.imageModelSaveSetting('gpt-image-2', {
-        baseUrlOverride: null,
         requestModelIdOverride: null,
         apiKey: 'sk-image'
       });
@@ -956,35 +955,135 @@ describe('app-server', () => {
     }
   });
 
-  it('saves media model routing overrides and derives configured state from API keys', async () => {
+  it('does not attach a stored LLM provider key when discovery targets a different base URL', async () => {
+    const home = await mkdtemp(join(tmpdir(), 'debrute-llm-discovery-origin-binding-home-'));
+    const originalFetch = globalThis.fetch;
+    const globalRuntime = new DebruteGlobalRuntimeServer({
+      globalConfigStore: new GlobalConfigStore({ debruteHome: home })
+    });
+    const calls: Array<{ url: string; authorization?: string }> = [];
+    try {
+      globalThis.fetch = async (url, init) => {
+        calls.push({
+          url: String(url),
+          authorization: (init?.headers as Record<string, string> | undefined)?.authorization
+        });
+        return new Response(JSON.stringify({ data: [] }), {
+          status: 200,
+          headers: { 'content-type': 'application/json' }
+        });
+      };
+      await globalRuntime.llmSaveProviderSetting({
+        id: 'openai-main',
+        name: 'OpenAI Compatible',
+        providerType: 'openai_compat',
+        baseUrl: 'https://api.openai.com/v1',
+        enabled: true,
+        modelIds: ['gpt-5.1'],
+        apiKey: 'sk-stored-discovery'
+      });
+
+      await globalRuntime.llmDiscoverProviderModels({
+        id: 'openai-main',
+        providerType: 'openai_compat',
+        baseUrl: 'https://attacker.example/v1'
+      });
+
+      expect(calls).toEqual([{
+        url: 'https://attacker.example/v1/models',
+        authorization: undefined
+      }]);
+    } finally {
+      globalRuntime.close();
+      globalThis.fetch = originalFetch;
+      await rm(home, { recursive: true, force: true });
+    }
+  });
+
+  it('uses a stored LLM provider key when discovery targets the stored provider base URL', async () => {
+    const home = await mkdtemp(join(tmpdir(), 'debrute-llm-discovery-stored-key-home-'));
+    const originalFetch = globalThis.fetch;
+    const globalRuntime = new DebruteGlobalRuntimeServer({
+      globalConfigStore: new GlobalConfigStore({ debruteHome: home })
+    });
+    const calls: Array<{ url: string; authorization?: string }> = [];
+    try {
+      globalThis.fetch = async (url, init) => {
+        calls.push({
+          url: String(url),
+          authorization: (init?.headers as Record<string, string> | undefined)?.authorization
+        });
+        return new Response(JSON.stringify({ data: [] }), {
+          status: 200,
+          headers: { 'content-type': 'application/json' }
+        });
+      };
+      await globalRuntime.llmSaveProviderSetting({
+        id: 'openai-main',
+        name: 'OpenAI Compatible',
+        providerType: 'openai_compat',
+        baseUrl: 'https://api.openai.com/v1',
+        enabled: true,
+        modelIds: ['gpt-5.1'],
+        apiKey: 'sk-stored-discovery'
+      });
+
+      await globalRuntime.llmDiscoverProviderModels({
+        id: 'openai-main',
+        providerType: 'openai_compat',
+        baseUrl: 'https://api.openai.com/v1'
+      });
+
+      expect(calls).toEqual([{
+        url: 'https://api.openai.com/v1/models',
+        authorization: 'Bearer sk-stored-discovery'
+      }]);
+    } finally {
+      globalRuntime.close();
+      globalThis.fetch = originalFetch;
+      await rm(home, { recursive: true, force: true });
+    }
+  });
+
+  it('saves media model request-model overrides and derives configured state from API keys', async () => {
     const home = await mkdtemp(join(tmpdir(), 'debrute-media-model-settings-home-'));
     const globalRuntime = new DebruteGlobalRuntimeServer({
       globalConfigStore: new GlobalConfigStore({ debruteHome: home })
     });
     try {
       const imageSettings = await globalRuntime.imageModelSaveSetting('gpt-image-2', {
-        baseUrlOverride: 'not a url yet',
         requestModelIdOverride: 'custom-image-model',
         apiKey: 'sk-image'
       });
       const videoSettings = await globalRuntime.videoModelSaveSetting('doubao-seedance-2-0-260128', {
-        baseUrlOverride: 'ark local draft',
         requestModelIdOverride: 'custom-video-model',
         apiKey: 'sk-video'
       });
 
-      expect(imageSettings.models.find((model) => model.debruteModelId === 'gpt-image-2')).toMatchObject({
+      const imageModel = imageSettings.models.find((model) => model.debruteModelId === 'gpt-image-2');
+      const videoModel = videoSettings.models.find((model) => model.debruteModelId === 'doubao-seedance-2-0-260128');
+
+      expect(imageModel).toEqual({
+        debruteModelId: 'gpt-image-2',
+        summary: expect.any(String),
+        supportsEditing: expect.any(Boolean),
+        supportsTextRendering: expect.any(Boolean),
         defaultBaseUrl: 'https://api.openai.com/v1',
         defaultRequestModelId: 'gpt-image-2',
-        baseUrlOverride: 'not a url yet',
         requestModelIdOverride: 'custom-image-model',
         apiKeySet: true,
         apiKey: 'sk-image'
       });
-      expect(videoSettings.models.find((model) => model.debruteModelId === 'doubao-seedance-2-0-260128')).toMatchObject({
+      expect(videoModel).toEqual({
+        debruteModelId: 'doubao-seedance-2-0-260128',
+        summary: expect.any(String),
+        supportsTextToVideo: expect.any(Boolean),
+        supportsImageReferences: expect.any(Boolean),
+        supportsVideoReferences: expect.any(Boolean),
+        supportsAudioReferences: expect.any(Boolean),
+        supportsGeneratedAudio: expect.any(Boolean),
         defaultBaseUrl: 'https://ark.cn-beijing.volces.com/api/v3',
         defaultRequestModelId: 'doubao-seedance-2-0-260128',
-        baseUrlOverride: 'ark local draft',
         requestModelIdOverride: 'custom-video-model',
         apiKeySet: true,
         apiKey: 'sk-video'
@@ -1001,13 +1100,18 @@ describe('app-server', () => {
     const globalRuntime = new DebruteGlobalRuntimeServer({ globalConfigStore: configStore });
     try {
       const settings = await globalRuntime.imageModelSaveSetting('gpt-image-2', {
-        baseUrlOverride: null,
         requestModelIdOverride: null,
         apiKey: 'sk-image'
       });
 
-      expect(settings.models.find((model) => model.debruteModelId === 'gpt-image-2')).toMatchObject({
-        baseUrlOverride: null,
+      const imageModel = settings.models.find((model) => model.debruteModelId === 'gpt-image-2');
+      expect(imageModel).toEqual({
+        debruteModelId: 'gpt-image-2',
+        summary: expect.any(String),
+        supportsEditing: expect.any(Boolean),
+        supportsTextRendering: expect.any(Boolean),
+        defaultBaseUrl: 'https://api.openai.com/v1',
+        defaultRequestModelId: 'gpt-image-2',
         requestModelIdOverride: null,
         apiKeySet: true,
         apiKey: 'sk-image'
@@ -1018,6 +1122,38 @@ describe('app-server', () => {
       });
     } finally {
       globalRuntime.close();
+      await rm(home, { recursive: true, force: true });
+    }
+  });
+
+  it('writes secrets with private config directory and file permissions', async () => {
+    const home = await mkdtemp(join(tmpdir(), 'debrute-secret-permissions-home-'));
+    const configStore = new GlobalConfigStore({ debruteHome: home });
+    const configDir = join(home, 'config');
+    const secretsFile = join(configDir, 'secrets.json');
+    try {
+      await configStore.saveSecrets({
+        llmProviderApiKeys: { openai: 'sk-llm' },
+        imageModelApiKeys: { 'gpt-image-2': 'sk-image' },
+        videoModelApiKeys: { 'doubao-seedance-2-0-260128': 'sk-video' }
+      });
+
+      expect((await stat(configDir)).mode & 0o777).toBe(0o700);
+      expect((await stat(secretsFile)).mode & 0o777).toBe(0o600);
+
+      await chmod(secretsFile, 0o644);
+      expect((await stat(secretsFile)).mode & 0o777).toBe(0o644);
+
+      await configStore.saveSecrets({
+        llmProviderApiKeys: { openai: 'sk-llm-next' },
+        imageModelApiKeys: {},
+        videoModelApiKeys: {}
+      });
+
+      expect((await stat(configDir)).mode & 0o777).toBe(0o700);
+      expect((await stat(secretsFile)).mode & 0o777).toBe(0o600);
+      await expect(readFile(secretsFile, 'utf8')).resolves.toContain('sk-llm-next');
+    } finally {
       await rm(home, { recursive: true, force: true });
     }
   });

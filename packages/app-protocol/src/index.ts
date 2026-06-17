@@ -295,7 +295,6 @@ export interface DiscoverLlmProviderModelsInput {
   providerType: LlmProviderType;
   baseUrl: string;
   apiKey?: string;
-  modelsPath?: string;
   timeoutMs?: number;
 }
 
@@ -313,7 +312,6 @@ export interface ImageModelSettingRecord {
   supportsTextRendering: boolean;
   defaultBaseUrl: string;
   defaultRequestModelId: string;
-  baseUrlOverride: string | null;
   requestModelIdOverride: string | null;
   apiKeySet: boolean;
   apiKey: string;
@@ -324,7 +322,6 @@ export interface ImageModelSettingsView {
 }
 
 export interface SaveImageModelSettingInput {
-  baseUrlOverride: string | null;
   requestModelIdOverride: string | null;
   apiKey?: string;
 }
@@ -339,7 +336,6 @@ export interface VideoModelSettingRecord {
   supportsGeneratedAudio: boolean;
   defaultBaseUrl: string;
   defaultRequestModelId: string;
-  baseUrlOverride: string | null;
   requestModelIdOverride: string | null;
   apiKeySet: boolean;
   apiKey: string;
@@ -350,7 +346,6 @@ export interface VideoModelSettingsView {
 }
 
 export interface SaveVideoModelSettingInput {
-  baseUrlOverride: string | null;
   requestModelIdOverride: string | null;
   apiKey?: string;
 }

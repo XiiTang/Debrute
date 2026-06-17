@@ -154,7 +154,7 @@ export async function executeImageModelRequest(input: ExecuteImageModelRequestIn
     projectRoot: input.projectRoot,
     invocationId: input.invocationId,
     entry,
-    baseUrl: modelSettings?.baseUrlOverride?.trim() || entry.defaultBaseUrl,
+    baseUrl: entry.defaultBaseUrl,
     apiKey,
     requestModelId: modelSettings?.requestModelIdOverride?.trim() || entry.defaultRequestModelId,
     args,

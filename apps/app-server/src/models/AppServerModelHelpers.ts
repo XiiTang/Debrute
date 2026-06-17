@@ -18,7 +18,6 @@ export interface CliModelSummary {
   id: string;
   summary: string;
   apiKeySet: boolean;
-  baseUrlOverride: string | null;
   requestModelIdOverride: string | null;
 }
 
@@ -83,7 +82,6 @@ export function cliModelSummary(model: ImageModelSettingRecord | VideoModelSetti
     id: model.debruteModelId,
     summary: model.summary,
     apiKeySet: model.apiKeySet,
-    baseUrlOverride: model.baseUrlOverride,
     requestModelIdOverride: model.requestModelIdOverride
   };
 }

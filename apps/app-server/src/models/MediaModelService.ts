@@ -38,13 +38,11 @@ export async function saveMediaModelSetting(input: {
   const config = await input.readConfig();
   const secrets = await input.configStore.readSecrets();
   const records = input.recordsFromConfig(config);
-  const baseUrlOverride = input.value.baseUrlOverride?.trim() || null;
   const requestModelIdOverride = input.value.requestModelIdOverride?.trim() || null;
   const nextRecords = records.filter((model) => model.debruteModelId !== input.modelId);
-  if (baseUrlOverride || requestModelIdOverride) {
+  if (requestModelIdOverride) {
     nextRecords.push({
       debruteModelId: input.modelId,
-      baseUrlOverride,
       requestModelIdOverride
     });
   }

@@ -297,11 +297,11 @@ describe('image model executors', () => {
       }
     }).jpeg().toBuffer();
     const fetch: ImageModelFetch = async (url, init) => {
-      if (url === 'https://dashscope.example/api/v1/services/aigc/image-generation/generation') {
+      if (url === 'https://dashscope.aliyuncs.com/api/v1/services/aigc/image-generation/generation') {
         requestBody = JSON.parse(String(init?.body)) as Record<string, unknown>;
         return new Response(JSON.stringify({ output: { task_id: 'task-1' } }), { status: 200, headers: { 'content-type': 'application/json' } });
       }
-      if (url === 'https://dashscope.example/api/v1/tasks/task-1') {
+      if (url === 'https://dashscope.aliyuncs.com/api/v1/tasks/task-1') {
         return new Response(JSON.stringify({ output: { task_status: 'SUCCEEDED', choices: [{ message: { content: [{ image: 'https://cdn.example/out.png' }] } }] } }), { status: 200, headers: { 'content-type': 'application/json' } });
       }
       return new Response(tinyPng, { status: 200, headers: { 'content-type': 'image/png' } });
@@ -313,7 +313,7 @@ describe('image model executors', () => {
         projectRoot,
         invocationId: 'turn-wan-autofix',
         input: { model: 'wan2.7-image', arguments: { prompt: 'use this', image: ['wide.jpg'] } },
-        settings: { imageModels: [{ debruteModelId: 'wan2.7-image', baseUrlOverride: 'https://dashscope.example/api/v1', requestModelIdOverride: 'wan2.7-image' }] },
+        settings: { imageModels: [{ debruteModelId: 'wan2.7-image', requestModelIdOverride: 'wan2.7-image' }] },
         secrets: { imageModelApiKeys: { 'wan2.7-image': 'sk-image' } },
         fetch,
         pollIntervalMs: 0
@@ -337,14 +337,14 @@ describe('image model executors', () => {
         projectRoot,
         invocationId: 'turn-wan-type',
         input: { model: 'wan2.7-image', arguments: { prompt: 'use this', image: ['source.gif'] } },
-        settings: { imageModels: [{ debruteModelId: 'wan2.7-image', baseUrlOverride: 'https://dashscope.example/api/v1', requestModelIdOverride: 'wan2.7-image' }] },
+        settings: { imageModels: [{ debruteModelId: 'wan2.7-image', requestModelIdOverride: 'wan2.7-image' }] },
         secrets: { imageModelApiKeys: { 'wan2.7-image': 'sk-image' } },
         fetch: async (url) => {
-          if (url === 'https://dashscope.example/api/v1/services/aigc/image-generation/generation') {
+          if (url === 'https://dashscope.aliyuncs.com/api/v1/services/aigc/image-generation/generation') {
             modelRuns += 1;
             return new Response(JSON.stringify({ output: { task_id: 'task-1' } }), { status: 200, headers: { 'content-type': 'application/json' } });
           }
-          if (url === 'https://dashscope.example/api/v1/tasks/task-1') {
+          if (url === 'https://dashscope.aliyuncs.com/api/v1/tasks/task-1') {
             return new Response(JSON.stringify({ output: { task_status: 'SUCCEEDED', choices: [{ message: { content: [{ image: 'https://cdn.example/out.png' }] } }] } }), { status: 200, headers: { 'content-type': 'application/json' } });
           }
           return new Response(tinyPng, { status: 200, headers: { 'content-type': 'image/png' } });
@@ -479,7 +479,7 @@ describe('image model executors', () => {
         projectRoot,
         invocationId: 'turn-1',
         input: { model: 'gpt-image-2', arguments: { prompt: 'cover image', size: '1024x1024' } },
-        settings: { imageModels: [{ debruteModelId: 'gpt-image-2', baseUrlOverride: 'https://api.openai.com/v1', requestModelIdOverride: 'gpt-image-2' }] },
+        settings: { imageModels: [{ debruteModelId: 'gpt-image-2', requestModelIdOverride: 'gpt-image-2' }] },
         secrets: { imageModelApiKeys: { 'gpt-image-2': 'sk-image' } },
         fetch
       });
@@ -511,7 +511,7 @@ describe('image model executors', () => {
         projectRoot,
         invocationId: 'turn-metadata',
         input: { model: 'gpt-image-2', arguments: { prompt: 'cover image', size: '1024x1024' } },
-        settings: { imageModels: [{ debruteModelId: 'gpt-image-2', baseUrlOverride: 'https://api.openai.com/v1', requestModelIdOverride: 'gpt-image-2' }] },
+        settings: { imageModels: [{ debruteModelId: 'gpt-image-2', requestModelIdOverride: 'gpt-image-2' }] },
         secrets: { imageModelApiKeys: { 'gpt-image-2': 'sk-image' } },
         fetch,
         recordGeneratedAsset: async (input) => {
@@ -579,7 +579,7 @@ describe('image model executors', () => {
             image: ['source.png']
           }
         },
-        settings: { imageModels: [{ debruteModelId: 'gpt-image-2', baseUrlOverride: 'https://api.openai.com/v1', requestModelIdOverride: 'gpt-image-2' }] },
+        settings: { imageModels: [{ debruteModelId: 'gpt-image-2', requestModelIdOverride: 'gpt-image-2' }] },
         secrets: { imageModelApiKeys: { 'gpt-image-2': 'sk-image' } },
         fetch,
         recordGeneratedAsset: async (input) => {
@@ -655,7 +655,7 @@ describe('image model executors', () => {
             mask: 'mask.png'
           }
         },
-        settings: { imageModels: [{ debruteModelId: 'gpt-image-2', baseUrlOverride: 'https://api.openai.com/v1', requestModelIdOverride: 'gpt-image-2' }] },
+        settings: { imageModels: [{ debruteModelId: 'gpt-image-2', requestModelIdOverride: 'gpt-image-2' }] },
         secrets: { imageModelApiKeys: { 'gpt-image-2': 'sk-image' } },
         fetch
       });
@@ -685,7 +685,7 @@ describe('image model executors', () => {
             mask: 'mask.png'
           }
         },
-        settings: { imageModels: [{ debruteModelId: 'gpt-image-2', baseUrlOverride: 'https://api.openai.com/v1', requestModelIdOverride: 'gpt-image-2' }] },
+        settings: { imageModels: [{ debruteModelId: 'gpt-image-2', requestModelIdOverride: 'gpt-image-2' }] },
         secrets: { imageModelApiKeys: { 'gpt-image-2': 'sk-image' } },
         fetch: async (url, init) => {
           expect(url).toBe('https://api.openai.com/v1/images/edits');
@@ -719,7 +719,7 @@ describe('image model executors', () => {
             mask: { data: mask.toString('base64') }
           }
         },
-        settings: { imageModels: [{ debruteModelId: 'gpt-image-2', baseUrlOverride: 'https://api.openai.com/v1', requestModelIdOverride: 'gpt-image-2' }] },
+        settings: { imageModels: [{ debruteModelId: 'gpt-image-2', requestModelIdOverride: 'gpt-image-2' }] },
         secrets: { imageModelApiKeys: { 'gpt-image-2': 'sk-image' } },
         fetch: async (url, init) => {
           expect(url).toBe('https://api.openai.com/v1/images/edits');
@@ -766,7 +766,7 @@ describe('image model executors', () => {
             mask: 'https://cdn.example/mask.png'
           }
         },
-        settings: { imageModels: [{ debruteModelId: 'gpt-image-2', baseUrlOverride: 'https://api.openai.com/v1', requestModelIdOverride: 'gpt-image-2' }] },
+        settings: { imageModels: [{ debruteModelId: 'gpt-image-2', requestModelIdOverride: 'gpt-image-2' }] },
         secrets: { imageModelApiKeys: { 'gpt-image-2': 'sk-image' } },
         fetch
       });
@@ -800,7 +800,7 @@ describe('image model executors', () => {
             image: ['http://127.0.0.1/private.png']
           }
         },
-        settings: { imageModels: [{ debruteModelId: 'gpt-image-2', baseUrlOverride: 'https://api.openai.com/v1', requestModelIdOverride: 'gpt-image-2' }] },
+        settings: { imageModels: [{ debruteModelId: 'gpt-image-2', requestModelIdOverride: 'gpt-image-2' }] },
         secrets: { imageModelApiKeys: { 'gpt-image-2': 'sk-image' } },
         fetch
       });
@@ -832,7 +832,7 @@ describe('image model executors', () => {
             image: [{ image_url: 'http://127.0.0.1/private.png' }]
           }
         },
-        settings: { imageModels: [{ debruteModelId: 'gpt-image-2', baseUrlOverride: 'https://api.openai.com/v1', requestModelIdOverride: 'gpt-image-2' }] },
+        settings: { imageModels: [{ debruteModelId: 'gpt-image-2', requestModelIdOverride: 'gpt-image-2' }] },
         secrets: { imageModelApiKeys: { 'gpt-image-2': 'sk-image' } },
         fetch
       });
@@ -862,7 +862,7 @@ describe('image model executors', () => {
             image: ['missing/source.png']
           }
         },
-        settings: { imageModels: [{ debruteModelId: 'gpt-image-2', baseUrlOverride: 'https://api.openai.com/v1', requestModelIdOverride: 'gpt-image-2' }] },
+        settings: { imageModels: [{ debruteModelId: 'gpt-image-2', requestModelIdOverride: 'gpt-image-2' }] },
         secrets: { imageModelApiKeys: { 'gpt-image-2': 'sk-image' } },
         fetch
       });
@@ -879,7 +879,6 @@ describe('image model executors', () => {
   it.each([
     {
       model: 'gpt-image-2',
-      baseUrl: 'https://api.openai.com/v1',
       arguments: {
         prompt: 'retouch the image',
         image: ['../outside.png']
@@ -887,13 +886,12 @@ describe('image model executors', () => {
     },
     {
       model: 'doubao-seedream-5-0-lite-260128',
-      baseUrl: 'https://ark.example/v1',
       arguments: {
         prompt: 'restyle the image',
         image: ['../outside.png']
       }
     }
-  ])('preserves project path validation errors for $model image inputs', async ({ model, baseUrl, arguments: args }) => {
+  ])('preserves project path validation errors for $model image inputs', async ({ model, arguments: args }) => {
     const projectRoot = await mkdtemp(join(tmpdir(), 'debrute-image-invalid-path-input-'));
     const fetch: ImageModelFetch = async () => {
       throw new Error('model fetch should not be called for invalid image input paths');
@@ -903,7 +901,7 @@ describe('image model executors', () => {
         projectRoot,
         invocationId: 'turn-invalid-image-input-path',
         input: { model, arguments: args },
-        settings: { imageModels: [{ debruteModelId: model, baseUrlOverride: baseUrl, requestModelIdOverride: model }] },
+        settings: { imageModels: [{ debruteModelId: model, requestModelIdOverride: model }] },
         secrets: { imageModelApiKeys: { [model]: 'sk-image' } },
         fetch
       });
@@ -934,7 +932,7 @@ describe('image model executors', () => {
             image_url: 'https://cdn.example/source.png'
           }
         },
-        settings: { imageModels: [{ debruteModelId: 'fal-ai/flux/dev', baseUrlOverride: 'https://fal.run', requestModelIdOverride: 'fal-ai/flux/dev' }] },
+        settings: { imageModels: [{ debruteModelId: 'fal-ai/flux/dev', requestModelIdOverride: 'fal-ai/flux/dev' }] },
         secrets: { imageModelApiKeys: { 'fal-ai/flux/dev': 'sk-image' } },
         fetch
       });
@@ -964,7 +962,7 @@ describe('image model executors', () => {
             image: null
           }
         },
-        settings: { imageModels: [{ debruteModelId: 'gpt-image-2', baseUrlOverride: 'https://api.openai.com/v1', requestModelIdOverride: 'gpt-image-2' }] },
+        settings: { imageModels: [{ debruteModelId: 'gpt-image-2', requestModelIdOverride: 'gpt-image-2' }] },
         secrets: { imageModelApiKeys: { 'gpt-image-2': 'sk-image' } },
         fetch
       });
@@ -994,7 +992,7 @@ describe('image model executors', () => {
             image: 'source.png'
           }
         },
-        settings: { imageModels: [{ debruteModelId: 'gpt-image-2', baseUrlOverride: 'https://api.openai.com/v1', requestModelIdOverride: 'gpt-image-2' }] },
+        settings: { imageModels: [{ debruteModelId: 'gpt-image-2', requestModelIdOverride: 'gpt-image-2' }] },
         secrets: { imageModelApiKeys: { 'gpt-image-2': 'sk-image' } },
         fetch
       });
@@ -1027,7 +1025,7 @@ describe('image model executors', () => {
             mask: ['mask-1.png', 'mask-2.png']
           }
         },
-        settings: { imageModels: [{ debruteModelId: 'gpt-image-2', baseUrlOverride: 'https://api.openai.com/v1', requestModelIdOverride: 'gpt-image-2' }] },
+        settings: { imageModels: [{ debruteModelId: 'gpt-image-2', requestModelIdOverride: 'gpt-image-2' }] },
         secrets: { imageModelApiKeys: { 'gpt-image-2': 'sk-image' } },
         fetch
       });
@@ -1057,7 +1055,7 @@ describe('image model executors', () => {
             mask: 'mask.png'
           }
         },
-        settings: { imageModels: [{ debruteModelId: 'gpt-image-2', baseUrlOverride: 'https://api.openai.com/v1', requestModelIdOverride: 'gpt-image-2' }] },
+        settings: { imageModels: [{ debruteModelId: 'gpt-image-2', requestModelIdOverride: 'gpt-image-2' }] },
         secrets: { imageModelApiKeys: { 'gpt-image-2': 'sk-image' } },
         fetch
       });
@@ -1086,7 +1084,7 @@ describe('image model executors', () => {
             image: [{ fileData: { fileUri: 'https://cdn.example/source.png', mimeType: 'image/png' } }]
           }
         },
-        settings: { imageModels: [{ debruteModelId: 'doubao-seedream-5-0-lite-260128', baseUrlOverride: 'https://ark.example/v1', requestModelIdOverride: 'doubao-image' }] },
+        settings: { imageModels: [{ debruteModelId: 'doubao-seedream-5-0-lite-260128', requestModelIdOverride: 'doubao-image' }] },
         secrets: { imageModelApiKeys: { 'doubao-seedream-5-0-lite-260128': 'sk-image' } },
         fetch
       });
@@ -1116,7 +1114,7 @@ describe('image model executors', () => {
             image: [{ image_file: 'https://cdn.example/source.png' }]
           }
         },
-        settings: { imageModels: [{ debruteModelId: 'doubao-seedream-5-0-lite-260128', baseUrlOverride: 'https://ark.example/v1', requestModelIdOverride: 'doubao-image' }] },
+        settings: { imageModels: [{ debruteModelId: 'doubao-seedream-5-0-lite-260128', requestModelIdOverride: 'doubao-image' }] },
         secrets: { imageModelApiKeys: { 'doubao-seedream-5-0-lite-260128': 'sk-image' } },
         fetch
       });
@@ -1147,7 +1145,7 @@ describe('image model executors', () => {
             image: [{ image_url: 'assets/source.png' }]
           }
         },
-        settings: { imageModels: [{ debruteModelId: 'gpt-image-2', baseUrlOverride: 'https://api.openai.com/v1', requestModelIdOverride: 'gpt-image-2' }] },
+        settings: { imageModels: [{ debruteModelId: 'gpt-image-2', requestModelIdOverride: 'gpt-image-2' }] },
         secrets: { imageModelApiKeys: { 'gpt-image-2': 'sk-image' } },
         fetch
       });
@@ -1179,7 +1177,7 @@ describe('image model executors', () => {
             image: [{ inline_data: { mime_type: 'image/png', data: tinyPngBase64 } }]
           }
         },
-        settings: { imageModels: [{ debruteModelId: 'gemini-3.1-flash-image-preview', baseUrlOverride: 'https://generativelanguage.googleapis.com/v1beta', requestModelIdOverride: 'gemini-3.1-flash-image-preview' }] },
+        settings: { imageModels: [{ debruteModelId: 'gemini-3.1-flash-image-preview', requestModelIdOverride: 'gemini-3.1-flash-image-preview' }] },
         secrets: { imageModelApiKeys: { 'gemini-3.1-flash-image-preview': 'sk-image' } },
         fetch
       });
@@ -1211,7 +1209,7 @@ describe('image model executors', () => {
             subject_reference: [{ type: 'character', image_file: 'assets/source.png' }]
           }
         },
-        settings: { imageModels: [{ debruteModelId: 'image-01', baseUrlOverride: 'https://api.minimax.io', requestModelIdOverride: 'image-01' }] },
+        settings: { imageModels: [{ debruteModelId: 'image-01', requestModelIdOverride: 'image-01' }] },
         secrets: { imageModelApiKeys: { 'image-01': 'sk-image' } },
         fetch
       });
@@ -1243,7 +1241,7 @@ describe('image model executors', () => {
             subject_reference: [{ type: 'character', image_data: tinyPngBase64 }]
           }
         },
-        settings: { imageModels: [{ debruteModelId: 'image-01', baseUrlOverride: 'https://api.minimax.io', requestModelIdOverride: 'image-01' }] },
+        settings: { imageModels: [{ debruteModelId: 'image-01', requestModelIdOverride: 'image-01' }] },
         secrets: { imageModelApiKeys: { 'image-01': 'sk-image' } },
         fetch
       });
@@ -1261,7 +1259,6 @@ describe('image model executors', () => {
     {
       name: 'OpenAI',
       model: 'gpt-image-2',
-      baseUrl: 'https://api.openai.com/v1',
       requestModelId: 'gpt-image-2',
       arguments: {
         prompt: 'retouch the image',
@@ -1272,7 +1269,6 @@ describe('image model executors', () => {
     {
       name: 'MiniMax',
       model: 'image-01',
-      baseUrl: 'https://api.minimax.io',
       requestModelId: 'image-01',
       arguments: {
         prompt: 'keep the character consistent',
@@ -1280,7 +1276,7 @@ describe('image model executors', () => {
       },
       field: 'subject_reference'
     }
-  ])('rejects $name model-specific image input objects with extra fields before model requests', async ({ model, baseUrl, requestModelId, arguments: requestArguments, field }) => {
+  ])('rejects $name model-specific image input objects with extra fields before model requests', async ({ model, requestModelId, arguments: requestArguments, field }) => {
     const projectRoot = await mkdtemp(join(tmpdir(), `debrute-image-extra-object-${model.replace(/[^a-z0-9]+/gi, '-')}-`));
     let modelRuned = false;
     const fetch: ImageModelFetch = async () => {
@@ -1295,7 +1291,7 @@ describe('image model executors', () => {
           model,
           arguments: requestArguments
         },
-        settings: { imageModels: [{ debruteModelId: model, baseUrlOverride: baseUrl, requestModelIdOverride: requestModelId }] },
+        settings: { imageModels: [{ debruteModelId: model, requestModelIdOverride: requestModelId }] },
         secrets: { imageModelApiKeys: { [model]: 'sk-image' } },
         fetch
       });
@@ -1337,7 +1333,7 @@ describe('image model executors', () => {
             subject_reference: ['source.png']
           }
         },
-        settings: { imageModels: [{ debruteModelId: 'image-01', baseUrlOverride: 'https://api.minimax.io', requestModelIdOverride: 'image-01' }] },
+        settings: { imageModels: [{ debruteModelId: 'image-01', requestModelIdOverride: 'image-01' }] },
         secrets: { imageModelApiKeys: { 'image-01': 'sk-image' } },
         fetch
       });
@@ -1380,7 +1376,7 @@ describe('image model executors', () => {
             ]
           }
         },
-        settings: { imageModels: [{ debruteModelId: 'image-01', baseUrlOverride: 'https://api.minimax.io', requestModelIdOverride: 'image-01' }] },
+        settings: { imageModels: [{ debruteModelId: 'image-01', requestModelIdOverride: 'image-01' }] },
         secrets: { imageModelApiKeys: { 'image-01': 'sk-image' } },
         fetch
       });
@@ -1401,7 +1397,7 @@ describe('image model executors', () => {
         projectRoot,
         invocationId: 'turn-empty-input-images',
         input: { model: 'gpt-image-2', arguments: { prompt: 'cover image', image: [], size: '1024x1024' } },
-        settings: { imageModels: [{ debruteModelId: 'gpt-image-2', baseUrlOverride: 'https://api.openai.com/v1', requestModelIdOverride: 'gpt-image-2' }] },
+        settings: { imageModels: [{ debruteModelId: 'gpt-image-2', requestModelIdOverride: 'gpt-image-2' }] },
         secrets: { imageModelApiKeys: { 'gpt-image-2': 'sk-image' } },
         fetch
       });
@@ -1435,7 +1431,7 @@ describe('image model executors', () => {
         projectRoot,
         invocationId: 'turn-openai-timeout',
         input: { model: 'gpt-image-2', arguments: { prompt: 'cover image', size: '1024x1024' } },
-        settings: { imageModels: [{ debruteModelId: 'gpt-image-2', baseUrlOverride: 'https://api.openai.com/v1', requestModelIdOverride: 'gpt-image-2' }] },
+        settings: { imageModels: [{ debruteModelId: 'gpt-image-2', requestModelIdOverride: 'gpt-image-2' }] },
         secrets: { imageModelApiKeys: { 'gpt-image-2': 'sk-image' } },
         requestTimeoutMs: 5,
         fetch
@@ -1468,7 +1464,7 @@ describe('image model executors', () => {
         projectRoot,
         invocationId: 'turn-openai-body-timeout',
         input: { model: 'gpt-image-2', arguments: { prompt: 'cover image', size: '1024x1024' } },
-        settings: { imageModels: [{ debruteModelId: 'gpt-image-2', baseUrlOverride: 'https://api.openai.com/v1', requestModelIdOverride: 'gpt-image-2' }] },
+        settings: { imageModels: [{ debruteModelId: 'gpt-image-2', requestModelIdOverride: 'gpt-image-2' }] },
         secrets: { imageModelApiKeys: { 'gpt-image-2': 'sk-image' } },
         requestTimeoutMs: 5,
         fetch
@@ -1502,7 +1498,7 @@ describe('image model executors', () => {
         projectRoot,
         invocationId: 'turn-openai-body-cancel-hang',
         input: { model: 'gpt-image-2', arguments: { prompt: 'cover image', size: '1024x1024' } },
-        settings: { imageModels: [{ debruteModelId: 'gpt-image-2', baseUrlOverride: 'https://api.openai.com/v1', requestModelIdOverride: 'gpt-image-2' }] },
+        settings: { imageModels: [{ debruteModelId: 'gpt-image-2', requestModelIdOverride: 'gpt-image-2' }] },
         secrets: { imageModelApiKeys: { 'gpt-image-2': 'sk-image' } },
         requestTimeoutMs: 5,
         fetch
@@ -1539,7 +1535,7 @@ describe('image model executors', () => {
         projectRoot,
         invocationId: 'turn-openai-caller-abort',
         input: { model: 'gpt-image-2', arguments: { prompt: 'cover image', size: '1024x1024' } },
-        settings: { imageModels: [{ debruteModelId: 'gpt-image-2', baseUrlOverride: 'https://api.openai.com/v1', requestModelIdOverride: 'gpt-image-2' }] },
+        settings: { imageModels: [{ debruteModelId: 'gpt-image-2', requestModelIdOverride: 'gpt-image-2' }] },
         secrets: { imageModelApiKeys: { 'gpt-image-2': 'sk-image' } },
         fetch,
         signal: controller.signal
@@ -1572,7 +1568,7 @@ describe('image model executors', () => {
         projectRoot,
         invocationId: 'turn-wan-caller-abort',
         input: { model: 'wan2.7-image', arguments: { prompt: 'cover image' } },
-        settings: { imageModels: [{ debruteModelId: 'wan2.7-image', baseUrlOverride: 'https://dashscope.aliyuncs.com/api/v1', requestModelIdOverride: 'wan2.7-image' }] },
+        settings: { imageModels: [{ debruteModelId: 'wan2.7-image', requestModelIdOverride: 'wan2.7-image' }] },
         secrets: { imageModelApiKeys: { 'wan2.7-image': 'sk-wan' } },
         pollIntervalMs: 1_000,
         wanPollMaxAttempts: 10,
@@ -1611,7 +1607,7 @@ describe('image model executors', () => {
         projectRoot,
         invocationId: 'turn-openai-download-failure',
         input: { model: 'gpt-image-2', arguments: { prompt: 'cover image', size: '1024x1024' } },
-        settings: { imageModels: [{ debruteModelId: 'gpt-image-2', baseUrlOverride: 'https://api.openai.com/v1', requestModelIdOverride: 'gpt-image-2' }] },
+        settings: { imageModels: [{ debruteModelId: 'gpt-image-2', requestModelIdOverride: 'gpt-image-2' }] },
         secrets: { imageModelApiKeys: { 'gpt-image-2': 'sk-image' } },
         fetch
       });
@@ -1630,29 +1626,25 @@ describe('image model executors', () => {
   it.each([
     {
       debruteModelId: 'doubao-seedream-5-0-lite-260128',
-      baseUrl: 'https://ark.example/v1',
-      expectedFirstUrl: 'https://ark.example/v1/images/generations',
+      expectedFirstUrl: 'https://ark.cn-beijing.volces.com/api/v3/images/generations',
       response: { data: [{ url: 'https://cdn.example/doubao.png' }] }
     },
     {
       debruteModelId: 'gemini-3.1-flash-image-preview',
-      baseUrl: 'https://generativelanguage.googleapis.com/v1beta',
       expectedFirstUrl: 'https://generativelanguage.googleapis.com/v1beta/models/gemini-3.1-flash-image-preview:generateContent?key=sk-image',
       response: { candidates: [{ content: { parts: [{ inlineData: { mimeType: 'image/png', data: tinyPngBase64 } }] } }] }
     },
     {
       debruteModelId: 'fal-ai/flux/dev',
-      baseUrl: 'https://fal.run',
       expectedFirstUrl: 'https://fal.run/fal-ai/flux/dev',
       response: { images: [{ url: 'https://cdn.example/fal.png' }], seed: 123 }
     },
     {
       debruteModelId: 'image-01',
-      baseUrl: 'https://api.minimax.io',
       expectedFirstUrl: 'https://api.minimax.io/v1/image_generation',
       response: { base_resp: { status_code: 0 }, data: { image_base64: [tinyPngBase64] } }
     }
-  ])('executes the $debruteModelId executor branch', async ({ debruteModelId, baseUrl, expectedFirstUrl, response }) => {
+  ])('executes the $debruteModelId executor branch', async ({ debruteModelId, expectedFirstUrl, response }) => {
     const projectRoot = await mkdtemp(join(tmpdir(), `debrute-image-${debruteModelId.replace(/[^a-z0-9]+/gi, '-')}-`));
     const calls: string[] = [];
     const fetch: ImageModelFetch = async (url) => {
@@ -1667,7 +1659,7 @@ describe('image model executors', () => {
         projectRoot,
         invocationId: 'turn-1',
         input: { model: debruteModelId, arguments: { prompt: 'cover image' } },
-        settings: { imageModels: [{ debruteModelId, baseUrlOverride: baseUrl, requestModelIdOverride: debruteModelId }] },
+        settings: { imageModels: [{ debruteModelId, requestModelIdOverride: debruteModelId }] },
         secrets: { imageModelApiKeys: { [debruteModelId]: 'sk-image' } },
         fetch
       });
@@ -1721,7 +1713,7 @@ describe('image model executors', () => {
             image_size: '1K'
           }
         },
-        settings: { imageModels: [{ debruteModelId: 'gemini-3.1-flash-image-preview', baseUrlOverride: 'https://generativelanguage.googleapis.com/v1beta', requestModelIdOverride: 'gemini-3.1-flash-image-preview' }] },
+        settings: { imageModels: [{ debruteModelId: 'gemini-3.1-flash-image-preview', requestModelIdOverride: 'gemini-3.1-flash-image-preview' }] },
         secrets: { imageModelApiKeys: { 'gemini-3.1-flash-image-preview': 'sk-image' } },
         fetch,
         recordGeneratedAsset: async (input) => {
@@ -1796,7 +1788,7 @@ describe('image model executors', () => {
         projectRoot,
         invocationId: 'turn-1',
         input: { model: 'wan2.7-image', arguments: { prompt: 'cover image' } },
-        settings: { imageModels: [{ debruteModelId: 'wan2.7-image', baseUrlOverride: 'https://dashscope.aliyuncs.com/api/v1', requestModelIdOverride: 'wan2.7-image' }] },
+        settings: { imageModels: [{ debruteModelId: 'wan2.7-image', requestModelIdOverride: 'wan2.7-image' }] },
         secrets: { imageModelApiKeys: { 'wan2.7-image': 'sk-wan' } },
         pollIntervalMs: 0,
         fetch
@@ -1831,7 +1823,7 @@ describe('image model executors', () => {
         projectRoot,
         invocationId: 'turn-1',
         input: { model: 'grok-imagine', arguments: { prompt: 'cover image' } },
-        settings: { imageModels: [{ debruteModelId: 'grok-imagine', baseUrlOverride: 'https://vydra.example', requestModelIdOverride: 'grok-imagine' }] },
+        settings: { imageModels: [{ debruteModelId: 'grok-imagine', requestModelIdOverride: 'grok-imagine' }] },
         secrets: { imageModelApiKeys: { 'grok-imagine': 'sk-grok' } },
         pollIntervalMs: 0,
         fetch
@@ -1839,8 +1831,8 @@ describe('image model executors', () => {
 
       expect(result.status).toBe('ok');
       expect(calls).toEqual([
-        'https://vydra.example/models/grok-imagine',
-        'https://vydra.example/jobs/job-1',
+        'https://api.vydra.ai/api/v1/models/grok-imagine',
+        'https://api.vydra.ai/api/v1/jobs/job-1',
         'https://cdn.example/grok.png'
       ]);
     } finally {
@@ -1856,7 +1848,7 @@ describe('image model executors', () => {
         projectRoot,
         invocationId: 'turn-1',
         input: { model: 'gpt-image-2', arguments: { prompt: 'cover image' } },
-        settings: { imageModels: [{ debruteModelId: 'gpt-image-2', baseUrlOverride: 'https://api.openai.com/v1', requestModelIdOverride: 'gpt-image-2' }] },
+        settings: { imageModels: [{ debruteModelId: 'gpt-image-2', requestModelIdOverride: 'gpt-image-2' }] },
         secrets: { imageModelApiKeys: {} },
         fetch: async () => {
           called = true;
