@@ -81,7 +81,7 @@ describe('web Settings pages', () => {
     expect(html).toContain('db-status-pill');
   });
 
-  it('renders disabled browser update state without throwing', () => {
+  it('renders disabled browser update state with a stable check action', () => {
     const state: DesktopAppUpdateState = { type: 'disabled', currentVersion: '0.2.0', reason: 'browser' };
     const html = renderToStaticMarkup(React.createElement(GeneralSettingsPage, {
       shell: undefined,
@@ -93,19 +93,21 @@ describe('web Settings pages', () => {
     expect(html).toContain('Current version');
     expect(html).toContain('0.2.0');
     expect(html).toContain('Updates are unavailable in browser mode.');
-    expect(html).not.toContain('Check for Updates</button>');
+    expect(html).toContain('Check for Updates');
+    expect(html).toContain('disabled=""');
   });
 
   it('renders automatic update states and actions', () => {
     const states: DesktopAppUpdateState[] = [
       { type: 'idle', currentVersion: '0.2.0', platform: 'darwin' },
-      { type: 'checking', currentVersion: '0.2.0', explicit: true },
-      { type: 'available', currentVersion: '0.2.0', updateVersion: '0.3.0', installMode: 'automatic' },
-      { type: 'downloading', currentVersion: '0.2.0', updateVersion: '0.3.0', percent: 55 },
-      { type: 'downloaded', currentVersion: '0.2.0', updateVersion: '0.3.0' },
+      { type: 'checking', currentVersion: '0.2.0', platform: 'darwin', explicit: true },
+      { type: 'available', currentVersion: '0.2.0', platform: 'darwin', updateVersion: '0.3.0', installMode: 'automatic' },
+      { type: 'downloading', currentVersion: '0.2.0', platform: 'darwin', updateVersion: '0.3.0', percent: 55 },
+      { type: 'downloaded', currentVersion: '0.2.0', platform: 'darwin', updateVersion: '0.3.0' },
       {
         type: 'error',
         currentVersion: '0.2.0',
+        platform: 'darwin',
         operation: 'download',
         message: 'network failed',
         retryable: true,
@@ -130,12 +132,14 @@ describe('web Settings pages', () => {
     expect(html).toContain('55%');
     expect(html).toContain('Install and Restart');
     expect(html).toContain('network failed');
+    expect(html).not.toContain('unknown');
   });
 
   it('renders Linux manual download update action', () => {
     const state: DesktopAppUpdateState = {
       type: 'available',
       currentVersion: '0.2.0',
+      platform: 'linux',
       updateVersion: '0.3.0',
       releaseUrl: 'https://github.com/XiiTang/Debrute/releases/tag/v0.3.0',
       installMode: 'manual-download'

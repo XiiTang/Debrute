@@ -23,7 +23,12 @@ describe('Desktop app update service', () => {
       linuxReleaseChecker: async () => null
     });
 
-    expect(service.getState()).toEqual({ type: 'disabled', currentVersion: '0.2.0', reason: 'development' });
+    expect(service.getState()).toEqual({
+      type: 'disabled',
+      currentVersion: '0.2.0',
+      platform: 'darwin',
+      reason: 'development'
+    });
   });
 
   it('configures driver for manual download and maps updater lifecycle events', async () => {
@@ -63,7 +68,12 @@ describe('Desktop app update service', () => {
 
     expect(driver.checkForUpdates).toHaveBeenCalledTimes(1);
     expect(driver.downloadUpdate).not.toHaveBeenCalled();
-    expect(service.getState()).toMatchObject({ type: 'available', updateVersion: '0.3.0', installMode: 'automatic' });
+    expect(service.getState()).toMatchObject({
+      type: 'available',
+      platform: 'win32',
+      updateVersion: '0.3.0',
+      installMode: 'automatic'
+    });
   });
 
   it('starts one delayed background check for packaged builds and skips disabled builds', async () => {
@@ -158,6 +168,7 @@ describe('Desktop app update service', () => {
     expect(service.getState()).toEqual({
       type: 'available',
       currentVersion: '0.2.0',
+      platform: 'linux',
       updateVersion: '0.3.0',
       releaseName: 'Debrute 0.3.0',
       releaseUrl: 'https://github.com/XiiTang/Debrute/releases/tag/v0.3.0',
@@ -180,9 +191,50 @@ describe('Desktop app update service', () => {
     expect(service.getState()).toEqual({
       type: 'error',
       currentVersion: '0.2.0',
+      platform: 'darwin',
       operation: 'check',
       message: 'network failed',
       retryable: true
+    });
+  });
+
+  it('keeps platform and retry action while reporting updater event errors', async () => {
+    const driver = new FakeDriver();
+    const service = createDesktopAppUpdateService({
+      app: { isPackaged: true, getVersion: () => '0.2.0' },
+      platform: 'win32',
+      driver,
+      linuxReleaseChecker: async () => null
+    });
+
+    await service.checkForUpdates(true);
+    driver.emit('download-progress', { percent: 20 });
+    expect(service.getState()).toMatchObject({
+      type: 'downloading',
+      platform: 'win32',
+      updateVersion: '0.3.0',
+      percent: 20
+    });
+
+    driver.emit('update-downloaded', { version: '0.3.0', releaseName: 'Debrute 0.3.0' });
+    expect(service.getState()).toMatchObject({
+      type: 'downloaded',
+      platform: 'win32',
+      updateVersion: '0.3.0'
+    });
+
+    await service.installDownloadedUpdate();
+    driver.emit('error', new Error('install failed'));
+
+    expect(service.getState()).toEqual({
+      type: 'error',
+      currentVersion: '0.2.0',
+      platform: 'win32',
+      operation: 'install',
+      message: 'install failed',
+      retryable: true,
+      updateVersion: '0.3.0',
+      installMode: 'automatic'
     });
   });
 

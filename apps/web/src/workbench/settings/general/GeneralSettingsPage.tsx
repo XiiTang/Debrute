@@ -27,7 +27,7 @@ export function GeneralSettingsPage({
   initialUpdateState?: DesktopAppUpdateState;
 }): React.ReactElement {
   const [updateState, setUpdateState] = useState<DesktopAppUpdateState>(
-    initialUpdateState ?? { type: 'disabled', currentVersion: 'unknown', reason: shell ? 'unpackaged' : 'browser' }
+    initialUpdateState ?? { type: 'disabled', currentVersion: 'unknown', reason: shell?.getAppUpdateState ? 'development' : 'browser' }
   );
   const [operation, setOperation] = useState<OperationState>({ status: 'idle' });
 
@@ -111,22 +111,22 @@ function AppUpdateCard({
       </small>
       <Toolbar ariaLabel="Application update actions" className="settings-actions">
         {action === 'check' ? (
-          <Button type="button" disabled={busy || !shell?.checkForAppUpdate} iconStart={<RefreshCw size={14} />} onClick={() => void run(() => shell!.checkForAppUpdate!())}>
+          <Button type="button" disabled={busy || !canRunAppUpdateAction(action, state, shell)} iconStart={<RefreshCw size={14} />} onClick={() => void run(() => shell!.checkForAppUpdate!())}>
             Check for Updates
           </Button>
         ) : null}
         {action === 'download' ? (
-          <Button type="button" disabled={busy || !shell?.downloadAppUpdate} iconStart={<Download size={14} />} onClick={() => void run(() => shell!.downloadAppUpdate!())}>
+          <Button type="button" disabled={busy || !canRunAppUpdateAction(action, state, shell)} iconStart={<Download size={14} />} onClick={() => void run(() => shell!.downloadAppUpdate!())}>
             Download Update
           </Button>
         ) : null}
         {action === 'install' ? (
-          <Button type="button" disabled={busy || !shell?.installAppUpdate} iconStart={<RotateCw size={14} />} onClick={() => void run(() => shell!.installAppUpdate!())}>
+          <Button type="button" disabled={busy || !canRunAppUpdateAction(action, state, shell)} iconStart={<RotateCw size={14} />} onClick={() => void run(() => shell!.installAppUpdate!())}>
             Install and Restart
           </Button>
         ) : null}
         {action === 'open-download-page' ? (
-          <Button type="button" disabled={busy || !shell?.openAppUpdateDownloadPage} iconStart={<ExternalLink size={14} />} onClick={() => void run(() => shell!.openAppUpdateDownloadPage!())}>
+          <Button type="button" disabled={busy || !canRunAppUpdateAction(action, state, shell)} iconStart={<ExternalLink size={14} />} onClick={() => void run(() => shell!.openAppUpdateDownloadPage!())}>
             Open GitHub Releases
           </Button>
         ) : null}
@@ -211,13 +211,16 @@ function stateMessage(state: DesktopAppUpdateState): string {
 }
 
 function appUpdateActionForState(state: DesktopAppUpdateState): AppUpdateAction {
-  if (state.type === 'idle') {
+  if (state.type === 'disabled' || state.type === 'idle' || state.type === 'checking') {
     return 'check';
   }
   if (state.type === 'available') {
     return state.installMode === 'manual-download' ? 'open-download-page' : 'download';
   }
-  if (state.type === 'downloaded') {
+  if (state.type === 'downloading') {
+    return 'download';
+  }
+  if (state.type === 'downloaded' || state.type === 'installing') {
     return 'install';
   }
   if (state.type === 'error' && state.retryable) {
@@ -234,6 +237,29 @@ function appUpdateActionForState(state: DesktopAppUpdateState): AppUpdateAction 
   return 'none';
 }
 
+function canRunAppUpdateAction(
+  action: AppUpdateAction,
+  state: DesktopAppUpdateState,
+  shell: DebruteShellApi | undefined
+): boolean {
+  if (state.type === 'disabled' || state.type === 'checking' || state.type === 'downloading' || state.type === 'installing') {
+    return false;
+  }
+  if (action === 'check') {
+    return Boolean(shell?.checkForAppUpdate);
+  }
+  if (action === 'download') {
+    return Boolean(shell?.downloadAppUpdate);
+  }
+  if (action === 'install') {
+    return Boolean(shell?.installAppUpdate);
+  }
+  if (action === 'open-download-page') {
+    return Boolean(shell?.openAppUpdateDownloadPage);
+  }
+  return false;
+}
+
 function disabledReasonMessage(reason: DesktopAppUpdateDisabledReason): string {
   if (reason === 'browser') {
     return 'Updates are unavailable in browser mode.';
@@ -241,24 +267,30 @@ function disabledReasonMessage(reason: DesktopAppUpdateDisabledReason): string {
   if (reason === 'development') {
     return 'Updates are unavailable in development builds.';
   }
-  if (reason === 'unpackaged') {
-    return 'Updates are unavailable in unpackaged builds.';
-  }
   if (reason === 'unsupported-platform') {
     return 'Updates are unavailable on this platform.';
   }
-  return 'Updates are unavailable because update configuration is missing.';
+  return 'Updates are unavailable.';
 }
 
 function surfaceLabel(state: DesktopAppUpdateState): string {
   if (state.type === 'disabled') {
-    return state.reason === 'browser' ? 'Browser' : 'Desktop unavailable';
+    if (state.reason === 'browser') {
+      return 'Browser';
+    }
+    if (state.reason === 'development') {
+      return 'Desktop development';
+    }
+    return 'Desktop unsupported';
   }
   return 'Desktop packaged';
 }
 
 function platformLabel(state: DesktopAppUpdateState): string {
-  return 'platform' in state ? state.platform : 'unknown';
+  if ('platform' in state && state.platform) {
+    return state.platform;
+  }
+  return state.type === 'disabled' && state.reason === 'browser' ? 'browser' : 'desktop';
 }
 
 function isDesktopAppUpdateState(value: unknown): value is DesktopAppUpdateState {

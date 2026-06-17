@@ -573,10 +573,8 @@ export interface DebruteCliManualCommand {
 
 export type DesktopAppUpdateDisabledReason =
   | 'development'
-  | 'unpackaged'
   | 'browser'
-  | 'unsupported-platform'
-  | 'missing-update-config';
+  | 'unsupported-platform';
 
 export type DesktopAppUpdateInstallMode = 'automatic' | 'manual-download';
 export type DesktopAppUpdateErrorOperation = 'check' | 'download' | 'install';
@@ -585,6 +583,7 @@ export type DesktopAppUpdateState =
   | {
       type: 'disabled';
       currentVersion: string;
+      platform?: NodeJS.Platform;
       reason: DesktopAppUpdateDisabledReason;
     }
   | {
@@ -598,11 +597,13 @@ export type DesktopAppUpdateState =
   | {
       type: 'checking';
       currentVersion: string;
+      platform: NodeJS.Platform;
       explicit: boolean;
     }
   | {
       type: 'available';
       currentVersion: string;
+      platform: NodeJS.Platform;
       updateVersion: string;
       releaseName?: string;
       releaseDate?: string;
@@ -612,12 +613,14 @@ export type DesktopAppUpdateState =
   | {
       type: 'downloading';
       currentVersion: string;
+      platform: NodeJS.Platform;
       updateVersion: string;
       percent: number;
     }
   | {
       type: 'downloaded';
       currentVersion: string;
+      platform: NodeJS.Platform;
       updateVersion: string;
       releaseName?: string;
       releaseDate?: string;
@@ -625,11 +628,13 @@ export type DesktopAppUpdateState =
   | {
       type: 'installing';
       currentVersion: string;
+      platform: NodeJS.Platform;
       updateVersion: string;
     }
   | {
       type: 'error';
       currentVersion: string;
+      platform: NodeJS.Platform;
       operation: DesktopAppUpdateErrorOperation;
       message: string;
       retryable: boolean;

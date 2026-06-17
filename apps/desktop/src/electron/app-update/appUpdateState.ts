@@ -11,11 +11,17 @@ export interface AppUpdateInfoLike {
   releaseDate?: string;
 }
 
-export function appUpdateDisabledState(
-  currentVersion: string,
-  reason: DesktopAppUpdateDisabledReason
-): DesktopAppUpdateState {
-  return { type: 'disabled', currentVersion, reason };
+export function appUpdateDisabledState(input: {
+  currentVersion: string;
+  platform: NodeJS.Platform;
+  reason: DesktopAppUpdateDisabledReason;
+}): DesktopAppUpdateState {
+  return {
+    type: 'disabled',
+    currentVersion: input.currentVersion,
+    platform: input.platform,
+    reason: input.reason
+  };
 }
 
 export function appUpdateIdleState(input: {
@@ -37,6 +43,7 @@ export function appUpdateIdleState(input: {
 
 export function appUpdateStateFromInfo(input: {
   currentVersion: string;
+  platform: NodeJS.Platform;
   info: AppUpdateInfoLike;
   installMode: DesktopAppUpdateInstallMode;
   releaseUrl?: string;
@@ -44,6 +51,7 @@ export function appUpdateStateFromInfo(input: {
   return {
     type: 'available',
     currentVersion: input.currentVersion,
+    platform: input.platform,
     updateVersion: input.info.version,
     ...(input.info.releaseName ? { releaseName: input.info.releaseName } : {}),
     ...(input.info.releaseDate ? { releaseDate: input.info.releaseDate } : {}),
@@ -54,6 +62,7 @@ export function appUpdateStateFromInfo(input: {
 
 export function appUpdateErrorState(input: {
   currentVersion: string;
+  platform: NodeJS.Platform;
   operation: DesktopAppUpdateErrorOperation;
   error: unknown;
   retryable?: boolean;
@@ -63,6 +72,7 @@ export function appUpdateErrorState(input: {
   return {
     type: 'error',
     currentVersion: input.currentVersion,
+    platform: input.platform,
     operation: input.operation,
     message: errorMessage(input.error),
     retryable: input.retryable ?? true,

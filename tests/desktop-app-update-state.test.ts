@@ -9,9 +9,14 @@ import {
 
 describe('desktop app update state helpers', () => {
   it('creates disabled and idle states with current version', () => {
-    expect(appUpdateDisabledState('0.2.0', 'development')).toEqual({
+    expect(appUpdateDisabledState({
+      currentVersion: '0.2.0',
+      platform: 'darwin',
+      reason: 'development'
+    })).toEqual({
       type: 'disabled',
       currentVersion: '0.2.0',
+      platform: 'darwin',
       reason: 'development'
     });
     expect(appUpdateIdleState({
@@ -31,6 +36,7 @@ describe('desktop app update state helpers', () => {
   it('maps update info to automatic and manual-download availability', () => {
     expect(appUpdateStateFromInfo({
       currentVersion: '0.2.0',
+      platform: 'darwin',
       installMode: 'automatic',
       info: {
         version: '0.3.0',
@@ -40,6 +46,7 @@ describe('desktop app update state helpers', () => {
     })).toEqual({
       type: 'available',
       currentVersion: '0.2.0',
+      platform: 'darwin',
       updateVersion: '0.3.0',
       releaseName: 'Debrute 0.3.0',
       releaseDate: '2026-06-18T00:00:00.000Z',
@@ -48,11 +55,13 @@ describe('desktop app update state helpers', () => {
 
     expect(appUpdateStateFromInfo({
       currentVersion: '0.2.0',
+      platform: 'linux',
       installMode: 'manual-download',
       releaseUrl: 'https://github.com/XiiTang/Debrute/releases/tag/v0.3.0',
       info: { version: '0.3.0' }
     })).toMatchObject({
       type: 'available',
+      platform: 'linux',
       updateVersion: '0.3.0',
       releaseUrl: 'https://github.com/XiiTang/Debrute/releases/tag/v0.3.0',
       installMode: 'manual-download'
@@ -68,6 +77,7 @@ describe('desktop app update state helpers', () => {
   it('keeps retry context in error states', () => {
     expect(appUpdateErrorState({
       currentVersion: '0.2.0',
+      platform: 'darwin',
       operation: 'download',
       error: new Error('network failed'),
       updateVersion: '0.3.0',
@@ -75,6 +85,7 @@ describe('desktop app update state helpers', () => {
     })).toEqual({
       type: 'error',
       currentVersion: '0.2.0',
+      platform: 'darwin',
       operation: 'download',
       message: 'network failed',
       retryable: true,

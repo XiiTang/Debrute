@@ -1,5 +1,10 @@
 import { EventEmitter } from 'node:events';
-import type { DesktopAppUpdateDisabledReason, DesktopAppUpdateState } from '@debrute/app-protocol';
+import type {
+  DesktopAppUpdateDisabledReason,
+  DesktopAppUpdateErrorOperation,
+  DesktopAppUpdateInstallMode,
+  DesktopAppUpdateState
+} from '@debrute/app-protocol';
 import {
   appUpdateDisabledState,
   appUpdateErrorState,
@@ -56,7 +61,7 @@ export function createDesktopAppUpdateService(input: DesktopAppUpdateServiceInpu
   const events = new EventEmitter();
   const disabledReason = disabledReasonFor(input.app.isPackaged, input.platform);
   let state: DesktopAppUpdateState = disabledReason
-    ? appUpdateDisabledState(currentVersion, disabledReason)
+    ? appUpdateDisabledState({ currentVersion, platform: input.platform, reason: disabledReason })
     : appUpdateIdleState({ currentVersion, platform: input.platform });
 
   input.driver.autoDownload = false;
@@ -70,6 +75,7 @@ export function createDesktopAppUpdateService(input: DesktopAppUpdateServiceInpu
     setState({
       type: 'downloading',
       currentVersion,
+      platform: input.platform,
       updateVersion,
       percent: normalizeDownloadPercent(progress.percent ?? 0)
     });
@@ -78,6 +84,7 @@ export function createDesktopAppUpdateService(input: DesktopAppUpdateServiceInpu
     setState({
       type: 'downloaded',
       currentVersion,
+      platform: input.platform,
       updateVersion: info.version,
       ...(info.releaseName ? { releaseName: info.releaseName } : {}),
       ...(info.releaseDate ? { releaseDate: info.releaseDate } : {})
@@ -85,10 +92,11 @@ export function createDesktopAppUpdateService(input: DesktopAppUpdateServiceInpu
   });
   input.driver.on('error', (error) => {
     const previousUpdateVersion = updateVersionFromState(state);
-    const previousInstallMode = 'installMode' in state ? state.installMode : undefined;
+    const previousInstallMode = installModeFromState(state);
     setState(appUpdateErrorState({
       currentVersion,
-      operation: state.type === 'downloading' ? 'download' : 'check',
+      platform: input.platform,
+      operation: errorOperationFromState(state),
       error,
       ...(previousUpdateVersion ? { updateVersion: previousUpdateVersion } : {}),
       ...(previousInstallMode ? { installMode: previousInstallMode } : {})
@@ -105,7 +113,7 @@ export function createDesktopAppUpdateService(input: DesktopAppUpdateServiceInpu
     if (state.type === 'disabled') {
       return state;
     }
-    setState({ type: 'checking', currentVersion, explicit });
+    setState({ type: 'checking', currentVersion, platform: input.platform, explicit });
     if (input.platform === 'linux') {
       return checkLinuxRelease();
     }
@@ -122,11 +130,17 @@ export function createDesktopAppUpdateService(input: DesktopAppUpdateServiceInpu
       }
       return setState(appUpdateStateFromInfo({
         currentVersion,
+        platform: input.platform,
         info: updateInfo,
         installMode: 'automatic'
       }));
     } catch (error) {
-      return setState(appUpdateErrorState({ currentVersion, operation: 'check', error }));
+      return setState(appUpdateErrorState({
+        currentVersion,
+        platform: input.platform,
+        operation: 'check',
+        error
+      }));
     }
   }
 
@@ -143,12 +157,18 @@ export function createDesktopAppUpdateService(input: DesktopAppUpdateServiceInpu
       }
       return setState(appUpdateStateFromInfo({
         currentVersion,
+        platform: input.platform,
         info: release,
         releaseUrl: release.releaseUrl,
         installMode: 'manual-download'
       }));
     } catch (error) {
-      return setState(appUpdateErrorState({ currentVersion, operation: 'check', error }));
+      return setState(appUpdateErrorState({
+        currentVersion,
+        platform: input.platform,
+        operation: 'check',
+        error
+      }));
     }
   }
 
@@ -164,13 +184,14 @@ export function createDesktopAppUpdateService(input: DesktopAppUpdateServiceInpu
       if (!updateVersion || installMode !== 'automatic') {
         return state;
       }
-      setState({ type: 'downloading', currentVersion, updateVersion, percent: 0 });
+      setState({ type: 'downloading', currentVersion, platform: input.platform, updateVersion, percent: 0 });
       try {
         await input.driver.downloadUpdate();
         return state;
       } catch (error) {
         return setState(appUpdateErrorState({
           currentVersion,
+          platform: input.platform,
           operation: 'download',
           error,
           updateVersion,
@@ -186,13 +207,14 @@ export function createDesktopAppUpdateService(input: DesktopAppUpdateServiceInpu
       if (!updateVersion) {
         return state;
       }
-      setState({ type: 'installing', currentVersion, updateVersion });
+      setState({ type: 'installing', currentVersion, platform: input.platform, updateVersion });
       try {
         input.driver.quitAndInstall(true, true);
         return state;
       } catch (error) {
         return setState(appUpdateErrorState({
           currentVersion,
+          platform: input.platform,
           operation: 'install',
           error,
           updateVersion,
@@ -274,6 +296,26 @@ function disabledReasonFor(
 
 function updateVersionFromState(state: DesktopAppUpdateState): string | undefined {
   return 'updateVersion' in state ? state.updateVersion : undefined;
+}
+
+function installModeFromState(state: DesktopAppUpdateState): DesktopAppUpdateInstallMode | undefined {
+  if ('installMode' in state) {
+    return state.installMode;
+  }
+  if (state.type === 'downloaded' || state.type === 'installing') {
+    return 'automatic';
+  }
+  return undefined;
+}
+
+function errorOperationFromState(state: DesktopAppUpdateState): DesktopAppUpdateErrorOperation {
+  if (state.type === 'downloading') {
+    return 'download';
+  }
+  if (state.type === 'installing') {
+    return 'install';
+  }
+  return 'check';
 }
 
 function isVersionGreater(candidate: string, current: string): boolean {
