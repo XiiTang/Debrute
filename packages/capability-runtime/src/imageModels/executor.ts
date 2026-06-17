@@ -8,7 +8,13 @@ import {
   readResponseTextWithTimeout as readResponseTextBodyWithTimeout
 } from '../requestTimeout.js';
 import { redactModelRunMetadata } from '../modelRunMetadataRedaction.js';
-import { assertPublicHttpUrl, publicHttpRedirectUrl, type PublicRemoteHostLookup } from '../remoteFetchPolicy.js';
+import {
+  assertPublicHttpUrl,
+  fetchPublicHttpUrl,
+  resolveHttpRedirectUrl,
+  type PublicRemoteHostLookup,
+  type PublicRemoteHttpTransport
+} from '../remoteFetchPolicy.js';
 import {
   createImageModelCatalog,
   imageInputFieldsForCatalogEntry,
@@ -47,6 +53,7 @@ export interface ExecuteImageModelRequestInput {
   wanPollMaxAttempts?: number;
   vydraPollMaxAttempts?: number;
   remoteUrlLookup?: PublicRemoteHostLookup;
+  remoteHttpTransport?: PublicRemoteHttpTransport;
   signal?: AbortSignal;
 }
 
@@ -91,6 +98,7 @@ interface RequestState {
   wanPollMaxAttempts: number;
   vydraPollMaxAttempts: number;
   remoteUrlLookup?: PublicRemoteHostLookup;
+  remoteHttpTransport?: PublicRemoteHttpTransport;
   signal?: AbortSignal;
 }
 
@@ -169,6 +177,7 @@ export async function executeImageModelRequest(input: ExecuteImageModelRequestIn
     wanPollMaxAttempts: input.wanPollMaxAttempts ?? DEFAULT_WAN_POLL_ATTEMPTS,
     vydraPollMaxAttempts: input.vydraPollMaxAttempts ?? DEFAULT_VYDRA_POLL_ATTEMPTS,
     ...(input.remoteUrlLookup ? { remoteUrlLookup: input.remoteUrlLookup } : {}),
+    ...(input.remoteHttpTransport ? { remoteHttpTransport: input.remoteHttpTransport } : {}),
     ...(input.signal ? { signal: input.signal } : {})
   };
   log(state, 'resolve_model', {
@@ -956,18 +965,32 @@ async function downloadImage(state: RequestState, url: string): Promise<ImagePay
 }
 
 async function fetchRemoteImage(state: RequestState, url: string, redirectCount = 0): Promise<Response> {
-  const safeUrl = await assertPublicHttpUrl(url, 'Remote image URLs', { lookup: state.remoteUrlLookup });
-  const response = await fetchWithTimeout(state, safeUrl, { method: 'GET', redirect: 'manual' });
+  const response = await fetchRemoteHttpUrl(state, url, 'Remote image URLs');
   if (!isHttpRedirect(response.status)) {
     return response;
   }
   if (redirectCount >= 5) {
     throw new Error('Remote image URLs redirected too many times.');
   }
-  const redirectUrl = await publicHttpRedirectUrl(safeUrl, response.headers.get('location'), 'Remote image URLs', {
-    lookup: state.remoteUrlLookup
-  });
+  const redirectUrl = resolveHttpRedirectUrl(url, response.headers.get('location'), 'Remote image URLs');
   return fetchRemoteImage(state, redirectUrl, redirectCount + 1);
+}
+
+async function fetchRemoteHttpUrl(state: RequestState, url: string, label: string): Promise<Response> {
+  return fetchWithRequestTimeout(
+    (requestUrl, init) => fetchPublicHttpUrl(requestUrl, label, init, {
+      lookup: state.remoteUrlLookup,
+      transport: state.remoteHttpTransport
+    }),
+    url,
+    { method: 'GET' },
+    {
+      signal: state.signal,
+      timeoutMs: state.requestTimeoutMs,
+      timeoutMessage: `Image request timed out after ${state.requestTimeoutMs}ms`,
+      abortMessage: 'Image request aborted.'
+    }
+  );
 }
 
 function isHttpRedirect(status: number): boolean {

@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import {
   assertPublicHttpUrl,
+  fetchPublicHttpUrl,
   publicHttpRedirectUrl,
   type PublicRemoteHostLookup
 } from '@debrute/capability-runtime';
@@ -37,6 +38,50 @@ describe('PublicRemoteFetchPolicy', () => {
   it('accepts public HTTP(S) URLs only after every resolved address is public', async () => {
     await expect(assertPublicHttpUrl('https://media.example/image.png', 'Remote image URLs', { lookup: publicLookup }))
       .resolves.toBe('https://media.example/image.png');
+  });
+
+  it('passes the validated DNS address to the remote transport', async () => {
+    const resolvedHosts: unknown[] = [];
+
+    const response = await fetchPublicHttpUrl(
+      'https://media.example/image.png',
+      'Remote image URLs',
+      { method: 'GET' },
+      {
+        lookup: publicLookup,
+        transport: async (input) => {
+          resolvedHosts.push(input.resolved);
+          return new Response('ok', { status: 200 });
+        }
+      }
+    );
+
+    expect(response.status).toBe(200);
+    expect(resolvedHosts).toEqual([{
+      url: 'https://media.example/image.png',
+      hostname: 'media.example',
+      address: '93.184.216.34',
+      family: 4
+    }]);
+  });
+
+  it('does not call the remote transport when DNS validation fails', async () => {
+    let transportCalled = false;
+
+    await expect(fetchPublicHttpUrl(
+      'https://media.example/private.png',
+      'Remote image URLs',
+      { method: 'GET' },
+      {
+        lookup: privateLookup,
+        transport: async () => {
+          transportCalled = true;
+          return new Response('unexpected');
+        }
+      }
+    )).rejects.toThrow('Remote image URLs must not target local or private network hosts');
+
+    expect(transportCalled).toBe(false);
   });
 
   it('revalidates redirect targets against the same policy', async () => {

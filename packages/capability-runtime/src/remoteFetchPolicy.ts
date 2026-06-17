@@ -1,5 +1,8 @@
+import { request as httpRequest, type IncomingHttpHeaders } from 'node:http';
+import { request as httpsRequest } from 'node:https';
 import { lookup as nodeLookup } from 'node:dns/promises';
 import { isIP } from 'node:net';
+import { Readable } from 'node:stream';
 
 export interface PublicRemoteHostLookupAddress {
   address: string;
@@ -12,11 +15,46 @@ export interface PublicRemoteFetchPolicyOptions {
   lookup?: PublicRemoteHostLookup | undefined;
 }
 
+export interface PublicRemoteResolvedUrl {
+  url: string;
+  hostname: string;
+  address: string;
+  family: 4 | 6;
+}
+
+export interface PublicRemoteHttpTransportInput {
+  url: string;
+  resolved: PublicRemoteResolvedUrl;
+  method: string;
+  headers?: HeadersInit | undefined;
+  signal?: AbortSignal | undefined;
+}
+
+export type PublicRemoteHttpTransport = (input: PublicRemoteHttpTransportInput) => Promise<Response>;
+
+export interface PublicRemoteHttpRequestInit {
+  method?: string | undefined;
+  headers?: HeadersInit | undefined;
+  signal?: AbortSignal | null | undefined;
+}
+
+export interface PublicRemoteHttpFetchOptions extends PublicRemoteFetchPolicyOptions {
+  transport?: PublicRemoteHttpTransport | undefined;
+}
+
 export async function assertPublicHttpUrl(
   value: string,
   label: string,
   options: PublicRemoteFetchPolicyOptions = {}
 ): Promise<string> {
+  return (await resolvePublicHttpUrl(value, label, options)).url;
+}
+
+export async function resolvePublicHttpUrl(
+  value: string,
+  label: string,
+  options: PublicRemoteFetchPolicyOptions = {}
+): Promise<PublicRemoteResolvedUrl> {
   let url: URL;
   try {
     url = new URL(value);
@@ -31,8 +69,30 @@ export async function assertPublicHttpUrl(
   }
 
   const host = canonicalHost(url.hostname);
-  await assertPublicHost(host, label, value, options.lookup ?? defaultLookup);
-  return url.toString();
+  const address = await resolvePublicHost(host, label, value, options.lookup ?? defaultLookup);
+  return {
+    url: url.toString(),
+    hostname: host,
+    address: address.address,
+    family: address.family
+  };
+}
+
+export async function fetchPublicHttpUrl(
+  value: string,
+  label: string,
+  init: PublicRemoteHttpRequestInit = {},
+  options: PublicRemoteHttpFetchOptions = {}
+): Promise<Response> {
+  const resolved = await resolvePublicHttpUrl(value, label, options);
+  const transport = options.transport ?? nodePublicRemoteHttpTransport;
+  return transport({
+    url: resolved.url,
+    resolved,
+    method: init.method ?? 'GET',
+    ...(init.headers ? { headers: init.headers } : {}),
+    ...(init.signal ? { signal: init.signal } : {})
+  });
 }
 
 export async function publicHttpRedirectUrl(
@@ -41,10 +101,18 @@ export async function publicHttpRedirectUrl(
   label: string,
   options: PublicRemoteFetchPolicyOptions = {}
 ): Promise<string> {
+  return assertPublicHttpUrl(resolveHttpRedirectUrl(currentUrl, location, label), label, options);
+}
+
+export function resolveHttpRedirectUrl(currentUrl: string, location: string | null, label: string): string {
   if (!location) {
     throw new Error(`${label} redirect response is missing a location header.`);
   }
-  return assertPublicHttpUrl(new URL(location, currentUrl).toString(), label, options);
+  try {
+    return new URL(location, currentUrl).toString();
+  } catch {
+    throw new Error(`${label} redirect location is not a valid URL.`);
+  }
 }
 
 async function defaultLookup(hostname: string): Promise<PublicRemoteHostLookupAddress[]> {
@@ -52,19 +120,18 @@ async function defaultLookup(hostname: string): Promise<PublicRemoteHostLookupAd
   return addresses.map((entry) => ({ address: entry.address, family: entry.family as 4 | 6 }));
 }
 
-async function assertPublicHost(
+async function resolvePublicHost(
   host: string,
   label: string,
   value: string,
   lookup: PublicRemoteHostLookup
-): Promise<void> {
+): Promise<PublicRemoteHostLookupAddress> {
   if (!host || host === 'localhost' || host.endsWith('.localhost')) {
     throw new Error(`${label} must not target local or private network hosts: ${value}`);
   }
   const ipKind = isIP(host);
   if (ipKind !== 0) {
-    assertPublicAddress(host, label, value);
-    return;
+    return publicAddress(host, label, value);
   }
 
   let addresses: PublicRemoteHostLookupAddress[];
@@ -76,22 +143,84 @@ async function assertPublicHost(
   if (addresses.length === 0) {
     throw new Error(`${label} host could not be resolved: ${value}`);
   }
-  for (const address of addresses) {
-    assertPublicAddress(address.address, label, value);
-  }
+  const publicAddresses = addresses.map((address) => publicAddress(address.address, label, value));
+  return publicAddresses[0]!;
 }
 
-function assertPublicAddress(address: string, label: string, value: string): void {
+function publicAddress(address: string, label: string, value: string): PublicRemoteHostLookupAddress {
   const host = canonicalHost(address);
   const ipKind = isIP(host);
-  const unsafe = ipKind === 4
-    ? isPrivateIpv4(host)
-    : ipKind === 6
-      ? isPrivateIpv6(host)
-      : true;
-  if (unsafe) {
+  if (ipKind !== 4 && ipKind !== 6) {
     throw new Error(`${label} must not target local or private network hosts: ${value}`);
   }
+  if (isUnsafeAddress(host, ipKind)) {
+    throw new Error(`${label} must not target local or private network hosts: ${value}`);
+  }
+  return { address: host, family: ipKind };
+}
+
+function isUnsafeAddress(host: string, ipKind: 4 | 6): boolean {
+  return ipKind === 4
+    ? isPrivateIpv4(host)
+    : isPrivateIpv6(host);
+}
+
+async function nodePublicRemoteHttpTransport(input: PublicRemoteHttpTransportInput): Promise<Response> {
+  if (input.signal?.aborted) {
+    throw input.signal.reason ?? new DOMException('Aborted', 'AbortError');
+  }
+  const url = new URL(input.url);
+  const request = url.protocol === 'https:' ? httpsRequest : httpRequest;
+  return new Promise<Response>((resolve, reject) => {
+    const req = request(url, {
+      method: input.method,
+      headers: nodeRequestHeaders(input.headers),
+      lookup: (_hostname, _options, callback) => {
+        callback(null, input.resolved.address, input.resolved.family);
+      },
+      ...(input.signal ? { signal: input.signal } : {})
+    }, (incoming) => {
+      const status = incoming.statusCode ?? 500;
+      const body = status === 204 || status === 304
+        ? null
+        : Readable.toWeb(incoming) as ReadableStream<Uint8Array>;
+      resolve(new Response(body, {
+        status,
+        ...(incoming.statusMessage ? { statusText: incoming.statusMessage } : {}),
+        headers: responseHeaders(incoming.headers)
+      }));
+    });
+    req.on('error', reject);
+    req.end();
+  });
+}
+
+function nodeRequestHeaders(headers: HeadersInit | undefined): Record<string, string> {
+  if (!headers) {
+    return {};
+  }
+  const output: Record<string, string> = {};
+  new Headers(headers).forEach((value, key) => {
+    output[key] = value;
+  });
+  return output;
+}
+
+function responseHeaders(headers: IncomingHttpHeaders): Headers {
+  const output = new Headers();
+  for (const [key, value] of Object.entries(headers)) {
+    if (value === undefined) {
+      continue;
+    }
+    if (Array.isArray(value)) {
+      for (const item of value) {
+        output.append(key, item);
+      }
+      continue;
+    }
+    output.set(key, String(value));
+  }
+  return output;
 }
 
 function canonicalHost(hostname: string): string {

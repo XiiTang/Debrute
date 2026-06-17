@@ -8,7 +8,8 @@ import {
   executeImageModelRequest as executeImageModelRequestBase,
   type ExecuteImageModelRequestInput,
   type ImageModelFetch,
-  type PublicRemoteHostLookup
+  type PublicRemoteHostLookup,
+  type PublicRemoteHttpTransport
 } from '@debrute/capability-runtime';
 
 const tinyPngBase64 = 'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADElEQVR42mP8z8AARQAHSQGmK3P7WAAAAABJRU5ErkJggg==';
@@ -17,9 +18,15 @@ const publicRemoteLookup: PublicRemoteHostLookup = async () => [{ address: '93.1
 const privateRemoteLookup: PublicRemoteHostLookup = async () => [{ address: '169.254.169.254', family: 4 }];
 
 function executeImageModelRequest(input: ExecuteImageModelRequestInput) {
+  const fetchImpl = input.fetch;
+  const remoteHttpTransport: PublicRemoteHttpTransport | undefined = input.remoteHttpTransport
+    ?? (fetchImpl
+      ? ({ url, method, headers, signal }) => fetchImpl(url, { method, headers, signal })
+      : undefined);
   return executeImageModelRequestBase({
     remoteUrlLookup: publicRemoteLookup,
-    ...input
+    ...input,
+    ...(remoteHttpTransport ? { remoteHttpTransport } : {})
   });
 }
 
@@ -1684,6 +1691,40 @@ describe('image model executors', () => {
         error: 'image_request_failed',
         content: 'Image request failed: fetch failed'
       });
+    } finally {
+      await rm(projectRoot, { recursive: true, force: true });
+    }
+  });
+
+  it('downloads provider image URLs through the validated remote transport', async () => {
+    const projectRoot = await mkdtemp(join(tmpdir(), 'debrute-image-pinned-remote-download-'));
+    const remoteResolutions: unknown[] = [];
+    const fetch: ImageModelFetch = async (url) => {
+      expect(url).toBe('https://api.openai.com/v1/images/generations');
+      return jsonResponse({ data: [{ url: 'https://cdn.example/pinned-output.png' }] });
+    };
+    try {
+      const result = await executeImageModelRequest({
+        projectRoot,
+        invocationId: 'turn-image-pinned-remote-download',
+        input: { model: 'gpt-image-2', arguments: { prompt: 'cover image', size: '1024x1024' } },
+        settings: { imageModels: [{ debruteModelId: 'gpt-image-2', requestModelIdOverride: 'gpt-image-2' }] },
+        secrets: { imageModelApiKeys: { 'gpt-image-2': 'sk-image' } },
+        fetch,
+        remoteHttpTransport: async (input) => {
+          expect(input.url).toBe('https://cdn.example/pinned-output.png');
+          remoteResolutions.push(input.resolved);
+          return pngResponse();
+        }
+      });
+
+      expect(result.status).toBe('ok');
+      expect(remoteResolutions).toEqual([{
+        url: 'https://cdn.example/pinned-output.png',
+        hostname: 'cdn.example',
+        address: '93.184.216.34',
+        family: 4
+      }]);
     } finally {
       await rm(projectRoot, { recursive: true, force: true });
     }

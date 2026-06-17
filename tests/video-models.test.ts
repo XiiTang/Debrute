@@ -7,6 +7,7 @@ import {
   executeVideoModelRequest as executeVideoModelRequestBase,
   type ExecuteVideoModelRequestInput,
   type PublicRemoteHostLookup,
+  type PublicRemoteHttpTransport,
   type VideoModelFetch
 } from '@debrute/capability-runtime';
 
@@ -18,9 +19,15 @@ const publicRemoteLookup: PublicRemoteHostLookup = async () => [{ address: '93.1
 const privateRemoteLookup: PublicRemoteHostLookup = async () => [{ address: '169.254.169.254', family: 4 }];
 
 function executeVideoModelRequest(input: ExecuteVideoModelRequestInput) {
+  const fetchImpl = input.fetch;
+  const remoteHttpTransport: PublicRemoteHttpTransport | undefined = input.remoteHttpTransport
+    ?? (fetchImpl
+      ? ({ url, method, headers, signal }) => fetchImpl(url, { method, headers, signal })
+      : undefined);
   return executeVideoModelRequestBase({
     remoteUrlLookup: publicRemoteLookup,
-    ...input
+    ...input,
+    ...(remoteHttpTransport ? { remoteHttpTransport } : {})
   });
 }
 
@@ -252,6 +259,55 @@ describe('video model executor', () => {
         'https://ark.cn-beijing.volces.com/api/v3/contents/generations/tasks',
         'https://ark.cn-beijing.volces.com/api/v3/contents/generations/tasks/task-dns-private'
       ]);
+    } finally {
+      await rm(projectRoot, { recursive: true, force: true });
+    }
+  });
+
+  it('downloads provider artifact URLs through the validated remote transport', async () => {
+    const projectRoot = await mkdtemp(join(tmpdir(), 'debrute-video-pinned-remote-download-'));
+    const remoteResolutions: unknown[] = [];
+    const fetch: VideoModelFetch = async (url, init) => {
+      if (url.endsWith('/contents/generations/tasks') && init?.method === 'POST') {
+        return jsonResponse({ id: 'task-pinned-download', status: 'queued' });
+      }
+      if (url.endsWith('/contents/generations/tasks/task-pinned-download')) {
+        return jsonResponse({
+          id: 'task-pinned-download',
+          status: 'succeeded',
+          content: { video_url: 'https://cdn.example/pinned-video.mp4' }
+        });
+      }
+      throw new Error(`unexpected provider URL: ${url}`);
+    };
+    try {
+      const result = await executeVideoModelRequest({
+        projectRoot,
+        invocationId: 'turn-video-pinned-remote-download',
+        input: {
+          model: 'doubao-seedance-2-0-260128',
+          arguments: { prompt: 'camera move' }
+        },
+        settings: {
+          videoModels: [{ debruteModelId: 'doubao-seedance-2-0-260128', requestModelIdOverride: null }]
+        },
+        secrets: { videoModelApiKeys: { 'doubao-seedance-2-0-260128': 'sk-video' } },
+        pollIntervalMs: 0,
+        fetch,
+        remoteHttpTransport: async (input) => {
+          expect(input.url).toBe('https://cdn.example/pinned-video.mp4');
+          remoteResolutions.push(input.resolved);
+          return new Response(tinyMp4, { status: 200, headers: { 'content-type': 'video/mp4' } });
+        }
+      });
+
+      expect(result.status).toBe('ok');
+      expect(remoteResolutions).toEqual([{
+        url: 'https://cdn.example/pinned-video.mp4',
+        hostname: 'cdn.example',
+        address: '93.184.216.34',
+        family: 4
+      }]);
     } finally {
       await rm(projectRoot, { recursive: true, force: true });
     }

@@ -9,7 +9,12 @@ import {
   readResponseTextWithTimeout as readResponseTextBodyWithTimeout
 } from '../requestTimeout.js';
 import { redactModelRunMetadata } from '../modelRunMetadataRedaction.js';
-import { assertPublicHttpUrl, publicHttpRedirectUrl, type PublicRemoteHostLookup } from '../remoteFetchPolicy.js';
+import {
+  fetchPublicHttpUrl,
+  resolveHttpRedirectUrl,
+  type PublicRemoteHostLookup,
+  type PublicRemoteHttpTransport
+} from '../remoteFetchPolicy.js';
 import { createVideoModelCatalog, type VideoModelCatalogEntry } from './catalog.js';
 import {
   normalizeSeedanceVideoArguments,
@@ -48,6 +53,7 @@ export interface ExecuteVideoModelRequestInput {
   requestTimeoutMs?: number;
   pollMaxAttempts?: number;
   remoteUrlLookup?: PublicRemoteHostLookup;
+  remoteHttpTransport?: PublicRemoteHttpTransport;
   signal?: AbortSignal;
 }
 
@@ -100,6 +106,7 @@ interface RequestState {
   requestTimeoutMs: number;
   pollMaxAttempts: number;
   remoteUrlLookup?: PublicRemoteHostLookup;
+  remoteHttpTransport?: PublicRemoteHttpTransport;
   signal?: AbortSignal;
 }
 
@@ -194,6 +201,7 @@ export async function executeVideoModelRequest(input: ExecuteVideoModelRequestIn
     requestTimeoutMs,
     pollMaxAttempts: input.pollMaxAttempts ?? DEFAULT_POLL_ATTEMPTS,
     ...(input.remoteUrlLookup ? { remoteUrlLookup: input.remoteUrlLookup } : {}),
+    ...(input.remoteHttpTransport ? { remoteHttpTransport: input.remoteHttpTransport } : {}),
     signal: operationTimeout.signal
   };
   log(state, 'resolve_model', {
@@ -399,18 +407,32 @@ async function storeDownloadedArtifact(state: RequestState, url: string, index: 
 }
 
 async function fetchRemoteArtifact(state: RequestState, url: string, redirectCount = 0): Promise<Response> {
-  const safeUrl = await assertPublicHttpUrl(url, 'Remote artifact URLs', { lookup: state.remoteUrlLookup });
-  const response = await fetchWithTimeout(state, safeUrl, { method: 'GET', redirect: 'manual' });
+  const response = await fetchRemoteHttpUrl(state, url, 'Remote artifact URLs');
   if (!isHttpRedirect(response.status)) {
     return response;
   }
   if (redirectCount >= 5) {
     throw new Error('Remote artifact URLs redirected too many times.');
   }
-  const redirectUrl = await publicHttpRedirectUrl(safeUrl, response.headers.get('location'), 'Remote artifact URLs', {
-    lookup: state.remoteUrlLookup
-  });
+  const redirectUrl = resolveHttpRedirectUrl(url, response.headers.get('location'), 'Remote artifact URLs');
   return fetchRemoteArtifact(state, redirectUrl, redirectCount + 1);
+}
+
+async function fetchRemoteHttpUrl(state: RequestState, url: string, label: string): Promise<Response> {
+  return fetchWithRequestTimeout(
+    (requestUrl, init) => fetchPublicHttpUrl(requestUrl, label, init, {
+      lookup: state.remoteUrlLookup,
+      transport: state.remoteHttpTransport
+    }),
+    url,
+    { method: 'GET' },
+    {
+      signal: state.signal,
+      timeoutMs: state.requestTimeoutMs,
+      timeoutMessage: `Video request timed out after ${state.requestTimeoutMs}ms`,
+      abortMessage: 'Video request aborted.'
+    }
+  );
 }
 
 function isHttpRedirect(status: number): boolean {
