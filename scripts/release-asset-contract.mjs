@@ -1,10 +1,18 @@
 export const checksumManifestName = 'debrute_SHA256SUMS';
 
 export const desktopReleaseTargets = [
-  { platform: 'macos', arch: 'arm64', extension: 'dmg' },
-  { platform: 'macos', arch: 'x64', extension: 'dmg' },
-  { platform: 'windows', arch: 'x64', extension: 'exe' },
-  { platform: 'linux', arch: 'x64', extension: 'AppImage' }
+  { platform: 'macos', arch: 'arm64', extension: 'dmg', updateAsset: false },
+  { platform: 'macos', arch: 'x64', extension: 'dmg', updateAsset: false },
+  { platform: 'macos', arch: 'universal', extension: 'zip', updateAsset: true },
+  { platform: 'macos', arch: 'universal', extension: 'zip.blockmap', updateAsset: true },
+  { platform: 'windows', arch: 'x64', extension: 'exe', updateAsset: false },
+  { platform: 'windows', arch: 'x64', extension: 'exe.blockmap', updateAsset: true },
+  { platform: 'linux', arch: 'x64', extension: 'AppImage', updateAsset: false }
+];
+
+export const desktopUpdateMetadataAssets = [
+  'latest-mac.yml',
+  'latest.yml'
 ];
 
 export const cliReleaseTargetPublicIds = {
@@ -31,6 +39,7 @@ export function desktopReleaseAssetName(version, platform, arch, extension) {
 export function expectedReleaseAssets(version) {
   return [
     ...desktopReleaseTargets.map((target) => desktopReleaseAssetName(version, target.platform, target.arch, target.extension)),
+    ...desktopUpdateMetadataAssets,
     `debrute-cli-${version}-macos-arm64.tar.gz`,
     `debrute-cli-${version}-macos-x64.tar.gz`,
     `debrute-cli-${version}-linux-arm64.tar.gz`,

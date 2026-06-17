@@ -10,10 +10,32 @@ import {
   debruteCliSkillsStatusFromActionResult,
   debruteCliStatusFromActionResult
 } from '../apps/web/src/workbench/settings/debrute-cli/DebruteCliSettingsPage';
-import type { DebruteCliStatus } from '@debrute/app-protocol';
+import { GeneralSettingsPage } from '../apps/web/src/workbench/settings/general/GeneralSettingsPage';
+import type {
+  DebruteCliStatus,
+  DesktopAppUpdateState
+} from '@debrute/app-protocol';
 import type { WorkbenchActions, WorkbenchState } from '../apps/web/src/types';
 
 describe('web Settings pages', () => {
+  it('uses General as the first and default settings page', () => {
+    const html = renderToStaticMarkup(React.createElement(SettingsPanel, {
+      state: {
+        llmSettings: { providers: [], availableModelKeys: [], defaultModelKey: null },
+        imageModelSettings: { models: [] },
+        videoModelSettings: { models: [] }
+      } as unknown as WorkbenchState,
+      actions: {} as unknown as WorkbenchActions
+    }));
+
+    expect(html.match(/class="db-nav-row(?: db-nav-row--active)?"/g)).toHaveLength(5);
+    expect(html.indexOf('General')).toBeLessThan(html.indexOf('LLM'));
+    expect(html).toContain('aria-pressed="true"');
+    expect(html).toContain('Application');
+    expect(html).toContain('Updates');
+    expect(html.indexOf('Updates')).toBeGreaterThan(html.indexOf('Application'));
+  });
+
   it('uses a directory layout with Debrute CLI settings', () => {
     const html = renderToStaticMarkup(React.createElement(SettingsPanel, {
       state: {
@@ -45,25 +67,92 @@ describe('web Settings pages', () => {
     expect(html).toContain('db-nav-row');
     expect(html).toContain('db-nav-row__icon');
     expect(html).toContain('aria-label="Settings sections"');
-    expect(html.match(/class="db-nav-row(?: db-nav-row--active)?"/g)).toHaveLength(4);
+    expect(html.match(/class="db-nav-row(?: db-nav-row--active)?"/g)).toHaveLength(5);
+    expect(html).toContain('General');
     expect(html).toContain('LLM');
     expect(html).toContain('Models');
     expect(html).toContain('Integrations');
     expect(html).toContain('Debrute CLI');
-    expect(html).toContain('Image Models');
-    expect(html).toContain('<header class="settings-section-header"><h2>Image Models</h2></header>');
-    expect(html).toContain('<header class="settings-section-header"><h2>Video Models</h2></header>');
+    expect(html).toContain('Application');
+    expect(html).toContain('<header class="settings-section-header"><h2>General</h2></header>');
     expect(html).not.toContain('Base URL override');
     expect(html).not.toContain('aria-label="Base URL override"');
-    expect(html).toContain('placeholder="gpt-image-2"');
-    expect(html).toContain('aria-label="Request model ID override"');
-    expect(html).toContain('aria-label="API Key"');
-    expect(html).toContain('value="sk-image-ui"');
-    expect(html).toContain('no key');
     expect(html).toContain('db-card');
-    expect(html).toContain('db-field');
-    expect(html).toContain('db-input');
     expect(html).toContain('db-status-pill');
+  });
+
+  it('renders disabled browser update state without throwing', () => {
+    const state: DesktopAppUpdateState = { type: 'disabled', currentVersion: '0.2.0', reason: 'browser' };
+    const html = renderToStaticMarkup(React.createElement(GeneralSettingsPage, {
+      shell: undefined,
+      initialUpdateState: state
+    }));
+
+    expect(html).toContain('General');
+    expect(html).toContain('Updates');
+    expect(html).toContain('Current version');
+    expect(html).toContain('0.2.0');
+    expect(html).toContain('Updates are unavailable in browser mode.');
+    expect(html).not.toContain('Check for Updates</button>');
+  });
+
+  it('renders automatic update states and actions', () => {
+    const states: DesktopAppUpdateState[] = [
+      { type: 'idle', currentVersion: '0.2.0', platform: 'darwin' },
+      { type: 'checking', currentVersion: '0.2.0', explicit: true },
+      { type: 'available', currentVersion: '0.2.0', updateVersion: '0.3.0', installMode: 'automatic' },
+      { type: 'downloading', currentVersion: '0.2.0', updateVersion: '0.3.0', percent: 55 },
+      { type: 'downloaded', currentVersion: '0.2.0', updateVersion: '0.3.0' },
+      {
+        type: 'error',
+        currentVersion: '0.2.0',
+        operation: 'download',
+        message: 'network failed',
+        retryable: true,
+        updateVersion: '0.3.0',
+        installMode: 'automatic'
+      }
+    ];
+    const html = states.map((state) => renderToStaticMarkup(React.createElement(GeneralSettingsPage, {
+      shell: {
+        chooseProjectRoot: async () => undefined,
+        getAppUpdateState: async () => state,
+        checkForAppUpdate: async () => state,
+        downloadAppUpdate: async () => state,
+        installAppUpdate: async () => state
+      },
+      initialUpdateState: state
+    }))).join('\n');
+
+    expect(html).toContain('Check for Updates');
+    expect(html).toContain('Checking for updates');
+    expect(html).toContain('Download Update');
+    expect(html).toContain('55%');
+    expect(html).toContain('Install and Restart');
+    expect(html).toContain('network failed');
+  });
+
+  it('renders Linux manual download update action', () => {
+    const state: DesktopAppUpdateState = {
+      type: 'available',
+      currentVersion: '0.2.0',
+      updateVersion: '0.3.0',
+      releaseUrl: 'https://github.com/XiiTang/Debrute/releases/tag/v0.3.0',
+      installMode: 'manual-download'
+    };
+    const html = renderToStaticMarkup(React.createElement(GeneralSettingsPage, {
+      shell: {
+        chooseProjectRoot: async () => undefined,
+        getAppUpdateState: async () => state,
+        openAppUpdateDownloadPage: async () => ({ ok: true })
+      },
+      initialUpdateState: state
+    }));
+
+    expect(html).toContain('Update available');
+    expect(html).toContain('0.3.0');
+    expect(html).toContain('Open GitHub Releases');
+    expect(html).not.toContain('Install and Restart');
   });
 
   it('renders visibility controls for every API key input', () => {
@@ -108,15 +197,10 @@ describe('web Settings pages', () => {
     } as unknown as WorkbenchState;
     const actions = {} as unknown as WorkbenchActions;
 
-    const modelHtml = renderToStaticMarkup(React.createElement(SettingsPanel, { state, actions }));
-    const llmHtml = renderToStaticMarkup(React.createElement(LlmSettings, { state, actions }));
-    const html = `${modelHtml}${llmHtml}`;
+    const html = renderToStaticMarkup(React.createElement(LlmSettings, { state, actions }));
 
     expect(html).not.toContain('type="password"');
-    expect(html.match(/db-input--secret/g)).toHaveLength(2);
-    expect(html.match(/aria-label="Show API key"/g)).toHaveLength(3);
-    expect(html).toContain('value="sk-image-ui"');
-    expect(html).toContain('value="sk-video-ui"');
+    expect(html.match(/aria-label="Show API key"/g)).toHaveLength(1);
     expect(html).toContain('settings-key-input');
     expect(html).toContain('settings-key-control');
     expect(html).toContain('settings-key-visibility');

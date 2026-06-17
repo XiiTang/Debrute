@@ -73,6 +73,10 @@ jobs:
             platform: darwin
             publicPlatform: macos
             arch: x64
+          - os: macos-latest
+            platform: darwin
+            publicPlatform: macos
+            arch: universal
           - os: windows-latest
             platform: win32
             publicPlatform: windows
@@ -94,8 +98,19 @@ jobs:
           cache: pnpm
       - run: pnpm install --frozen-lockfile
       - run: pnpm build
-      - run: pnpm --filter @debrute/desktop exec electron-builder --${{ matrix.arch }} --publish never
-      - name: Rename Desktop assets
+      - name: Build Desktop assets
+        shell: bash
+        run: |
+          if [ "${{ matrix.platform }}" = "darwin" ] && [ "${{ matrix.arch }}" = "universal" ]; then
+            pnpm --filter @debrute/desktop exec electron-builder --mac zip --universal --publish never
+          elif [ "${{ matrix.platform }}" = "darwin" ]; then
+            pnpm --filter @debrute/desktop exec electron-builder --mac dmg --${{ matrix.arch }} --publish never
+          elif [ "${{ matrix.platform }}" = "win32" ]; then
+            pnpm --filter @debrute/desktop exec electron-builder --win nsis --x64 --publish never
+          else
+            pnpm --filter @debrute/desktop exec electron-builder --linux AppImage --x64 --publish never
+          fi
+      - name: Verify Desktop assets
         shell: bash
         run: |
           VERSION="$(node -p "require('./package.json').version")"
@@ -103,7 +118,10 @@ jobs:
       - uses: actions/upload-artifact@v4
         with:
           name: debrute-desktop-${{ matrix.publicPlatform }}-${{ matrix.arch }}
-          path: apps/desktop/release/debrute-desktop-*
+          path: |
+            apps/desktop/release/debrute-desktop-*
+            apps/desktop/release/latest-mac.yml
+            apps/desktop/release/latest.yml
 
   publish-release:
     needs:
@@ -123,7 +141,7 @@ jobs:
           mkdir -p release-upload
           find release-assets -type f -print -exec cp {} release-upload/ \;
           cd release-upload
-          sha256sum debrute-* > debrute_SHA256SUMS
+          find . -maxdepth 1 -type f ! -name debrute_SHA256SUMS -printf '%P\0' | sort -z | xargs -0 sha256sum > debrute_SHA256SUMS
       - name: Verify expected assets
         run: |
           VERSION="$(node -p "require('./package.json').version")"

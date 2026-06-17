@@ -53,13 +53,20 @@ Debrute publishes Desktop installers and Debrute CLI archives on GitHub Releases
 
 Current Desktop builds are unsigned. macOS may require right-click Open or Privacy & Security approval. Windows may show SmartScreen. Linux AppImage builds may require `chmod +x`.
 
+The Desktop app checks for application updates from GitHub Releases after startup on packaged macOS and Windows builds. Settings under **General** can also check, download, and install Desktop updates manually. Linux Desktop updates are manual downloads from GitHub Releases in this version.
+
 Each `vX.Y.Z` release includes these public asset names:
 
 ```text
 debrute-desktop-X.Y.Z-macos-arm64.dmg
 debrute-desktop-X.Y.Z-macos-x64.dmg
+debrute-desktop-X.Y.Z-macos-universal.zip
+debrute-desktop-X.Y.Z-macos-universal.zip.blockmap
 debrute-desktop-X.Y.Z-windows-x64.exe
+debrute-desktop-X.Y.Z-windows-x64.exe.blockmap
 debrute-desktop-X.Y.Z-linux-x64.AppImage
+latest-mac.yml
+latest.yml
 debrute-cli-X.Y.Z-macos-arm64.tar.gz
 debrute-cli-X.Y.Z-macos-x64.tar.gz
 debrute-cli-X.Y.Z-linux-arm64.tar.gz

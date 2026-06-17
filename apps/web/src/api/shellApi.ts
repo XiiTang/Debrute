@@ -3,7 +3,8 @@ import type {
   DebruteCliManualCommand,
   DebruteCliPathRepairResult,
   DebruteCliSkillsSyncResult,
-  DebruteCliStatus
+  DebruteCliStatus,
+  DesktopAppUpdateState
 } from '@debrute/app-protocol';
 
 export interface DebruteShellApi {
@@ -18,6 +19,12 @@ export interface DebruteShellApi {
   restoreDebruteCliSkills?(): Promise<DebruteCliSkillsSyncResult>;
   repairDebruteCliPath?(): Promise<DebruteCliPathRepairResult>;
   getDebruteCliManualInstallCommand?(): Promise<DebruteCliManualCommand>;
+  getAppUpdateState?(): Promise<DesktopAppUpdateState>;
+  checkForAppUpdate?(): Promise<DesktopAppUpdateState>;
+  downloadAppUpdate?(): Promise<DesktopAppUpdateState>;
+  installAppUpdate?(): Promise<DesktopAppUpdateState>;
+  openAppUpdateDownloadPage?(): Promise<{ ok: true }>;
+  onAppUpdateStateChanged?(listener: (state: DesktopAppUpdateState) => void): () => void;
 }
 
 export function getDebruteShellApi(): DebruteShellApi | undefined {

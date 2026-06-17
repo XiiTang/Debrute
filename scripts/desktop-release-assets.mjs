@@ -1,5 +1,4 @@
-import { readdir, rename, stat } from 'node:fs/promises';
-import { join } from 'node:path';
+import { readdir } from 'node:fs/promises';
 import { fileURLToPath } from 'node:url';
 import { desktopReleaseAssetName } from './release-asset-contract.mjs';
 
@@ -10,32 +9,41 @@ export function electronBuilderPlatformName(platform) {
   throw new Error(`Unsupported Desktop release platform: ${platform}`);
 }
 
-export function inferDesktopExtension(fileName) {
-  if (fileName.endsWith('.dmg')) return 'dmg';
-  if (fileName.endsWith('.exe')) return 'exe';
-  if (fileName.endsWith('.AppImage')) return 'AppImage';
-  return undefined;
+export function requiredDesktopReleaseAssets(version, platform = process.platform, arch = process.arch) {
+  const publicPlatform = electronBuilderPlatformName(platform);
+  if (platform === 'darwin' && arch === 'universal') {
+    return [
+      desktopReleaseAssetName(version, publicPlatform, arch, 'zip'),
+      desktopReleaseAssetName(version, publicPlatform, arch, 'zip.blockmap'),
+      'latest-mac.yml'
+    ];
+  }
+  if (platform === 'darwin') {
+    return [desktopReleaseAssetName(version, publicPlatform, arch, 'dmg')];
+  }
+  if (platform === 'win32') {
+    return [
+      desktopReleaseAssetName(version, publicPlatform, arch, 'exe'),
+      desktopReleaseAssetName(version, publicPlatform, arch, 'exe.blockmap'),
+      'latest.yml'
+    ];
+  }
+  return [desktopReleaseAssetName(version, publicPlatform, arch, 'AppImage')];
 }
 
-export async function renameDesktopReleaseAssets({
+export async function verifyDesktopReleaseAssets({
   releaseDir,
   version,
   platform = process.platform,
   arch = process.arch
 }) {
-  const publicPlatform = electronBuilderPlatformName(platform);
-  const files = await readdir(releaseDir);
-  const renamed = [];
-  for (const fileName of files) {
-    const extension = inferDesktopExtension(fileName);
-    if (!extension) continue;
-    const source = join(releaseDir, fileName);
-    if (!(await stat(source)).isFile()) continue;
-    const nextName = desktopReleaseAssetName(version, publicPlatform, arch, extension);
-    await rename(source, join(releaseDir, nextName));
-    renamed.push(nextName);
+  const files = new Set(await readdir(releaseDir));
+  const expected = requiredDesktopReleaseAssets(version, platform, arch);
+  const missing = expected.filter((name) => !files.has(name));
+  if (missing.length > 0) {
+    throw new Error(`Missing Desktop release assets: ${missing.join(', ')}`);
   }
-  return renamed.sort();
+  return expected;
 }
 
 export function isDirectCliInvocation(moduleUrl, argvPath) {
@@ -56,9 +64,9 @@ if (isDirectCliInvocation(import.meta.url, process.argv[1])) {
     console.error('--version is required');
     process.exit(1);
   }
-  renameDesktopReleaseAssets({ releaseDir, version, platform, arch })
-    .then((renamed) => {
-      console.log(`Renamed Desktop release assets: ${renamed.join(', ')}`);
+  verifyDesktopReleaseAssets({ releaseDir, version, platform, arch })
+    .then((verified) => {
+      console.log(`Verified Desktop release assets: ${verified.join(', ')}`);
     })
     .catch((error) => {
       console.error(error instanceof Error ? error.message : String(error));

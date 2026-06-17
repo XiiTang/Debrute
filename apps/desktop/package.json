@@ -30,19 +30,30 @@
       "dist-electron/**/*",
       "package.json"
     ],
+    "publish": [
+      {
+        "provider": "github",
+        "owner": "XiiTang",
+        "repo": "Debrute",
+        "releaseType": "release"
+      }
+    ],
     "mac": {
       "category": "public.app-category.productivity",
+      "artifactName": "debrute-desktop-${version}-macos-${arch}.${ext}",
       "target": [
-        "dir",
-        "dmg"
+        "dmg",
+        "zip"
       ]
     },
     "win": {
+      "artifactName": "debrute-desktop-${version}-windows-${arch}.${ext}",
       "target": [
         "nsis"
       ]
     },
     "linux": {
+      "artifactName": "debrute-desktop-${version}-linux-${arch}.${ext}",
       "target": [
         "AppImage"
       ],
@@ -53,6 +64,7 @@
     "@debrute/app-protocol": "workspace:*",
     "@debrute/project-core": "workspace:*",
     "@debrute/workbench-runtime": "workspace:*",
+    "electron-updater": "^6.8.9",
     "node-pty": "^1.1.0"
   },
   "devDependencies": {

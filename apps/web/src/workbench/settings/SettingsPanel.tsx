@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from 'react';
-import { Bot, Cpu, Eye, EyeOff, RefreshCw, Save, Search, Terminal, Trash2, Wrench } from 'lucide-react';
+import { Bot, Cpu, Eye, EyeOff, RefreshCw, Save, Search, Settings, Terminal, Trash2, Wrench } from 'lucide-react';
 import type {
   ImageModelSettingRecord,
   LlmProviderSettingRecord,
@@ -22,6 +22,7 @@ import {
   Toolbar
 } from '../ui';
 import { DebruteCliSettingsPage } from './debrute-cli/DebruteCliSettingsPage';
+import { GeneralSettingsPage } from './general/GeneralSettingsPage';
 import { IntegrationsSettingsPage } from './integrations/IntegrationsSettingsPage';
 
 interface LlmProviderDraft {
@@ -56,6 +57,7 @@ type DiscoveryState =
   | { status: 'error'; message: string };
 
 const SETTINGS_NAV_ITEMS = [
+  { id: 'general', label: 'General', icon: Settings },
   { id: 'llm', label: 'LLM', icon: Bot },
   { id: 'models', label: 'Models', icon: Cpu },
   { id: 'integrations', label: 'Integrations', icon: Wrench },
@@ -65,7 +67,7 @@ const SETTINGS_NAV_ITEMS = [
 type SettingsPageId = typeof SETTINGS_NAV_ITEMS[number]['id'];
 
 export function SettingsPanel({ state, actions }: { state: WorkbenchState; actions: WorkbenchActions }): React.ReactElement {
-  const [activePage, setActivePage] = useState<SettingsPageId>('models');
+  const [activePage, setActivePage] = useState<SettingsPageId>('general');
   return (
     <div className="settings-panel">
       <nav className="settings-directory" aria-label="Settings sections">
@@ -86,7 +88,9 @@ export function SettingsPanel({ state, actions }: { state: WorkbenchState; actio
         })}
       </nav>
       <div className="settings-page">
-        {activePage === 'llm' ? (
+        {activePage === 'general' ? (
+          <GeneralSettingsPage shell={getDebruteShellApi()} />
+        ) : activePage === 'llm' ? (
           <LlmSettings state={state} actions={actions} />
         ) : activePage === 'models' ? (
           <>

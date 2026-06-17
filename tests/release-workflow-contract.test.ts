@@ -30,6 +30,17 @@ describe('GitHub release workflow contract', () => {
     const buildDesktopBlock = workflow.slice(workflow.indexOf('build-desktop:'), workflow.indexOf('publish-release:'));
     expect(buildDesktopBlock).toContain('- run: pnpm build');
     expect(buildDesktopBlock).not.toContain('- run: pnpm --filter @debrute/desktop build');
+    expect(buildDesktopBlock).toContain('electron-builder --mac dmg --${{ matrix.arch }} --publish never');
+    expect(buildDesktopBlock).toContain('electron-builder --mac zip --universal --publish never');
+    expect(buildDesktopBlock).toContain('electron-builder --win nsis --x64 --publish never');
+    expect(buildDesktopBlock).toContain('electron-builder --linux AppImage --x64 --publish never');
+    expect(buildDesktopBlock).toContain('latest-mac.yml');
+    expect(buildDesktopBlock).toContain('latest.yml');
+    expect(buildDesktopBlock).toContain('debrute-desktop-${{ matrix.publicPlatform }}-${{ matrix.arch }}');
+    expect(buildDesktopBlock).not.toContain('Rename Desktop assets');
+    expect(readFileSync(join(process.cwd(), 'apps/desktop/package.json'), 'utf8')).toContain('"electron-updater"');
+    expect(workflow).not.toContain('sha256sum debrute-*');
+    expect(workflow).toContain('find . -maxdepth 1 -type f ! -name debrute_SHA256SUMS');
   });
 
   it('runs every Node-backed release job under Node.js 24', () => {
@@ -47,6 +58,11 @@ describe('GitHub release workflow contract', () => {
     expect(readme).toContain('debrute skills sync');
     expect(readme).toContain('debrute skills sync --force');
     expect(readme).toContain('debrute-desktop-X.Y.Z-macos-arm64.dmg');
+    expect(readme).toContain('debrute-desktop-X.Y.Z-macos-universal.zip');
+    expect(readme).toContain('latest-mac.yml');
+    expect(readme).toContain('latest.yml');
+    expect(readme).toContain('Desktop app checks for application updates');
+    expect(readme).toContain('Linux Desktop updates are manual downloads');
     expect(readme).toContain('debrute-cli-X.Y.Z-macos-arm64.tar.gz');
     expect(readme).toContain('debrute_SHA256SUMS');
     expect(readme).toContain('grep "  debrute-cli-X.Y.Z-macos-arm64.tar.gz$" debrute_SHA256SUMS | shasum -a 256 -c -');

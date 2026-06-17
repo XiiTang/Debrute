@@ -80,8 +80,13 @@ describe('Debrute CLI release packaging', () => {
     expect(expectedReleaseAssets('0.2.0')).toEqual([
       'debrute-desktop-0.2.0-macos-arm64.dmg',
       'debrute-desktop-0.2.0-macos-x64.dmg',
+      'debrute-desktop-0.2.0-macos-universal.zip',
+      'debrute-desktop-0.2.0-macos-universal.zip.blockmap',
       'debrute-desktop-0.2.0-windows-x64.exe',
+      'debrute-desktop-0.2.0-windows-x64.exe.blockmap',
       'debrute-desktop-0.2.0-linux-x64.AppImage',
+      'latest-mac.yml',
+      'latest.yml',
       'debrute-cli-0.2.0-macos-arm64.tar.gz',
       'debrute-cli-0.2.0-macos-x64.tar.gz',
       'debrute-cli-0.2.0-linux-arm64.tar.gz',
@@ -190,7 +195,12 @@ describe('Debrute CLI release packaging', () => {
     const extraResources = JSON.stringify(packageJson.build.extraResources ?? []);
     expect(extraResources).not.toContain('debrute-cli');
     expect(extraResources).not.toContain('skills');
-    expect(packageJson.build.publish).toBeUndefined();
+    expect(packageJson.build.publish).toEqual([{
+      provider: 'github',
+      owner: 'XiiTang',
+      repo: 'Debrute',
+      releaseType: 'release'
+    }]);
   });
 
   it('copies sharp runtime dependencies into Desktop app resources', async () => {

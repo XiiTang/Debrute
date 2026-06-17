@@ -571,6 +571,72 @@ export interface DebruteCliManualCommand {
   command: string;
 }
 
+export type DesktopAppUpdateDisabledReason =
+  | 'development'
+  | 'unpackaged'
+  | 'browser'
+  | 'unsupported-platform'
+  | 'missing-update-config';
+
+export type DesktopAppUpdateInstallMode = 'automatic' | 'manual-download';
+export type DesktopAppUpdateErrorOperation = 'check' | 'download' | 'install';
+
+export type DesktopAppUpdateState =
+  | {
+      type: 'disabled';
+      currentVersion: string;
+      reason: DesktopAppUpdateDisabledReason;
+    }
+  | {
+      type: 'idle';
+      currentVersion: string;
+      platform: NodeJS.Platform;
+      lastCheckedAt?: string;
+      notAvailable?: boolean;
+      lastError?: string;
+    }
+  | {
+      type: 'checking';
+      currentVersion: string;
+      explicit: boolean;
+    }
+  | {
+      type: 'available';
+      currentVersion: string;
+      updateVersion: string;
+      releaseName?: string;
+      releaseDate?: string;
+      releaseUrl?: string;
+      installMode: DesktopAppUpdateInstallMode;
+    }
+  | {
+      type: 'downloading';
+      currentVersion: string;
+      updateVersion: string;
+      percent: number;
+    }
+  | {
+      type: 'downloaded';
+      currentVersion: string;
+      updateVersion: string;
+      releaseName?: string;
+      releaseDate?: string;
+    }
+  | {
+      type: 'installing';
+      currentVersion: string;
+      updateVersion: string;
+    }
+  | {
+      type: 'error';
+      currentVersion: string;
+      operation: DesktopAppUpdateErrorOperation;
+      message: string;
+      retryable: boolean;
+      updateVersion?: string;
+      installMode?: DesktopAppUpdateInstallMode;
+    };
+
 export interface GeneratedAssetRecord {
   schemaVersion: 1;
   recordId: string;

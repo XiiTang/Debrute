@@ -1,6 +1,13 @@
 import { randomUUID } from 'node:crypto';
 import electron from 'electron';
+import { autoUpdater } from 'electron-updater';
 import { join } from 'node:path';
+import {
+  createDesktopAppUpdateService,
+  fetchLatestDebruteRelease,
+  type DesktopAppUpdateService
+} from './app-update/appUpdateService.js';
+import { registerAppUpdateShellIpc } from './app-update/appUpdateShell.js';
 import { createDesktopStateStore, type DesktopState } from './desktop-state/desktopStateStore.js';
 import { createAttachedDesktopRuntimeClient, type DesktopRuntimeClient } from './desktopRuntimeClient.js';
 import { createDebruteCliInstaller } from './debruteCliInstaller.js';
@@ -16,6 +23,7 @@ const { app, BrowserWindow, dialog, ipcMain, Menu } = electron;
 let runtimeSupervisor: RuntimeSupervisor | undefined;
 let runtimeClient: DesktopRuntimeClient | undefined;
 let trayController: TrayController | undefined;
+let appUpdateService: DesktopAppUpdateService | undefined;
 let trueQuitRequested = false;
 const projectWindowsByProjectId = new Map<string, Electron.BrowserWindow>();
 const projectIdsByWindowId = new Map<number, string>();
@@ -150,7 +158,15 @@ app.whenReady().then(async () => {
     }
   });
   await trayController.start();
+  appUpdateService = createDesktopAppUpdateService({
+    app,
+    platform: process.platform,
+    driver: autoUpdater,
+    openExternal: (url) => electron.shell.openExternal(url),
+    linuxReleaseChecker: () => fetchLatestDebruteRelease({ fetch })
+  });
   registerShellIpc();
+  appUpdateService.startDelayedBackgroundCheck();
   syncDesktopProjectHistory(await desktopStateStore().readDesktopState());
   await applicationMenu.refreshApplicationMenu();
   try {
@@ -225,6 +241,13 @@ function registerShellIpc(): void {
       userHome: app.getPath('home')
     })
   });
+  if (appUpdateService) {
+    registerAppUpdateShellIpc({
+      ipcMain,
+      service: appUpdateService,
+      windows: () => BrowserWindow.getAllWindows()
+    });
+  }
 }
 
 async function chooseProjectRoot(parentWindow?: Electron.BrowserWindow): Promise<string | undefined> {
