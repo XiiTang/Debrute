@@ -70,6 +70,7 @@ describe('video model executor', () => {
   it('submits, polls, downloads, and writes a Seedance mp4 artifact', async () => {
     const projectRoot = await mkdtemp(join(tmpdir(), 'debrute-video-seedance-'));
     const calls: string[] = [];
+    const apiKey = 'sk-video';
     const fetch: VideoModelFetch = async (url, init) => {
       calls.push(url);
       if (url.endsWith('/contents/generations/tasks') && init?.method === 'POST') {
@@ -82,7 +83,7 @@ describe('video model executor', () => {
           duration: 5,
           return_last_frame: true
         });
-        expect(init.headers).toMatchObject({ authorization: 'Bearer sk-video' });
+        expect(init.headers).toMatchObject({ authorization: `Bearer ${apiKey}` });
         return jsonResponse({ id: 'task-1', status: 'queued' });
       }
       if (url.endsWith('/contents/generations/tasks/task-1')) {
@@ -121,7 +122,7 @@ describe('video model executor', () => {
             requestModelIdOverride: null
           }]
         },
-        secrets: { videoModelApiKeys: { 'doubao-seedance-2-0-260128': 'sk-video' } },
+        secrets: { videoModelApiKeys: { 'doubao-seedance-2-0-260128': apiKey } },
         pollIntervalMs: 0,
         fetch
       });
@@ -298,13 +299,82 @@ describe('video model executor', () => {
           output: {
             responses: [
               expect.objectContaining({ status: 200, body: { id: 'task-metadata', status: 'queued' } }),
-              expect.objectContaining({ status: 200, body: { id: 'task-metadata', status: 'succeeded', content: { video_url: 'https://cdn.example/video.mp4?token=SIGNED' } } })
+              expect.objectContaining({ status: 200, body: { id: 'task-metadata', status: 'succeeded', content: { video_url: 'https://cdn.example/video.mp4?token=%5Bredacted%5D' } } })
             ],
             artifactIndex: 0,
             sourceUrl: 'https://cdn.example/video.mp4?token=%5Bredacted%5D'
           }
         }
       });
+      expect(JSON.stringify(recorded)).not.toContain('sk-video');
+      expect(JSON.stringify(recorded)).not.toContain('SIGNED');
+    } finally {
+      await rm(projectRoot, { recursive: true, force: true });
+    }
+  });
+
+  it('redacts local video reference data URL payloads from generated asset metadata', async () => {
+    const projectRoot = await mkdtemp(join(tmpdir(), 'debrute-video-reference-metadata-'));
+    const recorded: unknown[] = [];
+    const fetch: VideoModelFetch = async (url, init) => {
+      if (url.endsWith('/contents/generations/tasks') && init?.method === 'POST') {
+        const body = JSON.parse(String(init.body));
+        expect(JSON.stringify(body.content)).toContain(`data:image/png;base64,${tinyPngBase64}`);
+        return jsonResponse({ id: 'task-reference-metadata', status: 'queued' });
+      }
+      if (url.endsWith('/contents/generations/tasks/task-reference-metadata')) {
+        return jsonResponse({ id: 'task-reference-metadata', status: 'succeeded', content: { video_url: 'https://cdn.example/video.mp4' } });
+      }
+      if (url === 'https://cdn.example/video.mp4') {
+        return new Response(tinyMp4, { status: 200, headers: { 'content-type': 'video/mp4' } });
+      }
+      throw new Error(`unexpected URL: ${url}`);
+    };
+    try {
+      await writeFile(join(projectRoot, 'first.png'), tinyPng);
+      const result = await executeVideoModelRequest({
+        projectRoot,
+        invocationId: 'turn-video-reference-metadata',
+        input: {
+          model: 'doubao-seedance-2-0-260128',
+          arguments: {
+            prompt: 'animate the product',
+            intent: 'generate',
+            references: [{ source: 'first.png' }]
+          }
+        },
+        settings: {
+          videoModels: [{ debruteModelId: 'doubao-seedance-2-0-260128', baseUrlOverride: 'https://ark.example/api/v3', requestModelIdOverride: null }]
+        },
+        secrets: { videoModelApiKeys: { 'doubao-seedance-2-0-260128': 'sk-video' } },
+        pollIntervalMs: 0,
+        fetch,
+        recordGeneratedAsset: async (input) => {
+          recorded.push(input);
+        }
+      });
+
+      expect(result.status).toBe('ok');
+      expect(recorded).toHaveLength(1);
+      expect(recorded[0]).toMatchObject({
+        modelRun: {
+          request: {
+            upstream: {
+              body: {
+                content: [
+                  { type: 'text', text: 'animate the product' },
+                  {
+                    type: 'image_url',
+                    image_url: { url: 'data:image/png;base64,[redacted]' },
+                    role: 'first_frame'
+                  }
+                ]
+              }
+            }
+          }
+        }
+      });
+      expect(JSON.stringify(recorded)).not.toContain(tinyPngBase64);
       expect(JSON.stringify(recorded)).not.toContain('sk-video');
     } finally {
       await rm(projectRoot, { recursive: true, force: true });

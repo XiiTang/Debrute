@@ -7,6 +7,7 @@ import {
   readResponseArrayBufferWithTimeout as readResponseArrayBufferBodyWithTimeout,
   readResponseTextWithTimeout as readResponseTextBodyWithTimeout
 } from '../requestTimeout.js';
+import { redactModelRunMetadata } from '../modelRunMetadataRedaction.js';
 import { assertPublicHttpUrl, publicHttpRedirectUrl } from '../remoteFetchPolicy.js';
 import {
   createImageModelCatalog,
@@ -553,7 +554,7 @@ async function fetchWithTimeout(state: RequestState, url: string, init: RequestI
 
 function recordModelRequest(state: RequestState, request: unknown): void {
   if (state.modelRun.request === undefined) {
-    state.modelRun.request = request;
+    state.modelRun.request = redactModelRunMetadata(request, { apiKey: state.apiKey });
   }
 }
 
@@ -655,16 +656,17 @@ async function storeImagePayload(
     state.signal ? { signal: state.signal } : undefined
   );
   const [width, height] = detectDimensions(Buffer.from(payload.data), payload.mimeType);
+  const modelRun: ImageGeneratedAssetRecorderInput['modelRun'] = {
+    request: redactModelRunMetadata(state.modelRun.request ?? null, { apiKey: state.apiKey }),
+    output: redactModelRunMetadata({
+      responses: [...state.modelRun.responses],
+      parsed: output,
+      artifactIndex: index
+    }, { apiKey: state.apiKey })
+  };
   await state.recordGeneratedAsset?.({
     projectRelativePath: normalizedPath,
-    modelRun: {
-      request: state.modelRun.request ?? null,
-      output: {
-        responses: [...state.modelRun.responses],
-        parsed: output,
-        artifactIndex: index
-      }
-    }
+    modelRun
   });
   return {
     artifactId,

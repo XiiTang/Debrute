@@ -8,6 +8,7 @@ import {
   readResponseArrayBufferWithTimeout as readResponseArrayBufferBodyWithTimeout,
   readResponseTextWithTimeout as readResponseTextBodyWithTimeout
 } from '../requestTimeout.js';
+import { redactModelRunMetadata } from '../modelRunMetadataRedaction.js';
 import { assertPublicHttpUrl, publicHttpRedirectUrl } from '../remoteFetchPolicy.js';
 import { createVideoModelCatalog, type VideoModelCatalogEntry } from './catalog.js';
 import {
@@ -304,17 +305,17 @@ async function parseModelResponse(state: RequestState, response: Response): Prom
   } catch (error) {
     const endpointResponse = {
       status: response.status,
-      body: rawBody.trim() ? { raw: truncateString(rawBody) } : { raw: '' }
+      body: redactModelRunValue(state, rawBody.trim() ? { raw: truncateString(rawBody) } : { raw: '' })
     };
     state.modelRun.responses.push({
       status: response.status,
       headers: Object.fromEntries(response.headers.entries()),
-      body: redactModelResponseValue(endpointResponse.body, state.apiKey)
+      body: endpointResponse.body
     });
     log(state, 'execute_request', { status: response.status, payloadShape: summarizeJsonShape(endpointResponse.body) });
     return { ok: false, result: modelFailure(state, `Video request failed: ${errorMessage(error)}`, endpointResponse) };
   }
-  const endpointResponse = { status: response.status, body: redactModelResponseValue(body, state.apiKey) };
+  const endpointResponse = { status: response.status, body: redactModelRunValue(state, body) };
   state.modelRun.responses.push({
     status: response.status,
     headers: Object.fromEntries(response.headers.entries()),
@@ -377,12 +378,12 @@ async function storeDownloadedArtifact(state: RequestState, url: string, index: 
   await state.recordGeneratedAsset?.({
     projectRelativePath: normalizedPath,
     modelRun: {
-      request: state.modelRun.request ?? null,
-      output: {
+      request: redactModelRunValue(state, state.modelRun.request ?? null),
+      output: redactModelRunValue(state, {
         responses: [...state.modelRun.responses],
         artifactIndex: index,
-        sourceUrl: sanitizeArtifactSourceUrl(url)
-      }
+        sourceUrl: url
+      })
     }
   });
   return {
@@ -413,7 +414,7 @@ function recordModelRequest(state: RequestState, request: unknown): void {
   if (state.modelRun.request === undefined) {
     state.modelRun.request = {
       debrute: state.redactedDebruteArgs,
-      upstream: redactModelResponseValue(request, state.apiKey)
+      upstream: redactModelRunValue(state, request)
     };
   }
 }
@@ -423,7 +424,7 @@ function modelFailure(state: RequestState, content: string, endpointResponse?: M
     message: content,
     endpointStatus: endpointResponse?.status ?? null,
     payloadShape: summarizeJsonShape(endpointResponse?.body),
-    ...(endpointResponse ? { endpointResponse: redactModelResponseValue(endpointResponse, state.apiKey) } : {})
+    ...(endpointResponse ? { endpointResponse: redactModelRunValue(state, endpointResponse) } : {})
   });
   return {
     status: 'error',
@@ -508,37 +509,8 @@ function objectAt(value: unknown): Record<string, unknown> | undefined {
   return value && typeof value === 'object' && !Array.isArray(value) ? value as Record<string, unknown> : undefined;
 }
 
-function redactModelResponseValue(value: unknown, apiKey: string): unknown {
-  if (Array.isArray(value)) {
-    return value.map((item) => redactModelResponseValue(item, apiKey));
-  }
-  if (value && typeof value === 'object') {
-    return Object.fromEntries(Object.entries(value as Record<string, unknown>).map(([key, item]) => [
-      key,
-      /authorization|token|secret|api[-_]?key|apikey/i.test(key) ? '[redacted]' : redactModelResponseValue(item, apiKey)
-    ]));
-  }
-  if (typeof value === 'string') {
-    let next = value;
-    if (apiKey) {
-      next = next.split(apiKey).join('[redacted]');
-    }
-    if (/^data:(image|audio|video)\//.test(next)) {
-      return `${next.slice(0, next.indexOf(',') + 1)}[redacted]`;
-    }
-    return truncateString(next);
-  }
-  return value;
-}
-
-function sanitizeArtifactSourceUrl(value: string): string {
-  const url = new URL(value);
-  for (const key of [...url.searchParams.keys()]) {
-    if (/key|token|secret/i.test(key)) {
-      url.searchParams.set(key, '[redacted]');
-    }
-  }
-  return url.toString();
+function redactModelRunValue(state: Pick<RequestState, 'apiKey'>, value: unknown): unknown {
+  return redactModelRunMetadata(value, { apiKey: state.apiKey });
 }
 
 function truncateString(value: string): string {

@@ -527,7 +527,7 @@ describe('image model executors', () => {
           request: {
             method: 'POST',
             url: 'https://api.openai.com/v1/images/generations',
-            headers: expect.objectContaining({ authorization: 'Bearer sk-image' }),
+            headers: expect.objectContaining({ authorization: '[redacted]' }),
             body: { model: 'gpt-image-2', prompt: 'cover image', size: '1024x1024' }
           },
           output: {
@@ -552,6 +552,7 @@ describe('image model executors', () => {
         }
       });
       expect(JSON.stringify(recorded[0])).not.toContain(tinyPngBase64);
+      expect(JSON.stringify(recorded[0])).not.toContain('sk-image');
     } finally {
       await rm(projectRoot, { recursive: true, force: true });
     }
@@ -594,7 +595,7 @@ describe('image model executors', () => {
           request: {
             method: 'POST',
             url: 'https://api.openai.com/v1/images/edits',
-            headers: expect.objectContaining({ authorization: 'Bearer sk-image' }),
+            headers: expect.objectContaining({ authorization: '[redacted]' }),
             body: {
               fields: {
                 model: 'gpt-image-2',
@@ -618,6 +619,7 @@ describe('image model executors', () => {
         }
       });
       expect(JSON.stringify(recorded[0])).not.toContain(tinyPngBase64);
+      expect(JSON.stringify(recorded[0])).not.toContain('sk-image');
     } finally {
       await rm(projectRoot, { recursive: true, force: true });
     }
@@ -1738,6 +1740,10 @@ describe('image model executors', () => {
       expect(recorded).toHaveLength(1);
       expect(recorded[0]).toMatchObject({
         modelRun: {
+          request: {
+            method: 'POST',
+            url: 'https://generativelanguage.googleapis.com/v1beta/models/gemini-3.1-flash-image-preview:generateContent?key=%5Bredacted%5D'
+          },
           output: {
             responses: [{
               body: {
@@ -1766,6 +1772,7 @@ describe('image model executors', () => {
         }
       });
       expect(JSON.stringify(recorded[0])).not.toContain(tinyPngBase64);
+      expect(JSON.stringify(recorded[0])).not.toContain('sk-image');
     } finally {
       await rm(projectRoot, { recursive: true, force: true });
     }
