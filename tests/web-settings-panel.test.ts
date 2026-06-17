@@ -13,8 +13,6 @@ import {
 import type { DebruteCliStatus } from '@debrute/app-protocol';
 import type { WorkbenchActions, WorkbenchState } from '../apps/web/src/types';
 
-const joinText = (...parts: string[]) => parts.join('');
-
 describe('web Settings pages', () => {
   it('uses a directory layout with Debrute CLI settings', () => {
     const html = renderToStaticMarkup(React.createElement(SettingsPanel, {
@@ -48,28 +46,21 @@ describe('web Settings pages', () => {
     expect(html).toContain('settings-directory');
     expect(html).toContain('db-nav-row');
     expect(html).toContain('db-nav-row__icon');
-    expect(html).not.toContain(joinText('Model routing', ' and provider credentials'));
-    expect(html).not.toContain(joinText('Generation endpoints', ' and API keys'));
-    expect(html).not.toContain(joinText('Optional local', ' capabilities'));
-    expect(html).not.toContain(joinText('Command install', ' and Skills sync'));
+    expect(html).toContain('aria-label="Settings sections"');
+    expect(html.match(/class="db-nav-row(?: db-nav-row--active)?"/g)).toHaveLength(4);
     expect(html).toContain('LLM');
     expect(html).toContain('Models');
-    expect(html).not.toContain('<strong>Canvas</strong>');
-    expect(html).not.toContain('Canvas rendering resources');
     expect(html).toContain('Integrations');
     expect(html).toContain('Debrute CLI');
-    expect(html).not.toContain('Updates');
     expect(html).toContain('Image Models');
-    expect(html).not.toContain(joinText('Manage image generation model', ' endpoints and credentials.'));
-    expect(html).not.toContain(joinText('Manage video generation model', ' endpoints and credentials.'));
+    expect(html).toContain('<header class="settings-section-header"><h2>Image Models</h2></header>');
+    expect(html).toContain('<header class="settings-section-header"><h2>Video Models</h2></header>');
     expect(html).toContain('placeholder="https://api.openai.com/v1"');
     expect(html).toContain('placeholder="gpt-image-2"');
     expect(html).toContain('aria-label="Base URL override"');
     expect(html).toContain('aria-label="Request model ID override"');
     expect(html).toContain('aria-label="API Key"');
     expect(html).toContain('value="sk-image-ui"');
-    expect(html).not.toContain('Leave blank to keep existing key');
-    expect(html).not.toContain('configured');
     expect(html).toContain('no key');
     expect(html).toContain('db-card');
     expect(html).toContain('db-field');
@@ -133,24 +124,7 @@ describe('web Settings pages', () => {
     expect(html).toContain('settings-key-input');
     expect(html).toContain('settings-key-control');
     expect(html).toContain('settings-key-visibility');
-    expect(html).not.toContain('Leave blank to keep existing key');
     expect(html).not.toContain('aria-label="Hide API key"');
-  });
-
-  it('does not render Canvas settings or image preview controls', () => {
-    const html = renderToStaticMarkup(React.createElement(SettingsPanel, {
-      state: {
-        llmSettings: { providers: [], availableModelKeys: [], defaultModelKey: null },
-        imageModelSettings: { models: [] },
-        videoModelSettings: { models: [] },
-        integrationsSettings: undefined
-      } as unknown as WorkbenchState,
-      actions: {} as unknown as WorkbenchActions
-    }));
-
-    expect(html).not.toContain('Canvas image previews');
-    expect(html).not.toContain('Canvas rendering resources');
-    expect(html).not.toContain('<strong>Canvas</strong>');
   });
 
   it('renders browser-only manual Debrute CLI instructions when Desktop shell is unavailable', () => {

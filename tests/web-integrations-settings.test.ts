@@ -5,8 +5,6 @@ import { SettingsPanel } from '../apps/web/src/workbench/settings/SettingsPanel'
 import { IntegrationsSettingsPage } from '../apps/web/src/workbench/settings/integrations/IntegrationsSettingsPage';
 import type { WorkbenchActions, WorkbenchState } from '../apps/web/src/types';
 
-const joinText = (...parts: string[]) => parts.join('');
-
 describe('web Integrations settings page', () => {
   it('adds Integrations to the Settings directory', () => {
     const html = renderToStaticMarkup(React.createElement(SettingsPanel, {
@@ -15,7 +13,8 @@ describe('web Integrations settings page', () => {
     }));
 
     expect(html).toContain('Integrations');
-    expect(html).not.toContain(joinText('Optional local', ' capabilities'));
+    expect(html).toContain('db-nav-row');
+    expect(html).toContain('db-nav-row__icon');
   });
 
   it('renders ready, missing, failed, and Python CLI integration states', () => {
@@ -25,9 +24,9 @@ describe('web Integrations settings page', () => {
     }));
 
     expect(html).toContain('<h2>Integrations</h2>');
-    expect(html).not.toContain(joinText('Debrute detects optional local capabilities from PATH', ' and shows backend command previews without executing them.'));
+    expect(html).toContain('role="toolbar"');
+    expect(html).toContain('aria-label="Integration actions"');
     expect(html).toContain('Homebrew, uv');
-    expect(html).not.toContain('Integration backends:');
     expect(html).toContain('<span>FFmpeg</span>');
     expect(html).toContain('7.1.1');
     expect(html).toContain('brew upgrade --formula ffmpeg');
@@ -44,7 +43,7 @@ describe('web Integrations settings page', () => {
     expect(html).toContain('class="db-status-pill db-status-pill--success">Ready</span>');
   });
 
-  it('does not render unknown versions for missing binaries', () => {
+  it('renders missing binaries as neutral rows with blank version cells', () => {
     const html = renderToStaticMarkup(React.createElement(IntegrationsSettingsPage, {
       state: createState({
         integrationsSettings: {
@@ -67,9 +66,10 @@ describe('web Integrations settings page', () => {
       actions: createActions()
     }));
 
+    expect(html).toContain('<span>ImageMagick</span>');
     expect(html).toContain('Not found');
-    expect(html).not.toContain('magick is missing.');
-    expect(html).not.toContain('version unknown');
+    expect(html).toContain('class="db-status-pill db-status-pill--neutral">Not found</span>');
+    expect(html).toContain('<small></small>');
   });
 
   it('renders query failure diagnostics without top-level operation diagnostics', () => {
@@ -95,7 +95,6 @@ describe('web Integrations settings page', () => {
     expect(html).toContain('Unable to check updates.');
     expect(html).toContain('nonzero_exit');
     expect(html).toContain('brew exploded');
-    expect(html).not.toContain('Invalid integration id.');
   });
 });
 

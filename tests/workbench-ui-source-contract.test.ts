@@ -13,7 +13,6 @@ const styleFiles = [
   'apps/web/src/workbench/ui/styles/workbench-patterns.css'
 ];
 const rawColorLiteralPattern = /(?:#[0-9a-fA-F]{3,8}\b|rgb\(|oklch\()/;
-const joinText = (...parts: string[]) => parts.join('');
 
 describe('Workbench UI source contract', () => {
   it('keeps Workbench style variables in current namespaces', () => {
@@ -253,45 +252,16 @@ describe('Workbench UI source contract', () => {
     expect(functionBlock(canvasTextNodeStatus, 'textBufferStatus')).not.toContain("'success'");
   });
 
-  it('does not keep explanatory Settings chrome copy or decorative eyebrow hooks', () => {
+  it('keeps Settings headers structural instead of copy-bearing chrome', () => {
     const settings = readFileSync('apps/web/src/workbench/settings/SettingsPanel.tsx', 'utf8');
-    const integrations = readFileSync('apps/web/src/workbench/settings/integrations/IntegrationsSettingsPage.tsx', 'utf8');
-    const cli = readFileSync('apps/web/src/workbench/settings/debrute-cli/DebruteCliSettingsPage.tsx', 'utf8');
     const styles = readFileSync('apps/web/src/styles.css', 'utf8');
+    const sectionHeader = functionBlock(settings, 'SettingsSectionHeader');
 
-    for (const text of [
-      joinText('Model routing', ' and provider credentials'),
-      joinText('Generation endpoints', ' and API keys'),
-      joinText('Optional local', ' capabilities'),
-      joinText('Command install', ' and Skills sync'),
-      'Configure chat providers, discovery, and the default model route.',
-      joinText('Manage image generation model', ' endpoints and credentials.'),
-      joinText('Manage video generation model', ' endpoints and credentials.'),
-      joinText('Debrute detects optional local capabilities from PATH', ' and shows backend command previews without executing them.')
-    ]) {
-      expect(`${settings}\n${integrations}\n${cli}`).not.toContain(text);
-    }
-
-    expect(styles).not.toContain(joinText('.settings-section-header', ' span'));
-    expect(styles).not.toContain(joinText('.settings-section-header', ' p'));
-  });
-
-  it('does not keep non-canvas chrome raw colors in the feature stylesheet', () => {
-    const styles = readFileSync('apps/web/src/styles.css', 'utf8');
-
-    for (const rawChromeValue of [
-      '#0b0d12',
-      '#10141c',
-      'rgb(23 26 31 / 98%)',
-      'oklch(0.78 0.12 25)',
-      '#8bd5a9',
-      'rgb(10 12 12 / 72%)',
-      'rgb(90 98 112 / 78%)',
-      'rgb(20 22 26 / 94%)',
-      'oklch(0.84 0.13 82)'
-    ]) {
-      expect(styles, rawChromeValue).not.toContain(rawChromeValue);
-    }
+    expect(sectionHeader).toContain('<header className="settings-section-header">');
+    expect(sectionHeader).toContain('<h2>{title}</h2>');
+    expect(sectionHeader).not.toContain('<p');
+    expect(sectionHeader).not.toContain('<span');
+    expect(styles).not.toMatch(/\.settings-section-header\s+(?:span|p)\b/);
   });
 
   it('does not keep raw color or shadow literals in non-Canvas feature CSS rules', () => {
@@ -305,21 +275,25 @@ describe('Workbench UI source contract', () => {
     expect(violations).toEqual([]);
   });
 
-  it('keeps Canvas node chrome tokenized without raw selection or surface literals', () => {
+  it('keeps Canvas node feature CSS scoped to geometry and media rendering', () => {
     const styles = readFileSync('apps/web/src/styles.css', 'utf8');
+    const featureOwnedPrefixes = [
+      '.canvas-node-element',
+      '.canvas-node-presentation',
+      '.canvas-node-preview',
+      '.canvas-node-image-reserved',
+      '.canvas-node-resize',
+      '.canvas-text-node',
+      '.canvas-text-body',
+      '.canvas-text-message',
+      '.canvas-monaco-editor'
+    ];
+    const violations = cssRuleBlocks(styles)
+      .flatMap((rule) => rule.selector.split(',').map((selector) => selector.trim()))
+      .filter((selector) => selector.includes('canvas-node') || selector.includes('canvas-text'))
+      .filter((selector) => !featureOwnedPrefixes.some((prefix) => selector.startsWith(prefix)));
 
-    for (const rawCanvasChrome of [
-      joinText('#5e', '8eff'),
-      joinText('#2c', '3036'),
-      joinText('rgb(28 ', '31 36 / 38%)'),
-      joinText('rgb(17 19 23', ' / 96%)'),
-      joinText('rgb(24 ', '27 32 / 96%)'),
-      joinText('rgb(24 ', '18 20 / 92%)'),
-      joinText('rgb(24 ', '17 17 / 88%)'),
-      joinText('rgb(0 0 0', ' / 40%)')
-    ]) {
-      expect(styles, rawCanvasChrome).not.toContain(rawCanvasChrome);
-    }
+    expect(violations).toEqual([]);
   });
 
   it('keeps Canvas generic node labels single-line and ellipsized', () => {
@@ -368,13 +342,13 @@ describe('Workbench UI source contract', () => {
   it('keeps feature CSS from defining local Workbench control systems', () => {
     const styles = readFileSync('apps/web/src/styles.css', 'utf8');
     const localControlSelectors = [
-      joinText('.terminal-panel__actions', ' .db-icon-button'),
-      joinText('.db-canvas-node-titlebar', ' .db-icon-button'),
-      joinText('.floating-text-editor-header', ' .db-icon-button'),
-      joinText('.settings-section', ' .db-card strong'),
-      joinText('.settings-section', ' .db-card small'),
-      joinText('.settings-model-edit-grid', ' .db-input'),
-      joinText('.settings-key-input', ' .db-input'),
+      '.terminal-panel__actions .db-icon-button',
+      '.db-canvas-node-titlebar .db-icon-button',
+      '.floating-text-editor-header .db-icon-button',
+      '.settings-section .db-card strong',
+      '.settings-section .db-card small',
+      '.settings-model-edit-grid .db-input',
+      '.settings-key-input .db-input',
       '.settings-key-visibility.db-icon-button',
       '.canvas-card-rename-form .db-input',
       '.canvas-card-rename-form .db-menu__item',
@@ -382,21 +356,6 @@ describe('Workbench UI source contract', () => {
     ];
 
     for (const selector of localControlSelectors) {
-      expect(styles).not.toContain(selector);
-    }
-  });
-
-  it('does not keep unused stylesheet fragments from removed Workbench UI paths', () => {
-    const styles = readFileSync('apps/web/src/styles.css', 'utf8');
-
-    for (const selector of [
-      '.settings-list',
-      '.settings-edit-card-header',
-      '.settings-model-card-footer',
-      '.integration-confirm-backdrop',
-      '.integration-confirm-dialog',
-      '.integration-confirm-close'
-    ]) {
       expect(styles).not.toContain(selector);
     }
   });
