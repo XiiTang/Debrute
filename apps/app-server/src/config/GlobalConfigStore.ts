@@ -2,7 +2,14 @@ import { randomUUID } from 'node:crypto';
 import { chmod, mkdir, readFile, rename, writeFile } from 'node:fs/promises';
 import { dirname, join } from 'node:path';
 import { debruteHomeDir } from '@debrute/project-core';
-import type { ImageModelsConfig, LlmProvidersConfig, SecretsConfig, VideoModelsConfig } from '@debrute/capability-runtime';
+import type {
+  ImageModelConfig,
+  ImageModelsConfig,
+  LlmProvidersConfig,
+  SecretsConfig,
+  VideoModelConfig,
+  VideoModelsConfig
+} from '@debrute/capability-runtime';
 import type { LlmProviderType } from '@debrute/app-protocol';
 
 export interface GlobalConfigPaths {
@@ -122,22 +129,64 @@ function requireStringArrayProperty(value: Record<string, unknown>, key: string,
   return value[key];
 }
 
-function normalizeImageModelsConfig(config: ImageModelsConfig): ImageModelsConfig {
+function normalizeImageModelsConfig(config: unknown): ImageModelsConfig {
+  if (!isRecord(config) || !Array.isArray(config.imageModels)) {
+    throw new Error('Image models config must contain imageModels.');
+  }
   return {
-    imageModels: config.imageModels.map((model) => ({
-      debruteModelId: model.debruteModelId.trim(),
-      requestModelIdOverride: model.requestModelIdOverride?.trim() || null
-    })).filter((model) => model.debruteModelId.length > 0)
+    imageModels: config.imageModels.map(normalizeImageModelConfig)
   };
 }
 
-function normalizeVideoModelsConfig(config: VideoModelsConfig): VideoModelsConfig {
+function normalizeVideoModelsConfig(config: unknown): VideoModelsConfig {
+  if (!isRecord(config) || !Array.isArray(config.videoModels)) {
+    throw new Error('Video models config must contain videoModels.');
+  }
   return {
-    videoModels: config.videoModels.map((model) => ({
-      debruteModelId: model.debruteModelId.trim(),
-      requestModelIdOverride: model.requestModelIdOverride?.trim() || null
-    })).filter((model) => model.debruteModelId.length > 0)
+    videoModels: config.videoModels.map(normalizeVideoModelConfig)
   };
+}
+
+function normalizeImageModelConfig(model: unknown): ImageModelConfig {
+  if (!isRecord(model)) {
+    throw new Error('Image model config must be an object.');
+  }
+  const debruteModelId = requireStringProperty(model, 'debruteModelId', 'Image model debruteModelId').trim();
+  if (!debruteModelId) {
+    throw new Error('Image model debruteModelId must be a non-empty string.');
+  }
+  return {
+    debruteModelId,
+    requestModelIdOverride: normalizeMediaRequestModelIdOverride(model.requestModelIdOverride, 'Image model')
+  };
+}
+
+function normalizeVideoModelConfig(model: unknown): VideoModelConfig {
+  if (!isRecord(model)) {
+    throw new Error('Video model config must be an object.');
+  }
+  const debruteModelId = requireStringProperty(model, 'debruteModelId', 'Video model debruteModelId').trim();
+  if (!debruteModelId) {
+    throw new Error('Video model debruteModelId must be a non-empty string.');
+  }
+  return {
+    debruteModelId,
+    requestModelIdOverride: normalizeMediaRequestModelIdOverride(model.requestModelIdOverride, 'Video model')
+  };
+}
+
+function normalizeMediaRequestModelIdOverride(value: unknown, label: 'Image model' | 'Video model'): string | null {
+  if (value === null) {
+    return null;
+  }
+  if (typeof value !== 'string') {
+    throw new Error(`${label} requestModelIdOverride must be a string or null.`);
+  }
+  const trimmed = value.trim();
+  if (!trimmed) {
+    throw new Error(`${label} requestModelIdOverride must be null or a non-empty string.`);
+  }
+  return trimmed;
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {

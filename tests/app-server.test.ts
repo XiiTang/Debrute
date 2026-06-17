@@ -1094,6 +1094,26 @@ describe('app-server', () => {
     }
   });
 
+  it('rejects malformed media model setting saves instead of clearing overrides', async () => {
+    const home = await mkdtemp(join(tmpdir(), 'debrute-media-model-invalid-save-home-'));
+    const globalRuntime = new DebruteGlobalRuntimeServer({
+      globalConfigStore: new GlobalConfigStore({ debruteHome: home })
+    });
+    try {
+      await expect(globalRuntime.imageModelSaveSetting('gpt-image-2', {} as never)).rejects.toMatchObject({
+        code: 'invalid_input'
+      });
+      await expect(globalRuntime.videoModelSaveSetting('doubao-seedance-2-0-260128', {
+        requestModelIdOverride: '   '
+      })).rejects.toMatchObject({
+        code: 'invalid_input'
+      });
+    } finally {
+      globalRuntime.close();
+      await rm(home, { recursive: true, force: true });
+    }
+  });
+
   it('stores API-key-only media settings only in secrets', async () => {
     const home = await mkdtemp(join(tmpdir(), 'debrute-media-model-api-key-only-home-'));
     const configStore = new GlobalConfigStore({ debruteHome: home });
@@ -1122,6 +1142,22 @@ describe('app-server', () => {
       });
     } finally {
       globalRuntime.close();
+      await rm(home, { recursive: true, force: true });
+    }
+  });
+
+  it('rejects malformed media model config records instead of filling missing fields', async () => {
+    const home = await mkdtemp(join(tmpdir(), 'debrute-media-model-strict-config-home-'));
+    const configStore = new GlobalConfigStore({ debruteHome: home });
+    const paths = configStore.paths();
+    try {
+      await mkdir(paths.root, { recursive: true });
+      await writeFile(paths.imageModelsFile, JSON.stringify({
+        imageModels: [{ debruteModelId: 'gpt-image-2' }]
+      }), 'utf8');
+
+      await expect(configStore.readImageModels()).rejects.toThrow('Image model requestModelIdOverride must be a string or null.');
+    } finally {
       await rm(home, { recursive: true, force: true });
     }
   });
