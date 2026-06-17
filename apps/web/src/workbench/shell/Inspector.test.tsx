@@ -21,7 +21,8 @@ describe('DiagnosticList', () => {
       />
     );
 
-    expect(html).toMatch(/<button[^>]*class="[^"]*diagnostic warning[^"]*"[^>]*><svg[\s\S]*<\/svg><span>Missing asset<\/span><small>briefs\/scene\.md \/ missing_asset<\/small><\/button>/);
+    expect(html).toContain('db-diagnostic-list');
+    expect(html).toMatch(/<button[^>]*class="[^"]*db-diagnostic-row db-diagnostic-row--warning[^"]*"[^>]*><svg[\s\S]*<\/svg><span class="db-diagnostic-row__message">Missing asset<\/span><small class="db-diagnostic-row__source">briefs\/scene\.md \/ missing_asset<\/small><\/button>/);
     expect(html).not.toContain('db-button__label');
   });
 });

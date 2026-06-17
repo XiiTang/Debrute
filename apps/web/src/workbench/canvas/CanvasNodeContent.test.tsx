@@ -36,7 +36,7 @@ describe('CanvasImageNodePreview', () => {
     expect(html).toContain('data-canvas-image-layer="visible"');
     expect(html).not.toContain('data-canvas-image-layer="next"');
     expect(html).not.toContain('class="canvas-node-image-reserved"');
-    expect(html).not.toContain('class="canvas-node-placeholder"');
+    expect(html).not.toContain('class="db-canvas-node-placeholder"');
   });
 
   it('reserves the first pending image slot without flashing a placeholder', () => {
@@ -52,7 +52,7 @@ describe('CanvasImageNodePreview', () => {
     expect(html).not.toContain('src="/preview/first.jpg"');
     expect(html).not.toContain('data-canvas-image-layer="next"');
     expect(html).not.toContain('data-canvas-image-layer="visible"');
-    expect(html).not.toContain('class="canvas-node-placeholder"');
+    expect(html).not.toContain('class="db-canvas-node-placeholder"');
   });
 
   it('keeps visible image markup when next load error exists', () => {
@@ -68,7 +68,7 @@ describe('CanvasImageNodePreview', () => {
     expect(html).toContain('src="/preview/low.jpg"');
     expect(html).toContain('Unable to load flow/cover.png.');
     expect(html).toContain('db-button');
-    expect(html).not.toContain('class="canvas-node-placeholder"');
+    expect(html).not.toContain('class="db-canvas-node-placeholder"');
   });
 });
 
@@ -107,6 +107,7 @@ describe('CanvasNodeContent text chrome', () => {
     );
 
     expect(html).toContain('<strong>archive</strong>');
+    expect(html).toContain('db-canvas-node-generic');
     expect(html).not.toContain('<span>archive</span>');
   });
 
@@ -126,6 +127,7 @@ describe('CanvasNodeContent text chrome', () => {
     );
 
     expect(html).toContain('<strong>Missing File</strong>');
+    expect(html).toContain('db-canvas-node-generic db-canvas-node-generic--problem');
     expect(html).toContain('<span>Unable to read references/archive.</span>');
     expect(html).toContain('<span>archive</span>');
   });
@@ -145,9 +147,37 @@ describe('CanvasNodeContent text chrome', () => {
       />
     );
 
-    expect(html).toContain('canvas-text-titlebar');
+    expect(html).toContain('db-canvas-node-titlebar');
     expect(html).toContain('db-icon-button');
     expect(html).toContain('Open large editor');
+  });
+
+  it('renders media captions through the shared Canvas node caption pattern', () => {
+    const html = renderToStaticMarkup(
+      <CanvasNodeContent
+        node={{
+          ...imageNode('audio/theme.mp3', 'rev-a'),
+          mediaKind: 'audio',
+          availability: {
+            state: 'available',
+            revision: 'rev-a',
+            size: 10_000,
+            mimeType: 'audio/mpeg',
+            fileUrl: 'http://127.0.0.1:17321/api/projects/p/files/raw/audio/theme.mp3?v=rev-a'
+          }
+        }}
+        selected
+        culled={false}
+        actions={actionsFixture()}
+        textBuffer={undefined}
+        onSelectNode={() => undefined}
+        onTitlePointerDown={() => undefined}
+        onTitlePointerMove={() => undefined}
+        onTitlePointerUp={() => undefined}
+      />
+    );
+
+    expect(html).toContain('db-canvas-node-caption');
   });
 
   it('renders external text changes with the shared info status tone only', () => {

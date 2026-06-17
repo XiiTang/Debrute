@@ -13,7 +13,7 @@ export function CanvasResetLayoutButton({
 }: CanvasResetLayoutButtonProps): React.ReactElement {
   return (
     <IconButton
-      className="canvas-reset-layout-button"
+      className="canvas-reset-layout-button db-canvas-control"
       data-testid="canvas-reset-layout-button"
       data-canvas-local-wheel="true"
       label="Reset Canvas Layout"

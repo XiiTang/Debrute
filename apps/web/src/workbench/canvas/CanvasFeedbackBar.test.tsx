@@ -16,6 +16,7 @@ describe('CanvasFeedbackBar', () => {
     );
 
     expect(html).toContain('canvas-feedback-note');
+    expect(html).toContain('db-floating-bar canvas-feedback-bar');
     expect(html).toContain('db-input');
     expect(html).toContain('db-icon-button');
     expect(html).toContain('data-canvas-local-wheel="true"');

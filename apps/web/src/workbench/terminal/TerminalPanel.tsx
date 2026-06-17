@@ -178,12 +178,12 @@ export function TerminalPanel({
   return (
     <div className="terminal-panel">
       <Toolbar ariaLabel="Terminal sessions" className="terminal-panel__toolbar">
-        <TabList className="terminal-panel__tabs" aria-label="Terminal sessions">
+        <TabList className="db-terminal-tabs" aria-label="Terminal sessions">
           {state.sessions.map((session) => (
             <Tab
               key={session.id}
               active={session.id === state.activeSessionId}
-              className="terminal-panel__tab"
+              className="db-terminal-tab"
               onClick={() => setState((current) => ({ ...current, activeSessionId: session.id }))}
             >
               <span>{session.title}</span>

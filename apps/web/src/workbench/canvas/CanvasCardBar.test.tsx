@@ -57,6 +57,8 @@ describe('CanvasCardBar', () => {
     expect(html).toContain('db-button');
     expect(html).toContain('db-button--sm');
     expect(html).toContain('db-icon-button');
+    expect(html).toContain('db-canvas-card');
+    expect(html).toContain('db-canvas-control');
   });
 
   it('submits canvas menu actions without browser prompt or confirm dialogs', () => {

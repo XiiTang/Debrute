@@ -171,6 +171,7 @@ describe('CanvasSurface', () => {
 
     expect(html).toContain('data-canvas-entity="node"');
     expect(html).toContain('data-canvas-node-path="image-production/cover.png"');
+    expect(html).toContain('db-canvas-node-frame');
     expect(html).toContain('class="canvas-node-resize nw"');
     expect(html).not.toContain('Delete');
   });

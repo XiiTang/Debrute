@@ -356,18 +356,18 @@ export function DiagnosticList({
     return <EmptyState className="empty-line" title="No diagnostics" />;
   }
   return (
-    <div className={compact ? 'diagnostics compact' : 'diagnostics'}>
+    <div className={compact ? 'db-diagnostic-list db-diagnostic-list--compact' : 'db-diagnostic-list'}>
       {diagnostics.map((diagnostic) => (
         <button
           type="button"
-          className={`diagnostic ${diagnostic.severity}`}
+          className={`db-diagnostic-row db-diagnostic-row--${diagnostic.severity}`}
           key={diagnostic.id}
           onClick={() => onSelect?.(diagnostic)}
           disabled={!onSelect}
         >
           <AlertTriangle size={14} />
-          <span>{diagnostic.message}</span>
-          <small>{diagnostic.filePath ? `${diagnostic.filePath} / ${diagnostic.code}` : diagnostic.code}</small>
+          <span className="db-diagnostic-row__message">{diagnostic.message}</span>
+          <small className="db-diagnostic-row__source">{diagnostic.filePath ? `${diagnostic.filePath} / ${diagnostic.code}` : diagnostic.code}</small>
         </button>
       ))}
     </div>

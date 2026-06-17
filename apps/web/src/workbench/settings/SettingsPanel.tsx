@@ -76,11 +76,11 @@ export function SettingsPanel({ state, actions }: { state: WorkbenchState; actio
             <button
               key={item.id}
               type="button"
-              className={activePage === item.id ? 'db-settings-nav-button db-settings-nav-button--active' : 'db-settings-nav-button'}
+              className={activePage === item.id ? 'db-nav-row db-nav-row--active' : 'db-nav-row'}
               aria-pressed={activePage === item.id}
               onClick={() => setActivePage(item.id)}
             >
-              <span className="db-settings-nav-button__icon"><Icon size={15} /></span>
+              <span className="db-nav-row__icon"><Icon size={15} /></span>
               <strong>{item.label}</strong>
             </button>
           );
@@ -419,6 +419,7 @@ function ApiKeyInput({
       <IconButton
         className="settings-key-visibility"
         label={visibilityLabel}
+        size="xs"
         pressed={visible}
         icon={visible ? <EyeOff size={13} /> : <Eye size={13} />}
         onMouseDown={(event) => event.preventDefault()}

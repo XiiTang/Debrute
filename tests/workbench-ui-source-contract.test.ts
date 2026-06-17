@@ -1,9 +1,6 @@
 import { readFileSync } from 'node:fs';
 import { describe, expect, it } from 'vitest';
 
-const legacyTokenNames = 'bg|bg-elevated|bg-panel|bg-soft|text|muted|subtle|border|accent|accent-strong|warn|danger|info|radius';
-const legacyTokenPattern = new RegExp(`(?:var\\(--(?:${legacyTokenNames})\\)|--(?:${legacyTokenNames}):)`);
-
 const styleFiles = [
   'apps/web/src/styles.css',
   'apps/web/src/workbench/ui/styles/base.css',
@@ -19,13 +16,17 @@ const rawColorLiteralPattern = /(?:#[0-9a-fA-F]{3,8}\b|rgb\(|oklch\()/;
 const joinText = (...parts: string[]) => parts.join('');
 
 describe('Workbench UI source contract', () => {
-  it('uses only final Workbench UI token names in current stylesheets', () => {
+  it('keeps Workbench style variables in current namespaces', () => {
     const violations = styleFiles.flatMap((file) => (
       readFileSync(file, 'utf8')
         .split('\n')
         .map((line, index) => ({ file, line: index + 1, text: line }))
-        .filter(({ text }) => legacyTokenPattern.test(text))
-        .map(({ file, line, text }) => `${file}:${line}:${text.trim()}`)
+        .flatMap(({ file, line, text }) => (
+          [...text.matchAll(/(^|[^\w-])(--[a-zA-Z0-9-]+)(?=\s*:|\))/g)]
+            .map((match) => match[2])
+            .filter((token) => !token.startsWith('--db-') && !token.startsWith('--canvas-') && !token.startsWith('--tree-'))
+            .map((token) => `${file}:${line}:${token}`)
+        ))
     ));
 
     expect(violations).toEqual([]);
@@ -39,6 +40,49 @@ describe('Workbench UI source contract', () => {
     expect(styles).not.toMatch(/\.settings-directory\s+button:/);
   });
 
+  it('uses final Workbench pattern names for repeated structures', () => {
+    const patterns = readFileSync('apps/web/src/workbench/ui/styles/workbench-patterns.css', 'utf8');
+    const settings = readFileSync('apps/web/src/workbench/settings/SettingsPanel.tsx', 'utf8');
+
+    for (const pattern of [
+      '.db-tree-row',
+      '.db-nav-row',
+      '.db-nav-row__icon',
+      '.db-object-properties',
+      '.db-diagnostic-list',
+      '.db-diagnostic-row',
+      '.db-floating-bar',
+      '.db-terminal-tabs',
+      '.db-terminal-tab',
+      '.db-notification-stack',
+      '.db-notification-row'
+    ]) {
+      expect(patterns).toContain(pattern);
+    }
+
+    expect(settings).toContain('className={activePage === item.id ? \'db-nav-row db-nav-row--active\' : \'db-nav-row\'}');
+    expect(settings).toContain('className="db-nav-row__icon"');
+  });
+
+  it('keeps reusable Workbench pattern chrome out of the feature stylesheet', () => {
+    const styles = readFileSync('apps/web/src/styles.css', 'utf8');
+    const patternPrefixes = [
+      '.db-nav-row',
+      '.db-diagnostic',
+      '.db-terminal-tab',
+      '.db-notification',
+      '.db-canvas-node'
+    ];
+
+    const violations = cssRuleBlocks(styles)
+      .map((rule) => rule.selector)
+      .filter((selector) => selector.split(',').some((part) => (
+        patternPrefixes.some((prefix) => part.trim().startsWith(prefix))
+      )));
+
+    expect(violations).toEqual([]);
+  });
+
   it('keeps floating text editor chrome on Workbench UI primitives', () => {
     const styles = readFileSync('apps/web/src/styles.css', 'utf8');
     const source = readFileSync('apps/web/src/workbench/shell/FloatingTextEditorWindow.tsx', 'utf8');
@@ -49,7 +93,7 @@ describe('Workbench UI source contract', () => {
     expect(styles).not.toMatch(/\.floating-text-editor-header\s+button:/);
   });
 
-  it('does not keep active-class compatibility for primitive pressed state', () => {
+  it('uses primitive ARIA pressed state for Workbench toggles', () => {
     const controls = readFileSync('apps/web/src/workbench/ui/styles/controls.css', 'utf8');
     const sources = [
       'apps/web/src/workbench/shell/FloatingDock.tsx',
@@ -58,11 +102,9 @@ describe('Workbench UI source contract', () => {
     ].map((file) => readFileSync(file, 'utf8')).join('\n');
     const terminalPanel = readFileSync('apps/web/src/workbench/terminal/TerminalPanel.tsx', 'utf8');
 
-    expect(controls).not.toContain('.db-icon-button.active');
-    expect(sources).not.toContain(" active'");
-    expect(sources).not.toContain(' active"');
-    expect(sources).not.toContain("'active'");
-    expect(terminalPanel).not.toContain(joinText('terminal-panel__tab', '--active'));
+    expect(controls).toContain('.db-icon-button[aria-pressed="true"]');
+    expect(sources).toContain('pressed=');
+    expect(terminalPanel).toContain('active={session.id === state.activeSessionId}');
   });
 
   it('keeps Workbench spin animation owned by the UI base stylesheet only', () => {
@@ -100,7 +142,6 @@ describe('Workbench UI source contract', () => {
     const cardControlRule = styles.match(/\.canvas-card,\n\.canvas-card-add,\n\.canvas-card-menu-button\s*\{[^}]*\}/)?.[0] ?? '';
     const cardActionRule = styles.match(/\.canvas-card-menu-button,\n\.canvas-card-add\s*\{[^}]*\}/)?.[0] ?? '';
     const dockRule = styles.match(/\.floating-dock\s*\{[^}]*\}/)?.[0] ?? '';
-    const dockButtonRule = styles.match(/\.floating-dock \.db-icon-button\s*\{[^}]*\}/)?.[0] ?? '';
     const cardBarSource = readFileSync('apps/web/src/workbench/canvas/CanvasCardBar.tsx', 'utf8');
     const dockSource = readFileSync('apps/web/src/workbench/shell/FloatingDock.tsx', 'utf8');
 
@@ -113,7 +154,7 @@ describe('Workbench UI source contract', () => {
     expect(dockRule).toContain('top: 45px;');
     expect(dockRule).toContain('width: 28px;');
     expect(dockRule).toContain('padding: 0;');
-    expect(dockButtonRule).toContain('border: 0;');
+    expect(styles).not.toContain('.floating-dock .db-icon-button');
     expect(cardBarSource).toContain('size="sm"');
     expect(cardBarSource).not.toContain('db-floating-bar');
     expect(dockSource).toContain('size={14}');
@@ -154,15 +195,29 @@ describe('Workbench UI source contract', () => {
     const tokens = readFileSync('apps/web/src/workbench/ui/styles/tokens.css', 'utf8');
 
     for (const token of [
+      '--db-bg',
+      '--db-surface-1',
+      '--db-surface-2',
+      '--db-surface-3',
       '--db-canvas-bg',
       '--db-canvas-grid',
+      '--db-text',
+      '--db-text-muted',
+      '--db-border',
       '--db-selection',
       '--db-selection-muted',
       '--db-floating-bg',
       '--db-danger-bg',
+      '--db-control-xs',
+      '--db-control-sm',
+      '--db-control-md',
+      '--db-radius-sm',
       '--db-shadow-floating',
+      '--db-focus-ring',
       '--db-duration-fast',
-      '--db-ease-standard'
+      '--db-ease-standard',
+      '--db-z-canvas',
+      '--db-z-overlays'
     ]) {
       expect(tokens).toContain(token);
     }
@@ -268,12 +323,21 @@ describe('Workbench UI source contract', () => {
   });
 
   it('keeps Canvas generic node labels single-line and ellipsized', () => {
-    const styles = readFileSync('apps/web/src/styles.css', 'utf8');
-    const labelRule = styles.match(/\.canvas-node-generic strong,\n\.canvas-node-generic span\s*\{[^}]*\}/)?.[0] ?? '';
+    const patterns = readFileSync('apps/web/src/workbench/ui/styles/workbench-patterns.css', 'utf8');
+    const labelRule = patterns.match(/\.db-canvas-node-generic strong,\n\.db-canvas-node-generic span\s*\{[^}]*\}/)?.[0] ?? '';
 
     expect(labelRule).toContain('overflow: hidden;');
     expect(labelRule).toContain('text-overflow: ellipsis;');
     expect(labelRule).toContain('white-space: nowrap;');
+  });
+
+  it('owns Canvas node chrome through db-canvas-node pattern selectors', () => {
+    const patterns = readFileSync('apps/web/src/workbench/ui/styles/workbench-patterns.css', 'utf8');
+    const violations = cssRuleBlocks(patterns)
+      .flatMap((rule) => rule.selector.split(',').map((selector) => selector.trim()))
+      .filter((selector) => selector.includes('canvas-node') && !selector.startsWith('.db-canvas-node-'));
+
+    expect(violations).toEqual([]);
   });
 
   it('keeps Canvas chrome shadows tokenized and scoped to Workbench stat classes', () => {
@@ -293,29 +357,28 @@ describe('Workbench UI source contract', () => {
     expect(violations).toEqual([]);
   });
 
-  it('keeps empty actions and notifications on shared primitives without duplicate chrome', () => {
-    const styles = readFileSync('apps/web/src/styles.css', 'utf8');
-    const canvasEditor = readFileSync('apps/web/src/workbench/canvas/CanvasEditor.tsx', 'utf8');
-    const workbenchApp = readFileSync('apps/web/src/workbench/WorkbenchApp.tsx', 'utf8');
+  it('keeps notifications on shared primitives and Workbench patterns', () => {
     const notificationStack = readFileSync('apps/web/src/workbench/shell/NotificationStack.tsx', 'utf8');
 
-    expect(styles).not.toMatch(/\.empty-action\b/);
-    expect(canvasEditor).not.toContain('className="empty-action"');
-    expect(workbenchApp).not.toContain('className="empty-action"');
-    expect(styles).not.toMatch(/\.notification\s*\{/);
-    expect(notificationStack).not.toContain('className="notification"');
+    expect(notificationStack).toContain('className="db-notification-stack"');
+    expect(notificationStack).toContain('className="db-notification-row"');
+    expect(notificationStack).toContain('<Card');
   });
 
   it('keeps feature CSS from defining local Workbench control systems', () => {
     const styles = readFileSync('apps/web/src/styles.css', 'utf8');
     const localControlSelectors = [
       joinText('.terminal-panel__actions', ' .db-icon-button'),
-      joinText('.canvas-text-titlebar', ' .db-icon-button'),
+      joinText('.db-canvas-node-titlebar', ' .db-icon-button'),
       joinText('.floating-text-editor-header', ' .db-icon-button'),
       joinText('.settings-section', ' .db-card strong'),
       joinText('.settings-section', ' .db-card small'),
       joinText('.settings-model-edit-grid', ' .db-input'),
-      joinText('.settings-key-input', ' .db-input')
+      joinText('.settings-key-input', ' .db-input'),
+      '.settings-key-visibility.db-icon-button',
+      '.canvas-card-rename-form .db-input',
+      '.canvas-card-rename-form .db-menu__item',
+      '.floating-dock .db-icon-button'
     ];
 
     for (const selector of localControlSelectors) {

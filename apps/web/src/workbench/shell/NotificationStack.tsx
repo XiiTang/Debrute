@@ -6,9 +6,9 @@ export function NotificationStack({ notifications }: { notifications: string[] }
     return null;
   }
   return (
-    <div className="notifications">
+    <div className="db-notification-stack">
       {notifications.map((notification) => (
-        <Card key={notification}>{notification}</Card>
+        <Card className="db-notification-row" key={notification}>{notification}</Card>
       ))}
     </div>
   );

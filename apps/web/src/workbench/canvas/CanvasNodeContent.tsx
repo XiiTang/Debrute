@@ -125,13 +125,13 @@ export function CanvasNodeContent({
         </div>
       ) : (
         <div className="canvas-node-preview">
-          <div className={problem ? 'canvas-node-placeholder problem' : 'canvas-node-placeholder'}>
+          <div className={problem ? 'db-canvas-node-placeholder db-canvas-node-placeholder--problem' : 'db-canvas-node-placeholder'}>
             {problem ? <AlertTriangle size={22} /> : node.mediaKind === 'video' ? <Video size={22} /> : node.mediaKind === 'audio' ? <Music2 size={22} /> : <ImageIcon size={22} />}
             <strong>{problem?.title ?? (node.mediaKind === 'video' ? 'Video' : node.mediaKind === 'audio' ? 'Audio' : 'Image')}</strong>
             <span>{problem?.message ?? nodeDisplayName(node.projectRelativePath)}</span>
             {mediaProblem ? (
               <Button
-                className="canvas-node-retry"
+                className="db-canvas-node-retry"
                 size="xs"
                 iconStart={<RefreshCw size={12} />}
                 onPointerDown={(event) => event.stopPropagation()}
@@ -144,7 +144,7 @@ export function CanvasNodeContent({
         </div>
       )}
       {node.mediaKind === 'video' || node.mediaKind === 'audio' ? (
-        <div className="canvas-node-caption">
+        <div className="db-canvas-node-caption">
           <span>{nodeDisplayName(node.projectRelativePath)}</span>
         </div>
       ) : null}
@@ -358,7 +358,7 @@ function CanvasGenericNodeContent({
   const label = nodeDisplayName(node.projectRelativePath);
   if (problem) {
     return (
-      <div className="canvas-node-generic problem">
+      <div className="db-canvas-node-generic db-canvas-node-generic--problem">
         <AlertTriangle size={20} />
         <strong>{problem.title}</strong>
         <span>{problem.message}</span>
@@ -368,7 +368,7 @@ function CanvasGenericNodeContent({
   }
 
   return (
-    <div className="canvas-node-generic">
+    <div className="db-canvas-node-generic">
       {node.nodeKind === 'directory' ? <Folder size={20} /> : <File size={20} />}
       <strong>{label}</strong>
     </div>
@@ -383,11 +383,11 @@ function CanvasNodeMediaErrorOverlay({
   onRetry: () => void;
 }): React.ReactElement {
   return (
-    <div className="canvas-node-error-overlay">
+    <div className="db-canvas-node-error-overlay">
       <AlertTriangle size={16} />
       <span>{message}</span>
       <Button
-        className="canvas-node-retry"
+        className="db-canvas-node-retry"
         size="xs"
         iconStart={<RefreshCw size={12} />}
         onPointerDown={(event) => event.stopPropagation()}
@@ -407,13 +407,13 @@ function CanvasImagePlaceholder({
   onRetry?: (() => void) | undefined;
 }): React.ReactElement {
   return (
-    <div className="canvas-node-placeholder">
+    <div className="db-canvas-node-placeholder">
       <ImageIcon size={22} />
       <strong>Image</strong>
       <span>{nodeDisplayName(node.projectRelativePath)}</span>
       {onRetry ? (
         <Button
-          className="canvas-node-retry"
+          className="db-canvas-node-retry"
           size="xs"
           iconStart={<RefreshCw size={12} />}
           onPointerDown={(event) => event.stopPropagation()}
@@ -457,7 +457,7 @@ function CanvasTextNodeContent({
   return (
     <section className="canvas-text-node" data-canvas-local-wheel="true">
       <div
-        className="canvas-text-titlebar"
+        className="db-canvas-node-titlebar"
         onPointerDown={onTitlePointerDown}
         onPointerMove={onTitlePointerMove}
         onPointerUp={onTitlePointerUp}

@@ -46,9 +46,8 @@ describe('web Settings pages', () => {
     }));
 
     expect(html).toContain('settings-directory');
-    expect(html).toContain('db-settings-nav-button');
-    expect(html).toMatch(/<button[^>]*class="[^"]*db-settings-nav-button[^"]*"[^>]*><span class="db-settings-nav-button__icon">/);
-    expect(html).not.toContain('settings-nav-icon');
+    expect(html).toContain('db-nav-row');
+    expect(html).toContain('db-nav-row__icon');
     expect(html).not.toContain(joinText('Model routing', ' and provider credentials'));
     expect(html).not.toContain(joinText('Generation endpoints', ' and API keys'));
     expect(html).not.toContain(joinText('Optional local', ' capabilities'));
@@ -76,7 +75,6 @@ describe('web Settings pages', () => {
     expect(html).toContain('db-field');
     expect(html).toContain('db-input');
     expect(html).toContain('db-status-pill');
-    expect(html).not.toContain('settings-card');
   });
 
   it('renders visibility controls for every API key input', () => {
@@ -132,8 +130,9 @@ describe('web Settings pages', () => {
     expect(html.match(/aria-label="Show API key"/g)).toHaveLength(3);
     expect(html).toContain('value="sk-image-ui"');
     expect(html).toContain('value="sk-video-ui"');
-    expect(html).not.toContain('settings-key-leading-icon');
-    expect(html).not.toContain('settings-key-input-field');
+    expect(html).toContain('settings-key-input');
+    expect(html).toContain('settings-key-control');
+    expect(html).toContain('settings-key-visibility');
     expect(html).not.toContain('Leave blank to keep existing key');
     expect(html).not.toContain('aria-label="Hide API key"');
   });

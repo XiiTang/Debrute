@@ -67,7 +67,7 @@ describe('Workbench UI system contract', () => {
     expect(violations).toEqual([]);
   });
 
-  it('has a single public Workbench UI export surface', () => {
+  it('has a single public Workbench UI primitive export surface', () => {
     const contents = uiIndexSources['./index.ts'];
     expect(contents).toBeDefined();
     for (const exportName of [
@@ -75,16 +75,35 @@ describe('Workbench UI system contract', () => {
       'IconButton',
       'Field',
       'Input',
+      'SecretInput',
+      'Select',
+      'Textarea',
+      'Switch',
       'Card',
       'Panel',
+      'PanelHeader',
+      'PanelBody',
+      'PanelTitle',
       'Toolbar',
       'Menu',
+      'Tab',
+      'TabList',
       'StatusPill',
-      'EmptyState'
+      'EmptyState',
+      'cx'
     ]) {
       expect(contents).toContain(exportName);
     }
-    for (const unusedExport of ['Checkbox', 'Slider', 'Tooltip', 'Dialog', 'Popover', 'Spinner']) {
+    for (const unusedExport of [
+      'Checkbox',
+      'Slider',
+      'Tooltip',
+      'Dialog',
+      'Popover',
+      'Spinner',
+      'Command',
+      'Combobox'
+    ]) {
       expect(contents).not.toContain(unusedExport);
     }
   });

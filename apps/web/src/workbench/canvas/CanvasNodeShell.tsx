@@ -67,6 +67,7 @@ function CanvasNodeShellComponent({
   const className = [
     'canvas-node-element',
     'canvas-node-shell',
+    'db-canvas-node-frame',
     node.mediaKind,
     selected ? 'selected' : '',
     hovered ? 'hovered' : '',

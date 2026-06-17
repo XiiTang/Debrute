@@ -9,7 +9,13 @@ import {
   IconButton,
   Input,
   Menu,
+  SecretInput,
+  Select,
   StatusPill,
+  Switch,
+  Tab,
+  TabList,
+  Textarea,
   Toolbar
 } from './index';
 import { getNextMenuItemIndex } from './Menu';
@@ -108,5 +114,45 @@ describe('Workbench UI primitives', () => {
     expect(html).toContain('aria-pressed="true"');
     expect(html).toContain('db-icon-button--ghost');
     expect(html).not.toContain(' active');
+  });
+
+  it('renders final primitive states through shared classes and ARIA state', () => {
+    const html = renderToStaticMarkup(
+      <Card variant="interactive">
+        <Toolbar ariaLabel="Primitive states">
+          <Button loading>Saving</Button>
+          <Button pressed>Pressed</Button>
+          <IconButton label="Toggle panel" pressed icon={<span data-icon="panel" />} />
+        </Toolbar>
+        <Field label="Endpoint" description="Base URL" error="Invalid URL">
+          <Input invalid value="https://example.invalid" readOnly />
+        </Field>
+        <SecretInput masked value="secret" readOnly />
+        <Select invalid defaultValue="a">
+          <option value="a">A</option>
+        </Select>
+        <Textarea invalid value="body" readOnly />
+        <Switch label="Enabled" checked readOnly />
+        <TabList aria-label="Example tabs">
+          <Tab active>Active</Tab>
+          <Tab disabled>Disabled</Tab>
+        </TabList>
+        <StatusPill tone="warning">warning</StatusPill>
+        <EmptyState title="No records" />
+      </Card>
+    );
+
+    expect(html).toContain('db-card--interactive');
+    expect(html).toContain('aria-busy="true"');
+    expect(html).toContain('aria-pressed="true"');
+    expect(html).toContain('db-input--invalid');
+    expect(html).toContain('db-input--secret');
+    expect(html).toContain('db-select--invalid');
+    expect(html).toContain('db-textarea--invalid');
+    expect(html).toContain('db-switch');
+    expect(html).toContain('role="tablist"');
+    expect(html).toContain('aria-selected="true"');
+    expect(html).toContain('db-status-pill--warning');
+    expect(html).toContain('db-empty-state');
   });
 });

@@ -50,7 +50,7 @@ export function CanvasCardBar({
             }}
           >
             <Button
-              className="canvas-card"
+              className="canvas-card db-canvas-card"
               size="sm"
               pressed={canvasId === activeCanvasId}
               draggable
@@ -63,7 +63,7 @@ export function CanvasCardBar({
               {canvasId}
             </Button>
             <details className="canvas-card-menu-details" onToggle={(event) => positionCanvasCardMenu(event.currentTarget)}>
-              <summary aria-label="Canvas actions" className="canvas-card-menu-button db-icon-button db-icon-button--ghost db-icon-button--sm" role="button">
+              <summary aria-label="Canvas actions" className="canvas-card-menu-button db-icon-button db-icon-button--ghost db-icon-button--sm db-canvas-control" role="button">
                 <MoreHorizontal size={14} />
               </summary>
               <Menu className="canvas-card-menu" ariaLabel={`${canvasId} canvas actions`}>
@@ -111,7 +111,7 @@ export function CanvasCardBar({
           </div>
         ))}
       </div>
-      <IconButton className="canvas-card-add" label="New Canvas" icon={<Plus size={14} />} onClick={() => { void onCreateCanvas(); }} />
+      <IconButton className="canvas-card-add db-canvas-control" label="New Canvas" icon={<Plus size={14} />} onClick={() => { void onCreateCanvas(); }} />
     </nav>
   );
 }
