@@ -78,13 +78,61 @@ describe('Workbench UI source contract', () => {
   it('keeps Canvas feedback controls inside the compact floating bar geometry', () => {
     const styles = readFileSync('apps/web/src/styles.css', 'utf8');
     const feedbackBarRule = styles.match(/\.canvas-feedback-bar\s*\{[^}]*\}/)?.[0] ?? '';
+    const feedbackMarkRule = styles.match(/\.canvas-feedback-mark\s*\{[^}]*\}/)?.[0] ?? '';
     const feedbackNoteRule = styles.match(/\.canvas-feedback-note\s*\{[^}]*\}/)?.[0] ?? '';
+    const feedbackSource = readFileSync('apps/web/src/workbench/canvas/CanvasFeedbackBar.tsx', 'utf8');
 
-    expect(feedbackBarRule).toContain('height: 32px;');
-    expect(feedbackBarRule).toContain('padding: 3px 4px;');
-    expect(feedbackNoteRule).toContain('height: 24px;');
-    expect(feedbackNoteRule).toContain('min-height: 24px;');
+    expect(feedbackBarRule).toContain('height: 30px;');
+    expect(feedbackBarRule).toContain('grid-template-columns: repeat(7, 28px) 132px;');
+    expect(feedbackBarRule).toContain('padding: 0;');
+    expect(feedbackMarkRule).toContain('width: 28px;');
+    expect(feedbackMarkRule).toContain('height: 28px;');
+    expect(feedbackMarkRule).toContain('border: 0;');
+    expect(feedbackNoteRule).toContain('height: 28px;');
+    expect(feedbackNoteRule).not.toContain('min-height: 28px;');
     expect(feedbackNoteRule).toContain('padding: 0 7px;');
+    expect(feedbackSource).toContain('db-floating-bar canvas-feedback-bar');
+  });
+
+  it('keeps Canvas cards and dock icons on the compact control rhythm', () => {
+    const styles = readFileSync('apps/web/src/styles.css', 'utf8');
+    const cardBarRule = styles.match(/\.canvas-card-bar\s*\{[^}]*\}/)?.[0] ?? '';
+    const cardControlRule = styles.match(/\.canvas-card,\n\.canvas-card-add,\n\.canvas-card-menu-button\s*\{[^}]*\}/)?.[0] ?? '';
+    const cardActionRule = styles.match(/\.canvas-card-menu-button,\n\.canvas-card-add\s*\{[^}]*\}/)?.[0] ?? '';
+    const dockRule = styles.match(/\.floating-dock\s*\{[^}]*\}/)?.[0] ?? '';
+    const dockButtonRule = styles.match(/\.floating-dock \.db-icon-button\s*\{[^}]*\}/)?.[0] ?? '';
+    const cardBarSource = readFileSync('apps/web/src/workbench/canvas/CanvasCardBar.tsx', 'utf8');
+    const dockSource = readFileSync('apps/web/src/workbench/shell/FloatingDock.tsx', 'utf8');
+
+    expect(cardBarRule).toContain('height: 28px;');
+    expect(cardBarRule).toContain('padding: 0;');
+    expect(cardControlRule).toContain('height: 28px;');
+    expect(cardControlRule).not.toContain('min-height: 28px;');
+    expect(cardControlRule).toContain('border: 0;');
+    expect(cardActionRule).toContain('width: 28px;');
+    expect(dockRule).toContain('top: 45px;');
+    expect(dockRule).toContain('width: 28px;');
+    expect(dockRule).toContain('padding: 0;');
+    expect(dockButtonRule).toContain('border: 0;');
+    expect(cardBarSource).toContain('size="sm"');
+    expect(cardBarSource).not.toContain('db-floating-bar');
+    expect(dockSource).toContain('size={14}');
+    expect(dockSource).not.toContain('size={18}');
+    expect(dockSource).not.toContain('db-floating-bar');
+  });
+
+  it('keeps lower-left Canvas controls borderless', () => {
+    const styles = readFileSync('apps/web/src/styles.css', 'utf8');
+    const minimapRule = styles.match(/\.canvas-minimap-bar\s*\{[^}]*\}/)?.[0] ?? '';
+    const resetRule = styles.match(/\.canvas-reset-layout-button\s*\{[^}]*\}/)?.[0] ?? '';
+    const minimapSource = readFileSync('apps/web/src/workbench/canvas/CanvasMinimapBar.tsx', 'utf8');
+    const resetSource = readFileSync('apps/web/src/workbench/canvas/CanvasResetLayoutButton.tsx', 'utf8');
+
+    expect(minimapRule).toContain('border: 0;');
+    expect(styles).toContain('.canvas-minimap-bar[aria-pressed="true"] {\n  outline: 0;\n}');
+    expect(resetRule).toContain('border: 0;');
+    expect(minimapSource).not.toContain('db-floating-bar canvas-minimap-bar');
+    expect(resetSource).not.toContain('db-floating-bar canvas-reset-layout-button');
   });
 
   it('styles invalid state for every Workbench field control', () => {

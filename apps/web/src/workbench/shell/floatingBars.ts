@@ -40,8 +40,8 @@ export interface FloatingBarPlacement extends FloatingBarRect {
 }
 
 export const CANVAS_FEEDBACK_BAR_SIZE = {
-  width: 398,
-  height: 32
+  width: 358,
+  height: 30
 } as const;
 
 export const CANVAS_MINIMAP_BUTTON_SIZE = {
@@ -58,8 +58,8 @@ export const CANVAS_RESET_LAYOUT_BUTTON_SIZE = {
 
 export const CANVAS_CARD_BAR_SIZE = {
   left: 88,
-  bottom: 14,
-  height: 38,
+  bottom: 18,
+  height: 28,
   maxWidth: 720,
   maxViewportWidthRatio: 0.58
 } as const;
@@ -71,7 +71,7 @@ export const CANVAS_MINIMAP_PANEL_SIZE = {
 
 export type CanvasMinimapPanelPlacement = FloatingBarRect;
 
-const FLOATING_BAR_GAP_PX = 1;
+const FLOATING_BAR_GAP_PX = 3;
 const VIEWPORT_PADDING_PX = 8;
 
 export function canvasNodeToViewportRect(input: {

@@ -48,12 +48,17 @@
 .floating-dock {
   position: absolute;
   left: 18px;
-  top: 18px;
+  top: 45px;
   display: flex;
   flex-direction: column;
-  gap: var(--db-space-2);
-  padding: var(--db-space-2);
+  gap: var(--db-space-1);
+  width: 28px;
+  padding: 0;
   pointer-events: auto;
+}
+
+.floating-dock .db-icon-button {
+  border: 0;
 }
 
 .floating-panel {
@@ -237,15 +242,15 @@
 .canvas-card-bar {
   position: fixed;
   left: 88px;
-  bottom: 14px;
+  bottom: 18px;
   z-index: 150;
   pointer-events: auto;
   display: flex;
   align-items: center;
   gap: 6px;
   max-width: min(58vw, 720px, calc(100vw - 96px));
-  height: 38px;
-  padding: 4px;
+  height: 28px;
+  padding: 0;
 }
 
 .canvas-card-scroll {
@@ -268,12 +273,13 @@
 .canvas-card-add,
 .canvas-card-menu-button {
   height: 28px;
+  border: 0;
 }
 
 .canvas-card {
   max-width: 160px;
   min-width: 68px;
-  padding: 0 10px;
+  padding: 0 8px;
   border-radius: 6px 0 0 6px;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -294,14 +300,13 @@
 
 .canvas-card-menu-button,
 .canvas-card-add {
-  width: 30px;
+  width: 28px;
   display: inline-flex;
   align-items: center;
   justify-content: center;
 }
 
 .canvas-card-menu-button {
-  border-left: 0;
   border-radius: 0 6px 6px 0;
   cursor: pointer;
 }
@@ -434,6 +439,7 @@ small {
   place-items: center;
   padding: 0;
   pointer-events: auto;
+  border: 0;
   color: var(--db-text-muted);
   cursor: pointer;
 }
@@ -445,7 +451,7 @@ small {
 }
 
 .canvas-minimap-bar[aria-pressed="true"] {
-  outline: 1px solid color-mix(in oklch, var(--db-accent) 72%, transparent);
+  outline: 0;
 }
 
 .canvas-minimap-bar:disabled {
@@ -462,6 +468,7 @@ small {
   place-items: center;
   padding: 0;
   pointer-events: auto;
+  border: 0;
   color: var(--db-text-muted);
   cursor: pointer;
 }
@@ -805,25 +812,25 @@ small {
 
 .canvas-feedback-bar {
   position: absolute;
-  height: 32px;
+  height: 30px;
   display: grid;
-  grid-template-columns: repeat(7, 26px) minmax(124px, 180px);
+  grid-template-columns: repeat(7, 28px) 132px;
   align-items: center;
   gap: 4px;
-  padding: 3px 4px;
+  padding: 0;
   pointer-events: auto;
 }
 
 .canvas-feedback-mark {
-  width: 26px;
-  height: 24px;
+  width: 28px;
+  height: 28px;
   padding: 0;
+  border: 0;
 }
 
 .canvas-feedback-note {
   width: 100%;
-  height: 24px;
-  min-height: 24px;
+  height: 28px;
   min-width: 0;
   padding: 0 7px;
   font-size: 12px;

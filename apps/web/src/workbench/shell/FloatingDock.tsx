@@ -22,15 +22,15 @@ export function FloatingDock({
   onToggle: (panelId: FloatingPanelId) => void;
 }): React.ReactElement {
   const icons: Record<FloatingPanelId, React.ReactElement> = {
-    explorer: <FolderTree size={18} />,
-    inspector: <CircleDot size={18} />,
-    problems: <AlertTriangle size={18} />,
-    settings: <Settings size={18} />,
-    terminal: <Terminal size={18} />
+    explorer: <FolderTree size={14} />,
+    inspector: <CircleDot size={14} />,
+    problems: <AlertTriangle size={14} />,
+    settings: <Settings size={14} />,
+    terminal: <Terminal size={14} />
   };
 
   return (
-    <nav className="db-floating-bar floating-dock" data-testid="floating-dock" aria-label="Workbench panels">
+    <nav className="floating-dock" data-testid="floating-dock" aria-label="Workbench panels">
       {FLOATING_PANEL_IDS.map((panelId) => (
         <IconButton
           key={panelId}

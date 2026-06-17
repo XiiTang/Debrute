@@ -102,7 +102,7 @@ export function CanvasMinimapBar({
     <>
       <IconButton
         ref={barRef}
-        className="db-floating-bar canvas-minimap-bar"
+        className="canvas-minimap-bar"
         data-testid="canvas-minimap-bar"
         data-canvas-local-wheel="true"
         label="Mini Map"

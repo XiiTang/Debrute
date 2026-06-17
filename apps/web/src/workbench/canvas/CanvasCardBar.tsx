@@ -27,7 +27,7 @@ export function CanvasCardBar({
   onReorderCanvases
 }: CanvasCardBarProps): React.ReactElement {
   return (
-    <nav className="db-floating-bar canvas-card-bar" aria-label="Canvases">
+    <nav className="canvas-card-bar" aria-label="Canvases">
       <div className="canvas-card-scroll">
         {canvasOrder.map((canvasId) => (
           <div
@@ -51,6 +51,7 @@ export function CanvasCardBar({
           >
             <Button
               className="canvas-card"
+              size="sm"
               pressed={canvasId === activeCanvasId}
               draggable
               onDragStart={(event) => {

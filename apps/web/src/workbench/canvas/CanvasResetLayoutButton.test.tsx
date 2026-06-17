@@ -25,6 +25,7 @@ describe('CanvasResetLayoutButton', () => {
     expect(html).toContain('canvas-reset-layout-button');
     expect(html).toContain('data-testid="canvas-reset-layout-button"');
     expect(html).toContain('aria-label="Reset Canvas Layout"');
+    expect(html).not.toContain('db-floating-bar canvas-reset-layout-button');
   });
 
   it('stays disabled when the active canvas has no manual nodes', () => {

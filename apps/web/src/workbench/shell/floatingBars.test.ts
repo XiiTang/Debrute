@@ -23,8 +23,8 @@ describe('floating bar placement', () => {
     });
 
     expect(placement).toEqual({
-      x: 201,
-      y: 321,
+      x: 221,
+      y: 323,
       width: CANVAS_FEEDBACK_BAR_SIZE.width,
       height: CANVAS_FEEDBACK_BAR_SIZE.height,
       placement: 'below'
@@ -40,7 +40,7 @@ describe('floating bar placement', () => {
     });
 
     expect(placement?.placement).toBe('below');
-    expect(placement?.y).toBe(nodeViewportRect.y + nodeViewportRect.height + 1);
+    expect(placement?.y).toBe(nodeViewportRect.y + nodeViewportRect.height + 3);
   });
 
   it('flips feedback above when below does not fit', () => {
@@ -97,8 +97,8 @@ describe('floating bar placement', () => {
       viewportRect: { x: 0, y: 0, width: 1000, height: 700 },
       reservedRects: []
     })).toEqual({
-      x: 241,
-      y: 361,
+      x: 261,
+      y: 363,
       width: CANVAS_FEEDBACK_BAR_SIZE.width,
       height: CANVAS_FEEDBACK_BAR_SIZE.height,
       placement: 'below'
@@ -133,7 +133,7 @@ describe('floating bar placement', () => {
     });
     expect(cardBar).toEqual({
       x: 88,
-      y: 648,
+      y: 654,
       width: 580,
       height: CANVAS_CARD_BAR_SIZE.height
     });

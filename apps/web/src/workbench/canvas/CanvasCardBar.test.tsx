@@ -55,6 +55,7 @@ describe('CanvasCardBar', () => {
     expect(onActiveCanvasChange).toHaveBeenCalledWith('storyboard');
     const html = renderToStaticMarkup(element);
     expect(html).toContain('db-button');
+    expect(html).toContain('db-button--sm');
     expect(html).toContain('db-icon-button');
   });
 
