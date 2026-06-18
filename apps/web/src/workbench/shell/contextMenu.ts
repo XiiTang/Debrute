@@ -79,25 +79,13 @@ export type WorkbenchContextMenuItem =
 export function buildWorkbenchContextMenuItems(input: {
   target: WorkbenchContextMenuTarget;
   projection: CanvasProjection | undefined;
+  canSelectCanvasNode?: boolean | undefined;
   canRevealInCanvas: boolean;
   fileClipboard?: WorkbenchFileClipboard | undefined;
   desktopPlatform?: NodeJS.Platform | undefined;
   adobeBridgeEnabled?: boolean | undefined;
 }): WorkbenchContextMenuItem[] {
-  if (input.target.source === 'canvas') {
-    const node = projectedContextMenuNode(input.projection, input.target.projectRelativePath);
-    return compactMenuItems([
-      node ? action('show-details', 'Show Details') : undefined,
-      node && input.canRevealInCanvas ? action('reveal-in-canvas', 'Reveal in Canvas') : undefined,
-      node?.layoutMode === 'manual' ? action('reset-auto-layout', 'Reset Auto Layout') : undefined,
-      input.target.kind === 'file' && input.adobeBridgeEnabled === true && isSupportedAdobeBridgeWorkbenchFile(input.target.projectRelativePath)
-        ? action('send-to-photoshop', 'Send to Photoshop...')
-        : undefined,
-      action('copy-relative-path', 'Copy Relative Path')
-    ]);
-  }
-
-  if (input.target.targetKind === 'root') {
+  if (input.target.source === 'explorer' && input.target.targetKind === 'root') {
     return [
       action('create-file', 'New File'),
       action('create-directory', 'New Folder'),
@@ -106,7 +94,7 @@ export function buildWorkbenchContextMenuItems(input: {
     ];
   }
 
-  if (input.target.targetKind === 'selection') {
+  if (input.target.source === 'explorer' && input.target.targetKind === 'selection') {
     return [
       action('cut', 'Cut'),
       action('copy', 'Copy'),
@@ -118,29 +106,82 @@ export function buildWorkbenchContextMenuItems(input: {
   }
 
   const targetEntry = explorerContextMenuPrimaryEntry(input.target);
-  return [
-    ...(targetEntry?.kind === 'directory' ? [
-      action('create-file', 'New File'),
-      action('create-directory', 'New Folder'),
-      separator('new')
-    ] : []),
+  if (!targetEntry) {
+    return [];
+  }
+  const node = projectedContextMenuNode(input.projection, targetEntry.projectRelativePath);
+  return buildSinglePathContextMenuItems({
+    ...input,
+    targetEntry,
+    node
+  });
+}
+
+function buildSinglePathContextMenuItems(input: {
+  target: WorkbenchContextMenuTarget;
+  targetEntry: WorkbenchProjectPathEntry;
+  node: ProjectedCanvasNode | undefined;
+  canSelectCanvasNode?: boolean | undefined;
+  canRevealInCanvas: boolean;
+  fileClipboard?: WorkbenchFileClipboard | undefined;
+  desktopPlatform?: NodeJS.Platform | undefined;
+  adobeBridgeEnabled?: boolean | undefined;
+}): WorkbenchContextMenuItem[] {
+  const explorerItem = input.target.source === 'explorer';
+  const directory = input.targetEntry.kind === 'directory';
+  const canvasActions = [
+    action('show-details', 'Show Details', {
+      disabled: !(input.node && input.canSelectCanvasNode === true)
+    }),
+    action('reveal-in-canvas', 'Reveal in Canvas', {
+      disabled: !(input.node && input.canRevealInCanvas)
+    }),
+    action('reset-auto-layout', 'Reset Auto Layout', {
+      disabled: input.node?.layoutMode !== 'manual'
+    })
+  ];
+  const creationActions = explorerItem && directory
+    ? [
+        action('create-file', 'New File'),
+        action('create-directory', 'New Folder')
+      ]
+    : [];
+  const fileActions = [
     action('cut', 'Cut'),
     action('copy', 'Copy'),
-    ...(targetEntry?.kind === 'directory' ? [
+    ...(directory ? [
       action('paste', 'Paste', { disabled: !input.fileClipboard?.entries.length })
     ] : []),
+  ];
+  const pathActions = compactMenuItems([
     action('open-terminal', 'Open in Terminal'),
-    separator('path-actions'),
     action('copy-path', 'Copy Path'),
     action('copy-relative-path', 'Copy Relative Path'),
-    ...(targetEntry?.kind === 'file' && input.adobeBridgeEnabled === true && isSupportedAdobeBridgeWorkbenchFile(targetEntry.projectRelativePath)
-      ? [action('send-to-photoshop', 'Send to Photoshop...')]
-      : []),
-    action('reveal-in-system-file-manager', projectSystemFileManagerLabel(input.desktopPlatform ?? 'linux')),
-    separator('modify'),
-    action('rename', 'Rename'),
+    input.targetEntry.kind === 'file'
+      && input.adobeBridgeEnabled === true
+      && isSupportedAdobeBridgeWorkbenchFile(input.targetEntry.projectRelativePath)
+      ? action('send-to-photoshop', 'Send to Photoshop...')
+      : undefined,
+    action('reveal-in-system-file-manager', projectSystemFileManagerLabel(input.desktopPlatform ?? 'linux'))
+  ]);
+  const modifyActions = [
+    ...(explorerItem ? [action('rename', 'Rename')] : []),
     action('delete', 'Delete')
   ];
+  return groupedMenuItems([
+    { id: 'canvas-actions', items: canvasActions },
+    { id: 'new', items: creationActions },
+    { id: 'file-actions', items: fileActions },
+    { id: 'path-actions', items: pathActions },
+    { id: 'modify', items: modifyActions }
+  ]);
+}
+
+function groupedMenuItems(groups: Array<{ id: string; items: WorkbenchContextMenuItem[] }>): WorkbenchContextMenuItem[] {
+  const populated = groups.filter((group) => group.items.length > 0);
+  return populated.flatMap((group, index) => (
+    index === 0 ? group.items : [separator(group.id), ...group.items]
+  ));
 }
 
 export function explorerContextMenuEntries(target: WorkbenchContextMenuTarget): WorkbenchProjectPathEntry[] {

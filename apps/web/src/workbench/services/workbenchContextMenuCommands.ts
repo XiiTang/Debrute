@@ -56,21 +56,22 @@ export function runWorkbenchContextMenuCommand(input: {
     if (runExplorerCommand(input, target)) {
       return;
     }
-    input.closeContextMenu();
+    if (target.targetKind !== 'item') {
+      input.closeContextMenu();
+      return;
+    }
+  }
+
+  if (runSinglePathFileCommand(input, target)) {
     return;
   }
 
-  const projectRelativePath = target.projectRelativePath;
-  if (input.command === 'copy-relative-path') {
-    void input.copyText(projectRelativePath);
+  const primaryEntry = explorerContextMenuPrimaryEntry(target);
+  if (!primaryEntry) {
     input.closeContextMenu();
     return;
   }
-  if (input.command === 'send-to-photoshop') {
-    input.actions.openSendToPhotoshopPicker(projectRelativePath);
-    input.closeContextMenu();
-    return;
-  }
+  const projectRelativePath = primaryEntry.projectRelativePath;
 
   const node = projectedContextMenuNode(input.activeProjection, projectRelativePath);
   if (!node) {
@@ -80,7 +81,9 @@ export function runWorkbenchContextMenuCommand(input: {
 
   input.activeCanvasRuntime?.setSelection({ kind: 'node', projectRelativePath });
   if (input.command === 'show-details') {
-    input.openInspectorPanel();
+    if (input.activeCanvasRuntime) {
+      input.openInspectorPanel();
+    }
     input.closeContextMenu();
     return;
   }
@@ -94,9 +97,13 @@ export function runWorkbenchContextMenuCommand(input: {
     }));
   }
   if (input.command === 'reset-auto-layout') {
+    if (node.layoutMode !== 'manual') {
+      input.closeContextMenu();
+      return;
+    }
     const canvasId = input.activeProjection?.canvasId;
     if (canvasId) {
-      void input.actions.resetCanvasNodeLayouts(canvasId, canvasLayoutResetInputForTarget(target)).then((result) => {
+      void input.actions.resetCanvasNodeLayouts(canvasId, canvasLayoutResetInputForTarget(primaryEntry)).then((result) => {
         const updatedNode = projectedContextMenuNode(result.projection, projectRelativePath);
         const snapshot = input.activeCanvasRuntime?.getSnapshot();
         if (!updatedNode || !input.activeCanvasRuntime || !snapshot?.surfaceSize) {
@@ -116,7 +123,7 @@ export function runWorkbenchContextMenuCommand(input: {
 }
 
 function canvasLayoutResetInputForTarget(
-  target: Extract<WorkbenchContextMenuTarget, { source: 'canvas' }>
+  target: WorkbenchProjectPathEntry
 ): Parameters<WorkbenchActions['resetCanvasNodeLayouts']>[1] {
   if (target.kind === 'directory' && target.projectRelativePath === '') {
     return { all: true };
@@ -124,6 +131,73 @@ function canvasLayoutResetInputForTarget(
   return {
     pathRules: [target.kind === 'directory' ? `${target.projectRelativePath}/` : target.projectRelativePath]
   };
+}
+
+function runSinglePathFileCommand(
+  input: Parameters<typeof runWorkbenchContextMenuCommand>[0],
+  target: WorkbenchContextMenuTarget
+): boolean {
+  const primaryEntry = explorerContextMenuPrimaryEntry(target);
+  if (!primaryEntry) {
+    return false;
+  }
+  const entries = explorerContextMenuEntries(target);
+  if (input.command === 'cut') {
+    input.setFileClipboard({ operation: 'cut', entries });
+    input.closeContextMenu();
+    return true;
+  }
+  if (input.command === 'copy') {
+    input.setFileClipboard({ operation: 'copy', entries });
+    input.closeContextMenu();
+    return true;
+  }
+  if (input.command === 'paste') {
+    if (target.source === 'canvas' && primaryEntry.kind !== 'directory') {
+      input.closeContextMenu();
+      return true;
+    }
+    runPasteCommand(input, target);
+    input.closeContextMenu();
+    return true;
+  }
+  if (input.command === 'copy-path') {
+    void input.actions.copyProjectAbsolutePaths({ entries })
+      .then((result) => input.copyText(result.paths.join('\n')))
+      .catch((error) => input.notify(notificationMessageForFileCommandError('Copy Path failed', error)));
+    input.closeContextMenu();
+    return true;
+  }
+  if (input.command === 'copy-relative-path') {
+    void input.copyText(explorerContextMenuProjectRelativePaths(target).join('\n'));
+    input.closeContextMenu();
+    return true;
+  }
+  if (input.command === 'open-terminal') {
+    input.actions.openTerminalPanel(terminalCwdForEntry(primaryEntry));
+    input.closeContextMenu();
+    return true;
+  }
+  if (input.command === 'send-to-photoshop') {
+    if (primaryEntry.kind === 'file') {
+      input.actions.openSendToPhotoshopPicker(primaryEntry.projectRelativePath);
+    }
+    input.closeContextMenu();
+    return true;
+  }
+  if (input.command === 'reveal-in-system-file-manager') {
+    void input.actions.revealProjectPathInSystemFileManager(primaryEntry)
+      .catch((error) => input.notify(notificationMessageForFileCommandError('Reveal failed', error)));
+    input.closeContextMenu();
+    return true;
+  }
+  if (input.command === 'delete') {
+    void input.actions.trashProjectPaths({ entries })
+      .catch((error) => input.notify(notificationMessageForFileCommandError('Delete failed', error)));
+    input.closeContextMenu();
+    return true;
+  }
+  return false;
 }
 
 function runExplorerCommand(
@@ -229,9 +303,10 @@ function terminalCwdForExplorerTarget(target: Extract<WorkbenchContextMenuTarget
     return '';
   }
   const entry = explorerContextMenuPrimaryEntry(target);
-  if (!entry) {
-    return '';
-  }
+  return entry ? terminalCwdForEntry(entry) : '';
+}
+
+function terminalCwdForEntry(entry: WorkbenchProjectPathEntry): string {
   if (entry.kind === 'directory') {
     return entry.projectRelativePath;
   }

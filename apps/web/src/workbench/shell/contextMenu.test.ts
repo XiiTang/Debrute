@@ -7,61 +7,108 @@ import {
 } from './contextMenu';
 
 describe('workbench context menu', () => {
-  it('shows Canvas actions and copy path for targets projected in the active Canvas', () => {
+  it('builds the aligned Canvas file node menu without Explorer edit-only actions', () => {
     const items = buildWorkbenchContextMenuItems({
       target: { source: 'canvas', kind: 'file', projectRelativePath: 'flow/cover.png' },
       projection: projectionWithNodes(['flow/cover.png']),
-      canRevealInCanvas: true
+      canSelectCanvasNode: true,
+      canRevealInCanvas: true,
+      fileClipboard: undefined,
+      desktopPlatform: 'darwin',
+      adobeBridgeEnabled: true
     });
 
-    expect(actionCommands(items)).toEqual([
-      'show-details',
-      'reveal-in-canvas',
-      'copy-relative-path'
+    expect(menuShape(items)).toEqual([
+      'show-details:enabled',
+      'reveal-in-canvas:enabled',
+      'reset-auto-layout:disabled',
+      '---',
+      'cut:enabled',
+      'copy:enabled',
+      '---',
+      'open-terminal:enabled',
+      'copy-path:enabled',
+      'copy-relative-path:enabled',
+      'send-to-photoshop:enabled',
+      'reveal-in-system-file-manager:enabled',
+      '---',
+      'delete:enabled'
     ]);
+    expect(actionCommands(items)).not.toContain('create-file');
+    expect(actionCommands(items)).not.toContain('create-directory');
+    expect(actionCommands(items)).not.toContain('rename');
+    expect(actionCommands(items)).not.toContain('paste');
   });
 
-  it('shows Reset Auto Layout for manual Canvas nodes', () => {
+  it('builds the aligned Canvas directory node menu with directory paste', () => {
     const items = buildWorkbenchContextMenuItems({
-      target: { source: 'canvas', kind: 'file', projectRelativePath: 'flow/cover.png' },
-      projection: projectionWithNodes(['flow/cover.png'], new Set(['flow/cover.png'])),
-      canRevealInCanvas: true
+      target: { source: 'canvas', kind: 'directory', projectRelativePath: 'assets' },
+      projection: projectionWithNodes([{ projectRelativePath: 'assets', nodeKind: 'directory', layoutMode: 'manual' }]),
+      canSelectCanvasNode: true,
+      canRevealInCanvas: true,
+      fileClipboard: {
+        operation: 'copy',
+        entries: [{ projectRelativePath: 'briefs/concept.md', kind: 'file' }]
+      },
+      desktopPlatform: 'linux'
     });
 
-    expect(actionCommands(items)).toEqual([
-      'show-details',
-      'reveal-in-canvas',
-      'reset-auto-layout',
-      'copy-relative-path'
+    expect(menuShape(items)).toEqual([
+      'show-details:enabled',
+      'reveal-in-canvas:enabled',
+      'reset-auto-layout:enabled',
+      '---',
+      'cut:enabled',
+      'copy:enabled',
+      'paste:enabled',
+      '---',
+      'open-terminal:enabled',
+      'copy-path:enabled',
+      'copy-relative-path:enabled',
+      'reveal-in-system-file-manager:enabled',
+      '---',
+      'delete:enabled'
     ]);
-    expect(actionLabels(items)).toContain('Reset Auto Layout');
+    expect(actionCommands(items)).not.toContain('rename');
   });
 
-
-  it('shows only copy path for targets absent from the active Canvas projection', () => {
+  it('shows disabled Canvas actions for Project Explorer items absent from the active Canvas', () => {
     const items = buildWorkbenchContextMenuItems({
-      target: { source: 'canvas', kind: 'file', projectRelativePath: 'briefs/concept.md' },
+      target: {
+        source: 'explorer',
+        targetKind: 'item',
+        paths: [{ projectRelativePath: 'briefs/concept.md', kind: 'file' }],
+        primaryPath: 'briefs/concept.md',
+        targetDirectoryPath: 'briefs'
+      },
       projection: projectionWithNodes(['flow/cover.png']),
-      canRevealInCanvas: true
+      canSelectCanvasNode: true,
+      canRevealInCanvas: true,
+      fileClipboard: undefined,
+      desktopPlatform: 'win32'
     });
 
-    expect(actionCommands(items)).toEqual(['copy-relative-path']);
-  });
-
-  it('hides reveal when the active Canvas surface cannot navigate', () => {
-    const items = buildWorkbenchContextMenuItems({
-      target: { source: 'canvas', kind: 'file', projectRelativePath: 'flow/cover.png' },
-      projection: projectionWithNodes(['flow/cover.png']),
-      canRevealInCanvas: false
-    });
-
-    expect(actionCommands(items)).toEqual([
-      'show-details',
-      'copy-relative-path'
+    expect(menuShape(items)).toEqual([
+      'show-details:disabled',
+      'reveal-in-canvas:disabled',
+      'reset-auto-layout:disabled',
+      '---',
+      'cut:enabled',
+      'copy:enabled',
+      '---',
+      'open-terminal:enabled',
+      'copy-path:enabled',
+      'copy-relative-path:enabled',
+      'reveal-in-system-file-manager:enabled',
+      '---',
+      'rename:enabled',
+      'delete:enabled'
     ]);
+    expect(actionLabels(items)).toContain('Reveal in File Explorer');
+    expect(actionCommands(items)).not.toContain('paste');
   });
 
-  it('builds VS Code-style Project Tree menu groups for directories with an empty file clipboard', () => {
+  it('shows enabled Canvas actions for Project Explorer items in the active Canvas', () => {
     const items = buildWorkbenchContextMenuItems({
       target: {
         source: 'explorer',
@@ -70,21 +117,26 @@ describe('workbench context menu', () => {
         primaryPath: 'assets',
         targetDirectoryPath: 'assets'
       },
-      projection: projectionWithNodes([]),
-      canRevealInCanvas: false,
+      projection: projectionWithNodes([{ projectRelativePath: 'assets', nodeKind: 'directory', layoutMode: 'manual' }]),
+      canSelectCanvasNode: true,
+      canRevealInCanvas: true,
       fileClipboard: undefined,
       desktopPlatform: 'darwin'
     });
 
-    expect(items.map((item) => item.kind === 'separator' ? '---' : `${item.command}:${item.disabled === true ? 'disabled' : 'enabled'}`)).toEqual([
+    expect(menuShape(items)).toEqual([
+      'show-details:enabled',
+      'reveal-in-canvas:enabled',
+      'reset-auto-layout:enabled',
+      '---',
       'create-file:enabled',
       'create-directory:enabled',
       '---',
       'cut:enabled',
       'copy:enabled',
       'paste:disabled',
-      'open-terminal:enabled',
       '---',
+      'open-terminal:enabled',
       'copy-path:enabled',
       'copy-relative-path:enabled',
       'reveal-in-system-file-manager:enabled',
@@ -92,12 +144,30 @@ describe('workbench context menu', () => {
       'rename:enabled',
       'delete:enabled'
     ]);
-    expect(actionLabels(items)).toContain('Copy Path');
-    expect(actionLabels(items)).toContain('Copy Relative Path');
     expect(actionLabels(items)).toContain('Reveal in Finder');
-    expect(actionLabels(items)).toContain('Delete');
-    expect(actionLabels(items)).not.toContain('Move to Trash');
-    expect(actionLabels(items)).not.toContain('Delete Permanently');
+  });
+
+  it('disables Reveal in Canvas when the active Canvas surface cannot navigate', () => {
+    const items = buildWorkbenchContextMenuItems({
+      target: {
+        source: 'explorer',
+        targetKind: 'item',
+        paths: [{ projectRelativePath: 'flow/cover.png', kind: 'file' }],
+        primaryPath: 'flow/cover.png',
+        targetDirectoryPath: 'flow'
+      },
+      projection: projectionWithNodes(['flow/cover.png']),
+      canSelectCanvasNode: true,
+      canRevealInCanvas: false,
+      fileClipboard: undefined,
+      desktopPlatform: 'linux'
+    });
+
+    expect(menuShape(items).slice(0, 3)).toEqual([
+      'show-details:enabled',
+      'reveal-in-canvas:disabled',
+      'reset-auto-layout:disabled'
+    ]);
   });
 
   it('enables Project Tree paste when the internal clipboard has a source', () => {
@@ -142,31 +212,6 @@ describe('workbench context menu', () => {
     });
 
     expect(items.find((item) => item.kind === 'action' && item.command === 'paste')).toMatchObject({ disabled: true });
-  });
-
-  it('hides folder-only creation actions for Project Tree file targets', () => {
-    const items = buildWorkbenchContextMenuItems({
-      target: {
-        source: 'explorer',
-        targetKind: 'item',
-        paths: [{ projectRelativePath: 'assets/cover.png', kind: 'file' }],
-        primaryPath: 'assets/cover.png',
-        targetDirectoryPath: 'assets'
-      },
-      projection: projectionWithNodes([]),
-      canRevealInCanvas: false,
-      fileClipboard: undefined,
-      desktopPlatform: 'linux'
-    });
-
-    expect(actionCommands(items)).not.toContain('create-file');
-    expect(actionCommands(items)).not.toContain('create-directory');
-    expect(actionCommands(items)).toContain('copy-path');
-    expect(actionCommands(items)).toContain('delete');
-    expect(actionCommands(items)).not.toContain('delete-permanently');
-    expect(actionCommands(items)).not.toContain('move-to-trash');
-    expect(actionLabels(items)).toContain('Delete');
-    expect(actionLabels(items)).toContain('Copy Path');
   });
 
   it('shows Send to Photoshop for supported Project Tree image files when bridge is enabled', () => {
@@ -253,21 +298,6 @@ describe('workbench context menu', () => {
     ]);
   });
 
-  it('keeps Canvas node menus free of file-management commands', () => {
-    const items = buildWorkbenchContextMenuItems({
-      target: { source: 'canvas', kind: 'file', projectRelativePath: 'flow/cover.png' },
-      projection: projectionWithNodes(['flow/cover.png']),
-      canRevealInCanvas: true,
-      fileClipboard: {
-        operation: 'cut',
-        entries: [{ projectRelativePath: 'briefs/concept.md', kind: 'file' }]
-      },
-      desktopPlatform: 'linux'
-    });
-
-    expect(actionCommands(items)).toEqual(['show-details', 'reveal-in-canvas', 'copy-relative-path']);
-  });
-
   it('centers a Canvas camera on the node while preserving z', () => {
     expect(cameraCenteredOnNode({
       node: {
@@ -310,27 +340,52 @@ function actionLabels(items: ReturnType<typeof buildWorkbenchContextMenuItems>):
   return items.filter((item) => item.kind === 'action').map((item) => item.label);
 }
 
-function projectionWithNodes(paths: string[], manualPaths = new Set<string>()): CanvasProjection {
+function menuShape(items: ReturnType<typeof buildWorkbenchContextMenuItems>): string[] {
+  return items.map((item) => (
+    item.kind === 'separator'
+      ? '---'
+      : `${item.command}:${item.disabled === true ? 'disabled' : 'enabled'}`
+  ));
+}
+
+function projectionWithNodes(
+  nodes: Array<string | {
+    projectRelativePath: string;
+    nodeKind?: 'file' | 'directory';
+    layoutMode?: 'manual';
+  }>,
+  manualPaths = new Set<string>()
+): CanvasProjection {
   return {
     canvasId: 'main',
-    nodes: paths.map((path) => ({
-      projectRelativePath: path,
-      nodeKind: 'file',
-      mediaKind: 'image',
-      x: 0,
-      y: 0,
-      width: 200,
-      height: 120,
-      z: 0,
-      ...(manualPaths.has(path) ? { layoutMode: 'manual' as const } : {}),
-      availability: {
-        state: 'available',
-        size: 100,
-        mimeType: 'image/png',
-        fileUrl: `http://127.0.0.1:17321/api/projects/123e4567-e89b-42d3-a456-426614174000/files/raw/${path}?v=rev`,
-        revision: 'rev'
-      }
-    })),
+    nodes: nodes.map((entry) => {
+      const node = typeof entry === 'string'
+        ? {
+            projectRelativePath: entry,
+            nodeKind: 'file' as const,
+            layoutMode: manualPaths.has(entry) ? 'manual' as const : undefined
+          }
+        : entry;
+      const nodeKind = node.nodeKind ?? 'file';
+      return {
+        projectRelativePath: node.projectRelativePath,
+        nodeKind,
+        ...(nodeKind === 'directory' ? {} : { mediaKind: 'image' as const }),
+        x: 0,
+        y: 0,
+        width: 200,
+        height: 120,
+        z: 0,
+        ...(node.layoutMode ? { layoutMode: node.layoutMode } : {}),
+        availability: {
+          state: 'available',
+          size: 100,
+          mimeType: 'image/png',
+          fileUrl: `http://127.0.0.1:17321/api/projects/123e4567-e89b-42d3-a456-426614174000/files/raw/${node.projectRelativePath}?v=rev`,
+          revision: 'rev'
+        }
+      };
+    }),
     edges: [],
     diagnostics: []
   };

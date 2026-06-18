@@ -238,6 +238,264 @@ describe('workbench context menu commands', () => {
     });
   });
 
+  it('sets the file clipboard from a Canvas Cut command', () => {
+    const setFileClipboard = vi.fn();
+
+    runWorkbenchContextMenuCommand(commandInput({
+      command: 'cut',
+      target: { source: 'canvas', kind: 'file', projectRelativePath: 'flow/cover.png' },
+      activeProjection: canvasProjectionFixture('canvas-1', {
+        projectRelativePath: 'flow/cover.png',
+        x: 200,
+        y: 100,
+        width: 100,
+        height: 50
+      }),
+      actions: {},
+      setFileClipboard
+    }));
+
+    expect(setFileClipboard).toHaveBeenCalledWith({
+      operation: 'cut',
+      entries: [{ projectRelativePath: 'flow/cover.png', kind: 'file' }]
+    });
+  });
+
+  it('copies daemon-returned absolute paths for a Canvas Copy Path command', async () => {
+    const copiedText: string[] = [];
+    const copyProjectAbsolutePaths = vi.fn(async () => ({
+      paths: ['/tmp/debrute-project/flow/cover.png']
+    }));
+
+    runWorkbenchContextMenuCommand(commandInput({
+      command: 'copy-path',
+      target: { source: 'canvas', kind: 'file', projectRelativePath: 'flow/cover.png' },
+      actions: {
+        copyProjectAbsolutePaths
+      },
+      copyText: (text) => {
+        copiedText.push(text);
+      }
+    }));
+
+    await Promise.resolve();
+
+    expect(copyProjectAbsolutePaths).toHaveBeenCalledWith({
+      entries: [{ projectRelativePath: 'flow/cover.png', kind: 'file' }]
+    });
+    expect(copiedText).toEqual(['/tmp/debrute-project/flow/cover.png']);
+  });
+
+  it('opens a terminal in a Canvas directory node', () => {
+    const openTerminalPanel = vi.fn();
+
+    runWorkbenchContextMenuCommand(commandInput({
+      command: 'open-terminal',
+      target: { source: 'canvas', kind: 'directory', projectRelativePath: 'assets' },
+      actions: {
+        openTerminalPanel
+      }
+    }));
+
+    expect(openTerminalPanel).toHaveBeenCalledWith('assets');
+  });
+
+  it('opens a terminal in a Canvas file parent directory', () => {
+    const openTerminalPanel = vi.fn();
+
+    runWorkbenchContextMenuCommand(commandInput({
+      command: 'open-terminal',
+      target: { source: 'canvas', kind: 'file', projectRelativePath: 'flow/cover.png' },
+      actions: {
+        openTerminalPanel
+      }
+    }));
+
+    expect(openTerminalPanel).toHaveBeenCalledWith('flow');
+  });
+
+  it('pastes into a Canvas directory node', async () => {
+    const copyProjectPaths = vi.fn(async () => ({
+      ...batchResult(),
+      results: [{
+        sourceProjectRelativePath: 'briefs/concept.md',
+        projectRelativePath: 'assets/concept.md',
+        kind: 'file' as const,
+        status: 'ok' as const
+      }]
+    }));
+    const setFileClipboard = vi.fn();
+    const clipboard = {
+      operation: 'copy' as const,
+      entries: [{ projectRelativePath: 'briefs/concept.md', kind: 'file' as const }]
+    };
+
+    runWorkbenchContextMenuCommand(commandInput({
+      command: 'paste',
+      target: { source: 'canvas', kind: 'directory', projectRelativePath: 'assets' },
+      actions: {
+        copyProjectPaths
+      },
+      fileClipboard: clipboard,
+      setFileClipboard
+    }));
+
+    await Promise.resolve();
+
+    expect(copyProjectPaths).toHaveBeenCalledWith({
+      entries: [{ projectRelativePath: 'briefs/concept.md', kind: 'file' }],
+      targetDirectoryProjectRelativePath: 'assets'
+    });
+    expect(setFileClipboard).toHaveBeenCalledWith(clipboard);
+  });
+
+  it('does not paste from a stale Canvas file target command', async () => {
+    const copyProjectPaths = vi.fn(async () => ({
+      ...batchResult(),
+      results: []
+    }));
+
+    runWorkbenchContextMenuCommand(commandInput({
+      command: 'paste',
+      target: { source: 'canvas', kind: 'file', projectRelativePath: 'flow/cover.png' },
+      actions: {
+        copyProjectPaths
+      },
+      fileClipboard: {
+        operation: 'copy',
+        entries: [{ projectRelativePath: 'briefs/concept.md', kind: 'file' }]
+      }
+    }));
+
+    await Promise.resolve();
+
+    expect(copyProjectPaths).not.toHaveBeenCalled();
+  });
+
+  it('reveals a Canvas path in the system file manager', async () => {
+    const revealProjectPathInSystemFileManager = vi.fn(async () => ({ ok: true as const }));
+
+    runWorkbenchContextMenuCommand(commandInput({
+      command: 'reveal-in-system-file-manager',
+      target: { source: 'canvas', kind: 'file', projectRelativePath: 'flow/cover.png' },
+      actions: {
+        revealProjectPathInSystemFileManager
+      }
+    }));
+
+    await Promise.resolve();
+
+    expect(revealProjectPathInSystemFileManager).toHaveBeenCalledWith({
+      projectRelativePath: 'flow/cover.png',
+      kind: 'file'
+    });
+  });
+
+  it('deletes a Canvas path through the project trash flow', async () => {
+    const trashProjectPaths = vi.fn(async () => ({
+      ...batchResult(),
+      results: [{
+        sourceProjectRelativePath: 'flow/cover.png',
+        projectRelativePath: 'flow/cover.png',
+        kind: 'file' as const,
+        status: 'ok' as const
+      }]
+    }));
+
+    runWorkbenchContextMenuCommand(commandInput({
+      command: 'delete',
+      target: { source: 'canvas', kind: 'file', projectRelativePath: 'flow/cover.png' },
+      actions: {
+        trashProjectPaths
+      }
+    }));
+
+    await Promise.resolve();
+
+    expect(trashProjectPaths).toHaveBeenCalledWith({
+      entries: [{ projectRelativePath: 'flow/cover.png', kind: 'file' }]
+    });
+  });
+
+  it('runs Show Details from a Project Explorer item that exists in the Canvas projection', () => {
+    const openInspectorPanel = vi.fn();
+    const setSelection = vi.fn<CanvasEditorRuntime['setSelection']>();
+
+    runWorkbenchContextMenuCommand(commandInput({
+      command: 'show-details',
+      target: {
+        source: 'explorer',
+        targetKind: 'item',
+        paths: [{ projectRelativePath: 'flow/cover.png', kind: 'file' }],
+        primaryPath: 'flow/cover.png',
+        targetDirectoryPath: 'flow'
+      },
+      activeProjection: canvasProjectionFixture('canvas-1', {
+        projectRelativePath: 'flow/cover.png',
+        x: 200,
+        y: 100,
+        width: 100,
+        height: 50
+      }),
+      activeCanvasRuntime: canvasRuntimeFixture({ setSelection }),
+      actions: {},
+      openInspectorPanel
+    }));
+
+    expect(setSelection).toHaveBeenCalledWith({ kind: 'node', projectRelativePath: 'flow/cover.png' });
+    expect(openInspectorPanel).toHaveBeenCalled();
+  });
+
+  it('does not reset auto layout from a stale command for an automatic node', async () => {
+    const resetCanvasNodeLayouts = vi.fn(async () => ({
+      projectId: 'project-live-id',
+      projectRevision: 2,
+      resetCount: 0,
+      canvas: {
+        schemaVersion: 1 as const,
+        id: 'canvas-1',
+        nodeElements: [],
+        annotations: [],
+        preferences: {
+          showDiagnostics: true
+        }
+      },
+      projection: canvasProjectionFixture('canvas-1', {
+        projectRelativePath: 'flow/cover.png',
+        x: 200,
+        y: 100,
+        width: 100,
+        height: 50
+      })
+    }));
+
+    runWorkbenchContextMenuCommand(commandInput({
+      command: 'reset-auto-layout',
+      target: {
+        source: 'explorer',
+        targetKind: 'item',
+        paths: [{ projectRelativePath: 'flow/cover.png', kind: 'file' }],
+        primaryPath: 'flow/cover.png',
+        targetDirectoryPath: 'flow'
+      },
+      activeProjection: canvasProjectionFixture('canvas-1', {
+        projectRelativePath: 'flow/cover.png',
+        x: 200,
+        y: 100,
+        width: 100,
+        height: 50
+      }),
+      activeCanvasRuntime: canvasRuntimeFixture(),
+      actions: {
+        resetCanvasNodeLayouts
+      }
+    }));
+
+    await Promise.resolve();
+
+    expect(resetCanvasNodeLayouts).not.toHaveBeenCalled();
+  });
+
   it('resets a manual Canvas node and centers its updated projection', async () => {
     const resetCanvasNodeLayouts = vi.fn(async () => ({
       projectId: 'project-live-id',
@@ -406,6 +664,7 @@ function commandInput(overrides: {
   snapshot?: WorkbenchProjectSessionSnapshot;
   copyText?: Parameters<typeof runWorkbenchContextMenuCommand>[0]['copyText'];
   setFileClipboard?: Parameters<typeof runWorkbenchContextMenuCommand>[0]['setFileClipboard'];
+  openInspectorPanel?: Parameters<typeof runWorkbenchContextMenuCommand>[0]['openInspectorPanel'];
   confirmPermanentDelete?: Parameters<typeof runWorkbenchContextMenuCommand>[0]['confirmPermanentDelete'];
   confirmMoveOverwrite?: (input: { entries: Array<{ projectRelativePath: string; kind: 'file' | 'directory' }>; targetDirectoryProjectRelativePath: string }) => boolean;
 }): Parameters<typeof runWorkbenchContextMenuCommand>[0] {
@@ -437,7 +696,7 @@ function commandInput(overrides: {
     copyText: overrides.copyText ?? (() => undefined),
     notify: () => undefined,
     closeContextMenu: () => undefined,
-    openInspectorPanel: () => undefined,
+    openInspectorPanel: overrides.openInspectorPanel ?? (() => undefined),
     confirmPermanentDelete: overrides.confirmPermanentDelete ?? (() => true),
     projectSnapshot: overrides.snapshot,
     confirmMoveOverwrite: overrides.confirmMoveOverwrite ?? (() => true)

@@ -922,12 +922,13 @@ export function WorkbenchApp(): React.ReactElement {
       ? buildWorkbenchContextMenuItems({
           target: contextMenu.target,
           projection: activeProjection,
+          canSelectCanvasNode: Boolean(activeCanvasRuntime),
           canRevealInCanvas,
           fileClipboard,
           desktopPlatform,
           adobeBridgeEnabled: adobeBridge?.settings.enabled === true
         })
-    : [], [activeProjection, adobeBridge?.settings.enabled, canRevealInCanvas, contextMenu, desktopPlatform, fileClipboard]);
+    : [], [activeCanvasRuntime, activeProjection, adobeBridge?.settings.enabled, canRevealInCanvas, contextMenu, desktopPlatform, fileClipboard]);
   const canvasOrder = snapshot?.canvasRegistry.status === 'ready'
     ? snapshot.canvasRegistry.canvasOrder
     : [];
