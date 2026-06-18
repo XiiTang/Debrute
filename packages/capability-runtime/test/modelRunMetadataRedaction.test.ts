@@ -157,4 +157,11 @@ describe('model run metadata redaction', () => {
       { secrets: ['sk-one-secret', 'sk-two-secret'] }
     )).toBe('first [redacted] second [redacted] url https://api.example.test/v1?api_key=%5Bredacted%5D');
   });
+
+  it('redacts overlapping active secrets without leaving suffixes', () => {
+    expect(redactRuntimeSecretString(
+      'provider echoed sk-overlap-long',
+      { secrets: ['sk-overlap', 'sk-overlap-long'] }
+    )).toBe('provider echoed [redacted]');
+  });
 });

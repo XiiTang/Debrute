@@ -51,7 +51,8 @@ export function redactRuntimeSecretString(
 }
 
 function normalizedSecrets(secrets: string[] | undefined): string[] {
-  return [...new Set((secrets ?? []).map((secret) => secret.trim()).filter(Boolean))];
+  return [...new Set((secrets ?? []).map((secret) => secret.trim()).filter(Boolean))]
+    .sort((left, right) => right.length - left.length);
 }
 
 function redactValue(value: unknown, secrets: string[]): unknown {
