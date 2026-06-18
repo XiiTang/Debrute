@@ -1,5 +1,5 @@
-export interface ModelRunMetadataRedactionOptions {
-  apiKey?: string;
+export interface RuntimeSecretRedactionOptions {
+  secrets?: string[];
 }
 
 const REDACTED = '[redacted]';
@@ -36,37 +36,47 @@ const SENSITIVE_QUERY_PARAM_NAMES = new Set([
   'xamzsignature'
 ]);
 
-export function redactModelRunMetadata(
+export function redactRuntimeSecrets(
   value: unknown,
-  options: ModelRunMetadataRedactionOptions = {}
+  options: RuntimeSecretRedactionOptions = {}
 ): unknown {
-  const apiKey = typeof options.apiKey === 'string' && options.apiKey.length > 0 ? options.apiKey : undefined;
-  return redactValue(value, apiKey);
+  return redactValue(value, normalizedSecrets(options.secrets));
 }
 
-function redactValue(value: unknown, apiKey: string | undefined): unknown {
+export function redactRuntimeSecretString(
+  value: string,
+  options: RuntimeSecretRedactionOptions = {}
+): string {
+  return redactString(value, normalizedSecrets(options.secrets));
+}
+
+function normalizedSecrets(secrets: string[] | undefined): string[] {
+  return [...new Set((secrets ?? []).map((secret) => secret.trim()).filter(Boolean))];
+}
+
+function redactValue(value: unknown, secrets: string[]): unknown {
   if (typeof value === 'string') {
-    return redactString(value, apiKey);
+    return redactString(value, secrets);
   }
   if (Array.isArray(value)) {
-    return value.map((item) => redactValue(item, apiKey));
+    return value.map((item) => redactValue(item, secrets));
   }
   if (!value || typeof value !== 'object') {
     return value;
   }
   return Object.fromEntries(Object.entries(value as Record<string, unknown>).map(([key, childValue]) => [
     key,
-    isSensitiveName(key, SENSITIVE_FIELD_NAMES) ? REDACTED : redactValue(childValue, apiKey)
+    isSensitiveName(key, SENSITIVE_FIELD_NAMES) ? REDACTED : redactValue(childValue, secrets)
   ]));
 }
 
-function redactString(value: string, apiKey: string | undefined): string {
-  const withoutApiKey = apiKey ? value.split(apiKey).join(REDACTED) : value;
-  const mediaDataUrl = redactMediaDataUrl(withoutApiKey);
+function redactString(value: string, secrets: string[]): string {
+  const withoutSecrets = secrets.reduce((current, secret) => current.split(secret).join(REDACTED), value);
+  const mediaDataUrl = redactMediaDataUrl(withoutSecrets);
   if (mediaDataUrl !== undefined) {
     return mediaDataUrl;
   }
-  return redactUrlQueryParams(withoutApiKey);
+  return redactUrlQueryParams(withoutSecrets);
 }
 
 function redactMediaDataUrl(value: string): string | undefined {
@@ -78,6 +88,14 @@ function redactMediaDataUrl(value: string): string | undefined {
 }
 
 function redactUrlQueryParams(value: string): string {
+  const redactedInlineUrls = value.replace(/https?:\/\/[^\s"'<>]+/g, (url) => redactSingleUrlQueryParams(url));
+  if (redactedInlineUrls !== value) {
+    return redactedInlineUrls;
+  }
+  return redactSingleUrlQueryParams(value);
+}
+
+function redactSingleUrlQueryParams(value: string): string {
   let url: URL;
   try {
     url = new URL(value);

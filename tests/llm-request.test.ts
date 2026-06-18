@@ -217,6 +217,67 @@ describe('runtime LLM request', () => {
       error: { code: 'no_llm_model_configured' }
     });
   });
+
+  it('redacts active provider keys from LLM success outputs', async () => {
+    const provider = fakeChatProvider('fake-main', [
+      { type: 'message', modelKey: 'fake-main:model-a', text: 'provider echoed sk-llm-secret' }
+    ]);
+
+    const result = await runLlmRuntimeRequest({ prompt: 'Echo.' }, {
+      providers: fakeProviderRegistry([provider], { 'fake-main': 'sk-llm-secret' }),
+      defaultModelKey: 'fake-main:model-a'
+    });
+
+    expect(result).toMatchObject({
+      status: 'ok',
+      outputs: {
+        content: 'provider echoed [redacted]',
+        text: 'provider echoed [redacted]',
+        modelKey: 'fake-main:model-a'
+      }
+    });
+    expect(JSON.stringify(result)).not.toContain('sk-llm-secret');
+  });
+
+  it('redacts active provider keys from LLM provider errors and thrown errors', async () => {
+    const errorResponseProvider = fakeChatProvider('fake-main', [
+      { type: 'error', modelKey: 'fake-main:model-a', message: 'bad key sk-llm-secret', retryable: false }
+    ]);
+    const errorResponse = await runLlmRuntimeRequest({ prompt: 'Fail.' }, {
+      providers: fakeProviderRegistry([errorResponseProvider], { 'fake-main': 'sk-llm-secret' }),
+      defaultModelKey: 'fake-main:model-a'
+    });
+
+    expect(errorResponse).toMatchObject({
+      status: 'error',
+      error: { message: 'bad key [redacted]' },
+      outputs: { content: 'bad key [redacted]' }
+    });
+    expect(JSON.stringify(errorResponse)).not.toContain('sk-llm-secret');
+
+    const throwingProvider: ChatProvider = {
+      id: 'fake-main',
+      providerType: 'openai_compat',
+      modelKeys: ['fake-main:model-a'],
+      async send() {
+        throw new Error('transport included sk-llm-secret');
+      }
+    };
+    const thrown = await runLlmRuntimeRequest({ prompt: 'Throw.' }, {
+      providers: fakeProviderRegistry([throwingProvider], { 'fake-main': 'sk-llm-secret' }),
+      defaultModelKey: 'fake-main:model-a'
+    });
+
+    expect(thrown).toMatchObject({
+      status: 'error',
+      error: { message: 'transport included [redacted]' },
+      outputs: {
+        content: 'transport included [redacted]',
+        text: 'transport included [redacted]'
+      }
+    });
+    expect(JSON.stringify(thrown)).not.toContain('sk-llm-secret');
+  });
 });
 
 async function waitForAbortOrDelay(signal: AbortSignal | undefined, delayMs: number): Promise<void> {
@@ -229,12 +290,20 @@ async function waitForAbortOrDelay(signal: AbortSignal | undefined, delayMs: num
   });
 }
 
-function fakeProviderRegistry(providers: ChatProvider[]): { providerForModel(modelKey: string): ChatProvider | undefined } {
+function fakeProviderRegistry(
+  providers: ChatProvider[],
+  secretsByProviderId: Record<string, string> = {}
+): { providerForModel(modelKey: string): ChatProvider | undefined; apiKeysForModel(modelKey: string): string[] } {
   const byId = new Map(providers.map((provider) => [provider.id, provider]));
   return {
     providerForModel(modelKey: string): ChatProvider | undefined {
       const providerId = modelKey.includes(':') ? modelKey.slice(0, modelKey.indexOf(':')) : modelKey;
       return byId.get(providerId);
+    },
+    apiKeysForModel(modelKey: string): string[] {
+      const providerId = modelKey.includes(':') ? modelKey.slice(0, modelKey.indexOf(':')) : modelKey;
+      const apiKey = secretsByProviderId[providerId]?.trim();
+      return apiKey ? [apiKey] : [];
     }
   };
 }

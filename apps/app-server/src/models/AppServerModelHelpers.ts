@@ -162,7 +162,8 @@ export function imageModelBatchResultFromExecution(result: ExecuteImageModelRequ
     status: 'failed',
     error: {
       code: result.error,
-      message: result.content
+      message: result.content,
+      ...(result.details ? { details: result.details } : {})
     }
   };
 }

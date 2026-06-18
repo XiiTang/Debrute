@@ -8,7 +8,7 @@ import {
   readResponseArrayBufferWithTimeout as readResponseArrayBufferBodyWithTimeout,
   readResponseTextWithTimeout as readResponseTextBodyWithTimeout
 } from '../requestTimeout.js';
-import { redactModelRunMetadata } from '../modelRunMetadataRedaction.js';
+import { redactRuntimeSecrets } from '../modelRunMetadataRedaction.js';
 import {
   fetchPublicHttpUrl,
   resolveHttpRedirectUrl,
@@ -539,7 +539,7 @@ function objectAt(value: unknown): Record<string, unknown> | undefined {
 }
 
 function redactModelRunValue(state: Pick<RequestState, 'apiKey'>, value: unknown): unknown {
-  return redactModelRunMetadata(value, { apiKey: state.apiKey });
+  return redactRuntimeSecrets(value, { secrets: [state.apiKey] });
 }
 
 function truncateString(value: string): string {

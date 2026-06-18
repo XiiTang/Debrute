@@ -7,6 +7,7 @@ export * from './llmRequest/runtimeRequest.js';
 export * from './imageModels/catalog.js';
 export * from './imageModels/officialDocs/index.js';
 export * from './imageModels/executor.js';
+export * from './modelRunMetadataRedaction.js';
 export * from './remoteFetchPolicy.js';
 export * from './videoModels/catalog.js';
 export * from './videoModels/normalizer.js';

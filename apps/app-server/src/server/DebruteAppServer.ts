@@ -1,5 +1,5 @@
 import { randomUUID } from 'node:crypto';
-import { access, mkdir, stat } from 'node:fs/promises';
+import { access, mkdir, realpath, stat } from 'node:fs/promises';
 import { basename, join } from 'node:path';
 import { EventEmitter } from 'node:events';
 import {
@@ -569,7 +569,7 @@ export class DebruteAppServer {
 
   async pushCanvasMapForProject(projectRoot: string, input: { canvasId: string }): Promise<{ ok: true; command: 'canvas-map.push'; canvasId: string }> {
     try {
-      return await this.canvasMapSessionService.pushCanvasMapForProject(projectRoot, input);
+      return await this.canvasMapSessionService.pushCanvasMapForProject(await realpath(projectRoot), input);
     } catch (error) {
       if (error instanceof CanvasMapError) {
         throw canvasMapServiceError(error, input.canvasId);

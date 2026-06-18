@@ -1,5 +1,5 @@
 import { createHash, randomUUID } from 'node:crypto';
-import { mkdir, open, readFile, rename, rm, writeFile, type FileHandle } from 'node:fs/promises';
+import { mkdir, open, readFile, realpath, rename, rm, writeFile, type FileHandle } from 'node:fs/promises';
 import { dirname, isAbsolute, relative } from 'node:path';
 import { resolveNoSymlinkProjectPathForWrite } from '@debrute/project-core';
 import { documentServiceError } from './ProjectDocumentDiagnostics.js';
@@ -202,7 +202,7 @@ async function resolveProjectDocumentDeletes(
 }
 
 async function resolveProjectDocumentMutationPath(projectRoot: string, owner: string, absolutePath: string): Promise<string> {
-  const projectRelativePath = projectRelativeDocumentPath(projectRoot, absolutePath);
+  const projectRelativePath = await projectRelativeDocumentPath(projectRoot, absolutePath);
   const descriptor = projectDocumentDescriptorForPath(projectRelativePath);
   if (!descriptor) {
     throw documentServiceError('document_descriptor_violation', 'Project document path is not registered.', {
@@ -230,7 +230,7 @@ async function resolveProjectDocumentReads(
 }
 
 async function resolveProjectDocumentReadPath(projectRoot: string, absolutePath: string): Promise<string> {
-  const relativePath = projectRelativeDocumentPath(projectRoot, absolutePath);
+  const relativePath = await projectRelativeDocumentPath(projectRoot, absolutePath);
   if (projectDocumentDescriptorForPath(relativePath) === undefined) {
     throw documentServiceError('document_descriptor_violation', 'Project document path is not registered.', {
       file_path: absolutePath
@@ -380,14 +380,29 @@ function suppressRollbackEvent(
   (operation.suppressInternalEvent as (path: string, content: string) => void)(absolutePath, content);
 }
 
-function projectRelativeDocumentPath(projectRoot: string, absolutePath: string): string {
-  const relativePath = relative(projectRoot, absolutePath);
-  if (!relativePath || relativePath.startsWith('..') || isAbsolute(relativePath)) {
-    throw documentServiceError('document_descriptor_violation', 'Project document path is outside the project root.', {
-      file_path: absolutePath
-    });
+async function projectRelativeDocumentPath(projectRoot: string, absolutePath: string): Promise<string> {
+  const lexicalRelativePath = projectRelativeDocumentPathIfInside(projectRoot, absolutePath);
+  if (lexicalRelativePath) {
+    return lexicalRelativePath;
   }
-  return relativePath.replaceAll('\\', '/');
+
+  const projectRootRealPath = await realpath(projectRoot);
+  const canonicalRelativePath = projectRelativeDocumentPathIfInside(projectRootRealPath, absolutePath);
+  if (canonicalRelativePath) {
+    return canonicalRelativePath;
+  }
+
+  const targetRealPath = await realpathIfExisting(absolutePath);
+  if (targetRealPath) {
+    const targetRelativePath = projectRelativeDocumentPathIfInside(projectRootRealPath, targetRealPath);
+    if (targetRelativePath) {
+      return targetRelativePath;
+    }
+  }
+
+  throw documentServiceError('document_descriptor_violation', 'Project document path is outside the project root.', {
+    file_path: absolutePath
+  });
 }
 
 function projectRelativeDocumentPathIfInside(projectRoot: string, absolutePath: string): string | undefined {
@@ -396,6 +411,14 @@ function projectRelativeDocumentPathIfInside(projectRoot: string, absolutePath: 
     return undefined;
   }
   return relativePath.replaceAll('\\', '/');
+}
+
+async function realpathIfExisting(path: string): Promise<string | undefined> {
+  try {
+    return await realpath(path);
+  } catch {
+    return undefined;
+  }
 }
 
 function isMissingPathError(error: unknown): boolean {

@@ -99,6 +99,9 @@ importers:
       '@debrute/app-server':
         specifier: workspace:*
         version: link:../app-server
+      '@debrute/capability-runtime':
+        specifier: workspace:*
+        version: link:../../packages/capability-runtime
       '@debrute/project-core':
         specifier: workspace:*
         version: link:../../packages/project-core

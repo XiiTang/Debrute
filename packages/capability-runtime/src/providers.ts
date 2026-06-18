@@ -73,6 +73,12 @@ export class ProviderRegistry {
     return this.providers.get(providerId);
   }
 
+  apiKeysForModel(modelKey: string): string[] {
+    const providerId = providerIdForModelKey(modelKey);
+    const apiKey = this.providerRecords.get(providerId)?.apiKey.trim();
+    return apiKey ? [apiKey] : [];
+  }
+
   resolve(modelKey: string): ResolvedProvider {
     const spec = this.models.get(modelKey);
     if (!spec) {

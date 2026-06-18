@@ -7,7 +7,7 @@ import {
   readResponseArrayBufferWithTimeout as readResponseArrayBufferBodyWithTimeout,
   readResponseTextWithTimeout as readResponseTextBodyWithTimeout
 } from '../requestTimeout.js';
-import { redactModelRunMetadata } from '../modelRunMetadataRedaction.js';
+import { redactRuntimeSecretString, redactRuntimeSecrets } from '../modelRunMetadataRedaction.js';
 import {
   assertPublicHttpUrl,
   fetchPublicHttpUrl,
@@ -69,7 +69,7 @@ export type ImageGeneratedAssetRecorder = (input: ImageGeneratedAssetRecorderInp
 
 export type ExecuteImageModelRequestResult =
   | { status: 'ok'; content: string; artifacts: ImageModelRequestArtifact[]; logs: Array<Record<string, unknown>> }
-  | { status: 'error'; content: string; error: string; logs: Array<Record<string, unknown>> };
+  | { status: 'error'; content: string; error: string; logs: Array<Record<string, unknown>>; details?: Record<string, unknown> };
 
 interface ImagePayload {
   data: Uint8Array;
@@ -200,10 +200,11 @@ export async function executeImageModelRequest(input: ExecuteImageModelRequestIn
       logs
     };
   } catch (error) {
-    log(state, 'error', { message: errorMessage(error) });
+    const message = redactModelRunMessage(state, errorMessage(error));
+    log(state, 'error', { message });
     return {
       status: 'error',
-      content: `Image request failed: ${errorMessage(error)}`,
+      content: `Image request failed: ${message}`,
       error: 'image_request_failed',
       logs
     };
@@ -566,7 +567,7 @@ async function fetchWithTimeout(state: RequestState, url: string, init: RequestI
 
 function recordModelRequest(state: RequestState, request: unknown): void {
   if (state.modelRun.request === undefined) {
-    state.modelRun.request = redactModelRunMetadata(request, { apiKey: state.apiKey });
+    state.modelRun.request = redactModelRunValue(state, request);
   }
 }
 
@@ -579,28 +580,35 @@ async function parseModelResponse(
   try {
     payload = parseJsonObject(rawBody);
   } catch (error) {
-    const body = rawBody.trim() ? { raw: truncateString(rawBody) } : { raw: '' };
+    const endpointResponse = {
+      status: response.status,
+      body: redactModelRunValue(state, rawBody.trim() ? { raw: truncateString(rawBody) } : { raw: '' })
+    };
     state.modelRun.responses.push({
       status: response.status,
-      headers: Object.fromEntries(response.headers.entries()),
-      body
+      headers: redactModelRunValue(state, Object.fromEntries(response.headers.entries())) as Record<string, string>,
+      body: endpointResponse.body
     });
-    log(state, 'execute_request', { status: response.status, payloadShape: summarizeJsonShape(body) });
-    return { ok: false, result: failure(state, 'response_parse_failed', { reason: errorMessage(error), status: response.status }) };
+    log(state, 'execute_request', { status: response.status, payloadShape: summarizeJsonShape(endpointResponse.body) });
+    return { ok: false, result: failure(state, 'response_parse_failed', { reason: redactModelRunMessage(state, errorMessage(error)), status: response.status, endpointResponse }) };
   }
+  const endpointResponse = {
+    status: response.status,
+    body: redactModelRunValue(state, payload)
+  };
   state.modelRun.responses.push({
     status: response.status,
-    headers: Object.fromEntries(response.headers.entries()),
-    body: payload
+    headers: redactModelRunValue(state, Object.fromEntries(response.headers.entries())) as Record<string, string>,
+    body: endpointResponse.body
   });
-  log(state, 'execute_request', { status: response.status, payloadShape: summarizeJsonShape(payload) });
+  log(state, 'execute_request', { status: response.status, payloadShape: summarizeJsonShape(endpointResponse.body) });
   if (!response.ok) {
     return {
       ok: false,
       result: failure(
         state,
         'request_failed',
-        { status: response.status, payloadShape: summarizeJsonShape(payload) },
+        { status: response.status, payloadShape: summarizeJsonShape(endpointResponse.body), endpointResponse },
         `Image request failed: model endpoint responded with HTTP ${response.status}.`
       )
     };
@@ -669,12 +677,12 @@ async function storeImagePayload(
   );
   const [width, height] = detectDimensions(Buffer.from(payload.data), payload.mimeType);
   const modelRun: ImageGeneratedAssetRecorderInput['modelRun'] = {
-    request: redactModelRunMetadata(state.modelRun.request ?? null, { apiKey: state.apiKey }),
-    output: redactModelRunMetadata({
+    request: redactModelRunValue(state, state.modelRun.request ?? null),
+    output: redactModelRunValue(state, {
       responses: [...state.modelRun.responses],
       parsed: output,
       artifactIndex: index
-    }, { apiKey: state.apiKey })
+    })
   };
   await state.recordGeneratedAsset?.({
     projectRelativePath: normalizedPath,
@@ -1503,19 +1511,21 @@ function omittedDataUrlImage(value: string): Record<string, unknown> {
 }
 
 function failure(
-  state: Pick<RequestState, 'logs'>,
+  state: Pick<RequestState, 'apiKey' | 'logs'>,
   error: string,
   raw?: Record<string, unknown>,
   content = `Image request failed: ${error}`
 ): ImageRequestError {
+  const details = raw ? redactModelRunValue(state, raw) as Record<string, unknown> : undefined;
   if (raw) {
-    state.logs.push({ stage: 'error', ...sanitizeLog(raw) });
+    state.logs.push({ stage: 'error', ...sanitizeLog(details) });
   }
   return {
     status: 'error',
     content,
     error,
-    logs: state.logs
+    logs: state.logs,
+    ...(details ? { details } : {})
   };
 }
 
@@ -1526,6 +1536,14 @@ function log(state: Pick<RequestState, 'logs'>, stage: string, value: Record<str
 function sanitizeLog(value: unknown): Record<string, unknown> {
   const sanitized = sanitizeValue(value);
   return objectAt(sanitized) ?? { value: sanitized };
+}
+
+function redactModelRunValue(state: Pick<RequestState, 'apiKey'>, value: unknown): unknown {
+  return redactRuntimeSecrets(value, { secrets: [state.apiKey] });
+}
+
+function redactModelRunMessage(state: Pick<RequestState, 'apiKey'>, value: string): string {
+  return redactRuntimeSecretString(value, { secrets: [state.apiKey] });
 }
 
 function sanitizeValue(value: unknown, key = ''): unknown {

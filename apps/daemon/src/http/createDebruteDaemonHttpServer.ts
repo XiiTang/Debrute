@@ -8,6 +8,7 @@ import { pipeline } from 'node:stream/promises';
 import { fileURLToPath } from 'node:url';
 import Busboy from 'busboy';
 import { DebruteAppServer, DebruteGlobalRuntimeServer, GlobalConfigStore, type DebruteAppServerOptions } from '@debrute/app-server';
+import { redactRuntimeSecretString, redactRuntimeSecrets } from '@debrute/capability-runtime';
 import {
   normalizeDebruteRuntimeInfo,
   type AppServerEvent,
@@ -1670,8 +1671,8 @@ function writeError(
   const body: DebruteHttpErrorBody = {
     error: {
       code,
-      message,
-      ...(details ? { details } : {})
+      message: redactRuntimeSecretString(message),
+      ...(details ? { details: redactRuntimeSecrets(details) as Record<string, unknown> } : {})
     }
   };
   writeJson(response, statusCode, body);

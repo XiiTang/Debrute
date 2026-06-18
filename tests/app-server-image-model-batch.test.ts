@@ -392,6 +392,72 @@ describe('DebruteAppServer image model batch', () => {
       await rm(debruteHome, { recursive: true, force: true });
     }
   });
+
+  test('redacts active image API keys from failed batch JSONL output', async () => {
+    const projectRoot = await mkdtemp(join(tmpdir(), 'debrute-app-server-batch-redaction-project-'));
+    const debruteHome = await mkdtemp(join(tmpdir(), 'debrute-app-server-batch-redaction-home-'));
+    const logPath = 'batch-results.jsonl';
+    const configStore = new GlobalConfigStore({ debruteHome });
+    await configStore.saveImageModels({
+      imageModels: [{ debruteModelId: 'gpt-image-2', requestModelIdOverride: 'gpt-image-2' }]
+    });
+    await configStore.saveSecrets({
+      llmProviderApiKeys: {},
+      imageModelApiKeys: { 'gpt-image-2': 'sk-image-batch-secret' },
+      videoModelApiKeys: {}
+    });
+    const server = new DebruteAppServer({
+      globalConfigStore: configStore,
+      imageModelFetch: async () => new Response(JSON.stringify({
+        error: {
+          message: 'provider echoed sk-image-batch-secret',
+          apiKey: 'sk-image-batch-secret'
+        }
+      }), {
+        status: 400,
+        headers: { 'content-type': 'application/json' }
+      })
+    });
+
+    try {
+      await server.openProject(projectRoot, {
+        initializeIfMissing: true,
+        createDefaultCanvas: false
+      });
+
+      await server.runImageModelBatch({
+        source: {
+          kind: 'requests',
+          requests: [{
+            model: 'gpt-image-2',
+            arguments: {
+              prompt: 'will fail',
+              output_path: 'generated/failed.png'
+            },
+            outputPath: 'generated/failed.png'
+          }]
+        },
+        concurrency: 1,
+        retries: 0,
+        logPath
+      });
+
+      const content = await readFile(join(projectRoot, logPath), 'utf8');
+      expect(content).toContain('[redacted]');
+      expect(content).not.toContain('sk-image-batch-secret');
+      const [result] = content.trim().split('\n').map((line) => JSON.parse(line) as Record<string, unknown>);
+      expect(result).toMatchObject({
+        status: 'failed',
+        error: {
+          code: 'request_failed'
+        }
+      });
+    } finally {
+      server.close();
+      await rm(projectRoot, { recursive: true, force: true });
+      await rm(debruteHome, { recursive: true, force: true });
+    }
+  });
 });
 
 function jsonResponse(body: unknown, status = 200): Response {

@@ -1,9 +1,11 @@
 import { capabilityError, capabilityOk, type DebruteCapabilityResult } from '@debrute/capability-core';
 import type { ChatProvider, ProviderRequest } from '../providers.js';
+import { redactRuntimeSecretString, redactRuntimeSecrets } from '../modelRunMetadataRedaction.js';
 import { DEFAULT_REQUEST_TIMEOUT_MS, createRequestTimeoutSignal, isRequestTimeoutError, parseRequestTimeoutMs } from '../requestTimeout.js';
 
 export interface LlmProviderResolver {
   providerForModel(modelKey: string): ChatProvider | undefined;
+  apiKeysForModel?(modelKey: string): string[];
 }
 
 export interface LlmRuntimeRequestOptions {
@@ -49,6 +51,11 @@ export async function runLlmRuntimeRequest(input: Record<string, unknown>, optio
       modelKey: parsed.value.modelKey
     });
   }
+  const activeSecrets = options.providers.apiKeysForModel?.(parsed.value.modelKey) ?? [];
+  const redactText = (value: string): string => redactRuntimeSecretString(value, { secrets: activeSecrets });
+  const redactObject = (value: Record<string, unknown>): Record<string, unknown> => (
+    redactRuntimeSecrets(value, { secrets: activeSecrets }) as Record<string, unknown>
+  );
 
   const timeout = createRequestTimeoutSignal(options.signal, parsed.value.timeoutMs);
   let response: Awaited<ReturnType<typeof provider.send>>;
@@ -77,13 +84,14 @@ export async function runLlmRuntimeRequest(input: Record<string, unknown>, optio
         }
       });
     }
-    return capabilityError('llm_request_failed', errorMessage(error), {
+    const message = redactText(errorMessage(error));
+    return capabilityError('llm_request_failed', message, {
       modelKey: parsed.value.modelKey,
       retryable: true
     }, {
       outputs: {
-        content: errorMessage(error),
-        text: errorMessage(error),
+        content: message,
+        text: message,
         modelKey: parsed.value.modelKey
       }
     });
@@ -92,20 +100,22 @@ export async function runLlmRuntimeRequest(input: Record<string, unknown>, optio
   }
 
   if (response.type === 'error') {
-    return capabilityError('llm_request_failed', response.message, {
+    const message = redactText(response.message);
+    return capabilityError('llm_request_failed', message, {
       modelKey: parsed.value.modelKey,
       retryable: response.retryable
     }, {
       outputs: {
-        content: response.message,
+        content: message,
         modelKey: parsed.value.modelKey
       }
     });
   }
 
+  const text = redactText(response.text);
   const outputs: Record<string, unknown> = {
-    content: response.text,
-    text: response.text,
+    content: text,
+    text,
     modelKey: response.modelKey
   };
 
@@ -115,10 +125,10 @@ export async function runLlmRuntimeRequest(input: Record<string, unknown>, optio
       return capabilityError('llm_invalid_json', json.message, {
         modelKey: response.modelKey
       }, {
-        outputs
+        outputs: redactObject(outputs)
       });
     }
-    outputs.result = json.value;
+    outputs.result = redactRuntimeSecrets(json.value, { secrets: activeSecrets });
   }
 
   return capabilityOk(outputs);

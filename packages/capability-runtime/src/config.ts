@@ -82,6 +82,23 @@ export interface VideoModelCatalogViewEntry {
   defaultRequestModelId: string;
 }
 
+const API_KEY_PREVIEW_MASK = '****************************';
+const API_KEY_PREVIEW_MIN_LENGTH = 8;
+
+export function apiKeyPreview(apiKey: string | undefined): { apiKeySet: boolean; apiKeyPreview?: string } {
+  const trimmed = apiKey?.trim() ?? '';
+  if (!trimmed) {
+    return { apiKeySet: false };
+  }
+  if (trimmed.length < API_KEY_PREVIEW_MIN_LENGTH) {
+    return { apiKeySet: true, apiKeyPreview: '****' };
+  }
+  return {
+    apiKeySet: true,
+    apiKeyPreview: `${trimmed.slice(0, 2)}${API_KEY_PREVIEW_MASK}${trimmed.slice(-2)}`
+  };
+}
+
 export function createImageModelSettingsView(
   config: ImageModelsConfig,
   secrets: SecretsConfig,
@@ -91,7 +108,7 @@ export function createImageModelSettingsView(
   return {
     models: catalog.map((entry) => {
       const configured = configuredById.get(entry.debruteModelId);
-      const apiKey = secrets.imageModelApiKeys[entry.debruteModelId]?.trim() ?? '';
+      const keyState = apiKeyPreview(secrets.imageModelApiKeys[entry.debruteModelId]);
       return {
         debruteModelId: entry.debruteModelId,
         summary: entry.summary,
@@ -100,8 +117,7 @@ export function createImageModelSettingsView(
         defaultBaseUrl: entry.defaultBaseUrl,
         defaultRequestModelId: entry.defaultRequestModelId,
         requestModelIdOverride: configured?.requestModelIdOverride ?? null,
-        apiKeySet: Boolean(apiKey),
-        apiKey
+        ...keyState
       };
     })
   };
@@ -116,7 +132,7 @@ export function createVideoModelSettingsView(
   return {
     models: catalog.map((entry) => {
       const configured = configuredById.get(entry.debruteModelId);
-      const apiKey = secrets.videoModelApiKeys[entry.debruteModelId]?.trim() ?? '';
+      const keyState = apiKeyPreview(secrets.videoModelApiKeys[entry.debruteModelId]);
       return {
         debruteModelId: entry.debruteModelId,
         summary: entry.summary,
@@ -128,8 +144,7 @@ export function createVideoModelSettingsView(
         defaultBaseUrl: entry.defaultBaseUrl,
         defaultRequestModelId: entry.defaultRequestModelId,
         requestModelIdOverride: configured?.requestModelIdOverride ?? null,
-        apiKeySet: Boolean(apiKey),
-        apiKey
+        ...keyState
       };
     })
   };
@@ -141,11 +156,10 @@ export function createLlmProviderSettingsView(
 ): LlmProviderSettingsView {
   const providers = config.providers
     .map((provider) => {
-      const apiKey = secrets.llmProviderApiKeys[provider.id]?.trim() ?? '';
+      const keyState = apiKeyPreview(secrets.llmProviderApiKeys[provider.id]);
       return {
         ...provider,
-        apiKeySet: Boolean(apiKey),
-        apiKey,
+        ...keyState,
         modelKeys: provider.modelIds.map((modelId) => `${provider.id}:${modelId}`)
       };
     })

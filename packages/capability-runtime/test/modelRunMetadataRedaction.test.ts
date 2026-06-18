@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { redactModelRunMetadata } from '../src/modelRunMetadataRedaction';
+import { redactRuntimeSecretString, redactRuntimeSecrets } from '../src/modelRunMetadataRedaction';
 
 describe('model run metadata redaction', () => {
   it('redacts credential fields and URL query secrets while preserving non-secret metadata', () => {
@@ -25,7 +25,7 @@ describe('model run metadata redaction', () => {
       }
     };
 
-    const redacted = redactModelRunMetadata(input, { apiKey: 'sk-active-secret' });
+    const redacted = redactRuntimeSecrets(input, { secrets: ['sk-active-secret'] });
 
     expect(redacted).toEqual({
       method: 'POST',
@@ -72,7 +72,7 @@ describe('model run metadata redaction', () => {
       keyframe: 'keep keyframe'
     };
 
-    const redacted = redactModelRunMetadata(input, { apiKey: 'sk-runtime-secret' });
+    const redacted = redactRuntimeSecrets(input, { secrets: ['sk-runtime-secret'] });
 
     expect(redacted).toEqual({
       responses: [
@@ -120,7 +120,7 @@ describe('model run metadata redaction', () => {
       }
     };
 
-    const redacted = redactModelRunMetadata(input, { apiKey: 'sk-runtime-secret' });
+    const redacted = redactRuntimeSecrets(input, { secrets: ['sk-runtime-secret'] });
 
     expect(redacted).toEqual({
       headers: {
@@ -149,5 +149,12 @@ describe('model run metadata redaction', () => {
     expect(JSON.stringify(redacted)).not.toContain('response-secret');
     expect(JSON.stringify(redacted)).not.toContain('iVBORw0KGgoAAAANSUhEUgAAAAEAAAAB');
     expect(JSON.stringify(redacted)).not.toContain('UklGRgAAAABXQVZF');
+  });
+
+  it('redacts multiple active secret values from arbitrary strings', () => {
+    expect(redactRuntimeSecretString(
+      'first sk-one-secret second sk-two-secret url https://api.example.test/v1?api_key=sk-three-secret',
+      { secrets: ['sk-one-secret', 'sk-two-secret'] }
+    )).toBe('first [redacted] second [redacted] url https://api.example.test/v1?api_key=%5Bredacted%5D');
   });
 });

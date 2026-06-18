@@ -889,10 +889,12 @@ describe('app-server', () => {
             providerType: 'openai_compat',
             modelIds: ['gpt-5.1'],
             apiKeySet: true,
-            apiKey: 'sk-llm-test'
+            apiKeyPreview: 'sk****************************st'
           })
         ]
       });
+      expect(settings.providers[0] as Record<string, unknown>).not.toHaveProperty('apiKey');
+      expect(JSON.stringify(settings)).not.toContain('sk-llm-test');
 
       const result = await server.runLlmRequestForCli({ modelKey: 'default', prompt: 'Say hello.' });
       expect(result).toMatchObject({
@@ -908,6 +910,103 @@ describe('app-server', () => {
       globalThis.fetch = originalFetch;
       await rm(home, { recursive: true, force: true });
       await rm(projectRoot, { recursive: true, force: true });
+    }
+  });
+
+  it('preserves, replaces, and clears provider API keys through settings saves', async () => {
+    const home = await mkdtemp(join(tmpdir(), 'debrute-settings-secret-semantics-home-'));
+    const configStore = new GlobalConfigStore({ debruteHome: home });
+    const globalRuntime = new DebruteGlobalRuntimeServer({ globalConfigStore: configStore });
+    try {
+      await globalRuntime.llmSaveProviderSetting({
+        id: 'openai-main',
+        name: 'OpenAI Compatible',
+        providerType: 'openai_compat',
+        baseUrl: 'https://api.openai.com/v1',
+        enabled: true,
+        modelIds: ['gpt-5.1'],
+        apiKey: 'sk-llm-initial'
+      });
+      await globalRuntime.llmSaveProviderSetting({
+        id: 'openai-main',
+        name: 'OpenAI Compatible Updated',
+        providerType: 'openai_compat',
+        baseUrl: 'https://api.openai.com/v1',
+        enabled: true,
+        modelIds: ['gpt-5.1']
+      }, 'openai-main');
+      await globalRuntime.imageModelSaveSetting('gpt-image-2', {
+        requestModelIdOverride: 'gpt-image-2',
+        apiKey: 'sk-image-initial'
+      });
+      await globalRuntime.imageModelSaveSetting('gpt-image-2', {
+        requestModelIdOverride: null
+      });
+      await globalRuntime.videoModelSaveSetting('doubao-seedance-2-0-260128', {
+        requestModelIdOverride: null,
+        apiKey: 'sk-video-initial'
+      });
+      await globalRuntime.videoModelSaveSetting('doubao-seedance-2-0-260128', {
+        requestModelIdOverride: 'doubao-seedance-2-0-260128'
+      });
+
+      let secrets = await configStore.readSecrets();
+      expect(secrets.llmProviderApiKeys['openai-main']).toBe('sk-llm-initial');
+      expect(secrets.imageModelApiKeys['gpt-image-2']).toBe('sk-image-initial');
+      expect(secrets.videoModelApiKeys['doubao-seedance-2-0-260128']).toBe('sk-video-initial');
+
+      await globalRuntime.llmSaveProviderSetting({
+        id: 'openai-main',
+        name: 'OpenAI Compatible Updated',
+        providerType: 'openai_compat',
+        baseUrl: 'https://api.openai.com/v1',
+        enabled: true,
+        modelIds: ['gpt-5.1'],
+        apiKey: 'sk-llm-replaced'
+      }, 'openai-main');
+      await globalRuntime.imageModelSaveSetting('gpt-image-2', {
+        requestModelIdOverride: null,
+        apiKey: 'sk-image-replaced'
+      });
+      await globalRuntime.videoModelSaveSetting('doubao-seedance-2-0-260128', {
+        requestModelIdOverride: null,
+        apiKey: 'sk-video-replaced'
+      });
+
+      secrets = await configStore.readSecrets();
+      expect(secrets.llmProviderApiKeys['openai-main']).toBe('sk-llm-replaced');
+      expect(secrets.imageModelApiKeys['gpt-image-2']).toBe('sk-image-replaced');
+      expect(secrets.videoModelApiKeys['doubao-seedance-2-0-260128']).toBe('sk-video-replaced');
+
+      const llmView = await globalRuntime.llmSaveProviderSetting({
+        id: 'openai-main',
+        name: 'OpenAI Compatible Updated',
+        providerType: 'openai_compat',
+        baseUrl: 'https://api.openai.com/v1',
+        enabled: true,
+        modelIds: ['gpt-5.1'],
+        apiKey: ''
+      }, 'openai-main');
+      const imageView = await globalRuntime.imageModelSaveSetting('gpt-image-2', {
+        requestModelIdOverride: null,
+        apiKey: ''
+      });
+      const videoView = await globalRuntime.videoModelSaveSetting('doubao-seedance-2-0-260128', {
+        requestModelIdOverride: null,
+        apiKey: ''
+      });
+
+      secrets = await configStore.readSecrets();
+      expect(secrets.llmProviderApiKeys).not.toHaveProperty('openai-main');
+      expect(secrets.imageModelApiKeys).not.toHaveProperty('gpt-image-2');
+      expect(secrets.videoModelApiKeys).not.toHaveProperty('doubao-seedance-2-0-260128');
+      expect(llmView.providers[0]).toMatchObject({ apiKeySet: false });
+      expect(imageView.models.find((model) => model.debruteModelId === 'gpt-image-2')).toMatchObject({ apiKeySet: false });
+      expect(videoView.models.find((model) => model.debruteModelId === 'doubao-seedance-2-0-260128')).toMatchObject({ apiKeySet: false });
+      expect(JSON.stringify({ llmView, imageView, videoView })).not.toContain('sk-');
+    } finally {
+      globalRuntime.close();
+      await rm(home, { recursive: true, force: true });
     }
   });
 
@@ -1072,7 +1171,7 @@ describe('app-server', () => {
         defaultRequestModelId: 'gpt-image-2',
         requestModelIdOverride: 'custom-image-model',
         apiKeySet: true,
-        apiKey: 'sk-image'
+        apiKeyPreview: 'sk****************************ge'
       });
       expect(videoModel).toEqual({
         debruteModelId: 'doubao-seedance-2-0-260128',
@@ -1086,8 +1185,10 @@ describe('app-server', () => {
         defaultRequestModelId: 'doubao-seedance-2-0-260128',
         requestModelIdOverride: 'custom-video-model',
         apiKeySet: true,
-        apiKey: 'sk-video'
+        apiKeyPreview: 'sk****************************eo'
       });
+      expect(imageModel as Record<string, unknown>).not.toHaveProperty('apiKey');
+      expect(videoModel as Record<string, unknown>).not.toHaveProperty('apiKey');
     } finally {
       globalRuntime.close();
       await rm(home, { recursive: true, force: true });
@@ -1134,8 +1235,9 @@ describe('app-server', () => {
         defaultRequestModelId: 'gpt-image-2',
         requestModelIdOverride: null,
         apiKeySet: true,
-        apiKey: 'sk-image'
+        apiKeyPreview: 'sk****************************ge'
       });
+      expect(imageModel as Record<string, unknown>).not.toHaveProperty('apiKey');
       await expect(configStore.readImageModels()).resolves.toEqual({ imageModels: [] });
       await expect(configStore.readSecrets()).resolves.toMatchObject({
         imageModelApiKeys: { 'gpt-image-2': 'sk-image' }

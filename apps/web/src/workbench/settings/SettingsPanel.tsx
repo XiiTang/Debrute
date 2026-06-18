@@ -25,19 +25,19 @@ import { DebruteCliSettingsPage } from './debrute-cli/DebruteCliSettingsPage';
 import { GeneralSettingsPage } from './general/GeneralSettingsPage';
 import { IntegrationsSettingsPage } from './integrations/IntegrationsSettingsPage';
 
-interface LlmProviderDraft {
+export interface LlmProviderDraft {
   id: string;
   name: string;
   providerType: 'openai_compat' | 'anthropic';
   baseUrl: string;
   modelIdsText: string;
   enabled: boolean;
-  apiKey: string;
+  apiKeyInput: string;
 }
 
-interface ModelDraft {
+export interface ModelDraft {
   requestModelIdOverride: string;
-  apiKey: string;
+  apiKeyInput: string;
 }
 
 interface ApiKeyInputProps {
@@ -120,17 +120,12 @@ export function LlmSettings({ state, actions }: { state: WorkbenchState; actions
   }, [editingProviderId, settings]);
 
   const save = async () => {
-    const input: SaveLlmProviderSettingInput = {
-      id: draft.id.trim(),
-      name: draft.name.trim(),
-      providerType: draft.providerType,
-      baseUrl: draft.baseUrl.trim(),
-      enabled: draft.enabled,
-      modelIds: splitModelIds(draft.modelIdsText),
-      apiKey: draft.apiKey.trim()
-    };
-    await actions.saveLlmProviderSetting(input, editingProviderId);
+    await actions.saveLlmProviderSetting(llmProviderDraftToSaveInput(draft), editingProviderId);
     setEditingProviderId(undefined);
+  };
+
+  const clearProviderApiKey = async (provider: LlmProviderSettingRecord) => {
+    await actions.saveLlmProviderSetting(llmProviderDraftToClearApiKeyInput(llmProviderToDraft(provider)), provider.id);
   };
 
   const discoverModels = async () => {
@@ -140,7 +135,7 @@ export function LlmSettings({ state, actions }: { state: WorkbenchState; actions
         id: draft.id.trim(),
         providerType: draft.providerType,
         baseUrl: draft.baseUrl.trim(),
-        ...(draft.apiKey.trim() ? { apiKey: draft.apiKey.trim() } : {})
+        ...(draft.apiKeyInput.trim() ? { apiKey: draft.apiKeyInput.trim() } : {})
       }, editingProviderId);
       if (!result.supportsDiscovery) {
         setDiscovery({ status: 'ok', message: 'Model discovery is not available for this provider.' });
@@ -199,8 +194,8 @@ export function LlmSettings({ state, actions }: { state: WorkbenchState; actions
           <div className="settings-row">
             <ApiKeyInput
               label="API Key"
-              value={draft.apiKey}
-              onChange={(apiKey) => setDraft({ ...draft, apiKey })}
+              value={draft.apiKeyInput}
+              onChange={(apiKeyInput) => setDraft({ ...draft, apiKeyInput })}
               resetKey={editingProviderId ?? 'new'}
             />
           </div>
@@ -227,6 +222,7 @@ export function LlmSettings({ state, actions }: { state: WorkbenchState; actions
               key={provider.id}
               provider={provider}
               onEdit={() => setEditingProviderId(provider.id)}
+              onClearApiKey={() => void clearProviderApiKey(provider)}
               onDelete={() => void actions.deleteLlmProviderSetting(provider.id)}
             />
           ))}
@@ -247,7 +243,7 @@ function ImageModelSettings({ state, actions }: { state: WorkbenchState; actions
           <MediaModelCard
             key={model.debruteModelId}
             model={model}
-            onSave={(draft) => actions.saveImageModelSetting(model.debruteModelId, modelDraftToSaveInput(draft))}
+            onSave={(input) => actions.saveImageModelSetting(model.debruteModelId, input)}
           />
         ))}
       </div>
@@ -266,7 +262,7 @@ function VideoModelSettings({ state, actions }: { state: WorkbenchState; actions
           <MediaModelCard
             key={model.debruteModelId}
             model={model}
-            onSave={(draft) => actions.saveVideoModelSetting(model.debruteModelId, modelDraftToSaveInput(draft))}
+            onSave={(input) => actions.saveVideoModelSetting(model.debruteModelId, input)}
           />
         ))}
       </div>
@@ -291,7 +287,7 @@ function MediaModelCard({
   onSave
 }: {
   model: ImageModelSettingRecord | VideoModelSettingRecord;
-  onSave: (draft: ModelDraft) => Promise<void>;
+  onSave: (input: ReturnType<typeof modelDraftToSaveInput>) => Promise<void>;
 }): React.ReactElement {
   const [draft, setDraft] = useState(() => modelToDraft(model));
   const [status, setStatus] = useState<DiscoveryState>({ status: 'idle' });
@@ -307,7 +303,16 @@ function MediaModelCard({
     }
     setStatus({ status: 'idle' });
     try {
-      await onSave(nextDraft);
+      await onSave(modelDraftToSaveInput(nextDraft));
+    } catch (error) {
+      setStatus({ status: 'error', message: errorMessage(error) });
+    }
+  };
+
+  const clearApiKey = async () => {
+    setStatus({ status: 'idle' });
+    try {
+      await onSave(modelDraftToClearApiKeyInput(draft));
     } catch (error) {
       setStatus({ status: 'error', message: errorMessage(error) });
     }
@@ -318,15 +323,20 @@ function MediaModelCard({
       <div className="settings-model-card-header">
         <div>
           <strong>{model.debruteModelId}</strong>
-          {!model.apiKeySet ? <StatusPill tone="neutral">no key</StatusPill> : null}
+          {model.apiKeySet ? <StatusPill>key {model.apiKeyPreview}</StatusPill> : <StatusPill tone="neutral">no key</StatusPill>}
         </div>
+        {model.apiKeySet ? (
+          <Button type="button" variant="danger" onClick={() => void clearApiKey()}>
+            Clear API key
+          </Button>
+        ) : null}
       </div>
       <div className="settings-model-card-fields">
         <div className="settings-row">
           <ApiKeyInput
             ariaLabel="API Key"
-            value={draft.apiKey}
-            onChange={(apiKey) => setDraft({ ...draft, apiKey })}
+            value={draft.apiKeyInput}
+            onChange={(apiKeyInput) => setDraft({ ...draft, apiKeyInput })}
             onBlur={() => void saveDraft(draft)}
             placeholder="API Key"
             resetKey={model.debruteModelId}
@@ -356,10 +366,12 @@ function MediaModelCard({
 function LlmProviderCard({
   provider,
   onEdit,
+  onClearApiKey,
   onDelete
 }: {
   provider: LlmProviderSettingRecord;
   onEdit: () => void;
+  onClearApiKey: () => void;
   onDelete: () => void;
 }): React.ReactElement {
   return (
@@ -368,11 +380,12 @@ function LlmProviderCard({
       <small>{provider.providerType} / {provider.baseUrl}</small>
       <div className="settings-pills">
         {!provider.enabled ? <StatusPill tone="neutral">disabled</StatusPill> : null}
-        {!provider.apiKeySet ? <StatusPill tone="neutral">no key</StatusPill> : null}
+        {provider.apiKeySet ? <StatusPill>key {provider.apiKeyPreview}</StatusPill> : <StatusPill tone="neutral">no key</StatusPill>}
         {provider.modelKeys.map((modelKey) => <StatusPill key={modelKey}>{modelKey}</StatusPill>)}
       </div>
       <Toolbar ariaLabel={`${provider.name} actions`} className="settings-actions">
         <Button type="button" onClick={onEdit}>Edit</Button>
+        {provider.apiKeySet ? <Button type="button" variant="danger" onClick={onClearApiKey}>Clear API key</Button> : null}
         <Button type="button" variant="danger" iconStart={<Trash2 size={14} />} onClick={onDelete}>Delete</Button>
       </Toolbar>
     </Card>
@@ -427,23 +440,31 @@ function ApiKeyInput({
   return <Field label={label}>{input}</Field>;
 }
 
-function modelToDraft(model: ImageModelSettingRecord | VideoModelSettingRecord): ModelDraft {
+export function modelToDraft(model: ImageModelSettingRecord | VideoModelSettingRecord): ModelDraft {
   return {
     requestModelIdOverride: model.requestModelIdOverride ?? '',
-    apiKey: model.apiKey
+    apiKeyInput: ''
   };
 }
 
-function modelDraftToSaveInput(draft: ModelDraft) {
+export function modelDraftToSaveInput(draft: ModelDraft) {
+  const apiKey = draft.apiKeyInput.trim();
   return {
     requestModelIdOverride: draft.requestModelIdOverride.trim() || null,
-    apiKey: draft.apiKey.trim()
+    ...(apiKey ? { apiKey } : {})
+  };
+}
+
+export function modelDraftToClearApiKeyInput(draft: ModelDraft) {
+  return {
+    requestModelIdOverride: draft.requestModelIdOverride.trim() || null,
+    apiKey: ''
   };
 }
 
 function modelDraftMatchesPersisted(draft: ModelDraft, model: ImageModelSettingRecord | VideoModelSettingRecord): boolean {
   return draft.requestModelIdOverride.trim() === (model.requestModelIdOverride ?? '')
-    && draft.apiKey.trim() === model.apiKey;
+    && draft.apiKeyInput.trim() === '';
 }
 
 function createEmptyLlmProviderDraft(): LlmProviderDraft {
@@ -454,11 +475,11 @@ function createEmptyLlmProviderDraft(): LlmProviderDraft {
     baseUrl: '',
     modelIdsText: '',
     enabled: true,
-    apiKey: ''
+    apiKeyInput: ''
   };
 }
 
-function llmProviderToDraft(provider: LlmProviderSettingRecord): LlmProviderDraft {
+export function llmProviderToDraft(provider: LlmProviderSettingRecord): LlmProviderDraft {
   return {
     id: provider.id,
     name: provider.name,
@@ -466,7 +487,32 @@ function llmProviderToDraft(provider: LlmProviderSettingRecord): LlmProviderDraf
     baseUrl: provider.baseUrl,
     modelIdsText: provider.modelIds.join('\n'),
     enabled: provider.enabled,
-    apiKey: provider.apiKey
+    apiKeyInput: ''
+  };
+}
+
+export function llmProviderDraftToSaveInput(draft: LlmProviderDraft): SaveLlmProviderSettingInput {
+  const apiKey = draft.apiKeyInput.trim();
+  return {
+    id: draft.id.trim(),
+    name: draft.name.trim(),
+    providerType: draft.providerType,
+    baseUrl: draft.baseUrl.trim(),
+    enabled: draft.enabled,
+    modelIds: splitModelIds(draft.modelIdsText),
+    ...(apiKey ? { apiKey } : {})
+  };
+}
+
+export function llmProviderDraftToClearApiKeyInput(draft: LlmProviderDraft): SaveLlmProviderSettingInput {
+  return {
+    id: draft.id.trim(),
+    name: draft.name.trim(),
+    providerType: draft.providerType,
+    baseUrl: draft.baseUrl.trim(),
+    enabled: draft.enabled,
+    modelIds: splitModelIds(draft.modelIdsText),
+    apiKey: ''
   };
 }
 

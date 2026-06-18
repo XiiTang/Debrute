@@ -8,6 +8,7 @@ import type {
   ImageModelBatchSummary,
   RunImageModelBatchInput
 } from '@debrute/app-protocol';
+import { redactRuntimeSecrets } from '@debrute/capability-runtime';
 
 interface ImageModelBatchPayload {
   model?: unknown;
@@ -126,9 +127,10 @@ export async function runImageModelBatch(
   };
 
   const writeFinalResult = async (result: ImageModelBatchResult): Promise<void> => {
-    results.push(result);
-    await writer.write(result);
-    emitProgress({ type: 'item_finished', result, snapshot: snapshot() });
+    const redacted = redactRuntimeSecrets(result) as ImageModelBatchResult;
+    results.push(redacted);
+    await writer.write(redacted);
+    emitProgress({ type: 'item_finished', result: redacted, snapshot: snapshot() });
   };
   emitProgress({ type: 'started', snapshot: snapshot() });
 

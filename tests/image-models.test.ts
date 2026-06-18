@@ -1947,6 +1947,54 @@ describe('image model executors', () => {
     }
   });
 
+  it('returns a redacted model response error when the endpoint rejects an image request', async () => {
+    const projectRoot = await mkdtemp(join(tmpdir(), 'debrute-image-model-error-'));
+    try {
+      const result = await executeImageModelRequest({
+        projectRoot,
+        invocationId: 'turn-error',
+        input: {
+          model: 'gpt-image-2',
+          arguments: { prompt: 'bad prompt', size: '1024x1024' }
+        },
+        settings: {
+          imageModels: [{ debruteModelId: 'gpt-image-2', requestModelIdOverride: null }]
+        },
+        secrets: { imageModelApiKeys: { 'gpt-image-2': 'sk-image-secret' } },
+        fetch: async () => new Response(JSON.stringify({
+          error: {
+            code: 'BadRequest',
+            message: 'prompt rejected for sk-image-secret',
+            apiKey: 'sk-image-secret'
+          }
+        }), {
+          status: 400,
+          headers: { 'content-type': 'application/json' }
+        })
+      });
+
+      expect(result.status).toBe('error');
+      expect(result.error).toBe('request_failed');
+      expect(result.content).toBe('Image request failed: model endpoint responded with HTTP 400.');
+      expect(result.logs).toContainEqual(expect.objectContaining({
+        stage: 'error',
+        endpointResponse: {
+          status: 400,
+          body: {
+            error: {
+              code: 'BadRequest',
+              message: 'prompt rejected for [redacted]',
+              apiKey: '[redacted]'
+            }
+          }
+        }
+      }));
+      expect(JSON.stringify(result)).not.toContain('sk-image-secret');
+    } finally {
+      await rm(projectRoot, { recursive: true, force: true });
+    }
+  });
+
   it('returns an error without external fetch when the model is disabled', async () => {
     let called = false;
     const projectRoot = await mkdtemp(join(tmpdir(), 'debrute-image-disabled-'));

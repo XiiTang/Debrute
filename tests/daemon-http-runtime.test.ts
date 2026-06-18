@@ -167,6 +167,80 @@ describe('daemon HTTP runtime', () => {
     });
   });
 
+  it('redacts sensitive fields and credential query parameters from daemon HTTP errors', async () => {
+    const projectRoot = await mkdtemp(join(tmpdir(), 'debrute-daemon-error-redaction-'));
+    const listeners = new Set<(event: AppServerEvent) => void>();
+    let currentSnapshot = projectSnapshotFixture(projectRoot);
+    const appServer = {
+      openProject: async (root: string) => {
+        currentSnapshot = projectSnapshotFixture(root);
+        return currentSnapshot;
+      },
+      getSnapshot: () => currentSnapshot,
+      currentSnapshot: () => currentSnapshot,
+      drainSessionOperations: async () => undefined,
+      refreshProject: async () => {
+        const error = new Error('Upstream rejected https://api.example.test/v1/models?api_key=sk-http-secret') as Error & {
+          code: string;
+          fields: Record<string, unknown>;
+        };
+        error.code = 'provider_failed';
+        error.fields = {
+          apiKey: 'sk-http-secret',
+          url: 'https://api.example.test/v1/models?token=sk-http-secret&model=gpt',
+          nested: {
+            authorization: 'Bearer sk-http-secret',
+            message: 'provider echoed a credential'
+          }
+        };
+        throw error;
+      },
+      onEvent: (listener: (event: AppServerEvent) => void) => {
+        listeners.add(listener);
+        return () => listeners.delete(listener);
+      },
+      close: () => undefined
+    } as unknown as DebruteAppServer;
+
+    const daemon = createDebruteDaemonHttpServer({
+      host: '127.0.0.1',
+      port: 0,
+      token: 'test-token',
+      webBaseUrl: null,
+      createAppServer: () => appServer
+    });
+    cleanups.push(() => daemon.close(), () => rm(projectRoot, { recursive: true, force: true }));
+    const runtime = await daemon.listen();
+    const opened = await requestJson<{ projectId: string }>(`${runtime.daemonUrl}/api/projects/open`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json', 'x-debrute-daemon-token': 'test-token' },
+      body: JSON.stringify({ projectRoot })
+    });
+
+    const response = await apiFetch(`${runtime.daemonUrl}/api/projects/${opened.projectId}/refresh`, {
+      method: 'POST',
+      headers: { 'x-debrute-daemon-token': 'test-token' }
+    });
+    const body = await response.json() as Record<string, unknown>;
+
+    expect(response.status).toBe(400);
+    expect(JSON.stringify(body)).not.toContain('sk-http-secret');
+    expect(body).toMatchObject({
+      error: {
+        code: 'provider_failed',
+        message: 'Upstream rejected https://api.example.test/v1/models?api_key=%5Bredacted%5D',
+        details: {
+          apiKey: '[redacted]',
+          url: 'https://api.example.test/v1/models?token=%5Bredacted%5D&model=gpt',
+          nested: {
+            authorization: '[redacted]',
+            message: 'provider echoed a credential'
+          }
+        }
+      }
+    });
+  });
+
   it('opens a project and exposes text file routes through HTTP', async () => {
     const projectRoot = await mkdtemp(join(tmpdir(), 'debrute-daemon-project-'));
     await mkdir(join(projectRoot, 'briefs'), { recursive: true });

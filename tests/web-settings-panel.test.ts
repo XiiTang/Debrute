@@ -3,7 +3,11 @@ import { renderToStaticMarkup } from 'react-dom/server';
 import { describe, expect, it } from 'vitest';
 import {
   LlmSettings,
-  SettingsPanel
+  SettingsPanel,
+  llmProviderDraftToClearApiKeyInput,
+  llmProviderDraftToSaveInput,
+  modelDraftToClearApiKeyInput,
+  modelDraftToSaveInput
 } from '../apps/web/src/workbench/settings/SettingsPanel';
 import {
   DebruteCliSettingsPage,
@@ -48,7 +52,7 @@ describe('web Settings pages', () => {
             defaultRequestModelId: 'gpt-image-2',
             requestModelIdOverride: null,
             apiKeySet: true,
-            apiKey: 'sk-image-ui'
+            apiKeyPreview: 'sk****************************ui'
           }, {
             debruteModelId: 'missing-image',
             summary: 'Missing configuration',
@@ -159,7 +163,7 @@ describe('web Settings pages', () => {
     expect(html).not.toContain('Install and Restart');
   });
 
-  it('renders visibility controls for every API key input', () => {
+  it('renders configured key previews without raw API keys', () => {
     const state = {
       llmSettings: {
         providers: [{
@@ -171,44 +175,82 @@ describe('web Settings pages', () => {
           modelKeys: ['openai:gpt-4.1'],
           enabled: true,
           apiKeySet: true,
-          apiKey: 'sk-llm-ui'
+          apiKeyPreview: 'sk****************************ui'
         }],
         availableModelKeys: ['openai:gpt-4.1'],
         defaultModelKey: null
       },
-      imageModelSettings: {
-        models: [{
-          debruteModelId: 'gpt-image-2',
-          summary: 'Image generation',
-          defaultBaseUrl: 'https://api.openai.com/v1',
-          defaultRequestModelId: 'gpt-image-2',
-          requestModelIdOverride: null,
-          apiKeySet: true,
-          apiKey: 'sk-image-ui'
-        }]
-      },
-      videoModelSettings: {
-        models: [{
-          debruteModelId: 'sora-2',
-          summary: 'Video generation',
-          defaultBaseUrl: 'https://api.openai.com/v1',
-          defaultRequestModelId: 'sora-2',
-          requestModelIdOverride: null,
-          apiKeySet: true,
-          apiKey: 'sk-video-ui'
-        }]
-      }
+      imageModelSettings: { models: [] },
+      videoModelSettings: { models: [] }
     } as unknown as WorkbenchState;
     const actions = {} as unknown as WorkbenchActions;
 
     const html = renderToStaticMarkup(React.createElement(LlmSettings, { state, actions }));
 
+    expect(html).toContain('sk****************************ui');
+    expect(html).toContain('Clear API key');
+    expect(html).not.toContain('sk-llm-ui');
+    expect(html).not.toContain('value="sk');
     expect(html).not.toContain('type="password"');
     expect(html.match(/aria-label="Show API key"/g)).toHaveLength(1);
     expect(html).toContain('settings-key-input');
     expect(html).toContain('settings-key-control');
     expect(html).toContain('settings-key-visibility');
     expect(html).not.toContain('aria-label="Hide API key"');
+  });
+
+  it('omits API keys from ordinary settings saves when the key input is empty', () => {
+    expect(llmProviderDraftToSaveInput({
+      id: 'openai',
+      name: 'OpenAI',
+      providerType: 'openai_compat',
+      baseUrl: 'https://api.openai.com/v1',
+      modelIdsText: 'gpt-4.1',
+      enabled: true,
+      apiKeyInput: ''
+    })).toEqual({
+      id: 'openai',
+      name: 'OpenAI',
+      providerType: 'openai_compat',
+      baseUrl: 'https://api.openai.com/v1',
+      enabled: true,
+      modelIds: ['gpt-4.1']
+    });
+
+    expect(modelDraftToSaveInput({
+      requestModelIdOverride: '',
+      apiKeyInput: ''
+    })).toEqual({
+      requestModelIdOverride: null
+    });
+  });
+
+  it('sends empty API keys only through explicit clear actions', () => {
+    expect(llmProviderDraftToClearApiKeyInput({
+      id: 'openai',
+      name: 'OpenAI',
+      providerType: 'openai_compat',
+      baseUrl: 'https://api.openai.com/v1',
+      modelIdsText: 'gpt-4.1',
+      enabled: true,
+      apiKeyInput: ''
+    })).toEqual({
+      id: 'openai',
+      name: 'OpenAI',
+      providerType: 'openai_compat',
+      baseUrl: 'https://api.openai.com/v1',
+      enabled: true,
+      modelIds: ['gpt-4.1'],
+      apiKey: ''
+    });
+
+    expect(modelDraftToClearApiKeyInput({
+      requestModelIdOverride: '',
+      apiKeyInput: ''
+    })).toEqual({
+      requestModelIdOverride: null,
+      apiKey: ''
+    });
   });
 
   it('renders browser-only manual Debrute CLI instructions when Desktop shell is unavailable', () => {
