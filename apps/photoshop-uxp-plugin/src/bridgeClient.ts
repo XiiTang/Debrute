@@ -9,23 +9,25 @@ export function createPhotoshopHelloMessage(input: {
   adobeClientId: string;
   hostVersion: string;
   documentTitle: string | null;
+  documentCount: number;
 }): PhotoshopBridgeHelloMessage {
   return {
     type: 'hello',
     adobeClientId: input.adobeClientId,
     hostApp: 'photoshop',
     hostVersion: input.hostVersion,
-    documentCount: input.documentTitle ? 1 : 0,
+    documentCount: input.documentCount,
     activeDocumentTitle: input.documentTitle
   };
 }
 
 export function createPhotoshopStatusMessage(input: {
   documentTitle: string | null;
+  documentCount: number;
 }): PhotoshopBridgeStatusMessage {
   return {
     type: 'photoshop.status',
-    documentCount: input.documentTitle ? 1 : 0,
+    documentCount: input.documentCount,
     activeDocumentTitle: input.documentTitle
   };
 }

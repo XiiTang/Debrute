@@ -86,11 +86,12 @@ export function photoshopHostVersion(photoshop: PhotoshopRuntime): string {
 export function photoshopSelectionSnapshot(photoshop: PhotoshopRuntime): PhotoshopSelectionSnapshot {
   const document = currentPhotoshopDocument(photoshop);
   if (!document) {
-    return { documentTitle: null, selectedItems: [] };
+    return { documentTitle: null, documentCount: photoshop.app.documents.length, selectedItems: [] };
   }
   const activeLayersById = new Map(document.activeLayers.map((layer) => [layer.id, layer]));
   return {
     documentTitle: document.title,
+    documentCount: photoshop.app.documents.length,
     selectedItems: document.layers
       .filter((layer) => activeLayersById.has(layer.id))
       .map((layer) => ({

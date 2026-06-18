@@ -4,6 +4,7 @@ import { stat } from 'node:fs/promises';
 import type { IncomingMessage, ServerResponse } from 'node:http';
 import { basename, extname } from 'node:path';
 import type {
+  AdobeBridgeStateView,
   AdobeBridgeSettings,
   DaemonBridgeImportRequestMessage,
   SaveAdobeBridgeSettingsInput,
@@ -20,7 +21,7 @@ import { AdobeBridgeError, adobeBridgeHttpStatus, createAdobeBridgeError } from 
 import { ADOBE_BRIDGE_TRANSFER_TIMEOUT_MS, type AdobeBridgeService } from './AdobeBridgeService.js';
 import type { ProjectSessionRegistry } from '../http/ProjectSessionRegistry.js';
 
-interface TransferContentEntry {
+export interface AdobeBridgeTransferContentEntry {
   transferId: string;
   projectId: string;
   adobeClientId: string;
@@ -38,8 +39,9 @@ export interface AdobeBridgeHttpRouteContext {
   sessions: ProjectSessionRegistry;
   getSettings(): Promise<AdobeBridgeSettings>;
   saveSettings(input: SaveAdobeBridgeSettingsInput): Promise<AdobeBridgeSettings>;
+  readJsonBody<T>(request: IncomingMessage): Promise<T>;
   sendImportRequest(adobeClientId: string, message: DaemonBridgeImportRequestMessage): boolean;
-  transferContents: Map<string, TransferContentEntry>;
+  transferContents: Map<string, AdobeBridgeTransferContentEntry>;
 }
 
 export async function routeAdobeBridgeHttp(context: AdobeBridgeHttpRouteContext): Promise<boolean> {
@@ -54,7 +56,7 @@ export async function routeAdobeBridgeHttp(context: AdobeBridgeHttpRouteContext)
   }
 
   if (method === 'PUT' && path === '/api/adobe-bridge/settings') {
-    const settings = await context.saveSettings(await readJsonBody<SaveAdobeBridgeSettingsInput>(context.request));
+    const settings = await context.saveSettings(await context.readJsonBody<SaveAdobeBridgeSettingsInput>(context.request));
     context.bridge.setSettings(settings);
     syncAdobeBridgeProjects(context);
     writeJson(context.response, 200, context.bridge.state());
@@ -116,7 +118,7 @@ async function handleLinkRoute(
   syncAdobeBridgeProjects(context);
   context.bridge.setSettings(await context.getSettings());
   if (method === 'POST' && !adobeClientIdFromPath) {
-    const body = await readJsonBody<{ adobeClientId?: unknown }>(context.request);
+    const body = await context.readJsonBody<{ adobeClientId?: unknown }>(context.request);
     const adobeClientId = stringField(body.adobeClientId, 'adobeClientId');
     writeJson(context.response, 200, context.bridge.linkProjectToPhotoshop(projectId, adobeClientId));
     return;
@@ -155,7 +157,7 @@ async function handleSendProjectFileToPhotoshop(
 ): Promise<void> {
   syncAdobeBridgeProjects(context);
   context.bridge.setSettings(await context.getSettings());
-  const body = await readJsonBody<SendProjectFileToPhotoshopInput>(context.request);
+  const body = await context.readJsonBody<SendProjectFileToPhotoshopInput>(context.request);
   const adobeClientId = stringField(body.adobeClientId, 'adobeClientId');
   const projectRelativePath = stringField(body.projectRelativePath, 'projectRelativePath');
   context.bridge.assertTransferAllowed(projectId, adobeClientId);
@@ -286,14 +288,26 @@ function adobeBridgeTransferFailure(error: unknown): { errorCode?: AdobeBridgeEr
 }
 
 async function handleTransferContent(context: AdobeBridgeHttpRouteContext, transferId: string): Promise<void> {
+  context.bridge.setSettings(await context.getSettings());
+  if (!context.bridge.state().settings.enabled) {
+    throw createAdobeBridgeError('adobe_bridge_disabled');
+  }
+  pruneAdobeBridgeTransferContents({
+    transferContents: context.transferContents,
+    state: context.bridge.state()
+  });
   const entry = context.transferContents.get(transferId);
-  if (!entry || context.url.searchParams.get('token') !== entry.token || Date.now() > entry.expiresAt) {
+  if (!entry || context.url.searchParams.get('token') !== entry.token) {
     throw createAdobeBridgeError('transfer_url_expired', { transferId });
   }
-  context.bridge.setSettings(await context.getSettings());
+  if (Date.now() > entry.expiresAt) {
+    context.transferContents.delete(transferId);
+    throw createAdobeBridgeError('transfer_url_expired', { transferId });
+  }
   context.bridge.assertTransferAllowed(entry.projectId, entry.adobeClientId);
   const transfer = context.bridge.state().transfers.find((candidate) => candidate.transferId === transferId);
   if (transfer?.status !== 'pending' && transfer?.status !== 'running') {
+    context.transferContents.delete(transferId);
     throw createAdobeBridgeError('transfer_url_expired', { transferId });
   }
   const session = context.sessions.get(entry.projectId);
@@ -340,19 +354,27 @@ function requiredPercentEncodedHeader(request: IncomingMessage, name: string): s
   }
 }
 
+export function pruneAdobeBridgeTransferContents(input: {
+  transferContents: Map<string, AdobeBridgeTransferContentEntry>;
+  state: Pick<AdobeBridgeStateView, 'transfers'>;
+  nowMs?: number;
+}): void {
+  const nowMs = input.nowMs ?? Date.now();
+  const liveTransferIds = new Set(input.state.transfers
+    .filter((transfer) => transfer.status === 'pending' || transfer.status === 'running')
+    .map((transfer) => transfer.transferId));
+  for (const [transferId, entry] of input.transferContents) {
+    if (entry.expiresAt <= nowMs || !liveTransferIds.has(transferId)) {
+      input.transferContents.delete(transferId);
+    }
+  }
+}
+
 function stringField(value: unknown, name: string): string {
   if (typeof value !== 'string' || !value.trim()) {
     throw createAdobeBridgeError('invalid_transfer_payload', { field: name });
   }
   return value;
-}
-
-async function readJsonBody<T>(request: IncomingMessage): Promise<T> {
-  let body = '';
-  for await (const chunk of request) {
-    body += String(chunk);
-  }
-  return body.trim() ? JSON.parse(body) as T : {} as T;
 }
 
 export function writeAdobeBridgeCaughtError(response: ServerResponse, error: unknown): boolean {

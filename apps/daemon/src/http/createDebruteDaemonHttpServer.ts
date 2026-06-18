@@ -31,7 +31,13 @@ import {
 } from '@debrute/app-protocol';
 import { projectFileRevision, resolveExistingProjectPath, type ProjectUploadImportEntry } from '@debrute/project-core';
 import { createAdobeBridgeDiscoveryServer } from '../adobe-bridge/AdobeBridgeDiscoveryServer.js';
-import { routeAdobeBridgeHttp, syncAdobeBridgeProjects, writeAdobeBridgeCaughtError } from '../adobe-bridge/AdobeBridgeHttpRoutes.js';
+import {
+  pruneAdobeBridgeTransferContents,
+  routeAdobeBridgeHttp,
+  syncAdobeBridgeProjects,
+  type AdobeBridgeTransferContentEntry,
+  writeAdobeBridgeCaughtError
+} from '../adobe-bridge/AdobeBridgeHttpRoutes.js';
 import { AdobeBridgeService } from '../adobe-bridge/AdobeBridgeService.js';
 import { createAdobeBridgeWebSocketRoutes } from '../adobe-bridge/AdobeBridgeWebSocketRoutes.js';
 import { ProjectRevisionConflictError, ProjectSessionRegistry, type ProjectSessionRecord } from './ProjectSessionRegistry.js';
@@ -126,15 +132,14 @@ export function createDebruteDaemonHttpServer(options: DebruteDaemonHttpServerOp
   };
   const globalRuntime = new DebruteGlobalRuntimeServer(appServerOptions);
   const adobeBridge = new AdobeBridgeService();
-  const adobeBridgeTransferContents = new Map<string, {
-    transferId: string;
-    projectId: string;
-    adobeClientId: string;
-    projectRelativePath: string;
-    token: string;
-    expiresAt: number;
-  }>();
+  const adobeBridgeTransferContents = new Map<string, AdobeBridgeTransferContentEntry>();
   const adobeBridgeWebSockets = createAdobeBridgeWebSocketRoutes({ bridge: adobeBridge });
+  const unsubscribeAdobeBridgeTransferContentPrune = adobeBridge.onEvent((state) => {
+    pruneAdobeBridgeTransferContents({
+      transferContents: adobeBridgeTransferContents,
+      state
+    });
+  });
   let adobeBridgeProjectSyncQueued = false;
   const sessions = new ProjectSessionRegistry({
     appServerOptions,
@@ -211,6 +216,7 @@ export function createDebruteDaemonHttpServer(options: DebruteDaemonHttpServerOp
     }
     electronWindowLeases.clear();
     globalRuntime.close();
+    unsubscribeAdobeBridgeTransferContentPrune();
     await adobeBridgeWebSockets.close();
     await adobeBridgeDiscovery.close();
     adobeBridge.dispose();
@@ -332,6 +338,7 @@ export function createDebruteDaemonHttpServer(options: DebruteDaemonHttpServerOp
       sessions,
       getSettings: adobeBridgeSettings,
       saveSettings: saveAdobeBridgeSettings,
+      readJsonBody,
       sendImportRequest: sendAdobeBridgeImportRequest,
       transferContents: adobeBridgeTransferContents
     })) {

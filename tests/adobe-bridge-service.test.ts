@@ -218,4 +218,37 @@ describe('AdobeBridgeService', () => {
       errorCode: 'transfer_timeout'
     }]);
   });
+
+  it('keeps active transfers and only recent terminal transfer history', () => {
+    let nowMs = Date.parse('2026-06-18T00:00:00.000Z');
+    const service = new AdobeBridgeService({
+      now: () => new Date(nowMs)
+    });
+
+    for (let index = 0; index < 25; index += 1) {
+      const transfer = service.createTransfer({
+        transferId: `terminal-${index}`,
+        direction: 'debrute-to-photoshop',
+        projectId: 'project-1',
+        adobeClientId: 'ps-1',
+        projectRelativePath: `assets/${index}.png`
+      });
+      nowMs += 1000;
+      service.updateTransfer({ transferId: transfer.transferId, status: 'succeeded' });
+    }
+    const active = service.createTransfer({
+      transferId: 'active-transfer',
+      direction: 'photoshop-to-debrute',
+      projectId: 'project-1',
+      adobeClientId: 'ps-1',
+      projectRelativePath: null
+    });
+
+    const transferIds = service.state().transfers.map((transfer) => transfer.transferId);
+
+    expect(transferIds).toEqual([
+      ...Array.from({ length: 20 }, (_value, index) => `terminal-${index + 5}`),
+      active.transferId
+    ]);
+  });
 });

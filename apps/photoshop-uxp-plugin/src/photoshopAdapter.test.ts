@@ -30,7 +30,7 @@ describe('currentPhotoshopDocument', () => {
     const runtime: PhotoshopRuntime = {
       app: {
         version: '27.0.0',
-        documents: [{}],
+        documents: [{}, {}],
         activeDocument: {
           id: 42,
           title: 'poster.psd',
@@ -49,6 +49,7 @@ describe('currentPhotoshopDocument', () => {
 
     expect(photoshopSelectionSnapshot(runtime)).toEqual({
       documentTitle: 'poster.psd',
+      documentCount: 2,
       selectedItems: [
         { layerId: 7, name: 'Hero Group', kind: 'group' },
         { layerId: 8, name: 'Logo', kind: 'layer' }

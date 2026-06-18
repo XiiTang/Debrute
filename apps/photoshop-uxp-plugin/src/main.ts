@@ -45,7 +45,8 @@ async function connect(): Promise<void> {
     socket.send(JSON.stringify(createPhotoshopHelloMessage({
       adobeClientId,
       hostVersion: adapter.hostVersion(),
-      documentTitle: snapshot.documentTitle
+      documentTitle: snapshot.documentTitle,
+      documentCount: snapshot.documentCount
     })));
     sendPhotoshopStatus(socket);
     statusInterval = window.setInterval(() => sendPhotoshopStatus(socket), 1000);
@@ -232,7 +233,10 @@ function sendPhotoshopStatus(socket: WebSocket): void {
     return;
   }
   const snapshot = adapter.currentSelectionSnapshot();
-  socket.send(JSON.stringify(createPhotoshopStatusMessage({ documentTitle: snapshot.documentTitle })));
+  socket.send(JSON.stringify(createPhotoshopStatusMessage({
+    documentTitle: snapshot.documentTitle,
+    documentCount: snapshot.documentCount
+  })));
 }
 
 function escapeHtml(value: string): string {

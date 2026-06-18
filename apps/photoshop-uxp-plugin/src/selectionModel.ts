@@ -1,5 +1,6 @@
 export interface PhotoshopSelectionSnapshot {
   documentTitle: string | null;
+  documentCount: number;
   selectedItems: Array<{
     layerId: number;
     name: string;

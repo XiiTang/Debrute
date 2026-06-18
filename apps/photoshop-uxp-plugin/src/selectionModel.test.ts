@@ -10,11 +10,13 @@ describe('selectionCardsFromSnapshot', () => {
   it('creates one draggable card for a single top-level layer and a batch card for multiple selections', () => {
     expect(selectionCardsFromSnapshot({
       documentTitle: 'poster.psd',
+      documentCount: 1,
       selectedItems: [{ layerId: 7, name: 'Hero', kind: 'layer' }]
     })).toEqual([{ id: 'layer:7', label: 'Hero', count: 1, draggable: true }]);
 
     expect(selectionCardsFromSnapshot({
       documentTitle: 'poster.psd',
+      documentCount: 1,
       selectedItems: [
         { layerId: 7, name: 'Hero', kind: 'layer' },
         { layerId: 9, name: 'Logo', kind: 'group' }
@@ -25,6 +27,7 @@ describe('selectionCardsFromSnapshot', () => {
   it('creates and validates selection-card drag payloads', () => {
     const [card] = selectionCardsFromSnapshot({
       documentTitle: 'poster.psd',
+      documentCount: 1,
       selectedItems: [{ layerId: 7, name: 'Hero', kind: 'layer' }]
     });
 

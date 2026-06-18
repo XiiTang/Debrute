@@ -4,6 +4,7 @@ import { join } from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
 import { GlobalConfigStore } from '@debrute/app-server';
 import { createDebruteDaemonHttpServer } from '@debrute/daemon';
+import { pruneAdobeBridgeTransferContents } from '../apps/daemon/src/adobe-bridge/AdobeBridgeHttpRoutes';
 
 describe('daemon Adobe Bridge HTTP routes', () => {
   const cleanups: Array<() => Promise<void> | void> = [];
@@ -38,6 +39,100 @@ describe('daemon Adobe Bridge HTTP routes', () => {
       body: JSON.stringify({ enabled: false })
     });
     expect(saved.settings).toMatchObject({ enabled: false, discoveryStatus: 'disabled' });
+  });
+
+  it('uses the daemon JSON parser for Adobe Bridge JSON request bodies', async () => {
+    const home = await mkdtemp(join(tmpdir(), 'debrute-bridge-json-home-'));
+    const daemon = createDebruteDaemonHttpServer({
+      host: '127.0.0.1',
+      port: 0,
+      token: 'test-token',
+      webBaseUrl: null,
+      adobeBridgeDiscoveryPort: 0,
+      appServerOptions: { globalConfigStore: new GlobalConfigStore({ debruteHome: home }) }
+    });
+    cleanups.push(() => daemon.close(), () => rm(home, { recursive: true, force: true }));
+    const runtime = await daemon.listen();
+
+    const invalid = await fetch(`${runtime.daemonUrl}/api/adobe-bridge/settings`, {
+      method: 'PUT',
+      headers: { 'content-type': 'application/json', 'x-debrute-daemon-token': 'test-token' },
+      body: '{'
+    });
+    expect(invalid.status).toBe(400);
+    await expect(invalid.json()).resolves.toMatchObject({
+      error: { code: 'invalid_json' }
+    });
+
+    const oversized = await fetch(`${runtime.daemonUrl}/api/adobe-bridge/settings`, {
+      method: 'PUT',
+      headers: { 'content-type': 'application/json', 'x-debrute-daemon-token': 'test-token' },
+      body: JSON.stringify({ enabled: true, padding: 'x'.repeat(2 * 1024 * 1024) })
+    });
+    expect(oversized.status).toBe(413);
+    await expect(oversized.json()).resolves.toMatchObject({
+      error: { code: 'request_body_too_large' }
+    });
+  });
+
+  it('prunes stale Adobe Bridge transfer content entries', () => {
+    const transferContents = new Map([
+      ['active', {
+        transferId: 'active',
+        projectId: 'project-1',
+        adobeClientId: 'ps-1',
+        projectRelativePath: 'assets/active.png',
+        token: 'active-token',
+        expiresAt: 2000
+      }],
+      ['terminal', {
+        transferId: 'terminal',
+        projectId: 'project-1',
+        adobeClientId: 'ps-1',
+        projectRelativePath: 'assets/terminal.png',
+        token: 'terminal-token',
+        expiresAt: 2000
+      }],
+      ['expired', {
+        transferId: 'expired',
+        projectId: 'project-1',
+        adobeClientId: 'ps-1',
+        projectRelativePath: 'assets/expired.png',
+        token: 'expired-token',
+        expiresAt: 900
+      }]
+    ]);
+
+    pruneAdobeBridgeTransferContents({
+      transferContents,
+      state: {
+        transfers: [
+          {
+            transferId: 'active',
+            direction: 'debrute-to-photoshop',
+            projectId: 'project-1',
+            adobeClientId: 'ps-1',
+            projectRelativePath: 'assets/active.png',
+            status: 'running',
+            createdAt: '2026-06-18T00:00:00.000Z',
+            updatedAt: '2026-06-18T00:00:00.000Z'
+          },
+          {
+            transferId: 'terminal',
+            direction: 'debrute-to-photoshop',
+            projectId: 'project-1',
+            adobeClientId: 'ps-1',
+            projectRelativePath: 'assets/terminal.png',
+            status: 'succeeded',
+            createdAt: '2026-06-18T00:00:00.000Z',
+            updatedAt: '2026-06-18T00:00:01.000Z'
+          }
+        ]
+      },
+      nowMs: 1000
+    });
+
+    expect([...transferContents.keys()]).toEqual(['active']);
   });
 
   it('allows Photoshop UXP preflight headers on tokenless plugin routes', async () => {

@@ -10,13 +10,14 @@ describe('bridgeClient pure helpers', () => {
     expect(createPhotoshopHelloMessage({
       adobeClientId: 'ps-1',
       hostVersion: '2026',
-      documentTitle: null
+      documentTitle: null,
+      documentCount: 3
     })).toEqual({
       type: 'hello',
       adobeClientId: 'ps-1',
       hostApp: 'photoshop',
       hostVersion: '2026',
-      documentCount: 0,
+      documentCount: 3,
       activeDocumentTitle: null
     });
   });
@@ -32,12 +33,12 @@ describe('bridgeClient pure helpers', () => {
   });
 
   it('creates Photoshop status messages from the current document title', () => {
-    expect(createPhotoshopStatusMessage({ documentTitle: 'poster.psd' })).toEqual({
+    expect(createPhotoshopStatusMessage({ documentTitle: 'poster.psd', documentCount: 2 })).toEqual({
       type: 'photoshop.status',
-      documentCount: 1,
+      documentCount: 2,
       activeDocumentTitle: 'poster.psd'
     });
-    expect(createPhotoshopStatusMessage({ documentTitle: null })).toEqual({
+    expect(createPhotoshopStatusMessage({ documentTitle: null, documentCount: 0 })).toEqual({
       type: 'photoshop.status',
       documentCount: 0,
       activeDocumentTitle: null

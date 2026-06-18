@@ -44,6 +44,7 @@ export interface CreateAdobeBridgeTransferInput {
 }
 
 export const ADOBE_BRIDGE_TRANSFER_TIMEOUT_MS = 5 * 60_000;
+const ADOBE_BRIDGE_TRANSFER_HISTORY_LIMIT = 20;
 
 export class AdobeBridgeService {
   private readonly events = new EventEmitter();
@@ -80,6 +81,7 @@ export class AdobeBridgeService {
       }
       this.adobeClients.clear();
       this.links.clear();
+      this.pruneTransferHistory();
     }
     this.emit();
   }
@@ -228,6 +230,7 @@ export class AdobeBridgeService {
     this.transfers.set(updated.transferId, updated);
     if (updated.status === 'failed' || updated.status === 'succeeded') {
       this.clearTransferTimeout(updated.transferId);
+      this.pruneTransferHistory();
     }
     this.emit();
     return updated;
@@ -342,6 +345,19 @@ export class AdobeBridgeService {
     }
     clearTimeout(timeout);
     this.transferTimeouts.delete(transferId);
+  }
+
+  private pruneTransferHistory(): void {
+    const terminalTransfers = [...this.transfers.values()]
+      .filter((transfer) => transfer.status === 'failed' || transfer.status === 'succeeded')
+      .sort((left, right) => left.updatedAt.localeCompare(right.updatedAt));
+    const removeCount = terminalTransfers.length - ADOBE_BRIDGE_TRANSFER_HISTORY_LIMIT;
+    if (removeCount <= 0) {
+      return;
+    }
+    for (const transfer of terminalTransfers.slice(0, removeCount)) {
+      this.transfers.delete(transfer.transferId);
+    }
   }
 }
 
