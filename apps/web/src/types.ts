@@ -1,14 +1,18 @@
 import type {
   AddProjectPathToCanvasMapInput,
+  AdobeBridgeStateView,
   ImageModelSettingsView,
   DiscoverLlmProviderModelsInput,
   DiscoverProviderModelsOutput,
   GeneratedAssetView,
   GeneratedAssetMetadataLookup,
   LlmProviderSettingsView,
+  SaveAdobeBridgeSettingsInput,
   SaveImageModelSettingInput,
   SaveLlmProviderSettingInput,
   SaveVideoModelSettingInput,
+  SendProjectFileToPhotoshopInput,
+  SendProjectFileToPhotoshopResult,
   IntegrationSettingsView,
   VideoModelSettingsView,
   WorkbenchCanvasManagementResult,
@@ -28,11 +32,13 @@ import type { ProjectTreeSelectionState } from './workbench/project-explorer/pro
 
 export interface WorkbenchState {
   snapshot: WorkbenchProjectSessionSnapshot | undefined;
+  projectId?: string | undefined;
   explorerSelection: ProjectTreeSelectionState;
   llmSettings: LlmProviderSettingsView | undefined;
   imageModelSettings: ImageModelSettingsView | undefined;
   videoModelSettings: VideoModelSettingsView | undefined;
   integrationsSettings: IntegrationSettingsView | undefined;
+  adobeBridge: AdobeBridgeStateView | undefined;
   canvasFeedback: CanvasFeedbackDocument | undefined;
   textFileBuffers: Record<string, TextFileBuffer>;
   textEditorWindows: Record<string, FloatingTextEditorWindowState>;
@@ -69,6 +75,11 @@ export interface WorkbenchActions {
   saveImageModelSetting: (modelId: string, input: SaveImageModelSettingInput) => Promise<void>;
   saveVideoModelSetting: (modelId: string, input: SaveVideoModelSettingInput) => Promise<void>;
   rescanIntegrations: () => Promise<IntegrationSettingsView>;
+  saveAdobeBridgeSettings: (input: SaveAdobeBridgeSettingsInput) => Promise<void>;
+  linkAdobeBridgePhotoshop: (input: { adobeClientId: string }) => Promise<void>;
+  unlinkAdobeBridgePhotoshop: (adobeClientId: string) => Promise<void>;
+  sendProjectFileToPhotoshop: (input: SendProjectFileToPhotoshopInput) => Promise<SendProjectFileToPhotoshopResult>;
+  openSendToPhotoshopPicker: (projectRelativePath: string) => void;
   lookupGeneratedAssetMetadata: (input: { projectRelativePath: string }) => Promise<GeneratedAssetMetadataLookup>;
   readGeneratedAsset: (assetId: string) => Promise<GeneratedAssetView>;
   readProjectTextFile: (projectRelativePath: string) => Promise<WorkbenchProjectTextFile>;

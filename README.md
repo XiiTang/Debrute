@@ -49,7 +49,7 @@ pnpm exec tsx apps/debrute-cli/src/index.ts project validate path/to/project
 
 ## Releases
 
-Debrute publishes Desktop installers and Debrute CLI archives on GitHub Releases.
+Debrute publishes Desktop installers, Debrute CLI archives, and the Photoshop UXP bridge panel on GitHub Releases.
 
 Current Desktop builds are unsigned. macOS may require right-click Open or Privacy & Security approval. Windows may show SmartScreen. Linux AppImage builds may require `chmod +x`.
 
@@ -73,6 +73,7 @@ debrute-cli-X.Y.Z-linux-arm64.tar.gz
 debrute-cli-X.Y.Z-linux-x64.tar.gz
 debrute-cli-X.Y.Z-windows-arm64.zip
 debrute-cli-X.Y.Z-windows-x64.zip
+debrute-photoshop-uxp-X.Y.Z.ccx
 debrute_SHA256SUMS
 ```
 

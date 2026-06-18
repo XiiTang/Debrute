@@ -1,0 +1,39 @@
+body {
+  margin: 0;
+  background: var(--uxp-host-background-color);
+  color: var(--uxp-host-text-color);
+  font: 12px system-ui, sans-serif;
+}
+
+.bridge-panel {
+  display: grid;
+  gap: 10px;
+  padding: 10px;
+}
+
+section {
+  display: grid;
+  gap: 6px;
+  border-bottom: 1px solid var(--uxp-host-border-color);
+  padding-bottom: 10px;
+}
+
+h1,
+h2,
+h3,
+p {
+  margin: 0;
+}
+
+.bridge-status-error {
+  color: var(--uxp-host-error-color, #b42318);
+}
+
+button {
+  min-height: 28px;
+  text-align: left;
+}
+
+button.is-drop-active {
+  outline: 2px solid var(--uxp-host-link-color);
+}

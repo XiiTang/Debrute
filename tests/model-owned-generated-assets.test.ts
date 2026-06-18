@@ -41,7 +41,7 @@ describe('model-owned generated asset contracts', () => {
       defaultRequestModelId: 'gpt-image-2',
       requestModelIdOverride: 'gpt-image-2-custom',
       apiKeySet: true,
-      apiKey: 'sk-image'
+      apiKeyPreview: 'sk****************************ge'
     });
     expect(videoSettings.models[0]).toEqual({
       debruteModelId: 'doubao-seedance-2-0-260128',
@@ -55,7 +55,7 @@ describe('model-owned generated asset contracts', () => {
       defaultRequestModelId: 'doubao-seedance-2-0-260128',
       requestModelIdOverride: 'seedance-custom',
       apiKeySet: true,
-      apiKey: 'sk-video'
+      apiKeyPreview: 'sk****************************eo'
     });
   });
 

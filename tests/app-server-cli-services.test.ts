@@ -415,13 +415,18 @@ describe('DebruteAppServer CLI service methods', () => {
         if (url.endsWith('/contents/generations/tasks/task-1')) {
           return jsonResponse({ status: 'succeeded', content: { video_url: 'https://files.example/video.mp4' } });
         }
-        if (url === 'https://files.example/video.mp4') {
-          return new Response(new Uint8Array([0, 0, 0, 24]), {
-            status: 200,
-            headers: { 'content-type': 'video/mp4' }
-          });
-        }
         throw new Error(`Unexpected video model fetch: ${url}`);
+      },
+      remoteUrlLookup: async (hostname) => {
+        expect(hostname).toBe('files.example');
+        return [{ address: '93.184.216.34', family: 4 }];
+      },
+      remoteHttpTransport: async (input) => {
+        expect(input.url).toBe('https://files.example/video.mp4');
+        return new Response(new Uint8Array([0, 0, 0, 24]), {
+          status: 200,
+          headers: { 'content-type': 'video/mp4' }
+        });
       }
     });
     try {

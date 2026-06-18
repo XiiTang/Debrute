@@ -423,6 +423,7 @@ describe('app-server', () => {
     });
     try {
       expect(Object.keys(globalConfigStore.paths()).sort()).toEqual([
+        'adobeBridgeFile',
         'imageModelsFile',
         'llmProvidersFile',
         'root',

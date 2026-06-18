@@ -18,6 +18,11 @@ export interface GlobalConfigPaths {
   imageModelsFile: string;
   videoModelsFile: string;
   secretsFile: string;
+  adobeBridgeFile: string;
+}
+
+export interface AdobeBridgeConfig {
+  enabled: boolean;
 }
 
 export class GlobalConfigStore {
@@ -31,7 +36,8 @@ export class GlobalConfigStore {
       llmProvidersFile: join(root, 'llm_providers.json'),
       imageModelsFile: join(root, 'image_models.json'),
       videoModelsFile: join(root, 'video_models.json'),
-      secretsFile: join(root, 'secrets.json')
+      secretsFile: join(root, 'secrets.json'),
+      adobeBridgeFile: join(root, 'adobe_bridge.json')
     };
   }
 
@@ -62,6 +68,16 @@ export class GlobalConfigStore {
     await writeJsonAtomic(this.paths().videoModelsFile, normalizeVideoModelsConfig(config));
   }
 
+  async readAdobeBridge(): Promise<AdobeBridgeConfig> {
+    return normalizeAdobeBridgeConfig(await readJsonOrDefault<unknown>(this.paths().adobeBridgeFile, {
+      enabled: true
+    }));
+  }
+
+  async saveAdobeBridge(config: AdobeBridgeConfig): Promise<void> {
+    await writeJsonAtomic(this.paths().adobeBridgeFile, normalizeAdobeBridgeConfig(config));
+  }
+
   async readSecrets(): Promise<SecretsConfig> {
     return readJsonOrDefault(this.paths().secretsFile, { llmProviderApiKeys: {}, imageModelApiKeys: {}, videoModelApiKeys: {} });
   }
@@ -74,6 +90,13 @@ export class GlobalConfigStore {
     });
   }
 
+}
+
+function normalizeAdobeBridgeConfig(config: unknown): AdobeBridgeConfig {
+  if (!isRecord(config) || typeof config.enabled !== 'boolean') {
+    throw new Error('Adobe Bridge config must contain enabled.');
+  }
+  return { enabled: config.enabled };
 }
 
 function normalizeLlmProvidersConfig(config: unknown): LlmProvidersConfig {

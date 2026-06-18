@@ -46,3 +46,32 @@
   color: var(--db-text);
   font-size: var(--db-font-md);
 }
+
+.db-modal-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: var(--db-z-overlays);
+  display: grid;
+  place-items: center;
+  padding: var(--db-space-5);
+  background: color-mix(in oklch, var(--db-bg) 58%, transparent);
+}
+
+.db-modal {
+  width: min(440px, 100%);
+  max-height: min(620px, calc(100vh - 40px));
+  display: grid;
+  gap: var(--db-space-4);
+  overflow: auto;
+  border: 1px solid var(--db-border);
+  border-radius: var(--db-radius-lg);
+  padding: var(--db-space-5);
+  background: var(--db-surface-1);
+  box-shadow: var(--db-shadow-floating);
+}
+
+.adobe-bridge-target-row {
+  width: 100%;
+  color: var(--db-text);
+  text-align: left;
+}

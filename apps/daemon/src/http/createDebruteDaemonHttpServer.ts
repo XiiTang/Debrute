@@ -11,7 +11,9 @@ import { DebruteAppServer, DebruteGlobalRuntimeServer, GlobalConfigStore, type D
 import { redactRuntimeSecretString, redactRuntimeSecrets } from '@debrute/capability-runtime';
 import {
   normalizeDebruteRuntimeInfo,
+  type AdobeBridgeSettings,
   type AppServerEvent,
+  type DaemonBridgeImportRequestMessage,
   type DaemonCliCommandRequest,
   type DaemonProjectUploadImportPlan,
   type DebruteHttpErrorBody,
@@ -28,6 +30,10 @@ import {
   type WorkbenchProjectTextFile
 } from '@debrute/app-protocol';
 import { projectFileRevision, resolveExistingProjectPath, type ProjectUploadImportEntry } from '@debrute/project-core';
+import { createAdobeBridgeDiscoveryServer } from '../adobe-bridge/AdobeBridgeDiscoveryServer.js';
+import { routeAdobeBridgeHttp, syncAdobeBridgeProjects, writeAdobeBridgeCaughtError } from '../adobe-bridge/AdobeBridgeHttpRoutes.js';
+import { AdobeBridgeService } from '../adobe-bridge/AdobeBridgeService.js';
+import { createAdobeBridgeWebSocketRoutes } from '../adobe-bridge/AdobeBridgeWebSocketRoutes.js';
 import { ProjectRevisionConflictError, ProjectSessionRegistry, type ProjectSessionRecord } from './ProjectSessionRegistry.js';
 import { writeRevisionedFileResponse } from './fileResponse.js';
 import { createNodeNativeShell, type DebruteNativeShell } from './nativeShell.js';
@@ -52,6 +58,7 @@ export interface DebruteDaemonHttpServerOptions {
   webBaseUrl?: string | null;
   webDistDir?: string;
   projectIdleTtlMs?: number;
+  adobeBridgeDiscoveryPort?: number;
 }
 
 export interface DebruteDaemonHttpServer {
@@ -87,6 +94,15 @@ interface ProjectApiRoute {
 const DEFAULT_HOST = '127.0.0.1';
 const DEFAULT_PORT = 0;
 const BODY_LIMIT_BYTES = 2 * 1024 * 1024;
+const PHOTOSHOP_UXP_ORIGIN = 'uxp://com.debrute.photoshop.bridge';
+const CORS_ALLOWED_HEADERS = [
+  'content-type',
+  'x-debrute-daemon-token',
+  'x-debrute-adobe-client-id',
+  'x-debrute-transfer-id',
+  'x-debrute-target-directory',
+  'x-debrute-suggested-name'
+].join(',');
 
 interface MultipartUploadFilePart {
   temporaryPath: string;
@@ -109,13 +125,39 @@ export function createDebruteDaemonHttpServer(options: DebruteDaemonHttpServerOp
     globalConfigStore: sharedConfigStore
   };
   const globalRuntime = new DebruteGlobalRuntimeServer(appServerOptions);
+  const adobeBridge = new AdobeBridgeService();
+  const adobeBridgeTransferContents = new Map<string, {
+    transferId: string;
+    projectId: string;
+    adobeClientId: string;
+    projectRelativePath: string;
+    token: string;
+    expiresAt: number;
+  }>();
+  const adobeBridgeWebSockets = createAdobeBridgeWebSocketRoutes({ bridge: adobeBridge });
+  let adobeBridgeProjectSyncQueued = false;
   const sessions = new ProjectSessionRegistry({
     appServerOptions,
     ...(options.createAppServer ? { createAppServer: options.createAppServer } : {}),
-    ...(options.projectIdleTtlMs !== undefined ? { idleTtlMs: options.projectIdleTtlMs } : {})
+    ...(options.projectIdleTtlMs !== undefined ? { idleTtlMs: options.projectIdleTtlMs } : {}),
+    onChange: () => scheduleAdobeBridgeProjectSync()
   });
   let runtime: DebruteDaemonRuntime | undefined;
   let server: Server | undefined;
+  const adobeBridgeDiscovery = createAdobeBridgeDiscoveryServer({
+    ...(options.adobeBridgeDiscoveryPort !== undefined ? { port: options.adobeBridgeDiscoveryPort } : {}),
+    snapshot: () => {
+      const current = currentRuntime();
+      return {
+        product: 'debrute',
+        bridgeVersion: 1,
+        enabled: adobeBridge.state().settings.enabled,
+        daemonUrl: current.daemonUrl,
+        apiBaseUrl: `${current.daemonUrl}/api/adobe-bridge`,
+        wsUrl: current.daemonUrl.replace(/^http:/, 'ws:') + '/api/adobe-bridge/plugin/ws'
+      };
+    }
+  });
   const electronWindowLeases = new Map<string, () => void>();
 
   async function listen(): Promise<DebruteDaemonRuntime> {
@@ -128,6 +170,12 @@ export function createDebruteDaemonHttpServer(options: DebruteDaemonHttpServerOp
       void handleRequest(request, response).catch((error) => {
         writeCaughtError(response, error);
       });
+    });
+    server.on('upgrade', (request, socket, head) => {
+      if (adobeBridgeWebSockets.handleUpgrade(request, socket, head)) {
+        return;
+      }
+      socket.destroy();
     });
 
     await new Promise<void>((resolveListen, rejectListen) => {
@@ -151,6 +199,9 @@ export function createDebruteDaemonHttpServer(options: DebruteDaemonHttpServerOp
       }),
       token
     };
+    await adobeBridgeDiscovery.listen();
+    adobeBridge.setSettings(await adobeBridgeSettings());
+    syncAdobeBridgeProjectState();
     return runtime;
   }
 
@@ -160,6 +211,9 @@ export function createDebruteDaemonHttpServer(options: DebruteDaemonHttpServerOp
     }
     electronWindowLeases.clear();
     globalRuntime.close();
+    await adobeBridgeWebSockets.close();
+    await adobeBridgeDiscovery.close();
+    adobeBridge.dispose();
     await sessions.close();
     if (!server) {
       return;
@@ -181,7 +235,7 @@ export function createDebruteDaemonHttpServer(options: DebruteDaemonHttpServerOp
       return;
     }
     const url = new URL(request.url ?? '/', runtime.daemonUrl);
-    if (url.pathname.startsWith('/api/') && !applyCorsHeaders(request, response, runtime)) {
+    if (url.pathname.startsWith('/api/') && !applyCorsHeaders(request, response, runtime, url.pathname)) {
       writeError(response, 403, 'forbidden', 'Debrute daemon origin is not allowed.');
       return;
     }
@@ -271,6 +325,19 @@ export function createDebruteDaemonHttpServer(options: DebruteDaemonHttpServerOp
       return true;
     }
 
+    if (await routeAdobeBridgeHttp({
+      ...context,
+      daemonUrl: currentRuntime().daemonUrl,
+      bridge: adobeBridge,
+      sessions,
+      getSettings: adobeBridgeSettings,
+      saveSettings: saveAdobeBridgeSettings,
+      sendImportRequest: sendAdobeBridgeImportRequest,
+      transferContents: adobeBridgeTransferContents
+    })) {
+      return true;
+    }
+
     const projectRoute = projectApiRoute(path);
     if (projectRoute) {
       const releaseRequest = sessions.registerRequest(projectRoute.projectId);
@@ -327,7 +394,7 @@ export function createDebruteDaemonHttpServer(options: DebruteDaemonHttpServerOp
     const path = context.url.pathname;
     const tail = projectRoute.tail;
     if (method === 'GET' && tail === '/events') {
-      writeEventStream(context, session, globalRuntime, sessions);
+      writeEventStream(context, session, globalRuntime, sessions, adobeBridge);
       return;
     }
     if (method === 'GET' && tail === '') {
@@ -464,6 +531,44 @@ export function createDebruteDaemonHttpServer(options: DebruteDaemonHttpServerOp
 
   function writeProjectNotOpen(context: RequestContext, projectId: string): void {
     writeError(context.response, 404, 'project_not_open', `Debrute project is not open: ${projectId}`);
+  }
+
+  async function adobeBridgeSettings(): Promise<AdobeBridgeSettings> {
+    const settings = await globalRuntime.adobeBridgeGetSettings();
+    if (!settings.enabled) {
+      return { enabled: false, discoveryStatus: 'disabled' };
+    }
+    return {
+      enabled: true,
+      discoveryStatus: adobeBridgeDiscovery.status()?.status === 'available' ? 'available' : 'unavailable'
+    };
+  }
+
+  async function saveAdobeBridgeSettings(input: { enabled: boolean }): Promise<AdobeBridgeSettings> {
+    await globalRuntime.adobeBridgeSaveSettings(input);
+    return adobeBridgeSettings();
+  }
+
+  function syncAdobeBridgeProjectState(): void {
+    syncAdobeBridgeProjects({ bridge: adobeBridge, sessions });
+  }
+
+  function scheduleAdobeBridgeProjectSync(): void {
+    if (adobeBridgeProjectSyncQueued) {
+      return;
+    }
+    adobeBridgeProjectSyncQueued = true;
+    queueMicrotask(() => {
+      adobeBridgeProjectSyncQueued = false;
+      syncAdobeBridgeProjectState();
+    });
+  }
+
+  function sendAdobeBridgeImportRequest(
+    adobeClientId: string,
+    message: DaemonBridgeImportRequestMessage
+  ): boolean {
+    return adobeBridgeWebSockets.sendImportRequest(adobeClientId, message);
   }
 
   return {
@@ -1244,7 +1349,8 @@ function writeEventStream(
   context: RequestContext,
   session: ProjectSessionRecord,
   globalRuntime: DebruteGlobalRuntimeServer,
-  sessions: ProjectSessionRegistry
+  sessions: ProjectSessionRegistry,
+  bridge?: AdobeBridgeService
 ): void {
   const clientId = context.url.searchParams.get('clientId') || randomUUID();
   const releaseClient = sessions.registerClient(session.projectId, { clientId, kind: 'sse' });
@@ -1275,6 +1381,12 @@ function writeEventStream(
       context.runtime.token
     ))}\n\n`);
   });
+  const unsubscribeBridge = bridge?.onEvent((state) => {
+    context.response.write(`event: message\ndata: ${JSON.stringify({
+      type: 'adobeBridge.state.changed',
+      state
+    } satisfies WorkbenchEvent)}\n\n`);
+  }) ?? (() => undefined);
   const keepalive = setInterval(() => {
     context.response.write(': keepalive\n\n');
   }, 15_000);
@@ -1282,6 +1394,7 @@ function writeEventStream(
     clearInterval(keepalive);
     unsubscribeProject();
     unsubscribeGlobal();
+    unsubscribeBridge();
     releaseClient?.();
   };
   context.request.once('close', cleanup);
@@ -1291,7 +1404,8 @@ function isGlobalEvent(event: AppServerEvent): boolean {
   return event.type === 'llm.settings.changed'
     || event.type === 'imageModel.settings.changed'
     || event.type === 'videoModel.settings.changed'
-    || event.type === 'integrations.settings.changed';
+    || event.type === 'integrations.settings.changed'
+    || event.type === 'adobeBridge.settings.changed';
 }
 
 async function serveWebAsset(context: RequestContext, configuredWebDistDir: string | undefined): Promise<void> {
@@ -1465,20 +1579,33 @@ function rawFileUrl(
   return url.toString();
 }
 
-function applyCorsHeaders(request: IncomingMessage, response: ServerResponse, runtime: DebruteDaemonRuntime): boolean {
+function applyCorsHeaders(
+  request: IncomingMessage,
+  response: ServerResponse,
+  runtime: DebruteDaemonRuntime,
+  path: string
+): boolean {
   const origin = request.headers.origin;
   if (!origin) {
     return true;
   }
-  if (origin !== runtime.daemonUrl && origin !== runtime.webBaseUrl) {
+  const allowedOrigin = origin === runtime.daemonUrl
+    || origin === runtime.webBaseUrl
+    || (origin === PHOTOSHOP_UXP_ORIGIN && isPhotoshopUxpBridgeRoute(path));
+  if (!allowedOrigin) {
     return false;
   }
   response.setHeader('access-control-allow-origin', origin);
   response.setHeader('access-control-allow-methods', 'GET,HEAD,POST,PUT,PATCH,DELETE,OPTIONS');
-  response.setHeader('access-control-allow-headers', 'content-type,x-debrute-daemon-token');
+  response.setHeader('access-control-allow-headers', CORS_ALLOWED_HEADERS);
   response.setHeader('access-control-max-age', '600');
   response.setHeader('vary', 'origin');
   return true;
+}
+
+function isPhotoshopUxpBridgeRoute(path: string): boolean {
+  return path.startsWith('/api/adobe-bridge/plugin/')
+    || path.startsWith('/api/adobe-bridge/transfers/');
 }
 
 function requiresDaemonToken(path: string): boolean {
@@ -1486,6 +1613,15 @@ function requiresDaemonToken(path: string): boolean {
     return false;
   }
   if (path === '/api/status') {
+    return false;
+  }
+  if (path === '/api/adobe-bridge/plugin/ws') {
+    return false;
+  }
+  if (path.startsWith('/api/adobe-bridge/plugin/')) {
+    return false;
+  }
+  if (path.startsWith('/api/adobe-bridge/transfers/')) {
     return false;
   }
   return path !== '/api/runtime';
@@ -1685,6 +1821,9 @@ function writeCaughtError(response: ServerResponse, error: unknown): void {
   }
   if (error instanceof DebruteDaemonHttpError) {
     writeError(response, error.statusCode, error.code, error.message, error.details);
+    return;
+  }
+  if (writeAdobeBridgeCaughtError(response, error)) {
     return;
   }
   if (isServiceError(error)) {

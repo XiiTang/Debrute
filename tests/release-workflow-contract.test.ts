@@ -13,6 +13,8 @@ describe('GitHub release workflow contract', () => {
     expect(workflow).toContain('sudo apt-get update && sudo apt-get install -y ripgrep');
     expect(workflow).toContain('build-cli:');
     expect(workflow).toContain('build-desktop:');
+    expect(workflow).toContain('build-photoshop-uxp:');
+    expect(workflow).toContain('pnpm package:photoshop-plugin');
     expect(workflow).toContain('publish-release:');
     expect(workflow).toContain('CSC_IDENTITY_AUTO_DISCOVERY: false');
     expect(workflow).toContain('debrute_SHA256SUMS');
@@ -46,7 +48,7 @@ describe('GitHub release workflow contract', () => {
   it('runs every Node-backed release job under Node.js 24', () => {
     const configuredNodeVersions = [...workflow.matchAll(/node-version:\s*(\d+)/g)].map((match) => match[1]);
 
-    expect(configuredNodeVersions).toEqual(['24', '24', '24', '24']);
+    expect(configuredNodeVersions).toEqual(['24', '24', '24', '24', '24']);
     expect(workflow).not.toContain('node-version: 22');
   });
 
@@ -64,6 +66,8 @@ describe('GitHub release workflow contract', () => {
     expect(readme).toContain('Desktop app checks for application updates');
     expect(readme).toContain('Linux Desktop updates are manual downloads');
     expect(readme).toContain('debrute-cli-X.Y.Z-macos-arm64.tar.gz');
+    expect(readme).toContain('debrute-photoshop-uxp-X.Y.Z.ccx');
+    expect(readme).toContain('Photoshop UXP');
     expect(readme).toContain('debrute_SHA256SUMS');
     expect(readme).toContain('grep "  debrute-cli-X.Y.Z-macos-arm64.tar.gz$" debrute_SHA256SUMS | shasum -a 256 -c -');
     expect(readme).toContain('sha256sum -c --ignore-missing debrute_SHA256SUMS');

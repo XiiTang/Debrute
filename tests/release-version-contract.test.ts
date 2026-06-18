@@ -17,6 +17,8 @@ describe('release version contract', () => {
       'root package',
       'Desktop package',
       'Debrute CLI package',
+      'Photoshop UXP package',
+      'Photoshop UXP manifest',
       'debrute-core Skill',
       'debrute-image-director Skill',
       'debrute-video-director Skill'
@@ -29,10 +31,14 @@ describe('release version contract', () => {
     try {
       await mkdir(join(root, 'apps/desktop'), { recursive: true });
       await mkdir(join(root, 'apps/debrute-cli'), { recursive: true });
+      await mkdir(join(root, 'apps/photoshop-uxp-plugin'), { recursive: true });
+      await mkdir(join(root, 'apps/photoshop-uxp-plugin/public'), { recursive: true });
       await mkdir(join(root, 'skills/debrute-core'), { recursive: true });
       await writeFile(join(root, 'package.json'), JSON.stringify({ version: '1.2.3' }), 'utf8');
       await writeFile(join(root, 'apps/desktop/package.json'), JSON.stringify({ version: '1.2.3' }), 'utf8');
       await writeFile(join(root, 'apps/debrute-cli/package.json'), JSON.stringify({ version: '1.2.4' }), 'utf8');
+      await writeFile(join(root, 'apps/photoshop-uxp-plugin/package.json'), JSON.stringify({ version: '1.2.3' }), 'utf8');
+      await writeFile(join(root, 'apps/photoshop-uxp-plugin/public/manifest.json'), JSON.stringify({ version: '1.2.3' }), 'utf8');
       await writeFile(join(root, 'skills/debrute-core/SKILL.md'), [
         '---',
         'name: debrute-core',
@@ -43,6 +49,33 @@ describe('release version contract', () => {
       ].join('\n'), 'utf8');
 
       await expect(validateReleaseVersionContract(root)).rejects.toThrow(/release version mismatch/i);
+    } finally {
+      await rm(root, { recursive: true, force: true });
+    }
+  });
+
+  it('rejects mismatched Photoshop UXP manifest versions instead of packaging mixed metadata', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'debrute-release-uxp-manifest-contract-'));
+    try {
+      await mkdir(join(root, 'apps/desktop'), { recursive: true });
+      await mkdir(join(root, 'apps/debrute-cli'), { recursive: true });
+      await mkdir(join(root, 'apps/photoshop-uxp-plugin/public'), { recursive: true });
+      await mkdir(join(root, 'skills/debrute-core'), { recursive: true });
+      await writeFile(join(root, 'package.json'), JSON.stringify({ version: '1.2.3' }), 'utf8');
+      await writeFile(join(root, 'apps/desktop/package.json'), JSON.stringify({ version: '1.2.3' }), 'utf8');
+      await writeFile(join(root, 'apps/debrute-cli/package.json'), JSON.stringify({ version: '1.2.3' }), 'utf8');
+      await writeFile(join(root, 'apps/photoshop-uxp-plugin/package.json'), JSON.stringify({ version: '1.2.3' }), 'utf8');
+      await writeFile(join(root, 'apps/photoshop-uxp-plugin/public/manifest.json'), JSON.stringify({ version: '1.2.4' }), 'utf8');
+      await writeFile(join(root, 'skills/debrute-core/SKILL.md'), [
+        '---',
+        'name: debrute-core',
+        'metadata:',
+        '  debrute.version: "1.2.3"',
+        '---',
+        ''
+      ].join('\n'), 'utf8');
+
+      await expect(validateReleaseVersionContract(root)).rejects.toThrow(/photoshop uxp manifest/i);
     } finally {
       await rm(root, { recursive: true, force: true });
     }

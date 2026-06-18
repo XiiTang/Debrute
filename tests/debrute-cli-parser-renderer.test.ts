@@ -255,7 +255,7 @@ describe('debrute cli parser and renderer', () => {
       requires: 'project-session',
       writes: 'assets'
     });
-    expect(imageBatchSpec?.input).toContain('--summary <path>');
+    expect(imageBatchSpec?.input).toContain('--summary <project-relative-path>');
     expect(imageBatchSpec?.input).toContain('--concurrency <n>');
     expect(imageBatchSpec?.input).toContain('--retries <n>');
     expect(specForCommandPath(['project', 'status'])?.errors).toContain('project_not_found');

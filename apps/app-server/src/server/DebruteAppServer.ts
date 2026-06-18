@@ -55,6 +55,8 @@ import {
   type ImageModelCatalogEntry,
   type ImageModelFetch,
   type ImageModelRequestInput,
+  type PublicRemoteHostLookup,
+  type PublicRemoteHttpTransport,
   type VideoModelRequestInput,
   type VideoModelFetch
 } from '@debrute/capability-runtime';
@@ -173,6 +175,8 @@ export interface DebruteAppServerOptions {
   globalConfigStore?: GlobalConfigStore;
   imageModelFetch?: ImageModelFetch;
   videoModelFetch?: VideoModelFetch;
+  remoteUrlLookup?: PublicRemoteHostLookup;
+  remoteHttpTransport?: PublicRemoteHttpTransport;
   integrationEnvPath?: string;
   integrationPathExt?: string;
   integrationPlatform?: NodeJS.Platform;
@@ -853,7 +857,9 @@ export class DebruteAppServer {
       settings,
       secrets: { videoModelApiKeys: secrets.videoModelApiKeys },
       recordGeneratedAsset: (metadata) => this.recordGeneratedAssetMetadata(metadata).then(() => undefined),
-      ...(this.options.videoModelFetch ? { fetch: this.options.videoModelFetch } : {})
+      ...(this.options.videoModelFetch ? { fetch: this.options.videoModelFetch } : {}),
+      ...(this.options.remoteUrlLookup ? { remoteUrlLookup: this.options.remoteUrlLookup } : {}),
+      ...(this.options.remoteHttpTransport ? { remoteHttpTransport: this.options.remoteHttpTransport } : {})
     });
     if (result.status === 'error') {
       return capabilityError(result.error, result.content, undefined, {
@@ -942,6 +948,8 @@ export class DebruteAppServer {
           secrets: { imageModelApiKeys: secrets.imageModelApiKeys },
           recordGeneratedAsset: (metadata) => this.recordGeneratedAssetMetadata(metadata).then(() => undefined),
           ...(this.options.imageModelFetch ? { fetch: this.options.imageModelFetch } : {}),
+          ...(this.options.remoteUrlLookup ? { remoteUrlLookup: this.options.remoteUrlLookup } : {}),
+          ...(this.options.remoteHttpTransport ? { remoteHttpTransport: this.options.remoteHttpTransport } : {}),
           ...(options.signal ? { signal: options.signal } : {})
         });
       }

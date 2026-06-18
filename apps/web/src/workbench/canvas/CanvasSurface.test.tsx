@@ -1108,6 +1108,7 @@ function workbenchStateFixture(
     imageModelSettings: undefined,
     videoModelSettings: undefined,
     integrationsSettings: undefined,
+    adobeBridge: undefined,
     canvasFeedback: undefined,
     textFileBuffers: {},
     textEditorWindows: {},
@@ -1123,6 +1124,13 @@ const actions: WorkbenchActions = {
   saveImageModelSetting: async () => undefined,
   saveVideoModelSetting: async () => undefined,
   rescanIntegrations: async () => emptyIntegrationsSettings,
+  saveAdobeBridgeSettings: async () => undefined,
+  linkAdobeBridgePhotoshop: async () => undefined,
+  unlinkAdobeBridgePhotoshop: async () => undefined,
+  sendProjectFileToPhotoshop: async () => {
+    throw new Error('not used');
+  },
+  openSendToPhotoshopPicker: () => undefined,
   lookupGeneratedAssetMetadata: async () => {
     throw new Error('not used');
   },

@@ -1,5 +1,6 @@
 import type {
   AddProjectPathToCanvasMapInput,
+  AdobeBridgeStateView,
   DebruteRuntimeInfo,
   DebruteHttpErrorBody,
   DaemonProjectUploadImportPlan,
@@ -12,9 +13,11 @@ import type {
   IntegrationSettingsView,
   LlmProviderSettingsView,
   ProjectHealthSummary,
+  SaveAdobeBridgeSettingsInput,
   SaveImageModelSettingInput,
   SaveLlmProviderSettingInput,
   SaveVideoModelSettingInput,
+  SendProjectFileToPhotoshopResult,
   TerminalEvent,
   TerminalEventSubscription,
   TerminalSessionList,
@@ -188,6 +191,18 @@ export function createHttpWorkbenchApiClient(options: HttpWorkbenchApiClientOpti
   return {
     mode: 'web',
     clientId: eventClientId,
+    adobeBridgeGetState: () => request<AdobeBridgeStateView>('GET', '/api/adobe-bridge'),
+    adobeBridgeSaveSettings: (input: SaveAdobeBridgeSettingsInput) => request<AdobeBridgeStateView>('PUT', '/api/adobe-bridge/settings', input),
+    adobeBridgeLinkPhotoshop: (input) => request<AdobeBridgeStateView>('POST', projectPath('/adobe-bridge/links'), input),
+    adobeBridgeUnlinkPhotoshop: (adobeClientId) => request<AdobeBridgeStateView>(
+      'DELETE',
+      projectPath(`/adobe-bridge/links/${encodeURIComponent(adobeClientId)}`)
+    ),
+    sendProjectFileToPhotoshop: (input) => request<SendProjectFileToPhotoshopResult>(
+      'POST',
+      projectPath('/adobe-bridge/send-to-photoshop'),
+      input
+    ),
     chooseProjectRoot: async () => {
       const debruteShell = shell();
       if (!debruteShell) {

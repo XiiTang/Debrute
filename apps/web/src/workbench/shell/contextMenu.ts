@@ -1,4 +1,5 @@
 import type { CanvasProjection, ProjectedCanvasNode } from '@debrute/canvas-core';
+import { isSupportedAdobeBridgeWorkbenchFile } from '../adobe-bridge/adobeBridgeLabels';
 import type { CanvasCamera } from '../canvas/runtime/canvasCamera';
 import { cameraCenteredOnCanvasPoint } from '../canvas/runtime/canvasCamera';
 
@@ -7,6 +8,7 @@ export type WorkbenchContextMenuTargetKind = 'file' | 'directory';
 export type WorkbenchExplorerContextMenuTargetKind = 'root' | 'item' | 'selection';
 
 export type WorkbenchContextMenuCommand =
+  | 'send-to-photoshop'
   | 'show-details'
   | 'reveal-in-canvas'
   | 'reset-auto-layout'
@@ -80,6 +82,7 @@ export function buildWorkbenchContextMenuItems(input: {
   canRevealInCanvas: boolean;
   fileClipboard?: WorkbenchFileClipboard | undefined;
   desktopPlatform?: NodeJS.Platform | undefined;
+  adobeBridgeEnabled?: boolean | undefined;
 }): WorkbenchContextMenuItem[] {
   if (input.target.source === 'canvas') {
     const node = projectedContextMenuNode(input.projection, input.target.projectRelativePath);
@@ -87,6 +90,9 @@ export function buildWorkbenchContextMenuItems(input: {
       node ? action('show-details', 'Show Details') : undefined,
       node && input.canRevealInCanvas ? action('reveal-in-canvas', 'Reveal in Canvas') : undefined,
       node?.layoutMode === 'manual' ? action('reset-auto-layout', 'Reset Auto Layout') : undefined,
+      input.target.kind === 'file' && input.adobeBridgeEnabled === true && isSupportedAdobeBridgeWorkbenchFile(input.target.projectRelativePath)
+        ? action('send-to-photoshop', 'Send to Photoshop...')
+        : undefined,
       action('copy-relative-path', 'Copy Relative Path')
     ]);
   }
@@ -127,6 +133,9 @@ export function buildWorkbenchContextMenuItems(input: {
     separator('path-actions'),
     action('copy-path', 'Copy Path'),
     action('copy-relative-path', 'Copy Relative Path'),
+    ...(targetEntry?.kind === 'file' && input.adobeBridgeEnabled === true && isSupportedAdobeBridgeWorkbenchFile(targetEntry.projectRelativePath)
+      ? [action('send-to-photoshop', 'Send to Photoshop...')]
+      : []),
     action('reveal-in-system-file-manager', projectSystemFileManagerLabel(input.desktopPlatform ?? 'linux')),
     separator('modify'),
     action('rename', 'Rename'),

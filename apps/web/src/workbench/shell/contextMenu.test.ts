@@ -169,6 +169,43 @@ describe('workbench context menu', () => {
     expect(actionLabels(items)).toContain('Copy Path');
   });
 
+  it('shows Send to Photoshop for supported Project Tree image files when bridge is enabled', () => {
+    const items = buildWorkbenchContextMenuItems({
+      target: {
+        source: 'explorer',
+        targetKind: 'item',
+        paths: [{ projectRelativePath: 'assets/cover.png', kind: 'file' }],
+        primaryPath: 'assets/cover.png',
+        targetDirectoryPath: 'assets'
+      },
+      projection: projectionWithNodes([]),
+      canRevealInCanvas: false,
+      desktopPlatform: 'linux',
+      adobeBridgeEnabled: true
+    });
+
+    expect(actionCommands(items)).toContain('send-to-photoshop');
+    expect(actionLabels(items)).toContain('Send to Photoshop...');
+  });
+
+  it('does not show Send to Photoshop for unsupported files', () => {
+    const items = buildWorkbenchContextMenuItems({
+      target: {
+        source: 'explorer',
+        targetKind: 'item',
+        paths: [{ projectRelativePath: 'brief.md', kind: 'file' }],
+        primaryPath: 'brief.md',
+        targetDirectoryPath: ''
+      },
+      projection: projectionWithNodes([]),
+      canRevealInCanvas: false,
+      desktopPlatform: 'linux',
+      adobeBridgeEnabled: true
+    });
+
+    expect(actionCommands(items)).not.toContain('send-to-photoshop');
+  });
+
   it('shows only root-level creation and paste actions for blank Project Tree targets', () => {
     const items = buildWorkbenchContextMenuItems({
       target: {

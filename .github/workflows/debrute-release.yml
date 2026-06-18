@@ -123,10 +123,31 @@ jobs:
             apps/desktop/release/latest-mac.yml
             apps/desktop/release/latest.yml
 
+  build-photoshop-uxp:
+    needs: preflight
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 11.2.2
+          run_install: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm package:photoshop-plugin
+      - uses: actions/upload-artifact@v4
+        with:
+          name: photoshop-uxp
+          path: release/photoshop-uxp/debrute-photoshop-uxp-*.ccx
+
   publish-release:
     needs:
       - build-cli
       - build-desktop
+      - build-photoshop-uxp
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4

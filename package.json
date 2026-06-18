@@ -17,6 +17,7 @@
     "pack": "pnpm --filter @debrute/desktop pack",
     "package:cli": "node scripts/package-debrute-cli.mjs",
     "package:cli:all": "node scripts/package-debrute-cli.mjs --all",
+    "package:photoshop-plugin": "node scripts/package-photoshop-uxp-plugin.mjs",
     "dist": "pnpm --filter @debrute/desktop dist",
     "check": "tsc -b tsconfig.build.json --pretty false",
     "dev": "tsx scripts/dev-workbench.ts",

@@ -1,0 +1,20 @@
+{
+  "name": "@debrute/photoshop-uxp-plugin",
+  "version": "0.0.1",
+  "license": "Apache-2.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "build": "tsc --noEmit && vite build",
+    "check": "tsc --noEmit --pretty false"
+  },
+  "dependencies": {
+    "@debrute/app-protocol": "workspace:*"
+  },
+  "devDependencies": {
+    "@vitejs/plugin-react": "^6.0.2",
+    "typescript": "^6.0.3",
+    "vite": "^8.0.16",
+    "vitest": "^4.0.16"
+  }
+}

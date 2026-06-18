@@ -29,6 +29,7 @@ import {
 } from './services/textEditorWindows';
 import { useTextFileBufferActions } from './services/textFileBufferActions';
 import { runWorkbenchContextMenuCommand } from './services/workbenchContextMenuCommands';
+import { SendToPhotoshopDialog } from './adobe-bridge/SendToPhotoshopDialog';
 import { WorkbenchContextMenu } from './shell/WorkbenchContextMenu';
 import {
   buildWorkbenchContextMenuItems,
@@ -114,6 +115,7 @@ export function WorkbenchApp(): React.ReactElement {
   const [imageModelSettings, setImageModelSettings] = useState<WorkbenchState['imageModelSettings']>();
   const [videoModelSettings, setVideoModelSettings] = useState<WorkbenchState['videoModelSettings']>();
   const [integrationsSettings, setIntegrationsSettings] = useState<WorkbenchState['integrationsSettings']>();
+  const [adobeBridge, setAdobeBridge] = useState<WorkbenchState['adobeBridge']>();
   const [canvasFeedback, setCanvasFeedback] = useState<WorkbenchState['canvasFeedback']>();
   const [textFileBuffers, setTextFileBuffers] = useState<Record<string, TextFileBuffer>>({});
   const [textEditorWindows, setTextEditorWindows] = useState<Record<string, FloatingTextEditorWindowState>>({});
@@ -124,6 +126,8 @@ export function WorkbenchApp(): React.ReactElement {
     target: WorkbenchContextMenuTarget;
     position: WorkbenchContextMenuPosition;
   }>();
+  const [sendToPhotoshopPath, setSendToPhotoshopPath] = useState<string>();
+  const [sendingToPhotoshop, setSendingToPhotoshop] = useState(false);
   const [fileClipboard, setFileClipboard] = useState<WorkbenchFileClipboard>();
   const [desktopPlatform, setDesktopPlatform] = useState<NodeJS.Platform>('linux');
   const [inlineProjectTreeEdit, setInlineProjectTreeEdit] = useState<ProjectTreeInlineEditState>();
@@ -204,6 +208,11 @@ export function WorkbenchApp(): React.ReactElement {
         setIntegrationsSettings(settings);
       }
     });
+    void api.adobeBridgeGetState().then((state) => {
+      if (!disposed) {
+        setAdobeBridge(state);
+      }
+    });
     void api.getDesktopPlatform().then((platform) => {
       if (!disposed) {
         setDesktopPlatform(platform);
@@ -226,6 +235,7 @@ export function WorkbenchApp(): React.ReactElement {
         void api.llmGetSettings().then(setLlmSettings);
         void api.imageModelGetSettings().then(setImageModelSettings);
         void api.videoModelGetSettings().then(setVideoModelSettings);
+        void api.adobeBridgeGetState().then(setAdobeBridge);
       })
       .catch((error) => {
         if (!disposed) {
@@ -339,6 +349,12 @@ export function WorkbenchApp(): React.ReactElement {
       }
       if (event.type === 'integrations.settings.changed') {
         setIntegrationsSettings(event.settings);
+      }
+      if (event.type === 'adobeBridge.settings.changed') {
+        setAdobeBridge((current) => current ? { ...current, settings: event.settings } : current);
+      }
+      if (event.type === 'adobeBridge.state.changed') {
+        setAdobeBridge(event.state);
       }
     });
   }, [chooseActiveCanvasForProject, loadFloatingPanelsForProject, refreshTextFileBuffer]);
@@ -497,11 +513,13 @@ export function WorkbenchApp(): React.ReactElement {
 
   const state: WorkbenchState = {
     snapshot,
+    projectId: daemonProjectId,
     explorerSelection,
     llmSettings,
     imageModelSettings,
     videoModelSettings,
     integrationsSettings,
+    adobeBridge,
     canvasFeedback,
     textFileBuffers,
     textEditorWindows,
@@ -550,6 +568,7 @@ export function WorkbenchApp(): React.ReactElement {
       setImageModelSettings(await api.imageModelGetSettings());
       setVideoModelSettings(await api.videoModelGetSettings());
       setIntegrationsSettings(await api.integrationsListStatus());
+      setAdobeBridge(await api.adobeBridgeGetState());
       await loadCanvasFeedback(api, setCanvasFeedback, setNotifications);
       setNotifications((current) => [`Opened project: ${opened.snapshot.metadata.project.name}`, ...current].slice(0, 4));
     },
@@ -578,6 +597,23 @@ export function WorkbenchApp(): React.ReactElement {
       const settings = await api.integrationsRescan();
       setIntegrationsSettings(settings);
       return settings;
+    },
+    saveAdobeBridgeSettings: async (input) => {
+      setAdobeBridge(await api.adobeBridgeSaveSettings(input));
+    },
+    linkAdobeBridgePhotoshop: async (input) => {
+      setAdobeBridge(await api.adobeBridgeLinkPhotoshop(input));
+    },
+    unlinkAdobeBridgePhotoshop: async (adobeClientId) => {
+      setAdobeBridge(await api.adobeBridgeUnlinkPhotoshop(adobeClientId));
+    },
+    sendProjectFileToPhotoshop: async (input) => {
+      const result = await api.sendProjectFileToPhotoshop(input);
+      setNotifications((current) => [`Sent to Photoshop: ${input.projectRelativePath}`, ...current].slice(0, 4));
+      return result;
+    },
+    openSendToPhotoshopPicker: (projectRelativePath) => {
+      setSendToPhotoshopPath(projectRelativePath);
     },
     lookupGeneratedAssetMetadata,
     readGeneratedAsset,
@@ -888,9 +924,10 @@ export function WorkbenchApp(): React.ReactElement {
           projection: activeProjection,
           canRevealInCanvas,
           fileClipboard,
-          desktopPlatform
+          desktopPlatform,
+          adobeBridgeEnabled: adobeBridge?.settings.enabled === true
         })
-    : [], [activeProjection, canRevealInCanvas, contextMenu, desktopPlatform, fileClipboard]);
+    : [], [activeProjection, adobeBridge?.settings.enabled, canRevealInCanvas, contextMenu, desktopPlatform, fileClipboard]);
   const canvasOrder = snapshot?.canvasRegistry.status === 'ready'
     ? snapshot.canvasRegistry.canvasOrder
     : [];
@@ -1214,6 +1251,28 @@ export function WorkbenchApp(): React.ReactElement {
           position={contextMenu.position}
           onCommand={handleWorkbenchContextMenuCommand}
           onClose={closeWorkbenchContextMenu}
+        />
+      ) : null}
+      {sendToPhotoshopPath && daemonProjectId ? (
+        <SendToPhotoshopDialog
+          projectId={daemonProjectId}
+          projectRelativePath={sendToPhotoshopPath}
+          bridge={adobeBridge}
+          sending={sendingToPhotoshop}
+          onClose={() => setSendToPhotoshopPath(undefined)}
+          onSend={(adobeClientId) => {
+            setSendingToPhotoshop(true);
+            void actions.sendProjectFileToPhotoshop({
+              projectRelativePath: sendToPhotoshopPath,
+              adobeClientId
+            }).then(() => {
+              setSendToPhotoshopPath(undefined);
+            }).catch((error) => {
+              notify(`Send to Photoshop failed: ${errorMessage(error)}`);
+            }).finally(() => {
+              setSendingToPhotoshop(false);
+            });
+          }}
         />
       ) : null}
       <NotificationStack notifications={notifications} />

@@ -250,6 +250,18 @@ export {
 } from './projectFileOperations.js';
 
 export {
+  ADOBE_BRIDGE_MAX_UPLOAD_BYTES,
+  AdobeBridgeProjectFileError,
+  importAdobeBridgePngTransfer,
+  isSupportedAdobeBridgeProjectImageFile,
+  nextAdobeBridgeTransferFileName,
+  sanitizeAdobeBridgePngBasename,
+  type AdobeBridgeProjectFileErrorCode,
+  type AdobeBridgeProjectFileResult,
+  type ImportAdobeBridgePngTransferInput
+} from './adobeBridgeFileTransfer.js';
+
+export {
   assertProjectTreeVisibleMutationPath,
   debruteHomeDir,
   isIgnoredProjectFilePath,

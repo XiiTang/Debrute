@@ -66,6 +66,11 @@ export function runWorkbenchContextMenuCommand(input: {
     input.closeContextMenu();
     return;
   }
+  if (input.command === 'send-to-photoshop') {
+    input.actions.openSendToPhotoshopPicker(projectRelativePath);
+    input.closeContextMenu();
+    return;
+  }
 
   const node = projectedContextMenuNode(input.activeProjection, projectRelativePath);
   if (!node) {
@@ -182,6 +187,13 @@ function runExplorerCommand(
   }
   if (input.command === 'copy-relative-path') {
     void input.copyText(explorerContextMenuProjectRelativePaths(target).join('\n'));
+    input.closeContextMenu();
+    return true;
+  }
+  if (input.command === 'send-to-photoshop') {
+    if (primaryEntry?.kind === 'file') {
+      input.actions.openSendToPhotoshopPicker(primaryEntry.projectRelativePath);
+    }
     input.closeContextMenu();
     return true;
   }

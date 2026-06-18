@@ -1,16 +1,19 @@
 import { EventEmitter } from 'node:events';
 import type {
+  AdobeBridgeSettings,
   AppServerEvent,
   DiscoverLlmProviderModelsInput,
   DiscoverProviderModelsOutput,
   ImageModelSettingsView,
   IntegrationSettingsView,
   LlmProviderSettingsView,
+  SaveAdobeBridgeSettingsInput,
   SaveImageModelSettingInput,
   SaveLlmProviderSettingInput,
   SaveVideoModelSettingInput,
   VideoModelSettingsView
 } from '@debrute/app-protocol';
+import { AdobeBridgeSettingsService } from '../adobe-bridge/AdobeBridgeSettingsService.js';
 import { GlobalConfigStore } from '../config/GlobalConfigStore.js';
 import { IntegrationsService } from '../integrations/IntegrationsService.js';
 import { ImageModelService } from '../models/ImageModelService.js';
@@ -31,12 +34,14 @@ export class DebruteGlobalRuntimeServer {
   private readonly imageModelService: ImageModelService;
   private readonly videoModelService: VideoModelService;
   private readonly integrationsService: IntegrationsService;
+  private readonly adobeBridgeSettingsService: AdobeBridgeSettingsService;
 
   constructor(options: DebruteGlobalRuntimeServerOptions = {}) {
     this.configStore = options.globalConfigStore ?? new GlobalConfigStore();
     this.llmService = new LlmService({ configStore: this.configStore });
     this.imageModelService = new ImageModelService({ configStore: this.configStore });
     this.videoModelService = new VideoModelService({ configStore: this.configStore });
+    this.adobeBridgeSettingsService = new AdobeBridgeSettingsService({ configStore: this.configStore });
     this.integrationsService = new IntegrationsService({
       ...(options.integrationEnvPath !== undefined ? { envPath: options.integrationEnvPath } : {}),
       ...(options.integrationPathExt !== undefined ? { pathExt: options.integrationPathExt } : {}),
@@ -102,6 +107,16 @@ export class DebruteGlobalRuntimeServer {
   async integrationsRescan(): Promise<IntegrationSettingsView> {
     const settings = await this.integrationsService.rescan();
     this.emit({ type: 'integrations.settings.changed', settings });
+    return settings;
+  }
+
+  async adobeBridgeGetSettings(): Promise<AdobeBridgeSettings> {
+    return this.adobeBridgeSettingsService.getSettings();
+  }
+
+  async adobeBridgeSaveSettings(input: SaveAdobeBridgeSettingsInput): Promise<AdobeBridgeSettings> {
+    const settings = await this.adobeBridgeSettingsService.saveSettings(input);
+    this.emit({ type: 'adobeBridge.settings.changed', settings });
     return settings;
   }
 

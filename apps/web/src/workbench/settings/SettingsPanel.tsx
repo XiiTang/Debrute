@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from 'react';
-import { Bot, Cpu, Eye, EyeOff, RefreshCw, Save, Search, Settings, Terminal, Trash2, Wrench } from 'lucide-react';
+import { Bot, Cable, Cpu, Eye, EyeOff, RefreshCw, Save, Search, Settings, Terminal, Trash2, Wrench } from 'lucide-react';
 import type {
   ImageModelSettingRecord,
   LlmProviderSettingRecord,
@@ -24,6 +24,7 @@ import {
 import { DebruteCliSettingsPage } from './debrute-cli/DebruteCliSettingsPage';
 import { GeneralSettingsPage } from './general/GeneralSettingsPage';
 import { IntegrationsSettingsPage } from './integrations/IntegrationsSettingsPage';
+import { AdobeBridgeSettingsPage } from './adobe-bridge/AdobeBridgeSettingsPage';
 
 export interface LlmProviderDraft {
   id: string;
@@ -61,6 +62,7 @@ const SETTINGS_NAV_ITEMS = [
   { id: 'llm', label: 'LLM', icon: Bot },
   { id: 'models', label: 'Models', icon: Cpu },
   { id: 'integrations', label: 'Integrations', icon: Wrench },
+  { id: 'adobe-bridge', label: 'Adobe Bridge', icon: Cable },
   { id: 'debrute-cli', label: 'Debrute CLI', icon: Terminal }
 ] as const;
 
@@ -99,6 +101,8 @@ export function SettingsPanel({ state, actions }: { state: WorkbenchState; actio
           </>
         ) : activePage === 'integrations' ? (
           <IntegrationsSettingsPage state={state} actions={actions} />
+        ) : activePage === 'adobe-bridge' ? (
+          <AdobeBridgeSettingsPage state={state} actions={actions} />
         ) : activePage === 'debrute-cli' ? (
           <DebruteCliSettingsPage shell={getDebruteShellApi()} />
         ) : null}

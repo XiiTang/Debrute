@@ -844,6 +844,171 @@ export interface WorkbenchCanvasFeedbackMutationResult extends RevisionedProject
   feedback: CanvasFeedbackDocument;
 }
 
+export type AdobeBridgeDiscoveryStatus = 'available' | 'disabled' | 'unavailable';
+
+export interface AdobeBridgeSettings {
+  enabled: boolean;
+  discoveryStatus: AdobeBridgeDiscoveryStatus;
+}
+
+export type AdobeBridgeHostApp = 'photoshop';
+
+export interface AdobeBridgeClient {
+  adobeClientId: string;
+  hostApp: AdobeBridgeHostApp;
+  hostVersion: string;
+  displayName: string;
+  documentCount: number;
+  activeDocumentTitle: string | null;
+  connectedAt: string;
+  lastSeenAt: string;
+}
+
+export interface ProjectBridgeDirectory {
+  projectRelativePath: string;
+  name: string;
+  depth: number;
+}
+
+export interface ProjectBridgeClient {
+  projectId: string;
+  projectName: string;
+  projectRevision: number;
+  directories: ProjectBridgeDirectory[];
+  connectedWorkbenchClientCount: number;
+}
+
+export interface AdobeBridgeLink {
+  linkId: string;
+  projectId: string;
+  adobeClientId: string;
+  createdAt: string;
+  status: 'active' | 'adobe-offline' | 'project-offline';
+}
+
+export type AdobeBridgeTransferDirection = 'photoshop-to-debrute' | 'debrute-to-photoshop';
+export type AdobeBridgeTransferStatus = 'pending' | 'running' | 'succeeded' | 'failed';
+
+export interface AdobeBridgeTransferView {
+  transferId: string;
+  direction: AdobeBridgeTransferDirection;
+  projectId: string;
+  adobeClientId: string;
+  projectRelativePath: string | null;
+  status: AdobeBridgeTransferStatus;
+  errorCode?: AdobeBridgeErrorCode;
+  message?: string;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface AdobeBridgeStateView {
+  settings: AdobeBridgeSettings;
+  adobeClients: AdobeBridgeClient[];
+  projects: ProjectBridgeClient[];
+  links: AdobeBridgeLink[];
+  transfers: AdobeBridgeTransferView[];
+}
+
+export interface SaveAdobeBridgeSettingsInput {
+  enabled: boolean;
+}
+
+export interface CreateAdobeBridgeLinkInput {
+  adobeClientId: string;
+}
+
+export interface SendProjectFileToPhotoshopInput {
+  projectRelativePath: string;
+  adobeClientId: string;
+}
+
+export interface SendProjectFileToPhotoshopResult {
+  transfer: AdobeBridgeTransferView;
+}
+
+export interface PhotoshopBridgeHelloMessage {
+  type: 'hello';
+  adobeClientId?: string;
+  hostApp: 'photoshop';
+  hostVersion: string;
+  documentCount: number;
+  activeDocumentTitle: string | null;
+}
+
+export interface PhotoshopBridgeStatusMessage {
+  type: 'photoshop.status';
+  documentCount: number;
+  activeDocumentTitle: string | null;
+}
+
+export interface PhotoshopBridgeImportResultMessage {
+  type: 'transfer.import.result';
+  transferId: string;
+  ok: boolean;
+  errorCode?: AdobeBridgeErrorCode;
+  message?: string;
+}
+
+export type PhotoshopBridgeClientMessage =
+  | PhotoshopBridgeHelloMessage
+  | PhotoshopBridgeStatusMessage
+  | PhotoshopBridgeImportResultMessage
+  | { type: 'heartbeat' };
+
+export interface DaemonBridgeStateMessage {
+  type: 'bridge.state';
+  state: AdobeBridgeStateView;
+}
+
+export interface DaemonBridgeImportRequestMessage {
+  type: 'transfer.import.request';
+  transferId: string;
+  projectId: string;
+  projectRelativePath: string;
+  fileName: string;
+  mimeType: 'image/png' | 'image/jpeg' | 'image/webp' | 'image/vnd.adobe.photoshop';
+  byteLength: number;
+  downloadUrl: string;
+}
+
+export type DaemonBridgeClientMessage =
+  | DaemonBridgeStateMessage
+  | DaemonBridgeImportRequestMessage
+  | { type: 'bridge.error'; code: AdobeBridgeErrorCode; message: string };
+
+export const adobeBridgeErrorCodes = [
+  'adobe_bridge_disabled',
+  'adobe_discovery_unavailable',
+  'adobe_client_offline',
+  'project_offline',
+  'project_not_linked',
+  'target_directory_missing',
+  'target_directory_not_visible',
+  'unsupported_file_type',
+  'upload_too_large',
+  'invalid_transfer_payload',
+  'no_active_document',
+  'photoshop_place_failed',
+  'transfer_url_expired',
+  'transfer_timeout'
+] as const;
+
+export type AdobeBridgeErrorCode = typeof adobeBridgeErrorCodes[number];
+
+export function isAdobeBridgeErrorCode(value: string): value is AdobeBridgeErrorCode {
+  return (adobeBridgeErrorCodes as readonly string[]).includes(value);
+}
+
+export function adobeBridgeClientDisplayName(input: {
+  hostApp: AdobeBridgeHostApp;
+  hostVersion: string;
+  activeDocumentTitle: string | null;
+}): string {
+  const hostLabel = input.hostApp === 'photoshop' ? 'Photoshop' : input.hostApp;
+  return `${hostLabel} ${input.hostVersion} · ${input.activeDocumentTitle ?? 'No document open'}`;
+}
+
 export type AppServerEvent =
   | { type: 'project.opened'; snapshot: ProjectSessionSnapshot }
   | { type: 'project.changed'; snapshot: ProjectSessionSnapshot }
@@ -854,7 +1019,8 @@ export type AppServerEvent =
   | { type: 'llm.settings.changed'; settings: LlmProviderSettingsView }
   | { type: 'imageModel.settings.changed'; settings: ImageModelSettingsView }
   | { type: 'videoModel.settings.changed'; settings: VideoModelSettingsView }
-  | { type: 'integrations.settings.changed'; settings: IntegrationSettingsView };
+  | { type: 'integrations.settings.changed'; settings: IntegrationSettingsView }
+  | { type: 'adobeBridge.settings.changed'; settings: AdobeBridgeSettings };
 
 export type WorkbenchFileWatchEvent = Omit<NormalizedFileWatchEvent, 'absolutePath'>;
 
@@ -868,11 +1034,18 @@ export type WorkbenchEvent =
   | { type: 'llm.settings.changed'; settings: LlmProviderSettingsView }
   | { type: 'imageModel.settings.changed'; settings: ImageModelSettingsView }
   | { type: 'videoModel.settings.changed'; settings: VideoModelSettingsView }
-  | { type: 'integrations.settings.changed'; settings: IntegrationSettingsView };
+  | { type: 'integrations.settings.changed'; settings: IntegrationSettingsView }
+  | { type: 'adobeBridge.settings.changed'; settings: AdobeBridgeSettings }
+  | { type: 'adobeBridge.state.changed'; state: AdobeBridgeStateView };
 
 export interface WorkbenchApiClient {
   readonly mode: 'web' | 'desktop';
   readonly clientId: string;
+  adobeBridgeGetState(): Promise<AdobeBridgeStateView>;
+  adobeBridgeSaveSettings(input: SaveAdobeBridgeSettingsInput): Promise<AdobeBridgeStateView>;
+  adobeBridgeLinkPhotoshop(input: CreateAdobeBridgeLinkInput): Promise<AdobeBridgeStateView>;
+  adobeBridgeUnlinkPhotoshop(adobeClientId: string): Promise<AdobeBridgeStateView>;
+  sendProjectFileToPhotoshop(input: SendProjectFileToPhotoshopInput): Promise<SendProjectFileToPhotoshopResult>;
   chooseProjectRoot(): Promise<string | undefined>;
   openProjectFromShell(input: { forceNewWindow: boolean }): Promise<{ opened: boolean }>;
   openProject(input: { projectRoot: string } | { projectId: string }): Promise<WorkbenchProjectOpenResult>;

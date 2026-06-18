@@ -9,6 +9,8 @@ export async function releaseVersionContract(root = process.cwd()) {
     { label: 'root package', path: 'package.json', version },
     { label: 'Desktop package', path: 'apps/desktop/package.json', version: await readPackageVersion(root, 'apps/desktop/package.json') },
     { label: 'Debrute CLI package', path: 'apps/debrute-cli/package.json', version: await readPackageVersion(root, 'apps/debrute-cli/package.json') },
+    { label: 'Photoshop UXP package', path: 'apps/photoshop-uxp-plugin/package.json', version: await readPackageVersion(root, 'apps/photoshop-uxp-plugin/package.json') },
+    { label: 'Photoshop UXP manifest', path: 'apps/photoshop-uxp-plugin/public/manifest.json', version: await readPackageVersion(root, 'apps/photoshop-uxp-plugin/public/manifest.json') },
     ...await readSkillVersionEntries(root)
   ];
   return { version, entries };

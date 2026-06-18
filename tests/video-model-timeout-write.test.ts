@@ -25,7 +25,7 @@ vi.mock('@debrute/project-core', async (importOriginal) => {
         const timer = setTimeout(() => {
           options?.signal?.removeEventListener('abort', onAbort);
           resolve();
-        }, 40);
+        }, 200);
         if (options?.signal?.aborted) {
           onAbort();
           return;
@@ -54,9 +54,6 @@ describe('video model artifact write timeout', () => {
           content: { video_url: 'https://cdn.example/video.mp4' }
         });
       }
-      if (url === 'https://cdn.example/video.mp4') {
-        return new Response(tinyMp4, { status: 200, headers: { 'content-type': 'video/mp4' } });
-      }
       throw new Error(`unexpected URL: ${url}`);
     };
 
@@ -66,7 +63,7 @@ describe('video model artifact write timeout', () => {
         invocationId: 'turn-video-write-timeout',
         input: {
           model: 'doubao-seedance-2-0-260128',
-          timeoutMs: 5,
+          timeoutMs: 100,
           arguments: { prompt: 'cover video', output_path: 'generated/timeout.mp4' }
         },
         settings: {
@@ -74,13 +71,21 @@ describe('video model artifact write timeout', () => {
         },
         secrets: { videoModelApiKeys: { 'doubao-seedance-2-0-260128': 'sk-video' } },
         pollIntervalMs: 0,
+        remoteUrlLookup: async (hostname) => {
+          expect(hostname).toBe('cdn.example');
+          return [{ address: '93.184.216.34', family: 4 }];
+        },
+        remoteHttpTransport: async (input) => {
+          expect(input.url).toBe('https://cdn.example/video.mp4');
+          return new Response(tinyMp4, { status: 200, headers: { 'content-type': 'video/mp4' } });
+        },
         fetch
       });
 
       expect(writeSignals).toHaveLength(1);
       expect(writeSignals[0]).toBeInstanceOf(AbortSignal);
       expect(result.status).toBe('error');
-      expect(result.content).toContain('Video request timed out after 5ms');
+      expect(result.content).toContain('Video request timed out after 100ms');
       await expect(readFile(join(projectRoot, 'generated/timeout.mp4'))).rejects.toMatchObject({ code: 'ENOENT' });
     } finally {
       writeSignals.length = 0;

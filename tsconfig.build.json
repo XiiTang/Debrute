@@ -12,6 +12,7 @@
     { "path": "apps/daemon" },
     { "path": "apps/runtime-host" },
     { "path": "apps/web" },
+    { "path": "apps/photoshop-uxp-plugin" },
     { "path": "apps/debrute-cli" }
   ]
 }

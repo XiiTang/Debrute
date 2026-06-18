@@ -32,7 +32,7 @@ describe('web Settings pages', () => {
       actions: {} as unknown as WorkbenchActions
     }));
 
-    expect(html.match(/class="db-nav-row(?: db-nav-row--active)?"/g)).toHaveLength(5);
+    expect(html.match(/class="db-nav-row(?: db-nav-row--active)?"/g)).toHaveLength(6);
     expect(html.indexOf('General')).toBeLessThan(html.indexOf('LLM'));
     expect(html).toContain('aria-pressed="true"');
     expect(html).toContain('Application');
@@ -71,11 +71,12 @@ describe('web Settings pages', () => {
     expect(html).toContain('db-nav-row');
     expect(html).toContain('db-nav-row__icon');
     expect(html).toContain('aria-label="Settings sections"');
-    expect(html.match(/class="db-nav-row(?: db-nav-row--active)?"/g)).toHaveLength(5);
+    expect(html.match(/class="db-nav-row(?: db-nav-row--active)?"/g)).toHaveLength(6);
     expect(html).toContain('General');
     expect(html).toContain('LLM');
     expect(html).toContain('Models');
     expect(html).toContain('Integrations');
+    expect(html).toContain('Adobe Bridge');
     expect(html).toContain('Debrute CLI');
     expect(html).toContain('Application');
     expect(html).toContain('<header class="settings-section-header"><h2>General</h2></header>');

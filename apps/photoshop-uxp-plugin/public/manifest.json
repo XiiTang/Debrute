@@ -1,0 +1,45 @@
+{
+  "manifestVersion": 5,
+  "id": "com.debrute.photoshop.bridge",
+  "name": "Debrute Bridge",
+  "version": "0.0.1",
+  "main": "index.html",
+  "host": {
+    "app": "PS",
+    "minVersion": "23.3.0"
+  },
+  "entrypoints": [
+    {
+      "type": "panel",
+      "id": "debruteBridgePanel",
+      "label": {
+        "default": "Debrute"
+      },
+      "minimumSize": {
+        "width": 300,
+        "height": 420
+      },
+      "maximumSize": {
+        "width": 640,
+        "height": 900
+      },
+      "preferredDockedSize": {
+        "width": 320,
+        "height": 560
+      },
+      "preferredFloatingSize": {
+        "width": 320,
+        "height": 560
+      }
+    }
+  ],
+  "requiredPermissions": {
+    "network": {
+      "domains": [
+        "http://127.0.0.1:*",
+        "ws://127.0.0.1:*"
+      ]
+    },
+    "localFileSystem": "plugin"
+  }
+}

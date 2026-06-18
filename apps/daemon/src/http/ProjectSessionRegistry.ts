@@ -8,6 +8,7 @@ export interface ProjectSessionRegistryOptions {
   appServerOptions?: DebruteAppServerOptions;
   createAppServer?: () => DebruteAppServer;
   idleTtlMs?: number;
+  onChange?: () => void;
 }
 
 export type ProjectSessionClientKind = 'sse' | 'electron-window';
@@ -50,10 +51,12 @@ export class ProjectSessionRegistry {
   private readonly openingByRoot = new Map<string, Promise<ProjectSessionRecord>>();
   private readonly idleTtlMs: number;
   private readonly createAppServer: () => DebruteAppServer;
+  private readonly onChange: () => void;
   private closed = false;
 
   constructor(options: ProjectSessionRegistryOptions = {}) {
     this.idleTtlMs = options.idleTtlMs ?? 30_000;
+    this.onChange = options.onChange ?? (() => undefined);
     if (options.createAppServer) {
       this.createAppServer = options.createAppServer;
       return;
@@ -129,6 +132,7 @@ export class ProjectSessionRegistry {
     this.sessionsById.set(projectId, record);
     this.projectIdsByRoot.set(canonicalRoot, projectId);
     this.scheduleIdleCleanupIfUnused(record);
+    this.onChange();
     return record;
   }
 
@@ -297,6 +301,7 @@ export class ProjectSessionRegistry {
     }
     record.unsubscribeAppServerEvents();
     record.appServer.close();
+    this.onChange();
   }
 
   private applyAppServerEvent(record: ProjectSessionRecord, event: AppServerEvent): void {
@@ -306,6 +311,7 @@ export class ProjectSessionRegistry {
     if (event.type === 'project.opened' || event.type === 'project.changed' || event.type === 'project.fileChanged') {
       record.snapshot = event.snapshot;
       record.projectRevision += 1;
+      this.onChange();
       return;
     }
     if (event.type === 'canvas.changed') {
@@ -317,10 +323,12 @@ export class ProjectSessionRegistry {
         ))
       };
       record.projectRevision += 1;
+      this.onChange();
       return;
     }
     if (event.type === 'canvas.feedback.changed' || event.type === 'generatedAsset.metadata.changed') {
       record.projectRevision += 1;
+      this.onChange();
     }
   }
 

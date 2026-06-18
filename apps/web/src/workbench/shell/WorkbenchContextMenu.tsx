@@ -9,6 +9,7 @@ import {
   Info,
   LocateFixed,
   RotateCcw,
+  Send,
   Scissors,
   Trash2
 } from 'lucide-react';
@@ -129,6 +130,9 @@ function contextMenuIcon(command: WorkbenchContextMenuCommand): React.ReactEleme
   }
   if (command === 'reset-auto-layout') {
     return <RotateCcw size={14} />;
+  }
+  if (command === 'send-to-photoshop') {
+    return <Send size={14} />;
   }
   if (command === 'create-file') {
     return <FilePlus2 size={14} />;

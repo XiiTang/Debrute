@@ -18,10 +18,12 @@ export {
 
 export {
   GlobalConfigStore,
+  type AdobeBridgeConfig,
   type GlobalConfigPaths
 } from './config/GlobalConfigStore.js';
 
 export type {
+  AdobeBridgeSettings,
   IntegrationBackendId,
   IntegrationBackendStatus,
   IntegrationBinaryId,

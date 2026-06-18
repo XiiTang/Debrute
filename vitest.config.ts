@@ -25,7 +25,8 @@ export default defineConfig({
       { find: '@debrute/canvas-map-core', replacement: resolve(workspaceRoot, 'packages/canvas-map-core/src/index.ts') },
       { find: '@debrute/workbench-runtime', replacement: resolve(workspaceRoot, 'packages/workbench-runtime/src/index.ts') },
       { find: '@debrute/app-server', replacement: resolve(workspaceRoot, 'apps/app-server/src/index.ts') },
-      { find: '@debrute/daemon', replacement: resolve(workspaceRoot, 'apps/daemon/src/index.ts') }
+      { find: '@debrute/daemon', replacement: resolve(workspaceRoot, 'apps/daemon/src/index.ts') },
+      { find: '@debrute/photoshop-uxp-plugin', replacement: resolve(workspaceRoot, 'apps/photoshop-uxp-plugin/src/main.ts') }
     ]
   }
 });
