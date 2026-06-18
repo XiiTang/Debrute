@@ -53,16 +53,21 @@ export function runWorkbenchContextMenuCommand(input: {
   }
 
   if (target.source === 'explorer') {
-    if (runExplorerCommand(input, target)) {
+    if (runExplorerSpecificCommand(input, target)) {
       return;
     }
-    if (target.targetKind !== 'item') {
+    if (target.targetKind === 'root') {
       input.closeContextMenu();
       return;
     }
   }
 
   if (runSinglePathFileCommand(input, target)) {
+    return;
+  }
+
+  if (target.source === 'explorer' && target.targetKind !== 'item') {
+    input.closeContextMenu();
     return;
   }
 
@@ -142,12 +147,21 @@ function runSinglePathFileCommand(
     return false;
   }
   const entries = explorerContextMenuEntries(target);
+  const canvasProjectRoot = isCanvasProjectRootTarget(target, primaryEntry);
   if (input.command === 'cut') {
+    if (canvasProjectRoot) {
+      input.closeContextMenu();
+      return true;
+    }
     input.setFileClipboard({ operation: 'cut', entries });
     input.closeContextMenu();
     return true;
   }
   if (input.command === 'copy') {
+    if (canvasProjectRoot) {
+      input.closeContextMenu();
+      return true;
+    }
     input.setFileClipboard({ operation: 'copy', entries });
     input.closeContextMenu();
     return true;
@@ -169,6 +183,10 @@ function runSinglePathFileCommand(
     return true;
   }
   if (input.command === 'copy-relative-path') {
+    if (canvasProjectRoot) {
+      input.closeContextMenu();
+      return true;
+    }
     void input.copyText(explorerContextMenuProjectRelativePaths(target).join('\n'));
     input.closeContextMenu();
     return true;
@@ -192,6 +210,10 @@ function runSinglePathFileCommand(
     return true;
   }
   if (input.command === 'delete') {
+    if (canvasProjectRoot) {
+      input.closeContextMenu();
+      return true;
+    }
     void input.actions.trashProjectPaths({ entries })
       .catch((error) => input.notify(notificationMessageForFileCommandError('Delete failed', error)));
     input.closeContextMenu();
@@ -200,32 +222,49 @@ function runSinglePathFileCommand(
   return false;
 }
 
-function runExplorerCommand(
+function runExplorerSpecificCommand(
   input: Parameters<typeof runWorkbenchContextMenuCommand>[0],
   target: Extract<WorkbenchContextMenuTarget, { source: 'explorer' }>
 ): boolean {
   const entries = explorerContextMenuEntries(target);
   const primaryEntry = explorerContextMenuPrimaryEntry(target);
-  if (
-    target.targetKind === 'root'
-    && input.command !== 'create-file'
-    && input.command !== 'create-directory'
-    && input.command !== 'paste'
-    && input.command !== 'open-terminal'
-  ) {
+  if (target.targetKind === 'root') {
+    if (input.command === 'create-file') {
+      input.setInlineProjectTreeEdit(createInlineEditState('creating-file', projectTreePasteTargetDirectory(target)));
+      input.closeContextMenu();
+      return true;
+    }
+    if (input.command === 'create-directory') {
+      input.setInlineProjectTreeEdit(createInlineEditState('creating-directory', projectTreePasteTargetDirectory(target)));
+      input.closeContextMenu();
+      return true;
+    }
+    if (input.command === 'paste') {
+      runPasteCommand(input, target);
+      input.closeContextMenu();
+      return true;
+    }
+    if (input.command === 'open-terminal') {
+      input.actions.openTerminalPanel('');
+      input.closeContextMenu();
+      return true;
+    }
     return false;
   }
-  if (input.command === 'open-terminal') {
-    input.actions.openTerminalPanel(terminalCwdForExplorerTarget(target));
-    input.closeContextMenu();
-    return true;
-  }
   if (input.command === 'create-file') {
+    if (target.targetKind !== 'item' || primaryEntry?.kind !== 'directory') {
+      input.closeContextMenu();
+      return true;
+    }
     input.setInlineProjectTreeEdit(createInlineEditState('creating-file', projectTreePasteTargetDirectory(target)));
     input.closeContextMenu();
     return true;
   }
   if (input.command === 'create-directory') {
+    if (target.targetKind !== 'item' || primaryEntry?.kind !== 'directory') {
+      input.closeContextMenu();
+      return true;
+    }
     input.setInlineProjectTreeEdit(createInlineEditState('creating-directory', projectTreePasteTargetDirectory(target)));
     input.closeContextMenu();
     return true;
@@ -234,54 +273,6 @@ function runExplorerCommand(
     if (primaryEntry && entries.length === 1) {
       input.setInlineProjectTreeEdit(createInlineEditState('renaming', primaryEntry.projectRelativePath));
     }
-    input.closeContextMenu();
-    return true;
-  }
-  if (input.command === 'cut') {
-    input.setFileClipboard({ operation: 'cut', entries });
-    input.closeContextMenu();
-    return true;
-  }
-  if (input.command === 'copy') {
-    input.setFileClipboard({ operation: 'copy', entries });
-    input.closeContextMenu();
-    return true;
-  }
-  if (input.command === 'paste') {
-    runPasteCommand(input, target);
-    input.closeContextMenu();
-    return true;
-  }
-  if (input.command === 'copy-path') {
-    void input.actions.copyProjectAbsolutePaths({ entries })
-      .then((result) => input.copyText(result.paths.join('\n')))
-      .catch((error) => input.notify(notificationMessageForFileCommandError('Copy Path failed', error)));
-    input.closeContextMenu();
-    return true;
-  }
-  if (input.command === 'copy-relative-path') {
-    void input.copyText(explorerContextMenuProjectRelativePaths(target).join('\n'));
-    input.closeContextMenu();
-    return true;
-  }
-  if (input.command === 'send-to-photoshop') {
-    if (primaryEntry?.kind === 'file') {
-      input.actions.openSendToPhotoshopPicker(primaryEntry.projectRelativePath);
-    }
-    input.closeContextMenu();
-    return true;
-  }
-  if (input.command === 'reveal-in-system-file-manager') {
-    if (primaryEntry) {
-      void input.actions.revealProjectPathInSystemFileManager(primaryEntry)
-        .catch((error) => input.notify(notificationMessageForFileCommandError('Reveal failed', error)));
-    }
-    input.closeContextMenu();
-    return true;
-  }
-  if (input.command === 'delete') {
-    void input.actions.trashProjectPaths({ entries })
-      .catch((error) => input.notify(notificationMessageForFileCommandError('Delete failed', error)));
     input.closeContextMenu();
     return true;
   }
@@ -298,20 +289,21 @@ function runExplorerCommand(
   return false;
 }
 
-function terminalCwdForExplorerTarget(target: Extract<WorkbenchContextMenuTarget, { source: 'explorer' }>): string {
-  if (target.targetKind === 'root') {
-    return '';
-  }
-  const entry = explorerContextMenuPrimaryEntry(target);
-  return entry ? terminalCwdForEntry(entry) : '';
-}
-
 function terminalCwdForEntry(entry: WorkbenchProjectPathEntry): string {
   if (entry.kind === 'directory') {
     return entry.projectRelativePath;
   }
   const slashIndex = entry.projectRelativePath.lastIndexOf('/');
   return slashIndex < 0 ? '' : entry.projectRelativePath.slice(0, slashIndex);
+}
+
+function isCanvasProjectRootTarget(
+  target: WorkbenchContextMenuTarget,
+  entry: WorkbenchProjectPathEntry
+): boolean {
+  return target.source === 'canvas'
+    && entry.kind === 'directory'
+    && entry.projectRelativePath === '';
 }
 
 function runPasteCommand(

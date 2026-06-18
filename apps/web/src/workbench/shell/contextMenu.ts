@@ -129,6 +129,9 @@ function buildSinglePathContextMenuItems(input: {
 }): WorkbenchContextMenuItem[] {
   const explorerItem = input.target.source === 'explorer';
   const directory = input.targetEntry.kind === 'directory';
+  const canvasProjectRoot = input.target.source === 'canvas'
+    && directory
+    && input.targetEntry.projectRelativePath === '';
   const canvasActions = [
     action('show-details', 'Show Details', {
       disabled: !(input.node && input.canSelectCanvasNode === true)
@@ -146,17 +149,15 @@ function buildSinglePathContextMenuItems(input: {
         action('create-directory', 'New Folder')
       ]
     : [];
-  const fileActions = [
-    action('cut', 'Cut'),
-    action('copy', 'Copy'),
-    ...(directory ? [
-      action('paste', 'Paste', { disabled: !input.fileClipboard?.entries.length })
-    ] : []),
-  ];
+  const fileActions = compactMenuItems([
+    canvasProjectRoot ? undefined : action('cut', 'Cut'),
+    canvasProjectRoot ? undefined : action('copy', 'Copy'),
+    directory ? action('paste', 'Paste', { disabled: !input.fileClipboard?.entries.length }) : undefined
+  ]);
   const pathActions = compactMenuItems([
     action('open-terminal', 'Open in Terminal'),
     action('copy-path', 'Copy Path'),
-    action('copy-relative-path', 'Copy Relative Path'),
+    canvasProjectRoot ? undefined : action('copy-relative-path', 'Copy Relative Path'),
     input.targetEntry.kind === 'file'
       && input.adobeBridgeEnabled === true
       && isSupportedAdobeBridgeWorkbenchFile(input.targetEntry.projectRelativePath)
@@ -164,10 +165,10 @@ function buildSinglePathContextMenuItems(input: {
       : undefined,
     action('reveal-in-system-file-manager', projectSystemFileManagerLabel(input.desktopPlatform ?? 'linux'))
   ]);
-  const modifyActions = [
-    ...(explorerItem ? [action('rename', 'Rename')] : []),
-    action('delete', 'Delete')
-  ];
+  const modifyActions = compactMenuItems([
+    explorerItem ? action('rename', 'Rename') : undefined,
+    canvasProjectRoot ? undefined : action('delete', 'Delete')
+  ]);
   return groupedMenuItems([
     { id: 'canvas-actions', items: canvasActions },
     { id: 'new', items: creationActions },

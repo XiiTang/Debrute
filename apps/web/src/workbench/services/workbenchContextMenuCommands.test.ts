@@ -417,6 +417,45 @@ describe('workbench context menu commands', () => {
     });
   });
 
+  it('does not run root entry file commands from stale Canvas project root commands', async () => {
+    const setFileClipboard = vi.fn();
+    const copyText = vi.fn();
+    const trashProjectPaths = vi.fn(async () => ({
+      ...batchResult(),
+      results: []
+    }));
+    const rootTarget = { source: 'canvas' as const, kind: 'directory' as const, projectRelativePath: '' };
+    const rootProjection = canvasProjectionFixture('canvas-1', {
+      projectRelativePath: '',
+      nodeKind: 'directory',
+      x: 200,
+      y: 100,
+      width: 120,
+      height: 80,
+      layoutMode: 'manual'
+    });
+
+    for (const command of ['cut', 'copy', 'copy-relative-path', 'delete'] as const) {
+      runWorkbenchContextMenuCommand(commandInput({
+        command,
+        target: rootTarget,
+        activeProjection: rootProjection,
+        activeCanvasRuntime: canvasRuntimeFixture(),
+        actions: {
+          trashProjectPaths
+        },
+        setFileClipboard,
+        copyText
+      }));
+    }
+
+    await Promise.resolve();
+
+    expect(setFileClipboard).not.toHaveBeenCalled();
+    expect(copyText).not.toHaveBeenCalled();
+    expect(trashProjectPaths).not.toHaveBeenCalled();
+  });
+
   it('runs Show Details from a Project Explorer item that exists in the Canvas projection', () => {
     const openInspectorPanel = vi.fn();
     const setSelection = vi.fn<CanvasEditorRuntime['setSelection']>();

@@ -72,6 +72,36 @@ describe('workbench context menu', () => {
     expect(actionCommands(items)).not.toContain('rename');
   });
 
+  it('builds the Canvas project root node menu without root entry file operations', () => {
+    const items = buildWorkbenchContextMenuItems({
+      target: { source: 'canvas', kind: 'directory', projectRelativePath: '' },
+      projection: projectionWithNodes([{ projectRelativePath: '', nodeKind: 'directory', layoutMode: 'manual' }]),
+      canSelectCanvasNode: true,
+      canRevealInCanvas: true,
+      fileClipboard: {
+        operation: 'copy',
+        entries: [{ projectRelativePath: 'briefs/concept.md', kind: 'file' }]
+      },
+      desktopPlatform: 'darwin'
+    });
+
+    expect(menuShape(items)).toEqual([
+      'show-details:enabled',
+      'reveal-in-canvas:enabled',
+      'reset-auto-layout:enabled',
+      '---',
+      'paste:enabled',
+      '---',
+      'open-terminal:enabled',
+      'copy-path:enabled',
+      'reveal-in-system-file-manager:enabled'
+    ]);
+    expect(actionCommands(items)).not.toContain('cut');
+    expect(actionCommands(items)).not.toContain('copy');
+    expect(actionCommands(items)).not.toContain('copy-relative-path');
+    expect(actionCommands(items)).not.toContain('delete');
+  });
+
   it('shows disabled Canvas actions for Project Explorer items absent from the active Canvas', () => {
     const items = buildWorkbenchContextMenuItems({
       target: {
