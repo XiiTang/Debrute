@@ -3,6 +3,7 @@ import { EventEmitter } from 'node:events';
 import {
   adobeBridgeClientDisplayName,
   type AdobeBridgeClient,
+  type AdobeBridgeClientRuntime,
   type AdobeBridgeLink,
   type AdobeBridgeSettings,
   type AdobeBridgeErrorCode,
@@ -31,6 +32,7 @@ export interface AdobeBridgePhotoshopClientInput {
   adobeClientId: string;
   hostApp: 'photoshop';
   hostVersion: string;
+  clientRuntime?: AdobeBridgeClientRuntime;
   documentCount: number;
   activeDocumentTitle: string | null;
 }
@@ -94,6 +96,7 @@ export class AdobeBridgeService {
       adobeClientId: input.adobeClientId,
       hostApp: input.hostApp,
       hostVersion: input.hostVersion,
+      ...(input.clientRuntime === undefined ? {} : { clientRuntime: input.clientRuntime }),
       displayName: adobeBridgeClientDisplayName(input),
       documentCount: input.documentCount,
       activeDocumentTitle: input.activeDocumentTitle,

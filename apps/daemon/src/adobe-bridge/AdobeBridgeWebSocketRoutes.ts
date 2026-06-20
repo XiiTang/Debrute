@@ -45,6 +45,7 @@ export function createAdobeBridgeWebSocketRoutes(input: {
             adobeClientId,
             hostApp: message.hostApp,
             hostVersion: message.hostVersion,
+            ...(message.clientRuntime === undefined ? {} : { clientRuntime: message.clientRuntime }),
             documentCount: message.documentCount,
             activeDocumentTitle: message.activeDocumentTitle
           });
@@ -63,6 +64,7 @@ export function createAdobeBridgeWebSocketRoutes(input: {
               adobeClientId: current.adobeClientId,
               hostApp: 'photoshop',
               hostVersion: current.hostVersion,
+              ...(current.clientRuntime === undefined ? {} : { clientRuntime: current.clientRuntime }),
               documentCount: message.documentCount,
               activeDocumentTitle: message.activeDocumentTitle
             });

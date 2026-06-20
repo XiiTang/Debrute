@@ -49,7 +49,7 @@ pnpm exec tsx apps/debrute-cli/src/index.ts project validate path/to/project
 
 ## Releases
 
-Debrute publishes Desktop installers, Debrute CLI archives, and the Photoshop UXP bridge panel on GitHub Releases.
+Debrute publishes Desktop installers, Debrute CLI archives, and Photoshop bridge panel packages on GitHub Releases.
 
 Current Desktop builds are unsigned. macOS may require right-click Open or Privacy & Security approval. Windows may show SmartScreen. Linux AppImage builds may require `chmod +x`.
 
@@ -74,8 +74,11 @@ debrute-cli-X.Y.Z-linux-x64.tar.gz
 debrute-cli-X.Y.Z-windows-arm64.zip
 debrute-cli-X.Y.Z-windows-x64.zip
 debrute-photoshop-uxp-X.Y.Z.ccx
+debrute-photoshop-cep-X.Y.Z.zip
 debrute_SHA256SUMS
 ```
+
+Use `debrute-photoshop-uxp-X.Y.Z.ccx` when the normal Creative Cloud plugin installation path is available. Use `debrute-photoshop-cep-X.Y.Z.zip` only when that `.ccx` installation path is unavailable; extract the zip and copy its `com.debrute.photoshop.bridge.cep` directory into the user's CEP extensions directory for Photoshop. Keep Debrute Desktop or the daemon running and enable **Adobe Bridge** in Debrute Settings before connecting either Photoshop panel.
 
 Verify manual downloads against `debrute_SHA256SUMS` from the same release tag before installing. Filter the manifest to the asset you downloaded:
 

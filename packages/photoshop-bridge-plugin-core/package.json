@@ -1,0 +1,15 @@
+{
+  "name": "@debrute/photoshop-bridge-plugin-core",
+  "version": "0.0.1",
+  "license": "Apache-2.0",
+  "type": "module",
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "scripts": {
+    "build": "tsc -b",
+    "check": "tsc -b --pretty false"
+  },
+  "dependencies": {
+    "@debrute/app-protocol": "workspace:*"
+  }
+}

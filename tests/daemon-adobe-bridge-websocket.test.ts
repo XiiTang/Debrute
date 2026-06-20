@@ -32,9 +32,10 @@ describe('daemon Adobe Bridge WebSocket routes', () => {
     await onceOpen(socket);
     socket.send(JSON.stringify({
       type: 'hello',
-      adobeClientId: 'ps-1',
+      adobeClientId: 'ps-cep',
       hostApp: 'photoshop',
-      hostVersion: '2026',
+      hostVersion: '26.0.0',
+      clientRuntime: 'cep',
       documentCount: 0,
       activeDocumentTitle: null
     }));
@@ -44,8 +45,9 @@ describe('daemon Adobe Bridge WebSocket routes', () => {
       type: 'bridge.state',
       state: {
         adobeClients: [{
-          adobeClientId: 'ps-1',
-          displayName: 'Photoshop 2026 · No document open'
+          adobeClientId: 'ps-cep',
+          clientRuntime: 'cep',
+          displayName: 'Photoshop 26.0.0 · No document open'
         }]
       }
     });

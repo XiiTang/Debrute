@@ -8,6 +8,7 @@ import {
 export function createPhotoshopHelloMessage(input: {
   adobeClientId: string;
   hostVersion: string;
+  clientRuntime?: 'uxp' | 'cep';
   documentTitle: string | null;
   documentCount: number;
 }): PhotoshopBridgeHelloMessage {
@@ -16,6 +17,7 @@ export function createPhotoshopHelloMessage(input: {
     adobeClientId: input.adobeClientId,
     hostApp: 'photoshop',
     hostVersion: input.hostVersion,
+    ...(input.clientRuntime === undefined ? {} : { clientRuntime: input.clientRuntime }),
     documentCount: input.documentCount,
     activeDocumentTitle: input.documentTitle
   };

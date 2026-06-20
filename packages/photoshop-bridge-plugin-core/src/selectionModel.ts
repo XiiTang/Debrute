@@ -1,12 +1,4 @@
-export interface PhotoshopSelectionSnapshot {
-  documentTitle: string | null;
-  documentCount: number;
-  selectedItems: Array<{
-    layerId: number;
-    name: string;
-    kind: 'layer' | 'group';
-  }>;
-}
+import type { PhotoshopSelectionSnapshot } from './adapter';
 
 export interface SelectionCard {
   id: string;

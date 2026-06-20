@@ -18,16 +18,16 @@ import {
   type DaemonBridgeClientMessage,
   type SelectionCard
 } from '@debrute/photoshop-bridge-plugin-core';
-import { createPhotoshopAdapter } from './photoshopAdapter';
+import { createCepPhotoshopAdapter } from './cepPhotoshopAdapter';
 import './styles.css';
 
 const root = document.getElementById('app');
-const adapter = createPhotoshopAdapter();
+const adapter = createCepPhotoshopAdapter();
 let bridgeState: AdobeBridgeStateView | undefined;
 let apiBaseUrl: string | undefined;
 let uploadErrorMessage: string | undefined;
-const adobeClientId = sessionStorage.getItem('debrute.adobeClientId') ?? crypto.randomUUID();
-sessionStorage.setItem('debrute.adobeClientId', adobeClientId);
+const adobeClientId = localStorage.getItem('debrute.adobeClientId') ?? crypto.randomUUID();
+localStorage.setItem('debrute.adobeClientId', adobeClientId);
 
 void connect();
 
@@ -43,16 +43,12 @@ async function connect(): Promise<void> {
   const socket = new WebSocket(discovery.wsUrl);
   let statusInterval: number | undefined;
   socket.addEventListener('open', () => {
-    const snapshot = adapter.currentSelectionSnapshot();
-    socket.send(JSON.stringify(createPhotoshopHelloMessage({
-      adobeClientId,
-      hostVersion: adapter.hostVersion(),
-      clientRuntime: 'uxp',
-      documentTitle: snapshot.documentTitle,
-      documentCount: snapshot.documentCount
-    })));
-    sendPhotoshopStatus(socket);
-    statusInterval = window.setInterval(() => sendPhotoshopStatus(socket), 1000);
+    void initializeSocket(socket).then((interval) => {
+      statusInterval = interval;
+    }, (error) => {
+      uploadErrorMessage = error instanceof Error ? error.message : String(error);
+      render('Unavailable');
+    });
   });
   socket.addEventListener('message', (event) => {
     void handleDaemonMessage(socket, parseDaemonBridgeMessage(String(event.data)));
@@ -65,6 +61,27 @@ async function connect(): Promise<void> {
     render('Searching');
     window.setTimeout(() => void connect(), 2000);
   });
+}
+
+async function initializeSocket(socket: WebSocket): Promise<number> {
+  await refreshSelection();
+  const snapshot = adapter.currentSelectionSnapshot();
+  socket.send(JSON.stringify(createPhotoshopHelloMessage({
+    adobeClientId,
+    hostVersion: adapter.hostVersion(),
+    clientRuntime: 'cep',
+    documentTitle: snapshot.documentTitle,
+    documentCount: snapshot.documentCount
+  })));
+  sendPhotoshopStatus(socket);
+  return window.setInterval(() => {
+    void refreshSelection().then(() => sendPhotoshopStatus(socket));
+  }, 1000);
+}
+
+async function refreshSelection(): Promise<void> {
+  await adapter.refreshSelectionSnapshot();
+  render('Connected');
 }
 
 async function handleDaemonMessage(socket: WebSocket, message: DaemonBridgeClientMessage): Promise<void> {

@@ -16,6 +16,7 @@ describe('AdobeBridgeService', () => {
       adobeClientId: 'ps-1',
       hostApp: 'photoshop',
       hostVersion: '2026',
+      clientRuntime: 'uxp',
       documentCount: 1,
       activeDocumentTitle: 'poster.psd'
     });
@@ -38,8 +39,39 @@ describe('AdobeBridgeService', () => {
     const state = service.state();
 
     expect(state.adobeClients[0]?.displayName).toBe('Photoshop 2026 · poster.psd');
+    expect(state.adobeClients[0]?.clientRuntime).toBe('uxp');
     expect(state.projects[0]?.directories.map((entry) => entry.projectRelativePath)).toEqual(['assets', 'briefs']);
     expect(state.links).toMatchObject([{ projectId: 'project-1', adobeClientId: 'ps-1', status: 'active' }]);
+  });
+
+  it('keeps Photoshop client runtime metadata across document status updates', () => {
+    const service = new AdobeBridgeService({
+      now: () => new Date('2026-06-18T00:00:00.000Z')
+    });
+
+    service.setSettings({ enabled: true, discoveryStatus: 'available' });
+    service.upsertPhotoshopClient({
+      adobeClientId: 'ps-cep',
+      hostApp: 'photoshop',
+      hostVersion: '26.0.0',
+      clientRuntime: 'cep',
+      documentCount: 0,
+      activeDocumentTitle: null
+    });
+    service.upsertPhotoshopClient({
+      adobeClientId: 'ps-cep',
+      hostApp: 'photoshop',
+      hostVersion: '26.0.0',
+      clientRuntime: 'cep',
+      documentCount: 1,
+      activeDocumentTitle: 'poster.psd'
+    });
+
+    expect(service.stateForPhotoshopClient('ps-cep').adobeClients[0]).toMatchObject({
+      adobeClientId: 'ps-cep',
+      clientRuntime: 'cep',
+      activeDocumentTitle: 'poster.psd'
+    });
   });
 
   it('scopes project directories and links to the requesting Photoshop client', () => {

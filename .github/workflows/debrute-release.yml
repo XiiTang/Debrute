@@ -123,7 +123,7 @@ jobs:
             apps/desktop/release/latest-mac.yml
             apps/desktop/release/latest.yml
 
-  build-photoshop-uxp:
+  build-photoshop-plugins:
     needs: preflight
     runs-on: ubuntu-latest
     steps:
@@ -140,14 +140,16 @@ jobs:
       - run: pnpm package:photoshop-plugin
       - uses: actions/upload-artifact@v4
         with:
-          name: photoshop-uxp
-          path: release/photoshop-uxp/debrute-photoshop-uxp-*.ccx
+          name: photoshop-plugins
+          path: |
+            release/photoshop-uxp/debrute-photoshop-uxp-*.ccx
+            release/photoshop-cep/debrute-photoshop-cep-*.zip
 
   publish-release:
     needs:
       - build-cli
       - build-desktop
-      - build-photoshop-uxp
+      - build-photoshop-plugins
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4

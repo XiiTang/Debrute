@@ -40,6 +40,10 @@ export function photoshopUxpReleaseAssetName(version) {
   return `debrute-photoshop-uxp-${version}.ccx`;
 }
 
+export function photoshopCepReleaseAssetName(version) {
+  return `debrute-photoshop-cep-${version}.zip`;
+}
+
 export function expectedReleaseAssets(version) {
   return [
     ...desktopReleaseTargets.map((target) => desktopReleaseAssetName(version, target.platform, target.arch, target.extension)),
@@ -51,6 +55,7 @@ export function expectedReleaseAssets(version) {
     `debrute-cli-${version}-windows-arm64.zip`,
     `debrute-cli-${version}-windows-x64.zip`,
     photoshopUxpReleaseAssetName(version),
+    photoshopCepReleaseAssetName(version),
     checksumManifestName
   ];
 }

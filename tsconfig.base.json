@@ -27,6 +27,7 @@
       "@debrute/canvas-core": ["./packages/canvas-core/src/index.ts"],
       "@debrute/canvas-map-core": ["./packages/canvas-map-core/src/index.ts"],
       "@debrute/workbench-runtime": ["./packages/workbench-runtime/src/index.ts"],
+      "@debrute/photoshop-bridge-plugin-core": ["./packages/photoshop-bridge-plugin-core/src/index.ts"],
       "@debrute/app-server": ["./apps/app-server/src/index.ts"],
       "@debrute/daemon": ["./apps/daemon/src/index.ts"],
       "@debrute/runtime-host": ["./apps/runtime-host/src/index.ts"]

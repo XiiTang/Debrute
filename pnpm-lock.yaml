@@ -168,11 +168,30 @@ importers:
         specifier: ^8.0.16
         version: 8.0.16(@types/node@24.13.1)(esbuild@0.28.0)(jiti@2.7.0)(tsx@4.22.4)(yaml@2.9.0)
 
+  apps/photoshop-cep-plugin:
+    dependencies:
+      '@debrute/photoshop-bridge-plugin-core':
+        specifier: workspace:*
+        version: link:../../packages/photoshop-bridge-plugin-core
+    devDependencies:
+      '@vitejs/plugin-react':
+        specifier: ^6.0.2
+        version: 6.0.2(vite@8.0.16(@types/node@24.13.1)(esbuild@0.28.0)(jiti@2.7.0)(tsx@4.22.4)(yaml@2.9.0))
+      typescript:
+        specifier: ^6.0.3
+        version: 6.0.3
+      vite:
+        specifier: ^8.0.16
+        version: 8.0.16(@types/node@24.13.1)(esbuild@0.28.0)(jiti@2.7.0)(tsx@4.22.4)(yaml@2.9.0)
+      vitest:
+        specifier: ^4.0.16
+        version: 4.1.8(@types/node@24.13.1)(vite@8.0.16(@types/node@24.13.1)(esbuild@0.28.0)(jiti@2.7.0)(tsx@4.22.4)(yaml@2.9.0))
+
   apps/photoshop-uxp-plugin:
     dependencies:
-      '@debrute/app-protocol':
+      '@debrute/photoshop-bridge-plugin-core':
         specifier: workspace:*
-        version: link:../../packages/app-protocol
+        version: link:../../packages/photoshop-bridge-plugin-core
     devDependencies:
       '@vitejs/plugin-react':
         specifier: ^6.0.2
@@ -284,6 +303,12 @@ importers:
       yaml:
         specifier: ^2.9.0
         version: 2.9.0
+
+  packages/photoshop-bridge-plugin-core:
+    dependencies:
+      '@debrute/app-protocol':
+        specifier: workspace:*
+        version: link:../app-protocol
 
   packages/project-core: {}
 

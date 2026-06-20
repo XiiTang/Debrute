@@ -12,7 +12,9 @@
     { "path": "apps/daemon" },
     { "path": "apps/runtime-host" },
     { "path": "apps/web" },
+    { "path": "packages/photoshop-bridge-plugin-core" },
     { "path": "apps/photoshop-uxp-plugin" },
+    { "path": "apps/photoshop-cep-plugin" },
     { "path": "apps/debrute-cli" }
   ]
 }

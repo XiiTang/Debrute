@@ -15,6 +15,7 @@ import {
   expectedReleaseAssets
 } from '../scripts/release-asset-contract.mjs';
 import { resolveNodeModulePackageRoot } from '../scripts/sharp-runtime-payload.mjs';
+import photoshopCepViteConfig from '../apps/photoshop-cep-plugin/vite.config';
 import photoshopUxpViteConfig from '../apps/photoshop-uxp-plugin/vite.config';
 
 describe('Debrute CLI release packaging', () => {
@@ -95,12 +96,14 @@ describe('Debrute CLI release packaging', () => {
       'debrute-cli-0.2.0-windows-arm64.zip',
       'debrute-cli-0.2.0-windows-x64.zip',
       'debrute-photoshop-uxp-0.2.0.ccx',
+      'debrute-photoshop-cep-0.2.0.zip',
       'debrute_SHA256SUMS'
     ]);
   });
 
-  it('builds the Photoshop UXP package with relative panel asset URLs', () => {
+  it('builds Photoshop plugin packages with relative panel asset URLs', () => {
     expect((photoshopUxpViteConfig as { base?: string }).base).toBe('./');
+    expect((photoshopCepViteConfig as { base?: string }).base).toBe('./');
   });
 
   it('includes skills and web dist payload entries', () => {

@@ -1,16 +1,8 @@
-import type { PhotoshopSelectionSnapshot } from './selectionModel';
-
-export interface ExportedSelectionPng {
-  suggestedName: string;
-  bytes: Uint8Array;
-}
-
-export interface PhotoshopAdapter {
-  hostVersion(): string;
-  currentSelectionSnapshot(): PhotoshopSelectionSnapshot;
-  exportSelectedTopLevelPngs(): Promise<ExportedSelectionPng[]>;
-  placeFileAsSmartObject(input: { fileName: string; bytes: Uint8Array }): Promise<void>;
-}
+import type {
+  ExportedSelectionPng,
+  PhotoshopAdapter,
+  PhotoshopSelectionSnapshot
+} from '@debrute/photoshop-bridge-plugin-core';
 
 export interface PhotoshopRuntimeLayer {
   id: number;

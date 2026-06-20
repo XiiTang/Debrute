@@ -852,11 +852,13 @@ export interface AdobeBridgeSettings {
 }
 
 export type AdobeBridgeHostApp = 'photoshop';
+export type AdobeBridgeClientRuntime = 'uxp' | 'cep';
 
 export interface AdobeBridgeClient {
   adobeClientId: string;
   hostApp: AdobeBridgeHostApp;
   hostVersion: string;
+  clientRuntime?: AdobeBridgeClientRuntime;
   displayName: string;
   documentCount: number;
   activeDocumentTitle: string | null;
@@ -932,6 +934,7 @@ export interface PhotoshopBridgeHelloMessage {
   adobeClientId?: string;
   hostApp: 'photoshop';
   hostVersion: string;
+  clientRuntime?: AdobeBridgeClientRuntime;
   documentCount: number;
   activeDocumentTitle: string | null;
 }

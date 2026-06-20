@@ -11,6 +11,8 @@ export async function releaseVersionContract(root = process.cwd()) {
     { label: 'Debrute CLI package', path: 'apps/debrute-cli/package.json', version: await readPackageVersion(root, 'apps/debrute-cli/package.json') },
     { label: 'Photoshop UXP package', path: 'apps/photoshop-uxp-plugin/package.json', version: await readPackageVersion(root, 'apps/photoshop-uxp-plugin/package.json') },
     { label: 'Photoshop UXP manifest', path: 'apps/photoshop-uxp-plugin/public/manifest.json', version: await readPackageVersion(root, 'apps/photoshop-uxp-plugin/public/manifest.json') },
+    { label: 'Photoshop CEP package', path: 'apps/photoshop-cep-plugin/package.json', version: await readPackageVersion(root, 'apps/photoshop-cep-plugin/package.json') },
+    { label: 'Photoshop CEP manifest', path: 'apps/photoshop-cep-plugin/public/CSXS/manifest.xml', version: await readCepManifestVersion(root, 'apps/photoshop-cep-plugin/public/CSXS/manifest.xml') },
     ...await readSkillVersionEntries(root)
   ];
   return { version, entries };
@@ -34,6 +36,15 @@ async function readPackageVersion(root, relativePath) {
     throw new Error(`${relativePath} must declare a string version.`);
   }
   return parsed.version;
+}
+
+async function readCepManifestVersion(root, relativePath) {
+  const content = await readFile(join(root, relativePath), 'utf8');
+  const match = /ExtensionBundleVersion="([^"]+)"/.exec(content);
+  if (!match?.[1]) {
+    throw new Error(`${relativePath} must declare ExtensionBundleVersion.`);
+  }
+  return match[1];
 }
 
 async function readSkillVersionEntries(root) {

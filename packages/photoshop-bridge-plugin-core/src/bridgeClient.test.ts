@@ -22,6 +22,24 @@ describe('bridgeClient pure helpers', () => {
     });
   });
 
+  it('includes optional client runtime metadata in hello messages', () => {
+    expect(createPhotoshopHelloMessage({
+      adobeClientId: 'ps-1',
+      hostVersion: '26.0.0',
+      clientRuntime: 'cep',
+      documentTitle: 'poster.psd',
+      documentCount: 1
+    })).toMatchObject({
+      type: 'hello',
+      adobeClientId: 'ps-1',
+      hostApp: 'photoshop',
+      hostVersion: '26.0.0',
+      clientRuntime: 'cep',
+      documentCount: 1,
+      activeDocumentTitle: 'poster.psd'
+    });
+  });
+
   it('parses daemon bridge messages and rejects unrelated payloads', () => {
     expect(parseDaemonBridgeMessage(JSON.stringify({
       type: 'bridge.error',
@@ -29,7 +47,7 @@ describe('bridgeClient pure helpers', () => {
       message: 'not linked'
     }))).toMatchObject({ type: 'bridge.error', code: 'project_not_linked' });
 
-    expect(() => parseDaemonBridgeMessage(JSON.stringify({ type: 'legacy' }))).toThrow('Unsupported daemon bridge message');
+    expect(() => parseDaemonBridgeMessage(JSON.stringify({ type: 'unsupported' }))).toThrow('Unsupported daemon bridge message');
   });
 
   it('creates Photoshop status messages from the current document title', () => {

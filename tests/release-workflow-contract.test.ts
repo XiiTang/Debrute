@@ -13,8 +13,11 @@ describe('GitHub release workflow contract', () => {
     expect(workflow).toContain('sudo apt-get update && sudo apt-get install -y ripgrep');
     expect(workflow).toContain('build-cli:');
     expect(workflow).toContain('build-desktop:');
-    expect(workflow).toContain('build-photoshop-uxp:');
+    expect(workflow).toContain('build-photoshop-plugins:');
     expect(workflow).toContain('pnpm package:photoshop-plugin');
+    expect(workflow).toContain('release/photoshop-uxp/debrute-photoshop-uxp-*.ccx');
+    expect(workflow).toContain('release/photoshop-cep/debrute-photoshop-cep-*.zip');
+    expect(workflow).toContain('name: photoshop-plugins');
     expect(workflow).toContain('publish-release:');
     expect(workflow).toContain('CSC_IDENTITY_AUTO_DISCOVERY: false');
     expect(workflow).toContain('debrute_SHA256SUMS');
@@ -67,7 +70,9 @@ describe('GitHub release workflow contract', () => {
     expect(readme).toContain('Linux Desktop updates are manual downloads');
     expect(readme).toContain('debrute-cli-X.Y.Z-macos-arm64.tar.gz');
     expect(readme).toContain('debrute-photoshop-uxp-X.Y.Z.ccx');
-    expect(readme).toContain('Photoshop UXP');
+    expect(readme).toContain('debrute-photoshop-cep-X.Y.Z.zip');
+    expect(readme).toContain('Photoshop bridge panel packages');
+    expect(readme).toContain('copy its `com.debrute.photoshop.bridge.cep` directory');
     expect(readme).toContain('debrute_SHA256SUMS');
     expect(readme).toContain('grep "  debrute-cli-X.Y.Z-macos-arm64.tar.gz$" debrute_SHA256SUMS | shasum -a 256 -c -');
     expect(readme).toContain('sha256sum -c --ignore-missing debrute_SHA256SUMS');

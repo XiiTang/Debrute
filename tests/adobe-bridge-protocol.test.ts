@@ -5,7 +5,8 @@ import {
   adobeBridgeClientDisplayName,
   isAdobeBridgeErrorCode,
   type AdobeBridgeClient,
-  type AdobeBridgeStateView
+  type AdobeBridgeStateView,
+  type PhotoshopBridgeHelloMessage
 } from '@debrute/app-protocol';
 
 describe('Adobe Bridge protocol', () => {
@@ -45,6 +46,36 @@ describe('Adobe Bridge protocol', () => {
 
     expect(state.adobeClients[0]?.displayName).toBe('Photoshop 2026 · No document open');
     expect(state.settings.discoveryStatus).toBe('available');
+  });
+
+  it('allows Photoshop clients to report their plugin runtime without changing host identity', () => {
+    const protocolSource = readFileSync(join(process.cwd(), 'packages/app-protocol/src/index.ts'), 'utf8');
+    const client: AdobeBridgeClient = {
+      adobeClientId: 'ps-client-cep',
+      hostApp: 'photoshop',
+      hostVersion: '26.0.0',
+      clientRuntime: 'cep',
+      displayName: 'Photoshop 26.0.0 · No document open',
+      documentCount: 0,
+      activeDocumentTitle: null,
+      connectedAt: '2026-06-20T00:00:00.000Z',
+      lastSeenAt: '2026-06-20T00:00:01.000Z'
+    };
+
+    const hello: PhotoshopBridgeHelloMessage = {
+      type: 'hello',
+      adobeClientId: client.adobeClientId,
+      hostApp: 'photoshop',
+      hostVersion: client.hostVersion,
+      clientRuntime: 'cep',
+      documentCount: 0,
+      activeDocumentTitle: null
+    };
+
+    expect(client.hostApp).toBe('photoshop');
+    expect(client.clientRuntime).toBe('cep');
+    expect(hello.clientRuntime).toBe('cep');
+    expect(protocolSource).toContain("export type AdobeBridgeClientRuntime = 'uxp' | 'cep';");
   });
 
   it('recognizes only stable bridge error codes', () => {
