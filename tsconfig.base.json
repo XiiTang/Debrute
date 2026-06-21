@@ -23,6 +23,7 @@
       "@debrute/architecture-rules": ["./packages/architecture-rules/src/index.mjs"],
       "@debrute/capability-core": ["./packages/capability-core/src/index.ts"],
       "@debrute/capability-runtime": ["./packages/capability-runtime/src/index.ts"],
+      "@debrute/project-core/projectTextFileTypes": ["./packages/project-core/src/projectTextFileTypes.ts"],
       "@debrute/project-core": ["./packages/project-core/src/index.ts"],
       "@debrute/canvas-core": ["./packages/canvas-core/src/index.ts"],
       "@debrute/canvas-map-core": ["./packages/canvas-map-core/src/index.ts"],

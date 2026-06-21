@@ -1,6 +1,8 @@
-import { access, stat } from 'node:fs/promises';
+import { access, open, stat } from 'node:fs/promises';
 import {
+  isKnownProjectTextFilePath,
   projectFileRevision,
+  projectTextMimeTypeFromPath,
   resolveExistingProjectPath
 } from '@debrute/project-core';
 import {
@@ -70,10 +72,20 @@ export function canvasMediaKindFromPath(projectRelativePath: string): CanvasMedi
   if (/\.(mp3|wav|wave|ogg|oga|opus|m4a|aac|flac|weba)$/.test(lowerPath)) {
     return 'audio';
   }
-  if (/\.(md|markdown|txt|json|ya?ml|html?|css|csv|tsv|xml|js|jsx|ts|tsx|mjs|cjs)$/.test(lowerPath)) {
+  if (isKnownProjectTextFilePath(projectRelativePath)) {
     return 'text';
   }
   return 'unknown';
+}
+
+export async function canvasMediaKindForProjectFile(projectRoot: string, projectRelativePath: string): Promise<CanvasMediaKind> {
+  const pathKind = canvasMediaKindFromPath(projectRelativePath);
+  if (pathKind !== 'unknown') {
+    return pathKind;
+  }
+  const absolutePath = await resolveExistingProjectPath(projectRoot, projectRelativePath);
+  const firstLine = await firstLineForTextClassification(absolutePath);
+  return isKnownProjectTextFilePath(projectRelativePath, firstLine) ? 'text' : 'unknown';
 }
 
 async function inspectCanvasNodeAvailability(projectRoot: string, node: CanvasNodeElement): Promise<CanvasNodeAvailability> {
@@ -113,7 +125,10 @@ async function inspectCanvasNodeAvailability(projectRoot: string, node: CanvasNo
     }
     await access(absolutePath);
     const revision = projectFileRevision(fileStat.size, fileStat.mtimeMs);
-    const mimeType = mimeTypeFromProjectPath(node.projectRelativePath);
+    const firstLine = node.mediaKind === 'text'
+      ? await firstLineForTextClassification(absolutePath)
+      : undefined;
+    const mimeType = mimeTypeFromProjectPath(node.projectRelativePath, firstLine);
     const canvasImagePreview = node.mediaKind === 'image'
       ? await canvasImagePreviewSourceInfo(projectRoot, node.projectRelativePath)
       : undefined;
@@ -172,7 +187,7 @@ function isCurrentCanvasNodeElement(value: unknown): value is CanvasNodeElement 
     && (value.layoutMode === undefined || value.layoutMode === 'manual');
 }
 
-function mimeTypeFromProjectPath(projectRelativePath: string): string {
+function mimeTypeFromProjectPath(projectRelativePath: string, firstLine?: string): string {
   const lowerPath = projectRelativePath.toLowerCase();
   if (lowerPath.endsWith('.png')) {
     return 'image/png';
@@ -237,7 +252,23 @@ function mimeTypeFromProjectPath(projectRelativePath: string): string {
   if (lowerPath.endsWith('.csv')) {
     return 'text/csv';
   }
-  return 'text/plain';
+  return projectTextMimeTypeFromPath(projectRelativePath, firstLine);
+}
+
+async function firstLineForTextClassification(absolutePath: string): Promise<string | undefined> {
+  let file: Awaited<ReturnType<typeof open>> | undefined;
+  try {
+    file = await open(absolutePath, 'r');
+    const buffer = Buffer.alloc(4096);
+    const { bytesRead } = await file.read(buffer, 0, buffer.length, 0);
+    const content = buffer.subarray(0, bytesRead).toString('utf8');
+    if (content.includes('\u0000') || content.includes('\uFFFD')) {
+      return undefined;
+    }
+    return content.split(/\r?\n/, 1)[0] ?? '';
+  } finally {
+    await file?.close();
+  }
 }
 
 function hasOnlyKeys(value: Record<string, unknown>, allowed: string[]): boolean {

@@ -1,5 +1,6 @@
 import React from 'react';
 import Editor from '@monaco-editor/react';
+import { monacoLanguageForProjectTextLanguage } from './textEditorLanguages';
 
 export function CanvasMonacoEditor({
   value,
@@ -41,7 +42,7 @@ export function CanvasMonacoEditor({
     >
       <Editor
         value={value}
-        language={monacoLanguage(language)}
+        language={monacoLanguageForProjectTextLanguage(language)}
         theme="vs-dark"
         options={{
           readOnly: readOnly === true,
@@ -64,17 +65,4 @@ export function CanvasMonacoEditor({
       />
     </div>
   );
-}
-
-function monacoLanguage(language: string): string {
-  if (language === 'yaml') {
-    return 'yaml';
-  }
-  if (language === 'json') {
-    return 'json';
-  }
-  if (language === 'markdown') {
-    return 'markdown';
-  }
-  return 'plaintext';
 }

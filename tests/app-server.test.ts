@@ -1386,6 +1386,106 @@ describe('app-server', () => {
     }
   });
 
+  it('projects supported text formats on Canvas through the shared text registry', async () => {
+    const projectRoot = await mkdtemp(join(tmpdir(), 'debrute-app-server-text-format-registry-'));
+    const server = new DebruteAppServer();
+    try {
+      await server.openProject(projectRoot, {
+        initializeIfMissing: true,
+        createDefaultCanvas: true
+      });
+      await mkdir(join(projectRoot, 'batch'), { recursive: true });
+      await mkdir(join(projectRoot, 'scripts'), { recursive: true });
+      await mkdir(join(projectRoot, 'logs'), { recursive: true });
+      await mkdir(join(projectRoot, 'config'), { recursive: true });
+      await mkdir(join(projectRoot, 'bin'), { recursive: true });
+      await mkdir(join(projectRoot, 'src'), { recursive: true });
+      await mkdir(join(projectRoot, 'assets'), { recursive: true });
+      await writeFile(join(projectRoot, 'batch/requests.jsonl'), '{"prompt":"one"}\n', 'utf8');
+      await writeFile(join(projectRoot, 'scripts/run.sh'), '#!/usr/bin/env bash\necho run\n', 'utf8');
+      await writeFile(join(projectRoot, 'logs/results.log'), 'ok\n', 'utf8');
+      await writeFile(join(projectRoot, 'config/.env.local'), 'MODEL=gpt-image-2\n', 'utf8');
+      await writeFile(join(projectRoot, '.gitignore'), 'node_modules\n', 'utf8');
+      await writeFile(join(projectRoot, 'bin/run'), '#!/usr/bin/env bash\necho run\n', 'utf8');
+      await writeFile(join(projectRoot, 'Dockerfile'), 'FROM node:24\n', 'utf8');
+      await writeFile(join(projectRoot, 'Makefile'), 'all:\n\tpnpm check\n', 'utf8');
+      await writeFile(join(projectRoot, 'LICENSE'), 'Apache-2.0\n', 'utf8');
+      await writeFile(join(projectRoot, 'src/module.mts'), 'export const value = 1;\n', 'utf8');
+      await writeFile(join(projectRoot, 'assets/icon.svg'), '<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" />\n', 'utf8');
+      await writeFile(join(projectRoot, 'assets/cover.png'), await largePreviewablePngBuffer());
+      await writeCanvasMap(projectRoot, 'canvas-1', canvasMapSource([
+        'batch/requests.jsonl',
+        'scripts/run.sh',
+        'logs/results.log',
+        'config/.env.local',
+        '.gitignore',
+        'bin/run',
+        'Dockerfile',
+        'Makefile',
+        'LICENSE',
+        'src/module.mts',
+        'assets/icon.svg',
+        'assets/cover.png'
+      ]));
+
+      await server.pushCanvasMapForProject(projectRoot, { canvasId: 'canvas-1' });
+      const nodes = (await server.refreshProject()).projections[0]!.nodes;
+      const byPath = new Map(nodes.map((node) => [node.projectRelativePath, node]));
+
+      expect(byPath.get('batch/requests.jsonl')).toMatchObject({
+        mediaKind: 'text',
+        availability: { state: 'available', mimeType: 'application/jsonl' }
+      });
+      expect(byPath.get('scripts/run.sh')).toMatchObject({
+        mediaKind: 'text',
+        availability: { state: 'available', mimeType: 'text/x-shellscript' }
+      });
+      expect(byPath.get('logs/results.log')).toMatchObject({
+        mediaKind: 'text',
+        availability: { state: 'available', mimeType: 'text/plain' }
+      });
+      expect(byPath.get('config/.env.local')).toMatchObject({
+        mediaKind: 'text',
+        availability: { state: 'available', mimeType: 'text/plain' }
+      });
+      expect(byPath.get('.gitignore')).toMatchObject({
+        mediaKind: 'text',
+        availability: { state: 'available', mimeType: 'text/plain' }
+      });
+      expect(byPath.get('bin/run')).toMatchObject({
+        mediaKind: 'text',
+        availability: { state: 'available', mimeType: 'text/x-shellscript' }
+      });
+      expect(byPath.get('Dockerfile')).toMatchObject({
+        mediaKind: 'text',
+        availability: { state: 'available', mimeType: 'text/plain' }
+      });
+      expect(byPath.get('Makefile')).toMatchObject({
+        mediaKind: 'text',
+        availability: { state: 'available', mimeType: 'text/plain' }
+      });
+      expect(byPath.get('LICENSE')).toMatchObject({
+        mediaKind: 'text',
+        availability: { state: 'available', mimeType: 'text/plain' }
+      });
+      expect(byPath.get('src/module.mts')).toMatchObject({
+        mediaKind: 'text',
+        availability: { state: 'available', mimeType: 'text/typescript' }
+      });
+      expect(byPath.get('assets/icon.svg')).toMatchObject({
+        mediaKind: 'image',
+        availability: { state: 'available', mimeType: 'image/svg+xml' }
+      });
+      expect(byPath.get('assets/cover.png')).toMatchObject({
+        mediaKind: 'image',
+        availability: { state: 'available', mimeType: 'image/png' }
+      });
+    } finally {
+      server.close();
+      await rm(projectRoot, { recursive: true, force: true });
+    }
+  });
+
   it('materializes dynamic generic node widths during Canvas Map synchronization', async () => {
     const projectRoot = await mkdtemp(join(tmpdir(), 'debrute-app-server-canvas-map-generic-widths-'));
     const server = new DebruteAppServer();

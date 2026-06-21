@@ -48,7 +48,7 @@ export interface WorkbenchState {
 export interface TextFileBuffer {
   projectRelativePath: string;
   content: string;
-  language: WorkbenchProjectTextFile['language'] | string;
+  language: WorkbenchProjectTextFile['language'];
   wordWrap: boolean;
   dirty: boolean;
   saving: boolean;

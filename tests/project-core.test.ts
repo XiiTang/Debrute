@@ -19,6 +19,10 @@ import {
   normalizeProjectRelativePath,
   nextCopyProjectPathName,
   projectFileRevision,
+  isKnownProjectTextFilePath,
+  projectTextFileTypeForPath,
+  projectTextLanguageFromPath,
+  projectTextMimeTypeFromPath,
   readProjectFileBytes,
   readProjectTextFile,
   renameProjectPath,
@@ -58,6 +62,126 @@ describe('project-core', () => {
 
   it('owns project file revision tokens in project-core', () => {
     expect(projectFileRevision(2048, 1001.2)).toBe('1001:2048');
+  });
+
+  it('classifies supported project text file formats through one registry', () => {
+    const cases: Array<{ path: string; language: string; mimeType: string; firstLine?: string }> = [
+      { path: 'batch/requests.jsonl', language: 'jsonl', mimeType: 'application/jsonl' },
+      { path: 'batch/results.ndjson', language: 'jsonl', mimeType: 'application/jsonl' },
+      { path: 'config/settings.jsonc', language: 'jsonc', mimeType: 'application/jsonc' },
+      { path: 'config/.eslintrc', language: 'jsonc', mimeType: 'application/jsonc' },
+      { path: 'docs/notes.mdown', language: 'markdown', mimeType: 'text/markdown' },
+      { path: 'skills/SKILL.md', language: 'markdown', mimeType: 'text/markdown' },
+      { path: 'compose.dev.yml', language: 'yaml', mimeType: 'application/yaml' },
+      { path: 'scripts/run.sh', language: 'shell', mimeType: 'text/x-shellscript' },
+      { path: '.zshrc', language: 'shell', mimeType: 'text/x-shellscript' },
+      { path: 'bin/run', firstLine: '#!/usr/bin/env bash', language: 'shell', mimeType: 'text/x-shellscript' },
+      { path: '.env.local', language: 'dotenv', mimeType: 'text/plain' },
+      { path: '.editorconfig', language: 'properties', mimeType: 'text/plain' },
+      { path: '.gitignore', language: 'plaintext', mimeType: 'text/plain' },
+      { path: '.npmrc', language: 'properties', mimeType: 'text/plain' },
+      { path: 'logs/debrute.log', language: 'log', mimeType: 'text/plain' },
+      { path: 'logs/debrute.log.1', language: 'log', mimeType: 'text/plain' },
+      { path: 'Dockerfile', language: 'dockerfile', mimeType: 'text/plain' },
+      { path: 'Containerfile.dev', language: 'dockerfile', mimeType: 'text/plain' },
+      { path: 'Makefile', language: 'makefile', mimeType: 'text/plain' },
+      { path: 'build/rules.mk', language: 'makefile', mimeType: 'text/plain' },
+      { path: 'patches/fix.patch', language: 'diff', mimeType: 'text/plain' },
+      { path: 'data/table.tsv', language: 'tsv', mimeType: 'text/tab-separated-values' },
+      { path: 'src/module.mts', language: 'typescript', mimeType: 'text/typescript' },
+      { path: 'scripts/build.py', language: 'python', mimeType: 'text/x-python' },
+      { path: 'LICENSE', language: 'plaintext', mimeType: 'text/plain' }
+    ];
+
+    for (const item of cases) {
+      expect(projectTextLanguageFromPath(item.path, item.firstLine)).toBe(item.language);
+      expect(projectTextMimeTypeFromPath(item.path, item.firstLine)).toBe(item.mimeType);
+      expect(isKnownProjectTextFilePath(item.path, item.firstLine)).toBe(true);
+      expect(projectTextFileTypeForPath(item.path, item.firstLine)).toMatchObject({
+        id: item.language,
+        mimeType: item.mimeType
+      });
+    }
+
+    expect(isKnownProjectTextFilePath('assets/cover.png')).toBe(false);
+    expect(isKnownProjectTextFilePath('assets/icon.svg')).toBe(false);
+    expect(isKnownProjectTextFilePath('archives/export.debrutebin')).toBe(false);
+  });
+
+  it('reads supported project text files with registry language and MIME metadata', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'debrute-project-text-types-'));
+    try {
+      await mkdir(join(root, 'batch'), { recursive: true });
+      await mkdir(join(root, 'scripts'), { recursive: true });
+      await mkdir(join(root, 'logs'), { recursive: true });
+      await mkdir(join(root, 'bin'), { recursive: true });
+      await writeFile(join(root, 'batch/requests.jsonl'), '{"prompt":"one"}\n', 'utf8');
+      await writeFile(join(root, 'scripts/run.sh'), '#!/usr/bin/env bash\necho run\n', 'utf8');
+      await writeFile(join(root, 'logs/results.log'), 'ok\n', 'utf8');
+      await writeFile(join(root, '.env.local'), 'API_BASE=http://127.0.0.1\n', 'utf8');
+      await writeFile(join(root, '.gitignore'), 'node_modules\n', 'utf8');
+      await writeFile(join(root, 'Dockerfile'), 'FROM node:24\n', 'utf8');
+      await writeFile(join(root, 'Makefile'), 'all:\n\tpnpm check\n', 'utf8');
+      await writeFile(join(root, 'bin/run'), '#!/usr/bin/env bash\necho extensionless\n', 'utf8');
+      await writeFile(join(root, 'LICENSE'), 'Apache-2.0\n', 'utf8');
+
+      await expect(readProjectTextFile(root, 'batch/requests.jsonl')).resolves.toMatchObject({
+        language: 'jsonl',
+        mimeType: 'application/jsonl'
+      });
+      await expect(readProjectTextFile(root, 'scripts/run.sh')).resolves.toMatchObject({
+        language: 'shell',
+        mimeType: 'text/x-shellscript'
+      });
+      await expect(readProjectTextFile(root, 'logs/results.log')).resolves.toMatchObject({
+        language: 'log',
+        mimeType: 'text/plain'
+      });
+      await expect(readProjectTextFile(root, '.env.local')).resolves.toMatchObject({
+        language: 'dotenv',
+        mimeType: 'text/plain'
+      });
+      await expect(readProjectTextFile(root, '.gitignore')).resolves.toMatchObject({
+        language: 'plaintext',
+        mimeType: 'text/plain'
+      });
+      await expect(readProjectTextFile(root, 'Dockerfile')).resolves.toMatchObject({
+        language: 'dockerfile',
+        mimeType: 'text/plain'
+      });
+      await expect(readProjectTextFile(root, 'Makefile')).resolves.toMatchObject({
+        language: 'makefile',
+        mimeType: 'text/plain'
+      });
+      await expect(readProjectTextFile(root, 'bin/run')).resolves.toMatchObject({
+        language: 'shell',
+        mimeType: 'text/x-shellscript'
+      });
+      await expect(readProjectTextFile(root, 'LICENSE')).resolves.toMatchObject({
+        language: 'plaintext',
+        mimeType: 'text/plain'
+      });
+    } finally {
+      await rm(root, { recursive: true, force: true });
+    }
+  });
+
+  it('keeps text-read safety checks strict while adding text formats', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'debrute-project-text-format-safety-'));
+    try {
+      await writeFile(join(root, 'binary.log'), Buffer.from([0x00, 0x01, 0x02]));
+      await writeFile(join(root, 'invalid.jsonl'), Buffer.from([0x7b, 0x80, 0x7d]));
+      await writeFile(join(root, 'oversized.sh'), '#!/usr/bin/env bash\necho too-large\n', 'utf8');
+
+      await expect(readProjectTextFile(root, 'binary.log'))
+        .rejects.toThrow('Project file appears to be binary, not text: binary.log');
+      await expect(readProjectTextFile(root, 'invalid.jsonl'))
+        .rejects.toThrow('Project file is not valid UTF-8 text: invalid.jsonl');
+      await expect(readProjectTextFile(root, 'oversized.sh', { maxBytes: 8 }))
+        .rejects.toThrow('Project file is too large to open as text');
+    } finally {
+      await rm(root, { recursive: true, force: true });
+    }
   });
 
   it('keeps Canvas image preview cache files out of project-visible files', async () => {

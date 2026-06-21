@@ -11,6 +11,10 @@ import {
   resolveProjectPathForWrite,
   resolveProjectPath
 } from './projectPaths.js';
+import {
+  projectTextLanguageFromPath,
+  projectTextMimeTypeFromPath
+} from './projectTextFileTypes.js';
 
 export const DEBRUTE_PROJECT_SCHEMA_VERSION = 1;
 
@@ -51,7 +55,8 @@ export interface ProjectTextFile {
   size: number;
   mtimeMs: number;
   revision: string;
-  language: 'yaml' | 'json' | 'markdown' | 'text';
+  language: string;
+  mimeType: string;
 }
 
 export interface ProjectFileWatchHandle {
@@ -182,6 +187,7 @@ export async function readProjectTextFile(projectRoot: string, projectRelativePa
   if (content.includes('\uFFFD')) {
     throw new Error(`Project file is not valid UTF-8 text: ${projectRelativePath}`);
   }
+  const firstLine = firstLineOf(content);
   return {
     projectRelativePath: normalizeProjectRelativePath(projectRelativePath),
     absolutePath,
@@ -189,7 +195,8 @@ export async function readProjectTextFile(projectRoot: string, projectRelativePa
     size: fileStat.size,
     mtimeMs: fileStat.mtimeMs,
     revision: projectFileRevision(fileStat.size, fileStat.mtimeMs),
-    language: detectTextLanguage(projectRelativePath)
+    language: projectTextLanguageFromPath(projectRelativePath, firstLine),
+    mimeType: projectTextMimeTypeFromPath(projectRelativePath, firstLine)
   };
 }
 
@@ -260,6 +267,16 @@ export {
   type AdobeBridgeProjectFileResult,
   type ImportAdobeBridgePngTransferInput
 } from './adobeBridgeFileTransfer.js';
+
+export {
+  isKnownProjectTextFilePath,
+  monacoLanguageFromProjectTextLanguage,
+  projectTextFileTypeForPath,
+  projectTextLanguageFromPath,
+  projectTextMimeTypeFromPath,
+  type ProjectTextFileType,
+  type ProjectTextLanguageId
+} from './projectTextFileTypes.js';
 
 export {
   assertProjectTreeVisibleMutationPath,
@@ -373,17 +390,8 @@ function basenameFromPath(path: string): string {
   return normalized.slice(normalized.lastIndexOf('/') + 1) || 'Untitled Project';
 }
 
-function detectTextLanguage(projectRelativePath: string): ProjectTextFile['language'] {
-  if (/\.(yaml|yml)$/i.test(projectRelativePath)) {
-    return 'yaml';
-  }
-  if (/\.json$/i.test(projectRelativePath)) {
-    return 'json';
-  }
-  if (/\.(md|markdown)$/i.test(projectRelativePath)) {
-    return 'markdown';
-  }
-  return 'text';
+function firstLineOf(content: string): string {
+  return content.split(/\r?\n/, 1)[0] ?? '';
 }
 
 function isProbablyBinary(bytes: Uint8Array): boolean {

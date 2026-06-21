@@ -39,6 +39,7 @@ describe('app protocol project revisions', () => {
         projectRelativePath: 'brief.md',
         content: '# Brief',
         language: 'markdown',
+        mimeType: 'text/markdown',
         revision: 'file-rev',
         size: 7,
         mtimeMs: 1

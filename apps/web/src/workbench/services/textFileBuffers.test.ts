@@ -22,7 +22,8 @@ describe('text file buffer merge behavior', () => {
       size: 3,
       mtimeMs: 20,
       revision: 'rev-2',
-      language: 'markdown'
+      language: 'markdown',
+      mimeType: 'text/markdown'
     }, current)).toMatchObject({
       content: 'new',
       dirty: false,
@@ -52,7 +53,8 @@ describe('text file buffer merge behavior', () => {
       size: 13,
       mtimeMs: 30,
       revision: 'rev-2',
-      language: 'markdown'
+      language: 'markdown',
+      mimeType: 'text/markdown'
     }, current)).toMatchObject({
       content: 'local edit',
       dirty: true,
@@ -81,7 +83,8 @@ describe('text file buffer merge behavior', () => {
       size: 12,
       mtimeMs: 20,
       revision: 'rev-1',
-      language: 'markdown'
+      language: 'markdown',
+      mimeType: 'text/markdown'
     }, current)).toMatchObject({
       content: 'local edit',
       dirty: true,

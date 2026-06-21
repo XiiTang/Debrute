@@ -29,7 +29,7 @@ import {
   serializeCanvasMapWithRule,
   type ExpandedCanvasMap
 } from '@debrute/canvas-map-core';
-import { canvasMediaKindFromPath } from '../canvas/CanvasProjectionService.js';
+import { canvasMediaKindForProjectFile } from '../canvas/CanvasProjectionService.js';
 import { projectDocumentDiagnostic } from '../project-documents/ProjectDocumentDiagnostics.js';
 
 export interface CanvasMapSessionServiceOptions {
@@ -332,11 +332,13 @@ export class CanvasMapSessionService {
     projectRoot: string,
     expanded: ExpandedCanvasMap
   ): Promise<{ desired: CanvasDesiredNode[]; layoutRows: CanvasDesiredLayoutRow[]; layoutSizes: Map<string, CanvasLayoutSize> }> {
-    const candidates = expanded.nodes.map((node): CanvasDesiredNode => ({
+    const candidates = await Promise.all(expanded.nodes.map(async (node): Promise<CanvasDesiredNode> => ({
       projectRelativePath: node.projectRelativePath,
       nodeKind: node.nodeKind,
-      ...(node.nodeKind === 'file' ? { mediaKind: canvasMediaKindFromPath(node.projectRelativePath) } : {})
-    }));
+      ...(node.nodeKind === 'file' ? {
+        mediaKind: await canvasMediaKindForProjectFile(projectRoot, node.projectRelativePath)
+      } : {})
+    })));
     const layoutSizes = new Map<string, CanvasLayoutSize>();
     for (const node of candidates) {
       try {

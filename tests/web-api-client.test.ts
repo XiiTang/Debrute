@@ -721,13 +721,13 @@ function routeResponse(url: string, init?: RequestInit): unknown {
     };
   }
   if (path.endsWith('/files/text/briefs/outline.md') && (init?.method ?? 'GET') === 'GET') {
-    return { projectRelativePath: 'briefs/outline.md', content: '# Outline', language: 'markdown', revision: 'rev' };
+    return { projectRelativePath: 'briefs/outline.md', content: '# Outline', language: 'markdown', mimeType: 'text/markdown', revision: 'rev' };
   }
   if (path.endsWith('/files/text/briefs/outline.md') && init?.method === 'PUT') {
     return {
       projectId,
       projectRevision: 2,
-      file: { projectRelativePath: 'briefs/outline.md', content: '# Outline', language: 'markdown', revision: 'rev2' }
+      file: { projectRelativePath: 'briefs/outline.md', content: '# Outline', language: 'markdown', mimeType: 'text/markdown', revision: 'rev2' }
     };
   }
   if (path === `/api/projects/${projectId}/canvases`) {

@@ -69,7 +69,7 @@ export function useTextFileBufferActions(input: {
         [projectRelativePath]: {
           projectRelativePath,
           content,
-          language: current?.language ?? 'text',
+          language: current?.language ?? 'plaintext',
           wordWrap: current?.wordWrap ?? false,
           dirty: true,
           saving: false,
@@ -183,7 +183,7 @@ function textBufferErrorState(projectRelativePath: string, current: TextFileBuff
   return {
     projectRelativePath,
     content: current?.content ?? '',
-    language: current?.language ?? 'text',
+    language: current?.language ?? 'plaintext',
     wordWrap: current?.wordWrap ?? false,
     dirty: current?.dirty ?? false,
     saving: false,
