@@ -143,12 +143,24 @@ function renderAvailableProjects(): string {
 function bindProjectLinkActions(): void {
   root?.querySelectorAll<HTMLButtonElement>('[data-connect-project]').forEach((button) => {
     button.addEventListener('click', () => {
-      void setProjectLink(button.dataset.connectProject ?? '', true);
+      void setProjectLink(button.dataset.connectProject ?? '', true)
+        .then(() => {
+          uploadErrorMessage = undefined;
+        }, (error) => {
+          uploadErrorMessage = error instanceof Error ? error.message : String(error);
+          render('Connected');
+        });
     });
   });
   root?.querySelectorAll<HTMLButtonElement>('[data-disconnect-project]').forEach((button) => {
     button.addEventListener('click', () => {
-      void setProjectLink(button.dataset.disconnectProject ?? '', false);
+      void setProjectLink(button.dataset.disconnectProject ?? '', false)
+        .then(() => {
+          uploadErrorMessage = undefined;
+        }, (error) => {
+          uploadErrorMessage = error instanceof Error ? error.message : String(error);
+          render('Connected');
+        });
     });
   });
 }

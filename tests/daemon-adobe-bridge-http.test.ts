@@ -174,6 +174,35 @@ describe('daemon Adobe Bridge HTTP routes', () => {
     ]));
   });
 
+  it('allows Photoshop CEP preflight headers on tokenless plugin routes', async () => {
+    const home = await mkdtemp(join(tmpdir(), 'debrute-bridge-cep-cors-home-'));
+    const daemon = createDebruteDaemonHttpServer({
+      host: '127.0.0.1',
+      port: 0,
+      token: 'test-token',
+      webBaseUrl: null,
+      adobeBridgeDiscoveryPort: 0,
+      appServerOptions: { globalConfigStore: new GlobalConfigStore({ debruteHome: home }) }
+    });
+    cleanups.push(() => daemon.close(), () => rm(home, { recursive: true, force: true }));
+    const runtime = await daemon.listen();
+
+    for (const origin of ['null', 'file://']) {
+      const response = await fetch(`${runtime.daemonUrl}/api/adobe-bridge/plugin/projects/project-1/link`, {
+        method: 'OPTIONS',
+        headers: {
+          origin,
+          'access-control-request-method': 'POST',
+          'access-control-request-headers': 'x-debrute-adobe-client-id'
+        }
+      });
+
+      expect(response.status).toBe(204);
+      expect(response.headers.get('access-control-allow-origin')).toBe(origin);
+      expect(commaSeparatedHeaderValues(response.headers.get('access-control-allow-headers'))).toContain('x-debrute-adobe-client-id');
+    }
+  });
+
   it('requires an explicit project link for Photoshop uploads', async () => {
     const home = await mkdtemp(join(tmpdir(), 'debrute-bridge-upload-home-'));
     const projectRoot = await mkdtemp(join(tmpdir(), 'debrute-bridge-upload-'));

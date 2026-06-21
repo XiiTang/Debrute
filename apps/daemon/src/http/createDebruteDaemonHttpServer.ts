@@ -101,6 +101,7 @@ const DEFAULT_HOST = '127.0.0.1';
 const DEFAULT_PORT = 0;
 const BODY_LIMIT_BYTES = 2 * 1024 * 1024;
 const PHOTOSHOP_UXP_ORIGIN = 'uxp://com.debrute.photoshop.bridge';
+const PHOTOSHOP_CEP_ORIGINS = new Set(['null', 'file://']);
 const CORS_ALLOWED_HEADERS = [
   'content-type',
   'x-debrute-daemon-token',
@@ -1598,7 +1599,10 @@ function applyCorsHeaders(
   }
   const allowedOrigin = origin === runtime.daemonUrl
     || origin === runtime.webBaseUrl
-    || (origin === PHOTOSHOP_UXP_ORIGIN && isPhotoshopUxpBridgeRoute(path));
+    || (isPhotoshopPluginBridgeRoute(path) && (
+      origin === PHOTOSHOP_UXP_ORIGIN
+      || PHOTOSHOP_CEP_ORIGINS.has(origin)
+    ));
   if (!allowedOrigin) {
     return false;
   }
@@ -1610,7 +1614,7 @@ function applyCorsHeaders(
   return true;
 }
 
-function isPhotoshopUxpBridgeRoute(path: string): boolean {
+function isPhotoshopPluginBridgeRoute(path: string): boolean {
   return path.startsWith('/api/adobe-bridge/plugin/')
     || path.startsWith('/api/adobe-bridge/transfers/');
 }

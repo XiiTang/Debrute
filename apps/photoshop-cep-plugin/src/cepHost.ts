@@ -32,7 +32,7 @@ export function createBrowserCepHost(): CepHost {
   if (!window.cep) {
     throw new Error('CEP file runtime is unavailable.');
   }
-  return createCepHost({ cep: window.__adobe_cep__, fs: window.cep });
+  return createCepHost({ cep: withDebruteBridgeScript(window.__adobe_cep__, window.location.href), fs: window.cep });
 }
 
 export function createCepHost(input: {
@@ -99,4 +99,42 @@ function requiredFileApi(fs: CepFileApi | undefined): CepFileApi {
     throw new Error('CEP file runtime is unavailable.');
   }
   return fs;
+}
+
+export function bridgeScriptPathFromLocation(locationHref: string): string {
+  const url = new URL('jsx/debruteBridge.jsx', locationHref);
+  return decodeURIComponent(url.pathname).replace(/^\/([A-Za-z]:\/)/, '$1');
+}
+
+function withDebruteBridgeScript(cep: CepEvalApi, locationHref: string): CepEvalApi {
+  let bridgeScriptLoad: Promise<void> | undefined;
+  return {
+    evalScript(script, callback) {
+      bridgeScriptLoad ??= loadDebruteBridgeScript(cep, bridgeScriptPathFromLocation(locationHref));
+      bridgeScriptLoad.then(
+        () => cep.evalScript(script, callback),
+        (error) => callback(JSON.stringify({ ok: false, message: errorMessage(error) }))
+      );
+    }
+  };
+}
+
+async function loadDebruteBridgeScript(cep: CepEvalApi, scriptPath: string): Promise<void> {
+  await evalRawScript(cep, `$.evalFile(new File(${JSON.stringify(scriptPath)})); 'ok';`);
+}
+
+function evalRawScript(cep: CepEvalApi, script: string): Promise<void> {
+  return new Promise((resolve, reject) => {
+    cep.evalScript(script, (raw) => {
+      if (raw === 'EvalScript error.') {
+        reject(new Error('Photoshop rejected the Debrute bridge script.'));
+        return;
+      }
+      resolve();
+    });
+  });
+}
+
+function errorMessage(error: unknown): string {
+  return error instanceof Error ? error.message : String(error);
 }

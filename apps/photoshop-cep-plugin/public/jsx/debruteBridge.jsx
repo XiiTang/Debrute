@@ -1,10 +1,10 @@
 var debruteBridge = (function () {
   function ok(value) {
-    return JSON.stringify({ ok: true, value: value });
+    return stringify({ ok: true, value: value });
   }
 
   function fail(error) {
-    return JSON.stringify({
+    return stringify({
       ok: false,
       message: error && error.message ? error.message : String(error)
     });
@@ -130,10 +130,78 @@ var debruteBridge = (function () {
   }
 
   function safeFileName(value) {
-    return String(value || 'debrute-asset')
-      .replace(/[\\/:*?"<>|]+/g, '-')
-      .replace(/^\.+/, '')
-      .substring(0, 80) || 'debrute-asset';
+    var source = String(value || 'debrute-asset');
+    var output = '';
+    var blocked = '\\/:*?"<>|';
+    for (var index = 0; index < source.length && output.length < 80; index += 1) {
+      var character = source.charAt(index);
+      output += blocked.indexOf(character) >= 0 ? '-' : character;
+    }
+    while (output.charAt(0) === '.') {
+      output = output.substring(1);
+    }
+    return output || 'debrute-asset';
+  }
+
+  function stringify(value) {
+    if (value === null) {
+      return 'null';
+    }
+    var type = typeof value;
+    if (type === 'string') {
+      return '"' + escapeString(value) + '"';
+    }
+    if (type === 'number') {
+      return isFinite(value) ? String(value) : 'null';
+    }
+    if (type === 'boolean') {
+      return value ? 'true' : 'false';
+    }
+    if (value instanceof Array) {
+      var items = [];
+      for (var index = 0; index < value.length; index += 1) {
+        items.push(stringify(value[index]));
+      }
+      return '[' + items.join(',') + ']';
+    }
+    if (type === 'object') {
+      var fields = [];
+      for (var key in value) {
+        if (value.hasOwnProperty(key) && typeof value[key] !== 'undefined' && typeof value[key] !== 'function') {
+          fields.push(stringify(key) + ':' + stringify(value[key]));
+        }
+      }
+      return '{' + fields.join(',') + '}';
+    }
+    return 'null';
+  }
+
+  function escapeString(value) {
+    var output = '';
+    for (var index = 0; index < value.length; index += 1) {
+      var character = value.charAt(index);
+      var code = value.charCodeAt(index);
+      if (character === '\\') {
+        output += '\\\\';
+      } else if (character === '"') {
+        output += '\\"';
+      } else if (character === '\b') {
+        output += '\\b';
+      } else if (character === '\f') {
+        output += '\\f';
+      } else if (character === '\n') {
+        output += '\\n';
+      } else if (character === '\r') {
+        output += '\\r';
+      } else if (character === '\t') {
+        output += '\\t';
+      } else if (code < 32) {
+        output += '\\u' + ('0000' + code.toString(16)).slice(-4);
+      } else {
+        output += character;
+      }
+    }
+    return output;
   }
 
   return {

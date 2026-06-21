@@ -1,6 +1,7 @@
 import { describe, expect, it, vi } from 'vitest';
 import {
   base64ToUint8Array,
+  bridgeScriptPathFromLocation,
   createCepHost,
   uint8ArrayToBase64
 } from './cepHost';
@@ -35,5 +36,11 @@ describe('CEP host bridge', () => {
   it('round-trips byte arrays through base64', () => {
     const bytes = new Uint8Array([0, 1, 2, 253, 254, 255]);
     expect(base64ToUint8Array(uint8ArrayToBase64(bytes))).toEqual(bytes);
+  });
+
+  it('resolves the bundled JSX bridge path from a CEP file URL', () => {
+    expect(bridgeScriptPathFromLocation(
+      'file:///D:/ps/Adobe%20Photoshop%202026/Required/CEP/extensions/com.debrute.photoshop.bridge.cep/index.html'
+    )).toBe('D:/ps/Adobe Photoshop 2026/Required/CEP/extensions/com.debrute.photoshop.bridge.cep/jsx/debruteBridge.jsx');
   });
 });
