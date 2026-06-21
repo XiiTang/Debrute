@@ -1390,10 +1390,6 @@ describe('app-server', () => {
     const projectRoot = await mkdtemp(join(tmpdir(), 'debrute-app-server-text-format-registry-'));
     const server = new DebruteAppServer();
     try {
-      await server.openProject(projectRoot, {
-        initializeIfMissing: true,
-        createDefaultCanvas: true
-      });
       await mkdir(join(projectRoot, 'batch'), { recursive: true });
       await mkdir(join(projectRoot, 'scripts'), { recursive: true });
       await mkdir(join(projectRoot, 'logs'), { recursive: true });
@@ -1410,9 +1406,14 @@ describe('app-server', () => {
       await writeFile(join(projectRoot, 'Dockerfile'), 'FROM node:24\n', 'utf8');
       await writeFile(join(projectRoot, 'Makefile'), 'all:\n\tpnpm check\n', 'utf8');
       await writeFile(join(projectRoot, 'LICENSE'), 'Apache-2.0\n', 'utf8');
+      await writeFile(join(projectRoot, 'tsconfig.json'), '{"compilerOptions":{}}\n', 'utf8');
       await writeFile(join(projectRoot, 'src/module.mts'), 'export const value = 1;\n', 'utf8');
       await writeFile(join(projectRoot, 'assets/icon.svg'), '<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" />\n', 'utf8');
       await writeFile(join(projectRoot, 'assets/cover.png'), await largePreviewablePngBuffer());
+      await server.openProject(projectRoot, {
+        initializeIfMissing: true,
+        createDefaultCanvas: true
+      });
       await writeCanvasMap(projectRoot, 'canvas-1', canvasMapSource([
         'batch/requests.jsonl',
         'scripts/run.sh',
@@ -1423,6 +1424,7 @@ describe('app-server', () => {
         'Dockerfile',
         'Makefile',
         'LICENSE',
+        'tsconfig.json',
         'src/module.mts',
         'assets/icon.svg',
         'assets/cover.png'
@@ -1467,6 +1469,10 @@ describe('app-server', () => {
       expect(byPath.get('LICENSE')).toMatchObject({
         mediaKind: 'text',
         availability: { state: 'available', mimeType: 'text/plain' }
+      });
+      expect(byPath.get('tsconfig.json')).toMatchObject({
+        mediaKind: 'text',
+        availability: { state: 'available', mimeType: 'application/jsonc' }
       });
       expect(byPath.get('src/module.mts')).toMatchObject({
         mediaKind: 'text',

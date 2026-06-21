@@ -234,24 +234,6 @@ function mimeTypeFromProjectPath(projectRelativePath: string, firstLine?: string
   if (lowerPath.endsWith('.weba')) {
     return 'audio/webm';
   }
-  if (lowerPath.endsWith('.md') || lowerPath.endsWith('.markdown')) {
-    return 'text/markdown';
-  }
-  if (lowerPath.endsWith('.json')) {
-    return 'application/json';
-  }
-  if (lowerPath.endsWith('.yaml') || lowerPath.endsWith('.yml')) {
-    return 'application/yaml';
-  }
-  if (lowerPath.endsWith('.html') || lowerPath.endsWith('.htm')) {
-    return 'text/html';
-  }
-  if (lowerPath.endsWith('.css')) {
-    return 'text/css';
-  }
-  if (lowerPath.endsWith('.csv')) {
-    return 'text/csv';
-  }
   return projectTextMimeTypeFromPath(projectRelativePath, firstLine);
 }
 
