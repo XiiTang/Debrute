@@ -23,9 +23,10 @@ export class VideoModelService {
     }
     const config = await this.input.configStore.readVideoModels();
     const videoModels = config.videoModels.filter((model) => model.debruteModelId !== modelId);
-    if (saveInput.requestModelIdOverride !== null) {
+    if (saveInput.baseUrlOverride !== null || saveInput.requestModelIdOverride !== null) {
       videoModels.push({
         debruteModelId: modelId,
+        baseUrlOverride: saveInput.baseUrlOverride,
         requestModelIdOverride: saveInput.requestModelIdOverride
       });
     }
@@ -50,18 +51,38 @@ export class VideoModelService {
   }
 }
 
-function normalizeVideoModelSaveInput(input: SaveVideoModelSettingInput): { requestModelIdOverride: string | null; apiKey?: string } {
+function normalizeVideoModelSaveInput(input: SaveVideoModelSettingInput): {
+  baseUrlOverride: string | null;
+  requestModelIdOverride: string | null;
+  apiKey?: string;
+} {
   if (!isRecord(input)) {
-    throw videoModelInputError('Video model setting must be an object.');
+    throw videoModelInputError('Video model setting must be an object.', 'mediaModelSetting');
   }
+  const baseUrlOverride = normalizeVideoModelBaseUrlOverride(input.baseUrlOverride);
   const requestModelIdOverride = normalizeVideoModelRequestModelIdOverride(input.requestModelIdOverride);
   if (input.apiKey !== undefined && typeof input.apiKey !== 'string') {
-    throw videoModelInputError('Video model apiKey must be a string when provided.');
+    throw videoModelInputError('Video model apiKey must be a string when provided.', 'apiKey');
   }
   return {
+    baseUrlOverride,
     requestModelIdOverride,
     ...(input.apiKey !== undefined ? { apiKey: input.apiKey } : {})
   };
+}
+
+function normalizeVideoModelBaseUrlOverride(value: unknown): string | null {
+  if (value === null) {
+    return null;
+  }
+  if (typeof value !== 'string') {
+    throw videoModelInputError('Video model baseUrlOverride must be a string or null.', 'baseUrlOverride');
+  }
+  const trimmed = value.trim();
+  if (!trimmed) {
+    throw videoModelInputError('Video model baseUrlOverride must be null or a non-empty string.', 'baseUrlOverride');
+  }
+  return trimmed;
 }
 
 function normalizeVideoModelRequestModelIdOverride(value: unknown): string | null {
@@ -69,17 +90,17 @@ function normalizeVideoModelRequestModelIdOverride(value: unknown): string | nul
     return null;
   }
   if (typeof value !== 'string') {
-    throw videoModelInputError('Video model requestModelIdOverride must be a string or null.');
+    throw videoModelInputError('Video model requestModelIdOverride must be a string or null.', 'requestModelIdOverride');
   }
   const trimmed = value.trim();
   if (!trimmed) {
-    throw videoModelInputError('Video model requestModelIdOverride must be null or a non-empty string.');
+    throw videoModelInputError('Video model requestModelIdOverride must be null or a non-empty string.', 'requestModelIdOverride');
   }
   return trimmed;
 }
 
-function videoModelInputError(message: string): Error {
-  return serviceError('invalid_input', message, { field: 'requestModelIdOverride' });
+function videoModelInputError(message: string, field: string): Error {
+  return serviceError('invalid_input', message, { field });
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {

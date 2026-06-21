@@ -811,6 +811,7 @@ describe('app-server', () => {
     try {
       await server.openProject(projectRoot, { initializeIfMissing: true, createDefaultCanvas: true });
       await globalRuntime.imageModelSaveSetting('gpt-image-2', {
+        baseUrlOverride: null,
         requestModelIdOverride: null,
         apiKey: 'sk-image'
       });
@@ -937,17 +938,21 @@ describe('app-server', () => {
         modelIds: ['gpt-5.1']
       }, 'openai-main');
       await globalRuntime.imageModelSaveSetting('gpt-image-2', {
+        baseUrlOverride: null,
         requestModelIdOverride: 'gpt-image-2',
         apiKey: 'sk-image-initial'
       });
       await globalRuntime.imageModelSaveSetting('gpt-image-2', {
+        baseUrlOverride: null,
         requestModelIdOverride: null
       });
       await globalRuntime.videoModelSaveSetting('doubao-seedance-2-0-260128', {
+        baseUrlOverride: null,
         requestModelIdOverride: null,
         apiKey: 'sk-video-initial'
       });
       await globalRuntime.videoModelSaveSetting('doubao-seedance-2-0-260128', {
+        baseUrlOverride: null,
         requestModelIdOverride: 'doubao-seedance-2-0-260128'
       });
 
@@ -966,10 +971,12 @@ describe('app-server', () => {
         apiKey: 'sk-llm-replaced'
       }, 'openai-main');
       await globalRuntime.imageModelSaveSetting('gpt-image-2', {
+        baseUrlOverride: null,
         requestModelIdOverride: null,
         apiKey: 'sk-image-replaced'
       });
       await globalRuntime.videoModelSaveSetting('doubao-seedance-2-0-260128', {
+        baseUrlOverride: null,
         requestModelIdOverride: null,
         apiKey: 'sk-video-replaced'
       });
@@ -989,10 +996,12 @@ describe('app-server', () => {
         apiKey: ''
       }, 'openai-main');
       const imageView = await globalRuntime.imageModelSaveSetting('gpt-image-2', {
+        baseUrlOverride: null,
         requestModelIdOverride: null,
         apiKey: ''
       });
       const videoView = await globalRuntime.videoModelSaveSetting('doubao-seedance-2-0-260128', {
+        baseUrlOverride: null,
         requestModelIdOverride: null,
         apiKey: ''
       });
@@ -1152,10 +1161,12 @@ describe('app-server', () => {
     });
     try {
       const imageSettings = await globalRuntime.imageModelSaveSetting('gpt-image-2', {
+        baseUrlOverride: 'https://images.example.test/v1',
         requestModelIdOverride: 'custom-image-model',
         apiKey: 'sk-image'
       });
       const videoSettings = await globalRuntime.videoModelSaveSetting('doubao-seedance-2-0-260128', {
+        baseUrlOverride: 'https://videos.example.test/v1',
         requestModelIdOverride: 'custom-video-model',
         apiKey: 'sk-video'
       });
@@ -1170,6 +1181,7 @@ describe('app-server', () => {
         supportsTextRendering: expect.any(Boolean),
         defaultBaseUrl: 'https://api.openai.com/v1',
         defaultRequestModelId: 'gpt-image-2',
+        baseUrlOverride: 'https://images.example.test/v1',
         requestModelIdOverride: 'custom-image-model',
         apiKeySet: true,
         apiKeyPreview: 'sk****************************ge'
@@ -1184,6 +1196,7 @@ describe('app-server', () => {
         supportsGeneratedAudio: expect.any(Boolean),
         defaultBaseUrl: 'https://ark.cn-beijing.volces.com/api/v3',
         defaultRequestModelId: 'doubao-seedance-2-0-260128',
+        baseUrlOverride: 'https://videos.example.test/v1',
         requestModelIdOverride: 'custom-video-model',
         apiKeySet: true,
         apiKeyPreview: 'sk****************************eo'
@@ -1206,6 +1219,7 @@ describe('app-server', () => {
         code: 'invalid_input'
       });
       await expect(globalRuntime.videoModelSaveSetting('doubao-seedance-2-0-260128', {
+        baseUrlOverride: null,
         requestModelIdOverride: '   '
       })).rejects.toMatchObject({
         code: 'invalid_input'
@@ -1222,6 +1236,7 @@ describe('app-server', () => {
     const globalRuntime = new DebruteGlobalRuntimeServer({ globalConfigStore: configStore });
     try {
       const settings = await globalRuntime.imageModelSaveSetting('gpt-image-2', {
+        baseUrlOverride: null,
         requestModelIdOverride: null,
         apiKey: 'sk-image'
       });
@@ -1234,11 +1249,45 @@ describe('app-server', () => {
         supportsTextRendering: expect.any(Boolean),
         defaultBaseUrl: 'https://api.openai.com/v1',
         defaultRequestModelId: 'gpt-image-2',
+        baseUrlOverride: null,
         requestModelIdOverride: null,
         apiKeySet: true,
         apiKeyPreview: 'sk****************************ge'
       });
       expect(imageModel as Record<string, unknown>).not.toHaveProperty('apiKey');
+      await expect(configStore.readImageModels()).resolves.toEqual({ imageModels: [] });
+      await expect(configStore.readSecrets()).resolves.toMatchObject({
+        imageModelApiKeys: { 'gpt-image-2': 'sk-image' }
+      });
+    } finally {
+      globalRuntime.close();
+      await rm(home, { recursive: true, force: true });
+    }
+  });
+
+  it('clears media model URL overrides without clearing configured API keys', async () => {
+    const home = await mkdtemp(join(tmpdir(), 'debrute-media-model-clear-url-home-'));
+    const configStore = new GlobalConfigStore({ debruteHome: home });
+    const globalRuntime = new DebruteGlobalRuntimeServer({ globalConfigStore: configStore });
+    try {
+      await globalRuntime.imageModelSaveSetting('gpt-image-2', {
+        baseUrlOverride: 'https://images.example.test/v1',
+        requestModelIdOverride: null,
+        apiKey: 'sk-image'
+      });
+
+      const settings = await globalRuntime.imageModelSaveSetting('gpt-image-2', {
+        baseUrlOverride: null,
+        requestModelIdOverride: null
+      });
+
+      const imageModel = settings.models.find((model) => model.debruteModelId === 'gpt-image-2');
+      expect(imageModel).toMatchObject({
+        baseUrlOverride: null,
+        requestModelIdOverride: null,
+        apiKeySet: true,
+        apiKeyPreview: 'sk****************************ge'
+      });
       await expect(configStore.readImageModels()).resolves.toEqual({ imageModels: [] });
       await expect(configStore.readSecrets()).resolves.toMatchObject({
         imageModelApiKeys: { 'gpt-image-2': 'sk-image' }
@@ -1256,10 +1305,10 @@ describe('app-server', () => {
     try {
       await mkdir(paths.root, { recursive: true });
       await writeFile(paths.imageModelsFile, JSON.stringify({
-        imageModels: [{ debruteModelId: 'gpt-image-2' }]
+        imageModels: [{ debruteModelId: 'gpt-image-2', requestModelIdOverride: null }]
       }), 'utf8');
 
-      await expect(configStore.readImageModels()).rejects.toThrow('Image model requestModelIdOverride must be a string or null.');
+      await expect(configStore.readImageModels()).rejects.toThrow('Image model baseUrlOverride must be a string or null.');
     } finally {
       await rm(home, { recursive: true, force: true });
     }

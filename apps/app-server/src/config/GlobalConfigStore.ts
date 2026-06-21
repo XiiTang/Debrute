@@ -180,6 +180,7 @@ function normalizeImageModelConfig(model: unknown): ImageModelConfig {
   }
   return {
     debruteModelId,
+    baseUrlOverride: normalizeMediaBaseUrlOverride(model.baseUrlOverride, 'Image model'),
     requestModelIdOverride: normalizeMediaRequestModelIdOverride(model.requestModelIdOverride, 'Image model')
   };
 }
@@ -194,8 +195,23 @@ function normalizeVideoModelConfig(model: unknown): VideoModelConfig {
   }
   return {
     debruteModelId,
+    baseUrlOverride: normalizeMediaBaseUrlOverride(model.baseUrlOverride, 'Video model'),
     requestModelIdOverride: normalizeMediaRequestModelIdOverride(model.requestModelIdOverride, 'Video model')
   };
+}
+
+function normalizeMediaBaseUrlOverride(value: unknown, label: 'Image model' | 'Video model'): string | null {
+  if (value === null) {
+    return null;
+  }
+  if (typeof value !== 'string') {
+    throw new Error(`${label} baseUrlOverride must be a string or null.`);
+  }
+  const trimmed = value.trim();
+  if (!trimmed) {
+    throw new Error(`${label} baseUrlOverride must be null or a non-empty string.`);
+  }
+  return trimmed;
 }
 
 function normalizeMediaRequestModelIdOverride(value: unknown, label: 'Image model' | 'Video model'): string | null {
