@@ -37,6 +37,7 @@ export interface LlmProviderDraft {
 }
 
 export interface ModelDraft {
+  baseUrlOverride: string;
   requestModelIdOverride: string;
   apiKeyInput: string;
 }
@@ -236,7 +237,7 @@ export function LlmSettings({ state, actions }: { state: WorkbenchState; actions
   );
 }
 
-function ImageModelSettings({ state, actions }: { state: WorkbenchState; actions: WorkbenchActions }): React.ReactElement {
+export function ImageModelSettings({ state, actions }: { state: WorkbenchState; actions: WorkbenchActions }): React.ReactElement {
   const models = state.imageModelSettings?.models ?? [];
 
   return (
@@ -255,7 +256,7 @@ function ImageModelSettings({ state, actions }: { state: WorkbenchState; actions
   );
 }
 
-function VideoModelSettings({ state, actions }: { state: WorkbenchState; actions: WorkbenchActions }): React.ReactElement {
+export function VideoModelSettings({ state, actions }: { state: WorkbenchState; actions: WorkbenchActions }): React.ReactElement {
   const models = state.videoModelSettings?.models ?? [];
 
   return (
@@ -337,16 +338,26 @@ function MediaModelCard({
       </div>
       <div className="settings-model-card-fields">
         <div className="settings-row">
-          <ApiKeyInput
+          <MediaApiKeyInput
             ariaLabel="API Key"
             value={draft.apiKeyInput}
             onChange={(apiKeyInput) => setDraft({ ...draft, apiKeyInput })}
             onBlur={() => void saveDraft(draft)}
             placeholder="API Key"
-            resetKey={model.debruteModelId}
           />
         </div>
         <div className="settings-model-edit-grid">
+          <div className="settings-row">
+            <Field label="Base URL override">
+            <Input
+              aria-label="Base URL override"
+              value={draft.baseUrlOverride}
+              onChange={(event) => setDraft({ ...draft, baseUrlOverride: event.currentTarget.value })}
+              onBlur={() => void saveDraft(draft)}
+              placeholder={model.defaultBaseUrl}
+            />
+            </Field>
+          </div>
           <div className="settings-row">
             <Field label="Request model ID override">
             <Input
@@ -393,6 +404,25 @@ function LlmProviderCard({
         <Button type="button" variant="danger" iconStart={<Trash2 size={14} />} onClick={onDelete}>Delete</Button>
       </Toolbar>
     </Card>
+  );
+}
+
+function MediaApiKeyInput({
+  value,
+  onChange,
+  ariaLabel,
+  onBlur,
+  placeholder
+}: Pick<ApiKeyInputProps, 'value' | 'onChange' | 'ariaLabel' | 'onBlur' | 'placeholder'>): React.ReactElement {
+  return (
+    <Input
+      aria-label={ariaLabel}
+      value={value}
+      onChange={(event) => onChange(event.currentTarget.value)}
+      onBlur={onBlur}
+      placeholder={placeholder}
+      spellCheck={false}
+    />
   );
 }
 
@@ -446,6 +476,7 @@ function ApiKeyInput({
 
 export function modelToDraft(model: ImageModelSettingRecord | VideoModelSettingRecord): ModelDraft {
   return {
+    baseUrlOverride: model.baseUrlOverride ?? '',
     requestModelIdOverride: model.requestModelIdOverride ?? '',
     apiKeyInput: ''
   };
@@ -454,6 +485,7 @@ export function modelToDraft(model: ImageModelSettingRecord | VideoModelSettingR
 export function modelDraftToSaveInput(draft: ModelDraft) {
   const apiKey = draft.apiKeyInput.trim();
   return {
+    baseUrlOverride: draft.baseUrlOverride.trim() || null,
     requestModelIdOverride: draft.requestModelIdOverride.trim() || null,
     ...(apiKey ? { apiKey } : {})
   };
@@ -461,13 +493,15 @@ export function modelDraftToSaveInput(draft: ModelDraft) {
 
 export function modelDraftToClearApiKeyInput(draft: ModelDraft) {
   return {
+    baseUrlOverride: draft.baseUrlOverride.trim() || null,
     requestModelIdOverride: draft.requestModelIdOverride.trim() || null,
     apiKey: ''
   };
 }
 
 function modelDraftMatchesPersisted(draft: ModelDraft, model: ImageModelSettingRecord | VideoModelSettingRecord): boolean {
-  return draft.requestModelIdOverride.trim() === (model.requestModelIdOverride ?? '')
+  return draft.baseUrlOverride.trim() === (model.baseUrlOverride ?? '')
+    && draft.requestModelIdOverride.trim() === (model.requestModelIdOverride ?? '')
     && draft.apiKeyInput.trim() === '';
 }
 

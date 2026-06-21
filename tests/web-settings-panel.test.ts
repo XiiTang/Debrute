@@ -2,6 +2,7 @@ import React from 'react';
 import { renderToStaticMarkup } from 'react-dom/server';
 import { describe, expect, it } from 'vitest';
 import {
+  ImageModelSettings,
   LlmSettings,
   SettingsPanel,
   llmProviderDraftToClearApiKeyInput,
@@ -50,6 +51,7 @@ describe('web Settings pages', () => {
             summary: 'Image generation',
             defaultBaseUrl: 'https://api.openai.com/v1',
             defaultRequestModelId: 'gpt-image-2',
+            baseUrlOverride: null,
             requestModelIdOverride: null,
             apiKeySet: true,
             apiKeyPreview: 'sk****************************ui'
@@ -58,6 +60,7 @@ describe('web Settings pages', () => {
             summary: 'Missing configuration',
             defaultBaseUrl: 'https://api.openai.com/v1',
             defaultRequestModelId: 'missing-image',
+            baseUrlOverride: null,
             requestModelIdOverride: null,
             apiKeySet: false
           }]
@@ -200,6 +203,44 @@ describe('web Settings pages', () => {
     expect(html).not.toContain('aria-label="Hide API key"');
   });
 
+  it('renders media model URL overrides and plain API key inputs', () => {
+    const state = {
+      llmSettings: { providers: [], availableModelKeys: [], defaultModelKey: null },
+      imageModelSettings: {
+        models: [{
+          debruteModelId: 'gpt-image-2',
+          summary: 'Image generation',
+          supportsEditing: true,
+          supportsTextRendering: true,
+          defaultBaseUrl: 'https://api.openai.com/v1',
+          defaultRequestModelId: 'gpt-image-2',
+          baseUrlOverride: 'https://images.example.test/v1',
+          requestModelIdOverride: null,
+          apiKeySet: true,
+          apiKeyPreview: 'sk****************************ui'
+        }]
+      },
+      videoModelSettings: { models: [] }
+    } as unknown as WorkbenchState;
+
+    const html = renderToStaticMarkup(React.createElement(ImageModelSettings, {
+      state,
+      actions: {} as unknown as WorkbenchActions
+    }));
+
+    expect(html).toContain('Base URL override');
+    expect(html).toContain('aria-label="Base URL override"');
+    expect(html).toContain('value="https://images.example.test/v1"');
+    expect(html).toContain('placeholder="https://api.openai.com/v1"');
+    expect(html).toContain('sk****************************ui');
+    expect(html).toContain('Clear API key');
+    expect(html).toContain('aria-label="API Key"');
+    expect(html).not.toContain('settings-key-visibility');
+    expect(html).not.toContain('aria-label="Show API key"');
+    expect(html).not.toContain('db-input--secret');
+    expect(html).not.toContain('value="sk');
+  });
+
   it('omits API keys from ordinary settings saves when the key input is empty', () => {
     expect(llmProviderDraftToSaveInput({
       id: 'openai',
@@ -219,9 +260,11 @@ describe('web Settings pages', () => {
     });
 
     expect(modelDraftToSaveInput({
+      baseUrlOverride: '',
       requestModelIdOverride: '',
       apiKeyInput: ''
     })).toEqual({
+      baseUrlOverride: null,
       requestModelIdOverride: null
     });
   });
@@ -246,9 +289,11 @@ describe('web Settings pages', () => {
     });
 
     expect(modelDraftToClearApiKeyInput({
+      baseUrlOverride: '',
       requestModelIdOverride: '',
       apiKeyInput: ''
     })).toEqual({
+      baseUrlOverride: null,
       requestModelIdOverride: null,
       apiKey: ''
     });
