@@ -21,8 +21,10 @@ describe('Electron development scripts', () => {
       readFileSync(join(process.cwd(), 'apps/desktop/package.json'), 'utf8')
     ) as PackageJson;
 
-    expect(desktopPackage.scripts['build:electron']).toBe('pnpm --workspace-root icons:sync && node scripts/bundle-electron.mjs');
-    expect(desktopPackage.scripts['build:electron:dev']).toBe('pnpm --workspace-root icons:sync && node scripts/bundle-electron.mjs --skip-web-dist');
+    expect(desktopPackage.scripts['build:electron']).toBe('node scripts/bundle-electron.mjs');
+    expect(desktopPackage.scripts['build:electron:dev']).toBe('node scripts/bundle-electron.mjs --skip-web-dist');
+    expect(desktopPackage.scripts['build:electron']).not.toContain('icons:sync');
+    expect(desktopPackage.scripts['build:electron:dev']).not.toContain('icons:sync');
     expect(desktopPackage.scripts['dev:electron']).toBe('tsx ../../scripts/dev-electron-workbench.ts');
     expect(desktopPackage.scripts['dev:electron']).not.toContain('pnpm build:electron &&');
   });

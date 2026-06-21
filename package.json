@@ -11,7 +11,7 @@
     "pnpm": ">=11.2.2 <12"
   },
   "scripts": {
-    "build": "pnpm icons:sync && tsc -b tsconfig.build.json && node scripts/copy-runtime-assets.mjs && pnpm --filter @debrute/desktop build",
+    "build": "tsc -b tsconfig.build.json && node scripts/copy-runtime-assets.mjs && pnpm --filter @debrute/desktop build",
     "clean": "node scripts/clean.mjs",
     "icons:sync": "node scripts/sync-project-icons.mjs",
     "pack": "pnpm --filter @debrute/desktop pack",

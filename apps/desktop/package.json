@@ -8,9 +8,9 @@
   "author": "Debrute",
   "main": "dist-electron/main.js",
   "scripts": {
-    "build": "pnpm --workspace-root icons:sync && pnpm --filter @debrute/web build && tsc -p tsconfig.electron.json --noEmit && node scripts/bundle-electron.mjs",
-    "build:electron": "pnpm --workspace-root icons:sync && node scripts/bundle-electron.mjs",
-    "build:electron:dev": "pnpm --workspace-root icons:sync && node scripts/bundle-electron.mjs --skip-web-dist",
+    "build": "pnpm --filter @debrute/web build && tsc -p tsconfig.electron.json --noEmit && node scripts/bundle-electron.mjs",
+    "build:electron": "node scripts/bundle-electron.mjs",
+    "build:electron:dev": "node scripts/bundle-electron.mjs --skip-web-dist",
     "pack": "pnpm build && electron-builder --dir",
     "dist": "pnpm build && electron-builder",
     "dev:electron": "tsx ../../scripts/dev-electron-workbench.ts"

@@ -159,12 +159,17 @@ describe('project icon assets', () => {
       scripts: Record<string, string>;
     };
     const desktopPackage = JSON.parse(readFileSync(join(root, 'apps/desktop/package.json'), 'utf8')) as {
+      scripts: Record<string, string>;
       build: { icon?: string; directories: { buildResources: string } };
     };
     const webHtml = readFileSync(join(root, 'apps/web/index.html'), 'utf8');
     const electronMain = readFileSync(join(root, 'apps/desktop/src/electron/main.ts'), 'utf8');
 
     expect(rootPackage.scripts['icons:sync']).toBe('node scripts/sync-project-icons.mjs');
+    expect(rootPackage.scripts.build).not.toContain('icons:sync');
+    expect(desktopPackage.scripts.build).not.toContain('icons:sync');
+    expect(desktopPackage.scripts['build:electron']).not.toContain('icons:sync');
+    expect(desktopPackage.scripts['build:electron:dev']).not.toContain('icons:sync');
     expect(webHtml).toContain('<link rel="icon" type="image/svg+xml" href="/debrute.svg" />');
     expect(desktopPackage.build.directories.buildResources).toBe('build');
     expect(desktopPackage.build).not.toHaveProperty('icon');
