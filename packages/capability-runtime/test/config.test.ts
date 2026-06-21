@@ -56,7 +56,11 @@ describe('settings secret view contract', () => {
 
   it('omits plaintext keys from image and video model settings views', () => {
     const image = createImageModelSettingsView({
-      imageModels: [{ debruteModelId: 'gpt-image-2', requestModelIdOverride: null }]
+      imageModels: [{
+        debruteModelId: 'gpt-image-2',
+        baseUrlOverride: 'https://images.example.test/v1',
+        requestModelIdOverride: null
+      }]
     }, {
       llmProviderApiKeys: {},
       imageModelApiKeys: { 'gpt-image-2': 'sk-image-123456fg' },
@@ -71,7 +75,11 @@ describe('settings secret view contract', () => {
     }]);
 
     const video = createVideoModelSettingsView({
-      videoModels: [{ debruteModelId: 'sora-2', requestModelIdOverride: null }]
+      videoModels: [{
+        debruteModelId: 'sora-2',
+        baseUrlOverride: 'https://videos.example.test/v1',
+        requestModelIdOverride: null
+      }]
     }, {
       llmProviderApiKeys: {},
       imageModelApiKeys: {},
@@ -89,10 +97,12 @@ describe('settings secret view contract', () => {
     }]);
 
     expect(image.models[0]).toMatchObject({
+      baseUrlOverride: 'https://images.example.test/v1',
       apiKeySet: true,
       apiKeyPreview: 'sk****************************fg'
     });
     expect(video.models[0]).toMatchObject({
+      baseUrlOverride: 'https://videos.example.test/v1',
       apiKeySet: true,
       apiKeyPreview: 'sk****************************fg'
     });
