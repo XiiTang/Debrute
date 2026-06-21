@@ -135,6 +135,7 @@ describe('video model executor', () => {
         settings: {
           videoModels: [{
             debruteModelId: 'doubao-seedance-2-0-260128',
+            baseUrlOverride: null,
             requestModelIdOverride: null
           }]
         },
@@ -168,6 +169,61 @@ describe('video model executor', () => {
     }
   });
 
+  it('uses configured base URL overrides for video model requests', async () => {
+    const projectRoot = await mkdtemp(join(tmpdir(), 'debrute-video-url-override-'));
+    const calls: string[] = [];
+    const fetch: VideoModelFetch = async (url, init) => {
+      calls.push(url);
+      if (url.endsWith('/contents/generations/tasks') && init?.method === 'POST') {
+        return jsonResponse({ id: 'task-override', status: 'queued' });
+      }
+      if (url.endsWith('/contents/generations/tasks/task-override')) {
+        return jsonResponse({
+          id: 'task-override',
+          status: 'succeeded',
+          content: { video_url: 'https://cdn.example/video.mp4' }
+        });
+      }
+      if (url === 'https://cdn.example/video.mp4') {
+        return new Response(tinyMp4, { status: 200, headers: { 'content-type': 'video/mp4' } });
+      }
+      throw new Error(`unexpected URL: ${url}`);
+    };
+    try {
+      const result = await executeVideoModelRequest({
+        projectRoot,
+        invocationId: 'turn-video-override',
+        input: {
+          model: 'doubao-seedance-2-0-260128',
+          arguments: {
+            prompt: 'camera slowly moves across a desk',
+            resolution: '720p',
+            ratio: '16:9',
+            duration: 5
+          }
+        },
+        settings: {
+          videoModels: [{
+            debruteModelId: 'doubao-seedance-2-0-260128',
+            baseUrlOverride: 'https://videos.example.test/api/v3',
+            requestModelIdOverride: null
+          }]
+        },
+        secrets: { videoModelApiKeys: { 'doubao-seedance-2-0-260128': 'sk-video' } },
+        pollIntervalMs: 0,
+        fetch
+      });
+
+      expect(result.status).toBe('ok');
+      expect(calls.slice(0, 2)).toEqual([
+        'https://videos.example.test/api/v3/contents/generations/tasks',
+        'https://videos.example.test/api/v3/contents/generations/tasks/task-override'
+      ]);
+    } finally {
+      await rm(projectRoot, { recursive: true, force: true });
+    }
+  });
+
   it('rejects loopback provider artifact URLs before download', async () => {
     const projectRoot = await mkdtemp(join(tmpdir(), 'debrute-video-loopback-artifact-'));
     const calls: string[] = [];
@@ -196,6 +252,7 @@ describe('video model executor', () => {
         settings: {
           videoModels: [{
             debruteModelId: 'doubao-seedance-2-0-260128',
+            baseUrlOverride: null,
             requestModelIdOverride: null
           }]
         },
@@ -244,6 +301,7 @@ describe('video model executor', () => {
         settings: {
           videoModels: [{
             debruteModelId: 'doubao-seedance-2-0-260128',
+            baseUrlOverride: null,
             requestModelIdOverride: null
           }]
         },
@@ -289,7 +347,7 @@ describe('video model executor', () => {
           arguments: { prompt: 'camera move' }
         },
         settings: {
-          videoModels: [{ debruteModelId: 'doubao-seedance-2-0-260128', requestModelIdOverride: null }]
+          videoModels: [{ debruteModelId: 'doubao-seedance-2-0-260128', baseUrlOverride: null, requestModelIdOverride: null }]
         },
         secrets: { videoModelApiKeys: { 'doubao-seedance-2-0-260128': 'sk-video' } },
         pollIntervalMs: 0,
@@ -377,7 +435,7 @@ describe('video model executor', () => {
           }
         },
         settings: {
-          videoModels: [{ debruteModelId: 'doubao-seedance-2-0-260128', requestModelIdOverride: null }]
+          videoModels: [{ debruteModelId: 'doubao-seedance-2-0-260128', baseUrlOverride: null, requestModelIdOverride: null }]
         },
         secrets: { videoModelApiKeys: { 'doubao-seedance-2-0-260128': 'sk-video' } },
         pollIntervalMs: 0,
@@ -456,7 +514,7 @@ describe('video model executor', () => {
           }
         },
         settings: {
-          videoModels: [{ debruteModelId: 'doubao-seedance-2-0-260128', requestModelIdOverride: null }]
+          videoModels: [{ debruteModelId: 'doubao-seedance-2-0-260128', baseUrlOverride: null, requestModelIdOverride: null }]
         },
         secrets: { videoModelApiKeys: { 'doubao-seedance-2-0-260128': 'sk-video' } },
         pollIntervalMs: 0,
@@ -624,7 +682,7 @@ describe('video model executor', () => {
           }
         },
         settings: {
-          videoModels: [{ debruteModelId: 'doubao-seedance-2-0-260128', requestModelIdOverride: null }]
+          videoModels: [{ debruteModelId: 'doubao-seedance-2-0-260128', baseUrlOverride: null, requestModelIdOverride: null }]
         },
         secrets: { videoModelApiKeys: { 'doubao-seedance-2-0-260128': 'sk-video' } },
         fetch: async () => {
@@ -715,7 +773,7 @@ describe('video model executor', () => {
           }
         },
         settings: {
-          videoModels: [{ debruteModelId: 'doubao-seedance-2-0-260128', requestModelIdOverride: null }]
+          videoModels: [{ debruteModelId: 'doubao-seedance-2-0-260128', baseUrlOverride: null, requestModelIdOverride: null }]
         },
         secrets: { videoModelApiKeys: { 'doubao-seedance-2-0-260128': 'sk-video' } },
         fetch: async () => {
@@ -747,7 +805,7 @@ describe('video model executor', () => {
           }
         },
         settings: {
-          videoModels: [{ debruteModelId: 'doubao-seedance-2-0-260128', requestModelIdOverride: null }]
+          videoModels: [{ debruteModelId: 'doubao-seedance-2-0-260128', baseUrlOverride: null, requestModelIdOverride: null }]
         },
         secrets: { videoModelApiKeys: { 'doubao-seedance-2-0-260128': 'sk-video' } },
         fetch: async () => {
@@ -776,7 +834,7 @@ describe('video model executor', () => {
           arguments: { prompt: 'request brief', content: [{ type: 'text', text: 'not public schema' }] }
         },
         settings: {
-          videoModels: [{ debruteModelId: 'doubao-seedance-2-0-260128', requestModelIdOverride: null }]
+          videoModels: [{ debruteModelId: 'doubao-seedance-2-0-260128', baseUrlOverride: null, requestModelIdOverride: null }]
         },
         secrets: { videoModelApiKeys: { 'doubao-seedance-2-0-260128': 'sk-video' } },
         fetch: async () => {
@@ -810,7 +868,7 @@ describe('video model executor', () => {
             arguments: args
           },
           settings: {
-            videoModels: [{ debruteModelId: 'doubao-seedance-2-0-fast-260128', requestModelIdOverride: null }]
+            videoModels: [{ debruteModelId: 'doubao-seedance-2-0-fast-260128', baseUrlOverride: null, requestModelIdOverride: null }]
           },
           secrets: { videoModelApiKeys: { 'doubao-seedance-2-0-fast-260128': 'sk-video' } },
           fetch: async () => {
@@ -842,6 +900,7 @@ describe('video model executor', () => {
         settings: {
           videoModels: [{
             debruteModelId: 'doubao-seedance-2-0-260128',
+            baseUrlOverride: null,
             requestModelIdOverride: null
           }]
         },
@@ -876,7 +935,7 @@ describe('video model executor', () => {
           }
         },
         settings: {
-          videoModels: [{ debruteModelId: 'doubao-seedance-2-0-260128', requestModelIdOverride: null }]
+          videoModels: [{ debruteModelId: 'doubao-seedance-2-0-260128', baseUrlOverride: null, requestModelIdOverride: null }]
         },
         secrets: { videoModelApiKeys: { 'doubao-seedance-2-0-260128': 'sk-video' } },
         uploadVideoReference: async () => {
@@ -922,7 +981,7 @@ describe('video model executor', () => {
           arguments: { prompt: 'cover video' }
         },
         settings: {
-          videoModels: [{ debruteModelId: 'doubao-seedance-2-0-260128', requestModelIdOverride: null }]
+          videoModels: [{ debruteModelId: 'doubao-seedance-2-0-260128', baseUrlOverride: null, requestModelIdOverride: null }]
         },
         secrets: { videoModelApiKeys: { 'doubao-seedance-2-0-260128': 'sk-video' } },
         pollIntervalMs: 10,
@@ -964,7 +1023,7 @@ describe('video model executor', () => {
           arguments: { prompt: 'cover video' }
         },
         settings: {
-          videoModels: [{ debruteModelId: 'doubao-seedance-2-0-260128', requestModelIdOverride: null }]
+          videoModels: [{ debruteModelId: 'doubao-seedance-2-0-260128', baseUrlOverride: null, requestModelIdOverride: null }]
         },
         secrets: { videoModelApiKeys: { 'doubao-seedance-2-0-260128': 'sk-video' } },
         requestTimeoutMs: 5,
@@ -1018,7 +1077,7 @@ describe('video model executor', () => {
           arguments: { prompt: 'cover video' }
         },
         settings: {
-          videoModels: [{ debruteModelId: 'doubao-seedance-2-0-260128', requestModelIdOverride: null }]
+          videoModels: [{ debruteModelId: 'doubao-seedance-2-0-260128', baseUrlOverride: null, requestModelIdOverride: null }]
         },
         secrets: { videoModelApiKeys: { 'doubao-seedance-2-0-260128': 'sk-video' } },
         requestTimeoutMs: 5,
@@ -1052,7 +1111,7 @@ describe('video model executor', () => {
           arguments: { prompt: 'bad prompt' }
         },
         settings: {
-          videoModels: [{ debruteModelId: 'doubao-seedance-2-0-260128', requestModelIdOverride: null }]
+          videoModels: [{ debruteModelId: 'doubao-seedance-2-0-260128', baseUrlOverride: null, requestModelIdOverride: null }]
         },
         secrets: { videoModelApiKeys: { 'doubao-seedance-2-0-260128': 'sk-video' } },
         fetch: async () => new Response(JSON.stringify({ error: { code: 'BadRequest', message: 'prompt rejected', apiKey: 'sk-video' } }), {
@@ -1115,6 +1174,7 @@ async function runVideoRequestAndCaptureBody(input: {
     settings: {
       videoModels: [{
         debruteModelId: 'doubao-seedance-2-0-260128',
+        baseUrlOverride: null,
         requestModelIdOverride: null
       }]
     },

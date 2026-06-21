@@ -67,7 +67,7 @@ describe('video model artifact write timeout', () => {
           arguments: { prompt: 'cover video', output_path: 'generated/timeout.mp4' }
         },
         settings: {
-          videoModels: [{ debruteModelId: 'doubao-seedance-2-0-260128', requestModelIdOverride: null }]
+          videoModels: [{ debruteModelId: 'doubao-seedance-2-0-260128', baseUrlOverride: null, requestModelIdOverride: null }]
         },
         secrets: { videoModelApiKeys: { 'doubao-seedance-2-0-260128': 'sk-video' } },
         pollIntervalMs: 0,

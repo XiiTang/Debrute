@@ -188,7 +188,7 @@ export async function executeVideoModelRequest(input: ExecuteVideoModelRequestIn
     projectRoot: input.projectRoot,
     invocationId: input.invocationId,
     entry,
-    baseUrl: entry.defaultBaseUrl,
+    baseUrl: modelSettings?.baseUrlOverride?.trim() || entry.defaultBaseUrl,
     apiKey,
     requestModelId: modelSettings?.requestModelIdOverride?.trim() || entry.defaultRequestModelId,
     args: normalized.upstreamArgs,

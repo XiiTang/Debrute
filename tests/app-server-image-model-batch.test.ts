@@ -18,6 +18,7 @@ describe('DebruteAppServer image model batch', () => {
       imageModels: [
         {
           debruteModelId: 'gpt-image-2',
+          baseUrlOverride: null,
           requestModelIdOverride: 'gpt-image-2'
         }
       ]
@@ -217,7 +218,7 @@ describe('DebruteAppServer image model batch', () => {
     const logPath = 'batch-results.jsonl';
     const configStore = new GlobalConfigStore({ debruteHome });
     await configStore.saveImageModels({
-      imageModels: [{ debruteModelId: 'gpt-image-2', requestModelIdOverride: 'gpt-image-2' }]
+      imageModels: [{ debruteModelId: 'gpt-image-2', baseUrlOverride: null, requestModelIdOverride: 'gpt-image-2' }]
     });
     await configStore.saveSecrets({
       llmProviderApiKeys: {},
@@ -330,6 +331,7 @@ describe('DebruteAppServer image model batch', () => {
       imageModels: [
         {
           debruteModelId: 'gpt-image-2',
+          baseUrlOverride: null,
           requestModelIdOverride: 'gpt-image-2'
         }
       ]
@@ -399,7 +401,7 @@ describe('DebruteAppServer image model batch', () => {
     const logPath = 'batch-results.jsonl';
     const configStore = new GlobalConfigStore({ debruteHome });
     await configStore.saveImageModels({
-      imageModels: [{ debruteModelId: 'gpt-image-2', requestModelIdOverride: 'gpt-image-2' }]
+      imageModels: [{ debruteModelId: 'gpt-image-2', baseUrlOverride: null, requestModelIdOverride: 'gpt-image-2' }]
     });
     await configStore.saveSecrets({
       llmProviderApiKeys: {},
