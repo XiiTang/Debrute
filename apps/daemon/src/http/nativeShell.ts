@@ -90,7 +90,8 @@ function isNativePickerCancel(error: unknown): boolean {
   const code = (error as { code?: unknown }).code;
   const stderr = String((error as { stderr?: unknown }).stderr ?? '');
   const message = error instanceof Error ? error.message : '';
-  return code === 1 && /cancel/i.test(`${stderr}\n${message}`);
+  const output = `${stderr}\n${message}`.trim();
+  return code === 1 && (!output || /cancel/i.test(output));
 }
 
 async function revealPath(

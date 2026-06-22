@@ -96,6 +96,15 @@ describe('daemon native shell adapter', () => {
     await expect(shell.chooseDirectory()).resolves.toBeUndefined();
   });
 
+  it('treats blank native picker exit-code cancel as no selected directory', async () => {
+    const execFile = vi.fn(async () => {
+      throw Object.assign(new Error(''), { code: 1, stderr: '' });
+    });
+    const shell = createNodeNativeShell({ platform: 'linux', execFile });
+
+    await expect(shell.chooseDirectory()).resolves.toBeUndefined();
+  });
+
   it('propagates native picker command failures that are not cancelation', async () => {
     const execFile = vi.fn(async () => {
       throw Object.assign(new Error('zenity missing'), { code: 127, stderr: 'zenity missing' });
