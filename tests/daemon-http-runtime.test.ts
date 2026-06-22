@@ -2,9 +2,14 @@ import { mkdir, mkdtemp, readFile, realpath, rm, stat, symlink, writeFile } from
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { DebruteAppServer } from '@debrute/app-server';
+import { DebruteAppServer, GlobalConfigStore } from '@debrute/app-server';
 import { createDebruteDaemonHttpServer } from '@debrute/daemon';
-import type { AppServerEvent, WorkbenchProjectPickerOpenResult } from '@debrute/app-protocol';
+import type {
+  AppServerEvent,
+  WorkbenchProjectOpenResult,
+  WorkbenchProjectPickerOpenResult,
+  WorkbenchTitleBarState
+} from '@debrute/app-protocol';
 import { projectFileRevision } from '@debrute/project-core';
 import sharp from 'sharp';
 
@@ -2201,6 +2206,81 @@ describe('daemon HTTP runtime', () => {
         error: { code: 'method_not_allowed' }
       });
     }
+  });
+
+  it('serves Workbench title-bar state from runtime chrome state', async () => {
+    const debruteHome = await mkdtemp(join(tmpdir(), 'debrute-titlebar-state-home-'));
+    const projectRoot = await mkdtemp(join(tmpdir(), 'debrute-titlebar-state-project-'));
+    await writeFile(join(projectRoot, 'brief.md'), '# Brief', 'utf8');
+    const daemon = createDebruteDaemonHttpServer({
+      appServerOptions: {
+        globalConfigStore: new GlobalConfigStore({ debruteHome })
+      },
+      host: '127.0.0.1',
+      port: 0,
+      token: 'test-token'
+    });
+    cleanups.push(
+      () => daemon.close(),
+      () => rm(debruteHome, { recursive: true, force: true }),
+      () => rm(projectRoot, { recursive: true, force: true })
+    );
+    const runtime = await daemon.listen();
+
+    const opened = await requestJson<WorkbenchProjectOpenResult>(`${runtime.daemonUrl}/api/projects/open`, {
+      method: 'POST',
+      headers: {
+        'content-type': 'application/json',
+        'x-debrute-daemon-token': runtime.token
+      },
+      body: JSON.stringify({ projectRoot })
+    });
+
+    const titleBar = await requestJson<WorkbenchTitleBarState>(
+      `${runtime.daemonUrl}/api/workbench/title-bar?host=desktop&projectId=${opened.projectId}`,
+      { headers: { 'x-debrute-daemon-token': runtime.token } }
+    );
+
+    expect(titleBar.title).toBe(opened.snapshot.metadata.project.name);
+    expect(titleBar.recentProjectRoots).toEqual([await realpath(projectRoot)]);
+    expect(titleBar.menus.map((menu) => menu.label)).toEqual(['File', 'Edit', 'View']);
+  });
+
+  it('rejects invalid Workbench title-bar host values', async () => {
+    const daemon = createDebruteDaemonHttpServer({
+      host: '127.0.0.1',
+      port: 0,
+      token: 'test-token'
+    });
+    cleanups.push(() => daemon.close());
+    const runtime = await daemon.listen();
+
+    const response = await fetch(`${runtime.daemonUrl}/api/workbench/title-bar?host=mobile`, {
+      headers: { 'x-debrute-daemon-token': runtime.token }
+    });
+
+    expect(response.status).toBe(400);
+    await expect(response.json()).resolves.toMatchObject({
+      error: { code: 'invalid_input' }
+    });
+  });
+
+  it('clears runtime recent projects through the Workbench chrome route', async () => {
+    const daemon = createDebruteDaemonHttpServer({
+      host: '127.0.0.1',
+      port: 0,
+      token: 'test-token'
+    });
+    cleanups.push(() => daemon.close());
+    const runtime = await daemon.listen();
+
+    const response = await fetch(`${runtime.daemonUrl}/api/workbench/recent-projects`, {
+      method: 'DELETE',
+      headers: { 'x-debrute-daemon-token': runtime.token }
+    });
+
+    expect(response.status).toBe(200);
+    await expect(response.json()).resolves.toEqual({ ok: true });
   });
 });
 

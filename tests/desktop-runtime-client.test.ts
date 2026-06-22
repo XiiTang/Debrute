@@ -95,6 +95,39 @@ describe('desktop runtime client', () => {
       }
     }]);
   });
+
+  it('reads and clears runtime title-bar state for Electron chrome surfaces', async () => {
+    const requests: Array<{ method: string; path: string; search: string }> = [];
+    const client = createAttachedDesktopRuntimeClient(runtimeFixture(), async (url, init) => {
+      const parsed = new URL(String(url));
+      requests.push({ method: init?.method ?? 'GET', path: parsed.pathname, search: parsed.search });
+      if (parsed.pathname === '/api/workbench/title-bar') {
+        return new Response(JSON.stringify({
+          title: 'Desktop Project',
+          recentProjectRoots: ['/tmp/project'],
+          presentation: {
+            platform: 'darwin',
+            host: 'desktop',
+            showWebMenus: false,
+            showWindowControls: false,
+            trafficLightSpacer: true
+          },
+          menus: []
+        }), { status: 200, headers: { 'content-type': 'application/json' } });
+      }
+      return new Response(JSON.stringify({ ok: true }), { status: 200, headers: { 'content-type': 'application/json' } });
+    });
+
+    await expect(client.getWorkbenchTitleBarState()).resolves.toMatchObject({
+      title: 'Desktop Project',
+      presentation: { host: 'desktop' }
+    });
+    await expect(client.clearRecentProjectRoots()).resolves.toEqual({ ok: true });
+    expect(requests).toEqual([
+      { method: 'GET', path: '/api/workbench/title-bar', search: '?host=desktop' },
+      { method: 'DELETE', path: '/api/workbench/recent-projects', search: '' }
+    ]);
+  });
 });
 
 function runtimeFixture(): DebruteDaemonRuntimeLike {

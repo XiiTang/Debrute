@@ -49,6 +49,8 @@
   --db-z-canvas: 0;
   --db-z-floating-bars: 100;
   --db-z-panels: 200;
+  --db-z-titlebar: 250;
   --db-z-toasts: 300;
   --db-z-overlays: 400;
+  --db-z-titlebar-menu: 450;
 }

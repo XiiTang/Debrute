@@ -39,7 +39,8 @@ import type {
   WorkbenchProjectTextFile,
   WorkbenchProjectTextFileWriteResult,
   WorkbenchProjectUploadImportInput,
-  WorkbenchAddProjectPathToCanvasMapResult
+  WorkbenchAddProjectPathToCanvasMapResult,
+  WorkbenchTitleBarState
 } from '@debrute/app-protocol';
 import type {
   CanvasFeedbackDocument,
@@ -248,6 +249,14 @@ export function createHttpWorkbenchApiClient(options: HttpWorkbenchApiClientOpti
       }
       return result;
     },
+    getWorkbenchTitleBarState: (input) => {
+      const params = new URLSearchParams({ host: input.host });
+      if (input.projectId) {
+        params.set('projectId', input.projectId);
+      }
+      return request<WorkbenchTitleBarState>('GET', `/api/workbench/title-bar?${params.toString()}`);
+    },
+    clearRecentProjectRoots: () => request<{ ok: true }>('DELETE', '/api/workbench/recent-projects'),
     getSnapshot: async () => {
       const result = await request<WorkbenchProjectRefreshResult>('GET', projectPath(''));
       rememberProjectRevision(result);

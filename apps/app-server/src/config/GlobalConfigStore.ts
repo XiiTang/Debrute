@@ -19,10 +19,15 @@ export interface GlobalConfigPaths {
   videoModelsFile: string;
   secretsFile: string;
   adobeBridgeFile: string;
+  workbenchChromeFile: string;
 }
 
 export interface AdobeBridgeConfig {
   enabled: boolean;
+}
+
+export interface WorkbenchChromeConfig {
+  recentProjectRoots: string[];
 }
 
 export class GlobalConfigStore {
@@ -37,7 +42,8 @@ export class GlobalConfigStore {
       imageModelsFile: join(root, 'image_models.json'),
       videoModelsFile: join(root, 'video_models.json'),
       secretsFile: join(root, 'secrets.json'),
-      adobeBridgeFile: join(root, 'adobe_bridge.json')
+      adobeBridgeFile: join(root, 'adobe_bridge.json'),
+      workbenchChromeFile: join(root, 'workbench_chrome.json')
     };
   }
 
@@ -78,6 +84,16 @@ export class GlobalConfigStore {
     await writeJsonAtomic(this.paths().adobeBridgeFile, normalizeAdobeBridgeConfig(config));
   }
 
+  async readWorkbenchChrome(): Promise<WorkbenchChromeConfig> {
+    return normalizeWorkbenchChromeConfig(await readJsonOrDefault<unknown>(this.paths().workbenchChromeFile, {
+      recentProjectRoots: []
+    }));
+  }
+
+  async saveWorkbenchChrome(config: WorkbenchChromeConfig): Promise<void> {
+    await writeJsonAtomic(this.paths().workbenchChromeFile, normalizeWorkbenchChromeConfig(config));
+  }
+
   async readSecrets(): Promise<SecretsConfig> {
     return readJsonOrDefault(this.paths().secretsFile, { llmProviderApiKeys: {}, imageModelApiKeys: {}, videoModelApiKeys: {} });
   }
@@ -97,6 +113,18 @@ function normalizeAdobeBridgeConfig(config: unknown): AdobeBridgeConfig {
     throw new Error('Adobe Bridge config must contain enabled.');
   }
   return { enabled: config.enabled };
+}
+
+function normalizeWorkbenchChromeConfig(config: unknown): WorkbenchChromeConfig {
+  if (!isRecord(config) || !Array.isArray(config.recentProjectRoots)) {
+    throw new Error('Workbench chrome config must contain recentProjectRoots.');
+  }
+  return {
+    recentProjectRoots: config.recentProjectRoots
+      .map((item) => typeof item === 'string' ? item.trim() : '')
+      .filter(Boolean)
+      .slice(0, 12)
+  };
 }
 
 function normalizeLlmProvidersConfig(config: unknown): LlmProvidersConfig {

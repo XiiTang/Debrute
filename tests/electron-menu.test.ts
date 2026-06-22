@@ -2,18 +2,26 @@ import type { MenuItemConstructorOptions } from 'electron';
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { describe, expect, it, vi } from 'vitest';
+import { buildWorkbenchTitleBarState } from '@debrute/app-protocol';
 import { openProjectFromPickerThroughDaemon, openProjectThroughDaemon, projectWebShellUrl } from '../apps/desktop/src/electron/daemonProjectOpen';
 import { buildApplicationMenuTemplate } from '../apps/desktop/src/electron/menu/applicationMenu';
 
 describe('desktop application menu', () => {
   it('puts project actions under a top-level File menu', () => {
     const template = buildApplicationMenuTemplate({
-      recentProjectRoots: ['/tmp/alpha-project', '/tmp/beta-project'],
-      onNewWindow: vi.fn(),
-      onOpenProject: vi.fn(),
-      onOpenRecentProject: vi.fn(),
-      onClearRecentProjects: vi.fn()
+      state: buildWorkbenchTitleBarState({
+        platform: 'darwin',
+        host: 'desktop',
+        projectTitle: 'Debrute',
+        recentProjectRoots: ['/tmp/alpha-project', '/tmp/beta-project']
+      }),
+      onCommand: vi.fn()
     });
+
+    expect(template.find((item) => item.label === 'Debrute')).toBeDefined();
+    expect(template.find((item) => item.label === 'File')).toBeDefined();
+    expect(template.find((item) => item.label === 'Edit')).toBeDefined();
+    expect(template.find((item) => item.label === 'View')).toBeDefined();
 
     const fileMenu = template.find((item) => item.label === 'File');
     expect(fileMenu).toBeDefined();
@@ -29,19 +37,18 @@ describe('desktop application menu', () => {
     const recentItems = openRecent?.submenu as MenuItemConstructorOptions[];
     expect(recentItems.map((item) => item.label ?? item.role)).toEqual([
       '/tmp/alpha-project',
-      '/tmp/beta-project',
-      undefined,
-      'Clear Recent'
+      '/tmp/beta-project'
     ]);
   });
 
-  it('keeps the recent-project submenu usable when there are no recents', () => {
+  it('keeps the recent-project submenu disabled when there are no recents', () => {
     const template = buildApplicationMenuTemplate({
-      recentProjectRoots: [],
-      onNewWindow: vi.fn(),
-      onOpenProject: vi.fn(),
-      onOpenRecentProject: vi.fn(),
-      onClearRecentProjects: vi.fn()
+      state: buildWorkbenchTitleBarState({
+        platform: 'darwin',
+        host: 'desktop',
+        recentProjectRoots: []
+      }),
+      onCommand: vi.fn()
     });
 
     const fileMenu = template.find((item) => item.label === 'File');
@@ -49,24 +56,24 @@ describe('desktop application menu', () => {
     const openRecent = fileItems.find((item) => item.label === 'Open Recent');
     const recentItems = openRecent?.submenu as MenuItemConstructorOptions[];
 
-    expect(recentItems.map((item) => item.label ?? item.role)).toEqual([
-      'No Recent Projects',
-      undefined,
-      'Clear Recent'
-    ]);
+    expect(openRecent?.enabled).toBe(false);
+    expect(fileItems.find((item) => item.label === 'Clear Recent')?.enabled).toBe(false);
+    expect(recentItems.map((item) => item.label ?? item.role)).toEqual(['No Recent Projects']);
     expect(recentItems[0]?.enabled).toBe(false);
-    expect(recentItems[2]?.enabled).toBe(false);
   });
 
-  it('forwards the source window and new-window intent from project menu actions', () => {
-    const calls: Array<{ forceNewWindow: boolean; hasSourceWindow: boolean }> = [];
-    const onNewWindow = vi.fn();
+  it('forwards shared command ids from project menu actions', () => {
+    const commands: Array<{ commandId: string; projectRoot?: string }> = [];
     const template = buildApplicationMenuTemplate({
-      recentProjectRoots: ['/tmp/alpha-project'],
-      onNewWindow,
-      onOpenProject: (_sourceWindow, options) => calls.push({ forceNewWindow: options.forceNewWindow, hasSourceWindow: Boolean(_sourceWindow) }),
-      onOpenRecentProject: (_projectRoot, _sourceWindow, options) => calls.push({ forceNewWindow: options.forceNewWindow, hasSourceWindow: Boolean(_sourceWindow) }),
-      onClearRecentProjects: vi.fn()
+      state: buildWorkbenchTitleBarState({
+        platform: 'darwin',
+        host: 'desktop',
+        recentProjectRoots: ['/tmp/alpha-project']
+      }),
+      onCommand: (_sourceWindow, command) => commands.push({
+        commandId: command.commandId,
+        projectRoot: typeof command.payload?.projectRoot === 'string' ? command.payload.projectRoot : undefined
+      })
     });
     const fileMenu = template.find((item) => item.label === 'File')!;
     const fileItems = fileMenu.submenu as MenuItemConstructorOptions[];
@@ -78,33 +85,45 @@ describe('desktop application menu', () => {
     const recentItems = fileItems.find((item) => item.label === 'Open Recent')!.submenu as MenuItemConstructorOptions[];
     recentItems[0]!.click!(undefined as never, sourceWindow, undefined as never);
 
-    expect(calls).toEqual([
-      { forceNewWindow: false, hasSourceWindow: true },
-      { forceNewWindow: true, hasSourceWindow: true },
-      { forceNewWindow: false, hasSourceWindow: true }
+    expect(commands).toEqual([
+      { commandId: 'window.new' },
+      { commandId: 'project.open-picker' },
+      { commandId: 'project.open-picker-new-window' },
+      { commandId: 'project.open-recent', projectRoot: '/tmp/alpha-project' }
     ]);
-    expect(onNewWindow).toHaveBeenCalledTimes(1);
   });
 
   it('provides native editing roles including speech controls', () => {
     const template = buildApplicationMenuTemplate({
-      recentProjectRoots: [],
-      onNewWindow: vi.fn(),
-      onOpenProject: vi.fn(),
-      onOpenRecentProject: vi.fn(),
-      onClearRecentProjects: vi.fn()
+      state: buildWorkbenchTitleBarState({
+        platform: 'darwin',
+        host: 'desktop',
+        recentProjectRoots: []
+      }),
+      onCommand: vi.fn()
     });
 
     const editMenu = template.find((item) => item.label === 'Edit');
     expect(editMenu).toBeDefined();
 
     const editItems = editMenu?.submenu as MenuItemConstructorOptions[];
-    expect(editItems.map((item) => item.role)).toContain('copy');
-    expect(editItems.map((item) => item.role)).toContain('selectAll');
-
-    const speech = editItems.find((item) => item.label === 'Speech');
-    const speechItems = speech?.submenu as MenuItemConstructorOptions[];
-    expect(speechItems.map((item) => item.role)).toEqual(['startSpeaking', 'stopSpeaking']);
+    expect(editItems.map((item) => item.role).filter(Boolean)).toEqual([
+      'undo',
+      'redo',
+      'cut',
+      'copy',
+      'paste',
+      'pasteAndMatchStyle',
+      'delete',
+      'selectAll',
+      'startSpeaking',
+      'stopSpeaking'
+    ]);
+    for (const item of editItems) {
+      if (item.role) {
+        expect(item.click).toBeUndefined();
+      }
+    }
   });
 
   it('opens menu-selected projects through the daemon route', async () => {
@@ -229,9 +248,16 @@ describe('desktop application menu', () => {
     expect(main).toContain('createAttachedDesktopRuntimeClient');
     expect(main).toContain('new TrayController');
     expect(main).toContain('runtimeSupervisor.stopOwnedRuntime()');
-    expect(main).toContain('await rememberProjectRootAndRefreshMenu(projectRoot)');
+    expect(main).toContain('refreshProjectHistorySurfaces');
     expect(main).not.toContain('hostedDaemon');
     expect(main).not.toContain('desktopStateStore:');
+  });
+
+  it('does not keep an Electron-owned recent project store', () => {
+    const main = readFileSync(join(process.cwd(), 'apps/desktop/src/electron/main.ts'), 'utf8');
+
+    expect(main).not.toContain('desktopStateStore');
+    expect(main).not.toContain('createDesktopStateStore');
   });
 
   it('reopens project windows by project root after a runtime restart', () => {

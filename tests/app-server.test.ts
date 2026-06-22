@@ -432,7 +432,8 @@ describe('app-server', () => {
         'llmProvidersFile',
         'root',
         'secretsFile',
-        'videoModelsFile'
+        'videoModelsFile',
+        'workbenchChromeFile'
       ]);
     } finally {
       globalRuntime.close();
@@ -2625,6 +2626,56 @@ describe('app-server', () => {
       server.close();
       await rm(projectRoot, { recursive: true, force: true });
     }
+  });
+
+  describe('global Workbench chrome state', () => {
+    it('stores recent project roots in current runtime config', async () => {
+      const debruteHome = await mkdtemp(join(tmpdir(), 'debrute-workbench-chrome-'));
+      const server = new DebruteGlobalRuntimeServer({
+        globalConfigStore: new GlobalConfigStore({ debruteHome })
+      });
+      try {
+        await server.rememberRecentProjectRoot('/projects/alpha');
+        await server.rememberRecentProjectRoot('/projects/beta');
+        await server.rememberRecentProjectRoot('/projects/alpha');
+
+        await expect(server.workbenchTitleBarState({
+          host: 'desktop',
+          platform: 'darwin',
+          projectTitle: 'Alpha'
+        })).resolves.toMatchObject({
+          title: 'Alpha',
+          recentProjectRoots: ['/projects/alpha', '/projects/beta'],
+          presentation: { showWebMenus: false, trafficLightSpacer: true }
+        });
+        await expect(readFile(join(debruteHome, 'config/workbench_chrome.json'), 'utf8')).resolves.toContain('/projects/alpha');
+      } finally {
+        server.close();
+        await rm(debruteHome, { recursive: true, force: true });
+      }
+    });
+
+    it('clears recent project roots through runtime state only', async () => {
+      const debruteHome = await mkdtemp(join(tmpdir(), 'debrute-workbench-chrome-clear-'));
+      const server = new DebruteGlobalRuntimeServer({
+        globalConfigStore: new GlobalConfigStore({ debruteHome })
+      });
+      try {
+        await server.rememberRecentProjectRoot('/projects/alpha');
+        await server.clearRecentProjectRoots();
+
+        await expect(server.workbenchTitleBarState({
+          host: 'web',
+          platform: 'linux'
+        })).resolves.toMatchObject({
+          title: 'Debrute',
+          recentProjectRoots: []
+        });
+      } finally {
+        server.close();
+        await rm(debruteHome, { recursive: true, force: true });
+      }
+    });
   });
 });
 

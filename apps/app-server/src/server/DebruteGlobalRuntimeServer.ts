@@ -1,5 +1,8 @@
 import { EventEmitter } from 'node:events';
-import type {
+import {
+  buildWorkbenchTitleBarState,
+  type WorkbenchHostKind,
+  type WorkbenchTitleBarState,
   AdobeBridgeSettings,
   AppServerEvent,
   DiscoverLlmProviderModelsInput,
@@ -118,6 +121,38 @@ export class DebruteGlobalRuntimeServer {
     const settings = await this.adobeBridgeSettingsService.saveSettings(input);
     this.emit({ type: 'adobeBridge.settings.changed', settings });
     return settings;
+  }
+
+  async rememberRecentProjectRoot(projectRoot: string): Promise<void> {
+    const trimmed = projectRoot.trim();
+    if (!trimmed) {
+      return;
+    }
+    const current = await this.configStore.readWorkbenchChrome();
+    await this.configStore.saveWorkbenchChrome({
+      recentProjectRoots: [
+        trimmed,
+        ...current.recentProjectRoots.filter((item) => item !== trimmed)
+      ].slice(0, 12)
+    });
+  }
+
+  async clearRecentProjectRoots(): Promise<void> {
+    await this.configStore.saveWorkbenchChrome({ recentProjectRoots: [] });
+  }
+
+  async workbenchTitleBarState(input: {
+    host: WorkbenchHostKind;
+    platform: NodeJS.Platform;
+    projectTitle?: string | undefined;
+  }): Promise<WorkbenchTitleBarState> {
+    const chrome = await this.configStore.readWorkbenchChrome();
+    return buildWorkbenchTitleBarState({
+      host: input.host,
+      platform: input.platform,
+      projectTitle: input.projectTitle,
+      recentProjectRoots: chrome.recentProjectRoots
+    });
   }
 
   close(): void {

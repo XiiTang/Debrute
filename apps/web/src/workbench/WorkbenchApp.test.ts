@@ -1,4 +1,5 @@
 import { describe, expect, expectTypeOf, it } from 'vitest';
+import type { WorkbenchState } from '../types';
 import type { CanvasFeedbackBarTarget, CanvasLocalFeedbackDraft } from './shell/floatingBars';
 import { chooseInitialActiveCanvasId } from './canvas/canvasCardBarState';
 import { sameCanvasFeedbackBarTarget } from './shell/floatingBars';
@@ -60,6 +61,14 @@ describe('WorkbenchApp canvas registry integration helpers', () => {
       storedActiveCanvasId: 'canvas-2',
       canvasOrder: ['canvas-1', 'canvas-2']
     })).toBe('canvas-2');
+  });
+});
+
+describe('WorkbenchApp title bar contracts', () => {
+  it('keeps title-bar state in WorkbenchState', () => {
+    type HasTitleBarState = WorkbenchState extends { titleBarState: unknown } ? true : false;
+    const check: HasTitleBarState = true;
+    expect(check).toBe(true);
   });
 });
 

@@ -660,6 +660,44 @@ describe('HTTP workbench API client', () => {
 
     expect(boundProjectIds).toEqual([projectId, secondProjectId]);
   });
+
+  it('reads and clears Workbench title-bar state through daemon HTTP', async () => {
+    const requests: Array<{ method: string; path: string; search: string }> = [];
+    const client = createHttpWorkbenchApiClient({
+      daemonUrl: 'http://127.0.0.1:17456/',
+      token: 'secret',
+      fetch: async (url, init) => {
+        const parsed = new URL(String(url));
+        requests.push({ method: init?.method ?? 'GET', path: parsed.pathname, search: parsed.search });
+        if (parsed.pathname === '/api/workbench/title-bar') {
+          return jsonResponse({
+            title: 'Test Project',
+            recentProjectRoots: ['/tmp/project'],
+            presentation: {
+              platform: 'linux',
+              host: parsed.searchParams.get('host') ?? 'web',
+              showWebMenus: true,
+              showWindowControls: false,
+              trafficLightSpacer: false
+            },
+            menus: []
+          });
+        }
+        return jsonResponse({ ok: true });
+      }
+    });
+
+    await expect(client.getWorkbenchTitleBarState({ host: 'web', projectId })).resolves.toMatchObject({
+      title: 'Test Project',
+      recentProjectRoots: ['/tmp/project']
+    });
+    await expect(client.clearRecentProjectRoots()).resolves.toEqual({ ok: true });
+
+    expect(requests).toEqual([
+      { method: 'GET', path: '/api/workbench/title-bar', search: `?host=web&projectId=${projectId}` },
+      { method: 'DELETE', path: '/api/workbench/recent-projects', search: '' }
+    ]);
+  });
 });
 
 function formDataSummary(formData: FormData): unknown {

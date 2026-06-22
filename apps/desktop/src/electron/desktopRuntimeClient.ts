@@ -4,6 +4,7 @@ import {
   projectWebShellUrl,
   type DebruteDaemonRuntimeLike
 } from './daemonProjectOpen.js';
+import type { WorkbenchTitleBarState } from '@debrute/app-protocol';
 
 type DesktopRuntimeFetch = (url: string, init?: RequestInit) => Promise<Response>;
 
@@ -13,6 +14,8 @@ export interface DesktopRuntimeClient {
   shellUrl(projectId?: string): string;
   openProject(projectRoot: string): Promise<{ projectId: string; url: string }>;
   openProjectFromPicker(): Promise<{ opened: false } | { opened: true; projectId: string; url: string }>;
+  getWorkbenchTitleBarState(projectId?: string): Promise<WorkbenchTitleBarState>;
+  clearRecentProjectRoots(): Promise<{ ok: true }>;
   registerElectronProjectWindow(projectId: string, windowId: number): Promise<{ projectRoot: string; release: () => Promise<void> }>;
   close(): Promise<void>;
 }
@@ -33,9 +36,44 @@ export function createAttachedDesktopRuntimeClient(
     shellUrl: (projectId) => projectWebShellUrl(attachedRuntime, projectId),
     openProject: (projectRoot) => openProjectThroughDaemon(attachedRuntime, projectRoot, fetchImpl),
     openProjectFromPicker: () => openProjectFromPickerThroughDaemon(attachedRuntime, fetchImpl),
+    getWorkbenchTitleBarState: (projectId) => getWorkbenchTitleBarState(attachedRuntime, fetchImpl, projectId),
+    clearRecentProjectRoots: () => clearRecentProjectRoots(attachedRuntime, fetchImpl),
     registerElectronProjectWindow: (projectId, windowId) => registerElectronProjectWindow(attachedRuntime, projectId, windowId, fetchImpl),
     close: async () => undefined
   };
+}
+
+async function getWorkbenchTitleBarState(
+  runtime: DebruteDaemonRuntimeLike,
+  fetchImpl: DesktopRuntimeFetch,
+  projectId?: string
+): Promise<WorkbenchTitleBarState> {
+  const url = new URL('/api/workbench/title-bar', runtime.daemonUrl);
+  url.searchParams.set('host', 'desktop');
+  if (projectId) {
+    url.searchParams.set('projectId', projectId);
+  }
+  const response = await fetchImpl(url.toString(), {
+    headers: { 'x-debrute-daemon-token': runtime.token }
+  });
+  if (!response.ok) {
+    throw new Error(`Debrute daemon title bar state request failed: ${response.status}`);
+  }
+  return response.json() as Promise<WorkbenchTitleBarState>;
+}
+
+async function clearRecentProjectRoots(
+  runtime: DebruteDaemonRuntimeLike,
+  fetchImpl: DesktopRuntimeFetch
+): Promise<{ ok: true }> {
+  const response = await fetchImpl(new URL('/api/workbench/recent-projects', runtime.daemonUrl).toString(), {
+    method: 'DELETE',
+    headers: { 'x-debrute-daemon-token': runtime.token }
+  });
+  if (!response.ok) {
+    throw new Error(`Debrute daemon recent project clear failed: ${response.status}`);
+  }
+  return response.json() as Promise<{ ok: true }>;
 }
 
 async function registerElectronProjectWindow(

@@ -160,7 +160,6 @@ describe('Debrute architecture boundaries', () => {
 
   it('keeps Electron main as a runtime supervisor and client', () => {
     for (const file of [
-      'apps/desktop/src/electron/desktop-state/desktopStateStore.ts',
       'apps/desktop/src/electron/preload.ts'
     ]) {
       expect(existsSync(join(root, file)), file).toBe(true);

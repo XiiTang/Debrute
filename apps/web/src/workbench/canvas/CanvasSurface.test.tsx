@@ -2,6 +2,7 @@ import React from 'react';
 import { renderToStaticMarkup } from 'react-dom/server';
 import { describe, expect, it, vi } from 'vitest';
 import { createCanvasDocument, type CanvasFeedbackDocument, type CanvasProjection } from '@debrute/canvas-core';
+import { buildWorkbenchTitleBarState } from '@debrute/app-protocol';
 import type { IntegrationSettingsView } from '@debrute/app-protocol';
 import type { WorkbenchActions, WorkbenchState } from '../../types';
 import { CanvasEditor } from './CanvasEditor';
@@ -1133,6 +1134,12 @@ function workbenchStateFixture(
         checkedAt: '2026-05-26T00:00:00.000Z'
       }
     },
+    titleBarState: buildWorkbenchTitleBarState({
+      platform: 'linux',
+      host: 'web',
+      projectTitle: 'Project',
+      recentProjectRoots: []
+    }),
     projectOpen: {
       opening: false
     },

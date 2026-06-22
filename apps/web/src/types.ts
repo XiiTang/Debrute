@@ -22,7 +22,8 @@ import type {
   WorkbenchProjectPathEntry,
   WorkbenchProjectSessionSnapshot,
   WorkbenchProjectTextFile,
-  WorkbenchProjectTextFileWriteResult
+  WorkbenchProjectTextFileWriteResult,
+  WorkbenchTitleBarState
 } from '@debrute/app-protocol';
 import type {
   CanvasFeedbackDocument,
@@ -33,6 +34,7 @@ import type { ProjectTreeSelectionState } from './workbench/project-explorer/pro
 export interface WorkbenchState {
   snapshot: WorkbenchProjectSessionSnapshot | undefined;
   projectId?: string | undefined;
+  titleBarState: WorkbenchTitleBarState;
   projectOpen: ProjectOpenState;
   explorerSelection: ProjectTreeSelectionState;
   llmSettings: LlmProviderSettingsView | undefined;

@@ -19,7 +19,8 @@ export {
 export {
   GlobalConfigStore,
   type AdobeBridgeConfig,
-  type GlobalConfigPaths
+  type GlobalConfigPaths,
+  type WorkbenchChromeConfig
 } from './config/GlobalConfigStore.js';
 
 export type {

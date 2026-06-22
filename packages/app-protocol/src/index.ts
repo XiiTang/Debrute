@@ -15,6 +15,25 @@ import type {
   ProjectTextFile
 } from '@debrute/project-core';
 
+export {
+  buildWorkbenchMenus,
+  buildWorkbenchTitleBarState,
+  menuLabels,
+  titleBarPresentationForPlatform,
+  type WorkbenchHostKind,
+  type WorkbenchMenu,
+  type WorkbenchMenuCommandId,
+  type WorkbenchMenuId,
+  type WorkbenchMenuItem,
+  type WorkbenchTitleBarPresentation,
+  type WorkbenchTitleBarState
+} from './workbenchChrome.js';
+
+import type {
+  WorkbenchHostKind,
+  WorkbenchTitleBarState
+} from './workbenchChrome.js';
+
 export type { ProjectTextFile } from '@debrute/project-core';
 
 export interface ProjectHealthSummary {
@@ -1074,6 +1093,8 @@ export interface WorkbenchApiClient {
   sendProjectFileToPhotoshop(input: SendProjectFileToPhotoshopInput): Promise<SendProjectFileToPhotoshopResult>;
   openProject(input: { projectRoot: string } | { projectId: string }): Promise<WorkbenchProjectOpenResult>;
   openProjectFromPicker(): Promise<WorkbenchProjectPickerOpenResult>;
+  getWorkbenchTitleBarState(input: { host: WorkbenchHostKind; projectId?: string | undefined }): Promise<WorkbenchTitleBarState>;
+  clearRecentProjectRoots(): Promise<{ ok: true }>;
   getSnapshot(): Promise<WorkbenchProjectRefreshResult>;
   getProjectHealth(): Promise<ProjectHealthSummary>;
   listTerminalSessions(): Promise<TerminalSessionList>;

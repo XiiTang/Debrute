@@ -1,6 +1,6 @@
 import type { BrowserWindow, Menu, MenuItemConstructorOptions } from 'electron';
-import type { DesktopState } from '../desktop-state/desktopStateStore.js';
-import type { ProjectOpenMenuOptions } from './applicationMenu.js';
+import { buildWorkbenchTitleBarState, type WorkbenchTitleBarState } from '@debrute/app-protocol';
+import type { ApplicationMenuCommand } from './applicationMenu.js';
 import { buildApplicationMenuTemplate } from './applicationMenu.js';
 
 interface ElectronMenuModule {
@@ -14,32 +14,26 @@ export interface ApplicationMenuController {
 
 export interface CreateApplicationMenuControllerInput {
   menu: ElectronMenuModule;
-  readDesktopState(): Promise<DesktopState>;
-  newWindow(): Promise<void>;
-  openProjectFromPicker(sourceWindow: BrowserWindow | undefined, options: ProjectOpenMenuOptions): Promise<void>;
-  openProject(projectRoot: string, sourceWindow: BrowserWindow | undefined, options: ProjectOpenMenuOptions): Promise<void>;
-  clearRecentProjectRoots(): Promise<void>;
+  platform: NodeJS.Platform;
+  readTitleBarState(): Promise<WorkbenchTitleBarState | undefined>;
+  onCommand(sourceWindow: BrowserWindow | undefined, command: ApplicationMenuCommand): Promise<void>;
 }
 
 export function createApplicationMenuController(input: CreateApplicationMenuControllerInput): ApplicationMenuController {
   const controller: ApplicationMenuController = {
     async refreshApplicationMenu(): Promise<void> {
-      const desktopState = await input.readDesktopState();
+      if (input.platform !== 'darwin') {
+        input.menu.setApplicationMenu(null);
+        return;
+      }
+      const state = await input.readTitleBarState() ?? buildWorkbenchTitleBarState({
+        platform: 'darwin',
+        host: 'desktop',
+        recentProjectRoots: []
+      });
       input.menu.setApplicationMenu(input.menu.buildFromTemplate(buildApplicationMenuTemplate({
-        recentProjectRoots: desktopState.recentProjectRoots,
-        onNewWindow: async () => {
-          await input.newWindow();
-        },
-        onOpenProject: async (sourceWindow, options) => {
-          await input.openProjectFromPicker(sourceWindow, options);
-        },
-        onOpenRecentProject: async (projectRoot, sourceWindow, options) => {
-          await input.openProject(projectRoot, sourceWindow, options);
-        },
-        onClearRecentProjects: async () => {
-          await input.clearRecentProjectRoots();
-          await controller.refreshApplicationMenu();
-        }
+        state,
+        onCommand: input.onCommand
       })));
     }
   };

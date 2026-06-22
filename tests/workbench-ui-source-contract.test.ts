@@ -119,19 +119,29 @@ describe('Workbench UI source contract', () => {
   it('keeps Canvas feedback controls inside the compact floating bar geometry', () => {
     const styles = readFileSync('apps/web/src/styles.css', 'utf8');
     const feedbackBarRule = styles.match(/\.canvas-feedback-bar\s*\{[^}]*\}/)?.[0] ?? '';
+    const feedbackBarWithCommentsRule = styles.match(/\.canvas-feedback-bar--has-comment-row\s*\{[^}]*\}/)?.[0] ?? '';
+    const feedbackPrimaryRowRule = styles.match(/\.canvas-feedback-primary-row\s*\{[^}]*\}/)?.[0] ?? '';
     const feedbackMarkRule = styles.match(/\.canvas-feedback-mark\s*\{[^}]*\}/)?.[0] ?? '';
-    const feedbackNoteRule = styles.match(/\.canvas-feedback-note\s*\{[^}]*\}/)?.[0] ?? '';
+    const feedbackMarkIconRule = styles.match(/\.canvas-feedback-mark \.db-icon-button__icon\s*\{[^}]*\}/)?.[0] ?? '';
+    const feedbackNoteRule = styles.match(/\.canvas-feedback-comment-pill\s*\{[^}]*\}/)?.[0] ?? '';
+    const feedbackCommentCreatorRule = styles.match(/\.canvas-feedback-comment-creator\s*\{[^}]*\}/)?.[0] ?? '';
+    const feedbackCommentStripRule = styles.match(/\.canvas-feedback-comment-strip\s*\{[^}]*\}/)?.[0] ?? '';
     const feedbackSource = readFileSync('apps/web/src/workbench/canvas/CanvasFeedbackBar.tsx', 'utf8');
 
-    expect(feedbackBarRule).toContain('height: 30px;');
-    expect(feedbackBarRule).toContain('grid-template-columns: repeat(7, 28px) 132px;');
-    expect(feedbackBarRule).toContain('padding: 0;');
+    expect(feedbackBarRule).toContain('grid-template-rows: 30px;');
+    expect(feedbackBarRule).toContain('gap: 2px;');
+    expect(feedbackBarRule).toContain('padding: 3px;');
+    expect(feedbackBarWithCommentsRule).toContain('grid-template-rows: 30px 36px;');
     expect(feedbackMarkRule).toContain('width: 28px;');
     expect(feedbackMarkRule).toContain('height: 28px;');
     expect(feedbackMarkRule).toContain('border: 0;');
-    expect(feedbackNoteRule).toContain('height: 28px;');
-    expect(feedbackNoteRule).not.toContain('min-height: 28px;');
-    expect(feedbackNoteRule).toContain('padding: 0 7px;');
+    expect(feedbackMarkIconRule).toContain('transform: translateY(-0.5px);');
+    expect(feedbackNoteRule).toContain('height: 30px;');
+    expect(feedbackNoteRule).not.toContain('min-height: 30px;');
+    expect(feedbackNoteRule).toContain('padding: 5px 30px 5px 12px;');
+    expect(feedbackPrimaryRowRule).toContain('grid-template-columns: max-content 90px;');
+    expect(feedbackCommentCreatorRule).toContain('justify-self: start;');
+    expect(feedbackCommentStripRule).toContain('padding: 3px 2px 3px 0;');
     expect(feedbackSource).toContain('db-floating-bar canvas-feedback-bar');
   });
 
@@ -150,7 +160,7 @@ describe('Workbench UI source contract', () => {
     expect(cardControlRule).not.toContain('min-height: 28px;');
     expect(cardControlRule).toContain('border: 0;');
     expect(cardActionRule).toContain('width: 28px;');
-    expect(dockRule).toContain('top: 45px;');
+    expect(dockRule).toContain('top: calc(32px + 13px);');
     expect(dockRule).toContain('width: 28px;');
     expect(dockRule).toContain('padding: 0;');
     expect(styles).not.toContain('.floating-dock .db-icon-button');
@@ -358,6 +368,16 @@ describe('Workbench UI source contract', () => {
     for (const selector of localControlSelectors) {
       expect(styles).not.toContain(selector);
     }
+  });
+
+  it('styles the Workbench title bar as drag chrome and not a card', () => {
+    const styles = readFileSync('apps/web/src/styles.css', 'utf8');
+
+    expect(styles).toContain('.workbench-titlebar');
+    expect(styles).toContain('-webkit-app-region: drag');
+    expect(styles).toContain('backdrop-filter');
+    expect(styles).toContain('linear-gradient');
+    expect(styles).not.toContain('.workbench-titlebar .db-card');
   });
 });
 

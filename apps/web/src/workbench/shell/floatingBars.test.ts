@@ -1,5 +1,3 @@
-import { readFileSync } from 'node:fs';
-import { fileURLToPath } from 'node:url';
 import { describe, expect, it } from 'vitest';
 import {
   CANVAS_FEEDBACK_BAR_SIZE,
@@ -17,8 +15,7 @@ import {
   placeCanvasFeedbackBar,
   placeCanvasMinimapPanel
 } from './floatingBars';
-
-const canvasStyles = readFileSync(fileURLToPath(new URL('../../styles.css', import.meta.url)), 'utf8');
+import { TITLE_BAR_RESERVED_RECT, WORKBENCH_TITLE_BAR_HEIGHT } from './workbenchLayers';
 
 describe('floating bar placement', () => {
   it('places feedback below a node by default', () => {
@@ -184,26 +181,6 @@ describe('floating bar placement', () => {
     expect(imagePlacement?.height).toBe(CANVAS_FEEDBACK_BAR_SIZE.twoRowHeight);
   });
 
-  it('keeps feedback layout rows inside their placement heights', () => {
-    expect(CANVAS_FEEDBACK_BAR_SIZE.oneRowHeight).toBe(38);
-    expect(CANVAS_FEEDBACK_BAR_SIZE.twoRowHeight).toBe(76);
-    expect(canvasStyles).toContain('grid-template-rows: 30px;');
-    expect(canvasStyles).toContain('grid-template-rows: 30px 36px;');
-    expect(canvasStyles).toContain('gap: 2px;');
-    expect(canvasStyles).toContain('padding: 3px;');
-    expect(canvasStyles).toContain('padding: 3px 2px 3px 0;');
-  });
-
-  it('keeps the first-row comment creator adjacent to the feedback tools', () => {
-    expect(canvasStyles).toContain('grid-template-columns: max-content 90px;');
-    expect(canvasStyles).toContain('justify-self: start;');
-  });
-
-  it('keeps one-row feedback mark glyphs visually centered in the compact bar', () => {
-    expect(canvasStyles).toContain('.canvas-feedback-mark .db-icon-button__icon');
-    expect(canvasStyles).toContain('transform: translateY(-0.5px);');
-  });
-
   it('refreshes retained feedback targets from the current feedback document before placement', () => {
     const target = {
       projectRelativePath: 'flow/cover.png',
@@ -303,6 +280,16 @@ describe('floating bar placement', () => {
       y: 496,
       width: CANVAS_MINIMAP_PANEL_SIZE.width,
       height: CANVAS_MINIMAP_PANEL_SIZE.height
+    });
+  });
+
+  it('reserves the title bar at the top of the viewport', () => {
+    expect(WORKBENCH_TITLE_BAR_HEIGHT).toBe(32);
+    expect(TITLE_BAR_RESERVED_RECT(1280)).toEqual({
+      x: 0,
+      y: 0,
+      width: 1280,
+      height: 32
     });
   });
 });

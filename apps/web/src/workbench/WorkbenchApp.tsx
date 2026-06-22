@@ -1,11 +1,14 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Loader2 } from 'lucide-react';
 import type {
+  WorkbenchMenuItem,
   WorkbenchCanvasDocumentMutationResult,
   WorkbenchProjectFileBatchOperationResult,
   WorkbenchProjectPathEntry,
-  WorkbenchProjectSessionSnapshot
+  WorkbenchProjectSessionSnapshot,
+  WorkbenchTitleBarState
 } from '@debrute/app-protocol';
+import { buildWorkbenchTitleBarState } from '@debrute/app-protocol';
 import type { ProjectedCanvasNode } from '@debrute/canvas-core';
 import { createWorkbenchApiClient } from './api/workbenchApiClient';
 import { getDebruteShellApi } from '../api/shellApi';
@@ -32,6 +35,8 @@ import { useTextFileBufferActions } from './services/textFileBufferActions';
 import { runWorkbenchContextMenuCommand } from './services/workbenchContextMenuCommands';
 import { SendToPhotoshopDialog } from './adobe-bridge/SendToPhotoshopDialog';
 import { WorkbenchContextMenu } from './shell/WorkbenchContextMenu';
+import { WorkbenchTitleBar } from './shell/WorkbenchTitleBar';
+import { executeTitleBarMenuCommand } from './shell/workbenchTitleBarCommands';
 import {
   buildWorkbenchContextMenuItems,
   cameraCenteredOnNode,
@@ -85,7 +90,7 @@ import { FloatingTextEditorWindow } from './shell/FloatingTextEditorWindow';
 import { NotificationStack } from './shell/NotificationStack';
 import { TerminalPanel } from './terminal/TerminalPanel';
 import { Button } from './ui';
-import { FIXED_TOP_FLOATING_BAR_RECTS } from './shell/workbenchLayers';
+import { FIXED_TOP_FLOATING_BAR_RECTS, TITLE_BAR_RESERVED_RECT } from './shell/workbenchLayers';
 import {
   DEFAULT_WORKBENCH_WINDOW_ORDER,
   closeWorkbenchWindow,
@@ -137,6 +142,8 @@ export function WorkbenchApp(): React.ReactElement {
   const [sendToPhotoshopPath, setSendToPhotoshopPath] = useState<string>();
   const [sendingToPhotoshop, setSendingToPhotoshop] = useState(false);
   const [fileClipboard, setFileClipboard] = useState<WorkbenchFileClipboard>();
+  const [titleBarState, setTitleBarState] = useState<WorkbenchTitleBarState>();
+  const [nativeWindowState, setNativeWindowState] = useState({ maximized: false });
   const [desktopPlatform, setDesktopPlatform] = useState<NodeJS.Platform>('linux');
   const [inlineProjectTreeEdit, setInlineProjectTreeEdit] = useState<ProjectTreeInlineEditState>();
   const [notifications, setNotifications] = useState<string[]>([]);
@@ -150,6 +157,17 @@ export function WorkbenchApp(): React.ReactElement {
   const textEditorWindowsRef = useRef(textEditorWindows);
   const feedbackBarClearTimerRef = useRef<number | undefined>(undefined);
   const feedbackBarHoveredRef = useRef(false);
+
+  const refreshTitleBarState = useCallback(async (projectId = daemonProjectId) => {
+    const shell = getDebruteShellApi();
+    const state = shell?.getWorkbenchTitleBarState
+      ? await shell.getWorkbenchTitleBarState({ ...(projectId ? { projectId } : {}) })
+      : await api.getWorkbenchTitleBarState({
+          host: 'web',
+          ...(projectId ? { projectId } : {})
+        });
+    setTitleBarState(state);
+  }, [daemonProjectId]);
 
   const chooseActiveCanvasForProject = useCallback((input: {
     projectId: string;
@@ -201,8 +219,9 @@ export function WorkbenchApp(): React.ReactElement {
     setIntegrationsSettings(await api.integrationsListStatus());
     setAdobeBridge(await api.adobeBridgeGetState());
     await loadCanvasFeedback(api, setCanvasFeedback, setNotifications);
+    await refreshTitleBarState(opened.projectId);
     setNotifications((current) => [`Opened project: ${opened.snapshot.metadata.project.name}`, ...current].slice(0, 4));
-  }, [chooseActiveCanvasForProject, loadFloatingPanelsForProject]);
+  }, [chooseActiveCanvasForProject, loadFloatingPanelsForProject, refreshTitleBarState]);
 
   useEffect(() => {
     snapshotRef.current = snapshot;
@@ -287,6 +306,24 @@ export function WorkbenchApp(): React.ReactElement {
       disposed = true;
     };
   }, [applyOpenedProject]);
+
+  useEffect(() => {
+    void refreshTitleBarState().catch((error) => {
+      setTitleBarState(buildWorkbenchTitleBarState({
+        platform: desktopPlatform,
+        host: getDebruteShellApi()?.getWorkbenchTitleBarState ? 'desktop' : 'web',
+        projectTitle: snapshot?.metadata.project.name,
+        recentProjectRoots: []
+      }));
+      setNotifications((current) => [`Title bar state failed: ${errorMessage(error)}`, ...current].slice(0, 4));
+    });
+  }, [desktopPlatform, refreshTitleBarState, snapshot?.metadata.project.name]);
+
+  useEffect(() => {
+    const shell = getDebruteShellApi();
+    void shell?.getNativeWindowState?.().then(setNativeWindowState).catch(() => undefined);
+    return shell?.onNativeWindowStateChanged?.(setNativeWindowState);
+  }, []);
 
   useEffect(() => {
     if (!daemonProjectId || !activeCanvasId) {
@@ -546,10 +583,17 @@ export function WorkbenchApp(): React.ReactElement {
   const locateProjectFileInCanvas = useCallback((projectRelativePath: string) => {
     centerCanvasProjectionNode(activeProjection, projectRelativePath);
   }, [activeProjection, centerCanvasProjectionNode]);
+  const effectiveTitleBarState = titleBarState ?? buildWorkbenchTitleBarState({
+    platform: desktopPlatform,
+    host: getDebruteShellApi()?.getWorkbenchTitleBarState ? 'desktop' : 'web',
+    projectTitle: snapshot?.metadata.project.name,
+    recentProjectRoots: []
+  });
 
   const state: WorkbenchState = {
     snapshot,
     projectId: daemonProjectId,
+    titleBarState: effectiveTitleBarState,
     projectOpen: {
       ...(projectOpenAttemptedPath ? { attemptedPath: projectOpenAttemptedPath } : {}),
       ...(projectOpenError ? { error: projectOpenError } : {}),
@@ -922,6 +966,38 @@ export function WorkbenchApp(): React.ReactElement {
   const notify = useCallback((message: string) => {
     setNotifications((current) => [message, ...current].slice(0, 4));
   }, []);
+  const handleTitleBarCommand = useCallback((item: Extract<WorkbenchMenuItem, { kind: 'command' }>) => {
+    void executeTitleBarMenuCommand(item, {
+      api,
+      shell: getDebruteShellApi(),
+      notify,
+      openProjectFromPicker: actions.openProject,
+      openProjectRoot: async (projectRoot) => {
+        setIsProjectOpening(true);
+        setProjectOpenError(undefined);
+        setProjectOpenAttemptedPath(projectRoot);
+        try {
+          await applyOpenedProject(await api.openProject({ projectRoot }));
+        } finally {
+          setIsProjectOpening(false);
+        }
+      },
+      refreshTitleBarState
+    }).catch((error) => notify(`Menu command failed: ${errorMessage(error)}`));
+  }, [actions.openProject, applyOpenedProject, notify, refreshTitleBarState]);
+  const handleTitleBarWindowCommand = useCallback((command: 'minimize' | 'toggle-maximize' | 'close') => {
+    const shell = getDebruteShellApi();
+    const promise = command === 'minimize'
+      ? shell?.minimizeNativeWindow?.()
+      : command === 'toggle-maximize'
+        ? shell?.toggleMaximizeNativeWindow?.()
+        : shell?.closeNativeWindow?.();
+    void Promise.resolve(promise).then((state) => {
+      if (state && 'maximized' in state) {
+        setNativeWindowState(state);
+      }
+    }).catch((error) => notify(`Window command failed: ${errorMessage(error)}`));
+  }, [notify]);
 
   const workbenchViewportRect: FloatingBarRect = {
     x: 0,
@@ -941,6 +1017,7 @@ export function WorkbenchApp(): React.ReactElement {
     ? canvasCardBarRect(workbenchViewportRect)
     : undefined;
   const floatingBarReservedRects = [
+    TITLE_BAR_RESERVED_RECT(workbenchViewportRect.width),
     ...FIXED_TOP_FLOATING_BAR_RECTS,
     minimapButtonRect,
     ...(resetLayoutButtonRect ? [resetLayoutButtonRect] : []),
@@ -1160,15 +1237,29 @@ export function WorkbenchApp(): React.ReactElement {
   }, [locateProjectFileInCanvas, notify, snapshot]);
   if (isLoading) {
     return (
-      <div className="boot-screen">
-        <Loader2 className="spin" size={22} />
-        <span>Opening Debrute workbench</span>
+      <div className="workbench-shell" data-theme="dark" data-testid="workbench-shell">
+        <WorkbenchTitleBar
+          state={effectiveTitleBarState}
+          nativeWindowState={nativeWindowState}
+          onCommand={handleTitleBarCommand}
+          onWindowCommand={handleTitleBarWindowCommand}
+        />
+        <div className="boot-screen boot-screen--with-titlebar">
+          <Loader2 className="spin" size={22} />
+          <span>Opening Debrute workbench</span>
+        </div>
       </div>
     );
   }
 
   return (
     <div className="workbench-shell" data-theme="dark" data-testid="workbench-shell">
+      <WorkbenchTitleBar
+        state={effectiveTitleBarState}
+        nativeWindowState={nativeWindowState}
+        onCommand={handleTitleBarCommand}
+        onWindowCommand={handleTitleBarWindowCommand}
+      />
       <div className="canvas-layer" data-testid="canvas-layer">
         {registryInvalid ? (
           <div className="empty-editor empty-project">

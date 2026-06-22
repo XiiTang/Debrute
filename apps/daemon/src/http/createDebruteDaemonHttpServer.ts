@@ -30,7 +30,9 @@ import {
   type WorkbenchProjectPathEntry,
   type WorkbenchProjectPickerOpenResult,
   type WorkbenchProjectSessionSnapshot,
-  type WorkbenchProjectTextFile
+  type WorkbenchProjectTextFile,
+  type WorkbenchHostKind,
+  type WorkbenchTitleBarState
 } from '@debrute/app-protocol';
 import { projectFileRevision, projectImageMimeTypeFromPath, resolveExistingProjectPath, type ProjectUploadImportEntry } from '@debrute/project-core';
 import { createAdobeBridgeDiscoveryServer } from '../adobe-bridge/AdobeBridgeDiscoveryServer.js';
@@ -302,6 +304,31 @@ export function createDebruteDaemonHttpServer(options: DebruteDaemonHttpServerOp
       }
       return true;
     }
+    if (path === '/api/workbench/title-bar') {
+      if (method !== 'GET') {
+        writeError(context.response, 405, 'method_not_allowed', 'Unsupported Workbench title bar method.');
+        return true;
+      }
+      const projectId = context.url.searchParams.get('projectId') ?? undefined;
+      const host = workbenchHostFromQuery(context.url.searchParams.get('host'));
+      const session = projectId ? sessions.get(projectId) : undefined;
+      const titleBarState: WorkbenchTitleBarState = await globalRuntime.workbenchTitleBarState({
+        host,
+        platform: currentPublicRuntime().platform,
+        projectTitle: session?.appServer.currentSnapshot()?.metadata.project.name ?? session?.snapshot.metadata.project.name
+      });
+      writeJson(context.response, 200, titleBarState);
+      return true;
+    }
+    if (path === '/api/workbench/recent-projects') {
+      if (method !== 'DELETE') {
+        writeError(context.response, 405, 'method_not_allowed', 'Unsupported recent projects method.');
+        return true;
+      }
+      await globalRuntime.clearRecentProjectRoots();
+      writeJson(context.response, 200, { ok: true });
+      return true;
+    }
     if (method === 'GET' && path === '/api/projects') {
       writeJson(context.response, 200, {
         projects: sessions.list().map((session) => ({
@@ -333,6 +360,7 @@ export function createDebruteDaemonHttpServer(options: DebruteDaemonHttpServerOp
         return true;
       }
       const session = await sessions.openProject(projectRoot);
+      await globalRuntime.rememberRecentProjectRoot(session.projectRoot);
       const body: WorkbenchProjectPickerOpenResult = {
         opened: true,
         ...projectOpenResultForHttp(session)
@@ -358,6 +386,7 @@ export function createDebruteDaemonHttpServer(options: DebruteDaemonHttpServerOp
         return true;
       }
       const session = await sessions.openProject(projectRoot);
+      await globalRuntime.rememberRecentProjectRoot(session.projectRoot);
       writeJson(context.response, 200, projectOpenResultForHttp(session));
       return true;
     }
@@ -1988,6 +2017,13 @@ function stringArrayField(value: unknown, name: string): string[] {
     throw new DebruteDaemonHttpError(400, 'invalid_input', `${name} must be an array.`);
   }
   return value.map((item, index) => stringField(item, `${name}[${index}]`));
+}
+
+function workbenchHostFromQuery(value: string | null): WorkbenchHostKind {
+  if (value === 'desktop' || value === 'web') {
+    return value;
+  }
+  throw new DebruteDaemonHttpError(400, 'invalid_input', 'host must be "desktop" or "web".');
 }
 
 function projectPathEntriesField(value: unknown): WorkbenchProjectPathEntry[] {
