@@ -55,7 +55,7 @@ const IMAGE_INPUT_VALUE_WITH_OBJECT_ACCEPTED_VALUE_FORMAT = 'Project-relative im
 const MODEL_SPECIFIC_IMAGE_OBJECTS: Record<ModelSpecificImageObjectKind, ModelSpecificImageObjectMetadata> = {
   'openai-image': {
     kind: 'openai-image',
-    acceptedValueFormat: 'OpenAI image objects with `image_url` or base64 `data`',
+    acceptedValueFormat: 'OpenAI image objects with `image_url` or base64 `data` plus `mime_type`',
     schema: {
       type: 'object',
       properties: {
@@ -65,7 +65,7 @@ const MODEL_SPECIFIC_IMAGE_OBJECTS: Record<ModelSpecificImageObjectKind, ModelSp
       },
       anyOf: [
         { required: ['image_url'] },
-        { required: ['data'] }
+        { required: ['data', 'mime_type'] }
       ],
       additionalProperties: false
     }

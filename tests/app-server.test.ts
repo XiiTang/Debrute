@@ -2,11 +2,15 @@ import { randomBytes } from 'node:crypto';
 import { chmod, mkdir, mkdtemp, readFile, rm, stat, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
+import { promisify } from 'node:util';
+import { gzip } from 'node:zlib';
 import sharp from 'sharp';
 import { describe, expect, it } from 'vitest';
 import { DebruteAppServer, DebruteGlobalRuntimeServer, GlobalConfigStore } from '@debrute/app-server';
 import type { AppServerEvent } from '@debrute/app-protocol';
-import { CANVAS_DOCUMENT_SCHEMA_VERSION } from '@debrute/canvas-core';
+import { CANVAS_DOCUMENT_SCHEMA_VERSION, CANVAS_FEEDBACK_SCHEMA_VERSION } from '@debrute/canvas-core';
+
+const gzipBuffer = promisify(gzip);
 
 describe('app-server', () => {
   it('opens a project with current Canvas snapshot and health fields', async () => {
@@ -328,7 +332,7 @@ describe('app-server', () => {
       const feedback = await server.readCanvasFeedback();
 
       expect(feedback).toMatchObject({
-        schemaVersion: 1,
+        schemaVersion: CANVAS_FEEDBACK_SCHEMA_VERSION,
         entries: {}
       });
       expect(feedback.updatedAt).toEqual(expect.any(String));
@@ -436,7 +440,7 @@ describe('app-server', () => {
     }
   });
 
-  it('writes, preserves, and clears Canvas feedback entries', async () => {
+  it('writes, preserves, and clears Canvas feedback mark entries', async () => {
     const projectRoot = await mkdtemp(join(tmpdir(), 'debrute-app-server-feedback-write-'));
     const server = new DebruteAppServer();
     try {
@@ -446,36 +450,42 @@ describe('app-server', () => {
       });
 
       const first = await server.updateCanvasFeedbackEntry({
+        operation: 'set-marks',
         projectRelativePath: 'flow/a.png',
-        marks: ['cross', 'like'],
-        note: '  Keep A.  '
+        marks: ['cross', 'like']
       });
       const second = await server.updateCanvasFeedbackEntry({
+        operation: 'set-marks',
         projectRelativePath: 'flow/b.png',
-        marks: ['needs_revision'],
-        note: ''
+        marks: ['needs_revision']
       });
       const cleared = await server.updateCanvasFeedbackEntry({
+        operation: 'set-marks',
         projectRelativePath: 'flow/a.png',
-        marks: [],
-        note: '   '
+        marks: []
       });
 
       expect(first.entries['flow/a.png']).toMatchObject({
         projectRelativePath: 'flow/a.png',
         marks: ['like', 'cross'],
-        note: 'Keep A.'
+        comments: [],
+        nextRegionLabel: 1,
+        regions: []
       });
       expect(second.entries['flow/a.png']).toBeDefined();
       expect(second.entries['flow/b.png']).toMatchObject({
         marks: ['needs_revision'],
-        note: ''
+        comments: [],
+        nextRegionLabel: 1,
+        regions: []
       });
       expect(cleared.entries['flow/a.png']).toBeUndefined();
       expect(cleared.entries['flow/b.png']).toMatchObject({
         projectRelativePath: 'flow/b.png',
         marks: ['needs_revision'],
-        note: ''
+        comments: [],
+        nextRegionLabel: 1,
+        regions: []
       });
       expect(await readJson(join(projectRoot, '.debrute/reviews/canvas-feedback.json'))).toEqual(cleared);
     } finally {
@@ -496,9 +506,9 @@ describe('app-server', () => {
       const unsubscribe = server.onEvent((event) => events.push(event));
 
       await server.updateCanvasFeedbackEntry({
+        operation: 'add-comment',
         projectRelativePath: 'brief.md',
-        marks: ['like'],
-        note: 'Use this direction'
+        comment: 'Use this direction'
       });
       unsubscribe();
 
@@ -508,8 +518,10 @@ describe('app-server', () => {
           entries: {
             'brief.md': {
               projectRelativePath: 'brief.md',
-              marks: ['like'],
-              note: 'Use this direction'
+              marks: [],
+              comments: [expect.objectContaining({ comment: 'Use this direction' })],
+              nextRegionLabel: 1,
+              regions: []
             }
           }
         }
@@ -555,9 +567,9 @@ describe('app-server', () => {
 
       await Promise.all(Array.from({ length: 8 }, async (_item, index) => {
         await server.updateCanvasFeedbackEntry({
+          operation: 'set-marks',
           projectRelativePath: `flow/${index}.png`,
-          marks: ['like'],
-          note: `Option ${index}`
+          marks: ['like']
         });
       }));
 
@@ -592,9 +604,9 @@ describe('app-server', () => {
       await writeFile(feedbackPath, '{"schemaVersion":1,"entries":', 'utf8');
 
       await expect(server.updateCanvasFeedbackEntry({
+        operation: 'set-marks',
         projectRelativePath: 'flow/a.png',
-        marks: ['like'],
-        note: ''
+        marks: ['like']
       })).rejects.toThrow();
 
       expect(await readFile(feedbackPath, 'utf8')).toBe('{"schemaVersion":1,"entries":');
@@ -1492,6 +1504,75 @@ describe('app-server', () => {
     }
   });
 
+  it('projects supported image formats on Canvas through the shared image registry', async () => {
+    const projectRoot = await mkdtemp(join(tmpdir(), 'debrute-app-server-image-format-registry-'));
+    const server = new DebruteAppServer();
+    try {
+      await mkdir(join(projectRoot, 'assets'), { recursive: true });
+      const png = await sharp({
+        create: { width: 32, height: 24, channels: 4, background: '#336699ff' }
+      }).png().toBuffer();
+      const jpeg = await sharp({
+        create: { width: 32, height: 24, channels: 3, background: '#884422' }
+      }).jpeg().toBuffer();
+      const webp = await sharp({
+        create: { width: 32, height: 24, channels: 4, background: '#113355ff' }
+      }).webp().toBuffer();
+      const avif = await sharp({
+        create: { width: 32, height: 24, channels: 4, background: '#225533ff' }
+      }).avif().toBuffer();
+      const tiff = await sharp({
+        create: { width: 32, height: 24, channels: 4, background: '#663399ff' }
+      }).tiff().toBuffer();
+      const svg = '<svg xmlns="http://www.w3.org/2000/svg" width="32" height="24"><rect width="32" height="24" fill="#336699"/></svg>';
+
+      await writeFile(join(projectRoot, 'assets/cover.png'), png);
+      await writeFile(join(projectRoot, 'assets/photo.jpe'), jpeg);
+      await writeFile(join(projectRoot, 'assets/photo.jfif'), jpeg);
+      await writeFile(join(projectRoot, 'assets/render.webp'), webp);
+      await writeFile(join(projectRoot, 'assets/render.avif'), avif);
+      await writeFile(join(projectRoot, 'assets/scan.tif'), tiff);
+      await writeFile(join(projectRoot, 'assets/scan.tiff'), tiff);
+      await writeFile(join(projectRoot, 'assets/icon.svg'), svg, 'utf8');
+      await writeFile(join(projectRoot, 'assets/icon.svgz'), await gzipBuffer(Buffer.from(svg)));
+      await writeFile(join(projectRoot, 'assets/animated.gif'), Buffer.from('GIF89a'));
+
+      await server.openProject(projectRoot, { initializeIfMissing: true, createDefaultCanvas: true });
+      await writeCanvasMap(projectRoot, 'canvas-1', canvasMapSource([
+        'assets/*'
+      ]));
+      await server.pushCanvasMapForProject(projectRoot, { canvasId: 'canvas-1' });
+
+      const nodes = (await server.refreshProject()).projections[0]!.nodes;
+      const byPath = new Map(nodes.map((node) => [node.projectRelativePath, node]));
+
+      for (const [path, mimeType] of [
+        ['assets/cover.png', 'image/png'],
+        ['assets/photo.jpe', 'image/jpeg'],
+        ['assets/photo.jfif', 'image/jpeg'],
+        ['assets/render.webp', 'image/webp'],
+        ['assets/render.avif', 'image/avif'],
+        ['assets/scan.tif', 'image/tiff'],
+        ['assets/scan.tiff', 'image/tiff'],
+        ['assets/icon.svg', 'image/svg+xml'],
+        ['assets/icon.svgz', 'image/svg+xml']
+      ] as const) {
+        expect(byPath.get(path)).toMatchObject({
+          mediaKind: 'image',
+          availability: { state: 'available', mimeType, canvasImagePreviewable: true }
+        });
+      }
+
+      expect(byPath.get('assets/animated.gif')).toMatchObject({
+        mediaKind: 'unknown',
+        availability: { state: 'available', mimeType: 'text/plain' }
+      });
+    } finally {
+      server.close();
+      await rm(projectRoot, { recursive: true, force: true });
+    }
+  });
+
   it('materializes dynamic generic node widths during Canvas Map synchronization', async () => {
     const projectRoot = await mkdtemp(join(tmpdir(), 'debrute-app-server-canvas-map-generic-widths-'));
     const server = new DebruteAppServer();
@@ -2216,7 +2297,8 @@ describe('app-server', () => {
         availability: { state: 'available', mimeType: 'image/png', canvasImagePreviewable: true, canvasImagePreviewSourceWidth: 320 }
       });
       expect(nodes.find((node) => node.projectRelativePath === 'image-production/generated/animated.gif')).toMatchObject({
-        availability: { state: 'available', mimeType: 'image/gif', canvasImagePreviewable: false }
+        mediaKind: 'unknown',
+        availability: { state: 'available', mimeType: 'text/plain' }
       });
     } finally {
       server.close();

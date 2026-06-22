@@ -1,6 +1,9 @@
 import { randomUUID } from 'node:crypto';
 import { basename } from 'node:path';
-import { writeProjectFile } from '@debrute/project-core';
+import {
+  projectImageExtensionForMimeType,
+  writeProjectFile
+} from '@debrute/project-core';
 import type { SecretsConfig, VideoModelsConfig } from '../config.js';
 import {
   createRequestTimeoutSignal,
@@ -509,17 +512,15 @@ function joinUrl(baseUrl: string, path: string): string {
 }
 
 function extensionForMimeType(mimeType: string): string {
+  const imageExtension = projectImageExtensionForMimeType(mimeType);
+  if (imageExtension) {
+    return imageExtension;
+  }
   switch (mimeType) {
     case 'video/mp4':
       return 'mp4';
-    case 'image/jpeg':
-      return 'jpg';
-    case 'image/webp':
-      return 'webp';
-    case 'image/png':
-      return 'png';
     default:
-      return mimeType.startsWith('image/') ? 'png' : 'mp4';
+      return 'bin';
   }
 }
 

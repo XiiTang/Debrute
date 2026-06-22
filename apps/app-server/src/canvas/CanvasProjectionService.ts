@@ -1,7 +1,9 @@
 import { access, open, stat } from 'node:fs/promises';
 import {
   isKnownProjectTextFilePath,
+  isSupportedProjectImagePath,
   projectFileRevision,
+  projectImageMimeTypeFromPath,
   projectTextMimeTypeFromPath,
   resolveExistingProjectPath
 } from '@debrute/project-core';
@@ -63,7 +65,7 @@ export function assertCurrentCanvasDocument(value: unknown, filePath: string): C
 
 export function canvasMediaKindFromPath(projectRelativePath: string): CanvasMediaKind {
   const lowerPath = projectRelativePath.toLowerCase();
-  if (/\.(png|jpe?g|webp|svg|gif)$/.test(lowerPath)) {
+  if (isSupportedProjectImagePath(projectRelativePath)) {
     return 'image';
   }
   if (/\.(mp4|webm|mov|m4v)$/.test(lowerPath)) {
@@ -189,20 +191,9 @@ function isCurrentCanvasNodeElement(value: unknown): value is CanvasNodeElement 
 
 function mimeTypeFromProjectPath(projectRelativePath: string, firstLine?: string): string {
   const lowerPath = projectRelativePath.toLowerCase();
-  if (lowerPath.endsWith('.png')) {
-    return 'image/png';
-  }
-  if (lowerPath.endsWith('.jpg') || lowerPath.endsWith('.jpeg')) {
-    return 'image/jpeg';
-  }
-  if (lowerPath.endsWith('.webp')) {
-    return 'image/webp';
-  }
-  if (lowerPath.endsWith('.svg')) {
-    return 'image/svg+xml';
-  }
-  if (lowerPath.endsWith('.gif')) {
-    return 'image/gif';
+  const imageMimeType = projectImageMimeTypeFromPath(projectRelativePath);
+  if (imageMimeType) {
+    return imageMimeType;
   }
   if (lowerPath.endsWith('.mp4')) {
     return 'video/mp4';

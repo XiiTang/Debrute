@@ -1,5 +1,9 @@
 import { extname } from 'node:path';
-import { readProjectFileBytes } from '@debrute/project-core';
+import {
+  projectImageMimeTypeFromDataUrl,
+  projectImageMimeTypeFromPath,
+  readProjectFileBytes
+} from '@debrute/project-core';
 import { assertPublicHttpUrl, type PublicRemoteHostLookup } from '../remoteFetchPolicy.js';
 import type { VideoModelCatalogEntry } from './catalog.js';
 
@@ -141,6 +145,9 @@ async function normalizeReference(input: {
   if (isHttpUrl(source) || source.startsWith('asset://')) {
     if (isHttpUrl(source)) {
       await assertPublicHttpUrl(source, 'Remote video reference URLs', { lookup: input.remoteUrlLookup });
+      if (mediaType === 'image' || mediaType === 'mask') {
+        assertSupportedImageUrl(source);
+      }
     }
     return { source, mediaType, url: source };
   }
@@ -150,7 +157,7 @@ async function normalizeReference(input: {
 
   const bytes = await readLocalReference(input.projectRoot, source);
   if (mediaType === 'image' || mediaType === 'mask') {
-    return { source, mediaType, url: `data:${imageMimeType(Buffer.from(bytes), source)};base64,${Buffer.from(bytes).toString('base64')}` };
+    return { source, mediaType, url: `data:${imageMimeType(source)};base64,${Buffer.from(bytes).toString('base64')}` };
   }
   if (mediaType === 'audio') {
     return { source, mediaType, url: `data:${audioMimeType(source)};base64,${Buffer.from(bytes).toString('base64')}` };
@@ -480,10 +487,11 @@ function inferMediaType(source: string): VideoReferenceMediaType | undefined {
   if (source.startsWith('data:video/')) {
     return 'video';
   }
-  const ext = extname(pathForExtension(source)).toLowerCase();
-  if (['.png', '.jpg', '.jpeg', '.webp'].includes(ext)) {
+  const extensionPath = pathForExtension(source);
+  if (projectImageMimeTypeFromPath(extensionPath)) {
     return 'image';
   }
+  const ext = extname(extensionPath).toLowerCase();
   if (['.mp4', '.mov', '.webm'].includes(ext)) {
     return 'video';
   }
@@ -497,11 +505,7 @@ function pathForExtension(source: string): string {
   if (!isHttpUrl(source)) {
     return source;
   }
-  try {
-    return new URL(source).pathname;
-  } catch {
-    return source;
-  }
+  return new URL(source).pathname;
 }
 
 function isMediaType(value: unknown): value is VideoReferenceMediaType {
@@ -513,8 +517,16 @@ function objectAt(value: unknown): Record<string, unknown> | undefined {
 }
 
 function validateDataUrl(source: string, mediaType: VideoReferenceMediaType): string {
-  if ((mediaType === 'image' || mediaType === 'mask') && source.startsWith('data:image/')) {
-    return source;
+  if (mediaType === 'image' || mediaType === 'mask') {
+    if (source.startsWith('data:image/')) {
+      const mimeType = projectImageMimeTypeFromDataUrl(source);
+      if (mimeType) {
+        return source;
+      }
+      const declaredMimeType = source.replace(/^data:/, '').split(';', 1)[0] || 'application/octet-stream';
+      throw new VideoArgumentError('video_reference_type_unsupported', `Unsupported Debrute project image data URL MIME type: ${declaredMimeType}`);
+    }
+    throw new VideoArgumentError('video_reference_type_unsupported', `Data URL MIME type is not supported for reference media type: ${mediaType}`);
   }
   if (mediaType === 'audio' && source.startsWith('data:audio/')) {
     return source;
@@ -523,20 +535,25 @@ function validateDataUrl(source: string, mediaType: VideoReferenceMediaType): st
 }
 
 function isHttpUrl(value: string): boolean {
-  return /^https?:\/\//.test(value);
+  if (!URL.canParse(value)) {
+    return false;
+  }
+  const protocol = new URL(value).protocol;
+  return protocol === 'http:' || protocol === 'https:';
 }
 
-function imageMimeType(bytes: Buffer, path: string): string {
-  if (bytes.subarray(0, 8).equals(Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]))) {
-    return 'image/png';
+function imageMimeType(path: string): string {
+  const mimeType = projectImageMimeTypeFromPath(path);
+  if (!mimeType) {
+    throw new VideoArgumentError('video_reference_type_unsupported', `Unsupported Debrute project image reference: ${path}`);
   }
-  if (bytes[0] === 0xff && bytes[1] === 0xd8) {
-    return 'image/jpeg';
+  return mimeType;
+}
+
+function assertSupportedImageUrl(source: string): void {
+  if (!projectImageMimeTypeFromPath(pathForExtension(source))) {
+    throw new VideoArgumentError('video_reference_type_unsupported', `Unsupported Debrute project image URL reference: ${source}`);
   }
-  if (/\.webp$/i.test(path)) {
-    return 'image/webp';
-  }
-  return 'image/png';
 }
 
 function audioMimeType(path: string): string {

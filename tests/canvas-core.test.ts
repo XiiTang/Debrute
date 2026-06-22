@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import {
   CANVAS_FEEDBACK_MARKS,
+  CANVAS_FEEDBACK_SCHEMA_VERSION,
   CANVAS_DOCUMENT_SCHEMA_VERSION,
   canvasNodeLayerOrderTopFirst,
   clearCanvasNodeManualLayouts,
@@ -586,13 +587,15 @@ describe('canvas-core', () => {
 
   it('normalizes Canvas feedback marks as selected-only fixed-order values', () => {
     const normalized = normalizeCanvasFeedbackDocument({
-      schemaVersion: 1,
+      schemaVersion: CANVAS_FEEDBACK_SCHEMA_VERSION,
       updatedAt: '2026-05-26T12:00:00.000Z',
       entries: {
         'flow/a.png': {
           projectRelativePath: 'flow/a.png',
           marks: ['needs_revision', 'like', 'like', 'check'],
-          note: '  Needs hand cleanup.  ',
+          comments: [],
+          nextRegionLabel: 1,
+          regions: [],
           updatedAt: '2026-05-26T12:00:00.000Z'
         }
       }
@@ -610,7 +613,9 @@ describe('canvas-core', () => {
     expect(normalized.entries['flow/a.png']).toEqual({
       projectRelativePath: 'flow/a.png',
       marks: ['like', 'check', 'needs_revision'],
-      note: 'Needs hand cleanup.',
+      comments: [],
+      nextRegionLabel: 1,
+      regions: [],
       updatedAt: '2026-05-26T12:00:00.000Z'
     });
   });
@@ -618,32 +623,34 @@ describe('canvas-core', () => {
   it('updates and deletes Canvas feedback entries as current state', () => {
     const empty = createEmptyCanvasFeedbackDocument('2026-05-26T12:00:00.000Z');
     const added = updateCanvasFeedbackEntry(empty, {
+      operation: 'set-marks',
       projectRelativePath: 'flow/a.png',
-      marks: ['cross', 'like'],
-      note: '  Keep alternate.  '
+      marks: ['cross', 'like']
     }, '2026-05-26T12:01:00.000Z');
 
     expect(added).toEqual({
-      schemaVersion: 1,
+      schemaVersion: CANVAS_FEEDBACK_SCHEMA_VERSION,
       updatedAt: '2026-05-26T12:01:00.000Z',
       entries: {
         'flow/a.png': {
           projectRelativePath: 'flow/a.png',
           marks: ['like', 'cross'],
-          note: 'Keep alternate.',
+          comments: [],
+          nextRegionLabel: 1,
+          regions: [],
           updatedAt: '2026-05-26T12:01:00.000Z'
         }
       }
     });
 
     const cleared = updateCanvasFeedbackEntry(added, {
+      operation: 'set-marks',
       projectRelativePath: 'flow/a.png',
-      marks: [],
-      note: '   '
+      marks: []
     }, '2026-05-26T12:02:00.000Z');
 
     expect(cleared).toEqual({
-      schemaVersion: 1,
+      schemaVersion: CANVAS_FEEDBACK_SCHEMA_VERSION,
       updatedAt: '2026-05-26T12:02:00.000Z',
       entries: {}
     });
@@ -651,26 +658,30 @@ describe('canvas-core', () => {
 
   it('rejects invalid Canvas feedback documents', () => {
     expect(() => normalizeCanvasFeedbackDocument({
-      schemaVersion: 1,
+      schemaVersion: CANVAS_FEEDBACK_SCHEMA_VERSION,
       updatedAt: '2026-05-26T12:00:00.000Z',
       entries: {
         'flow/a.png': {
           projectRelativePath: 'flow/a.png',
           marks: ['unknown'],
-          note: '',
+          comments: [],
+          nextRegionLabel: 1,
+          regions: [],
           updatedAt: '2026-05-26T12:00:00.000Z'
         }
       }
     })).toThrow('Invalid Canvas feedback mark: unknown');
 
     expect(() => normalizeCanvasFeedbackDocument({
-      schemaVersion: 1,
+      schemaVersion: CANVAS_FEEDBACK_SCHEMA_VERSION,
       updatedAt: '2026-05-26T12:00:00.000Z',
       entries: {
         'flow/a.png': {
           projectRelativePath: 'flow/b.png',
           marks: ['like'],
-          note: '',
+          comments: [],
+          nextRegionLabel: 1,
+          regions: [],
           updatedAt: '2026-05-26T12:00:00.000Z'
         }
       }
@@ -678,7 +689,7 @@ describe('canvas-core', () => {
 
     expect(() => updateCanvasFeedbackEntry(
       createEmptyCanvasFeedbackDocument('2026-05-26T12:00:00.000Z'),
-      { projectRelativePath: '../outside.png', marks: ['like'], note: '' },
+      { operation: 'set-marks', projectRelativePath: '../outside.png', marks: ['like'] },
       '2026-05-26T12:01:00.000Z'
     )).toThrow('Invalid Canvas feedback project-relative path: ../outside.png');
   });

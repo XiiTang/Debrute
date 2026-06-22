@@ -29,7 +29,7 @@ import {
   type WorkbenchProjectSessionSnapshot,
   type WorkbenchProjectTextFile
 } from '@debrute/app-protocol';
-import { projectFileRevision, resolveExistingProjectPath, type ProjectUploadImportEntry } from '@debrute/project-core';
+import { projectFileRevision, projectImageMimeTypeFromPath, resolveExistingProjectPath, type ProjectUploadImportEntry } from '@debrute/project-core';
 import { createAdobeBridgeDiscoveryServer } from '../adobe-bridge/AdobeBridgeDiscoveryServer.js';
 import {
   pruneAdobeBridgeTransferContents,
@@ -1960,11 +1960,8 @@ function contentTypeFromPath(path: string): string {
   if (ext === '.js' || ext === '.mjs') return 'text/javascript; charset=utf-8';
   if (ext === '.css') return 'text/css; charset=utf-8';
   if (ext === '.json') return 'application/json; charset=utf-8';
-  if (ext === '.png') return 'image/png';
-  if (ext === '.jpg' || ext === '.jpeg') return 'image/jpeg';
-  if (ext === '.webp') return 'image/webp';
-  if (ext === '.svg') return 'image/svg+xml';
-  if (ext === '.gif') return 'image/gif';
+  const imageMimeType = projectImageMimeTypeFromPath(path);
+  if (imageMimeType) return imageMimeType;
   if (ext === '.mp4') return 'video/mp4';
   if (ext === '.webm') return 'video/webm';
   return 'application/octet-stream';

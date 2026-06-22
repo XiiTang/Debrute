@@ -288,12 +288,12 @@ describe('canvas image preview service', () => {
     }
   });
 
-  it('rejects stale revisions, invalid dynamic widths, unsafe paths, and non-previewable images', async () => {
+  it('rejects stale revisions, invalid dynamic widths, unsafe paths, and unsupported image formats', async () => {
     const projectRoot = await mkdtemp(join(tmpdir(), 'debrute-canvas-preview-service-reject-'));
     try {
       await mkdir(join(projectRoot, 'images'), { recursive: true });
       await writeFile(join(projectRoot, 'images/cover.png'), await previewablePngBuffer());
-      await writeFile(join(projectRoot, 'images/vector.svg'), '<svg xmlns="http://www.w3.org/2000/svg" />', 'utf8');
+      await writeFile(join(projectRoot, 'images/animated.gif'), 'GIF89a', 'utf8');
       const service = createCanvasImagePreviewService();
       const revision = await canvasImageSourceRevision(projectRoot, 'images/cover.png');
 
@@ -329,8 +329,8 @@ describe('canvas image preview service', () => {
       })).rejects.toThrow('Project path must not contain "." or ".." segments');
       await expect(service.resolve({
         projectRoot,
-        projectRelativePath: 'images/vector.svg',
-        revision: await canvasImageSourceRevision(projectRoot, 'images/vector.svg'),
+        projectRelativePath: 'images/animated.gif',
+        revision: await canvasImageSourceRevision(projectRoot, 'images/animated.gif'),
         width: 256
       })).rejects.toThrow('not previewable');
     } finally {

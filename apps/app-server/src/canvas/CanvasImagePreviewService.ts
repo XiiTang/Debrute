@@ -4,6 +4,7 @@ import { access, mkdir, rename, stat, writeFile } from 'node:fs/promises';
 import { dirname } from 'node:path';
 import sharp from 'sharp';
 import {
+  isCanvasPreviewableProjectImagePath,
   normalizeProjectRelativePath,
   projectFileRevision,
   resolveExistingProjectPath,
@@ -377,7 +378,7 @@ function normalizePreviewProjectRelativePath(projectRelativePath: string): strin
 }
 
 function isPreviewableRasterImagePath(projectRelativePath: string): boolean {
-  return /\.(png|jpe?g|webp)$/i.test(projectRelativePath);
+  return isCanvasPreviewableProjectImagePath(projectRelativePath);
 }
 
 async function writeFileAtomic(path: string, bytes: Buffer): Promise<void> {

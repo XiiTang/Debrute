@@ -269,6 +269,18 @@ export {
 } from './adobeBridgeFileTransfer.js';
 
 export {
+  isCanvasPreviewableProjectImagePath,
+  isProjectImageReferencePath,
+  isSupportedProjectImagePath,
+  projectImageExtensionForMimeType,
+  projectImageFileTypeForPath,
+  projectImageMimeTypeFromDataUrl,
+  projectImageMimeTypeFromPath,
+  type ProjectImageFileType,
+  type ProjectImageMimeType
+} from './projectImageFileTypes.js';
+
+export {
   isKnownProjectTextFilePath,
   monacoLanguageFromProjectTextLanguage,
   projectTextFileTypeForPath,

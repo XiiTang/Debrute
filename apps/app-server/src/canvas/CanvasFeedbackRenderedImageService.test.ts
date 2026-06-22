@@ -87,6 +87,43 @@ describe('CanvasFeedbackRenderedImageService', () => {
     }
   });
 
+  it('renders numbered feedback overlays from an AVIF source image', async () => {
+    const projectRoot = await mkdtemp(join(tmpdir(), 'debrute-feedback-render-avif-'));
+    try {
+      await writeFile(join(projectRoot, 'page.avif'), await sharp({
+        create: {
+          width: 96,
+          height: 64,
+          channels: 4,
+          background: { r: 240, g: 240, b: 240, alpha: 1 }
+        }
+      }).avif().toBuffer());
+
+      const outputPath = join(projectRoot, '.debrute/reviews/rendered-feedback/page.avif.annotated.png.job-1.tmp');
+      const result = await renderCanvasFeedbackAnnotatedImage({
+        jobId: 'job-1',
+        projectRoot,
+        entry: entryFixture('page.avif'),
+        outputPath
+      });
+
+      expect(result).toMatchObject({
+        ok: true,
+        jobId: 'job-1',
+        outputPath,
+        width: 96,
+        height: 64
+      });
+      const output = await sharp(outputPath).metadata();
+      expect(output.width).toBe(96);
+      expect(output.height).toBe(64);
+      expect(output.format).toBe('png');
+      expect(await countNonBackgroundPixels(outputPath, { r: 240, g: 240, b: 240 })).toBeGreaterThan(0);
+    } finally {
+      await rm(projectRoot, { recursive: true, force: true });
+    }
+  });
+
   it('removes obsolete rendered artifacts when an entry loses all local regions', async () => {
     const projectRoot = await mkdtemp(join(tmpdir(), 'debrute-feedback-remove-'));
     try {

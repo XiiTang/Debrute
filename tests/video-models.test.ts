@@ -169,6 +169,64 @@ describe('video model executor', () => {
     }
   });
 
+  it('stores supported last-frame image MIME types with registry extensions', async () => {
+    const projectRoot = await mkdtemp(join(tmpdir(), 'debrute-video-last-frame-registry-extension-'));
+    const fetch: VideoModelFetch = async (url, init) => {
+      if (url.endsWith('/contents/generations/tasks') && init?.method === 'POST') {
+        return jsonResponse({ id: 'task-last-frame-avif', status: 'queued' });
+      }
+      if (url.endsWith('/contents/generations/tasks/task-last-frame-avif')) {
+        return jsonResponse({
+          id: 'task-last-frame-avif',
+          status: 'succeeded',
+          content: { video_url: 'https://cdn.example/video.mp4', last_frame_url: 'https://cdn.example/last-frame.avif' }
+        });
+      }
+      if (url === 'https://cdn.example/video.mp4') {
+        return new Response(tinyMp4, { status: 200, headers: { 'content-type': 'video/mp4' } });
+      }
+      if (url === 'https://cdn.example/last-frame.avif') {
+        return new Response(tinyPng, { status: 200, headers: { 'content-type': 'image/avif' } });
+      }
+      throw new Error(`unexpected URL: ${url}`);
+    };
+    try {
+      const result = await executeVideoModelRequest({
+        projectRoot,
+        invocationId: 'turn-video-last-frame-avif',
+        input: {
+          model: 'doubao-seedance-2-0-260128',
+          arguments: {
+            prompt: 'camera slowly moves across a desk',
+            return_last_frame: true
+          }
+        },
+        settings: {
+          videoModels: [{
+            debruteModelId: 'doubao-seedance-2-0-260128',
+            baseUrlOverride: null,
+            requestModelIdOverride: null
+          }]
+        },
+        secrets: { videoModelApiKeys: { 'doubao-seedance-2-0-260128': 'sk-video' } },
+        pollIntervalMs: 0,
+        fetch
+      });
+
+      expect(result.status).toBe('ok');
+      if (result.status !== 'ok') {
+        throw new Error(result.content);
+      }
+      expect(result.artifacts[1]).toMatchObject({
+        projectRelativePath: expect.stringMatching(/^generated\/turn-video-last-frame-avif\/.+\.avif$/),
+        mimeType: 'image/avif'
+      });
+      await expect(readFile(join(projectRoot, result.artifacts[1]!.projectRelativePath))).resolves.toEqual(tinyPng);
+    } finally {
+      await rm(projectRoot, { recursive: true, force: true });
+    }
+  });
+
   it('uses configured base URL overrides for video model requests', async () => {
     const projectRoot = await mkdtemp(join(tmpdir(), 'debrute-video-url-override-'));
     const calls: string[] = [];
@@ -604,6 +662,30 @@ describe('video model executor', () => {
     }
   });
 
+  it('infers supported project image formats for Seedance references through the image registry', async () => {
+    const projectRoot = await mkdtemp(join(tmpdir(), 'debrute-video-image-registry-'));
+    try {
+      await writeFile(join(projectRoot, 'first.avif'), tinyPng);
+      await writeFile(join(projectRoot, 'last.jfif'), tinyPng);
+
+      const captured = await runVideoRequestAndCaptureBody({
+        projectRoot,
+        invocationId: 'turn-video-registry-images',
+        arguments: {
+          prompt: 'animate the product',
+          intent: 'generate',
+          references: [{ source: 'first.avif' }, { source: 'last.jfif' }]
+        }
+      });
+
+      expect(captured.result.status).toBe('ok');
+      expect(JSON.stringify(captured.body?.content)).toContain(`data:image/avif;base64,${tinyPngBase64}`);
+      expect(JSON.stringify(captured.body?.content)).toContain(`data:image/jpeg;base64,${tinyPngBase64}`);
+    } finally {
+      await rm(projectRoot, { recursive: true, force: true });
+    }
+  });
+
   it('infers all-purpose reference routing from reference media types', async () => {
     const projectRoot = await mkdtemp(join(tmpdir(), 'debrute-video-reference-routing-'));
     try {
@@ -784,6 +866,81 @@ describe('video model executor', () => {
       expect(result.status).toBe('error');
       expect(result.error).toBe('video_argument_invalid');
       expect(result.content).toContain('Unsupported video reference argument: references[0].weight');
+    } finally {
+      await rm(projectRoot, { recursive: true, force: true });
+    }
+  });
+
+  it('validates video image data URLs through the image registry', async () => {
+    const projectRoot = await mkdtemp(join(tmpdir(), 'debrute-video-data-image-registry-'));
+    try {
+      const accepted = await runVideoRequestAndCaptureBody({
+        projectRoot,
+        invocationId: 'turn-video-data-avif',
+        arguments: {
+          prompt: 'animate the product',
+          intent: 'generate',
+          references: [{ source: `data:image/avif;base64,${tinyPngBase64}` }]
+        }
+      });
+
+      expect(accepted.result.status).toBe('ok');
+      expect(JSON.stringify(accepted.body?.content)).toContain(`data:image/avif;base64,${tinyPngBase64}`);
+
+      const rejected = await executeVideoModelRequest({
+        projectRoot,
+        invocationId: 'turn-video-data-gif',
+        input: {
+          model: 'doubao-seedance-2-0-260128',
+          arguments: {
+            prompt: 'reject gif',
+            intent: 'generate',
+            references: [{ source: `data:image/gif;base64,${tinyPngBase64}` }]
+          }
+        },
+        settings: {
+          videoModels: [{ debruteModelId: 'doubao-seedance-2-0-260128', baseUrlOverride: null, requestModelIdOverride: null }]
+        },
+        secrets: { videoModelApiKeys: { 'doubao-seedance-2-0-260128': 'sk-video' } },
+        fetch: async () => {
+          throw new Error('upstream request should not run for unsupported image data URLs');
+        }
+      });
+
+      expect(rejected.status).toBe('error');
+      expect(rejected.error).toBe('video_reference_type_unsupported');
+      expect(rejected.content).toContain('Unsupported Debrute project image data URL MIME type: image/gif');
+    } finally {
+      await rm(projectRoot, { recursive: true, force: true });
+    }
+  });
+
+  it('rejects unsupported video image URL paths through the image registry', async () => {
+    const projectRoot = await mkdtemp(join(tmpdir(), 'debrute-video-image-url-registry-'));
+    try {
+      const result = await executeVideoModelRequest({
+        projectRoot,
+        invocationId: 'turn-video-image-url-gif',
+        input: {
+          model: 'doubao-seedance-2-0-260128',
+          arguments: {
+            prompt: 'reject gif reference',
+            intent: 'generate',
+            references: [{ source: 'https://cdn.example/source.gif', media_type: 'image' }]
+          }
+        },
+        settings: {
+          videoModels: [{ debruteModelId: 'doubao-seedance-2-0-260128', baseUrlOverride: null, requestModelIdOverride: null }]
+        },
+        secrets: { videoModelApiKeys: { 'doubao-seedance-2-0-260128': 'sk-video' } },
+        fetch: async () => {
+          throw new Error('upstream request should not run for unsupported image URL paths');
+        }
+      });
+
+      expect(result.status).toBe('error');
+      expect(result.error).toBe('video_reference_type_unsupported');
+      expect(result.content).toBe('Unsupported Debrute project image URL reference: https://cdn.example/source.gif');
     } finally {
       await rm(projectRoot, { recursive: true, force: true });
     }

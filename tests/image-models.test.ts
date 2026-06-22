@@ -173,11 +173,11 @@ describe('image model catalog and tools', () => {
     expect(detailModels.find((model) => model.model === 'gpt-image-2')?.imageInputRules).toEqual([
       {
         field: 'image',
-        acceptedValueFormat: 'Array of Project-relative image paths, http(s) image URLs, or data:image URLs. Model-specific objects: OpenAI image objects with `image_url` or base64 `data`.'
+        acceptedValueFormat: 'Array of Project-relative image paths, http(s) image URLs, or data:image URLs. Model-specific objects: OpenAI image objects with `image_url` or base64 `data` plus `mime_type`.'
       },
       {
         field: 'mask',
-        acceptedValueFormat: 'Project-relative image path, http(s) image URL, or data:image URL. Model-specific objects: OpenAI image objects with `image_url` or base64 `data`.'
+        acceptedValueFormat: 'Project-relative image path, http(s) image URL, or data:image URL. Model-specific objects: OpenAI image objects with `image_url` or base64 `data` plus `mime_type`.'
       }
     ]);
     expect(detailModels.find((model) => model.model === 'doubao-seedream-5-0-lite-260128')?.imageInputRules).toEqual([
@@ -231,7 +231,7 @@ describe('image model catalog and tools', () => {
             },
             anyOf: [
               { required: ['image_url'] },
-              { required: ['data'] }
+              { required: ['data', 'mime_type'] }
             ]
           }
         ])
@@ -251,7 +251,7 @@ describe('image model catalog and tools', () => {
             },
             anyOf: [
               { required: ['image_url'] },
-              { required: ['data'] }
+              { required: ['data', 'mime_type'] }
             ]
           }
         ])
@@ -270,7 +270,7 @@ describe('image model catalog and tools', () => {
           },
           anyOf: [
             { required: ['image_url'] },
-            { required: ['data'] }
+            { required: ['data', 'mime_type'] }
           ]
         }
       ])
@@ -346,8 +346,8 @@ describe('image model executors', () => {
     }
   });
 
-  it('passes wan unsupported local reference image types to upstream', async () => {
-    const projectRoot = await mkdtemp(join(tmpdir(), 'debrute-image-wan-reference-type-pass-through-'));
+  it('rejects unsupported local reference image types before upstream image requests', async () => {
+    const projectRoot = await mkdtemp(join(tmpdir(), 'debrute-image-wan-reference-type-reject-'));
     let modelRuns = 0;
     try {
       await writeFile(join(projectRoot, 'source.gif'), Buffer.from('GIF89a'));
@@ -357,21 +357,17 @@ describe('image model executors', () => {
         input: { model: 'wan2.7-image', arguments: { prompt: 'use this', image: ['source.gif'] } },
         settings: { imageModels: [{ debruteModelId: 'wan2.7-image', baseUrlOverride: null, requestModelIdOverride: 'wan2.7-image' }] },
         secrets: { imageModelApiKeys: { 'wan2.7-image': 'sk-image' } },
-        fetch: async (url) => {
-          if (url === 'https://dashscope.aliyuncs.com/api/v1/services/aigc/image-generation/generation') {
-            modelRuns += 1;
-            return new Response(JSON.stringify({ output: { task_id: 'task-1' } }), { status: 200, headers: { 'content-type': 'application/json' } });
-          }
-          if (url === 'https://dashscope.aliyuncs.com/api/v1/tasks/task-1') {
-            return new Response(JSON.stringify({ output: { task_status: 'SUCCEEDED', choices: [{ message: { content: [{ image: 'https://cdn.example/out.png' }] } }] } }), { status: 200, headers: { 'content-type': 'application/json' } });
-          }
-          return new Response(tinyPng, { status: 200, headers: { 'content-type': 'image/png' } });
+        fetch: async () => {
+          modelRuns += 1;
+          throw new Error('upstream request should not run for unsupported local image types');
         },
         pollIntervalMs: 0
       });
 
-      expect(result.status).toBe('ok');
-      expect(modelRuns).toBe(1);
+      expect(result.status).toBe('error');
+      expect(result.error).toBe('invalid_image_input');
+      expect(result.content).toContain('Unsupported Debrute project image reference: source.gif');
+      expect(modelRuns).toBe(0);
     } finally {
       await rm(projectRoot, { recursive: true, force: true });
     }
@@ -519,6 +515,94 @@ describe('image model executors', () => {
     }
   });
 
+  it('uses registry MIME types for Gemini local fileData parts instead of caller MIME overrides', async () => {
+    const projectRoot = await mkdtemp(join(tmpdir(), 'debrute-image-gemini-local-registry-mime-'));
+    try {
+      await writeFile(join(projectRoot, 'source.png'), tinyPng);
+      let submittedBody: Record<string, unknown> | undefined;
+      const fetch: ImageModelFetch = async (_url, init) => {
+        submittedBody = JSON.parse(String(init?.body));
+        return jsonResponse({
+          candidates: [{ content: { parts: [{ inlineData: { mimeType: 'image/png', data: tinyPngBase64 } }] } }]
+        });
+      };
+
+      const result = await executeImageModelRequest({
+        projectRoot,
+        invocationId: 'turn-gemini-local-registry-mime',
+        input: {
+          model: 'gemini-3.1-flash-image-preview',
+          arguments: {
+            prompt: 'Use this reference',
+            contents: [{ role: 'user', parts: [{ fileData: { fileUri: 'source.png', mimeType: 'image/gif' } }] }]
+          }
+        },
+        settings: { imageModels: [] },
+        secrets: { imageModelApiKeys: { 'gemini-3.1-flash-image-preview': 'sk-gemini' } },
+        fetch
+      });
+
+      expect(result.status).toBe('ok');
+      expect(submittedBody?.contents).toEqual([{
+        role: 'user',
+        parts: [
+          { text: 'Use this reference' },
+          { inlineData: { mimeType: 'image/png', data: tinyPngBase64 } }
+        ]
+      }]);
+      expect(JSON.stringify(submittedBody)).not.toContain('image/gif');
+    } finally {
+      await rm(projectRoot, { recursive: true, force: true });
+    }
+  });
+
+  it('uses registry MIME types for Gemini remote fileData parts instead of caller MIME overrides', async () => {
+    const projectRoot = await mkdtemp(join(tmpdir(), 'debrute-image-gemini-remote-registry-mime-'));
+    try {
+      let submittedBody: Record<string, unknown> | undefined;
+      const fetch: ImageModelFetch = async (_url, init) => {
+        submittedBody = JSON.parse(String(init?.body));
+        return jsonResponse({
+          candidates: [{ content: { parts: [{ inlineData: { mimeType: 'image/png', data: tinyPngBase64 } }] } }]
+        });
+      };
+
+      const result = await executeImageModelRequest({
+        projectRoot,
+        invocationId: 'turn-gemini-remote-registry-mime',
+        input: {
+          model: 'gemini-3.1-flash-image-preview',
+          arguments: {
+            prompt: 'Use these references',
+            contents: [{
+              role: 'user',
+              parts: [
+                { fileData: { fileUri: 'https://cdn.example/source.avif?token=SIGNED', mimeType: 'image/gif' } },
+                { fileData: { fileUri: 'https://cdn.example/icon.svgz' } }
+              ]
+            }]
+          }
+        },
+        settings: { imageModels: [] },
+        secrets: { imageModelApiKeys: { 'gemini-3.1-flash-image-preview': 'sk-gemini' } },
+        fetch
+      });
+
+      expect(result.status).toBe('ok');
+      expect(submittedBody?.contents).toEqual([{
+        role: 'user',
+        parts: [
+          { text: 'Use these references' },
+          { fileData: { fileUri: 'https://cdn.example/source.avif?token=SIGNED', mimeType: 'image/avif' } },
+          { fileData: { fileUri: 'https://cdn.example/icon.svgz', mimeType: 'image/svg+xml' } }
+        ]
+      }]);
+      expect(JSON.stringify(submittedBody)).not.toContain('image/gif');
+    } finally {
+      await rm(projectRoot, { recursive: true, force: true });
+    }
+  });
+
   it('writes OpenAI image artifacts into generated/<turn-id>', async () => {
     const projectRoot = await mkdtemp(join(tmpdir(), 'debrute-image-openai-'));
     const fetch: ImageModelFetch = async (url, init) => {
@@ -546,6 +630,42 @@ describe('image model executors', () => {
       await expect(readFile(join(projectRoot, result.artifacts[0].projectRelativePath))).resolves.toBeInstanceOf(Buffer);
       expect(JSON.stringify(result.logs)).not.toContain('sk-image');
       expect(JSON.stringify(result.logs)).not.toContain(tinyPngBase64);
+    } finally {
+      await rm(projectRoot, { recursive: true, force: true });
+    }
+  });
+
+  it('stores supported generated image URL path MIME types with registry extensions', async () => {
+    const projectRoot = await mkdtemp(join(tmpdir(), 'debrute-image-artifact-registry-extension-'));
+    try {
+      const result = await executeImageModelRequest({
+        projectRoot,
+        invocationId: 'turn-artifact-avif',
+        input: { model: 'wan2.7-image', arguments: { prompt: 'make an icon' } },
+        settings: { imageModels: [{ debruteModelId: 'wan2.7-image', baseUrlOverride: null, requestModelIdOverride: 'wan2.7-image' }] },
+        secrets: { imageModelApiKeys: { 'wan2.7-image': 'sk-image' } },
+        fetch: async (url) => {
+          if (url === 'https://dashscope.aliyuncs.com/api/v1/services/aigc/image-generation/generation') {
+            return jsonResponse({ output: { task_id: 'task-avif' } });
+          }
+          if (url === 'https://dashscope.aliyuncs.com/api/v1/tasks/task-avif') {
+            return jsonResponse({ output: { task_status: 'SUCCEEDED', choices: [{ message: { content: [{ image: 'https://cdn.example/out.avif?token=SIGNED' }] } }] } });
+          }
+          expect(url).toBe('https://cdn.example/out.avif?token=SIGNED');
+          return new Response(await imageFixture({ width: 12, height: 10, channels: 4, alpha: 1, format: 'avif' }), {
+            status: 200,
+            headers: { 'content-type': 'application/octet-stream' }
+          });
+        },
+        pollIntervalMs: 0
+      });
+
+      expect(result.status).toBe('ok');
+      expect(result.artifacts[0]).toMatchObject({
+        projectRelativePath: expect.stringMatching(/^generated\/turn-artifact-avif\/.+\.avif$/),
+        mimeType: 'image/avif'
+      });
+      await expect(readFile(join(projectRoot, result.artifacts[0].projectRelativePath))).resolves.toBeInstanceOf(Buffer);
     } finally {
       await rm(projectRoot, { recursive: true, force: true });
     }
@@ -754,6 +874,48 @@ describe('image model executors', () => {
     }
   });
 
+  it('passes supported project image aliases to OpenAI edits with registry MIME types', async () => {
+    const projectRoot = await mkdtemp(join(tmpdir(), 'debrute-image-openai-registry-inputs-'));
+    try {
+      await writeFile(join(projectRoot, 'source.avif'), await imageFixture({ width: 16, height: 16, channels: 4, alpha: 1, format: 'avif' }));
+      await writeFile(join(projectRoot, 'mask.jfif'), await imageFixture({ width: 16, height: 16, channels: 3, format: 'jpeg' }));
+      const seenFiles: Array<{ name: string; type: string }> = [];
+
+      const result = await executeImageModelRequest({
+        projectRoot,
+        invocationId: 'turn-openai-registry-inputs',
+        input: {
+          model: 'gpt-image-2',
+          arguments: {
+            prompt: 'retouch the image',
+            image: ['source.avif'],
+            mask: 'mask.jfif'
+          }
+        },
+        settings: { imageModels: [{ debruteModelId: 'gpt-image-2', baseUrlOverride: null, requestModelIdOverride: 'gpt-image-2' }] },
+        secrets: { imageModelApiKeys: { 'gpt-image-2': 'sk-image' } },
+        fetch: async (url, init) => {
+          expect(url).toBe('https://api.openai.com/v1/images/edits');
+          expect(init?.body).toBeInstanceOf(FormData);
+          for (const [_key, value] of (init!.body as FormData).entries()) {
+            if (value instanceof File) {
+              seenFiles.push({ name: value.name, type: value.type });
+            }
+          }
+          return jsonResponse({ data: [{ b64_json: tinyPngBase64 }] });
+        }
+      });
+
+      expect(result.status).toBe('ok');
+      expect(seenFiles).toEqual([
+        { name: 'image-0.avif', type: 'image/avif' },
+        { name: 'mask.jpg', type: 'image/jpeg' }
+      ]);
+    } finally {
+      await rm(projectRoot, { recursive: true, force: true });
+    }
+  });
+
   it('passes OpenAI object data edit masks to upstream without physical validation', async () => {
     const projectRoot = await mkdtemp(join(tmpdir(), 'debrute-image-openai-mask-data-pass-through-'));
     let modelRuns = 0;
@@ -767,8 +929,8 @@ describe('image model executors', () => {
           model: 'gpt-image-2',
           arguments: {
             prompt: 'retouch the image',
-            image: [{ data: image.toString('base64') }],
-            mask: { data: mask.toString('base64') }
+            image: [{ data: image.toString('base64'), mime_type: 'image/png' }],
+            mask: { data: mask.toString('base64'), mime_type: 'image/webp' }
           }
         },
         settings: { imageModels: [{ debruteModelId: 'gpt-image-2', baseUrlOverride: null, requestModelIdOverride: 'gpt-image-2' }] },
@@ -783,6 +945,38 @@ describe('image model executors', () => {
 
       expect(result.status).toBe('ok');
       expect(modelRuns).toBe(1);
+    } finally {
+      await rm(projectRoot, { recursive: true, force: true });
+    }
+  });
+
+  it('rejects OpenAI raw object data image inputs without declared registry MIME types', async () => {
+    const projectRoot = await mkdtemp(join(tmpdir(), 'debrute-image-openai-raw-data-missing-mime-'));
+    let modelRuned = false;
+    const fetch: ImageModelFetch = async () => {
+      modelRuned = true;
+      throw new Error('model fetch should not be called for raw image data without MIME types');
+    };
+    try {
+      const result = await executeImageModelRequest({
+        projectRoot,
+        invocationId: 'turn-openai-raw-data-missing-mime',
+        input: {
+          model: 'gpt-image-2',
+          arguments: {
+            prompt: 'retouch the image',
+            image: [{ data: tinyPngBase64 }]
+          }
+        },
+        settings: { imageModels: [{ debruteModelId: 'gpt-image-2', baseUrlOverride: null, requestModelIdOverride: 'gpt-image-2' }] },
+        secrets: { imageModelApiKeys: { 'gpt-image-2': 'sk-image' } },
+        fetch
+      });
+
+      expect(result.status).toBe('error');
+      expect(result.error).toBe('invalid_image_input');
+      expect(result.content).toBe('Raw image data objects must include a registry-supported mime_type.');
+      expect(modelRuned).toBe(false);
     } finally {
       await rm(projectRoot, { recursive: true, force: true });
     }
@@ -948,6 +1142,147 @@ describe('image model executors', () => {
       expect(result.error).toBe('invalid_image_input');
       expect(result.content).toBe('Remote image URLs must not target local or private network hosts: http://127.0.0.1/private.png');
       expect(modelRuned).toBe(false);
+    } finally {
+      await rm(projectRoot, { recursive: true, force: true });
+    }
+  });
+
+  it('validates data:image MIME types against the project image registry', async () => {
+    const projectRoot = await mkdtemp(join(tmpdir(), 'debrute-image-data-url-registry-'));
+    let acceptedRuns = 0;
+    try {
+      const accepted = await executeImageModelRequest({
+        projectRoot,
+        invocationId: 'turn-image-data-url-avif',
+        input: {
+          model: 'wan2.7-image',
+          arguments: { prompt: 'use this', image: [`data:image/avif;base64,${tinyPngBase64}`] }
+        },
+        settings: { imageModels: [{ debruteModelId: 'wan2.7-image', baseUrlOverride: null, requestModelIdOverride: 'wan2.7-image' }] },
+        secrets: { imageModelApiKeys: { 'wan2.7-image': 'sk-image' } },
+        fetch: async (url) => {
+          if (url === 'https://dashscope.aliyuncs.com/api/v1/services/aigc/image-generation/generation') {
+            acceptedRuns += 1;
+            return jsonResponse({ output: { task_id: 'task-1' } });
+          }
+          if (url === 'https://dashscope.aliyuncs.com/api/v1/tasks/task-1') {
+            return jsonResponse({ output: { task_status: 'SUCCEEDED', choices: [{ message: { content: [{ image: 'https://cdn.example/out.png' }] } }] } });
+          }
+          return pngResponse();
+        },
+        pollIntervalMs: 0
+      });
+
+      expect(accepted.status).toBe('ok');
+      expect(acceptedRuns).toBe(1);
+
+      const rejected = await executeImageModelRequest({
+        projectRoot,
+        invocationId: 'turn-image-data-url-gif',
+        input: {
+          model: 'wan2.7-image',
+          arguments: { prompt: 'use this', image: [`data:image/gif;base64,${tinyPngBase64}`] }
+        },
+        settings: { imageModels: [{ debruteModelId: 'wan2.7-image', baseUrlOverride: null, requestModelIdOverride: 'wan2.7-image' }] },
+        secrets: { imageModelApiKeys: { 'wan2.7-image': 'sk-image' } },
+        fetch: async () => {
+          throw new Error('upstream request should not run for unsupported data image types');
+        },
+        pollIntervalMs: 0
+      });
+
+      expect(rejected.status).toBe('error');
+      expect(rejected.error).toBe('invalid_image_input');
+      expect(rejected.content).toContain('Unsupported Debrute project image data URL MIME type: image/gif');
+
+      const objectRejected = await executeImageModelRequest({
+        projectRoot,
+        invocationId: 'turn-image-object-data-url-gif',
+        input: {
+          model: 'gpt-image-2',
+          arguments: {
+            prompt: 'use this',
+            image: [{ image_url: `data:image/gif;base64,${tinyPngBase64}` }]
+          }
+        },
+        settings: { imageModels: [{ debruteModelId: 'gpt-image-2', baseUrlOverride: null, requestModelIdOverride: 'gpt-image-2' }] },
+        secrets: { imageModelApiKeys: { 'gpt-image-2': 'sk-image' } },
+        fetch: async () => {
+          throw new Error('upstream request should not run for unsupported object data image types');
+        }
+      });
+
+      expect(objectRejected.status).toBe('error');
+      expect(objectRejected.error).toBe('invalid_image_input');
+      expect(objectRejected.content).toContain('Unsupported Debrute project image data URL MIME type: image/gif');
+
+      const rawObjectRejected = await executeImageModelRequest({
+        projectRoot,
+        invocationId: 'turn-image-object-raw-gif',
+        input: {
+          model: 'gpt-image-2',
+          arguments: {
+            prompt: 'use this',
+            image: [{ data: tinyPngBase64, mime_type: 'image/gif' }]
+          }
+        },
+        settings: { imageModels: [{ debruteModelId: 'gpt-image-2', baseUrlOverride: null, requestModelIdOverride: 'gpt-image-2' }] },
+        secrets: { imageModelApiKeys: { 'gpt-image-2': 'sk-image' } },
+        fetch: async () => {
+          throw new Error('upstream request should not run for unsupported raw object image types');
+        }
+      });
+
+      expect(rawObjectRejected.status).toBe('error');
+      expect(rawObjectRejected.error).toBe('invalid_image_input');
+      expect(rawObjectRejected.content).toContain('Unsupported Debrute project image MIME type: image/gif');
+    } finally {
+      await rm(projectRoot, { recursive: true, force: true });
+    }
+  });
+
+  it('rejects unsupported remote image URL paths through the project image registry', async () => {
+    const projectRoot = await mkdtemp(join(tmpdir(), 'debrute-image-url-registry-'));
+    try {
+      const rejected = await executeImageModelRequest({
+        projectRoot,
+        invocationId: 'turn-image-url-gif',
+        input: {
+          model: 'wan2.7-image',
+          arguments: { prompt: 'use this', image: ['https://cdn.example/source.gif'] }
+        },
+        settings: { imageModels: [{ debruteModelId: 'wan2.7-image', baseUrlOverride: null, requestModelIdOverride: 'wan2.7-image' }] },
+        secrets: { imageModelApiKeys: { 'wan2.7-image': 'sk-image' } },
+        fetch: async () => {
+          throw new Error('upstream request should not run for unsupported image URL paths');
+        },
+        pollIntervalMs: 0
+      });
+
+      expect(rejected.status).toBe('error');
+      expect(rejected.error).toBe('invalid_image_input');
+      expect(rejected.content).toBe('Unsupported Debrute project image URL reference: https://cdn.example/source.gif');
+
+      const objectRejected = await executeImageModelRequest({
+        projectRoot,
+        invocationId: 'turn-image-object-url-gif',
+        input: {
+          model: 'gpt-image-2',
+          arguments: {
+            prompt: 'use this',
+            image: [{ image_url: 'https://cdn.example/source.gif' }]
+          }
+        },
+        settings: { imageModels: [{ debruteModelId: 'gpt-image-2', baseUrlOverride: null, requestModelIdOverride: 'gpt-image-2' }] },
+        secrets: { imageModelApiKeys: { 'gpt-image-2': 'sk-image' } },
+        fetch: async () => {
+          throw new Error('upstream request should not run for unsupported object image URL paths');
+        }
+      });
+
+      expect(objectRejected.status).toBe('error');
+      expect(objectRejected.error).toBe('invalid_image_input');
+      expect(objectRejected.content).toBe('Unsupported Debrute project image URL reference: https://cdn.example/source.gif');
     } finally {
       await rm(projectRoot, { recursive: true, force: true });
     }
@@ -2066,7 +2401,7 @@ function imageFixture(input: {
   height: number;
   channels: 3 | 4;
   alpha?: number;
-  format?: 'png' | 'webp';
+  format?: 'png' | 'webp' | 'jpeg' | 'avif' | 'tiff';
 }): Promise<Buffer> {
   const create = input.channels === 4
     ? {
@@ -2082,7 +2417,11 @@ function imageFixture(input: {
         background: { r: 255, g: 255, b: 255 }
       };
   const pipeline = sharp({ create });
-  return input.format === 'webp' ? pipeline.webp().toBuffer() : pipeline.png().toBuffer();
+  if (input.format === 'webp') return pipeline.webp().toBuffer();
+  if (input.format === 'jpeg') return pipeline.jpeg().toBuffer();
+  if (input.format === 'avif') return pipeline.avif().toBuffer();
+  if (input.format === 'tiff') return pipeline.tiff().toBuffer();
+  return pipeline.png().toBuffer();
 }
 
 function sleep(ms: number): Promise<void> {

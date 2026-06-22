@@ -1,6 +1,12 @@
 import { randomUUID } from 'node:crypto';
-import { basename, extname } from 'node:path';
-import { readProjectFileBytes, writeProjectFile } from '@debrute/project-core';
+import { basename } from 'node:path';
+import {
+  projectImageExtensionForMimeType,
+  projectImageMimeTypeFromDataUrl,
+  projectImageMimeTypeFromPath,
+  readProjectFileBytes,
+  writeProjectFile
+} from '@debrute/project-core';
 import type { ImageModelsConfig, SecretsConfig } from '../config.js';
 import {
   fetchWithRequestTimeout,
@@ -790,28 +796,31 @@ async function normalizeGeminiPart(
   }
   if (/^https?:\/\//.test(fileUri)) {
     await assertPublicHttpUrl(fileUri, 'Remote image URLs', { lookup: remoteUrlLookup });
-    return item;
+    const mimeType = supportedProjectImageUrlMimeType(fileUri);
+    return { ...item, fileData: { ...fileData, mimeType } };
   }
   if (fileUri.startsWith('data:image/')) {
-    return { inlineData: inlineDataFromDataImageUrl(fileUri, stringValueAt(fileData, 'mimeType')) };
+    return { inlineData: inlineDataFromDataImageUrl(fileUri) };
   }
   const bytes = await readImageInputProjectFileBytes(projectRoot, fileUri);
   const content = bufferForBytes(bytes);
+  const mimeType = supportedProjectImageMimeType(fileUri);
   return {
     inlineData: {
-      mimeType: stringValueAt(fileData, 'mimeType') ?? detectMimeType(content, fileUri),
+      mimeType,
       data: content.toString('base64')
     }
   };
 }
 
-function inlineDataFromDataImageUrl(value: string, fallbackMimeType: string | undefined): Record<string, string> {
-  const [header, payload] = value.split(',', 2);
+function inlineDataFromDataImageUrl(value: string): Record<string, string> {
+  const [, payload] = value.split(',', 2);
   if (!payload) {
     throw new Error('Gemini data:image fileUri must include a base64 payload.');
   }
+  const mimeType = supportedDataImageMimeType(value);
   return {
-    mimeType: header?.replace(/^data:/, '').split(';', 1)[0] || fallbackMimeType || 'image/png',
+    mimeType,
     data: payload
   };
 }
@@ -873,7 +882,7 @@ async function resolveImageInputs(
         if (!modelSpecificObjectKind || !isSupportedModelSpecificImageInputObject(imageInput, modelSpecificObjectKind)) {
           throw new Error(`Unsupported model-specific image input object for field "${field}".`);
         }
-        await assertModelSpecificImageInputUrlsArePublic(imageInput, remoteUrlLookup);
+        await assertModelSpecificImageInputReferencesAreSupported(imageInput, remoteUrlLookup);
         resolved.push(imageInput);
         continue;
       }
@@ -881,15 +890,15 @@ async function resolveImageInputs(
     }
     if (/^https?:\/\//.test(input)) {
       await assertPublicHttpUrl(input, 'Remote image URLs', { lookup: remoteUrlLookup });
-      resolved.push({ image_url: input, mime_type: mimeTypeFromPath(input) });
+      resolved.push({ image_url: input, mime_type: supportedProjectImageUrlMimeType(input) });
       continue;
     }
     if (input.startsWith('data:image/')) {
-      resolved.push({ image_url: input, mime_type: mimeTypeFromPath(input) });
+      resolved.push({ image_url: input, mime_type: supportedDataImageMimeType(input) });
       continue;
     }
     const bytes = await readImageInputProjectFileBytes(projectRoot, input);
-    resolved.push({ data: Buffer.from(bytes).toString('base64'), mime_type: detectMimeType(Buffer.from(bytes), input) });
+    resolved.push({ data: Buffer.from(bytes).toString('base64'), mime_type: supportedProjectImageMimeType(input) });
   }
   return resolved;
 }
@@ -910,7 +919,7 @@ async function resolveGptImage2ImageInputs(
         if (!modelSpecificObjectKind || !isSupportedModelSpecificImageInputObject(imageInput, modelSpecificObjectKind)) {
           throw new Error(`Unsupported model-specific image input object for field "${field}".`);
         }
-        await assertModelSpecificImageInputUrlsArePublic(imageInput, remoteUrlLookup);
+        await assertModelSpecificImageInputReferencesAreSupported(imageInput, remoteUrlLookup);
         resolved.push(imageInput);
         continue;
       }
@@ -918,18 +927,17 @@ async function resolveGptImage2ImageInputs(
     }
     if (/^https?:\/\//.test(input)) {
       await assertPublicHttpUrl(input, 'Remote image URLs', { lookup: remoteUrlLookup });
-      resolved.push({ image_url: input, mime_type: mimeTypeFromPath(input) });
+      resolved.push({ image_url: input, mime_type: supportedProjectImageUrlMimeType(input) });
       continue;
     }
     if (input.startsWith('data:image/')) {
-      resolved.push({ image_url: input, mime_type: mimeTypeFromPath(input) });
+      resolved.push({ image_url: input, mime_type: supportedDataImageMimeType(input) });
       continue;
     }
     const bytes = await readImageInputProjectFileBytes(projectRoot, input);
-    const content = bufferForBytes(bytes);
     resolved.push({
       bytes,
-      mime_type: detectMimeType(content, input),
+      mime_type: supportedProjectImageMimeType(input),
       source_kind: 'project-file',
       project_relative_path: input.replaceAll('\\', '/').replace(/^\.\//, '')
     });
@@ -1111,11 +1119,11 @@ function toImageUrlOrDataUrl(image: Record<string, unknown>): string {
   const imageUrl = stringValueAt(image, 'image_url');
   const data = stringValueAt(image, 'data');
   const imageFile = stringValueAt(image, 'image_file');
-  const mimeType = stringValueAt(image, 'mime_type') || 'image/png';
   if (imageUrl) {
     return imageUrl;
   }
   if (data) {
+    const mimeType = rawImageDataObjectMimeType(image);
     return `data:${mimeType};base64,${data}`;
   }
   if (imageFile) {
@@ -1126,8 +1134,8 @@ function toImageUrlOrDataUrl(image: Record<string, unknown>): string {
 
 async function inlineImageBytes(state: RequestState, image: Record<string, unknown>): Promise<ImagePayload> {
   const bytes = image.bytes;
-  const mimeType = stringValueAt(image, 'mime_type') || 'image/png';
   if (bytes instanceof Uint8Array) {
+    const mimeType = rawImageDataObjectMimeType(image);
     return {
       data: bytes,
       mimeType,
@@ -1143,11 +1151,12 @@ async function inlineImageBytes(state: RequestState, image: Record<string, unkno
   const data = stringValueAt(image, 'data');
   const imageUrl = stringValueAt(image, 'image_url');
   if (data) {
+    const mimeType = rawImageDataObjectMimeType(image);
     return { data: Buffer.from(data, 'base64'), mimeType };
   }
   if (imageUrl?.startsWith('data:')) {
-    const [header, payload] = imageUrl.split(',', 2);
-    const dataUrlMimeType = header?.replace(/^data:/, '').split(';')[0] || 'image/png';
+    const [, payload] = imageUrl.split(',', 2);
+    const dataUrlMimeType = supportedDataImageMimeType(imageUrl);
     const decoded = Buffer.from(payload ?? '', 'base64');
     return {
       data: decoded,
@@ -1227,8 +1236,8 @@ function detectMimeType(content: Buffer, sourceName: string, headers?: Headers):
   if (headerMime?.startsWith('image/')) {
     return headerMime;
   }
-  const fromPath = mimeTypeFromPath(sourceName);
-  if (fromPath !== 'application/octet-stream') {
+  const fromPath = projectImageMimeTypeFromPath(pathForImageExtension(sourceName));
+  if (fromPath) {
     return fromPath;
   }
   if (content.subarray(0, PNG_SIGNATURE.length).equals(PNG_SIGNATURE)) {
@@ -1239,29 +1248,6 @@ function detectMimeType(content: Buffer, sourceName: string, headers?: Headers):
   }
   if (content.subarray(0, 4).toString('ascii') === 'RIFF' && content.subarray(8, 12).toString('ascii') === 'WEBP') {
     return 'image/webp';
-  }
-  if (content.subarray(0, 2).toString('ascii') === 'BM') {
-    return 'image/bmp';
-  }
-  return 'application/octet-stream';
-}
-
-function mimeTypeFromPath(path: string): string {
-  if (path.startsWith('data:')) {
-    return path.replace(/^data:/, '').split(';', 1)[0] || 'application/octet-stream';
-  }
-  const extension = extname(path).toLowerCase();
-  if (extension === '.png') {
-    return 'image/png';
-  }
-  if (extension === '.jpg' || extension === '.jpeg') {
-    return 'image/jpeg';
-  }
-  if (extension === '.webp') {
-    return 'image/webp';
-  }
-  if (extension === '.bmp') {
-    return 'image/bmp';
   }
   return 'application/octet-stream';
 }
@@ -1304,19 +1290,7 @@ function detectWebpDimensions(content: Buffer): [number, number] {
 }
 
 function extensionForMimeType(mimeType: string): string {
-  if (mimeType === 'image/jpeg') {
-    return 'jpg';
-  }
-  if (mimeType === 'image/webp') {
-    return 'webp';
-  }
-  if (mimeType === 'image/png') {
-    return 'png';
-  }
-  if (mimeType === 'image/bmp') {
-    return 'bmp';
-  }
-  return 'bin';
+  return projectImageExtensionForMimeType(mimeType) ?? 'bin';
 }
 
 function joinUrl(base: string, path: string): string {
@@ -1393,16 +1367,79 @@ function isSupportedModelSpecificImageInputObject(image: Record<string, unknown>
     && hasHttpOrDataImageStringPayload(image, 'image_file');
 }
 
-async function assertModelSpecificImageInputUrlsArePublic(
+async function assertModelSpecificImageInputReferencesAreSupported(
   image: Record<string, unknown>,
   remoteUrlLookup: PublicRemoteHostLookup | undefined
 ): Promise<void> {
+  const mimeType = stringValueAt(image, 'mime_type');
+  if (mimeType) {
+    supportedProjectImageMimeTypeValue(mimeType);
+  }
+  if (stringValueAt(image, 'data') && !mimeType) {
+    throw new Error('Raw image data objects must include a registry-supported mime_type.');
+  }
   for (const key of ['image_url', 'image_file']) {
     const value = stringValueAt(image, key);
-    if (value && /^https?:\/\//.test(value)) {
+    if (!value) {
+      continue;
+    }
+    if (/^https?:\/\//.test(value)) {
       await assertPublicHttpUrl(value, 'Remote image URLs', { lookup: remoteUrlLookup });
+      supportedProjectImageUrlMimeType(value);
+      continue;
+    }
+    if (value.startsWith('data:image/')) {
+      supportedDataImageMimeType(value);
     }
   }
+}
+
+function supportedProjectImageMimeTypeValue(mimeType: string): string {
+  const normalized = mimeType.trim().toLowerCase();
+  if (!projectImageExtensionForMimeType(normalized)) {
+    throw new Error(`Unsupported Debrute project image MIME type: ${mimeType}`);
+  }
+  return normalized;
+}
+
+function rawImageDataObjectMimeType(image: Record<string, unknown>): string {
+  const mimeType = stringValueAt(image, 'mime_type');
+  if (!mimeType) {
+    throw new Error('Raw image data objects must include a registry-supported mime_type.');
+  }
+  return supportedProjectImageMimeTypeValue(mimeType);
+}
+
+function supportedProjectImageMimeType(projectRelativePath: string): string {
+  const mimeType = projectImageMimeTypeFromPath(projectRelativePath);
+  if (!mimeType) {
+    throw new Error(`Unsupported Debrute project image reference: ${projectRelativePath}`);
+  }
+  return mimeType;
+}
+
+function supportedProjectImageUrlMimeType(url: string): string {
+  const mimeType = projectImageMimeTypeFromPath(pathForImageExtension(url));
+  if (!mimeType) {
+    throw new Error(`Unsupported Debrute project image URL reference: ${url}`);
+  }
+  return mimeType;
+}
+
+function supportedDataImageMimeType(value: string): string {
+  const mimeType = projectImageMimeTypeFromDataUrl(value);
+  if (mimeType) {
+    return mimeType;
+  }
+  const declaredMimeType = value.replace(/^data:/, '').split(';', 1)[0] || 'application/octet-stream';
+  throw new Error(`Unsupported Debrute project image data URL MIME type: ${declaredMimeType}`);
+}
+
+function pathForImageExtension(source: string): string {
+  if (!/^https?:\/\//.test(source)) {
+    return source;
+  }
+  return new URL(source).pathname;
 }
 
 function hasOnlyKeys(image: Record<string, unknown>, allowedKeys: string[]): boolean {

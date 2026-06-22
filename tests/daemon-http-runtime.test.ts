@@ -5,6 +5,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import { DebruteAppServer } from '@debrute/app-server';
 import { createDebruteDaemonHttpServer } from '@debrute/daemon';
 import type { AppServerEvent } from '@debrute/app-protocol';
+import { projectFileRevision } from '@debrute/project-core';
 import sharp from 'sharp';
 
 const SHORT_PROJECT_IDLE_TTL_MS = 200;
@@ -529,6 +530,58 @@ describe('daemon HTTP runtime', () => {
     await expect(response.json()).resolves.toMatchObject({
       error: { code: 'missing_revision' }
     });
+  });
+
+  it('serves supported project image formats with registry content types', async () => {
+    const projectRoot = await mkdtemp(join(tmpdir(), 'debrute-daemon-image-content-types-'));
+    await mkdir(join(projectRoot, 'assets'), { recursive: true });
+    await writeFile(join(projectRoot, 'assets/photo.jpe'), 'jpeg-bytes', 'utf8');
+    await writeFile(join(projectRoot, 'assets/photo.jfif'), 'jpeg-bytes', 'utf8');
+    await writeFile(join(projectRoot, 'assets/render.avif'), 'avif-bytes', 'utf8');
+    await writeFile(join(projectRoot, 'assets/scan.tif'), 'tiff-bytes', 'utf8');
+    await writeFile(join(projectRoot, 'assets/scan.tiff'), 'tiff-bytes', 'utf8');
+    await writeFile(join(projectRoot, 'assets/icon.svgz'), 'svgz-bytes', 'utf8');
+    await writeFile(join(projectRoot, 'assets/animated.gif'), 'gif-bytes', 'utf8');
+
+    const daemon = createDebruteDaemonHttpServer({
+      host: '127.0.0.1',
+      port: 0,
+      token: 'test-token',
+      webBaseUrl: null
+    });
+    cleanups.push(() => daemon.close(), () => rm(projectRoot, { recursive: true, force: true }));
+    const runtime = await daemon.listen();
+    const opened = await requestJson<{ projectId: string; projectRevision: number }>(`${runtime.daemonUrl}/api/projects/open`, {
+      method: 'POST',
+      headers: {
+        'content-type': 'application/json',
+        'x-debrute-daemon-token': 'test-token'
+      },
+      body: JSON.stringify({ projectRoot })
+    });
+
+    for (const [path, contentType] of [
+      ['assets/photo.jpe', 'image/jpeg'],
+      ['assets/photo.jfif', 'image/jpeg'],
+      ['assets/render.avif', 'image/avif'],
+      ['assets/scan.tif', 'image/tiff'],
+      ['assets/scan.tiff', 'image/tiff'],
+      ['assets/icon.svgz', 'image/svg+xml']
+    ] as const) {
+      const fileStat = await stat(join(projectRoot, path));
+      const revision = projectFileRevision(fileStat.size, fileStat.mtimeMs);
+      const response = await apiFetch(`${runtime.daemonUrl}/api/projects/${opened.projectId}/files/raw/${path}?v=${revision}`);
+      expect(response.status).toBe(200);
+      expect(response.headers.get('content-type')).toBe(contentType);
+      await response.arrayBuffer();
+    }
+
+    const gifStat = await stat(join(projectRoot, 'assets/animated.gif'));
+    const gifRevision = projectFileRevision(gifStat.size, gifStat.mtimeMs);
+    const gif = await apiFetch(`${runtime.daemonUrl}/api/projects/${opened.projectId}/files/raw/assets/animated.gif?v=${gifRevision}`);
+    expect(gif.status).toBe(200);
+    expect(gif.headers.get('content-type')).toBe('application/octet-stream');
+    await gif.arrayBuffer();
   });
 
   it('protects native project path operations with daemon token and validates project paths', async () => {
