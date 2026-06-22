@@ -10,13 +10,15 @@ describe('appServerEvents', () => {
       projectId: 'project-live-id',
       projectRevision: 2,
       feedback: {
-        schemaVersion: 1,
+        schemaVersion: 2,
         updatedAt: '2026-06-12T00:00:00.000Z',
         entries: {
           'brief.md': {
             projectRelativePath: 'brief.md',
             marks: ['like'],
             note: 'Good',
+            nextRegionLabel: 1,
+            regions: [],
             updatedAt: '2026-06-12T00:00:00.000Z'
           }
         }

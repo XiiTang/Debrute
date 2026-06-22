@@ -4,6 +4,7 @@ import { createCanvasFeedbackEntryUpdater } from './canvasFeedbackUpdates';
 
 describe('canvas feedback updates', () => {
   const input: UpdateCanvasFeedbackEntryInput = {
+    operation: 'set-entry',
     projectRelativePath: 'flow/a.png',
     marks: ['like'],
     note: ''
@@ -20,7 +21,7 @@ describe('canvas feedback updates', () => {
       notifyUnavailable: (message) => notifications.push(message)
     });
 
-    await updateCanvasFeedbackEntry(input);
+    await expect(updateCanvasFeedbackEntry(input)).resolves.toBe(false);
 
     expect(applied).toEqual([]);
     expect(notifications).toEqual(['Canvas feedback unavailable: invalid feedback file']);
@@ -38,30 +39,36 @@ describe('canvas feedback updates', () => {
 
     const firstUpdate = updateCanvasFeedbackEntry(input);
     const secondUpdate = updateCanvasFeedbackEntry({
+      operation: 'add-region',
       projectRelativePath: 'flow/b.png',
-      marks: ['cross'],
-      note: ''
+      region: {
+        kind: 'pin',
+        geometry: { type: 'point', x: 0.2, y: 0.3 },
+        comment: 'fix face'
+      }
     });
 
     first.resolve(feedbackDocument('flow/a.png'));
-    await firstUpdate;
+    await expect(firstUpdate).resolves.toBe(false);
     expect(applied).toEqual([]);
 
     second.resolve(feedbackDocument('flow/b.png'));
-    await secondUpdate;
+    await expect(secondUpdate).resolves.toBe(true);
     expect(applied).toEqual([feedbackDocument('flow/b.png')]);
   });
 });
 
 function feedbackDocument(projectRelativePath: string): CanvasFeedbackDocument {
   return {
-    schemaVersion: 1,
+    schemaVersion: 2,
     updatedAt: '2026-05-26T12:00:00.000Z',
     entries: {
       [projectRelativePath]: {
         projectRelativePath,
         marks: ['like'],
         note: '',
+        nextRegionLabel: 1,
+        regions: [],
         updatedAt: '2026-05-26T12:00:00.000Z'
       }
     }

@@ -1,0 +1,332 @@
+import { mkdir, mkdtemp, rm, stat, writeFile } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
+import { dirname, join } from 'node:path';
+import sharp from 'sharp';
+import { describe, expect, it } from 'vitest';
+import { canvasFeedbackRenderedProjectPath } from '@debrute/canvas-core';
+import { normalizeFileWatchEvent, type NormalizedFileWatchEvent } from '@debrute/project-core';
+import { DebruteAppServer } from './DebruteAppServer';
+import {
+  CanvasFeedbackRenderCancelledError,
+  type CanvasFeedbackRenderRunner
+} from '../canvas/CanvasFeedbackRenderedImageScheduler';
+import type { CanvasFeedbackRenderJobInput, CanvasFeedbackRenderJobResult } from '../canvas/CanvasFeedbackRenderedImageWorkerProtocol';
+
+const NOW = '2026-06-21T12:00:00.000Z';
+
+describe('DebruteAppServer Canvas feedback materialization', () => {
+  it('queues rendered Canvas feedback artifacts when opening a project without waiting for publication', async () => {
+    const projectRoot = await mkdtemp(join(tmpdir(), 'debrute-open-feedback-'));
+    const runner = new ManualRenderRunner();
+    const server = new DebruteAppServer({ canvasFeedbackRenderRunner: runner });
+    try {
+      await writeImageFixture(projectRoot, 'page.png');
+      await writeFeedbackDocument(projectRoot, ['page.png']);
+
+      await server.openProject(projectRoot, {
+        initializeIfMissing: true,
+        createDefaultCanvas: true,
+        watchFiles: false
+      });
+
+      expect(runner.jobs).toHaveLength(1);
+      expect(runner.jobs[0]!.input.entry.projectRelativePath).toBe('page.png');
+      await expect(stat(join(projectRoot, canvasFeedbackRenderedProjectPath('page.png')))).rejects.toMatchObject({ code: 'ENOENT' });
+    } finally {
+      server.close();
+      await rm(projectRoot, { recursive: true, force: true });
+    }
+  });
+
+  it('emits accepted feedback immediately when GUI feedback changes', async () => {
+    const projectRoot = await mkdtemp(join(tmpdir(), 'debrute-update-feedback-'));
+    const runner = new ManualRenderRunner();
+    const server = new DebruteAppServer({ canvasFeedbackRenderRunner: runner });
+    const feedbackChanges: unknown[] = [];
+    server.onEvent((event) => {
+      if (event.type === 'canvas.feedback.changed') {
+        feedbackChanges.push(event.feedback);
+      }
+    });
+    try {
+      await writeImageFixture(projectRoot, 'page.png');
+      await server.openProject(projectRoot, {
+        initializeIfMissing: true,
+        createDefaultCanvas: true,
+        watchFiles: false
+      });
+
+      const feedback = await server.updateCanvasFeedbackEntry({
+        operation: 'add-region',
+        projectRelativePath: 'page.png',
+        region: {
+          kind: 'pin',
+          geometry: { type: 'point', x: 0.2, y: 0.3 },
+          comment: 'fix this'
+        }
+      });
+
+      expect(feedback.entries['page.png']?.regions).toHaveLength(1);
+      expect(feedbackChanges).toHaveLength(1);
+      expect(runner.jobs.at(-1)?.input.entry.projectRelativePath).toBe('page.png');
+    } finally {
+      server.close();
+      await rm(projectRoot, { recursive: true, force: true });
+    }
+  });
+
+  it('records render_failed diagnostics from asynchronous materialization', async () => {
+    const projectRoot = await mkdtemp(join(tmpdir(), 'debrute-feedback-render-diagnostic-'));
+    const runner = new ManualRenderRunner();
+    const server = new DebruteAppServer({ canvasFeedbackRenderRunner: runner });
+    try {
+      await writeImageFixture(projectRoot, 'page.png');
+      await writeFeedbackDocument(projectRoot, ['page.png']);
+      await server.openProject(projectRoot, {
+        initializeIfMissing: true,
+        createDefaultCanvas: true,
+        watchFiles: false
+      });
+
+      await runner.jobs[0]!.resolveFailure('render failed');
+      await waitFor(() => server.currentSnapshot()?.diagnostics.some((diagnostic) => diagnostic.code === 'canvas-feedback.render_failed') === true);
+
+      expect(server.currentSnapshot()?.diagnostics).toEqual(expect.arrayContaining([
+        expect.objectContaining({
+          id: 'canvas-feedback.render_failed:page.png',
+          code: 'canvas-feedback.render_failed',
+          entityId: 'page.png'
+        })
+      ]));
+    } finally {
+      server.close();
+      await rm(projectRoot, { recursive: true, force: true });
+    }
+  });
+
+  it('records and clears document_invalid diagnostics for external feedback JSON edits', async () => {
+    const projectRoot = await mkdtemp(join(tmpdir(), 'debrute-feedback-document-invalid-'));
+    const runner = new ManualRenderRunner();
+    const server = new DebruteAppServer({ canvasFeedbackRenderRunner: runner });
+    try {
+      await writeImageFixture(projectRoot, 'page.png');
+      await writeFeedbackDocument(projectRoot, ['page.png']);
+      await server.openProject(projectRoot, {
+        initializeIfMissing: true,
+        createDefaultCanvas: true,
+        watchFiles: false
+      });
+      const feedbackPath = join(projectRoot, '.debrute/reviews/canvas-feedback.json');
+
+      await writeFile(feedbackPath, '{ invalid json');
+      await handleWatchedFileEvent(server, normalizeFileWatchEvent(projectRoot, feedbackPath, 'changed'));
+
+      expect(server.currentSnapshot()?.diagnostics).toEqual(expect.arrayContaining([
+        expect.objectContaining({
+          id: 'canvas-feedback.document_invalid',
+          code: 'canvas-feedback.document_invalid'
+        })
+      ]));
+
+      await writeFeedbackDocument(projectRoot, []);
+      await handleWatchedFileEvent(server, normalizeFileWatchEvent(projectRoot, feedbackPath, 'changed'));
+
+      expect(server.currentSnapshot()?.diagnostics.some((diagnostic) => diagnostic.code === 'canvas-feedback.document_invalid')).toBe(false);
+    } finally {
+      server.close();
+      await rm(projectRoot, { recursive: true, force: true });
+    }
+  });
+
+  it('opens projects with invalid current feedback JSON and surfaces a document diagnostic', async () => {
+    const projectRoot = await mkdtemp(join(tmpdir(), 'debrute-feedback-open-invalid-'));
+    const runner = new ManualRenderRunner();
+    const server = new DebruteAppServer({ canvasFeedbackRenderRunner: runner });
+    try {
+      await writeImageFixture(projectRoot, 'page.png');
+      await mkdir(join(projectRoot, '.debrute/reviews'), { recursive: true });
+      await writeFile(join(projectRoot, '.debrute/reviews/canvas-feedback.json'), '{ invalid json');
+
+      const snapshot = await server.openProject(projectRoot, {
+        initializeIfMissing: true,
+        createDefaultCanvas: true,
+        watchFiles: false
+      });
+
+      expect(snapshot.diagnostics).toEqual(expect.arrayContaining([
+        expect.objectContaining({
+          id: 'canvas-feedback.document_invalid',
+          code: 'canvas-feedback.document_invalid'
+        })
+      ]));
+      expect(server.currentSnapshot()?.diagnostics).toEqual(snapshot.diagnostics);
+      expect(runner.jobs).toHaveLength(0);
+    } finally {
+      server.close();
+      await rm(projectRoot, { recursive: true, force: true });
+    }
+  });
+
+  it('treats external local feedback regions on non-image files as an invalid feedback document', async () => {
+    const projectRoot = await mkdtemp(join(tmpdir(), 'debrute-feedback-non-image-document-invalid-'));
+    const runner = new ManualRenderRunner();
+    const server = new DebruteAppServer({ canvasFeedbackRenderRunner: runner });
+    try {
+      await writeImageFixture(projectRoot, 'page.png');
+      await writeFeedbackDocument(projectRoot, []);
+      await server.openProject(projectRoot, {
+        initializeIfMissing: true,
+        createDefaultCanvas: true,
+        watchFiles: false
+      });
+      const feedbackPath = join(projectRoot, '.debrute/reviews/canvas-feedback.json');
+      await writeFile(feedbackPath, `${JSON.stringify({
+        schemaVersion: 2,
+        updatedAt: NOW,
+        entries: {
+          'notes.md': {
+            projectRelativePath: 'notes.md',
+            marks: [],
+            note: '',
+            nextRegionLabel: 2,
+            regions: [{
+              id: 'region-1',
+              label: 1,
+              kind: 'pin',
+              geometry: { type: 'point', x: 0.5, y: 0.5 },
+              comment: 'center',
+              createdAt: NOW,
+              updatedAt: NOW
+            }],
+            updatedAt: NOW
+          }
+        }
+      }, null, 2)}\n`);
+
+      await handleWatchedFileEvent(server, normalizeFileWatchEvent(projectRoot, feedbackPath, 'changed'));
+
+      expect(server.currentSnapshot()?.diagnostics).toEqual(expect.arrayContaining([
+        expect.objectContaining({
+          id: 'canvas-feedback.document_invalid',
+          code: 'canvas-feedback.document_invalid'
+        })
+      ]));
+      expect(runner.jobs).toHaveLength(0);
+    } finally {
+      server.close();
+      await rm(projectRoot, { recursive: true, force: true });
+    }
+  });
+});
+
+class ManualRenderRunner implements CanvasFeedbackRenderRunner {
+  readonly jobs: ManualRenderJob[] = [];
+
+  render(input: CanvasFeedbackRenderJobInput, signal: AbortSignal): Promise<CanvasFeedbackRenderJobResult> {
+    let resolveJob!: (result: CanvasFeedbackRenderJobResult) => void;
+    let rejectJob!: (error: unknown) => void;
+    const promise = new Promise<CanvasFeedbackRenderJobResult>((resolve, reject) => {
+      resolveJob = resolve;
+      rejectJob = reject;
+    });
+    const rejectCancelled = () => {
+      rejectJob(new CanvasFeedbackRenderCancelledError());
+    };
+    if (signal.aborted) {
+      rejectCancelled();
+    } else {
+      signal.addEventListener('abort', rejectCancelled, { once: true });
+    }
+    void promise.then(() => {
+      signal.removeEventListener('abort', rejectCancelled);
+    }, () => {
+      signal.removeEventListener('abort', rejectCancelled);
+    });
+    this.jobs.push({
+      input,
+      signal,
+      resolveSuccess: async () => {
+        await mkdir(dirname(input.outputPath), { recursive: true });
+        await writeFile(input.outputPath, 'ok');
+        resolveJob({
+          ok: true,
+          jobId: input.jobId,
+          outputPath: input.outputPath,
+          width: 10,
+          height: 10
+        });
+      },
+      resolveFailure: async (message: string) => {
+        resolveJob({
+          ok: false,
+          jobId: input.jobId,
+          message
+        });
+      }
+    });
+    return promise;
+  }
+}
+
+interface ManualRenderJob {
+  input: CanvasFeedbackRenderJobInput;
+  signal: AbortSignal;
+  resolveSuccess(): Promise<void>;
+  resolveFailure(message: string): Promise<void>;
+}
+
+async function writeImageFixture(projectRoot: string, projectRelativePath: string): Promise<void> {
+  await mkdir(dirname(join(projectRoot, projectRelativePath)), { recursive: true });
+  await writeFile(join(projectRoot, projectRelativePath), await sharp({
+    create: {
+      width: 32,
+      height: 24,
+      channels: 4,
+      background: { r: 240, g: 240, b: 240, alpha: 1 }
+    }
+  }).png().toBuffer());
+}
+
+async function writeFeedbackDocument(projectRoot: string, projectRelativePaths: string[]): Promise<void> {
+  await mkdir(join(projectRoot, '.debrute/reviews'), { recursive: true });
+  await writeFile(join(projectRoot, '.debrute/reviews/canvas-feedback.json'), `${JSON.stringify({
+    schemaVersion: 2,
+    updatedAt: NOW,
+    entries: Object.fromEntries(projectRelativePaths.map((projectRelativePath) => [
+      projectRelativePath,
+      {
+        projectRelativePath,
+        marks: [],
+        note: '',
+        nextRegionLabel: 2,
+        regions: [{
+          id: 'region-1',
+          label: 1,
+          kind: 'pin',
+          geometry: { type: 'point', x: 0.5, y: 0.5 },
+          comment: 'center',
+          createdAt: NOW,
+          updatedAt: NOW
+        }],
+        updatedAt: NOW
+      }
+    ]))
+  }, null, 2)}\n`);
+}
+
+async function handleWatchedFileEvent(server: DebruteAppServer, event: NormalizedFileWatchEvent): Promise<void> {
+  await (server as unknown as {
+    handleWatchedFileEvent(event: NormalizedFileWatchEvent): Promise<void>;
+  }).handleWatchedFileEvent(event);
+}
+
+async function waitFor(predicate: () => boolean): Promise<void> {
+  const deadline = Date.now() + 1000;
+  while (Date.now() < deadline) {
+    if (predicate()) {
+      return;
+    }
+    await new Promise((resolve) => setTimeout(resolve, 5));
+  }
+  throw new Error('Timed out waiting for app-server test condition.');
+}

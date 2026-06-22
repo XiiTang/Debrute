@@ -1,12 +1,13 @@
 import React from 'react';
 import { Boxes, FolderTree } from 'lucide-react';
-import type { ProjectedCanvasNode } from '@debrute/canvas-core';
+import type { CanvasFeedbackGeometry, ProjectedCanvasNode } from '@debrute/canvas-core';
 import type { WorkbenchActions, WorkbenchState } from '../../types';
 import type { WorkbenchContextMenuPosition, WorkbenchContextMenuTarget } from '../shell/contextMenu';
 import type { CanvasFeedbackBarTarget, FloatingBarRect } from '../shell/floatingBars';
 import { getCanvasById } from '../services/canvasState';
 import { CanvasSurface } from './CanvasSurface';
 import type { CanvasOverlayRuntime } from './CanvasOverlayRuntime';
+import type { CanvasImageFeedbackMode } from './CanvasImageFeedbackLayer';
 import type { CanvasEditorRuntime } from './runtime/CanvasEditorRuntime';
 import { createCanvasEditorRuntime } from './runtime/CanvasEditorRuntime';
 import { Button } from '../ui';
@@ -22,7 +23,10 @@ export function CanvasEditor({
   onCurrentNodesChange,
   onFeedbackBarTargetChange,
   onRuntimeChange,
-  onOpenContextMenu
+  onOpenContextMenu,
+  localFeedbackMode,
+  pendingFeedbackRegion,
+  onLocalFeedbackDraft
 }: {
   canvasId: string | undefined;
   state: WorkbenchState;
@@ -38,6 +42,9 @@ export function CanvasEditor({
   onFeedbackBarTargetChange?: ((target: CanvasFeedbackBarTarget | undefined) => void) | undefined;
   onRuntimeChange?: ((runtime: CanvasEditorRuntime | undefined) => void) | undefined;
   onOpenContextMenu?: ((target: WorkbenchContextMenuTarget, position: WorkbenchContextMenuPosition) => void) | undefined;
+  localFeedbackMode?: CanvasImageFeedbackMode | undefined;
+  pendingFeedbackRegion?: { projectRelativePath: string; geometry: CanvasFeedbackGeometry } | undefined;
+  onLocalFeedbackDraft?: ((input: { projectRelativePath: string; geometry: CanvasFeedbackGeometry }) => void) | undefined;
 }): React.ReactElement {
   const canvas = getCanvasById(state.snapshot, canvasId);
   const projection = state.snapshot?.projections.find((item) => item.canvasId === canvas?.id);
@@ -92,6 +99,9 @@ export function CanvasEditor({
         actions={actions}
         textFileBuffers={state.textFileBuffers}
         canvasFeedback={state.canvasFeedback}
+        localFeedbackMode={localFeedbackMode}
+        pendingFeedbackRegion={pendingFeedbackRegion}
+        onLocalFeedbackDraft={onLocalFeedbackDraft}
         overlayRuntime={overlayRuntime}
         minimapOpen={minimapOpen}
         feedbackPlacementContext={feedbackPlacementContext}

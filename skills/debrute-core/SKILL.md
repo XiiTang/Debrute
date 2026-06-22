@@ -111,8 +111,64 @@ Canvas file-asset feedback is stored as current state in:
 .debrute/reviews/canvas-feedback.json
 ```
 
-Missing file means there is no Canvas feedback. Entries are keyed by project-relative path. The `marks` array contains only selected marks; unselected marks are absent. The first feedback mark set is `like`, `dislike`, `check`, `cross`, `pending`, `important`, and `needs_revision`.
+Missing file means there is no Canvas feedback. The document uses `schemaVersion: 2`. Entries are keyed by project-relative path. The `marks` array contains only selected marks; unselected marks are absent. The mark set is `like`, `dislike`, `check`, `cross`, `pending`, `important`, and `needs_revision`.
 
-No dedicated Canvas feedback CLI exists. Read `.debrute/reviews/canvas-feedback.json` with the external Agent's filesystem tools when appropriate.
+Image entries can contain local feedback regions:
 
-If feedback contains contradictory or abnormal combinations, ask the user for confirmation before batch processing, deleting, regenerating, or otherwise applying broad changes.
+```json
+{
+  "projectRelativePath": "assets/page.png",
+  "marks": ["needs_revision"],
+  "note": "overall note",
+  "nextRegionLabel": 3,
+  "regions": [
+    {
+      "id": "region-1",
+      "label": 1,
+      "kind": "pin",
+      "geometry": { "type": "point", "x": 0.42, "y": 0.31 },
+      "comment": "face is blurry",
+      "createdAt": "2026-06-21T12:00:00.000Z",
+      "updatedAt": "2026-06-21T12:00:00.000Z"
+    },
+    {
+      "id": "region-2",
+      "label": 2,
+      "kind": "region",
+      "geometry": { "type": "rect", "x": 0.1, "y": 0.55, "width": 0.32, "height": 0.18 },
+      "comment": "make this background brighter",
+      "createdAt": "2026-06-21T12:00:00.000Z",
+      "updatedAt": "2026-06-21T12:00:00.000Z"
+    }
+  ],
+  "updatedAt": "2026-06-21T12:00:00.000Z"
+}
+```
+
+Local feedback geometry is normalized to image content, not Canvas screen position. Rectangle geometry uses a normalized bounding box. Use the rendered annotated image to understand the visual location. For an image at project-relative path:
+
+```text
+<projectRelativePath>
+```
+
+the rendered annotated image is:
+
+```text
+.debrute/reviews/rendered-feedback/<projectRelativePath>.annotated.png
+```
+
+Example:
+
+```text
+Source image:
+拼接图/韩语翻译-liked-page1-8-右到左.png
+
+Rendered feedback image:
+.debrute/reviews/rendered-feedback/拼接图/韩语翻译-liked-page1-8-右到左.png.annotated.png
+```
+
+The rendered image shows only numbered pins and rectangle outlines. Match each visible number to `regions[].label`; comments are in JSON and are intentionally not rendered into the image.
+
+No dedicated Canvas feedback CLI exists. Read `.debrute/reviews/canvas-feedback.json` and rendered annotated images with the external Agent's filesystem tools when appropriate.
+
+Do not edit files under `.debrute/reviews/rendered-feedback/`. Do not generate or refresh rendered annotated images yourself. If feedback contains contradictory or abnormal combinations, ask the user for confirmation before batch processing, deleting, regenerating, or otherwise applying broad changes.

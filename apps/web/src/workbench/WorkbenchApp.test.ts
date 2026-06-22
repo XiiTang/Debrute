@@ -14,7 +14,8 @@ describe('WorkbenchApp feedback bar target equality', () => {
       camera: { ...target.camera },
       entry: target.entry ? {
         ...target.entry,
-        marks: [...target.entry.marks]
+        marks: [...target.entry.marks],
+        regions: [...target.entry.regions]
       } : undefined
     })).toBe(true);
   });
@@ -25,6 +26,15 @@ describe('WorkbenchApp feedback bar target equality', () => {
     expect(sameCanvasFeedbackBarTarget(target, {
       ...target,
       camera: { ...target.camera, z: 0.5 }
+    })).toBe(false);
+  });
+
+  it('detects feedback bar target local image feedback support changes', () => {
+    const target = feedbackTarget();
+
+    expect(sameCanvasFeedbackBarTarget(target, {
+      ...target,
+      supportsImageLocalFeedback: false
     })).toBe(false);
   });
 });
@@ -44,10 +54,13 @@ function feedbackTarget(): CanvasFeedbackBarTarget {
     nodeRect: { x: 10, y: 20, width: 300, height: 180 },
     surfaceRect: { x: 0, y: 0, width: 1280, height: 720 },
     camera: { x: 12, y: 24, z: 1 },
+    supportsImageLocalFeedback: true,
     entry: {
       projectRelativePath: 'flow/a.png',
       marks: ['needs_revision'],
       note: 'Needs revision',
+      nextRegionLabel: 1,
+      regions: [],
       updatedAt: '2026-06-08T00:00:00.000Z'
     }
   };

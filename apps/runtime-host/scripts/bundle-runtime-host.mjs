@@ -3,19 +3,31 @@ import { build } from 'esbuild';
 
 await rm('bundle', { recursive: true, force: true });
 
-await build({
+const commonBuildOptions = {
   bundle: true,
   platform: 'node',
   format: 'cjs',
   target: 'node24',
   sourcemap: true,
-  entryPoints: ['src/cli.ts'],
-  outfile: 'bundle/runtime-host.cjs',
-  external: ['node-pty', 'sharp'],
   logOverride: {
     'empty-import-meta': 'silent'
   }
-});
+};
+
+await Promise.all([
+  build({
+    ...commonBuildOptions,
+    entryPoints: ['src/cli.ts'],
+    outfile: 'bundle/runtime-host.cjs',
+    external: ['node-pty', 'sharp']
+  }),
+  build({
+    ...commonBuildOptions,
+    entryPoints: ['../app-server/src/canvas/CanvasFeedbackRenderedImageWorker.ts'],
+    outfile: 'bundle/canvas-feedback-render-worker.cjs',
+    external: ['sharp']
+  })
+]);
 
 await Promise.all([
   cp(

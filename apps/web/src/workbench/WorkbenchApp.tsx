@@ -6,12 +6,13 @@ import type {
   WorkbenchProjectPathEntry,
   WorkbenchProjectSessionSnapshot
 } from '@debrute/app-protocol';
-import type { ProjectedCanvasNode } from '@debrute/canvas-core';
+import type { CanvasFeedbackGeometry, ProjectedCanvasNode } from '@debrute/canvas-core';
 import { createWorkbenchApiClient } from './api/workbenchApiClient';
 import { getDebruteShellApi } from '../api/shellApi';
 import { CanvasEditor } from './canvas/CanvasEditor';
 import { CanvasCardBar } from './canvas/CanvasCardBar';
 import { CanvasFeedbackBar } from './canvas/CanvasFeedbackBar';
+import type { CanvasImageFeedbackMode } from './canvas/CanvasImageFeedbackLayer';
 import { CanvasMinimapBar } from './canvas/CanvasMinimapBar';
 import { CanvasResetLayoutButton } from './canvas/CanvasResetLayoutButton';
 import { createCanvasOverlayRuntime } from './canvas/CanvasOverlayRuntime';
@@ -121,6 +122,12 @@ export function WorkbenchApp(): React.ReactElement {
   const [textEditorWindows, setTextEditorWindows] = useState<Record<string, FloatingTextEditorWindowState>>({});
   const [windowOrder, setWindowOrder] = useState<WorkbenchWindowOrderState>(DEFAULT_WORKBENCH_WINDOW_ORDER);
   const [feedbackBarTarget, setFeedbackBarTarget] = useState<CanvasFeedbackBarTarget>();
+  const [localFeedbackMode, setLocalFeedbackMode] = useState<CanvasImageFeedbackMode>();
+  const [pendingFeedbackRegion, setPendingFeedbackRegion] = useState<{
+    projectRelativePath: string;
+    geometry: CanvasFeedbackGeometry;
+  }>();
+  const [pendingFeedbackRegionComment, setPendingFeedbackRegionComment] = useState('');
   const [canvasMinimapOpen, setCanvasMinimapOpen] = useState(false);
   const [contextMenu, setContextMenu] = useState<{
     target: WorkbenchContextMenuTarget;
@@ -802,6 +809,46 @@ export function WorkbenchApp(): React.ReactElement {
     writeProjectTextFile
   ]);
 
+  const handleLocalFeedbackModeChange = useCallback((mode: CanvasImageFeedbackMode) => {
+    setLocalFeedbackMode(mode);
+    setPendingFeedbackRegion(undefined);
+    setPendingFeedbackRegionComment('');
+  }, []);
+
+  const handleLocalFeedbackDraft = useCallback((draft: { projectRelativePath: string; geometry: CanvasFeedbackGeometry }) => {
+    setPendingFeedbackRegion(draft);
+    setPendingFeedbackRegionComment('');
+  }, []);
+
+  const cancelPendingFeedbackRegion = useCallback(() => {
+    setPendingFeedbackRegion(undefined);
+    setPendingFeedbackRegionComment('');
+  }, []);
+
+  const savePendingFeedbackRegion = useCallback(async () => {
+    if (!pendingFeedbackRegion || !localFeedbackMode) {
+      return;
+    }
+    const comment = pendingFeedbackRegionComment.trim();
+    if (!comment) {
+      return;
+    }
+    const saved = await updateCanvasFeedbackEntry({
+      operation: 'add-region',
+      projectRelativePath: pendingFeedbackRegion.projectRelativePath,
+      region: {
+        kind: localFeedbackMode === 'pin' ? 'pin' : 'region',
+        geometry: pendingFeedbackRegion.geometry,
+        comment
+      }
+    });
+    if (!saved) {
+      return;
+    }
+    setPendingFeedbackRegion(undefined);
+    setPendingFeedbackRegionComment('');
+  }, [localFeedbackMode, pendingFeedbackRegion, pendingFeedbackRegionComment, updateCanvasFeedbackEntry]);
+
   const updateInlineProjectTreeEditValue = useCallback((value: string) => {
     setInlineProjectTreeEdit((current) => current ? { ...current, value } : current);
   }, []);
@@ -1128,6 +1175,9 @@ export function WorkbenchApp(): React.ReactElement {
             onFeedbackBarTargetChange={handleFeedbackBarTargetChange}
             onRuntimeChange={setActiveCanvasRuntime}
             onOpenContextMenu={openWorkbenchContextMenu}
+            localFeedbackMode={localFeedbackMode}
+            pendingFeedbackRegion={pendingFeedbackRegion}
+            onLocalFeedbackDraft={handleLocalFeedbackDraft}
           />
         )}
       </div>
@@ -1165,6 +1215,28 @@ export function WorkbenchApp(): React.ReactElement {
             entry={feedbackBarTarget.entry}
             onUpdate={actions.updateCanvasFeedbackEntry}
             overlayRuntime={canvasOverlayRuntime}
+            localFeedbackMode={feedbackBarTarget.supportsImageLocalFeedback ? localFeedbackMode : undefined}
+            onLocalFeedbackModeChange={feedbackBarTarget.supportsImageLocalFeedback ? handleLocalFeedbackModeChange : undefined}
+            pendingRegionComment={
+              feedbackBarTarget.supportsImageLocalFeedback && pendingFeedbackRegion?.projectRelativePath === feedbackBarTarget.projectRelativePath
+                ? pendingFeedbackRegionComment
+                : undefined
+            }
+            onPendingRegionCommentChange={
+              feedbackBarTarget.supportsImageLocalFeedback && pendingFeedbackRegion?.projectRelativePath === feedbackBarTarget.projectRelativePath
+                ? setPendingFeedbackRegionComment
+                : undefined
+            }
+            onSavePendingRegion={
+              feedbackBarTarget.supportsImageLocalFeedback && pendingFeedbackRegion?.projectRelativePath === feedbackBarTarget.projectRelativePath
+                ? () => { void savePendingFeedbackRegion(); }
+                : undefined
+            }
+            onCancelPendingRegion={
+              feedbackBarTarget.supportsImageLocalFeedback && pendingFeedbackRegion?.projectRelativePath === feedbackBarTarget.projectRelativePath
+                ? cancelPendingFeedbackRegion
+                : undefined
+            }
             onPointerEnter={handleFeedbackBarPointerEnter}
             onPointerLeave={handleFeedbackBarPointerLeave}
           />

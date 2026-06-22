@@ -23,7 +23,7 @@ describe('floating bar placement', () => {
     });
 
     expect(placement).toEqual({
-      x: 221,
+      x: 155,
       y: 323,
       width: CANVAS_FEEDBACK_BAR_SIZE.width,
       height: CANVAS_FEEDBACK_BAR_SIZE.height,
@@ -51,7 +51,7 @@ describe('floating bar placement', () => {
     });
 
     expect(placement?.placement).toBe('above');
-    expect(placement?.y).toBe(617);
+    expect(placement?.y).toBe(551);
   });
 
   it('clamps feedback horizontally inside the viewport', () => {
@@ -97,7 +97,7 @@ describe('floating bar placement', () => {
       viewportRect: { x: 0, y: 0, width: 1000, height: 700 },
       reservedRects: []
     })).toEqual({
-      x: 261,
+      x: 195,
       y: 363,
       width: CANVAS_FEEDBACK_BAR_SIZE.width,
       height: CANVAS_FEEDBACK_BAR_SIZE.height,

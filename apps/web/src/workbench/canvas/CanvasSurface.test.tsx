@@ -316,29 +316,39 @@ describe('CanvasSurface', () => {
     expect(html).not.toContain('viewBox="-100000 -100000 200000 200000"');
   });
 
-  it('does not render feedback bars inside Canvas node markup', () => {
-    const canvas = createCanvasDocument({ id: 'feedback-canvas' });
+  it('passes image feedback entries to image node markup without rendering feedback bars inside nodes', () => {
+    const canvas = createCanvasDocument({ id: 'image-feedback-layer' });
     const projection: CanvasProjection = {
       canvasId: canvas.id,
-      nodes: [nodeFixture('image-production/cover.png', 120, 80)],
+      nodes: [nodeFixture('flow/cover.png', 120, 80)],
       edges: [],
       diagnostics: []
     };
 
     const html = renderToStaticMarkup(surface(canvas, projection, {
       canvasFeedback: feedbackDocument({
-        'image-production/cover.png': {
-          projectRelativePath: 'image-production/cover.png',
-          marks: ['like', 'needs_revision'],
-          note: 'Needs revision',
+        'flow/cover.png': {
+          projectRelativePath: 'flow/cover.png',
+          marks: [],
+          note: '',
+          nextRegionLabel: 2,
+          regions: [{
+            id: 'region-1',
+            label: 1,
+            kind: 'pin',
+            geometry: { type: 'point', x: 0.2, y: 0.3 },
+            comment: 'face',
+            createdAt: '2026-05-26T12:00:00.000Z',
+            updatedAt: '2026-05-26T12:00:00.000Z'
+          }],
           updatedAt: '2026-05-26T12:00:00.000Z'
         }
       })
     }));
 
-    expect(html).toContain('data-canvas-node-path="image-production/cover.png"');
+    expect(html).toContain('canvas-image-feedback-layer');
+    expect(html).toContain('data-canvas-feedback-label="1"');
     expect(html).not.toContain('class="canvas-feedback-bar"');
-    expect(html).not.toContain('aria-label="Needs revision"');
   });
 
   it('does not render minimap UI inside the Canvas surface layer', () => {
@@ -1066,7 +1076,7 @@ function directoryFixture(path: string, x: number, y: number): CanvasProjection[
 
 function feedbackDocument(entries: CanvasFeedbackDocument['entries']): CanvasFeedbackDocument {
   return {
-    schemaVersion: 1,
+    schemaVersion: 2,
     updatedAt: '2026-05-26T12:00:00.000Z',
     entries
   };
@@ -1181,7 +1191,7 @@ const actions: WorkbenchActions = {
     throw new Error('not used');
   },
   updateCanvasNodeLayers: async () => undefined,
-  updateCanvasFeedbackEntry: async () => undefined,
+  updateCanvasFeedbackEntry: async () => true,
   addProjectPathToCanvasMap: async () => undefined,
   createCanvas: async () => {
     throw new Error('not used');

@@ -1,5 +1,5 @@
 import React, { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
-import type { CanvasDocument, CanvasFeedbackDocument, CanvasProjection, ProjectedCanvasNode } from '@debrute/canvas-core';
+import type { CanvasDocument, CanvasFeedbackDocument, CanvasFeedbackGeometry, CanvasProjection, ProjectedCanvasNode } from '@debrute/canvas-core';
 import type { TextFileBuffer, WorkbenchActions } from '../../types';
 import type { WorkbenchContextMenuPosition, WorkbenchContextMenuTarget } from '../shell/contextMenu';
 import {
@@ -16,6 +16,7 @@ import {
 import { cameraForCanvasContent } from './CanvasCameraBounds';
 import { CANVAS_IMAGE_PREVIEW_RESOURCE_SETTLE_MS } from './canvasImagePreviews';
 import { CanvasImageNodeAssetProvider, type CanvasImageNodeAssetContextValue } from './CanvasImageNodeAssetContext';
+import type { CanvasImageFeedbackMode } from './CanvasImageFeedbackLayer';
 import { CanvasNodeShell } from './CanvasNodeShell';
 import type { CanvasOverlayRuntime } from './CanvasOverlayRuntime';
 import { createCanvasPerfBrowserAdapter } from './CanvasPerfBrowserAdapter';
@@ -61,6 +62,9 @@ interface CanvasSurfaceProps {
   actions: WorkbenchActions;
   textFileBuffers: Record<string, TextFileBuffer>;
   canvasFeedback: CanvasFeedbackDocument | undefined;
+  localFeedbackMode?: CanvasImageFeedbackMode | undefined;
+  pendingFeedbackRegion?: { projectRelativePath: string; geometry: CanvasFeedbackGeometry } | undefined;
+  onLocalFeedbackDraft?: ((input: { projectRelativePath: string; geometry: CanvasFeedbackGeometry }) => void) | undefined;
   overlayRuntime: CanvasOverlayRuntime;
   minimapOpen?: boolean | undefined;
   feedbackPlacementContext: {
@@ -79,6 +83,9 @@ export function CanvasSurface({
   actions,
   textFileBuffers,
   canvasFeedback,
+  localFeedbackMode,
+  pendingFeedbackRegion,
+  onLocalFeedbackDraft,
   overlayRuntime,
   minimapOpen,
   feedbackPlacementContext,
@@ -115,6 +122,9 @@ export function CanvasSurface({
       actions={actions}
       textFileBuffers={textFileBuffers}
       canvasFeedback={canvasFeedback}
+      localFeedbackMode={localFeedbackMode}
+      pendingFeedbackRegion={pendingFeedbackRegion}
+      onLocalFeedbackDraft={onLocalFeedbackDraft}
       perfMonitor={perfMonitor}
       overlayRuntime={overlayRuntime}
       minimapOpen={minimapOpen}
@@ -133,6 +143,9 @@ function CanvasSurfaceRuntime({
   actions,
   textFileBuffers,
   canvasFeedback,
+  localFeedbackMode,
+  pendingFeedbackRegion,
+  onLocalFeedbackDraft,
   perfMonitor,
   overlayRuntime,
   minimapOpen,
@@ -753,7 +766,8 @@ function CanvasSurfaceRuntime({
       nodeRect: nodeRectForFloatingBar(node),
       surfaceRect: domRectToFloatingBarRect(surfaceRect),
       camera,
-      entry: canvasFeedback.entries[node.projectRelativePath]
+      entry: canvasFeedback.entries[node.projectRelativePath],
+      supportsImageLocalFeedback: node.mediaKind === 'image'
     });
   }, [
     canvasFeedback,
@@ -858,6 +872,14 @@ function CanvasSurfaceRuntime({
               stageRuntime={stageRuntime}
               actions={actions}
               textBuffer={textFileBuffers[node.projectRelativePath]}
+              feedbackEntry={canvasFeedback?.entries[node.projectRelativePath]}
+              localFeedbackMode={node.mediaKind === 'image' ? localFeedbackMode : undefined}
+              pendingFeedbackGeometry={
+                node.mediaKind === 'image' && pendingFeedbackRegion?.projectRelativePath === node.projectRelativePath
+                  ? pendingFeedbackRegion.geometry
+                  : undefined
+              }
+              onLocalFeedbackDraft={onLocalFeedbackDraft}
               onPointerDown={beginNodeMove}
               onPointerMove={handlePointerMove}
               onPointerUp={handlePointerUpEvent}

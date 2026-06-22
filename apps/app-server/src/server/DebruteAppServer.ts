@@ -27,6 +27,7 @@ import {
 } from '@debrute/project-core';
 import {
   type CanvasDesiredNode,
+  type Diagnostic,
   type CanvasDocument,
   type CanvasFeedbackDocument,
   type CanvasLayoutSize,
@@ -99,9 +100,17 @@ import {
   type RecordGeneratedAssetInput
 } from '../generated-assets/GeneratedAssetMetadataService.js';
 import {
+  canvasFeedbackPaths,
   createCanvasFeedbackService,
   type CanvasFeedbackService
 } from '../canvas/CanvasFeedbackService.js';
+import {
+  createCanvasFeedbackRenderScheduler,
+  type CanvasFeedbackRenderDiagnosticUpdate,
+  type CanvasFeedbackRenderRunner,
+  type CanvasFeedbackRenderScheduler
+} from '../canvas/CanvasFeedbackRenderedImageScheduler.js';
+import { createCanvasFeedbackRenderedImageProcessRunner } from '../canvas/CanvasFeedbackRenderedImageProcessRunner.js';
 import {
   createCanvasImagePreviewService,
   type CanvasImagePreviewResult,
@@ -182,6 +191,8 @@ export interface DebruteAppServerOptions {
   integrationPlatform?: NodeJS.Platform;
   canvasNodeLayoutSizeReader?: (input: ReadCanvasNodeLayoutSizeInput) => Promise<CanvasLayoutSize>;
   terminalPtyFactory?: TerminalPtyFactory;
+  canvasFeedbackRenderRunner?: CanvasFeedbackRenderRunner;
+  canvasFeedbackRenderMaxConcurrentImages?: number;
 }
 
 export type { CliImageModelDetail, CliImageModelListEntry, CliModelDetail, CliModelSummary, CliRuntimeDiagnostic, CliRuntimeStatus, CliVideoModelDetail, CliVideoModelListEntry };
@@ -200,11 +211,14 @@ interface AppServerImageModelRequestOptions {
 }
 
 const INTERNAL_PROJECT_FILE_WRITE_SUPPRESSION_MS = 2000;
+const CANVAS_FEEDBACK_RENDER_DIAGNOSTIC_PREFIX = 'canvas-feedback.render_failed:';
+const CANVAS_FEEDBACK_DOCUMENT_INVALID_DIAGNOSTIC_ID = 'canvas-feedback.document_invalid';
 
 export class DebruteAppServer {
   private readonly events = new EventEmitter();
   private readonly configStore: GlobalConfigStore;
   private readonly generatedAssetMetadataService: GeneratedAssetMetadataService;
+  private readonly canvasFeedbackRenderScheduler: CanvasFeedbackRenderScheduler;
   private readonly canvasFeedbackService: CanvasFeedbackService;
   private readonly canvasImagePreviewService: CanvasImagePreviewService;
   private readonly canvasProjectionService: CanvasProjectionService;
@@ -224,6 +238,11 @@ export class DebruteAppServer {
       writeStructuredDocuments: (input) => this.writeStructuredDocuments(input),
       onDiagnostic: (diagnostic) => this.recordGeneratedAssetMetadataDiagnostic(diagnostic)
     });
+    this.canvasFeedbackRenderScheduler = createCanvasFeedbackRenderScheduler({
+      runner: options.canvasFeedbackRenderRunner ?? createCanvasFeedbackRenderedImageProcessRunner(),
+      ...(options.canvasFeedbackRenderMaxConcurrentImages !== undefined ? { maxConcurrentImages: options.canvasFeedbackRenderMaxConcurrentImages } : {}),
+      onDiagnostic: (diagnostic) => this.applyCanvasFeedbackRenderedDiagnostics(diagnostic)
+    });
     this.canvasFeedbackService = createCanvasFeedbackService({
       writeStructuredDocument: (projectRoot, absolutePath, content, expectedHash) => this.writeProjectDocumentText(
         projectRoot,
@@ -231,7 +250,8 @@ export class DebruteAppServer {
         absolutePath,
         content,
         expectedHash
-      )
+      ),
+      renderScheduler: this.canvasFeedbackRenderScheduler
     });
     this.canvasImagePreviewService = createCanvasImagePreviewService();
     this.canvasProjectionService = new CanvasProjectionService();
@@ -322,9 +342,21 @@ export class DebruteAppServer {
         await this.canvasRegistryService.ensureDefaultCanvas(projectRoot);
       }
 
-      const snapshot = await this.loadSnapshot(projectRoot);
+      if (this.snapshot && this.snapshot.projectRoot !== projectRoot) {
+        this.canvasFeedbackRenderScheduler.cancelProject(this.snapshot.projectRoot);
+      }
+      let snapshot = await this.loadSnapshot(projectRoot);
       this.snapshot = snapshot;
       this.snapshotLoadedAt = Date.now();
+      try {
+        await this.canvasFeedbackService.queueRenderedFeedbackDocument(projectRoot);
+      } catch (error) {
+        snapshot = snapshotWithCanvasFeedbackDocumentInvalidDiagnostic(snapshot, {
+          filePath: canvasFeedbackPaths(projectRoot).feedbackFile,
+          entityId: '.debrute/reviews/canvas-feedback.json'
+        }, error);
+        this.snapshot = snapshot;
+      }
       this.terminalService?.closeAll();
       this.terminalService = new TerminalService({
         projectRoot: snapshot.projectRoot,
@@ -885,6 +917,9 @@ export class DebruteAppServer {
   }
 
   close(): void {
+    if (this.snapshot) {
+      this.canvasFeedbackRenderScheduler.cancelProject(this.snapshot.projectRoot);
+    }
     this.terminalService?.closeAll();
     this.terminalService = undefined;
     this.stopWatchingProject();
@@ -1087,19 +1122,35 @@ export class DebruteAppServer {
       })) {
         return;
       }
-      const snapshot = await this.loadFreshProjectSnapshotUnlocked();
+      if (event.affects.includes('canvas-feedback')) {
+        const current = this.getSnapshot();
+        await this.canvasFeedbackService.queueRenderedFeedbackDocument(current.projectRoot);
+      } else if (event.affects.includes('content')) {
+        const current = this.getSnapshot();
+        await this.canvasFeedbackService.queueRenderedFeedbackForSource(current.projectRoot, event.projectRelativePath);
+      }
+      const loadedSnapshot = await this.loadFreshProjectSnapshotUnlocked();
+      const snapshot = event.affects.includes('canvas-feedback')
+        ? snapshotWithoutCanvasFeedbackDocumentInvalidDiagnostic(loadedSnapshot)
+        : loadedSnapshot;
+      this.snapshot = snapshot;
       this.emit({ type: 'project.fileChanged', event, snapshot });
     } catch (error) {
       const current = this.snapshot;
       if (!current) {
         return;
       }
-      const snapshot = projectWatchRefreshFailedSnapshot({
-        current,
-        event,
-        errorMessage: errorMessage(error),
-        checkedAt: new Date().toISOString()
-      });
+      const snapshot = event.affects.includes('canvas-feedback')
+        ? snapshotWithCanvasFeedbackDocumentInvalidDiagnostic(current, {
+          filePath: event.absolutePath,
+          entityId: event.projectRelativePath
+        }, error)
+        : projectWatchRefreshFailedSnapshot({
+          current,
+          event,
+          errorMessage: errorMessage(error),
+          checkedAt: new Date().toISOString()
+        });
       this.snapshot = snapshot;
       this.emit({ type: 'project.fileChanged', event, snapshot });
     }
@@ -1107,6 +1158,19 @@ export class DebruteAppServer {
 
   private emit(event: AppServerEvent): void {
     this.events.emit('event', event);
+  }
+
+  private applyCanvasFeedbackRenderedDiagnostics(renderedFeedback: CanvasFeedbackRenderDiagnosticUpdate): void {
+    const current = this.snapshot;
+    if (!current) {
+      return;
+    }
+    const snapshot = snapshotWithCanvasFeedbackRenderedDiagnostics(current, renderedFeedback);
+    if (snapshot === current) {
+      return;
+    }
+    this.snapshot = snapshot;
+    this.emit({ type: 'project.changed', snapshot });
   }
 
   private getTerminalService(): TerminalService {
@@ -1194,6 +1258,103 @@ export class DebruteAppServer {
     this.sessionOperation = run.then(() => undefined, () => undefined);
     return run;
   }
+}
+
+function snapshotWithCanvasFeedbackRenderedDiagnostics(
+  snapshot: ProjectSessionSnapshot,
+  renderedFeedback: CanvasFeedbackRenderDiagnosticUpdate
+): ProjectSessionSnapshot {
+  if (!renderedFeedback.checkedAllEntries
+    && renderedFeedback.checkedProjectRelativePaths.length === 0
+    && renderedFeedback.diagnostics.length === 0) {
+    return snapshot;
+  }
+  const checkedDiagnosticIds = new Set(
+    renderedFeedback.checkedProjectRelativePaths.map(canvasFeedbackRenderDiagnosticId)
+  );
+  const retainedProjectRelativePaths = new Set(renderedFeedback.retainedProjectRelativePaths ?? []);
+  const retainedDiagnostics = snapshot.diagnostics.filter((diagnostic) => {
+    if (renderedFeedback.checkedAllEntries && diagnostic.id.startsWith(CANVAS_FEEDBACK_RENDER_DIAGNOSTIC_PREFIX)) {
+      return typeof diagnostic.entityId === 'string' && retainedProjectRelativePaths.has(diagnostic.entityId);
+    }
+    return !checkedDiagnosticIds.has(diagnostic.id);
+  });
+  const diagnostics = uniqueDiagnostics([
+    ...renderedFeedback.diagnostics,
+    ...retainedDiagnostics
+  ]);
+  if (sameDiagnostics(snapshot.diagnostics, diagnostics)) {
+    return snapshot;
+  }
+  return {
+    ...snapshot,
+    diagnostics,
+    health: {
+      ...snapshot.health,
+      diagnosticCounts: diagnosticCounts(diagnostics),
+      checkedAt: new Date().toISOString()
+    }
+  };
+}
+
+function snapshotWithCanvasFeedbackDocumentInvalidDiagnostic(
+  snapshot: ProjectSessionSnapshot,
+  input: { filePath: string; entityId: string },
+  error: unknown
+): ProjectSessionSnapshot {
+  return snapshotWithDiagnostics(snapshot, uniqueDiagnostics([
+    projectDocumentDiagnostic({
+      id: CANVAS_FEEDBACK_DOCUMENT_INVALID_DIAGNOSTIC_ID,
+      code: 'canvas-feedback.document_invalid',
+      severity: 'error',
+      message: `Canvas feedback document is invalid: ${errorMessage(error)}`,
+      filePath: input.filePath,
+      entityId: input.entityId
+    }),
+    ...snapshot.diagnostics.filter((diagnostic) => diagnostic.id !== CANVAS_FEEDBACK_DOCUMENT_INVALID_DIAGNOSTIC_ID)
+  ]));
+}
+
+function snapshotWithoutCanvasFeedbackDocumentInvalidDiagnostic(snapshot: ProjectSessionSnapshot): ProjectSessionSnapshot {
+  return snapshotWithDiagnostics(
+    snapshot,
+    snapshot.diagnostics.filter((diagnostic) => diagnostic.id !== CANVAS_FEEDBACK_DOCUMENT_INVALID_DIAGNOSTIC_ID)
+  );
+}
+
+function snapshotWithDiagnostics(snapshot: ProjectSessionSnapshot, diagnostics: Diagnostic[]): ProjectSessionSnapshot {
+  if (sameDiagnostics(snapshot.diagnostics, diagnostics)) {
+    return snapshot;
+  }
+  return {
+    ...snapshot,
+    diagnostics,
+    health: {
+      ...snapshot.health,
+      diagnosticCounts: diagnosticCounts(diagnostics),
+      checkedAt: new Date().toISOString()
+    }
+  };
+}
+
+function canvasFeedbackRenderDiagnosticId(projectRelativePath: string): string {
+  return `${CANVAS_FEEDBACK_RENDER_DIAGNOSTIC_PREFIX}${projectRelativePath}`;
+}
+
+function uniqueDiagnostics(diagnostics: Diagnostic[]): Diagnostic[] {
+  return [...new Map(diagnostics.map((diagnostic) => [diagnostic.id, diagnostic])).values()];
+}
+
+function sameDiagnostics(left: Diagnostic[], right: Diagnostic[]): boolean {
+  return JSON.stringify(left) === JSON.stringify(right);
+}
+
+function diagnosticCounts(diagnostics: Diagnostic[]): ProjectHealthSummary['diagnosticCounts'] {
+  return {
+    errors: diagnostics.filter((diagnostic) => diagnostic.severity === 'error').length,
+    warnings: diagnostics.filter((diagnostic) => diagnostic.severity === 'warning').length,
+    infos: diagnostics.filter((diagnostic) => diagnostic.severity === 'info').length
+  };
 }
 
 async function fileExists(absolutePath: string): Promise<boolean> {

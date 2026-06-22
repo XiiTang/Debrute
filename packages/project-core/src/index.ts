@@ -68,7 +68,7 @@ export interface NormalizedFileWatchEvent {
   absolutePath: string;
   projectRelativePath: string;
   observedAt?: number;
-  affects: Array<'canvas' | 'canvas-registry' | 'canvas-map' | 'project-metadata' | 'generated-asset-metadata' | 'content'>;
+  affects: Array<'canvas' | 'canvas-registry' | 'canvas-map' | 'canvas-feedback' | 'project-metadata' | 'generated-asset-metadata' | 'content'>;
 }
 
 export function createProjectIdentity(projectRoot: string, name = basenameFromPath(projectRoot)): ProjectIdentity {
@@ -331,6 +331,8 @@ export function normalizeFileWatchEvent(projectRoot: string, absolutePath: strin
     affects.push('canvas');
   } else if (projectRelativePath.startsWith('.debrute/canvas-maps/') && projectRelativePath.endsWith('.yaml')) {
     affects.push('canvas-map');
+  } else if (projectRelativePath === '.debrute/reviews/canvas-feedback.json') {
+    affects.push('canvas-feedback');
   } else if (projectRelativePath === '.debrute/project.json') {
     affects.push('project-metadata');
   } else if (

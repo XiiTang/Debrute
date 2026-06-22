@@ -126,6 +126,8 @@ export function assertProjectTreeVisibleMutationPath(projectRelativePath: string
 export function isIgnoredProjectFilePath(projectRelativePath: string): boolean {
   return projectRelativePath === '.debrute/cache/canvas-image-previews'
     || projectRelativePath.startsWith('.debrute/cache/canvas-image-previews/')
+    || projectRelativePath === '.debrute/reviews/rendered-feedback'
+    || projectRelativePath.startsWith('.debrute/reviews/rendered-feedback/')
     || (projectRelativePath.startsWith('.debrute/') && projectRelativePath.endsWith('.lock'));
 }
 

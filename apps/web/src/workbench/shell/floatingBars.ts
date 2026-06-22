@@ -1,4 +1,4 @@
-import type { CanvasFeedbackEntry } from '@debrute/canvas-core';
+import type { CanvasFeedbackEntry, CanvasFeedbackGeometry, CanvasImageFeedbackRegion } from '@debrute/canvas-core';
 import type { CanvasCamera } from '../canvas/runtime/canvasCamera';
 
 export interface FloatingBarRect {
@@ -14,6 +14,7 @@ export interface CanvasFeedbackBarTarget {
   surfaceRect: FloatingBarRect;
   camera: CanvasCamera;
   entry: CanvasFeedbackEntry | undefined;
+  supportsImageLocalFeedback: boolean;
 }
 
 export function sameCanvasFeedbackBarTarget(
@@ -32,6 +33,7 @@ export function sameCanvasFeedbackBarTarget(
     && left.camera.x === right.camera.x
     && left.camera.y === right.camera.y
     && left.camera.z === right.camera.z
+    && left.supportsImageLocalFeedback === right.supportsImageLocalFeedback
     && sameCanvasFeedbackEntry(left.entry, right.entry);
 }
 
@@ -40,8 +42,8 @@ export interface FloatingBarPlacement extends FloatingBarRect {
 }
 
 export const CANVAS_FEEDBACK_BAR_SIZE = {
-  width: 358,
-  height: 30
+  width: 490,
+  height: 96
 } as const;
 
 export const CANVAS_MINIMAP_BUTTON_SIZE = {
@@ -219,11 +221,44 @@ function sameCanvasFeedbackEntry(
   if (left === right) {
     return true;
   }
-  if (!left || !right || left.marks.length !== right.marks.length) {
+  if (!left || !right || left.marks.length !== right.marks.length || left.regions.length !== right.regions.length) {
     return false;
   }
   return left.projectRelativePath === right.projectRelativePath
     && left.note === right.note
+    && left.nextRegionLabel === right.nextRegionLabel
     && left.updatedAt === right.updatedAt
-    && left.marks.every((mark, index) => mark === right.marks[index]);
+    && left.marks.every((mark, index) => mark === right.marks[index])
+    && left.regions.every((region, index) => sameCanvasFeedbackRegion(region, right.regions[index]));
+}
+
+function sameCanvasFeedbackRegion(
+  left: CanvasImageFeedbackRegion,
+  right: CanvasImageFeedbackRegion | undefined
+): boolean {
+  if (!right) {
+    return false;
+  }
+  return left.id === right.id
+    && left.label === right.label
+    && left.kind === right.kind
+    && left.comment === right.comment
+    && left.updatedAt === right.updatedAt
+    && sameCanvasFeedbackGeometry(left.geometry, right.geometry);
+}
+
+function sameCanvasFeedbackGeometry(left: CanvasFeedbackGeometry, right: CanvasFeedbackGeometry): boolean {
+  if (left.type !== right.type) {
+    return false;
+  }
+  if (left.type === 'point' && right.type === 'point') {
+    return left.x === right.x && left.y === right.y;
+  }
+  if (left.type !== 'point' && right.type !== 'point') {
+    return left.x === right.x
+      && left.y === right.y
+      && left.width === right.width
+      && left.height === right.height;
+  }
+  return false;
 }

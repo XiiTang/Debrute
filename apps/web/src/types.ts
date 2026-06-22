@@ -106,7 +106,7 @@ export interface WorkbenchActions {
   updateCanvasNodeLayers: (canvasId: string, input: {
     nodeProjectRelativePathsTopFirst?: string[];
   }) => Promise<void>;
-  updateCanvasFeedbackEntry: (input: UpdateCanvasFeedbackEntryInput) => Promise<void>;
+  updateCanvasFeedbackEntry: (input: UpdateCanvasFeedbackEntryInput) => Promise<boolean>;
   addProjectPathToCanvasMap: (input: AddProjectPathToCanvasMapInput) => Promise<void>;
   createCanvas: () => Promise<WorkbenchCanvasManagementResult>;
   renameCanvas: (input: { canvasId: string; nextCanvasId: string }) => Promise<WorkbenchCanvasManagementResult>;

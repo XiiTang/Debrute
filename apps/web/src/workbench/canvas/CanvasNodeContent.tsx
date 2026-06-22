@@ -1,9 +1,10 @@
 import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { AlertTriangle, File, FileText, Folder, Image as ImageIcon, Maximize2, Music2, RefreshCw, Save, Video } from 'lucide-react';
-import type { ProjectedCanvasNode } from '@debrute/canvas-core';
+import type { CanvasFeedbackEntry, CanvasFeedbackGeometry, ProjectedCanvasNode } from '@debrute/canvas-core';
 import type { TextFileBuffer, WorkbenchActions } from '../../types';
 import { CanvasMonacoEditor } from './CanvasMonacoEditor';
 import { useCanvasImageNodeAsset, type CanvasImageNodeAssetHookState } from './CanvasImageNodeAssetContext';
+import { CanvasImageFeedbackLayer, type CanvasImageFeedbackMode } from './CanvasImageFeedbackLayer';
 import type { CanvasLoadedImage } from './canvasImagePreviews';
 import { Button, IconButton, StatusPill } from '../ui';
 
@@ -13,6 +14,10 @@ export interface CanvasNodeContentProps {
   culled: boolean;
   actions: WorkbenchActions;
   textBuffer: TextFileBuffer | undefined;
+  feedbackEntry?: CanvasFeedbackEntry | undefined;
+  localFeedbackMode?: CanvasImageFeedbackMode | undefined;
+  pendingFeedbackGeometry?: CanvasFeedbackGeometry | undefined;
+  onLocalFeedbackDraft?: ((input: { projectRelativePath: string; geometry: CanvasFeedbackGeometry }) => void) | undefined;
   onSelectNode: () => void;
   onTitlePointerDown: (event: React.PointerEvent<Element>) => void;
   onTitlePointerMove: (event: React.PointerEvent<Element>) => void;
@@ -25,6 +30,10 @@ export function CanvasNodeContent({
   culled,
   actions,
   textBuffer,
+  feedbackEntry,
+  localFeedbackMode,
+  pendingFeedbackGeometry,
+  onLocalFeedbackDraft,
   onSelectNode,
   onTitlePointerDown,
   onTitlePointerMove,
@@ -104,7 +113,18 @@ export function CanvasNodeContent({
       {canRenderMediaPreview ? (
         <div className="canvas-node-preview">
           {node.mediaKind === 'image' ? (
-            <CanvasImageNodeContent node={node} culled={culled} />
+            <>
+              <CanvasImageNodeContent node={node} culled={culled} />
+              <CanvasImageFeedbackLayer
+                entry={feedbackEntry}
+                mode={localFeedbackMode}
+                draftGeometry={pendingFeedbackGeometry}
+                onRegionDraft={(geometry) => onLocalFeedbackDraft?.({
+                  projectRelativePath: node.projectRelativePath,
+                  geometry
+                })}
+              />
+            </>
           ) : node.mediaKind === 'video' ? (
             <video
               key={`${mediaSrc}:${mediaRetryNonce}`}
