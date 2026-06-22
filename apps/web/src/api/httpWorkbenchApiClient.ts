@@ -1,6 +1,7 @@
 import type {
   AddProjectPathToCanvasMapInput,
   AdobeBridgeStateView,
+  BrowserSessionCredential,
   DebruteRuntimeInfo,
   DebruteHttpErrorBody,
   DaemonProjectUploadImportPlan,
@@ -70,18 +71,43 @@ class DebruteHttpRequestError extends Error {
 
 export function createHttpWorkbenchApiClient(options: HttpWorkbenchApiClientOptions = {}): WorkbenchApiClient {
   const daemonUrl = trimTrailingSlash(options.daemonUrl ?? browserDaemonUrl());
-  const token = options.token ?? browserToken();
+  let token = options.token ?? browserToken();
   const transportFetch = options.fetch ?? fetch;
   const shell = () => options.shell ?? getDebruteShellApi();
   const eventClientId = browserEventClientId();
+  const workbenchOrigin = browserWorkbenchOrigin(daemonUrl);
+
+  const routeNeedsDaemonToken = (path: string): boolean => (
+    path !== '/api/runtime'
+    && path !== '/api/status'
+    && path !== '/api/browser-session'
+  );
+
+  const daemonToken = async (): Promise<string | undefined> => {
+    if (token) {
+      return token;
+    }
+    const response = await transportFetch(`${daemonUrl}/api/browser-session`, {
+      method: 'GET',
+      headers: { 'x-debrute-web-origin': workbenchOrigin }
+    });
+    if (!response.ok) {
+      throw await responseError(response);
+    }
+    const credential = await response.json() as BrowserSessionCredential;
+    token = credential.token;
+    rememberBrowserToken(credential.token);
+    return token;
+  };
 
   const request = async <T>(method: string, path: string, body?: unknown): Promise<T> => {
     const headers: Record<string, string> = {};
     if (body !== undefined) {
       headers['content-type'] = 'application/json';
     }
-    if (token) {
-      headers['x-debrute-daemon-token'] = token;
+    const resolvedToken = routeNeedsDaemonToken(path) ? await daemonToken() : token;
+    if (resolvedToken) {
+      headers['x-debrute-daemon-token'] = resolvedToken;
     }
     const response = await transportFetch(`${daemonUrl}${path}`, {
       method,
@@ -98,8 +124,9 @@ export function createHttpWorkbenchApiClient(options: HttpWorkbenchApiClientOpti
   };
   const requestFormData = async <T>(method: string, path: string, body: FormData): Promise<T> => {
     const headers: Record<string, string> = {};
-    if (token) {
-      headers['x-debrute-daemon-token'] = token;
+    const resolvedToken = routeNeedsDaemonToken(path) ? await daemonToken() : token;
+    if (resolvedToken) {
+      headers['x-debrute-daemon-token'] = resolvedToken;
     }
     const response = await transportFetch(`${daemonUrl}${path}`, {
       method,
@@ -414,6 +441,13 @@ function browserDaemonUrl(): string {
   return window.location.origin;
 }
 
+function browserWorkbenchOrigin(daemonUrl: string): string {
+  if (typeof window !== 'undefined') {
+    return window.location.origin;
+  }
+  return daemonUrl;
+}
+
 function browserToken(): string | undefined {
   if (typeof window === 'undefined') {
     return undefined;
@@ -437,6 +471,17 @@ function daemonTokenFromHistoryState(): string | undefined {
   }
   const token = (state as { debruteDaemonToken?: unknown }).debruteDaemonToken;
   return typeof token === 'string' && token.length > 0 ? token : undefined;
+}
+
+function rememberBrowserToken(token: string): void {
+  if (typeof window === 'undefined') {
+    return;
+  }
+  window.history.replaceState(
+    historyStateWithDaemonToken(token),
+    '',
+    `${window.location.pathname}${window.location.search}${window.location.hash}`
+  );
 }
 
 function historyStateWithDaemonToken(token: string): Record<string, unknown> {

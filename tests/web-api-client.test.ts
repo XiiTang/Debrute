@@ -54,6 +54,40 @@ describe('HTTP workbench API client', () => {
     expect(requests[0]!.init?.headers).toMatchObject({ 'x-debrute-daemon-token': 'secret' });
   });
 
+  it('bootstraps a daemon token for HTTP clients without an explicit token', async () => {
+    const requests: Array<{ method: string; path: string; headers?: RequestInit['headers'] }> = [];
+    const client = createHttpWorkbenchApiClient({
+      daemonUrl: 'http://127.0.0.1:17456/',
+      fetch: async (url, init) => {
+        const parsed = new URL(String(url));
+        requests.push({ method: init?.method ?? 'GET', path: parsed.pathname, headers: init?.headers });
+        if (parsed.pathname === '/api/browser-session') {
+          return jsonResponse({
+            token: 'bootstrapped-secret',
+            runtime: {
+              daemonUrl: 'http://127.0.0.1:17456',
+              webBaseUrl: 'http://127.0.0.1:17456',
+              platform: 'darwin'
+            }
+          });
+        }
+        return jsonResponse(routeResponse(String(url), init));
+      }
+    });
+
+    await client.openProject({ projectRoot: '/tmp/project' });
+    await client.readProjectTextFile('briefs/outline.md');
+
+    expect(requests.map((request) => [request.method, request.path])).toEqual([
+      ['GET', '/api/browser-session'],
+      ['POST', '/api/projects/open'],
+      ['GET', `/api/projects/${projectId}/files/text/briefs/outline.md`]
+    ]);
+    expect(requests[0]!.headers).toMatchObject({ 'x-debrute-web-origin': 'http://127.0.0.1:17456' });
+    expect(requests[1]!.headers).toMatchObject({ 'x-debrute-daemon-token': 'bootstrapped-secret' });
+    expect(requests[2]!.headers).toMatchObject({ 'x-debrute-daemon-token': 'bootstrapped-secret' });
+  });
+
   it('opens the project event stream after the daemon returns an opaque project id', async () => {
     const eventSourceUrls: string[] = [];
     const client = createHttpWorkbenchApiClient({

@@ -3,6 +3,7 @@ import {
   isDebruteMutatingMethod,
   normalizeDebruteRuntimeInfo,
   parseDebruteWorkbenchPath,
+  type BrowserSessionCredential,
   type LiveProjectsView,
   type WorkbenchApiClient,
   type WorkbenchProjectOpenResult
@@ -34,7 +35,13 @@ describe('app-protocol runtime metadata', () => {
     });
   });
 
-  it('parses only project-level Workbench routes', () => {
+  it('parses final Web Workbench routes', () => {
+    expect(parseDebruteWorkbenchPath('/')).toEqual({ kind: 'workbench' });
+    expect(parseDebruteWorkbenchPath('/open', '')).toEqual({ kind: 'project-open' });
+    expect(parseDebruteWorkbenchPath('/open', '?path=%2FUsers%2Fme%2FProject%20A')).toEqual({
+      kind: 'project-open',
+      projectRoot: '/Users/me/Project A'
+    });
     expect(parseDebruteWorkbenchPath('/projects/123e4567-e89b-42d3-a456-426614174000')).toEqual({
       kind: 'project',
       projectId: '123e4567-e89b-42d3-a456-426614174000'
@@ -42,6 +49,21 @@ describe('app-protocol runtime metadata', () => {
 
     expect(parseDebruteWorkbenchPath('/projects/123e4567-e89b-42d3-a456-426614174000/files/briefs/cover%20art.png')).toEqual({ kind: 'workbench' });
     expect(parseDebruteWorkbenchPath('/settings')).toEqual({ kind: 'workbench' });
+  });
+
+  it('models browser session credentials without project state', () => {
+    const credential: BrowserSessionCredential = {
+      token: 'secret',
+      runtime: {
+        daemonUrl: 'http://127.0.0.1:17321',
+        webBaseUrl: 'http://127.0.0.1:17322',
+        platform: 'darwin'
+      }
+    };
+
+    expect(credential.token).toBe('secret');
+    expect(JSON.stringify(credential)).not.toContain('projectRoot');
+    expect(JSON.stringify(credential)).not.toContain('projectId');
   });
 
   it('models live projects as a collection instead of an active project alias', () => {

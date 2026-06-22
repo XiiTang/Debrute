@@ -21,7 +21,7 @@ import { createCanvasFeedbackEntryUpdater } from './services/canvasFeedbackUpdat
 import { nextSnapshotFromAppServerEvent } from './services/appServerEvents';
 import { getCanvasById } from './services/canvasState';
 import { chooseInitialActiveCanvasId } from './canvas/canvasCardBarState';
-import { loadCanvasFeedback, openInitialProject, replaceWorkbenchProjectRoute } from './services/projectSessionState';
+import { isAbsoluteLocalProjectPath, loadCanvasFeedback, openInitialProject, replaceWorkbenchProjectRoute } from './services/projectSessionState';
 import { loadProjectViewState, saveProjectViewState } from './services/projectViewState';
 import {
   closeTextEditorWindowState,
@@ -141,6 +141,9 @@ export function WorkbenchApp(): React.ReactElement {
   const [inlineProjectTreeEdit, setInlineProjectTreeEdit] = useState<ProjectTreeInlineEditState>();
   const [notifications, setNotifications] = useState<string[]>([]);
   const [isLoading, setIsLoading] = useState(true);
+  const [projectOpenPath, setProjectOpenPath] = useState('');
+  const [projectOpenError, setProjectOpenError] = useState<string>();
+  const [isProjectOpening, setIsProjectOpening] = useState(false);
   const canvasOverlayRuntime = useMemo(() => createCanvasOverlayRuntime(), []);
   const snapshotRef = useRef(snapshot);
   const textFileBuffersRef = useRef(textFileBuffers);
@@ -173,6 +176,32 @@ export function WorkbenchApp(): React.ReactElement {
       clientId: api.clientId
     }).floatingPanels ?? DEFAULT_FLOATING_PANEL_STATE;
   }, []);
+
+  const applyOpenedProject = useCallback(async (opened: { projectId: string; snapshot: WorkbenchProjectSessionSnapshot }) => {
+    replaceWorkbenchProjectRoute(opened.projectId, { search: '', hash: '' });
+    setSnapshot(opened.snapshot);
+    setDaemonProjectId(opened.projectId);
+    setFloatingPanels(loadFloatingPanelsForProject(opened.projectId));
+    setActiveCanvasId(chooseActiveCanvasForProject({ projectId: opened.projectId, snapshot: opened.snapshot }));
+    setActiveCanvasRuntime(undefined);
+    setCanvasRuntimeScopeKey((current) => current + 1);
+    setExplorerSelection(createEmptyProjectTreeSelection());
+    setFileClipboard(undefined);
+    setInlineProjectTreeEdit(undefined);
+    setTextFileBuffers({});
+    setTextEditorWindows({});
+    setWindowOrder(DEFAULT_WORKBENCH_WINDOW_ORDER);
+    setFeedbackBarTarget(undefined);
+    setCanvasMinimapOpen(false);
+    setProjectOpenError(undefined);
+    setLlmSettings(await api.llmGetSettings());
+    setImageModelSettings(await api.imageModelGetSettings());
+    setVideoModelSettings(await api.videoModelGetSettings());
+    setIntegrationsSettings(await api.integrationsListStatus());
+    setAdobeBridge(await api.adobeBridgeGetState());
+    await loadCanvasFeedback(api, setCanvasFeedback, setNotifications);
+    setNotifications((current) => [`Opened project: ${opened.snapshot.metadata.project.name}`, ...current].slice(0, 4));
+  }, [chooseActiveCanvasForProject, loadFloatingPanelsForProject]);
 
   useEffect(() => {
     snapshotRef.current = snapshot;
@@ -231,19 +260,17 @@ export function WorkbenchApp(): React.ReactElement {
       }
     });
     openInitialProject(api)
-      .then(({ projectId: routeProjectId, snapshot: opened }) => {
-        if (!opened || !routeProjectId || disposed) {
+      .then(async (result) => {
+        if (disposed) {
           return;
         }
-        setSnapshot(opened);
-        setDaemonProjectId(routeProjectId);
-        setFloatingPanels(loadFloatingPanelsForProject(routeProjectId));
-        void loadCanvasFeedback(api, setCanvasFeedback, setNotifications);
-        setActiveCanvasId(chooseActiveCanvasForProject({ projectId: routeProjectId, snapshot: opened }));
-        void api.llmGetSettings().then(setLlmSettings);
-        void api.imageModelGetSettings().then(setImageModelSettings);
-        void api.videoModelGetSettings().then(setVideoModelSettings);
-        void api.adobeBridgeGetState().then(setAdobeBridge);
+        setProjectOpenPath(result.projectOpen?.path ?? '');
+        setProjectOpenError(result.projectOpen?.error);
+        const { projectId: routeProjectId, snapshot: opened } = result;
+        if (!opened || !routeProjectId) {
+          return;
+        }
+        await applyOpenedProject({ projectId: routeProjectId, snapshot: opened });
       })
       .catch((error) => {
         if (!disposed) {
@@ -258,7 +285,7 @@ export function WorkbenchApp(): React.ReactElement {
     return () => {
       disposed = true;
     };
-  }, [chooseActiveCanvasForProject, loadFloatingPanelsForProject]);
+  }, [applyOpenedProject]);
 
   useEffect(() => {
     if (!daemonProjectId || !activeCanvasId) {
@@ -522,6 +549,12 @@ export function WorkbenchApp(): React.ReactElement {
   const state: WorkbenchState = {
     snapshot,
     projectId: daemonProjectId,
+    projectOpen: {
+      path: projectOpenPath,
+      ...(projectOpenError ? { error: projectOpenError } : {}),
+      opening: isProjectOpening,
+      canChooseDirectory: Boolean(getDebruteShellApi()?.openProject || getDebruteShellApi()?.chooseProjectRoot)
+    },
     explorerSelection,
     llmSettings,
     imageModelSettings,
@@ -541,6 +574,29 @@ export function WorkbenchApp(): React.ReactElement {
   }, []);
 
   const actions: WorkbenchActions = useMemo(() => ({
+    setProjectOpenPath,
+    openProjectPath: async (projectRoot) => {
+      const trimmed = projectRoot.trim();
+      setProjectOpenPath(trimmed);
+      setIsProjectOpening(true);
+      setProjectOpenError(undefined);
+      try {
+        if (!trimmed) {
+          setProjectOpenError('Project path is required.');
+          return;
+        }
+        if (!isAbsoluteLocalProjectPath(trimmed)) {
+          setProjectOpenError('Project path must be absolute.');
+          return;
+        }
+        const opened = await api.openProject({ projectRoot: trimmed });
+        await applyOpenedProject(opened);
+      } catch (error) {
+        setProjectOpenError(`Open project failed: ${errorMessage(error)}`);
+      } finally {
+        setIsProjectOpening(false);
+      }
+    },
     openProject: async () => {
       let opened: Awaited<ReturnType<typeof api.openProject>>;
       try {
@@ -557,28 +613,7 @@ export function WorkbenchApp(): React.ReactElement {
         setNotifications((current) => [`Open project failed: ${errorMessage(error)}`, ...current].slice(0, 4));
         return;
       }
-      replaceWorkbenchProjectRoute(opened.projectId);
-      setSnapshot(opened.snapshot);
-      setDaemonProjectId(opened.projectId);
-      setFloatingPanels(loadFloatingPanelsForProject(opened.projectId));
-      setActiveCanvasId(chooseActiveCanvasForProject({ projectId: opened.projectId, snapshot: opened.snapshot }));
-      setActiveCanvasRuntime(undefined);
-      setCanvasRuntimeScopeKey((current) => current + 1);
-      setExplorerSelection(createEmptyProjectTreeSelection());
-      setFileClipboard(undefined);
-      setInlineProjectTreeEdit(undefined);
-      setTextFileBuffers({});
-      setTextEditorWindows({});
-      setWindowOrder(DEFAULT_WORKBENCH_WINDOW_ORDER);
-      setFeedbackBarTarget(undefined);
-      setCanvasMinimapOpen(false);
-      setLlmSettings(await api.llmGetSettings());
-      setImageModelSettings(await api.imageModelGetSettings());
-      setVideoModelSettings(await api.videoModelGetSettings());
-      setIntegrationsSettings(await api.integrationsListStatus());
-      setAdobeBridge(await api.adobeBridgeGetState());
-      await loadCanvasFeedback(api, setCanvasFeedback, setNotifications);
-      setNotifications((current) => [`Opened project: ${opened.snapshot.metadata.project.name}`, ...current].slice(0, 4));
+      await applyOpenedProject(opened);
     },
     saveLlmProviderSetting: async (input, providerId) => {
       const settings = await api.llmSaveProviderSetting(input, providerId);
@@ -791,6 +826,7 @@ export function WorkbenchApp(): React.ReactElement {
   }), [
     activeCanvasId,
     activeCanvasRuntime,
+    applyOpenedProject,
     centerCanvasProjectionNode,
     locateProjectFileInCanvas,
     chooseActiveCanvasForProject,

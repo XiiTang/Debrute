@@ -197,6 +197,25 @@
   font-size: 15px;
 }
 
+.project-open-panel {
+  display: grid;
+  justify-items: center;
+  gap: 12px;
+  width: min(520px, calc(100vw - 48px));
+}
+
+.project-open-panel .db-field {
+  width: 100%;
+  text-align: left;
+}
+
+.project-open-panel__actions {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: center;
+  gap: 8px;
+}
+
 .empty-line {
   height: 32px;
   display: flex;

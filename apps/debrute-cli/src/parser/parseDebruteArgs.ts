@@ -15,7 +15,7 @@ export type DebruteCliCommand =
   | 'project.init'
   | 'project.status'
   | 'project.validate'
-  | 'workbench.url'
+  | 'workbench.start'
   | 'canvas-map.push'
   | 'canvas.create'
   | 'canvas.rename'
@@ -52,7 +52,7 @@ const POSITIONAL_COUNTS: Record<DebruteCliCommand, { min: number; max: number }>
   'project.init': { min: 1, max: 1 },
   'project.status': { min: 1, max: 1 },
   'project.validate': { min: 1, max: 1 },
-  'workbench.url': { min: 1, max: 1 },
+  'workbench.start': { min: 0, max: 0 },
   'canvas-map.push': { min: 2, max: 2 },
   'canvas.create': { min: 1, max: 1 },
   'canvas.rename': { min: 3, max: 3 },
@@ -81,7 +81,7 @@ const ALLOWED_OPTIONS: Record<DebruteCliCommand, Set<string>> = {
   'project.init': new Set(),
   'project.status': new Set(),
   'project.validate': new Set(),
-  'workbench.url': new Set(),
+  'workbench.start': new Set(),
   'canvas-map.push': new Set(),
   'canvas.create': new Set(),
   'canvas.rename': new Set(),
@@ -111,7 +111,6 @@ const PROJECT_COMMANDS = new Set<DebruteCliCommand>([
   'project.init',
   'project.status',
   'project.validate',
-  'workbench.url',
   'canvas-map.push',
   'canvas.create',
   'canvas.rename',

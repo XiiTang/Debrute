@@ -28,6 +28,13 @@ describe('debrute cli parser and renderer', () => {
       scope: 'project',
       projectRoot: '/tmp/project'
     });
+    const workbenchStart = parseDebruteArgs(['workbench', 'start']);
+    expect(workbenchStart).toMatchObject({
+      command: 'workbench.start',
+      scope: 'runtime',
+      positional: []
+    });
+    expect(workbenchStart.projectRoot).toBeUndefined();
     expect(parseDebruteArgs(['generate', 'image-batch', '/tmp/project', '--input-jsonl', 'requests.jsonl', '--log', 'results.jsonl'])).toMatchObject({
       command: 'generate.image-batch',
       scope: 'generation',
@@ -232,7 +239,7 @@ describe('debrute cli parser and renderer', () => {
       'project.init',
       'project.status',
       'project.validate',
-      'workbench.url',
+      'workbench.start',
       'canvas-map.push',
       'canvas.create',
       'canvas.rename',
@@ -259,12 +266,12 @@ describe('debrute cli parser and renderer', () => {
     expect(imageBatchSpec?.input).toContain('--concurrency <n>');
     expect(imageBatchSpec?.input).toContain('--retries <n>');
     expect(specForCommandPath(['project', 'status'])?.errors).toContain('project_not_found');
-    expect(specForCommandPath(['workbench', 'url'])).toMatchObject({
-      command: 'workbench.url',
+    expect(specForCommandPath(['workbench', 'start'])).toMatchObject({
+      command: 'workbench.start',
       scope: 'runtime',
       risk: 'write',
-      requires: 'project',
-      writes: 'debrute-project'
+      requires: 'none',
+      writes: 'logs'
     });
     expect(specForCommandPath(['canvas-map', 'push'])?.errors).toEqual(expect.arrayContaining([
       'canvas_map_invalid_canvas_id',

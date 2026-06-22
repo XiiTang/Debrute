@@ -80,6 +80,67 @@ describe('daemon HTTP runtime', () => {
 
   });
 
+  it('serves browser session credentials only through the bootstrap route', async () => {
+    const daemon = createDebruteDaemonHttpServer({
+      host: '127.0.0.1',
+      port: 0,
+      token: 'test-token',
+      webBaseUrl: 'http://127.0.0.1:17322'
+    });
+    cleanups.push(() => daemon.close());
+    const runtime = await daemon.listen();
+
+    const credential = await fetch(`${runtime.daemonUrl}/api/browser-session`, {
+      headers: { origin: 'http://127.0.0.1:17322' }
+    });
+    expect(credential.status).toBe(200);
+    expect(credential.headers.get('access-control-allow-origin')).toBe('http://127.0.0.1:17322');
+    await expect(credential.json()).resolves.toEqual({
+      token: 'test-token',
+      runtime: {
+        daemonUrl: runtime.daemonUrl,
+        webBaseUrl: runtime.webBaseUrl,
+        platform: process.platform
+      }
+    });
+
+    const tokenlessLoopback = await fetch(`${runtime.daemonUrl}/api/browser-session`);
+    expect(tokenlessLoopback.status).toBe(403);
+    await expect(tokenlessLoopback.json()).resolves.toMatchObject({
+      error: { code: 'forbidden' }
+    });
+
+    const workbenchClaimed = await fetch(`${runtime.daemonUrl}/api/browser-session`, {
+      headers: { 'x-debrute-web-origin': 'http://127.0.0.1:17322' }
+    });
+    expect(workbenchClaimed.status).toBe(200);
+    await expect(workbenchClaimed.json()).resolves.toMatchObject({
+      token: 'test-token'
+    });
+
+    const rejectedDaemonOrigin = await fetch(`${runtime.daemonUrl}/api/browser-session`, {
+      headers: {
+        origin: runtime.daemonUrl,
+        'x-debrute-web-origin': 'http://127.0.0.1:17322'
+      }
+    });
+    expect(rejectedDaemonOrigin.status).toBe(403);
+
+    const rejectedOrigin = await fetch(`${runtime.daemonUrl}/api/browser-session`, {
+      headers: { origin: 'http://example.com' }
+    });
+    expect(rejectedOrigin.status).toBe(403);
+
+    const rejectedMethod = await fetch(`${runtime.daemonUrl}/api/browser-session`, {
+      method: 'POST',
+      headers: { origin: 'http://127.0.0.1:17322' }
+    });
+    expect(rejectedMethod.status).toBe(405);
+    await expect(rejectedMethod.json()).resolves.toMatchObject({
+      error: { code: 'method_not_allowed' }
+    });
+  });
+
   it('protects project read routes with the daemon token', async () => {
     const projectRoot = await mkdtemp(join(tmpdir(), 'debrute-daemon-read-token-'));
     await writeFile(join(projectRoot, 'brief.md'), '# Brief', 'utf8');

@@ -66,6 +66,11 @@ export interface DebruteRuntimeInfo {
   platform: NodeJS.Platform;
 }
 
+export interface BrowserSessionCredential {
+  token: string;
+  runtime: DebruteRuntimeInfo;
+}
+
 export interface RevisionedProjectResult {
   projectId: string;
   projectRevision: number;
@@ -92,6 +97,10 @@ export interface LiveProjectsView {
 
 export type DebruteWorkbenchRoute =
   | { kind: 'workbench' }
+  | {
+      kind: 'project-open';
+      projectRoot?: string;
+    }
   | {
       kind: 'project';
       projectId: string;
@@ -149,11 +158,15 @@ export function normalizeDebruteRuntimeInfo(input: {
   };
 }
 
-export function parseDebruteWorkbenchPath(pathname: string): DebruteWorkbenchRoute {
+export function parseDebruteWorkbenchPath(pathname: string, search = ''): DebruteWorkbenchRoute {
   const segments = pathname
     .split('/')
     .filter((segment) => segment.length > 0)
     .map(decodeURIComponent);
+  if (segments.length === 1 && segments[0] === 'open') {
+    const projectRoot = new URLSearchParams(search).get('path') ?? undefined;
+    return projectRoot ? { kind: 'project-open', projectRoot } : { kind: 'project-open' };
+  }
   if (segments.length === 2 && segments[0] === 'projects' && segments[1]) {
     return {
       kind: 'project',

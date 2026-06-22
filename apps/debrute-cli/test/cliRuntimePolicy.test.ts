@@ -16,7 +16,7 @@ describe('CLI runtime policy', () => {
 
   it('ensures runtime for project, model, workbench, and generation commands', () => {
     for (const command of [
-      'workbench.url',
+      'workbench.start',
       'models.image.list',
       'models.image.describe',
       'models.video.list',

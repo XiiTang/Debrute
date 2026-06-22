@@ -57,7 +57,7 @@ async function runParsedCli(args: ParsedDebruteArgs, options: { output: (text: s
       skillsService: skillsRuntime.skillsService
     });
   }
-  if (args.command === 'workbench.url') {
+  if (args.command === 'workbench.start') {
     return runWorkbenchCommand(args);
   }
   return await runRuntimeBackedCliCommand(args, { output: options.output }) as DebruteAgentResult;

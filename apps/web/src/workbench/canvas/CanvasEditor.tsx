@@ -1,5 +1,5 @@
 import React from 'react';
-import { Boxes, FolderTree } from 'lucide-react';
+import { Boxes } from 'lucide-react';
 import type { ProjectedCanvasNode } from '@debrute/canvas-core';
 import type { WorkbenchActions, WorkbenchState } from '../../types';
 import type { WorkbenchContextMenuPosition, WorkbenchContextMenuTarget } from '../shell/contextMenu';
@@ -10,7 +10,7 @@ import type { CanvasOverlayRuntime } from './CanvasOverlayRuntime';
 import type { CanvasImageFeedbackDraftRegion, CanvasImageFeedbackMode } from './CanvasImageFeedbackLayer';
 import type { CanvasEditorRuntime } from './runtime/CanvasEditorRuntime';
 import { createCanvasEditorRuntime } from './runtime/CanvasEditorRuntime';
-import { Button } from '../ui';
+import { ProjectOpenPanel } from '../project-open/ProjectOpenPanel';
 
 export function CanvasEditor({
   canvasId,
@@ -83,7 +83,7 @@ export function CanvasEditor({
   }, [onRuntimeChange, runtimeKey]);
 
   if (!canvas || !projection) {
-    return <EmptyCanvas hasProject={Boolean(state.snapshot)} actions={actions} />;
+    return <EmptyCanvas hasProject={Boolean(state.snapshot)} state={state} actions={actions} />;
   }
 
   if (!runtime) {
@@ -113,15 +113,27 @@ export function CanvasEditor({
   );
 }
 
-function EmptyCanvas({ hasProject, actions }: { hasProject: boolean; actions: WorkbenchActions }): React.ReactElement {
+function EmptyCanvas({
+  hasProject,
+  state,
+  actions
+}: {
+  hasProject: boolean;
+  state: WorkbenchState;
+  actions: WorkbenchActions;
+}): React.ReactElement {
   if (!hasProject) {
     return (
       <div className="empty-editor empty-project">
-        <Boxes size={34} />
-        <strong>No project open</strong>
-        <Button iconStart={<FolderTree size={15} />} onClick={actions.openProject}>
-          Open Project
-        </Button>
+        <ProjectOpenPanel
+          path={state.projectOpen.path}
+          error={state.projectOpen.error}
+          opening={state.projectOpen.opening}
+          canChooseDirectory={state.projectOpen.canChooseDirectory}
+          onPathChange={actions.setProjectOpenPath}
+          onOpenPath={(projectRoot) => { void actions.openProjectPath(projectRoot); }}
+          onChooseDirectory={() => { void actions.openProject(); }}
+        />
       </div>
     );
   }

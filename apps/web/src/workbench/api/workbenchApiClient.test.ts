@@ -14,7 +14,8 @@ describe('workbench API client', () => {
     (globalThis as { window?: unknown }).window = {
       location: { origin: 'http://127.0.0.1:17321', search: '' },
       localStorage: { getItem: () => undefined, setItem: () => undefined },
-      sessionStorage: { getItem: () => undefined, setItem: () => undefined }
+      sessionStorage: { getItem: () => undefined, setItem: () => undefined },
+      history: { state: { debruteDaemonToken: 'secret' }, replaceState: vi.fn() }
     };
 
     expect(createWorkbenchApiClient()).toMatchObject({
@@ -27,7 +28,8 @@ describe('workbench API client', () => {
     (globalThis as { window?: unknown }).window = {
       location: { origin: 'http://127.0.0.1:17321', search: '' },
       localStorage: { getItem: () => undefined, setItem: () => undefined },
-      sessionStorage: { getItem: () => undefined, setItem: () => undefined }
+      sessionStorage: { getItem: () => undefined, setItem: () => undefined },
+      history: { state: { debruteDaemonToken: 'secret' }, replaceState: vi.fn() }
     };
     vi.stubGlobal('fetch', async (url: string) => {
       responses.push(url);
@@ -93,6 +95,48 @@ describe('workbench API client', () => {
     expect(requests[0]!.headers).toMatchObject({ 'x-debrute-daemon-token': 'secret' });
   });
 
+  it('bootstraps a daemon token when the browser has no URL or history token', async () => {
+    (globalThis as { window?: unknown }).window = {
+      location: {
+        origin: 'http://127.0.0.1:17321',
+        search: '',
+        pathname: '/open',
+        hash: ''
+      },
+      localStorage: { getItem: () => undefined, setItem: () => undefined },
+      sessionStorage: { getItem: () => undefined, setItem: () => undefined },
+      history: { state: {}, replaceState: vi.fn() }
+    };
+    const requests: Array<{ method: string | undefined; path: string; headers?: RequestInit['headers'] }> = [];
+    vi.stubGlobal('fetch', async (url: string, init: RequestInit = {}) => {
+      const parsed = new URL(url);
+      requests.push({ method: init.method, path: parsed.pathname, headers: init.headers });
+      if (parsed.pathname === '/api/browser-session') {
+        return new Response(JSON.stringify({
+          token: 'bootstrapped-secret',
+          runtime: {
+            daemonUrl: 'http://127.0.0.1:17321',
+            webBaseUrl: 'http://127.0.0.1:17321',
+            platform: 'darwin'
+          }
+        }), { status: 200, headers: { 'content-type': 'application/json' } });
+      }
+      return new Response(JSON.stringify({ projectId, projectRevision: 1, snapshot: { canvases: [] } }), {
+        status: 200,
+        headers: { 'content-type': 'application/json' }
+      });
+    });
+
+    await createWorkbenchApiClient().openProject({ projectRoot: '/tmp/project' });
+
+    expect(requests.map((request) => [request.method ?? 'GET', request.path])).toEqual([
+      ['GET', '/api/browser-session'],
+      ['POST', '/api/projects/open']
+    ]);
+    expect(requests[0]!.headers).toMatchObject({ 'x-debrute-web-origin': 'http://127.0.0.1:17321' });
+    expect(requests[1]!.headers).toMatchObject({ 'x-debrute-daemon-token': 'bootstrapped-secret' });
+  });
+
   it('calls project-scoped Canvas management routes', async () => {
     const requests: Array<{ method: string | undefined; url: string; body?: unknown }> = [];
     (globalThis as { window?: unknown }).window = {
@@ -104,7 +148,7 @@ describe('workbench API client', () => {
       },
       localStorage: { getItem: () => undefined, setItem: () => undefined },
       sessionStorage: { getItem: () => undefined, setItem: () => undefined },
-      history: { state: {}, replaceState: vi.fn() }
+      history: { state: { debruteDaemonToken: 'secret' }, replaceState: vi.fn() }
     };
     vi.stubGlobal('fetch', async (url: string, init: RequestInit = {}) => {
       requests.push({

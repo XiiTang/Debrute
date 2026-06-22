@@ -33,6 +33,7 @@ import type { ProjectTreeSelectionState } from './workbench/project-explorer/pro
 export interface WorkbenchState {
   snapshot: WorkbenchProjectSessionSnapshot | undefined;
   projectId?: string | undefined;
+  projectOpen: ProjectOpenState;
   explorerSelection: ProjectTreeSelectionState;
   llmSettings: LlmProviderSettingsView | undefined;
   imageModelSettings: ImageModelSettingsView | undefined;
@@ -43,6 +44,13 @@ export interface WorkbenchState {
   textFileBuffers: Record<string, TextFileBuffer>;
   textEditorWindows: Record<string, FloatingTextEditorWindowState>;
   notifications: string[];
+}
+
+export interface ProjectOpenState {
+  path: string;
+  error?: string;
+  opening: boolean;
+  canChooseDirectory: boolean;
 }
 
 export interface TextFileBuffer {
@@ -113,6 +121,8 @@ export interface WorkbenchActions {
   deleteCanvas: (input: { canvasId: string }) => Promise<WorkbenchCanvasManagementResult>;
   reorderCanvases: (input: { canvasOrder: string[] }) => Promise<WorkbenchCanvasManagementResult>;
   repairCanvasIndex: () => Promise<WorkbenchCanvasManagementResult>;
+  setProjectOpenPath: (path: string) => void;
+  openProjectPath: (projectRoot: string) => Promise<void>;
   openProject: () => Promise<void>;
   openTerminalPanel: (cwdProjectRelativePath?: string) => void;
 }

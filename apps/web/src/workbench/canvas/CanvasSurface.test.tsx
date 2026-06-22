@@ -1133,6 +1133,11 @@ function workbenchStateFixture(
         checkedAt: '2026-05-26T00:00:00.000Z'
       }
     },
+    projectOpen: {
+      path: '',
+      opening: false,
+      canChooseDirectory: false
+    },
     explorerSelection: { selectedPaths: [], focusedPath: null, anchorPath: null },
     llmSettings: undefined,
     imageModelSettings: undefined,
@@ -1228,6 +1233,8 @@ const actions: WorkbenchActions = {
   repairCanvasIndex: async () => {
     throw new Error('not used');
   },
+  setProjectOpenPath: () => undefined,
+  openProjectPath: async () => undefined,
   openProject: async () => undefined,
   openTerminalPanel: () => undefined
 };

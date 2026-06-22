@@ -1,9 +1,8 @@
-import { mkdir, mkdtemp, readFile, readdir, rm, stat, writeFile } from 'node:fs/promises';
+import { mkdir, mkdtemp, rm, stat, writeFile } from 'node:fs/promises';
 import { createServer, type Server } from 'node:net';
 import { tmpdir } from 'node:os';
-import { join, resolve } from 'node:path';
+import { join } from 'node:path';
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { createDebruteDaemonHttpServer, type DebruteDaemonHttpServer } from '@debrute/daemon';
 import { DebruteCliError, exitCodeForCliError } from '../src/errors/cliErrors';
 import { commandSpecs, specForCommandPath } from '../src/commands/helpSpec';
 import { parseDebruteArgs } from '../src/parser/parseDebruteArgs';
@@ -24,28 +23,29 @@ import { INTERNAL_WORKBENCH_RUNTIME_CHILD_COMMAND } from '../src/workbench/workb
 import * as workbenchRuntimeLauncher from '../src/workbench/workbenchRuntimeLauncher';
 import { parseRuntimeHostConfig } from '../../runtime-host/src/runtimeHostConfig';
 
-describe('debrute workbench url CLI metadata', () => {
-  it('parses workbench url with a project path', () => {
-    const parsed = parseDebruteArgs(['workbench', 'url', '.']);
+describe('debrute workbench start CLI metadata', () => {
+  it('parses workbench start without a project path', () => {
+    const parsed = parseDebruteArgs(['workbench', 'start']);
 
-    expect(parsed.command).toBe('workbench.url');
+    expect(parsed.command).toBe('workbench.start');
     expect(parsed.scope).toBe('runtime');
-    expect(parsed.commandPath).toEqual(['workbench', 'url']);
-    expect(parsed.projectRoot).toBe(resolve(process.cwd()));
+    expect(parsed.commandPath).toEqual(['workbench', 'start']);
+    expect(parsed.projectRoot).toBeUndefined();
+    expect(parsed.positional).toEqual([]);
   });
 
-  it('lists workbench url in command specs', () => {
+  it('lists workbench start in command specs', () => {
     expect(commandSpecs).toContainEqual(expect.objectContaining({
-      command: 'workbench.url',
-      path: ['workbench', 'url'],
+      command: 'workbench.start',
+      path: ['workbench', 'start'],
       scope: 'runtime',
       risk: 'write',
-      requires: 'project',
-      writes: 'debrute-project',
-      input: '<project>',
-      output: 'Workbench URL and runtime port fields'
+      requires: 'none',
+      writes: 'logs',
+      input: 'no args',
+      output: 'Workbench runtime URL and port fields'
     }));
-    expect(specForCommandPath(['workbench', 'url'])?.errors).toEqual(expect.arrayContaining([
+    expect(specForCommandPath(['workbench', 'start'])?.errors).toEqual(expect.arrayContaining([
       'runtime_launch_failed',
       'runtime_health_failed',
       'runtime_state_unreadable',
@@ -54,9 +54,9 @@ describe('debrute workbench url CLI metadata', () => {
     ]));
   });
 
-  it('rejects unknown workbench url options and json output mode', () => {
-    expect(() => parseDebruteArgs(['workbench', 'url', '.', '--open'])).toThrow(/Unknown option/);
-    expect(() => parseDebruteArgs(['workbench', 'url', '.', '--json'])).toThrow(/--json is not supported/);
+  it('rejects workbench start project paths and json output mode', () => {
+    expect(() => parseDebruteArgs(['workbench', 'start', '.'])).toThrow(/Unexpected argument/);
+    expect(() => parseDebruteArgs(['workbench', 'start', '--json'])).toThrow(/--json is not supported/);
   });
 
   it('assigns runtime failures to configuration exit code', () => {
@@ -77,33 +77,21 @@ describe('runWorkbenchCommand', () => {
     }
   });
 
-  it('opens a project through the runtime daemon and returns URL fields', async () => {
-    const projectRoot = await mkdtemp(join(tmpdir(), 'debrute-workbench-url-project-'));
-    cleanups.push(() => rm(projectRoot, { recursive: true, force: true }));
-
-    const result = await runWorkbenchCommand(parseDebruteArgs(['workbench', 'url', projectRoot]), {
+  it('starts or reuses the runtime and returns base URL fields', async () => {
+    const result = await runWorkbenchCommand(parseDebruteArgs(['workbench', 'start']), {
       ensureRuntime: async () => ({
         runtimeStarted: false,
         statePath: '/home/user/.debrute/runtime/workbench-runtime.json',
         state: runtimeState()
-      }),
-      fetch: async (url, init) => {
-        expect(String(url)).toBe('http://127.0.0.1:17321/api/projects/open');
-        expect(init?.method).toBe('POST');
-        expect((init?.headers as Record<string, string>)['x-debrute-daemon-token']).toBe('secret');
-        expect(JSON.parse(String(init?.body))).toEqual({ projectRoot });
-        return new Response(JSON.stringify({ projectId: 'project-1' }), { status: 200 });
-      }
+      })
     });
 
     expect(result).toMatchObject({
       status: 'ok',
-      command: 'workbench.url',
+      command: 'workbench.start',
       fields: {
-        project_url: 'http://127.0.0.1:17322/projects/project-1?debrute-token=secret',
         web_url: 'http://127.0.0.1:17322',
         daemon_url: 'http://127.0.0.1:17321',
-        project_id: 'project-1',
         web_port: 17322,
         daemon_port: 17321,
         runtime_started: false,
@@ -111,20 +99,17 @@ describe('runWorkbenchCommand', () => {
         state_path: '/home/user/.debrute/runtime/workbench-runtime.json'
       }
     });
-    expect(renderAgentRecord(result)).not.toContain(projectRoot);
+    expect(renderAgentRecord(result)).not.toContain('project_url');
+    expect(renderAgentRecord(result)).not.toContain('project_id');
   });
 
   it('reports desktop runtime kind when reusing a registered desktop runtime', async () => {
-    const projectRoot = await mkdtemp(join(tmpdir(), 'debrute-workbench-url-desktop-'));
-    cleanups.push(() => rm(projectRoot, { recursive: true, force: true }));
-
-    const result = await runWorkbenchCommand(parseDebruteArgs(['workbench', 'url', projectRoot]), {
+    const result = await runWorkbenchCommand(parseDebruteArgs(['workbench', 'start']), {
       ensureRuntime: async () => ({
         runtimeStarted: false,
         statePath: '/home/user/.debrute/runtime/workbench-runtime.json',
         state: runtimeState({ runtimeKind: 'desktop-packaged', processControl: 'external' })
-      }),
-      fetch: async () => new Response(JSON.stringify({ projectId: 'project-1' }), { status: 200 })
+      })
     });
 
     expect(result).toMatchObject({
@@ -133,97 +118,6 @@ describe('runWorkbenchCommand', () => {
         runtime_started: false,
         runtime_kind: 'desktop-packaged'
       }
-    });
-  });
-
-  it('lets daemon project-open initialize missing Debrute metadata and default canvas', async () => {
-    const projectRoot = await mkdtemp(join(tmpdir(), 'debrute-workbench-url-init-'));
-    const daemon = createDebruteDaemonHttpServer({
-      host: '127.0.0.1',
-      port: 0,
-      token: 'secret',
-      webBaseUrl: 'http://127.0.0.1:17322'
-    });
-    cleanups.push(() => daemon.close(), () => rm(projectRoot, { recursive: true, force: true }));
-    const runtime = await daemon.listen();
-
-    const result = await runWorkbenchCommand(parseDebruteArgs(['workbench', 'url', projectRoot]), {
-      ensureRuntime: async () => ({
-        runtimeStarted: false,
-        statePath: '/home/user/.debrute/runtime/workbench-runtime.json',
-        state: runtimeState({
-          daemonUrl: runtime.daemonUrl,
-          webUrl: 'http://127.0.0.1:17322',
-          daemonPid: process.pid,
-          webPid: process.pid
-        })
-      })
-    });
-
-    expect(result).toMatchObject({
-      status: 'ok',
-      command: 'workbench.url',
-      fields: {
-        web_url: 'http://127.0.0.1:17322',
-        daemon_url: runtime.daemonUrl
-      }
-    });
-    const metadata = JSON.parse(await readFile(join(projectRoot, '.debrute/project.json'), 'utf8')) as {
-      project?: { name?: string };
-    };
-    expect(metadata.project?.name).toBe(projectRoot.slice(projectRoot.lastIndexOf('/') + 1));
-    expect(await readdir(join(projectRoot, '.debrute/canvases'))).toContain('canvas-1.json');
-  });
-
-  it('returns project_not_found for missing directories without launching runtime', async () => {
-    const missingProject = join(tmpdir(), `debrute-missing-${Date.now()}`);
-    let launched = false;
-
-    const result = await runWorkbenchCommand(parseDebruteArgs(['workbench', 'url', missingProject]), {
-      ensureRuntime: async () => {
-        launched = true;
-        return {
-          runtimeStarted: false,
-          statePath: '/state.json',
-          state: runtimeState()
-        };
-      }
-    });
-
-    expect(launched).toBe(false);
-    expect(result).toMatchObject({
-      status: 'error',
-      command: 'workbench.url',
-      code: 'project_not_found'
-    });
-  });
-
-  it('preserves daemon internal_error from project-open failures', async () => {
-    const projectRoot = await mkdtemp(join(tmpdir(), 'debrute-workbench-url-invalid-'));
-    cleanups.push(() => rm(projectRoot, { recursive: true, force: true }));
-
-    const result = await runWorkbenchCommand(parseDebruteArgs(['workbench', 'url', projectRoot]), {
-      ensureRuntime: async () => ({
-        runtimeStarted: false,
-        statePath: '/state.json',
-        state: runtimeState()
-      }),
-      fetch: async () => new Response(JSON.stringify({
-        error: {
-          code: 'internal_error',
-          message: 'Invalid Debrute project metadata.'
-        }
-      }), {
-        status: 500,
-        headers: { 'content-type': 'application/json' }
-      })
-    });
-
-    expect(result).toMatchObject({
-      status: 'error',
-      command: 'workbench.url',
-      code: 'internal_error',
-      message: 'Invalid Debrute project metadata.'
     });
   });
 });

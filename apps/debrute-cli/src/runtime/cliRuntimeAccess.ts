@@ -56,9 +56,6 @@ export async function runRuntimeBackedCliCommand(
   const runtime = await ensureRuntime({
     shouldTerminateStaleRuntime: (state) => isWorkbenchRuntimeOwnedBy(state, owner)
   });
-  if (args.command === 'workbench.url') {
-    throw new Error('workbench.url uses the dedicated workbench URL command path.');
-  }
   if (args.command === 'generate.image-batch') {
     return applyRuntimeBackedResultExitCode(
       await postDaemonCliRunStream(runtime.state, args, services.fetch ?? fetch, services.output)

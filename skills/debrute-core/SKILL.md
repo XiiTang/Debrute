@@ -1,6 +1,6 @@
 ---
 name: debrute-core
-description: Use when an external Agent needs Debrute project semantics through the debrute command, including project status, visual Workbench URLs, Canvas Map pushing, generated assets, and model-backed generation.
+description: Use when an external Agent needs Debrute project semantics through the debrute command, including project status, visual Workbench runtime URLs, Canvas Map pushing, generated assets, and model-backed generation.
 metadata:
   debrute.managed: "true"
   debrute.package: "debrute"
@@ -28,7 +28,7 @@ debrute runtime doctor
 debrute project init /path/to/project
 debrute project status /path/to/project
 debrute project validate /path/to/project
-debrute workbench url /path/to/project
+debrute workbench start
 debrute canvas-map push /path/to/project canvas-1
 debrute generated-asset lookup /path/to/project --path generated/example.png
 debrute llm request --input-json '{"prompt":"Summarize this project."}'
@@ -46,15 +46,23 @@ debrute commands
 
 ## Visual Workbench
 
-When the user wants to view Debrute visually, run:
+Use the Workbench when visual inspection helps: Canvas layout, image previews, generated assets, or project file structure.
+
+Start or discover the local Workbench runtime:
 
 ```sh
-debrute workbench url /path/to/project
+debrute workbench start
 ```
 
-Read `project_url` from stdout. Open that URL with the current agent environment's own GUI/browser capability. Debrute CLI only returns URLs and ports; it does not open browsers.
+Read `web_url` from stdout. Build the project URL from the absolute local project path:
 
-Agent GUI examples:
+```text
+project_url=<web_url>/open?path=<encodeURIComponent(absProjectPath)>
+```
+
+Open that URL with the current agent environment's own GUI/browser capability. Debrute CLI returns the runtime base URL and ports; it does not open browsers or projects.
+
+Examples:
 
 ```text
 Qoder: /browser Open <project_url>

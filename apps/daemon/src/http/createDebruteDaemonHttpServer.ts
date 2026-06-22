@@ -13,6 +13,7 @@ import {
   normalizeDebruteRuntimeInfo,
   type AdobeBridgeSettings,
   type AppServerEvent,
+  type BrowserSessionCredential,
   type DaemonBridgeImportRequestMessage,
   type DaemonCliCommandRequest,
   type DaemonProjectUploadImportPlan,
@@ -105,6 +106,7 @@ const PHOTOSHOP_CEP_ORIGINS = new Set(['null', 'file://']);
 const CORS_ALLOWED_HEADERS = [
   'content-type',
   'x-debrute-daemon-token',
+  'x-debrute-web-origin',
   'x-debrute-adobe-client-id',
   'x-debrute-transfer-id',
   'x-debrute-target-directory',
@@ -279,6 +281,22 @@ export function createDebruteDaemonHttpServer(options: DebruteDaemonHttpServerOp
         writeJson(context.response, 200, currentPublicRuntime());
       } else {
         writeError(context.response, 405, 'method_not_allowed', 'Unsupported runtime metadata method.');
+      }
+      return true;
+    }
+    if (path === '/api/browser-session') {
+      if (method === 'GET') {
+        if (!isWorkbenchBrowserSessionRequest(context.request, context.runtime)) {
+          writeError(context.response, 403, 'forbidden', 'Debrute browser session requests must originate from the configured Workbench origin.');
+          return true;
+        }
+        const body: BrowserSessionCredential = {
+          token: currentRuntime().token,
+          runtime: currentPublicRuntime()
+        };
+        writeJson(context.response, 200, body);
+      } else {
+        writeError(context.response, 405, 'method_not_allowed', 'Unsupported browser session method.');
       }
       return true;
     }
@@ -1619,11 +1637,20 @@ function isPhotoshopPluginBridgeRoute(path: string): boolean {
     || path.startsWith('/api/adobe-bridge/transfers/');
 }
 
+function isWorkbenchBrowserSessionRequest(request: IncomingMessage, runtime: DebruteDaemonRuntime): boolean {
+  const webOrigin = runtime.webBaseUrl;
+  const origin = requestHeader(request, 'origin');
+  if (origin) {
+    return origin === webOrigin;
+  }
+  return requestHeader(request, 'x-debrute-web-origin') === webOrigin;
+}
+
 function requiresDaemonToken(path: string): boolean {
   if (!path.startsWith('/api/')) {
     return false;
   }
-  if (path === '/api/status') {
+  if (path === '/api/status' || path === '/api/browser-session') {
     return false;
   }
   if (path === '/api/adobe-bridge/plugin/ws') {
@@ -1640,6 +1667,11 @@ function requiresDaemonToken(path: string): boolean {
 
 function hasDaemonToken(request: IncomingMessage, url: URL, token: string): boolean {
   return request.headers['x-debrute-daemon-token'] === token || url.searchParams.get('debrute-token') === token;
+}
+
+function requestHeader(request: IncomingMessage, name: string): string | undefined {
+  const value = request.headers[name];
+  return typeof value === 'string' ? value : undefined;
 }
 
 function isLoopbackRequest(request: IncomingMessage): boolean {
