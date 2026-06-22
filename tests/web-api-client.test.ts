@@ -88,6 +88,49 @@ describe('HTTP workbench API client', () => {
     expect(requests[2]!.headers).toMatchObject({ 'x-debrute-daemon-token': 'bootstrapped-secret' });
   });
 
+  it('opens projects from the daemon picker and tracks the opened project', async () => {
+    const requests: Array<{ method: string; path: string; headers?: RequestInit['headers'] }> = [];
+    const client = createHttpWorkbenchApiClient({
+      daemonUrl: 'http://127.0.0.1:17456/',
+      token: 'secret',
+      fetch: async (url, init) => {
+        const parsed = new URL(String(url));
+        requests.push({ method: init?.method ?? 'GET', path: parsed.pathname, headers: init?.headers });
+        return jsonResponse(routeResponse(String(url), init));
+      }
+    });
+
+    await expect(client.openProjectFromPicker()).resolves.toMatchObject({
+      opened: true,
+      projectId,
+      snapshot: { metadata: { project: { name: 'Test Project' } } }
+    });
+    await client.readProjectTextFile('briefs/outline.md');
+
+    expect(requests.map((request) => [request.method, request.path])).toEqual([
+      ['POST', '/api/projects/open-picker'],
+      ['GET', `/api/projects/${projectId}/files/text/briefs/outline.md`]
+    ]);
+    expect(requests[0]!.headers).toMatchObject({ 'x-debrute-daemon-token': 'secret' });
+  });
+
+  it('keeps the client unopened when the daemon picker is canceled', async () => {
+    const client = createHttpWorkbenchApiClient({
+      daemonUrl: 'http://127.0.0.1:17456/',
+      token: 'secret',
+      fetch: async (url) => {
+        const parsed = new URL(String(url));
+        if (parsed.pathname === '/api/projects/open-picker') {
+          return jsonResponse({ opened: false });
+        }
+        return jsonResponse(routeResponse(String(url)));
+      }
+    });
+
+    await expect(client.openProjectFromPicker()).resolves.toEqual({ opened: false });
+    expect(() => client.readProjectTextFile('briefs/outline.md')).toThrow('Debrute project is not open.');
+  });
+
   it('opens the project event stream after the daemon returns an opaque project id', async () => {
     const eventSourceUrls: string[] = [];
     const client = createHttpWorkbenchApiClient({
@@ -605,7 +648,6 @@ describe('HTTP workbench API client', () => {
       daemonUrl: 'http://127.0.0.1:17456/',
       fetch: async (url, init) => jsonResponse(routeResponse(String(url), init)),
       shell: {
-        chooseProjectRoot: async () => undefined,
         bindProjectWindowToProject: async (input) => {
           boundProjectIds.push(input.projectId);
           return { ok: true };
@@ -617,32 +659,6 @@ describe('HTTP workbench API client', () => {
     await client.openProject({ projectId: secondProjectId });
 
     expect(boundProjectIds).toEqual([projectId, secondProjectId]);
-  });
-
-  it('delegates Electron-loaded project opening to the desktop shell instead of posting directly to the daemon', async () => {
-    const openedFromShell: Array<{ forceNewWindow: boolean }> = [];
-    const requests: string[] = [];
-    const client = createHttpWorkbenchApiClient({
-      daemonUrl: 'http://127.0.0.1:17456/',
-      fetch: async (url, init) => {
-        requests.push(`${init?.method ?? 'GET'} ${new URL(String(url)).pathname}`);
-        return jsonResponse(routeResponse(String(url), init));
-      },
-      shell: {
-        chooseProjectRoot: async () => {
-          throw new Error('Renderer should not pick project roots for Electron opens.');
-        },
-        openProject: async (input) => {
-          openedFromShell.push({ forceNewWindow: input.forceNewWindow });
-          return { opened: true };
-        }
-      }
-    });
-
-    await expect(client.openProjectFromShell({ forceNewWindow: false })).resolves.toEqual({ opened: true });
-
-    expect(openedFromShell).toEqual([{ forceNewWindow: false }]);
-    expect(requests).toEqual([]);
   });
 });
 
@@ -668,6 +684,14 @@ function routeResponse(url: string, init?: RequestInit): unknown {
   }
   if (path === '/api/projects/open') {
     return { projectId, projectRevision: 1, snapshot: workbenchSnapshot() };
+  }
+  if (path === '/api/projects/open-picker') {
+    return {
+      opened: true,
+      projectId,
+      projectRevision: 1,
+      snapshot: workbenchSnapshot()
+    };
   }
   const projectMatch = /^\/api\/projects\/([^/]+)$/.exec(path);
   if (projectMatch?.[1]) {

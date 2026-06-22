@@ -15,6 +15,7 @@ describe('Debrute repository Skill', () => {
     expect(skill).toContain('debrute commands');
     expect(skill).toContain('## Visual Workbench');
     expect(skill).toContain('debrute workbench start');
+    expect(skill).toContain('Interactive users open projects from the Workbench `Open Project` picker.');
     expect(skill).toContain('project_url=<web_url>/open?path=<encodeURIComponent(absProjectPath)>');
     expect(skill).toContain('Debrute CLI returns the runtime base URL and ports; it does not open browsers or projects.');
     expect(skill).toContain('Qoder: /browser Open <project_url>');

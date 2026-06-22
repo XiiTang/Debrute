@@ -7,7 +7,7 @@ export interface OpenInitialProjectResult {
   snapshot: WorkbenchProjectSessionSnapshot | undefined;
   route: DebruteWorkbenchRoute;
   projectOpen?: {
-    path: string;
+    attemptedPath?: string;
     error?: string;
   };
 }
@@ -30,7 +30,6 @@ export async function openInitialProject(
         snapshot: undefined,
         route,
         projectOpen: {
-          path: '',
           error: `Project snapshot load failed: ${errorMessage(error)}`
         }
       };
@@ -42,14 +41,14 @@ export async function openInitialProject(
       return {
         snapshot: undefined,
         route,
-        projectOpen: { path: '', error: 'Project path is required.' }
+        projectOpen: { error: 'Project path is required.' }
       };
     }
     if (!isAbsoluteLocalProjectPath(projectRoot)) {
       return {
         snapshot: undefined,
         route,
-        projectOpen: { path: projectRoot, error: 'Project path must be absolute.' }
+        projectOpen: { attemptedPath: projectRoot, error: 'Project path must be absolute.' }
       };
     }
     try {
@@ -59,14 +58,14 @@ export async function openInitialProject(
         projectId: opened.projectId,
         snapshot: opened.snapshot,
         route,
-        projectOpen: { path: projectRoot }
+        projectOpen: { attemptedPath: projectRoot }
       };
     } catch (error) {
       return {
         snapshot: undefined,
         route,
         projectOpen: {
-          path: projectRoot,
+          attemptedPath: projectRoot,
           error: `Open project failed: ${errorMessage(error)}`
         }
       };

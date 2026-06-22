@@ -4,7 +4,7 @@ import { join } from 'node:path';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { DebruteAppServer } from '@debrute/app-server';
 import { createDebruteDaemonHttpServer } from '@debrute/daemon';
-import type { AppServerEvent } from '@debrute/app-protocol';
+import type { AppServerEvent, WorkbenchProjectPickerOpenResult } from '@debrute/app-protocol';
 import { projectFileRevision } from '@debrute/project-core';
 import sharp from 'sharp';
 
@@ -138,6 +138,143 @@ describe('daemon HTTP runtime', () => {
     expect(rejectedMethod.status).toBe(405);
     await expect(rejectedMethod.json()).resolves.toMatchObject({
       error: { code: 'method_not_allowed' }
+    });
+  });
+
+  it('protects the project picker open route with token and method checks', async () => {
+    const nativeShell = nativeShellFixture(async () => undefined);
+    const daemon = createDebruteDaemonHttpServer({
+      host: '127.0.0.1',
+      port: 0,
+      token: 'test-token',
+      nativeShell
+    });
+    cleanups.push(() => daemon.close());
+    const runtime = await daemon.listen();
+
+    const tokenless = await fetch(`${runtime.daemonUrl}/api/projects/open-picker`, {
+      method: 'POST'
+    });
+    expect(tokenless.status).toBe(403);
+    expect(nativeShell.chooseDirectory).not.toHaveBeenCalled();
+
+    const wrongMethod = await fetch(`${runtime.daemonUrl}/api/projects/open-picker`, {
+      headers: { 'x-debrute-daemon-token': runtime.token }
+    });
+    expect(wrongMethod.status).toBe(405);
+    await expect(wrongMethod.json()).resolves.toMatchObject({
+      error: { code: 'method_not_allowed' }
+    });
+  });
+
+  it('returns a quiet cancel result when the native picker is canceled', async () => {
+    const nativeShell = nativeShellFixture(async () => undefined);
+    const daemon = createDebruteDaemonHttpServer({
+      host: '127.0.0.1',
+      port: 0,
+      token: 'test-token',
+      nativeShell
+    });
+    cleanups.push(() => daemon.close());
+    const runtime = await daemon.listen();
+
+    const result = await requestJson<WorkbenchProjectPickerOpenResult>(`${runtime.daemonUrl}/api/projects/open-picker`, {
+      method: 'POST',
+      headers: { 'x-debrute-daemon-token': runtime.token }
+    });
+
+    expect(result).toEqual({ opened: false });
+  });
+
+  it('opens picker-selected directories without exposing projectRoot in the response', async () => {
+    const projectRoot = await mkdtemp(join(tmpdir(), 'debrute-daemon-picker-open-'));
+    await writeFile(join(projectRoot, 'brief.md'), '# Brief', 'utf8');
+    const nativeShell = nativeShellFixture(async () => projectRoot);
+    const daemon = createDebruteDaemonHttpServer({
+      host: '127.0.0.1',
+      port: 0,
+      token: 'test-token',
+      nativeShell
+    });
+    cleanups.push(
+      () => daemon.close(),
+      () => rm(projectRoot, { recursive: true, force: true })
+    );
+    const runtime = await daemon.listen();
+
+    const result = await requestJson<WorkbenchProjectPickerOpenResult>(`${runtime.daemonUrl}/api/projects/open-picker`, {
+      method: 'POST',
+      headers: { 'x-debrute-daemon-token': runtime.token }
+    });
+
+    expect(result).toMatchObject({
+      opened: true,
+      projectRevision: 1,
+      snapshot: {
+        files: expect.arrayContaining([{ projectRelativePath: 'brief.md', kind: 'file' }])
+      }
+    });
+    expect(result.opened && result.projectId).toBeTruthy();
+    expect(JSON.stringify(result)).not.toContain(projectRoot);
+    expect(JSON.stringify(result)).not.toContain('projectRoot');
+    expect(daemon.projectRootForProjectId(result.opened ? result.projectId : '')).toBe(await realpath(projectRoot));
+  });
+
+  it('rejects picker-selected paths that are not directories', async () => {
+    const projectRoot = await mkdtemp(join(tmpdir(), 'debrute-daemon-picker-file-'));
+    const filePath = join(projectRoot, 'brief.md');
+    await writeFile(filePath, '# Brief', 'utf8');
+    const nativeShell = nativeShellFixture(async () => filePath);
+    const daemon = createDebruteDaemonHttpServer({
+      host: '127.0.0.1',
+      port: 0,
+      token: 'test-token',
+      nativeShell
+    });
+    cleanups.push(
+      () => daemon.close(),
+      () => rm(projectRoot, { recursive: true, force: true })
+    );
+    const runtime = await daemon.listen();
+
+    const response = await fetch(`${runtime.daemonUrl}/api/projects/open-picker`, {
+      method: 'POST',
+      headers: { 'x-debrute-daemon-token': runtime.token }
+    });
+
+    expect(response.status).toBe(400);
+    await expect(response.json()).resolves.toMatchObject({
+      error: {
+        code: 'invalid_input',
+        message: 'projectRoot must resolve to a directory.'
+      }
+    });
+  });
+
+  it('rejects explicit project opens with non-absolute paths', async () => {
+    const daemon = createDebruteDaemonHttpServer({
+      host: '127.0.0.1',
+      port: 0,
+      token: 'test-token'
+    });
+    cleanups.push(() => daemon.close());
+    const runtime = await daemon.listen();
+
+    const response = await fetch(`${runtime.daemonUrl}/api/projects/open`, {
+      method: 'POST',
+      headers: {
+        'content-type': 'application/json',
+        'x-debrute-daemon-token': runtime.token
+      },
+      body: JSON.stringify({ projectRoot: 'relative/project' })
+    });
+
+    expect(response.status).toBe(400);
+    await expect(response.json()).resolves.toMatchObject({
+      error: {
+        code: 'invalid_input',
+        message: 'projectRoot must be an absolute local path.'
+      }
     });
   });
 
@@ -649,12 +786,7 @@ describe('daemon HTTP runtime', () => {
     const projectRoot = await mkdtemp(join(tmpdir(), 'debrute-daemon-native-path-'));
     await mkdir(join(projectRoot, 'briefs'), { recursive: true });
     await writeFile(join(projectRoot, 'briefs/outline.md'), '# Outline', 'utf8');
-    const nativeShell = {
-      platform: 'darwin' as NodeJS.Platform,
-      showItemInFolder: vi.fn(async () => undefined),
-      openPath: vi.fn(async () => undefined),
-      trashItem: vi.fn(async () => undefined)
-    };
+    const nativeShell = nativeShellFixture(async () => undefined);
 
     const daemon = createDebruteDaemonHttpServer({
       host: '127.0.0.1',
@@ -1701,9 +1833,9 @@ describe('daemon HTTP runtime', () => {
       body: JSON.stringify({ projectRoot })
     });
 
-    await expect(apiFetch(`${runtime.daemonUrl}/api/projects/${opened.projectId}/electron-windows/42`, {
+    await expect(requestJson(`${runtime.daemonUrl}/api/projects/${opened.projectId}/electron-windows/42`, {
       method: 'PUT'
-    })).resolves.toMatchObject({ status: 204 });
+    })).resolves.toEqual({ ok: true, projectRoot: await realpath(projectRoot) });
     await delay(AFTER_SHORT_PROJECT_IDLE_TTL_MS);
 
     await expect(requestJson(`${runtime.daemonUrl}/api/projects/${opened.projectId}`))
@@ -2071,6 +2203,16 @@ describe('daemon HTTP runtime', () => {
     }
   });
 });
+
+function nativeShellFixture(chooseDirectory: () => Promise<string | undefined>) {
+  return {
+    platform: process.platform,
+    chooseDirectory: vi.fn(chooseDirectory),
+    showItemInFolder: vi.fn(async () => undefined),
+    openPath: vi.fn(async () => undefined),
+    trashItem: vi.fn(async () => undefined)
+  };
+}
 
 async function requestJson<T>(url: string, init?: RequestInit): Promise<T> {
   const response = await apiFetch(url, init);

@@ -268,6 +268,12 @@ export interface WorkbenchProjectOpenResult extends RevisionedProjectResult {
   snapshot: WorkbenchProjectSessionSnapshot;
 }
 
+export type WorkbenchProjectPickerOpenResult =
+  | { opened: false }
+  | ({
+      opened: true;
+    } & WorkbenchProjectOpenResult);
+
 export interface WorkbenchProjectRefreshResult extends RevisionedProjectResult {
   snapshot: WorkbenchProjectSessionSnapshot;
 }
@@ -1066,9 +1072,8 @@ export interface WorkbenchApiClient {
   adobeBridgeLinkPhotoshop(input: CreateAdobeBridgeLinkInput): Promise<AdobeBridgeStateView>;
   adobeBridgeUnlinkPhotoshop(adobeClientId: string): Promise<AdobeBridgeStateView>;
   sendProjectFileToPhotoshop(input: SendProjectFileToPhotoshopInput): Promise<SendProjectFileToPhotoshopResult>;
-  chooseProjectRoot(): Promise<string | undefined>;
-  openProjectFromShell(input: { forceNewWindow: boolean }): Promise<{ opened: boolean }>;
   openProject(input: { projectRoot: string } | { projectId: string }): Promise<WorkbenchProjectOpenResult>;
+  openProjectFromPicker(): Promise<WorkbenchProjectPickerOpenResult>;
   getSnapshot(): Promise<WorkbenchProjectRefreshResult>;
   getProjectHealth(): Promise<ProjectHealthSummary>;
   listTerminalSessions(): Promise<TerminalSessionList>;

@@ -126,13 +126,10 @@ function EmptyCanvas({
     return (
       <div className="empty-editor empty-project">
         <ProjectOpenPanel
-          path={state.projectOpen.path}
+          attemptedPath={state.projectOpen.attemptedPath}
           error={state.projectOpen.error}
           opening={state.projectOpen.opening}
-          canChooseDirectory={state.projectOpen.canChooseDirectory}
-          onPathChange={actions.setProjectOpenPath}
-          onOpenPath={(projectRoot) => { void actions.openProjectPath(projectRoot); }}
-          onChooseDirectory={() => { void actions.openProject(); }}
+          onOpenProject={() => { void actions.openProject(); }}
         />
       </div>
     );

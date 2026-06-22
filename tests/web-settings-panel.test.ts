@@ -125,7 +125,6 @@ describe('web Settings pages', () => {
     ];
     const html = states.map((state) => renderToStaticMarkup(React.createElement(GeneralSettingsPage, {
       shell: {
-        chooseProjectRoot: async () => undefined,
         getAppUpdateState: async () => state,
         checkForAppUpdate: async () => state,
         downloadAppUpdate: async () => state,
@@ -154,7 +153,6 @@ describe('web Settings pages', () => {
     };
     const html = renderToStaticMarkup(React.createElement(GeneralSettingsPage, {
       shell: {
-        chooseProjectRoot: async () => undefined,
         getAppUpdateState: async () => state,
         openAppUpdateDownloadPage: async () => ({ ok: true })
       },
@@ -323,7 +321,6 @@ describe('web Settings pages', () => {
         skills: { kind: 'partially_removed', skippedDeletedSkills: ['debrute-example'] }
       },
       shell: {
-        chooseProjectRoot: async () => undefined,
         getDebruteCliStatus: async () => ({ kind: 'not_installed', desktopVersion: '0.2.0', manualCommand: 'curl ...' }),
         installDebruteCli: async () => ({ ok: true, status: { kind: 'not_installed', desktopVersion: '0.2.0', manualCommand: 'curl ...' } }),
         updateDebruteCli: async () => ({ ok: true, status: { kind: 'not_installed', desktopVersion: '0.2.0', manualCommand: 'curl ...' } }),
@@ -370,7 +367,6 @@ describe('web Settings pages', () => {
         skills: { kind: 'error', code: 'skills_sync_failed', message: 'Debrute Skills sync failed.' }
       },
       shell: {
-        chooseProjectRoot: async () => undefined,
         getDebruteCliStatus: async () => ({ kind: 'not_installed', desktopVersion: '0.2.0', manualCommand: 'curl ...' })
       }
     }));

@@ -33,6 +33,7 @@ import type {
   WorkbenchProjectOpenResult,
   WorkbenchProjectFileBatchOperationResult,
   WorkbenchProjectFileOperationResult,
+  WorkbenchProjectPickerOpenResult,
   WorkbenchProjectRefreshResult,
   WorkbenchProjectSessionSnapshot,
   WorkbenchProjectTextFile,
@@ -230,20 +231,6 @@ export function createHttpWorkbenchApiClient(options: HttpWorkbenchApiClientOpti
       projectPath('/adobe-bridge/send-to-photoshop'),
       input
     ),
-    chooseProjectRoot: async () => {
-      const debruteShell = shell();
-      if (!debruteShell) {
-        throw new Error('Debrute desktop shell is unavailable.');
-      }
-      return debruteShell.chooseProjectRoot();
-    },
-    openProjectFromShell: async (input) => {
-      const debruteShell = shell();
-      if (!debruteShell?.openProject) {
-        throw new Error('Debrute desktop shell project opening is unavailable.');
-      }
-      return debruteShell.openProject(input);
-    },
     openProject: async (input) => {
       if ('projectId' in input) {
         const opened = await request<WorkbenchProjectOpenResult>('GET', projectPathFor(input.projectId, ''));
@@ -253,6 +240,13 @@ export function createHttpWorkbenchApiClient(options: HttpWorkbenchApiClientOpti
       const opened = await request<WorkbenchProjectOpenResult>('POST', '/api/projects/open', { projectRoot: input.projectRoot });
       await setCurrentProject(opened.projectId, opened.projectRevision);
       return opened;
+    },
+    openProjectFromPicker: async () => {
+      const result = await request<WorkbenchProjectPickerOpenResult>('POST', '/api/projects/open-picker');
+      if (result.opened) {
+        await setCurrentProject(result.projectId, result.projectRevision);
+      }
+      return result;
     },
     getSnapshot: async () => {
       const result = await request<WorkbenchProjectRefreshResult>('GET', projectPath(''));

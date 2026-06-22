@@ -11,8 +11,6 @@ import type {
 const { contextBridge, ipcRenderer, webUtils } = electron;
 
 interface DebruteShellApi {
-  chooseProjectRoot(): Promise<string | undefined>;
-  openProject(input: { forceNewWindow: boolean }): Promise<{ opened: boolean }>;
   bindProjectWindowToProject(input: { projectId: string }): Promise<{ ok: true }>;
   getDroppedFilePath(file: File): string | undefined;
   getDebruteCliStatus(): Promise<DebruteCliStatus>;
@@ -31,8 +29,6 @@ interface DebruteShellApi {
 }
 
 const debruteShellApi: DebruteShellApi = {
-  chooseProjectRoot: () => ipcRenderer.invoke('debrute-shell:chooseProjectRoot') as Promise<string | undefined>,
-  openProject: (input) => ipcRenderer.invoke('debrute-shell:openProject', input) as Promise<{ opened: boolean }>,
   bindProjectWindowToProject: (input) => (
     ipcRenderer.invoke('debrute-shell:bindProjectWindowToProject', input) as Promise<{ ok: true }>
   ),

@@ -53,7 +53,6 @@ describe('project session startup', () => {
         projectId: 'missing-project'
       },
       projectOpen: {
-        path: '',
         error: 'Project snapshot load failed: Project session is not open.'
       }
     });
@@ -96,7 +95,7 @@ describe('project session startup', () => {
       projectId: 'project-live-id',
       snapshot,
       route: { kind: 'project-open', projectRoot: '/Users/me/Project A' },
-      projectOpen: { path: '/Users/me/Project A' }
+      projectOpen: { attemptedPath: '/Users/me/Project A' }
     });
     expect(calls).toEqual([{ projectRoot: '/Users/me/Project A' }]);
     expect(replaceState).toHaveBeenCalledWith(
@@ -118,14 +117,32 @@ describe('project session startup', () => {
     await expect(openInitialProject(api, { kind: 'project-open', projectRoot: 'relative/project' })).resolves.toMatchObject({
       snapshot: undefined,
       projectOpen: {
-        path: 'relative/project',
+        attemptedPath: 'relative/project',
         error: 'Project path must be absolute.'
       }
     });
     expect(calls).toEqual([]);
   });
 
-  it('keeps failed project-open attempts editable', async () => {
+  it('surfaces a missing project-open path without attempted path context', async () => {
+    const calls: unknown[] = [];
+    const api = {
+      openProject: async (input: unknown) => {
+        calls.push(input);
+        throw new Error('openProject should not be called without a path');
+      }
+    } as unknown as WorkbenchApiClient;
+
+    await expect(openInitialProject(api, { kind: 'project-open' })).resolves.toMatchObject({
+      snapshot: undefined,
+      projectOpen: {
+        error: 'Project path is required.'
+      }
+    });
+    expect(calls).toEqual([]);
+  });
+
+  it('keeps failed project-open attempts as read-only error context', async () => {
     const api = {
       openProject: async () => {
         throw new Error('projectRoot must resolve to a directory.');
@@ -135,7 +152,7 @@ describe('project session startup', () => {
     await expect(openInitialProject(api, { kind: 'project-open', projectRoot: '/missing/project' })).resolves.toMatchObject({
       snapshot: undefined,
       projectOpen: {
-        path: '/missing/project',
+        attemptedPath: '/missing/project',
         error: 'Open project failed: projectRoot must resolve to a directory.'
       }
     });

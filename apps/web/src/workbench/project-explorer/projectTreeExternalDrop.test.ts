@@ -8,7 +8,6 @@ describe('project tree external drop', () => {
     await expect(createProjectTreeExternalDropPlan({
       dataTransfer: dataTransferWithFiles([file]),
       shell: {
-        chooseProjectRoot: async () => undefined,
         getDroppedFilePath: () => '/external/cover.png'
       },
       targetDirectoryProjectRelativePath: 'assets'
@@ -26,7 +25,6 @@ describe('project tree external drop', () => {
     await expect(createProjectTreeExternalDropPlan({
       dataTransfer: dataTransferWithFiles([cover, notes]),
       shell: {
-        chooseProjectRoot: async () => undefined,
         getDroppedFilePath: (file) => file.name === 'cover.png' ? '/external/cover.png' : undefined
       },
       targetDirectoryProjectRelativePath: 'assets'

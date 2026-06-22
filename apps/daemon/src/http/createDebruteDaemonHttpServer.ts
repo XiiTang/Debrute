@@ -26,7 +26,9 @@ import {
   type TerminalEvent,
   type WorkbenchEvent,
   type WorkbenchFileWatchEvent,
+  type WorkbenchProjectOpenResult,
   type WorkbenchProjectPathEntry,
+  type WorkbenchProjectPickerOpenResult,
   type WorkbenchProjectSessionSnapshot,
   type WorkbenchProjectTextFile
 } from '@debrute/app-protocol';
@@ -311,6 +313,33 @@ export function createDebruteDaemonHttpServer(options: DebruteDaemonHttpServerOp
       });
       return true;
     }
+    if (path === '/api/projects/open-picker') {
+      if (method !== 'POST') {
+        writeError(context.response, 405, 'method_not_allowed', 'Unsupported project picker open method.');
+        return true;
+      }
+      const projectRoot = await nativeShell.chooseDirectory();
+      if (!projectRoot) {
+        const body: WorkbenchProjectPickerOpenResult = { opened: false };
+        writeJson(context.response, 200, body);
+        return true;
+      }
+      if (!isAbsoluteLocalProjectRoot(projectRoot)) {
+        writeError(context.response, 400, 'invalid_input', 'projectRoot must be an absolute local path.');
+        return true;
+      }
+      if (!await isDirectoryProjectRoot(projectRoot)) {
+        writeError(context.response, 400, 'invalid_input', 'projectRoot must resolve to a directory.');
+        return true;
+      }
+      const session = await sessions.openProject(projectRoot);
+      const body: WorkbenchProjectPickerOpenResult = {
+        opened: true,
+        ...projectOpenResultForHttp(session)
+      };
+      writeJson(context.response, 200, body);
+      return true;
+    }
     if (method === 'POST' && path === '/api/projects/open') {
       const body = await readJsonBody<{ projectRoot?: unknown }>(context.request);
       const projectRoot = typeof body.projectRoot === 'string' && body.projectRoot.trim()
@@ -320,16 +349,16 @@ export function createDebruteDaemonHttpServer(options: DebruteDaemonHttpServerOp
         writeError(context.response, 400, 'invalid_input', 'projectRoot must be a non-empty string.');
         return true;
       }
+      if (!isAbsoluteLocalProjectRoot(projectRoot)) {
+        writeError(context.response, 400, 'invalid_input', 'projectRoot must be an absolute local path.');
+        return true;
+      }
       if (!await isDirectoryProjectRoot(projectRoot)) {
         writeError(context.response, 400, 'invalid_input', 'projectRoot must resolve to a directory.');
         return true;
       }
       const session = await sessions.openProject(projectRoot);
-      writeJson(context.response, 200, {
-        projectId: session.projectId,
-        projectRevision: session.projectRevision,
-        snapshot: snapshotForHttp(session.appServer.currentSnapshot() ?? session.snapshot, currentRuntime().daemonUrl, session.projectId, currentRuntime().token)
-      });
+      writeJson(context.response, 200, projectOpenResultForHttp(session));
       return true;
     }
     if (method === 'POST' && path === '/api/cli/run') {
@@ -555,6 +584,19 @@ export function createDebruteDaemonHttpServer(options: DebruteDaemonHttpServerOp
     return publicRuntime;
   }
 
+  function projectOpenResultForHttp(session: ProjectSessionRecord): WorkbenchProjectOpenResult {
+    return {
+      projectId: session.projectId,
+      projectRevision: session.projectRevision,
+      snapshot: snapshotForHttp(
+        session.appServer.currentSnapshot() ?? session.snapshot,
+        currentRuntime().daemonUrl,
+        session.projectId,
+        currentRuntime().token
+      )
+    };
+  }
+
   function writeProjectNotOpen(context: RequestContext, projectId: string): void {
     writeError(context.response, 404, 'project_not_open', `Debrute project is not open: ${projectId}`);
   }
@@ -631,8 +673,10 @@ function handleElectronWindowLeaseRoute(
       release();
       electronWindowLeases.delete(key);
     });
-    context.response.writeHead(204);
-    context.response.end();
+    writeJson(context.response, 200, {
+      ok: true,
+      projectRoot: context.session.projectRoot
+    });
     return;
   }
   if (context.request.method === 'DELETE') {
@@ -1972,6 +2016,12 @@ async function isDirectoryProjectRoot(projectRoot: string): Promise<boolean> {
     }
     throw error;
   }
+}
+
+function isAbsoluteLocalProjectRoot(value: string): boolean {
+  return value.startsWith('/')
+    || /^[A-Za-z]:[\\/]/.test(value)
+    || /^\\\\[^\\]+\\[^\\]+/.test(value);
 }
 
 function daemonAppServer(context: ProjectRequestContext): DebruteAppServer {

@@ -21,7 +21,7 @@ import { createCanvasFeedbackEntryUpdater } from './services/canvasFeedbackUpdat
 import { nextSnapshotFromAppServerEvent } from './services/appServerEvents';
 import { getCanvasById } from './services/canvasState';
 import { chooseInitialActiveCanvasId } from './canvas/canvasCardBarState';
-import { isAbsoluteLocalProjectPath, loadCanvasFeedback, openInitialProject, replaceWorkbenchProjectRoute } from './services/projectSessionState';
+import { loadCanvasFeedback, openInitialProject, replaceWorkbenchProjectRoute } from './services/projectSessionState';
 import { loadProjectViewState, saveProjectViewState } from './services/projectViewState';
 import {
   closeTextEditorWindowState,
@@ -141,7 +141,7 @@ export function WorkbenchApp(): React.ReactElement {
   const [inlineProjectTreeEdit, setInlineProjectTreeEdit] = useState<ProjectTreeInlineEditState>();
   const [notifications, setNotifications] = useState<string[]>([]);
   const [isLoading, setIsLoading] = useState(true);
-  const [projectOpenPath, setProjectOpenPath] = useState('');
+  const [projectOpenAttemptedPath, setProjectOpenAttemptedPath] = useState<string>();
   const [projectOpenError, setProjectOpenError] = useState<string>();
   const [isProjectOpening, setIsProjectOpening] = useState(false);
   const canvasOverlayRuntime = useMemo(() => createCanvasOverlayRuntime(), []);
@@ -193,6 +193,7 @@ export function WorkbenchApp(): React.ReactElement {
     setWindowOrder(DEFAULT_WORKBENCH_WINDOW_ORDER);
     setFeedbackBarTarget(undefined);
     setCanvasMinimapOpen(false);
+    setProjectOpenAttemptedPath(undefined);
     setProjectOpenError(undefined);
     setLlmSettings(await api.llmGetSettings());
     setImageModelSettings(await api.imageModelGetSettings());
@@ -264,7 +265,7 @@ export function WorkbenchApp(): React.ReactElement {
         if (disposed) {
           return;
         }
-        setProjectOpenPath(result.projectOpen?.path ?? '');
+        setProjectOpenAttemptedPath(result.projectOpen?.attemptedPath);
         setProjectOpenError(result.projectOpen?.error);
         const { projectId: routeProjectId, snapshot: opened } = result;
         if (!opened || !routeProjectId) {
@@ -550,10 +551,9 @@ export function WorkbenchApp(): React.ReactElement {
     snapshot,
     projectId: daemonProjectId,
     projectOpen: {
-      path: projectOpenPath,
+      ...(projectOpenAttemptedPath ? { attemptedPath: projectOpenAttemptedPath } : {}),
       ...(projectOpenError ? { error: projectOpenError } : {}),
-      opening: isProjectOpening,
-      canChooseDirectory: Boolean(getDebruteShellApi()?.openProject || getDebruteShellApi()?.chooseProjectRoot)
+      opening: isProjectOpening
     },
     explorerSelection,
     llmSettings,
@@ -574,46 +574,21 @@ export function WorkbenchApp(): React.ReactElement {
   }, []);
 
   const actions: WorkbenchActions = useMemo(() => ({
-    setProjectOpenPath,
-    openProjectPath: async (projectRoot) => {
-      const trimmed = projectRoot.trim();
-      setProjectOpenPath(trimmed);
+    openProject: async () => {
       setIsProjectOpening(true);
       setProjectOpenError(undefined);
+      setProjectOpenAttemptedPath(undefined);
       try {
-        if (!trimmed) {
-          setProjectOpenError('Project path is required.');
+        const result = await api.openProjectFromPicker();
+        if (!result.opened) {
           return;
         }
-        if (!isAbsoluteLocalProjectPath(trimmed)) {
-          setProjectOpenError('Project path must be absolute.');
-          return;
-        }
-        const opened = await api.openProject({ projectRoot: trimmed });
-        await applyOpenedProject(opened);
+        await applyOpenedProject(result);
       } catch (error) {
         setProjectOpenError(`Open project failed: ${errorMessage(error)}`);
       } finally {
         setIsProjectOpening(false);
       }
-    },
-    openProject: async () => {
-      let opened: Awaited<ReturnType<typeof api.openProject>>;
-      try {
-        if (getDebruteShellApi()?.openProject) {
-          await api.openProjectFromShell({ forceNewWindow: false });
-          return;
-        }
-        const selectedRoot = await api.chooseProjectRoot();
-        if (!selectedRoot) {
-          return;
-        }
-        opened = await api.openProject({ projectRoot: selectedRoot });
-      } catch (error) {
-        setNotifications((current) => [`Open project failed: ${errorMessage(error)}`, ...current].slice(0, 4));
-        return;
-      }
-      await applyOpenedProject(opened);
     },
     saveLlmProviderSetting: async (input, providerId) => {
       const settings = await api.llmSaveProviderSetting(input, providerId);

@@ -47,10 +47,9 @@ export interface WorkbenchState {
 }
 
 export interface ProjectOpenState {
-  path: string;
+  attemptedPath?: string;
   error?: string;
   opening: boolean;
-  canChooseDirectory: boolean;
 }
 
 export interface TextFileBuffer {
@@ -121,8 +120,6 @@ export interface WorkbenchActions {
   deleteCanvas: (input: { canvasId: string }) => Promise<WorkbenchCanvasManagementResult>;
   reorderCanvases: (input: { canvasOrder: string[] }) => Promise<WorkbenchCanvasManagementResult>;
   repairCanvasIndex: () => Promise<WorkbenchCanvasManagementResult>;
-  setProjectOpenPath: (path: string) => void;
-  openProjectPath: (projectRoot: string) => Promise<void>;
   openProject: () => Promise<void>;
   openTerminalPanel: (cwdProjectRelativePath?: string) => void;
 }

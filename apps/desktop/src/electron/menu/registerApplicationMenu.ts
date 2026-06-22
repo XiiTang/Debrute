@@ -15,8 +15,8 @@ export interface ApplicationMenuController {
 export interface CreateApplicationMenuControllerInput {
   menu: ElectronMenuModule;
   readDesktopState(): Promise<DesktopState>;
-  chooseProjectRoot(sourceWindow?: BrowserWindow): Promise<string | undefined>;
   newWindow(): Promise<void>;
+  openProjectFromPicker(sourceWindow: BrowserWindow | undefined, options: ProjectOpenMenuOptions): Promise<void>;
   openProject(projectRoot: string, sourceWindow: BrowserWindow | undefined, options: ProjectOpenMenuOptions): Promise<void>;
   clearRecentProjectRoots(): Promise<void>;
 }
@@ -31,11 +31,7 @@ export function createApplicationMenuController(input: CreateApplicationMenuCont
           await input.newWindow();
         },
         onOpenProject: async (sourceWindow, options) => {
-          const selectedRoot = await input.chooseProjectRoot(sourceWindow);
-          if (!selectedRoot) {
-            return;
-          }
-          await input.openProject(selectedRoot, sourceWindow, options);
+          await input.openProjectFromPicker(sourceWindow, options);
         },
         onOpenRecentProject: async (projectRoot, sourceWindow, options) => {
           await input.openProject(projectRoot, sourceWindow, options);

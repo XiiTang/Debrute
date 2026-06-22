@@ -50,12 +50,17 @@ for (const signal of ['SIGINT', 'SIGTERM'] as const) {
 const applicationMenu = createApplicationMenuController({
   menu: Menu,
   readDesktopState: () => desktopStateStore().readDesktopState(),
-  chooseProjectRoot,
   newWindow: async () => {
     await createWindow();
   },
+  openProjectFromPicker: async (sourceWindow, options) => {
+    await openProjectFromPickerFromShell({
+      forceNewWindow: options.forceNewWindow,
+      ...(sourceWindow ? { sourceWindow } : {})
+    });
+  },
   openProject: async (projectRoot, sourceWindow, options) => {
-    await openProjectFromShell(projectRoot, {
+    await openProjectRootFromDesktop(projectRoot, {
       forceNewWindow: options.forceNewWindow,
       ...(sourceWindow ? { sourceWindow } : {})
     });
@@ -144,7 +149,7 @@ app.whenReady().then(async () => {
         void openDebruteRootWindow();
       },
       openRecent: (projectRoot) => {
-        void openProjectFromShell(projectRoot, { forceNewWindow: false });
+        void openProjectRootFromDesktop(projectRoot, { forceNewWindow: false });
       },
       showRuntimeStatus: () => {
         void showRuntimeStatus();
@@ -211,21 +216,6 @@ app.on('before-quit', (event) => {
 });
 
 function registerShellIpc(): void {
-  ipcMain.handle('debrute-shell:chooseProjectRoot', async (event) => (
-    chooseProjectRoot(BrowserWindow.fromWebContents(event.sender) ?? undefined)
-  ));
-  ipcMain.handle('debrute-shell:openProject', async (event, input: { forceNewWindow?: boolean } = {}) => {
-    const sourceWindow = BrowserWindow.fromWebContents(event.sender) ?? undefined;
-    const selectedRoot = await chooseProjectRoot(sourceWindow);
-    if (!selectedRoot) {
-      return { opened: false };
-    }
-    await openProjectFromShell(selectedRoot, {
-      forceNewWindow: input.forceNewWindow === true,
-      ...(sourceWindow ? { sourceWindow } : {})
-    });
-    return { opened: true };
-  });
   ipcMain.handle('debrute-shell:bindProjectWindowToProject', async (event, input: { projectId: string }) => {
     const window = BrowserWindow.fromWebContents(event.sender);
     if (!window) {
@@ -248,17 +238,6 @@ function registerShellIpc(): void {
       windows: () => BrowserWindow.getAllWindows()
     });
   }
-}
-
-async function chooseProjectRoot(parentWindow?: Electron.BrowserWindow): Promise<string | undefined> {
-  const options: Electron.OpenDialogOptions = {
-    title: 'Open Debrute Project',
-    properties: ['openDirectory', 'createDirectory']
-  };
-  const result = parentWindow && !parentWindow.isDestroyed()
-    ? await dialog.showOpenDialog(parentWindow, options)
-    : await dialog.showOpenDialog(options);
-  return result.canceled ? undefined : result.filePaths[0];
 }
 
 async function rememberProjectRootAndRefreshMenu(projectRoot: string): Promise<DesktopState> {
@@ -285,7 +264,7 @@ async function handleDesktopOpenIntent(intent: DesktopOpenIntent | undefined): P
     await createWindow();
     return;
   }
-  await openProjectFromShell(intent.projectRoot, { forceNewWindow: false });
+  await openProjectRootFromDesktop(intent.projectRoot, { forceNewWindow: false });
 }
 
 async function flushPendingDesktopOpenIntents(): Promise<void> {
@@ -294,7 +273,7 @@ async function flushPendingDesktopOpenIntents(): Promise<void> {
   }
 }
 
-async function openProjectFromShell(
+async function openProjectRootFromDesktop(
   projectRoot: string,
   options: { sourceWindow?: Electron.BrowserWindow; forceNewWindow?: boolean } = {}
 ): Promise<void> {
@@ -310,8 +289,25 @@ async function openProjectFromShell(
   });
 }
 
+async function openProjectFromPickerFromShell(
+  options: { sourceWindow?: Electron.BrowserWindow; forceNewWindow?: boolean } = {}
+): Promise<void> {
+  const opened = await requireRuntimeClient().openProjectFromPicker();
+  if (!opened.opened) {
+    return;
+  }
+  await runProjectWindowOpenOnce({
+    projectId: opened.projectId,
+    pendingProjectOpens: pendingProjectWindowOpens,
+    open: () => openProjectInWindow(opened, options),
+    reusePending: () => {
+      projectWindowsByProjectId.get(opened.projectId)?.focus();
+    }
+  });
+}
+
 async function openProjectInWindow(
-  opened: { projectId: string; url: string; projectRoot: string },
+  opened: { projectId: string; url: string; projectRoot?: string },
   options: { sourceWindow?: Electron.BrowserWindow; forceNewWindow?: boolean }
 ): Promise<void> {
   const liveWindowIds = new Set(BrowserWindow.getAllWindows().filter((window) => !window.isDestroyed()).map((window) => window.id));
@@ -468,12 +464,19 @@ async function prepareProjectWindowBinding(window: Electron.BrowserWindow, proje
       commit: () => {
         if (projectRoot) {
           projectRootsByWindowId.set(window.id, projectRoot);
+          void rememberProjectRootAndRefreshMenu(projectRoot).catch((error) => {
+            if (!trueQuitRequested) {
+              console.error(`Debrute recent project update failed: ${messageFromUnknown(error)}`);
+            }
+          });
         }
       },
       rollback: () => undefined
     };
   }
-  const release = await requireRuntimeClient().registerElectronProjectWindow(projectId, window.id);
+  const lease = await requireRuntimeClient().registerElectronProjectWindow(projectId, window.id);
+  const release = lease.release;
+  const boundProjectRoot = projectRoot ?? lease.projectRoot;
   let finalized = false;
   return {
     commit: async () => {
@@ -489,8 +492,13 @@ async function prepareProjectWindowBinding(window: Electron.BrowserWindow, proje
       }
       projectWindowsByProjectId.set(projectId, window);
       projectIdsByWindowId.set(window.id, projectId);
-      if (projectRoot) {
-        projectRootsByWindowId.set(window.id, projectRoot);
+      if (boundProjectRoot) {
+        projectRootsByWindowId.set(window.id, boundProjectRoot);
+        void rememberProjectRootAndRefreshMenu(boundProjectRoot).catch((error) => {
+          if (!trueQuitRequested) {
+            console.error(`Debrute recent project update failed: ${messageFromUnknown(error)}`);
+          }
+        });
       }
       detachedProjectWindowLeaseIds.delete(window.id);
       releaseProjectWindowByWindowId.set(window.id, release);

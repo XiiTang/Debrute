@@ -2,7 +2,7 @@ import type { MenuItemConstructorOptions } from 'electron';
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { describe, expect, it, vi } from 'vitest';
-import { openProjectThroughDaemon, projectWebShellUrl } from '../apps/desktop/src/electron/daemonProjectOpen';
+import { openProjectFromPickerThroughDaemon, openProjectThroughDaemon, projectWebShellUrl } from '../apps/desktop/src/electron/daemonProjectOpen';
 import { buildApplicationMenuTemplate } from '../apps/desktop/src/electron/menu/applicationMenu';
 
 describe('desktop application menu', () => {
@@ -138,10 +138,39 @@ describe('desktop application menu', () => {
     }]);
   });
 
+  it('opens menu picker projects through the daemon picker route', async () => {
+    const requests: Array<{ url: string; init?: RequestInit }> = [];
+    const runtime = daemonRuntimeFixture();
+
+    await expect(openProjectFromPickerThroughDaemon(runtime, async (url, init) => {
+      requests.push({ url: String(url), init });
+      return new Response(JSON.stringify({
+        opened: true,
+        projectId: '123e4567-e89b-42d3-a456-426614174000',
+        projectRevision: 1,
+        snapshot: { canvases: [] }
+      }), { status: 200, headers: { 'content-type': 'application/json' } });
+    })).resolves.toEqual({
+      opened: true,
+      projectId: '123e4567-e89b-42d3-a456-426614174000',
+      url: 'http://127.0.0.1:17322/projects/123e4567-e89b-42d3-a456-426614174000?debrute-token=secret'
+    });
+
+    expect(requests).toEqual([{
+      url: 'http://127.0.0.1:17321/api/projects/open-picker',
+      init: {
+        method: 'POST',
+        headers: { 'x-debrute-daemon-token': 'secret' }
+      }
+    }]);
+  });
+
   it('keeps Electron main from opening menu projects directly through app-server', () => {
     const main = readFileSync(join(process.cwd(), 'apps/desktop/src/electron/main.ts'), 'utf8');
 
-    expect(main).toContain('openProjectFromShell');
+    expect(main).toContain('openProjectFromPickerFromShell');
+    expect(main).toContain('requireRuntimeClient().openProjectFromPicker()');
+    expect(main).toContain('openProjectRootFromDesktop(projectRoot');
     expect(main).toContain('requireRuntimeClient().openProject(projectRoot)');
     expect(main).not.toContain('const appServer = new DebruteAppServer');
     expect(main).not.toContain('appServer.openProject(projectRoot)');
@@ -152,7 +181,6 @@ describe('desktop application menu', () => {
 
     expect(main).toContain('projectWindowsByProjectId');
     expect(main).toContain('registerElectronProjectWindow');
-    expect(main).toContain("ipcMain.handle('debrute-shell:openProject'");
     expect(main).toContain("ipcMain.handle('debrute-shell:bindProjectWindowToProject'");
     expect(main).toContain('BrowserWindow.fromWebContents');
     expect(main).not.toContain('loadProjectRouteInShell');
@@ -191,8 +219,6 @@ describe('desktop application menu', () => {
     expect(preload).not.toContain('trashProjectPath');
     expect(preload).toContain('getDroppedFilePath');
     expect(preload).toContain('webUtils.getPathForFile');
-    expect(preload).toContain('chooseProjectRoot');
-    expect(preload).toContain('openProject');
     expect(preload).toContain('bindProjectWindowToProject');
   });
 

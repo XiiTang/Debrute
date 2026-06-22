@@ -8,8 +8,6 @@ import type {
 } from '@debrute/app-protocol';
 
 export interface DebruteShellApi {
-  chooseProjectRoot(): Promise<string | undefined>;
-  openProject?(input: { forceNewWindow: boolean }): Promise<{ opened: boolean }>;
   bindProjectWindowToProject?(input: { projectId: string }): Promise<{ ok: true }>;
   getDroppedFilePath?(file: File): string | undefined;
   getDebruteCliStatus?(): Promise<DebruteCliStatus>;

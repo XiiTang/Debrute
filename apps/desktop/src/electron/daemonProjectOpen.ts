@@ -4,6 +4,10 @@ interface OpenProjectResponse {
   projectId: string;
 }
 
+type OpenProjectFromPickerResponse =
+  | { opened: false }
+  | { opened: true; projectId: string };
+
 export interface DebruteDaemonRuntimeLike {
   daemonUrl: string;
   webBaseUrl: string | null;
@@ -29,6 +33,30 @@ export async function openProjectThroughDaemon(
   }
   const opened = await response.json() as OpenProjectResponse;
   return {
+    projectId: opened.projectId,
+    url: projectWebShellUrl(runtime, opened.projectId)
+  };
+}
+
+export async function openProjectFromPickerThroughDaemon(
+  runtime: DebruteDaemonRuntimeLike,
+  fetchImpl: DesktopProjectOpenFetch = fetch
+): Promise<{ opened: false } | { opened: true; projectId: string; url: string }> {
+  const response = await fetchImpl(new URL('/api/projects/open-picker', runtime.daemonUrl).toString(), {
+    method: 'POST',
+    headers: {
+      'x-debrute-daemon-token': runtime.token
+    }
+  });
+  if (!response.ok) {
+    throw new Error(`Debrute daemon project picker open failed: ${response.status}${await daemonErrorMessage(response)}`);
+  }
+  const opened = await response.json() as OpenProjectFromPickerResponse;
+  if (!opened.opened) {
+    return { opened: false };
+  }
+  return {
+    opened: true,
     projectId: opened.projectId,
     url: projectWebShellUrl(runtime, opened.projectId)
   };

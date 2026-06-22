@@ -33,12 +33,13 @@ describe('desktop runtime client', () => {
     const requests: Array<{ url: string; init?: RequestInit }> = [];
     const client = createAttachedDesktopRuntimeClient(runtimeFixture(), async (url, init) => {
       requests.push({ url: String(url), init });
-      return new Response(JSON.stringify({ ok: true }), { status: 200 });
+      return new Response(JSON.stringify({ ok: true, projectRoot: '/tmp/debrute-project' }), { status: 200 });
     });
 
-    const release = await client.registerElectronProjectWindow('project-1', 42);
-    await release();
+    const lease = await client.registerElectronProjectWindow('project-1', 42);
+    await lease.release();
 
+    expect(lease.projectRoot).toBe('/tmp/debrute-project');
     expect(requests.map((request) => request.url)).toEqual([
       'http://127.0.0.1:17321/api/projects/project-1/electron-windows/42',
       'http://127.0.0.1:17321/api/projects/project-1/electron-windows/42'
@@ -61,12 +62,38 @@ describe('desktop runtime client', () => {
     const client = createAttachedDesktopRuntimeClient(runtimeFixture(), async (_url, init) => (
       init?.method === 'DELETE'
         ? new Response('', { status: 500 })
-        : new Response(null, { status: 204 })
+        : new Response(JSON.stringify({ ok: true, projectRoot: '/tmp/debrute-project' }), { status: 200 })
     ));
 
-    const release = await client.registerElectronProjectWindow('project-1', 42);
+    const lease = await client.registerElectronProjectWindow('project-1', 42);
 
-    await expect(release()).rejects.toThrow('Debrute daemon Electron window lease failed: DELETE 500');
+    await expect(lease.release()).rejects.toThrow('Debrute daemon Electron window lease failed: DELETE 500');
+  });
+
+  it('opens projects through the daemon picker route', async () => {
+    const requests: Array<{ url: string; init?: RequestInit }> = [];
+    const client = createAttachedDesktopRuntimeClient(runtimeFixture(), async (url, init) => {
+      requests.push({ url: String(url), init });
+      return new Response(JSON.stringify({
+        opened: true,
+        projectId: 'project-1',
+        projectRevision: 1,
+        snapshot: {}
+      }), { status: 200 });
+    });
+
+    await expect(client.openProjectFromPicker()).resolves.toEqual({
+      opened: true,
+      projectId: 'project-1',
+      url: 'http://127.0.0.1:17322/projects/project-1?debrute-token=secret'
+    });
+    expect(requests).toEqual([{
+      url: 'http://127.0.0.1:17321/api/projects/open-picker',
+      init: {
+        method: 'POST',
+        headers: { 'x-debrute-daemon-token': 'secret' }
+      }
+    }]);
   });
 });
 

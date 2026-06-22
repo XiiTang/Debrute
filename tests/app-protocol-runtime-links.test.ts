@@ -6,7 +6,9 @@ import {
   type BrowserSessionCredential,
   type LiveProjectsView,
   type WorkbenchApiClient,
-  type WorkbenchProjectOpenResult
+  type WorkbenchProjectOpenResult,
+  type WorkbenchProjectPickerOpenResult,
+  type WorkbenchProjectSessionSnapshot
 } from '@debrute/app-protocol';
 
 type IsExactType<Actual, Expected> =
@@ -18,6 +20,10 @@ type AssertTrue<Value extends true> = Value;
 type OpenProjectReturnIsExact = AssertTrue<IsExactType<
   ReturnType<WorkbenchApiClient['openProject']>,
   Promise<WorkbenchProjectOpenResult>
+>>;
+type OpenProjectFromPickerReturnIsExact = AssertTrue<IsExactType<
+  ReturnType<WorkbenchApiClient['openProjectFromPicker']>,
+  Promise<WorkbenchProjectPickerOpenResult>
 >>;
 
 describe('app-protocol runtime metadata', () => {
@@ -103,6 +109,45 @@ describe('app-protocol runtime metadata', () => {
   it('requires project open clients to return an opened project result', () => {
     const _typeCheck: OpenProjectReturnIsExact = true;
     expect(_typeCheck).toBe(true);
+  });
+
+  it('models picker project open results without project roots', () => {
+    const _typeCheck: OpenProjectFromPickerReturnIsExact = true;
+    const snapshot: WorkbenchProjectSessionSnapshot = {
+      metadata: {
+        schemaVersion: 1,
+        project: {
+          id: 'project-record-id',
+          name: 'Alpha',
+          createdAt: '2026-06-22T00:00:00.000Z',
+          updatedAt: '2026-06-22T00:00:00.000Z'
+        }
+      },
+      files: [],
+      canvases: [],
+      projections: [],
+      diagnostics: [],
+      canvasRegistry: { status: 'ready', canvasOrder: [] },
+      health: {
+        projectName: 'Alpha',
+        canvasCount: 0,
+        diagnosticCounts: { errors: 0, warnings: 0, infos: 0 },
+        runtimeDataLocation: 'debrute-home',
+        checkedAt: '2026-06-22T00:00:00.000Z'
+      }
+    };
+    const canceled: WorkbenchProjectPickerOpenResult = { opened: false };
+    const opened: WorkbenchProjectPickerOpenResult = {
+      opened: true,
+      projectId: '123e4567-e89b-42d3-a456-426614174000',
+      projectRevision: 1,
+      snapshot
+    };
+
+    expect(_typeCheck).toBe(true);
+    expect(canceled.opened).toBe(false);
+    expect(opened.projectId).toBe('123e4567-e89b-42d3-a456-426614174000');
+    expect(JSON.stringify(opened)).not.toContain('projectRoot');
   });
 
   it('classifies mutating HTTP methods', () => {

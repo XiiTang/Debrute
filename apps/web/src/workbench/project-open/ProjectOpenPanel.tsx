@@ -1,59 +1,36 @@
 import React from 'react';
-import { FolderOpen, FolderTree } from 'lucide-react';
-import { Button, Field, Input } from '../ui';
+import { FolderOpen } from 'lucide-react';
+import { Button } from '../ui';
 
 export interface ProjectOpenPanelProps {
-  path: string;
+  attemptedPath?: string | undefined;
   error?: string | undefined;
   opening: boolean;
-  canChooseDirectory: boolean;
-  onPathChange(path: string): void;
-  onOpenPath(path: string): void;
-  onChooseDirectory(): void;
+  onOpenProject(): void;
 }
 
 export function ProjectOpenPanel({
-  path,
+  attemptedPath,
   error,
   opening,
-  canChooseDirectory,
-  onPathChange,
-  onOpenPath,
-  onChooseDirectory
+  onOpenProject
 }: ProjectOpenPanelProps): React.ReactElement {
   return (
     <form
       className="project-open-panel"
       onSubmit={(event) => {
         event.preventDefault();
-        onOpenPath(path);
+        onOpenProject();
       }}
     >
       <FolderOpen size={34} aria-hidden="true" />
       <strong>No project open</strong>
-      <Field label="Project path" error={error}>
-        <Input
-          value={path}
-          autoComplete="off"
-          spellCheck={false}
-          disabled={opening}
-          onChange={(event) => onPathChange(event.currentTarget.value)}
-        />
-      </Field>
+      {attemptedPath ? <span className="project-open-panel__path">{attemptedPath}</span> : null}
+      {error ? <span className="project-open-panel__error">{error}</span> : null}
       <div className="project-open-panel__actions">
-        <Button type="submit" variant="primary" iconStart={<FolderTree size={15} />} loading={opening}>
-          Open Path
+        <Button type="submit" variant="primary" iconStart={<FolderOpen size={15} />} loading={opening} disabled={opening}>
+          Open Project
         </Button>
-        {canChooseDirectory ? (
-          <Button
-            type="button"
-            iconStart={<FolderOpen size={15} />}
-            disabled={opening}
-            onClick={onChooseDirectory}
-          >
-            Choose Folder
-          </Button>
-        ) : null}
       </div>
     </form>
   );

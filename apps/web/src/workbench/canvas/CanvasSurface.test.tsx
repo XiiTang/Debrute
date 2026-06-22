@@ -1134,9 +1134,7 @@ function workbenchStateFixture(
       }
     },
     projectOpen: {
-      path: '',
-      opening: false,
-      canChooseDirectory: false
+      opening: false
     },
     explorerSelection: { selectedPaths: [], focusedPath: null, anchorPath: null },
     llmSettings: undefined,
@@ -1233,8 +1231,6 @@ const actions: WorkbenchActions = {
   repairCanvasIndex: async () => {
     throw new Error('not used');
   },
-  setProjectOpenPath: () => undefined,
-  openProjectPath: async () => undefined,
   openProject: async () => undefined,
   openTerminalPanel: () => undefined
 };

@@ -54,7 +54,7 @@ Start or discover the local Workbench runtime:
 debrute workbench start
 ```
 
-Read `web_url` from stdout. Build the project URL from the absolute local project path:
+Read `web_url` from stdout. Interactive users open projects from the Workbench `Open Project` picker. Agents and automation build the project URL from the absolute local project path:
 
 ```text
 project_url=<web_url>/open?path=<encodeURIComponent(absProjectPath)>

@@ -204,16 +204,25 @@
   width: min(520px, calc(100vw - 48px));
 }
 
-.project-open-panel .db-field {
-  width: 100%;
-  text-align: left;
-}
-
 .project-open-panel__actions {
   display: flex;
   flex-wrap: wrap;
   justify-content: center;
   gap: 8px;
+}
+
+.project-open-panel__path {
+  max-width: 100%;
+  overflow-wrap: anywhere;
+  color: var(--db-muted);
+  font-size: 12px;
+}
+
+.project-open-panel__error {
+  max-width: 100%;
+  overflow-wrap: anywhere;
+  color: var(--db-danger);
+  font-size: 12px;
 }
 
 .empty-line {

@@ -4,40 +4,34 @@ import { describe, expect, it, vi } from 'vitest';
 import { ProjectOpenPanel } from './ProjectOpenPanel';
 
 describe('ProjectOpenPanel', () => {
-  it('submits the entered absolute path', () => {
-    const onOpenPath = vi.fn();
+  it('submits the daemon picker open action', () => {
+    const onOpenProject = vi.fn();
     const preventDefault = vi.fn();
     const element = ProjectOpenPanel({
-      path: '/Users/me/Project A',
       opening: false,
-      canChooseDirectory: false,
-      onPathChange: () => undefined,
-      onOpenPath,
-      onChooseDirectory: () => undefined
+      onOpenProject
     });
 
     (element.props as { onSubmit(event: { preventDefault(): void }): void }).onSubmit({ preventDefault });
 
     expect(preventDefault).toHaveBeenCalledOnce();
-    expect(onOpenPath).toHaveBeenCalledWith('/Users/me/Project A');
+    expect(onOpenProject).toHaveBeenCalledOnce();
   });
 
-  it('renders validation errors and disables duplicate opens while loading', () => {
+  it('renders errors and attempted path context without a path input', () => {
     const html = renderToStaticMarkup(
       <ProjectOpenPanel
-        path="relative/project"
-        error="Project path must be absolute."
+        error="Open project failed: projectRoot must resolve to a directory."
+        attemptedPath="/missing/project"
         opening={true}
-        canChooseDirectory={true}
-        onPathChange={() => undefined}
-        onOpenPath={() => undefined}
-        onChooseDirectory={() => undefined}
+        onOpenProject={() => undefined}
       />
     );
 
-    expect(html).toContain('Project path must be absolute.');
-    expect(html).toContain('Open Path');
-    expect(html).toContain('Choose Folder');
+    expect(html).toContain('Open project failed: projectRoot must resolve to a directory.');
+    expect(html).toContain('/missing/project');
+    expect(html).toContain('Open Project');
     expect(html).toContain('disabled=""');
+    expect(html).not.toContain('<input');
   });
 });

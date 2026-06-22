@@ -40,4 +40,68 @@ describe('daemon native shell adapter', () => {
 
     await expect(shell.openPath('/tmp/debrute-project/assets')).rejects.toThrow('xdg-open failed');
   });
+
+  it('chooses macOS project directories with the system folder picker', async () => {
+    const execFile = vi.fn(async () => ({ stdout: '/Users/me/Project A\n', stderr: '' }));
+    const shell = createNodeNativeShell({ platform: 'darwin', execFile });
+
+    await expect(shell.chooseDirectory()).resolves.toBe('/Users/me/Project A');
+
+    expect(execFile).toHaveBeenCalledWith('osascript', [
+      '-e',
+      'POSIX path of (choose folder with prompt "Open Debrute Project")'
+    ]);
+  });
+
+  it('chooses Windows project directories with the system folder picker', async () => {
+    const execFile = vi.fn(async () => ({ stdout: 'C:\\Users\\me\\Project A\r\n', stderr: '' }));
+    const shell = createNodeNativeShell({ platform: 'win32', execFile });
+
+    await expect(shell.chooseDirectory()).resolves.toBe('C:\\Users\\me\\Project A');
+
+    expect(execFile).toHaveBeenCalledWith('powershell.exe', [
+      '-NoProfile',
+      '-NonInteractive',
+      '-Command',
+      [
+        'Add-Type -AssemblyName System.Windows.Forms',
+        '$dialog = New-Object System.Windows.Forms.FolderBrowserDialog',
+        '$dialog.Description = "Open Debrute Project"',
+        '$dialog.ShowNewFolderButton = $true',
+        'if ($dialog.ShowDialog() -eq [System.Windows.Forms.DialogResult]::OK) { $dialog.SelectedPath }'
+      ].join('; ')
+    ]);
+  });
+
+  it('chooses Linux project directories with zenity', async () => {
+    const execFile = vi.fn(async () => ({ stdout: '/home/me/project-a\n', stderr: '' }));
+    const shell = createNodeNativeShell({ platform: 'linux', execFile });
+
+    await expect(shell.chooseDirectory()).resolves.toBe('/home/me/project-a');
+
+    expect(execFile).toHaveBeenCalledWith('zenity', [
+      '--file-selection',
+      '--directory',
+      '--title',
+      'Open Debrute Project'
+    ]);
+  });
+
+  it('treats native picker cancel as no selected directory', async () => {
+    const execFile = vi.fn(async () => {
+      throw Object.assign(new Error('User canceled.'), { code: 1, stderr: 'User canceled.' });
+    });
+    const shell = createNodeNativeShell({ platform: 'darwin', execFile });
+
+    await expect(shell.chooseDirectory()).resolves.toBeUndefined();
+  });
+
+  it('propagates native picker command failures that are not cancelation', async () => {
+    const execFile = vi.fn(async () => {
+      throw Object.assign(new Error('zenity missing'), { code: 127, stderr: 'zenity missing' });
+    });
+    const shell = createNodeNativeShell({ platform: 'linux', execFile });
+
+    await expect(shell.chooseDirectory()).rejects.toThrow('zenity missing');
+  });
 });
