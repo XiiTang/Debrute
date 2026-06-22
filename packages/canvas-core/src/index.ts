@@ -142,6 +142,13 @@ export type CanvasFeedbackGeometry =
   | { type: 'point'; x: number; y: number }
   | { type: 'rect'; x: number; y: number; width: number; height: number };
 
+export interface CanvasFeedbackComment {
+  id: string;
+  comment: string;
+  createdAt: string;
+  updatedAt: string;
+}
+
 export interface CanvasImageFeedbackRegion {
   id: string;
   label: number;
@@ -155,7 +162,7 @@ export interface CanvasImageFeedbackRegion {
 export interface CanvasFeedbackEntry {
   projectRelativePath: string;
   marks: CanvasFeedbackMark[];
-  note: string;
+  comments: CanvasFeedbackComment[];
   nextRegionLabel: number;
   regions: CanvasImageFeedbackRegion[];
   updatedAt: string;
@@ -169,10 +176,25 @@ export interface CanvasFeedbackDocument {
 
 export type UpdateCanvasFeedbackEntryInput =
   | {
-      operation: 'set-entry';
+      operation: 'set-marks';
       projectRelativePath: string;
       marks: CanvasFeedbackMark[];
-      note: string;
+    }
+  | {
+      operation: 'add-comment';
+      projectRelativePath: string;
+      comment: string;
+    }
+  | {
+      operation: 'update-comment';
+      projectRelativePath: string;
+      commentId: string;
+      comment: string;
+    }
+  | {
+      operation: 'delete-comment';
+      projectRelativePath: string;
+      commentId: string;
     }
   | {
       operation: 'add-region';
@@ -226,7 +248,7 @@ export function normalizeCanvasFeedbackDocument(value: unknown): CanvasFeedbackD
     if (normalizedKey !== normalizedEntry.projectRelativePath) {
       throw new Error(`Canvas feedback entry key must match projectRelativePath: ${key}`);
     }
-    if (normalizedEntry.marks.length > 0 || normalizedEntry.note.length > 0 || normalizedEntry.regions.length > 0) {
+    if (normalizedEntry.marks.length > 0 || normalizedEntry.comments.length > 0 || normalizedEntry.regions.length > 0) {
       entries[normalizedKey] = normalizedEntry;
     }
   }
@@ -249,7 +271,7 @@ export function updateCanvasFeedbackEntry(
     ?? createEmptyCanvasFeedbackEntry(projectRelativePath, updatedAt);
   const nextEntry = normalizedCanvasFeedbackEntryForOperation(currentEntry, input, updatedAt);
   const entries = { ...normalizedDocument.entries };
-  if (nextEntry.marks.length === 0 && nextEntry.note.length === 0 && nextEntry.regions.length === 0) {
+  if (nextEntry.marks.length === 0 && nextEntry.comments.length === 0 && nextEntry.regions.length === 0) {
     delete entries[projectRelativePath];
   } else {
     entries[projectRelativePath] = nextEntry;
@@ -306,11 +328,24 @@ function createEmptyCanvasFeedbackEntry(projectRelativePath: string, updatedAt: 
   return {
     projectRelativePath,
     marks: [],
-    note: '',
+    comments: [],
     nextRegionLabel: 1,
     regions: [],
     updatedAt
   };
+}
+
+function nextCanvasFeedbackCommentId(comments: CanvasFeedbackComment[], updatedAt: string): string {
+  const timestamp = updatedAt.replace(/[^0-9]/g, '');
+  const prefix = `comment-${timestamp}-`;
+  const maxExistingSuffix = comments.reduce((max, comment) => {
+    if (!comment.id.startsWith(prefix)) {
+      return max;
+    }
+    const suffix = Number(comment.id.slice(prefix.length));
+    return Number.isInteger(suffix) && suffix > max ? suffix : max;
+  }, 0);
+  return `${prefix}${maxExistingSuffix + 1}`;
 }
 
 function normalizedCanvasFeedbackEntryForOperation(
@@ -318,13 +353,60 @@ function normalizedCanvasFeedbackEntryForOperation(
   input: UpdateCanvasFeedbackEntryInput,
   updatedAt: string
 ): CanvasFeedbackEntry {
-  if (input.operation === 'set-entry') {
+  if (input.operation === 'set-marks') {
     return {
       ...entry,
       marks: normalizeCanvasFeedbackMarks(input.marks),
-      note: input.note.trim(),
       updatedAt
     };
+  }
+  if (input.operation === 'add-comment') {
+    const comment = normalizeCanvasFeedbackComment(input.comment);
+    return {
+      ...entry,
+      comments: [
+        ...entry.comments,
+        {
+          id: nextCanvasFeedbackCommentId(entry.comments, updatedAt),
+          comment,
+          createdAt: updatedAt,
+          updatedAt
+        }
+      ],
+      updatedAt
+    };
+  }
+  if (input.operation === 'update-comment') {
+    let changed = false;
+    const comments = entry.comments.map((item) => {
+      if (item.id !== input.commentId) {
+        return item;
+      }
+      changed = true;
+      return {
+        ...item,
+        comment: normalizeCanvasFeedbackComment(input.comment),
+        updatedAt
+      };
+    });
+    if (!changed) {
+      throw new Error(`Canvas feedback comment not found: ${input.commentId}`);
+    }
+    return { ...entry, comments, updatedAt };
+  }
+  if (input.operation === 'delete-comment') {
+    let removed = false;
+    const comments = entry.comments.filter((item) => {
+      if (item.id === input.commentId) {
+        removed = true;
+        return false;
+      }
+      return true;
+    });
+    if (!removed) {
+      throw new Error(`Canvas feedback comment not found: ${input.commentId}`);
+    }
+    return { ...entry, comments, updatedAt };
   }
   if (input.operation === 'add-region') {
     const label = entry.nextRegionLabel;
@@ -633,17 +715,19 @@ function parentPath(path: string): string | undefined {
 function normalizeCanvasFeedbackEntry(value: unknown): CanvasFeedbackEntry {
   const nextRegionLabel = isRecord(value) ? value.nextRegionLabel : undefined;
   if (!isRecord(value)
-    || !hasOnlyKeys(value, ['projectRelativePath', 'marks', 'note', 'nextRegionLabel', 'regions', 'updatedAt'])
+    || !hasOnlyKeys(value, ['projectRelativePath', 'marks', 'comments', 'nextRegionLabel', 'regions', 'updatedAt'])
     || typeof value.projectRelativePath !== 'string'
-    || typeof value.note !== 'string'
     || typeof nextRegionLabel !== 'number'
     || !Number.isInteger(nextRegionLabel)
     || nextRegionLabel <= 0
+    || !Array.isArray(value.comments)
     || !Array.isArray(value.regions)
     || typeof value.updatedAt !== 'string') {
     throw new Error('Invalid Canvas feedback entry.');
   }
   assertIsoDateTime(value.updatedAt, 'Canvas feedback entry updatedAt must be an ISO date-time string.');
+  const comments = value.comments.map(normalizeCanvasFeedbackCommentEntry);
+  assertUniqueCanvasFeedbackCommentIds(comments);
   const regions = value.regions.map(normalizeCanvasFeedbackRegion);
   assertUniqueCanvasFeedbackRegionIds(regions);
   assertUniqueCanvasFeedbackRegionLabels(regions);
@@ -654,11 +738,21 @@ function normalizeCanvasFeedbackEntry(value: unknown): CanvasFeedbackEntry {
   return {
     projectRelativePath: normalizeCanvasFeedbackProjectRelativePath(value.projectRelativePath),
     marks: normalizeCanvasFeedbackMarks(value.marks),
-    note: value.note.trim(),
+    comments,
     nextRegionLabel,
     regions,
     updatedAt: value.updatedAt
   };
+}
+
+function assertUniqueCanvasFeedbackCommentIds(comments: CanvasFeedbackComment[]): void {
+  const ids = new Set<string>();
+  for (const comment of comments) {
+    if (ids.has(comment.id)) {
+      throw new Error('Canvas feedback comment ids must be unique.');
+    }
+    ids.add(comment.id);
+  }
 }
 
 function assertUniqueCanvasFeedbackRegionIds(regions: CanvasImageFeedbackRegion[]): void {
@@ -679,6 +773,25 @@ function assertUniqueCanvasFeedbackRegionLabels(regions: CanvasImageFeedbackRegi
     }
     labels.add(region.label);
   }
+}
+
+function normalizeCanvasFeedbackCommentEntry(value: unknown): CanvasFeedbackComment {
+  if (!isRecord(value)
+    || !hasOnlyKeys(value, ['id', 'comment', 'createdAt', 'updatedAt'])
+    || typeof value.id !== 'string'
+    || !value.id.trim()
+    || typeof value.createdAt !== 'string'
+    || typeof value.updatedAt !== 'string') {
+    throw new Error('Invalid Canvas feedback comment.');
+  }
+  assertIsoDateTime(value.createdAt, 'Canvas feedback comment createdAt must be an ISO date-time string.');
+  assertIsoDateTime(value.updatedAt, 'Canvas feedback comment updatedAt must be an ISO date-time string.');
+  return {
+    id: value.id.trim(),
+    comment: normalizeCanvasFeedbackComment(value.comment),
+    createdAt: value.createdAt,
+    updatedAt: value.updatedAt
+  };
 }
 
 function normalizeCanvasFeedbackRegion(value: unknown): CanvasImageFeedbackRegion {
@@ -758,6 +871,17 @@ function normalizePositiveUnitSize(value: unknown, label: string): number {
     throw new Error(`${label} must be greater than 0.`);
   }
   return value;
+}
+
+function normalizeCanvasFeedbackComment(comment: unknown): string {
+  if (typeof comment !== 'string') {
+    throw new Error('Canvas feedback comment must be a string.');
+  }
+  const trimmed = comment.trim();
+  if (!trimmed) {
+    throw new Error('Canvas feedback comment must be non-empty.');
+  }
+  return trimmed;
 }
 
 function normalizeCanvasFeedbackRegionComment(comment: unknown): string {

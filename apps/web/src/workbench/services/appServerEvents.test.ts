@@ -16,7 +16,12 @@ describe('appServerEvents', () => {
           'brief.md': {
             projectRelativePath: 'brief.md',
             marks: ['like'],
-            note: 'Good',
+            comments: [{
+              id: 'comment-1',
+              comment: 'Good',
+              createdAt: '2026-06-12T00:00:00.000Z',
+              updatedAt: '2026-06-12T00:00:00.000Z'
+            }],
             nextRegionLabel: 1,
             regions: [],
             updatedAt: '2026-06-12T00:00:00.000Z'

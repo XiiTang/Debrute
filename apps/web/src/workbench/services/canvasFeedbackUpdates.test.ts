@@ -4,10 +4,9 @@ import { createCanvasFeedbackEntryUpdater } from './canvasFeedbackUpdates';
 
 describe('canvas feedback updates', () => {
   const input: UpdateCanvasFeedbackEntryInput = {
-    operation: 'set-entry',
+    operation: 'set-marks',
     projectRelativePath: 'flow/a.png',
-    marks: ['like'],
-    note: ''
+    marks: ['like']
   };
 
   it('keeps the current feedback state visible when a save fails', async () => {
@@ -66,7 +65,7 @@ function feedbackDocument(projectRelativePath: string): CanvasFeedbackDocument {
       [projectRelativePath]: {
         projectRelativePath,
         marks: ['like'],
-        note: '',
+        comments: [],
         nextRegionLabel: 1,
         regions: [],
         updatedAt: '2026-05-26T12:00:00.000Z'

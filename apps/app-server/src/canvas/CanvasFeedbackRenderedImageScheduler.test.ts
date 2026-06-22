@@ -312,7 +312,7 @@ function entryFixture(projectRelativePath: string, comment: string): CanvasFeedb
   return {
     projectRelativePath,
     marks: [],
-    note: '',
+    comments: [],
     nextRegionLabel: 2,
     regions: [{
       id: 'region-1',

@@ -86,7 +86,7 @@ function jobInput(tempDir: string): CanvasFeedbackRenderJobInput {
     entry: {
       projectRelativePath: 'source.png',
       marks: [],
-      note: '',
+      comments: [],
       nextRegionLabel: 1,
       regions: [],
       updatedAt: '2026-06-21T12:00:00.000Z'

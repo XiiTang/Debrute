@@ -26,12 +26,15 @@ describe('CanvasImageFeedbackLayer', () => {
     expect(html).not.toContain('rect comment');
   });
 
-  it('renders a pending draft geometry from Workbench state after pointer interaction finishes', () => {
+  it('renders numbered pending draft geometry from Workbench state after pointer interaction finishes', () => {
     const pointHtml = renderToStaticMarkup(
       <CanvasImageFeedbackLayer
         entry={undefined}
         mode={undefined}
-        draftGeometry={{ type: 'point', x: 0.4, y: 0.6 }}
+        draftRegion={{
+          label: 3,
+          geometry: { type: 'point', x: 0.4, y: 0.6 }
+        }}
         onRegionDraft={() => undefined}
       />
     );
@@ -39,18 +42,24 @@ describe('CanvasImageFeedbackLayer', () => {
       <CanvasImageFeedbackLayer
         entry={undefined}
         mode={undefined}
-        draftGeometry={{ type: 'rect', x: 0.1, y: 0.2, width: 0.3, height: 0.4 }}
+        draftRegion={{
+          label: 4,
+          geometry: { type: 'rect', x: 0.1, y: 0.2, width: 0.3, height: 0.4 }
+        }}
         onRegionDraft={() => undefined}
       />
     );
 
     expect(pointHtml).toContain('canvas-image-feedback-pin');
     expect(pointHtml).toContain('draft');
-    expect(pointHtml).toContain('canvas-image-feedback-label');
+    expect(pointHtml).toContain('data-canvas-feedback-label="3"');
+    expect(pointHtml).toContain('>3</span>');
     expect(pointHtml).toContain('left:40%');
     expect(pointHtml).toContain('top:60%');
     expect(rectHtml).toContain('canvas-image-feedback-region--rect');
     expect(rectHtml).toContain('draft');
+    expect(rectHtml).toContain('data-canvas-feedback-label="4"');
+    expect(rectHtml).toContain('>4</span>');
     expect(rectHtml).toContain('width:30%');
     expect(rectHtml).toContain('height:40%');
   });
@@ -68,7 +77,7 @@ function entryFixture(): CanvasFeedbackEntry {
   return {
     projectRelativePath: 'assets/page.png',
     marks: [],
-    note: '',
+    comments: [],
     nextRegionLabel: 3,
     regions: [{
       id: 'region-1',

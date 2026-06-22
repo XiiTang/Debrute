@@ -10,6 +10,7 @@ import { createCanvasOverlayRuntime } from './CanvasOverlayRuntime';
 import { areCanvasNodeShellPropsEqual, CanvasNodeShell, type CanvasNodeShellProps } from './CanvasNodeShell';
 import {
   CanvasSurface,
+  canvasFeedbackBarTargetForProjectedNode,
   isCanvasMapProjectTreeDragOver,
   canvasMapProjectTreeDropEntry,
   canvasMapProjectTreeDropInput,
@@ -330,7 +331,7 @@ describe('CanvasSurface', () => {
         'flow/cover.png': {
           projectRelativePath: 'flow/cover.png',
           marks: [],
-          note: '',
+          comments: [],
           nextRegionLabel: 2,
           regions: [{
             id: 'region-1',
@@ -349,6 +350,25 @@ describe('CanvasSurface', () => {
     expect(html).toContain('canvas-image-feedback-layer');
     expect(html).toContain('data-canvas-feedback-label="1"');
     expect(html).not.toContain('class="canvas-feedback-bar"');
+  });
+
+  it('builds feedback bar targets for the image that creates a local feedback draft', () => {
+    const node = nodeFixture('flow/b.png', 260, 140);
+    const entry = feedbackDocument({}).entries['flow/b.png'];
+
+    expect(canvasFeedbackBarTargetForProjectedNode({
+      node,
+      surfaceRect: { x: 10, y: 20, width: 900, height: 600 },
+      camera: { x: 30, y: 40, z: 2 },
+      entry
+    })).toEqual({
+      projectRelativePath: 'flow/b.png',
+      nodeRect: { x: 260, y: 140, width: 200, height: 120 },
+      surfaceRect: { x: 10, y: 20, width: 900, height: 600 },
+      camera: { x: 30, y: 40, z: 2 },
+      entry,
+      supportsImageLocalFeedback: true
+    });
   });
 
   it('does not render minimap UI inside the Canvas surface layer', () => {

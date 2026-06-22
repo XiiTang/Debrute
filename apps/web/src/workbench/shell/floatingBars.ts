@@ -1,4 +1,10 @@
-import type { CanvasFeedbackEntry, CanvasFeedbackGeometry, CanvasImageFeedbackRegion } from '@debrute/canvas-core';
+import type {
+  CanvasFeedbackComment,
+  CanvasFeedbackDocument,
+  CanvasFeedbackEntry,
+  CanvasFeedbackGeometry,
+  CanvasImageFeedbackRegion
+} from '@debrute/canvas-core';
 import type { CanvasCamera } from '../canvas/runtime/canvasCamera';
 
 export interface FloatingBarRect {
@@ -15,6 +21,12 @@ export interface CanvasFeedbackBarTarget {
   camera: CanvasCamera;
   entry: CanvasFeedbackEntry | undefined;
   supportsImageLocalFeedback: boolean;
+}
+
+export interface CanvasLocalFeedbackDraft {
+  projectRelativePath: string;
+  geometry: CanvasFeedbackGeometry;
+  feedbackBarTarget: CanvasFeedbackBarTarget;
 }
 
 export function sameCanvasFeedbackBarTarget(
@@ -42,8 +54,10 @@ export interface FloatingBarPlacement extends FloatingBarRect {
 }
 
 export const CANVAS_FEEDBACK_BAR_SIZE = {
-  width: 490,
-  height: 96
+  fileOnlyWidth: 325,
+  imageWidth: 397,
+  oneRowHeight: 38,
+  twoRowHeight: 76
 } as const;
 
 export const CANVAS_MINIMAP_BUTTON_SIZE = {
@@ -90,7 +104,7 @@ export function canvasNodeToViewportRect(input: {
 }
 
 export function feedbackBarPlacementForCanvasTarget(input: {
-  target: Pick<CanvasFeedbackBarTarget, 'nodeRect' | 'surfaceRect'>;
+  target: Pick<CanvasFeedbackBarTarget, 'nodeRect' | 'surfaceRect' | 'supportsImageLocalFeedback' | 'entry'>;
   camera: CanvasCamera;
   viewportRect: FloatingBarRect;
   reservedRects: readonly FloatingBarRect[];
@@ -102,7 +116,11 @@ export function feedbackBarPlacementForCanvasTarget(input: {
       camera: input.camera
     }),
     viewportRect: input.viewportRect,
-    reservedRects: [...input.reservedRects]
+    reservedRects: [...input.reservedRects],
+    barSize: canvasFeedbackBarSizeForTarget({
+      supportsImageLocalFeedback: input.target.supportsImageLocalFeedback,
+      hasCommentRow: canvasFeedbackEntryHasCommentRow(input.target.entry)
+    })
   });
 }
 
@@ -110,24 +128,25 @@ export function placeCanvasFeedbackBar(input: {
   nodeViewportRect: FloatingBarRect;
   viewportRect: FloatingBarRect;
   reservedRects: FloatingBarRect[];
+  barSize: Pick<FloatingBarRect, 'width' | 'height'>;
 }): FloatingBarPlacement | undefined {
-  const centeredX = input.nodeViewportRect.x + input.nodeViewportRect.width / 2 - CANVAS_FEEDBACK_BAR_SIZE.width / 2;
+  const centeredX = input.nodeViewportRect.x + input.nodeViewportRect.width / 2 - input.barSize.width / 2;
   const clampedX = clamp(
     centeredX,
     input.viewportRect.x + VIEWPORT_PADDING_PX,
-    input.viewportRect.x + input.viewportRect.width - CANVAS_FEEDBACK_BAR_SIZE.width - VIEWPORT_PADDING_PX
+    input.viewportRect.x + input.viewportRect.width - input.barSize.width - VIEWPORT_PADDING_PX
   );
   const candidates: FloatingBarPlacement[] = [{
     x: Math.round(clampedX),
     y: Math.round(input.nodeViewportRect.y + input.nodeViewportRect.height + FLOATING_BAR_GAP_PX),
-    width: CANVAS_FEEDBACK_BAR_SIZE.width,
-    height: CANVAS_FEEDBACK_BAR_SIZE.height,
+    width: input.barSize.width,
+    height: input.barSize.height,
     placement: 'below'
   }, {
     x: Math.round(clampedX),
-    y: Math.round(input.nodeViewportRect.y - CANVAS_FEEDBACK_BAR_SIZE.height - FLOATING_BAR_GAP_PX),
-    width: CANVAS_FEEDBACK_BAR_SIZE.width,
-    height: CANVAS_FEEDBACK_BAR_SIZE.height,
+    y: Math.round(input.nodeViewportRect.y - input.barSize.height - FLOATING_BAR_GAP_PX),
+    width: input.barSize.width,
+    height: input.barSize.height,
     placement: 'above'
   }];
 
@@ -135,6 +154,34 @@ export function placeCanvasFeedbackBar(input: {
     rectInside(candidate, input.viewportRect)
     && input.reservedRects.every((reserved) => !rectsIntersect(candidate, reserved))
   ));
+}
+
+export function canvasFeedbackEntryHasCommentRow(
+  entry: CanvasFeedbackEntry | undefined
+): boolean {
+  return Boolean((entry?.comments.length ?? 0) > 0 || (entry?.regions.length ?? 0) > 0);
+}
+
+export function canvasFeedbackBarTargetWithCurrentEntry(
+  target: CanvasFeedbackBarTarget,
+  canvasFeedback: CanvasFeedbackDocument | undefined
+): CanvasFeedbackBarTarget {
+  const entry = canvasFeedback?.entries[target.projectRelativePath];
+  return target.entry === entry ? target : { ...target, entry };
+}
+
+export function canvasFeedbackBarSizeForTarget(input: {
+  supportsImageLocalFeedback: boolean;
+  hasCommentRow: boolean;
+}): Pick<FloatingBarRect, 'width' | 'height'> {
+  return {
+    width: input.supportsImageLocalFeedback
+      ? CANVAS_FEEDBACK_BAR_SIZE.imageWidth
+      : CANVAS_FEEDBACK_BAR_SIZE.fileOnlyWidth,
+    height: input.hasCommentRow
+      ? CANVAS_FEEDBACK_BAR_SIZE.twoRowHeight
+      : CANVAS_FEEDBACK_BAR_SIZE.oneRowHeight
+  };
 }
 
 export function canvasMinimapButtonRect(viewportRect: FloatingBarRect): FloatingBarRect {
@@ -221,15 +268,32 @@ function sameCanvasFeedbackEntry(
   if (left === right) {
     return true;
   }
-  if (!left || !right || left.marks.length !== right.marks.length || left.regions.length !== right.regions.length) {
+  if (!left
+    || !right
+    || left.marks.length !== right.marks.length
+    || left.comments.length !== right.comments.length
+    || left.regions.length !== right.regions.length) {
     return false;
   }
   return left.projectRelativePath === right.projectRelativePath
-    && left.note === right.note
     && left.nextRegionLabel === right.nextRegionLabel
     && left.updatedAt === right.updatedAt
     && left.marks.every((mark, index) => mark === right.marks[index])
+    && left.comments.every((comment, index) => sameCanvasFeedbackComment(comment, right.comments[index]))
     && left.regions.every((region, index) => sameCanvasFeedbackRegion(region, right.regions[index]));
+}
+
+function sameCanvasFeedbackComment(
+  left: CanvasFeedbackComment,
+  right: CanvasFeedbackComment | undefined
+): boolean {
+  if (!right) {
+    return false;
+  }
+  return left.id === right.id
+    && left.comment === right.comment
+    && left.createdAt === right.createdAt
+    && left.updatedAt === right.updatedAt;
 }
 
 function sameCanvasFeedbackRegion(

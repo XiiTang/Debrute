@@ -92,13 +92,13 @@ describe('CanvasFeedbackService materialization', () => {
 
       await expect(service.updateCanvasFeedbackEntry(projectRoot, {
         operation: 'add-region',
-        projectRelativePath: 'notes.md',
+        projectRelativePath: 'copy.md',
         region: {
           kind: 'pin',
           geometry: { type: 'point', x: 0.2, y: 0.3 },
           comment: 'fix this'
         }
-      })).rejects.toThrow('Canvas feedback local regions require an image file: notes.md');
+      })).rejects.toThrow('Canvas feedback local regions require an image file: copy.md');
 
       expect(writeStructuredDocument).not.toHaveBeenCalled();
       expect(renderScheduler.enqueueSource).not.toHaveBeenCalled();
@@ -107,62 +107,60 @@ describe('CanvasFeedbackService materialization', () => {
     }
   });
 
-  it('allows image-level feedback for non-image targets without queueing local artifact rendering', async () => {
+  it('allows file-level feedback for non-image targets without queueing local artifact rendering', async () => {
     const projectRoot = await mkdtemp(join(tmpdir(), 'debrute-feedback-non-image-entry-'));
     try {
       const renderScheduler = createScheduler();
-      const writeStructuredDocument = vi.fn(async () => undefined);
+      let currentContent = JSON.stringify(emptyFeedbackDocument());
+      const writeStructuredDocument = vi.fn(async (_projectRoot, _absolutePath, content: string) => {
+        currentContent = content;
+      });
       const service = createCanvasFeedbackService({
         now: () => NOW,
         renderScheduler,
+        readStructuredDocument: async () => currentContent,
         writeStructuredDocument
       });
 
-      const result = await service.updateCanvasFeedbackEntry(projectRoot, {
-        operation: 'set-entry',
-        projectRelativePath: 'notes.md',
-        marks: ['needs_revision'],
-        note: 'revise copy'
+      const marksResult = await service.updateCanvasFeedbackEntry(projectRoot, {
+        operation: 'set-marks',
+        projectRelativePath: 'copy.md',
+        marks: ['needs_revision']
+      });
+      const commentResult = await service.updateCanvasFeedbackEntry(projectRoot, {
+        operation: 'add-comment',
+        projectRelativePath: 'copy.md',
+        comment: 'revise copy'
       });
 
-      expect(result.entries['notes.md']).toMatchObject({
+      expect(marksResult.entries['copy.md']).toMatchObject({
         marks: ['needs_revision'],
-        note: 'revise copy',
+        comments: [],
         regions: []
       });
-      expect(writeStructuredDocument).toHaveBeenCalledTimes(1);
+      expect(commentResult.entries['copy.md']).toMatchObject({
+        marks: ['needs_revision'],
+        comments: [{
+          comment: 'revise copy',
+          createdAt: NOW,
+          updatedAt: NOW
+        }],
+        regions: []
+      });
+      expect(writeStructuredDocument).toHaveBeenCalledTimes(2);
       expect(renderScheduler.enqueueSource).not.toHaveBeenCalled();
     } finally {
       await rm(projectRoot, { recursive: true, force: true });
     }
   });
 
-  it('does not queue rendered artifacts for comment-only feedback updates', async () => {
+  it('does not queue rendered artifacts for text-only feedback updates', async () => {
     const projectRoot = await mkdtemp(join(tmpdir(), 'debrute-feedback-comment-only-'));
     try {
       const renderScheduler = createScheduler();
-      let currentContent = JSON.stringify({
-        schemaVersion: 2,
-        updatedAt: NOW,
-        entries: {
-          'assets/page.png': {
-            projectRelativePath: 'assets/page.png',
-            marks: [],
-            note: '',
-            nextRegionLabel: 2,
-            regions: [{
-              id: 'region-1',
-              label: 1,
-              kind: 'pin',
-              geometry: { type: 'point', x: 0.2, y: 0.3 },
-              comment: 'old comment',
-              createdAt: NOW,
-              updatedAt: NOW
-            }],
-            updatedAt: NOW
-          }
-        }
-      });
+      let currentContent = JSON.stringify(feedbackDocument({
+        'assets/page.png': imageEntry()
+      }));
       const service = createCanvasFeedbackService({
         now: () => NOW,
         renderScheduler,
@@ -176,15 +174,60 @@ describe('CanvasFeedbackService materialization', () => {
         operation: 'update-region',
         projectRelativePath: 'assets/page.png',
         regionId: 'region-1',
-        comment: 'new comment'
+        comment: 'new region comment'
       });
       await service.updateCanvasFeedbackEntry(projectRoot, {
-        operation: 'set-entry',
+        operation: 'set-marks',
         projectRelativePath: 'assets/page.png',
-        marks: ['needs_revision'],
-        note: 'overall note'
+        marks: ['needs_revision']
+      });
+      await service.updateCanvasFeedbackEntry(projectRoot, {
+        operation: 'add-comment',
+        projectRelativePath: 'assets/page.png',
+        comment: 'overall comment'
+      });
+      const fileCommentId = JSON.parse(currentContent).entries['assets/page.png'].comments[0].id as string;
+      await service.updateCanvasFeedbackEntry(projectRoot, {
+        operation: 'update-comment',
+        projectRelativePath: 'assets/page.png',
+        commentId: fileCommentId,
+        comment: 'updated overall comment'
+      });
+      await service.updateCanvasFeedbackEntry(projectRoot, {
+        operation: 'delete-comment',
+        projectRelativePath: 'assets/page.png',
+        commentId: fileCommentId
       });
 
+      expect(renderScheduler.enqueueSource).not.toHaveBeenCalled();
+    } finally {
+      await rm(projectRoot, { recursive: true, force: true });
+    }
+  });
+
+  it('rejects text-only feedback writes when the current document has invalid local regions elsewhere', async () => {
+    const projectRoot = await mkdtemp(join(tmpdir(), 'debrute-feedback-current-invalid-text-'));
+    try {
+      const renderScheduler = createScheduler();
+      const writeStructuredDocument = vi.fn(async () => undefined);
+      const service = createCanvasFeedbackService({
+        now: () => NOW,
+        renderScheduler,
+        readStructuredDocument: async () => JSON.stringify(feedbackDocument({
+          'copy.md': {
+            ...imageEntry(),
+            projectRelativePath: 'copy.md'
+          }
+        })),
+        writeStructuredDocument
+      });
+
+      await expect(service.updateCanvasFeedbackEntry(projectRoot, {
+        operation: 'add-comment',
+        projectRelativePath: 'assets/page.png',
+        comment: 'overall comment'
+      })).rejects.toThrow('Canvas feedback local regions require an image file: copy.md');
+      expect(writeStructuredDocument).not.toHaveBeenCalled();
       expect(renderScheduler.enqueueSource).not.toHaveBeenCalled();
     } finally {
       await rm(projectRoot, { recursive: true, force: true });
@@ -195,28 +238,9 @@ describe('CanvasFeedbackService materialization', () => {
     const projectRoot = await mkdtemp(join(tmpdir(), 'debrute-feedback-geometry-update-'));
     try {
       const renderScheduler = createScheduler();
-      let currentContent = JSON.stringify({
-        schemaVersion: 2,
-        updatedAt: NOW,
-        entries: {
-          'assets/page.png': {
-            projectRelativePath: 'assets/page.png',
-            marks: [],
-            note: '',
-            nextRegionLabel: 2,
-            regions: [{
-              id: 'region-1',
-              label: 1,
-              kind: 'pin',
-              geometry: { type: 'point', x: 0.2, y: 0.3 },
-              comment: 'fix this',
-              createdAt: NOW,
-              updatedAt: NOW
-            }],
-            updatedAt: NOW
-          }
-        }
-      });
+      let currentContent = JSON.stringify(feedbackDocument({
+        'assets/page.png': imageEntry()
+      }));
       const service = createCanvasFeedbackService({
         now: () => NOW,
         renderScheduler,
@@ -250,28 +274,9 @@ describe('CanvasFeedbackService materialization', () => {
       const service = createCanvasFeedbackService({
         now: () => NOW,
         renderScheduler,
-        readStructuredDocument: async () => JSON.stringify({
-          schemaVersion: 2,
-          updatedAt: NOW,
-          entries: {
-            'assets/page.png': {
-              projectRelativePath: 'assets/page.png',
-              marks: [],
-              note: '',
-              nextRegionLabel: 2,
-              regions: [{
-                id: 'region-1',
-                label: 1,
-                kind: 'pin',
-                geometry: { type: 'point', x: 0.2, y: 0.3 },
-                comment: 'fix this',
-                createdAt: NOW,
-                updatedAt: NOW
-              }],
-              updatedAt: NOW
-            }
-          }
-        })
+        readStructuredDocument: async () => JSON.stringify(feedbackDocument({
+          'assets/page.png': imageEntry()
+        }))
       });
 
       await service.queueRenderedFeedbackForSource(projectRoot, 'assets/page.png');
@@ -293,28 +298,9 @@ describe('CanvasFeedbackService materialization', () => {
       const service = createCanvasFeedbackService({
         now: () => NOW,
         renderScheduler,
-        readStructuredDocument: async () => JSON.stringify({
-          schemaVersion: 2,
-          updatedAt: NOW,
-          entries: {
-            'assets/page.png': {
-              projectRelativePath: 'assets/page.png',
-              marks: [],
-              note: '',
-              nextRegionLabel: 2,
-              regions: [{
-                id: 'region-1',
-                label: 1,
-                kind: 'pin',
-                geometry: { type: 'point', x: 0.2, y: 0.3 },
-                comment: 'fix this',
-                createdAt: NOW,
-                updatedAt: NOW
-              }],
-              updatedAt: NOW
-            }
-          }
-        })
+        readStructuredDocument: async () => JSON.stringify(feedbackDocument({
+          'assets/page.png': imageEntry()
+        }))
       });
 
       await service.queueRenderedFeedbackDocument(projectRoot);
@@ -335,32 +321,16 @@ describe('CanvasFeedbackService materialization', () => {
       const service = createCanvasFeedbackService({
         now: () => NOW,
         renderScheduler,
-        readStructuredDocument: async () => JSON.stringify({
-          schemaVersion: 2,
-          updatedAt: NOW,
-          entries: {
-            'notes.md': {
-              projectRelativePath: 'notes.md',
-              marks: [],
-              note: '',
-              nextRegionLabel: 2,
-              regions: [{
-                id: 'region-1',
-                label: 1,
-                kind: 'pin',
-                geometry: { type: 'point', x: 0.2, y: 0.3 },
-                comment: 'fix this',
-                createdAt: NOW,
-                updatedAt: NOW
-              }],
-              updatedAt: NOW
-            }
+        readStructuredDocument: async () => JSON.stringify(feedbackDocument({
+          'copy.md': {
+            ...imageEntry(),
+            projectRelativePath: 'copy.md'
           }
-        })
+        }))
       });
 
       await expect(service.queueRenderedFeedbackDocument(projectRoot)).rejects.toThrow(
-        'Canvas feedback local regions require an image file: notes.md'
+        'Canvas feedback local regions require an image file: copy.md'
       );
       expect(renderScheduler.enqueueDocument).not.toHaveBeenCalled();
     } finally {
@@ -375,32 +345,16 @@ describe('CanvasFeedbackService materialization', () => {
       const service = createCanvasFeedbackService({
         now: () => NOW,
         renderScheduler,
-        readStructuredDocument: async () => JSON.stringify({
-          schemaVersion: 2,
-          updatedAt: NOW,
-          entries: {
-            'notes.md': {
-              projectRelativePath: 'notes.md',
-              marks: [],
-              note: '',
-              nextRegionLabel: 2,
-              regions: [{
-                id: 'region-1',
-                label: 1,
-                kind: 'pin',
-                geometry: { type: 'point', x: 0.2, y: 0.3 },
-                comment: 'fix this',
-                createdAt: NOW,
-                updatedAt: NOW
-              }],
-              updatedAt: NOW
-            }
+        readStructuredDocument: async () => JSON.stringify(feedbackDocument({
+          'copy.md': {
+            ...imageEntry(),
+            projectRelativePath: 'copy.md'
           }
-        })
+        }))
       });
 
       await expect(service.queueRenderedFeedbackForSource(projectRoot, 'assets/page.png')).rejects.toThrow(
-        'Canvas feedback local regions require an image file: notes.md'
+        'Canvas feedback local regions require an image file: copy.md'
       );
       expect(renderScheduler.enqueueSource).not.toHaveBeenCalled();
     } finally {
@@ -408,6 +362,41 @@ describe('CanvasFeedbackService materialization', () => {
     }
   });
 });
+
+function emptyFeedbackDocument(): object {
+  return {
+    schemaVersion: 2,
+    updatedAt: NOW,
+    entries: {}
+  };
+}
+
+function feedbackDocument(entries: Record<string, object>): object {
+  return {
+    schemaVersion: 2,
+    updatedAt: NOW,
+    entries
+  };
+}
+
+function imageEntry(): object {
+  return {
+    projectRelativePath: 'assets/page.png',
+    marks: [],
+    comments: [],
+    nextRegionLabel: 2,
+    regions: [{
+      id: 'region-1',
+      label: 1,
+      kind: 'pin',
+      geometry: { type: 'point', x: 0.2, y: 0.3 },
+      comment: 'fix this',
+      createdAt: NOW,
+      updatedAt: NOW
+    }],
+    updatedAt: NOW
+  };
+}
 
 function createScheduler(overrides: Partial<CanvasFeedbackRenderScheduler> = {}): CanvasFeedbackRenderScheduler {
   return {

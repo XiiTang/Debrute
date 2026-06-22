@@ -1,5 +1,5 @@
 import React, { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
-import type { CanvasDocument, CanvasFeedbackDocument, CanvasFeedbackGeometry, CanvasProjection, ProjectedCanvasNode } from '@debrute/canvas-core';
+import type { CanvasDocument, CanvasFeedbackDocument, CanvasFeedbackEntry, CanvasFeedbackGeometry, CanvasProjection, ProjectedCanvasNode } from '@debrute/canvas-core';
 import type { TextFileBuffer, WorkbenchActions } from '../../types';
 import type { WorkbenchContextMenuPosition, WorkbenchContextMenuTarget } from '../shell/contextMenu';
 import {
@@ -8,9 +8,12 @@ import {
   type ResizeHandle
 } from '../services/canvasInteraction';
 import {
+  canvasFeedbackBarSizeForTarget,
+  canvasFeedbackEntryHasCommentRow,
   canvasNodeToViewportRect,
   placeCanvasFeedbackBar,
   type CanvasFeedbackBarTarget,
+  type CanvasLocalFeedbackDraft,
   type FloatingBarRect
 } from '../shell/floatingBars';
 import { cameraForCanvasContent } from './CanvasCameraBounds';
@@ -46,6 +49,7 @@ import {
   useCanvasSelection,
   useCanvasSurfaceSize
 } from './runtime/useCanvasRuntimeSnapshot';
+import type { CanvasCamera } from './runtime/canvasCamera';
 import {
   canvasLayoutOverridesForCanvas,
   canvasLocalLayoutDraftFromDragState,
@@ -54,6 +58,7 @@ import {
   type CanvasLocalLayoutDraft
 } from './canvasLocalLayoutDraft';
 import { hasInternalProjectTreeDrag, readInternalProjectTreeDragEntries } from '../project-explorer/ProjectTree';
+import type { CanvasImageFeedbackDraftRegion } from './CanvasImageFeedbackLayer';
 
 interface CanvasSurfaceProps {
   canvas: CanvasDocument;
@@ -63,8 +68,8 @@ interface CanvasSurfaceProps {
   textFileBuffers: Record<string, TextFileBuffer>;
   canvasFeedback: CanvasFeedbackDocument | undefined;
   localFeedbackMode?: CanvasImageFeedbackMode | undefined;
-  pendingFeedbackRegion?: { projectRelativePath: string; geometry: CanvasFeedbackGeometry } | undefined;
-  onLocalFeedbackDraft?: ((input: { projectRelativePath: string; geometry: CanvasFeedbackGeometry }) => void) | undefined;
+  pendingFeedbackRegion?: { projectRelativePath: string } & CanvasImageFeedbackDraftRegion | undefined;
+  onLocalFeedbackDraft?: ((input: CanvasLocalFeedbackDraft) => void) | undefined;
   overlayRuntime: CanvasOverlayRuntime;
   minimapOpen?: boolean | undefined;
   feedbackPlacementContext: {
@@ -720,14 +725,50 @@ function CanvasSurfaceRuntime({
     const placement = placeCanvasFeedbackBar({
       nodeViewportRect,
       viewportRect: feedbackPlacementContext.viewportRect,
-      reservedRects: [...feedbackPlacementContext.reservedRects]
+      reservedRects: [...feedbackPlacementContext.reservedRects],
+      barSize: canvasFeedbackBarSizeForTarget({
+        supportsImageLocalFeedback: input.node.mediaKind === 'image',
+        hasCommentRow: canvasFeedbackEntryHasCommentRow(canvasFeedback?.entries[input.node.projectRelativePath])
+      })
     });
     if (placement) {
       overlayRuntime.setFeedbackBarPlacement(placement);
     } else {
       overlayRuntime.clearFeedbackBarPlacement();
     }
-  }, [feedbackPlacementContext.reservedRects, feedbackPlacementContext.viewportRect, overlayRuntime]);
+  }, [canvasFeedback, feedbackPlacementContext.reservedRects, feedbackPlacementContext.viewportRect, overlayRuntime]);
+
+  const handleLocalFeedbackDraft = useCallback((draft: {
+    projectRelativePath: string;
+    geometry: CanvasFeedbackGeometry;
+  }) => {
+    if (!onLocalFeedbackDraft) {
+      return;
+    }
+    const node = projectedNodes.find((item) => item.projectRelativePath === draft.projectRelativePath);
+    const surfaceRect = surfaceRef.current?.getBoundingClientRect();
+    if (!node || !surfaceRect) {
+      return;
+    }
+    const camera = runtime.getSnapshot().camera;
+    const feedbackBarTarget = canvasFeedbackBarTargetForProjectedNode({
+      node,
+      surfaceRect: domRectToFloatingBarRect(surfaceRect),
+      camera,
+      entry: canvasFeedback?.entries[node.projectRelativePath]
+    });
+    if (!feedbackBarTarget) {
+      return;
+    }
+    syncFeedbackBarPlacement({ node, surfaceRect, camera });
+    onLocalFeedbackDraft({ ...draft, feedbackBarTarget });
+  }, [
+    canvasFeedback,
+    onLocalFeedbackDraft,
+    projectedNodes,
+    runtime,
+    syncFeedbackBarPlacement
+  ]);
 
   const emitFeedbackBarTarget = useCallback(() => {
     const hasFeedbackTargetHandler = Boolean(onFeedbackBarTargetChange);
@@ -746,7 +787,7 @@ function CanvasSurfaceRuntime({
 
     const node = projectedNodes.find((item) => item.projectRelativePath === hoveredNodePath);
     const surfaceRect = surfaceRef.current?.getBoundingClientRect();
-    if (!node || node.nodeKind !== 'file' || !surfaceRect) {
+    if (!node || !surfaceRect) {
       onFeedbackBarTargetChange(undefined);
       if (shouldClearFeedbackBarPlacementForFeedbackTarget({
         hasFeedbackTargetHandler,
@@ -760,15 +801,26 @@ function CanvasSurfaceRuntime({
     }
 
     const camera = runtime.getSnapshot().camera;
-    syncFeedbackBarPlacement({ node, surfaceRect, camera });
-    onFeedbackBarTargetChange({
-      projectRelativePath: node.projectRelativePath,
-      nodeRect: nodeRectForFloatingBar(node),
+    const feedbackBarTarget = canvasFeedbackBarTargetForProjectedNode({
+      node,
       surfaceRect: domRectToFloatingBarRect(surfaceRect),
       camera,
-      entry: canvasFeedback.entries[node.projectRelativePath],
-      supportsImageLocalFeedback: node.mediaKind === 'image'
+      entry: canvasFeedback.entries[node.projectRelativePath]
     });
+    if (!feedbackBarTarget) {
+      onFeedbackBarTargetChange(undefined);
+      if (shouldClearFeedbackBarPlacementForFeedbackTarget({
+        hasFeedbackTargetHandler,
+        hasCanvasFeedback: true,
+        hoveredNodePath,
+        hasRenderableFeedbackTarget: false
+      })) {
+        overlayRuntime.clearFeedbackBarPlacement();
+      }
+      return;
+    }
+    syncFeedbackBarPlacement({ node, surfaceRect, camera });
+    onFeedbackBarTargetChange(feedbackBarTarget);
   }, [
     canvasFeedback,
     hoveredNodePath,
@@ -874,12 +926,12 @@ function CanvasSurfaceRuntime({
               textBuffer={textFileBuffers[node.projectRelativePath]}
               feedbackEntry={canvasFeedback?.entries[node.projectRelativePath]}
               localFeedbackMode={node.mediaKind === 'image' ? localFeedbackMode : undefined}
-              pendingFeedbackGeometry={
+              pendingFeedbackRegion={
                 node.mediaKind === 'image' && pendingFeedbackRegion?.projectRelativePath === node.projectRelativePath
-                  ? pendingFeedbackRegion.geometry
+                  ? { label: pendingFeedbackRegion.label, geometry: pendingFeedbackRegion.geometry }
                   : undefined
               }
-              onLocalFeedbackDraft={onLocalFeedbackDraft}
+              onLocalFeedbackDraft={handleLocalFeedbackDraft}
               onPointerDown={beginNodeMove}
               onPointerMove={handlePointerMove}
               onPointerUp={handlePointerUpEvent}
@@ -1410,6 +1462,25 @@ function domRectToFloatingBarRect(rect: DOMRect): FloatingBarRect {
     y: rect.top,
     width: rect.width,
     height: rect.height
+  };
+}
+
+export function canvasFeedbackBarTargetForProjectedNode(input: {
+  node: ProjectedCanvasNode;
+  surfaceRect: FloatingBarRect;
+  camera: CanvasCamera;
+  entry: CanvasFeedbackEntry | undefined;
+}): CanvasFeedbackBarTarget | undefined {
+  if (input.node.nodeKind !== 'file') {
+    return undefined;
+  }
+  return {
+    projectRelativePath: input.node.projectRelativePath,
+    nodeRect: nodeRectForFloatingBar(input.node),
+    surfaceRect: input.surfaceRect,
+    camera: input.camera,
+    entry: input.entry,
+    supportsImageLocalFeedback: input.node.mediaKind === 'image'
   };
 }
 

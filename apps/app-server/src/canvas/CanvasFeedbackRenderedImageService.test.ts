@@ -133,7 +133,12 @@ function entryFixture(projectRelativePath: string): CanvasFeedbackEntry {
   return {
     projectRelativePath,
     marks: ['needs_revision'],
-    note: 'overall note',
+    comments: [{
+      id: 'comment-1',
+      comment: 'overall comment',
+      createdAt: NOW,
+      updatedAt: NOW
+    }],
     nextRegionLabel: 3,
     regions: [{
       id: 'region-1',

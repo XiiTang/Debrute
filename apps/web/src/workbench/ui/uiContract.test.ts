@@ -90,6 +90,7 @@ describe('Workbench UI system contract', () => {
       'TabList',
       'StatusPill',
       'EmptyState',
+      'CommentPillInput',
       'cx'
     ]) {
       expect(contents).toContain(exportName);
@@ -102,7 +103,9 @@ describe('Workbench UI system contract', () => {
       'Popover',
       'Spinner',
       'Command',
-      'Combobox'
+      'Combobox',
+      'CommentPillInputBadgeMode',
+      'CommentPillInputContainerProps'
     ]) {
       expect(contents).not.toContain(unusedExport);
     }

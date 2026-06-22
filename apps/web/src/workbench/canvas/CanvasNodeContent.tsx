@@ -4,7 +4,7 @@ import type { CanvasFeedbackEntry, CanvasFeedbackGeometry, ProjectedCanvasNode }
 import type { TextFileBuffer, WorkbenchActions } from '../../types';
 import { CanvasMonacoEditor } from './CanvasMonacoEditor';
 import { useCanvasImageNodeAsset, type CanvasImageNodeAssetHookState } from './CanvasImageNodeAssetContext';
-import { CanvasImageFeedbackLayer, type CanvasImageFeedbackMode } from './CanvasImageFeedbackLayer';
+import { CanvasImageFeedbackLayer, type CanvasImageFeedbackDraftRegion, type CanvasImageFeedbackMode } from './CanvasImageFeedbackLayer';
 import type { CanvasLoadedImage } from './canvasImagePreviews';
 import { Button, IconButton, StatusPill } from '../ui';
 
@@ -16,8 +16,11 @@ export interface CanvasNodeContentProps {
   textBuffer: TextFileBuffer | undefined;
   feedbackEntry?: CanvasFeedbackEntry | undefined;
   localFeedbackMode?: CanvasImageFeedbackMode | undefined;
-  pendingFeedbackGeometry?: CanvasFeedbackGeometry | undefined;
-  onLocalFeedbackDraft?: ((input: { projectRelativePath: string; geometry: CanvasFeedbackGeometry }) => void) | undefined;
+  pendingFeedbackRegion?: CanvasImageFeedbackDraftRegion | undefined;
+  onLocalFeedbackDraft?: ((input: {
+    projectRelativePath: string;
+    geometry: CanvasFeedbackGeometry;
+  }) => void) | undefined;
   onSelectNode: () => void;
   onTitlePointerDown: (event: React.PointerEvent<Element>) => void;
   onTitlePointerMove: (event: React.PointerEvent<Element>) => void;
@@ -32,7 +35,7 @@ export function CanvasNodeContent({
   textBuffer,
   feedbackEntry,
   localFeedbackMode,
-  pendingFeedbackGeometry,
+  pendingFeedbackRegion,
   onLocalFeedbackDraft,
   onSelectNode,
   onTitlePointerDown,
@@ -118,7 +121,7 @@ export function CanvasNodeContent({
               <CanvasImageFeedbackLayer
                 entry={feedbackEntry}
                 mode={localFeedbackMode}
-                draftGeometry={pendingFeedbackGeometry}
+                draftRegion={pendingFeedbackRegion}
                 onRegionDraft={(geometry) => onLocalFeedbackDraft?.({
                   projectRelativePath: node.projectRelativePath,
                   geometry

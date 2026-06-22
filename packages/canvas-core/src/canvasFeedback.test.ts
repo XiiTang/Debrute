@@ -21,7 +21,7 @@ describe('Canvas feedback v2', () => {
     });
   });
 
-  it('rejects old v1 feedback documents instead of migrating them', () => {
+  it('rejects invalid schema versions', () => {
     expect(() => normalizeCanvasFeedbackDocument({
       schemaVersion: 1,
       updatedAt: NOW,
@@ -29,10 +29,15 @@ describe('Canvas feedback v2', () => {
     })).toThrow('Invalid Canvas feedback document.');
   });
 
-  it('preserves local regions when updating image-level marks and note', () => {
-    const withRegion = updateCanvasFeedbackEntry(createEmptyCanvasFeedbackDocument(NOW), {
+  it('updates marks independently from file-level comments and local regions', () => {
+    const withComment = updateCanvasFeedbackEntry(createEmptyCanvasFeedbackDocument(NOW), {
+      operation: 'add-comment',
+      projectRelativePath: 'assets/page.png',
+      comment: 'overall direction works'
+    }, NOW);
+    const withRegion = updateCanvasFeedbackEntry(withComment, {
       operation: 'add-region',
-      projectRelativePath: '拼接图/page.png',
+      projectRelativePath: 'assets/page.png',
       region: {
         kind: 'pin',
         geometry: { type: 'point', x: 0.42, y: 0.31 },
@@ -41,16 +46,19 @@ describe('Canvas feedback v2', () => {
     }, NOW);
 
     const next = updateCanvasFeedbackEntry(withRegion, {
-      operation: 'set-entry',
-      projectRelativePath: '拼接图/page.png',
-      marks: ['like', 'needs_revision'],
-      note: 'overall direction works'
+      operation: 'set-marks',
+      projectRelativePath: 'assets/page.png',
+      marks: ['like', 'needs_revision']
     }, LATER);
 
-    expect(next.entries['拼接图/page.png']).toMatchObject({
-      projectRelativePath: '拼接图/page.png',
+    expect(next.entries['assets/page.png']).toMatchObject({
+      projectRelativePath: 'assets/page.png',
       marks: ['like', 'needs_revision'],
-      note: 'overall direction works',
+      comments: [{
+        comment: 'overall direction works',
+        createdAt: NOW,
+        updatedAt: NOW
+      }],
       nextRegionLabel: 2,
       regions: [{
         label: 1,
@@ -59,6 +67,91 @@ describe('Canvas feedback v2', () => {
         comment: 'face is blurry'
       }]
     });
+  });
+
+  it('adds updates and deletes file-level comments', () => {
+    const first = updateCanvasFeedbackEntry(createEmptyCanvasFeedbackDocument(NOW), {
+      operation: 'add-comment',
+      projectRelativePath: 'assets/page.png',
+      comment: ' first comment '
+    }, NOW);
+    const commentId = first.entries['assets/page.png']!.comments[0]!.id;
+    const second = updateCanvasFeedbackEntry(first, {
+      operation: 'add-comment',
+      projectRelativePath: 'assets/page.png',
+      comment: 'second comment'
+    }, LATER);
+    const updated = updateCanvasFeedbackEntry(second, {
+      operation: 'update-comment',
+      projectRelativePath: 'assets/page.png',
+      commentId,
+      comment: 'updated comment'
+    }, LATER);
+    const deleted = updateCanvasFeedbackEntry(updated, {
+      operation: 'delete-comment',
+      projectRelativePath: 'assets/page.png',
+      commentId
+    }, LATER);
+
+    expect(first.entries['assets/page.png']!.comments).toMatchObject([{
+      id: commentId,
+      comment: 'first comment',
+      createdAt: NOW,
+      updatedAt: NOW
+    }]);
+    expect(second.entries['assets/page.png']!.comments).toHaveLength(2);
+    expect(updated.entries['assets/page.png']!.comments[0]).toMatchObject({
+      id: commentId,
+      comment: 'updated comment',
+      createdAt: NOW,
+      updatedAt: LATER
+    });
+    expect(deleted.entries['assets/page.png']!.comments.map((item) => item.comment)).toEqual(['second comment']);
+  });
+
+  it('allocates non-conflicting comment ids for one timestamp', () => {
+    const first = updateCanvasFeedbackEntry(createEmptyCanvasFeedbackDocument(NOW), {
+      operation: 'add-comment',
+      projectRelativePath: 'assets/page.png',
+      comment: 'first'
+    }, NOW);
+    const firstId = first.entries['assets/page.png']!.comments[0]!.id;
+    const second = updateCanvasFeedbackEntry(first, {
+      operation: 'add-comment',
+      projectRelativePath: 'assets/page.png',
+      comment: 'second'
+    }, NOW);
+    const deleted = updateCanvasFeedbackEntry(second, {
+      operation: 'delete-comment',
+      projectRelativePath: 'assets/page.png',
+      commentId: firstId
+    }, NOW);
+    const third = updateCanvasFeedbackEntry(deleted, {
+      operation: 'add-comment',
+      projectRelativePath: 'assets/page.png',
+      comment: 'third'
+    }, NOW);
+
+    expect(third.entries['assets/page.png']!.comments.map((comment) => comment.id)).toEqual([
+      `comment-${NOW.replace(/[^0-9]/g, '')}-2`,
+      `comment-${NOW.replace(/[^0-9]/g, '')}-3`
+    ]);
+  });
+
+  it('removes an entry when the last mark comment and region are removed', () => {
+    const withMark = updateCanvasFeedbackEntry(createEmptyCanvasFeedbackDocument(NOW), {
+      operation: 'set-marks',
+      projectRelativePath: 'assets/page.png',
+      marks: ['check']
+    }, NOW);
+    const withoutMark = updateCanvasFeedbackEntry(withMark, {
+      operation: 'set-marks',
+      projectRelativePath: 'assets/page.png',
+      marks: []
+    }, LATER);
+
+    expect(withMark.entries['assets/page.png']).toBeDefined();
+    expect(withoutMark.entries['assets/page.png']).toBeUndefined();
   });
 
   it('allocates stable non-reused labels for pins and rectangles', () => {
@@ -131,6 +224,12 @@ describe('Canvas feedback v2', () => {
         comment: '   '
       }
     }, NOW)).toThrow('Canvas feedback region comment must be non-empty.');
+
+    expect(() => updateCanvasFeedbackEntry(document, {
+      operation: 'add-comment',
+      projectRelativePath: 'assets/page.png',
+      comment: '   '
+    }, NOW)).toThrow('Canvas feedback comment must be non-empty.');
   });
 
   it('derives rendered feedback paths without storing them in the feedback document', () => {
@@ -153,7 +252,12 @@ describe('Canvas feedback v2', () => {
         'assets/page.png': {
           projectRelativePath: 'assets/page.png',
           marks: ['like'],
-          note: 'note',
+          comments: [{
+            id: 'comment-1',
+            comment: 'overall',
+            createdAt: NOW,
+            updatedAt: NOW
+          }],
           nextRegionLabel: 2,
           regions: [{
             id: 'region-1',
@@ -177,7 +281,25 @@ describe('Canvas feedback v2', () => {
     })).toThrow('Canvas feedback entry key must match projectRelativePath: assets/other.png');
   });
 
-  it('rejects duplicate local feedback ids and labels', () => {
+  it('rejects unknown feedback entry fields', () => {
+    expect(() => normalizeCanvasFeedbackDocument({
+      schemaVersion: 2,
+      updatedAt: NOW,
+      entries: {
+        'assets/page.png': {
+          projectRelativePath: 'assets/page.png',
+          marks: [],
+          comments: [],
+          nextRegionLabel: 1,
+          regions: [],
+          updatedAt: NOW,
+          extra: 'unexpected'
+        }
+      }
+    })).toThrow('Invalid Canvas feedback entry.');
+  });
+
+  it('rejects duplicate local feedback ids labels and comment ids', () => {
     const duplicateLabel: CanvasFeedbackDocument = {
       schemaVersion: 2,
       updatedAt: NOW,
@@ -185,7 +307,7 @@ describe('Canvas feedback v2', () => {
         'assets/page.png': {
           projectRelativePath: 'assets/page.png',
           marks: [],
-          note: '',
+          comments: [],
           nextRegionLabel: 3,
           regions: [{
             id: 'region-1',
@@ -208,6 +330,30 @@ describe('Canvas feedback v2', () => {
         }
       }
     };
+    const duplicateCommentId: CanvasFeedbackDocument = {
+      schemaVersion: 2,
+      updatedAt: NOW,
+      entries: {
+        'assets/page.png': {
+          projectRelativePath: 'assets/page.png',
+          marks: [],
+          comments: [{
+            id: 'comment-1',
+            comment: 'first',
+            createdAt: NOW,
+            updatedAt: NOW
+          }, {
+            id: 'comment-1',
+            comment: 'second',
+            createdAt: NOW,
+            updatedAt: NOW
+          }],
+          nextRegionLabel: 1,
+          regions: [],
+          updatedAt: NOW
+        }
+      }
+    };
 
     expect(() => normalizeCanvasFeedbackDocument(duplicateLabel)).toThrow(
       'Canvas feedback region labels must be unique.'
@@ -225,5 +371,8 @@ describe('Canvas feedback v2', () => {
         }
       }
     })).toThrow('Canvas feedback region ids must be unique.');
+    expect(() => normalizeCanvasFeedbackDocument(duplicateCommentId)).toThrow(
+      'Canvas feedback comment ids must be unique.'
+    );
   });
 });

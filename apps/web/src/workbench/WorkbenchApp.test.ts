@@ -1,9 +1,13 @@
-import { describe, expect, it } from 'vitest';
-import type { CanvasFeedbackBarTarget } from './shell/floatingBars';
+import { describe, expect, expectTypeOf, it } from 'vitest';
+import type { CanvasFeedbackBarTarget, CanvasLocalFeedbackDraft } from './shell/floatingBars';
 import { chooseInitialActiveCanvasId } from './canvas/canvasCardBarState';
 import { sameCanvasFeedbackBarTarget } from './shell/floatingBars';
 
 describe('WorkbenchApp feedback bar target equality', () => {
+  it('requires local feedback drafts to carry the confirming image feedback target', () => {
+    expectTypeOf<CanvasLocalFeedbackDraft['feedbackBarTarget']>().toEqualTypeOf<CanvasFeedbackBarTarget>();
+  });
+
   it('treats equal feedback bar targets as unchanged', () => {
     const target = feedbackTarget();
 
@@ -37,6 +41,17 @@ describe('WorkbenchApp feedback bar target equality', () => {
       supportsImageLocalFeedback: false
     })).toBe(false);
   });
+
+  it('carries the confirming image target on local feedback drafts', () => {
+    const draftTarget = feedbackTarget('flow/b.png');
+    const draft: CanvasLocalFeedbackDraft = {
+      projectRelativePath: 'flow/b.png',
+      geometry: { type: 'point', x: 0.4, y: 0.5 },
+      feedbackBarTarget: draftTarget
+    };
+
+    expect(draft.feedbackBarTarget).toBe(draftTarget);
+  });
 });
 
 describe('WorkbenchApp canvas registry integration helpers', () => {
@@ -48,17 +63,22 @@ describe('WorkbenchApp canvas registry integration helpers', () => {
   });
 });
 
-function feedbackTarget(): CanvasFeedbackBarTarget {
+function feedbackTarget(projectRelativePath = 'flow/a.png'): CanvasFeedbackBarTarget {
   return {
-    projectRelativePath: 'flow/a.png',
+    projectRelativePath,
     nodeRect: { x: 10, y: 20, width: 300, height: 180 },
     surfaceRect: { x: 0, y: 0, width: 1280, height: 720 },
     camera: { x: 12, y: 24, z: 1 },
     supportsImageLocalFeedback: true,
     entry: {
-      projectRelativePath: 'flow/a.png',
+      projectRelativePath,
       marks: ['needs_revision'],
-      note: 'Needs revision',
+      comments: [{
+        id: 'comment-1',
+        comment: 'Needs revision',
+        createdAt: '2026-06-08T00:00:00.000Z',
+        updatedAt: '2026-06-08T00:00:00.000Z'
+      }],
       nextRegionLabel: 1,
       regions: [],
       updatedAt: '2026-06-08T00:00:00.000Z'

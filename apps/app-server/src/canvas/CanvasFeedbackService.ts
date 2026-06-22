@@ -56,10 +56,9 @@ export function createCanvasFeedbackService(options: CanvasFeedbackServiceOption
         const current = await readCanvasFeedbackState(projectRoot, now, readStructuredDocument);
         const next = updateCanvasFeedbackEntry(current.document, input, now());
         const projectRelativePath = normalizeCanvasFeedbackProjectRelativePath(input.projectRelativePath);
-        await assertCanvasFeedbackLocalRegionsTargetImage({
+        await assertCanvasFeedbackDocumentLocalRegionsTargetImages({
           projectRoot,
           document: next,
-          projectRelativePath,
           projectMediaKindForPath
         });
         await writeStructuredDocument(projectRoot, feedbackFile, `${JSON.stringify(next, null, 2)}\n`, current.expectedHash);

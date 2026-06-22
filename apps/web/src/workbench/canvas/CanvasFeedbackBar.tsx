@@ -8,7 +8,6 @@ import {
   Square,
   Star,
   ThumbsDown,
-  Trash2,
   X,
   type LucideIcon
 } from 'lucide-react';
@@ -20,9 +19,7 @@ import {
 import type { WorkbenchActions } from '../../types';
 import type { CanvasOverlayRuntime } from './CanvasOverlayRuntime';
 import type { CanvasImageFeedbackMode } from './CanvasImageFeedbackLayer';
-import { IconButton, Input } from '../ui';
-
-const NOTE_SAVE_DELAY_MS = 350;
+import { CommentPillInput, IconButton } from '../ui';
 
 const FEEDBACK_MARKS: Record<CanvasFeedbackMark, { label: string; Icon: LucideIcon }> = {
   like: { label: 'Like', Icon: Heart },
@@ -41,6 +38,7 @@ export function CanvasFeedbackBar({
   overlayRuntime,
   localFeedbackMode,
   onLocalFeedbackModeChange,
+  pendingRegionLabel,
   pendingRegionComment,
   onPendingRegionCommentChange,
   onSavePendingRegion,
@@ -54,6 +52,7 @@ export function CanvasFeedbackBar({
   overlayRuntime: CanvasOverlayRuntime;
   localFeedbackMode?: CanvasImageFeedbackMode | undefined;
   onLocalFeedbackModeChange?: ((mode: CanvasImageFeedbackMode) => void) | undefined;
+  pendingRegionLabel?: number | undefined;
   pendingRegionComment?: string | undefined;
   onPendingRegionCommentChange?: ((comment: string) => void) | undefined;
   onSavePendingRegion?: (() => void) | undefined;
@@ -62,34 +61,37 @@ export function CanvasFeedbackBar({
   onPointerLeave?: () => void;
 }): React.ReactElement {
   const elementRef = useRef<HTMLDivElement | null>(null);
+  const creatorInputRef = useRef<HTMLInputElement | null>(null);
+  const pendingRegionFocusTimerRef = useRef<number | undefined>(undefined);
+  const [draftComment, setDraftComment] = useState('');
   const [marks, setMarks] = useState<CanvasFeedbackMark[]>(entry?.marks ?? []);
-  const [note, setNote] = useState(entry?.note ?? '');
-  const [regionComments, setRegionComments] = useState<Record<string, string>>(() => (
-    Object.fromEntries((entry?.regions ?? []).map((region) => [region.id, region.comment]))
-  ));
-  const saveTimerRef = useRef<number | undefined>(undefined);
+  const draftCommentRef = useRef('');
+  const pendingRegionCommentRef = useRef(pendingRegionComment ?? '');
+  const creatorSaveInFlightRef = useRef<string | undefined>(undefined);
   const localFeedbackEnabled = Boolean(onLocalFeedbackModeChange);
-  const latestSaveRef = useRef<{ marks: CanvasFeedbackMark[]; note: string }>({
-    marks: entry?.marks ?? [],
-    note: entry?.note ?? ''
-  });
+  const hasPendingRegionDraft = localFeedbackEnabled && Boolean(onSavePendingRegion);
+  const hasCommentRow = Boolean((entry?.comments.length ?? 0) > 0 || (entry?.regions.length ?? 0) > 0);
+  const creatorValue = hasPendingRegionDraft ? pendingRegionComment ?? '' : draftComment;
+  const creatorLabel = hasPendingRegionDraft
+    ? `New annotation comment for ${projectRelativePath}`
+    : `New file-level comment for ${projectRelativePath}`;
+  const creatorTitle = hasPendingRegionDraft ? 'New annotation comment' : 'New file-level comment';
+  const pendingRegionFocusKey = hasPendingRegionDraft
+    ? `${projectRelativePath}:${pendingRegionLabel ?? 'pending'}`
+    : undefined;
 
   useEffect(() => {
-    const next = {
-      marks: entry?.marks ?? [],
-      note: entry?.note ?? ''
-    };
-    setMarks(next.marks);
-    setNote(next.note);
-    setRegionComments(Object.fromEntries((entry?.regions ?? []).map((region) => [region.id, region.comment])));
-    latestSaveRef.current = next;
-  }, [entry, projectRelativePath]);
+    setMarks(entry?.marks ?? []);
+  }, [entry]);
 
-  useEffect(() => () => {
-    if (saveTimerRef.current !== undefined) {
-      window.clearTimeout(saveTimerRef.current);
-    }
-  }, []);
+  useEffect(() => {
+    draftCommentRef.current = '';
+    setDraftComment('');
+  }, [projectRelativePath]);
+
+  useEffect(() => {
+    pendingRegionCommentRef.current = pendingRegionComment ?? '';
+  }, [pendingRegionComment]);
 
   useLayoutEffect(() => {
     if (!elementRef.current) {
@@ -98,81 +100,77 @@ export function CanvasFeedbackBar({
     return overlayRuntime.bindFeedbackBar(elementRef.current);
   }, [overlayRuntime]);
 
-  const saveFeedback = (next: { marks: CanvasFeedbackMark[]; note: string }) => {
-    latestSaveRef.current = next;
-    void onUpdate({
-      operation: 'set-entry',
-      projectRelativePath,
-      marks: next.marks,
-      note: next.note
-    });
-  };
-
-  const clearPendingNoteSave = () => {
-    if (saveTimerRef.current !== undefined) {
-      window.clearTimeout(saveTimerRef.current);
-      saveTimerRef.current = undefined;
+  useLayoutEffect(() => {
+    if (pendingRegionFocusTimerRef.current !== undefined) {
+      window.clearTimeout(pendingRegionFocusTimerRef.current);
+      pendingRegionFocusTimerRef.current = undefined;
     }
-  };
+    if (!pendingRegionFocusKey) {
+      return undefined;
+    }
+    pendingRegionFocusTimerRef.current = window.setTimeout(() => {
+      pendingRegionFocusTimerRef.current = undefined;
+      creatorInputRef.current?.focus();
+    }, 0);
+    return () => {
+      if (pendingRegionFocusTimerRef.current !== undefined) {
+        window.clearTimeout(pendingRegionFocusTimerRef.current);
+        pendingRegionFocusTimerRef.current = undefined;
+      }
+    };
+  }, [pendingRegionFocusKey]);
 
   const toggleMark = (mark: CanvasFeedbackMark) => {
     const nextMarks = marks.includes(mark)
       ? marks.filter((item) => item !== mark)
       : CANVAS_FEEDBACK_MARKS.filter((item) => item === mark || marks.includes(item));
     setMarks(nextMarks);
-    clearPendingNoteSave();
-    saveFeedback({ marks: nextMarks, note: latestSaveRef.current.note });
-  };
-
-  const scheduleNoteSave = (nextNote: string) => {
-    setNote(nextNote);
-    latestSaveRef.current = {
-      marks: latestSaveRef.current.marks,
-      note: nextNote
-    };
-    clearPendingNoteSave();
-    saveTimerRef.current = window.setTimeout(() => {
-      saveTimerRef.current = undefined;
-      saveFeedback(latestSaveRef.current);
-    }, NOTE_SAVE_DELAY_MS);
-  };
-
-  const flushNoteSave = () => {
-    if (saveTimerRef.current === undefined) {
-      return;
-    }
-    clearPendingNoteSave();
-    saveFeedback(latestSaveRef.current);
-  };
-
-  const updateRegionComment = (regionId: string, comment: string) => {
-    setRegionComments((current) => ({
-      ...current,
-      [regionId]: comment
-    }));
-  };
-
-  const saveRegionComment = (region: CanvasFeedbackEntry['regions'][number]) => {
-    const comment = (regionComments[region.id] ?? region.comment).trim();
-    if (!comment) {
-      updateRegionComment(region.id, region.comment);
-      return;
-    }
-    if (comment === region.comment) {
-      return;
-    }
     void onUpdate({
-      operation: 'update-region',
+      operation: 'set-marks',
       projectRelativePath,
-      regionId: region.id,
+      marks: nextMarks
+    });
+  };
+
+  const saveFileDraftComment = async () => {
+    const comment = draftCommentRef.current.trim();
+    if (!comment) {
+      draftCommentRef.current = '';
+      setDraftComment('');
+      return;
+    }
+    if (creatorSaveInFlightRef.current === comment) {
+      return;
+    }
+    creatorSaveInFlightRef.current = comment;
+    const saved = await onUpdate({
+      operation: 'add-comment',
+      projectRelativePath,
       comment
     });
+    if (creatorSaveInFlightRef.current === comment) {
+      creatorSaveInFlightRef.current = undefined;
+    }
+    if (saved && draftCommentRef.current.trim() === comment) {
+      draftCommentRef.current = '';
+      setDraftComment('');
+    }
+  };
+
+  const saveCreatorComment = async () => {
+    if (hasPendingRegionDraft) {
+      if (pendingRegionCommentRef.current.trim()) {
+        onSavePendingRegion?.();
+      }
+      return;
+    }
+    await saveFileDraftComment();
   };
 
   return (
     <div
       ref={elementRef}
-      className="db-floating-bar canvas-feedback-bar"
+      className={`db-floating-bar canvas-feedback-bar${hasCommentRow ? ' canvas-feedback-bar--has-comment-row' : ''}`}
       data-canvas-feedback-bar="true"
       onPointerDown={stopCanvasFeedbackBarEvent}
       onPointerMove={stopCanvasFeedbackBarEvent}
@@ -187,107 +185,125 @@ export function CanvasFeedbackBar({
       }}
       onKeyDown={stopCanvasFeedbackBarEvent}
     >
-      {CANVAS_FEEDBACK_MARKS.map((mark) => {
-        const pressed = marks.includes(mark);
-        const { label, Icon } = FEEDBACK_MARKS[mark];
-        return (
-          <IconButton
-            key={mark}
-            className="canvas-feedback-mark"
-            label={label}
-            pressed={pressed}
-            icon={<Icon size={14} />}
-            onClick={() => toggleMark(mark)}
-          />
-        );
-      })}
-      {localFeedbackEnabled ? (
-        <div className="canvas-feedback-local-mode" role="group" aria-label="Image region feedback tools">
-          <IconButton
-            className="canvas-feedback-mark"
-            label="Add feedback pin"
-            pressed={localFeedbackMode === 'pin'}
-            icon={<MapPin size={14} />}
-            onClick={() => onLocalFeedbackModeChange?.(localFeedbackMode === 'pin' ? undefined : 'pin')}
-          />
-          <IconButton
-            className="canvas-feedback-mark"
-            label="Add feedback rectangle"
-            pressed={localFeedbackMode === 'rect'}
-            icon={<Square size={14} />}
-            onClick={() => onLocalFeedbackModeChange?.(localFeedbackMode === 'rect' ? undefined : 'rect')}
-          />
-        </div>
-      ) : null}
-      <Input
-        className="canvas-feedback-note"
-        data-canvas-local-wheel="true"
-        aria-label={`Feedback note for ${projectRelativePath}`}
-        title="Feedback note"
-        value={note}
-        placeholder="Note"
-        onChange={(event) => scheduleNoteSave(event.currentTarget.value)}
-        onBlur={flushNoteSave}
-      />
-      {localFeedbackEnabled && onSavePendingRegion ? (
-        <div className="canvas-feedback-region-row pending">
-          <span>New</span>
-          <Input
-            className="canvas-feedback-region-comment"
-            data-canvas-local-wheel="true"
-            aria-label={`New region feedback for ${projectRelativePath}`}
-            title="Region feedback"
-            value={pendingRegionComment ?? ''}
-            placeholder="Comment"
-            onChange={(event) => onPendingRegionCommentChange?.(event.currentTarget.value)}
-            onKeyDown={(event) => {
-              if (event.key === 'Enter') {
-                onSavePendingRegion();
-              }
-              if (event.key === 'Escape') {
-                onCancelPendingRegion?.();
-              }
-            }}
-            onBlur={() => {
-              if ((pendingRegionComment ?? '').trim()) {
-                onSavePendingRegion();
-              }
-            }}
-          />
-        </div>
-      ) : null}
-      {localFeedbackEnabled && entry?.regions.length ? (
-        <div className="canvas-feedback-regions">
-          {entry.regions.map((region) => (
-            <div
-              key={region.id}
-              className="canvas-feedback-region-row"
-              data-canvas-feedback-region-label={region.label}
-            >
-              <span>{region.label}</span>
-              <Input
-                className="canvas-feedback-region-comment"
-                data-canvas-local-wheel="true"
-                aria-label={`Feedback for region ${region.label}`}
-                title={`Feedback for region ${region.label}`}
-                value={regionComments[region.id] ?? region.comment}
-                onChange={(event) => updateRegionComment(region.id, event.currentTarget.value)}
-                onKeyDown={(event) => {
-                  if (event.key === 'Enter') {
-                    saveRegionComment(region);
-                  }
-                  if (event.key === 'Escape') {
-                    updateRegionComment(region.id, region.comment);
-                  }
-                }}
-                onBlur={() => saveRegionComment(region)}
+      <div className="canvas-feedback-primary-row">
+        <div className="canvas-feedback-actions" role="group" aria-label="Canvas feedback actions">
+          {CANVAS_FEEDBACK_MARKS.map((mark) => {
+            const pressed = marks.includes(mark);
+            const { label, Icon } = FEEDBACK_MARKS[mark];
+            return (
+              <IconButton
+                key={mark}
+                className="canvas-feedback-mark"
+                label={label}
+                pressed={pressed}
+                icon={<Icon size={14} />}
+                onClick={() => toggleMark(mark)}
+              />
+            );
+          })}
+          {localFeedbackEnabled ? (
+            <div className="canvas-feedback-local-mode" role="group" aria-label="Image region feedback tools">
+              <IconButton
+                className="canvas-feedback-mark"
+                label="Add feedback pin"
+                pressed={localFeedbackMode === 'pin'}
+                icon={<MapPin size={14} />}
+                onClick={() => onLocalFeedbackModeChange?.(localFeedbackMode === 'pin' ? undefined : 'pin')}
               />
               <IconButton
-                className="canvas-feedback-region-delete"
+                className="canvas-feedback-mark"
+                label="Add feedback rectangle"
+                pressed={localFeedbackMode === 'rect'}
+                icon={<Square size={14} />}
+                onClick={() => onLocalFeedbackModeChange?.(localFeedbackMode === 'rect' ? undefined : 'rect')}
+              />
+            </div>
+          ) : null}
+        </div>
+        <CommentPillInput
+          ref={creatorInputRef}
+          className="canvas-feedback-comment-creator"
+          inputClassName="canvas-feedback-comment-input"
+          data-canvas-local-wheel="true"
+          aria-label={creatorLabel}
+          title={creatorTitle}
+          value={creatorValue}
+          placeholder="Comment"
+          autoFocus={hasPendingRegionDraft}
+          sizing={{ minWidthPx: 90, maxWidthPx: 90 }}
+          onChange={(event) => {
+            if (hasPendingRegionDraft) {
+              pendingRegionCommentRef.current = event.currentTarget.value;
+              onPendingRegionCommentChange?.(event.currentTarget.value);
+              return;
+            }
+            draftCommentRef.current = event.currentTarget.value;
+            setDraftComment(event.currentTarget.value);
+          }}
+          onKeyDown={(event) => {
+            if (event.key === 'Enter') {
+              event.preventDefault();
+              void saveCreatorComment();
+            }
+            if (event.key === 'Escape') {
+              if (hasPendingRegionDraft) {
+                pendingRegionCommentRef.current = '';
+                onCancelPendingRegion?.();
+                return;
+              }
+              draftCommentRef.current = '';
+              setDraftComment('');
+            }
+          }}
+          onBlur={() => { void saveCreatorComment(); }}
+        />
+      </div>
+
+      {hasCommentRow ? (
+        <div className="canvas-feedback-comment-strip" aria-label={`Feedback comments for ${projectRelativePath}`}>
+          {entry?.comments.map((fileComment) => (
+            <span
+              key={fileComment.id}
+              className="canvas-feedback-comment-pill canvas-feedback-comment-pill--file"
+              title="File-level comment"
+              data-canvas-local-wheel="true"
+            >
+              <span className="canvas-feedback-comment-pill-text">{fileComment.comment}</span>
+              <IconButton
+                className="canvas-feedback-comment-pill-close"
+                label={`Delete file-level comment for ${projectRelativePath}`}
+                title={`Delete file-level comment for ${projectRelativePath}`}
+                icon={<X size={11} strokeWidth={2.4} />}
+                onClick={(event) => {
+                  event.preventDefault();
+                  event.stopPropagation();
+                  void onUpdate({
+                    operation: 'delete-comment',
+                    projectRelativePath,
+                    commentId: fileComment.id
+                  });
+                }}
+              />
+            </span>
+          ))}
+          {localFeedbackEnabled && entry?.regions.length ? entry.regions.map((region) => (
+            <span
+              key={region.id}
+              className="canvas-feedback-comment-pill canvas-feedback-comment-pill--region"
+              data-canvas-feedback-region-label={region.label}
+              data-canvas-local-wheel="true"
+              title={`Feedback for region ${region.label}`}
+            >
+              <span className="canvas-feedback-comment-pill-text">{region.comment}</span>
+              <span className="canvas-feedback-comment-pill-badge" aria-hidden="true">{region.label}</span>
+              <IconButton
+                className="canvas-feedback-comment-pill-close"
                 label={`Delete feedback region ${region.label}`}
-                title="Delete"
-                icon={<Trash2 size={13} />}
-                onClick={() => {
+                title={`Delete feedback region ${region.label}`}
+                icon={<X size={11} strokeWidth={2.4} />}
+                onClick={(event) => {
+                  event.preventDefault();
+                  event.stopPropagation();
                   void onUpdate({
                     operation: 'delete-region',
                     projectRelativePath,
@@ -295,8 +311,8 @@ export function CanvasFeedbackBar({
                   });
                 }}
               />
-            </div>
-          ))}
+            </span>
+          )) : null}
         </div>
       ) : null}
     </div>

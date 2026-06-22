@@ -6,6 +6,8 @@ export { Field } from './Field';
 export type { FieldProps } from './Field';
 export { Input, SecretInput } from './Input';
 export type { InputProps } from './Input';
+export { CommentPillInput } from './CommentPillInput';
+export type { CommentPillInputProps, CommentPillInputSizing } from './CommentPillInput';
 export { Select } from './Select';
 export { Textarea } from './Textarea';
 export { Switch } from './Switch';

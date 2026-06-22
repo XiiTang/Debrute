@@ -4,7 +4,7 @@ import type { TextFileBuffer, WorkbenchActions } from '../../types';
 import type { ResizeHandle } from '../services/canvasInteraction';
 import type { CanvasStageRuntime } from './runtime/CanvasStageRuntime';
 import { CanvasNodeContent } from './CanvasNodeContent';
-import type { CanvasImageFeedbackMode } from './CanvasImageFeedbackLayer';
+import type { CanvasImageFeedbackDraftRegion, CanvasImageFeedbackMode } from './CanvasImageFeedbackLayer';
 
 const RESIZE_HANDLES: ResizeHandle[] = ['nw', 'n', 'ne', 'w', 'e', 'sw', 's', 'se'];
 
@@ -19,8 +19,11 @@ export interface CanvasNodeShellProps {
   textBuffer: TextFileBuffer | undefined;
   feedbackEntry?: CanvasFeedbackEntry | undefined;
   localFeedbackMode?: CanvasImageFeedbackMode | undefined;
-  pendingFeedbackGeometry?: CanvasFeedbackGeometry | undefined;
-  onLocalFeedbackDraft?: ((input: { projectRelativePath: string; geometry: CanvasFeedbackGeometry }) => void) | undefined;
+  pendingFeedbackRegion?: CanvasImageFeedbackDraftRegion | undefined;
+  onLocalFeedbackDraft?: ((input: {
+    projectRelativePath: string;
+    geometry: CanvasFeedbackGeometry;
+  }) => void) | undefined;
   onPointerDown: (node: ProjectedCanvasNode, event: React.PointerEvent<Element>) => void;
   onPointerMove: (event: React.PointerEvent<Element>) => void;
   onPointerUp: (event: React.PointerEvent<Element>) => void;
@@ -42,7 +45,7 @@ function CanvasNodeShellComponent({
   textBuffer,
   feedbackEntry,
   localFeedbackMode,
-  pendingFeedbackGeometry,
+  pendingFeedbackRegion,
   onLocalFeedbackDraft,
   onPointerDown,
   onPointerMove,
@@ -108,7 +111,7 @@ function CanvasNodeShellComponent({
             textBuffer={textBuffer}
             feedbackEntry={feedbackEntry}
             localFeedbackMode={localFeedbackMode}
-            pendingFeedbackGeometry={pendingFeedbackGeometry}
+            pendingFeedbackRegion={pendingFeedbackRegion}
             onLocalFeedbackDraft={onLocalFeedbackDraft}
             onSelectNode={() => onSelectNode(node)}
             onTitlePointerDown={(event) => onPointerDown(node, event)}
@@ -125,7 +128,7 @@ function CanvasNodeShellComponent({
           textBuffer={textBuffer}
           feedbackEntry={feedbackEntry}
           localFeedbackMode={localFeedbackMode}
-          pendingFeedbackGeometry={pendingFeedbackGeometry}
+          pendingFeedbackRegion={pendingFeedbackRegion}
           onLocalFeedbackDraft={onLocalFeedbackDraft}
           onSelectNode={() => onSelectNode(node)}
           onTitlePointerDown={(event) => onPointerDown(node, event)}
@@ -165,7 +168,7 @@ export function areCanvasNodeShellPropsEqual(
     && previous.textBuffer === next.textBuffer
     && previous.feedbackEntry === next.feedbackEntry
     && previous.localFeedbackMode === next.localFeedbackMode
-    && previous.pendingFeedbackGeometry === next.pendingFeedbackGeometry
+    && previous.pendingFeedbackRegion === next.pendingFeedbackRegion
     && previous.onLocalFeedbackDraft === next.onLocalFeedbackDraft
     && previous.onPointerDown === next.onPointerDown
     && previous.onPointerMove === next.onPointerMove

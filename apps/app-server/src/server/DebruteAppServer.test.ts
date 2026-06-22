@@ -184,10 +184,10 @@ describe('DebruteAppServer Canvas feedback materialization', () => {
         schemaVersion: 2,
         updatedAt: NOW,
         entries: {
-          'notes.md': {
-            projectRelativePath: 'notes.md',
+          'copy.md': {
+            projectRelativePath: 'copy.md',
             marks: [],
-            note: '',
+            comments: [],
             nextRegionLabel: 2,
             regions: [{
               id: 'region-1',
@@ -297,7 +297,7 @@ async function writeFeedbackDocument(projectRoot: string, projectRelativePaths: 
       {
         projectRelativePath,
         marks: [],
-        note: '',
+        comments: [],
         nextRegionLabel: 2,
         regions: [{
           id: 'region-1',

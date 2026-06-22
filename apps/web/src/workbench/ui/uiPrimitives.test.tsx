@@ -4,6 +4,7 @@ import { describe, expect, it } from 'vitest';
 import {
   Button,
   Card,
+  CommentPillInput,
   EmptyState,
   Field,
   IconButton,
@@ -154,5 +155,25 @@ describe('Workbench UI primitives', () => {
     expect(html).toContain('aria-selected="true"');
     expect(html).toContain('db-status-pill--warning');
     expect(html).toContain('db-empty-state');
+  });
+
+  it('renders the reusable comment pill input with adaptive sizing only', () => {
+    const html = renderToStaticMarkup(
+      <CommentPillInput
+        aria-label="File feedback comment"
+        value="File comment"
+        readOnly
+        sizing={{ minWidthPx: 112, maxWidthPx: 260 }}
+      />
+    );
+
+    expect(html).toContain('db-comment-pill-input');
+    expect(html).toContain('aria-label="File feedback comment"');
+    expect(html).toContain('--db-comment-pill-min-width:112px');
+    expect(html).toContain('--db-comment-pill-max-width:260px');
+    expect(html).toContain('--db-comment-pill-input-ch:');
+    expect(html).not.toContain('db-comment-pill-input__badge');
+    expect(html).not.toContain('db-comment-pill-input__close');
+    expect(html).not.toContain('db-comment-pill-input--badge-until-hover');
   });
 });

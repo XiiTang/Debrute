@@ -76,6 +76,49 @@
   -webkit-text-security: disc;
 }
 
+.db-comment-pill-input {
+  position: relative;
+  display: inline-grid;
+  flex: 0 0 auto;
+  width: clamp(
+    var(--db-comment-pill-min-width, 112px),
+    calc(var(--db-comment-pill-input-ch, 12) * 1ch + 44px),
+    var(--db-comment-pill-max-width, 280px)
+  );
+  min-width: var(--db-comment-pill-min-width, 112px);
+  max-width: var(--db-comment-pill-max-width, 280px);
+  height: 30px;
+}
+
+.db-comment-pill-input__field {
+  width: 100%;
+  height: 100%;
+  min-width: 0;
+  border: 1px solid color-mix(in oklch, var(--db-border) 88%, transparent);
+  border-radius: 999px;
+  padding: 5px 12px;
+  background: color-mix(in oklch, var(--db-bg) 86%, transparent);
+  color: var(--db-text);
+  font: inherit;
+  font-size: var(--db-font-sm);
+  line-height: 18px;
+  outline: 0;
+}
+
+.db-comment-pill-input__field::placeholder {
+  color: var(--db-text-subtle);
+  opacity: 1;
+}
+
+.db-comment-pill-input:focus-within .db-comment-pill-input__field {
+  border-color: color-mix(in oklch, var(--db-accent) 58%, var(--db-border));
+  box-shadow: var(--db-focus-ring);
+}
+
+.db-comment-pill-input--disabled {
+  opacity: 0.48;
+}
+
 .db-switch {
   display: inline-flex;
   align-items: center;
