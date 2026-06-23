@@ -69,9 +69,3 @@
   background: var(--db-surface-1);
   box-shadow: var(--db-shadow-floating);
 }
-
-.adobe-bridge-target-row {
-  width: 100%;
-  color: var(--db-text);
-  text-align: left;
-}

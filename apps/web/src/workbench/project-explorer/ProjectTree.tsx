@@ -786,6 +786,7 @@ function ProjectTreeInlineEditRow({
       <span className="tree-chevron-spacer" />
       {editing.kind === 'creating-directory' ? <FolderPlus size={14} /> : <FilePlus2 size={14} />}
       <Input
+        className="project-tree-edit-input"
         value={editing.value}
         disabled={editing.submitting === true}
         autoFocus
@@ -830,6 +831,7 @@ function ProjectTreeRenameRow({
       {node.kind === 'directory' ? <span className={open ? 'tree-chevron open' : 'tree-chevron'} /> : <span className="tree-chevron-spacer" />}
       {node.kind === 'directory' ? <FolderTree size={14} /> : <Files size={14} />}
       <Input
+        className="project-tree-edit-input"
         value={editing.value}
         disabled={editing.submitting === true}
         autoFocus

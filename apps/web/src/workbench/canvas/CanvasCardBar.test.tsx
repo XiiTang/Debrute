@@ -54,6 +54,7 @@ describe('CanvasCardBar', () => {
     expect(buttonByText(element, 'canvas-1').props.pressed ?? buttonByText(element, 'canvas-1').props['aria-pressed']).toBe(true);
     expect(onActiveCanvasChange).toHaveBeenCalledWith('storyboard');
     const html = renderToStaticMarkup(element);
+    expect(html).toContain('db-floating-bar canvas-card-bar');
     expect(html).toContain('db-button');
     expect(html).toContain('db-button--sm');
     expect(html).toContain('db-icon-button');

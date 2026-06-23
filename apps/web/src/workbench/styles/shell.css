@@ -1,0 +1,158 @@
+.workbench-shell {
+  position: relative;
+  width: 100vw;
+  height: 100vh;
+  overflow: hidden;
+  background: var(--db-bg);
+  color: var(--db-text);
+}
+
+.canvas-layer,
+.floating-bar-layer,
+.panel-layer {
+  position: absolute;
+  inset: 0;
+  min-width: 0;
+  min-height: 0;
+}
+
+.canvas-layer {
+  z-index: var(--db-z-canvas);
+}
+
+.floating-bar-layer {
+  z-index: var(--db-z-floating-bars);
+  pointer-events: none;
+}
+
+.panel-layer {
+  z-index: var(--db-z-panels);
+  pointer-events: none;
+}
+
+.workbench-context-menu {
+  position: fixed;
+  z-index: var(--db-z-overlays);
+  pointer-events: auto;
+}
+
+.floating-dock {
+  position: absolute;
+  left: 18px;
+  top: calc(32px + 13px);
+  display: flex;
+  flex-direction: column;
+  gap: var(--db-space-1);
+  width: 28px;
+  padding: 0;
+  pointer-events: auto;
+}
+
+.floating-panel {
+  position: absolute;
+  display: grid;
+  grid-template-rows: 38px minmax(0, 1fr);
+  pointer-events: auto;
+}
+
+.floating-panel-header {
+  height: 38px;
+  cursor: move;
+  user-select: none;
+}
+
+.floating-panel-body {
+  min-height: 0;
+  overflow: auto;
+}
+
+.floating-panel-terminal .floating-panel-body {
+  overflow: hidden;
+}
+
+.floating-panel-resize-handle {
+  position: absolute;
+  right: 0;
+  bottom: 0;
+  width: 18px;
+  height: 18px;
+  cursor: nwse-resize;
+}
+
+.floating-panel-resize-handle::after {
+  content: "";
+  position: absolute;
+  right: 5px;
+  bottom: 5px;
+  width: 7px;
+  height: 7px;
+  border-right: 1px solid color-mix(in oklch, var(--db-text-muted) 75%, transparent);
+  border-bottom: 1px solid color-mix(in oklch, var(--db-text-muted) 75%, transparent);
+}
+
+.floating-text-editor-header {
+  min-width: 0;
+  display: grid;
+  grid-template-columns: 20px minmax(120px, 160px) minmax(0, 1fr);
+  grid-auto-flow: column;
+  grid-auto-columns: max-content;
+  align-items: center;
+  gap: 7px;
+  padding: 0 8px;
+  border-bottom: 1px solid var(--db-border);
+  background: color-mix(in oklch, var(--db-surface-2) 94%, transparent);
+  cursor: grab;
+}
+
+.floating-text-editor-header strong {
+  font-size: 13px;
+}
+
+.floating-text-editor-header small {
+  color: var(--db-text-muted);
+  font-size: 11px;
+}
+
+.floating-panel-inspector .floating-panel-body,
+.floating-panel-problems .floating-panel-body,
+.floating-panel-settings .floating-panel-body {
+  background: var(--db-surface-1);
+}
+
+.boot-screen,
+.empty-editor {
+  height: 100vh;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+  color: var(--db-text-muted);
+}
+
+.empty-project {
+  flex-direction: column;
+  text-align: center;
+}
+
+.empty-project strong {
+  color: var(--db-text);
+  font-size: 15px;
+}
+
+.empty-line {
+  height: 32px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  color: var(--db-text-muted);
+  font-size: 13px;
+  padding: 0 8px;
+}
+
+.floating-text-editor-header strong,
+.floating-text-editor-header small {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}

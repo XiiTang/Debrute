@@ -82,7 +82,7 @@ describe('web Settings pages', () => {
     expect(html).toContain('Adobe Bridge');
     expect(html).toContain('Debrute CLI');
     expect(html).toContain('Application');
-    expect(html).toContain('<header class="settings-section-header"><h2>General</h2></header>');
+    expect(html).toContain('<header class="db-settings-section__header"><h2>General</h2></header>');
     expect(html).not.toContain('Base URL override');
     expect(html).not.toContain('aria-label="Base URL override"');
     expect(html).toContain('db-card');
@@ -195,9 +195,9 @@ describe('web Settings pages', () => {
     expect(html).not.toContain('value="sk');
     expect(html).not.toContain('type="password"');
     expect(html.match(/aria-label="Show API key"/g)).toHaveLength(1);
-    expect(html).toContain('settings-key-input');
-    expect(html).toContain('settings-key-control');
-    expect(html).toContain('settings-key-visibility');
+    expect(html).toContain('db-secret-field');
+    expect(html).toContain('db-secret-field__control');
+    expect(html).toContain('db-secret-field__visibility');
     expect(html).not.toContain('aria-label="Hide API key"');
   });
 
@@ -233,8 +233,9 @@ describe('web Settings pages', () => {
     expect(html).toContain('sk****************************ui');
     expect(html).toContain('Clear API key');
     expect(html).toContain('aria-label="API Key"');
-    expect(html).not.toContain('settings-key-visibility');
-    expect(html).not.toContain('aria-label="Show API key"');
+    expect(html).toContain('db-secret-field');
+    expect(html).toContain('db-secret-field__visibility');
+    expect(html).toContain('aria-label="Show API key"');
     expect(html).not.toContain('db-input--secret');
     expect(html).not.toContain('value="sk');
   });

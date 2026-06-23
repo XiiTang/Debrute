@@ -1,3 +1,4 @@
+import { readFileSync } from 'node:fs';
 import { describe, expect, it } from 'vitest';
 import webPackageJson from '../../../package.json';
 
@@ -108,6 +109,35 @@ describe('Workbench UI system contract', () => {
       'CommentPillInputContainerProps'
     ]) {
       expect(contents).not.toContain(unusedExport);
+    }
+  });
+
+  it('defines final project-level Workbench pattern selectors', () => {
+    const patterns = readFileSync('apps/web/src/workbench/ui/styles/workbench-patterns.css', 'utf8');
+
+    for (const selector of [
+      '.db-settings-section',
+      '.db-settings-section__header',
+      '.db-form-grid',
+      '.db-form-row',
+      '.db-action-row',
+      '.db-model-card',
+      '.db-model-card__header',
+      '.db-model-card__fields',
+      '.db-secret-field',
+      '.db-status-list',
+      '.db-project-open',
+      '.db-project-open__meta',
+      '.db-integration-list',
+      '.db-integration-row',
+      '.db-integration-row__action',
+      '.db-integration-summary',
+      '.db-object-properties',
+      '.db-diagnostic-row',
+      '.db-floating-bar',
+      '.db-canvas-control'
+    ]) {
+      expect(patterns).toContain(selector);
     }
   });
 

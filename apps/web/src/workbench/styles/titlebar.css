@@ -1,0 +1,146 @@
+.workbench-titlebar {
+  position: fixed;
+  inset: 0 0 auto 0;
+  z-index: var(--db-z-titlebar);
+  height: 32px;
+  display: grid;
+  grid-template-columns: minmax(180px, 1fr) minmax(160px, auto) minmax(180px, 1fr);
+  align-items: center;
+  color: var(--db-text);
+  user-select: none;
+  -webkit-user-select: none;
+}
+
+.workbench-titlebar::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  z-index: 0;
+  pointer-events: none;
+  background:
+    linear-gradient(
+      to bottom,
+      color-mix(in srgb, var(--db-bg) 90%, transparent) 0%,
+      color-mix(in srgb, var(--db-bg) 58%, transparent) 54%,
+      color-mix(in srgb, var(--db-bg) 20%, transparent) 72%,
+      transparent 86%,
+      transparent 100%
+    );
+  backdrop-filter: blur(18px);
+  -webkit-mask-image: linear-gradient(to bottom, #000 0%, #000 70%, transparent 86%, transparent 100%);
+  mask-image: linear-gradient(to bottom, #000 0%, #000 70%, transparent 86%, transparent 100%);
+  border-top: 1px solid color-mix(in oklch, var(--db-text) 5%, transparent);
+}
+
+.workbench-titlebar__drag-region {
+  position: absolute;
+  inset: 0;
+  -webkit-app-region: drag;
+}
+
+.workbench-titlebar__left,
+.workbench-titlebar__center,
+.workbench-titlebar__right {
+  position: relative;
+  z-index: 1;
+  min-width: 0;
+  height: 100%;
+  display: flex;
+  align-items: center;
+}
+
+.workbench-titlebar__left {
+  justify-content: flex-start;
+  padding-left: 8px;
+}
+
+.workbench-titlebar--traffic-spacer .workbench-titlebar__left {
+  padding-left: 88px;
+}
+
+.workbench-titlebar__center {
+  justify-content: center;
+}
+
+.workbench-titlebar__right {
+  justify-content: flex-end;
+}
+
+.workbench-titlebar__title {
+  max-width: min(48vw, 520px);
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+  color: color-mix(in srgb, var(--db-text) 82%, transparent);
+  font-size: var(--db-font-sm);
+}
+
+.workbench-titlebar__menubar,
+.workbench-titlebar__window-controls,
+.workbench-titlebar__menu-popover {
+  -webkit-app-region: no-drag;
+}
+
+.workbench-titlebar__menubar {
+  display: flex;
+  align-items: center;
+  gap: 1px;
+}
+
+.workbench-titlebar__menu-button {
+  height: 24px;
+  padding: 0 8px;
+  border: 0;
+  border-radius: var(--db-radius-sm);
+  background: transparent;
+  color: color-mix(in srgb, var(--db-text) 82%, transparent);
+  font: inherit;
+  font-size: var(--db-font-sm);
+}
+
+.workbench-titlebar__menu-button:hover,
+.workbench-titlebar__menu-button[aria-expanded="true"] {
+  background: color-mix(in srgb, var(--db-text) 10%, transparent);
+  color: var(--db-text);
+}
+
+.workbench-titlebar__window-controls {
+  display: flex;
+  align-items: center;
+  height: 100%;
+}
+
+.workbench-titlebar__window-controls .db-icon-button {
+  width: 38px;
+  height: 32px;
+  border-radius: 0;
+}
+
+.workbench-titlebar__window-controls .db-icon-button:last-child:hover {
+  color: var(--db-text);
+  background: color-mix(in srgb, var(--db-danger) 72%, transparent);
+}
+
+.workbench-titlebar__menu-popover {
+  position: absolute;
+  top: 30px;
+  left: 8px;
+  z-index: var(--db-z-titlebar-menu);
+  min-width: 220px;
+}
+
+.workbench-titlebar__submenu {
+  position: relative;
+}
+
+.workbench-titlebar__submenu-trigger .db-menu__item-icon {
+  justify-self: center;
+}
+
+.workbench-titlebar__submenu-menu {
+  position: absolute;
+  top: -5px;
+  left: calc(100% + 4px);
+  z-index: calc(var(--db-z-titlebar-menu) + 1);
+  min-width: 220px;
+}

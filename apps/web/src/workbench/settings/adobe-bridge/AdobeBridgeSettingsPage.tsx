@@ -35,10 +35,10 @@ export function AdobeBridgeSettingsPage({
   };
 
   return (
-    <section className="settings-section adobe-bridge-settings-page">
-      <header className="settings-section-header">
+    <section className="db-settings-section adobe-bridge-settings-page">
+      <header className="db-settings-section__header">
         <h2>Adobe Bridge</h2>
-        <Toolbar ariaLabel="Adobe Bridge actions" className="settings-actions">
+        <Toolbar ariaLabel="Adobe Bridge actions" className="db-action-row">
           <Switch
             label="Enable Adobe Bridge"
             checked={bridge?.settings.enabled === true}
@@ -47,23 +47,23 @@ export function AdobeBridgeSettingsPage({
           />
         </Toolbar>
       </header>
-      {error ? <small className="settings-error">{error}</small> : null}
-      <div className="integration-backend-summary">
+      {error ? <small className="db-form-error">{error}</small> : null}
+      <div className="db-integration-summary">
         <StatusPill tone={bridge?.settings.discoveryStatus === 'available' ? 'success' : bridge?.settings.discoveryStatus === 'disabled' ? 'neutral' : 'danger'}>
           {discoveryLabel(bridge?.settings.discoveryStatus)}
         </StatusPill>
       </div>
-      <div className="integrations-list">
+      <div className="db-integration-list">
         {(bridge?.adobeClients ?? []).map((client) => {
           const linked = isPhotoshopLinkedToCurrentProject(bridge, currentProjectId, client.adobeClientId);
           return (
-            <div className="integration-row" key={client.adobeClientId}>
+            <div className="db-integration-row" key={client.adobeClientId}>
               <span><Cable size={14} /> {client.displayName}</span>
               <StatusPill tone={client.activeDocumentTitle ? 'success' : 'neutral'}>
                 {client.activeDocumentTitle ? 'Document open' : 'No document open'}
               </StatusPill>
               <small>{linked ? 'Linked' : 'Available'}</small>
-              <div className="integration-row-action">
+              <div className="db-integration-row__action">
                 {linked ? (
                   <Button type="button" iconStart={<Unlink size={14} />} onClick={() => void actions.unlinkAdobeBridgePhotoshop(client.adobeClientId)}>
                     Disconnect
@@ -78,24 +78,24 @@ export function AdobeBridgeSettingsPage({
           );
         })}
         {(bridge?.projects ?? []).map((project) => (
-          <div className="integration-row" key={project.projectId}>
+          <div className="db-integration-row" key={project.projectId}>
             <span>{project.projectName}</span>
             <StatusPill tone="success">Open</StatusPill>
             <small>{project.directories.length} directories</small>
-            <div className="integration-row-action" />
+            <div className="db-integration-row__action" />
           </div>
         ))}
       </div>
       {failedTransfers.length > 0 ? (
         <>
           <h3>Recent transfer failures</h3>
-          <div className="integrations-list">
+          <div className="db-integration-list">
             {failedTransfers.map((transfer) => (
-              <div className="integration-row" key={transfer.transferId}>
+              <div className="db-integration-row" key={transfer.transferId}>
                 <span><AlertTriangle size={14} /> {transfer.projectRelativePath ?? transfer.direction}</span>
                 <StatusPill tone="danger">Failed</StatusPill>
                 <small>{transferFailureLabel(transfer)}</small>
-                <div className="integration-row-action" />
+                <div className="db-integration-row__action" />
               </div>
             ))}
           </div>

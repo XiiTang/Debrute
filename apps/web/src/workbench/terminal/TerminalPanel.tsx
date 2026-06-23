@@ -193,7 +193,7 @@ export function TerminalPanel({
             </Tab>
           ))}
         </TabList>
-        <div className="terminal-panel__actions">
+        <div className="db-action-row">
           <IconButton label="New Terminal" icon={<Plus size={14} />} onClick={() => void createSession('').catch(showError)} />
           <IconButton label="Restart Terminal" icon={<RotateCcw size={14} />} disabled={!activeSession} onClick={restartActiveSession} />
           <IconButton

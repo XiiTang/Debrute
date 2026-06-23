@@ -35,23 +35,23 @@ export function IntegrationsSettingsPage({
   };
 
   return (
-    <section className="settings-section integrations-settings-page">
-      <header className="settings-section-header integrations-settings-header">
+    <section className="db-settings-section integrations-settings-page">
+      <header className="db-settings-section__header">
         <h2>Integrations</h2>
-        <Toolbar ariaLabel="Integration actions" className="settings-actions">
+        <Toolbar ariaLabel="Integration actions" className="db-action-row">
           <Button type="button" disabled={rescanRunning} iconStart={<RefreshCw size={14} />} onClick={() => void rescan()}>
             {rescanning ? 'Rescanning' : 'Rescan'}
           </Button>
         </Toolbar>
       </header>
 
-      {error ? <small className="settings-error">{error}</small> : null}
+      {error ? <small className="db-form-error">{error}</small> : null}
       <BackendSummary
         backends={state.integrationsSettings?.backends}
         checking={rescanning || (!state.integrationsSettings?.backends?.length && rescanRunning)}
       />
 
-      <div className="integrations-list">
+      <div className="db-integration-list">
         {integrations.map((integration) => (
           <IntegrationRow
             key={integration.integrationId}
@@ -72,13 +72,13 @@ function IntegrationRow({
     ? integration.binaries.find((binary) => binary.status === 'ready' && binary.version)?.version
     : undefined;
   return (
-    <div className="integration-row">
+    <div className="db-integration-row">
       <span>{integration.displayName}</span>
       <StatusPill tone={integration.status === 'ready' ? 'success' : integration.status === 'probe_failed' ? 'danger' : 'neutral'}>
         {statusLabel(integration.status)}
       </StatusPill>
       <small>{version ?? ''}</small>
-      <div className="integration-row-action">
+      <div className="db-integration-row__action">
         <IntegrationRowAction integration={integration} />
       </div>
     </div>
@@ -93,7 +93,7 @@ function BackendSummary({
   checking: boolean;
 }): React.ReactElement | null {
   if (checking) {
-    return <small className="integration-backend-summary">Checking backends</small>;
+    return <small className="db-integration-summary">Checking backends</small>;
   }
   if (!backends?.length) {
     return null;
@@ -104,7 +104,7 @@ function BackendSummary({
   const summary = labels.length > 0
     ? labels.join(', ')
     : backends.map((backend) => backend.unavailableReason ?? 'unavailable').join(', ');
-  return <small className="integration-backend-summary">{summary}</small>;
+  return <small className="db-integration-summary">{summary}</small>;
 }
 
 function IntegrationRowAction({ integration }: { integration: IntegrationStatus }): React.ReactElement | null {
@@ -120,7 +120,7 @@ function IntegrationRowAction({ integration }: { integration: IntegrationStatus 
   return (
     <>
       {previews.map((preview) => (
-        <div className="integration-command-preview" key={`${preview.kind}:${preview.command}`}>
+        <div className="db-integration-command" key={`${preview.kind}:${preview.command}`}>
           <small>{operationLabel(preview.kind)}</small>
           <code>{preview.command}</code>
         </div>
@@ -155,7 +155,7 @@ function DiagnosticSummary({ diagnostic }: { diagnostic: IntegrationOperationDia
     diagnostic.exitCode !== undefined ? `exit ${diagnostic.exitCode}` : undefined,
     diagnostic.stderrTail ?? diagnostic.stdoutTail
   ].filter((item): item is string => Boolean(item));
-  return details.length > 0 ? <small className="settings-error">{details.join(' / ')}</small> : null;
+  return details.length > 0 ? <small className="db-form-error">{details.join(' / ')}</small> : null;
 }
 
 function statusLabel(status: string): string {

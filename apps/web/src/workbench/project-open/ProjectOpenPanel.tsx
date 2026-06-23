@@ -1,6 +1,6 @@
 import React from 'react';
 import { FolderOpen } from 'lucide-react';
-import { Button } from '../ui';
+import { Button, EmptyState, Toolbar } from '../ui';
 
 export interface ProjectOpenPanelProps {
   attemptedPath?: string | undefined;
@@ -17,21 +17,24 @@ export function ProjectOpenPanel({
 }: ProjectOpenPanelProps): React.ReactElement {
   return (
     <form
-      className="project-open-panel"
+      className="project-open-panel db-project-open"
       onSubmit={(event) => {
         event.preventDefault();
         onOpenProject();
       }}
     >
-      <FolderOpen size={34} aria-hidden="true" />
-      <strong>No project open</strong>
-      {attemptedPath ? <span className="project-open-panel__path">{attemptedPath}</span> : null}
-      {error ? <span className="project-open-panel__error">{error}</span> : null}
-      <div className="project-open-panel__actions">
-        <Button type="submit" variant="primary" iconStart={<FolderOpen size={15} />} loading={opening} disabled={opening}>
-          Open Project
-        </Button>
-      </div>
+      <EmptyState
+        title="No project open"
+        description={attemptedPath ? <span className="db-project-open__meta">{attemptedPath}</span> : undefined}
+        action={(
+          <Toolbar ariaLabel="Project open actions" className="db-action-row">
+            <Button type="submit" variant="primary" iconStart={<FolderOpen size={15} />} loading={opening} disabled={opening}>
+              Open Project
+            </Button>
+          </Toolbar>
+        )}
+      />
+      {error ? <span className="db-form-error">{error}</span> : null}
     </form>
   );
 }

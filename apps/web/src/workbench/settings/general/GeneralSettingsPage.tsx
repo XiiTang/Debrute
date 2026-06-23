@@ -58,13 +58,13 @@ export function GeneralSettingsPage({
   };
 
   return (
-    <section className="settings-section general-settings-page">
-      <header className="settings-section-header">
+    <section className="db-settings-section general-settings-page">
+      <header className="db-settings-section__header">
         <h2>General</h2>
       </header>
-      <Card className="general-settings-card">
+      <Card className="db-model-card">
         <strong>Application</strong>
-        <div className="general-settings-grid">
+        <div className="db-property-grid">
           <small><span>Name</span>Debrute</small>
           <small><span>Current version</span>{updateState.currentVersion}</small>
           <small><span>Surface</span>{surfaceLabel(updateState)}</small>
@@ -95,21 +95,21 @@ function AppUpdateCard({
   const action = appUpdateActionForState(state);
   const busy = operation.status === 'loading';
   return (
-    <Card className="app-update-card">
-      <div className="app-update-header">
+    <Card className="db-model-card">
+      <div className="db-model-card__header">
         <strong>Updates</strong>
         <StatusPill tone={statusTone(state)}>{statusLabel(state)}</StatusPill>
       </div>
-      <div className="general-settings-grid">
+      <div className="db-property-grid">
         <small><span>Current version</span>{state.currentVersion}</small>
         {'updateVersion' in state && state.updateVersion ? <small><span>Latest version</span>{state.updateVersion}</small> : null}
         {'lastCheckedAt' in state && state.lastCheckedAt ? <small><span>Last checked</span>{state.lastCheckedAt}</small> : null}
         {state.type === 'downloading' ? <small><span>Progress</span>{state.percent}%</small> : null}
       </div>
-      <small className={state.type === 'error' || operation.status === 'error' ? 'settings-error' : 'app-update-message'}>
+      <small className={state.type === 'error' || operation.status === 'error' ? 'db-form-error' : 'db-form-help'}>
         {operation.status === 'error' ? operation.message : stateMessage(state)}
       </small>
-      <Toolbar ariaLabel="Application update actions" className="settings-actions">
+      <Toolbar ariaLabel="Application update actions" className="db-action-row">
         {action === 'check' ? (
           <Button type="button" disabled={busy || !canRunAppUpdateAction(action, state, shell)} iconStart={<RefreshCw size={14} />} onClick={() => void run(() => shell!.checkForAppUpdate!())}>
             Check for Updates

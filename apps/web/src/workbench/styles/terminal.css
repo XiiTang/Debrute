@@ -1,0 +1,33 @@
+.terminal-panel {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  min-height: 0;
+  background: var(--db-bg);
+}
+
+.terminal-panel__toolbar {
+  justify-content: space-between;
+  min-height: 34px;
+  padding: 5px 8px;
+}
+
+.terminal-panel__status {
+  flex: 0 0 auto;
+  padding: 5px 8px;
+  color: var(--db-danger);
+  background: var(--db-danger-bg);
+  font-size: var(--db-font-sm);
+}
+
+.terminal-panel__surface {
+  flex: 1;
+  min-height: 0;
+  padding: 6px;
+  overflow: hidden;
+}
+
+.terminal-panel__empty {
+  flex: 1;
+  min-height: 0;
+}

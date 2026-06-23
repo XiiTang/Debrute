@@ -162,7 +162,7 @@ export function LlmSettings({ state, actions }: { state: WorkbenchState; actions
   };
 
   return (
-    <section className="settings-section">
+    <section className="db-settings-section">
       <SettingsSectionHeader title="LLM Providers" />
       <Card>
         <Field label="Default Model">
@@ -177,51 +177,51 @@ export function LlmSettings({ state, actions }: { state: WorkbenchState; actions
           </Select>
         </Field>
       </Card>
-      <div className="settings-grid">
-        <form className="settings-edit-form" onSubmit={(event) => {
+      <div className="db-form-grid">
+        <form className="db-form-grid db-form-grid--contents" onSubmit={(event) => {
           event.preventDefault();
           void save();
         }}>
           <Card>
-          <strong>{editingProviderId ? 'Edit LLM Provider' : 'Add LLM Provider'}</strong>
-          <div className="settings-row">
-            <Field label="Provider Type">
-              <Select value={draft.providerType} onChange={(event) => setDraft({ ...draft, providerType: event.currentTarget.value as LlmProviderDraft['providerType'] })}>
-                <option value="openai_compat">OpenAI Compatible</option>
-                <option value="anthropic">Anthropic</option>
-              </Select>
-            </Field>
-          </div>
-          <div className="settings-row"><Field label="ID"><Input value={draft.id} onChange={(event) => setDraft({ ...draft, id: event.currentTarget.value })} /></Field></div>
-          <div className="settings-row"><Field label="Name"><Input value={draft.name} onChange={(event) => setDraft({ ...draft, name: event.currentTarget.value })} /></Field></div>
-          <div className="settings-row"><Field label="Base URL"><Input value={draft.baseUrl} onChange={(event) => setDraft({ ...draft, baseUrl: event.currentTarget.value })} /></Field></div>
-          <div className="settings-row"><Field label="Model IDs"><Textarea value={draft.modelIdsText} onChange={(event) => setDraft({ ...draft, modelIdsText: event.currentTarget.value })} /></Field></div>
-          <div className="settings-row">
-            <ApiKeyInput
-              label="API Key"
-              value={draft.apiKeyInput}
-              onChange={(apiKeyInput) => setDraft({ ...draft, apiKeyInput })}
-              resetKey={editingProviderId ?? 'new'}
-            />
-          </div>
-          <Switch label="Enabled" checked={draft.enabled} onChange={(event) => setDraft({ ...draft, enabled: event.currentTarget.checked })} />
-          {discovery.status !== 'idle' ? (
-            <small className={discovery.status === 'error' ? 'settings-error' : ''}>
-              {discovery.status === 'loading' ? 'Discovering models' : discovery.message}
-            </small>
-          ) : null}
-          <Toolbar ariaLabel="LLM provider actions" className="settings-actions">
-            {editingProviderId ? <Button type="button" onClick={() => setEditingProviderId(undefined)}>Cancel</Button> : null}
-            <Button type="button" disabled={!draft.baseUrl.trim() || discovery.status === 'loading'} iconStart={<Search size={14} />} onClick={() => void discoverModels()}>
-              Discover Models
-            </Button>
-            <Button type="submit" variant="primary" disabled={!draft.id.trim() || !draft.name.trim() || !draft.baseUrl.trim() || splitModelIds(draft.modelIdsText).length === 0} iconStart={<Save size={14} />}>
-              {editingProviderId ? 'Save LLM Provider' : 'Add LLM Provider'}
-            </Button>
-          </Toolbar>
+            <strong>{editingProviderId ? 'Edit LLM Provider' : 'Add LLM Provider'}</strong>
+            <div className="db-form-row">
+              <Field label="Provider Type">
+                <Select value={draft.providerType} onChange={(event) => setDraft({ ...draft, providerType: event.currentTarget.value as LlmProviderDraft['providerType'] })}>
+                  <option value="openai_compat">OpenAI Compatible</option>
+                  <option value="anthropic">Anthropic</option>
+                </Select>
+              </Field>
+            </div>
+            <div className="db-form-row"><Field label="ID"><Input value={draft.id} onChange={(event) => setDraft({ ...draft, id: event.currentTarget.value })} /></Field></div>
+            <div className="db-form-row"><Field label="Name"><Input value={draft.name} onChange={(event) => setDraft({ ...draft, name: event.currentTarget.value })} /></Field></div>
+            <div className="db-form-row"><Field label="Base URL"><Input value={draft.baseUrl} onChange={(event) => setDraft({ ...draft, baseUrl: event.currentTarget.value })} /></Field></div>
+            <div className="db-form-row"><Field label="Model IDs"><Textarea value={draft.modelIdsText} onChange={(event) => setDraft({ ...draft, modelIdsText: event.currentTarget.value })} /></Field></div>
+            <div className="db-form-row">
+              <ApiKeyInput
+                label="API Key"
+                value={draft.apiKeyInput}
+                onChange={(apiKeyInput) => setDraft({ ...draft, apiKeyInput })}
+                resetKey={editingProviderId ?? 'new'}
+              />
+            </div>
+            <Switch label="Enabled" checked={draft.enabled} onChange={(event) => setDraft({ ...draft, enabled: event.currentTarget.checked })} />
+            {discovery.status !== 'idle' ? (
+              <small className={discovery.status === 'error' ? 'db-form-error' : ''}>
+                {discovery.status === 'loading' ? 'Discovering models' : discovery.message}
+              </small>
+            ) : null}
+            <Toolbar ariaLabel="LLM provider actions" className="db-action-row">
+              {editingProviderId ? <Button type="button" onClick={() => setEditingProviderId(undefined)}>Cancel</Button> : null}
+              <Button type="button" disabled={!draft.baseUrl.trim() || discovery.status === 'loading'} iconStart={<Search size={14} />} onClick={() => void discoverModels()}>
+                Discover Models
+              </Button>
+              <Button type="submit" variant="primary" disabled={!draft.id.trim() || !draft.name.trim() || !draft.baseUrl.trim() || splitModelIds(draft.modelIdsText).length === 0} iconStart={<Save size={14} />}>
+                {editingProviderId ? 'Save LLM Provider' : 'Add LLM Provider'}
+              </Button>
+            </Toolbar>
           </Card>
         </form>
-        <div className="settings-grid">
+        <div className="db-form-grid">
           {(settings?.providers ?? []).map((provider) => (
             <LlmProviderCard
               key={provider.id}
@@ -241,9 +241,9 @@ export function ImageModelSettings({ state, actions }: { state: WorkbenchState; 
   const models = state.imageModelSettings?.models ?? [];
 
   return (
-    <section className="settings-section">
+    <section className="db-settings-section">
       <SettingsSectionHeader title="Image Models" />
-      <div className="settings-grid">
+      <div className="db-form-grid">
         {models.map((model) => (
           <MediaModelCard
             key={model.debruteModelId}
@@ -260,9 +260,9 @@ export function VideoModelSettings({ state, actions }: { state: WorkbenchState; 
   const models = state.videoModelSettings?.models ?? [];
 
   return (
-    <section className="settings-section">
+    <section className="db-settings-section">
       <SettingsSectionHeader title="Video Models" />
-      <div className="settings-grid">
+      <div className="db-form-grid">
         {models.map((model) => (
           <MediaModelCard
             key={model.debruteModelId}
@@ -281,7 +281,7 @@ function SettingsSectionHeader({
   title: string;
 }): React.ReactElement {
   return (
-    <header className="settings-section-header">
+    <header className="db-settings-section__header">
       <h2>{title}</h2>
     </header>
   );
@@ -324,8 +324,8 @@ function MediaModelCard({
   };
 
   return (
-    <Card className="settings-model-card">
-      <div className="settings-model-card-header">
+    <Card className="db-model-card">
+      <div className="db-model-card__header">
         <div>
           <strong>{model.debruteModelId}</strong>
           {model.apiKeySet ? <StatusPill>key {model.apiKeyPreview}</StatusPill> : <StatusPill tone="neutral">no key</StatusPill>}
@@ -336,9 +336,9 @@ function MediaModelCard({
           </Button>
         ) : null}
       </div>
-      <div className="settings-model-card-fields">
-        <div className="settings-row">
-          <MediaApiKeyInput
+      <div className="db-model-card__fields">
+        <div className="db-form-row">
+          <ApiKeyInput
             ariaLabel="API Key"
             value={draft.apiKeyInput}
             onChange={(apiKeyInput) => setDraft({ ...draft, apiKeyInput })}
@@ -346,33 +346,33 @@ function MediaModelCard({
             placeholder="API Key"
           />
         </div>
-        <div className="settings-model-edit-grid">
-          <div className="settings-row">
+        <div className="db-form-grid db-form-grid--two">
+          <div className="db-form-row">
             <Field label="Base URL override">
-            <Input
-              aria-label="Base URL override"
-              value={draft.baseUrlOverride}
-              onChange={(event) => setDraft({ ...draft, baseUrlOverride: event.currentTarget.value })}
-              onBlur={() => void saveDraft(draft)}
-              placeholder={model.defaultBaseUrl}
-            />
+              <Input
+                aria-label="Base URL override"
+                value={draft.baseUrlOverride}
+                onChange={(event) => setDraft({ ...draft, baseUrlOverride: event.currentTarget.value })}
+                onBlur={() => void saveDraft(draft)}
+                placeholder={model.defaultBaseUrl}
+              />
             </Field>
           </div>
-          <div className="settings-row">
+          <div className="db-form-row">
             <Field label="Request model ID override">
-            <Input
-              aria-label="Request model ID override"
-              value={draft.requestModelIdOverride}
-              onChange={(event) => setDraft({ ...draft, requestModelIdOverride: event.currentTarget.value })}
-              onBlur={() => void saveDraft(draft)}
-              placeholder={model.defaultRequestModelId}
-            />
+              <Input
+                aria-label="Request model ID override"
+                value={draft.requestModelIdOverride}
+                onChange={(event) => setDraft({ ...draft, requestModelIdOverride: event.currentTarget.value })}
+                onBlur={() => void saveDraft(draft)}
+                placeholder={model.defaultRequestModelId}
+              />
             </Field>
           </div>
         </div>
       </div>
       {status.status === 'error' ? (
-        <small className="settings-error">{status.message}</small>
+        <small className="db-form-error">{status.message}</small>
       ) : null}
     </Card>
   );
@@ -393,36 +393,17 @@ function LlmProviderCard({
     <Card>
       <strong>{provider.name}</strong>
       <small>{provider.providerType} / {provider.baseUrl}</small>
-      <div className="settings-pills">
+      <div className="db-status-list">
         {!provider.enabled ? <StatusPill tone="neutral">disabled</StatusPill> : null}
         {provider.apiKeySet ? <StatusPill>key {provider.apiKeyPreview}</StatusPill> : <StatusPill tone="neutral">no key</StatusPill>}
         {provider.modelKeys.map((modelKey) => <StatusPill key={modelKey}>{modelKey}</StatusPill>)}
       </div>
-      <Toolbar ariaLabel={`${provider.name} actions`} className="settings-actions">
+      <Toolbar ariaLabel={`${provider.name} actions`} className="db-action-row">
         <Button type="button" onClick={onEdit}>Edit</Button>
         {provider.apiKeySet ? <Button type="button" variant="danger" onClick={onClearApiKey}>Clear API key</Button> : null}
         <Button type="button" variant="danger" iconStart={<Trash2 size={14} />} onClick={onDelete}>Delete</Button>
       </Toolbar>
     </Card>
-  );
-}
-
-function MediaApiKeyInput({
-  value,
-  onChange,
-  ariaLabel,
-  onBlur,
-  placeholder
-}: Pick<ApiKeyInputProps, 'value' | 'onChange' | 'ariaLabel' | 'onBlur' | 'placeholder'>): React.ReactElement {
-  return (
-    <Input
-      aria-label={ariaLabel}
-      value={value}
-      onChange={(event) => onChange(event.currentTarget.value)}
-      onBlur={onBlur}
-      placeholder={placeholder}
-      spellCheck={false}
-    />
   );
 }
 
@@ -444,9 +425,9 @@ function ApiKeyInput({
   const visibilityLabel = visible ? 'Hide API key' : 'Show API key';
   const effectivePlaceholder = value ? undefined : placeholder;
   const input = (
-    <span className="settings-key-input">
+    <span className="db-secret-field">
       <SecretInput
-        className="settings-key-control"
+        className="db-secret-field__control"
         aria-label={ariaLabel}
         masked={!visible && Boolean(value)}
         value={value}
@@ -456,7 +437,7 @@ function ApiKeyInput({
         spellCheck={false}
       />
       <IconButton
-        className="settings-key-visibility"
+        className="db-secret-field__visibility"
         label={visibilityLabel}
         size="xs"
         pressed={visible}

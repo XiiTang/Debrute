@@ -65,11 +65,11 @@ export function DebruteCliSettingsPage({
 
   if (!shell?.getDebruteCliStatus) {
     return (
-      <section className="settings-section debrute-cli-settings-page">
-        <header className="settings-section-header">
+      <section className="db-settings-section debrute-cli-settings-page">
+        <header className="db-settings-section__header">
           <h2>Debrute CLI</h2>
         </header>
-        <Card className="debrute-cli-status-card">
+        <Card className="db-model-card">
           <strong>Manual install</strong>
           <p>
             Download the matching Debrute CLI archive from{' '}
@@ -85,15 +85,15 @@ export function DebruteCliSettingsPage({
   const desktopShell = shell;
   const busy = operation.status === 'loading';
   return (
-    <section className="settings-section debrute-cli-settings-page">
-      <header className="settings-section-header">
+    <section className="db-settings-section debrute-cli-settings-page">
+      <header className="db-settings-section__header">
         <h2>Debrute CLI</h2>
       </header>
-      <Card className="debrute-cli-status-card">
+      <Card className="db-model-card">
         <strong>{statusLabel(status)}</strong>
         {status ? <DebruteCliStatusDetails status={status} /> : <small>Checking</small>}
-        {operation.status === 'error' ? <small className="settings-error">{operation.message}</small> : null}
-        <Toolbar ariaLabel="Debrute CLI actions" className="settings-actions">
+        {operation.status === 'error' ? <small className="db-form-error">{operation.message}</small> : null}
+        <Toolbar ariaLabel="Debrute CLI actions" className="db-action-row">
           {status?.kind === 'not_installed' ? (
             <Button type="button" disabled={busy || !desktopShell.installDebruteCli} iconStart={<Download size={14} />} onClick={() => void run('install', () => desktopShell.installDebruteCli!())}>
               Install Debrute CLI
@@ -140,12 +140,12 @@ function DebruteCliStatusDetails({ status }: { status: DebruteCliStatus }): Reac
   if (skills) rows.push(['Skills', skillsStatusLabel(skills)]);
   return (
     <>
-      <div className="debrute-cli-status-grid">
+      <div className="db-property-grid">
         {rows.map(([label, value]) => <small key={label}><span>{label}</span>{value}</small>)}
       </div>
-      {skills?.kind === 'error' ? <small className="settings-error">{skills.message}</small> : null}
+      {skills?.kind === 'error' ? <small className="db-form-error">{skills.message}</small> : null}
       {skills?.kind === 'partially_removed' ? (
-        <div className="settings-pills">
+        <div className="db-status-list">
           {skills.skippedDeletedSkills.map((name) => <StatusPill key={name} tone="warning">{name}</StatusPill>)}
         </div>
       ) : null}

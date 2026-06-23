@@ -1,8 +1,8 @@
 import { readFileSync } from 'node:fs';
 import { describe, expect, it } from 'vitest';
 
-const styleFiles = [
-  'apps/web/src/styles.css',
+const entryStyleFile = 'apps/web/src/styles.css';
+const uiStyleFiles = [
   'apps/web/src/workbench/ui/styles/base.css',
   'apps/web/src/workbench/ui/styles/controls.css',
   'apps/web/src/workbench/ui/styles/fields.css',
@@ -12,12 +12,49 @@ const styleFiles = [
   'apps/web/src/workbench/ui/styles/tokens.css',
   'apps/web/src/workbench/ui/styles/workbench-patterns.css'
 ];
+const featureStyleFiles = [
+  'apps/web/src/workbench/styles/shell.css',
+  'apps/web/src/workbench/styles/titlebar.css',
+  'apps/web/src/workbench/styles/project-open.css',
+  'apps/web/src/workbench/styles/explorer.css',
+  'apps/web/src/workbench/styles/canvas.css',
+  'apps/web/src/workbench/styles/inspector.css',
+  'apps/web/src/workbench/styles/settings.css',
+  'apps/web/src/workbench/styles/terminal.css',
+  'apps/web/src/workbench/styles/integrations.css'
+];
+const styleFiles = [entryStyleFile, ...uiStyleFiles, ...featureStyleFiles];
+const nonCanvasFeatureStyleFiles = featureStyleFiles.filter((file) => !file.endsWith('/canvas.css'));
 const rawColorLiteralPattern = /(?:#[0-9a-fA-F]{3,8}\b|rgb\(|oklch\()/;
 
 describe('Workbench UI source contract', () => {
+  it('keeps the Web entry stylesheet import-only', () => {
+    const imports = css(entryStyleFile).split('\n').map((line) => line.trim()).filter(Boolean);
+
+    expect(imports).toEqual([
+      '@import "./workbench/ui/styles/tokens.css";',
+      '@import "./workbench/ui/styles/base.css";',
+      '@import "./workbench/ui/styles/controls.css";',
+      '@import "./workbench/ui/styles/fields.css";',
+      '@import "./workbench/ui/styles/panels.css";',
+      '@import "./workbench/ui/styles/menus.css";',
+      '@import "./workbench/ui/styles/overlays.css";',
+      '@import "./workbench/ui/styles/workbench-patterns.css";',
+      '@import "./workbench/styles/shell.css";',
+      '@import "./workbench/styles/titlebar.css";',
+      '@import "./workbench/styles/project-open.css";',
+      '@import "./workbench/styles/explorer.css";',
+      '@import "./workbench/styles/canvas.css";',
+      '@import "./workbench/styles/inspector.css";',
+      '@import "./workbench/styles/settings.css";',
+      '@import "./workbench/styles/terminal.css";',
+      '@import "./workbench/styles/integrations.css";'
+    ]);
+  });
+
   it('keeps Workbench style variables in current namespaces', () => {
     const violations = styleFiles.flatMap((file) => (
-      readFileSync(file, 'utf8')
+      css(file)
         .split('\n')
         .map((line, index) => ({ file, line: index + 1, text: line }))
         .flatMap(({ file, line, text }) => (
@@ -31,17 +68,9 @@ describe('Workbench UI source contract', () => {
     expect(violations).toEqual([]);
   });
 
-  it('keeps settings navigation control chrome in Workbench UI patterns', () => {
-    const styles = readFileSync('apps/web/src/styles.css', 'utf8');
-
-    expect(styles).not.toMatch(/\.settings-directory\s+button\b/);
-    expect(styles).not.toMatch(/\.settings-directory\s+button\./);
-    expect(styles).not.toMatch(/\.settings-directory\s+button:/);
-  });
-
   it('uses final Workbench pattern names for repeated structures', () => {
-    const patterns = readFileSync('apps/web/src/workbench/ui/styles/workbench-patterns.css', 'utf8');
-    const settings = readFileSync('apps/web/src/workbench/settings/SettingsPanel.tsx', 'utf8');
+    const patterns = css('apps/web/src/workbench/ui/styles/workbench-patterns.css');
+    const settings = css('apps/web/src/workbench/settings/SettingsPanel.tsx');
 
     for (const pattern of [
       '.db-tree-row',
@@ -54,7 +83,23 @@ describe('Workbench UI source contract', () => {
       '.db-terminal-tabs',
       '.db-terminal-tab',
       '.db-notification-stack',
-      '.db-notification-row'
+      '.db-notification-row',
+      '.db-settings-section',
+      '.db-settings-section__header',
+      '.db-form-grid',
+      '.db-form-row',
+      '.db-action-row',
+      '.db-model-card',
+      '.db-model-card__header',
+      '.db-model-card__fields',
+      '.db-secret-field',
+      '.db-status-list',
+      '.db-project-open',
+      '.db-project-open__meta',
+      '.db-integration-list',
+      '.db-integration-row',
+      '.db-integration-row__action',
+      '.db-integration-summary'
     ]) {
       expect(patterns).toContain(pattern);
     }
@@ -63,70 +108,229 @@ describe('Workbench UI source contract', () => {
     expect(settings).toContain('className="db-nav-row__icon"');
   });
 
-  it('keeps reusable Workbench pattern chrome out of the feature stylesheet', () => {
-    const styles = readFileSync('apps/web/src/styles.css', 'utf8');
+  it('keeps reusable Workbench pattern chrome out of feature styles', () => {
     const patternPrefixes = [
       '.db-nav-row',
       '.db-diagnostic',
       '.db-terminal-tab',
       '.db-notification',
-      '.db-canvas-node'
+      '.db-canvas-node',
+      '.db-settings-section',
+      '.db-form-',
+      '.db-action-row',
+      '.db-model-card',
+      '.db-secret-field',
+      '.db-status-list',
+      '.db-project-open',
+      '.db-integration',
+      '.db-object-property-row'
     ];
-
-    const violations = cssRuleBlocks(styles)
-      .map((rule) => rule.selector)
-      .filter((selector) => selector.split(',').some((part) => (
-        patternPrefixes.some((prefix) => part.trim().startsWith(prefix))
-      )));
+    const violations = featureStyleFiles.flatMap((file) => (
+      cssRuleBlocks(css(file))
+        .map((rule) => rule.selector)
+        .filter((selector) => selector.split(',').some((part) => (
+          patternPrefixes.some((prefix) => part.trim().startsWith(prefix))
+        )))
+        .map((selector) => `${file}:${selector}`)
+    ));
 
     expect(violations).toEqual([]);
   });
 
-  it('keeps floating text editor chrome on Workbench UI primitives', () => {
-    const styles = readFileSync('apps/web/src/styles.css', 'utf8');
-    const source = readFileSync('apps/web/src/workbench/shell/FloatingTextEditorWindow.tsx', 'utf8');
+  it('removes obsolete feature-local Workbench visual classes', () => {
+    const obsoleteClasses = [
+      'settings-section',
+      'settings-section-header',
+      'settings-grid',
+      'settings-edit-form',
+      'settings-actions',
+      'settings-row',
+      'settings-error',
+      'settings-model-card',
+      'settings-model-card-header',
+      'settings-model-card-fields',
+      'settings-model-edit-grid',
+      'settings-key-input',
+      'settings-key-control',
+      'settings-key-visibility',
+      'settings-pills',
+      'integrations-list',
+      'integration-row',
+      'integration-row-action',
+      'integration-backend-summary',
+      'integration-command-preview',
+      'terminal-panel__actions',
+      'project-open-panel__actions',
+      'project-open-panel__path',
+      'project-open-panel__error',
+      'debrute-cli-status-card',
+      'debrute-cli-status-grid',
+      'general-settings-grid',
+      'general-settings-card',
+      'app-update-card',
+      'app-update-header',
+      'app-update-message',
+      'adobe-bridge-target-row'
+    ];
+    const files = [
+      ...featureStyleFiles,
+      ...uiStyleFiles,
+      'apps/web/src/workbench/adobe-bridge/SendToPhotoshopDialog.tsx',
+      'apps/web/src/workbench/settings/SettingsPanel.tsx',
+      'apps/web/src/workbench/settings/general/GeneralSettingsPage.tsx',
+      'apps/web/src/workbench/settings/debrute-cli/DebruteCliSettingsPage.tsx',
+      'apps/web/src/workbench/settings/integrations/IntegrationsSettingsPage.tsx',
+      'apps/web/src/workbench/settings/adobe-bridge/AdobeBridgeSettingsPage.tsx',
+      'apps/web/src/workbench/project-open/ProjectOpenPanel.tsx',
+      'apps/web/src/workbench/terminal/TerminalPanel.tsx'
+    ];
+    const violations = files.flatMap((file) => (
+      obsoleteClasses
+        .filter((className) => hasCssClassToken(css(file), className))
+        .map((className) => `${file}:${className}`)
+    ));
 
-    expect(source).not.toContain('<button');
-    expect(styles).not.toMatch(/\.floating-text-editor-window\s*\{/);
-    expect(styles).not.toMatch(/\.floating-text-editor-header\s+button\b/);
-    expect(styles).not.toMatch(/\.floating-text-editor-header\s+button:/);
+    expect(violations).toEqual([]);
   });
 
-  it('uses primitive ARIA pressed state for Workbench toggles', () => {
-    const controls = readFileSync('apps/web/src/workbench/ui/styles/controls.css', 'utf8');
-    const sources = [
-      'apps/web/src/workbench/shell/FloatingDock.tsx',
-      'apps/web/src/workbench/canvas/CanvasMinimapBar.tsx',
-      'apps/web/src/workbench/canvas/CanvasFeedbackBar.tsx'
-    ].map((file) => readFileSync(file, 'utf8')).join('\n');
-    const terminalPanel = readFileSync('apps/web/src/workbench/terminal/TerminalPanel.tsx', 'utf8');
+  it('keeps feature-specific selectors out of Workbench UI style modules', () => {
+    const uiStyleSources = uiStyleFiles.map((file) => ({ file, styles: css(file) }));
+    const allowedNonDbSelectors = new Set([
+      ':root',
+      '*',
+      '*::before',
+      '*::after',
+      'html',
+      'body',
+      '#root',
+      'button',
+      'input',
+      'textarea',
+      'select',
+      'small',
+      '.spin'
+    ]);
+    const violations = uiStyleSources.flatMap(({ file, styles }) => (
+      cssRuleBlocks(styles)
+        .flatMap((block) => block.selector.split(',').map((selector) => selector.trim()))
+        .filter((selector) => selector.startsWith('.'))
+        .filter((selector) => !selector.startsWith('.db-') && !allowedNonDbSelectors.has(selector))
+        .map((selector) => `${file}:${selector}`)
+    ));
 
-    expect(controls).toContain('.db-icon-button[aria-pressed="true"]');
-    expect(sources).toContain('pressed=');
-    expect(terminalPanel).toContain('active={session.id === state.activeSessionId}');
+    expect(violations).toEqual([]);
+  });
+
+  it('keeps feature styles from defining primitive chrome systems', () => {
+    const allowedSelectors = new Set([
+      '.workbench-titlebar__window-controls .db-icon-button',
+      '.workbench-titlebar__window-controls .db-icon-button:last-child:hover',
+      '.workbench-titlebar__submenu-trigger .db-menu__item-icon',
+      '.canvas-feedback-mark .db-icon-button__icon'
+    ]);
+    const primitiveFragments = [
+      '.db-button',
+      '.db-icon-button',
+      '.db-input',
+      '.db-select',
+      '.db-textarea',
+      '.db-card',
+      '.db-panel',
+      '.db-menu',
+      '.db-status-pill',
+      '.db-toolbar',
+      '.db-tab'
+    ];
+    const nativeControlPattern = /(^|[\s>+~])(button|input|textarea|select)(?=[\s.#:[,]|$)/;
+    const violations = featureStyleFiles.flatMap((file) => (
+      cssRuleBlocks(css(file))
+        .flatMap((rule) => rule.selector.split(',').map((selector) => selector.trim()))
+        .filter((selector) => !allowedSelectors.has(selector))
+        .filter((selector) => primitiveFragments.some((fragment) => selector.includes(fragment)) || nativeControlPattern.test(selector))
+        .map((selector) => `${file}:${selector}`)
+    ));
+
+    expect(violations).toEqual([]);
+  });
+
+  it('keeps raw non-Canvas chrome values out of feature styles', () => {
+    const violations = nonCanvasFeatureStyleFiles.flatMap((file) => (
+      cssRuleBlocks(css(file))
+        .flatMap((rule) => rule.lines
+          .filter(({ text }) => rawColorLiteralPattern.test(text))
+          .filter(({ text }) => !(file.endsWith('/titlebar.css') && text.includes('mask-image') && text.includes('#000')))
+          .map(({ line, text }) => `${file}:${line}:${rule.selector}:${text.trim()}`))
+    ));
+
+    expect(violations).toEqual([]);
+  });
+
+  it('keeps primitive imports at the public Workbench UI boundary', () => {
+    const sources = [
+      'apps/web/src/workbench/settings/SettingsPanel.tsx',
+      'apps/web/src/workbench/settings/general/GeneralSettingsPage.tsx',
+      'apps/web/src/workbench/settings/debrute-cli/DebruteCliSettingsPage.tsx',
+      'apps/web/src/workbench/settings/integrations/IntegrationsSettingsPage.tsx',
+      'apps/web/src/workbench/settings/adobe-bridge/AdobeBridgeSettingsPage.tsx',
+      'apps/web/src/workbench/project-open/ProjectOpenPanel.tsx',
+      'apps/web/src/workbench/project-explorer/ProjectTree.tsx',
+      'apps/web/src/workbench/shell/Inspector.tsx',
+      'apps/web/src/workbench/terminal/TerminalPanel.tsx',
+      'apps/web/src/workbench/canvas/CanvasCardBar.tsx',
+      'apps/web/src/workbench/canvas/CanvasFeedbackBar.tsx',
+      'apps/web/src/workbench/canvas/CanvasMinimapBar.tsx',
+      'apps/web/src/workbench/canvas/CanvasResetLayoutButton.tsx'
+    ];
+    const violations = sources.flatMap((file) => (
+      [...css(file).matchAll(/from ['"](?:\.\.\/)+ui\/(?!index['"])([^'"]+)['"]/g)]
+        .map((match) => `${file}:../ui/${match[1]}`)
+    ));
+
+    expect(violations).toEqual([]);
+  });
+
+  it('keeps third-party UI implementation details out of feature code', () => {
+    const sources = [
+      'apps/web/src/workbench/settings/SettingsPanel.tsx',
+      'apps/web/src/workbench/project-open/ProjectOpenPanel.tsx',
+      'apps/web/src/workbench/project-explorer/ProjectTree.tsx',
+      'apps/web/src/workbench/shell/Inspector.tsx',
+      'apps/web/src/workbench/terminal/TerminalPanel.tsx',
+      'apps/web/src/workbench/canvas/CanvasCardBar.tsx',
+      'apps/web/src/workbench/canvas/CanvasFeedbackBar.tsx',
+      'apps/web/src/workbench/canvas/CanvasMinimapBar.tsx'
+    ];
+    const disallowed = ['@radix-ui/', 'antd', '@mui/', '@chakra-ui/', '@mantine/', '@fluentui/', 'bootstrap'];
+    const violations = sources.flatMap((file) => (
+      disallowed
+        .filter((target) => css(file).includes(`from '${target}`) || css(file).includes(`from "${target}`))
+        .map((target) => `${file}:${target}`)
+    ));
+
+    expect(violations).toEqual([]);
   });
 
   it('keeps Workbench spin animation owned by the UI base stylesheet only', () => {
-    const styles = readFileSync('apps/web/src/styles.css', 'utf8');
-    const base = readFileSync('apps/web/src/workbench/ui/styles/base.css', 'utf8');
+    const featureStyles = featureCss();
+    const base = css('apps/web/src/workbench/ui/styles/base.css');
 
     expect(base).toContain('.spin');
     expect(base).toContain('@keyframes db-spin');
-    expect(styles).not.toMatch(/\.spin\s*\{/);
-    expect(styles).not.toContain('@keyframes spin');
+    expect(featureStyles).not.toMatch(/\.spin\s*\{/);
+    expect(featureStyles).not.toContain('@keyframes spin');
   });
 
   it('keeps Canvas feedback controls inside the compact floating bar geometry', () => {
-    const styles = readFileSync('apps/web/src/styles.css', 'utf8');
-    const feedbackBarRule = styles.match(/\.canvas-feedback-bar\s*\{[^}]*\}/)?.[0] ?? '';
-    const feedbackBarWithCommentsRule = styles.match(/\.canvas-feedback-bar--has-comment-row\s*\{[^}]*\}/)?.[0] ?? '';
-    const feedbackPrimaryRowRule = styles.match(/\.canvas-feedback-primary-row\s*\{[^}]*\}/)?.[0] ?? '';
-    const feedbackMarkRule = styles.match(/\.canvas-feedback-mark\s*\{[^}]*\}/)?.[0] ?? '';
-    const feedbackMarkIconRule = styles.match(/\.canvas-feedback-mark \.db-icon-button__icon\s*\{[^}]*\}/)?.[0] ?? '';
-    const feedbackNoteRule = styles.match(/\.canvas-feedback-comment-pill\s*\{[^}]*\}/)?.[0] ?? '';
-    const feedbackCommentCreatorRule = styles.match(/\.canvas-feedback-comment-creator\s*\{[^}]*\}/)?.[0] ?? '';
-    const feedbackCommentStripRule = styles.match(/\.canvas-feedback-comment-strip\s*\{[^}]*\}/)?.[0] ?? '';
-    const feedbackSource = readFileSync('apps/web/src/workbench/canvas/CanvasFeedbackBar.tsx', 'utf8');
+    const styles = css('apps/web/src/workbench/styles/canvas.css');
+    const feedbackBarRule = rule(styles, '.canvas-feedback-bar');
+    const feedbackBarWithCommentsRule = rule(styles, '.canvas-feedback-bar--has-comment-row');
+    const feedbackPrimaryRowRule = rule(styles, '.canvas-feedback-primary-row');
+    const feedbackMarkRule = rule(styles, '.canvas-feedback-mark');
+    const feedbackMarkIconRule = rule(styles, '.canvas-feedback-mark .db-icon-button__icon');
+    const feedbackNoteRule = rule(styles, '.canvas-feedback-comment-pill');
+    const feedbackCommentCreatorRule = rule(styles, '.canvas-feedback-comment-creator');
+    const feedbackCommentStripRule = rule(styles, '.canvas-feedback-comment-strip');
+    const feedbackSource = css('apps/web/src/workbench/canvas/CanvasFeedbackBar.tsx');
 
     expect(feedbackBarRule).toContain('grid-template-rows: 30px;');
     expect(feedbackBarRule).toContain('gap: 2px;');
@@ -146,47 +350,52 @@ describe('Workbench UI source contract', () => {
   });
 
   it('keeps Canvas cards and dock icons on the compact control rhythm', () => {
-    const styles = readFileSync('apps/web/src/styles.css', 'utf8');
-    const cardBarRule = styles.match(/\.canvas-card-bar\s*\{[^}]*\}/)?.[0] ?? '';
-    const cardControlRule = styles.match(/\.canvas-card,\n\.canvas-card-add,\n\.canvas-card-menu-button\s*\{[^}]*\}/)?.[0] ?? '';
-    const cardActionRule = styles.match(/\.canvas-card-menu-button,\n\.canvas-card-add\s*\{[^}]*\}/)?.[0] ?? '';
-    const dockRule = styles.match(/\.floating-dock\s*\{[^}]*\}/)?.[0] ?? '';
-    const cardBarSource = readFileSync('apps/web/src/workbench/canvas/CanvasCardBar.tsx', 'utf8');
-    const dockSource = readFileSync('apps/web/src/workbench/shell/FloatingDock.tsx', 'utf8');
+    const canvasStyles = css('apps/web/src/workbench/styles/canvas.css');
+    const shellStyles = css('apps/web/src/workbench/styles/shell.css');
+    const cardBarRule = rule(canvasStyles, '.canvas-card-bar');
+    const dockRule = rule(shellStyles, '.floating-dock');
+    const cardBarSource = css('apps/web/src/workbench/canvas/CanvasCardBar.tsx');
+    const dockSource = css('apps/web/src/workbench/shell/FloatingDock.tsx');
 
     expect(cardBarRule).toContain('height: 28px;');
     expect(cardBarRule).toContain('padding: 0;');
-    expect(cardControlRule).toContain('height: 28px;');
-    expect(cardControlRule).not.toContain('min-height: 28px;');
-    expect(cardControlRule).toContain('border: 0;');
-    expect(cardActionRule).toContain('width: 28px;');
     expect(dockRule).toContain('top: calc(32px + 13px);');
     expect(dockRule).toContain('width: 28px;');
     expect(dockRule).toContain('padding: 0;');
-    expect(styles).not.toContain('.floating-dock .db-icon-button');
+    expect(shellStyles).not.toContain('.floating-dock .db-icon-button');
+    expect(cardBarSource).toContain('db-floating-bar canvas-card-bar');
     expect(cardBarSource).toContain('size="sm"');
-    expect(cardBarSource).not.toContain('db-floating-bar');
     expect(dockSource).toContain('size={14}');
     expect(dockSource).not.toContain('size={18}');
     expect(dockSource).not.toContain('db-floating-bar');
   });
 
-  it('keeps lower-left Canvas controls borderless', () => {
-    const styles = readFileSync('apps/web/src/styles.css', 'utf8');
-    const minimapRule = styles.match(/\.canvas-minimap-bar\s*\{[^}]*\}/)?.[0] ?? '';
-    const resetRule = styles.match(/\.canvas-reset-layout-button\s*\{[^}]*\}/)?.[0] ?? '';
-    const minimapSource = readFileSync('apps/web/src/workbench/canvas/CanvasMinimapBar.tsx', 'utf8');
-    const resetSource = readFileSync('apps/web/src/workbench/canvas/CanvasResetLayoutButton.tsx', 'utf8');
+  it('keeps lower-left Canvas controls borderless and pattern-owned', () => {
+    const styles = css('apps/web/src/workbench/styles/canvas.css');
+    const patterns = css('apps/web/src/workbench/ui/styles/workbench-patterns.css');
+    const minimapRule = rule(styles, '.canvas-minimap-bar');
+    const resetRule = rule(styles, '.canvas-reset-layout-button');
+    const minimapSource = css('apps/web/src/workbench/canvas/CanvasMinimapBar.tsx');
+    const resetSource = css('apps/web/src/workbench/canvas/CanvasResetLayoutButton.tsx');
 
-    expect(minimapRule).toContain('border: 0;');
-    expect(styles).toContain('.canvas-minimap-bar[aria-pressed="true"] {\n  outline: 0;\n}');
-    expect(resetRule).toContain('border: 0;');
-    expect(minimapSource).not.toContain('db-floating-bar canvas-minimap-bar');
-    expect(resetSource).not.toContain('db-floating-bar canvas-reset-layout-button');
+    expect(minimapRule).not.toContain('border: 0;');
+    expect(minimapRule).not.toContain('color:');
+    expect(resetRule).not.toContain('border: 0;');
+    expect(resetRule).not.toContain('color:');
+    expect(styles).not.toContain('.canvas-minimap-bar:hover');
+    expect(styles).not.toContain('.canvas-minimap-bar[aria-pressed="true"]');
+    expect(styles).not.toContain('.canvas-minimap-bar:disabled');
+    expect(styles).not.toContain('.canvas-reset-layout-button:hover');
+    expect(styles).not.toContain('.canvas-reset-layout-button:disabled');
+    expect(patterns).toContain('.db-canvas-control:hover:not(:disabled)');
+    expect(patterns).toContain('.db-canvas-control[aria-pressed="true"]');
+    expect(patterns).toContain('.db-canvas-control:disabled');
+    expect(minimapSource).toContain('db-floating-bar canvas-minimap-bar');
+    expect(resetSource).toContain('db-floating-bar canvas-reset-layout-button');
   });
 
   it('styles invalid state for every Workbench field control', () => {
-    const fields = readFileSync('apps/web/src/workbench/ui/styles/fields.css', 'utf8');
+    const fields = css('apps/web/src/workbench/ui/styles/fields.css');
 
     for (const selector of [
       '.db-input[aria-invalid="true"]',
@@ -201,7 +410,7 @@ describe('Workbench UI source contract', () => {
   });
 
   it('defines the final visual token families used by Workbench chrome', () => {
-    const tokens = readFileSync('apps/web/src/workbench/ui/styles/tokens.css', 'utf8');
+    const tokens = css('apps/web/src/workbench/ui/styles/tokens.css');
 
     for (const token of [
       '--db-bg',
@@ -233,8 +442,8 @@ describe('Workbench UI source contract', () => {
   });
 
   it('keeps the final neutral Workbench background and white foreground contract', () => {
-    const tokens = readFileSync('apps/web/src/workbench/ui/styles/tokens.css', 'utf8');
-    const controls = readFileSync('apps/web/src/workbench/ui/styles/controls.css', 'utf8');
+    const tokens = css('apps/web/src/workbench/ui/styles/tokens.css');
+    const controls = css('apps/web/src/workbench/ui/styles/controls.css');
 
     for (const declaration of [
       '--db-bg: #181818;',
@@ -249,13 +458,13 @@ describe('Workbench UI source contract', () => {
 
     expect(tokens).toContain('--db-canvas-grid: color-mix(in srgb, #ffffff 8%, transparent);');
     expect(tokens).not.toMatch(/--db-canvas-bg:\s*oklch\(0\.9/);
-    expect(controlRule(controls, '.db-button--ghost')).toContain('color: var(--db-text);');
-    expect(controlRule(controls, '.db-icon-button--ghost')).toContain('color: var(--db-text);');
+    expect(rule(controls, '.db-button--ghost')).toContain('color: var(--db-text);');
+    expect(rule(controls, '.db-icon-button--ghost')).toContain('color: var(--db-text);');
   });
 
   it('does not keep success as a text-buffer status tone after saved state stops rendering', () => {
-    const floatingTextEditorStatus = readFileSync('apps/web/src/workbench/services/textEditorWindows.ts', 'utf8');
-    const canvasTextNodeStatus = readFileSync('apps/web/src/workbench/canvas/CanvasNodeContent.tsx', 'utf8');
+    const floatingTextEditorStatus = css('apps/web/src/workbench/services/textEditorWindows.ts');
+    const canvasTextNodeStatus = css('apps/web/src/workbench/canvas/CanvasNodeContent.tsx');
 
     expect(floatingTextEditorStatus).not.toMatch(/TextBufferStatusTone\s*=\s*[^;]*'success'/);
     expect(functionBlock(floatingTextEditorStatus, 'textBufferStatus')).not.toContain("'success'");
@@ -263,30 +472,19 @@ describe('Workbench UI source contract', () => {
   });
 
   it('keeps Settings headers structural instead of copy-bearing chrome', () => {
-    const settings = readFileSync('apps/web/src/workbench/settings/SettingsPanel.tsx', 'utf8');
-    const styles = readFileSync('apps/web/src/styles.css', 'utf8');
+    const settings = css('apps/web/src/workbench/settings/SettingsPanel.tsx');
+    const patterns = css('apps/web/src/workbench/ui/styles/workbench-patterns.css');
     const sectionHeader = functionBlock(settings, 'SettingsSectionHeader');
 
-    expect(sectionHeader).toContain('<header className="settings-section-header">');
+    expect(sectionHeader).toContain('<header className="db-settings-section__header">');
     expect(sectionHeader).toContain('<h2>{title}</h2>');
     expect(sectionHeader).not.toContain('<p');
     expect(sectionHeader).not.toContain('<span');
-    expect(styles).not.toMatch(/\.settings-section-header\s+(?:span|p)\b/);
-  });
-
-  it('does not keep raw color or shadow literals in non-Canvas feature CSS rules', () => {
-    const styles = readFileSync('apps/web/src/styles.css', 'utf8');
-    const violations = cssRuleBlocks(styles)
-      .filter((rule) => !rule.selector.includes('.canvas-'))
-      .flatMap((rule) => rule.lines
-        .filter(({ text }) => rawColorLiteralPattern.test(text))
-        .map(({ line, text }) => `${line}:${rule.selector}:${text.trim()}`));
-
-    expect(violations).toEqual([]);
+    expect(patterns).not.toMatch(/\.db-settings-section__header\s+(?:span|p)\b/);
   });
 
   it('keeps Canvas node feature CSS scoped to geometry and media rendering', () => {
-    const styles = readFileSync('apps/web/src/styles.css', 'utf8');
+    const styles = css('apps/web/src/workbench/styles/canvas.css');
     const featureOwnedPrefixes = [
       '.canvas-node-element',
       '.canvas-node-presentation',
@@ -296,18 +494,20 @@ describe('Workbench UI source contract', () => {
       '.canvas-text-node',
       '.canvas-text-body',
       '.canvas-text-message',
-      '.canvas-monaco-editor'
+      '.canvas-monaco-editor',
+      '.canvas-image-feedback',
+      '.canvas-feedback'
     ];
     const violations = cssRuleBlocks(styles)
-      .flatMap((rule) => rule.selector.split(',').map((selector) => selector.trim()))
-      .filter((selector) => selector.includes('canvas-node') || selector.includes('canvas-text'))
+      .flatMap((ruleBlock) => ruleBlock.selector.split(',').map((selector) => selector.trim()))
+      .filter((selector) => selector.includes('canvas-node') || selector.includes('canvas-text') || selector.includes('canvas-feedback'))
       .filter((selector) => !featureOwnedPrefixes.some((prefix) => selector.startsWith(prefix)));
 
     expect(violations).toEqual([]);
   });
 
   it('keeps Canvas generic node labels single-line and ellipsized', () => {
-    const patterns = readFileSync('apps/web/src/workbench/ui/styles/workbench-patterns.css', 'utf8');
+    const patterns = css('apps/web/src/workbench/ui/styles/workbench-patterns.css');
     const labelRule = patterns.match(/\.db-canvas-node-generic strong,\n\.db-canvas-node-generic span\s*\{[^}]*\}/)?.[0] ?? '';
 
     expect(labelRule).toContain('overflow: hidden;');
@@ -316,62 +516,24 @@ describe('Workbench UI source contract', () => {
   });
 
   it('owns Canvas node chrome through db-canvas-node pattern selectors', () => {
-    const patterns = readFileSync('apps/web/src/workbench/ui/styles/workbench-patterns.css', 'utf8');
+    const patterns = css('apps/web/src/workbench/ui/styles/workbench-patterns.css');
     const violations = cssRuleBlocks(patterns)
-      .flatMap((rule) => rule.selector.split(',').map((selector) => selector.trim()))
+      .flatMap((ruleBlock) => ruleBlock.selector.split(',').map((selector) => selector.trim()))
       .filter((selector) => selector.includes('canvas-node') && !selector.startsWith('.db-canvas-node-'));
 
     expect(violations).toEqual([]);
   });
 
-  it('keeps Canvas chrome shadows tokenized and scoped to Workbench stat classes', () => {
-    const styles = readFileSync('apps/web/src/styles.css', 'utf8');
-    const canvasChromeSelectors = new Set([
-      '.canvas-card-bar',
-      '.canvas-minimap-bar',
-      '.canvas-minimap-panel',
-      '.canvas-empty-state'
-    ]);
-    const violations = cssRuleBlocks(styles)
-      .filter((rule) => canvasChromeSelectors.has(rule.selector))
-      .flatMap((rule) => rule.lines
-        .filter(({ text }) => text.trim().startsWith('box-shadow:') && !text.trim().startsWith('box-shadow: var(--db-'))
-        .map(({ line, text }) => `${line}:${rule.selector}:${text.trim()}`));
-
-    expect(violations).toEqual([]);
-  });
-
   it('keeps notifications on shared primitives and Workbench patterns', () => {
-    const notificationStack = readFileSync('apps/web/src/workbench/shell/NotificationStack.tsx', 'utf8');
+    const notificationStack = css('apps/web/src/workbench/shell/NotificationStack.tsx');
 
     expect(notificationStack).toContain('className="db-notification-stack"');
     expect(notificationStack).toContain('className="db-notification-row"');
     expect(notificationStack).toContain('<Card');
   });
 
-  it('keeps feature CSS from defining local Workbench control systems', () => {
-    const styles = readFileSync('apps/web/src/styles.css', 'utf8');
-    const localControlSelectors = [
-      '.terminal-panel__actions .db-icon-button',
-      '.db-canvas-node-titlebar .db-icon-button',
-      '.floating-text-editor-header .db-icon-button',
-      '.settings-section .db-card strong',
-      '.settings-section .db-card small',
-      '.settings-model-edit-grid .db-input',
-      '.settings-key-input .db-input',
-      '.settings-key-visibility.db-icon-button',
-      '.canvas-card-rename-form .db-input',
-      '.canvas-card-rename-form .db-menu__item',
-      '.floating-dock .db-icon-button'
-    ];
-
-    for (const selector of localControlSelectors) {
-      expect(styles).not.toContain(selector);
-    }
-  });
-
   it('styles the Workbench title bar as drag chrome and not a card', () => {
-    const styles = readFileSync('apps/web/src/styles.css', 'utf8');
+    const styles = css('apps/web/src/workbench/styles/titlebar.css');
 
     expect(styles).toContain('.workbench-titlebar');
     expect(styles).toContain('-webkit-app-region: drag');
@@ -380,6 +542,14 @@ describe('Workbench UI source contract', () => {
     expect(styles).not.toContain('.workbench-titlebar .db-card');
   });
 });
+
+function css(file: string): string {
+  return readFileSync(file, 'utf8');
+}
+
+function featureCss(): string {
+  return featureStyleFiles.map((file) => css(file)).join('\n');
+}
 
 function cssRuleBlocks(styles: string): Array<{
   selector: string;
@@ -410,8 +580,16 @@ function cssRuleBlocks(styles: string): Array<{
   return rules;
 }
 
-function controlRule(styles: string, selector: string): string {
-  return cssRuleBlocks(styles).find((rule) => rule.selector === selector)?.lines.map(({ text }) => text.trim()).join('\n') ?? '';
+function rule(styles: string, selector: string): string {
+  return cssRuleBlocks(styles).find((block) => block.selector === selector)?.lines.map(({ text }) => text.trim()).join('\n') ?? '';
+}
+
+function hasCssClassToken(source: string, className: string): boolean {
+  return new RegExp(`(^|[^\\w-])${escapeRegExp(className)}($|[^\\w-])`).test(source);
+}
+
+function escapeRegExp(value: string): string {
+  return value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 }
 
 function functionBlock(source: string, name: string): string {

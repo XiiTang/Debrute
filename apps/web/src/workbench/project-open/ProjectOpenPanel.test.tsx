@@ -31,6 +31,10 @@ describe('ProjectOpenPanel', () => {
     expect(html).toContain('Open project failed: projectRoot must resolve to a directory.');
     expect(html).toContain('/missing/project');
     expect(html).toContain('Open Project');
+    expect(html).toContain('db-project-open');
+    expect(html).toContain('db-empty-state');
+    expect(html).toContain('db-action-row');
+    expect(html).toContain('db-button--primary');
     expect(html).toContain('disabled=""');
     expect(html).not.toContain('<input');
   });

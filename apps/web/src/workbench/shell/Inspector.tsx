@@ -283,7 +283,7 @@ function MatchedGeneratedAssetMetadataView({
       {lookup.records.length > 1 ? (
         <label className="asset-ai-metadata-picker">
           <span>Record</span>
-          <Select value={selectedIndex} onChange={(event) => setSelectedIndex(Number(event.currentTarget.value))}>
+          <Select className="asset-ai-metadata-select" value={selectedIndex} onChange={(event) => setSelectedIndex(Number(event.currentTarget.value))}>
             {lookup.records.map((item, index) => (
               <option key={item.recordId} value={index}>{`${index + 1}. ${item.createdAt}`}</option>
             ))}

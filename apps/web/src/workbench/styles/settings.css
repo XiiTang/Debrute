@@ -1,0 +1,44 @@
+.settings-panel {
+  height: 100%;
+  min-height: 0;
+  overflow: hidden;
+  padding: 14px;
+  display: grid;
+  grid-template-columns: 192px minmax(0, 1fr);
+  gap: 14px;
+  align-content: stretch;
+  background:
+    linear-gradient(180deg, color-mix(in oklch, var(--db-surface-1) 80%, transparent), transparent 220px),
+    var(--db-bg);
+}
+
+.settings-directory {
+  min-height: 0;
+  display: grid;
+  grid-template-rows: auto;
+  align-content: start;
+  gap: var(--db-space-2);
+  padding: var(--db-space-3);
+  overflow: auto;
+}
+
+.settings-page {
+  min-width: 0;
+  min-height: 0;
+  overflow: auto;
+  display: grid;
+  gap: 16px;
+  align-content: start;
+  padding: 2px 4px 10px 0;
+}
+
+.general-settings-page,
+.debrute-cli-settings-page {
+  gap: 14px;
+}
+
+.debrute-cli-settings-page pre {
+  margin: 0;
+  max-width: 100%;
+  overflow: auto;
+}

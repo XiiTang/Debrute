@@ -1,0 +1,141 @@
+.inspector {
+  min-height: 0;
+  height: 100%;
+  overflow: auto;
+  background: var(--db-surface-1);
+}
+
+.inspector-title {
+  height: 38px;
+  padding: 0 12px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  border-bottom: 1px solid var(--db-border);
+  color: var(--db-text-muted);
+  font-size: 12px;
+  font-weight: 700;
+  text-transform: uppercase;
+}
+
+.inspector-section {
+  padding: 14px;
+  border-bottom: 1px solid var(--db-border);
+}
+
+.inspector-section h2,
+.inspector-section h3 {
+  margin: 0 0 12px;
+  font-size: 15px;
+}
+
+.inspector-node-controls {
+  display: flex;
+  gap: 8px;
+}
+
+.asset-ai-metadata summary {
+  cursor: pointer;
+  color: var(--db-text);
+  font-size: 15px;
+  font-weight: 700;
+}
+
+.asset-ai-metadata[open] summary {
+  margin-bottom: 12px;
+}
+
+.asset-ai-metadata-content {
+  display: grid;
+  gap: 12px;
+}
+
+.asset-ai-metadata-picker {
+  display: grid;
+  gap: 6px;
+  color: var(--db-text-muted);
+  font-size: 12px;
+}
+
+.asset-ai-metadata-select {
+  width: 100%;
+}
+
+.asset-ai-metadata-message {
+  color: var(--db-text-muted);
+  font-size: 12px;
+  overflow-wrap: anywhere;
+}
+
+.asset-ai-metadata-message.error {
+  color: var(--db-danger);
+}
+
+.asset-ai-metadata-json {
+  display: grid;
+  gap: 6px;
+}
+
+.asset-ai-metadata-json h4 {
+  margin: 0;
+  color: var(--db-text-muted);
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.asset-ai-metadata-diagnostics {
+  display: grid;
+  gap: 6px;
+}
+
+.asset-ai-metadata-diagnostics h4 {
+  margin: 0;
+  color: var(--db-text-muted);
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.asset-ai-metadata-diagnostics ul {
+  display: grid;
+  gap: 6px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.asset-ai-metadata-diagnostics li {
+  display: grid;
+  gap: 3px;
+  color: var(--db-text-muted);
+  font-size: 12px;
+  overflow-wrap: anywhere;
+}
+
+.asset-ai-metadata-diagnostics strong {
+  color: var(--db-danger);
+}
+
+.asset-ai-metadata-json pre {
+  max-height: 220px;
+  margin: 0;
+  padding: 9px;
+  overflow: auto;
+  border: 1px solid var(--db-border);
+  border-radius: 5px;
+  background: color-mix(in oklch, var(--db-bg) 82%, black);
+  color: var(--db-text);
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", monospace;
+  font-size: 11px;
+  line-height: 1.45;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+.inspector-empty {
+  display: flex;
+  gap: 10px;
+  padding: 14px;
+  color: var(--db-text-muted);
+  font-size: 13px;
+  border-bottom: 1px solid var(--db-border);
+}

@@ -22,28 +22,28 @@ export function SendToPhotoshopDialog({
   return (
     <div className="db-modal-backdrop" role="presentation">
       <section className="db-modal" role="dialog" aria-modal="true" aria-label="Send to Photoshop">
-        <header className="settings-section-header">
+        <header className="db-settings-section__header">
           <h2>Send to Photoshop</h2>
-          <Toolbar ariaLabel="Dialog actions" className="settings-actions">
+          <Toolbar ariaLabel="Dialog actions" className="db-action-row">
             <Button type="button" iconStart={<X size={14} />} onClick={onClose}>Close</Button>
           </Toolbar>
         </header>
         <small>{projectRelativePath}</small>
-        <div className="integrations-list">
+        <div className="db-integration-list">
           {linkedClients.map((client) => {
             const disabled = sending || client.activeDocumentTitle === null;
             return (
               <button
                 key={client.adobeClientId}
                 type="button"
-                className="integration-row adobe-bridge-target-row"
+                className="db-integration-row"
                 disabled={disabled}
                 onClick={() => onSend(client.adobeClientId)}
               >
                 <span>{client.displayName}</span>
                 {client.activeDocumentTitle ? <StatusPill tone="success">Ready</StatusPill> : null}
                 <small>{sending ? 'Sending' : ''}</small>
-                <span className="integration-row-action"><Send size={14} /></span>
+                <span className="db-integration-row__action"><Send size={14} /></span>
               </button>
             );
           })}

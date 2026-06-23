@@ -1,0 +1,5 @@
+.integrations-settings-page,
+.adobe-bridge-settings-page {
+  min-width: 0;
+  gap: 14px;
+}

@@ -1,0 +1,6 @@
+.project-open-panel {
+  width: min(520px, calc(100vw - 48px));
+  display: grid;
+  justify-items: center;
+  gap: var(--db-space-3);
+}
