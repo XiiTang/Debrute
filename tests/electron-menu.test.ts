@@ -5,6 +5,7 @@ import { describe, expect, it, vi } from 'vitest';
 import { buildWorkbenchTitleBarState } from '@debrute/app-protocol';
 import { openProjectFromPickerThroughDaemon, openProjectThroughDaemon, projectWebShellUrl } from '../apps/desktop/src/electron/daemonProjectOpen';
 import { buildApplicationMenuTemplate } from '../apps/desktop/src/electron/menu/applicationMenu';
+import { createApplicationMenuController } from '../apps/desktop/src/electron/menu/registerApplicationMenu';
 
 describe('desktop application menu', () => {
   it('puts project actions under a top-level File menu', () => {
@@ -124,6 +125,29 @@ describe('desktop application menu', () => {
         expect(item.click).toBeUndefined();
       }
     }
+  });
+
+  it('does not synthesize enabled native menus when runtime title-bar state is unavailable', async () => {
+    const templates: MenuItemConstructorOptions[][] = [];
+    const setApplicationMenu = vi.fn();
+    const controller = createApplicationMenuController({
+      platform: 'darwin',
+      menu: {
+        buildFromTemplate: (template) => {
+          templates.push(template);
+          return {} as Electron.Menu;
+        },
+        setApplicationMenu
+      },
+      readTitleBarState: async () => undefined,
+      onCommand: vi.fn()
+    });
+
+    await controller.refreshApplicationMenu();
+
+    expect(templates).toHaveLength(1);
+    expect(templates[0]?.map((item) => item.label)).toEqual(['Debrute']);
+    expect(setApplicationMenu).toHaveBeenCalledTimes(1);
   });
 
   it('opens menu-selected projects through the daemon route', async () => {

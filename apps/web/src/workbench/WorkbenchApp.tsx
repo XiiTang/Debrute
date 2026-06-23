@@ -8,7 +8,7 @@ import type {
   WorkbenchProjectSessionSnapshot,
   WorkbenchTitleBarState
 } from '@debrute/app-protocol';
-import { buildWorkbenchTitleBarState } from '@debrute/app-protocol';
+import { unavailableWorkbenchTitleBarState } from '@debrute/app-protocol';
 import type { ProjectedCanvasNode } from '@debrute/canvas-core';
 import { createWorkbenchApiClient } from './api/workbenchApiClient';
 import { getDebruteShellApi } from '../api/shellApi';
@@ -144,7 +144,7 @@ export function WorkbenchApp(): React.ReactElement {
   const [fileClipboard, setFileClipboard] = useState<WorkbenchFileClipboard>();
   const [titleBarState, setTitleBarState] = useState<WorkbenchTitleBarState>();
   const [nativeWindowState, setNativeWindowState] = useState({ maximized: false });
-  const [desktopPlatform, setDesktopPlatform] = useState<NodeJS.Platform>('linux');
+  const [desktopPlatform, setDesktopPlatform] = useState<NodeJS.Platform>();
   const [inlineProjectTreeEdit, setInlineProjectTreeEdit] = useState<ProjectTreeInlineEditState>();
   const [notifications, setNotifications] = useState<string[]>([]);
   const [isLoading, setIsLoading] = useState(true);
@@ -160,13 +160,18 @@ export function WorkbenchApp(): React.ReactElement {
 
   const refreshTitleBarState = useCallback(async (projectId = daemonProjectId) => {
     const shell = getDebruteShellApi();
-    const state = shell?.getWorkbenchTitleBarState
-      ? await shell.getWorkbenchTitleBarState({ ...(projectId ? { projectId } : {}) })
-      : await api.getWorkbenchTitleBarState({
-          host: 'web',
-          ...(projectId ? { projectId } : {})
-        });
-    setTitleBarState(state);
+    try {
+      const state = shell?.getWorkbenchTitleBarState
+        ? await shell.getWorkbenchTitleBarState({ ...(projectId ? { projectId } : {}) })
+        : await api.getWorkbenchTitleBarState({
+            host: 'web',
+            ...(projectId ? { projectId } : {})
+          });
+      setTitleBarState(state);
+    } catch (error) {
+      setTitleBarState(unavailableWorkbenchTitleBarState());
+      setNotifications((current) => [`Title bar state failed: ${errorMessage(error)}`, ...current].slice(0, 4));
+    }
   }, [daemonProjectId]);
 
   const chooseActiveCanvasForProject = useCallback((input: {
@@ -308,16 +313,8 @@ export function WorkbenchApp(): React.ReactElement {
   }, [applyOpenedProject]);
 
   useEffect(() => {
-    void refreshTitleBarState().catch((error) => {
-      setTitleBarState(buildWorkbenchTitleBarState({
-        platform: desktopPlatform,
-        host: getDebruteShellApi()?.getWorkbenchTitleBarState ? 'desktop' : 'web',
-        projectTitle: snapshot?.metadata.project.name,
-        recentProjectRoots: []
-      }));
-      setNotifications((current) => [`Title bar state failed: ${errorMessage(error)}`, ...current].slice(0, 4));
-    });
-  }, [desktopPlatform, refreshTitleBarState, snapshot?.metadata.project.name]);
+    void refreshTitleBarState();
+  }, [refreshTitleBarState]);
 
   useEffect(() => {
     const shell = getDebruteShellApi();
@@ -583,12 +580,7 @@ export function WorkbenchApp(): React.ReactElement {
   const locateProjectFileInCanvas = useCallback((projectRelativePath: string) => {
     centerCanvasProjectionNode(activeProjection, projectRelativePath);
   }, [activeProjection, centerCanvasProjectionNode]);
-  const effectiveTitleBarState = titleBarState ?? buildWorkbenchTitleBarState({
-    platform: desktopPlatform,
-    host: getDebruteShellApi()?.getWorkbenchTitleBarState ? 'desktop' : 'web',
-    projectTitle: snapshot?.metadata.project.name,
-    recentProjectRoots: []
-  });
+  const effectiveTitleBarState = titleBarState ?? unavailableWorkbenchTitleBarState();
 
   const state: WorkbenchState = {
     snapshot,

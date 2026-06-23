@@ -1,5 +1,5 @@
 import type { BrowserWindow, Menu, MenuItemConstructorOptions } from 'electron';
-import { buildWorkbenchTitleBarState, type WorkbenchTitleBarState } from '@debrute/app-protocol';
+import { unavailableWorkbenchTitleBarState, type WorkbenchTitleBarState } from '@debrute/app-protocol';
 import type { ApplicationMenuCommand } from './applicationMenu.js';
 import { buildApplicationMenuTemplate } from './applicationMenu.js';
 
@@ -26,11 +26,7 @@ export function createApplicationMenuController(input: CreateApplicationMenuCont
         input.menu.setApplicationMenu(null);
         return;
       }
-      const state = await input.readTitleBarState() ?? buildWorkbenchTitleBarState({
-        platform: 'darwin',
-        host: 'desktop',
-        recentProjectRoots: []
-      });
+      const state = await input.readTitleBarState() ?? unavailableWorkbenchTitleBarState();
       input.menu.setApplicationMenu(input.menu.buildFromTemplate(buildApplicationMenuTemplate({
         state,
         onCommand: input.onCommand

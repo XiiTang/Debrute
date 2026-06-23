@@ -1,3 +1,5 @@
+import { readFileSync } from 'node:fs';
+import { join } from 'node:path';
 import { describe, expect, expectTypeOf, it } from 'vitest';
 import type { WorkbenchState } from '../types';
 import type { CanvasFeedbackBarTarget, CanvasLocalFeedbackDraft } from './shell/floatingBars';
@@ -69,6 +71,26 @@ describe('WorkbenchApp title bar contracts', () => {
     type HasTitleBarState = WorkbenchState extends { titleBarState: unknown } ? true : false;
     const check: HasTitleBarState = true;
     expect(check).toBe(true);
+  });
+
+  it('does not locally rebuild enabled title-bar menus when runtime state is unavailable', () => {
+    const source = readFileSync(join(process.cwd(), 'apps/web/src/workbench/WorkbenchApp.tsx'), 'utf8');
+
+    expect(source).not.toContain("useState<NodeJS.Platform>('linux')");
+    expect(source).not.toContain('titleBarState ?? buildWorkbenchTitleBarState');
+    expect(source).not.toContain('setTitleBarState(buildWorkbenchTitleBarState');
+  });
+
+  it('keeps title-bar request failures inside title-bar refresh', () => {
+    const source = readFileSync(join(process.cwd(), 'apps/web/src/workbench/WorkbenchApp.tsx'), 'utf8');
+    const refreshBody = source.slice(
+      source.indexOf('const refreshTitleBarState = useCallback'),
+      source.indexOf('const chooseActiveCanvasForProject')
+    );
+
+    expect(refreshBody).toContain('setTitleBarState(unavailableWorkbenchTitleBarState())');
+    expect(refreshBody).toContain('Title bar state failed');
+    expect(source).not.toContain('void refreshTitleBarState().catch');
   });
 });
 

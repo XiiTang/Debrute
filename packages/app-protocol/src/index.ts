@@ -20,6 +20,8 @@ export {
   buildWorkbenchTitleBarState,
   menuLabels,
   titleBarPresentationForPlatform,
+  unavailableWorkbenchTitleBarState,
+  type WorkbenchChromePlatform,
   type WorkbenchHostKind,
   type WorkbenchMenu,
   type WorkbenchMenuCommandId,

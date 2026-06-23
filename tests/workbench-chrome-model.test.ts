@@ -61,6 +61,7 @@ describe('Workbench chrome protocol', () => {
       showWindowControls: false,
       trafficLightSpacer: false
     });
+    expect(menuLabels(state.menus)).toEqual(['File', 'Edit']);
     expect(commandIds(state)).not.toContain('window.close');
     expect(commandIds(state)).not.toContain('edit.paste-and-match-style');
     expect(commandIds(state)).not.toContain('edit.start-speaking');

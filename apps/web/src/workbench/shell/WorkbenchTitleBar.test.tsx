@@ -83,4 +83,13 @@ describe('WorkbenchTitleBar', () => {
     expect(source).not.toContain('role="group"');
     expect(source).not.toContain('<Menu.Item disabled>{item.label}</Menu.Item>');
   });
+
+  it('fades the title-bar material before the bottom edge', () => {
+    const source = readFileSync('apps/web/src/styles.css', 'utf8');
+
+    expect(source).toContain('.workbench-titlebar::before');
+    expect(source).toContain('transparent 86%');
+    expect(source).toContain('transparent 100%');
+    expect(source).not.toContain('inset 0 -1px 0');
+  });
 });
