@@ -6,7 +6,7 @@ import {
   Save,
   X
 } from 'lucide-react';
-import { CanvasMonacoEditor } from '../canvas/CanvasMonacoEditor';
+import { CanvasTextEditor } from '../canvas/CanvasTextEditor';
 import type { FloatingTextEditorWindowState, TextFileBuffer, WorkbenchActions } from '../../types';
 import {
   textEditorWindowIdentity,
@@ -94,7 +94,7 @@ export function FloatingTextEditorWindow({
             <span>{buffer.error}</span>
           </div>
         ) : buffer ? (
-          <CanvasMonacoEditor
+          <CanvasTextEditor
             value={buffer.content}
             language={buffer.language}
             wordWrap={buffer.wordWrap}

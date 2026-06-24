@@ -494,7 +494,7 @@ describe('Workbench UI source contract', () => {
       '.canvas-text-node',
       '.canvas-text-body',
       '.canvas-text-message',
-      '.canvas-monaco-editor',
+      '.canvas-text-editor',
       '.canvas-image-feedback',
       '.canvas-feedback'
     ];

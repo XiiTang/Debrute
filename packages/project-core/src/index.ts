@@ -13,7 +13,8 @@ import {
 } from './projectPaths.js';
 import {
   projectTextLanguageFromPath,
-  projectTextMimeTypeFromPath
+  projectTextMimeTypeFromPath,
+  type ProjectTextLanguageId
 } from './projectTextFileTypes.js';
 
 export const DEBRUTE_PROJECT_SCHEMA_VERSION = 1;
@@ -55,7 +56,7 @@ export interface ProjectTextFile {
   size: number;
   mtimeMs: number;
   revision: string;
-  language: string;
+  language: ProjectTextLanguageId;
   mimeType: string;
 }
 
@@ -282,7 +283,6 @@ export {
 
 export {
   isKnownProjectTextFilePath,
-  monacoLanguageFromProjectTextLanguage,
   projectTextFileTypeForPath,
   projectTextLanguageFromPath,
   projectTextMimeTypeFromPath,

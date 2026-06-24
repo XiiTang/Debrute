@@ -132,14 +132,14 @@ describe('CanvasNodeContent text chrome', () => {
     expect(html).toContain('<span>archive</span>');
   });
 
-  it('renders text node titlebar actions through Workbench UI primitives', () => {
+  it('renders text node titlebar actions and CodeMirror editor markers', () => {
     const html = renderToStaticMarkup(
       <CanvasNodeContent
         node={textNode('flow/readme.md', 'rev-a')}
         selected
         culled={false}
         actions={actionsFixture()}
-        textBuffer={undefined}
+        textBuffer={textBuffer('flow/readme.md', 'rev-a')}
         onSelectNode={() => undefined}
         onTitlePointerDown={() => undefined}
         onTitlePointerMove={() => undefined}
@@ -152,6 +152,7 @@ describe('CanvasNodeContent text chrome', () => {
     expect(html).not.toContain('data-canvas-local-wheel="true"');
     expect(html).toContain('db-icon-button');
     expect(html).toContain('Open large editor');
+    expect(html).toContain('data-editor-engine="codemirror"');
   });
 
   it('renders media captions through the shared Canvas node caption pattern', () => {

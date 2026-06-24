@@ -524,10 +524,23 @@
   background: var(--db-danger-bg);
 }
 
-.canvas-monaco-editor {
+.canvas-text-editor {
   width: 100%;
   height: 100%;
+  overflow: hidden;
   overscroll-behavior: contain;
+}
+
+.canvas-text-editor .cm-editor,
+.canvas-text-editor .cm-scroller {
+  height: 100%;
+}
+
+.canvas-text-editor .cm-search {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px;
 }
 
 .canvas-text-message {

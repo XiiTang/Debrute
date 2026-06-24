@@ -2,7 +2,7 @@ import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { AlertTriangle, File, FileText, Folder, Image as ImageIcon, Maximize2, Music2, RefreshCw, Save, Video } from 'lucide-react';
 import type { CanvasFeedbackEntry, CanvasFeedbackGeometry, ProjectedCanvasNode } from '@debrute/canvas-core';
 import type { TextFileBuffer, WorkbenchActions } from '../../types';
-import { CanvasMonacoEditor } from './CanvasMonacoEditor';
+import { CanvasTextEditor } from './CanvasTextEditor';
 import { useCanvasImageNodeAsset, type CanvasImageNodeAssetHookState } from './CanvasImageNodeAssetContext';
 import { CanvasImageFeedbackLayer, type CanvasImageFeedbackDraftRegion, type CanvasImageFeedbackMode } from './CanvasImageFeedbackLayer';
 import type { CanvasLoadedImage } from './canvasImagePreviews';
@@ -519,7 +519,7 @@ function CanvasTextNodeContent({
             <span>{problem?.message ?? buffer?.error}</span>
           </div>
         ) : buffer ? (
-          <CanvasMonacoEditor
+          <CanvasTextEditor
             value={buffer.content}
             language={buffer.language}
             wordWrap={buffer.wordWrap}
