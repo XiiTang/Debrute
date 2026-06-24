@@ -3,7 +3,12 @@ import React from 'react';
 import { renderToStaticMarkup } from 'react-dom/server';
 import type { ProjectedCanvasNode } from '@debrute/canvas-core';
 import type { TextFileBuffer, WorkbenchActions } from '../../types';
-import { CanvasImageNodePreview, CanvasNodeContent, canvasTextBufferEnsureKey } from './CanvasNodeContent';
+import {
+  CanvasImageNodePreview,
+  CanvasNodeContent,
+  canvasInlineTextFocusRequestForPointer,
+  canvasTextBufferEnsureKey
+} from './CanvasNodeContent';
 import type { CanvasImageNodeAssetHookState } from './CanvasImageNodeAssetContext';
 
 describe('CanvasImageNodePreview', () => {
@@ -81,6 +86,10 @@ describe('CanvasNodeContent text chrome', () => {
         culled={false}
         actions={actionsFixture()}
         textBuffer={undefined}
+        inlineTextEditorActive={false}
+        inlineTextPreviewScrollTop={0}
+        onDeactivateInlineTextEditor={() => undefined}
+        onInlineTextEditorScrollTopChange={() => undefined}
         onSelectNode={() => undefined}
         onTitlePointerDown={() => undefined}
         onTitlePointerMove={() => undefined}
@@ -99,6 +108,10 @@ describe('CanvasNodeContent text chrome', () => {
         culled={false}
         actions={actionsFixture()}
         textBuffer={undefined}
+        inlineTextEditorActive={false}
+        inlineTextPreviewScrollTop={0}
+        onDeactivateInlineTextEditor={() => undefined}
+        onInlineTextEditorScrollTopChange={() => undefined}
         onSelectNode={() => undefined}
         onTitlePointerDown={() => undefined}
         onTitlePointerMove={() => undefined}
@@ -119,6 +132,10 @@ describe('CanvasNodeContent text chrome', () => {
         culled={false}
         actions={actionsFixture()}
         textBuffer={undefined}
+        inlineTextEditorActive={false}
+        inlineTextPreviewScrollTop={0}
+        onDeactivateInlineTextEditor={() => undefined}
+        onInlineTextEditorScrollTopChange={() => undefined}
         onSelectNode={() => undefined}
         onTitlePointerDown={() => undefined}
         onTitlePointerMove={() => undefined}
@@ -132,7 +149,7 @@ describe('CanvasNodeContent text chrome', () => {
     expect(html).toContain('<span>archive</span>');
   });
 
-  it('renders text node titlebar actions and CodeMirror editor markers', () => {
+  it('renders inactive text nodes as CodeMirror-style previews', () => {
     const html = renderToStaticMarkup(
       <CanvasNodeContent
         node={textNode('flow/readme.md', 'rev-a')}
@@ -140,6 +157,10 @@ describe('CanvasNodeContent text chrome', () => {
         culled={false}
         actions={actionsFixture()}
         textBuffer={textBuffer('flow/readme.md', 'rev-a')}
+        inlineTextEditorActive={false}
+        inlineTextPreviewScrollTop={0}
+        onDeactivateInlineTextEditor={() => undefined}
+        onInlineTextEditorScrollTopChange={() => undefined}
         onSelectNode={() => undefined}
         onTitlePointerDown={() => undefined}
         onTitlePointerMove={() => undefined}
@@ -150,9 +171,59 @@ describe('CanvasNodeContent text chrome', () => {
     expect(html).toContain('db-canvas-node-titlebar');
     expect(html).toContain('data-canvas-local-wheel="focus"');
     expect(html).not.toContain('data-canvas-local-wheel="true"');
-    expect(html).toContain('db-icon-button');
     expect(html).toContain('Open large editor');
     expect(html).toContain('data-editor-engine="codemirror"');
+    expect(html).toContain('data-editor-mode="preview"');
+    expect(html).not.toContain('data-editor-mode="edit"');
+  });
+
+  it('renders active text nodes as live edit mode', () => {
+    const html = renderToStaticMarkup(
+      <CanvasNodeContent
+        node={textNode('flow/readme.md', 'rev-a')}
+        selected
+        culled={false}
+        actions={actionsFixture()}
+        textBuffer={textBuffer('flow/readme.md', 'rev-a')}
+        inlineTextEditorActive
+        inlineTextPreviewScrollTop={0}
+        onDeactivateInlineTextEditor={() => undefined}
+        onInlineTextEditorScrollTopChange={() => undefined}
+        onSelectNode={() => undefined}
+        onTitlePointerDown={() => undefined}
+        onTitlePointerMove={() => undefined}
+        onTitlePointerUp={() => undefined}
+      />
+    );
+
+    expect(html).toContain('data-editor-mode="edit"');
+    expect(html).not.toContain('data-editor-mode="preview"');
+  });
+
+  it('sizes inactive text previews from the current node body height', () => {
+    const html = renderToStaticMarkup(
+      <CanvasNodeContent
+        node={{ ...textNode('flow/readme.md', 'rev-a'), height: 760 }}
+        selected
+        culled={false}
+        actions={actionsFixture()}
+        textBuffer={{
+          ...textBuffer('flow/readme.md', 'rev-a'),
+          content: Array.from({ length: 60 }, (_item, index) => `line-${index + 1}`).join('\n'),
+          language: 'plaintext'
+        }}
+        inlineTextEditorActive={false}
+        inlineTextPreviewScrollTop={0}
+        onDeactivateInlineTextEditor={() => undefined}
+        onInlineTextEditorScrollTopChange={() => undefined}
+        onSelectNode={() => undefined}
+        onTitlePointerDown={() => undefined}
+        onTitlePointerMove={() => undefined}
+        onTitlePointerUp={() => undefined}
+      />
+    );
+
+    expect(html).toContain('line-40');
   });
 
   it('renders media captions through the shared Canvas node caption pattern', () => {
@@ -173,6 +244,10 @@ describe('CanvasNodeContent text chrome', () => {
         culled={false}
         actions={actionsFixture()}
         textBuffer={undefined}
+        inlineTextEditorActive={false}
+        inlineTextPreviewScrollTop={0}
+        onDeactivateInlineTextEditor={() => undefined}
+        onInlineTextEditorScrollTopChange={() => undefined}
         onSelectNode={() => undefined}
         onTitlePointerDown={() => undefined}
         onTitlePointerMove={() => undefined}
@@ -191,6 +266,10 @@ describe('CanvasNodeContent text chrome', () => {
         culled={false}
         actions={actionsFixture()}
         textBuffer={{ ...textBuffer('flow/readme.md', 'rev-a'), externalChange: true }}
+        inlineTextEditorActive={false}
+        inlineTextPreviewScrollTop={0}
+        onDeactivateInlineTextEditor={() => undefined}
+        onInlineTextEditorScrollTopChange={() => undefined}
         onSelectNode={() => undefined}
         onTitlePointerDown={() => undefined}
         onTitlePointerMove={() => undefined}
@@ -211,6 +290,10 @@ describe('CanvasNodeContent text chrome', () => {
         culled={false}
         actions={actionsFixture()}
         textBuffer={textBuffer('flow/readme.md', 'rev-a')}
+        inlineTextEditorActive={false}
+        inlineTextPreviewScrollTop={0}
+        onDeactivateInlineTextEditor={() => undefined}
+        onInlineTextEditorScrollTopChange={() => undefined}
         onSelectNode={() => undefined}
         onTitlePointerDown={() => undefined}
         onTitlePointerMove={() => undefined}
@@ -220,6 +303,48 @@ describe('CanvasNodeContent text chrome', () => {
 
     expect(html).not.toContain('Saved');
     expect(html).not.toContain('db-status-pill--success');
+  });
+
+  it('creates inline text focus requests for primary clicks on editable previews', () => {
+    expect(canvasInlineTextFocusRequestForPointer({
+      bufferAvailable: true,
+      bufferHasError: false,
+      inlineTextEditorActive: false,
+      pointerButton: 0,
+      clientX: 12,
+      clientY: 34,
+      problem: false
+    })).toEqual({ clientX: 12, clientY: 34 });
+
+    expect(canvasInlineTextFocusRequestForPointer({
+      bufferAvailable: true,
+      bufferHasError: false,
+      inlineTextEditorActive: false,
+      pointerButton: 2,
+      clientX: 12,
+      clientY: 34,
+      problem: false
+    })).toBeUndefined();
+
+    expect(canvasInlineTextFocusRequestForPointer({
+      bufferAvailable: true,
+      bufferHasError: false,
+      inlineTextEditorActive: true,
+      pointerButton: 0,
+      clientX: 12,
+      clientY: 34,
+      problem: false
+    })).toBeUndefined();
+
+    expect(canvasInlineTextFocusRequestForPointer({
+      bufferAvailable: false,
+      bufferHasError: false,
+      inlineTextEditorActive: false,
+      pointerButton: 0,
+      clientX: 12,
+      clientY: 34,
+      problem: false
+    })).toBeUndefined();
   });
 });
 

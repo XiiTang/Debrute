@@ -11,8 +11,8 @@ export interface CanvasVisibilityController {
 export interface CanvasVisibilityControllerSyncInput {
   nodesByPath: ReadonlyMap<string, Pick<ProjectedCanvasNode, 'projectRelativePath'>>;
   culledNodePaths: ReadonlySet<string>;
-  selectedNodePaths: readonly string[];
-  activeNodePaths: readonly string[];
+  selectedNodePaths: ReadonlySet<string>;
+  activeNodePaths: ReadonlySet<string>;
 }
 
 export function createCanvasVisibilityController(input: {
@@ -22,9 +22,6 @@ export function createCanvasVisibilityController(input: {
 
   return {
     sync: (syncInput) => {
-      const selected = new Set(syncInput.selectedNodePaths);
-      const active = new Set(syncInput.activeNodePaths);
-
       for (const path of [...lastVisibilityByPath.keys()]) {
         if (!syncInput.nodesByPath.has(path)) {
           lastVisibilityByPath.delete(path);
@@ -33,8 +30,8 @@ export function createCanvasVisibilityController(input: {
 
       for (const path of syncInput.nodesByPath.keys()) {
         const visible = !syncInput.culledNodePaths.has(path)
-          || selected.has(path)
-          || active.has(path);
+          || syncInput.selectedNodePaths.has(path)
+          || syncInput.activeNodePaths.has(path);
         if (lastVisibilityByPath.get(path) === visible) {
           continue;
         }

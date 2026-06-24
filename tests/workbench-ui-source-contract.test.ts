@@ -506,6 +506,41 @@ describe('Workbench UI source contract', () => {
     expect(violations).toEqual([]);
   });
 
+  it('keeps canvas text preview and editor on shared text surface variables', () => {
+    const styles = css('apps/web/src/workbench/styles/canvas.css');
+
+    expect(styles).toContain('--canvas-text-editor-font-family');
+    expect(styles).toContain('var(--canvas-text-editor-line-height)');
+    expect(styles).toContain('.canvas-text-editor--preview');
+    expect(styles).toContain('.tok-keyword');
+    expect(styles).toContain('.tok-string');
+  });
+
+  it('keeps live canvas text editors on text editing cursors', () => {
+    const styles = css('apps/web/src/workbench/styles/canvas.css');
+    const editorCursorRule = rule(styles, '.canvas-text-editor--edit .cm-scroller, .canvas-text-editor--edit .cm-content, .canvas-text-editor--edit .cm-line');
+    const gutterCursorRule = rule(styles, '.canvas-text-editor--edit .cm-gutters, .canvas-text-editor--edit .cm-gutterElement');
+
+    expect(editorCursorRule).toContain('cursor: text;');
+    expect(gutterCursorRule).toContain('cursor: default;');
+  });
+
+  it('does not force CodeMirror edit gutter measurement elements to line height', () => {
+    const styles = css('apps/web/src/workbench/styles/canvas.css');
+    const editGutterRule = rule(styles, '.canvas-text-editor .cm-gutterElement');
+    const previewGutterRule = rule(styles, '.canvas-text-editor--preview .cm-gutterElement:not(.canvas-text-editor__gutter-measure)');
+
+    expect(editGutterRule).not.toContain('min-height:');
+    expect(previewGutterRule).toContain('min-height: var(--canvas-text-editor-line-height);');
+  });
+
+  it('keeps canvas text preview activation owned by text node content', () => {
+    const preview = css('apps/web/src/workbench/canvas/CanvasTextPreview.tsx');
+
+    expect(preview).not.toContain('onActivate');
+    expect(preview).not.toContain('onPointerDown');
+  });
+
   it('keeps Canvas generic node labels single-line and ellipsized', () => {
     const patterns = css('apps/web/src/workbench/ui/styles/workbench-patterns.css');
     const labelRule = patterns.match(/\.db-canvas-node-generic strong,\n\.db-canvas-node-generic span\s*\{[^}]*\}/)?.[0] ?? '';

@@ -536,6 +536,117 @@
   height: 100%;
 }
 
+.canvas-text-editor .cm-editor {
+  color: var(--db-text);
+  background: transparent;
+  font-size: var(--canvas-text-editor-font-size);
+}
+
+.canvas-text-editor .cm-scroller {
+  display: flex;
+  align-items: stretch;
+  overflow: auto;
+  overscroll-behavior: contain;
+  font-family: var(--canvas-text-editor-font-family);
+  font-size: var(--canvas-text-editor-font-size);
+  line-height: var(--canvas-text-editor-line-height);
+}
+
+.canvas-text-editor .cm-content {
+  flex: 1 1 auto;
+  min-height: 100%;
+  padding-block: var(--canvas-text-editor-content-padding-block);
+  tab-size: var(--canvas-text-editor-tab-size);
+}
+
+.canvas-text-editor .cm-line {
+  min-height: var(--canvas-text-editor-line-height);
+  padding-inline: var(--canvas-text-editor-line-padding-inline);
+  line-height: var(--canvas-text-editor-line-height);
+}
+
+.canvas-text-editor .cm-gutters {
+  flex: 0 0 auto;
+  color: var(--db-text-muted);
+  background: transparent;
+  border: 0;
+  font-family: var(--canvas-text-editor-font-family);
+  font-size: var(--canvas-text-editor-font-size);
+  line-height: var(--canvas-text-editor-line-height);
+  font-variant-numeric: tabular-nums;
+}
+
+.canvas-text-editor .cm-gutterElement {
+  padding-left: var(--canvas-text-editor-gutter-padding-left);
+  padding-right: var(--canvas-text-editor-gutter-padding-right);
+  line-height: var(--canvas-text-editor-line-height);
+  white-space: nowrap;
+}
+
+.canvas-text-editor .cm-lineNumbers .cm-gutterElement {
+  min-width: 20px;
+  text-align: right;
+}
+
+.canvas-text-editor--preview .cm-gutterElement:not(.canvas-text-editor__gutter-measure) {
+  min-height: var(--canvas-text-editor-line-height);
+}
+
+.canvas-text-editor[data-word-wrap="off"] .cm-content,
+.canvas-text-editor[data-word-wrap="off"] .cm-line {
+  white-space: pre;
+}
+
+.canvas-text-editor[data-word-wrap="on"] .cm-content,
+.canvas-text-editor[data-word-wrap="on"] .cm-line {
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+.canvas-text-editor--preview .cm-editor {
+  pointer-events: none;
+}
+
+.canvas-text-editor--edit .cm-scroller, .canvas-text-editor--edit .cm-content, .canvas-text-editor--edit .cm-line {
+  cursor: text;
+}
+
+.canvas-text-editor--edit .cm-gutters, .canvas-text-editor--edit .cm-gutterElement {
+  cursor: default;
+}
+
+.canvas-text-editor .tok-keyword { color: #c792ea; }
+.canvas-text-editor .tok-atom,
+.canvas-text-editor .tok-bool,
+.canvas-text-editor .tok-number,
+.canvas-text-editor .tok-literal,
+.canvas-text-editor .tok-regexp,
+.canvas-text-editor .tok-character,
+.canvas-text-editor .tok-escape { color: #f78c6c; }
+.canvas-text-editor .tok-string,
+.canvas-text-editor .tok-string2 { color: #c3e88d; }
+.canvas-text-editor .tok-comment { color: var(--db-text-muted); }
+.canvas-text-editor .tok-variableName,
+.canvas-text-editor .tok-variableName2,
+.canvas-text-editor .tok-propertyName { color: #82aaff; }
+.canvas-text-editor .tok-definition,
+.canvas-text-editor .tok-typeName,
+.canvas-text-editor .tok-className,
+.canvas-text-editor .tok-namespace { color: #ffcb6b; }
+.canvas-text-editor .tok-operator,
+.canvas-text-editor .tok-punctuation { color: var(--db-text); }
+.canvas-text-editor .tok-meta,
+.canvas-text-editor .tok-macroName,
+.canvas-text-editor .tok-labelName { color: #89ddff; }
+.canvas-text-editor .tok-heading { color: #82aaff; font-weight: 700; }
+.canvas-text-editor .tok-strong { font-weight: 700; }
+.canvas-text-editor .tok-emphasis { font-style: italic; }
+.canvas-text-editor .tok-link,
+.canvas-text-editor .tok-url { color: #89ddff; text-decoration: underline; }
+.canvas-text-editor .tok-inserted { color: #c3e88d; }
+.canvas-text-editor .tok-deleted { color: var(--db-danger); }
+.canvas-text-editor .tok-invalid { color: var(--db-danger); }
+
 .canvas-text-editor .cm-search {
   display: flex;
   flex-wrap: wrap;
@@ -585,14 +696,14 @@
 }
 
 .canvas-node-resize.n {
-  top: calc(-4px * var(--canvas-chrome-scale, 1));
+  top: calc(-8px * var(--canvas-chrome-scale, 1));
   left: 50%;
   transform: translateX(-50%);
   cursor: ns-resize;
 }
 
 .canvas-node-resize.s {
-  bottom: calc(-4px * var(--canvas-chrome-scale, 1));
+  bottom: calc(-8px * var(--canvas-chrome-scale, 1));
   left: 50%;
   transform: translateX(-50%);
   cursor: ns-resize;
@@ -600,38 +711,38 @@
 
 .canvas-node-resize.e {
   top: 50%;
-  right: calc(-4px * var(--canvas-chrome-scale, 1));
+  right: calc(-8px * var(--canvas-chrome-scale, 1));
   transform: translateY(-50%);
   cursor: ew-resize;
 }
 
 .canvas-node-resize.w {
   top: 50%;
-  left: calc(-4px * var(--canvas-chrome-scale, 1));
+  left: calc(-8px * var(--canvas-chrome-scale, 1));
   transform: translateY(-50%);
   cursor: ew-resize;
 }
 
 .canvas-node-resize.nw {
-  top: calc(-4px * var(--canvas-chrome-scale, 1));
-  left: calc(-4px * var(--canvas-chrome-scale, 1));
+  top: calc(-8px * var(--canvas-chrome-scale, 1));
+  left: calc(-8px * var(--canvas-chrome-scale, 1));
   cursor: nwse-resize;
 }
 
 .canvas-node-resize.ne {
-  top: calc(-4px * var(--canvas-chrome-scale, 1));
-  right: calc(-4px * var(--canvas-chrome-scale, 1));
+  top: calc(-8px * var(--canvas-chrome-scale, 1));
+  right: calc(-8px * var(--canvas-chrome-scale, 1));
   cursor: nesw-resize;
 }
 
 .canvas-node-resize.sw {
-  bottom: calc(-4px * var(--canvas-chrome-scale, 1));
-  left: calc(-4px * var(--canvas-chrome-scale, 1));
+  bottom: calc(-8px * var(--canvas-chrome-scale, 1));
+  left: calc(-8px * var(--canvas-chrome-scale, 1));
   cursor: nesw-resize;
 }
 
 .canvas-node-resize.se {
-  right: calc(-4px * var(--canvas-chrome-scale, 1));
-  bottom: calc(-4px * var(--canvas-chrome-scale, 1));
+  right: calc(-8px * var(--canvas-chrome-scale, 1));
+  bottom: calc(-8px * var(--canvas-chrome-scale, 1));
   cursor: nwse-resize;
 }

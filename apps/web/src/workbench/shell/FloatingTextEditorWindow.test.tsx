@@ -32,6 +32,8 @@ describe('FloatingTextEditorWindow', () => {
     expect(html).toContain('floating-text-editor-window');
     expect(html).toContain('data-editor-engine="codemirror"');
     expect(html).toContain('data-canvas-text-editor="true"');
+    expect(html).toContain('data-editor-mode="edit"');
+    expect(html).not.toContain('data-editor-mode="preview"');
   });
 });
 

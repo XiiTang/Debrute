@@ -12,6 +12,7 @@ import { areCanvasNodeShellPropsEqual, CanvasNodeShell, type CanvasNodeShellProp
 import {
   CanvasSurface,
   canvasFeedbackBarTargetForProjectedNode,
+  canvasSurfaceNextInlineTextEditorPathForNodeSelection,
   isCanvasMapProjectTreeDragOver,
   canvasMapProjectTreeDropEntry,
   canvasMapProjectTreeDropInput,
@@ -33,6 +34,24 @@ import type { CanvasSelection } from './runtime/canvasSelection';
 import { createCanvasEditorRuntime, type CanvasEditorRuntime } from './runtime/CanvasEditorRuntime';
 
 describe('CanvasSurface', () => {
+  it('keeps inline text editing only for explicit text focus requests', () => {
+    expect(canvasSurfaceNextInlineTextEditorPathForNodeSelection({
+      currentPath: 'flow/active.md',
+      node: { projectRelativePath: 'flow/next.md', mediaKind: 'text' },
+      inlineTextFocusRequest: { clientX: 10, clientY: 20 }
+    })).toBe('flow/next.md');
+
+    expect(canvasSurfaceNextInlineTextEditorPathForNodeSelection({
+      currentPath: 'flow/active.md',
+      node: { projectRelativePath: 'flow/image.png', mediaKind: 'image' }
+    })).toBeUndefined();
+
+    expect(canvasSurfaceNextInlineTextEditorPathForNodeSelection({
+      currentPath: 'flow/active.md',
+      node: { projectRelativePath: 'flow/next.md', mediaKind: 'text' }
+    })).toBeUndefined();
+  });
+
   it('renders an empty Canvas Map node state', () => {
     const canvas = createCanvasDocument({ id: 'empty-canvas' });
     const projection: CanvasProjection = {
@@ -271,6 +290,133 @@ describe('CanvasSurface', () => {
     expect(html).not.toContain('data-canvas-node-path="flow/notes/offscreen.md"');
     expect(html).not.toContain('canvas-text-node');
     expect(html).not.toContain('# Offscreen');
+  });
+
+  it('renders visible canvas text nodes as previews by default', () => {
+    const canvas = createCanvasDocument({ id: 'text-preview-canvas' });
+    const projection: CanvasProjection = {
+      canvasId: canvas.id,
+      nodes: [
+        {
+          ...nodeFixture('flow/a.md', 0, 0),
+          mediaKind: 'text',
+          availability: {
+            state: 'available',
+            size: 100,
+            mimeType: 'text/markdown',
+            fileUrl: 'http://127.0.0.1:17321/api/projects/123e4567-e89b-42d3-a456-426614174000/files/raw/flow/a.md?v=rev-a',
+            revision: 'rev-a'
+          }
+        },
+        {
+          ...nodeFixture('flow/b.md', 300, 0),
+          mediaKind: 'text',
+          availability: {
+            state: 'available',
+            size: 100,
+            mimeType: 'text/markdown',
+            fileUrl: 'http://127.0.0.1:17321/api/projects/123e4567-e89b-42d3-a456-426614174000/files/raw/flow/b.md?v=rev-b',
+            revision: 'rev-b'
+          }
+        }
+      ],
+      edges: [],
+      diagnostics: []
+    };
+
+    const html = renderToStaticMarkup(surface(canvas, projection, {
+      textFileBuffers: {
+        'flow/a.md': {
+          projectRelativePath: 'flow/a.md',
+          content: '# A',
+          language: 'markdown',
+          wordWrap: false,
+          dirty: false,
+          saving: false,
+          diskRevision: 'rev-a',
+          lastSavedRevision: 'rev-a',
+          externalChange: false
+        },
+        'flow/b.md': {
+          projectRelativePath: 'flow/b.md',
+          content: '# B',
+          language: 'markdown',
+          wordWrap: false,
+          dirty: false,
+          saving: false,
+          diskRevision: 'rev-b',
+          lastSavedRevision: 'rev-b',
+          externalChange: false
+        }
+      }
+    }));
+
+    expect(html.match(/data-editor-mode="preview"/g)).toHaveLength(2);
+    expect(html).not.toContain('data-editor-mode="edit"');
+  });
+
+  it('renders selected canvas text nodes as live editors', () => {
+    const canvas = createCanvasDocument({ id: 'selected-text-canvas' });
+    const projection: CanvasProjection = {
+      canvasId: canvas.id,
+      nodes: [
+        {
+          ...nodeFixture('flow/selected.md', 0, 0),
+          mediaKind: 'text',
+          availability: {
+            state: 'available',
+            size: 100,
+            mimeType: 'text/markdown',
+            fileUrl: 'http://127.0.0.1:17321/api/projects/123e4567-e89b-42d3-a456-426614174000/files/raw/flow/selected.md?v=rev-selected',
+            revision: 'rev-selected'
+          }
+        },
+        {
+          ...nodeFixture('flow/inactive.md', 300, 0),
+          mediaKind: 'text',
+          availability: {
+            state: 'available',
+            size: 100,
+            mimeType: 'text/markdown',
+            fileUrl: 'http://127.0.0.1:17321/api/projects/123e4567-e89b-42d3-a456-426614174000/files/raw/flow/inactive.md?v=rev-inactive',
+            revision: 'rev-inactive'
+          }
+        }
+      ],
+      edges: [],
+      diagnostics: []
+    };
+
+    const html = renderToStaticMarkup(surface(canvas, projection, {
+      selection: { kind: 'node', projectRelativePath: 'flow/selected.md' },
+      textFileBuffers: {
+        'flow/selected.md': {
+          projectRelativePath: 'flow/selected.md',
+          content: '# Selected',
+          language: 'markdown',
+          wordWrap: false,
+          dirty: false,
+          saving: false,
+          diskRevision: 'rev-selected',
+          lastSavedRevision: 'rev-selected',
+          externalChange: false
+        },
+        'flow/inactive.md': {
+          projectRelativePath: 'flow/inactive.md',
+          content: '# Inactive',
+          language: 'markdown',
+          wordWrap: false,
+          dirty: false,
+          saving: false,
+          diskRevision: 'rev-inactive',
+          lastSavedRevision: 'rev-inactive',
+          externalChange: false
+        }
+      }
+    }));
+
+    expect(html.match(/data-editor-mode="edit"/g) ?? []).toHaveLength(1);
+    expect(html.match(/data-editor-mode="preview"/g) ?? []).toHaveLength(1);
   });
 
   it('renders structure edges when their segments intersect the virtual viewport', () => {
@@ -1065,6 +1211,11 @@ function nodeShellProps(node = nodeFixture('flow/cover.png', 0, 0)): CanvasNodeS
     stageRuntime: createCanvasStageRuntime(),
     actions,
     textBuffer: undefined,
+    inlineTextEditorActive: false,
+    inlineTextEditorFocusRequest: undefined,
+    inlineTextPreviewScrollTop: 0,
+    onDeactivateInlineTextEditor: () => undefined,
+    onInlineTextEditorScrollTopChange: () => undefined,
     onPointerDown: () => undefined,
     onPointerMove: () => undefined,
     onPointerUp: () => undefined,

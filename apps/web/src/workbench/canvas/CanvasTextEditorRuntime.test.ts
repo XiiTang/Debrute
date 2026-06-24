@@ -1,7 +1,9 @@
 import { describe, expect, it, vi } from 'vitest';
 import { EditorState, type Transaction } from '@codemirror/state';
 import { history, undoDepth } from '@codemirror/commands';
+import { canvasTextSyntaxHighlighter } from './CanvasTextHighlighting';
 import {
+  canvasTextEditorCancelInlineEditKeyBinding,
   canvasTextEditorExternalValueSyncAnnotation,
   canvasTextEditorKeymap,
   canvasTextEditorSyncExternalValue,
@@ -10,12 +12,17 @@ import {
 } from './CanvasTextEditorRuntime';
 
 describe('CanvasTextEditorRuntime', () => {
+  it('uses the shared text syntax highlighter', () => {
+    expect(canvasTextSyntaxHighlighter.style).toEqual(expect.any(Function));
+  });
+
   it('binds Mod-s to save', () => {
     const callbacks: CanvasTextEditorCallbackRef = {
       current: {
         onChange: vi.fn(),
         onSave: vi.fn(),
-        onToggleWordWrap: vi.fn()
+        onToggleWordWrap: vi.fn(),
+        onCancel: vi.fn()
       }
     };
     const binding = canvasTextEditorKeymap(callbacks).find((item) => item.key === 'Mod-s');
@@ -32,7 +39,8 @@ describe('CanvasTextEditorRuntime', () => {
       current: {
         onChange: vi.fn(),
         onSave: vi.fn(),
-        onToggleWordWrap: vi.fn()
+        onToggleWordWrap: vi.fn(),
+        onCancel: vi.fn()
       }
     };
     const binding = canvasTextEditorKeymap(callbacks).find((item) => item.key === 'Alt-z');
@@ -49,11 +57,31 @@ describe('CanvasTextEditorRuntime', () => {
       current: {
         onChange: vi.fn(),
         onSave: vi.fn(),
-        onToggleWordWrap: vi.fn()
+        onToggleWordWrap: vi.fn(),
+        onCancel: vi.fn()
       }
     };
 
     expect(canvasTextEditorKeymap(callbacks).some((item) => item.key === 'Mod-f')).toBe(true);
+  });
+
+  it('binds Escape to cancel inline editing when CodeMirror has not handled it first', () => {
+    const callbacks: CanvasTextEditorCallbackRef = {
+      current: {
+        onChange: vi.fn(),
+        onSave: vi.fn(),
+        onToggleWordWrap: vi.fn(),
+        onCancel: vi.fn()
+      }
+    };
+    const binding = canvasTextEditorCancelInlineEditKeyBinding(callbacks);
+
+    expect(binding.key).toBe('Escape');
+    expect(binding.run?.({} as never)).toBe(true);
+    expect(callbacks.current.onCancel).toHaveBeenCalledTimes(1);
+    expect(canvasTextEditorKeymap(callbacks).some((item) => (
+      item.key === 'Escape' && item.preventDefault === true
+    ))).toBe(true);
   });
 
   it('emits document changes through onChange', () => {
@@ -61,7 +89,8 @@ describe('CanvasTextEditorRuntime', () => {
       current: {
         onChange: vi.fn(),
         onSave: vi.fn(),
-        onToggleWordWrap: vi.fn()
+        onToggleWordWrap: vi.fn(),
+        onCancel: vi.fn()
       }
     };
     const listener = canvasTextEditorUpdateListener(callbacks);
@@ -80,7 +109,8 @@ describe('CanvasTextEditorRuntime', () => {
       current: {
         onChange: vi.fn(),
         onSave: vi.fn(),
-        onToggleWordWrap: vi.fn()
+        onToggleWordWrap: vi.fn(),
+        onCancel: vi.fn()
       }
     };
     const listener = canvasTextEditorUpdateListener(callbacks);
@@ -99,7 +129,8 @@ describe('CanvasTextEditorRuntime', () => {
       current: {
         onChange: vi.fn(),
         onSave: vi.fn(),
-        onToggleWordWrap: vi.fn()
+        onToggleWordWrap: vi.fn(),
+        onCancel: vi.fn()
       }
     };
     const listener = canvasTextEditorUpdateListener(callbacks);

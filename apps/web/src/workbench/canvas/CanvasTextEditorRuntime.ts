@@ -8,13 +8,15 @@ import {
   type ViewUpdate
 } from '@codemirror/view';
 import { defaultKeymap, history, historyKeymap } from '@codemirror/commands';
-import { defaultHighlightStyle, syntaxHighlighting } from '@codemirror/language';
+import { syntaxHighlighting } from '@codemirror/language';
 import { search, searchKeymap } from '@codemirror/search';
+import { canvasTextSyntaxHighlighter } from './CanvasTextHighlighting';
 
 export interface CanvasTextEditorCallbacks {
   onChange: (value: string) => void;
   onSave: () => void;
   onToggleWordWrap: () => void;
+  onCancel: () => void;
 }
 
 export interface CanvasTextEditorCallbackRef {
@@ -31,6 +33,7 @@ export function canvasTextEditorExternalValueSyncAnnotations() {
 }
 
 export function canvasTextEditorKeymap(callbacks: CanvasTextEditorCallbackRef): readonly KeyBinding[] {
+  const cancelInlineEdit = canvasTextEditorCancelInlineEditKeyBinding(callbacks);
   return [
     {
       key: 'Mod-s',
@@ -49,9 +52,21 @@ export function canvasTextEditorKeymap(callbacks: CanvasTextEditorCallbackRef): 
       }
     },
     ...searchKeymap,
+    cancelInlineEdit,
     ...defaultKeymap,
     ...historyKeymap
   ];
+}
+
+export function canvasTextEditorCancelInlineEditKeyBinding(callbacks: CanvasTextEditorCallbackRef): KeyBinding {
+  return {
+    key: 'Escape',
+    preventDefault: true,
+    run: () => {
+      callbacks.current.onCancel();
+      return true;
+    }
+  };
 }
 
 export function canvasTextEditorUpdateListener(
@@ -108,22 +123,25 @@ export function canvasTextEditorTheme(): Extension {
       height: '100%',
       color: 'var(--db-text)',
       backgroundColor: 'transparent',
-      fontSize: '12px'
+      fontSize: 'var(--canvas-text-editor-font-size)'
     },
     '&.cm-focused': {
       outline: 'none'
     },
     '.cm-scroller': {
-      fontFamily: 'ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", monospace',
+      fontFamily: 'var(--canvas-text-editor-font-family)',
+      lineHeight: 'var(--canvas-text-editor-line-height)',
       overscrollBehavior: 'contain'
     },
     '.cm-content': {
       minHeight: '100%',
-      padding: '6px 0',
-      caretColor: 'var(--db-text)'
+      padding: 'var(--canvas-text-editor-content-padding-block) 0',
+      caretColor: 'var(--db-text)',
+      tabSize: 'var(--canvas-text-editor-tab-size)'
     },
     '.cm-line': {
-      padding: '0 8px'
+      padding: '0 var(--canvas-text-editor-line-padding-inline)',
+      lineHeight: 'var(--canvas-text-editor-line-height)'
     },
     '.cm-gutters': {
       color: 'var(--db-text-muted)',
@@ -132,6 +150,11 @@ export function canvasTextEditorTheme(): Extension {
     },
     '.cm-activeLineGutter': {
       backgroundColor: 'transparent'
+    },
+    '.cm-gutterElement': {
+      paddingLeft: 'var(--canvas-text-editor-gutter-padding-left)',
+      paddingRight: 'var(--canvas-text-editor-gutter-padding-right)',
+      lineHeight: 'var(--canvas-text-editor-line-height)'
     },
     '.cm-panels': {
       color: 'var(--db-text)',
@@ -164,7 +187,7 @@ export function canvasTextEditorBaseExtensions(callbacks: CanvasTextEditorCallba
     history(),
     lineNumbers(),
     search(),
-    syntaxHighlighting(defaultHighlightStyle),
+    syntaxHighlighting(canvasTextSyntaxHighlighter),
     keymap.of(canvasTextEditorKeymap(callbacks)),
     EditorView.updateListener.of(canvasTextEditorUpdateListener(callbacks)),
     canvasTextEditorTheme()

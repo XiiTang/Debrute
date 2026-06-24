@@ -3,10 +3,13 @@ import { AlertTriangle, File, FileText, Folder, Image as ImageIcon, Maximize2, M
 import type { CanvasFeedbackEntry, CanvasFeedbackGeometry, ProjectedCanvasNode } from '@debrute/canvas-core';
 import type { TextFileBuffer, WorkbenchActions } from '../../types';
 import { CanvasTextEditor } from './CanvasTextEditor';
+import { CanvasTextPreview } from './CanvasTextPreview';
 import { useCanvasImageNodeAsset, type CanvasImageNodeAssetHookState } from './CanvasImageNodeAssetContext';
 import { CanvasImageFeedbackLayer, type CanvasImageFeedbackDraftRegion, type CanvasImageFeedbackMode } from './CanvasImageFeedbackLayer';
 import type { CanvasLoadedImage } from './canvasImagePreviews';
 import { Button, IconButton, StatusPill } from '../ui';
+
+const CANVAS_TEXT_NODE_TITLEBAR_HEIGHT_PX = 32;
 
 export interface CanvasNodeContentProps {
   node: ProjectedCanvasNode;
@@ -14,6 +17,9 @@ export interface CanvasNodeContentProps {
   culled: boolean;
   actions: WorkbenchActions;
   textBuffer: TextFileBuffer | undefined;
+  inlineTextEditorActive: boolean;
+  inlineTextEditorFocusRequest?: { requestId: number; clientX: number; clientY: number } | undefined;
+  inlineTextPreviewScrollTop: number;
   feedbackEntry?: CanvasFeedbackEntry | undefined;
   localFeedbackMode?: CanvasImageFeedbackMode | undefined;
   pendingFeedbackRegion?: CanvasImageFeedbackDraftRegion | undefined;
@@ -21,7 +27,9 @@ export interface CanvasNodeContentProps {
     projectRelativePath: string;
     geometry: CanvasFeedbackGeometry;
   }) => void) | undefined;
-  onSelectNode: () => void;
+  onDeactivateInlineTextEditor: (projectRelativePath: string) => void;
+  onInlineTextEditorScrollTopChange: (projectRelativePath: string, scrollTop: number) => void;
+  onSelectNode: (inlineTextFocusRequest?: { clientX: number; clientY: number } | undefined) => void;
   onTitlePointerDown: (event: React.PointerEvent<Element>) => void;
   onTitlePointerMove: (event: React.PointerEvent<Element>) => void;
   onTitlePointerUp: (event: React.PointerEvent<Element>) => void;
@@ -33,10 +41,15 @@ export function CanvasNodeContent({
   culled,
   actions,
   textBuffer,
+  inlineTextEditorActive,
+  inlineTextEditorFocusRequest,
+  inlineTextPreviewScrollTop,
   feedbackEntry,
   localFeedbackMode,
   pendingFeedbackRegion,
   onLocalFeedbackDraft,
+  onDeactivateInlineTextEditor,
+  onInlineTextEditorScrollTopChange,
   onSelectNode,
   onTitlePointerDown,
   onTitlePointerMove,
@@ -99,6 +112,11 @@ export function CanvasNodeContent({
         problem={problem}
         selected={selected}
         actions={actions}
+        inlineTextEditorActive={inlineTextEditorActive}
+        inlineTextEditorFocusRequest={inlineTextEditorFocusRequest}
+        inlineTextPreviewScrollTop={inlineTextPreviewScrollTop}
+        onDeactivateInlineTextEditor={onDeactivateInlineTextEditor}
+        onInlineTextEditorScrollTopChange={onInlineTextEditorScrollTopChange}
         onSelectNode={onSelectNode}
         onTitlePointerDown={onTitlePointerDown}
         onTitlePointerMove={onTitlePointerMove}
@@ -190,6 +208,30 @@ export function canvasTextBufferEnsureKey(
     return undefined;
   }
   return `${node.projectRelativePath}\u001f${node.availability.revision}`;
+}
+
+export function canvasInlineTextFocusRequestForPointer(input: {
+  bufferAvailable: boolean;
+  bufferHasError: boolean;
+  inlineTextEditorActive: boolean;
+  pointerButton: number;
+  clientX: number;
+  clientY: number;
+  problem: boolean;
+}): { clientX: number; clientY: number } | undefined {
+  if (
+    input.pointerButton !== 0
+    || input.problem
+    || input.bufferHasError
+    || !input.bufferAvailable
+    || input.inlineTextEditorActive
+  ) {
+    return undefined;
+  }
+  return {
+    clientX: input.clientX,
+    clientY: input.clientY
+  };
 }
 
 function CanvasImageNodeContent({
@@ -455,6 +497,11 @@ function CanvasTextNodeContent({
   problem,
   selected,
   actions,
+  inlineTextEditorActive,
+  inlineTextEditorFocusRequest,
+  inlineTextPreviewScrollTop,
+  onDeactivateInlineTextEditor,
+  onInlineTextEditorScrollTopChange,
   onSelectNode,
   onTitlePointerDown,
   onTitlePointerMove,
@@ -465,17 +512,33 @@ function CanvasTextNodeContent({
   problem: { title: string; message: string } | undefined;
   selected: boolean;
   actions: WorkbenchActions;
-  onSelectNode: () => void;
+  inlineTextEditorActive: boolean;
+  inlineTextEditorFocusRequest?: { requestId: number; clientX: number; clientY: number } | undefined;
+  inlineTextPreviewScrollTop: number;
+  onDeactivateInlineTextEditor: (projectRelativePath: string) => void;
+  onInlineTextEditorScrollTopChange: (projectRelativePath: string, scrollTop: number) => void;
+  onSelectNode: (inlineTextFocusRequest?: { clientX: number; clientY: number } | undefined) => void;
   onTitlePointerDown: (event: React.PointerEvent<Element>) => void;
   onTitlePointerMove: (event: React.PointerEvent<Element>) => void;
   onTitlePointerUp: (event: React.PointerEvent<Element>) => void;
 }): React.ReactElement {
   const status = textBufferStatus(buffer, problem);
-  const selectSelf = () => {
-    if (!selected) {
-      onSelectNode();
+  const selectSelf = (inlineTextFocusRequest?: { clientX: number; clientY: number } | undefined) => {
+    if (!selected || inlineTextFocusRequest) {
+      onSelectNode(inlineTextFocusRequest);
     }
   };
+  const inlineTextFocusRequest = (event: Pick<React.PointerEvent<Element>, 'button' | 'clientX' | 'clientY'>) => (
+    canvasInlineTextFocusRequestForPointer({
+      bufferAvailable: Boolean(buffer),
+      bufferHasError: Boolean(buffer?.error),
+      inlineTextEditorActive,
+      pointerButton: event.button,
+      clientX: event.clientX,
+      clientY: event.clientY,
+      problem: Boolean(problem)
+    })
+  );
 
   return (
     <section className="canvas-text-node">
@@ -509,7 +572,13 @@ function CanvasTextNodeContent({
         data-canvas-local-wheel="focus"
         onPointerDown={(event) => {
           event.stopPropagation();
-          selectSelf();
+          selectSelf(inlineTextFocusRequest(event));
+        }}
+        onPointerUp={(event) => {
+          event.stopPropagation();
+        }}
+        onClick={(event) => {
+          event.stopPropagation();
         }}
       >
         {problem || buffer?.error ? (
@@ -519,14 +588,28 @@ function CanvasTextNodeContent({
             <span>{problem?.message ?? buffer?.error}</span>
           </div>
         ) : buffer ? (
-          <CanvasTextEditor
-            value={buffer.content}
-            language={buffer.language}
-            wordWrap={buffer.wordWrap}
-            onChange={(content) => actions.updateTextFileBuffer(node.projectRelativePath, content)}
-            onSave={() => void actions.saveTextFileBuffer(node.projectRelativePath)}
-            onToggleWordWrap={() => actions.toggleTextFileWordWrap(node.projectRelativePath)}
-          />
+          inlineTextEditorActive ? (
+            <CanvasTextEditor
+              value={buffer.content}
+              language={buffer.language}
+              wordWrap={buffer.wordWrap}
+              focusRequest={inlineTextEditorFocusRequest}
+              initialScrollTop={inlineTextPreviewScrollTop}
+              onScrollTopChange={(scrollTop) => onInlineTextEditorScrollTopChange(node.projectRelativePath, scrollTop)}
+              onEditorBlur={() => onDeactivateInlineTextEditor(node.projectRelativePath)}
+              onChange={(content) => actions.updateTextFileBuffer(node.projectRelativePath, content)}
+              onSave={() => void actions.saveTextFileBuffer(node.projectRelativePath)}
+              onToggleWordWrap={() => actions.toggleTextFileWordWrap(node.projectRelativePath)}
+            />
+          ) : (
+            <CanvasTextPreview
+              value={buffer.content}
+              language={buffer.language}
+              wordWrap={buffer.wordWrap}
+              scrollTop={inlineTextPreviewScrollTop}
+              viewportHeight={canvasTextPreviewViewportHeight(node)}
+            />
+          )
         ) : (
           <div className="canvas-text-message" data-canvas-text-editor="true">
             <FileText size={18} />
@@ -536,6 +619,10 @@ function CanvasTextNodeContent({
       </div>
     </section>
   );
+}
+
+function canvasTextPreviewViewportHeight(node: Pick<ProjectedCanvasNode, 'height'>): number {
+  return Math.max(0, node.height - CANVAS_TEXT_NODE_TITLEBAR_HEIGHT_PX);
 }
 
 function textBufferStatus(buffer: TextFileBuffer | undefined, problem: { title: string; message: string } | undefined): { label: string; tone: 'warning' | 'danger' | 'info' | 'loading' } | undefined {

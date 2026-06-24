@@ -3,6 +3,7 @@ import type { ProjectTextLanguageId } from '@debrute/project-core';
 import { Compartment } from '@codemirror/state';
 import { EditorView } from '@codemirror/view';
 import { codeMirrorLanguageExtensionForProjectTextLanguage } from './textEditorCodeMirrorLanguages';
+import { canvasTextSurfaceCssVariables } from './CanvasTextSurface';
 import {
   canvasTextEditorBaseExtensions,
   canvasTextEditorReadOnlyExtension,
@@ -23,6 +24,10 @@ export function CanvasTextEditor({
   language,
   wordWrap,
   readOnly,
+  focusRequest,
+  initialScrollTop,
+  onScrollTopChange,
+  onEditorBlur,
   onChange,
   onSave,
   onToggleWordWrap
@@ -31,6 +36,10 @@ export function CanvasTextEditor({
   language: ProjectTextLanguageId;
   wordWrap: boolean;
   readOnly?: boolean;
+  focusRequest?: { requestId: number; clientX: number; clientY: number } | undefined;
+  initialScrollTop?: number | undefined;
+  onScrollTopChange?: ((scrollTop: number) => void) | undefined;
+  onEditorBlur?: (() => void) | undefined;
   onChange: (value: string) => void;
   onSave: () => void;
   onToggleWordWrap: () => void;
@@ -40,7 +49,8 @@ export function CanvasTextEditor({
   const callbacksRef = React.useRef<CanvasTextEditorCallbacks>({
     onChange,
     onSave,
-    onToggleWordWrap
+    onToggleWordWrap,
+    onCancel: () => undefined
   });
   const compartmentsRef = React.useRef<CanvasTextEditorCompartments | null>(null);
 
@@ -56,9 +66,17 @@ export function CanvasTextEditor({
     callbacksRef.current = {
       onChange,
       onSave,
-      onToggleWordWrap
+      onToggleWordWrap,
+      onCancel: () => {
+        const view = viewRef.current;
+        if (view) {
+          onScrollTopChange?.(view.scrollDOM.scrollTop);
+          view.contentDOM.blur();
+        }
+        onEditorBlur?.();
+      }
     };
-  }, [onChange, onSave, onToggleWordWrap]);
+  }, [onChange, onEditorBlur, onSave, onScrollTopChange, onToggleWordWrap]);
 
   React.useEffect(() => {
     const host = hostRef.current;
@@ -97,6 +115,82 @@ export function CanvasTextEditor({
 
   React.useEffect(() => {
     const view = viewRef.current;
+    if (!view || initialScrollTop === undefined) {
+      return;
+    }
+    view.scrollDOM.scrollTop = initialScrollTop;
+  }, [initialScrollTop]);
+
+  React.useEffect(() => {
+    const view = viewRef.current;
+    if (!view || !focusRequest) {
+      return;
+    }
+    view.focus();
+    const position = view.posAtCoords({
+      x: focusRequest.clientX,
+      y: focusRequest.clientY
+    });
+    if (position !== null) {
+      view.dispatch({
+        selection: { anchor: position },
+        scrollIntoView: true
+      });
+    }
+  }, [focusRequest?.requestId]);
+
+  React.useEffect(() => {
+    const view = viewRef.current;
+    if (!view || !onScrollTopChange) {
+      return;
+    }
+    const handleScroll = () => {
+      onScrollTopChange(view.scrollDOM.scrollTop);
+    };
+    view.scrollDOM.addEventListener('scroll', handleScroll);
+    return () => {
+      view.scrollDOM.removeEventListener('scroll', handleScroll);
+    };
+  }, [onScrollTopChange]);
+
+  React.useEffect(() => {
+    const view = viewRef.current;
+    if (!view || !onEditorBlur) {
+      return;
+    }
+    let blurTimer: number | undefined;
+    const handleFocusOut = () => {
+      if (blurTimer !== undefined) {
+        window.clearTimeout(blurTimer);
+      }
+      blurTimer = window.setTimeout(() => {
+        blurTimer = undefined;
+        const activeElement = document.activeElement;
+        if (!(activeElement instanceof Node) || !view.dom.contains(activeElement)) {
+          onScrollTopChange?.(view.scrollDOM.scrollTop);
+          onEditorBlur();
+        }
+      }, 0);
+    };
+    const handleFocusIn = () => {
+      if (blurTimer !== undefined) {
+        window.clearTimeout(blurTimer);
+        blurTimer = undefined;
+      }
+    };
+    view.dom.addEventListener('focusout', handleFocusOut);
+    view.dom.addEventListener('focusin', handleFocusIn);
+    return () => {
+      if (blurTimer !== undefined) {
+        window.clearTimeout(blurTimer);
+      }
+      view.dom.removeEventListener('focusout', handleFocusOut);
+      view.dom.removeEventListener('focusin', handleFocusIn);
+    };
+  }, [onEditorBlur, onScrollTopChange]);
+
+  React.useEffect(() => {
+    const view = viewRef.current;
     const compartments = compartmentsRef.current;
     if (!view || !compartments) {
       return;
@@ -116,8 +210,10 @@ export function CanvasTextEditor({
       ref={hostRef}
       data-canvas-text-editor="true"
       data-editor-engine="codemirror"
+      data-editor-mode="edit"
       data-word-wrap={wordWrap ? 'on' : 'off'}
-      className="canvas-text-editor"
+      className="canvas-text-editor canvas-text-editor--edit"
+      style={canvasTextSurfaceCssVariables() as React.CSSProperties}
     />
   );
 }
