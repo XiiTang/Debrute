@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import {
+  DEFAULT_WORKBENCH_WINDOW_ORDER,
   closeWorkbenchWindow,
   focusWorkbenchWindow,
   panelWindowIdentity,
@@ -11,6 +12,12 @@ import {
 } from './workbenchWindowOrder';
 
 describe('workbench window order', () => {
+  it('does not focus a panel before the user opens one', () => {
+    expect(DEFAULT_WORKBENCH_WINDOW_ORDER).toEqual({
+      orderBackToFront: []
+    });
+  });
+
   it('focuses a window by moving it to the front', () => {
     const state: WorkbenchWindowOrderState = {
       orderBackToFront: [

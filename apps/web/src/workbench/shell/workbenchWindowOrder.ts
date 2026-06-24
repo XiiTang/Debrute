@@ -13,8 +13,7 @@ export interface WorkbenchWindowOrderState {
 }
 
 export const DEFAULT_WORKBENCH_WINDOW_ORDER: WorkbenchWindowOrderState = {
-  orderBackToFront: [panelWindowIdentity('explorer')],
-  focusedWindow: panelWindowIdentity('explorer')
+  orderBackToFront: []
 };
 
 export function panelWindowIdentity(panelId: FloatingPanelId): WorkbenchWindowIdentity {

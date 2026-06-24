@@ -6,6 +6,7 @@ import {
   handleProjectTreeKeyboardEvent,
   handleProjectTreeRootContextMenuEvent,
   isRootBlankAreaEventTarget,
+  projectTreeRowClickAction,
   ProjectTree
 } from './ProjectTree';
 import { flattenProjectTree, type ProjectTreeSelectionState } from './projectTreeInteraction';
@@ -32,6 +33,57 @@ describe('ProjectTree', () => {
     expect(html).toContain('concept.md');
     expect(html).toContain('aria-selected="true"');
     expect(html).toContain('db-tree-row');
+  });
+
+  it('renders project rows without disclosure chevrons', () => {
+    const html = renderToStaticMarkup(
+      <ProjectTree
+        snapshot={{
+          files: [
+            { kind: 'file', projectRelativePath: 'assets/cover.png' }
+          ]
+        } as WorkbenchProjectSessionSnapshot}
+        selection={selection(['assets/cover.png'])}
+        cutPaths={[]}
+        onSelectionChange={() => undefined}
+      />
+    );
+
+    expect(html).not.toContain('tree-chevron');
+    expect(html).not.toContain('tree-chevron-spacer');
+  });
+
+  it('activates directories on a plain click without requiring a prior selection', () => {
+    expect(projectTreeRowClickAction({
+      kind: 'directory',
+      platform: 'linux',
+      event: {}
+    })).toEqual({
+      toggleDirectory: true,
+      locateFileInCanvas: false
+    });
+  });
+
+  it('keeps modified directory clicks available for selection without expanding', () => {
+    expect(projectTreeRowClickAction({
+      kind: 'directory',
+      platform: 'linux',
+      event: { ctrlKey: true }
+    })).toEqual({
+      toggleDirectory: false,
+      locateFileInCanvas: false
+    });
+  });
+
+  it('locates files on a plain click', () => {
+    expect(projectTreeRowClickAction({
+      kind: 'file',
+      platform: 'darwin',
+      event: {}
+    })).toEqual({
+      toggleDirectory: false,
+      locateFileInCanvas: true
+    });
   });
 
   it('renders the empty Project Tree state through shared UI classes', () => {

@@ -1,5 +1,5 @@
 import React, { useEffect, useMemo, useState } from 'react';
-import { FilePlus2, Files, FolderPlus, FolderTree } from 'lucide-react';
+import { File, FilePlus2, Folder, FolderOpen, FolderPlus } from 'lucide-react';
 import type { WorkbenchProjectSessionSnapshot } from '@debrute/app-protocol';
 import type {
   WorkbenchContextMenuPosition,
@@ -299,6 +299,18 @@ export function handleProjectTreeKeyboardEvent(input: {
   input.onKeyboardFileCommand?.(command, target);
 }
 
+export function projectTreeRowClickAction(input: {
+  kind: ProjectFileTreeNode['kind'];
+  platform: NodeJS.Platform;
+  event: ProjectTreePointerModifiers;
+}): { toggleDirectory: boolean; locateFileInCanvas: boolean } {
+  const selectionModifier = isSelectionModifierEvent(input.event, input.platform);
+  return {
+    toggleDirectory: input.kind === 'directory' && !selectionModifier,
+    locateFileInCanvas: input.kind === 'file' && !selectionModifier
+  };
+}
+
 export function isRootBlankAreaEventTarget(input: { target: unknown; currentTarget: unknown }): boolean {
   if (input.target === input.currentTarget) {
     return true;
@@ -467,10 +479,11 @@ function ProjectTreeRow({
   };
   const selectRow = (event: React.MouseEvent<HTMLButtonElement>) => {
     event.stopPropagation();
-    const togglesDirectory = node.kind === 'directory'
-      && selection.selectedPaths.length === 1
-      && selection.selectedPaths[0] === node.path
-      && !isSelectionModifierEvent(event, desktopPlatform);
+    const action = projectTreeRowClickAction({
+      kind: node.kind,
+      platform: desktopPlatform,
+      event
+    });
     const nextSelection = updateProjectTreeSelection({
       state: selection,
       visibleItems,
@@ -479,10 +492,10 @@ function ProjectTreeRow({
       event
     });
     onSelectionChange(nextSelection);
-    if (togglesDirectory) {
+    if (action.toggleDirectory) {
       onToggle(node.path);
     }
-    if (node.kind === 'file' && !isSelectionModifierEvent(event, desktopPlatform)) {
+    if (action.locateFileInCanvas) {
       onLocateFileInCanvas?.(node.path);
     }
   };
@@ -571,7 +584,7 @@ function ProjectTreeRow({
   if (node.kind === 'directory') {
     const open = expanded.has(node.path);
     return (
-      <div role="treeitem" aria-expanded={open}>
+      <div role="treeitem" aria-expanded={open} aria-selected={selected}>
         {renameEditing ? (
           <ProjectTreeRenameRow
             node={node}
@@ -598,14 +611,7 @@ function ProjectTreeRow({
             onDragLeave={() => setDragOverPath(null)}
             onDrop={drop}
           >
-            <span
-              className={open ? 'tree-chevron open' : 'tree-chevron'}
-              onClick={(event) => {
-                event.stopPropagation();
-                onToggle(node.path);
-              }}
-            />
-            <FolderTree size={14} />
+            {open ? <FolderOpen size={14} /> : <Folder size={14} />}
             <span>{node.name}</span>
           </button>
         )}
@@ -681,8 +687,7 @@ function ProjectTreeRow({
       onDragLeave={() => setDragOverPath(null)}
       onDrop={drop}
     >
-      <span className="tree-chevron-spacer" />
-      <Files size={14} />
+      <File size={14} />
       <span>{node.name}</span>
     </button>
   );
@@ -783,7 +788,6 @@ function ProjectTreeInlineEditRow({
   const style = { '--tree-indent': `${depth * 14}px` } as React.CSSProperties;
   return (
     <div className="project-tree-edit-row" style={style} data-project-tree-edit-kind={editing.kind}>
-      <span className="tree-chevron-spacer" />
       {editing.kind === 'creating-directory' ? <FolderPlus size={14} /> : <FilePlus2 size={14} />}
       <Input
         className="project-tree-edit-input"
@@ -828,8 +832,9 @@ function ProjectTreeRenameRow({
   const style = { '--tree-indent': `${depth * 14}px` } as React.CSSProperties;
   return (
     <div className={rowClassName} style={style} title={node.path} data-project-tree-context-path={node.path}>
-      {node.kind === 'directory' ? <span className={open ? 'tree-chevron open' : 'tree-chevron'} /> : <span className="tree-chevron-spacer" />}
-      {node.kind === 'directory' ? <FolderTree size={14} /> : <Files size={14} />}
+      {node.kind === 'directory' ? (
+        open ? <FolderOpen size={14} /> : <Folder size={14} />
+      ) : <File size={14} />}
       <Input
         className="project-tree-edit-input"
         value={editing.value}

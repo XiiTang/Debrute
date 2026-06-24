@@ -77,6 +77,10 @@ export async function openInitialProject(
   };
 }
 
+export function shouldShowInitialProjectLoader(route: DebruteWorkbenchRoute): boolean {
+  return route.kind !== 'workbench';
+}
+
 export async function loadCanvasFeedback(
   api: WorkbenchApiClient,
   setCanvasFeedback: React.Dispatch<React.SetStateAction<WorkbenchState['canvasFeedback']>>,
@@ -94,7 +98,7 @@ export function errorMessage(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
 }
 
-function currentDebruteWorkbenchRoute(): DebruteWorkbenchRoute {
+export function currentDebruteWorkbenchRoute(): DebruteWorkbenchRoute {
   if (typeof window === 'undefined') {
     return { kind: 'workbench' };
   }

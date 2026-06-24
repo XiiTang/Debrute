@@ -26,7 +26,7 @@ export interface FloatingPanelState {
 }
 
 export const FLOATING_PANEL_DEFINITIONS: Record<FloatingPanelId, FloatingPanelDefinition> = {
-  explorer: panelDefinition('explorer', 'Explorer', 18, 72, 320, 620, 280, 320, 720, 900),
+  explorer: panelDefinition('explorer', 'Explorer', 58, 45, 320, 620, 280, 320, 720, 900),
   inspector: panelDefinition('inspector', 'Inspector', 1036, 470, 340, 420, 300, 280, 760, 760),
   problems: panelDefinition('problems', 'Problems', 360, 680, 720, 260, 420, 180, 1200, 520),
   settings: panelDefinition('settings', 'Settings', 360, 120, 760, 580, 520, 360, 1100, 860),
@@ -38,7 +38,7 @@ export const FLOATING_PANEL_IDS = Object.keys(FLOATING_PANEL_DEFINITIONS) as Flo
 export const DEFAULT_FLOATING_PANEL_STATE: FloatingPanelState = {
   panels: {
     explorer: {
-      open: true,
+      open: false,
       x: FLOATING_PANEL_DEFINITIONS.explorer.defaultX,
       y: FLOATING_PANEL_DEFINITIONS.explorer.defaultY,
       width: FLOATING_PANEL_DEFINITIONS.explorer.defaultWidth,

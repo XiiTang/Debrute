@@ -92,6 +92,14 @@ describe('WorkbenchApp title bar contracts', () => {
     expect(refreshBody).toContain('Title bar state failed');
     expect(source).not.toContain('void refreshTitleBarState().catch');
   });
+
+  it('keeps explicit route loading copy scoped to opening a project', () => {
+    const source = readFileSync(join(process.cwd(), 'apps/web/src/workbench/WorkbenchApp.tsx'), 'utf8');
+
+    expect(source).not.toContain('Opening Debrute workbench');
+    expect(source).not.toContain('Opening Explorer');
+    expect(source).toContain('Opening project');
+  });
 });
 
 function feedbackTarget(projectRelativePath = 'flow/a.png'): CanvasFeedbackBarTarget {

@@ -8,18 +8,24 @@
 .project-tree {
   min-height: 0;
   height: 100%;
-  padding: 8px 6px 12px;
+  padding: 6px 4px 10px;
   overflow: auto;
 }
 
 .project-tree-row {
-  height: 26px;
+  min-height: 24px;
   display: grid;
-  grid-template-columns: 16px 16px minmax(0, 1fr);
+  grid-template-columns: 16px minmax(0, 1fr);
   align-items: center;
-  gap: 5px;
-  padding: 0 8px 0 calc(8px + var(--tree-indent));
+  gap: 7px;
+  padding: 0 8px 0 calc(6px + var(--tree-indent));
   text-align: left;
+  font-size: var(--db-font-sm);
+}
+
+.project-tree-row svg,
+.project-tree-edit-row svg {
+  color: var(--db-text-subtle);
 }
 
 .project-tree-row span:last-child {
@@ -32,10 +38,10 @@
 .project-tree-edit-row {
   min-height: 28px;
   display: grid;
-  grid-template-columns: calc(var(--tree-indent) + 14px) 16px minmax(0, 1fr);
+  grid-template-columns: 16px minmax(0, 1fr);
   align-items: center;
   gap: 7px;
-  padding: 0 8px 0 4px;
+  padding: 0 8px 0 calc(6px + var(--tree-indent));
 }
 
 .project-tree-edit-input {
@@ -47,29 +53,8 @@
 
 .project-tree-edit-row small,
 .project-tree-row small {
-  grid-column: 3;
+  grid-column: 2;
   color: var(--db-danger);
   font-size: 11px;
   line-height: 16px;
-}
-
-.tree-chevron,
-.tree-chevron-spacer {
-  width: 16px;
-  height: 16px;
-  position: relative;
-}
-
-.tree-chevron::before {
-  content: "";
-  position: absolute;
-  top: 4px;
-  left: 5px;
-  border-top: 4px solid transparent;
-  border-bottom: 4px solid transparent;
-  border-left: 5px solid var(--db-text-muted);
-}
-
-.tree-chevron.open::before {
-  transform: rotate(90deg);
 }

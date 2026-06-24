@@ -24,7 +24,13 @@ import { createCanvasFeedbackEntryUpdater } from './services/canvasFeedbackUpdat
 import { nextSnapshotFromAppServerEvent } from './services/appServerEvents';
 import { getCanvasById } from './services/canvasState';
 import { chooseInitialActiveCanvasId } from './canvas/canvasCardBarState';
-import { loadCanvasFeedback, openInitialProject, replaceWorkbenchProjectRoute } from './services/projectSessionState';
+import {
+  currentDebruteWorkbenchRoute,
+  loadCanvasFeedback,
+  openInitialProject,
+  replaceWorkbenchProjectRoute,
+  shouldShowInitialProjectLoader
+} from './services/projectSessionState';
 import { loadProjectViewState, saveProjectViewState } from './services/projectViewState';
 import {
   closeTextEditorWindowState,
@@ -106,6 +112,7 @@ import type { FloatingTextEditorWindowState, TextFileBuffer, WorkbenchActions, W
 const api = createWorkbenchApiClient();
 
 export function WorkbenchApp(): React.ReactElement {
+  const initialRoute = useMemo(() => currentDebruteWorkbenchRoute(), []);
   const [snapshot, setSnapshot] = useState<WorkbenchProjectSessionSnapshot>();
   const [daemonProjectId, setDaemonProjectId] = useState<string>();
   const [activeCanvasId, setActiveCanvasId] = useState<string>();
@@ -147,7 +154,7 @@ export function WorkbenchApp(): React.ReactElement {
   const [desktopPlatform, setDesktopPlatform] = useState<NodeJS.Platform>();
   const [inlineProjectTreeEdit, setInlineProjectTreeEdit] = useState<ProjectTreeInlineEditState>();
   const [notifications, setNotifications] = useState<string[]>([]);
-  const [isLoading, setIsLoading] = useState(true);
+  const [isLoading, setIsLoading] = useState(() => shouldShowInitialProjectLoader(initialRoute));
   const [projectOpenAttemptedPath, setProjectOpenAttemptedPath] = useState<string>();
   const [projectOpenError, setProjectOpenError] = useState<string>();
   const [isProjectOpening, setIsProjectOpening] = useState(false);
@@ -284,7 +291,7 @@ export function WorkbenchApp(): React.ReactElement {
         setNotifications((current) => [...current, `Desktop platform failed: ${errorMessage(error)}`]);
       }
     });
-    openInitialProject(api)
+    openInitialProject(api, initialRoute)
       .then(async (result) => {
         if (disposed) {
           return;
@@ -310,7 +317,7 @@ export function WorkbenchApp(): React.ReactElement {
     return () => {
       disposed = true;
     };
-  }, [applyOpenedProject]);
+  }, [applyOpenedProject, initialRoute]);
 
   useEffect(() => {
     void refreshTitleBarState();
@@ -1238,7 +1245,7 @@ export function WorkbenchApp(): React.ReactElement {
         />
         <div className="boot-screen boot-screen--with-titlebar">
           <Loader2 className="spin" size={22} />
-          <span>Opening Debrute workbench</span>
+          <span>Opening project</span>
         </div>
       </div>
     );

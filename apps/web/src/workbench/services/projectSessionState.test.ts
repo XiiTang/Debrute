@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import type { WorkbenchApiClient, WorkbenchProjectSessionSnapshot } from '@debrute/app-protocol';
-import { openInitialProject, replaceWorkbenchProjectRoute } from './projectSessionState';
+import { openInitialProject, replaceWorkbenchProjectRoute, shouldShowInitialProjectLoader } from './projectSessionState';
 
 describe('project session startup', () => {
   const originalWindow = (globalThis as { window?: unknown }).window;
@@ -74,6 +74,21 @@ describe('project session startup', () => {
     });
 
     expect(calls).toEqual([]);
+  });
+
+  it('skips the project-opening loader for the Workbench root', () => {
+    expect(shouldShowInitialProjectLoader({ kind: 'workbench' })).toBe(false);
+  });
+
+  it('keeps the project-opening loader for explicit project routes', () => {
+    expect(shouldShowInitialProjectLoader({
+      kind: 'project',
+      projectId: '123e4567-e89b-42d3-a456-426614174000'
+    })).toBe(true);
+    expect(shouldShowInitialProjectLoader({
+      kind: 'project-open',
+      projectRoot: '/Users/me/Project A'
+    })).toBe(true);
   });
 
   it('opens an absolute path from the project-open route and removes the path from browser history', async () => {

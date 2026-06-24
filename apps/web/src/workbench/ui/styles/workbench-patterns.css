@@ -190,13 +190,20 @@
   overflow: auto hidden;
 }
 
+.db-terminal-tab-shell {
+  position: relative;
+  min-width: 0;
+  flex: 0 1 190px;
+}
+
 .db-terminal-tab {
   display: inline-flex;
   align-items: center;
   gap: var(--db-space-2);
+  width: 100%;
   max-width: 180px;
   height: 24px;
-  padding: 0 var(--db-space-3);
+  padding: 0 20px 0 var(--db-space-3);
   white-space: nowrap;
 }
 
@@ -208,6 +215,27 @@
 .db-terminal-tab small {
   color: var(--db-text-subtle);
   font-size: var(--db-font-xs);
+}
+
+.db-terminal-tab__close.db-icon-button {
+  position: absolute;
+  top: 1px;
+  right: 2px;
+  width: 16px;
+  height: 16px;
+  border-radius: 999px;
+  background: color-mix(in oklch, var(--db-bg) 74%, var(--db-surface-2));
+  color: var(--db-text-muted);
+  opacity: 0.78;
+}
+
+.db-terminal-tab-shell:hover .db-terminal-tab__close.db-icon-button,
+.db-terminal-tab-shell:focus-within .db-terminal-tab__close.db-icon-button,
+.db-terminal-tab__close.db-icon-button:hover:not(:disabled) {
+  border-color: color-mix(in oklch, var(--db-accent) 42%, var(--db-border));
+  background: color-mix(in oklch, var(--db-surface-3) 82%, var(--db-accent));
+  color: var(--db-text);
+  opacity: 1;
 }
 
 .db-notification-stack {

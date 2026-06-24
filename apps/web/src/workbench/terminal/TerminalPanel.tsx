@@ -7,7 +7,6 @@ import { createTerminalMetadataEventHandler } from './terminalMetadataEvents';
 import {
   beginClosingTerminalSession,
   finishClosingTerminalSession,
-  isTerminalSessionClosing,
   replaceTerminalSession,
   selectNextTerminalSession,
   shouldShowTerminalEmptyState,
@@ -18,6 +17,60 @@ export interface TerminalPanelProps {
   api: WorkbenchApiClient;
   requestedCwdProjectRelativePath: string | null;
   onRequestedCwdConsumed(): void;
+}
+
+export interface TerminalPanelToolbarProps {
+  sessions: TerminalSessionView[];
+  activeSessionId: string | null;
+  closingSessionIds: string[];
+  canRestartActiveSession: boolean;
+  onSelectSession(terminalId: string): void;
+  onCreateSession(): void;
+  onRestartActiveSession(): void;
+  onCloseSession(session: TerminalSessionView): void;
+}
+
+export function TerminalPanelToolbar({
+  sessions,
+  activeSessionId,
+  closingSessionIds,
+  canRestartActiveSession,
+  onSelectSession,
+  onCreateSession,
+  onRestartActiveSession,
+  onCloseSession
+}: TerminalPanelToolbarProps): React.ReactElement {
+  return (
+    <Toolbar ariaLabel="Terminal sessions" className="terminal-panel__toolbar">
+      <TabList className="db-terminal-tabs" aria-label="Terminal sessions">
+        {sessions.map((session) => (
+          <div key={session.id} className="db-terminal-tab-shell">
+            <Tab
+              active={session.id === activeSessionId}
+              className="db-terminal-tab"
+              onClick={() => onSelectSession(session.id)}
+            >
+              <span>{session.title}</span>
+              {session.status === 'exited' || session.status === 'failed' ? (
+                <small>{session.status}</small>
+              ) : null}
+            </Tab>
+            <IconButton
+              className="db-terminal-tab__close"
+              label={`Close ${session.title}`}
+              icon={<X size={10} />}
+              disabled={closingSessionIds.includes(session.id)}
+              onClick={() => onCloseSession(session)}
+            />
+          </div>
+        ))}
+      </TabList>
+      <div className="db-action-row">
+        <IconButton label="New Terminal" icon={<Plus size={14} />} onClick={onCreateSession} />
+        <IconButton label="Restart Terminal" icon={<RotateCcw size={14} />} disabled={!canRestartActiveSession} onClick={onRestartActiveSession} />
+      </div>
+    </Toolbar>
+  );
 }
 
 export function TerminalPanel({
@@ -177,33 +230,16 @@ export function TerminalPanel({
 
   return (
     <div className="terminal-panel">
-      <Toolbar ariaLabel="Terminal sessions" className="terminal-panel__toolbar">
-        <TabList className="db-terminal-tabs" aria-label="Terminal sessions">
-          {state.sessions.map((session) => (
-            <Tab
-              key={session.id}
-              active={session.id === state.activeSessionId}
-              className="db-terminal-tab"
-              onClick={() => setState((current) => ({ ...current, activeSessionId: session.id }))}
-            >
-              <span>{session.title}</span>
-              {session.status === 'exited' || session.status === 'failed' ? (
-                <small>{session.status}</small>
-              ) : null}
-            </Tab>
-          ))}
-        </TabList>
-        <div className="db-action-row">
-          <IconButton label="New Terminal" icon={<Plus size={14} />} onClick={() => void createSession('').catch(showError)} />
-          <IconButton label="Restart Terminal" icon={<RotateCcw size={14} />} disabled={!activeSession} onClick={restartActiveSession} />
-          <IconButton
-            label="Close Terminal"
-            icon={<X size={14} />}
-            disabled={!activeSession || isTerminalSessionClosing(state, activeSession.id)}
-            onClick={() => activeSession && closeSession(activeSession)}
-          />
-        </div>
-      </Toolbar>
+      <TerminalPanelToolbar
+        sessions={state.sessions}
+        activeSessionId={state.activeSessionId}
+        closingSessionIds={state.closingSessionIds}
+        canRestartActiveSession={Boolean(activeSession)}
+        onSelectSession={(terminalId) => setState((current) => ({ ...current, activeSessionId: terminalId }))}
+        onCreateSession={() => void createSession('').catch(showError)}
+        onRestartActiveSession={restartActiveSession}
+        onCloseSession={closeSession}
+      />
       {state.error ? <div className="terminal-panel__status">{state.error}</div> : null}
       {state.isLoading && state.sessions.length === 0 ? (
         <EmptyState className="terminal-panel__empty" data-testid="terminal-panel-loading-state" title="Starting terminal" />

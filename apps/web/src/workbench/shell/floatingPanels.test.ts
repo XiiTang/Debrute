@@ -9,11 +9,11 @@ import {
 } from './floatingPanels';
 
 describe('floating panel state', () => {
-  it('opens explorer by default without panel z-index state', () => {
+  it('keeps panels closed by default while preserving the Explorer spawn position', () => {
     expect(DEFAULT_FLOATING_PANEL_STATE.panels.explorer).toEqual({
-      open: true,
-      x: 18,
-      y: 72,
+      open: false,
+      x: 58,
+      y: 45,
       width: 320,
       height: 620
     });
@@ -47,10 +47,10 @@ describe('floating panel state', () => {
     expect(next.panels.terminal.height).toBe(320);
   });
 
-  it('closes an open panel from the dock', () => {
+  it('opens explorer from the dock', () => {
     const next = toggleFloatingPanel(DEFAULT_FLOATING_PANEL_STATE, 'explorer');
 
-    expect(next.panels.explorer.open).toBe(false);
+    expect(next.panels.explorer.open).toBe(true);
   });
 
   it('closes a panel without changing its position', () => {
