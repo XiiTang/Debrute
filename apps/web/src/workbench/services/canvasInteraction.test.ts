@@ -103,12 +103,22 @@ describe('canvas interaction', () => {
     } as unknown as EventTarget)).toBe(false);
   });
 
+  it('routes focus-gated local wheel targets to the canvas until focused', () => {
+    const unfocusedEditor = mockElement('canvas-text-body', undefined, 'focus', false);
+    const focusedEditor = mockElement('canvas-text-body', undefined, 'focus', true);
+
+    expect(shouldCanvasHandleWheelTarget(unfocusedEditor as unknown as EventTarget)).toBe(true);
+    expect(shouldCanvasHandleWheelTarget(focusedEditor as unknown as EventTarget)).toBe(false);
+  });
+
   it('lets canvas-owned floating bars keep wheel gestures on the canvas', () => {
     const shell = mockElement('workbench-shell');
     const surface = mockElement('canvas-surface', shell);
     const floatingLayer = mockElement('floating-bar-layer', shell);
     const floatingActionButton = mockElement('floating-action-button', floatingLayer);
     const localWheelInput = mockElement('canvas-feedback-comment-input', floatingLayer, true);
+    const unfocusedFocusLocalInput = mockElement('canvas-feedback-comment-input', floatingLayer, 'focus', false);
+    const focusedFocusLocalInput = mockElement('canvas-feedback-comment-input', floatingLayer, 'focus', true);
     const panelLayer = mockElement('panel-layer', shell);
     const panelButton = mockElement('floating-panel-button', panelLayer);
     const otherShell = mockElement('workbench-shell');
@@ -118,6 +128,8 @@ describe('canvas interaction', () => {
     expect(shouldCanvasHandleGlobalWheelTarget(surface as unknown as EventTarget, surface as unknown as EventTarget)).toBe(true);
     expect(shouldCanvasHandleGlobalWheelTarget(floatingActionButton as unknown as EventTarget, surface as unknown as EventTarget)).toBe(true);
     expect(shouldCanvasHandleGlobalWheelTarget(localWheelInput as unknown as EventTarget, surface as unknown as EventTarget)).toBe(false);
+    expect(shouldCanvasHandleGlobalWheelTarget(unfocusedFocusLocalInput as unknown as EventTarget, surface as unknown as EventTarget)).toBe(true);
+    expect(shouldCanvasHandleGlobalWheelTarget(focusedFocusLocalInput as unknown as EventTarget, surface as unknown as EventTarget)).toBe(false);
     expect(shouldCanvasHandleGlobalWheelTarget(panelButton as unknown as EventTarget, surface as unknown as EventTarget)).toBe(false);
     expect(shouldCanvasHandleGlobalWheelTarget(otherFloatingActionButton as unknown as EventTarget, surface as unknown as EventTarget)).toBe(false);
   });
@@ -134,19 +146,31 @@ describe('canvas interaction', () => {
   });
 });
 
-function mockElement(className: string, parent?: MockElement, localWheel = false): MockElement {
+function mockElement(
+  className: string,
+  parent?: MockElement,
+  localWheel: false | true | 'focus' = false,
+  focused = false
+): MockElement {
   const element: MockElement = {
     className,
+    focused,
     localWheel,
     parent,
     closest(selector: string): MockElement | null {
-      if (selector === '[data-canvas-local-wheel="true"]' && element.localWheel) {
+      if (selector === '[data-canvas-local-wheel="true"]' && element.localWheel === true) {
+        return element;
+      }
+      if (selector === '[data-canvas-local-wheel="focus"]' && element.localWheel === 'focus') {
         return element;
       }
       if (selector.startsWith('.') && element.className === selector.slice(1)) {
         return element;
       }
       return element.parent?.closest(selector) ?? null;
+    },
+    matches(selector: string): boolean {
+      return selector === ':focus-within' && element.focused;
     },
     contains(target: EventTarget | null): boolean {
       let current = target as unknown as MockElement | undefined;
@@ -164,8 +188,10 @@ function mockElement(className: string, parent?: MockElement, localWheel = false
 
 interface MockElement {
   className: string;
-  localWheel: boolean;
+  focused: boolean;
+  localWheel: false | true | 'focus';
   parent: MockElement | undefined;
   closest: (selector: string) => MockElement | null;
+  matches: (selector: string) => boolean;
   contains: (target: EventTarget | null) => boolean;
 }

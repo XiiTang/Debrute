@@ -27,7 +27,8 @@ describe('CanvasFeedbackBar', () => {
     expect(html).toContain('--db-comment-pill-min-width:90px');
     expect(html).toContain('--db-comment-pill-max-width:90px');
     expect(html).not.toContain('Clear draft comment for flow/cover.png');
-    expect(html).toContain('data-canvas-local-wheel="true"');
+    expect(html).toContain('data-canvas-local-wheel="focus"');
+    expect(html).not.toContain('data-canvas-local-wheel="true"');
     expect(html).not.toContain('canvas-feedback-comment-strip');
   });
 

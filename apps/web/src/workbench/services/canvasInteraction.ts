@@ -56,11 +56,16 @@ export function normalizeCanvasWheelDelta(
 }
 
 const CANVAS_LOCAL_WHEEL_SELECTOR = '[data-canvas-local-wheel="true"]';
+const CANVAS_FOCUS_LOCAL_WHEEL_SELECTOR = '[data-canvas-local-wheel="focus"]';
 const CANVAS_FLOATING_BAR_LAYER_SELECTOR = '.floating-bar-layer';
 const CANVAS_WORKBENCH_SHELL_SELECTOR = '.workbench-shell';
 
 export function shouldCanvasHandleWheelTarget(target: EventTarget | null): boolean {
-  return closestElement(target, CANVAS_LOCAL_WHEEL_SELECTOR) === null;
+  if (closestElement(target, CANVAS_LOCAL_WHEEL_SELECTOR) !== null) {
+    return false;
+  }
+  const focusLocalWheel = closestElement(target, CANVAS_FOCUS_LOCAL_WHEEL_SELECTOR);
+  return focusLocalWheel === null || !elementMatches(focusLocalWheel, ':focus-within');
 }
 
 export function shouldCanvasHandleGlobalWheelTarget(
@@ -142,6 +147,11 @@ function closestElement(target: EventTarget | null, selector: string): unknown |
     return null;
   }
   return maybeElement.closest(selector) ?? null;
+}
+
+function elementMatches(element: unknown, selector: string): boolean {
+  const maybeElement = element as { matches?: (selector: string) => boolean };
+  return typeof maybeElement.matches === 'function' && maybeElement.matches(selector);
 }
 
 function containsTarget(container: EventTarget | null, target: EventTarget | null): boolean {

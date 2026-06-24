@@ -478,7 +478,7 @@ function CanvasTextNodeContent({
   };
 
   return (
-    <section className="canvas-text-node" data-canvas-local-wheel="true">
+    <section className="canvas-text-node">
       <div
         className="db-canvas-node-titlebar"
         onPointerDown={onTitlePointerDown}
@@ -506,6 +506,7 @@ function CanvasTextNodeContent({
       </div>
       <div
         className={problem || buffer?.error ? 'canvas-text-body problem' : 'canvas-text-body'}
+        data-canvas-local-wheel="focus"
         onPointerDown={(event) => {
           event.stopPropagation();
           selectSelf();

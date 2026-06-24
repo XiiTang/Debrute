@@ -148,6 +148,8 @@ describe('CanvasNodeContent text chrome', () => {
     );
 
     expect(html).toContain('db-canvas-node-titlebar');
+    expect(html).toContain('data-canvas-local-wheel="focus"');
+    expect(html).not.toContain('data-canvas-local-wheel="true"');
     expect(html).toContain('db-icon-button');
     expect(html).toContain('Open large editor');
   });

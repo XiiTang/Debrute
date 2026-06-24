@@ -224,7 +224,7 @@ export function CanvasFeedbackBar({
           ref={creatorInputRef}
           className="canvas-feedback-comment-creator"
           inputClassName="canvas-feedback-comment-input"
-          data-canvas-local-wheel="true"
+          data-canvas-local-wheel="focus"
           aria-label={creatorLabel}
           title={creatorTitle}
           value={creatorValue}
