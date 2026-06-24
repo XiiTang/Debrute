@@ -3,6 +3,7 @@ import { access, mkdir, realpath, stat } from 'node:fs/promises';
 import { basename, join } from 'node:path';
 import { EventEmitter } from 'node:events';
 import {
+  assertProjectTreeVisibleMutationPath,
   getDebruteProjectPaths,
   initializeBlankProject,
   normalizeProjectRelativePath,
@@ -797,6 +798,10 @@ export class DebruteAppServer {
     const summaryProjectRelativePath = input.summaryPath === undefined
       ? undefined
       : normalizeProjectRelativePath(input.summaryPath);
+    assertProjectTreeVisibleMutationPath(logProjectRelativePath);
+    if (summaryProjectRelativePath) {
+      assertProjectTreeVisibleMutationPath(summaryProjectRelativePath);
+    }
     const source = await this.resolveImageModelBatchSource(projectRoot, input.source);
     return {
       ...input,

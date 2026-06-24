@@ -1,4 +1,4 @@
-import { mkdir, mkdtemp, rm, stat, writeFile } from 'node:fs/promises';
+import { mkdir, mkdtemp, readFile, rm, stat, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import sharp from 'sharp';
@@ -13,6 +13,86 @@ import {
 import type { CanvasFeedbackRenderJobInput, CanvasFeedbackRenderJobResult } from '../canvas/CanvasFeedbackRenderedImageWorkerProtocol';
 
 const NOW = '2026-06-21T12:00:00.000Z';
+const PROTECTED_BATCH_OUTPUT_PATHS = ['.git/config', '.debrute/project.json'] as const;
+
+describe('DebruteAppServer image model batch paths', () => {
+  it('rejects batch log paths that target protected project metadata', async () => {
+    const projectRoot = await mkdtemp(join(tmpdir(), 'debrute-image-batch-log-path-'));
+    const server = new DebruteAppServer();
+    try {
+      await server.openProject(projectRoot, {
+        initializeIfMissing: true,
+        createDefaultCanvas: true,
+        watchFiles: false
+      });
+
+      for (const logPath of PROTECTED_BATCH_OUTPUT_PATHS) {
+        await expect(server.runImageModelBatch(imageBatchInput({
+          logPath
+        }))).rejects.toThrow(/Project path is (not visible in the Project Tree|protected by the Project Document System)/);
+      }
+    } finally {
+      server.close();
+      await rm(projectRoot, { recursive: true, force: true });
+    }
+  });
+
+  it('rejects batch summary paths that target protected project metadata', async () => {
+    const projectRoot = await mkdtemp(join(tmpdir(), 'debrute-image-batch-summary-path-'));
+    const server = new DebruteAppServer();
+    try {
+      await server.openProject(projectRoot, {
+        initializeIfMissing: true,
+        createDefaultCanvas: true,
+        watchFiles: false
+      });
+
+      for (const summaryPath of PROTECTED_BATCH_OUTPUT_PATHS) {
+        await expect(server.runImageModelBatch(imageBatchInput({
+          logPath: 'batch/results.jsonl',
+          summaryPath
+        }))).rejects.toThrow(/Project path is (not visible in the Project Tree|protected by the Project Document System)/);
+      }
+    } finally {
+      server.close();
+      await rm(projectRoot, { recursive: true, force: true });
+    }
+  });
+
+  it('allows visible batch log and summary paths', async () => {
+    const projectRoot = await mkdtemp(join(tmpdir(), 'debrute-image-batch-visible-paths-'));
+    const server = new DebruteAppServer();
+    try {
+      await server.openProject(projectRoot, {
+        initializeIfMissing: true,
+        createDefaultCanvas: true,
+        watchFiles: false
+      });
+
+      const summary = await server.runImageModelBatch(imageBatchInput({
+        logPath: 'batch/results.jsonl',
+        summaryPath: 'batch/summary.json'
+      }));
+
+      expect(summary).toMatchObject({
+        total: 1,
+        failedCount: 1,
+        logPath: 'batch/results.jsonl',
+        summaryPath: 'batch/summary.json'
+      });
+      expect(await readFile(join(projectRoot, 'batch/results.jsonl'), 'utf8')).toContain('"status":"failed"');
+      expect(JSON.parse(await readFile(join(projectRoot, 'batch/summary.json'), 'utf8'))).toMatchObject({
+        total: 1,
+        failedCount: 1,
+        logPath: 'batch/results.jsonl',
+        summaryPath: 'batch/summary.json'
+      });
+    } finally {
+      server.close();
+      await rm(projectRoot, { recursive: true, force: true });
+    }
+  });
+});
 
 describe('DebruteAppServer Canvas feedback materialization', () => {
   it('queues rendered Canvas feedback artifacts when opening a project without waiting for publication', async () => {
@@ -273,6 +353,22 @@ interface ManualRenderJob {
   signal: AbortSignal;
   resolveSuccess(): Promise<void>;
   resolveFailure(message: string): Promise<void>;
+}
+
+function imageBatchInput(input: { logPath: string; summaryPath?: string }) {
+  return {
+    source: {
+      kind: 'requests' as const,
+      requests: [{
+        model: 'missing-image-model',
+        arguments: { prompt: 'test' }
+      }]
+    },
+    concurrency: 1,
+    retries: 0,
+    logPath: input.logPath,
+    ...(input.summaryPath === undefined ? {} : { summaryPath: input.summaryPath })
+  };
 }
 
 async function writeImageFixture(projectRoot: string, projectRelativePath: string): Promise<void> {
