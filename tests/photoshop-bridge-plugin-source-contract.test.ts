@@ -95,7 +95,7 @@ describe('Photoshop bridge plugin source contract', () => {
       '--bridge-text: #ffffff',
       '--bridge-text-muted: color-mix(in srgb, #ffffff 72%, transparent)',
       '--bridge-border: #3a3a3a',
-      '--bridge-error: oklch(0.66 0.2 26)',
+      '--bridge-error: #f4514c',
       '--bridge-focus: #ffffff',
       '--bridge-control-height: 28px',
       '--bridge-font-size: 12px'
@@ -121,6 +121,7 @@ describe('Photoshop bridge plugin source contract', () => {
     for (const rawChrome of ['#252525', '#f2f2f2', '#4a4a4a', '#ffb4a8', '#7aa7ff']) {
       expect(styles).not.toContain(rawChrome);
     }
+    expect(styles).not.toContain('oklch(');
     expect(styles).not.toMatch(/\nbutton\s*\{/);
     expect(styles).not.toMatch(/\nsection\s*\{/);
   });

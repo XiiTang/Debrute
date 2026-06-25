@@ -5,7 +5,7 @@
   --bridge-text: #ffffff;
   --bridge-text-muted: color-mix(in srgb, #ffffff 72%, transparent);
   --bridge-border: #3a3a3a;
-  --bridge-error: oklch(0.66 0.2 26);
+  --bridge-error: #f4514c;
   --bridge-focus: #ffffff;
   --bridge-control-height: 28px;
   --bridge-font-size: 12px;
