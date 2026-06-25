@@ -54,6 +54,7 @@ export function FloatingTextEditorWindow({
     <Panel
       className="floating-panel floating-text-editor-window"
       data-testid="floating-text-editor-window"
+      data-canvas-local-wheel="true"
       style={{
         [FLOATING_PANEL_TITLEBAR_CSS_PROPERTY]: FLOATING_PANEL_TITLEBAR_CSS_VALUE,
         left: windowState.x,

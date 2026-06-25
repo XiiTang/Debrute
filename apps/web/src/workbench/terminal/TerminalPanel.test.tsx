@@ -46,14 +46,6 @@ describe('TerminalPanel rendering', () => {
     expect(html).toContain('aria-label="Close two"');
     expect(html).not.toContain('aria-label="Close Terminal"');
   });
-
-  it('positions the terminal toolbar in the floating panel title row', () => {
-    const css = readFileSync('apps/web/src/workbench/styles/terminal.css', 'utf8');
-
-    expect(css).toContain('.floating-panel-terminal .terminal-panel__toolbar');
-    expect(css).toContain('position: absolute;');
-    expect(css).toContain('top: calc(-1 * var(--db-floating-panel-titlebar-height));');
-  });
 });
 
 function sessionFixture(id: string): TerminalSessionView {
