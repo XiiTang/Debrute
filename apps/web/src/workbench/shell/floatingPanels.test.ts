@@ -2,11 +2,14 @@ import { describe, expect, it } from 'vitest';
 import {
   DEFAULT_FLOATING_PANEL_STATE,
   closeFloatingPanel,
+  constrainOpenFloatingPanelsToViewport,
   dragFloatingPanel,
   openFloatingPanel,
   resizeFloatingPanel,
   toggleFloatingPanel
 } from './floatingPanels';
+
+const viewport = { x: 0, y: 0, width: 1000, height: 700 };
 
 describe('floating panel state', () => {
   it('keeps panels closed by default while preserving the Explorer spawn position', () => {
@@ -28,7 +31,8 @@ describe('floating panel state', () => {
   });
 
   it('opens a closed panel from the dock without assigning z-index', () => {
-    const next = toggleFloatingPanel(DEFAULT_FLOATING_PANEL_STATE, 'problems');
+    const roomyViewport = { ...viewport, height: 900 };
+    const next = toggleFloatingPanel(DEFAULT_FLOATING_PANEL_STATE, 'problems', roomyViewport);
 
     expect(next.panels.problems).toEqual({
       open: true,
@@ -40,17 +44,41 @@ describe('floating panel state', () => {
   });
 
   it('opens a panel directly for commands', () => {
-    const next = openFloatingPanel(DEFAULT_FLOATING_PANEL_STATE, 'terminal');
+    const next = openFloatingPanel(DEFAULT_FLOATING_PANEL_STATE, 'terminal', viewport);
 
     expect(next.panels.terminal.open).toBe(true);
     expect(next.panels.terminal.width).toBe(920);
     expect(next.panels.terminal.height).toBe(320);
+    expect(next.panels.terminal.x).toBe(96);
+    expect(next.panels.terminal.y).toBe(420);
   });
 
   it('opens explorer from the dock', () => {
-    const next = toggleFloatingPanel(DEFAULT_FLOATING_PANEL_STATE, 'explorer');
+    const next = toggleFloatingPanel(DEFAULT_FLOATING_PANEL_STATE, 'explorer', viewport);
 
     expect(next.panels.explorer.open).toBe(true);
+  });
+
+  it('constrains a fully offscreen panel when it opens', () => {
+    const state = {
+      panels: {
+        ...DEFAULT_FLOATING_PANEL_STATE.panels,
+        terminal: {
+          ...DEFAULT_FLOATING_PANEL_STATE.panels.terminal,
+          open: false,
+          x: 1600,
+          y: 900
+        }
+      }
+    };
+
+    const next = openFloatingPanel(state, 'terminal', viewport);
+
+    expect(next.panels.terminal).toMatchObject({
+      open: true,
+      x: 961,
+      y: 661
+    });
   });
 
   it('closes a panel without changing its position', () => {
@@ -61,20 +89,64 @@ describe('floating panel state', () => {
     expect(next.panels.explorer.y).toBe(DEFAULT_FLOATING_PANEL_STATE.panels.explorer.y);
   });
 
-  it('updates panel position after drag', () => {
-    const next = dragFloatingPanel(DEFAULT_FLOATING_PANEL_STATE, 'settings', { dx: -24, dy: 18 });
+  it('allows panel drag past all viewport edges while keeping the titlebar visible', () => {
+    const leftTop = dragFloatingPanel(DEFAULT_FLOATING_PANEL_STATE, 'settings', { dx: -1200, dy: -600 }, viewport);
+    expect(leftTop.panels.settings).toMatchObject({
+      x: -721,
+      y: -1
+    });
 
-    expect(next.panels.settings.x).toBe(DEFAULT_FLOATING_PANEL_STATE.panels.settings.x - 24);
-    expect(next.panels.settings.y).toBe(DEFAULT_FLOATING_PANEL_STATE.panels.settings.y + 18);
+    const rightBottom = dragFloatingPanel(DEFAULT_FLOATING_PANEL_STATE, 'settings', { dx: 2000, dy: 2000 }, viewport);
+    expect(rightBottom.panels.settings).toMatchObject({
+      x: 961,
+      y: 661
+    });
   });
 
   it('updates panel size after resize and clamps to definition limits', () => {
-    const small = resizeFloatingPanel(DEFAULT_FLOATING_PANEL_STATE, 'terminal', { width: 10, height: 10 });
+    const small = resizeFloatingPanel(DEFAULT_FLOATING_PANEL_STATE, 'terminal', { width: 10, height: 10 }, viewport);
     expect(small.panels.terminal.width).toBe(520);
     expect(small.panels.terminal.height).toBe(220);
+    expect(small.panels.terminal.x).toBe(96);
+    expect(small.panels.terminal.y).toBe(420);
 
-    const large = resizeFloatingPanel(DEFAULT_FLOATING_PANEL_STATE, 'terminal', { width: 2000, height: 1200 });
+    const large = resizeFloatingPanel(DEFAULT_FLOATING_PANEL_STATE, 'terminal', { width: 2000, height: 1200 }, viewport);
     expect(large.panels.terminal.width).toBe(1440);
     expect(large.panels.terminal.height).toBe(900);
+    expect(large.panels.terminal.x).toBe(96);
+    expect(large.panels.terminal.y).toBe(420);
+  });
+
+  it('constrains only open panels during viewport resize', () => {
+    const state = {
+      panels: {
+        ...DEFAULT_FLOATING_PANEL_STATE.panels,
+        explorer: {
+          ...DEFAULT_FLOATING_PANEL_STATE.panels.explorer,
+          open: true,
+          x: -500,
+          y: -100
+        },
+        settings: {
+          ...DEFAULT_FLOATING_PANEL_STATE.panels.settings,
+          open: false,
+          x: 2000,
+          y: 2000
+        }
+      }
+    };
+
+    const next = constrainOpenFloatingPanelsToViewport(state, viewport);
+
+    expect(next.panels.explorer).toMatchObject({
+      open: true,
+      x: -281,
+      y: -1
+    });
+    expect(next.panels.settings).toMatchObject({
+      open: false,
+      x: 2000,
+      y: 2000
+    });
   });
 });

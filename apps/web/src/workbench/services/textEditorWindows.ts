@@ -1,4 +1,9 @@
 import type { FloatingTextEditorWindowState, TextFileBuffer } from '../../types';
+import {
+  constrainContainedRect,
+  sameWindowRect,
+  type WorkbenchViewportRect
+} from '../shell/windowBounds';
 
 const DEFAULT_TEXT_EDITOR_WINDOW_RECT = {
   x: 420,
@@ -9,18 +14,20 @@ const DEFAULT_TEXT_EDITOR_WINDOW_RECT = {
 
 export function openTextEditorWindowState(
   windows: Record<string, FloatingTextEditorWindowState>,
-  projectRelativePath: string
+  projectRelativePath: string,
+  viewport: WorkbenchViewportRect
 ): Record<string, FloatingTextEditorWindowState> {
   const existing = windows[projectRelativePath];
+  const next = constrainTextEditorWindowState(existing
+    ? { ...existing, open: true }
+    : {
+        projectRelativePath,
+        open: true,
+        ...DEFAULT_TEXT_EDITOR_WINDOW_RECT
+      }, viewport);
   return {
     ...windows,
-    [projectRelativePath]: existing
-      ? { ...existing, open: true }
-      : {
-          projectRelativePath,
-          open: true,
-          ...DEFAULT_TEXT_EDITOR_WINDOW_RECT
-        }
+    [projectRelativePath]: next
   };
 }
 
@@ -44,7 +51,8 @@ export function closeTextEditorWindowState(
 export function dragTextEditorWindowState(
   windows: Record<string, FloatingTextEditorWindowState>,
   projectRelativePath: string,
-  delta: { dx: number; dy: number }
+  delta: { dx: number; dy: number },
+  viewport: WorkbenchViewportRect
 ): Record<string, FloatingTextEditorWindowState> {
   const existing = windows[projectRelativePath];
   if (!existing) {
@@ -52,12 +60,50 @@ export function dragTextEditorWindowState(
   }
   return {
     ...windows,
-    [projectRelativePath]: {
+    [projectRelativePath]: constrainTextEditorWindowState({
       ...existing,
-      x: Math.max(8, existing.x + delta.dx),
-      y: Math.max(8, existing.y + delta.dy)
-    }
+      x: existing.x + delta.dx,
+      y: existing.y + delta.dy
+    }, viewport)
   };
+}
+
+export function constrainOpenTextEditorWindowsToViewport(
+  windows: Record<string, FloatingTextEditorWindowState>,
+  viewport: WorkbenchViewportRect
+): Record<string, FloatingTextEditorWindowState> {
+  let changed = false;
+  const nextWindows = { ...windows };
+  for (const [projectRelativePath, windowState] of Object.entries(windows)) {
+    if (!windowState.open) {
+      continue;
+    }
+    const nextWindow = constrainTextEditorWindowState(windowState, viewport);
+    if (!sameTextEditorWindowState(windowState, nextWindow)) {
+      nextWindows[projectRelativePath] = nextWindow;
+      changed = true;
+    }
+  }
+  return changed ? nextWindows : windows;
+}
+
+function constrainTextEditorWindowState(
+  windowState: FloatingTextEditorWindowState,
+  viewport: WorkbenchViewportRect
+): FloatingTextEditorWindowState {
+  return {
+    ...windowState,
+    ...constrainContainedRect(windowState, viewport)
+  };
+}
+
+function sameTextEditorWindowState(
+  left: FloatingTextEditorWindowState,
+  right: FloatingTextEditorWindowState
+): boolean {
+  return left.projectRelativePath === right.projectRelativePath
+    && left.open === right.open
+    && sameWindowRect(left, right);
 }
 
 export type TextBufferStatusTone = 'warning' | 'danger' | 'info' | 'loading';

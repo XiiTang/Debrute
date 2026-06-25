@@ -51,12 +51,13 @@
 .floating-panel {
   position: absolute;
   display: grid;
-  grid-template-rows: 38px minmax(0, 1fr);
+  grid-template-rows: var(--db-floating-panel-titlebar-height) minmax(0, 1fr);
   pointer-events: auto;
 }
 
 .floating-panel-header {
-  height: 38px;
+  height: var(--db-floating-panel-titlebar-height);
+  min-height: var(--db-floating-panel-titlebar-height);
   cursor: move;
   user-select: none;
 }

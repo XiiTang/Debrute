@@ -246,6 +246,7 @@
   width: 280px;
   display: grid;
   gap: var(--db-space-2);
+  pointer-events: none;
 }
 
 .db-notification-row {

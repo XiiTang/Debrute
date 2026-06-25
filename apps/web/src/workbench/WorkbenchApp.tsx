@@ -32,6 +32,7 @@ import {
   shouldShowInitialProjectLoader
 } from './services/projectSessionState';
 import { loadProjectViewState, saveProjectViewState } from './services/projectViewState';
+import { reconcileWorkbenchViewportLayout } from './services/workbenchViewportLayout';
 import {
   closeTextEditorWindowState,
   dragTextEditorWindowState,
@@ -77,13 +78,13 @@ import {
   placeCanvasMinimapPanel,
   sameCanvasFeedbackBarTarget,
   type CanvasFeedbackBarTarget,
-  type CanvasLocalFeedbackDraft,
-  type FloatingBarRect
+  type CanvasLocalFeedbackDraft
 } from './shell/floatingBars';
 import {
   DEFAULT_FLOATING_PANEL_STATE,
   FLOATING_PANEL_IDS,
   closeFloatingPanel,
+  constrainOpenFloatingPanelsToViewport,
   dragFloatingPanel,
   openFloatingPanel,
   resizeFloatingPanel,
@@ -107,6 +108,7 @@ import {
   type WorkbenchWindowIdentity,
   type WorkbenchWindowOrderState
 } from './shell/workbenchWindowOrder';
+import { readWorkbenchViewportRect } from './shell/windowBounds';
 import type { FloatingTextEditorWindowState, TextFileBuffer, WorkbenchActions, WorkbenchState } from '../types';
 
 const api = createWorkbenchApiClient();
@@ -158,14 +160,16 @@ export function WorkbenchApp(): React.ReactElement {
   const [projectOpenAttemptedPath, setProjectOpenAttemptedPath] = useState<string>();
   const [projectOpenError, setProjectOpenError] = useState<string>();
   const [isProjectOpening, setIsProjectOpening] = useState(false);
+  const [workbenchViewportRect, setWorkbenchViewportRect] = useState(readWorkbenchViewportRect);
   const canvasOverlayRuntime = useMemo(() => createCanvasOverlayRuntime(), []);
+  const workbenchViewportRectRef = useRef(workbenchViewportRect);
   const snapshotRef = useRef(snapshot);
   const textFileBuffersRef = useRef(textFileBuffers);
   const textEditorWindowsRef = useRef(textEditorWindows);
   const feedbackBarClearTimerRef = useRef<number | undefined>(undefined);
   const feedbackBarHoveredRef = useRef(false);
 
-  const refreshTitleBarState = useCallback(async (projectId = daemonProjectId) => {
+  const refreshTitleBarState = useCallback(async (projectId?: string) => {
     const shell = getDebruteShellApi();
     try {
       const state = shell?.getWorkbenchTitleBarState
@@ -179,7 +183,7 @@ export function WorkbenchApp(): React.ReactElement {
       setTitleBarState(unavailableWorkbenchTitleBarState());
       setNotifications((current) => [`Title bar state failed: ${errorMessage(error)}`, ...current].slice(0, 4));
     }
-  }, [daemonProjectId]);
+  }, []);
 
   const chooseActiveCanvasForProject = useCallback((input: {
     projectId: string;
@@ -200,11 +204,11 @@ export function WorkbenchApp(): React.ReactElement {
   }, []);
 
   const loadFloatingPanelsForProject = useCallback((projectId: string): FloatingPanelState => {
-    return loadProjectViewState({
+    return constrainOpenFloatingPanelsToViewport(loadProjectViewState({
       storage: sessionProjectViewStorage(),
       projectId,
       clientId: api.clientId
-    }).floatingPanels ?? DEFAULT_FLOATING_PANEL_STATE;
+    }).floatingPanels ?? DEFAULT_FLOATING_PANEL_STATE, workbenchViewportRectRef.current);
   }, []);
 
   const applyOpenedProject = useCallback(async (opened: { projectId: string; snapshot: WorkbenchProjectSessionSnapshot }) => {
@@ -236,6 +240,10 @@ export function WorkbenchApp(): React.ReactElement {
   }, [chooseActiveCanvasForProject, loadFloatingPanelsForProject, refreshTitleBarState]);
 
   useEffect(() => {
+    workbenchViewportRectRef.current = workbenchViewportRect;
+  }, [workbenchViewportRect]);
+
+  useEffect(() => {
     snapshotRef.current = snapshot;
   }, [snapshot]);
 
@@ -246,6 +254,22 @@ export function WorkbenchApp(): React.ReactElement {
   useEffect(() => {
     textEditorWindowsRef.current = textEditorWindows;
   }, [textEditorWindows]);
+
+  const reconcileCurrentWorkbenchViewportLayout = useCallback(() => {
+    reconcileWorkbenchViewportLayout({
+      viewportRef: workbenchViewportRectRef,
+      setViewportRect: setWorkbenchViewportRect,
+      setFloatingPanels,
+      setTextEditorWindows
+    }, readWorkbenchViewportRect());
+  }, []);
+
+  useEffect(() => {
+    globalThis.window.addEventListener('resize', reconcileCurrentWorkbenchViewportLayout);
+    return () => {
+      globalThis.window.removeEventListener('resize', reconcileCurrentWorkbenchViewportLayout);
+    };
+  }, [reconcileCurrentWorkbenchViewportLayout]);
 
   useEffect(() => {
     if (!activeCanvasRuntime) {
@@ -320,14 +344,20 @@ export function WorkbenchApp(): React.ReactElement {
   }, [applyOpenedProject, initialRoute]);
 
   useEffect(() => {
-    void refreshTitleBarState();
-  }, [refreshTitleBarState]);
+    void refreshTitleBarState(daemonProjectId);
+  }, [daemonProjectId, refreshTitleBarState]);
 
   useEffect(() => {
     const shell = getDebruteShellApi();
-    void shell?.getNativeWindowState?.().then(setNativeWindowState).catch(() => undefined);
-    return shell?.onNativeWindowStateChanged?.(setNativeWindowState);
-  }, []);
+    void shell?.getNativeWindowState?.().then((state) => {
+      setNativeWindowState(state);
+      reconcileCurrentWorkbenchViewportLayout();
+    }).catch(() => undefined);
+    return shell?.onNativeWindowStateChanged?.((state) => {
+      setNativeWindowState(state);
+      reconcileCurrentWorkbenchViewportLayout();
+    });
+  }, [reconcileCurrentWorkbenchViewportLayout]);
 
   useEffect(() => {
     if (!daemonProjectId || !activeCanvasId) {
@@ -462,7 +492,7 @@ export function WorkbenchApp(): React.ReactElement {
   }, []);
 
   const openTextEditorWindow = useCallback((projectRelativePath: string) => {
-    setTextEditorWindows((windows) => openTextEditorWindowState(windows, projectRelativePath));
+    setTextEditorWindows((windows) => openTextEditorWindowState(windows, projectRelativePath, workbenchViewportRectRef.current));
     setWindowOrder((current) => focusWorkbenchWindow(current, textEditorWindowIdentity(projectRelativePath)));
     void ensureTextFileBuffer(projectRelativePath);
   }, [ensureTextFileBuffer]);
@@ -523,16 +553,7 @@ export function WorkbenchApp(): React.ReactElement {
   }, []);
 
   const openInspectorPanel = useCallback(() => {
-    setFloatingPanels((current) => ({
-      ...current,
-      panels: {
-        ...current.panels,
-        inspector: {
-          ...current.panels.inspector,
-          open: true
-        }
-      }
-    }));
+    setFloatingPanels((current) => openFloatingPanel(current, 'inspector', workbenchViewportRectRef.current));
     setWindowOrder((current) => focusWorkbenchWindow(current, panelWindowIdentity('inspector')));
   }, []);
 
@@ -612,7 +633,7 @@ export function WorkbenchApp(): React.ReactElement {
 
   const openTerminalPanel = useCallback((cwdProjectRelativePath = '') => {
     setRequestedTerminalCwd(cwdProjectRelativePath);
-    setFloatingPanels((current) => openFloatingPanel(current, 'terminal'));
+    setFloatingPanels((current) => openFloatingPanel(current, 'terminal', workbenchViewportRectRef.current));
     setWindowOrder((current) => focusWorkbenchWindow(current, panelWindowIdentity('terminal')));
   }, []);
 
@@ -981,9 +1002,9 @@ export function WorkbenchApp(): React.ReactElement {
           setIsProjectOpening(false);
         }
       },
-      refreshTitleBarState
+      refreshTitleBarState: () => refreshTitleBarState(daemonProjectId)
     }).catch((error) => notify(`Menu command failed: ${errorMessage(error)}`));
-  }, [actions.openProject, applyOpenedProject, notify, refreshTitleBarState]);
+  }, [actions.openProject, applyOpenedProject, daemonProjectId, notify, refreshTitleBarState]);
   const handleTitleBarWindowCommand = useCallback((command: 'minimize' | 'toggle-maximize' | 'close') => {
     const shell = getDebruteShellApi();
     const promise = command === 'minimize'
@@ -994,16 +1015,11 @@ export function WorkbenchApp(): React.ReactElement {
     void Promise.resolve(promise).then((state) => {
       if (state && 'maximized' in state) {
         setNativeWindowState(state);
+        reconcileCurrentWorkbenchViewportLayout();
       }
     }).catch((error) => notify(`Window command failed: ${errorMessage(error)}`));
-  }, [notify]);
+  }, [notify, reconcileCurrentWorkbenchViewportLayout]);
 
-  const workbenchViewportRect: FloatingBarRect = {
-    x: 0,
-    y: 0,
-    width: globalThis.window?.innerWidth ?? 1280,
-    height: globalThis.window?.innerHeight ?? 720
-  };
   const minimapButtonRect = canvasMinimapButtonRect(workbenchViewportRect);
   const minimapPanelPlacement = placeCanvasMinimapPanel({
     buttonRect: minimapButtonRect,
@@ -1297,7 +1313,7 @@ export function WorkbenchApp(): React.ReactElement {
           panelState={floatingPanels}
           onToggle={(panelId) => {
             const isOpen = floatingPanels.panels[panelId].open;
-            setFloatingPanels((current) => toggleFloatingPanel(current, panelId));
+            setFloatingPanels((current) => toggleFloatingPanel(current, panelId, workbenchViewportRect));
             setWindowOrder((current) => (
               isOpen
                 ? closeWorkbenchWindow(current, panelWindowIdentity(panelId))
@@ -1368,6 +1384,23 @@ export function WorkbenchApp(): React.ReactElement {
             onReorderCanvases={(input) => actions.reorderCanvases(input).then(() => undefined).catch((error) => notify(`Reorder canvases failed: ${errorMessage(error)}`))}
           />
         ) : null}
+        {Object.values(textEditorWindows).filter((windowState) => windowState.open).map((windowState) => (
+          <FloatingTextEditorWindow
+            key={windowState.projectRelativePath}
+            windowState={windowState}
+            orderState={renderWindowOrder}
+            buffer={textFileBuffers[windowState.projectRelativePath]}
+            actions={actions}
+            onBringToFront={() => setWindowOrder((current) => (
+              focusWorkbenchWindow(current, textEditorWindowIdentity(windowState.projectRelativePath))
+            ))}
+            onClose={() => {
+              setTextEditorWindows((windows) => closeTextEditorWindowState(windows, windowState.projectRelativePath));
+              setWindowOrder((current) => closeWorkbenchWindow(current, textEditorWindowIdentity(windowState.projectRelativePath)));
+            }}
+            onDrag={(dx, dy) => setTextEditorWindows((windows) => dragTextEditorWindowState(windows, windowState.projectRelativePath, { dx, dy }, workbenchViewportRect))}
+          />
+        ))}
       </div>
       <div className="panel-layer" data-testid="panel-layer">
         {FLOATING_PANEL_IDS.map((panelId) => (
@@ -1382,8 +1415,8 @@ export function WorkbenchApp(): React.ReactElement {
                 setWindowOrder((current) => closeWorkbenchWindow(current, panelWindowIdentity(panelId)));
               }}
               onBringToFront={() => setWindowOrder((current) => focusWorkbenchWindow(current, panelWindowIdentity(panelId)))}
-              onDrag={(dx, dy) => setFloatingPanels((current) => dragFloatingPanel(current, panelId, { dx, dy }))}
-              onResize={(width, height) => setFloatingPanels((current) => resizeFloatingPanel(current, panelId, { width, height }))}
+              onDrag={(dx, dy) => setFloatingPanels((current) => dragFloatingPanel(current, panelId, { dx, dy }, workbenchViewportRect))}
+              onResize={(width, height) => setFloatingPanels((current) => resizeFloatingPanel(current, panelId, { width, height }, workbenchViewportRect))}
             >
               <FloatingPanelContent
                 panelId={panelId}
@@ -1415,23 +1448,6 @@ export function WorkbenchApp(): React.ReactElement {
               />
             </FloatingPanel>
           ) : null
-        ))}
-        {Object.values(textEditorWindows).filter((windowState) => windowState.open).map((windowState) => (
-          <FloatingTextEditorWindow
-            key={windowState.projectRelativePath}
-            windowState={windowState}
-            orderState={renderWindowOrder}
-            buffer={textFileBuffers[windowState.projectRelativePath]}
-            actions={actions}
-            onBringToFront={() => setWindowOrder((current) => (
-              focusWorkbenchWindow(current, textEditorWindowIdentity(windowState.projectRelativePath))
-            ))}
-            onClose={() => {
-              setTextEditorWindows((windows) => closeTextEditorWindowState(windows, windowState.projectRelativePath));
-              setWindowOrder((current) => closeWorkbenchWindow(current, textEditorWindowIdentity(windowState.projectRelativePath)));
-            }}
-            onDrag={(dx, dy) => setTextEditorWindows((windows) => dragTextEditorWindowState(windows, windowState.projectRelativePath, { dx, dy }))}
-          />
         ))}
       </div>
       {contextMenu ? (

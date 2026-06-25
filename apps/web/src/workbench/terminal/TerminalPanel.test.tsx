@@ -52,7 +52,7 @@ describe('TerminalPanel rendering', () => {
 
     expect(css).toContain('.floating-panel-terminal .terminal-panel__toolbar');
     expect(css).toContain('position: absolute;');
-    expect(css).toContain('top: -38px;');
+    expect(css).toContain('top: calc(-1 * var(--db-floating-panel-titlebar-height));');
   });
 });
 

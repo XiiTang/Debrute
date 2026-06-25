@@ -15,6 +15,10 @@ import {
   workbenchWindowZIndex,
   type WorkbenchWindowOrderState
 } from './workbenchWindowOrder';
+import {
+  FLOATING_PANEL_TITLEBAR_CSS_PROPERTY,
+  FLOATING_PANEL_TITLEBAR_CSS_VALUE
+} from './windowBounds';
 import type {
   WorkbenchContextMenuPosition,
   WorkbenchContextMenuTarget,
@@ -63,12 +67,13 @@ export function FloatingPanel({
       className={`floating-panel floating-panel-${panelId}`}
       data-testid={`floating-panel-${panelId}`}
       style={{
+        [FLOATING_PANEL_TITLEBAR_CSS_PROPERTY]: FLOATING_PANEL_TITLEBAR_CSS_VALUE,
         left: layout.x,
         top: layout.y,
         width: layout.width,
         height: layout.height,
         zIndex: workbenchWindowZIndex(orderState, panelWindowIdentity(panelId))
-      }}
+      } as React.CSSProperties}
       onPointerDown={onBringToFront}
     >
       <PanelHeader

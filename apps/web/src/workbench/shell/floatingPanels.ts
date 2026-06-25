@@ -1,3 +1,9 @@
+import {
+  constrainTitlebarVisible,
+  sameWindowRect,
+  type WorkbenchViewportRect
+} from './windowBounds';
+
 export type FloatingPanelId = 'explorer' | 'inspector' | 'problems' | 'settings' | 'terminal';
 
 export interface FloatingPanelDefinition {
@@ -75,8 +81,12 @@ export const DEFAULT_FLOATING_PANEL_STATE: FloatingPanelState = {
   }
 };
 
-export function openFloatingPanel(state: FloatingPanelState, panelId: FloatingPanelId): FloatingPanelState {
-  const panel = state.panels[panelId];
+export function openFloatingPanel(
+  state: FloatingPanelState,
+  panelId: FloatingPanelId,
+  viewport: WorkbenchViewportRect
+): FloatingPanelState {
+  const panel = constrainFloatingPanelLayout(state.panels[panelId], viewport);
   return {
     ...state,
     panels: {
@@ -86,13 +96,19 @@ export function openFloatingPanel(state: FloatingPanelState, panelId: FloatingPa
   };
 }
 
-export function toggleFloatingPanel(state: FloatingPanelState, panelId: FloatingPanelId): FloatingPanelState {
+export function toggleFloatingPanel(
+  state: FloatingPanelState,
+  panelId: FloatingPanelId,
+  viewport: WorkbenchViewportRect
+): FloatingPanelState {
   const panel = state.panels[panelId];
+  const nextOpen = !panel.open;
+  const nextPanel = nextOpen ? constrainFloatingPanelLayout(panel, viewport) : panel;
   return {
     ...state,
     panels: {
       ...state.panels,
-      [panelId]: { ...panel, open: !panel.open }
+      [panelId]: { ...nextPanel, open: nextOpen }
     }
   };
 }
@@ -110,18 +126,20 @@ export function closeFloatingPanel(state: FloatingPanelState, panelId: FloatingP
 export function dragFloatingPanel(
   state: FloatingPanelState,
   panelId: FloatingPanelId,
-  delta: { dx: number; dy: number }
+  delta: { dx: number; dy: number },
+  viewport: WorkbenchViewportRect
 ): FloatingPanelState {
   const panel = state.panels[panelId];
+  const nextPanel = constrainFloatingPanelLayout({
+    ...panel,
+    x: panel.x + delta.dx,
+    y: panel.y + delta.dy
+  }, viewport);
   return {
     ...state,
     panels: {
       ...state.panels,
-      [panelId]: {
-        ...panel,
-        x: Math.max(8, panel.x + delta.dx),
-        y: Math.max(8, panel.y + delta.dy)
-      }
+      [panelId]: nextPanel
     }
   };
 }
@@ -129,21 +147,57 @@ export function dragFloatingPanel(
 export function resizeFloatingPanel(
   state: FloatingPanelState,
   panelId: FloatingPanelId,
-  size: { width: number; height: number }
+  size: { width: number; height: number },
+  viewport: WorkbenchViewportRect
 ): FloatingPanelState {
   const panel = state.panels[panelId];
   const definition = FLOATING_PANEL_DEFINITIONS[panelId];
+  const nextPanel = constrainFloatingPanelLayout({
+    ...panel,
+    width: clamp(Math.round(size.width), definition.minWidth, definition.maxWidth),
+    height: clamp(Math.round(size.height), definition.minHeight, definition.maxHeight)
+  }, viewport);
   return {
     ...state,
     panels: {
       ...state.panels,
-      [panelId]: {
-        ...panel,
-        width: clamp(Math.round(size.width), definition.minWidth, definition.maxWidth),
-        height: clamp(Math.round(size.height), definition.minHeight, definition.maxHeight)
-      }
+      [panelId]: nextPanel
     }
   };
+}
+
+export function constrainOpenFloatingPanelsToViewport(
+  state: FloatingPanelState,
+  viewport: WorkbenchViewportRect
+): FloatingPanelState {
+  let changed = false;
+  const panels = { ...state.panels };
+  for (const panelId of FLOATING_PANEL_IDS) {
+    const panel = panels[panelId];
+    if (!panel.open) {
+      continue;
+    }
+    const nextPanel = constrainFloatingPanelLayout(panel, viewport);
+    if (!sameFloatingPanelLayout(panel, nextPanel)) {
+      panels[panelId] = nextPanel;
+      changed = true;
+    }
+  }
+  return changed ? { ...state, panels } : state;
+}
+
+function constrainFloatingPanelLayout(
+  panel: FloatingPanelLayout,
+  viewport: WorkbenchViewportRect
+): FloatingPanelLayout {
+  return {
+    ...panel,
+    ...constrainTitlebarVisible(panel, viewport)
+  };
+}
+
+function sameFloatingPanelLayout(left: FloatingPanelLayout, right: FloatingPanelLayout): boolean {
+  return left.open === right.open && sameWindowRect(left, right);
 }
 
 function panelDefinition(

@@ -19,12 +19,12 @@
 
 .floating-panel-terminal .terminal-panel__toolbar {
   position: absolute;
-  top: -38px;
+  top: calc(-1 * var(--db-floating-panel-titlebar-height));
   right: 44px;
   left: 92px;
   z-index: 1;
-  height: 38px;
-  min-height: 38px;
+  height: var(--db-floating-panel-titlebar-height);
+  min-height: var(--db-floating-panel-titlebar-height);
   padding: 0;
   background: transparent;
 }
