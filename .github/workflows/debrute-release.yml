@@ -175,12 +175,10 @@ jobs:
           cat > release-notes.md <<EOF
           # Debrute ${VERSION}
 
-          Debrute Desktop builds in this release are unsigned and unnotarized. Verify downloaded files against debrute_SHA256SUMS from this same release before installing.
-
           Desktop assets:
-          - macOS may require right-click Open or Privacy & Security approval.
-          - Windows may show Microsoft Defender SmartScreen.
-          - Linux AppImage builds may require chmod +x.
+          - macOS: DMG installers for Apple Silicon and Intel Macs, plus a universal zip for updates.
+          - Windows: NSIS installer for x64.
+          - Linux: AppImage for x64.
 
           Debrute CLI is managed from Debrute Desktop Settings under Debrute CLI. Manual CLI installs should download the matching debrute-cli asset, verify it with debrute_SHA256SUMS, then run:
 
