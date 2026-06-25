@@ -1,7 +1,6 @@
 import { describe, expect, it, vi } from 'vitest';
 import { EditorState, type Transaction } from '@codemirror/state';
 import { history, undoDepth } from '@codemirror/commands';
-import { canvasTextSyntaxHighlighter } from './CanvasTextHighlighting';
 import {
   canvasTextEditorCancelInlineEditKeyBinding,
   canvasTextEditorExternalValueSyncAnnotation,
@@ -12,10 +11,6 @@ import {
 } from './CanvasTextEditorRuntime';
 
 describe('CanvasTextEditorRuntime', () => {
-  it('uses the shared text syntax highlighter', () => {
-    expect(canvasTextSyntaxHighlighter.style).toEqual(expect.any(Function));
-  });
-
   it('binds Mod-s to save', () => {
     const callbacks: CanvasTextEditorCallbackRef = {
       current: {

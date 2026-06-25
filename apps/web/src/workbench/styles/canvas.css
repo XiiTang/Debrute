@@ -588,10 +588,6 @@
   text-align: right;
 }
 
-.canvas-text-editor--preview .cm-gutterElement:not(.canvas-text-editor__gutter-measure) {
-  min-height: var(--canvas-text-editor-line-height);
-}
-
 .canvas-text-editor[data-word-wrap="off"] .cm-content,
 .canvas-text-editor[data-word-wrap="off"] .cm-line {
   white-space: pre;
@@ -603,10 +599,6 @@
   overflow-wrap: anywhere;
 }
 
-.canvas-text-editor--preview .cm-editor {
-  pointer-events: none;
-}
-
 .canvas-text-editor--edit .cm-scroller, .canvas-text-editor--edit .cm-content, .canvas-text-editor--edit .cm-line {
   cursor: text;
 }
@@ -614,38 +606,6 @@
 .canvas-text-editor--edit .cm-gutters, .canvas-text-editor--edit .cm-gutterElement {
   cursor: default;
 }
-
-.canvas-text-editor .tok-keyword { color: #c792ea; }
-.canvas-text-editor .tok-atom,
-.canvas-text-editor .tok-bool,
-.canvas-text-editor .tok-number,
-.canvas-text-editor .tok-literal,
-.canvas-text-editor .tok-regexp,
-.canvas-text-editor .tok-character,
-.canvas-text-editor .tok-escape { color: #f78c6c; }
-.canvas-text-editor .tok-string,
-.canvas-text-editor .tok-string2 { color: #c3e88d; }
-.canvas-text-editor .tok-comment { color: var(--db-text-muted); }
-.canvas-text-editor .tok-variableName,
-.canvas-text-editor .tok-variableName2,
-.canvas-text-editor .tok-propertyName { color: #82aaff; }
-.canvas-text-editor .tok-definition,
-.canvas-text-editor .tok-typeName,
-.canvas-text-editor .tok-className,
-.canvas-text-editor .tok-namespace { color: #ffcb6b; }
-.canvas-text-editor .tok-operator,
-.canvas-text-editor .tok-punctuation { color: var(--db-text); }
-.canvas-text-editor .tok-meta,
-.canvas-text-editor .tok-macroName,
-.canvas-text-editor .tok-labelName { color: #89ddff; }
-.canvas-text-editor .tok-heading { color: #82aaff; font-weight: 700; }
-.canvas-text-editor .tok-strong { font-weight: 700; }
-.canvas-text-editor .tok-emphasis { font-style: italic; }
-.canvas-text-editor .tok-link,
-.canvas-text-editor .tok-url { color: #89ddff; text-decoration: underline; }
-.canvas-text-editor .tok-inserted { color: #c3e88d; }
-.canvas-text-editor .tok-deleted { color: var(--db-danger); }
-.canvas-text-editor .tok-invalid { color: var(--db-danger); }
 
 .canvas-text-editor .cm-search {
   display: flex;

@@ -91,9 +91,12 @@ describe('canvas virtualization geometry', () => {
     })).toThrow('Canvas camera z must be a positive finite number.');
   });
 
-  it('renders visible image nodes, selected nodes, and active nodes without rendering unrelated offscreen non-image nodes', () => {
+  it('renders visible retained nodes, selected nodes, and active nodes without rendering unrelated offscreen nodes', () => {
     const projection = projectionFixture([
       nodeFixture('flow/visible.png', 0, 0),
+      nodeFixture('flow/offscreen-image.png', 6000, 0),
+      textNodeFixture('flow/offscreen-text.md', 7000, 0),
+      directoryFixture('flow/offscreen-directory', 8000, 0),
       nodeFixture('flow/selected-offscreen.png', 6000, 0),
       nodeFixture('flow/active-offscreen.png', 0, 6000),
       nodeFixture('flow/far.png', 6000, 6000),
@@ -109,12 +112,14 @@ describe('canvas virtualization geometry', () => {
       activeNodeProjectRelativePaths: ['flow/active-offscreen.png']
     });
 
-    expect(state.nodes.map((node) => node.projectRelativePath)).toEqual([
-      'flow/visible.png',
-      'flow/selected-offscreen.png',
-      'flow/active-offscreen.png',
-      'flow/far.png'
-    ]);
+    const paths = state.nodes.map((node) => node.projectRelativePath);
+    expect(paths).toContain('flow/visible.png');
+    expect(paths).toContain('flow/offscreen-image.png');
+    expect(paths).toContain('flow/offscreen-text.md');
+    expect(paths).toContain('flow/selected-offscreen.png');
+    expect(paths).toContain('flow/active-offscreen.png');
+    expect(paths).toContain('flow/far.png');
+    expect(paths).not.toContain('flow/offscreen-directory');
   });
 
   it('appends selected and active nodes from the indexed node map', () => {
@@ -202,7 +207,12 @@ describe('canvas virtualization geometry', () => {
       activeNodeProjectRelativePaths: []
     });
 
-    expect(state.nodes.map((node) => node.projectRelativePath)).toEqual(['flow/source.png']);
+    expect(state.nodes.map((node) => node.projectRelativePath)).toEqual([
+      'flow/source.png',
+      'flow/target.txt',
+      'flow/outside-a.txt',
+      'flow/outside-b.txt'
+    ]);
     expect(state.edges.map((edge) => edge.id)).toEqual(['source-to-target']);
     expect(state.edges[0]?.svgViewBox).not.toBe('-100000 -100000 200000 200000');
   });
@@ -314,7 +324,10 @@ describe('canvas virtualization geometry', () => {
       activeNodeProjectRelativePaths: []
     });
 
-    expect(state.nodes).toEqual([]);
+    expect(state.nodes.map((node) => node.projectRelativePath)).toEqual([
+      'flow/source.txt',
+      'flow/target.txt'
+    ]);
     expect(state.edges.map((edge) => edge.id)).toEqual(['vertical-trunk']);
     expect(state.edges[0]?.points).toEqual([
       { x: 200, y: -4940 },
@@ -356,8 +369,8 @@ describe('canvas virtualization geometry', () => {
       activeNodeProjectRelativePaths: []
     });
 
-    expect(first.nodes.map((node) => node.projectRelativePath)).toEqual(['flow/visible-a.png', 'flow/visible-b.png']);
-    expect(second.nodes.map((node) => node.projectRelativePath)).toEqual(['flow/visible-a.png', 'flow/visible-b.png']);
+    expect(first.nodes.map((node) => node.projectRelativePath)).toEqual(['flow/visible-a.png', 'flow/visible-b.png', 'flow/far.txt']);
+    expect(second.nodes.map((node) => node.projectRelativePath)).toEqual(['flow/visible-a.png', 'flow/visible-b.png', 'flow/far.txt']);
   });
 
   it('matches fresh culling after incremental camera movement', () => {
@@ -441,6 +454,25 @@ function textNodeFixture(projectRelativePath: string, x: number, y: number): Can
       size: 100,
       mimeType: 'text/plain',
       fileUrl: `http://127.0.0.1:17321/api/projects/123e4567-e89b-42d3-a456-426614174000/files/raw/${projectRelativePath}?v=rev`,
+      revision: 'rev'
+    }
+  };
+}
+
+function directoryFixture(projectRelativePath: string, x: number, y: number): CanvasProjection['nodes'][number] {
+  return {
+    projectRelativePath,
+    nodeKind: 'directory',
+    x,
+    y,
+    width: 200,
+    height: 120,
+    z: 0,
+    availability: {
+      state: 'available',
+      size: 0,
+      mimeType: 'inode/directory',
+      fileUrl: '',
       revision: 'rev'
     }
   };

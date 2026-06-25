@@ -81,7 +81,7 @@ export function createCanvasVirtualizationIndex(input: {
   nodes: ProjectedCanvasNode[];
   edges: CanvasProjection['edges'];
 }): CanvasVirtualizationIndex {
-  const imageNodes = input.nodes.filter((node) => node.nodeKind === 'file' && node.mediaKind === 'image');
+  const retainedNodes = input.nodes.filter(isRetainedCanvasNode);
   const nodeByPath = new Map(input.nodes.map((node) => [node.projectRelativePath, node]));
   const nodeIndex = new CanvasNodeSpatialIndex(input.nodes);
   const edgeSegments = indexedCanvasEdgeSegmentsForProjectionEdges({
@@ -94,7 +94,7 @@ export function createCanvasVirtualizationIndex(input: {
     render: (query) => buildVirtualizedCanvasRenderStateFromIndex({
       ...query,
       nodeByPath,
-      imageNodes,
+      retainedNodes,
       nodeIndex,
       edgeIndex
     })
@@ -130,7 +130,7 @@ export function buildVirtualizedCanvasRenderState(input: {
 
 function buildVirtualizedCanvasRenderStateFromIndex(input: CanvasVirtualizationQueryInput & {
   nodeByPath: Map<string, ProjectedCanvasNode>;
-  imageNodes: readonly ProjectedCanvasNode[];
+  retainedNodes: readonly ProjectedCanvasNode[];
   nodeIndex: CanvasNodeSpatialIndex;
   edgeIndex: CanvasEdgeSpatialIndex;
 }): VirtualizedCanvasRenderState {
@@ -140,7 +140,7 @@ function buildVirtualizedCanvasRenderStateFromIndex(input: CanvasVirtualizationQ
   const activePaths = [...input.activeNodeProjectRelativePaths];
   const nodes = uniqueNodes([
     ...input.nodeIndex.query(virtualRect),
-    ...input.imageNodes,
+    ...input.retainedNodes,
     ...selectedPaths.flatMap((path) => input.nodeByPath.get(path) ?? []),
     ...activePaths.flatMap((path) => input.nodeByPath.get(path) ?? [])
   ]);
@@ -227,6 +227,11 @@ function uniqueNodes(nodes: ProjectedCanvasNode[]): ProjectedCanvasNode[] {
     result.push(node);
   }
   return result;
+}
+
+function isRetainedCanvasNode(node: ProjectedCanvasNode): boolean {
+  return node.nodeKind === 'file'
+    && (node.mediaKind === 'image' || node.mediaKind === 'text');
 }
 
 function rectArea(rect: CanvasRect): number {

@@ -6,9 +6,7 @@ export const CANVAS_TEXT_SURFACE_METRICS = {
   linePaddingInlinePx: 8,
   gutterPaddingLeftPx: 5,
   gutterPaddingRightPx: 3,
-  tabSize: 4,
-  previewLineOverscan: 2,
-  previewInitialLineCount: 24
+  tabSize: 4
 } as const;
 
 export type CanvasTextSurfaceCssVariable =

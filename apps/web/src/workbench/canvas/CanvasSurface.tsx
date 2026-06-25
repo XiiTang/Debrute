@@ -187,15 +187,6 @@ function CanvasSurfaceRuntime({
   const canvasPerfDragSessionRef = useRef<CanvasPerfRuntimeSession | undefined>(undefined);
   const reactCommitCountRef = useRef(0);
   const [hoveredNodePath, setHoveredNodePath] = useState<string>();
-  const [activeInlineTextEditorPath, setActiveInlineTextEditorPath] = useState<string>();
-  const inlineTextEditorFocusRequestIdRef = useRef(0);
-  const [inlineTextEditorFocusRequest, setInlineTextEditorFocusRequest] = useState<{
-    projectRelativePath: string;
-    requestId: number;
-    clientX: number;
-    clientY: number;
-  }>();
-  const [inlineTextPreviewScrollTopByPath, setInlineTextPreviewScrollTopByPath] = useState<Record<string, number>>({});
 
   const projectedNodes = projection.nodes;
   const devicePixelRatio = devicePixelRatioValue();
@@ -566,12 +557,6 @@ function CanvasSurfaceRuntime({
     runtime.setImageResourceZoom(runtime.getSnapshot().camera.z);
   }, [canvas.id, runtime]);
 
-  useEffect(() => {
-    setActiveInlineTextEditorPath(undefined);
-    setInlineTextEditorFocusRequest(undefined);
-    setInlineTextPreviewScrollTopByPath({});
-  }, [canvas.id]);
-
   useEffect(() => () => {
     if (imageResourceZoomTimerRef.current !== undefined) {
       window.clearTimeout(imageResourceZoomTimerRef.current);
@@ -592,23 +577,7 @@ function CanvasSurfaceRuntime({
     runtime.coordinates.screenToCanvas({ x: event.clientX, y: event.clientY })
   ), [runtime]);
 
-  const deactivateInlineTextEditor = useCallback((projectRelativePath?: string) => {
-    setActiveInlineTextEditorPath((current) => {
-      if (projectRelativePath !== undefined && current !== projectRelativePath) {
-        return current;
-      }
-      return undefined;
-    });
-    setInlineTextEditorFocusRequest((current) => {
-      if (projectRelativePath !== undefined && current?.projectRelativePath !== projectRelativePath) {
-        return current;
-      }
-      return undefined;
-    });
-  }, []);
-
   const beginNodeMove = useCallback((node: ProjectedCanvasNode, event: React.PointerEvent<Element>) => {
-    deactivateInlineTextEditor();
     event.currentTarget.setPointerCapture(event.pointerId);
     const item = { kind: 'node' as const, projectRelativePath: node.projectRelativePath };
     const currentSelection = selectionRef.current;
@@ -629,11 +598,10 @@ function CanvasSurfaceRuntime({
       selection: nextSelection,
       nodes: projectedNodes
     });
-  }, [deactivateInlineTextEditor, pointerCanvasPoint, projectedNodes, runtime]);
+  }, [pointerCanvasPoint, projectedNodes, runtime]);
 
   const beginNodeResize = useCallback((node: ProjectedCanvasNode, handle: ResizeHandle, event: React.PointerEvent<HTMLButtonElement>) => {
     event.stopPropagation();
-    deactivateInlineTextEditor();
     event.currentTarget.setPointerCapture(event.pointerId);
     const resizeNode = node.mediaKind === undefined
       ? { projectRelativePath: node.projectRelativePath }
@@ -652,7 +620,7 @@ function CanvasSurfaceRuntime({
       modifiers: pointerEventModifiers(event)
     });
     runtime.setSelection({ kind: 'node', projectRelativePath: node.projectRelativePath });
-  }, [deactivateInlineTextEditor, pointerCanvasPoint, runtime]);
+  }, [pointerCanvasPoint, runtime]);
 
   const handlePointerMove = useCallback((event: React.PointerEvent<Element>) => {
     runtime.input.updatePointer({
@@ -712,33 +680,9 @@ function CanvasSurfaceRuntime({
     void handlePointerUp(event);
   }, [handlePointerUp]);
 
-  const activateInlineTextEditor = useCallback((projectRelativePath: string, request: { clientX: number; clientY: number }) => {
-    const requestId = inlineTextEditorFocusRequestIdRef.current + 1;
-    inlineTextEditorFocusRequestIdRef.current = requestId;
-    setActiveInlineTextEditorPath(projectRelativePath);
-    setInlineTextEditorFocusRequest({ projectRelativePath, requestId, ...request });
-  }, []);
-
-  const selectNode = useCallback((node: ProjectedCanvasNode, inlineTextFocusRequest?: { clientX: number; clientY: number } | undefined) => {
+  const selectNode = useCallback((node: ProjectedCanvasNode) => {
     runtime.setSelection({ kind: 'node', projectRelativePath: node.projectRelativePath });
-    const nextInlineTextEditorPath = canvasSurfaceNextInlineTextEditorPathForNodeSelection({
-      node,
-      inlineTextFocusRequest
-    });
-    if (nextInlineTextEditorPath && inlineTextFocusRequest) {
-      activateInlineTextEditor(node.projectRelativePath, inlineTextFocusRequest);
-    } else {
-      deactivateInlineTextEditor();
-    }
-  }, [activateInlineTextEditor, deactivateInlineTextEditor, runtime]);
-
-  const updateInlineTextPreviewScrollTop = useCallback((projectRelativePath: string, scrollTop: number) => {
-    setInlineTextPreviewScrollTopByPath((current) => (
-      current[projectRelativePath] === scrollTop
-        ? current
-        : { ...current, [projectRelativePath]: scrollTop }
-    ));
-  }, []);
+  }, [runtime]);
 
   const handleNodePointerEnter = useCallback((node: ProjectedCanvasNode) => {
     setHoveredNodePath(node.projectRelativePath);
@@ -921,7 +865,6 @@ function CanvasSurfaceRuntime({
       data-testid="canvas-surface"
       onClick={(event) => {
         if (event.target === event.currentTarget) {
-          deactivateInlineTextEditor();
           runtime.setSelection(undefined);
         }
       }}
@@ -968,8 +911,6 @@ function CanvasSurfaceRuntime({
         <CanvasImageNodeAssetProvider value={imageNodeAssetContext}>
           {renderedNodes.map((node) => {
             const selected = isCanvasItemSelected(selection, { kind: 'node', projectRelativePath: node.projectRelativePath });
-            const inlineTextEditorActive = activeInlineTextEditorPath === node.projectRelativePath
-              || (node.mediaKind === 'text' && selected);
             return (
               <CanvasNodeShell
                 key={node.projectRelativePath}
@@ -981,17 +922,6 @@ function CanvasSurfaceRuntime({
                 stageRuntime={stageRuntime}
                 actions={actions}
                 textBuffer={textFileBuffers[node.projectRelativePath]}
-                inlineTextEditorActive={inlineTextEditorActive}
-                inlineTextEditorFocusRequest={
-                  inlineTextEditorFocusRequest?.projectRelativePath === node.projectRelativePath
-                    ? {
-                        requestId: inlineTextEditorFocusRequest.requestId,
-                        clientX: inlineTextEditorFocusRequest.clientX,
-                        clientY: inlineTextEditorFocusRequest.clientY
-                      }
-                    : undefined
-                }
-                inlineTextPreviewScrollTop={inlineTextPreviewScrollTopByPath[node.projectRelativePath] ?? 0}
                 feedbackEntry={canvasFeedback?.entries[node.projectRelativePath]}
                 localFeedbackMode={node.mediaKind === 'image' ? localFeedbackMode : undefined}
                 pendingFeedbackRegion={
@@ -1000,8 +930,6 @@ function CanvasSurfaceRuntime({
                     : undefined
                 }
                 onLocalFeedbackDraft={handleLocalFeedbackDraft}
-                onDeactivateInlineTextEditor={deactivateInlineTextEditor}
-                onInlineTextEditorScrollTopChange={updateInlineTextPreviewScrollTop}
                 onPointerDown={beginNodeMove}
                 onPointerMove={handlePointerMove}
                 onPointerUp={handlePointerUpEvent}
@@ -1041,16 +969,6 @@ export function canvasMapProjectTreeDropInput(
         canvasId,
         projectRelativePath: entry.projectRelativePath
       }
-    : undefined;
-}
-
-export function canvasSurfaceNextInlineTextEditorPathForNodeSelection(input: {
-  currentPath?: string | undefined;
-  node: Pick<ProjectedCanvasNode, 'projectRelativePath' | 'mediaKind'>;
-  inlineTextFocusRequest?: { clientX: number; clientY: number } | undefined;
-}): string | undefined {
-  return input.node.mediaKind === 'text' && input.inlineTextFocusRequest
-    ? input.node.projectRelativePath
     : undefined;
 }
 

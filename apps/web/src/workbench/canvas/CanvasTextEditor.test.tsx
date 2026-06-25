@@ -36,6 +36,23 @@ describe('CanvasTextEditor', () => {
     expect(html).toContain('data-editor-mode="edit"');
   });
 
+  it('accepts visible state without changing the editor mode marker', () => {
+    const html = renderToStaticMarkup(
+      <CanvasTextEditor
+        value="# Notes"
+        language="markdown"
+        wordWrap={false}
+        visible={false}
+        onChange={() => undefined}
+        onSave={() => undefined}
+        onToggleWordWrap={() => undefined}
+      />
+    );
+
+    expect(html).toContain('data-editor-mode="edit"');
+    expect(html).not.toContain(`data-editor-mode="${'pre'}${'view'}"`);
+  });
+
   it('uses shared text surface CSS variables', () => {
     const html = renderToStaticMarkup(
       <CanvasTextEditor

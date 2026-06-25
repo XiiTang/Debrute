@@ -8,9 +8,8 @@ import {
   type ViewUpdate
 } from '@codemirror/view';
 import { defaultKeymap, history, historyKeymap } from '@codemirror/commands';
-import { syntaxHighlighting } from '@codemirror/language';
+import { defaultHighlightStyle, syntaxHighlighting } from '@codemirror/language';
 import { search, searchKeymap } from '@codemirror/search';
-import { canvasTextSyntaxHighlighter } from './CanvasTextHighlighting';
 
 export interface CanvasTextEditorCallbacks {
   onChange: (value: string) => void;
@@ -187,7 +186,7 @@ export function canvasTextEditorBaseExtensions(callbacks: CanvasTextEditorCallba
     history(),
     lineNumbers(),
     search(),
-    syntaxHighlighting(canvasTextSyntaxHighlighter),
+    syntaxHighlighting(defaultHighlightStyle),
     keymap.of(canvasTextEditorKeymap(callbacks)),
     EditorView.updateListener.of(canvasTextEditorUpdateListener(callbacks)),
     canvasTextEditorTheme()

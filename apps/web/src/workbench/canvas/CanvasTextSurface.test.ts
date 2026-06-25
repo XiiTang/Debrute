@@ -5,7 +5,7 @@ import {
 } from './CanvasTextSurface';
 
 describe('CanvasTextSurface', () => {
-  it('emits all editor and preview text metrics from one source', () => {
+  it('emits all editor text metrics from one source', () => {
     expect(canvasTextSurfaceCssVariables()).toEqual({
       '--canvas-text-editor-font-family': CANVAS_TEXT_SURFACE_METRICS.fontFamily,
       '--canvas-text-editor-font-size': '12px',
@@ -18,7 +18,7 @@ describe('CanvasTextSurface', () => {
     });
   });
 
-  it('keeps line-window math on the same line-height metric as styling', () => {
+  it('keeps editor line height in the shared CSS variables', () => {
     expect(CANVAS_TEXT_SURFACE_METRICS.lineHeightPx).toBe(16.8);
     expect(canvasTextSurfaceCssVariables()['--canvas-text-editor-line-height']).toBe('16.8px');
   });

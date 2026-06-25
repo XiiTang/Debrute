@@ -4,7 +4,7 @@ import { describe, expect, it, vi } from 'vitest';
 import { createCanvasDocument, type CanvasFeedbackDocument, type CanvasProjection } from '@debrute/canvas-core';
 import { buildWorkbenchTitleBarState } from '@debrute/app-protocol';
 import type { IntegrationSettingsView } from '@debrute/app-protocol';
-import type { WorkbenchActions, WorkbenchState } from '../../types';
+import type { TextFileBuffer, WorkbenchActions, WorkbenchState } from '../../types';
 import { CanvasEditor } from './CanvasEditor';
 import { preloadCanvasImageForHandoff, scheduleCanvasImageHandoffAfterPaint } from './CanvasNodeContent';
 import { createCanvasOverlayRuntime } from './CanvasOverlayRuntime';
@@ -12,7 +12,6 @@ import { areCanvasNodeShellPropsEqual, CanvasNodeShell, type CanvasNodeShellProp
 import {
   CanvasSurface,
   canvasFeedbackBarTargetForProjectedNode,
-  canvasSurfaceNextInlineTextEditorPathForNodeSelection,
   isCanvasMapProjectTreeDragOver,
   canvasMapProjectTreeDropEntry,
   canvasMapProjectTreeDropInput,
@@ -34,24 +33,6 @@ import type { CanvasSelection } from './runtime/canvasSelection';
 import { createCanvasEditorRuntime, type CanvasEditorRuntime } from './runtime/CanvasEditorRuntime';
 
 describe('CanvasSurface', () => {
-  it('keeps inline text editing only for explicit text focus requests', () => {
-    expect(canvasSurfaceNextInlineTextEditorPathForNodeSelection({
-      currentPath: 'flow/active.md',
-      node: { projectRelativePath: 'flow/next.md', mediaKind: 'text' },
-      inlineTextFocusRequest: { clientX: 10, clientY: 20 }
-    })).toBe('flow/next.md');
-
-    expect(canvasSurfaceNextInlineTextEditorPathForNodeSelection({
-      currentPath: 'flow/active.md',
-      node: { projectRelativePath: 'flow/image.png', mediaKind: 'image' }
-    })).toBeUndefined();
-
-    expect(canvasSurfaceNextInlineTextEditorPathForNodeSelection({
-      currentPath: 'flow/active.md',
-      node: { projectRelativePath: 'flow/next.md', mediaKind: 'text' }
-    })).toBeUndefined();
-  });
-
   it('renders an empty Canvas Map node state', () => {
     const canvas = createCanvasDocument({ id: 'empty-canvas' });
     const projection: CanvasProjection = {
@@ -197,14 +178,13 @@ describe('CanvasSurface', () => {
     expect(html).not.toContain('Delete');
   });
 
-  it('keeps image nodes mounted while still virtualizing offscreen non-image nodes', () => {
+  it('keeps image and text nodes mounted while still virtualizing other offscreen nodes', () => {
     const canvas = createCanvasDocument({ id: 'virtual-nodes' });
     const projection: CanvasProjection = {
       canvasId: canvas.id,
       nodes: [
         nodeFixture('flow/visible.png', 0, 0),
         nodeFixture('flow/offscreen.png', 6000, 0),
-        nodeFixture('flow/selected.png', 6000, 6000),
         {
           ...nodeFixture('flow/offscreen.txt', 8000, 0),
           mediaKind: 'text',
@@ -215,20 +195,33 @@ describe('CanvasSurface', () => {
             fileUrl: 'http://127.0.0.1:17321/api/projects/123e4567-e89b-42d3-a456-426614174000/files/raw/flow/offscreen.txt?v=rev-text',
             revision: 'rev-text'
           }
-        }
+        },
+        directoryFixture('flow/offscreen-dir', 9000, 0)
       ],
       edges: [],
       diagnostics: []
     };
 
     const html = renderToStaticMarkup(surface(canvas, projection, {
-      selection: { kind: 'node', projectRelativePath: 'flow/selected.png' }
+      textFileBuffers: {
+        'flow/offscreen.txt': {
+          projectRelativePath: 'flow/offscreen.txt',
+          content: 'offscreen text',
+          language: 'plaintext',
+          wordWrap: false,
+          dirty: false,
+          saving: false,
+          diskRevision: 'rev-text',
+          lastSavedRevision: 'rev-text',
+          externalChange: false
+        }
+      }
     }));
 
     expect(html).toContain('data-canvas-node-path="flow/visible.png"');
     expect(html).toContain('data-canvas-node-path="flow/offscreen.png"');
-    expect(html).toContain('data-canvas-node-path="flow/selected.png"');
-    expect(html).not.toContain('data-canvas-node-path="flow/offscreen.txt"');
+    expect(html).toContain('data-canvas-node-path="flow/offscreen.txt"');
+    expect(html).not.toContain('data-canvas-node-path="flow/offscreen-dir"');
   });
 
   it('keeps camera transforms out of React stage markup', () => {
@@ -249,8 +242,8 @@ describe('CanvasSurface', () => {
     expect(html).not.toContain('--canvas-zoom:0.5');
   });
 
-  it('does not render offscreen text node content', () => {
-    const canvas = createCanvasDocument({ id: 'virtual-text' });
+  it('retains offscreen text node content so camera movement does not create it later', () => {
+    const canvas = createCanvasDocument({ id: 'retained-text' });
     const projection: CanvasProjection = {
       canvasId: canvas.id,
       nodes: [
@@ -287,38 +280,19 @@ describe('CanvasSurface', () => {
       }
     }));
 
-    expect(html).not.toContain('data-canvas-node-path="flow/notes/offscreen.md"');
-    expect(html).not.toContain('canvas-text-node');
-    expect(html).not.toContain('# Offscreen');
+    expect(html).toContain('data-canvas-node-path="flow/notes/offscreen.md"');
+    expect(html).toContain('canvas-text-node');
+    expect(html).toContain('data-editor-mode="edit"');
+    expect(html).not.toContain(`data-editor-mode="${'pre'}${'view'}"`);
   });
 
-  it('renders visible canvas text nodes as previews by default', () => {
-    const canvas = createCanvasDocument({ id: 'text-preview-canvas' });
+  it('renders visible canvas text nodes as live editors by default', () => {
+    const canvas = createCanvasDocument({ id: 'text-editor-canvas' });
     const projection: CanvasProjection = {
       canvasId: canvas.id,
       nodes: [
-        {
-          ...nodeFixture('flow/a.md', 0, 0),
-          mediaKind: 'text',
-          availability: {
-            state: 'available',
-            size: 100,
-            mimeType: 'text/markdown',
-            fileUrl: 'http://127.0.0.1:17321/api/projects/123e4567-e89b-42d3-a456-426614174000/files/raw/flow/a.md?v=rev-a',
-            revision: 'rev-a'
-          }
-        },
-        {
-          ...nodeFixture('flow/b.md', 300, 0),
-          mediaKind: 'text',
-          availability: {
-            state: 'available',
-            size: 100,
-            mimeType: 'text/markdown',
-            fileUrl: 'http://127.0.0.1:17321/api/projects/123e4567-e89b-42d3-a456-426614174000/files/raw/flow/b.md?v=rev-b',
-            revision: 'rev-b'
-          }
-        }
+        textProjectionNode('flow/a.md', 0, 0, 'rev-a'),
+        textProjectionNode('flow/b.md', 300, 0, 'rev-b')
       ],
       edges: [],
       diagnostics: []
@@ -326,62 +300,22 @@ describe('CanvasSurface', () => {
 
     const html = renderToStaticMarkup(surface(canvas, projection, {
       textFileBuffers: {
-        'flow/a.md': {
-          projectRelativePath: 'flow/a.md',
-          content: '# A',
-          language: 'markdown',
-          wordWrap: false,
-          dirty: false,
-          saving: false,
-          diskRevision: 'rev-a',
-          lastSavedRevision: 'rev-a',
-          externalChange: false
-        },
-        'flow/b.md': {
-          projectRelativePath: 'flow/b.md',
-          content: '# B',
-          language: 'markdown',
-          wordWrap: false,
-          dirty: false,
-          saving: false,
-          diskRevision: 'rev-b',
-          lastSavedRevision: 'rev-b',
-          externalChange: false
-        }
+        'flow/a.md': textBufferFixture('flow/a.md', '# A', 'rev-a'),
+        'flow/b.md': textBufferFixture('flow/b.md', '# B', 'rev-b')
       }
     }));
 
-    expect(html.match(/data-editor-mode="preview"/g)).toHaveLength(2);
-    expect(html).not.toContain('data-editor-mode="edit"');
+    expect(html.match(/data-editor-mode="edit"/g)).toHaveLength(2);
+    expect(html).not.toContain(`data-editor-mode="${'pre'}${'view'}"`);
   });
 
-  it('renders selected canvas text nodes as live editors', () => {
+  it('selection does not change text nodes into a different render mode', () => {
     const canvas = createCanvasDocument({ id: 'selected-text-canvas' });
     const projection: CanvasProjection = {
       canvasId: canvas.id,
       nodes: [
-        {
-          ...nodeFixture('flow/selected.md', 0, 0),
-          mediaKind: 'text',
-          availability: {
-            state: 'available',
-            size: 100,
-            mimeType: 'text/markdown',
-            fileUrl: 'http://127.0.0.1:17321/api/projects/123e4567-e89b-42d3-a456-426614174000/files/raw/flow/selected.md?v=rev-selected',
-            revision: 'rev-selected'
-          }
-        },
-        {
-          ...nodeFixture('flow/inactive.md', 300, 0),
-          mediaKind: 'text',
-          availability: {
-            state: 'available',
-            size: 100,
-            mimeType: 'text/markdown',
-            fileUrl: 'http://127.0.0.1:17321/api/projects/123e4567-e89b-42d3-a456-426614174000/files/raw/flow/inactive.md?v=rev-inactive',
-            revision: 'rev-inactive'
-          }
-        }
+        textProjectionNode('flow/selected.md', 0, 0, 'rev-selected'),
+        textProjectionNode('flow/inactive.md', 300, 0, 'rev-inactive')
       ],
       edges: [],
       diagnostics: []
@@ -390,33 +324,13 @@ describe('CanvasSurface', () => {
     const html = renderToStaticMarkup(surface(canvas, projection, {
       selection: { kind: 'node', projectRelativePath: 'flow/selected.md' },
       textFileBuffers: {
-        'flow/selected.md': {
-          projectRelativePath: 'flow/selected.md',
-          content: '# Selected',
-          language: 'markdown',
-          wordWrap: false,
-          dirty: false,
-          saving: false,
-          diskRevision: 'rev-selected',
-          lastSavedRevision: 'rev-selected',
-          externalChange: false
-        },
-        'flow/inactive.md': {
-          projectRelativePath: 'flow/inactive.md',
-          content: '# Inactive',
-          language: 'markdown',
-          wordWrap: false,
-          dirty: false,
-          saving: false,
-          diskRevision: 'rev-inactive',
-          lastSavedRevision: 'rev-inactive',
-          externalChange: false
-        }
+        'flow/selected.md': textBufferFixture('flow/selected.md', '# Selected', 'rev-selected'),
+        'flow/inactive.md': textBufferFixture('flow/inactive.md', '# Inactive', 'rev-inactive')
       }
     }));
 
-    expect(html.match(/data-editor-mode="edit"/g) ?? []).toHaveLength(1);
-    expect(html.match(/data-editor-mode="preview"/g) ?? []).toHaveLength(1);
+    expect(html.match(/data-editor-mode="edit"/g) ?? []).toHaveLength(2);
+    expect(html).not.toContain(`data-editor-mode="${'pre'}${'view'}"`);
   });
 
   it('renders structure edges when their segments intersect the virtual viewport', () => {
@@ -1185,6 +1099,34 @@ function nodeFixture(path: string, x: number, y: number): CanvasProjection['node
   };
 }
 
+function textProjectionNode(path: string, x: number, y: number, revision: string): CanvasProjection['nodes'][number] {
+  return {
+    ...nodeFixture(path, x, y),
+    mediaKind: 'text',
+    availability: {
+      state: 'available',
+      size: 100,
+      mimeType: 'text/markdown',
+      fileUrl: `http://127.0.0.1:17321/api/projects/123e4567-e89b-42d3-a456-426614174000/files/raw/${path}?v=${revision}`,
+      revision
+    }
+  };
+}
+
+function textBufferFixture(path: string, content: string, revision: string): TextFileBuffer {
+  return {
+    projectRelativePath: path,
+    content,
+    language: 'markdown',
+    wordWrap: false,
+    dirty: false,
+    saving: false,
+    diskRevision: revision,
+    lastSavedRevision: revision,
+    externalChange: false
+  };
+}
+
 function largePreviewNodeFixture(path: string): CanvasProjection['nodes'][number] {
   const node = nodeFixture(path, 0, 0);
   if (node.availability.state !== 'available') {
@@ -1211,11 +1153,6 @@ function nodeShellProps(node = nodeFixture('flow/cover.png', 0, 0)): CanvasNodeS
     stageRuntime: createCanvasStageRuntime(),
     actions,
     textBuffer: undefined,
-    inlineTextEditorActive: false,
-    inlineTextEditorFocusRequest: undefined,
-    inlineTextPreviewScrollTop: 0,
-    onDeactivateInlineTextEditor: () => undefined,
-    onInlineTextEditorScrollTopChange: () => undefined,
     onPointerDown: () => undefined,
     onPointerMove: () => undefined,
     onPointerUp: () => undefined,

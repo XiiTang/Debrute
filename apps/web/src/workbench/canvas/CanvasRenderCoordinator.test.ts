@@ -131,11 +131,12 @@ describe('CanvasRenderCoordinator', () => {
     expect(snapshot.culledNodePaths.has('flow/active.png')).toBe(true);
   });
 
-  it('keeps offscreen image nodes mounted and marks them culled', () => {
+  it('keeps offscreen image and text nodes mounted and marks them culled', () => {
     const coordinator = createCanvasRenderCoordinator({ projection: projection([
       imageNode('flow/visible.png', 0, 0, 1),
       imageNode('flow/offscreen.png', 5000, 0, 2),
-      textNode('flow/offscreen.txt', 6000, 0, 3)
+      textNode('flow/offscreen.txt', 6000, 0, 3),
+      directoryNode('flow/offscreen-dir', 7000, 0, 4)
     ]) });
 
     const snapshot = coordinator.update({
@@ -146,12 +147,12 @@ describe('CanvasRenderCoordinator', () => {
       activeNodePaths: []
     });
 
-    expect([...snapshot.nodesByPath.keys()]).toEqual([
-      'flow/offscreen.png',
-      'flow/visible.png'
-    ]);
-    expect(snapshot.nodesByPath.has('flow/offscreen.txt')).toBe(false);
+    expect(snapshot.nodesByPath.has('flow/visible.png')).toBe(true);
+    expect(snapshot.nodesByPath.has('flow/offscreen.png')).toBe(true);
+    expect(snapshot.nodesByPath.has('flow/offscreen.txt')).toBe(true);
+    expect(snapshot.nodesByPath.has('flow/offscreen-dir')).toBe(false);
     expect(snapshot.culledNodePaths.has('flow/offscreen.png')).toBe(true);
+    expect(snapshot.culledNodePaths.has('flow/offscreen.txt')).toBe(true);
   });
 
   it('keeps mounted nodes display-visible inside the virtual rect before they cross the viewport', () => {
@@ -175,7 +176,7 @@ describe('CanvasRenderCoordinator', () => {
     expect(snapshot.culledNodePaths.has('flow/near-notes.txt')).toBe(false);
   });
 
-  it('keeps image nodes mounted while culling toggles during a pan out and back', () => {
+  it('keeps image and text nodes mounted while culling toggles during a pan out and back', () => {
     const coordinator = createCanvasRenderCoordinator({ projection: projection([
       imageNode('flow/a.png', 0, 0, 1),
       imageNode('flow/b.png', 0, 2000, 2),
@@ -204,18 +205,20 @@ describe('CanvasRenderCoordinator', () => {
       activeNodePaths: []
     });
 
-    expect([...atA.nodesByPath.keys()]).toEqual(['flow/a.png', 'flow/b.png']);
-    expect([...atB.nodesByPath.keys()]).toEqual(['flow/a.png', 'flow/b-notes.txt', 'flow/b.png']);
-    expect([...backAtA.nodesByPath.keys()]).toEqual(['flow/a.png', 'flow/b.png']);
-    expect(atA.nodesByPath.has('flow/b-notes.txt')).toBe(false);
-    expect(atB.nodesByPath.has('flow/b-notes.txt')).toBe(true);
-    expect(backAtA.nodesByPath.has('flow/b-notes.txt')).toBe(false);
+    for (const snapshot of [atA, atB, backAtA]) {
+      expect(snapshot.nodesByPath.has('flow/a.png')).toBe(true);
+      expect(snapshot.nodesByPath.has('flow/b.png')).toBe(true);
+      expect(snapshot.nodesByPath.has('flow/b-notes.txt')).toBe(true);
+    }
     expect(atA.culledNodePaths.has('flow/a.png')).toBe(false);
     expect(atA.culledNodePaths.has('flow/b.png')).toBe(true);
+    expect(atA.culledNodePaths.has('flow/b-notes.txt')).toBe(true);
     expect(atB.culledNodePaths.has('flow/a.png')).toBe(true);
     expect(atB.culledNodePaths.has('flow/b.png')).toBe(false);
+    expect(atB.culledNodePaths.has('flow/b-notes.txt')).toBe(false);
     expect(backAtA.culledNodePaths.has('flow/a.png')).toBe(false);
     expect(backAtA.culledNodePaths.has('flow/b.png')).toBe(true);
+    expect(backAtA.culledNodePaths.has('flow/b-notes.txt')).toBe(true);
   });
 
   it('applies local layout overrides to rendered nodes and connected edges', () => {
@@ -597,6 +600,25 @@ function textNode(path: string, x: number, y: number, z: number): ProjectedCanva
       revision: '1',
       size: 1000,
       mimeType: 'text/plain'
+    }
+  };
+}
+
+function directoryNode(path: string, x: number, y: number, z: number): ProjectedCanvasNode {
+  return {
+    nodeKind: 'directory',
+    projectRelativePath: path,
+    x,
+    y,
+    width: 100,
+    height: 100,
+    z,
+    availability: {
+      state: 'available',
+      fileUrl: '',
+      revision: '1',
+      size: 0,
+      mimeType: 'inode/directory'
     }
   };
 }

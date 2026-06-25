@@ -17,9 +17,6 @@ export interface CanvasNodeShellProps {
   stageRuntime: CanvasStageRuntime;
   actions: WorkbenchActions;
   textBuffer: TextFileBuffer | undefined;
-  inlineTextEditorActive: boolean;
-  inlineTextEditorFocusRequest?: { requestId: number; clientX: number; clientY: number } | undefined;
-  inlineTextPreviewScrollTop: number;
   feedbackEntry?: CanvasFeedbackEntry | undefined;
   localFeedbackMode?: CanvasImageFeedbackMode | undefined;
   pendingFeedbackRegion?: CanvasImageFeedbackDraftRegion | undefined;
@@ -27,15 +24,13 @@ export interface CanvasNodeShellProps {
     projectRelativePath: string;
     geometry: CanvasFeedbackGeometry;
   }) => void) | undefined;
-  onDeactivateInlineTextEditor: (projectRelativePath: string) => void;
-  onInlineTextEditorScrollTopChange: (projectRelativePath: string, scrollTop: number) => void;
   onPointerDown: (node: ProjectedCanvasNode, event: React.PointerEvent<Element>) => void;
   onPointerMove: (event: React.PointerEvent<Element>) => void;
   onPointerUp: (event: React.PointerEvent<Element>) => void;
   onPointerEnter: (node: ProjectedCanvasNode, event: React.PointerEvent<Element>) => void;
   onPointerLeave: (node: ProjectedCanvasNode, event: React.PointerEvent<Element>) => void;
   onContextMenu: (node: ProjectedCanvasNode, event: React.MouseEvent<Element>) => void;
-  onSelectNode: (node: ProjectedCanvasNode, inlineTextFocusRequest?: { clientX: number; clientY: number } | undefined) => void;
+  onSelectNode: (node: ProjectedCanvasNode) => void;
   onResizePointerDown: (node: ProjectedCanvasNode, handle: ResizeHandle, event: React.PointerEvent<HTMLButtonElement>) => void;
 }
 
@@ -48,15 +43,10 @@ function CanvasNodeShellComponent({
   stageRuntime,
   actions,
   textBuffer,
-  inlineTextEditorActive,
-  inlineTextEditorFocusRequest,
-  inlineTextPreviewScrollTop,
   feedbackEntry,
   localFeedbackMode,
   pendingFeedbackRegion,
   onLocalFeedbackDraft,
-  onDeactivateInlineTextEditor,
-  onInlineTextEditorScrollTopChange,
   onPointerDown,
   onPointerMove,
   onPointerUp,
@@ -119,16 +109,11 @@ function CanvasNodeShellComponent({
             culled={culled}
             actions={actions}
             textBuffer={textBuffer}
-            inlineTextEditorActive={inlineTextEditorActive}
-            inlineTextEditorFocusRequest={inlineTextEditorFocusRequest}
-            inlineTextPreviewScrollTop={inlineTextPreviewScrollTop}
             feedbackEntry={feedbackEntry}
             localFeedbackMode={localFeedbackMode}
             pendingFeedbackRegion={pendingFeedbackRegion}
             onLocalFeedbackDraft={onLocalFeedbackDraft}
-            onDeactivateInlineTextEditor={onDeactivateInlineTextEditor}
-            onInlineTextEditorScrollTopChange={onInlineTextEditorScrollTopChange}
-            onSelectNode={(inlineTextFocusRequest) => onSelectNode(node, inlineTextFocusRequest)}
+            onSelectNode={() => onSelectNode(node)}
             onTitlePointerDown={(event) => onPointerDown(node, event)}
             onTitlePointerMove={onPointerMove}
             onTitlePointerUp={onPointerUp}
@@ -141,16 +126,11 @@ function CanvasNodeShellComponent({
           culled={culled}
           actions={actions}
           textBuffer={textBuffer}
-          inlineTextEditorActive={inlineTextEditorActive}
-          inlineTextEditorFocusRequest={inlineTextEditorFocusRequest}
-          inlineTextPreviewScrollTop={inlineTextPreviewScrollTop}
           feedbackEntry={feedbackEntry}
           localFeedbackMode={localFeedbackMode}
           pendingFeedbackRegion={pendingFeedbackRegion}
           onLocalFeedbackDraft={onLocalFeedbackDraft}
-          onDeactivateInlineTextEditor={onDeactivateInlineTextEditor}
-          onInlineTextEditorScrollTopChange={onInlineTextEditorScrollTopChange}
-          onSelectNode={(inlineTextFocusRequest) => onSelectNode(node, inlineTextFocusRequest)}
+          onSelectNode={() => onSelectNode(node)}
           onTitlePointerDown={(event) => onPointerDown(node, event)}
           onTitlePointerMove={onPointerMove}
           onTitlePointerUp={onPointerUp}
@@ -186,15 +166,10 @@ export function areCanvasNodeShellPropsEqual(
     && previous.stageRuntime === next.stageRuntime
     && (previous.node.mediaKind === 'text' ? previous.actions === next.actions : true)
     && previous.textBuffer === next.textBuffer
-    && previous.inlineTextEditorActive === next.inlineTextEditorActive
-    && previous.inlineTextEditorFocusRequest === next.inlineTextEditorFocusRequest
-    && previous.inlineTextPreviewScrollTop === next.inlineTextPreviewScrollTop
     && previous.feedbackEntry === next.feedbackEntry
     && previous.localFeedbackMode === next.localFeedbackMode
     && previous.pendingFeedbackRegion === next.pendingFeedbackRegion
     && previous.onLocalFeedbackDraft === next.onLocalFeedbackDraft
-    && previous.onDeactivateInlineTextEditor === next.onDeactivateInlineTextEditor
-    && previous.onInlineTextEditorScrollTopChange === next.onInlineTextEditorScrollTopChange
     && previous.onPointerDown === next.onPointerDown
     && previous.onPointerMove === next.onPointerMove
     && previous.onPointerUp === next.onPointerUp

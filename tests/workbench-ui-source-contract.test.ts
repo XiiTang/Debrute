@@ -506,14 +506,14 @@ describe('Workbench UI source contract', () => {
     expect(violations).toEqual([]);
   });
 
-  it('keeps canvas text preview and editor on shared text surface variables', () => {
+  it('keeps canvas text styling owned by the live CodeMirror editor surface', () => {
     const styles = css('apps/web/src/workbench/styles/canvas.css');
 
     expect(styles).toContain('--canvas-text-editor-font-family');
     expect(styles).toContain('var(--canvas-text-editor-line-height)');
-    expect(styles).toContain('.canvas-text-editor--preview');
-    expect(styles).toContain('.tok-keyword');
-    expect(styles).toContain('.tok-string');
+    expect(styles).toContain('.canvas-text-editor--edit');
+    expect(styles).not.toContain(`.canvas-text-editor--${'pre'}${'view'}`);
+    expect(styles).not.toContain(`.tok-${'key'}${'word'}`);
   });
 
   it('keeps live canvas text editors on text editing cursors', () => {
@@ -528,17 +528,9 @@ describe('Workbench UI source contract', () => {
   it('does not force CodeMirror edit gutter measurement elements to line height', () => {
     const styles = css('apps/web/src/workbench/styles/canvas.css');
     const editGutterRule = rule(styles, '.canvas-text-editor .cm-gutterElement');
-    const previewGutterRule = rule(styles, '.canvas-text-editor--preview .cm-gutterElement:not(.canvas-text-editor__gutter-measure)');
 
     expect(editGutterRule).not.toContain('min-height:');
-    expect(previewGutterRule).toContain('min-height: var(--canvas-text-editor-line-height);');
-  });
-
-  it('keeps canvas text preview activation owned by text node content', () => {
-    const preview = css('apps/web/src/workbench/canvas/CanvasTextPreview.tsx');
-
-    expect(preview).not.toContain('onActivate');
-    expect(preview).not.toContain('onPointerDown');
+    expect(styles).not.toContain(`canvas-text-editor__gutter-${'measure'}`);
   });
 
   it('keeps Canvas generic node labels single-line and ellipsized', () => {
