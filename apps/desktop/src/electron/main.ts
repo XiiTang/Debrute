@@ -65,7 +65,7 @@ async function createWindow(initialUrl?: string, projectId?: string, projectRoot
     minWidth: 1100,
     minHeight: 720,
     ...desktopBrowserWindowChromeOptions(process.platform),
-    backgroundColor: '#151616',
+    backgroundColor: '#181818',
     icon: projectIconPath,
     webPreferences: {
       preload: join(__dirname, 'preload.js'),

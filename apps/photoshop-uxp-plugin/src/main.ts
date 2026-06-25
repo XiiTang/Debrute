@@ -99,10 +99,10 @@ function render(connectionLabel: string): void {
   const selection = adapter.currentSelectionSnapshot();
   const cards = selectionCardsFromSnapshot(selection);
   root.innerHTML = [
-    `<section><h1>Debrute</h1><p>${escapeHtml(connectionLabel)}</p><p>${escapeHtml(selection.documentTitle ?? 'No document open')}</p>${renderUploadError()}</section>`,
-    `<section><h2>Current Selection</h2>${cards.map((card) => `<button draggable="${card.draggable}" data-selection-card="${escapeHtml(card.id)}">${escapeHtml(card.label)}</button>`).join('')}</section>`,
-    `<section><h2>Debrute Projects</h2>${renderLinkedProjects()}</section>`,
-    `<section><h2>Available Projects</h2>${renderAvailableProjects()}</section>`
+    `<section class="bridge-section bridge-section--status"><h1 class="bridge-section__title">Debrute</h1><p class="bridge-status-line">${escapeHtml(connectionLabel)}</p><p class="bridge-status-line">${escapeHtml(selection.documentTitle ?? 'No document open')}</p>${renderUploadError()}</section>`,
+    `<section class="bridge-section"><h2 class="bridge-section__title">Current Selection</h2>${cards.map((card) => `<button class="bridge-selection-card" draggable="${card.draggable}" data-selection-card="${escapeHtml(card.id)}">${escapeHtml(card.label)}</button>`).join('')}</section>`,
+    `<section class="bridge-section"><h2 class="bridge-section__title">Debrute Projects</h2>${renderLinkedProjects()}</section>`,
+    `<section class="bridge-section"><h2 class="bridge-section__title">Available Projects</h2>${renderAvailableProjects()}</section>`
   ].join('');
   bindSelectionDrags(cards);
   bindDirectoryDrops();
@@ -111,15 +111,15 @@ function render(connectionLabel: string): void {
 
 function renderLinkedProjects(): string {
   return linkedProjectTrees(bridgeState, adobeClientId).map((project) => (
-    `<article><h3>${escapeHtml(project.projectName)}</h3><button data-disconnect-project="${escapeHtml(project.projectId)}">Disconnect</button>${project.directories.map((directory) => (
-      `<button data-project="${escapeHtml(project.projectId)}" data-directory="${escapeHtml(directory.projectRelativePath)}">${escapeHtml(directory.projectRelativePath)}</button>`
+    `<article class="bridge-project-card"><h3>${escapeHtml(project.projectName)}</h3><button class="bridge-action-button" data-disconnect-project="${escapeHtml(project.projectId)}">Disconnect</button>${project.directories.map((directory) => (
+      `<button class="bridge-drop-target" data-project="${escapeHtml(project.projectId)}" data-directory="${escapeHtml(directory.projectRelativePath)}">${escapeHtml(directory.projectRelativePath)}</button>`
     )).join('')}</article>`
   )).join('');
 }
 
 function renderAvailableProjects(): string {
   return availableProjectLinks(bridgeState, adobeClientId)
-    .map((project) => `<button data-connect-project="${escapeHtml(project.projectId)}">Connect ${escapeHtml(project.projectName)}</button>`)
+    .map((project) => `<button class="bridge-action-button" data-connect-project="${escapeHtml(project.projectId)}">Connect ${escapeHtml(project.projectName)}</button>`)
     .join('');
 }
 

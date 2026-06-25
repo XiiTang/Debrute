@@ -45,4 +45,83 @@ describe('Photoshop bridge plugin source contract', () => {
     expect(main).toContain("clientRuntime: 'cep'");
     expect(manifest).toContain('ExtensionBundleId="com.debrute.photoshop.bridge.cep"');
   });
+
+  it('keeps UXP bridge panel styling on named host-aware roles', () => {
+    const root = process.cwd();
+    const styles = readFileSync(join(root, 'apps/photoshop-uxp-plugin/src/styles.css'), 'utf8');
+    const main = readFileSync(join(root, 'apps/photoshop-uxp-plugin/src/main.ts'), 'utf8');
+
+    for (const token of [
+      '--bridge-bg: var(--uxp-host-background-color)',
+      '--bridge-text: var(--uxp-host-text-color)',
+      '--bridge-border: var(--uxp-host-border-color)',
+      '--bridge-error: var(--uxp-host-error-color)',
+      '--bridge-focus: var(--uxp-host-link-color)',
+      '--bridge-control-height: 28px',
+      '--bridge-font-size: 12px'
+    ]) {
+      expect(styles).toContain(token);
+    }
+
+    for (const className of [
+      'bridge-section',
+      'bridge-section--status',
+      'bridge-section__title',
+      'bridge-status-line',
+      'bridge-selection-card',
+      'bridge-project-card',
+      'bridge-action-button',
+      'bridge-drop-target',
+      'bridge-status-error'
+    ]) {
+      expect(styles).toContain(`.${className}`);
+      expect(main).toContain(className);
+    }
+
+    expect(styles).not.toContain('#b42318');
+    expect(styles).not.toMatch(/\nbutton\s*\{/);
+    expect(styles).not.toMatch(/\nsection\s*\{/);
+  });
+
+  it('keeps CEP bridge panel styling on Debrute-compatible semantic roles', () => {
+    const root = process.cwd();
+    const styles = readFileSync(join(root, 'apps/photoshop-cep-plugin/src/styles.css'), 'utf8');
+    const main = readFileSync(join(root, 'apps/photoshop-cep-plugin/src/main.ts'), 'utf8');
+
+    for (const token of [
+      '--bridge-bg: #181818',
+      '--bridge-surface: #1f1f1f',
+      '--bridge-surface-2: #262626',
+      '--bridge-text: #ffffff',
+      '--bridge-text-muted: color-mix(in srgb, #ffffff 72%, transparent)',
+      '--bridge-border: #3a3a3a',
+      '--bridge-error: oklch(0.66 0.2 26)',
+      '--bridge-focus: #ffffff',
+      '--bridge-control-height: 28px',
+      '--bridge-font-size: 12px'
+    ]) {
+      expect(styles).toContain(token);
+    }
+
+    for (const className of [
+      'bridge-section',
+      'bridge-section--status',
+      'bridge-section__title',
+      'bridge-status-line',
+      'bridge-selection-card',
+      'bridge-project-card',
+      'bridge-action-button',
+      'bridge-drop-target',
+      'bridge-status-error'
+    ]) {
+      expect(styles).toContain(`.${className}`);
+      expect(main).toContain(className);
+    }
+
+    for (const rawChrome of ['#252525', '#f2f2f2', '#4a4a4a', '#ffb4a8', '#7aa7ff']) {
+      expect(styles).not.toContain(rawChrome);
+    }
+    expect(styles).not.toMatch(/\nbutton\s*\{/);
+    expect(styles).not.toMatch(/\nsection\s*\{/);
+  });
 });

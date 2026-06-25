@@ -1,8 +1,22 @@
+:root {
+  --bridge-bg: var(--uxp-host-background-color);
+  --bridge-surface: color-mix(in srgb, var(--bridge-bg) 88%, var(--bridge-text) 12%);
+  --bridge-surface-2: color-mix(in srgb, var(--bridge-bg) 78%, var(--bridge-text) 22%);
+  --bridge-text: var(--uxp-host-text-color);
+  --bridge-text-muted: color-mix(in srgb, var(--bridge-text) 72%, transparent);
+  --bridge-border: var(--uxp-host-border-color);
+  --bridge-error: var(--uxp-host-error-color);
+  --bridge-focus: var(--uxp-host-link-color);
+  --bridge-control-height: 28px;
+  --bridge-font-size: 12px;
+  --bridge-radius: 6px;
+}
+
 body {
   margin: 0;
-  background: var(--uxp-host-background-color);
-  color: var(--uxp-host-text-color);
-  font: 12px system-ui, sans-serif;
+  background: var(--bridge-bg);
+  color: var(--bridge-text);
+  font: var(--bridge-font-size) Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
 }
 
 .bridge-panel {
@@ -11,29 +25,71 @@ body {
   padding: 10px;
 }
 
-section {
+.bridge-section {
   display: grid;
   gap: 6px;
-  border-bottom: 1px solid var(--uxp-host-border-color);
+  border-bottom: 1px solid var(--bridge-border);
   padding-bottom: 10px;
 }
 
-h1,
-h2,
-h3,
-p {
+.bridge-section--status {
+  gap: 4px;
+}
+
+.bridge-section__title,
+.bridge-project-card h3,
+.bridge-status-line,
+.bridge-status-error {
   margin: 0;
 }
 
-.bridge-status-error {
-  color: var(--uxp-host-error-color, #b42318);
+.bridge-section__title {
+  color: var(--bridge-text);
+  font-size: 12px;
+  font-weight: 700;
 }
 
-button {
-  min-height: 28px;
+.bridge-project-card {
+  display: grid;
+  gap: 6px;
+}
+
+.bridge-status-line {
+  color: var(--bridge-text-muted);
+}
+
+.bridge-status-error {
+  color: var(--bridge-error);
+}
+
+.bridge-selection-card,
+.bridge-action-button,
+.bridge-drop-target {
+  min-height: var(--bridge-control-height);
+  border: 1px solid var(--bridge-border);
+  border-radius: var(--bridge-radius);
+  background: var(--bridge-surface);
+  color: var(--bridge-text);
+  font: inherit;
   text-align: left;
 }
 
-button.is-drop-active {
-  outline: 2px solid var(--uxp-host-link-color);
+.bridge-selection-card,
+.bridge-action-button {
+  padding: 5px 8px;
+}
+
+.bridge-drop-target {
+  padding: 5px 8px;
+}
+
+.bridge-selection-card:hover,
+.bridge-action-button:hover,
+.bridge-drop-target:hover {
+  background: var(--bridge-surface-2);
+}
+
+.bridge-drop-target.is-drop-active {
+  outline: 2px solid var(--bridge-focus);
+  outline-offset: 1px;
 }
