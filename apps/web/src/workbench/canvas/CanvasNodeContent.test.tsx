@@ -160,6 +160,76 @@ describe('CanvasNodeContent text chrome', () => {
     expect(html).not.toContain(`data-editor-mode="${'pre'}${'view'}"`);
   });
 
+  it('renders inactive available text nodes as preview images', () => {
+    const html = renderToStaticMarkup(
+      <CanvasNodeContent
+        node={textNode('flow/readme.md', 'rev-a')}
+        selected={false}
+        culled={false}
+        actions={actionsFixture()}
+        textBuffer={textBuffer('flow/readme.md', 'rev-a')}
+        textPreview={{
+          src: '/api/projects/p/canvas-text-preview?canvasId=canvas-1&path=flow%2Freadme.md&fingerprint=fp&w=700',
+          previewWidth: 700
+        }}
+        onSelectNode={() => undefined}
+        onTitlePointerDown={() => undefined}
+        onTitlePointerMove={() => undefined}
+        onTitlePointerUp={() => undefined}
+      />
+    );
+
+    expect(html).toContain('class="canvas-text-preview-image"');
+    expect(html).toContain('data-preview-width="700"');
+    expect(html).not.toContain('data-canvas-text-editor="true"');
+    expect(html).not.toContain('data-editor-engine="codemirror"');
+  });
+
+  it('renders text preview generation errors instead of an empty preview body', () => {
+    const html = renderToStaticMarkup(
+      <CanvasNodeContent
+        node={textNode('flow/readme.md', 'rev-a')}
+        selected={false}
+        culled={false}
+        actions={actionsFixture()}
+        textBuffer={textBuffer('flow/readme.md', 'rev-a')}
+        textPreviewError="Canvas text preview source capture did not produce a PNG blob."
+        onSelectNode={() => undefined}
+        onTitlePointerDown={() => undefined}
+        onTitlePointerMove={() => undefined}
+        onTitlePointerUp={() => undefined}
+      />
+    );
+
+    expect(html).toContain('Canvas text preview source capture did not produce a PNG blob.');
+    expect(html).toContain('Text Preview Error');
+    expect(html).not.toContain('canvas-text-preview-empty');
+    expect(html).not.toContain('data-canvas-text-editor="true"');
+  });
+
+  it('renders selected text nodes as live CodeMirror editors instead of preview images', () => {
+    const html = renderToStaticMarkup(
+      <CanvasNodeContent
+        node={textNode('flow/readme.md', 'rev-a')}
+        selected
+        culled={false}
+        actions={actionsFixture()}
+        textBuffer={textBuffer('flow/readme.md', 'rev-a')}
+        textPreview={{
+          src: '/api/projects/p/canvas-text-preview?canvasId=canvas-1&path=flow%2Freadme.md&fingerprint=fp&w=700',
+          previewWidth: 700
+        }}
+        onSelectNode={() => undefined}
+        onTitlePointerDown={() => undefined}
+        onTitlePointerMove={() => undefined}
+        onTitlePointerUp={() => undefined}
+      />
+    );
+
+    expect(html).toContain('data-editor-engine="codemirror"');
+    expect(html).not.toContain('canvas-text-preview-image');
+  });
+
   it('keeps text bodies focus-gated for Canvas wheel routing', () => {
     const html = renderToStaticMarkup(
       <CanvasNodeContent

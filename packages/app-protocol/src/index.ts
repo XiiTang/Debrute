@@ -303,6 +303,44 @@ export interface WorkbenchProjectTextFileWriteResult extends RevisionedProjectRe
   file: WorkbenchProjectTextFile;
 }
 
+export interface CanvasTextPreviewNodeTarget {
+  projectRelativePath: string;
+  fingerprint: string;
+  contentCssWidth: number;
+  contentCssHeight: number;
+  scrollTop: number;
+  scrollLeft: number;
+}
+
+export interface CanvasTextPreviewDescriptorView {
+  fingerprint: string;
+  sourceWidth: number;
+  sourceHeight: number;
+  contentCssWidth: number;
+  contentCssHeight: number;
+  scrollTop: number;
+  scrollLeft: number;
+  variants: number[];
+}
+
+export interface SaveCanvasTextPreviewSourceInput extends CanvasTextPreviewNodeTarget {
+  canvasId: string;
+  sourcePng: Blob;
+}
+
+export interface CanvasTextPreviewDescriptorRequest {
+  canvasId: string;
+  nodes: CanvasTextPreviewNodeTarget[];
+}
+
+export interface CanvasTextPreviewReconcileRequest extends CanvasTextPreviewDescriptorRequest {
+  devicePixelRatio: number;
+}
+
+export interface CanvasTextPreviewDescriptorResponse {
+  descriptors: Record<string, CanvasTextPreviewDescriptorView>;
+}
+
 export type LlmProviderType = 'openai_compat' | 'anthropic';
 
 export interface LlmProviderConfig {
@@ -1106,6 +1144,9 @@ export interface WorkbenchApiClient {
   ): TerminalEventSubscription;
   readProjectTextFile(projectRelativePath: string): Promise<WorkbenchProjectTextFile>;
   writeProjectTextFile(projectRelativePath: string, content: string): Promise<WorkbenchProjectTextFileWriteResult>;
+  saveCanvasTextPreviewSource(input: SaveCanvasTextPreviewSourceInput): Promise<CanvasTextPreviewDescriptorView>;
+  readCanvasTextPreviewDescriptors(input: CanvasTextPreviewDescriptorRequest): Promise<CanvasTextPreviewDescriptorResponse>;
+  reconcileCanvasTextPreviews(input: CanvasTextPreviewReconcileRequest): Promise<CanvasTextPreviewDescriptorResponse>;
   getDesktopPlatform(): Promise<NodeJS.Platform>;
   createProjectFile(input: { parentProjectRelativePath: string; name: string }): Promise<WorkbenchProjectFileOperationResult>;
   createProjectDirectory(input: { parentProjectRelativePath: string; name: string }): Promise<WorkbenchProjectFileOperationResult>;

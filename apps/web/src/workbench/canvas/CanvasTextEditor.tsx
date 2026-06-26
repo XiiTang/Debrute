@@ -5,6 +5,7 @@ import { EditorView } from '@codemirror/view';
 import { codeMirrorLanguageExtensionForProjectTextLanguage } from './textEditorCodeMirrorLanguages';
 import { canvasTextSurfaceCssVariables } from './CanvasTextSurface';
 import {
+  canvasTextEditorApplyInitialScroll,
   canvasTextEditorBaseExtensions,
   canvasTextEditorReadOnlyExtension,
   canvasTextEditorSyncExternalValue,
@@ -25,6 +26,8 @@ export function CanvasTextEditor({
   wordWrap,
   readOnly,
   visible,
+  initialScrollTop,
+  initialScrollLeft,
   onChange,
   onSave,
   onToggleWordWrap
@@ -34,6 +37,8 @@ export function CanvasTextEditor({
   wordWrap: boolean;
   readOnly?: boolean;
   visible?: boolean | undefined;
+  initialScrollTop?: number | undefined;
+  initialScrollLeft?: number | undefined;
   onChange: (value: string) => void;
   onSave: () => void;
   onToggleWordWrap: () => void;
@@ -88,6 +93,10 @@ export function CanvasTextEditor({
       parent: host
     });
     viewRef.current = view;
+    canvasTextEditorApplyInitialScroll(view, {
+      scrollTop: initialScrollTop,
+      scrollLeft: initialScrollLeft
+    });
 
     return () => {
       view.destroy();

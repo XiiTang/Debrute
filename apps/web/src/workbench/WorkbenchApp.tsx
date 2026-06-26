@@ -701,6 +701,9 @@ export function WorkbenchApp(): React.ReactElement {
     readGeneratedAsset,
     readProjectTextFile,
     writeProjectTextFile,
+    saveCanvasTextPreviewSource: (input) => api.saveCanvasTextPreviewSource(input),
+    readCanvasTextPreviewDescriptors: (input) => api.readCanvasTextPreviewDescriptors(input),
+    reconcileCanvasTextPreviews: (input) => api.reconcileCanvasTextPreviews(input),
     createProjectFile: async (input) => {
       const result = await api.createProjectFile(input);
       setSnapshot(result.snapshot);

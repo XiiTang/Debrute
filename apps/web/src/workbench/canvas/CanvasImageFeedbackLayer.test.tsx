@@ -65,7 +65,7 @@ describe('CanvasImageFeedbackLayer', () => {
   });
 
   it('keeps rectangle labels at the top-left anchor', async () => {
-    const css = await readFile(new URL('../../styles.css', import.meta.url), 'utf8');
+    const css = await readFile(new URL('../styles/canvas.css', import.meta.url), 'utf8');
 
     expect(css).toContain('.canvas-image-feedback-region .canvas-image-feedback-label');
     expect(css).toContain('left: 0;');

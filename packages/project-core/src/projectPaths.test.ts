@@ -10,6 +10,13 @@ describe('project path ignore rules', () => {
     expect(isIgnoredProjectFilePath('assets/page.png')).toBe(false);
   });
 
+  it('ignores Canvas text preview artifacts', () => {
+    expect(isIgnoredProjectFilePath('.debrute/cache/canvas-text-previews')).toBe(true);
+    expect(isIgnoredProjectFilePath('.debrute/cache/canvas-text-previews/canvas-1/notes/a.md.source.png')).toBe(true);
+    expect(isIgnoredProjectFilePath('.debrute/cache/canvas-text-previews/canvas-1/notes/a.md.preview-w700.png')).toBe(true);
+    expect(isIgnoredProjectFilePath('.debrute/cache/canvas-text-previews/canvas-1/notes/a.md.preview.json')).toBe(true);
+  });
+
   it('classifies Canvas feedback document changes separately from source content', () => {
     expect(normalizeFileWatchEvent('/project', '/project/.debrute/reviews/canvas-feedback.json', 'changed').affects).toEqual([
       'canvas-feedback'

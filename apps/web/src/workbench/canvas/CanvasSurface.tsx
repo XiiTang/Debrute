@@ -21,6 +21,7 @@ import { CANVAS_IMAGE_PREVIEW_RESOURCE_SETTLE_MS } from './canvasImagePreviews';
 import { CanvasImageNodeAssetProvider, type CanvasImageNodeAssetContextValue } from './CanvasImageNodeAssetContext';
 import type { CanvasImageFeedbackMode } from './CanvasImageFeedbackLayer';
 import { CanvasNodeShell } from './CanvasNodeShell';
+import { CanvasTextPreviewProvider, useCanvasTextPreviewRuntime } from './CanvasTextPreviewRuntime';
 import type { CanvasOverlayRuntime } from './CanvasOverlayRuntime';
 import { createCanvasPerfBrowserAdapter } from './CanvasPerfBrowserAdapter';
 import { createCanvasPerfDebugBridge, type DebruteCanvasPerfCanvasSnapshot } from './CanvasPerfDebugBridge';
@@ -169,6 +170,7 @@ function CanvasSurfaceRuntime({
   const initialRuntimeSnapshot = runtime.getSnapshot();
   const initialDragState = initialRuntimeSnapshot.dragState;
   const [cameraState, setCameraState] = useState(initialRuntimeSnapshot.cameraState);
+  const [dragState, setDragState] = useState(initialDragState);
   const selectionRef = useRef<CanvasSelection | undefined>(selection);
   const surfaceSizeRef = useRef(surfaceSize);
   const renderSnapshotRef = useRef<CanvasRenderCoordinatorSnapshot | undefined>(undefined);
@@ -493,6 +495,7 @@ function CanvasSurfaceRuntime({
       });
     }
     return runtime.subscribeDragState((nextDragState) => {
+      setDragState(nextDragState);
       const snapshot = runtime.getSnapshot();
       activeLayoutDraftRef.current = canvasSurfaceLayoutDraftFromDragState({
         canvasId: canvas.id,
@@ -707,6 +710,10 @@ function CanvasSurfaceRuntime({
   }, [onOpenContextMenu, runtime]);
 
   const renderedNodes = [...renderSnapshot.nodesByPath.values()];
+  const selectedProjectRelativePathsForTextPreview = useMemo(
+    () => selectedNodeProjectRelativePaths(selection),
+    [selection]
+  );
 
   const syncFeedbackBarPlacement = useCallback((input: {
     node: ProjectedCanvasNode;
@@ -908,14 +915,22 @@ function CanvasSurfaceRuntime({
             />
           </svg>
         ))}
-        <CanvasImageNodeAssetProvider value={imageNodeAssetContext}>
-          {renderedNodes.map((node) => {
-            const selected = isCanvasItemSelected(selection, { kind: 'node', projectRelativePath: node.projectRelativePath });
-            return (
-              <CanvasNodeShell
+        <CanvasTextPreviewProvider
+          canvasId={canvas.id}
+          nodes={projectedNodes}
+          selectedProjectRelativePaths={selectedProjectRelativePathsForTextPreview}
+          textFileBuffers={textFileBuffers}
+          actions={actions}
+          cameraState={cameraState}
+          dragState={dragState}
+          devicePixelRatio={devicePixelRatio}
+        >
+          <CanvasImageNodeAssetProvider value={imageNodeAssetContext}>
+            {renderedNodes.map((node) => (
+              <CanvasSurfaceNodeShell
                 key={node.projectRelativePath}
                 node={node}
-                selected={selected}
+                selected={isCanvasItemSelected(selection, { kind: 'node', projectRelativePath: node.projectRelativePath })}
                 hovered={hoveredNodePath === node.projectRelativePath}
                 culled={renderSnapshot.culledNodePaths.has(node.projectRelativePath)}
                 zIndex={renderSnapshot.nodeLayers.get(node.projectRelativePath)?.zIndex ?? node.z}
@@ -929,6 +944,8 @@ function CanvasSurfaceRuntime({
                     ? { label: pendingFeedbackRegion.label, geometry: pendingFeedbackRegion.geometry }
                     : undefined
                 }
+                imageResourceZoom={imageResourceZoom}
+                devicePixelRatio={devicePixelRatio}
                 onLocalFeedbackDraft={handleLocalFeedbackDraft}
                 onPointerDown={beginNodeMove}
                 onPointerMove={handlePointerMove}
@@ -939,9 +956,9 @@ function CanvasSurfaceRuntime({
                 onContextMenu={handleNodeContextMenu}
                 onResizePointerDown={beginNodeResize}
               />
-            );
-          })}
-        </CanvasImageNodeAssetProvider>
+            ))}
+          </CanvasImageNodeAssetProvider>
+        </CanvasTextPreviewProvider>
       </div>
       {projectedNodes.length === 0 ? (
         <div className="canvas-empty-state" data-testid="canvas-empty-state">
@@ -949,6 +966,91 @@ function CanvasSurfaceRuntime({
         </div>
       ) : null}
     </div>
+  );
+}
+
+function CanvasSurfaceNodeShell({
+  node,
+  selected,
+  hovered,
+  culled,
+  zIndex,
+  stageRuntime,
+  actions,
+  textBuffer,
+  feedbackEntry,
+  localFeedbackMode,
+  pendingFeedbackRegion,
+  imageResourceZoom,
+  devicePixelRatio,
+  onLocalFeedbackDraft,
+  onPointerDown,
+  onPointerMove,
+  onPointerUp,
+  onPointerEnter,
+  onPointerLeave,
+  onSelectNode,
+  onContextMenu,
+  onResizePointerDown
+}: {
+  node: ProjectedCanvasNode;
+  selected: boolean;
+  hovered: boolean;
+  culled: boolean;
+  zIndex: number;
+  stageRuntime: CanvasStageRuntime;
+  actions: WorkbenchActions;
+  textBuffer: TextFileBuffer | undefined;
+  feedbackEntry?: CanvasFeedbackEntry | undefined;
+  localFeedbackMode?: CanvasImageFeedbackMode | undefined;
+  pendingFeedbackRegion?: CanvasImageFeedbackDraftRegion | undefined;
+  imageResourceZoom: number;
+  devicePixelRatio: number;
+  onLocalFeedbackDraft?: ((input: {
+    projectRelativePath: string;
+    geometry: CanvasFeedbackGeometry;
+  }) => void) | undefined;
+  onPointerDown: (node: ProjectedCanvasNode, event: React.PointerEvent<Element>) => void;
+  onPointerMove: (event: React.PointerEvent<Element>) => void;
+  onPointerUp: (event: React.PointerEvent<Element>) => void;
+  onPointerEnter: (node: ProjectedCanvasNode, event: React.PointerEvent<Element>) => void;
+  onPointerLeave: (node: ProjectedCanvasNode, event: React.PointerEvent<Element>) => void;
+  onContextMenu: (node: ProjectedCanvasNode, event: React.MouseEvent<Element>) => void;
+  onSelectNode: (node: ProjectedCanvasNode) => void;
+  onResizePointerDown: (node: ProjectedCanvasNode, handle: ResizeHandle, event: React.PointerEvent<HTMLButtonElement>) => void;
+}): React.ReactElement {
+  const textPreviewRuntime = useCanvasTextPreviewRuntime();
+  const textPreview = node.mediaKind === 'text'
+    ? textPreviewRuntime.previewForNode({ node, imageResourceZoom, devicePixelRatio })
+    : undefined;
+  const textPreviewError = node.mediaKind === 'text'
+    ? textPreviewRuntime.previewErrorForNode({ node })
+    : undefined;
+  return (
+    <CanvasNodeShell
+      node={node}
+      selected={selected}
+      hovered={hovered}
+      culled={culled}
+      zIndex={zIndex}
+      stageRuntime={stageRuntime}
+      actions={actions}
+      textBuffer={textBuffer}
+      textPreview={textPreview}
+      textPreviewError={textPreviewError}
+      feedbackEntry={feedbackEntry}
+      localFeedbackMode={localFeedbackMode}
+      pendingFeedbackRegion={pendingFeedbackRegion}
+      onLocalFeedbackDraft={onLocalFeedbackDraft}
+      onPointerDown={onPointerDown}
+      onPointerMove={onPointerMove}
+      onPointerUp={onPointerUp}
+      onPointerEnter={onPointerEnter}
+      onPointerLeave={onPointerLeave}
+      onSelectNode={onSelectNode}
+      onContextMenu={onContextMenu}
+      onResizePointerDown={onResizePointerDown}
+    />
   );
 }
 

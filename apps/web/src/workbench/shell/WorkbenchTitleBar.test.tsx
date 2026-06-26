@@ -85,7 +85,7 @@ describe('WorkbenchTitleBar', () => {
   });
 
   it('fades the title-bar material before the bottom edge', () => {
-    const source = readFileSync('apps/web/src/styles.css', 'utf8');
+    const source = readFileSync('apps/web/src/workbench/styles/titlebar.css', 'utf8');
 
     expect(source).toContain('.workbench-titlebar::before');
     expect(source).toContain('transparent 86%');

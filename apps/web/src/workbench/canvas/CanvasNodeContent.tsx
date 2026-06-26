@@ -6,6 +6,7 @@ import { CanvasTextEditor } from './CanvasTextEditor';
 import { useCanvasImageNodeAsset, type CanvasImageNodeAssetHookState } from './CanvasImageNodeAssetContext';
 import { CanvasImageFeedbackLayer, type CanvasImageFeedbackDraftRegion, type CanvasImageFeedbackMode } from './CanvasImageFeedbackLayer';
 import type { CanvasLoadedImage } from './canvasImagePreviews';
+import { useCanvasTextPreviewRuntime, type CanvasTextPreviewSource } from './CanvasTextPreviewRuntime';
 import { Button, IconButton, StatusPill } from '../ui';
 
 export interface CanvasNodeContentProps {
@@ -14,6 +15,8 @@ export interface CanvasNodeContentProps {
   culled: boolean;
   actions: WorkbenchActions;
   textBuffer: TextFileBuffer | undefined;
+  textPreview?: CanvasTextPreviewSource | undefined;
+  textPreviewError?: string | undefined;
   feedbackEntry?: CanvasFeedbackEntry | undefined;
   localFeedbackMode?: CanvasImageFeedbackMode | undefined;
   pendingFeedbackRegion?: CanvasImageFeedbackDraftRegion | undefined;
@@ -33,6 +36,8 @@ export function CanvasNodeContent({
   culled,
   actions,
   textBuffer,
+  textPreview,
+  textPreviewError,
   feedbackEntry,
   localFeedbackMode,
   pendingFeedbackRegion,
@@ -100,6 +105,8 @@ export function CanvasNodeContent({
         selected={selected}
         culled={culled}
         actions={actions}
+        textPreview={textPreview}
+        textPreviewError={textPreviewError}
         onSelectNode={onSelectNode}
         onTitlePointerDown={onTitlePointerDown}
         onTitlePointerMove={onTitlePointerMove}
@@ -457,6 +464,8 @@ function CanvasTextNodeContent({
   selected,
   culled,
   actions,
+  textPreview,
+  textPreviewError,
   onSelectNode,
   onTitlePointerDown,
   onTitlePointerMove,
@@ -468,12 +477,23 @@ function CanvasTextNodeContent({
   selected: boolean;
   culled: boolean;
   actions: WorkbenchActions;
+  textPreview?: CanvasTextPreviewSource | undefined;
+  textPreviewError?: string | undefined;
   onSelectNode: () => void;
   onTitlePointerDown: (event: React.PointerEvent<Element>) => void;
   onTitlePointerMove: (event: React.PointerEvent<Element>) => void;
   onTitlePointerUp: (event: React.PointerEvent<Element>) => void;
 }): React.ReactElement {
-  const status = textBufferStatus(buffer, problem);
+  const { registerTextBody } = useCanvasTextPreviewRuntime();
+  const active = selected;
+  const textPreviewProblem = !active && textPreviewError
+    ? { title: 'Text Preview Error', message: textPreviewError }
+    : undefined;
+  const bodyProblem = problem ?? textPreviewProblem;
+  const status = textBufferStatus(buffer, bodyProblem);
+  const bodyRef = useCallback((element: HTMLDivElement | null) => {
+    registerTextBody(node.projectRelativePath, element);
+  }, [node.projectRelativePath, registerTextBody]);
   const selectSelf = () => {
     if (!selected) {
       onSelectNode();
@@ -508,7 +528,8 @@ function CanvasTextNodeContent({
         />
       </div>
       <div
-        className={problem || buffer?.error ? 'canvas-text-body problem' : 'canvas-text-body'}
+        ref={bodyRef}
+        className={bodyProblem || buffer?.error ? 'canvas-text-body problem' : 'canvas-text-body'}
         data-canvas-local-wheel="focus"
         onPointerDown={(event) => {
           event.stopPropagation();
@@ -521,13 +542,13 @@ function CanvasTextNodeContent({
           event.stopPropagation();
         }}
       >
-        {problem || buffer?.error ? (
-          <div className="canvas-text-message" data-canvas-text-editor="true">
+        {bodyProblem || buffer?.error ? (
+          <div className="canvas-text-message">
             <AlertTriangle size={18} />
-            <strong>{problem?.title ?? 'Text Error'}</strong>
-            <span>{problem?.message ?? buffer?.error}</span>
+            <strong>{bodyProblem?.title ?? 'Text Error'}</strong>
+            <span>{bodyProblem?.message ?? buffer?.error}</span>
           </div>
-        ) : buffer ? (
+        ) : buffer && active ? (
           <CanvasTextEditor
             value={buffer.content}
             language={buffer.language}
@@ -537,11 +558,18 @@ function CanvasTextNodeContent({
             onSave={() => void actions.saveTextFileBuffer(node.projectRelativePath)}
             onToggleWordWrap={() => actions.toggleTextFileWordWrap(node.projectRelativePath)}
           />
+        ) : buffer && textPreview ? (
+          <img
+            className="canvas-text-preview-image"
+            src={textPreview.src}
+            alt=""
+            draggable={false}
+            data-preview-width={textPreview.previewWidth}
+          />
+        ) : buffer ? (
+          <div className="canvas-text-preview-empty" aria-hidden="true" />
         ) : (
-          <div className="canvas-text-message" data-canvas-text-editor="true">
-            <FileText size={18} />
-            <span>Loading text</span>
-          </div>
+          <div className="canvas-text-preview-empty" aria-hidden="true" />
         )}
       </div>
     </section>

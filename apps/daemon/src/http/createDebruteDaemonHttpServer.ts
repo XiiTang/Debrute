@@ -14,6 +14,9 @@ import {
   type AdobeBridgeSettings,
   type AppServerEvent,
   type BrowserSessionCredential,
+  type CanvasTextPreviewDescriptorRequest,
+  type CanvasTextPreviewNodeTarget,
+  type CanvasTextPreviewReconcileRequest,
   type DaemonBridgeImportRequestMessage,
   type DaemonCliCommandRequest,
   type DaemonProjectUploadImportPlan,
@@ -590,6 +593,22 @@ export function createDebruteDaemonHttpServer(options: DebruteDaemonHttpServerOp
         return;
       }
     }
+    if (tail === '/canvas-text-previews/source') {
+      await handleCanvasTextPreviewSourceRoute(context);
+      return;
+    }
+    if (tail === '/canvas-text-previews/descriptors') {
+      await handleCanvasTextPreviewDescriptorRoute(context);
+      return;
+    }
+    if (tail === '/canvas-text-previews/reconcile') {
+      await handleCanvasTextPreviewReconcileRoute(context);
+      return;
+    }
+    if (tail === '/canvas-text-preview') {
+      await handleCanvasTextPreviewImageRoute(context);
+      return;
+    }
     if (tail === '/canvases' || tail.startsWith('/canvases/')) {
       await handleCanvasRoute(context, tail, session);
       return;
@@ -1149,6 +1168,70 @@ async function handleCanvasImagePreviewRoute(context: ProjectRequestContext): Pr
     revision,
     width,
     abortSignal: requestAbortSignal(context.request, context.response, 30_000)
+  });
+  await writeRevisionedFileResponse({
+    request: context.request,
+    response: context.response,
+    absolutePath: preview.absolutePath,
+    contentType: contentTypeFromPath(preview.absolutePath)
+  });
+}
+
+async function handleCanvasTextPreviewSourceRoute(context: ProjectRequestContext): Promise<void> {
+  if (context.request.method !== 'POST') {
+    writeError(context.response, 405, 'method_not_allowed', 'Unsupported Canvas text preview source method.');
+    return;
+  }
+  const parts = await readMultipartUploadParts(context.request);
+  try {
+    const metadata = daemonCanvasTextPreviewMetadata(parts.fields.get('metadata'));
+    const source = parts.files.get('source');
+    if (!source) {
+      throw new DebruteDaemonHttpError(400, 'invalid_input', 'Canvas text preview source file is required.');
+    }
+    const descriptor = await daemonAppServer(context).saveCanvasTextPreviewSource({
+      ...metadata,
+      sourceTemporaryPath: source.temporaryPath
+    });
+    writeJson(context.response, 200, descriptor);
+  } finally {
+    await parts.cleanup();
+  }
+}
+
+async function handleCanvasTextPreviewDescriptorRoute(context: ProjectRequestContext): Promise<void> {
+  if (context.request.method !== 'POST') {
+    writeError(context.response, 405, 'method_not_allowed', 'Unsupported Canvas text preview descriptor method.');
+    return;
+  }
+  const body = daemonCanvasTextPreviewDescriptorRequest(
+    await readJsonBody<Record<string, unknown>>(context.request)
+  );
+  const descriptors = await daemonAppServer(context).readCanvasTextPreviewDescriptors(body);
+  writeJson(context.response, 200, { descriptors });
+}
+
+async function handleCanvasTextPreviewReconcileRoute(context: ProjectRequestContext): Promise<void> {
+  if (context.request.method !== 'POST') {
+    writeError(context.response, 405, 'method_not_allowed', 'Unsupported Canvas text preview reconcile method.');
+    return;
+  }
+  const body = daemonCanvasTextPreviewReconcileRequest(
+    await readJsonBody<Record<string, unknown>>(context.request)
+  );
+  writeJson(context.response, 200, await daemonAppServer(context).reconcileCanvasTextPreviews(body));
+}
+
+async function handleCanvasTextPreviewImageRoute(context: ProjectRequestContext): Promise<void> {
+  if ((context.request.method ?? 'GET') !== 'GET') {
+    writeError(context.response, 405, 'method_not_allowed', 'Unsupported Canvas text preview image method.');
+    return;
+  }
+  const preview = await daemonAppServer(context).resolveCanvasTextPreviewVariant({
+    canvasId: context.url.searchParams.get('canvasId') ?? '',
+    projectRelativePath: context.url.searchParams.get('path') ?? '',
+    fingerprint: context.url.searchParams.get('fingerprint') ?? '',
+    width: Number(context.url.searchParams.get('w') ?? '')
   });
   await writeRevisionedFileResponse({
     request: context.request,
@@ -1858,6 +1941,66 @@ function daemonUploadImportPlan(value: string | undefined): DaemonProjectUploadI
   };
 }
 
+function daemonCanvasTextPreviewMetadata(value: string | undefined): CanvasTextPreviewNodeTarget & { canvasId: string } {
+  if (typeof value !== 'string') {
+    throw new DebruteDaemonHttpError(400, 'invalid_input', 'Canvas text preview metadata is required.');
+  }
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(value);
+  } catch {
+    throw new DebruteDaemonHttpError(400, 'invalid_json', 'Canvas text preview metadata is not valid JSON.');
+  }
+  if (typeof parsed !== 'object' || parsed === null || Array.isArray(parsed)) {
+    throw new DebruteDaemonHttpError(400, 'invalid_input', 'Canvas text preview metadata must be an object.');
+  }
+  const record = parsed as Record<string, unknown>;
+  return {
+    canvasId: stringField(record.canvasId, 'canvasId'),
+    ...daemonCanvasTextPreviewNodeTarget(record)
+  };
+}
+
+function daemonCanvasTextPreviewDescriptorRequest(body: Record<string, unknown>): CanvasTextPreviewDescriptorRequest {
+  return {
+    canvasId: stringField(body.canvasId, 'canvasId'),
+    nodes: daemonCanvasTextPreviewNodeTargets(body.nodes)
+  };
+}
+
+function daemonCanvasTextPreviewReconcileRequest(body: Record<string, unknown>): CanvasTextPreviewReconcileRequest {
+  return {
+    ...daemonCanvasTextPreviewDescriptorRequest(body),
+    devicePixelRatio: positiveFiniteNumberField(body.devicePixelRatio, 'devicePixelRatio')
+  };
+}
+
+function daemonCanvasTextPreviewNodeTargets(value: unknown): CanvasTextPreviewNodeTarget[] {
+  if (!Array.isArray(value)) {
+    throw new DebruteDaemonHttpError(400, 'invalid_input', 'nodes must be an array.');
+  }
+  return value.map((item, index) => {
+    if (typeof item !== 'object' || item === null || Array.isArray(item)) {
+      throw new DebruteDaemonHttpError(400, 'invalid_input', `nodes[${index}] must be an object.`);
+    }
+    return daemonCanvasTextPreviewNodeTarget(item as Record<string, unknown>, `nodes[${index}].`);
+  });
+}
+
+function daemonCanvasTextPreviewNodeTarget(
+  record: Record<string, unknown>,
+  prefix = ''
+): CanvasTextPreviewNodeTarget {
+  return {
+    projectRelativePath: stringField(record.projectRelativePath, `${prefix}projectRelativePath`),
+    fingerprint: stringField(record.fingerprint, `${prefix}fingerprint`),
+    contentCssWidth: positiveFiniteNumberField(record.contentCssWidth, `${prefix}contentCssWidth`),
+    contentCssHeight: positiveFiniteNumberField(record.contentCssHeight, `${prefix}contentCssHeight`),
+    scrollTop: nonNegativeFiniteNumberField(record.scrollTop, `${prefix}scrollTop`),
+    scrollLeft: nonNegativeFiniteNumberField(record.scrollLeft, `${prefix}scrollLeft`)
+  };
+}
+
 function daemonUploadImportPlanEntry(value: unknown, index: number): DaemonProjectUploadImportPlan['entries'][number] {
   if (typeof value !== 'object' || value === null || Array.isArray(value)) {
     throw new DebruteDaemonHttpError(400, 'invalid_input', `entries[${index}] must be an object.`);
@@ -1986,6 +2129,20 @@ function stringField(value: unknown, name: string): string {
 function numberField(value: unknown, name: string): number {
   if (typeof value !== 'number' || !Number.isInteger(value) || value < 1) {
     throw new DebruteDaemonHttpError(400, 'invalid_input', `${name} must be a positive integer.`);
+  }
+  return value;
+}
+
+function positiveFiniteNumberField(value: unknown, name: string): number {
+  if (typeof value !== 'number' || !Number.isFinite(value) || value <= 0) {
+    throw new DebruteDaemonHttpError(400, 'invalid_input', `${name} must be a positive finite number.`);
+  }
+  return value;
+}
+
+function nonNegativeFiniteNumberField(value: unknown, name: string): number {
+  if (typeof value !== 'number' || !Number.isFinite(value) || value < 0) {
+    throw new DebruteDaemonHttpError(400, 'invalid_input', `${name} must be a non-negative finite number.`);
   }
   return value;
 }

@@ -190,4 +190,63 @@ describe('workbench API client', () => {
       { method: 'POST', url: `http://127.0.0.1:17321/api/projects/${projectId}/canvases/canvas-1/reset-layout`, body: { baseRevision: 7, pathRules: ['outputs/gpt/', 'prompts/cover.md'] } }
     ]);
   });
+
+  it('calls project-scoped Canvas text preview routes', async () => {
+    const requests: Array<{ method: string | undefined; url: string; bodyKind: string }> = [];
+    (globalThis as { window?: unknown }).window = {
+      location: {
+        origin: 'http://127.0.0.1:17321',
+        search: '',
+        pathname: `/projects/${projectId}`,
+        hash: ''
+      },
+      localStorage: { getItem: () => undefined, setItem: () => undefined },
+      sessionStorage: { getItem: () => undefined, setItem: () => undefined },
+      history: { state: { debruteDaemonToken: 'secret' }, replaceState: vi.fn() }
+    };
+    vi.stubGlobal('fetch', async (url: string, init: RequestInit = {}) => {
+      requests.push({
+        method: init.method,
+        url,
+        bodyKind: init.body instanceof FormData ? 'form' : init.body ? 'json' : 'none'
+      });
+      return new Response(JSON.stringify({ projectId, projectRevision: 1, snapshot: { canvases: [] }, descriptors: {}, variants: [] }), {
+        status: 200,
+        headers: { 'content-type': 'application/json' }
+      });
+    });
+
+    const client = createWorkbenchApiClient();
+    await client.openProject({ projectId });
+    await client.saveCanvasTextPreviewSource({
+      canvasId: 'canvas-1',
+      projectRelativePath: 'notes/a.md',
+      fingerprint: 'fp',
+      contentCssWidth: 600,
+      contentCssHeight: 320,
+      scrollTop: 0,
+      scrollLeft: 0,
+      sourcePng: new Blob(['png'], { type: 'image/png' })
+    });
+    await client.readCanvasTextPreviewDescriptors({ canvasId: 'canvas-1', nodes: [] });
+    await client.reconcileCanvasTextPreviews({ canvasId: 'canvas-1', nodes: [], devicePixelRatio: 2 });
+
+    expect(requests.slice(1)).toEqual([
+      {
+        method: 'POST',
+        url: `http://127.0.0.1:17321/api/projects/${projectId}/canvas-text-previews/source`,
+        bodyKind: 'form'
+      },
+      {
+        method: 'POST',
+        url: `http://127.0.0.1:17321/api/projects/${projectId}/canvas-text-previews/descriptors`,
+        bodyKind: 'json'
+      },
+      {
+        method: 'POST',
+        url: `http://127.0.0.1:17321/api/projects/${projectId}/canvas-text-previews/reconcile`,
+        bodyKind: 'json'
+      }
+    ]);
+  });
 });

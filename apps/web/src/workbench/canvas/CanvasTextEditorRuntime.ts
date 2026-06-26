@@ -22,6 +22,13 @@ export interface CanvasTextEditorCallbackRef {
   current: CanvasTextEditorCallbacks;
 }
 
+export interface CanvasTextEditorScrollableView {
+  scrollDOM: {
+    scrollTop: number;
+    scrollLeft: number;
+  };
+}
+
 export const canvasTextEditorExternalValueSyncAnnotation = Annotation.define<boolean>();
 
 export function canvasTextEditorExternalValueSyncAnnotations() {
@@ -102,6 +109,14 @@ export function canvasTextEditorSyncExternalValue(
     }
   }));
   return true;
+}
+
+export function canvasTextEditorApplyInitialScroll(
+  view: CanvasTextEditorScrollableView,
+  scroll: { scrollTop?: number | undefined; scrollLeft?: number | undefined }
+): void {
+  view.scrollDOM.scrollTop = scroll.scrollTop ?? 0;
+  view.scrollDOM.scrollLeft = scroll.scrollLeft ?? 0;
 }
 
 export function canvasTextEditorReadOnlyExtension(readOnly: boolean | undefined): Extension {

@@ -22,12 +22,12 @@ describe('model-owned generated asset contracts', () => {
     });
 
     const imageSettings = createImageModelSettingsView(
-      { imageModels: [{ debruteModelId: 'gpt-image-2', requestModelIdOverride: 'gpt-image-2-custom' }] },
+      { imageModels: [{ debruteModelId: 'gpt-image-2', baseUrlOverride: null, requestModelIdOverride: 'gpt-image-2-custom' }] },
       { llmProviderApiKeys: {}, imageModelApiKeys: { 'gpt-image-2': 'sk-image' }, videoModelApiKeys: {} },
       [imageEntry]
     );
     const videoSettings = createVideoModelSettingsView(
-      { videoModels: [{ debruteModelId: 'doubao-seedance-2-0-260128', requestModelIdOverride: 'seedance-custom' }] },
+      { videoModels: [{ debruteModelId: 'doubao-seedance-2-0-260128', baseUrlOverride: null, requestModelIdOverride: 'seedance-custom' }] },
       { llmProviderApiKeys: {}, imageModelApiKeys: {}, videoModelApiKeys: { 'doubao-seedance-2-0-260128': 'sk-video' } },
       [videoEntry]
     );
@@ -38,6 +38,7 @@ describe('model-owned generated asset contracts', () => {
       supportsEditing: expect.any(Boolean),
       supportsTextRendering: expect.any(Boolean),
       defaultBaseUrl: expect.any(String),
+      baseUrlOverride: null,
       defaultRequestModelId: 'gpt-image-2',
       requestModelIdOverride: 'gpt-image-2-custom',
       apiKeySet: true,
@@ -52,6 +53,7 @@ describe('model-owned generated asset contracts', () => {
       supportsAudioReferences: expect.any(Boolean),
       supportsGeneratedAudio: expect.any(Boolean),
       defaultBaseUrl: expect.any(String),
+      baseUrlOverride: null,
       defaultRequestModelId: 'doubao-seedance-2-0-260128',
       requestModelIdOverride: 'seedance-custom',
       apiKeySet: true,

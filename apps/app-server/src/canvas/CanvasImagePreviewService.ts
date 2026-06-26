@@ -1,8 +1,7 @@
-import { createHash, randomUUID } from 'node:crypto';
+import { createHash } from 'node:crypto';
 import type { Stats } from 'node:fs';
-import { access, mkdir, rename, stat, writeFile } from 'node:fs/promises';
-import { dirname } from 'node:path';
-import sharp from 'sharp';
+import { access, stat } from 'node:fs/promises';
+import type sharp from 'sharp';
 import {
   isCanvasPreviewableProjectImagePath,
   normalizeProjectRelativePath,
@@ -12,6 +11,12 @@ import {
   resolveNoSymlinkProjectPathForWrite,
   resolveProjectPath
 } from '@debrute/project-core';
+import {
+  assertCanvasRasterPreviewWidth,
+  createCanvasRasterPreviewConcurrencyLimiter,
+  createCanvasRasterPreviewService,
+  readCanvasRasterPreviewMetadata
+} from './CanvasRasterPreviewService.js';
 
 const CANVAS_IMAGE_PREVIEW_GENERATION_CONCURRENCY = 2;
 const CANVAS_IMAGE_PREVIEW_METADATA_CONCURRENCY = 4;
@@ -50,62 +55,13 @@ export function createCanvasImagePreviewService(): CanvasImagePreviewService {
 }
 
 export function createCanvasImagePreviewConcurrencyLimiter(concurrency: number): <T>(run: () => Promise<T>, abortSignal?: AbortSignal) => Promise<T> {
-  if (!Number.isInteger(concurrency) || concurrency <= 0) {
-    throw new Error(`Canvas image preview concurrency must be a positive integer: ${concurrency}`);
-  }
-  const queue: Array<{
-    start: () => void;
-    reject: (error: Error) => void;
-    onAbort: (() => void) | undefined;
-    abortSignal: AbortSignal | undefined;
-  }> = [];
-  let active = 0;
-  return async <T>(run: () => Promise<T>, abortSignal?: AbortSignal): Promise<T> => {
-    throwIfCanvasPreviewAborted(abortSignal);
-    if (active >= concurrency) {
-      await new Promise<void>((resolve, reject) => {
-        const queued = {
-          start: () => {
-            if (queued.abortSignal && queued.onAbort) {
-              queued.abortSignal.removeEventListener('abort', queued.onAbort);
-            }
-            resolve();
-          },
-          reject: (_error: Error) => {},
-          onAbort: undefined as (() => void) | undefined,
-          abortSignal
-        };
-        queued.reject = (error: Error) => {
-          if (queued.abortSignal && queued.onAbort) {
-            queued.abortSignal.removeEventListener('abort', queued.onAbort);
-          }
-          const index = queue.indexOf(queued);
-          if (index >= 0) {
-            queue.splice(index, 1);
-          }
-          reject(error);
-        };
-        queued.onAbort = () => queued.reject(canvasPreviewAbortError());
-        if (abortSignal) {
-          abortSignal.addEventListener('abort', queued.onAbort, { once: true });
-        }
-        queue.push(queued);
-      });
-    } else {
-      active += 1;
+  const limit = createCanvasRasterPreviewConcurrencyLimiter(concurrency);
+  return (run, abortSignal) => limit(run, abortSignal).catch((error: unknown) => {
+    if (abortSignal?.aborted) {
+      throw canvasPreviewAbortError();
     }
-    try {
-      throwIfCanvasPreviewAborted(abortSignal);
-      return await run();
-    } finally {
-      const next = queue.shift();
-      if (next) {
-        next.start();
-      } else {
-        active -= 1;
-      }
-    }
-  };
+    throw error;
+  });
 }
 
 export async function canvasImageSourceRevision(projectRoot: string, projectRelativePath: string): Promise<string> {
@@ -114,7 +70,9 @@ export async function canvasImageSourceRevision(projectRoot: string, projectRela
 }
 
 export function assertCanvasImagePreviewWidth(width: number): void {
-  if (!Number.isFinite(width) || !Number.isInteger(width) || width <= 0) {
+  try {
+    assertCanvasRasterPreviewWidth(width);
+  } catch {
     throw new Error(`Canvas preview width must be a positive integer: ${width}`);
   }
 }
@@ -154,7 +112,10 @@ export async function canvasImagePreviewSourceInfo(
 
 class LocalCanvasImagePreviewService implements CanvasImagePreviewService {
   private readonly inFlight = new Map<string, CanvasImagePreviewInFlightEntry>();
-  private readonly withGenerationSlot = createCanvasImagePreviewConcurrencyLimiter(CANVAS_IMAGE_PREVIEW_GENERATION_CONCURRENCY);
+  private readonly rasterPreviewService = createCanvasRasterPreviewService({
+    generationConcurrency: CANVAS_IMAGE_PREVIEW_GENERATION_CONCURRENCY,
+    metadataConcurrency: CANVAS_IMAGE_PREVIEW_METADATA_CONCURRENCY
+  });
 
   async resolve(input: ResolveCanvasImagePreviewInput): Promise<CanvasImagePreviewResult> {
     throwIfCanvasPreviewAborted(input.abortSignal);
@@ -289,30 +250,21 @@ class LocalCanvasImagePreviewService implements CanvasImagePreviewService {
     const previewProjectPath = `${previewBaseProjectPath}.${output.extension}`;
     const absolutePreviewPath = await resolveNoSymlinkProjectPathForWrite(input.projectRoot, previewProjectPath);
 
-    return this.withGenerationSlot(async () => {
-      input.onGenerationStart?.();
-      const generatedByAnotherRequest = await existingCanvasImagePreviewCachePath(input.projectRoot, previewBaseProjectPath);
-      if (generatedByAnotherRequest) {
-        return {
-          absolutePath: generatedByAnotherRequest
-        };
-      }
-      const pipeline = sharp(absoluteSourcePath)
-        .rotate()
-        .resize({ width: input.width, withoutEnlargement: true });
-      const bytes = output.extension === 'png'
-        ? await pipeline.png().toBuffer()
-        : await pipeline.jpeg({ quality: 82 }).toBuffer();
-      throwIfCanvasPreviewAborted(input.abortSignal);
-      await writeFileAtomic(absolutePreviewPath, bytes);
+    input.onGenerationStart?.();
+    const generatedByAnotherRequest = await existingCanvasImagePreviewCachePath(input.projectRoot, previewBaseProjectPath);
+    if (generatedByAnotherRequest) {
       return {
-        absolutePath: absolutePreviewPath
+        absolutePath: generatedByAnotherRequest
       };
-    }, input.abortSignal);
+    }
+    return this.rasterPreviewService.generate({
+      sourceAbsolutePath: absoluteSourcePath,
+      outputAbsolutePath: absolutePreviewPath,
+      width: input.width,
+      abortSignal: input.abortSignal
+    });
   }
 }
-
-const withMetadataSlot = createCanvasImagePreviewConcurrencyLimiter(CANVAS_IMAGE_PREVIEW_METADATA_CONCURRENCY);
 
 async function canvasImageSourceFileStat(projectRoot: string, projectRelativePath: string): Promise<Stats> {
   const fileStat = await stat(await resolveExistingProjectPath(projectRoot, normalizePreviewProjectRelativePath(projectRelativePath)));
@@ -328,10 +280,7 @@ async function readCanvasImagePreviewMetadata(
   abortSignal?: AbortSignal
 ): Promise<sharp.Metadata> {
   try {
-    return await withMetadataSlot(() => {
-      throwIfCanvasPreviewAborted(abortSignal);
-      return sharp(absolutePath).metadata();
-    }, abortSignal);
+    return await readCanvasRasterPreviewMetadata(absolutePath, projectRelativePath, abortSignal);
   } catch (error) {
     if (abortSignal?.aborted) {
       throw error;
@@ -379,13 +328,6 @@ function normalizePreviewProjectRelativePath(projectRelativePath: string): strin
 
 function isPreviewableRasterImagePath(projectRelativePath: string): boolean {
   return isCanvasPreviewableProjectImagePath(projectRelativePath);
-}
-
-async function writeFileAtomic(path: string, bytes: Buffer): Promise<void> {
-  await mkdir(dirname(path), { recursive: true });
-  const tempPath = `${path}.${randomUUID()}.tmp`;
-  await writeFile(tempPath, bytes);
-  await rename(tempPath, path);
 }
 
 async function fileExists(path: string): Promise<boolean> {

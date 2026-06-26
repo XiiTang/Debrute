@@ -117,6 +117,14 @@ import {
   type CanvasImagePreviewService,
   type ResolveCanvasImagePreviewInput
 } from '../canvas/CanvasImagePreviewService.js';
+import {
+  createCanvasTextPreviewService,
+  type CanvasTextPreviewReadInput,
+  type CanvasTextPreviewReconcileInput,
+  type CanvasTextPreviewResolveVariantInput,
+  type CanvasTextPreviewSaveSourceInput,
+  type CanvasTextPreviewService
+} from '../canvas/CanvasTextPreviewService.js';
 import { CanvasProjectionService } from '../canvas/CanvasProjectionService.js';
 import { CanvasSessionService } from '../canvas/CanvasSessionService.js';
 import { CanvasRegistryService } from '../canvas/CanvasRegistryService.js';
@@ -221,6 +229,7 @@ export class DebruteAppServer {
   private readonly canvasFeedbackRenderScheduler: CanvasFeedbackRenderScheduler;
   private readonly canvasFeedbackService: CanvasFeedbackService;
   private readonly canvasImagePreviewService: CanvasImagePreviewService;
+  private readonly canvasTextPreviewService: CanvasTextPreviewService;
   private readonly canvasProjectionService: CanvasProjectionService;
   private readonly canvasSessionService: CanvasSessionService;
   private readonly canvasRegistryService: CanvasRegistryService;
@@ -254,6 +263,7 @@ export class DebruteAppServer {
       renderScheduler: this.canvasFeedbackRenderScheduler
     });
     this.canvasImagePreviewService = createCanvasImagePreviewService();
+    this.canvasTextPreviewService = createCanvasTextPreviewService();
     this.canvasProjectionService = new CanvasProjectionService();
     this.canvasSessionService = new CanvasSessionService({
       writeCanvasText: (projectRoot, canvasPath, content, expectedHash) => this.writeProjectDocumentText(
@@ -594,6 +604,46 @@ export class DebruteAppServer {
   ): Promise<CanvasImagePreviewResult> {
     const current = this.getSnapshot();
     return this.canvasImagePreviewService.resolve({
+      projectRoot: current.projectRoot,
+      ...input
+    });
+  }
+
+  async saveCanvasTextPreviewSource(
+    input: Omit<CanvasTextPreviewSaveSourceInput, 'projectRoot'>
+  ) {
+    const current = this.getSnapshot();
+    return this.canvasTextPreviewService.saveSource({
+      projectRoot: current.projectRoot,
+      ...input
+    });
+  }
+
+  async readCanvasTextPreviewDescriptors(
+    input: Omit<CanvasTextPreviewReadInput, 'projectRoot'>
+  ) {
+    const current = this.getSnapshot();
+    return this.canvasTextPreviewService.readDescriptors({
+      projectRoot: current.projectRoot,
+      ...input
+    });
+  }
+
+  async reconcileCanvasTextPreviews(
+    input: Omit<CanvasTextPreviewReconcileInput, 'projectRoot'>
+  ) {
+    const current = this.getSnapshot();
+    return this.canvasTextPreviewService.reconcile({
+      projectRoot: current.projectRoot,
+      ...input
+    });
+  }
+
+  async resolveCanvasTextPreviewVariant(
+    input: Omit<CanvasTextPreviewResolveVariantInput, 'projectRoot'>
+  ) {
+    const current = this.getSnapshot();
+    return this.canvasTextPreviewService.resolveVariant({
       projectRoot: current.projectRoot,
       ...input
     });

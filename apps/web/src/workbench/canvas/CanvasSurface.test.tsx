@@ -282,11 +282,12 @@ describe('CanvasSurface', () => {
 
     expect(html).toContain('data-canvas-node-path="flow/notes/offscreen.md"');
     expect(html).toContain('canvas-text-node');
-    expect(html).toContain('data-editor-mode="edit"');
+    expect(html).toContain('canvas-text-preview-empty');
+    expect(html).not.toContain('data-editor-mode="edit"');
     expect(html).not.toContain(`data-editor-mode="${'pre'}${'view'}"`);
   });
 
-  it('renders visible canvas text nodes as live editors by default', () => {
+  it('renders visible canvas text nodes as inactive preview bodies by default', () => {
     const canvas = createCanvasDocument({ id: 'text-editor-canvas' });
     const projection: CanvasProjection = {
       canvasId: canvas.id,
@@ -305,11 +306,12 @@ describe('CanvasSurface', () => {
       }
     }));
 
-    expect(html.match(/data-editor-mode="edit"/g)).toHaveLength(2);
+    expect(html.match(/data-editor-mode="edit"/g) ?? []).toHaveLength(0);
+    expect(html.match(/canvas-text-preview-empty/g) ?? []).toHaveLength(2);
     expect(html).not.toContain(`data-editor-mode="${'pre'}${'view'}"`);
   });
 
-  it('selection does not change text nodes into a different render mode', () => {
+  it('renders selected text nodes as live editors and leaves inactive text as preview bodies', () => {
     const canvas = createCanvasDocument({ id: 'selected-text-canvas' });
     const projection: CanvasProjection = {
       canvasId: canvas.id,
@@ -329,7 +331,8 @@ describe('CanvasSurface', () => {
       }
     }));
 
-    expect(html.match(/data-editor-mode="edit"/g) ?? []).toHaveLength(2);
+    expect(html.match(/data-editor-mode="edit"/g) ?? []).toHaveLength(1);
+    expect(html.match(/canvas-text-preview-empty/g) ?? []).toHaveLength(1);
     expect(html).not.toContain(`data-editor-mode="${'pre'}${'view'}"`);
   });
 
@@ -1271,6 +1274,11 @@ const actions: WorkbenchActions = {
   writeProjectTextFile: async () => {
     throw new Error('not used');
   },
+  saveCanvasTextPreviewSource: async () => {
+    throw new Error('not used');
+  },
+  readCanvasTextPreviewDescriptors: async () => ({ descriptors: {} }),
+  reconcileCanvasTextPreviews: async () => ({ descriptors: {} }),
   createProjectFile: async () => {
     throw new Error('not used');
   },

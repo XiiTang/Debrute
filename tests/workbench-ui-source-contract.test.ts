@@ -720,6 +720,7 @@ describe('Workbench UI source contract', () => {
       '.canvas-text-body',
       '.canvas-text-message',
       '.canvas-text-editor',
+      '.canvas-text-preview',
       '.canvas-image-feedback',
       '.canvas-feedback'
     ];

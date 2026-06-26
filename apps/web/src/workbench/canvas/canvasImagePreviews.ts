@@ -1,7 +1,13 @@
-import type { ProjectedCanvasNode } from '@debrute/canvas-core';
+import {
+  CANVAS_RASTER_PREVIEW_MAX_SCALE,
+  CANVAS_RASTER_PREVIEW_MIN_SCALE,
+  canvasRasterPreviewSteppedScale,
+  canvasRasterPreviewWidth,
+  type ProjectedCanvasNode
+} from '@debrute/canvas-core';
 
-export const CANVAS_IMAGE_PREVIEW_MIN_SCALE = 1 / 32;
-export const CANVAS_IMAGE_PREVIEW_MAX_SCALE = 1;
+export const CANVAS_IMAGE_PREVIEW_MIN_SCALE = CANVAS_RASTER_PREVIEW_MIN_SCALE;
+export const CANVAS_IMAGE_PREVIEW_MAX_SCALE = CANVAS_RASTER_PREVIEW_MAX_SCALE;
 export const CANVAS_IMAGE_PREVIEW_RESOURCE_SETTLE_MS = 500;
 
 export interface CanvasImageSource {
@@ -39,8 +45,7 @@ export function canvasImageSource(input: {
 
 export function canvasImagePreviewSteppedScale(screenScale: number): number {
   assertPositiveFinite(screenScale, 'Canvas image preview screen scale must be a positive finite number.');
-  const stepIndex = Math.ceil(Math.log2(screenScale) * 2);
-  return 2 ** (stepIndex / 2);
+  return canvasRasterPreviewSteppedScale(screenScale);
 }
 
 export function canvasImagePreviewWidth(input: {
@@ -54,16 +59,7 @@ export function canvasImagePreviewWidth(input: {
   assertPositiveFinite(input.imageResourceZoom, 'Canvas image preview resource zoom must be a positive finite number.');
   assertPositiveFinite(input.devicePixelRatio, 'Canvas image devicePixelRatio must be a positive finite number.');
 
-  const screenScale = input.imageResourceZoom * (input.nodeDisplayWidth / input.sourceWidth);
-  const steppedScale = canvasImagePreviewSteppedScale(screenScale);
-  const clampedScale = Math.min(
-    CANVAS_IMAGE_PREVIEW_MAX_SCALE,
-    Math.max(CANVAS_IMAGE_PREVIEW_MIN_SCALE, steppedScale)
-  );
-  const previewWidth = Math.ceil(Math.min(
-    input.sourceWidth * clampedScale * input.devicePixelRatio,
-    input.sourceWidth
-  ));
+  const previewWidth = canvasRasterPreviewWidth(input);
   if (!Number.isInteger(previewWidth) || previewWidth <= 0) {
     throw new Error('Canvas image preview width must be a positive integer.');
   }

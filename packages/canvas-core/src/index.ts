@@ -1,5 +1,8 @@
 import { layoutCanvasDesiredNodes } from './canvasAutoLayout.js';
 
+export * from './canvasRasterPreviews.js';
+export * from './canvasTextPreviews.js';
+
 export const CANVAS_DOCUMENT_SCHEMA_VERSION = 1;
 
 export type CanvasNodeKind = 'directory' | 'file';

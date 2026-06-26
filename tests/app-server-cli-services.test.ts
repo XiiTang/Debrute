@@ -52,6 +52,7 @@ describe('DebruteAppServer CLI service methods', () => {
     try {
       await expect(server.listVideoModelsForCli()).resolves.toEqual([]);
       await globalRuntime.videoModelSaveSetting('doubao-seedance-2-0-260128', {
+        baseUrlOverride: null,
         requestModelIdOverride: null,
         apiKey: 'sk-video'
       });
@@ -80,7 +81,11 @@ describe('DebruteAppServer CLI service methods', () => {
     const globalRuntime = new DebruteGlobalRuntimeServer({ globalConfigStore: configStore });
     const server = new DebruteAppServer({ globalConfigStore: configStore });
     try {
-      await globalRuntime.imageModelSaveSetting('gpt-image-2', { requestModelIdOverride: null, apiKey: 'sk-image' });
+      await globalRuntime.imageModelSaveSetting('gpt-image-2', {
+        baseUrlOverride: null,
+        requestModelIdOverride: null,
+        apiKey: 'sk-image'
+      });
       const imageModels = await server.listImageModelsForCli();
 
       expect(imageModels).toEqual([expect.objectContaining({
@@ -113,6 +118,7 @@ describe('DebruteAppServer CLI service methods', () => {
       });
 
       await globalRuntime.imageModelSaveSetting('gpt-image-2', {
+        baseUrlOverride: null,
         requestModelIdOverride: null,
         apiKey: 'sk-image'
       });
@@ -141,6 +147,7 @@ describe('DebruteAppServer CLI service methods', () => {
       });
 
       await globalRuntime.videoModelSaveSetting('doubao-seedance-2-0-260128', {
+        baseUrlOverride: null,
         requestModelIdOverride: null,
         apiKey: 'sk-video'
       });
@@ -319,6 +326,7 @@ describe('DebruteAppServer CLI service methods', () => {
     try {
       await server.openProject(projectRoot, { initializeIfMissing: true, createDefaultCanvas: true });
       await globalRuntime.imageModelSaveSetting('gpt-image-2', {
+        baseUrlOverride: null,
         requestModelIdOverride: 'gpt-image-2'
       });
 
@@ -377,6 +385,7 @@ describe('DebruteAppServer CLI service methods', () => {
     try {
       await server.openProject(projectRoot, { initializeIfMissing: true, createDefaultCanvas: true });
       await globalRuntime.videoModelSaveSetting('doubao-seedance-2-0-260128', {
+        baseUrlOverride: null,
         requestModelIdOverride: null
       });
 
@@ -432,6 +441,7 @@ describe('DebruteAppServer CLI service methods', () => {
     try {
       await server.openProject(projectRoot, { initializeIfMissing: true, createDefaultCanvas: true });
       await globalRuntime.videoModelSaveSetting('doubao-seedance-2-0-260128', {
+        baseUrlOverride: null,
         requestModelIdOverride: null,
         apiKey: 'sk-video'
       });

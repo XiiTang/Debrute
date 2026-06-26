@@ -2,12 +2,17 @@ import type {
   AddProjectPathToCanvasMapInput,
   AdobeBridgeStateView,
   ImageModelSettingsView,
+  CanvasTextPreviewDescriptorRequest,
+  CanvasTextPreviewDescriptorResponse,
+  CanvasTextPreviewDescriptorView,
+  CanvasTextPreviewReconcileRequest,
   DiscoverLlmProviderModelsInput,
   DiscoverProviderModelsOutput,
   GeneratedAssetView,
   GeneratedAssetMetadataLookup,
   LlmProviderSettingsView,
   SaveAdobeBridgeSettingsInput,
+  SaveCanvasTextPreviewSourceInput,
   SaveImageModelSettingInput,
   SaveLlmProviderSettingInput,
   SaveVideoModelSettingInput,
@@ -93,6 +98,9 @@ export interface WorkbenchActions {
   readGeneratedAsset: (assetId: string) => Promise<GeneratedAssetView>;
   readProjectTextFile: (projectRelativePath: string) => Promise<WorkbenchProjectTextFile>;
   writeProjectTextFile: (projectRelativePath: string, content: string) => Promise<WorkbenchProjectTextFileWriteResult>;
+  saveCanvasTextPreviewSource: (input: SaveCanvasTextPreviewSourceInput) => Promise<CanvasTextPreviewDescriptorView>;
+  readCanvasTextPreviewDescriptors: (input: CanvasTextPreviewDescriptorRequest) => Promise<CanvasTextPreviewDescriptorResponse>;
+  reconcileCanvasTextPreviews: (input: CanvasTextPreviewReconcileRequest) => Promise<CanvasTextPreviewDescriptorResponse>;
   createProjectFile: (input: { parentProjectRelativePath: string; name: string }) => Promise<WorkbenchProjectFileOperationResult>;
   createProjectDirectory: (input: { parentProjectRelativePath: string; name: string }) => Promise<WorkbenchProjectFileOperationResult>;
   renameProjectPath: (input: { projectRelativePath: string; name: string }) => Promise<WorkbenchProjectFileOperationResult>;

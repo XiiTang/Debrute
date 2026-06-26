@@ -2,6 +2,7 @@ import { describe, expect, it, vi } from 'vitest';
 import { EditorState, type Transaction } from '@codemirror/state';
 import { history, undoDepth } from '@codemirror/commands';
 import {
+  canvasTextEditorApplyInitialScroll,
   canvasTextEditorCancelInlineEditKeyBinding,
   canvasTextEditorExternalValueSyncAnnotation,
   canvasTextEditorKeymap,
@@ -160,5 +161,22 @@ describe('CanvasTextEditorRuntime', () => {
       transactions: [transaction!]
     });
     expect(callbacks.current.onChange).not.toHaveBeenCalled();
+  });
+
+  it('applies initial scroll to the CodeMirror scroller', () => {
+    const scrollDOM = {
+      scrollTop: 0,
+      scrollLeft: 0
+    };
+
+    canvasTextEditorApplyInitialScroll({ scrollDOM }, {
+      scrollTop: 84,
+      scrollLeft: 12
+    });
+
+    expect(scrollDOM).toEqual({
+      scrollTop: 84,
+      scrollLeft: 12
+    });
   });
 });

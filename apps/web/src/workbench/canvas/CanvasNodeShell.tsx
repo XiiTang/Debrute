@@ -5,6 +5,7 @@ import type { ResizeHandle } from '../services/canvasInteraction';
 import type { CanvasStageRuntime } from './runtime/CanvasStageRuntime';
 import { CanvasNodeContent } from './CanvasNodeContent';
 import type { CanvasImageFeedbackDraftRegion, CanvasImageFeedbackMode } from './CanvasImageFeedbackLayer';
+import type { CanvasTextPreviewSource } from './CanvasTextPreviewRuntime';
 
 const RESIZE_HANDLES: ResizeHandle[] = ['nw', 'n', 'ne', 'w', 'e', 'sw', 's', 'se'];
 
@@ -17,6 +18,8 @@ export interface CanvasNodeShellProps {
   stageRuntime: CanvasStageRuntime;
   actions: WorkbenchActions;
   textBuffer: TextFileBuffer | undefined;
+  textPreview?: CanvasTextPreviewSource | undefined;
+  textPreviewError?: string | undefined;
   feedbackEntry?: CanvasFeedbackEntry | undefined;
   localFeedbackMode?: CanvasImageFeedbackMode | undefined;
   pendingFeedbackRegion?: CanvasImageFeedbackDraftRegion | undefined;
@@ -43,6 +46,8 @@ function CanvasNodeShellComponent({
   stageRuntime,
   actions,
   textBuffer,
+  textPreview,
+  textPreviewError,
   feedbackEntry,
   localFeedbackMode,
   pendingFeedbackRegion,
@@ -109,6 +114,8 @@ function CanvasNodeShellComponent({
             culled={culled}
             actions={actions}
             textBuffer={textBuffer}
+            textPreview={textPreview}
+            textPreviewError={textPreviewError}
             feedbackEntry={feedbackEntry}
             localFeedbackMode={localFeedbackMode}
             pendingFeedbackRegion={pendingFeedbackRegion}
@@ -126,6 +133,8 @@ function CanvasNodeShellComponent({
           culled={culled}
           actions={actions}
           textBuffer={textBuffer}
+          textPreview={textPreview}
+          textPreviewError={textPreviewError}
           feedbackEntry={feedbackEntry}
           localFeedbackMode={localFeedbackMode}
           pendingFeedbackRegion={pendingFeedbackRegion}
@@ -166,6 +175,8 @@ export function areCanvasNodeShellPropsEqual(
     && previous.stageRuntime === next.stageRuntime
     && (previous.node.mediaKind === 'text' ? previous.actions === next.actions : true)
     && previous.textBuffer === next.textBuffer
+    && previous.textPreview === next.textPreview
+    && previous.textPreviewError === next.textPreviewError
     && previous.feedbackEntry === next.feedbackEntry
     && previous.localFeedbackMode === next.localFeedbackMode
     && previous.pendingFeedbackRegion === next.pendingFeedbackRegion
