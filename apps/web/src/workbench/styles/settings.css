@@ -2,7 +2,7 @@
   height: 100%;
   min-height: 0;
   overflow: hidden;
-  padding: 14px;
+  padding: 0 14px 14px;
   display: grid;
   grid-template-columns: 192px minmax(0, 1fr);
   gap: 14px;
@@ -18,7 +18,7 @@
   grid-template-rows: auto;
   align-content: start;
   gap: var(--db-space-2);
-  padding: var(--db-space-3);
+  padding: 0 var(--db-space-3) var(--db-space-3);
   overflow: auto;
 }
 
@@ -29,7 +29,7 @@
   display: grid;
   gap: 16px;
   align-content: start;
-  padding: 2px 4px 10px 0;
+  padding: 0 4px 10px 0;
 }
 
 .general-settings-page,

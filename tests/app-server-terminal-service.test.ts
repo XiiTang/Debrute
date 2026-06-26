@@ -1,4 +1,4 @@
-import { mkdir, mkdtemp, realpath, rm, writeFile } from 'node:fs/promises';
+import { mkdir, mkdtemp, realpath, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
@@ -44,10 +44,21 @@ describe('TerminalService', () => {
       cwdProjectRelativePath: 'src',
       cols: 120,
       rows: 34,
-      status: 'running',
-      restartCount: 0
+      status: 'running'
     });
     expect(session).not.toHaveProperty('cwdAbsolutePath');
+    expect(Object.keys(session).sort()).toEqual([
+      'cols',
+      'createdAt',
+      'cwdProjectRelativePath',
+      'exitCode',
+      'id',
+      'rows',
+      'signal',
+      'status',
+      'title',
+      'updatedAt'
+    ]);
     expect(factory.spawns).toHaveLength(1);
     expect(factory.spawns[0]).toMatchObject({
       cwd: await realpath(join(projectRoot, 'src')),
@@ -124,70 +135,6 @@ describe('TerminalService', () => {
         lastSequence: 3
       }
     ]);
-  });
-
-  it('clears replay output and restarts terminal sequences on restart', async () => {
-    const projectRoot = await tempProjectRoot('terminal-service-restart-replay-');
-    const factory = createFakePtyFactory();
-    const service = new TerminalService({
-      projectRoot,
-      ptyFactory: factory.factory,
-      idFactory: () => 'terminal-1',
-      now: fixedNow
-    });
-    const session = await service.createSession();
-    factory.ptys[0]!.emitData('before restart\n');
-
-    await service.restart({ terminalId: session.id });
-
-    const replayAfterRestart: unknown[] = [];
-    service.subscribe(session.id, (event) => replayAfterRestart.push(event)).close();
-    expect(replayAfterRestart).toEqual([
-      { type: 'replay', terminalId: session.id, chunks: [], lastSequence: 0 }
-    ]);
-
-    factory.ptys[1]!.emitData('after restart\n');
-    const replayAfterNewOutput: unknown[] = [];
-    service.subscribe(session.id, (event) => replayAfterNewOutput.push(event)).close();
-    expect(replayAfterNewOutput).toEqual([
-      {
-        type: 'replay',
-        terminalId: session.id,
-        chunks: [{ sequence: 1, data: 'after restart\n' }],
-        lastSequence: 1
-      }
-    ]);
-  });
-
-  it('restarts with the original cwd and closes live PTYs', async () => {
-    const projectRoot = await tempProjectRoot('terminal-service-restart-');
-    await mkdir(join(projectRoot, 'src'), { recursive: true });
-    await writeFile(join(projectRoot, 'src/index.ts'), '', 'utf8');
-    const factory = createFakePtyFactory();
-    const service = new TerminalService({
-      projectRoot,
-      ptyFactory: factory.factory,
-      idFactory: () => 'terminal-1',
-      now: fixedNow
-    });
-    const session = await service.createSession({ cwdProjectRelativePath: 'src/index.ts' });
-    const firstPty = factory.ptys[0]!;
-
-    await expect(service.restart({ terminalId: session.id })).resolves.toMatchObject({
-      id: session.id,
-      cwdProjectRelativePath: 'src',
-      restartCount: 1,
-      status: 'running'
-    });
-
-    expect(firstPty.killedWith).toBeUndefined();
-    expect(factory.spawns).toHaveLength(2);
-    expect(factory.spawns[1]!.cwd).toBe(await realpath(join(projectRoot, 'src')));
-
-    service.close({ terminalId: session.id });
-
-    expect(factory.ptys[1]!.killedWith).toBeUndefined();
-    expect(service.listSessions()).toEqual([]);
   });
 
   it('updates status on PTY exit and kills all sessions on closeAll', async () => {
@@ -310,7 +257,7 @@ describe('TerminalService', () => {
     expect(service.listSessions()).toEqual([]);
   });
 
-  it('keeps a failed spawn session inspectable and restartable', async () => {
+  it('keeps a failed spawn session inspectable without accepting input', async () => {
     const projectRoot = await tempProjectRoot('terminal-service-failed-');
     const factory = createFakePtyFactory({ failFirstSpawn: true });
     const service = new TerminalService({
@@ -344,10 +291,6 @@ describe('TerminalService', () => {
       }
     ]);
 
-    await expect(service.restart({ terminalId: failed.id })).resolves.toMatchObject({
-      status: 'running',
-      restartCount: 1
-    });
   });
 
   it('exposes terminal methods through DebruteAppServer and closes PTYs with the server', async () => {

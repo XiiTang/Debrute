@@ -1,8 +1,8 @@
 import { afterEach, describe, expect, it } from 'vitest';
 import {
-  FLOATING_PANEL_TITLEBAR_HEIGHT,
+  FLOATING_PANEL_DRAG_HIT_AREA_HEIGHT,
   constrainContainedRect,
-  constrainTitlebarVisible,
+  constrainDragHitAreaVisible,
   readWorkbenchViewportRect,
   type WorkbenchViewportRect
 } from './windowBounds';
@@ -16,42 +16,42 @@ describe('window bounds', () => {
     (globalThis as { window?: unknown }).window = originalWindow;
   });
 
-  it('allows product panels past every viewport edge while keeping a titlebar-height strip visible', () => {
-    expect(constrainTitlebarVisible({
+  it('allows product panels past every viewport edge while keeping a drag-hit-area strip visible', () => {
+    expect(constrainDragHitAreaVisible({
       x: -500,
       y: -80,
       width: 320,
       height: 620
     }, viewport)).toMatchObject({
-      x: -281,
+      x: -301,
       y: -1
     });
 
-    expect(constrainTitlebarVisible({
+    expect(constrainDragHitAreaVisible({
       x: 1200,
       y: 900,
       width: 320,
       height: 620
     }, viewport)).toMatchObject({
-      x: 961,
-      y: 661
+      x: 981,
+      y: 681
     });
   });
 
-  it('accounts for the Workbench panel frame when keeping the actual header visible', () => {
-    expect(constrainTitlebarVisible({
+  it('accounts for the Workbench panel frame when keeping the drag hit area reachable', () => {
+    expect(constrainDragHitAreaVisible({
       x: 999,
       y: 699,
       width: 320,
       height: 620
     }, viewport)).toMatchObject({
-      x: 961,
-      y: 661
+      x: 981,
+      y: 681
     });
   });
 
-  it('preserves already visible product panel titlebars', () => {
-    expect(constrainTitlebarVisible({
+  it('preserves already reachable product panel drag hit areas', () => {
+    expect(constrainDragHitAreaVisible({
       x: -240,
       y: -1,
       width: 320,
@@ -64,8 +64,8 @@ describe('window bounds', () => {
     });
   });
 
-  it('uses the titlebar height for horizontal and vertical reserved visibility', () => {
-    expect(constrainTitlebarVisible({
+  it('uses the drag hit area height for horizontal and vertical reserved visibility', () => {
+    expect(constrainDragHitAreaVisible({
       x: 1200,
       y: 900,
       width: 320,
@@ -76,8 +76,8 @@ describe('window bounds', () => {
     });
   });
 
-  it('uses the Workbench floating panel header height for titlebar visibility', () => {
-    expect(FLOATING_PANEL_TITLEBAR_HEIGHT).toBe(38);
+  it('uses the Workbench floating panel transparent drag hit area height', () => {
+    expect(FLOATING_PANEL_DRAG_HIT_AREA_HEIGHT).toBe(18);
   });
 
   it('keeps floating bar windows fully contained in the viewport', () => {

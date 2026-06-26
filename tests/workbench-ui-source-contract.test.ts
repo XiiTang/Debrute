@@ -82,6 +82,7 @@ describe('Workbench UI source contract', () => {
       '.db-floating-bar',
       '.db-terminal-tabs',
       '.db-terminal-tab',
+      '.db-terminal-tab-end-slot',
       '.db-notification-stack',
       '.db-notification-row',
       '.db-settings-section',
@@ -106,6 +107,118 @@ describe('Workbench UI source contract', () => {
 
     expect(settings).toContain('className={activePage === item.id ? \'db-nav-row db-nav-row--active\' : \'db-nav-row\'}');
     expect(settings).toContain('className="db-nav-row__icon"');
+  });
+
+  it('keeps floating panel shell interaction geometry shared, compact, and isolated from feature scroll', () => {
+    const shell = css('apps/web/src/workbench/styles/shell.css');
+    const patterns = css('apps/web/src/workbench/ui/styles/workbench-patterns.css');
+    const terminal = css('apps/web/src/workbench/styles/terminal.css');
+    const workbenchCloseButtonRule = rule(patterns, '.db-workbench-close-button.db-icon-button');
+    const floatingPanelCloseRule = rule(shell, '.floating-panel-close-button');
+
+    expect(shell).toContain('grid-template-rows: var(--db-floating-panel-drag-hit-area-height) minmax(0, 1fr);');
+    expect(shell).toContain('.floating-panel-close-button');
+    expect(shell).toContain('.floating-panel-drag-hit-area');
+    expect(shell).toContain('height: var(--db-floating-panel-drag-hit-area-height);');
+    expect(shell).toContain('inset: 4px 0 0;');
+    expect(workbenchCloseButtonRule).toContain('width: 14px;');
+    expect(workbenchCloseButtonRule).toContain('height: 14px;');
+    expect(workbenchCloseButtonRule).toContain('border: 0;');
+    expect(workbenchCloseButtonRule).toContain('border-radius: 999px;');
+    expect(workbenchCloseButtonRule).toContain('background: transparent;');
+    expect(workbenchCloseButtonRule).toContain('opacity: 0.42;');
+    expect(patterns).toContain('.db-workbench-close-button.db-icon-button:hover:not(:disabled),');
+    expect(patterns).toContain('.db-workbench-close-button.db-icon-button:focus-visible');
+    expect(floatingPanelCloseRule).toContain('top: 2px;');
+    expect(floatingPanelCloseRule).toContain('right: 2px;');
+    expect(floatingPanelCloseRule).not.toContain('width:');
+    expect(floatingPanelCloseRule).not.toContain('height:');
+    expect(floatingPanelCloseRule).not.toContain('border:');
+    expect(floatingPanelCloseRule).not.toContain('border-radius:');
+    expect(floatingPanelCloseRule).not.toContain('background:');
+    expect(floatingPanelCloseRule).not.toContain('opacity:');
+    expect(floatingPanelCloseRule).not.toContain('border-color:');
+    for (const direction of ['n', 's', 'e', 'w', 'ne', 'nw', 'se', 'sw']) {
+      expect(shell).toContain(`.floating-panel-resize-handle--${direction}`);
+    }
+    expect(shell).not.toContain('.floating-panel-resize-handle--se::after');
+    expect(shell).not.toContain('resize-handle--se::after');
+    expect(shell).toContain('cursor: ns-resize;');
+    expect(shell).toContain('cursor: ew-resize;');
+    expect(shell).toContain('cursor: nesw-resize;');
+    expect(shell).toContain('cursor: nwse-resize;');
+    expect(shell).toContain('grid-row: 2;');
+    expect(shell).toContain('.floating-panel-terminal .floating-panel-body {\n  overflow: visible;\n}');
+    expect(terminal).not.toContain('.floating-panel-terminal .floating-panel-body');
+    expect(terminal).not.toContain('padding: 0 34px');
+  });
+
+  it('keeps Project Explorer content below the shell drag area without a feature spacer', () => {
+    const explorer = css('apps/web/src/workbench/styles/explorer.css');
+    const projectTree = css('apps/web/src/workbench/project-explorer/ProjectTree.tsx');
+
+    expect(explorer).toContain('padding: 0 4px 10px;');
+    expect(explorer).not.toContain('padding: 6px 4px 10px;');
+    expect(explorer).not.toContain('padding: 20px 4px 10px;');
+    expect(explorer).not.toContain('--tree-depth');
+    expect(projectTree).not.toContain('--tree-depth');
+    expect(projectTree).not.toContain('data-project-tree-depth');
+  });
+
+  it('keeps Settings content flush under the shell drag area', () => {
+    const settingsStyles = css('apps/web/src/workbench/styles/settings.css');
+
+    expect(settingsStyles).toContain('padding: 0 14px 14px;');
+    expect(settingsStyles).toContain('padding: 0 var(--db-space-3) var(--db-space-3);');
+    expect(settingsStyles).toContain('padding: 0 4px 10px 0;');
+    expect(settingsStyles).not.toContain('padding: 14px;');
+    expect(settingsStyles).not.toContain('padding: var(--db-space-3);');
+    expect(settingsStyles).not.toContain('padding: 2px 4px 10px 0;');
+  });
+
+  it('keeps every floating panel content surface visually flush with the interaction area', () => {
+    const shell = css('apps/web/src/workbench/styles/shell.css');
+    const floatingPanelRule = rule(shell, '.floating-panel');
+    const floatingPanelBodyRule = rule(shell, '.floating-panel-body');
+
+    expect(floatingPanelRule).toContain('--db-floating-panel-content-bg: var(--db-panel-bg);');
+    expect(floatingPanelRule).toContain('background: var(--db-floating-panel-content-bg);');
+    expect(floatingPanelBodyRule).toContain('background: var(--db-floating-panel-content-bg);');
+    expect(shell).toContain('.floating-panel-inspector,\n.floating-panel-problems {\n  --db-floating-panel-content-bg: var(--db-surface-1);');
+    expect(shell).toContain('.floating-panel-settings,\n.floating-panel-terminal {\n  --db-floating-panel-content-bg: var(--db-bg);');
+    expect(shell).not.toContain('.floating-panel-inspector .floating-panel-body');
+    expect(shell).not.toContain('.floating-panel-problems .floating-panel-body');
+    expect(shell).not.toContain('.floating-panel-settings .floating-panel-body');
+  });
+
+  it('keeps Terminal tab controls at one height and prevents tab close controls from overlapping the end slot', () => {
+    const patterns = css('apps/web/src/workbench/ui/styles/workbench-patterns.css');
+    const terminal = css('apps/web/src/workbench/styles/terminal.css');
+    const terminalTabCloseRule = rule(patterns, '.db-terminal-tab__close.db-icon-button');
+
+    expect(terminal).toContain('top: calc(-1 * var(--db-floating-panel-drag-hit-area-height));');
+    expect(terminal).toContain('height: var(--db-floating-panel-drag-hit-area-height);');
+    expect(terminal).toContain('min-height: var(--db-floating-panel-drag-hit-area-height);');
+    expect(terminal).toContain('padding: 0 4px;');
+    expect(terminal).toContain('align-items: center;');
+    expect(patterns).toContain('flex: 0 1 auto;');
+    expect(patterns).toContain('flex: 0 0 168px;');
+    expect(patterns).toContain('height: var(--db-floating-panel-drag-hit-area-height);');
+    expect(patterns).not.toContain('height: 24px;');
+    expect(patterns).toContain('.db-terminal-tab__close.db-icon-button');
+    expect(terminalTabCloseRule).toContain('top: calc((var(--db-floating-panel-drag-hit-area-height) - 14px) / 2);');
+    expect(terminalTabCloseRule).not.toContain('width:');
+    expect(terminalTabCloseRule).not.toContain('height:');
+    expect(terminalTabCloseRule).not.toContain('border:');
+    expect(terminalTabCloseRule).not.toContain('border-radius:');
+    expect(terminalTabCloseRule).not.toContain('background:');
+    expect(terminalTabCloseRule).not.toContain('color:');
+    expect(terminalTabCloseRule).not.toContain('opacity:');
+    expect(terminalTabCloseRule).not.toContain('border-color:');
+    expect(terminalTabCloseRule).not.toContain('border-radius: var(--db-radius-sm);');
+    expect(patterns).not.toMatch(/db-terminal-tab__close\.db-icon-button:hover:not\(:disabled\)\s*\{\n\s*border-color:/);
+    expect(patterns).toContain('.db-terminal-tab-end-slot');
+    expect(patterns).toContain('.db-terminal-tab-new-button');
   });
 
   it('keeps reusable Workbench pattern chrome out of feature styles', () => {

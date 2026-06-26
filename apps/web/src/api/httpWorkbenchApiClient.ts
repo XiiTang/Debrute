@@ -275,10 +275,6 @@ export function createHttpWorkbenchApiClient(options: HttpWorkbenchApiClientOpti
       projectPath(`/terminals/${encodeURIComponent(input.terminalId)}/resize`),
       { cols: input.cols, rows: input.rows }
     ),
-    restartTerminalSession: (input) => request<TerminalSessionResult>(
-      'POST',
-      projectPath(`/terminals/${encodeURIComponent(input.terminalId)}/restart`)
-    ),
     closeTerminalSession: (input) => request<{ ok: true }>(
       'DELETE',
       projectPath(`/terminals/${encodeURIComponent(input.terminalId)}`)

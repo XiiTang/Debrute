@@ -77,5 +77,5 @@ export function useXtermTerminal(input: UseXtermTerminalInput): void {
       dataDisposable.dispose();
       terminal.dispose();
     };
-  }, [input.api, input.containerRef, input.session?.id, input.session?.restartCount, input.onError, input.onSessionUpdate]);
+  }, [input.api, input.containerRef, input.session?.id, input.onError, input.onSessionUpdate]);
 }

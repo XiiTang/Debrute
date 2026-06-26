@@ -67,7 +67,7 @@ describe('workbench viewport layout', () => {
     expect(viewportState).toEqual({ x: 0, y: 0, width: 1000, height: 700 });
     expect(floatingPanels.panels.explorer).toMatchObject({
       open: true,
-      x: -281,
+      x: -301,
       y: -1
     });
     expect(floatingPanels.panels.settings).toMatchObject({

@@ -400,6 +400,12 @@ function projectTreeSelectionForPath(projectRelativePath: string): ProjectTreeSe
   };
 }
 
+function projectTreeDepthStyle(depth: number): React.CSSProperties {
+  return {
+    '--tree-indent': `${depth * 14}px`
+  } as React.CSSProperties;
+}
+
 function ProjectTreeRow({
   node,
   depth,
@@ -450,7 +456,7 @@ function ProjectTreeRow({
 }): React.ReactElement {
   const selected = selection.selectedPaths.includes(node.path);
   const focused = selection.focusedPath === node.path;
-  const style = { '--tree-indent': `${depth * 14}px` } as React.CSSProperties;
+  const style = projectTreeDepthStyle(depth);
   const rowClassName = cx(
     'project-tree-row',
     selected && 'selected',
@@ -785,9 +791,13 @@ function ProjectTreeInlineEditRow({
   onEditSubmit?: (() => void) | undefined;
   onEditCancel?: (() => void) | undefined;
 }): React.ReactElement {
-  const style = { '--tree-indent': `${depth * 14}px` } as React.CSSProperties;
+  const style = projectTreeDepthStyle(depth);
   return (
-    <div className="project-tree-edit-row" style={style} data-project-tree-edit-kind={editing.kind}>
+    <div
+      className="project-tree-edit-row"
+      style={style}
+      data-project-tree-edit-kind={editing.kind}
+    >
       {editing.kind === 'creating-directory' ? <FolderPlus size={14} /> : <FilePlus2 size={14} />}
       <Input
         className="project-tree-edit-input"
@@ -829,9 +839,14 @@ function ProjectTreeRenameRow({
   onEditSubmit?: (() => void) | undefined;
   onEditCancel?: (() => void) | undefined;
 }): React.ReactElement {
-  const style = { '--tree-indent': `${depth * 14}px` } as React.CSSProperties;
+  const style = projectTreeDepthStyle(depth);
   return (
-    <div className={rowClassName} style={style} title={node.path} data-project-tree-context-path={node.path}>
+    <div
+      className={rowClassName}
+      style={style}
+      title={node.path}
+      data-project-tree-context-path={node.path}
+    >
       {node.kind === 'directory' ? (
         open ? <FolderOpen size={14} /> : <Folder size={14} />
       ) : <File size={14} />}

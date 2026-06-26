@@ -17,8 +17,8 @@ import { floatingPanelDragHandleProps } from './FloatingPanel';
 import { basenameFromProjectPath, textBufferStatus } from '../services/textEditorWindows';
 import { IconButton, Panel, PanelBody, PanelHeader, PanelTitle, StatusPill } from '../ui';
 import {
-  FLOATING_PANEL_TITLEBAR_CSS_PROPERTY,
-  FLOATING_PANEL_TITLEBAR_CSS_VALUE
+  FLOATING_TEXT_EDITOR_TITLEBAR_CSS_PROPERTY,
+  FLOATING_TEXT_EDITOR_TITLEBAR_CSS_VALUE
 } from './windowBounds';
 
 export function FloatingTextEditorWindow({
@@ -56,7 +56,7 @@ export function FloatingTextEditorWindow({
       data-testid="floating-text-editor-window"
       data-canvas-local-wheel="true"
       style={{
-        [FLOATING_PANEL_TITLEBAR_CSS_PROPERTY]: FLOATING_PANEL_TITLEBAR_CSS_VALUE,
+        [FLOATING_TEXT_EDITOR_TITLEBAR_CSS_PROPERTY]: FLOATING_TEXT_EDITOR_TITLEBAR_CSS_VALUE,
         left: windowState.x,
         top: windowState.y,
         width: windowState.width,
@@ -65,7 +65,7 @@ export function FloatingTextEditorWindow({
       } as React.CSSProperties}
       onPointerDown={onBringToFront}
     >
-      <PanelHeader className="floating-panel-header floating-text-editor-header" {...dragHandleProps}>
+      <PanelHeader className="floating-text-editor-header" {...dragHandleProps}>
         <FileText size={15} />
         <PanelTitle>{basenameFromProjectPath(windowState.projectRelativePath)}</PanelTitle>
         <small>{windowState.projectRelativePath}</small>

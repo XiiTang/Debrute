@@ -1,6 +1,7 @@
 import {
-  constrainTitlebarVisible,
+  constrainDragHitAreaVisible,
   sameWindowRect,
+  type WorkbenchWindowRect,
   type WorkbenchViewportRect
 } from './windowBounds';
 
@@ -30,6 +31,8 @@ export interface FloatingPanelLayout {
 export interface FloatingPanelState {
   panels: Record<FloatingPanelId, FloatingPanelLayout>;
 }
+
+export type FloatingPanelResizeRect = WorkbenchWindowRect;
 
 export const FLOATING_PANEL_DEFINITIONS: Record<FloatingPanelId, FloatingPanelDefinition> = {
   explorer: panelDefinition('explorer', 'Explorer', 58, 45, 320, 620, 280, 320, 720, 900),
@@ -147,15 +150,21 @@ export function dragFloatingPanel(
 export function resizeFloatingPanel(
   state: FloatingPanelState,
   panelId: FloatingPanelId,
-  size: { width: number; height: number },
+  rect: FloatingPanelResizeRect,
   viewport: WorkbenchViewportRect
 ): FloatingPanelState {
   const panel = state.panels[panelId];
   const definition = FLOATING_PANEL_DEFINITIONS[panelId];
+  const width = clamp(Math.round(rect.width), definition.minWidth, definition.maxWidth);
+  const height = clamp(Math.round(rect.height), definition.minHeight, definition.maxHeight);
+  const leftEdgeMoved = Math.round(rect.x) !== panel.x;
+  const topEdgeMoved = Math.round(rect.y) !== panel.y;
   const nextPanel = constrainFloatingPanelLayout({
     ...panel,
-    width: clamp(Math.round(size.width), definition.minWidth, definition.maxWidth),
-    height: clamp(Math.round(size.height), definition.minHeight, definition.maxHeight)
+    x: leftEdgeMoved ? panel.x + panel.width - width : panel.x,
+    y: topEdgeMoved ? panel.y + panel.height - height : panel.y,
+    width,
+    height
   }, viewport);
   return {
     ...state,
@@ -192,7 +201,7 @@ function constrainFloatingPanelLayout(
 ): FloatingPanelLayout {
   return {
     ...panel,
-    ...constrainTitlebarVisible(panel, viewport)
+    ...constrainDragHitAreaVisible(panel, viewport)
   };
 }
 

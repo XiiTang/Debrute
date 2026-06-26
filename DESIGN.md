@@ -127,7 +127,7 @@ Inter -> ui-sans-serif -> system UI stack
 Debrute layout is dense but scannable.
 
 - Standard Workbench controls use 24px, 28px, or 32px heights.
-- Panel headers stay compact, generally around 38px.
+- Floating Workbench panels do not render visible title headers. Their 18px top interaction band is transparent, owns the panel drag and top-edge resize interactions, and separates the scrollable feature body from the panel top edge without rendering a visible strip, divider, or title row.
 - Titlebar chrome stays compact, generally around 32px.
 - Panel padding generally stays between 8px and 14px.
 - Repeated cards or settings form groups may use 16px padding when scanability requires it.
@@ -164,6 +164,7 @@ The existing Workbench UI package is the component authority:
 apps/web/src/workbench/ui/
   Button.tsx
   IconButton.tsx
+  CloseButton.tsx
   Field.tsx
   Input.tsx
   Select.tsx
@@ -198,6 +199,19 @@ apps/web/src/workbench/ui/
 - `apps/web/src/workbench/ui/styles/workbench-patterns.css` owns reusable Workbench structures.
 - `apps/web/src/workbench/styles/*.css` owns feature placement, layout, Canvas geometry, and surface-specific rendering.
 - Feature styles do not define local reusable button, icon-button, input, card, menu, panel, status, floating-bar, notification, terminal-tab, nav-row, diagnostic-row, or Canvas-node chrome systems.
+
+Workbench floating panels use one shared shell for Explorer, Inspector, Problems, Settings, and Terminal.
+
+- The shared shell owns placement, dimensions, z-index, the transparent drag hit area, close button placement, eight-direction resize hit areas, body container, and overflow mode.
+- Floating panels do not render panel names such as `Explorer`, `Inspector`, `Problems`, `Settings`, or `Terminal`.
+- The 18px top interaction band is interaction-only chrome: no visible background, border, divider, or title text. Its top 4px is the north resize hit area; the remaining area is the panel drag target.
+- Feature content starts below the drag hit area so scrollable content cannot cover the only drag target.
+- Floating panel and Terminal tab close controls share the same compact 14px borderless circular `CloseButton` primitive; each surface owns only placement.
+- Floating panels resize from any edge or corner. All resize hit areas are invisible; no single corner owns a special visual grip.
+- Feature content remains owned by the feature surface.
+- Explorer uses faint always-visible indentation guides for nested tree levels.
+- Terminal uses the drag-hit-area row for its compact tab row. The new-terminal button sits immediately after the tab strip, not pinned to the far panel edge.
+- Terminal has no restart feature in the UI, Workbench API, daemon routes, app-server facade, service layer, or terminal session view model.
 
 ### Desktop
 
@@ -254,6 +268,9 @@ apps/web/src/workbench/ui/*.tsx
 apps/web/src/workbench/ui/styles/workbench-patterns.css
   Reusable Workbench structures.
 
+apps/web/src/workbench/shell/*
+  Shared Workbench floating panel shell, floating dock, panel layout, and panel window ordering.
+
 apps/web/src/workbench/styles/*.css
   Feature layout, placement, and surface-specific rendering.
 
@@ -302,6 +319,7 @@ Don't:
 - Do not create compatibility layers for old chrome.
 - Do not add transitional class aliases.
 - Do not keep obsolete UI paths.
+- Do not keep obsolete Terminal restart protocol, route, service, state, UI, or test paths.
 - Do not use historical blacklist tests as the main enforcement model.
 - Do not make ordinary Workbench screens look like marketing pages.
 - Do not spread Canvas feedback colors into general panel chrome.

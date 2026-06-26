@@ -4,7 +4,7 @@ import { renderToStaticMarkup } from 'react-dom/server';
 import type { TextFileBuffer, WorkbenchActions } from '../../types';
 import { FloatingTextEditorWindow } from './FloatingTextEditorWindow';
 import { textEditorWindowIdentity } from './workbenchWindowOrder';
-import { FLOATING_PANEL_TITLEBAR_HEIGHT } from './windowBounds';
+import { FLOATING_TEXT_EDITOR_TITLEBAR_HEIGHT } from './windowBounds';
 
 describe('FloatingTextEditorWindow', () => {
   it('renders the shared CodeMirror text editor surface', () => {
@@ -31,7 +31,7 @@ describe('FloatingTextEditorWindow', () => {
     );
 
     expect(html).toContain('floating-text-editor-window');
-    expect(html).toContain(`--db-floating-panel-titlebar-height:${FLOATING_PANEL_TITLEBAR_HEIGHT}px`);
+    expect(html).toContain(`--db-floating-text-editor-titlebar-height:${FLOATING_TEXT_EDITOR_TITLEBAR_HEIGHT}px`);
     expect(html).toContain('data-canvas-local-wheel="true"');
     expect(html).toContain('data-editor-engine="codemirror"');
     expect(html).toContain('data-canvas-text-editor="true"');

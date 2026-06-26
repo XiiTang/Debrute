@@ -7,9 +7,12 @@ export interface WorkbenchWindowRect {
 
 export type WorkbenchViewportRect = WorkbenchWindowRect;
 
-export const FLOATING_PANEL_TITLEBAR_HEIGHT = 38;
-export const FLOATING_PANEL_TITLEBAR_CSS_PROPERTY = '--db-floating-panel-titlebar-height';
-export const FLOATING_PANEL_TITLEBAR_CSS_VALUE = `${FLOATING_PANEL_TITLEBAR_HEIGHT}px`;
+export const FLOATING_PANEL_DRAG_HIT_AREA_HEIGHT = 18;
+export const FLOATING_PANEL_DRAG_HIT_AREA_CSS_PROPERTY = '--db-floating-panel-drag-hit-area-height';
+export const FLOATING_PANEL_DRAG_HIT_AREA_CSS_VALUE = `${FLOATING_PANEL_DRAG_HIT_AREA_HEIGHT}px`;
+export const FLOATING_TEXT_EDITOR_TITLEBAR_HEIGHT = 38;
+export const FLOATING_TEXT_EDITOR_TITLEBAR_CSS_PROPERTY = '--db-floating-text-editor-titlebar-height';
+export const FLOATING_TEXT_EDITOR_TITLEBAR_CSS_VALUE = `${FLOATING_TEXT_EDITOR_TITLEBAR_HEIGHT}px`;
 export const FLOATING_PANEL_FRAME_INSET = 1;
 
 export function readWorkbenchViewportRect(): WorkbenchViewportRect {
@@ -24,24 +27,24 @@ export function readWorkbenchViewportRect(): WorkbenchViewportRect {
   };
 }
 
-export function constrainTitlebarVisible(
+export function constrainDragHitAreaVisible(
   rect: WorkbenchWindowRect,
   viewport: WorkbenchViewportRect,
-  titlebarHeight = FLOATING_PANEL_TITLEBAR_HEIGHT,
+  dragHitAreaHeight = FLOATING_PANEL_DRAG_HIT_AREA_HEIGHT,
   frameInset = FLOATING_PANEL_FRAME_INSET
 ): WorkbenchWindowRect {
-  const visibleTitlebarLength = titlebarHeight;
+  const visibleDragHitAreaLength = dragHitAreaHeight;
   return {
     ...rect,
     x: clamp(
       rect.x,
-      viewport.x + visibleTitlebarLength - rect.width + frameInset,
-      viewport.x + viewport.width - visibleTitlebarLength - frameInset
+      viewport.x + visibleDragHitAreaLength - rect.width + frameInset,
+      viewport.x + viewport.width - visibleDragHitAreaLength - frameInset
     ),
     y: clamp(
       rect.y,
       viewport.y - frameInset,
-      viewport.y + viewport.height - titlebarHeight - frameInset
+      viewport.y + viewport.height - dragHitAreaHeight - frameInset
     )
   };
 }

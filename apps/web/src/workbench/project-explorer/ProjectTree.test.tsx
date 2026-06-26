@@ -33,6 +33,9 @@ describe('ProjectTree', () => {
     expect(html).toContain('concept.md');
     expect(html).toContain('aria-selected="true"');
     expect(html).toContain('db-tree-row');
+    expect(html).toContain('--tree-indent:14px');
+    expect(html).not.toContain('--tree-depth');
+    expect(html).not.toContain('data-project-tree-depth');
   });
 
   it('renders project rows without disclosure chevrons', () => {
@@ -160,6 +163,7 @@ describe('ProjectTree', () => {
 
     expect(html).toContain('project-tree-row cut');
     expect(html).toContain('data-project-tree-edit-kind="creating-file"');
+    expect(html).toContain('class="project-tree-edit-row" style="--tree-indent:14px" data-project-tree-edit-kind="creating-file"');
     expect(html).toContain('value="new.md"');
   });
 

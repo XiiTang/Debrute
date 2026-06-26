@@ -81,7 +81,6 @@ import type {
   ProjectFileOperationResult,
   ProjectHealthSummary,
   ProjectSessionSnapshot,
-  RestartTerminalSessionInput,
   RunImageModelBatchInput,
   TerminalEvent,
   TerminalEventSubscription,
@@ -397,10 +396,6 @@ export class DebruteAppServer {
 
   resizeTerminal(input: TerminalResize): TerminalSessionResult {
     return { session: this.getTerminalService().resize(input) };
-  }
-
-  async restartTerminalSession(input: RestartTerminalSessionInput): Promise<TerminalSessionResult> {
-    return { session: await this.getTerminalService().restart(input) };
   }
 
   closeTerminalSession(input: CloseTerminalSessionInput): { ok: true } {

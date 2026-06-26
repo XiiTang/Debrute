@@ -49,50 +49,138 @@
 }
 
 .floating-panel {
+  --db-floating-panel-content-bg: var(--db-panel-bg);
   position: absolute;
   display: grid;
-  grid-template-rows: var(--db-floating-panel-titlebar-height) minmax(0, 1fr);
+  grid-template-rows: var(--db-floating-panel-drag-hit-area-height) minmax(0, 1fr);
+  min-width: 0;
+  min-height: 0;
+  background: var(--db-floating-panel-content-bg);
   pointer-events: auto;
 }
 
-.floating-panel-header {
-  height: var(--db-floating-panel-titlebar-height);
-  min-height: var(--db-floating-panel-titlebar-height);
-  cursor: move;
+.floating-panel-interaction-row {
+  position: relative;
+  grid-row: 1;
+  z-index: 2;
+  min-width: 0;
+  min-height: 0;
+  height: var(--db-floating-panel-drag-hit-area-height);
+  background: transparent;
+  border: 0;
+  pointer-events: none;
+}
+
+.floating-panel-drag-hit-area {
+  position: absolute;
+  inset: 4px 0 0;
+  cursor: grab;
   user-select: none;
+  pointer-events: auto;
+}
+
+.floating-panel-close-button {
+  position: absolute;
+  top: 2px;
+  right: 2px;
+  z-index: 1;
+  pointer-events: auto;
 }
 
 .floating-panel-body {
+  grid-row: 2;
   min-height: 0;
+  background: var(--db-floating-panel-content-bg);
   overflow: auto;
 }
 
 .floating-panel-terminal .floating-panel-body {
-  overflow: hidden;
+  overflow: visible;
 }
 
 .floating-panel-resize-handle {
   position: absolute;
+  z-index: 1;
+  pointer-events: auto;
+}
+
+.floating-panel-resize-handle--n,
+.floating-panel-resize-handle--s {
+  left: 10px;
+  right: 10px;
+  height: 4px;
+  cursor: ns-resize;
+}
+
+.floating-panel-resize-handle--n {
+  top: 0;
+}
+
+.floating-panel-resize-handle--s {
+  bottom: 0;
+}
+
+.floating-panel-resize-handle--e,
+.floating-panel-resize-handle--w {
+  top: 10px;
+  bottom: 10px;
+  width: 4px;
+  cursor: ew-resize;
+}
+
+.floating-panel-resize-handle--e {
+  right: 0;
+}
+
+.floating-panel-resize-handle--w {
+  left: 0;
+}
+
+.floating-panel-resize-handle--ne,
+.floating-panel-resize-handle--nw,
+.floating-panel-resize-handle--se,
+.floating-panel-resize-handle--sw {
+  width: 10px;
+  height: 10px;
+}
+
+.floating-panel-resize-handle--ne {
+  top: 0;
+  right: 0;
+}
+
+.floating-panel-resize-handle--nw {
+  top: 0;
+  left: 0;
+}
+
+.floating-panel-resize-handle--se {
   right: 0;
   bottom: 0;
-  width: 18px;
-  height: 18px;
+}
+
+.floating-panel-resize-handle--sw {
+  left: 0;
+  bottom: 0;
+}
+
+.floating-panel-resize-handle--ne,
+.floating-panel-resize-handle--sw {
+  cursor: nesw-resize;
+}
+
+.floating-panel-resize-handle--nw,
+.floating-panel-resize-handle--se {
   cursor: nwse-resize;
 }
 
-.floating-panel-resize-handle::after {
-  content: "";
-  position: absolute;
-  right: 5px;
-  bottom: 5px;
-  width: 7px;
-  height: 7px;
-  border-right: 1px solid color-mix(in oklch, var(--db-text-muted) 75%, transparent);
-  border-bottom: 1px solid color-mix(in oklch, var(--db-text-muted) 75%, transparent);
+.floating-text-editor-window {
+  grid-template-rows: var(--db-floating-text-editor-titlebar-height) minmax(0, 1fr);
 }
 
 .floating-text-editor-header {
   min-width: 0;
+  min-height: var(--db-floating-text-editor-titlebar-height);
   display: grid;
   grid-template-columns: 20px minmax(120px, 160px) minmax(0, 1fr);
   grid-auto-flow: column;
@@ -114,10 +202,14 @@
   font-size: 11px;
 }
 
-.floating-panel-inspector .floating-panel-body,
-.floating-panel-problems .floating-panel-body,
-.floating-panel-settings .floating-panel-body {
-  background: var(--db-surface-1);
+.floating-panel-inspector,
+.floating-panel-problems {
+  --db-floating-panel-content-bg: var(--db-surface-1);
+}
+
+.floating-panel-settings,
+.floating-panel-terminal {
+  --db-floating-panel-content-bg: var(--db-bg);
 }
 
 .boot-screen,

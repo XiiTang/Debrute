@@ -82,17 +82,10 @@ describe('daemon terminal routes', () => {
     });
     expect(factory.ptys[0]!.resizes).toEqual([{ cols: 100, rows: 24 }]);
 
-    await requestJson(`${runtime.daemonUrl}/api/projects/${opened.projectId}/terminals/${created.session.id}/restart`, {
-      method: 'POST'
-    });
-    expect(factory.ptys[0]!.killedWith).toBeUndefined();
-    expect(factory.spawns).toHaveLength(2);
-    expect(factory.spawns[1]!.cwd).toBe(await realpath(join(projectRoot, 'src')));
-
     await requestJson(`${runtime.daemonUrl}/api/projects/${opened.projectId}/terminals/${created.session.id}`, {
       method: 'DELETE'
     });
-    expect(factory.ptys[1]!.killedWith).toBeUndefined();
+    expect(factory.ptys[0]!.killedWith).toBeUndefined();
     await expect(requestJson(`${runtime.daemonUrl}/api/projects/${opened.projectId}/terminals`)).resolves.toEqual({
       sessions: []
     });

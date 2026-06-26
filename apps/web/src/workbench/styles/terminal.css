@@ -8,25 +8,26 @@
 }
 
 .terminal-panel__toolbar {
-  justify-content: space-between;
-  min-height: 34px;
-  padding: 5px 8px;
-}
-
-.floating-panel-terminal .floating-panel-body {
-  overflow: visible;
+  min-height: var(--db-floating-panel-drag-hit-area-height);
+  height: var(--db-floating-panel-drag-hit-area-height);
+  padding: 0 4px;
+  gap: 4px;
+  align-items: center;
 }
 
 .floating-panel-terminal .terminal-panel__toolbar {
   position: absolute;
-  top: calc(-1 * var(--db-floating-panel-titlebar-height));
-  right: 44px;
-  left: 92px;
-  z-index: 1;
-  height: var(--db-floating-panel-titlebar-height);
-  min-height: var(--db-floating-panel-titlebar-height);
-  padding: 0;
+  top: calc(-1 * var(--db-floating-panel-drag-hit-area-height));
+  right: calc(var(--db-floating-panel-drag-hit-area-height) + 2px);
+  left: 0;
+  z-index: 3;
   background: transparent;
+  pointer-events: none;
+}
+
+.floating-panel-terminal .db-terminal-tabs,
+.floating-panel-terminal .db-terminal-tab-end-slot {
+  pointer-events: auto;
 }
 
 .terminal-panel__status {

@@ -4,6 +4,7 @@ import { describe, expect, it } from 'vitest';
 import {
   Button,
   Card,
+  CloseButton,
   CommentPillInput,
   EmptyState,
   Field,
@@ -37,6 +38,18 @@ describe('Workbench UI primitives', () => {
     expect(html).toContain('db-button--danger');
     expect(html).toContain('aria-label="Close panel"');
     expect(html).toContain('db-icon-button');
+  });
+
+  it('renders Workbench close buttons through one shared primitive', () => {
+    const html = renderToStaticMarkup(
+      <CloseButton label="Close example" className="example-close-button" />
+    );
+
+    expect(html).toContain('aria-label="Close example"');
+    expect(html).toContain('db-workbench-close-button');
+    expect(html).toContain('example-close-button');
+    expect(html).toContain('width="10"');
+    expect(html).toContain('height="10"');
   });
 
   it('renders fields, cards, menus, pills, and empty states through shared classes', () => {

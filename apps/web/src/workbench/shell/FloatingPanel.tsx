@@ -1,13 +1,13 @@
 import React from 'react';
-import { X } from 'lucide-react';
 import { SettingsPanel } from '../settings/SettingsPanel';
 import { ProjectTree } from '../project-explorer/ProjectTree';
-import { IconButton, Panel, PanelBody, PanelHeader, PanelTitle } from '../ui';
+import { CloseButton, Panel, PanelBody } from '../ui';
 import type { ProjectTreeInlineEditState } from '../project-explorer/projectTreeEditing';
 import type { ProjectTreeFileKeyboardCommand } from '../project-explorer/projectTreeKeyboardCommands';
 import {
   FLOATING_PANEL_DEFINITIONS,
   type FloatingPanelId,
+  type FloatingPanelResizeRect,
   type FloatingPanelState
 } from './floatingPanels';
 import {
@@ -16,8 +16,8 @@ import {
   type WorkbenchWindowOrderState
 } from './workbenchWindowOrder';
 import {
-  FLOATING_PANEL_TITLEBAR_CSS_PROPERTY,
-  FLOATING_PANEL_TITLEBAR_CSS_VALUE
+  FLOATING_PANEL_DRAG_HIT_AREA_CSS_PROPERTY,
+  FLOATING_PANEL_DRAG_HIT_AREA_CSS_VALUE
 } from './windowBounds';
 import type {
   WorkbenchContextMenuPosition,
@@ -28,7 +28,16 @@ import type { WorkbenchActions, WorkbenchState } from '../../types';
 import { DiagnosticList, Inspector } from './Inspector';
 import type { CanvasEditorRuntime } from '../canvas/runtime/CanvasEditorRuntime';
 
-export function FloatingPanel({
+const FLOATING_PANEL_RESIZE_DIRECTIONS = ['n', 's', 'e', 'w', 'ne', 'nw', 'se', 'sw'] as const;
+type FloatingPanelResizeDirection = typeof FLOATING_PANEL_RESIZE_DIRECTIONS[number];
+
+interface FloatingPanelResizeStart extends FloatingPanelResizeRect {
+  pointerX: number;
+  pointerY: number;
+  direction: FloatingPanelResizeDirection;
+}
+
+export function WorkbenchFloatingPanelShell({
   panelId,
   state,
   orderState,
@@ -45,29 +54,23 @@ export function FloatingPanel({
   onClose: () => void;
   onBringToFront: () => void;
   onDrag: (dx: number, dy: number) => void;
-  onResize: (width: number, height: number) => void;
+  onResize: (rect: FloatingPanelResizeRect) => void;
 }): React.ReactElement {
   const definition = FLOATING_PANEL_DEFINITIONS[panelId];
   const layout = state.panels[panelId];
   const dragStart = React.useRef<{ x: number; y: number } | undefined>(undefined);
-  const resizeStart = React.useRef<{ x: number; y: number; width: number; height: number } | undefined>(undefined);
+  const resizeStart = React.useRef<FloatingPanelResizeStart | undefined>(undefined);
   const dragHandleProps = floatingPanelDragHandleProps({
     dragStart,
     onBringToFront,
     onDrag
-  });
-  const resizeHandleProps = floatingPanelResizeHandleProps({
-    resizeStart,
-    layout,
-    onBringToFront,
-    onResize
   });
   return (
     <Panel
       className={`floating-panel floating-panel-${panelId}`}
       data-testid={`floating-panel-${panelId}`}
       style={{
-        [FLOATING_PANEL_TITLEBAR_CSS_PROPERTY]: FLOATING_PANEL_TITLEBAR_CSS_VALUE,
+        [FLOATING_PANEL_DRAG_HIT_AREA_CSS_PROPERTY]: FLOATING_PANEL_DRAG_HIT_AREA_CSS_VALUE,
         left: layout.x,
         top: layout.y,
         width: layout.width,
@@ -76,26 +79,32 @@ export function FloatingPanel({
       } as React.CSSProperties}
       onPointerDown={onBringToFront}
     >
-      <PanelHeader
-        className="floating-panel-header"
-        {...dragHandleProps}
-      >
-        <PanelTitle>{definition.title}</PanelTitle>
-        <IconButton
+      <div className="floating-panel-interaction-row">
+        <div className="floating-panel-drag-hit-area" role="presentation" {...dragHandleProps} />
+        <CloseButton
+          className="floating-panel-close-button"
           label={`Close ${definition.title}`}
-          icon={<X size={14} />}
           onPointerDown={(event) => event.stopPropagation()}
           onClick={onClose}
         />
-      </PanelHeader>
+      </div>
       <PanelBody className="floating-panel-body">
         {children}
       </PanelBody>
-      <div
-        className="floating-panel-resize-handle"
-        role="presentation"
-        {...resizeHandleProps}
-      />
+      {FLOATING_PANEL_RESIZE_DIRECTIONS.map((direction) => (
+        <div
+          key={direction}
+          className={`floating-panel-resize-handle floating-panel-resize-handle--${direction}`}
+          role="presentation"
+          {...floatingPanelResizeHandleProps({
+            direction,
+            resizeStart,
+            layout,
+            onBringToFront,
+            onResize
+          })}
+        />
+      ))}
     </Panel>
   );
 }
@@ -215,22 +224,27 @@ export function floatingPanelDragHandleProps({
 }
 
 export function floatingPanelResizeHandleProps({
+  direction,
   resizeStart,
   layout,
   onBringToFront,
   onResize
 }: {
-  resizeStart: React.MutableRefObject<{ x: number; y: number; width: number; height: number } | undefined>;
-  layout: { width: number; height: number };
+  direction: FloatingPanelResizeDirection;
+  resizeStart: React.MutableRefObject<FloatingPanelResizeStart | undefined>;
+  layout: FloatingPanelResizeRect;
   onBringToFront: () => void;
-  onResize: (width: number, height: number) => void;
+  onResize: (rect: FloatingPanelResizeRect) => void;
 }): React.HTMLAttributes<HTMLElement> {
   return {
     onPointerDown: (event) => {
       event.stopPropagation();
       resizeStart.current = {
-        x: event.clientX,
-        y: event.clientY,
+        pointerX: event.clientX,
+        pointerY: event.clientY,
+        direction,
+        x: layout.x,
+        y: layout.y,
         width: layout.width,
         height: layout.height
       };
@@ -241,14 +255,30 @@ export function floatingPanelResizeHandleProps({
       if (!resizeStart.current) {
         return;
       }
-      onResize(
-        resizeStart.current.width + event.clientX - resizeStart.current.x,
-        resizeStart.current.height + event.clientY - resizeStart.current.y
-      );
+      onResize(resizeFloatingPanelRect(resizeStart.current, event.clientX, event.clientY));
     },
     onPointerUp: (event) => {
       resizeStart.current = undefined;
       event.currentTarget.releasePointerCapture(event.pointerId);
     }
+  };
+}
+
+function resizeFloatingPanelRect(
+  start: FloatingPanelResizeStart,
+  pointerX: number,
+  pointerY: number
+): FloatingPanelResizeRect {
+  const dx = pointerX - start.pointerX;
+  const dy = pointerY - start.pointerY;
+  return {
+    x: start.direction.includes('w') ? start.x + dx : start.x,
+    y: start.direction.includes('n') ? start.y + dy : start.y,
+    width: start.width
+      + (start.direction.includes('e') ? dx : 0)
+      - (start.direction.includes('w') ? dx : 0),
+    height: start.height
+      + (start.direction.includes('s') ? dy : 0)
+      - (start.direction.includes('n') ? dy : 0)
   };
 }

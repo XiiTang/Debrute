@@ -769,7 +769,6 @@ export interface TerminalSessionView {
   signal: string | null;
   createdAt: string;
   updatedAt: string;
-  restartCount: number;
 }
 
 export interface CreateTerminalSessionInput {
@@ -795,10 +794,6 @@ export interface TerminalResize {
   terminalId: string;
   cols: number;
   rows: number;
-}
-
-export interface RestartTerminalSessionInput {
-  terminalId: string;
 }
 
 export interface CloseTerminalSessionInput {
@@ -1103,7 +1098,6 @@ export interface WorkbenchApiClient {
   createTerminalSession(input?: CreateTerminalSessionInput): Promise<TerminalSessionResult>;
   writeTerminalInput(input: TerminalInputWrite): Promise<{ ok: true }>;
   resizeTerminal(input: TerminalResize): Promise<TerminalSessionResult>;
-  restartTerminalSession(input: RestartTerminalSessionInput): Promise<TerminalSessionResult>;
   closeTerminalSession(input: CloseTerminalSessionInput): Promise<{ ok: true }>;
   subscribeTerminalEvents(
     terminalId: string,

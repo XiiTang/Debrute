@@ -302,7 +302,6 @@ describe('HTTP workbench API client', () => {
       await client.listTerminalSessions();
       await client.writeTerminalInput({ terminalId: 'terminal-1', data: 'pwd\r' });
       await client.resizeTerminal({ terminalId: 'terminal-1', cols: 120, rows: 40 });
-      await client.restartTerminalSession({ terminalId: 'terminal-1' });
       await client.closeTerminalSession({ terminalId: 'terminal-1' });
       const subscription = client.subscribeTerminalEvents('terminal-1', (event) => terminalEvents.push(event));
 
@@ -320,7 +319,6 @@ describe('HTTP workbench API client', () => {
         { method: 'GET', path: `/api/projects/${projectId}/terminals`, body: undefined },
         { method: 'POST', path: `/api/projects/${projectId}/terminals/terminal-1/input`, body: { data: 'pwd\r' } },
         { method: 'POST', path: `/api/projects/${projectId}/terminals/terminal-1/resize`, body: { cols: 120, rows: 40 } },
-        { method: 'POST', path: `/api/projects/${projectId}/terminals/terminal-1/restart`, body: undefined },
         { method: 'DELETE', path: `/api/projects/${projectId}/terminals/terminal-1`, body: undefined }
       ]));
       expect(eventSourceUrls).toHaveLength(1);
@@ -749,13 +747,12 @@ function routeResponse(url: string, init?: RequestInit): unknown {
       exitCode: null,
       signal: null,
       createdAt: '2026-06-12T00:00:00.000Z',
-      updatedAt: '2026-06-12T00:00:00.000Z',
-      restartCount: 0
+      updatedAt: '2026-06-12T00:00:00.000Z'
     };
     return init?.method === 'POST' ? { session } : { sessions: [session] };
   }
   if (path.startsWith(`/api/projects/${projectId}/terminals/`)) {
-    return path.endsWith('/resize') || path.endsWith('/restart')
+    return path.endsWith('/resize')
       ? {
           session: {
             id: 'terminal-1',
@@ -767,8 +764,7 @@ function routeResponse(url: string, init?: RequestInit): unknown {
             exitCode: null,
             signal: null,
             createdAt: '2026-06-12T00:00:00.000Z',
-            updatedAt: '2026-06-12T00:00:00.000Z',
-            restartCount: path.endsWith('/restart') ? 1 : 0
+            updatedAt: '2026-06-12T00:00:00.000Z'
           }
         }
       : { ok: true };

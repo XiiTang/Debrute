@@ -1,7 +1,7 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { Plus, RotateCcw, X } from 'lucide-react';
+import { Plus } from 'lucide-react';
 import type { TerminalSessionView, WorkbenchApiClient } from '@debrute/app-protocol';
-import { EmptyState, IconButton, Tab, TabList, Toolbar } from '../ui';
+import { CloseButton, EmptyState, IconButton, Tab, TabList, Toolbar } from '../ui';
 import { useXtermTerminal } from './useXtermTerminal';
 import { createTerminalMetadataEventHandler } from './terminalMetadataEvents';
 import {
@@ -23,10 +23,8 @@ export interface TerminalPanelToolbarProps {
   sessions: TerminalSessionView[];
   activeSessionId: string | null;
   closingSessionIds: string[];
-  canRestartActiveSession: boolean;
   onSelectSession(terminalId: string): void;
   onCreateSession(): void;
-  onRestartActiveSession(): void;
   onCloseSession(session: TerminalSessionView): void;
 }
 
@@ -34,10 +32,8 @@ export function TerminalPanelToolbar({
   sessions,
   activeSessionId,
   closingSessionIds,
-  canRestartActiveSession,
   onSelectSession,
   onCreateSession,
-  onRestartActiveSession,
   onCloseSession
 }: TerminalPanelToolbarProps): React.ReactElement {
   return (
@@ -55,19 +51,24 @@ export function TerminalPanelToolbar({
                 <small>{session.status}</small>
               ) : null}
             </Tab>
-            <IconButton
+            <CloseButton
               className="db-terminal-tab__close"
-              label={`Close ${session.title}`}
-              icon={<X size={10} />}
+              label={`Close Terminal ${session.title}`}
               disabled={closingSessionIds.includes(session.id)}
+              onPointerDown={(event) => event.stopPropagation()}
               onClick={() => onCloseSession(session)}
             />
           </div>
         ))}
       </TabList>
-      <div className="db-action-row">
-        <IconButton label="New Terminal" icon={<Plus size={14} />} onClick={onCreateSession} />
-        <IconButton label="Restart Terminal" icon={<RotateCcw size={14} />} disabled={!canRestartActiveSession} onClick={onRestartActiveSession} />
+      <div className="db-terminal-tab-end-slot">
+        <IconButton
+          className="db-terminal-tab-new-button"
+          label="New Terminal"
+          icon={<Plus size={14} />}
+          size="xs"
+          onClick={onCreateSession}
+        />
       </div>
     </Toolbar>
   );
@@ -218,14 +219,6 @@ export function TerminalPanel({
     });
   }, [api, removeSession, showError]);
 
-  const restartActiveSession = useCallback(() => {
-    if (!activeSession) {
-      return;
-    }
-    void api.restartTerminalSession({ terminalId: activeSession.id })
-      .then((result) => updateSession(result.session))
-      .catch(showError);
-  }, [activeSession, api, showError, updateSession]);
   const showEmptyState = shouldShowTerminalEmptyState(state);
 
   return (
@@ -234,10 +227,8 @@ export function TerminalPanel({
         sessions={state.sessions}
         activeSessionId={state.activeSessionId}
         closingSessionIds={state.closingSessionIds}
-        canRestartActiveSession={Boolean(activeSession)}
         onSelectSession={(terminalId) => setState((current) => ({ ...current, activeSessionId: terminalId }))}
         onCreateSession={() => void createSession('').catch(showError)}
-        onRestartActiveSession={restartActiveSession}
         onCloseSession={closeSession}
       />
       {state.error ? <div className="terminal-panel__status">{state.error}</div> : null}

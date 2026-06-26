@@ -1220,17 +1220,6 @@ async function handleTerminalRoute(context: ProjectRequestContext, tail: string)
     return;
   }
 
-  if (route.operation === 'restart') {
-    if (method !== 'POST') {
-      writeError(context.response, 405, 'method_not_allowed', 'Unsupported terminal restart method.');
-      return;
-    }
-    writeJson(context.response, 200, await daemonAppServer(context).restartTerminalSession({
-      terminalId: route.terminalId
-    }));
-    return;
-  }
-
   if (route.operation === 'session') {
     if (method !== 'DELETE') {
       writeError(context.response, 405, 'method_not_allowed', 'Unsupported terminal session method.');
@@ -1245,7 +1234,7 @@ async function handleTerminalRoute(context: ProjectRequestContext, tail: string)
 
 interface TerminalRoute {
   terminalId: string;
-  operation: 'session' | 'events' | 'input' | 'resize' | 'restart';
+  operation: 'session' | 'events' | 'input' | 'resize';
 }
 
 function parseTerminalRoute(tail: string): TerminalRoute | undefined {
@@ -1259,7 +1248,7 @@ function parseTerminalRoute(tail: string): TerminalRoute | undefined {
   }
   if (
     segments.length === 3
-    && (segments[2] === 'events' || segments[2] === 'input' || segments[2] === 'resize' || segments[2] === 'restart')
+    && (segments[2] === 'events' || segments[2] === 'input' || segments[2] === 'resize')
   ) {
     return { terminalId, operation: segments[2] };
   }

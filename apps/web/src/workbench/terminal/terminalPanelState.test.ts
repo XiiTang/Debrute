@@ -75,7 +75,6 @@ function sessionFixture(id: string): TerminalSessionView {
     exitCode: null,
     signal: null,
     createdAt: '2026-06-12T00:00:00.000Z',
-    updatedAt: '2026-06-12T00:00:00.000Z',
-    restartCount: 0
+    updatedAt: '2026-06-12T00:00:00.000Z'
   };
 }

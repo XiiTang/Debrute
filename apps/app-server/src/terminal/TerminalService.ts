@@ -2,7 +2,6 @@ import { randomUUID } from 'node:crypto';
 import {
   type CloseTerminalSessionInput,
   type CreateTerminalSessionInput,
-  type RestartTerminalSessionInput,
   type TerminalEvent,
   type TerminalEventSubscription,
   type TerminalInputWrite,
@@ -77,8 +76,7 @@ export class TerminalService {
         exitCode: null,
         signal: null,
         createdAt: now,
-        updatedAt: now,
-        restartCount: 0
+        updatedAt: now
       },
       cwdAbsolutePath: cwd.absolutePath,
       pty: null,
@@ -110,27 +108,6 @@ export class TerminalService {
     };
     session.pty?.resize(dimensions.cols, dimensions.rows);
     this.publish(session, { type: 'status', terminalId: session.view.id, session: { ...session.view } });
-    return { ...session.view };
-  }
-
-  async restart(input: RestartTerminalSessionInput): Promise<TerminalSessionView> {
-    const session = this.requireSession(input.terminalId);
-    this.disposePty(session);
-    session.replayBuffer = this.createReplayBuffer();
-    session.view = {
-      ...session.view,
-      status: 'starting',
-      exitCode: null,
-      signal: null,
-      restartCount: session.view.restartCount + 1,
-      updatedAt: this.nowIso()
-    };
-    this.publish(session, { type: 'status', terminalId: session.view.id, session: { ...session.view } });
-    this.spawnSession(session, {
-      absolutePath: session.cwdAbsolutePath,
-      projectRelativePath: session.view.cwdProjectRelativePath,
-      title: session.view.title
-    });
     return { ...session.view };
   }
 

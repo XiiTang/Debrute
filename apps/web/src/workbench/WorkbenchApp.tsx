@@ -92,7 +92,7 @@ import {
   type FloatingPanelState
 } from './shell/floatingPanels';
 import { FloatingDock } from './shell/FloatingDock';
-import { FloatingPanel, FloatingPanelContent } from './shell/FloatingPanel';
+import { FloatingPanelContent, WorkbenchFloatingPanelShell } from './shell/FloatingPanel';
 import { FloatingTextEditorWindow } from './shell/FloatingTextEditorWindow';
 import { NotificationStack } from './shell/NotificationStack';
 import { TerminalPanel } from './terminal/TerminalPanel';
@@ -1405,7 +1405,7 @@ export function WorkbenchApp(): React.ReactElement {
       <div className="panel-layer" data-testid="panel-layer">
         {FLOATING_PANEL_IDS.map((panelId) => (
           floatingPanels.panels[panelId].open ? (
-            <FloatingPanel
+            <WorkbenchFloatingPanelShell
               key={panelId}
               panelId={panelId}
               state={floatingPanels}
@@ -1416,7 +1416,7 @@ export function WorkbenchApp(): React.ReactElement {
               }}
               onBringToFront={() => setWindowOrder((current) => focusWorkbenchWindow(current, panelWindowIdentity(panelId)))}
               onDrag={(dx, dy) => setFloatingPanels((current) => dragFloatingPanel(current, panelId, { dx, dy }, workbenchViewportRect))}
-              onResize={(width, height) => setFloatingPanels((current) => resizeFloatingPanel(current, panelId, { width, height }, workbenchViewportRect))}
+              onResize={(rect) => setFloatingPanels((current) => resizeFloatingPanel(current, panelId, rect, workbenchViewportRect))}
             >
               <FloatingPanelContent
                 panelId={panelId}
@@ -1446,7 +1446,7 @@ export function WorkbenchApp(): React.ReactElement {
                   />
                 )}
               />
-            </FloatingPanel>
+            </WorkbenchFloatingPanelShell>
           ) : null
         ))}
       </div>
