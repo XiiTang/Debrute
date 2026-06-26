@@ -41,8 +41,18 @@
 .terminal-panel__surface {
   flex: 1;
   min-height: 0;
-  padding: 6px;
+  padding: 0;
+  background: var(--db-terminal-bg);
   overflow: hidden;
+}
+
+.terminal-panel__surface .xterm {
+  height: 100%;
+  background-color: var(--db-terminal-bg);
+}
+
+.terminal-panel__surface .xterm-viewport, .terminal-panel__surface .xterm-screen, .terminal-panel__surface .xterm-rows {
+  background-color: var(--db-terminal-bg);
 }
 
 .terminal-panel__empty {

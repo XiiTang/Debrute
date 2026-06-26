@@ -4,6 +4,8 @@
   --db-surface-1: #1f1f1f;
   --db-surface-2: #262626;
   --db-surface-3: #303030;
+  --db-terminal-bg: #0c0e10;
+  --db-terminal-tab-active-line: color-mix(in srgb, #ffffff 42%, transparent);
   --db-panel-bg: color-mix(in srgb, var(--db-surface-1) 94%, transparent);
   --db-floating-bg: color-mix(in srgb, var(--db-surface-1) 90%, transparent);
   --db-canvas-bg: #181818;

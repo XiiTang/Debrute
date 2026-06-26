@@ -200,13 +200,25 @@ describe('Workbench UI source contract', () => {
   it('keeps Settings content flush under the shell drag area', () => {
     const settingsStyles = css('apps/web/src/workbench/styles/settings.css');
     const settingsPanelRule = rule(settingsStyles, '.settings-panel');
+    const settingsDirectoryRule = rule(settingsStyles, '.settings-directory');
+    const settingsPageRule = rule(settingsStyles, '.settings-page');
 
-    expect(settingsStyles).toContain('padding: 0 14px 14px;');
-    expect(settingsStyles).toContain('padding: 0 var(--db-space-3) var(--db-space-3);');
-    expect(settingsStyles).toContain('padding: 0 4px 10px 0;');
+    expect(settingsPanelRule).toContain('padding: 0 var(--db-floating-panel-drag-hit-area-height) 0 var(--db-floating-panel-drag-hit-area-height);');
+    expect(settingsPanelRule).toContain('grid-template-columns: 160px minmax(0, 1fr);');
+    expect(settingsPanelRule).toContain('gap: var(--db-space-3);');
+    expect(settingsDirectoryRule).toContain('padding: 0 var(--db-space-3) 0 0;');
+    expect(settingsPageRule).toContain('padding: 0;');
+    expect(settingsPanelRule).not.toContain('border-bottom:');
+    expect(settingsPanelRule).not.toContain('padding: 0 14px 14px;');
+    expect(settingsPanelRule).not.toContain('padding: 0 14px 14px 4px;');
+    expect(settingsPanelRule).not.toContain('grid-template-columns: 192px');
+    expect(settingsPanelRule).not.toContain('gap: 14px;');
     expect(settingsStyles).not.toContain('padding: 14px;');
     expect(settingsStyles).not.toContain('padding: var(--db-space-3);');
+    expect(settingsDirectoryRule).not.toContain('padding: 0 var(--db-space-3) var(--db-space-3);');
+    expect(settingsDirectoryRule).not.toContain('padding: 0 var(--db-space-3) var(--db-space-3) 0;');
     expect(settingsStyles).not.toContain('padding: 2px 4px 10px 0;');
+    expect(settingsStyles).not.toContain('padding: 0 4px 10px 0;');
     expect(settingsPanelRule).not.toContain('background:');
     expect(settingsPanelRule).not.toContain('linear-gradient');
   });
@@ -221,6 +233,7 @@ describe('Workbench UI source contract', () => {
     expect(floatingPanelBodyRule).toContain('background: var(--db-floating-panel-content-bg);');
     expect(shell).toContain('.floating-panel-inspector,\n.floating-panel-problems {\n  --db-floating-panel-content-bg: var(--db-surface-1);');
     expect(shell).toContain('.floating-panel-settings,\n.floating-panel-terminal {\n  --db-floating-panel-content-bg: var(--db-bg);');
+    expect(shell).not.toContain('.floating-panel-terminal {\n  --db-floating-panel-content-bg: var(--db-terminal-bg);');
     expect(shell).not.toContain('.floating-panel-inspector .floating-panel-body');
     expect(shell).not.toContain('.floating-panel-problems .floating-panel-body');
     expect(shell).not.toContain('.floating-panel-settings .floating-panel-body');
@@ -243,8 +256,15 @@ describe('Workbench UI source contract', () => {
   it('keeps Terminal tab controls at one height and prevents tab close controls from overlapping the end slot', () => {
     const patterns = css('apps/web/src/workbench/ui/styles/workbench-patterns.css');
     const terminal = css('apps/web/src/workbench/styles/terminal.css');
+    const terminalPanelRule = rule(terminal, '.terminal-panel');
     const terminalToolbarRule = rule(terminal, '.floating-panel-terminal .terminal-panel__toolbar');
+    const terminalSurfaceRule = rule(terminal, '.terminal-panel__surface');
+    const terminalTabsRule = rule(patterns, '.db-terminal-tabs');
+    const terminalEndSlotRule = rule(patterns, '.db-terminal-tab-end-slot');
     const terminalTabCloseRule = rule(patterns, '.db-terminal-tab__close.db-icon-button');
+    const terminalTabActiveRule = rule(patterns, '.db-terminal-tab.db-tab--active');
+    const terminalNewButtonRule = rule(patterns, '.db-terminal-tab-new-button.db-icon-button');
+    const terminalNewButtonHoverRule = rule(patterns, '.db-terminal-tab-new-button.db-icon-button:hover:not(:disabled), .db-terminal-tab-new-button.db-icon-button:focus-visible');
 
     expect(terminal).toContain('top: calc(-1 * var(--db-floating-panel-drag-hit-area-height));');
     expect(terminalToolbarRule).toContain('left: var(--db-floating-panel-title-slot-width);');
@@ -252,12 +272,24 @@ describe('Workbench UI source contract', () => {
     expect(terminal).toContain('min-height: var(--db-floating-panel-drag-hit-area-height);');
     expect(terminal).toContain('padding: 0 4px;');
     expect(terminal).toContain('align-items: center;');
+    expect(terminalPanelRule).toContain('background: var(--db-bg);');
+    expect(terminalToolbarRule).toContain('background: transparent;');
     expect(patterns).toContain('flex: 0 1 auto;');
     expect(patterns).toContain('flex: 0 0 168px;');
     expect(patterns).toContain('height: var(--db-floating-panel-drag-hit-area-height);');
+    expect(terminalTabsRule).toContain('background: var(--db-terminal-bg);');
+    expect(terminalEndSlotRule).toContain('background: transparent;');
+    expect(terminalEndSlotRule).not.toContain('background: var(--db-terminal-bg);');
     expect(patterns).not.toContain('height: 24px;');
     expect(patterns).toContain('.db-terminal-tab__close.db-icon-button');
     expect(rule(patterns, '.db-terminal-tab')).toContain('min-height: var(--db-floating-panel-drag-hit-area-height);');
+    expect(rule(patterns, '.db-terminal-tab')).toContain('border: 0;');
+    expect(rule(patterns, '.db-terminal-tab')).toContain('border-radius: 0;');
+    expect(rule(patterns, '.db-terminal-tab')).toContain('background: transparent;');
+    expect(patterns).toContain('.db-terminal-tab:hover, .db-terminal-tab.db-tab--active');
+    expect(rule(patterns, '.db-terminal-tab:hover, .db-terminal-tab.db-tab--active')).toContain('background: transparent;');
+    expect(rule(patterns, '.db-terminal-tab:hover, .db-terminal-tab.db-tab--active')).not.toContain('border-radius:');
+    expect(terminalTabActiveRule).toContain('box-shadow: inset 0 -1px 0 var(--db-terminal-tab-active-line);');
     expect(terminalTabCloseRule).toContain('top: calc((var(--db-floating-panel-drag-hit-area-height) - 14px) / 2);');
     expect(terminalTabCloseRule).not.toContain('width:');
     expect(terminalTabCloseRule).not.toContain('height:');
@@ -271,6 +303,31 @@ describe('Workbench UI source contract', () => {
     expect(patterns).not.toMatch(/db-terminal-tab__close\.db-icon-button:hover:not\(:disabled\)\s*\{\n\s*border-color:/);
     expect(patterns).toContain('.db-terminal-tab-end-slot');
     expect(patterns).toContain('.db-terminal-tab-new-button');
+    expect(terminalNewButtonRule).toContain('border: 0;');
+    expect(terminalNewButtonRule).toContain('border-radius: 0;');
+    expect(terminalNewButtonRule).toContain('background: transparent;');
+    expect(terminalNewButtonRule).toContain('color: var(--db-text-muted);');
+    expect(terminalNewButtonHoverRule).toContain('border: 0;');
+    expect(terminalNewButtonHoverRule).toContain('background: transparent;');
+    expect(terminalNewButtonHoverRule).toContain('color: var(--db-text);');
+    expect(terminalSurfaceRule).toContain('padding: 0;');
+    expect(terminalSurfaceRule).toContain('background: var(--db-terminal-bg);');
+    expect(terminalSurfaceRule).not.toContain('padding: 6px;');
+    expect(terminalSurfaceRule).not.toContain('border:');
+    expect(terminal).toContain('.terminal-panel__surface .xterm');
+    expect(rule(terminal, '.terminal-panel__surface .xterm')).toContain('height: 100%;');
+    expect(rule(terminal, '.terminal-panel__surface .xterm')).toContain('background-color: var(--db-terminal-bg);');
+    expect(terminal).toContain('.terminal-panel__surface .xterm-viewport, .terminal-panel__surface .xterm-screen, .terminal-panel__surface .xterm-rows');
+    expect(rule(terminal, '.terminal-panel__surface .xterm-viewport, .terminal-panel__surface .xterm-screen, .terminal-panel__surface .xterm-rows')).toContain('background-color: var(--db-terminal-bg);');
+  });
+
+  it('keeps Terminal emulator background continuous with the Workbench panel surface', () => {
+    const terminalHook = css('apps/web/src/workbench/terminal/useXtermTerminal.ts');
+
+    expect(terminalHook).toContain("background: '#0c0e10'");
+    expect(terminalHook).not.toContain("background: '#111315'");
+    expect(terminalHook).not.toContain("background: '#181818'");
+    expect(terminalHook).not.toContain("background: '#0b0d12'");
   });
 
   it('keeps reusable Workbench pattern chrome out of feature styles', () => {
@@ -582,6 +639,8 @@ describe('Workbench UI source contract', () => {
       '--db-surface-1',
       '--db-surface-2',
       '--db-surface-3',
+      '--db-terminal-bg',
+      '--db-terminal-tab-active-line',
       '--db-canvas-bg',
       '--db-canvas-grid',
       '--db-text',
@@ -615,6 +674,7 @@ describe('Workbench UI source contract', () => {
       '--db-surface-1: #1f1f1f;',
       '--db-surface-2: #262626;',
       '--db-surface-3: #303030;',
+      '--db-terminal-bg: #0c0e10;',
       '--db-canvas-bg: #181818;',
       '--db-text: #ffffff;'
     ]) {

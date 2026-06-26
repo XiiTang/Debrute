@@ -207,6 +207,7 @@
   gap: 3px;
   height: var(--db-floating-panel-drag-hit-area-height);
   min-width: 0;
+  background: var(--db-terminal-bg);
   overflow-x: auto;
   overflow-y: hidden;
 }
@@ -227,11 +228,25 @@
   max-width: none;
   height: var(--db-floating-panel-drag-hit-area-height);
   min-height: var(--db-floating-panel-drag-hit-area-height);
+  border: 0;
+  border-radius: 0;
   padding: 0 19px 0 7px;
+  background: transparent;
+  color: var(--db-text-muted);
   white-space: nowrap;
   font-size: var(--db-font-sm);
   line-height: 1.4;
   letter-spacing: 0;
+}
+
+.db-terminal-tab:hover, .db-terminal-tab.db-tab--active {
+  border: 0;
+  background: transparent;
+  color: var(--db-text);
+}
+
+.db-terminal-tab.db-tab--active {
+  box-shadow: inset 0 -1px 0 var(--db-terminal-tab-active-line);
 }
 
 .db-terminal-tab span {
@@ -256,11 +271,22 @@
   align-items: center;
   height: var(--db-floating-panel-drag-hit-area-height);
   padding-left: 1px;
+  background: transparent;
 }
 
 .db-terminal-tab-new-button.db-icon-button {
   width: var(--db-floating-panel-drag-hit-area-height);
   height: var(--db-floating-panel-drag-hit-area-height);
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+  color: var(--db-text-muted);
+}
+
+.db-terminal-tab-new-button.db-icon-button:hover:not(:disabled), .db-terminal-tab-new-button.db-icon-button:focus-visible {
+  border: 0;
+  background: transparent;
+  color: var(--db-text);
 }
 
 .db-notification-stack {

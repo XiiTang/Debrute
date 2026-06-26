@@ -29,7 +29,7 @@ export function useXtermTerminal(input: UseXtermTerminalInput): void {
       lineHeight: 1.2,
       scrollback: 10_000,
       theme: {
-        background: '#0b0d12',
+        background: '#0c0e10',
         foreground: '#e6edf3',
         cursor: '#f6f8fa'
       }

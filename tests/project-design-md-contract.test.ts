@@ -52,6 +52,7 @@ describe('project DESIGN.md contract', () => {
       'surface-1: "#1f1f1f"',
       'surface-2: "#262626"',
       'surface-3: "#303030"',
+      'terminal: "#0c0e10"',
       'text: "#ffffff"',
       'border: "#3a3a3a"',
       'selection: "#ffffff"',

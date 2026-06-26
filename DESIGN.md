@@ -7,6 +7,7 @@ colors:
   surface-1: "#1f1f1f"
   surface-2: "#262626"
   surface-3: "#303030"
+  terminal: "#0c0e10"
   floating: "color-mix(in srgb, #1f1f1f 90%, transparent)"
   text: "#ffffff"
   text-muted: "color-mix(in srgb, #ffffff 72%, transparent)"
@@ -99,6 +100,7 @@ The implementation maps this ladder to `--db-*` tokens in `apps/web/src/workbenc
 
 - Use `canvas` for application and Canvas viewport foundations.
 - Use `surface-1`, `surface-2`, and `surface-3` for panel, control, hover, and active layers.
+- Use `terminal` only for the Terminal tab row and emulator background when they need a Zed-like work-surface distinction from ordinary panels.
 - Use 1px borders as the default hierarchy mechanism.
 - Use `selection` for selected, pressed, and focus-associated states.
 - Use warning, danger, info, and success only for semantic state.
@@ -211,7 +213,7 @@ Workbench floating panels use one shared shell for Explorer, Inspector, Problems
 - Floating panels resize from any edge or corner. All resize hit areas are invisible; no single corner owns a special visual grip.
 - Feature content remains owned by the feature surface.
 - Explorer uses faint always-visible indentation guides for nested tree levels.
-- Terminal uses the drag-hit-area row for its compact tab row. The tab strip starts to the right of the `Terminal` title, and the new-terminal button sits immediately after the tab strip, not pinned to the far panel edge.
+- Terminal keeps the ordinary floating panel shell background, then uses a darker neutral `terminal` surface only for the drag-hit-area tab row and emulator content. Its compact tab strip starts to the right of the `Terminal` title, uses no rounded active pill, marks the active tab with text emphasis and a thin bottom line, and keeps the new-terminal button flat immediately after the tab strip rather than pinned to the far panel edge.
 - Terminal has no restart feature in the UI, Workbench API, daemon routes, app-server facade, service layer, or terminal session view model.
 
 ### Desktop
