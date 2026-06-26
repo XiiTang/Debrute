@@ -5,6 +5,11 @@ import { join } from 'node:path';
 import sharp from 'sharp';
 import { describe, expect, it } from 'vitest';
 import {
+  canvasTextPreviewDescriptorProjectPath,
+  canvasTextPreviewSourceProjectPath,
+  canvasTextPreviewVariantProjectPath
+} from '@debrute/canvas-core';
+import {
   createCanvasTextPreviewService,
   type CanvasTextPreviewService
 } from './CanvasTextPreviewService';
@@ -44,8 +49,14 @@ describe('CanvasTextPreviewService', () => {
       contentCssHeight: 320,
       variants: []
     });
-    await expect(stat(join(projectRoot, '.debrute/cache/canvas-text-previews/canvas-1/notes/scene.md.source.png'))).resolves.toBeTruthy();
-    await expect(readFile(join(projectRoot, '.debrute/cache/canvas-text-previews/canvas-1/notes/scene.md.preview.json'), 'utf8'))
+    await expect(stat(join(projectRoot, canvasTextPreviewSourceProjectPath({
+      canvasId: 'canvas-1',
+      projectRelativePath: 'notes/scene.md'
+    })))).resolves.toBeTruthy();
+    await expect(readFile(join(projectRoot, canvasTextPreviewDescriptorProjectPath({
+      canvasId: 'canvas-1',
+      projectRelativePath: 'notes/scene.md'
+    })), 'utf8'))
       .resolves.toContain('fingerprint-a');
   });
 
@@ -89,7 +100,11 @@ describe('CanvasTextPreviewService', () => {
     });
 
     expect(result.descriptors['notes/scene.md']?.variants).toEqual([10, 15, 20, 29, 40, 57, 80, 114, 160, 227, 320]);
-    await expect(stat(join(projectRoot, '.debrute/cache/canvas-text-previews/canvas-1/notes/scene.md.preview-w160.png'))).resolves.toBeTruthy();
+    await expect(stat(join(projectRoot, canvasTextPreviewVariantProjectPath({
+      canvasId: 'canvas-1',
+      projectRelativePath: 'notes/scene.md',
+      width: 160
+    })))).resolves.toBeTruthy();
   });
 
   it('generates missing variants in parallel', async () => {
@@ -226,7 +241,11 @@ describe('CanvasTextPreviewService', () => {
         scrollLeft: commonInput.scrollLeft
       }]
     });
-    const variantPath = join(projectRoot, '.debrute/cache/canvas-text-previews/canvas-1/notes/scene.md.preview-w64.png');
+    const variantPath = join(projectRoot, canvasTextPreviewVariantProjectPath({
+      canvasId: 'canvas-1',
+      projectRelativePath: commonInput.projectRelativePath,
+      width: 64
+    }));
     const firstVariantHash = sha256(await readFile(variantPath));
 
     await service.saveSource({

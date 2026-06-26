@@ -1,7 +1,7 @@
 import { randomBytes } from 'node:crypto';
 import { mkdir, mkdtemp, readdir, rm, stat, symlink, unlink, utimes, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { basename, dirname, join } from 'node:path';
 import sharp from 'sharp';
 import { describe, expect, it } from 'vitest';
 import {
@@ -35,7 +35,10 @@ describe('canvas image preview service', () => {
       });
 
       expect(Object.keys(first).sort()).toEqual(['absolutePath']);
-      expect(first.absolutePath).toContain('/.debrute/cache/canvas-image-previews/');
+      const normalizedPath = first.absolutePath.replaceAll('\\', '/');
+      expect(normalizedPath).toMatch(
+        /\/\.debrute\/cache\/canvas-image-previews\/images%2Fcover\.png--[a-f0-9]{16}\/[^/]+%3A\d+\/preview-w300\.(jpg|png)$/
+      );
       expect(firstMetadata.width).toBe(300);
       expect(firstMetadata.height).toBe(150);
       expect(second.absolutePath).toBe(first.absolutePath);
@@ -263,6 +266,8 @@ describe('canvas image preview service', () => {
 
       expect(secondRevision).not.toBe(firstRevision);
       expect(second.absolutePath).not.toBe(first.absolutePath);
+      expect(dirname(second.absolutePath)).not.toBe(dirname(first.absolutePath));
+      expect(basename(second.absolutePath)).toBe(basename(first.absolutePath));
     } finally {
       await rm(projectRoot, { recursive: true, force: true });
     }

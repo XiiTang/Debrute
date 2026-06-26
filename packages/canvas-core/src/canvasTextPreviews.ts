@@ -1,3 +1,5 @@
+import { projectRelativePathCacheKey } from '@debrute/project-core/projectCacheKeys';
+
 export interface CanvasTextPreviewDescriptor {
   fingerprint: string;
   sourceWidth: number;
@@ -15,19 +17,16 @@ export interface CanvasTextPreviewPathInput {
 }
 
 export function canvasTextPreviewSourceProjectPath(input: CanvasTextPreviewPathInput): string {
-  const base = canvasTextPreviewBaseProjectPath(input);
-  return `${base}.source.png`;
+  return `${canvasTextPreviewBaseProjectPath(input)}/source.png`;
 }
 
 export function canvasTextPreviewDescriptorProjectPath(input: CanvasTextPreviewPathInput): string {
-  const base = canvasTextPreviewBaseProjectPath(input);
-  return `${base}.preview.json`;
+  return `${canvasTextPreviewBaseProjectPath(input)}/preview.json`;
 }
 
 export function canvasTextPreviewVariantProjectPath(input: CanvasTextPreviewPathInput & { width: number }): string {
   assertPositiveInteger(input.width, 'Canvas text preview width must be a positive integer.');
-  const base = canvasTextPreviewBaseProjectPath(input);
-  return `${base}.preview-w${input.width}.png`;
+  return `${canvasTextPreviewBaseProjectPath(input)}/preview-w${input.width}.png`;
 }
 
 export function normalizeCanvasTextPreviewDescriptor(value: CanvasTextPreviewDescriptor): CanvasTextPreviewDescriptor {
@@ -57,8 +56,9 @@ export function normalizeCanvasTextPreviewDescriptor(value: CanvasTextPreviewDes
 
 function canvasTextPreviewBaseProjectPath(input: CanvasTextPreviewPathInput): string {
   const canvasId = normalizeCanvasTextPreviewCanvasId(input.canvasId);
-  const projectRelativePath = normalizeCanvasTextPreviewProjectRelativePath(input.projectRelativePath);
-  return `.debrute/cache/canvas-text-previews/${canvasId}/${projectRelativePath}`;
+  assertCanvasTextPreviewProjectRelativePath(input.projectRelativePath);
+  const sourceKey = projectRelativePathCacheKey(input.projectRelativePath);
+  return `.debrute/cache/canvas-text-previews/${canvasId}/${sourceKey}`;
 }
 
 function normalizeCanvasTextPreviewCanvasId(canvasId: string): string {
@@ -68,19 +68,10 @@ function normalizeCanvasTextPreviewCanvasId(canvasId: string): string {
   return canvasId;
 }
 
-function normalizeCanvasTextPreviewProjectRelativePath(projectRelativePath: string): string {
-  const normalized = projectRelativePath.replaceAll('\\', '/').replace(/^\.\//, '');
-  const segments = normalized.split('/');
-  if (!normalized
-    || normalized.startsWith('/')
-    || /^[A-Za-z]:/.test(normalized)
-    || segments.some((segment) => segment === '' || segment === '..')) {
-    throw new Error(`Invalid Canvas text preview project-relative path: ${projectRelativePath}`);
-  }
-  if (normalized === '.debrute' || normalized.startsWith('.debrute/')) {
+function assertCanvasTextPreviewProjectRelativePath(projectRelativePath: string): void {
+  if (projectRelativePath === '.debrute' || projectRelativePath.startsWith('.debrute/')) {
     throw new Error('Canvas text preview cannot target Debrute internal files.');
   }
-  return normalized;
 }
 
 function assertPositiveFinite(value: number, message: string): void {

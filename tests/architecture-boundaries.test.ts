@@ -97,6 +97,32 @@ describe('Debrute architecture boundaries', () => {
     )).toEqual(['@debrute/app-protocol']);
   });
 
+  it('keeps Electron out of web tests while allowing source inspection helpers', async () => {
+    const fixtureRoot = mkdtempSync(join(tmpdir(), 'debrute-architecture-web-tests-'));
+    try {
+      mkdirSync(join(fixtureRoot, 'apps/web/src/workbench'), { recursive: true });
+      writeFileSync(
+        join(fixtureRoot, 'apps/web/src/workbench/reads-source.test.ts'),
+        "import { readFileSync } from 'node:fs';\n",
+        'utf8'
+      );
+      writeFileSync(
+        join(fixtureRoot, 'apps/web/src/workbench/violates-electron.test.ts'),
+        "import { ipcRenderer } from 'electron';\n",
+        'utf8'
+      );
+
+      await expect(architectureBoundaryViolations(fixtureRoot, [
+        'apps/web/src/workbench/reads-source.test.ts',
+        'apps/web/src/workbench/violates-electron.test.ts'
+      ])).resolves.toEqual([
+        'web workbench does not import electron: apps/web/src/workbench/violates-electron.test.ts imports "electron"'
+      ]);
+    } finally {
+      rmSync(fixtureRoot, { recursive: true, force: true });
+    }
+  });
+
   it('keeps App Server project, Canvas Map, and Canvas ownership out of the coordinator', () => {
     for (const file of [
       'apps/app-server/src/project-session/projectSnapshot.ts',

@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useRef, useState } from 'react';
+import React, { useCallback, useEffect, useReducer, useRef, useState } from 'react';
 import { AlertTriangle, File, FileText, Folder, Image as ImageIcon, Maximize2, Music2, RefreshCw, Save, Video } from 'lucide-react';
 import type { CanvasFeedbackEntry, CanvasFeedbackGeometry, ProjectedCanvasNode } from '@debrute/canvas-core';
 import type { TextFileBuffer, WorkbenchActions } from '../../types';
@@ -6,7 +6,12 @@ import { CanvasTextEditor } from './CanvasTextEditor';
 import { useCanvasImageNodeAsset, type CanvasImageNodeAssetHookState } from './CanvasImageNodeAssetContext';
 import { CanvasImageFeedbackLayer, type CanvasImageFeedbackDraftRegion, type CanvasImageFeedbackMode } from './CanvasImageFeedbackLayer';
 import type { CanvasLoadedImage } from './canvasImagePreviews';
-import { useCanvasTextPreviewRuntime, type CanvasTextPreviewSource } from './CanvasTextPreviewRuntime';
+import {
+  canvasTextPreviewImageReducer,
+  initialCanvasTextPreviewImageState,
+  useCanvasTextPreviewRuntime,
+  type CanvasTextPreviewSource
+} from './CanvasTextPreviewRuntime';
 import { Button, IconButton, StatusPill } from '../ui';
 
 export interface CanvasNodeContentProps {
@@ -558,21 +563,55 @@ function CanvasTextNodeContent({
             onSave={() => void actions.saveTextFileBuffer(node.projectRelativePath)}
             onToggleWordWrap={() => actions.toggleTextFileWordWrap(node.projectRelativePath)}
           />
-        ) : buffer && textPreview ? (
-          <img
-            className="canvas-text-preview-image"
-            src={textPreview.src}
-            alt=""
-            draggable={false}
-            data-preview-width={textPreview.previewWidth}
-          />
         ) : buffer ? (
-          <div className="canvas-text-preview-empty" aria-hidden="true" />
+          <CanvasTextPreviewImage source={textPreview} />
         ) : (
           <div className="canvas-text-preview-empty" aria-hidden="true" />
         )}
       </div>
     </section>
+  );
+}
+
+function CanvasTextPreviewImage({
+  source
+}: {
+  source?: CanvasTextPreviewSource | undefined;
+}): React.ReactElement {
+  const [state, dispatch] = useReducer(
+    canvasTextPreviewImageReducer,
+    source,
+    initialCanvasTextPreviewImageState
+  );
+  const nextPreview = state.next;
+
+  useEffect(() => {
+    dispatch({ type: 'source-resolved', source });
+  }, [source]);
+
+  useEffect(() => {
+    if (!nextPreview) {
+      return undefined;
+    }
+    return preloadCanvasImageForHandoff({
+      image: nextPreview,
+      resolveLoaded: (loadKey) => dispatch({ type: 'next-loaded', loadKey }),
+      rejectLoaded: (loadKey) => dispatch({ type: 'next-failed', loadKey })
+    });
+  }, [nextPreview]);
+
+  if (!state.loaded) {
+    return <div className="canvas-text-preview-empty" aria-hidden="true" />;
+  }
+
+  return (
+    <img
+      className="canvas-text-preview-image"
+      src={state.loaded.src}
+      alt=""
+      draggable={false}
+      data-preview-width={state.loaded.previewWidth}
+    />
   );
 }
 

@@ -34,7 +34,7 @@ describe('Project document descriptors', () => {
     expect(projectDocumentDescriptorForPath('.debrute/assets/generated/record-1.json')?.type).toBe('generated-asset-record');
     expect(projectDocumentDescriptorForPath('.debrute/cache/file-fingerprints.json')?.type).toBe('fingerprint-cache');
     expect(projectDocumentDescriptorForPath('.debrute/cache/canvas-image-previews/a/b.webp')).toBeUndefined();
-    expect(projectDocumentDescriptorForPath('.debrute/cache/canvas-text-previews/canvas-1/notes/a.md.preview.json')).toBeUndefined();
+    expect(projectDocumentDescriptorForPath('.debrute/cache/canvas-text-previews/canvas-1/notes%2Fa.md--1234567890abcdef12345678/preview.json')).toBeUndefined();
     expect(projectDocumentDescriptorForPath('.debrute/unknown/state.json')).toBeUndefined();
     expect(projectDocumentDescriptorForPath('.debrute/canvas-maps/nested/canvas-1.yaml')).toBeUndefined();
     expect(projectDocumentDescriptorForPath('.debrute/canvas-maps/bad.id.yaml')).toBeUndefined();

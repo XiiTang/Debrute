@@ -20,6 +20,7 @@ export default defineConfig({
       { find: '@debrute/app-protocol', replacement: resolve(workspaceRoot, 'packages/app-protocol/src/index.ts') },
       { find: '@debrute/capability-core', replacement: resolve(workspaceRoot, 'packages/capability-core/src/index.ts') },
       { find: '@debrute/capability-runtime', replacement: resolve(workspaceRoot, 'packages/capability-runtime/src/index.ts') },
+      { find: '@debrute/project-core/projectCacheKeys', replacement: resolve(workspaceRoot, 'packages/project-core/src/projectCacheKeys.ts') },
       { find: '@debrute/project-core/projectTextFileTypes', replacement: resolve(workspaceRoot, 'packages/project-core/src/projectTextFileTypes.ts') },
       { find: '@debrute/project-core', replacement: resolve(workspaceRoot, 'packages/project-core/src/index.ts') },
       { find: '@debrute/canvas-core', replacement: resolve(workspaceRoot, 'packages/canvas-core/src/index.ts') },

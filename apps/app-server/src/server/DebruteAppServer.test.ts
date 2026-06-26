@@ -1,10 +1,16 @@
-import { mkdir, mkdtemp, readFile, rm, stat, writeFile } from 'node:fs/promises';
+import { mkdir, mkdtemp, readFile, readdir, rm, stat, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import sharp from 'sharp';
 import { describe, expect, it } from 'vitest';
 import { canvasFeedbackRenderedProjectPath } from '@debrute/canvas-core';
-import { normalizeFileWatchEvent, type NormalizedFileWatchEvent } from '@debrute/project-core';
+import {
+  normalizeFileWatchEvent,
+  projectFileRevision,
+  projectRelativePathCacheKey,
+  projectRevisionCacheKey,
+  type NormalizedFileWatchEvent
+} from '@debrute/project-core';
 import { DebruteAppServer } from './DebruteAppServer';
 import {
   CanvasFeedbackRenderCancelledError,
@@ -87,6 +93,49 @@ describe('DebruteAppServer image model batch paths', () => {
         logPath: 'batch/results.jsonl',
         summaryPath: 'batch/summary.json'
       });
+    } finally {
+      server.close();
+      await rm(projectRoot, { recursive: true, force: true });
+    }
+  });
+});
+
+describe('DebruteAppServer Canvas image preview cache cleanup', () => {
+  it('reconciles Canvas image preview cache when opening a project', async () => {
+    const projectRoot = await mkdtemp(join(tmpdir(), 'debrute-open-preview-cleanup-'));
+    const server = new DebruteAppServer();
+    try {
+      await writeImageFixture(projectRoot, 'images/cover.png');
+      const fixture = await writeImagePreviewCacheRevisionFixtures(projectRoot, 'images/cover.png');
+
+      await server.openProject(projectRoot, {
+        initializeIfMissing: true,
+        createDefaultCanvas: true,
+        watchFiles: false
+      });
+
+      await expect(readdir(fixture.sourceCacheRoot)).resolves.toEqual([fixture.currentRevisionKey]);
+    } finally {
+      server.close();
+      await rm(projectRoot, { recursive: true, force: true });
+    }
+  });
+
+  it('reconciles Canvas image preview cache when refreshing a project', async () => {
+    const projectRoot = await mkdtemp(join(tmpdir(), 'debrute-refresh-preview-cleanup-'));
+    const server = new DebruteAppServer();
+    try {
+      await writeImageFixture(projectRoot, 'images/cover.png');
+      await server.openProject(projectRoot, {
+        initializeIfMissing: true,
+        createDefaultCanvas: true,
+        watchFiles: false
+      });
+      const fixture = await writeImagePreviewCacheRevisionFixtures(projectRoot, 'images/cover.png');
+
+      await server.refreshProject();
+
+      await expect(readdir(fixture.sourceCacheRoot)).resolves.toEqual([fixture.currentRevisionKey]);
     } finally {
       server.close();
       await rm(projectRoot, { recursive: true, force: true });
@@ -381,6 +430,24 @@ async function writeImageFixture(projectRoot: string, projectRelativePath: strin
       background: { r: 240, g: 240, b: 240, alpha: 1 }
     }
   }).png().toBuffer());
+}
+
+async function writeImagePreviewCacheRevisionFixtures(
+  projectRoot: string,
+  projectRelativePath: string
+): Promise<{ sourceCacheRoot: string; currentRevisionKey: string }> {
+  const sourceStat = await stat(join(projectRoot, projectRelativePath));
+  const sourceKey = projectRelativePathCacheKey(projectRelativePath);
+  const currentRevisionKey = projectRevisionCacheKey(projectFileRevision(sourceStat.size, sourceStat.mtimeMs));
+  const sourceCacheRoot = join(projectRoot, '.debrute/cache/canvas-image-previews', sourceKey);
+  await mkdir(join(sourceCacheRoot, currentRevisionKey), { recursive: true });
+  await writeFile(join(sourceCacheRoot, currentRevisionKey, 'preview-w32.jpg'), 'current');
+  await mkdir(join(sourceCacheRoot, 'old%3A10'), { recursive: true });
+  await writeFile(join(sourceCacheRoot, 'old%3A10', 'preview-w32.jpg'), 'old');
+  return {
+    sourceCacheRoot,
+    currentRevisionKey
+  };
 }
 
 async function writeFeedbackDocument(projectRoot: string, projectRelativePaths: string[]): Promise<void> {

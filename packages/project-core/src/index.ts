@@ -270,6 +270,11 @@ export {
 } from './adobeBridgeFileTransfer.js';
 
 export {
+  projectRelativePathCacheKey,
+  projectRevisionCacheKey
+} from './projectCacheKeys.js';
+
+export {
   isCanvasPreviewableProjectImagePath,
   isProjectImageReferencePath,
   isSupportedProjectImagePath,

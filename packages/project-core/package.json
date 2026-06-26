@@ -5,6 +5,20 @@
   "type": "module",
   "main": "dist/index.js",
   "types": "dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    },
+    "./projectCacheKeys": {
+      "types": "./dist/projectCacheKeys.d.ts",
+      "import": "./dist/projectCacheKeys.js"
+    },
+    "./projectTextFileTypes": {
+      "types": "./dist/projectTextFileTypes.d.ts",
+      "import": "./dist/projectTextFileTypes.js"
+    }
+  },
   "scripts": {
     "build": "tsc -b",
     "check": "tsc -b --pretty false"

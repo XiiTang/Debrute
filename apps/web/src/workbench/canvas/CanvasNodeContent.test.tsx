@@ -1,5 +1,8 @@
-import { describe, expect, it } from 'vitest';
-import React from 'react';
+// @vitest-environment jsdom
+
+import { afterEach, describe, expect, it, vi } from 'vitest';
+import React, { act } from 'react';
+import { createRoot, type Root } from 'react-dom/client';
 import { renderToStaticMarkup } from 'react-dom/server';
 import type { ProjectedCanvasNode } from '@debrute/canvas-core';
 import type { TextFileBuffer, WorkbenchActions } from '../../types';
@@ -9,6 +12,12 @@ import {
   canvasTextBufferEnsureKey
 } from './CanvasNodeContent';
 import type { CanvasImageNodeAssetHookState } from './CanvasImageNodeAssetContext';
+import type { CanvasTextPreviewSource } from './CanvasTextPreviewRuntime';
+
+afterEach(() => {
+  vi.restoreAllMocks();
+  vi.unstubAllGlobals();
+});
 
 describe('CanvasImageNodePreview', () => {
   it('keeps the visible image mounted while the next image preloads off-DOM', () => {
@@ -183,6 +192,65 @@ describe('CanvasNodeContent text chrome', () => {
     expect(html).toContain('data-preview-width="700"');
     expect(html).not.toContain('data-canvas-text-editor="true"');
     expect(html).not.toContain('data-editor-engine="codemirror"');
+  });
+
+  it('keeps the loaded text preview mounted while the preview source is unavailable and the next variant loads', async () => {
+    const restoreActEnvironment = installReactActEnvironment();
+    const frameCallbacks: FrameRequestCallback[] = [];
+    const restoreAnimationFrame = installAnimationFrameQueue(frameCallbacks);
+    const preloadImages = installTextPreviewImagePreload();
+    const container = document.createElement('div');
+    document.body.appendChild(container);
+    const root = createRoot(container);
+    const firstPreview = textPreviewSource(320);
+    const nextPreview = textPreviewSource(640);
+
+    try {
+      await renderTextPreviewNode(root, firstPreview);
+
+      expect(textPreviewImage(container)?.getAttribute('src')).toBe(firstPreview.src);
+      expect(textPreviewImage(container)?.getAttribute('data-preview-width')).toBe('320');
+
+      await renderTextPreviewNode(root, undefined);
+
+      expect(textPreviewImage(container)?.getAttribute('src')).toBe(firstPreview.src);
+      expect(container.querySelector('.canvas-text-preview-empty')).toBeNull();
+
+      await renderTextPreviewNode(root, nextPreview);
+
+      expect(textPreviewImage(container)?.getAttribute('src')).toBe(firstPreview.src);
+      expect(preloadImages).toHaveLength(1);
+      expect(preloadImages[0]?.src).toBe(nextPreview.src);
+
+      await act(async () => {
+        preloadImages[0]?.emit('load', nextPreview.previewWidth);
+        await Promise.resolve();
+      });
+
+      expect(textPreviewImage(container)?.getAttribute('src')).toBe(firstPreview.src);
+      expect(frameCallbacks).toHaveLength(1);
+
+      await act(async () => {
+        frameCallbacks.shift()?.(16);
+      });
+
+      expect(textPreviewImage(container)?.getAttribute('src')).toBe(firstPreview.src);
+      expect(frameCallbacks).toHaveLength(1);
+
+      await act(async () => {
+        frameCallbacks.shift()?.(32);
+      });
+
+      expect(textPreviewImage(container)?.getAttribute('src')).toBe(nextPreview.src);
+      expect(textPreviewImage(container)?.getAttribute('data-preview-width')).toBe('640');
+    } finally {
+      await act(async () => {
+        root.unmount();
+      });
+      container.remove();
+      restoreAnimationFrame();
+      restoreActEnvironment();
+    }
   });
 
   it('renders text preview generation errors instead of an empty preview body', () => {
@@ -364,6 +432,123 @@ function textBuffer(path: string, revision: string): TextFileBuffer {
     lastSavedRevision: revision,
     externalChange: false
   };
+}
+
+async function renderTextPreviewNode(root: Root, textPreview: CanvasTextPreviewSource | undefined): Promise<void> {
+  await act(async () => {
+    root.render(
+      <CanvasNodeContent
+        node={textNode('flow/readme.md', 'rev-a')}
+        selected={false}
+        culled={false}
+        actions={actionsFixture()}
+        textBuffer={textBuffer('flow/readme.md', 'rev-a')}
+        textPreview={textPreview}
+        onSelectNode={() => undefined}
+        onTitlePointerDown={() => undefined}
+        onTitlePointerMove={() => undefined}
+        onTitlePointerUp={() => undefined}
+      />
+    );
+  });
+}
+
+function textPreviewSource(previewWidth: number): CanvasTextPreviewSource {
+  return {
+    src: `/api/projects/p/canvas-text-preview?canvasId=canvas-1&path=flow%2Freadme.md&fingerprint=fp&w=${previewWidth}`,
+    previewWidth
+  };
+}
+
+function textPreviewImage(container: HTMLElement): HTMLImageElement | null {
+  return container.querySelector('img.canvas-text-preview-image');
+}
+
+function installReactActEnvironment(): () => void {
+  const globalWithActFlag = globalThis as typeof globalThis & { IS_REACT_ACT_ENVIRONMENT?: boolean };
+  const previous = globalWithActFlag.IS_REACT_ACT_ENVIRONMENT;
+  globalWithActFlag.IS_REACT_ACT_ENVIRONMENT = true;
+  return () => {
+    if (previous === undefined) {
+      delete globalWithActFlag.IS_REACT_ACT_ENVIRONMENT;
+      return;
+    }
+    globalWithActFlag.IS_REACT_ACT_ENVIRONMENT = previous;
+  };
+}
+
+function installAnimationFrameQueue(frameCallbacks: FrameRequestCallback[]): () => void {
+  const originalRequestAnimationFrame = window.requestAnimationFrame;
+  const originalCancelAnimationFrame = window.cancelAnimationFrame;
+  Object.defineProperty(window, 'requestAnimationFrame', {
+    configurable: true,
+    writable: true,
+    value: (callback: FrameRequestCallback): number => {
+      frameCallbacks.push(callback);
+      return frameCallbacks.length;
+    }
+  });
+  Object.defineProperty(window, 'cancelAnimationFrame', {
+    configurable: true,
+    writable: true,
+    value: () => undefined
+  });
+  return () => {
+    Object.defineProperty(window, 'requestAnimationFrame', {
+      configurable: true,
+      writable: true,
+      value: originalRequestAnimationFrame
+    });
+    Object.defineProperty(window, 'cancelAnimationFrame', {
+      configurable: true,
+      writable: true,
+      value: originalCancelAnimationFrame
+    });
+  };
+}
+
+function installTextPreviewImagePreload(): FakeTextPreviewImage[] {
+  const images: FakeTextPreviewImage[] = [];
+  class FakeImage extends FakeTextPreviewImage {
+    constructor() {
+      super();
+      images.push(this);
+    }
+  }
+  vi.stubGlobal('Image', FakeImage);
+  return images;
+}
+
+class FakeTextPreviewImage {
+  complete = false;
+  naturalWidth = 0;
+  decoding: HTMLImageElement['decoding'] = 'auto';
+  src = '';
+  readonly decode = vi.fn(async () => undefined);
+  private readonly listeners = new Map<string, Set<EventListenerOrEventListenerObject>>();
+
+  addEventListener(type: string, listener: EventListenerOrEventListenerObject): void {
+    const current = this.listeners.get(type) ?? new Set<EventListenerOrEventListenerObject>();
+    current.add(listener);
+    this.listeners.set(type, current);
+  }
+
+  removeEventListener(type: string, listener: EventListenerOrEventListenerObject): void {
+    this.listeners.get(type)?.delete(listener);
+  }
+
+  emit(type: 'load' | 'error', naturalWidth = 1): void {
+    this.complete = true;
+    this.naturalWidth = naturalWidth;
+    const event = new Event(type);
+    for (const listener of this.listeners.get(type) ?? []) {
+      if (typeof listener === 'function') {
+        listener(event);
+      } else {
+        listener.handleEvent(event);
+      }
+    }
+  }
 }
 
 function renderImagePreview(imageState: CanvasImageNodeAssetHookState): string {

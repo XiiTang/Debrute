@@ -7,22 +7,27 @@ import {
 } from './canvasTextPreviews';
 
 describe('Canvas text preview paths', () => {
-  it('maps a Canvas text file to source, variant, and descriptor paths', () => {
-    expect(canvasTextPreviewSourceProjectPath({
+  it('maps a Canvas text file to source, variant, and descriptor paths through a source key', () => {
+    const sourcePath = canvasTextPreviewSourceProjectPath({
       canvasId: 'canvas-1',
       projectRelativePath: 'notes/scene.md'
-    })).toBe('.debrute/cache/canvas-text-previews/canvas-1/notes/scene.md.source.png');
+    });
+    expect(sourcePath).toMatch(
+      /^\.debrute\/cache\/canvas-text-previews\/canvas-1\/notes%2Fscene\.md--[a-f0-9]{16}\/source\.png$/
+    );
 
-    expect(canvasTextPreviewVariantProjectPath({
+    const variantPath = canvasTextPreviewVariantProjectPath({
       canvasId: 'canvas-1',
       projectRelativePath: 'notes/scene.md',
       width: 700
-    })).toBe('.debrute/cache/canvas-text-previews/canvas-1/notes/scene.md.preview-w700.png');
+    });
+    expect(variantPath).toBe(sourcePath.replace('/source.png', '/preview-w700.png'));
 
-    expect(canvasTextPreviewDescriptorProjectPath({
+    const descriptorPath = canvasTextPreviewDescriptorProjectPath({
       canvasId: 'canvas-1',
       projectRelativePath: 'notes/scene.md'
-    })).toBe('.debrute/cache/canvas-text-previews/canvas-1/notes/scene.md.preview.json');
+    });
+    expect(descriptorPath).toBe(sourcePath.replace('/source.png', '/preview.json'));
   });
 
   it('rejects unsafe canvas ids and internal project paths', () => {
@@ -35,6 +40,16 @@ describe('Canvas text preview paths', () => {
       canvasId: 'canvas-1',
       projectRelativePath: '.debrute/cache/file.md'
     })).toThrow('Canvas text preview cannot target Debrute internal files.');
+
+    expect(() => canvasTextPreviewSourceProjectPath({
+      canvasId: 'canvas-1',
+      projectRelativePath: 'notes\\scene.md'
+    })).toThrow('Project path must not contain backslashes');
+
+    expect(() => canvasTextPreviewSourceProjectPath({
+      canvasId: 'canvas-1',
+      projectRelativePath: './notes/scene.md'
+    })).toThrow('Project path must not contain "." or ".." segments');
   });
 
   it('normalizes descriptors with sorted positive widths', () => {

@@ -1,4 +1,3 @@
-import { createHash } from 'node:crypto';
 import type { Stats } from 'node:fs';
 import { access, stat } from 'node:fs/promises';
 import type sharp from 'sharp';
@@ -6,6 +5,8 @@ import {
   isCanvasPreviewableProjectImagePath,
   normalizeProjectRelativePath,
   projectFileRevision,
+  projectRelativePathCacheKey,
+  projectRevisionCacheKey,
   resolveExistingProjectPath,
   resolveNoSymlinkExistingProjectPath,
   resolveNoSymlinkProjectPathForWrite,
@@ -296,14 +297,9 @@ function canvasImagePreviewCacheBaseProjectPath(
     width: number;
   }
 ): string {
-  const hash = createHash('sha256')
-    .update(input.projectRelativePath)
-    .update('\0')
-    .update(input.revision)
-    .update('\0')
-    .update(String(input.width))
-    .digest('hex');
-  return `.debrute/cache/canvas-image-previews/${hash}`;
+  const sourceKey = projectRelativePathCacheKey(input.projectRelativePath);
+  const revisionKey = projectRevisionCacheKey(input.revision);
+  return `.debrute/cache/canvas-image-previews/${sourceKey}/${revisionKey}/preview-w${input.width}`;
 }
 
 async function existingCanvasImagePreviewCachePath(projectRoot: string, baseProjectPath: string): Promise<string | undefined> {

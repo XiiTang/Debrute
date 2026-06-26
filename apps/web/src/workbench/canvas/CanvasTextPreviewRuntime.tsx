@@ -17,6 +17,20 @@ export interface CanvasTextPreviewSource {
   previewWidth: number;
 }
 
+export type CanvasLoadedTextPreviewSource = CanvasTextPreviewSource & {
+  loadKey: string;
+};
+
+export interface CanvasTextPreviewImageState {
+  loaded?: CanvasLoadedTextPreviewSource | undefined;
+  next?: CanvasLoadedTextPreviewSource | undefined;
+}
+
+export type CanvasTextPreviewImageEvent =
+  | { type: 'source-resolved'; source: CanvasTextPreviewSource | undefined }
+  | { type: 'next-loaded'; loadKey: string }
+  | { type: 'next-failed'; loadKey: string };
+
 export interface CanvasTextPreviewMeasuredBody {
   width: number;
   height: number;
@@ -64,6 +78,64 @@ const CanvasTextPreviewRuntimeContext = createContext<CanvasTextPreviewRuntimeVa
 
 export function useCanvasTextPreviewRuntime(): CanvasTextPreviewRuntimeValue {
   return useContext(CanvasTextPreviewRuntimeContext);
+}
+
+export function initialCanvasTextPreviewImageState(
+  source?: CanvasTextPreviewSource | undefined
+): CanvasTextPreviewImageState {
+  return source
+    ? { loaded: canvasLoadedTextPreviewSource(source), next: undefined }
+    : { loaded: undefined, next: undefined };
+}
+
+export function canvasTextPreviewImageReducer(
+  state: CanvasTextPreviewImageState,
+  event: CanvasTextPreviewImageEvent
+): CanvasTextPreviewImageState {
+  switch (event.type) {
+    case 'source-resolved': {
+      if (!event.source) {
+        return state.loaded ? { loaded: state.loaded, next: undefined } : initialCanvasTextPreviewImageState();
+      }
+      const next = canvasLoadedTextPreviewSource(event.source);
+      if (!state.loaded) {
+        return { loaded: next, next: undefined };
+      }
+      if (state.loaded?.loadKey === next.loadKey) {
+        return state.next ? { ...state, next: undefined } : state;
+      }
+      if (state.next?.loadKey === next.loadKey) {
+        return state;
+      }
+      return {
+        ...state,
+        next
+      };
+    }
+    case 'next-loaded':
+      if (!state.next || state.next.loadKey !== event.loadKey) {
+        return state;
+      }
+      return {
+        loaded: state.next,
+        next: undefined
+      };
+    case 'next-failed':
+      if (!state.next || state.next.loadKey !== event.loadKey) {
+        return state;
+      }
+      return {
+        ...state,
+        next: undefined
+      };
+  }
+}
+
+function canvasLoadedTextPreviewSource(source: CanvasTextPreviewSource): CanvasLoadedTextPreviewSource {
+  return {
+    ...source,
+    loadKey: source.src
+  };
 }
 
 export function CanvasTextPreviewProvider({

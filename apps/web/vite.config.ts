@@ -10,6 +10,7 @@ export default defineConfig({
   resolve: {
     alias: {
       '@debrute/app-protocol': resolve(workspaceRoot, 'packages/app-protocol/src/index.ts'),
+      '@debrute/project-core/projectCacheKeys': resolve(workspaceRoot, 'packages/project-core/src/projectCacheKeys.ts'),
       '@debrute/project-core/projectTextFileTypes': resolve(workspaceRoot, 'packages/project-core/src/projectTextFileTypes.ts'),
       '@debrute/project-core': resolve(workspaceRoot, 'packages/project-core/src/index.ts'),
       '@debrute/canvas-core': resolve(workspaceRoot, 'packages/canvas-core/src/index.ts')

@@ -39,6 +39,11 @@ import {
   watchProjectFiles
 } from '@debrute/project-core';
 
+const IMAGE_PREVIEW_CACHE_PARENT = '.debrute/cache/canvas-image-previews/images%2Fsource.png--1234567890abcdef/1000%3A6';
+const IMAGE_PREVIEW_CACHE_PATH = `${IMAGE_PREVIEW_CACHE_PARENT}/preview-w300.jpg`;
+const TEXT_PREVIEW_CACHE_PARENT = '.debrute/cache/canvas-text-previews/canvas-1/notes%2Fa.md--1234567890abcdef';
+const TEXT_PREVIEW_CACHE_PATH = `${TEXT_PREVIEW_CACHE_PARENT}/preview-w700.png`;
+
 describe('project-core', () => {
   it('initializes project metadata and canvases', async () => {
     const root = await mkdtemp(join(tmpdir(), 'debrute-project-'));
@@ -61,8 +66,8 @@ describe('project-core', () => {
     expect(normalizeFileWatchEvent('/project', '/project/.debrute/assets/generated-assets-index.json', 'changed').affects).toEqual(['generated-asset-metadata']);
     expect(normalizeFileWatchEvent('/project', '/project/.debrute/assets/generated/record-1.json', 'changed').affects).toEqual(['generated-asset-metadata']);
     expect(normalizeFileWatchEvent('/project', '/project/.debrute/cache/file-fingerprints.json', 'changed').affects).toEqual(['generated-asset-metadata']);
-    expect(normalizeFileWatchEvent('/project', '/project/.debrute/cache/canvas-image-previews/preview.jpg', 'changed').affects).toEqual([]);
-    expect(normalizeFileWatchEvent('/project', '/project/.debrute/cache/canvas-text-previews/canvas-1/a.md.preview-w700.png', 'changed').affects).toEqual([]);
+    expect(normalizeFileWatchEvent('/project', `/project/${IMAGE_PREVIEW_CACHE_PATH}`, 'changed').affects).toEqual([]);
+    expect(normalizeFileWatchEvent('/project', `/project/${TEXT_PREVIEW_CACHE_PATH}`, 'changed').affects).toEqual([]);
     expect(normalizeFileWatchEvent('/project', '/project/.debrute/canvases/main.json.lock', 'changed').affects).toEqual([]);
     expect(normalizeFileWatchEvent('/project', '/project/work/items.json', 'changed').affects).toEqual(['content']);
   });
@@ -251,16 +256,16 @@ describe('project-core', () => {
   it('keeps Canvas image preview cache files out of project-visible files', async () => {
     const root = await mkdtemp(join(tmpdir(), 'debrute-project-preview-cache-'));
     try {
-      await mkdir(join(root, '.debrute/cache/canvas-image-previews'), { recursive: true });
+      await mkdir(join(root, IMAGE_PREVIEW_CACHE_PARENT), { recursive: true });
       await mkdir(join(root, 'images'), { recursive: true });
-      await writeFile(join(root, '.debrute/cache/canvas-image-previews/preview.jpg'), 'cache', 'utf8');
+      await writeFile(join(root, IMAGE_PREVIEW_CACHE_PATH), 'cache', 'utf8');
       await writeFile(join(root, 'images/source.png'), 'source', 'utf8');
 
       const paths = (await listDebruteProjectFiles(root)).map((file) => file.projectRelativePath);
 
       expect(paths).toContain('images/source.png');
       expect(paths).not.toContain('.debrute/cache/canvas-image-previews');
-      expect(paths).not.toContain('.debrute/cache/canvas-image-previews/preview.jpg');
+      expect(paths).not.toContain(IMAGE_PREVIEW_CACHE_PATH);
     } finally {
       await rm(root, { recursive: true, force: true });
     }
@@ -269,9 +274,9 @@ describe('project-core', () => {
   it('keeps Canvas text preview cache files out of project-visible files', async () => {
     const root = await mkdtemp(join(tmpdir(), 'debrute-project-text-preview-cache-'));
     try {
-      await mkdir(join(root, '.debrute/cache/canvas-text-previews/canvas-1/notes'), { recursive: true });
+      await mkdir(join(root, TEXT_PREVIEW_CACHE_PARENT), { recursive: true });
       await mkdir(join(root, 'notes'), { recursive: true });
-      await writeFile(join(root, '.debrute/cache/canvas-text-previews/canvas-1/notes/a.md.preview-w700.png'), 'cache', 'utf8');
+      await writeFile(join(root, TEXT_PREVIEW_CACHE_PATH), 'cache', 'utf8');
       await writeFile(join(root, 'notes/a.md'), 'source', 'utf8');
 
       const paths = (await listDebruteProjectFiles(root)).map((file) => file.projectRelativePath);
@@ -802,11 +807,11 @@ describe('project-core', () => {
     const root = await mkdtemp(join(tmpdir(), 'debrute-project-no-symlink-existing-'));
     const externalRoot = await mkdtemp(join(tmpdir(), 'debrute-project-no-symlink-external-'));
     try {
-      await mkdir(join(root, '.debrute/cache/canvas-image-previews'), { recursive: true });
+      await mkdir(join(root, IMAGE_PREVIEW_CACHE_PARENT), { recursive: true });
       await writeFile(join(externalRoot, 'preview.jpg'), 'external', 'utf8');
-      await symlink(join(externalRoot, 'preview.jpg'), join(root, '.debrute/cache/canvas-image-previews/cache.jpg'));
+      await symlink(join(externalRoot, 'preview.jpg'), join(root, IMAGE_PREVIEW_CACHE_PATH));
 
-      await expect(resolveNoSymlinkExistingProjectPath(root, '.debrute/cache/canvas-image-previews/cache.jpg'))
+      await expect(resolveNoSymlinkExistingProjectPath(root, IMAGE_PREVIEW_CACHE_PATH))
         .rejects.toThrow('Project path must not be a symbolic link');
     } finally {
       await rm(root, { recursive: true, force: true });
@@ -853,21 +858,21 @@ describe('project-core', () => {
   it('rejects mutations for project-internal cache paths hidden from the Project Tree', async () => {
     const root = await mkdtemp(join(tmpdir(), 'debrute-project-file-ops-hidden-cache-'));
     try {
-      await mkdir(join(root, '.debrute/cache/canvas-image-previews'), { recursive: true });
-      await writeFile(join(root, '.debrute/cache/canvas-image-previews/preview.jpg'), 'cache', 'utf8');
+      await mkdir(join(root, IMAGE_PREVIEW_CACHE_PARENT), { recursive: true });
+      await writeFile(join(root, IMAGE_PREVIEW_CACHE_PATH), 'cache', 'utf8');
 
       await expect(createProjectFile(root, {
-        parentProjectRelativePath: '.debrute/cache/canvas-image-previews',
+        parentProjectRelativePath: IMAGE_PREVIEW_CACHE_PARENT,
         name: 'created.jpg'
       })).rejects.toThrow('Project path is not visible in the Project Tree');
       await expect(copyProjectPaths(root, {
-        entries: [{ projectRelativePath: '.debrute/cache/canvas-image-previews/preview.jpg', kind: 'file' }],
+        entries: [{ projectRelativePath: IMAGE_PREVIEW_CACHE_PATH, kind: 'file' }],
         targetDirectoryProjectRelativePath: ''
       })).rejects.toThrow('Project path is not visible in the Project Tree');
       await expect(deleteProjectPathsPermanently(root, {
         entries: [{ projectRelativePath: '.debrute/cache/canvas-image-previews', kind: 'directory' }]
       })).rejects.toThrow('Project path is not visible in the Project Tree');
-      await expect(readFile(join(root, '.debrute/cache/canvas-image-previews/preview.jpg'), 'utf8')).resolves.toBe('cache');
+      await expect(readFile(join(root, IMAGE_PREVIEW_CACHE_PATH), 'utf8')).resolves.toBe('cache');
     } finally {
       await rm(root, { recursive: true, force: true });
     }
@@ -876,21 +881,21 @@ describe('project-core', () => {
   it('rejects mutations for Canvas text preview cache paths hidden from the Project Tree', async () => {
     const root = await mkdtemp(join(tmpdir(), 'debrute-project-file-ops-hidden-text-cache-'));
     try {
-      await mkdir(join(root, '.debrute/cache/canvas-text-previews/canvas-1/notes'), { recursive: true });
-      await writeFile(join(root, '.debrute/cache/canvas-text-previews/canvas-1/notes/a.md.preview-w700.png'), 'cache', 'utf8');
+      await mkdir(join(root, TEXT_PREVIEW_CACHE_PARENT), { recursive: true });
+      await writeFile(join(root, TEXT_PREVIEW_CACHE_PATH), 'cache', 'utf8');
 
       await expect(createProjectFile(root, {
-        parentProjectRelativePath: '.debrute/cache/canvas-text-previews/canvas-1/notes',
+        parentProjectRelativePath: TEXT_PREVIEW_CACHE_PARENT,
         name: 'created.png'
       })).rejects.toThrow('Project path is not visible in the Project Tree');
       await expect(copyProjectPaths(root, {
-        entries: [{ projectRelativePath: '.debrute/cache/canvas-text-previews/canvas-1/notes/a.md.preview-w700.png', kind: 'file' }],
+        entries: [{ projectRelativePath: TEXT_PREVIEW_CACHE_PATH, kind: 'file' }],
         targetDirectoryProjectRelativePath: ''
       })).rejects.toThrow('Project path is not visible in the Project Tree');
       await expect(deleteProjectPathsPermanently(root, {
         entries: [{ projectRelativePath: '.debrute/cache/canvas-text-previews', kind: 'directory' }]
       })).rejects.toThrow('Project path is not visible in the Project Tree');
-      await expect(readFile(join(root, '.debrute/cache/canvas-text-previews/canvas-1/notes/a.md.preview-w700.png'), 'utf8')).resolves.toBe('cache');
+      await expect(readFile(join(root, TEXT_PREVIEW_CACHE_PATH), 'utf8')).resolves.toBe('cache');
     } finally {
       await rm(root, { recursive: true, force: true });
     }
@@ -936,9 +941,9 @@ describe('project-core', () => {
 
   it('exposes the Project Tree mutation visibility boundary for desktop actions', () => {
     expect(() => assertProjectTreeVisibleMutationPath('assets/cover.png')).not.toThrow();
-    expect(() => assertProjectTreeVisibleMutationPath('.debrute/cache/canvas-image-previews/preview.jpg'))
+    expect(() => assertProjectTreeVisibleMutationPath(IMAGE_PREVIEW_CACHE_PATH))
       .toThrow('Project path is not visible in the Project Tree');
-    expect(() => assertProjectTreeVisibleMutationPath('.debrute/cache/canvas-text-previews/canvas-1/a.md.preview-w700.png'))
+    expect(() => assertProjectTreeVisibleMutationPath(TEXT_PREVIEW_CACHE_PATH))
       .toThrow('Project path is not visible in the Project Tree');
     expect(() => assertProjectTreeVisibleMutationPath('.debrute/canvases/canvas-1.json'))
       .toThrow('Project path is protected by the Project Document System');

@@ -5,6 +5,8 @@
     "outDir": "dist",
     "rootDir": "src"
   },
-  "references": [],
+  "references": [
+    { "path": "../project-core" }
+  ],
   "include": ["src/**/*.ts"]
 }

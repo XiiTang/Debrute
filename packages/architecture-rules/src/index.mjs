@@ -70,9 +70,14 @@ export const importMatrix = [
     forbiddenImports: [/^@debrute\/app-server$/, /^apps\/app-server\//, /^@debrute\/capability-runtime$/, /^@debrute\/capability-core$/]
   },
   {
-    name: 'web workbench does not import electron or node filesystem',
+    name: 'web workbench does not import electron',
     match: (file) => file.startsWith('apps/web/src/'),
-    forbiddenImports: [/^electron$/, /^node:fs$/, /^node:fs\/promises$/, /^fs$/, /^fs\/promises$/]
+    forbiddenImports: [/^electron$/]
+  },
+  {
+    name: 'web workbench runtime does not import node filesystem',
+    match: (file) => file.startsWith('apps/web/src/') && !isTestSourceFile(file),
+    forbiddenImports: [/^node:fs$/, /^node:fs\/promises$/, /^fs$/, /^fs\/promises$/]
   },
   {
     name: 'desktop electron stays a supervisor and client',
@@ -150,6 +155,10 @@ export function isScannableArchitectureFile(file) {
     && !file.includes('/dist/')
     && !file.includes('/dist-electron/')
     && !file.includes('/node_modules/');
+}
+
+function isTestSourceFile(file) {
+  return /\.test\.[cm]?[jt]sx?$/.test(file);
 }
 
 export async function architectureBoundaryViolations(root = process.cwd(), files = rgFiles(root)) {
@@ -273,7 +282,13 @@ function viteAliasViolations(file, text) {
     return [];
   }
   const aliases = [...text.matchAll(/['"](@debrute\/[^'"]+)['"]\s*:/g)].map((match) => match[1]);
-  const allowedAliases = new Set(['@debrute/app-protocol', '@debrute/project-core', '@debrute/canvas-core']);
+  const allowedAliases = new Set([
+    '@debrute/app-protocol',
+    '@debrute/project-core',
+    '@debrute/project-core/projectCacheKeys',
+    '@debrute/project-core/projectTextFileTypes',
+    '@debrute/canvas-core'
+  ]);
   return aliases
     .filter((alias) => !allowedAliases.has(alias))
     .map((alias) => `web workbench Vite aliases stay renderer-safe: ${file} aliases ${alias}`);

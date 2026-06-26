@@ -4,11 +4,13 @@ import type { TextFileBuffer } from '../../types';
 import {
   canvasTextPreviewBodyMeasurement,
   canvasTextPreviewCurrentDescriptors,
+  canvasTextPreviewImageReducer,
   canvasTextPreviewNextCaptureTargets,
   canvasTextPreviewTargetsForNodes,
   selectCanvasTextPreviewVariant,
   shouldStartCanvasTextPreviewSourceWork
 } from './CanvasTextPreviewRuntime';
+import type { CanvasTextPreviewImageState } from './CanvasTextPreviewRuntime';
 
 describe('CanvasTextPreviewRuntime', () => {
   it('targets inactive available text nodes and excludes the selected text node', () => {
@@ -147,6 +149,32 @@ describe('CanvasTextPreviewRuntime', () => {
       'a.md': descriptorFor(currentTarget)
     });
   });
+
+  it('keeps the loaded text preview visible while a zoomed variant loads', () => {
+    const loaded = textPreviewImageState(textPreviewSource(320));
+    const nextSource = textPreviewSource(640);
+    const loading = canvasTextPreviewImageReducer(loaded, {
+      type: 'source-resolved',
+      source: nextSource
+    });
+
+    expect(loading.loaded).toEqual(loaded.loaded);
+    expect(loading.next).toEqual({
+      ...nextSource,
+      loadKey: nextSource.src
+    });
+
+    const promoted = canvasTextPreviewImageReducer(loading, {
+      type: 'next-loaded',
+      loadKey: nextSource.src
+    });
+
+    expect(promoted.loaded).toEqual({
+      ...nextSource,
+      loadKey: nextSource.src
+    });
+    expect(promoted.next).toBeUndefined();
+  });
 });
 
 function textNode(path: string, width: number, height: number): ProjectedCanvasNode {
@@ -213,5 +241,22 @@ function descriptorFor(target: {
     scrollTop: target.scrollTop,
     scrollLeft: target.scrollLeft,
     variants: [320]
+  };
+}
+
+function textPreviewSource(previewWidth: number) {
+  return {
+    src: `/api/projects/p/canvas-text-preview?canvasId=canvas-1&path=flow%2Freadme.md&fingerprint=fp&w=${previewWidth}`,
+    previewWidth
+  };
+}
+
+function textPreviewImageState(source: ReturnType<typeof textPreviewSource>): CanvasTextPreviewImageState {
+  return {
+    loaded: {
+      ...source,
+      loadKey: source.src
+    },
+    next: undefined
   };
 }

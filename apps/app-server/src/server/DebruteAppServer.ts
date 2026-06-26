@@ -117,6 +117,7 @@ import {
   type CanvasImagePreviewService,
   type ResolveCanvasImagePreviewInput
 } from '../canvas/CanvasImagePreviewService.js';
+import { reconcileCanvasImagePreviewCache } from '../canvas/CanvasImagePreviewCacheCleanup.js';
 import {
   createCanvasTextPreviewService,
   type CanvasTextPreviewReadInput,
@@ -356,6 +357,10 @@ export class DebruteAppServer {
         this.canvasFeedbackRenderScheduler.cancelProject(this.snapshot.projectRoot);
       }
       let snapshot = await this.loadSnapshot(projectRoot);
+      await reconcileCanvasImagePreviewCache({
+        projectRoot,
+        files: snapshot.files
+      });
       this.snapshot = snapshot;
       this.snapshotLoadedAt = Date.now();
       try {
@@ -1298,6 +1303,10 @@ export class DebruteAppServer {
   private async loadFreshProjectSnapshotUnlocked(): Promise<ProjectSessionSnapshot> {
     const current = this.getSnapshot();
     const snapshot = await this.loadSnapshot(current.projectRoot);
+    await reconcileCanvasImagePreviewCache({
+      projectRoot: current.projectRoot,
+      files: snapshot.files
+    });
     this.snapshot = snapshot;
     this.snapshotLoadedAt = Date.now();
     return snapshot;

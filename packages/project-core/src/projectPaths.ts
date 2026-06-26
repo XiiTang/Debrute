@@ -1,5 +1,15 @@
 import { lstat, realpath } from 'node:fs/promises';
-import { basename, dirname, isAbsolute, join, resolve, sep } from 'node:path';
+import { basename, dirname, join, resolve, sep } from 'node:path';
+import {
+  normalizeProjectDirectoryPath,
+  normalizeProjectPath,
+  normalizeProjectRelativePath
+} from './projectPathNormalization.js';
+
+export {
+  normalizeProjectDirectoryPath,
+  normalizeProjectRelativePath
+} from './projectPathNormalization.js';
 
 export function userHomeDir(): string {
   const home = process.env.HOME ?? process.env.USERPROFILE;
@@ -22,14 +32,6 @@ export function normalizeProjectPathBasename(name: string): string {
     throw new Error('Project path name must be a basename.');
   }
   return trimmed;
-}
-
-export function normalizeProjectRelativePath(projectRelativePath: string): string {
-  return normalizeProjectPath(projectRelativePath, { allowEmpty: false });
-}
-
-export function normalizeProjectDirectoryPath(projectRelativePath: string): string {
-  return normalizeProjectPath(projectRelativePath, { allowEmpty: true });
 }
 
 export function parentProjectPath(projectRelativePath: string): string {
@@ -136,26 +138,6 @@ export function isIgnoredProjectFilePath(projectRelativePath: string): boolean {
 export function isProtectedProjectDocumentMutationPath(projectRelativePath: string): boolean {
   return projectRelativePath === '.debrute'
     || projectRelativePath.startsWith('.debrute/');
-}
-
-function normalizeProjectPath(projectRelativePath: string, options: { allowEmpty: boolean }): string {
-  if (isAbsolute(projectRelativePath) || /^[A-Za-z]:[\\/]/.test(projectRelativePath)) {
-    throw new Error(`Project path must be relative: ${projectRelativePath}`);
-  }
-  if (projectRelativePath.includes('\\')) {
-    throw new Error(`Project path must not contain backslashes: ${projectRelativePath}`);
-  }
-  if (!projectRelativePath) {
-    if (options.allowEmpty) {
-      return '';
-    }
-    throw new Error('Project path must be non-empty.');
-  }
-  const parts = projectRelativePath.split('/');
-  if (parts.some((part) => part === '' || part === '.' || part === '..')) {
-    throw new Error(`Project path must not contain "." or ".." segments: ${projectRelativePath}`);
-  }
-  return parts.join('/');
 }
 
 async function nearestExistingParentRealPath(projectRoot: string, absoluteParentPath: string): Promise<string> {

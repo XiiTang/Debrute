@@ -9,5 +9,7 @@
     "build": "tsc -b",
     "check": "tsc -b --pretty false"
   },
-  "dependencies": {}
+  "dependencies": {
+    "@debrute/project-core": "workspace:*"
+  }
 }
