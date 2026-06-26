@@ -7,9 +7,6 @@
   grid-template-columns: 192px minmax(0, 1fr);
   gap: 14px;
   align-content: stretch;
-  background:
-    linear-gradient(180deg, color-mix(in oklch, var(--db-surface-1) 80%, transparent), transparent 220px),
-    var(--db-bg);
 }
 
 .settings-directory {

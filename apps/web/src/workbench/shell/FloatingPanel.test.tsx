@@ -9,7 +9,7 @@ import { WorkbenchFloatingPanelShell } from './FloatingPanel';
 import { FLOATING_PANEL_DRAG_HIT_AREA_HEIGHT } from './windowBounds';
 
 describe('FloatingPanel', () => {
-  it('renders the shared product shell without visible panel title chrome', () => {
+  it('renders the shared product shell title inside the drag area without legacy header chrome', () => {
     const html = renderToStaticMarkup(
       <WorkbenchFloatingPanelShell
         panelId="explorer"
@@ -34,6 +34,7 @@ describe('FloatingPanel', () => {
 
     expect(html).toContain('floating-panel-interaction-row');
     expect(html).toContain('class="floating-panel-drag-hit-area"');
+    expect(html).toContain('class="floating-panel-title"');
     expect(html).toContain('floating-panel-body');
     for (const direction of ['n', 's', 'e', 'w', 'ne', 'nw', 'se', 'sw']) {
       expect(html).toContain(`floating-panel-resize-handle--${direction}`);
@@ -44,7 +45,7 @@ describe('FloatingPanel', () => {
     expect(html).toContain('height="10"');
     expect(html).not.toContain('db-panel__header');
     expect(html).not.toContain('db-panel__title');
-    expect(html).not.toContain('>Explorer<');
+    expect(html).toContain('>Explorer<');
     expect(html).toContain(`--db-floating-panel-drag-hit-area-height:${FLOATING_PANEL_DRAG_HIT_AREA_HEIGHT}px`);
     expect(html).toContain(`height:${FLOATING_PANEL_DEFINITIONS.explorer.defaultHeight}px`);
   });

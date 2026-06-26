@@ -19,7 +19,7 @@
   position: absolute;
   top: calc(-1 * var(--db-floating-panel-drag-hit-area-height));
   right: calc(var(--db-floating-panel-drag-hit-area-height) + 2px);
-  left: 0;
+  left: var(--db-floating-panel-title-slot-width);
   z-index: 3;
   background: transparent;
   pointer-events: none;

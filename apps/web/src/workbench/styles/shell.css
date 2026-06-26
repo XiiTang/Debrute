@@ -50,6 +50,7 @@
 
 .floating-panel {
   --db-floating-panel-content-bg: var(--db-panel-bg);
+  --db-floating-panel-title-slot-width: 72px;
   position: absolute;
   display: grid;
   grid-template-rows: var(--db-floating-panel-drag-hit-area-height) minmax(0, 1fr);
@@ -77,6 +78,22 @@
   cursor: grab;
   user-select: none;
   pointer-events: auto;
+}
+
+.floating-panel-title {
+  position: absolute;
+  top: 2px;
+  left: 8px;
+  z-index: 1;
+  max-width: calc(var(--db-floating-panel-title-slot-width) - 14px);
+  overflow: hidden;
+  color: var(--db-text-subtle);
+  font-size: var(--db-font-xs);
+  line-height: 14px;
+  letter-spacing: 0;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  pointer-events: none;
 }
 
 .floating-panel-close-button {

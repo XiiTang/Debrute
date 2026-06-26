@@ -81,6 +81,7 @@ export function WorkbenchFloatingPanelShell({
     >
       <div className="floating-panel-interaction-row">
         <div className="floating-panel-drag-hit-area" role="presentation" {...dragHandleProps} />
+        <div className="floating-panel-title" aria-hidden="true">{definition.title}</div>
         <CloseButton
           className="floating-panel-close-button"
           label={`Close ${definition.title}`}

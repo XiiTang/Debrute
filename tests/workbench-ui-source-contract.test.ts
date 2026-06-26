@@ -114,13 +114,26 @@ describe('Workbench UI source contract', () => {
     const patterns = css('apps/web/src/workbench/ui/styles/workbench-patterns.css');
     const terminal = css('apps/web/src/workbench/styles/terminal.css');
     const workbenchCloseButtonRule = rule(patterns, '.db-workbench-close-button.db-icon-button');
+    const floatingPanelRule = rule(shell, '.floating-panel');
+    const floatingPanelTitleRule = rule(shell, '.floating-panel-title');
     const floatingPanelCloseRule = rule(shell, '.floating-panel-close-button');
 
+    expect(floatingPanelRule).toContain('--db-floating-panel-title-slot-width: 72px;');
     expect(shell).toContain('grid-template-rows: var(--db-floating-panel-drag-hit-area-height) minmax(0, 1fr);');
     expect(shell).toContain('.floating-panel-close-button');
+    expect(shell).toContain('.floating-panel-title');
     expect(shell).toContain('.floating-panel-drag-hit-area');
     expect(shell).toContain('height: var(--db-floating-panel-drag-hit-area-height);');
     expect(shell).toContain('inset: 4px 0 0;');
+    expect(floatingPanelTitleRule).toContain('position: absolute;');
+    expect(floatingPanelTitleRule).toContain('top: 2px;');
+    expect(floatingPanelTitleRule).toContain('left: 8px;');
+    expect(floatingPanelTitleRule).toContain('max-width: calc(var(--db-floating-panel-title-slot-width) - 14px);');
+    expect(floatingPanelTitleRule).toContain('font-size: var(--db-font-xs);');
+    expect(floatingPanelTitleRule).toContain('line-height: 14px;');
+    expect(floatingPanelTitleRule).toContain('color: var(--db-text-subtle);');
+    expect(floatingPanelTitleRule).toContain('pointer-events: none;');
+    expect(floatingPanelTitleRule).toContain('text-overflow: ellipsis;');
     expect(workbenchCloseButtonRule).toContain('width: 14px;');
     expect(workbenchCloseButtonRule).toContain('height: 14px;');
     expect(workbenchCloseButtonRule).toContain('border: 0;');
@@ -186,6 +199,7 @@ describe('Workbench UI source contract', () => {
 
   it('keeps Settings content flush under the shell drag area', () => {
     const settingsStyles = css('apps/web/src/workbench/styles/settings.css');
+    const settingsPanelRule = rule(settingsStyles, '.settings-panel');
 
     expect(settingsStyles).toContain('padding: 0 14px 14px;');
     expect(settingsStyles).toContain('padding: 0 var(--db-space-3) var(--db-space-3);');
@@ -193,6 +207,8 @@ describe('Workbench UI source contract', () => {
     expect(settingsStyles).not.toContain('padding: 14px;');
     expect(settingsStyles).not.toContain('padding: var(--db-space-3);');
     expect(settingsStyles).not.toContain('padding: 2px 4px 10px 0;');
+    expect(settingsPanelRule).not.toContain('background:');
+    expect(settingsPanelRule).not.toContain('linear-gradient');
   });
 
   it('keeps every floating panel content surface visually flush with the interaction area', () => {
@@ -227,9 +243,11 @@ describe('Workbench UI source contract', () => {
   it('keeps Terminal tab controls at one height and prevents tab close controls from overlapping the end slot', () => {
     const patterns = css('apps/web/src/workbench/ui/styles/workbench-patterns.css');
     const terminal = css('apps/web/src/workbench/styles/terminal.css');
+    const terminalToolbarRule = rule(terminal, '.floating-panel-terminal .terminal-panel__toolbar');
     const terminalTabCloseRule = rule(patterns, '.db-terminal-tab__close.db-icon-button');
 
     expect(terminal).toContain('top: calc(-1 * var(--db-floating-panel-drag-hit-area-height));');
+    expect(terminalToolbarRule).toContain('left: var(--db-floating-panel-title-slot-width);');
     expect(terminal).toContain('height: var(--db-floating-panel-drag-hit-area-height);');
     expect(terminal).toContain('min-height: var(--db-floating-panel-drag-hit-area-height);');
     expect(terminal).toContain('padding: 0 4px;');

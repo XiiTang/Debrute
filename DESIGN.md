@@ -127,7 +127,7 @@ Inter -> ui-sans-serif -> system UI stack
 Debrute layout is dense but scannable.
 
 - Standard Workbench controls use 24px, 28px, or 32px heights.
-- Floating Workbench panels do not render visible title headers. Their 18px top interaction band is transparent, owns the panel drag and top-edge resize interactions, and separates the scrollable feature body from the panel top edge without rendering a visible strip, divider, or title row.
+- Floating Workbench panels render a compact low-contrast title inside their 18px top interaction band. The band stays transparent, owns the panel drag and top-edge resize interactions, and separates the scrollable feature body from the panel top edge without rendering a visible strip, divider, or header row.
 - Titlebar chrome stays compact, generally around 32px.
 - Panel padding generally stays between 8px and 14px.
 - Repeated cards or settings form groups may use 16px padding when scanability requires it.
@@ -203,14 +203,15 @@ apps/web/src/workbench/ui/
 Workbench floating panels use one shared shell for Explorer, Inspector, Problems, Settings, and Terminal.
 
 - The shared shell owns placement, dimensions, z-index, the transparent drag hit area, close button placement, eight-direction resize hit areas, body container, and overflow mode.
-- Floating panels do not render panel names such as `Explorer`, `Inspector`, `Problems`, `Settings`, or `Terminal`.
-- The 18px top interaction band is interaction-only chrome: no visible background, border, divider, or title text. Its top 4px is the north resize hit area; the remaining area is the panel drag target.
+- The shared shell owns each floating panel's continuous background surface through the panel content background token; feature content must not paint an alternate panel-wide background or decorative gradient.
+- Floating panel names such as `Explorer`, `Inspector`, `Problems`, `Settings`, and `Terminal` render as compact low-contrast text at the top-left of the shared drag area.
+- The 18px top interaction band is transparent interaction chrome: no visible background, border, divider, or header row. Its top 4px is the north resize hit area; the remaining area is the panel drag target.
 - Feature content starts below the drag hit area so scrollable content cannot cover the only drag target.
 - Floating panel and Terminal tab close controls share the same compact 14px borderless circular `CloseButton` primitive; each surface owns only placement.
 - Floating panels resize from any edge or corner. All resize hit areas are invisible; no single corner owns a special visual grip.
 - Feature content remains owned by the feature surface.
 - Explorer uses faint always-visible indentation guides for nested tree levels.
-- Terminal uses the drag-hit-area row for its compact tab row. The new-terminal button sits immediately after the tab strip, not pinned to the far panel edge.
+- Terminal uses the drag-hit-area row for its compact tab row. The tab strip starts to the right of the `Terminal` title, and the new-terminal button sits immediately after the tab strip, not pinned to the far panel edge.
 - Terminal has no restart feature in the UI, Workbench API, daemon routes, app-server facade, service layer, or terminal session view model.
 
 ### Desktop
