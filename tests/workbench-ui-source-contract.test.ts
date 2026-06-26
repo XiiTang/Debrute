@@ -165,6 +165,25 @@ describe('Workbench UI source contract', () => {
     expect(projectTree).not.toContain('data-project-tree-depth');
   });
 
+  it('keeps Project Explorer indentation guides aligned to tree icon centers', () => {
+    const explorer = css('apps/web/src/workbench/styles/explorer.css');
+    const treeRule = rule(explorer, '.project-tree');
+    const treeRowRule = rule(explorer, '.project-tree-row');
+    const editRowRule = rule(explorer, '.project-tree-edit-row');
+    const guideRule = rule(explorer, '.project-tree-edit-row::before');
+
+    expect(treeRule).toContain('--tree-indent-step: 14px;');
+    expect(treeRule).toContain('--tree-guide-left-offset: 14px;');
+    expect(treeRule).toContain('--tree-row-left-offset: 6px;');
+    expect(treeRowRule).toContain('padding: 0 8px 0 calc(var(--tree-row-left-offset) + var(--tree-indent));');
+    expect(editRowRule).toContain('padding: 0 8px 0 calc(var(--tree-row-left-offset) + var(--tree-indent));');
+    expect(guideRule).toContain('left: var(--tree-guide-left-offset);');
+    expect(guideRule).toContain('width: var(--tree-indent);');
+    expect(guideRule).toContain('transparent var(--tree-indent-step)');
+    expect(guideRule).not.toContain('left: 6px;');
+    expect(guideRule).not.toContain('transparent 13px');
+  });
+
   it('keeps Settings content flush under the shell drag area', () => {
     const settingsStyles = css('apps/web/src/workbench/styles/settings.css');
 
@@ -191,6 +210,20 @@ describe('Workbench UI source contract', () => {
     expect(shell).not.toContain('.floating-panel-settings .floating-panel-body');
   });
 
+  it('keeps Workbench default typography and Terminal tabs on DESIGN token sizes', () => {
+    const base = css('apps/web/src/workbench/ui/styles/base.css');
+    const patterns = css('apps/web/src/workbench/ui/styles/workbench-patterns.css');
+    const bodyRule = rule(base, 'body');
+    const terminalTabRule = rule(patterns, '.db-terminal-tab');
+
+    expect(bodyRule).toContain('font-size: var(--db-font-md);');
+    expect(bodyRule).toContain('line-height: 1.45;');
+    expect(bodyRule).toContain('letter-spacing: 0;');
+    expect(terminalTabRule).toContain('font-size: var(--db-font-sm);');
+    expect(terminalTabRule).toContain('line-height: 1.4;');
+    expect(terminalTabRule).toContain('letter-spacing: 0;');
+  });
+
   it('keeps Terminal tab controls at one height and prevents tab close controls from overlapping the end slot', () => {
     const patterns = css('apps/web/src/workbench/ui/styles/workbench-patterns.css');
     const terminal = css('apps/web/src/workbench/styles/terminal.css');
@@ -206,6 +239,7 @@ describe('Workbench UI source contract', () => {
     expect(patterns).toContain('height: var(--db-floating-panel-drag-hit-area-height);');
     expect(patterns).not.toContain('height: 24px;');
     expect(patterns).toContain('.db-terminal-tab__close.db-icon-button');
+    expect(rule(patterns, '.db-terminal-tab')).toContain('min-height: var(--db-floating-panel-drag-hit-area-height);');
     expect(terminalTabCloseRule).toContain('top: calc((var(--db-floating-panel-drag-hit-area-height) - 14px) / 2);');
     expect(terminalTabCloseRule).not.toContain('width:');
     expect(terminalTabCloseRule).not.toContain('height:');

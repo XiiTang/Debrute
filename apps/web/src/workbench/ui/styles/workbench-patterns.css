@@ -226,8 +226,12 @@
   width: 100%;
   max-width: none;
   height: var(--db-floating-panel-drag-hit-area-height);
+  min-height: var(--db-floating-panel-drag-hit-area-height);
   padding: 0 19px 0 7px;
   white-space: nowrap;
+  font-size: var(--db-font-sm);
+  line-height: 1.4;
+  letter-spacing: 0;
 }
 
 .db-terminal-tab span {

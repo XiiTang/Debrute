@@ -6,6 +6,9 @@
 }
 
 .project-tree {
+  --tree-indent-step: 14px;
+  --tree-guide-left-offset: 14px;
+  --tree-row-left-offset: 6px;
   min-height: 0;
   height: 100%;
   padding: 0 4px 10px;
@@ -19,7 +22,7 @@
   grid-template-columns: 16px minmax(0, 1fr);
   align-items: center;
   gap: 7px;
-  padding: 0 8px 0 calc(6px + var(--tree-indent));
+  padding: 0 8px 0 calc(var(--tree-row-left-offset) + var(--tree-indent));
   overflow: hidden;
   text-align: left;
   font-size: var(--db-font-sm);
@@ -31,15 +34,15 @@
   position: absolute;
   top: 0;
   bottom: 0;
-  left: 6px;
+  left: var(--tree-guide-left-offset);
   width: var(--tree-indent);
   pointer-events: none;
   background-image: repeating-linear-gradient(
     to right,
-    transparent 0,
-    transparent 13px,
-    color-mix(in srgb, var(--db-border-muted) 58%, transparent) 13px,
-    color-mix(in srgb, var(--db-border-muted) 58%, transparent) 14px
+    color-mix(in srgb, var(--db-border-muted) 58%, transparent) 0,
+    color-mix(in srgb, var(--db-border-muted) 58%, transparent) 1px,
+    transparent 1px,
+    transparent var(--tree-indent-step)
   );
 }
 
@@ -62,7 +65,7 @@
   grid-template-columns: 16px minmax(0, 1fr);
   align-items: center;
   gap: 7px;
-  padding: 0 8px 0 calc(6px + var(--tree-indent));
+  padding: 0 8px 0 calc(var(--tree-row-left-offset) + var(--tree-indent));
   overflow: hidden;
 }
 
