@@ -530,7 +530,7 @@ function canvasTextPreviewForNode(input: {
     return undefined;
   }
   const targetWidth = canvasRasterPreviewWidth({
-    nodeDisplayWidth: input.descriptor.contentCssWidth,
+    nodeDisplayWidth: input.node.width,
     sourceWidth: input.descriptor.sourceWidth,
     imageResourceZoom: input.imageResourceZoom,
     devicePixelRatio: input.devicePixelRatio
