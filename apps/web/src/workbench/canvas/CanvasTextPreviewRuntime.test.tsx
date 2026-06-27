@@ -157,7 +157,7 @@ describe('CanvasTextPreviewRuntime', () => {
     expect(isCanvasTextPreviewCaptureLayoutReady(element)).toBe(true);
   });
 
-  it('does not fail text preview capture when CodeMirror layout readiness cannot be proven', async () => {
+  it('reports capture layout readiness instead of continuing when readiness cannot be proven', async () => {
     const element = document.createElement('div');
     const lineNumbers = document.createElement('div');
     lineNumbers.className = 'cm-lineNumbers';
@@ -167,7 +167,11 @@ describe('CanvasTextPreviewRuntime', () => {
     content.append(layoutElement('cm-line', { top: 14, height: 16.8 }));
     element.append(lineNumbers, content);
 
-    await expect(waitForCanvasTextPreviewCaptureLayout(element, { maxFrames: 0 })).resolves.toBeUndefined();
+    await expect(waitForCanvasTextPreviewCaptureLayout(element, { maxFrames: 0 })).resolves.toBe(false);
+
+    setLayoutRect(lineNumbers.querySelector('.cm-gutterElement') as HTMLElement, { top: 14, height: 16.8 });
+
+    await expect(waitForCanvasTextPreviewCaptureLayout(element, { maxFrames: 0 })).resolves.toBe(true);
   });
 
   it('inlines CodeMirror line metrics onto gutter elements before image capture', () => {

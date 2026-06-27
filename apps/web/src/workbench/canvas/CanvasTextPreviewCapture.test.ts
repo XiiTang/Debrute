@@ -11,20 +11,17 @@ describe('CanvasTextPreviewCapture', () => {
     vi.clearAllMocks();
   });
 
-  it('captures a text body at a fixed source scale', async () => {
+  it('captures a text body at the fixed source scale', async () => {
     const element = {
       clientWidth: 320,
       clientHeight: 160
     } as HTMLElement;
 
-    const blob = await captureCanvasTextPreviewSource({
-      element,
-      sourceScale: 2
-    });
+    const blob = await captureCanvasTextPreviewSource({ element });
 
     expect(blob.type).toBe('image/png');
     expect(toBlob).toHaveBeenCalledWith(element, expect.objectContaining({
-      pixelRatio: 2,
+      pixelRatio: 4,
       width: 320,
       height: 160,
       backgroundColor: 'transparent'
@@ -48,7 +45,8 @@ describe('CanvasTextPreviewCapture', () => {
       contentCssWidth: 320,
       contentCssHeight: 160,
       scrollTop: 0,
-      scrollLeft: 0
+      scrollLeft: 0,
+      sourceScale: 4
     });
     const second = await canvasTextPreviewFingerprint({
       content: 'hello',
@@ -57,10 +55,36 @@ describe('CanvasTextPreviewCapture', () => {
       contentCssWidth: 320,
       contentCssHeight: 160,
       scrollTop: 0,
-      scrollLeft: 0
+      scrollLeft: 0,
+      sourceScale: 4
     });
 
     expect(first).not.toBe(second);
     expect(first).toMatch(/^sha256:/);
+  });
+
+  it('hashes the text preview source scale', async () => {
+    const first = await canvasTextPreviewFingerprint({
+      content: 'hello',
+      language: 'markdown',
+      wordWrap: true,
+      contentCssWidth: 320,
+      contentCssHeight: 160,
+      scrollTop: 0,
+      scrollLeft: 0,
+      sourceScale: 2
+    });
+    const second = await canvasTextPreviewFingerprint({
+      content: 'hello',
+      language: 'markdown',
+      wordWrap: true,
+      contentCssWidth: 320,
+      contentCssHeight: 160,
+      scrollTop: 0,
+      scrollLeft: 0,
+      sourceScale: 4
+    });
+
+    expect(first).not.toBe(second);
   });
 });

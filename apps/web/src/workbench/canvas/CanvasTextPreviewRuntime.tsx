@@ -7,12 +7,17 @@ import {
 import type { ProjectTextLanguageId } from '@debrute/project-core';
 import type { TextFileBuffer, WorkbenchActions } from '../../types';
 import { CanvasTextEditor } from './CanvasTextEditor';
-import { captureCanvasTextPreviewSource, canvasTextPreviewFingerprint } from './CanvasTextPreviewCapture';
+import {
+  CANVAS_TEXT_PREVIEW_SOURCE_SCALE,
+  captureCanvasTextPreviewSource,
+  canvasTextPreviewFingerprint
+} from './CanvasTextPreviewCapture';
 import type { CanvasCameraState } from './runtime/canvasCamera';
 
 const CANVAS_TEXT_PREVIEW_SOURCE_CONCURRENCY = 3;
 const CANVAS_TEXT_PREVIEW_CAPTURE_LAYOUT_MAX_FRAMES = 12;
 const CANVAS_TEXT_PREVIEW_CAPTURE_LAYOUT_TOP_TOLERANCE_PX = 0.5;
+const CANVAS_TEXT_PREVIEW_CAPTURE_LAYOUT_ERROR = 'Canvas text preview CodeMirror layout did not settle before capture.';
 
 export interface CanvasTextPreviewSource {
   src: string;
@@ -245,7 +250,10 @@ export function CanvasTextPreviewProvider({
     }
     void Promise.all(candidates.map(async (candidate): Promise<CanvasTextPreviewTarget> => ({
       ...candidate,
-      fingerprint: await canvasTextPreviewFingerprint(candidate)
+      fingerprint: await canvasTextPreviewFingerprint({
+        ...candidate,
+        sourceScale: CANVAS_TEXT_PREVIEW_SOURCE_SCALE
+      })
     }))).then(async (targets) => {
       if (cancelled || targets.length === 0) {
         return;
@@ -497,20 +505,21 @@ export async function waitForCanvasTextPreviewCaptureLayout(
     maxFrames?: number | undefined;
     isCancelled?: (() => boolean) | undefined;
   } = {}
-): Promise<void> {
+): Promise<boolean> {
   await canvasTextPreviewFontsReady();
   const maxFrames = options.maxFrames ?? CANVAS_TEXT_PREVIEW_CAPTURE_LAYOUT_MAX_FRAMES;
   for (let frame = 0; frame <= maxFrames; frame += 1) {
     if (options.isCancelled?.()) {
-      return;
+      return false;
     }
     if (isCanvasTextPreviewCaptureLayoutReady(element)) {
-      return;
+      return true;
     }
     if (frame < maxFrames) {
       await canvasTextPreviewAnimationFrame();
     }
   }
+  return false;
 }
 
 function firstMeasuredCanvasTextPreviewElement(elements: NodeListOf<Element>): HTMLElement | undefined {
@@ -605,16 +614,20 @@ function CanvasTextPreviewCaptureTarget({
       void (async () => {
         try {
           prepareCanvasTextPreviewCaptureElement(element);
-          await waitForCanvasTextPreviewCaptureLayout(element, {
+          const layoutReady = await waitForCanvasTextPreviewCaptureLayout(element, {
             isCancelled: () => cancelled
           });
           if (cancelled) {
             return;
           }
-          const sourcePng = await captureCanvasTextPreviewSource({
-            element,
-            sourceScale: Math.max(1, devicePixelRatio)
-          });
+          if (!layoutReady) {
+            onComplete(target, {
+              status: 'error',
+              message: CANVAS_TEXT_PREVIEW_CAPTURE_LAYOUT_ERROR
+            });
+            return;
+          }
+          const sourcePng = await captureCanvasTextPreviewSource({ element });
           await actions.saveCanvasTextPreviewSource({
             ...canvasTextPreviewTargetForApi(target),
             canvasId: target.canvasId,

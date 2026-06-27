@@ -1,11 +1,12 @@
 import { toBlob } from 'html-to-image';
 import type { ProjectTextLanguageId } from '@debrute/project-core';
 
-const CANVAS_TEXT_PREVIEW_VISUAL_VERSION = 'canvas-text-preview-v3';
+export const CANVAS_TEXT_PREVIEW_SOURCE_SCALE = 4;
+
+const CANVAS_TEXT_PREVIEW_VISUAL_VERSION = 'canvas-text-preview-v4';
 
 export async function captureCanvasTextPreviewSource(input: {
   element: HTMLElement;
-  sourceScale: number;
 }): Promise<Blob> {
   const width = input.element.clientWidth;
   const height = input.element.clientHeight;
@@ -13,7 +14,7 @@ export async function captureCanvasTextPreviewSource(input: {
     throw new Error('Canvas text preview source element must have positive dimensions.');
   }
   const blob = await toBlob(input.element, {
-    pixelRatio: input.sourceScale,
+    pixelRatio: CANVAS_TEXT_PREVIEW_SOURCE_SCALE,
     width,
     height,
     backgroundColor: 'transparent'
@@ -32,6 +33,7 @@ export async function canvasTextPreviewFingerprint(input: {
   contentCssHeight: number;
   scrollTop: number;
   scrollLeft: number;
+  sourceScale: number;
 }): Promise<string> {
   const payload = JSON.stringify({
     visualVersion: CANVAS_TEXT_PREVIEW_VISUAL_VERSION,
@@ -42,7 +44,7 @@ export async function canvasTextPreviewFingerprint(input: {
     contentCssHeight: input.contentCssHeight,
     scrollTop: input.scrollTop,
     scrollLeft: input.scrollLeft,
-    sourceScaleStrategy: 'devicePixelRatio'
+    sourceScale: input.sourceScale
   });
   const digest = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(payload));
   return `sha256:${[...new Uint8Array(digest)].map((byte) => byte.toString(16).padStart(2, '0')).join('')}`;
