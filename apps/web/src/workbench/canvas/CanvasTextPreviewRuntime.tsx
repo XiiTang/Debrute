@@ -11,6 +11,8 @@ import { captureCanvasTextPreviewSource, canvasTextPreviewFingerprint } from './
 import type { CanvasCameraState } from './runtime/canvasCamera';
 
 const CANVAS_TEXT_PREVIEW_SOURCE_CONCURRENCY = 3;
+const CANVAS_TEXT_PREVIEW_CAPTURE_LAYOUT_MAX_FRAMES = 12;
+const CANVAS_TEXT_PREVIEW_CAPTURE_LAYOUT_TOP_TOLERANCE_PX = 0.5;
 
 export interface CanvasTextPreviewSource {
   src: string;
@@ -426,6 +428,159 @@ export function shouldStartCanvasTextPreviewSourceWork(input: {
     && input.dragState === undefined;
 }
 
+export function isCanvasTextPreviewCaptureLayoutReady(element: HTMLElement): boolean {
+  const firstLine = firstMeasuredCanvasTextPreviewElement(element.querySelectorAll('.cm-content .cm-line'));
+  const firstLineNumber = firstMeasuredCanvasTextPreviewElement(
+    element.querySelectorAll('.cm-lineNumbers .cm-gutterElement')
+  );
+  if (!firstLine || !firstLineNumber) {
+    return false;
+  }
+  const lineRect = firstLine.getBoundingClientRect();
+  const lineNumberRect = firstLineNumber.getBoundingClientRect();
+  return Math.abs(lineRect.top - lineNumberRect.top) <= CANVAS_TEXT_PREVIEW_CAPTURE_LAYOUT_TOP_TOLERANCE_PX;
+}
+
+export function prepareCanvasTextPreviewCaptureElement(element: HTMLElement): void {
+  const firstLine = firstMeasuredCanvasTextPreviewElement(element.querySelectorAll('.cm-content .cm-line'));
+  if (!firstLine) {
+    return;
+  }
+  const content = element.querySelector('.cm-content');
+  const contentPaddingTop = content instanceof HTMLElement
+    ? window.getComputedStyle(content).paddingTop
+    : '0px';
+  const lineStyle = window.getComputedStyle(firstLine);
+  for (const gutter of element.querySelectorAll('.cm-gutter')) {
+    if (gutter instanceof HTMLElement) {
+      gutter.style.setProperty('display', 'flex', 'important');
+      gutter.style.flexDirection = 'column';
+      gutter.style.boxSizing = 'border-box';
+      inlineCanvasTextPreviewCaptureProperties(gutter, window.getComputedStyle(gutter), [
+        'font-family',
+        'font-size',
+        'font-variant-numeric',
+        'line-height',
+        'overflow'
+      ]);
+      moveFirstCanvasTextPreviewGutterOffsetToPadding(gutter);
+    }
+  }
+  for (const gutterElement of element.querySelectorAll('.cm-gutterElement')) {
+    if (!(gutterElement instanceof HTMLElement) || !isMeasuredCanvasTextPreviewElement(gutterElement)) {
+      continue;
+    }
+    inlineCanvasTextPreviewCaptureProperties(gutterElement, lineStyle, [
+      'font-family',
+      'font-size',
+      'font-weight',
+      'font-variant-numeric',
+      'line-height'
+    ]);
+    inlineCanvasTextPreviewCaptureProperties(gutterElement, window.getComputedStyle(gutterElement), [
+      'box-sizing',
+      'height',
+      'margin-top',
+      'padding-left',
+      'padding-right',
+      'text-align',
+      'white-space'
+    ]);
+    gutterElement.style.minHeight = lineStyle.lineHeight;
+    translateCanvasTextPreviewCaptureElement(gutterElement, contentPaddingTop);
+  }
+}
+
+export async function waitForCanvasTextPreviewCaptureLayout(
+  element: HTMLElement,
+  options: {
+    maxFrames?: number | undefined;
+    isCancelled?: (() => boolean) | undefined;
+  } = {}
+): Promise<void> {
+  await canvasTextPreviewFontsReady();
+  const maxFrames = options.maxFrames ?? CANVAS_TEXT_PREVIEW_CAPTURE_LAYOUT_MAX_FRAMES;
+  for (let frame = 0; frame <= maxFrames; frame += 1) {
+    if (options.isCancelled?.()) {
+      return;
+    }
+    if (isCanvasTextPreviewCaptureLayoutReady(element)) {
+      return;
+    }
+    if (frame < maxFrames) {
+      await canvasTextPreviewAnimationFrame();
+    }
+  }
+}
+
+function firstMeasuredCanvasTextPreviewElement(elements: NodeListOf<Element>): HTMLElement | undefined {
+  for (const element of elements) {
+    if (element instanceof HTMLElement && isMeasuredCanvasTextPreviewElement(element)) {
+      return element;
+    }
+  }
+  return undefined;
+}
+
+function isMeasuredCanvasTextPreviewElement(element: HTMLElement): boolean {
+  const rect = element.getBoundingClientRect();
+  return Number.isFinite(rect.top) && Number.isFinite(rect.height) && rect.height > 0;
+}
+
+function inlineCanvasTextPreviewCaptureProperties(
+  element: HTMLElement,
+  style: CSSStyleDeclaration,
+  properties: string[]
+): void {
+  for (const property of properties) {
+    const value = style.getPropertyValue(property);
+    if (value) {
+      element.style.setProperty(property, value, style.getPropertyPriority(property));
+    }
+  }
+}
+
+function moveFirstCanvasTextPreviewGutterOffsetToPadding(gutter: HTMLElement): void {
+  const firstVisibleGutterElement = firstMeasuredCanvasTextPreviewElement(gutter.querySelectorAll('.cm-gutterElement'));
+  if (!firstVisibleGutterElement) {
+    return;
+  }
+  const marginTop = parseFloat(window.getComputedStyle(firstVisibleGutterElement).marginTop);
+  if (!Number.isFinite(marginTop) || marginTop <= 0) {
+    return;
+  }
+  const gutterStyle = window.getComputedStyle(gutter);
+  const paddingTop = parseFloat(gutterStyle.paddingTop);
+  gutter.style.paddingTop = `${(Number.isFinite(paddingTop) ? paddingTop : 0) + marginTop}px`;
+  firstVisibleGutterElement.style.marginTop = '0px';
+}
+
+function translateCanvasTextPreviewCaptureElement(element: HTMLElement, translateY: string): void {
+  const offset = parseFloat(translateY);
+  if (!Number.isFinite(offset) || offset === 0) {
+    return;
+  }
+  element.style.transform = `translateY(${translateY})`;
+}
+
+async function canvasTextPreviewFontsReady(): Promise<void> {
+  const fontSet = typeof document !== 'undefined' ? document.fonts : undefined;
+  if (!fontSet) {
+    return;
+  }
+  await fontSet.ready.catch(() => undefined);
+}
+
+function canvasTextPreviewAnimationFrame(): Promise<void> {
+  return new Promise((resolve) => {
+    if (typeof window === 'undefined' || typeof window.requestAnimationFrame !== 'function') {
+      setTimeout(resolve, 0);
+      return;
+    }
+    window.requestAnimationFrame(() => resolve());
+  });
+}
+
 function CanvasTextPreviewCaptureTarget({
   target,
   actions,
@@ -438,16 +593,24 @@ function CanvasTextPreviewCaptureTarget({
   onComplete: (target: CanvasTextPreviewTarget, result: CanvasTextPreviewCaptureResult) => void;
 }): React.ReactElement {
   const elementRef = useRef<HTMLDivElement | null>(null);
+  const [editorLayoutReady, setEditorLayoutReady] = useState(false);
 
   useEffect(() => {
     let cancelled = false;
     const element = elementRef.current;
-    if (!element) {
+    if (!element || !editorLayoutReady) {
       return undefined;
     }
     const frame = window.requestAnimationFrame(() => {
       void (async () => {
         try {
+          prepareCanvasTextPreviewCaptureElement(element);
+          await waitForCanvasTextPreviewCaptureLayout(element, {
+            isCancelled: () => cancelled
+          });
+          if (cancelled) {
+            return;
+          }
           const sourcePng = await captureCanvasTextPreviewSource({
             element,
             sourceScale: Math.max(1, devicePixelRatio)
@@ -487,7 +650,7 @@ function CanvasTextPreviewCaptureTarget({
       cancelled = true;
       window.cancelAnimationFrame(frame);
     };
-  }, [actions, devicePixelRatio, onComplete, target]);
+  }, [actions, devicePixelRatio, editorLayoutReady, onComplete, target]);
 
   return (
     <div
@@ -509,6 +672,7 @@ function CanvasTextPreviewCaptureTarget({
         onChange={() => undefined}
         onSave={() => undefined}
         onToggleWordWrap={() => undefined}
+        onLayoutReady={() => setEditorLayoutReady(true)}
       />
     </div>
   );

@@ -23,6 +23,18 @@ describe('CanvasTextPreviewCapture', () => {
     });
 
     expect(blob.type).toBe('image/png');
+    expect(toBlob).toHaveBeenCalledWith(element, expect.objectContaining({
+      pixelRatio: 2,
+      width: 320,
+      height: 160,
+      backgroundColor: 'transparent'
+    }));
+    expect(toBlob).toHaveBeenCalledWith(element, expect.not.objectContaining({
+      canvasWidth: expect.any(Number)
+    }));
+    expect(toBlob).toHaveBeenCalledWith(element, expect.not.objectContaining({
+      canvasHeight: expect.any(Number)
+    }));
     expect(toBlob).toHaveBeenCalledWith(element, expect.not.objectContaining({
       filter: expect.any(Function)
     }));

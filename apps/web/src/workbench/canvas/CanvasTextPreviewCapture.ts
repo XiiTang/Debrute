@@ -1,7 +1,7 @@
 import { toBlob } from 'html-to-image';
 import type { ProjectTextLanguageId } from '@debrute/project-core';
 
-const CANVAS_TEXT_PREVIEW_VISUAL_VERSION = 'canvas-text-preview-v1';
+const CANVAS_TEXT_PREVIEW_VISUAL_VERSION = 'canvas-text-preview-v3';
 
 export async function captureCanvasTextPreviewSource(input: {
   element: HTMLElement;
@@ -16,8 +16,6 @@ export async function captureCanvasTextPreviewSource(input: {
     pixelRatio: input.sourceScale,
     width,
     height,
-    canvasWidth: Math.ceil(width * input.sourceScale),
-    canvasHeight: Math.ceil(height * input.sourceScale),
     backgroundColor: 'transparent'
   });
   if (!blob) {

@@ -30,7 +30,8 @@ export function CanvasTextEditor({
   initialScrollLeft,
   onChange,
   onSave,
-  onToggleWordWrap
+  onToggleWordWrap,
+  onLayoutReady
 }: {
   value: string;
   language: ProjectTextLanguageId;
@@ -42,9 +43,11 @@ export function CanvasTextEditor({
   onChange: (value: string) => void;
   onSave: () => void;
   onToggleWordWrap: () => void;
+  onLayoutReady?: (() => void) | undefined;
 }): React.ReactElement {
   const hostRef = React.useRef<HTMLDivElement | null>(null);
   const viewRef = React.useRef<EditorView | null>(null);
+  const onLayoutReadyRef = React.useRef(onLayoutReady);
   const callbacksRef = React.useRef<CanvasTextEditorCallbacks>({
     onChange,
     onSave,
@@ -73,6 +76,10 @@ export function CanvasTextEditor({
       }
     };
   }, [onChange, onSave, onToggleWordWrap]);
+
+  React.useEffect(() => {
+    onLayoutReadyRef.current = onLayoutReady;
+  }, [onLayoutReady]);
 
   React.useEffect(() => {
     const host = hostRef.current;
@@ -109,11 +116,26 @@ export function CanvasTextEditor({
     if (!view || visible === false) {
       return;
     }
+    let cancelled = false;
+    let notifyFrame: number | undefined;
     const handle = window.requestAnimationFrame(() => {
-      view.requestMeasure();
+      view.requestMeasure({
+        read: () => undefined,
+        write: () => {
+          notifyFrame = window.requestAnimationFrame(() => {
+            if (!cancelled) {
+              onLayoutReadyRef.current?.();
+            }
+          });
+        }
+      });
     });
     return () => {
+      cancelled = true;
       window.cancelAnimationFrame(handle);
+      if (notifyFrame !== undefined) {
+        window.cancelAnimationFrame(notifyFrame);
+      }
     };
   }, [visible]);
 

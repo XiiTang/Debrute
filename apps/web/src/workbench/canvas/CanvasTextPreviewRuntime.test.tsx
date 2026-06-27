@@ -9,12 +9,15 @@ import {
   CanvasTextPreviewProvider,
   canvasTextPreviewBodyMeasurement,
   canvasTextPreviewCurrentDescriptors,
+  isCanvasTextPreviewCaptureLayoutReady,
   canvasTextPreviewImageReducer,
   canvasTextPreviewNextCaptureTargets,
   canvasTextPreviewTargetsForNodes,
   selectCanvasTextPreviewVariant,
   shouldStartCanvasTextPreviewSourceWork,
-  useCanvasTextPreviewRuntime
+  prepareCanvasTextPreviewCaptureElement,
+  useCanvasTextPreviewRuntime,
+  waitForCanvasTextPreviewCaptureLayout
 } from './CanvasTextPreviewRuntime';
 import type { CanvasTextPreviewImageState, CanvasTextPreviewSource } from './CanvasTextPreviewRuntime';
 
@@ -132,6 +135,69 @@ describe('CanvasTextPreviewRuntime', () => {
       scrollTop: 72,
       scrollLeft: 9
     });
+  });
+
+  it('requires the first visible line number to align with the first content line before capture', () => {
+    const element = document.createElement('div');
+    const lineNumbers = document.createElement('div');
+    lineNumbers.className = 'cm-lineNumbers';
+    const spacer = layoutElement('cm-gutterElement', { top: 0, height: 0 });
+    const visibleLineNumber = layoutElement('cm-gutterElement', { top: 10, height: 16.8 });
+    lineNumbers.append(spacer, visibleLineNumber);
+    const content = document.createElement('div');
+    content.className = 'cm-content';
+    const line = layoutElement('cm-line', { top: 14, height: 16.8 });
+    content.append(line);
+    element.append(lineNumbers, content);
+
+    expect(isCanvasTextPreviewCaptureLayoutReady(element)).toBe(false);
+
+    setLayoutRect(visibleLineNumber, { top: 14, height: 16.8 });
+
+    expect(isCanvasTextPreviewCaptureLayoutReady(element)).toBe(true);
+  });
+
+  it('does not fail text preview capture when CodeMirror layout readiness cannot be proven', async () => {
+    const element = document.createElement('div');
+    const lineNumbers = document.createElement('div');
+    lineNumbers.className = 'cm-lineNumbers';
+    lineNumbers.append(layoutElement('cm-gutterElement', { top: 10, height: 16.8 }));
+    const content = document.createElement('div');
+    content.className = 'cm-content';
+    content.append(layoutElement('cm-line', { top: 14, height: 16.8 }));
+    element.append(lineNumbers, content);
+
+    await expect(waitForCanvasTextPreviewCaptureLayout(element, { maxFrames: 0 })).resolves.toBeUndefined();
+  });
+
+  it('inlines CodeMirror line metrics onto gutter elements before image capture', () => {
+    const element = document.createElement('div');
+    const content = document.createElement('div');
+    content.className = 'cm-content';
+    content.style.paddingTop = '6px';
+    const line = document.createElement('div');
+    line.className = 'cm-line';
+    line.style.fontFamily = 'monospace';
+    line.style.fontSize = '12px';
+    line.style.lineHeight = '16.8px';
+    setLayoutRect(line, { top: 6, height: 16.8 });
+    content.append(line);
+    const lineNumbers = document.createElement('div');
+    lineNumbers.className = 'cm-lineNumbers';
+    const gutterElement = document.createElement('div');
+    gutterElement.className = 'cm-gutterElement';
+    setLayoutRect(gutterElement, { top: 6, height: 16.8 });
+    lineNumbers.append(gutterElement);
+    element.append(lineNumbers, content);
+
+    prepareCanvasTextPreviewCaptureElement(element);
+    prepareCanvasTextPreviewCaptureElement(element);
+
+    expect(gutterElement.style.fontFamily).toBe('monospace');
+    expect(gutterElement.style.fontSize).toBe('12px');
+    expect(gutterElement.style.lineHeight).toBe('16.8px');
+    expect(gutterElement.style.minHeight).toBe('16.8px');
+    expect(gutterElement.style.transform).toBe('translateY(6px)');
   });
 
   it('keeps descriptors only when they match the current text preview target', () => {
@@ -417,4 +483,25 @@ function textPreviewImageState(source: ReturnType<typeof textPreviewSource>): Ca
     },
     next: undefined
   };
+}
+
+function layoutElement(className: string, rect: { top: number; height: number }): HTMLElement {
+  const element = document.createElement('div');
+  element.className = className;
+  setLayoutRect(element, rect);
+  return element;
+}
+
+function setLayoutRect(element: HTMLElement, rect: { top: number; height: number }): void {
+  element.getBoundingClientRect = () => ({
+    x: 0,
+    y: rect.top,
+    top: rect.top,
+    bottom: rect.top + rect.height,
+    left: 0,
+    right: 10,
+    width: 10,
+    height: rect.height,
+    toJSON: () => undefined
+  });
 }
