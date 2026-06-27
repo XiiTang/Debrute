@@ -10,7 +10,6 @@ describe('appServerEvents', () => {
       projectId: 'project-live-id',
       projectRevision: 2,
       feedback: {
-        schemaVersion: 2,
         updatedAt: '2026-06-12T00:00:00.000Z',
         entries: {
           'brief.md': {
@@ -37,7 +36,6 @@ describe('appServerEvents', () => {
 function snapshotFixture(): WorkbenchProjectSessionSnapshot {
   return {
     metadata: {
-      schemaVersion: 1,
       project: {
         id: 'project-record-id',
         name: 'Test Project',

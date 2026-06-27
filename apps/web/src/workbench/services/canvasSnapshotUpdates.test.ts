@@ -45,7 +45,6 @@ function snapshotFixture(input: {
 }): WorkbenchProjectSessionSnapshot {
   return {
     metadata: {
-      schemaVersion: 1,
       project: {
         id: 'project-1',
         name: 'Project',
@@ -77,7 +76,6 @@ function snapshotFixture(input: {
 
 function canvasDocument(canvasId: string, x: number, y: number): CanvasDocument {
   return {
-    schemaVersion: 1,
     id: canvasId,
     nodeElements: [{
       projectRelativePath: 'flow/a.png',

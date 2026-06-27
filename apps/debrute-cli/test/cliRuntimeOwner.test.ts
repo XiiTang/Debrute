@@ -24,7 +24,6 @@ describe('CLI runtime owner', () => {
     try {
       await mkdir(root, { recursive: true });
       await writeFile(join(root, 'cli-owner.json'), JSON.stringify({
-        schemaVersion: 1,
         ownerId: ''
       }), 'utf8');
 

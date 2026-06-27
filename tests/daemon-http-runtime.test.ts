@@ -2407,7 +2407,6 @@ async function readWithTimeout(
 function projectSnapshotFixture(projectRoot: string) {
   return {
     metadata: {
-      schemaVersion: 1,
       project: {
         id: 'project',
         name: 'Project',

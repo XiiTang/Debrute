@@ -310,7 +310,6 @@ describe('DebruteAppServer Canvas feedback materialization', () => {
       });
       const feedbackPath = join(projectRoot, '.debrute/reviews/canvas-feedback.json');
       await writeFile(feedbackPath, `${JSON.stringify({
-        schemaVersion: 2,
         updatedAt: NOW,
         entries: {
           'copy.md': {
@@ -453,7 +452,6 @@ async function writeImagePreviewCacheRevisionFixtures(
 async function writeFeedbackDocument(projectRoot: string, projectRelativePaths: string[]): Promise<void> {
   await mkdir(join(projectRoot, '.debrute/reviews'), { recursive: true });
   await writeFile(join(projectRoot, '.debrute/reviews/canvas-feedback.json'), `${JSON.stringify({
-    schemaVersion: 2,
     updatedAt: NOW,
     entries: Object.fromEntries(projectRelativePaths.map((projectRelativePath) => [
       projectRelativePath,

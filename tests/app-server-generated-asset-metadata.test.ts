@@ -25,7 +25,6 @@ describe('app-server generated asset metadata', () => {
       expect(lookup.status).toBe('matched');
       if (lookup.status === 'matched') {
         expect(lookup.records[0]).toMatchObject({
-          schemaVersion: 1,
           modelRun: { request: { prompt: 'cover' }, output: { ok: true } }
         });
       }

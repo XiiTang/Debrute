@@ -24,7 +24,6 @@ export interface DebruteCanvasPerfCanvasSnapshot {
 }
 
 export interface DebruteCanvasPerfCapture {
-  version: 1;
   label?: string | undefined;
   startedAt: number;
   endedAt: number;
@@ -124,7 +123,6 @@ export function createCanvasPerfDebugBridge(input: {
       error = { message: errorMessage(snapshotError) };
     }
     const capture: DebruteCanvasPerfCapture = {
-      version: 1,
       ...(label !== undefined ? { label } : {}),
       startedAt: captureInput.startedAt,
       endedAt: captureInput.endedAt,
@@ -196,7 +194,6 @@ export function createCanvasPerfDebugBridge(input: {
 
 function cloneCapture(capture: DebruteCanvasPerfCapture): DebruteCanvasPerfCapture {
   return {
-    version: 1,
     ...(capture.label !== undefined ? { label: capture.label } : {}),
     startedAt: capture.startedAt,
     endedAt: capture.endedAt,

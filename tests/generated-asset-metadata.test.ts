@@ -62,11 +62,10 @@ describe('generated asset metadata service', () => {
       const recordFile = await readJson(join(paths.recordsDir, 'record-1.json'));
       const cache = await readJson(paths.cacheFile);
 
-	      expect(record).toEqual({
-	        schemaVersion: 1,
-	        recordId: 'record-1',
-	        projectRelativePath: 'generated/cover.png',
-	        createdAt: '2026-05-24T00:00:00.000Z',
+      expect(record).toEqual({
+        recordId: 'record-1',
+        projectRelativePath: 'generated/cover.png',
+        createdAt: '2026-05-24T00:00:00.000Z',
         fingerprint: { algorithm: 'sha256', hash: sha256('image-bytes') },
         modelRun: {
           request: { method: 'POST', url: 'https://model.example/images', body: { prompt: 'cover' } },
@@ -74,7 +73,6 @@ describe('generated asset metadata service', () => {
         }
       });
       expect(index).toEqual({
-        schemaVersion: 1,
         records: [
           {
             recordId: 'record-1',
@@ -88,7 +86,6 @@ describe('generated asset metadata service', () => {
       expect(JSON.stringify(index)).not.toContain('full-model-output');
       expect(recordFile).toEqual(record);
       expect(cache).toMatchObject({
-        schemaVersion: 1,
         entries: {
           'generated/cover.png': {
             sizeBytes: 11,
@@ -117,7 +114,6 @@ describe('generated asset metadata service', () => {
             injectedConflict = true;
             await mkdir(join(root, '.debrute/assets'), { recursive: true });
             await writeFile(paths.indexFile, JSON.stringify({
-              schemaVersion: 1,
               records: [{
                 recordId: 'external-record',
                 createdAt: '2026-05-24T00:00:01.000Z',
@@ -264,7 +260,6 @@ describe('generated asset metadata service', () => {
         expect(lookup.fingerprint.hash).toBe(sha256('image-bytes'));
         expect(lookup.records).toEqual([
 	          {
-	            schemaVersion: 1,
 	            recordId: 'record-1',
 	            projectRelativePath: 'generated/cover.png',
 	            createdAt: '2026-05-24T00:00:00.000Z',
@@ -361,7 +356,6 @@ describe('generated asset metadata service', () => {
         fingerprint: { algorithm: 'sha256', hash: sha256('image-bytes') }
       });
       expect(cache).toMatchObject({
-        schemaVersion: 1,
         entries: {
           'generated/cover.png': {
             sha256: sha256('image-bytes'),
@@ -398,7 +392,6 @@ describe('generated asset metadata service', () => {
       await writeFile(join(root, 'generated/cover.png'), Buffer.from('image-bytes'));
       const fileStat = await stat(join(root, 'generated/cover.png'));
       await writeFile(join(root, '.debrute/cache/file-fingerprints.json'), JSON.stringify({
-        schemaVersion: 1,
         entries: {
           'generated/cover.png': {
             sizeBytes: fileStat.size,
@@ -448,7 +441,6 @@ describe('generated asset metadata service', () => {
       await writeFile(join(root, 'generated/cover.png'), Buffer.from('image-bytes'));
       const fingerprint = { algorithm: 'sha256' as const, hash: sha256('image-bytes') };
 	      await writeFile(join(root, 'generated/not-metadata.json'), JSON.stringify({
-	        schemaVersion: 1,
 	        recordId: 'record-1',
 	        projectRelativePath: 'generated/cover.png',
 	        createdAt: '2026-05-24T00:00:00.000Z',
@@ -456,7 +448,6 @@ describe('generated asset metadata service', () => {
         modelRun: { request: { prompt: 'outside' }, output: { ok: true } }
       }, null, 2), 'utf8');
       await writeFile(join(root, '.debrute/assets/generated-assets-index.json'), JSON.stringify({
-        schemaVersion: 1,
         records: [
           {
             recordId: 'record-1',
@@ -488,7 +479,6 @@ describe('generated asset metadata service', () => {
       await writeFile(join(root, 'generated/cover.png'), Buffer.from('image-bytes'));
       const fingerprint = { algorithm: 'sha256' as const, hash: sha256('image-bytes') };
       await writeFile(join(root, '.debrute/assets/generated/nested/record-1.json'), JSON.stringify({
-        schemaVersion: 1,
         recordId: 'record-1',
         projectRelativePath: 'generated/cover.png',
         createdAt: '2026-05-24T00:00:00.000Z',
@@ -496,7 +486,6 @@ describe('generated asset metadata service', () => {
         modelRun: { request: { prompt: 'nested' }, output: { ok: true } }
       }, null, 2), 'utf8');
       await writeFile(join(root, '.debrute/assets/generated-assets-index.json'), JSON.stringify({
-        schemaVersion: 1,
         records: [
           {
             recordId: 'record-1',
@@ -527,7 +516,6 @@ describe('generated asset metadata service', () => {
       await mkdir(join(root, '.debrute/assets/generated'), { recursive: true });
       await writeFile(join(root, 'generated/cover.png'), Buffer.from('image-bytes'));
 	      await writeFile(join(root, '.debrute/assets/generated/record-1.json'), JSON.stringify({
-	        schemaVersion: 1,
 	        recordId: 'record-1',
 	        projectRelativePath: 'generated/cover.png',
 	        createdAt: '2026-05-24T00:00:00.000Z',
@@ -535,7 +523,6 @@ describe('generated asset metadata service', () => {
         modelRun: { request: { prompt: 'cover' }, output: { ok: true } }
       }, null, 2), 'utf8');
       await writeFile(join(root, '.debrute/assets/generated-assets-index.json'), JSON.stringify({
-        schemaVersion: 1,
         records: [
           {
             recordId: 'record-1',

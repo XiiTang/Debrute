@@ -308,7 +308,6 @@ function snapshotFixture(projectRoot: string): ProjectSessionSnapshot {
   return {
     projectRoot,
     metadata: {
-      schemaVersion: 1,
       project: {
         id: 'project-record-id',
         name: 'Test Project',

@@ -153,7 +153,6 @@ describe('CanvasFeedbackRenderedImageScheduler', () => {
         projectRoot,
         projectRelativePath: 'assets/page.png',
         document: {
-          schemaVersion: 2,
           updatedAt: NOW,
           entries: {}
         }
@@ -302,7 +301,6 @@ function documentFixture(projectRelativePaths: string[], comment = 'fix this'): 
     entryFixture(projectRelativePath, comment)
   ]));
   return {
-    schemaVersion: 2,
     updatedAt: NOW,
     entries
   };

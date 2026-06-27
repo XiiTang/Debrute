@@ -191,7 +191,6 @@ describe('floating bar placement', () => {
       supportsImageLocalFeedback: true
     };
     const currentTarget = canvasFeedbackBarTargetWithCurrentEntry(target, {
-      schemaVersion: 2,
       updatedAt: '2026-06-22T12:00:00.000Z',
       entries: {
         'flow/cover.png': {

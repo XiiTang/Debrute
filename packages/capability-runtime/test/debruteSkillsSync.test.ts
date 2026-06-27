@@ -74,7 +74,6 @@ describe('Debrute Skills sync service', () => {
       await writeSkill(fixture.shared, 'debrute-core', { body: 'old core' });
       await mkdir(join(fixture.home, '.debrute'), { recursive: true });
       await writeFile(fixture.statePath, `${JSON.stringify({
-        schemaVersion: 1,
         debruteVersion: '1.0.0',
         bundledSkills: ['debrute-core', 'debrute-optional'],
         updatedSkills: ['debrute-core', 'debrute-optional'],
@@ -146,7 +145,6 @@ describe('Debrute Skills sync service', () => {
       await writeSkill(fixture.shared, 'custom-skill', { managed: false, body: 'custom stays' });
       await mkdir(join(fixture.home, '.debrute'), { recursive: true });
       await writeFile(fixture.statePath, `${JSON.stringify({
-        schemaVersion: 1,
         debruteVersion: '1.0.0',
         bundledSkills: ['debrute-core', 'debrute-optional'],
         updatedSkills: ['debrute-core'],
@@ -189,11 +187,9 @@ describe('Debrute Skills sync service', () => {
       const forced = await service.sync({ force: true });
       expect(forced.updatedSkills.map((skill) => skill.name)).toEqual(['debrute-core']);
       const state = JSON.parse(await readFile(fixture.statePath, 'utf8')) as {
-        schemaVersion: number;
         bundledSkills: string[];
         skippedDeletedSkills: string[];
       };
-      expect(state.schemaVersion).toBe(1);
       expect(state.bundledSkills).toEqual(['debrute-core']);
       expect(state.skippedDeletedSkills).toEqual([]);
     } finally {

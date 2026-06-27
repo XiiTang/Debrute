@@ -59,7 +59,6 @@ describe('canvas feedback updates', () => {
 
 function feedbackDocument(projectRelativePath: string): CanvasFeedbackDocument {
   return {
-    schemaVersion: 2,
     updatedAt: '2026-05-26T12:00:00.000Z',
     entries: {
       [projectRelativePath]: {

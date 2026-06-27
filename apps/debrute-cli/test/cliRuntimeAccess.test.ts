@@ -24,7 +24,7 @@ describe('CLI runtime access', () => {
   it('surfaces unreadable runtime state instead of reporting stopped', async () => {
     const result = await runRuntimeBackedCliCommand(parsed('runtime.status'), {
       readRuntimeState: vi.fn(async () => {
-        throw new Error('Invalid Debrute workbench runtime state: schemaVersion must be 2.');
+        throw new Error('Invalid Debrute workbench runtime state: owner must include kind, ownerId, and pid.');
       }),
       checkHealth: vi.fn(),
       skillsStatus: vi.fn(async () => skillsSnapshot({ skills: [] })),
@@ -35,14 +35,14 @@ describe('CLI runtime access', () => {
       status: 'error',
       command: 'runtime.status',
       code: 'runtime_state_unreadable',
-      message: 'Debrute workbench runtime state is unreadable: Invalid Debrute workbench runtime state: schemaVersion must be 2.'
+      message: 'Debrute workbench runtime state is unreadable: Invalid Debrute workbench runtime state: owner must include kind, ownerId, and pid.'
     });
   });
 
   it('reports unreadable runtime state as a doctor diagnostic', async () => {
     const result = await runRuntimeBackedCliCommand(parsed('runtime.doctor'), {
       readRuntimeState: vi.fn(async () => {
-        throw new Error('Invalid Debrute workbench runtime state: schemaVersion must be 2.');
+        throw new Error('Invalid Debrute workbench runtime state: owner must include kind, ownerId, and pid.');
       }),
       checkHealth: vi.fn(),
       skillsStatus: vi.fn(async () => skillsSnapshot({ skills: [] })),
@@ -286,7 +286,6 @@ function parsed(command: string, positional: string[] = [], options: Record<stri
 
 function runtimeState(overrides: Partial<WorkbenchRuntimeState> = {}): WorkbenchRuntimeState {
   return {
-    schemaVersion: 2,
     runtimeKind: 'desktop-packaged',
     processControl: 'managed',
     owner: { kind: 'cli', ownerId: 'cli-owner-1', pid: 300 },

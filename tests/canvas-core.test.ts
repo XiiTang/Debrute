@@ -1,8 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import {
   CANVAS_FEEDBACK_MARKS,
-  CANVAS_FEEDBACK_SCHEMA_VERSION,
-  CANVAS_DOCUMENT_SCHEMA_VERSION,
   canvasNodeLayerOrderTopFirst,
   clearCanvasNodeManualLayouts,
   createCanvasDocument,
@@ -24,7 +22,6 @@ describe('canvas-core', () => {
     const canvas = createCanvasDocument({ id: 'main' });
 
     expect(canvas).toEqual({
-      schemaVersion: CANVAS_DOCUMENT_SCHEMA_VERSION,
       id: 'main',
       nodeElements: [],
       annotations: [],
@@ -587,7 +584,6 @@ describe('canvas-core', () => {
 
   it('normalizes Canvas feedback marks as selected-only fixed-order values', () => {
     const normalized = normalizeCanvasFeedbackDocument({
-      schemaVersion: CANVAS_FEEDBACK_SCHEMA_VERSION,
       updatedAt: '2026-05-26T12:00:00.000Z',
       entries: {
         'flow/a.png': {
@@ -629,7 +625,6 @@ describe('canvas-core', () => {
     }, '2026-05-26T12:01:00.000Z');
 
     expect(added).toEqual({
-      schemaVersion: CANVAS_FEEDBACK_SCHEMA_VERSION,
       updatedAt: '2026-05-26T12:01:00.000Z',
       entries: {
         'flow/a.png': {
@@ -650,7 +645,6 @@ describe('canvas-core', () => {
     }, '2026-05-26T12:02:00.000Z');
 
     expect(cleared).toEqual({
-      schemaVersion: CANVAS_FEEDBACK_SCHEMA_VERSION,
       updatedAt: '2026-05-26T12:02:00.000Z',
       entries: {}
     });
@@ -658,7 +652,6 @@ describe('canvas-core', () => {
 
   it('rejects invalid Canvas feedback documents', () => {
     expect(() => normalizeCanvasFeedbackDocument({
-      schemaVersion: CANVAS_FEEDBACK_SCHEMA_VERSION,
       updatedAt: '2026-05-26T12:00:00.000Z',
       entries: {
         'flow/a.png': {
@@ -673,7 +666,6 @@ describe('canvas-core', () => {
     })).toThrow('Invalid Canvas feedback mark: unknown');
 
     expect(() => normalizeCanvasFeedbackDocument({
-      schemaVersion: CANVAS_FEEDBACK_SCHEMA_VERSION,
       updatedAt: '2026-05-26T12:00:00.000Z',
       entries: {
         'flow/a.png': {

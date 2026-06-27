@@ -119,7 +119,6 @@ async function launchSourceDevRuntime(
   const webPid = requirePid(web, 'web');
 
   return {
-    schemaVersion: 2,
     runtimeKind: 'source-dev',
     processControl: 'managed',
     owner: {
@@ -159,7 +158,6 @@ async function launchPackagedRuntime(
   const daemonPid = requirePid(daemon, 'daemon');
 
   return {
-    schemaVersion: 2,
     runtimeKind: 'packaged',
     processControl: 'managed',
     owner: {

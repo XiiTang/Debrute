@@ -13,7 +13,6 @@ import { serviceError } from '../server/ServiceErrors.js';
 import { projectDocumentFileHash } from '../project-documents/ProjectDocumentTransaction.js';
 
 export interface CanvasRegistryDocument {
-  schemaVersion: 1;
   canvasOrder: string[];
 }
 
@@ -34,7 +33,6 @@ export interface CanvasRegistryServiceOptions {
   }): Promise<void>;
 }
 
-const CANVAS_REGISTRY_SCHEMA_VERSION = 1;
 const EMPTY_CANVAS_MAP_SOURCE = 'paths: []\n';
 
 export class CanvasRegistryService {
@@ -60,7 +58,6 @@ export class CanvasRegistryService {
         canvasMapWrite(projectRoot, canvas.id, EMPTY_CANVAS_MAP_SOURCE),
         canvasJsonWrite(projectRoot, canvas.id, canvas),
         registryWrite(projectRoot, {
-          schemaVersion: CANVAS_REGISTRY_SCHEMA_VERSION,
           canvasOrder: [canvas.id]
         })
       ]
@@ -111,7 +108,6 @@ export class CanvasRegistryService {
         canvasMapWrite(projectRoot, canvasId, EMPTY_CANVAS_MAP_SOURCE),
         canvasJsonWrite(projectRoot, canvasId, createCanvasDocument({ id: canvasId })),
         registryWrite(projectRoot, {
-          schemaVersion: CANVAS_REGISTRY_SCHEMA_VERSION,
           canvasOrder: [...document.canvasOrder, canvasId]
         })
       ]
@@ -155,7 +151,6 @@ export class CanvasRegistryService {
         { absolutePath: nextMapPath, content: sourceMapContent },
         { absolutePath: nextJsonPath, content: `${JSON.stringify({ ...canvas, id: input.nextCanvasId }, null, 2)}\n` },
         registryWrite(projectRoot, {
-          schemaVersion: CANVAS_REGISTRY_SCHEMA_VERSION,
           canvasOrder: document.canvasOrder.map((id) => id === input.canvasId ? input.nextCanvasId : id)
         })
       ],
@@ -193,7 +188,6 @@ export class CanvasRegistryService {
       ],
       writes: [
         registryWrite(projectRoot, {
-          schemaVersion: CANVAS_REGISTRY_SCHEMA_VERSION,
           canvasOrder: document.canvasOrder.filter((id) => id !== input.canvasId)
         })
       ],
@@ -215,7 +209,6 @@ export class CanvasRegistryService {
       reads: [{ absolutePath: getDebruteProjectPaths(projectRoot).canvasIndexFile, expectedHash: sourceHash }],
       writes: [
         registryWrite(projectRoot, {
-          schemaVersion: CANVAS_REGISTRY_SCHEMA_VERSION,
           canvasOrder: input.canvasOrder
         })
       ]
@@ -237,7 +230,6 @@ export class CanvasRegistryService {
       reads: [],
       writes: [
         registryWrite(projectRoot, {
-          schemaVersion: CANVAS_REGISTRY_SCHEMA_VERSION,
           canvasOrder: canvasIds
         })
       ]
@@ -356,7 +348,6 @@ export class CanvasRegistryService {
 
 function normalizeCanvasRegistryDocument(value: unknown): CanvasRegistryDocument {
   if (!isRecord(value)
-    || value.schemaVersion !== CANVAS_REGISTRY_SCHEMA_VERSION
     || !Array.isArray(value.canvasOrder)) {
     throw new Error('Invalid Canvas registry document.');
   }
@@ -370,7 +361,6 @@ function normalizeCanvasRegistryDocument(value: unknown): CanvasRegistryDocument
     throw new Error('Canvas registry contains duplicate canvas ids.');
   }
   return {
-    schemaVersion: CANVAS_REGISTRY_SCHEMA_VERSION,
     canvasOrder: ids
   };
 }

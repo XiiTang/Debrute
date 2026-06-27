@@ -8,7 +8,6 @@ import sharp from 'sharp';
 import { describe, expect, it } from 'vitest';
 import { DebruteAppServer, DebruteGlobalRuntimeServer, GlobalConfigStore } from '@debrute/app-server';
 import type { AppServerEvent } from '@debrute/app-protocol';
-import { CANVAS_DOCUMENT_SCHEMA_VERSION, CANVAS_FEEDBACK_SCHEMA_VERSION } from '@debrute/canvas-core';
 
 const gzipBuffer = promisify(gzip);
 
@@ -25,7 +24,6 @@ describe('app-server', () => {
       expect(snapshot.canvases).toHaveLength(1);
       expect(snapshot.health.canvasCount).toBe(1);
       expect(snapshot.canvases[0]).toMatchObject({
-        schemaVersion: CANVAS_DOCUMENT_SCHEMA_VERSION,
         id: 'canvas-1',
         nodeElements: []
       });
@@ -57,7 +55,6 @@ describe('app-server', () => {
       });
       await expect(readFile(join(projectRoot, '.debrute/canvases/index.json'), 'utf8')).resolves.toBe([
         '{',
-        '  "schemaVersion": 1,',
         '  "canvasOrder": [',
         '    "canvas-1"',
         '  ]',
@@ -77,7 +74,6 @@ describe('app-server', () => {
       await mkdir(join(projectRoot, '.debrute/canvases'), { recursive: true });
       await mkdir(join(projectRoot, '.debrute/canvas-maps'), { recursive: true });
       await writeFile(join(projectRoot, '.debrute/project.json'), JSON.stringify({
-        schemaVersion: 1,
         project: {
           id: 'registry-order',
           name: 'Registry Order',
@@ -90,7 +86,6 @@ describe('app-server', () => {
       await writeFile(join(projectRoot, '.debrute/canvas-maps/a.yaml'), 'paths: []\n', 'utf8');
       await writeFile(join(projectRoot, '.debrute/canvas-maps/b.yaml'), 'paths: []\n', 'utf8');
       await writeFile(join(projectRoot, '.debrute/canvases/index.json'), JSON.stringify({
-        schemaVersion: 1,
         canvasOrder: ['b', 'a']
       }, null, 2), 'utf8');
 
@@ -149,7 +144,6 @@ describe('app-server', () => {
       await server.openProject(projectRoot, { initializeIfMissing: true, createDefaultCanvas: true });
       await server.createCanvas();
       await writeFile(join(projectRoot, '.debrute/canvases/index.json'), JSON.stringify({
-        schemaVersion: 1,
         canvasOrder: ['canvas-2', 'canvas-1']
       }, null, 2), 'utf8');
 
@@ -181,7 +175,6 @@ describe('app-server', () => {
       await mkdir(join(projectRoot, '.debrute/canvases'), { recursive: true });
       await mkdir(join(projectRoot, '.debrute/canvas-maps'), { recursive: true });
       await writeFile(join(projectRoot, '.debrute/project.json'), JSON.stringify({
-        schemaVersion: 1,
         project: {
           id: 'repair',
           name: 'Repair',
@@ -212,14 +205,10 @@ describe('app-server', () => {
     const server = new DebruteAppServer();
     try {
       await mkdir(join(projectRoot, '.debrute/canvases'), { recursive: true });
-      await writeFile(join(projectRoot, '.debrute/project.json'), JSON.stringify({
-        schemaVersion: 1,
-        project: { name: 'Broken Canvas Project' }
-      }, null, 2), 'utf8');
+      await writeFile(join(projectRoot, '.debrute/project.json'), JSON.stringify(projectMetadata('Broken Canvas Project'), null, 2), 'utf8');
       await writeFile(join(projectRoot, '.debrute/canvases/canvas-1.json'), JSON.stringify({
-        schemaVersion: 3,
         id: 'canvas-1',
-        nodeElements: [],
+        nodeElements: 'bad',
         annotations: [],
         preferences: { showDiagnostics: true }
       }, null, 2), 'utf8');
@@ -234,12 +223,12 @@ describe('app-server', () => {
           source: 'project',
           severity: 'error',
           code: 'document_invalid_pushed',
-          message: expect.stringContaining('Invalid canvas document schema'),
+          message: expect.stringContaining('Invalid canvas document'),
           filePath: join(projectRoot, '.debrute/canvases/canvas-1.json'),
           entityId: 'canvas-1'
         })
       ]));
-      await expect(readFile(join(projectRoot, '.debrute/canvases/canvas-1.json'), 'utf8')).resolves.toContain('"schemaVersion": 3');
+      await expect(readFile(join(projectRoot, '.debrute/canvases/canvas-1.json'), 'utf8')).resolves.toContain('"nodeElements": "bad"');
     } finally {
       server.close();
       await rm(projectRoot, { recursive: true, force: true });
@@ -249,13 +238,10 @@ describe('app-server', () => {
   it('does not create a default canvas over an invalid pushed document', async () => {
     const projectRoot = await mkdtemp(join(tmpdir(), 'debrute-app-server-invalid-canvas-default-open-'));
     const server = new DebruteAppServer();
-    const invalidCanvas = '{"schemaVersion":3,"id":"canvas-1","nodeElements":[],"annotations":[],"preferences":{"showDiagnostics":true}}\n';
+    const invalidCanvas = '{"id":"canvas-1","nodeElements":"bad","annotations":[],"preferences":{"showDiagnostics":true}}\n';
     try {
       await mkdir(join(projectRoot, '.debrute/canvases'), { recursive: true });
-      await writeFile(join(projectRoot, '.debrute/project.json'), JSON.stringify({
-        schemaVersion: 1,
-        project: { name: 'Broken Canvas Project' }
-      }, null, 2), 'utf8');
+      await writeFile(join(projectRoot, '.debrute/project.json'), JSON.stringify(projectMetadata('Broken Canvas Project'), null, 2), 'utf8');
       const canvasPath = join(projectRoot, '.debrute/canvases/canvas-1.json');
       await writeFile(canvasPath, invalidCanvas, 'utf8');
 
@@ -287,12 +273,8 @@ describe('app-server', () => {
     const server = new DebruteAppServer();
     try {
       await mkdir(join(projectRoot, '.debrute/canvases'), { recursive: true });
-      await writeFile(join(projectRoot, '.debrute/project.json'), JSON.stringify({
-        schemaVersion: 1,
-        project: { name: 'Unsafe Canvas Project' }
-      }, null, 2), 'utf8');
+      await writeFile(join(projectRoot, '.debrute/project.json'), JSON.stringify(projectMetadata('Unsafe Canvas Project'), null, 2), 'utf8');
       await writeFile(join(projectRoot, '.debrute/canvases/canvas-1.json'), JSON.stringify({
-        schemaVersion: CANVAS_DOCUMENT_SCHEMA_VERSION,
         id: '../../../escape',
         nodeElements: [],
         annotations: [],
@@ -332,7 +314,6 @@ describe('app-server', () => {
       const feedback = await server.readCanvasFeedback();
 
       expect(feedback).toMatchObject({
-        schemaVersion: CANVAS_FEEDBACK_SCHEMA_VERSION,
         entries: {}
       });
       expect(feedback.updatedAt).toEqual(expect.any(String));
@@ -602,7 +583,7 @@ describe('app-server', () => {
       });
       const feedbackPath = join(projectRoot, '.debrute/reviews/canvas-feedback.json');
       await mkdir(join(projectRoot, '.debrute/reviews'), { recursive: true });
-      await writeFile(feedbackPath, '{"schemaVersion":1,"entries":', 'utf8');
+      await writeFile(feedbackPath, '{"entries":', 'utf8');
 
       await expect(server.updateCanvasFeedbackEntry({
         operation: 'set-marks',
@@ -610,7 +591,7 @@ describe('app-server', () => {
         marks: ['like']
       })).rejects.toThrow();
 
-      expect(await readFile(feedbackPath, 'utf8')).toBe('{"schemaVersion":1,"entries":');
+      expect(await readFile(feedbackPath, 'utf8')).toBe('{"entries":');
     } finally {
       server.close();
       await rm(projectRoot, { recursive: true, force: true });
@@ -634,54 +615,6 @@ describe('app-server', () => {
     }
   });
 
-  it('reports Canvas node elements with unsupported fields', async () => {
-    const projectRoot = await mkdtemp(join(tmpdir(), 'debrute-app-server-unsupported-canvas-field-'));
-    const server = new DebruteAppServer();
-    try {
-      await mkdir(join(projectRoot, '.debrute/canvases'), { recursive: true });
-      await writeFile(join(projectRoot, '.debrute/project.json'), JSON.stringify({
-        schemaVersion: 1,
-        project: { name: 'Unsupported Canvas Field Project' }
-      }, null, 2), 'utf8');
-      await writeFile(join(projectRoot, '.debrute/canvases/canvas-1.json'), JSON.stringify({
-        schemaVersion: CANVAS_DOCUMENT_SCHEMA_VERSION,
-        id: 'canvas-1',
-        nodeElements: [{
-          projectRelativePath: 'generated/a.png',
-          nodeKind: 'file',
-          mediaKind: 'image',
-          x: 0,
-          y: 0,
-          width: 100,
-          height: 100,
-          z: 0,
-          unsupportedField: true
-        }],
-        annotations: [],
-        preferences: { showDiagnostics: true }
-      }, null, 2), 'utf8');
-
-      const snapshot = await server.openProject(projectRoot, {
-        initializeIfMissing: false,
-        createDefaultCanvas: false
-      });
-
-      expect(snapshot.diagnostics).toEqual(expect.arrayContaining([
-        expect.objectContaining({
-          source: 'project',
-          severity: 'error',
-          code: 'document_invalid_pushed',
-          message: expect.stringContaining('Invalid canvas document schema'),
-          filePath: join(projectRoot, '.debrute/canvases/canvas-1.json'),
-          entityId: 'canvas-1'
-        })
-      ]));
-    } finally {
-      server.close();
-      await rm(projectRoot, { recursive: true, force: true });
-    }
-  });
-
   it('accepts manual Canvas node layout mode in current Canvas JSON', async () => {
     const projectRoot = await mkdtemp(join(tmpdir(), 'debrute-app-server-manual-layout-'));
     const server = new DebruteAppServer();
@@ -690,12 +623,8 @@ describe('app-server', () => {
       await mkdir(join(projectRoot, '.debrute/canvas-maps'), { recursive: true });
       await mkdir(join(projectRoot, 'image-production/generated'), { recursive: true });
       await writeFile(join(projectRoot, 'image-production/generated/a.md'), 'fake', 'utf8');
-      await writeFile(join(projectRoot, '.debrute/project.json'), JSON.stringify({
-        schemaVersion: 1,
-        project: { name: 'Manual Layout Project' }
-      }, null, 2), 'utf8');
+      await writeFile(join(projectRoot, '.debrute/project.json'), JSON.stringify(projectMetadata('Manual Layout Project'), null, 2), 'utf8');
       await writeFile(join(projectRoot, '.debrute/canvases/canvas-1.json'), JSON.stringify({
-        schemaVersion: CANVAS_DOCUMENT_SCHEMA_VERSION,
         id: 'canvas-1',
         nodeElements: [{
           projectRelativePath: 'image-production/generated/a.md',
@@ -713,7 +642,6 @@ describe('app-server', () => {
       }, null, 2), 'utf8');
       await writeFile(join(projectRoot, '.debrute/canvas-maps/canvas-1.yaml'), canvasMapSource(['image-production/generated/a.md']), 'utf8');
       await writeFile(join(projectRoot, '.debrute/canvases/index.json'), JSON.stringify({
-        schemaVersion: 1,
         canvasOrder: ['canvas-1']
       }, null, 2), 'utf8');
 
@@ -734,12 +662,8 @@ describe('app-server', () => {
     const server = new DebruteAppServer();
     try {
       await mkdir(join(projectRoot, '.debrute/canvases'), { recursive: true });
-      await writeFile(join(projectRoot, '.debrute/project.json'), JSON.stringify({
-        schemaVersion: 1,
-        project: { name: 'Auto Layout Mode Project' }
-      }, null, 2), 'utf8');
+      await writeFile(join(projectRoot, '.debrute/project.json'), JSON.stringify(projectMetadata('Auto Layout Mode Project'), null, 2), 'utf8');
       await writeFile(join(projectRoot, '.debrute/canvases/canvas-1.json'), JSON.stringify({
-        schemaVersion: CANVAS_DOCUMENT_SCHEMA_VERSION,
         id: 'canvas-1',
         nodeElements: [{
           projectRelativePath: 'generated/a.png',
@@ -766,7 +690,7 @@ describe('app-server', () => {
           source: 'project',
           severity: 'error',
           code: 'document_invalid_pushed',
-          message: expect.stringContaining('Invalid canvas document schema'),
+          message: expect.stringContaining('Invalid canvas document'),
           filePath: join(projectRoot, '.debrute/canvases/canvas-1.json'),
           entityId: 'canvas-1'
         })
@@ -783,7 +707,6 @@ describe('app-server', () => {
     try {
       await mkdir(join(projectRoot, '.debrute/canvases'), { recursive: true });
       await writeFile(join(projectRoot, '.debrute/project.json'), JSON.stringify({
-        schemaVersion: 1,
         project: {
           id: 'project-default-canvas-json-only',
           name: 'Default Canvas JSON Only',
@@ -2593,7 +2516,6 @@ describe('app-server', () => {
       await mkdir(join(projectRoot, '.debrute/canvases'), { recursive: true });
       await mkdir(join(projectRoot, '.debrute/canvas-maps'), { recursive: true });
       await writeFile(join(projectRoot, '.debrute/project.json'), JSON.stringify({
-        schemaVersion: 1,
         project: {
           id: 'project-empty-canvas',
           name: 'Empty Canvas',
@@ -2602,7 +2524,6 @@ describe('app-server', () => {
         }
       }, null, 2), 'utf8');
       await writeFile(join(projectRoot, '.debrute/canvases/canvas-1.json'), JSON.stringify({
-        schemaVersion: CANVAS_DOCUMENT_SCHEMA_VERSION,
         id: 'canvas-1',
         nodeElements: [],
         annotations: [],
@@ -2610,7 +2531,6 @@ describe('app-server', () => {
       }, null, 2), 'utf8');
       await writeFile(join(projectRoot, '.debrute/canvas-maps/canvas-1.yaml'), 'paths: []\n', 'utf8');
       await writeFile(join(projectRoot, '.debrute/canvases/index.json'), JSON.stringify({
-        schemaVersion: 1,
         canvasOrder: ['canvas-1']
       }, null, 2), 'utf8');
 
@@ -2705,7 +2625,6 @@ async function readJson(path: string): Promise<unknown> {
 
 function emptyCanvasDocument(id: string) {
   return {
-    schemaVersion: CANVAS_DOCUMENT_SCHEMA_VERSION,
     id,
     nodeElements: [],
     annotations: [],
@@ -2749,6 +2668,17 @@ function canvasNodeRectsOverlap(
     && left.x + left.width > right.x
     && left.y < right.y + right.height
     && left.y + left.height > right.y;
+}
+
+function projectMetadata(name: string) {
+  return {
+    project: {
+      id: `${name.toLowerCase().replaceAll(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '')}-id`,
+      name,
+      createdAt: '2026-06-27T00:00:00.000Z',
+      updatedAt: '2026-06-27T00:00:00.000Z'
+    }
+  };
 }
 
 function canvasLayoutSizeReader(sizes: Record<string, { width: number; height: number }>) {

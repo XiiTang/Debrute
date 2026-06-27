@@ -1,6 +1,5 @@
 import { describe, expect, it } from 'vitest';
 import {
-  CANVAS_FEEDBACK_SCHEMA_VERSION,
   canvasFeedbackRenderedProjectPath,
   createEmptyCanvasFeedbackDocument,
   normalizeCanvasFeedbackDocument,
@@ -11,20 +10,17 @@ import {
 const NOW = '2026-06-21T12:00:00.000Z';
 const LATER = '2026-06-21T12:00:01.000Z';
 
-describe('Canvas feedback v2', () => {
-  it('creates an empty v2 feedback document', () => {
-    expect(CANVAS_FEEDBACK_SCHEMA_VERSION).toBe(2);
+describe('Canvas feedback', () => {
+  it('creates an empty feedback document', () => {
     expect(createEmptyCanvasFeedbackDocument(NOW)).toEqual({
-      schemaVersion: 2,
       updatedAt: NOW,
       entries: {}
     });
   });
 
-  it('rejects invalid schema versions', () => {
+  it('rejects invalid document structure', () => {
     expect(() => normalizeCanvasFeedbackDocument({
-      schemaVersion: 1,
-      updatedAt: NOW,
+      updatedAt: 1,
       entries: {}
     })).toThrow('Invalid Canvas feedback document.');
   });
@@ -244,9 +240,8 @@ describe('Canvas feedback v2', () => {
     );
   });
 
-  it('normalizes a complete v2 document and rejects mismatched entry keys', () => {
+  it('normalizes a complete document and rejects mismatched entry keys', () => {
     const document: CanvasFeedbackDocument = {
-      schemaVersion: 2,
       updatedAt: NOW,
       entries: {
         'assets/page.png': {
@@ -283,7 +278,6 @@ describe('Canvas feedback v2', () => {
 
   it('rejects unknown feedback entry fields', () => {
     expect(() => normalizeCanvasFeedbackDocument({
-      schemaVersion: 2,
       updatedAt: NOW,
       entries: {
         'assets/page.png': {
@@ -301,7 +295,6 @@ describe('Canvas feedback v2', () => {
 
   it('rejects duplicate local feedback ids labels and comment ids', () => {
     const duplicateLabel: CanvasFeedbackDocument = {
-      schemaVersion: 2,
       updatedAt: NOW,
       entries: {
         'assets/page.png': {
@@ -331,7 +324,6 @@ describe('Canvas feedback v2', () => {
       }
     };
     const duplicateCommentId: CanvasFeedbackDocument = {
-      schemaVersion: 2,
       updatedAt: NOW,
       entries: {
         'assets/page.png': {

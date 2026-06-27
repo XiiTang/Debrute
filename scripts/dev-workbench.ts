@@ -87,7 +87,6 @@ async function launchSourceDevRuntime(): Promise<WorkbenchRuntimeState> {
   children.push(daemon, web);
   const now = new Date().toISOString();
   const state: WorkbenchRuntimeState = {
-    schemaVersion: 2,
     runtimeKind: 'source-dev',
     processControl: 'external',
     owner: {

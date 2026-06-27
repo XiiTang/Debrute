@@ -21,7 +21,7 @@ import {
 } from '@debrute/workbench-runtime';
 
 describe('@debrute/workbench-runtime state', () => {
-  it('accepts only the current runtime state schema', async () => {
+  it('writes the current runtime state without schemaVersion', async () => {
     const root = await mkdtemp(join(tmpdir(), 'debrute-runtime-state-'));
     try {
       const paths = resolveWorkbenchRuntimePaths(root);
@@ -30,25 +30,26 @@ describe('@debrute/workbench-runtime state', () => {
       await writeWorkbenchRuntimeState(paths.statePath, state);
 
       await expect(readWorkbenchRuntimeState(paths.statePath)).resolves.toEqual(state);
-      await expect(readFile(paths.statePath, 'utf8')).resolves.toContain('"processControl": "managed"');
+      const stateJson = await readFile(paths.statePath, 'utf8');
+      expect(stateJson).toContain('"processControl": "managed"');
+      expect(stateJson).not.toContain('schemaVersion');
     } finally {
       await rm(root, { recursive: true, force: true });
     }
   });
 
-  it('rejects malformed state instead of adapting it', async () => {
+  it('rejects malformed current runtime state', async () => {
     const root = await mkdtemp(join(tmpdir(), 'debrute-runtime-state-invalid-'));
     try {
       const paths = resolveWorkbenchRuntimePaths(root);
       await mkdir(paths.runtimeDir, { recursive: true });
       await writeFile(paths.statePath, JSON.stringify({
-        schemaVersion: 1,
         runtimeKind: 'source-dev',
         processControl: 'managed',
         daemonUrl: 'http://127.0.0.1:17321'
       }), 'utf8');
 
-      await expect(readWorkbenchRuntimeState(paths.statePath)).rejects.toThrow(/schemaVersion must be 2/);
+      await expect(readWorkbenchRuntimeState(paths.statePath)).rejects.toThrow(/owner/);
     } finally {
       await rm(root, { recursive: true, force: true });
     }
@@ -200,7 +201,7 @@ describe('@debrute/workbench-runtime registry', () => {
     try {
       const paths = resolveWorkbenchRuntimePaths(root);
       await mkdir(paths.runtimeDir, { recursive: true });
-      await writeFile(paths.statePath, '{"schemaVersion":2}', 'utf8');
+      await writeFile(paths.statePath, '{"runtimeKind":"source-dev"}', 'utf8');
       const launched = runtimeState({ token: 'fresh', daemonLogPath: paths.daemonLogPath, webLogPath: paths.webLogPath });
 
       const result = await ensureRegisteredWorkbenchRuntime({
@@ -291,7 +292,6 @@ describe('@debrute/workbench-runtime ports', () => {
 
 function runtimeState(overrides: Partial<WorkbenchRuntimeState> = {}): WorkbenchRuntimeState {
   return {
-    schemaVersion: 2,
     runtimeKind: 'source-dev',
     processControl: 'managed',
     owner: {

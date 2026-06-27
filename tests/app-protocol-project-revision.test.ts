@@ -48,13 +48,13 @@ describe('app protocol project revisions', () => {
     const documentResult: WorkbenchCanvasDocumentMutationResult = {
       projectId: opened.projectId,
       projectRevision: 4,
-      canvas: { schemaVersion: 1, id: 'canvas-1', nodeElements: [], annotations: [], preferences: { showDiagnostics: true } },
+      canvas: { id: 'canvas-1', nodeElements: [], annotations: [], preferences: { showDiagnostics: true } },
       projection: { canvasId: 'canvas-1', nodes: [], edges: [], diagnostics: [] }
     };
     const feedbackResult: WorkbenchCanvasFeedbackMutationResult = {
       projectId: opened.projectId,
       projectRevision: 5,
-      feedback: { schemaVersion: 1, updatedAt: '2026-06-12T00:00:00.000Z', entries: {} }
+      feedback: { updatedAt: '2026-06-12T00:00:00.000Z', entries: {} }
     };
     const event: WorkbenchEvent = {
       type: 'project.changed',
@@ -75,7 +75,6 @@ describe('app protocol project revisions', () => {
 function snapshotFixture(): WorkbenchProjectSessionSnapshot {
   return {
     metadata: {
-      schemaVersion: 1,
       project: {
         id: 'project-record-id',
         name: 'Test Project',

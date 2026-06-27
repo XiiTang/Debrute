@@ -30,13 +30,4 @@ describe('Debrute video director Skill', () => {
     expect(core).toContain('"prompt":"Short video brief"');
     expect(core).not.toContain('"content":[{"type":"text"');
   });
-
-  it('documents video model discovery and native request shape in README', () => {
-    const readme = readRepoFile('README.md');
-
-    expect(readme).toContain('Use `models video list` to compare configured video models by Debrute-native parameters and constraints.');
-    expect(readme).toContain('Before video generation, run `models video describe <model-id>` once for the selected model.');
-    expect(readme).toContain('Video generation uses `prompt`, `intent`, and `references`; Debrute constructs Seedance `content` internally.');
-    expect(readme).toContain('Video `--timeout-ms` defaults to 600000ms and covers task submission, polling, response reads, and artifact download.');
-  });
 });

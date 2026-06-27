@@ -94,7 +94,6 @@ describe('Debrute CLI protocol contracts', () => {
 
   it('models final Skills state and sync snapshots', () => {
     const state: DebruteSkillsState = {
-      schemaVersion: 1,
       debruteVersion: '0.2.0',
       bundledSkills: ['debrute-core', 'debrute-image-director', 'debrute-video-director'],
       updatedSkills: ['debrute-core'],

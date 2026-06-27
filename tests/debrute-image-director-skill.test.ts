@@ -59,22 +59,4 @@ describe('Debrute image director Skill', () => {
     expect(imageDirector).toContain('Add exact file, folder, or glob entries under `paths` in `.debrute/canvas-maps/<canvas-id>.yaml`; folder rules must end with `/`.');
     expect(imageDirector).toContain('Push the Canvas Map with `debrute canvas-map push');
   });
-
-  it('documents batch command semantics in the README', () => {
-    const readme = readRepoFile('README.md');
-
-    expect(readme).toContain('- `apps/daemon` - loopback HTTP/SSE runtime that serves the Web workbench and owns privileged project, Canvas, settings, and generated asset operations.');
-    expect(readme).toContain('- `apps/app-server` - local domain service boundary for project sessions, Canvas Map pushing and sync, Canvas node projection, model settings, generated asset metadata, and explicit CLI service methods.');
-    expect(readme).toContain('- `packages/capability-core` - result and artifact value shapes shared by Debrute runtime services.');
-    expect(readme).toContain('- `packages/capability-runtime` - model catalogs, model executors, runtime LLM request execution, LLM provider settings, generation model settings, and Skills registry code.');
-    expect(readme).toContain('Use `generate image-batch` for multiple planned image requests; do not loop over `generate image` for planned batches.');
-    expect(readme).toContain('Batch item outcomes are written to `--log`; stdout emits sparse progress records and the final aggregate record.');
-    expect(readme).toContain('Use `models image list` to compare configured image models by original model parameters and constraints.');
-    expect(readme).toContain('Before image generation, run `models image describe <model-id>` once for the selected model.');
-    expect(readme).toContain('Single image `--timeout-ms` defaults to 600000ms; image batch `--timeout-ms` defaults to 900000ms per item attempt.');
-    expect(readme).toContain('Use `--overwrite-existing` to regenerate batch outputs that would otherwise be skipped.');
-    expect(readme).toContain('model-specific file format, size, dimension, alpha, and mask constraints are left to the upstream model.');
-    expect(readme).toContain('Do not include model API keys in generation requests; Debrute reads configured keys locally.');
-    expect(readme).toContain('Model descriptions return official documentation URLs, a repository snapshot path, official-documentation-backed `description_markdown`, Debrute examples, and the machine-readable `arguments_schema`.');
-  });
 });

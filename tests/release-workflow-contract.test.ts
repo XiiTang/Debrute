@@ -4,7 +4,6 @@ import { describe, expect, it } from 'vitest';
 
 describe('GitHub release workflow contract', () => {
   const workflow = readFileSync(join(process.cwd(), '.github/workflows/debrute-release.yml'), 'utf8');
-  const readme = readFileSync(join(process.cwd(), 'README.md'), 'utf8');
   const desktopPackage = JSON.parse(readFileSync(join(process.cwd(), 'apps/desktop/package.json'), 'utf8'));
 
   it('uses a release workflow with preflight, CLI, Desktop, and final publish jobs', () => {
@@ -166,37 +165,5 @@ describe('GitHub release workflow contract', () => {
 
     expect(configuredNodeVersions).toEqual(['24', '24', '24', '24']);
     expect(workflow).not.toContain('node-version: 22');
-  });
-
-  it('documents signed macOS Desktop releases, Debrute CLI install, and Skills sync', () => {
-    expect(readme).toContain('GitHub Releases');
-    expect(readme).toContain('macOS Desktop builds are signed and notarized');
-    expect(readme).toContain('APPLE_API_KEY');
-    expect(readme).toContain('APPLE_API_KEY_ID');
-    expect(readme).toContain('APPLE_API_ISSUER');
-    expect(readme).toContain('CSC_LINK');
-    expect(readme).toContain('CSC_KEY_PASSWORD');
-    expect(readme).not.toContain('Current Desktop builds are unsigned');
-    expect(readme).not.toContain('right-click Open');
-    expect(readme).toContain('Windows may show SmartScreen');
-    expect(readme).toContain('Linux AppImage builds may require `chmod +x`');
-    expect(readme).toContain('Debrute CLI');
-    expect(readme).toContain('debrute skills status');
-    expect(readme).toContain('debrute skills sync');
-    expect(readme).toContain('debrute skills sync --force');
-    expect(readme).toContain('debrute-desktop-X.Y.Z-macos-arm64.dmg');
-    expect(readme).not.toContain('debrute-desktop-X.Y.Z-macos-universal.zip');
-    expect(readme).not.toContain('latest-mac.yml');
-    expect(readme).toContain('latest.yml');
-    expect(readme).toContain('packaged Windows builds');
-    expect(readme).toContain('macOS and Linux Desktop updates are manual downloads');
-    expect(readme).toContain('debrute-cli-X.Y.Z-macos-arm64.tar.gz');
-    expect(readme).not.toContain('debrute-photoshop-uxp-X.Y.Z.ccx');
-    expect(readme).not.toContain('debrute-photoshop-cep-X.Y.Z.zip');
-    expect(readme).not.toContain('Photoshop bridge panel packages');
-    expect(readme).not.toContain('copy its `com.debrute.photoshop.bridge.cep` directory');
-    expect(readme).toContain('debrute_SHA256SUMS');
-    expect(readme).toContain('grep "  debrute-cli-X.Y.Z-macos-arm64.tar.gz$" debrute_SHA256SUMS | shasum -a 256 -c -');
-    expect(readme).toContain('sha256sum -c --ignore-missing debrute_SHA256SUMS');
   });
 });

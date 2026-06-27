@@ -63,7 +63,6 @@ describe('model-owned generated asset contracts', () => {
 
   it('stores generated asset provenance as a model run', () => {
 	    const record: GeneratedAssetRecord = {
-	      schemaVersion: 1,
 	      recordId: 'record-1',
 	      projectRelativePath: 'generated/cover.png',
 	      createdAt: '2026-06-01T00:00:00.000Z',

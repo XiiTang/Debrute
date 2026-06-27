@@ -17,8 +17,6 @@ import {
   type ProjectTextLanguageId
 } from './projectTextFileTypes.js';
 
-export const DEBRUTE_PROJECT_SCHEMA_VERSION = 1;
-
 export interface ProjectIdentity {
   id: string;
   name: string;
@@ -26,7 +24,6 @@ export interface ProjectIdentity {
 }
 
 export interface DebruteProjectMetadata {
-  schemaVersion: number;
   project: {
     id: string;
     name: string;
@@ -99,7 +96,6 @@ export async function initializeBlankProject(projectRoot: string, options: { nam
   const now = new Date().toISOString();
   const identity = createProjectIdentity(projectRoot, options.name);
   const metadata: DebruteProjectMetadata = {
-    schemaVersion: DEBRUTE_PROJECT_SCHEMA_VERSION,
     project: {
       id: identity.id,
       name: identity.name,
@@ -113,9 +109,7 @@ export async function initializeBlankProject(projectRoot: string, options: { nam
 }
 
 export async function readProjectMetadata(projectRoot: string): Promise<DebruteProjectMetadata> {
-  const metadata = await readJsonFile<DebruteProjectMetadata>(getDebruteProjectPaths(projectRoot).projectFile);
-  assertProjectSchema(metadata);
-  return metadata;
+  return normalizeProjectMetadata(await readJsonFile<unknown>(getDebruteProjectPaths(projectRoot).projectFile));
 }
 
 export async function listDebruteProjectFiles(projectRoot: string): Promise<ProjectFileEntry[]> {
@@ -371,10 +365,32 @@ export function normalizeFileWatchEvent(projectRoot: string, absolutePath: strin
   };
 }
 
-export function assertProjectSchema(metadata: DebruteProjectMetadata): void {
-  if (metadata.schemaVersion !== DEBRUTE_PROJECT_SCHEMA_VERSION) {
-    throw new Error(`Unsupported Debrute project schema ${metadata.schemaVersion}. Expected ${DEBRUTE_PROJECT_SCHEMA_VERSION}.`);
+function normalizeProjectMetadata(metadata: unknown): DebruteProjectMetadata {
+  if (!metadata || typeof metadata !== 'object' || Array.isArray(metadata)) {
+    throw new Error('Invalid Debrute project metadata.');
   }
+  const value = metadata as Record<string, unknown>;
+  const project = value.project;
+  if (!project || typeof project !== 'object' || Array.isArray(project)) {
+    throw new Error('Invalid Debrute project metadata.');
+  }
+  const projectRecord = project as Record<string, unknown>;
+  if (
+    typeof projectRecord.id !== 'string'
+    || typeof projectRecord.name !== 'string'
+    || typeof projectRecord.createdAt !== 'string'
+    || typeof projectRecord.updatedAt !== 'string'
+  ) {
+    throw new Error('Invalid Debrute project metadata.');
+  }
+  return {
+    project: {
+      id: projectRecord.id,
+      name: projectRecord.name,
+      createdAt: projectRecord.createdAt,
+      updatedAt: projectRecord.updatedAt
+    }
+  };
 }
 
 async function walkEntries(root: string, prefix = ''): Promise<ProjectFileEntry[]> {

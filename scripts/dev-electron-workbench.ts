@@ -103,7 +103,6 @@ async function launchDesktopDevRuntime(): Promise<WorkbenchRuntimeState> {
   });
   const now = new Date().toISOString();
   const state: WorkbenchRuntimeState = {
-    schemaVersion: 2,
     runtimeKind: 'desktop-dev',
     processControl: 'external',
     owner: {

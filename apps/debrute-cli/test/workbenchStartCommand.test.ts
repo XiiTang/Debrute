@@ -155,7 +155,7 @@ describe('workbench runtime state and health', () => {
     try {
       const paths = resolveWorkbenchRuntimePaths(root);
       await mkdir(paths.runtimeDir, { recursive: true });
-      await writeFile(paths.statePath, '{"schemaVersion":2}', 'utf8');
+      await writeFile(paths.statePath, '{"runtimeKind":"source-dev"}', 'utf8');
 
       await expect(readWorkbenchRuntimeState(paths.statePath)).rejects.toThrow(/Invalid Debrute workbench runtime state/);
     } finally {
@@ -215,7 +215,6 @@ describe('ensureWorkbenchRuntime', () => {
       const paths = resolveWorkbenchRuntimePaths(root);
       await mkdir(paths.runtimeDir, { recursive: true });
       await writeFile(join(paths.runtimeDir, 'cli-owner.json'), JSON.stringify({
-        schemaVersion: 1,
         ownerId: 'cli-owner-1'
       }), 'utf8');
       const stale = runtimeState({
@@ -247,7 +246,6 @@ describe('ensureWorkbenchRuntime', () => {
       expect(result.state).toEqual(launched);
       expect(await readWorkbenchRuntimeState(paths.statePath)).toEqual(launched);
       expect(await readWorkbenchRuntimeState(paths.statePath)).toMatchObject({
-        schemaVersion: 2,
         owner: {
           kind: 'cli',
           ownerId: 'cli-owner-1'
@@ -284,7 +282,6 @@ describe('ensureWorkbenchRuntime', () => {
       const paths = resolveWorkbenchRuntimePaths(root);
       await mkdir(paths.runtimeDir, { recursive: true });
       await writeFile(join(paths.runtimeDir, 'cli-owner.json'), JSON.stringify({
-        schemaVersion: 1,
         ownerId: 'cli-owner-1'
       }), 'utf8');
       const launched = runtimeState({
@@ -353,7 +350,6 @@ describe('internal workbench runtime child args', () => {
 
 function runtimeState(overrides: Partial<WorkbenchRuntimeState> = {}): WorkbenchRuntimeState {
   return {
-    schemaVersion: 2,
     runtimeKind: 'source-dev',
     processControl: 'managed',
     owner: {

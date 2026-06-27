@@ -125,7 +125,6 @@ class DefaultDebruteSkillsSyncService implements DebruteSkillsSyncService {
       ...stateResult.diagnostics
     ];
     await writeStateOrThrow(this.statePath(), {
-      schemaVersion: 1,
       debruteVersion: this.input.debruteVersion,
       bundledSkills: sortSkillNames(bundled.skills),
       updatedSkills: sortSkillNames(updatedSkills),
@@ -417,7 +416,9 @@ async function writeStateOrThrow(statePath: string, state: DebruteSkillsState): 
 }
 
 function isDebruteSkillsState(value: unknown): value is DebruteSkillsState {
-  if (!isRecord(value) || value.schemaVersion !== 1 || typeof value.debruteVersion !== 'string' || typeof value.updatedAt !== 'string') {
+  if (!isRecord(value)
+    || typeof value.debruteVersion !== 'string'
+    || typeof value.updatedAt !== 'string') {
     return false;
   }
   return stringArray(value.bundledSkills)
@@ -426,6 +427,8 @@ function isDebruteSkillsState(value: unknown): value is DebruteSkillsState {
     && stringArray(value.skippedDeletedSkills)
     && Array.isArray(value.diagnostics)
     && value.diagnostics.every((diagnostic) => isRecord(diagnostic)
+      && (diagnostic.source === undefined || diagnostic.source === 'shared-agents' || diagnostic.source === 'debrute-repository' || diagnostic.source === 'debrute-sync')
+      && (diagnostic.root === undefined || typeof diagnostic.root === 'string')
       && typeof diagnostic.code === 'string'
       && (diagnostic.severity === 'info' || diagnostic.severity === 'warning' || diagnostic.severity === 'error')
       && typeof diagnostic.message === 'string'

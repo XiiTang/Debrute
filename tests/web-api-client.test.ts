@@ -847,7 +847,6 @@ function routeResponse(url: string, init?: RequestInit): unknown {
 function workbenchSnapshot(): WorkbenchProjectSessionSnapshot {
   return {
     metadata: {
-      schemaVersion: 1,
       project: {
         id: 'project-record-id',
         name: 'Test Project',

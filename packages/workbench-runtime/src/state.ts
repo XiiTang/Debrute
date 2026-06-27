@@ -13,7 +13,6 @@ export interface WorkbenchRuntimeOwner {
 }
 
 export interface WorkbenchRuntimeState {
-  schemaVersion: 2;
   runtimeKind: WorkbenchRuntimeKind;
   processControl: WorkbenchRuntimeProcessControl;
   owner: WorkbenchRuntimeOwner;
@@ -43,10 +42,10 @@ export async function readWorkbenchRuntimeState(statePath: string): Promise<Work
 }
 
 export async function writeWorkbenchRuntimeState(statePath: string, state: WorkbenchRuntimeState): Promise<void> {
-  assertWorkbenchRuntimeState(state);
+  const normalizedState = assertWorkbenchRuntimeState(state);
   await mkdir(dirname(statePath), { recursive: true, mode: 0o700 });
   const tempPath = `${statePath}.${process.pid}.${Date.now()}.tmp`;
-  await writeFile(tempPath, `${JSON.stringify(state, null, 2)}\n`, { encoding: 'utf8', mode: 0o600 });
+  await writeFile(tempPath, `${JSON.stringify(normalizedState, null, 2)}\n`, { encoding: 'utf8', mode: 0o600 });
   await rename(tempPath, statePath);
 }
 
@@ -57,9 +56,6 @@ export async function deleteWorkbenchRuntimeState(statePath: string): Promise<vo
 function assertWorkbenchRuntimeState(value: unknown): WorkbenchRuntimeState {
   if (!isRecord(value)) {
     throw invalidState('expected object');
-  }
-  if (value.schemaVersion !== 2) {
-    throw invalidState('schemaVersion must be 2');
   }
   if (!isRuntimeKind(value.runtimeKind)) {
     throw invalidState('unsupported runtimeKind');
@@ -94,7 +90,6 @@ function assertWorkbenchRuntimeState(value: unknown): WorkbenchRuntimeState {
     throw invalidState('log paths and timestamps must be strings');
   }
   const state: WorkbenchRuntimeState = {
-    schemaVersion: 2,
     runtimeKind: value.runtimeKind,
     processControl: value.processControl,
     owner: value.owner,

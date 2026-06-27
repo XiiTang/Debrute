@@ -114,7 +114,6 @@ describe('CanvasPerfDebugBridge', () => {
     const capture = bridge.api.stopCapture();
 
     expect(capture).toEqual({
-      version: 1,
       label: 'drag',
       startedAt: 100,
       endedAt: 160,
@@ -212,7 +211,6 @@ describe('CanvasPerfDebugBridge', () => {
     });
 
     expect(bridge.api.stopCapture()).toEqual({
-      version: 1,
       startedAt: 250,
       endedAt: 250,
       durationMs: 0,
@@ -235,7 +233,6 @@ describe('CanvasPerfDebugBridge', () => {
     const capture = bridge.api.exportCapture();
 
     expect(capture).toMatchObject({
-      version: 1,
       label: 'live',
       startedAt: 10,
       endedAt: 40,

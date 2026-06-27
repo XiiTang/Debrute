@@ -21,7 +21,6 @@ import {
 import { projectDocumentDescriptorForPath } from '../project-documents/documentDescriptors.js';
 
 export interface GeneratedAssetMetadataIndex {
-  schemaVersion: 1;
   records: GeneratedAssetMetadataIndexEntry[];
 }
 
@@ -36,7 +35,6 @@ export interface GeneratedAssetMetadataIndexEntry {
 }
 
 export interface FileFingerprintCache {
-  schemaVersion: 1;
   entries: Record<string, FileFingerprintCacheEntry>;
 }
 
@@ -75,8 +73,6 @@ export interface GeneratedAssetMetadataServiceOptions {
   }) => Promise<void>;
 }
 
-const GENERATED_ASSET_METADATA_SCHEMA_VERSION = 1;
-const FILE_FINGERPRINT_CACHE_SCHEMA_VERSION = 1;
 const GENERATED_ASSET_INDEX_PROJECT_PATH = '.debrute/assets/generated-assets-index.json';
 const GENERATED_ASSET_RECORDS_PROJECT_DIR = '.debrute/assets/generated';
 const FINGERPRINT_CACHE_PROJECT_PATH = '.debrute/cache/file-fingerprints.json';
@@ -105,7 +101,6 @@ export function createGeneratedAssetMetadataService(options: GeneratedAssetMetad
       assertGeneratedAssetRecordId(recordId);
       const createdAt = now();
       const record: GeneratedAssetRecord = {
-        schemaVersion: GENERATED_ASSET_METADATA_SCHEMA_VERSION,
         recordId,
         projectRelativePath,
         createdAt,
@@ -113,13 +108,15 @@ export function createGeneratedAssetMetadataService(options: GeneratedAssetMetad
           algorithm: 'sha256',
           hash
         },
-        modelRun: input.modelRun
+        modelRun: {
+          request: input.modelRun.request,
+          output: input.modelRun.output
+        }
       };
 
       const index = await readGeneratedAssetMetadataIndexState(projectRoot);
       const recordPath = await resolveProjectPathForWrite(projectRoot, generatedAssetMetadataRecordProjectPath(record.recordId));
       const nextIndex: GeneratedAssetMetadataIndex = {
-        schemaVersion: GENERATED_ASSET_METADATA_SCHEMA_VERSION,
         records: [
           ...index.document.records,
           {
@@ -283,7 +280,7 @@ async function readGeneratedAssetMetadataIndexState(
     if (isNotFoundError(error)) {
       return {
         absolutePath,
-        document: { schemaVersion: GENERATED_ASSET_METADATA_SCHEMA_VERSION, records: [] },
+        document: { records: [] },
         expectedHash: null
       };
     }
@@ -292,9 +289,10 @@ async function readGeneratedAssetMetadataIndexState(
 }
 
 function assertGeneratedAssetMetadataIndex(value: unknown): GeneratedAssetMetadataIndex {
-  if (!isRecord(value) || value.schemaVersion !== GENERATED_ASSET_METADATA_SCHEMA_VERSION || !Array.isArray(value.records)) {
+  if (!isRecord(value) || !Array.isArray(value.records)) {
     throw new Error('Invalid generated asset metadata index.');
   }
+  const records: GeneratedAssetMetadataIndexEntry[] = [];
   for (const entry of value.records) {
     if (!isRecord(entry)
       || typeof entry.recordId !== 'string'
@@ -306,18 +304,25 @@ function assertGeneratedAssetMetadataIndex(value: unknown): GeneratedAssetMetada
       || !isGeneratedAssetMetadataRecordProjectPath(entry.metadataPath)) {
       throw new Error('Invalid generated asset metadata index entry.');
     }
+    records.push({
+      recordId: entry.recordId,
+      createdAt: entry.createdAt,
+      fingerprint: {
+        algorithm: entry.fingerprint.algorithm,
+        hash: entry.fingerprint.hash
+      },
+      metadataPath: entry.metadataPath
+    });
   }
   return {
-    schemaVersion: GENERATED_ASSET_METADATA_SCHEMA_VERSION,
-    records: value.records
+    records
   };
 }
 
 async function readGeneratedAssetRecord(projectRoot: string, entry: GeneratedAssetMetadataIndexEntry): Promise<GeneratedAssetRecord> {
   const absolutePath = await resolveExistingProjectPath(projectRoot, entry.metadataPath);
-  const record = await readJsonFile<unknown>(absolutePath);
-  if (!isGeneratedAssetRecord(record)
-    || record.recordId !== entry.recordId
+  const record = normalizeGeneratedAssetRecord(await readJsonFile<unknown>(absolutePath), entry.metadataPath);
+  if (record.recordId !== entry.recordId
     || record.fingerprint.algorithm !== entry.fingerprint.algorithm
     || record.fingerprint.hash !== entry.fingerprint.hash) {
     throw new Error(`Invalid generated asset metadata record: ${entry.metadataPath}`);
@@ -334,18 +339,32 @@ async function readGeneratedAssetById(projectRoot: string, recordId: string): Pr
   return readGeneratedAssetRecord(projectRoot, entry);
 }
 
-function isGeneratedAssetRecord(value: unknown): value is GeneratedAssetRecord {
-  return isRecord(value)
-    && value.schemaVersion === GENERATED_ASSET_METADATA_SCHEMA_VERSION
-    && typeof value.recordId === 'string'
-    && typeof value.projectRelativePath === 'string'
-    && typeof value.createdAt === 'string'
-    && isRecord(value.fingerprint)
-    && value.fingerprint.algorithm === 'sha256'
-    && isSha256Hash(value.fingerprint.hash)
-    && isRecord(value.modelRun)
-    && 'request' in value.modelRun
-    && 'output' in value.modelRun;
+function normalizeGeneratedAssetRecord(value: unknown, metadataPath: string): GeneratedAssetRecord {
+  if (!isRecord(value)
+    || typeof value.recordId !== 'string'
+    || typeof value.projectRelativePath !== 'string'
+    || typeof value.createdAt !== 'string'
+    || !isRecord(value.fingerprint)
+    || value.fingerprint.algorithm !== 'sha256'
+    || !isSha256Hash(value.fingerprint.hash)
+    || !isRecord(value.modelRun)
+    || !('request' in value.modelRun)
+    || !('output' in value.modelRun)) {
+    throw new Error(`Invalid generated asset metadata record: ${metadataPath}`);
+  }
+  return {
+    recordId: value.recordId,
+    projectRelativePath: value.projectRelativePath,
+    createdAt: value.createdAt,
+    fingerprint: {
+      algorithm: value.fingerprint.algorithm,
+      hash: value.fingerprint.hash
+    },
+    modelRun: {
+      request: value.modelRun.request,
+      output: value.modelRun.output
+    }
+  };
 }
 
 async function readFingerprintCache(projectRoot: string): Promise<FileFingerprintCache> {
@@ -367,7 +386,7 @@ async function readFingerprintCacheState(
     if (isNotFoundError(error)) {
       return {
         absolutePath,
-        document: { schemaVersion: FILE_FINGERPRINT_CACHE_SCHEMA_VERSION, entries: {} },
+        document: { entries: {} },
         expectedHash: null
       };
     }
@@ -376,18 +395,18 @@ async function readFingerprintCacheState(
 }
 
 function assertFingerprintCache(value: unknown): FileFingerprintCache {
-  if (!isRecord(value) || value.schemaVersion !== FILE_FINGERPRINT_CACHE_SCHEMA_VERSION || !isRecord(value.entries)) {
+  if (!isRecord(value) || !isRecord(value.entries)) {
     throw new Error('Invalid generated asset fingerprint cache.');
   }
   const entries: Record<string, FileFingerprintCacheEntry> = {};
   for (const [projectRelativePath, entry] of Object.entries(value.entries)) {
-    if (!isFileFingerprintCacheEntry(entry)) {
+    const normalizedEntry = normalizeFileFingerprintCacheEntry(entry);
+    if (!normalizedEntry) {
       throw new Error(`Invalid generated asset fingerprint cache entry: ${projectRelativePath}`);
     }
-    entries[projectRelativePath] = entry;
+    entries[projectRelativePath] = normalizedEntry;
   }
   return {
-    schemaVersion: FILE_FINGERPRINT_CACHE_SCHEMA_VERSION,
     entries
   };
 }
@@ -407,7 +426,6 @@ async function updateFingerprintCache(
       {
         absolutePath: cache.absolutePath,
         content: `${JSON.stringify({
-          schemaVersion: FILE_FINGERPRINT_CACHE_SCHEMA_VERSION,
           entries: {
             ...cache.document.entries,
             [projectRelativePath]: entry
@@ -485,15 +503,23 @@ function isGeneratedAssetMetadataRecordProjectPath(metadataPath: string): boolea
   return projectDocumentDescriptorForPath(metadataPath)?.type === 'generated-asset-record';
 }
 
-function isFileFingerprintCacheEntry(value: unknown): value is FileFingerprintCacheEntry {
-  return isRecord(value)
-    && typeof value.sizeBytes === 'number'
-    && Number.isFinite(value.sizeBytes)
-    && value.sizeBytes >= 0
-    && typeof value.mtimeMs === 'number'
-    && Number.isFinite(value.mtimeMs)
-    && isSha256Hash(value.sha256)
-    && typeof value.computedAt === 'string';
+function normalizeFileFingerprintCacheEntry(value: unknown): FileFingerprintCacheEntry | undefined {
+  if (!isRecord(value)
+    || typeof value.sizeBytes !== 'number'
+    || !Number.isFinite(value.sizeBytes)
+    || value.sizeBytes < 0
+    || typeof value.mtimeMs !== 'number'
+    || !Number.isFinite(value.mtimeMs)
+    || !isSha256Hash(value.sha256)
+    || typeof value.computedAt !== 'string') {
+    return undefined;
+  }
+  return {
+    sizeBytes: value.sizeBytes,
+    mtimeMs: value.mtimeMs,
+    sha256: value.sha256,
+    computedAt: value.computedAt
+  };
 }
 
 function isSha256Hash(value: unknown): value is string {

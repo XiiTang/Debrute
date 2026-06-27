@@ -8,7 +8,6 @@ import {
   resolveExistingProjectPath
 } from '@debrute/project-core';
 import {
-  CANVAS_DOCUMENT_SCHEMA_VERSION,
   isCanvasDocumentId,
   projectCanvas,
   type CanvasDocument,
@@ -60,7 +59,7 @@ export function assertCurrentCanvasDocument(value: unknown, filePath: string): C
   if (isCurrentCanvasDocument(value)) {
     return value;
   }
-  throw new Error(`Invalid canvas document schema: ${filePath}`);
+  throw new Error(`Invalid canvas document: ${filePath}`);
 }
 
 export function canvasMediaKindFromPath(projectRelativePath: string): CanvasMediaKind {
@@ -161,23 +160,29 @@ async function inspectCanvasNodeAvailability(projectRoot: string, node: CanvasNo
 }
 
 function isCurrentCanvasDocument(value: unknown): value is CanvasDocument {
-  if (!isRecord(value) || value.schemaVersion !== CANVAS_DOCUMENT_SCHEMA_VERSION) {
+  if (!isRecord(value)) {
     return false;
   }
-  return hasOnlyKeys(value, ['schemaVersion', 'id', 'nodeElements', 'annotations', 'preferences'])
-    && typeof value.id === 'string'
+  return typeof value.id === 'string'
     && isCanvasDocumentId(value.id)
     && Array.isArray(value.nodeElements)
     && value.nodeElements.every(isCurrentCanvasNodeElement)
     && Array.isArray(value.annotations)
+    && value.annotations.every(isCurrentCanvasAnnotation)
     && isRecord(value.preferences)
-    && hasOnlyKeys(value.preferences, ['showDiagnostics'])
     && typeof value.preferences.showDiagnostics === 'boolean';
+}
+
+function isCurrentCanvasAnnotation(value: unknown): value is CanvasDocument['annotations'][number] {
+  return isRecord(value)
+    && typeof value.id === 'string'
+    && typeof value.text === 'string'
+    && typeof value.x === 'number'
+    && typeof value.y === 'number';
 }
 
 function isCurrentCanvasNodeElement(value: unknown): value is CanvasNodeElement {
   return isRecord(value)
-    && hasOnlyKeys(value, ['projectRelativePath', 'nodeKind', 'mediaKind', 'x', 'y', 'width', 'height', 'z', 'layoutMode'])
     && typeof value.projectRelativePath === 'string'
     && (value.nodeKind === 'directory' || value.nodeKind === 'file')
     && (value.mediaKind === undefined || value.mediaKind === 'image' || value.mediaKind === 'video' || value.mediaKind === 'audio' || value.mediaKind === 'text' || value.mediaKind === 'unknown')
@@ -244,17 +249,8 @@ async function firstLineForTextClassification(absolutePath: string): Promise<str
   }
 }
 
-function hasOnlyKeys(value: Record<string, unknown>, allowed: string[]): boolean {
-  const allowedSet = new Set(allowed);
-  return Object.keys(value).every((key) => allowedSet.has(key));
-}
-
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null && !Array.isArray(value);
-}
-
-function isFiniteNumber(value: unknown): value is number {
-  return typeof value === 'number' && Number.isFinite(value);
 }
 
 function isNodeError(error: unknown): error is NodeJS.ErrnoException {

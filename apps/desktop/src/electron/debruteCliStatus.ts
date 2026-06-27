@@ -265,8 +265,7 @@ function isMissingPathError(error: unknown): boolean {
 function isDebruteSkillsState(value: unknown): value is DebruteSkillsState {
   if (typeof value !== 'object' || value === null || Array.isArray(value)) return false;
   const record = value as Partial<DebruteSkillsState>;
-  return record.schemaVersion === 1
-    && typeof record.debruteVersion === 'string'
+  return typeof record.debruteVersion === 'string'
     && stringArray(record.bundledSkills)
     && stringArray(record.updatedSkills)
     && stringArray(record.addedBundledSkills)
@@ -283,7 +282,9 @@ function stringArray(value: unknown): value is string[] {
 function isDebruteSkillsDiagnostic(value: unknown): boolean {
   if (typeof value !== 'object' || value === null || Array.isArray(value)) return false;
   const record = value as Record<string, unknown>;
-  return typeof record.code === 'string'
+  return (record.source === undefined || record.source === 'shared-agents' || record.source === 'debrute-repository' || record.source === 'debrute-sync')
+    && (record.root === undefined || typeof record.root === 'string')
+    && typeof record.code === 'string'
     && (record.severity === 'info' || record.severity === 'warning' || record.severity === 'error')
     && typeof record.message === 'string'
     && (record.path === undefined || typeof record.path === 'string');

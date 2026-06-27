@@ -491,7 +491,6 @@ describe('workbench context menu commands', () => {
       projectRevision: 2,
       resetCount: 0,
       canvas: {
-        schemaVersion: 1 as const,
         id: 'canvas-1',
         nodeElements: [],
         annotations: [],
@@ -541,7 +540,6 @@ describe('workbench context menu commands', () => {
       projectRevision: 2,
       resetCount: 1,
       canvas: {
-        schemaVersion: 1 as const,
         id: 'canvas-1',
         nodeElements: [],
         annotations: [],
@@ -592,7 +590,6 @@ describe('workbench context menu commands', () => {
       projectRevision: 2,
       resetCount: 1,
       canvas: {
-        schemaVersion: 1 as const,
         id: 'canvas-1',
         nodeElements: [],
         annotations: [],
@@ -643,7 +640,6 @@ describe('workbench context menu commands', () => {
       projectRevision: 2,
       resetCount: 1,
       canvas: {
-        schemaVersion: 1 as const,
         id: 'canvas-1',
         nodeElements: [],
         annotations: [],
@@ -833,7 +829,6 @@ function rootTarget(): NonNullable<Parameters<typeof runWorkbenchContextMenuComm
 function snapshotFixture(overrides: Partial<WorkbenchProjectSessionSnapshot> = {}): WorkbenchProjectSessionSnapshot {
   return {
     metadata: {
-      schemaVersion: 1,
       project: {
         id: 'project-1',
         name: 'Test Project',

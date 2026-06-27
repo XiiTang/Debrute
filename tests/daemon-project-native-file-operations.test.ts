@@ -224,7 +224,6 @@ function snapshotFixture(projectRoot: string): ProjectSessionSnapshot {
   return {
     projectRoot,
     metadata: {
-      schemaVersion: 1,
       name: 'Test Project'
     },
     files: [],

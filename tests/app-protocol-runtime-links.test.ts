@@ -78,7 +78,6 @@ describe('app-protocol runtime metadata', () => {
         projectId: '123e4567-e89b-42d3-a456-426614174000',
         snapshot: {
           metadata: {
-            schemaVersion: 1,
             project: {
               id: 'project-record-id',
               name: 'Alpha',
@@ -115,7 +114,6 @@ describe('app-protocol runtime metadata', () => {
     const _typeCheck: OpenProjectFromPickerReturnIsExact = true;
     const snapshot: WorkbenchProjectSessionSnapshot = {
       metadata: {
-        schemaVersion: 1,
         project: {
           id: 'project-record-id',
           name: 'Alpha',

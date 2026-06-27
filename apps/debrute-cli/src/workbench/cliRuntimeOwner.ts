@@ -4,7 +4,6 @@ import { join } from 'node:path';
 import { resolveWorkbenchRuntimePaths, type WorkbenchRuntimeOwner } from '@debrute/workbench-runtime';
 
 interface CliOwnerState {
-  schemaVersion: 1;
   ownerId: string;
 }
 
@@ -23,7 +22,7 @@ async function readOrCreateCliOwnerId(runtimeDir: string): Promise<string> {
   if (existing) {
     return existing.ownerId;
   }
-  const next: CliOwnerState = { schemaVersion: 1, ownerId: randomUUID() };
+  const next: CliOwnerState = { ownerId: randomUUID() };
   await mkdir(runtimeDir, { recursive: true, mode: 0o700 });
   await writeFile(path, `${JSON.stringify(next, null, 2)}\n`, { encoding: 'utf8', mode: 0o600 });
   return next.ownerId;
@@ -53,14 +52,10 @@ function assertCliOwnerState(value: unknown): CliOwnerState {
     throw invalidCliOwnerState('expected object');
   }
   const state = value as Record<string, unknown>;
-  if (state.schemaVersion !== 1) {
-    throw invalidCliOwnerState('schemaVersion must be 1');
-  }
   if (typeof state.ownerId !== 'string' || state.ownerId.length === 0) {
     throw invalidCliOwnerState('ownerId must be a non-empty string');
   }
   return {
-    schemaVersion: 1,
     ownerId: state.ownerId
   };
 }

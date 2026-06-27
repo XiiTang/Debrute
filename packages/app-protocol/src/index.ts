@@ -567,7 +567,6 @@ export interface DebruteSkillsDiagnostic {
 }
 
 export interface DebruteSkillsState {
-  schemaVersion: 1;
   debruteVersion: string;
   bundledSkills: string[];
   updatedSkills: string[];
@@ -737,7 +736,6 @@ export type DesktopAppUpdateState =
     };
 
 export interface GeneratedAssetRecord {
-  schemaVersion: 1;
   recordId: string;
   projectRelativePath: string;
   createdAt: string;

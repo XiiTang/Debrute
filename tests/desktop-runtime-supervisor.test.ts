@@ -142,7 +142,6 @@ describe('RuntimeSupervisor', () => {
 
 function runtimeState(overrides: Partial<WorkbenchRuntimeState> = {}): WorkbenchRuntimeState {
   return {
-    schemaVersion: 2,
     runtimeKind: 'desktop-packaged',
     processControl: 'managed',
     owner: { kind: 'desktop', ownerId: 'desktop-owner', pid: 222 },

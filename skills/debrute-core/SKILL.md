@@ -119,7 +119,7 @@ Canvas file-asset feedback is stored as current state in:
 .debrute/reviews/canvas-feedback.json
 ```
 
-Missing file means there is no Canvas feedback. The document uses `schemaVersion: 2`. Entries are keyed by project-relative path. The `marks` array contains only selected marks; unselected marks are absent. The mark set is `like`, `dislike`, `check`, `cross`, `pending`, `important`, and `needs_revision`.
+Missing file means there is no Canvas feedback. Entries are keyed by project-relative path. The `marks` array contains only selected marks; unselected marks are absent. The mark set is `like`, `dislike`, `check`, `cross`, `pending`, `important`, and `needs_revision`.
 
 Image entries can contain local feedback regions:
 

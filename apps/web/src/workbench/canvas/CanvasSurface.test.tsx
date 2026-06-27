@@ -1188,7 +1188,6 @@ function directoryFixture(path: string, x: number, y: number): CanvasProjection[
 
 function feedbackDocument(entries: CanvasFeedbackDocument['entries']): CanvasFeedbackDocument {
   return {
-    schemaVersion: 2,
     updatedAt: '2026-05-26T12:00:00.000Z',
     entries
   };
@@ -1201,7 +1200,6 @@ function workbenchStateFixture(
   return {
     snapshot: {
       metadata: {
-        schemaVersion: 1,
         project: {
           id: 'project',
           name: 'Project',

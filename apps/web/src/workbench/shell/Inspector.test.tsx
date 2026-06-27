@@ -48,8 +48,7 @@ describe('Inspector property density', () => {
                 z: 0
               }],
               annotations: [],
-              preferences: { showDiagnostics: true },
-              schemaVersion: 1
+              preferences: { showDiagnostics: true }
             }],
             projections: [{
               canvasId: 'canvas',

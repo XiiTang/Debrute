@@ -24,7 +24,8 @@ describe('CanvasFeedbackService materialization', () => {
         now: () => NOW,
         renderScheduler,
         writeStructuredDocument: async (_projectRoot, _absolutePath, content) => {
-          events.push(`write:${JSON.parse(content).schemaVersion}`);
+          const document = JSON.parse(content) as { entries?: unknown };
+          events.push(`write:${document.entries && typeof document.entries === 'object' ? 'entries' : 'invalid'}`);
         }
       });
 
@@ -44,7 +45,7 @@ describe('CanvasFeedbackService materialization', () => {
         document: result,
         projectRelativePath: 'assets/page.png'
       });
-      expect(events).toEqual(['write:2', 'enqueue:assets/page.png']);
+      expect(events).toEqual(['write:entries', 'enqueue:assets/page.png']);
       expect(result.entries['assets/page.png']?.regions).toHaveLength(1);
     } finally {
       await rm(projectRoot, { recursive: true, force: true });
@@ -283,7 +284,7 @@ describe('CanvasFeedbackService materialization', () => {
 
       expect(renderScheduler.enqueueSource).toHaveBeenCalledWith({
         projectRoot,
-        document: expect.objectContaining({ schemaVersion: 2 }),
+        document: expect.objectContaining({ entries: expect.any(Object) }),
         projectRelativePath: 'assets/page.png'
       });
     } finally {
@@ -307,7 +308,7 @@ describe('CanvasFeedbackService materialization', () => {
 
       expect(renderScheduler.enqueueDocument).toHaveBeenCalledWith({
         projectRoot,
-        document: expect.objectContaining({ schemaVersion: 2 })
+        document: expect.objectContaining({ entries: expect.any(Object) })
       });
     } finally {
       await rm(projectRoot, { recursive: true, force: true });
@@ -365,7 +366,6 @@ describe('CanvasFeedbackService materialization', () => {
 
 function emptyFeedbackDocument(): object {
   return {
-    schemaVersion: 2,
     updatedAt: NOW,
     entries: {}
   };
@@ -373,7 +373,6 @@ function emptyFeedbackDocument(): object {
 
 function feedbackDocument(entries: Record<string, object>): object {
   return {
-    schemaVersion: 2,
     updatedAt: NOW,
     entries
   };

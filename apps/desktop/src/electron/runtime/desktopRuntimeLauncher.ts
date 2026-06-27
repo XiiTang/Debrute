@@ -22,7 +22,6 @@ export async function launchPackagedDesktopRuntime(
   const child = spawnRuntimeHost(paths, owner, daemonPort);
   const now = new Date().toISOString();
   return {
-    schemaVersion: 2,
     runtimeKind: process.env.DEBRUTE_WORKBENCH_RUNTIME_KIND === 'desktop-dev' ? 'desktop-dev' : 'desktop-packaged',
     processControl: 'managed',
     owner,

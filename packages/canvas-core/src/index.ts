@@ -3,8 +3,6 @@ import { layoutCanvasDesiredNodes } from './canvasAutoLayout.js';
 export * from './canvasRasterPreviews.js';
 export * from './canvasTextPreviews.js';
 
-export const CANVAS_DOCUMENT_SCHEMA_VERSION = 1;
-
 export type CanvasNodeKind = 'directory' | 'file';
 export type CanvasMediaKind = 'image' | 'video' | 'audio' | 'text' | 'unknown';
 export type DiagnosticSeverity = 'error' | 'warning' | 'info';
@@ -61,7 +59,6 @@ export type CanvasNodeAvailability =
     };
 
 export interface CanvasDocument {
-  schemaVersion: typeof CANVAS_DOCUMENT_SCHEMA_VERSION;
   id: string;
   nodeElements: CanvasNodeElement[];
   annotations: CanvasAnnotation[];
@@ -127,8 +124,6 @@ export interface ReconcileCanvasNodeElementsInput {
   layoutSizeForNode: (node: CanvasDesiredNode) => CanvasLayoutSize;
 }
 
-export const CANVAS_FEEDBACK_SCHEMA_VERSION = 2;
-
 export const CANVAS_FEEDBACK_MARKS = [
   'like',
   'dislike',
@@ -172,7 +167,6 @@ export interface CanvasFeedbackEntry {
 }
 
 export interface CanvasFeedbackDocument {
-  schemaVersion: typeof CANVAS_FEEDBACK_SCHEMA_VERSION;
   updatedAt: string;
   entries: Record<string, CanvasFeedbackEntry>;
 }
@@ -229,7 +223,6 @@ const PROJECT_ROOT_PATH = '';
 export function createEmptyCanvasFeedbackDocument(updatedAt: string): CanvasFeedbackDocument {
   assertIsoDateTime(updatedAt, 'Canvas feedback updatedAt must be an ISO date-time string.');
   return {
-    schemaVersion: CANVAS_FEEDBACK_SCHEMA_VERSION,
     updatedAt,
     entries: {}
   };
@@ -237,8 +230,7 @@ export function createEmptyCanvasFeedbackDocument(updatedAt: string): CanvasFeed
 
 export function normalizeCanvasFeedbackDocument(value: unknown): CanvasFeedbackDocument {
   if (!isRecord(value)
-    || !hasOnlyKeys(value, ['schemaVersion', 'updatedAt', 'entries'])
-    || value.schemaVersion !== CANVAS_FEEDBACK_SCHEMA_VERSION
+    || !hasOnlyKeys(value, ['updatedAt', 'entries'])
     || typeof value.updatedAt !== 'string'
     || !isRecord(value.entries)) {
     throw new Error('Invalid Canvas feedback document.');
@@ -256,7 +248,6 @@ export function normalizeCanvasFeedbackDocument(value: unknown): CanvasFeedbackD
     }
   }
   return {
-    schemaVersion: CANVAS_FEEDBACK_SCHEMA_VERSION,
     updatedAt: value.updatedAt,
     entries
   };
@@ -280,7 +271,6 @@ export function updateCanvasFeedbackEntry(
     entries[projectRelativePath] = nextEntry;
   }
   return {
-    schemaVersion: CANVAS_FEEDBACK_SCHEMA_VERSION,
     updatedAt,
     entries
   };
@@ -471,7 +461,6 @@ function normalizedCanvasFeedbackEntryForOperation(
 export function createCanvasDocument(input: { id: string }): CanvasDocument {
   const id = assertCanvasDocumentId(input.id);
   return {
-    schemaVersion: CANVAS_DOCUMENT_SCHEMA_VERSION,
     id,
     nodeElements: [],
     annotations: [],

@@ -264,7 +264,7 @@ describe('DebruteAppServer CLI service methods', () => {
     try {
       await server.initProjectForCli(root);
       const canvasPath = join(root, '.debrute/canvases/canvas-1.json');
-      await writeFile(canvasPath, '{"schemaVersion":1,"id":"canvas-1","nodeElements":"bad"}\n', 'utf8');
+      await writeFile(canvasPath, '{"id":"canvas-1","nodeElements":"bad"}\n', 'utf8');
 
       const status = await server.projectStatusForCli(root);
 
@@ -275,11 +275,11 @@ describe('DebruteAppServer CLI service methods', () => {
           code: 'document_invalid_pushed',
           filePath: canvasPath,
           entityId: 'canvas-1',
-          message: expect.stringContaining('Invalid canvas document schema')
+          message: expect.stringContaining('Invalid canvas document')
         })
       ]));
       expect(status.health.diagnosticCounts.errors).toBeGreaterThan(0);
-      await expect(readFile(canvasPath, 'utf8')).resolves.toBe('{"schemaVersion":1,"id":"canvas-1","nodeElements":"bad"}\n');
+      await expect(readFile(canvasPath, 'utf8')).resolves.toBe('{"id":"canvas-1","nodeElements":"bad"}\n');
     } finally {
       server.close();
       await rm(root, { recursive: true, force: true });
