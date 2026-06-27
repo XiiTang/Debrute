@@ -10,6 +10,7 @@ import {
   canvasTextPreviewImageReducer,
   initialCanvasTextPreviewImageState,
   useCanvasTextPreviewRuntime,
+  type CanvasTextPreviewImageState,
   type CanvasTextPreviewSource
 } from './CanvasTextPreviewRuntime';
 import { Button, IconButton, StatusPill } from '../ui';
@@ -496,6 +497,12 @@ function CanvasTextNodeContent({
     : undefined;
   const bodyProblem = problem ?? textPreviewProblem;
   const status = textBufferStatus(buffer, bodyProblem);
+  const [textPreviewImageState, dispatchTextPreviewImage] = useReducer(
+    canvasTextPreviewImageReducer,
+    textPreview,
+    initialCanvasTextPreviewImageState
+  );
+  const nextTextPreview = textPreviewImageState.next;
   const bodyRef = useCallback((element: HTMLDivElement | null) => {
     registerTextBody(node.projectRelativePath, element);
   }, [node.projectRelativePath, registerTextBody]);
@@ -504,6 +511,21 @@ function CanvasTextNodeContent({
       onSelectNode();
     }
   };
+
+  useEffect(() => {
+    dispatchTextPreviewImage({ type: 'source-resolved', source: textPreview });
+  }, [textPreview]);
+
+  useEffect(() => {
+    if (!nextTextPreview) {
+      return undefined;
+    }
+    return preloadCanvasImageForHandoff({
+      image: nextTextPreview,
+      resolveLoaded: (loadKey) => dispatchTextPreviewImage({ type: 'next-loaded', loadKey }),
+      rejectLoaded: (loadKey) => dispatchTextPreviewImage({ type: 'next-failed', loadKey })
+    });
+  }, [nextTextPreview]);
 
   return (
     <section className="canvas-text-node">
@@ -564,7 +586,7 @@ function CanvasTextNodeContent({
             onToggleWordWrap={() => actions.toggleTextFileWordWrap(node.projectRelativePath)}
           />
         ) : buffer ? (
-          <CanvasTextPreviewImage source={textPreview} />
+          <CanvasTextPreviewImage state={textPreviewImageState} />
         ) : (
           <div className="canvas-text-preview-empty" aria-hidden="true" />
         )}
@@ -574,32 +596,10 @@ function CanvasTextNodeContent({
 }
 
 function CanvasTextPreviewImage({
-  source
+  state
 }: {
-  source?: CanvasTextPreviewSource | undefined;
+  state: CanvasTextPreviewImageState;
 }): React.ReactElement {
-  const [state, dispatch] = useReducer(
-    canvasTextPreviewImageReducer,
-    source,
-    initialCanvasTextPreviewImageState
-  );
-  const nextPreview = state.next;
-
-  useEffect(() => {
-    dispatch({ type: 'source-resolved', source });
-  }, [source]);
-
-  useEffect(() => {
-    if (!nextPreview) {
-      return undefined;
-    }
-    return preloadCanvasImageForHandoff({
-      image: nextPreview,
-      resolveLoaded: (loadKey) => dispatch({ type: 'next-loaded', loadKey }),
-      rejectLoaded: (loadKey) => dispatch({ type: 'next-failed', loadKey })
-    });
-  }, [nextPreview]);
-
   if (!state.loaded) {
     return <div className="canvas-text-preview-empty" aria-hidden="true" />;
   }

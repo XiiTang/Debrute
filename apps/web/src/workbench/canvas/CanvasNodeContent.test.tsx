@@ -253,6 +253,36 @@ describe('CanvasNodeContent text chrome', () => {
     }
   });
 
+  it('keeps the loaded text preview visible when a selected text node loses focus before the next preview resolves', async () => {
+    const restoreActEnvironment = installReactActEnvironment();
+    const container = document.createElement('div');
+    document.body.appendChild(container);
+    const root = createRoot(container);
+    const firstPreview = textPreviewSource(320);
+
+    try {
+      await renderTextPreviewNode(root, firstPreview);
+
+      expect(textPreviewImage(container)?.getAttribute('src')).toBe(firstPreview.src);
+
+      await renderTextPreviewNode(root, undefined, { selected: true });
+
+      expect(container.querySelector('[data-canvas-text-editor="true"]')).not.toBeNull();
+      expect(textPreviewImage(container)).toBeNull();
+
+      await renderTextPreviewNode(root, undefined);
+
+      expect(textPreviewImage(container)?.getAttribute('src')).toBe(firstPreview.src);
+      expect(container.querySelector('.canvas-text-preview-empty')).toBeNull();
+    } finally {
+      await act(async () => {
+        root.unmount();
+      });
+      container.remove();
+      restoreActEnvironment();
+    }
+  });
+
   it('renders text preview generation errors instead of an empty preview body', () => {
     const html = renderToStaticMarkup(
       <CanvasNodeContent
@@ -434,12 +464,16 @@ function textBuffer(path: string, revision: string): TextFileBuffer {
   };
 }
 
-async function renderTextPreviewNode(root: Root, textPreview: CanvasTextPreviewSource | undefined): Promise<void> {
+async function renderTextPreviewNode(
+  root: Root,
+  textPreview: CanvasTextPreviewSource | undefined,
+  options?: { selected?: boolean | undefined }
+): Promise<void> {
   await act(async () => {
     root.render(
       <CanvasNodeContent
         node={textNode('flow/readme.md', 'rev-a')}
-        selected={false}
+        selected={options?.selected ?? false}
         culled={false}
         actions={actionsFixture()}
         textBuffer={textBuffer('flow/readme.md', 'rev-a')}
