@@ -1,6 +1,10 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { toBlob } from 'html-to-image';
-import { captureCanvasTextPreviewSource, canvasTextPreviewFingerprint } from './CanvasTextPreviewCapture';
+import {
+  CANVAS_TEXT_PREVIEW_SOURCE_SCALE,
+  captureCanvasTextPreviewSource,
+  canvasTextPreviewFingerprint
+} from './CanvasTextPreviewCapture';
 
 vi.mock('html-to-image', () => ({
   toBlob: vi.fn(async () => new Blob(['png'], { type: 'image/png' }))
@@ -45,8 +49,7 @@ describe('CanvasTextPreviewCapture', () => {
       contentCssWidth: 320,
       contentCssHeight: 160,
       scrollTop: 0,
-      scrollLeft: 0,
-      sourceScale: 4
+      scrollLeft: 0
     });
     const second = await canvasTextPreviewFingerprint({
       content: 'hello',
@@ -55,36 +58,39 @@ describe('CanvasTextPreviewCapture', () => {
       contentCssWidth: 320,
       contentCssHeight: 160,
       scrollTop: 0,
-      scrollLeft: 0,
-      sourceScale: 4
+      scrollLeft: 0
     });
 
     expect(first).not.toBe(second);
     expect(first).toMatch(/^sha256:/);
   });
 
-  it('hashes the text preview source scale', async () => {
-    const first = await canvasTextPreviewFingerprint({
+  it('hashes the fixed text preview source scale', async () => {
+    const fingerprint = await canvasTextPreviewFingerprint({
       content: 'hello',
       language: 'markdown',
       wordWrap: true,
       contentCssWidth: 320,
       contentCssHeight: 160,
       scrollTop: 0,
-      scrollLeft: 0,
-      sourceScale: 2
-    });
-    const second = await canvasTextPreviewFingerprint({
-      content: 'hello',
-      language: 'markdown',
-      wordWrap: true,
-      contentCssWidth: 320,
-      contentCssHeight: 160,
-      scrollTop: 0,
-      scrollLeft: 0,
-      sourceScale: 4
+      scrollLeft: 0
     });
 
-    expect(first).not.toBe(second);
+    await expect(sha256({
+      visualVersion: 'canvas-text-preview-v4',
+      content: 'hello',
+      language: 'markdown',
+      wordWrap: true,
+      contentCssWidth: 320,
+      contentCssHeight: 160,
+      scrollTop: 0,
+      scrollLeft: 0,
+      sourceScale: CANVAS_TEXT_PREVIEW_SOURCE_SCALE
+    })).resolves.toBe(fingerprint);
   });
 });
+
+async function sha256(value: unknown): Promise<string> {
+  const digest = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(JSON.stringify(value)));
+  return `sha256:${[...new Uint8Array(digest)].map((byte) => byte.toString(16).padStart(2, '0')).join('')}`;
+}

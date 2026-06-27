@@ -7,11 +7,7 @@ import {
 import type { ProjectTextLanguageId } from '@debrute/project-core';
 import type { TextFileBuffer, WorkbenchActions } from '../../types';
 import { CanvasTextEditor } from './CanvasTextEditor';
-import {
-  CANVAS_TEXT_PREVIEW_SOURCE_SCALE,
-  captureCanvasTextPreviewSource,
-  canvasTextPreviewFingerprint
-} from './CanvasTextPreviewCapture';
+import { captureCanvasTextPreviewSource, canvasTextPreviewFingerprint } from './CanvasTextPreviewCapture';
 import type { CanvasCameraState } from './runtime/canvasCamera';
 
 const CANVAS_TEXT_PREVIEW_SOURCE_CONCURRENCY = 3;
@@ -250,10 +246,7 @@ export function CanvasTextPreviewProvider({
     }
     void Promise.all(candidates.map(async (candidate): Promise<CanvasTextPreviewTarget> => ({
       ...candidate,
-      fingerprint: await canvasTextPreviewFingerprint({
-        ...candidate,
-        sourceScale: CANVAS_TEXT_PREVIEW_SOURCE_SCALE
-      })
+      fingerprint: await canvasTextPreviewFingerprint(candidate)
     }))).then(async (targets) => {
       if (cancelled || targets.length === 0) {
         return;

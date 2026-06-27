@@ -252,7 +252,7 @@ describe('CanvasTextPreviewRuntime', () => {
     expect(promoted.next).toBeUndefined();
   });
 
-  it('selects text preview variants from the canvas node display width', async () => {
+  it('selects text preview variants above the previous DPR-only source width', async () => {
     const restoreActEnvironment = installReactActEnvironment();
     const restoreAnimationFrame = installAnimationFrame();
     const container = document.createElement('div');
@@ -286,8 +286,8 @@ describe('CanvasTextPreviewRuntime', () => {
 
       const preview = await waitForTextPreview(previews);
 
-      expect(preview.previewWidth).toBe(293);
-      expect(new URL(preview.src, 'http://127.0.0.1').searchParams.get('w')).toBe('293');
+      expect(preview.previewWidth).toBe(1169);
+      expect(new URL(preview.src, 'http://127.0.0.1').searchParams.get('w')).toBe('1169');
     } finally {
       await act(async () => {
         root.unmount();
@@ -317,7 +317,7 @@ function TextPreviewSelectionProbe({
   React.useEffect(() => {
     onPreview(previewForNode({
       node,
-      imageResourceZoom: 0.03,
+      imageResourceZoom: 0.11,
       devicePixelRatio: 2
     }));
   }, [node, onPreview, previewForNode]);
@@ -377,7 +377,7 @@ function textPreviewActionsFixture(): WorkbenchActions {
         contentCssHeight: node.contentCssHeight,
         scrollTop: node.scrollTop,
         scrollLeft: node.scrollLeft,
-        variants: [104, 147, 207, 293, 413]
+        variants: [104, 147, 207, 293, 413, 585, 826, 1169, 1652]
       } satisfies CanvasTextPreviewDescriptor
     ]))
   });
