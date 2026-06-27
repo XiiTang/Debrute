@@ -7,8 +7,8 @@ import type {
 
 export interface AppUpdateInfoLike {
   version: string;
-  releaseName?: string;
-  releaseDate?: string;
+  releaseName?: string | null;
+  releaseDate?: string | null;
 }
 
 export function appUpdateDisabledState(input: {

@@ -51,7 +51,7 @@ function nativeMenuItem(item: WorkbenchMenuItem, onCommand: MenuAction): MenuIte
   return {
     label: item.label,
     enabled: item.enabled,
-    accelerator: item.accelerator,
+    ...(item.accelerator ? { accelerator: item.accelerator } : {}),
     click: (_item: MenuItem, browserWindow: BaseWindow | undefined) => onCommand(menuBrowserWindow(browserWindow), {
       commandId: item.commandId,
       ...(item.payload ? { payload: item.payload } : {})

@@ -11,14 +11,10 @@ export function electronBuilderPlatformName(platform) {
 
 export function requiredDesktopReleaseAssets(version, platform = process.platform, arch = process.arch) {
   const publicPlatform = electronBuilderPlatformName(platform);
-  if (platform === 'darwin' && arch === 'universal') {
-    return [
-      desktopReleaseAssetName(version, publicPlatform, arch, 'zip'),
-      desktopReleaseAssetName(version, publicPlatform, arch, 'zip.blockmap'),
-      'latest-mac.yml'
-    ];
-  }
   if (platform === 'darwin') {
+    if (arch !== 'arm64' && arch !== 'x64') {
+      throw new Error(`Unsupported macOS release arch: ${arch}`);
+    }
     return [desktopReleaseAssetName(version, publicPlatform, arch, 'dmg')];
   }
   if (platform === 'win32') {

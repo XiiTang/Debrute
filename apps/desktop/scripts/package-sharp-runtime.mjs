@@ -108,16 +108,16 @@ export function nodePtyRuntimePayloadEntries(root, context) {
     return entries;
   }
 
-  entries.push(
-    nodePtyRuntimePayloadEntry(packageRoot, 'build/Release/pty.node', false),
-    {
+  entries.push(nodePtyRuntimePayloadEntry(packageRoot, 'build/Release/pty.node', false));
+  if (existsSync(join(packageRoot, 'build/Release/spawn-helper'))) {
+    entries.push({
       from: join(packageRoot, 'build/Release/spawn-helper'),
       to: 'node_modules/node-pty/build/Release/spawn-helper',
       recursive: false,
       executable: true,
       executableRelativePath: ''
-    }
-  );
+    });
+  }
   return entries;
 }
 

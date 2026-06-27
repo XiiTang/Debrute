@@ -17,7 +17,7 @@ describe('daemon terminal routes', () => {
 
   afterEach(async () => {
     while (cleanups.length > 0) {
-      await cleanups.pop()?.();
+      await cleanups.shift()?.();
     }
   });
 

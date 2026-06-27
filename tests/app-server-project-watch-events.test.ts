@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
+import { mkdir, mkdtemp, readFile, rm, utimes, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import type { NormalizedFileWatchEvent } from '@debrute/project-core';
@@ -163,12 +163,15 @@ describe('App Server project watch events', () => {
       await writeFile(join(projectRoot, 'brief.md'), '# Brief', 'utf8');
       await server.openProject(projectRoot, { initializeIfMissing: true, createDefaultCanvas: true, watchFiles: false });
       server.onEvent((event) => events.push(event.type));
-      await writeFile(join(projectRoot, 'brief.md'), '# Updated', 'utf8');
+      const briefPath = join(projectRoot, 'brief.md');
+      const observedAt = Date.now() + 1000;
+      await writeFile(briefPath, '# Updated', 'utf8');
+      await utimes(briefPath, observedAt / 1000, observedAt / 1000);
       await callWatchedFileEvent(server, {
         type: 'changed',
-        absolutePath: join(projectRoot, 'brief.md'),
+        absolutePath: briefPath,
         projectRelativePath: 'brief.md',
-        observedAt: Date.now() + 1000,
+        observedAt,
         affects: ['content']
       });
 

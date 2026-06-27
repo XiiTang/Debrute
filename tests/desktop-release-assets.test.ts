@@ -15,11 +15,10 @@ describe('Desktop release asset script', () => {
   });
 
   it('verifies final Electron Builder asset names instead of renaming update metadata after build', () => {
-    expect(requiredDesktopReleaseAssets('0.2.0', 'darwin', 'universal')).toEqual([
-      'debrute-desktop-0.2.0-macos-universal.zip',
-      'debrute-desktop-0.2.0-macos-universal.zip.blockmap',
-      'latest-mac.yml'
+    expect(requiredDesktopReleaseAssets('0.2.0', 'darwin', 'arm64')).toEqual([
+      'debrute-desktop-0.2.0-macos-arm64.dmg'
     ]);
+    expect(() => requiredDesktopReleaseAssets('0.2.0', 'darwin', 'universal')).toThrow(/unsupported macos release arch/i);
     expect(requiredDesktopReleaseAssets('0.2.0', 'win32', 'x64')).toEqual([
       'debrute-desktop-0.2.0-windows-x64.exe',
       'debrute-desktop-0.2.0-windows-x64.exe.blockmap',

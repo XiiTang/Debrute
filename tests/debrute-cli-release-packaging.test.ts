@@ -10,6 +10,7 @@ import {
   debruteCliReleaseTargets,
   checksumManifestName
 } from '../scripts/package-debrute-cli.mjs';
+import { nodePtyRuntimePayloadEntries } from '../scripts/node-pty-runtime-payload.mjs';
 import {
   desktopReleaseAssetName,
   expectedReleaseAssets
@@ -82,12 +83,9 @@ describe('Debrute CLI release packaging', () => {
     expect(expectedReleaseAssets('0.2.0')).toEqual([
       'debrute-desktop-0.2.0-macos-arm64.dmg',
       'debrute-desktop-0.2.0-macos-x64.dmg',
-      'debrute-desktop-0.2.0-macos-universal.zip',
-      'debrute-desktop-0.2.0-macos-universal.zip.blockmap',
       'debrute-desktop-0.2.0-windows-x64.exe',
       'debrute-desktop-0.2.0-windows-x64.exe.blockmap',
       'debrute-desktop-0.2.0-linux-x64.AppImage',
-      'latest-mac.yml',
       'latest.yml',
       'debrute-cli-0.2.0-macos-arm64.tar.gz',
       'debrute-cli-0.2.0-macos-x64.tar.gz',
@@ -95,8 +93,6 @@ describe('Debrute CLI release packaging', () => {
       'debrute-cli-0.2.0-linux-x64.tar.gz',
       'debrute-cli-0.2.0-windows-arm64.zip',
       'debrute-cli-0.2.0-windows-x64.zip',
-      'debrute-photoshop-uxp-0.2.0.ccx',
-      'debrute-photoshop-cep-0.2.0.zip',
       'debrute_SHA256SUMS'
     ]);
   });
@@ -175,6 +171,26 @@ describe('Debrute CLI release packaging', () => {
       expect(prebuildEntry?.filter?.(join(root, 'node_modules/node-pty/prebuilds/darwin-arm64/pty.node'))).toBe(true);
       expect(prebuildEntry?.filter?.(join(root, 'node_modules/node-pty/prebuilds/darwin-arm64/spawn-helper'))).toBe(true);
       expect(prebuildEntry?.filter?.(join(root, 'node_modules/node-pty/prebuilds/darwin-arm64/pty.pdb'))).toBe(false);
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+
+  it('does not require a Linux node-pty spawn helper when node-pty did not build one', () => {
+    const root = createRootWithNodePackages(['node-pty']);
+    const nodePtyRoot = join(root, 'node_modules/node-pty');
+    mkdirSync(join(nodePtyRoot, 'lib'), { recursive: true });
+    mkdirSync(join(nodePtyRoot, 'build/Release'), { recursive: true });
+    writeFileSync(join(nodePtyRoot, 'package.json'), '{}');
+    writeFileSync(join(nodePtyRoot, 'lib/index.js'), '');
+    writeFileSync(join(nodePtyRoot, 'build/Release/pty.node'), '');
+    try {
+      const linuxX64Target = debruteCliReleaseTargets.find((target) => target.id === 'linux-x64');
+      expect(linuxX64Target).toBeDefined();
+      const entries = nodePtyRuntimePayloadEntries(root, linuxX64Target!);
+
+      expect(entries.map((entry) => entry.to)).toContain('node_modules/node-pty/build/Release/pty.node');
+      expect(entries.map((entry) => entry.to)).not.toContain('node_modules/node-pty/build/Release/spawn-helper');
     } finally {
       rmSync(root, { recursive: true, force: true });
     }

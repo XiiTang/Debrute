@@ -1,4 +1,4 @@
-import { mkdir, mkdtemp, readFile, readdir, rm, stat, writeFile } from 'node:fs/promises';
+import { mkdir, mkdtemp, readFile, readdir, rm, stat, utimes, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import sharp from 'sharp';
@@ -478,9 +478,11 @@ async function writeFeedbackDocument(projectRoot: string, projectRelativePaths: 
 }
 
 async function handleWatchedFileEvent(server: DebruteAppServer, event: NormalizedFileWatchEvent): Promise<void> {
+  const observedAt = Date.now() + 1000;
+  await utimes(event.absolutePath, observedAt / 1000, observedAt / 1000);
   await (server as unknown as {
     handleWatchedFileEvent(event: NormalizedFileWatchEvent): Promise<void>;
-  }).handleWatchedFileEvent(event);
+  }).handleWatchedFileEvent({ ...event, observedAt });
 }
 
 async function waitFor(predicate: () => boolean): Promise<void> {

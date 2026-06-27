@@ -21,8 +21,14 @@ export function parseDesktopOpenIntent(argv: string[]): DesktopOpenIntent | unde
   if (argv.includes('--new-window')) {
     return { kind: 'new-window' };
   }
-  const openProjectValue = argv.findLast((value) => value.startsWith('--open-project='))
-    ?.slice('--open-project='.length);
+  let openProjectValue: string | undefined;
+  for (let index = argv.length - 1; index >= 0; index -= 1) {
+    const value = argv[index];
+    if (value?.startsWith('--open-project=')) {
+      openProjectValue = value.slice('--open-project='.length);
+      break;
+    }
+  }
   if (openProjectValue) {
     return { kind: 'open-project', projectRoot: openProjectValue };
   }

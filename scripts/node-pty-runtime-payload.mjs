@@ -39,14 +39,14 @@ export function nodePtyRuntimePayloadEntries(root, releaseTarget) {
     return entries;
   }
 
-  entries.push(
-    nodePtyRuntimePayloadEntry(packageRoot, 'build/Release/pty.node', false),
-    {
+  entries.push(nodePtyRuntimePayloadEntry(packageRoot, 'build/Release/pty.node', false));
+  if (existsSync(join(packageRoot, 'build/Release/spawn-helper'))) {
+    entries.push({
       ...nodePtyRuntimePayloadEntry(packageRoot, 'build/Release/spawn-helper', false),
       executable: true,
       executableRelativePath: ''
-    }
-  );
+    });
+  }
   return entries;
 }
 

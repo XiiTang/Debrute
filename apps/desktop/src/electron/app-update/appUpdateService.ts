@@ -27,8 +27,8 @@ export interface DesktopAppUpdateDriver {
 
 export interface LinuxAppUpdateRelease {
   version: string;
-  releaseName?: string;
-  releaseDate?: string;
+  releaseName?: string | null;
+  releaseDate?: string | null;
   releaseUrl: string;
 }
 
@@ -324,11 +324,17 @@ function isVersionGreater(candidate: string, current: string): boolean {
   if (!candidateParts || !currentParts) {
     return false;
   }
-  for (let index = 0; index < 3; index += 1) {
-    if (candidateParts[index] > currentParts[index]) {
+  const [candidateMajor, candidateMinor, candidatePatch] = candidateParts;
+  const [currentMajor, currentMinor, currentPatch] = currentParts;
+  for (const [candidateValue, currentValue] of [
+    [candidateMajor, currentMajor],
+    [candidateMinor, currentMinor],
+    [candidatePatch, currentPatch]
+  ] as const) {
+    if (candidateValue > currentValue) {
       return true;
     }
-    if (candidateParts[index] < currentParts[index]) {
+    if (candidateValue < currentValue) {
       return false;
     }
   }

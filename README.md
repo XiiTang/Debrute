@@ -49,23 +49,20 @@ pnpm exec tsx apps/debrute-cli/src/index.ts project validate path/to/project
 
 ## Releases
 
-Debrute publishes Desktop installers, Debrute CLI archives, and Photoshop bridge panel packages on GitHub Releases.
+Debrute publishes Desktop installers and Debrute CLI archives on GitHub Releases.
 
-Current Desktop builds are unsigned. macOS may require right-click Open or Privacy & Security approval. Windows may show SmartScreen. Linux AppImage builds may require `chmod +x`.
+macOS Desktop builds are signed and notarized by Apple before publication. Windows may show SmartScreen. Linux AppImage builds may require `chmod +x`.
 
-The Desktop app checks for application updates from GitHub Releases after startup on packaged macOS and Windows builds. Settings under **General** can also check, download, and install Desktop updates manually. Linux Desktop updates are manual downloads from GitHub Releases in this version.
+The Desktop app checks for application updates from GitHub Releases after startup on packaged Windows builds. Settings under **General** can also check, download, and install Desktop updates manually. macOS and Linux Desktop updates are manual downloads from GitHub Releases in this version.
 
 Each `vX.Y.Z` release includes these public asset names:
 
 ```text
 debrute-desktop-X.Y.Z-macos-arm64.dmg
 debrute-desktop-X.Y.Z-macos-x64.dmg
-debrute-desktop-X.Y.Z-macos-universal.zip
-debrute-desktop-X.Y.Z-macos-universal.zip.blockmap
 debrute-desktop-X.Y.Z-windows-x64.exe
 debrute-desktop-X.Y.Z-windows-x64.exe.blockmap
 debrute-desktop-X.Y.Z-linux-x64.AppImage
-latest-mac.yml
 latest.yml
 debrute-cli-X.Y.Z-macos-arm64.tar.gz
 debrute-cli-X.Y.Z-macos-x64.tar.gz
@@ -73,12 +70,10 @@ debrute-cli-X.Y.Z-linux-arm64.tar.gz
 debrute-cli-X.Y.Z-linux-x64.tar.gz
 debrute-cli-X.Y.Z-windows-arm64.zip
 debrute-cli-X.Y.Z-windows-x64.zip
-debrute-photoshop-uxp-X.Y.Z.ccx
-debrute-photoshop-cep-X.Y.Z.zip
 debrute_SHA256SUMS
 ```
 
-Use `debrute-photoshop-uxp-X.Y.Z.ccx` when the normal Creative Cloud plugin installation path is available. Use `debrute-photoshop-cep-X.Y.Z.zip` only when that `.ccx` installation path is unavailable; extract the zip and copy its `com.debrute.photoshop.bridge.cep` directory into the user's CEP extensions directory for Photoshop. Keep Debrute Desktop or the daemon running and enable **Adobe Bridge** in Debrute Settings before connecting either Photoshop panel.
+macOS Desktop release jobs require these GitHub Actions secrets: `CSC_LINK`, `CSC_KEY_PASSWORD`, `APPLE_API_KEY`, `APPLE_API_KEY_ID`, and `APPLE_API_ISSUER`. `CSC_LINK` contains the base64-encoded Developer ID Application `.p12` certificate. `APPLE_API_KEY` contains the App Store Connect `.p8` key material; the release workflow writes both credentials to temporary files before invoking Electron Builder and `notarytool`.
 
 Verify manual downloads against `debrute_SHA256SUMS` from the same release tag before installing. Filter the manifest to the asset you downloaded:
 

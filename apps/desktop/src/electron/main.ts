@@ -52,7 +52,7 @@ const applicationMenu = createApplicationMenuController({
   platform: process.platform,
   readTitleBarState: async () => runtimeClient?.getWorkbenchTitleBarState(),
   onCommand: async (sourceWindow, command) => {
-    await executeNativeMenuCommand(sourceWindow ?? BrowserWindow.getFocusedWindow(), command);
+    await executeNativeMenuCommand(sourceWindow, command);
   }
 });
 const projectIconPath = join(__dirname, 'icon.png');

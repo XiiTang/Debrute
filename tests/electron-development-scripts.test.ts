@@ -196,6 +196,34 @@ describe('Electron development scripts', () => {
     }
   });
 
+  it('does not require a Linux node-pty spawn helper for Electron when node-pty did not build one', async () => {
+    const root = join(tmpdir(), `debrute-node-pty-linux-payload-${process.pid}-${Date.now()}`);
+    const packageRoot = join(root, 'node_modules', 'node-pty');
+    mkdirSync(join(packageRoot, 'lib'), { recursive: true });
+    mkdirSync(join(packageRoot, 'build/Release'), { recursive: true });
+    writeFileSync(join(packageRoot, 'package.json'), '{}');
+    writeFileSync(join(packageRoot, 'lib', 'index.js'), '');
+    writeFileSync(join(packageRoot, 'build/Release', 'pty.node'), '');
+    try {
+      const hook = await import(pathToFileURL(join(process.cwd(), 'apps/desktop/scripts/package-sharp-runtime.mjs')).href) as {
+        nodePtyRuntimePayloadEntries: (root: string, context: { electronPlatformName: string; arch: number }) => Array<{
+          from: string;
+          to: string;
+        }>;
+      };
+
+      const entries = hook.nodePtyRuntimePayloadEntries(root, {
+        electronPlatformName: 'linux',
+        arch: 1
+      });
+
+      expect(entries.map((entry) => entry.to)).toContain('node_modules/node-pty/build/Release/pty.node');
+      expect(entries.map((entry) => entry.to)).not.toContain('node_modules/node-pty/build/Release/spawn-helper');
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+
   it('targets Node.js 24 for Electron main and preload bundles', () => {
     const script = readFileSync(join(process.cwd(), 'apps/desktop/scripts/bundle-electron.mjs'), 'utf8');
 

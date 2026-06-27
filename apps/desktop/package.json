@@ -1,6 +1,6 @@
 {
   "name": "@debrute/desktop",
-  "version": "0.0.1",
+  "version": "0.0.2",
   "license": "Apache-2.0",
   "private": true,
   "type": "commonjs",
@@ -16,11 +16,13 @@
     "dev:electron": "tsx ../../scripts/dev-electron-workbench.ts"
   },
   "build": {
-    "appId": "dev.debrute.desktop",
+    "appId": "io.github.xiitang.debrute",
     "productName": "Debrute",
+    "executableName": "debrute",
     "electronVersion": "42.4.0",
     "asar": true,
     "afterPack": "scripts/package-sharp-runtime.mjs",
+    "afterSign": "scripts/notarize-macos-app.cjs",
     "directories": {
       "buildResources": "build",
       "output": "release"
@@ -41,10 +43,17 @@
     "mac": {
       "category": "public.app-category.productivity",
       "artifactName": "debrute-desktop-${version}-macos-${arch}.${ext}",
+      "hardenedRuntime": true,
+      "gatekeeperAssess": false,
+      "entitlements": "build/entitlements.mac.plist",
+      "entitlementsInherit": "build/entitlements.mac.inherit.plist",
+      "notarize": false,
       "target": [
-        "dmg",
-        "zip"
+        "dmg"
       ]
+    },
+    "dmg": {
+      "sign": true
     },
     "win": {
       "artifactName": "debrute-desktop-${version}-windows-${arch}.${ext}",
@@ -53,11 +62,12 @@
       ]
     },
     "linux": {
-      "artifactName": "debrute-desktop-${version}-linux-${arch}.${ext}",
+      "artifactName": "debrute-desktop-${version}-linux-x64.${ext}",
       "target": [
         "AppImage"
       ],
-      "category": "Utility"
+      "category": "Utility",
+      "syncDesktopName": true
     }
   },
   "dependencies": {

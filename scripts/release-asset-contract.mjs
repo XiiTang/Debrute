@@ -1,17 +1,14 @@
 export const checksumManifestName = 'debrute_SHA256SUMS';
 
 export const desktopReleaseTargets = [
-  { platform: 'macos', arch: 'arm64', extension: 'dmg', updateAsset: false },
-  { platform: 'macos', arch: 'x64', extension: 'dmg', updateAsset: false },
-  { platform: 'macos', arch: 'universal', extension: 'zip', updateAsset: true },
-  { platform: 'macos', arch: 'universal', extension: 'zip.blockmap', updateAsset: true },
-  { platform: 'windows', arch: 'x64', extension: 'exe', updateAsset: false },
-  { platform: 'windows', arch: 'x64', extension: 'exe.blockmap', updateAsset: true },
-  { platform: 'linux', arch: 'x64', extension: 'AppImage', updateAsset: false }
+  { platform: 'macos', arch: 'arm64', extension: 'dmg' },
+  { platform: 'macos', arch: 'x64', extension: 'dmg' },
+  { platform: 'windows', arch: 'x64', extension: 'exe' },
+  { platform: 'windows', arch: 'x64', extension: 'exe.blockmap' },
+  { platform: 'linux', arch: 'x64', extension: 'AppImage' }
 ];
 
 export const desktopUpdateMetadataAssets = [
-  'latest-mac.yml',
   'latest.yml'
 ];
 
@@ -36,14 +33,6 @@ export function desktopReleaseAssetName(version, platform, arch, extension) {
   return `debrute-desktop-${version}-${platform}-${arch}.${extension}`;
 }
 
-export function photoshopUxpReleaseAssetName(version) {
-  return `debrute-photoshop-uxp-${version}.ccx`;
-}
-
-export function photoshopCepReleaseAssetName(version) {
-  return `debrute-photoshop-cep-${version}.zip`;
-}
-
 export function expectedReleaseAssets(version) {
   return [
     ...desktopReleaseTargets.map((target) => desktopReleaseAssetName(version, target.platform, target.arch, target.extension)),
@@ -54,8 +43,6 @@ export function expectedReleaseAssets(version) {
     `debrute-cli-${version}-linux-x64.tar.gz`,
     `debrute-cli-${version}-windows-arm64.zip`,
     `debrute-cli-${version}-windows-x64.zip`,
-    photoshopUxpReleaseAssetName(version),
-    photoshopCepReleaseAssetName(version),
     checksumManifestName
   ];
 }
