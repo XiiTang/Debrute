@@ -79,10 +79,11 @@ function runNotarytool(args) {
 
 function run(command, args, options = {}) {
   try {
-    return execFileSync(command, args, {
+    const output = execFileSync(command, args, {
       encoding: 'utf8',
       stdio: options.capture ? ['ignore', 'pipe', 'pipe'] : 'inherit'
-    }).trim();
+    });
+    return typeof output === 'string' ? output.trim() : '';
   } catch (error) {
     const stderr = error.stderr?.toString().trim();
     const stdout = error.stdout?.toString().trim();
