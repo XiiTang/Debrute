@@ -1,194 +1,98 @@
 # Debrute
 
-Debrute is a browser-first local creative production workbench for projects, Canvas review, and generation capabilities. The primary runtime is a normal Web workbench backed by a loopback daemon. Electron is an optional native shell that starts the daemon and loads the same Web URL. Debrute does not implement an internal Agent; external Agents use Debrute through Debrute CLI and Debrute Skills installed under the standard shared Skills directory.
+[中文版](./README.zh-CN.md)
 
-## What Is Here
+Debrute is a local creative production workbench for the files that AI agents generate: images, videos, audio, documents, design references, and future 3D assets.
 
-- `apps/web` - Vite/React browser workbench. It talks to the daemon through HTTP and SSE.
-- `apps/daemon` - loopback HTTP/SSE runtime that serves the Web workbench and owns privileged project, Canvas, settings, and generated asset operations.
-- `apps/desktop` - optional Electron shell for native folder picking, menus, packaging, and loading the Web workbench URL.
-- `apps/app-server` - local domain service boundary for project sessions, Canvas Map pushing and sync, Canvas node projection, model settings, generated asset metadata, and explicit CLI service methods.
-- `apps/debrute-cli` - external Agent interface for invoking Debrute capabilities with structured output.
-- `packages/project-core` - project identity, `.debrute/` path conventions, atomic JSON persistence, project text/binary file access, and file event normalization.
-- `packages/canvas-map-core` - Canvas Map YAML parsing, path and row rule expansion, and file-tree node derivation.
-- `packages/canvas-core` - Canvas documents, projected node state, derived structure edges, selection, viewport, diagnostics, and node layout operations.
-- `packages/capability-core` - result and artifact value shapes shared by Debrute runtime services.
-- `packages/capability-runtime` - model catalogs, model executors, runtime LLM request execution, LLM provider settings, generation model settings, and Skills registry code.
-- `skills/debrute-*` - Debrute-managed standard Skills packages for external Agents.
+It is built around a simple belief: the best agents already exist, and the best professional creative tools already exist. Debrute does not try to replace either side. Instead, it gives agents, designers, and creative teams a shared place to generate, inspect, organize, compare, annotate, and hand off production assets.
 
-## Commands
+## Why Debrute Exists
 
-```sh
-pnpm install
-pnpm doctor
-pnpm check
-pnpm test
-pnpm lint:arch
-pnpm build
-pnpm package:cli
-pnpm package:cli:all
-pnpm verify
-pnpm pack
-pnpm dist
-pnpm dev
-pnpm dev:electron
-pnpm preview
-pnpm clean
-pnpm exec tsx apps/debrute-cli/src/index.ts project validate path/to/project
-```
+Modern agents are already good at planning, writing prompts, calling tools, generating assets, and editing files. What is still awkward is the space between an agent's filesystem operations and a human's visual judgment.
 
-`pnpm doctor` checks the local Node/pnpm/tooling surface needed for development and macOS packaging. `pnpm verify` runs doctor, type checking, tests, architecture lint, and the production build.
+Generated assets are often binary, visual, versioned, and messy. They need to be seen, compared, rejected, annotated, selected, and passed into professional tools. A terminal transcript is not enough. A folder tree is not enough. A single chat attachment is not enough.
 
-`pnpm dev` starts or reuses the shared local Workbench runtime and prints the Web URL. It prefers daemon port `17321` and Web port `17322` when they are free, but they are not required ports. The Web workbench is the primary product surface and can be opened directly in a normal browser. `pnpm dev:electron` participates in the same runtime registry, so it attaches to an existing healthy daemon/Web pair instead of starting a competing one. One daemon can host multiple live project sessions, and browser tabs or Electron windows connected to that daemon attach to `/projects/:projectId` routes with daemon-issued opaque project ids. Interactive users open projects with the Workbench `Open Project` action, which asks the local runtime daemon to present the native directory picker. Agents and automation can open an explicit absolute path through `/open?path=<encoded-absolute-local-path>`. The root workbench route does not reopen the last project.
+Debrute turns a local project folder into an agent-readable and human-readable production space.
 
-`pnpm preview` serves the production Web build for smoke testing after `pnpm build`. `pnpm clean` removes generated build, release, and TypeScript build-info files.
+## What Debrute Is
 
-`pnpm package:cli` creates the current-platform standalone CLI release asset under `release/debrute-cli/` with bundled Skills and Web workbench assets. `pnpm package:cli:all` creates all supported CLI assets for GitHub Releases.
+- A local workbench for generated production assets.
+- A visual Canvas for reviewing project files, asset variants, folder structure, and feedback.
+- A project model based on your real local folder, not an imported cloud workspace.
+- A bridge between external agents, generated files, and professional design tools.
+- A command and Skills surface that lets agents call Debrute without becoming dependent on a Debrute-specific agent.
 
-`pnpm pack` creates an unpacked desktop app under `apps/desktop/release/`. `pnpm dist` creates distributable Desktop artifacts when run on the matching platform. Packaged builds and standalone CLI assets are published from the public `XiiTang/Debrute` GitHub repository.
+Debrute is designed for projects where filesystem structure matters. You can ask an agent to create folders, prompts, references, outputs, alternatives, and final picks. The folder hierarchy itself becomes part of the project logic: a lightweight way to express grouping, sequencing, comparison, and intent.
 
-## Releases
+## What Debrute Is Not
 
-Debrute publishes Desktop installers and Debrute CLI archives on GitHub Releases.
+Debrute is not an agent.
 
-macOS Desktop builds are signed and notarized by Apple before publication. Windows may show SmartScreen. Linux AppImage builds may require `chmod +x`.
+The market already has strong agents, and they keep improving quickly. Debrute does not implement its own planner, coding assistant, creative director, or autonomous workflow engine. You bring the agent you like, install the Skills you need, and let that agent use Debrute as a project and asset workbench.
 
-The Desktop app checks for application updates from GitHub Releases after startup on packaged Windows builds. Settings under **General** can also check, download, and install Desktop updates manually. macOS and Linux Desktop updates are manual downloads from GitHub Releases in this version.
+Debrute is not a workflow system.
 
-Each `vX.Y.Z` release includes these public asset names:
+It does not force a fixed production pipeline. It does not prescribe how you should brainstorm, generate, rank, edit, approve, or publish. Agents and humans can express those choices through files, folders, Canvas Maps, prompts, and normal project conventions.
 
-```text
-debrute-desktop-X.Y.Z-macos-arm64.dmg
-debrute-desktop-X.Y.Z-macos-x64.dmg
-debrute-desktop-X.Y.Z-windows-x64.exe
-debrute-desktop-X.Y.Z-windows-x64.exe.blockmap
-debrute-desktop-X.Y.Z-linux-x64.AppImage
-latest.yml
-debrute-cli-X.Y.Z-macos-arm64.tar.gz
-debrute-cli-X.Y.Z-macos-x64.tar.gz
-debrute-cli-X.Y.Z-linux-arm64.tar.gz
-debrute-cli-X.Y.Z-linux-x64.tar.gz
-debrute-cli-X.Y.Z-windows-arm64.zip
-debrute-cli-X.Y.Z-windows-x64.zip
-debrute_SHA256SUMS
-```
+Debrute is not a replacement for Photoshop, Blender, Premiere, Figma, or other professional creative software.
 
-macOS Desktop release jobs require these GitHub Actions secrets: `CSC_LINK`, `CSC_KEY_PASSWORD`, `APPLE_API_KEY`, `APPLE_API_KEY_ID`, and `APPLE_API_ISSUER`. `CSC_LINK` contains the base64-encoded Developer ID Application `.p12` certificate. `APPLE_API_KEY` contains the App Store Connect `.p8` key material; the release workflow writes both credentials to temporary files before invoking Electron Builder and `notarytool`.
+For a long time, AI generation will not fully replace the precision, control, and expertise of professional editing tools. Debrute intentionally avoids features that those tools already do well. For professional designers, Debrute is the place to generate, gather, review, compare, and select resources before taking them into specialized software. Debrute includes and plans more plugins so designers can move assets between Debrute and professional tools with less friction.
 
-Verify manual downloads against `debrute_SHA256SUMS` from the same release tag before installing. Filter the manifest to the asset you downloaded:
+## Working With Agents
 
-```sh
-grep "  debrute-cli-X.Y.Z-macos-arm64.tar.gz$" debrute_SHA256SUMS | shasum -a 256 -c -
-```
+Debrute is agent-agnostic. It works best with agent GUI projects that have a built-in browser, because the agent can open the Debrute Workbench, inspect Canvas state, understand visual feedback, and then update project files in the same loop.
 
-On Linux, use:
+Good examples to evaluate first:
 
-```sh
-sha256sum -c --ignore-missing debrute_SHA256SUMS
-```
+- [Codex](https://developers.openai.com/codex/app/browser)
+- [Qoder](https://docs.qoder.com/user-guide/chat/browser-agent)
+- [Cursor](https://cursor.com/docs/agent/tools/browser)
+- [Google Antigravity](https://www.antigravity.google/docs/browser)
 
-Debrute CLI is managed from Debrute Desktop Settings under **Debrute CLI**. The Desktop app downloads the matching CLI archive from the same GitHub Release, verifies `debrute_SHA256SUMS`, installs the command as `debrute`, and runs:
+All CLI agents can use Debrute too. Debrute provides a command surface and official Skills so external agents can start the Workbench, validate a project, push Canvas Maps, request generation, and inspect generated asset metadata.
 
-```sh
-debrute skills sync
-```
+## Working With Designers
 
-Manual Skill commands:
+Debrute is meant to sit before and beside professional editing software, not above it.
 
-```sh
-debrute skills status
-debrute skills sync
-debrute skills sync --force
-```
+A designer can use Debrute as a resource table: generate many candidates, keep references nearby, mark what works, reject what does not, annotate exact visual regions, compare variations, and then move selected assets into tools like Photoshop or other specialized editors.
 
-`debrute skills sync --force` restores all official Debrute Skills. Normal sync updates installed official Skills and adds newly introduced official Skills without restoring official Skills the user removed.
+This repository already includes Photoshop plugin work, and the roadmap includes more professional-tool plugins and handoff paths.
 
-## Product Model
+## Project Model
 
-Project is the local file workspace plus `.debrute/` metadata, generated assets, and health diagnostics.
+A Debrute project is your local folder plus Debrute metadata under `.debrute/`.
 
-Canvas Map YAML controls which project files and folders appear on one Canvas, plus optional automatic comparison rows. A Canvas Map lives at `.debrute/canvas-maps/<canvas-id>.yaml`; the Canvas with the same id is the map's target. The file is a top-level YAML object:
+The local folder remains the source of truth. Agents can use normal filesystem tools to create project structure, prompts, references, generated outputs, and final assets. Debrute adds a visual layer over that folder so humans and agents can see the same project shape.
 
-```yaml
-paths:
-  - outputs/gpt/
-  - outputs/**/*.png
-  - prompts/cover.md
-layout:
-  rows:
-    - outputs/**/high/*.png
-```
+Canvas Maps define which project files appear on a Canvas. The Canvas then becomes the shared visual surface for review, comparison, selection, and feedback.
 
-`paths` is the complete positive membership rule list. A trailing slash recursively includes files under that folder, a glob includes matching files, and an exact file rule includes one file. `layout.rows` is optional; each row glob affects files already included by `paths`, splitting matches into horizontal rows by direct parent directory.
+## Official Skills
 
-Canvas is the visual workspace for projected Canvas Map nodes. Canvas JSON under `.debrute/canvases/<canvas-id>.json` stores visual state: node layout, z-order, annotations, and preferences. File and folder hierarchy is derived from the project filesystem. Push copies the current Canvas Map membership into Canvas JSON, while Canvas display always derives default structure from filesystem paths.
+Debrute ships standard Skills for external agents:
 
-Capabilities are discrete operations that the daemon-backed Web workbench or the `debrute` command can invoke: project semantics, LLM requests, image generation, video generation, and generated asset metadata lookup. External Agents use their own filesystem tools for generic file access.
+- `debrute-core` for project semantics, Workbench URLs, Canvas Map pushes, generated assets, and model-backed generation.
+- `debrute-image-director` for image generation and editing through the `debrute` command.
+- `debrute-video-director` for video generation and editing through the `debrute` command.
 
-Integrations are optional local capabilities that the daemon detects and the Web Settings surface renders as command previews. The first supported integrations are FFmpeg, ImageMagick, MediaInfo, ExifTool, and the `remove-ai-watermarks` CLI. Integrations are not required for Debrute startup and are not exposed through the `debrute` command. Third-party tools are optional local dependencies; Debrute does not bundle or redistribute them, and users are responsible for complying with each tool's license.
+The Skills explain how to call Debrute. They are not hidden APIs and they do not replace the agent's own tools.
 
-Skills are standard packages installed under `~/.agents/skills`. Debrute CLI release payloads include the official `skills/debrute-*` bundle. Skills synchronization is explicit through `debrute skills sync`; Debrute Desktop can invoke that managed CLI sync from Settings, and the Web workbench shows manual instructions only.
+## Roadmap
 
-## CLI
+- Voice and audio generation.
+- 3D asset generation and review.
+- Richer previews for more binary asset types.
+- More plugins for professional creative tools.
+- Smoother handoff paths between Debrute, local project folders, and specialized editors.
 
-The CLI is Agent-facing and writes structured Agent Records on stdout. There is no JSON output mode; JSON is used only as an input encoding for request payloads.
+## Technical Docs
 
-```sh
-debrute --version
-pnpm exec tsx apps/debrute-cli/src/index.ts runtime status
-pnpm exec tsx apps/debrute-cli/src/index.ts runtime doctor
-pnpm exec tsx apps/debrute-cli/src/index.ts skills status
-pnpm exec tsx apps/debrute-cli/src/index.ts skills sync
-pnpm exec tsx apps/debrute-cli/src/index.ts project init path/to/project
-pnpm exec tsx apps/debrute-cli/src/index.ts project validate path/to/project
-pnpm exec tsx apps/debrute-cli/src/index.ts workbench start
-pnpm exec tsx apps/debrute-cli/src/index.ts canvas-map push path/to/project canvas-1
-pnpm exec tsx apps/debrute-cli/src/index.ts canvas create path/to/project
-pnpm exec tsx apps/debrute-cli/src/index.ts canvas rename path/to/project canvas-2 storyboard
-pnpm exec tsx apps/debrute-cli/src/index.ts canvas reorder path/to/project storyboard canvas-1
-pnpm exec tsx apps/debrute-cli/src/index.ts canvas delete path/to/project storyboard
-pnpm exec tsx apps/debrute-cli/src/index.ts canvas repair-index path/to/project
-pnpm exec tsx apps/debrute-cli/src/index.ts generated-asset lookup path/to/project --path generated/example.png
-pnpm exec tsx apps/debrute-cli/src/index.ts llm request --input-json '{"prompt":"Summarize this project."}'
-pnpm exec tsx apps/debrute-cli/src/index.ts models image list
-pnpm exec tsx apps/debrute-cli/src/index.ts models image describe gpt-image-2
-pnpm exec tsx apps/debrute-cli/src/index.ts generate image path/to/project --input-json '{"model":"gpt-image-2","arguments":{"prompt":"Cover image","output_path":"generated/cover.png"}}' --timeout-ms 600000
-pnpm exec tsx apps/debrute-cli/src/index.ts generate image-batch path/to/project --manifest image-requests.json --concurrency 8 --retries 0 --timeout-ms 900000 --log image-results.jsonl --summary image-summary.json
-pnpm exec tsx apps/debrute-cli/src/index.ts models video list
-pnpm exec tsx apps/debrute-cli/src/index.ts models video describe doubao-seedance-2-0-260128
-pnpm exec tsx apps/debrute-cli/src/index.ts generate video path/to/project --input-json '{"model":"doubao-seedance-2-0-260128","arguments":{"prompt":"Short video brief","intent":"generate"}}' --timeout-ms 600000
-pnpm exec tsx apps/debrute-cli/src/index.ts commands
-```
+The README is intentionally short. Technical details live here:
 
-Use `generate image-batch` for multiple planned image requests; do not loop over `generate image` for planned batches. `--manifest` expects `{ "requests": [...] }`, with each item shaped like a `generate image` input. Batch item outcomes are written to `--log`; stdout emits sparse progress records and the final aggregate record.
-
-Use `models image list` to compare configured image models by original model parameters and constraints. Before image generation, run `models image describe <model-id>` once for the selected model. Model descriptions return official documentation URLs, a repository snapshot path, official-documentation-backed `description_markdown`, Debrute examples, and the machine-readable `arguments_schema`.
-
-Single image `--timeout-ms` defaults to 600000ms; image batch `--timeout-ms` defaults to 900000ms per item attempt. Use `--overwrite-existing` to regenerate batch outputs that would otherwise be skipped. Debrute resolves project files, data URLs, and safe public `http(s)` URLs for image inputs; model-specific file format, size, dimension, alpha, and mask constraints are left to the upstream model.
-
-Use `models video list` to compare configured video models by Debrute-native parameters and constraints. Before video generation, run `models video describe <model-id>` once for the selected model. Video model descriptions return official documentation URLs, a repository snapshot path, official-documentation-backed `description_markdown`, Debrute examples, and the machine-readable `arguments_schema`.
-
-Video `--timeout-ms` defaults to 600000ms and covers task submission, polling, response reads, and artifact download.
-
-Video generation uses `prompt`, `intent`, and `references`; Debrute constructs Seedance `content` internally. Project-local image and audio references can be normalized by Debrute when the selected model supports them. Project-local video references require Debrute upload-server support unless the source is already `http(s)` or `asset://`.
-
-Do not include model API keys in generation requests; Debrute reads configured keys locally. Use the original model parameter names shown by `models image list` and confirmed by `models image describe`.
-
-Model request failures keep the stable CLI error code and include the Debrute model id, message, and structured logs when available.
-
-Minimal Canvas Map:
-
-```yaml
-paths:
-  - outputs/gpt/
-  - prompts/cover.md
-```
-
-## Storage Boundaries
-
-Project metadata and canvas state live under `.debrute/`. Generated asset metadata, LLM provider settings, generation model settings, LLM provider secrets, and generation model secrets live in Debrute-owned runtime storage. Renderer code does not read or write project files, generated asset metadata, model secret files, or Skills directories directly; project and settings operations use the daemon/App Server boundary, while Skills synchronization is owned by the CLI.
-
-The CLI and Skills product posture is command-first: Debrute provides commands, structured output, safety guidance, and Skills for external Agents while not being the Agent itself. `debrute workbench start` starts or reuses the local Workbench runtime and returns base URLs and ports without opening a browser. Interactive users open projects through the Workbench `Open Project` picker. Agents open projects by constructing `<web_url>/open?path=<encodeURIComponent(absProjectPath)>`. One-shot project, Canvas Map, and generation commands do not require the Workbench daemon.
+- [Development](./docs/development.md)
+- [Product model](./docs/product-model.md)
+- [CLI](./docs/cli.md)
+- [Releases](./docs/releases.md)
 
 ## License
 
