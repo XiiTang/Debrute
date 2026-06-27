@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 import { execFileSync } from 'node:child_process';
-import { mkdtempSync, readdirSync, rmSync, statSync } from 'node:fs';
+import { lstatSync, mkdtempSync, readdirSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 
@@ -68,7 +68,8 @@ function collectApps(root) {
   function visit(dir) {
     for (const entry of readdirSync(dir)) {
       const entryPath = join(dir, entry);
-      if (!statSync(entryPath).isDirectory()) {
+      const entryStat = lstatSync(entryPath);
+      if (entryStat.isSymbolicLink() || !entryStat.isDirectory()) {
         continue;
       }
       if (entry.endsWith('.app')) {

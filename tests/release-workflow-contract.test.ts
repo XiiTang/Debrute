@@ -98,6 +98,9 @@ describe('GitHub release workflow contract', () => {
     expect(script).toContain('hdiutil');
     expect(script).toContain('plutil');
     expect(script).toContain('CFBundleIdentifier');
+    expect(script).toContain('lstatSync');
+    expect(script).toContain('isSymbolicLink');
+    expect(script).not.toMatch(/\bstatSync\b/);
     expect(script).toContain('io.github.xiitang.debrute');
     expect(script).toContain('debrute-desktop-${version}-macos-${arch}.dmg');
     expect(script).not.toContain('debrute-desktop-${version}-macos-universal.zip');
