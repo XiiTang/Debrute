@@ -131,7 +131,7 @@ describe('HTTP workbench API client', () => {
     expect(() => client.readProjectTextFile('briefs/outline.md')).toThrow('Debrute project is not open.');
   });
 
-  it('opens the project event stream after the daemon returns an opaque project id', async () => {
+  it('opens the global event stream before adding the project event stream for an opaque project id', async () => {
     const eventSourceUrls: string[] = [];
     const client = createHttpWorkbenchApiClient({
       daemonUrl: 'http://127.0.0.1:17456/',
@@ -155,11 +155,15 @@ describe('HTTP workbench API client', () => {
     } as typeof EventSource;
     try {
       const unsubscribe = client.onEvent(() => {});
-      expect(eventSourceUrls).toEqual([]);
+      expect(eventSourceUrls).toHaveLength(1);
+      const globalEventUrl = new URL(eventSourceUrls[0]!);
+      expect(globalEventUrl.origin + globalEventUrl.pathname).toBe('http://127.0.0.1:17456/api/workbench/events');
+      expect(globalEventUrl.searchParams.get('clientId')).toMatch(/^web:/);
+      expect(globalEventUrl.searchParams.get('debrute-token')).toBe('secret');
 
       await client.openProject({ projectRoot: '/tmp/project' });
-      expect(eventSourceUrls).toHaveLength(1);
-      const eventUrl = new URL(eventSourceUrls[0]!);
+      expect(eventSourceUrls).toHaveLength(2);
+      const eventUrl = new URL(eventSourceUrls[1]!);
       expect(eventUrl.origin + eventUrl.pathname).toBe(`http://127.0.0.1:17456/api/projects/${projectId}/events`);
       const clientId = eventUrl.searchParams.get('clientId');
       expect(clientId).not.toBeNull();

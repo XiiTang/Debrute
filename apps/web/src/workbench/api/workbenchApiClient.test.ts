@@ -5,6 +5,39 @@ describe('workbench API client', () => {
   const originalWindow = (globalThis as { window?: unknown }).window;
   const projectId = '123e4567-e89b-42d3-a456-426614174000';
 
+  class FakeEventSource {
+    static instances: FakeEventSource[] = [];
+
+    onmessage: ((event: MessageEvent) => void) | null = null;
+    closed = false;
+
+    constructor(readonly url: string) {
+      FakeEventSource.instances.push(this);
+    }
+
+    emit(data: unknown): void {
+      this.onmessage?.({ data: JSON.stringify(data) } as MessageEvent);
+    }
+
+    close(): void {
+      this.closed = true;
+    }
+  }
+
+  function installFakeEventSource(): typeof FakeEventSource {
+    FakeEventSource.instances = [];
+    vi.stubGlobal('EventSource', FakeEventSource);
+    return FakeEventSource;
+  }
+
+  async function waitForEventSourceCount(EventSource: typeof FakeEventSource, count: number): Promise<void> {
+    const deadline = Date.now() + 1000;
+    while (EventSource.instances.length !== count && Date.now() < deadline) {
+      await new Promise((resolve) => setTimeout(resolve, 0));
+    }
+    expect(EventSource.instances).toHaveLength(count);
+  }
+
   afterEach(() => {
     (globalThis as { window?: unknown }).window = originalWindow;
     vi.unstubAllGlobals();
@@ -135,6 +168,116 @@ describe('workbench API client', () => {
     ]);
     expect(requests[0]!.headers).toMatchObject({ 'x-debrute-web-origin': 'http://127.0.0.1:17321' });
     expect(requests[1]!.headers).toMatchObject({ 'x-debrute-daemon-token': 'bootstrapped-secret' });
+  });
+
+  it('subscribes to global Workbench events before a project is open', async () => {
+    const EventSource = installFakeEventSource();
+    const events: unknown[] = [];
+    (globalThis as { window?: unknown }).window = {
+      location: { origin: 'http://127.0.0.1:17321', search: '', pathname: '/', hash: '' },
+      localStorage: { getItem: () => undefined, setItem: () => undefined },
+      sessionStorage: {
+        getItem: (key: string) => key === 'debrute.webClientId' ? 'debrute-web-client' : undefined,
+        setItem: () => undefined
+      },
+      history: { state: {}, replaceState: vi.fn() }
+    };
+    vi.stubGlobal('fetch', async (url: string) => {
+      const parsed = new URL(url);
+      expect(parsed.pathname).toBe('/api/browser-session');
+      return new Response(JSON.stringify({
+        token: 'bootstrapped-secret',
+        runtime: {
+          daemonUrl: 'http://127.0.0.1:17321',
+          webBaseUrl: 'http://127.0.0.1:17321',
+          platform: 'darwin'
+        }
+      }), { status: 200, headers: { 'content-type': 'application/json' } });
+    });
+
+    const client = createWorkbenchApiClient();
+    const unsubscribe = client.onEvent((event) => events.push(event));
+    await waitForEventSourceCount(EventSource, 1);
+
+    expect(EventSource.instances[0]!.url).toBe('http://127.0.0.1:17321/api/workbench/events?clientId=debrute-web-client&debrute-token=bootstrapped-secret');
+
+    EventSource.instances[0]!.emit({
+      type: 'workbench.preferences.changed',
+      preferences: { locale: 'zh-CN', themePreference: 'light' }
+    });
+
+    expect(events).toEqual([{
+      type: 'workbench.preferences.changed',
+      preferences: { locale: 'zh-CN', themePreference: 'light' }
+    }]);
+
+    unsubscribe();
+    expect(EventSource.instances[0]!.closed).toBe(true);
+  });
+
+  it('keeps the global event source active when a project event source is added', async () => {
+    const EventSource = installFakeEventSource();
+    const events: unknown[] = [];
+    (globalThis as { window?: unknown }).window = {
+      location: { origin: 'http://127.0.0.1:17321', search: '', pathname: '/', hash: '' },
+      localStorage: { getItem: () => undefined, setItem: () => undefined },
+      sessionStorage: {
+        getItem: (key: string) => key === 'debrute.webClientId' ? 'debrute-web-client' : undefined,
+        setItem: () => undefined
+      },
+      history: { state: { debruteDaemonToken: 'secret' }, replaceState: vi.fn() }
+    };
+    vi.stubGlobal('fetch', async (url: string, init: RequestInit = {}) => {
+      const parsed = new URL(url);
+      expect(init.headers).toMatchObject({ 'x-debrute-daemon-token': 'secret' });
+      expect(parsed.pathname).toBe(`/api/projects/${projectId}`);
+      return new Response(JSON.stringify({
+        projectId,
+        projectRevision: 7,
+        snapshot: {
+          metadata: { project: { name: 'Demo' } },
+          canvases: [],
+          projections: [],
+          canvasRegistry: { status: 'ready', canvasOrder: [] }
+        }
+      }), { status: 200, headers: { 'content-type': 'application/json' } });
+    });
+
+    const client = createWorkbenchApiClient();
+    const unsubscribe = client.onEvent((event) => events.push(event));
+
+    expect(EventSource.instances).toHaveLength(1);
+    expect(EventSource.instances[0]!.url).toBe('http://127.0.0.1:17321/api/workbench/events?clientId=debrute-web-client&debrute-token=secret');
+
+    await client.openProject({ projectId });
+
+    expect(EventSource.instances).toHaveLength(2);
+    expect(EventSource.instances[0]!.closed).toBe(false);
+    expect(EventSource.instances[1]!.url).toBe(`http://127.0.0.1:17321/api/projects/${projectId}/events?clientId=debrute-web-client&debrute-token=secret`);
+
+    EventSource.instances[0]!.emit({
+      type: 'workbench.preferences.changed',
+      preferences: { locale: 'zh-CN', themePreference: 'dark' }
+    });
+    EventSource.instances[1]!.emit({
+      type: 'project.changed',
+      projectId,
+      projectRevision: 8,
+      snapshot: {
+        metadata: { project: { name: 'Demo' } },
+        canvases: [],
+        projections: [],
+        canvasRegistry: { status: 'ready', canvasOrder: [] }
+      }
+    });
+
+    expect(events.map((event) => (event as { type: string }).type)).toEqual([
+      'workbench.preferences.changed',
+      'project.changed'
+    ]);
+
+    unsubscribe();
+    expect(EventSource.instances.every((source) => source.closed)).toBe(true);
   });
 
   it('calls Workbench preferences routes', async () => {

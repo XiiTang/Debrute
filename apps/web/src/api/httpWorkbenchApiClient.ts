@@ -148,7 +148,9 @@ export function createHttpWorkbenchApiClient(options: HttpWorkbenchApiClientOpti
 
   let currentProjectId: string | undefined;
   let currentProjectRevision: number | undefined;
-  let eventSource: EventSource | undefined;
+  let globalEventSource: EventSource | undefined;
+  let projectEventSource: EventSource | undefined;
+  let globalEventSourceRequestId = 0;
   const eventListeners = new Set<(event: WorkbenchEvent) => void>();
   const projectPathFor = (projectId: string, path: string) => `/api/projects/${encodeURIComponent(projectId)}${path}`;
   const projectPath = (path: string) => {
@@ -196,12 +198,52 @@ export function createHttpWorkbenchApiClient(options: HttpWorkbenchApiClientOpti
   const setCurrentProject = async (projectId: string, projectRevision: number) => {
     currentProjectId = projectId;
     currentProjectRevision = projectRevision;
-    reconnectEventSource();
+    reconnectProjectEventSource();
     await shell()?.bindProjectWindowToProject?.({ projectId });
   };
-  const reconnectEventSource = () => {
-    eventSource?.close();
-    eventSource = undefined;
+  const dispatchWorkbenchEvent = (event: WorkbenchEvent): void => {
+    if ('projectId' in event && 'projectRevision' in event) {
+      rememberProjectRevision(event);
+    }
+    for (const listener of eventListeners) {
+      listener(event);
+    }
+  };
+  const openWorkbenchEventSource = (url: URL): EventSource => {
+    const source = new EventSource(url.toString());
+    source.onmessage = (event) => {
+      dispatchWorkbenchEvent(JSON.parse(event.data) as WorkbenchEvent);
+    };
+    return source;
+  };
+  const reconnectGlobalEventSource = (): void => {
+    globalEventSourceRequestId += 1;
+    const requestId = globalEventSourceRequestId;
+    globalEventSource?.close();
+    globalEventSource = undefined;
+    if (eventListeners.size === 0) {
+      return;
+    }
+    const openGlobalEventSource = (resolvedToken: string | undefined): void => {
+      if (requestId !== globalEventSourceRequestId || eventListeners.size === 0) {
+        return;
+      }
+      const eventUrl = new URL(`${daemonUrl}/api/workbench/events`);
+      eventUrl.searchParams.set('clientId', eventClientId);
+      if (resolvedToken) {
+        eventUrl.searchParams.set('debrute-token', resolvedToken);
+      }
+      globalEventSource = openWorkbenchEventSource(eventUrl);
+    };
+    if (token) {
+      openGlobalEventSource(token);
+      return;
+    }
+    void daemonToken().then(openGlobalEventSource);
+  };
+  const reconnectProjectEventSource = (): void => {
+    projectEventSource?.close();
+    projectEventSource = undefined;
     if (!currentProjectId || eventListeners.size === 0) {
       return;
     }
@@ -210,16 +252,7 @@ export function createHttpWorkbenchApiClient(options: HttpWorkbenchApiClientOpti
     if (token) {
       eventUrl.searchParams.set('debrute-token', token);
     }
-    eventSource = new EventSource(eventUrl.toString());
-    eventSource.onmessage = (event) => {
-      const parsed = JSON.parse(event.data) as WorkbenchEvent;
-      if ('projectId' in parsed && 'projectRevision' in parsed) {
-        rememberProjectRevision(parsed);
-      }
-      for (const listener of eventListeners) {
-        listener(parsed);
-      }
-    };
+    projectEventSource = openWorkbenchEventSource(eventUrl);
   };
 
   return {
@@ -441,15 +474,20 @@ export function createHttpWorkbenchApiClient(options: HttpWorkbenchApiClientOpti
     integrationsRescan: () => request<IntegrationSettingsView>('POST', '/api/integrations/rescan', {}),
     onEvent: (listener: (event: WorkbenchEvent) => void) => {
       eventListeners.add(listener);
-      reconnectEventSource();
+      reconnectGlobalEventSource();
+      reconnectProjectEventSource();
       return () => {
         eventListeners.delete(listener);
         if (eventListeners.size === 0) {
-          eventSource?.close();
-          eventSource = undefined;
+          globalEventSourceRequestId += 1;
+          globalEventSource?.close();
+          projectEventSource?.close();
+          globalEventSource = undefined;
+          projectEventSource = undefined;
           return;
         }
-        reconnectEventSource();
+        reconnectGlobalEventSource();
+        reconnectProjectEventSource();
       };
     }
   };

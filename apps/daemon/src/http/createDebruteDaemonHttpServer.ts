@@ -333,6 +333,14 @@ export function createDebruteDaemonHttpServer(options: DebruteDaemonHttpServerOp
       writeJson(context.response, 200, { ok: true });
       return true;
     }
+    if (path === '/api/workbench/events') {
+      if (method !== 'GET') {
+        writeError(context.response, 405, 'method_not_allowed', 'Unsupported Workbench event stream method.');
+        return true;
+      }
+      writeGlobalWorkbenchEventStream(context, globalRuntime);
+      return true;
+    }
     if (method === 'GET' && path === '/api/projects') {
       writeJson(context.response, 200, {
         projects: sessions.list().map((session) => ({
@@ -482,7 +490,7 @@ export function createDebruteDaemonHttpServer(options: DebruteDaemonHttpServerOp
     const path = context.url.pathname;
     const tail = projectRoute.tail;
     if (method === 'GET' && tail === '/events') {
-      writeEventStream(context, session, globalRuntime, sessions, adobeBridge);
+      writeEventStream(context, session, sessions, adobeBridge);
       return;
     }
     if (method === 'GET' && tail === '') {
@@ -1525,10 +1533,57 @@ async function handleSettingsRoute(context: GlobalRuntimeRequestContext): Promis
   writeError(context.response, 404, 'not_found', `Unknown Debrute API route: ${path}`);
 }
 
+type GlobalWorkbenchEvent = Extract<WorkbenchEvent, {
+  type:
+    | 'llm.settings.changed'
+    | 'imageModel.settings.changed'
+    | 'videoModel.settings.changed'
+    | 'integrations.settings.changed'
+    | 'adobeBridge.settings.changed'
+    | 'workbench.preferences.changed'
+}>;
+
+function writeGlobalWorkbenchEventStream(
+  context: RequestContext,
+  globalRuntime: DebruteGlobalRuntimeServer
+): void {
+  context.response.writeHead(200, {
+    'content-type': 'text/event-stream',
+    'cache-control': 'no-cache',
+    connection: 'keep-alive'
+  });
+  context.response.write('\n');
+  const unsubscribeGlobal = globalRuntime.onEvent((event) => {
+    if (isGlobalWorkbenchEvent(event)) {
+      writeSseWorkbenchEvent(context.response, event);
+    }
+  });
+  const keepalive = setInterval(() => {
+    context.response.write(': keepalive\n\n');
+  }, 15_000);
+  const cleanup = (): void => {
+    clearInterval(keepalive);
+    unsubscribeGlobal();
+  };
+  context.request.once('close', cleanup);
+}
+
+function writeSseWorkbenchEvent(response: ServerResponse, event: WorkbenchEvent): void {
+  response.write(`event: message\ndata: ${JSON.stringify(event)}\n\n`);
+}
+
+function isGlobalWorkbenchEvent(event: AppServerEvent): event is GlobalWorkbenchEvent {
+  return event.type === 'llm.settings.changed'
+    || event.type === 'imageModel.settings.changed'
+    || event.type === 'videoModel.settings.changed'
+    || event.type === 'integrations.settings.changed'
+    || event.type === 'adobeBridge.settings.changed'
+    || event.type === 'workbench.preferences.changed';
+}
+
 function writeEventStream(
   context: RequestContext,
   session: ProjectSessionRecord,
-  globalRuntime: DebruteGlobalRuntimeServer,
   sessions: ProjectSessionRegistry,
   bridge?: AdobeBridgeService
 ): void {
@@ -1541,31 +1596,19 @@ function writeEventStream(
   });
   context.response.write('\n');
   const unsubscribeProject = session.appServer.onEvent((event) => {
-    context.response.write(`event: message\ndata: ${JSON.stringify(eventForHttp(
+    writeSseWorkbenchEvent(context.response, eventForHttp(
       event,
       context.runtime.daemonUrl,
       session.projectId,
       session.projectRevision,
       context.runtime.token
-    ))}\n\n`);
-  });
-  const unsubscribeGlobal = globalRuntime.onEvent((event) => {
-    if (!isGlobalEvent(event)) {
-      return;
-    }
-    context.response.write(`event: message\ndata: ${JSON.stringify(eventForHttp(
-      event,
-      context.runtime.daemonUrl,
-      session.projectId,
-      session.projectRevision,
-      context.runtime.token
-    ))}\n\n`);
+    ));
   });
   const unsubscribeBridge = bridge?.onEvent((state) => {
-    context.response.write(`event: message\ndata: ${JSON.stringify({
+    writeSseWorkbenchEvent(context.response, {
       type: 'adobeBridge.state.changed',
       state
-    } satisfies WorkbenchEvent)}\n\n`);
+    });
   }) ?? (() => undefined);
   const keepalive = setInterval(() => {
     context.response.write(': keepalive\n\n');
@@ -1573,20 +1616,10 @@ function writeEventStream(
   const cleanup = (): void => {
     clearInterval(keepalive);
     unsubscribeProject();
-    unsubscribeGlobal();
     unsubscribeBridge();
     releaseClient?.();
   };
   context.request.once('close', cleanup);
-}
-
-function isGlobalEvent(event: AppServerEvent): boolean {
-  return event.type === 'llm.settings.changed'
-    || event.type === 'imageModel.settings.changed'
-    || event.type === 'videoModel.settings.changed'
-    || event.type === 'integrations.settings.changed'
-    || event.type === 'adobeBridge.settings.changed'
-    || event.type === 'workbench.preferences.changed';
 }
 
 async function serveWebAsset(context: RequestContext, configuredWebDistDir: string | undefined): Promise<void> {

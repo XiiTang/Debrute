@@ -80,23 +80,13 @@ describe('daemon Workbench preferences HTTP routes', () => {
     });
   });
 
-  it('forwards Workbench preference changes to project event streams', async () => {
-    const home = await mkdtemp(join(tmpdir(), 'debrute-daemon-workbench-event-home-'));
-    const projectRoot = await mkdtemp(join(tmpdir(), 'debrute-daemon-workbench-event-project-'));
+  it('forwards Workbench preference changes to the global Workbench event stream without opening a project', async () => {
+    const home = await mkdtemp(join(tmpdir(), 'debrute-daemon-workbench-global-event-home-'));
     const daemon = createDaemon(home);
-    cleanups.push(
-      () => daemon.close(),
-      () => rm(projectRoot, { recursive: true, force: true }),
-      () => rm(home, { recursive: true, force: true })
-    );
+    cleanups.push(() => daemon.close(), () => rm(home, { recursive: true, force: true }));
     const runtime = await daemon.listen();
-    const opened = await requestJson<{ projectId: string }>(`${runtime.daemonUrl}/api/projects/open`, {
-      method: 'POST',
-      headers: { 'content-type': 'application/json', 'x-debrute-daemon-token': 'test-token' },
-      body: JSON.stringify({ projectRoot })
-    });
 
-    const eventPromise = onceWorkbenchEvent(`${runtime.daemonUrl}/api/projects/${encodeURIComponent(opened.projectId)}/events?clientId=test-client&debrute-token=test-token`);
+    const eventPromise = onceWorkbenchEvent(`${runtime.daemonUrl}/api/workbench/events?clientId=test-client&debrute-token=test-token`);
     await requestJson(`${runtime.daemonUrl}/api/settings/workbench-preferences`, {
       method: 'PUT',
       headers: { 'content-type': 'application/json', 'x-debrute-daemon-token': 'test-token' },
