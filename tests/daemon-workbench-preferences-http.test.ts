@@ -6,6 +6,7 @@ import { GlobalConfigStore } from '@debrute/app-server';
 import { createDebruteDaemonHttpServer } from '@debrute/daemon';
 
 const invalidLocaleMessage = 'Workbench locale must be "en" or "zh-CN".';
+const invalidThemeMessage = 'Workbench theme preference must be "system", "dark", or "light".';
 
 describe('daemon Workbench preferences HTTP routes', () => {
   const cleanups: Array<() => Promise<void> | void> = [];
@@ -25,16 +26,16 @@ describe('daemon Workbench preferences HTTP routes', () => {
     const initial = await requestJson(`${runtime.daemonUrl}/api/settings/workbench-preferences`, {
       headers: { 'x-debrute-daemon-token': 'test-token' }
     });
-    expect(initial).toEqual({ locale: 'en' });
+    expect(initial).toEqual({ locale: 'en', themePreference: 'system' });
 
     const saved = await requestJson(`${runtime.daemonUrl}/api/settings/workbench-preferences`, {
       method: 'PUT',
       headers: { 'content-type': 'application/json', 'x-debrute-daemon-token': 'test-token' },
-      body: JSON.stringify({ locale: 'zh-CN' })
+      body: JSON.stringify({ locale: 'zh-CN', themePreference: 'light' })
     });
 
-    expect(saved).toEqual({ locale: 'zh-CN' });
-    await expect(readFile(join(home, 'config', 'workbench_preferences.json'), 'utf8')).resolves.toBe('{\n  "locale": "zh-CN"\n}\n');
+    expect(saved).toEqual({ locale: 'zh-CN', themePreference: 'light' });
+    await expect(readFile(join(home, 'config', 'workbench_preferences.json'), 'utf8')).resolves.toBe('{\n  "locale": "zh-CN",\n  "themePreference": "light"\n}\n');
   });
 
   it('rejects unsupported locales through the daemon route', async () => {
@@ -46,7 +47,7 @@ describe('daemon Workbench preferences HTTP routes', () => {
     const response = await fetch(`${runtime.daemonUrl}/api/settings/workbench-preferences`, {
       method: 'PUT',
       headers: { 'content-type': 'application/json', 'x-debrute-daemon-token': 'test-token' },
-      body: JSON.stringify({ locale: 'fr' })
+      body: JSON.stringify({ locale: 'fr', themePreference: 'system' })
     });
 
     expect(response.status).toBe(400);
@@ -54,6 +55,27 @@ describe('daemon Workbench preferences HTTP routes', () => {
       error: {
         code: 'invalid_input',
         message: invalidLocaleMessage
+      }
+    });
+  });
+
+  it('rejects unsupported theme preferences through the daemon route', async () => {
+    const home = await mkdtemp(join(tmpdir(), 'debrute-daemon-workbench-invalid-theme-home-'));
+    const daemon = createDaemon(home);
+    cleanups.push(() => daemon.close(), () => rm(home, { recursive: true, force: true }));
+    const runtime = await daemon.listen();
+
+    const response = await fetch(`${runtime.daemonUrl}/api/settings/workbench-preferences`, {
+      method: 'PUT',
+      headers: { 'content-type': 'application/json', 'x-debrute-daemon-token': 'test-token' },
+      body: JSON.stringify({ locale: 'en', themePreference: 'solarized' })
+    });
+
+    expect(response.status).toBe(400);
+    await expect(response.json()).resolves.toMatchObject({
+      error: {
+        code: 'invalid_input',
+        message: invalidThemeMessage
       }
     });
   });
@@ -78,12 +100,12 @@ describe('daemon Workbench preferences HTTP routes', () => {
     await requestJson(`${runtime.daemonUrl}/api/settings/workbench-preferences`, {
       method: 'PUT',
       headers: { 'content-type': 'application/json', 'x-debrute-daemon-token': 'test-token' },
-      body: JSON.stringify({ locale: 'zh-CN' })
+      body: JSON.stringify({ locale: 'zh-CN', themePreference: 'dark' })
     });
 
     await expect(eventPromise).resolves.toEqual({
       type: 'workbench.preferences.changed',
-      preferences: { locale: 'zh-CN' }
+      preferences: { locale: 'zh-CN', themePreference: 'dark' }
     });
   });
 });

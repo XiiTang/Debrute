@@ -37,12 +37,14 @@ import type {
   UpdateCanvasFeedbackEntryInput
 } from '@debrute/canvas-core';
 import type { ProjectTreeSelectionState } from './workbench/project-explorer/projectTreeInteraction';
+import type { WorkbenchResolvedTheme } from './workbench/services/workbenchTheme';
 
 export interface WorkbenchState {
   snapshot: WorkbenchProjectSessionSnapshot | undefined;
   projectId?: string | undefined;
   titleBarState: WorkbenchTitleBarState;
   workbenchPreferences: WorkbenchPreferencesView | undefined;
+  resolvedTheme: WorkbenchResolvedTheme;
   projectOpen: ProjectOpenState;
   explorerSelection: ProjectTreeSelectionState;
   llmSettings: LlmProviderSettingsView | undefined;

@@ -4,7 +4,7 @@ import {
   projectWebShellUrl,
   type DebruteDaemonRuntimeLike
 } from './daemonProjectOpen.js';
-import type { WorkbenchTitleBarState } from '@debrute/app-protocol';
+import type { WorkbenchPreferencesView, WorkbenchTitleBarState } from '@debrute/app-protocol';
 
 type DesktopRuntimeFetch = (url: string, init?: RequestInit) => Promise<Response>;
 
@@ -15,6 +15,7 @@ export interface DesktopRuntimeClient {
   openProject(projectRoot: string): Promise<{ projectId: string; url: string }>;
   openProjectFromPicker(): Promise<{ opened: false } | { opened: true; projectId: string; url: string }>;
   getWorkbenchTitleBarState(projectId?: string): Promise<WorkbenchTitleBarState>;
+  workbenchPreferencesGet(): Promise<WorkbenchPreferencesView>;
   clearRecentProjectRoots(): Promise<{ ok: true }>;
   registerElectronProjectWindow(projectId: string, windowId: number): Promise<{ projectRoot: string; release: () => Promise<void> }>;
   close(): Promise<void>;
@@ -37,10 +38,24 @@ export function createAttachedDesktopRuntimeClient(
     openProject: (projectRoot) => openProjectThroughDaemon(attachedRuntime, projectRoot, fetchImpl),
     openProjectFromPicker: () => openProjectFromPickerThroughDaemon(attachedRuntime, fetchImpl),
     getWorkbenchTitleBarState: (projectId) => getWorkbenchTitleBarState(attachedRuntime, fetchImpl, projectId),
+    workbenchPreferencesGet: () => workbenchPreferencesGet(attachedRuntime, fetchImpl),
     clearRecentProjectRoots: () => clearRecentProjectRoots(attachedRuntime, fetchImpl),
     registerElectronProjectWindow: (projectId, windowId) => registerElectronProjectWindow(attachedRuntime, projectId, windowId, fetchImpl),
     close: async () => undefined
   };
+}
+
+async function workbenchPreferencesGet(
+  runtime: DebruteDaemonRuntimeLike,
+  fetchImpl: DesktopRuntimeFetch
+): Promise<WorkbenchPreferencesView> {
+  const response = await fetchImpl(new URL('/api/settings/workbench-preferences', runtime.daemonUrl).toString(), {
+    headers: { 'x-debrute-daemon-token': runtime.token }
+  });
+  if (!response.ok) {
+    throw new Error(`Debrute daemon Workbench preferences request failed: ${response.status}`);
+  }
+  return response.json() as Promise<WorkbenchPreferencesView>;
 }
 
 async function getWorkbenchTitleBarState(

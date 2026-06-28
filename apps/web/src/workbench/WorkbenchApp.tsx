@@ -7,6 +7,7 @@ import type {
   WorkbenchProjectPathEntry,
   WorkbenchProjectSessionSnapshot,
   WorkbenchPreferencesView,
+  WorkbenchThemePreference,
   WorkbenchTitleBarState
 } from '@debrute/app-protocol';
 import { unavailableWorkbenchTitleBarState } from '@debrute/app-protocol';
@@ -113,6 +114,14 @@ import {
 import { readWorkbenchViewportRect } from './shell/windowBounds';
 import type { FloatingTextEditorWindowState, TextFileBuffer, WorkbenchActions, WorkbenchState } from '../types';
 import { I18nProvider, createI18n, parseWorkbenchLocale, type WorkbenchI18n, type WorkbenchLocale } from './i18n';
+import {
+  DEFAULT_WORKBENCH_PREFERENCES,
+  parseWorkbenchThemePreference,
+  resolveWorkbenchThemePreference,
+  setDocumentTheme,
+  subscribeSystemThemeChanges,
+  type WorkbenchResolvedTheme
+} from './services/workbenchTheme';
 
 const api = createWorkbenchApiClient();
 
@@ -138,6 +147,8 @@ export function WorkbenchApp(): React.ReactElement {
   const [adobeBridge, setAdobeBridge] = useState<WorkbenchState['adobeBridge']>();
   const [workbenchPreferences, setWorkbenchPreferences] = useState<WorkbenchPreferencesView>();
   const [locale, setLocale] = useState<WorkbenchLocale>('en');
+  const [themePreference, setThemePreference] = useState<WorkbenchThemePreference>('system');
+  const [resolvedTheme, setResolvedTheme] = useState<WorkbenchResolvedTheme>(() => resolveWorkbenchThemePreference('system'));
   const [canvasFeedback, setCanvasFeedback] = useState<WorkbenchState['canvasFeedback']>();
   const [textFileBuffers, setTextFileBuffers] = useState<Record<string, TextFileBuffer>>({});
   const [textEditorWindows, setTextEditorWindows] = useState<Record<string, FloatingTextEditorWindowState>>({});
@@ -176,9 +187,34 @@ export function WorkbenchApp(): React.ReactElement {
   const i18n = useMemo(() => createI18n(locale), [locale]);
   const localeRef = useRef<WorkbenchLocale>(locale);
 
+  const applyWorkbenchPreferences = useCallback((preferences: WorkbenchPreferencesView) => {
+    const nextLocale = parseWorkbenchLocale(preferences.locale);
+    const nextThemePreference = parseWorkbenchThemePreference(preferences.themePreference);
+    const nextPreferences: WorkbenchPreferencesView = {
+      locale: nextLocale,
+      themePreference: nextThemePreference
+    };
+    localeRef.current = nextLocale;
+    setWorkbenchPreferences(nextPreferences);
+    setLocale(nextLocale);
+    setThemePreference(nextThemePreference);
+  }, []);
+
   useEffect(() => {
     localeRef.current = locale;
   }, [locale]);
+
+  useEffect(() => {
+    setResolvedTheme(resolveWorkbenchThemePreference(themePreference));
+    if (themePreference !== 'system') {
+      return;
+    }
+    return subscribeSystemThemeChanges(setResolvedTheme);
+  }, [themePreference]);
+
+  useEffect(() => {
+    setDocumentTheme(resolvedTheme);
+  }, [resolvedTheme]);
 
   const notifyCanvasFeedbackUnavailable = useCallback((message: string) => {
     const currentI18n = createI18n(localeRef.current);
@@ -340,18 +376,13 @@ export function WorkbenchApp(): React.ReactElement {
         if (disposed) {
           return;
         }
-        const nextLocale = parseWorkbenchLocale(preferences.locale);
-        localeRef.current = nextLocale;
-        setWorkbenchPreferences({ locale: nextLocale });
-        setLocale(nextLocale);
+        applyWorkbenchPreferences(preferences);
       } catch (error) {
         if (disposed) {
           return;
         }
         const englishI18n = createI18n('en');
-        localeRef.current = 'en';
-        setLocale('en');
-        setWorkbenchPreferences({ locale: 'en' });
+        applyWorkbenchPreferences(DEFAULT_WORKBENCH_PREFERENCES);
         setNotifications((current) => [
           englishI18n.t('shell.notifications.languagePreferenceLoadFailed', { message: errorMessage(error) }),
           ...current
@@ -384,7 +415,7 @@ export function WorkbenchApp(): React.ReactElement {
     return () => {
       disposed = true;
     };
-  }, [applyOpenedProject, initialRoute]);
+  }, [applyOpenedProject, applyWorkbenchPreferences, initialRoute]);
 
   useEffect(() => {
     void refreshTitleBarState(daemonProjectId);
@@ -480,10 +511,7 @@ export function WorkbenchApp(): React.ReactElement {
         void loadCanvasFeedback(api, setCanvasFeedback, notifyCanvasFeedbackUnavailable);
       }
       if (event.type === 'workbench.preferences.changed') {
-        const nextLocale = parseWorkbenchLocale(event.preferences.locale);
-        localeRef.current = nextLocale;
-        setWorkbenchPreferences({ locale: nextLocale });
-        setLocale(nextLocale);
+        applyWorkbenchPreferences(event.preferences);
       }
       if (event.type === 'project.fileChanged') {
         void refreshTextFileBuffer(event.event.projectRelativePath);
@@ -513,7 +541,7 @@ export function WorkbenchApp(): React.ReactElement {
         setAdobeBridge(event.state);
       }
     });
-  }, [chooseActiveCanvasForProject, loadFloatingPanelsForProject, notifyCanvasFeedbackUnavailable, refreshTextFileBuffer]);
+  }, [applyWorkbenchPreferences, chooseActiveCanvasForProject, loadFloatingPanelsForProject, notifyCanvasFeedbackUnavailable, refreshTextFileBuffer]);
 
   useEffect(() => {
     if (!snapshot || snapshot.canvasRegistry.status !== 'ready') {
@@ -664,6 +692,7 @@ export function WorkbenchApp(): React.ReactElement {
     projectId: daemonProjectId,
     titleBarState: effectiveTitleBarState,
     workbenchPreferences,
+    resolvedTheme,
     projectOpen: {
       ...(projectOpenAttemptedPath ? { attemptedPath: projectOpenAttemptedPath } : {}),
       ...(projectOpenError ? { error: projectOpenError } : {}),
@@ -689,26 +718,18 @@ export function WorkbenchApp(): React.ReactElement {
 
   const actions: WorkbenchActions = useMemo(() => ({
     saveWorkbenchPreferences: async (input) => {
-      const previousLocale = locale;
-      const nextLocale = input.locale;
-      localeRef.current = nextLocale;
-      setLocale(nextLocale);
-      setWorkbenchPreferences({ locale: nextLocale });
+      const previousPreferences = workbenchPreferences ?? DEFAULT_WORKBENCH_PREFERENCES;
+      const nextPreferences: WorkbenchPreferencesView = {
+        locale: parseWorkbenchLocale(input.locale),
+        themePreference: parseWorkbenchThemePreference(input.themePreference)
+      };
+      applyWorkbenchPreferences(nextPreferences);
       try {
-        const preferences = await api.workbenchPreferencesSave({ locale: nextLocale });
-        const savedLocale = parseWorkbenchLocale(preferences.locale);
-        localeRef.current = savedLocale;
-        setLocale(savedLocale);
-        setWorkbenchPreferences({ locale: savedLocale });
+        const preferences = await api.workbenchPreferencesSave(nextPreferences);
+        applyWorkbenchPreferences(preferences);
       } catch (error) {
-        localeRef.current = previousLocale;
-        setLocale(previousLocale);
-        setWorkbenchPreferences({ locale: previousLocale });
-        const previousI18n = createI18n(previousLocale);
-        setNotifications((current) => [
-          previousI18n.t('shell.notifications.languagePreferenceSaveFailed', { message: errorMessage(error) }),
-          ...current
-        ].slice(0, 4));
+        applyWorkbenchPreferences(previousPreferences);
+        throw error;
       }
     },
     openProject: async () => {
@@ -941,6 +962,7 @@ export function WorkbenchApp(): React.ReactElement {
   }), [
     activeCanvasId,
     activeCanvasRuntime,
+    applyWorkbenchPreferences,
     applyOpenedProject,
     centerCanvasProjectionNode,
     locateProjectFileInCanvas,
@@ -948,7 +970,6 @@ export function WorkbenchApp(): React.ReactElement {
     ensureTextFileBuffer,
     i18n,
     loadFloatingPanelsForProject,
-    locale,
     lookupGeneratedAssetMetadata,
     openTerminalPanel,
     openTextEditorWindow,
@@ -960,6 +981,7 @@ export function WorkbenchApp(): React.ReactElement {
     toggleTextFileWordWrap,
     updateCanvasFeedbackEntry,
     updateTextFileBuffer,
+    workbenchPreferences,
     writeProjectTextFile
   ]);
 
@@ -1356,7 +1378,7 @@ export function WorkbenchApp(): React.ReactElement {
   if (isLoading) {
     return (
       <I18nProvider locale={locale}>
-        <div className="workbench-shell" data-theme="dark" data-testid="workbench-shell">
+        <div className="workbench-shell" data-theme={resolvedTheme} data-testid="workbench-shell">
           <WorkbenchTitleBar
             state={effectiveTitleBarState}
             nativeWindowState={nativeWindowState}
@@ -1374,7 +1396,7 @@ export function WorkbenchApp(): React.ReactElement {
 
   return (
     <I18nProvider locale={locale}>
-      <div className="workbench-shell" data-theme="dark" data-testid="workbench-shell">
+      <div className="workbench-shell" data-theme={resolvedTheme} data-testid="workbench-shell">
       <WorkbenchTitleBar
         state={effectiveTitleBarState}
         nativeWindowState={nativeWindowState}
@@ -1547,6 +1569,7 @@ export function WorkbenchApp(): React.ReactElement {
                 terminalPanel={(
                   <TerminalPanel
                     api={api}
+                    resolvedTheme={resolvedTheme}
                     requestedCwdProjectRelativePath={requestedTerminalCwd}
                     onRequestedCwdConsumed={() => setRequestedTerminalCwd(null)}
                   />

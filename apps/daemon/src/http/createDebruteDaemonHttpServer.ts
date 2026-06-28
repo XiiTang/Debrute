@@ -2084,7 +2084,13 @@ function writeCaughtError(response: ServerResponse, error: unknown): void {
   if (writeAdobeBridgeCaughtError(response, error)) {
     return;
   }
-  if (error instanceof Error && error.message === 'Workbench locale must be "en" or "zh-CN".') {
+  if (
+    error instanceof Error
+    && (
+      error.message === 'Workbench locale must be "en" or "zh-CN".'
+      || error.message === 'Workbench theme preference must be "system", "dark", or "light".'
+    )
+  ) {
     writeError(response, 400, 'invalid_input', error.message);
     return;
   }

@@ -60,6 +60,8 @@ const allowedStringPatterns = [
   /^Resize \{value\}$/,
   /^CanvasImageNodeAssetProvider is required\.$/,
   /^Workbench locale must be "en" or "zh-CN"\.$/,
+  /^Workbench theme preference must be "system", "dark", or "light"\.$/,
+  /^\(prefers-color-scheme: dark\)$/,
   /^Workbench viewport requires a browser window\.$/,
   /^Electron shell IPC is unavailable\.$/,
   /^Electron external drop did not expose every dropped file path\.$/,

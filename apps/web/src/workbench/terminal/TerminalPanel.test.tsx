@@ -18,6 +18,7 @@ describe('TerminalPanel rendering', () => {
     const html = renderStaticWithI18n(
       <TerminalPanel
         api={{} as WorkbenchApiClient}
+        resolvedTheme="light"
         requestedCwdProjectRelativePath={null}
         onRequestedCwdConsumed={() => undefined}
       />

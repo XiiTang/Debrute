@@ -102,6 +102,32 @@ describe('WorkbenchApp title bar contracts', () => {
   });
 });
 
+describe('WorkbenchApp appearance theme contracts', () => {
+  it('keeps resolved theme in WorkbenchState', () => {
+    type HasResolvedTheme = WorkbenchState extends { resolvedTheme: 'dark' | 'light' } ? true : false;
+    const check: HasResolvedTheme = true;
+    expect(check).toBe(true);
+  });
+
+  it('does not hard-code dark theme on the Workbench shell', () => {
+    const source = readFileSync(join(process.cwd(), 'apps/web/src/workbench/WorkbenchApp.tsx'), 'utf8');
+
+    expect(source).not.toContain('data-theme="dark"');
+    expect(source).toContain('data-theme={resolvedTheme}');
+    expect(source).toContain('setDocumentTheme(resolvedTheme)');
+    expect(source).toContain('resolvedTheme={resolvedTheme}');
+  });
+
+  it('handles full Workbench preferences instead of locale-only state', () => {
+    const source = readFileSync(join(process.cwd(), 'apps/web/src/workbench/WorkbenchApp.tsx'), 'utf8');
+
+    expect(source).toContain('parseWorkbenchThemePreference(preferences.themePreference)');
+    expect(source).toContain('setThemePreference(nextThemePreference)');
+    expect(source).toContain('subscribeSystemThemeChanges(setResolvedTheme)');
+    expect(source).not.toContain('setWorkbenchPreferences({ locale: nextLocale })');
+  });
+});
+
 function feedbackTarget(projectRelativePath = 'flow/a.png'): CanvasFeedbackBarTarget {
   return {
     projectRelativePath,

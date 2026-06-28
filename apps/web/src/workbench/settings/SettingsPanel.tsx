@@ -96,8 +96,9 @@ export function SettingsPanel({ state, actions }: { state: WorkbenchState; actio
         {activePage === 'general' ? (
           <GeneralSettingsPage
             shell={getDebruteShellApi()}
-            locale={state.workbenchPreferences?.locale ?? 'en'}
-            onLocaleChange={(locale) => void actions.saveWorkbenchPreferences({ locale })}
+            resolvedTheme={state.resolvedTheme}
+            onPreferencesChange={actions.saveWorkbenchPreferences}
+            {...(state.workbenchPreferences ? { preferences: state.workbenchPreferences } : {})}
           />
         ) : activePage === 'llm' ? (
           <LlmSettings state={state} actions={actions} />

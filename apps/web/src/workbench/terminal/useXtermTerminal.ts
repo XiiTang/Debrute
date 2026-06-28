@@ -1,12 +1,15 @@
-import { useEffect, type RefObject } from 'react';
+import { useEffect, useRef, type RefObject } from 'react';
 import { FitAddon } from '@xterm/addon-fit';
 import { Terminal } from '@xterm/xterm';
 import '@xterm/xterm/css/xterm.css';
 import type { TerminalSessionView, WorkbenchApiClient } from '@debrute/app-protocol';
+import type { WorkbenchResolvedTheme } from '../services/workbenchTheme';
 import { createTerminalEventRenderer } from './terminalEventRendering';
+import { terminalThemeForWorkbenchTheme } from './terminalTheme';
 
 export interface UseXtermTerminalInput {
   api: WorkbenchApiClient;
+  resolvedTheme: WorkbenchResolvedTheme;
   session: TerminalSessionView | null;
   containerRef: RefObject<HTMLDivElement | null>;
   onSessionUpdate(session: TerminalSessionView): void;
@@ -15,6 +18,8 @@ export interface UseXtermTerminalInput {
 }
 
 export function useXtermTerminal(input: UseXtermTerminalInput): void {
+  const terminalRef = useRef<Terminal | null>(null);
+
   useEffect(() => {
     const session = input.session;
     const container = input.containerRef.current;
@@ -28,12 +33,9 @@ export function useXtermTerminal(input: UseXtermTerminalInput): void {
       fontSize: 13,
       lineHeight: 1.2,
       scrollback: 10_000,
-      theme: {
-        background: '#0c0e10',
-        foreground: '#e6edf3',
-        cursor: '#f6f8fa'
-      }
+      theme: terminalThemeForWorkbenchTheme(input.resolvedTheme)
     });
+    terminalRef.current = terminal;
     const fitAddon = new FitAddon();
     terminal.loadAddon(fitAddon);
     terminal.open(container);
@@ -76,6 +78,15 @@ export function useXtermTerminal(input: UseXtermTerminalInput): void {
       subscription.close();
       dataDisposable.dispose();
       terminal.dispose();
+      terminalRef.current = null;
     };
-  }, [input.api, input.containerRef, input.session?.id, input.onError, input.onSessionUpdate]);
+  }, [input.api, input.containerRef, input.session?.id, input.onError, input.onSessionClose, input.onSessionUpdate]);
+
+  useEffect(() => {
+    const terminal = terminalRef.current;
+    if (!terminal) {
+      return;
+    }
+    terminal.options.theme = terminalThemeForWorkbenchTheme(input.resolvedTheme);
+  }, [input.resolvedTheme]);
 }

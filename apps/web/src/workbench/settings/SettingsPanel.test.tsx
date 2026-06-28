@@ -47,21 +47,27 @@ describe('SettingsPanel shared UI composition', () => {
     expect(html).not.toContain('settings-key-input');
   });
 
-  it('renders the Workbench language preference in General settings', () => {
-    const saved: string[] = [];
+  it('renders Workbench language and appearance preferences in General settings', () => {
+    const saved: Array<{ locale: string; themePreference: string }> = [];
     const html = renderToStaticMarkup(
       <I18nProvider locale="zh-CN">
         <GeneralSettingsPage
           shell={undefined}
-          locale="zh-CN"
-          onLocaleChange={(locale) => {
-            saved.push(locale);
+          preferences={{ locale: 'zh-CN', themePreference: 'system' }}
+          resolvedTheme="dark"
+          onPreferencesChange={async (preferences) => {
+            saved.push(preferences);
           }}
         />
       </I18nProvider>
     );
 
     expect(html).toContain('通用');
+    expect(html).toContain('外观');
+    expect(html).toContain('主题');
+    expect(html).toContain('跟随系统');
+    expect(html).toContain('深色');
+    expect(html).toContain('浅色');
     expect(html).toContain('语言');
     expect(html).toContain('简体中文');
     expect(saved).toEqual([]);
@@ -72,6 +78,8 @@ function stateWithSettings(): WorkbenchState {
   return {
     snapshot: undefined,
     titleBarState: { available: false },
+    workbenchPreferences: { locale: 'en', themePreference: 'system' },
+    resolvedTheme: 'dark',
     projectOpen: { opening: false },
     explorerSelection: { selectedPaths: [], focusedPath: undefined, anchorPath: undefined },
     llmSettings: {
@@ -112,6 +120,7 @@ function stateWithSettings(): WorkbenchState {
 
 function actions(): WorkbenchActions {
   return {
+    saveWorkbenchPreferences: vi.fn(async () => undefined),
     saveLlmProviderSetting: vi.fn(async () => undefined),
     deleteLlmProviderSetting: vi.fn(async () => undefined),
     setDefaultLlmModelKey: vi.fn(async () => undefined),

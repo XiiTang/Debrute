@@ -153,7 +153,10 @@ describe('workbench API client', () => {
         body: init.body ? JSON.parse(String(init.body)) : undefined,
         headers: init.headers
       });
-      return new Response(JSON.stringify({ locale: parsed.pathname === '/api/settings/workbench-preferences' && init.method === 'PUT' ? 'zh-CN' : 'en' }), {
+      return new Response(JSON.stringify({
+        locale: parsed.pathname === '/api/settings/workbench-preferences' && init.method === 'PUT' ? 'zh-CN' : 'en',
+        themePreference: parsed.pathname === '/api/settings/workbench-preferences' && init.method === 'PUT' ? 'light' : 'system'
+      }), {
         status: 200,
         headers: { 'content-type': 'application/json' }
       });
@@ -161,8 +164,17 @@ describe('workbench API client', () => {
 
     const client = createWorkbenchApiClient();
 
-    await expect(client.workbenchPreferencesGet()).resolves.toEqual({ locale: 'en' });
-    await expect(client.workbenchPreferencesSave({ locale: 'zh-CN' })).resolves.toEqual({ locale: 'zh-CN' });
+    await expect(client.workbenchPreferencesGet()).resolves.toEqual({
+      locale: 'en',
+      themePreference: 'system'
+    });
+    await expect(client.workbenchPreferencesSave({
+      locale: 'zh-CN',
+      themePreference: 'light'
+    })).resolves.toEqual({
+      locale: 'zh-CN',
+      themePreference: 'light'
+    });
 
     expect(requests).toEqual([
       {
@@ -174,7 +186,7 @@ describe('workbench API client', () => {
       {
         method: 'PUT',
         path: '/api/settings/workbench-preferences',
-        body: { locale: 'zh-CN' },
+        body: { locale: 'zh-CN', themePreference: 'light' },
         headers: { 'content-type': 'application/json', 'x-debrute-daemon-token': 'secret' }
       }
     ]);

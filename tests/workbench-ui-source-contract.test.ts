@@ -321,10 +321,17 @@ describe('Workbench UI source contract', () => {
     expect(rule(terminal, '.terminal-panel__surface .xterm-viewport, .terminal-panel__surface .xterm-screen, .terminal-panel__surface .xterm-rows')).toContain('background-color: var(--db-terminal-bg);');
   });
 
-  it('keeps Terminal emulator background continuous with the Workbench panel surface', () => {
+  it('keeps Terminal emulator theme tied to the resolved Workbench theme', () => {
     const terminalHook = css('apps/web/src/workbench/terminal/useXtermTerminal.ts');
+    const terminalPanel = css('apps/web/src/workbench/terminal/TerminalPanel.tsx');
+    const workbenchApp = css('apps/web/src/workbench/WorkbenchApp.tsx');
 
-    expect(terminalHook).toContain("background: '#0c0e10'");
+    expect(terminalHook).toContain('terminalThemeForWorkbenchTheme(input.resolvedTheme)');
+    expect(terminalHook).toContain('terminal.options.theme = terminalThemeForWorkbenchTheme(input.resolvedTheme);');
+    expect(terminalHook).not.toContain("background: '#0c0e10'");
+    expect(terminalPanel).toContain('resolvedTheme: WorkbenchResolvedTheme;');
+    expect(terminalPanel).toContain('resolvedTheme,');
+    expect(workbenchApp).toContain('resolvedTheme={resolvedTheme}');
     expect(terminalHook).not.toContain("background: '#111315'");
     expect(terminalHook).not.toContain("background: '#181818'");
     expect(terminalHook).not.toContain("background: '#0b0d12'");
@@ -665,11 +672,13 @@ describe('Workbench UI source contract', () => {
     }
   });
 
-  it('keeps the final neutral Workbench background and white foreground contract', () => {
+  it('defines dark and light Workbench theme token branches', () => {
     const tokens = css('apps/web/src/workbench/ui/styles/tokens.css');
     const controls = css('apps/web/src/workbench/ui/styles/controls.css');
 
-    for (const declaration of [
+    expect(tokens).toContain(':root[data-theme="dark"]');
+    expect(tokens).toContain(':root[data-theme="light"]');
+    for (const darkDeclaration of [
       '--db-bg: #181818;',
       '--db-surface-1: #1f1f1f;',
       '--db-surface-2: #262626;',
@@ -678,11 +687,22 @@ describe('Workbench UI source contract', () => {
       '--db-canvas-bg: #181818;',
       '--db-text: #ffffff;'
     ]) {
-      expect(tokens).toContain(declaration);
+      expect(tokens).toContain(darkDeclaration);
+    }
+    for (const lightDeclaration of [
+      '--db-bg: #f4f5f7;',
+      '--db-surface-1: #ffffff;',
+      '--db-surface-2: #eef0f3;',
+      '--db-surface-3: #e2e5e9;',
+      '--db-terminal-bg: #f8f9fb;',
+      '--db-canvas-bg: #eef0f3;',
+      '--db-text: #111827;'
+    ]) {
+      expect(tokens).toContain(lightDeclaration);
     }
 
     expect(tokens).toContain('--db-canvas-grid: color-mix(in srgb, #ffffff 8%, transparent);');
-    expect(tokens).not.toMatch(/--db-canvas-bg:\s*oklch\(0\.9/);
+    expect(tokens).toContain('--db-canvas-grid: color-mix(in srgb, #111827 10%, transparent);');
     expect(rule(controls, '.db-button--ghost')).toContain('color: var(--db-text);');
     expect(rule(controls, '.db-icon-button--ghost')).toContain('color: var(--db-text);');
   });

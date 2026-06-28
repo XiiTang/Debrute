@@ -42,10 +42,15 @@ describe('Desktop title-bar shell boundary', () => {
     expect(main).not.toContain('sourceWindow ?? BrowserWindow.getFocusedWindow() ??');
   });
 
-  it('uses the Workbench canvas color while BrowserWindow content loads', () => {
+  it('resolves BrowserWindow startup background from Workbench appearance preference', () => {
     const main = readFileSync(join(process.cwd(), 'apps/desktop/src/electron/main.ts'), 'utf8');
+    const helper = readFileSync(join(process.cwd(), 'apps/desktop/src/electron/workbenchAppearance.ts'), 'utf8');
 
-    expect(main).toContain("backgroundColor: '#181818'");
+    expect(main).toContain('workbenchStartupBackgroundColorForRuntime');
+    expect(main).toContain('backgroundColor,');
+    expect(helper).toContain("WORKBENCH_DARK_BACKGROUND = '#181818'");
+    expect(helper).toContain("WORKBENCH_LIGHT_BACKGROUND = '#f4f5f7'");
+    expect(main).not.toContain("backgroundColor: '#181818'");
     expect(main).not.toContain("backgroundColor: '#151616'");
   });
 });

@@ -136,13 +136,16 @@ export interface DebruteHttpErrorBody {
 }
 
 export type WorkbenchLocale = 'en' | 'zh-CN';
+export type WorkbenchThemePreference = 'system' | 'dark' | 'light';
 
 export interface WorkbenchPreferencesView {
   locale: WorkbenchLocale;
+  themePreference: WorkbenchThemePreference;
 }
 
 export interface SaveWorkbenchPreferencesInput {
   locale: WorkbenchLocale;
+  themePreference: WorkbenchThemePreference;
 }
 
 export type DebruteAgentFieldValue = string | number | boolean | null;

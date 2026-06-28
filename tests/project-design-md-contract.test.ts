@@ -44,18 +44,19 @@ describe('project DESIGN.md contract', () => {
     }
   });
 
-  it('declares canonical project-level tokens that map to Workbench UI tokens', () => {
+  it('declares theme-aware project-level tokens that map to Workbench UI tokens', () => {
     const design = readFileSync(designPath, 'utf8');
 
     for (const token of [
-      'canvas: "#181818"',
-      'surface-1: "#1f1f1f"',
-      'surface-2: "#262626"',
-      'surface-3: "#303030"',
-      'terminal: "#0c0e10"',
-      'text: "#ffffff"',
-      'border: "#3a3a3a"',
-      'selection: "#ffffff"',
+      'dark.canvas: "#181818"',
+      'light.canvas: "#eef0f3"',
+      'surface-1:',
+      'surface-2:',
+      'surface-3:',
+      'terminal:',
+      'text:',
+      'border:',
+      'selection:',
       'ui-xs:',
       'ui-sm:',
       'ui-md:',
@@ -71,6 +72,9 @@ describe('project DESIGN.md contract', () => {
     ]) {
       expect(design).toContain(token);
     }
+
+    expect(design).toContain('theme-aware compact creative production workbench');
+    expect(design).not.toContain('dark, compact, low-decoration');
   });
 
   it('keeps Workbench implementation ownership explicit', () => {

@@ -3,21 +3,28 @@ version: alpha
 name: Debrute Front-End Design System
 description: Project-level front-end design constraints for Debrute.
 colors:
-  canvas: "#181818"
-  surface-1: "#1f1f1f"
-  surface-2: "#262626"
-  surface-3: "#303030"
-  terminal: "#0c0e10"
-  floating: "color-mix(in srgb, #1f1f1f 90%, transparent)"
-  text: "#ffffff"
-  text-muted: "color-mix(in srgb, #ffffff 72%, transparent)"
-  text-subtle: "color-mix(in srgb, #ffffff 52%, transparent)"
-  border: "#3a3a3a"
-  selection: "#ffffff"
-  warning: "oklch(0.75 0.15 78)"
-  danger: "oklch(0.66 0.2 26)"
-  info: "oklch(0.72 0.12 235)"
-  success: "oklch(0.74 0.13 155)"
+  dark:
+    canvas: "#181818"
+    surface-1: "#1f1f1f"
+    surface-2: "#262626"
+    surface-3: "#303030"
+    terminal: "#0c0e10"
+    text: "#ffffff"
+    border: "#3a3a3a"
+    selection: "#ffffff"
+  light:
+    canvas: "#eef0f3"
+    surface-1: "#ffffff"
+    surface-2: "#eef0f3"
+    surface-3: "#e2e5e9"
+    terminal: "#f8f9fb"
+    text: "#111827"
+    border: "#c9cdd3"
+    selection: "#111827"
+  warning: "semantic state token"
+  danger: "semantic state token"
+  info: "semantic state token"
+  success: "semantic state token"
 typography:
   ui-xs:
     fontFamily: "Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, Segoe UI, sans-serif"
@@ -82,18 +89,44 @@ components:
 
 ## Overview
 
-Debrute is a browser-first local creative production workbench. Its UI should feel like a durable creative tool: dark, compact, low-decoration, and built for repeated daily use. It should not look like a marketing site, a generic SaaS dashboard, or an enterprise admin surface.
+Debrute is a browser-first local creative production workbench. Its UI should feel like a durable creative tool: a theme-aware compact creative production workbench built for repeated daily use. It should not look like a marketing site, a generic SaaS dashboard, or an enterprise admin surface.
 
-The main product chrome follows the restraint of Raycast and Linear: dark surface ladder, 1px hairlines, compact controls, very little color, and the product UI itself as the visual subject. Canvas and creative-object surfaces borrow the object clarity of Miro and Figma: nodes, selections, feedback marks, previews, and review state can use stronger affordances than ordinary panel chrome.
+The main product chrome follows the restraint of Raycast and Linear: neutral surface ladder, 1px hairlines, compact controls, very little color, and the product UI itself as the visual subject. Canvas and creative-object surfaces borrow the object clarity of Miro and Figma: nodes, selections, feedback marks, previews, and review state can use stronger affordances than ordinary panel chrome.
 
 These references guide method, not brand imitation. Debrute does not adopt Raycast red stripes, Linear lavender, Miro marketing yellow, Figma color blocks, large landing-page typography, or decorative gradients.
 
 ## Colors
 
-The core palette is a neutral dark surface ladder:
+The core palette is a neutral theme-aware surface ladder:
 
 ```text
 canvas -> surface-1 -> surface-2 -> surface-3
+```
+
+Dark theme keeps the original Debrute neutral ladder:
+
+```text
+dark.canvas: "#181818"
+dark.surface-1: "#1f1f1f"
+dark.surface-2: "#262626"
+dark.surface-3: "#303030"
+dark.terminal: "#0c0e10"
+dark.text: "#ffffff"
+dark.border: "#3a3a3a"
+dark.selection: "#ffffff"
+```
+
+Light theme uses the same roles with light neutral values:
+
+```text
+light.canvas: "#eef0f3"
+light.surface-1: "#ffffff"
+light.surface-2: "#eef0f3"
+light.surface-3: "#e2e5e9"
+light.terminal: "#f8f9fb"
+light.text: "#111827"
+light.border: "#c9cdd3"
+light.selection: "#111827"
 ```
 
 The implementation maps this ladder to `--db-*` tokens in `apps/web/src/workbench/ui/styles/tokens.css`. General product chrome uses neutral surfaces, text hierarchy, borders, selection, and semantic tones.
@@ -220,7 +253,7 @@ Workbench floating panels use one shared shell for Explorer, Inspector, Problems
 
 `apps/desktop` is the native host for Workbench. It does not define a second UI system.
 
-- BrowserWindow background matches the Workbench dark base closely enough to avoid a visible alternate theme during loading.
+- BrowserWindow background matches the active Workbench theme base closely enough to avoid a visible alternate theme during loading.
 - Native menu, tray, app update, and shell behavior use platform UI where appropriate.
 - Desktop code does not add a separate React/CSS component system.
 
@@ -307,7 +340,7 @@ These exceptions do not allow feature-owned reusable product chrome.
 
 Do:
 
-- Use the dark neutral surface ladder for product chrome.
+- Use the active neutral surface ladder for product chrome.
 - Keep controls compact.
 - Use 1px borders as the primary hierarchy mechanism.
 - Keep Canvas object affordances clear and visible over media.

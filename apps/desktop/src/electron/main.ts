@@ -17,9 +17,10 @@ import type { ApplicationMenuCommand } from './menu/applicationMenu.js';
 import { parseDesktopOpenIntent, syncNativeRecentProjects, type DesktopOpenIntent } from './nativeRecentProjects.js';
 import { RuntimeSupervisor } from './runtime/runtimeSupervisor.js';
 import { TrayController } from './tray/trayController.js';
+import { workbenchStartupBackgroundColorForRuntime } from './workbenchAppearance.js';
 import { runProjectWindowOpenOnce, selectProjectWindowOpenTarget } from './windowProjectRouting.js';
 
-const { app, BrowserWindow, dialog, ipcMain, Menu } = electron;
+const { app, BrowserWindow, dialog, ipcMain, Menu, nativeTheme } = electron;
 let runtimeSupervisor: RuntimeSupervisor | undefined;
 let runtimeClient: DesktopRuntimeClient | undefined;
 let trayController: TrayController | undefined;
@@ -59,13 +60,15 @@ const projectIconPath = join(__dirname, 'icon.png');
 const dockIconPath = join(__dirname, 'dock_icon.png');
 
 async function createWindow(initialUrl?: string, projectId?: string, projectRoot?: string): Promise<Electron.BrowserWindow> {
+  const client = requireRuntimeClient();
+  const backgroundColor = await workbenchStartupBackgroundColorForRuntime(client, nativeTheme);
   const window = new BrowserWindow({
     width: 1440,
     height: 940,
     minWidth: 1100,
     minHeight: 720,
     ...desktopBrowserWindowChromeOptions(process.platform),
-    backgroundColor: '#181818',
+    backgroundColor,
     icon: projectIconPath,
     webPreferences: {
       preload: join(__dirname, 'preload.js'),
@@ -98,7 +101,6 @@ async function createWindow(initialUrl?: string, projectId?: string, projectRoot
   window.on('unmaximize', sendNativeWindowState);
   window.on('restore', sendNativeWindowState);
 
-  const client = requireRuntimeClient();
   const urlToLoad = initialUrl ?? client.shellUrl();
   if (projectId) {
     await loadDebruteProjectShellWindow(window, urlToLoad, () => prepareProjectWindowBinding(window, projectId, projectRoot));

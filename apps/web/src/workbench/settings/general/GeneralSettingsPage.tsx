@@ -3,10 +3,14 @@ import { Download, ExternalLink, RefreshCw, RotateCw } from 'lucide-react';
 import type {
   DesktopAppUpdateDisabledReason,
   DesktopAppUpdateState,
-  WorkbenchLocale
+  SaveWorkbenchPreferencesInput,
+  WorkbenchLocale,
+  WorkbenchPreferencesView,
+  WorkbenchThemePreference
 } from '@debrute/app-protocol';
 import type { DebruteShellApi } from '../../../api/shellApi';
 import { useI18n, type WorkbenchI18n } from '../../i18n';
+import { DEFAULT_WORKBENCH_PREFERENCES, type WorkbenchResolvedTheme } from '../../services/workbenchTheme';
 import { Button, Card, Field, Select, StatusPill, Toolbar, type StatusTone } from '../../ui';
 
 type OperationState =
@@ -24,19 +28,22 @@ type AppUpdateAction =
 export function GeneralSettingsPage({
   shell,
   initialUpdateState,
-  locale = 'en',
-  onLocaleChange
+  preferences = DEFAULT_WORKBENCH_PREFERENCES,
+  resolvedTheme = 'dark',
+  onPreferencesChange
 }: {
   shell: DebruteShellApi | undefined;
   initialUpdateState?: DesktopAppUpdateState;
-  locale?: WorkbenchLocale;
-  onLocaleChange?: (locale: WorkbenchLocale) => void;
+  preferences?: WorkbenchPreferencesView;
+  resolvedTheme?: WorkbenchResolvedTheme;
+  onPreferencesChange?: (preferences: SaveWorkbenchPreferencesInput) => Promise<void>;
 }): React.ReactElement {
   const i18n = useI18n();
   const [updateState, setUpdateState] = useState<DesktopAppUpdateState>(
     initialUpdateState ?? { type: 'disabled', currentVersion: 'unknown', reason: shell?.getAppUpdateState ? 'development' : 'browser' }
   );
   const [operation, setOperation] = useState<OperationState>({ status: 'idle' });
+  const [preferenceOperation, setPreferenceOperation] = useState<OperationState>({ status: 'idle' });
 
   useEffect(() => {
     if (initialUpdateState || !shell?.getAppUpdateState) {
@@ -64,17 +71,59 @@ export function GeneralSettingsPage({
     }
   };
 
+  const savePreferences = async (nextPreferences: SaveWorkbenchPreferencesInput) => {
+    if (!onPreferencesChange) {
+      return;
+    }
+    setPreferenceOperation({ status: 'loading' });
+    try {
+      await onPreferencesChange(nextPreferences);
+      setPreferenceOperation({ status: 'idle' });
+    } catch (error) {
+      setPreferenceOperation({ status: 'error', message: errorMessage(error) });
+    }
+  };
+
   return (
     <section className="db-settings-section general-settings-page">
       <header className="db-settings-section__header">
         <h2>{i18n.t('settings.general.title')}</h2>
       </header>
       <Card className="db-model-card">
+        <strong>{i18n.t('settings.general.appearance')}</strong>
+        <Field
+          label={i18n.t('settings.general.theme.label')}
+          description={themeHelpText(preferences.themePreference, resolvedTheme, i18n)}
+        >
+          <Select
+            value={preferences.themePreference}
+            disabled={preferenceOperation.status === 'loading'}
+            onChange={(event) => void savePreferences({
+              ...preferences,
+              themePreference: event.currentTarget.value as WorkbenchThemePreference
+            })}
+          >
+            <option value="system">{i18n.t('settings.general.theme.system')}</option>
+            <option value="dark">{i18n.t('settings.general.theme.dark')}</option>
+            <option value="light">{i18n.t('settings.general.theme.light')}</option>
+          </Select>
+        </Field>
+        {preferenceOperation.status === 'error' ? (
+          <small className="db-form-error">
+            {i18n.t('settings.general.theme.saveFailed', { message: preferenceOperation.message })}
+          </small>
+        ) : null}
+      </Card>
+      <Card className="db-model-card">
         <strong>{i18n.t('settings.general.language.label')}</strong>
         <Field label={i18n.t('settings.general.language.label')}>
           <Select
-            value={locale}
-            onChange={(event) => onLocaleChange?.(event.currentTarget.value as WorkbenchLocale)}
+            value={preferences.locale}
+            disabled={preferenceOperation.status === 'loading'}
+            onChange={(event) => void savePreferences({
+              ...preferences,
+              locale: event.currentTarget.value as WorkbenchLocale
+            })}
           >
             <option value="en">{i18n.t('settings.general.language.english')}</option>
             <option value="zh-CN">{i18n.t('settings.general.language.simplifiedChinese')}</option>
@@ -99,6 +148,21 @@ export function GeneralSettingsPage({
       />
     </section>
   );
+}
+
+function themeHelpText(
+  preference: WorkbenchThemePreference,
+  resolvedTheme: WorkbenchResolvedTheme,
+  i18n: WorkbenchI18n
+): string {
+  if (preference === 'system') {
+    return i18n.t('settings.general.theme.usingSystem', {
+      theme: resolvedTheme === 'dark'
+        ? i18n.t('settings.general.theme.resolvedDark')
+        : i18n.t('settings.general.theme.resolvedLight')
+    });
+  }
+  return i18n.t('settings.general.theme.appliedGlobal');
 }
 
 function AppUpdateCard({

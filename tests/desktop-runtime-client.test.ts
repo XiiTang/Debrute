@@ -128,6 +128,26 @@ describe('desktop runtime client', () => {
       { method: 'DELETE', path: '/api/workbench/recent-projects', search: '' }
     ]);
   });
+
+  it('reads Workbench preferences for Electron startup appearance', async () => {
+    const requests: Array<{ method: string; path: string }> = [];
+    const client = createAttachedDesktopRuntimeClient(runtimeFixture(), async (url, init) => {
+      const parsed = new URL(String(url));
+      requests.push({ method: init?.method ?? 'GET', path: parsed.pathname });
+      return new Response(JSON.stringify({ locale: 'en', themePreference: 'light' }), {
+        status: 200,
+        headers: { 'content-type': 'application/json' }
+      });
+    });
+
+    await expect(client.workbenchPreferencesGet()).resolves.toEqual({
+      locale: 'en',
+      themePreference: 'light'
+    });
+    expect(requests).toEqual([
+      { method: 'GET', path: '/api/settings/workbench-preferences' }
+    ]);
+  });
 });
 
 function runtimeFixture(): DebruteDaemonRuntimeLike {

@@ -34,6 +34,7 @@ export interface WorkbenchChromeConfig {
 export type WorkbenchPreferencesConfig = WorkbenchPreferencesView;
 
 const WORKBENCH_LOCALE_ERROR_MESSAGE = 'Workbench locale must be "en" or "zh-CN".';
+const WORKBENCH_THEME_PREFERENCE_ERROR_MESSAGE = 'Workbench theme preference must be "system", "dark", or "light".';
 
 export class GlobalConfigStore {
   constructor(private readonly options: { debruteHome?: string } = {}) {}
@@ -102,7 +103,8 @@ export class GlobalConfigStore {
 
   async readWorkbenchPreferences(): Promise<WorkbenchPreferencesConfig> {
     return normalizeWorkbenchPreferencesConfig(await readJsonOrDefault<unknown>(this.paths().workbenchPreferencesFile, {
-      locale: 'en'
+      locale: 'en',
+      themePreference: 'system'
     }));
   }
 
@@ -147,7 +149,13 @@ function normalizeWorkbenchPreferencesConfig(config: unknown): WorkbenchPreferen
   if (!isRecord(config) || (config.locale !== 'en' && config.locale !== 'zh-CN')) {
     throw new Error(WORKBENCH_LOCALE_ERROR_MESSAGE);
   }
-  return { locale: config.locale };
+  if (config.themePreference !== 'system' && config.themePreference !== 'dark' && config.themePreference !== 'light') {
+    throw new Error(WORKBENCH_THEME_PREFERENCE_ERROR_MESSAGE);
+  }
+  return {
+    locale: config.locale,
+    themePreference: config.themePreference
+  };
 }
 
 function normalizeLlmProvidersConfig(config: unknown): LlmProvidersConfig {

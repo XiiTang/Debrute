@@ -3,6 +3,7 @@ import { Plus } from 'lucide-react';
 import type { TerminalSessionView, WorkbenchApiClient } from '@debrute/app-protocol';
 import { CloseButton, EmptyState, IconButton, Tab, TabList, Toolbar } from '../ui';
 import { useI18n, type WorkbenchI18n } from '../i18n';
+import type { WorkbenchResolvedTheme } from '../services/workbenchTheme';
 import { useXtermTerminal } from './useXtermTerminal';
 import { createTerminalMetadataEventHandler } from './terminalMetadataEvents';
 import {
@@ -16,6 +17,7 @@ import {
 
 export interface TerminalPanelProps {
   api: WorkbenchApiClient;
+  resolvedTheme: WorkbenchResolvedTheme;
   requestedCwdProjectRelativePath: string | null;
   onRequestedCwdConsumed(): void;
 }
@@ -88,6 +90,7 @@ function terminalStatusLabel(status: TerminalSessionView['status'], i18n: Workbe
 
 export function TerminalPanel({
   api,
+  resolvedTheme,
   requestedCwdProjectRelativePath,
   onRequestedCwdConsumed
 }: TerminalPanelProps): React.ReactElement {
@@ -209,6 +212,7 @@ export function TerminalPanel({
 
   useXtermTerminal({
     api,
+    resolvedTheme,
     session: activeSession,
     containerRef,
     onSessionUpdate: updateSession,
