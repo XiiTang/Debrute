@@ -174,7 +174,7 @@ describe('CanvasImageNodeAsset', () => {
     });
   });
 
-  it('warms the first preview for culled images while the camera is idle', () => {
+  it('does not warm the first preview for culled images while the camera is idle', () => {
     const source = resolveCanvasImageNodeSource({
       node: imageNode('flow/far.png', 2400, 1200, 2400, 'rev-a'),
       imageResourceZoom: 0.1,
@@ -189,10 +189,7 @@ describe('CanvasImageNodeAsset', () => {
       culled: true
     });
 
-    expect(next.next).toMatchObject({
-      src: previewUrl('flow/far.png', 'rev-a', 300),
-      previewWidth: 300
-    });
+    expect(next.next).toBeUndefined();
   });
 
   it('still skips new work for far culled images', () => {
@@ -213,7 +210,7 @@ describe('CanvasImageNodeAsset', () => {
     expect(next.next).toBeUndefined();
   });
 
-  it('publishes settled resource zoom source changes immediately', () => {
+  it('schedules settled resource zoom source changes when a loaded image exists', () => {
     const loaded = loadedState('flow/cover.png', 'rev-a', 300);
     const source = resolveCanvasImageNodeSource({
       node: imageNode('flow/cover.png', 2400, 1200, 2400, 'rev-a'),
@@ -229,13 +226,58 @@ describe('CanvasImageNodeAsset', () => {
       retryRequested: false,
       hasLoadedImage: true,
       culled: false,
-      cameraState: 'idle',
+      becameVisibleAfterCull: false,
+      dragActive: false,
       loadedLoadKey: loaded.loaded?.loadKey,
-      imageResourceZoomChanged: true
+    })).toBe(false);
+  });
+
+  it('keeps first load, revision change, retry, and not-eligible transitions immediate', () => {
+    const source = resolveCanvasImageNodeSource({
+      node: imageNode('flow/cover.png', 200, 120, 2400, 'rev-b'),
+      imageResourceZoom: 1,
+      devicePixelRatio: 1,
+      retryKey: 1
+    });
+
+    expect(shouldPublishCanvasImageNodeSourceImmediately({
+      source,
+      didResolveUrl: false,
+      revisionChanged: false,
+      retryRequested: false,
+      hasLoadedImage: false,
+      culled: false,
+      becameVisibleAfterCull: false,
+      dragActive: false,
+      loadedLoadKey: undefined,
+    })).toBe(true);
+
+    expect(shouldPublishCanvasImageNodeSourceImmediately({
+      source,
+      didResolveUrl: true,
+      revisionChanged: true,
+      retryRequested: false,
+      hasLoadedImage: true,
+      culled: false,
+      becameVisibleAfterCull: false,
+      dragActive: false,
+      loadedLoadKey: `${previewUrl('flow/cover.png', 'rev-a', 213)}:0`,
+    })).toBe(true);
+
+    expect(shouldPublishCanvasImageNodeSourceImmediately({
+      source,
+      didResolveUrl: true,
+      revisionChanged: false,
+      retryRequested: true,
+      hasLoadedImage: true,
+      culled: false,
+      becameVisibleAfterCull: false,
+      dragActive: false,
+      loadedLoadKey: `${previewUrl('flow/cover.png', 'rev-b', 213)}:0`,
     })).toBe(true);
   });
 
-  it('debounces direct image-node size churn when resource zoom did not change', () => {
+  it('schedules direct image-node size churn instead of publishing immediately', () => {
     const loaded = loadedState('flow/cover.png', 'rev-a', 300);
     const source = resolveCanvasImageNodeSource({
       node: imageNode('flow/cover.png', 2400, 1200, 2400, 'rev-a'),
@@ -251,9 +293,52 @@ describe('CanvasImageNodeAsset', () => {
       retryRequested: false,
       hasLoadedImage: true,
       culled: false,
-      cameraState: 'idle',
-      loadedLoadKey: loaded.loaded?.loadKey,
-      imageResourceZoomChanged: false
+      becameVisibleAfterCull: false,
+      dragActive: false,
+      loadedLoadKey: loaded.loaded?.loadKey
+    })).toBe(false);
+  });
+
+  it('schedules first image load after a culled node becomes visible', () => {
+    const source = resolveCanvasImageNodeSource({
+      node: imageNode('flow/far.png', 2400, 1200, 2400, 'rev-a'),
+      imageResourceZoom: 0.1,
+      devicePixelRatio: 1,
+      retryKey: 0
+    });
+
+    expect(shouldPublishCanvasImageNodeSourceImmediately({
+      source,
+      didResolveUrl: false,
+      revisionChanged: false,
+      retryRequested: false,
+      hasLoadedImage: false,
+      culled: false,
+      becameVisibleAfterCull: true,
+      dragActive: false,
+      loadedLoadKey: undefined
+    })).toBe(false);
+  });
+
+  it('schedules direct image-node size churn while a canvas drag is active', () => {
+    const loaded = loadedState('flow/cover.png', 'rev-a', 300);
+    const source = resolveCanvasImageNodeSource({
+      node: imageNode('flow/cover.png', 2400, 1200, 2400, 'rev-a'),
+      imageResourceZoom: 1,
+      devicePixelRatio: 1,
+      retryKey: 0
+    });
+
+    expect(shouldPublishCanvasImageNodeSourceImmediately({
+      source,
+      didResolveUrl: true,
+      revisionChanged: false,
+      retryRequested: false,
+      hasLoadedImage: true,
+      culled: false,
+      becameVisibleAfterCull: false,
+      dragActive: true,
+      loadedLoadKey: loaded.loaded?.loadKey
     })).toBe(false);
   });
 
@@ -296,6 +381,30 @@ describe('CanvasImageNodeAsset', () => {
     expect(next.loaded).toEqual(state.loaded);
     expect(next.next).toBeUndefined();
     expect(next.error).toMatchObject({ message: 'Unable to load flow/cover.png.' });
+  });
+
+  it('cancels pending quality upgrades when interaction starts but keeps first loads', () => {
+    const nextImage = {
+      src: previewUrl('flow/cover.png', 'rev-a', 1200),
+      loadKey: `${previewUrl('flow/cover.png', 'rev-a', 1200)}:0`,
+      previewWidth: 1200
+    };
+    const upgrading: CanvasImageNodeAssetState = {
+      ...loadedState('flow/cover.png', 'rev-a', 300),
+      next: nextImage
+    };
+
+    const cancelledUpgrade = canvasImageNodeAssetReducer(upgrading, { type: 'interaction-started' });
+
+    expect(cancelledUpgrade.loaded).toEqual(upgrading.loaded);
+    expect(cancelledUpgrade.next).toBeUndefined();
+
+    const firstLoad: CanvasImageNodeAssetState = {
+      ...emptyState(),
+      next: nextImage
+    };
+
+    expect(canvasImageNodeAssetReducer(firstLoad, { type: 'interaction-started' })).toBe(firstLoad);
   });
 
   it('resets only the affected image state on source revision change', () => {

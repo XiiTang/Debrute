@@ -1,13 +1,25 @@
-import React from 'react';
+// @vitest-environment jsdom
+
+import React, { act } from 'react';
+import { createRoot } from 'react-dom/client';
 import { renderToStaticMarkup } from 'react-dom/server';
 import { describe, expect, it, vi } from 'vitest';
-import { createCanvasDocument, type CanvasFeedbackDocument, type CanvasProjection } from '@debrute/canvas-core';
+import {
+  createCanvasDocument,
+  type CanvasFeedbackDocument,
+  type CanvasProjection,
+  type CanvasTextPreviewDescriptor
+} from '@debrute/canvas-core';
 import { buildWorkbenchTitleBarState } from '@debrute/app-protocol';
 import type { IntegrationSettingsView } from '@debrute/app-protocol';
 import type { TextFileBuffer, WorkbenchActions, WorkbenchState } from '../../types';
 import { CanvasEditor } from './CanvasEditor';
 import { preloadCanvasImageForHandoff, scheduleCanvasImageHandoffAfterPaint } from './CanvasNodeContent';
 import { createCanvasOverlayRuntime } from './CanvasOverlayRuntime';
+import {
+  CANVAS_PREVIEW_RESOURCE_SETTLE_MS,
+  createCanvasPreviewResourceScheduler
+} from './CanvasPreviewResourceScheduler';
 import { areCanvasNodeShellPropsEqual, CanvasNodeShell, type CanvasNodeShellProps } from './CanvasNodeShell';
 import {
   CanvasSurface,
@@ -23,6 +35,7 @@ import {
   syncCanvasMovingCameraFrame,
   syncCanvasPerfSessionState,
   syncCanvasImageResourceZoomForCameraState,
+  syncCanvasPreviewResourceSchedulerForInteraction,
   shouldClearFeedbackBarPlacementForFeedbackTarget,
   type CanvasPerfRuntimeSession
 } from './CanvasSurface';
@@ -335,6 +348,78 @@ describe('CanvasSurface', () => {
     expect(html.match(/data-editor-mode="edit"/g) ?? []).toHaveLength(1);
     expect(html.match(/canvas-text-preview-empty/g) ?? []).toHaveLength(1);
     expect(html).not.toContain(`data-editor-mode="${'pre'}${'view'}"`);
+  });
+
+  it('starts Canvas-owned text preview scheduled work after StrictMode mount cleanup', async () => {
+    const restoreActEnvironment = installReactActEnvironment();
+    const restoreAnimationFrame = installAnimationFrame();
+    const restoreTextBodyMeasurement = installCanvasTextBodyMeasurement({ width: 420, height: 260 });
+    const container = document.createElement('div');
+    document.body.append(container);
+    const root = createRoot(container);
+    const canvas = createCanvasDocument({ id: 'strict-text-preview' });
+    const node = textProjectionNode('flow/strict.md', 0, 0, 'rev-strict');
+    const projection: CanvasProjection = {
+      canvasId: canvas.id,
+      nodes: [node],
+      edges: [],
+      diagnostics: []
+    };
+    const readCanvasTextPreviewDescriptors = vi.fn(async (
+      input: Parameters<WorkbenchActions['readCanvasTextPreviewDescriptors']>[0]
+    ) => canvasTextPreviewDescriptorResponse(input));
+    const reconcileCanvasTextPreviews = vi.fn(async (
+      input: Parameters<WorkbenchActions['reconcileCanvasTextPreviews']>[0]
+    ) => canvasTextPreviewDescriptorResponse(input));
+    const runtime = createCanvasEditorRuntime();
+
+    try {
+      await act(async () => {
+        root.render(
+          <React.StrictMode>
+            <I18nProvider locale="en">
+              <CanvasSurface
+                canvas={canvas}
+                projection={projection}
+                runtime={runtime}
+                actions={{
+                  ...actions,
+                  readCanvasTextPreviewDescriptors,
+                  reconcileCanvasTextPreviews
+                }}
+                textFileBuffers={{
+                  [node.projectRelativePath]: textBufferFixture(node.projectRelativePath, '# Strict', 'rev-strict')
+                }}
+                canvasFeedback={undefined}
+                overlayRuntime={createCanvasOverlayRuntime()}
+                feedbackPlacementContext={feedbackPlacementContextFixture()}
+              />
+            </I18nProvider>
+          </React.StrictMode>
+        );
+      });
+
+      const previewImage = await waitForCanvasSurfaceTextPreviewImage(container);
+
+      expect(readCanvasTextPreviewDescriptors).toHaveBeenCalledWith({
+        canvasId: canvas.id,
+        nodes: [expect.objectContaining({ projectRelativePath: node.projectRelativePath })]
+      });
+      expect(reconcileCanvasTextPreviews).toHaveBeenCalledWith({
+        canvasId: canvas.id,
+        devicePixelRatio: expect.any(Number),
+        nodes: [expect.objectContaining({ projectRelativePath: node.projectRelativePath })]
+      });
+      expect(previewImage.getAttribute('data-preview-width')).toBe('420');
+    } finally {
+      await act(async () => {
+        root.unmount();
+      });
+      container.remove();
+      restoreTextBodyMeasurement();
+      restoreAnimationFrame();
+      restoreActEnvironment();
+    }
   });
 
   it('renders structure edges when their segments intersect the virtual viewport', () => {
@@ -779,6 +864,69 @@ describe('CanvasSurface', () => {
     expect(updates).toEqual([]);
   });
 
+  it('updates preview resource scheduler interaction state from camera and drag state', () => {
+    const frames: FrameRequestCallback[] = [];
+    const timers: Array<{ callback: () => void; delay: number }> = [];
+    const started: string[] = [];
+    let time = 0;
+    const scheduler = createCanvasPreviewResourceScheduler({
+      now: () => time,
+      settleMs: 500,
+      requestFrame: (callback) => {
+        frames.push(callback);
+        return frames.length;
+      },
+      cancelFrame: () => undefined,
+      setTimeout: (callback, delay) => {
+        timers.push({ callback, delay });
+        return timers.length;
+      },
+      clearTimeout: () => undefined
+    });
+
+    syncCanvasPreviewResourceSchedulerForInteraction({
+      scheduler,
+      cameraState: 'moving',
+      dragState: undefined
+    });
+    scheduler.enqueue({
+      kind: 'image',
+      nodeId: 'cover.png',
+      sourceKey: 'source',
+      targetWidth: 640,
+      isCurrent: () => true,
+      isCulled: () => false,
+      run: () => started.push('cover.png')
+    });
+    expect(frames).toEqual([]);
+
+    syncCanvasPreviewResourceSchedulerForInteraction({
+      scheduler,
+      cameraState: 'idle',
+      dragState: {
+        kind: 'move-node',
+        pointerId: 1,
+        start: { x: 0, y: 0 },
+        origins: []
+      }
+    });
+    expect(frames).toEqual([]);
+
+    syncCanvasPreviewResourceSchedulerForInteraction({
+      scheduler,
+      cameraState: 'idle',
+      dragState: undefined
+    });
+    expect(frames).toEqual([]);
+    expect(timers[0]?.delay).toBe(500);
+
+    time = 500;
+    timers[0]?.callback();
+    frames[0]?.(16);
+
+    expect(started).toEqual(['cover.png']);
+  });
+
   it('coalesces moving render snapshot refreshes onto one animation frame', () => {
     const frames: FrameRequestCallback[] = [];
     const commits: unknown[] = [];
@@ -1133,6 +1281,110 @@ function textBufferFixture(path: string, content: string, revision: string): Tex
   };
 }
 
+function canvasTextPreviewDescriptorResponse(input: { nodes: Array<{
+  projectRelativePath: string;
+  fingerprint: string;
+  contentCssWidth: number;
+  contentCssHeight: number;
+  scrollTop: number;
+  scrollLeft: number;
+}> }): { descriptors: Record<string, CanvasTextPreviewDescriptor> } {
+  return {
+    descriptors: Object.fromEntries(input.nodes.map((item) => [
+      item.projectRelativePath,
+      {
+        fingerprint: item.fingerprint,
+        sourceWidth: item.contentCssWidth,
+        sourceHeight: item.contentCssHeight,
+        contentCssWidth: item.contentCssWidth,
+        contentCssHeight: item.contentCssHeight,
+        scrollTop: item.scrollTop,
+        scrollLeft: item.scrollLeft,
+        variants: [item.contentCssWidth]
+      } satisfies CanvasTextPreviewDescriptor
+    ]))
+  };
+}
+
+function installCanvasTextBodyMeasurement(size: { width: number; height: number }): () => void {
+  const widthDescriptor = Object.getOwnPropertyDescriptor(HTMLElement.prototype, 'clientWidth');
+  const heightDescriptor = Object.getOwnPropertyDescriptor(HTMLElement.prototype, 'clientHeight');
+  Object.defineProperty(HTMLElement.prototype, 'clientWidth', {
+    configurable: true,
+    get(this: HTMLElement) {
+      return this.classList.contains('canvas-text-body')
+        ? size.width
+        : widthDescriptor?.get?.call(this) ?? 0;
+    }
+  });
+  Object.defineProperty(HTMLElement.prototype, 'clientHeight', {
+    configurable: true,
+    get(this: HTMLElement) {
+      return this.classList.contains('canvas-text-body')
+        ? size.height
+        : heightDescriptor?.get?.call(this) ?? 0;
+    }
+  });
+  return () => {
+    restorePropertyDescriptor(HTMLElement.prototype, 'clientWidth', widthDescriptor);
+    restorePropertyDescriptor(HTMLElement.prototype, 'clientHeight', heightDescriptor);
+  };
+}
+
+function restorePropertyDescriptor(
+  target: object,
+  property: string,
+  descriptor: PropertyDescriptor | undefined
+): void {
+  if (descriptor) {
+    Object.defineProperty(target, property, descriptor);
+  } else {
+    delete (target as Record<string, unknown>)[property];
+  }
+}
+
+async function waitForCanvasSurfaceTextPreviewImage(container: HTMLElement): Promise<HTMLImageElement> {
+  for (let attempt = 0; attempt < 6; attempt += 1) {
+    await flushReactWork(CANVAS_PREVIEW_RESOURCE_SETTLE_MS);
+    await flushReactWork();
+    const image = container.querySelector<HTMLImageElement>('img.canvas-text-preview-image');
+    if (image) {
+      return image;
+    }
+  }
+  throw new Error('Expected Canvas text preview image to render.');
+}
+
+async function flushReactWork(delay = 0): Promise<void> {
+  await act(async () => {
+    await new Promise((resolve) => setTimeout(resolve, delay));
+  });
+}
+
+function installReactActEnvironment(): () => void {
+  const globalWithActFlag = globalThis as typeof globalThis & { IS_REACT_ACT_ENVIRONMENT?: boolean };
+  const previous = globalWithActFlag.IS_REACT_ACT_ENVIRONMENT;
+  globalWithActFlag.IS_REACT_ACT_ENVIRONMENT = true;
+  return () => {
+    if (previous === undefined) {
+      delete globalWithActFlag.IS_REACT_ACT_ENVIRONMENT;
+    } else {
+      globalWithActFlag.IS_REACT_ACT_ENVIRONMENT = previous;
+    }
+  };
+}
+
+function installAnimationFrame(): () => void {
+  const previousRequestAnimationFrame = window.requestAnimationFrame;
+  const previousCancelAnimationFrame = window.cancelAnimationFrame;
+  window.requestAnimationFrame ??= (callback) => window.setTimeout(() => callback(performance.now()), 0);
+  window.cancelAnimationFrame ??= (handle) => window.clearTimeout(handle);
+  return () => {
+    window.requestAnimationFrame = previousRequestAnimationFrame;
+    window.cancelAnimationFrame = previousCancelAnimationFrame;
+  };
+}
+
 function largePreviewNodeFixture(path: string): CanvasProjection['nodes'][number] {
   const node = nodeFixture(path, 0, 0);
   if (node.availability.state !== 'available') {
@@ -1159,6 +1411,7 @@ function nodeShellProps(node = nodeFixture('flow/cover.png', 0, 0)): CanvasNodeS
     stageRuntime: createCanvasStageRuntime(),
     actions,
     textBuffer: undefined,
+    previewInteractionActive: false,
     onPointerDown: () => undefined,
     onPointerMove: () => undefined,
     onPointerUp: () => undefined,

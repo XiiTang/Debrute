@@ -24,6 +24,7 @@ export interface CanvasNodeContentProps {
   textBuffer: TextFileBuffer | undefined;
   textPreview?: CanvasTextPreviewSource | undefined;
   textPreviewError?: string | undefined;
+  previewInteractionActive?: boolean | undefined;
   feedbackEntry?: CanvasFeedbackEntry | undefined;
   localFeedbackMode?: CanvasImageFeedbackMode | undefined;
   pendingFeedbackRegion?: CanvasImageFeedbackDraftRegion | undefined;
@@ -45,6 +46,7 @@ export function CanvasNodeContent({
   textBuffer,
   textPreview,
   textPreviewError,
+  previewInteractionActive = false,
   feedbackEntry,
   localFeedbackMode,
   pendingFeedbackRegion,
@@ -115,6 +117,7 @@ export function CanvasNodeContent({
         actions={actions}
         textPreview={textPreview}
         textPreviewError={textPreviewError}
+        previewInteractionActive={previewInteractionActive}
         onSelectNode={onSelectNode}
         onTitlePointerDown={onTitlePointerDown}
         onTitlePointerMove={onTitlePointerMove}
@@ -479,6 +482,7 @@ function CanvasTextNodeContent({
   actions,
   textPreview,
   textPreviewError,
+  previewInteractionActive,
   onSelectNode,
   onTitlePointerDown,
   onTitlePointerMove,
@@ -493,6 +497,7 @@ function CanvasTextNodeContent({
   actions: WorkbenchActions;
   textPreview?: CanvasTextPreviewSource | undefined;
   textPreviewError?: string | undefined;
+  previewInteractionActive: boolean;
   onSelectNode: () => void;
   onTitlePointerDown: (event: React.PointerEvent<Element>) => void;
   onTitlePointerMove: (event: React.PointerEvent<Element>) => void;
@@ -524,6 +529,12 @@ function CanvasTextNodeContent({
   useEffect(() => {
     dispatchTextPreviewImage({ type: 'source-resolved', source: textPreview });
   }, [textPreview]);
+
+  useEffect(() => {
+    if (previewInteractionActive) {
+      dispatchTextPreviewImage({ type: 'interaction-started' });
+    }
+  }, [previewInteractionActive]);
 
   useEffect(() => {
     if (!nextTextPreview) {

@@ -153,21 +153,21 @@ describe('CanvasPerfDebugBridge', () => {
       }, {
         kind: 'counter',
         timestamp: 111,
-        source: 'CanvasImageNodeAsset',
-        name: 'image-node-url-resolve',
-        value: 1
+        source: 'CanvasPreviewResourceScheduler',
+        name: 'preview-resource-started',
+        value: 2
       }],
       sessions: []
     };
     fakeMonitor.counters = {
       'stage-camera-write': 12,
-      'image-node-url-resolve': 1
+      'preview-resource-started': 2
     };
     const capture = bridge.api.stopCapture();
 
     expect(capture.counterTotals).toEqual({
       'stage-camera-write': 12,
-      'image-node-url-resolve': 1
+      'preview-resource-started': 2
     });
   });
 

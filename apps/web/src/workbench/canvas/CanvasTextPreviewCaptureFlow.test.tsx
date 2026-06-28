@@ -3,9 +3,16 @@
 import React, { act } from 'react';
 import { createRoot } from 'react-dom/client';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { toBlob } from 'html-to-image';
 import type { ProjectedCanvasNode } from '@debrute/canvas-core';
 import type { TextFileBuffer, WorkbenchActions } from '../../types';
+import type { CanvasPreviewResourceRequest, CanvasPreviewResourceScheduler } from './CanvasPreviewResourceScheduler';
 import { CanvasTextPreviewProvider, useCanvasTextPreviewRuntime } from './CanvasTextPreviewRuntime';
+
+const textEditorMockLayout = vi.hoisted(() => ({
+  gutterTop: 10,
+  lineTop: 14
+}));
 
 vi.mock('html-to-image', () => ({
   toBlob: vi.fn(async () => new Blob(['png'], { type: 'image/png' }))
@@ -48,7 +55,7 @@ vi.mock('./CanvasTextEditor', async () => {
           { className: 'cm-lineNumbers' },
           ReactModule.createElement('div', {
             className: 'cm-gutterElement',
-            ref: (element: HTMLElement | null) => setRect(element, 10)
+            ref: (element: HTMLElement | null) => setRect(element, textEditorMockLayout.gutterTop)
           })
         ),
         ReactModule.createElement(
@@ -56,7 +63,7 @@ vi.mock('./CanvasTextEditor', async () => {
           { className: 'cm-content' },
           ReactModule.createElement('div', {
             className: 'cm-line',
-            ref: (element: HTMLElement | null) => setRect(element, 14)
+            ref: (element: HTMLElement | null) => setRect(element, textEditorMockLayout.lineTop)
           })
         )
       );
@@ -67,6 +74,8 @@ vi.mock('./CanvasTextEditor', async () => {
 describe('CanvasTextPreviewCaptureFlow', () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    textEditorMockLayout.gutterTop = 10;
+    textEditorMockLayout.lineTop = 14;
   });
 
   it('does not save a text preview source when capture layout validation fails', async () => {
@@ -93,7 +102,10 @@ describe('CanvasTextPreviewCaptureFlow', () => {
             actions={textPreviewActionsFixture(saveCanvasTextPreviewSource)}
             cameraState="idle"
             dragState={undefined}
+            imageResourceZoom={0.11}
             devicePixelRatio={2}
+            culledNodePaths={new Set()}
+            previewResourceScheduler={createImmediateScheduler()}
           >
             <RegisteredTextBody node={node} />
             <TextPreviewErrorProbe node={node} onError={(error) => errors.push(error)} />
@@ -104,6 +116,71 @@ describe('CanvasTextPreviewCaptureFlow', () => {
       const error = await waitForTextPreviewError(errors);
 
       expect(error).toContain('CodeMirror layout did not settle');
+      expect(saveCanvasTextPreviewSource).not.toHaveBeenCalled();
+    } finally {
+      await act(async () => {
+        root.unmount();
+      });
+      container.remove();
+      restoreClientSize();
+      restoreAnimationFrame();
+      restoreActEnvironment();
+    }
+  });
+
+  it('cancels an active source capture when camera movement begins before capture completes', async () => {
+    const restoreActEnvironment = installReactActEnvironment();
+    const restoreAnimationFrame = installAnimationFrame();
+    const restoreClientSize = installElementClientSize();
+    const container = document.createElement('div');
+    document.body.append(container);
+    const root = createRoot(container);
+    const node = textNode('notes/cancelled.md');
+    const saveCanvasTextPreviewSource = vi.fn(async () => descriptorFor(node.projectRelativePath));
+    const toBlobMock = vi.mocked(toBlob);
+    let resolveBlob: ((blob: Blob) => void) | undefined;
+    const pendingBlob = new Promise<Blob>((resolve) => {
+      resolveBlob = resolve;
+    });
+    textEditorMockLayout.gutterTop = 14;
+    textEditorMockLayout.lineTop = 14;
+    toBlobMock.mockImplementationOnce(async () => pendingBlob);
+
+    const render = async (cameraState: 'idle' | 'moving') => {
+      await act(async () => {
+        root.render(
+          <CanvasTextPreviewProvider
+            canvasId="canvas-1"
+            nodes={[node]}
+            selectedProjectRelativePaths={[]}
+            textFileBuffers={{
+              [node.projectRelativePath]: textBuffer(node.projectRelativePath, 'content')
+            }}
+            actions={textPreviewActionsFixture(saveCanvasTextPreviewSource)}
+            cameraState={cameraState}
+            dragState={undefined}
+            imageResourceZoom={0.11}
+            devicePixelRatio={2}
+            culledNodePaths={new Set()}
+            previewResourceScheduler={createImmediateScheduler()}
+          >
+            <RegisteredTextBody node={node} />
+          </CanvasTextPreviewProvider>
+        );
+      });
+    };
+
+    try {
+      await render('idle');
+      await waitForMockCall(toBlobMock);
+
+      await render('moving');
+      await act(async () => {
+        resolveBlob?.(new Blob(['png'], { type: 'image/png' }));
+        await Promise.resolve();
+      });
+      await flushReactWork();
+
       expect(saveCanvasTextPreviewSource).not.toHaveBeenCalled();
     } finally {
       await act(async () => {
@@ -190,6 +267,19 @@ function textPreviewActionsFixture(
   } as unknown as WorkbenchActions;
 }
 
+function createImmediateScheduler(): CanvasPreviewResourceScheduler {
+  return {
+    enqueue: (request: CanvasPreviewResourceRequest) => {
+      if (request.isCurrent() && !request.isCulled()) {
+        request.run();
+      }
+    },
+    cancel: () => undefined,
+    setInteractionState: () => undefined,
+    dispose: () => undefined
+  };
+}
+
 function descriptorFor(projectRelativePath: string) {
   return {
     fingerprint: `sha256:${projectRelativePath}`,
@@ -214,6 +304,24 @@ async function waitForTextPreviewError(errors: Array<string | undefined>): Promi
     });
   }
   throw new Error('Expected text preview error.');
+}
+
+async function waitForMockCall(mock: { mock: { calls: unknown[] } }): Promise<void> {
+  for (let attempt = 0; attempt < 30; attempt += 1) {
+    if (mock.mock.calls.length > 0) {
+      return;
+    }
+    await act(async () => {
+      await new Promise((resolve) => setTimeout(resolve, 0));
+    });
+  }
+  throw new Error('Expected mock to be called.');
+}
+
+async function flushReactWork(): Promise<void> {
+  await act(async () => {
+    await new Promise((resolve) => setTimeout(resolve, 0));
+  });
 }
 
 function installReactActEnvironment(): () => void {

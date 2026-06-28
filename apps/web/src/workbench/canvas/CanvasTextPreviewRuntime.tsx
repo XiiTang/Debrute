@@ -8,9 +8,10 @@ import type { ProjectTextLanguageId } from '@debrute/project-core';
 import type { TextFileBuffer, WorkbenchActions } from '../../types';
 import { CanvasTextEditor } from './CanvasTextEditor';
 import { captureCanvasTextPreviewSource, canvasTextPreviewFingerprint } from './CanvasTextPreviewCapture';
+import type { CanvasPreviewResourceScheduler } from './CanvasPreviewResourceScheduler';
 import type { CanvasCameraState } from './runtime/canvasCamera';
 
-const CANVAS_TEXT_PREVIEW_SOURCE_CONCURRENCY = 3;
+const CANVAS_TEXT_PREVIEW_SOURCE_CONCURRENCY = 1;
 const CANVAS_TEXT_PREVIEW_CAPTURE_LAYOUT_MAX_FRAMES = 12;
 const CANVAS_TEXT_PREVIEW_CAPTURE_LAYOUT_TOP_TOLERANCE_PX = 0.5;
 const CANVAS_TEXT_PREVIEW_CAPTURE_LAYOUT_ERROR = 'Canvas text preview CodeMirror layout did not settle before capture.';
@@ -32,7 +33,8 @@ export interface CanvasTextPreviewImageState {
 export type CanvasTextPreviewImageEvent =
   | { type: 'source-resolved'; source: CanvasTextPreviewSource | undefined }
   | { type: 'next-loaded'; loadKey: string }
-  | { type: 'next-failed'; loadKey: string };
+  | { type: 'next-failed'; loadKey: string }
+  | { type: 'interaction-started' };
 
 export interface CanvasTextPreviewMeasuredBody {
   width: number;
@@ -57,13 +59,17 @@ export interface CanvasTextPreviewTarget extends CanvasTextPreviewCandidate {
   fingerprint: string;
 }
 
+interface CanvasTextPreviewPublishedSource {
+  targetKey: string;
+  sourceKey: string;
+  source: CanvasTextPreviewSource;
+}
+
 export interface CanvasTextPreviewRuntimeValue {
   descriptors: Record<string, CanvasTextPreviewDescriptor>;
   registerTextBody(projectRelativePath: string, element: HTMLElement | null): void;
   previewForNode(input: {
     node: ProjectedCanvasNode;
-    imageResourceZoom: number;
-    devicePixelRatio: number;
   }): CanvasTextPreviewSource | undefined;
   previewErrorForNode(input: {
     node: ProjectedCanvasNode;
@@ -131,6 +137,14 @@ export function canvasTextPreviewImageReducer(
         ...state,
         next: undefined
       };
+    case 'interaction-started':
+      if (!state.loaded || !state.next) {
+        return state;
+      }
+      return {
+        ...state,
+        next: undefined
+      };
   }
 }
 
@@ -149,7 +163,10 @@ export function CanvasTextPreviewProvider({
   actions,
   cameraState,
   dragState,
+  imageResourceZoom,
   devicePixelRatio,
+  culledNodePaths,
+  previewResourceScheduler,
   children
 }: {
   canvasId: string;
@@ -159,7 +176,10 @@ export function CanvasTextPreviewProvider({
   actions: WorkbenchActions;
   cameraState: CanvasCameraState;
   dragState: { kind: string } | undefined;
+  imageResourceZoom: number;
   devicePixelRatio: number;
+  culledNodePaths: ReadonlySet<string>;
+  previewResourceScheduler: CanvasPreviewResourceScheduler;
   children: React.ReactNode;
 }): React.ReactElement {
   const [descriptors, setDescriptors] = useState<Record<string, CanvasTextPreviewDescriptor>>({});
@@ -168,9 +188,18 @@ export function CanvasTextPreviewProvider({
   const [captureSlotVersion, setCaptureSlotVersion] = useState(0);
   const [previewErrors, setPreviewErrors] = useState<Record<string, { captureKey: string; message: string }>>({});
   const [currentTargets, setCurrentTargets] = useState<Record<string, CanvasTextPreviewTarget>>({});
+  const [previewSources, setPreviewSources] = useState<Record<string, CanvasTextPreviewPublishedSource>>({});
+  const [resourceCheckedTargetKeys, setResourceCheckedTargetKeys] = useState<ReadonlySet<string>>(() => new Set());
   const pendingCaptureKeysRef = useRef(new Set<string>());
   const currentTargetKeysRef = useRef(new Map<string, string>());
+  const currentResourceKeysRef = useRef(new Map<string, string>());
+  const currentCulledPathsRef = useRef<ReadonlySet<string>>(culledNodePaths);
+  const interactionActive = cameraState !== 'idle' || dragState !== undefined;
+  const interactionActiveRef = useRef(interactionActive);
   const bodyRegistrationsRef = useRef(new Map<string, () => void>());
+  currentCulledPathsRef.current = culledNodePaths;
+  interactionActiveRef.current = interactionActive;
+  const nodesByPath = useMemo(() => new Map(nodes.map((node) => [node.projectRelativePath, node])), [nodes]);
 
   const commitTextBodyMeasurement = useCallback((projectRelativePath: string, element: HTMLElement) => {
     setMeasuredBodies((current) => {
@@ -235,8 +264,19 @@ export function CanvasTextPreviewProvider({
       nodes,
       selectedProjectRelativePaths,
       textFileBuffers,
-      measuredBodies
+      measuredBodies,
+      culledNodePaths
     });
+    if (candidates.length === 0) {
+      setCurrentTargets((current) => Object.keys(current).length === 0 ? current : {});
+      currentTargetKeysRef.current = new Map();
+      currentResourceKeysRef.current = new Map();
+      setResourceCheckedTargetKeys((current) => current.size === 0 ? current : new Set());
+      setDescriptors((current) => Object.keys(current).length === 0 ? current : {});
+      setPreviewSources((current) => Object.keys(current).length === 0 ? current : {});
+      setPreviewErrors((current) => Object.keys(current).length === 0 ? current : {});
+      return undefined;
+    }
     if (!shouldStartCanvasTextPreviewSourceWork({
       cameraState,
       dragState,
@@ -251,64 +291,169 @@ export function CanvasTextPreviewProvider({
       if (cancelled || targets.length === 0) {
         return;
       }
+      const targetKeySet = new Set(targets.map(canvasTextPreviewTargetKey));
       setCurrentTargets(canvasTextPreviewTargetsByPath(targets));
       currentTargetKeysRef.current = new Map(targets.map((target) => [
         target.projectRelativePath,
         canvasTextPreviewTargetKey(target)
       ]));
+      setResourceCheckedTargetKeys((current) => new Set([...current].filter((key) => targetKeySet.has(key))));
       setDescriptors((current) => canvasTextPreviewCurrentDescriptors({ targets, descriptors: current }));
+      setPreviewSources((current) => canvasTextPreviewCurrentSources({ targets, sources: current }));
       setPreviewErrors((current) => clearStaleCanvasTextPreviewErrors(current, targets));
-      const read = await actions.readCanvasTextPreviewDescriptors({
-        canvasId,
-        nodes: targets.map(canvasTextPreviewTargetForApi)
-      });
-      if (cancelled) {
-        return;
-      }
-      setDescriptors((current) => canvasTextPreviewCurrentDescriptors({
-        targets,
-        descriptors: { ...current, ...read.descriptors }
-      }));
-      setPreviewErrors((current) => clearCanvasTextPreviewErrorsForDescriptors(current, read.descriptors));
-      const reconciled = await actions.reconcileCanvasTextPreviews({
-        canvasId,
-        nodes: targets.map(canvasTextPreviewTargetForApi),
-        devicePixelRatio
-      });
-      if (cancelled) {
-        return;
-      }
-      setDescriptors((current) => canvasTextPreviewCurrentDescriptors({
-        targets,
-        descriptors: { ...current, ...reconciled.descriptors }
-      }));
-      setPreviewErrors((current) => clearCanvasTextPreviewErrorsForDescriptors(current, reconciled.descriptors));
-      const failedCaptureKeys = new Set(Object.values(previewErrors).map((error) => error.captureKey));
-      const nextCaptures = canvasTextPreviewNextCaptureTargets({
-        targets,
-        descriptors: reconciled.descriptors,
-        pendingCaptureKeys: pendingCaptureKeysRef.current,
-        skippedCaptureKeys: failedCaptureKeys,
-        concurrency: CANVAS_TEXT_PREVIEW_SOURCE_CONCURRENCY
-      });
-      if (nextCaptures.length > 0) {
-        setCaptureTargets((current) => [...current, ...nextCaptures]);
-      }
     });
     return () => {
       cancelled = true;
     };
   }, [
-    actions,
     cameraState,
     canvasId,
+    culledNodePaths,
     dragState,
     measuredBodies,
     nodes,
-    captureSlotVersion,
     selectedProjectRelativePaths,
-    textFileBuffers,
-    devicePixelRatio
+    textFileBuffers
+  ]);
+
+  useEffect(() => {
+    const targets = Object.values(currentTargets);
+    if (!shouldStartCanvasTextPreviewSourceWork({
+      cameraState,
+      dragState,
+      pendingSourceCount: targets.length
+    })) {
+      return;
+    }
+    for (const target of targets) {
+      const node = nodesByPath.get(target.projectRelativePath);
+      if (!node) {
+        continue;
+      }
+      const targetKey = canvasTextPreviewTargetKey(target);
+      const descriptor = descriptors[target.projectRelativePath];
+      const targetWidth = descriptor && canvasTextPreviewDescriptorMatchesTarget(descriptor, target)
+        ? canvasTextPreviewTargetWidthForNode({
+          node,
+          descriptor,
+          imageResourceZoom,
+          devicePixelRatio
+        })
+        : target.contentCssWidth;
+      const sourceKey = canvasTextPreviewResourceSourceKey(targetKey, targetWidth);
+      const published = previewSources[target.projectRelativePath];
+      if (published?.targetKey === targetKey && published.sourceKey === sourceKey) {
+        continue;
+      }
+      currentResourceKeysRef.current.set(target.projectRelativePath, sourceKey);
+      previewResourceScheduler.enqueue({
+        kind: 'text',
+        nodeId: target.projectRelativePath,
+        sourceKey,
+        targetWidth,
+        isCurrent: () => currentTargetKeysRef.current.get(target.projectRelativePath) === targetKey
+          && currentResourceKeysRef.current.get(target.projectRelativePath) === sourceKey
+          && !interactionActiveRef.current,
+        isCulled: () => currentCulledPathsRef.current.has(target.projectRelativePath),
+        run: () => {
+          const isCurrent = () => currentTargetKeysRef.current.get(target.projectRelativePath) === targetKey
+            && currentResourceKeysRef.current.get(target.projectRelativePath) === sourceKey
+            && !interactionActiveRef.current;
+          void runCanvasTextPreviewResourceWork({
+            actions,
+            canvasId,
+            node,
+            target,
+            targetKey,
+            imageResourceZoom,
+            devicePixelRatio,
+            isCurrent,
+            setDescriptors,
+            setPreviewErrors,
+            setPreviewSources,
+            markResourceChecked: () => {
+              setResourceCheckedTargetKeys((current) => {
+                if (current.has(targetKey)) {
+                  return current;
+                }
+                const next = new Set(current);
+                next.add(targetKey);
+                return next;
+              });
+            }
+          }).catch((error: unknown) => {
+            if (!isCurrent()) {
+              return;
+            }
+            setPreviewErrors((current) => ({
+              ...current,
+              [target.projectRelativePath]: {
+                captureKey: targetKey,
+                message: messageFromUnknown(error)
+              }
+            }));
+          });
+        }
+      });
+    }
+  }, [
+    actions,
+    cameraState,
+    canvasId,
+    currentTargets,
+    descriptors,
+    devicePixelRatio,
+    dragState,
+    imageResourceZoom,
+    nodesByPath,
+    previewSources,
+    previewResourceScheduler
+  ]);
+
+  useEffect(() => () => {
+    for (const projectRelativePath of currentTargetKeysRef.current.keys()) {
+      previewResourceScheduler.cancel('text', projectRelativePath);
+    }
+  }, [previewResourceScheduler]);
+
+  useEffect(() => {
+    if (!interactionActive) {
+      return;
+    }
+    pendingCaptureKeysRef.current.clear();
+    setCaptureTargets((current) => current.length === 0 ? current : []);
+  }, [interactionActive]);
+
+  useEffect(() => {
+    const targets = Object.values(currentTargets).filter((target) => (
+      resourceCheckedTargetKeys.has(canvasTextPreviewTargetKey(target))
+    ));
+    if (!shouldStartCanvasTextPreviewSourceWork({
+      cameraState,
+      dragState,
+      pendingSourceCount: targets.length
+    })) {
+      return;
+    }
+    const failedCaptureKeys = new Set(Object.values(previewErrors).map((error) => error.captureKey));
+    const nextCaptures = canvasTextPreviewNextCaptureTargets({
+      targets,
+      descriptors,
+      pendingCaptureKeys: pendingCaptureKeysRef.current,
+      skippedCaptureKeys: failedCaptureKeys,
+      concurrency: CANVAS_TEXT_PREVIEW_SOURCE_CONCURRENCY
+    });
+    if (nextCaptures.length > 0) {
+      setCaptureTargets((current) => [...current, ...nextCaptures]);
+    }
+  }, [
+    cameraState,
+    captureSlotVersion,
+    currentTargets,
+    descriptors,
+    dragState,
+    previewErrors,
+    resourceCheckedTargetKeys
   ]);
 
   const finishCaptureTarget = useCallback((target: CanvasTextPreviewTarget, result: CanvasTextPreviewCaptureResult) => {
@@ -346,16 +491,15 @@ export function CanvasTextPreviewProvider({
   const value = useMemo<CanvasTextPreviewRuntimeValue>(() => ({
     descriptors,
     registerTextBody,
-    previewForNode: ({ node, imageResourceZoom: previewZoom, devicePixelRatio: previewDpr }) => canvasTextPreviewForNode({
-      canvasId,
-      node,
-      target: currentTargets[node.projectRelativePath],
-      descriptor: descriptors[node.projectRelativePath],
-      imageResourceZoom: previewZoom,
-      devicePixelRatio: previewDpr
-    }),
+    previewForNode: ({ node }) => {
+      const target = currentTargets[node.projectRelativePath];
+      const published = previewSources[node.projectRelativePath];
+      return target && published?.targetKey === canvasTextPreviewTargetKey(target)
+        ? published.source
+        : undefined;
+    },
     previewErrorForNode: ({ node }) => previewErrors[node.projectRelativePath]?.message
-  }), [canvasId, currentTargets, descriptors, previewErrors, registerTextBody]);
+  }), [currentTargets, descriptors, previewErrors, previewSources, registerTextBody]);
 
   return (
     <CanvasTextPreviewRuntimeContext.Provider value={value}>
@@ -381,6 +525,7 @@ export function canvasTextPreviewTargetsForNodes(input: {
   selectedProjectRelativePaths: readonly string[];
   textFileBuffers: Record<string, TextFileBuffer>;
   measuredBodies: Map<string, CanvasTextPreviewMeasuredBody>;
+  culledNodePaths: ReadonlySet<string>;
 }): CanvasTextPreviewCandidate[] {
   const selected = new Set(input.selectedProjectRelativePaths);
   const targets: CanvasTextPreviewCandidate[] = [];
@@ -388,6 +533,7 @@ export function canvasTextPreviewTargetsForNodes(input: {
     if (node.nodeKind !== 'file'
       || node.mediaKind !== 'text'
       || node.availability.state !== 'available'
+      || input.culledNodePaths.has(node.projectRelativePath)
       || selected.has(node.projectRelativePath)) {
       continue;
     }
@@ -427,6 +573,62 @@ export function shouldStartCanvasTextPreviewSourceWork(input: {
   return input.pendingSourceCount > 0
     && input.cameraState === 'idle'
     && input.dragState === undefined;
+}
+
+async function runCanvasTextPreviewResourceWork(input: {
+  actions: WorkbenchActions;
+  canvasId: string;
+  node: ProjectedCanvasNode;
+  target: CanvasTextPreviewTarget;
+  targetKey: string;
+  imageResourceZoom: number;
+  devicePixelRatio: number;
+  isCurrent: () => boolean;
+  setDescriptors: React.Dispatch<React.SetStateAction<Record<string, CanvasTextPreviewDescriptor>>>;
+  setPreviewErrors: React.Dispatch<React.SetStateAction<Record<string, { captureKey: string; message: string }>>>;
+  setPreviewSources: React.Dispatch<React.SetStateAction<Record<string, CanvasTextPreviewPublishedSource>>>;
+  markResourceChecked: () => void;
+}): Promise<void> {
+  const read = await input.actions.readCanvasTextPreviewDescriptors({
+    canvasId: input.canvasId,
+    nodes: [canvasTextPreviewTargetForApi(input.target)]
+  });
+  if (!input.isCurrent()) {
+    return;
+  }
+  input.setDescriptors((current) => canvasTextPreviewDescriptorsWithTargetDescriptor({
+    current,
+    target: input.target,
+    descriptors: read.descriptors
+  }));
+  input.setPreviewErrors((current) => clearCanvasTextPreviewErrorsForDescriptors(current, read.descriptors));
+
+  const reconciled = await input.actions.reconcileCanvasTextPreviews({
+    canvasId: input.canvasId,
+    nodes: [canvasTextPreviewTargetForApi(input.target)],
+    devicePixelRatio: input.devicePixelRatio
+  });
+  if (!input.isCurrent()) {
+    return;
+  }
+  input.setDescriptors((current) => canvasTextPreviewDescriptorsWithTargetDescriptor({
+    current,
+    target: input.target,
+    descriptors: reconciled.descriptors
+  }));
+  input.setPreviewErrors((current) => clearCanvasTextPreviewErrorsForDescriptors(current, reconciled.descriptors));
+  input.markResourceChecked();
+  const descriptor = reconciled.descriptors[input.target.projectRelativePath] ?? read.descriptors[input.target.projectRelativePath];
+  input.setPreviewSources((current) => canvasTextPreviewSourcesWithTargetSource({
+    current,
+    node: input.node,
+    canvasId: input.canvasId,
+    target: input.target,
+    targetKey: input.targetKey,
+    descriptor,
+    imageResourceZoom: input.imageResourceZoom,
+    devicePixelRatio: input.devicePixelRatio
+  }));
 }
 
 export function isCanvasTextPreviewCaptureLayoutReady(element: HTMLElement): boolean {
@@ -621,11 +823,17 @@ function CanvasTextPreviewCaptureTarget({
             return;
           }
           const sourcePng = await captureCanvasTextPreviewSource({ element });
+          if (cancelled) {
+            return;
+          }
           await actions.saveCanvasTextPreviewSource({
             ...canvasTextPreviewTargetForApi(target),
             canvasId: target.canvasId,
             sourcePng
           });
+          if (cancelled) {
+            return;
+          }
           const reconciled = await actions.reconcileCanvasTextPreviews({
             canvasId: target.canvasId,
             nodes: [canvasTextPreviewTargetForApi(target)],
@@ -699,9 +907,9 @@ function canvasTextPreviewForNode(input: {
     || !canvasTextPreviewDescriptorMatchesTarget(input.descriptor, input.target)) {
     return undefined;
   }
-  const targetWidth = canvasRasterPreviewWidth({
-    nodeDisplayWidth: input.node.width,
-    sourceWidth: input.descriptor.sourceWidth,
+  const targetWidth = canvasTextPreviewTargetWidthForNode({
+    node: input.node,
+    descriptor: input.descriptor,
     imageResourceZoom: input.imageResourceZoom,
     devicePixelRatio: input.devicePixelRatio
   });
@@ -720,6 +928,20 @@ function canvasTextPreviewForNode(input: {
     width: previewWidth
   }).toString();
   return { src, previewWidth };
+}
+
+function canvasTextPreviewTargetWidthForNode(input: {
+  node: ProjectedCanvasNode;
+  descriptor: CanvasTextPreviewDescriptor;
+  imageResourceZoom: number;
+  devicePixelRatio: number;
+}): number {
+  return canvasRasterPreviewWidth({
+    nodeDisplayWidth: input.node.width,
+    sourceWidth: input.descriptor.sourceWidth,
+    imageResourceZoom: input.imageResourceZoom,
+    devicePixelRatio: input.devicePixelRatio
+  });
 }
 
 function canvasTextPreviewUrl(input: {
@@ -824,6 +1046,97 @@ export function canvasTextPreviewCurrentDescriptors(input: {
   return currentDescriptors;
 }
 
+function canvasTextPreviewCurrentSources(input: {
+  targets: CanvasTextPreviewTarget[];
+  sources: Record<string, CanvasTextPreviewPublishedSource>;
+}): Record<string, CanvasTextPreviewPublishedSource> {
+  const targetKeysByPath = new Map(input.targets.map((target) => [
+    target.projectRelativePath,
+    canvasTextPreviewTargetKey(target)
+  ]));
+  const currentSources: Record<string, CanvasTextPreviewPublishedSource> = {};
+  for (const [projectRelativePath, source] of Object.entries(input.sources)) {
+    if (targetKeysByPath.get(projectRelativePath) === source.targetKey) {
+      currentSources[projectRelativePath] = source;
+    }
+  }
+  return currentSources;
+}
+
+function canvasTextPreviewDescriptorsWithTargetDescriptor(input: {
+  current: Record<string, CanvasTextPreviewDescriptor>;
+  target: CanvasTextPreviewTarget;
+  descriptors: Record<string, CanvasTextPreviewDescriptor>;
+}): Record<string, CanvasTextPreviewDescriptor> {
+  const descriptor = input.descriptors[input.target.projectRelativePath];
+  if (descriptor && canvasTextPreviewDescriptorMatchesTarget(descriptor, input.target)) {
+    if (canvasTextPreviewDescriptorsEqual(input.current[input.target.projectRelativePath], descriptor)) {
+      return input.current;
+    }
+    const next = { ...input.current };
+    next[input.target.projectRelativePath] = descriptor;
+    return next;
+  }
+  if (!input.current[input.target.projectRelativePath]) {
+    return input.current;
+  }
+  const next = { ...input.current };
+  delete next[input.target.projectRelativePath];
+  return next;
+}
+
+function canvasTextPreviewSourcesWithTargetSource(input: {
+  current: Record<string, CanvasTextPreviewPublishedSource>;
+  canvasId: string;
+  node: ProjectedCanvasNode;
+  target: CanvasTextPreviewTarget;
+  targetKey: string;
+  descriptor: CanvasTextPreviewDescriptor | undefined;
+  imageResourceZoom: number;
+  devicePixelRatio: number;
+}): Record<string, CanvasTextPreviewPublishedSource> {
+  const source = input.descriptor
+    ? canvasTextPreviewForNode({
+      canvasId: input.canvasId,
+      node: input.node,
+      target: input.target,
+      descriptor: input.descriptor,
+      imageResourceZoom: input.imageResourceZoom,
+      devicePixelRatio: input.devicePixelRatio
+    })
+    : undefined;
+  if (!source) {
+    if (!input.current[input.target.projectRelativePath]) {
+      return input.current;
+    }
+    const next = { ...input.current };
+    delete next[input.target.projectRelativePath];
+    return next;
+  }
+  const sourceKey = canvasTextPreviewResourceSourceKey(input.targetKey, source.previewWidth);
+  const nextSource = {
+    targetKey: input.targetKey,
+    sourceKey,
+    source
+  };
+  const currentSource = input.current[input.target.projectRelativePath];
+  if (currentSource
+    && currentSource.targetKey === nextSource.targetKey
+    && currentSource.sourceKey === nextSource.sourceKey
+    && currentSource.source.src === nextSource.source.src
+    && currentSource.source.previewWidth === nextSource.source.previewWidth) {
+    return input.current;
+  }
+  return {
+    ...input.current,
+    [input.target.projectRelativePath]: nextSource
+  };
+}
+
+function canvasTextPreviewResourceSourceKey(targetKey: string, targetWidth: number): string {
+  return `${targetKey}\u001f${targetWidth}`;
+}
+
 function canvasTextPreviewTargetsByPath(targets: CanvasTextPreviewTarget[]): Record<string, CanvasTextPreviewTarget> {
   return Object.fromEntries(targets.map((target) => [target.projectRelativePath, target]));
 }
@@ -837,6 +1150,24 @@ function canvasTextPreviewDescriptorMatchesTarget(
     && descriptor.contentCssHeight === target.contentCssHeight
     && descriptor.scrollTop === target.scrollTop
     && descriptor.scrollLeft === target.scrollLeft;
+}
+
+function canvasTextPreviewDescriptorsEqual(
+  left: CanvasTextPreviewDescriptor | undefined,
+  right: CanvasTextPreviewDescriptor
+): boolean {
+  if (!left) {
+    return false;
+  }
+  return left.fingerprint === right.fingerprint
+    && left.sourceWidth === right.sourceWidth
+    && left.sourceHeight === right.sourceHeight
+    && left.contentCssWidth === right.contentCssWidth
+    && left.contentCssHeight === right.contentCssHeight
+    && left.scrollTop === right.scrollTop
+    && left.scrollLeft === right.scrollLeft
+    && left.variants.length === right.variants.length
+    && left.variants.every((width, index) => width === right.variants[index]);
 }
 
 function clearStaleCanvasTextPreviewErrors(

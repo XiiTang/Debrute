@@ -167,6 +167,13 @@ describe('CanvasPerfBrowserAdapter', () => {
 
     adapter.recordEvent({ kind: 'counter', timestamp: 1, source: 'CanvasSurface', name: 'react-commit', value: 1 });
     adapter.recordEvent({
+      kind: 'counter',
+      timestamp: 3,
+      source: 'CanvasPreviewResourceScheduler',
+      name: 'preview-resource-started',
+      value: 1
+    });
+    adapter.recordEvent({
       kind: 'frame',
       timestamp: 2,
       source: 'CanvasSurface',

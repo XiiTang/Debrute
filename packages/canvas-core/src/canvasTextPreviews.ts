@@ -14,6 +14,7 @@ export interface CanvasTextPreviewDescriptor {
 export interface CanvasTextPreviewPathInput {
   canvasId: string;
   projectRelativePath: string;
+  fingerprint: string;
 }
 
 export function canvasTextPreviewSourceProjectPath(input: CanvasTextPreviewPathInput): string {
@@ -58,7 +59,8 @@ function canvasTextPreviewBaseProjectPath(input: CanvasTextPreviewPathInput): st
   const canvasId = normalizeCanvasTextPreviewCanvasId(input.canvasId);
   assertCanvasTextPreviewProjectRelativePath(input.projectRelativePath);
   const sourceKey = projectRelativePathCacheKey(input.projectRelativePath);
-  return `.debrute/cache/canvas-text-previews/${canvasId}/${sourceKey}`;
+  const fingerprintKey = normalizeCanvasTextPreviewFingerprint(input.fingerprint);
+  return `.debrute/cache/canvas-text-previews/${canvasId}/${sourceKey}/${fingerprintKey}`;
 }
 
 function normalizeCanvasTextPreviewCanvasId(canvasId: string): string {
@@ -72,6 +74,20 @@ function assertCanvasTextPreviewProjectRelativePath(projectRelativePath: string)
   if (projectRelativePath === '.debrute' || projectRelativePath.startsWith('.debrute/')) {
     throw new Error('Canvas text preview cannot target Debrute internal files.');
   }
+}
+
+function normalizeCanvasTextPreviewFingerprint(fingerprint: string): string {
+  if (typeof fingerprint !== 'string' || fingerprint.length === 0) {
+    throw new Error('Canvas text preview fingerprint must be a non-empty string.');
+  }
+  return assertCachePathSegment(encodeURIComponent(fingerprint), 'Canvas text preview fingerprint key');
+}
+
+function assertCachePathSegment(segment: string, label: string): string {
+  if (!segment || segment === '.' || segment === '..' || segment.includes('/') || segment.includes('\\')) {
+    throw new Error(`${label} must be a filesystem-safe path segment.`);
+  }
+  return segment;
 }
 
 function assertPositiveFinite(value: number, message: string): void {

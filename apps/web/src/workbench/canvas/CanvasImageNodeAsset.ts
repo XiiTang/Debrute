@@ -49,6 +49,7 @@ export type CanvasImageNodeAssetEvent =
     }
   | { type: 'next-loaded'; loadKey: string }
   | { type: 'next-failed'; loadKey: string; message: string }
+  | { type: 'interaction-started' }
   | { type: 'retry' };
 
 export function initialCanvasImageNodeAssetState(): CanvasImageNodeAssetState {
@@ -126,6 +127,14 @@ export function canvasImageNodeAssetReducer(
           message: event.message
         }
       };
+    case 'interaction-started':
+      if (!state.loaded || !state.next) {
+        return state;
+      }
+      return {
+        ...state,
+        next: undefined
+      };
   }
 }
 
@@ -156,22 +165,23 @@ export function shouldPublishCanvasImageNodeSourceImmediately(input: {
   retryRequested: boolean;
   hasLoadedImage: boolean;
   culled: boolean;
-  cameraState: CanvasCameraState;
+  becameVisibleAfterCull: boolean;
+  dragActive: boolean;
   loadedLoadKey: string | undefined;
-  imageResourceZoomChanged: boolean;
 }): boolean {
   const sourceLoadKey = input.source.kind === 'source'
     ? input.source.image.loadKey
     : undefined;
-  return input.source.kind === 'not-eligible'
-    || !input.didResolveUrl
+  if (input.source.kind === 'not-eligible'
     || input.revisionChanged
     || input.retryRequested
-    || !input.hasLoadedImage
-    || input.culled
-    || input.cameraState === 'moving'
-    || input.imageResourceZoomChanged
-    || input.loadedLoadKey === sourceLoadKey;
+    || input.loadedLoadKey === sourceLoadKey) {
+    return true;
+  }
+  if (input.culled || input.becameVisibleAfterCull || input.dragActive) {
+    return false;
+  }
+  return !input.didResolveUrl || !input.hasLoadedImage;
 }
 
 function reduceResolvedSource(
@@ -210,9 +220,7 @@ function reduceResolvedSource(
     };
   }
 
-  const shouldSkipCulledWork = event.culled
-    && (event.cameraState !== 'idle' || base.loaded !== undefined);
-  if (shouldSkipCulledWork || (event.cameraState === 'moving' && base.loaded)) {
+  if (event.culled || (event.cameraState === 'moving' && base.loaded)) {
     if (!base.next) {
       return base;
     }

@@ -51,11 +51,13 @@ describe('CanvasTextPreviewService', () => {
     });
     await expect(stat(join(projectRoot, canvasTextPreviewSourceProjectPath({
       canvasId: 'canvas-1',
-      projectRelativePath: 'notes/scene.md'
+      projectRelativePath: 'notes/scene.md',
+      fingerprint: 'fingerprint-a'
     })))).resolves.toBeTruthy();
     await expect(readFile(join(projectRoot, canvasTextPreviewDescriptorProjectPath({
       canvasId: 'canvas-1',
-      projectRelativePath: 'notes/scene.md'
+      projectRelativePath: 'notes/scene.md',
+      fingerprint: 'fingerprint-a'
     })), 'utf8'))
       .resolves.toContain('fingerprint-a');
   });
@@ -103,6 +105,7 @@ describe('CanvasTextPreviewService', () => {
     await expect(stat(join(projectRoot, canvasTextPreviewVariantProjectPath({
       canvasId: 'canvas-1',
       projectRelativePath: 'notes/scene.md',
+      fingerprint: 'fingerprint-a',
       width: 160
     })))).resolves.toBeTruthy();
   });
@@ -193,7 +196,65 @@ describe('CanvasTextPreviewService', () => {
     expect(result.descriptors).toEqual({});
   });
 
-  it('regenerates existing variant files after a source fingerprint change', async () => {
+  it('keeps current text preview descriptors readable after a late stale source save for the same file', async () => {
+    const projectRoot = await mkdtemp(join(tmpdir(), 'debrute-text-preview-current-'));
+    const staleSource = join(projectRoot, 'stale.png');
+    const currentSource = join(projectRoot, 'current.png');
+    await sharp({
+      create: {
+        width: 200,
+        height: 100,
+        channels: 4,
+        background: { r: 255, g: 0, b: 0, alpha: 1 }
+      }
+    }).png().toFile(staleSource);
+    await sharp({
+      create: {
+        width: 200,
+        height: 100,
+        channels: 4,
+        background: { r: 0, g: 0, b: 255, alpha: 1 }
+      }
+    }).png().toFile(currentSource);
+
+    const service = createCanvasTextPreviewService();
+    const commonInput = {
+      projectRoot,
+      canvasId: 'canvas-1',
+      projectRelativePath: 'notes/scene.md',
+      contentCssWidth: 100,
+      contentCssHeight: 50,
+      scrollTop: 0,
+      scrollLeft: 0
+    };
+    await service.saveSource({
+      ...commonInput,
+      fingerprint: 'fingerprint-current',
+      sourceTemporaryPath: currentSource
+    });
+    await service.saveSource({
+      ...commonInput,
+      fingerprint: 'fingerprint-stale',
+      sourceTemporaryPath: staleSource
+    });
+
+    const descriptors = await service.readDescriptors({
+      projectRoot,
+      canvasId: 'canvas-1',
+      nodes: [{
+        projectRelativePath: commonInput.projectRelativePath,
+        fingerprint: 'fingerprint-current',
+        contentCssWidth: commonInput.contentCssWidth,
+        contentCssHeight: commonInput.contentCssHeight,
+        scrollTop: commonInput.scrollTop,
+        scrollLeft: commonInput.scrollLeft
+      }]
+    });
+
+    expect(descriptors['notes/scene.md']?.fingerprint).toBe('fingerprint-current');
+  });
+
+  it('keeps existing variant files isolated after a source fingerprint change', async () => {
     const projectRoot = await mkdtemp(join(tmpdir(), 'debrute-text-preview-replace-'));
     const firstSource = join(projectRoot, 'first.png');
     const secondSource = join(projectRoot, 'second.png');
@@ -241,12 +302,13 @@ describe('CanvasTextPreviewService', () => {
         scrollLeft: commonInput.scrollLeft
       }]
     });
-    const variantPath = join(projectRoot, canvasTextPreviewVariantProjectPath({
+    const firstVariantPath = join(projectRoot, canvasTextPreviewVariantProjectPath({
       canvasId: 'canvas-1',
       projectRelativePath: commonInput.projectRelativePath,
+      fingerprint: 'fingerprint-a',
       width: 64
     }));
-    const firstVariantHash = sha256(await readFile(variantPath));
+    const firstVariantHash = sha256(await readFile(firstVariantPath));
 
     await service.saveSource({
       ...commonInput,
@@ -267,7 +329,15 @@ describe('CanvasTextPreviewService', () => {
     });
 
     expect(result.descriptors['notes/scene.md']?.variants).toContain(64);
-    expect(sha256(await readFile(variantPath))).not.toBe(firstVariantHash);
+    const secondVariantPath = join(projectRoot, canvasTextPreviewVariantProjectPath({
+      canvasId: 'canvas-1',
+      projectRelativePath: commonInput.projectRelativePath,
+      fingerprint: 'fingerprint-b',
+      width: 64
+    }));
+    expect(secondVariantPath).not.toBe(firstVariantPath);
+    expect(sha256(await readFile(firstVariantPath))).toBe(firstVariantHash);
+    expect(sha256(await readFile(secondVariantPath))).not.toBe(firstVariantHash);
   });
 });
 

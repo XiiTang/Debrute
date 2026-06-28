@@ -9,6 +9,7 @@ export type CanvasPerfEventSource =
   | 'CanvasStageRuntime'
   | 'CanvasRenderCoordinator'
   | 'CanvasImageNodeAsset'
+  | 'CanvasPreviewResourceScheduler'
   | 'CanvasRenderSnapshotScheduler'
   | 'CanvasPerfBrowserAdapter';
 
@@ -35,7 +36,13 @@ export type CanvasPerfCounterName =
   | 'image-node-upgrade-skip-culled'
   | 'image-node-upgrade-skip-moving'
   | 'image-node-source-reset'
-  | 'image-node-retry';
+  | 'image-node-retry'
+  | 'preview-resource-queued'
+  | 'preview-resource-coalesced'
+  | 'preview-resource-started'
+  | 'preview-resource-skip-culled'
+  | 'preview-resource-skip-stale'
+  | 'preview-resource-paused-moving';
 
 export type CanvasPerfSessionId = `${CanvasPerfSessionType}:${number}`;
 

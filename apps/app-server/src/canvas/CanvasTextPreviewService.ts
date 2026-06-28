@@ -107,7 +107,13 @@ class LocalCanvasTextPreviewService implements CanvasTextPreviewService {
       if (!descriptor) {
         continue;
       }
-      const existingVariants = await this.existingVariantWidths(input.projectRoot, input.canvasId, node.projectRelativePath, descriptor.variants);
+      const existingVariants = await this.existingVariantWidths(
+        input.projectRoot,
+        input.canvasId,
+        node.projectRelativePath,
+        node.fingerprint,
+        descriptor.variants
+      );
       descriptors[node.projectRelativePath] = {
         ...descriptor,
         variants: existingVariants
@@ -142,7 +148,8 @@ class LocalCanvasTextPreviewService implements CanvasTextPreviewService {
   ): Promise<CanvasTextPreviewDescriptor | undefined> {
     const descriptor = await readTextPreviewDescriptor(projectRoot, {
       canvasId,
-      projectRelativePath: node.projectRelativePath
+      projectRelativePath: node.projectRelativePath,
+      fingerprint: node.fingerprint
     });
     if (!descriptor || !canvasTextPreviewDescriptorMatchesNode(descriptor, node)) {
       return undefined;
@@ -154,11 +161,12 @@ class LocalCanvasTextPreviewService implements CanvasTextPreviewService {
     projectRoot: string,
     canvasId: string,
     projectRelativePath: string,
+    fingerprint: string,
     variants: number[]
   ): Promise<number[]> {
     const existing: number[] = [];
     for (const width of variants) {
-      const projectPath = canvasTextPreviewVariantProjectPath({ canvasId, projectRelativePath, width });
+      const projectPath = canvasTextPreviewVariantProjectPath({ canvasId, projectRelativePath, fingerprint, width });
       if (await existingFilePath(projectRoot, projectPath)) {
         existing.push(width);
       }
@@ -176,7 +184,8 @@ class LocalCanvasTextPreviewService implements CanvasTextPreviewService {
     }
     const sourceProjectPath = canvasTextPreviewSourceProjectPath({
       canvasId: input.canvasId,
-      projectRelativePath: node.projectRelativePath
+      projectRelativePath: node.projectRelativePath,
+      fingerprint: node.fingerprint
     });
     const absoluteSourcePath = await existingFilePath(input.projectRoot, sourceProjectPath);
     if (!absoluteSourcePath) {
@@ -190,6 +199,7 @@ class LocalCanvasTextPreviewService implements CanvasTextPreviewService {
       const variantProjectPath = canvasTextPreviewVariantProjectPath({
         canvasId: input.canvasId,
         projectRelativePath: node.projectRelativePath,
+        fingerprint: node.fingerprint,
         width
       });
       const absoluteVariantPath = await resolveNoSymlinkProjectPathForWrite(input.projectRoot, variantProjectPath);
@@ -211,7 +221,8 @@ class LocalCanvasTextPreviewService implements CanvasTextPreviewService {
     await writeTextPreviewDescriptor(
       await resolveNoSymlinkProjectPathForWrite(input.projectRoot, canvasTextPreviewDescriptorProjectPath({
         canvasId: input.canvasId,
-        projectRelativePath: node.projectRelativePath
+        projectRelativePath: node.projectRelativePath,
+        fingerprint: node.fingerprint
       })),
       nextDescriptor
     );
@@ -221,7 +232,7 @@ class LocalCanvasTextPreviewService implements CanvasTextPreviewService {
 
 async function readTextPreviewDescriptor(
   projectRoot: string,
-  input: { canvasId: string; projectRelativePath: string }
+  input: { canvasId: string; projectRelativePath: string; fingerprint: string }
 ): Promise<CanvasTextPreviewDescriptor | undefined> {
   const descriptorPath = await existingFilePath(projectRoot, canvasTextPreviewDescriptorProjectPath(input));
   if (!descriptorPath) {

@@ -17,10 +17,14 @@ import {
   type FloatingBarRect
 } from '../shell/floatingBars';
 import { cameraForCanvasContent } from './CanvasCameraBounds';
-import { CANVAS_IMAGE_PREVIEW_RESOURCE_SETTLE_MS } from './canvasImagePreviews';
 import { CanvasImageNodeAssetProvider, type CanvasImageNodeAssetContextValue } from './CanvasImageNodeAssetContext';
 import type { CanvasImageFeedbackMode } from './CanvasImageFeedbackLayer';
 import { CanvasNodeShell } from './CanvasNodeShell';
+import {
+  CANVAS_PREVIEW_RESOURCE_SETTLE_MS,
+  createCanvasPreviewResourceScheduler,
+  type CanvasPreviewResourceScheduler
+} from './CanvasPreviewResourceScheduler';
 import { CanvasTextPreviewProvider, useCanvasTextPreviewRuntime } from './CanvasTextPreviewRuntime';
 import type { CanvasOverlayRuntime } from './CanvasOverlayRuntime';
 import { createCanvasPerfBrowserAdapter } from './CanvasPerfBrowserAdapter';
@@ -194,6 +198,7 @@ function CanvasSurfaceRuntime({
   const devicePixelRatio = devicePixelRatioValue();
   const perfMonitorEnabled = canvasPerfMonitorEnabled();
   const stageRuntime = useMemo(() => createCanvasStageRuntime({ perfMonitor }), [perfMonitor]);
+  const previewResourceScheduler = useMemo(() => createCanvasPreviewResourceScheduler({ perfMonitor }), [perfMonitor]);
   const visibilityController = useMemo(() => createCanvasVisibilityController({ stageRuntime }), [stageRuntime]);
   const renderCoordinator = useMemo(() => createCanvasRenderCoordinator({ projection, perfMonitor }), [perfMonitor]);
   const currentLayoutOverrides = useCallback(() => canvasLayoutOverridesForCanvas({
@@ -215,8 +220,10 @@ function CanvasSurfaceRuntime({
     imageResourceZoom,
     devicePixelRatio,
     cameraState,
-    perfMonitor
-  }), [cameraState, devicePixelRatio, imageResourceZoom, perfMonitor]);
+    dragActive: dragState !== undefined,
+    perfMonitor,
+    previewResourceScheduler
+  }), [cameraState, devicePixelRatio, dragState, imageResourceZoom, perfMonitor, previewResourceScheduler]);
 
   selectionRef.current = selection;
   surfaceSizeRef.current = surfaceSize;
@@ -249,6 +256,16 @@ function CanvasSurfaceRuntime({
       perfDebugBridge.unregister();
     };
   }, [perfDebugBridge]);
+
+  useEffect(() => () => previewResourceScheduler.dispose(), [previewResourceScheduler]);
+
+  useEffect(() => {
+    syncCanvasPreviewResourceSchedulerForInteraction({
+      scheduler: previewResourceScheduler,
+      cameraState,
+      dragState
+    });
+  }, [cameraState, dragState, previewResourceScheduler]);
 
   const commitRenderSnapshot = useCallback((input: {
     camera: CanvasRuntimeSnapshot['camera'];
@@ -411,6 +428,13 @@ function CanvasSurfaceRuntime({
   }, [canvas.id, projectedNodes, runtime, surfaceSize]);
 
   useLayoutEffect(() => runtime.subscribeCamera((liveCamera) => {
+    const snapshot = runtime.getSnapshot();
+    syncCanvasPreviewResourceSchedulerForInteraction({
+      scheduler: previewResourceScheduler,
+      cameraState: snapshot.cameraState,
+      dragState: snapshot.dragState
+    });
+    syncImageResourceZoomForSnapshot(snapshot);
     syncCanvasMovingCameraFrame({
       liveCamera,
       stageRuntime,
@@ -423,7 +447,7 @@ function CanvasSurfaceRuntime({
       enabled: perfMonitorEnabled,
       perfMonitor,
       sessionRef: canvasPerfSessionRef,
-      cameraState: runtime.getSnapshot().cameraState,
+      cameraState: snapshot.cameraState,
       renderSnapshot: renderSnapshotRef.current ?? renderSnapshot,
       reactCommitCountRef
     });
@@ -433,13 +457,20 @@ function CanvasSurfaceRuntime({
     stageRuntime,
     renderSnapshot,
     renderSnapshotScheduler,
-    runtime
+    runtime,
+    previewResourceScheduler,
+    syncImageResourceZoomForSnapshot
   ]);
 
   useEffect(() => {
     return runtime.subscribeCameraState((cameraState) => {
-      setCameraState(cameraState);
       const snapshot = runtime.getSnapshot();
+      syncCanvasPreviewResourceSchedulerForInteraction({
+        scheduler: previewResourceScheduler,
+        cameraState,
+        dragState: snapshot.dragState
+      });
+      setCameraState(cameraState);
       syncCanvasPerfSessionState({
         enabled: perfMonitorEnabled,
         perfMonitor,
@@ -466,6 +497,7 @@ function CanvasSurfaceRuntime({
     minimapOpen,
     perfMonitor,
     perfMonitorEnabled,
+    previewResourceScheduler,
     renderSnapshotScheduler,
     runtime
   ]);
@@ -495,8 +527,13 @@ function CanvasSurfaceRuntime({
       });
     }
     return runtime.subscribeDragState((nextDragState) => {
-      setDragState(nextDragState);
       const snapshot = runtime.getSnapshot();
+      syncCanvasPreviewResourceSchedulerForInteraction({
+        scheduler: previewResourceScheduler,
+        cameraState: snapshot.cameraState,
+        dragState: nextDragState
+      });
+      setDragState(nextDragState);
       activeLayoutDraftRef.current = canvasSurfaceLayoutDraftFromDragState({
         canvasId: canvas.id,
         dragState: nextDragState,
@@ -546,6 +583,7 @@ function CanvasSurfaceRuntime({
     canvas.id,
     perfMonitor,
     perfMonitorEnabled,
+    previewResourceScheduler,
     renderSnapshot,
     syncVisibility,
     runtime
@@ -923,7 +961,10 @@ function CanvasSurfaceRuntime({
           actions={actions}
           cameraState={cameraState}
           dragState={dragState}
+          imageResourceZoom={imageResourceZoom}
           devicePixelRatio={devicePixelRatio}
+          culledNodePaths={renderSnapshot.culledNodePaths}
+          previewResourceScheduler={previewResourceScheduler}
         >
           <CanvasImageNodeAssetProvider value={imageNodeAssetContext}>
             {renderedNodes.map((node) => (
@@ -937,6 +978,7 @@ function CanvasSurfaceRuntime({
                 stageRuntime={stageRuntime}
                 actions={actions}
                 textBuffer={textFileBuffers[node.projectRelativePath]}
+                previewInteractionActive={cameraState !== 'idle' || dragState !== undefined}
                 feedbackEntry={canvasFeedback?.entries[node.projectRelativePath]}
                 localFeedbackMode={node.mediaKind === 'image' ? localFeedbackMode : undefined}
                 pendingFeedbackRegion={
@@ -944,8 +986,6 @@ function CanvasSurfaceRuntime({
                     ? { label: pendingFeedbackRegion.label, geometry: pendingFeedbackRegion.geometry }
                     : undefined
                 }
-                imageResourceZoom={imageResourceZoom}
-                devicePixelRatio={devicePixelRatio}
                 onLocalFeedbackDraft={handleLocalFeedbackDraft}
                 onPointerDown={beginNodeMove}
                 onPointerMove={handlePointerMove}
@@ -978,11 +1018,10 @@ function CanvasSurfaceNodeShell({
   stageRuntime,
   actions,
   textBuffer,
+  previewInteractionActive,
   feedbackEntry,
   localFeedbackMode,
   pendingFeedbackRegion,
-  imageResourceZoom,
-  devicePixelRatio,
   onLocalFeedbackDraft,
   onPointerDown,
   onPointerMove,
@@ -1001,11 +1040,10 @@ function CanvasSurfaceNodeShell({
   stageRuntime: CanvasStageRuntime;
   actions: WorkbenchActions;
   textBuffer: TextFileBuffer | undefined;
+  previewInteractionActive: boolean;
   feedbackEntry?: CanvasFeedbackEntry | undefined;
   localFeedbackMode?: CanvasImageFeedbackMode | undefined;
   pendingFeedbackRegion?: CanvasImageFeedbackDraftRegion | undefined;
-  imageResourceZoom: number;
-  devicePixelRatio: number;
   onLocalFeedbackDraft?: ((input: {
     projectRelativePath: string;
     geometry: CanvasFeedbackGeometry;
@@ -1021,7 +1059,7 @@ function CanvasSurfaceNodeShell({
 }): React.ReactElement {
   const textPreviewRuntime = useCanvasTextPreviewRuntime();
   const textPreview = node.mediaKind === 'text'
-    ? textPreviewRuntime.previewForNode({ node, imageResourceZoom, devicePixelRatio })
+    ? textPreviewRuntime.previewForNode({ node })
     : undefined;
   const textPreviewError = node.mediaKind === 'text'
     ? textPreviewRuntime.previewErrorForNode({ node })
@@ -1038,6 +1076,7 @@ function CanvasSurfaceNodeShell({
       textBuffer={textBuffer}
       textPreview={textPreview}
       textPreviewError={textPreviewError}
+      previewInteractionActive={previewInteractionActive}
       feedbackEntry={feedbackEntry}
       localFeedbackMode={localFeedbackMode}
       pendingFeedbackRegion={pendingFeedbackRegion}
@@ -1442,7 +1481,7 @@ export function syncCanvasImageResourceZoomForCameraState(input: {
   settleMs?: number | undefined;
 }): void {
   const now = input.now ?? canvasPerfTimestamp;
-  const settleMs = input.settleMs ?? CANVAS_IMAGE_PREVIEW_RESOURCE_SETTLE_MS;
+  const settleMs = input.settleMs ?? CANVAS_PREVIEW_RESOURCE_SETTLE_MS;
   const clearPendingTimer = () => {
     if (input.timerRef.current === undefined) {
       return;
@@ -1479,6 +1518,17 @@ export function syncCanvasImageResourceZoomForCameraState(input: {
     }
     input.setImageResourceZoom(input.liveCameraZoom);
   }, delay);
+}
+
+export function syncCanvasPreviewResourceSchedulerForInteraction(input: {
+  scheduler: Pick<CanvasPreviewResourceScheduler, 'setInteractionState'>;
+  cameraState: CanvasRuntimeSnapshot['cameraState'];
+  dragState: CanvasRuntimeSnapshot['dragState'];
+}): void {
+  input.scheduler.setInteractionState({
+    cameraState: input.cameraState,
+    dragActive: input.dragState !== undefined
+  });
 }
 
 export function createCanvasRenderSnapshotScheduler<T>(input: {

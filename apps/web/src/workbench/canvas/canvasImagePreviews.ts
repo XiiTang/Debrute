@@ -8,7 +8,6 @@ import {
 
 export const CANVAS_IMAGE_PREVIEW_MIN_SCALE = CANVAS_RASTER_PREVIEW_MIN_SCALE;
 export const CANVAS_IMAGE_PREVIEW_MAX_SCALE = CANVAS_RASTER_PREVIEW_MAX_SCALE;
-export const CANVAS_IMAGE_PREVIEW_RESOURCE_SETTLE_MS = 500;
 
 export interface CanvasImageSource {
   src: string;

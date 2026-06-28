@@ -159,6 +159,8 @@ describe('CanvasPerfMonitor', () => {
     monitor.recordCounter({ sessionId, timestamp: 3, source: 'CanvasImageNodeAsset', name: 'image-node-next-load-resolve' });
     monitor.recordCounter({ sessionId, timestamp: 4, source: 'CanvasImageNodeAsset', name: 'image-node-handoff-promote' });
     monitor.recordCounter({ sessionId, timestamp: 5, source: 'CanvasImageNodeAsset', name: 'image-node-upgrade-skip-culled' });
+    monitor.recordCounter({ sessionId, timestamp: 6, source: 'CanvasPreviewResourceScheduler', name: 'preview-resource-queued' });
+    monitor.recordCounter({ sessionId, timestamp: 7, source: 'CanvasPreviewResourceScheduler', name: 'preview-resource-started' });
 
     const summary = monitor.endSession({ sessionId, timestamp: 10, source: 'CanvasSurface' });
 
@@ -167,7 +169,9 @@ describe('CanvasPerfMonitor', () => {
       'image-node-next-load-start': 1,
       'image-node-next-load-resolve': 1,
       'image-node-handoff-promote': 1,
-      'image-node-upgrade-skip-culled': 1
+      'image-node-upgrade-skip-culled': 1,
+      'preview-resource-queued': 1,
+      'preview-resource-started': 1
     });
     expect(summary?.counters).toEqual(monitor.getCounterTotals());
   });

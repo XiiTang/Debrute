@@ -20,6 +20,7 @@ export interface CanvasNodeShellProps {
   textBuffer: TextFileBuffer | undefined;
   textPreview?: CanvasTextPreviewSource | undefined;
   textPreviewError?: string | undefined;
+  previewInteractionActive: boolean;
   feedbackEntry?: CanvasFeedbackEntry | undefined;
   localFeedbackMode?: CanvasImageFeedbackMode | undefined;
   pendingFeedbackRegion?: CanvasImageFeedbackDraftRegion | undefined;
@@ -48,6 +49,7 @@ function CanvasNodeShellComponent({
   textBuffer,
   textPreview,
   textPreviewError,
+  previewInteractionActive,
   feedbackEntry,
   localFeedbackMode,
   pendingFeedbackRegion,
@@ -116,6 +118,7 @@ function CanvasNodeShellComponent({
             textBuffer={textBuffer}
             textPreview={textPreview}
             textPreviewError={textPreviewError}
+            previewInteractionActive={previewInteractionActive}
             feedbackEntry={feedbackEntry}
             localFeedbackMode={localFeedbackMode}
             pendingFeedbackRegion={pendingFeedbackRegion}
@@ -135,6 +138,7 @@ function CanvasNodeShellComponent({
           textBuffer={textBuffer}
           textPreview={textPreview}
           textPreviewError={textPreviewError}
+          previewInteractionActive={previewInteractionActive}
           feedbackEntry={feedbackEntry}
           localFeedbackMode={localFeedbackMode}
           pendingFeedbackRegion={pendingFeedbackRegion}
@@ -177,6 +181,7 @@ export function areCanvasNodeShellPropsEqual(
     && previous.textBuffer === next.textBuffer
     && previous.textPreview === next.textPreview
     && previous.textPreviewError === next.textPreviewError
+    && previous.previewInteractionActive === next.previewInteractionActive
     && previous.feedbackEntry === next.feedbackEntry
     && previous.localFeedbackMode === next.localFeedbackMode
     && previous.pendingFeedbackRegion === next.pendingFeedbackRegion

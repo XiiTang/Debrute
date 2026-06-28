@@ -1,6 +1,7 @@
 import React, { createContext, useCallback, useContext, useEffect, useMemo, useReducer, useRef } from 'react';
 import type { ProjectedCanvasNode } from '@debrute/canvas-core';
 import { CANVAS_PERF_INTERACTION_SESSION_TYPES, type CanvasPerfCounterName, type CanvasPerfMonitor } from './CanvasPerfMonitor';
+import type { CanvasPreviewResourceScheduler } from './CanvasPreviewResourceScheduler';
 import {
   canvasImageNodeAssetReducer,
   deriveCanvasImageNodeRenderState,
@@ -10,14 +11,15 @@ import {
   type CanvasImageNodeRenderState,
   type CanvasImageNodeResolvedSource
 } from './CanvasImageNodeAsset';
-import { CANVAS_IMAGE_PREVIEW_RESOURCE_SETTLE_MS } from './canvasImagePreviews';
 import type { CanvasCameraState } from './runtime/canvasCamera';
 
 export interface CanvasImageNodeAssetContextValue {
   imageResourceZoom: number;
   devicePixelRatio: number;
   cameraState: CanvasCameraState;
+  dragActive: boolean;
   perfMonitor?: Pick<CanvasPerfMonitor, 'recordCounter'> | undefined;
+  previewResourceScheduler: CanvasPreviewResourceScheduler;
 }
 
 export type CanvasImageNodeAssetHookState = CanvasImageNodeRenderState & {
@@ -50,7 +52,10 @@ export function useCanvasImageNodeAsset(input: {
   const didResolveUrlRef = useRef(false);
   const retryRequestedRef = useRef(false);
   const previousRevisionKeyRef = useRef<string | undefined>(undefined);
-  const previousImageResourceZoomRef = useRef(context.imageResourceZoom);
+  const previousCulledRef = useRef(input.culled);
+  const latestScheduleKeyRef = useRef<string | undefined>(undefined);
+  const latestCulledRef = useRef(input.culled);
+  latestCulledRef.current = input.culled;
   const source = useMemo(() => resolveCanvasImageNodeSource({
     node: input.node,
     imageResourceZoom: context.imageResourceZoom,
@@ -62,12 +67,16 @@ export function useCanvasImageNodeAsset(input: {
     input.node,
     state.retryKey
   ]);
+  const scheduleKey = source.kind === 'source'
+    ? `${source.sourceRevisionKey}\u001f${source.image.loadKey}`
+    : `${source.kind}\u001f${source.sourceRevisionKey ?? ''}`;
+  latestScheduleKeyRef.current = scheduleKey;
 
   useEffect(() => {
     const revisionChanged = previousRevisionKeyRef.current !== source.sourceRevisionKey;
     previousRevisionKeyRef.current = source.sourceRevisionKey;
-    const imageResourceZoomChanged = previousImageResourceZoomRef.current !== context.imageResourceZoom;
-    previousImageResourceZoomRef.current = context.imageResourceZoom;
+    const becameVisibleAfterCull = previousCulledRef.current && !input.culled;
+    previousCulledRef.current = input.culled;
     const retryRequested = retryRequestedRef.current;
     const shouldRunImmediately = shouldPublishCanvasImageNodeSourceImmediately({
       source,
@@ -76,9 +85,9 @@ export function useCanvasImageNodeAsset(input: {
       retryRequested,
       hasLoadedImage: Boolean(state.loaded),
       culled: input.culled,
-      cameraState: context.cameraState,
-      loadedLoadKey: state.loaded?.loadKey,
-      imageResourceZoomChanged
+      becameVisibleAfterCull,
+      dragActive: context.dragActive,
+      loadedLoadKey: state.loaded?.loadKey
     });
     retryRequestedRef.current = false;
 
@@ -108,17 +117,43 @@ export function useCanvasImageNodeAsset(input: {
       return undefined;
     }
 
-    const handle = window.setTimeout(publishSource, CANVAS_IMAGE_PREVIEW_RESOURCE_SETTLE_MS);
-    return () => {
-      window.clearTimeout(handle);
-    };
+    if (source.kind !== 'source') {
+      return undefined;
+    }
+
+    if (input.culled) {
+      context.previewResourceScheduler.cancel('image', input.node.projectRelativePath);
+      return undefined;
+    }
+
+    context.previewResourceScheduler.enqueue({
+      kind: 'image',
+      nodeId: input.node.projectRelativePath,
+      sourceKey: scheduleKey,
+      targetWidth: source.image.previewWidth,
+      isCurrent: () => latestScheduleKeyRef.current === scheduleKey,
+      isCulled: () => latestCulledRef.current,
+      run: publishSource
+    });
+    return undefined;
   }, [
     context,
     input.culled,
     input.node,
     source,
+    scheduleKey,
     state.loaded
   ]);
+
+  useEffect(() => () => {
+    context.previewResourceScheduler.cancel('image', input.node.projectRelativePath);
+  }, [context.previewResourceScheduler, input.node.projectRelativePath]);
+
+  useEffect(() => {
+    if (context.cameraState !== 'idle' || context.dragActive) {
+      dispatch({ type: 'interaction-started' });
+    }
+  }, [context.cameraState, context.dragActive]);
 
   const retry = useCallback(() => {
     retryRequestedRef.current = true;
