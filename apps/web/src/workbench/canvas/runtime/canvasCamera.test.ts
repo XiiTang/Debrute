@@ -40,6 +40,22 @@ describe('canvas camera runtime', () => {
     expect(camera.y).toBeCloseTo(2);
   });
 
+  it('clamps wheel zoom to the canvas zoom range', () => {
+    expect(cameraForWheelDelta({
+      camera: { x: 0, y: 0, z: 1 },
+      surfaceRect: { left: 0, top: 0 },
+      screenPoint: { x: 100, y: 100 },
+      delta: { x: 0, y: 0, z: -100 }
+    }).z).toBe(0.01);
+
+    expect(cameraForWheelDelta({
+      camera: { x: 0, y: 0, z: 1 },
+      surfaceRect: { left: 0, top: 0 },
+      screenPoint: { x: 100, y: 100 },
+      delta: { x: 0, y: 0, z: 100 }
+    }).z).toBe(9.99);
+  });
+
   it('combines gesture scale and gesture-center movement in one camera update', () => {
     const camera = cameraForGestureZoom({
       camera: { x: 10, y: 20, z: 2 },
@@ -52,6 +68,24 @@ describe('canvas camera runtime', () => {
     expect(camera.z).toBeCloseTo(2.5);
     expect(camera.x).toBeCloseTo(-25.5);
     expect(camera.y).toBeCloseTo(-31);
+  });
+
+  it('clamps gesture zoom to the canvas zoom range', () => {
+    expect(cameraForGestureZoom({
+      camera: { x: 0, y: 0, z: 1 },
+      surfaceRect: { left: 0, top: 0 },
+      origin: { x: 100, y: 100 },
+      scale: 0.001,
+      delta: { x: 0, y: 0 }
+    }).z).toBe(0.01);
+
+    expect(cameraForGestureZoom({
+      camera: { x: 0, y: 0, z: 1 },
+      surfaceRect: { left: 0, top: 0 },
+      origin: { x: 100, y: 100 },
+      scale: 20,
+      delta: { x: 0, y: 0 }
+    }).z).toBe(9.99);
   });
 
   it('centers a canvas point while preserving zoom', () => {

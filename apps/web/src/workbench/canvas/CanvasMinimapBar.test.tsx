@@ -1,8 +1,12 @@
+// @vitest-environment jsdom
+
 import type { ReactElement } from 'react';
+import React, { act } from 'react';
+import { createRoot, type Root } from 'react-dom/client';
 import { renderToStaticMarkup } from 'react-dom/server';
 import { describe, expect, it } from 'vitest';
 import { createCanvasDocument, type CanvasProjection } from '@debrute/canvas-core';
-import { CanvasMinimapBar } from './CanvasMinimapBar';
+import { CanvasMinimapBar, formatCanvasMinimapZoomLabel } from './CanvasMinimapBar';
 import { createCanvasOverlayRuntime } from './CanvasOverlayRuntime';
 import type { CanvasEditorRuntime } from './runtime/CanvasEditorRuntime';
 import { createCanvasEditorRuntime } from './runtime/CanvasEditorRuntime';
@@ -18,6 +22,12 @@ function renderStaticWithI18n(element: ReactElement): string {
 }
 
 describe('CanvasMinimapBar', () => {
+  it('formats zoom labels as integer percentages below one and decimals at or above one', () => {
+    expect(formatCanvasMinimapZoomLabel(0.1234)).toBe('12%');
+    expect(formatCanvasMinimapZoomLabel(0.5)).toBe('50%');
+    expect(formatCanvasMinimapZoomLabel(9.99)).toBe('9.99');
+  });
+
   it('renders a disabled Mini Map button without valid navigation content', () => {
     const html = renderStaticWithI18n(
       <CanvasMinimapBar
@@ -74,10 +84,13 @@ describe('CanvasMinimapBar', () => {
 
     expect(html).toContain('data-testid="canvas-minimap-panel"');
     expect(html).toContain(`width:${CANVAS_MINIMAP_PANEL_SIZE.width}px`);
+    expect(html).toContain('data-testid="canvas-minimap-button-zoom"');
     expect(html).toContain('data-minimap-node-path="flow/a.png"');
     expect(html).toContain('data-minimap-node-path="flow/selected.png"');
     expect(html).toContain('class="canvas-minimap-node selected"');
     expect(html).toContain('class="canvas-minimap-viewport"');
+    expect(html).toContain('50%');
+    expect(html).not.toContain('data-testid="canvas-minimap-zoom"');
     expect(html).not.toContain('Close Mini Map');
     expect(html).not.toContain('canvas-minimap-close');
     expect(html).not.toContain('<div class="canvas-minimap-bar"');
@@ -116,6 +129,29 @@ describe('CanvasMinimapBar', () => {
     expect(html).not.toContain('height="24"');
   });
 
+  it('updates the zoom label when the canvas camera changes', async () => {
+    const canvas = createCanvasDocument({ id: 'minimap-live-zoom-canvas' });
+    const runtime = runtimeFixture();
+
+    await withRenderedMinimap({
+      canvas,
+      nodes: [
+        nodeFixture('flow/a.png', 0, 0),
+        nodeFixture('flow/selected.png', 800, 400)
+      ],
+      runtime
+    }, async ({ container }) => {
+      expect(readButtonZoomLabel(container)).toBe('50%');
+      expect(container.querySelector('[data-testid="canvas-minimap-zoom"]')).toBeNull();
+
+      await act(async () => {
+        runtime.camera.setCamera({ x: 0, y: 0, z: 9.99 });
+      });
+
+      expect(readButtonZoomLabel(container)).toBe('9.99');
+      expect(container.querySelector('[data-testid="canvas-minimap-zoom"]')).toBeNull();
+    });
+  });
 });
 
 const panelPlacementFixture = placeCanvasMinimapPanel({
@@ -152,6 +188,65 @@ function runtimeFixture(): CanvasEditorRuntime {
     surface: fakeElement({ left: 0, top: 0, width: 1000, height: 500 }) as unknown as HTMLElement
   });
   return runtime;
+}
+
+async function withRenderedMinimap(
+  input: {
+    canvas: ReturnType<typeof createCanvasDocument>;
+    nodes: CanvasProjection['nodes'];
+    runtime: CanvasEditorRuntime;
+  },
+  callback: (input: { container: HTMLDivElement; root: Root }) => Promise<void>
+): Promise<void> {
+  const restoreActEnvironment = installReactActEnvironment();
+  const container = document.createElement('div');
+  document.body.appendChild(container);
+  const root = createRoot(container);
+  try {
+    await act(async () => {
+      root.render(
+        <I18nProvider locale="en">
+          <CanvasMinimapBar
+            canvas={input.canvas}
+            nodes={input.nodes}
+            runtime={input.runtime}
+            overlayRuntime={createCanvasOverlayRuntime()}
+            open={true}
+            onOpenChange={() => undefined}
+            panelPlacement={panelPlacementFixture}
+          />
+        </I18nProvider>
+      );
+    });
+    await callback({ container, root });
+  } finally {
+    await act(async () => {
+      root.unmount();
+    });
+    container.remove();
+    restoreActEnvironment();
+  }
+}
+
+function readButtonZoomLabel(container: ParentNode): string {
+  const label = container.querySelector('[data-testid="canvas-minimap-button-zoom"]');
+  if (!label) {
+    throw new Error('Expected minimap button zoom label');
+  }
+  return label.textContent ?? '';
+}
+
+function installReactActEnvironment(): () => void {
+  const globalWithActFlag = globalThis as typeof globalThis & { IS_REACT_ACT_ENVIRONMENT?: boolean };
+  const previous = globalWithActFlag.IS_REACT_ACT_ENVIRONMENT;
+  globalWithActFlag.IS_REACT_ACT_ENVIRONMENT = true;
+  return () => {
+    if (previous === undefined) {
+      delete globalWithActFlag.IS_REACT_ACT_ENVIRONMENT;
+    } else {
+      globalWithActFlag.IS_REACT_ACT_ENVIRONMENT = previous;
+    }
+  };
 }
 
 function fakeElement(rect: { left: number; top: number; width: number; height: number }): {

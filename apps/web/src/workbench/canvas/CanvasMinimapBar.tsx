@@ -43,6 +43,15 @@ export function CanvasMinimapBar({
   const panelRef = React.useRef<HTMLDivElement | null>(null);
   const runtimeSnapshot = useOptionalRuntimeSnapshot(runtime);
   const modelCamera = runtimeSnapshot?.camera ?? DEFAULT_CANVAS_CAMERA;
+  const buttonIcon = runtime ? (
+    <CanvasMinimapZoomLabel
+      runtime={runtime}
+      className="canvas-minimap-button-zoom"
+      testId="canvas-minimap-button-zoom"
+    />
+  ) : (
+    <Map size={13} />
+  );
   const enabled = Boolean(
     canvas
     && nodes
@@ -109,7 +118,7 @@ export function CanvasMinimapBar({
         data-canvas-local-wheel="true"
         label={i18n.t('canvas.minimap.title')}
         pressed={open}
-        icon={<Map size={13} />}
+        icon={buttonIcon}
         disabled={!enabled}
         onPointerDown={stopCanvasMinimapEvent}
         onPointerMove={stopCanvasMinimapEvent}
@@ -276,6 +285,47 @@ const CanvasMinimapPanel = React.forwardRef<HTMLDivElement, {
     </div>
   );
 });
+
+export function formatCanvasMinimapZoomLabel(zoom: number): string {
+  if (!Number.isFinite(zoom) || zoom <= 0) {
+    return '';
+  }
+  return zoom < 1
+    ? `${Math.trunc(zoom * 100)}%`
+    : formatCompactCanvasZoomNumber(zoom);
+}
+
+function formatCompactCanvasZoomNumber(value: number): string {
+  return value.toFixed(2).replace(/\.?0+$/, '');
+}
+
+function useCanvasMinimapCameraZoom(runtime: CanvasEditorRuntime): number {
+  const [cameraZoom, setCameraZoom] = React.useState(() => runtime.getSnapshot().camera.z);
+  React.useEffect(() => {
+    setCameraZoom(runtime.getSnapshot().camera.z);
+    return runtime.subscribeCamera((camera) => {
+      setCameraZoom(camera.z);
+    });
+  }, [runtime]);
+  return cameraZoom;
+}
+
+function CanvasMinimapZoomLabel({
+  runtime,
+  className,
+  testId
+}: {
+  runtime: CanvasEditorRuntime;
+  className: string;
+  testId: string;
+}): React.ReactElement {
+  const cameraZoom = useCanvasMinimapCameraZoom(runtime);
+  return (
+    <span className={className} data-testid={testId}>
+      {formatCanvasMinimapZoomLabel(cameraZoom)}
+    </span>
+  );
+}
 
 function requestCanvasMinimapPointerDownCameraChange(input: {
   button: number;

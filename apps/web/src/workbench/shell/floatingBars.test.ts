@@ -239,13 +239,13 @@ describe('floating bar placement', () => {
     const cardBar = canvasCardBarRect(viewportRect);
 
     expect(resetButton).toEqual({
-      x: 52,
+      x: 66,
       y: 654,
       width: CANVAS_RESET_LAYOUT_BUTTON_SIZE.width,
       height: CANVAS_RESET_LAYOUT_BUTTON_SIZE.height
     });
     expect(cardBar).toEqual({
-      x: 88,
+      x: 102,
       y: 654,
       width: 580,
       height: CANVAS_CARD_BAR_SIZE.height

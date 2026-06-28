@@ -61,19 +61,19 @@ export const CANVAS_FEEDBACK_BAR_SIZE = {
 } as const;
 
 export const CANVAS_MINIMAP_BUTTON_SIZE = {
-  width: 28,
+  width: 42,
   height: 28
 } as const;
 
 export const CANVAS_RESET_LAYOUT_BUTTON_SIZE = {
-  left: 52,
+  left: 66,
   bottom: 18,
   width: 28,
   height: 28
 } as const;
 
 export const CANVAS_CARD_BAR_SIZE = {
-  left: 88,
+  left: 102,
   bottom: 18,
   height: 28,
   maxWidth: 720,

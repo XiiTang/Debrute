@@ -10,8 +10,8 @@ export interface CanvasCamera {
 export type CanvasCameraState = 'idle' | 'moving';
 
 export const DEFAULT_CANVAS_CAMERA: CanvasCamera = { x: 0, y: 0, z: 1 };
-export const MIN_CANVAS_CAMERA_Z = 0.03;
-export const MAX_CANVAS_CAMERA_Z = 10;
+export const MIN_CANVAS_CAMERA_Z = 0.01;
+export const MAX_CANVAS_CAMERA_Z = 9.99;
 export const CANVAS_CAMERA_IDLE_MS = 64;
 
 interface SurfaceRect {
