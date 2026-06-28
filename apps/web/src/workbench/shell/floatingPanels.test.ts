@@ -1,6 +1,8 @@
 import { describe, expect, it } from 'vitest';
 import {
   DEFAULT_FLOATING_PANEL_STATE,
+  type FloatingPanelResizeDirection,
+  type FloatingPanelState,
   closeFloatingPanel,
   constrainOpenFloatingPanelsToViewport,
   dragFloatingPanel,
@@ -104,48 +106,32 @@ describe('floating panel state', () => {
   });
 
   it('updates panel size after resize and clamps to definition limits', () => {
-    const small = resizeFloatingPanel(DEFAULT_FLOATING_PANEL_STATE, 'terminal', {
-      ...DEFAULT_FLOATING_PANEL_STATE.panels.terminal,
-      width: 10,
-      height: 10
-    }, viewport);
-    expect(small.panels.terminal.width).toBe(520);
-    expect(small.panels.terminal.height).toBe(220);
-    expect(small.panels.terminal.x).toBe(96);
-    expect(small.panels.terminal.y).toBe(420);
+    const small = resizeTerminal('se', { width: 10, height: 10 });
+    expect(small.width).toBe(520);
+    expect(small.height).toBe(220);
+    expect(small.x).toBe(96);
+    expect(small.y).toBe(420);
 
-    const large = resizeFloatingPanel(DEFAULT_FLOATING_PANEL_STATE, 'terminal', {
-      ...DEFAULT_FLOATING_PANEL_STATE.panels.terminal,
-      width: 2000,
-      height: 1200
-    }, viewport);
-    expect(large.panels.terminal.width).toBe(1440);
-    expect(large.panels.terminal.height).toBe(900);
-    expect(large.panels.terminal.x).toBe(96);
-    expect(large.panels.terminal.y).toBe(420);
+    const large = resizeTerminal('se', { width: 2000, height: 1200 });
+    expect(large.width).toBe(1440);
+    expect(large.height).toBe(900);
+    expect(large.x).toBe(96);
+    expect(large.y).toBe(420);
   });
 
   it('resizes from left and top edges while preserving the opposite edges', () => {
-    const left = resizeFloatingPanel(DEFAULT_FLOATING_PANEL_STATE, 'terminal', {
-      ...DEFAULT_FLOATING_PANEL_STATE.panels.terminal,
-      x: 196,
-      width: 820
-    }, viewport);
+    const left = resizeTerminal('w', { x: 196, width: 820 });
 
-    expect(left.panels.terminal).toMatchObject({
+    expect(left).toMatchObject({
       x: 196,
       y: 420,
       width: 820,
       height: 320
     });
 
-    const top = resizeFloatingPanel(DEFAULT_FLOATING_PANEL_STATE, 'terminal', {
-      ...DEFAULT_FLOATING_PANEL_STATE.panels.terminal,
-      y: 360,
-      height: 380
-    }, viewport);
+    const top = resizeTerminal('n', { y: 360, height: 380 });
 
-    expect(top.panels.terminal).toMatchObject({
+    expect(top).toMatchObject({
       x: 96,
       y: 360,
       width: 920,
@@ -154,26 +140,40 @@ describe('floating panel state', () => {
   });
 
   it('clamps left and top resize at minimum size without moving the opposite edges', () => {
-    const left = resizeFloatingPanel(DEFAULT_FLOATING_PANEL_STATE, 'terminal', {
-      ...DEFAULT_FLOATING_PANEL_STATE.panels.terminal,
-      x: 900,
-      width: 116
-    }, viewport);
+    const left = resizeTerminal('w', { x: 900, width: 116 });
 
-    expect(left.panels.terminal).toMatchObject({
+    expect(left).toMatchObject({
       x: 496,
       width: 520
     });
 
-    const top = resizeFloatingPanel(DEFAULT_FLOATING_PANEL_STATE, 'terminal', {
-      ...DEFAULT_FLOATING_PANEL_STATE.panels.terminal,
-      y: 700,
-      height: 40
-    }, viewport);
+    const top = resizeTerminal('n', { y: 700, height: 40 });
 
-    expect(top.panels.terminal).toMatchObject({
+    expect(top).toMatchObject({
       y: 520,
       height: 220
+    });
+  });
+
+  it('uses the active resize direction instead of inferring moved edges from the current panel rect', () => {
+    const partiallyResizedFromLeft = {
+      panels: {
+        ...DEFAULT_FLOATING_PANEL_STATE.panels,
+        terminal: {
+          ...DEFAULT_FLOATING_PANEL_STATE.panels.terminal,
+          x: 196,
+          width: 820
+        }
+      }
+    };
+
+    const next = resizeTerminal('se', { width: 960, height: 380 }, partiallyResizedFromLeft);
+
+    expect(next).toMatchObject({
+      x: 96,
+      y: 420,
+      width: 960,
+      height: 380
     });
   });
 
@@ -210,3 +210,15 @@ describe('floating panel state', () => {
     });
   });
 });
+
+function resizeTerminal(
+  direction: FloatingPanelResizeDirection,
+  rect: Partial<typeof DEFAULT_FLOATING_PANEL_STATE.panels.terminal>,
+  state: FloatingPanelState = DEFAULT_FLOATING_PANEL_STATE
+): FloatingPanelState['panels']['terminal'] {
+  return resizeFloatingPanel(state, 'terminal', {
+    ...DEFAULT_FLOATING_PANEL_STATE.panels.terminal,
+    ...rect,
+    direction
+  }, viewport).panels.terminal;
+}

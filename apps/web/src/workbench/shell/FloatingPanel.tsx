@@ -6,7 +6,10 @@ import type { ProjectTreeInlineEditState } from '../project-explorer/projectTree
 import type { ProjectTreeFileKeyboardCommand } from '../project-explorer/projectTreeKeyboardCommands';
 import {
   FLOATING_PANEL_DEFINITIONS,
+  FLOATING_PANEL_RESIZE_DIRECTIONS,
   type FloatingPanelId,
+  type FloatingPanelResizeDirection,
+  type FloatingPanelResizeInput,
   type FloatingPanelResizeRect,
   type FloatingPanelState
 } from './floatingPanels';
@@ -37,9 +40,6 @@ const floatingPanelTitleKeys: Record<FloatingPanelId, WorkbenchTranslationKey> =
   terminal: 'shell.panels.terminal'
 };
 
-const FLOATING_PANEL_RESIZE_DIRECTIONS = ['n', 's', 'e', 'w', 'ne', 'nw', 'se', 'sw'] as const;
-type FloatingPanelResizeDirection = typeof FLOATING_PANEL_RESIZE_DIRECTIONS[number];
-
 interface FloatingPanelResizeStart extends FloatingPanelResizeRect {
   pointerX: number;
   pointerY: number;
@@ -63,7 +63,7 @@ export function WorkbenchFloatingPanelShell({
   onClose: () => void;
   onBringToFront: () => void;
   onDrag: (dx: number, dy: number) => void;
-  onResize: (rect: FloatingPanelResizeRect) => void;
+  onResize: (input: FloatingPanelResizeInput) => void;
 }): React.ReactElement {
   const i18n = useI18n();
   const title = floatingPanelTitle(panelId, i18n);
@@ -249,7 +249,7 @@ export function floatingPanelResizeHandleProps({
   resizeStart: React.MutableRefObject<FloatingPanelResizeStart | undefined>;
   layout: FloatingPanelResizeRect;
   onBringToFront: () => void;
-  onResize: (rect: FloatingPanelResizeRect) => void;
+  onResize: (input: FloatingPanelResizeInput) => void;
 }): React.HTMLAttributes<HTMLElement> {
   return {
     onPointerDown: (event) => {
@@ -270,7 +270,10 @@ export function floatingPanelResizeHandleProps({
       if (!resizeStart.current) {
         return;
       }
-      onResize(resizeFloatingPanelRect(resizeStart.current, event.clientX, event.clientY));
+      onResize({
+        ...resizeFloatingPanelRect(resizeStart.current, event.clientX, event.clientY),
+        direction: resizeStart.current.direction
+      });
     },
     onPointerUp: (event) => {
       resizeStart.current = undefined;

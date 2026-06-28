@@ -6,6 +6,8 @@ import {
 } from './windowBounds';
 
 export type FloatingPanelId = 'explorer' | 'inspector' | 'problems' | 'settings' | 'terminal';
+export const FLOATING_PANEL_RESIZE_DIRECTIONS = ['n', 's', 'e', 'w', 'ne', 'nw', 'se', 'sw'] as const;
+export type FloatingPanelResizeDirection = typeof FLOATING_PANEL_RESIZE_DIRECTIONS[number];
 
 export interface FloatingPanelDefinition {
   id: FloatingPanelId;
@@ -33,6 +35,9 @@ export interface FloatingPanelState {
 }
 
 export type FloatingPanelResizeRect = WorkbenchWindowRect;
+export interface FloatingPanelResizeInput extends FloatingPanelResizeRect {
+  direction: FloatingPanelResizeDirection;
+}
 
 export const FLOATING_PANEL_DEFINITIONS: Record<FloatingPanelId, FloatingPanelDefinition> = {
   explorer: panelDefinition('explorer', 'Explorer', 58, 45, 320, 620, 280, 320, 720, 900),
@@ -150,19 +155,17 @@ export function dragFloatingPanel(
 export function resizeFloatingPanel(
   state: FloatingPanelState,
   panelId: FloatingPanelId,
-  rect: FloatingPanelResizeRect,
+  input: FloatingPanelResizeInput,
   viewport: WorkbenchViewportRect
 ): FloatingPanelState {
   const panel = state.panels[panelId];
   const definition = FLOATING_PANEL_DEFINITIONS[panelId];
-  const width = clamp(Math.round(rect.width), definition.minWidth, definition.maxWidth);
-  const height = clamp(Math.round(rect.height), definition.minHeight, definition.maxHeight);
-  const leftEdgeMoved = Math.round(rect.x) !== panel.x;
-  const topEdgeMoved = Math.round(rect.y) !== panel.y;
+  const width = clamp(Math.round(input.width), definition.minWidth, definition.maxWidth);
+  const height = clamp(Math.round(input.height), definition.minHeight, definition.maxHeight);
   const nextPanel = constrainFloatingPanelLayout({
     ...panel,
-    x: leftEdgeMoved ? panel.x + panel.width - width : panel.x,
-    y: topEdgeMoved ? panel.y + panel.height - height : panel.y,
+    x: input.direction.includes('w') ? input.x + input.width - width : input.x,
+    y: input.direction.includes('n') ? input.y + input.height - height : input.y,
     width,
     height
   }, viewport);
