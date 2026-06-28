@@ -1,44 +1,30 @@
-import { createHash } from 'node:crypto';
 import { readFileSync } from 'node:fs';
-import { chmod, cp, mkdir, readFile, rm, stat, writeFile } from 'node:fs/promises';
+import { chmod, cp, mkdir, rm, stat, writeFile } from 'node:fs/promises';
 import { execFile } from 'node:child_process';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { promisify } from 'node:util';
-import AdmZip from 'adm-zip';
 import { build } from 'esbuild';
-import {
-  checksumManifestName,
-  cliReleaseAssetName
-} from './release-asset-contract.mjs';
-import { packageManagerCommand } from './package-manager-command.mjs';
 import { sharpRuntimePayloadEntries } from './sharp-runtime-payload.mjs';
 import { nodePtyRuntimePayloadEntries } from './node-pty-runtime-payload.mjs';
-export { checksumManifestName } from './release-asset-contract.mjs';
 
 const execFileAsync = promisify(execFile);
 const workspaceRoot = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 const pkgBin = join(workspaceRoot, 'node_modules/@yao-pkg/pkg/lib-es5/bin.js');
 
-export const debruteCliReleaseTargets = [
-  target('darwin-arm64', 'node24-macos-arm64', 'debrute', 'tar.gz'),
-  target('darwin-x64', 'node24-macos-x64', 'debrute', 'tar.gz'),
-  target('linux-arm64', 'node24-linux-arm64', 'debrute', 'tar.gz'),
-  target('linux-x64', 'node24-linux-x64', 'debrute', 'tar.gz'),
-  target('windows-arm64', 'node24-win-arm64', 'debrute.exe', 'zip'),
-  target('windows-x64', 'node24-win-x64', 'debrute.exe', 'zip')
+export const managedCliRuntimeTargets = [
+  target('darwin-arm64', 'node24-macos-arm64', 'debrute'),
+  target('darwin-x64', 'node24-macos-x64', 'debrute'),
+  target('linux-arm64', 'node24-linux-arm64', 'debrute'),
+  target('linux-x64', 'node24-linux-x64', 'debrute'),
+  target('windows-arm64', 'node24-win-arm64', 'debrute.exe'),
+  target('windows-x64', 'node24-win-x64', 'debrute.exe')
 ];
 
-export const debruteCliPkgFlags = ['--public', '--public-packages', '*', '--no-bytecode'];
+export const managedCliPkgFlags = ['--public', '--public-packages', '*', '--no-bytecode'];
 
-export function debruteCliArchiveName(version, releaseTarget) {
-  return cliReleaseAssetName(version, releaseTarget);
-}
-
-export function debruteCliPayloadEntries(root, releaseTarget = releaseTargetForHost()) {
+export function managedCliRuntimePayloadEntries(root, releaseTarget = releaseTargetForHost()) {
   return [
-    { from: join(root, 'skills'), to: 'skills', recursive: true, dereference: false },
-    { from: join(root, 'apps/web/dist'), to: 'web', recursive: true, dereference: false },
     { from: join(root, 'packages/capability-runtime/src/imageModels/officialDocs/snapshots'), to: 'official-docs/imageModels/snapshots', recursive: true, dereference: false },
     { from: join(root, 'packages/capability-runtime/src/videoModels/officialDocs/snapshots'), to: 'official-docs/videoModels/snapshots', recursive: true, dereference: false },
     ...sharpRuntimePayloadEntries(root, releaseTarget),
@@ -46,19 +32,12 @@ export function debruteCliPayloadEntries(root, releaseTarget = releaseTargetForH
   ];
 }
 
-export async function packageDebruteCliRelease({ all = false, outDir = join(workspaceRoot, 'release', 'debrute-cli') } = {}) {
+export async function packageDebruteCliRuntimePayload({
+  outDir = join(workspaceRoot, 'build', 'runtime-product', 'cli'),
+  releaseTarget = releaseTargetForHost()
+} = {}) {
   const version = JSON.parse(readFileSync(join(workspaceRoot, 'package.json'), 'utf8')).version;
-  const selectedTargets = all ? debruteCliReleaseTargets : debruteCliReleaseTargets.filter((releaseTarget) => releaseTarget.id === hostTargetId());
-  if (selectedTargets.length === 0) {
-    throw new Error(`No Debrute CLI release target for ${process.platform}-${process.arch}.`);
-  }
-
-  const checkCommand = packageManagerCommand(workspaceRoot, ['check']);
-  await execFileAsync(checkCommand.command, checkCommand.args, { cwd: workspaceRoot });
-  const webBuildCommand = packageManagerCommand(workspaceRoot, ['--filter', '@debrute/web', 'build']);
-  await execFileAsync(webBuildCommand.command, webBuildCommand.args, { cwd: workspaceRoot });
-
-  const buildRoot = join(workspaceRoot, 'build', 'debrute-cli-release');
+  const buildRoot = join(workspaceRoot, 'build', 'debrute-cli-runtime-payload');
   const bundlePath = join(buildRoot, 'debrute-cli.cjs');
   await rm(buildRoot, { recursive: true, force: true });
   await rm(outDir, { recursive: true, force: true });
@@ -77,58 +56,30 @@ export async function packageDebruteCliRelease({ all = false, outDir = join(work
     },
     logLevel: 'info'
   });
-
-  const checksums = [];
-  for (const releaseTarget of selectedTargets) {
-    const executablePath = join(buildRoot, releaseTarget.executableName);
-    await execFileAsync(process.execPath, [
-      pkgBin,
-      bundlePath,
-      '--targets',
-      releaseTarget.pkgTarget,
-      '--output',
-      executablePath,
-      ...debruteCliPkgFlags
-    ], { cwd: workspaceRoot });
-    const payloadDir = join(buildRoot, releaseTarget.id, 'payload');
-    await mkdir(payloadDir, { recursive: true });
-    await cp(executablePath, join(payloadDir, releaseTarget.executableName));
-    for (const entry of debruteCliPayloadEntries(workspaceRoot, releaseTarget)) {
-      const destination = join(payloadDir, entry.to);
-      await mkdir(dirname(destination), { recursive: true });
-      await cp(entry.from, destination, {
-        recursive: entry.recursive,
-        dereference: entry.dereference,
-        filter: payloadEntryFilter(entry)
-      });
-      if (entry.executable === true) {
-        await makeExecutable(join(destination, entry.executableRelativePath));
-      }
-    }
-    await writeFile(join(payloadDir, 'package.json'), `${JSON.stringify({ version }, null, 2)}\n`, 'utf8');
-    const archiveName = debruteCliArchiveName(version, releaseTarget);
-    const archivePath = join(outDir, archiveName);
-    if (releaseTarget.archiveExtension === 'zip') {
-      const zip = new AdmZip();
-      zip.addLocalFolder(payloadDir);
-      await new Promise((resolvePromise, reject) => {
-        zip.writeZip(archivePath, (error) => error ? reject(error) : resolvePromise());
-      });
-    } else {
-      await execFileAsync('tar', ['-czf', archivePath, '-C', payloadDir, '.']);
-    }
-    checksums.push(`${await sha256File(archivePath)}  ${archiveName}`);
+  const executablePath = join(buildRoot, releaseTarget.executableName);
+  await execFileAsync(process.execPath, [
+    pkgBin,
+    bundlePath,
+    '--targets',
+    releaseTarget.pkgTarget,
+    '--output',
+    executablePath,
+    ...managedCliPkgFlags
+  ], { cwd: workspaceRoot });
+  await cp(executablePath, join(outDir, releaseTarget.executableName));
+  for (const entry of managedCliRuntimePayloadEntries(workspaceRoot, releaseTarget)) {
+    await copyPayloadEntry(outDir, entry);
   }
-  await writeFile(join(outDir, checksumManifestName), `${checksums.join('\n')}\n`, 'utf8');
-  return { outDir, targets: selectedTargets.map((releaseTarget) => releaseTarget.id) };
+  await writeFile(join(outDir, 'package.json'), `${JSON.stringify({ version }, null, 2)}\n`, 'utf8');
+  return { outDir, target: releaseTarget.id };
 }
 
-function target(id, pkgTarget, executableName, archiveExtension) {
-  return { id, pkgTarget, executableName, archiveExtension };
+function target(id, pkgTarget, executableName) {
+  return { id, pkgTarget, executableName };
 }
 
 function releaseTargetForHost() {
-  const targetItem = debruteCliReleaseTargets.find((releaseTarget) => releaseTarget.id === hostTargetId());
+  const targetItem = managedCliRuntimeTargets.find((releaseTarget) => releaseTarget.id === hostTargetId());
   if (!targetItem) {
     throw new Error(`No Debrute CLI release target for ${process.platform}-${process.arch}.`);
   }
@@ -140,10 +91,17 @@ function hostTargetId() {
   return `${platform}-${process.arch}`;
 }
 
-async function sha256File(path) {
-  const hash = createHash('sha256');
-  hash.update(await readFile(path));
-  return hash.digest('hex');
+async function copyPayloadEntry(outDir, entry) {
+  const destination = join(outDir, entry.to);
+  await mkdir(dirname(destination), { recursive: true });
+  await cp(entry.from, destination, {
+    recursive: entry.recursive,
+    dereference: entry.dereference,
+    filter: payloadEntryFilter(entry)
+  });
+  if (entry.executable === true) {
+    await makeExecutable(join(destination, entry.executableRelativePath));
+  }
 }
 
 async function makeExecutable(path) {
@@ -163,11 +121,12 @@ function payloadEntryFilter(entry) {
 }
 
 if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
-  const all = process.argv.includes('--all');
-  packageDebruteCliRelease({ all })
+  const outDirFlagIndex = process.argv.indexOf('--out-dir');
+  const outDir = outDirFlagIndex === -1 ? undefined : process.argv[outDirFlagIndex + 1];
+  packageDebruteCliRuntimePayload({ ...(outDir ? { outDir } : {}) })
     .then((result) => {
-      console.log(`Packaged Debrute CLI assets in ${result.outDir}`);
-      console.log(`Targets: ${result.targets.join(', ')}`);
+      console.log(`Packaged managed Debrute CLI runtime payload in ${result.outDir}`);
+      console.log(`Target: ${result.target}`);
     })
     .catch((error) => {
       console.error(error instanceof Error ? error.message : String(error));

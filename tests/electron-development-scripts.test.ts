@@ -104,7 +104,7 @@ describe('Electron development scripts', () => {
   it('keeps native Electron runtime modules external so their native packages resolve from pnpm', () => {
     const script = readFileSync(join(process.cwd(), 'apps/desktop/scripts/bundle-electron.mjs'), 'utf8');
 
-    expect(script).toContain("external: ['electron', 'electron-updater', 'node-pty', 'sharp']");
+    expect(script).toContain("external: ['electron', 'node-pty', 'sharp']");
   });
 
   it('loads app-server terminal pty code after Electron CJS bundling', async () => {

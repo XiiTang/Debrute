@@ -20,7 +20,10 @@ import {
   type DaemonBridgeImportRequestMessage,
   type DaemonCliCommandRequest,
   type DaemonProjectUploadImportPlan,
+  type DebruteProductState,
   type DebruteHttpErrorBody,
+  type ManagedCliDiagnostic,
+  type ProductUpdateApplyResult,
   type DebruteRuntimeInfo,
   type GeneratedAssetRecord,
   type GeneratedAssetView,
@@ -63,12 +66,34 @@ export interface DebruteDaemonRuntime extends DebruteRuntimeInfo {
   token: string;
 }
 
+export interface DebruteManagedCliService {
+  ensureCurrent(): Promise<ManagedCliDiagnostic>;
+  diagnostic(): ManagedCliDiagnostic;
+}
+
+export interface DebruteReplacementHelperCommand {
+  executablePath: string;
+  helperPath: string;
+}
+
+export interface DebruteProductUpdateService {
+  state(): Promise<DebruteProductState>;
+  check(): Promise<DebruteProductState>;
+  apply(): Promise<ProductUpdateApplyResult>;
+}
+
+export interface DebruteProductServices {
+  managedCli: DebruteManagedCliService;
+  productUpdate: DebruteProductUpdateService;
+}
+
 export interface DebruteDaemonHttpServerOptions {
   appServerOptions?: DebruteAppServerOptions;
   createAppServer?: () => DebruteAppServer;
   host?: string;
   port?: number;
   token?: string;
+  productServices?: DebruteProductServices;
   nativeShell?: DebruteNativeShell;
   webBaseUrl?: string | null;
   webDistDir?: string;
@@ -292,6 +317,30 @@ export function createDebruteDaemonHttpServer(options: DebruteDaemonHttpServerOp
       }
       return true;
     }
+    if (path === '/api/runtime/product') {
+      if (method !== 'GET') {
+        writeError(context.response, 405, 'method_not_allowed', 'Unsupported runtime product state method.');
+        return true;
+      }
+      writeJson(context.response, 200, await requireProductServices().productUpdate.state());
+      return true;
+    }
+    if (path === '/api/runtime/product/update/check') {
+      if (method !== 'POST') {
+        writeError(context.response, 405, 'method_not_allowed', 'Unsupported runtime product update check method.');
+        return true;
+      }
+      writeJson(context.response, 200, await requireProductServices().productUpdate.check());
+      return true;
+    }
+    if (path === '/api/runtime/product/update/apply') {
+      if (method !== 'POST') {
+        writeError(context.response, 405, 'method_not_allowed', 'Unsupported runtime product update apply method.');
+        return true;
+      }
+      writeJson(context.response, 200, await requireProductServices().productUpdate.apply());
+      return true;
+    }
     if (path === '/api/browser-session') {
       if (method === 'GET') {
         if (!isWorkbenchBrowserSessionRequest(context.request, context.runtime)) {
@@ -474,11 +523,19 @@ export function createDebruteDaemonHttpServer(options: DebruteDaemonHttpServerOp
     try {
       return await runDaemonCliCommand(body, {
         server: cliServer,
+        ...(options.productServices ? { productServices: options.productServices } : {}),
         ...services
       });
     } finally {
       cliServer.close();
     }
+  }
+
+  function requireProductServices(): DebruteProductServices {
+    if (!options.productServices) {
+      throw new Error('Debrute runtime product services are not configured.');
+    }
+    return options.productServices;
   }
 
   async function routeProjectApi(

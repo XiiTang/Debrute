@@ -1,14 +1,15 @@
 import React, { useEffect, useState } from 'react';
-import { Download, ExternalLink, RefreshCw, RotateCw } from 'lucide-react';
+import { RefreshCw, RotateCw } from 'lucide-react';
 import type {
-  DesktopAppUpdateDisabledReason,
-  DesktopAppUpdateState,
+  DebruteProductState,
+  ManagedCliDiagnostic,
+  ProductUpdateState,
   SaveWorkbenchPreferencesInput,
   WorkbenchLocale,
   WorkbenchPreferencesView,
   WorkbenchThemePreference
 } from '@debrute/app-protocol';
-import type { DebruteShellApi } from '../../../api/shellApi';
+import type { WorkbenchActions } from '../../../types';
 import { useI18n, type WorkbenchI18n } from '../../i18n';
 import { DEFAULT_WORKBENCH_PREFERENCES, type WorkbenchResolvedTheme } from '../../services/workbenchTheme';
 import { Button, Card, Field, Select, StatusPill, Toolbar, type StatusTone } from '../../ui';
@@ -18,53 +19,42 @@ type OperationState =
   | { status: 'loading' }
   | { status: 'error'; message: string };
 
-type AppUpdateAction =
-  | 'none'
-  | 'check'
-  | 'download'
-  | 'install'
-  | 'open-download-page';
+type ProductUpdateAction = 'none' | 'check' | 'apply';
+
+type ProductActions = Pick<WorkbenchActions, 'getProductState' | 'checkProductUpdate' | 'applyProductUpdate'>;
 
 export function GeneralSettingsPage({
-  shell,
-  initialUpdateState,
+  actions,
+  initialProductState,
   preferences = DEFAULT_WORKBENCH_PREFERENCES,
   resolvedTheme = 'dark',
   onPreferencesChange
 }: {
-  shell: DebruteShellApi | undefined;
-  initialUpdateState?: DesktopAppUpdateState;
+  actions: ProductActions;
+  initialProductState?: DebruteProductState;
   preferences?: WorkbenchPreferencesView;
   resolvedTheme?: WorkbenchResolvedTheme;
   onPreferencesChange?: (preferences: SaveWorkbenchPreferencesInput) => Promise<void>;
 }): React.ReactElement {
   const i18n = useI18n();
-  const [updateState, setUpdateState] = useState<DesktopAppUpdateState>(
-    initialUpdateState ?? { type: 'disabled', currentVersion: 'unknown', reason: shell?.getAppUpdateState ? 'development' : 'browser' }
-  );
+  const [productState, setProductState] = useState<DebruteProductState>(initialProductState ?? defaultProductState());
   const [operation, setOperation] = useState<OperationState>({ status: 'idle' });
   const [preferenceOperation, setPreferenceOperation] = useState<OperationState>({ status: 'idle' });
 
   useEffect(() => {
-    if (initialUpdateState || !shell?.getAppUpdateState) {
+    if (initialProductState) {
       return;
     }
-    void shell.getAppUpdateState()
-      .then(setUpdateState)
+    void actions.getProductState()
+      .then(setProductState)
       .catch((error) => setOperation({ status: 'error', message: errorMessage(error) }));
-  }, [shell, initialUpdateState]);
+  }, [actions, initialProductState]);
 
-  useEffect(() => (
-    shell?.onAppUpdateStateChanged?.((state) => setUpdateState(state))
-  ), [shell]);
-
-  const run = async (action: () => Promise<DesktopAppUpdateState | { ok: true } | undefined>) => {
+  const run = async (action: () => Promise<DebruteProductState | { state: DebruteProductState }>) => {
     setOperation({ status: 'loading' });
     try {
       const result = await action();
-      if (isDesktopAppUpdateState(result)) {
-        setUpdateState(result);
-      }
+      setProductState('state' in result ? result.state : result);
       setOperation({ status: 'idle' });
     } catch (error) {
       setOperation({ status: 'error', message: errorMessage(error) });
@@ -134,15 +124,16 @@ export function GeneralSettingsPage({
         <strong>{i18n.t('settings.general.application')}</strong>
         <div className="db-property-grid">
           <small><span>{i18n.t('settings.general.name')}</span>Debrute</small>
-          <small><span>{i18n.t('settings.general.currentVersion')}</span>{updateState.currentVersion}</small>
-          <small><span>{i18n.t('settings.general.surface')}</span>{surfaceLabel(updateState, i18n)}</small>
-          <small><span>{i18n.t('settings.general.platform')}</span>{platformLabel(updateState)}</small>
+          <small><span>{i18n.t('settings.general.currentVersion')}</span>{productState.productVersion}</small>
+          <small><span>{i18n.t('settings.general.surface')}</span>{i18n.t('settings.general.surface.desktopPackaged')}</small>
+          <small><span>{i18n.t('settings.general.platform')}</span>{productState.platform}</small>
+          <small><span>{i18n.t('settings.general.cliDiagnostic')}</span>{cliDiagnosticLabel(productState.cli, i18n)}</small>
         </div>
       </Card>
-      <AppUpdateCard
-        state={updateState}
+      <ProductUpdateCard
+        state={productState.update}
         operation={operation}
-        shell={shell}
+        actions={actions}
         run={run}
         i18n={i18n}
       />
@@ -165,20 +156,20 @@ function themeHelpText(
   return i18n.t('settings.general.theme.appliedGlobal');
 }
 
-function AppUpdateCard({
+function ProductUpdateCard({
   state,
   operation,
-  shell,
+  actions,
   run,
   i18n
 }: {
-  state: DesktopAppUpdateState;
+  state: ProductUpdateState;
   operation: OperationState;
-  shell: DebruteShellApi | undefined;
-  run: (action: () => Promise<DesktopAppUpdateState | { ok: true } | undefined>) => Promise<void>;
+  actions: ProductActions;
+  run: (action: () => Promise<DebruteProductState | { state: DebruteProductState }>) => Promise<void>;
   i18n: WorkbenchI18n;
 }): React.ReactElement {
-  const action = appUpdateActionForState(state);
+  const action = productUpdateActionForState(state);
   const busy = operation.status === 'loading';
   return (
     <Card className="db-model-card">
@@ -190,30 +181,19 @@ function AppUpdateCard({
         <small><span>{i18n.t('settings.general.currentVersion')}</span>{state.currentVersion}</small>
         {'updateVersion' in state && state.updateVersion ? <small><span>{i18n.t('settings.general.latestVersion')}</span>{state.updateVersion}</small> : null}
         {'lastCheckedAt' in state && state.lastCheckedAt ? <small><span>{i18n.t('settings.general.lastChecked')}</span>{state.lastCheckedAt}</small> : null}
-        {state.type === 'downloading' ? <small><span>{i18n.t('settings.general.progress')}</span>{state.percent}%</small> : null}
       </div>
       <small className={state.type === 'error' || operation.status === 'error' ? 'db-form-error' : 'db-form-help'}>
         {operation.status === 'error' ? operation.message : stateMessage(state, i18n)}
       </small>
       <Toolbar ariaLabel={i18n.t('settings.general.updateActions')} className="db-action-row">
         {action === 'check' ? (
-          <Button type="button" disabled={busy || !canRunAppUpdateAction(action, state, shell)} iconStart={<RefreshCw size={14} />} onClick={() => void run(() => shell!.checkForAppUpdate!())}>
+          <Button type="button" disabled={busy || state.type === 'checking'} iconStart={<RefreshCw size={14} />} onClick={() => void run(() => actions.checkProductUpdate())}>
             {i18n.t('settings.general.checkForUpdates')}
           </Button>
         ) : null}
-        {action === 'download' ? (
-          <Button type="button" disabled={busy || !canRunAppUpdateAction(action, state, shell)} iconStart={<Download size={14} />} onClick={() => void run(() => shell!.downloadAppUpdate!())}>
-            {i18n.t('settings.general.downloadUpdate')}
-          </Button>
-        ) : null}
-        {action === 'install' ? (
-          <Button type="button" disabled={busy || !canRunAppUpdateAction(action, state, shell)} iconStart={<RotateCw size={14} />} onClick={() => void run(() => shell!.installAppUpdate!())}>
+        {action === 'apply' ? (
+          <Button type="button" disabled={busy || state.type === 'installing'} iconStart={<RotateCw size={14} />} onClick={() => void run(() => actions.applyProductUpdate())}>
             {i18n.t('settings.general.installAndRestart')}
-          </Button>
-        ) : null}
-        {action === 'open-download-page' ? (
-          <Button type="button" disabled={busy || !canRunAppUpdateAction(action, state, shell)} iconStart={<ExternalLink size={14} />} onClick={() => void run(() => shell!.openAppUpdateDownloadPage!())}>
-            {i18n.t('settings.general.openGithubReleases')}
           </Button>
         ) : null}
       </Toolbar>
@@ -221,15 +201,9 @@ function AppUpdateCard({
   );
 }
 
-function statusLabel(state: DesktopAppUpdateState, i18n: WorkbenchI18n): string {
-  if (state.type === 'disabled') {
-    return i18n.t('settings.general.updateStatus.unavailable');
-  }
-  if (state.type === 'idle' && state.notAvailable) {
-    return i18n.t('settings.general.updateStatus.upToDate');
-  }
+function statusLabel(state: ProductUpdateState, i18n: WorkbenchI18n): string {
   if (state.type === 'idle') {
-    return i18n.t('settings.general.updateStatus.ready');
+    return i18n.t('settings.general.updateStatus.upToDate');
   }
   if (state.type === 'checking') {
     return i18n.t('settings.general.updateStatus.checking');
@@ -237,52 +211,34 @@ function statusLabel(state: DesktopAppUpdateState, i18n: WorkbenchI18n): string 
   if (state.type === 'available') {
     return i18n.t('settings.general.updateStatus.available');
   }
-  if (state.type === 'downloading') {
-    return i18n.t('settings.general.updateStatus.downloading');
-  }
-  if (state.type === 'downloaded') {
-    return i18n.t('settings.general.updateStatus.downloaded');
-  }
   if (state.type === 'installing') {
     return i18n.t('settings.general.updateStatus.installing');
   }
   return i18n.t('settings.general.updateStatus.error');
 }
 
-function statusTone(state: DesktopAppUpdateState): StatusTone {
+function statusTone(state: ProductUpdateState): StatusTone {
   if (state.type === 'error') {
     return 'danger';
   }
-  if (state.type === 'available' || state.type === 'downloaded') {
+  if (state.type === 'available') {
     return 'warning';
   }
-  if (state.type === 'idle' && state.notAvailable) {
+  if (state.type === 'idle') {
     return 'success';
   }
-  if (state.type === 'checking' || state.type === 'downloading' || state.type === 'installing') {
+  if (state.type === 'checking' || state.type === 'installing') {
     return 'loading';
   }
   return 'neutral';
 }
 
-function stateMessage(state: DesktopAppUpdateState, i18n: WorkbenchI18n): string {
-  if (state.type === 'disabled') {
-    return disabledReasonMessage(state.reason, i18n);
-  }
+function stateMessage(state: ProductUpdateState, i18n: WorkbenchI18n): string {
   if (state.type === 'checking') {
     return i18n.t('settings.general.updateMessage.checking');
   }
-  if (state.type === 'available' && state.installMode === 'manual-download') {
-    return i18n.t('settings.general.updateMessage.manualDownload');
-  }
   if (state.type === 'available') {
     return i18n.t('settings.general.updateMessage.available');
-  }
-  if (state.type === 'downloading') {
-    return i18n.t('settings.general.updateMessage.downloading');
-  }
-  if (state.type === 'downloaded') {
-    return i18n.t('settings.general.updateMessage.downloaded');
   }
   if (state.type === 'installing') {
     return i18n.t('settings.general.updateMessage.installing');
@@ -290,97 +246,53 @@ function stateMessage(state: DesktopAppUpdateState, i18n: WorkbenchI18n): string
   if (state.type === 'error') {
     return state.message;
   }
-  if (state.notAvailable) {
-    return i18n.t('settings.general.updateMessage.upToDate');
-  }
-  return i18n.t('settings.general.updateMessage.checkLatest');
+  return i18n.t('settings.general.updateMessage.upToDate');
 }
 
-function appUpdateActionForState(state: DesktopAppUpdateState): AppUpdateAction {
-  if (state.type === 'disabled' || state.type === 'idle' || state.type === 'checking') {
+function productUpdateActionForState(state: ProductUpdateState): ProductUpdateAction {
+  if (state.type === 'idle' || state.type === 'checking') {
     return 'check';
   }
-  if (state.type === 'available') {
-    return state.installMode === 'manual-download' ? 'open-download-page' : 'download';
+  if (state.type === 'available' || state.type === 'installing') {
+    return 'apply';
   }
-  if (state.type === 'downloading') {
-    return 'download';
-  }
-  if (state.type === 'downloaded' || state.type === 'installing') {
-    return 'install';
-  }
-  if (state.type === 'error' && state.retryable) {
-    if (state.operation === 'check') {
-      return 'check';
-    }
-    if (state.operation === 'download' && state.updateVersion && state.installMode === 'automatic') {
-      return 'download';
-    }
-    if (state.operation === 'install' && state.updateVersion && state.installMode === 'automatic') {
-      return 'install';
-    }
+  if (state.type === 'error') {
+    return state.operation === 'check' ? 'check' : 'apply';
   }
   return 'none';
 }
 
-function canRunAppUpdateAction(
-  action: AppUpdateAction,
-  state: DesktopAppUpdateState,
-  shell: DebruteShellApi | undefined
-): boolean {
-  if (state.type === 'disabled' || state.type === 'checking' || state.type === 'downloading' || state.type === 'installing') {
-    return false;
+export function cliDiagnosticLabel(cli: ManagedCliDiagnostic, i18n: WorkbenchI18n): string {
+  if (cli.status === 'ready') {
+    return i18n.t('settings.general.cliDiagnosticReady', {
+      version: cli.version,
+      path: cli.path,
+      skillsVersion: cli.skillsVersion
+    });
   }
-  if (action === 'check') {
-    return Boolean(shell?.checkForAppUpdate);
-  }
-  if (action === 'download') {
-    return Boolean(shell?.downloadAppUpdate);
-  }
-  if (action === 'install') {
-    return Boolean(shell?.installAppUpdate);
-  }
-  if (action === 'open-download-page') {
-    return Boolean(shell?.openAppUpdateDownloadPage);
-  }
-  return false;
+  return i18n.t('settings.general.cliDiagnosticError', {
+    version: cli.version,
+    message: cli.message,
+    path: cli.path ?? i18n.t('common.none')
+  });
 }
 
-function disabledReasonMessage(reason: DesktopAppUpdateDisabledReason, i18n: WorkbenchI18n): string {
-  if (reason === 'browser') {
-    return i18n.t('settings.general.updateMessage.browser');
-  }
-  if (reason === 'development') {
-    return i18n.t('settings.general.updateMessage.development');
-  }
-  if (reason === 'unsupported-platform') {
-    return i18n.t('settings.general.updateMessage.unsupportedPlatform');
-  }
-  return i18n.t('settings.general.updateMessage.unavailable');
-}
-
-function surfaceLabel(state: DesktopAppUpdateState, i18n: WorkbenchI18n): string {
-  if (state.type === 'disabled') {
-    if (state.reason === 'browser') {
-      return i18n.t('settings.general.surface.browser');
+function defaultProductState(): DebruteProductState {
+  const platform = (globalThis as { process?: { platform?: NodeJS.Platform } }).process?.platform ?? 'linux';
+  return {
+    productVersion: 'unknown',
+    platform,
+    cli: {
+      status: 'error',
+      version: 'unknown',
+      message: 'Debrute runtime product state has not loaded.'
+    },
+    update: {
+      type: 'idle',
+      currentVersion: 'unknown',
+      updateAvailable: false
     }
-    if (state.reason === 'development') {
-      return i18n.t('settings.general.surface.desktopDevelopment');
-    }
-    return i18n.t('settings.general.surface.desktopUnsupported');
-  }
-  return i18n.t('settings.general.surface.desktopPackaged');
-}
-
-function platformLabel(state: DesktopAppUpdateState): string {
-  if ('platform' in state && state.platform) {
-    return state.platform;
-  }
-  return state.type === 'disabled' && state.reason === 'browser' ? 'browser' : 'desktop';
-}
-
-function isDesktopAppUpdateState(value: unknown): value is DesktopAppUpdateState {
-  return typeof value === 'object' && value !== null && 'type' in value && 'currentVersion' in value;
+  };
 }
 
 function errorMessage(error: unknown): string {

@@ -18,11 +18,7 @@ export function requiredDesktopReleaseAssets(version, platform = process.platfor
     return [desktopReleaseAssetName(version, publicPlatform, arch, 'dmg')];
   }
   if (platform === 'win32') {
-    return [
-      desktopReleaseAssetName(version, publicPlatform, arch, 'exe'),
-      desktopReleaseAssetName(version, publicPlatform, arch, 'exe.blockmap'),
-      'latest.yml'
-    ];
+    return [desktopReleaseAssetName(version, publicPlatform, arch, 'exe')];
   }
   return [desktopReleaseAssetName(version, publicPlatform, arch, 'AppImage')];
 }

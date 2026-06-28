@@ -2,8 +2,8 @@ import { describe, expect, it } from 'vitest';
 import { runtimePolicyForCommand } from '../src/runtime/cliRuntimePolicy';
 
 describe('CLI runtime policy', () => {
-  it('keeps metadata and skills commands local', () => {
-    for (const command of ['commands', 'help', 'skills.status', 'skills.sync']) {
+  it('keeps metadata commands local', () => {
+    for (const command of ['commands', 'help']) {
       expect(runtimePolicyForCommand(command)).toBe('no-runtime');
     }
   });
@@ -14,9 +14,11 @@ describe('CLI runtime policy', () => {
     }
   });
 
-  it('ensures runtime for project, model, workbench, and generation commands', () => {
+  it('ensures runtime for project, model, workbench, product, Skills, and generation commands', () => {
     for (const command of [
+      'update',
       'workbench.start',
+      'skills.status',
       'models.image.list',
       'models.image.describe',
       'models.video.list',

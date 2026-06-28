@@ -28,15 +28,14 @@ const WORKBENCH_RUNTIME_ERRORS = [
 ];
 
 export const commandSpecs: DebruteCommandSpec[] = [
+  spec('update', ['update'], 'runtime', 'write', 'none', 'logs', 'no args', 'product update record', [
+    'runtime_launch_failed',
+    'runtime_health_failed',
+    'product_update_failed'
+  ]),
   spec('runtime.status', ['runtime', 'status'], 'runtime', 'read', 'none', 'none', 'no args', 'runtime status record'),
   spec('runtime.doctor', ['runtime', 'doctor'], 'runtime', 'read', 'none', 'none', 'no args', 'diagnostic records', ['runtime_config_error']),
-  spec('skills.status', ['skills', 'status'], 'runtime', 'read', 'none', 'none', 'no args', 'installed, missing, and skipped Debrute Skill records'),
-  spec('skills.sync', ['skills', 'sync'], 'runtime', 'write', 'none', 'skills', '[--force]', 'updated, added, and skipped Debrute Skill records', [
-    'skills_bundle_unavailable',
-    'skills_bundle_invalid',
-    'skills_permission_denied',
-    'skills_sync_failed'
-  ]),
+  spec('skills.status', ['skills', 'status'], 'runtime', 'read', 'none', 'none', 'no args', 'runtime-owned managed CLI and Skills diagnostic'),
   spec('models.image.list', ['models', 'image', 'list'], 'runtime', 'read', 'model-config', 'none', 'no args', 'image model records', ['runtime_config_error']),
   spec('models.image.describe', ['models', 'image', 'describe'], 'runtime', 'read', 'model-config', 'none', '<model-id>', 'image model detail record', ['model_unavailable', 'runtime_config_error']),
   spec('models.video.list', ['models', 'video', 'list'], 'runtime', 'read', 'model-config', 'none', 'no args', 'video model records', ['runtime_config_error']),

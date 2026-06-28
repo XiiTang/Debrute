@@ -1,6 +1,7 @@
 import React from 'react';
 import { renderToStaticMarkup } from 'react-dom/server';
 import { describe, expect, it, vi } from 'vitest';
+import type { DebruteProductState } from '@debrute/app-protocol';
 import type { WorkbenchActions, WorkbenchState } from '../../types';
 import { I18nProvider } from '../i18n';
 import { ImageModelSettings, LlmSettings } from './SettingsPanel';
@@ -52,7 +53,8 @@ describe('SettingsPanel shared UI composition', () => {
     const html = renderToStaticMarkup(
       <I18nProvider locale="zh-CN">
         <GeneralSettingsPage
-          shell={undefined}
+          actions={actions()}
+          initialProductState={productState()}
           preferences={{ locale: 'zh-CN', themePreference: 'system' }}
           resolvedTheme="dark"
           onPreferencesChange={async (preferences) => {
@@ -120,6 +122,9 @@ function stateWithSettings(): WorkbenchState {
 
 function actions(): WorkbenchActions {
   return {
+    getProductState: vi.fn(async () => productState()),
+    checkProductUpdate: vi.fn(async () => productState()),
+    applyProductUpdate: vi.fn(async () => ({ state: productState() })),
     saveWorkbenchPreferences: vi.fn(async () => undefined),
     saveLlmProviderSetting: vi.fn(async () => undefined),
     deleteLlmProviderSetting: vi.fn(async () => undefined),
@@ -133,4 +138,23 @@ function actions(): WorkbenchActions {
     saveImageModelSetting: vi.fn(async () => undefined),
     saveVideoModelSetting: vi.fn(async () => undefined)
   } as unknown as WorkbenchActions;
+}
+
+function productState(): DebruteProductState {
+  return {
+    productVersion: '0.2.0',
+    platform: 'darwin',
+    cli: {
+      status: 'ready',
+      version: '0.2.0',
+      path: '/Users/me/.debrute/bin/debrute',
+      skillsVersion: '0.2.0',
+      skillsRoot: '/Users/me/.agents/skills'
+    },
+    update: {
+      type: 'idle',
+      currentVersion: '0.2.0',
+      updateAvailable: false
+    }
+  };
 }

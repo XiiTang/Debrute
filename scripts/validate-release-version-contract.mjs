@@ -18,6 +18,12 @@ export async function releaseVersionContract(root = process.cwd()) {
   return { version, entries };
 }
 
+const internalRuntimePackagePaths = [
+  'apps/daemon/package.json',
+  'apps/runtime-host/package.json',
+  'apps/web/package.json'
+];
+
 export async function validateReleaseVersionContract(root = process.cwd()) {
   const contract = await releaseVersionContract(root);
   const mismatches = contract.entries.filter((entry) => entry.version !== contract.version);
@@ -25,6 +31,13 @@ export async function validateReleaseVersionContract(root = process.cwd()) {
     throw new Error([
       `Release version mismatch. Expected every release surface to use ${contract.version}.`,
       ...mismatches.map((entry) => `- ${entry.label} (${entry.path}) uses ${entry.version}`)
+    ].join('\n'));
+  }
+  const internalVersions = await readInternalRuntimePackageVersions(root);
+  if (internalVersions.length > 0) {
+    throw new Error([
+      'Internal package versions are not product versions. Remove version fields from:',
+      ...internalVersions.map((entry) => `- ${entry.path} declares ${entry.version}`)
     ].join('\n'));
   }
   return contract;
@@ -36,6 +49,20 @@ async function readPackageVersion(root, relativePath) {
     throw new Error(`${relativePath} must declare a string version.`);
   }
   return parsed.version;
+}
+
+async function readInternalRuntimePackageVersions(root) {
+  const entries = [];
+  for (const relativePath of internalRuntimePackagePaths) {
+    const parsed = JSON.parse(await readFile(join(root, relativePath), 'utf8'));
+    if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
+      throw new Error(`${relativePath} must be a JSON object.`);
+    }
+    if (typeof parsed.version === 'string') {
+      entries.push({ path: relativePath, version: parsed.version });
+    }
+  }
+  return entries;
 }
 
 async function readCepManifestVersion(root, relativePath) {

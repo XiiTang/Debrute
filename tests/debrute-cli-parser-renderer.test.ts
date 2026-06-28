@@ -23,6 +23,17 @@ describe('debrute cli parser and renderer', () => {
       command: 'runtime.status',
       scope: 'runtime'
     });
+    expect(parseDebruteArgs(['update'])).toMatchObject({
+      command: 'update',
+      scope: 'runtime',
+      positional: []
+    });
+    expect(parseDebruteArgs(['skills', 'status'])).toMatchObject({
+      command: 'skills.status',
+      scope: 'runtime',
+      positional: []
+    });
+    expect(() => parseDebruteArgs(['skills', 'sync'])).toThrow(DebruteCliError);
     expect(parseDebruteArgs(['project', 'init', '/tmp/project'])).toMatchObject({
       command: 'project.init',
       scope: 'project',
@@ -227,10 +238,10 @@ describe('debrute cli parser and renderer', () => {
 
   it('exposes command metadata for final help commands', () => {
     expect(commandSpecs.map((spec) => spec.command)).toEqual([
+      'update',
       'runtime.status',
       'runtime.doctor',
       'skills.status',
-      'skills.sync',
       'models.image.list',
       'models.image.describe',
       'models.video.list',

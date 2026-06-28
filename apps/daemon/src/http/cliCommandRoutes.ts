@@ -3,13 +3,16 @@ import type {
   DaemonCliCommandRequest,
   DebruteAgentCommandResult,
   DebruteAgentFieldValue,
+  ManagedCliDiagnostic,
   ProjectSessionSnapshot,
   RunImageModelBatchInput
 } from '@debrute/app-protocol';
 import { normalizeProjectRelativePath } from '@debrute/project-core';
+import type { DebruteProductServices } from './createDebruteDaemonHttpServer.js';
 
 export interface DaemonCliCommandServices {
   server: DebruteAppServer;
+  productServices?: DebruteProductServices;
   onProgress?(command: string, fields: Record<string, DebruteAgentFieldValue>): void;
 }
 
@@ -17,7 +20,9 @@ type DaemonCliCommandErrorCode =
   | 'invalid_command'
   | 'missing_argument'
   | 'invalid_input'
-  | 'invalid_json_input';
+  | 'invalid_json_input'
+  | 'product_update_failed';
+type AgentRecord = NonNullable<DebruteAgentCommandResult['records']>[number];
 
 export async function runDaemonCliCommand(
   request: DaemonCliCommandRequest,
@@ -35,8 +40,35 @@ async function runDaemonCliCommandUnsafe(
   services: DaemonCliCommandServices
 ): Promise<DebruteAgentCommandResult> {
   const server = services.server;
+  if (request.command === 'update') {
+    const result = await requireProductServices(services, request.command).productUpdate.apply();
+    const updateVersion = 'updateVersion' in result.state.update ? result.state.update.updateVersion : undefined;
+    const fields = {
+      current_version: result.state.productVersion,
+      update_state: result.state.update.type,
+      ...(updateVersion ? { update_version: updateVersion } : {})
+    };
+    if (result.state.update.type === 'error') {
+      return {
+        status: 'error',
+        command: request.command,
+        code: 'product_update_failed',
+        message: result.state.update.message,
+        fields
+      };
+    }
+    return {
+      status: 'ok',
+      command: request.command,
+      fields
+    };
+  }
+  if (request.command === 'skills.status') {
+    return managedCliDiagnosticResult(request.command, requireProductServices(services, request.command).managedCli.diagnostic());
+  }
   if (request.command === 'runtime.status') {
     const status = await server.runtimeStatusForCli();
+    const product = productFields(services.productServices?.managedCli.diagnostic());
     return {
       status: 'ok',
       command: request.command,
@@ -47,16 +79,16 @@ async function runDaemonCliCommandUnsafe(
         video_models: status.videoModels,
         available_video_models: status.availableVideoModels,
         llm_models: status.availableLlmModels,
-        diagnostics: status.diagnostics
+        diagnostics: status.diagnostics,
+        ...product
       }
     };
   }
   if (request.command === 'runtime.doctor') {
     const doctor = await server.runtimeDoctorForCli();
-    return {
-      status: 'ok',
-      command: request.command,
-      records: doctor.diagnostics.map((diagnostic) => ({
+    const productDiagnostic = managedCliDoctorRecord(services.productServices?.managedCli.diagnostic());
+    const records = [
+      ...doctor.diagnostics.map((diagnostic) => ({
         name: 'diagnostic',
         fields: {
           code: diagnostic.code,
@@ -64,7 +96,13 @@ async function runDaemonCliCommandUnsafe(
           message: diagnostic.message
         }
       })),
-      fields: { diagnostics: doctor.diagnostics.length }
+      ...(productDiagnostic ? [productDiagnostic] : [])
+    ];
+    return {
+      status: 'ok',
+      command: request.command,
+      records,
+      fields: { diagnostics: records.length }
     };
   }
   if (request.command === 'models.image.list') {
@@ -225,6 +263,76 @@ async function runDaemonCliCommandUnsafe(
     };
   }
   throw cliCommandError('invalid_command', `Unsupported daemon CLI command: ${request.command}`);
+}
+
+function requireProductServices(services: DaemonCliCommandServices, command: string): DebruteProductServices {
+  if (!services.productServices) {
+    throw cliCommandError('invalid_command', `${command} requires runtime product services.`);
+  }
+  return services.productServices;
+}
+
+function managedCliDiagnosticResult(command: string, diagnostic: ManagedCliDiagnostic): DebruteAgentCommandResult {
+  return {
+    status: 'ok',
+    command,
+    fields: managedCliFields(diagnostic)
+  };
+}
+
+function managedCliFields(diagnostic: ManagedCliDiagnostic): Record<string, DebruteAgentFieldValue> {
+  if (diagnostic.status === 'ready') {
+    return {
+      cli_status: diagnostic.status,
+      cli_version: diagnostic.version,
+      cli_path: diagnostic.path,
+      skills_version: diagnostic.skillsVersion,
+      skills_root: diagnostic.skillsRoot
+    };
+  }
+  return {
+    cli_status: diagnostic.status,
+    cli_version: diagnostic.version,
+    ...(diagnostic.path ? { cli_path: diagnostic.path } : {}),
+    cli_error: diagnostic.message
+  };
+}
+
+function productFields(diagnostic: ManagedCliDiagnostic | undefined): Record<string, DebruteAgentFieldValue> {
+  if (!diagnostic) {
+    return {};
+  }
+  if (diagnostic.status === 'ready') {
+    return {
+      product_version: diagnostic.version,
+      cli_status: diagnostic.status,
+      cli_version: diagnostic.version,
+      cli_path: diagnostic.path,
+      skills_version: diagnostic.skillsVersion,
+      skills_root: diagnostic.skillsRoot
+    };
+  }
+  return {
+    product_version: diagnostic.version,
+    cli_status: diagnostic.status,
+    cli_version: diagnostic.version,
+    ...(diagnostic.path ? { cli_path: diagnostic.path } : {}),
+    cli_error: diagnostic.message
+  };
+}
+
+function managedCliDoctorRecord(diagnostic: ManagedCliDiagnostic | undefined): AgentRecord | undefined {
+  if (!diagnostic || diagnostic.status !== 'error') {
+    return undefined;
+  }
+  return {
+    name: 'diagnostic',
+    fields: {
+      code: 'managed_cli_error',
+      severity: 'error',
+      message: diagnostic.message
+    }
+  };
 }
 
 async function openCliProject(server: DebruteAppServer, request: DaemonCliCommandRequest): Promise<void> {

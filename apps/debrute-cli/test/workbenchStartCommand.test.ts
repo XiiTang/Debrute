@@ -1,3 +1,4 @@
+import { readFileSync } from 'node:fs';
 import { mkdir, mkdtemp, rm, stat, writeFile } from 'node:fs/promises';
 import { createServer, type Server } from 'node:net';
 import { tmpdir } from 'node:os';
@@ -19,7 +20,10 @@ import {
   type WorkbenchRuntimeState
 } from '@debrute/workbench-runtime';
 import { ensureWorkbenchRuntime } from '../src/workbench/workbenchRuntimeLauncher';
-import { INTERNAL_WORKBENCH_RUNTIME_CHILD_COMMAND } from '../src/workbench/workbenchRuntimeChildEntrypoint';
+import {
+  INTERNAL_PRODUCT_REPLACEMENT_HELPER_COMMAND,
+  INTERNAL_WORKBENCH_RUNTIME_CHILD_COMMAND
+} from '../src/workbench/workbenchRuntimeChildEntrypoint';
 import * as workbenchRuntimeLauncher from '../src/workbench/workbenchRuntimeLauncher';
 import { parseRuntimeHostConfig } from '../../runtime-host/src/runtimeHostConfig';
 
@@ -330,13 +334,41 @@ describe('internal workbench runtime child args', () => {
       env: {
         DEBRUTE_RUNTIME_HOST_DAEMON_PORT: '17321',
         DEBRUTE_RUNTIME_HOST_TOKEN_FILE: '/runtime/token',
-        DEBRUTE_RUNTIME_HOST_WEB_DIST_DIR: '/payload/web'
+        DEBRUTE_RUNTIME_HOST_WEB_DIST_DIR: '/payload/web',
+        DEBRUTE_RUNTIME_HOST_PRODUCT_VERSION: '0.2.0',
+        DEBRUTE_RUNTIME_HOST_CLI_PAYLOAD_DIR: '/payload/cli',
+        DEBRUTE_RUNTIME_HOST_SKILLS_PAYLOAD_DIR: '/payload/skills',
+        DEBRUTE_RUNTIME_HOST_MANAGED_BIN_DIR: '/home/user/.debrute/bin',
+        DEBRUTE_RUNTIME_HOST_MANAGED_PRODUCT_ROOT: '/home/user/.debrute/products',
+        DEBRUTE_RUNTIME_HOST_PRODUCT_MANIFEST_PATH: '/home/user/.debrute/products/product-manifest.json',
+        DEBRUTE_RUNTIME_HOST_DESKTOP_INSTALL_PATH: '/Applications/Debrute.app/Contents/MacOS/debrute',
+        DEBRUTE_RUNTIME_HOST_REPLACEMENT_HELPER_PATH: '/home/user/.debrute/products/product-replacement-helper.cjs'
       }
     })).toMatchObject({
       daemonPort: 17321,
       tokenFile: '/runtime/token',
-      webDistDir: '/payload/web'
+      webDistDir: '/payload/web',
+      productVersion: '0.2.0',
+      cliPayloadDir: '/payload/cli',
+      skillsPayloadDir: '/payload/skills',
+      replacementHelperPath: '/home/user/.debrute/products/product-replacement-helper.cjs'
     });
+  });
+
+  it('does not pass a replacement helper runner for packaged CLI-launched runtimes', () => {
+    const source = readFileSync(join(process.cwd(), 'apps/debrute-cli/src/workbench/workbenchRuntimeLauncher.ts'), 'utf8');
+
+    expect(INTERNAL_PRODUCT_REPLACEMENT_HELPER_COMMAND).toBe('internal-product-replacement-helper');
+    expect(source).not.toContain('DEBRUTE_RUNTIME_HOST_REPLACEMENT_HELPER_RUNNER');
+    expect(source).not.toContain('cli-internal');
+  });
+
+  it('passes source product metadata into source-dev daemon launches', () => {
+    const source = readFileSync(join(process.cwd(), 'apps/debrute-cli/src/workbench/workbenchRuntimeLauncher.ts'), 'utf8');
+
+    expect(source).toContain('DEBRUTE_DAEMON_PRODUCT_VERSION');
+    expect(source).toContain('DEBRUTE_DAEMON_CLI_PATH');
+    expect(source).toContain('DEBRUTE_DAEMON_SKILLS_PAYLOAD_DIR');
   });
 
   it('rejects missing packaged runtime host args', () => {

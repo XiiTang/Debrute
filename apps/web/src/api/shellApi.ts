@@ -1,10 +1,4 @@
 import type {
-  DebruteCliInstallResult,
-  DebruteCliManualCommand,
-  DebruteCliPathRepairResult,
-  DebruteCliSkillsSyncResult,
-  DebruteCliStatus,
-  DesktopAppUpdateState,
   WorkbenchMenuCommandId,
   WorkbenchTitleBarState
 } from '@debrute/app-protocol';
@@ -27,19 +21,6 @@ export interface DebruteShellApi {
   }): Promise<{ ok: true }>;
   onNativeWindowStateChanged?(listener: (state: NativeWindowState) => void): () => void;
   getDroppedFilePath?(file: File): string | undefined;
-  getDebruteCliStatus?(): Promise<DebruteCliStatus>;
-  installDebruteCli?(): Promise<DebruteCliInstallResult>;
-  updateDebruteCli?(): Promise<DebruteCliInstallResult>;
-  syncDebruteCliSkills?(): Promise<DebruteCliSkillsSyncResult>;
-  restoreDebruteCliSkills?(): Promise<DebruteCliSkillsSyncResult>;
-  repairDebruteCliPath?(): Promise<DebruteCliPathRepairResult>;
-  getDebruteCliManualInstallCommand?(): Promise<DebruteCliManualCommand>;
-  getAppUpdateState?(): Promise<DesktopAppUpdateState>;
-  checkForAppUpdate?(): Promise<DesktopAppUpdateState>;
-  downloadAppUpdate?(): Promise<DesktopAppUpdateState>;
-  installAppUpdate?(): Promise<DesktopAppUpdateState>;
-  openAppUpdateDownloadPage?(): Promise<{ ok: true }>;
-  onAppUpdateStateChanged?(listener: (state: DesktopAppUpdateState) => void): () => void;
 }
 
 export function getDebruteShellApi(): DebruteShellApi | undefined {

@@ -15,12 +15,18 @@
     "dist": "pnpm build && electron-builder",
     "dev:electron": "tsx ../../scripts/dev-electron-workbench.ts"
   },
-  "build": {
+    "build": {
     "appId": "io.github.xiitang.debrute",
     "productName": "Debrute",
     "executableName": "debrute",
     "electronVersion": "42.4.0",
     "asar": true,
+    "asarUnpack": [
+      "dist-electron/runtime-host.cjs",
+      "dist-electron/canvas-feedback-render-worker.cjs",
+      "dist-electron/product-replacement-helper.cjs",
+      "dist-electron/runtime-product/**"
+    ],
     "afterPack": "scripts/package-sharp-runtime.mjs",
     "afterSign": "scripts/notarize-macos-app.cjs",
     "directories": {
@@ -74,7 +80,6 @@
     "@debrute/app-protocol": "workspace:*",
     "@debrute/project-core": "workspace:*",
     "@debrute/workbench-runtime": "workspace:*",
-    "electron-updater": "^6.8.9",
     "node-pty": "^1.1.0"
   },
   "devDependencies": {

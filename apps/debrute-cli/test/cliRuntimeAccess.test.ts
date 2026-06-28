@@ -1,6 +1,5 @@
 import { describe, expect, it, vi } from 'vitest';
 import type { WorkbenchRuntimeState } from '@debrute/workbench-runtime';
-import type { SkillRecord, SkillsStatusSnapshot } from '@debrute/app-protocol';
 import { runRuntimeBackedCliCommand } from '../src/runtime/cliRuntimeAccess';
 
 describe('CLI runtime access', () => {
@@ -27,7 +26,6 @@ describe('CLI runtime access', () => {
         throw new Error('Invalid Debrute workbench runtime state: owner must include kind, ownerId, and pid.');
       }),
       checkHealth: vi.fn(),
-      skillsStatus: vi.fn(async () => skillsSnapshot({ skills: [] })),
       fetch: vi.fn()
     });
 
@@ -45,7 +43,6 @@ describe('CLI runtime access', () => {
         throw new Error('Invalid Debrute workbench runtime state: owner must include kind, ownerId, and pid.');
       }),
       checkHealth: vi.fn(),
-      skillsStatus: vi.fn(async () => skillsSnapshot({ skills: [] })),
       fetch: vi.fn()
     });
 
@@ -54,12 +51,11 @@ describe('CLI runtime access', () => {
       command: 'runtime.doctor',
       fields: {
         runtime_state: 'unreadable',
-        diagnostics: 2
+        diagnostics: 1
       }
     });
     expect(result.records?.map((record) => record.fields.code)).toEqual([
-      'runtime_state_unreadable',
-      'skills_not_installed'
+      'runtime_state_unreadable'
     ]);
   });
 
@@ -67,7 +63,6 @@ describe('CLI runtime access', () => {
     const result = await runRuntimeBackedCliCommand(parsed('runtime.doctor'), {
       readRuntimeState: vi.fn(async () => undefined),
       checkHealth: vi.fn(),
-      skillsStatus: vi.fn(async () => skillsSnapshot({ skills: [] })),
       fetch: vi.fn()
     });
 
@@ -76,93 +71,11 @@ describe('CLI runtime access', () => {
       command: 'runtime.doctor',
       fields: {
         runtime_state: 'stopped',
-        diagnostics: 2
+        diagnostics: 1
       }
     });
     expect(result.records?.map((record) => record.fields.code)).toEqual([
-      'runtime_stopped',
-      'skills_not_installed'
-    ]);
-  });
-
-  it('adds CLI-owned Skills status to observed runtime status', async () => {
-    const state = runtimeState();
-    const result = await runRuntimeBackedCliCommand(parsed('runtime.status'), {
-      readRuntimeState: vi.fn(async () => state),
-      checkHealth: vi.fn(async () => 'healthy'),
-      skillsStatus: vi.fn(async () => skillsSnapshot({
-        skills: [
-          skillRecord('debrute-core'),
-          skillRecord('debrute-image-director')
-        ],
-        diagnostics: [{
-          source: 'debrute-sync',
-          root: '/Debrute/skills',
-          code: 'skills_bundle_unavailable',
-          severity: 'warning',
-          message: 'Bundled Debrute Skills are unavailable.'
-        }]
-      })),
-      fetch: vi.fn(async () => new Response(JSON.stringify({
-        status: 'ok',
-        command: 'runtime.status',
-        fields: {
-          ok: true,
-          image_models: 1,
-          diagnostics: 2
-        }
-      }), { status: 200, headers: { 'content-type': 'application/json' } }))
-    });
-
-    expect(result).toMatchObject({
-      status: 'ok',
-      command: 'runtime.status',
-      fields: {
-        ok: true,
-        image_models: 1,
-        skills: 2,
-        diagnostics: 3
-      }
-    });
-  });
-
-  it('adds CLI-owned Skills diagnostics to observed runtime doctor', async () => {
-    const state = runtimeState();
-    const result = await runRuntimeBackedCliCommand(parsed('runtime.doctor'), {
-      readRuntimeState: vi.fn(async () => state),
-      checkHealth: vi.fn(async () => 'healthy'),
-      skillsStatus: vi.fn(async () => skillsSnapshot({
-        skills: [],
-        bundledRootAvailable: false,
-        diagnostics: [{
-          source: 'debrute-sync',
-          root: '/Debrute/skills',
-          code: 'skills_bundle_unavailable',
-          severity: 'warning',
-          message: 'Bundled Debrute Skills are unavailable.'
-        }]
-      })),
-      fetch: vi.fn(async () => new Response(JSON.stringify({
-        status: 'ok',
-        command: 'runtime.doctor',
-        records: [{
-          name: 'diagnostic',
-          fields: {
-            code: 'llm_model_not_configured',
-            severity: 'warning',
-            message: 'No available LLM model is configured.'
-          }
-        }],
-        fields: { diagnostics: 1 }
-      }), { status: 200, headers: { 'content-type': 'application/json' } }))
-    });
-
-    expect(result.status).toBe('ok');
-    expect(result.fields).toEqual({ diagnostics: 3 });
-    expect(result.records?.map((record) => record.fields.code)).toEqual([
-      'llm_model_not_configured',
-      'skills_bundle_unavailable',
-      'skills_not_installed'
+      'runtime_stopped'
     ]);
   });
 
@@ -191,6 +104,41 @@ describe('CLI runtime access', () => {
       headers: expect.objectContaining({ 'x-debrute-daemon-token': 'secret' })
     }));
     expect(result).toMatchObject({ status: 'ok', command: 'models.image.list' });
+  });
+
+  it('ensures runtime and posts update through the daemon CLI bridge', async () => {
+    const state = runtimeState();
+    const ensureRuntime = vi.fn(async () => ({ runtimeStarted: false, statePath: '/tmp/state.json', state }));
+    const fetch = vi.fn(async () => new Response(JSON.stringify({
+      status: 'ok',
+      command: 'update',
+      fields: {
+        current_version: '0.2.0',
+        update_state: 'installing',
+        update_version: '0.3.0'
+      }
+    }), { status: 200, headers: { 'content-type': 'application/json' } }));
+
+    await expect(runRuntimeBackedCliCommand(parsed('update'), {
+      ensureRuntime,
+      fetch,
+      owner: { kind: 'cli', ownerId: 'cli-owner-1', pid: 300 }
+    })).resolves.toMatchObject({
+      status: 'ok',
+      command: 'update',
+      fields: {
+        update_state: 'installing'
+      }
+    });
+    expect(ensureRuntime).toHaveBeenCalledTimes(1);
+    expect(fetch).toHaveBeenCalledWith('http://127.0.0.1:17321/api/cli/run', expect.objectContaining({
+      method: 'POST',
+      body: JSON.stringify({
+        command: 'update',
+        positional: [],
+        options: {}
+      })
+    }));
   });
 
   it('does not allow CLI replacement to terminate a Desktop-owned runtime', async () => {
@@ -299,36 +247,6 @@ function runtimeState(overrides: Partial<WorkbenchRuntimeState> = {}): Workbench
     startedAt: '2026-06-13T00:00:00.000Z',
     updatedAt: '2026-06-13T00:00:00.000Z',
     ...overrides
-  };
-}
-
-function skillsSnapshot(overrides: Partial<SkillsStatusSnapshot> = {}): SkillsStatusSnapshot {
-  return {
-    sources: [{ source: 'shared-agents', root: '/home/user/.agents/skills' }],
-    skills: [skillRecord('debrute-core')],
-    diagnostics: [],
-    statePath: '/home/user/.debrute/skills-state.json',
-    currentDebruteVersion: '1.2.3',
-    sharedSkillsRoot: '/home/user/.agents/skills',
-    bundledSkillsRoot: '/Debrute/skills',
-    bundledRootAvailable: true,
-    bundledSkills: ['debrute-core'],
-    missingBundledSkills: [],
-    missingBundledSkillCount: 0,
-    skippedDeletedSkills: [],
-    ...overrides
-  };
-}
-
-function skillRecord(name: string): SkillRecord {
-  return {
-    name,
-    description: 'Core',
-    source: 'shared-agents',
-    root: '/home/user/.agents/skills',
-    skillDir: `/home/user/.agents/skills/${name}`,
-    skillPath: `/home/user/.agents/skills/${name}/SKILL.md`,
-    debruteVersion: '1.2.3'
   };
 }
 

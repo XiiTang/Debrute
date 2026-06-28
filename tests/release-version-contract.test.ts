@@ -59,6 +59,42 @@ describe('release version contract', () => {
     }
   });
 
+  it('rejects version fields on internal runtime workspace packages', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'debrute-release-internal-version-contract-'));
+    try {
+      await mkdir(join(root, 'apps/desktop'), { recursive: true });
+      await mkdir(join(root, 'apps/debrute-cli'), { recursive: true });
+      await mkdir(join(root, 'apps/daemon'), { recursive: true });
+      await mkdir(join(root, 'apps/runtime-host'), { recursive: true });
+      await mkdir(join(root, 'apps/web'), { recursive: true });
+      await mkdir(join(root, 'apps/photoshop-uxp-plugin/public'), { recursive: true });
+      await mkdir(join(root, 'apps/photoshop-cep-plugin/public/CSXS'), { recursive: true });
+      await mkdir(join(root, 'skills/debrute-core'), { recursive: true });
+      await writeFile(join(root, 'package.json'), JSON.stringify({ version: '1.2.3' }), 'utf8');
+      await writeFile(join(root, 'apps/desktop/package.json'), JSON.stringify({ version: '1.2.3' }), 'utf8');
+      await writeFile(join(root, 'apps/debrute-cli/package.json'), JSON.stringify({ version: '1.2.3' }), 'utf8');
+      await writeFile(join(root, 'apps/daemon/package.json'), JSON.stringify({ version: '1.2.3' }), 'utf8');
+      await writeFile(join(root, 'apps/runtime-host/package.json'), JSON.stringify({ version: '1.2.3' }), 'utf8');
+      await writeFile(join(root, 'apps/web/package.json'), JSON.stringify({ version: '1.2.3' }), 'utf8');
+      await writeFile(join(root, 'apps/photoshop-uxp-plugin/package.json'), JSON.stringify({ version: '1.2.3' }), 'utf8');
+      await writeFile(join(root, 'apps/photoshop-uxp-plugin/public/manifest.json'), JSON.stringify({ version: '1.2.3' }), 'utf8');
+      await writeFile(join(root, 'apps/photoshop-cep-plugin/package.json'), JSON.stringify({ version: '1.2.3' }), 'utf8');
+      await writeFile(join(root, 'apps/photoshop-cep-plugin/public/CSXS/manifest.xml'), '<ExtensionManifest ExtensionBundleVersion="1.2.3"></ExtensionManifest>', 'utf8');
+      await writeFile(join(root, 'skills/debrute-core/SKILL.md'), [
+        '---',
+        'name: debrute-core',
+        'metadata:',
+        '  debrute.version: "1.2.3"',
+        '---',
+        ''
+      ].join('\n'), 'utf8');
+
+      await expect(validateReleaseVersionContract(root)).rejects.toThrow(/internal package versions/i);
+    } finally {
+      await rm(root, { recursive: true, force: true });
+    }
+  });
+
   it('rejects mismatched Photoshop UXP manifest versions instead of packaging mixed metadata', async () => {
     const root = await mkdtemp(join(tmpdir(), 'debrute-release-uxp-manifest-contract-'));
     try {

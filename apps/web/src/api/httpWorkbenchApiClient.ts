@@ -4,6 +4,7 @@ import type {
   BrowserSessionCredential,
   CanvasTextPreviewDescriptorResponse,
   CanvasTextPreviewDescriptorView,
+  DebruteProductState,
   DebruteRuntimeInfo,
   DebruteHttpErrorBody,
   DaemonProjectUploadImportPlan,
@@ -15,6 +16,7 @@ import type {
   ImageModelSettingsView,
   IntegrationSettingsView,
   LlmProviderSettingsView,
+  ProductUpdateApplyResult,
   ProjectHealthSummary,
   SaveCanvasTextPreviewSourceInput,
   SaveAdobeBridgeSettingsInput,
@@ -295,6 +297,9 @@ export function createHttpWorkbenchApiClient(options: HttpWorkbenchApiClientOpti
       return request<WorkbenchTitleBarState>('GET', `/api/workbench/title-bar?${params.toString()}`);
     },
     clearRecentProjectRoots: () => request<{ ok: true }>('DELETE', '/api/workbench/recent-projects'),
+    getProductState: () => request<DebruteProductState>('GET', '/api/runtime/product'),
+    checkProductUpdate: () => request<DebruteProductState>('POST', '/api/runtime/product/update/check'),
+    applyProductUpdate: () => request<ProductUpdateApplyResult>('POST', '/api/runtime/product/update/apply'),
     workbenchPreferencesGet: () => request<WorkbenchPreferencesView>('GET', '/api/settings/workbench-preferences'),
     workbenchPreferencesSave: (input: SaveWorkbenchPreferencesInput) => request<WorkbenchPreferencesView>('PUT', '/api/settings/workbench-preferences', input),
     getSnapshot: async () => {

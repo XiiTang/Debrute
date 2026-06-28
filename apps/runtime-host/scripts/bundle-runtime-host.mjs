@@ -26,6 +26,12 @@ await Promise.all([
     entryPoints: ['../app-server/src/canvas/CanvasFeedbackRenderedImageWorker.ts'],
     outfile: 'bundle/canvas-feedback-render-worker.cjs',
     external: ['sharp']
+  }),
+  build({
+    ...commonBuildOptions,
+    entryPoints: ['src/productReplacementHelper.ts'],
+    outfile: 'bundle/product-replacement-helper.cjs',
+    external: ['node-pty', 'sharp']
   })
 ]);
 

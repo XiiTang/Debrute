@@ -9,7 +9,6 @@ debrute --version
 pnpm exec tsx apps/debrute-cli/src/index.ts runtime status
 pnpm exec tsx apps/debrute-cli/src/index.ts runtime doctor
 pnpm exec tsx apps/debrute-cli/src/index.ts skills status
-pnpm exec tsx apps/debrute-cli/src/index.ts skills sync
 pnpm exec tsx apps/debrute-cli/src/index.ts project init path/to/project
 pnpm exec tsx apps/debrute-cli/src/index.ts project validate path/to/project
 pnpm exec tsx apps/debrute-cli/src/index.ts workbench start

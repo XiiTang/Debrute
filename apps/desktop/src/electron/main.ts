@@ -1,20 +1,12 @@
 import { randomUUID } from 'node:crypto';
 import electron from 'electron';
-import { autoUpdater } from 'electron-updater';
 import { join } from 'node:path';
-import {
-  createDesktopAppUpdateService,
-  fetchLatestDebruteRelease,
-  type DesktopAppUpdateService
-} from './app-update/appUpdateService.js';
-import { registerAppUpdateShellIpc } from './app-update/appUpdateShell.js';
 import { createAttachedDesktopRuntimeClient, type DesktopRuntimeClient } from './desktopRuntimeClient.js';
-import { createDebruteCliInstaller } from './debruteCliInstaller.js';
-import { registerDebruteCliShellIpc } from './debruteCliShell.js';
 import { loadDebruteProjectShellWindow, waitForDebruteShellUrl } from './desktopShellLoad.js';
 import { createApplicationMenuController } from './menu/registerApplicationMenu.js';
 import type { ApplicationMenuCommand } from './menu/applicationMenu.js';
 import { parseDesktopOpenIntent, syncNativeRecentProjects, type DesktopOpenIntent } from './nativeRecentProjects.js';
+import { desktopProductRuntimeConfig } from './runtime/desktopProductRuntimeConfig.js';
 import { RuntimeSupervisor } from './runtime/runtimeSupervisor.js';
 import { TrayController } from './tray/trayController.js';
 import { workbenchStartupBackgroundColorForRuntime } from './workbenchAppearance.js';
@@ -24,7 +16,6 @@ const { app, BrowserWindow, dialog, ipcMain, Menu, nativeTheme } = electron;
 let runtimeSupervisor: RuntimeSupervisor | undefined;
 let runtimeClient: DesktopRuntimeClient | undefined;
 let trayController: TrayController | undefined;
-let appUpdateService: DesktopAppUpdateService | undefined;
 let trueQuitRequested = false;
 const projectWindowsByProjectId = new Map<string, Electron.BrowserWindow>();
 const projectIdsByWindowId = new Map<number, string>();
@@ -141,7 +132,17 @@ app.whenReady().then(async () => {
       kind: 'desktop',
       ownerId: randomUUID(),
       pid: process.pid
-    }
+    },
+    productRuntimeConfig: desktopProductRuntimeConfig({
+      appVersion: app.getVersion(),
+      electronDistDir: __dirname,
+      userHome: app.getPath('home'),
+      platform: process.platform,
+      execPath: process.execPath,
+      appImagePath: process.env.APPIMAGE,
+      appIsPackaged: app.isPackaged,
+      desktopPid: process.pid
+    })
   });
   trayController = new TrayController({
     app,
@@ -171,15 +172,7 @@ app.whenReady().then(async () => {
     }
   });
   await trayController.start();
-  appUpdateService = createDesktopAppUpdateService({
-    app,
-    platform: process.platform,
-    driver: autoUpdater,
-    openExternal: (url) => electron.shell.openExternal(url),
-    linuxReleaseChecker: () => fetchLatestDebruteRelease({ fetch })
-  });
   registerShellIpc();
-  appUpdateService.startDelayedBackgroundCheck();
   await applicationMenu.refreshApplicationMenu();
   try {
     const runtimeState = await runtimeSupervisor.start();
@@ -263,20 +256,6 @@ function registerShellIpc(): void {
     await executeNativeMenuCommand(requireFocusedWindow(event), input);
     return { ok: true };
   });
-  registerDebruteCliShellIpc({
-    ipcMain,
-    installer: createDebruteCliInstaller({
-      desktopVersion: app.getVersion(),
-      userHome: app.getPath('home')
-    })
-  });
-  if (appUpdateService) {
-    registerAppUpdateShellIpc({
-      ipcMain,
-      service: appUpdateService,
-      windows: () => BrowserWindow.getAllWindows()
-    });
-  }
 }
 
 function requireFocusedWindow(event: Electron.IpcMainInvokeEvent): Electron.BrowserWindow {

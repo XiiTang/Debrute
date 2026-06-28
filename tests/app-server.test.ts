@@ -414,7 +414,8 @@ describe('app-server', () => {
         'root',
         'secretsFile',
         'videoModelsFile',
-        'workbenchChromeFile'
+        'workbenchChromeFile',
+        'workbenchPreferencesFile'
       ]);
     } finally {
       globalRuntime.close();

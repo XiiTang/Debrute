@@ -3,6 +3,15 @@ export interface RuntimeHostConfig {
   daemonPort: number;
   tokenFile: string;
   webDistDir: string;
+  productVersion: string;
+  cliPayloadDir: string;
+  skillsPayloadDir: string;
+  managedBinDir: string;
+  managedProductRoot: string;
+  productManifestPath: string;
+  desktopInstallPath: string;
+  replacementHelperPath: string;
+  desktopPid?: number;
 }
 
 export interface ParseRuntimeHostConfigInput {
@@ -15,7 +24,18 @@ export function parseRuntimeHostConfig(input: ParseRuntimeHostConfigInput): Runt
     host: '127.0.0.1',
     daemonPort: parsePositiveInteger(requireEnv(env, 'DEBRUTE_RUNTIME_HOST_DAEMON_PORT'), 'DEBRUTE_RUNTIME_HOST_DAEMON_PORT'),
     tokenFile: requireEnv(env, 'DEBRUTE_RUNTIME_HOST_TOKEN_FILE'),
-    webDistDir: requireEnv(env, 'DEBRUTE_RUNTIME_HOST_WEB_DIST_DIR')
+    webDistDir: requireEnv(env, 'DEBRUTE_RUNTIME_HOST_WEB_DIST_DIR'),
+    productVersion: requireEnv(env, 'DEBRUTE_RUNTIME_HOST_PRODUCT_VERSION'),
+    cliPayloadDir: requireEnv(env, 'DEBRUTE_RUNTIME_HOST_CLI_PAYLOAD_DIR'),
+    skillsPayloadDir: requireEnv(env, 'DEBRUTE_RUNTIME_HOST_SKILLS_PAYLOAD_DIR'),
+    managedBinDir: requireEnv(env, 'DEBRUTE_RUNTIME_HOST_MANAGED_BIN_DIR'),
+    managedProductRoot: requireEnv(env, 'DEBRUTE_RUNTIME_HOST_MANAGED_PRODUCT_ROOT'),
+    productManifestPath: requireEnv(env, 'DEBRUTE_RUNTIME_HOST_PRODUCT_MANIFEST_PATH'),
+    desktopInstallPath: requireEnv(env, 'DEBRUTE_RUNTIME_HOST_DESKTOP_INSTALL_PATH'),
+    replacementHelperPath: requireEnv(env, 'DEBRUTE_RUNTIME_HOST_REPLACEMENT_HELPER_PATH'),
+    ...(env.DEBRUTE_RUNTIME_HOST_DESKTOP_PID
+      ? { desktopPid: parsePositiveInteger(env.DEBRUTE_RUNTIME_HOST_DESKTOP_PID, 'DEBRUTE_RUNTIME_HOST_DESKTOP_PID') }
+      : {})
   };
 }
 

@@ -1,6 +1,6 @@
 export type CliRuntimePolicy = 'no-runtime' | 'observe-runtime' | 'ensure-runtime';
 
-const NO_RUNTIME = new Set(['commands', 'help', 'skills.status', 'skills.sync']);
+const NO_RUNTIME = new Set(['commands', 'help']);
 const OBSERVE_RUNTIME = new Set(['runtime.status', 'runtime.doctor']);
 
 export function runtimePolicyForCommand(command: string): CliRuntimePolicy {

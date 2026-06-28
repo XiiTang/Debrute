@@ -3,17 +3,20 @@ import { renderToStaticMarkup } from 'react-dom/server';
 import type { AdobeBridgeStateView } from '@debrute/app-protocol';
 import { describe, expect, it } from 'vitest';
 import { SendToPhotoshopDialog } from '../apps/web/src/workbench/adobe-bridge/SendToPhotoshopDialog';
+import { I18nProvider } from '../apps/web/src/workbench/i18n';
 
 describe('SendToPhotoshopDialog', () => {
   it('lists only linked Photoshop clients and disables no-document clients', () => {
-    const html = renderToStaticMarkup(React.createElement(SendToPhotoshopDialog, {
-      projectId: 'project-1',
-      projectRelativePath: 'assets/cover.png',
-      bridge: bridgeState(),
-      sending: false,
-      onSend: () => undefined,
-      onClose: () => undefined
-    }));
+    const html = renderToStaticMarkup(
+      React.createElement(I18nProvider, { locale: 'en' }, React.createElement(SendToPhotoshopDialog, {
+        projectId: 'project-1',
+        projectRelativePath: 'assets/cover.png',
+        bridge: bridgeState(),
+        sending: false,
+        onSend: () => undefined,
+        onClose: () => undefined
+      }))
+    );
 
     expect(html).toContain('Photoshop 2026 · poster.psd');
     expect(html).toContain('Photoshop 2026 · No document open');

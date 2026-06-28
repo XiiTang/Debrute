@@ -6,12 +6,11 @@ describe('GitHub release workflow contract', () => {
   const workflow = readFileSync(join(process.cwd(), '.github/workflows/debrute-release.yml'), 'utf8');
   const desktopPackage = JSON.parse(readFileSync(join(process.cwd(), 'apps/desktop/package.json'), 'utf8'));
 
-  it('uses a release workflow with preflight, CLI, Desktop, and final publish jobs', () => {
+  it('uses a release workflow with preflight, Desktop, and final publish jobs', () => {
     expect(workflow).toContain('preflight:');
     expect(workflow).toContain('node scripts/validate-release-version-contract.mjs');
     expect(workflow).toContain('Install ripgrep');
     expect(workflow).toContain('sudo apt-get update && sudo apt-get install -y ripgrep');
-    expect(workflow).toContain('build-cli:');
     expect(workflow).toContain('build-desktop:');
     expect(workflow).not.toContain('build-photoshop-plugins:');
     expect(workflow).not.toContain('pnpm package:photoshop-plugin');
@@ -40,11 +39,11 @@ describe('GitHub release workflow contract', () => {
     expect(buildDesktopBlock).toContain('electron-builder --win nsis --x64 --publish never');
     expect(buildDesktopBlock).toContain('electron-builder --linux AppImage --x64 --publish never');
     expect(buildDesktopBlock).not.toContain('latest-mac.yml');
-    expect(buildDesktopBlock).toContain('latest.yml');
+    expect(buildDesktopBlock).not.toContain('latest.yml');
+    expect(buildDesktopBlock).not.toContain('.blockmap');
     expect(buildDesktopBlock).toContain('debrute-desktop-${{ matrix.publicPlatform }}-${{ matrix.arch }}');
     expect(buildDesktopBlock).not.toContain('arch: universal');
     expect(buildDesktopBlock).not.toContain('Rename Desktop assets');
-    expect(readFileSync(join(process.cwd(), 'apps/desktop/package.json'), 'utf8')).toContain('"electron-updater"');
     expect(workflow).not.toContain('sha256sum debrute-*');
     expect(workflow).toContain('find . -maxdepth 1 -type f ! -name debrute_SHA256SUMS');
   });
@@ -163,7 +162,7 @@ describe('GitHub release workflow contract', () => {
   it('runs every Node-backed release job under Node.js 24', () => {
     const configuredNodeVersions = [...workflow.matchAll(/node-version:\s*(\d+)/g)].map((match) => match[1]);
 
-    expect(configuredNodeVersions).toEqual(['24', '24', '24', '24']);
+    expect(configuredNodeVersions).toEqual(['24', '24', '24']);
     expect(workflow).not.toContain('node-version: 22');
   });
 });

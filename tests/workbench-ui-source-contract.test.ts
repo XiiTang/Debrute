@@ -109,6 +109,27 @@ describe('Workbench UI source contract', () => {
     expect(settings).toContain('className="db-nav-row__icon"');
   });
 
+  it('does not keep removed standalone CLI settings or old updater UI source strings', () => {
+    const dictionaries = css('apps/web/src/workbench/i18n/dictionaries.ts');
+    const settings = css('apps/web/src/workbench/styles/settings.css');
+
+    for (const removed of [
+      'settings.general.downloadUpdate',
+      'settings.general.openGithubReleases',
+      'settings.general.updateStatus.unavailable',
+      'settings.general.updateStatus.ready',
+      'settings.general.updateStatus.downloading',
+      'settings.general.updateStatus.downloaded',
+      'settings.general.updateMessage.unsupportedPlatform',
+      'settings.general.updateMessage.manualDownload',
+      'settings.general.updateMessage.downloading',
+      'settings.general.updateMessage.downloaded',
+      '.debrute-cli-settings-page'
+    ]) {
+      expect(`${dictionaries}\n${settings}`).not.toContain(removed);
+    }
+  });
+
   it('keeps floating panel shell interaction geometry shared, compact, and isolated from feature scroll', () => {
     const shell = css('apps/web/src/workbench/styles/shell.css');
     const patterns = css('apps/web/src/workbench/ui/styles/workbench-patterns.css');
@@ -392,13 +413,8 @@ describe('Workbench UI source contract', () => {
       'project-open-panel__actions',
       'project-open-panel__path',
       'project-open-panel__error',
-      'debrute-cli-status-card',
-      'debrute-cli-status-grid',
       'general-settings-grid',
       'general-settings-card',
-      'app-update-card',
-      'app-update-header',
-      'app-update-message',
       'adobe-bridge-target-row'
     ];
     const files = [
@@ -407,7 +423,6 @@ describe('Workbench UI source contract', () => {
       'apps/web/src/workbench/adobe-bridge/SendToPhotoshopDialog.tsx',
       'apps/web/src/workbench/settings/SettingsPanel.tsx',
       'apps/web/src/workbench/settings/general/GeneralSettingsPage.tsx',
-      'apps/web/src/workbench/settings/debrute-cli/DebruteCliSettingsPage.tsx',
       'apps/web/src/workbench/settings/integrations/IntegrationsSettingsPage.tsx',
       'apps/web/src/workbench/settings/adobe-bridge/AdobeBridgeSettingsPage.tsx',
       'apps/web/src/workbench/project-open/ProjectOpenPanel.tsx',
@@ -498,7 +513,6 @@ describe('Workbench UI source contract', () => {
     const sources = [
       'apps/web/src/workbench/settings/SettingsPanel.tsx',
       'apps/web/src/workbench/settings/general/GeneralSettingsPage.tsx',
-      'apps/web/src/workbench/settings/debrute-cli/DebruteCliSettingsPage.tsx',
       'apps/web/src/workbench/settings/integrations/IntegrationsSettingsPage.tsx',
       'apps/web/src/workbench/settings/adobe-bridge/AdobeBridgeSettingsPage.tsx',
       'apps/web/src/workbench/project-open/ProjectOpenPanel.tsx',

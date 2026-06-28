@@ -717,6 +717,9 @@ export function WorkbenchApp(): React.ReactElement {
   }, []);
 
   const actions: WorkbenchActions = useMemo(() => ({
+    getProductState: () => api.getProductState(),
+    checkProductUpdate: () => api.checkProductUpdate(),
+    applyProductUpdate: () => api.applyProductUpdate(),
     saveWorkbenchPreferences: async (input) => {
       const previousPreferences = workbenchPreferences ?? DEFAULT_WORKBENCH_PREFERENCES;
       const nextPreferences: WorkbenchPreferencesView = {

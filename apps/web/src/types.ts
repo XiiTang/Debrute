@@ -1,6 +1,7 @@
 import type {
   AddProjectPathToCanvasMapInput,
   AdobeBridgeStateView,
+  DebruteProductState,
   ImageModelSettingsView,
   CanvasTextPreviewDescriptorRequest,
   CanvasTextPreviewDescriptorResponse,
@@ -11,6 +12,7 @@ import type {
   GeneratedAssetView,
   GeneratedAssetMetadataLookup,
   LlmProviderSettingsView,
+  ProductUpdateApplyResult,
   SaveAdobeBridgeSettingsInput,
   SaveCanvasTextPreviewSourceInput,
   SaveWorkbenchPreferencesInput,
@@ -87,6 +89,9 @@ export interface FloatingTextEditorWindowState {
 }
 
 export interface WorkbenchActions {
+  getProductState: () => Promise<DebruteProductState>;
+  checkProductUpdate: () => Promise<DebruteProductState>;
+  applyProductUpdate: () => Promise<ProductUpdateApplyResult>;
   saveWorkbenchPreferences: (input: SaveWorkbenchPreferencesInput) => Promise<void>;
   saveLlmProviderSetting: (input: SaveLlmProviderSettingInput, providerId?: string) => Promise<void>;
   deleteLlmProviderSetting: (providerId: string) => Promise<void>;

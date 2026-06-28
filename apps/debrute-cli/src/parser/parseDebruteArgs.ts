@@ -3,10 +3,10 @@ import { cliError } from '../errors/cliErrors.js';
 import { commandSpecs, specForCommandPath, type DebruteCommandScope } from '../commands/helpSpec.js';
 
 export type DebruteCliCommand =
+  | 'update'
   | 'runtime.status'
   | 'runtime.doctor'
   | 'skills.status'
-  | 'skills.sync'
   | 'models.image.list'
   | 'models.image.describe'
   | 'models.video.list'
@@ -40,10 +40,10 @@ export interface ParsedDebruteArgs {
 }
 
 const POSITIONAL_COUNTS: Record<DebruteCliCommand, { min: number; max: number }> = {
+  update: { min: 0, max: 0 },
   'runtime.status': { min: 0, max: 0 },
   'runtime.doctor': { min: 0, max: 0 },
   'skills.status': { min: 0, max: 0 },
-  'skills.sync': { min: 0, max: 0 },
   'models.image.list': { min: 0, max: 0 },
   'models.image.describe': { min: 1, max: 1 },
   'models.video.list': { min: 0, max: 0 },
@@ -69,10 +69,10 @@ const POSITIONAL_COUNTS: Record<DebruteCliCommand, { min: number; max: number }>
 };
 
 const ALLOWED_OPTIONS: Record<DebruteCliCommand, Set<string>> = {
+  update: new Set(),
   'runtime.status': new Set(),
   'runtime.doctor': new Set(),
   'skills.status': new Set(),
-  'skills.sync': new Set(['force']),
   'models.image.list': new Set(),
   'models.image.describe': new Set(),
   'models.video.list': new Set(),
@@ -98,7 +98,6 @@ const ALLOWED_OPTIONS: Record<DebruteCliCommand, Set<string>> = {
 };
 
 const BOOLEAN_OPTIONS: Partial<Record<DebruteCliCommand, Set<string>>> = {
-  'skills.sync': new Set(['force']),
   'canvas.reset-layout': new Set(['all']),
   'generate.image-batch': new Set(['overwrite-existing'])
 };

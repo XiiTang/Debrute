@@ -32,8 +32,7 @@ pnpm check
 pnpm test
 pnpm lint:arch
 pnpm build
-pnpm package:cli
-pnpm package:cli:all
+pnpm package:runtime-cli
 pnpm verify
 pnpm pack
 pnpm dist
@@ -54,8 +53,8 @@ One daemon can host multiple live project sessions, and browser tabs or Electron
 
 `pnpm preview` serves the production Web build for smoke testing after `pnpm build`. `pnpm clean` removes generated build, release, and TypeScript build-info files.
 
-`pnpm package:cli` creates the current-platform standalone CLI release asset under `release/debrute-cli/` with bundled Skills and Web workbench assets. `pnpm package:cli:all` creates all supported CLI assets for GitHub Releases.
+`pnpm package:runtime-cli` creates the current-platform managed CLI payload used inside the Desktop runtime product bundle.
 
 `pnpm pack` creates an unpacked desktop app under `apps/desktop/release/`. `pnpm dist` creates distributable Desktop artifacts when run on the matching platform.
 
-Packaged builds and standalone CLI assets are published from the public `XiiTang/Debrute` GitHub repository.
+Packaged Desktop product assets are published from the public `XiiTang/Debrute` GitHub repository.

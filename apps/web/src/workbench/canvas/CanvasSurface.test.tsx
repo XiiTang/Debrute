@@ -1251,6 +1251,9 @@ function workbenchStateFixture(
 }
 
 const actions: WorkbenchActions = {
+  getProductState: async () => productState(),
+  checkProductUpdate: async () => productState(),
+  applyProductUpdate: async () => ({ state: productState() }),
   saveLlmProviderSetting: async () => undefined,
   deleteLlmProviderSetting: async () => undefined,
   setDefaultLlmModelKey: async () => undefined,
@@ -1341,6 +1344,25 @@ const actions: WorkbenchActions = {
   openProject: async () => undefined,
   openTerminalPanel: () => undefined
 };
+
+function productState() {
+  return {
+    productVersion: '0.2.0',
+    platform: 'linux' as const,
+    cli: {
+      status: 'ready' as const,
+      version: '0.2.0',
+      path: '/home/me/.debrute/bin/debrute',
+      skillsVersion: '0.2.0',
+      skillsRoot: '/home/me/.agents/skills'
+    },
+    update: {
+      type: 'idle' as const,
+      currentVersion: '0.2.0',
+      updateAvailable: false as const
+    }
+  };
+}
 
 const emptyIntegrationsSettings: IntegrationSettingsView = {
   integrations: [],

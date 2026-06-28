@@ -60,7 +60,7 @@ Integrations are not required for Debrute startup and are not exposed through th
 
 Skills are standard packages installed under `~/.agents/skills`.
 
-Debrute CLI release payloads include the official `skills/debrute-*` bundle. Skills synchronization is explicit through `debrute skills sync`; Debrute Desktop can invoke that managed CLI sync from Settings, and the Web workbench shows manual instructions only.
+The Desktop product payload includes the official `skills/debrute-*` bundle. Runtime materializes those official Skills from the current product payload during startup, alongside the managed `debrute` CLI.
 
 ## Storage Boundaries
 
@@ -68,7 +68,7 @@ Project metadata and canvas state live under `.debrute/`.
 
 Generated asset metadata, LLM provider settings, generation model settings, LLM provider secrets, and generation model secrets live in Debrute-owned runtime storage.
 
-Renderer code does not read or write project files, generated asset metadata, model secret files, or Skills directories directly. Project and settings operations use the daemon/App Server boundary, while Skills synchronization is owned by the CLI.
+Renderer code does not read or write project files, generated asset metadata, model secret files, or Skills directories directly. Project and settings operations use the daemon/App Server boundary, while official Skills materialization is owned by the runtime.
 
 The CLI and Skills product posture is command-first: Debrute provides commands, structured output, safety guidance, and Skills for external Agents while not being the Agent itself.
 
@@ -78,4 +78,4 @@ The CLI and Skills product posture is command-first: Debrute provides commands, 
 <web_url>/open?path=<encodeURIComponent(absProjectPath)>
 ```
 
-One-shot project, Canvas Map, and generation commands do not require the Workbench daemon.
+Project, Canvas Map, and generation commands are runtime-backed. The CLI starts or reuses the local runtime for those operations so project state, settings, generated asset metadata, managed CLI diagnostics, and official Skills status stay behind the daemon boundary.

@@ -20,9 +20,7 @@ describe('Desktop release asset script', () => {
     ]);
     expect(() => requiredDesktopReleaseAssets('0.2.0', 'darwin', 'universal')).toThrow(/unsupported macos release arch/i);
     expect(requiredDesktopReleaseAssets('0.2.0', 'win32', 'x64')).toEqual([
-      'debrute-desktop-0.2.0-windows-x64.exe',
-      'debrute-desktop-0.2.0-windows-x64.exe.blockmap',
-      'latest.yml'
+      'debrute-desktop-0.2.0-windows-x64.exe'
     ]);
   });
 

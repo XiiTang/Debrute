@@ -100,7 +100,8 @@ async function launchSourceDevRuntime(
   const daemon = spawnDetached(daemonCommand.command, daemonCommand.args, sourceRoot, paths.daemonLogPath, {
     DEBRUTE_DAEMON_PORT: String(daemonPort),
     DEBRUTE_DAEMON_TOKEN_FILE: paths.tokenPath,
-    DEBRUTE_WEB_BASE_URL: webUrl
+    DEBRUTE_WEB_BASE_URL: webUrl,
+    ...sourceDevProductEnv(sourceRoot)
   });
   const webCommand = packageManagerCommand(sourceRoot, [
     '--filter',
@@ -142,6 +143,7 @@ async function launchPackagedRuntime(
   owner: WorkbenchRuntimeOwner
 ): Promise<WorkbenchRuntimeState> {
   const executablePath = packagedExecutablePath();
+  const productConfig = packagedCliProductRuntimeConfig(executablePath);
   const daemonPort = await chooseLoopbackPort(DEFAULT_WORKBENCH_DAEMON_PORT);
   const token = randomUUID();
   await writeRuntimeTokenFile(paths, token);
@@ -152,7 +154,15 @@ async function launchPackagedRuntime(
   ], process.cwd(), paths.daemonLogPath, {
     DEBRUTE_RUNTIME_HOST_DAEMON_PORT: String(daemonPort),
     DEBRUTE_RUNTIME_HOST_TOKEN_FILE: paths.tokenPath,
-    DEBRUTE_RUNTIME_HOST_WEB_DIST_DIR: resolve(dirname(executablePath), 'web'),
+    DEBRUTE_RUNTIME_HOST_WEB_DIST_DIR: productConfig.webDistDir,
+    DEBRUTE_RUNTIME_HOST_PRODUCT_VERSION: productConfig.productVersion,
+    DEBRUTE_RUNTIME_HOST_CLI_PAYLOAD_DIR: productConfig.cliPayloadDir,
+    DEBRUTE_RUNTIME_HOST_SKILLS_PAYLOAD_DIR: productConfig.skillsPayloadDir,
+    DEBRUTE_RUNTIME_HOST_MANAGED_BIN_DIR: productConfig.managedBinDir,
+    DEBRUTE_RUNTIME_HOST_MANAGED_PRODUCT_ROOT: productConfig.managedProductRoot,
+    DEBRUTE_RUNTIME_HOST_PRODUCT_MANIFEST_PATH: productConfig.productManifestPath,
+    DEBRUTE_RUNTIME_HOST_DESKTOP_INSTALL_PATH: productConfig.desktopInstallPath,
+    DEBRUTE_RUNTIME_HOST_REPLACEMENT_HELPER_PATH: productConfig.replacementHelperPath,
     PKG_EXECPATH: ''
   });
   const daemonPid = requirePid(daemon, 'daemon');
@@ -173,6 +183,80 @@ async function launchPackagedRuntime(
     startedAt: now,
     updatedAt: now
   };
+}
+
+interface PackagedCliProductRuntimeConfig {
+  productVersion: string;
+  cliPayloadDir: string;
+  skillsPayloadDir: string;
+  managedBinDir: string;
+  managedProductRoot: string;
+  productManifestPath: string;
+  webDistDir: string;
+  desktopInstallPath: string;
+  replacementHelperPath: string;
+}
+
+function packagedCliProductRuntimeConfig(executablePath: string): PackagedCliProductRuntimeConfig {
+  const cliPayloadDir = dirname(executablePath);
+  const versionRoot = dirname(cliPayloadDir);
+  const managedProductRoot = dirname(versionRoot);
+  const managedHome = dirname(managedProductRoot);
+  const productRuntimePath = resolve(managedProductRoot, 'product-runtime.json');
+  const productRuntime = readProductRuntimeConfig(productRuntimePath);
+  return {
+    productVersion: productRuntime.productVersion,
+    cliPayloadDir,
+    skillsPayloadDir: resolve(versionRoot, 'skills'),
+    managedBinDir: resolve(managedHome, 'bin'),
+    managedProductRoot,
+    productManifestPath: resolve(managedProductRoot, 'product-manifest.json'),
+    webDistDir: productRuntime.webDistDir,
+    desktopInstallPath: productRuntime.desktopInstallPath,
+    replacementHelperPath: productRuntime.replacementHelperPath
+  };
+}
+
+function readProductRuntimeConfig(path: string): {
+  productVersion: string;
+  webDistDir: string;
+  desktopInstallPath: string;
+  replacementHelperPath: string;
+} {
+  const parsed = JSON.parse(readFileSync(path, 'utf8')) as unknown;
+  if (!isRecord(parsed)
+    || typeof parsed.productVersion !== 'string'
+    || typeof parsed.webDistDir !== 'string'
+    || typeof parsed.desktopInstallPath !== 'string'
+    || typeof parsed.replacementHelperPath !== 'string') {
+    throw cliError('runtime_launch_failed', `Invalid Debrute product runtime config: ${path}.`);
+  }
+  return {
+    productVersion: parsed.productVersion,
+    webDistDir: parsed.webDistDir,
+    desktopInstallPath: parsed.desktopInstallPath,
+    replacementHelperPath: parsed.replacementHelperPath
+  };
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null && !Array.isArray(value);
+}
+
+function sourceDevProductEnv(sourceRoot: string): Record<string, string> {
+  return {
+    DEBRUTE_DAEMON_PRODUCT_VERSION: readRootProductVersion(sourceRoot),
+    DEBRUTE_DAEMON_CLI_PATH: resolve(sourceRoot, 'apps/debrute-cli/src/index.ts'),
+    DEBRUTE_DAEMON_SKILLS_PAYLOAD_DIR: resolve(sourceRoot, 'skills')
+  };
+}
+
+function readRootProductVersion(sourceRoot: string): string {
+  const parsed = JSON.parse(readFileSync(resolve(sourceRoot, 'package.json'), 'utf8')) as unknown;
+  if (!isRecord(parsed) || typeof parsed.version !== 'string' || parsed.version.trim() === '') {
+    throw cliError('runtime_launch_failed', `Invalid Debrute root package version: ${resolve(sourceRoot, 'package.json')}.`);
+  }
+  return parsed.version;
 }
 
 async function writeRuntimeTokenFile(paths: WorkbenchRuntimePaths, token: string): Promise<void> {

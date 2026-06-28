@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from 'react';
-import { Bot, Cable, Cpu, Eye, EyeOff, RefreshCw, Save, Search, Settings, Terminal, Trash2, Wrench } from 'lucide-react';
+import { Bot, Cable, Cpu, Eye, EyeOff, RefreshCw, Save, Search, Settings, Trash2, Wrench } from 'lucide-react';
 import type {
   ImageModelSettingRecord,
   LlmProviderSettingRecord,
@@ -7,7 +7,6 @@ import type {
   VideoModelSettingRecord
 } from '@debrute/app-protocol';
 import type { WorkbenchActions, WorkbenchState } from '../../types';
-import { getDebruteShellApi } from '../../api/shellApi';
 import {
   Button,
   Card,
@@ -21,7 +20,6 @@ import {
   Textarea,
   Toolbar
 } from '../ui';
-import { DebruteCliSettingsPage } from './debrute-cli/DebruteCliSettingsPage';
 import { GeneralSettingsPage } from './general/GeneralSettingsPage';
 import { IntegrationsSettingsPage } from './integrations/IntegrationsSettingsPage';
 import { AdobeBridgeSettingsPage } from './adobe-bridge/AdobeBridgeSettingsPage';
@@ -64,8 +62,7 @@ const SETTINGS_NAV_ITEMS = [
   { id: 'llm', labelKey: 'settings.nav.llm', icon: Bot },
   { id: 'models', labelKey: 'settings.nav.models', icon: Cpu },
   { id: 'integrations', labelKey: 'settings.nav.integrations', icon: Wrench },
-  { id: 'adobe-bridge', labelKey: 'settings.nav.adobeBridge', icon: Cable },
-  { id: 'debrute-cli', labelKey: 'settings.nav.debruteCli', icon: Terminal }
+  { id: 'adobe-bridge', labelKey: 'settings.nav.adobeBridge', icon: Cable }
 ] as const;
 
 type SettingsPageId = typeof SETTINGS_NAV_ITEMS[number]['id'];
@@ -95,7 +92,7 @@ export function SettingsPanel({ state, actions }: { state: WorkbenchState; actio
       <div className="settings-page">
         {activePage === 'general' ? (
           <GeneralSettingsPage
-            shell={getDebruteShellApi()}
+            actions={actions}
             resolvedTheme={state.resolvedTheme}
             onPreferencesChange={actions.saveWorkbenchPreferences}
             {...(state.workbenchPreferences ? { preferences: state.workbenchPreferences } : {})}
@@ -111,8 +108,6 @@ export function SettingsPanel({ state, actions }: { state: WorkbenchState; actio
           <IntegrationsSettingsPage state={state} actions={actions} />
         ) : activePage === 'adobe-bridge' ? (
           <AdobeBridgeSettingsPage state={state} actions={actions} />
-        ) : activePage === 'debrute-cli' ? (
-          <DebruteCliSettingsPage shell={getDebruteShellApi()} />
         ) : null}
       </div>
     </div>

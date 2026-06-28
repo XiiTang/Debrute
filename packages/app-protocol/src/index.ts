@@ -571,7 +571,7 @@ export interface SkillRecord {
 }
 
 export interface DebruteSkillsDiagnostic {
-  source?: SkillSourceKind | 'debrute-sync';
+  source?: SkillSourceKind | 'debrute-materialize';
   root?: string;
   path?: string;
   code: string;
@@ -579,154 +579,53 @@ export interface DebruteSkillsDiagnostic {
   message: string;
 }
 
-export interface DebruteSkillsState {
-  debruteVersion: string;
-  bundledSkills: string[];
-  updatedSkills: string[];
-  addedBundledSkills: string[];
-  skippedDeletedSkills: string[];
-  diagnostics: DebruteSkillsDiagnostic[];
-  updatedAt: string;
-}
-
-export interface SkillsStatusSnapshot {
+export interface OfficialDebruteSkillsStatusSnapshot {
   sources: Array<{ source: SkillSourceKind; root: string }>;
   skills: SkillRecord[];
   diagnostics: DebruteSkillsDiagnostic[];
-  statePath: string;
-  state?: DebruteSkillsState;
   currentDebruteVersion: string;
   sharedSkillsRoot: string;
-  bundledSkillsRoot?: string;
-  bundledRootAvailable: boolean;
-  bundledSkills: string[];
-  missingBundledSkills: string[];
-  missingBundledSkillCount: number;
-  skippedDeletedSkills: string[];
+  payloadSkillsRoot?: string;
+  payloadRootAvailable: boolean;
+  payloadSkills: string[];
 }
 
-export interface SkillsSyncInput {
-  force: boolean;
+export interface OfficialDebruteSkillsMaterializeSnapshot extends OfficialDebruteSkillsStatusSnapshot {
+  materializedSkills: SkillRecord[];
 }
 
-export interface SkillsSyncSnapshot extends SkillsStatusSnapshot {
-  force: boolean;
-  updatedSkills: SkillRecord[];
-  addedBundledSkills: SkillRecord[];
-  skippedDeletedSkills: string[];
-}
-
-export type DebruteCliSkillsStatus =
-  | { kind: 'in_sync'; debruteVersion: string }
-  | { kind: 'out_of_sync'; cliVersion: string; stateDebruteVersion: string | null }
-  | { kind: 'partially_removed'; skippedDeletedSkills: string[] }
-  | { kind: 'error'; code: string; message: string };
-
-export type DebruteCliStatus =
-  | { kind: 'not_installed'; desktopVersion: string; manualCommand: string }
+export type ManagedCliDiagnostic =
   | {
-      kind: 'installed';
-      desktopVersion: string;
-      cliVersion: string;
-      managedPath: string;
-      resolvedPath: string | null;
-      onPath: boolean;
-      skills: DebruteCliSkillsStatus;
+      status: 'ready';
+      version: string;
+      path: string;
+      skillsVersion: string;
+      skillsRoot: string;
     }
   | {
-      kind: 'update_available';
-      desktopVersion: string;
-      cliVersion: string;
-      managedPath: string;
-      skills: DebruteCliSkillsStatus;
-    }
-  | {
-      kind: 'external_newer';
-      desktopVersion: string;
-      cliVersion: string;
-      managedPath: string;
-      skills: DebruteCliSkillsStatus;
-    }
-  | {
-      kind: 'installed_but_not_on_path';
-      desktopVersion: string;
-      cliVersion: string;
-      managedPath: string;
-      repairCommand: string;
-      skills: DebruteCliSkillsStatus;
-    }
-  | { kind: 'error'; desktopVersion: string; code: string; message: string; manualCommand: string };
+      status: 'error';
+      version: string;
+      path?: string;
+      message: string;
+      logPath?: string;
+    };
 
-export interface DebruteCliInstallResult {
-  ok: boolean;
-  status: DebruteCliStatus;
-}
+export type ProductUpdateOperation = 'check' | 'apply';
 
-export interface DebruteCliSkillsSyncResult {
-  ok: boolean;
-  status: DebruteCliSkillsStatus;
-}
-
-export interface DebruteCliPathRepairResult {
-  ok: boolean;
-  status: DebruteCliStatus;
-}
-
-export interface DebruteCliManualCommand {
-  platform: 'macos' | 'linux' | 'windows';
-  command: string;
-}
-
-export type DesktopAppUpdateDisabledReason =
-  | 'development'
-  | 'browser'
-  | 'unsupported-platform';
-
-export type DesktopAppUpdateInstallMode = 'automatic' | 'manual-download';
-export type DesktopAppUpdateErrorOperation = 'check' | 'download' | 'install';
-
-export type DesktopAppUpdateState =
-  | {
-      type: 'disabled';
-      currentVersion: string;
-      platform?: NodeJS.Platform;
-      reason: DesktopAppUpdateDisabledReason;
-    }
+export type ProductUpdateState =
   | {
       type: 'idle';
       currentVersion: string;
-      platform: NodeJS.Platform;
       lastCheckedAt?: string;
-      notAvailable?: boolean;
-      lastError?: string;
+      updateAvailable: false;
     }
   | {
       type: 'checking';
       currentVersion: string;
-      platform: NodeJS.Platform;
-      explicit: boolean;
     }
   | {
       type: 'available';
       currentVersion: string;
-      platform: NodeJS.Platform;
-      updateVersion: string;
-      releaseName?: string;
-      releaseDate?: string;
-      releaseUrl?: string;
-      installMode: DesktopAppUpdateInstallMode;
-    }
-  | {
-      type: 'downloading';
-      currentVersion: string;
-      platform: NodeJS.Platform;
-      updateVersion: string;
-      percent: number;
-    }
-  | {
-      type: 'downloaded';
-      currentVersion: string;
-      platform: NodeJS.Platform;
       updateVersion: string;
       releaseName?: string;
       releaseDate?: string;
@@ -734,19 +633,27 @@ export type DesktopAppUpdateState =
   | {
       type: 'installing';
       currentVersion: string;
-      platform: NodeJS.Platform;
       updateVersion: string;
     }
   | {
       type: 'error';
       currentVersion: string;
-      platform: NodeJS.Platform;
-      operation: DesktopAppUpdateErrorOperation;
+      operation: ProductUpdateOperation;
       message: string;
-      retryable: boolean;
       updateVersion?: string;
-      installMode?: DesktopAppUpdateInstallMode;
+      logPath?: string;
     };
+
+export interface DebruteProductState {
+  productVersion: string;
+  platform: NodeJS.Platform;
+  cli: ManagedCliDiagnostic;
+  update: ProductUpdateState;
+}
+
+export interface ProductUpdateApplyResult {
+  state: DebruteProductState;
+}
 
 export interface GeneratedAssetRecord {
   recordId: string;
@@ -1143,6 +1050,9 @@ export interface WorkbenchApiClient {
   openProjectFromPicker(): Promise<WorkbenchProjectPickerOpenResult>;
   getWorkbenchTitleBarState(input: { host: WorkbenchHostKind; projectId?: string | undefined }): Promise<WorkbenchTitleBarState>;
   clearRecentProjectRoots(): Promise<{ ok: true }>;
+  getProductState(): Promise<DebruteProductState>;
+  checkProductUpdate(): Promise<DebruteProductState>;
+  applyProductUpdate(): Promise<ProductUpdateApplyResult>;
   workbenchPreferencesGet(): Promise<WorkbenchPreferencesView>;
   workbenchPreferencesSave(input: SaveWorkbenchPreferencesInput): Promise<WorkbenchPreferencesView>;
   getSnapshot(): Promise<WorkbenchProjectRefreshResult>;

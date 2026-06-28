@@ -1,7 +1,7 @@
 #!/usr/bin/env tsx
 import { spawn, spawnSync, type ChildProcess } from 'node:child_process';
 import { randomUUID } from 'node:crypto';
-import { rmSync } from 'node:fs';
+import { readFileSync, rmSync } from 'node:fs';
 import { mkdir, writeFile } from 'node:fs/promises';
 import { createRequire } from 'node:module';
 import { dirname, join, resolve } from 'node:path';
@@ -87,7 +87,8 @@ async function launchDesktopDevRuntime(): Promise<WorkbenchRuntimeState> {
   ], {
     DEBRUTE_DAEMON_PORT: String(daemonPort),
     DEBRUTE_DAEMON_TOKEN_FILE: paths.tokenPath,
-    DEBRUTE_WEB_BASE_URL: webUrl
+    DEBRUTE_WEB_BASE_URL: webUrl,
+    ...sourceDevProductEnv()
   });
   const web = spawnPnpm([
     '--filter',
@@ -231,4 +232,24 @@ async function stopChild(child: ChildProcess): Promise<void> {
 
 function electronExecutable(): string {
   return desktopRequire('electron') as string;
+}
+
+function sourceDevProductEnv(): Record<string, string> {
+  return {
+    DEBRUTE_DAEMON_PRODUCT_VERSION: readRootProductVersion(),
+    DEBRUTE_DAEMON_CLI_PATH: join(workspaceRoot, 'apps/debrute-cli/src/index.ts'),
+    DEBRUTE_DAEMON_SKILLS_PAYLOAD_DIR: join(workspaceRoot, 'skills')
+  };
+}
+
+function readRootProductVersion(): string {
+  const parsed = JSON.parse(readFileSync(join(workspaceRoot, 'package.json'), 'utf8')) as unknown;
+  if (!isRecord(parsed) || typeof parsed.version !== 'string' || parsed.version.trim() === '') {
+    throw new Error(`Invalid Debrute root package version: ${join(workspaceRoot, 'package.json')}.`);
+  }
+  return parsed.version;
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null && !Array.isArray(value);
 }

@@ -37,28 +37,6 @@ jobs:
       - run: pnpm test
       - run: pnpm lint:arch
 
-  build-cli:
-    needs: preflight
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-      - uses: pnpm/action-setup@v4
-        with:
-          version: 11.2.2
-          run_install: false
-      - uses: actions/setup-node@v4
-        with:
-          node-version: 24
-          cache: pnpm
-      - run: pnpm install --frozen-lockfile
-      - run: pnpm package:cli:all
-      - uses: actions/upload-artifact@v4
-        with:
-          name: debrute-cli-release-assets
-          path: |
-            release/debrute-cli/debrute-cli-*.tar.gz
-            release/debrute-cli/debrute-cli-*.zip
-
   build-desktop:
     needs: preflight
     strategy:
@@ -192,12 +170,12 @@ jobs:
         with:
           name: debrute-desktop-${{ matrix.publicPlatform }}-${{ matrix.arch }}
           path: |
-            apps/desktop/release/debrute-desktop-*
-            apps/desktop/release/latest.yml
+            apps/desktop/release/debrute-desktop-*-${{ matrix.publicPlatform }}-${{ matrix.arch }}.dmg
+            apps/desktop/release/debrute-desktop-*-${{ matrix.publicPlatform }}-${{ matrix.arch }}.exe
+            apps/desktop/release/debrute-desktop-*-${{ matrix.publicPlatform }}-${{ matrix.arch }}.AppImage
 
   publish-release:
     needs:
-      - build-cli
       - build-desktop
     runs-on: ubuntu-latest
     steps:
@@ -229,15 +207,7 @@ jobs:
           - Windows: NSIS installer for x64.
           - Linux: AppImage for x64.
 
-          Debrute CLI is managed from Debrute Desktop Settings under Debrute CLI. Manual CLI installs should download the matching debrute-cli asset, verify it with debrute_SHA256SUMS, then run:
-
-          debrute --version
-          debrute skills sync
-
-          Skills commands:
-          - debrute skills status
-          - debrute skills sync
-          - debrute skills sync --force
+          Install Debrute by downloading the desktop installer for your platform. The runtime materializes the matching debrute CLI and official Skills on first launch, and product updates keep Desktop, runtime, CLI, and Skills on the same version.
           EOF
       - uses: softprops/action-gh-release@v2
         with:

@@ -15,9 +15,12 @@ import { renderAgentRecord, type DebruteAgentResult } from './output/renderAgent
 import { runRuntimeCommand } from './commands/runtimeCommands.js';
 import { runRuntimeBackedCliCommand } from './runtime/cliRuntimeAccess.js';
 import { runtimePolicyForCommand } from './runtime/cliRuntimePolicy.js';
-import { createCliSkillsRuntime, resolveCliDebruteVersion } from './runtime/createCliSkillsRuntime.js';
+import { resolveCliDebruteVersion } from './runtime/cliProductVersion.js';
 import { configurePackagedNodeModules } from './runtime/packagedNodeModules.js';
-import { INTERNAL_WORKBENCH_RUNTIME_CHILD_COMMAND } from './workbench/workbenchRuntimeChildEntrypoint.js';
+import {
+  INTERNAL_PRODUCT_REPLACEMENT_HELPER_COMMAND,
+  INTERNAL_WORKBENCH_RUNTIME_CHILD_COMMAND
+} from './workbench/workbenchRuntimeChildEntrypoint.js';
 
 export async function runCli(argv: string[], output: (text: string) => void = console.log): Promise<void> {
   process.exitCode = undefined;
@@ -49,13 +52,7 @@ export async function runCli(argv: string[], output: (text: string) => void = co
 
 async function runParsedCli(args: ParsedDebruteArgs, options: { output: (text: string) => void }): Promise<DebruteAgentResult> {
   if (runtimePolicyForCommand(args.command) === 'no-runtime') {
-    if (args.command === 'commands' || args.command === 'help') {
-      return runRuntimeCommand(args);
-    }
-    const skillsRuntime = await createCliSkillsRuntime();
-    return runRuntimeCommand(args, {
-      skillsService: skillsRuntime.skillsService
-    });
+    return runRuntimeCommand(args);
   }
   if (args.command === 'workbench.start') {
     return runWorkbenchCommand(args);
@@ -95,6 +92,13 @@ if (isCliEntrypoint()) {
   if (argv[0] === INTERNAL_WORKBENCH_RUNTIME_CHILD_COMMAND) {
     void import('./workbench/internalWorkbenchRuntimeChild.js')
       .then(({ runInternalWorkbenchRuntimeChild }) => runInternalWorkbenchRuntimeChild())
+      .catch((error) => {
+        console.error(messageFromUnknown(error));
+        process.exit(5);
+      });
+  } else if (argv[0] === INTERNAL_PRODUCT_REPLACEMENT_HELPER_COMMAND) {
+    void import('./workbench/internalProductReplacementHelper.js')
+      .then(({ runInternalProductReplacementHelper }) => runInternalProductReplacementHelper(argv[1], argv[2]))
       .catch((error) => {
         console.error(messageFromUnknown(error));
         process.exit(5);

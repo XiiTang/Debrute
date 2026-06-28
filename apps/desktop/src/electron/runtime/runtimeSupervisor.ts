@@ -12,10 +12,12 @@ import {
   type WorkbenchRuntimeState
 } from '@debrute/workbench-runtime';
 import { launchPackagedDesktopRuntime } from './desktopRuntimeLauncher.js';
+import type { DesktopProductRuntimeConfig } from './desktopProductRuntimeConfig.js';
 import { desktopStatusFromHealth, type DesktopRuntimeSnapshot } from './runtimeStatus.js';
 
 export interface RuntimeSupervisorServices {
   owner: WorkbenchRuntimeOwner;
+  productRuntimeConfig?: DesktopProductRuntimeConfig;
   ensureRuntime?: typeof ensureRegisteredWorkbenchRuntime;
   readState?: typeof readWorkbenchRuntimeState;
   deleteState?: typeof deleteWorkbenchRuntimeState;
@@ -42,7 +44,12 @@ export class RuntimeSupervisor extends EventEmitter {
     this.readState = input.readState ?? readWorkbenchRuntimeState;
     this.deleteState = input.deleteState ?? deleteWorkbenchRuntimeState;
     this.terminateOwned = input.terminateOwned ?? terminateOwnedWorkbenchRuntime;
-    this.launchRuntime = input.launchRuntime ?? ((paths) => launchPackagedDesktopRuntime(paths, input.owner));
+    this.launchRuntime = input.launchRuntime ?? ((paths) => {
+      if (!input.productRuntimeConfig) {
+        throw new Error('Desktop product runtime config is required to launch packaged Debrute runtime.');
+      }
+      return launchPackagedDesktopRuntime(paths, input.owner, input.productRuntimeConfig);
+    });
     this.checkHealth = input.checkHealth ?? ((state) => checkWorkbenchRuntimeHealth(state));
   }
 

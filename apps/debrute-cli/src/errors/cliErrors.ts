@@ -30,6 +30,7 @@ export type DebruteCliErrorCode =
   | 'runtime_state_unreadable'
   | 'runtime_state_write_failed'
   | 'runtime_lock_timeout'
+  | 'product_update_failed'
   | 'skills_bundle_unavailable'
   | 'skills_bundle_invalid'
   | 'skills_shared_root_unreadable'
@@ -84,6 +85,7 @@ export function exitCodeForCliError(error: unknown): DebruteCliExitCode {
     || error.code === 'runtime_state_unreadable'
     || error.code === 'runtime_state_write_failed'
     || error.code === 'runtime_lock_timeout'
+    || error.code === 'product_update_failed'
     || error.code === 'model_not_configured'
     || error.code === 'skills_bundle_unavailable'
     || error.code === 'skills_shared_root_unreadable'
@@ -190,6 +192,7 @@ function isDebruteCliErrorCode(code: string): code is DebruteCliErrorCode {
     'runtime_state_unreadable',
     'runtime_state_write_failed',
     'runtime_lock_timeout',
+    'product_update_failed',
     'skills_bundle_unavailable',
     'skills_bundle_invalid',
     'skills_shared_root_unreadable',

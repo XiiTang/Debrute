@@ -11,18 +11,12 @@ import {
 import type {
   DaemonCliCommandRequest,
   DaemonCliRunEvent,
-  DebruteAgentCommandResult,
-  SkillsStatusSnapshot
+  DebruteAgentCommandResult
 } from '@debrute/app-protocol';
 import type { ParsedDebruteArgs } from '../parser/parseDebruteArgs.js';
 import { renderAgentProgressRecord } from '../output/renderAgentRecord.js';
 import { ensureWorkbenchRuntime } from '../workbench/workbenchRuntimeLauncher.js';
 import { resolveCliRuntimeOwner } from '../workbench/cliRuntimeOwner.js';
-import { createCliSkillsRuntime } from './createCliSkillsRuntime.js';
-import {
-  addCliSkillsToRuntimeDoctor,
-  addCliSkillsToRuntimeStatus
-} from './cliSkillsRuntimeSummary.js';
 import { runtimePolicyForCommand } from './cliRuntimePolicy.js';
 
 type RuntimeFetch = (url: string, init?: RequestInit) => Promise<Response>;
@@ -34,7 +28,6 @@ export interface CliRuntimeAccessServices {
   ensureRuntime?: EnsureRuntimeForCli;
   readRuntimeState?: typeof readWorkbenchRuntimeState;
   checkHealth?: (state: WorkbenchRuntimeState) => Promise<WorkbenchRuntimeHealthStatus>;
-  skillsStatus?: () => Promise<SkillsStatusSnapshot>;
   fetch?: RuntimeFetch;
   owner?: WorkbenchRuntimeOwner;
   output?: (text: string) => void;
@@ -73,14 +66,14 @@ async function observeRuntimeCommand(
   try {
     state = await (services.readRuntimeState ?? readWorkbenchRuntimeState)(statePath);
   } catch (error) {
-    return addCliSkillsToObserveResult(args.command, unreadableRuntimeObserveResult(args.command, error), services);
+    return unreadableRuntimeObserveResult(args.command, error);
   }
   if (!state) {
-    return addCliSkillsToObserveResult(args.command, stoppedRuntimeObserveResult(args.command), services);
+    return stoppedRuntimeObserveResult(args.command);
   }
   const health = await (services.checkHealth ?? checkWorkbenchRuntimeHealth)(state);
   if (health !== 'healthy' && health !== 'web-unavailable') {
-    return addCliSkillsToObserveResult(args.command, {
+    return {
       status: 'ok',
       command: args.command,
       fields: {
@@ -89,10 +82,9 @@ async function observeRuntimeCommand(
         owner_kind: state.owner.kind,
         owner_id: state.owner.ownerId
       }
-    }, services);
+    };
   }
-  const result = await postDaemonCliRun(state, args, services.fetch ?? fetch);
-  return addCliSkillsToObserveResult(args.command, result, services);
+  return await postDaemonCliRun(state, args, services.fetch ?? fetch);
 }
 
 function unreadableRuntimeObserveResult(command: string, error: unknown): DebruteAgentCommandResult {
@@ -220,31 +212,6 @@ function commandRequest(args: ParsedDebruteArgs): DaemonCliCommandRequest {
     options: args.options,
     ...(args.projectRoot ? { projectRoot: args.projectRoot } : {})
   };
-}
-
-async function addCliSkillsToObserveResult(
-  command: string,
-  result: DebruteAgentCommandResult,
-  services: CliRuntimeAccessServices
-): Promise<DebruteAgentCommandResult> {
-  if (result.status !== 'ok') {
-    return result;
-  }
-  if (command !== 'runtime.status' && command !== 'runtime.doctor') {
-    return result;
-  }
-  const snapshot = await readCliSkillsStatus(services);
-  return command === 'runtime.status'
-    ? addCliSkillsToRuntimeStatus(result, snapshot)
-    : addCliSkillsToRuntimeDoctor(result, snapshot);
-}
-
-async function readCliSkillsStatus(services: CliRuntimeAccessServices): Promise<SkillsStatusSnapshot> {
-  if (services.skillsStatus) {
-    return services.skillsStatus();
-  }
-  const skillsRuntime = await createCliSkillsRuntime();
-  return skillsRuntime.skillsService.status();
 }
 
 function messageFromUnknown(error: unknown): string {

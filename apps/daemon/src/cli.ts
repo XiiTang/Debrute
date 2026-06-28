@@ -1,15 +1,19 @@
 #!/usr/bin/env node
 import { readFile } from 'node:fs/promises';
 import { createDebruteDaemonHttpServer } from './http/createDebruteDaemonHttpServer.js';
+import { createSourceDevProductServicesFromEnv } from './product/SourceDevProductServices.js';
 
 const port = numberArg('--port') ?? numberEnv('DEBRUTE_DAEMON_PORT') ?? 0;
 const token = await readToken();
 const webBaseUrl = stringArg('--web-base-url') ?? process.env.DEBRUTE_WEB_BASE_URL;
+const productServices = createSourceDevProductServicesFromEnv(process.env);
+await productServices.managedCli.ensureCurrent();
 
 const daemon = createDebruteDaemonHttpServer({
   port,
   ...(token ? { token } : {}),
-  ...(webBaseUrl ? { webBaseUrl } : {})
+  ...(webBaseUrl ? { webBaseUrl } : {}),
+  productServices
 });
 const runtime = await daemon.listen();
 process.stdout.write(`${JSON.stringify(runtime)}\n`);

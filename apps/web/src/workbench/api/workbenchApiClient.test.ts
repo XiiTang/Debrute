@@ -77,6 +77,54 @@ describe('workbench API client', () => {
     expect(responses).toEqual(['http://127.0.0.1:17321/api/projects/open']);
   });
 
+  it('uses runtime product HTTP endpoints with the daemon token', async () => {
+    const requests: Array<{ url: string; init: RequestInit }> = [];
+    (globalThis as { window?: unknown }).window = {
+      location: { origin: 'http://127.0.0.1:17321', search: '' },
+      localStorage: { getItem: () => undefined, setItem: () => undefined },
+      sessionStorage: { getItem: () => undefined, setItem: () => undefined },
+      history: { state: { debruteDaemonToken: 'secret' }, replaceState: vi.fn() }
+    };
+    const state = {
+      productVersion: '0.2.0',
+      platform: 'darwin',
+      cli: {
+        status: 'ready',
+        version: '0.2.0',
+        path: '/Users/me/.debrute/bin/debrute',
+        skillsVersion: '0.2.0',
+        skillsRoot: '/Users/me/.agents/skills'
+      },
+      update: {
+        type: 'idle',
+        currentVersion: '0.2.0',
+        updateAvailable: false
+      }
+    };
+    vi.stubGlobal('fetch', async (url: string, init: RequestInit) => {
+      requests.push({ url, init });
+      const body = url.endsWith('/api/runtime/product/update/apply') ? { state } : state;
+      return new Response(JSON.stringify(body), {
+        status: 200,
+        headers: { 'content-type': 'application/json' }
+      });
+    });
+
+    const client = createWorkbenchApiClient();
+    await expect(client.getProductState()).resolves.toMatchObject({ productVersion: '0.2.0' });
+    await expect(client.checkProductUpdate()).resolves.toMatchObject({ productVersion: '0.2.0' });
+    await expect(client.applyProductUpdate()).resolves.toMatchObject({ state: { productVersion: '0.2.0' } });
+
+    expect(requests.map((request) => [request.init.method, request.url])).toEqual([
+      ['GET', 'http://127.0.0.1:17321/api/runtime/product'],
+      ['POST', 'http://127.0.0.1:17321/api/runtime/product/update/check'],
+      ['POST', 'http://127.0.0.1:17321/api/runtime/product/update/apply']
+    ]);
+    expect(requests.every((request) => (
+      (request.init.headers as Record<string, string>)['x-debrute-daemon-token'] === 'secret'
+    ))).toBe(true);
+  });
+
   it('keeps URL daemon tokens in memory instead of persisting them in browser storage', async () => {
     const setItem = vi.fn();
     const replaceState = vi.fn();

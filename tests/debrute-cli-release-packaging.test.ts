@@ -4,11 +4,9 @@ import { join } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { describe, expect, it } from 'vitest';
 import {
-  debruteCliPayloadEntries,
-  debruteCliArchiveName,
-  debruteCliPkgFlags,
-  debruteCliReleaseTargets,
-  checksumManifestName
+  managedCliRuntimePayloadEntries,
+  managedCliPkgFlags,
+  managedCliRuntimeTargets
 } from '../scripts/package-debrute-cli.mjs';
 import { nodePtyRuntimePayloadEntries } from '../scripts/node-pty-runtime-payload.mjs';
 import {
@@ -19,26 +17,26 @@ import { resolveNodeModulePackageRoot } from '../scripts/sharp-runtime-payload.m
 import photoshopCepViteConfig from '../apps/photoshop-cep-plugin/vite.config';
 import photoshopUxpViteConfig from '../apps/photoshop-uxp-plugin/vite.config';
 
-describe('Debrute CLI release packaging', () => {
-  it('uses the public release asset naming contract', () => {
-    expect(debruteCliReleaseTargets.map((target) => debruteCliArchiveName('0.2.0', target))).toEqual([
-      'debrute-cli-0.2.0-macos-arm64.tar.gz',
-      'debrute-cli-0.2.0-macos-x64.tar.gz',
-      'debrute-cli-0.2.0-linux-arm64.tar.gz',
-      'debrute-cli-0.2.0-linux-x64.tar.gz',
-      'debrute-cli-0.2.0-windows-arm64.zip',
-      'debrute-cli-0.2.0-windows-x64.zip'
+describe('Debrute managed CLI runtime packaging', () => {
+  it('does not define public standalone CLI release archives', () => {
+    const packagingScript = readFileSync(join(process.cwd(), 'scripts/package-debrute-cli.mjs'), 'utf8');
+
+    expect(packagingScript).not.toContain('release/debrute-cli');
+    expect(packagingScript).not.toContain('tar -czf');
+    expect(packagingScript).not.toContain('AdmZip');
+    expect(expectedReleaseAssets('0.2.0')).toEqual([
+      'debrute-desktop-0.2.0-macos-arm64.dmg',
+      'debrute-desktop-0.2.0-macos-x64.dmg',
+      'debrute-desktop-0.2.0-windows-x64.exe',
+      'debrute-desktop-0.2.0-linux-x64.AppImage',
+      'debrute_SHA256SUMS'
     ]);
-    expect(checksumManifestName).toBe('debrute_SHA256SUMS');
   });
 
-  it('packages CLI releases without target-architecture bytecode execution', () => {
-    expect(debruteCliPkgFlags).toContain('--public');
-    expect(debruteCliPkgFlags).toContain('--no-bytecode');
-  });
-
-  it('embeds Node.js 24 in every CLI package target', () => {
-    expect(debruteCliReleaseTargets.map((target) => target.pkgTarget)).toEqual([
+  it('packages managed CLI runtime targets without target-architecture bytecode execution', () => {
+    expect(managedCliPkgFlags).toContain('--public');
+    expect(managedCliPkgFlags).toContain('--no-bytecode');
+    expect(managedCliRuntimeTargets.map((target) => target.pkgTarget)).toEqual([
       'node24-macos-arm64',
       'node24-macos-x64',
       'node24-linux-arm64',
@@ -49,22 +47,8 @@ describe('Debrute CLI release packaging', () => {
 
     const packagingScript = readFileSync(join(process.cwd(), 'scripts/package-debrute-cli.mjs'), 'utf8');
     expect(packagingScript).toContain("target: 'node24'");
-    expect(packagingScript).not.toContain('node22');
-  });
-
-  it('builds workspace references before packaging web assets', () => {
-    const packagingScript = readFileSync(join(process.cwd(), 'scripts/package-debrute-cli.mjs'), 'utf8');
-    const workspaceBuild = "['check']";
-    const webBuild = "['--filter', '@debrute/web', 'build']";
-
-    expect(packagingScript).toContain(workspaceBuild);
-    expect(packagingScript.indexOf(workspaceBuild)).toBeLessThan(packagingScript.indexOf(webBuild));
-  });
-
-  it('keeps native runtime packages external to the CLI bundle', () => {
-    const packagingScript = readFileSync(join(process.cwd(), 'scripts/package-debrute-cli.mjs'), 'utf8');
-
     expect(packagingScript).toContain("external: ['node-pty', 'sharp']");
+    expect(packagingScript).not.toContain('node22');
   });
 
   it('resolves payload packages from pnpm hoisted node_modules', () => {
@@ -78,23 +62,9 @@ describe('Debrute CLI release packaging', () => {
     }
   });
 
-  it('defines the full GitHub Release asset contract', () => {
+  it('defines the desktop GitHub Release asset contract', () => {
     expect(desktopReleaseAssetName('0.2.0', 'macos', 'arm64', 'dmg')).toBe('debrute-desktop-0.2.0-macos-arm64.dmg');
-    expect(expectedReleaseAssets('0.2.0')).toEqual([
-      'debrute-desktop-0.2.0-macos-arm64.dmg',
-      'debrute-desktop-0.2.0-macos-x64.dmg',
-      'debrute-desktop-0.2.0-windows-x64.exe',
-      'debrute-desktop-0.2.0-windows-x64.exe.blockmap',
-      'debrute-desktop-0.2.0-linux-x64.AppImage',
-      'latest.yml',
-      'debrute-cli-0.2.0-macos-arm64.tar.gz',
-      'debrute-cli-0.2.0-macos-x64.tar.gz',
-      'debrute-cli-0.2.0-linux-arm64.tar.gz',
-      'debrute-cli-0.2.0-linux-x64.tar.gz',
-      'debrute-cli-0.2.0-windows-arm64.zip',
-      'debrute-cli-0.2.0-windows-x64.zip',
-      'debrute_SHA256SUMS'
-    ]);
+    expect(expectedReleaseAssets('0.2.0')).not.toContain('debrute-cli-0.2.0-macos-arm64.tar.gz');
   });
 
   it('builds Photoshop plugin packages with relative panel asset URLs', () => {
@@ -102,7 +72,7 @@ describe('Debrute CLI release packaging', () => {
     expect((photoshopCepViteConfig as { base?: string }).base).toBe('./');
   });
 
-  it('includes skills and web dist payload entries', () => {
+  it('includes native runtime payload entries without duplicating desktop web dist', () => {
     const root = createRootWithCliRuntimePackages([
       'sharp',
       '@img/colour',
@@ -112,9 +82,7 @@ describe('Debrute CLI release packaging', () => {
       '@img/sharp-libvips-darwin-arm64'
     ]);
     try {
-      expect(debruteCliPayloadEntries(root, debruteCliReleaseTargets[0])).toEqual([
-        { from: join(root, 'skills'), to: 'skills', recursive: true, dereference: false },
-        { from: join(root, 'apps/web/dist'), to: 'web', recursive: true, dereference: false },
+      expect(managedCliRuntimePayloadEntries(root, managedCliRuntimeTargets[0])).toEqual([
         { from: join(root, 'packages/capability-runtime/src/imageModels/officialDocs/snapshots'), to: 'official-docs/imageModels/snapshots', recursive: true, dereference: false },
         { from: join(root, 'packages/capability-runtime/src/videoModels/officialDocs/snapshots'), to: 'official-docs/videoModels/snapshots', recursive: true, dereference: false },
         { from: join(root, 'node_modules/sharp'), to: 'node_modules/sharp', recursive: true, dereference: true, excludeNestedNodeModules: true },
@@ -141,6 +109,8 @@ describe('Debrute CLI release packaging', () => {
           executableRelativePath: 'spawn-helper'
         }
       ]);
+      expect(managedCliRuntimePayloadEntries(root, managedCliRuntimeTargets[0]).map((entry) => entry.to)).not.toContain('skills');
+      expect(managedCliRuntimePayloadEntries(root, managedCliRuntimeTargets[0]).map((entry) => entry.to)).not.toContain('web');
     } finally {
       rmSync(root, { recursive: true, force: true });
     }
@@ -156,7 +126,7 @@ describe('Debrute CLI release packaging', () => {
       '@img/sharp-libvips-darwin-arm64'
     ]);
     try {
-      const entries = debruteCliPayloadEntries(root, debruteCliReleaseTargets[0]);
+      const entries = managedCliRuntimePayloadEntries(root, managedCliRuntimeTargets[0]);
       const libEntry = entries.find((entry) => entry.to === 'node_modules/node-pty/lib');
       const prebuildEntry = entries.find((entry) => entry.to === 'node_modules/node-pty/prebuilds/darwin-arm64');
 
@@ -185,7 +155,7 @@ describe('Debrute CLI release packaging', () => {
     writeFileSync(join(nodePtyRoot, 'lib/index.js'), '');
     writeFileSync(join(nodePtyRoot, 'build/Release/pty.node'), '');
     try {
-      const linuxX64Target = debruteCliReleaseTargets.find((target) => target.id === 'linux-x64');
+      const linuxX64Target = managedCliRuntimeTargets.find((target) => target.id === 'linux-x64');
       expect(linuxX64Target).toBeDefined();
       const entries = nodePtyRuntimePayloadEntries(root, linuxX64Target!);
 
@@ -197,7 +167,7 @@ describe('Debrute CLI release packaging', () => {
   });
 
   it('uses the actual sharp Windows native package layout', () => {
-    const windowsX64Target = debruteCliReleaseTargets.find((target) => target.id === 'windows-x64');
+    const windowsX64Target = managedCliRuntimeTargets.find((target) => target.id === 'windows-x64');
     expect(windowsX64Target).toBeDefined();
     const root = createRootWithCliRuntimePackages([
       'sharp',
@@ -207,25 +177,12 @@ describe('Debrute CLI release packaging', () => {
       '@img/sharp-win32-x64'
     ]);
     try {
-      const entries = debruteCliPayloadEntries(root, windowsX64Target!);
+      const entries = managedCliRuntimePayloadEntries(root, windowsX64Target!);
       expect(entries.map((entry) => entry.to)).toContain('node_modules/@img/sharp-win32-x64');
       expect(entries.map((entry) => entry.to)).not.toContain('node_modules/@img/sharp-libvips-win32-x64');
     } finally {
       rmSync(root, { recursive: true, force: true });
     }
-  });
-
-  it('keeps Desktop packages free of CLI binaries and Skills bundles', () => {
-    const packageJson = JSON.parse(readFileSync(join(process.cwd(), 'apps/desktop/package.json'), 'utf8'));
-    const extraResources = JSON.stringify(packageJson.build.extraResources ?? []);
-    expect(extraResources).not.toContain('debrute-cli');
-    expect(extraResources).not.toContain('skills');
-    expect(packageJson.build.publish).toEqual([{
-      provider: 'github',
-      owner: 'XiiTang',
-      repo: 'Debrute',
-      releaseType: 'release'
-    }]);
   });
 
   it('copies sharp runtime dependencies into Desktop app resources', async () => {

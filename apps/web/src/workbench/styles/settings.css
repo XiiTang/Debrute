@@ -29,13 +29,6 @@
   padding: 0;
 }
 
-.general-settings-page,
-.debrute-cli-settings-page {
+.general-settings-page {
   gap: 14px;
-}
-
-.debrute-cli-settings-page pre {
-  margin: 0;
-  max-width: 100%;
-  overflow: auto;
 }
