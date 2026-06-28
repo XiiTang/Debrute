@@ -13,8 +13,10 @@ import {
   SaveAdobeBridgeSettingsInput,
   SaveImageModelSettingInput,
   SaveLlmProviderSettingInput,
+  SaveWorkbenchPreferencesInput,
   SaveVideoModelSettingInput,
-  VideoModelSettingsView
+  VideoModelSettingsView,
+  WorkbenchPreferencesView
 } from '@debrute/app-protocol';
 import { AdobeBridgeSettingsService } from '../adobe-bridge/AdobeBridgeSettingsService.js';
 import { GlobalConfigStore } from '../config/GlobalConfigStore.js';
@@ -139,6 +141,17 @@ export class DebruteGlobalRuntimeServer {
 
   async clearRecentProjectRoots(): Promise<void> {
     await this.configStore.saveWorkbenchChrome({ recentProjectRoots: [] });
+  }
+
+  async workbenchPreferencesGet(): Promise<WorkbenchPreferencesView> {
+    return this.configStore.readWorkbenchPreferences();
+  }
+
+  async workbenchPreferencesSave(input: SaveWorkbenchPreferencesInput): Promise<WorkbenchPreferencesView> {
+    await this.configStore.saveWorkbenchPreferences(input);
+    const preferences = await this.configStore.readWorkbenchPreferences();
+    this.emit({ type: 'workbench.preferences.changed', preferences });
+    return preferences;
   }
 
   async workbenchTitleBarState(input: {

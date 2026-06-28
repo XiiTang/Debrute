@@ -2,6 +2,7 @@ import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { Plus } from 'lucide-react';
 import type { TerminalSessionView, WorkbenchApiClient } from '@debrute/app-protocol';
 import { CloseButton, EmptyState, IconButton, Tab, TabList, Toolbar } from '../ui';
+import { useI18n, type WorkbenchI18n } from '../i18n';
 import { useXtermTerminal } from './useXtermTerminal';
 import { createTerminalMetadataEventHandler } from './terminalMetadataEvents';
 import {
@@ -36,9 +37,10 @@ export function TerminalPanelToolbar({
   onCreateSession,
   onCloseSession
 }: TerminalPanelToolbarProps): React.ReactElement {
+  const i18n = useI18n();
   return (
-    <Toolbar ariaLabel="Terminal sessions" className="terminal-panel__toolbar">
-      <TabList className="db-terminal-tabs" aria-label="Terminal sessions">
+    <Toolbar ariaLabel={i18n.t('terminal.sessions')} className="terminal-panel__toolbar">
+      <TabList className="db-terminal-tabs" aria-label={i18n.t('terminal.sessions')}>
         {sessions.map((session) => (
           <div key={session.id} className="db-terminal-tab-shell">
             <Tab
@@ -48,12 +50,12 @@ export function TerminalPanelToolbar({
             >
               <span>{session.title}</span>
               {session.status === 'exited' || session.status === 'failed' ? (
-                <small>{session.status}</small>
+                <small>{terminalStatusLabel(session.status, i18n)}</small>
               ) : null}
             </Tab>
             <CloseButton
               className="db-terminal-tab__close"
-              label={`Close Terminal ${session.title}`}
+              label={i18n.t('terminal.closeSession', { title: session.title })}
               disabled={closingSessionIds.includes(session.id)}
               onPointerDown={(event) => event.stopPropagation()}
               onClick={() => onCloseSession(session)}
@@ -64,7 +66,7 @@ export function TerminalPanelToolbar({
       <div className="db-terminal-tab-end-slot">
         <IconButton
           className="db-terminal-tab-new-button"
-          label="New Terminal"
+          label={i18n.t('terminal.new')}
           icon={<Plus size={14} />}
           size="xs"
           onClick={onCreateSession}
@@ -72,6 +74,16 @@ export function TerminalPanelToolbar({
       </div>
     </Toolbar>
   );
+}
+
+function terminalStatusLabel(status: TerminalSessionView['status'], i18n: WorkbenchI18n): string {
+  if (status === 'exited') {
+    return i18n.t('terminal.statusExited');
+  }
+  if (status === 'failed') {
+    return i18n.t('terminal.statusFailed');
+  }
+  return status;
 }
 
 export function TerminalPanel({
@@ -220,6 +232,7 @@ export function TerminalPanel({
   }, [api, removeSession, showError]);
 
   const showEmptyState = shouldShowTerminalEmptyState(state);
+  const i18n = useI18n();
 
   return (
     <div className="terminal-panel">
@@ -233,10 +246,10 @@ export function TerminalPanel({
       />
       {state.error ? <div className="terminal-panel__status">{state.error}</div> : null}
       {state.isLoading && state.sessions.length === 0 ? (
-        <EmptyState className="terminal-panel__empty" data-testid="terminal-panel-loading-state" title="Starting terminal" />
+        <EmptyState className="terminal-panel__empty" data-testid="terminal-panel-loading-state" title={i18n.t('terminal.starting')} />
       ) : null}
       {!state.isLoading && showEmptyState ? (
-        <EmptyState className="terminal-panel__empty" data-testid="terminal-panel-empty-state" title="No terminal sessions" />
+        <EmptyState className="terminal-panel__empty" data-testid="terminal-panel-empty-state" title={i18n.t('terminal.noSessions')} />
       ) : !state.isLoading ? (
         <div ref={containerRef} className="terminal-panel__surface" />
       ) : null}

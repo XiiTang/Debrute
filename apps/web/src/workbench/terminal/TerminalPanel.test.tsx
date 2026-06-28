@@ -3,10 +3,19 @@ import { renderToStaticMarkup } from 'react-dom/server';
 import { describe, expect, it } from 'vitest';
 import type { TerminalSessionView, WorkbenchApiClient } from '@debrute/app-protocol';
 import { TerminalPanel, TerminalPanelToolbar } from './TerminalPanel';
+import { I18nProvider } from '../i18n';
+
+function renderStaticWithI18n(element: React.ReactElement): string {
+  return renderToStaticMarkup(
+    <I18nProvider locale="en">
+      {element}
+    </I18nProvider>
+  );
+}
 
 describe('TerminalPanel rendering', () => {
   it('renders toolbar actions through Workbench UI primitives', () => {
-    const html = renderToStaticMarkup(
+    const html = renderStaticWithI18n(
       <TerminalPanel
         api={{} as WorkbenchApiClient}
         requestedCwdProjectRelativePath={null}
@@ -27,7 +36,7 @@ describe('TerminalPanel rendering', () => {
   });
 
   it('renders a close button on each terminal tab instead of a global close action', () => {
-    const html = renderToStaticMarkup(
+    const html = renderStaticWithI18n(
       <TerminalPanelToolbar
         sessions={[sessionFixture('one'), sessionFixture('two')]}
         activeSessionId="one"

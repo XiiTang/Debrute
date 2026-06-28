@@ -8,6 +8,7 @@ import type {
   WorkbenchProjectPathEntry
 } from '../shell/contextMenu';
 import { EmptyState, Input, cx } from '../ui';
+import { useI18n } from '../i18n';
 import { buildProjectFileTree, expandedProjectTreePaths, type ProjectFileTreeNode } from './projectFileTree';
 import type { ProjectTreeInlineEditState } from './projectTreeEditing';
 import {
@@ -78,6 +79,7 @@ export function ProjectTree({
   desktopPlatform?: NodeJS.Platform | undefined;
   onKeyboardFileCommand?: ((command: ProjectTreeFileKeyboardCommand, target: WorkbenchContextMenuTarget) => void) | undefined;
 }): React.ReactElement {
+  const i18n = useI18n();
   const tree = useMemo(() => buildProjectFileTree(snapshot?.files ?? []), [snapshot?.files]);
   const defaultExpanded = useMemo(() => expandedProjectTreePaths(tree, selection.selectedPaths), [selection.selectedPaths, tree]);
   const [expanded, setExpanded] = useState<Set<string>>(defaultExpanded);
@@ -104,7 +106,7 @@ export function ProjectTree({
       <div
         className="project-tree"
         role="tree"
-        aria-label="Project files"
+        aria-label={i18n.t('explorer.projectFiles')}
         tabIndex={0}
         onClick={(event) => {
           if (!isRootBlankAreaEventTarget(event)) {
@@ -203,7 +205,7 @@ export function ProjectTree({
             onEditCancel={onEditCancel}
           />
         ) : null}
-        {tree.length === 0 ? <EmptyState className="empty-line" data-project-tree-empty-line title="No project files" /> : null}
+        {tree.length === 0 ? <EmptyState className="empty-line" data-project-tree-empty-line title={i18n.t('explorer.noProjectFiles')} /> : null}
         {tree.map((node) => (
           <ProjectTreeRow
             key={node.path}

@@ -108,21 +108,32 @@ function sameTextEditorWindowState(
 
 export type TextBufferStatusTone = 'warning' | 'danger' | 'info' | 'loading';
 
-export function textBufferStatus(buffer: TextFileBuffer | undefined): { label: string; tone: TextBufferStatusTone } | undefined {
+export interface TextBufferStatusLabels {
+  loading: string;
+  error: string;
+  externalChange: string;
+  saving: string;
+  unsaved: string;
+}
+
+export function textBufferStatus(
+  buffer: TextFileBuffer | undefined,
+  labels: TextBufferStatusLabels
+): { label: string; tone: TextBufferStatusTone } | undefined {
   if (!buffer) {
-    return { label: 'Loading', tone: 'loading' };
+    return { label: labels.loading, tone: 'loading' };
   }
   if (buffer.error) {
-    return { label: 'Error', tone: 'danger' };
+    return { label: labels.error, tone: 'danger' };
   }
   if (buffer.externalChange) {
-    return { label: 'External change', tone: 'info' };
+    return { label: labels.externalChange, tone: 'info' };
   }
   if (buffer.saving) {
-    return { label: 'Saving', tone: 'loading' };
+    return { label: labels.saving, tone: 'loading' };
   }
   if (buffer.dirty) {
-    return { label: 'Unsaved', tone: 'warning' };
+    return { label: labels.unsaved, tone: 'warning' };
   }
   return undefined;
 }

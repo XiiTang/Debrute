@@ -25,6 +25,7 @@ import { DebruteCliSettingsPage } from './debrute-cli/DebruteCliSettingsPage';
 import { GeneralSettingsPage } from './general/GeneralSettingsPage';
 import { IntegrationsSettingsPage } from './integrations/IntegrationsSettingsPage';
 import { AdobeBridgeSettingsPage } from './adobe-bridge/AdobeBridgeSettingsPage';
+import { useI18n } from '../i18n';
 
 export interface LlmProviderDraft {
   id: string;
@@ -59,21 +60,22 @@ type DiscoveryState =
   | { status: 'error'; message: string };
 
 const SETTINGS_NAV_ITEMS = [
-  { id: 'general', label: 'General', icon: Settings },
-  { id: 'llm', label: 'LLM', icon: Bot },
-  { id: 'models', label: 'Models', icon: Cpu },
-  { id: 'integrations', label: 'Integrations', icon: Wrench },
-  { id: 'adobe-bridge', label: 'Adobe Bridge', icon: Cable },
-  { id: 'debrute-cli', label: 'Debrute CLI', icon: Terminal }
+  { id: 'general', labelKey: 'settings.nav.general', icon: Settings },
+  { id: 'llm', labelKey: 'settings.nav.llm', icon: Bot },
+  { id: 'models', labelKey: 'settings.nav.models', icon: Cpu },
+  { id: 'integrations', labelKey: 'settings.nav.integrations', icon: Wrench },
+  { id: 'adobe-bridge', labelKey: 'settings.nav.adobeBridge', icon: Cable },
+  { id: 'debrute-cli', labelKey: 'settings.nav.debruteCli', icon: Terminal }
 ] as const;
 
 type SettingsPageId = typeof SETTINGS_NAV_ITEMS[number]['id'];
 
 export function SettingsPanel({ state, actions }: { state: WorkbenchState; actions: WorkbenchActions }): React.ReactElement {
+  const i18n = useI18n();
   const [activePage, setActivePage] = useState<SettingsPageId>('general');
   return (
     <div className="settings-panel">
-      <nav className="settings-directory" aria-label="Settings sections">
+      <nav className="settings-directory" aria-label={i18n.t('settings.nav.sections')}>
         {SETTINGS_NAV_ITEMS.map((item) => {
           const Icon = item.icon;
           return (
@@ -85,14 +87,18 @@ export function SettingsPanel({ state, actions }: { state: WorkbenchState; actio
               onClick={() => setActivePage(item.id)}
             >
               <span className="db-nav-row__icon"><Icon size={15} /></span>
-              <strong>{item.label}</strong>
+              <strong>{i18n.t(item.labelKey)}</strong>
             </button>
           );
         })}
       </nav>
       <div className="settings-page">
         {activePage === 'general' ? (
-          <GeneralSettingsPage shell={getDebruteShellApi()} />
+          <GeneralSettingsPage
+            shell={getDebruteShellApi()}
+            locale={state.workbenchPreferences?.locale ?? 'en'}
+            onLocaleChange={(locale) => void actions.saveWorkbenchPreferences({ locale })}
+          />
         ) : activePage === 'llm' ? (
           <LlmSettings state={state} actions={actions} />
         ) : activePage === 'models' ? (
@@ -113,6 +119,7 @@ export function SettingsPanel({ state, actions }: { state: WorkbenchState; actio
 }
 
 export function LlmSettings({ state, actions }: { state: WorkbenchState; actions: WorkbenchActions }): React.ReactElement {
+  const i18n = useI18n();
   const settings = state.llmSettings;
   const [editingProviderId, setEditingProviderId] = useState<string>();
   const [draft, setDraft] = useState<LlmProviderDraft>(createEmptyLlmProviderDraft());
@@ -143,7 +150,7 @@ export function LlmSettings({ state, actions }: { state: WorkbenchState; actions
         ...(draft.apiKeyInput.trim() ? { apiKey: draft.apiKeyInput.trim() } : {})
       }, editingProviderId);
       if (!result.supportsDiscovery) {
-        setDiscovery({ status: 'ok', message: 'Model discovery is not available for this provider.' });
+        setDiscovery({ status: 'ok', message: i18n.t('settings.llm.discoveryUnavailable') });
         return;
       }
       setDraft((current) => ({
@@ -153,8 +160,8 @@ export function LlmSettings({ state, actions }: { state: WorkbenchState; actions
       setDiscovery({
         status: 'ok',
         message: result.modelsCount === 0
-          ? `No models found at ${result.endpoint}.`
-          : `Discovered ${result.modelsCount} models from ${result.endpoint}.`
+          ? i18n.t('settings.llm.noModelsFound', { endpoint: result.endpoint })
+          : i18n.t('settings.llm.discoveredModels', { count: result.modelsCount, endpoint: result.endpoint })
       });
     } catch (error) {
       setDiscovery({ status: 'error', message: errorMessage(error) });
@@ -163,14 +170,14 @@ export function LlmSettings({ state, actions }: { state: WorkbenchState; actions
 
   return (
     <section className="db-settings-section">
-      <SettingsSectionHeader title="LLM Providers" />
+      <SettingsSectionHeader title={i18n.t('settings.llm.title')} />
       <Card>
-        <Field label="Default Model">
+        <Field label={i18n.t('settings.llm.defaultModel')}>
           <Select
             value={settings?.defaultModelKey ?? ''}
             onChange={(event) => void actions.setDefaultLlmModelKey(event.currentTarget.value || null)}
           >
-            <option value="">None</option>
+            <option value="">{i18n.t('common.none')}</option>
             {(settings?.availableModelKeys ?? []).map((modelKey: string) => (
               <option key={modelKey} value={modelKey}>{modelKey}</option>
             ))}
@@ -183,40 +190,40 @@ export function LlmSettings({ state, actions }: { state: WorkbenchState; actions
           void save();
         }}>
           <Card>
-            <strong>{editingProviderId ? 'Edit LLM Provider' : 'Add LLM Provider'}</strong>
+            <strong>{editingProviderId ? i18n.t('settings.llm.editProvider') : i18n.t('settings.llm.addProvider')}</strong>
             <div className="db-form-row">
-              <Field label="Provider Type">
+              <Field label={i18n.t('settings.llm.providerType')}>
                 <Select value={draft.providerType} onChange={(event) => setDraft({ ...draft, providerType: event.currentTarget.value as LlmProviderDraft['providerType'] })}>
-                  <option value="openai_compat">OpenAI Compatible</option>
-                  <option value="anthropic">Anthropic</option>
+                  <option value="openai_compat">{i18n.t('settings.llm.openaiCompatible')}</option>
+                  <option value="anthropic">{i18n.t('settings.llm.anthropic')}</option>
                 </Select>
               </Field>
             </div>
-            <div className="db-form-row"><Field label="ID"><Input value={draft.id} onChange={(event) => setDraft({ ...draft, id: event.currentTarget.value })} /></Field></div>
-            <div className="db-form-row"><Field label="Name"><Input value={draft.name} onChange={(event) => setDraft({ ...draft, name: event.currentTarget.value })} /></Field></div>
-            <div className="db-form-row"><Field label="Base URL"><Input value={draft.baseUrl} onChange={(event) => setDraft({ ...draft, baseUrl: event.currentTarget.value })} /></Field></div>
-            <div className="db-form-row"><Field label="Model IDs"><Textarea value={draft.modelIdsText} onChange={(event) => setDraft({ ...draft, modelIdsText: event.currentTarget.value })} /></Field></div>
+            <div className="db-form-row"><Field label={i18n.t('settings.llm.id')}><Input value={draft.id} onChange={(event) => setDraft({ ...draft, id: event.currentTarget.value })} /></Field></div>
+            <div className="db-form-row"><Field label={i18n.t('settings.llm.name')}><Input value={draft.name} onChange={(event) => setDraft({ ...draft, name: event.currentTarget.value })} /></Field></div>
+            <div className="db-form-row"><Field label={i18n.t('settings.llm.baseUrl')}><Input value={draft.baseUrl} onChange={(event) => setDraft({ ...draft, baseUrl: event.currentTarget.value })} /></Field></div>
+            <div className="db-form-row"><Field label={i18n.t('settings.llm.modelIds')}><Textarea value={draft.modelIdsText} onChange={(event) => setDraft({ ...draft, modelIdsText: event.currentTarget.value })} /></Field></div>
             <div className="db-form-row">
               <ApiKeyInput
-                label="API Key"
+                label={i18n.t('settings.llm.apiKey')}
                 value={draft.apiKeyInput}
                 onChange={(apiKeyInput) => setDraft({ ...draft, apiKeyInput })}
                 resetKey={editingProviderId ?? 'new'}
               />
             </div>
-            <Switch label="Enabled" checked={draft.enabled} onChange={(event) => setDraft({ ...draft, enabled: event.currentTarget.checked })} />
+            <Switch label={i18n.t('common.enabled')} checked={draft.enabled} onChange={(event) => setDraft({ ...draft, enabled: event.currentTarget.checked })} />
             {discovery.status !== 'idle' ? (
               <small className={discovery.status === 'error' ? 'db-form-error' : ''}>
-                {discovery.status === 'loading' ? 'Discovering models' : discovery.message}
+                {discovery.status === 'loading' ? i18n.t('settings.llm.discoveringModels') : discovery.message}
               </small>
             ) : null}
-            <Toolbar ariaLabel="LLM provider actions" className="db-action-row">
-              {editingProviderId ? <Button type="button" onClick={() => setEditingProviderId(undefined)}>Cancel</Button> : null}
+            <Toolbar ariaLabel={i18n.t('settings.llm.providerActions', { name: draft.name || draft.id || i18n.t('settings.llm.addProvider') })} className="db-action-row">
+              {editingProviderId ? <Button type="button" onClick={() => setEditingProviderId(undefined)}>{i18n.t('common.cancel')}</Button> : null}
               <Button type="button" disabled={!draft.baseUrl.trim() || discovery.status === 'loading'} iconStart={<Search size={14} />} onClick={() => void discoverModels()}>
-                Discover Models
+                {i18n.t('settings.llm.discoverModels')}
               </Button>
               <Button type="submit" variant="primary" disabled={!draft.id.trim() || !draft.name.trim() || !draft.baseUrl.trim() || splitModelIds(draft.modelIdsText).length === 0} iconStart={<Save size={14} />}>
-                {editingProviderId ? 'Save LLM Provider' : 'Add LLM Provider'}
+                {editingProviderId ? i18n.t('settings.llm.saveProvider') : i18n.t('settings.llm.addProviderAction')}
               </Button>
             </Toolbar>
           </Card>
@@ -238,11 +245,12 @@ export function LlmSettings({ state, actions }: { state: WorkbenchState; actions
 }
 
 export function ImageModelSettings({ state, actions }: { state: WorkbenchState; actions: WorkbenchActions }): React.ReactElement {
+  const i18n = useI18n();
   const models = state.imageModelSettings?.models ?? [];
 
   return (
     <section className="db-settings-section">
-      <SettingsSectionHeader title="Image Models" />
+      <SettingsSectionHeader title={i18n.t('settings.models.imageTitle')} />
       <div className="db-form-grid">
         {models.map((model) => (
           <MediaModelCard
@@ -257,11 +265,12 @@ export function ImageModelSettings({ state, actions }: { state: WorkbenchState; 
 }
 
 export function VideoModelSettings({ state, actions }: { state: WorkbenchState; actions: WorkbenchActions }): React.ReactElement {
+  const i18n = useI18n();
   const models = state.videoModelSettings?.models ?? [];
 
   return (
     <section className="db-settings-section">
-      <SettingsSectionHeader title="Video Models" />
+      <SettingsSectionHeader title={i18n.t('settings.models.videoTitle')} />
       <div className="db-form-grid">
         {models.map((model) => (
           <MediaModelCard
@@ -294,6 +303,7 @@ function MediaModelCard({
   model: ImageModelSettingRecord | VideoModelSettingRecord;
   onSave: (input: ReturnType<typeof modelDraftToSaveInput>) => Promise<void>;
 }): React.ReactElement {
+  const i18n = useI18n();
   const [draft, setDraft] = useState(() => modelToDraft(model));
   const [status, setStatus] = useState<DiscoveryState>({ status: 'idle' });
 
@@ -328,29 +338,31 @@ function MediaModelCard({
       <div className="db-model-card__header">
         <div>
           <strong>{model.debruteModelId}</strong>
-          {model.apiKeySet ? <StatusPill>key {model.apiKeyPreview}</StatusPill> : <StatusPill tone="neutral">no key</StatusPill>}
+          {model.apiKeySet
+            ? <StatusPill>{i18n.t('settings.models.apiKeyConfigured', { preview: requireApiKeyPreview(model.apiKeyPreview) })}</StatusPill>
+            : <StatusPill tone="neutral">{i18n.t('settings.models.apiKeyMissing')}</StatusPill>}
         </div>
         {model.apiKeySet ? (
           <Button type="button" variant="danger" onClick={() => void clearApiKey()}>
-            Clear API key
+            {i18n.t('settings.models.clearApiKey')}
           </Button>
         ) : null}
       </div>
       <div className="db-model-card__fields">
         <div className="db-form-row">
           <ApiKeyInput
-            ariaLabel="API Key"
+            ariaLabel={i18n.t('settings.llm.apiKey')}
             value={draft.apiKeyInput}
             onChange={(apiKeyInput) => setDraft({ ...draft, apiKeyInput })}
             onBlur={() => void saveDraft(draft)}
-            placeholder="API Key"
+            placeholder={i18n.t('settings.llm.apiKey')}
           />
         </div>
         <div className="db-form-grid db-form-grid--two">
           <div className="db-form-row">
-            <Field label="Base URL override">
+            <Field label={i18n.t('settings.models.baseUrlOverride')}>
               <Input
-                aria-label="Base URL override"
+                aria-label={i18n.t('settings.models.baseUrlOverride')}
                 value={draft.baseUrlOverride}
                 onChange={(event) => setDraft({ ...draft, baseUrlOverride: event.currentTarget.value })}
                 onBlur={() => void saveDraft(draft)}
@@ -359,9 +371,9 @@ function MediaModelCard({
             </Field>
           </div>
           <div className="db-form-row">
-            <Field label="Request model ID override">
+            <Field label={i18n.t('settings.models.requestModelIdOverride')}>
               <Input
-                aria-label="Request model ID override"
+                aria-label={i18n.t('settings.models.requestModelIdOverride')}
                 value={draft.requestModelIdOverride}
                 onChange={(event) => setDraft({ ...draft, requestModelIdOverride: event.currentTarget.value })}
                 onBlur={() => void saveDraft(draft)}
@@ -389,19 +401,22 @@ function LlmProviderCard({
   onClearApiKey: () => void;
   onDelete: () => void;
 }): React.ReactElement {
+  const i18n = useI18n();
   return (
     <Card>
       <strong>{provider.name}</strong>
       <small>{provider.providerType} / {provider.baseUrl}</small>
       <div className="db-status-list">
-        {!provider.enabled ? <StatusPill tone="neutral">disabled</StatusPill> : null}
-        {provider.apiKeySet ? <StatusPill>key {provider.apiKeyPreview}</StatusPill> : <StatusPill tone="neutral">no key</StatusPill>}
+        {!provider.enabled ? <StatusPill tone="neutral">{i18n.t('common.disabled')}</StatusPill> : null}
+        {provider.apiKeySet
+          ? <StatusPill>{i18n.t('settings.llm.apiKeyConfigured', { preview: requireApiKeyPreview(provider.apiKeyPreview) })}</StatusPill>
+          : <StatusPill tone="neutral">{i18n.t('settings.llm.apiKeyMissing')}</StatusPill>}
         {provider.modelKeys.map((modelKey) => <StatusPill key={modelKey}>{modelKey}</StatusPill>)}
       </div>
-      <Toolbar ariaLabel={`${provider.name} actions`} className="db-action-row">
-        <Button type="button" onClick={onEdit}>Edit</Button>
-        {provider.apiKeySet ? <Button type="button" variant="danger" onClick={onClearApiKey}>Clear API key</Button> : null}
-        <Button type="button" variant="danger" iconStart={<Trash2 size={14} />} onClick={onDelete}>Delete</Button>
+      <Toolbar ariaLabel={i18n.t('settings.llm.providerActions', { name: provider.name })} className="db-action-row">
+        <Button type="button" onClick={onEdit}>{i18n.t('settings.llm.edit')}</Button>
+        {provider.apiKeySet ? <Button type="button" variant="danger" onClick={onClearApiKey}>{i18n.t('settings.llm.clearApiKey')}</Button> : null}
+        <Button type="button" variant="danger" iconStart={<Trash2 size={14} />} onClick={onDelete}>{i18n.t('common.delete')}</Button>
       </Toolbar>
     </Card>
   );
@@ -416,13 +431,14 @@ function ApiKeyInput({
   placeholder,
   resetKey
 }: ApiKeyInputProps): React.ReactElement {
+  const i18n = useI18n();
   const [visible, setVisible] = useState(false);
 
   useEffect(() => {
     setVisible(false);
   }, [resetKey]);
 
-  const visibilityLabel = visible ? 'Hide API key' : 'Show API key';
+  const visibilityLabel = visible ? i18n.t('settings.llm.hideApiKey') : i18n.t('settings.llm.showApiKey');
   const effectivePlaceholder = value ? undefined : placeholder;
   const input = (
     <span className="db-secret-field">
@@ -478,6 +494,13 @@ export function modelDraftToClearApiKeyInput(draft: ModelDraft) {
     requestModelIdOverride: draft.requestModelIdOverride.trim() || null,
     apiKey: ''
   };
+}
+
+function requireApiKeyPreview(preview: string | undefined): string {
+  if (preview === undefined) {
+    throw new Error('[debrute:settings] Missing API key preview.');
+  }
+  return preview;
 }
 
 function modelDraftMatchesPersisted(draft: ModelDraft, model: ImageModelSettingRecord | VideoModelSettingRecord): boolean {

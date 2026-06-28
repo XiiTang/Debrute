@@ -35,6 +35,7 @@ import {
   type WorkbenchProjectSessionSnapshot,
   type WorkbenchProjectTextFile,
   type WorkbenchHostKind,
+  type SaveWorkbenchPreferencesInput,
   type WorkbenchTitleBarState
 } from '@debrute/app-protocol';
 import { projectFileRevision, projectImageMimeTypeFromPath, resolveExistingProjectPath, type ProjectUploadImportEntry } from '@debrute/project-core';
@@ -1467,6 +1468,14 @@ async function handleSettingsRoute(context: GlobalRuntimeRequestContext): Promis
     writeJson(context.response, 200, await server.llmGetSettings());
     return;
   }
+  if (method === 'GET' && path === '/api/settings/workbench-preferences') {
+    writeJson(context.response, 200, await server.workbenchPreferencesGet());
+    return;
+  }
+  if (method === 'PUT' && path === '/api/settings/workbench-preferences') {
+    writeJson(context.response, 200, await server.workbenchPreferencesSave(await readJsonBody<SaveWorkbenchPreferencesInput>(context.request)));
+    return;
+  }
   if (method === 'PUT' && path.startsWith('/api/settings/llm/providers/')) {
     writeJson(context.response, 200, await server.llmSaveProviderSetting(await readJsonBody(context.request), decodePathSegment(path.split('/').at(-1)!)));
     return;
@@ -1576,7 +1585,8 @@ function isGlobalEvent(event: AppServerEvent): boolean {
     || event.type === 'imageModel.settings.changed'
     || event.type === 'videoModel.settings.changed'
     || event.type === 'integrations.settings.changed'
-    || event.type === 'adobeBridge.settings.changed';
+    || event.type === 'adobeBridge.settings.changed'
+    || event.type === 'workbench.preferences.changed';
 }
 
 async function serveWebAsset(context: RequestContext, configuredWebDistDir: string | undefined): Promise<void> {
@@ -2072,6 +2082,10 @@ function writeCaughtError(response: ServerResponse, error: unknown): void {
     return;
   }
   if (writeAdobeBridgeCaughtError(response, error)) {
+    return;
+  }
+  if (error instanceof Error && error.message === 'Workbench locale must be "en" or "zh-CN".') {
+    writeError(response, 400, 'invalid_input', error.message);
     return;
   }
   if (isServiceError(error)) {

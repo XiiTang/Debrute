@@ -2,6 +2,7 @@ import React from 'react';
 import { Send, X } from 'lucide-react';
 import type { AdobeBridgeClient, AdobeBridgeStateView } from '@debrute/app-protocol';
 import { Button, StatusPill, Toolbar } from '../ui';
+import { useI18n } from '../i18n';
 
 export function SendToPhotoshopDialog({
   projectId,
@@ -18,14 +19,15 @@ export function SendToPhotoshopDialog({
   onSend: (adobeClientId: string) => void;
   onClose: () => void;
 }): React.ReactElement {
+  const i18n = useI18n();
   const linkedClients = linkedPhotoshopClients(bridge, projectId);
   return (
     <div className="db-modal-backdrop" role="presentation">
-      <section className="db-modal" role="dialog" aria-modal="true" aria-label="Send to Photoshop">
+      <section className="db-modal" role="dialog" aria-modal="true" aria-label={i18n.t('adobeBridge.sendToPhotoshop.title')}>
         <header className="db-settings-section__header">
-          <h2>Send to Photoshop</h2>
-          <Toolbar ariaLabel="Dialog actions" className="db-action-row">
-            <Button type="button" iconStart={<X size={14} />} onClick={onClose}>Close</Button>
+          <h2>{i18n.t('adobeBridge.sendToPhotoshop.title')}</h2>
+          <Toolbar ariaLabel={i18n.t('adobeBridge.sendToPhotoshop.dialogActions')} className="db-action-row">
+            <Button type="button" iconStart={<X size={14} />} onClick={onClose}>{i18n.t('common.close')}</Button>
           </Toolbar>
         </header>
         <small>{projectRelativePath}</small>
@@ -41,8 +43,8 @@ export function SendToPhotoshopDialog({
                 onClick={() => onSend(client.adobeClientId)}
               >
                 <span>{client.displayName}</span>
-                {client.activeDocumentTitle ? <StatusPill tone="success">Ready</StatusPill> : null}
-                <small>{sending ? 'Sending' : ''}</small>
+                {client.activeDocumentTitle ? <StatusPill tone="success">{i18n.t('adobeBridge.sendToPhotoshop.ready')}</StatusPill> : null}
+                <small>{sending ? i18n.t('adobeBridge.sendToPhotoshop.sending') : ''}</small>
                 <span className="db-integration-row__action"><Send size={14} /></span>
               </button>
             );

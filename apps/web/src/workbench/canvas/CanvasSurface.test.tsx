@@ -31,6 +31,7 @@ import type { CanvasCamera } from './runtime/canvasCamera';
 import { createCanvasStageRuntime } from './runtime/CanvasStageRuntime';
 import type { CanvasSelection } from './runtime/canvasSelection';
 import { createCanvasEditorRuntime, type CanvasEditorRuntime } from './runtime/CanvasEditorRuntime';
+import { I18nProvider } from '../i18n';
 
 describe('CanvasSurface', () => {
   it('renders an empty Canvas Map node state', () => {
@@ -1060,16 +1061,18 @@ function surface(
     selection: input.selection
   });
   return (
-    <CanvasSurface
-      canvas={canvas}
-      projection={projection}
-      runtime={runtime}
-      actions={actions}
-      textFileBuffers={input.textFileBuffers ?? {}}
-      canvasFeedback={input.canvasFeedback}
-      overlayRuntime={createCanvasOverlayRuntime()}
-      feedbackPlacementContext={feedbackPlacementContextFixture()}
-    />
+    <I18nProvider locale="en">
+      <CanvasSurface
+        canvas={canvas}
+        projection={projection}
+        runtime={runtime}
+        actions={actions}
+        textFileBuffers={input.textFileBuffers ?? {}}
+        canvasFeedback={input.canvasFeedback}
+        overlayRuntime={createCanvasOverlayRuntime()}
+        feedbackPlacementContext={feedbackPlacementContextFixture()}
+      />
+    </I18nProvider>
   );
 }
 
@@ -1238,6 +1241,7 @@ function workbenchStateFixture(
     videoModelSettings: undefined,
     integrationsSettings: undefined,
     adobeBridge: undefined,
+    workbenchPreferences: { locale: 'en' },
     canvasFeedback: undefined,
     textFileBuffers: {},
     textEditorWindows: {},
@@ -1252,6 +1256,7 @@ const actions: WorkbenchActions = {
   discoverLlmProviderModels: async () => ({ endpoint: '', models: [], modelsCount: 0, supportsDiscovery: false }),
   saveImageModelSetting: async () => undefined,
   saveVideoModelSetting: async () => undefined,
+  saveWorkbenchPreferences: async () => undefined,
   rescanIntegrations: async () => emptyIntegrationsSettings,
   saveAdobeBridgeSettings: async () => undefined,
   linkAdobeBridgePhotoshop: async () => undefined,

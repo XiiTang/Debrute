@@ -734,7 +734,14 @@ function commandInput(overrides: {
     openInspectorPanel: overrides.openInspectorPanel ?? (() => undefined),
     confirmPermanentDelete: overrides.confirmPermanentDelete ?? (() => true),
     projectSnapshot: overrides.snapshot,
-    confirmMoveOverwrite: overrides.confirmMoveOverwrite ?? (() => true)
+    confirmMoveOverwrite: overrides.confirmMoveOverwrite ?? (() => true),
+    errorLabels: {
+      copyPathFailed: 'Copy Path failed',
+      revealFailed: 'Reveal failed',
+      deleteFailed: 'Delete failed',
+      pasteFailed: 'Paste failed',
+      resetAutoLayoutFailed: 'Reset auto layout failed'
+    }
   };
 }
 

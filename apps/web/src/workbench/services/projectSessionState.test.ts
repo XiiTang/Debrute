@@ -34,7 +34,7 @@ describe('project session startup', () => {
     expect(calls).toEqual([{ projectId: '123e4567-e89b-42d3-a456-426614174000' }]);
   });
 
-  it('surfaces project route load failures in the project-opening state', async () => {
+  it('surfaces project route load failures as structured project-opening errors', async () => {
     const calls: unknown[] = [];
     const api = {
       openProject: async (input: unknown) => {
@@ -53,7 +53,10 @@ describe('project session startup', () => {
         projectId: 'missing-project'
       },
       projectOpen: {
-        error: 'Project snapshot load failed: Project session is not open.'
+        error: {
+          code: 'project-snapshot-load-failed',
+          message: 'Project session is not open.'
+        }
       }
     });
     expect(calls).toEqual([{ projectId: 'missing-project' }]);
@@ -133,7 +136,7 @@ describe('project session startup', () => {
       snapshot: undefined,
       projectOpen: {
         attemptedPath: 'relative/project',
-        error: 'Project path must be absolute.'
+        error: { code: 'project-path-must-be-absolute' }
       }
     });
     expect(calls).toEqual([]);
@@ -151,13 +154,13 @@ describe('project session startup', () => {
     await expect(openInitialProject(api, { kind: 'project-open' })).resolves.toMatchObject({
       snapshot: undefined,
       projectOpen: {
-        error: 'Project path is required.'
+        error: { code: 'project-path-required' }
       }
     });
     expect(calls).toEqual([]);
   });
 
-  it('keeps failed project-open attempts as read-only error context', async () => {
+  it('keeps failed project-open attempts as structured read-only error context', async () => {
     const api = {
       openProject: async () => {
         throw new Error('projectRoot must resolve to a directory.');
@@ -168,7 +171,10 @@ describe('project session startup', () => {
       snapshot: undefined,
       projectOpen: {
         attemptedPath: '/missing/project',
-        error: 'Open project failed: projectRoot must resolve to a directory.'
+        error: {
+          code: 'project-open-failed',
+          message: 'projectRoot must resolve to a directory.'
+        }
       }
     });
   });

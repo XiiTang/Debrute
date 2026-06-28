@@ -1,68 +1,40 @@
-import React from 'react';
+// @vitest-environment jsdom
+
+import React, { act } from 'react';
+import { createRoot, type Root } from 'react-dom/client';
 import { renderToStaticMarkup } from 'react-dom/server';
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { CanvasCardBar } from './CanvasCardBar';
-
-interface ButtonProps {
-  role?: string;
-  onClick(event?: { currentTarget: { closest(selector: string): { removeAttribute(name: string): void } | null } }): void;
-  'aria-pressed'?: boolean;
-  pressed?: boolean;
-  hidden?: boolean;
-  children?: React.ReactNode;
-}
-
-interface FormProps {
-  className?: string;
-  onSubmit(event: {
-    preventDefault(): void;
-    currentTarget: {
-      elements: {
-        namedItem(name: string): { value?: string } | null;
-      };
-      closest(selector: string): { removeAttribute(name: string): void } | null;
-    };
-  }): void;
-  children?: React.ReactNode;
-}
-
-interface InputProps {
-  name?: string;
-  defaultValue?: string;
-  'aria-label'?: string;
-}
+import { CanvasCardBar, type CanvasCardBarProps } from './CanvasCardBar';
+import { I18nProvider } from '../i18n';
 
 describe('CanvasCardBar', () => {
   afterEach(() => {
     vi.unstubAllGlobals();
   });
 
-  it('renders canvas cards and switches active canvas on click', () => {
+  it('renders canvas cards and switches active canvas on click', async () => {
     const onActiveCanvasChange = vi.fn();
-    const element = CanvasCardBar({
-      canvasOrder: ['canvas-1', 'storyboard'],
-      activeCanvasId: 'canvas-1',
-      onActiveCanvasChange,
-      onCreateCanvas: async () => undefined,
-      onRenameCanvas: async () => undefined,
-      onDeleteCanvas: async () => undefined,
-      onReorderCanvases: async () => undefined
-    });
+    const props = propsFixture({ onActiveCanvasChange });
+    const html = renderStaticWithI18n(<CanvasCardBar {...props} />);
 
-    buttonByText(element, 'storyboard').props.onClick();
-
-    expect(buttonByText(element, 'canvas-1').props.pressed ?? buttonByText(element, 'canvas-1').props['aria-pressed']).toBe(true);
-    expect(onActiveCanvasChange).toHaveBeenCalledWith('storyboard');
-    const html = renderToStaticMarkup(element);
     expect(html).toContain('db-floating-bar canvas-card-bar');
     expect(html).toContain('db-button');
     expect(html).toContain('db-button--sm');
     expect(html).toContain('db-icon-button');
     expect(html).toContain('db-canvas-card');
     expect(html).toContain('db-canvas-control');
+    expect(html).toContain('aria-pressed="true"');
+
+    await withRenderedCardBar(props, async ({ container }) => {
+      await act(async () => {
+        buttonByText(container, 'storyboard').click();
+      });
+    });
+
+    expect(onActiveCanvasChange).toHaveBeenCalledWith('storyboard');
   });
 
-  it('submits canvas menu actions without browser prompt or confirm dialogs', () => {
+  it('submits canvas menu actions without browser prompt or confirm dialogs', async () => {
     const onCreateCanvas = vi.fn(async () => undefined);
     const onRenameCanvas = vi.fn(async () => undefined);
     const onDeleteCanvas = vi.fn(async () => undefined);
@@ -70,27 +42,27 @@ describe('CanvasCardBar', () => {
     const confirm = vi.fn(() => true);
     vi.stubGlobal('prompt', prompt);
     vi.stubGlobal('confirm', confirm);
-    const element = CanvasCardBar({
+
+    await withRenderedCardBar(propsFixture({
       canvasOrder: ['canvas-1'],
-      activeCanvasId: 'canvas-1',
-      onActiveCanvasChange: () => undefined,
       onCreateCanvas,
       onRenameCanvas,
-      onDeleteCanvas,
-      onReorderCanvases: async () => undefined
+      onDeleteCanvas
+    }), async ({ container }) => {
+      await act(async () => {
+        buttonByText(container, 'New Canvas').click();
+      });
+      await act(async () => {
+        const input = queryRequired<HTMLInputElement>(container, 'input[name="nextCanvasId"]');
+        input.value = 'renamed';
+        queryRequired<HTMLFormElement>(container, 'form.canvas-card-rename-form')
+          .dispatchEvent(new Event('submit', { bubbles: true, cancelable: true }));
+      });
+      await act(async () => {
+        buttonByText(container, 'Delete').click();
+        buttonByText(container, 'Confirm Delete').click();
+      });
     });
-
-    menuItemByText(element, 'New Canvas').props.onClick(clickEvent());
-    renameForm(element).props.onSubmit({
-      preventDefault: vi.fn(),
-      currentTarget: {
-        elements: {
-          namedItem: () => ({ value: 'renamed' })
-        },
-        closest: () => ({ removeAttribute: vi.fn() })
-      }
-    });
-    menuItemByText(element, 'Confirm Delete').props.onClick(clickEvent());
 
     expect(onCreateCanvas).toHaveBeenCalled();
     expect(onRenameCanvas).toHaveBeenCalledWith({ canvasId: 'canvas-1', nextCanvasId: 'renamed' });
@@ -100,94 +72,74 @@ describe('CanvasCardBar', () => {
   });
 
   it('renders inline rename and explicit delete confirmation controls in the menu', () => {
-    const element = CanvasCardBar({
-      canvasOrder: ['canvas-1'],
-      activeCanvasId: 'canvas-1',
-      onActiveCanvasChange: () => undefined,
-      onCreateCanvas: async () => undefined,
-      onRenameCanvas: async () => undefined,
-      onDeleteCanvas: async () => undefined,
-      onReorderCanvases: async () => undefined
-    });
+    const html = renderStaticWithI18n(<CanvasCardBar {...propsFixture({ canvasOrder: ['canvas-1'] })} />);
 
-    expect(renameInput(element).props).toMatchObject({
-      name: 'nextCanvasId',
-      defaultValue: 'canvas-1',
-      'aria-label': 'Rename canvas-1'
-    });
-    expect(menuItemByText(element, 'Confirm Delete').props.hidden).toBe(true);
-    expect(renderToStaticMarkup(element)).toContain('db-menu');
+    expect(html).toContain('name="nextCanvasId"');
+    expect(html).toContain('value="canvas-1"');
+    expect(html).toContain('aria-label="Rename canvas-1"');
+    expect(html).toContain('hidden=""');
+    expect(html).toContain('Confirm Delete');
+    expect(html).toContain('db-menu');
   });
 });
 
-function buttonByText(element: React.ReactElement, text: string): React.ReactElement<ButtonProps> {
-  const button = elements(element).find((item) => (
-    typeof item.props.onClick === 'function'
-    && textContent(item) === text
-  ));
-  if (!button) {
-    throw new Error(`Expected button: ${text}`);
-  }
-  return button as React.ReactElement<ButtonProps>;
+function renderStaticWithI18n(element: React.ReactElement): string {
+  return renderToStaticMarkup(
+    <I18nProvider locale="en">
+      {element}
+    </I18nProvider>
+  );
 }
 
-function menuItemByText(element: React.ReactElement, text: string): React.ReactElement<ButtonProps> {
-  const item = elements(element).find((candidate) => (
-    typeof candidate.props.onClick === 'function'
-    && textContent(candidate) === text
-  ));
-  if (!item) {
-    throw new Error(`Expected menu item: ${text}`);
+async function withRenderedCardBar(
+  props: CanvasCardBarProps,
+  callback: (input: { container: HTMLDivElement; root: Root }) => Promise<void>
+): Promise<void> {
+  const container = document.createElement('div');
+  document.body.appendChild(container);
+  const root = createRoot(container);
+  try {
+    await act(async () => {
+      root.render(
+        <I18nProvider locale="en">
+          <CanvasCardBar {...props} />
+        </I18nProvider>
+      );
+    });
+    await callback({ container, root });
+  } finally {
+    await act(async () => {
+      root.unmount();
+    });
+    container.remove();
   }
-  return item as React.ReactElement<ButtonProps>;
 }
 
-function renameForm(element: React.ReactElement): React.ReactElement<FormProps> {
-  const form = elements(element).find((candidate) => (
-    candidate.type === 'form'
-    && candidate.props.className === 'canvas-card-rename-form'
-  ));
-  if (!form) {
-    throw new Error('Expected rename form');
-  }
-  return form as React.ReactElement<FormProps>;
-}
-
-function renameInput(element: React.ReactElement): React.ReactElement<InputProps> {
-  const input = elements(element).find((candidate) => (
-    (candidate.props as InputProps).name === 'nextCanvasId'
-  ));
-  if (!input) {
-    throw new Error('Expected rename input');
-  }
-  return input as React.ReactElement<InputProps>;
-}
-
-function clickEvent() {
+function propsFixture(overrides: Partial<CanvasCardBarProps> = {}): CanvasCardBarProps {
   return {
-    currentTarget: {
-      closest: () => ({ removeAttribute: vi.fn() })
-    }
+    canvasOrder: ['canvas-1', 'storyboard'],
+    activeCanvasId: 'canvas-1',
+    onActiveCanvasChange: () => undefined,
+    onCreateCanvas: async () => undefined,
+    onRenameCanvas: async () => undefined,
+    onDeleteCanvas: async () => undefined,
+    onReorderCanvases: async () => undefined,
+    ...overrides
   };
 }
 
-function elements(node: React.ReactNode): Array<React.ReactElement<{ children?: React.ReactNode; role?: unknown; className?: string; onClick?: unknown }>> {
-  if (!React.isValidElement(node)) {
-    return [];
+function buttonByText(container: HTMLElement, text: string): HTMLButtonElement {
+  const button = Array.from(container.querySelectorAll<HTMLButtonElement>('button')).find((candidate) => candidate.textContent === text);
+  if (!button) {
+    throw new Error(`Expected button: ${text}`);
   }
-  const element = node as React.ReactElement<{ children?: React.ReactNode; role?: unknown; className?: string; onClick?: unknown }>;
-  return [
-    element,
-    ...React.Children.toArray(element.props.children).flatMap(elements)
-  ];
+  return button;
 }
 
-function textContent(node: React.ReactNode): string {
-  if (typeof node === 'string' || typeof node === 'number') {
-    return String(node);
+function queryRequired<T extends Element>(container: ParentNode, selector: string): T {
+  const element = container.querySelector<T>(selector);
+  if (!element) {
+    throw new Error(`Expected element: ${selector}`);
   }
-  if (!React.isValidElement(node)) {
-    return '';
-  }
-  return React.Children.toArray((node.props as { children?: React.ReactNode }).children).map(textContent).join('');
+  return element;
 }

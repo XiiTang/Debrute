@@ -27,6 +27,14 @@ import {
 
 type SetState<T> = (value: T | ((current: T) => T)) => void;
 
+export interface WorkbenchContextMenuCommandErrorLabels {
+  copyPathFailed: string;
+  revealFailed: string;
+  deleteFailed: string;
+  pasteFailed: string;
+  resetAutoLayoutFailed: string;
+}
+
 export function runWorkbenchContextMenuCommand(input: {
   command: WorkbenchContextMenuCommand;
   contextMenu: { target: WorkbenchContextMenuTarget; position: WorkbenchContextMenuPosition } | undefined;
@@ -46,6 +54,7 @@ export function runWorkbenchContextMenuCommand(input: {
     entries: WorkbenchProjectPathEntry[];
     targetDirectoryProjectRelativePath: string;
   }) => boolean;
+  errorLabels: WorkbenchContextMenuCommandErrorLabels;
 }): void {
   const target = input.contextMenu?.target;
   if (!target) {
@@ -120,7 +129,7 @@ export function runWorkbenchContextMenuCommand(input: {
           camera: snapshot.camera
         }));
       }).catch((error) => {
-        input.notify(`Reset auto layout failed: ${errorMessage(error)}`);
+        input.notify(notificationMessageForFileCommandError(input.errorLabels.resetAutoLayoutFailed, error));
       });
     }
   }
@@ -178,7 +187,7 @@ function runSinglePathFileCommand(
   if (input.command === 'copy-path') {
     void input.actions.copyProjectAbsolutePaths({ entries })
       .then((result) => input.copyText(result.paths.join('\n')))
-      .catch((error) => input.notify(notificationMessageForFileCommandError('Copy Path failed', error)));
+      .catch((error) => input.notify(notificationMessageForFileCommandError(input.errorLabels.copyPathFailed, error)));
     input.closeContextMenu();
     return true;
   }
@@ -205,7 +214,7 @@ function runSinglePathFileCommand(
   }
   if (input.command === 'reveal-in-system-file-manager') {
     void input.actions.revealProjectPathInSystemFileManager(primaryEntry)
-      .catch((error) => input.notify(notificationMessageForFileCommandError('Reveal failed', error)));
+      .catch((error) => input.notify(notificationMessageForFileCommandError(input.errorLabels.revealFailed, error)));
     input.closeContextMenu();
     return true;
   }
@@ -215,7 +224,7 @@ function runSinglePathFileCommand(
       return true;
     }
     void input.actions.trashProjectPaths({ entries })
-      .catch((error) => input.notify(notificationMessageForFileCommandError('Delete failed', error)));
+      .catch((error) => input.notify(notificationMessageForFileCommandError(input.errorLabels.deleteFailed, error)));
     input.closeContextMenu();
     return true;
   }
@@ -282,7 +291,7 @@ function runExplorerSpecificCommand(
       return true;
     }
     void input.actions.deleteProjectPathsPermanently({ entries })
-      .catch((error) => input.notify(notificationMessageForFileCommandError('Delete failed', error)));
+      .catch((error) => input.notify(notificationMessageForFileCommandError(input.errorLabels.deleteFailed, error)));
     input.closeContextMenu();
     return true;
   }
@@ -334,7 +343,7 @@ function runPasteCommand(
     }).then(() => {
       input.setFileClipboard(clearClipboardAfterPaste(fileClipboard));
     }).catch((error) => {
-      input.notify(notificationMessageForFileCommandError('Paste failed', error));
+      input.notify(notificationMessageForFileCommandError(input.errorLabels.pasteFailed, error));
     });
     return;
   }
@@ -344,10 +353,6 @@ function runPasteCommand(
   }).then(() => {
     input.setFileClipboard(clearClipboardAfterPaste(fileClipboard));
   }).catch((error) => {
-    input.notify(notificationMessageForFileCommandError('Paste failed', error));
+    input.notify(notificationMessageForFileCommandError(input.errorLabels.pasteFailed, error));
   });
-}
-
-function errorMessage(error: unknown): string {
-  return error instanceof Error ? error.message : String(error);
 }

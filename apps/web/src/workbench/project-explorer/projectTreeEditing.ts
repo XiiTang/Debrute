@@ -37,10 +37,10 @@ export function createInlineEditState(
 export function validateInlineProjectName(value: string): { ok: true; name: string } | { ok: false; message: string } {
   const name = value.trim();
   if (!name) {
-    return { ok: false, message: 'Name is required.' };
+    return { ok: false, message: 'required' };
   }
   if (name.includes('/') || name.includes('\\')) {
-    return { ok: false, message: 'Name must not contain path separators.' };
+    return { ok: false, message: 'path-separators' };
   }
   return { ok: true, name };
 }

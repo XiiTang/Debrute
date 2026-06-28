@@ -20,6 +20,7 @@ import {
   FLOATING_TEXT_EDITOR_TITLEBAR_CSS_PROPERTY,
   FLOATING_TEXT_EDITOR_TITLEBAR_CSS_VALUE
 } from './windowBounds';
+import { useI18n } from '../i18n';
 
 export function FloatingTextEditorWindow({
   windowState,
@@ -38,13 +39,20 @@ export function FloatingTextEditorWindow({
   onClose: () => void;
   onDrag: (dx: number, dy: number) => void;
 }): React.ReactElement {
+  const i18n = useI18n();
   const dragStart = React.useRef<{ x: number; y: number } | undefined>(undefined);
   const dragHandleProps = floatingPanelDragHandleProps({
     dragStart,
     onBringToFront,
     onDrag
   });
-  const status = textBufferStatus(buffer);
+  const status = textBufferStatus(buffer, {
+    loading: i18n.t('canvas.node.loading'),
+    error: i18n.t('canvas.node.error'),
+    externalChange: i18n.t('canvas.node.externalChange'),
+    saving: i18n.t('canvas.node.saving'),
+    unsaved: i18n.t('canvas.node.unsaved')
+  });
 
   useEffect(() => {
     void actions.ensureTextFileBuffer(windowState.projectRelativePath);
@@ -71,7 +79,7 @@ export function FloatingTextEditorWindow({
         <small>{windowState.projectRelativePath}</small>
         {status ? <StatusPill tone={status.tone}>{status.label}</StatusPill> : null}
         <IconButton
-          label={`Save ${windowState.projectRelativePath}`}
+          label={i18n.t('canvas.node.saveFile', { path: windowState.projectRelativePath })}
           disabled={!buffer || !buffer.dirty || buffer.saving}
           icon={<Save size={14} />}
           onPointerDown={(event) => event.stopPropagation()}
@@ -79,14 +87,14 @@ export function FloatingTextEditorWindow({
         />
         {buffer?.externalChange ? (
           <IconButton
-            label={`Reload ${windowState.projectRelativePath} from disk`}
+            label={i18n.t('canvas.node.reloadFile', { path: windowState.projectRelativePath })}
             icon={<RefreshCw size={14} />}
             onPointerDown={(event) => event.stopPropagation()}
             onClick={() => void actions.reloadTextFileBuffer(windowState.projectRelativePath)}
           />
         ) : null}
         <IconButton
-          label={`Close ${windowState.projectRelativePath}`}
+          label={i18n.t('canvas.node.closeFile', { path: windowState.projectRelativePath })}
           icon={<X size={14} />}
           onPointerDown={(event) => event.stopPropagation()}
           onClick={onClose}
@@ -96,7 +104,7 @@ export function FloatingTextEditorWindow({
         {buffer?.error ? (
           <div className="canvas-text-message" data-canvas-text-editor="true">
             <AlertTriangle size={18} />
-            <strong>Text Error</strong>
+            <strong>{i18n.t('canvas.node.textError')}</strong>
             <span>{buffer.error}</span>
           </div>
         ) : buffer ? (
@@ -111,7 +119,7 @@ export function FloatingTextEditorWindow({
         ) : (
           <div className="canvas-text-message" data-canvas-text-editor="true">
             <FileText size={18} />
-            <span>Loading text</span>
+            <span>{i18n.t('canvas.node.loadingText')}</span>
           </div>
         )}
       </PanelBody>

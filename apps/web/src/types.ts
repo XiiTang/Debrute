@@ -13,6 +13,7 @@ import type {
   LlmProviderSettingsView,
   SaveAdobeBridgeSettingsInput,
   SaveCanvasTextPreviewSourceInput,
+  SaveWorkbenchPreferencesInput,
   SaveImageModelSettingInput,
   SaveLlmProviderSettingInput,
   SaveVideoModelSettingInput,
@@ -28,6 +29,7 @@ import type {
   WorkbenchProjectSessionSnapshot,
   WorkbenchProjectTextFile,
   WorkbenchProjectTextFileWriteResult,
+  WorkbenchPreferencesView,
   WorkbenchTitleBarState
 } from '@debrute/app-protocol';
 import type {
@@ -40,6 +42,7 @@ export interface WorkbenchState {
   snapshot: WorkbenchProjectSessionSnapshot | undefined;
   projectId?: string | undefined;
   titleBarState: WorkbenchTitleBarState;
+  workbenchPreferences: WorkbenchPreferencesView | undefined;
   projectOpen: ProjectOpenState;
   explorerSelection: ProjectTreeSelectionState;
   llmSettings: LlmProviderSettingsView | undefined;
@@ -82,6 +85,7 @@ export interface FloatingTextEditorWindowState {
 }
 
 export interface WorkbenchActions {
+  saveWorkbenchPreferences: (input: SaveWorkbenchPreferencesInput) => Promise<void>;
   saveLlmProviderSetting: (input: SaveLlmProviderSettingInput, providerId?: string) => Promise<void>;
   deleteLlmProviderSetting: (providerId: string) => Promise<void>;
   setDefaultLlmModelKey: (modelKey: string | null) => Promise<void>;

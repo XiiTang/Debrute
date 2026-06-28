@@ -2,10 +2,12 @@ import React, { useEffect, useState } from 'react';
 import { Download, ExternalLink, RefreshCw, RotateCw } from 'lucide-react';
 import type {
   DesktopAppUpdateDisabledReason,
-  DesktopAppUpdateState
+  DesktopAppUpdateState,
+  WorkbenchLocale
 } from '@debrute/app-protocol';
 import type { DebruteShellApi } from '../../../api/shellApi';
-import { Button, Card, StatusPill, Toolbar, type StatusTone } from '../../ui';
+import { useI18n, type WorkbenchI18n } from '../../i18n';
+import { Button, Card, Field, Select, StatusPill, Toolbar, type StatusTone } from '../../ui';
 
 type OperationState =
   | { status: 'idle' }
@@ -21,11 +23,16 @@ type AppUpdateAction =
 
 export function GeneralSettingsPage({
   shell,
-  initialUpdateState
+  initialUpdateState,
+  locale = 'en',
+  onLocaleChange
 }: {
   shell: DebruteShellApi | undefined;
   initialUpdateState?: DesktopAppUpdateState;
+  locale?: WorkbenchLocale;
+  onLocaleChange?: (locale: WorkbenchLocale) => void;
 }): React.ReactElement {
+  const i18n = useI18n();
   const [updateState, setUpdateState] = useState<DesktopAppUpdateState>(
     initialUpdateState ?? { type: 'disabled', currentVersion: 'unknown', reason: shell?.getAppUpdateState ? 'development' : 'browser' }
   );
@@ -60,15 +67,27 @@ export function GeneralSettingsPage({
   return (
     <section className="db-settings-section general-settings-page">
       <header className="db-settings-section__header">
-        <h2>General</h2>
+        <h2>{i18n.t('settings.general.title')}</h2>
       </header>
       <Card className="db-model-card">
-        <strong>Application</strong>
+        <strong>{i18n.t('settings.general.language.label')}</strong>
+        <Field label={i18n.t('settings.general.language.label')}>
+          <Select
+            value={locale}
+            onChange={(event) => onLocaleChange?.(event.currentTarget.value as WorkbenchLocale)}
+          >
+            <option value="en">{i18n.t('settings.general.language.english')}</option>
+            <option value="zh-CN">{i18n.t('settings.general.language.simplifiedChinese')}</option>
+          </Select>
+        </Field>
+      </Card>
+      <Card className="db-model-card">
+        <strong>{i18n.t('settings.general.application')}</strong>
         <div className="db-property-grid">
-          <small><span>Name</span>Debrute</small>
-          <small><span>Current version</span>{updateState.currentVersion}</small>
-          <small><span>Surface</span>{surfaceLabel(updateState)}</small>
-          <small><span>Platform</span>{platformLabel(updateState)}</small>
+          <small><span>{i18n.t('settings.general.name')}</span>Debrute</small>
+          <small><span>{i18n.t('settings.general.currentVersion')}</span>{updateState.currentVersion}</small>
+          <small><span>{i18n.t('settings.general.surface')}</span>{surfaceLabel(updateState, i18n)}</small>
+          <small><span>{i18n.t('settings.general.platform')}</span>{platformLabel(updateState)}</small>
         </div>
       </Card>
       <AppUpdateCard
@@ -76,6 +95,7 @@ export function GeneralSettingsPage({
         operation={operation}
         shell={shell}
         run={run}
+        i18n={i18n}
       />
     </section>
   );
@@ -85,49 +105,51 @@ function AppUpdateCard({
   state,
   operation,
   shell,
-  run
+  run,
+  i18n
 }: {
   state: DesktopAppUpdateState;
   operation: OperationState;
   shell: DebruteShellApi | undefined;
   run: (action: () => Promise<DesktopAppUpdateState | { ok: true } | undefined>) => Promise<void>;
+  i18n: WorkbenchI18n;
 }): React.ReactElement {
   const action = appUpdateActionForState(state);
   const busy = operation.status === 'loading';
   return (
     <Card className="db-model-card">
       <div className="db-model-card__header">
-        <strong>Updates</strong>
-        <StatusPill tone={statusTone(state)}>{statusLabel(state)}</StatusPill>
+        <strong>{i18n.t('settings.general.updates')}</strong>
+        <StatusPill tone={statusTone(state)}>{statusLabel(state, i18n)}</StatusPill>
       </div>
       <div className="db-property-grid">
-        <small><span>Current version</span>{state.currentVersion}</small>
-        {'updateVersion' in state && state.updateVersion ? <small><span>Latest version</span>{state.updateVersion}</small> : null}
-        {'lastCheckedAt' in state && state.lastCheckedAt ? <small><span>Last checked</span>{state.lastCheckedAt}</small> : null}
-        {state.type === 'downloading' ? <small><span>Progress</span>{state.percent}%</small> : null}
+        <small><span>{i18n.t('settings.general.currentVersion')}</span>{state.currentVersion}</small>
+        {'updateVersion' in state && state.updateVersion ? <small><span>{i18n.t('settings.general.latestVersion')}</span>{state.updateVersion}</small> : null}
+        {'lastCheckedAt' in state && state.lastCheckedAt ? <small><span>{i18n.t('settings.general.lastChecked')}</span>{state.lastCheckedAt}</small> : null}
+        {state.type === 'downloading' ? <small><span>{i18n.t('settings.general.progress')}</span>{state.percent}%</small> : null}
       </div>
       <small className={state.type === 'error' || operation.status === 'error' ? 'db-form-error' : 'db-form-help'}>
-        {operation.status === 'error' ? operation.message : stateMessage(state)}
+        {operation.status === 'error' ? operation.message : stateMessage(state, i18n)}
       </small>
-      <Toolbar ariaLabel="Application update actions" className="db-action-row">
+      <Toolbar ariaLabel={i18n.t('settings.general.updateActions')} className="db-action-row">
         {action === 'check' ? (
           <Button type="button" disabled={busy || !canRunAppUpdateAction(action, state, shell)} iconStart={<RefreshCw size={14} />} onClick={() => void run(() => shell!.checkForAppUpdate!())}>
-            Check for Updates
+            {i18n.t('settings.general.checkForUpdates')}
           </Button>
         ) : null}
         {action === 'download' ? (
           <Button type="button" disabled={busy || !canRunAppUpdateAction(action, state, shell)} iconStart={<Download size={14} />} onClick={() => void run(() => shell!.downloadAppUpdate!())}>
-            Download Update
+            {i18n.t('settings.general.downloadUpdate')}
           </Button>
         ) : null}
         {action === 'install' ? (
           <Button type="button" disabled={busy || !canRunAppUpdateAction(action, state, shell)} iconStart={<RotateCw size={14} />} onClick={() => void run(() => shell!.installAppUpdate!())}>
-            Install and Restart
+            {i18n.t('settings.general.installAndRestart')}
           </Button>
         ) : null}
         {action === 'open-download-page' ? (
           <Button type="button" disabled={busy || !canRunAppUpdateAction(action, state, shell)} iconStart={<ExternalLink size={14} />} onClick={() => void run(() => shell!.openAppUpdateDownloadPage!())}>
-            Open GitHub Releases
+            {i18n.t('settings.general.openGithubReleases')}
           </Button>
         ) : null}
       </Toolbar>
@@ -135,32 +157,32 @@ function AppUpdateCard({
   );
 }
 
-function statusLabel(state: DesktopAppUpdateState): string {
+function statusLabel(state: DesktopAppUpdateState, i18n: WorkbenchI18n): string {
   if (state.type === 'disabled') {
-    return 'Unavailable';
+    return i18n.t('settings.general.updateStatus.unavailable');
   }
   if (state.type === 'idle' && state.notAvailable) {
-    return 'Up to date';
+    return i18n.t('settings.general.updateStatus.upToDate');
   }
   if (state.type === 'idle') {
-    return 'Ready';
+    return i18n.t('settings.general.updateStatus.ready');
   }
   if (state.type === 'checking') {
-    return 'Checking';
+    return i18n.t('settings.general.updateStatus.checking');
   }
   if (state.type === 'available') {
-    return 'Update available';
+    return i18n.t('settings.general.updateStatus.available');
   }
   if (state.type === 'downloading') {
-    return 'Downloading';
+    return i18n.t('settings.general.updateStatus.downloading');
   }
   if (state.type === 'downloaded') {
-    return 'Downloaded';
+    return i18n.t('settings.general.updateStatus.downloaded');
   }
   if (state.type === 'installing') {
-    return 'Installing';
+    return i18n.t('settings.general.updateStatus.installing');
   }
-  return 'Error';
+  return i18n.t('settings.general.updateStatus.error');
 }
 
 function statusTone(state: DesktopAppUpdateState): StatusTone {
@@ -179,35 +201,35 @@ function statusTone(state: DesktopAppUpdateState): StatusTone {
   return 'neutral';
 }
 
-function stateMessage(state: DesktopAppUpdateState): string {
+function stateMessage(state: DesktopAppUpdateState, i18n: WorkbenchI18n): string {
   if (state.type === 'disabled') {
-    return disabledReasonMessage(state.reason);
+    return disabledReasonMessage(state.reason, i18n);
   }
   if (state.type === 'checking') {
-    return 'Checking for updates.';
+    return i18n.t('settings.general.updateMessage.checking');
   }
   if (state.type === 'available' && state.installMode === 'manual-download') {
-    return 'A new version is available. Download and install it from GitHub Releases.';
+    return i18n.t('settings.general.updateMessage.manualDownload');
   }
   if (state.type === 'available') {
-    return 'A new version is available.';
+    return i18n.t('settings.general.updateMessage.available');
   }
   if (state.type === 'downloading') {
-    return 'Downloading update.';
+    return i18n.t('settings.general.updateMessage.downloading');
   }
   if (state.type === 'downloaded') {
-    return 'Update downloaded and ready to install.';
+    return i18n.t('settings.general.updateMessage.downloaded');
   }
   if (state.type === 'installing') {
-    return 'Installing update and restarting Debrute.';
+    return i18n.t('settings.general.updateMessage.installing');
   }
   if (state.type === 'error') {
     return state.message;
   }
   if (state.notAvailable) {
-    return 'Debrute is up to date.';
+    return i18n.t('settings.general.updateMessage.upToDate');
   }
-  return 'Check for the latest Debrute release.';
+  return i18n.t('settings.general.updateMessage.checkLatest');
 }
 
 function appUpdateActionForState(state: DesktopAppUpdateState): AppUpdateAction {
@@ -260,30 +282,30 @@ function canRunAppUpdateAction(
   return false;
 }
 
-function disabledReasonMessage(reason: DesktopAppUpdateDisabledReason): string {
+function disabledReasonMessage(reason: DesktopAppUpdateDisabledReason, i18n: WorkbenchI18n): string {
   if (reason === 'browser') {
-    return 'Updates are unavailable in browser mode.';
+    return i18n.t('settings.general.updateMessage.browser');
   }
   if (reason === 'development') {
-    return 'Updates are unavailable in development builds.';
+    return i18n.t('settings.general.updateMessage.development');
   }
   if (reason === 'unsupported-platform') {
-    return 'Updates are unavailable on this platform.';
+    return i18n.t('settings.general.updateMessage.unsupportedPlatform');
   }
-  return 'Updates are unavailable.';
+  return i18n.t('settings.general.updateMessage.unavailable');
 }
 
-function surfaceLabel(state: DesktopAppUpdateState): string {
+function surfaceLabel(state: DesktopAppUpdateState, i18n: WorkbenchI18n): string {
   if (state.type === 'disabled') {
     if (state.reason === 'browser') {
-      return 'Browser';
+      return i18n.t('settings.general.surface.browser');
     }
     if (state.reason === 'development') {
-      return 'Desktop development';
+      return i18n.t('settings.general.surface.desktopDevelopment');
     }
-    return 'Desktop unsupported';
+    return i18n.t('settings.general.surface.desktopUnsupported');
   }
-  return 'Desktop packaged';
+  return i18n.t('settings.general.surface.desktopPackaged');
 }
 
 function platformLabel(state: DesktopAppUpdateState): string {

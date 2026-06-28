@@ -134,7 +134,6 @@ describe('workbench context menu', () => {
       'rename:enabled',
       'delete:enabled'
     ]);
-    expect(actionLabels(items)).toContain('Reveal in File Explorer');
     expect(actionCommands(items)).not.toContain('paste');
   });
 
@@ -174,7 +173,6 @@ describe('workbench context menu', () => {
       'rename:enabled',
       'delete:enabled'
     ]);
-    expect(actionLabels(items)).toContain('Reveal in Finder');
   });
 
   it('disables Reveal in Canvas when the active Canvas surface cannot navigate', () => {
@@ -220,7 +218,6 @@ describe('workbench context menu', () => {
 
     expect(actionCommands(items)).toContain('paste');
     expect(items.find((item) => item.kind === 'action' && item.command === 'paste')).toMatchObject({ disabled: false });
-    expect(actionLabels(items)).not.toContain('Reveal in File Explorer');
   });
 
   it('keeps Project Tree paste disabled when the internal clipboard has no entries', () => {
@@ -260,7 +257,6 @@ describe('workbench context menu', () => {
     });
 
     expect(actionCommands(items)).toContain('send-to-photoshop');
-    expect(actionLabels(items)).toContain('Send to Photoshop...');
   });
 
   it('does not show Send to Photoshop for unsupported files', () => {
@@ -364,10 +360,6 @@ describe('workbench context menu', () => {
 
 function actionCommands(items: ReturnType<typeof buildWorkbenchContextMenuItems>): string[] {
   return items.filter((item) => item.kind === 'action').map((item) => item.command);
-}
-
-function actionLabels(items: ReturnType<typeof buildWorkbenchContextMenuItems>): string[] {
-  return items.filter((item) => item.kind === 'action').map((item) => item.label);
 }
 
 function menuShape(items: ReturnType<typeof buildWorkbenchContextMenuItems>): string[] {

@@ -24,10 +24,11 @@ describe('executeTitleBarMenuCommand', () => {
       notify: (message) => notifications.push(message),
       openProjectFromPicker: async () => undefined,
       openProjectRoot: async () => undefined,
-      refreshTitleBarState: async () => undefined
+      refreshTitleBarState: async () => undefined,
+      commandUnavailableMessage: (label) => `${label} is not available in this host.`
     });
 
     expect(execCommand).not.toHaveBeenCalled();
-    expect(notifications).toEqual(['paste and match style is not available in this host.']);
+    expect(notifications).toEqual(['Paste and Match Style is not available in this host.']);
   });
 });

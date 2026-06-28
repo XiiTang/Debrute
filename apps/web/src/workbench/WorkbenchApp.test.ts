@@ -89,7 +89,7 @@ describe('WorkbenchApp title bar contracts', () => {
     );
 
     expect(refreshBody).toContain('setTitleBarState(unavailableWorkbenchTitleBarState())');
-    expect(refreshBody).toContain('Title bar state failed');
+    expect(refreshBody).toContain('shell.notifications.titleBarStateFailed');
     expect(source).not.toContain('void refreshTitleBarState().catch');
   });
 
@@ -98,7 +98,7 @@ describe('WorkbenchApp title bar contracts', () => {
 
     expect(source).not.toContain('Opening Debrute workbench');
     expect(source).not.toContain('Opening Explorer');
-    expect(source).toContain('Opening project');
+    expect(source).toContain('shell.boot.openingProject');
   });
 });
 

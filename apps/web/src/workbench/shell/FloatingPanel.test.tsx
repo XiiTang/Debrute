@@ -7,29 +7,32 @@ import {
 } from './floatingPanels';
 import { WorkbenchFloatingPanelShell } from './FloatingPanel';
 import { FLOATING_PANEL_DRAG_HIT_AREA_HEIGHT } from './windowBounds';
+import { I18nProvider } from '../i18n';
 
 describe('FloatingPanel', () => {
   it('renders the shared product shell title inside the drag area without legacy header chrome', () => {
     const html = renderToStaticMarkup(
-      <WorkbenchFloatingPanelShell
-        panelId="explorer"
-        state={{
-          panels: {
-            ...DEFAULT_FLOATING_PANEL_STATE.panels,
-            explorer: {
-              ...DEFAULT_FLOATING_PANEL_STATE.panels.explorer,
-              open: true
+      <I18nProvider locale="en">
+        <WorkbenchFloatingPanelShell
+          panelId="explorer"
+          state={{
+            panels: {
+              ...DEFAULT_FLOATING_PANEL_STATE.panels,
+              explorer: {
+                ...DEFAULT_FLOATING_PANEL_STATE.panels.explorer,
+                open: true
+              }
             }
-          }
-        }}
-        orderState={{ orderBackToFront: [] }}
-        onClose={() => undefined}
-        onBringToFront={() => undefined}
-        onDrag={() => undefined}
-        onResize={() => undefined}
-      >
-        <div>Explorer content</div>
-      </WorkbenchFloatingPanelShell>
+          }}
+          orderState={{ orderBackToFront: [] }}
+          onClose={() => undefined}
+          onBringToFront={() => undefined}
+          onDrag={() => undefined}
+          onResize={() => undefined}
+        >
+          <div>Explorer content</div>
+        </WorkbenchFloatingPanelShell>
+      </I18nProvider>
     );
 
     expect(html).toContain('floating-panel-interaction-row');

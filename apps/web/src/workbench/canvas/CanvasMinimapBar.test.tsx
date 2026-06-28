@@ -1,3 +1,4 @@
+import type { ReactElement } from 'react';
 import { renderToStaticMarkup } from 'react-dom/server';
 import { describe, expect, it } from 'vitest';
 import { createCanvasDocument, type CanvasProjection } from '@debrute/canvas-core';
@@ -6,10 +7,19 @@ import { createCanvasOverlayRuntime } from './CanvasOverlayRuntime';
 import type { CanvasEditorRuntime } from './runtime/CanvasEditorRuntime';
 import { createCanvasEditorRuntime } from './runtime/CanvasEditorRuntime';
 import { CANVAS_MINIMAP_PANEL_SIZE, canvasMinimapButtonRect, placeCanvasMinimapPanel } from '../shell/floatingBars';
+import { I18nProvider } from '../i18n';
+
+function renderStaticWithI18n(element: ReactElement): string {
+  return renderToStaticMarkup(
+    <I18nProvider locale="en">
+      {element}
+    </I18nProvider>
+  );
+}
 
 describe('CanvasMinimapBar', () => {
   it('renders a disabled Mini Map button without valid navigation content', () => {
-    const html = renderToStaticMarkup(
+    const html = renderStaticWithI18n(
       <CanvasMinimapBar
         canvas={undefined}
         nodes={undefined}
@@ -50,7 +60,7 @@ describe('CanvasMinimapBar', () => {
     });
     const runtime = runtimeFixture();
 
-    const html = renderToStaticMarkup(
+    const html = renderStaticWithI18n(
       <CanvasMinimapBar
         canvas={canvas}
         nodes={projection.nodes}
@@ -87,7 +97,7 @@ describe('CanvasMinimapBar', () => {
       surface: fakeElement({ left: 0, top: 0, width: 1000, height: 500 }) as unknown as HTMLElement
     });
 
-    const html = renderToStaticMarkup(
+    const html = renderStaticWithI18n(
       <CanvasMinimapBar
         canvas={canvas}
         nodes={[{ ...durableNode, width: 300, height: 160 }]}

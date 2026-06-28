@@ -4,21 +4,24 @@ import { renderToStaticMarkup } from 'react-dom/server';
 import { describe, expect, it } from 'vitest';
 import { buildWorkbenchTitleBarState } from '@debrute/app-protocol';
 import { WorkbenchTitleBar } from './WorkbenchTitleBar';
+import { I18nProvider } from '../i18n';
 
 describe('WorkbenchTitleBar', () => {
   it('hides Web menus and window controls on macOS Desktop', () => {
     const html = renderToStaticMarkup(
-      <WorkbenchTitleBar
-        state={buildWorkbenchTitleBarState({
-          platform: 'darwin',
-          host: 'desktop',
-          projectTitle: 'Alpha',
-          recentProjectRoots: ['/tmp/alpha']
-        })}
-        nativeWindowState={{ maximized: false }}
-        onCommand={() => undefined}
-        onWindowCommand={() => undefined}
-      />
+      <I18nProvider locale="en">
+        <WorkbenchTitleBar
+          state={buildWorkbenchTitleBarState({
+            platform: 'darwin',
+            host: 'desktop',
+            projectTitle: 'Alpha',
+            recentProjectRoots: ['/tmp/alpha']
+          })}
+          nativeWindowState={{ maximized: false }}
+          onCommand={() => undefined}
+          onWindowCommand={() => undefined}
+        />
+      </I18nProvider>
     );
 
     expect(html).toContain('Alpha');
@@ -29,17 +32,19 @@ describe('WorkbenchTitleBar', () => {
 
   it('renders Web menus and window controls on Windows Desktop', () => {
     const html = renderToStaticMarkup(
-      <WorkbenchTitleBar
-        state={buildWorkbenchTitleBarState({
-          platform: 'win32',
-          host: 'desktop',
-          projectTitle: 'Beta',
-          recentProjectRoots: ['/tmp/beta']
-        })}
-        nativeWindowState={{ maximized: true }}
-        onCommand={() => undefined}
-        onWindowCommand={() => undefined}
-      />
+      <I18nProvider locale="en">
+        <WorkbenchTitleBar
+          state={buildWorkbenchTitleBarState({
+            platform: 'win32',
+            host: 'desktop',
+            projectTitle: 'Beta',
+            recentProjectRoots: ['/tmp/beta']
+          })}
+          nativeWindowState={{ maximized: true }}
+          onCommand={() => undefined}
+          onWindowCommand={() => undefined}
+        />
+      </I18nProvider>
     );
 
     expect(html).toContain('>File<');
@@ -54,17 +59,19 @@ describe('WorkbenchTitleBar', () => {
 
   it('renders Web menus without native controls in browser host', () => {
     const html = renderToStaticMarkup(
-      <WorkbenchTitleBar
-        state={buildWorkbenchTitleBarState({
-          platform: 'linux',
-          host: 'web',
-          projectTitle: undefined,
-          recentProjectRoots: []
-        })}
-        nativeWindowState={{ maximized: false }}
-        onCommand={() => undefined}
-        onWindowCommand={() => undefined}
-      />
+      <I18nProvider locale="en">
+        <WorkbenchTitleBar
+          state={buildWorkbenchTitleBarState({
+            platform: 'linux',
+            host: 'web',
+            projectTitle: undefined,
+            recentProjectRoots: []
+          })}
+          nativeWindowState={{ maximized: false }}
+          onCommand={() => undefined}
+          onWindowCommand={() => undefined}
+        />
+      </I18nProvider>
     );
 
     expect(html).toContain('Debrute');

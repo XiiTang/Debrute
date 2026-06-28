@@ -3,11 +3,12 @@ import { renderToStaticMarkup } from 'react-dom/server';
 import { describe, expect, it } from 'vitest';
 import { SettingsPanel } from '../apps/web/src/workbench/settings/SettingsPanel';
 import { IntegrationsSettingsPage } from '../apps/web/src/workbench/settings/integrations/IntegrationsSettingsPage';
+import { I18nProvider } from '../apps/web/src/workbench/i18n';
 import type { WorkbenchActions, WorkbenchState } from '../apps/web/src/types';
 
 describe('web Integrations settings page', () => {
   it('adds Integrations to the Settings directory', () => {
-    const html = renderToStaticMarkup(React.createElement(SettingsPanel, {
+    const html = renderWithI18n(React.createElement(SettingsPanel, {
       state: createState(),
       actions: createActions()
     }));
@@ -18,7 +19,7 @@ describe('web Integrations settings page', () => {
   });
 
   it('renders ready, missing, failed, and Python CLI integration states', () => {
-    const html = renderToStaticMarkup(React.createElement(IntegrationsSettingsPage, {
+    const html = renderWithI18n(React.createElement(IntegrationsSettingsPage, {
       state: createState(),
       actions: createActions()
     }));
@@ -44,7 +45,7 @@ describe('web Integrations settings page', () => {
   });
 
   it('renders missing binaries as neutral rows with blank version cells', () => {
-    const html = renderToStaticMarkup(React.createElement(IntegrationsSettingsPage, {
+    const html = renderWithI18n(React.createElement(IntegrationsSettingsPage, {
       state: createState({
         integrationsSettings: {
           backends: [{ kind: 'system-package-manager', backend: 'brew', available: true }],
@@ -87,7 +88,7 @@ describe('web Integrations settings page', () => {
         stderrTail: 'brew exploded'
       }
     };
-    const html = renderToStaticMarkup(React.createElement(IntegrationsSettingsPage, {
+    const html = renderWithI18n(React.createElement(IntegrationsSettingsPage, {
       state,
       actions: createActions()
     }));
@@ -97,6 +98,10 @@ describe('web Integrations settings page', () => {
     expect(html).toContain('brew exploded');
   });
 });
+
+function renderWithI18n(element: React.ReactElement): string {
+  return renderToStaticMarkup(React.createElement(I18nProvider, { locale: 'en' }, element));
+}
 
 function createState(overrides: Partial<WorkbenchState> = {}): WorkbenchState {
   return {

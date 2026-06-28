@@ -18,7 +18,7 @@ export function createCanvasFeedbackEntryUpdater(options: {
       return false;
     } catch (error) {
       if (requestId === latestRequestId) {
-        options.notifyUnavailable(`Canvas feedback unavailable: ${errorMessage(error)}`);
+        options.notifyUnavailable(errorMessage(error));
       }
       return false;
     }

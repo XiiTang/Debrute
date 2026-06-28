@@ -62,20 +62,28 @@ export function notificationMessageForFileCommandError(prefix: string, error: un
   return `${prefix}: ${error instanceof Error ? error.message : String(error)}`;
 }
 
+export interface PermanentDeleteConfirmationLabels {
+  directory: (path: string) => string;
+  file: (path: string) => string;
+  selectedItems: (count: number) => string;
+}
+
 export function permanentDeleteConfirmationMessage(input: {
   projectRelativePath: string;
   kind: 'file' | 'directory';
-}): string {
-  return `Permanently delete ${input.kind} "${input.projectRelativePath}"? This cannot be undone.`;
+}, labels: PermanentDeleteConfirmationLabels): string {
+  return input.kind === 'directory'
+    ? labels.directory(input.projectRelativePath)
+    : labels.file(input.projectRelativePath);
 }
 
 export function permanentDeleteConfirmationMessageForEntries(input: {
   entries: Array<{ projectRelativePath: string; kind: 'file' | 'directory' }>;
-}): string {
+}, labels: PermanentDeleteConfirmationLabels): string {
   if (input.entries.length === 1) {
-    return permanentDeleteConfirmationMessage(input.entries[0]!);
+    return permanentDeleteConfirmationMessage(input.entries[0]!, labels);
   }
-  return `Permanently delete ${input.entries.length} selected items? This cannot be undone.`;
+  return labels.selectedItems(input.entries.length);
 }
 
 function isDeletedNodeSelection(

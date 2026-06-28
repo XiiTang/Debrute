@@ -86,11 +86,11 @@ describe('workbench file command helpers', () => {
     expect(permanentDeleteConfirmationMessage({
       projectRelativePath: 'assets',
       kind: 'directory'
-    })).toBe('Permanently delete directory "assets"? This cannot be undone.');
+    }, permanentDeleteLabels)).toBe('Permanently delete directory "assets"? This cannot be undone.');
     expect(permanentDeleteConfirmationMessage({
       projectRelativePath: 'briefs/concept.md',
       kind: 'file'
-    })).toBe('Permanently delete file "briefs/concept.md"? This cannot be undone.');
+    }, permanentDeleteLabels)).toBe('Permanently delete file "briefs/concept.md"? This cannot be undone.');
   });
 
   it('formats command errors for notifications', () => {
@@ -98,3 +98,9 @@ describe('workbench file command helpers', () => {
     expect(notificationMessageForFileCommandError('Rename failed', 'bad')).toBe('Rename failed: bad');
   });
 });
+
+const permanentDeleteLabels = {
+  directory: (path: string) => `Permanently delete directory "${path}"? This cannot be undone.`,
+  file: (path: string) => `Permanently delete file "${path}"? This cannot be undone.`,
+  selectedItems: (count: number) => `Permanently delete ${count} selected items? This cannot be undone.`
+};

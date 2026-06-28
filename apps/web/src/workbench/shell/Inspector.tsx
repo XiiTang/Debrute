@@ -22,6 +22,7 @@ import {
   projectRelativeSource,
   type SelectionContext
 } from '../services/canvasState';
+import { useI18n, type WorkbenchI18n } from '../i18n';
 
 export function Inspector({
   state,
@@ -34,17 +35,18 @@ export function Inspector({
   selection: CanvasSelection | undefined;
   actions: WorkbenchActions;
 }): React.ReactElement {
+  const i18n = useI18n();
   const context = getSelectionContext(state, selection, activeCanvasId);
   const diagnostics = context.diagnostics.length > 0 ? context.diagnostics : state.snapshot?.diagnostics.slice(0, 5) ?? [];
   return (
     <aside className="inspector">
       <div className="inspector-title">
-        <span>Inspector</span>
+        <span>{i18n.t('inspector.title')}</span>
         <CircleDot size={15} />
       </div>
-      <InspectorDetails context={context} state={state} actions={actions} />
+      <InspectorDetails context={context} state={state} actions={actions} i18n={i18n} />
       <div className="inspector-section">
-        <h3>Diagnostics</h3>
+        <h3>{i18n.t('inspector.diagnostics')}</h3>
         <DiagnosticList diagnostics={diagnostics} compact />
       </div>
     </aside>
@@ -54,11 +56,13 @@ export function Inspector({
 function InspectorDetails({
   context,
   state,
-  actions
+  actions,
+  i18n
 }: {
   context: SelectionContext;
   state: WorkbenchState;
   actions: WorkbenchActions;
+  i18n: WorkbenchI18n;
 }): React.ReactElement {
   const snapshot = state.snapshot;
   if (context.kind === 'node') {
@@ -67,15 +71,15 @@ function InspectorDetails({
         <div className="inspector-section">
           <h2>{context.node.projectRelativePath}</h2>
           <dl className="db-object-properties">
-            {selectedNodeRows(context).map(([label, value]) => (
+            {selectedNodeRows(context, i18n).map(([label, value]) => (
               <React.Fragment key={label}>
                 <dt>{label}</dt><dd>{value}</dd>
               </React.Fragment>
             ))}
           </dl>
         </div>
-        <NodeVisualControls context={context} state={state} actions={actions} />
-        {context.node.nodeKind === 'file' ? <NodeGeneratedMetadataSection node={context.node} actions={actions} /> : null}
+        <NodeVisualControls context={context} state={state} actions={actions} i18n={i18n} />
+        {context.node.nodeKind === 'file' ? <NodeGeneratedMetadataSection node={context.node} actions={actions} i18n={i18n} /> : null}
       </>
     );
   }
@@ -86,7 +90,7 @@ function InspectorDetails({
     }), {});
     return (
       <div className="inspector-section">
-        <h2>{context.items.length} selected</h2>
+        <h2>{i18n.t('inspector.selectedCount', { count: context.items.length })}</h2>
         <dl className="db-object-properties">
           {Object.entries(counts).map(([kind, count]) => (
             <React.Fragment key={kind}>
@@ -102,28 +106,28 @@ function InspectorDetails({
       <div className="inspector-section">
         <h2>{context.diagnostic.code}</h2>
         <dl className="db-object-properties">
-          <dt>Source</dt><dd>{context.diagnostic.source}</dd>
-          <dt>Severity</dt><dd>{context.diagnostic.severity}</dd>
-          <dt>Entity</dt><dd>{context.diagnostic.entityId ?? 'project'}</dd>
-          <dt>File</dt><dd>{context.diagnostic.filePath ? projectRelativeSource(snapshot, context.diagnostic.filePath) : 'none'}</dd>
+          <dt>{i18n.t('inspector.source')}</dt><dd>{context.diagnostic.source}</dd>
+          <dt>{i18n.t('inspector.severity')}</dt><dd>{context.diagnostic.severity}</dd>
+          <dt>{i18n.t('inspector.entity')}</dt><dd>{context.diagnostic.entityId ?? 'project'}</dd>
+          <dt>{i18n.t('inspector.file')}</dt><dd>{context.diagnostic.filePath ? projectRelativeSource(snapshot, context.diagnostic.filePath) : i18n.t('common.none')}</dd>
         </dl>
       </div>
     );
   }
   return (
-    <EmptyState className="inspector-empty" title="Select a node or diagnostic." />
+    <EmptyState className="inspector-empty" title={i18n.t('inspector.selectNodeOrDiagnostic')} />
   );
 }
 
-function selectedNodeRows(context: Extract<SelectionContext, { kind: 'node' }>): Array<[string, string]> {
+function selectedNodeRows(context: Extract<SelectionContext, { kind: 'node' }>, i18n: WorkbenchI18n): Array<[string, string]> {
   const rows: Array<[string, string]> = [
-    ['Type', context.node.mediaKind ?? context.node.nodeKind],
-    ['Position', `${Math.round(context.node.x)}, ${Math.round(context.node.y)}`],
-    ['Size', `${Math.round(context.node.width)} x ${Math.round(context.node.height)}`],
-    ['Layer', String(context.node.z)]
+    [i18n.t('inspector.type'), context.node.mediaKind ?? context.node.nodeKind],
+    [i18n.t('inspector.position'), `${Math.round(context.node.x)}, ${Math.round(context.node.y)}`],
+    [i18n.t('inspector.size'), `${Math.round(context.node.width)} x ${Math.round(context.node.height)}`],
+    [i18n.t('inspector.layer'), String(context.node.z)]
   ];
   if (context.node.availability.state !== 'available') {
-    rows.push(['Status', nodeStatusLabel(context.node)]);
+    rows.push([i18n.t('inspector.status'), nodeStatusLabel(context.node)]);
   }
   return rows;
 }
@@ -131,11 +135,13 @@ function selectedNodeRows(context: Extract<SelectionContext, { kind: 'node' }>):
 function NodeVisualControls({
   context,
   state,
-  actions
+  actions,
+  i18n
 }: {
   context: Extract<SelectionContext, { kind: 'node' }>;
   state: WorkbenchState;
   actions: WorkbenchActions;
+  i18n: WorkbenchI18n;
 }): React.ReactElement {
   const canvas = getCanvasById(state.snapshot, context.canvasId);
   const nodePath = context.node.projectRelativePath;
@@ -159,16 +165,16 @@ function NodeVisualControls({
 
   return (
     <div className="inspector-section">
-      <h3>Visual</h3>
-      <div className="inspector-node-controls" aria-label="Node visual controls">
+      <h3>{i18n.t('inspector.visual')}</h3>
+      <div className="inspector-node-controls" aria-label={i18n.t('inspector.nodeVisualControls')}>
         <IconButton
-          label="Move forward"
+          label={i18n.t('inspector.moveForward')}
           disabled={!canMoveLayer || layerIndex === 0}
           icon={<ArrowUp size={14} />}
           onClick={() => moveLayer(-1)}
         />
         <IconButton
-          label="Move backward"
+          label={i18n.t('inspector.moveBackward')}
           disabled={!canMoveLayer || layerIndex === layerOrderTopFirst.length - 1}
           icon={<ArrowDown size={14} />}
           onClick={() => moveLayer(1)}
@@ -186,10 +192,12 @@ type NodeGeneratedMetadataState =
 
 function NodeGeneratedMetadataSection({
   node,
-  actions
+  actions,
+  i18n
 }: {
   node: Extract<SelectionContext, { kind: 'node' }>['node'];
   actions: WorkbenchActions;
+  i18n: WorkbenchI18n;
 }): React.ReactElement {
   const [state, setState] = useState<NodeGeneratedMetadataState>({ status: 'idle' });
   const [open, setOpen] = useState(false);
@@ -228,17 +236,17 @@ function NodeGeneratedMetadataSection({
         setOpen(event.currentTarget.open);
       }}
     >
-      <summary>AI Metadata</summary>
-      {state.status === 'loading' ? <div className="empty-line"><Loader2 className="spin" size={14} />Loading</div> : null}
+      <summary>{i18n.t('inspector.aiMetadata')}</summary>
+      {state.status === 'loading' ? <div className="empty-line"><Loader2 className="spin" size={14} />{i18n.t('inspector.loading')}</div> : null}
       {state.status === 'error' ? <div className="asset-ai-metadata-message error">{state.message}</div> : null}
-      {state.status === 'loaded' ? <GeneratedAssetMetadataLookupView lookup={state.lookup} /> : null}
+      {state.status === 'loaded' ? <GeneratedAssetMetadataLookupView lookup={state.lookup} i18n={i18n} /> : null}
     </details>
   );
 }
 
-function GeneratedAssetMetadataLookupView({ lookup }: { lookup: GeneratedAssetMetadataLookup }): React.ReactElement {
+function GeneratedAssetMetadataLookupView({ lookup, i18n }: { lookup: GeneratedAssetMetadataLookup; i18n: WorkbenchI18n }): React.ReactElement {
   const diagnostics = lookup.diagnostics?.length
-    ? <GeneratedAssetMetadataDiagnosticsView diagnostics={lookup.diagnostics} />
+    ? <GeneratedAssetMetadataDiagnosticsView diagnostics={lookup.diagnostics} i18n={i18n} />
     : null;
   if (lookup.status === 'unavailable') {
     return (
@@ -253,7 +261,7 @@ function GeneratedAssetMetadataLookupView({ lookup }: { lookup: GeneratedAssetMe
       <>
         <dl>
           <dt>SHA-256</dt><dd>{lookup.fingerprint.hash}</dd>
-          <dt>Match</dt><dd>none</dd>
+          <dt>{i18n.t('inspector.match')}</dt><dd>{i18n.t('common.none')}</dd>
         </dl>
         {diagnostics}
       </>
@@ -261,16 +269,18 @@ function GeneratedAssetMetadataLookupView({ lookup }: { lookup: GeneratedAssetMe
   }
   return (
     <>
-      <MatchedGeneratedAssetMetadataView lookup={lookup} />
+      <MatchedGeneratedAssetMetadataView lookup={lookup} i18n={i18n} />
       {diagnostics}
     </>
   );
 }
 
 function MatchedGeneratedAssetMetadataView({
-  lookup
+  lookup,
+  i18n
 }: {
   lookup: Extract<GeneratedAssetMetadataLookup, { status: 'matched' }>;
+  i18n: WorkbenchI18n;
 }): React.ReactElement {
   const [selectedIndex, setSelectedIndex] = useState(0);
   useEffect(() => {
@@ -282,7 +292,7 @@ function MatchedGeneratedAssetMetadataView({
     <div className="asset-ai-metadata-content">
       {lookup.records.length > 1 ? (
         <label className="asset-ai-metadata-picker">
-          <span>Record</span>
+          <span>{i18n.t('inspector.record')}</span>
           <Select className="asset-ai-metadata-select" value={selectedIndex} onChange={(event) => setSelectedIndex(Number(event.currentTarget.value))}>
             {lookup.records.map((item, index) => (
               <option key={item.recordId} value={index}>{`${index + 1}. ${item.createdAt}`}</option>
@@ -290,38 +300,42 @@ function MatchedGeneratedAssetMetadataView({
           </Select>
         </label>
       ) : null}
-      <GeneratedAssetMetadataRecordView record={record} fingerprint={lookup.fingerprint.hash} />
+      <GeneratedAssetMetadataRecordView record={record} fingerprint={lookup.fingerprint.hash} i18n={i18n} />
     </div>
   );
 }
 
 function GeneratedAssetMetadataRecordView({
   record,
-  fingerprint
+  fingerprint,
+  i18n
 }: {
   record: GeneratedAssetRecord;
   fingerprint: string;
+  i18n: WorkbenchI18n;
 }): React.ReactElement {
   return (
     <>
       <dl>
         <dt>SHA-256</dt><dd>{fingerprint}</dd>
-        <dt>Created</dt><dd>{record.createdAt}</dd>
+        <dt>{i18n.t('inspector.created')}</dt><dd>{record.createdAt}</dd>
       </dl>
-      <JsonBlock title="Request" value={record.modelRun.request} />
-      <JsonBlock title="Output" value={record.modelRun.output} />
+      <JsonBlock title={i18n.t('inspector.request')} value={record.modelRun.request} />
+      <JsonBlock title={i18n.t('inspector.output')} value={record.modelRun.output} />
     </>
   );
 }
 
 function GeneratedAssetMetadataDiagnosticsView({
-  diagnostics
+  diagnostics,
+  i18n
 }: {
   diagnostics: NonNullable<GeneratedAssetMetadataLookup['diagnostics']>;
+  i18n: WorkbenchI18n;
 }): React.ReactElement {
   return (
     <section className="asset-ai-metadata-diagnostics">
-      <h4>Diagnostics</h4>
+      <h4>{i18n.t('inspector.diagnostics')}</h4>
       <ul>
         {diagnostics.map((diagnostic, index) => (
           <li key={`${diagnostic.code}:${diagnostic.recordId ?? index}`}>
@@ -352,8 +366,9 @@ export function DiagnosticList({
   compact?: boolean;
   onSelect?: (diagnostic: Diagnostic) => void;
 }): React.ReactElement {
+  const i18n = useI18n();
   if (diagnostics.length === 0) {
-    return <EmptyState className="empty-line" title="No diagnostics" />;
+    return <EmptyState className="empty-line" title={i18n.t('inspector.noDiagnostics')} />;
   }
   return (
     <div className={compact ? 'db-diagnostic-list db-diagnostic-list--compact' : 'db-diagnostic-list'}>

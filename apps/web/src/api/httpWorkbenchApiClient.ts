@@ -20,6 +20,7 @@ import type {
   SaveAdobeBridgeSettingsInput,
   SaveImageModelSettingInput,
   SaveLlmProviderSettingInput,
+  SaveWorkbenchPreferencesInput,
   SaveVideoModelSettingInput,
   SendProjectFileToPhotoshopResult,
   TerminalEvent,
@@ -43,6 +44,7 @@ import type {
   WorkbenchProjectTextFileWriteResult,
   WorkbenchProjectUploadImportInput,
   WorkbenchAddProjectPathToCanvasMapResult,
+  WorkbenchPreferencesView,
   WorkbenchTitleBarState
 } from '@debrute/app-protocol';
 import type {
@@ -260,6 +262,8 @@ export function createHttpWorkbenchApiClient(options: HttpWorkbenchApiClientOpti
       return request<WorkbenchTitleBarState>('GET', `/api/workbench/title-bar?${params.toString()}`);
     },
     clearRecentProjectRoots: () => request<{ ok: true }>('DELETE', '/api/workbench/recent-projects'),
+    workbenchPreferencesGet: () => request<WorkbenchPreferencesView>('GET', '/api/settings/workbench-preferences'),
+    workbenchPreferencesSave: (input: SaveWorkbenchPreferencesInput) => request<WorkbenchPreferencesView>('PUT', '/api/settings/workbench-preferences', input),
     getSnapshot: async () => {
       const result = await request<WorkbenchProjectRefreshResult>('GET', projectPath(''));
       rememberProjectRevision(result);

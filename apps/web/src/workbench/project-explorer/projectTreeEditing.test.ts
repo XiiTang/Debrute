@@ -26,9 +26,9 @@ describe('project tree editing helpers', () => {
 
   it('validates inline project basenames', () => {
     expect(validateInlineProjectName(' cover.png ')).toEqual({ ok: true, name: 'cover.png' });
-    expect(validateInlineProjectName('')).toEqual({ ok: false, message: 'Name is required.' });
-    expect(validateInlineProjectName('nested/name.md')).toEqual({ ok: false, message: 'Name must not contain path separators.' });
-    expect(validateInlineProjectName('nested\\name.md')).toEqual({ ok: false, message: 'Name must not contain path separators.' });
+    expect(validateInlineProjectName('')).toEqual({ ok: false, message: 'required' });
+    expect(validateInlineProjectName('nested/name.md')).toEqual({ ok: false, message: 'path-separators' });
+    expect(validateInlineProjectName('nested\\name.md')).toEqual({ ok: false, message: 'path-separators' });
   });
 
   it('resolves paste target directories from file and directory targets', () => {

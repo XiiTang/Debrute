@@ -27,6 +27,15 @@ import type {
 import type { WorkbenchActions, WorkbenchState } from '../../types';
 import { DiagnosticList, Inspector } from './Inspector';
 import type { CanvasEditorRuntime } from '../canvas/runtime/CanvasEditorRuntime';
+import { useI18n, type WorkbenchI18n, type WorkbenchTranslationKey } from '../i18n';
+
+const floatingPanelTitleKeys: Record<FloatingPanelId, WorkbenchTranslationKey> = {
+  explorer: 'shell.panels.explorer',
+  inspector: 'shell.panels.inspector',
+  problems: 'shell.panels.problems',
+  settings: 'shell.panels.settings',
+  terminal: 'shell.panels.terminal'
+};
 
 const FLOATING_PANEL_RESIZE_DIRECTIONS = ['n', 's', 'e', 'w', 'ne', 'nw', 'se', 'sw'] as const;
 type FloatingPanelResizeDirection = typeof FLOATING_PANEL_RESIZE_DIRECTIONS[number];
@@ -56,7 +65,8 @@ export function WorkbenchFloatingPanelShell({
   onDrag: (dx: number, dy: number) => void;
   onResize: (rect: FloatingPanelResizeRect) => void;
 }): React.ReactElement {
-  const definition = FLOATING_PANEL_DEFINITIONS[panelId];
+  const i18n = useI18n();
+  const title = floatingPanelTitle(panelId, i18n);
   const layout = state.panels[panelId];
   const dragStart = React.useRef<{ x: number; y: number } | undefined>(undefined);
   const resizeStart = React.useRef<FloatingPanelResizeStart | undefined>(undefined);
@@ -81,10 +91,10 @@ export function WorkbenchFloatingPanelShell({
     >
       <div className="floating-panel-interaction-row">
         <div className="floating-panel-drag-hit-area" role="presentation" {...dragHandleProps} />
-        <div className="floating-panel-title" aria-hidden="true">{definition.title}</div>
+        <div className="floating-panel-title" aria-hidden="true">{title}</div>
         <CloseButton
           className="floating-panel-close-button"
-          label={`Close ${definition.title}`}
+          label={i18n.t('shell.panels.close', { title })}
           onPointerDown={(event) => event.stopPropagation()}
           onClick={onClose}
         />
@@ -108,6 +118,10 @@ export function WorkbenchFloatingPanelShell({
       ))}
     </Panel>
   );
+}
+
+function floatingPanelTitle(panelId: FloatingPanelId, i18n: WorkbenchI18n): string {
+  return i18n.t(floatingPanelTitleKeys[panelId]);
 }
 
 export function FloatingPanelContent({

@@ -8,9 +8,15 @@ export interface OpenInitialProjectResult {
   route: DebruteWorkbenchRoute;
   projectOpen?: {
     attemptedPath?: string;
-    error?: string;
+    error?: ProjectOpenStartupError;
   };
 }
+
+export type ProjectOpenStartupError =
+  | { code: 'project-path-required' }
+  | { code: 'project-path-must-be-absolute' }
+  | { code: 'project-snapshot-load-failed'; message: string }
+  | { code: 'project-open-failed'; message: string };
 
 export async function openInitialProject(
   api: WorkbenchApiClient,
@@ -30,7 +36,10 @@ export async function openInitialProject(
         snapshot: undefined,
         route,
         projectOpen: {
-          error: `Project snapshot load failed: ${errorMessage(error)}`
+          error: {
+            code: 'project-snapshot-load-failed',
+            message: errorMessage(error)
+          }
         }
       };
     }
@@ -41,14 +50,14 @@ export async function openInitialProject(
       return {
         snapshot: undefined,
         route,
-        projectOpen: { error: 'Project path is required.' }
+        projectOpen: { error: { code: 'project-path-required' } }
       };
     }
     if (!isAbsoluteLocalProjectPath(projectRoot)) {
       return {
         snapshot: undefined,
         route,
-        projectOpen: { attemptedPath: projectRoot, error: 'Project path must be absolute.' }
+        projectOpen: { attemptedPath: projectRoot, error: { code: 'project-path-must-be-absolute' } }
       };
     }
     try {
@@ -66,7 +75,10 @@ export async function openInitialProject(
         route,
         projectOpen: {
           attemptedPath: projectRoot,
-          error: `Open project failed: ${errorMessage(error)}`
+          error: {
+            code: 'project-open-failed',
+            message: errorMessage(error)
+          }
         }
       };
     }
@@ -84,13 +96,13 @@ export function shouldShowInitialProjectLoader(route: DebruteWorkbenchRoute): bo
 export async function loadCanvasFeedback(
   api: WorkbenchApiClient,
   setCanvasFeedback: React.Dispatch<React.SetStateAction<WorkbenchState['canvasFeedback']>>,
-  setNotifications: React.Dispatch<React.SetStateAction<string[]>>
+  notifyUnavailable: (message: string) => void
 ): Promise<void> {
   try {
     setCanvasFeedback(await api.readCanvasFeedback());
   } catch (error) {
     setCanvasFeedback(undefined);
-    setNotifications((current) => [`Canvas feedback unavailable: ${errorMessage(error)}`, ...current].slice(0, 4));
+    notifyUnavailable(errorMessage(error));
   }
 }
 

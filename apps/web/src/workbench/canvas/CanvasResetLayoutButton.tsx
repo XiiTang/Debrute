@@ -1,6 +1,7 @@
 import React from 'react';
 import { RotateCcw } from 'lucide-react';
 import { IconButton } from '../ui';
+import { useI18n } from '../i18n';
 
 export interface CanvasResetLayoutButtonProps {
   enabled: boolean;
@@ -11,12 +12,13 @@ export function CanvasResetLayoutButton({
   enabled,
   onResetCanvasLayout
 }: CanvasResetLayoutButtonProps): React.ReactElement {
+  const i18n = useI18n();
   return (
     <IconButton
       className="db-floating-bar canvas-reset-layout-button db-canvas-control"
       data-testid="canvas-reset-layout-button"
       data-canvas-local-wheel="true"
-      label="Reset Canvas Layout"
+      label={i18n.t('canvas.resetLayout')}
       icon={<RotateCcw size={13} />}
       disabled={!enabled}
       onPointerDown={stopCanvasResetLayoutEvent}

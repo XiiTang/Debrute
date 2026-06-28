@@ -7,10 +7,11 @@ import {
   isPhotoshopLinkedToCurrentProject
 } from '../apps/web/src/workbench/settings/adobe-bridge/AdobeBridgeSettingsPage';
 import { SettingsPanel } from '../apps/web/src/workbench/settings/SettingsPanel';
+import { I18nProvider } from '../apps/web/src/workbench/i18n';
 
 describe('web Adobe Bridge settings page', () => {
   it('adds Adobe Bridge to the Settings directory', () => {
-    const html = renderToStaticMarkup(React.createElement(SettingsPanel, {
+    const html = renderWithI18n(React.createElement(SettingsPanel, {
       state: createState(),
       actions: createActions()
     }));
@@ -20,7 +21,7 @@ describe('web Adobe Bridge settings page', () => {
   });
 
   it('renders bridge status, Photoshop clients, projects, and link actions', () => {
-    const html = renderToStaticMarkup(React.createElement(AdobeBridgeSettingsPage, {
+    const html = renderWithI18n(React.createElement(AdobeBridgeSettingsPage, {
       state: createState(),
       actions: createActions()
     }));
@@ -33,7 +34,7 @@ describe('web Adobe Bridge settings page', () => {
   });
 
   it('renders Adobe Bridge transfer failures with stable error labels', () => {
-    const html = renderToStaticMarkup(React.createElement(AdobeBridgeSettingsPage, {
+    const html = renderWithI18n(React.createElement(AdobeBridgeSettingsPage, {
       state: createState({
         adobeBridge: {
           ...createState().adobeBridge!,
@@ -95,6 +96,10 @@ describe('web Adobe Bridge settings page', () => {
     expect(isPhotoshopLinkedToCurrentProject(state.adobeBridge, state.projectId, 'ps-other-project')).toBe(false);
   });
 });
+
+function renderWithI18n(element: React.ReactElement): string {
+  return renderToStaticMarkup(React.createElement(I18nProvider, { locale: 'en' }, element));
+}
 
 function createState(overrides: Partial<WorkbenchState> = {}): WorkbenchState {
   return {

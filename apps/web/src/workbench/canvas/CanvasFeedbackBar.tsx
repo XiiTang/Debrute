@@ -20,15 +20,16 @@ import type { WorkbenchActions } from '../../types';
 import type { CanvasOverlayRuntime } from './CanvasOverlayRuntime';
 import type { CanvasImageFeedbackMode } from './CanvasImageFeedbackLayer';
 import { CommentPillInput, IconButton } from '../ui';
+import { useI18n, type WorkbenchTranslationKey } from '../i18n';
 
-const FEEDBACK_MARKS: Record<CanvasFeedbackMark, { label: string; Icon: LucideIcon }> = {
-  like: { label: 'Like', Icon: Heart },
-  dislike: { label: 'Dislike', Icon: ThumbsDown },
-  check: { label: 'Check', Icon: Check },
-  cross: { label: 'Cross', Icon: X },
-  pending: { label: 'Pending', Icon: CircleDot },
-  important: { label: 'Important', Icon: Star },
-  needs_revision: { label: 'Needs revision', Icon: AlertCircle }
+const FEEDBACK_MARKS: Record<CanvasFeedbackMark, { labelKey: WorkbenchTranslationKey; Icon: LucideIcon }> = {
+  like: { labelKey: 'canvas.feedback.like', Icon: Heart },
+  dislike: { labelKey: 'canvas.feedback.dislike', Icon: ThumbsDown },
+  check: { labelKey: 'canvas.feedback.check', Icon: Check },
+  cross: { labelKey: 'canvas.feedback.cross', Icon: X },
+  pending: { labelKey: 'canvas.feedback.pending', Icon: CircleDot },
+  important: { labelKey: 'canvas.feedback.important', Icon: Star },
+  needs_revision: { labelKey: 'canvas.feedback.needsRevision', Icon: AlertCircle }
 };
 
 export function CanvasFeedbackBar({
@@ -60,6 +61,7 @@ export function CanvasFeedbackBar({
   onPointerEnter?: () => void;
   onPointerLeave?: () => void;
 }): React.ReactElement {
+  const i18n = useI18n();
   const elementRef = useRef<HTMLDivElement | null>(null);
   const creatorInputRef = useRef<HTMLInputElement | null>(null);
   const pendingRegionFocusTimerRef = useRef<number | undefined>(undefined);
@@ -73,9 +75,9 @@ export function CanvasFeedbackBar({
   const hasCommentRow = Boolean((entry?.comments.length ?? 0) > 0 || (entry?.regions.length ?? 0) > 0);
   const creatorValue = hasPendingRegionDraft ? pendingRegionComment ?? '' : draftComment;
   const creatorLabel = hasPendingRegionDraft
-    ? `New annotation comment for ${projectRelativePath}`
-    : `New file-level comment for ${projectRelativePath}`;
-  const creatorTitle = hasPendingRegionDraft ? 'New annotation comment' : 'New file-level comment';
+    ? i18n.t('canvas.feedback.newAnnotationCommentForFile', { path: projectRelativePath })
+    : i18n.t('canvas.feedback.newFileCommentForFile', { path: projectRelativePath });
+  const creatorTitle = hasPendingRegionDraft ? i18n.t('canvas.feedback.newAnnotationComment') : i18n.t('canvas.feedback.newFileComment');
   const pendingRegionFocusKey = hasPendingRegionDraft
     ? `${projectRelativePath}:${pendingRegionLabel ?? 'pending'}`
     : undefined;
@@ -186,15 +188,15 @@ export function CanvasFeedbackBar({
       onKeyDown={stopCanvasFeedbackBarEvent}
     >
       <div className="canvas-feedback-primary-row">
-        <div className="canvas-feedback-actions" role="group" aria-label="Canvas feedback actions">
+        <div className="canvas-feedback-actions" role="group" aria-label={i18n.t('canvas.feedback.actions')}>
           {CANVAS_FEEDBACK_MARKS.map((mark) => {
             const pressed = marks.includes(mark);
-            const { label, Icon } = FEEDBACK_MARKS[mark];
+            const { labelKey, Icon } = FEEDBACK_MARKS[mark];
             return (
               <IconButton
                 key={mark}
                 className="canvas-feedback-mark"
-                label={label}
+                label={i18n.t(labelKey)}
                 pressed={pressed}
                 icon={<Icon size={14} />}
                 onClick={() => toggleMark(mark)}
@@ -202,17 +204,17 @@ export function CanvasFeedbackBar({
             );
           })}
           {localFeedbackEnabled ? (
-            <div className="canvas-feedback-local-mode" role="group" aria-label="Image region feedback tools">
+            <div className="canvas-feedback-local-mode" role="group" aria-label={i18n.t('canvas.feedback.imageRegionTools')}>
               <IconButton
                 className="canvas-feedback-mark"
-                label="Add feedback pin"
+                label={i18n.t('canvas.feedback.addPin')}
                 pressed={localFeedbackMode === 'pin'}
                 icon={<MapPin size={14} />}
                 onClick={() => onLocalFeedbackModeChange?.(localFeedbackMode === 'pin' ? undefined : 'pin')}
               />
               <IconButton
                 className="canvas-feedback-mark"
-                label="Add feedback rectangle"
+                label={i18n.t('canvas.feedback.addRectangle')}
                 pressed={localFeedbackMode === 'rect'}
                 icon={<Square size={14} />}
                 onClick={() => onLocalFeedbackModeChange?.(localFeedbackMode === 'rect' ? undefined : 'rect')}
@@ -228,7 +230,7 @@ export function CanvasFeedbackBar({
           aria-label={creatorLabel}
           title={creatorTitle}
           value={creatorValue}
-          placeholder="Comment"
+          placeholder={i18n.t('canvas.feedback.commentPlaceholder')}
           autoFocus={hasPendingRegionDraft}
           sizing={{ minWidthPx: 90, maxWidthPx: 90 }}
           onChange={(event) => {
@@ -260,19 +262,19 @@ export function CanvasFeedbackBar({
       </div>
 
       {hasCommentRow ? (
-        <div className="canvas-feedback-comment-strip" aria-label={`Feedback comments for ${projectRelativePath}`}>
+        <div className="canvas-feedback-comment-strip" aria-label={i18n.t('canvas.feedback.commentsForFile', { path: projectRelativePath })}>
           {entry?.comments.map((fileComment) => (
             <span
               key={fileComment.id}
               className="canvas-feedback-comment-pill canvas-feedback-comment-pill--file"
-              title="File-level comment"
+              title={i18n.t('canvas.feedback.fileLevelComment')}
               data-canvas-local-wheel="true"
             >
               <span className="canvas-feedback-comment-pill-text">{fileComment.comment}</span>
               <IconButton
                 className="canvas-feedback-comment-pill-close"
-                label={`Delete file-level comment for ${projectRelativePath}`}
-                title={`Delete file-level comment for ${projectRelativePath}`}
+                label={i18n.t('canvas.feedback.deleteFileComment', { path: projectRelativePath })}
+                title={i18n.t('canvas.feedback.deleteFileComment', { path: projectRelativePath })}
                 icon={<X size={11} strokeWidth={2.4} />}
                 onClick={(event) => {
                   event.preventDefault();
@@ -292,14 +294,14 @@ export function CanvasFeedbackBar({
               className="canvas-feedback-comment-pill canvas-feedback-comment-pill--region"
               data-canvas-feedback-region-label={region.label}
               data-canvas-local-wheel="true"
-              title={`Feedback for region ${region.label}`}
+              title={i18n.t('canvas.feedback.region', { index: region.label })}
             >
               <span className="canvas-feedback-comment-pill-text">{region.comment}</span>
               <span className="canvas-feedback-comment-pill-badge" aria-hidden="true">{region.label}</span>
               <IconButton
                 className="canvas-feedback-comment-pill-close"
-                label={`Delete feedback region ${region.label}`}
-                title={`Delete feedback region ${region.label}`}
+                label={i18n.t('canvas.feedback.deleteRegion', { index: region.label })}
+                title={i18n.t('canvas.feedback.deleteRegion', { index: region.label })}
                 icon={<X size={11} strokeWidth={2.4} />}
                 onClick={(event) => {
                   event.preventDefault();

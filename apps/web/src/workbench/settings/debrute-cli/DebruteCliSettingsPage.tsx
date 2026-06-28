@@ -3,6 +3,7 @@ import { Download, RefreshCw, RotateCcw, Terminal, Wrench } from 'lucide-react';
 import type { DebruteCliSkillsStatus, DebruteCliStatus } from '@debrute/app-protocol';
 import type { DebruteShellApi } from '../../../api/shellApi';
 import { Button, Card, StatusPill, Toolbar } from '../../ui';
+import { useI18n, type WorkbenchI18n } from '../../i18n';
 
 type OperationState =
   | { status: 'idle' }
@@ -16,6 +17,7 @@ export function DebruteCliSettingsPage({
   shell: DebruteShellApi | undefined;
   initialStatus?: DebruteCliStatus;
 }): React.ReactElement {
+  const i18n = useI18n();
   const [status, setStatus] = useState<DebruteCliStatus | undefined>(initialStatus);
   const [operation, setOperation] = useState<OperationState>({ status: 'idle' });
 
@@ -67,14 +69,14 @@ export function DebruteCliSettingsPage({
     return (
       <section className="db-settings-section debrute-cli-settings-page">
         <header className="db-settings-section__header">
-          <h2>Debrute CLI</h2>
+          <h2>{i18n.t('settings.debruteCli.title')}</h2>
         </header>
         <Card className="db-model-card">
-          <strong>Manual install</strong>
+          <strong>{i18n.t('settings.debruteCli.manualInstall')}</strong>
           <p>
-            Download the matching Debrute CLI archive from{' '}
-            <a href="https://github.com/XiiTang/Debrute/releases" target="_blank" rel="noreferrer">GitHub Releases</a>,
-            verify it with debrute_SHA256SUMS, then use the README manual install command for your platform.
+            {i18n.t('settings.debruteCli.manualInstallPrefix')}{' '}
+            <a href="https://github.com/XiiTang/Debrute/releases" target="_blank" rel="noreferrer">GitHub Releases</a>
+            {i18n.t('settings.debruteCli.manualInstallSuffix')}
           </p>
           <pre><code>debrute --version{'\n'}debrute skills sync</code></pre>
         </Card>
@@ -87,41 +89,41 @@ export function DebruteCliSettingsPage({
   return (
     <section className="db-settings-section debrute-cli-settings-page">
       <header className="db-settings-section__header">
-        <h2>Debrute CLI</h2>
+        <h2>{i18n.t('settings.debruteCli.title')}</h2>
       </header>
       <Card className="db-model-card">
-        <strong>{statusLabel(status)}</strong>
-        {status ? <DebruteCliStatusDetails status={status} /> : <small>Checking</small>}
+        <strong>{statusLabel(status, i18n)}</strong>
+        {status ? <DebruteCliStatusDetails status={status} i18n={i18n} /> : <small>{i18n.t('common.checking')}</small>}
         {operation.status === 'error' ? <small className="db-form-error">{operation.message}</small> : null}
-        <Toolbar ariaLabel="Debrute CLI actions" className="db-action-row">
+        <Toolbar ariaLabel={i18n.t('settings.debruteCli.actions')} className="db-action-row">
           {status?.kind === 'not_installed' ? (
             <Button type="button" disabled={busy || !desktopShell.installDebruteCli} iconStart={<Download size={14} />} onClick={() => void run('install', () => desktopShell.installDebruteCli!())}>
-              Install Debrute CLI
+              {i18n.t('settings.debruteCli.install')}
             </Button>
           ) : null}
           {status?.kind === 'not_installed' || status?.kind === 'error' || status?.kind === 'update_available' ? (
             <Button type="button" disabled={busy || !desktopShell.getDebruteCliManualInstallCommand} iconStart={<Terminal size={14} />} onClick={() => void copyManualCommand()}>
-              Copy Manual Install Command
+              {i18n.t('settings.debruteCli.copyManualInstallCommand')}
             </Button>
           ) : null}
           {status?.kind === 'update_available' ? (
             <Button type="button" disabled={busy || !desktopShell.updateDebruteCli} iconStart={<RefreshCw size={14} />} onClick={() => void run('update', () => desktopShell.updateDebruteCli!())}>
-              Update Debrute CLI
+              {i18n.t('settings.debruteCli.update')}
             </Button>
           ) : null}
           {status?.kind === 'installed_but_not_on_path' ? (
             <Button type="button" disabled={busy || !desktopShell.repairDebruteCliPath} iconStart={<Wrench size={14} />} onClick={() => void run('path', () => desktopShell.repairDebruteCliPath!())}>
-              Repair PATH
+              {i18n.t('settings.debruteCli.repairPath')}
             </Button>
           ) : null}
           {status && status.kind !== 'not_installed' && status.kind !== 'error' ? (
             <Button type="button" disabled={busy || !desktopShell.syncDebruteCliSkills} iconStart={<Terminal size={14} />} onClick={() => void run('sync', () => desktopShell.syncDebruteCliSkills!())}>
-              Sync Skills
+              {i18n.t('settings.debruteCli.syncSkills')}
             </Button>
           ) : null}
           {hasPartiallyRemovedSkills(status) ? (
             <Button type="button" disabled={busy || !desktopShell.restoreDebruteCliSkills} iconStart={<RotateCcw size={14} />} onClick={() => void run('restore', () => desktopShell.restoreDebruteCliSkills!())}>
-              Restore All Debrute Skills
+              {i18n.t('settings.debruteCli.restoreSkills')}
             </Button>
           ) : null}
         </Toolbar>
@@ -130,14 +132,14 @@ export function DebruteCliSettingsPage({
   );
 }
 
-function DebruteCliStatusDetails({ status }: { status: DebruteCliStatus }): React.ReactElement {
+function DebruteCliStatusDetails({ status, i18n }: { status: DebruteCliStatus; i18n: WorkbenchI18n }): React.ReactElement {
   const rows: Array<[string, string]> = [];
-  if ('cliVersion' in status) rows.push(['CLI', status.cliVersion]);
-  if ('desktopVersion' in status) rows.push(['Desktop', status.desktopVersion]);
-  if ('managedPath' in status) rows.push(['Path', status.managedPath]);
-  if (status.kind === 'not_installed' || status.kind === 'error') rows.push(['Manual', status.manualCommand]);
+  if ('cliVersion' in status) rows.push([i18n.t('settings.debruteCli.cli'), status.cliVersion]);
+  if ('desktopVersion' in status) rows.push([i18n.t('settings.debruteCli.desktop'), status.desktopVersion]);
+  if ('managedPath' in status) rows.push([i18n.t('settings.debruteCli.path'), status.managedPath]);
+  if (status.kind === 'not_installed' || status.kind === 'error') rows.push([i18n.t('settings.debruteCli.manual'), status.manualCommand]);
   const skills = 'skills' in status ? status.skills : undefined;
-  if (skills) rows.push(['Skills', skillsStatusLabel(skills)]);
+  if (skills) rows.push([i18n.t('settings.debruteCli.skills'), skillsStatusLabel(skills, i18n)]);
   return (
     <>
       <div className="db-property-grid">
@@ -153,25 +155,25 @@ function DebruteCliStatusDetails({ status }: { status: DebruteCliStatus }): Reac
   );
 }
 
-function statusLabel(status: DebruteCliStatus | undefined): string {
-  if (!status) return 'Checking';
-  if (status.kind === 'not_installed') return 'Not installed';
-  if (status.kind === 'update_available') return 'Update available';
-  if (status.kind === 'external_newer') return 'External newer CLI';
-  if (status.kind === 'installed_but_not_on_path') return 'Installed but not on PATH';
-  if (status.kind === 'error') return 'Error';
-  return 'Installed';
+function statusLabel(status: DebruteCliStatus | undefined, i18n: WorkbenchI18n): string {
+  if (!status) return i18n.t('common.checking');
+  if (status.kind === 'not_installed') return i18n.t('settings.debruteCli.notInstalled');
+  if (status.kind === 'update_available') return i18n.t('settings.debruteCli.updateAvailable');
+  if (status.kind === 'external_newer') return i18n.t('settings.debruteCli.externalNewer');
+  if (status.kind === 'installed_but_not_on_path') return i18n.t('settings.debruteCli.installedButNotOnPath');
+  if (status.kind === 'error') return i18n.t('common.error');
+  return i18n.t('settings.debruteCli.installed');
 }
 
-function skillsStatusLabel(status: DebruteCliSkillsStatus): string {
-  if (status.kind === 'in_sync') return `In sync ${status.debruteVersion}`;
+function skillsStatusLabel(status: DebruteCliSkillsStatus, i18n: WorkbenchI18n): string {
+  if (status.kind === 'in_sync') return i18n.t('settings.debruteCli.inSync', { version: status.debruteVersion });
   if (status.kind === 'out_of_sync') {
     return status.stateDebruteVersion
-      ? `Out of sync ${status.stateDebruteVersion} -> ${status.cliVersion}`
-      : `Out of sync with ${status.cliVersion}`;
+      ? i18n.t('settings.debruteCli.outOfSync', { from: status.stateDebruteVersion, to: status.cliVersion })
+      : i18n.t('settings.debruteCli.outOfSyncWith', { version: status.cliVersion });
   }
-  if (status.kind === 'partially_removed') return 'Some official Skills removed';
-  return `Error ${status.code}`;
+  if (status.kind === 'partially_removed') return i18n.t('settings.debruteCli.someOfficialSkillsRemoved');
+  return i18n.t('settings.debruteCli.errorWithCode', { code: status.code });
 }
 
 function hasPartiallyRemovedSkills(status: DebruteCliStatus | undefined): boolean {

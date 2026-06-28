@@ -1,6 +1,7 @@
 import React from 'react';
 import { FolderOpen } from 'lucide-react';
 import { Button, EmptyState, Toolbar } from '../ui';
+import { useI18n } from '../i18n';
 
 export interface ProjectOpenPanelProps {
   attemptedPath?: string | undefined;
@@ -15,6 +16,7 @@ export function ProjectOpenPanel({
   opening,
   onOpenProject
 }: ProjectOpenPanelProps): React.ReactElement {
+  const i18n = useI18n();
   return (
     <form
       className="project-open-panel db-project-open"
@@ -24,12 +26,12 @@ export function ProjectOpenPanel({
       }}
     >
       <EmptyState
-        title="No project open"
+        title={i18n.t('projectOpen.title')}
         description={attemptedPath ? <span className="db-project-open__meta">{attemptedPath}</span> : undefined}
         action={(
-          <Toolbar ariaLabel="Project open actions" className="db-action-row">
+          <Toolbar ariaLabel={i18n.t('projectOpen.actions')} className="db-action-row">
             <Button type="submit" variant="primary" iconStart={<FolderOpen size={15} />} loading={opening} disabled={opening}>
-              Open Project
+              {i18n.t('projectOpen.openProject')}
             </Button>
           </Toolbar>
         )}

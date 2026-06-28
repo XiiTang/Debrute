@@ -23,7 +23,7 @@ describe('canvas feedback updates', () => {
     await expect(updateCanvasFeedbackEntry(input)).resolves.toBe(false);
 
     expect(applied).toEqual([]);
-    expect(notifications).toEqual(['Canvas feedback unavailable: invalid feedback file']);
+    expect(notifications).toEqual(['invalid feedback file']);
   });
 
   it('applies only the newest overlapping save response', async () => {

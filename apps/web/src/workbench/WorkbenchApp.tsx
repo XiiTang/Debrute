@@ -6,6 +6,7 @@ import type {
   WorkbenchProjectFileBatchOperationResult,
   WorkbenchProjectPathEntry,
   WorkbenchProjectSessionSnapshot,
+  WorkbenchPreferencesView,
   WorkbenchTitleBarState
 } from '@debrute/app-protocol';
 import { unavailableWorkbenchTitleBarState } from '@debrute/app-protocol';
@@ -29,7 +30,8 @@ import {
   loadCanvasFeedback,
   openInitialProject,
   replaceWorkbenchProjectRoute,
-  shouldShowInitialProjectLoader
+  shouldShowInitialProjectLoader,
+  type ProjectOpenStartupError
 } from './services/projectSessionState';
 import { loadProjectViewState, saveProjectViewState } from './services/projectViewState';
 import { reconcileWorkbenchViewportLayout } from './services/workbenchViewportLayout';
@@ -110,6 +112,7 @@ import {
 } from './shell/workbenchWindowOrder';
 import { readWorkbenchViewportRect } from './shell/windowBounds';
 import type { FloatingTextEditorWindowState, TextFileBuffer, WorkbenchActions, WorkbenchState } from '../types';
+import { I18nProvider, createI18n, parseWorkbenchLocale, type WorkbenchI18n, type WorkbenchLocale } from './i18n';
 
 const api = createWorkbenchApiClient();
 
@@ -133,6 +136,8 @@ export function WorkbenchApp(): React.ReactElement {
   const [videoModelSettings, setVideoModelSettings] = useState<WorkbenchState['videoModelSettings']>();
   const [integrationsSettings, setIntegrationsSettings] = useState<WorkbenchState['integrationsSettings']>();
   const [adobeBridge, setAdobeBridge] = useState<WorkbenchState['adobeBridge']>();
+  const [workbenchPreferences, setWorkbenchPreferences] = useState<WorkbenchPreferencesView>();
+  const [locale, setLocale] = useState<WorkbenchLocale>('en');
   const [canvasFeedback, setCanvasFeedback] = useState<WorkbenchState['canvasFeedback']>();
   const [textFileBuffers, setTextFileBuffers] = useState<Record<string, TextFileBuffer>>({});
   const [textEditorWindows, setTextEditorWindows] = useState<Record<string, FloatingTextEditorWindowState>>({});
@@ -168,6 +173,17 @@ export function WorkbenchApp(): React.ReactElement {
   const textEditorWindowsRef = useRef(textEditorWindows);
   const feedbackBarClearTimerRef = useRef<number | undefined>(undefined);
   const feedbackBarHoveredRef = useRef(false);
+  const i18n = useMemo(() => createI18n(locale), [locale]);
+  const localeRef = useRef<WorkbenchLocale>(locale);
+
+  useEffect(() => {
+    localeRef.current = locale;
+  }, [locale]);
+
+  const notifyCanvasFeedbackUnavailable = useCallback((message: string) => {
+    const currentI18n = createI18n(localeRef.current);
+    setNotifications((current) => [currentI18n.t('canvas.feedback.unavailable', { message }), ...current].slice(0, 4));
+  }, []);
 
   const refreshTitleBarState = useCallback(async (projectId?: string) => {
     const shell = getDebruteShellApi();
@@ -181,7 +197,8 @@ export function WorkbenchApp(): React.ReactElement {
       setTitleBarState(state);
     } catch (error) {
       setTitleBarState(unavailableWorkbenchTitleBarState());
-      setNotifications((current) => [`Title bar state failed: ${errorMessage(error)}`, ...current].slice(0, 4));
+      const currentI18n = createI18n(localeRef.current);
+      setNotifications((current) => [currentI18n.t('shell.notifications.titleBarStateFailed', { message: errorMessage(error) }), ...current].slice(0, 4));
     }
   }, []);
 
@@ -234,10 +251,11 @@ export function WorkbenchApp(): React.ReactElement {
     setVideoModelSettings(await api.videoModelGetSettings());
     setIntegrationsSettings(await api.integrationsListStatus());
     setAdobeBridge(await api.adobeBridgeGetState());
-    await loadCanvasFeedback(api, setCanvasFeedback, setNotifications);
+    await loadCanvasFeedback(api, setCanvasFeedback, notifyCanvasFeedbackUnavailable);
     await refreshTitleBarState(opened.projectId);
-    setNotifications((current) => [`Opened project: ${opened.snapshot.metadata.project.name}`, ...current].slice(0, 4));
-  }, [chooseActiveCanvasForProject, loadFloatingPanelsForProject, refreshTitleBarState]);
+    const currentI18n = createI18n(localeRef.current);
+    setNotifications((current) => [currentI18n.t('shell.notifications.projectOpened', { name: opened.snapshot.metadata.project.name }), ...current].slice(0, 4));
+  }, [chooseActiveCanvasForProject, loadFloatingPanelsForProject, notifyCanvasFeedbackUnavailable, refreshTitleBarState]);
 
   useEffect(() => {
     workbenchViewportRectRef.current = workbenchViewportRect;
@@ -312,32 +330,57 @@ export function WorkbenchApp(): React.ReactElement {
       }
     }).catch((error) => {
       if (!disposed) {
-        setNotifications((current) => [...current, `Desktop platform failed: ${errorMessage(error)}`]);
+        const currentI18n = createI18n(localeRef.current);
+        setNotifications((current) => [currentI18n.t('shell.notifications.desktopPlatformFailed', { message: errorMessage(error) }), ...current].slice(0, 4));
       }
     });
-    openInitialProject(api, initialRoute)
-      .then(async (result) => {
+    void (async () => {
+      try {
+        const preferences = await api.workbenchPreferencesGet();
+        if (disposed) {
+          return;
+        }
+        const nextLocale = parseWorkbenchLocale(preferences.locale);
+        localeRef.current = nextLocale;
+        setWorkbenchPreferences({ locale: nextLocale });
+        setLocale(nextLocale);
+      } catch (error) {
+        if (disposed) {
+          return;
+        }
+        const englishI18n = createI18n('en');
+        localeRef.current = 'en';
+        setLocale('en');
+        setWorkbenchPreferences({ locale: 'en' });
+        setNotifications((current) => [
+          englishI18n.t('shell.notifications.languagePreferenceLoadFailed', { message: errorMessage(error) }),
+          ...current
+        ].slice(0, 4));
+      }
+
+      try {
+        const result = await openInitialProject(api, initialRoute);
         if (disposed) {
           return;
         }
         setProjectOpenAttemptedPath(result.projectOpen?.attemptedPath);
-        setProjectOpenError(result.projectOpen?.error);
+        setProjectOpenError(localizedProjectOpenError(result.projectOpen?.error, createI18n(localeRef.current)));
         const { projectId: routeProjectId, snapshot: opened } = result;
         if (!opened || !routeProjectId) {
           return;
         }
         await applyOpenedProject({ projectId: routeProjectId, snapshot: opened });
-      })
-      .catch((error) => {
+      } catch (error) {
         if (!disposed) {
-          setNotifications((current) => [`Project startup failed: ${errorMessage(error)}`, ...current].slice(0, 4));
+          const currentI18n = createI18n(localeRef.current);
+          setNotifications((current) => [currentI18n.t('shell.notifications.projectStartupFailed', { message: errorMessage(error) }), ...current].slice(0, 4));
         }
-      })
-      .finally(() => {
+      } finally {
         if (!disposed) {
           setIsLoading(false);
         }
-      });
+      }
+    })();
     return () => {
       disposed = true;
     };
@@ -434,12 +477,18 @@ export function WorkbenchApp(): React.ReactElement {
         setActiveCanvasRuntime(undefined);
         setCanvasRuntimeScopeKey((current) => current + 1);
         setCanvasMinimapOpen(false);
-        void loadCanvasFeedback(api, setCanvasFeedback, setNotifications);
+        void loadCanvasFeedback(api, setCanvasFeedback, notifyCanvasFeedbackUnavailable);
+      }
+      if (event.type === 'workbench.preferences.changed') {
+        const nextLocale = parseWorkbenchLocale(event.preferences.locale);
+        localeRef.current = nextLocale;
+        setWorkbenchPreferences({ locale: nextLocale });
+        setLocale(nextLocale);
       }
       if (event.type === 'project.fileChanged') {
         void refreshTextFileBuffer(event.event.projectRelativePath);
         if (event.event.projectRelativePath === '.debrute/reviews/canvas-feedback.json') {
-          void loadCanvasFeedback(api, setCanvasFeedback, setNotifications);
+          void loadCanvasFeedback(api, setCanvasFeedback, notifyCanvasFeedbackUnavailable);
         }
       }
       if (event.type === 'canvas.feedback.changed') {
@@ -464,7 +513,7 @@ export function WorkbenchApp(): React.ReactElement {
         setAdobeBridge(event.state);
       }
     });
-  }, [chooseActiveCanvasForProject, loadFloatingPanelsForProject, refreshTextFileBuffer]);
+  }, [chooseActiveCanvasForProject, loadFloatingPanelsForProject, notifyCanvasFeedbackUnavailable, refreshTextFileBuffer]);
 
   useEffect(() => {
     if (!snapshot || snapshot.canvasRegistry.status !== 'ready') {
@@ -501,9 +550,9 @@ export function WorkbenchApp(): React.ReactElement {
     requestUpdate: async (input) => (await api.updateCanvasFeedbackEntry(input)).feedback,
     applyFeedback: setCanvasFeedback,
     notifyUnavailable: (message) => {
-      setNotifications((current) => [message, ...current].slice(0, 4));
+      notifyCanvasFeedbackUnavailable(message);
     }
-  }), []);
+  }), [notifyCanvasFeedbackUnavailable]);
 
   const clearFeedbackBarHideTimer = useCallback(() => {
     if (feedbackBarClearTimerRef.current !== undefined) {
@@ -564,9 +613,9 @@ export function WorkbenchApp(): React.ReactElement {
       }
       await navigator.clipboard.writeText(projectRelativePath);
     } catch (error) {
-      setNotifications((current) => [`Copy failed: ${errorMessage(error)}`, ...current].slice(0, 4));
+      setNotifications((current) => [i18n.t('shell.notifications.copyFailed', { message: errorMessage(error) }), ...current].slice(0, 4));
     }
-  }, []);
+  }, [i18n]);
 
   const activeCanvas = getCanvasById(snapshot, activeCanvasId);
   const activeProjection = activeCanvas
@@ -614,6 +663,7 @@ export function WorkbenchApp(): React.ReactElement {
     snapshot,
     projectId: daemonProjectId,
     titleBarState: effectiveTitleBarState,
+    workbenchPreferences,
     projectOpen: {
       ...(projectOpenAttemptedPath ? { attemptedPath: projectOpenAttemptedPath } : {}),
       ...(projectOpenError ? { error: projectOpenError } : {}),
@@ -638,6 +688,29 @@ export function WorkbenchApp(): React.ReactElement {
   }, []);
 
   const actions: WorkbenchActions = useMemo(() => ({
+    saveWorkbenchPreferences: async (input) => {
+      const previousLocale = locale;
+      const nextLocale = input.locale;
+      localeRef.current = nextLocale;
+      setLocale(nextLocale);
+      setWorkbenchPreferences({ locale: nextLocale });
+      try {
+        const preferences = await api.workbenchPreferencesSave({ locale: nextLocale });
+        const savedLocale = parseWorkbenchLocale(preferences.locale);
+        localeRef.current = savedLocale;
+        setLocale(savedLocale);
+        setWorkbenchPreferences({ locale: savedLocale });
+      } catch (error) {
+        localeRef.current = previousLocale;
+        setLocale(previousLocale);
+        setWorkbenchPreferences({ locale: previousLocale });
+        const previousI18n = createI18n(previousLocale);
+        setNotifications((current) => [
+          previousI18n.t('shell.notifications.languagePreferenceSaveFailed', { message: errorMessage(error) }),
+          ...current
+        ].slice(0, 4));
+      }
+    },
     openProject: async () => {
       setIsProjectOpening(true);
       setProjectOpenError(undefined);
@@ -649,7 +722,7 @@ export function WorkbenchApp(): React.ReactElement {
         }
         await applyOpenedProject(result);
       } catch (error) {
-        setProjectOpenError(`Open project failed: ${errorMessage(error)}`);
+        setProjectOpenError(i18n.t('projectOpen.openFailed', { message: errorMessage(error) }));
       } finally {
         setIsProjectOpening(false);
       }
@@ -691,7 +764,7 @@ export function WorkbenchApp(): React.ReactElement {
     },
     sendProjectFileToPhotoshop: async (input) => {
       const result = await api.sendProjectFileToPhotoshop(input);
-      setNotifications((current) => [`Sent to Photoshop: ${input.projectRelativePath}`, ...current].slice(0, 4));
+      setNotifications((current) => [i18n.t('shell.notifications.sentToPhotoshop', { path: input.projectRelativePath }), ...current].slice(0, 4));
       return result;
     },
     openSendToPhotoshopPicker: (projectRelativePath) => {
@@ -784,7 +857,7 @@ export function WorkbenchApp(): React.ReactElement {
         snapshotRef.current = next;
         setSnapshot(next);
       } catch (error) {
-        setNotifications((current) => [`Update Canvas layout failed: ${errorMessage(error)}`, ...current].slice(0, 4));
+        setNotifications((current) => [i18n.t('shell.notifications.updateCanvasLayoutFailed', { message: errorMessage(error) }), ...current].slice(0, 4));
         throw error;
       }
     },
@@ -824,7 +897,7 @@ export function WorkbenchApp(): React.ReactElement {
         setExplorerSelection(projectTreeSelectionFromPaths([result.centerProjectRelativePath]));
         centerCanvasProjectionNode(result.projection, result.centerProjectRelativePath);
       } catch (error) {
-        setNotifications((current) => [`Add to Canvas Map failed: ${errorMessage(error)}`, ...current].slice(0, 4));
+        setNotifications((current) => [i18n.t('shell.notifications.addToCanvasMapFailed', { message: errorMessage(error) }), ...current].slice(0, 4));
       }
     },
     createCanvas: async () => {
@@ -873,7 +946,9 @@ export function WorkbenchApp(): React.ReactElement {
     locateProjectFileInCanvas,
     chooseActiveCanvasForProject,
     ensureTextFileBuffer,
+    i18n,
     loadFloatingPanelsForProject,
+    locale,
     lookupGeneratedAssetMetadata,
     openTerminalPanel,
     openTextEditorWindow,
@@ -945,7 +1020,10 @@ export function WorkbenchApp(): React.ReactElement {
     }
     const validation = validateInlineProjectName(current.value);
     if (!validation.ok) {
-      setInlineProjectTreeEdit({ ...current, error: validation.message });
+      setInlineProjectTreeEdit({
+        ...current,
+        error: i18n.t(validation.message === 'required' ? 'explorer.nameRequired' : 'explorer.namePathSeparators')
+      });
       return;
     }
     const { error: _error, ...submittingEdit } = current;
@@ -971,7 +1049,7 @@ export function WorkbenchApp(): React.ReactElement {
     } catch (error) {
       setInlineProjectTreeEdit({ ...current, submitting: false, error: errorMessage(error) });
     }
-  }, [actions, inlineProjectTreeEdit]);
+  }, [actions, i18n, inlineProjectTreeEdit]);
 
   const openWorkbenchWindows = useMemo<WorkbenchWindowIdentity[]>(() => [
     ...FLOATING_PANEL_IDS
@@ -1005,9 +1083,10 @@ export function WorkbenchApp(): React.ReactElement {
           setIsProjectOpening(false);
         }
       },
-      refreshTitleBarState: () => refreshTitleBarState(daemonProjectId)
-    }).catch((error) => notify(`Menu command failed: ${errorMessage(error)}`));
-  }, [actions.openProject, applyOpenedProject, daemonProjectId, notify, refreshTitleBarState]);
+      refreshTitleBarState: () => refreshTitleBarState(daemonProjectId),
+      commandUnavailableMessage: (label) => i18n.t('shell.notifications.commandUnavailable', { command: label })
+    }).catch((error) => notify(i18n.t('shell.notifications.menuCommandFailed', { message: errorMessage(error) })));
+  }, [actions.openProject, applyOpenedProject, daemonProjectId, i18n, notify, refreshTitleBarState]);
   const handleTitleBarWindowCommand = useCallback((command: 'minimize' | 'toggle-maximize' | 'close') => {
     const shell = getDebruteShellApi();
     const promise = command === 'minimize'
@@ -1020,8 +1099,8 @@ export function WorkbenchApp(): React.ReactElement {
         setNativeWindowState(state);
         reconcileCurrentWorkbenchViewportLayout();
       }
-    }).catch((error) => notify(`Window command failed: ${errorMessage(error)}`));
-  }, [notify, reconcileCurrentWorkbenchViewportLayout]);
+    }).catch((error) => notify(i18n.t('shell.notifications.windowCommandFailed', { message: errorMessage(error) })));
+  }, [i18n, notify, reconcileCurrentWorkbenchViewportLayout]);
 
   const minimapButtonRect = canvasMinimapButtonRect(workbenchViewportRect);
   const minimapPanelPlacement = placeCanvasMinimapPanel({
@@ -1077,9 +1156,9 @@ export function WorkbenchApp(): React.ReactElement {
       return;
     }
     void actions.resetCanvasNodeLayouts(activeCanvasId, { all: true }).catch((error) => {
-      notify(`Reset canvas layout failed: ${errorMessage(error)}`);
+      notify(i18n.t('shell.notifications.resetCanvasLayoutFailed', { message: errorMessage(error) }));
     });
-  }, [actions, activeCanvasId, notify]);
+  }, [actions, activeCanvasId, i18n, notify]);
   const canRevealInCanvas = Boolean(activeCanvasRuntime && activeCanvasRuntimeSnapshot?.surfaceSize);
   const contextMenuItems = useMemo(() => contextMenu
       ? buildWorkbenchContextMenuItems({
@@ -1098,15 +1177,29 @@ export function WorkbenchApp(): React.ReactElement {
   const registryInvalid = snapshot?.canvasRegistry.status === 'invalid'
     ? snapshot.canvasRegistry
     : undefined;
+  const permanentDeleteConfirmationLabels = useMemo(() => ({
+    directory: (path: string) => i18n.t('shell.confirm.permanentDeleteDirectory', { path }),
+    file: (path: string) => i18n.t('shell.confirm.permanentDeleteFile', { path }),
+    selectedItems: (count: number) => i18n.t('shell.confirm.permanentDeleteSelected', { count })
+  }), [i18n]);
   const confirmPermanentDelete = useCallback((input: { entries: Array<{ projectRelativePath: string; kind: 'file' | 'directory' }> }) => (
-    window.confirm(permanentDeleteConfirmationMessageForEntries(input))
-  ), []);
+    window.confirm(permanentDeleteConfirmationMessageForEntries(input, permanentDeleteConfirmationLabels))
+  ), [permanentDeleteConfirmationLabels]);
   const confirmMoveOverwrite = useCallback((input: {
     entries: WorkbenchProjectPathEntry[];
     targetDirectoryProjectRelativePath: string;
   }) => (
-    window.confirm(`Overwrite existing project item${input.entries.length === 1 ? '' : 's'} in "${input.targetDirectoryProjectRelativePath || 'project root'}"?`)
-  ), []);
+    window.confirm(i18n.t('shell.confirm.moveOverwrite', {
+      target: input.targetDirectoryProjectRelativePath || i18n.t('shell.confirm.projectRoot')
+    }))
+  ), [i18n]);
+  const contextMenuCommandErrorLabels = useMemo(() => ({
+    copyPathFailed: i18n.t('shell.notifications.copyPathFailed'),
+    revealFailed: i18n.t('shell.notifications.revealFailed'),
+    deleteFailed: i18n.t('shell.notifications.deleteFailed'),
+    pasteFailed: i18n.t('shell.notifications.pasteFailed'),
+    resetAutoLayoutFailed: i18n.t('shell.notifications.resetAutoLayoutFailed')
+  }), [i18n]);
   const handleWorkbenchContextMenuCommand = useCallback((command: WorkbenchContextMenuCommand) => {
     runWorkbenchContextMenuCommand({
       command,
@@ -1123,7 +1216,8 @@ export function WorkbenchApp(): React.ReactElement {
       openInspectorPanel,
       confirmPermanentDelete,
       projectSnapshot: snapshot,
-      confirmMoveOverwrite
+      confirmMoveOverwrite,
+      errorLabels: contextMenuCommandErrorLabels
     });
   }, [
     actions,
@@ -1131,6 +1225,7 @@ export function WorkbenchApp(): React.ReactElement {
     activeProjection,
     closeWorkbenchContextMenu,
     confirmMoveOverwrite,
+    contextMenuCommandErrorLabels,
     contextMenu,
     copyProjectRelativePath,
     confirmPermanentDelete,
@@ -1158,7 +1253,8 @@ export function WorkbenchApp(): React.ReactElement {
       openInspectorPanel,
       confirmPermanentDelete,
       projectSnapshot: snapshot,
-      confirmMoveOverwrite
+      confirmMoveOverwrite,
+      errorLabels: contextMenuCommandErrorLabels
     });
   }, [
     actions,
@@ -1166,6 +1262,7 @@ export function WorkbenchApp(): React.ReactElement {
     activeProjection,
     closeWorkbenchContextMenu,
     confirmMoveOverwrite,
+    contextMenuCommandErrorLabels,
     confirmPermanentDelete,
     copyProjectRelativePath,
     fileClipboard,
@@ -1182,7 +1279,7 @@ export function WorkbenchApp(): React.ReactElement {
       void actions.copyProjectPaths({
         entries: input.entries,
         targetDirectoryProjectRelativePath: input.targetDirectoryProjectRelativePath
-      }).catch((error) => notify(`Copy failed: ${errorMessage(error)}`));
+      }).catch((error) => notify(i18n.t('shell.notifications.copyFailed', { message: errorMessage(error) })));
       return;
     }
     if (isProjectTreeMoveNoop({
@@ -1196,9 +1293,10 @@ export function WorkbenchApp(): React.ReactElement {
       entries: input.entries,
       targetDirectoryProjectRelativePath: input.targetDirectoryProjectRelativePath
     });
+    const target = input.targetDirectoryProjectRelativePath || i18n.t('shell.confirm.projectRoot');
     const confirmed = window.confirm(overwrite
-      ? `Overwrite existing project item${input.entries.length === 1 ? '' : 's'} in "${input.targetDirectoryProjectRelativePath || 'project root'}"?`
-      : `Move ${input.entries.length} item${input.entries.length === 1 ? '' : 's'} to "${input.targetDirectoryProjectRelativePath || 'project root'}"?`);
+      ? i18n.t('shell.confirm.moveOverwrite', { target })
+      : i18n.t('shell.confirm.moveItems', { count: input.entries.length, target }));
     if (!confirmed) {
       return;
     }
@@ -1206,8 +1304,8 @@ export function WorkbenchApp(): React.ReactElement {
       entries: input.entries,
       targetDirectoryProjectRelativePath: input.targetDirectoryProjectRelativePath,
       ...(overwrite ? { overwrite: true } : {})
-    }).catch((error) => notify(`Move failed: ${errorMessage(error)}`));
-  }, [actions, notify, snapshot]);
+    }).catch((error) => notify(i18n.t('shell.notifications.moveFailed', { message: errorMessage(error) })));
+  }, [actions, i18n, notify, snapshot]);
   const handleProjectTreeExternalDrop = useCallback((input: {
     dataTransfer: DataTransfer;
     targetDirectoryProjectRelativePath: string;
@@ -1223,7 +1321,9 @@ export function WorkbenchApp(): React.ReactElement {
         uploads: plan.uploads,
         targetDirectoryProjectRelativePath: plan.targetDirectoryProjectRelativePath
       });
-      if (overwrite && !window.confirm(`Overwrite existing project item${plan.localPaths.length + plan.uploads.length === 1 ? '' : 's'} in "${plan.targetDirectoryProjectRelativePath || 'project root'}"?`)) {
+      if (overwrite && !window.confirm(i18n.t('shell.confirm.moveOverwrite', {
+        target: plan.targetDirectoryProjectRelativePath || i18n.t('shell.confirm.projectRoot')
+      }))) {
         return;
       }
       if (plan.localPaths.length > 0) {
@@ -1251,27 +1351,30 @@ export function WorkbenchApp(): React.ReactElement {
       const selectedPaths = batchResultSelectionPaths(result.results);
       setExplorerSelection(projectTreeSelectionFromPaths(selectedPaths));
       locateSingleFileBatchResult(result.results, locateProjectFileInCanvas);
-    }).catch((error) => notify(`Import failed: ${errorMessage(error)}`));
-  }, [locateProjectFileInCanvas, notify, snapshot]);
+    }).catch((error) => notify(i18n.t('shell.notifications.importFailed', { message: errorMessage(error) })));
+  }, [i18n, locateProjectFileInCanvas, notify, snapshot]);
   if (isLoading) {
     return (
-      <div className="workbench-shell" data-theme="dark" data-testid="workbench-shell">
-        <WorkbenchTitleBar
-          state={effectiveTitleBarState}
-          nativeWindowState={nativeWindowState}
-          onCommand={handleTitleBarCommand}
-          onWindowCommand={handleTitleBarWindowCommand}
-        />
-        <div className="boot-screen boot-screen--with-titlebar">
-          <Loader2 className="spin" size={22} />
-          <span>Opening project</span>
+      <I18nProvider locale={locale}>
+        <div className="workbench-shell" data-theme="dark" data-testid="workbench-shell">
+          <WorkbenchTitleBar
+            state={effectiveTitleBarState}
+            nativeWindowState={nativeWindowState}
+            onCommand={handleTitleBarCommand}
+            onWindowCommand={handleTitleBarWindowCommand}
+          />
+          <div className="boot-screen boot-screen--with-titlebar">
+            <Loader2 className="spin" size={22} />
+            <span>{i18n.t('shell.boot.openingProject')}</span>
+          </div>
         </div>
-      </div>
+      </I18nProvider>
     );
   }
 
   return (
-    <div className="workbench-shell" data-theme="dark" data-testid="workbench-shell">
+    <I18nProvider locale={locale}>
+      <div className="workbench-shell" data-theme="dark" data-testid="workbench-shell">
       <WorkbenchTitleBar
         state={effectiveTitleBarState}
         nativeWindowState={nativeWindowState}
@@ -1281,12 +1384,12 @@ export function WorkbenchApp(): React.ReactElement {
       <div className="canvas-layer" data-testid="canvas-layer">
         {registryInvalid ? (
           <div className="empty-editor empty-project">
-            <strong>Canvas registry needs repair</strong>
+            <strong>{i18n.t('canvas.registry.needsRepair')}</strong>
             <span>{registryInvalid.message}</span>
             <Button
-              onClick={() => { void actions.repairCanvasIndex().catch((error) => notify(`Canvas registry repair failed: ${errorMessage(error)}`)); }}
+              onClick={() => { void actions.repairCanvasIndex().catch((error) => notify(i18n.t('shell.notifications.canvasRegistryRepairFailed', { message: errorMessage(error) }))); }}
             >
-              Auto Repair
+              {i18n.t('canvas.registry.autoRepair')}
             </Button>
           </div>
         ) : (
@@ -1381,10 +1484,10 @@ export function WorkbenchApp(): React.ReactElement {
             canvasOrder={canvasOrder}
             activeCanvasId={activeCanvasId}
             onActiveCanvasChange={setActiveCanvasId}
-            onCreateCanvas={() => actions.createCanvas().then(() => undefined).catch((error) => notify(`Create canvas failed: ${errorMessage(error)}`))}
-            onRenameCanvas={(input) => actions.renameCanvas(input).then(() => undefined).catch((error) => notify(`Rename canvas failed: ${errorMessage(error)}`))}
-            onDeleteCanvas={(input) => actions.deleteCanvas(input).then(() => undefined).catch((error) => notify(`Delete canvas failed: ${errorMessage(error)}`))}
-            onReorderCanvases={(input) => actions.reorderCanvases(input).then(() => undefined).catch((error) => notify(`Reorder canvases failed: ${errorMessage(error)}`))}
+            onCreateCanvas={() => actions.createCanvas().then(() => undefined).catch((error) => notify(i18n.t('shell.notifications.createCanvasFailed', { message: errorMessage(error) })))}
+            onRenameCanvas={(input) => actions.renameCanvas(input).then(() => undefined).catch((error) => notify(i18n.t('shell.notifications.renameCanvasFailed', { message: errorMessage(error) })))}
+            onDeleteCanvas={(input) => actions.deleteCanvas(input).then(() => undefined).catch((error) => notify(i18n.t('shell.notifications.deleteCanvasFailed', { message: errorMessage(error) })))}
+            onReorderCanvases={(input) => actions.reorderCanvases(input).then(() => undefined).catch((error) => notify(i18n.t('shell.notifications.reorderCanvasesFailed', { message: errorMessage(error) })))}
           />
         ) : null}
         {Object.values(textEditorWindows).filter((windowState) => windowState.open).map((windowState) => (
@@ -1457,6 +1560,7 @@ export function WorkbenchApp(): React.ReactElement {
         <WorkbenchContextMenu
           items={contextMenuItems}
           position={contextMenu.position}
+          desktopPlatform={desktopPlatform}
           onCommand={handleWorkbenchContextMenuCommand}
           onClose={closeWorkbenchContextMenu}
         />
@@ -1476,15 +1580,16 @@ export function WorkbenchApp(): React.ReactElement {
             }).then(() => {
               setSendToPhotoshopPath(undefined);
             }).catch((error) => {
-              notify(`Send to Photoshop failed: ${errorMessage(error)}`);
+              notify(i18n.t('shell.notifications.sendToPhotoshopFailed', { message: errorMessage(error) }));
             }).finally(() => {
               setSendingToPhotoshop(false);
             });
           }}
         />
       ) : null}
-      <NotificationStack notifications={notifications} />
-    </div>
+        <NotificationStack notifications={notifications} />
+      </div>
+    </I18nProvider>
   );
 }
 
@@ -1632,4 +1737,27 @@ function sameWorkbenchRuntimeSnapshot(
 
 function errorMessage(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
+}
+
+function localizedProjectOpenError(error: ProjectOpenStartupError | undefined, i18n: WorkbenchI18n): string | undefined {
+  if (!error) {
+    return undefined;
+  }
+  if (error.code === 'project-path-required') {
+    return i18n.t('projectOpen.pathRequired');
+  }
+  if (error.code === 'project-path-must-be-absolute') {
+    return i18n.t('projectOpen.pathMustBeAbsolute');
+  }
+  if (error.code === 'project-snapshot-load-failed') {
+    return i18n.t('projectOpen.snapshotLoadFailed', { message: error.message });
+  }
+  if (error.code === 'project-open-failed') {
+    return i18n.t('projectOpen.openFailed', { message: error.message });
+  }
+  return assertNever(error);
+}
+
+function assertNever(value: never): never {
+  throw new Error(`[debrute:workbench] Unhandled project open error: ${String(value)}`);
 }

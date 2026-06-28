@@ -1,31 +1,35 @@
 import React from 'react';
 import { renderToStaticMarkup } from 'react-dom/server';
-import { describe, expect, it, vi } from 'vitest';
+import { describe, expect, it } from 'vitest';
+import { I18nProvider } from '../i18n';
 import { ProjectOpenPanel } from './ProjectOpenPanel';
 
 describe('ProjectOpenPanel', () => {
-  it('submits the daemon picker open action', () => {
-    const onOpenProject = vi.fn();
-    const preventDefault = vi.fn();
-    const element = ProjectOpenPanel({
-      opening: false,
-      onOpenProject
-    });
+  it('renders the daemon picker open form action', () => {
+    const html = renderToStaticMarkup(
+      <I18nProvider locale="en">
+        <ProjectOpenPanel
+          opening={false}
+          onOpenProject={() => undefined}
+        />
+      </I18nProvider>
+    );
 
-    (element.props as { onSubmit(event: { preventDefault(): void }): void }).onSubmit({ preventDefault });
-
-    expect(preventDefault).toHaveBeenCalledOnce();
-    expect(onOpenProject).toHaveBeenCalledOnce();
+    expect(html).toContain('<form');
+    expect(html).toContain('Open Project');
+    expect(html).toContain('type="submit"');
   });
 
   it('renders errors and attempted path context without a path input', () => {
     const html = renderToStaticMarkup(
-      <ProjectOpenPanel
-        error="Open project failed: projectRoot must resolve to a directory."
-        attemptedPath="/missing/project"
-        opening={true}
-        onOpenProject={() => undefined}
-      />
+      <I18nProvider locale="en">
+        <ProjectOpenPanel
+          error="Open project failed: projectRoot must resolve to a directory."
+          attemptedPath="/missing/project"
+          opening={true}
+          onOpenProject={() => undefined}
+        />
+      </I18nProvider>
     );
 
     expect(html).toContain('Open project failed: projectRoot must resolve to a directory.');

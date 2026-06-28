@@ -5,12 +5,28 @@ import { renderToStaticMarkup } from 'react-dom/server';
 import { describe, expect, it, vi } from 'vitest';
 import { CanvasFeedbackBar } from './CanvasFeedbackBar';
 import { createCanvasOverlayRuntime } from './CanvasOverlayRuntime';
+import { I18nProvider } from '../i18n';
 
 const canvasFeedbackBarSource = readFileSync(fileURLToPath(new URL('./CanvasFeedbackBar.tsx', import.meta.url)), 'utf8');
 
+function renderStaticWithI18n(element: React.ReactElement): string {
+  return renderStaticWithProvider(element, I18nProvider);
+}
+
+function renderStaticWithProvider(
+  element: React.ReactElement,
+  Provider: typeof I18nProvider
+): string {
+  return renderToStaticMarkup(
+    <Provider locale="en">
+      {element}
+    </Provider>
+  );
+}
+
 describe('CanvasFeedbackBar', () => {
   it('renders the persistent first-row file comment creator without an empty second row', () => {
-    const html = renderToStaticMarkup(
+    const html = renderStaticWithI18n(
       <CanvasFeedbackBar
         projectRelativePath="flow/cover.png"
         entry={undefined}
@@ -33,7 +49,7 @@ describe('CanvasFeedbackBar', () => {
   });
 
   it('uses the first-row creator for a pending annotation comment without rendering a second-row input', () => {
-    const html = renderToStaticMarkup(
+    const html = renderStaticWithI18n(
       <CanvasFeedbackBar
         projectRelativePath="flow/cover.png"
         entry={undefined}
@@ -67,7 +83,7 @@ describe('CanvasFeedbackBar', () => {
   });
 
   it('renders saved file comments before saved annotation comments', () => {
-    const html = renderToStaticMarkup(
+    const html = renderStaticWithI18n(
       <CanvasFeedbackBar
         projectRelativePath="flow/cover.png"
         entry={{
@@ -136,9 +152,10 @@ describe('CanvasFeedbackBar', () => {
 
     try {
       const { CanvasFeedbackBar: MockedCanvasFeedbackBar } = await import('./CanvasFeedbackBar');
+      const { I18nProvider: MockedI18nProvider } = await import('../i18n');
       const updates: unknown[] = [];
 
-      renderToStaticMarkup(
+      renderStaticWithProvider(
         <MockedCanvasFeedbackBar
           projectRelativePath="flow/cover.png"
           entry={undefined}
@@ -147,7 +164,8 @@ describe('CanvasFeedbackBar', () => {
             return true;
           }}
           overlayRuntime={createCanvasOverlayRuntime()}
-        />
+        />,
+        MockedI18nProvider
       );
 
       expect(commentInputs[0]!.onClose).toBeUndefined();
@@ -192,10 +210,11 @@ describe('CanvasFeedbackBar', () => {
 
     try {
       const { CanvasFeedbackBar: MockedCanvasFeedbackBar } = await import('./CanvasFeedbackBar');
+      const { I18nProvider: MockedI18nProvider } = await import('../i18n');
       const onPendingRegionCommentChange = vi.fn();
       const onSavePendingRegion = vi.fn();
 
-      renderToStaticMarkup(
+      renderStaticWithProvider(
         <MockedCanvasFeedbackBar
           projectRelativePath="flow/cover.png"
           entry={undefined}
@@ -208,7 +227,8 @@ describe('CanvasFeedbackBar', () => {
           onPendingRegionCommentChange={onPendingRegionCommentChange}
           onSavePendingRegion={onSavePendingRegion}
           onCancelPendingRegion={() => undefined}
-        />
+        />,
+        MockedI18nProvider
       );
 
       expect(commentInputs).toHaveLength(1);
@@ -248,10 +268,11 @@ describe('CanvasFeedbackBar', () => {
 
     try {
       const { CanvasFeedbackBar: MockedCanvasFeedbackBar } = await import('./CanvasFeedbackBar');
+      const { I18nProvider: MockedI18nProvider } = await import('../i18n');
       const onCancelPendingRegion = vi.fn();
       const onSavePendingRegion = vi.fn();
 
-      renderToStaticMarkup(
+      renderStaticWithProvider(
         <MockedCanvasFeedbackBar
           projectRelativePath="flow/cover.png"
           entry={undefined}
@@ -264,7 +285,8 @@ describe('CanvasFeedbackBar', () => {
           onPendingRegionCommentChange={() => undefined}
           onSavePendingRegion={onSavePendingRegion}
           onCancelPendingRegion={onCancelPendingRegion}
-        />
+        />,
+        MockedI18nProvider
       );
 
       commentInputs[0]!.onKeyDown?.({ key: 'Escape', preventDefault: () => undefined });
@@ -301,9 +323,10 @@ describe('CanvasFeedbackBar', () => {
 
     try {
       const { CanvasFeedbackBar: MockedCanvasFeedbackBar } = await import('./CanvasFeedbackBar');
+      const { I18nProvider: MockedI18nProvider } = await import('../i18n');
       const updates: unknown[] = [];
 
-      renderToStaticMarkup(
+      renderStaticWithProvider(
         <MockedCanvasFeedbackBar
           projectRelativePath="flow/cover.png"
           entry={undefined}
@@ -312,7 +335,8 @@ describe('CanvasFeedbackBar', () => {
             return true;
           }}
           overlayRuntime={createCanvasOverlayRuntime()}
-        />
+        />,
+        MockedI18nProvider
       );
 
       commentInputs[0]!.onChange?.({ currentTarget: { value: 'draft comment' } });
@@ -344,8 +368,9 @@ describe('CanvasFeedbackBar', () => {
 
     try {
       const { CanvasFeedbackBar: MockedCanvasFeedbackBar } = await import('./CanvasFeedbackBar');
+      const { I18nProvider: MockedI18nProvider } = await import('../i18n');
 
-      renderToStaticMarkup(
+      renderStaticWithProvider(
         <MockedCanvasFeedbackBar
           projectRelativePath="flow/cover.png"
           entry={{
@@ -363,7 +388,8 @@ describe('CanvasFeedbackBar', () => {
           }}
           onUpdate={async () => true}
           overlayRuntime={createCanvasOverlayRuntime()}
-        />
+        />,
+        MockedI18nProvider
       );
 
       expect(commentInputs).toHaveLength(1);
@@ -387,9 +413,10 @@ describe('CanvasFeedbackBar', () => {
 
     try {
       const { CanvasFeedbackBar: MockedCanvasFeedbackBar } = await import('./CanvasFeedbackBar');
+      const { I18nProvider: MockedI18nProvider } = await import('../i18n');
       const updates: unknown[] = [];
 
-      renderToStaticMarkup(
+      renderStaticWithProvider(
         <MockedCanvasFeedbackBar
           projectRelativePath="flow/cover.png"
           entry={{
@@ -410,7 +437,8 @@ describe('CanvasFeedbackBar', () => {
             return true;
           }}
           overlayRuntime={createCanvasOverlayRuntime()}
-        />
+        />,
+        MockedI18nProvider
       );
 
       buttons.find((button) => button.label === 'Delete file-level comment for flow/cover.png')!.onClick?.({

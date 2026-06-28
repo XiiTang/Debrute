@@ -4,10 +4,19 @@ import { describe, expect, it } from 'vitest';
 import type { Diagnostic } from '@debrute/canvas-core';
 import type { WorkbenchActions, WorkbenchState } from '../../types';
 import { DiagnosticList, Inspector } from './Inspector';
+import { I18nProvider } from '../i18n';
+
+function renderStaticWithI18n(element: React.ReactElement): string {
+  return renderToStaticMarkup(
+    <I18nProvider locale="en">
+      {element}
+    </I18nProvider>
+  );
+}
 
 describe('DiagnosticList', () => {
   it('keeps diagnostic icon, message, and code as direct grid children', () => {
-    const html = renderToStaticMarkup(
+    const html = renderStaticWithI18n(
       <DiagnosticList
         diagnostics={[{
           id: 'diag-1',
@@ -29,7 +38,7 @@ describe('DiagnosticList', () => {
 
 describe('Inspector property density', () => {
   it('keeps default selected-node details focused on actionable properties', () => {
-    const html = renderToStaticMarkup(
+    const html = renderStaticWithI18n(
       <Inspector
         activeCanvasId="canvas"
         selection={{ kind: 'node', projectRelativePath: 'flow/cover.png' }}

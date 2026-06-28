@@ -10,7 +10,7 @@ import type {
   VideoModelConfig,
   VideoModelsConfig
 } from '@debrute/capability-runtime';
-import type { LlmProviderType } from '@debrute/app-protocol';
+import type { LlmProviderType, WorkbenchPreferencesView } from '@debrute/app-protocol';
 
 export interface GlobalConfigPaths {
   root: string;
@@ -20,6 +20,7 @@ export interface GlobalConfigPaths {
   secretsFile: string;
   adobeBridgeFile: string;
   workbenchChromeFile: string;
+  workbenchPreferencesFile: string;
 }
 
 export interface AdobeBridgeConfig {
@@ -29,6 +30,10 @@ export interface AdobeBridgeConfig {
 export interface WorkbenchChromeConfig {
   recentProjectRoots: string[];
 }
+
+export type WorkbenchPreferencesConfig = WorkbenchPreferencesView;
+
+const WORKBENCH_LOCALE_ERROR_MESSAGE = 'Workbench locale must be "en" or "zh-CN".';
 
 export class GlobalConfigStore {
   constructor(private readonly options: { debruteHome?: string } = {}) {}
@@ -43,7 +48,8 @@ export class GlobalConfigStore {
       videoModelsFile: join(root, 'video_models.json'),
       secretsFile: join(root, 'secrets.json'),
       adobeBridgeFile: join(root, 'adobe_bridge.json'),
-      workbenchChromeFile: join(root, 'workbench_chrome.json')
+      workbenchChromeFile: join(root, 'workbench_chrome.json'),
+      workbenchPreferencesFile: join(root, 'workbench_preferences.json')
     };
   }
 
@@ -94,6 +100,16 @@ export class GlobalConfigStore {
     await writeJsonAtomic(this.paths().workbenchChromeFile, normalizeWorkbenchChromeConfig(config));
   }
 
+  async readWorkbenchPreferences(): Promise<WorkbenchPreferencesConfig> {
+    return normalizeWorkbenchPreferencesConfig(await readJsonOrDefault<unknown>(this.paths().workbenchPreferencesFile, {
+      locale: 'en'
+    }));
+  }
+
+  async saveWorkbenchPreferences(config: WorkbenchPreferencesConfig): Promise<void> {
+    await writeJsonAtomic(this.paths().workbenchPreferencesFile, normalizeWorkbenchPreferencesConfig(config));
+  }
+
   async readSecrets(): Promise<SecretsConfig> {
     return readJsonOrDefault(this.paths().secretsFile, { llmProviderApiKeys: {}, imageModelApiKeys: {}, videoModelApiKeys: {} });
   }
@@ -125,6 +141,13 @@ function normalizeWorkbenchChromeConfig(config: unknown): WorkbenchChromeConfig 
       .filter(Boolean)
       .slice(0, 12)
   };
+}
+
+function normalizeWorkbenchPreferencesConfig(config: unknown): WorkbenchPreferencesConfig {
+  if (!isRecord(config) || (config.locale !== 'en' && config.locale !== 'zh-CN')) {
+    throw new Error(WORKBENCH_LOCALE_ERROR_MESSAGE);
+  }
+  return { locale: config.locale };
 }
 
 function normalizeLlmProvidersConfig(config: unknown): LlmProvidersConfig {

@@ -9,6 +9,7 @@ export interface TitleBarCommandContext {
   openProjectFromPicker(): Promise<void>;
   openProjectRoot(projectRoot: string): Promise<void>;
   refreshTitleBarState(): Promise<void>;
+  commandUnavailableMessage(commandLabel: string): string;
 }
 
 export async function executeTitleBarMenuCommand(
@@ -26,12 +27,13 @@ export async function executeTitleBarMenuCommand(
     await context.refreshTitleBarState();
     return;
   }
-  await executeBrowserMenuCommand(item.commandId, item.payload, context);
+  await executeBrowserMenuCommand(item.commandId, item.payload, item.label, context);
 }
 
 async function executeBrowserMenuCommand(
   commandId: WorkbenchMenuCommandId,
   payload: Record<string, string | boolean> | undefined,
+  label: string,
   context: TitleBarCommandContext
 ): Promise<void> {
   switch (commandId) {
@@ -60,7 +62,7 @@ async function executeBrowserMenuCommand(
       executeDocumentEditCommand(commandId);
       return;
     default:
-      context.notify(`${commandLabel(commandId)} is not available in this host.`);
+      context.notify(context.commandUnavailableMessage(label));
   }
 }
 
@@ -78,8 +80,4 @@ function executeDocumentEditCommand(commandId: WorkbenchMenuCommandId): void {
   if (browserCommand) {
     document.execCommand(browserCommand);
   }
-}
-
-function commandLabel(commandId: WorkbenchMenuCommandId): string {
-  return commandId.split('.').at(-1)?.replaceAll('-', ' ') ?? commandId;
 }

@@ -9,6 +9,8 @@ import {
   titleBarMenuKeyAction,
   type OpenTitleBarMenu
 } from './workbenchTitleBarInteraction';
+import { useI18n, type WorkbenchI18n } from '../i18n';
+import { localizedWorkbenchMenus } from './titleBarI18n';
 
 type WorkbenchMenuCommandItem = Extract<WorkbenchMenuItem, { kind: 'command' }>;
 
@@ -25,12 +27,14 @@ export function WorkbenchTitleBar({
   onCommand,
   onWindowCommand
 }: WorkbenchTitleBarProps): React.ReactElement {
+  const i18n = useI18n();
   const [openMenu, setOpenMenu] = useState<OpenTitleBarMenu>();
   const [openSubmenu, setOpenSubmenu] = useState<string>();
   const rootRef = useRef<HTMLElement | null>(null);
   const menuRef = useRef<HTMLDivElement | null>(null);
   const menuButtonRefs = useRef(new Map<WorkbenchMenuId, HTMLButtonElement>());
-  const currentMenu = state.menus.find((menu) => menu.id === openMenu);
+  const menus = localizedWorkbenchMenus(state.menus, i18n);
+  const currentMenu = menus.find((menu) => menu.id === openMenu);
 
   useEffect(() => {
     if (!openMenu) {
@@ -84,10 +88,10 @@ export function WorkbenchTitleBar({
         {state.presentation.showWebMenus ? (
           <nav
             className="workbench-titlebar__menubar"
-            aria-label="Application menu"
+            aria-label={i18n.t('shell.titleBar.applicationMenu')}
             style={{ WebkitAppRegion: 'no-drag' } as React.CSSProperties}
           >
-            {state.menus.map((menu) => (
+            {menus.map((menu) => (
               <button
                 key={menu.id}
                 ref={(element) => setMenuButtonRef(menuButtonRefs.current, menu.id, element)}
@@ -120,13 +124,13 @@ export function WorkbenchTitleBar({
       <div className="workbench-titlebar__right">
         {state.presentation.showWindowControls ? (
           <div className="workbench-titlebar__window-controls" style={{ WebkitAppRegion: 'no-drag' } as React.CSSProperties}>
-            <IconButton label="Minimize window" icon={<Minus size={13} />} onClick={() => onWindowCommand('minimize')} />
+            <IconButton label={i18n.t('shell.titleBar.minimizeWindow')} icon={<Minus size={13} />} onClick={() => onWindowCommand('minimize')} />
             <IconButton
-              label={nativeWindowState.maximized ? 'Restore window' : 'Maximize window'}
+              label={nativeWindowState.maximized ? i18n.t('shell.titleBar.restoreWindow') : i18n.t('shell.titleBar.maximizeWindow')}
               icon={nativeWindowState.maximized ? <Square size={12} /> : <Maximize2 size={13} />}
               onClick={() => onWindowCommand('toggle-maximize')}
             />
-            <IconButton label="Close window" icon={<X size={14} />} onClick={() => onWindowCommand('close')} />
+            <IconButton label={i18n.t('shell.titleBar.closeWindow')} icon={<X size={14} />} onClick={() => onWindowCommand('close')} />
           </div>
         ) : null}
       </div>
@@ -136,9 +140,10 @@ export function WorkbenchTitleBar({
             id={`workbench-titlebar-menu-${currentMenu.id}`}
             ref={menuRef}
             tabIndex={-1}
-            ariaLabel={`${currentMenu.label} menu`}
+            ariaLabel={i18n.t('shell.titleBar.menu', { label: currentMenu.label })}
           >
             {currentMenu.items.map((item) => renderMenuItem(item, {
+              i18n,
               openSubmenu,
               setOpenSubmenu,
               onCommand: (command) => {
@@ -156,6 +161,7 @@ export function WorkbenchTitleBar({
 
 interface RenderMenuItemOptions {
   openSubmenu: string | undefined;
+  i18n: WorkbenchI18n;
   setOpenSubmenu(openSubmenu: string | undefined): void;
   onCommand: WorkbenchTitleBarProps['onCommand'];
 }
@@ -211,7 +217,7 @@ function renderMenuItem(
           <Menu
             id={submenuId}
             className="workbench-titlebar__submenu-menu"
-            ariaLabel={`${item.label} submenu`}
+            ariaLabel={options.i18n.t('shell.titleBar.submenu', { label: item.label })}
             onKeyDown={(event) => {
               if (titleBarMenuKeyAction(event.key) !== 'close-submenu') {
                 return;

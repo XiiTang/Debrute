@@ -137,6 +137,49 @@ describe('workbench API client', () => {
     expect(requests[1]!.headers).toMatchObject({ 'x-debrute-daemon-token': 'bootstrapped-secret' });
   });
 
+  it('calls Workbench preferences routes', async () => {
+    const requests: Array<{ method: string | undefined; path: string; body?: unknown; headers?: RequestInit['headers'] }> = [];
+    (globalThis as { window?: unknown }).window = {
+      location: { origin: 'http://127.0.0.1:17321', search: '', pathname: '/', hash: '' },
+      localStorage: { getItem: () => undefined, setItem: () => undefined },
+      sessionStorage: { getItem: () => undefined, setItem: () => undefined },
+      history: { state: { debruteDaemonToken: 'secret' }, replaceState: vi.fn() }
+    };
+    vi.stubGlobal('fetch', async (url: string, init: RequestInit = {}) => {
+      const parsed = new URL(url);
+      requests.push({
+        method: init.method,
+        path: parsed.pathname,
+        body: init.body ? JSON.parse(String(init.body)) : undefined,
+        headers: init.headers
+      });
+      return new Response(JSON.stringify({ locale: parsed.pathname === '/api/settings/workbench-preferences' && init.method === 'PUT' ? 'zh-CN' : 'en' }), {
+        status: 200,
+        headers: { 'content-type': 'application/json' }
+      });
+    });
+
+    const client = createWorkbenchApiClient();
+
+    await expect(client.workbenchPreferencesGet()).resolves.toEqual({ locale: 'en' });
+    await expect(client.workbenchPreferencesSave({ locale: 'zh-CN' })).resolves.toEqual({ locale: 'zh-CN' });
+
+    expect(requests).toEqual([
+      {
+        method: 'GET',
+        path: '/api/settings/workbench-preferences',
+        body: undefined,
+        headers: { 'x-debrute-daemon-token': 'secret' }
+      },
+      {
+        method: 'PUT',
+        path: '/api/settings/workbench-preferences',
+        body: { locale: 'zh-CN' },
+        headers: { 'content-type': 'application/json', 'x-debrute-daemon-token': 'secret' }
+      }
+    ]);
+  });
+
   it('calls project-scoped Canvas management routes', async () => {
     const requests: Array<{ method: string | undefined; url: string; body?: unknown }> = [];
     (globalThis as { window?: unknown }).window = {

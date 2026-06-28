@@ -13,11 +13,20 @@ import {
 } from './CanvasNodeContent';
 import type { CanvasImageNodeAssetHookState } from './CanvasImageNodeAssetContext';
 import type { CanvasTextPreviewSource } from './CanvasTextPreviewRuntime';
+import { I18nProvider } from '../i18n';
 
 afterEach(() => {
   vi.restoreAllMocks();
   vi.unstubAllGlobals();
 });
+
+function renderStaticWithI18n(element: React.ReactElement): string {
+  return renderToStaticMarkup(
+    <I18nProvider locale="en">
+      {element}
+    </I18nProvider>
+  );
+}
 
 describe('CanvasImageNodePreview', () => {
   it('keeps the visible image mounted while the next image preloads off-DOM', () => {
@@ -87,7 +96,7 @@ describe('CanvasImageNodePreview', () => {
 
 describe('CanvasNodeContent text chrome', () => {
   it('renders the project root directory with a non-empty label', () => {
-    const html = renderToStaticMarkup(
+    const html = renderStaticWithI18n(
       <CanvasNodeContent
         node={directoryNode('')}
         selected
@@ -105,7 +114,7 @@ describe('CanvasNodeContent text chrome', () => {
   });
 
   it('renders a generic node label once in the normal state', () => {
-    const html = renderToStaticMarkup(
+    const html = renderStaticWithI18n(
       <CanvasNodeContent
         node={directoryNode('references/archive')}
         selected
@@ -125,7 +134,7 @@ describe('CanvasNodeContent text chrome', () => {
   });
 
   it('keeps the generic node label as error context when unavailable', () => {
-    const html = renderToStaticMarkup(
+    const html = renderStaticWithI18n(
       <CanvasNodeContent
         node={unavailableDirectoryNode('references/archive', 'Unable to read references/archive.')}
         selected
@@ -146,7 +155,7 @@ describe('CanvasNodeContent text chrome', () => {
   });
 
   it('renders available text nodes as live CodeMirror editors', () => {
-    const html = renderToStaticMarkup(
+    const html = renderStaticWithI18n(
       <CanvasNodeContent
         node={textNode('flow/readme.md', 'rev-a')}
         selected
@@ -170,7 +179,7 @@ describe('CanvasNodeContent text chrome', () => {
   });
 
   it('renders inactive available text nodes as preview images', () => {
-    const html = renderToStaticMarkup(
+    const html = renderStaticWithI18n(
       <CanvasNodeContent
         node={textNode('flow/readme.md', 'rev-a')}
         selected={false}
@@ -284,7 +293,7 @@ describe('CanvasNodeContent text chrome', () => {
   });
 
   it('renders text preview generation errors instead of an empty preview body', () => {
-    const html = renderToStaticMarkup(
+    const html = renderStaticWithI18n(
       <CanvasNodeContent
         node={textNode('flow/readme.md', 'rev-a')}
         selected={false}
@@ -306,7 +315,7 @@ describe('CanvasNodeContent text chrome', () => {
   });
 
   it('renders selected text nodes as live CodeMirror editors instead of preview images', () => {
-    const html = renderToStaticMarkup(
+    const html = renderStaticWithI18n(
       <CanvasNodeContent
         node={textNode('flow/readme.md', 'rev-a')}
         selected
@@ -329,7 +338,7 @@ describe('CanvasNodeContent text chrome', () => {
   });
 
   it('keeps text bodies focus-gated for Canvas wheel routing', () => {
-    const html = renderToStaticMarkup(
+    const html = renderStaticWithI18n(
       <CanvasNodeContent
         node={textNode('flow/readme.md', 'rev-a')}
         selected={false}
@@ -348,7 +357,7 @@ describe('CanvasNodeContent text chrome', () => {
   });
 
   it('renders media captions through the shared Canvas node caption pattern', () => {
-    const html = renderToStaticMarkup(
+    const html = renderStaticWithI18n(
       <CanvasNodeContent
         node={{
           ...imageNode('audio/theme.mp3', 'rev-a'),
@@ -376,7 +385,7 @@ describe('CanvasNodeContent text chrome', () => {
   });
 
   it('renders external text changes with the shared info status tone only', () => {
-    const html = renderToStaticMarkup(
+    const html = renderStaticWithI18n(
       <CanvasNodeContent
         node={textNode('flow/readme.md', 'rev-a')}
         selected
@@ -396,7 +405,7 @@ describe('CanvasNodeContent text chrome', () => {
   });
 
   it('does not render the default saved text state as a status pill', () => {
-    const html = renderToStaticMarkup(
+    const html = renderStaticWithI18n(
       <CanvasNodeContent
         node={textNode('flow/readme.md', 'rev-a')}
         selected
@@ -471,18 +480,20 @@ async function renderTextPreviewNode(
 ): Promise<void> {
   await act(async () => {
     root.render(
-      <CanvasNodeContent
-        node={textNode('flow/readme.md', 'rev-a')}
-        selected={options?.selected ?? false}
-        culled={false}
-        actions={actionsFixture()}
-        textBuffer={textBuffer('flow/readme.md', 'rev-a')}
-        textPreview={textPreview}
-        onSelectNode={() => undefined}
-        onTitlePointerDown={() => undefined}
-        onTitlePointerMove={() => undefined}
-        onTitlePointerUp={() => undefined}
-      />
+      <I18nProvider locale="en">
+        <CanvasNodeContent
+          node={textNode('flow/readme.md', 'rev-a')}
+          selected={options?.selected ?? false}
+          culled={false}
+          actions={actionsFixture()}
+          textBuffer={textBuffer('flow/readme.md', 'rev-a')}
+          textPreview={textPreview}
+          onSelectNode={() => undefined}
+          onTitlePointerDown={() => undefined}
+          onTitlePointerMove={() => undefined}
+          onTitlePointerUp={() => undefined}
+        />
+      </I18nProvider>
     );
   });
 }
@@ -586,7 +597,7 @@ class FakeTextPreviewImage {
 }
 
 function renderImagePreview(imageState: CanvasImageNodeAssetHookState): string {
-  return renderToStaticMarkup(
+  return renderStaticWithI18n(
     <CanvasImageNodePreview
       node={imageNode('flow/cover.png', 'rev-a')}
       imageState={imageState}

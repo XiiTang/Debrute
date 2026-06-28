@@ -2,15 +2,19 @@ import React from 'react';
 import { renderToStaticMarkup } from 'react-dom/server';
 import { describe, expect, it, vi } from 'vitest';
 import type { WorkbenchActions, WorkbenchState } from '../../types';
+import { I18nProvider } from '../i18n';
 import { ImageModelSettings, LlmSettings } from './SettingsPanel';
+import { GeneralSettingsPage } from './general/GeneralSettingsPage';
 
 describe('SettingsPanel shared UI composition', () => {
   it('renders LLM settings through shared settings patterns and primitives', () => {
     const html = renderToStaticMarkup(
-      <LlmSettings
-        state={stateWithSettings()}
-        actions={actions()}
-      />
+      <I18nProvider locale="en">
+        <LlmSettings
+          state={stateWithSettings()}
+          actions={actions()}
+        />
+      </I18nProvider>
     );
 
     expect(html).toContain('db-settings-section');
@@ -27,10 +31,12 @@ describe('SettingsPanel shared UI composition', () => {
 
   it('renders media model settings through shared model-card patterns', () => {
     const html = renderToStaticMarkup(
-      <ImageModelSettings
-        state={stateWithSettings()}
-        actions={actions()}
-      />
+      <I18nProvider locale="en">
+        <ImageModelSettings
+          state={stateWithSettings()}
+          actions={actions()}
+        />
+      </I18nProvider>
     );
 
     expect(html).toContain('db-model-card');
@@ -39,6 +45,26 @@ describe('SettingsPanel shared UI composition', () => {
     expect(html).toContain('db-secret-field');
     expect(html).not.toContain('settings-model-card');
     expect(html).not.toContain('settings-key-input');
+  });
+
+  it('renders the Workbench language preference in General settings', () => {
+    const saved: string[] = [];
+    const html = renderToStaticMarkup(
+      <I18nProvider locale="zh-CN">
+        <GeneralSettingsPage
+          shell={undefined}
+          locale="zh-CN"
+          onLocaleChange={(locale) => {
+            saved.push(locale);
+          }}
+        />
+      </I18nProvider>
+    );
+
+    expect(html).toContain('通用');
+    expect(html).toContain('语言');
+    expect(html).toContain('简体中文');
+    expect(saved).toEqual([]);
   });
 });
 

@@ -1,3 +1,4 @@
+import type { ReactElement } from 'react';
 import { renderToStaticMarkup } from 'react-dom/server';
 import { describe, expect, it, vi } from 'vitest';
 import type { WorkbenchProjectSessionSnapshot } from '@debrute/app-protocol';
@@ -12,10 +13,19 @@ import {
 import { flattenProjectTree, type ProjectTreeSelectionState } from './projectTreeInteraction';
 import { buildProjectFileTree } from './projectFileTree';
 import type { ProjectTreeFileKeyboardCommand } from './projectTreeKeyboardCommands';
+import { I18nProvider } from '../i18n';
+
+function renderStaticWithI18n(element: ReactElement): string {
+  return renderToStaticMarkup(
+    <I18nProvider locale="en">
+      {element}
+    </I18nProvider>
+  );
+}
 
 describe('ProjectTree', () => {
   it('renders selected project files', () => {
-    const html = renderToStaticMarkup(
+    const html = renderStaticWithI18n(
       <ProjectTree
         snapshot={{
           files: [
@@ -39,7 +49,7 @@ describe('ProjectTree', () => {
   });
 
   it('renders project rows without disclosure chevrons', () => {
-    const html = renderToStaticMarkup(
+    const html = renderStaticWithI18n(
       <ProjectTree
         snapshot={{
           files: [
@@ -90,7 +100,7 @@ describe('ProjectTree', () => {
   });
 
   it('renders the empty Project Tree state through shared UI classes', () => {
-    const html = renderToStaticMarkup(
+    const html = renderStaticWithI18n(
       <ProjectTree
         snapshot={{ files: [] } as unknown as WorkbenchProjectSessionSnapshot}
         selection={selection([])}
@@ -104,7 +114,7 @@ describe('ProjectTree', () => {
   });
 
   it('renders known binary files as project tree rows', () => {
-    const html = renderToStaticMarkup(
+    const html = renderStaticWithI18n(
       <ProjectTree
         snapshot={{
           files: [
@@ -121,7 +131,7 @@ describe('ProjectTree', () => {
   });
 
   it('marks file and directory rows as context menu targets', () => {
-    const html = renderToStaticMarkup(
+    const html = renderStaticWithI18n(
       <ProjectTree
         snapshot={{
           files: [
@@ -142,7 +152,7 @@ describe('ProjectTree', () => {
   });
 
   it('renders cut rows and inline edit rows', () => {
-    const html = renderToStaticMarkup(
+    const html = renderStaticWithI18n(
       <ProjectTree
         snapshot={{
           files: [

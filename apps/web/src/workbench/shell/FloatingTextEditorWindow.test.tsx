@@ -5,10 +5,19 @@ import type { TextFileBuffer, WorkbenchActions } from '../../types';
 import { FloatingTextEditorWindow } from './FloatingTextEditorWindow';
 import { textEditorWindowIdentity } from './workbenchWindowOrder';
 import { FLOATING_TEXT_EDITOR_TITLEBAR_HEIGHT } from './windowBounds';
+import { I18nProvider } from '../i18n';
+
+function renderStaticWithI18n(element: React.ReactElement): string {
+  return renderToStaticMarkup(
+    <I18nProvider locale="en">
+      {element}
+    </I18nProvider>
+  );
+}
 
 describe('FloatingTextEditorWindow', () => {
   it('renders the shared CodeMirror text editor surface', () => {
-    const html = renderToStaticMarkup(
+    const html = renderStaticWithI18n(
       <FloatingTextEditorWindow
         windowState={{
           projectRelativePath: 'notes/readme.md',

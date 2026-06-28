@@ -135,6 +135,16 @@ export interface DebruteHttpErrorBody {
   };
 }
 
+export type WorkbenchLocale = 'en' | 'zh-CN';
+
+export interface WorkbenchPreferencesView {
+  locale: WorkbenchLocale;
+}
+
+export interface SaveWorkbenchPreferencesInput {
+  locale: WorkbenchLocale;
+}
+
 export type DebruteAgentFieldValue = string | number | boolean | null;
 
 export interface DebruteAgentNamedRecord {
@@ -1098,7 +1108,8 @@ export type AppServerEvent =
   | { type: 'imageModel.settings.changed'; settings: ImageModelSettingsView }
   | { type: 'videoModel.settings.changed'; settings: VideoModelSettingsView }
   | { type: 'integrations.settings.changed'; settings: IntegrationSettingsView }
-  | { type: 'adobeBridge.settings.changed'; settings: AdobeBridgeSettings };
+  | { type: 'adobeBridge.settings.changed'; settings: AdobeBridgeSettings }
+  | { type: 'workbench.preferences.changed'; preferences: WorkbenchPreferencesView };
 
 export type WorkbenchFileWatchEvent = Omit<NormalizedFileWatchEvent, 'absolutePath'>;
 
@@ -1114,6 +1125,7 @@ export type WorkbenchEvent =
   | { type: 'videoModel.settings.changed'; settings: VideoModelSettingsView }
   | { type: 'integrations.settings.changed'; settings: IntegrationSettingsView }
   | { type: 'adobeBridge.settings.changed'; settings: AdobeBridgeSettings }
+  | { type: 'workbench.preferences.changed'; preferences: WorkbenchPreferencesView }
   | { type: 'adobeBridge.state.changed'; state: AdobeBridgeStateView };
 
 export interface WorkbenchApiClient {
@@ -1128,6 +1140,8 @@ export interface WorkbenchApiClient {
   openProjectFromPicker(): Promise<WorkbenchProjectPickerOpenResult>;
   getWorkbenchTitleBarState(input: { host: WorkbenchHostKind; projectId?: string | undefined }): Promise<WorkbenchTitleBarState>;
   clearRecentProjectRoots(): Promise<{ ok: true }>;
+  workbenchPreferencesGet(): Promise<WorkbenchPreferencesView>;
+  workbenchPreferencesSave(input: SaveWorkbenchPreferencesInput): Promise<WorkbenchPreferencesView>;
   getSnapshot(): Promise<WorkbenchProjectRefreshResult>;
   getProjectHealth(): Promise<ProjectHealthSummary>;
   listTerminalSessions(): Promise<TerminalSessionList>;

@@ -20,6 +20,11 @@ import {
   type WorkbenchContextMenuPosition
 } from './contextMenu';
 import { Menu } from '../ui';
+import { useI18n } from '../i18n';
+import {
+  projectSystemFileManagerLabelForLocale,
+  workbenchContextMenuCommandLabel
+} from './contextMenuI18n';
 
 const CONTEXT_MENU_WIDTH = 190;
 const CONTEXT_MENU_ROW_HEIGHT = 32;
@@ -29,13 +34,16 @@ export function WorkbenchContextMenu({
   items,
   position,
   onCommand,
-  onClose
+  onClose,
+  desktopPlatform
 }: {
   items: WorkbenchContextMenuItem[];
   position: WorkbenchContextMenuPosition;
   onCommand: (command: WorkbenchContextMenuCommand) => void;
   onClose: () => void;
+  desktopPlatform?: NodeJS.Platform | undefined;
 }): React.ReactElement | null {
+  const i18n = useI18n();
   const menuRef = useRef<HTMLDivElement | null>(null);
   const actionCount = items.filter((item) => item.kind === 'action').length;
   const separatorCount = items.filter((item) => item.kind === 'separator').length;
@@ -89,7 +97,7 @@ export function WorkbenchContextMenu({
     <Menu
       ref={menuRef}
       className="workbench-context-menu"
-      ariaLabel="Context menu"
+      ariaLabel={i18n.t('shell.contextMenu.ariaLabel')}
       style={{
         left: clampedPosition.x,
         top: clampedPosition.y,
@@ -113,7 +121,9 @@ export function WorkbenchContextMenu({
               onCommand(item.command);
             }}
           >
-            {item.label}
+            {item.command === 'reveal-in-system-file-manager'
+              ? projectSystemFileManagerLabelForLocale(desktopPlatform ?? 'linux', i18n)
+              : workbenchContextMenuCommandLabel(item.command, i18n)}
           </Menu.Item>
         )
       ))}

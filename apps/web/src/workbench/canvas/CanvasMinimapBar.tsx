@@ -19,6 +19,7 @@ import type { CanvasEditorRuntime, CanvasRuntimeSnapshot } from './runtime/Canva
 import { DEFAULT_CANVAS_CAMERA } from './runtime/canvasCamera';
 import type { CanvasOverlayRuntime } from './CanvasOverlayRuntime';
 import { IconButton } from '../ui';
+import { useI18n } from '../i18n';
 
 export function CanvasMinimapBar({
   canvas,
@@ -37,6 +38,7 @@ export function CanvasMinimapBar({
   onOpenChange: (open: boolean) => void;
   panelPlacement: CanvasMinimapPanelPlacement;
 }): React.ReactElement {
+  const i18n = useI18n();
   const barRef = React.useRef<HTMLButtonElement | null>(null);
   const panelRef = React.useRef<HTMLDivElement | null>(null);
   const runtimeSnapshot = useOptionalRuntimeSnapshot(runtime);
@@ -105,7 +107,7 @@ export function CanvasMinimapBar({
         className="db-floating-bar canvas-minimap-bar db-canvas-control"
         data-testid="canvas-minimap-bar"
         data-canvas-local-wheel="true"
-        label="Mini Map"
+        label={i18n.t('canvas.minimap.title')}
         pressed={open}
         icon={<Map size={13} />}
         disabled={!enabled}
@@ -130,6 +132,7 @@ export function CanvasMinimapBar({
           runtime={runtime}
           overlayRuntime={overlayRuntime}
           panelPlacement={panelPlacement}
+          overviewLabel={i18n.t('canvas.minimap.overview')}
         />
       ) : null}
     </>
@@ -142,12 +145,14 @@ const CanvasMinimapPanel = React.forwardRef<HTMLDivElement, {
   runtime: CanvasEditorRuntime;
   overlayRuntime: CanvasOverlayRuntime;
   panelPlacement: CanvasMinimapPanelPlacement;
+  overviewLabel: string;
 }>(function CanvasMinimapPanel({
   staticModel,
   initialViewportRect,
   runtime,
   overlayRuntime,
-  panelPlacement
+  panelPlacement,
+  overviewLabel
 }, ref): React.ReactElement {
   const dragStateRef = React.useRef<CanvasMinimapDragState | undefined>(undefined);
   const viewportRef = React.useRef<SVGRectElement | null>(null);
@@ -239,7 +244,7 @@ const CanvasMinimapPanel = React.forwardRef<HTMLDivElement, {
       <svg
         className="canvas-minimap-svg"
         role="img"
-        aria-label="Canvas overview"
+        aria-label={overviewLabel}
         viewBox={`0 0 ${CANVAS_MINIMAP_PANEL_SIZE.width} ${CANVAS_MINIMAP_PANEL_SIZE.height}`}
         onPointerDown={beginDrag}
         onPointerMove={updateDrag}

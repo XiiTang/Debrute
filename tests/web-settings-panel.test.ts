@@ -16,6 +16,7 @@ import {
   debruteCliStatusFromActionResult
 } from '../apps/web/src/workbench/settings/debrute-cli/DebruteCliSettingsPage';
 import { GeneralSettingsPage } from '../apps/web/src/workbench/settings/general/GeneralSettingsPage';
+import { I18nProvider } from '../apps/web/src/workbench/i18n';
 import type {
   DebruteCliStatus,
   DesktopAppUpdateState
@@ -24,7 +25,7 @@ import type { WorkbenchActions, WorkbenchState } from '../apps/web/src/types';
 
 describe('web Settings pages', () => {
   it('uses General as the first and default settings page', () => {
-    const html = renderToStaticMarkup(React.createElement(SettingsPanel, {
+    const html = renderWithI18n(React.createElement(SettingsPanel, {
       state: {
         llmSettings: { providers: [], availableModelKeys: [], defaultModelKey: null },
         imageModelSettings: { models: [] },
@@ -42,7 +43,7 @@ describe('web Settings pages', () => {
   });
 
   it('uses a directory layout with Debrute CLI settings', () => {
-    const html = renderToStaticMarkup(React.createElement(SettingsPanel, {
+    const html = renderWithI18n(React.createElement(SettingsPanel, {
       state: {
         llmSettings: { providers: [], availableModelKeys: [], defaultModelKey: null },
         imageModelSettings: {
@@ -91,7 +92,7 @@ describe('web Settings pages', () => {
 
   it('renders disabled browser update state with a stable check action', () => {
     const state: DesktopAppUpdateState = { type: 'disabled', currentVersion: '0.2.0', reason: 'browser' };
-    const html = renderToStaticMarkup(React.createElement(GeneralSettingsPage, {
+    const html = renderWithI18n(React.createElement(GeneralSettingsPage, {
       shell: undefined,
       initialUpdateState: state
     }));
@@ -123,7 +124,7 @@ describe('web Settings pages', () => {
         installMode: 'automatic'
       }
     ];
-    const html = states.map((state) => renderToStaticMarkup(React.createElement(GeneralSettingsPage, {
+    const html = states.map((state) => renderWithI18n(React.createElement(GeneralSettingsPage, {
       shell: {
         getAppUpdateState: async () => state,
         checkForAppUpdate: async () => state,
@@ -151,7 +152,7 @@ describe('web Settings pages', () => {
       releaseUrl: 'https://github.com/XiiTang/Debrute/releases/tag/v0.3.0',
       installMode: 'manual-download'
     };
-    const html = renderToStaticMarkup(React.createElement(GeneralSettingsPage, {
+    const html = renderWithI18n(React.createElement(GeneralSettingsPage, {
       shell: {
         getAppUpdateState: async () => state,
         openAppUpdateDownloadPage: async () => ({ ok: true })
@@ -187,7 +188,7 @@ describe('web Settings pages', () => {
     } as unknown as WorkbenchState;
     const actions = {} as unknown as WorkbenchActions;
 
-    const html = renderToStaticMarkup(React.createElement(LlmSettings, { state, actions }));
+    const html = renderWithI18n(React.createElement(LlmSettings, { state, actions }));
 
     expect(html).toContain('sk****************************ui');
     expect(html).toContain('Clear API key');
@@ -221,7 +222,7 @@ describe('web Settings pages', () => {
       videoModelSettings: { models: [] }
     } as unknown as WorkbenchState;
 
-    const html = renderToStaticMarkup(React.createElement(ImageModelSettings, {
+    const html = renderWithI18n(React.createElement(ImageModelSettings, {
       state,
       actions: {} as unknown as WorkbenchActions
     }));
@@ -299,7 +300,7 @@ describe('web Settings pages', () => {
   });
 
   it('renders browser-only manual Debrute CLI instructions when Desktop shell is unavailable', () => {
-    const html = renderToStaticMarkup(React.createElement(DebruteCliSettingsPage, {
+    const html = renderWithI18n(React.createElement(DebruteCliSettingsPage, {
       shell: undefined
     }));
 
@@ -313,7 +314,7 @@ describe('web Settings pages', () => {
   });
 
   it('renders one-click Debrute CLI actions from Desktop shell status', () => {
-    const html = renderToStaticMarkup(React.createElement(DebruteCliSettingsPage, {
+    const html = renderWithI18n(React.createElement(DebruteCliSettingsPage, {
       initialStatus: {
         kind: 'update_available',
         desktopVersion: '0.2.0',
@@ -357,7 +358,7 @@ describe('web Settings pages', () => {
   });
 
   it('renders Debrute CLI Skills status details and errors', () => {
-    const html = renderToStaticMarkup(React.createElement(DebruteCliSettingsPage, {
+    const html = renderWithI18n(React.createElement(DebruteCliSettingsPage, {
       initialStatus: {
         kind: 'installed',
         desktopVersion: '0.2.0',
@@ -377,3 +378,7 @@ describe('web Settings pages', () => {
   });
 
 });
+
+function renderWithI18n(element: React.ReactElement): string {
+  return renderToStaticMarkup(React.createElement(I18nProvider, { locale: 'en' }, element));
+}

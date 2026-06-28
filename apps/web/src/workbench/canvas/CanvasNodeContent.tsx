@@ -14,6 +14,7 @@ import {
   type CanvasTextPreviewSource
 } from './CanvasTextPreviewRuntime';
 import { Button, IconButton, StatusPill } from '../ui';
+import { useI18n, type WorkbenchI18n } from '../i18n';
 
 export interface CanvasNodeContentProps {
   node: ProjectedCanvasNode;
@@ -53,6 +54,7 @@ export function CanvasNodeContent({
   onTitlePointerMove,
   onTitlePointerUp
 }: CanvasNodeContentProps): React.ReactElement {
+  const i18n = useI18n();
   const [mediaError, setMediaError] = useState<string>();
   const [mediaRetryNonce, setMediaRetryNonce] = useState(0);
   const requestedTextBufferKeyRef = useRef<string | undefined>(undefined);
@@ -90,8 +92,8 @@ export function CanvasNodeContent({
 
   const availabilityProblem = node.availability.state === 'available'
     ? undefined
-    : { title: nodeAvailabilityTitle(node.availability.state), message: node.availability.message };
-  const mediaProblem = node.mediaKind === 'image' || !mediaError ? undefined : { title: 'Load Error', message: mediaError };
+    : { title: nodeAvailabilityTitle(node.availability.state, i18n), message: node.availability.message };
+  const mediaProblem = node.mediaKind === 'image' || !mediaError ? undefined : { title: i18n.t('canvas.node.loadError'), message: mediaError };
   const problem = mediaProblem ?? availabilityProblem;
   const retryMediaLoad = () => {
     setMediaError(undefined);
@@ -99,7 +101,7 @@ export function CanvasNodeContent({
   };
 
   if (node.nodeKind === 'directory' || node.mediaKind === 'unknown' || !node.mediaKind) {
-    return <CanvasGenericNodeContent node={node} problem={problem} />;
+    return <CanvasGenericNodeContent node={node} problem={problem} i18n={i18n} />;
   }
 
   if (node.mediaKind === 'text') {
@@ -117,6 +119,7 @@ export function CanvasNodeContent({
         onTitlePointerDown={onTitlePointerDown}
         onTitlePointerMove={onTitlePointerMove}
         onTitlePointerUp={onTitlePointerUp}
+        i18n={i18n}
       />
     );
   }
@@ -148,7 +151,7 @@ export function CanvasNodeContent({
               controls
               preload="none"
               src={mediaSrc}
-              onError={() => setMediaError(`Unable to load ${node.projectRelativePath}.`)}
+              onError={() => setMediaError(i18n.t('canvas.node.unableToLoad', { path: node.projectRelativePath }))}
             />
           ) : (
             <audio
@@ -156,7 +159,7 @@ export function CanvasNodeContent({
               controls
               preload="none"
               src={mediaSrc}
-              onError={() => setMediaError(`Unable to load ${node.projectRelativePath}.`)}
+              onError={() => setMediaError(i18n.t('canvas.node.unableToLoad', { path: node.projectRelativePath }))}
             />
           )}
         </div>
@@ -164,8 +167,8 @@ export function CanvasNodeContent({
         <div className="canvas-node-preview">
           <div className={problem ? 'db-canvas-node-placeholder db-canvas-node-placeholder--problem' : 'db-canvas-node-placeholder'}>
             {problem ? <AlertTriangle size={22} /> : node.mediaKind === 'video' ? <Video size={22} /> : node.mediaKind === 'audio' ? <Music2 size={22} /> : <ImageIcon size={22} />}
-            <strong>{problem?.title ?? (node.mediaKind === 'video' ? 'Video' : node.mediaKind === 'audio' ? 'Audio' : 'Image')}</strong>
-            <span>{problem?.message ?? nodeDisplayName(node.projectRelativePath)}</span>
+            <strong>{problem?.title ?? mediaKindLabel(node.mediaKind, i18n)}</strong>
+            <span>{problem?.message ?? nodeDisplayName(node.projectRelativePath, i18n)}</span>
             {mediaProblem ? (
               <Button
                 className="db-canvas-node-retry"
@@ -174,7 +177,7 @@ export function CanvasNodeContent({
                 onPointerDown={(event) => event.stopPropagation()}
                 onClick={retryMediaLoad}
               >
-                Retry
+                {i18n.t('canvas.node.retry')}
               </Button>
             ) : null}
           </div>
@@ -182,7 +185,7 @@ export function CanvasNodeContent({
       )}
       {node.mediaKind === 'video' || node.mediaKind === 'audio' ? (
         <div className="db-canvas-node-caption">
-          <span>{nodeDisplayName(node.projectRelativePath)}</span>
+          <span>{nodeDisplayName(node.projectRelativePath, i18n)}</span>
         </div>
       ) : null}
     </>
@@ -387,12 +390,14 @@ export function preloadCanvasImageForHandoff(input: {
 
 function CanvasGenericNodeContent({
   node,
-  problem
+  problem,
+  i18n
 }: {
   node: ProjectedCanvasNode;
   problem: { title: string; message: string } | undefined;
+  i18n: WorkbenchI18n;
 }): React.ReactElement {
-  const label = nodeDisplayName(node.projectRelativePath);
+  const label = nodeDisplayName(node.projectRelativePath, i18n);
   if (problem) {
     return (
       <div className="db-canvas-node-generic db-canvas-node-generic--problem">
@@ -419,6 +424,7 @@ function CanvasNodeMediaErrorOverlay({
   message: string;
   onRetry: () => void;
 }): React.ReactElement {
+  const i18n = useI18n();
   return (
     <div className="db-canvas-node-error-overlay">
       <AlertTriangle size={16} />
@@ -430,7 +436,7 @@ function CanvasNodeMediaErrorOverlay({
         onPointerDown={(event) => event.stopPropagation()}
         onClick={onRetry}
       >
-        Retry
+        {i18n.t('canvas.node.retry')}
       </Button>
     </div>
   );
@@ -443,11 +449,12 @@ function CanvasImagePlaceholder({
   node: ProjectedCanvasNode;
   onRetry?: (() => void) | undefined;
 }): React.ReactElement {
+  const i18n = useI18n();
   return (
     <div className="db-canvas-node-placeholder">
       <ImageIcon size={22} />
-      <strong>Image</strong>
-      <span>{nodeDisplayName(node.projectRelativePath)}</span>
+      <strong>{i18n.t('canvas.node.image')}</strong>
+      <span>{nodeDisplayName(node.projectRelativePath, i18n)}</span>
       {onRetry ? (
         <Button
           className="db-canvas-node-retry"
@@ -456,7 +463,7 @@ function CanvasImagePlaceholder({
           onPointerDown={(event) => event.stopPropagation()}
           onClick={onRetry}
         >
-          Retry
+          {i18n.t('canvas.node.retry')}
         </Button>
       ) : null}
     </div>
@@ -475,7 +482,8 @@ function CanvasTextNodeContent({
   onSelectNode,
   onTitlePointerDown,
   onTitlePointerMove,
-  onTitlePointerUp
+  onTitlePointerUp,
+  i18n
 }: {
   node: ProjectedCanvasNode;
   buffer: TextFileBuffer | undefined;
@@ -489,14 +497,15 @@ function CanvasTextNodeContent({
   onTitlePointerDown: (event: React.PointerEvent<Element>) => void;
   onTitlePointerMove: (event: React.PointerEvent<Element>) => void;
   onTitlePointerUp: (event: React.PointerEvent<Element>) => void;
+  i18n: WorkbenchI18n;
 }): React.ReactElement {
   const { registerTextBody } = useCanvasTextPreviewRuntime();
   const active = selected;
   const textPreviewProblem = !active && textPreviewError
-    ? { title: 'Text Preview Error', message: textPreviewError }
+    ? { title: i18n.t('canvas.node.textPreviewError'), message: textPreviewError }
     : undefined;
   const bodyProblem = problem ?? textPreviewProblem;
-  const status = textBufferStatus(buffer, bodyProblem);
+  const status = textBufferStatus(buffer, bodyProblem, i18n);
   const [textPreviewImageState, dispatchTextPreviewImage] = useReducer(
     canvasTextPreviewImageReducer,
     textPreview,
@@ -536,19 +545,19 @@ function CanvasTextNodeContent({
         onPointerUp={onTitlePointerUp}
       >
         <FileText size={13} />
-        <strong>{nodeDisplayName(node.projectRelativePath)}</strong>
+        <strong>{nodeDisplayName(node.projectRelativePath, i18n)}</strong>
         {status ? <StatusPill tone={status.tone}>{status.label}</StatusPill> : null}
         <IconButton
-          label={`Save ${node.projectRelativePath}`}
-          title="Save"
+          label={i18n.t('canvas.node.saveFile', { path: node.projectRelativePath })}
+          title={i18n.t('canvas.node.save')}
           disabled={!buffer || !buffer.dirty || buffer.saving}
           icon={<Save size={13} />}
           onPointerDown={(event) => event.stopPropagation()}
           onClick={() => void actions.saveTextFileBuffer(node.projectRelativePath)}
         />
         <IconButton
-          label={`Open ${node.projectRelativePath} in large editor`}
-          title="Open large editor"
+          label={i18n.t('canvas.node.openLargeEditorForFile', { path: node.projectRelativePath })}
+          title={i18n.t('canvas.node.openLargeEditor')}
           icon={<Maximize2 size={13} />}
           onPointerDown={(event) => event.stopPropagation()}
           onClick={() => actions.openTextEditorWindow(node.projectRelativePath)}
@@ -572,7 +581,7 @@ function CanvasTextNodeContent({
         {bodyProblem || buffer?.error ? (
           <div className="canvas-text-message">
             <AlertTriangle size={18} />
-            <strong>{bodyProblem?.title ?? 'Text Error'}</strong>
+            <strong>{bodyProblem?.title ?? i18n.t('canvas.node.textError')}</strong>
             <span>{bodyProblem?.message ?? buffer?.error}</span>
           </div>
         ) : buffer && active ? (
@@ -615,35 +624,49 @@ function CanvasTextPreviewImage({
   );
 }
 
-function textBufferStatus(buffer: TextFileBuffer | undefined, problem: { title: string; message: string } | undefined): { label: string; tone: 'warning' | 'danger' | 'info' | 'loading' } | undefined {
+function textBufferStatus(
+  buffer: TextFileBuffer | undefined,
+  problem: { title: string; message: string } | undefined,
+  i18n: WorkbenchI18n
+): { label: string; tone: 'warning' | 'danger' | 'info' | 'loading' } | undefined {
   if (problem || buffer?.error) {
-    return { label: 'Error', tone: 'danger' };
+    return { label: i18n.t('canvas.node.error'), tone: 'danger' };
   }
   if (!buffer) {
-    return { label: 'Loading', tone: 'loading' };
+    return { label: i18n.t('canvas.node.loading'), tone: 'loading' };
   }
   if (buffer.externalChange) {
-    return { label: 'External change', tone: 'info' };
+    return { label: i18n.t('canvas.node.externalChange'), tone: 'info' };
   }
   if (buffer.saving) {
-    return { label: 'Saving', tone: 'loading' };
+    return { label: i18n.t('canvas.node.saving'), tone: 'loading' };
   }
   if (buffer.dirty) {
-    return { label: 'Unsaved', tone: 'warning' };
+    return { label: i18n.t('canvas.node.unsaved'), tone: 'warning' };
   }
   return undefined;
 }
 
-function nodeDisplayName(path: string): string {
+function nodeDisplayName(path: string, i18n: WorkbenchI18n): string {
   if (path === '') {
-    return 'Project Root';
+    return i18n.t('canvas.node.projectRoot');
   }
   return path.split('/').pop() ?? path;
 }
 
-function nodeAvailabilityTitle(state: ProjectedCanvasNode['availability']['state']): string {
+function nodeAvailabilityTitle(state: ProjectedCanvasNode['availability']['state'], i18n: WorkbenchI18n): string {
   if (state === 'missing') {
-    return 'Missing File';
+    return i18n.t('canvas.node.missingFile');
   }
-  return 'Unreadable File';
+  return i18n.t('canvas.node.unreadableFile');
+}
+
+function mediaKindLabel(mediaKind: ProjectedCanvasNode['mediaKind'], i18n: WorkbenchI18n): string {
+  if (mediaKind === 'video') {
+    return i18n.t('canvas.node.video');
+  }
+  if (mediaKind === 'audio') {
+    return i18n.t('canvas.node.audio');
+  }
+  return i18n.t('canvas.node.image');
 }

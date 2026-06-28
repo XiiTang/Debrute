@@ -8,6 +8,13 @@ import {
 } from './textEditorWindows';
 
 const viewport = { x: 0, y: 0, width: 1280, height: 720 };
+const statusLabels = {
+  loading: 'Loading',
+  error: 'Error',
+  externalChange: 'External change',
+  saving: 'Saving',
+  unsaved: 'Unsaved'
+};
 
 describe('text editor window state', () => {
   it('opens existing windows and creates new windows with stable defaults', () => {
@@ -97,16 +104,19 @@ describe('text editor window state', () => {
   });
 
   it('does not surface the default saved text buffer state', () => {
-    expect(textBufferStatus({
-      projectRelativePath: 'notes/brief.md',
-      content: '# Brief',
-      language: 'markdown',
-      wordWrap: false,
-      dirty: false,
-      saving: false,
-      diskRevision: 'rev-a',
-      lastSavedRevision: 'rev-a',
-      externalChange: false
-    })).toBeUndefined();
+    expect(textBufferStatus(
+      {
+        projectRelativePath: 'notes/brief.md',
+        content: '# Brief',
+        language: 'markdown',
+        wordWrap: false,
+        dirty: false,
+        saving: false,
+        diskRevision: 'rev-a',
+        lastSavedRevision: 'rev-a',
+        externalChange: false
+      },
+      statusLabels
+    )).toBeUndefined();
   });
 });

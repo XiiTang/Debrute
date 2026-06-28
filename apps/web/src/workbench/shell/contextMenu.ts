@@ -68,7 +68,6 @@ export type WorkbenchContextMenuItem =
   | {
       kind: 'action';
       command: WorkbenchContextMenuCommand;
-      label: string;
       disabled?: boolean;
     }
   | {
@@ -87,21 +86,21 @@ export function buildWorkbenchContextMenuItems(input: {
 }): WorkbenchContextMenuItem[] {
   if (input.target.source === 'explorer' && input.target.targetKind === 'root') {
     return [
-      action('create-file', 'New File'),
-      action('create-directory', 'New Folder'),
-      action('paste', 'Paste', { disabled: !input.fileClipboard?.entries.length }),
-      action('open-terminal', 'Open in Terminal')
+      action('create-file'),
+      action('create-directory'),
+      action('paste', { disabled: !input.fileClipboard?.entries.length }),
+      action('open-terminal')
     ];
   }
 
   if (input.target.source === 'explorer' && input.target.targetKind === 'selection') {
     return [
-      action('cut', 'Cut'),
-      action('copy', 'Copy'),
-      action('open-terminal', 'Open in Terminal'),
-      action('copy-path', 'Copy Path'),
-      action('copy-relative-path', 'Copy Relative Path'),
-      action('delete', 'Delete')
+      action('cut'),
+      action('copy'),
+      action('open-terminal'),
+      action('copy-path'),
+      action('copy-relative-path'),
+      action('delete')
     ];
   }
 
@@ -133,41 +132,41 @@ function buildSinglePathContextMenuItems(input: {
     && directory
     && input.targetEntry.projectRelativePath === '';
   const canvasActions = [
-    action('show-details', 'Show Details', {
+    action('show-details', {
       disabled: !(input.node && input.canSelectCanvasNode === true)
     }),
-    action('reveal-in-canvas', 'Reveal in Canvas', {
+    action('reveal-in-canvas', {
       disabled: !(input.node && input.canRevealInCanvas)
     }),
-    action('reset-auto-layout', 'Reset Auto Layout', {
+    action('reset-auto-layout', {
       disabled: input.node?.layoutMode !== 'manual'
     })
   ];
   const creationActions = explorerItem && directory
     ? [
-        action('create-file', 'New File'),
-        action('create-directory', 'New Folder')
+        action('create-file'),
+        action('create-directory')
       ]
     : [];
   const fileActions = compactMenuItems([
-    canvasProjectRoot ? undefined : action('cut', 'Cut'),
-    canvasProjectRoot ? undefined : action('copy', 'Copy'),
-    directory ? action('paste', 'Paste', { disabled: !input.fileClipboard?.entries.length }) : undefined
+    canvasProjectRoot ? undefined : action('cut'),
+    canvasProjectRoot ? undefined : action('copy'),
+    directory ? action('paste', { disabled: !input.fileClipboard?.entries.length }) : undefined
   ]);
   const pathActions = compactMenuItems([
-    action('open-terminal', 'Open in Terminal'),
-    action('copy-path', 'Copy Path'),
-    canvasProjectRoot ? undefined : action('copy-relative-path', 'Copy Relative Path'),
+    action('open-terminal'),
+    action('copy-path'),
+    canvasProjectRoot ? undefined : action('copy-relative-path'),
     input.targetEntry.kind === 'file'
       && input.adobeBridgeEnabled === true
       && isSupportedAdobeBridgeWorkbenchFile(input.targetEntry.projectRelativePath)
-      ? action('send-to-photoshop', 'Send to Photoshop...')
+      ? action('send-to-photoshop')
       : undefined,
-    action('reveal-in-system-file-manager', projectSystemFileManagerLabel(input.desktopPlatform ?? 'linux'))
+    action('reveal-in-system-file-manager')
   ]);
   const modifyActions = compactMenuItems([
-    explorerItem ? action('rename', 'Rename') : undefined,
-    canvasProjectRoot ? undefined : action('delete', 'Delete')
+    explorerItem ? action('rename') : undefined,
+    canvasProjectRoot ? undefined : action('delete')
   ]);
   return groupedMenuItems([
     { id: 'canvas-actions', items: canvasActions },
@@ -198,16 +197,6 @@ export function explorerContextMenuPrimaryEntry(target: WorkbenchContextMenuTarg
 
 export function explorerContextMenuProjectRelativePaths(target: WorkbenchContextMenuTarget): string[] {
   return explorerContextMenuEntries(target).map((entry) => entry.projectRelativePath);
-}
-
-export function projectSystemFileManagerLabel(platform: NodeJS.Platform): string {
-  if (platform === 'darwin') {
-    return 'Reveal in Finder';
-  }
-  if (platform === 'win32') {
-    return 'Reveal in File Explorer';
-  }
-  return 'Open Containing Folder';
 }
 
 export function projectedContextMenuNode(
@@ -252,13 +241,11 @@ function clamp(value: number, min: number, max: number): number {
 
 function action(
   command: WorkbenchContextMenuCommand,
-  label: string,
   options: { disabled?: boolean } = {}
 ): WorkbenchContextMenuItem {
   return {
     kind: 'action',
     command,
-    label,
     ...(options.disabled === undefined ? {} : { disabled: options.disabled })
   };
 }

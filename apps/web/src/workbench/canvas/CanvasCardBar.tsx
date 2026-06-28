@@ -2,6 +2,7 @@ import React from 'react';
 import { MoreHorizontal, Plus } from 'lucide-react';
 import { reorderCanvasIds } from './canvasCardBarState';
 import { Button, IconButton, Input, Menu } from '../ui';
+import { useI18n } from '../i18n';
 
 export interface CanvasCardBarProps {
   canvasOrder: string[];
@@ -26,8 +27,9 @@ export function CanvasCardBar({
   onDeleteCanvas,
   onReorderCanvases
 }: CanvasCardBarProps): React.ReactElement {
+  const i18n = useI18n();
   return (
-    <nav className="db-floating-bar canvas-card-bar" aria-label="Canvases">
+    <nav className="db-floating-bar canvas-card-bar" aria-label={i18n.t('canvas.cardBar.canvases')}>
       <div className="canvas-card-scroll">
         {canvasOrder.map((canvasId) => (
           <div
@@ -63,37 +65,37 @@ export function CanvasCardBar({
               {canvasId}
             </Button>
             <details className="canvas-card-menu-details" onToggle={(event) => positionCanvasCardMenu(event.currentTarget)}>
-              <summary aria-label="Canvas actions" className="canvas-card-menu-button db-icon-button db-icon-button--ghost db-icon-button--sm db-canvas-control" role="button">
+              <summary aria-label={i18n.t('canvas.cardBar.actions')} className="canvas-card-menu-button db-icon-button db-icon-button--ghost db-icon-button--sm db-canvas-control" role="button">
                 <MoreHorizontal size={14} />
               </summary>
-              <Menu className="canvas-card-menu" ariaLabel={`${canvasId} canvas actions`}>
+              <Menu className="canvas-card-menu" ariaLabel={i18n.t('canvas.cardBar.canvasActions', { canvasId })}>
                 <Menu.Item
                   onClick={(event) => {
                     closeCanvasCardMenu(event.currentTarget);
                     void onCreateCanvas();
                   }}
                 >
-                  New Canvas
+                  {i18n.t('canvas.cardBar.new')}
                 </Menu.Item>
                 <form
                   className="canvas-card-rename-form"
                   onSubmit={(event) => submitRenameCanvas(event, canvasId, onRenameCanvas)}
                 >
                   <Input
-                    aria-label={`Rename ${canvasId}`}
+                    aria-label={i18n.t('canvas.cardBar.renameCanvas', { canvasId })}
                     name="nextCanvasId"
                     defaultValue={canvasId}
                     autoComplete="off"
                     spellCheck={false}
                   />
-                  <Menu.Item type="submit">Rename</Menu.Item>
+                  <Menu.Item type="submit">{i18n.t('canvas.cardBar.rename')}</Menu.Item>
                 </form>
                 <Menu.Item
                   data-canvas-delete-request
                   variant="danger"
                   onClick={(event) => requestDeleteCanvas(event.currentTarget)}
                 >
-                  Delete
+                  {i18n.t('canvas.cardBar.delete')}
                 </Menu.Item>
                 <Menu.Item
                   data-canvas-delete-confirm
@@ -104,14 +106,14 @@ export function CanvasCardBar({
                     void onDeleteCanvas({ canvasId });
                   }}
                 >
-                  Confirm Delete
+                  {i18n.t('canvas.cardBar.confirmDelete')}
                 </Menu.Item>
               </Menu>
             </details>
           </div>
         ))}
       </div>
-      <IconButton className="canvas-card-add db-canvas-control" label="New Canvas" icon={<Plus size={14} />} onClick={() => { void onCreateCanvas(); }} />
+      <IconButton className="canvas-card-add db-canvas-control" label={i18n.t('canvas.cardBar.new')} icon={<Plus size={14} />} onClick={() => { void onCreateCanvas(); }} />
     </nav>
   );
 }
