@@ -14,13 +14,6 @@
   padding: 0;
 }
 
-.canvas-card-bar.db-floating-bar {
-  border: 0;
-  background: transparent;
-  box-shadow: none;
-  backdrop-filter: none;
-}
-
 .canvas-card-scroll {
   display: flex;
   align-items: center;
@@ -48,21 +41,14 @@
 .canvas-card-add,
 .canvas-card-rename-form {
   height: 28px;
-  border: 0;
 }
 
 .canvas-card {
   width: var(--canvas-card-width);
   padding: 0 8px;
-  border-radius: 6px;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
-}
-
-.canvas-card .db-button__label {
-  width: 100%;
-  text-align: center;
 }
 
 .canvas-card-add {
@@ -74,7 +60,6 @@
 
 .canvas-card-add {
   flex: 0 0 auto;
-  border-radius: 6px;
 }
 
 .canvas-card-rename-form {
@@ -82,21 +67,18 @@
   display: block;
 }
 
-.canvas-card-rename-input.db-input {
+.canvas-card-rename-input {
   width: 100%;
   height: 28px;
   min-height: 28px;
   padding: 0 8px;
-  border: 0;
-  border-radius: 6px;
-  font-size: var(--db-font-sm);
   text-align: center;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
 
-.canvas-card-delete.db-icon-button {
+.canvas-card-delete {
   position: absolute;
   top: 0;
   right: 0;
@@ -106,32 +88,8 @@
   pointer-events: none;
 }
 
-.canvas-card-delete.db-icon-button::before {
-  content: '';
-  position: absolute;
-  inset: 1px;
-  border-radius: 999px;
-  background: transparent;
-  transition: background var(--db-duration-fast) var(--db-ease-standard);
-}
-
-.canvas-card-delete.db-icon-button .db-icon-button__icon {
-  position: relative;
-  z-index: 1;
-}
-
-.canvas-card-delete.db-icon-button:hover:not(:disabled),
-.canvas-card-delete.db-icon-button:focus-visible {
-  background: transparent;
-}
-
-.canvas-card-delete.db-icon-button:hover:not(:disabled)::before,
-.canvas-card-delete.db-icon-button:focus-visible::before {
-  background: color-mix(in oklch, var(--db-surface-3) 82%, var(--db-accent));
-}
-
-.canvas-card-wrap:hover .canvas-card-delete.db-icon-button,
-.canvas-card-delete.db-icon-button:focus-visible {
+.canvas-card-wrap:hover .canvas-card-delete,
+.canvas-card-delete:focus-visible {
   opacity: 1;
   pointer-events: auto;
 }

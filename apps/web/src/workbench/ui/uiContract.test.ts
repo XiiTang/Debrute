@@ -135,7 +135,8 @@ describe('Workbench UI system contract', () => {
       '.db-object-properties',
       '.db-diagnostic-row',
       '.db-floating-bar',
-      '.db-canvas-control'
+      '.db-canvas-control',
+      '.db-canvas-card'
     ]) {
       expect(patterns).toContain(selector);
     }
