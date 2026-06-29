@@ -25,6 +25,7 @@ describe('CanvasCardBar', () => {
     expect(html).toContain('db-canvas-card');
     expect(html).toContain('canvas-card db-canvas-control db-canvas-card');
     expect(html).toContain('canvas-card-delete');
+    expect(html).toContain('db-workbench-close-button canvas-card-delete db-canvas-control');
     expect(html).toContain('db-canvas-control');
     expect(html).toContain('aria-pressed="true"');
     expect(html).not.toContain('--canvas-card-name-ch');
