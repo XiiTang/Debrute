@@ -9,6 +9,7 @@ import {
 } from '@debrute/project-core';
 import {
   isCanvasDocumentId,
+  isCanvasDocumentName,
   projectCanvas,
   type CanvasDocument,
   type CanvasMediaKind,
@@ -165,6 +166,7 @@ function isCurrentCanvasDocument(value: unknown): value is CanvasDocument {
   }
   return typeof value.id === 'string'
     && isCanvasDocumentId(value.id)
+    && isCanvasDocumentName(value.name)
     && Array.isArray(value.nodeElements)
     && value.nodeElements.every(isCurrentCanvasNodeElement)
     && Array.isArray(value.annotations)

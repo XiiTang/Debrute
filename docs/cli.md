@@ -14,9 +14,9 @@ pnpm exec tsx apps/debrute-cli/src/index.ts project validate path/to/project
 pnpm exec tsx apps/debrute-cli/src/index.ts workbench start
 pnpm exec tsx apps/debrute-cli/src/index.ts canvas-map push path/to/project canvas-1
 pnpm exec tsx apps/debrute-cli/src/index.ts canvas create path/to/project
-pnpm exec tsx apps/debrute-cli/src/index.ts canvas rename path/to/project canvas-2 storyboard
-pnpm exec tsx apps/debrute-cli/src/index.ts canvas reorder path/to/project storyboard canvas-1
-pnpm exec tsx apps/debrute-cli/src/index.ts canvas delete path/to/project storyboard
+pnpm exec tsx apps/debrute-cli/src/index.ts canvas rename path/to/project canvas-2 故事板
+pnpm exec tsx apps/debrute-cli/src/index.ts canvas reorder path/to/project canvas-2 canvas-1
+pnpm exec tsx apps/debrute-cli/src/index.ts canvas delete path/to/project canvas-2
 pnpm exec tsx apps/debrute-cli/src/index.ts canvas repair-index path/to/project
 pnpm exec tsx apps/debrute-cli/src/index.ts generated-asset lookup path/to/project --path generated/example.png
 pnpm exec tsx apps/debrute-cli/src/index.ts models image list

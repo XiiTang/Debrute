@@ -3,7 +3,10 @@ import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import sharp from 'sharp';
 import { describe, expect, it } from 'vitest';
-import { canvasFeedbackRenderedProjectPath } from '@debrute/canvas-core';
+import {
+  canvasFeedbackRenderedProjectPath,
+  canvasTextPreviewSourceProjectPath
+} from '@debrute/canvas-core';
 import {
   normalizeFileWatchEvent,
   projectFileRevision,
@@ -136,6 +139,105 @@ describe('DebruteAppServer Canvas image preview cache cleanup', () => {
       await server.refreshProject();
 
       await expect(readdir(fixture.sourceCacheRoot)).resolves.toEqual([fixture.currentRevisionKey]);
+    } finally {
+      server.close();
+      await rm(projectRoot, { recursive: true, force: true });
+    }
+  });
+});
+
+describe('DebruteAppServer Canvas display names', () => {
+  it('renames a Canvas display name without moving id-keyed files', async () => {
+    const projectRoot = await mkdtemp(join(tmpdir(), 'debrute-canvas-name-'));
+    const server = new DebruteAppServer();
+    try {
+      await server.openProject(projectRoot, {
+        initializeIfMissing: true,
+        createDefaultCanvas: true,
+        watchFiles: false
+      });
+
+      const result = await server.renameCanvas({
+        canvasId: 'canvas-1',
+        name: '  故事板  '
+      });
+
+      expect(result.activeCanvasId).toBe('canvas-1');
+      expect(result.snapshot.canvasRegistry).toEqual({
+        status: 'ready',
+        canvasOrder: ['canvas-1']
+      });
+      expect(result.snapshot.canvases[0]).toMatchObject({
+        id: 'canvas-1',
+        name: '故事板'
+      });
+      expect(JSON.parse(await readFile(join(projectRoot, '.debrute/canvases/canvas-1.json'), 'utf8'))).toMatchObject({
+        id: 'canvas-1',
+        name: '故事板'
+      });
+      expect(JSON.parse(await readFile(join(projectRoot, '.debrute/canvases/index.json'), 'utf8'))).toEqual({
+        canvasOrder: ['canvas-1']
+      });
+      await expect(stat(join(projectRoot, '.debrute/canvases/故事板.json'))).rejects.toMatchObject({ code: 'ENOENT' });
+      await expect(stat(join(projectRoot, '.debrute/canvas-maps/canvas-1.yaml'))).resolves.toBeTruthy();
+      await expect(stat(join(projectRoot, '.debrute/canvas-maps/故事板.yaml'))).rejects.toMatchObject({ code: 'ENOENT' });
+    } finally {
+      server.close();
+      await rm(projectRoot, { recursive: true, force: true });
+    }
+  });
+
+  it('keeps text preview descriptors readable after a Canvas display name change', async () => {
+    const projectRoot = await mkdtemp(join(tmpdir(), 'debrute-canvas-name-preview-'));
+    const server = new DebruteAppServer();
+    const sourceUpload = join(projectRoot, 'upload.png');
+    try {
+      await server.openProject(projectRoot, {
+        initializeIfMissing: true,
+        createDefaultCanvas: true,
+        watchFiles: false
+      });
+      await sharp({
+        create: {
+          width: 120,
+          height: 60,
+          channels: 4,
+          background: { r: 20, g: 20, b: 20, alpha: 1 }
+        }
+      }).png().toFile(sourceUpload);
+      const target = {
+        canvasId: 'canvas-1',
+        projectRelativePath: 'notes/scene.md',
+        fingerprint: 'fingerprint-a'
+      };
+      await server.saveCanvasTextPreviewSource({
+        ...target,
+        contentCssWidth: 60,
+        contentCssHeight: 30,
+        scrollTop: 0,
+        scrollLeft: 0,
+        sourceTemporaryPath: sourceUpload
+      });
+      const sourcePath = join(projectRoot, canvasTextPreviewSourceProjectPath(target));
+
+      await server.renameCanvas({
+        canvasId: 'canvas-1',
+        name: '故事板'
+      });
+      const descriptors = await server.readCanvasTextPreviewDescriptors({
+        canvasId: 'canvas-1',
+        nodes: [{
+          projectRelativePath: target.projectRelativePath,
+          fingerprint: target.fingerprint,
+          contentCssWidth: 60,
+          contentCssHeight: 30,
+          scrollTop: 0,
+          scrollLeft: 0
+        }]
+      });
+
+      expect(descriptors['notes/scene.md']?.fingerprint).toBe('fingerprint-a');
+      await expect(stat(sourcePath)).resolves.toBeTruthy();
     } finally {
       server.close();
       await rm(projectRoot, { recursive: true, force: true });

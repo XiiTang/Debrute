@@ -1047,7 +1047,7 @@ export interface WorkbenchApiClient {
   updateCanvasFeedbackEntry(input: UpdateCanvasFeedbackEntryInput): Promise<WorkbenchCanvasFeedbackMutationResult>;
   refreshProject(): Promise<WorkbenchProjectRefreshResult>;
   createCanvas(): Promise<WorkbenchCanvasManagementResult>;
-  renameCanvas(input: { canvasId: string; nextCanvasId: string }): Promise<WorkbenchCanvasManagementResult>;
+  renameCanvas(input: { canvasId: string; name: string }): Promise<WorkbenchCanvasManagementResult>;
   deleteCanvas(input: { canvasId: string }): Promise<WorkbenchCanvasManagementResult>;
   reorderCanvases(input: { canvasOrder: string[] }): Promise<WorkbenchCanvasManagementResult>;
   repairCanvasIndex(): Promise<WorkbenchCanvasManagementResult>;

@@ -11,7 +11,7 @@ describe('project session startup', () => {
 
   it('opens the project addressed by the project Workbench route', async () => {
     const calls: unknown[] = [];
-    const snapshot = { canvases: [{ id: 'canvas-1' }] } as WorkbenchProjectSessionSnapshot;
+    const snapshot = { canvases: [{ id: 'canvas-1', name: 'canvas-1' }] } as WorkbenchProjectSessionSnapshot;
     const api = {
       openProject: async (input: unknown) => {
         calls.push(input);
@@ -96,7 +96,7 @@ describe('project session startup', () => {
 
   it('opens an absolute path from the project-open route and removes the path from browser history', async () => {
     const replaceState = vi.fn();
-    const snapshot = { canvases: [{ id: 'canvas-1' }] } as WorkbenchProjectSessionSnapshot;
+    const snapshot = { canvases: [{ id: 'canvas-1', name: 'canvas-1' }] } as WorkbenchProjectSessionSnapshot;
     (globalThis as { window?: unknown }).window = {
       location: { pathname: '/open', search: '?path=%2FUsers%2Fme%2FProject%20A', hash: '' },
       history: { state: { debruteDaemonToken: 'secret' }, replaceState }

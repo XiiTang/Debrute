@@ -38,7 +38,11 @@ layout:
 
 Canvas is the visual workspace for projected Canvas Map nodes.
 
-Canvas JSON under `.debrute/canvases/<canvas-id>.json` stores visual state: node layout, z-order, annotations, and preferences. File and folder hierarchy is derived from the project filesystem.
+Canvas ids are stable internal keys. They are filesystem-safe slugs used as the file stem for Canvas JSON, Canvas Map YAML, registry ordering, active Canvas state, and preview cache identity.
+
+Canvas names are editable display labels stored inside Canvas JSON. Names can use Unicode text and are not used in filesystem paths, URLs, registry ids, Canvas Map ids, or preview cache keys.
+
+Canvas JSON under `.debrute/canvases/<canvas-id>.json` stores the Canvas id, display name, node layout, z-order, annotations, and preferences. File and folder hierarchy is derived from the project filesystem.
 
 Push copies the current Canvas Map membership into Canvas JSON, while Canvas display always derives default structure from filesystem paths.
 

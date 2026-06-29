@@ -693,7 +693,7 @@ export class DebruteAppServer {
     });
   }
 
-  async renameCanvas(input: { canvasId: string; nextCanvasId: string }): Promise<ProjectCanvasManagementResult> {
+  async renameCanvas(input: { canvasId: string; name: string }): Promise<ProjectCanvasManagementResult> {
     return this.enqueueSessionOperation(async () => {
       const current = this.getSnapshot();
       const { canvasId } = await this.canvasRegistryService.renameCanvas(current.projectRoot, input);

@@ -128,7 +128,7 @@ export interface WorkbenchActions {
   updateCanvasFeedbackEntry: (input: UpdateCanvasFeedbackEntryInput) => Promise<boolean>;
   addProjectPathToCanvasMap: (input: AddProjectPathToCanvasMapInput) => Promise<void>;
   createCanvas: () => Promise<WorkbenchCanvasManagementResult>;
-  renameCanvas: (input: { canvasId: string; nextCanvasId: string }) => Promise<WorkbenchCanvasManagementResult>;
+  renameCanvas: (input: { canvasId: string; name: string }) => Promise<WorkbenchCanvasManagementResult>;
   deleteCanvas: (input: { canvasId: string }) => Promise<WorkbenchCanvasManagementResult>;
   reorderCanvases: (input: { canvasOrder: string[] }) => Promise<WorkbenchCanvasManagementResult>;
   repairCanvasIndex: () => Promise<WorkbenchCanvasManagementResult>;

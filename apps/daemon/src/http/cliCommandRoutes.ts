@@ -177,7 +177,7 @@ async function runDaemonCliCommandUnsafe(
     await openCliProject(server, request);
     const result = await server.renameCanvas({
       canvasId: request.positional[1] ?? '',
-      nextCanvasId: request.positional[2] ?? ''
+      name: request.positional[2] ?? ''
     });
     return canvasManagementResult(request.command, result.activeCanvasId);
   }

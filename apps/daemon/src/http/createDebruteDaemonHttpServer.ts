@@ -1134,7 +1134,7 @@ async function handleCanvasRoute(
       const result = await runRevisionedMutation(context, baseRevisionField(body), async () => (
         withHttpSnapshot(await server.renameCanvas({
           canvasId,
-          nextCanvasId: stringField(body.nextCanvasId, 'nextCanvasId')
+          name: stringField(body.name, 'name')
         }), context.runtime.daemonUrl, session, context.runtime.token)
       ));
       writeJson(context.response, 200, result);

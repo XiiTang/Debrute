@@ -492,6 +492,7 @@ describe('workbench context menu commands', () => {
       resetCount: 0,
       canvas: {
         id: 'canvas-1',
+        name: 'canvas-1',
         nodeElements: [],
         annotations: [],
         preferences: {
@@ -541,6 +542,7 @@ describe('workbench context menu commands', () => {
       resetCount: 1,
       canvas: {
         id: 'canvas-1',
+        name: 'canvas-1',
         nodeElements: [],
         annotations: [],
         preferences: {
@@ -591,6 +593,7 @@ describe('workbench context menu commands', () => {
       resetCount: 1,
       canvas: {
         id: 'canvas-1',
+        name: 'canvas-1',
         nodeElements: [],
         annotations: [],
         preferences: {
@@ -641,6 +644,7 @@ describe('workbench context menu commands', () => {
       resetCount: 1,
       canvas: {
         id: 'canvas-1',
+        name: 'canvas-1',
         nodeElements: [],
         annotations: [],
         preferences: {
