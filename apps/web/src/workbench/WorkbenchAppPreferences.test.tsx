@@ -140,7 +140,6 @@ function apiFixture(): WorkbenchApiClient {
     getWorkbenchTitleBarState: vi.fn(async () => unavailableWorkbenchTitleBarState()),
     integrationsListStatus: vi.fn(async () => ({ integrations: [] })),
     adobeBridgeGetState: vi.fn(async () => ({ settings: { enabled: true }, clients: [], links: [], transfers: [] })),
-    llmGetSettings: vi.fn(async () => ({ defaultModelKey: null, availableModelKeys: [], providers: [] })),
     imageModelGetSettings: vi.fn(async () => ({ models: [] })),
     videoModelGetSettings: vi.fn(async () => ({ models: [] })),
     openProject: vi.fn(async () => ({

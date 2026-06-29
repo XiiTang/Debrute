@@ -465,41 +465,6 @@ describe('DebruteAppServer CLI service methods', () => {
     }
   });
 
-  it('runs runtime LLM requests without project output fields', async () => {
-    const home = await mkdtemp(join(tmpdir(), 'debrute-cli-llm-runtime-home-'));
-    const configStore = new GlobalConfigStore({ debruteHome: home });
-    const globalRuntime = new DebruteGlobalRuntimeServer({ globalConfigStore: configStore });
-    const server = new DebruteAppServer({ globalConfigStore: configStore });
-    try {
-      await globalRuntime.llmSaveProviderSetting({
-        id: 'openai-main',
-        name: 'OpenAI Compatible',
-        providerType: 'openai_compat',
-        baseUrl: 'https://api.openai.com/v1',
-        enabled: true,
-        modelIds: ['gpt-debrute'],
-        apiKey: 'sk-test'
-      });
-      await globalRuntime.llmSetDefaultModelKey('openai-main:gpt-debrute');
-
-      const result = await server.runLlmRequestForCli({
-        prompt: 'write',
-        output_path: 'generated/outline.md'
-      });
-
-      expect(result).toMatchObject({
-        status: 'error',
-        error: {
-          code: 'invalid_input',
-          message: 'Unknown llm.request input field: output_path'
-        }
-      });
-    } finally {
-      globalRuntime.close();
-      server.close();
-      await rm(home, { recursive: true, force: true });
-    }
-  });
 });
 
 function jsonResponse(body: unknown): Response {

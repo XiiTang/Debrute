@@ -8,20 +8,16 @@ import type {
   DebruteRuntimeInfo,
   DebruteHttpErrorBody,
   DaemonProjectUploadImportPlan,
-  DiscoverLlmProviderModelsInput,
-  DiscoverProviderModelsOutput,
   GeneratedAssetView,
   GeneratedAssetsView,
   GeneratedAssetMetadataLookup,
   ImageModelSettingsView,
   IntegrationSettingsView,
-  LlmProviderSettingsView,
   ProductUpdateApplyResult,
   ProjectHealthSummary,
   SaveCanvasTextPreviewSourceInput,
   SaveAdobeBridgeSettingsInput,
   SaveImageModelSettingInput,
-  SaveLlmProviderSettingInput,
   SaveWorkbenchPreferencesInput,
   SaveVideoModelSettingInput,
   SendProjectFileToPhotoshopResult,
@@ -458,15 +454,6 @@ export function createHttpWorkbenchApiClient(options: HttpWorkbenchApiClientOpti
     updateCanvasNodeLayers: (input) => requestRevisioned<WorkbenchCanvasDocumentMutationResult>('PATCH', projectPath(`/canvases/${encodeURIComponent(input.canvasId)}/node-layers`), {
       nodeProjectRelativePathsTopFirst: input.nodeProjectRelativePathsTopFirst
     }),
-    llmGetSettings: () => request<LlmProviderSettingsView>('GET', '/api/settings/llm'),
-    llmSaveProviderSetting: (input, providerId) => providerId
-      ? request<LlmProviderSettingsView>('PUT', `/api/settings/llm/providers/${encodeURIComponent(providerId)}`, input)
-      : request<LlmProviderSettingsView>('POST', '/api/settings/llm/providers', input),
-    llmDeleteProviderSetting: (providerId) => request<LlmProviderSettingsView>('DELETE', `/api/settings/llm/providers/${encodeURIComponent(providerId)}`),
-    llmSetDefaultModelKey: (modelKey) => request<LlmProviderSettingsView>('PUT', '/api/settings/llm/default-model', { modelKey }),
-    llmDiscoverProviderModels: (input: DiscoverLlmProviderModelsInput, providerId?: string) => (
-      request<DiscoverProviderModelsOutput>('POST', '/api/settings/llm/discover-models', { input, providerId })
-    ),
     imageModelGetSettings: () => request<ImageModelSettingsView>('GET', '/api/models/image'),
     imageModelSaveSetting: (modelId: string, input: SaveImageModelSettingInput) => (
       request<ImageModelSettingsView>('PUT', `/api/models/image/${encodeURIComponent(modelId)}`, input)

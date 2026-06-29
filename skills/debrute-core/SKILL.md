@@ -31,7 +31,6 @@ debrute project validate /path/to/project
 debrute workbench start
 debrute canvas-map push /path/to/project canvas-1
 debrute generated-asset lookup /path/to/project --path generated/example.png
-debrute llm request --input-json '{"prompt":"Summarize this project."}'
 debrute models image list
 debrute models image describe gpt-image-2
 debrute generate image /path/to/project --input-json '{"model":"gpt-image-2","arguments":{"prompt":"Cover image","output_path":"generated/cover.png"}}' --timeout-ms 600000
@@ -108,7 +107,7 @@ Folder rules under `paths` must end with `/`, for example `outputs/gpt/`. A fold
 Rows never add files to the Canvas. Each `layout.rows` glob matches included files, then splits matches into one horizontal row per direct parent directory.
 
 Do not use CLI commands to add, remove, inspect, or modify Canvas nodes or edges.
-Maintain the Canvas Map while creating file-producing scripts, prompts, llm requests, image requests, or video requests.
+Maintain the Canvas Map while creating file-producing scripts, prompts, image requests, or video requests.
 When output paths are known before generation starts, add matching file, folder, or glob entries under `paths` and push before running generation.
 
 ## Canvas Feedback

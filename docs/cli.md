@@ -19,7 +19,6 @@ pnpm exec tsx apps/debrute-cli/src/index.ts canvas reorder path/to/project story
 pnpm exec tsx apps/debrute-cli/src/index.ts canvas delete path/to/project storyboard
 pnpm exec tsx apps/debrute-cli/src/index.ts canvas repair-index path/to/project
 pnpm exec tsx apps/debrute-cli/src/index.ts generated-asset lookup path/to/project --path generated/example.png
-pnpm exec tsx apps/debrute-cli/src/index.ts llm request --input-json '{"prompt":"Summarize this project."}'
 pnpm exec tsx apps/debrute-cli/src/index.ts models image list
 pnpm exec tsx apps/debrute-cli/src/index.ts models image describe gpt-image-2
 pnpm exec tsx apps/debrute-cli/src/index.ts generate image path/to/project --input-json '{"model":"gpt-image-2","arguments":{"prompt":"Cover image","output_path":"generated/cover.png"}}' --timeout-ms 600000

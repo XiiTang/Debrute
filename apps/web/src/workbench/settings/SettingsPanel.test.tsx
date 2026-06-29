@@ -4,32 +4,10 @@ import { describe, expect, it, vi } from 'vitest';
 import type { DebruteProductState } from '@debrute/app-protocol';
 import type { WorkbenchActions, WorkbenchState } from '../../types';
 import { I18nProvider } from '../i18n';
-import { ImageModelSettings, LlmSettings } from './SettingsPanel';
+import { ImageModelSettings } from './SettingsPanel';
 import { GeneralSettingsPage } from './general/GeneralSettingsPage';
 
 describe('SettingsPanel shared UI composition', () => {
-  it('renders LLM settings through shared settings patterns and primitives', () => {
-    const html = renderToStaticMarkup(
-      <I18nProvider locale="en">
-        <LlmSettings
-          state={stateWithSettings()}
-          actions={actions()}
-        />
-      </I18nProvider>
-    );
-
-    expect(html).toContain('db-settings-section');
-    expect(html).toContain('db-settings-section__header');
-    expect(html).toContain('db-form-grid');
-    expect(html).toContain('db-action-row');
-    expect(html).toContain('db-card');
-    expect(html).toContain('db-field');
-    expect(html).toContain('db-input');
-    expect(html).toContain('db-select');
-    expect(html).not.toContain('settings-actions');
-    expect(html).not.toContain('settings-grid');
-  });
-
   it('renders media model settings through shared model-card patterns', () => {
     const html = renderToStaticMarkup(
       <I18nProvider locale="en">
@@ -84,20 +62,6 @@ function stateWithSettings(): WorkbenchState {
     resolvedTheme: 'dark',
     projectOpen: { opening: false },
     explorerSelection: { selectedPaths: [], focusedPath: undefined, anchorPath: undefined },
-    llmSettings: {
-      defaultModelKey: null,
-      availableModelKeys: ['openai:gpt-4.1'],
-      providers: [{
-        id: 'openai',
-        name: 'OpenAI',
-        providerType: 'openai_compat',
-        baseUrl: 'https://api.openai.com/v1',
-        enabled: true,
-        apiKeySet: true,
-        apiKeyPreview: 'sk-...',
-        modelKeys: ['openai:gpt-4.1']
-      }]
-    },
     imageModelSettings: {
       models: [{
         debruteModelId: 'image/openai/gpt-image-1',
@@ -126,15 +90,6 @@ function actions(): WorkbenchActions {
     checkProductUpdate: vi.fn(async () => productState()),
     applyProductUpdate: vi.fn(async () => ({ state: productState() })),
     saveWorkbenchPreferences: vi.fn(async () => undefined),
-    saveLlmProviderSetting: vi.fn(async () => undefined),
-    deleteLlmProviderSetting: vi.fn(async () => undefined),
-    setDefaultLlmModelKey: vi.fn(async () => undefined),
-    discoverLlmProviderModels: vi.fn(async () => ({
-      supportsDiscovery: false,
-      endpoint: 'https://api.openai.com/v1/models',
-      models: [],
-      modelsCount: 0
-    })),
     saveImageModelSetting: vi.fn(async () => undefined),
     saveVideoModelSetting: vi.fn(async () => undefined)
   } as unknown as WorkbenchActions;

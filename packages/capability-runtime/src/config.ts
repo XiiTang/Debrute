@@ -1,41 +1,16 @@
 import type {
   ImageModelSettingsView,
-  LlmProviderConfig,
-  LlmProviderSettingsView,
-  LlmProviderType,
   VideoModelSettingsView
 } from '@debrute/app-protocol';
 
 export type {
-  DiscoverLlmProviderModelsInput,
-  DiscoverProviderModelsOutput,
   ImageModelSettingRecord,
   ImageModelSettingsView,
-  LlmProviderConfig,
-  LlmProviderSettingRecord,
-  LlmProviderSettingsView,
-  LlmProviderType,
   SaveImageModelSettingInput,
-  SaveLlmProviderSettingInput,
   SaveVideoModelSettingInput,
   VideoModelSettingRecord,
   VideoModelSettingsView
 } from '@debrute/app-protocol';
-
-export interface LlmProvidersConfig {
-  providers: LlmProviderConfig[];
-  defaultModelKey: string | null;
-}
-
-export interface ProviderModelSpec {
-  modelKey: string;
-  providerId: string;
-  providerType: LlmProviderType;
-  modelId: string;
-  displayName: string;
-  contextWindow?: number;
-  supportsTools?: boolean;
-}
 
 export interface ImageModelsConfig {
   imageModels: ImageModelConfig[];
@@ -58,7 +33,6 @@ export interface VideoModelConfig {
 }
 
 export interface SecretsConfig {
-  llmProviderApiKeys: Record<string, string>;
   imageModelApiKeys: Record<string, string>;
   videoModelApiKeys: Record<string, string>;
 }
@@ -151,30 +125,5 @@ export function createVideoModelSettingsView(
         ...keyState
       };
     })
-  };
-}
-
-export function createLlmProviderSettingsView(
-  config: LlmProvidersConfig,
-  secrets: SecretsConfig
-): LlmProviderSettingsView {
-  const providers = config.providers
-    .map((provider) => {
-      const keyState = apiKeyPreview(secrets.llmProviderApiKeys[provider.id]);
-      return {
-        ...provider,
-        ...keyState,
-        modelKeys: provider.modelIds.map((modelId) => `${provider.id}:${modelId}`)
-      };
-    })
-    .sort((left, right) => left.id.localeCompare(right.id));
-  const availableModelKeys = providers
-    .filter((provider) => provider.enabled && provider.apiKeySet)
-    .flatMap((provider) => provider.modelKeys);
-  const availableSet = new Set(availableModelKeys);
-  return {
-    providers,
-    availableModelKeys,
-    defaultModelKey: config.defaultModelKey && availableSet.has(config.defaultModelKey) ? config.defaultModelKey : null
   };
 }

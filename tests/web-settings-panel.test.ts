@@ -14,8 +14,7 @@ describe('web Settings pages', () => {
       actions: actionsFixture()
     }));
 
-    expect(html.match(/class="db-nav-row(?: db-nav-row--active)?"/g)).toHaveLength(5);
-    expect(html.indexOf('General')).toBeLessThan(html.indexOf('LLM'));
+    expect(html.match(/class="db-nav-row(?: db-nav-row--active)?"/g)).toHaveLength(4);
     expect(html).toContain('Application');
     expect(html).toContain('Updates');
     expect(html.match(/Debrute CLI/g)).toHaveLength(1);
@@ -112,7 +111,6 @@ function stateFixture(): WorkbenchState {
     resolvedTheme: 'dark',
     projectOpen: { opening: false },
     explorerSelection: { selectedPaths: [], focusedPath: undefined, anchorPath: undefined },
-    llmSettings: { providers: [], availableModelKeys: [], defaultModelKey: null },
     imageModelSettings: { models: [] },
     videoModelSettings: { models: [] },
     integrationsSettings: undefined,

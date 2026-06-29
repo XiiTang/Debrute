@@ -5,14 +5,10 @@ import {
   type WorkbenchTitleBarState,
   AdobeBridgeSettings,
   AppServerEvent,
-  DiscoverLlmProviderModelsInput,
-  DiscoverProviderModelsOutput,
   ImageModelSettingsView,
   IntegrationSettingsView,
-  LlmProviderSettingsView,
   SaveAdobeBridgeSettingsInput,
   SaveImageModelSettingInput,
-  SaveLlmProviderSettingInput,
   SaveWorkbenchPreferencesInput,
   SaveVideoModelSettingInput,
   VideoModelSettingsView,
@@ -22,7 +18,6 @@ import { AdobeBridgeSettingsService } from '../adobe-bridge/AdobeBridgeSettingsS
 import { GlobalConfigStore } from '../config/GlobalConfigStore.js';
 import { IntegrationsService } from '../integrations/IntegrationsService.js';
 import { ImageModelService } from '../models/ImageModelService.js';
-import { LlmService } from '../models/LlmService.js';
 import { VideoModelService } from '../models/VideoModelService.js';
 
 export interface DebruteGlobalRuntimeServerOptions {
@@ -35,7 +30,6 @@ export interface DebruteGlobalRuntimeServerOptions {
 export class DebruteGlobalRuntimeServer {
   private readonly events = new EventEmitter();
   private readonly configStore: GlobalConfigStore;
-  private readonly llmService: LlmService;
   private readonly imageModelService: ImageModelService;
   private readonly videoModelService: VideoModelService;
   private readonly integrationsService: IntegrationsService;
@@ -43,7 +37,6 @@ export class DebruteGlobalRuntimeServer {
 
   constructor(options: DebruteGlobalRuntimeServerOptions = {}) {
     this.configStore = options.globalConfigStore ?? new GlobalConfigStore();
-    this.llmService = new LlmService({ configStore: this.configStore });
     this.imageModelService = new ImageModelService({ configStore: this.configStore });
     this.videoModelService = new VideoModelService({ configStore: this.configStore });
     this.adobeBridgeSettingsService = new AdobeBridgeSettingsService({ configStore: this.configStore });
@@ -57,32 +50,6 @@ export class DebruteGlobalRuntimeServer {
   onEvent(listener: (event: AppServerEvent) => void): () => void {
     this.events.on('event', listener);
     return () => this.events.off('event', listener);
-  }
-
-  async llmGetSettings(): Promise<LlmProviderSettingsView> {
-    return this.llmService.getSettings();
-  }
-
-  async llmSaveProviderSetting(input: SaveLlmProviderSettingInput, providerId?: string): Promise<LlmProviderSettingsView> {
-    const settings = await this.llmService.saveProviderSetting(input, providerId);
-    this.emit({ type: 'llm.settings.changed', settings });
-    return settings;
-  }
-
-  async llmDeleteProviderSetting(providerId: string): Promise<LlmProviderSettingsView> {
-    const settings = await this.llmService.deleteProviderSetting(providerId);
-    this.emit({ type: 'llm.settings.changed', settings });
-    return settings;
-  }
-
-  async llmSetDefaultModelKey(modelKey: string | null): Promise<LlmProviderSettingsView> {
-    const settings = await this.llmService.setDefaultModelKey(modelKey);
-    this.emit({ type: 'llm.settings.changed', settings });
-    return settings;
-  }
-
-  async llmDiscoverProviderModels(input: DiscoverLlmProviderModelsInput, providerId?: string): Promise<DiscoverProviderModelsOutput> {
-    return this.llmService.discoverProviderModels(input, providerId);
   }
 
   async imageModelGetSettings(): Promise<ImageModelSettingsView> {

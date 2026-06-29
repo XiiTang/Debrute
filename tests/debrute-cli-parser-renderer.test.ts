@@ -214,13 +214,13 @@ describe('debrute cli parser and renderer', () => {
   it('escapes terminal control characters in Agent Record values', () => {
     const rendered = renderAgentRecord({
       status: 'ok',
-      command: 'llm.request',
+      command: 'project.status',
       fields: {
         text: 'hello\u001b]52;c;AAAA\u0007world'
       }
     });
 
-    expect(rendered).toBe('debrute/1 ok cmd=llm.request\ntext="hello\\u001b]52;c;AAAA\\u0007world"');
+    expect(rendered).toBe('debrute/1 ok cmd=project.status\ntext="hello\\u001b]52;c;AAAA\\u0007world"');
     expect(rendered).not.toContain('\u001b');
     expect(rendered).not.toContain('\u0007');
   });
@@ -246,7 +246,6 @@ describe('debrute cli parser and renderer', () => {
       'models.image.describe',
       'models.video.list',
       'models.video.describe',
-      'llm.request',
       'project.init',
       'project.status',
       'project.validate',

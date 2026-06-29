@@ -7,17 +7,13 @@ import type {
   CanvasTextPreviewDescriptorResponse,
   CanvasTextPreviewDescriptorView,
   CanvasTextPreviewReconcileRequest,
-  DiscoverLlmProviderModelsInput,
-  DiscoverProviderModelsOutput,
   GeneratedAssetView,
   GeneratedAssetMetadataLookup,
-  LlmProviderSettingsView,
   ProductUpdateApplyResult,
   SaveAdobeBridgeSettingsInput,
   SaveCanvasTextPreviewSourceInput,
   SaveWorkbenchPreferencesInput,
   SaveImageModelSettingInput,
-  SaveLlmProviderSettingInput,
   SaveVideoModelSettingInput,
   SendProjectFileToPhotoshopInput,
   SendProjectFileToPhotoshopResult,
@@ -49,7 +45,6 @@ export interface WorkbenchState {
   resolvedTheme: WorkbenchResolvedTheme;
   projectOpen: ProjectOpenState;
   explorerSelection: ProjectTreeSelectionState;
-  llmSettings: LlmProviderSettingsView | undefined;
   imageModelSettings: ImageModelSettingsView | undefined;
   videoModelSettings: VideoModelSettingsView | undefined;
   integrationsSettings: IntegrationSettingsView | undefined;
@@ -93,10 +88,6 @@ export interface WorkbenchActions {
   checkProductUpdate: () => Promise<DebruteProductState>;
   applyProductUpdate: () => Promise<ProductUpdateApplyResult>;
   saveWorkbenchPreferences: (input: SaveWorkbenchPreferencesInput) => Promise<void>;
-  saveLlmProviderSetting: (input: SaveLlmProviderSettingInput, providerId?: string) => Promise<void>;
-  deleteLlmProviderSetting: (providerId: string) => Promise<void>;
-  setDefaultLlmModelKey: (modelKey: string | null) => Promise<void>;
-  discoverLlmProviderModels: (input: DiscoverLlmProviderModelsInput, providerId?: string) => Promise<DiscoverProviderModelsOutput>;
   saveImageModelSetting: (modelId: string, input: SaveImageModelSettingInput) => Promise<void>;
   saveVideoModelSetting: (modelId: string, input: SaveVideoModelSettingInput) => Promise<void>;
   rescanIntegrations: () => Promise<IntegrationSettingsView>;

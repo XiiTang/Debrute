@@ -16,7 +16,7 @@ This page keeps the project and development details out of the public README.
 - `packages/canvas-map-core` - Canvas Map YAML parsing, path and row rule expansion, and file-tree node derivation.
 - `packages/canvas-core` - Canvas documents, projected node state, derived structure edges, selection, viewport, diagnostics, and node layout operations.
 - `packages/capability-core` - result and artifact value shapes shared by Debrute runtime services.
-- `packages/capability-runtime` - model catalogs, model executors, runtime LLM request execution, LLM provider settings, generation model settings, and Skills registry code.
+- `packages/capability-runtime` - model catalogs, model executors, generation model settings, and Skills registry code.
 - `packages/workbench-runtime` - shared local Workbench runtime discovery, locking, process control, and state.
 - `packages/app-protocol` - protocol types shared across the app boundary.
 - `packages/photoshop-bridge-plugin-core` - shared Photoshop bridge plugin logic.

@@ -23,7 +23,6 @@ describe('CLI runtime policy', () => {
       'models.image.describe',
       'models.video.list',
       'models.video.describe',
-      'llm.request',
       'project.init',
       'project.status',
       'project.validate',

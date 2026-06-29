@@ -305,11 +305,6 @@ describe('Debrute architecture boundaries', () => {
 
     expect(text).not.toContain('getGlobalRuntime');
     for (const method of [
-      'llmGetSettings',
-      'llmSaveProviderSetting',
-      'llmDeleteProviderSetting',
-      'llmSetDefaultModelKey',
-      'llmDiscoverProviderModels',
       'imageModelGetSettings',
       'imageModelSaveSetting',
       'videoModelGetSettings',

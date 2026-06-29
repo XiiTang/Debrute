@@ -42,15 +42,11 @@ export type {
 export type {
   AddProjectPathToCanvasMapInput,
   AppServerEvent,
-  DiscoverLlmProviderModelsInput,
-  DiscoverProviderModelsOutput,
   GeneratedAssetMetadataLookup,
   GeneratedAssetRecord,
   ImageModelBatchSummary,
   ImageModelSettingRecord,
   ImageModelSettingsView,
-  LlmProviderSettingRecord,
-  LlmProviderSettingsView,
   ProjectAddProjectPathToCanvasMapResult,
   ProjectFileOperationResult,
   ProjectHealthSummary,
@@ -58,7 +54,6 @@ export type {
   ProjectTextFile,
   RunImageModelBatchInput,
   SaveImageModelSettingInput,
-  SaveLlmProviderSettingInput,
   SaveVideoModelSettingInput,
   VideoModelSettingRecord,
   VideoModelSettingsView

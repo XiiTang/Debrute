@@ -42,15 +42,12 @@ import {
   type DebruteCapabilityResult
 } from '@debrute/capability-core';
 import {
-  ProviderRegistry,
   createImageModelCatalog,
   createImageModelSettingsView,
-  createLlmProviderSettingsView,
   createVideoModelCatalog,
   createVideoModelSettingsView,
   describeImageModelOfficialDoc,
   describeVideoModelOfficialDoc,
-  runLlmRuntimeRequest,
   executeImageModelRequest,
   executeVideoModelRequest,
   type ExecuteImageModelRequestResult,
@@ -434,10 +431,9 @@ export class DebruteAppServer {
   }
 
   async runtimeStatusForCli(): Promise<CliRuntimeStatus> {
-    const [configuredImageModels, configuredVideoModels, llmSettings] = await Promise.all([
+    const [configuredImageModels, configuredVideoModels] = await Promise.all([
       this.listImageModelsForCli(),
-      this.listVideoModelsForCli(),
-      this.readLlmProviderSettings()
+      this.listVideoModelsForCli()
     ]);
     return {
       ok: true,
@@ -445,7 +441,6 @@ export class DebruteAppServer {
       availableImageModels: configuredImageModels.length,
       videoModels: createVideoModelCatalog().listAll().length,
       availableVideoModels: configuredVideoModels.length,
-      availableLlmModels: llmSettings.availableModelKeys.length,
       diagnostics: 0
     };
   }
@@ -453,9 +448,6 @@ export class DebruteAppServer {
   async runtimeDoctorForCli(): Promise<{ diagnostics: CliRuntimeDiagnostic[] }> {
     const status = await this.runtimeStatusForCli();
     const diagnostics: CliRuntimeDiagnostic[] = [];
-    if (status.availableLlmModels === 0) {
-      diagnostics.push({ severity: 'warning', code: 'llm_model_not_configured', message: 'No available LLM model is configured.' });
-    }
     if (status.availableImageModels === 0) {
       diagnostics.push({ severity: 'warning', code: 'image_model_not_configured', message: 'No available image model is configured.' });
     }
@@ -786,15 +778,6 @@ export class DebruteAppServer {
     return this.enqueueSessionOperation(async () => (
       this.applyCanvasSessionUpdate(await this.canvasSessionService.updateCanvasNodeLayers(this.getSnapshot(), input))
     ));
-  }
-
-  async runLlmRequestForCli(input: Record<string, unknown>): Promise<DebruteCapabilityResult> {
-    const llmProviderSettings = await this.configStore.readLlmProviders();
-    const providers = new ProviderRegistry(llmProviderSettings, await this.configStore.readSecrets());
-    return runLlmRuntimeRequest(input, {
-      providers,
-      defaultModelKey: llmProviderSettings.defaultModelKey ?? null
-    });
   }
 
   async listImageModelsForCli(): Promise<CliImageModelListEntry[]> {
@@ -1269,13 +1252,6 @@ export class DebruteAppServer {
     };
     this.snapshot = snapshot;
     this.emit({ type: 'project.changed', snapshot });
-  }
-
-  private async readLlmProviderSettings() {
-    return createLlmProviderSettingsView(
-      await this.configStore.readLlmProviders(),
-      await this.configStore.readSecrets()
-    );
   }
 
   private async readImageModelSettings() {

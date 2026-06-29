@@ -106,7 +106,6 @@ function createState(overrides: Partial<WorkbenchState> = {}): WorkbenchState {
     snapshot: undefined,
     projectId: 'project-1',
     explorerSelection: { selectedPaths: [], focusedPath: null, anchorPath: null },
-    llmSettings: { providers: [], availableModelKeys: [], defaultModelKey: null },
     imageModelSettings: { models: [] },
     videoModelSettings: { models: [] },
     integrationsSettings: { integrations: [], backends: [] },

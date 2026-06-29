@@ -40,7 +40,6 @@ export const commandSpecs: DebruteCommandSpec[] = [
   spec('models.image.describe', ['models', 'image', 'describe'], 'runtime', 'read', 'model-config', 'none', '<model-id>', 'image model detail record', ['model_unavailable', 'runtime_config_error']),
   spec('models.video.list', ['models', 'video', 'list'], 'runtime', 'read', 'model-config', 'none', 'no args', 'video model records', ['runtime_config_error']),
   spec('models.video.describe', ['models', 'video', 'describe'], 'runtime', 'read', 'model-config', 'none', '<model-id>', 'video model detail record', ['model_unavailable', 'runtime_config_error']),
-  spec('llm.request', ['llm', 'request'], 'runtime', 'generate', 'secrets', 'none', '--input-json <json>', 'llm response records', ['invalid_json_input', 'model_not_configured', 'model_unavailable', 'model_request_failed', 'runtime_config_error']),
   spec('project.init', ['project', 'init'], 'project', 'write', 'project', 'debrute-project', '<project>', 'project status record', ['project_invalid']),
   spec('project.status', ['project', 'status'], 'project', 'read', 'project', 'none', '<project>', 'project status record', PROJECT_LOAD_ERRORS),
   spec('project.validate', ['project', 'validate'], 'project', 'read', 'project', 'none', '<project>', 'validation problem records', [...PROJECT_LOAD_ERRORS, 'project_validation_failed']),

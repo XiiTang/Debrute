@@ -140,7 +140,6 @@ export function WorkbenchApp(): React.ReactElement {
   const [explorerSelection, setExplorerSelection] = useState<ProjectTreeSelectionState>(() => createEmptyProjectTreeSelection());
   const [floatingPanels, setFloatingPanels] = useState<FloatingPanelState>(DEFAULT_FLOATING_PANEL_STATE);
   const [requestedTerminalCwd, setRequestedTerminalCwd] = useState<string | null>(null);
-  const [llmSettings, setLlmSettings] = useState<WorkbenchState['llmSettings']>();
   const [imageModelSettings, setImageModelSettings] = useState<WorkbenchState['imageModelSettings']>();
   const [videoModelSettings, setVideoModelSettings] = useState<WorkbenchState['videoModelSettings']>();
   const [integrationsSettings, setIntegrationsSettings] = useState<WorkbenchState['integrationsSettings']>();
@@ -282,7 +281,6 @@ export function WorkbenchApp(): React.ReactElement {
     setCanvasMinimapOpen(false);
     setProjectOpenAttemptedPath(undefined);
     setProjectOpenError(undefined);
-    setLlmSettings(await api.llmGetSettings());
     setImageModelSettings(await api.imageModelGetSettings());
     setVideoModelSettings(await api.videoModelGetSettings());
     setIntegrationsSettings(await api.integrationsListStatus());
@@ -522,9 +520,6 @@ export function WorkbenchApp(): React.ReactElement {
       if (event.type === 'canvas.feedback.changed') {
         setCanvasFeedback(event.feedback);
       }
-      if (event.type === 'llm.settings.changed') {
-        setLlmSettings(event.settings);
-      }
       if (event.type === 'imageModel.settings.changed') {
         setImageModelSettings(event.settings);
       }
@@ -699,7 +694,6 @@ export function WorkbenchApp(): React.ReactElement {
       opening: isProjectOpening
     },
     explorerSelection,
-    llmSettings,
     imageModelSettings,
     videoModelSettings,
     integrationsSettings,
@@ -751,19 +745,6 @@ export function WorkbenchApp(): React.ReactElement {
         setIsProjectOpening(false);
       }
     },
-    saveLlmProviderSetting: async (input, providerId) => {
-      const settings = await api.llmSaveProviderSetting(input, providerId);
-      setLlmSettings(settings);
-    },
-    deleteLlmProviderSetting: async (providerId) => {
-      const settings = await api.llmDeleteProviderSetting(providerId);
-      setLlmSettings(settings);
-    },
-    setDefaultLlmModelKey: async (modelKey) => {
-      const settings = await api.llmSetDefaultModelKey(modelKey);
-      setLlmSettings(settings);
-    },
-    discoverLlmProviderModels: (input, providerId) => api.llmDiscoverProviderModels(input, providerId),
     saveImageModelSetting: async (modelId, input) => {
       const imageModels = await api.imageModelSaveSetting(modelId, input);
       setImageModelSettings(imageModels);

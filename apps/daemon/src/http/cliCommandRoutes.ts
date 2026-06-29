@@ -78,7 +78,6 @@ async function runDaemonCliCommandUnsafe(
         available_image_models: status.availableImageModels,
         video_models: status.videoModels,
         available_video_models: status.availableVideoModels,
-        llm_models: status.availableLlmModels,
         diagnostics: status.diagnostics,
         ...product
       }
@@ -140,9 +139,6 @@ async function runDaemonCliCommandUnsafe(
   }
   if (request.command === 'models.video.describe') {
     return videoModelDetailResult(request.command, await server.describeVideoModelForCli(request.positional[0] ?? ''));
-  }
-  if (request.command === 'llm.request') {
-    return capabilityResult(request.command, await server.runLlmRequestForCli(jsonObjectOption(request, 'input-json')));
   }
   if (request.command === 'project.init') {
     return projectSnapshotResult(request.command, await server.initProjectForCli(requiredProjectRoot(request)));
@@ -729,22 +725,16 @@ function errorResult(command: string, error: unknown, projectRoot?: string): Deb
 
 function normalizeServiceErrorCode(code: string): string {
   if (
-    code === 'no_llm_model_configured'
-    || code === 'image_model_not_configured'
+    code === 'image_model_not_configured'
     || code === 'video_model_not_configured'
   ) {
     return 'model_not_configured';
-  }
-  if (code === 'llm_model_unavailable') {
-    return 'model_unavailable';
   }
   if (code === 'image_model_official_doc_missing' || code === 'video_model_official_doc_missing') {
     return 'runtime_config_error';
   }
   if (
-    code === 'llm_request_failed'
-    || code === 'llm_request_timeout'
-    || code === 'image_request_failed'
+    code === 'image_request_failed'
     || code === 'video_request_failed'
     || code === 'request_failed'
     || code === 'response_parse_failed'
@@ -753,7 +743,6 @@ function normalizeServiceErrorCode(code: string): string {
   }
   if (
     code === 'invalid_image_input'
-    || code === 'llm_invalid_json'
     || code === 'video_argument_invalid'
     || code === 'video_reference_missing'
     || code === 'video_reference_type_unsupported'

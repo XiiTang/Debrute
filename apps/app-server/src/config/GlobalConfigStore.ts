@@ -5,16 +5,14 @@ import { debruteHomeDir } from '@debrute/project-core';
 import type {
   ImageModelConfig,
   ImageModelsConfig,
-  LlmProvidersConfig,
   SecretsConfig,
   VideoModelConfig,
   VideoModelsConfig
 } from '@debrute/capability-runtime';
-import type { LlmProviderType, WorkbenchPreferencesView } from '@debrute/app-protocol';
+import type { WorkbenchPreferencesView } from '@debrute/app-protocol';
 
 export interface GlobalConfigPaths {
   root: string;
-  llmProvidersFile: string;
   imageModelsFile: string;
   videoModelsFile: string;
   secretsFile: string;
@@ -44,7 +42,6 @@ export class GlobalConfigStore {
     const root = join(debruteHome, 'config');
     return {
       root,
-      llmProvidersFile: join(root, 'llm_providers.json'),
       imageModelsFile: join(root, 'image_models.json'),
       videoModelsFile: join(root, 'video_models.json'),
       secretsFile: join(root, 'secrets.json'),
@@ -52,17 +49,6 @@ export class GlobalConfigStore {
       workbenchChromeFile: join(root, 'workbench_chrome.json'),
       workbenchPreferencesFile: join(root, 'workbench_preferences.json')
     };
-  }
-
-  async readLlmProviders(): Promise<LlmProvidersConfig> {
-    return normalizeLlmProvidersConfig(await readJsonOrDefault<unknown>(this.paths().llmProvidersFile, {
-      providers: [],
-      defaultModelKey: null
-    }));
-  }
-
-  async saveLlmProviders(config: LlmProvidersConfig): Promise<void> {
-    await writeJsonAtomic(this.paths().llmProvidersFile, normalizeLlmProvidersConfig(config));
   }
 
   async readImageModels(): Promise<ImageModelsConfig> {
@@ -113,12 +99,11 @@ export class GlobalConfigStore {
   }
 
   async readSecrets(): Promise<SecretsConfig> {
-    return readJsonOrDefault(this.paths().secretsFile, { llmProviderApiKeys: {}, imageModelApiKeys: {}, videoModelApiKeys: {} });
+    return readJsonOrDefault(this.paths().secretsFile, { imageModelApiKeys: {}, videoModelApiKeys: {} });
   }
 
   async saveSecrets(config: SecretsConfig): Promise<void> {
     await writeSecretJsonAtomic(this.paths().secretsFile, {
-      llmProviderApiKeys: { ...config.llmProviderApiKeys },
       imageModelApiKeys: { ...config.imageModelApiKeys },
       videoModelApiKeys: { ...config.videoModelApiKeys }
     });
@@ -156,59 +141,6 @@ function normalizeWorkbenchPreferencesConfig(config: unknown): WorkbenchPreferen
     locale: config.locale,
     themePreference: config.themePreference
   };
-}
-
-function normalizeLlmProvidersConfig(config: unknown): LlmProvidersConfig {
-  if (!isRecord(config) || !Array.isArray(config.providers) || !optionalStringOrNull(config.defaultModelKey)) {
-    throw new Error('LLM providers config must contain providers and defaultModelKey.');
-  }
-  const defaultModelKey = typeof config.defaultModelKey === 'string' ? config.defaultModelKey.trim() || null : null;
-  return {
-    providers: config.providers.map(normalizeLlmProviderConfig).filter((provider) => provider.id.length > 0),
-    defaultModelKey
-  };
-}
-
-function normalizeLlmProviderConfig(provider: unknown): LlmProvidersConfig['providers'][number] {
-  if (!isRecord(provider)) {
-    throw new Error('LLM provider config must be an object.');
-  }
-  return {
-    id: requireStringProperty(provider, 'id', 'LLM provider id').trim(),
-    name: requireStringProperty(provider, 'name', 'LLM provider name').trim(),
-    providerType: requireLlmProviderType(provider.providerType),
-    baseUrl: requireStringProperty(provider, 'baseUrl', 'LLM provider baseUrl').trim(),
-    enabled: requireBooleanProperty(provider, 'enabled', 'LLM provider enabled'),
-    modelIds: requireStringArrayProperty(provider, 'modelIds', 'LLM provider modelIds').map((modelId) => modelId.trim()).filter(Boolean)
-  };
-}
-
-function requireLlmProviderType(value: unknown): LlmProviderType {
-  if (value !== 'openai_compat' && value !== 'anthropic') {
-    throw new Error('LLM provider providerType must be "openai_compat" or "anthropic".');
-  }
-  return value;
-}
-
-function requireStringProperty(value: Record<string, unknown>, key: string, label: string): string {
-  if (typeof value[key] !== 'string') {
-    throw new Error(`${label} must be a string.`);
-  }
-  return value[key];
-}
-
-function requireBooleanProperty(value: Record<string, unknown>, key: string, label: string): boolean {
-  if (typeof value[key] !== 'boolean') {
-    throw new Error(`${label} must be a boolean.`);
-  }
-  return value[key];
-}
-
-function requireStringArrayProperty(value: Record<string, unknown>, key: string, label: string): string[] {
-  if (!Array.isArray(value[key]) || !value[key].every((item) => typeof item === 'string')) {
-    throw new Error(`${label} must be a string array.`);
-  }
-  return value[key];
 }
 
 function normalizeImageModelsConfig(config: unknown): ImageModelsConfig {
@@ -291,8 +223,12 @@ function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null && !Array.isArray(value);
 }
 
-function optionalStringOrNull(value: unknown): boolean {
-  return value === null || typeof value === 'string';
+function requireStringProperty(record: Record<string, unknown>, key: string, label: string): string {
+  const value = record[key];
+  if (typeof value !== 'string') {
+    throw new Error(`${label} must be a string.`);
+  }
+  return value;
 }
 
 async function readJson<T>(path: string): Promise<T> {

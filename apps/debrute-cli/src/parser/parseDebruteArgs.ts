@@ -11,7 +11,6 @@ export type DebruteCliCommand =
   | 'models.image.describe'
   | 'models.video.list'
   | 'models.video.describe'
-  | 'llm.request'
   | 'project.init'
   | 'project.status'
   | 'project.validate'
@@ -48,7 +47,6 @@ const POSITIONAL_COUNTS: Record<DebruteCliCommand, { min: number; max: number }>
   'models.image.describe': { min: 1, max: 1 },
   'models.video.list': { min: 0, max: 0 },
   'models.video.describe': { min: 1, max: 1 },
-  'llm.request': { min: 0, max: 0 },
   'project.init': { min: 1, max: 1 },
   'project.status': { min: 1, max: 1 },
   'project.validate': { min: 1, max: 1 },
@@ -77,7 +75,6 @@ const ALLOWED_OPTIONS: Record<DebruteCliCommand, Set<string>> = {
   'models.image.describe': new Set(),
   'models.video.list': new Set(),
   'models.video.describe': new Set(),
-  'llm.request': new Set(['input-json']),
   'project.init': new Set(),
   'project.status': new Set(),
   'project.validate': new Set(),
@@ -240,7 +237,7 @@ function validatePositionals(command: DebruteCliCommand, positionals: string[]):
 }
 
 function validateRequiredOptions(command: DebruteCliCommand, options: Record<string, string>): void {
-  if ((command === 'llm.request' || command === 'generate.image' || command === 'generate.video') && !options['input-json']) {
+  if ((command === 'generate.image' || command === 'generate.video') && !options['input-json']) {
     throw cliError('missing_argument', '--input-json is required.', { command });
   }
   if (command === 'generated-asset.lookup' && !options.path) {

@@ -410,7 +410,6 @@ describe('app-server', () => {
       expect(Object.keys(globalConfigStore.paths()).sort()).toEqual([
         'adobeBridgeFile',
         'imageModelsFile',
-        'llmProvidersFile',
         'root',
         'secretsFile',
         'videoModelsFile',
@@ -775,105 +774,11 @@ describe('app-server', () => {
     }
   });
 
-  it('saves LLM settings that make llm_request usable from persisted config', async () => {
-    const home = await mkdtemp(join(tmpdir(), 'debrute-llm-settings-home-'));
-    const projectRoot = await mkdtemp(join(tmpdir(), 'debrute-llm-settings-project-'));
-    const originalFetch = globalThis.fetch;
-    const configStore = new GlobalConfigStore({ debruteHome: home });
-    const globalRuntime = new DebruteGlobalRuntimeServer({ globalConfigStore: configStore });
-    const server = new DebruteAppServer({ globalConfigStore: configStore });
-    try {
-      globalThis.fetch = async (url, init) => {
-        expect(url).toBe('https://api.openai.com/v1/chat/completions');
-        expect(init?.headers).toMatchObject({
-          authorization: 'Bearer sk-llm-test',
-          'content-type': 'application/json'
-        });
-        return new Response(JSON.stringify({
-          choices: [{ message: { content: 'configured llm result' } }]
-        }), {
-          status: 200,
-          headers: { 'content-type': 'application/json' }
-        });
-      };
-      await server.openProject(projectRoot, {
-        initializeIfMissing: true,
-        createDefaultCanvas: true
-      });
-
-      const initial = await globalRuntime.llmGetSettings();
-      expect(initial).toEqual({
-        providers: [],
-        availableModelKeys: [],
-        defaultModelKey: null
-      });
-
-      await globalRuntime.llmSaveProviderSetting({
-        id: 'openai-main',
-        name: 'OpenAI Compatible',
-        providerType: 'openai_compat',
-        baseUrl: 'https://api.openai.com/v1',
-        enabled: true,
-        modelIds: ['gpt-5.1'],
-        apiKey: 'sk-llm-test'
-      });
-      const settings = await globalRuntime.llmSetDefaultModelKey('openai-main:gpt-5.1');
-
-      expect(settings).toMatchObject({
-        defaultModelKey: 'openai-main:gpt-5.1',
-        availableModelKeys: ['openai-main:gpt-5.1'],
-        providers: [
-          expect.objectContaining({
-            id: 'openai-main',
-            providerType: 'openai_compat',
-            modelIds: ['gpt-5.1'],
-            apiKeySet: true,
-            apiKeyPreview: 'sk****************************st'
-          })
-        ]
-      });
-      expect(settings.providers[0] as Record<string, unknown>).not.toHaveProperty('apiKey');
-      expect(JSON.stringify(settings)).not.toContain('sk-llm-test');
-
-      const result = await server.runLlmRequestForCli({ modelKey: 'default', prompt: 'Say hello.' });
-      expect(result).toMatchObject({
-        status: 'ok',
-        outputs: {
-          text: 'configured llm result',
-          modelKey: 'openai-main:gpt-5.1'
-        }
-      });
-    } finally {
-      globalRuntime.close();
-      server.close();
-      globalThis.fetch = originalFetch;
-      await rm(home, { recursive: true, force: true });
-      await rm(projectRoot, { recursive: true, force: true });
-    }
-  });
-
-  it('preserves, replaces, and clears provider API keys through settings saves', async () => {
+  it('preserves, replaces, and clears media model API keys through settings saves', async () => {
     const home = await mkdtemp(join(tmpdir(), 'debrute-settings-secret-semantics-home-'));
     const configStore = new GlobalConfigStore({ debruteHome: home });
     const globalRuntime = new DebruteGlobalRuntimeServer({ globalConfigStore: configStore });
     try {
-      await globalRuntime.llmSaveProviderSetting({
-        id: 'openai-main',
-        name: 'OpenAI Compatible',
-        providerType: 'openai_compat',
-        baseUrl: 'https://api.openai.com/v1',
-        enabled: true,
-        modelIds: ['gpt-5.1'],
-        apiKey: 'sk-llm-initial'
-      });
-      await globalRuntime.llmSaveProviderSetting({
-        id: 'openai-main',
-        name: 'OpenAI Compatible Updated',
-        providerType: 'openai_compat',
-        baseUrl: 'https://api.openai.com/v1',
-        enabled: true,
-        modelIds: ['gpt-5.1']
-      }, 'openai-main');
       await globalRuntime.imageModelSaveSetting('gpt-image-2', {
         baseUrlOverride: null,
         requestModelIdOverride: 'gpt-image-2',
@@ -894,19 +799,9 @@ describe('app-server', () => {
       });
 
       let secrets = await configStore.readSecrets();
-      expect(secrets.llmProviderApiKeys['openai-main']).toBe('sk-llm-initial');
       expect(secrets.imageModelApiKeys['gpt-image-2']).toBe('sk-image-initial');
       expect(secrets.videoModelApiKeys['doubao-seedance-2-0-260128']).toBe('sk-video-initial');
 
-      await globalRuntime.llmSaveProviderSetting({
-        id: 'openai-main',
-        name: 'OpenAI Compatible Updated',
-        providerType: 'openai_compat',
-        baseUrl: 'https://api.openai.com/v1',
-        enabled: true,
-        modelIds: ['gpt-5.1'],
-        apiKey: 'sk-llm-replaced'
-      }, 'openai-main');
       await globalRuntime.imageModelSaveSetting('gpt-image-2', {
         baseUrlOverride: null,
         requestModelIdOverride: null,
@@ -919,19 +814,9 @@ describe('app-server', () => {
       });
 
       secrets = await configStore.readSecrets();
-      expect(secrets.llmProviderApiKeys['openai-main']).toBe('sk-llm-replaced');
       expect(secrets.imageModelApiKeys['gpt-image-2']).toBe('sk-image-replaced');
       expect(secrets.videoModelApiKeys['doubao-seedance-2-0-260128']).toBe('sk-video-replaced');
 
-      const llmView = await globalRuntime.llmSaveProviderSetting({
-        id: 'openai-main',
-        name: 'OpenAI Compatible Updated',
-        providerType: 'openai_compat',
-        baseUrl: 'https://api.openai.com/v1',
-        enabled: true,
-        modelIds: ['gpt-5.1'],
-        apiKey: ''
-      }, 'openai-main');
       const imageView = await globalRuntime.imageModelSaveSetting('gpt-image-2', {
         baseUrlOverride: null,
         requestModelIdOverride: null,
@@ -944,149 +829,13 @@ describe('app-server', () => {
       });
 
       secrets = await configStore.readSecrets();
-      expect(secrets.llmProviderApiKeys).not.toHaveProperty('openai-main');
       expect(secrets.imageModelApiKeys).not.toHaveProperty('gpt-image-2');
       expect(secrets.videoModelApiKeys).not.toHaveProperty('doubao-seedance-2-0-260128');
-      expect(llmView.providers[0]).toMatchObject({ apiKeySet: false });
       expect(imageView.models.find((model) => model.debruteModelId === 'gpt-image-2')).toMatchObject({ apiKeySet: false });
       expect(videoView.models.find((model) => model.debruteModelId === 'doubao-seedance-2-0-260128')).toMatchObject({ apiKeySet: false });
-      expect(JSON.stringify({ llmView, imageView, videoView })).not.toContain('sk-');
+      expect(JSON.stringify({ imageView, videoView })).not.toContain('sk-');
     } finally {
       globalRuntime.close();
-      await rm(home, { recursive: true, force: true });
-    }
-  });
-
-  it('discovers OpenAI-compatible provider models from LLM settings input', async () => {
-    const home = await mkdtemp(join(tmpdir(), 'debrute-llm-discovery-home-'));
-    const originalFetch = globalThis.fetch;
-    const globalRuntime = new DebruteGlobalRuntimeServer({
-      globalConfigStore: new GlobalConfigStore({ debruteHome: home })
-    });
-    try {
-      globalThis.fetch = async (url, init) => {
-        expect(url).toBe('https://api.example.test/v1/models');
-        expect(init?.headers).toMatchObject({
-          authorization: 'Bearer sk-discovery-test'
-        });
-        return new Response(JSON.stringify({
-          data: [
-            { id: 'gpt-debrute-a' },
-            { id: 'gpt-debrute-b' },
-            { id: 'gpt-debrute-a' }
-          ]
-        }), {
-          status: 200,
-          headers: { 'content-type': 'application/json' }
-        });
-      };
-
-      const result = await globalRuntime.llmDiscoverProviderModels({
-        id: 'openai-main',
-        providerType: 'openai_compat',
-        baseUrl: 'https://api.example.test/v1',
-        apiKey: 'sk-discovery-test'
-      });
-
-      expect(result).toEqual({
-        endpoint: 'https://api.example.test/v1/models',
-        models: ['gpt-debrute-a', 'gpt-debrute-b'],
-        modelsCount: 2,
-        supportsDiscovery: true
-      });
-    } finally {
-      globalRuntime.close();
-      globalThis.fetch = originalFetch;
-      await rm(home, { recursive: true, force: true });
-    }
-  });
-
-  it('does not attach a stored LLM provider key when discovery targets a different base URL', async () => {
-    const home = await mkdtemp(join(tmpdir(), 'debrute-llm-discovery-origin-binding-home-'));
-    const originalFetch = globalThis.fetch;
-    const globalRuntime = new DebruteGlobalRuntimeServer({
-      globalConfigStore: new GlobalConfigStore({ debruteHome: home })
-    });
-    const calls: Array<{ url: string; authorization?: string }> = [];
-    try {
-      globalThis.fetch = async (url, init) => {
-        calls.push({
-          url: String(url),
-          authorization: (init?.headers as Record<string, string> | undefined)?.authorization
-        });
-        return new Response(JSON.stringify({ data: [] }), {
-          status: 200,
-          headers: { 'content-type': 'application/json' }
-        });
-      };
-      await globalRuntime.llmSaveProviderSetting({
-        id: 'openai-main',
-        name: 'OpenAI Compatible',
-        providerType: 'openai_compat',
-        baseUrl: 'https://api.openai.com/v1',
-        enabled: true,
-        modelIds: ['gpt-5.1'],
-        apiKey: 'sk-stored-discovery'
-      });
-
-      await globalRuntime.llmDiscoverProviderModels({
-        id: 'openai-main',
-        providerType: 'openai_compat',
-        baseUrl: 'https://attacker.example/v1'
-      });
-
-      expect(calls).toEqual([{
-        url: 'https://attacker.example/v1/models',
-        authorization: undefined
-      }]);
-    } finally {
-      globalRuntime.close();
-      globalThis.fetch = originalFetch;
-      await rm(home, { recursive: true, force: true });
-    }
-  });
-
-  it('uses a stored LLM provider key when discovery targets the stored provider base URL', async () => {
-    const home = await mkdtemp(join(tmpdir(), 'debrute-llm-discovery-stored-key-home-'));
-    const originalFetch = globalThis.fetch;
-    const globalRuntime = new DebruteGlobalRuntimeServer({
-      globalConfigStore: new GlobalConfigStore({ debruteHome: home })
-    });
-    const calls: Array<{ url: string; authorization?: string }> = [];
-    try {
-      globalThis.fetch = async (url, init) => {
-        calls.push({
-          url: String(url),
-          authorization: (init?.headers as Record<string, string> | undefined)?.authorization
-        });
-        return new Response(JSON.stringify({ data: [] }), {
-          status: 200,
-          headers: { 'content-type': 'application/json' }
-        });
-      };
-      await globalRuntime.llmSaveProviderSetting({
-        id: 'openai-main',
-        name: 'OpenAI Compatible',
-        providerType: 'openai_compat',
-        baseUrl: 'https://api.openai.com/v1',
-        enabled: true,
-        modelIds: ['gpt-5.1'],
-        apiKey: 'sk-stored-discovery'
-      });
-
-      await globalRuntime.llmDiscoverProviderModels({
-        id: 'openai-main',
-        providerType: 'openai_compat',
-        baseUrl: 'https://api.openai.com/v1'
-      });
-
-      expect(calls).toEqual([{
-        url: 'https://api.openai.com/v1/models',
-        authorization: 'Bearer sk-stored-discovery'
-      }]);
-    } finally {
-      globalRuntime.close();
-      globalThis.fetch = originalFetch;
       await rm(home, { recursive: true, force: true });
     }
   });
@@ -1258,7 +1007,6 @@ describe('app-server', () => {
     const secretsFile = join(configDir, 'secrets.json');
     try {
       await configStore.saveSecrets({
-        llmProviderApiKeys: { openai: 'sk-llm' },
         imageModelApiKeys: { 'gpt-image-2': 'sk-image' },
         videoModelApiKeys: { 'doubao-seedance-2-0-260128': 'sk-video' }
       });
@@ -1270,14 +1018,13 @@ describe('app-server', () => {
       expect((await stat(secretsFile)).mode & 0o777).toBe(0o644);
 
       await configStore.saveSecrets({
-        llmProviderApiKeys: { openai: 'sk-llm-next' },
-        imageModelApiKeys: {},
+        imageModelApiKeys: { 'gpt-image-2': 'sk-image-next' },
         videoModelApiKeys: {}
       });
 
       expect((await stat(configDir)).mode & 0o777).toBe(0o700);
       expect((await stat(secretsFile)).mode & 0o777).toBe(0o600);
-      await expect(readFile(secretsFile, 'utf8')).resolves.toContain('sk-llm-next');
+      await expect(readFile(secretsFile, 'utf8')).resolves.toContain('sk-image-next');
     } finally {
       await rm(home, { recursive: true, force: true });
     }
