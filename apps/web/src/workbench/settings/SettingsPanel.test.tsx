@@ -1,9 +1,10 @@
 import React from 'react';
 import { renderToStaticMarkup } from 'react-dom/server';
 import { describe, expect, it, vi } from 'vitest';
-import type { DebruteProductState } from '@debrute/app-protocol';
+import { unavailableWorkbenchTitleBarState, type DebruteProductState } from '@debrute/app-protocol';
 import type { WorkbenchActions, WorkbenchState } from '../../types';
 import { I18nProvider } from '../i18n';
+import { createEmptyProjectTreeSelection } from '../project-explorer/projectTreeInteraction';
 import { ImageModelSettings } from './SettingsPanel';
 import { GeneralSettingsPage } from './general/GeneralSettingsPage';
 
@@ -57,21 +58,22 @@ describe('SettingsPanel shared UI composition', () => {
 function stateWithSettings(): WorkbenchState {
   return {
     snapshot: undefined,
-    titleBarState: { available: false },
+    titleBarState: unavailableWorkbenchTitleBarState(),
     workbenchPreferences: { locale: 'en', themePreference: 'system' },
     resolvedTheme: 'dark',
     projectOpen: { opening: false },
-    explorerSelection: { selectedPaths: [], focusedPath: undefined, anchorPath: undefined },
+    explorerSelection: createEmptyProjectTreeSelection(),
     imageModelSettings: {
       models: [{
         debruteModelId: 'image/openai/gpt-image-1',
-        provider: 'openai',
+        summary: 'OpenAI gpt-image-1 image generation and edits.',
+        supportsEditing: true,
+        supportsTextRendering: true,
         defaultBaseUrl: 'https://api.openai.com/v1',
         defaultRequestModelId: 'gpt-image-1',
         baseUrlOverride: null,
         requestModelIdOverride: null,
-        apiKeySet: false,
-        apiKeyPreview: null
+        apiKeySet: false
       }]
     },
     videoModelSettings: { models: [] },
@@ -81,7 +83,7 @@ function stateWithSettings(): WorkbenchState {
     textFileBuffers: {},
     textEditorWindows: {},
     notifications: []
-  } as unknown as WorkbenchState;
+  };
 }
 
 function actions(): WorkbenchActions {

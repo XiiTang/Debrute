@@ -4,7 +4,8 @@ import { describe, expect, it, vi } from 'vitest';
 import { SettingsPanel } from '../apps/web/src/workbench/settings/SettingsPanel';
 import { GeneralSettingsPage } from '../apps/web/src/workbench/settings/general/GeneralSettingsPage';
 import { I18nProvider } from '../apps/web/src/workbench/i18n';
-import type { DebruteProductState } from '@debrute/app-protocol';
+import { unavailableWorkbenchTitleBarState, type DebruteProductState } from '@debrute/app-protocol';
+import { createEmptyProjectTreeSelection } from '../apps/web/src/workbench/project-explorer/projectTreeInteraction';
 import type { WorkbenchActions, WorkbenchState } from '../apps/web/src/types';
 
 describe('web Settings pages', () => {
@@ -106,11 +107,11 @@ function productState(overrides: Partial<DebruteProductState> = {}): DebruteProd
 function stateFixture(): WorkbenchState {
   return {
     snapshot: undefined,
-    titleBarState: { available: false },
+    titleBarState: unavailableWorkbenchTitleBarState(),
     workbenchPreferences: { locale: 'en', themePreference: 'system' },
     resolvedTheme: 'dark',
     projectOpen: { opening: false },
-    explorerSelection: { selectedPaths: [], focusedPath: undefined, anchorPath: undefined },
+    explorerSelection: createEmptyProjectTreeSelection(),
     imageModelSettings: { models: [] },
     videoModelSettings: { models: [] },
     integrationsSettings: undefined,
@@ -119,7 +120,7 @@ function stateFixture(): WorkbenchState {
     textFileBuffers: {},
     textEditorWindows: {},
     notifications: []
-  } as unknown as WorkbenchState;
+  };
 }
 
 function actionsFixture(): WorkbenchActions {
