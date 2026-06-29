@@ -176,6 +176,31 @@ describe('CanvasPerfMonitor', () => {
     expect(summary?.counters).toEqual(monitor.getCounterTotals());
   });
 
+  it('records text preview counters in totals and summaries', () => {
+    const monitor = createCanvasPerfMonitor({ enabled: true });
+    const sessionId = monitor.startSession({ type: 'camera-pan', timestamp: 0, source: 'CanvasSurface' });
+    if (!sessionId) {
+      throw new Error('Expected enabled monitor to start a session.');
+    }
+
+    monitor.recordCounter({ sessionId, timestamp: 1, source: 'CanvasTextPreviewRuntime', name: 'text-preview-source-check-requested' });
+    monitor.recordCounter({ sessionId, timestamp: 2, source: 'CanvasTextPreviewRuntime', name: 'text-preview-source-availability-resolved' });
+    monitor.recordCounter({ sessionId, timestamp: 3, source: 'CanvasTextPreviewRuntime', name: 'text-preview-source-capture-saved' });
+    monitor.recordCounter({ sessionId, timestamp: 4, source: 'CanvasTextPreviewRuntime', name: 'text-preview-publish-critical' });
+    monitor.recordCounter({ sessionId, timestamp: 5, source: 'CanvasTextPreviewRuntime', name: 'text-preview-publish-deferred' });
+
+    const summary = monitor.endSession({ sessionId, timestamp: 10, source: 'CanvasSurface' });
+
+    expect(monitor.getCounterTotals()).toEqual({
+      'text-preview-source-check-requested': 1,
+      'text-preview-source-availability-resolved': 1,
+      'text-preview-source-capture-saved': 1,
+      'text-preview-publish-critical': 1,
+      'text-preview-publish-deferred': 1
+    });
+    expect(summary?.counters).toEqual(monitor.getCounterTotals());
+  });
+
   it('is inert when disabled', () => {
     const listener = vi.fn();
     const monitor = createCanvasPerfMonitor({ enabled: false, onEvent: listener });

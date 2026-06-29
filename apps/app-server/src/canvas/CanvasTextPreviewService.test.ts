@@ -103,6 +103,37 @@ describe('CanvasTextPreviewService', () => {
       .resolves.toMatchObject({ width: 80 });
   });
 
+  it('deduplicates concurrent variant generation for the same source key and width', async () => {
+    const projectRoot = await mkdtemp(join(tmpdir(), 'debrute-text-preview-dedupe-'));
+    const sourceUpload = await writeFixturePng(projectRoot, 'upload.png', 320, 160);
+    const service = createCanvasTextPreviewService();
+    await service.saveSource({
+      projectRoot,
+      canvasId: 'canvas-1',
+      projectRelativePath: 'notes/scene.md',
+      fingerprint: 'fingerprint-a',
+      sourceTemporaryPath: sourceUpload
+    });
+
+    const input = {
+      projectRoot,
+      canvasId: 'canvas-1',
+      projectRelativePath: 'notes/scene.md',
+      fingerprint: 'fingerprint-a',
+      width: 80
+    };
+
+    const [first, second] = await Promise.all([
+      service.resolveVariant(input),
+      service.resolveVariant(input)
+    ]);
+
+    expect(first).toBe(second);
+    expect(first.absolutePath).toContain('preview-w80.png');
+    await expect(readCanvasRasterPreviewMetadata(first.absolutePath, 'notes/scene.md'))
+      .resolves.toMatchObject({ width: 80 });
+  });
+
   it('fails variant resolution when source.png is missing', async () => {
     const projectRoot = await mkdtemp(join(tmpdir(), 'debrute-text-preview-missing-'));
     const service = createCanvasTextPreviewService();
