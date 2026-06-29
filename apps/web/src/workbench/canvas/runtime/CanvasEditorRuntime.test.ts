@@ -114,26 +114,21 @@ describe('CanvasEditorRuntime', () => {
     const runtime = createCanvasEditorRuntime();
     const selections: unknown[] = [];
     const surfaceSizes: unknown[] = [];
-    const imageResourceZooms: unknown[] = [];
 
     runtime.subscribeSelection((selection) => selections.push(selection));
     runtime.subscribeSurfaceSize((size) => surfaceSizes.push(size));
-    runtime.subscribeImageResourceZoom((zoom) => imageResourceZooms.push(zoom));
 
     runtime.camera.setCamera({ x: 12, y: 8, z: 1.25 });
 
     expect(selections).toEqual([]);
     expect(surfaceSizes).toEqual([]);
-    expect(imageResourceZooms).toEqual([]);
 
     runtime.setSelection({ kind: 'node', projectRelativePath: 'flow/a.png' });
-    runtime.setImageResourceZoom(2);
     runtime.bindSurface({
       surface: fakeElement({ left: 0, top: 0, width: 640, height: 480 }) as unknown as HTMLElement
     });
 
     expect(selections).toEqual([{ kind: 'node', projectRelativePath: 'flow/a.png' }]);
-    expect(imageResourceZooms).toEqual([2]);
     expect(surfaceSizes).toEqual([{ width: 640, height: 480 }]);
   });
 
@@ -147,21 +142,18 @@ describe('CanvasEditorRuntime', () => {
 
       runtime.subscribeSurfaceSize(() => snapshots.push(['surfaceSize', runtime.getSnapshot().surfaceSize]));
       runtime.subscribeSelection(() => snapshots.push(['selection', runtime.getSnapshot().selection]));
-      runtime.subscribeImageResourceZoom(() => snapshots.push(['imageResourceZoom', runtime.getSnapshot().imageResourceZoom]));
       runtime.subscribeCameraState(() => snapshots.push(['cameraState', runtime.getSnapshot().cameraState]));
 
       runtime.bindSurface({
         surface: fakeElement({ left: 0, top: 0, width: 640, height: 480 }) as unknown as HTMLElement
       });
       runtime.setSelection({ kind: 'node', projectRelativePath: 'flow/a.png' });
-      runtime.setImageResourceZoom(2);
       runtime.camera.setCamera({ x: 10, y: 20, z: 1.5 });
       vi.advanceTimersByTime(64);
 
       expect(snapshots).toEqual([
         ['surfaceSize', { width: 640, height: 480 }],
         ['selection', { kind: 'node', projectRelativePath: 'flow/a.png' }],
-        ['imageResourceZoom', 2],
         ['cameraState', 'moving'],
         ['cameraState', 'idle']
       ]);
@@ -175,25 +167,20 @@ describe('CanvasEditorRuntime', () => {
     const runtime = createCanvasEditorRuntime();
     const selections: unknown[] = [];
     const surfaceSizes: unknown[] = [];
-    const imageResourceZooms: unknown[] = [];
 
     const unsubscribeSelection = runtime.subscribeSelection((selection) => selections.push(selection));
     const unsubscribeSurfaceSize = runtime.subscribeSurfaceSize((size) => surfaceSizes.push(size));
-    const unsubscribeImageResourceZoom = runtime.subscribeImageResourceZoom((zoom) => imageResourceZooms.push(zoom));
 
     unsubscribeSelection();
     unsubscribeSurfaceSize();
-    unsubscribeImageResourceZoom();
 
     runtime.setSelection({ kind: 'node', projectRelativePath: 'flow/a.png' });
-    runtime.setImageResourceZoom(2);
     runtime.bindSurface({
       surface: fakeElement({ left: 0, top: 0, width: 640, height: 480 }) as unknown as HTMLElement
     });
 
     expect(selections).toEqual([]);
     expect(surfaceSizes).toEqual([]);
-    expect(imageResourceZooms).toEqual([]);
   });
 
   it('updates selection in the local runtime snapshot', () => {

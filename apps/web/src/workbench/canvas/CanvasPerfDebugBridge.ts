@@ -14,7 +14,7 @@ export interface DebruteCanvasPerfCanvasSnapshot {
   mountedNodeCount: number;
   visibleNodeCount: number;
   culledNodeCount: number;
-  imageResourceZoom: number;
+  resourceZoom: number;
   imageLayers: {
     visible: number;
     next: number;
@@ -213,7 +213,7 @@ function cloneCanvasSnapshot(snapshot: DebruteCanvasPerfCanvasSnapshot): Debrute
     mountedNodeCount: snapshot.mountedNodeCount,
     visibleNodeCount: snapshot.visibleNodeCount,
     culledNodeCount: snapshot.culledNodeCount,
-    imageResourceZoom: snapshot.imageResourceZoom,
+    resourceZoom: snapshot.resourceZoom,
     imageLayers: { ...snapshot.imageLayers }
   };
 }

@@ -64,7 +64,7 @@ export function initialCanvasImageNodeAssetState(): CanvasImageNodeAssetState {
 
 export function resolveCanvasImageNodeSource(input: {
   node: ProjectedCanvasNode;
-  imageResourceZoom: number;
+  resourceZoom: number;
   devicePixelRatio: number;
   retryKey: number;
 }): CanvasImageNodeResolvedSource {
@@ -75,7 +75,7 @@ export function resolveCanvasImageNodeSource(input: {
   const availableSourceRevisionKey = `${input.node.projectRelativePath}\u001f${input.node.availability.revision}`;
   const source = canvasImageSource({
     node: input.node,
-    cameraZoom: input.imageResourceZoom,
+    resourceZoom: input.resourceZoom,
     devicePixelRatio: input.devicePixelRatio
   });
   if (!source) {

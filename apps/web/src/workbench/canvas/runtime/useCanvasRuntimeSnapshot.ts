@@ -22,11 +22,3 @@ export function useCanvasSurfaceSize(runtime: CanvasEditorRuntime): CanvasSize |
     () => runtime.getSnapshot().surfaceSize
   );
 }
-
-export function useCanvasImageResourceZoom(runtime: CanvasEditorRuntime): number {
-  return useSyncExternalStore(
-    runtime.subscribeImageResourceZoom,
-    () => runtime.getSnapshot().imageResourceZoom,
-    () => runtime.getSnapshot().imageResourceZoom
-  );
-}

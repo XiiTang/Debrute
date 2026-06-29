@@ -760,8 +760,7 @@ function canvasRuntimeFixture(input: {
       camera: { x: 0, y: 0, z: 1 },
       cameraState: 'idle' as const,
       selection: undefined,
-      dragState: undefined,
-      imageResourceZoom: 1
+      dragState: undefined
     }),
     camera: {
       getCamera: () => ({ x: 0, y: 0, z: 1 }),

@@ -359,7 +359,7 @@ function snapshot(): DebruteCanvasPerfCanvasSnapshot {
     mountedNodeCount: 8,
     visibleNodeCount: 5,
     culledNodeCount: 3,
-    imageResourceZoom: 0.75,
+    resourceZoom: 0.75,
     imageLayers: {
       visible: 4,
       next: 2,

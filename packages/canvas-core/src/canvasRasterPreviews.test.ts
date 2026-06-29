@@ -20,13 +20,13 @@ describe('Canvas raster preview sizing', () => {
     expect(canvasRasterPreviewWidth({
       nodeDisplayWidth: 1200,
       sourceWidth: 2400,
-      imageResourceZoom: 0.5,
+      resourceZoom: 0.5,
       devicePixelRatio: 1
     })).toBe(600);
     expect(canvasRasterPreviewWidth({
       nodeDisplayWidth: 1200,
       sourceWidth: 2400,
-      imageResourceZoom: 0.51,
+      resourceZoom: 0.51,
       devicePixelRatio: 2
     })).toBe(1698);
   });
@@ -43,7 +43,7 @@ describe('Canvas raster preview sizing', () => {
     expect(() => canvasRasterPreviewWidth({
       nodeDisplayWidth: 0,
       sourceWidth: 100,
-      imageResourceZoom: 1,
+      resourceZoom: 1,
       devicePixelRatio: 1
     })).toThrow('Canvas raster preview node display width must be a positive finite number.');
   });

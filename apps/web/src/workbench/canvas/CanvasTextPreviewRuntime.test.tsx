@@ -297,7 +297,7 @@ describe('CanvasTextPreviewRuntime', () => {
             actions={textPreviewActionsFixture()}
             cameraState="idle"
             dragState={undefined}
-            imageResourceZoom={0.11}
+            resourceZoom={0.11}
             devicePixelRatio={2}
             culledNodePaths={new Set()}
             previewResourceScheduler={createImmediateScheduler()}
@@ -335,7 +335,7 @@ describe('CanvasTextPreviewRuntime', () => {
     const queued: CanvasPreviewResourceRequest[] = [];
     const scheduler = createQueuedScheduler(queued);
 
-    const render = async (imageResourceZoom: number) => {
+    const render = async (resourceZoom: number) => {
       await act(async () => {
         root.render(
           <CanvasTextPreviewProvider
@@ -348,7 +348,7 @@ describe('CanvasTextPreviewRuntime', () => {
             actions={textPreviewActionsFixture()}
             cameraState="idle"
             dragState={undefined}
-            imageResourceZoom={imageResourceZoom}
+            resourceZoom={resourceZoom}
             devicePixelRatio={2}
             culledNodePaths={new Set()}
             previewResourceScheduler={scheduler}
@@ -423,7 +423,7 @@ describe('CanvasTextPreviewRuntime', () => {
             actions={recordingTextPreviewActionsFixture(records)}
             cameraState="idle"
             dragState={undefined}
-            imageResourceZoom={0.11}
+            resourceZoom={0.11}
             devicePixelRatio={2}
             culledNodePaths={new Set(['notes/b.md'])}
             previewResourceScheduler={scheduler}
@@ -503,7 +503,7 @@ async function expectScheduledTextPreviewError(input: {
           actions={input.actions}
           cameraState="idle"
           dragState={undefined}
-          imageResourceZoom={0.11}
+          resourceZoom={0.11}
           devicePixelRatio={2}
           culledNodePaths={new Set()}
           previewResourceScheduler={createImmediateScheduler()}
