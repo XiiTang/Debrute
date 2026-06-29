@@ -38,6 +38,13 @@ describe('workbench API client', () => {
     expect(EventSource.instances).toHaveLength(count);
   }
 
+  function jsonResponse(body: unknown): Response {
+    return new Response(JSON.stringify(body), {
+      status: 200,
+      headers: { 'content-type': 'application/json' }
+    });
+  }
+
   afterEach(() => {
     (globalThis as { window?: unknown }).window = originalWindow;
     vi.unstubAllGlobals();
@@ -456,10 +463,28 @@ describe('workbench API client', () => {
         url,
         bodyKind: init.body instanceof FormData ? 'form' : init.body ? 'json' : 'none'
       });
-      return new Response(JSON.stringify({ projectId, projectRevision: 1, snapshot: { canvases: [] }, descriptors: {}, variants: [] }), {
-        status: 200,
-        headers: { 'content-type': 'application/json' }
-      });
+      if (url.endsWith('/canvas-text-previews/source')) {
+        return jsonResponse({
+          ok: true,
+          source: {
+            projectRelativePath: 'notes/a.md',
+            fingerprint: 'fp',
+            available: true
+          }
+        });
+      }
+      if (url.endsWith('/canvas-text-previews/sources')) {
+        return jsonResponse({
+          sources: {
+            'notes/a.md': {
+              projectRelativePath: 'notes/a.md',
+              fingerprint: 'fp',
+              available: true
+            }
+          }
+        });
+      }
+      return jsonResponse({ projectId, projectRevision: 1, snapshot: { canvases: [] } });
     });
 
     const client = createWorkbenchApiClient();
