@@ -163,7 +163,7 @@ export function CanvasTextPreviewProvider({
   actions,
   cameraState,
   dragState,
-  imageResourceZoom,
+  resourceZoom,
   devicePixelRatio,
   culledNodePaths,
   previewResourceScheduler,
@@ -176,7 +176,7 @@ export function CanvasTextPreviewProvider({
   actions: WorkbenchActions;
   cameraState: CanvasCameraState;
   dragState: { kind: string } | undefined;
-  imageResourceZoom: number;
+  resourceZoom: number;
   devicePixelRatio: number;
   culledNodePaths: ReadonlySet<string>;
   previewResourceScheduler: CanvasPreviewResourceScheduler;
@@ -336,7 +336,7 @@ export function CanvasTextPreviewProvider({
         ? canvasTextPreviewTargetWidthForNode({
           node,
           descriptor,
-          imageResourceZoom,
+          resourceZoom,
           devicePixelRatio
         })
         : target.contentCssWidth;
@@ -365,7 +365,7 @@ export function CanvasTextPreviewProvider({
             node,
             target,
             targetKey,
-            imageResourceZoom,
+            resourceZoom,
             devicePixelRatio,
             isCurrent,
             setDescriptors,
@@ -404,7 +404,7 @@ export function CanvasTextPreviewProvider({
     descriptors,
     devicePixelRatio,
     dragState,
-    imageResourceZoom,
+    resourceZoom,
     nodesByPath,
     previewSources,
     previewResourceScheduler
@@ -581,7 +581,7 @@ async function runCanvasTextPreviewResourceWork(input: {
   node: ProjectedCanvasNode;
   target: CanvasTextPreviewTarget;
   targetKey: string;
-  imageResourceZoom: number;
+  resourceZoom: number;
   devicePixelRatio: number;
   isCurrent: () => boolean;
   setDescriptors: React.Dispatch<React.SetStateAction<Record<string, CanvasTextPreviewDescriptor>>>;
@@ -626,7 +626,7 @@ async function runCanvasTextPreviewResourceWork(input: {
     target: input.target,
     targetKey: input.targetKey,
     descriptor,
-    imageResourceZoom: input.imageResourceZoom,
+    resourceZoom: input.resourceZoom,
     devicePixelRatio: input.devicePixelRatio
   }));
 }
@@ -897,7 +897,7 @@ function canvasTextPreviewForNode(input: {
   node: ProjectedCanvasNode;
   target: CanvasTextPreviewTarget | undefined;
   descriptor: CanvasTextPreviewDescriptor | undefined;
-  imageResourceZoom: number;
+  resourceZoom: number;
   devicePixelRatio: number;
 }): CanvasTextPreviewSource | undefined {
   if (input.node.availability.state !== 'available'
@@ -910,7 +910,7 @@ function canvasTextPreviewForNode(input: {
   const targetWidth = canvasTextPreviewTargetWidthForNode({
     node: input.node,
     descriptor: input.descriptor,
-    imageResourceZoom: input.imageResourceZoom,
+    resourceZoom: input.resourceZoom,
     devicePixelRatio: input.devicePixelRatio
   });
   const previewWidth = selectCanvasTextPreviewVariant({
@@ -933,13 +933,13 @@ function canvasTextPreviewForNode(input: {
 function canvasTextPreviewTargetWidthForNode(input: {
   node: ProjectedCanvasNode;
   descriptor: CanvasTextPreviewDescriptor;
-  imageResourceZoom: number;
+  resourceZoom: number;
   devicePixelRatio: number;
 }): number {
   return canvasRasterPreviewWidth({
     nodeDisplayWidth: input.node.width,
     sourceWidth: input.descriptor.sourceWidth,
-    imageResourceZoom: input.imageResourceZoom,
+    resourceZoom: input.resourceZoom,
     devicePixelRatio: input.devicePixelRatio
   });
 }
@@ -1092,7 +1092,7 @@ function canvasTextPreviewSourcesWithTargetSource(input: {
   target: CanvasTextPreviewTarget;
   targetKey: string;
   descriptor: CanvasTextPreviewDescriptor | undefined;
-  imageResourceZoom: number;
+  resourceZoom: number;
   devicePixelRatio: number;
 }): Record<string, CanvasTextPreviewPublishedSource> {
   const source = input.descriptor
@@ -1101,7 +1101,7 @@ function canvasTextPreviewSourcesWithTargetSource(input: {
       node: input.node,
       target: input.target,
       descriptor: input.descriptor,
-      imageResourceZoom: input.imageResourceZoom,
+      resourceZoom: input.resourceZoom,
       devicePixelRatio: input.devicePixelRatio
     })
     : undefined;

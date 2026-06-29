@@ -14,7 +14,7 @@ import {
 import type { CanvasCameraState } from './runtime/canvasCamera';
 
 export interface CanvasImageNodeAssetContextValue {
-  imageResourceZoom: number;
+  resourceZoom: number;
   devicePixelRatio: number;
   cameraState: CanvasCameraState;
   dragActive: boolean;
@@ -58,12 +58,12 @@ export function useCanvasImageNodeAsset(input: {
   latestCulledRef.current = input.culled;
   const source = useMemo(() => resolveCanvasImageNodeSource({
     node: input.node,
-    imageResourceZoom: context.imageResourceZoom,
+    resourceZoom: context.resourceZoom,
     devicePixelRatio: context.devicePixelRatio,
     retryKey: state.retryKey
   }), [
     context.devicePixelRatio,
-    context.imageResourceZoom,
+    context.resourceZoom,
     input.node,
     state.retryKey
   ]);

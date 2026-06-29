@@ -7,7 +7,6 @@ import {
 } from '../../services/canvasInteraction';
 import {
   CANVAS_CAMERA_IDLE_MS,
-  DEFAULT_CANVAS_CAMERA,
   assertCanvasCamera,
   cameraCenteredOnCanvasPoint,
   cameraForGestureZoom,
@@ -38,7 +37,6 @@ export interface CanvasRuntimeSnapshot {
   selection: CanvasSelection | undefined;
   dragState: CanvasRuntimeDragState | undefined;
   surfaceSize: CanvasSize | undefined;
-  imageResourceZoom: number;
 }
 
 export interface CanvasCameraController {
@@ -91,11 +89,9 @@ export interface CanvasEditorRuntime {
   subscribeSelection(listener: (selection: CanvasSelection | undefined) => void): () => void;
   subscribeSurfaceSize(listener: (size: CanvasSize | undefined) => void): () => void;
   subscribeDragState(listener: (state: CanvasRuntimeDragState | undefined) => void): () => void;
-  subscribeImageResourceZoom(listener: (zoom: number) => void): () => void;
   getSnapshot(): CanvasRuntimeSnapshot;
   bindSurface(elements: CanvasSurfaceElements): () => void;
   setSelection(selection: CanvasSelection | undefined): void;
-  setImageResourceZoom(zoom: number): void;
   dispose(): void;
 }
 
@@ -136,7 +132,6 @@ interface RuntimeState {
   selection: CanvasSelection | undefined;
   dragState: CanvasRuntimeDragState | undefined;
   surfaceSize: CanvasSize | undefined;
-  imageResourceZoom: number;
 }
 
 interface GestureState {
@@ -155,14 +150,12 @@ export function createCanvasEditorRuntime(initial?: {
   const selectionListeners = new Set<(selection: CanvasSelection | undefined) => void>();
   const surfaceSizeListeners = new Set<(size: CanvasSize | undefined) => void>();
   const dragStateListeners = new Set<(state: CanvasRuntimeDragState | undefined) => void>();
-  const imageResourceZoomListeners = new Set<(zoom: number) => void>();
   const state: RuntimeState = {
     camera: initial?.camera ?? canvasCameraReset(),
     cameraState: 'idle',
     selection: initial?.selection,
     dragState: undefined,
-    surfaceSize: undefined,
-    imageResourceZoom: initial?.camera?.z ?? DEFAULT_CANVAS_CAMERA.z
+    surfaceSize: undefined
   };
   assertCanvasCamera(state.camera);
 
@@ -183,8 +176,7 @@ export function createCanvasEditorRuntime(initial?: {
       cameraState: state.cameraState,
       selection: state.selection,
       dragState: state.dragState,
-      surfaceSize: state.surfaceSize,
-      imageResourceZoom: state.imageResourceZoom
+      surfaceSize: state.surfaceSize
     };
     return cachedSnapshot;
   };
@@ -212,12 +204,6 @@ export function createCanvasEditorRuntime(initial?: {
   const flushSurfaceSizeListeners = (size: CanvasSize | undefined) => {
     for (const listener of surfaceSizeListeners) {
       listener(size);
-    }
-  };
-
-  const flushImageResourceZoomListeners = (zoom: number) => {
-    for (const listener of imageResourceZoomListeners) {
-      listener(zoom);
     }
   };
 
@@ -538,12 +524,6 @@ export function createCanvasEditorRuntime(initial?: {
         dragStateListeners.delete(listener);
       };
     },
-    subscribeImageResourceZoom: (listener) => {
-      imageResourceZoomListeners.add(listener);
-      return () => {
-        imageResourceZoomListeners.delete(listener);
-      };
-    },
     getSnapshot: snapshot,
     bindSurface: (elements) => {
       boundElements = elements;
@@ -597,18 +577,6 @@ export function createCanvasEditorRuntime(initial?: {
       flushSelectionListeners(selection);
       notify();
     },
-    setImageResourceZoom: (zoom) => {
-      if (!Number.isFinite(zoom) || zoom <= 0) {
-        throw new Error('Canvas image resource zoom must be a positive finite number.');
-      }
-      if (state.imageResourceZoom === zoom) {
-        return;
-      }
-      state.imageResourceZoom = zoom;
-      invalidateSnapshot();
-      flushImageResourceZoomListeners(zoom);
-      notify();
-    },
     dispose: () => {
       disposed = true;
       clearIdleTimer();
@@ -622,7 +590,6 @@ export function createCanvasEditorRuntime(initial?: {
       selectionListeners.clear();
       surfaceSizeListeners.clear();
       dragStateListeners.clear();
-      imageResourceZoomListeners.clear();
       boundElements = undefined;
     }
   };

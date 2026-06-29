@@ -12,7 +12,7 @@ describe('CanvasImageNodeAsset', () => {
   it('resolves preview URLs from node size, resource zoom, DPR, revision, and retry key', () => {
     const source = resolveCanvasImageNodeSource({
       node: imageNode('flow/cover.png', 200, 120, 2400, 'rev-a'),
-      imageResourceZoom: 1,
+      resourceZoom: 1,
       devicePixelRatio: 1,
       retryKey: 2
     });
@@ -32,7 +32,7 @@ describe('CanvasImageNodeAsset', () => {
     const state = loadedState('flow/cover.png', 'rev-a', 300);
     const source = resolveCanvasImageNodeSource({
       node: imageNode('flow/cover.png', 2400, 1200, 2400, 'rev-a'),
-      imageResourceZoom: 1,
+      resourceZoom: 1,
       devicePixelRatio: 1,
       retryKey: 0
     });
@@ -56,7 +56,7 @@ describe('CanvasImageNodeAsset', () => {
     const state = loadedState('flow/cover.png', 'rev-a', 213);
     const source = resolveCanvasImageNodeSource({
       node: imageNode('flow/cover.png', 200, 120, 2400, 'rev-a'),
-      imageResourceZoom: 1,
+      resourceZoom: 1,
       devicePixelRatio: 1,
       retryKey: 0
     });
@@ -78,7 +78,7 @@ describe('CanvasImageNodeAsset', () => {
     const loaded = loadedState('flow/cover.png', 'rev-a', 213);
     const source = resolveCanvasImageNodeSource({
       node: imageNode('flow/cover.png', 200, 120, 2400, 'rev-a'),
-      imageResourceZoom: 1,
+      resourceZoom: 1,
       devicePixelRatio: 1,
       retryKey: 0
     });
@@ -117,7 +117,7 @@ describe('CanvasImageNodeAsset', () => {
     const state = loadedState('flow/cover.png', 'rev-a', 300);
     const source = resolveCanvasImageNodeSource({
       node: imageNode('flow/cover.png', 2400, 1200, 2400, 'rev-a'),
-      imageResourceZoom: 1,
+      resourceZoom: 1,
       devicePixelRatio: 1,
       retryKey: 0
     });
@@ -137,7 +137,7 @@ describe('CanvasImageNodeAsset', () => {
     const state = loadedState('flow/cover.png', 'rev-a', 300);
     const source = resolveCanvasImageNodeSource({
       node: imageNode('flow/cover.png', 2400, 1200, 2400, 'rev-a'),
-      imageResourceZoom: 1,
+      resourceZoom: 1,
       devicePixelRatio: 1,
       retryKey: 0
     });
@@ -156,7 +156,7 @@ describe('CanvasImageNodeAsset', () => {
   it('loads the first preview while moving once the image is display-visible', () => {
     const source = resolveCanvasImageNodeSource({
       node: imageNode('flow/near.png', 2400, 1200, 2400, 'rev-a'),
-      imageResourceZoom: 0.1,
+      resourceZoom: 0.1,
       devicePixelRatio: 1,
       retryKey: 0
     });
@@ -177,7 +177,7 @@ describe('CanvasImageNodeAsset', () => {
   it('does not warm the first preview for culled images while the camera is idle', () => {
     const source = resolveCanvasImageNodeSource({
       node: imageNode('flow/far.png', 2400, 1200, 2400, 'rev-a'),
-      imageResourceZoom: 0.1,
+      resourceZoom: 0.1,
       devicePixelRatio: 1,
       retryKey: 0
     });
@@ -195,7 +195,7 @@ describe('CanvasImageNodeAsset', () => {
   it('still skips new work for far culled images', () => {
     const source = resolveCanvasImageNodeSource({
       node: imageNode('flow/far.png', 2400, 1200, 2400, 'rev-a'),
-      imageResourceZoom: 0.1,
+      resourceZoom: 0.1,
       devicePixelRatio: 1,
       retryKey: 0
     });
@@ -214,7 +214,7 @@ describe('CanvasImageNodeAsset', () => {
     const loaded = loadedState('flow/cover.png', 'rev-a', 300);
     const source = resolveCanvasImageNodeSource({
       node: imageNode('flow/cover.png', 2400, 1200, 2400, 'rev-a'),
-      imageResourceZoom: 1,
+      resourceZoom: 1,
       devicePixelRatio: 1,
       retryKey: 0
     });
@@ -235,7 +235,7 @@ describe('CanvasImageNodeAsset', () => {
   it('keeps first load, revision change, retry, and not-eligible transitions immediate', () => {
     const source = resolveCanvasImageNodeSource({
       node: imageNode('flow/cover.png', 200, 120, 2400, 'rev-b'),
-      imageResourceZoom: 1,
+      resourceZoom: 1,
       devicePixelRatio: 1,
       retryKey: 1
     });
@@ -281,7 +281,7 @@ describe('CanvasImageNodeAsset', () => {
     const loaded = loadedState('flow/cover.png', 'rev-a', 300);
     const source = resolveCanvasImageNodeSource({
       node: imageNode('flow/cover.png', 2400, 1200, 2400, 'rev-a'),
-      imageResourceZoom: 1,
+      resourceZoom: 1,
       devicePixelRatio: 1,
       retryKey: 0
     });
@@ -302,7 +302,7 @@ describe('CanvasImageNodeAsset', () => {
   it('schedules first image load after a culled node becomes visible', () => {
     const source = resolveCanvasImageNodeSource({
       node: imageNode('flow/far.png', 2400, 1200, 2400, 'rev-a'),
-      imageResourceZoom: 0.1,
+      resourceZoom: 0.1,
       devicePixelRatio: 1,
       retryKey: 0
     });
@@ -324,7 +324,7 @@ describe('CanvasImageNodeAsset', () => {
     const loaded = loadedState('flow/cover.png', 'rev-a', 300);
     const source = resolveCanvasImageNodeSource({
       node: imageNode('flow/cover.png', 2400, 1200, 2400, 'rev-a'),
-      imageResourceZoom: 1,
+      resourceZoom: 1,
       devicePixelRatio: 1,
       retryKey: 0
     });
@@ -414,7 +414,7 @@ describe('CanvasImageNodeAsset', () => {
     };
     const source = resolveCanvasImageNodeSource({
       node: imageNode('flow/cover.png', 200, 120, 2400, 'rev-b'),
-      imageResourceZoom: 1,
+      resourceZoom: 1,
       devicePixelRatio: 1,
       retryKey: 0
     });

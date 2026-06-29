@@ -20,7 +20,7 @@ export interface CanvasLoadedImage extends CanvasImageSource {
 
 export function canvasImageSource(input: {
   node: ProjectedCanvasNode;
-  cameraZoom: number;
+  resourceZoom: number;
   devicePixelRatio: number;
 }): CanvasImageSource | undefined {
   if (input.node.availability.state !== 'available' || !input.node.availability.fileUrl) {
@@ -29,7 +29,7 @@ export function canvasImageSource(input: {
   if (!isPreviewableImageNode(input.node)) {
     return undefined;
   }
-  const previewWidth = canvasImagePreviewWidthForNode(input.node, input.cameraZoom, input.devicePixelRatio);
+  const previewWidth = canvasImagePreviewWidthForNode(input.node, input.resourceZoom, input.devicePixelRatio);
   const src = canvasImagePreviewUrl(
     input.node.availability.fileUrl,
     input.node.projectRelativePath,
@@ -50,12 +50,12 @@ export function canvasImagePreviewSteppedScale(screenScale: number): number {
 export function canvasImagePreviewWidth(input: {
   nodeDisplayWidth: number;
   sourceWidth: number;
-  imageResourceZoom: number;
+  resourceZoom: number;
   devicePixelRatio: number;
 }): number {
   assertPositiveFinite(input.nodeDisplayWidth, 'Canvas image preview node display width must be a positive finite number.');
   assertPositiveFinite(input.sourceWidth, 'Canvas image preview source width must be a positive finite number.');
-  assertPositiveFinite(input.imageResourceZoom, 'Canvas image preview resource zoom must be a positive finite number.');
+  assertPositiveFinite(input.resourceZoom, 'Canvas image preview resource zoom must be a positive finite number.');
   assertPositiveFinite(input.devicePixelRatio, 'Canvas image devicePixelRatio must be a positive finite number.');
 
   const previewWidth = canvasRasterPreviewWidth(input);
@@ -67,7 +67,7 @@ export function canvasImagePreviewWidth(input: {
 
 export function canvasImagePreviewWidthForNode(
   node: Pick<ProjectedCanvasNode, 'width' | 'availability'>,
-  cameraZoom: number,
+  resourceZoom: number,
   devicePixelRatio: number
 ): number {
   if (node.availability.state !== 'available') {
@@ -80,7 +80,7 @@ export function canvasImagePreviewWidthForNode(
   return canvasImagePreviewWidth({
     nodeDisplayWidth: node.width,
     sourceWidth,
-    imageResourceZoom: cameraZoom,
+    resourceZoom,
     devicePixelRatio
   });
 }

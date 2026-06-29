@@ -10,15 +10,15 @@ export function canvasRasterPreviewSteppedScale(screenScale: number): number {
 export function canvasRasterPreviewWidth(input: {
   nodeDisplayWidth: number;
   sourceWidth: number;
-  imageResourceZoom: number;
+  resourceZoom: number;
   devicePixelRatio: number;
 }): number {
   assertPositiveFinite(input.nodeDisplayWidth, 'Canvas raster preview node display width must be a positive finite number.');
   assertPositiveFinite(input.sourceWidth, 'Canvas raster preview source width must be a positive finite number.');
-  assertPositiveFinite(input.imageResourceZoom, 'Canvas raster preview resource zoom must be a positive finite number.');
+  assertPositiveFinite(input.resourceZoom, 'Canvas raster preview resource zoom must be a positive finite number.');
   assertPositiveFinite(input.devicePixelRatio, 'Canvas raster preview devicePixelRatio must be a positive finite number.');
 
-  const screenScale = input.imageResourceZoom * (input.nodeDisplayWidth / input.sourceWidth);
+  const screenScale = input.resourceZoom * (input.nodeDisplayWidth / input.sourceWidth);
   const steppedScale = canvasRasterPreviewSteppedScale(screenScale);
   const clampedScale = Math.min(
     CANVAS_RASTER_PREVIEW_MAX_SCALE,

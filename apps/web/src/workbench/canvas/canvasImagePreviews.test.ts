@@ -19,28 +19,28 @@ describe('canvas image preview URLs', () => {
     expect(canvasImagePreviewWidth({
       nodeDisplayWidth: 2400,
       sourceWidth: 2400,
-      imageResourceZoom: 0.1,
+      resourceZoom: 0.1,
       devicePixelRatio: 1
     })).toBe(300);
 
     expect(canvasImagePreviewWidth({
       nodeDisplayWidth: 2400,
       sourceWidth: 2400,
-      imageResourceZoom: 0.1,
+      resourceZoom: 0.1,
       devicePixelRatio: 2
     })).toBe(600);
 
     expect(canvasImagePreviewWidth({
       nodeDisplayWidth: 2400,
       sourceWidth: 2400,
-      imageResourceZoom: 1,
+      resourceZoom: 1,
       devicePixelRatio: 2
     })).toBe(2400);
 
     expect(canvasImagePreviewWidth({
       nodeDisplayWidth: 2400,
       sourceWidth: 2400,
-      imageResourceZoom: 0.51,
+      resourceZoom: 0.51,
       devicePixelRatio: 1
     })).toBe(1698);
   });
@@ -49,14 +49,14 @@ describe('canvas image preview URLs', () => {
     expect(canvasImagePreviewWidth({
       nodeDisplayWidth: 2400,
       sourceWidth: 2400,
-      imageResourceZoom: 0.001,
+      resourceZoom: 0.001,
       devicePixelRatio: 1
     })).toBe(75);
 
     expect(canvasImagePreviewWidth({
       nodeDisplayWidth: 1200,
       sourceWidth: 300,
-      imageResourceZoom: 2,
+      resourceZoom: 2,
       devicePixelRatio: 2
     })).toBe(300);
   });
@@ -66,13 +66,13 @@ describe('canvas image preview URLs', () => {
 
     expect(canvasImageSource({
       node,
-      cameraZoom: 0.1,
+      resourceZoom: 0.1,
       devicePixelRatio: 1
     })).toEqual({ src: previewUrl('flow/cover.png', 300), previewWidth: 300 });
 
     expect(canvasImageSource({
       node,
-      cameraZoom: 1,
+      resourceZoom: 1,
       devicePixelRatio: 1
     })).toEqual({ src: previewUrl('flow/cover.png', 2400), previewWidth: 2400 });
   });
@@ -80,7 +80,7 @@ describe('canvas image preview URLs', () => {
   it('returns source metadata with the chosen dynamic preview width', () => {
     expect(canvasImageSource({
       node: nodeFixture('flow/cover.png', 2400, 'image/png'),
-      cameraZoom: 0.2,
+      resourceZoom: 0.2,
       devicePixelRatio: 1
     })).toEqual({
       src: previewUrl('flow/cover.png', 600),
@@ -91,19 +91,19 @@ describe('canvas image preview URLs', () => {
   it('does not return raw Canvas image URLs for unsupported image nodes', () => {
     expect(canvasImageSource({
       node: nodeFixture('flow/animated.gif', 1000, 'image/gif'),
-      cameraZoom: 0.1,
+      resourceZoom: 0.1,
       devicePixelRatio: 1
     })).toBeUndefined();
 
     expect(canvasImageSource({
       node: { ...nodeFixture('flow/movie.mp4', 1000, 'video/mp4'), mediaKind: 'video' },
-      cameraZoom: 0.1,
+      resourceZoom: 0.1,
       devicePixelRatio: 1
     })).toBeUndefined();
 
     expect(canvasImageSource({
       node: nodeFixture('flow/animated.webp', 1000, 'image/webp', false),
-      cameraZoom: 0.1,
+      resourceZoom: 0.1,
       devicePixelRatio: 1
     })).toBeUndefined();
   });
@@ -113,13 +113,13 @@ describe('canvas image preview URLs', () => {
 
     expect(canvasImageSource({
       node,
-      cameraZoom: 0.1,
+      resourceZoom: 0.1,
       devicePixelRatio: 1
     })).toEqual({ src: previewUrl('flow/small.png', 150), previewWidth: 150 });
 
     expect(canvasImageSource({
       node,
-      cameraZoom: 2,
+      resourceZoom: 2,
       devicePixelRatio: 2
     })).toEqual({ src: previewUrl('flow/small.png', 300), previewWidth: 300 });
   });
@@ -130,13 +130,13 @@ describe('canvas image preview URLs', () => {
     expect(() => canvasImagePreviewWidth({
       nodeDisplayWidth: 0,
       sourceWidth: 2400,
-      imageResourceZoom: 1,
+      resourceZoom: 1,
       devicePixelRatio: 1
     })).toThrow('Canvas image preview node display width must be a positive finite number.');
     expect(() => canvasImagePreviewWidth({
       nodeDisplayWidth: 2400,
       sourceWidth: 0,
-      imageResourceZoom: 1,
+      resourceZoom: 1,
       devicePixelRatio: 1
     })).toThrow('Canvas image preview source width must be a positive finite number.');
   });
@@ -144,7 +144,7 @@ describe('canvas image preview URLs', () => {
   it('keeps preview URLs limited to path, revision, and dynamic width', () => {
     expect(canvasImageSource({
       node: nodeFixture('flow/cover art.png', 1000, 'image/png'),
-      cameraZoom: 0.2,
+      resourceZoom: 0.2,
       devicePixelRatio: 1
     })).toEqual({
       src: 'http://127.0.0.1:17321/api/projects/123e4567-e89b-42d3-a456-426614174000/canvas-image-preview?path=flow%2Fcover+art.png&v=rev&w=250',
@@ -158,7 +158,7 @@ describe('canvas image preview URLs', () => {
 
     expect(canvasImageSource({
       node,
-      cameraZoom: 0.1,
+      resourceZoom: 0.1,
       devicePixelRatio: 1
     })).toEqual({
       src: previewUrl(path, 640, 'test-token'),
