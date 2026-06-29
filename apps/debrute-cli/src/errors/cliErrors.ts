@@ -111,8 +111,7 @@ export function normalizeServiceErrorCode(code: string): DebruteCliErrorCode {
     return code;
   }
   if (
-    code === 'no_llm_model_configured'
-    || code === 'image_model_not_configured'
+    code === 'image_model_not_configured'
     || code === 'video_model_not_configured'
   ) {
     return 'model_not_configured';
@@ -123,13 +122,8 @@ export function normalizeServiceErrorCode(code: string): DebruteCliErrorCode {
   if (code === 'video_model_official_doc_missing') {
     return 'runtime_config_error';
   }
-  if (code === 'llm_model_unavailable') {
-    return 'model_unavailable';
-  }
   if (
-    code === 'llm_request_failed'
-    || code === 'llm_request_timeout'
-    || code === 'image_request_failed'
+    code === 'image_request_failed'
     || code === 'video_request_failed'
     || code === 'request_failed'
     || code === 'response_parse_failed'
@@ -138,7 +132,6 @@ export function normalizeServiceErrorCode(code: string): DebruteCliErrorCode {
   }
   if (
     code === 'invalid_image_input'
-    || code === 'llm_invalid_json'
     || code === 'video_argument_invalid'
     || code === 'video_reference_missing'
     || code === 'video_reference_type_unsupported'

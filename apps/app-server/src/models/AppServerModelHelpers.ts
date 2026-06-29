@@ -67,7 +67,6 @@ export interface CliRuntimeStatus {
   availableImageModels: number;
   videoModels: number;
   availableVideoModels: number;
-  availableLlmModels: number;
   diagnostics: number;
 }
 

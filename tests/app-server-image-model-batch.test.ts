@@ -24,7 +24,6 @@ describe('DebruteAppServer image model batch', () => {
       ]
     });
     await configStore.saveSecrets({
-      llmProviderApiKeys: {},
       imageModelApiKeys: { 'gpt-image-2': 'sk-image' },
       videoModelApiKeys: {}
     });
@@ -221,7 +220,6 @@ describe('DebruteAppServer image model batch', () => {
       imageModels: [{ debruteModelId: 'gpt-image-2', baseUrlOverride: null, requestModelIdOverride: 'gpt-image-2' }]
     });
     await configStore.saveSecrets({
-      llmProviderApiKeys: {},
       imageModelApiKeys: { 'gpt-image-2': 'sk-image' },
       videoModelApiKeys: {}
     });
@@ -337,7 +335,6 @@ describe('DebruteAppServer image model batch', () => {
       ]
     });
     await configStore.saveSecrets({
-      llmProviderApiKeys: {},
       imageModelApiKeys: { 'gpt-image-2': 'sk-image' },
       videoModelApiKeys: {}
     });
@@ -404,7 +401,6 @@ describe('DebruteAppServer image model batch', () => {
       imageModels: [{ debruteModelId: 'gpt-image-2', baseUrlOverride: null, requestModelIdOverride: 'gpt-image-2' }]
     });
     await configStore.saveSecrets({
-      llmProviderApiKeys: {},
       imageModelApiKeys: { 'gpt-image-2': 'sk-image-batch-secret' },
       videoModelApiKeys: {}
     });

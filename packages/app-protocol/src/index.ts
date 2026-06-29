@@ -354,48 +354,6 @@ export interface CanvasTextPreviewDescriptorResponse {
   descriptors: Record<string, CanvasTextPreviewDescriptorView>;
 }
 
-export type LlmProviderType = 'openai_compat' | 'anthropic';
-
-export interface LlmProviderConfig {
-  id: string;
-  name: string;
-  providerType: LlmProviderType;
-  baseUrl: string;
-  enabled: boolean;
-  modelIds: string[];
-}
-
-export interface LlmProviderSettingRecord extends LlmProviderConfig {
-  apiKeySet: boolean;
-  apiKeyPreview?: string;
-  modelKeys: string[];
-}
-
-export interface LlmProviderSettingsView {
-  providers: LlmProviderSettingRecord[];
-  availableModelKeys: string[];
-  defaultModelKey: string | null;
-}
-
-export interface SaveLlmProviderSettingInput extends LlmProviderConfig {
-  apiKey?: string;
-}
-
-export interface DiscoverLlmProviderModelsInput {
-  id?: string;
-  providerType: LlmProviderType;
-  baseUrl: string;
-  apiKey?: string;
-  timeoutMs?: number;
-}
-
-export interface DiscoverProviderModelsOutput {
-  endpoint: string;
-  models: string[];
-  modelsCount: number;
-  supportsDiscovery: boolean;
-}
-
 export interface ImageModelSettingRecord {
   debruteModelId: string;
   summary: string;
@@ -1014,7 +972,6 @@ export type AppServerEvent =
   | { type: 'canvas.changed'; canvas: CanvasDocument; projection: CanvasProjection }
   | { type: 'canvas.feedback.changed'; feedback: CanvasFeedbackDocument }
   | { type: 'generatedAsset.metadata.changed'; record: GeneratedAssetRecord }
-  | { type: 'llm.settings.changed'; settings: LlmProviderSettingsView }
   | { type: 'imageModel.settings.changed'; settings: ImageModelSettingsView }
   | { type: 'videoModel.settings.changed'; settings: VideoModelSettingsView }
   | { type: 'integrations.settings.changed'; settings: IntegrationSettingsView }
@@ -1030,7 +987,6 @@ export type WorkbenchEvent =
   | { type: 'canvas.changed'; projectId: string; projectRevision: number; canvas: CanvasDocument; projection: CanvasProjection }
   | { type: 'canvas.feedback.changed'; projectId: string; projectRevision: number; feedback: CanvasFeedbackDocument }
   | { type: 'generatedAsset.metadata.changed'; projectId: string; projectRevision: number; record: GeneratedAssetRecord }
-  | { type: 'llm.settings.changed'; settings: LlmProviderSettingsView }
   | { type: 'imageModel.settings.changed'; settings: ImageModelSettingsView }
   | { type: 'videoModel.settings.changed'; settings: VideoModelSettingsView }
   | { type: 'integrations.settings.changed'; settings: IntegrationSettingsView }
@@ -1105,11 +1061,6 @@ export interface WorkbenchApiClient {
     canvasId: string;
     nodeProjectRelativePathsTopFirst?: string[];
   }): Promise<WorkbenchCanvasDocumentMutationResult>;
-  llmGetSettings(): Promise<LlmProviderSettingsView>;
-  llmSaveProviderSetting(input: SaveLlmProviderSettingInput, providerId?: string): Promise<LlmProviderSettingsView>;
-  llmDeleteProviderSetting(providerId: string): Promise<LlmProviderSettingsView>;
-  llmSetDefaultModelKey(modelKey: string | null): Promise<LlmProviderSettingsView>;
-  llmDiscoverProviderModels(input: DiscoverLlmProviderModelsInput, providerId?: string): Promise<DiscoverProviderModelsOutput>;
   imageModelGetSettings(): Promise<ImageModelSettingsView>;
   imageModelSaveSetting(modelId: string, input: SaveImageModelSettingInput): Promise<ImageModelSettingsView>;
   videoModelGetSettings(): Promise<VideoModelSettingsView>;

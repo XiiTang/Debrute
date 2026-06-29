@@ -2,7 +2,6 @@ import { describe, expect, it } from 'vitest';
 import {
   apiKeyPreview,
   createImageModelSettingsView,
-  createLlmProviderSettingsView,
   createVideoModelSettingsView
 } from '../src/config';
 
@@ -24,36 +23,6 @@ describe('settings secret view contract', () => {
     expect(apiKeyPreview(undefined)).toEqual({ apiKeySet: false });
   });
 
-  it('omits plaintext keys from LLM settings views', () => {
-    const view = createLlmProviderSettingsView({
-      defaultModelKey: 'openai-main:gpt-5.1',
-      providers: [{
-        id: 'openai-main',
-        name: 'OpenAI Main',
-        providerType: 'openai_compat',
-        baseUrl: 'https://api.openai.com/v1',
-        enabled: true,
-        modelIds: ['gpt-5.1']
-      }]
-    }, {
-      llmProviderApiKeys: { 'openai-main': 'sk-llm-123456fg' },
-      imageModelApiKeys: {},
-      videoModelApiKeys: {}
-    });
-
-    expect(view).toMatchObject({
-      availableModelKeys: ['openai-main:gpt-5.1'],
-      defaultModelKey: 'openai-main:gpt-5.1',
-      providers: [{
-        id: 'openai-main',
-        apiKeySet: true,
-        apiKeyPreview: 'sk****************************fg'
-      }]
-    });
-    expect(view.providers[0] as Record<string, unknown>).not.toHaveProperty('apiKey');
-    expect(JSON.stringify(view)).not.toContain('sk-llm-123456fg');
-  });
-
   it('omits plaintext keys from image and video model settings views', () => {
     const image = createImageModelSettingsView({
       imageModels: [{
@@ -62,7 +31,6 @@ describe('settings secret view contract', () => {
         requestModelIdOverride: null
       }]
     }, {
-      llmProviderApiKeys: {},
       imageModelApiKeys: { 'gpt-image-2': 'sk-image-123456fg' },
       videoModelApiKeys: {}
     }, [{
@@ -81,7 +49,6 @@ describe('settings secret view contract', () => {
         requestModelIdOverride: null
       }]
     }, {
-      llmProviderApiKeys: {},
       imageModelApiKeys: {},
       videoModelApiKeys: { 'sora-2': 'sk-video-123456fg' }
     }, [{

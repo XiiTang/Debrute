@@ -1489,7 +1489,6 @@ function workbenchStateFixture(
       opening: false
     },
     explorerSelection: { selectedPaths: [], focusedPath: null, anchorPath: null },
-    llmSettings: undefined,
     imageModelSettings: undefined,
     videoModelSettings: undefined,
     integrationsSettings: undefined,
@@ -1507,10 +1506,6 @@ const actions: WorkbenchActions = {
   getProductState: async () => productState(),
   checkProductUpdate: async () => productState(),
   applyProductUpdate: async () => ({ state: productState() }),
-  saveLlmProviderSetting: async () => undefined,
-  deleteLlmProviderSetting: async () => undefined,
-  setDefaultLlmModelKey: async () => undefined,
-  discoverLlmProviderModels: async () => ({ endpoint: '', models: [], modelsCount: 0, supportsDiscovery: false }),
   saveImageModelSetting: async () => undefined,
   saveVideoModelSetting: async () => undefined,
   saveWorkbenchPreferences: async () => undefined,

@@ -4,7 +4,8 @@ import { describe, expect, it, vi } from 'vitest';
 import { SettingsPanel } from '../apps/web/src/workbench/settings/SettingsPanel';
 import { GeneralSettingsPage } from '../apps/web/src/workbench/settings/general/GeneralSettingsPage';
 import { I18nProvider } from '../apps/web/src/workbench/i18n';
-import type { DebruteProductState } from '@debrute/app-protocol';
+import { unavailableWorkbenchTitleBarState, type DebruteProductState } from '@debrute/app-protocol';
+import { createEmptyProjectTreeSelection } from '../apps/web/src/workbench/project-explorer/projectTreeInteraction';
 import type { WorkbenchActions, WorkbenchState } from '../apps/web/src/types';
 
 describe('web Settings pages', () => {
@@ -14,8 +15,7 @@ describe('web Settings pages', () => {
       actions: actionsFixture()
     }));
 
-    expect(html.match(/class="db-nav-row(?: db-nav-row--active)?"/g)).toHaveLength(5);
-    expect(html.indexOf('General')).toBeLessThan(html.indexOf('LLM'));
+    expect(html.match(/class="db-nav-row(?: db-nav-row--active)?"/g)).toHaveLength(4);
     expect(html).toContain('Application');
     expect(html).toContain('Updates');
     expect(html.match(/Debrute CLI/g)).toHaveLength(1);
@@ -107,12 +107,11 @@ function productState(overrides: Partial<DebruteProductState> = {}): DebruteProd
 function stateFixture(): WorkbenchState {
   return {
     snapshot: undefined,
-    titleBarState: { available: false },
+    titleBarState: unavailableWorkbenchTitleBarState(),
     workbenchPreferences: { locale: 'en', themePreference: 'system' },
     resolvedTheme: 'dark',
     projectOpen: { opening: false },
-    explorerSelection: { selectedPaths: [], focusedPath: undefined, anchorPath: undefined },
-    llmSettings: { providers: [], availableModelKeys: [], defaultModelKey: null },
+    explorerSelection: createEmptyProjectTreeSelection(),
     imageModelSettings: { models: [] },
     videoModelSettings: { models: [] },
     integrationsSettings: undefined,
@@ -121,7 +120,7 @@ function stateFixture(): WorkbenchState {
     textFileBuffers: {},
     textEditorWindows: {},
     notifications: []
-  } as unknown as WorkbenchState;
+  };
 }
 
 function actionsFixture(): WorkbenchActions {

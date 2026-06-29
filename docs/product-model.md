@@ -44,7 +44,7 @@ Push copies the current Canvas Map membership into Canvas JSON, while Canvas dis
 
 ## Capabilities
 
-Capabilities are discrete operations that the daemon-backed Web workbench or the `debrute` command can invoke: project semantics, LLM requests, image generation, video generation, and generated asset metadata lookup.
+Capabilities are discrete operations that the daemon-backed Web workbench or the `debrute` command can invoke: project semantics, image generation, video generation, and generated asset metadata lookup.
 
 External Agents use their own filesystem tools for generic file access.
 
@@ -66,7 +66,7 @@ The Desktop product payload includes the official `skills/debrute-*` bundle. Run
 
 Project metadata and canvas state live under `.debrute/`.
 
-Generated asset metadata, LLM provider settings, generation model settings, LLM provider secrets, and generation model secrets live in Debrute-owned runtime storage.
+Generated asset metadata, generation model settings, and generation model secrets live in Debrute-owned runtime storage.
 
 Renderer code does not read or write project files, generated asset metadata, model secret files, or Skills directories directly. Project and settings operations use the daemon/App Server boundary, while official Skills materialization is owned by the runtime.
 

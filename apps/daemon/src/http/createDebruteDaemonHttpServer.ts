@@ -1522,15 +1522,10 @@ async function handleSettingsRoute(context: GlobalRuntimeRequestContext): Promis
   const path = context.url.pathname;
   if (method === 'GET' && path === '/api/settings') {
     writeJson(context.response, 200, {
-      llm: await server.llmGetSettings(),
       imageModels: await server.imageModelGetSettings(),
       videoModels: await server.videoModelGetSettings(),
       integrations: await server.integrationsListStatus()
     });
-    return;
-  }
-  if (method === 'GET' && path === '/api/settings/llm') {
-    writeJson(context.response, 200, await server.llmGetSettings());
     return;
   }
   if (method === 'GET' && path === '/api/settings/workbench-preferences') {
@@ -1539,28 +1534,6 @@ async function handleSettingsRoute(context: GlobalRuntimeRequestContext): Promis
   }
   if (method === 'PUT' && path === '/api/settings/workbench-preferences') {
     writeJson(context.response, 200, await server.workbenchPreferencesSave(await readJsonBody<SaveWorkbenchPreferencesInput>(context.request)));
-    return;
-  }
-  if (method === 'PUT' && path.startsWith('/api/settings/llm/providers/')) {
-    writeJson(context.response, 200, await server.llmSaveProviderSetting(await readJsonBody(context.request), decodePathSegment(path.split('/').at(-1)!)));
-    return;
-  }
-  if (method === 'POST' && path === '/api/settings/llm/providers') {
-    writeJson(context.response, 200, await server.llmSaveProviderSetting(await readJsonBody(context.request)));
-    return;
-  }
-  if (method === 'DELETE' && path.startsWith('/api/settings/llm/providers/')) {
-    writeJson(context.response, 200, await server.llmDeleteProviderSetting(decodePathSegment(path.split('/').at(-1)!)));
-    return;
-  }
-  if (method === 'PUT' && path === '/api/settings/llm/default-model') {
-    const body = await readJsonBody<{ modelKey?: string | null }>(context.request);
-    writeJson(context.response, 200, await server.llmSetDefaultModelKey(body.modelKey ?? null));
-    return;
-  }
-  if (method === 'POST' && path === '/api/settings/llm/discover-models') {
-    const body = await readJsonBody<{ input?: unknown; providerId?: string }>(context.request);
-    writeJson(context.response, 200, await server.llmDiscoverProviderModels(body.input as never, body.providerId));
     return;
   }
   if (method === 'GET' && path === '/api/models/image') {
@@ -1592,7 +1565,6 @@ async function handleSettingsRoute(context: GlobalRuntimeRequestContext): Promis
 
 type GlobalWorkbenchEvent = Extract<WorkbenchEvent, {
   type:
-    | 'llm.settings.changed'
     | 'imageModel.settings.changed'
     | 'videoModel.settings.changed'
     | 'integrations.settings.changed'
@@ -1630,8 +1602,7 @@ function writeSseWorkbenchEvent(response: ServerResponse, event: WorkbenchEvent)
 }
 
 function isGlobalWorkbenchEvent(event: AppServerEvent): event is GlobalWorkbenchEvent {
-  return event.type === 'llm.settings.changed'
-    || event.type === 'imageModel.settings.changed'
+  return event.type === 'imageModel.settings.changed'
     || event.type === 'videoModel.settings.changed'
     || event.type === 'integrations.settings.changed'
     || event.type === 'adobeBridge.settings.changed'

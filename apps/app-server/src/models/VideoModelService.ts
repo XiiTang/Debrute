@@ -42,7 +42,6 @@ export class VideoModelService {
         delete videoModelApiKeys[modelId];
       }
       await this.input.configStore.saveSecrets({
-        llmProviderApiKeys: { ...secrets.llmProviderApiKeys },
         imageModelApiKeys: { ...secrets.imageModelApiKeys },
         videoModelApiKeys
       });
