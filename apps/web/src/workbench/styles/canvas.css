@@ -2,14 +2,14 @@
   --canvas-card-width: 78px;
   --canvas-card-delete-overlap: 7px;
   position: fixed;
-  left: 102px;
-  bottom: 18px;
+  left: 96px;
+  bottom: 14px;
   z-index: 150;
   pointer-events: auto;
   display: flex;
   align-items: center;
-  gap: 6px;
-  max-width: min(58vw, 720px, calc(100vw - 110px));
+  gap: 4px;
+  max-width: min(58vw, 720px, calc(100vw - 104px));
   height: 28px;
   padding: 0;
 }
@@ -20,6 +20,7 @@
   gap: 4px;
   height: calc(100% + var(--canvas-card-delete-overlap) + 2px);
   margin-top: calc(-1 * var(--canvas-card-delete-overlap));
+  margin-right: calc(-1 * var(--canvas-card-delete-overlap));
   padding-top: var(--canvas-card-delete-overlap);
   padding-right: var(--canvas-card-delete-overlap);
   padding-bottom: 2px;
@@ -107,7 +108,7 @@
 .canvas-minimap-bar {
   position: absolute;
   left: 18px;
-  bottom: 18px;
+  bottom: 14px;
   width: 42px;
   height: 28px;
   display: grid;
@@ -118,8 +119,8 @@
 
 .canvas-reset-layout-button {
   position: absolute;
-  left: 66px;
-  bottom: 18px;
+  left: 64px;
+  bottom: 14px;
   width: 28px;
   height: 28px;
   display: grid;

@@ -6,6 +6,7 @@ import type {
   CanvasImageFeedbackRegion
 } from '@debrute/canvas-core';
 import type { CanvasCamera } from '../canvas/runtime/canvasCamera';
+import { WORKBENCH_FLOATING_DOCK_EDGE_INSET } from './workbenchLayers';
 
 export interface FloatingBarRect {
   x: number;
@@ -65,16 +66,23 @@ export const CANVAS_MINIMAP_BUTTON_SIZE = {
   height: 28
 } as const;
 
+const CANVAS_LOWER_LEFT_CONTROL_INSET = {
+  left: WORKBENCH_FLOATING_DOCK_EDGE_INSET.horizontal,
+  bottom: 14
+} as const;
+const CANVAS_RESET_LAYOUT_GAP_PX = 4;
+const CANVAS_CARD_BAR_GAP_PX = 4;
+
 export const CANVAS_RESET_LAYOUT_BUTTON_SIZE = {
-  left: 66,
-  bottom: 18,
+  left: CANVAS_LOWER_LEFT_CONTROL_INSET.left + CANVAS_MINIMAP_BUTTON_SIZE.width + CANVAS_RESET_LAYOUT_GAP_PX,
+  bottom: CANVAS_LOWER_LEFT_CONTROL_INSET.bottom,
   width: 28,
   height: 28
 } as const;
 
 export const CANVAS_CARD_BAR_SIZE = {
-  left: 102,
-  bottom: 18,
+  left: CANVAS_RESET_LAYOUT_BUTTON_SIZE.left + CANVAS_RESET_LAYOUT_BUTTON_SIZE.width + CANVAS_CARD_BAR_GAP_PX,
+  bottom: CANVAS_LOWER_LEFT_CONTROL_INSET.bottom,
   height: 28,
   maxWidth: 720,
   maxViewportWidthRatio: 0.58
@@ -186,8 +194,8 @@ export function canvasFeedbackBarSizeForTarget(input: {
 
 export function canvasMinimapButtonRect(viewportRect: FloatingBarRect): FloatingBarRect {
   return {
-    x: viewportRect.x + 18,
-    y: viewportRect.y + viewportRect.height - 18 - CANVAS_MINIMAP_BUTTON_SIZE.height,
+    x: viewportRect.x + CANVAS_LOWER_LEFT_CONTROL_INSET.left,
+    y: viewportRect.y + viewportRect.height - CANVAS_LOWER_LEFT_CONTROL_INSET.bottom - CANVAS_MINIMAP_BUTTON_SIZE.height,
     width: CANVAS_MINIMAP_BUTTON_SIZE.width,
     height: CANVAS_MINIMAP_BUTTON_SIZE.height
   };
