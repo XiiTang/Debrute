@@ -93,6 +93,21 @@ describe('project DESIGN.md contract', () => {
     }
   });
 
+  it('states component-family consistency and Canvas overlay chrome ownership', () => {
+    const design = readFileSync(designPath, 'utf8');
+
+    for (const requiredText of [
+      'Component family comes first: components with the same role use the same primitive or named pattern.',
+      'Components in the same family share size, spacing, radius, surface, border, shadow, text, icon, hover, pressed, disabled, and focus rules.',
+      'Allowed component-family differences are limited to semantic state, established size tiers, placement geometry, content constraints, and narrow Canvas/media visibility needs.',
+      'Feature CSS does not define a second button, icon-button, input, card, menu, panel, status, floating-bar, notification, terminal-tab, nav-row, diagnostic-row, Canvas-node, or Canvas overlay chrome system.',
+      'Canvas overlay controls use the shared floating-bar and Canvas control patterns for base chrome.',
+      'Canvas exceptions do not allow feature-owned reusable product chrome or local overrides that clear shared floating-bar surface, border, shadow, or backdrop treatment.'
+    ]) {
+      expect(design).toContain(requiredText);
+    }
+  });
+
   it('does not introduce per-surface DESIGN.md appendix files', () => {
     const disallowedDesignFiles = findDesignFiles(root)
       .filter((file) => file !== 'DESIGN.md')
