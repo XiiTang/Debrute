@@ -1,9 +1,12 @@
 import { describe, expect, it, vi } from 'vitest';
 import { EditorState, type Transaction } from '@codemirror/state';
 import { history, undoDepth } from '@codemirror/commands';
+import { json } from '@codemirror/lang-json';
+import { syntaxTreeAvailable } from '@codemirror/language';
 import {
   canvasTextEditorApplyInitialScroll,
   canvasTextEditorCancelInlineEditKeyBinding,
+  canvasTextEditorEnsureVisibleSyntaxReady,
   canvasTextEditorExternalValueSyncAnnotation,
   canvasTextEditorKeymap,
   canvasTextEditorSyncExternalValue,
@@ -179,4 +182,46 @@ describe('CanvasTextEditorRuntime', () => {
       scrollLeft: 12
     });
   });
+
+  it('forces syntax parsing through the visible range before capture readiness', () => {
+    const content = jsonlFixture();
+    let state = EditorState.create({
+      doc: content,
+      extensions: [json()]
+    });
+    const view = {
+      get state() {
+        return state;
+      },
+      viewport: { from: 0, to: state.doc.length },
+      visibleRanges: [{ from: 0, to: state.doc.length }],
+      dispatch(spec: Parameters<typeof state.update>[0]) {
+        state = state.update(spec).state;
+      }
+    };
+
+    expect(syntaxTreeAvailable(state, state.doc.length)).toBe(false);
+    expect(canvasTextEditorEnsureVisibleSyntaxReady(view as never)).toBe(true);
+    expect(syntaxTreeAvailable(state, state.doc.length)).toBe(true);
+  });
 });
+
+function jsonlFixture(): string {
+  return Array.from({ length: 10 }, (_, index) => JSON.stringify({
+    index: index + 1,
+    model: 'gpt-image-2',
+    outputPath: `generated/wedding-invitation/${'nested/'.repeat(6)}set-${index + 1}-${'detail-'.repeat(20)}image.png`,
+    status: 'ok',
+    attempt: 1,
+    durationSeconds: 120 + index,
+    artifacts: [{
+      artifactId: `asset-${index}-${'x'.repeat(40)}`,
+      projectRelativePath: `generated/wedding-invitation/${'nested/'.repeat(6)}set-${index + 1}-${'detail-'.repeat(20)}image.png`,
+      available: true,
+      title: `set-${index + 1}-${'detail-'.repeat(12)}image.png`,
+      mimeType: 'image/png',
+      width: 853,
+      height: 1844
+    }]
+  })).join('\n');
+}

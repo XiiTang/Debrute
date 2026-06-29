@@ -3,7 +3,7 @@ import type { ProjectTextLanguageId } from '@debrute/project-core';
 
 export const CANVAS_TEXT_PREVIEW_SOURCE_SCALE = 4;
 
-const CANVAS_TEXT_PREVIEW_VISUAL_VERSION = 'canvas-text-preview-v4';
+const CANVAS_TEXT_PREVIEW_VISUAL_VERSION = 'canvas-text-preview-v5';
 
 export async function captureCanvasTextPreviewSource(input: {
   element: HTMLElement;

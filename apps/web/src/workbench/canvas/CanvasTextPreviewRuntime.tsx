@@ -18,6 +18,11 @@ import {
   canvasTextPreviewStyleSnapshotForDocument,
   type CanvasTextPreviewStyleKey
 } from './CanvasTextPreviewStyleKey';
+import {
+  CANVAS_PERF_INTERACTION_SESSION_TYPES,
+  type CanvasPerfCounterName,
+  type CanvasPerfMonitor
+} from './CanvasPerfMonitor';
 
 const CANVAS_TEXT_PREVIEW_SOURCE_CONCURRENCY = 1;
 const CANVAS_TEXT_PREVIEW_CAPTURE_LAYOUT_MAX_FRAMES = 12;
@@ -180,6 +185,7 @@ export function CanvasTextPreviewProvider({
   culledNodePaths,
   previewResourceScheduler,
   styleDependencyKey,
+  perfMonitor,
   children
 }: {
   canvasId: string;
@@ -194,6 +200,7 @@ export function CanvasTextPreviewProvider({
   culledNodePaths: ReadonlySet<string>;
   previewResourceScheduler: CanvasPreviewResourceScheduler;
   styleDependencyKey: string;
+  perfMonitor?: Pick<CanvasPerfMonitor, 'recordCounter'> | undefined;
   children: React.ReactNode;
 }): React.ReactElement {
   const [sourceAvailability, setSourceAvailability] = useState<Record<string, CanvasTextPreviewSourceAvailability>>({});
@@ -218,6 +225,18 @@ export function CanvasTextPreviewProvider({
   currentCulledPathsRef.current = culledNodePaths;
   interactionActiveRef.current = interactionActive;
   const nodesByPath = useMemo(() => new Map(nodes.map((node) => [node.projectRelativePath, node])), [nodes]);
+  const recordTextPreviewCounter = useCallback((
+    name: CanvasPerfCounterName,
+    detail?: Record<string, unknown>
+  ) => {
+    perfMonitor?.recordCounter({
+      sessionTypes: CANVAS_PERF_INTERACTION_SESSION_TYPES,
+      timestamp: performance.now(),
+      source: 'CanvasTextPreviewRuntime',
+      name,
+      detail
+    });
+  }, [perfMonitor]);
 
   useEffect(() => {
     let cancelled = false;
@@ -376,12 +395,23 @@ export function CanvasTextPreviewProvider({
       return undefined;
     }
     let cancelled = false;
+    recordTextPreviewCounter('text-preview-source-check-requested', {
+      count: targets.length
+    });
     void actions.readCanvasTextPreviewSources({
       canvasId,
       sources: targets.map(canvasTextPreviewSourceTargetForApi)
     }).then((result) => {
       if (cancelled) {
         return;
+      }
+      for (const target of targets) {
+        const source = result.sources[target.projectRelativePath];
+        recordTextPreviewCounter('text-preview-source-availability-resolved', {
+          projectRelativePath: target.projectRelativePath,
+          fingerprint: target.fingerprint,
+          available: Boolean(source && source.fingerprint === target.fingerprint && source.available)
+        });
       }
       setSourceAvailability((current) => canvasTextPreviewSourcesWithAvailability({
         current,
@@ -411,7 +441,8 @@ export function CanvasTextPreviewProvider({
     cameraState,
     canvasId,
     currentTargets,
-    dragState
+    dragState,
+    recordTextPreviewCounter
   ]);
 
   useEffect(() => {
@@ -445,6 +476,29 @@ export function CanvasTextPreviewProvider({
         continue;
       }
       currentResourceKeysRef.current.set(target.projectRelativePath, sourceKey);
+
+      const publishCurrentSource = () => {
+        setPreviewSources((current) => canvasTextPreviewSourcesWithTargetSource({
+          current,
+          node,
+          canvasId,
+          target,
+          targetKey,
+          resourceZoom,
+          devicePixelRatio
+        }));
+      };
+
+      const hasCurrentSourcePreview = published?.targetKey === targetKey;
+      if (!hasCurrentSourcePreview && !currentCulledPathsRef.current.has(target.projectRelativePath)) {
+        recordTextPreviewCounter('text-preview-publish-critical', {
+          projectRelativePath: target.projectRelativePath,
+          targetWidth
+        });
+        publishCurrentSource();
+        continue;
+      }
+
       previewResourceScheduler.enqueue({
         kind: 'text',
         nodeId: target.projectRelativePath,
@@ -461,15 +515,11 @@ export function CanvasTextPreviewProvider({
           if (!isCurrent()) {
             return;
           }
-          setPreviewSources((current) => canvasTextPreviewSourcesWithTargetSource({
-            current,
-            node,
-            canvasId,
-            target,
-            targetKey,
-            resourceZoom,
-            devicePixelRatio
-          }));
+          recordTextPreviewCounter('text-preview-publish-deferred', {
+            projectRelativePath: target.projectRelativePath,
+            targetWidth
+          });
+          publishCurrentSource();
         }
       });
     }
@@ -483,6 +533,7 @@ export function CanvasTextPreviewProvider({
     nodesByPath,
     previewSources,
     previewResourceScheduler,
+    recordTextPreviewCounter,
     sourceAvailability
   ]);
 
@@ -541,6 +592,10 @@ export function CanvasTextPreviewProvider({
       return;
     }
     if (result.status === 'ok') {
+      recordTextPreviewCounter('text-preview-source-capture-saved', {
+        projectRelativePath: target.projectRelativePath,
+        fingerprint: target.fingerprint
+      });
       setSourceAvailability((current) => ({
         ...current,
         [target.projectRelativePath]: {
@@ -558,7 +613,7 @@ export function CanvasTextPreviewProvider({
         message: result.message
       }
     }));
-  }, []);
+  }, [recordTextPreviewCounter]);
 
   const value = useMemo<CanvasTextPreviewRuntimeValue>(() => ({
     registerTextBody,

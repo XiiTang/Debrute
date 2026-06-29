@@ -954,6 +954,7 @@ function CanvasSurfaceRuntime({
           culledNodePaths={renderSnapshot.culledNodePaths}
           previewResourceScheduler={previewResourceScheduler}
           styleDependencyKey={textPreviewStyleDependencyKey}
+          perfMonitor={perfMonitor}
         >
           <CanvasImageNodeAssetProvider value={imageNodeAssetContext}>
             {renderedNodes.map((node) => (

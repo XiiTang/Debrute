@@ -64,6 +64,7 @@ class LocalCanvasTextPreviewService implements CanvasTextPreviewService {
     generationConcurrency: CANVAS_TEXT_PREVIEW_VARIANT_CONCURRENCY,
     metadataConcurrency: CANVAS_TEXT_PREVIEW_METADATA_CONCURRENCY
   });
+  private readonly inFlightVariants = new Map<string, Promise<{ absolutePath: string }>>();
 
   async saveSource(input: CanvasTextPreviewSaveSourceInput): Promise<{
     ok: true;
@@ -102,6 +103,21 @@ class LocalCanvasTextPreviewService implements CanvasTextPreviewService {
   }
 
   async resolveVariant(input: CanvasTextPreviewResolveVariantInput): Promise<{ absolutePath: string }> {
+    const key = canvasTextPreviewVariantInFlightKey(input);
+    const existing = this.inFlightVariants.get(key);
+    if (existing) {
+      return existing;
+    }
+    const promise = this.resolveVariantNow(input).finally(() => {
+      if (this.inFlightVariants.get(key) === promise) {
+        this.inFlightVariants.delete(key);
+      }
+    });
+    this.inFlightVariants.set(key, promise);
+    return promise;
+  }
+
+  private async resolveVariantNow(input: CanvasTextPreviewResolveVariantInput): Promise<{ absolutePath: string }> {
     const sourceProjectPath = canvasTextPreviewSourceProjectPath(input);
     const absoluteSourcePath = await existingFilePath(input.projectRoot, sourceProjectPath);
     if (!absoluteSourcePath) {
@@ -131,6 +147,16 @@ class LocalCanvasTextPreviewService implements CanvasTextPreviewService {
       absolutePath: await resolveNoSymlinkExistingProjectPath(input.projectRoot, variantProjectPath)
     };
   }
+}
+
+function canvasTextPreviewVariantInFlightKey(input: CanvasTextPreviewResolveVariantInput): string {
+  return [
+    input.projectRoot,
+    input.canvasId,
+    input.projectRelativePath,
+    input.fingerprint,
+    String(input.width)
+  ].join('\0');
 }
 
 class CanvasTextPreviewServiceError extends Error {

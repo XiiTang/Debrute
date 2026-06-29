@@ -377,7 +377,7 @@ describe('CanvasTextPreviewRuntime', () => {
     }
   });
 
-  it('keeps text preview URLs stable until scheduled resource work starts', async () => {
+  it('publishes the first current-source text preview immediately and schedules width upgrades', async () => {
     const restoreActEnvironment = installReactActEnvironment();
     const restoreAnimationFrame = installAnimationFrame();
     const container = document.createElement('div');
@@ -419,15 +419,9 @@ describe('CanvasTextPreviewRuntime', () => {
 
     try {
       await render(0.11);
-      expect(previews.at(-1)).toBeUndefined();
-      expect(queued.map((request) => request.nodeId)).toEqual(['notes/large.md']);
-
-      await act(async () => {
-        queued.shift()?.run();
-      });
-      await flushReactWork();
       const initialPreview = await waitForTextPreview(previews);
       expect(initialPreview.previewWidth).toBe(1169);
+      expect(queued).toEqual([]);
 
       await render(0.3);
       expect(previews.at(-1)).toEqual(initialPreview);
@@ -449,7 +443,109 @@ describe('CanvasTextPreviewRuntime', () => {
     }
   });
 
-  it('schedules visible text preview resource work per node instead of bulk reconciling all nodes', async () => {
+  it('records text preview source and publication counters', async () => {
+    const restoreActEnvironment = installReactActEnvironment();
+    const restoreAnimationFrame = installAnimationFrame();
+    const counters: string[] = [];
+    const perfMonitor = {
+      recordCounter: (input: { name: string }) => counters.push(input.name)
+    };
+    const container = document.createElement('div');
+    document.body.append(container);
+    const root = createRoot(container);
+    const node = textNode('notes/perf.md', 4134, 2410);
+
+    try {
+      await act(async () => {
+        root.render(
+          <CanvasTextPreviewProvider
+            canvasId="canvas-1"
+            nodes={[node]}
+            selectedProjectRelativePaths={[]}
+            textFileBuffers={{
+              [node.projectRelativePath]: textBuffer(node.projectRelativePath, 'content')
+            }}
+            actions={textPreviewActionsFixture()}
+            cameraState="idle"
+            dragState={undefined}
+            resourceZoom={0.11}
+            devicePixelRatio={2}
+            culledNodePaths={new Set()}
+            previewResourceScheduler={createQueuedScheduler([])}
+            styleDependencyKey="dark"
+            perfMonitor={perfMonitor}
+          >
+            <TextPreviewSelectionProbe node={node} onPreview={() => undefined} />
+          </CanvasTextPreviewProvider>
+        );
+      });
+      await flushReactWork();
+
+      expect(counters).toContain('text-preview-source-check-requested');
+      expect(counters).toContain('text-preview-source-availability-resolved');
+      expect(counters).toContain('text-preview-publish-critical');
+      expect(counters).not.toContain('text-preview-publish-deferred');
+    } finally {
+      await act(async () => {
+        root.unmount();
+      });
+      container.remove();
+      restoreAnimationFrame();
+      restoreActEnvironment();
+    }
+  });
+
+  it('does not create hidden off-DOM text preview images after publishing the first preview', async () => {
+    const restoreActEnvironment = installReactActEnvironment();
+    const restoreAnimationFrame = installAnimationFrame();
+    const imageConstructs = installImageConstructorCounter();
+    const container = document.createElement('div');
+    document.body.append(container);
+    const root = createRoot(container);
+    const node = textNode('notes/hidden-load.md', 4134, 2410);
+    const previews: Array<CanvasTextPreviewSource | undefined> = [];
+
+    try {
+      await act(async () => {
+        root.render(
+          <CanvasTextPreviewProvider
+            canvasId="canvas-1"
+            nodes={[node]}
+            selectedProjectRelativePaths={[]}
+            textFileBuffers={{
+              [node.projectRelativePath]: textBuffer(node.projectRelativePath, 'content')
+            }}
+            actions={textPreviewActionsFixture()}
+            cameraState="idle"
+            dragState={undefined}
+            resourceZoom={0.11}
+            devicePixelRatio={2}
+            culledNodePaths={new Set()}
+            previewResourceScheduler={createQueuedScheduler([])}
+            styleDependencyKey="dark"
+          >
+            <TextPreviewSelectionProbe node={node} onPreview={(preview) => previews.push(preview)} />
+          </CanvasTextPreviewProvider>
+        );
+      });
+      await flushReactWork();
+
+      const published = await waitForTextPreview(previews);
+      expect(published.previewWidth).toBe(1169);
+      expect(imageConstructs.count()).toBe(0);
+      expect(previews.at(-1)).toEqual(published);
+    } finally {
+      imageConstructs.restore();
+      await act(async () => {
+        root.unmount();
+      });
+      container.remove();
+      restoreAnimationFrame();
+      restoreActEnvironment();
+    }
+  });
+
+  it('checks source availability for visible text preview nodes without scheduling first publication', async () => {
     const restoreActEnvironment = installReactActEnvironment();
     const restoreAnimationFrame = installAnimationFrame();
     const records: string[][] = [];
@@ -489,9 +585,9 @@ describe('CanvasTextPreviewRuntime', () => {
         );
       });
 
-      await waitForEnqueuedNodes(enqueued, ['notes/a.md']);
+      await waitForRecordedSourceReads(records, [['notes/a.md']]);
 
-      expect(enqueued).toEqual(['notes/a.md']);
+      expect(enqueued).toEqual([]);
       expect(records).toEqual([['notes/a.md']]);
     } finally {
       await act(async () => {
@@ -840,14 +936,14 @@ async function waitForRecordedFingerprintCount(fingerprints: string[], count: nu
   throw new Error(`Expected ${count} recorded text preview fingerprints.`);
 }
 
-async function waitForEnqueuedNodes(enqueued: string[], expected: string[]): Promise<void> {
+async function waitForRecordedSourceReads(records: string[][], expected: string[][]): Promise<void> {
   for (let index = 0; index < 20; index += 1) {
-    if (JSON.stringify(enqueued) === JSON.stringify(expected)) {
+    if (JSON.stringify(records) === JSON.stringify(expected)) {
       return;
     }
     await flushReactWork();
   }
-  throw new Error(`Expected text preview resource enqueue ${JSON.stringify(expected)}, got ${JSON.stringify(enqueued)}.`);
+  throw new Error(`Expected text preview source reads ${JSON.stringify(expected)}, got ${JSON.stringify(records)}.`);
 }
 
 function textPreviewBodyElement(width: number, height: number): HTMLElement {
@@ -927,6 +1023,28 @@ function installAnimationFrame(): () => void {
   return () => {
     window.requestAnimationFrame = previousRequestAnimationFrame;
     window.cancelAnimationFrame = previousCancelAnimationFrame;
+  };
+}
+
+function installImageConstructorCounter(): { count(): number; restore(): void } {
+  const previousImage = window.Image;
+  let count = 0;
+  window.Image = ((width?: number, height?: number) => {
+    count += 1;
+    const image = document.createElement('img');
+    if (typeof width === 'number') {
+      image.width = width;
+    }
+    if (typeof height === 'number') {
+      image.height = height;
+    }
+    return image;
+  }) as unknown as typeof window.Image;
+  return {
+    count: () => count,
+    restore: () => {
+      window.Image = previousImage;
+    }
   };
 }
 

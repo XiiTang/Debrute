@@ -8,7 +8,13 @@ import {
   type ViewUpdate
 } from '@codemirror/view';
 import { defaultKeymap, history, historyKeymap } from '@codemirror/commands';
-import { defaultHighlightStyle, syntaxHighlighting } from '@codemirror/language';
+import {
+  defaultHighlightStyle,
+  forceParsing,
+  language as codeMirrorLanguage,
+  syntaxHighlighting,
+  syntaxTreeAvailable
+} from '@codemirror/language';
 import { search, searchKeymap } from '@codemirror/search';
 
 export const CANVAS_TEXT_EDITOR_SYNTAX_HIGHLIGHT_STYLE_ID = 'codemirror-default-highlight-style-v1';
@@ -30,6 +36,10 @@ export interface CanvasTextEditorScrollableView {
     scrollLeft: number;
   };
 }
+
+export type CanvasTextEditorSyntaxReadyView = Pick<EditorView, 'state' | 'viewport' | 'visibleRanges' | 'dispatch'>;
+
+const CANVAS_TEXT_EDITOR_SYNTAX_READY_TIMEOUT_MS = 50;
 
 export const canvasTextEditorExternalValueSyncAnnotation = Annotation.define<boolean>();
 
@@ -119,6 +129,23 @@ export function canvasTextEditorApplyInitialScroll(
 ): void {
   view.scrollDOM.scrollTop = scroll.scrollTop ?? 0;
   view.scrollDOM.scrollLeft = scroll.scrollLeft ?? 0;
+}
+
+export function canvasTextEditorEnsureVisibleSyntaxReady(view: CanvasTextEditorSyntaxReadyView): boolean {
+  if (!view.state.facet(codeMirrorLanguage)) {
+    return true;
+  }
+  const upto = canvasTextEditorVisibleSyntaxEnd(view);
+  return syntaxTreeAvailable(view.state, upto)
+    || forceParsing(view as EditorView, upto, CANVAS_TEXT_EDITOR_SYNTAX_READY_TIMEOUT_MS);
+}
+
+function canvasTextEditorVisibleSyntaxEnd(view: Pick<EditorView, 'state' | 'viewport' | 'visibleRanges'>): number {
+  const visibleEnd = view.visibleRanges.reduce(
+    (current, range) => Math.max(current, range.to),
+    view.viewport.to
+  );
+  return Math.max(0, Math.min(view.state.doc.length, visibleEnd));
 }
 
 export function canvasTextEditorReadOnlyExtension(readOnly: boolean | undefined): Extension {
