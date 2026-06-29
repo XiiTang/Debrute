@@ -29,54 +29,70 @@ describe('CanvasCardBar', () => {
 
     await withRenderedCardBar(props, async ({ container }) => {
       await act(async () => {
-        buttonByText(container, 'storyboard').click();
+        buttonByText(container, 'Storyboard').click();
       });
     });
 
     expect(onActiveCanvasChange).toHaveBeenCalledWith('storyboard');
   });
 
-  it('renames a canvas from an inline editor opened by double click', async () => {
+  it('renames a canvas display name from an inline editor opened by double click', async () => {
     const onRenameCanvas = vi.fn(async () => undefined);
-    const prompt = vi.fn(() => 'prompted');
-    const confirm = vi.fn(() => true);
-    vi.stubGlobal('prompt', prompt);
-    vi.stubGlobal('confirm', confirm);
 
     await withRenderedCardBar(propsFixture({
-      canvasOrder: ['canvas-1'],
+      canvases: [{ id: 'canvas-1', name: '故事板' }],
       onRenameCanvas
     }), async ({ container }) => {
       await act(async () => {
-        buttonByText(container, 'canvas-1').dispatchEvent(new MouseEvent('dblclick', { bubbles: true, cancelable: true }));
+        buttonByText(container, '故事板').dispatchEvent(new MouseEvent('dblclick', { bubbles: true, cancelable: true }));
       });
-      const input = queryRequired<HTMLInputElement>(container, 'input[name="nextCanvasId"]');
-      expect(input.value).toBe('canvas-1');
+      const input = queryRequired<HTMLInputElement>(container, 'input[name="name"]');
+      expect(input.value).toBe('故事板');
       expect(document.activeElement).toBe(input);
 
       await act(async () => {
-        input.value = 'renamed';
+        input.value = '  分镜  ';
         queryRequired<HTMLFormElement>(container, 'form.canvas-card-rename-form')
           .dispatchEvent(new Event('submit', { bubbles: true, cancelable: true }));
       });
     });
 
-    expect(onRenameCanvas).toHaveBeenCalledWith({ canvasId: 'canvas-1', nextCanvasId: 'renamed' });
-    expect(prompt).not.toHaveBeenCalled();
-    expect(confirm).not.toHaveBeenCalled();
+    expect(onRenameCanvas).toHaveBeenCalledWith({ canvasId: 'canvas-1', name: '分镜' });
+  });
+
+  it('does not submit a rename when the display name is unchanged after trim', async () => {
+    const onRenameCanvas = vi.fn(async () => undefined);
+
+    await withRenderedCardBar(propsFixture({
+      canvases: [{ id: 'canvas-1', name: '故事板' }],
+      onRenameCanvas
+    }), async ({ container }) => {
+      await act(async () => {
+        buttonByText(container, '故事板').dispatchEvent(new MouseEvent('dblclick', { bubbles: true, cancelable: true }));
+      });
+      const input = queryRequired<HTMLInputElement>(container, 'input[name="name"]');
+
+      await act(async () => {
+        input.value = '  故事板  ';
+        queryRequired<HTMLFormElement>(container, 'form.canvas-card-rename-form')
+          .dispatchEvent(new Event('submit', { bubbles: true, cancelable: true }));
+      });
+    });
+
+    expect(onRenameCanvas).not.toHaveBeenCalled();
   });
 
   it('cancels inline canvas rename on Escape', async () => {
     const onRenameCanvas = vi.fn(async () => undefined);
 
     await withRenderedCardBar(propsFixture({
-      canvasOrder: ['canvas-1'],
+      canvases: [{ id: 'canvas-1', name: 'Canvas 1' }],
       onRenameCanvas
     }), async ({ container }) => {
       await act(async () => {
-        buttonByText(container, 'canvas-1').dispatchEvent(new MouseEvent('dblclick', { bubbles: true, cancelable: true }));
+        buttonByText(container, 'Canvas 1').dispatchEvent(new MouseEvent('dblclick', { bubbles: true, cancelable: true }));
       });
-      const input = queryRequired<HTMLInputElement>(container, 'input[name="nextCanvasId"]');
+      const input = queryRequired<HTMLInputElement>(container, 'input[name="name"]');
       input.value = 'renamed';
 
       await act(async () => {
@@ -84,7 +100,7 @@ describe('CanvasCardBar', () => {
         input.dispatchEvent(new FocusEvent('focusout', { bubbles: true, cancelable: true }));
       });
 
-      expect(container.querySelector('input[name="nextCanvasId"]')).toBeNull();
+      expect(container.querySelector('input[name="name"]')).toBeNull();
     });
 
     expect(onRenameCanvas).not.toHaveBeenCalled();
@@ -99,7 +115,7 @@ describe('CanvasCardBar', () => {
     vi.stubGlobal('confirm', confirm);
 
     await withRenderedCardBar(propsFixture({
-      canvasOrder: ['canvas-1'],
+      canvases: [{ id: 'canvas-1', name: 'Canvas 1' }],
       onActiveCanvasChange,
       onDeleteCanvas
     }), async ({ container }) => {
@@ -115,9 +131,9 @@ describe('CanvasCardBar', () => {
   });
 
   it('renders direct rename and delete controls without a card menu', () => {
-    const html = renderStaticWithI18n(<CanvasCardBar {...propsFixture({ canvasOrder: ['canvas-1'] })} />);
+    const html = renderStaticWithI18n(<CanvasCardBar {...propsFixture({ canvases: [{ id: 'canvas-1', name: 'Canvas 1' }] })} />);
 
-    expect(html).toContain('aria-label="Delete canvas-1"');
+    expect(html).toContain('aria-label="Delete Canvas 1"');
     expect(html).toContain('canvas-card-delete');
     expect(html).not.toContain('canvas-card-menu');
     expect(html).not.toContain('db-menu');
@@ -160,7 +176,10 @@ async function withRenderedCardBar(
 
 function propsFixture(overrides: Partial<CanvasCardBarProps> = {}): CanvasCardBarProps {
   return {
-    canvasOrder: ['canvas-1', 'storyboard'],
+    canvases: [
+      { id: 'canvas-1', name: 'Canvas 1' },
+      { id: 'storyboard', name: 'Storyboard' }
+    ],
     activeCanvasId: 'canvas-1',
     onActiveCanvasChange: () => undefined,
     onCreateCanvas: async () => undefined,

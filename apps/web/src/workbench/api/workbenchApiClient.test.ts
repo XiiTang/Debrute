@@ -419,8 +419,8 @@ describe('workbench API client', () => {
     const client = createWorkbenchApiClient();
     await client.openProject({ projectId });
     await client.createCanvas();
-    await client.renameCanvas({ canvasId: 'canvas-1', nextCanvasId: 'storyboard' });
-    await client.deleteCanvas({ canvasId: 'storyboard' });
+    await client.renameCanvas({ canvasId: 'canvas-1', name: '故事板' });
+    await client.deleteCanvas({ canvasId: 'canvas-1' });
     await client.reorderCanvases({ canvasOrder: ['canvas-2', 'canvas-1'] });
     await client.repairCanvasIndex();
     await client.resetCanvasNodeLayouts({ canvasId: 'canvas-1', all: true });
@@ -428,8 +428,8 @@ describe('workbench API client', () => {
 
     expect(requests.slice(1)).toEqual([
       { method: 'POST', url: `http://127.0.0.1:17321/api/projects/${projectId}/canvases`, body: { baseRevision: 1 } },
-      { method: 'PATCH', url: `http://127.0.0.1:17321/api/projects/${projectId}/canvases/canvas-1`, body: { baseRevision: 2, operation: 'rename', nextCanvasId: 'storyboard' } },
-      { method: 'DELETE', url: `http://127.0.0.1:17321/api/projects/${projectId}/canvases/storyboard`, body: { baseRevision: 3 } },
+      { method: 'PATCH', url: `http://127.0.0.1:17321/api/projects/${projectId}/canvases/canvas-1`, body: { baseRevision: 2, operation: 'rename', name: '故事板' } },
+      { method: 'DELETE', url: `http://127.0.0.1:17321/api/projects/${projectId}/canvases/canvas-1`, body: { baseRevision: 3 } },
       { method: 'PUT', url: `http://127.0.0.1:17321/api/projects/${projectId}/canvases/index`, body: { baseRevision: 4, canvasOrder: ['canvas-2', 'canvas-1'] } },
       { method: 'POST', url: `http://127.0.0.1:17321/api/projects/${projectId}/canvases/index/repair`, body: { baseRevision: 5 } },
       { method: 'POST', url: `http://127.0.0.1:17321/api/projects/${projectId}/canvases/canvas-1/reset-layout`, body: { baseRevision: 6, all: true } },

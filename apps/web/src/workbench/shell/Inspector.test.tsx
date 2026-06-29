@@ -46,6 +46,7 @@ describe('Inspector property density', () => {
           snapshot: {
             canvases: [{
               id: 'canvas',
+              name: 'canvas',
               nodeElements: [{
                 projectRelativePath: 'flow/cover.png',
                 nodeKind: 'file',

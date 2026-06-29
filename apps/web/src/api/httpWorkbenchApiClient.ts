@@ -426,7 +426,7 @@ export function createHttpWorkbenchApiClient(options: HttpWorkbenchApiClientOpti
     renameCanvas: (input) => requestRevisioned<WorkbenchCanvasManagementResult>(
       'PATCH',
       projectPath(`/canvases/${encodeURIComponent(input.canvasId)}`),
-      { operation: 'rename', nextCanvasId: input.nextCanvasId }
+      { operation: 'rename', name: input.name }
     ),
     deleteCanvas: (input) => requestRevisioned<WorkbenchCanvasManagementResult>(
       'DELETE',

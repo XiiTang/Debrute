@@ -914,7 +914,6 @@ export function WorkbenchApp(): React.ReactElement {
     renameCanvas: async (input) => {
       const result = await api.renameCanvas(input);
       setSnapshot(result.snapshot);
-      setActiveCanvasId(result.activeCanvasId ?? input.nextCanvasId);
       return result;
     },
     deleteCanvas: async (input) => {
@@ -1180,6 +1179,13 @@ export function WorkbenchApp(): React.ReactElement {
   const canvasOrder = snapshot?.canvasRegistry.status === 'ready'
     ? snapshot.canvasRegistry.canvasOrder
     : [];
+  const canvasCards = useMemo(() => {
+    const canvasesById = new Map((snapshot?.canvases ?? []).map((canvas) => [canvas.id, canvas]));
+    return canvasOrder.flatMap((canvasId) => {
+      const canvas = canvasesById.get(canvasId);
+      return canvas ? [{ id: canvas.id, name: canvas.name }] : [];
+    });
+  }, [canvasOrder, snapshot?.canvases]);
   const registryInvalid = snapshot?.canvasRegistry.status === 'invalid'
     ? snapshot.canvasRegistry
     : undefined;
@@ -1487,7 +1493,7 @@ export function WorkbenchApp(): React.ReactElement {
         ) : null}
         {snapshot?.canvasRegistry.status === 'ready' ? (
           <CanvasCardBar
-            canvasOrder={canvasOrder}
+            canvases={canvasCards}
             activeCanvasId={activeCanvasId}
             onActiveCanvasChange={setActiveCanvasId}
             onCreateCanvas={() => actions.createCanvas().then(() => undefined).catch((error) => notify(i18n.t('shell.notifications.createCanvasFailed', { message: errorMessage(error) })))}

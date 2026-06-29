@@ -60,6 +60,7 @@ export type CanvasNodeAvailability =
 
 export interface CanvasDocument {
   id: string;
+  name: string;
   nodeElements: CanvasNodeElement[];
   annotations: CanvasAnnotation[];
   preferences: {
@@ -76,6 +77,18 @@ export function assertCanvasDocumentId(id: string): string {
     throw new Error(`Invalid canvas document id: ${id}`);
   }
   return id;
+}
+
+export function isCanvasDocumentName(value: unknown): value is string {
+  return typeof value === 'string' && value.length > 0 && value === value.trim();
+}
+
+export function normalizeCanvasDocumentName(name: string): string {
+  const normalized = name.trim();
+  if (!normalized) {
+    throw new Error('Canvas document name must be a non-empty string.');
+  }
+  return normalized;
 }
 
 export interface CanvasStructureEdgeProjection {
@@ -462,6 +475,7 @@ export function createCanvasDocument(input: { id: string }): CanvasDocument {
   const id = assertCanvasDocumentId(input.id);
   return {
     id,
+    name: id,
     nodeElements: [],
     annotations: [],
     preferences: {

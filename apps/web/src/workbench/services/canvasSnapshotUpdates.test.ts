@@ -77,6 +77,7 @@ function snapshotFixture(input: {
 function canvasDocument(canvasId: string, x: number, y: number): CanvasDocument {
   return {
     id: canvasId,
+    name: canvasId,
     nodeElements: [{
       projectRelativePath: 'flow/a.png',
       nodeKind: 'file',

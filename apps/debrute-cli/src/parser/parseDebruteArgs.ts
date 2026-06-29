@@ -268,7 +268,7 @@ function requiredPositionals(command: DebruteCliCommand): string {
     return '<project> <canvas-id>';
   }
   if (command === 'canvas.rename') {
-    return '<project> <old-id> <new-id>';
+    return '<project> <canvas-id> <name>';
   }
   if (command === 'canvas.delete') {
     return '<project> <canvas-id>';

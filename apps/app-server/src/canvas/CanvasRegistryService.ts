@@ -5,6 +5,7 @@ import { getDebruteProjectPaths } from '@debrute/project-core';
 import {
   assertCanvasDocumentId,
   createCanvasDocument,
+  normalizeCanvasDocumentName,
   type Diagnostic,
   type CanvasDocument
 } from '@debrute/canvas-core';
@@ -116,52 +117,32 @@ export class CanvasRegistryService {
     return { canvasId };
   }
 
-  async renameCanvas(projectRoot: string, input: { canvasId: string; nextCanvasId: string }): Promise<{ canvasId: string }> {
+  async renameCanvas(projectRoot: string, input: { canvasId: string; name: string }): Promise<{ canvasId: string }> {
     assertCanvasDocumentId(input.canvasId);
-    assertCanvasDocumentId(input.nextCanvasId);
+    const name = normalizeCanvasDocumentName(input.name);
     const { document, sourceHash } = await this.currentRegistryDocumentForWrite(projectRoot);
     if (!document.canvasOrder.includes(input.canvasId)) {
       throw serviceError('canvas_registry_invalid', `Canvas is not in registry: ${input.canvasId}`, { canvas_id: input.canvasId });
     }
-    if (document.canvasOrder.includes(input.nextCanvasId)) {
-      throw serviceError('canvas_registry_invalid', `Canvas already exists: ${input.nextCanvasId}`, { canvas_id: input.nextCanvasId });
-    }
 
-    const sourceMapContent = await this.assertCanvasMapHash(projectRoot, input.canvasId);
     const paths = getDebruteProjectPaths(projectRoot);
-    const oldJsonPath = join(paths.canvasesDir, `${input.canvasId}.json`);
-    const nextJsonPath = join(paths.canvasesDir, `${input.nextCanvasId}.json`);
-    const oldMapPath = join(paths.canvasMapsDir, `${input.canvasId}.yaml`);
-    const nextMapPath = join(paths.canvasMapsDir, `${input.nextCanvasId}.yaml`);
+    const jsonPath = join(paths.canvasesDir, `${input.canvasId}.json`);
     const canvas = (await this.options.loadCanvasDocuments(projectRoot)).canvases.find((item) => item.id === input.canvasId);
     if (!canvas) {
       throw serviceError('canvas_registry_invalid', `Canvas JSON is missing: ${input.canvasId}`, { canvas_id: input.canvasId });
     }
-    const oldJsonHash = await projectDocumentFileHash(oldJsonPath);
+    const jsonHash = await projectDocumentFileHash(jsonPath);
 
     await this.writeStructuredDocuments(projectRoot, {
       reads: [
         { absolutePath: paths.canvasIndexFile, expectedHash: sourceHash },
-        { absolutePath: oldMapPath, expectedHash: rawContentHash(sourceMapContent) },
-        { absolutePath: oldJsonPath, expectedHash: oldJsonHash },
-        { absolutePath: nextMapPath, expectedHash: null },
-        { absolutePath: nextJsonPath, expectedHash: null }
+        { absolutePath: jsonPath, expectedHash: jsonHash }
       ],
       writes: [
-        { absolutePath: nextMapPath, content: sourceMapContent },
-        { absolutePath: nextJsonPath, content: `${JSON.stringify({ ...canvas, id: input.nextCanvasId }, null, 2)}\n` },
-        registryWrite(projectRoot, {
-          canvasOrder: document.canvasOrder.map((id) => id === input.canvasId ? input.nextCanvasId : id)
-        })
-      ],
-      deletes: [
-        { absolutePath: oldMapPath },
-        { absolutePath: oldJsonPath }
+        canvasJsonWrite(projectRoot, input.canvasId, { ...canvas, name })
       ]
     });
-    this.canvasMapSourceHashByProjectCanvas.delete(projectCanvasKey(projectRoot, input.canvasId));
-    this.canvasMapSourceHashByProjectCanvas.set(projectCanvasKey(projectRoot, input.nextCanvasId), rawContentHash(sourceMapContent));
-    return { canvasId: input.nextCanvasId };
+    return { canvasId: input.canvasId };
   }
 
   async deleteCanvas(projectRoot: string, input: { canvasId: string }): Promise<{ activeCanvasId: string }> {

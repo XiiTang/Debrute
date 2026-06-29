@@ -4,12 +4,17 @@ import { reorderCanvasIds } from './canvasCardBarState';
 import { Button, CloseButton, IconButton } from '../ui';
 import { useI18n } from '../i18n';
 
+export interface CanvasCardBarItem {
+  id: string;
+  name: string;
+}
+
 export interface CanvasCardBarProps {
-  canvasOrder: string[];
+  canvases: CanvasCardBarItem[];
   activeCanvasId: string | undefined;
   onActiveCanvasChange(canvasId: string): void;
   onCreateCanvas(): Promise<void>;
-  onRenameCanvas(input: { canvasId: string; nextCanvasId: string }): Promise<void>;
+  onRenameCanvas(input: { canvasId: string; name: string }): Promise<void>;
   onDeleteCanvas(input: { canvasId: string }): Promise<void>;
   onReorderCanvases(input: { canvasOrder: string[] }): Promise<void>;
 }
@@ -17,7 +22,7 @@ export interface CanvasCardBarProps {
 const DRAG_DATA_TYPE = 'application/x-debrute-canvas-id';
 
 export function CanvasCardBar({
-  canvasOrder,
+  canvases,
   activeCanvasId,
   onActiveCanvasChange,
   onCreateCanvas,
@@ -26,6 +31,7 @@ export function CanvasCardBar({
   onReorderCanvases
 }: CanvasCardBarProps): React.ReactElement {
   const i18n = useI18n();
+  const canvasOrder = React.useMemo(() => canvases.map((canvas) => canvas.id), [canvases]);
   const [editingCanvasId, setEditingCanvasId] = React.useState<string>();
   const editingInputRef = React.useRef<HTMLInputElement | null>(null);
   const renameFinishedRef = React.useRef(false);
@@ -43,14 +49,14 @@ export function CanvasCardBar({
     renameFinishedRef.current = false;
     setEditingCanvasId(canvasId);
   };
-  const completeRename = (canvasId: string, value: string): void => {
+  const completeRename = (canvas: CanvasCardBarItem, value: string): void => {
     if (renameFinishedRef.current) {
       return;
     }
     renameFinishedRef.current = true;
-    const nextCanvasId = value.trim();
-    if (nextCanvasId && nextCanvasId !== canvasId) {
-      void onRenameCanvas({ canvasId, nextCanvasId });
+    const name = value.trim();
+    if (name && name !== canvas.name) {
+      void onRenameCanvas({ canvasId: canvas.id, name });
     }
     setEditingCanvasId(undefined);
   };
@@ -62,7 +68,8 @@ export function CanvasCardBar({
   return (
     <nav className="db-floating-bar canvas-card-bar" aria-label={i18n.t('canvas.cardBar.canvases')}>
       <div className="canvas-card-scroll">
-        {canvasOrder.map((canvasId) => {
+        {canvases.map((canvas) => {
+          const canvasId = canvas.id;
           const editing = editingCanvasId === canvasId;
           return (
             <div
@@ -89,18 +96,18 @@ export function CanvasCardBar({
                   className="canvas-card-rename-form"
                   onSubmit={(event) => {
                     event.preventDefault();
-                    completeRename(canvasId, renameFormValue(event.currentTarget));
+                    completeRename(canvas, renameFormValue(event.currentTarget));
                   }}
                 >
                   <input
                     ref={editingInputRef}
                     className="db-input canvas-card-rename-input"
-                    aria-label={i18n.t('canvas.cardBar.renameCanvas', { canvasId })}
-                    name="nextCanvasId"
-                    defaultValue={canvasId}
+                    aria-label={i18n.t('canvas.cardBar.renameCanvas', { name: canvas.name })}
+                    name="name"
+                    defaultValue={canvas.name}
                     autoComplete="off"
                     spellCheck={false}
-                    onBlur={(event) => completeRename(canvasId, event.currentTarget.value)}
+                    onBlur={(event) => completeRename(canvas, event.currentTarget.value)}
                     onKeyDown={(event) => {
                       if (event.key === 'Escape') {
                         event.preventDefault();
@@ -125,13 +132,13 @@ export function CanvasCardBar({
                     beginRename(canvasId);
                   }}
                 >
-                  {canvasId}
+                  {canvas.name}
                 </Button>
               )}
               {!editing ? (
                 <CloseButton
                   className="canvas-card-delete db-canvas-control"
-                  label={i18n.t('canvas.cardBar.deleteCanvas', { canvasId })}
+                  label={i18n.t('canvas.cardBar.deleteCanvas', { name: canvas.name })}
                   onPointerDown={stopCanvasCardDeleteEvent}
                   onDoubleClick={stopCanvasCardDeleteEvent}
                   onClick={(event) => {
@@ -150,7 +157,7 @@ export function CanvasCardBar({
 }
 
 function renameFormValue(form: HTMLFormElement): string {
-  const control = form.elements.namedItem('nextCanvasId') as { value?: unknown } | null;
+  const control = form.elements.namedItem('name') as { value?: unknown } | null;
   return typeof control?.value === 'string' ? control.value : '';
 }
 

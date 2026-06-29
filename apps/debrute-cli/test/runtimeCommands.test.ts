@@ -24,4 +24,14 @@ describe('debrute no-runtime CLI commands', () => {
   it('fails version resolution when package metadata is unavailable', async () => {
     await expect(resolveCliDebruteVersion('/tmp/debrute-cli-without-package/dist')).rejects.toThrow(/package metadata/i);
   });
+
+  it('describes canvas rename as a display-name update', () => {
+    expect(commandSpecs.find((spec) => spec.command === 'canvas.rename')).toMatchObject({
+      input: '<project> <canvas-id> <name>'
+    });
+    expect(parseDebruteArgs(['canvas', 'rename', '/tmp/project', 'canvas-1', '故事板'])).toMatchObject({
+      command: 'canvas.rename',
+      positional: ['/tmp/project', 'canvas-1', '故事板']
+    });
+  });
 });
