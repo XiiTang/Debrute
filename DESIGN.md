@@ -282,8 +282,9 @@ The CEP plugin is a compact host panel with Debrute-compatible CSS variables.
 Canvas is both a Workbench surface and a creative object space. It has stricter runtime needs than ordinary chrome.
 
 - Canvas chrome uses Debrute primitives and patterns.
-- Canvas overlay controls use the shared floating-bar and Canvas control patterns for base chrome.
-- Canvas feature CSS owns overlay placement and intrinsic Canvas geometry only; it does not clear shared floating-bar surface, border, shadow, or backdrop treatment for a single overlay.
+- Canvas fixed lower-left overlay controls use Canvas control patterns without floating-bar surface, border, shadow, or backdrop treatment.
+- Canvas floating overlay containers use shared floating-bar chrome only when they render panel-like content, such as feedback or an expanded minimap panel.
+- Canvas feature CSS owns overlay placement and intrinsic Canvas geometry only; it does not define per-control background, border, shadow, backdrop, hover, pressed, or disabled chrome.
 - Canvas content can define local geometry for zoom, hit targets, resize handles, node dimensions, media previews, and overlay alignment.
 - Selection, handles, region feedback, pins, and annotation overlays may use high-contrast local treatments when needed for media visibility.
 - Canvas-specific values are named by purpose when they represent reusable Canvas UI, and kept local when they are intrinsic rendering math.
@@ -339,7 +340,7 @@ Canvas exceptions are intentional and narrow:
 - Adobe host-provided variables inside UXP
 - native Electron, tray, and menu platform surfaces
 
-Canvas exceptions do not allow feature-owned reusable product chrome or local overrides that clear shared floating-bar surface, border, shadow, or backdrop treatment.
+Canvas exceptions do not allow feature-owned reusable product chrome or local overrides that add or restore floating-bar surface, border, shadow, or backdrop treatment for fixed lower-left controls.
 
 ## Do's and Don'ts
 

@@ -5,7 +5,7 @@ import { describe, expect, it } from 'vitest';
 const canvasStyles = readFileSync(fileURLToPath(new URL('../styles/canvas.css', import.meta.url)), 'utf8');
 
 describe('Canvas styles', () => {
-  it('keeps the Canvas card bar on shared floating-bar chrome', () => {
+  it('keeps the Canvas card bar without floating-bar base chrome', () => {
     expect(canvasStyles).not.toContain('.canvas-card-bar.db-floating-bar');
     expect(canvasStyles).not.toMatch(/\.canvas-card-bar\.db-floating-bar\s*{[^}]*\b(?:border|background|box-shadow|backdrop-filter)\s*:/);
     expect(canvasStyles).not.toMatch(/\.canvas-card-rename-input\.db-input\s*{[^}]*background:/);

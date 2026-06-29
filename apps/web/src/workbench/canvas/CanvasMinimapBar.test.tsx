@@ -48,7 +48,7 @@ describe('CanvasMinimapBar', () => {
     expect(html).toContain('aria-label="Mini Map"');
     expect(html).toContain('disabled=""');
     expect(html).toContain('db-icon-button');
-    expect(html).toContain('db-floating-bar canvas-minimap-bar');
+    expect(html).not.toContain('db-floating-bar canvas-minimap-bar');
     expect(html).not.toContain('<div class="canvas-minimap-bar"');
     expect(html).not.toContain('data-testid="canvas-minimap-panel"');
   });

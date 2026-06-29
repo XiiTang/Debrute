@@ -17,11 +17,13 @@ describe('CanvasCardBar', () => {
     const props = propsFixture({ onActiveCanvasChange });
     const html = renderStaticWithI18n(<CanvasCardBar {...props} />);
 
-    expect(html).toContain('db-floating-bar canvas-card-bar');
+    expect(html).toContain('canvas-card-bar');
+    expect(html).not.toContain('db-floating-bar canvas-card-bar');
     expect(html).toContain('db-button');
     expect(html).toContain('db-button--sm');
     expect(html).toContain('db-icon-button');
     expect(html).toContain('db-canvas-card');
+    expect(html).toContain('canvas-card db-canvas-control db-canvas-card');
     expect(html).toContain('canvas-card-delete');
     expect(html).toContain('db-canvas-control');
     expect(html).toContain('aria-pressed="true"');

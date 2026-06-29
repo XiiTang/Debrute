@@ -21,7 +21,7 @@ describe('CanvasResetLayoutButton', () => {
     expect(html).toContain('db-canvas-control');
     expect(html).toContain('data-testid="canvas-reset-layout-button"');
     expect(html).toContain('aria-label="Reset Canvas Layout"');
-    expect(html).toContain('db-floating-bar canvas-reset-layout-button');
+    expect(html).not.toContain('db-floating-bar canvas-reset-layout-button');
 
     await withRenderedButton({ enabled: true, onResetCanvasLayout }, async ({ button }) => {
       await act(async () => {

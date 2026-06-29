@@ -606,19 +606,20 @@ describe('Workbench UI source contract', () => {
     expect(dockRule).toContain('width: 28px;');
     expect(dockRule).toContain('padding: 0;');
     expect(shellStyles).not.toContain('.floating-dock .db-icon-button');
-    expect(cardBarSource).toContain('db-floating-bar canvas-card-bar');
+    expect(cardBarSource).toContain('canvas-card-bar');
+    expect(cardBarSource).not.toContain('db-floating-bar canvas-card-bar');
+    expect(cardBarSource).toContain('canvas-card db-canvas-control db-canvas-card');
     expect(cardBarSource).toContain('size="sm"');
     expect(dockSource).toContain('size={14}');
     expect(dockSource).not.toContain('size={18}');
     expect(dockSource).not.toContain('db-floating-bar');
   });
 
-  it('keeps fixed Canvas overlay controls on shared floating-bar chrome', () => {
+  it('keeps fixed lower-left Canvas overlay controls without floating-bar base chrome', () => {
     const styles = css('apps/web/src/workbench/styles/canvas.css');
     const patterns = css('apps/web/src/workbench/ui/styles/workbench-patterns.css');
     const cardBarRule = rule(styles, '.canvas-card-bar');
     const cardBarFloatingRule = rule(styles, '.canvas-card-bar.db-floating-bar');
-    const floatingCanvasControlRule = rule(patterns, '.db-floating-bar.db-canvas-control');
     const canvasCardRule = rule(patterns, '.db-canvas-card');
     const minimapRule = rule(styles, '.canvas-minimap-bar');
     const resetRule = rule(styles, '.canvas-reset-layout-button');
@@ -647,24 +648,27 @@ describe('Workbench UI source contract', () => {
     expect(patterns).toContain('background: var(--db-floating-bg);');
     expect(patterns).toContain('box-shadow: var(--db-shadow-floating);');
     expect(patterns).toContain('backdrop-filter: blur(14px);');
-    expect(patterns).toContain('.db-floating-bar.canvas-card-bar,');
-    expect(patterns).toContain('.db-floating-bar.canvas-feedback-bar,');
-    expect(patterns).toContain('.db-floating-bar.canvas-minimap-bar,');
-    expect(patterns).toContain('.db-floating-bar.canvas-reset-layout-button {');
-    expect(floatingCanvasControlRule).toContain('border: 1px solid var(--db-border-muted);');
-    expect(floatingCanvasControlRule).toContain('background: var(--db-floating-bg);');
-    expect(floatingCanvasControlRule).toContain('box-shadow: var(--db-shadow-floating);');
-    expect(floatingCanvasControlRule).toContain('backdrop-filter: blur(14px);');
-    expect(patterns).toContain('.db-floating-bar.db-canvas-control:hover:not(:disabled),\n.db-floating-bar.db-canvas-control[aria-pressed="true"]');
+    expect(patterns).not.toContain('.db-floating-bar.canvas-card-bar,');
+    expect(patterns).not.toContain('.db-floating-bar.canvas-minimap-bar');
+    expect(patterns).not.toContain('.db-floating-bar.canvas-reset-layout-button');
+    expect(patterns).not.toContain('.db-floating-bar.db-canvas-control');
     expect(patterns).toContain('.db-canvas-control:hover:not(:disabled)');
     expect(patterns).toContain('.db-canvas-control[aria-pressed="true"]');
     expect(patterns).toContain('.db-canvas-control:disabled');
-    expect(canvasCardRule).toContain('background: transparent;');
-    expect(canvasCardRule).toContain('color: var(--db-text-muted);');
-    expect(patterns).toContain('.db-canvas-card:hover:not(:disabled),\n.db-canvas-card[aria-pressed="true"]');
-    expect(minimapSource).toContain('db-floating-bar canvas-minimap-bar');
-    expect(resetSource).toContain('db-floating-bar canvas-reset-layout-button');
-    expect(cardBarSource).toContain('db-floating-bar canvas-card-bar');
+    expect(canvasCardRule).toContain('height: var(--db-control-sm);');
+    expect(canvasCardRule).toContain('border: 0;');
+    expect(canvasCardRule).toContain('max-width: 180px;');
+    expect(canvasCardRule).not.toContain('background:');
+    expect(canvasCardRule).not.toContain('color:');
+    expect(patterns).not.toContain('.db-canvas-card:hover:not(:disabled)');
+    expect(patterns).not.toContain('.db-canvas-card[aria-pressed="true"]');
+    expect(minimapSource).toContain('canvas-minimap-bar db-canvas-control');
+    expect(minimapSource).not.toContain('db-floating-bar canvas-minimap-bar');
+    expect(resetSource).toContain('canvas-reset-layout-button db-canvas-control');
+    expect(resetSource).not.toContain('db-floating-bar canvas-reset-layout-button');
+    expect(cardBarSource).toContain('canvas-card-bar');
+    expect(cardBarSource).not.toContain('db-floating-bar canvas-card-bar');
+    expect(cardBarSource).toContain('canvas-card db-canvas-control db-canvas-card');
     expect(cardBarSource).toContain('db-canvas-card');
   });
 

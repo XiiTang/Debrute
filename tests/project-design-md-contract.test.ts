@@ -101,8 +101,9 @@ describe('project DESIGN.md contract', () => {
       'Components in the same family share size, spacing, radius, surface, border, shadow, text, icon, hover, pressed, disabled, and focus rules.',
       'Allowed component-family differences are limited to semantic state, established size tiers, placement geometry, content constraints, and narrow Canvas/media visibility needs.',
       'Feature CSS does not define a second button, icon-button, input, card, menu, panel, status, floating-bar, notification, terminal-tab, nav-row, diagnostic-row, Canvas-node, or Canvas overlay chrome system.',
-      'Canvas overlay controls use the shared floating-bar and Canvas control patterns for base chrome.',
-      'Canvas exceptions do not allow feature-owned reusable product chrome or local overrides that clear shared floating-bar surface, border, shadow, or backdrop treatment.'
+      'Canvas fixed lower-left overlay controls use Canvas control patterns without floating-bar surface, border, shadow, or backdrop treatment.',
+      'Canvas floating overlay containers use shared floating-bar chrome only when they render panel-like content, such as feedback or an expanded minimap panel.',
+      'Canvas exceptions do not allow feature-owned reusable product chrome or local overrides that add or restore floating-bar surface, border, shadow, or backdrop treatment for fixed lower-left controls.'
     ]) {
       expect(design).toContain(requiredText);
     }
