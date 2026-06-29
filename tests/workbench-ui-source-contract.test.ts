@@ -606,21 +606,35 @@ describe('Workbench UI source contract', () => {
     expect(dockRule).toContain('width: 28px;');
     expect(dockRule).toContain('padding: 0;');
     expect(shellStyles).not.toContain('.floating-dock .db-icon-button');
-    expect(cardBarSource).toContain('db-floating-bar canvas-card-bar');
+    expect(cardBarSource).toContain('canvas-card-bar');
+    expect(cardBarSource).not.toContain('db-floating-bar canvas-card-bar');
+    expect(cardBarSource).toContain('canvas-card db-canvas-control db-canvas-card');
     expect(cardBarSource).toContain('size="sm"');
     expect(dockSource).toContain('size={14}');
     expect(dockSource).not.toContain('size={18}');
     expect(dockSource).not.toContain('db-floating-bar');
   });
 
-  it('keeps lower-left Canvas controls borderless and pattern-owned', () => {
+  it('keeps fixed lower-left Canvas overlay controls without floating-bar base chrome', () => {
     const styles = css('apps/web/src/workbench/styles/canvas.css');
     const patterns = css('apps/web/src/workbench/ui/styles/workbench-patterns.css');
+    const cardBarRule = rule(styles, '.canvas-card-bar');
+    const cardBarFloatingRule = rule(styles, '.canvas-card-bar.db-floating-bar');
+    const canvasCardRule = rule(patterns, '.db-canvas-card');
     const minimapRule = rule(styles, '.canvas-minimap-bar');
     const resetRule = rule(styles, '.canvas-reset-layout-button');
     const minimapSource = css('apps/web/src/workbench/canvas/CanvasMinimapBar.tsx');
     const resetSource = css('apps/web/src/workbench/canvas/CanvasResetLayoutButton.tsx');
+    const cardBarSource = css('apps/web/src/workbench/canvas/CanvasCardBar.tsx');
 
+    expect(cardBarFloatingRule).toBe('');
+    expect(styles).not.toContain('.canvas-card-bar.db-floating-bar');
+    expect(styles).not.toMatch(/\.canvas-card-bar\.db-floating-bar\s*{[^}]*\b(?:border|background|box-shadow|backdrop-filter)\s*:/);
+    expect(cardBarRule).toContain('height: 28px;');
+    expect(cardBarRule).toContain('padding: 0;');
+    expect(cardBarRule).not.toContain('background:');
+    expect(cardBarRule).not.toContain('box-shadow:');
+    expect(cardBarRule).not.toContain('backdrop-filter:');
     expect(minimapRule).not.toContain('border: 0;');
     expect(minimapRule).not.toContain('color:');
     expect(resetRule).not.toContain('border: 0;');
@@ -630,11 +644,32 @@ describe('Workbench UI source contract', () => {
     expect(styles).not.toContain('.canvas-minimap-bar:disabled');
     expect(styles).not.toContain('.canvas-reset-layout-button:hover');
     expect(styles).not.toContain('.canvas-reset-layout-button:disabled');
+    expect(patterns).toContain('.db-floating-bar {');
+    expect(patterns).toContain('background: var(--db-floating-bg);');
+    expect(patterns).toContain('box-shadow: var(--db-shadow-floating);');
+    expect(patterns).toContain('backdrop-filter: blur(14px);');
+    expect(patterns).not.toContain('.db-floating-bar.canvas-card-bar,');
+    expect(patterns).not.toContain('.db-floating-bar.canvas-minimap-bar');
+    expect(patterns).not.toContain('.db-floating-bar.canvas-reset-layout-button');
+    expect(patterns).not.toContain('.db-floating-bar.db-canvas-control');
     expect(patterns).toContain('.db-canvas-control:hover:not(:disabled)');
     expect(patterns).toContain('.db-canvas-control[aria-pressed="true"]');
     expect(patterns).toContain('.db-canvas-control:disabled');
-    expect(minimapSource).toContain('db-floating-bar canvas-minimap-bar');
-    expect(resetSource).toContain('db-floating-bar canvas-reset-layout-button');
+    expect(canvasCardRule).toContain('height: var(--db-control-sm);');
+    expect(canvasCardRule).toContain('border: 0;');
+    expect(canvasCardRule).toContain('max-width: 180px;');
+    expect(canvasCardRule).not.toContain('background:');
+    expect(canvasCardRule).not.toContain('color:');
+    expect(patterns).not.toContain('.db-canvas-card:hover:not(:disabled)');
+    expect(patterns).not.toContain('.db-canvas-card[aria-pressed="true"]');
+    expect(minimapSource).toContain('canvas-minimap-bar db-canvas-control');
+    expect(minimapSource).not.toContain('db-floating-bar canvas-minimap-bar');
+    expect(resetSource).toContain('canvas-reset-layout-button db-canvas-control');
+    expect(resetSource).not.toContain('db-floating-bar canvas-reset-layout-button');
+    expect(cardBarSource).toContain('canvas-card-bar');
+    expect(cardBarSource).not.toContain('db-floating-bar canvas-card-bar');
+    expect(cardBarSource).toContain('canvas-card db-canvas-control db-canvas-card');
+    expect(cardBarSource).toContain('db-canvas-card');
   });
 
   it('styles invalid state for every Workbench field control', () => {

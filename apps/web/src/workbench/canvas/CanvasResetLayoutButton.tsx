@@ -15,7 +15,7 @@ export function CanvasResetLayoutButton({
   const i18n = useI18n();
   return (
     <IconButton
-      className="db-floating-bar canvas-reset-layout-button db-canvas-control"
+      className="canvas-reset-layout-button db-canvas-control"
       data-testid="canvas-reset-layout-button"
       data-canvas-local-wheel="true"
       label={i18n.t('canvas.resetLayout')}

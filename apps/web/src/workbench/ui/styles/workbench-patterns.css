@@ -563,10 +563,7 @@
   max-width: 180px;
 }
 
-.db-floating-bar.canvas-card-bar,
-.db-floating-bar.canvas-feedback-bar,
-.db-floating-bar.canvas-minimap-bar,
-.db-floating-bar.canvas-reset-layout-button {
+.db-floating-bar.canvas-feedback-bar {
   pointer-events: auto;
 }
 

@@ -66,7 +66,7 @@ export function CanvasCardBar({
   };
 
   return (
-    <nav className="db-floating-bar canvas-card-bar" aria-label={i18n.t('canvas.cardBar.canvases')}>
+    <nav className="canvas-card-bar" aria-label={i18n.t('canvas.cardBar.canvases')}>
       <div className="canvas-card-scroll">
         {canvases.map((canvas) => {
           const canvasId = canvas.id;
@@ -118,7 +118,7 @@ export function CanvasCardBar({
                 </form>
               ) : (
                 <Button
-                  className="canvas-card db-canvas-card"
+                  className="canvas-card db-canvas-control db-canvas-card"
                   size="sm"
                   pressed={canvasId === activeCanvasId}
                   draggable
