@@ -7,6 +7,7 @@ import { canvasTextSurfaceCssVariables } from './CanvasTextSurface';
 import {
   canvasTextEditorApplyInitialScroll,
   canvasTextEditorBaseExtensions,
+  canvasTextEditorEnsureVisibleSyntaxReady,
   canvasTextEditorReadOnlyExtension,
   canvasTextEditorSyncExternalValue,
   canvasTextEditorWordWrapExtension,
@@ -117,24 +118,44 @@ export function CanvasTextEditor({
       return;
     }
     let cancelled = false;
-    let notifyFrame: number | undefined;
-    const handle = window.requestAnimationFrame(() => {
+    let frame: number | undefined;
+    const scheduleFrame = (callback: FrameRequestCallback) => {
+      frame = window.requestAnimationFrame((time) => {
+        frame = undefined;
+        callback(time);
+      });
+    };
+    const scheduleSyntaxReadyCheck = () => {
+      scheduleFrame(() => {
+        if (cancelled) {
+          return;
+        }
+        if (!canvasTextEditorEnsureVisibleSyntaxReady(view)) {
+          scheduleSyntaxReadyCheck();
+          return;
+        }
+        scheduleFrame(() => {
+          if (!cancelled) {
+            onLayoutReadyRef.current?.();
+          }
+        });
+      });
+    };
+    scheduleFrame(() => {
       view.requestMeasure({
         read: () => undefined,
         write: () => {
-          notifyFrame = window.requestAnimationFrame(() => {
-            if (!cancelled) {
-              onLayoutReadyRef.current?.();
-            }
-          });
+          if (cancelled) {
+            return;
+          }
+          scheduleSyntaxReadyCheck();
         }
       });
     });
     return () => {
       cancelled = true;
-      window.cancelAnimationFrame(handle);
-      if (notifyFrame !== undefined) {
-        window.cancelAnimationFrame(notifyFrame);
+      if (frame !== undefined) {
+        window.cancelAnimationFrame(frame);
       }
     };
   }, [visible]);
