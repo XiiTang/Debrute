@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from 'react';
-import { Cable, Cpu, Eye, EyeOff, Settings, Wrench } from 'lucide-react';
+import { Cable, Eye, EyeOff, Image as ImageIcon, Settings, Video, Wrench } from 'lucide-react';
 import type {
   ImageModelSettingRecord,
   VideoModelSettingRecord
@@ -39,7 +39,8 @@ interface ApiKeyInputProps {
 
 const SETTINGS_NAV_ITEMS = [
   { id: 'general', labelKey: 'settings.nav.general', icon: Settings },
-  { id: 'models', labelKey: 'settings.nav.models', icon: Cpu },
+  { id: 'image-models', labelKey: 'settings.nav.imageModels', icon: ImageIcon },
+  { id: 'video-models', labelKey: 'settings.nav.videoModels', icon: Video },
   { id: 'integrations', labelKey: 'settings.nav.integrations', icon: Wrench },
   { id: 'adobe-bridge', labelKey: 'settings.nav.adobeBridge', icon: Cable }
 ] as const;
@@ -76,11 +77,10 @@ export function SettingsPanel({ state, actions }: { state: WorkbenchState; actio
             onPreferencesChange={actions.saveWorkbenchPreferences}
             {...(state.workbenchPreferences ? { preferences: state.workbenchPreferences } : {})}
           />
-        ) : activePage === 'models' ? (
-          <>
-            <ImageModelSettings state={state} actions={actions} />
-            <VideoModelSettings state={state} actions={actions} />
-          </>
+        ) : activePage === 'image-models' ? (
+          <ImageModelSettings state={state} actions={actions} />
+        ) : activePage === 'video-models' ? (
+          <VideoModelSettings state={state} actions={actions} />
         ) : activePage === 'integrations' ? (
           <IntegrationsSettingsPage state={state} actions={actions} />
         ) : activePage === 'adobe-bridge' ? (

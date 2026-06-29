@@ -84,12 +84,15 @@
   right: 0;
   transform: translate(37%, -37%);
   z-index: 1;
+}
+
+.canvas-card-delete.db-workbench-close-button {
   opacity: 0;
   pointer-events: none;
 }
 
-.canvas-card-wrap:hover .canvas-card-delete,
-.canvas-card-delete:focus-visible {
+.canvas-card-wrap:hover .canvas-card-delete.db-workbench-close-button,
+.canvas-card-delete.db-workbench-close-button:focus-visible {
   opacity: 1;
   pointer-events: auto;
 }

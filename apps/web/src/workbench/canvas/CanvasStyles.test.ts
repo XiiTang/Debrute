@@ -27,8 +27,9 @@ describe('Canvas styles', () => {
   it('pins the Canvas card delete control to the card border corner', () => {
     expect(canvasStyles).toContain('--canvas-card-delete-overlap: 7px;');
     expect(canvasStyles).toContain('height: calc(100% + var(--canvas-card-delete-overlap) + 2px);\n  margin-top: calc(-1 * var(--canvas-card-delete-overlap));\n  padding-top: var(--canvas-card-delete-overlap);\n  padding-right: var(--canvas-card-delete-overlap);\n  padding-bottom: 2px;\n  padding-left: 2px;');
-    expect(canvasStyles).toContain('.canvas-card-delete {\n  position: absolute;\n  top: 0;\n  right: 0;\n  transform: translate(37%, -37%);\n  z-index: 1;\n  opacity: 0;\n  pointer-events: none;');
-    expect(canvasStyles).toContain('.canvas-card-wrap:hover .canvas-card-delete,\n.canvas-card-delete:focus-visible {\n  opacity: 1;\n  pointer-events: auto;');
+    expect(canvasStyles).toContain('.canvas-card-delete {\n  position: absolute;\n  top: 0;\n  right: 0;\n  transform: translate(37%, -37%);\n  z-index: 1;');
+    expect(canvasStyles).toContain('.canvas-card-delete.db-workbench-close-button {\n  opacity: 0;\n  pointer-events: none;\n}');
+    expect(canvasStyles).toContain('.canvas-card-wrap:hover .canvas-card-delete.db-workbench-close-button,\n.canvas-card-delete.db-workbench-close-button:focus-visible {\n  opacity: 1;\n  pointer-events: auto;\n}');
     expect(canvasStyles).not.toContain('.canvas-card-delete.db-icon-button');
     expect(canvasStyles).not.toContain('.canvas-card-delete::before');
     expect(canvasStyles).not.toMatch(/\.canvas-card-delete[^{]*{[^}]*background:/);
