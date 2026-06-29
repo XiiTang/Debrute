@@ -13,8 +13,12 @@ describe('Canvas styles', () => {
   it('keeps Canvas card names inside a fixed-width capsule', () => {
     expect(canvasStyles).toContain('--canvas-card-width: 96px;');
     expect(canvasStyles).toContain('.canvas-card {\n  width: var(--canvas-card-width);');
+    expect(canvasStyles).toContain('padding: 0 8px;');
     expect(canvasStyles).toContain('.canvas-card-rename-form {\n  width: var(--canvas-card-width);');
+    expect(canvasStyles).toContain('.canvas-card-rename-input.db-input {\n  width: 100%;');
+    expect(canvasStyles).toContain('text-align: center;');
     expect(canvasStyles).not.toContain('--canvas-card-name-ch');
+    expect(canvasStyles).not.toContain('padding: 0 24px 0 8px;');
   });
 
   it('pins the Canvas card delete control to the card border corner', () => {
