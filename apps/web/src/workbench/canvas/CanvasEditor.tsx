@@ -108,6 +108,7 @@ export function CanvasEditor({
         onCurrentNodesChange={onCurrentNodesChange}
         onFeedbackBarTargetChange={onFeedbackBarTargetChange}
         onOpenContextMenu={onOpenContextMenu}
+        textPreviewStyleDependencyKey={state.resolvedTheme}
       />
     </section>
   );

@@ -49,7 +49,8 @@ describe('CanvasTextPreviewCapture', () => {
       contentCssWidth: 320,
       contentCssHeight: 160,
       scrollTop: 0,
-      scrollLeft: 0
+      scrollLeft: 0,
+      styleKey: 'sha256:style-a'
     });
     const second = await canvasTextPreviewFingerprint({
       content: 'hello',
@@ -58,11 +59,37 @@ describe('CanvasTextPreviewCapture', () => {
       contentCssWidth: 320,
       contentCssHeight: 160,
       scrollTop: 0,
-      scrollLeft: 0
+      scrollLeft: 0,
+      styleKey: 'sha256:style-a'
     });
 
     expect(first).not.toBe(second);
     expect(first).toMatch(/^sha256:/);
+  });
+
+  it('hashes the text preview style key', async () => {
+    const first = await canvasTextPreviewFingerprint({
+      content: 'hello',
+      language: 'markdown',
+      wordWrap: true,
+      contentCssWidth: 320,
+      contentCssHeight: 160,
+      scrollTop: 0,
+      scrollLeft: 0,
+      styleKey: 'sha256:style-a'
+    });
+    const second = await canvasTextPreviewFingerprint({
+      content: 'hello',
+      language: 'markdown',
+      wordWrap: true,
+      contentCssWidth: 320,
+      contentCssHeight: 160,
+      scrollTop: 0,
+      scrollLeft: 0,
+      styleKey: 'sha256:style-b'
+    });
+
+    expect(first).not.toBe(second);
   });
 
   it('hashes the fixed text preview source scale', async () => {
@@ -73,7 +100,8 @@ describe('CanvasTextPreviewCapture', () => {
       contentCssWidth: 320,
       contentCssHeight: 160,
       scrollTop: 0,
-      scrollLeft: 0
+      scrollLeft: 0,
+      styleKey: 'sha256:style-a'
     });
 
     await expect(sha256({
@@ -85,7 +113,8 @@ describe('CanvasTextPreviewCapture', () => {
       contentCssHeight: 160,
       scrollTop: 0,
       scrollLeft: 0,
-      sourceScale: CANVAS_TEXT_PREVIEW_SOURCE_SCALE
+      sourceScale: CANVAS_TEXT_PREVIEW_SOURCE_SCALE,
+      styleKey: 'sha256:style-a'
     })).resolves.toBe(fingerprint);
   });
 });

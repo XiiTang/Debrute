@@ -3,7 +3,7 @@
 import React, { act } from 'react';
 import { createRoot } from 'react-dom/client';
 import { renderToStaticMarkup } from 'react-dom/server';
-import { describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import {
   createCanvasDocument,
   type CanvasFeedbackDocument,
@@ -46,6 +46,14 @@ import { createCanvasEditorRuntime, type CanvasEditorRuntime } from './runtime/C
 import { I18nProvider } from '../i18n';
 
 describe('CanvasSurface', () => {
+  beforeEach(() => {
+    installTextPreviewStyleVariables();
+  });
+
+  afterEach(() => {
+    clearTextPreviewStyleVariables();
+  });
+
   it('renders an empty Canvas Map node state', () => {
     const canvas = createCanvasDocument({ id: 'empty-canvas' });
     const projection: CanvasProjection = {
@@ -392,6 +400,7 @@ describe('CanvasSurface', () => {
                 canvasFeedback={undefined}
                 overlayRuntime={createCanvasOverlayRuntime()}
                 feedbackPlacementContext={feedbackPlacementContextFixture()}
+                textPreviewStyleDependencyKey="dark"
               />
             </I18nProvider>
           </React.StrictMode>
@@ -1068,6 +1077,7 @@ function surface(
         canvasFeedback={input.canvasFeedback}
         overlayRuntime={createCanvasOverlayRuntime()}
         feedbackPlacementContext={feedbackPlacementContextFixture()}
+        textPreviewStyleDependencyKey="dark"
       />
     </I18nProvider>
   );
@@ -1078,6 +1088,16 @@ function feedbackPlacementContextFixture(): Parameters<typeof CanvasSurface>[0][
     viewportRect: { x: 0, y: 0, width: 1280, height: 720 },
     reservedRects: []
   };
+}
+
+function installTextPreviewStyleVariables(): void {
+  document.documentElement.style.setProperty('--db-text', '#ffffff');
+  document.documentElement.style.setProperty('--db-text-muted', 'rgb(255 255 255 / 72%)');
+}
+
+function clearTextPreviewStyleVariables(): void {
+  document.documentElement.style.removeProperty('--db-text');
+  document.documentElement.style.removeProperty('--db-text-muted');
 }
 
 function nodeFixture(path: string, x: number, y: number): CanvasProjection['nodes'][number] {

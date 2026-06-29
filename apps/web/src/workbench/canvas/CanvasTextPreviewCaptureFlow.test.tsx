@@ -2,7 +2,7 @@
 
 import React, { act } from 'react';
 import { createRoot } from 'react-dom/client';
-import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { toBlob } from 'html-to-image';
 import type { ProjectedCanvasNode } from '@debrute/canvas-core';
 import type { TextFileBuffer, WorkbenchActions } from '../../types';
@@ -76,6 +76,11 @@ describe('CanvasTextPreviewCaptureFlow', () => {
     vi.clearAllMocks();
     textEditorMockLayout.gutterTop = 10;
     textEditorMockLayout.lineTop = 14;
+    installTextPreviewStyleVariables();
+  });
+
+  afterEach(() => {
+    clearTextPreviewStyleVariables();
   });
 
   it('does not save a text preview source when capture layout validation fails', async () => {
@@ -106,6 +111,7 @@ describe('CanvasTextPreviewCaptureFlow', () => {
             devicePixelRatio={2}
             culledNodePaths={new Set()}
             previewResourceScheduler={createImmediateScheduler()}
+            styleDependencyKey="dark"
           >
             <RegisteredTextBody node={node} />
             <TextPreviewErrorProbe node={node} onError={(error) => errors.push(error)} />
@@ -163,6 +169,7 @@ describe('CanvasTextPreviewCaptureFlow', () => {
             devicePixelRatio={2}
             culledNodePaths={new Set()}
             previewResourceScheduler={createImmediateScheduler()}
+            styleDependencyKey="dark"
           >
             <RegisteredTextBody node={node} />
           </CanvasTextPreviewProvider>
@@ -278,6 +285,16 @@ function createImmediateScheduler(): CanvasPreviewResourceScheduler {
     setInteractionState: () => undefined,
     dispose: () => undefined
   };
+}
+
+function installTextPreviewStyleVariables(): void {
+  document.documentElement.style.setProperty('--db-text', '#ffffff');
+  document.documentElement.style.setProperty('--db-text-muted', 'rgb(255 255 255 / 72%)');
+}
+
+function clearTextPreviewStyleVariables(): void {
+  document.documentElement.style.removeProperty('--db-text');
+  document.documentElement.style.removeProperty('--db-text-muted');
 }
 
 function descriptorFor(projectRelativePath: string) {

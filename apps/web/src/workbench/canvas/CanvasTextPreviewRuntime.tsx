@@ -10,6 +10,11 @@ import { CanvasTextEditor } from './CanvasTextEditor';
 import { captureCanvasTextPreviewSource, canvasTextPreviewFingerprint } from './CanvasTextPreviewCapture';
 import type { CanvasPreviewResourceScheduler } from './CanvasPreviewResourceScheduler';
 import type { CanvasCameraState } from './runtime/canvasCamera';
+import {
+  canvasTextPreviewStyleKey,
+  canvasTextPreviewStyleSnapshotForDocument,
+  type CanvasTextPreviewStyleKey
+} from './CanvasTextPreviewStyleKey';
 
 const CANVAS_TEXT_PREVIEW_SOURCE_CONCURRENCY = 1;
 const CANVAS_TEXT_PREVIEW_CAPTURE_LAYOUT_MAX_FRAMES = 12;
@@ -53,6 +58,7 @@ export interface CanvasTextPreviewCandidate {
   contentCssHeight: number;
   scrollTop: number;
   scrollLeft: number;
+  styleKey: string;
 }
 
 export interface CanvasTextPreviewTarget extends CanvasTextPreviewCandidate {
@@ -167,6 +173,7 @@ export function CanvasTextPreviewProvider({
   devicePixelRatio,
   culledNodePaths,
   previewResourceScheduler,
+  styleDependencyKey,
   children
 }: {
   canvasId: string;
@@ -180,6 +187,7 @@ export function CanvasTextPreviewProvider({
   devicePixelRatio: number;
   culledNodePaths: ReadonlySet<string>;
   previewResourceScheduler: CanvasPreviewResourceScheduler;
+  styleDependencyKey: string;
   children: React.ReactNode;
 }): React.ReactElement {
   const [descriptors, setDescriptors] = useState<Record<string, CanvasTextPreviewDescriptor>>({});
@@ -190,6 +198,10 @@ export function CanvasTextPreviewProvider({
   const [currentTargets, setCurrentTargets] = useState<Record<string, CanvasTextPreviewTarget>>({});
   const [previewSources, setPreviewSources] = useState<Record<string, CanvasTextPreviewPublishedSource>>({});
   const [resourceCheckedTargetKeys, setResourceCheckedTargetKeys] = useState<ReadonlySet<string>>(() => new Set());
+  const [styleKeyState, setStyleKeyState] = useState<{
+    key?: CanvasTextPreviewStyleKey | undefined;
+    error?: Error | undefined;
+  }>({});
   const pendingCaptureKeysRef = useRef(new Set<string>());
   const currentTargetKeysRef = useRef(new Map<string, string>());
   const currentResourceKeysRef = useRef(new Map<string, string>());
@@ -200,6 +212,31 @@ export function CanvasTextPreviewProvider({
   currentCulledPathsRef.current = culledNodePaths;
   interactionActiveRef.current = interactionActive;
   const nodesByPath = useMemo(() => new Map(nodes.map((node) => [node.projectRelativePath, node])), [nodes]);
+
+  useEffect(() => {
+    let cancelled = false;
+    try {
+      const snapshot = canvasTextPreviewStyleSnapshotForDocument();
+      void canvasTextPreviewStyleKey(snapshot).then((key) => {
+        if (!cancelled) {
+          setStyleKeyState((current) => current.key === key && !current.error ? current : { key });
+        }
+      }).catch((error: unknown) => {
+        if (!cancelled) {
+          setStyleKeyState({ error: errorFromUnknown(error) });
+        }
+      });
+    } catch (error: unknown) {
+      setStyleKeyState({ error: errorFromUnknown(error) });
+    }
+    return () => {
+      cancelled = true;
+    };
+  }, [styleDependencyKey]);
+
+  if (styleKeyState.error) {
+    throw styleKeyState.error;
+  }
 
   const commitTextBodyMeasurement = useCallback((projectRelativePath: string, element: HTMLElement) => {
     setMeasuredBodies((current) => {
@@ -259,13 +296,17 @@ export function CanvasTextPreviewProvider({
 
   useEffect(() => {
     let cancelled = false;
+    if (!styleKeyState.key) {
+      return undefined;
+    }
     const candidates = canvasTextPreviewTargetsForNodes({
       canvasId,
       nodes,
       selectedProjectRelativePaths,
       textFileBuffers,
       measuredBodies,
-      culledNodePaths
+      culledNodePaths,
+      styleKey: styleKeyState.key
     });
     if (candidates.length === 0) {
       setCurrentTargets((current) => Object.keys(current).length === 0 ? current : {});
@@ -313,6 +354,7 @@ export function CanvasTextPreviewProvider({
     measuredBodies,
     nodes,
     selectedProjectRelativePaths,
+    styleKeyState.key,
     textFileBuffers
   ]);
 
@@ -526,6 +568,7 @@ export function canvasTextPreviewTargetsForNodes(input: {
   textFileBuffers: Record<string, TextFileBuffer>;
   measuredBodies: Map<string, CanvasTextPreviewMeasuredBody>;
   culledNodePaths: ReadonlySet<string>;
+  styleKey: string;
 }): CanvasTextPreviewCandidate[] {
   const selected = new Set(input.selectedProjectRelativePaths);
   const targets: CanvasTextPreviewCandidate[] = [];
@@ -551,7 +594,8 @@ export function canvasTextPreviewTargetsForNodes(input: {
       contentCssWidth: measured.width,
       contentCssHeight: measured.height,
       scrollTop: measured.scrollTop,
-      scrollLeft: measured.scrollLeft
+      scrollLeft: measured.scrollLeft,
+      styleKey: input.styleKey
     });
   }
   return targets;
@@ -1203,4 +1247,8 @@ function clearCanvasTextPreviewErrorsForDescriptors(
 
 function messageFromUnknown(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
+}
+
+function errorFromUnknown(error: unknown): Error {
+  return error instanceof Error ? error : new Error(String(error));
 }
