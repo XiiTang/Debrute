@@ -316,42 +316,32 @@ export interface WorkbenchProjectTextFileWriteResult extends RevisionedProjectRe
   file: WorkbenchProjectTextFile;
 }
 
-export interface CanvasTextPreviewNodeTarget {
+export interface CanvasTextPreviewSourceTarget {
   projectRelativePath: string;
   fingerprint: string;
-  contentCssWidth: number;
-  contentCssHeight: number;
-  scrollTop: number;
-  scrollLeft: number;
 }
 
-export interface CanvasTextPreviewDescriptorView {
-  fingerprint: string;
-  sourceWidth: number;
-  sourceHeight: number;
-  contentCssWidth: number;
-  contentCssHeight: number;
-  scrollTop: number;
-  scrollLeft: number;
-  variants: number[];
+export interface CanvasTextPreviewSourceAvailabilityView extends CanvasTextPreviewSourceTarget {
+  available: boolean;
 }
 
-export interface SaveCanvasTextPreviewSourceInput extends CanvasTextPreviewNodeTarget {
+export interface SaveCanvasTextPreviewSourceInput extends CanvasTextPreviewSourceTarget {
   canvasId: string;
   sourcePng: Blob;
 }
 
-export interface CanvasTextPreviewDescriptorRequest {
+export interface SaveCanvasTextPreviewSourceResult {
+  ok: true;
+  source: CanvasTextPreviewSourceAvailabilityView & { available: true };
+}
+
+export interface CanvasTextPreviewSourceAvailabilityRequest {
   canvasId: string;
-  nodes: CanvasTextPreviewNodeTarget[];
+  sources: CanvasTextPreviewSourceTarget[];
 }
 
-export interface CanvasTextPreviewReconcileRequest extends CanvasTextPreviewDescriptorRequest {
-  devicePixelRatio: number;
-}
-
-export interface CanvasTextPreviewDescriptorResponse {
-  descriptors: Record<string, CanvasTextPreviewDescriptorView>;
+export interface CanvasTextPreviewSourceAvailabilityResponse {
+  sources: Record<string, CanvasTextPreviewSourceAvailabilityView>;
 }
 
 export interface ImageModelSettingRecord {
@@ -1025,9 +1015,8 @@ export interface WorkbenchApiClient {
   ): TerminalEventSubscription;
   readProjectTextFile(projectRelativePath: string): Promise<WorkbenchProjectTextFile>;
   writeProjectTextFile(projectRelativePath: string, content: string): Promise<WorkbenchProjectTextFileWriteResult>;
-  saveCanvasTextPreviewSource(input: SaveCanvasTextPreviewSourceInput): Promise<CanvasTextPreviewDescriptorView>;
-  readCanvasTextPreviewDescriptors(input: CanvasTextPreviewDescriptorRequest): Promise<CanvasTextPreviewDescriptorResponse>;
-  reconcileCanvasTextPreviews(input: CanvasTextPreviewReconcileRequest): Promise<CanvasTextPreviewDescriptorResponse>;
+  saveCanvasTextPreviewSource(input: SaveCanvasTextPreviewSourceInput): Promise<SaveCanvasTextPreviewSourceResult>;
+  readCanvasTextPreviewSources(input: CanvasTextPreviewSourceAvailabilityRequest): Promise<CanvasTextPreviewSourceAvailabilityResponse>;
   getDesktopPlatform(): Promise<NodeJS.Platform>;
   createProjectFile(input: { parentProjectRelativePath: string; name: string }): Promise<WorkbenchProjectFileOperationResult>;
   createProjectDirectory(input: { parentProjectRelativePath: string; name: string }): Promise<WorkbenchProjectFileOperationResult>;

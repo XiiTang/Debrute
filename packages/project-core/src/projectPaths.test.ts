@@ -14,7 +14,6 @@ describe('project path ignore rules', () => {
     expect(isIgnoredProjectFilePath('.debrute/cache/canvas-text-previews')).toBe(true);
     expect(isIgnoredProjectFilePath('.debrute/cache/canvas-text-previews/canvas-1/notes%2Fa.md--1234567890abcdef/source.png')).toBe(true);
     expect(isIgnoredProjectFilePath('.debrute/cache/canvas-text-previews/canvas-1/notes%2Fa.md--1234567890abcdef/preview-w700.png')).toBe(true);
-    expect(isIgnoredProjectFilePath('.debrute/cache/canvas-text-previews/canvas-1/notes%2Fa.md--1234567890abcdef/preview.json')).toBe(true);
   });
 
   it('classifies Canvas feedback document changes separately from source content', () => {

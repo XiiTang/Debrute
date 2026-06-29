@@ -187,7 +187,7 @@ describe('DebruteAppServer Canvas display names', () => {
     }
   });
 
-  it('keeps text preview descriptors readable after a Canvas display name change', async () => {
+  it('keeps text preview sources readable after a Canvas display name change', async () => {
     const projectRoot = await mkdtemp(join(tmpdir(), 'debrute-canvas-name-preview-'));
     const server = new DebruteAppServer();
     const sourceUpload = join(projectRoot, 'upload.png');
@@ -212,10 +212,6 @@ describe('DebruteAppServer Canvas display names', () => {
       };
       await server.saveCanvasTextPreviewSource({
         ...target,
-        contentCssWidth: 60,
-        contentCssHeight: 30,
-        scrollTop: 0,
-        scrollLeft: 0,
         sourceTemporaryPath: sourceUpload
       });
       const sourcePath = join(projectRoot, canvasTextPreviewSourceProjectPath(target));
@@ -224,19 +220,19 @@ describe('DebruteAppServer Canvas display names', () => {
         canvasId: 'canvas-1',
         name: '故事板'
       });
-      const descriptors = await server.readCanvasTextPreviewDescriptors({
+      const sources = await server.readCanvasTextPreviewSources({
         canvasId: 'canvas-1',
-        nodes: [{
+        sources: [{
           projectRelativePath: target.projectRelativePath,
-          fingerprint: target.fingerprint,
-          contentCssWidth: 60,
-          contentCssHeight: 30,
-          scrollTop: 0,
-          scrollLeft: 0
+          fingerprint: target.fingerprint
         }]
       });
 
-      expect(descriptors['notes/scene.md']?.fingerprint).toBe('fingerprint-a');
+      expect(sources.sources['notes/scene.md']).toEqual({
+        projectRelativePath: 'notes/scene.md',
+        fingerprint: 'fingerprint-a',
+        available: true
+      });
       await expect(stat(sourcePath)).resolves.toBeTruthy();
     } finally {
       server.close();

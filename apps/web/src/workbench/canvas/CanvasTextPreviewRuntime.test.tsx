@@ -3,19 +3,19 @@
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import React, { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
-import type { CanvasTextPreviewDescriptor, ProjectedCanvasNode } from '@debrute/canvas-core';
+import type { ProjectedCanvasNode } from '@debrute/canvas-core';
 import type { TextFileBuffer, WorkbenchActions } from '../../types';
 import type { CanvasPreviewResourceScheduler, CanvasPreviewResourceRequest } from './CanvasPreviewResourceScheduler';
 import {
   CanvasTextPreviewProvider,
   canvasTextPreviewBodyMeasurement,
-  canvasTextPreviewCurrentDescriptors,
+  canvasTextPreviewCurrentSourceAvailability,
   isCanvasTextPreviewCaptureLayoutReady,
   canvasTextPreviewImageReducer,
   initialCanvasTextPreviewImageState,
   canvasTextPreviewNextCaptureTargets,
+  canvasTextPreviewTargetWidthForNode,
   canvasTextPreviewTargetsForNodes,
-  selectCanvasTextPreviewVariant,
   shouldStartCanvasTextPreviewSourceWork,
   prepareCanvasTextPreviewCaptureElement,
   useCanvasTextPreviewRuntime,
@@ -78,15 +78,19 @@ describe('CanvasTextPreviewRuntime', () => {
     }]);
   });
 
-  it('selects the closest existing variant at or above target width', () => {
-    expect(selectCanvasTextPreviewVariant({
-      variants: [100, 200, 400],
-      targetWidth: 180
-    })).toBe(200);
-    expect(selectCanvasTextPreviewVariant({
-      variants: [100, 200, 400],
-      targetWidth: 800
-    })).toBe(400);
+  it('computes text preview target width from the source scale', () => {
+    const target = {
+      ...previewTarget('notes/large.md'),
+      contentCssWidth: 413,
+      contentCssHeight: 241
+    };
+
+    expect(canvasTextPreviewTargetWidthForNode({
+      node: textNode('notes/large.md', 4134, 2410),
+      target,
+      resourceZoom: 0.11,
+      devicePixelRatio: 2
+    })).toBe(1169);
   });
 
   it('does not start source capture while the camera is moving', () => {
@@ -111,7 +115,10 @@ describe('CanvasTextPreviewRuntime', () => {
 
     const firstBatch = canvasTextPreviewNextCaptureTargets({
       targets,
-      descriptors: {},
+      sourceAvailability: Object.fromEntries(targets.map((target) => [
+        target.projectRelativePath,
+        { fingerprint: target.fingerprint, available: false }
+      ])),
       pendingCaptureKeys,
       concurrency: 3
     });
@@ -127,8 +134,15 @@ describe('CanvasTextPreviewRuntime', () => {
     pendingCaptureKeys.delete(completedCapture.captureKey);
     const secondBatch = canvasTextPreviewNextCaptureTargets({
       targets,
-      descriptors: {
-        'a.md': descriptorFor(completedCapture)
+      sourceAvailability: {
+        ...Object.fromEntries(targets.map((target) => [
+          target.projectRelativePath,
+          { fingerprint: target.fingerprint, available: false }
+        ])),
+        'a.md': {
+          fingerprint: completedCapture.fingerprint,
+          available: true
+        }
       },
       pendingCaptureKeys,
       concurrency: 3
@@ -240,25 +254,30 @@ describe('CanvasTextPreviewRuntime', () => {
     expect(gutterElement.style.transform).toBe('translateY(6px)');
   });
 
-  it('keeps descriptors only when they match the current text preview target', () => {
+  it('keeps source availability only when it matches the current text preview target', () => {
     const currentTarget = previewTarget('a.md');
-    const staleTarget = { ...currentTarget, fingerprint: 'sha256:old-a' };
-    const descriptors = canvasTextPreviewCurrentDescriptors({
+    const sourceAvailability = canvasTextPreviewCurrentSourceAvailability({
       targets: [currentTarget],
-      descriptors: {
-        'a.md': descriptorFor(staleTarget),
-        'b.md': descriptorFor(previewTarget('b.md'))
+      sourceAvailability: {
+        'a.md': { fingerprint: 'sha256:old-a', available: true },
+        'b.md': { fingerprint: previewTarget('b.md').fingerprint, available: true }
       }
     });
 
-    expect(descriptors).toEqual({});
-    expect(canvasTextPreviewCurrentDescriptors({
+    expect(sourceAvailability).toEqual({});
+    expect(canvasTextPreviewCurrentSourceAvailability({
       targets: [currentTarget],
-      descriptors: {
-        'a.md': descriptorFor(currentTarget)
+      sourceAvailability: {
+        'a.md': {
+          fingerprint: currentTarget.fingerprint,
+          available: true
+        }
       }
     })).toEqual({
-      'a.md': descriptorFor(currentTarget)
+      'a.md': {
+        fingerprint: currentTarget.fingerprint,
+        available: true
+      }
     });
   });
 
@@ -470,12 +489,10 @@ describe('CanvasTextPreviewRuntime', () => {
         );
       });
 
-      await act(async () => {
-        await new Promise((resolve) => setTimeout(resolve, 0));
-      });
+      await waitForEnqueuedNodes(enqueued, ['notes/a.md']);
 
       expect(enqueued).toEqual(['notes/a.md']);
-      expect(records).toEqual([['notes/a.md'], ['notes/a.md']]);
+      expect(records).toEqual([['notes/a.md']]);
     } finally {
       await act(async () => {
         root.unmount();
@@ -486,27 +503,14 @@ describe('CanvasTextPreviewRuntime', () => {
     }
   });
 
-  it('reports scheduled descriptor read failures as text preview errors', async () => {
+  it('reports source availability failures as text preview errors', async () => {
     await expectScheduledTextPreviewError({
       projectRelativePath: 'notes/read-failure.md',
-      expectedError: 'descriptor read failed',
+      expectedError: 'source availability failed',
       actions: {
         ...textPreviewActionsFixture(),
-        readCanvasTextPreviewDescriptors: async () => {
-          throw new Error('descriptor read failed');
-        }
-      }
-    });
-  });
-
-  it('reports scheduled reconcile failures as text preview errors', async () => {
-    await expectScheduledTextPreviewError({
-      projectRelativePath: 'notes/reconcile-failure.md',
-      expectedError: 'preview reconcile failed',
-      actions: {
-        ...textPreviewActionsFixture(),
-        reconcileCanvasTextPreviews: async () => {
-          throw new Error('preview reconcile failed');
+        readCanvasTextPreviewSources: async () => {
+          throw new Error('source availability failed');
         }
       }
     });
@@ -696,35 +700,17 @@ function textBuffer(projectRelativePath: string, content: string): TextFileBuffe
 }
 
 function textPreviewActionsFixture(): WorkbenchActions {
-  const descriptorResponse = (input: { nodes: Array<{
-    projectRelativePath: string;
-    fingerprint: string;
-    contentCssWidth: number;
-    contentCssHeight: number;
-    scrollTop: number;
-    scrollLeft: number;
-  }> }) => ({
-    descriptors: Object.fromEntries(input.nodes.map((node) => [
-      node.projectRelativePath,
-      {
-        fingerprint: node.fingerprint,
-        sourceWidth: 1652,
-        sourceHeight: 964,
-        contentCssWidth: node.contentCssWidth,
-        contentCssHeight: node.contentCssHeight,
-        scrollTop: node.scrollTop,
-        scrollLeft: node.scrollLeft,
-        variants: [104, 147, 207, 293, 413, 585, 826, 1169, 1652]
-      } satisfies CanvasTextPreviewDescriptor
-    ]))
-  });
   return {
-    readCanvasTextPreviewDescriptors: async (
-      input: Parameters<WorkbenchActions['readCanvasTextPreviewDescriptors']>[0]
-    ) => descriptorResponse(input),
-    reconcileCanvasTextPreviews: async (
-      input: Parameters<WorkbenchActions['reconcileCanvasTextPreviews']>[0]
-    ) => descriptorResponse(input),
+    readCanvasTextPreviewSources: async (input: Parameters<WorkbenchActions['readCanvasTextPreviewSources']>[0]) => ({
+      sources: Object.fromEntries(input.sources.map((source) => [
+        source.projectRelativePath,
+        {
+          projectRelativePath: source.projectRelativePath,
+          fingerprint: source.fingerprint,
+          available: true
+        }
+      ]))
+    }),
     saveCanvasTextPreviewSource: async () => {
       throw new Error('Unexpected source capture in variant selection test.');
     }
@@ -732,40 +718,19 @@ function textPreviewActionsFixture(): WorkbenchActions {
 }
 
 function recordingTextPreviewActionsFixture(records: string[][]): WorkbenchActions {
-  const descriptorResponse = (input: { nodes: Array<{
-    projectRelativePath: string;
-    fingerprint: string;
-    contentCssWidth: number;
-    contentCssHeight: number;
-    scrollTop: number;
-    scrollLeft: number;
-  }> }) => ({
-    descriptors: Object.fromEntries(input.nodes.map((node) => [
-      node.projectRelativePath,
-      {
-        fingerprint: node.fingerprint,
-        sourceWidth: 1652,
-        sourceHeight: 964,
-        contentCssWidth: node.contentCssWidth,
-        contentCssHeight: node.contentCssHeight,
-        scrollTop: node.scrollTop,
-        scrollLeft: node.scrollLeft,
-        variants: [104, 147, 207, 293, 413, 585, 826, 1169, 1652]
-      } satisfies CanvasTextPreviewDescriptor
-    ]))
-  });
   return {
-    readCanvasTextPreviewDescriptors: async (
-      input: Parameters<WorkbenchActions['readCanvasTextPreviewDescriptors']>[0]
-    ) => {
-      records.push(input.nodes.map((node) => node.projectRelativePath));
-      return descriptorResponse(input);
-    },
-    reconcileCanvasTextPreviews: async (
-      input: Parameters<WorkbenchActions['reconcileCanvasTextPreviews']>[0]
-    ) => {
-      records.push(input.nodes.map((node) => node.projectRelativePath));
-      return descriptorResponse(input);
+    readCanvasTextPreviewSources: async (input: Parameters<WorkbenchActions['readCanvasTextPreviewSources']>[0]) => {
+      records.push(input.sources.map((source) => source.projectRelativePath));
+      return {
+        sources: Object.fromEntries(input.sources.map((source) => [
+          source.projectRelativePath,
+          {
+            projectRelativePath: source.projectRelativePath,
+            fingerprint: source.fingerprint,
+            available: true
+          }
+        ]))
+      };
     },
     saveCanvasTextPreviewSource: async () => {
       throw new Error('Unexpected source capture in scheduled text preview test.');
@@ -774,40 +739,22 @@ function recordingTextPreviewActionsFixture(records: string[][]): WorkbenchActio
 }
 
 function recordingFingerprintTextPreviewActionsFixture(fingerprints: string[]): WorkbenchActions {
-  const descriptorResponse = (input: { nodes: Array<{
-    projectRelativePath: string;
-    fingerprint: string;
-    contentCssWidth: number;
-    contentCssHeight: number;
-    scrollTop: number;
-    scrollLeft: number;
-  }> }) => ({
-    descriptors: Object.fromEntries(input.nodes.map((node) => {
-      if (fingerprints.at(-1) !== node.fingerprint) {
-        fingerprints.push(node.fingerprint);
-      }
-      return [
-        node.projectRelativePath,
-        {
-          fingerprint: node.fingerprint,
-          sourceWidth: 1652,
-          sourceHeight: 964,
-          contentCssWidth: node.contentCssWidth,
-          contentCssHeight: node.contentCssHeight,
-          scrollTop: node.scrollTop,
-          scrollLeft: node.scrollLeft,
-          variants: [104, 147, 207, 293, 413, 585, 826, 1169, 1652]
-        } satisfies CanvasTextPreviewDescriptor
-      ];
-    }))
-  });
   return {
-    readCanvasTextPreviewDescriptors: async (
-      input: Parameters<WorkbenchActions['readCanvasTextPreviewDescriptors']>[0]
-    ) => descriptorResponse(input),
-    reconcileCanvasTextPreviews: async (
-      input: Parameters<WorkbenchActions['reconcileCanvasTextPreviews']>[0]
-    ) => descriptorResponse(input),
+    readCanvasTextPreviewSources: async (input: Parameters<WorkbenchActions['readCanvasTextPreviewSources']>[0]) => ({
+      sources: Object.fromEntries(input.sources.map((source) => {
+        if (fingerprints.at(-1) !== source.fingerprint) {
+          fingerprints.push(source.fingerprint);
+        }
+        return [
+          source.projectRelativePath,
+          {
+            projectRelativePath: source.projectRelativePath,
+            fingerprint: source.fingerprint,
+            available: true
+          }
+        ];
+      }))
+    }),
     saveCanvasTextPreviewSource: async () => {
       throw new Error('Unexpected source capture in style key test.');
     }
@@ -893,6 +840,16 @@ async function waitForRecordedFingerprintCount(fingerprints: string[], count: nu
   throw new Error(`Expected ${count} recorded text preview fingerprints.`);
 }
 
+async function waitForEnqueuedNodes(enqueued: string[], expected: string[]): Promise<void> {
+  for (let index = 0; index < 20; index += 1) {
+    if (JSON.stringify(enqueued) === JSON.stringify(expected)) {
+      return;
+    }
+    await flushReactWork();
+  }
+  throw new Error(`Expected text preview resource enqueue ${JSON.stringify(expected)}, got ${JSON.stringify(enqueued)}.`);
+}
+
 function textPreviewBodyElement(width: number, height: number): HTMLElement {
   const element = document.createElement('div');
   Object.defineProperty(element, 'clientWidth', { value: width });
@@ -913,25 +870,6 @@ function previewTarget(projectRelativePath: string) {
     scrollLeft: 0,
     styleKey: 'sha256:style-a',
     fingerprint: `sha256:${projectRelativePath}`
-  };
-}
-
-function descriptorFor(target: {
-  fingerprint: string;
-  contentCssWidth: number;
-  contentCssHeight: number;
-  scrollTop: number;
-  scrollLeft: number;
-}): CanvasTextPreviewDescriptor {
-  return {
-    fingerprint: target.fingerprint,
-    sourceWidth: 640,
-    sourceHeight: 320,
-    contentCssWidth: target.contentCssWidth,
-    contentCssHeight: target.contentCssHeight,
-    scrollTop: target.scrollTop,
-    scrollLeft: target.scrollLeft,
-    variants: [320]
   };
 }
 

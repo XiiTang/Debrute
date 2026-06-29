@@ -7,8 +7,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import {
   createCanvasDocument,
   type CanvasFeedbackDocument,
-  type CanvasProjection,
-  type CanvasTextPreviewDescriptor
+  type CanvasProjection
 } from '@debrute/canvas-core';
 import { buildWorkbenchTitleBarState } from '@debrute/app-protocol';
 import type { IntegrationSettingsView } from '@debrute/app-protocol';
@@ -372,12 +371,9 @@ describe('CanvasSurface', () => {
       edges: [],
       diagnostics: []
     };
-    const readCanvasTextPreviewDescriptors = vi.fn(async (
-      input: Parameters<WorkbenchActions['readCanvasTextPreviewDescriptors']>[0]
-    ) => canvasTextPreviewDescriptorResponse(input));
-    const reconcileCanvasTextPreviews = vi.fn(async (
-      input: Parameters<WorkbenchActions['reconcileCanvasTextPreviews']>[0]
-    ) => canvasTextPreviewDescriptorResponse(input));
+    const readCanvasTextPreviewSources = vi.fn(async (
+      input: Parameters<WorkbenchActions['readCanvasTextPreviewSources']>[0]
+    ) => canvasTextPreviewSourceAvailabilityResponse(input));
     const runtime = createCanvasEditorRuntime();
 
     try {
@@ -391,8 +387,7 @@ describe('CanvasSurface', () => {
                 runtime={runtime}
                 actions={{
                   ...actions,
-                  readCanvasTextPreviewDescriptors,
-                  reconcileCanvasTextPreviews
+                  readCanvasTextPreviewSources
                 }}
                 textFileBuffers={{
                   [node.projectRelativePath]: textBufferFixture(node.projectRelativePath, '# Strict', 'rev-strict')
@@ -409,16 +404,11 @@ describe('CanvasSurface', () => {
 
       const previewImage = await waitForCanvasSurfaceTextPreviewImage(container);
 
-      expect(readCanvasTextPreviewDescriptors).toHaveBeenCalledWith({
+      expect(readCanvasTextPreviewSources).toHaveBeenCalledWith({
         canvasId: canvas.id,
-        nodes: [expect.objectContaining({ projectRelativePath: node.projectRelativePath })]
+        sources: [expect.objectContaining({ projectRelativePath: node.projectRelativePath })]
       });
-      expect(reconcileCanvasTextPreviews).toHaveBeenCalledWith({
-        canvasId: canvas.id,
-        devicePixelRatio: expect.any(Number),
-        nodes: [expect.objectContaining({ projectRelativePath: node.projectRelativePath })]
-      });
-      expect(previewImage.getAttribute('data-preview-width')).toBe('420');
+      expect(previewImage.getAttribute('data-preview-width')).toBe('210');
     } finally {
       await act(async () => {
         root.unmount();
@@ -1150,27 +1140,18 @@ function textBufferFixture(path: string, content: string, revision: string): Tex
   };
 }
 
-function canvasTextPreviewDescriptorResponse(input: { nodes: Array<{
+function canvasTextPreviewSourceAvailabilityResponse(input: { sources: Array<{
   projectRelativePath: string;
   fingerprint: string;
-  contentCssWidth: number;
-  contentCssHeight: number;
-  scrollTop: number;
-  scrollLeft: number;
-}> }): { descriptors: Record<string, CanvasTextPreviewDescriptor> } {
+}> }): { sources: Record<string, { projectRelativePath: string; fingerprint: string; available: boolean }> } {
   return {
-    descriptors: Object.fromEntries(input.nodes.map((item) => [
+    sources: Object.fromEntries(input.sources.map((item) => [
       item.projectRelativePath,
       {
+        projectRelativePath: item.projectRelativePath,
         fingerprint: item.fingerprint,
-        sourceWidth: item.contentCssWidth,
-        sourceHeight: item.contentCssHeight,
-        contentCssWidth: item.contentCssWidth,
-        contentCssHeight: item.contentCssHeight,
-        scrollTop: item.scrollTop,
-        scrollLeft: item.scrollLeft,
-        variants: [item.contentCssWidth]
-      } satisfies CanvasTextPreviewDescriptor
+        available: true
+      }
     ]))
   };
 }
@@ -1401,8 +1382,7 @@ const actions: WorkbenchActions = {
   saveCanvasTextPreviewSource: async () => {
     throw new Error('not used');
   },
-  readCanvasTextPreviewDescriptors: async () => ({ descriptors: {} }),
-  reconcileCanvasTextPreviews: async () => ({ descriptors: {} }),
+  readCanvasTextPreviewSources: async () => ({ sources: {} }),
   createProjectFile: async () => {
     throw new Error('not used');
   },

@@ -2,8 +2,7 @@ import type {
   AddProjectPathToCanvasMapInput,
   AdobeBridgeStateView,
   BrowserSessionCredential,
-  CanvasTextPreviewDescriptorResponse,
-  CanvasTextPreviewDescriptorView,
+  CanvasTextPreviewSourceAvailabilityResponse,
   DebruteProductState,
   DebruteRuntimeInfo,
   DebruteHttpErrorBody,
@@ -15,6 +14,7 @@ import type {
   IntegrationSettingsView,
   ProductUpdateApplyResult,
   ProjectHealthSummary,
+  SaveCanvasTextPreviewSourceResult,
   SaveCanvasTextPreviewSourceInput,
   SaveAdobeBridgeSettingsInput,
   SaveImageModelSettingInput,
@@ -352,19 +352,14 @@ export function createHttpWorkbenchApiClient(options: HttpWorkbenchApiClientOpti
     },
     readProjectTextFile: (projectRelativePath) => request<WorkbenchProjectTextFile>('GET', projectPath(`/files/text/${encodeProjectPath(projectRelativePath)}`)),
     writeProjectTextFile: (projectRelativePath, content) => requestRevisioned<WorkbenchProjectTextFileWriteResult>('PUT', projectPath(`/files/text/${encodeProjectPath(projectRelativePath)}`), { content }),
-    saveCanvasTextPreviewSource: (input) => requestFormData<CanvasTextPreviewDescriptorView>(
+    saveCanvasTextPreviewSource: (input) => requestFormData<SaveCanvasTextPreviewSourceResult>(
       'POST',
       projectPath('/canvas-text-previews/source'),
       canvasTextPreviewSourceFormData(input)
     ),
-    readCanvasTextPreviewDescriptors: (input) => request<CanvasTextPreviewDescriptorResponse>(
+    readCanvasTextPreviewSources: (input) => request<CanvasTextPreviewSourceAvailabilityResponse>(
       'POST',
-      projectPath('/canvas-text-previews/descriptors'),
-      input
-    ),
-    reconcileCanvasTextPreviews: (input) => request<CanvasTextPreviewDescriptorResponse>(
-      'POST',
-      projectPath('/canvas-text-previews/reconcile'),
+      projectPath('/canvas-text-previews/sources'),
       input
     ),
     getDesktopPlatform: async () => (
@@ -597,11 +592,7 @@ function canvasTextPreviewSourceFormData(input: SaveCanvasTextPreviewSourceInput
   formData.append('metadata', JSON.stringify({
     canvasId: input.canvasId,
     projectRelativePath: input.projectRelativePath,
-    fingerprint: input.fingerprint,
-    contentCssWidth: input.contentCssWidth,
-    contentCssHeight: input.contentCssHeight,
-    scrollTop: input.scrollTop,
-    scrollLeft: input.scrollLeft
+    fingerprint: input.fingerprint
   }));
   formData.append('source', input.sourcePng, 'source.png');
   return formData;

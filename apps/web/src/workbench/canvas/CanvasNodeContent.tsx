@@ -506,8 +506,10 @@ function CanvasTextNodeContent({
 }): React.ReactElement {
   const { registerTextBody } = useCanvasTextPreviewRuntime();
   const active = selected;
-  const textPreviewProblem = !active && textPreviewError
-    ? { title: i18n.t('canvas.node.textPreviewError'), message: textPreviewError }
+  const [textPreviewVariantError, setTextPreviewVariantError] = useState<string>();
+  const textPreviewProblemMessage = textPreviewError ?? textPreviewVariantError;
+  const textPreviewProblem = !active && textPreviewProblemMessage
+    ? { title: i18n.t('canvas.node.textPreviewError'), message: textPreviewProblemMessage }
     : undefined;
   const bodyProblem = problem ?? textPreviewProblem;
   const status = textBufferStatus(buffer, bodyProblem, i18n);
@@ -525,6 +527,15 @@ function CanvasTextNodeContent({
       onSelectNode();
     }
   };
+  const reportTextPreviewVariantError = useCallback(() => {
+    setTextPreviewVariantError(i18n.t('canvas.node.textPreviewVariantLoadError', {
+      path: node.projectRelativePath
+    }));
+  }, [i18n, node.projectRelativePath]);
+
+  useEffect(() => {
+    setTextPreviewVariantError(undefined);
+  }, [node.projectRelativePath, textPreview?.src]);
 
   useEffect(() => {
     dispatchTextPreviewImage({ type: 'source-resolved', source: textPreview });
@@ -543,9 +554,12 @@ function CanvasTextNodeContent({
     return preloadCanvasImageForHandoff({
       image: nextTextPreview,
       resolveLoaded: (loadKey) => dispatchTextPreviewImage({ type: 'next-loaded', loadKey }),
-      rejectLoaded: (loadKey) => dispatchTextPreviewImage({ type: 'next-failed', loadKey })
+      rejectLoaded: (loadKey) => {
+        dispatchTextPreviewImage({ type: 'next-failed', loadKey });
+        reportTextPreviewVariantError();
+      }
     });
-  }, [nextTextPreview]);
+  }, [nextTextPreview, reportTextPreviewVariantError]);
 
   return (
     <section className="canvas-text-node">
@@ -606,7 +620,10 @@ function CanvasTextNodeContent({
             onToggleWordWrap={() => actions.toggleTextFileWordWrap(node.projectRelativePath)}
           />
         ) : buffer ? (
-          <CanvasTextPreviewImage state={textPreviewImageState} />
+          <CanvasTextPreviewImage
+            state={textPreviewImageState}
+            onError={reportTextPreviewVariantError}
+          />
         ) : (
           <div className="canvas-text-preview-empty" aria-hidden="true" />
         )}
@@ -616,9 +633,11 @@ function CanvasTextNodeContent({
 }
 
 function CanvasTextPreviewImage({
-  state
+  state,
+  onError
 }: {
   state: CanvasTextPreviewImageState;
+  onError: () => void;
 }): React.ReactElement {
   if (!state.loaded) {
     return <div className="canvas-text-preview-empty" aria-hidden="true" />;
@@ -631,6 +650,7 @@ function CanvasTextPreviewImage({
       alt=""
       draggable={false}
       data-preview-width={state.loaded.previewWidth}
+      onError={onError}
     />
   );
 }
