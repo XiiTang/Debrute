@@ -1,7 +1,7 @@
 import React from 'react';
-import { MoreHorizontal, Plus } from 'lucide-react';
+import { Plus } from 'lucide-react';
 import { reorderCanvasIds } from './canvasCardBarState';
-import { Button, IconButton, Input, Menu } from '../ui';
+import { Button, CloseButton, IconButton } from '../ui';
 import { useI18n } from '../i18n';
 
 export interface CanvasCardBarProps {
@@ -15,8 +15,6 @@ export interface CanvasCardBarProps {
 }
 
 const DRAG_DATA_TYPE = 'application/x-debrute-canvas-id';
-const MENU_WIDTH_PX = 176;
-const MENU_VIEWPORT_PADDING_PX = 8;
 
 export function CanvasCardBar({
   canvasOrder,
@@ -28,149 +26,134 @@ export function CanvasCardBar({
   onReorderCanvases
 }: CanvasCardBarProps): React.ReactElement {
   const i18n = useI18n();
+  const [editingCanvasId, setEditingCanvasId] = React.useState<string>();
+  const editingInputRef = React.useRef<HTMLInputElement | null>(null);
+  const renameFinishedRef = React.useRef(false);
+
+  React.useEffect(() => {
+    const input = editingInputRef.current;
+    if (!input) {
+      return;
+    }
+    input.focus();
+    input.select();
+  }, [editingCanvasId]);
+
+  const beginRename = (canvasId: string): void => {
+    renameFinishedRef.current = false;
+    setEditingCanvasId(canvasId);
+  };
+  const completeRename = (canvasId: string, value: string): void => {
+    if (renameFinishedRef.current) {
+      return;
+    }
+    renameFinishedRef.current = true;
+    const nextCanvasId = value.trim();
+    if (nextCanvasId && nextCanvasId !== canvasId) {
+      void onRenameCanvas({ canvasId, nextCanvasId });
+    }
+    setEditingCanvasId(undefined);
+  };
+  const cancelRename = (): void => {
+    renameFinishedRef.current = true;
+    setEditingCanvasId(undefined);
+  };
+
   return (
     <nav className="db-floating-bar canvas-card-bar" aria-label={i18n.t('canvas.cardBar.canvases')}>
       <div className="canvas-card-scroll">
-        {canvasOrder.map((canvasId) => (
-          <div
-            key={canvasId}
-            className="canvas-card-wrap"
-            onDragOver={(event) => {
-              event.preventDefault();
-              event.dataTransfer.dropEffect = 'move';
-            }}
-            onDrop={(event) => {
-              event.preventDefault();
-              const draggedCanvasId = event.dataTransfer.getData(DRAG_DATA_TYPE);
-              if (!draggedCanvasId) {
-                return;
-              }
-              const nextOrder = reorderCanvasIds(canvasOrder, draggedCanvasId, canvasId);
-              if (nextOrder !== canvasOrder) {
-                void onReorderCanvases({ canvasOrder: nextOrder });
-              }
-            }}
-          >
-            <Button
-              className="canvas-card db-canvas-card"
-              size="sm"
-              pressed={canvasId === activeCanvasId}
-              draggable
-              onDragStart={(event) => {
-                event.dataTransfer.setData(DRAG_DATA_TYPE, canvasId);
-                event.dataTransfer.effectAllowed = 'move';
+        {canvasOrder.map((canvasId) => {
+          const editing = editingCanvasId === canvasId;
+          return (
+            <div
+              key={canvasId}
+              className="canvas-card-wrap"
+              onDragOver={(event) => {
+                event.preventDefault();
+                event.dataTransfer.dropEffect = 'move';
               }}
-              onClick={() => onActiveCanvasChange(canvasId)}
+              onDrop={(event) => {
+                event.preventDefault();
+                const draggedCanvasId = event.dataTransfer.getData(DRAG_DATA_TYPE);
+                if (!draggedCanvasId) {
+                  return;
+                }
+                const nextOrder = reorderCanvasIds(canvasOrder, draggedCanvasId, canvasId);
+                if (nextOrder !== canvasOrder) {
+                  void onReorderCanvases({ canvasOrder: nextOrder });
+                }
+              }}
             >
-              {canvasId}
-            </Button>
-            <details className="canvas-card-menu-details" onToggle={(event) => positionCanvasCardMenu(event.currentTarget)}>
-              <summary aria-label={i18n.t('canvas.cardBar.actions')} className="canvas-card-menu-button db-icon-button db-icon-button--ghost db-icon-button--sm db-canvas-control" role="button">
-                <MoreHorizontal size={14} />
-              </summary>
-              <Menu className="canvas-card-menu" ariaLabel={i18n.t('canvas.cardBar.canvasActions', { canvasId })}>
-                <Menu.Item
-                  onClick={(event) => {
-                    closeCanvasCardMenu(event.currentTarget);
-                    void onCreateCanvas();
-                  }}
-                >
-                  {i18n.t('canvas.cardBar.new')}
-                </Menu.Item>
+              {editing ? (
                 <form
                   className="canvas-card-rename-form"
-                  onSubmit={(event) => submitRenameCanvas(event, canvasId, onRenameCanvas)}
+                  onSubmit={(event) => {
+                    event.preventDefault();
+                    completeRename(canvasId, renameFormValue(event.currentTarget));
+                  }}
                 >
-                  <Input
+                  <input
+                    ref={editingInputRef}
+                    className="db-input canvas-card-rename-input"
                     aria-label={i18n.t('canvas.cardBar.renameCanvas', { canvasId })}
                     name="nextCanvasId"
                     defaultValue={canvasId}
                     autoComplete="off"
                     spellCheck={false}
+                    onBlur={(event) => completeRename(canvasId, event.currentTarget.value)}
+                    onKeyDown={(event) => {
+                      if (event.key === 'Escape') {
+                        event.preventDefault();
+                        cancelRename();
+                      }
+                    }}
                   />
-                  <Menu.Item type="submit">{i18n.t('canvas.cardBar.rename')}</Menu.Item>
                 </form>
-                <Menu.Item
-                  data-canvas-delete-request
-                  variant="danger"
-                  onClick={(event) => requestDeleteCanvas(event.currentTarget)}
-                >
-                  {i18n.t('canvas.cardBar.delete')}
-                </Menu.Item>
-                <Menu.Item
-                  data-canvas-delete-confirm
-                  hidden
-                  variant="danger"
-                  onClick={(event) => {
-                    closeCanvasCardMenu(event.currentTarget);
-                    void onDeleteCanvas({ canvasId });
+              ) : (
+                <Button
+                  className="canvas-card db-canvas-card"
+                  size="sm"
+                  pressed={canvasId === activeCanvasId}
+                  draggable
+                  onDragStart={(event) => {
+                    event.dataTransfer.setData(DRAG_DATA_TYPE, canvasId);
+                    event.dataTransfer.effectAllowed = 'move';
+                  }}
+                  onClick={() => onActiveCanvasChange(canvasId)}
+                  onDoubleClick={(event) => {
+                    event.preventDefault();
+                    beginRename(canvasId);
                   }}
                 >
-                  {i18n.t('canvas.cardBar.confirmDelete')}
-                </Menu.Item>
-              </Menu>
-            </details>
-          </div>
-        ))}
+                  {canvasId}
+                </Button>
+              )}
+              {!editing ? (
+                <CloseButton
+                  className="canvas-card-delete db-canvas-control"
+                  label={i18n.t('canvas.cardBar.deleteCanvas', { canvasId })}
+                  onPointerDown={stopCanvasCardDeleteEvent}
+                  onDoubleClick={stopCanvasCardDeleteEvent}
+                  onClick={(event) => {
+                    stopCanvasCardDeleteEvent(event);
+                    void onDeleteCanvas({ canvasId });
+                  }}
+                />
+              ) : null}
+            </div>
+          );
+        })}
       </div>
       <IconButton className="canvas-card-add db-canvas-control" label={i18n.t('canvas.cardBar.new')} icon={<Plus size={14} />} onClick={() => { void onCreateCanvas(); }} />
     </nav>
   );
 }
 
-function submitRenameCanvas(
-  event: React.FormEvent<HTMLFormElement>,
-  canvasId: string,
-  onRenameCanvas: CanvasCardBarProps['onRenameCanvas']
-): void {
-  event.preventDefault();
-  const control = event.currentTarget.elements.namedItem('nextCanvasId') as { value?: unknown } | null;
-  const nextCanvasId = typeof control?.value === 'string' ? control.value.trim() : '';
-  if (nextCanvasId && nextCanvasId !== canvasId) {
-    closeCanvasCardMenu(event.currentTarget);
-    void onRenameCanvas({ canvasId, nextCanvasId });
-  }
+function renameFormValue(form: HTMLFormElement): string {
+  const control = form.elements.namedItem('nextCanvasId') as { value?: unknown } | null;
+  return typeof control?.value === 'string' ? control.value : '';
 }
 
-function requestDeleteCanvas(button: HTMLButtonElement): void {
-  const menu = button.closest('.canvas-card-menu');
-  const confirmButton = menu?.querySelector<HTMLButtonElement>('[data-canvas-delete-confirm]');
-  if (!confirmButton) {
-    return;
-  }
-  button.hidden = true;
-  confirmButton.hidden = false;
-  confirmButton.focus();
-}
-
-function closeCanvasCardMenu(element: Element): void {
-  element.closest('details')?.removeAttribute('open');
-}
-
-function positionCanvasCardMenu(details: HTMLDetailsElement): void {
-  if (!details.open) {
-    return;
-  }
-  const summary = details.querySelector('summary');
-  if (!summary) {
-    return;
-  }
-  const rect = summary.getBoundingClientRect();
-  const viewportWidth = globalThis.window?.innerWidth ?? 1280;
-  const viewportHeight = globalThis.window?.innerHeight ?? 720;
-  const left = Math.round(clamp(
-    rect.right - MENU_WIDTH_PX,
-    MENU_VIEWPORT_PADDING_PX,
-    viewportWidth - MENU_WIDTH_PX - MENU_VIEWPORT_PADDING_PX
-  ));
-  const bottom = Math.round(Math.max(
-    MENU_VIEWPORT_PADDING_PX,
-    viewportHeight - rect.top + 6
-  ));
-  details.style.setProperty('--canvas-card-menu-left', `${left}px`);
-  details.style.setProperty('--canvas-card-menu-bottom', `${bottom}px`);
-}
-
-function clamp(value: number, min: number, max: number): number {
-  return Math.min(max, Math.max(min, value));
+function stopCanvasCardDeleteEvent(event: React.SyntheticEvent): void {
+  event.stopPropagation();
 }

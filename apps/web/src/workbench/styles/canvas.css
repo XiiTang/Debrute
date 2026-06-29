@@ -1,4 +1,6 @@
 .canvas-card-bar {
+  --canvas-card-width: 96px;
+  --canvas-card-delete-overlap: 7px;
   position: fixed;
   left: 102px;
   bottom: 18px;
@@ -12,10 +14,21 @@
   padding: 0;
 }
 
+.canvas-card-bar.db-floating-bar {
+  border: 0;
+  background: transparent;
+  box-shadow: none;
+  backdrop-filter: none;
+}
+
 .canvas-card-scroll {
   display: flex;
   align-items: center;
   gap: 4px;
+  height: calc(100% + var(--canvas-card-delete-overlap));
+  margin-top: calc(-1 * var(--canvas-card-delete-overlap));
+  padding-top: var(--canvas-card-delete-overlap);
+  padding-right: var(--canvas-card-delete-overlap);
   min-width: 0;
   overflow-x: auto;
   scrollbar-width: thin;
@@ -26,38 +39,25 @@
   display: flex;
   align-items: center;
   flex: 0 0 auto;
+  height: 28px;
 }
 
 .canvas-card,
 .canvas-card-add,
-.canvas-card-menu-button {
+.canvas-card-rename-form {
   height: 28px;
   border: 0;
 }
 
 .canvas-card {
-  max-width: 160px;
-  min-width: 68px;
-  padding: 0 8px;
-  border-radius: 6px 0 0 6px;
+  width: var(--canvas-card-width);
+  padding: 0 24px 0 8px;
+  border-radius: 6px;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
 
-.canvas-card-menu-details {
-  position: relative;
-}
-
-.canvas-card-menu-details summary {
-  list-style: none;
-}
-
-.canvas-card-menu-details summary::-webkit-details-marker {
-  display: none;
-}
-
-.canvas-card-menu-button,
 .canvas-card-add {
   width: 28px;
   display: inline-flex;
@@ -65,33 +65,67 @@
   justify-content: center;
 }
 
-.canvas-card-menu-button {
-  border-radius: 0 6px 6px 0;
-  cursor: pointer;
-}
-
 .canvas-card-add {
   flex: 0 0 auto;
   border-radius: 6px;
 }
 
-.canvas-card-menu {
-  position: fixed;
-  left: var(--canvas-card-menu-left, 88px);
-  bottom: var(--canvas-card-menu-bottom, 56px);
-  z-index: 180;
-  min-width: 176px;
-}
-
 .canvas-card-rename-form {
-  display: grid;
-  grid-template-columns: minmax(0, 1fr) 62px;
-  gap: 5px;
-  padding: 4px 0;
+  width: var(--canvas-card-width);
+  display: block;
 }
 
-.canvas-card-menu [hidden] {
-  display: none;
+.canvas-card-rename-input.db-input {
+  width: 100%;
+  height: 28px;
+  min-height: 28px;
+  padding: 0 24px 0 8px;
+  border: 0;
+  border-radius: 6px;
+  font-size: var(--db-font-sm);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.canvas-card-delete.db-icon-button {
+  position: absolute;
+  top: 0;
+  right: 0;
+  transform: translate(37%, -37%);
+  z-index: 1;
+  opacity: 0;
+  pointer-events: none;
+}
+
+.canvas-card-delete.db-icon-button::before {
+  content: '';
+  position: absolute;
+  inset: 1px;
+  border-radius: 999px;
+  background: transparent;
+  transition: background var(--db-duration-fast) var(--db-ease-standard);
+}
+
+.canvas-card-delete.db-icon-button .db-icon-button__icon {
+  position: relative;
+  z-index: 1;
+}
+
+.canvas-card-delete.db-icon-button:hover:not(:disabled),
+.canvas-card-delete.db-icon-button:focus-visible {
+  background: transparent;
+}
+
+.canvas-card-delete.db-icon-button:hover:not(:disabled)::before,
+.canvas-card-delete.db-icon-button:focus-visible::before {
+  background: color-mix(in oklch, var(--db-surface-3) 82%, var(--db-accent));
+}
+
+.canvas-card-wrap:hover .canvas-card-delete.db-icon-button,
+.canvas-card-delete.db-icon-button:focus-visible {
+  opacity: 1;
+  pointer-events: auto;
 }
 
 .canvas-shell {

@@ -22,8 +22,10 @@ describe('CanvasCardBar', () => {
     expect(html).toContain('db-button--sm');
     expect(html).toContain('db-icon-button');
     expect(html).toContain('db-canvas-card');
+    expect(html).toContain('canvas-card-delete');
     expect(html).toContain('db-canvas-control');
     expect(html).toContain('aria-pressed="true"');
+    expect(html).not.toContain('--canvas-card-name-ch');
 
     await withRenderedCardBar(props, async ({ container }) => {
       await act(async () => {
@@ -34,9 +36,62 @@ describe('CanvasCardBar', () => {
     expect(onActiveCanvasChange).toHaveBeenCalledWith('storyboard');
   });
 
-  it('submits canvas menu actions without browser prompt or confirm dialogs', async () => {
-    const onCreateCanvas = vi.fn(async () => undefined);
+  it('renames a canvas from an inline editor opened by double click', async () => {
     const onRenameCanvas = vi.fn(async () => undefined);
+    const prompt = vi.fn(() => 'prompted');
+    const confirm = vi.fn(() => true);
+    vi.stubGlobal('prompt', prompt);
+    vi.stubGlobal('confirm', confirm);
+
+    await withRenderedCardBar(propsFixture({
+      canvasOrder: ['canvas-1'],
+      onRenameCanvas
+    }), async ({ container }) => {
+      await act(async () => {
+        buttonByText(container, 'canvas-1').dispatchEvent(new MouseEvent('dblclick', { bubbles: true, cancelable: true }));
+      });
+      const input = queryRequired<HTMLInputElement>(container, 'input[name="nextCanvasId"]');
+      expect(input.value).toBe('canvas-1');
+      expect(document.activeElement).toBe(input);
+
+      await act(async () => {
+        input.value = 'renamed';
+        queryRequired<HTMLFormElement>(container, 'form.canvas-card-rename-form')
+          .dispatchEvent(new Event('submit', { bubbles: true, cancelable: true }));
+      });
+    });
+
+    expect(onRenameCanvas).toHaveBeenCalledWith({ canvasId: 'canvas-1', nextCanvasId: 'renamed' });
+    expect(prompt).not.toHaveBeenCalled();
+    expect(confirm).not.toHaveBeenCalled();
+  });
+
+  it('cancels inline canvas rename on Escape', async () => {
+    const onRenameCanvas = vi.fn(async () => undefined);
+
+    await withRenderedCardBar(propsFixture({
+      canvasOrder: ['canvas-1'],
+      onRenameCanvas
+    }), async ({ container }) => {
+      await act(async () => {
+        buttonByText(container, 'canvas-1').dispatchEvent(new MouseEvent('dblclick', { bubbles: true, cancelable: true }));
+      });
+      const input = queryRequired<HTMLInputElement>(container, 'input[name="nextCanvasId"]');
+      input.value = 'renamed';
+
+      await act(async () => {
+        input.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true, cancelable: true }));
+        input.dispatchEvent(new FocusEvent('focusout', { bubbles: true, cancelable: true }));
+      });
+
+      expect(container.querySelector('input[name="nextCanvasId"]')).toBeNull();
+    });
+
+    expect(onRenameCanvas).not.toHaveBeenCalled();
+  });
+
+  it('deletes a canvas from the card close control without switching canvases', async () => {
+    const onActiveCanvasChange = vi.fn();
     const onDeleteCanvas = vi.fn(async () => undefined);
     const prompt = vi.fn(() => 'prompted');
     const confirm = vi.fn(() => true);
@@ -45,41 +100,29 @@ describe('CanvasCardBar', () => {
 
     await withRenderedCardBar(propsFixture({
       canvasOrder: ['canvas-1'],
-      onCreateCanvas,
-      onRenameCanvas,
+      onActiveCanvasChange,
       onDeleteCanvas
     }), async ({ container }) => {
       await act(async () => {
-        buttonByText(container, 'New Canvas').click();
-      });
-      await act(async () => {
-        const input = queryRequired<HTMLInputElement>(container, 'input[name="nextCanvasId"]');
-        input.value = 'renamed';
-        queryRequired<HTMLFormElement>(container, 'form.canvas-card-rename-form')
-          .dispatchEvent(new Event('submit', { bubbles: true, cancelable: true }));
-      });
-      await act(async () => {
-        buttonByText(container, 'Delete').click();
-        buttonByText(container, 'Confirm Delete').click();
+        queryRequired<HTMLButtonElement>(container, '.canvas-card-delete').click();
       });
     });
 
-    expect(onCreateCanvas).toHaveBeenCalled();
-    expect(onRenameCanvas).toHaveBeenCalledWith({ canvasId: 'canvas-1', nextCanvasId: 'renamed' });
     expect(onDeleteCanvas).toHaveBeenCalledWith({ canvasId: 'canvas-1' });
+    expect(onActiveCanvasChange).not.toHaveBeenCalled();
     expect(prompt).not.toHaveBeenCalled();
     expect(confirm).not.toHaveBeenCalled();
   });
 
-  it('renders inline rename and explicit delete confirmation controls in the menu', () => {
+  it('renders direct rename and delete controls without a card menu', () => {
     const html = renderStaticWithI18n(<CanvasCardBar {...propsFixture({ canvasOrder: ['canvas-1'] })} />);
 
-    expect(html).toContain('name="nextCanvasId"');
-    expect(html).toContain('value="canvas-1"');
-    expect(html).toContain('aria-label="Rename canvas-1"');
-    expect(html).toContain('hidden=""');
-    expect(html).toContain('Confirm Delete');
-    expect(html).toContain('db-menu');
+    expect(html).toContain('aria-label="Delete canvas-1"');
+    expect(html).toContain('canvas-card-delete');
+    expect(html).not.toContain('canvas-card-menu');
+    expect(html).not.toContain('db-menu');
+    expect(html).not.toContain('Confirm Delete');
+    expect(html).not.toContain('Canvas actions');
   });
 });
 
