@@ -218,6 +218,9 @@ apps/web/src/workbench/ui/
 
 - Repeated controls use these primitives.
 - Repeated structures use `workbench-patterns.css`.
+- Component family comes first: components with the same role use the same primitive or named pattern.
+- Components in the same family share size, spacing, radius, surface, border, shadow, text, icon, hover, pressed, disabled, and focus rules.
+- Allowed component-family differences are limited to semantic state, established size tiers, placement geometry, content constraints, and narrow Canvas/media visibility needs.
 - Icon-only buttons require accessible labels.
 - Status UI uses `StatusPill` or a named pattern.
 - Quiet successful/default states should not be persistently rendered as green success badges.
@@ -233,7 +236,7 @@ apps/web/src/workbench/ui/
 - `apps/web/src/workbench/ui/styles/tokens.css` implements the root token language using `--db-*`.
 - `apps/web/src/workbench/ui/styles/workbench-patterns.css` owns reusable Workbench structures.
 - `apps/web/src/workbench/styles/*.css` owns feature placement, layout, Canvas geometry, and surface-specific rendering.
-- Feature styles do not define local reusable button, icon-button, input, card, menu, panel, status, floating-bar, notification, terminal-tab, nav-row, diagnostic-row, or Canvas-node chrome systems.
+- Feature CSS does not define a second button, icon-button, input, card, menu, panel, status, floating-bar, notification, terminal-tab, nav-row, diagnostic-row, Canvas-node, or Canvas overlay chrome system.
 
 Workbench floating panels use one shared shell for Explorer, Inspector, Problems, Settings, and Terminal.
 
@@ -279,6 +282,8 @@ The CEP plugin is a compact host panel with Debrute-compatible CSS variables.
 Canvas is both a Workbench surface and a creative object space. It has stricter runtime needs than ordinary chrome.
 
 - Canvas chrome uses Debrute primitives and patterns.
+- Canvas overlay controls use the shared floating-bar and Canvas control patterns for base chrome.
+- Canvas feature CSS owns overlay placement and intrinsic Canvas geometry only; it does not clear shared floating-bar surface, border, shadow, or backdrop treatment for a single overlay.
 - Canvas content can define local geometry for zoom, hit targets, resize handles, node dimensions, media previews, and overlay alignment.
 - Selection, handles, region feedback, pins, and annotation overlays may use high-contrast local treatments when needed for media visibility.
 - Canvas-specific values are named by purpose when they represent reusable Canvas UI, and kept local when they are intrinsic rendering math.
@@ -334,7 +339,7 @@ Canvas exceptions are intentional and narrow:
 - Adobe host-provided variables inside UXP
 - native Electron, tray, and menu platform surfaces
 
-These exceptions do not allow feature-owned reusable product chrome.
+Canvas exceptions do not allow feature-owned reusable product chrome or local overrides that clear shared floating-bar surface, border, shadow, or backdrop treatment.
 
 ## Do's and Don'ts
 
