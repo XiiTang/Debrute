@@ -541,6 +541,13 @@
   color: var(--db-text-muted);
 }
 
+.db-floating-bar.db-canvas-control {
+  border: 1px solid var(--db-border-muted);
+  background: var(--db-floating-bg);
+  box-shadow: var(--db-shadow-floating);
+  backdrop-filter: blur(14px);
+}
+
 .db-canvas-control:hover:not(:disabled),
 .db-canvas-control[aria-pressed="true"] {
   border: 0;
@@ -557,10 +564,30 @@
   color: var(--db-text-subtle);
 }
 
+.db-floating-bar.db-canvas-control:hover:not(:disabled),
+.db-floating-bar.db-canvas-control[aria-pressed="true"] {
+  border: 1px solid var(--db-border-muted);
+  background: var(--db-surface-3);
+}
+
+.db-floating-bar.db-canvas-control:disabled {
+  border: 1px solid var(--db-border-muted);
+  background: var(--db-floating-bg);
+}
+
 .db-canvas-card {
   height: var(--db-control-sm);
   border: 0;
   max-width: 180px;
+  background: transparent;
+  color: var(--db-text-muted);
+}
+
+.db-canvas-card:hover:not(:disabled),
+.db-canvas-card[aria-pressed="true"] {
+  border: 0;
+  background: var(--db-surface-3);
+  color: var(--db-text);
 }
 
 .db-floating-bar.canvas-card-bar,

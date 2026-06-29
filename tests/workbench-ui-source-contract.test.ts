@@ -618,6 +618,8 @@ describe('Workbench UI source contract', () => {
     const patterns = css('apps/web/src/workbench/ui/styles/workbench-patterns.css');
     const cardBarRule = rule(styles, '.canvas-card-bar');
     const cardBarFloatingRule = rule(styles, '.canvas-card-bar.db-floating-bar');
+    const floatingCanvasControlRule = rule(patterns, '.db-floating-bar.db-canvas-control');
+    const canvasCardRule = rule(patterns, '.db-canvas-card');
     const minimapRule = rule(styles, '.canvas-minimap-bar');
     const resetRule = rule(styles, '.canvas-reset-layout-button');
     const minimapSource = css('apps/web/src/workbench/canvas/CanvasMinimapBar.tsx');
@@ -649,9 +651,17 @@ describe('Workbench UI source contract', () => {
     expect(patterns).toContain('.db-floating-bar.canvas-feedback-bar,');
     expect(patterns).toContain('.db-floating-bar.canvas-minimap-bar,');
     expect(patterns).toContain('.db-floating-bar.canvas-reset-layout-button {');
+    expect(floatingCanvasControlRule).toContain('border: 1px solid var(--db-border-muted);');
+    expect(floatingCanvasControlRule).toContain('background: var(--db-floating-bg);');
+    expect(floatingCanvasControlRule).toContain('box-shadow: var(--db-shadow-floating);');
+    expect(floatingCanvasControlRule).toContain('backdrop-filter: blur(14px);');
+    expect(patterns).toContain('.db-floating-bar.db-canvas-control:hover:not(:disabled),\n.db-floating-bar.db-canvas-control[aria-pressed="true"]');
     expect(patterns).toContain('.db-canvas-control:hover:not(:disabled)');
     expect(patterns).toContain('.db-canvas-control[aria-pressed="true"]');
     expect(patterns).toContain('.db-canvas-control:disabled');
+    expect(canvasCardRule).toContain('background: transparent;');
+    expect(canvasCardRule).toContain('color: var(--db-text-muted);');
+    expect(patterns).toContain('.db-canvas-card:hover:not(:disabled),\n.db-canvas-card[aria-pressed="true"]');
     expect(minimapSource).toContain('db-floating-bar canvas-minimap-bar');
     expect(resetSource).toContain('db-floating-bar canvas-reset-layout-button');
     expect(cardBarSource).toContain('db-floating-bar canvas-card-bar');
