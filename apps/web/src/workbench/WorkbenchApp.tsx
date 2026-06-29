@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import React, { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { Loader2 } from 'lucide-react';
 import type {
   WorkbenchMenuItem,
@@ -211,7 +211,7 @@ export function WorkbenchApp(): React.ReactElement {
     return subscribeSystemThemeChanges(setResolvedTheme);
   }, [themePreference]);
 
-  useEffect(() => {
+  useLayoutEffect(() => {
     setDocumentTheme(resolvedTheme);
   }, [resolvedTheme]);
 
@@ -780,8 +780,7 @@ export function WorkbenchApp(): React.ReactElement {
     readProjectTextFile,
     writeProjectTextFile,
     saveCanvasTextPreviewSource: (input) => api.saveCanvasTextPreviewSource(input),
-    readCanvasTextPreviewDescriptors: (input) => api.readCanvasTextPreviewDescriptors(input),
-    reconcileCanvasTextPreviews: (input) => api.reconcileCanvasTextPreviews(input),
+    readCanvasTextPreviewSources: (input) => api.readCanvasTextPreviewSources(input),
     createProjectFile: async (input) => {
       const result = await api.createProjectFile(input);
       setSnapshot(result.snapshot);

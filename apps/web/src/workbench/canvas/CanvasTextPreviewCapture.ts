@@ -33,6 +33,7 @@ export async function canvasTextPreviewFingerprint(input: {
   contentCssHeight: number;
   scrollTop: number;
   scrollLeft: number;
+  styleKey: string;
 }): Promise<string> {
   const payload = JSON.stringify({
     visualVersion: CANVAS_TEXT_PREVIEW_VISUAL_VERSION,
@@ -43,7 +44,8 @@ export async function canvasTextPreviewFingerprint(input: {
     contentCssHeight: input.contentCssHeight,
     scrollTop: input.scrollTop,
     scrollLeft: input.scrollLeft,
-    sourceScale: CANVAS_TEXT_PREVIEW_SOURCE_SCALE
+    sourceScale: CANVAS_TEXT_PREVIEW_SOURCE_SCALE,
+    styleKey: input.styleKey
   });
   const digest = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(payload));
   return `sha256:${[...new Uint8Array(digest)].map((byte) => byte.toString(16).padStart(2, '0')).join('')}`;

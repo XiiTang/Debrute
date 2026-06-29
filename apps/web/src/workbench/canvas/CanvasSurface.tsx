@@ -86,6 +86,7 @@ interface CanvasSurfaceProps {
   onCurrentNodesChange?: ((canvasId: string, nodes: ProjectedCanvasNode[] | undefined) => void) | undefined;
   onFeedbackBarTargetChange?: ((target: CanvasFeedbackBarTarget | undefined) => void) | undefined;
   onOpenContextMenu?: ((target: WorkbenchContextMenuTarget, position: WorkbenchContextMenuPosition) => void) | undefined;
+  textPreviewStyleDependencyKey: string;
 }
 
 export function CanvasSurface({
@@ -103,7 +104,8 @@ export function CanvasSurface({
   feedbackPlacementContext,
   onCurrentNodesChange,
   onFeedbackBarTargetChange,
-  onOpenContextMenu
+  onOpenContextMenu,
+  textPreviewStyleDependencyKey
 }: CanvasSurfaceProps): React.ReactElement {
   const perfMonitorEnabled = canvasPerfMonitorEnabled();
   const perfMonitorRef = useRef<CanvasPerfMonitor | undefined>(undefined);
@@ -144,6 +146,7 @@ export function CanvasSurface({
       onCurrentNodesChange={onCurrentNodesChange}
       onFeedbackBarTargetChange={onFeedbackBarTargetChange}
       onOpenContextMenu={onOpenContextMenu}
+      textPreviewStyleDependencyKey={textPreviewStyleDependencyKey}
     />
   );
 }
@@ -164,7 +167,8 @@ function CanvasSurfaceRuntime({
   feedbackPlacementContext,
   onCurrentNodesChange,
   onFeedbackBarTargetChange,
-  onOpenContextMenu
+  onOpenContextMenu,
+  textPreviewStyleDependencyKey
 }: CanvasSurfaceProps & {
   perfMonitor: CanvasPerfMonitor;
 }): React.ReactElement {
@@ -949,6 +953,7 @@ function CanvasSurfaceRuntime({
           devicePixelRatio={devicePixelRatio}
           culledNodePaths={renderSnapshot.culledNodePaths}
           previewResourceScheduler={previewResourceScheduler}
+          styleDependencyKey={textPreviewStyleDependencyKey}
         >
           <CanvasImageNodeAssetProvider value={imageNodeAssetContext}>
             {renderedNodes.map((node) => (

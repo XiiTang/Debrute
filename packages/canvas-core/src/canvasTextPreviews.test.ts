@@ -1,31 +1,29 @@
 import { describe, expect, it } from 'vitest';
 import {
-  canvasTextPreviewDescriptorProjectPath,
   canvasTextPreviewSourceProjectPath,
-  canvasTextPreviewVariantProjectPath,
-  normalizeCanvasTextPreviewDescriptor
+  canvasTextPreviewVariantProjectPath
 } from './canvasTextPreviews';
 
 describe('Canvas text preview paths', () => {
-  it('maps a Canvas text file to source, variant, and descriptor paths through a source key', () => {
-    const target = {
+  it('scopes source cache paths by canvas, project path, and fingerprint', () => {
+    expect(canvasTextPreviewSourceProjectPath({
       canvasId: 'canvas-1',
       projectRelativePath: 'notes/scene.md',
       fingerprint: 'sha256:scene-a'
-    };
-    const sourcePath = canvasTextPreviewSourceProjectPath(target);
-    expect(sourcePath).toMatch(
+    })).toMatch(
       /^\.debrute\/cache\/canvas-text-previews\/canvas-1\/notes%2Fscene\.md--[a-f0-9]{16}\/sha256%3Ascene-a\/source\.png$/
     );
+  });
 
-    const variantPath = canvasTextPreviewVariantProjectPath({
-      ...target,
-      width: 700
-    });
-    expect(variantPath).toBe(sourcePath.replace('/source.png', '/preview-w700.png'));
-
-    const descriptorPath = canvasTextPreviewDescriptorProjectPath(target);
-    expect(descriptorPath).toBe(sourcePath.replace('/source.png', '/preview.json'));
+  it('scopes variant cache paths by source key and width', () => {
+    expect(canvasTextPreviewVariantProjectPath({
+      canvasId: 'canvas-1',
+      projectRelativePath: 'notes/scene.md',
+      fingerprint: 'sha256:scene-a',
+      width: 590
+    })).toMatch(
+      /^\.debrute\/cache\/canvas-text-previews\/canvas-1\/notes%2Fscene\.md--[a-f0-9]{16}\/sha256%3Ascene-a\/preview-w590\.png$/
+    );
   });
 
   it('rejects unsafe canvas ids and internal project paths', () => {
@@ -60,25 +58,13 @@ describe('Canvas text preview paths', () => {
     })).toThrow('Canvas text preview fingerprint must be a non-empty string.');
   });
 
-  it('normalizes descriptors with sorted positive widths', () => {
-    expect(normalizeCanvasTextPreviewDescriptor({
-      fingerprint: 'fp',
-      sourceWidth: 1200,
-      sourceHeight: 640,
-      contentCssWidth: 600,
-      contentCssHeight: 320,
-      scrollTop: 0,
-      scrollLeft: 0,
-      variants: [700, 350, 700]
-    })).toEqual({
-      fingerprint: 'fp',
-      sourceWidth: 1200,
-      sourceHeight: 640,
-      contentCssWidth: 600,
-      contentCssHeight: 320,
-      scrollTop: 0,
-      scrollLeft: 0,
-      variants: [350, 700]
-    });
+  it('rejects invalid variant widths', () => {
+    expect(() => canvasTextPreviewVariantProjectPath({
+      canvasId: 'canvas-1',
+      projectRelativePath: 'notes/scene.md',
+      fingerprint: 'sha256:scene-a',
+      width: 0
+    })).toThrow('Canvas text preview width must be a positive integer.');
   });
+
 });

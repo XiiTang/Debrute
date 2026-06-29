@@ -468,14 +468,12 @@ describe('workbench API client', () => {
       canvasId: 'canvas-1',
       projectRelativePath: 'notes/a.md',
       fingerprint: 'fp',
-      contentCssWidth: 600,
-      contentCssHeight: 320,
-      scrollTop: 0,
-      scrollLeft: 0,
       sourcePng: new Blob(['png'], { type: 'image/png' })
     });
-    await client.readCanvasTextPreviewDescriptors({ canvasId: 'canvas-1', nodes: [] });
-    await client.reconcileCanvasTextPreviews({ canvasId: 'canvas-1', nodes: [], devicePixelRatio: 2 });
+    await client.readCanvasTextPreviewSources({
+      canvasId: 'canvas-1',
+      sources: [{ projectRelativePath: 'notes/a.md', fingerprint: 'fp' }]
+    });
 
     expect(requests.slice(1)).toEqual([
       {
@@ -485,12 +483,7 @@ describe('workbench API client', () => {
       },
       {
         method: 'POST',
-        url: `http://127.0.0.1:17321/api/projects/${projectId}/canvas-text-previews/descriptors`,
-        bodyKind: 'json'
-      },
-      {
-        method: 'POST',
-        url: `http://127.0.0.1:17321/api/projects/${projectId}/canvas-text-previews/reconcile`,
+        url: `http://127.0.0.1:17321/api/projects/${projectId}/canvas-text-previews/sources`,
         bodyKind: 'json'
       }
     ]);

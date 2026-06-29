@@ -2,7 +2,7 @@
 
 import React, { act } from 'react';
 import { createRoot } from 'react-dom/client';
-import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { toBlob } from 'html-to-image';
 import type { ProjectedCanvasNode } from '@debrute/canvas-core';
 import type { TextFileBuffer, WorkbenchActions } from '../../types';
@@ -76,6 +76,11 @@ describe('CanvasTextPreviewCaptureFlow', () => {
     vi.clearAllMocks();
     textEditorMockLayout.gutterTop = 10;
     textEditorMockLayout.lineTop = 14;
+    installTextPreviewStyleVariables();
+  });
+
+  afterEach(() => {
+    clearTextPreviewStyleVariables();
   });
 
   it('does not save a text preview source when capture layout validation fails', async () => {
@@ -87,7 +92,9 @@ describe('CanvasTextPreviewCaptureFlow', () => {
     const root = createRoot(container);
     const node = textNode('notes/misaligned.md');
     const errors: Array<string | undefined> = [];
-    const saveCanvasTextPreviewSource = vi.fn(async () => descriptorFor(node.projectRelativePath));
+    const saveCanvasTextPreviewSource = vi.fn<WorkbenchActions['saveCanvasTextPreviewSource']>(
+      async (input) => textPreviewSourceSaveResult(input)
+    );
 
     try {
       await act(async () => {
@@ -106,6 +113,7 @@ describe('CanvasTextPreviewCaptureFlow', () => {
             devicePixelRatio={2}
             culledNodePaths={new Set()}
             previewResourceScheduler={createImmediateScheduler()}
+            styleDependencyKey="dark"
           >
             <RegisteredTextBody node={node} />
             <TextPreviewErrorProbe node={node} onError={(error) => errors.push(error)} />
@@ -136,7 +144,9 @@ describe('CanvasTextPreviewCaptureFlow', () => {
     document.body.append(container);
     const root = createRoot(container);
     const node = textNode('notes/cancelled.md');
-    const saveCanvasTextPreviewSource = vi.fn(async () => descriptorFor(node.projectRelativePath));
+    const saveCanvasTextPreviewSource = vi.fn<WorkbenchActions['saveCanvasTextPreviewSource']>(
+      async (input) => textPreviewSourceSaveResult(input)
+    );
     const toBlobMock = vi.mocked(toBlob);
     let resolveBlob: ((blob: Blob) => void) | undefined;
     const pendingBlob = new Promise<Blob>((resolve) => {
@@ -163,6 +173,7 @@ describe('CanvasTextPreviewCaptureFlow', () => {
             devicePixelRatio={2}
             culledNodePaths={new Set()}
             previewResourceScheduler={createImmediateScheduler()}
+            styleDependencyKey="dark"
           >
             <RegisteredTextBody node={node} />
           </CanvasTextPreviewProvider>
@@ -261,8 +272,15 @@ function textPreviewActionsFixture(
   saveCanvasTextPreviewSource: WorkbenchActions['saveCanvasTextPreviewSource']
 ): WorkbenchActions {
   return {
-    readCanvasTextPreviewDescriptors: async () => ({ descriptors: {} }),
-    reconcileCanvasTextPreviews: async () => ({ descriptors: {} }),
+    readCanvasTextPreviewSources: async (input: Parameters<WorkbenchActions['readCanvasTextPreviewSources']>[0]) => ({
+      sources: Object.fromEntries(input.sources.map((source) => [
+        source.projectRelativePath,
+        {
+          ...source,
+          available: false
+        }
+      ]))
+    }),
     saveCanvasTextPreviewSource
   } as unknown as WorkbenchActions;
 }
@@ -280,16 +298,26 @@ function createImmediateScheduler(): CanvasPreviewResourceScheduler {
   };
 }
 
-function descriptorFor(projectRelativePath: string) {
+function installTextPreviewStyleVariables(): void {
+  document.documentElement.style.setProperty('--db-text', '#ffffff');
+  document.documentElement.style.setProperty('--db-text-muted', 'rgb(255 255 255 / 72%)');
+}
+
+function clearTextPreviewStyleVariables(): void {
+  document.documentElement.style.removeProperty('--db-text');
+  document.documentElement.style.removeProperty('--db-text-muted');
+}
+
+function textPreviewSourceSaveResult(
+  input: Parameters<WorkbenchActions['saveCanvasTextPreviewSource']>[0]
+): Awaited<ReturnType<WorkbenchActions['saveCanvasTextPreviewSource']>> {
   return {
-    fingerprint: `sha256:${projectRelativePath}`,
-    sourceWidth: 1280,
-    sourceHeight: 640,
-    contentCssWidth: 320,
-    contentCssHeight: 160,
-    scrollTop: 0,
-    scrollLeft: 0,
-    variants: [320, 640, 1280]
+    ok: true,
+    source: {
+      projectRelativePath: input.projectRelativePath,
+      fingerprint: input.fingerprint,
+      available: true
+    }
   };
 }
 

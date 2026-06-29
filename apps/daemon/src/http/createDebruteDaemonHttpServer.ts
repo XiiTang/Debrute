@@ -14,9 +14,8 @@ import {
   type AdobeBridgeSettings,
   type AppServerEvent,
   type BrowserSessionCredential,
-  type CanvasTextPreviewDescriptorRequest,
-  type CanvasTextPreviewNodeTarget,
-  type CanvasTextPreviewReconcileRequest,
+  type CanvasTextPreviewSourceAvailabilityRequest,
+  type CanvasTextPreviewSourceTarget,
   type DaemonBridgeImportRequestMessage,
   type DaemonCliCommandRequest,
   type DaemonProjectUploadImportPlan,
@@ -663,12 +662,8 @@ export function createDebruteDaemonHttpServer(options: DebruteDaemonHttpServerOp
       await handleCanvasTextPreviewSourceRoute(context);
       return;
     }
-    if (tail === '/canvas-text-previews/descriptors') {
-      await handleCanvasTextPreviewDescriptorRoute(context);
-      return;
-    }
-    if (tail === '/canvas-text-previews/reconcile') {
-      await handleCanvasTextPreviewReconcileRoute(context);
+    if (tail === '/canvas-text-previews/sources') {
+      await handleCanvasTextPreviewSourcesRoute(context);
       return;
     }
     if (tail === '/canvas-text-preview') {
@@ -1255,37 +1250,25 @@ async function handleCanvasTextPreviewSourceRoute(context: ProjectRequestContext
     if (!source) {
       throw new DebruteDaemonHttpError(400, 'invalid_input', 'Canvas text preview source file is required.');
     }
-    const descriptor = await daemonAppServer(context).saveCanvasTextPreviewSource({
+    const result = await daemonAppServer(context).saveCanvasTextPreviewSource({
       ...metadata,
       sourceTemporaryPath: source.temporaryPath
     });
-    writeJson(context.response, 200, descriptor);
+    writeJson(context.response, 200, result);
   } finally {
     await parts.cleanup();
   }
 }
 
-async function handleCanvasTextPreviewDescriptorRoute(context: ProjectRequestContext): Promise<void> {
+async function handleCanvasTextPreviewSourcesRoute(context: ProjectRequestContext): Promise<void> {
   if (context.request.method !== 'POST') {
-    writeError(context.response, 405, 'method_not_allowed', 'Unsupported Canvas text preview descriptor method.');
+    writeError(context.response, 405, 'method_not_allowed', 'Unsupported Canvas text preview sources method.');
     return;
   }
-  const body = daemonCanvasTextPreviewDescriptorRequest(
+  const body = daemonCanvasTextPreviewSourceAvailabilityRequest(
     await readJsonBody<Record<string, unknown>>(context.request)
   );
-  const descriptors = await daemonAppServer(context).readCanvasTextPreviewDescriptors(body);
-  writeJson(context.response, 200, { descriptors });
-}
-
-async function handleCanvasTextPreviewReconcileRoute(context: ProjectRequestContext): Promise<void> {
-  if (context.request.method !== 'POST') {
-    writeError(context.response, 405, 'method_not_allowed', 'Unsupported Canvas text preview reconcile method.');
-    return;
-  }
-  const body = daemonCanvasTextPreviewReconcileRequest(
-    await readJsonBody<Record<string, unknown>>(context.request)
-  );
-  writeJson(context.response, 200, await daemonAppServer(context).reconcileCanvasTextPreviews(body));
+  writeJson(context.response, 200, await daemonAppServer(context).readCanvasTextPreviewSources(body));
 }
 
 async function handleCanvasTextPreviewImageRoute(context: ProjectRequestContext): Promise<void> {
@@ -1297,7 +1280,7 @@ async function handleCanvasTextPreviewImageRoute(context: ProjectRequestContext)
     canvasId: context.url.searchParams.get('canvasId') ?? '',
     projectRelativePath: context.url.searchParams.get('path') ?? '',
     fingerprint: context.url.searchParams.get('fingerprint') ?? '',
-    width: Number(context.url.searchParams.get('w') ?? '')
+    width: positiveIntegerQueryParam(context.url.searchParams.get('w'), 'w')
   });
   await writeRevisionedFileResponse({
     request: context.request,
@@ -2012,7 +1995,7 @@ function daemonUploadImportPlan(value: string | undefined): DaemonProjectUploadI
   };
 }
 
-function daemonCanvasTextPreviewMetadata(value: string | undefined): CanvasTextPreviewNodeTarget & { canvasId: string } {
+function daemonCanvasTextPreviewMetadata(value: string | undefined): CanvasTextPreviewSourceTarget & { canvasId: string } {
   if (typeof value !== 'string') {
     throw new DebruteDaemonHttpError(400, 'invalid_input', 'Canvas text preview metadata is required.');
   }
@@ -2028,47 +2011,36 @@ function daemonCanvasTextPreviewMetadata(value: string | undefined): CanvasTextP
   const record = parsed as Record<string, unknown>;
   return {
     canvasId: stringField(record.canvasId, 'canvasId'),
-    ...daemonCanvasTextPreviewNodeTarget(record)
+    ...daemonCanvasTextPreviewSourceTarget(record)
   };
 }
 
-function daemonCanvasTextPreviewDescriptorRequest(body: Record<string, unknown>): CanvasTextPreviewDescriptorRequest {
+function daemonCanvasTextPreviewSourceAvailabilityRequest(body: Record<string, unknown>): CanvasTextPreviewSourceAvailabilityRequest {
   return {
     canvasId: stringField(body.canvasId, 'canvasId'),
-    nodes: daemonCanvasTextPreviewNodeTargets(body.nodes)
+    sources: daemonCanvasTextPreviewSourceTargets(body.sources)
   };
 }
 
-function daemonCanvasTextPreviewReconcileRequest(body: Record<string, unknown>): CanvasTextPreviewReconcileRequest {
-  return {
-    ...daemonCanvasTextPreviewDescriptorRequest(body),
-    devicePixelRatio: positiveFiniteNumberField(body.devicePixelRatio, 'devicePixelRatio')
-  };
-}
-
-function daemonCanvasTextPreviewNodeTargets(value: unknown): CanvasTextPreviewNodeTarget[] {
+function daemonCanvasTextPreviewSourceTargets(value: unknown): CanvasTextPreviewSourceTarget[] {
   if (!Array.isArray(value)) {
-    throw new DebruteDaemonHttpError(400, 'invalid_input', 'nodes must be an array.');
+    throw new DebruteDaemonHttpError(400, 'invalid_input', 'sources must be an array.');
   }
   return value.map((item, index) => {
     if (typeof item !== 'object' || item === null || Array.isArray(item)) {
-      throw new DebruteDaemonHttpError(400, 'invalid_input', `nodes[${index}] must be an object.`);
+      throw new DebruteDaemonHttpError(400, 'invalid_input', `sources[${index}] must be an object.`);
     }
-    return daemonCanvasTextPreviewNodeTarget(item as Record<string, unknown>, `nodes[${index}].`);
+    return daemonCanvasTextPreviewSourceTarget(item as Record<string, unknown>, `sources[${index}].`);
   });
 }
 
-function daemonCanvasTextPreviewNodeTarget(
+function daemonCanvasTextPreviewSourceTarget(
   record: Record<string, unknown>,
   prefix = ''
-): CanvasTextPreviewNodeTarget {
+): CanvasTextPreviewSourceTarget {
   return {
     projectRelativePath: stringField(record.projectRelativePath, `${prefix}projectRelativePath`),
-    fingerprint: stringField(record.fingerprint, `${prefix}fingerprint`),
-    contentCssWidth: positiveFiniteNumberField(record.contentCssWidth, `${prefix}contentCssWidth`),
-    contentCssHeight: positiveFiniteNumberField(record.contentCssHeight, `${prefix}contentCssHeight`),
-    scrollTop: nonNegativeFiniteNumberField(record.scrollTop, `${prefix}scrollTop`),
-    scrollLeft: nonNegativeFiniteNumberField(record.scrollLeft, `${prefix}scrollLeft`)
+    fingerprint: stringField(record.fingerprint, `${prefix}fingerprint`)
   };
 }
 
@@ -2186,7 +2158,10 @@ function serviceErrorStatusCode(code: string): number {
   if (code === 'canvas_map_conflict' || code === 'canvas_registry_conflict') {
     return 409;
   }
-  if (code === 'canvas_map_canvas_missing' || code === 'canvas_map_target_missing' || code === 'terminal_not_found') {
+  if (code === 'canvas_map_canvas_missing'
+    || code === 'canvas_map_target_missing'
+    || code === 'canvas_text_preview_source_missing'
+    || code === 'terminal_not_found') {
     return 404;
   }
   return 400;
@@ -2219,6 +2194,14 @@ function positiveFiniteNumberField(value: unknown, name: string): number {
     throw new DebruteDaemonHttpError(400, 'invalid_input', `${name} must be a positive finite number.`);
   }
   return value;
+}
+
+function positiveIntegerQueryParam(value: string | null, name: string): number {
+  const numberValue = Number(value ?? '');
+  if (!Number.isInteger(numberValue) || numberValue <= 0) {
+    throw new DebruteDaemonHttpError(400, 'invalid_input', `${name} must be a positive integer.`);
+  }
+  return numberValue;
 }
 
 function nonNegativeFiniteNumberField(value: unknown, name: string): number {

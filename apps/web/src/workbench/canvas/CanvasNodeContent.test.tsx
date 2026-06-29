@@ -262,6 +262,65 @@ describe('CanvasNodeContent text chrome', () => {
     }
   });
 
+  it('renders a text preview variant error when the first preview image fails to load', async () => {
+    const restoreActEnvironment = installReactActEnvironment();
+    const container = document.createElement('div');
+    document.body.appendChild(container);
+    const root = createRoot(container);
+    const firstPreview = textPreviewSource(320);
+
+    try {
+      await renderTextPreviewNode(root, firstPreview);
+
+      await act(async () => {
+        textPreviewImage(container)?.dispatchEvent(new Event('error'));
+      });
+
+      expect(container.textContent).toContain('Unable to load text preview variant for flow/readme.md.');
+      expect(container.textContent).toContain('Text Preview Error');
+      expect(textPreviewImage(container)).toBeNull();
+      expect(container.querySelector('.canvas-text-preview-empty')).toBeNull();
+    } finally {
+      await act(async () => {
+        root.unmount();
+      });
+      container.remove();
+      restoreActEnvironment();
+    }
+  });
+
+  it('renders a text preview variant error when the next preview variant fails to preload', async () => {
+    const restoreActEnvironment = installReactActEnvironment();
+    const preloadImages = installTextPreviewImagePreload();
+    const container = document.createElement('div');
+    document.body.appendChild(container);
+    const root = createRoot(container);
+    const firstPreview = textPreviewSource(320);
+    const nextPreview = textPreviewSource(640);
+
+    try {
+      await renderTextPreviewNode(root, firstPreview);
+      await renderTextPreviewNode(root, nextPreview);
+
+      expect(preloadImages).toHaveLength(1);
+
+      await act(async () => {
+        preloadImages[0]?.emit('error');
+        await Promise.resolve();
+      });
+
+      expect(container.textContent).toContain('Unable to load text preview variant for flow/readme.md.');
+      expect(container.textContent).toContain('Text Preview Error');
+      expect(textPreviewImage(container)).toBeNull();
+    } finally {
+      await act(async () => {
+        root.unmount();
+      });
+      container.remove();
+      restoreActEnvironment();
+    }
+  });
+
   it('keeps the loaded text preview visible when a selected text node loses focus before the next preview resolves', async () => {
     const restoreActEnvironment = installReactActEnvironment();
     const container = document.createElement('div');

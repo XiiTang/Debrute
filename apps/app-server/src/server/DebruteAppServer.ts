@@ -117,8 +117,7 @@ import {
 import { reconcileCanvasImagePreviewCache } from '../canvas/CanvasImagePreviewCacheCleanup.js';
 import {
   createCanvasTextPreviewService,
-  type CanvasTextPreviewReadInput,
-  type CanvasTextPreviewReconcileInput,
+  type CanvasTextPreviewReadSourcesInput,
   type CanvasTextPreviewResolveVariantInput,
   type CanvasTextPreviewSaveSourceInput,
   type CanvasTextPreviewService
@@ -616,21 +615,11 @@ export class DebruteAppServer {
     });
   }
 
-  async readCanvasTextPreviewDescriptors(
-    input: Omit<CanvasTextPreviewReadInput, 'projectRoot'>
+  async readCanvasTextPreviewSources(
+    input: Omit<CanvasTextPreviewReadSourcesInput, 'projectRoot'>
   ) {
     const current = this.getSnapshot();
-    return this.canvasTextPreviewService.readDescriptors({
-      projectRoot: current.projectRoot,
-      ...input
-    });
-  }
-
-  async reconcileCanvasTextPreviews(
-    input: Omit<CanvasTextPreviewReconcileInput, 'projectRoot'>
-  ) {
-    const current = this.getSnapshot();
-    return this.canvasTextPreviewService.reconcile({
+    return this.canvasTextPreviewService.readSources({
       projectRoot: current.projectRoot,
       ...input
     });
