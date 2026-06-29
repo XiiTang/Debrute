@@ -1,5 +1,5 @@
 .canvas-card-bar {
-  --canvas-card-width: 96px;
+  --canvas-card-width: 78px;
   --canvas-card-delete-overlap: 7px;
   position: fixed;
   left: 102px;
@@ -25,10 +25,12 @@
   display: flex;
   align-items: center;
   gap: 4px;
-  height: calc(100% + var(--canvas-card-delete-overlap));
+  height: calc(100% + var(--canvas-card-delete-overlap) + 2px);
   margin-top: calc(-1 * var(--canvas-card-delete-overlap));
   padding-top: var(--canvas-card-delete-overlap);
   padding-right: var(--canvas-card-delete-overlap);
+  padding-bottom: 2px;
+  padding-left: 2px;
   min-width: 0;
   overflow-x: auto;
   scrollbar-width: thin;

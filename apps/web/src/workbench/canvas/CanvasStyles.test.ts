@@ -11,7 +11,7 @@ describe('Canvas styles', () => {
   });
 
   it('keeps Canvas card names inside a fixed-width capsule', () => {
-    expect(canvasStyles).toContain('--canvas-card-width: 96px;');
+    expect(canvasStyles).toContain('--canvas-card-width: 78px;');
     expect(canvasStyles).toContain('.canvas-card {\n  width: var(--canvas-card-width);');
     expect(canvasStyles).toContain('padding: 0 8px;');
     expect(canvasStyles).toContain('.canvas-card-rename-form {\n  width: var(--canvas-card-width);');
@@ -23,7 +23,7 @@ describe('Canvas styles', () => {
 
   it('pins the Canvas card delete control to the card border corner', () => {
     expect(canvasStyles).toContain('--canvas-card-delete-overlap: 7px;');
-    expect(canvasStyles).toContain('height: calc(100% + var(--canvas-card-delete-overlap));\n  margin-top: calc(-1 * var(--canvas-card-delete-overlap));\n  padding-top: var(--canvas-card-delete-overlap);\n  padding-right: var(--canvas-card-delete-overlap);');
+    expect(canvasStyles).toContain('height: calc(100% + var(--canvas-card-delete-overlap) + 2px);\n  margin-top: calc(-1 * var(--canvas-card-delete-overlap));\n  padding-top: var(--canvas-card-delete-overlap);\n  padding-right: var(--canvas-card-delete-overlap);\n  padding-bottom: 2px;\n  padding-left: 2px;');
     expect(canvasStyles).toContain('.canvas-card-delete.db-icon-button {\n  position: absolute;\n  top: 0;\n  right: 0;\n  transform: translate(37%, -37%);\n  z-index: 1;\n  opacity: 0;\n  pointer-events: none;');
     expect(canvasStyles).toContain('.canvas-card-delete.db-icon-button::before {\n  content: \'\';\n  position: absolute;\n  inset: 1px;');
     expect(canvasStyles).toContain('.canvas-card-delete.db-icon-button:hover:not(:disabled),\n.canvas-card-delete.db-icon-button:focus-visible {\n  background: transparent;');
