@@ -28,7 +28,7 @@ Use `debrute` as the Debrute execution interface. Debrute Skills describe how to
 - Submit the request with `debrute generate video /path/to/project --input-json '<json>'`.
 - --timeout-ms defaults to 600000ms for video requests and covers task submission, polling, response reads, and artifact download.
 - When project artifacts should be created, use output arguments supported by the selected model so generated files are written inside the project.
-- Update the Canvas Map when planning video output paths. Add exact file, folder, or glob entries under `paths` in `.debrute/canvas-maps/<canvas-id>.yaml`; folder rules must end with `/`.
+- Update the Canvas Map when planning video output paths. Add literal file/folder entries under `paths` in `.debrute/canvas-maps/<canvas-id>.yaml`; folder rules must end with `/`, and wildcard matching must use explicit `glob:` entries.
 - Use `layout.rows` when generated video siblings should compare horizontally by direct parent directory.
 - Push the Canvas Map with `debrute canvas-map push /path/to/project <canvas-id>`.
 - Surface structured CLI errors to the user when a command fails.
@@ -42,7 +42,7 @@ Use `debrute` as the Debrute execution interface. Debrute Skills describe how to
 5. Before generation, run `debrute models video describe <model-id>` once for the selected model.
 6. Build the request payload from `description_markdown`, the Debrute example, and `arguments_schema`.
 7. Use `prompt`, `intent`, and `references`; do not assemble official Seedance `content` arrays.
-8. When output paths or output globs are planned, update `.debrute/canvas-maps/<canvas-id>.yaml` so the generated files appear on that Canvas.
+8. When literal output paths or explicit `glob:` rules are planned, update `.debrute/canvas-maps/<canvas-id>.yaml` so the generated files appear on that Canvas.
 9. Push the Canvas Map with `debrute canvas-map push /path/to/project <canvas-id>`.
 10. Run `debrute generate video /path/to/project --input-json '<json>'`.
 11. Report artifact paths, generated asset metadata, and any structured errors.

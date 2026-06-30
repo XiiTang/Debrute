@@ -35,7 +35,7 @@ Use `debrute` as the Debrute execution interface. Debrute Skills describe how to
 - Batch progress is sparse: start, crossed 10 percent completion boundaries, and final summary.
 - Do not loop over `debrute generate image` for a planned set of image requests. Batch result JSONL contains one final item outcome per line.
 - When project artifacts should be created, use output arguments supported by the selected model so generated files are written inside the project.
-- Update the Canvas Map when planning image output paths. Add exact file, folder, or glob entries under `paths` in `.debrute/canvas-maps/<canvas-id>.yaml`; folder rules must end with `/`.
+- Update the Canvas Map when planning image output paths. Add literal file/folder entries under `paths` in `.debrute/canvas-maps/<canvas-id>.yaml`; folder rules must end with `/`, and wildcard matching must use explicit `glob:` entries.
 - Use `layout.rows` when generated image siblings should compare horizontally by direct parent directory.
 - Push the Canvas Map with `debrute canvas-map push /path/to/project <canvas-id>`.
 - Surface structured CLI errors to the user when a command fails.
@@ -48,7 +48,7 @@ Use `debrute` as the Debrute execution interface. Debrute Skills describe how to
 4. Choose a candidate from the returned models.
 5. Before generation, run `debrute models image describe <model-id>` once for the selected model.
 6. Build the request payload from the original parameter names confirmed by `description_markdown`, Debrute example, and `arguments_schema`.
-7. When image output paths or output globs are planned, update `.debrute/canvas-maps/<canvas-id>.yaml` so the generated files appear on that Canvas.
+7. When literal image output paths or explicit `glob:` rules are planned, update `.debrute/canvas-maps/<canvas-id>.yaml` so the generated files appear on that Canvas.
 8. Keep related outputs in the same filesystem directory structure so hierarchy and edges come from files and folders.
 9. Push the Canvas Map with `debrute canvas-map push /path/to/project <canvas-id>`.
 10. Run `debrute generate image /path/to/project --input-json '<json>'` for one planned request, or `debrute generate image-batch /path/to/project --manifest <manifest.json> --log <results.jsonl> --summary <summary.json>` for multiple planned requests.

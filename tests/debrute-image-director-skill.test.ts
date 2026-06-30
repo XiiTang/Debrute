@@ -53,10 +53,12 @@ describe('Debrute image director Skill', () => {
     expect(core).toContain('paths:');
     expect(core).toContain('layout:');
     expect(core).toContain('rows:');
-    expect(core).toContain('Folder rules under `paths` must end with `/`, for example `outputs/gpt/`.');
-    expect(core).toContain('add matching file, folder, or glob entries under `paths` and push before running generation.');
+    expect(core).toContain('String rules under `paths` are literal project paths.');
+    expect(core).toContain('Use object rules such as `glob: outputs/**/*.png` only when wildcard matching is intended.');
+    expect(core).toContain('add matching literal file/folder entries or explicit `glob:` entries under `paths` and push before running generation.');
     expect(imageDirector).toContain('Update the Canvas Map when planning image output paths.');
-    expect(imageDirector).toContain('Add exact file, folder, or glob entries under `paths` in `.debrute/canvas-maps/<canvas-id>.yaml`; folder rules must end with `/`.');
+    expect(imageDirector).toContain('Add literal file/folder entries under `paths` in `.debrute/canvas-maps/<canvas-id>.yaml`; folder rules must end with `/`, and wildcard matching must use explicit `glob:` entries.');
+    expect(imageDirector).toContain('When literal image output paths or explicit `glob:` rules are planned');
     expect(imageDirector).toContain('Push the Canvas Map with `debrute canvas-map push');
   });
 });

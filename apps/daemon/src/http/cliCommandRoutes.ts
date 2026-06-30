@@ -7,6 +7,7 @@ import type {
   ProjectSessionSnapshot,
   RunImageModelBatchInput
 } from '@debrute/app-protocol';
+import type { CanvasMapPathRuleSet } from '@debrute/canvas-map-core';
 import { normalizeProjectRelativePath } from '@debrute/project-core';
 import type { DebruteProductServices } from './createDebruteDaemonHttpServer.js';
 
@@ -384,19 +385,31 @@ function requestInput(request: DaemonCliCommandRequest): {
   };
 }
 
-function pathRulesOption(request: DaemonCliCommandRequest): string[] {
-  const raw = request.options.path;
+function pathRulesOption(request: DaemonCliCommandRequest): CanvasMapPathRuleSet {
+  const paths = stringArrayOption(request, 'path');
+  const globs = stringArrayOption(request, 'glob');
+  if (paths.length === 0 && globs.length === 0) {
+    throw cliCommandError('invalid_input', 'canvas.reset-layout requires --all or at least one --path/--glob.');
+  }
+  return {
+    ...(paths.length > 0 ? { paths } : {}),
+    ...(globs.length > 0 ? { globs } : {})
+  };
+}
+
+function stringArrayOption(request: DaemonCliCommandRequest, key: 'path' | 'glob'): string[] {
+  const raw = request.options[key];
   if (!raw) {
-    throw cliCommandError('invalid_input', 'canvas.reset-layout requires exactly one of --all or --path.');
+    return [];
   }
   let parsed: unknown;
   try {
     parsed = JSON.parse(raw) as unknown;
   } catch {
-    throw cliCommandError('invalid_input', '--path must be one or more Canvas Map path rules.');
+    throw cliCommandError('invalid_input', `--${key} must be one or more strings.`);
   }
   if (!Array.isArray(parsed) || parsed.some((item) => typeof item !== 'string')) {
-    throw cliCommandError('invalid_input', '--path must be one or more Canvas Map path rules.');
+    throw cliCommandError('invalid_input', `--${key} must be one or more strings.`);
   }
   return parsed;
 }

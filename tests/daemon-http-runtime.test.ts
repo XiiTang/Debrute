@@ -1888,7 +1888,7 @@ describe('daemon HTTP runtime', () => {
       },
       body: JSON.stringify({ projectRoot })
     });
-    await writeCanvasMap(projectRoot, 'canvas-1', canvasMapSource(['image-production/generated/*.png']));
+    await writeCanvasMap(projectRoot, 'canvas-1', canvasMapSource([{ glob: 'image-production/generated/*.png' }]));
     if (!appServer) {
       throw new Error('Daemon did not create a project app server.');
     }
@@ -1939,7 +1939,9 @@ describe('daemon HTTP runtime', () => {
   it('resets manual Canvas layout through the HTTP Canvas route', async () => {
     const projectRoot = await mkdtemp(join(tmpdir(), 'debrute-daemon-canvas-reset-route-project-'));
     await mkdir(join(projectRoot, 'prompts'), { recursive: true });
+    await mkdir(join(projectRoot, 'outputs/gpt'), { recursive: true });
     await writeFile(join(projectRoot, 'prompts/cover.md'), '# Cover\n', 'utf8');
+    await writeFile(join(projectRoot, 'outputs/gpt/a.md'), '# A\n', 'utf8');
 
     let appServer: DebruteAppServer | undefined;
     const daemon = createDebruteDaemonHttpServer({
@@ -1962,7 +1964,7 @@ describe('daemon HTTP runtime', () => {
       },
       body: JSON.stringify({ projectRoot })
     });
-    await writeCanvasMap(projectRoot, 'canvas-1', canvasMapSource(['prompts/cover.md']));
+    await writeCanvasMap(projectRoot, 'canvas-1', canvasMapSource(['prompts/cover.md', { glob: 'outputs/**/*.md' }]));
     if (!appServer) {
       throw new Error('Daemon did not create a project app server.');
     }
@@ -1979,11 +1981,15 @@ describe('daemon HTTP runtime', () => {
       },
       body: JSON.stringify({
         baseRevision: refreshed.projectRevision,
-        nodeLayouts: [{ projectRelativePath: 'prompts/cover.md', x: 1000, y: 900 }]
+        nodeLayouts: [
+          { projectRelativePath: 'prompts/cover.md', x: 1000, y: 900 },
+          { projectRelativePath: 'outputs/gpt/a.md', x: 1200, y: 950 }
+        ]
       })
     });
 
-    const reset = await requestJson<{
+    const partialReset = await requestJson<{
+      projectRevision: number;
       resetCount: number;
       canvas: { nodeElements: Array<{ projectRelativePath: string; layoutMode?: string }> };
       projection: { nodes: Array<{ projectRelativePath: string }> };
@@ -1995,13 +2001,33 @@ describe('daemon HTTP runtime', () => {
       },
       body: JSON.stringify({
         baseRevision: layout.projectRevision,
+        pathRules: { globs: ['outputs/**/*.md'] }
+      })
+    });
+
+    expect(partialReset.resetCount).toBe(1);
+    expect(partialReset.canvas.nodeElements.find((node) => node.projectRelativePath === 'outputs/gpt/a.md')).not.toHaveProperty('layoutMode');
+    expect(partialReset.canvas.nodeElements.find((node) => node.projectRelativePath === 'prompts/cover.md')).toHaveProperty('layoutMode', 'manual');
+
+    const allReset = await requestJson<{
+      resetCount: number;
+      canvas: { nodeElements: Array<{ projectRelativePath: string; layoutMode?: string }> };
+      projection: { nodes: Array<{ projectRelativePath: string }> };
+    }>(`${runtime.daemonUrl}/api/projects/${opened.projectId}/canvases/canvas-1/reset-layout`, {
+      method: 'POST',
+      headers: {
+        'content-type': 'application/json',
+        'x-debrute-daemon-token': 'test-token'
+      },
+      body: JSON.stringify({
+        baseRevision: partialReset.projectRevision,
         all: true
       })
     });
 
-    expect(reset.resetCount).toBe(1);
-    expect(reset.canvas.nodeElements.find((node) => node.projectRelativePath === 'prompts/cover.md')).not.toHaveProperty('layoutMode');
-    expect(reset.projection.nodes.map((node) => node.projectRelativePath)).toContain('prompts/cover.md');
+    expect(allReset.resetCount).toBe(1);
+    expect(allReset.canvas.nodeElements.find((node) => node.projectRelativePath === 'prompts/cover.md')).not.toHaveProperty('layoutMode');
+    expect(allReset.projection.nodes.map((node) => node.projectRelativePath)).toContain('prompts/cover.md');
   });
 
   it('adds project tree paths to Canvas Maps through the HTTP Canvas route', async () => {
@@ -2126,11 +2152,11 @@ describe('daemon HTTP runtime', () => {
           'content-type': 'application/json',
           'x-debrute-daemon-token': 'test-token'
         },
-        body: JSON.stringify({ baseRevision: created.projectRevision, operation: 'rename', nextCanvasId: 'storyboard' })
+        body: JSON.stringify({ baseRevision: created.projectRevision, operation: 'rename', name: 'Storyboard' })
       }
     );
-    expect(renamed.activeCanvasId).toBe('storyboard');
-    expect(renamed.snapshot.canvasRegistry).toEqual({ status: 'ready', canvasOrder: ['canvas-1', 'storyboard'] });
+    expect(renamed.activeCanvasId).toBe('canvas-2');
+    expect(renamed.snapshot.canvasRegistry).toEqual({ status: 'ready', canvasOrder: ['canvas-1', 'canvas-2'] });
 
     const reordered = await requestJson<{ projectRevision: number; snapshot: { canvasRegistry: { status: string; canvasOrder: string[] } } }>(
       `${runtime.daemonUrl}/api/projects/${opened.projectId}/canvases/index`,
@@ -2140,13 +2166,13 @@ describe('daemon HTTP runtime', () => {
           'content-type': 'application/json',
           'x-debrute-daemon-token': 'test-token'
         },
-        body: JSON.stringify({ baseRevision: renamed.projectRevision, canvasOrder: ['storyboard', 'canvas-1'] })
+        body: JSON.stringify({ baseRevision: renamed.projectRevision, canvasOrder: ['canvas-2', 'canvas-1'] })
       }
     );
-    expect(reordered.snapshot.canvasRegistry).toEqual({ status: 'ready', canvasOrder: ['storyboard', 'canvas-1'] });
+    expect(reordered.snapshot.canvasRegistry).toEqual({ status: 'ready', canvasOrder: ['canvas-2', 'canvas-1'] });
 
     const deleted = await requestJson<{ projectRevision: number; activeCanvasId: string; snapshot: { canvasRegistry: { status: string; canvasOrder: string[] } } }>(
-      `${runtime.daemonUrl}/api/projects/${opened.projectId}/canvases/storyboard`,
+      `${runtime.daemonUrl}/api/projects/${opened.projectId}/canvases/canvas-2`,
       {
         method: 'DELETE',
         headers: { 'content-type': 'application/json', 'x-debrute-daemon-token': 'test-token' },
@@ -2317,10 +2343,10 @@ async function writeCanvasMap(projectRoot: string, canvasId: string, content: st
   await writeFile(join(projectRoot, `.debrute/canvas-maps/${canvasId}.yaml`), content, 'utf8');
 }
 
-function canvasMapSource(paths: string[]): string {
+function canvasMapSource(paths: Array<string | { glob: string }>): string {
   return [
     'paths:',
-    ...paths.map((path) => `  - ${path}`),
+    ...paths.map((path) => typeof path === 'string' ? `  - ${path}` : `  - glob: ${path.glob}`),
     ''
   ].join('\n');
 }

@@ -250,7 +250,10 @@ describe('daemon CLI command routes', () => {
       command: 'canvas.reset-layout',
       positional: ['/tmp/project', 'canvas-1'],
       projectRoot: '/tmp/project',
-      options: { path: '["outputs/gpt/","prompts/cover.md"]' }
+      options: {
+        path: '["outputs/gpt/","prompts/cover [draft].md"]',
+        glob: '["outputs/**/*.png"]'
+      }
     }, { server })).resolves.toMatchObject({
       status: 'ok',
       command: 'canvas.reset-layout',
@@ -267,7 +270,10 @@ describe('daemon CLI command routes', () => {
     });
     expect(server.resetCanvasNodeLayouts).toHaveBeenCalledWith({
       canvasId: 'canvas-1',
-      pathRules: ['outputs/gpt/', 'prompts/cover.md']
+      pathRules: {
+        paths: ['outputs/gpt/', 'prompts/cover [draft].md'],
+        globs: ['outputs/**/*.png']
+      }
     });
   });
 

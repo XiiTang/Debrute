@@ -21,6 +21,8 @@ describe('Debrute video director Skill', () => {
     expect(skill).toContain('Project-local video references require Debrute upload-server support unless the source is already `http(s)` or `asset://`.');
     expect(skill).toContain('debrute generate video /path/to/project --input-json');
     expect(skill).toContain('--timeout-ms defaults to 600000ms for video requests');
+    expect(skill).toContain('Add literal file/folder entries under `paths` in `.debrute/canvas-maps/<canvas-id>.yaml`; folder rules must end with `/`, and wildcard matching must use explicit `glob:` entries.');
+    expect(skill).toContain('When literal output paths or explicit `glob:` rules are planned');
   });
 
   it('updates core Skill video examples to the native request contract', () => {

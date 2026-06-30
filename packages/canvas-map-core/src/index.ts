@@ -2,6 +2,12 @@ import { createHash } from 'node:crypto';
 import { parseDocument, stringify } from 'yaml';
 
 export type CanvasMapRuleKind = 'exact-file' | 'recursive-directory' | 'file-glob';
+export type CanvasMapPathRuleSource = string | { glob: string };
+
+export interface CanvasMapPathRuleSet {
+  paths?: string[];
+  globs?: string[];
+}
 
 export interface CanvasMapRule {
   raw: string;
@@ -171,10 +177,10 @@ export function expandCanvasMap(map: CanvasMapDocument, entries: CanvasMapProjec
 }
 
 export function expandCanvasMapPathRules(
-  rules: string[],
+  rules: CanvasMapPathRuleSet,
   entries: CanvasMapProjectEntry[]
 ): CanvasMapNodeProjection[] {
-  const normalizedRules = rules.map(normalizePathRule);
+  const normalizedRules = normalizePathRuleSet(rules);
   const entryByPath = new Map(entries.map((entry) => [
     normalizeProjectPath(entry.projectRelativePath),
     entry.kind
@@ -235,9 +241,11 @@ export function serializeCanvasMapWithRule(content: string, rule: string): strin
   }
   assertOnlyKeys(parsed, ['paths', 'layout'], 'Canvas Map');
   normalizeLayoutRows(parsed.layout);
-  const existing = normalizePathRules(parsed.paths).map((item) => item.raw);
-  const normalized = normalizePathRule(rule).raw;
-  const nextPaths = existing.includes(normalized) ? existing : [...existing, normalized];
+  const existing = normalizePathRuleEntries(parsed.paths);
+  const normalized = normalizeLiteralPathRule(rule);
+  const nextPaths = existing.some((item) => item.rule.kind === normalized.kind && item.rule.raw === normalized.raw)
+    ? existing.map((item) => item.source)
+    : [...existing.map((item) => item.source), normalized.raw];
   return ensureTrailingNewline(stringify({
     paths: nextPaths,
     ...(parsed.layout === undefined ? {} : { layout: parsed.layout })
@@ -245,13 +253,37 @@ export function serializeCanvasMapWithRule(content: string, rule: string): strin
 }
 
 function normalizePathRules(value: unknown): CanvasMapRule[] {
+  return normalizePathRuleEntries(value).map((entry) => entry.rule);
+}
+
+function normalizePathRuleEntries(value: unknown): Array<{ rule: CanvasMapRule; source: CanvasMapPathRuleSource }> {
   if (!Array.isArray(value)) {
     throw new CanvasMapError('Canvas Map paths must be an array.', 'canvas_map_invalid_yaml');
   }
-  return value.map(normalizePathRule);
+  return value.map(normalizePathRuleEntry);
 }
 
-function normalizePathRule(value: unknown): CanvasMapRule {
+function normalizePathRuleEntry(value: unknown): { rule: CanvasMapRule; source: CanvasMapPathRuleSource } {
+  if (typeof value !== 'string' || value.trim().length === 0) {
+    if (isRecord(value) && 'glob' in value) {
+      assertOnlyKeys(value, ['glob'], 'Canvas Map path glob rule');
+      const rule = normalizeGlobPathRule(value.glob);
+      return { rule, source: { glob: rule.raw } };
+    }
+    throw new CanvasMapError('Canvas Map path rule must be a non-empty string or a glob object.', 'canvas_map_invalid_yaml');
+  }
+  const rule = normalizeLiteralPathRule(value);
+  return { rule, source: rule.raw };
+}
+
+function normalizePathRuleSet(rules: CanvasMapPathRuleSet): CanvasMapRule[] {
+  return [
+    ...(rules.paths ?? []).map(normalizeLiteralPathRule),
+    ...(rules.globs ?? []).map(normalizeGlobPathRule)
+  ];
+}
+
+function normalizeLiteralPathRule(value: string): CanvasMapRule {
   if (typeof value !== 'string' || value.trim().length === 0) {
     throw new CanvasMapError('Canvas Map path rule must be a non-empty string.', 'canvas_map_invalid_yaml');
   }
@@ -267,8 +299,26 @@ function normalizePathRule(value: unknown): CanvasMapRule {
   return {
     raw: pattern,
     pattern,
-    kind: hasGlobSyntax(pattern) ? 'file-glob' : 'exact-file'
+    kind: 'exact-file'
   };
+}
+
+function normalizeGlobPathRule(value: unknown): CanvasMapRule {
+  if (typeof value !== 'string' || value.trim().length === 0) {
+    throw new CanvasMapError('Canvas Map glob path rule must be a non-empty string.', 'canvas_map_invalid_yaml');
+  }
+  const raw = value.trim().replaceAll('\\', '/');
+  if (raw.startsWith('!')) {
+    throw new CanvasMapError('Canvas Map negative rules are not supported.', 'canvas_map_invalid_path');
+  }
+  if (raw.endsWith('/')) {
+    throw new CanvasMapError('Canvas Map glob path rules must be file globs.', 'canvas_map_invalid_path');
+  }
+  const pattern = normalizeStrictProjectPath(raw);
+  if (!hasGlobSyntax(pattern)) {
+    throw new CanvasMapError('Canvas Map glob path rules must be file globs.', 'canvas_map_invalid_path');
+  }
+  return { raw: pattern, pattern, kind: 'file-glob' };
 }
 
 function normalizeLayoutRows(value: unknown): CanvasMapRowRule[] {

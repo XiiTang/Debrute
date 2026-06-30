@@ -231,7 +231,7 @@ describe('DebruteAppServer CLI service methods', () => {
       await mkdir(join(root, '.debrute/canvas-maps'), { recursive: true });
       await writeFile(join(root, '.debrute/canvas-maps/canvas-1.yaml'), [
         'paths:',
-        '  - production/**/*.md',
+        '  - glob: production/**/*.md',
         ''
       ].join('\n'), 'utf8');
       await server.pushCanvasMapForProject(root, { canvasId: 'canvas-1' });
@@ -239,7 +239,7 @@ describe('DebruteAppServer CLI service methods', () => {
       const canvasPath = join(root, '.debrute/canvases/canvas-1.json');
       const before = await readFile(canvasPath, 'utf8');
       await writeFile(join(root, 'production/future.md'), '# Future\n', 'utf8');
-      await writeFile(join(root, '.debrute/canvas-maps/canvas-1.yaml'), 'paths:\n  - production/*.md\n', 'utf8');
+      await writeFile(join(root, '.debrute/canvas-maps/canvas-1.yaml'), 'paths:\n  - glob: production/*.md\n', 'utf8');
 
       const status = await server.projectStatusForCli(root);
 

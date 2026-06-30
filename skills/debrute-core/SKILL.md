@@ -95,20 +95,20 @@ The YAML file is a top-level object. `paths` is the complete positive membership
 ```yaml
 paths:
   - outputs/gpt/
-  - outputs/gpt/*.png
+  - glob: outputs/gpt/*.png
   - prompts/cover.md
 layout:
   rows:
     - outputs/**/high/*.png
 ```
 
-Folder rules under `paths` must end with `/`, for example `outputs/gpt/`. A folder node appears automatically when matching files exist below that folder. Exact file rules and glob rules match files. Missing future files are allowed and do not produce diagnostics.
+String rules under `paths` are literal project paths. Folder rules must end with `/`, for example `outputs/gpt/`. Use object rules such as `glob: outputs/**/*.png` only when wildcard matching is intended. A folder node appears automatically when matching files exist below that folder. Exact file rules and glob rules match files. Missing future files are allowed and do not produce diagnostics.
 
 Rows never add files to the Canvas. Each `layout.rows` glob matches included files, then splits matches into one horizontal row per direct parent directory.
 
 Do not use CLI commands to add, remove, inspect, or modify Canvas nodes or edges.
 Maintain the Canvas Map while creating file-producing scripts, prompts, image requests, or video requests.
-When output paths are known before generation starts, add matching file, folder, or glob entries under `paths` and push before running generation.
+When output paths are known before generation starts, add matching literal file/folder entries or explicit `glob:` entries under `paths` and push before running generation.
 
 ## Canvas Feedback
 

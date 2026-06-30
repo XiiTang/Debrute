@@ -119,7 +119,7 @@ export interface WorkbenchActions {
   updateCanvasNodeLayouts: (canvasId: string, input: {
     nodeLayouts?: Array<{ projectRelativePath: string; x: number; y: number; width?: number; height?: number }>;
   }) => Promise<void>;
-  resetCanvasNodeLayouts: (canvasId: string, input: { all: true } | { pathRules: string[] }) => Promise<WorkbenchCanvasResetLayoutResult>;
+  resetCanvasNodeLayouts: (canvasId: string, input: { all: true } | { pathRules: { paths?: string[]; globs?: string[] } }) => Promise<WorkbenchCanvasResetLayoutResult>;
   updateCanvasNodeLayers: (canvasId: string, input: {
     nodeProjectRelativePathsTopFirst?: string[];
   }) => Promise<void>;

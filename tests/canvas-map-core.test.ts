@@ -18,7 +18,7 @@ describe('canvas-map core', () => {
         'paths:',
         '  - prompts/cover.md',
         '  - outputs/gpt/',
-        '  - outputs/**/*.png',
+        '  - glob: outputs/**/*.png',
         'layout:',
         '  rows:',
         '    - outputs/**/high/*.png',
@@ -58,7 +58,7 @@ describe('canvas-map core', () => {
       canvasId: 'main',
       sourcePath: '.debrute/canvas-maps/main.yaml',
       content: 'paths:\n  - 1\n'
-    })).toThrow('Canvas Map path rule must be a non-empty string.');
+    })).toThrow('Canvas Map path rule must be a non-empty string or a glob object.');
 
     expect(() => parseCanvasMap({
       canvasId: 'main',
@@ -99,7 +99,7 @@ describe('canvas-map core', () => {
         'paths:',
         '  - prompts/cover.md',
         '  - outputs/gpt/',
-        '  - outputs/**/*.png',
+        '  - glob: outputs/**/*.png',
         '  - missing/future.md',
         'layout:',
         '  rows:',
@@ -246,7 +246,7 @@ describe('canvas-map core', () => {
       sourcePath: '.debrute/canvas-maps/main.yaml',
       content: [
         'paths:',
-        '  - "*.md"',
+        '  - glob: "*.md"',
         ''
       ].join('\n')
     });
@@ -284,16 +284,43 @@ describe('canvas-map core', () => {
       { projectRelativePath: 'prompts/cover.md', kind: 'file' }
     ];
 
-    expect(expandCanvasMapPathRules(['prompts/cover.md', 'outputs/**/*.png'], entries)).toEqual([
+    expect(expandCanvasMapPathRules({ paths: ['prompts/cover.md'], globs: ['outputs/**/*.png'] }, entries)).toEqual([
       { projectRelativePath: 'outputs/gpt/high/a.png', nodeKind: 'file' },
       { projectRelativePath: 'prompts/cover.md', nodeKind: 'file' }
     ]);
 
-    expect(expandCanvasMapPathRules(['outputs/gpt/'], entries)).toEqual([
+    expect(expandCanvasMapPathRules({ paths: ['outputs/gpt/'] }, entries)).toEqual([
       { projectRelativePath: 'outputs/gpt', nodeKind: 'directory' },
       { projectRelativePath: 'outputs/gpt/high', nodeKind: 'directory' },
       { projectRelativePath: 'outputs/gpt/high/a.png', nodeKind: 'file' },
       { projectRelativePath: 'outputs/gpt/high/b.md', nodeKind: 'file' }
+    ]);
+  });
+
+  it('treats Canvas Map string paths literally and requires explicit glob rules', () => {
+    const entries: CanvasMapProjectEntry[] = [
+      { projectRelativePath: 'videos', kind: 'directory' },
+      { projectRelativePath: 'videos/谷歌：正在评估中国内存 [BV1LKjS6gEaN].mp4', kind: 'file' },
+      { projectRelativePath: 'videos/clip-a.mp4', kind: 'file' },
+      { projectRelativePath: 'videos/clip-b.mp4', kind: 'file' }
+    ];
+
+    expect(expandCanvasMap(parseCanvasMap({
+      canvasId: 'main',
+      sourcePath: '.debrute/canvas-maps/main.yaml',
+      content: [
+        'paths:',
+        '  - videos/谷歌：正在评估中国内存 [BV1LKjS6gEaN].mp4',
+        '  - videos/clip-*.mp4',
+        '  - glob: videos/clip-*.mp4',
+        ''
+      ].join('\n')
+    }), entries).nodes).toEqual([
+      { projectRelativePath: '', nodeKind: 'directory' },
+      { projectRelativePath: 'videos', nodeKind: 'directory' },
+      { projectRelativePath: 'videos/clip-a.mp4', nodeKind: 'file' },
+      { projectRelativePath: 'videos/clip-b.mp4', nodeKind: 'file' },
+      { projectRelativePath: 'videos/谷歌：正在评估中国内存 [BV1LKjS6gEaN].mp4', nodeKind: 'file' }
     ]);
   });
 
@@ -341,7 +368,7 @@ describe('canvas-map core', () => {
     expect(expandCanvasMap(parseCanvasMap({
       canvasId: 'main',
       sourcePath: '.debrute/canvas-maps/main.yaml',
-      content: 'paths:\n  - future/**/*.png\nlayout:\n  rows:\n    - future/**/high/*.png\n'
+      content: 'paths:\n  - glob: future/**/*.png\nlayout:\n  rows:\n    - future/**/high/*.png\n'
     }), [])).toMatchObject({
       nodes: [],
       layoutRows: []
@@ -352,7 +379,7 @@ describe('canvas-map core', () => {
       sourcePath: '.debrute/canvas-maps/main.yaml',
       content: [
         'paths:',
-        '  - outputs/**/*.png',
+        '  - glob: outputs/**/*.png',
         'layout:',
         '  rows:',
         '    - outputs/**/*.png',
@@ -386,7 +413,7 @@ describe('canvas-map core', () => {
     expect(expandCanvasMap(parseCanvasMap({
       canvasId: 'main',
       sourcePath: '.debrute/canvas-maps/main.yaml',
-      content: 'paths:\n  - future/path.md\n  - future/folder/\n  - future/**/*.png\n'
+      content: 'paths:\n  - future/path.md\n  - future/folder/\n  - glob: future/**/*.png\n'
     }), [])).toMatchObject({
       nodes: [],
       layoutRows: []
@@ -398,7 +425,7 @@ describe('canvas-map core', () => {
       expandCanvasMap(parseCanvasMap({
         canvasId: 'main',
         sourcePath: '.debrute/canvas-maps/main.yaml',
-        content: 'paths:\n  - outputs/[z-a].png\n'
+        content: 'paths:\n  - glob: outputs/[z-a].png\n'
       }), [
         { projectRelativePath: 'outputs/a.png', kind: 'file' }
       ]);

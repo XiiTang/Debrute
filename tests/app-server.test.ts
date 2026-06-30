@@ -117,20 +117,22 @@ describe('app-server', () => {
       expect(created.snapshot.canvases.map((canvas) => canvas.id)).toEqual(['canvas-1', 'canvas-2']);
       await expect(readFile(join(projectRoot, '.debrute/canvas-maps/canvas-2.yaml'), 'utf8')).resolves.toBe('paths: []\n');
 
-      const renamed = await server.renameCanvas({ canvasId: 'canvas-2', nextCanvasId: 'storyboard' });
-      expect(renamed.activeCanvasId).toBe('storyboard');
-      expect(renamed.snapshot.canvases.map((canvas) => canvas.id)).toEqual(['canvas-1', 'storyboard']);
-      await expect(readFile(join(projectRoot, '.debrute/canvas-maps/storyboard.yaml'), 'utf8')).resolves.toBe('paths: []\n');
-      await expect(readFile(join(projectRoot, '.debrute/canvas-maps/canvas-2.yaml'), 'utf8')).rejects.toThrow();
-      expect(await readJson(join(projectRoot, '.debrute/canvases/storyboard.json'))).toMatchObject({ id: 'storyboard' });
+      const renamed = await server.renameCanvas({ canvasId: 'canvas-2', name: 'Storyboard' });
+      expect(renamed.activeCanvasId).toBe('canvas-2');
+      expect(renamed.snapshot.canvases.map((canvas) => [canvas.id, canvas.name])).toEqual([
+        ['canvas-1', 'canvas-1'],
+        ['canvas-2', 'Storyboard']
+      ]);
+      await expect(readFile(join(projectRoot, '.debrute/canvas-maps/canvas-2.yaml'), 'utf8')).resolves.toBe('paths: []\n');
+      expect(await readJson(join(projectRoot, '.debrute/canvases/canvas-2.json'))).toMatchObject({ id: 'canvas-2', name: 'Storyboard' });
 
-      const reordered = await server.reorderCanvases({ canvasOrder: ['storyboard', 'canvas-1'] });
-      expect(reordered.snapshot.canvases.map((canvas) => canvas.id)).toEqual(['storyboard', 'canvas-1']);
+      const reordered = await server.reorderCanvases({ canvasOrder: ['canvas-2', 'canvas-1'] });
+      expect(reordered.snapshot.canvases.map((canvas) => canvas.id)).toEqual(['canvas-2', 'canvas-1']);
 
-      const deleted = await server.deleteCanvas({ canvasId: 'storyboard' });
+      const deleted = await server.deleteCanvas({ canvasId: 'canvas-2' });
       expect(deleted.activeCanvasId).toBe('canvas-1');
       expect(deleted.snapshot.canvases.map((canvas) => canvas.id)).toEqual(['canvas-1']);
-      await expect(readFile(join(projectRoot, '.debrute/canvases/storyboard.json'), 'utf8')).rejects.toThrow();
+      await expect(readFile(join(projectRoot, '.debrute/canvases/canvas-2.json'), 'utf8')).rejects.toThrow();
     } finally {
       server.close();
       await rm(projectRoot, { recursive: true, force: true });
@@ -153,9 +155,8 @@ describe('app-server', () => {
 
       await server.refreshProject();
       await writeFile(join(projectRoot, '.debrute/canvas-maps/canvas-2.yaml'), 'paths:\n  - changed.md\n', 'utf8');
-      await expect(server.renameCanvas({ canvasId: 'canvas-2', nextCanvasId: 'storyboard' })).rejects.toMatchObject({
-        code: 'canvas_map_conflict'
-      });
+      const renamed = await server.renameCanvas({ canvasId: 'canvas-2', name: 'Storyboard' });
+      expect(renamed.snapshot.canvases.find((canvas) => canvas.id === 'canvas-2')).toMatchObject({ name: 'Storyboard' });
 
       await server.refreshProject();
       await expect(server.deleteCanvas({ canvasId: 'canvas-1' })).resolves.toBeDefined();
@@ -626,6 +627,7 @@ describe('app-server', () => {
       await writeFile(join(projectRoot, '.debrute/project.json'), JSON.stringify(projectMetadata('Manual Layout Project'), null, 2), 'utf8');
       await writeFile(join(projectRoot, '.debrute/canvases/canvas-1.json'), JSON.stringify({
         id: 'canvas-1',
+        name: 'canvas-1',
         nodeElements: [{
           projectRelativePath: 'image-production/generated/a.md',
           nodeKind: 'file',
@@ -665,6 +667,7 @@ describe('app-server', () => {
       await writeFile(join(projectRoot, '.debrute/project.json'), JSON.stringify(projectMetadata('Auto Layout Mode Project'), null, 2), 'utf8');
       await writeFile(join(projectRoot, '.debrute/canvases/canvas-1.json'), JSON.stringify({
         id: 'canvas-1',
+        name: 'canvas-1',
         nodeElements: [{
           projectRelativePath: 'generated/a.png',
           nodeKind: 'file',
@@ -1043,7 +1046,7 @@ describe('app-server', () => {
 
       const textFile = await server.readProjectTextFile('notes/brief.md');
       const written = await server.writeProjectTextFile('notes/output.md', 'done\n');
-      await writeCanvasMap(projectRoot, 'canvas-1', canvasMapSource(['notes/*.md']));
+      await writeCanvasMap(projectRoot, 'canvas-1', canvasMapSource([{ glob: 'notes/*.md' }]));
       await server.pushCanvasMapForProject(projectRoot, { canvasId: 'canvas-1' });
       const snapshot = await server.refreshProject();
 
@@ -1211,7 +1214,7 @@ describe('app-server', () => {
 
       await server.openProject(projectRoot, { initializeIfMissing: true, createDefaultCanvas: true });
       await writeCanvasMap(projectRoot, 'canvas-1', canvasMapSource([
-        'assets/*'
+        { glob: 'assets/*' }
       ]));
       await server.pushCanvasMapForProject(projectRoot, { canvasId: 'canvas-1' });
 
@@ -1411,7 +1414,7 @@ describe('app-server', () => {
       await server.openProject(projectRoot, { initializeIfMissing: true, createDefaultCanvas: true });
       await writeCanvasMap(projectRoot, 'canvas-1', canvasMapSource(['notes/a.md']));
       await server.pushCanvasMapForProject(projectRoot, { canvasId: 'canvas-1' });
-      await writeFile(join(projectRoot, '.debrute/canvas-maps/canvas-1.yaml'), canvasMapSource(['notes/*.md']), 'utf8');
+      await writeFile(join(projectRoot, '.debrute/canvas-maps/canvas-1.yaml'), canvasMapSource([{ glob: 'notes/*.md' }]), 'utf8');
       await writeFile(join(projectRoot, 'notes/b.md'), '# B\n', 'utf8');
 
       const snapshot = await server.refreshProject();
@@ -1453,7 +1456,7 @@ describe('app-server', () => {
       await mkdir(join(projectRoot, 'image-production/generated'), { recursive: true });
       await writeFile(join(projectRoot, 'image-production/generated/a.png'), await largePreviewablePngBuffer());
       await server.openProject(projectRoot, { initializeIfMissing: true, createDefaultCanvas: true, watchFiles: false });
-      await writeCanvasMap(projectRoot, 'canvas-1', canvasMapSource(['image-production/generated/*.png']));
+      await writeCanvasMap(projectRoot, 'canvas-1', canvasMapSource([{ glob: 'image-production/generated/*.png' }]));
       await server.pushCanvasMapForProject(projectRoot, { canvasId: 'canvas-1' });
       const synced = await server.refreshProject();
       const nodePath = 'image-production/generated/a.png';
@@ -1587,7 +1590,7 @@ describe('app-server', () => {
 
       const partial = await server.resetCanvasNodeLayouts({
         canvasId: 'canvas-1',
-        pathRules: ['outputs/gpt/']
+        pathRules: { paths: ['outputs/gpt/'] }
       });
 
       expect(partial.resetCount).toBe(3);
@@ -1642,7 +1645,7 @@ describe('app-server', () => {
 
       await expect(server.resetCanvasNodeLayouts({
         canvasId: 'canvas-1',
-        pathRules: ['future/missing.md']
+        pathRules: { paths: ['future/missing.md'] }
       })).rejects.toMatchObject({ code: 'canvas_map_invalid_yaml' });
     } finally {
       server.close();
@@ -1671,7 +1674,7 @@ describe('app-server', () => {
 
       const reset = await server.resetCanvasNodeLayouts({
         canvasId: 'canvas-1',
-        pathRules: ['future/missing.md']
+        pathRules: { paths: ['future/missing.md'] }
       });
 
       expect(reset.resetCount).toBe(0);
@@ -1712,7 +1715,7 @@ describe('app-server', () => {
       await writeFile(join(projectRoot, 'outputs/gpt/high/b.png'), 'fake', 'utf8');
       await server.openProject(projectRoot, { initializeIfMissing: true, createDefaultCanvas: true });
       await writeCanvasMap(projectRoot, 'canvas-1', canvasMapSource(
-        ['outputs/**/*.png'],
+        [{ glob: 'outputs/**/*.png' }],
         ['outputs/**/high/*.png']
       ));
 
@@ -1955,8 +1958,8 @@ describe('app-server', () => {
       await writeFile(join(projectRoot, 'image-production/generated/animated.gif'), 'gif placeholder', 'utf8');
       await server.openProject(projectRoot, { initializeIfMissing: true, createDefaultCanvas: true });
       await writeCanvasMap(projectRoot, 'canvas-1', canvasMapSource([
-        'image-production/generated/*.png',
-        'image-production/generated/*.gif'
+        { glob: 'image-production/generated/*.png' },
+        { glob: 'image-production/generated/*.gif' }
       ]));
       await server.pushCanvasMapForProject(projectRoot, { canvasId: 'canvas-1' });
 
@@ -1989,7 +1992,7 @@ describe('app-server', () => {
       await mkdir(join(projectRoot, 'image-production/generated'), { recursive: true });
       await writeFile(join(projectRoot, 'image-production/generated/broken.png'), Buffer.alloc(1_600_000, 1));
       await server.openProject(projectRoot, { initializeIfMissing: true, createDefaultCanvas: true });
-      await writeCanvasMap(projectRoot, 'canvas-1', canvasMapSource(['image-production/generated/*.png']));
+      await writeCanvasMap(projectRoot, 'canvas-1', canvasMapSource([{ glob: 'image-production/generated/*.png' }]));
       await server.pushCanvasMapForProject(projectRoot, { canvasId: 'canvas-1' });
 
       const nodes = (await server.refreshProject()).projections[0]!.nodes;
@@ -2020,7 +2023,7 @@ describe('app-server', () => {
       await writeFile(join(projectRoot, 'image-production/generated/b.png'), 'fake', 'utf8');
       await writeFile(join(projectRoot, 'image-production/generated/c.png'), 'fake', 'utf8');
       await server.openProject(projectRoot, { initializeIfMissing: true, createDefaultCanvas: true });
-      await writeCanvasMap(projectRoot, 'canvas-1', canvasMapSource(['image-production/generated/*.png']));
+      await writeCanvasMap(projectRoot, 'canvas-1', canvasMapSource([{ glob: 'image-production/generated/*.png' }]));
       await server.pushCanvasMapForProject(projectRoot, { canvasId: 'canvas-1' });
       await server.refreshProject();
       await server.updateCanvasNodeLayouts({
@@ -2273,6 +2276,7 @@ describe('app-server', () => {
       }, null, 2), 'utf8');
       await writeFile(join(projectRoot, '.debrute/canvases/canvas-1.json'), JSON.stringify({
         id: 'canvas-1',
+        name: 'canvas-1',
         nodeElements: [],
         annotations: [],
         preferences: { showDiagnostics: true }
@@ -2352,10 +2356,10 @@ async function writeCanvasMap(projectRoot: string, canvasId: string, content: st
   await writeFile(join(projectRoot, `.debrute/canvas-maps/${canvasId}.yaml`), content, 'utf8');
 }
 
-function canvasMapSource(paths: string[], layoutRows: string[] = []): string {
+function canvasMapSource(paths: Array<string | { glob: string }>, layoutRows: string[] = []): string {
   return [
     'paths:',
-    ...paths.map((path) => `  - ${path}`),
+    ...paths.map((path) => typeof path === 'string' ? `  - ${path}` : `  - glob: ${path.glob}`),
     ...(layoutRows.length === 0
       ? []
       : [
@@ -2374,6 +2378,7 @@ async function readJson(path: string): Promise<unknown> {
 function emptyCanvasDocument(id: string) {
   return {
     id,
+    name: id,
     nodeElements: [],
     annotations: [],
     preferences: { showDiagnostics: true }

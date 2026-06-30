@@ -85,7 +85,7 @@ const ALLOWED_OPTIONS: Record<DebruteCliCommand, Set<string>> = {
   'canvas.delete': new Set(),
   'canvas.reorder': new Set(),
   'canvas.repair-index': new Set(),
-  'canvas.reset-layout': new Set(['all', 'path']),
+  'canvas.reset-layout': new Set(['all', 'path', 'glob']),
   'generated-asset.lookup': new Set(['path']),
   'generate.image': new Set(['input-json', 'timeout-ms']),
   'generate.image-batch': new Set(['manifest', 'input-jsonl', 'log', 'summary', 'concurrency', 'retries', 'timeout-ms', 'overwrite-existing']),
@@ -100,7 +100,7 @@ const BOOLEAN_OPTIONS: Partial<Record<DebruteCliCommand, Set<string>>> = {
 };
 
 const REPEATABLE_OPTIONS: Partial<Record<DebruteCliCommand, Set<string>>> = {
-  'canvas.reset-layout': new Set(['path'])
+  'canvas.reset-layout': new Set(['path', 'glob'])
 };
 
 const PROJECT_COMMANDS = new Set<DebruteCliCommand>([
@@ -243,8 +243,11 @@ function validateRequiredOptions(command: DebruteCliCommand, options: Record<str
   if (command === 'generated-asset.lookup' && !options.path) {
     throw cliError('missing_argument', '--path is required.', { command });
   }
-  if (command === 'canvas.reset-layout' && (options.all === 'true') === Boolean(options.path)) {
-    throw cliError('invalid_input', 'canvas.reset-layout requires exactly one of --all or --path.', { command });
+  if (command === 'canvas.reset-layout') {
+    const hasRule = Boolean(options.path || options.glob);
+    if ((options.all === 'true') === hasRule) {
+      throw cliError('invalid_input', 'canvas.reset-layout requires --all or at least one --path/--glob.', { command });
+    }
   }
   if (command === 'generate.image-batch') {
     const sources = ['manifest', 'input-jsonl'].filter((key) => options[key]);
@@ -274,7 +277,7 @@ function requiredPositionals(command: DebruteCliCommand): string {
     return '<project> <canvas-id>';
   }
   if (command === 'canvas.reset-layout') {
-    return '<project> <canvas-id> --all | --path <rule>';
+    return '<project> <canvas-id> --all | [--path <literal...>] [--glob <pattern...>]';
   }
   if (command === 'canvas.reorder') {
     return '<project> <canvas-id...>';

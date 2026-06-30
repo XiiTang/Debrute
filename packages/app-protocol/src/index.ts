@@ -757,7 +757,7 @@ export type ResetCanvasNodeLayoutsInput = {
   canvasId: string;
 } & (
   | { all: true }
-  | { pathRules: string[] }
+  | { pathRules: { paths?: string[]; globs?: string[] } }
 );
 
 export interface ProjectAddProjectPathToCanvasMapResult {
