@@ -7,6 +7,11 @@ import {
   projectTextMimeTypeFromPath,
   resolveExistingProjectPath
 } from '@debrute/project-core';
+import type {
+  GeneratedArtifactRole,
+  GeneratedAssetMetadataLookup,
+  GeneratedAssetRecord
+} from '@debrute/app-protocol';
 import {
   isCanvasDocumentId,
   isCanvasDocumentName,
@@ -19,38 +24,102 @@ import {
   type Diagnostic
 } from '@debrute/canvas-core';
 import { canvasImagePreviewSourceInfo } from './CanvasImagePreviewService.js';
+import type {
+  CanvasVideoMetadata,
+  ReadCanvasVideoMetadataInput
+} from './CanvasNodeDimensionsService.js';
+import { buildCanvasVideoPresentation } from './CanvasVideoPresentationService.js';
+
+export interface CanvasProjectionServiceDependencies {
+  lookupGeneratedAssetMetadata(projectRoot: string, input: { projectRelativePath: string }): Promise<GeneratedAssetMetadataLookup>;
+  listGeneratedAssetsByModelRun(
+    projectRoot: string,
+    input: { modelRunId: string; artifactRole?: GeneratedArtifactRole | undefined }
+  ): Promise<GeneratedAssetRecord[]>;
+  findCurrentProjectPathForGeneratedAsset(
+    projectRoot: string,
+    input: {
+      record: GeneratedAssetRecord;
+      candidateProjectRelativePaths?: readonly string[];
+    }
+  ): Promise<string | undefined>;
+  readCanvasVideoMetadata(input: ReadCanvasVideoMetadataInput): Promise<CanvasVideoMetadata>;
+}
 
 export class CanvasProjectionService {
+  constructor(private readonly dependencies: CanvasProjectionServiceDependencies) {}
+
   async projectCanvasDocument(
     projectRoot: string,
     canvas: CanvasDocument,
     diagnostics: Diagnostic[] = []
   ): Promise<CanvasProjection> {
-    const availabilityByPath = new Map(await Promise.all(canvas.nodeElements.map(async (node) => [
+    const inspectionByPath = new Map(await Promise.all(canvas.nodeElements.map(async (node) => [
       node.projectRelativePath,
-      await inspectCanvasNodeAvailability(projectRoot, node)
+      await inspectCanvasNode(projectRoot, node, this.dependencies)
     ] as const)));
-    return projectCanvas({
+    const projected = projectCanvas({
       canvas,
       diagnostics,
-      nodeAvailability: (node) => availabilityByPath.get(node.projectRelativePath)!
+      nodeAvailability: (node) => inspectionByPath.get(node.projectRelativePath)!.availability
     });
+    return {
+      ...projected,
+      nodes: await Promise.all(projected.nodes.map(async (node) => {
+        if (node.mediaKind !== 'video' || node.availability.state !== 'available') {
+          return node;
+        }
+        const inspection = inspectionByPath.get(node.projectRelativePath)!;
+        return {
+          ...node,
+          videoPresentation: await buildCanvasVideoPresentation({
+            projectRoot,
+            projectRelativePath: node.projectRelativePath,
+            durationSeconds: inspection.videoMetadata?.durationSeconds,
+            generatedAssetLookup: (input) => this.dependencies.lookupGeneratedAssetMetadata(projectRoot, input),
+            listGeneratedAssetsByModelRun: (input) => this.dependencies.listGeneratedAssetsByModelRun(projectRoot, input),
+            findCurrentProjectPathForGeneratedAsset: (input) => this.dependencies.findCurrentProjectPathForGeneratedAsset(projectRoot, input)
+          })
+        };
+      }))
+    };
   }
 
-  projectCanvasWithKnownAvailability(canvas: CanvasDocument, projection: CanvasProjection): CanvasProjection {
-    const availabilityByPath = new Map(projection.nodes.map((node) => [node.projectRelativePath, node.availability]));
-    return projectCanvas({
+  projectCanvasWithKnownProjection(canvas: CanvasDocument, projection: CanvasProjection): CanvasProjection {
+    const projectionByPath = new Map(projection.nodes.map((node) => [node.projectRelativePath, node]));
+    const projected = projectCanvas({
       canvas,
       diagnostics: projection.diagnostics,
       nodeAvailability: (node) => {
-        const availability = availabilityByPath.get(node.projectRelativePath);
-        if (!availability) {
+        const projectedNode = projectionByPath.get(node.projectRelativePath);
+        if (!projectedNode) {
           throw new Error(`Canvas node availability is not loaded: ${node.projectRelativePath}`);
         }
-        return availability;
+        return projectedNode.availability;
       }
     });
+    return {
+      ...projected,
+      nodes: projected.nodes.map((node) => {
+        if (node.mediaKind !== 'video' || node.availability.state !== 'available') {
+          return node;
+        }
+        const projectedNode = projectionByPath.get(node.projectRelativePath);
+        if (!projectedNode?.videoPresentation) {
+          throw new Error(`Canvas video presentation is not loaded: ${node.projectRelativePath}`);
+        }
+        return {
+          ...node,
+          videoPresentation: projectedNode.videoPresentation
+        };
+      })
+    };
   }
+}
+
+interface CanvasNodeInspection {
+  availability: CanvasNodeAvailability;
+  videoMetadata?: CanvasVideoMetadata;
 }
 
 export function assertCurrentCanvasDocument(value: unknown, filePath: string): CanvasDocument {
@@ -156,6 +225,33 @@ async function inspectCanvasNodeAvailability(projectRoot: string, node: CanvasNo
     return {
       state: 'unreadable',
       message: errorMessage(error)
+    };
+  }
+}
+
+async function inspectCanvasNode(
+  projectRoot: string,
+  node: CanvasNodeElement,
+  dependencies: CanvasProjectionServiceDependencies
+): Promise<CanvasNodeInspection> {
+  const availability = await inspectCanvasNodeAvailability(projectRoot, node);
+  if (availability.state !== 'available' || node.mediaKind !== 'video') {
+    return { availability };
+  }
+  try {
+    return {
+      availability,
+      videoMetadata: await dependencies.readCanvasVideoMetadata({
+        projectRoot,
+        projectRelativePath: node.projectRelativePath
+      })
+    };
+  } catch (error) {
+    return {
+      availability: {
+        state: 'unreadable',
+        message: errorMessage(error)
+      }
     };
   }
 }

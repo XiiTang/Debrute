@@ -44,6 +44,42 @@ import type { CanvasSelection } from './runtime/canvasSelection';
 import { createCanvasEditorRuntime, type CanvasEditorRuntime } from './runtime/CanvasEditorRuntime';
 import { I18nProvider } from '../i18n';
 
+const { videoTogglePlaybackSpy } = vi.hoisted(() => ({
+  videoTogglePlaybackSpy: vi.fn()
+}));
+
+vi.mock('./CanvasVideoNodeContent', async () => {
+  const ReactModule = await import('react');
+  return {
+    CanvasVideoNodeContent: ({ node, onRegisterVideoTarget }: {
+      node: CanvasProjection['nodes'][number];
+      onRegisterVideoTarget: (projectRelativePath: string, target: {
+        togglePlayback: () => void;
+        seekBy: (seconds: number) => void;
+        toggleMuted: () => void;
+        adjustPlaybackRate: (delta: number) => void;
+        toggleCaptions: () => void;
+        enterFullscreen: () => void;
+        togglePictureInPicture: () => void;
+      } | undefined) => void;
+    }) => {
+      ReactModule.useEffect(() => {
+        onRegisterVideoTarget(node.projectRelativePath, {
+          togglePlayback: videoTogglePlaybackSpy,
+          seekBy: vi.fn(),
+          toggleMuted: vi.fn(),
+          adjustPlaybackRate: vi.fn(),
+          toggleCaptions: vi.fn(),
+          enterFullscreen: vi.fn(),
+          togglePictureInPicture: vi.fn()
+        });
+        return () => onRegisterVideoTarget(node.projectRelativePath, undefined);
+      }, [node.projectRelativePath, onRegisterVideoTarget]);
+      return <div data-testid="mock-video-node">{node.projectRelativePath}</div>;
+    }
+  };
+});
+
 describe('CanvasSurface', () => {
   beforeEach(() => {
     installTextPreviewStyleVariables();
@@ -354,6 +390,55 @@ describe('CanvasSurface', () => {
     expect(html.match(/data-editor-mode="edit"/g) ?? []).toHaveLength(1);
     expect(html.match(/canvas-text-preview-empty/g) ?? []).toHaveLength(1);
     expect(html).not.toContain(`data-editor-mode="${'pre'}${'view'}"`);
+  });
+
+  it('routes video shortcuts to the selected video node only', async () => {
+    const restoreActEnvironment = installReactActEnvironment();
+    const container = document.createElement('div');
+    document.body.append(container);
+    const root = createRoot(container);
+    const canvas = createCanvasDocument({ id: 'video-hotkeys' });
+    const videoNode = videoProjectionNode('media/clip.mp4', 0, 0);
+    const projection: CanvasProjection = {
+      canvasId: canvas.id,
+      nodes: [videoNode],
+      edges: [],
+      diagnostics: []
+    };
+    const runtime = createCanvasEditorRuntime({
+      selection: { kind: 'node', projectRelativePath: videoNode.projectRelativePath }
+    });
+
+    try {
+      await act(async () => {
+        root.render(
+          <I18nProvider locale="en">
+            <CanvasSurface
+              canvas={canvas}
+              projection={projection}
+              runtime={runtime}
+              actions={actions}
+              textFileBuffers={{}}
+              canvasFeedback={undefined}
+              overlayRuntime={createCanvasOverlayRuntime()}
+              feedbackPlacementContext={feedbackPlacementContextFixture()}
+              textPreviewStyleDependencyKey="dark"
+            />
+          </I18nProvider>
+        );
+      });
+
+      window.dispatchEvent(new KeyboardEvent('keydown', { key: ' ' }));
+
+      expect(videoTogglePlaybackSpy).toHaveBeenCalledTimes(1);
+    } finally {
+      await act(async () => {
+        root.unmount();
+      });
+      container.remove();
+      restoreActEnvironment();
+      videoTogglePlaybackSpy.mockClear();
+    }
   });
 
   it('starts Canvas-owned text preview scheduled work after StrictMode mount cleanup', async () => {
@@ -1126,6 +1211,26 @@ function textProjectionNode(path: string, x: number, y: number, revision: string
   };
 }
 
+function videoProjectionNode(path: string, x: number, y: number): CanvasProjection['nodes'][number] {
+  return {
+    ...nodeFixture(path, x, y),
+    mediaKind: 'video',
+    width: 640,
+    height: 360,
+    availability: {
+      state: 'available',
+      size: 100,
+      mimeType: 'video/mp4',
+      fileUrl: `http://127.0.0.1:17321/api/projects/123e4567-e89b-42d3-a456-426614174000/files/raw/${path}?v=rev`,
+      revision: 'rev'
+    },
+    videoPresentation: {
+      kind: 'video',
+      textTracks: []
+    }
+  };
+}
+
 function textBufferFixture(path: string, content: string, revision: string): TextFileBuffer {
   return {
     projectRelativePath: path,
@@ -1269,7 +1374,8 @@ function nodeShellProps(node = nodeFixture('flow/cover.png', 0, 0)): CanvasNodeS
     onPointerLeave: () => undefined,
     onSelectNode: () => undefined,
     onContextMenu: () => undefined,
-    onResizePointerDown: () => undefined
+    onResizePointerDown: () => undefined,
+    onRegisterVideoTarget: () => undefined
   };
 }
 

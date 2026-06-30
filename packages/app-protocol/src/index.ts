@@ -627,10 +627,19 @@ export interface ProductUpdateApplyResult {
   state: DebruteProductState;
 }
 
+export type GeneratedArtifactRole =
+  | 'primary-image'
+  | 'primary-video'
+  | 'last-frame'
+  | 'other';
+
 export interface GeneratedAssetRecord {
   recordId: string;
+  modelRunId: string;
   projectRelativePath: string;
   createdAt: string;
+  artifactRole: GeneratedArtifactRole;
+  artifactIndex: number;
   fingerprint: {
     algorithm: 'sha256';
     hash: string;

@@ -12,20 +12,36 @@ export function applyCanvasDocumentToWorkbenchSnapshot(
   if (!currentProjection) {
     throw new Error(`Cannot apply Canvas document ${canvas.id} without a current projection.`);
   }
-  const availabilityByPath = new Map(
-    currentProjection.nodes.map((node) => [node.projectRelativePath, node.availability])
+  const projectionNodeByPath = new Map(
+    currentProjection.nodes.map((node) => [node.projectRelativePath, node])
   );
-  const nextProjection = projectCanvas({
+  const projected = projectCanvas({
     canvas,
     diagnostics: currentProjection.diagnostics,
     nodeAvailability: (node): CanvasNodeAvailability => {
-      const availability = availabilityByPath.get(node.projectRelativePath);
-      if (!availability) {
+      const projectedNode = projectionNodeByPath.get(node.projectRelativePath);
+      if (!projectedNode) {
         throw new Error(`Cannot apply Canvas document ${canvas.id} without availability for ${node.projectRelativePath}.`);
       }
-      return availability;
+      return projectedNode.availability;
     }
   });
+  const nextProjection = {
+    ...projected,
+    nodes: projected.nodes.map((node) => {
+      if (node.mediaKind !== 'video' || node.availability.state !== 'available') {
+        return node;
+      }
+      const projectedNode = projectionNodeByPath.get(node.projectRelativePath);
+      if (!projectedNode?.videoPresentation) {
+        throw new Error(`Cannot apply Canvas document ${canvas.id} without video presentation for ${node.projectRelativePath}.`);
+      }
+      return {
+        ...node,
+        videoPresentation: projectedNode.videoPresentation
+      };
+    })
+  };
   return {
     ...snapshot,
     canvases: snapshot.canvases.map((current) => current.id === canvas.id ? canvas : current),

@@ -64,7 +64,10 @@ export interface ExecuteImageModelRequestInput {
 }
 
 export interface ImageGeneratedAssetRecorderInput {
+  modelRunId: string;
   projectRelativePath: string;
+  artifactRole: 'primary-image';
+  artifactIndex: number;
   modelRun: {
     request: unknown;
     output: unknown;
@@ -90,6 +93,7 @@ type ImagePayloadSource =
 interface RequestState {
   projectRoot: string;
   invocationId: string;
+  modelRunId: string;
   entry: ImageModelCatalogEntry;
   baseUrl: string;
   apiKey: string;
@@ -169,6 +173,7 @@ export async function executeImageModelRequest(input: ExecuteImageModelRequestIn
   const state: RequestState = {
     projectRoot: input.projectRoot,
     invocationId: input.invocationId,
+    modelRunId: randomUUID(),
     entry,
     baseUrl: modelSettings?.baseUrlOverride?.trim() || entry.defaultBaseUrl,
     apiKey,
@@ -691,7 +696,10 @@ async function storeImagePayload(
     })
   };
   await state.recordGeneratedAsset?.({
+    modelRunId: state.modelRunId,
     projectRelativePath: normalizedPath,
+    artifactRole: 'primary-image',
+    artifactIndex: index,
     modelRun
   });
   return {

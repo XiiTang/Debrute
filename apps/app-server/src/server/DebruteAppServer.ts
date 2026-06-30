@@ -90,6 +90,7 @@ import type {
 import { GlobalConfigStore } from '../config/GlobalConfigStore.js';
 import {
   readCanvasNodeLayoutSize,
+  readCanvasVideoMetadata,
   type ReadCanvasNodeLayoutSizeInput
 } from '../canvas/CanvasNodeDimensionsService.js';
 import {
@@ -262,7 +263,15 @@ export class DebruteAppServer {
     });
     this.canvasImagePreviewService = createCanvasImagePreviewService();
     this.canvasTextPreviewService = createCanvasTextPreviewService();
-    this.canvasProjectionService = new CanvasProjectionService();
+    this.canvasProjectionService = new CanvasProjectionService({
+      lookupGeneratedAssetMetadata: (projectRoot, input) => this.generatedAssetMetadataService.lookupGeneratedAssetMetadata(projectRoot, input),
+      listGeneratedAssetsByModelRun: (projectRoot, input) => this.generatedAssetMetadataService.listGeneratedAssetsByModelRun(projectRoot, input),
+      findCurrentProjectPathForGeneratedAsset: (projectRoot, input) => this.generatedAssetMetadataService.findCurrentProjectPathForGeneratedAsset(projectRoot, input),
+      readCanvasVideoMetadata: (input) => readCanvasVideoMetadata({
+        ...input,
+        ...(this.options.integrationEnvPath !== undefined ? { envPath: this.options.integrationEnvPath } : {})
+      })
+    });
     this.canvasSessionService = new CanvasSessionService({
       writeCanvasText: (projectRoot, canvasPath, content, expectedHash) => this.writeProjectDocumentText(
         projectRoot,
@@ -271,7 +280,7 @@ export class DebruteAppServer {
         content,
         expectedHash
       ),
-      projectCanvasWithKnownAvailability: (canvas, projection) => this.canvasProjectionService.projectCanvasWithKnownAvailability(canvas, projection)
+      projectCanvasWithKnownProjection: (canvas, projection) => this.canvasProjectionService.projectCanvasWithKnownProjection(canvas, projection)
     });
     this.canvasRegistryService = new CanvasRegistryService({
       loadCanvasDocuments: (projectRoot) => this.canvasSessionService.loadCanvasDocuments(projectRoot),

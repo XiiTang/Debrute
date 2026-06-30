@@ -788,6 +788,113 @@ describe('daemon HTTP runtime', () => {
     await gif.arrayBuffer();
   });
 
+  it('serves supported audio video and VTT project files with media content types', async () => {
+    const projectRoot = await mkdtemp(join(tmpdir(), 'debrute-daemon-media-content-types-'));
+    await mkdir(join(projectRoot, 'assets'), { recursive: true });
+    for (const [path, body] of [
+      ['assets/clip.mp4', 'mp4-bytes'],
+      ['assets/clip.webm', 'webm-bytes'],
+      ['assets/clip.mov', 'mov-bytes'],
+      ['assets/clip.m4v', 'm4v-bytes'],
+      ['assets/theme.mp3', 'mp3-bytes'],
+      ['assets/theme.wav', 'wav-bytes'],
+      ['assets/theme.ogg', 'ogg-bytes'],
+      ['assets/theme.m4a', 'm4a-bytes'],
+      ['assets/theme.aac', 'aac-bytes'],
+      ['assets/theme.flac', 'flac-bytes'],
+      ['assets/theme.weba', 'weba-bytes'],
+      ['assets/clip.en.vtt', 'WEBVTT\n\n00:00.000 --> 00:01.000\nHello\n']
+    ] as const) {
+      await writeFile(join(projectRoot, path), body, 'utf8');
+    }
+
+    const daemon = createDebruteDaemonHttpServer({
+      host: '127.0.0.1',
+      port: 0,
+      token: 'test-token',
+      webBaseUrl: null
+    });
+    cleanups.push(() => daemon.close(), () => rm(projectRoot, { recursive: true, force: true }));
+    const runtime = await daemon.listen();
+    const opened = await requestJson<{ projectId: string; projectRevision: number }>(`${runtime.daemonUrl}/api/projects/open`, {
+      method: 'POST',
+      headers: {
+        'content-type': 'application/json',
+        'x-debrute-daemon-token': 'test-token'
+      },
+      body: JSON.stringify({ projectRoot })
+    });
+
+    for (const [path, contentType] of [
+      ['assets/clip.mp4', 'video/mp4'],
+      ['assets/clip.webm', 'video/webm'],
+      ['assets/clip.mov', 'video/quicktime'],
+      ['assets/clip.m4v', 'video/x-m4v'],
+      ['assets/theme.mp3', 'audio/mpeg'],
+      ['assets/theme.wav', 'audio/wav'],
+      ['assets/theme.ogg', 'audio/ogg'],
+      ['assets/theme.m4a', 'audio/mp4'],
+      ['assets/theme.aac', 'audio/mp4'],
+      ['assets/theme.flac', 'audio/flac'],
+      ['assets/theme.weba', 'audio/webm'],
+      ['assets/clip.en.vtt', 'text/vtt; charset=utf-8']
+    ] as const) {
+      const fileStat = await stat(join(projectRoot, path));
+      const revision = projectFileRevision(fileStat.size, fileStat.mtimeMs);
+      const response = await apiFetch(`${runtime.daemonUrl}/api/projects/${opened.projectId}/files/raw/${path}?v=${revision}`);
+      expect(response.status).toBe(200);
+      expect(response.headers.get('content-type')).toBe(contentType);
+      await response.arrayBuffer();
+    }
+  });
+
+  it('serves raw project files with byte range responses', async () => {
+    const projectRoot = await mkdtemp(join(tmpdir(), 'debrute-daemon-raw-range-'));
+    await mkdir(join(projectRoot, 'generated'), { recursive: true });
+    await writeFile(join(projectRoot, 'generated/clip.mp4'), '0123456789', 'utf8');
+
+    const daemon = createDebruteDaemonHttpServer({
+      host: '127.0.0.1',
+      port: 0,
+      token: 'test-token',
+      webBaseUrl: null
+    });
+    cleanups.push(() => daemon.close(), () => rm(projectRoot, { recursive: true, force: true }));
+    const runtime = await daemon.listen();
+    const opened = await requestJson<{ projectId: string; projectRevision: number }>(`${runtime.daemonUrl}/api/projects/open`, {
+      method: 'POST',
+      headers: {
+        'content-type': 'application/json',
+        'x-debrute-daemon-token': 'test-token'
+      },
+      body: JSON.stringify({ projectRoot })
+    });
+    const fileStat = await stat(join(projectRoot, 'generated/clip.mp4'));
+    const revision = projectFileRevision(fileStat.size, fileStat.mtimeMs);
+    const baseUrl = `${runtime.daemonUrl}/api/projects/${opened.projectId}/files/raw/generated/clip.mp4?v=${revision}`;
+
+    const first = await apiFetch(baseUrl, { headers: { range: 'bytes=2-5' } });
+    expect(first.status).toBe(206);
+    expect(first.headers.get('accept-ranges')).toBe('bytes');
+    expect(first.headers.get('content-range')).toBe('bytes 2-5/10');
+    expect(first.headers.get('content-length')).toBe('4');
+    expect(await first.text()).toBe('2345');
+
+    const openEnded = await apiFetch(baseUrl, { headers: { range: 'bytes=7-' } });
+    expect(openEnded.status).toBe(206);
+    expect(openEnded.headers.get('content-range')).toBe('bytes 7-9/10');
+    expect(await openEnded.text()).toBe('789');
+
+    const suffix = await apiFetch(baseUrl, { headers: { range: 'bytes=-3' } });
+    expect(suffix.status).toBe(206);
+    expect(suffix.headers.get('content-range')).toBe('bytes 7-9/10');
+    expect(await suffix.text()).toBe('789');
+
+    const invalid = await apiFetch(baseUrl, { headers: { range: 'bytes=20-30' } });
+    expect(invalid.status).toBe(416);
+    expect(invalid.headers.get('content-range')).toBe('bytes */10');
+  });
+
   it('protects native project path operations with daemon token and validates project paths', async () => {
     const projectRoot = await mkdtemp(join(tmpdir(), 'debrute-daemon-native-path-'));
     await mkdir(join(projectRoot, 'briefs'), { recursive: true });
@@ -1378,7 +1485,10 @@ describe('daemon HTTP runtime', () => {
     const events = await fetch(`${runtime.daemonUrl}/api/projects/${opened.projectId}/events?clientId=generated-assets-client&debrute-token=test-token`);
     expect(events.status).toBe(200);
     const record = await appServer.recordGeneratedAssetMetadata({
+      modelRunId: 'model-run-1',
       projectRelativePath: 'generated/cover.png',
+      artifactRole: 'primary-image',
+      artifactIndex: 0,
       modelRun: {
         request: { prompt: 'cover' },
         output: { ok: true }
@@ -1991,6 +2101,87 @@ describe('daemon HTTP runtime', () => {
     expect(eventNode.availability.fileUrl).toBe(node.availability.fileUrl);
   });
 
+  it('serves video presentation companions with browser file URLs at the HTTP snapshot boundary', async () => {
+    const projectRoot = await mkdtemp(join(tmpdir(), 'debrute-daemon-video-presentation-urls-project-'));
+    const binDir = await mkdtemp(join(tmpdir(), 'debrute-daemon-video-presentation-urls-bin-'));
+    await mkdir(join(projectRoot, 'media'), { recursive: true });
+    await writeFile(join(projectRoot, 'media/clip.mp4'), 'video-bytes', 'utf8');
+    await writeFile(join(projectRoot, 'media/clip.poster.webp'), 'poster-bytes', 'utf8');
+    await writeFile(join(projectRoot, 'media/clip.en.vtt'), 'WEBVTT\n', 'utf8');
+    await mkdir(join(projectRoot, '.debrute/canvases'), { recursive: true });
+    await mkdir(join(projectRoot, '.debrute/canvas-maps'), { recursive: true });
+    await writeFile(join(projectRoot, '.debrute/project.json'), JSON.stringify(projectMetadata('Video Presentation URLs'), null, 2), 'utf8');
+    await writeFile(join(projectRoot, '.debrute/canvases/index.json'), JSON.stringify({ canvasOrder: ['canvas-1'] }, null, 2), 'utf8');
+    await writeFile(join(projectRoot, '.debrute/canvases/canvas-1.json'), JSON.stringify({
+      id: 'canvas-1',
+      name: 'canvas-1',
+      nodeElements: [{
+        projectRelativePath: 'media/clip.mp4',
+        nodeKind: 'file',
+        mediaKind: 'video',
+        x: 0,
+        y: 0,
+        width: 640,
+        height: 360,
+        z: 0
+      }],
+      annotations: [],
+      preferences: { showDiagnostics: true }
+    }, null, 2), 'utf8');
+    await writeFile(join(projectRoot, '.debrute/canvas-maps/canvas-1.yaml'), canvasMapSource(['media/clip.mp4']), 'utf8');
+    await writeFakeFfprobe(binDir, {
+      streams: [{ codec_type: 'video', width: 640, height: 360, duration: '5' }],
+      format: { duration: '5' }
+    });
+
+    const daemon = createDebruteDaemonHttpServer({
+      appServerOptions: {
+        integrationEnvPath: binDir
+      },
+      host: '127.0.0.1',
+      port: 0,
+      token: 'test-token',
+      webBaseUrl: null
+    });
+    cleanups.push(
+      () => daemon.close(),
+      () => rm(projectRoot, { recursive: true, force: true }),
+      () => rm(binDir, { recursive: true, force: true })
+    );
+    const runtime = await daemon.listen();
+    const opened = await requestJson<{ projectId: string }>(`${runtime.daemonUrl}/api/projects/open`, {
+      method: 'POST',
+      headers: {
+        'content-type': 'application/json',
+        'x-debrute-daemon-token': 'test-token'
+      },
+      body: JSON.stringify({ projectRoot })
+    });
+
+    const refreshed = await requestJson<{
+      snapshot: {
+        projections: Array<{
+          nodes: Array<{
+            projectRelativePath: string;
+            availability: { state: string; fileUrl?: string };
+            videoPresentation?: {
+              poster?: { projectRelativePath: string; fileUrl?: string };
+              textTracks: Array<{ projectRelativePath: string; fileUrl?: string }>;
+            };
+          }>;
+        }>;
+      };
+    }>(`${runtime.daemonUrl}/api/projects/${opened.projectId}/refresh`, {
+      method: 'POST',
+      headers: { 'x-debrute-daemon-token': 'test-token' }
+    });
+
+    const node = refreshed.snapshot.projections[0]!.nodes.find((item) => item.projectRelativePath === 'media/clip.mp4')!;
+    expect(node.availability.fileUrl).toContain(`/api/projects/${opened.projectId}/files/raw/media/clip.mp4`);
+    expect(node.videoPresentation?.poster?.fileUrl).toContain(`/api/projects/${opened.projectId}/files/raw/media/clip.poster.webp`);
+    expect(node.videoPresentation?.textTracks[0]?.fileUrl).toContain(`/api/projects/${opened.projectId}/files/raw/media/clip.en.vtt`);
+  });
+
   it('resets manual Canvas layout through the HTTP Canvas route', async () => {
     const projectRoot = await mkdtemp(join(tmpdir(), 'debrute-daemon-canvas-reset-route-project-'));
     await mkdir(join(projectRoot, 'prompts'), { recursive: true });
@@ -2398,12 +2589,34 @@ async function writeCanvasMap(projectRoot: string, canvasId: string, content: st
   await writeFile(join(projectRoot, `.debrute/canvas-maps/${canvasId}.yaml`), content, 'utf8');
 }
 
+async function writeFakeFfprobe(binDir: string, output: unknown): Promise<void> {
+  await mkdir(binDir, { recursive: true });
+  const path = join(binDir, 'ffprobe');
+  await writeFile(path, [
+    '#!/bin/sh',
+    `printf '%s\\n' ${JSON.stringify(JSON.stringify(output))}`,
+    ''
+  ].join('\n'), 'utf8');
+  await chmod(path, 0o755);
+}
+
 async function writeFakePackageManager(dir: string, name: string, body: string): Promise<string> {
   await mkdir(dir, { recursive: true });
   const path = join(dir, name);
   await writeFile(path, ['#!/bin/sh', body].join('\n'), 'utf8');
   await chmod(path, 0o755);
   return path;
+}
+
+function projectMetadata(name: string) {
+  return {
+    project: {
+      id: `${name.toLowerCase().replaceAll(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '')}-id`,
+      name,
+      createdAt: '2026-06-30T00:00:00.000Z',
+      updatedAt: '2026-06-30T00:00:00.000Z'
+    }
+  };
 }
 
 function canvasMapSource(paths: Array<string | { glob: string }>): string {

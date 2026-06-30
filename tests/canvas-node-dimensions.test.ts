@@ -5,6 +5,7 @@ import sharp from 'sharp';
 import { describe, expect, it } from 'vitest';
 import {
   parseFfprobeDimensions,
+  parseFfprobeVideoMetadata,
   readCanvasNodeLayoutSize
 } from '../apps/app-server/src/canvas/CanvasNodeDimensionsService';
 
@@ -113,6 +114,23 @@ describe('canvas node dimensions', () => {
         { codec_type: 'video', width: 1920, height: 1080 }
       ]
     }))).toEqual({ width: 1920, height: 1080 });
+  });
+
+  it('parses ffprobe video stream dimensions and duration', () => {
+    expect(parseFfprobeVideoMetadata(JSON.stringify({
+      streams: [
+        { codec_type: 'audio' },
+        { codec_type: 'video', width: 1920, height: 1080, duration: '12.5' }
+      ],
+      format: { duration: '13.25' }
+    }))).toEqual({ width: 1920, height: 1080, durationSeconds: 12.5 });
+
+    expect(parseFfprobeVideoMetadata(JSON.stringify({
+      streams: [
+        { codec_type: 'video', width: 1280, height: 720 }
+      ],
+      format: { duration: '3.25' }
+    }))).toEqual({ width: 1280, height: 720, durationSeconds: 3.25 });
   });
 
 });

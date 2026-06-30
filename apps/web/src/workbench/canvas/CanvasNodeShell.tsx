@@ -6,6 +6,7 @@ import type { CanvasStageRuntime } from './runtime/CanvasStageRuntime';
 import { CanvasNodeContent } from './CanvasNodeContent';
 import type { CanvasImageFeedbackDraftRegion, CanvasImageFeedbackMode } from './CanvasImageFeedbackLayer';
 import type { CanvasTextPreviewSource } from './CanvasTextPreviewRuntime';
+import type { CanvasVideoPlayerHandle } from './CanvasVideoPlayerAdapter';
 
 const RESIZE_HANDLES: ResizeHandle[] = ['nw', 'n', 'ne', 'w', 'e', 'sw', 's', 'se'];
 
@@ -36,6 +37,7 @@ export interface CanvasNodeShellProps {
   onContextMenu: (node: ProjectedCanvasNode, event: React.MouseEvent<Element>) => void;
   onSelectNode: (node: ProjectedCanvasNode) => void;
   onResizePointerDown: (node: ProjectedCanvasNode, handle: ResizeHandle, event: React.PointerEvent<HTMLButtonElement>) => void;
+  onRegisterVideoTarget: (projectRelativePath: string, target: CanvasVideoPlayerHandle | undefined) => void;
 }
 
 function CanvasNodeShellComponent({
@@ -61,7 +63,8 @@ function CanvasNodeShellComponent({
   onPointerLeave,
   onContextMenu,
   onSelectNode,
-  onResizePointerDown
+  onResizePointerDown,
+  onRegisterVideoTarget
 }: CanvasNodeShellProps): React.ReactElement {
   const elementRef = useRef<HTMLDivElement | null>(null);
 
@@ -123,6 +126,7 @@ function CanvasNodeShellComponent({
             localFeedbackMode={localFeedbackMode}
             pendingFeedbackRegion={pendingFeedbackRegion}
             onLocalFeedbackDraft={onLocalFeedbackDraft}
+            onRegisterVideoTarget={onRegisterVideoTarget}
             onSelectNode={() => onSelectNode(node)}
             onTitlePointerDown={(event) => onPointerDown(node, event)}
             onTitlePointerMove={onPointerMove}
@@ -143,6 +147,7 @@ function CanvasNodeShellComponent({
           localFeedbackMode={localFeedbackMode}
           pendingFeedbackRegion={pendingFeedbackRegion}
           onLocalFeedbackDraft={onLocalFeedbackDraft}
+          onRegisterVideoTarget={onRegisterVideoTarget}
           onSelectNode={() => onSelectNode(node)}
           onTitlePointerDown={(event) => onPointerDown(node, event)}
           onTitlePointerMove={onPointerMove}
@@ -193,7 +198,8 @@ export function areCanvasNodeShellPropsEqual(
     && previous.onPointerLeave === next.onPointerLeave
     && previous.onContextMenu === next.onContextMenu
     && previous.onSelectNode === next.onSelectNode
-    && previous.onResizePointerDown === next.onResizePointerDown;
+    && previous.onResizePointerDown === next.onResizePointerDown
+    && previous.onRegisterVideoTarget === next.onRegisterVideoTarget;
 }
 
 function usesFixedNodePresentation(node: ProjectedCanvasNode): boolean {

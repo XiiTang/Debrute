@@ -9,7 +9,8 @@ import type { TextFileBuffer, WorkbenchActions } from '../../types';
 import {
   CanvasImageNodePreview,
   CanvasNodeContent,
-  canvasTextBufferEnsureKey
+  canvasTextBufferEnsureKey,
+  type CanvasNodeContentProps
 } from './CanvasNodeContent';
 import type { CanvasImageNodeAssetHookState } from './CanvasImageNodeAssetContext';
 import type { CanvasTextPreviewSource } from './CanvasTextPreviewRuntime';
@@ -27,6 +28,20 @@ function renderStaticWithI18n(element: React.ReactElement): string {
     </I18nProvider>
   );
 }
+
+// @ts-expect-error CanvasNodeContent requires the video target registry dependency.
+const canvasNodeContentPropsWithoutVideoRegistry: CanvasNodeContentProps = {
+  node: directoryNode('type-check'),
+  selected: false,
+  culled: false,
+  actions: actionsFixture(),
+  textBuffer: undefined,
+  onSelectNode: () => undefined,
+  onTitlePointerDown: () => undefined,
+  onTitlePointerMove: () => undefined,
+  onTitlePointerUp: () => undefined
+};
+void canvasNodeContentPropsWithoutVideoRegistry;
 
 describe('CanvasImageNodePreview', () => {
   it('keeps the visible image mounted while the next image preloads off-DOM', () => {
@@ -103,6 +118,7 @@ describe('CanvasNodeContent text chrome', () => {
         culled={false}
         actions={actionsFixture()}
         textBuffer={undefined}
+        onRegisterVideoTarget={() => undefined}
         onSelectNode={() => undefined}
         onTitlePointerDown={() => undefined}
         onTitlePointerMove={() => undefined}
@@ -121,6 +137,7 @@ describe('CanvasNodeContent text chrome', () => {
         culled={false}
         actions={actionsFixture()}
         textBuffer={undefined}
+        onRegisterVideoTarget={() => undefined}
         onSelectNode={() => undefined}
         onTitlePointerDown={() => undefined}
         onTitlePointerMove={() => undefined}
@@ -141,6 +158,7 @@ describe('CanvasNodeContent text chrome', () => {
         culled={false}
         actions={actionsFixture()}
         textBuffer={undefined}
+        onRegisterVideoTarget={() => undefined}
         onSelectNode={() => undefined}
         onTitlePointerDown={() => undefined}
         onTitlePointerMove={() => undefined}
@@ -162,6 +180,7 @@ describe('CanvasNodeContent text chrome', () => {
         culled={false}
         actions={actionsFixture()}
         textBuffer={textBuffer('flow/readme.md', 'rev-a')}
+        onRegisterVideoTarget={() => undefined}
         onSelectNode={() => undefined}
         onTitlePointerDown={() => undefined}
         onTitlePointerMove={() => undefined}
@@ -190,6 +209,7 @@ describe('CanvasNodeContent text chrome', () => {
           src: '/api/projects/p/canvas-text-preview?canvasId=canvas-1&path=flow%2Freadme.md&fingerprint=fp&w=700',
           previewWidth: 700
         }}
+        onRegisterVideoTarget={() => undefined}
         onSelectNode={() => undefined}
         onTitlePointerDown={() => undefined}
         onTitlePointerMove={() => undefined}
@@ -360,6 +380,7 @@ describe('CanvasNodeContent text chrome', () => {
         actions={actionsFixture()}
         textBuffer={textBuffer('flow/readme.md', 'rev-a')}
         textPreviewError="Canvas text preview source capture did not produce a PNG blob."
+        onRegisterVideoTarget={() => undefined}
         onSelectNode={() => undefined}
         onTitlePointerDown={() => undefined}
         onTitlePointerMove={() => undefined}
@@ -385,6 +406,7 @@ describe('CanvasNodeContent text chrome', () => {
           src: '/api/projects/p/canvas-text-preview?canvasId=canvas-1&path=flow%2Freadme.md&fingerprint=fp&w=700',
           previewWidth: 700
         }}
+        onRegisterVideoTarget={() => undefined}
         onSelectNode={() => undefined}
         onTitlePointerDown={() => undefined}
         onTitlePointerMove={() => undefined}
@@ -404,6 +426,7 @@ describe('CanvasNodeContent text chrome', () => {
         culled={false}
         actions={actionsFixture()}
         textBuffer={textBuffer('flow/readme.md', 'rev-a')}
+        onRegisterVideoTarget={() => undefined}
         onSelectNode={() => undefined}
         onTitlePointerDown={() => undefined}
         onTitlePointerMove={() => undefined}
@@ -433,6 +456,7 @@ describe('CanvasNodeContent text chrome', () => {
         culled={false}
         actions={actionsFixture()}
         textBuffer={undefined}
+        onRegisterVideoTarget={() => undefined}
         onSelectNode={() => undefined}
         onTitlePointerDown={() => undefined}
         onTitlePointerMove={() => undefined}
@@ -451,6 +475,7 @@ describe('CanvasNodeContent text chrome', () => {
         culled={false}
         actions={actionsFixture()}
         textBuffer={{ ...textBuffer('flow/readme.md', 'rev-a'), externalChange: true }}
+        onRegisterVideoTarget={() => undefined}
         onSelectNode={() => undefined}
         onTitlePointerDown={() => undefined}
         onTitlePointerMove={() => undefined}
@@ -471,6 +496,7 @@ describe('CanvasNodeContent text chrome', () => {
         culled={false}
         actions={actionsFixture()}
         textBuffer={textBuffer('flow/readme.md', 'rev-a')}
+        onRegisterVideoTarget={() => undefined}
         onSelectNode={() => undefined}
         onTitlePointerDown={() => undefined}
         onTitlePointerMove={() => undefined}
@@ -547,6 +573,7 @@ async function renderTextPreviewNode(
           actions={actionsFixture()}
           textBuffer={textBuffer('flow/readme.md', 'rev-a')}
           textPreview={textPreview}
+          onRegisterVideoTarget={() => undefined}
           onSelectNode={() => undefined}
           onTitlePointerDown={() => undefined}
           onTitlePointerMove={() => undefined}

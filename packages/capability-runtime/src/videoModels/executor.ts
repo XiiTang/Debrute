@@ -61,7 +61,10 @@ export interface ExecuteVideoModelRequestInput {
 }
 
 export interface VideoGeneratedAssetRecorderInput {
+  modelRunId: string;
   projectRelativePath: string;
+  artifactRole: 'primary-video' | 'last-frame';
+  artifactIndex: number;
   modelRun: {
     request: unknown;
     output: unknown;
@@ -95,6 +98,7 @@ export type ExecuteVideoModelRequestResult =
 interface RequestState {
   projectRoot: string;
   invocationId: string;
+  modelRunId: string;
   entry: VideoModelCatalogEntry;
   baseUrl: string;
   apiKey: string;
@@ -190,6 +194,7 @@ export async function executeVideoModelRequest(input: ExecuteVideoModelRequestIn
   const state: RequestState = {
     projectRoot: input.projectRoot,
     invocationId: input.invocationId,
+    modelRunId: randomUUID(),
     entry,
     baseUrl: modelSettings?.baseUrlOverride?.trim() || entry.defaultBaseUrl,
     apiKey,
@@ -390,8 +395,12 @@ async function storeDownloadedArtifact(state: RequestState, url: string, index: 
     bytes,
     state.signal ? { signal: state.signal } : undefined
   );
+  const artifactRole = index === 0 ? 'primary-video' : 'last-frame';
   await state.recordGeneratedAsset?.({
+    modelRunId: state.modelRunId,
     projectRelativePath: normalizedPath,
+    artifactRole,
+    artifactIndex: index,
     modelRun: {
       request: redactModelRunValue(state, state.modelRun.request ?? null),
       output: redactModelRunValue(state, {

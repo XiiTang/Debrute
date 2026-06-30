@@ -1,8 +1,10 @@
 import React, { useCallback, useEffect, useReducer, useRef, useState } from 'react';
-import { AlertTriangle, File, FileText, Folder, Image as ImageIcon, Maximize2, Music2, RefreshCw, Save, Video } from 'lucide-react';
+import { AlertTriangle, File, FileText, Folder, Image as ImageIcon, Maximize2, Music2, RefreshCw, Save } from 'lucide-react';
 import type { CanvasFeedbackEntry, CanvasFeedbackGeometry, ProjectedCanvasNode } from '@debrute/canvas-core';
 import type { TextFileBuffer, WorkbenchActions } from '../../types';
 import { CanvasTextEditor } from './CanvasTextEditor';
+import { CanvasVideoNodeContent } from './CanvasVideoNodeContent';
+import type { CanvasVideoPlayerHandle } from './CanvasVideoPlayerAdapter';
 import { useCanvasImageNodeAsset, type CanvasImageNodeAssetHookState } from './CanvasImageNodeAssetContext';
 import { CanvasImageFeedbackLayer, type CanvasImageFeedbackDraftRegion, type CanvasImageFeedbackMode } from './CanvasImageFeedbackLayer';
 import type { CanvasLoadedImage } from './canvasImagePreviews';
@@ -32,6 +34,7 @@ export interface CanvasNodeContentProps {
     projectRelativePath: string;
     geometry: CanvasFeedbackGeometry;
   }) => void) | undefined;
+  onRegisterVideoTarget: (projectRelativePath: string, target: CanvasVideoPlayerHandle | undefined) => void;
   onSelectNode: () => void;
   onTitlePointerDown: (event: React.PointerEvent<Element>) => void;
   onTitlePointerMove: (event: React.PointerEvent<Element>) => void;
@@ -51,6 +54,7 @@ export function CanvasNodeContent({
   localFeedbackMode,
   pendingFeedbackRegion,
   onLocalFeedbackDraft,
+  onRegisterVideoTarget,
   onSelectNode,
   onTitlePointerDown,
   onTitlePointerMove,
@@ -127,6 +131,16 @@ export function CanvasNodeContent({
     );
   }
 
+  if (node.mediaKind === 'video') {
+    return (
+      <CanvasVideoNodeContent
+        node={node}
+        onSelectNode={onSelectNode}
+        onRegisterVideoTarget={onRegisterVideoTarget}
+      />
+    );
+  }
+
   const canRenderMediaPreview = node.availability.state === 'available'
     && (node.mediaKind === 'image' || mediaSrc !== undefined)
     && (!problem || node.mediaKind === 'image');
@@ -148,14 +162,6 @@ export function CanvasNodeContent({
                 })}
               />
             </>
-          ) : node.mediaKind === 'video' ? (
-            <video
-              key={`${mediaSrc}:${mediaRetryNonce}`}
-              controls
-              preload="none"
-              src={mediaSrc}
-              onError={() => setMediaError(i18n.t('canvas.node.unableToLoad', { path: node.projectRelativePath }))}
-            />
           ) : (
             <audio
               key={`${mediaSrc}:${mediaRetryNonce}`}
@@ -169,7 +175,7 @@ export function CanvasNodeContent({
       ) : (
         <div className="canvas-node-preview">
           <div className={problem ? 'db-canvas-node-placeholder db-canvas-node-placeholder--problem' : 'db-canvas-node-placeholder'}>
-            {problem ? <AlertTriangle size={22} /> : node.mediaKind === 'video' ? <Video size={22} /> : node.mediaKind === 'audio' ? <Music2 size={22} /> : <ImageIcon size={22} />}
+            {problem ? <AlertTriangle size={22} /> : node.mediaKind === 'audio' ? <Music2 size={22} /> : <ImageIcon size={22} />}
             <strong>{problem?.title ?? mediaKindLabel(node.mediaKind, i18n)}</strong>
             <span>{problem?.message ?? nodeDisplayName(node.projectRelativePath, i18n)}</span>
             {mediaProblem ? (
@@ -186,7 +192,7 @@ export function CanvasNodeContent({
           </div>
         </div>
       )}
-      {node.mediaKind === 'video' || node.mediaKind === 'audio' ? (
+      {node.mediaKind === 'audio' ? (
         <div className="db-canvas-node-caption">
           <span>{nodeDisplayName(node.projectRelativePath, i18n)}</span>
         </div>

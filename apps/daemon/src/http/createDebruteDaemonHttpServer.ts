@@ -1718,7 +1718,40 @@ function projectionForHttp(
             ...node.availability,
             fileUrl: rawFileUrl(daemonUrl, projectId, node.projectRelativePath, node.availability.revision, daemonToken)
           }
-        : node.availability
+        : node.availability,
+      ...(node.videoPresentation ? {
+        videoPresentation: videoPresentationForHttp(node, daemonUrl, projectId, daemonToken)
+      } : {})
+    }))
+  };
+}
+
+function videoPresentationForHttp(
+  node: ProjectSessionSnapshot['projections'][number]['nodes'][number],
+  daemonUrl: string,
+  projectId: string,
+  daemonToken: string
+): typeof node.videoPresentation {
+  if (!node.videoPresentation) {
+    return undefined;
+  }
+  return {
+    ...node.videoPresentation,
+    ...(node.videoPresentation.poster ? {
+      poster: {
+        ...node.videoPresentation.poster,
+        fileUrl: rawFileUrl(
+          daemonUrl,
+          projectId,
+          node.videoPresentation.poster.projectRelativePath,
+          node.videoPresentation.poster.revision,
+          daemonToken
+        )
+      }
+    } : {}),
+    textTracks: node.videoPresentation.textTracks.map((track) => ({
+      ...track,
+      fileUrl: rawFileUrl(daemonUrl, projectId, track.projectRelativePath, track.revision, daemonToken)
     }))
   };
 }
@@ -2340,6 +2373,15 @@ function contentTypeFromPath(path: string): string {
   if (imageMimeType) return imageMimeType;
   if (ext === '.mp4') return 'video/mp4';
   if (ext === '.webm') return 'video/webm';
+  if (ext === '.mov') return 'video/quicktime';
+  if (ext === '.m4v') return 'video/x-m4v';
+  if (ext === '.mp3') return 'audio/mpeg';
+  if (ext === '.wav' || ext === '.wave') return 'audio/wav';
+  if (ext === '.ogg' || ext === '.oga' || ext === '.opus') return 'audio/ogg';
+  if (ext === '.m4a' || ext === '.aac') return 'audio/mp4';
+  if (ext === '.flac') return 'audio/flac';
+  if (ext === '.weba') return 'audio/webm';
+  if (ext === '.vtt') return 'text/vtt; charset=utf-8';
   return 'application/octet-stream';
 }
 

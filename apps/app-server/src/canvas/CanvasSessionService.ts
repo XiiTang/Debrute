@@ -18,7 +18,7 @@ import { assertCurrentCanvasDocument } from './CanvasProjectionService.js';
 
 export interface CanvasSessionServiceOptions {
   writeCanvasText(projectRoot: string, canvasPath: string, content: string, expectedHash: string): Promise<void>;
-  projectCanvasWithKnownAvailability(canvas: CanvasDocument, projection: CanvasProjection): CanvasProjection;
+  projectCanvasWithKnownProjection(canvas: CanvasDocument, projection: CanvasProjection): CanvasProjection;
 }
 
 export class CanvasSessionService {
@@ -130,7 +130,7 @@ export class CanvasSessionService {
     }
     await this.writeCanvasJson(current.projectRoot, canvasPath, next, expectedHash);
     this.recordCanvasDocumentTextHash(current.projectRoot, canvasId, `${JSON.stringify(next, null, 2)}\n`);
-    const projection = this.options.projectCanvasWithKnownAvailability(next, existingProjection);
+    const projection = this.options.projectCanvasWithKnownProjection(next, existingProjection);
     return {
       canvas: next,
       changed: true,

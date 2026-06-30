@@ -277,8 +277,7 @@
   background: transparent;
 }
 
-.canvas-node-element.video .canvas-node-preview,
-.canvas-node-element:not(.image) .canvas-node-preview {
+.canvas-node-element:not(.image):not(.video) .canvas-node-preview {
   height: calc(100% - 30px);
 }
 
@@ -346,12 +345,57 @@
   background: var(--db-surface-2);
 }
 
-.canvas-node-preview video {
+.canvas-video-node {
+  width: 100%;
+  height: 100%;
+  display: grid;
+  grid-template-rows: minmax(0, 1fr) 30px;
+  background: transparent;
+}
+
+.canvas-video-player-shell {
+  position: relative;
+  min-height: 0;
+  overflow: hidden;
+  background: #000;
+}
+
+.canvas-video-player,
+.canvas-video-player media-controller {
+  width: 100%;
+  height: 100%;
+  display: block;
+}
+
+.canvas-video-player video {
   width: 100%;
   height: 100%;
   display: block;
   object-fit: contain;
   background: #000;
+}
+
+.db-canvas-node-error-overlay {
+  position: absolute;
+  inset: 8px;
+  z-index: 1;
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+  padding: 8px;
+  color: var(--db-text);
+  background: color-mix(in oklch, var(--db-surface) 86%, transparent);
+  border: 1px solid var(--db-border);
+  border-radius: 6px;
+}
+
+.db-canvas-node-error-overlay span {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .canvas-node-preview audio {

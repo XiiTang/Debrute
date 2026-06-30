@@ -97,8 +97,34 @@ export interface CanvasStructureEdgeProjection {
   targetProjectRelativePath: string;
 }
 
+export interface CanvasVideoPoster {
+  projectRelativePath: string;
+  fileUrl?: string;
+  mimeType: string;
+  revision: string;
+  source: 'explicit' | 'generated-last-frame';
+}
+
+export interface CanvasVideoTextTrack {
+  projectRelativePath: string;
+  fileUrl?: string;
+  revision: string;
+  kind: 'subtitles' | 'captions' | 'chapters' | 'metadata';
+  label: string;
+  srclang?: string;
+  default: boolean;
+}
+
+export interface CanvasVideoPresentation {
+  kind: 'video';
+  durationSeconds?: number;
+  poster?: CanvasVideoPoster;
+  textTracks: CanvasVideoTextTrack[];
+}
+
 export interface ProjectedCanvasNode extends CanvasNodeElement {
   availability: CanvasNodeAvailability;
+  videoPresentation?: CanvasVideoPresentation;
 }
 
 export interface CanvasProjection {

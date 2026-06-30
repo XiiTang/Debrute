@@ -18,6 +18,8 @@ import {
 } from '../shell/floatingBars';
 import { cameraForCanvasContent } from './CanvasCameraBounds';
 import { CanvasImageNodeAssetProvider, type CanvasImageNodeAssetContextValue } from './CanvasImageNodeAssetContext';
+import { createCanvasVideoHotkeyController } from './CanvasVideoHotkeyController';
+import type { CanvasVideoPlayerHandle } from './CanvasVideoPlayerAdapter';
 import type { CanvasImageFeedbackMode } from './CanvasImageFeedbackLayer';
 import { CanvasNodeShell } from './CanvasNodeShell';
 import {
@@ -202,6 +204,10 @@ function CanvasSurfaceRuntime({
   const [hoveredNodePath, setHoveredNodePath] = useState<string>();
 
   const projectedNodes = projection.nodes;
+  const videoHotkeyController = useMemo(() => createCanvasVideoHotkeyController(), []);
+  const registerVideoTarget = useCallback((projectRelativePath: string, target: CanvasVideoPlayerHandle | undefined) => {
+    videoHotkeyController.register(projectRelativePath, target);
+  }, [videoHotkeyController]);
   const devicePixelRatio = devicePixelRatioValue();
   const perfMonitorEnabled = canvasPerfMonitorEnabled();
   const stageRuntime = useMemo(() => createCanvasStageRuntime({ perfMonitor }), [perfMonitor]);
@@ -245,6 +251,21 @@ function CanvasSurfaceRuntime({
   useEffect(() => {
     reactCommitCountRef.current += 1;
   });
+
+  useEffect(() => {
+    const handleKeyDown = (event: KeyboardEvent) => {
+      const selectedVideoPath = selectedSingleVideoPath(selectionRef.current, projectedNodes);
+      videoHotkeyController.handleKeyDown({
+        key: event.key,
+        shiftKey: event.shiftKey,
+        preventDefault: () => event.preventDefault(),
+        selectedVideoPath,
+        activeElement: document.activeElement
+      });
+    };
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, [projectedNodes, videoHotkeyController]);
 
   const perfDebugBridge = useMemo(() => createCanvasPerfDebugBridge({
     enabled: perfMonitorEnabled,
@@ -985,6 +1006,7 @@ function CanvasSurfaceRuntime({
                 onSelectNode={selectNode}
                 onContextMenu={handleNodeContextMenu}
                 onResizePointerDown={beginNodeResize}
+                onRegisterVideoTarget={registerVideoTarget}
               />
             ))}
           </CanvasImageNodeAssetProvider>
@@ -1020,7 +1042,8 @@ function CanvasSurfaceNodeShell({
   onPointerLeave,
   onSelectNode,
   onContextMenu,
-  onResizePointerDown
+  onResizePointerDown,
+  onRegisterVideoTarget
 }: {
   node: ProjectedCanvasNode;
   selected: boolean;
@@ -1046,6 +1069,7 @@ function CanvasSurfaceNodeShell({
   onContextMenu: (node: ProjectedCanvasNode, event: React.MouseEvent<Element>) => void;
   onSelectNode: (node: ProjectedCanvasNode) => void;
   onResizePointerDown: (node: ProjectedCanvasNode, handle: ResizeHandle, event: React.PointerEvent<HTMLButtonElement>) => void;
+  onRegisterVideoTarget: (projectRelativePath: string, target: CanvasVideoPlayerHandle | undefined) => void;
 }): React.ReactElement {
   const textPreviewRuntime = useCanvasTextPreviewRuntime();
   const textPreview = node.mediaKind === 'text'
@@ -1079,6 +1103,7 @@ function CanvasSurfaceNodeShell({
       onSelectNode={onSelectNode}
       onContextMenu={onContextMenu}
       onResizePointerDown={onResizePointerDown}
+      onRegisterVideoTarget={onRegisterVideoTarget}
     />
   );
 }
@@ -1586,4 +1611,12 @@ function nodeRectForFloatingBar(node: ProjectedCanvasNode): FloatingBarRect {
 function devicePixelRatioValue(): number {
   const value = globalThis.window?.devicePixelRatio;
   return typeof value === 'number' && Number.isFinite(value) && value > 0 ? value : 1;
+}
+
+function selectedSingleVideoPath(selection: CanvasSelection | undefined, nodes: readonly ProjectedCanvasNode[]): string | undefined {
+  if (!selection || selection.kind !== 'node') {
+    return undefined;
+  }
+  const node = nodes.find((item) => item.projectRelativePath === selection.projectRelativePath);
+  return node?.mediaKind === 'video' ? node.projectRelativePath : undefined;
 }
