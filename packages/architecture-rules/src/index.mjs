@@ -302,24 +302,10 @@ function tsconfigViolations(file, text) {
     .map((reference) => `cli stays behind app-server and protocol boundaries: ${file} references ${reference}`);
 }
 
-const packageDependencySections = [
-  ['dependencies', 'depends on'],
-  ['devDependencies', 'has devDependency on'],
-  ['optionalDependencies', 'has optionalDependency on'],
-  ['peerDependencies', 'has peerDependency on']
-];
-
-function packageDependencyViolations(file, pkg, ruleName, forbiddenDependencies) {
-  return packageDependencySections.flatMap(([sectionName, phrase]) => {
-    const dependencies = new Set(Object.keys(pkg[sectionName] ?? {}));
-    return forbiddenDependencies
-      .filter((dependency) => dependencies.has(dependency))
-      .map((dependency) => `${ruleName}: ${file} ${phrase} ${dependency}`);
-  });
-}
+const packageDependencySections = ['dependencies', 'devDependencies', 'optionalDependencies', 'peerDependencies'];
 
 function allowedPackageDependencyViolations(file, pkg, ruleName, allowedDependenciesBySection) {
-  return packageDependencySections.flatMap(([sectionName]) => {
+  return packageDependencySections.flatMap((sectionName) => {
     const allowedDependencies = allowedDependenciesBySection[sectionName] ?? new Set();
     return Object.keys(pkg[sectionName] ?? {})
       .filter((dependency) => !allowedDependencies.has(dependency))

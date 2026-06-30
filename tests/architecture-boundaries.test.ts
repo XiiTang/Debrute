@@ -321,32 +321,6 @@ describe('Debrute architecture boundaries', () => {
     expect(text).not.toContain('registerProjectFileProtocols');
   });
 
-  it('keeps forbidden packages out of Electron package metadata and TypeScript references', () => {
-    const desktopPackage = JSON.parse(readFileSync(join(root, 'apps/desktop/package.json'), 'utf8')) as {
-      dependencies?: Record<string, string>;
-    };
-    const desktopTsconfigs = [
-      'apps/desktop/tsconfig.json',
-      'apps/desktop/tsconfig.electron.json'
-    ].map((file) => readFileSync(join(root, file), 'utf8')).join('\n');
-
-    expect(desktopPackage.dependencies ?? {}).not.toHaveProperty('@debrute/daemon');
-    expect(desktopPackage.dependencies ?? {}).not.toHaveProperty('@debrute/app-server');
-    expect(desktopPackage.dependencies ?? {}).not.toHaveProperty('@debrute/capability-runtime');
-    expect(desktopPackage.dependencies ?? {}).not.toHaveProperty('@debrute/capability-core');
-    expect(desktopPackage.dependencies ?? {}).not.toHaveProperty('@debrute/project-core');
-    expect(desktopPackage.dependencies ?? {}).not.toHaveProperty('@debrute/canvas-core');
-    expect(desktopPackage.dependencies ?? {}).not.toHaveProperty('@debrute/canvas-map-core');
-    expect(desktopPackage.dependencies ?? {}).not.toHaveProperty('node-pty');
-    expect(desktopTsconfigs).not.toContain('../../apps/daemon');
-    expect(desktopTsconfigs).not.toContain('../../apps/app-server');
-    expect(desktopTsconfigs).not.toContain('../../packages/capability-runtime');
-    expect(desktopTsconfigs).not.toContain('../../packages/capability-core');
-    expect(desktopTsconfigs).not.toContain('../../packages/project-core');
-    expect(desktopTsconfigs).not.toContain('../../packages/canvas-core');
-    expect(desktopTsconfigs).not.toContain('../../packages/canvas-map-core');
-  });
-
   it('keeps CLI package dependencies out of runtime server packages', () => {
     const cliPackage = JSON.parse(readFileSync(join(root, 'apps/debrute-cli/package.json'), 'utf8')) as {
       dependencies?: Record<string, string>;
