@@ -27,8 +27,11 @@ describe('Desktop release asset script', () => {
   it('copies the runtime host bundle into the Electron runtime bundle', () => {
     const script = readFileSync(join(process.cwd(), 'apps/desktop/scripts/bundle-electron.mjs'), 'utf8');
 
-    expect(script).toContain("['--filter', '@debrute/runtime-host', 'build']");
+    expect(script).toContain("'@debrute/runtime-host'");
+    expect(script).toContain("...(withSourcemap ? ['--', '--sourcemap'] : [])");
     expect(script).toContain("cp('../runtime-host/bundle/runtime-host.cjs', 'dist-electron/runtime-host.cjs')");
+    expect(script).toContain("if (withSourcemap)");
+    expect(script).toContain("cp('../runtime-host/bundle/runtime-host.cjs.map', 'dist-electron/runtime-host.cjs.map')");
     expect(script).toContain("cp('build/tray_icon_template.png', 'dist-electron/tray_icon_template.png')");
     expect(script).toContain("cp('build/tray_icon_template@2x.png', 'dist-electron/tray_icon_template@2x.png')");
     for (const status of ['starting', 'running', 'degraded', 'stopped', 'error']) {

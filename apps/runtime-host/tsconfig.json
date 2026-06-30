@@ -13,5 +13,6 @@
     { "path": "../../apps/daemon" },
     { "path": "../../packages/workbench-runtime" }
   ],
-  "include": ["src/**/*.ts"]
+  "include": ["src/**/*.ts"],
+  "exclude": ["src/**/*.test.ts", "src/**/*.test.tsx"]
 }
