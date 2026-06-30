@@ -14,12 +14,17 @@ export type {
   IntegrationId,
   IntegrationInstallBackendKind,
   IntegrationOperationDiagnostic,
+  IntegrationOperationFailureKind,
+  IntegrationOperationInFlight,
+  IntegrationOperationKind,
   IntegrationOperationStatus,
   IntegrationProbeErrorKind,
   IntegrationSettingsView,
   IntegrationStatus,
   IntegrationStatusKind,
   PythonCliInstallerId,
+  RunIntegrationOperationInput,
+  RunIntegrationOperationResult,
   SystemPackageManagerId
 } from '@debrute/app-protocol';
 
@@ -33,7 +38,6 @@ export interface IntegrationCommand {
   backend: IntegrationBackendId;
   file: string;
   args: string[];
-  preview: string;
 }
 
 export interface IntegrationCatalogBinary {
@@ -95,8 +99,7 @@ export const INTEGRATION_CATALOG: IntegrationCatalogItem[] = [
     ],
     packages: {
       brew: { packageName: 'ffmpeg' },
-      winget: { packageName: 'Gyan.FFmpeg' },
-      apt: { packageName: 'ffmpeg' }
+      winget: { packageName: 'Gyan.FFmpeg' }
     }
   },
   {
@@ -116,8 +119,7 @@ export const INTEGRATION_CATALOG: IntegrationCatalogItem[] = [
     ],
     packages: {
       brew: { packageName: 'imagemagick' },
-      winget: { packageName: 'ImageMagick.ImageMagick' },
-      apt: { packageName: 'imagemagick' }
+      winget: { packageName: 'ImageMagick.ImageMagick' }
     }
   },
   {
@@ -137,8 +139,7 @@ export const INTEGRATION_CATALOG: IntegrationCatalogItem[] = [
     ],
     packages: {
       brew: { packageName: 'media-info' },
-      winget: { packageName: 'MediaArea.MediaInfo' },
-      apt: { packageName: 'mediainfo' }
+      winget: { packageName: 'MediaArea.MediaInfo' }
     }
   },
   {
@@ -158,8 +159,7 @@ export const INTEGRATION_CATALOG: IntegrationCatalogItem[] = [
     ],
     packages: {
       brew: { packageName: 'exiftool' },
-      winget: { packageName: 'OliverBetz.ExifTool' },
-      apt: { packageName: 'libimage-exiftool-perl' }
+      winget: { packageName: 'OliverBetz.ExifTool' }
     }
   },
   {

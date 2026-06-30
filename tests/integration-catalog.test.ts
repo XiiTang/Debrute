@@ -49,8 +49,7 @@ describe('integration catalog', () => {
     expect(entries.ffmpeg?.backend).toBe('system-package-manager');
     expect(entries.ffmpeg && 'packages' in entries.ffmpeg ? entries.ffmpeg.packages : undefined).toEqual({
       brew: { packageName: 'ffmpeg' },
-      winget: { packageName: 'Gyan.FFmpeg' },
-      apt: { packageName: 'ffmpeg' }
+      winget: { packageName: 'Gyan.FFmpeg' }
     });
     expect(entries['remove-ai-watermarks']?.backend).toBe('python-cli-installer');
     expect(entries['remove-ai-watermarks'] && 'pythonCli' in entries['remove-ai-watermarks']

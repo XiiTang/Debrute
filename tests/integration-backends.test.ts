@@ -40,16 +40,15 @@ describe('integration backends', () => {
     });
   });
 
-  it('requires apt-get and apt-cache on Linux', async () => {
-    const binDir = await mkdtemp(join(tmpdir(), 'debrute-integrations-apt-missing-cache-'));
+  it('does not expose Linux APT as a real operation backend without an elevation path', async () => {
+    const binDir = await mkdtemp(join(tmpdir(), 'debrute-integrations-apt-unavailable-'));
     await writeExecutable(binDir, 'apt-get', '#!/bin/sh\nexit 0\n');
+    await writeExecutable(binDir, 'apt-cache', '#!/bin/sh\nexit 0\n');
 
     await expect(detectSystemPackageManager({ platform: 'linux', envPath: binDir })).resolves.toEqual({
       kind: 'system-package-manager',
-      backend: 'apt',
-      manager: 'apt',
       available: false,
-      unavailableReason: 'APT was not found on PATH.'
+      unavailableReason: 'System package integration operations are not supported on linux.'
     });
   });
 
@@ -76,8 +75,7 @@ describe('integration backends', () => {
     }, 'install')).toEqual({
       backend: 'brew',
       file: '/opt/homebrew/bin/brew',
-      args: ['install', '--formula', 'ffmpeg'],
-      preview: 'brew install --formula ffmpeg'
+      args: ['install', '--formula', 'ffmpeg']
     });
 
     expect(buildIntegrationOperationCommand(remove, {
@@ -89,8 +87,7 @@ describe('integration backends', () => {
     }, 'install')).toEqual({
       backend: 'uv',
       file: '/opt/homebrew/bin/uv',
-      args: ['tool', 'install', 'git+https://github.com/wiltodelta/remove-ai-watermarks.git'],
-      preview: 'uv tool install git+https://github.com/wiltodelta/remove-ai-watermarks.git'
+      args: ['tool', 'install', 'git+https://github.com/wiltodelta/remove-ai-watermarks.git']
     });
 
     expect(buildIntegrationOperationCommand(remove, {
@@ -99,7 +96,11 @@ describe('integration backends', () => {
       backend: 'pipx',
       path: '/usr/local/bin/pipx',
       available: true
-    }, 'update')?.preview).toBe('pipx upgrade remove-ai-watermarks');
+    }, 'update')).toEqual({
+      backend: 'pipx',
+      file: '/usr/local/bin/pipx',
+      args: ['upgrade', 'remove-ai-watermarks']
+    });
   });
 
   it('builds fixed query commands only for system package integrations', () => {
@@ -115,8 +116,7 @@ describe('integration backends', () => {
     })).toEqual({
       backend: 'brew',
       file: '/opt/homebrew/bin/brew',
-      args: ['outdated', '--json=v2', '--formula', 'ffmpeg'],
-      preview: 'brew outdated --json=v2 --formula ffmpeg'
+      args: ['outdated', '--json=v2', '--formula', 'ffmpeg']
     });
     expect(buildIntegrationInstallQueryCommand(remove, {
       kind: 'python-cli-installer',
@@ -158,11 +158,11 @@ describe('integration backends', () => {
     const result = await runIntegrationCommand({
       file: command,
       args: ['hello', 'world'],
-      preview: 'runner hello world',
       timeoutMs: 10_000
     });
 
     expect(result).toMatchObject({ ok: true, stdout: 'ok\n' });
+    expect(result.diagnostic).toMatchObject({ exitCode: 0, stdoutTail: 'ok\n' });
     expect(await readFile(logPath, 'utf8')).toContain('runner|hello|world');
   }, SPAWN_TEST_TIMEOUT_MS);
 
@@ -178,7 +178,6 @@ describe('integration backends', () => {
     const largeResult = await runIntegrationCommand({
       file: large,
       args: [],
-      preview: 'large-output',
       timeoutMs: 10_000
     });
     expect(largeResult.stdout.length).toBeLessThan(200_001);
@@ -189,12 +188,10 @@ describe('integration backends', () => {
     await expect(runIntegrationCommand({
       file: sleepy,
       args: [],
-      preview: 'sleepy',
       timeoutMs: 50
     })).resolves.toMatchObject({
       ok: false,
       diagnostic: {
-        commandPreview: 'sleepy',
         errorKind: 'timeout'
       }
     });

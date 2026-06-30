@@ -149,7 +149,13 @@ function actions(): WorkbenchActions {
     applyProductUpdate: vi.fn(async () => ({ state: productState() })),
     saveWorkbenchPreferences: vi.fn(async () => undefined),
     saveImageModelSetting: vi.fn(async () => undefined),
-    saveVideoModelSetting: vi.fn(async () => undefined)
+    saveVideoModelSetting: vi.fn(async () => undefined),
+    runIntegrationOperation: vi.fn(async (input) => ({
+      ok: true,
+      integrationId: input.integrationId,
+      operation: input.operation,
+      settings: { integrations: [], backends: [] }
+    }))
   } as unknown as WorkbenchActions;
 }
 

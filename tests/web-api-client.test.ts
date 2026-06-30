@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import type { WorkbenchProjectSessionSnapshot } from '@debrute/app-protocol';
+import type { RunIntegrationOperationResult, WorkbenchProjectSessionSnapshot } from '@debrute/app-protocol';
 import { createHttpWorkbenchApiClient } from '../apps/web/src/api/httpWorkbenchApiClient';
 
 const projectId = '123e4567-e89b-42d3-a456-426614174000';
@@ -52,6 +52,39 @@ describe('HTTP workbench API client', () => {
       ['GET', `http://127.0.0.1:17456/api/projects/${projectId}/generated-assets/asset-1`]
     ]);
     expect(requests[0]!.init?.headers).toMatchObject({ 'x-debrute-daemon-token': 'secret' });
+  });
+
+  it('runs integration operations through daemon HTTP routes', async () => {
+    const requests: Array<{ method: string; path: string; body: unknown }> = [];
+    const client = createHttpWorkbenchApiClient({
+      daemonUrl: 'http://127.0.0.1:17456/',
+      token: 'secret',
+      fetch: async (url, init) => {
+        const parsed = new URL(String(url));
+        requests.push({
+          method: init?.method ?? 'GET',
+          path: parsed.pathname,
+          body: init?.body ? JSON.parse(String(init.body)) : undefined
+        });
+        return jsonResponse({
+          ok: true,
+          integrationId: 'imagemagick',
+          operation: 'install',
+          settings: { integrations: [], backends: [] }
+        } satisfies RunIntegrationOperationResult);
+      }
+    });
+
+    await expect(client.integrationsRunOperation({ integrationId: 'imagemagick', operation: 'install' })).resolves.toMatchObject({
+      ok: true,
+      integrationId: 'imagemagick',
+      operation: 'install'
+    });
+    expect(requests).toEqual([{
+      method: 'POST',
+      path: '/api/integrations/imagemagick/install',
+      body: {}
+    }]);
   });
 
   it('bootstraps a daemon token for HTTP clients without an explicit token', async () => {

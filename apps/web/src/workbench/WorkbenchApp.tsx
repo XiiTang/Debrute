@@ -758,6 +758,26 @@ export function WorkbenchApp(): React.ReactElement {
       setIntegrationsSettings(settings);
       return settings;
     },
+    runIntegrationOperation: async (input) => {
+      const result = await api.integrationsRunOperation(input);
+      setIntegrationsSettings(result.settings);
+      if (!result.ok) {
+        const currentI18n = createI18n(localeRef.current);
+        const diagnostic = result.diagnostic?.stderrTail
+          ?? result.diagnostic?.stdoutTail
+          ?? result.diagnostic?.errorKind
+          ?? currentI18n.t('settings.integrations.unknownOperationFailure');
+        setNotifications((current) => [
+          currentI18n.t('settings.integrations.operationFailedNotification', {
+            operation: currentI18n.t(integrationOperationLabelKey(result.operation)),
+            integration: result.integrationId,
+            message: diagnostic
+          }),
+          ...current
+        ].slice(0, 4));
+      }
+      return result;
+    },
     saveAdobeBridgeSettings: async (input) => {
       setAdobeBridge(await api.adobeBridgeSaveSettings(input));
     },
@@ -1749,6 +1769,12 @@ function sameWorkbenchRuntimeSnapshot(
 
 function errorMessage(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
+}
+
+function integrationOperationLabelKey(operation: 'install' | 'update' | 'uninstall'): 'settings.integrations.install' | 'settings.integrations.update' | 'settings.integrations.uninstall' {
+  if (operation === 'install') return 'settings.integrations.install';
+  if (operation === 'update') return 'settings.integrations.update';
+  return 'settings.integrations.uninstall';
 }
 
 function localizedProjectOpenError(error: ProjectOpenStartupError | undefined, i18n: WorkbenchI18n): string | undefined {

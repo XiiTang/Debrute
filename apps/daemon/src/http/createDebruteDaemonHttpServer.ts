@@ -28,6 +28,8 @@ import {
   type GeneratedAssetRecord,
   type GeneratedAssetView,
   type GeneratedAssetsView,
+  type IntegrationId,
+  type IntegrationOperationKind,
   type ProjectSessionSnapshot,
   type TerminalEvent,
   type WorkbenchEvent,
@@ -136,6 +138,8 @@ const DEFAULT_PORT = 0;
 const BODY_LIMIT_BYTES = 2 * 1024 * 1024;
 const PHOTOSHOP_UXP_ORIGIN = 'uxp://com.debrute.photoshop.bridge';
 const PHOTOSHOP_CEP_ORIGINS = new Set(['null', 'file://']);
+const INTEGRATION_IDS: readonly IntegrationId[] = ['ffmpeg', 'imagemagick', 'mediainfo', 'exiftool', 'remove-ai-watermarks'];
+const INTEGRATION_OPERATION_KINDS: readonly IntegrationOperationKind[] = ['install', 'update', 'uninstall'];
 const CORS_ALLOWED_HEADERS = [
   'content-type',
   'x-debrute-daemon-token',
@@ -1544,6 +1548,25 @@ async function handleSettingsRoute(context: GlobalRuntimeRequestContext): Promis
     writeJson(context.response, 200, await server.integrationsRescan());
     return;
   }
+  if (path.startsWith('/api/integrations/')) {
+    if (method !== 'POST') {
+      writeError(context.response, 405, 'method_not_allowed', 'Unsupported integrations method.');
+      return;
+    }
+    const segments = path.split('/').filter(Boolean);
+    if (segments.length !== 4) {
+      writeError(context.response, 404, 'not_found', `Unknown Debrute integrations route: ${path}`);
+      return;
+    }
+    const integrationId = decodePathSegment(segments[2]!);
+    const operation = decodePathSegment(segments[3]!);
+    if (!isIntegrationId(integrationId) || !isIntegrationOperationKind(operation)) {
+      writeError(context.response, 404, 'not_found', `Unknown Debrute integrations route: ${path}`);
+      return;
+    }
+    writeJson(context.response, 200, await server.integrationsRunOperation({ integrationId, operation }));
+    return;
+  }
   writeError(context.response, 404, 'not_found', `Unknown Debrute API route: ${path}`);
 }
 
@@ -2326,6 +2349,14 @@ function decodePathSegment(segment: string): string {
   } catch {
     throw new DebruteDaemonHttpError(400, 'invalid_path_encoding', 'Debrute API path segment is not valid percent-encoding.');
   }
+}
+
+function isIntegrationId(value: string): value is IntegrationId {
+  return (INTEGRATION_IDS as readonly string[]).includes(value);
+}
+
+function isIntegrationOperationKind(value: string): value is IntegrationOperationKind {
+  return (INTEGRATION_OPERATION_KINDS as readonly string[]).includes(value);
 }
 
 function errorMessage(error: unknown): string {

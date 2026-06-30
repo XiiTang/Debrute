@@ -32,10 +32,15 @@ export type {
   IntegrationId,
   IntegrationInstallBackendKind,
   IntegrationOperationDiagnostic,
+  IntegrationOperationFailureKind,
+  IntegrationOperationInFlight,
+  IntegrationOperationKind,
   IntegrationOperationStatus,
   IntegrationSettingsView,
   IntegrationStatus,
   PythonCliInstallerId,
+  RunIntegrationOperationInput,
+  RunIntegrationOperationResult,
   SystemPackageManagerId
 } from '@debrute/app-protocol';
 

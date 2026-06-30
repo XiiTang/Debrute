@@ -7,7 +7,6 @@ import type { IntegrationOperationDiagnostic, IntegrationProbeErrorKind } from '
 export interface IntegrationCommandInput {
   file: string;
   args: string[];
-  preview: string;
   timeoutMs: number;
 }
 
@@ -59,7 +58,6 @@ export function runIntegrationCommand(commandToRun: IntegrationCommandInput): Pr
         stdout,
         stderr,
         diagnostic: {
-          commandPreview: commandToRun.preview,
           errorKind: 'timeout',
           ...(stdout ? { stdoutTail: tail(stdout) } : {}),
           ...(stderr ? { stderrTail: tail(stderr) } : {})
@@ -85,7 +83,6 @@ export function runIntegrationCommand(commandToRun: IntegrationCommandInput): Pr
         stdout,
         stderr: message,
         diagnostic: {
-          commandPreview: commandToRun.preview,
           errorKind: 'spawn_error',
           ...(stdout ? { stdoutTail: tail(stdout) } : {}),
           stderrTail: tail(message)
@@ -104,7 +101,6 @@ export function runIntegrationCommand(commandToRun: IntegrationCommandInput): Pr
         stdout,
         stderr,
         diagnostic: {
-          commandPreview: commandToRun.preview,
           ...(exitCode !== null ? { exitCode } : {}),
           ...(errorKind ? { errorKind } : {}),
           ...(stdout ? { stdoutTail: tail(stdout) } : {}),

@@ -139,6 +139,13 @@ function apiFixture(): WorkbenchApiClient {
     getDesktopPlatform: vi.fn(async () => 'darwin'),
     getWorkbenchTitleBarState: vi.fn(async () => unavailableWorkbenchTitleBarState()),
     integrationsListStatus: vi.fn(async () => ({ integrations: [] })),
+    integrationsRescan: vi.fn(async () => ({ integrations: [], backends: [] })),
+    integrationsRunOperation: vi.fn(async () => ({
+      ok: true,
+      integrationId: 'imagemagick',
+      operation: 'install',
+      settings: { integrations: [], backends: [] }
+    })),
     adobeBridgeGetState: vi.fn(async () => ({ settings: { enabled: true }, clients: [], links: [], transfers: [] })),
     imageModelGetSettings: vi.fn(async () => ({ models: [] })),
     videoModelGetSettings: vi.fn(async () => ({ models: [] })),

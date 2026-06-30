@@ -1,4 +1,4 @@
-import { mkdir, mkdtemp, readFile, realpath, rm, stat, symlink, writeFile } from 'node:fs/promises';
+import { chmod, mkdir, mkdtemp, readFile, realpath, rm, stat, symlink, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, describe, expect, it, vi } from 'vitest';
@@ -6,6 +6,7 @@ import { DebruteAppServer, GlobalConfigStore } from '@debrute/app-server';
 import { createDebruteDaemonHttpServer } from '@debrute/daemon';
 import type {
   AppServerEvent,
+  RunIntegrationOperationResult,
   WorkbenchProjectOpenResult,
   WorkbenchProjectPickerOpenResult,
   WorkbenchTitleBarState
@@ -1605,6 +1606,60 @@ describe('daemon HTTP runtime', () => {
     expect(putResponse.status).toBe(404);
   }, 30_000);
 
+  it('runs integration operations through the global integrations HTTP route', async () => {
+    const binDir = await mkdtemp(join(tmpdir(), 'debrute-daemon-integrations-operation-bin-'));
+    const magickPath = join(binDir, 'magick');
+    await writeFakePackageManager(binDir, 'brew', [
+      'if [ "$1" = "info" ]; then',
+      '  printf \'{"formulae":[{"name":"imagemagick","versions":{"stable":"7.1.2-23"},"installed":[]}],"casks":[]}\\n\'',
+      'fi',
+      'if [ "$1" = "install" ]; then',
+      `  printf '%s\\n' '#!/bin/sh' 'printf "Version: ImageMagick 7.1.2-23\\n"' > ${JSON.stringify(magickPath)}`,
+      `  chmod +x ${JSON.stringify(magickPath)}`,
+      'fi'
+    ].join('\n'));
+    const daemon = createDebruteDaemonHttpServer({
+      host: '127.0.0.1',
+      port: 0,
+      token: 'test-token',
+      webBaseUrl: null,
+      appServerOptions: {
+        integrationEnvPath: binDir,
+        integrationPlatform: 'darwin'
+      }
+    });
+    cleanups.push(() => daemon.close(), () => rm(binDir, { recursive: true, force: true }));
+    const runtime = await daemon.listen();
+
+    const result = await requestJson<RunIntegrationOperationResult>(
+      `${runtime.daemonUrl}/api/integrations/imagemagick/install`,
+      {
+        method: 'POST',
+        headers: { 'x-debrute-daemon-token': 'test-token' }
+      }
+    );
+
+    expect(result).toMatchObject({
+      ok: true,
+      integrationId: 'imagemagick',
+      operation: 'install'
+    });
+    expect(result.settings.runningOperation).toBeUndefined();
+    expect(result.settings.integrations.find((integration) => integration.integrationId === 'imagemagick')?.status).toBe('ready');
+
+    const invalidId = await fetch(`${runtime.daemonUrl}/api/integrations/unknown/install`, {
+      method: 'POST',
+      headers: { 'x-debrute-daemon-token': 'test-token' }
+    });
+    expect(invalidId.status).toBe(404);
+
+    const invalidOperation = await fetch(`${runtime.daemonUrl}/api/integrations/imagemagick/preview`, {
+      method: 'POST',
+      headers: { 'x-debrute-daemon-token': 'test-token' }
+    });
+    expect(invalidOperation.status).toBe(404);
+  }, 30_000);
+
   it('releases a project session after the last event stream closes and idle TTL elapses', async () => {
     const projectRoot = await mkdtemp(join(tmpdir(), 'debrute-daemon-idle-release-project-'));
     await writeFile(join(projectRoot, 'brief.md'), '# Brief', 'utf8');
@@ -2341,6 +2396,14 @@ async function apiFetch(url: string, init: RequestInit = {}, token = 'test-token
 async function writeCanvasMap(projectRoot: string, canvasId: string, content: string): Promise<void> {
   await mkdir(join(projectRoot, '.debrute/canvas-maps'), { recursive: true });
   await writeFile(join(projectRoot, `.debrute/canvas-maps/${canvasId}.yaml`), content, 'utf8');
+}
+
+async function writeFakePackageManager(dir: string, name: string, body: string): Promise<string> {
+  await mkdir(dir, { recursive: true });
+  const path = join(dir, name);
+  await writeFile(path, ['#!/bin/sh', body].join('\n'), 'utf8');
+  await chmod(path, 0o755);
+  return path;
 }
 
 function canvasMapSource(paths: Array<string | { glob: string }>): string {

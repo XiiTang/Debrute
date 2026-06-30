@@ -1,6 +1,7 @@
 import type {
   IntegrationCatalogItem,
   IntegrationCommand,
+  IntegrationOperationKind,
   PythonCliInstallerId,
   PythonCliIntegrationCatalogItem,
   SystemPackageIntegrationCatalogItem,
@@ -21,7 +22,6 @@ export interface ResolvedSystemPackageManagerStatus {
   available: boolean;
   unavailableReason?: string;
   path?: string;
-  queryPath?: string;
 }
 
 export interface ResolvedPythonCliInstallerStatus {
@@ -40,9 +40,8 @@ export interface ParsedIntegrationQuery {
   unavailableReason?: string;
 }
 
-type IntegrationOperationKind = 'install' | 'update' | 'uninstall';
-
 const QUERY_TIMEOUT_MS = 20_000;
+const OPERATION_TIMEOUT_MS = 300_000;
 const PACKAGE_NOT_INSTALLED_REASON = 'Package manager does not report this package as installed.';
 
 export async function detectSystemPackageManager(
@@ -77,17 +76,11 @@ export async function detectSystemPackageManager(
         };
   }
   if (platform === 'linux') {
-    const aptGet = await resolveExecutable('apt-get', envPath, platform, pathExt);
-    const aptCache = await resolveExecutable('apt-cache', envPath, platform, pathExt);
-    return aptGet && aptCache
-      ? { kind: 'system-package-manager', backend: 'apt', manager: 'apt', path: aptGet, queryPath: aptCache, available: true }
-      : {
-          kind: 'system-package-manager',
-          backend: 'apt',
-          manager: 'apt',
-          available: false,
-          unavailableReason: 'APT was not found on PATH.'
-        };
+    return {
+      kind: 'system-package-manager',
+      available: false,
+      unavailableReason: 'System package integration operations are not supported on linux.'
+    };
   }
 
   return {
@@ -135,22 +128,14 @@ export function buildIntegrationQueryCommand(
     return command(
       backend.manager,
       backend.path,
-      ['outdated', '--json=v2', '--formula', packageName],
-      `brew outdated --json=v2 --formula ${packageName}`
+      ['outdated', '--json=v2', '--formula', packageName]
     );
   }
-  if (backend.manager === 'winget') {
-    return command(
-      backend.manager,
-      backend.path,
-      ['upgrade', '--id', packageName, '--exact', '--disable-interactivity'],
-      `winget upgrade --id ${packageName} --exact --disable-interactivity`
-    );
-  }
-  if (!backend.queryPath) {
-    return undefined;
-  }
-  return command(backend.manager, backend.queryPath, ['policy', packageName], `apt-cache policy ${packageName}`);
+  return command(
+    backend.manager,
+    backend.path,
+    ['upgrade', '--id', packageName, '--exact', '--disable-interactivity']
+  );
 }
 
 export function buildIntegrationInstallQueryCommand(
@@ -169,22 +154,14 @@ export function buildIntegrationInstallQueryCommand(
     return command(
       backend.manager,
       backend.path,
-      ['info', '--json=v2', '--formula', packageName],
-      `brew info --json=v2 --formula ${packageName}`
+      ['info', '--json=v2', '--formula', packageName]
     );
   }
-  if (backend.manager === 'winget') {
-    return command(
-      backend.manager,
-      backend.path,
-      ['show', '--id', packageName, '--exact', '--disable-interactivity'],
-      `winget show --id ${packageName} --exact --disable-interactivity`
-    );
-  }
-  if (!backend.queryPath) {
-    return undefined;
-  }
-  return command(backend.manager, backend.queryPath, ['policy', packageName], `apt-cache policy ${packageName}`);
+  return command(
+    backend.manager,
+    backend.path,
+    ['show', '--id', packageName, '--exact', '--disable-interactivity']
+  );
 }
 
 export function buildIntegrationOperationCommand(
@@ -210,10 +187,7 @@ export function parseSystemPackageQueryOutput(
   if (manager === 'brew') {
     return parseBrewOutdated(packageName, stdout);
   }
-  if (manager === 'winget') {
-    return parseWingetUpgrade(packageName, stdout);
-  }
-  return parseAptPolicy(stdout);
+  return parseWingetUpgrade(packageName, stdout);
 }
 
 export function parseSystemInstallQueryOutput(
@@ -224,18 +198,15 @@ export function parseSystemInstallQueryOutput(
   if (manager === 'brew') {
     return parseBrewInfo(packageName, stdout);
   }
-  if (manager === 'winget') {
-    return parseWingetShow(stdout);
-  }
-  const apt = parseAptPolicy(stdout);
-  return {
-    ...(apt.latestVersion ? { latestVersion: apt.latestVersion } : {}),
-    updateAvailable: false
-  };
+  return parseWingetShow(stdout);
 }
 
 export function queryTimeoutMs(): number {
   return QUERY_TIMEOUT_MS;
+}
+
+export function operationTimeoutMs(): number {
+  return OPERATION_TIMEOUT_MS;
 }
 
 function buildSystemPackageCommand(
@@ -251,30 +222,22 @@ function buildSystemPackageCommand(
   if (backend.manager === 'brew') {
     const commandName = kind === 'install' ? 'install' : kind === 'update' ? 'upgrade' : 'uninstall';
     const args = [commandName, '--formula', packageName];
-    return command(backend.manager, backend.path, args, `brew ${args.join(' ')}`);
-  }
-  if (backend.manager === 'winget') {
-    const commandName = kind === 'install' ? 'install' : kind === 'update' ? 'upgrade' : 'uninstall';
-    const args = commandName === 'uninstall'
-      ? [commandName, '--id', packageName, '--exact', '--disable-interactivity']
-      : [
-          commandName,
-          '--id',
-          packageName,
-          '--exact',
-          '--accept-source-agreements',
-          '--accept-package-agreements',
-          '--disable-interactivity'
-        ];
-    return command(backend.manager, backend.path, args, `winget ${args.join(' ')}`);
+    return command(backend.manager, backend.path, args);
   }
 
-  const args = kind === 'install'
-    ? ['install', '-y', packageName]
-    : kind === 'update'
-      ? ['install', '--only-upgrade', '-y', packageName]
-      : ['remove', '-y', packageName];
-  return command(backend.manager, backend.path, args, `apt-get ${args.join(' ')}`);
+  const commandName = kind === 'install' ? 'install' : kind === 'update' ? 'upgrade' : 'uninstall';
+  const args = commandName === 'uninstall'
+    ? [commandName, '--id', packageName, '--exact', '--disable-interactivity']
+    : [
+        commandName,
+        '--id',
+        packageName,
+        '--exact',
+        '--accept-source-agreements',
+        '--accept-package-agreements',
+        '--disable-interactivity'
+      ];
+  return command(backend.manager, backend.path, args);
 }
 
 function buildPythonCliCommand(
@@ -292,23 +255,22 @@ function buildPythonCliCommand(
       : kind === 'update'
         ? ['tool', 'upgrade', packageName]
         : ['tool', 'uninstall', packageName];
-    return { backend: 'uv', file: backend.path, args, preview: `uv ${args.join(' ')}` };
+    return { backend: 'uv', file: backend.path, args };
   }
   const args = kind === 'install'
     ? ['install', integration.pythonCli.repository]
     : kind === 'update'
       ? ['upgrade', packageName]
       : ['uninstall', packageName];
-  return { backend: 'pipx', file: backend.path, args, preview: `pipx ${args.join(' ')}` };
+  return { backend: 'pipx', file: backend.path, args };
 }
 
 function command(
   backend: SystemPackageManagerId,
   file: string,
-  args: string[],
-  preview: string
+  args: string[]
 ): IntegrationCommand {
-  return { backend, file, args, preview };
+  return { backend, file, args };
 }
 
 function parseBrewOutdated(packageName: string, stdout: string): ParsedIntegrationQuery {
@@ -355,17 +317,5 @@ function parseWingetUpgrade(packageName: string, stdout: string): ParsedIntegrat
     ...(columns[2] ? { installedVersion: columns[2] } : {}),
     ...(columns[3] ? { latestVersion: columns[3] } : {}),
     updateAvailable: Boolean(columns[2] && columns[3] && columns[2] !== columns[3])
-  };
-}
-
-function parseAptPolicy(stdout: string): ParsedIntegrationQuery {
-  const installedVersion = stdout.match(/Installed:\s*(\S+)/)?.[1];
-  const latestVersion = stdout.match(/Candidate:\s*(\S+)/)?.[1];
-  const installedMissing = !installedVersion || installedVersion === '(none)';
-  return {
-    ...(installedVersion && !installedMissing ? { installedVersion } : {}),
-    ...(latestVersion && latestVersion !== '(none)' ? { latestVersion } : {}),
-    updateAvailable: Boolean(!installedMissing && latestVersion && installedVersion !== latestVersion),
-    ...(installedMissing ? { unavailableReason: PACKAGE_NOT_INSTALLED_REASON } : {})
   };
 }

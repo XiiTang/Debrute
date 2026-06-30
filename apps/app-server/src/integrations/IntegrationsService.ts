@@ -4,7 +4,12 @@ import {
   type IntegrationBinaryStatus,
   type IntegrationCatalogBinary,
   type IntegrationCatalogItem,
+  type IntegrationOperationDiagnostic,
+  type IntegrationOperationInFlight,
+  type IntegrationOperationKind,
   type IntegrationOperationStatus,
+  type RunIntegrationOperationInput,
+  type RunIntegrationOperationResult,
   type IntegrationSettingsView,
   type IntegrationStatus,
   type IntegrationStatusKind
@@ -15,6 +20,7 @@ import {
   buildIntegrationQueryCommand,
   detectPythonCliInstaller,
   detectSystemPackageManager,
+  operationTimeoutMs,
   parseSystemInstallQueryOutput,
   parseSystemPackageQueryOutput,
   queryTimeoutMs,
@@ -39,13 +45,20 @@ interface IntegrationPackageQueryStatus {
   installedVersion?: string;
   latestVersion?: string;
   updateAvailable: boolean;
-  queryDiagnostic?: IntegrationOperationStatus['queryDiagnostic'];
+  queryDiagnostic?: IntegrationOperationDiagnostic;
   unavailableReason?: string;
+}
+
+export interface IntegrationsServiceOperationCallbacks {
+  onStarted?: (settings: IntegrationSettingsView) => void | Promise<void>;
+  onSettled?: (settings: IntegrationSettingsView) => void | Promise<void>;
 }
 
 export class IntegrationsService {
   private readonly cacheTtlMs: number;
   private cached: { createdAt: number; view: IntegrationSettingsView } | undefined;
+  private operationLock: RunIntegrationOperationInput | undefined;
+  private runningOperation: IntegrationOperationInFlight | undefined;
 
   constructor(private readonly options: IntegrationsServiceOptions) {
     this.cacheTtlMs = options.cacheTtlMs ?? 30_000;
@@ -53,7 +66,7 @@ export class IntegrationsService {
 
   async listStatus(): Promise<IntegrationSettingsView> {
     if (this.cached && Date.now() - this.cached.createdAt < this.cacheTtlMs) {
-      return this.cached.view;
+      return settingsWithRunningOperation(this.cached.view, this.runningOperation);
     }
     return this.rescan();
   }
@@ -62,10 +75,84 @@ export class IntegrationsService {
     return this.scanIntegrations();
   }
 
+  async runOperation(
+    input: RunIntegrationOperationInput,
+    callbacks: IntegrationsServiceOperationCallbacks = {}
+  ): Promise<RunIntegrationOperationResult> {
+    if (this.operationLock) {
+      const settings = await this.listStatus();
+      return {
+        ok: false,
+        integrationId: input.integrationId,
+        operation: input.operation,
+        settings,
+        diagnostic: { errorKind: 'operation_already_running' }
+      };
+    }
+
+    let ok = false;
+    let diagnostic: IntegrationOperationDiagnostic | undefined;
+    let settings: IntegrationSettingsView;
+
+    this.operationLock = input;
+    try {
+      const integration = INTEGRATION_CATALOG.find((entry) => entry.id === input.integrationId);
+      if (!integration) {
+        settings = await this.scanIntegrations();
+        return operationResult(input, settings, false, { errorKind: 'integration_not_found' });
+      }
+
+      const inspected = await this.inspectIntegrations();
+      this.cached = { createdAt: Date.now(), view: inspected.view };
+      const backend = integration.backend === 'python-cli-installer'
+        ? inspected.backends.pythonCliInstaller
+        : inspected.backends.systemPackageManager;
+      const status = inspected.view.integrations.find((entry) => entry.integrationId === input.integrationId);
+      if (!backend.available) {
+        return operationResult(input, inspected.view, false, {
+          errorKind: 'backend_unavailable',
+          ...(backend.unavailableReason ? { stderrTail: backend.unavailableReason } : {})
+        });
+      }
+      if (!status?.operationStatus?.availableOperations.includes(input.operation)) {
+        return operationResult(input, inspected.view, false, { errorKind: 'operation_unavailable' });
+      }
+
+      const command = buildIntegrationOperationCommand(integration, backend, input.operation);
+      if (!command) {
+        return operationResult(input, inspected.view, false, { errorKind: 'command_unavailable' });
+      }
+
+      this.runningOperation = { integrationId: input.integrationId, operation: input.operation };
+
+      try {
+        await callbacks.onStarted?.(settingsWithRunningOperation(inspected.view, this.runningOperation));
+        const result = await runIntegrationCommand({
+          file: command.file,
+          args: command.args,
+          timeoutMs: operationTimeoutMs()
+        });
+        ok = result.ok;
+        if (!result.ok) {
+          diagnostic = result.diagnostic;
+        }
+      } finally {
+        this.runningOperation = undefined;
+        this.cached = undefined;
+        settings = await this.scanIntegrations();
+      }
+
+      await callbacks.onSettled?.(settings);
+      return operationResult(input, settings, ok, diagnostic);
+    } finally {
+      this.operationLock = undefined;
+    }
+  }
+
   private async scanIntegrations(): Promise<IntegrationSettingsView> {
     const { view } = await this.inspectIntegrations();
     this.cached = { createdAt: Date.now(), view };
-    return view;
+    return settingsWithRunningOperation(view, this.runningOperation);
   }
 
   private async inspectIntegrations(): Promise<{
@@ -131,17 +218,17 @@ export class IntegrationsService {
     backend: ResolvedSystemPackageManagerStatus
   ): Promise<IntegrationOperationStatus> {
     const packageName = backend.manager ? integration.packages[backend.manager].packageName : undefined;
-    const base: IntegrationOperationStatus = {
+    const base: Omit<IntegrationOperationStatus, 'availableOperations'> = {
       backendKind: 'system-package-manager',
       ...(backend.backend ? { backend: backend.backend } : {}),
       ...(packageName ? { packageName } : {})
     };
 
     if (!backend.available) {
-      return {
+      return operationStatus({
         ...base,
         unavailableReason: backend.unavailableReason ?? 'System package manager is unavailable.'
-      };
+      }, []);
     }
 
     const installCommand = buildIntegrationOperationCommand(integration, backend, 'install');
@@ -149,26 +236,26 @@ export class IntegrationsService {
     const uninstallCommand = buildIntegrationOperationCommand(integration, backend, 'uninstall');
     if (status === 'not_found') {
       const query = installCommand ? await this.queryInstallPackageStatus(integration, backend) : { updateAvailable: false };
-      return {
+      return operationStatus({
         ...base,
-        ...operationQueryFields(query),
-        ...(installCommand ? { installCommandPreview: installCommand.preview } : {})
-      };
+        ...operationQueryFields(query)
+      }, installCommand ? ['install'] : []);
     }
     if (status !== 'ready') {
-      return {
+      return operationStatus({
         ...base,
         unavailableReason: 'Integration operations require a ready detected integration.'
-      };
+      }, []);
     }
 
     const query = await this.queryPackageStatus(integration, backend);
-    return {
+    return operationStatus({
       ...base,
-      ...operationQueryFields(query),
-      ...(updateCommand && query.updateAvailable ? { updateCommandPreview: updateCommand.preview } : {}),
-      ...(uninstallCommand ? { uninstallCommandPreview: uninstallCommand.preview } : {})
-    };
+      ...operationQueryFields(query)
+    }, [
+      ...(updateCommand && query.updateAvailable ? ['update' as const] : []),
+      ...(uninstallCommand ? ['uninstall' as const] : [])
+    ]);
   }
 
   private async inspectPythonCliStatus(
@@ -176,40 +263,40 @@ export class IntegrationsService {
     status: IntegrationStatusKind,
     backend: ResolvedPythonCliInstallerStatus
   ): Promise<IntegrationOperationStatus> {
-    const base: IntegrationOperationStatus = {
+    const base: Omit<IntegrationOperationStatus, 'availableOperations'> = {
       backendKind: 'python-cli-installer',
       ...(backend.backend ? { backend: backend.backend } : {}),
       packageName: integration.pythonCli.packageName
     };
 
     if (!backend.available) {
-      return {
+      return operationStatus({
         ...base,
         unavailableReason: backend.unavailableReason ?? 'Python CLI installer is unavailable.'
-      };
+      }, []);
     }
 
     const installCommand = buildIntegrationOperationCommand(integration, backend, 'install');
     const updateCommand = buildIntegrationOperationCommand(integration, backend, 'update');
     const uninstallCommand = buildIntegrationOperationCommand(integration, backend, 'uninstall');
     if (status === 'not_found') {
-      return {
+      return operationStatus({
         ...base,
-        ...(installCommand ? { installCommandPreview: installCommand.preview } : {})
-      };
+      }, installCommand ? ['install'] : []);
     }
     if (status !== 'ready') {
-      return {
+      return operationStatus({
         ...base,
         unavailableReason: 'Integration operations require a ready detected integration.'
-      };
+      }, []);
     }
 
-    return {
+    return operationStatus({
       ...base,
-      ...(updateCommand ? { updateCommandPreview: updateCommand.preview } : {}),
-      ...(uninstallCommand ? { uninstallCommandPreview: uninstallCommand.preview } : {})
-    };
+    }, [
+      ...(updateCommand ? ['update' as const] : []),
+      ...(uninstallCommand ? ['uninstall' as const] : [])
+    ]);
   }
 
   private async queryPackageStatus(
@@ -224,7 +311,6 @@ export class IntegrationsService {
     const result = await runIntegrationCommand({
       file: queryCommand.file,
       args: queryCommand.args,
-      preview: queryCommand.preview,
       timeoutMs: queryTimeoutMs()
     });
     const brewOutdatedJson = backend.manager === 'brew' && result.stdout.trim();
@@ -238,7 +324,6 @@ export class IntegrationsService {
       return {
         updateAvailable: false,
         queryDiagnostic: {
-          commandPreview: queryCommand.preview,
           errorKind: 'parse_error',
           stderrTail: error instanceof Error ? error.message : String(error)
         }
@@ -258,7 +343,6 @@ export class IntegrationsService {
     const result = await runIntegrationCommand({
       file: queryCommand.file,
       args: queryCommand.args,
-      preview: queryCommand.preview,
       timeoutMs: queryTimeoutMs()
     });
     if (!result.ok) {
@@ -271,7 +355,6 @@ export class IntegrationsService {
       return {
         updateAvailable: false,
         queryDiagnostic: {
-          commandPreview: queryCommand.preview,
           errorKind: 'parse_error',
           stderrTail: error instanceof Error ? error.message : String(error)
         }
@@ -353,6 +436,38 @@ function backendView(backend: ResolvedSystemPackageManagerStatus | ResolvedPytho
     ...(backend.backend ? { backend: backend.backend } : {}),
     available: backend.available,
     ...(backend.unavailableReason ? { unavailableReason: backend.unavailableReason } : {})
+  };
+}
+
+function operationStatus(
+  status: Omit<IntegrationOperationStatus, 'availableOperations'>,
+  availableOperations: IntegrationOperationKind[]
+): IntegrationOperationStatus {
+  return {
+    ...status,
+    availableOperations
+  };
+}
+
+function settingsWithRunningOperation(
+  view: IntegrationSettingsView,
+  runningOperation: IntegrationOperationInFlight | undefined
+): IntegrationSettingsView {
+  return runningOperation ? { ...view, runningOperation } : view;
+}
+
+function operationResult(
+  input: RunIntegrationOperationInput,
+  settings: IntegrationSettingsView,
+  ok: boolean,
+  diagnostic: IntegrationOperationDiagnostic | undefined
+): RunIntegrationOperationResult {
+  return {
+    ok,
+    integrationId: input.integrationId,
+    operation: input.operation,
+    settings,
+    ...(diagnostic ? { diagnostic } : {})
   };
 }
 

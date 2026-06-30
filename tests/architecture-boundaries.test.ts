@@ -412,10 +412,17 @@ describe('Debrute architecture boundaries', () => {
       'videoModelGetSettings',
       'videoModelSaveSetting',
       'integrationsListStatus',
-      'integrationsRescan'
+      'integrationsRescan',
+      'integrationsRunOperation'
     ]) {
       expect(text).not.toContain(`async ${method}(`);
     }
+  });
+
+  it('does not keep stale integration command preview styling', () => {
+    const text = readFileSync(join(root, 'apps/web/src/workbench/ui/styles/workbench-patterns.css'), 'utf8');
+
+    expect(text).not.toContain('db-integration-command');
   });
 
   it('does not keep stale optional project-open result guards in the Web workbench', () => {

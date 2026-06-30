@@ -444,17 +444,42 @@ export type IntegrationBinaryId = 'ffmpeg' | 'ffprobe' | 'magick' | 'mediainfo' 
 export type IntegrationStatusKind = 'ready' | 'not_found' | 'probe_failed';
 export type IntegrationBinaryStatusKind = IntegrationStatusKind;
 export type IntegrationProbeErrorKind = 'spawn_error' | 'timeout' | 'nonzero_exit' | 'parse_error';
-export type SystemPackageManagerId = 'brew' | 'winget' | 'apt';
+export type IntegrationOperationFailureKind =
+  | IntegrationProbeErrorKind
+  | 'operation_already_running'
+  | 'backend_unavailable'
+  | 'integration_not_found'
+  | 'operation_unavailable'
+  | 'command_unavailable';
+export type SystemPackageManagerId = 'brew' | 'winget';
 export type PythonCliInstallerId = 'uv' | 'pipx';
 export type IntegrationBackendId = SystemPackageManagerId | PythonCliInstallerId;
 export type IntegrationInstallBackendKind = 'system-package-manager' | 'python-cli-installer';
+export type IntegrationOperationKind = 'install' | 'update' | 'uninstall';
 
 export interface IntegrationOperationDiagnostic {
-  commandPreview: string;
   exitCode?: number;
-  errorKind?: IntegrationProbeErrorKind;
+  errorKind?: IntegrationOperationFailureKind;
   stdoutTail?: string;
   stderrTail?: string;
+}
+
+export interface IntegrationOperationInFlight {
+  integrationId: IntegrationId;
+  operation: IntegrationOperationKind;
+}
+
+export interface RunIntegrationOperationInput {
+  integrationId: IntegrationId;
+  operation: IntegrationOperationKind;
+}
+
+export interface RunIntegrationOperationResult {
+  ok: boolean;
+  integrationId: IntegrationId;
+  operation: IntegrationOperationKind;
+  settings: IntegrationSettingsView;
+  diagnostic?: IntegrationOperationDiagnostic;
 }
 
 export interface IntegrationBackendStatus {
@@ -468,9 +493,7 @@ export interface IntegrationOperationStatus {
   backendKind: IntegrationInstallBackendKind;
   backend?: IntegrationBackendId;
   packageName?: string;
-  installCommandPreview?: string;
-  updateCommandPreview?: string;
-  uninstallCommandPreview?: string;
+  availableOperations: IntegrationOperationKind[];
   installedVersion?: string;
   latestVersion?: string;
   unavailableReason?: string;
@@ -503,6 +526,7 @@ export interface IntegrationStatus {
 export interface IntegrationSettingsView {
   integrations: IntegrationStatus[];
   backends: IntegrationBackendStatus[];
+  runningOperation?: IntegrationOperationInFlight;
 }
 
 export type SkillSourceKind = 'shared-agents' | 'debrute-repository';
@@ -1056,5 +1080,6 @@ export interface WorkbenchApiClient {
   videoModelSaveSetting(modelId: string, input: SaveVideoModelSettingInput): Promise<VideoModelSettingsView>;
   integrationsListStatus(): Promise<IntegrationSettingsView>;
   integrationsRescan(): Promise<IntegrationSettingsView>;
+  integrationsRunOperation(input: RunIntegrationOperationInput): Promise<RunIntegrationOperationResult>;
   onEvent(listener: (event: WorkbenchEvent) => void): () => void;
 }
