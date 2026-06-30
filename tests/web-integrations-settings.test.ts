@@ -201,6 +201,109 @@ describe('web Integrations settings page', () => {
       restoreActEnvironment();
     }
   });
+
+  it('clears operation failure diagnostics after a successful rescan', async () => {
+    const restoreActEnvironment = installReactActEnvironment();
+    const container = document.createElement('div');
+    document.body.append(container);
+    const root = createRoot(container);
+    const actions = createActions({
+      runIntegrationOperation: async (input) => ({
+        ok: false,
+        integrationId: input.integrationId,
+        operation: input.operation,
+        settings: createState().integrationsSettings!,
+        diagnostic: { errorKind: 'nonzero_exit', stderrTail: 'install exploded' }
+      }),
+      rescanIntegrations: async () => createState().integrationsSettings!
+    });
+
+    try {
+      await act(async () => {
+        root.render(React.createElement(I18nProvider, { locale: 'en' }, React.createElement(IntegrationsSettingsPage, {
+          state: createState(),
+          actions
+        })));
+      });
+
+      const installButton = Array.from(container.querySelectorAll('button')).find((button) => button.textContent === 'Install');
+      expect(installButton).toBeTruthy();
+      await act(async () => {
+        installButton!.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+        await Promise.resolve();
+      });
+      expect(container.textContent).toContain('Install failed');
+
+      const rescanButton = Array.from(container.querySelectorAll('button')).find((button) => button.textContent === 'Rescan');
+      expect(rescanButton).toBeTruthy();
+      await act(async () => {
+        rescanButton!.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+        await Promise.resolve();
+      });
+
+      expect(container.textContent).not.toContain('Install failed');
+      expect(container.textContent).not.toContain('install exploded');
+    } finally {
+      await act(async () => {
+        root.unmount();
+      });
+      container.remove();
+      restoreActEnvironment();
+    }
+  });
+
+  it('clears operation failure diagnostics when refreshed settings change the integration row', async () => {
+    const restoreActEnvironment = installReactActEnvironment();
+    const container = document.createElement('div');
+    document.body.append(container);
+    const root = createRoot(container);
+    const actions = createActions({
+      runIntegrationOperation: async (input) => ({
+        ok: false,
+        integrationId: input.integrationId,
+        operation: input.operation,
+        settings: createState().integrationsSettings!,
+        diagnostic: { errorKind: 'nonzero_exit', stderrTail: 'install exploded' }
+      })
+    });
+
+    try {
+      await act(async () => {
+        root.render(React.createElement(I18nProvider, { locale: 'en' }, React.createElement(IntegrationsSettingsPage, {
+          state: createState(),
+          actions
+        })));
+      });
+
+      const installButton = Array.from(container.querySelectorAll('button')).find((button) => button.textContent === 'Install');
+      expect(installButton).toBeTruthy();
+      await act(async () => {
+        installButton!.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+        await Promise.resolve();
+      });
+      expect(container.textContent).toContain('Install failed');
+
+      await act(async () => {
+        root.render(React.createElement(I18nProvider, { locale: 'en' }, React.createElement(IntegrationsSettingsPage, {
+          state: createState({
+            integrationsSettings: installedImageMagickSettings()
+          }),
+          actions
+        })));
+        await Promise.resolve();
+      });
+
+      expect(container.textContent).not.toContain('Install failed');
+      expect(container.textContent).not.toContain('install exploded');
+      expect(container.textContent).toContain('7.1.2-23');
+    } finally {
+      await act(async () => {
+        root.unmount();
+      });
+      container.remove();
+      restoreActEnvironment();
+    }
+  });
 });
 
 function renderWithI18n(element: React.ReactElement): string {
@@ -322,6 +425,35 @@ function createActions(overrides: Partial<WorkbenchActions> = {}): WorkbenchActi
     }),
     ...overrides
   } as unknown as WorkbenchActions;
+}
+
+function installedImageMagickSettings(): NonNullable<WorkbenchState['integrationsSettings']> {
+  const settings = createState().integrationsSettings!;
+  return {
+    ...settings,
+    integrations: settings.integrations.map((integration) => (
+      integration.integrationId === 'imagemagick'
+        ? {
+            ...integration,
+            status: 'ready',
+            summary: 'Ready.',
+            operationStatus: {
+              backendKind: 'system-package-manager',
+              backend: 'brew',
+              packageName: 'imagemagick',
+              installedVersion: '7.1.2-23',
+              availableOperations: ['uninstall']
+            },
+            binaries: [{
+              binaryId: 'magick',
+              displayName: 'magick',
+              status: 'ready',
+              version: '7.1.2-23'
+            }]
+          }
+        : integration
+    ))
+  };
 }
 
 function installReactActEnvironment(): () => void {

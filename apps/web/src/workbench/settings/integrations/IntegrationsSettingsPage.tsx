@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import { Download, Loader2, RefreshCw, Trash2, Upload } from 'lucide-react';
 import type {
   IntegrationBackendStatus,
@@ -25,6 +25,7 @@ export function IntegrationsSettingsPage({
   const [operationFailure, setOperationFailure] = useState<{
     integrationId: string;
     operation: IntegrationOperationKind;
+    stateKey: string;
     diagnostic?: IntegrationOperationDiagnostic;
     message?: string;
   }>();
@@ -33,11 +34,21 @@ export function IntegrationsSettingsPage({
   const operationRunning = Boolean(runningOperation);
   const rescanRunning = rescanning;
 
+  useEffect(() => {
+    if (!operationFailure) {
+      return;
+    }
+    if (integrationFailureStateKey(state.integrationsSettings, operationFailure.integrationId) !== operationFailure.stateKey) {
+      setOperationFailure(undefined);
+    }
+  }, [operationFailure, state.integrationsSettings]);
+
   const rescan = async () => {
     setRescanning(true);
     setError(undefined);
     try {
       await actions.rescanIntegrations();
+      setOperationFailure(undefined);
     } catch (err) {
       setError(errorMessage(err));
     } finally {
@@ -82,6 +93,7 @@ export function IntegrationsSettingsPage({
                   setOperationFailure({
                     integrationId: result.integrationId,
                     operation: result.operation,
+                    stateKey: integrationFailureStateKey(result.settings, result.integrationId),
                     ...(result.diagnostic ? { diagnostic: result.diagnostic } : {})
                   });
                 }
@@ -89,6 +101,7 @@ export function IntegrationsSettingsPage({
                 setOperationFailure({
                   integrationId: integration.integrationId,
                   operation,
+                  stateKey: integrationFailureStateKey(state.integrationsSettings, integration.integrationId),
                   message: errorMessage(err)
                 });
               } finally {
@@ -303,6 +316,10 @@ function operationFailureLabel(kind: IntegrationOperationKind, i18n: WorkbenchI1
   if (kind === 'install') return i18n.t('settings.integrations.installFailed');
   if (kind === 'update') return i18n.t('settings.integrations.updateFailed');
   return i18n.t('settings.integrations.uninstallFailed');
+}
+
+function integrationFailureStateKey(settings: WorkbenchState['integrationsSettings'], integrationId: string): string {
+  return JSON.stringify(settings?.integrations.find((integration) => integration.integrationId === integrationId) ?? null);
 }
 
 function errorMessage(error: unknown): string {
