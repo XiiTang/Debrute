@@ -142,15 +142,9 @@ importers:
       '@debrute/app-protocol':
         specifier: workspace:*
         version: link:../../packages/app-protocol
-      '@debrute/project-core':
-        specifier: workspace:*
-        version: link:../../packages/project-core
       '@debrute/workbench-runtime':
         specifier: workspace:*
         version: link:../../packages/workbench-runtime
-      node-pty:
-        specifier: ^1.1.0
-        version: 1.1.0
     devDependencies:
       electron:
         specifier: 42.4.0

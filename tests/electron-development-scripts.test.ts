@@ -3,9 +3,9 @@ import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync
 import { createRequire } from 'node:module';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
-import { pathToFileURL } from 'node:url';
 import { build } from 'esbuild';
 import { describe, expect, it } from 'vitest';
+import { nodePtyRuntimePayloadEntries } from '../scripts/node-pty-runtime-payload.mjs';
 
 interface PackageJson {
   scripts: Record<string, string>;
@@ -167,18 +167,7 @@ describe('Electron development scripts', () => {
     writeFileSync(join(packageRoot, 'prebuilds', 'darwin-arm64', 'spawn-helper'), '');
     writeFileSync(join(packageRoot, 'prebuilds', 'darwin-arm64', 'pty.pdb'), '');
     try {
-      const hook = await import(pathToFileURL(join(process.cwd(), 'apps/desktop/scripts/package-sharp-runtime.mjs')).href) as {
-        nodePtyRuntimePayloadEntries: (root: string, context: { electronPlatformName: string; arch: number }) => Array<{
-          from: string;
-          to: string;
-          filter?: (source: string) => boolean;
-        }>;
-      };
-
-      const entries = hook.nodePtyRuntimePayloadEntries(root, {
-        electronPlatformName: 'darwin',
-        arch: 3
-      });
+      const entries = nodePtyRuntimePayloadEntries(root, { id: 'darwin-arm64' });
       const libEntry = entries.find((entry) => entry.to === 'node_modules/node-pty/lib');
       const prebuildEntry = entries.find((entry) => entry.to === 'node_modules/node-pty/prebuilds/darwin-arm64');
 
@@ -205,17 +194,7 @@ describe('Electron development scripts', () => {
     writeFileSync(join(packageRoot, 'lib', 'index.js'), '');
     writeFileSync(join(packageRoot, 'build/Release', 'pty.node'), '');
     try {
-      const hook = await import(pathToFileURL(join(process.cwd(), 'apps/desktop/scripts/package-sharp-runtime.mjs')).href) as {
-        nodePtyRuntimePayloadEntries: (root: string, context: { electronPlatformName: string; arch: number }) => Array<{
-          from: string;
-          to: string;
-        }>;
-      };
-
-      const entries = hook.nodePtyRuntimePayloadEntries(root, {
-        electronPlatformName: 'linux',
-        arch: 1
-      });
+      const entries = nodePtyRuntimePayloadEntries(root, { id: 'linux-x64' });
 
       expect(entries.map((entry) => entry.to)).toContain('node_modules/node-pty/build/Release/pty.node');
       expect(entries.map((entry) => entry.to)).not.toContain('node_modules/node-pty/build/Release/spawn-helper');

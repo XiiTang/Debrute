@@ -6,6 +6,7 @@ import { dirname, normalize } from 'node:path/posix';
 export const architectureScopes = [
   'packages',
   'apps/desktop/package.json',
+  'apps/desktop/tsconfig.json',
   'apps/desktop/tsconfig.electron.json',
   'apps/desktop/src',
   'apps/web/src',
@@ -83,15 +84,27 @@ export const importMatrix = [
     name: 'desktop electron stays a supervisor and client',
     match: (file) => file.startsWith('apps/desktop/src/electron/'),
     forbiddenImports: [
-      /^@debrute\/daemon$/,
-      /^@debrute\/app-server$/,
-      /^@debrute\/capability-runtime$/,
+      /^@debrute\/daemon(?:\/|$)/,
+      /^@debrute\/app-server(?:\/|$)/,
+      /^@debrute\/runtime-host(?:\/|$)/,
+      /^@debrute\/capability-runtime(?:\/|$)/,
+      /^@debrute\/capability-core(?:\/|$)/,
+      /^@debrute\/project-core(?:\/|$)/,
+      /^@debrute\/canvas-core(?:\/|$)/,
+      /^@debrute\/canvas-map-core(?:\/|$)/,
+      /^@debrute\/web(?:\/|$)/,
       /^apps\/app-server\//,
       /^apps\/daemon\//,
-      /apps\/web\/src\/workbench/,
-      /^\.\.\/\.\.\/\.\.\/web\/src\/workbench/,
-      /^react$/,
-      /^react-dom/
+      /^apps\/runtime-host\//,
+      /^apps\/web\//,
+      /^packages\/capability-runtime\/src\//,
+      /^packages\/capability-core\/src\//,
+      /^packages\/project-core\/src\//,
+      /^packages\/canvas-core\/src\//,
+      /^packages\/canvas-map-core\/src\//,
+      /^\.\.\/\.\.\/\.\.\/web\//,
+      /^react(?:\/|$)/,
+      /^react-dom(?:\/|$)/
     ]
   },
   {
@@ -244,10 +257,12 @@ function exportViolations(file, text) {
 function packageJsonViolations(file, text) {
   if (file === 'apps/desktop/package.json') {
     const pkg = JSON.parse(text);
-    const dependencies = new Set(Object.keys(pkg.dependencies ?? {}));
-    return ['@debrute/daemon', '@debrute/app-server', '@debrute/capability-runtime']
-      .filter((dependency) => dependencies.has(dependency))
-      .map((dependency) => `desktop electron stays a supervisor and client: ${file} depends on ${dependency}`);
+    return allowedPackageDependencyViolations(file, pkg, 'desktop electron stays a supervisor and client', {
+      dependencies: new Set(['@debrute/app-protocol', '@debrute/workbench-runtime']),
+      devDependencies: new Set(['electron', 'electron-builder', 'esbuild', 'typescript', 'vite']),
+      optionalDependencies: new Set(),
+      peerDependencies: new Set()
+    });
   }
   if (file !== 'apps/debrute-cli/package.json') {
     return [];
@@ -260,10 +275,20 @@ function packageJsonViolations(file, text) {
 }
 
 function tsconfigViolations(file, text) {
-  if (file === 'apps/desktop/tsconfig.electron.json') {
+  if (file === 'apps/desktop/tsconfig.json' || file === 'apps/desktop/tsconfig.electron.json') {
     const config = JSON.parse(text);
     const references = (config.references ?? []).map((reference) => reference.path);
-    return ['../../apps/daemon', '../../apps/app-server', '../../packages/capability-runtime']
+    return [
+      '../../apps/daemon',
+      '../../apps/app-server',
+      '../../apps/runtime-host',
+      '../../packages/capability-runtime',
+      '../../packages/capability-core',
+      '../../packages/project-core',
+      '../../packages/canvas-core',
+      '../../packages/canvas-map-core',
+      '../../apps/web'
+    ]
       .filter((reference) => references.includes(reference))
       .map((reference) => `desktop electron stays a supervisor and client: ${file} references ${reference}`);
   }
@@ -275,6 +300,31 @@ function tsconfigViolations(file, text) {
   return ['../../packages/project-core', '../../packages/canvas-map-core', '../../packages/canvas-core', '../../packages/capability-core']
     .filter((reference) => references.includes(reference))
     .map((reference) => `cli stays behind app-server and protocol boundaries: ${file} references ${reference}`);
+}
+
+const packageDependencySections = [
+  ['dependencies', 'depends on'],
+  ['devDependencies', 'has devDependency on'],
+  ['optionalDependencies', 'has optionalDependency on'],
+  ['peerDependencies', 'has peerDependency on']
+];
+
+function packageDependencyViolations(file, pkg, ruleName, forbiddenDependencies) {
+  return packageDependencySections.flatMap(([sectionName, phrase]) => {
+    const dependencies = new Set(Object.keys(pkg[sectionName] ?? {}));
+    return forbiddenDependencies
+      .filter((dependency) => dependencies.has(dependency))
+      .map((dependency) => `${ruleName}: ${file} ${phrase} ${dependency}`);
+  });
+}
+
+function allowedPackageDependencyViolations(file, pkg, ruleName, allowedDependenciesBySection) {
+  return packageDependencySections.flatMap(([sectionName]) => {
+    const allowedDependencies = allowedDependenciesBySection[sectionName] ?? new Set();
+    return Object.keys(pkg[sectionName] ?? {})
+      .filter((dependency) => !allowedDependencies.has(dependency))
+      .map((dependency) => `${ruleName}: ${file} declares ${dependency} in ${sectionName}`);
+  });
 }
 
 function viteAliasViolations(file, text) {

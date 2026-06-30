@@ -78,9 +78,7 @@
   },
   "dependencies": {
     "@debrute/app-protocol": "workspace:*",
-    "@debrute/project-core": "workspace:*",
-    "@debrute/workbench-runtime": "workspace:*",
-    "node-pty": "^1.1.0"
+    "@debrute/workbench-runtime": "workspace:*"
   },
   "devDependencies": {
     "electron": "42.4.0",

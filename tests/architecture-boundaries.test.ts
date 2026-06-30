@@ -123,6 +123,123 @@ describe('Debrute architecture boundaries', () => {
     }
   });
 
+  it('keeps backend, runtime-host, domain core, renderer, and capability packages out of Electron boundaries', async () => {
+    const fixtureRoot = mkdtempSync(join(tmpdir(), 'debrute-architecture-electron-domain-core-'));
+    try {
+      mkdirSync(join(fixtureRoot, 'apps/desktop/src/electron'), { recursive: true });
+      writeFileSync(
+        join(fixtureRoot, 'apps/desktop/src/electron/violates-domain-core-boundary.ts'),
+        [
+          "import { projectCacheKey } from '@debrute/project-core/projectCacheKeys';",
+          "import '../../../../packages/capability-runtime/src/index.js';",
+          "import 'react/jsx-runtime';"
+        ].join('\n'),
+        'utf8'
+      );
+      writeFileSync(
+        join(fixtureRoot, 'apps/desktop/package.json'),
+        JSON.stringify({
+          dependencies: {
+            '@debrute/app-protocol': 'workspace:*',
+            '@debrute/runtime-host': 'workspace:*',
+            '@debrute/project-core': 'workspace:*',
+            '@debrute/canvas-core': 'workspace:*',
+            '@debrute/capability-core': 'workspace:*',
+            '@debrute/capability-runtime': 'workspace:*',
+            '@debrute/web': 'workspace:*',
+            '@debrute/workbench-runtime': 'workspace:*'
+          },
+          devDependencies: {
+            react: '^19.0.0'
+          }
+        }, null, 2),
+        'utf8'
+      );
+      writeFileSync(
+        join(fixtureRoot, 'apps/desktop/tsconfig.json'),
+        JSON.stringify({
+          references: [
+            { path: '../../packages/app-protocol' },
+            { path: '../../apps/runtime-host' },
+            { path: '../../packages/project-core' },
+            { path: '../../packages/canvas-core' },
+            { path: '../../packages/capability-runtime' },
+            { path: '../../packages/workbench-runtime' }
+          ]
+        }, null, 2),
+        'utf8'
+      );
+      writeFileSync(
+        join(fixtureRoot, 'apps/desktop/tsconfig.electron.json'),
+        JSON.stringify({
+          references: [
+            { path: '../../packages/app-protocol' },
+            { path: '../../packages/canvas-map-core' },
+            { path: '../../packages/workbench-runtime' }
+          ]
+        }, null, 2),
+        'utf8'
+      );
+
+      await expect(architectureBoundaryViolations(fixtureRoot, [
+        'apps/desktop/src/electron/violates-domain-core-boundary.ts',
+        'apps/desktop/package.json',
+        'apps/desktop/tsconfig.json',
+        'apps/desktop/tsconfig.electron.json'
+      ])).resolves.toEqual([
+        'desktop electron stays a supervisor and client: apps/desktop/src/electron/violates-domain-core-boundary.ts imports "@debrute/project-core/projectCacheKeys"',
+        'desktop electron stays a supervisor and client: apps/desktop/src/electron/violates-domain-core-boundary.ts imports "packages/capability-runtime/src/index.js"',
+        'desktop electron stays a supervisor and client: apps/desktop/src/electron/violates-domain-core-boundary.ts imports "react/jsx-runtime"',
+        'desktop electron stays a supervisor and client: apps/desktop/package.json declares @debrute/runtime-host in dependencies',
+        'desktop electron stays a supervisor and client: apps/desktop/package.json declares @debrute/project-core in dependencies',
+        'desktop electron stays a supervisor and client: apps/desktop/package.json declares @debrute/canvas-core in dependencies',
+        'desktop electron stays a supervisor and client: apps/desktop/package.json declares @debrute/capability-core in dependencies',
+        'desktop electron stays a supervisor and client: apps/desktop/package.json declares @debrute/capability-runtime in dependencies',
+        'desktop electron stays a supervisor and client: apps/desktop/package.json declares @debrute/web in dependencies',
+        'desktop electron stays a supervisor and client: apps/desktop/package.json declares react in devDependencies',
+        'desktop electron stays a supervisor and client: apps/desktop/tsconfig.json references ../../apps/runtime-host',
+        'desktop electron stays a supervisor and client: apps/desktop/tsconfig.json references ../../packages/capability-runtime',
+        'desktop electron stays a supervisor and client: apps/desktop/tsconfig.json references ../../packages/project-core',
+        'desktop electron stays a supervisor and client: apps/desktop/tsconfig.json references ../../packages/canvas-core',
+        'desktop electron stays a supervisor and client: apps/desktop/tsconfig.electron.json references ../../packages/canvas-map-core'
+      ]);
+    } finally {
+      rmSync(fixtureRoot, { recursive: true, force: true });
+    }
+  });
+
+  it('keeps forbidden Electron packages out of every dependency metadata section', async () => {
+    const fixtureRoot = mkdtempSync(join(tmpdir(), 'debrute-architecture-electron-dependency-sections-'));
+    try {
+      mkdirSync(join(fixtureRoot, 'apps/desktop'), { recursive: true });
+      writeFileSync(
+        join(fixtureRoot, 'apps/desktop/package.json'),
+        JSON.stringify({
+          devDependencies: {
+            '@debrute/project-core': 'workspace:*'
+          },
+          optionalDependencies: {
+            '@debrute/web': 'workspace:*'
+          },
+          peerDependencies: {
+            react: '^19.0.0'
+          }
+        }, null, 2),
+        'utf8'
+      );
+
+      await expect(architectureBoundaryViolations(fixtureRoot, [
+        'apps/desktop/package.json'
+      ])).resolves.toEqual([
+        'desktop electron stays a supervisor and client: apps/desktop/package.json declares @debrute/project-core in devDependencies',
+        'desktop electron stays a supervisor and client: apps/desktop/package.json declares @debrute/web in optionalDependencies',
+        'desktop electron stays a supervisor and client: apps/desktop/package.json declares react in peerDependencies'
+      ]);
+    } finally {
+      rmSync(fixtureRoot, { recursive: true, force: true });
+    }
+  });
+
   it('keeps App Server project, Canvas Map, and Canvas ownership out of the coordinator', () => {
     for (const file of [
       'apps/app-server/src/project-session/projectSnapshot.ts',
@@ -204,7 +321,7 @@ describe('Debrute architecture boundaries', () => {
     expect(text).not.toContain('registerProjectFileProtocols');
   });
 
-  it('keeps desktop package dependencies out of runtime server packages', () => {
+  it('keeps forbidden packages out of Electron package metadata and TypeScript references', () => {
     const desktopPackage = JSON.parse(readFileSync(join(root, 'apps/desktop/package.json'), 'utf8')) as {
       dependencies?: Record<string, string>;
     };
@@ -215,8 +332,19 @@ describe('Debrute architecture boundaries', () => {
 
     expect(desktopPackage.dependencies ?? {}).not.toHaveProperty('@debrute/daemon');
     expect(desktopPackage.dependencies ?? {}).not.toHaveProperty('@debrute/app-server');
+    expect(desktopPackage.dependencies ?? {}).not.toHaveProperty('@debrute/capability-runtime');
+    expect(desktopPackage.dependencies ?? {}).not.toHaveProperty('@debrute/capability-core');
+    expect(desktopPackage.dependencies ?? {}).not.toHaveProperty('@debrute/project-core');
+    expect(desktopPackage.dependencies ?? {}).not.toHaveProperty('@debrute/canvas-core');
+    expect(desktopPackage.dependencies ?? {}).not.toHaveProperty('@debrute/canvas-map-core');
+    expect(desktopPackage.dependencies ?? {}).not.toHaveProperty('node-pty');
     expect(desktopTsconfigs).not.toContain('../../apps/daemon');
     expect(desktopTsconfigs).not.toContain('../../apps/app-server');
+    expect(desktopTsconfigs).not.toContain('../../packages/capability-runtime');
+    expect(desktopTsconfigs).not.toContain('../../packages/capability-core');
+    expect(desktopTsconfigs).not.toContain('../../packages/project-core');
+    expect(desktopTsconfigs).not.toContain('../../packages/canvas-core');
+    expect(desktopTsconfigs).not.toContain('../../packages/canvas-map-core');
   });
 
   it('keeps CLI package dependencies out of runtime server packages', () => {
