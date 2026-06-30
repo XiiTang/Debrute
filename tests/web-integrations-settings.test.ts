@@ -1,4 +1,8 @@
+// @vitest-environment jsdom
+
 import React from 'react';
+import { act } from 'react';
+import { createRoot } from 'react-dom/client';
 import { renderToStaticMarkup } from 'react-dom/server';
 import { describe, expect, it } from 'vitest';
 import { SettingsPanel } from '../apps/web/src/workbench/settings/SettingsPanel';
@@ -30,16 +34,19 @@ describe('web Integrations settings page', () => {
     expect(html).toContain('Homebrew, uv');
     expect(html).toContain('<span>FFmpeg</span>');
     expect(html).toContain('7.1.1');
-    expect(html).toContain('brew upgrade --formula ffmpeg');
-    expect(html).toContain('brew uninstall --formula ffmpeg');
+    expect(html).toContain('>8.0</span>');
+    expect(html).toContain('>Uninstall</span>');
+    expect(html).not.toContain('brew upgrade --formula ffmpeg');
+    expect(html).not.toContain('brew uninstall --formula ffmpeg');
     expect(html).toContain('<span>ImageMagick</span>');
     expect(html).toContain('Not found');
-    expect(html).toContain('brew install --formula imagemagick');
+    expect(html).toContain('>Install</span>');
+    expect(html).not.toContain('brew install --formula imagemagick');
     expect(html).toContain('MediaInfo');
     expect(html).toContain('Integration operations require a ready detected integration.');
     expect(html).toContain('<span>Remove AI Watermarks</span>');
     expect(html).toContain('0.5.4');
-    expect(html).toContain('uv tool upgrade remove-ai-watermarks');
+    expect(html).not.toContain('uv tool upgrade remove-ai-watermarks');
     expect(html).toContain('<span>FFmpeg</span>');
     expect(html).toContain('class="db-status-pill db-status-pill--success">Ready</span>');
   });
@@ -80,9 +87,8 @@ describe('web Integrations settings page', () => {
       backendKind: 'system-package-manager',
       backend: 'brew',
       packageName: 'ffmpeg',
-      uninstallCommandPreview: 'brew uninstall --formula ffmpeg',
+      availableOperations: ['uninstall'],
       queryDiagnostic: {
-        commandPreview: 'brew outdated --json=v2 --formula ffmpeg',
         exitCode: 1,
         errorKind: 'nonzero_exit',
         stderrTail: 'brew exploded'
@@ -96,6 +102,207 @@ describe('web Integrations settings page', () => {
     expect(html).toContain('Unable to check updates.');
     expect(html).toContain('nonzero_exit');
     expect(html).toContain('brew exploded');
+    expect(html).not.toContain('brew outdated');
+  });
+
+  it('disables integration actions while an operation is running', () => {
+    const html = renderWithI18n(React.createElement(IntegrationsSettingsPage, {
+      state: createState({
+        integrationsSettings: {
+          ...createState().integrationsSettings!,
+          runningOperation: { integrationId: 'ffmpeg', operation: 'update' }
+        }
+      }),
+      actions: createActions()
+    }));
+
+    expect(html).toContain('disabled=""');
+    expect(html).toContain('8.0');
+    expect(html).not.toContain('brew upgrade');
+  });
+
+  it('renders operation failure diagnostics without command text after a failed click', async () => {
+    const restoreActEnvironment = installReactActEnvironment();
+    const container = document.createElement('div');
+    document.body.append(container);
+    const root = createRoot(container);
+    const actions = createActions({
+      runIntegrationOperation: async (input) => ({
+        ok: false,
+        integrationId: input.integrationId,
+        operation: input.operation,
+        settings: createState().integrationsSettings!,
+        diagnostic: { errorKind: 'nonzero_exit', stderrTail: 'install exploded' }
+      })
+    });
+
+    try {
+      await act(async () => {
+        root.render(React.createElement(I18nProvider, { locale: 'en' }, React.createElement(IntegrationsSettingsPage, {
+          state: createState(),
+          actions
+        })));
+      });
+
+      const installButton = Array.from(container.querySelectorAll('button')).find((button) => button.textContent === 'Install');
+      expect(installButton).toBeTruthy();
+      await act(async () => {
+        installButton!.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+        await Promise.resolve();
+      });
+
+      expect(container.textContent).toContain('Install failed');
+      expect(container.textContent).toContain('install exploded');
+      expect(container.textContent).not.toContain('brew install');
+    } finally {
+      await act(async () => {
+        root.unmount();
+      });
+      container.remove();
+      restoreActEnvironment();
+    }
+  });
+
+  it('renders action exceptions without fabricating runtime diagnostics', async () => {
+    const restoreActEnvironment = installReactActEnvironment();
+    const container = document.createElement('div');
+    document.body.append(container);
+    const root = createRoot(container);
+    const actions = createActions({
+      runIntegrationOperation: async () => {
+        throw new Error('request failed');
+      }
+    });
+
+    try {
+      await act(async () => {
+        root.render(React.createElement(I18nProvider, { locale: 'en' }, React.createElement(IntegrationsSettingsPage, {
+          state: createState(),
+          actions
+        })));
+      });
+
+      const installButton = Array.from(container.querySelectorAll('button')).find((button) => button.textContent === 'Install');
+      expect(installButton).toBeTruthy();
+      await act(async () => {
+        installButton!.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+        await Promise.resolve();
+      });
+
+      expect(container.textContent).toContain('Install failed');
+      expect(container.textContent).toContain('request failed');
+      expect(container.textContent).not.toContain('spawn_error');
+      expect(container.textContent).not.toContain('brew install');
+    } finally {
+      await act(async () => {
+        root.unmount();
+      });
+      container.remove();
+      restoreActEnvironment();
+    }
+  });
+
+  it('clears operation failure diagnostics after a successful rescan', async () => {
+    const restoreActEnvironment = installReactActEnvironment();
+    const container = document.createElement('div');
+    document.body.append(container);
+    const root = createRoot(container);
+    const actions = createActions({
+      runIntegrationOperation: async (input) => ({
+        ok: false,
+        integrationId: input.integrationId,
+        operation: input.operation,
+        settings: createState().integrationsSettings!,
+        diagnostic: { errorKind: 'nonzero_exit', stderrTail: 'install exploded' }
+      }),
+      rescanIntegrations: async () => createState().integrationsSettings!
+    });
+
+    try {
+      await act(async () => {
+        root.render(React.createElement(I18nProvider, { locale: 'en' }, React.createElement(IntegrationsSettingsPage, {
+          state: createState(),
+          actions
+        })));
+      });
+
+      const installButton = Array.from(container.querySelectorAll('button')).find((button) => button.textContent === 'Install');
+      expect(installButton).toBeTruthy();
+      await act(async () => {
+        installButton!.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+        await Promise.resolve();
+      });
+      expect(container.textContent).toContain('Install failed');
+
+      const rescanButton = Array.from(container.querySelectorAll('button')).find((button) => button.textContent === 'Rescan');
+      expect(rescanButton).toBeTruthy();
+      await act(async () => {
+        rescanButton!.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+        await Promise.resolve();
+      });
+
+      expect(container.textContent).not.toContain('Install failed');
+      expect(container.textContent).not.toContain('install exploded');
+    } finally {
+      await act(async () => {
+        root.unmount();
+      });
+      container.remove();
+      restoreActEnvironment();
+    }
+  });
+
+  it('clears operation failure diagnostics when refreshed settings change the integration row', async () => {
+    const restoreActEnvironment = installReactActEnvironment();
+    const container = document.createElement('div');
+    document.body.append(container);
+    const root = createRoot(container);
+    const actions = createActions({
+      runIntegrationOperation: async (input) => ({
+        ok: false,
+        integrationId: input.integrationId,
+        operation: input.operation,
+        settings: createState().integrationsSettings!,
+        diagnostic: { errorKind: 'nonzero_exit', stderrTail: 'install exploded' }
+      })
+    });
+
+    try {
+      await act(async () => {
+        root.render(React.createElement(I18nProvider, { locale: 'en' }, React.createElement(IntegrationsSettingsPage, {
+          state: createState(),
+          actions
+        })));
+      });
+
+      const installButton = Array.from(container.querySelectorAll('button')).find((button) => button.textContent === 'Install');
+      expect(installButton).toBeTruthy();
+      await act(async () => {
+        installButton!.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+        await Promise.resolve();
+      });
+      expect(container.textContent).toContain('Install failed');
+
+      await act(async () => {
+        root.render(React.createElement(I18nProvider, { locale: 'en' }, React.createElement(IntegrationsSettingsPage, {
+          state: createState({
+            integrationsSettings: installedImageMagickSettings()
+          }),
+          actions
+        })));
+        await Promise.resolve();
+      });
+
+      expect(container.textContent).not.toContain('Install failed');
+      expect(container.textContent).not.toContain('install exploded');
+      expect(container.textContent).toContain('7.1.2-23');
+    } finally {
+      await act(async () => {
+        root.unmount();
+      });
+      container.remove();
+      restoreActEnvironment();
+    }
   });
 });
 
@@ -127,8 +334,7 @@ function createState(overrides: Partial<WorkbenchState> = {}): WorkbenchState {
           packageName: 'ffmpeg',
           installedVersion: '7.1.1',
           latestVersion: '8.0',
-          updateCommandPreview: 'brew upgrade --formula ffmpeg',
-          uninstallCommandPreview: 'brew uninstall --formula ffmpeg'
+          availableOperations: ['update', 'uninstall']
         },
         binaries: [{
           binaryId: 'ffmpeg',
@@ -153,7 +359,7 @@ function createState(overrides: Partial<WorkbenchState> = {}): WorkbenchState {
           backend: 'brew',
           packageName: 'imagemagick',
           latestVersion: '7.1.2-23',
-          installCommandPreview: 'brew install --formula imagemagick'
+          availableOperations: ['install']
         },
         binaries: [{
           binaryId: 'magick',
@@ -171,6 +377,7 @@ function createState(overrides: Partial<WorkbenchState> = {}): WorkbenchState {
           backendKind: 'system-package-manager',
           backend: 'brew',
           packageName: 'media-info',
+          availableOperations: [],
           unavailableReason: 'Integration operations require a ready detected integration.'
         },
         binaries: [{
@@ -190,8 +397,7 @@ function createState(overrides: Partial<WorkbenchState> = {}): WorkbenchState {
           backendKind: 'python-cli-installer',
           backend: 'uv',
           packageName: 'remove-ai-watermarks',
-          updateCommandPreview: 'uv tool upgrade remove-ai-watermarks',
-          uninstallCommandPreview: 'uv tool uninstall remove-ai-watermarks'
+          availableOperations: ['update', 'uninstall']
         },
         binaries: [{
           binaryId: 'remove-ai-watermarks',
@@ -208,8 +414,57 @@ function createState(overrides: Partial<WorkbenchState> = {}): WorkbenchState {
   };
 }
 
-function createActions(): WorkbenchActions {
+function createActions(overrides: Partial<WorkbenchActions> = {}): WorkbenchActions {
   return {
-    rescanIntegrations: async () => createState().integrationsSettings!
+    rescanIntegrations: async () => createState().integrationsSettings!,
+    runIntegrationOperation: async (input) => ({
+      ok: true,
+      integrationId: input.integrationId,
+      operation: input.operation,
+      settings: createState().integrationsSettings!
+    }),
+    ...overrides
   } as unknown as WorkbenchActions;
+}
+
+function installedImageMagickSettings(): NonNullable<WorkbenchState['integrationsSettings']> {
+  const settings = createState().integrationsSettings!;
+  return {
+    ...settings,
+    integrations: settings.integrations.map((integration) => (
+      integration.integrationId === 'imagemagick'
+        ? {
+            ...integration,
+            status: 'ready',
+            summary: 'Ready.',
+            operationStatus: {
+              backendKind: 'system-package-manager',
+              backend: 'brew',
+              packageName: 'imagemagick',
+              installedVersion: '7.1.2-23',
+              availableOperations: ['uninstall']
+            },
+            binaries: [{
+              binaryId: 'magick',
+              displayName: 'magick',
+              status: 'ready',
+              version: '7.1.2-23'
+            }]
+          }
+        : integration
+    ))
+  };
+}
+
+function installReactActEnvironment(): () => void {
+  const globalWithAct = globalThis as typeof globalThis & { IS_REACT_ACT_ENVIRONMENT?: boolean };
+  const previous = globalWithAct.IS_REACT_ACT_ENVIRONMENT;
+  globalWithAct.IS_REACT_ACT_ENVIRONMENT = true;
+  return () => {
+    if (previous === undefined) {
+      delete globalWithAct.IS_REACT_ACT_ENVIRONMENT;
+    } else {
+      globalWithAct.IS_REACT_ACT_ENVIRONMENT = previous;
+    }
+  };
 }

@@ -12,6 +12,8 @@ import type {
   GeneratedAssetMetadataLookup,
   ImageModelSettingsView,
   IntegrationSettingsView,
+  RunIntegrationOperationInput,
+  RunIntegrationOperationResult,
   ProductUpdateApplyResult,
   ProjectHealthSummary,
   SaveCanvasTextPreviewSourceResult,
@@ -459,6 +461,11 @@ export function createHttpWorkbenchApiClient(options: HttpWorkbenchApiClientOpti
     ),
     integrationsListStatus: () => request<IntegrationSettingsView>('GET', '/api/integrations'),
     integrationsRescan: () => request<IntegrationSettingsView>('POST', '/api/integrations/rescan', {}),
+    integrationsRunOperation: (input: RunIntegrationOperationInput) => request<RunIntegrationOperationResult>(
+      'POST',
+      `/api/integrations/${encodeURIComponent(input.integrationId)}/${encodeURIComponent(input.operation)}`,
+      {}
+    ),
     onEvent: (listener: (event: WorkbenchEvent) => void) => {
       eventListeners.add(listener);
       reconnectGlobalEventSource();

@@ -1,4 +1,4 @@
-import { chmod, mkdir, writeFile } from 'node:fs/promises';
+import { chmod, mkdir, readFile, writeFile } from 'node:fs/promises';
 import { mkdtemp } from 'node:fs/promises';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
@@ -65,12 +65,14 @@ describe('IntegrationsService', () => {
 
     expect(mediainfo?.status).toBe('probe_failed');
     expect(mediainfo?.summary).toBe('mediainfo probe failed.');
-    expect(mediainfo?.binaries[0]?.probe?.errorKind).toBe('nonzero_exit');
-    expect(mediainfo?.binaries[0]?.probe?.stderrTail).toContain('cannot load library');
-    expect((mediainfo?.binaries[0]?.probe as Record<string, unknown> | undefined)?.commandPreview).toBeUndefined();
+    expect(mediainfo?.binaries[0]?.probe).toMatchObject({
+      exitCode: 2,
+      errorKind: 'nonzero_exit',
+      stderrTail: expect.stringContaining('cannot load library')
+    });
   }, INTEGRATION_SCAN_TEST_TIMEOUT_MS);
 
-  it('exposes install command previews for missing media integrations when the system package manager is present', async () => {
+  it('exposes install availability for missing media integrations when the system package manager is present', async () => {
     const binDir = await mkdtemp(join(tmpdir(), 'debrute-integrations-install-available-'));
     await writeFakePackageManager(binDir, 'brew', [
       'if [ "$1" = "info" ]; then',
@@ -88,12 +90,12 @@ describe('IntegrationsService', () => {
       backend: 'brew',
       packageName: 'imagemagick',
       latestVersion: '7.1.2-23',
-      installCommandPreview: 'brew install --formula imagemagick'
+      availableOperations: ['install']
     });
-    expect((imagemagick?.operationStatus as Record<string, unknown>).installCommand).toBeUndefined();
+    expect(JSON.stringify(imagemagick?.operationStatus)).not.toContain('brew install');
   }, INTEGRATION_SCAN_TEST_TIMEOUT_MS);
 
-  it('exposes update command previews for ready media integrations when a newer package version exists', async () => {
+  it('exposes update availability for ready media integrations when a newer package version exists', async () => {
     const binDir = await mkdtemp(join(tmpdir(), 'debrute-integrations-update-available-'));
     await writeFakeBinary(binDir, 'ffmpeg', 'ffmpeg version 7.1.1');
     await writeFakeBinary(binDir, 'ffprobe', 'ffprobe version 7.1.1');
@@ -113,8 +115,9 @@ describe('IntegrationsService', () => {
       packageName: 'ffmpeg',
       installedVersion: '7.1.1',
       latestVersion: '8.0',
-      updateCommandPreview: 'brew upgrade --formula ffmpeg'
+      availableOperations: ['update', 'uninstall']
     });
+    expect(JSON.stringify(ffmpeg?.operationStatus)).not.toContain('brew upgrade');
   }, INTEGRATION_SCAN_TEST_TIMEOUT_MS);
 
   it('marks remove-ai-watermarks ready and parses its version', async () => {
@@ -133,8 +136,7 @@ describe('IntegrationsService', () => {
       backendKind: 'python-cli-installer',
       backend: 'uv',
       packageName: 'remove-ai-watermarks',
-      updateCommandPreview: 'uv tool upgrade remove-ai-watermarks',
-      uninstallCommandPreview: 'uv tool uninstall remove-ai-watermarks'
+      availableOperations: ['update', 'uninstall']
     });
     expect(integration?.operationStatus?.latestVersion).toBeUndefined();
   });
@@ -151,11 +153,11 @@ describe('IntegrationsService', () => {
     expect(integration?.operationStatus).toMatchObject({
       backendKind: 'python-cli-installer',
       backend: 'uv',
-      installCommandPreview: 'uv tool install git+https://github.com/wiltodelta/remove-ai-watermarks.git'
+      availableOperations: ['install']
     });
   });
 
-  it('only exposes command previews for integration operations', async () => {
+  it('does not expose command previews for integration operations', async () => {
     const binDir = await mkdtemp(join(tmpdir(), 'debrute-integrations-preview-only-'));
     await writeFakePackageManager(binDir, 'brew', [
       'if [ "$1" = "info" ]; then',
@@ -168,9 +170,180 @@ describe('IntegrationsService', () => {
     const imagemagick = view.integrations.find((integration) => integration.integrationId === 'imagemagick');
 
     expect(imagemagick?.operationStatus).toMatchObject({
-      installCommandPreview: 'brew install --formula imagemagick'
+      availableOperations: ['install']
     });
+    expect(JSON.stringify(imagemagick?.operationStatus)).not.toContain('brew install');
   }, 15_000);
+
+  it('runs an install operation and returns a rescanned settings view', async () => {
+    const binDir = await mkdtemp(join(tmpdir(), 'debrute-integrations-run-install-'));
+    const logPath = join(binDir, 'brew.log');
+    const magickPath = join(binDir, 'magick');
+    await writeFakePackageManager(binDir, 'brew', [
+      `printf '%s\\n' "$*" >> ${JSON.stringify(logPath)}`,
+      'if [ "$1" = "info" ]; then',
+      '  printf \'{"formulae":[{"name":"imagemagick","versions":{"stable":"7.1.2-23"},"installed":[]}],"casks":[]}\\n\'',
+      'fi',
+      'if [ "$1" = "install" ]; then',
+      `  printf '%s\\n' '#!/bin/sh' 'printf "Version: ImageMagick 7.1.2-23\\n"' > ${JSON.stringify(magickPath)}`,
+      `  chmod +x ${JSON.stringify(magickPath)}`,
+      'fi'
+    ].join('\n'));
+    const service = new IntegrationsService({ envPath: binDir, cacheTtlMs: 0, platform: 'darwin' });
+
+    const result = await service.runOperation({ integrationId: 'imagemagick', operation: 'install' });
+
+    expect(result.ok).toBe(true);
+    expect(await readFile(logPath, 'utf8')).toContain('install --formula imagemagick');
+    expect(result.settings.runningOperation).toBeUndefined();
+    expect(result.settings.integrations.find((integration) => integration.integrationId === 'imagemagick')?.status).toBe('ready');
+  }, INTEGRATION_SCAN_TEST_TIMEOUT_MS);
+
+  it('returns bounded diagnostics and fresh settings when an operation fails', async () => {
+    const binDir = await mkdtemp(join(tmpdir(), 'debrute-integrations-run-fail-'));
+    await writeFakePackageManager(binDir, 'brew', [
+      'if [ "$1" = "info" ]; then',
+      '  printf \'{"formulae":[{"name":"imagemagick","versions":{"stable":"7.1.2-23"},"installed":[]}],"casks":[]}\\n\'',
+      'fi',
+      'if [ "$1" = "install" ]; then',
+      '  printf "install exploded\\n" >&2',
+      '  exit 9',
+      'fi'
+    ].join('\n'));
+    const service = new IntegrationsService({ envPath: binDir, cacheTtlMs: 0, platform: 'darwin' });
+
+    const result = await service.runOperation({ integrationId: 'imagemagick', operation: 'install' });
+
+    expect(result).toMatchObject({
+      ok: false,
+      integrationId: 'imagemagick',
+      operation: 'install',
+      diagnostic: {
+        exitCode: 9,
+        errorKind: 'nonzero_exit',
+        stderrTail: expect.stringContaining('install exploded')
+      }
+    });
+    expect(JSON.stringify(result.diagnostic)).not.toContain('brew install');
+    expect(result.settings.integrations.find((integration) => integration.integrationId === 'imagemagick')?.status).toBe('not_found');
+  }, INTEGRATION_SCAN_TEST_TIMEOUT_MS);
+
+  it('rejects a second operation while one is running', async () => {
+    const binDir = await mkdtemp(join(tmpdir(), 'debrute-integrations-run-lock-'));
+    const logPath = join(binDir, 'brew.log');
+    await writeFakePackageManager(binDir, 'brew', [
+      `printf '%s\\n' "$*" >> ${JSON.stringify(logPath)}`,
+      'if [ "$1" = "info" ]; then',
+      '  printf \'{"formulae":[{"name":"imagemagick","versions":{"stable":"7.1.2-23"},"installed":[]}],"casks":[]}\\n\'',
+      'fi',
+      'if [ "$1" = "install" ]; then',
+      '  sleep 1',
+      'fi'
+    ].join('\n'));
+    const service = new IntegrationsService({ envPath: binDir, cacheTtlMs: 0, platform: 'darwin' });
+    let resolveStarted: (() => void) | undefined;
+    const started = new Promise<void>((resolve) => {
+      resolveStarted = resolve;
+    });
+
+    const first = service.runOperation(
+      { integrationId: 'imagemagick', operation: 'install' },
+      { onStarted: () => resolveStarted?.() }
+    );
+    await started;
+    const second = await service.runOperation({ integrationId: 'imagemagick', operation: 'install' });
+    const firstResult = await first;
+
+    expect(second).toMatchObject({
+      ok: false,
+      diagnostic: { errorKind: 'operation_already_running' },
+      settings: {
+        runningOperation: { integrationId: 'imagemagick', operation: 'install' }
+      }
+    });
+    expect(firstResult.ok).toBe(true);
+    expect((await readFile(logPath, 'utf8')).match(/install --formula imagemagick/g)?.length).toBe(1);
+  }, INTEGRATION_SCAN_TEST_TIMEOUT_MS);
+
+  it('rejects concurrent attempts while the first operation is still validating', async () => {
+    const binDir = await mkdtemp(join(tmpdir(), 'debrute-integrations-run-validation-lock-'));
+    const logPath = join(binDir, 'brew.log');
+    const magickPath = join(binDir, 'magick');
+    await writeFakePackageManager(binDir, 'brew', [
+      `printf '%s\\n' "$*" >> ${JSON.stringify(logPath)}`,
+      'if [ "$1" = "info" ]; then',
+      '  sleep 1',
+      '  printf \'{"formulae":[{"name":"imagemagick","versions":{"stable":"7.1.2-23"},"installed":[]}],"casks":[]}\\n\'',
+      'fi',
+      'if [ "$1" = "install" ]; then',
+      `  printf '%s\\n' '#!/bin/sh' 'printf "Version: ImageMagick 7.1.2-23\\n"' > ${JSON.stringify(magickPath)}`,
+      `  chmod +x ${JSON.stringify(magickPath)}`,
+      'fi'
+    ].join('\n'));
+    const service = new IntegrationsService({ envPath: binDir, cacheTtlMs: 0, platform: 'darwin' });
+
+    const first = service.runOperation({ integrationId: 'imagemagick', operation: 'install' });
+    const second = await service.runOperation({ integrationId: 'imagemagick', operation: 'install' });
+    const firstResult = await first;
+
+    expect(second).toMatchObject({
+      ok: false,
+      diagnostic: { errorKind: 'operation_already_running' }
+    });
+    expect(second.settings.integrations).not.toHaveLength(0);
+    expect(firstResult.ok).toBe(true);
+    expect((await readFile(logPath, 'utf8')).match(/install --formula imagemagick/g)?.length).toBe(1);
+  }, INTEGRATION_SCAN_TEST_TIMEOUT_MS);
+
+  it('does not enter running state for an unavailable operation', async () => {
+    const binDir = await mkdtemp(join(tmpdir(), 'debrute-integrations-unavailable-operation-'));
+    await writeFakePackageManager(binDir, 'brew', [
+      'if [ "$1" = "info" ]; then',
+      '  printf \'{"formulae":[{"name":"imagemagick","versions":{"stable":"7.1.2-23"},"installed":[]}],"casks":[]}\\n\'',
+      'fi'
+    ].join('\n'));
+    const service = new IntegrationsService({ envPath: binDir, cacheTtlMs: 0, platform: 'darwin' });
+    const startedSettings: unknown[] = [];
+    const settledSettings: unknown[] = [];
+
+    const result = await service.runOperation(
+      { integrationId: 'imagemagick', operation: 'uninstall' },
+      {
+        onStarted: (settings) => startedSettings.push(settings),
+        onSettled: (settings) => settledSettings.push(settings)
+      }
+    );
+
+    expect(result).toMatchObject({
+      ok: false,
+      diagnostic: { errorKind: 'operation_unavailable' }
+    });
+    expect(result.settings.runningOperation).toBeUndefined();
+    expect(result.settings.integrations).not.toHaveLength(0);
+    expect(startedSettings).toEqual([]);
+    expect(settledSettings).toEqual([]);
+  }, INTEGRATION_SCAN_TEST_TIMEOUT_MS);
+
+  it('clears running state when the started callback fails', async () => {
+    const binDir = await mkdtemp(join(tmpdir(), 'debrute-integrations-start-callback-fail-'));
+    await writeFakePackageManager(binDir, 'brew', [
+      'if [ "$1" = "info" ]; then',
+      '  printf \'{"formulae":[{"name":"imagemagick","versions":{"stable":"7.1.2-23"},"installed":[]}],"casks":[]}\\n\'',
+      'fi'
+    ].join('\n'));
+    const service = new IntegrationsService({ envPath: binDir, cacheTtlMs: 30_000, platform: 'darwin' });
+
+    await expect(service.runOperation(
+      { integrationId: 'imagemagick', operation: 'install' },
+      {
+        onStarted: () => {
+          throw new Error('emit failed');
+        }
+      }
+    )).rejects.toThrow('emit failed');
+
+    await expect(service.listStatus()).resolves.not.toHaveProperty('runningOperation');
+  }, INTEGRATION_SCAN_TEST_TIMEOUT_MS);
 });
 
 async function writeFakeBinary(

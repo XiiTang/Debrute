@@ -8,6 +8,8 @@ import type {
   GeneratedAssetView,
   GeneratedAssetMetadataLookup,
   ProductUpdateApplyResult,
+  RunIntegrationOperationInput,
+  RunIntegrationOperationResult,
   SaveAdobeBridgeSettingsInput,
   SaveCanvasTextPreviewSourceInput,
   SaveCanvasTextPreviewSourceResult,
@@ -90,6 +92,7 @@ export interface WorkbenchActions {
   saveImageModelSetting: (modelId: string, input: SaveImageModelSettingInput) => Promise<void>;
   saveVideoModelSetting: (modelId: string, input: SaveVideoModelSettingInput) => Promise<void>;
   rescanIntegrations: () => Promise<IntegrationSettingsView>;
+  runIntegrationOperation: (input: RunIntegrationOperationInput) => Promise<RunIntegrationOperationResult>;
   saveAdobeBridgeSettings: (input: SaveAdobeBridgeSettingsInput) => Promise<void>;
   linkAdobeBridgePhotoshop: (input: { adobeClientId: string }) => Promise<void>;
   unlinkAdobeBridgePhotoshop: (adobeClientId: string) => Promise<void>;

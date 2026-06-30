@@ -54,7 +54,7 @@ External Agents use their own filesystem tools for generic file access.
 
 ## Integrations
 
-Integrations are optional local capabilities that the daemon detects and the Web Settings surface renders as command previews.
+Integrations are optional local capabilities that the daemon detects and the Web Settings surface manages through runtime-owned install, update, and uninstall actions.
 
 The first supported integrations are FFmpeg, ImageMagick, MediaInfo, ExifTool, and the `remove-ai-watermarks` CLI.
 

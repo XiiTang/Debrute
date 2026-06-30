@@ -1360,6 +1360,12 @@ const actions: WorkbenchActions = {
   saveVideoModelSetting: async () => undefined,
   saveWorkbenchPreferences: async () => undefined,
   rescanIntegrations: async () => emptyIntegrationsSettings,
+  runIntegrationOperation: async (input) => ({
+    ok: true,
+    integrationId: input.integrationId,
+    operation: input.operation,
+    settings: emptyIntegrationsSettings
+  }),
   saveAdobeBridgeSettings: async () => undefined,
   linkAdobeBridgePhotoshop: async () => undefined,
   unlinkAdobeBridgePhotoshop: async () => undefined,

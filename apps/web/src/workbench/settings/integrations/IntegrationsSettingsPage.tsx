@@ -1,15 +1,15 @@
-import React, { useState } from 'react';
-import { RefreshCw } from 'lucide-react';
+import React, { useEffect, useState } from 'react';
+import { Download, Loader2, RefreshCw, Trash2, Upload } from 'lucide-react';
 import type {
   IntegrationBackendStatus,
   IntegrationOperationDiagnostic,
+  IntegrationOperationInFlight,
+  IntegrationOperationKind,
   IntegrationStatus
 } from '@debrute/app-protocol';
 import type { WorkbenchActions, WorkbenchState } from '../../../types';
 import { Button, StatusPill, Toolbar } from '../../ui';
 import { useI18n, type WorkbenchI18n } from '../../i18n';
-
-type IntegrationActionKind = 'install' | 'update' | 'uninstall';
 
 export function IntegrationsSettingsPage({
   state,
@@ -21,14 +21,34 @@ export function IntegrationsSettingsPage({
   const i18n = useI18n();
   const [rescanning, setRescanning] = useState(false);
   const [error, setError] = useState<string>();
+  const [localRunningOperation, setLocalRunningOperation] = useState<IntegrationOperationInFlight>();
+  const [operationFailure, setOperationFailure] = useState<{
+    integrationId: string;
+    operation: IntegrationOperationKind;
+    stateKey: string;
+    diagnostic?: IntegrationOperationDiagnostic;
+    message?: string;
+  }>();
   const integrations = state.integrationsSettings?.integrations ?? [];
+  const runningOperation = state.integrationsSettings?.runningOperation ?? localRunningOperation;
+  const operationRunning = Boolean(runningOperation);
   const rescanRunning = rescanning;
+
+  useEffect(() => {
+    if (!operationFailure) {
+      return;
+    }
+    if (integrationFailureStateKey(state.integrationsSettings, operationFailure.integrationId) !== operationFailure.stateKey) {
+      setOperationFailure(undefined);
+    }
+  }, [operationFailure, state.integrationsSettings]);
 
   const rescan = async () => {
     setRescanning(true);
     setError(undefined);
     try {
       await actions.rescanIntegrations();
+      setOperationFailure(undefined);
     } catch (err) {
       setError(errorMessage(err));
     } finally {
@@ -41,7 +61,7 @@ export function IntegrationsSettingsPage({
       <header className="db-settings-section__header">
         <h2>{i18n.t('settings.integrations.title')}</h2>
         <Toolbar ariaLabel={i18n.t('settings.integrations.actions')} className="db-action-row">
-          <Button type="button" disabled={rescanRunning} iconStart={<RefreshCw size={14} />} onClick={() => void rescan()}>
+          <Button type="button" disabled={rescanRunning || operationRunning} iconStart={<RefreshCw size={14} />} onClick={() => void rescan()}>
             {rescanning ? i18n.t('settings.integrations.rescanning') : i18n.t('settings.integrations.rescan')}
           </Button>
         </Toolbar>
@@ -60,6 +80,38 @@ export function IntegrationsSettingsPage({
             key={integration.integrationId}
             integration={integration}
             i18n={i18n}
+            operationRunning={operationRunning}
+            runningOperation={runningOperation}
+            operationFailure={operationFailure?.integrationId === integration.integrationId ? operationFailure : undefined}
+            onRunOperation={async (operation) => {
+              const localOperation = { integrationId: integration.integrationId, operation };
+              setLocalRunningOperation(localOperation);
+              setOperationFailure(undefined);
+              try {
+                const result = await actions.runIntegrationOperation({ integrationId: integration.integrationId, operation });
+                if (!result.ok) {
+                  setOperationFailure({
+                    integrationId: result.integrationId,
+                    operation: result.operation,
+                    stateKey: integrationFailureStateKey(result.settings, result.integrationId),
+                    ...(result.diagnostic ? { diagnostic: result.diagnostic } : {})
+                  });
+                }
+              } catch (err) {
+                setOperationFailure({
+                  integrationId: integration.integrationId,
+                  operation,
+                  stateKey: integrationFailureStateKey(state.integrationsSettings, integration.integrationId),
+                  message: errorMessage(err)
+                });
+              } finally {
+                setLocalRunningOperation((current) => (
+                  current?.integrationId === localOperation.integrationId && current.operation === localOperation.operation
+                    ? undefined
+                    : current
+                ));
+              }
+            }}
           />
         ))}
       </div>
@@ -69,10 +121,18 @@ export function IntegrationsSettingsPage({
 
 function IntegrationRow({
   integration,
-  i18n
+  i18n,
+  operationRunning,
+  runningOperation,
+  operationFailure,
+  onRunOperation
 }: {
   integration: IntegrationStatus;
   i18n: WorkbenchI18n;
+  operationRunning: boolean;
+  runningOperation: IntegrationOperationInFlight | undefined;
+  operationFailure: { operation: IntegrationOperationKind; diagnostic?: IntegrationOperationDiagnostic; message?: string } | undefined;
+  onRunOperation: (operation: IntegrationOperationKind) => Promise<void>;
 }): React.ReactElement {
   const version = integration.status === 'ready'
     ? integration.binaries.find((binary) => binary.status === 'ready' && binary.version)?.version
@@ -85,7 +145,14 @@ function IntegrationRow({
       </StatusPill>
       <small>{version ?? ''}</small>
       <div className="db-integration-row__action">
-        <IntegrationRowAction integration={integration} i18n={i18n} />
+        <IntegrationRowAction
+          integration={integration}
+          i18n={i18n}
+          operationRunning={operationRunning}
+          runningOperation={runningOperation}
+          operationFailure={operationFailure}
+          onRunOperation={onRunOperation}
+        />
       </div>
     </div>
   );
@@ -115,36 +182,60 @@ function BackendSummary({
   return <small className="db-integration-summary">{summary}</small>;
 }
 
-function IntegrationRowAction({ integration, i18n }: { integration: IntegrationStatus; i18n: WorkbenchI18n }): React.ReactElement | null {
+function IntegrationRowAction({
+  integration,
+  i18n,
+  operationRunning,
+  runningOperation,
+  operationFailure,
+  onRunOperation
+}: {
+  integration: IntegrationStatus;
+  i18n: WorkbenchI18n;
+  operationRunning: boolean;
+  runningOperation: IntegrationOperationInFlight | undefined;
+  operationFailure: { operation: IntegrationOperationKind; diagnostic?: IntegrationOperationDiagnostic; message?: string } | undefined;
+  onRunOperation: (operation: IntegrationOperationKind) => Promise<void>;
+}): React.ReactElement | null {
   const status = integration.operationStatus;
   if (!status) {
     return null;
   }
-  const previews = commandPreviews(status);
+  const operations = status.availableOperations;
   const reason = neutralReason(status, i18n);
-  if (previews.length === 0 && !reason && !status.queryDiagnostic) {
+  const activeOperation = runningOperation?.integrationId === integration.integrationId ? runningOperation.operation : undefined;
+  if (operations.length === 0 && !reason && !status.queryDiagnostic && !operationFailure) {
     return null;
   }
   return (
     <>
-      {previews.map((preview) => (
-        <div className="db-integration-command" key={`${preview.kind}:${preview.command}`}>
-          <small>{operationLabel(preview.kind, i18n)}</small>
-          <code>{preview.command}</code>
+      {operations.length > 0 ? (
+        <div className="db-integration-row__buttons">
+          {operations.map((operation) => (
+            <Button
+              key={operation}
+              type="button"
+              disabled={operationRunning}
+              iconStart={activeOperation === operation ? <Loader2 size={14} className="db-spin" /> : operationIcon(operation)}
+              onClick={() => void onRunOperation(operation)}
+            >
+              {operationLabel(operation, status, i18n)}
+            </Button>
+          ))}
         </div>
-      ))}
+      ) : null}
       {reason ? <small>{reason}</small> : null}
       {status.queryDiagnostic ? <DiagnosticSummary diagnostic={status.queryDiagnostic} /> : null}
+      {operationFailure ? (
+        <OperationFailureSummary
+          operation={operationFailure.operation}
+          diagnostic={operationFailure.diagnostic}
+          message={operationFailure.message}
+          i18n={i18n}
+        />
+      ) : null}
     </>
   );
-}
-
-function commandPreviews(status: NonNullable<IntegrationStatus['operationStatus']>): Array<{ kind: IntegrationActionKind; command: string }> {
-  return [
-    status.installCommandPreview ? { kind: 'install' as const, command: status.installCommandPreview } : undefined,
-    status.updateCommandPreview ? { kind: 'update' as const, command: status.updateCommandPreview } : undefined,
-    status.uninstallCommandPreview ? { kind: 'uninstall' as const, command: status.uninstallCommandPreview } : undefined
-  ].filter((item): item is { kind: IntegrationActionKind; command: string } => Boolean(item));
 }
 
 function neutralReason(status: NonNullable<IntegrationStatus['operationStatus']>, i18n: WorkbenchI18n): string | undefined {
@@ -166,6 +257,30 @@ function DiagnosticSummary({ diagnostic }: { diagnostic: IntegrationOperationDia
   return details.length > 0 ? <small className="db-form-error">{details.join(' / ')}</small> : null;
 }
 
+function OperationFailureSummary({
+  operation,
+  diagnostic,
+  message,
+  i18n
+}: {
+  operation: IntegrationOperationKind;
+  diagnostic: IntegrationOperationDiagnostic | undefined;
+  message: string | undefined;
+  i18n: WorkbenchI18n;
+}): React.ReactElement {
+  const details = [
+    message,
+    diagnostic?.errorKind,
+    diagnostic?.exitCode !== undefined ? `exit ${diagnostic.exitCode}` : undefined,
+    diagnostic?.stderrTail ?? diagnostic?.stdoutTail
+  ].filter((item): item is string => Boolean(item));
+  return (
+    <small className="db-form-error">
+      {[operationFailureLabel(operation, i18n), ...details].join(' / ')}
+    </small>
+  );
+}
+
 function statusLabel(status: string, i18n: WorkbenchI18n): string {
   if (status === 'ready') return i18n.t('settings.integrations.ready');
   if (status === 'not_found') return i18n.t('settings.integrations.notFound');
@@ -176,16 +291,35 @@ function statusLabel(status: string, i18n: WorkbenchI18n): string {
 function backendLabel(backend: string | undefined): string {
   if (backend === 'brew') return 'Homebrew';
   if (backend === 'winget') return 'winget';
-  if (backend === 'apt') return 'APT';
   if (backend === 'uv') return 'uv';
   if (backend === 'pipx') return 'pipx';
   return 'unavailable';
 }
 
-function operationLabel(kind: IntegrationActionKind, i18n: WorkbenchI18n): string {
-  if (kind === 'install') return i18n.t('settings.integrations.installCommand');
-  if (kind === 'update') return i18n.t('settings.integrations.updateCommand');
-  return i18n.t('settings.integrations.uninstallCommand');
+function operationIcon(kind: IntegrationOperationKind): React.ReactElement {
+  if (kind === 'install') return <Download size={14} />;
+  if (kind === 'update') return <Upload size={14} />;
+  return <Trash2 size={14} />;
+}
+
+function operationLabel(
+  kind: IntegrationOperationKind,
+  status: NonNullable<IntegrationStatus['operationStatus']>,
+  i18n: WorkbenchI18n
+): string {
+  if (kind === 'install') return i18n.t('settings.integrations.install');
+  if (kind === 'update') return status.latestVersion ?? i18n.t('settings.integrations.update');
+  return i18n.t('settings.integrations.uninstall');
+}
+
+function operationFailureLabel(kind: IntegrationOperationKind, i18n: WorkbenchI18n): string {
+  if (kind === 'install') return i18n.t('settings.integrations.installFailed');
+  if (kind === 'update') return i18n.t('settings.integrations.updateFailed');
+  return i18n.t('settings.integrations.uninstallFailed');
+}
+
+function integrationFailureStateKey(settings: WorkbenchState['integrationsSettings'], integrationId: string): string {
+  return JSON.stringify(settings?.integrations.find((integration) => integration.integrationId === integrationId) ?? null);
 }
 
 function errorMessage(error: unknown): string {

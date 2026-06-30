@@ -15,7 +15,7 @@ describe('web Settings pages', () => {
       actions: actionsFixture()
     }));
 
-    expect(html.match(/class="db-nav-row(?: db-nav-row--active)?"/g)).toHaveLength(4);
+    expect(html.match(/class="db-nav-row(?: db-nav-row--active)?"/g)).toHaveLength(5);
     expect(html).toContain('Application');
     expect(html).toContain('Updates');
     expect(html.match(/Debrute CLI/g)).toHaveLength(1);
@@ -128,6 +128,12 @@ function actionsFixture(): WorkbenchActions {
     getProductState: vi.fn(async () => productState()),
     checkProductUpdate: vi.fn(async () => productState()),
     applyProductUpdate: vi.fn(async () => ({ state: productState() })),
-    saveWorkbenchPreferences: vi.fn(async () => undefined)
+    saveWorkbenchPreferences: vi.fn(async () => undefined),
+    runIntegrationOperation: vi.fn(async (input) => ({
+      ok: true,
+      integrationId: input.integrationId,
+      operation: input.operation,
+      settings: { integrations: [], backends: [] }
+    }))
   } as unknown as WorkbenchActions;
 }

@@ -7,6 +7,8 @@ import {
   AppServerEvent,
   ImageModelSettingsView,
   IntegrationSettingsView,
+  RunIntegrationOperationInput,
+  RunIntegrationOperationResult,
   SaveAdobeBridgeSettingsInput,
   SaveImageModelSettingInput,
   SaveWorkbenchPreferencesInput,
@@ -80,6 +82,13 @@ export class DebruteGlobalRuntimeServer {
     const settings = await this.integrationsService.rescan();
     this.emit({ type: 'integrations.settings.changed', settings });
     return settings;
+  }
+
+  async integrationsRunOperation(input: RunIntegrationOperationInput): Promise<RunIntegrationOperationResult> {
+    return this.integrationsService.runOperation(input, {
+      onStarted: (settings) => this.emit({ type: 'integrations.settings.changed', settings }),
+      onSettled: (settings) => this.emit({ type: 'integrations.settings.changed', settings })
+    });
   }
 
   async adobeBridgeGetSettings(): Promise<AdobeBridgeSettings> {

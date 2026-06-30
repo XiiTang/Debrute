@@ -520,17 +520,6 @@
   background: color-mix(in oklch, var(--db-bg) 68%, transparent);
 }
 
-.db-integration-command {
-  min-width: 0;
-  display: grid;
-  gap: var(--db-space-1);
-}
-
-.db-integration-command code {
-  min-width: 0;
-  overflow-wrap: anywhere;
-}
-
 .db-operation-ok {
   color: var(--db-success);
 }
