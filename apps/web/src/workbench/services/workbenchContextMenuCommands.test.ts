@@ -580,7 +580,7 @@ describe('workbench context menu commands', () => {
     await Promise.resolve();
 
     expect(resetCanvasNodeLayouts).toHaveBeenCalledWith('canvas-1', {
-      pathRules: ['flow/cover.png']
+      pathRules: { paths: ['flow/cover.png'] }
     });
     expect(setSelection).toHaveBeenCalledWith({ kind: 'node', projectRelativePath: 'flow/cover.png' });
     expect(setCamera).toHaveBeenCalledWith({ x: 250, y: 175, z: 1 });
@@ -632,7 +632,7 @@ describe('workbench context menu commands', () => {
     await Promise.resolve();
 
     expect(resetCanvasNodeLayouts).toHaveBeenCalledWith('canvas-1', {
-      pathRules: ['flow/']
+      pathRules: { paths: ['flow/'] }
     });
     expect(setCamera).toHaveBeenCalledWith({ x: 240, y: 160, z: 1 });
   });

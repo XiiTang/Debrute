@@ -9,6 +9,7 @@ import { fileURLToPath } from 'node:url';
 import Busboy from 'busboy';
 import { DebruteAppServer, DebruteGlobalRuntimeServer, GlobalConfigStore, type DebruteAppServerOptions } from '@debrute/app-server';
 import { redactRuntimeSecretString, redactRuntimeSecrets } from '@debrute/capability-runtime';
+import type { CanvasMapPathRuleSet } from '@debrute/canvas-map-core';
 import {
   normalizeDebruteRuntimeInfo,
   type AdobeBridgeSettings,
@@ -1160,14 +1161,14 @@ async function handleCanvasRoute(
     const hasAll = body.all === true;
     const hasPathRules = body.pathRules !== undefined;
     if (hasAll === hasPathRules) {
-      throw new DebruteDaemonHttpError(400, 'invalid_input', 'reset layout requires exactly one of all or pathRules.');
+      throw new DebruteDaemonHttpError(400, 'invalid_input', 'reset layout requires exactly one of all or pathRules with paths/globs.');
     }
     const result = await runRevisionedMutation(context, baseRevisionField(body), async () => {
       const updated = await server.resetCanvasNodeLayouts({
         canvasId,
         ...(hasAll
           ? { all: true as const }
-          : { pathRules: stringArrayField(body.pathRules, 'pathRules') })
+          : { pathRules: pathRuleSetField(body.pathRules, 'pathRules') })
       });
       return {
         canvas: updated.canvas,
@@ -2227,6 +2228,30 @@ function stringArrayField(value: unknown, name: string): string[] {
     throw new DebruteDaemonHttpError(400, 'invalid_input', `${name} must be an array.`);
   }
   return value.map((item, index) => stringField(item, `${name}[${index}]`));
+}
+
+function pathRuleSetField(value: unknown, name: string): CanvasMapPathRuleSet {
+  if (!isRecord(value)) {
+    throw new DebruteDaemonHttpError(400, 'invalid_input', `${name} must be an object.`);
+  }
+  for (const key of Object.keys(value)) {
+    if (key !== 'paths' && key !== 'globs') {
+      throw new DebruteDaemonHttpError(400, 'invalid_input', `${name}.${key} is not supported.`);
+    }
+  }
+  const paths = value.paths === undefined ? [] : stringArrayField(value.paths, `${name}.paths`);
+  const globs = value.globs === undefined ? [] : stringArrayField(value.globs, `${name}.globs`);
+  if (paths.length === 0 && globs.length === 0) {
+    throw new DebruteDaemonHttpError(400, 'invalid_input', `${name} must include at least one path or glob.`);
+  }
+  return {
+    ...(paths.length > 0 ? { paths } : {}),
+    ...(globs.length > 0 ? { globs } : {})
+  };
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null && !Array.isArray(value);
 }
 
 function workbenchHostFromQuery(value: string | null): WorkbenchHostKind {

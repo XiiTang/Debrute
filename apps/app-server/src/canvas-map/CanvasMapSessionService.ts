@@ -27,6 +27,7 @@ import {
   expandCanvasMapPathRules,
   parseCanvasMap,
   serializeCanvasMapWithRule,
+  type CanvasMapPathRuleSet,
   type ExpandedCanvasMap
 } from '@debrute/canvas-map-core';
 import { canvasMediaKindForProjectFile } from '../canvas/CanvasProjectionService.js';
@@ -152,7 +153,7 @@ export class CanvasMapSessionService {
 
   async resetCanvasNodeLayouts(
     projectRoot: string,
-    input: { canvasId: string } & ({ all: true } | { pathRules: string[] })
+    input: { canvasId: string } & ({ all: true } | { pathRules: CanvasMapPathRuleSet })
   ): Promise<ResetCanvasNodeLayoutsResult> {
     const currentCanvas = await this.readCanvas(projectRoot, input.canvasId);
     let projectFiles: ProjectFileEntry[] | undefined;

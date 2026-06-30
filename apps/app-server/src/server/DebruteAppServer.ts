@@ -61,7 +61,8 @@ import {
 } from '@debrute/capability-runtime';
 import {
   CanvasMapError,
-  canvasMapPath
+  canvasMapPath,
+  type CanvasMapPathRuleSet
 } from '@debrute/canvas-map-core';
 import type {
   AddProjectPathToCanvasMapInput,
@@ -734,7 +735,7 @@ export class DebruteAppServer {
   }
 
   async resetCanvasNodeLayouts(
-    input: { canvasId: string } & ({ all: true } | { pathRules: string[] })
+    input: { canvasId: string } & ({ all: true } | { pathRules: CanvasMapPathRuleSet })
   ): Promise<{ canvas: CanvasDocument; projection: CanvasProjection; resetCount: number }> {
     return this.enqueueSessionOperation(async () => {
       let reset: Awaited<ReturnType<CanvasMapSessionService['resetCanvasNodeLayouts']>>;

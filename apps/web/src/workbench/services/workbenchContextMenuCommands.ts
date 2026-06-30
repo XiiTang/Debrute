@@ -143,7 +143,7 @@ function canvasLayoutResetInputForTarget(
     return { all: true };
   }
   return {
-    pathRules: [target.kind === 'directory' ? `${target.projectRelativePath}/` : target.projectRelativePath]
+    pathRules: { paths: [target.kind === 'directory' ? `${target.projectRelativePath}/` : target.projectRelativePath] }
   };
 }
 

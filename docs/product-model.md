@@ -23,14 +23,14 @@ The Canvas with the same id is the map's target. The file is a top-level YAML ob
 ```yaml
 paths:
   - outputs/gpt/
-  - outputs/**/*.png
+  - glob: outputs/**/*.png
   - prompts/cover.md
 layout:
   rows:
     - outputs/**/high/*.png
 ```
 
-`paths` is the complete positive membership rule list. A trailing slash recursively includes files under that folder, a glob includes matching files, and an exact file rule includes one file.
+`paths` is the complete positive membership rule list. Plain string entries are literal project paths: a trailing slash recursively includes files under that folder, and a file path includes one file. Wildcard matching is explicit with object entries such as `glob: outputs/**/*.png`.
 
 `layout.rows` is optional. Each row glob affects files already included by `paths`, splitting matches into horizontal rows by direct parent directory.
 

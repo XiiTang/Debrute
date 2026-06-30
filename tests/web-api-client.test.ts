@@ -478,7 +478,7 @@ describe('HTTP workbench API client', () => {
 
     await client.openProject({ projectRoot: '/tmp/project' });
     await client.createProjectFile({ parentProjectRelativePath: '', name: 'first.md' });
-    await client.renameCanvas({ canvasId: 'canvas-1', nextCanvasId: 'storyboard' });
+    await client.renameCanvas({ canvasId: 'canvas-1', name: 'Storyboard' });
 
     expect(requests).toContainEqual({
       method: 'POST',
@@ -496,7 +496,7 @@ describe('HTTP workbench API client', () => {
       body: {
         baseRevision: 2,
         operation: 'rename',
-        nextCanvasId: 'storyboard'
+        name: 'Storyboard'
       }
     });
   });

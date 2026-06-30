@@ -96,11 +96,16 @@ describe('debrute cli parser and renderer', () => {
       '--path',
       'outputs/gpt/',
       '--path',
-      'prompts/cover.md'
+      'prompts/cover [draft].md',
+      '--glob',
+      'outputs/**/*.png'
     ])).toMatchObject({
       command: 'canvas.reset-layout',
       positional: ['/tmp/project', 'canvas-1'],
-      options: { path: '["outputs/gpt/","prompts/cover.md"]' }
+      options: {
+        path: '["outputs/gpt/","prompts/cover [draft].md"]',
+        glob: '["outputs/**/*.png"]'
+      }
     });
     expect(() => parseDebruteArgs(['daemon', 'status', '--daemon-url', 'http://127.0.0.1:17321'])).toThrow(DebruteCliError);
   });
@@ -112,7 +117,7 @@ describe('debrute cli parser and renderer', () => {
     } catch (error) {
       expect(error).toMatchObject({
         code: 'invalid_input',
-        message: 'canvas.reset-layout requires exactly one of --all or --path.'
+        message: 'canvas.reset-layout requires --all or at least one --path/--glob.'
       });
     }
 
@@ -301,7 +306,7 @@ describe('debrute cli parser and renderer', () => {
       risk: 'write',
       requires: 'project',
       writes: 'canvas-map',
-      input: '<project> <canvas-id> --all | <project> <canvas-id> --path <rule...>'
+      input: '<project> <canvas-id> --all | <project> <canvas-id> [--path <literal...>] [--glob <pattern...>]'
     });
     expect(specForCommandPath(['generate', 'image'])?.errors).toEqual([
       'invalid_command',
