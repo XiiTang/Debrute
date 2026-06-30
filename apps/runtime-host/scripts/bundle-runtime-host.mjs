@@ -1,6 +1,8 @@
 import { cp, rm } from 'node:fs/promises';
 import { build } from 'esbuild';
 
+const withSourcemap = process.argv.includes('--sourcemap');
+
 await rm('bundle', { recursive: true, force: true });
 
 const commonBuildOptions = {
@@ -8,7 +10,7 @@ const commonBuildOptions = {
   platform: 'node',
   format: 'cjs',
   target: 'node24',
-  sourcemap: true,
+  sourcemap: withSourcemap,
   logOverride: {
     'empty-import-meta': 'silent'
   }

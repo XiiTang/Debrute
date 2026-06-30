@@ -139,7 +139,7 @@ app.whenReady().then(async () => {
       userHome: app.getPath('home'),
       platform: process.platform,
       execPath: process.execPath,
-      appImagePath: process.env.APPIMAGE,
+      ...(process.env.APPIMAGE ? { appImagePath: process.env.APPIMAGE } : {}),
       appIsPackaged: app.isPackaged,
       desktopPid: process.pid
     })

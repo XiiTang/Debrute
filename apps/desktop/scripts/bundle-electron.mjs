@@ -7,8 +7,14 @@ import { packageDebruteCliRuntimePayload } from '../../../scripts/package-debrut
 import { packageManagerCommand } from '../../../scripts/package-manager-command.mjs';
 
 const skipWebDist = process.argv.includes('--skip-web-dist');
+const withSourcemap = process.argv.includes('--sourcemap');
 const workspaceRoot = '../..';
-const runtimeHostBuild = packageManagerCommand(workspaceRoot, ['--filter', '@debrute/runtime-host', 'build']);
+const runtimeHostBuild = packageManagerCommand(workspaceRoot, [
+  '--filter',
+  '@debrute/runtime-host',
+  'build',
+  ...(withSourcemap ? ['--', '--sourcemap'] : [])
+]);
 
 execFileSync(runtimeHostBuild.command, runtimeHostBuild.args, {
   cwd: workspaceRoot,
@@ -22,7 +28,7 @@ const common = {
   platform: 'node',
   format: 'cjs',
   target: 'node24',
-  sourcemap: true,
+  sourcemap: withSourcemap,
   logOverride: {
     'empty-import-meta': 'silent'
   },
@@ -43,12 +49,15 @@ await Promise.all([
 ]);
 
 await cp('../runtime-host/bundle/runtime-host.cjs', 'dist-electron/runtime-host.cjs');
-await cp('../runtime-host/bundle/runtime-host.cjs.map', 'dist-electron/runtime-host.cjs.map');
 await cp('../runtime-host/bundle/canvas-feedback-render-worker.cjs', 'dist-electron/canvas-feedback-render-worker.cjs');
-await cp('../runtime-host/bundle/canvas-feedback-render-worker.cjs.map', 'dist-electron/canvas-feedback-render-worker.cjs.map');
 await cp('../runtime-host/bundle/official-docs', 'dist-electron/official-docs', { recursive: true });
 await cp('../runtime-host/bundle/product-replacement-helper.cjs', 'dist-electron/product-replacement-helper.cjs');
-await cp('../runtime-host/bundle/product-replacement-helper.cjs.map', 'dist-electron/product-replacement-helper.cjs.map');
+
+if (withSourcemap) {
+  await cp('../runtime-host/bundle/runtime-host.cjs.map', 'dist-electron/runtime-host.cjs.map');
+  await cp('../runtime-host/bundle/canvas-feedback-render-worker.cjs.map', 'dist-electron/canvas-feedback-render-worker.cjs.map');
+  await cp('../runtime-host/bundle/product-replacement-helper.cjs.map', 'dist-electron/product-replacement-helper.cjs.map');
+}
 
 if (!skipWebDist) {
   await cp('../web/dist', 'dist', { recursive: true });
