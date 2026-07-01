@@ -59,14 +59,15 @@ describe('Canvas styles', () => {
     expect(canvasStyles).toContain('.canvas-node-resize.se {\n  right: calc(-8px * var(--canvas-chrome-scale, 1));\n  bottom: calc(-8px * var(--canvas-chrome-scale, 1));');
   });
 
-  it('keeps Canvas feedback summaries as pointer-transparent node chrome below resize handles', () => {
-    expect(canvasStyles).toMatch(/\.canvas-node-element\.canvas-node-has-feedback\s*{[^}]*box-shadow:/);
-    expect(canvasStyles).toMatch(/\.canvas-feedback-summary\s*{[^}]*position: absolute;/);
-    expect(canvasStyles).toMatch(/\.canvas-feedback-summary\s*{[^}]*top: calc\(4px \* var\(--canvas-chrome-scale, 1\)\);/);
-    expect(canvasStyles).toMatch(/\.canvas-feedback-summary\s*{[^}]*right: calc\(4px \* var\(--canvas-chrome-scale, 1\)\);/);
-    expect(canvasStyles).toMatch(/\.canvas-feedback-summary\s*{[^}]*z-index: 3;/);
-    expect(canvasStyles).toMatch(/\.canvas-feedback-summary\s*{[^}]*pointer-events: none;/);
+  it('keeps Canvas feedback frames as pointer-transparent node chrome below resize handles', () => {
+    expect(canvasStyles).toMatch(/\.canvas-feedback-frame\s*{[^}]*position: absolute;/);
+    expect(canvasStyles).toMatch(/\.canvas-feedback-frame\s*{[^}]*inset: calc\(-1px \* var\(--canvas-chrome-scale, 1\)\);/);
+    expect(canvasStyles).toMatch(/\.canvas-feedback-frame\s*{[^}]*z-index: 3;/);
+    expect(canvasStyles).toMatch(/\.canvas-feedback-frame\s*{[^}]*border: calc\(1px \* var\(--canvas-chrome-scale, 1\)\) solid transparent;/);
+    expect(canvasStyles).toMatch(/\.canvas-feedback-frame\s*{[^}]*border-image-source: var\(--canvas-feedback-frame-gradient\);/);
+    expect(canvasStyles).toMatch(/\.canvas-feedback-frame\s*{[^}]*border-image-slice: 1;/);
+    expect(canvasStyles).toMatch(/\.canvas-feedback-frame\s*{[^}]*pointer-events: none;/);
+    expect(canvasStyles).toMatch(/\.canvas-node-element\.canvas-node-has-feedback(?:\:hover|\.hovered|\.selected)/);
     expect(canvasStyles).toMatch(/\.canvas-node-resize\s*{[^}]*z-index: 4;/);
-    expect(canvasStyles).not.toMatch(/\.canvas-feedback-summary\s*{[^}]*pointer-events: auto;/);
   });
 });

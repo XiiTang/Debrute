@@ -3,7 +3,7 @@ import type { CanvasFeedbackEntry, CanvasFeedbackGeometry, ProjectedCanvasNode }
 import type { TextFileBuffer, WorkbenchActions } from '../../types';
 import type { ResizeHandle } from '../services/canvasInteraction';
 import type { CanvasStageRuntime } from './runtime/CanvasStageRuntime';
-import { CanvasFeedbackSummary, canvasFeedbackEntryHasFeedback } from './CanvasFeedbackSummary';
+import { CanvasFeedbackFrame, canvasFeedbackEntryHasFeedback } from './CanvasFeedbackFrame';
 import { CanvasNodeContent } from './CanvasNodeContent';
 import type { CanvasImageFeedbackDraftRegion, CanvasImageFeedbackMode } from './CanvasImageFeedbackLayer';
 import type { CanvasTextPreviewSource } from './CanvasTextPreviewRuntime';
@@ -186,7 +186,7 @@ function CanvasNodeShellComponent({
           onTitlePointerUp={onPointerUp}
         />
       )}
-      <CanvasFeedbackSummary entry={feedbackEntry} />
+      <CanvasFeedbackFrame entry={feedbackEntry} />
       {selected ? RESIZE_HANDLES.map((handle) => (
         <button
           key={handle}

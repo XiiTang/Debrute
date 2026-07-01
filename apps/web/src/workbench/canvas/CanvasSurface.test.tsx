@@ -583,14 +583,14 @@ describe('CanvasSurface', () => {
 
     expect(html).toContain('canvas-image-feedback-layer');
     expect(html).toContain('data-canvas-feedback-label="1"');
-    expect(html).toContain('data-canvas-feedback-summary="true"');
-    expect(html).toContain('data-canvas-feedback-summary-regions="1"');
+    expect(html).toContain('data-canvas-feedback-frame="true"');
+    expect(html).toContain('data-canvas-feedback-frame-kinds="regions"');
     expect(html).not.toContain('region note hidden');
     expect(html).not.toContain('class="canvas-feedback-bar"');
   });
 
-  it('renders persistent feedback summaries for file-level marks and comments without comment text', () => {
-    const canvas = createCanvasDocument({ id: 'file-feedback-summary' });
+  it('renders persistent feedback frames for file-level marks and comments without comment text', () => {
+    const canvas = createCanvasDocument({ id: 'file-feedback-frame' });
     const projection: CanvasProjection = {
       canvasId: canvas.id,
       nodes: [nodeFixture('flow/cover.png', 120, 80)],
@@ -622,17 +622,15 @@ describe('CanvasSurface', () => {
     }));
 
     expect(html).toContain('canvas-node-has-feedback');
-    expect(html).toContain('data-canvas-feedback-summary="true"');
-    expect(html).toContain('data-canvas-feedback-summary-mark="like"');
-    expect(html).toContain('data-canvas-feedback-summary-mark="important"');
-    expect(html).toContain('data-canvas-feedback-summary-comments="2"');
+    expect(html).toContain('data-canvas-feedback-frame="true"');
+    expect(html).toContain('data-canvas-feedback-frame-kinds="like important comments"');
     expect(html).not.toContain('overall direction');
     expect(html).not.toContain('second pass');
     expect(html).not.toContain('class="canvas-feedback-bar"');
   });
 
-  it('does not render persistent feedback summaries for empty feedback entries', () => {
-    const canvas = createCanvasDocument({ id: 'empty-feedback-summary' });
+  it('does not render persistent feedback frames for empty feedback entries', () => {
+    const canvas = createCanvasDocument({ id: 'empty-feedback-frame' });
     const projection: CanvasProjection = {
       canvasId: canvas.id,
       nodes: [nodeFixture('flow/cover.png', 120, 80)],
@@ -654,11 +652,11 @@ describe('CanvasSurface', () => {
     }));
 
     expect(html).not.toContain('canvas-node-has-feedback');
-    expect(html).not.toContain('data-canvas-feedback-summary="true"');
+    expect(html).not.toContain('data-canvas-feedback-frame="true"');
   });
 
-  it('renders persistent feedback summaries for text and video nodes', () => {
-    const canvas = createCanvasDocument({ id: 'text-video-feedback-summary' });
+  it('renders persistent feedback frames for text and video nodes', () => {
+    const canvas = createCanvasDocument({ id: 'text-video-feedback-frame' });
     const projection: CanvasProjection = {
       canvasId: canvas.id,
       nodes: [
@@ -697,12 +695,90 @@ describe('CanvasSurface', () => {
 
     expect(html).toContain('data-canvas-node-path="flow/readme.md"');
     expect(html).toContain('data-canvas-node-path="flow/clip.mp4"');
-    expect(html.match(/data-canvas-feedback-summary="true"/g) ?? []).toHaveLength(2);
-    expect(html).toContain('data-canvas-feedback-summary-mark="check"');
-    expect(html).toContain('data-canvas-feedback-summary-mark="needs_revision"');
-    expect(html).toContain('data-canvas-feedback-summary-comments="1"');
+    expect(html.match(/data-canvas-feedback-frame="true"/g) ?? []).toHaveLength(2);
+    expect(html).toContain('data-canvas-feedback-frame-kinds="check comments"');
+    expect(html).toContain('data-canvas-feedback-frame-kinds="needs_revision"');
     expect(html).not.toContain('tighten intro');
     expect(html).not.toContain('class="canvas-feedback-bar"');
+  });
+
+  it('renders persistent feedback frames for audio, directory, and unknown-file nodes', () => {
+    const canvas = createCanvasDocument({ id: 'other-node-kind-feedback-frame' });
+    const audioNode: CanvasProjection['nodes'][number] = {
+      ...nodeFixture('flow/sound.wav', 120, 80),
+      mediaKind: 'audio',
+      availability: {
+        state: 'available',
+        size: 100,
+        mimeType: 'audio/wav',
+        fileUrl: 'http://127.0.0.1:17321/api/projects/123e4567-e89b-42d3-a456-426614174000/files/raw/flow/sound.wav?v=rev',
+        revision: 'rev'
+      }
+    };
+    const unknownNode: CanvasProjection['nodes'][number] = {
+      ...nodeFixture('flow/archive.bin', 380, 80),
+      mediaKind: 'unknown',
+      availability: {
+        state: 'available',
+        size: 100,
+        mimeType: 'application/octet-stream',
+        fileUrl: 'http://127.0.0.1:17321/api/projects/123e4567-e89b-42d3-a456-426614174000/files/raw/flow/archive.bin?v=rev',
+        revision: 'rev'
+      }
+    };
+    const projection: CanvasProjection = {
+      canvasId: canvas.id,
+      nodes: [
+        audioNode,
+        unknownNode,
+        directoryFixture('flow/assets', 640, 80)
+      ],
+      edges: [],
+      diagnostics: []
+    };
+
+    const html = renderToStaticMarkup(surface(canvas, projection, {
+      canvasFeedback: feedbackDocument({
+        'flow/sound.wav': {
+          projectRelativePath: 'flow/sound.wav',
+          marks: ['pending'],
+          comments: [],
+          nextRegionLabel: 1,
+          regions: [],
+          updatedAt: '2026-05-26T12:00:00.000Z'
+        },
+        'flow/archive.bin': {
+          projectRelativePath: 'flow/archive.bin',
+          marks: ['cross'],
+          comments: [],
+          nextRegionLabel: 1,
+          regions: [],
+          updatedAt: '2026-05-26T12:00:00.000Z'
+        },
+        'flow/assets': {
+          projectRelativePath: 'flow/assets',
+          marks: [],
+          comments: [{
+            id: 'comment-1',
+            comment: 'folder note hidden',
+            createdAt: '2026-05-26T12:00:00.000Z',
+            updatedAt: '2026-05-26T12:00:00.000Z'
+          }],
+          nextRegionLabel: 1,
+          regions: [],
+          updatedAt: '2026-05-26T12:00:00.000Z'
+        }
+      })
+    }));
+
+    expect(html).toContain('data-canvas-node-path="flow/sound.wav"');
+    expect(html).toContain('data-canvas-node-path="flow/archive.bin"');
+    expect(html).toContain('data-canvas-node-path="flow/assets"');
+    expect(html.match(/data-canvas-feedback-frame="true"/g) ?? []).toHaveLength(3);
+    expect(html).toContain('data-canvas-feedback-frame-kinds="pending"');
+    expect(html).toContain('data-canvas-feedback-frame-kinds="cross"');
+    expect(html).toContain('data-canvas-feedback-frame-kinds="comments"');
+    expect(html).not.toContain('folder note hidden');
   });
 
   it('builds feedback bar targets for the image that creates a local feedback draft', () => {
