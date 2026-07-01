@@ -145,7 +145,7 @@ describe('CanvasTextEditor', () => {
     }
   });
 
-  it('reapplies a focus request to the StrictMode-remounted editor view', async () => {
+  it('applies a focus request once after StrictMode remounts the editor view', async () => {
     const restoreActEnvironment = installReactActEnvironment();
     const frameCallbacks: Array<FrameRequestCallback | undefined> = [];
     const restoreAnimationFrame = installAnimationFrameQueue(frameCallbacks);
