@@ -377,6 +377,16 @@
   background: #000;
 }
 
+.canvas-video-layer {
+  position: absolute;
+  inset: 0;
+}
+
+.canvas-video-layer--hidden {
+  visibility: hidden;
+  pointer-events: none;
+}
+
 .canvas-video-player,
 .canvas-video-player media-controller {
   width: 100%;

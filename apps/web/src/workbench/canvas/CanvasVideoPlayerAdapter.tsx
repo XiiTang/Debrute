@@ -39,6 +39,7 @@ export interface CanvasVideoPlayerAdapterProps {
   onError: (message: string) => void;
   onPlayingChange: (playing: boolean) => void;
   onPlaybackBoundary: (currentTimeSeconds: number) => void;
+  onReadyForDisplay?: (() => void) | undefined;
   onPlayRequestConsumed?: ((requestId: number) => void) | undefined;
 }
 
@@ -51,11 +52,15 @@ export const CanvasVideoPlayerAdapter = forwardRef<CanvasVideoPlayerHandle, Canv
   onError,
   onPlayingChange,
   onPlaybackBoundary,
+  onReadyForDisplay,
   onPlayRequestConsumed
 }, ref) {
   const videoRef = useRef<HTMLVideoElement | null>(null);
   const lastPlaybackBoundaryRef = useRef<number | undefined>(undefined);
   const consumedPlayRequestIdRef = useRef<number | undefined>(undefined);
+  const readyForDisplayRef = useRef(false);
+  const displayReadinessFailedRef = useRef(false);
+  const pendingInitialSeekRef = useRef(false);
   const source = node.availability.state === 'available' ? node.availability.fileUrl : '';
   const presentation = node.videoPresentation;
   if (!presentation) {
@@ -76,6 +81,51 @@ export const CanvasVideoPlayerAdapter = forwardRef<CanvasVideoPlayerHandle, Canv
     lastPlaybackBoundaryRef.current = normalizedTimeSeconds;
     onPlaybackBoundary(normalizedTimeSeconds);
   }, [onPlaybackBoundary]);
+
+  const reportReadyForDisplay = useCallback(() => {
+    if (readyForDisplayRef.current || displayReadinessFailedRef.current) {
+      return;
+    }
+    readyForDisplayRef.current = true;
+    onReadyForDisplay?.();
+  }, [onReadyForDisplay]);
+
+  const reportInitialSeekError = useCallback((message: string) => {
+    displayReadinessFailedRef.current = true;
+    pendingInitialSeekRef.current = false;
+    onError(message);
+  }, [onError]);
+
+  const handleLoadedMetadata = useCallback((event: React.SyntheticEvent<HTMLVideoElement>) => {
+    if (initialTimeSeconds <= 0) {
+      return;
+    }
+    const message = `Unable to seek ${node.projectRelativePath} to ${initialTimeSeconds} seconds.`;
+    if (presentation.durationSeconds !== undefined && initialTimeSeconds > presentation.durationSeconds) {
+      reportInitialSeekError(message);
+      return;
+    }
+    try {
+      pendingInitialSeekRef.current = true;
+      event.currentTarget.currentTime = initialTimeSeconds;
+    } catch {
+      reportInitialSeekError(message);
+    }
+  }, [initialTimeSeconds, node.projectRelativePath, presentation.durationSeconds, reportInitialSeekError]);
+
+  const handleDisplayDataReady = useCallback(() => {
+    if (!pendingInitialSeekRef.current) {
+      reportReadyForDisplay();
+    }
+  }, [reportReadyForDisplay]);
+
+  const handleSeeked = useCallback(() => {
+    if (!pendingInitialSeekRef.current) {
+      return;
+    }
+    pendingInitialSeekRef.current = false;
+    reportReadyForDisplay();
+  }, [reportReadyForDisplay]);
 
   useEffect(() => () => {
     const video = videoRef.current;
@@ -167,20 +217,10 @@ export const CanvasVideoPlayerAdapter = forwardRef<CanvasVideoPlayerHandle, Canv
           src={source}
           preload="metadata"
           playsInline
-          onLoadedMetadata={(event) => {
-            if (initialTimeSeconds > 0) {
-              const message = `Unable to seek ${node.projectRelativePath} to ${initialTimeSeconds} seconds.`;
-              if (presentation.durationSeconds !== undefined && initialTimeSeconds > presentation.durationSeconds) {
-                onError(message);
-                return;
-              }
-              try {
-                event.currentTarget.currentTime = initialTimeSeconds;
-              } catch {
-                onError(message);
-              }
-            }
-          }}
+          onLoadedMetadata={handleLoadedMetadata}
+          onLoadedData={handleDisplayDataReady}
+          onCanPlay={handleDisplayDataReady}
+          onSeeked={handleSeeked}
           onPlay={() => onPlayingChange(true)}
           onPause={(event) => {
             onPlayingChange(false);

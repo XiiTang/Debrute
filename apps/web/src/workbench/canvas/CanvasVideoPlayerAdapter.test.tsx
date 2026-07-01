@@ -266,6 +266,137 @@ describe('CanvasVideoPlayerAdapter', () => {
     }
   });
 
+  it('reports display readiness after a zero-time video has display data', async () => {
+    const container = document.createElement('div');
+    document.body.append(container);
+    const root = createRoot(container);
+    const onReadyForDisplay = vi.fn();
+
+    try {
+      await act(async () => {
+        root.render(
+          <CanvasVideoPlayerAdapter
+            node={videoNode()}
+            initialTimeSeconds={0}
+            onPointerInside={() => undefined}
+            onFocusInside={() => undefined}
+            onError={() => undefined}
+            onPlayingChange={() => undefined}
+            onPlaybackBoundary={() => undefined}
+            onReadyForDisplay={onReadyForDisplay}
+          />
+        );
+      });
+      const video = requiredVideo(container);
+
+      act(() => {
+        video.dispatchEvent(new Event('loadedmetadata', { bubbles: true }));
+      });
+      expect(onReadyForDisplay).not.toHaveBeenCalled();
+
+      act(() => {
+        video.dispatchEvent(new Event('loadeddata', { bubbles: true }));
+      });
+      expect(onReadyForDisplay).toHaveBeenCalledTimes(1);
+
+      act(() => {
+        video.dispatchEvent(new Event('canplay', { bubbles: true }));
+      });
+      expect(onReadyForDisplay).toHaveBeenCalledTimes(1);
+    } finally {
+      await act(async () => {
+        root.unmount();
+      });
+      container.remove();
+    }
+  });
+
+  it('reports display readiness after the initial timestamp seek completes', async () => {
+    const container = document.createElement('div');
+    document.body.append(container);
+    const root = createRoot(container);
+    const onReadyForDisplay = vi.fn();
+
+    try {
+      await act(async () => {
+        root.render(
+          <CanvasVideoPlayerAdapter
+            node={videoNode({ durationSeconds: 10 })}
+            initialTimeSeconds={4.5}
+            onPointerInside={() => undefined}
+            onFocusInside={() => undefined}
+            onError={() => undefined}
+            onPlayingChange={() => undefined}
+            onPlaybackBoundary={() => undefined}
+            onReadyForDisplay={onReadyForDisplay}
+          />
+        );
+      });
+      const video = requiredVideo(container);
+
+      act(() => {
+        video.dispatchEvent(new Event('loadedmetadata', { bubbles: true }));
+      });
+      expect(video.currentTime).toBe(4.5);
+      expect(onReadyForDisplay).not.toHaveBeenCalled();
+
+      act(() => {
+        video.dispatchEvent(new Event('seeked', { bubbles: true }));
+      });
+      expect(onReadyForDisplay).toHaveBeenCalledTimes(1);
+    } finally {
+      await act(async () => {
+        root.unmount();
+      });
+      container.remove();
+    }
+  });
+
+  it('does not report display readiness when the initial timestamp is rejected', async () => {
+    const container = document.createElement('div');
+    document.body.append(container);
+    const root = createRoot(container);
+    const onReadyForDisplay = vi.fn();
+    const onError = vi.fn();
+
+    try {
+      await act(async () => {
+        root.render(
+          <CanvasVideoPlayerAdapter
+            node={videoNode({ durationSeconds: 5 })}
+            initialTimeSeconds={6.25}
+            onPointerInside={() => undefined}
+            onFocusInside={() => undefined}
+            onError={onError}
+            onPlayingChange={() => undefined}
+            onPlaybackBoundary={() => undefined}
+            onReadyForDisplay={onReadyForDisplay}
+          />
+        );
+      });
+      const video = requiredVideo(container);
+
+      act(() => {
+        video.dispatchEvent(new Event('loadedmetadata', { bubbles: true }));
+      });
+
+      expect(onError).toHaveBeenCalledWith('Unable to seek media/clip.mp4 to 6.25 seconds.');
+      expect(onReadyForDisplay).not.toHaveBeenCalled();
+
+      act(() => {
+        video.dispatchEvent(new Event('loadeddata', { bubbles: true }));
+        video.dispatchEvent(new Event('canplay', { bubbles: true }));
+      });
+
+      expect(onReadyForDisplay).not.toHaveBeenCalled();
+    } finally {
+      await act(async () => {
+        root.unmount();
+      });
+      container.remove();
+    }
+  });
+
   it('seeks to the initial time and reports playback boundary events', async () => {
     const container = document.createElement('div');
     document.body.append(container);
@@ -417,6 +548,14 @@ function textTrack(kind: TextTrack['kind']): { kind: TextTrack['kind']; mode: Te
     kind,
     mode: 'disabled'
   };
+}
+
+function requiredVideo(container: HTMLElement): HTMLVideoElement {
+  const video = container.querySelector('video');
+  if (!video) {
+    throw new Error('Expected video element.');
+  }
+  return video;
 }
 
 function videoNode(options: { durationSeconds?: number } = {}): ProjectedCanvasNode {

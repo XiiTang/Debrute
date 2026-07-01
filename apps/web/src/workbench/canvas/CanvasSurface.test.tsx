@@ -13,7 +13,7 @@ import { buildWorkbenchTitleBarState } from '@debrute/app-protocol';
 import type { IntegrationSettingsView } from '@debrute/app-protocol';
 import type { TextFileBuffer, WorkbenchActions, WorkbenchState } from '../../types';
 import { CanvasEditor } from './CanvasEditor';
-import { preloadCanvasImageForHandoff, scheduleCanvasImageHandoffAfterPaint } from './CanvasNodeContent';
+import { preloadCanvasImageForHandoff, scheduleCanvasImageHandoffAfterPaint } from './CanvasMediaHandoff';
 import { createCanvasOverlayRuntime } from './CanvasOverlayRuntime';
 import {
   CANVAS_PREVIEW_RESOURCE_SETTLE_MS,

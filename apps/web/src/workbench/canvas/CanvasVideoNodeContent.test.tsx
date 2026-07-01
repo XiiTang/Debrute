@@ -19,6 +19,7 @@ vi.mock('./CanvasVideoPlayerAdapter', () => ({
       onError,
       onPlayingChange,
       onPlaybackBoundary,
+      onReadyForDisplay,
       playRequest
     }: {
       node: ProjectedCanvasNode;
@@ -28,6 +29,7 @@ vi.mock('./CanvasVideoPlayerAdapter', () => ({
       onError: (message: string) => void;
       onPlayingChange: (playing: boolean) => void;
       onPlaybackBoundary: (currentTimeSeconds: number) => void;
+      onReadyForDisplay: () => void;
       playRequest?: { requestId: number } | undefined;
     },
     ref: React.ForwardedRef<unknown>
@@ -53,6 +55,9 @@ vi.mock('./CanvasVideoPlayerAdapter', () => ({
         <video src={node.availability.state === 'available' ? node.availability.fileUrl : undefined} />
         <button type="button" data-testid="mock-video-error" onClick={() => onError(`Unable to play ${node.projectRelativePath}.`)}>
           trigger error
+        </button>
+        <button type="button" data-testid="mock-video-ready" onClick={onReadyForDisplay}>
+          ready
         </button>
         <button type="button" data-testid="mock-video-playing" onClick={() => onPlayingChange(true)}>
           playing
@@ -101,7 +106,7 @@ describe('CanvasVideoNodeContent', () => {
       </I18nProvider>
     );
 
-    expect(html).toContain('class="canvas-video-preview-image"');
+    expect(html).toContain('canvas-video-preview-image');
     expect(html).toContain('preview.jpg');
     expect(html).toContain('db-canvas-node-caption');
     expect(html).not.toContain('data-testid="video-player-adapter"');
@@ -225,6 +230,322 @@ describe('CanvasVideoNodeContent', () => {
     }
   });
 
+  it('keeps the preview visible until the player is ready for display', async () => {
+    const container = document.createElement('div');
+    document.body.append(container);
+    const root = createRoot(container);
+
+    try {
+      await act(async () => {
+        root.render(
+          <I18nProvider locale="en">
+            <CanvasVideoNodeContent
+              node={videoNode()}
+              selected={false}
+              videoPreview={previewSource()}
+              onSelectNode={() => undefined}
+              onRegisterVideoTarget={() => undefined}
+              onUpdatePlaybackTime={() => undefined}
+            />
+          </I18nProvider>
+        );
+      });
+
+      await act(async () => {
+        container.querySelector<HTMLImageElement>('img.canvas-video-preview-image')?.dispatchEvent(new PointerEvent('pointerdown', {
+          bubbles: true
+        }));
+      });
+      await act(async () => {
+        root.render(
+          <I18nProvider locale="en">
+            <CanvasVideoNodeContent
+              node={videoNode()}
+              selected
+              videoPreview={previewSource()}
+              onSelectNode={() => undefined}
+              onRegisterVideoTarget={() => undefined}
+              onUpdatePlaybackTime={() => undefined}
+            />
+          </I18nProvider>
+        );
+      });
+
+      expect(container.querySelector('img.canvas-video-preview-image')).not.toBeNull();
+      expect(container.querySelector('[data-testid="video-player-adapter"]')).not.toBeNull();
+
+      await act(async () => {
+        button(container, 'mock-video-ready').click();
+      });
+
+      expect(container.querySelector('img.canvas-video-preview-image')).toBeNull();
+      expect(container.querySelector('[data-testid="video-player-adapter"]')).not.toBeNull();
+    } finally {
+      await act(async () => {
+        root.unmount();
+      });
+      container.remove();
+    }
+  });
+
+  it('keeps the last visible preview when the active preview runtime clears the source before player readiness', async () => {
+    const container = document.createElement('div');
+    document.body.append(container);
+    const root = createRoot(container);
+    const preview = previewSource();
+
+    try {
+      await act(async () => {
+        root.render(
+          <I18nProvider locale="en">
+            <CanvasVideoNodeContent
+              node={videoNode()}
+              selected={false}
+              videoPreview={preview}
+              onSelectNode={() => undefined}
+              onRegisterVideoTarget={() => undefined}
+              onUpdatePlaybackTime={() => undefined}
+            />
+          </I18nProvider>
+        );
+      });
+
+      await act(async () => {
+        root.render(
+          <I18nProvider locale="en">
+            <CanvasVideoNodeContent
+              node={videoNode()}
+              selected
+              videoPreview={preview}
+              onSelectNode={() => undefined}
+              onRegisterVideoTarget={() => undefined}
+              onUpdatePlaybackTime={() => undefined}
+            />
+          </I18nProvider>
+        );
+      });
+      await act(async () => {
+        root.render(
+          <I18nProvider locale="en">
+            <CanvasVideoNodeContent
+              node={videoNode()}
+              selected
+              onSelectNode={() => undefined}
+              onRegisterVideoTarget={() => undefined}
+              onUpdatePlaybackTime={() => undefined}
+            />
+          </I18nProvider>
+        );
+      });
+
+      expect(container.querySelector('img.canvas-video-preview-image')?.getAttribute('src')).toBe(preview.src);
+      expect(container.querySelector('[data-testid="video-player-adapter"]')).not.toBeNull();
+
+      await act(async () => {
+        button(container, 'mock-video-ready').click();
+      });
+
+      expect(container.querySelector('img.canvas-video-preview-image')).toBeNull();
+      expect(container.querySelector('[data-testid="video-player-adapter"]')).not.toBeNull();
+    } finally {
+      await act(async () => {
+        root.unmount();
+      });
+      container.remove();
+    }
+  });
+
+  it('unloads the pending player when preview-to-player handoff is cancelled before display readiness', async () => {
+    const container = document.createElement('div');
+    document.body.append(container);
+    const root = createRoot(container);
+
+    try {
+      await act(async () => {
+        root.render(
+          <I18nProvider locale="en">
+            <CanvasVideoNodeContent
+              node={videoNode()}
+              selected={false}
+              videoPreview={previewSource()}
+              onSelectNode={() => undefined}
+              onRegisterVideoTarget={() => undefined}
+              onUpdatePlaybackTime={() => undefined}
+            />
+          </I18nProvider>
+        );
+      });
+
+      await act(async () => {
+        container.querySelector<HTMLImageElement>('img.canvas-video-preview-image')?.dispatchEvent(new PointerEvent('pointerdown', {
+          bubbles: true
+        }));
+      });
+      await act(async () => {
+        root.render(
+          <I18nProvider locale="en">
+            <CanvasVideoNodeContent
+              node={videoNode()}
+              selected
+              videoPreview={previewSource()}
+              onSelectNode={() => undefined}
+              onRegisterVideoTarget={() => undefined}
+              onUpdatePlaybackTime={() => undefined}
+            />
+          </I18nProvider>
+        );
+      });
+
+      expect(container.querySelector('img.canvas-video-preview-image')).not.toBeNull();
+      expect(container.querySelector('[data-testid="video-player-adapter"]')).not.toBeNull();
+
+      await act(async () => {
+        root.render(
+          <I18nProvider locale="en">
+            <CanvasVideoNodeContent
+              node={videoNode()}
+              selected={false}
+              videoPreview={previewSource()}
+              onSelectNode={() => undefined}
+              onRegisterVideoTarget={() => undefined}
+              onUpdatePlaybackTime={() => undefined}
+            />
+          </I18nProvider>
+        );
+      });
+
+      expect(container.querySelector('img.canvas-video-preview-image')).not.toBeNull();
+      expect(container.querySelector('[data-testid="video-player-adapter"]')).toBeNull();
+    } finally {
+      await act(async () => {
+        root.unmount();
+      });
+      container.remove();
+    }
+  });
+
+  it('keeps the preview visible when the pending player reports an error', async () => {
+    const container = document.createElement('div');
+    document.body.append(container);
+    const root = createRoot(container);
+
+    try {
+      await act(async () => {
+        root.render(
+          <I18nProvider locale="en">
+            <CanvasVideoNodeContent
+              node={videoNode()}
+              selected={false}
+              videoPreview={previewSource()}
+              onSelectNode={() => undefined}
+              onRegisterVideoTarget={() => undefined}
+              onUpdatePlaybackTime={() => undefined}
+            />
+          </I18nProvider>
+        );
+      });
+
+      await act(async () => {
+        container.querySelector<HTMLImageElement>('img.canvas-video-preview-image')?.dispatchEvent(new PointerEvent('pointerdown', {
+          bubbles: true
+        }));
+      });
+      await act(async () => {
+        root.render(
+          <I18nProvider locale="en">
+            <CanvasVideoNodeContent
+              node={videoNode()}
+              selected
+              videoPreview={previewSource()}
+              onSelectNode={() => undefined}
+              onRegisterVideoTarget={() => undefined}
+              onUpdatePlaybackTime={() => undefined}
+            />
+          </I18nProvider>
+        );
+      });
+      await act(async () => {
+        button(container, 'mock-video-error').click();
+      });
+
+      expect(container.querySelector('img.canvas-video-preview-image')).not.toBeNull();
+      expect(container.textContent).toContain('Unable to play media/clip.mp4.');
+    } finally {
+      await act(async () => {
+        root.unmount();
+      });
+      container.remove();
+    }
+  });
+
+  it('resets pending handoff state when the projected video source changes', async () => {
+    const container = document.createElement('div');
+    document.body.append(container);
+    const root = createRoot(container);
+
+    try {
+      await act(async () => {
+        root.render(
+          <I18nProvider locale="en">
+            <CanvasVideoNodeContent
+              node={videoNode({ revision: 'rev-a' })}
+              selected={false}
+              videoPreview={previewSource()}
+              onSelectNode={() => undefined}
+              onRegisterVideoTarget={() => undefined}
+              onUpdatePlaybackTime={() => undefined}
+            />
+          </I18nProvider>
+        );
+      });
+
+      await act(async () => {
+        container.querySelector<HTMLImageElement>('img.canvas-video-preview-image')?.dispatchEvent(new PointerEvent('pointerdown', {
+          bubbles: true
+        }));
+      });
+      await act(async () => {
+        root.render(
+          <I18nProvider locale="en">
+            <CanvasVideoNodeContent
+              node={videoNode({ revision: 'rev-a' })}
+              selected
+              videoPreview={previewSource()}
+              onSelectNode={() => undefined}
+              onRegisterVideoTarget={() => undefined}
+              onUpdatePlaybackTime={() => undefined}
+            />
+          </I18nProvider>
+        );
+      });
+
+      expect(container.querySelector('img.canvas-video-preview-image')).not.toBeNull();
+
+      await act(async () => {
+        root.render(
+          <I18nProvider locale="en">
+            <CanvasVideoNodeContent
+              node={videoNode({ revision: 'rev-b' })}
+              selected
+              videoPreview={previewSource()}
+              onSelectNode={() => undefined}
+              onRegisterVideoTarget={() => undefined}
+              onUpdatePlaybackTime={() => undefined}
+            />
+          </I18nProvider>
+        );
+      });
+
+      expect(container.querySelector('img.canvas-video-preview-image')).toBeNull();
+      expect(container.querySelector('video')?.getAttribute('src')).toContain('v=rev-b');
+    } finally {
+      await act(async () => {
+        root.unmount();
+      });
+      container.remove();
+    }
+  });
+
   it('keeps the Canvas caption when a video file is unavailable', () => {
     const { videoPresentation: _videoPresentation, ...node } = videoNode();
 
@@ -316,7 +637,8 @@ describe('CanvasVideoNodeContent', () => {
     }
   });
 
-  it('persists the pause boundary and unloads the player after losing selection', async () => {
+  it('persists the pause boundary and unloads the player after the inactive preview is ready', async () => {
+    const imageLoader = installFakeImageLoader();
     const container = document.createElement('div');
     document.body.append(container);
     const root = createRoot(container);
@@ -335,6 +657,10 @@ describe('CanvasVideoNodeContent', () => {
             />
           </I18nProvider>
         );
+      });
+
+      await act(async () => {
+        button(container, 'mock-video-ready').click();
       });
 
       await act(async () => {
@@ -358,9 +684,86 @@ describe('CanvasVideoNodeContent', () => {
         );
       });
 
+      expect(container.querySelector('[data-testid="video-player-adapter"]')).not.toBeNull();
+      expect(container.querySelector('img.canvas-video-preview-image')).toBeNull();
+      expect(imageLoader.loads).toHaveLength(1);
+
+      imageLoader.loads[0]?.emit('load');
+      await act(async () => {
+        await Promise.resolve();
+      });
+      await act(async () => {
+        imageLoader.frames.shift()?.(16);
+        imageLoader.frames.shift()?.(32);
+      });
+
       expect(container.querySelector('[data-testid="video-player-adapter"]')).toBeNull();
       expect(container.querySelector('img.canvas-video-preview-image')).not.toBeNull();
     } finally {
+      imageLoader.restore();
+      await act(async () => {
+        root.unmount();
+      });
+      container.remove();
+    }
+  });
+
+  it('keeps the player visible when the pending preview image fails', async () => {
+    const imageLoader = installFakeImageLoader();
+    const container = document.createElement('div');
+    document.body.append(container);
+    const root = createRoot(container);
+    const onVideoPreviewError = vi.fn();
+
+    try {
+      await act(async () => {
+        root.render(
+          <I18nProvider locale="en">
+            <CanvasVideoNodeContent
+              node={videoNode()}
+              selected
+              videoPreview={previewSource()}
+              onSelectNode={() => undefined}
+              onRegisterVideoTarget={() => undefined}
+              onUpdatePlaybackTime={() => undefined}
+              onVideoPreviewError={onVideoPreviewError}
+            />
+          </I18nProvider>
+        );
+      });
+      await act(async () => {
+        button(container, 'mock-video-ready').click();
+      });
+      await act(async () => {
+        root.render(
+          <I18nProvider locale="en">
+            <CanvasVideoNodeContent
+              node={videoNode()}
+              selected={false}
+              videoPreview={previewSource()}
+              onSelectNode={() => undefined}
+              onRegisterVideoTarget={() => undefined}
+              onUpdatePlaybackTime={() => undefined}
+              onVideoPreviewError={onVideoPreviewError}
+            />
+          </I18nProvider>
+        );
+      });
+
+      imageLoader.loads[0]?.emit('error');
+      await act(async () => {
+        await Promise.resolve();
+      });
+
+      expect(container.querySelector('[data-testid="video-player-adapter"]')).not.toBeNull();
+      expect(container.querySelector('img.canvas-video-preview-image')).toBeNull();
+      expect(onVideoPreviewError).toHaveBeenCalledWith(
+        'media/clip.mp4',
+        previewSource(),
+        'Unable to load video preview variant for media/clip.mp4.'
+      );
+    } finally {
+      imageLoader.restore();
       await act(async () => {
         root.unmount();
       });
@@ -557,4 +960,77 @@ function button(container: HTMLElement, testId: string): HTMLButtonElement {
     throw new Error(`Missing button: ${testId}`);
   }
   return element;
+}
+
+function installFakeImageLoader(): {
+  loads: Array<{
+    element: HTMLImageElement;
+    emit: (type: 'load' | 'error') => void;
+  }>;
+  frames: FrameRequestCallback[];
+  restore: () => void;
+} {
+  const loads: Array<{
+    element: HTMLImageElement;
+    emit: (type: 'load' | 'error') => void;
+  }> = [];
+  const frames: FrameRequestCallback[] = [];
+
+  class FakeImage {
+    decoding: HTMLImageElement['decoding'] = 'auto';
+    complete = false;
+    naturalWidth = 0;
+    src = '';
+    private listeners = new Map<string, Set<EventListenerOrEventListenerObject>>();
+
+    addEventListener(type: string, listener: EventListenerOrEventListenerObject): void {
+      const set = this.listeners.get(type) ?? new Set<EventListenerOrEventListenerObject>();
+      set.add(listener);
+      this.listeners.set(type, set);
+    }
+
+    removeEventListener(type: string, listener: EventListenerOrEventListenerObject): void {
+      this.listeners.get(type)?.delete(listener);
+    }
+
+    decode(): Promise<void> {
+      return Promise.resolve();
+    }
+
+    emit(type: 'load' | 'error'): void {
+      this.complete = true;
+      this.naturalWidth = type === 'load' ? 640 : 0;
+      const event = new Event(type);
+      for (const listener of this.listeners.get(type) ?? []) {
+        if (typeof listener === 'function') {
+          listener.call(this, event);
+        } else {
+          listener.handleEvent(event);
+        }
+      }
+    }
+  }
+
+  vi.stubGlobal('Image', function ImageConstructor() {
+    const image = new FakeImage();
+    loads.push({
+      element: image as unknown as HTMLImageElement,
+      emit: (type) => image.emit(type)
+    });
+    return image;
+  });
+  vi.spyOn(window, 'requestAnimationFrame').mockImplementation((callback: FrameRequestCallback) => {
+    frames.push(callback);
+    return frames.length;
+  });
+  vi.spyOn(window, 'cancelAnimationFrame').mockImplementation(() => undefined);
+
+  return {
+    loads,
+    frames,
+    restore: () => {
+      vi.unstubAllGlobals();
+      vi.restoreAllMocks();
+    }
+  };
 }
