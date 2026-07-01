@@ -3,6 +3,7 @@ import type { CanvasFeedbackEntry, CanvasFeedbackGeometry, ProjectedCanvasNode }
 import type { TextFileBuffer, WorkbenchActions } from '../../types';
 import type { ResizeHandle } from '../services/canvasInteraction';
 import type { CanvasStageRuntime } from './runtime/CanvasStageRuntime';
+import { CanvasFeedbackSummary, canvasFeedbackEntryHasFeedback } from './CanvasFeedbackSummary';
 import { CanvasNodeContent } from './CanvasNodeContent';
 import type { CanvasImageFeedbackDraftRegion, CanvasImageFeedbackMode } from './CanvasImageFeedbackLayer';
 import type { CanvasTextPreviewSource } from './CanvasTextPreviewRuntime';
@@ -101,6 +102,7 @@ function CanvasNodeShellComponent({
     });
   }, [stageRuntime, node.height, node.projectRelativePath, node.width, node.x, node.y, zIndex]);
 
+  const hasFeedback = canvasFeedbackEntryHasFeedback(feedbackEntry);
   const className = [
     'canvas-node-element',
     'canvas-node-shell',
@@ -108,6 +110,7 @@ function CanvasNodeShellComponent({
     node.mediaKind,
     selected ? 'selected' : '',
     hovered ? 'hovered' : '',
+    hasFeedback ? 'canvas-node-has-feedback' : '',
     node.nodeKind,
     usesFixedNodePresentation(node) ? 'fixed-presentation' : ''
   ].filter(Boolean).join(' ');
@@ -183,6 +186,7 @@ function CanvasNodeShellComponent({
           onTitlePointerUp={onPointerUp}
         />
       )}
+      <CanvasFeedbackSummary entry={feedbackEntry} />
       {selected ? RESIZE_HANDLES.map((handle) => (
         <button
           key={handle}

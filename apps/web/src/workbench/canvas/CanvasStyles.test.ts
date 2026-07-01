@@ -58,4 +58,15 @@ describe('Canvas styles', () => {
     expect(canvasStyles).toContain('.canvas-node-resize.sw {\n  bottom: calc(-8px * var(--canvas-chrome-scale, 1));\n  left: calc(-8px * var(--canvas-chrome-scale, 1));');
     expect(canvasStyles).toContain('.canvas-node-resize.se {\n  right: calc(-8px * var(--canvas-chrome-scale, 1));\n  bottom: calc(-8px * var(--canvas-chrome-scale, 1));');
   });
+
+  it('keeps Canvas feedback summaries as pointer-transparent node chrome below resize handles', () => {
+    expect(canvasStyles).toMatch(/\.canvas-node-element\.canvas-node-has-feedback\s*{[^}]*box-shadow:/);
+    expect(canvasStyles).toMatch(/\.canvas-feedback-summary\s*{[^}]*position: absolute;/);
+    expect(canvasStyles).toMatch(/\.canvas-feedback-summary\s*{[^}]*top: calc\(4px \* var\(--canvas-chrome-scale, 1\)\);/);
+    expect(canvasStyles).toMatch(/\.canvas-feedback-summary\s*{[^}]*right: calc\(4px \* var\(--canvas-chrome-scale, 1\)\);/);
+    expect(canvasStyles).toMatch(/\.canvas-feedback-summary\s*{[^}]*z-index: 3;/);
+    expect(canvasStyles).toMatch(/\.canvas-feedback-summary\s*{[^}]*pointer-events: none;/);
+    expect(canvasStyles).toMatch(/\.canvas-node-resize\s*{[^}]*z-index: 4;/);
+    expect(canvasStyles).not.toMatch(/\.canvas-feedback-summary\s*{[^}]*pointer-events: auto;/);
+  });
 });
