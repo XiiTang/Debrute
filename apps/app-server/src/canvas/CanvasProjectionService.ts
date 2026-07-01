@@ -7,11 +7,6 @@ import {
   projectTextMimeTypeFromPath,
   resolveExistingProjectPath
 } from '@debrute/project-core';
-import type {
-  GeneratedArtifactRole,
-  GeneratedAssetMetadataLookup,
-  GeneratedAssetRecord
-} from '@debrute/app-protocol';
 import {
   isCanvasDocumentId,
   isCanvasDocumentName,
@@ -31,18 +26,6 @@ import type {
 import { buildCanvasVideoPresentation } from './CanvasVideoPresentationService.js';
 
 export interface CanvasProjectionServiceDependencies {
-  lookupGeneratedAssetMetadata(projectRoot: string, input: { projectRelativePath: string }): Promise<GeneratedAssetMetadataLookup>;
-  listGeneratedAssetsByModelRun(
-    projectRoot: string,
-    input: { modelRunId: string; artifactRole?: GeneratedArtifactRole | undefined }
-  ): Promise<GeneratedAssetRecord[]>;
-  findCurrentProjectPathForGeneratedAsset(
-    projectRoot: string,
-    input: {
-      record: GeneratedAssetRecord;
-      candidateProjectRelativePaths?: readonly string[];
-    }
-  ): Promise<string | undefined>;
   readCanvasVideoMetadata(input: ReadCanvasVideoMetadataInput): Promise<CanvasVideoMetadata>;
 }
 
@@ -75,10 +58,7 @@ export class CanvasProjectionService {
           videoPresentation: await buildCanvasVideoPresentation({
             projectRoot,
             projectRelativePath: node.projectRelativePath,
-            durationSeconds: inspection.videoMetadata?.durationSeconds,
-            generatedAssetLookup: (input) => this.dependencies.lookupGeneratedAssetMetadata(projectRoot, input),
-            listGeneratedAssetsByModelRun: (input) => this.dependencies.listGeneratedAssetsByModelRun(projectRoot, input),
-            findCurrentProjectPathForGeneratedAsset: (input) => this.dependencies.findCurrentProjectPathForGeneratedAsset(projectRoot, input)
+            durationSeconds: inspection.videoMetadata?.durationSeconds
           })
         };
       }))
@@ -289,7 +269,17 @@ function isCurrentCanvasNodeElement(value: unknown): value is CanvasNodeElement 
     && typeof value.width === 'number'
     && typeof value.height === 'number'
     && typeof value.z === 'number'
-    && (value.layoutMode === undefined || value.layoutMode === 'manual');
+    && (value.layoutMode === undefined || value.layoutMode === 'manual')
+    && (value.videoPlayback === undefined
+      || (value.nodeKind === 'file' && value.mediaKind === 'video' && isCurrentCanvasVideoPlaybackState(value.videoPlayback)));
+}
+
+function isCurrentCanvasVideoPlaybackState(value: unknown): value is NonNullable<CanvasNodeElement['videoPlayback']> {
+  const currentTimeSeconds = isRecord(value) ? value.currentTimeSeconds : undefined;
+  return isRecord(value)
+    && typeof currentTimeSeconds === 'number'
+    && Number.isFinite(currentTimeSeconds)
+    && currentTimeSeconds >= 0;
 }
 
 function mimeTypeFromProjectPath(projectRelativePath: string, firstLine?: string): string {

@@ -22,6 +22,7 @@ import {
 import { areCanvasNodeShellPropsEqual, CanvasNodeShell, type CanvasNodeShellProps } from './CanvasNodeShell';
 import {
   CanvasSurface,
+  canvasActiveVideoPaths,
   canvasFeedbackBarTargetForProjectedNode,
   isCanvasMapProjectTreeDragOver,
   canvasMapProjectTreeDropEntry,
@@ -797,6 +798,26 @@ describe('CanvasSurface', () => {
 
   });
 
+  it('tracks active video paths from selection, playback, and requested mounts', () => {
+    const active = canvasActiveVideoPaths({
+      nodes: [
+        videoProjectionNode('media/selected.mp4', 0, 0),
+        videoProjectionNode('media/playing.mp4', 0, 400),
+        videoProjectionNode('media/requested.mp4', 0, 800),
+        nodeFixture('images/cover.png', 0, 1200)
+      ],
+      selectedProjectRelativePaths: ['media/selected.mp4', 'images/cover.png'],
+      playingVideoPaths: new Set(['media/playing.mp4', 'media/missing.mp4']),
+      requestedVideoPlayerPath: 'media/requested.mp4'
+    });
+
+    expect([...active].sort()).toEqual([
+      'media/playing.mp4',
+      'media/requested.mp4',
+      'media/selected.mp4'
+    ]);
+  });
+
   it('updates preview resource scheduler interaction state from camera and drag state', () => {
     const frames: FrameRequestCallback[] = [];
     const timers: Array<{ callback: () => void; delay: number }> = [];
@@ -1375,7 +1396,10 @@ function nodeShellProps(node = nodeFixture('flow/cover.png', 0, 0)): CanvasNodeS
     onSelectNode: () => undefined,
     onContextMenu: () => undefined,
     onResizePointerDown: () => undefined,
-    onRegisterVideoTarget: () => undefined
+    onVideoPlayerMounted: () => undefined,
+    onVideoPlayingChange: () => undefined,
+    onRegisterVideoTarget: () => undefined,
+    onUpdateVideoPlaybackTime: () => undefined
   };
 }
 
@@ -1495,6 +1519,7 @@ const actions: WorkbenchActions = {
     throw new Error('not used');
   },
   readCanvasTextPreviewSources: async () => ({ sources: {} }),
+  readCanvasVideoPreviewSources: async () => ({ sources: {} }),
   createProjectFile: async () => {
     throw new Error('not used');
   },
@@ -1533,6 +1558,7 @@ const actions: WorkbenchActions = {
     throw new Error('not used');
   },
   updateCanvasNodeLayers: async () => undefined,
+  updateCanvasVideoPlaybackState: async () => undefined,
   updateCanvasFeedbackEntry: async () => true,
   addProjectPathToCanvasMap: async () => undefined,
   createCanvas: async () => {

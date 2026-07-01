@@ -5,7 +5,7 @@ import {
 } from './CanvasPerfMonitor';
 import type { CanvasCameraState } from './runtime/canvasCamera';
 
-export type CanvasPreviewResourceKind = 'image' | 'text';
+export type CanvasPreviewResourceKind = 'image' | 'text' | 'video';
 
 export interface CanvasPreviewResourceRequest {
   kind: CanvasPreviewResourceKind;

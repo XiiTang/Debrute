@@ -17,6 +17,8 @@ import {
   type BrowserSessionCredential,
   type CanvasTextPreviewSourceAvailabilityRequest,
   type CanvasTextPreviewSourceTarget,
+  type CanvasVideoPreviewSourceRequest,
+  type CanvasVideoPreviewSourceTarget,
   type DaemonBridgeImportRequestMessage,
   type DaemonCliCommandRequest,
   type DaemonProjectUploadImportPlan,
@@ -675,6 +677,14 @@ export function createDebruteDaemonHttpServer(options: DebruteDaemonHttpServerOp
       await handleCanvasTextPreviewImageRoute(context);
       return;
     }
+    if (tail === '/canvas-video-previews/sources') {
+      await handleCanvasVideoPreviewSourcesRoute(context);
+      return;
+    }
+    if (tail === '/canvas-video-preview') {
+      await handleCanvasVideoPreviewImageRoute(context);
+      return;
+    }
     if (tail === '/canvases' || tail.startsWith('/canvases/')) {
       await handleCanvasRoute(context, tail, session);
       return;
@@ -1213,6 +1223,21 @@ async function handleCanvasRoute(
     writeJson(context.response, 200, result);
     return;
   }
+  if (path.endsWith('/video-playback') && context.request.method === 'PATCH') {
+    const body = await readJsonBody<Record<string, unknown>>(context.request);
+    const result = await runRevisionedMutation(context, baseRevisionField(body), async () => {
+      const updated = await server.updateCanvasVideoPlaybackState({
+        canvasId,
+        updates: canvasVideoPlaybackUpdatesField(body.updates)
+      });
+      return {
+        canvas: updated.canvas,
+        projection: projectionForHttp(updated.projection, context.runtime.daemonUrl, session.projectId, context.runtime.token)
+      };
+    });
+    writeJson(context.response, 200, result);
+    return;
+  }
   if (context.request.method === 'GET') {
     const snapshot = server.getSnapshot();
     writeJson(context.response, 200, snapshot.canvases.find((canvas) => canvas.id === canvasId));
@@ -1285,6 +1310,38 @@ async function handleCanvasTextPreviewImageRoute(context: ProjectRequestContext)
     canvasId: context.url.searchParams.get('canvasId') ?? '',
     projectRelativePath: context.url.searchParams.get('path') ?? '',
     fingerprint: context.url.searchParams.get('fingerprint') ?? '',
+    width: positiveIntegerQueryParam(context.url.searchParams.get('w'), 'w')
+  });
+  await writeRevisionedFileResponse({
+    request: context.request,
+    response: context.response,
+    absolutePath: preview.absolutePath,
+    contentType: contentTypeFromPath(preview.absolutePath)
+  });
+}
+
+async function handleCanvasVideoPreviewSourcesRoute(context: ProjectRequestContext): Promise<void> {
+  if (context.request.method !== 'POST') {
+    writeError(context.response, 405, 'method_not_allowed', 'Unsupported Canvas video preview sources method.');
+    return;
+  }
+  const body = daemonCanvasVideoPreviewSourceRequest(
+    await readJsonBody<Record<string, unknown>>(context.request)
+  );
+  writeJson(context.response, 200, await daemonAppServer(context).readCanvasVideoPreviewSources(body));
+}
+
+async function handleCanvasVideoPreviewImageRoute(context: ProjectRequestContext): Promise<void> {
+  if ((context.request.method ?? 'GET') !== 'GET') {
+    writeError(context.response, 405, 'method_not_allowed', 'Unsupported Canvas video preview image method.');
+    return;
+  }
+  const preview = await daemonAppServer(context).resolveCanvasVideoPreviewVariant({
+    canvasId: context.url.searchParams.get('canvasId') ?? '',
+    projectRelativePath: context.url.searchParams.get('path') ?? '',
+    videoRevision: context.url.searchParams.get('videoRevision') ?? '',
+    currentTimeSeconds: nonNegativeFiniteNumberQueryParam(context.url.searchParams.get('t'), 't'),
+    sourceKey: context.url.searchParams.get('sourceKey') ?? '',
     width: positiveIntegerQueryParam(context.url.searchParams.get('w'), 'w')
   });
   await writeRevisionedFileResponse({
@@ -1737,18 +1794,6 @@ function videoPresentationForHttp(
   }
   return {
     ...node.videoPresentation,
-    ...(node.videoPresentation.poster ? {
-      poster: {
-        ...node.videoPresentation.poster,
-        fileUrl: rawFileUrl(
-          daemonUrl,
-          projectId,
-          node.videoPresentation.poster.projectRelativePath,
-          node.videoPresentation.poster.revision,
-          daemonToken
-        )
-      }
-    } : {}),
     textTracks: node.videoPresentation.textTracks.map((track) => ({
       ...track,
       fileUrl: rawFileUrl(daemonUrl, projectId, track.projectRelativePath, track.revision, daemonToken)
@@ -2101,6 +2146,29 @@ function daemonCanvasTextPreviewSourceTarget(
   };
 }
 
+function daemonCanvasVideoPreviewSourceRequest(body: Record<string, unknown>): CanvasVideoPreviewSourceRequest {
+  return {
+    canvasId: stringField(body.canvasId, 'canvasId'),
+    targets: daemonCanvasVideoPreviewSourceTargets(body.targets)
+  };
+}
+
+function daemonCanvasVideoPreviewSourceTargets(value: unknown): CanvasVideoPreviewSourceTarget[] {
+  if (!Array.isArray(value)) {
+    throw new DebruteDaemonHttpError(400, 'invalid_input', 'targets must be an array.');
+  }
+  return value.map((item, index) => {
+    if (!isRecord(item)) {
+      throw new DebruteDaemonHttpError(400, 'invalid_input', `targets[${index}] must be an object.`);
+    }
+    return {
+      projectRelativePath: stringField(item.projectRelativePath, `targets[${index}].projectRelativePath`),
+      videoRevision: stringField(item.videoRevision, `targets[${index}].videoRevision`),
+      currentTimeSeconds: nonNegativeFiniteNumberField(item.currentTimeSeconds, `targets[${index}].currentTimeSeconds`)
+    };
+  });
+}
+
 function daemonUploadImportPlanEntry(value: unknown, index: number): DaemonProjectUploadImportPlan['entries'][number] {
   if (typeof value !== 'object' || value === null || Array.isArray(value)) {
     throw new DebruteDaemonHttpError(400, 'invalid_input', `entries[${index}] must be an object.`);
@@ -2218,6 +2286,7 @@ function serviceErrorStatusCode(code: string): number {
   if (code === 'canvas_map_canvas_missing'
     || code === 'canvas_map_target_missing'
     || code === 'canvas_text_preview_source_missing'
+    || code === 'canvas_video_preview_source_missing'
     || code === 'terminal_not_found') {
     return 404;
   }
@@ -2261,6 +2330,14 @@ function positiveIntegerQueryParam(value: string | null, name: string): number {
   return numberValue;
 }
 
+function nonNegativeFiniteNumberQueryParam(value: string | null, name: string): number {
+  const numberValue = Number(value ?? '');
+  if (!Number.isFinite(numberValue) || numberValue < 0) {
+    throw new DebruteDaemonHttpError(400, 'invalid_input', `${name} must be a non-negative finite number.`);
+  }
+  return numberValue;
+}
+
 function nonNegativeFiniteNumberField(value: unknown, name: string): number {
   if (typeof value !== 'number' || !Number.isFinite(value) || value < 0) {
     throw new DebruteDaemonHttpError(400, 'invalid_input', `${name} must be a non-negative finite number.`);
@@ -2284,6 +2361,21 @@ function stringArrayField(value: unknown, name: string): string[] {
     throw new DebruteDaemonHttpError(400, 'invalid_input', `${name} must be an array.`);
   }
   return value.map((item, index) => stringField(item, `${name}[${index}]`));
+}
+
+function canvasVideoPlaybackUpdatesField(value: unknown): Array<{ projectRelativePath: string; currentTimeSeconds: number }> {
+  if (!Array.isArray(value)) {
+    throw new DebruteDaemonHttpError(400, 'invalid_input', 'updates must be an array.');
+  }
+  return value.map((item, index) => {
+    if (!isRecord(item)) {
+      throw new DebruteDaemonHttpError(400, 'invalid_input', `updates[${index}] must be an object.`);
+    }
+    return {
+      projectRelativePath: stringField(item.projectRelativePath, `updates[${index}].projectRelativePath`),
+      currentTimeSeconds: nonNegativeFiniteNumberField(item.currentTimeSeconds, `updates[${index}].currentTimeSeconds`)
+    };
+  });
 }
 
 function pathRuleSetField(value: unknown, name: string): CanvasMapPathRuleSet {

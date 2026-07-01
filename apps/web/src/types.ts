@@ -5,6 +5,8 @@ import type {
   ImageModelSettingsView,
   CanvasTextPreviewSourceAvailabilityRequest,
   CanvasTextPreviewSourceAvailabilityResponse,
+  CanvasVideoPreviewSourceRequest,
+  CanvasVideoPreviewSourceResponse,
   GeneratedAssetView,
   GeneratedAssetMetadataLookup,
   ProductUpdateApplyResult,
@@ -19,6 +21,7 @@ import type {
   SendProjectFileToPhotoshopInput,
   SendProjectFileToPhotoshopResult,
   IntegrationSettingsView,
+  UpdateCanvasVideoPlaybackStateInput,
   VideoModelSettingsView,
   WorkbenchCanvasManagementResult,
   WorkbenchCanvasResetLayoutResult,
@@ -104,6 +107,7 @@ export interface WorkbenchActions {
   writeProjectTextFile: (projectRelativePath: string, content: string) => Promise<WorkbenchProjectTextFileWriteResult>;
   saveCanvasTextPreviewSource: (input: SaveCanvasTextPreviewSourceInput) => Promise<SaveCanvasTextPreviewSourceResult>;
   readCanvasTextPreviewSources: (input: CanvasTextPreviewSourceAvailabilityRequest) => Promise<CanvasTextPreviewSourceAvailabilityResponse>;
+  readCanvasVideoPreviewSources: (input: CanvasVideoPreviewSourceRequest) => Promise<CanvasVideoPreviewSourceResponse>;
   createProjectFile: (input: { parentProjectRelativePath: string; name: string }) => Promise<WorkbenchProjectFileOperationResult>;
   createProjectDirectory: (input: { parentProjectRelativePath: string; name: string }) => Promise<WorkbenchProjectFileOperationResult>;
   renameProjectPath: (input: { projectRelativePath: string; name: string }) => Promise<WorkbenchProjectFileOperationResult>;
@@ -126,6 +130,7 @@ export interface WorkbenchActions {
   updateCanvasNodeLayers: (canvasId: string, input: {
     nodeProjectRelativePathsTopFirst?: string[];
   }) => Promise<void>;
+  updateCanvasVideoPlaybackState: (canvasId: string, input: Omit<UpdateCanvasVideoPlaybackStateInput, 'canvasId'>) => Promise<void>;
   updateCanvasFeedbackEntry: (input: UpdateCanvasFeedbackEntryInput) => Promise<boolean>;
   addProjectPathToCanvasMap: (input: AddProjectPathToCanvasMapInput) => Promise<void>;
   createCanvas: () => Promise<WorkbenchCanvasManagementResult>;

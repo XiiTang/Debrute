@@ -1,4 +1,4 @@
-import React, { forwardRef, useImperativeHandle, useRef } from 'react';
+import React, { forwardRef, useCallback, useEffect, useImperativeHandle, useRef } from 'react';
 import {
   MediaCaptionsButton,
   MediaControlBar,
@@ -28,30 +28,53 @@ export interface CanvasVideoPlayerHandle {
 
 export interface CanvasVideoPlayerAdapterProps {
   node: ProjectedCanvasNode;
+  initialTimeSeconds: number;
   onPointerInside: () => void;
   onFocusInside: () => void;
   onError: (message: string) => void;
+  onPlayingChange: (playing: boolean) => void;
+  onPlaybackBoundary: (currentTimeSeconds: number) => void;
 }
 
 export const CanvasVideoPlayerAdapter = forwardRef<CanvasVideoPlayerHandle, CanvasVideoPlayerAdapterProps>(function CanvasVideoPlayerAdapter({
   node,
+  initialTimeSeconds,
   onPointerInside,
   onFocusInside,
-  onError
+  onError,
+  onPlayingChange,
+  onPlaybackBoundary
 }, ref) {
   const videoRef = useRef<HTMLVideoElement | null>(null);
+  const lastPlaybackBoundaryRef = useRef<number | undefined>(undefined);
   const source = node.availability.state === 'available' ? node.availability.fileUrl : '';
   const presentation = node.videoPresentation;
   if (!presentation) {
     throw new Error(`Projected video node is missing videoPresentation: ${node.projectRelativePath}`);
   }
-  const posterUrl = presentation.poster
-    ? requiredVideoCompanionFileUrl(node, presentation.poster.projectRelativePath, presentation.poster.fileUrl)
-    : undefined;
   const textTracks = presentation.textTracks.map((track) => ({
     ...track,
     fileUrl: requiredVideoCompanionFileUrl(node, track.projectRelativePath, track.fileUrl)
   }));
+
+  const publishPlaybackBoundary = useCallback((currentTimeSeconds: number) => {
+    const normalizedTimeSeconds = Number.isFinite(currentTimeSeconds) && currentTimeSeconds > 0
+      ? currentTimeSeconds
+      : 0;
+    if (lastPlaybackBoundaryRef.current === normalizedTimeSeconds) {
+      return;
+    }
+    lastPlaybackBoundaryRef.current = normalizedTimeSeconds;
+    onPlaybackBoundary(normalizedTimeSeconds);
+  }, [onPlaybackBoundary]);
+
+  useEffect(() => () => {
+    const video = videoRef.current;
+    if (!video || !Number.isFinite(video.currentTime) || video.currentTime <= 0 || video.ended) {
+      return;
+    }
+    publishPlaybackBoundary(video.currentTime);
+  }, [publishPlaybackBoundary]);
 
   useImperativeHandle(ref, () => ({
     togglePlayback: () => {
@@ -122,7 +145,30 @@ export const CanvasVideoPlayerAdapter = forwardRef<CanvasVideoPlayerHandle, Canv
           src={source}
           preload="metadata"
           playsInline
-          poster={posterUrl}
+          onLoadedMetadata={(event) => {
+            if (initialTimeSeconds > 0) {
+              const message = `Unable to seek ${node.projectRelativePath} to ${initialTimeSeconds} seconds.`;
+              if (presentation.durationSeconds !== undefined && initialTimeSeconds > presentation.durationSeconds) {
+                onError(message);
+                return;
+              }
+              try {
+                event.currentTarget.currentTime = initialTimeSeconds;
+              } catch {
+                onError(message);
+              }
+            }
+          }}
+          onPlay={() => onPlayingChange(true)}
+          onPause={(event) => {
+            onPlayingChange(false);
+            publishPlaybackBoundary(event.currentTarget.currentTime);
+          }}
+          onEnded={(event) => {
+            onPlayingChange(false);
+            event.currentTarget.currentTime = 0;
+            publishPlaybackBoundary(0);
+          }}
           onError={() => onError(`Unable to play ${node.projectRelativePath}.`)}
         >
           {textTracks.map((track) => (

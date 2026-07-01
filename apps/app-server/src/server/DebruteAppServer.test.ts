@@ -1,4 +1,4 @@
-import { mkdir, mkdtemp, readFile, readdir, rm, stat, utimes, writeFile } from 'node:fs/promises';
+import { chmod, mkdir, mkdtemp, readFile, readdir, rm, stat, utimes, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import sharp from 'sharp';
@@ -234,6 +234,91 @@ describe('DebruteAppServer Canvas display names', () => {
         available: true
       });
       await expect(stat(sourcePath)).resolves.toBeTruthy();
+    } finally {
+      server.close();
+      await rm(projectRoot, { recursive: true, force: true });
+    }
+  });
+});
+
+describe('DebruteAppServer Canvas video playback state', () => {
+  it('persists video playback time in the Canvas document', async () => {
+    const projectRoot = await mkdtemp(join(tmpdir(), 'debrute-video-playback-state-'));
+    const server = new DebruteAppServer({
+      canvasNodeLayoutSizeReader: async () => ({ width: 640, height: 360 })
+    });
+    try {
+      await server.openProject(projectRoot, {
+        initializeIfMissing: true,
+        createDefaultCanvas: true,
+        watchFiles: false
+      });
+      await mkdir(join(projectRoot, 'media'), { recursive: true });
+      await writeFile(join(projectRoot, 'media/clip.mp4'), 'video-bytes', 'utf8');
+      const canvasPath = join(projectRoot, '.debrute/canvases/canvas-1.json');
+      await server.addProjectPathToCanvasMap({
+        canvasId: 'canvas-1',
+        projectRelativePath: 'media/clip.mp4'
+      });
+
+      const result = await server.updateCanvasVideoPlaybackState({
+        canvasId: 'canvas-1',
+        updates: [{ projectRelativePath: 'media/clip.mp4', currentTimeSeconds: 9.25 }]
+      });
+
+      expect(result.canvas.nodeElements.find((node) => node.projectRelativePath === 'media/clip.mp4')).toMatchObject({
+        projectRelativePath: 'media/clip.mp4',
+        videoPlayback: { currentTimeSeconds: 9.25 }
+      });
+      const savedCanvas = JSON.parse(await readFile(canvasPath, 'utf8')) as {
+        nodeElements: Array<{ projectRelativePath: string; videoPlayback?: { currentTimeSeconds: number } }>;
+      };
+      expect(savedCanvas.nodeElements.find((node) => node.projectRelativePath === 'media/clip.mp4')).toMatchObject({
+        projectRelativePath: 'media/clip.mp4',
+        videoPlayback: { currentTimeSeconds: 9.25 }
+      });
+    } finally {
+      server.close();
+      await rm(projectRoot, { recursive: true, force: true });
+    }
+  });
+});
+
+describe('DebruteAppServer Canvas video previews', () => {
+  it('uses the integration env path for Canvas video preview frame extraction', async () => {
+    const projectRoot = await mkdtemp(join(tmpdir(), 'debrute-video-preview-env-path-'));
+    const integrationBin = join(projectRoot, 'integration-bin');
+    const server = new DebruteAppServer({ integrationEnvPath: integrationBin });
+    try {
+      await server.openProject(projectRoot, {
+        initializeIfMissing: true,
+        createDefaultCanvas: true,
+        watchFiles: false
+      });
+      await mkdir(join(projectRoot, 'media'), { recursive: true });
+      await writeFile(join(projectRoot, 'media/clip.mp4'), 'video-bytes', 'utf8');
+      const videoStat = await stat(join(projectRoot, 'media/clip.mp4'));
+      const videoRevision = projectFileRevision(videoStat.size, videoStat.mtimeMs);
+      await writeImageFixture(projectRoot, 'fixtures/frame.png');
+      await writeFakeFfmpeg({
+        binDirectory: integrationBin,
+        framePath: join(projectRoot, 'fixtures/frame.png')
+      });
+
+      const result = await server.readCanvasVideoPreviewSources({
+        canvasId: 'canvas-1',
+        targets: [{
+          projectRelativePath: 'media/clip.mp4',
+          videoRevision,
+          currentTimeSeconds: 0
+        }]
+      });
+
+      expect(result.sources['media/clip.mp4']).toMatchObject({
+        status: 'available',
+        sourceKind: 'initial-poster',
+        sourceWidth: 32
+      });
     } finally {
       server.close();
       await rm(projectRoot, { recursive: true, force: true });
@@ -527,6 +612,28 @@ async function writeImageFixture(projectRoot: string, projectRelativePath: strin
       background: { r: 240, g: 240, b: 240, alpha: 1 }
     }
   }).png().toBuffer());
+}
+
+async function writeFakeFfmpeg(input: {
+  binDirectory: string;
+  framePath: string;
+}): Promise<void> {
+  await mkdir(input.binDirectory, { recursive: true });
+  const executablePath = join(input.binDirectory, 'ffmpeg');
+  await writeFile(executablePath, [
+    '#!/bin/sh',
+    'output=""',
+    'for argument in "$@"; do',
+    '  output="$argument"',
+    'done',
+    `/bin/cp ${shellSingleQuote(input.framePath)} "$output"`,
+    ''
+  ].join('\n'));
+  await chmod(executablePath, 0o755);
+}
+
+function shellSingleQuote(value: string): string {
+  return `'${value.replaceAll("'", "'\\''")}'`;
 }
 
 async function writeImagePreviewCacheRevisionFixtures(

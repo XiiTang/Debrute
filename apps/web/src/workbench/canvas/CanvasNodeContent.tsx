@@ -15,6 +15,7 @@ import {
   type CanvasTextPreviewImageState,
   type CanvasTextPreviewSource
 } from './CanvasTextPreviewRuntime';
+import type { CanvasVideoPreviewSource } from './canvasVideoPreviews';
 import { Button, IconButton, StatusPill } from '../ui';
 import { useI18n, type WorkbenchI18n } from '../i18n';
 
@@ -26,6 +27,9 @@ export interface CanvasNodeContentProps {
   textBuffer: TextFileBuffer | undefined;
   textPreview?: CanvasTextPreviewSource | undefined;
   textPreviewError?: string | undefined;
+  videoPreview?: CanvasVideoPreviewSource | undefined;
+  videoPreviewError?: string | undefined;
+  forceVideoPlayerMounted?: boolean | undefined;
   previewInteractionActive?: boolean | undefined;
   feedbackEntry?: CanvasFeedbackEntry | undefined;
   localFeedbackMode?: CanvasImageFeedbackMode | undefined;
@@ -34,7 +38,11 @@ export interface CanvasNodeContentProps {
     projectRelativePath: string;
     geometry: CanvasFeedbackGeometry;
   }) => void) | undefined;
+  onVideoPlayerMounted: (projectRelativePath: string) => void;
+  onVideoPlayingChange: (projectRelativePath: string, playing: boolean) => void;
   onRegisterVideoTarget: (projectRelativePath: string, target: CanvasVideoPlayerHandle | undefined) => void;
+  onUpdateVideoPlaybackTime: (projectRelativePath: string, currentTimeSeconds: number) => void | Promise<void>;
+  onVideoPreviewError?: ((projectRelativePath: string, preview: CanvasVideoPreviewSource, message: string) => void) | undefined;
   onSelectNode: () => void;
   onTitlePointerDown: (event: React.PointerEvent<Element>) => void;
   onTitlePointerMove: (event: React.PointerEvent<Element>) => void;
@@ -49,12 +57,19 @@ export function CanvasNodeContent({
   textBuffer,
   textPreview,
   textPreviewError,
+  videoPreview,
+  videoPreviewError,
+  forceVideoPlayerMounted = false,
   previewInteractionActive = false,
   feedbackEntry,
   localFeedbackMode,
   pendingFeedbackRegion,
   onLocalFeedbackDraft,
+  onVideoPlayerMounted,
+  onVideoPlayingChange,
   onRegisterVideoTarget,
+  onUpdateVideoPlaybackTime,
+  onVideoPreviewError,
   onSelectNode,
   onTitlePointerDown,
   onTitlePointerMove,
@@ -135,8 +150,16 @@ export function CanvasNodeContent({
     return (
       <CanvasVideoNodeContent
         node={node}
+        selected={selected}
+        videoPreview={videoPreview}
+        videoPreviewError={videoPreviewError}
+        forcePlayerMounted={forceVideoPlayerMounted}
         onSelectNode={onSelectNode}
+        onPlayerMounted={onVideoPlayerMounted}
+        onPlayingChange={onVideoPlayingChange}
         onRegisterVideoTarget={onRegisterVideoTarget}
+        onUpdatePlaybackTime={onUpdateVideoPlaybackTime}
+        onVideoPreviewError={onVideoPreviewError}
       />
     );
   }

@@ -46,7 +46,6 @@ describe('CanvasProjectionService Canvas document validation', () => {
     try {
       await mkdir(join(projectRoot, 'media'), { recursive: true });
       await writeFile(join(projectRoot, 'media/clip.mp4'), 'video', 'utf8');
-      await writeFile(join(projectRoot, 'media/clip.poster.png'), 'poster', 'utf8');
       await writeFile(join(projectRoot, 'media/clip.en.vtt'), 'WEBVTT\n', 'utf8');
       const canvas = {
         ...createCanvasDocument({ id: 'canvas-1' }),
@@ -63,12 +62,6 @@ describe('CanvasProjectionService Canvas document validation', () => {
       };
 
       const projectionService = new CanvasProjectionService({
-        lookupGeneratedAssetMetadata: async () => ({
-          status: 'unmatched',
-          fingerprint: { algorithm: 'sha256', hash: 'none' }
-        }),
-        listGeneratedAssetsByModelRun: async () => [],
-        findCurrentProjectPathForGeneratedAsset: async () => undefined,
         readCanvasVideoMetadata: async () => ({ width: 640, height: 360, durationSeconds: 5 })
       });
       const projection = await projectionService.projectCanvasDocument(projectRoot, canvas);
@@ -78,10 +71,6 @@ describe('CanvasProjectionService Canvas document validation', () => {
         videoPresentation: {
           kind: 'video',
           durationSeconds: 5,
-          poster: {
-            projectRelativePath: 'media/clip.poster.png',
-            source: 'explicit'
-          },
           textTracks: [
             expect.objectContaining({
               projectRelativePath: 'media/clip.en.vtt',
@@ -92,7 +81,6 @@ describe('CanvasProjectionService Canvas document validation', () => {
           ]
         }
       });
-      expect(projection.nodes[0]?.videoPresentation?.poster).not.toHaveProperty('fileUrl');
       expect(projection.nodes[0]?.videoPresentation?.textTracks[0]).not.toHaveProperty('fileUrl');
     } finally {
       await rm(projectRoot, { recursive: true, force: true });
@@ -136,12 +124,6 @@ describe('CanvasProjectionService Canvas document validation', () => {
       diagnostics: []
     };
     const projectionService = new CanvasProjectionService({
-      lookupGeneratedAssetMetadata: async () => ({
-        status: 'unmatched',
-        fingerprint: { algorithm: 'sha256', hash: 'none' }
-      }),
-      listGeneratedAssetsByModelRun: async () => [],
-      findCurrentProjectPathForGeneratedAsset: async () => undefined,
       readCanvasVideoMetadata: async () => ({ width: 640, height: 360 })
     });
 

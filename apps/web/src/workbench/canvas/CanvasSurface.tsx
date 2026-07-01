@@ -31,6 +31,8 @@ import {
   nextCanvasResourceZoomState
 } from './CanvasResourceZoom';
 import { CanvasTextPreviewProvider, useCanvasTextPreviewRuntime } from './CanvasTextPreviewRuntime';
+import { CanvasVideoPreviewProvider, useCanvasVideoPreviewRuntime } from './CanvasVideoPreviewRuntime';
+import type { CanvasVideoPreviewSource } from './canvasVideoPreviews';
 import type { CanvasOverlayRuntime } from './CanvasOverlayRuntime';
 import { createCanvasPerfBrowserAdapter } from './CanvasPerfBrowserAdapter';
 import { createCanvasPerfDebugBridge, type DebruteCanvasPerfCanvasSnapshot } from './CanvasPerfDebugBridge';
@@ -202,9 +204,13 @@ function CanvasSurfaceRuntime({
   const canvasPerfDragSessionRef = useRef<CanvasPerfRuntimeSession | undefined>(undefined);
   const reactCommitCountRef = useRef(0);
   const [hoveredNodePath, setHoveredNodePath] = useState<string>();
+  const [playingVideoPaths, setPlayingVideoPaths] = useState<ReadonlySet<string>>(() => new Set());
+  const [requestedVideoPlayerPath, setRequestedVideoPlayerPath] = useState<string>();
 
   const projectedNodes = projection.nodes;
-  const videoHotkeyController = useMemo(() => createCanvasVideoHotkeyController(), []);
+  const videoHotkeyController = useMemo(() => createCanvasVideoHotkeyController({
+    requestTargetMount: setRequestedVideoPlayerPath
+  }), []);
   const registerVideoTarget = useCallback((projectRelativePath: string, target: CanvasVideoPlayerHandle | undefined) => {
     videoHotkeyController.register(projectRelativePath, target);
   }, [videoHotkeyController]);
@@ -761,6 +767,51 @@ function CanvasSurfaceRuntime({
     () => selectedNodeProjectRelativePaths(selection),
     [selection]
   );
+  const activeVideoPaths = useMemo(() => canvasActiveVideoPaths({
+    nodes: projectedNodes,
+    selectedProjectRelativePaths: selectedProjectRelativePathsForTextPreview,
+    playingVideoPaths,
+    requestedVideoPlayerPath
+  }), [
+    playingVideoPaths,
+    projectedNodes,
+    requestedVideoPlayerPath,
+    selectedProjectRelativePathsForTextPreview
+  ]);
+  const handleVideoPlayerMounted = useCallback((projectRelativePath: string) => {
+    setRequestedVideoPlayerPath((current) => current === projectRelativePath ? undefined : current);
+  }, []);
+  const handleVideoPlayingChange = useCallback((projectRelativePath: string, playing: boolean) => {
+    setPlayingVideoPaths((current) => {
+      const hasPath = current.has(projectRelativePath);
+      if (playing === hasPath) {
+        return current;
+      }
+      const next = new Set(current);
+      if (playing) {
+        next.add(projectRelativePath);
+      } else {
+        next.delete(projectRelativePath);
+      }
+      return next;
+    });
+  }, []);
+  const handleUpdateVideoPlaybackTime = useCallback((projectRelativePath: string, currentTimeSeconds: number) => {
+    void actions.updateCanvasVideoPlaybackState(canvas.id, {
+      updates: [{ projectRelativePath, currentTimeSeconds }]
+    });
+  }, [actions, canvas.id]);
+
+  useEffect(() => {
+    const videoPaths = new Set(projectedNodes.filter(isProjectedVideoNode).map((node) => node.projectRelativePath));
+    setPlayingVideoPaths((current) => {
+      const next = new Set([...current].filter((path) => videoPaths.has(path)));
+      return next.size === current.size ? current : next;
+    });
+    if (requestedVideoPlayerPath && !videoPaths.has(requestedVideoPlayerPath)) {
+      setRequestedVideoPlayerPath(undefined);
+    }
+  }, [projectedNodes, requestedVideoPlayerPath]);
 
   const syncFeedbackBarPlacement = useCallback((input: {
     node: ProjectedCanvasNode;
@@ -962,11 +1013,10 @@ function CanvasSurfaceRuntime({
             />
           </svg>
         ))}
-        <CanvasTextPreviewProvider
+        <CanvasVideoPreviewProvider
           canvasId={canvas.id}
           nodes={projectedNodes}
-          selectedProjectRelativePaths={selectedProjectRelativePathsForTextPreview}
-          textFileBuffers={textFileBuffers}
+          activeVideoPaths={activeVideoPaths}
           actions={actions}
           cameraState={cameraState}
           dragState={dragState}
@@ -974,43 +1024,61 @@ function CanvasSurfaceRuntime({
           devicePixelRatio={devicePixelRatio}
           culledNodePaths={renderSnapshot.culledNodePaths}
           previewResourceScheduler={previewResourceScheduler}
-          styleDependencyKey={textPreviewStyleDependencyKey}
-          perfMonitor={perfMonitor}
         >
-          <CanvasImageNodeAssetProvider value={imageNodeAssetContext}>
-            {renderedNodes.map((node) => (
-              <CanvasSurfaceNodeShell
-                key={node.projectRelativePath}
-                node={node}
-                selected={isCanvasItemSelected(selection, { kind: 'node', projectRelativePath: node.projectRelativePath })}
-                hovered={hoveredNodePath === node.projectRelativePath}
-                culled={renderSnapshot.culledNodePaths.has(node.projectRelativePath)}
-                zIndex={renderSnapshot.nodeLayers.get(node.projectRelativePath)?.zIndex ?? node.z}
-                stageRuntime={stageRuntime}
-                actions={actions}
-                textBuffer={textFileBuffers[node.projectRelativePath]}
-                previewInteractionActive={cameraState !== 'idle' || dragState !== undefined}
-                feedbackEntry={canvasFeedback?.entries[node.projectRelativePath]}
-                localFeedbackMode={node.mediaKind === 'image' ? localFeedbackMode : undefined}
-                pendingFeedbackRegion={
-                  node.mediaKind === 'image' && pendingFeedbackRegion?.projectRelativePath === node.projectRelativePath
-                    ? { label: pendingFeedbackRegion.label, geometry: pendingFeedbackRegion.geometry }
-                    : undefined
-                }
-                onLocalFeedbackDraft={handleLocalFeedbackDraft}
-                onPointerDown={beginNodeMove}
-                onPointerMove={handlePointerMove}
-                onPointerUp={handlePointerUpEvent}
-                onPointerEnter={handleNodePointerEnter}
-                onPointerLeave={handleNodePointerLeave}
-                onSelectNode={selectNode}
-                onContextMenu={handleNodeContextMenu}
-                onResizePointerDown={beginNodeResize}
-                onRegisterVideoTarget={registerVideoTarget}
-              />
-            ))}
-          </CanvasImageNodeAssetProvider>
-        </CanvasTextPreviewProvider>
+          <CanvasTextPreviewProvider
+            canvasId={canvas.id}
+            nodes={projectedNodes}
+            selectedProjectRelativePaths={selectedProjectRelativePathsForTextPreview}
+            textFileBuffers={textFileBuffers}
+            actions={actions}
+            cameraState={cameraState}
+            dragState={dragState}
+            resourceZoom={resourceZoom}
+            devicePixelRatio={devicePixelRatio}
+            culledNodePaths={renderSnapshot.culledNodePaths}
+            previewResourceScheduler={previewResourceScheduler}
+            styleDependencyKey={textPreviewStyleDependencyKey}
+            perfMonitor={perfMonitor}
+          >
+            <CanvasImageNodeAssetProvider value={imageNodeAssetContext}>
+              {renderedNodes.map((node) => (
+                <CanvasSurfaceNodeShell
+                  key={node.projectRelativePath}
+                  node={node}
+                  selected={isCanvasItemSelected(selection, { kind: 'node', projectRelativePath: node.projectRelativePath })}
+                  hovered={hoveredNodePath === node.projectRelativePath}
+                  culled={renderSnapshot.culledNodePaths.has(node.projectRelativePath)}
+                  zIndex={renderSnapshot.nodeLayers.get(node.projectRelativePath)?.zIndex ?? node.z}
+                  stageRuntime={stageRuntime}
+                  actions={actions}
+                  textBuffer={textFileBuffers[node.projectRelativePath]}
+                  forceVideoPlayerMounted={requestedVideoPlayerPath === node.projectRelativePath}
+                  previewInteractionActive={cameraState !== 'idle' || dragState !== undefined}
+                  feedbackEntry={canvasFeedback?.entries[node.projectRelativePath]}
+                  localFeedbackMode={node.mediaKind === 'image' ? localFeedbackMode : undefined}
+                  pendingFeedbackRegion={
+                    node.mediaKind === 'image' && pendingFeedbackRegion?.projectRelativePath === node.projectRelativePath
+                      ? { label: pendingFeedbackRegion.label, geometry: pendingFeedbackRegion.geometry }
+                      : undefined
+                  }
+                  onLocalFeedbackDraft={handleLocalFeedbackDraft}
+                  onPointerDown={beginNodeMove}
+                  onPointerMove={handlePointerMove}
+                  onPointerUp={handlePointerUpEvent}
+                  onPointerEnter={handleNodePointerEnter}
+                  onPointerLeave={handleNodePointerLeave}
+                  onSelectNode={selectNode}
+                  onContextMenu={handleNodeContextMenu}
+                  onResizePointerDown={beginNodeResize}
+                  onVideoPlayerMounted={handleVideoPlayerMounted}
+                  onVideoPlayingChange={handleVideoPlayingChange}
+                  onRegisterVideoTarget={registerVideoTarget}
+                  onUpdateVideoPlaybackTime={handleUpdateVideoPlaybackTime}
+                />
+              ))}
+            </CanvasImageNodeAssetProvider>
+          </CanvasTextPreviewProvider>
+        </CanvasVideoPreviewProvider>
       </div>
       {projectedNodes.length === 0 ? (
         <div className="canvas-empty-state" data-testid="canvas-empty-state">
@@ -1030,6 +1098,7 @@ function CanvasSurfaceNodeShell({
   stageRuntime,
   actions,
   textBuffer,
+  forceVideoPlayerMounted,
   previewInteractionActive,
   feedbackEntry,
   localFeedbackMode,
@@ -1043,7 +1112,10 @@ function CanvasSurfaceNodeShell({
   onSelectNode,
   onContextMenu,
   onResizePointerDown,
-  onRegisterVideoTarget
+  onVideoPlayerMounted,
+  onVideoPlayingChange,
+  onRegisterVideoTarget,
+  onUpdateVideoPlaybackTime
 }: {
   node: ProjectedCanvasNode;
   selected: boolean;
@@ -1053,6 +1125,7 @@ function CanvasSurfaceNodeShell({
   stageRuntime: CanvasStageRuntime;
   actions: WorkbenchActions;
   textBuffer: TextFileBuffer | undefined;
+  forceVideoPlayerMounted: boolean;
   previewInteractionActive: boolean;
   feedbackEntry?: CanvasFeedbackEntry | undefined;
   localFeedbackMode?: CanvasImageFeedbackMode | undefined;
@@ -1069,15 +1142,37 @@ function CanvasSurfaceNodeShell({
   onContextMenu: (node: ProjectedCanvasNode, event: React.MouseEvent<Element>) => void;
   onSelectNode: (node: ProjectedCanvasNode) => void;
   onResizePointerDown: (node: ProjectedCanvasNode, handle: ResizeHandle, event: React.PointerEvent<HTMLButtonElement>) => void;
+  onVideoPlayerMounted: (projectRelativePath: string) => void;
+  onVideoPlayingChange: (projectRelativePath: string, playing: boolean) => void;
   onRegisterVideoTarget: (projectRelativePath: string, target: CanvasVideoPlayerHandle | undefined) => void;
+  onUpdateVideoPlaybackTime: (projectRelativePath: string, currentTimeSeconds: number) => void | Promise<void>;
 }): React.ReactElement {
   const textPreviewRuntime = useCanvasTextPreviewRuntime();
+  const videoPreviewRuntime = useCanvasVideoPreviewRuntime();
   const textPreview = node.mediaKind === 'text'
     ? textPreviewRuntime.previewForNode({ node })
     : undefined;
   const textPreviewError = node.mediaKind === 'text'
     ? textPreviewRuntime.previewErrorForNode({ node })
     : undefined;
+  const videoPreview = node.mediaKind === 'video'
+    ? videoPreviewRuntime.previewForNode({ node })
+    : undefined;
+  const videoPreviewError = node.mediaKind === 'video'
+    ? videoPreviewRuntime.previewErrorForNode({ node })
+    : undefined;
+  const reportPreviewError = videoPreviewRuntime.reportPreviewError;
+  const reportVideoPreviewError = useCallback((
+    projectRelativePath: string,
+    preview: CanvasVideoPreviewSource,
+    message: string
+  ) => {
+    reportPreviewError({
+      projectRelativePath,
+      preview,
+      message
+    });
+  }, [reportPreviewError]);
   return (
     <CanvasNodeShell
       node={node}
@@ -1090,6 +1185,9 @@ function CanvasSurfaceNodeShell({
       textBuffer={textBuffer}
       textPreview={textPreview}
       textPreviewError={textPreviewError}
+      videoPreview={videoPreview}
+      videoPreviewError={videoPreviewError}
+      forceVideoPlayerMounted={forceVideoPlayerMounted}
       previewInteractionActive={previewInteractionActive}
       feedbackEntry={feedbackEntry}
       localFeedbackMode={localFeedbackMode}
@@ -1103,7 +1201,11 @@ function CanvasSurfaceNodeShell({
       onSelectNode={onSelectNode}
       onContextMenu={onContextMenu}
       onResizePointerDown={onResizePointerDown}
+      onVideoPlayerMounted={onVideoPlayerMounted}
+      onVideoPlayingChange={onVideoPlayingChange}
       onRegisterVideoTarget={onRegisterVideoTarget}
+      onUpdateVideoPlaybackTime={onUpdateVideoPlaybackTime}
+      onVideoPreviewError={reportVideoPreviewError}
     />
   );
 }
@@ -1618,5 +1720,33 @@ function selectedSingleVideoPath(selection: CanvasSelection | undefined, nodes: 
     return undefined;
   }
   const node = nodes.find((item) => item.projectRelativePath === selection.projectRelativePath);
-  return node?.mediaKind === 'video' ? node.projectRelativePath : undefined;
+  return node && isProjectedVideoNode(node) ? node.projectRelativePath : undefined;
+}
+
+export function canvasActiveVideoPaths(input: {
+  nodes: readonly ProjectedCanvasNode[];
+  selectedProjectRelativePaths: readonly string[];
+  playingVideoPaths: ReadonlySet<string>;
+  requestedVideoPlayerPath: string | undefined;
+}): ReadonlySet<string> {
+  const videoPaths = new Set(input.nodes.filter(isProjectedVideoNode).map((node) => node.projectRelativePath));
+  const active = new Set<string>();
+  for (const projectRelativePath of input.selectedProjectRelativePaths) {
+    if (videoPaths.has(projectRelativePath)) {
+      active.add(projectRelativePath);
+    }
+  }
+  for (const projectRelativePath of input.playingVideoPaths) {
+    if (videoPaths.has(projectRelativePath)) {
+      active.add(projectRelativePath);
+    }
+  }
+  if (input.requestedVideoPlayerPath && videoPaths.has(input.requestedVideoPlayerPath)) {
+    active.add(input.requestedVideoPlayerPath);
+  }
+  return active;
+}
+
+function isProjectedVideoNode(node: ProjectedCanvasNode): boolean {
+  return node.nodeKind === 'file' && node.mediaKind === 'video';
 }

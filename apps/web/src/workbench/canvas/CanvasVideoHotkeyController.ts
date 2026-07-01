@@ -13,7 +13,9 @@ export interface CanvasVideoHotkeyController {
   handleKeyDown(event: CanvasVideoHotkeyEvent): boolean;
 }
 
-export function createCanvasVideoHotkeyController(): CanvasVideoHotkeyController {
+export function createCanvasVideoHotkeyController(options: {
+  requestTargetMount: (projectRelativePath: string) => void;
+}): CanvasVideoHotkeyController {
   const targets = new Map<string, CanvasVideoPlayerHandle>();
   return {
     register(projectRelativePath, target) {
@@ -27,9 +29,17 @@ export function createCanvasVideoHotkeyController(): CanvasVideoHotkeyController
       if (shouldLetFocusedElementHandleKey(event.activeElement)) {
         return false;
       }
-      const target = event.selectedVideoPath ? targets.get(event.selectedVideoPath) : undefined;
-      if (!target) {
+      if (!event.selectedVideoPath) {
         return false;
+      }
+      const target = targets.get(event.selectedVideoPath);
+      if (!target) {
+        if (!isVideoShortcutKey(event.key)) {
+          return false;
+        }
+        options.requestTargetMount(event.selectedVideoPath);
+        event.preventDefault();
+        return true;
       }
       const handled = dispatchVideoShortcut(target, event);
       if (handled) {
@@ -38,6 +48,31 @@ export function createCanvasVideoHotkeyController(): CanvasVideoHotkeyController
       return handled;
     }
   };
+}
+
+function isVideoShortcutKey(key: string): boolean {
+  switch (key) {
+    case ' ':
+    case 'k':
+    case 'K':
+    case 'ArrowLeft':
+    case 'ArrowRight':
+    case 'm':
+    case 'M':
+    case 'c':
+    case 'C':
+    case '[':
+    case '<':
+    case ']':
+    case '>':
+    case 'f':
+    case 'F':
+    case 'p':
+    case 'P':
+      return true;
+    default:
+      return false;
+  }
 }
 
 function shouldLetFocusedElementHandleKey(element: Element | null): boolean {

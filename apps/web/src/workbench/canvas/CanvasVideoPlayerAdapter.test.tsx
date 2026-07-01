@@ -58,9 +58,12 @@ describe('CanvasVideoPlayerAdapter', () => {
           <CanvasVideoPlayerAdapter
             ref={ref}
             node={videoNode()}
+            initialTimeSeconds={0}
             onPointerInside={() => undefined}
             onFocusInside={() => undefined}
             onError={() => undefined}
+            onPlayingChange={() => undefined}
+            onPlaybackBoundary={() => undefined}
           />
         );
       });
@@ -89,6 +92,151 @@ describe('CanvasVideoPlayerAdapter', () => {
       container.remove();
     }
   });
+
+  it('seeks to the initial time and reports playback boundary events', async () => {
+    const container = document.createElement('div');
+    document.body.append(container);
+    const root = createRoot(container);
+    const onPlayingChange = vi.fn();
+    const onPlaybackBoundary = vi.fn();
+
+    try {
+      await act(async () => {
+        root.render(
+          <CanvasVideoPlayerAdapter
+            node={videoNode()}
+            initialTimeSeconds={4.5}
+            onPointerInside={() => undefined}
+            onFocusInside={() => undefined}
+            onError={() => undefined}
+            onPlayingChange={onPlayingChange}
+            onPlaybackBoundary={onPlaybackBoundary}
+          />
+        );
+      });
+      const video = container.querySelector('video');
+      expect(video).not.toBeNull();
+      if (!video) {
+        throw new Error('Expected video element.');
+      }
+
+      act(() => {
+        video.dispatchEvent(new Event('loadedmetadata', { bubbles: true }));
+      });
+
+      expect(video.currentTime).toBe(4.5);
+
+      act(() => {
+        video.dispatchEvent(new Event('play', { bubbles: true }));
+      });
+      expect(onPlayingChange).toHaveBeenLastCalledWith(true);
+
+      video.currentTime = 6.25;
+      act(() => {
+        video.dispatchEvent(new Event('pause', { bubbles: true }));
+      });
+      expect(onPlayingChange).toHaveBeenLastCalledWith(false);
+      expect(onPlaybackBoundary).toHaveBeenLastCalledWith(6.25);
+
+      video.currentTime = 8;
+      act(() => {
+        video.dispatchEvent(new Event('ended', { bubbles: true }));
+      });
+      expect(video.currentTime).toBe(0);
+      expect(onPlaybackBoundary).toHaveBeenLastCalledWith(0);
+    } finally {
+      await act(async () => {
+        root.unmount();
+      });
+      container.remove();
+    }
+  });
+
+  it('reports a playback error when the initial time is outside the projected duration', async () => {
+    const container = document.createElement('div');
+    document.body.append(container);
+    const root = createRoot(container);
+    const onError = vi.fn();
+
+    try {
+      await act(async () => {
+        root.render(
+          <CanvasVideoPlayerAdapter
+            node={videoNode({ durationSeconds: 5 })}
+            initialTimeSeconds={6.25}
+            onPointerInside={() => undefined}
+            onFocusInside={() => undefined}
+            onError={onError}
+            onPlayingChange={() => undefined}
+            onPlaybackBoundary={() => undefined}
+          />
+        );
+      });
+      const video = container.querySelector('video');
+      expect(video).not.toBeNull();
+      if (!video) {
+        throw new Error('Expected video element.');
+      }
+
+      act(() => {
+        video.dispatchEvent(new Event('loadedmetadata', { bubbles: true }));
+      });
+
+      expect(onError).toHaveBeenCalledWith('Unable to seek media/clip.mp4 to 6.25 seconds.');
+      expect(video.currentTime).toBe(0);
+    } finally {
+      await act(async () => {
+        root.unmount();
+      });
+      container.remove();
+    }
+  });
+
+  it('reports a playback error when the browser rejects the initial seek assignment', async () => {
+    const container = document.createElement('div');
+    document.body.append(container);
+    const root = createRoot(container);
+    const onError = vi.fn();
+
+    try {
+      await act(async () => {
+        root.render(
+          <CanvasVideoPlayerAdapter
+            node={videoNode({ durationSeconds: 10 })}
+            initialTimeSeconds={4.5}
+            onPointerInside={() => undefined}
+            onFocusInside={() => undefined}
+            onError={onError}
+            onPlayingChange={() => undefined}
+            onPlaybackBoundary={() => undefined}
+          />
+        );
+      });
+      const video = container.querySelector('video');
+      expect(video).not.toBeNull();
+      if (!video) {
+        throw new Error('Expected video element.');
+      }
+      Object.defineProperty(video, 'currentTime', {
+        configurable: true,
+        get: () => 0,
+        set: () => {
+          throw new Error('seek rejected');
+        }
+      });
+
+      act(() => {
+        video.dispatchEvent(new Event('loadedmetadata', { bubbles: true }));
+      });
+
+      expect(onError).toHaveBeenCalledWith('Unable to seek media/clip.mp4 to 4.5 seconds.');
+    } finally {
+      await act(async () => {
+        root.unmount();
+      });
+      container.remove();
+    }
+  });
 });
 
 function textTrack(kind: TextTrack['kind']): { kind: TextTrack['kind']; mode: TextTrack['mode'] } {
@@ -98,7 +246,14 @@ function textTrack(kind: TextTrack['kind']): { kind: TextTrack['kind']; mode: Te
   };
 }
 
-function videoNode(): ProjectedCanvasNode {
+function videoNode(options: { durationSeconds?: number } = {}): ProjectedCanvasNode {
+  const videoPresentation: ProjectedCanvasNode['videoPresentation'] = {
+    kind: 'video',
+    textTracks: []
+  };
+  if (options.durationSeconds !== undefined) {
+    videoPresentation.durationSeconds = options.durationSeconds;
+  }
   return {
     projectRelativePath: 'media/clip.mp4',
     nodeKind: 'file',
@@ -115,9 +270,6 @@ function videoNode(): ProjectedCanvasNode {
       fileUrl: 'http://127.0.0.1:17321/api/projects/p/files/raw/media/clip.mp4?v=rev',
       revision: 'rev'
     },
-    videoPresentation: {
-      kind: 'video',
-      textTracks: []
-    }
+    videoPresentation
   };
 }

@@ -7,6 +7,7 @@ import {
 import {
   updateCanvasNodeLayers,
   updateCanvasNodeLayouts,
+  updateCanvasVideoPlaybackState,
   type CanvasDocument,
   type CanvasProjection,
   type Diagnostic
@@ -50,6 +51,19 @@ export class CanvasSessionService {
     }
   ): Promise<{ canvas: CanvasDocument; snapshot: ProjectSessionSnapshot; changed: boolean }> {
     return this.updateVisualCanvas(current, input.canvasId, (canvas) => updateCanvasNodeLayers(canvas, input));
+  }
+
+  async updateCanvasVideoPlaybackState(
+    current: ProjectSessionSnapshot,
+    input: {
+      canvasId: string;
+      updates: Array<{
+        projectRelativePath: string;
+        currentTimeSeconds: number;
+      }>;
+    }
+  ): Promise<{ canvas: CanvasDocument; snapshot: ProjectSessionSnapshot; changed: boolean }> {
+    return this.updateVisualCanvas(current, input.canvasId, (canvas) => updateCanvasVideoPlaybackState(canvas, input));
   }
 
   async writeCanvasJson(projectRoot: string, canvasPath: string, canvas: CanvasDocument, expectedHash: string): Promise<void> {

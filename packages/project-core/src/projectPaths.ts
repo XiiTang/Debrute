@@ -130,6 +130,8 @@ export function isIgnoredProjectFilePath(projectRelativePath: string): boolean {
     || projectRelativePath.startsWith('.debrute/cache/canvas-image-previews/')
     || projectRelativePath === '.debrute/cache/canvas-text-previews'
     || projectRelativePath.startsWith('.debrute/cache/canvas-text-previews/')
+    || projectRelativePath === '.debrute/cache/canvas-video-previews'
+    || projectRelativePath.startsWith('.debrute/cache/canvas-video-previews/')
     || projectRelativePath === '.debrute/reviews/rendered-feedback'
     || projectRelativePath.startsWith('.debrute/reviews/rendered-feedback/')
     || (projectRelativePath.startsWith('.debrute/') && projectRelativePath.endsWith('.lock'));

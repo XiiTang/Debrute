@@ -1,31 +1,19 @@
 import { readdir, stat } from 'node:fs/promises';
 import { dirname, extname, join } from 'node:path';
 import {
-  listDebruteProjectFiles,
   normalizeProjectRelativePath,
   projectFileRevision,
-  projectImageMimeTypeFromPath,
   resolveExistingProjectPath
 } from '@debrute/project-core';
 import type {
   CanvasVideoPresentation,
   CanvasVideoTextTrack
 } from '@debrute/canvas-core';
-import type {
-  GeneratedAssetMetadataLookup,
-  GeneratedAssetRecord
-} from '@debrute/app-protocol';
 
 export interface BuildCanvasVideoPresentationInput {
   projectRoot: string;
   projectRelativePath: string;
   durationSeconds?: number | undefined;
-  generatedAssetLookup(input: { projectRelativePath: string }): Promise<GeneratedAssetMetadataLookup>;
-  listGeneratedAssetsByModelRun(input: { modelRunId: string; artifactRole: 'last-frame' }): Promise<GeneratedAssetRecord[]>;
-  findCurrentProjectPathForGeneratedAsset(input: {
-    record: GeneratedAssetRecord;
-    candidateProjectRelativePaths?: readonly string[];
-  }): Promise<string | undefined>;
 }
 
 export async function buildCanvasVideoPresentation(input: BuildCanvasVideoPresentationInput): Promise<CanvasVideoPresentation> {
@@ -33,76 +21,8 @@ export async function buildCanvasVideoPresentation(input: BuildCanvasVideoPresen
   return {
     kind: 'video',
     ...(input.durationSeconds === undefined ? {} : { durationSeconds: input.durationSeconds }),
-    ...(await explicitPoster(input, projectRelativePath) ?? await generatedLastFramePoster(input, projectRelativePath) ?? {}),
     textTracks: await textTracks(input, projectRelativePath)
   };
-}
-
-async function explicitPoster(
-  input: BuildCanvasVideoPresentationInput,
-  videoPath: string
-): Promise<{ poster: NonNullable<CanvasVideoPresentation['poster']> } | undefined> {
-  for (const path of siblingCandidates(videoPath, ['.poster.png', '.poster.jpg', '.poster.jpeg', '.poster.webp', '.poster.avif'])) {
-    const asset = await companionAsset(input, path);
-    const mimeType = projectImageMimeTypeFromPath(path);
-    if (asset && mimeType) {
-      return {
-        poster: {
-          ...asset,
-          mimeType,
-          source: 'explicit'
-        }
-      };
-    }
-  }
-  return undefined;
-}
-
-async function generatedLastFramePoster(
-  input: BuildCanvasVideoPresentationInput,
-  videoPath: string
-): Promise<{ poster: NonNullable<CanvasVideoPresentation['poster']> } | undefined> {
-  const videoLookup = await input.generatedAssetLookup({ projectRelativePath: videoPath });
-  if (videoLookup.status !== 'matched') {
-    return undefined;
-  }
-  const videoRecord = videoLookup.records.find((record) => record.artifactRole === 'primary-video');
-  if (!videoRecord) {
-    return undefined;
-  }
-  const lastFrameRecords = await input.listGeneratedAssetsByModelRun({
-    modelRunId: videoRecord.modelRunId,
-    artifactRole: 'last-frame'
-  });
-  if (lastFrameRecords.length === 0) {
-    return undefined;
-  }
-  let imageCandidates: string[] | undefined;
-  for (const record of lastFrameRecords) {
-    let currentPath = await input.findCurrentProjectPathForGeneratedAsset({
-      record,
-      candidateProjectRelativePaths: []
-    });
-    if (!currentPath) {
-      imageCandidates ??= await imageProjectPaths(input.projectRoot);
-      currentPath = await input.findCurrentProjectPathForGeneratedAsset({
-        record,
-        candidateProjectRelativePaths: imageCandidates
-      });
-    }
-    if (!currentPath) {
-      continue;
-    }
-    const mimeType = projectImageMimeTypeFromPath(currentPath);
-    if (!mimeType) {
-      continue;
-    }
-    const asset = await companionAsset(input, currentPath);
-    if (asset) {
-      return { poster: { ...asset, mimeType, source: 'generated-last-frame' } };
-    }
-  }
-  return undefined;
 }
 
 async function textTracks(input: BuildCanvasVideoPresentationInput, videoPath: string): Promise<CanvasVideoTextTrack[]> {
@@ -223,12 +143,6 @@ async function companionAsset(input: BuildCanvasVideoPresentationInput, projectR
   };
 }
 
-function siblingCandidates(videoPath: string, suffixes: string[]): string[] {
-  const base = basenameWithoutMediaExtension(videoPath);
-  const directory = dirname(videoPath);
-  return suffixes.map((suffix) => normalizeProjectRelativePath(join(directory, `${base}${suffix}`)));
-}
-
 async function siblingProjectPaths(projectRoot: string, videoPath: string): Promise<string[]> {
   const directory = dirname(videoPath);
   const absoluteDirectory = await resolveExistingProjectPath(projectRoot, directory === '.' ? '' : directory);
@@ -236,14 +150,8 @@ async function siblingProjectPaths(projectRoot: string, videoPath: string): Prom
   return (await readdir(absoluteDirectory))
     .filter((name) => name.startsWith(`${base}.`))
     .map((name) => normalizeProjectRelativePath(join(directory, name)))
-    .filter((path) => path !== videoPath && (projectImageMimeTypeFromPath(path) || path.endsWith('.vtt')))
+    .filter((path) => path !== videoPath && path.endsWith('.vtt'))
     .sort();
-}
-
-async function imageProjectPaths(projectRoot: string): Promise<string[]> {
-  return (await listDebruteProjectFiles(projectRoot))
-    .filter((entry) => entry.kind === 'file' && projectImageMimeTypeFromPath(entry.projectRelativePath))
-    .map((entry) => entry.projectRelativePath);
 }
 
 function basenameWithoutMediaExtension(projectRelativePath: string): string {
