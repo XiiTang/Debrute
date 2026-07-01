@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useState } from 'react';
+import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { AlertTriangle, RefreshCw, Video } from 'lucide-react';
 import type { ProjectedCanvasNode } from '@debrute/canvas-core';
 import { Button } from '../ui';
@@ -41,9 +41,11 @@ export function CanvasVideoNodeContent({
   const [retryKey, setRetryKey] = useState(0);
   const [playerMounted, setPlayerMounted] = useState(() => selected || forcePlayerMounted);
   const [playing, setPlaying] = useState(false);
+  const playingRef = useRef(false);
   const sourceKey = node.availability.state === 'available'
     ? `${node.projectRelativePath}\u001f${node.availability.fileUrl}\u001f${node.availability.revision}`
     : `${node.projectRelativePath}\u001f${node.availability.state}`;
+  const previousSourceKeyRef = useRef(sourceKey);
   const register = useCallback((target: CanvasVideoPlayerHandle | null) => {
     onRegisterVideoTarget(node.projectRelativePath, target ?? undefined);
     if (target) {
@@ -52,9 +54,16 @@ export function CanvasVideoNodeContent({
   }, [node.projectRelativePath, onPlayerMounted, onRegisterVideoTarget]);
 
   useEffect(() => {
+    const sourceChanged = previousSourceKeyRef.current !== sourceKey;
+    previousSourceKeyRef.current = sourceKey;
+    const wasPlaying = playingRef.current;
+    playingRef.current = false;
     setError(undefined);
     setRetryKey(0);
     setPlaying(false);
+    if (sourceChanged && wasPlaying) {
+      onPlayingChange?.(node.projectRelativePath, false);
+    }
   }, [sourceKey]);
 
   useEffect(() => {
@@ -78,6 +87,7 @@ export function CanvasVideoNodeContent({
     onSelectNode();
   }, [onSelectNode]);
   const handlePlayingChange = useCallback((nextPlaying: boolean) => {
+    playingRef.current = nextPlaying;
     setPlaying(nextPlaying);
     onPlayingChange?.(node.projectRelativePath, nextPlaying);
     if (nextPlaying) {
@@ -92,6 +102,7 @@ export function CanvasVideoNodeContent({
       : 0;
     void onUpdatePlaybackTime(node.projectRelativePath, normalizedTimeSeconds);
     if (normalizedTimeSeconds === 0) {
+      playingRef.current = false;
       setPlaying(false);
       onPlayingChange?.(node.projectRelativePath, false);
       if (!selected && !forcePlayerMounted) {

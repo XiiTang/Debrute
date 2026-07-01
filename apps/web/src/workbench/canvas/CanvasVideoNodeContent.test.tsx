@@ -411,6 +411,56 @@ describe('CanvasVideoNodeContent', () => {
       container.remove();
     }
   });
+
+  it('reports playback stopped when the video source changes', async () => {
+    const container = document.createElement('div');
+    document.body.append(container);
+    const root = createRoot(container);
+    const onPlayingChange = vi.fn();
+
+    try {
+      await act(async () => {
+        root.render(
+          <I18nProvider locale="en">
+            <CanvasVideoNodeContent
+              node={videoNode({ revision: 'rev-a' })}
+              selected
+              onSelectNode={() => undefined}
+              onPlayingChange={onPlayingChange}
+              onRegisterVideoTarget={() => undefined}
+              onUpdatePlaybackTime={() => undefined}
+            />
+          </I18nProvider>
+        );
+      });
+      await act(async () => {
+        button(container, 'mock-video-playing').click();
+      });
+      expect(onPlayingChange).toHaveBeenLastCalledWith('media/clip.mp4', true);
+
+      await act(async () => {
+        root.render(
+          <I18nProvider locale="en">
+            <CanvasVideoNodeContent
+              node={videoNode({ revision: 'rev-b' })}
+              selected
+              onSelectNode={() => undefined}
+              onPlayingChange={onPlayingChange}
+              onRegisterVideoTarget={() => undefined}
+              onUpdatePlaybackTime={() => undefined}
+            />
+          </I18nProvider>
+        );
+      });
+
+      expect(onPlayingChange).toHaveBeenLastCalledWith('media/clip.mp4', false);
+    } finally {
+      await act(async () => {
+        root.unmount();
+      });
+      container.remove();
+    }
+  });
 });
 
 function videoNode(options: {
