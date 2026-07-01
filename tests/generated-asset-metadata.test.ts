@@ -1,5 +1,5 @@
 import { createHash } from 'node:crypto';
-import { mkdir, mkdtemp, readFile, rename, rm, stat, unlink, writeFile } from 'node:fs/promises';
+import { mkdir, mkdtemp, readFile, realpath, rename, rm, stat, unlink, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
@@ -29,7 +29,10 @@ describe('generated asset metadata service', () => {
       await writeFile(join(root, 'generated/cover.png'), 'fake', 'utf8');
 
       await expect(service.recordGeneratedAsset(root, {
+        modelRunId: 'model-run-1',
         projectRelativePath: 'generated/cover.png',
+        artifactRole: 'primary-image',
+        artifactIndex: 0,
         modelRun: { request: {}, output: {} }
       })).rejects.toThrow('Invalid generated asset record id');
 
@@ -50,7 +53,10 @@ describe('generated asset metadata service', () => {
       });
 
       const record = await service.recordGeneratedAsset(root, {
+        modelRunId: 'model-run-1',
         projectRelativePath: 'generated/cover.png',
+        artifactRole: 'primary-image',
+        artifactIndex: 0,
         modelRun: {
           request: { method: 'POST', url: 'https://model.example/images', body: { prompt: 'cover' } },
           output: { status: 200, body: { data: [{ b64_json: 'full-model-output' }] } }
@@ -64,8 +70,11 @@ describe('generated asset metadata service', () => {
 
       expect(record).toEqual({
         recordId: 'record-1',
+        modelRunId: 'model-run-1',
         projectRelativePath: 'generated/cover.png',
         createdAt: '2026-05-24T00:00:00.000Z',
+        artifactRole: 'primary-image',
+        artifactIndex: 0,
         fingerprint: { algorithm: 'sha256', hash: sha256('image-bytes') },
         modelRun: {
           request: { method: 'POST', url: 'https://model.example/images', body: { prompt: 'cover' } },
@@ -76,13 +85,16 @@ describe('generated asset metadata service', () => {
         records: [
           {
             recordId: 'record-1',
+            modelRunId: 'model-run-1',
+            artifactRole: 'primary-image',
+            artifactIndex: 0,
             createdAt: '2026-05-24T00:00:00.000Z',
             fingerprint: { algorithm: 'sha256', hash: sha256('image-bytes') },
             metadataPath: '.debrute/assets/generated/record-1.json'
           }
         ]
       });
-      expect(JSON.stringify(index)).not.toContain('modelRun');
+      expect(JSON.stringify(index)).not.toContain('https://model.example/images');
       expect(JSON.stringify(index)).not.toContain('full-model-output');
       expect(recordFile).toEqual(record);
       expect(cache).toMatchObject({
@@ -94,6 +106,55 @@ describe('generated asset metadata service', () => {
           }
         }
       });
+    } finally {
+      await rm(root, { recursive: true, force: true });
+    }
+  });
+
+  it('records video and last-frame artifacts under one model run id', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'debrute-generated-metadata-video-run-'));
+    try {
+      await mkdir(join(root, 'generated'), { recursive: true });
+      await writeFile(join(root, 'generated/clip.mp4'), Buffer.from('video-bytes'));
+      await writeFile(join(root, 'generated/clip-last.png'), Buffer.from('last-frame-bytes'));
+      let counter = 0;
+      const service = createGeneratedAssetMetadataService({
+        now: () => `2026-06-30T00:00:0${counter}.000Z`,
+        createRecordId: () => `record-${counter += 1}`
+      });
+
+      await service.recordGeneratedAsset(root, {
+        modelRunId: 'video-run-1',
+        projectRelativePath: 'generated/clip.mp4',
+        artifactRole: 'primary-video',
+        artifactIndex: 0,
+        modelRun: { request: { prompt: 'clip' }, output: { artifactIndex: 0 } }
+      });
+      await service.recordGeneratedAsset(root, {
+        modelRunId: 'video-run-1',
+        projectRelativePath: 'generated/clip-last.png',
+        artifactRole: 'last-frame',
+        artifactIndex: 1,
+        modelRun: { request: { prompt: 'clip' }, output: { artifactIndex: 1 } }
+      });
+
+      const videoLookup = await service.lookupGeneratedAssetMetadata(root, { projectRelativePath: 'generated/clip.mp4' });
+      const frameLookup = await service.lookupGeneratedAssetMetadata(root, { projectRelativePath: 'generated/clip-last.png' });
+
+      expect(videoLookup.status).toBe('matched');
+      expect(frameLookup.status).toBe('matched');
+      if (videoLookup.status === 'matched' && frameLookup.status === 'matched') {
+        expect(videoLookup.records[0]).toMatchObject({
+          modelRunId: 'video-run-1',
+          artifactRole: 'primary-video',
+          artifactIndex: 0
+        });
+        expect(frameLookup.records[0]).toMatchObject({
+          modelRunId: 'video-run-1',
+          artifactRole: 'last-frame',
+          artifactIndex: 1
+        });
+      }
     } finally {
       await rm(root, { recursive: true, force: true });
     }
@@ -116,6 +177,9 @@ describe('generated asset metadata service', () => {
             await writeFile(paths.indexFile, JSON.stringify({
               records: [{
                 recordId: 'external-record',
+                modelRunId: 'external-run-1',
+                artifactRole: 'primary-image',
+                artifactIndex: 0,
                 createdAt: '2026-05-24T00:00:01.000Z',
                 fingerprint: { algorithm: 'sha256', hash: sha256('external') },
                 metadataPath: '.debrute/assets/generated/external-record.json'
@@ -131,7 +195,10 @@ describe('generated asset metadata service', () => {
       });
 
       await expect(service.recordGeneratedAsset(root, {
+        modelRunId: 'model-run-1',
         projectRelativePath: 'generated/cover.png',
+        artifactRole: 'primary-image',
+        artifactIndex: 0,
         modelRun: { request: {}, output: {} }
       })).rejects.toMatchObject({ code: 'document_push_conflict' });
       await expect(readFile(join(paths.recordsDir, 'record-1.json'), 'utf8')).rejects.toBeDefined();
@@ -167,7 +234,10 @@ describe('generated asset metadata service', () => {
       });
 
       const record = await service.recordGeneratedAsset(root, {
+        modelRunId: 'model-run-1',
         projectRelativePath: 'generated/cover.png',
+        artifactRole: 'primary-image',
+        artifactIndex: 0,
         modelRun: { request: {}, output: {} }
       });
 
@@ -248,7 +318,10 @@ describe('generated asset metadata service', () => {
       });
 
       await service.recordGeneratedAsset(root, {
+        modelRunId: 'model-run-1',
         projectRelativePath: 'generated/cover.png',
+        artifactRole: 'primary-image',
+        artifactIndex: 0,
         modelRun: { request: { prompt: 'cover' }, output: { ok: true, raw: 'complete' } }
       });
       await rename(join(root, 'generated/cover.png'), join(root, 'generated/renamed-cover.png'));
@@ -259,15 +332,44 @@ describe('generated asset metadata service', () => {
       if (lookup.status === 'matched') {
         expect(lookup.fingerprint.hash).toBe(sha256('image-bytes'));
         expect(lookup.records).toEqual([
-	          {
-	            recordId: 'record-1',
-	            projectRelativePath: 'generated/cover.png',
-	            createdAt: '2026-05-24T00:00:00.000Z',
+          {
+            recordId: 'record-1',
+            modelRunId: 'model-run-1',
+            projectRelativePath: 'generated/cover.png',
+            createdAt: '2026-05-24T00:00:00.000Z',
+            artifactRole: 'primary-image',
+            artifactIndex: 0,
             fingerprint: { algorithm: 'sha256', hash: sha256('image-bytes') },
             modelRun: { request: { prompt: 'cover' }, output: { ok: true, raw: 'complete' } }
           }
         ]);
       }
+    } finally {
+      await rm(root, { recursive: true, force: true });
+    }
+  });
+
+  it('resolves generated asset raw paths by SHA-256 after rename', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'debrute-generated-metadata-raw-rename-'));
+    try {
+      await mkdir(join(root, 'generated'), { recursive: true });
+      await writeFile(join(root, 'generated/cover.png'), Buffer.from('image-bytes'));
+      const service = createGeneratedAssetMetadataService({
+        now: () => '2026-05-24T00:00:00.000Z',
+        createRecordId: () => 'record-1'
+      });
+
+      const record = await service.recordGeneratedAsset(root, {
+        modelRunId: 'model-run-1',
+        projectRelativePath: 'generated/cover.png',
+        artifactRole: 'primary-image',
+        artifactIndex: 0,
+        modelRun: { request: { prompt: 'cover' }, output: { ok: true } }
+      });
+      await rename(join(root, 'generated/cover.png'), join(root, 'generated/renamed-cover.png'));
+
+      await expect(service.resolveGeneratedAssetRawPath(root, record.recordId))
+        .resolves.toBe(await realpath(join(root, 'generated/renamed-cover.png')));
     } finally {
       await rm(root, { recursive: true, force: true });
     }
@@ -285,11 +387,17 @@ describe('generated asset metadata service', () => {
       });
 
       await service.recordGeneratedAsset(root, {
+        modelRunId: 'model-run-1',
         projectRelativePath: 'generated/cover.png',
+        artifactRole: 'primary-image',
+        artifactIndex: 0,
         modelRun: { request: { prompt: 'first' }, output: { seed: 1 } }
       });
       await service.recordGeneratedAsset(root, {
+        modelRunId: 'model-run-2',
         projectRelativePath: 'generated/cover.png',
+        artifactRole: 'primary-image',
+        artifactIndex: 0,
         modelRun: { request: { prompt: 'second' }, output: { seed: 2 } }
       });
 
@@ -316,7 +424,10 @@ describe('generated asset metadata service', () => {
       });
 
       await service.recordGeneratedAsset(root, {
+        modelRunId: 'model-run-1',
         projectRelativePath: 'generated/cover.png',
+        artifactRole: 'primary-image',
+        artifactIndex: 0,
         modelRun: { request: { prompt: 'cover' }, output: { ok: true } }
       });
       await unlink(join(generatedAssetMetadataPaths(root).recordsDir, 'record-1.json'));
@@ -440,10 +551,13 @@ describe('generated asset metadata service', () => {
       await mkdir(join(root, '.debrute/assets'), { recursive: true });
       await writeFile(join(root, 'generated/cover.png'), Buffer.from('image-bytes'));
       const fingerprint = { algorithm: 'sha256' as const, hash: sha256('image-bytes') };
-	      await writeFile(join(root, 'generated/not-metadata.json'), JSON.stringify({
-	        recordId: 'record-1',
-	        projectRelativePath: 'generated/cover.png',
-	        createdAt: '2026-05-24T00:00:00.000Z',
+      await writeFile(join(root, 'generated/not-metadata.json'), JSON.stringify({
+        recordId: 'record-1',
+        modelRunId: 'model-run-1',
+        projectRelativePath: 'generated/cover.png',
+        createdAt: '2026-05-24T00:00:00.000Z',
+        artifactRole: 'primary-image',
+        artifactIndex: 0,
         fingerprint,
         modelRun: { request: { prompt: 'outside' }, output: { ok: true } }
       }, null, 2), 'utf8');
@@ -451,6 +565,9 @@ describe('generated asset metadata service', () => {
         records: [
           {
             recordId: 'record-1',
+            modelRunId: 'model-run-1',
+            artifactRole: 'primary-image',
+            artifactIndex: 0,
             createdAt: '2026-05-24T00:00:00.000Z',
             fingerprint,
             metadataPath: 'generated/not-metadata.json'
@@ -480,8 +597,11 @@ describe('generated asset metadata service', () => {
       const fingerprint = { algorithm: 'sha256' as const, hash: sha256('image-bytes') };
       await writeFile(join(root, '.debrute/assets/generated/nested/record-1.json'), JSON.stringify({
         recordId: 'record-1',
+        modelRunId: 'model-run-1',
         projectRelativePath: 'generated/cover.png',
         createdAt: '2026-05-24T00:00:00.000Z',
+        artifactRole: 'primary-image',
+        artifactIndex: 0,
         fingerprint,
         modelRun: { request: { prompt: 'nested' }, output: { ok: true } }
       }, null, 2), 'utf8');
@@ -489,6 +609,9 @@ describe('generated asset metadata service', () => {
         records: [
           {
             recordId: 'record-1',
+            modelRunId: 'model-run-1',
+            artifactRole: 'primary-image',
+            artifactIndex: 0,
             createdAt: '2026-05-24T00:00:00.000Z',
             fingerprint,
             metadataPath: '.debrute/assets/generated/nested/record-1.json'
@@ -515,10 +638,13 @@ describe('generated asset metadata service', () => {
       await mkdir(join(root, 'generated'), { recursive: true });
       await mkdir(join(root, '.debrute/assets/generated'), { recursive: true });
       await writeFile(join(root, 'generated/cover.png'), Buffer.from('image-bytes'));
-	      await writeFile(join(root, '.debrute/assets/generated/record-1.json'), JSON.stringify({
-	        recordId: 'record-1',
-	        projectRelativePath: 'generated/cover.png',
-	        createdAt: '2026-05-24T00:00:00.000Z',
+      await writeFile(join(root, '.debrute/assets/generated/record-1.json'), JSON.stringify({
+        recordId: 'record-1',
+        modelRunId: 'model-run-1',
+        projectRelativePath: 'generated/cover.png',
+        createdAt: '2026-05-24T00:00:00.000Z',
+        artifactRole: 'primary-image',
+        artifactIndex: 0,
         fingerprint: { algorithm: 'sha256', hash: sha256('different-image-bytes') },
         modelRun: { request: { prompt: 'cover' }, output: { ok: true } }
       }, null, 2), 'utf8');
@@ -526,6 +652,9 @@ describe('generated asset metadata service', () => {
         records: [
           {
             recordId: 'record-1',
+            modelRunId: 'model-run-1',
+            artifactRole: 'primary-image',
+            artifactIndex: 0,
             createdAt: '2026-05-24T00:00:00.000Z',
             fingerprint: { algorithm: 'sha256', hash: sha256('image-bytes') },
             metadataPath: '.debrute/assets/generated/record-1.json'

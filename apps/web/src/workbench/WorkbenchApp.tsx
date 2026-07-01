@@ -801,6 +801,7 @@ export function WorkbenchApp(): React.ReactElement {
     writeProjectTextFile,
     saveCanvasTextPreviewSource: (input) => api.saveCanvasTextPreviewSource(input),
     readCanvasTextPreviewSources: (input) => api.readCanvasTextPreviewSources(input),
+    readCanvasVideoPreviewSources: (input) => api.readCanvasVideoPreviewSources(input),
     createProjectFile: async (input) => {
       const result = await api.createProjectFile(input);
       setSnapshot(result.snapshot);
@@ -901,6 +902,19 @@ export function WorkbenchApp(): React.ReactElement {
     },
     updateCanvasNodeLayers: async (canvasId, input) => {
       const result = await api.updateCanvasNodeLayers({
+        canvasId,
+        ...input
+      });
+      const current = snapshotRef.current;
+      if (!current) {
+        throw new Error(`Cannot apply Canvas document ${result.canvas.id} without a current snapshot.`);
+      }
+      const next = replaceCanvasMutationInSnapshot(current, result);
+      snapshotRef.current = next;
+      setSnapshot(next);
+    },
+    updateCanvasVideoPlaybackState: async (canvasId, input) => {
+      const result = await api.updateCanvasVideoPlaybackState({
         canvasId,
         ...input
       });

@@ -277,8 +277,7 @@
   background: transparent;
 }
 
-.canvas-node-element.video .canvas-node-preview,
-.canvas-node-element:not(.image) .canvas-node-preview {
+.canvas-node-element:not(.image):not(.video) .canvas-node-preview {
   height: calc(100% - 30px);
 }
 
@@ -289,6 +288,23 @@
   height: 100%;
   display: block;
   pointer-events: none;
+}
+
+.canvas-feedback-frame {
+  position: absolute;
+  inset: calc(-1px * var(--canvas-chrome-scale, 1));
+  z-index: 3;
+  box-sizing: border-box;
+  border: calc(1px * var(--canvas-chrome-scale, 1)) solid transparent;
+  border-image-source: var(--canvas-feedback-frame-gradient);
+  border-image-slice: 1;
+  pointer-events: none;
+}
+
+.canvas-node-element.canvas-node-has-feedback:hover,
+.canvas-node-element.canvas-node-has-feedback.hovered,
+.canvas-node-element.canvas-node-has-feedback.selected {
+  outline-color: transparent;
 }
 
 .canvas-image-feedback-layer {
@@ -346,12 +362,75 @@
   background: var(--db-surface-2);
 }
 
-.canvas-node-preview video {
+.canvas-video-node {
+  width: 100%;
+  height: 100%;
+  display: grid;
+  grid-template-rows: minmax(0, 1fr) 30px;
+  background: transparent;
+}
+
+.canvas-video-player-shell {
+  position: relative;
+  min-height: 0;
+  overflow: hidden;
+  background: #000;
+}
+
+.canvas-video-layer {
+  position: absolute;
+  inset: 0;
+}
+
+.canvas-video-layer--hidden {
+  visibility: hidden;
+  pointer-events: none;
+}
+
+.canvas-video-player,
+.canvas-video-player media-controller {
+  width: 100%;
+  height: 100%;
+  display: block;
+}
+
+.canvas-video-player video {
   width: 100%;
   height: 100%;
   display: block;
   object-fit: contain;
   background: #000;
+}
+
+.canvas-video-preview-image {
+  width: 100%;
+  height: 100%;
+  display: block;
+  object-fit: contain;
+  background: #000;
+}
+
+.db-canvas-node-error-overlay {
+  position: absolute;
+  inset: 8px;
+  z-index: 1;
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+  padding: 8px;
+  color: var(--db-text);
+  background: color-mix(in oklch, var(--db-surface) 86%, transparent);
+  border: 1px solid var(--db-border);
+  border-radius: 6px;
+}
+
+.db-canvas-node-error-overlay span {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .canvas-node-preview audio {
@@ -607,6 +686,16 @@
   min-height: 100%;
   padding-block: var(--canvas-text-editor-content-padding-block);
   tab-size: var(--canvas-text-editor-tab-size);
+  user-select: text;
+  -webkit-user-select: text;
+}
+
+.canvas-text-editor[data-pointer-focus="true"] .cm-cursorLayer {
+  animation: steps(1) cm-blink 1.2s infinite;
+}
+
+.canvas-text-editor[data-pointer-focus="true"] .cm-cursor {
+  display: block;
 }
 
 .canvas-text-editor .cm-line {

@@ -13,7 +13,7 @@ import { buildWorkbenchTitleBarState } from '@debrute/app-protocol';
 import type { IntegrationSettingsView } from '@debrute/app-protocol';
 import type { TextFileBuffer, WorkbenchActions, WorkbenchState } from '../../types';
 import { CanvasEditor } from './CanvasEditor';
-import { preloadCanvasImageForHandoff, scheduleCanvasImageHandoffAfterPaint } from './CanvasNodeContent';
+import { preloadCanvasImageForHandoff, scheduleCanvasImageHandoffAfterPaint } from './CanvasMediaHandoff';
 import { createCanvasOverlayRuntime } from './CanvasOverlayRuntime';
 import {
   CANVAS_PREVIEW_RESOURCE_SETTLE_MS,
@@ -22,6 +22,7 @@ import {
 import { areCanvasNodeShellPropsEqual, CanvasNodeShell, type CanvasNodeShellProps } from './CanvasNodeShell';
 import {
   CanvasSurface,
+  canvasActiveVideoPaths,
   canvasFeedbackBarTargetForProjectedNode,
   isCanvasMapProjectTreeDragOver,
   canvasMapProjectTreeDropEntry,
@@ -43,6 +44,42 @@ import { createCanvasStageRuntime } from './runtime/CanvasStageRuntime';
 import type { CanvasSelection } from './runtime/canvasSelection';
 import { createCanvasEditorRuntime, type CanvasEditorRuntime } from './runtime/CanvasEditorRuntime';
 import { I18nProvider } from '../i18n';
+
+const { videoTogglePlaybackSpy } = vi.hoisted(() => ({
+  videoTogglePlaybackSpy: vi.fn()
+}));
+
+vi.mock('./CanvasVideoNodeContent', async () => {
+  const ReactModule = await import('react');
+  return {
+    CanvasVideoNodeContent: ({ node, onRegisterVideoTarget }: {
+      node: CanvasProjection['nodes'][number];
+      onRegisterVideoTarget: (projectRelativePath: string, target: {
+        togglePlayback: () => void;
+        seekBy: (seconds: number) => void;
+        toggleMuted: () => void;
+        adjustPlaybackRate: (delta: number) => void;
+        toggleCaptions: () => void;
+        enterFullscreen: () => void;
+        togglePictureInPicture: () => void;
+      } | undefined) => void;
+    }) => {
+      ReactModule.useEffect(() => {
+        onRegisterVideoTarget(node.projectRelativePath, {
+          togglePlayback: videoTogglePlaybackSpy,
+          seekBy: vi.fn(),
+          toggleMuted: vi.fn(),
+          adjustPlaybackRate: vi.fn(),
+          toggleCaptions: vi.fn(),
+          enterFullscreen: vi.fn(),
+          togglePictureInPicture: vi.fn()
+        });
+        return () => onRegisterVideoTarget(node.projectRelativePath, undefined);
+      }, [node.projectRelativePath, onRegisterVideoTarget]);
+      return <div data-testid="mock-video-node">{node.projectRelativePath}</div>;
+    }
+  };
+});
 
 describe('CanvasSurface', () => {
   beforeEach(() => {
@@ -356,6 +393,55 @@ describe('CanvasSurface', () => {
     expect(html).not.toContain(`data-editor-mode="${'pre'}${'view'}"`);
   });
 
+  it('routes video shortcuts to the selected video node only', async () => {
+    const restoreActEnvironment = installReactActEnvironment();
+    const container = document.createElement('div');
+    document.body.append(container);
+    const root = createRoot(container);
+    const canvas = createCanvasDocument({ id: 'video-hotkeys' });
+    const videoNode = videoProjectionNode('media/clip.mp4', 0, 0);
+    const projection: CanvasProjection = {
+      canvasId: canvas.id,
+      nodes: [videoNode],
+      edges: [],
+      diagnostics: []
+    };
+    const runtime = createCanvasEditorRuntime({
+      selection: { kind: 'node', projectRelativePath: videoNode.projectRelativePath }
+    });
+
+    try {
+      await act(async () => {
+        root.render(
+          <I18nProvider locale="en">
+            <CanvasSurface
+              canvas={canvas}
+              projection={projection}
+              runtime={runtime}
+              actions={actions}
+              textFileBuffers={{}}
+              canvasFeedback={undefined}
+              overlayRuntime={createCanvasOverlayRuntime()}
+              feedbackPlacementContext={feedbackPlacementContextFixture()}
+              textPreviewStyleDependencyKey="dark"
+            />
+          </I18nProvider>
+        );
+      });
+
+      window.dispatchEvent(new KeyboardEvent('keydown', { key: ' ' }));
+
+      expect(videoTogglePlaybackSpy).toHaveBeenCalledTimes(1);
+    } finally {
+      await act(async () => {
+        root.unmount();
+      });
+      container.remove();
+      restoreActEnvironment();
+      videoTogglePlaybackSpy.mockClear();
+    }
+  });
+
   it('starts Canvas-owned text preview scheduled work after StrictMode mount cleanup', async () => {
     const restoreActEnvironment = installReactActEnvironment();
     const restoreAnimationFrame = installAnimationFrame();
@@ -486,7 +572,7 @@ describe('CanvasSurface', () => {
             label: 1,
             kind: 'pin',
             geometry: { type: 'point', x: 0.2, y: 0.3 },
-            comment: 'face',
+            comment: 'region note hidden',
             createdAt: '2026-05-26T12:00:00.000Z',
             updatedAt: '2026-05-26T12:00:00.000Z'
           }],
@@ -497,7 +583,202 @@ describe('CanvasSurface', () => {
 
     expect(html).toContain('canvas-image-feedback-layer');
     expect(html).toContain('data-canvas-feedback-label="1"');
+    expect(html).toContain('data-canvas-feedback-frame="true"');
+    expect(html).toContain('data-canvas-feedback-frame-kinds="regions"');
+    expect(html).not.toContain('region note hidden');
     expect(html).not.toContain('class="canvas-feedback-bar"');
+  });
+
+  it('renders persistent feedback frames for file-level marks and comments without comment text', () => {
+    const canvas = createCanvasDocument({ id: 'file-feedback-frame' });
+    const projection: CanvasProjection = {
+      canvasId: canvas.id,
+      nodes: [nodeFixture('flow/cover.png', 120, 80)],
+      edges: [],
+      diagnostics: []
+    };
+
+    const html = renderToStaticMarkup(surface(canvas, projection, {
+      canvasFeedback: feedbackDocument({
+        'flow/cover.png': {
+          projectRelativePath: 'flow/cover.png',
+          marks: ['like', 'important'],
+          comments: [{
+            id: 'comment-1',
+            comment: 'overall direction',
+            createdAt: '2026-05-26T12:00:00.000Z',
+            updatedAt: '2026-05-26T12:00:00.000Z'
+          }, {
+            id: 'comment-2',
+            comment: 'second pass',
+            createdAt: '2026-05-26T12:00:00.000Z',
+            updatedAt: '2026-05-26T12:00:00.000Z'
+          }],
+          nextRegionLabel: 1,
+          regions: [],
+          updatedAt: '2026-05-26T12:00:00.000Z'
+        }
+      })
+    }));
+
+    expect(html).toContain('canvas-node-has-feedback');
+    expect(html).toContain('data-canvas-feedback-frame="true"');
+    expect(html).toContain('data-canvas-feedback-frame-kinds="like important comments"');
+    expect(html).not.toContain('overall direction');
+    expect(html).not.toContain('second pass');
+    expect(html).not.toContain('class="canvas-feedback-bar"');
+  });
+
+  it('does not render persistent feedback frames for empty feedback entries', () => {
+    const canvas = createCanvasDocument({ id: 'empty-feedback-frame' });
+    const projection: CanvasProjection = {
+      canvasId: canvas.id,
+      nodes: [nodeFixture('flow/cover.png', 120, 80)],
+      edges: [],
+      diagnostics: []
+    };
+
+    const html = renderToStaticMarkup(surface(canvas, projection, {
+      canvasFeedback: feedbackDocument({
+        'flow/cover.png': {
+          projectRelativePath: 'flow/cover.png',
+          marks: [],
+          comments: [],
+          nextRegionLabel: 1,
+          regions: [],
+          updatedAt: '2026-05-26T12:00:00.000Z'
+        }
+      })
+    }));
+
+    expect(html).not.toContain('canvas-node-has-feedback');
+    expect(html).not.toContain('data-canvas-feedback-frame="true"');
+  });
+
+  it('renders persistent feedback frames for text and video nodes', () => {
+    const canvas = createCanvasDocument({ id: 'text-video-feedback-frame' });
+    const projection: CanvasProjection = {
+      canvasId: canvas.id,
+      nodes: [
+        textProjectionNode('flow/readme.md', 120, 80, 'rev-a'),
+        videoProjectionNode('flow/clip.mp4', 380, 80)
+      ],
+      edges: [],
+      diagnostics: []
+    };
+
+    const html = renderToStaticMarkup(surface(canvas, projection, {
+      canvasFeedback: feedbackDocument({
+        'flow/readme.md': {
+          projectRelativePath: 'flow/readme.md',
+          marks: ['check'],
+          comments: [{
+            id: 'comment-1',
+            comment: 'tighten intro',
+            createdAt: '2026-05-26T12:00:00.000Z',
+            updatedAt: '2026-05-26T12:00:00.000Z'
+          }],
+          nextRegionLabel: 1,
+          regions: [],
+          updatedAt: '2026-05-26T12:00:00.000Z'
+        },
+        'flow/clip.mp4': {
+          projectRelativePath: 'flow/clip.mp4',
+          marks: ['needs_revision'],
+          comments: [],
+          nextRegionLabel: 1,
+          regions: [],
+          updatedAt: '2026-05-26T12:00:00.000Z'
+        }
+      })
+    }));
+
+    expect(html).toContain('data-canvas-node-path="flow/readme.md"');
+    expect(html).toContain('data-canvas-node-path="flow/clip.mp4"');
+    expect(html.match(/data-canvas-feedback-frame="true"/g) ?? []).toHaveLength(2);
+    expect(html).toContain('data-canvas-feedback-frame-kinds="check comments"');
+    expect(html).toContain('data-canvas-feedback-frame-kinds="needs_revision"');
+    expect(html).not.toContain('tighten intro');
+    expect(html).not.toContain('class="canvas-feedback-bar"');
+  });
+
+  it('renders persistent feedback frames for audio, directory, and unknown-file nodes', () => {
+    const canvas = createCanvasDocument({ id: 'other-node-kind-feedback-frame' });
+    const audioNode: CanvasProjection['nodes'][number] = {
+      ...nodeFixture('flow/sound.wav', 120, 80),
+      mediaKind: 'audio',
+      availability: {
+        state: 'available',
+        size: 100,
+        mimeType: 'audio/wav',
+        fileUrl: 'http://127.0.0.1:17321/api/projects/123e4567-e89b-42d3-a456-426614174000/files/raw/flow/sound.wav?v=rev',
+        revision: 'rev'
+      }
+    };
+    const unknownNode: CanvasProjection['nodes'][number] = {
+      ...nodeFixture('flow/archive.bin', 380, 80),
+      mediaKind: 'unknown',
+      availability: {
+        state: 'available',
+        size: 100,
+        mimeType: 'application/octet-stream',
+        fileUrl: 'http://127.0.0.1:17321/api/projects/123e4567-e89b-42d3-a456-426614174000/files/raw/flow/archive.bin?v=rev',
+        revision: 'rev'
+      }
+    };
+    const projection: CanvasProjection = {
+      canvasId: canvas.id,
+      nodes: [
+        audioNode,
+        unknownNode,
+        directoryFixture('flow/assets', 640, 80)
+      ],
+      edges: [],
+      diagnostics: []
+    };
+
+    const html = renderToStaticMarkup(surface(canvas, projection, {
+      canvasFeedback: feedbackDocument({
+        'flow/sound.wav': {
+          projectRelativePath: 'flow/sound.wav',
+          marks: ['pending'],
+          comments: [],
+          nextRegionLabel: 1,
+          regions: [],
+          updatedAt: '2026-05-26T12:00:00.000Z'
+        },
+        'flow/archive.bin': {
+          projectRelativePath: 'flow/archive.bin',
+          marks: ['cross'],
+          comments: [],
+          nextRegionLabel: 1,
+          regions: [],
+          updatedAt: '2026-05-26T12:00:00.000Z'
+        },
+        'flow/assets': {
+          projectRelativePath: 'flow/assets',
+          marks: [],
+          comments: [{
+            id: 'comment-1',
+            comment: 'folder note hidden',
+            createdAt: '2026-05-26T12:00:00.000Z',
+            updatedAt: '2026-05-26T12:00:00.000Z'
+          }],
+          nextRegionLabel: 1,
+          regions: [],
+          updatedAt: '2026-05-26T12:00:00.000Z'
+        }
+      })
+    }));
+
+    expect(html).toContain('data-canvas-node-path="flow/sound.wav"');
+    expect(html).toContain('data-canvas-node-path="flow/archive.bin"');
+    expect(html).toContain('data-canvas-node-path="flow/assets"');
+    expect(html.match(/data-canvas-feedback-frame="true"/g) ?? []).toHaveLength(3);
+    expect(html).toContain('data-canvas-feedback-frame-kinds="pending"');
+    expect(html).toContain('data-canvas-feedback-frame-kinds="cross"');
+    expect(html).toContain('data-canvas-feedback-frame-kinds="comments"');
+    expect(html).not.toContain('folder note hidden');
   });
 
   it('builds feedback bar targets for the image that creates a local feedback draft', () => {
@@ -710,6 +991,26 @@ describe('CanvasSurface', () => {
       hovered: true
     })).toBe(false);
 
+  });
+
+  it('tracks active video paths from selection, playback, and requested mounts', () => {
+    const active = canvasActiveVideoPaths({
+      nodes: [
+        videoProjectionNode('media/selected.mp4', 0, 0),
+        videoProjectionNode('media/playing.mp4', 0, 400),
+        videoProjectionNode('media/requested.mp4', 0, 800),
+        nodeFixture('images/cover.png', 0, 1200)
+      ],
+      selectedProjectRelativePaths: ['media/selected.mp4', 'images/cover.png'],
+      playingVideoPaths: new Set(['media/playing.mp4', 'media/missing.mp4']),
+      requestedVideoPlayerPath: 'media/requested.mp4'
+    });
+
+    expect([...active].sort()).toEqual([
+      'media/playing.mp4',
+      'media/requested.mp4',
+      'media/selected.mp4'
+    ]);
   });
 
   it('updates preview resource scheduler interaction state from camera and drag state', () => {
@@ -1126,6 +1427,26 @@ function textProjectionNode(path: string, x: number, y: number, revision: string
   };
 }
 
+function videoProjectionNode(path: string, x: number, y: number): CanvasProjection['nodes'][number] {
+  return {
+    ...nodeFixture(path, x, y),
+    mediaKind: 'video',
+    width: 640,
+    height: 360,
+    availability: {
+      state: 'available',
+      size: 100,
+      mimeType: 'video/mp4',
+      fileUrl: `http://127.0.0.1:17321/api/projects/123e4567-e89b-42d3-a456-426614174000/files/raw/${path}?v=rev`,
+      revision: 'rev'
+    },
+    videoPresentation: {
+      kind: 'video',
+      textTracks: []
+    }
+  };
+}
+
 function textBufferFixture(path: string, content: string, revision: string): TextFileBuffer {
   return {
     projectRelativePath: path,
@@ -1269,7 +1590,11 @@ function nodeShellProps(node = nodeFixture('flow/cover.png', 0, 0)): CanvasNodeS
     onPointerLeave: () => undefined,
     onSelectNode: () => undefined,
     onContextMenu: () => undefined,
-    onResizePointerDown: () => undefined
+    onResizePointerDown: () => undefined,
+    onVideoPlayerMounted: () => undefined,
+    onVideoPlayingChange: () => undefined,
+    onRegisterVideoTarget: () => undefined,
+    onUpdateVideoPlaybackTime: () => undefined
   };
 }
 
@@ -1389,6 +1714,7 @@ const actions: WorkbenchActions = {
     throw new Error('not used');
   },
   readCanvasTextPreviewSources: async () => ({ sources: {} }),
+  readCanvasVideoPreviewSources: async () => ({ sources: {} }),
   createProjectFile: async () => {
     throw new Error('not used');
   },
@@ -1427,6 +1753,7 @@ const actions: WorkbenchActions = {
     throw new Error('not used');
   },
   updateCanvasNodeLayers: async () => undefined,
+  updateCanvasVideoPlaybackState: async () => undefined,
   updateCanvasFeedbackEntry: async () => true,
   addProjectPathToCanvasMap: async () => undefined,
   createCanvas: async () => {

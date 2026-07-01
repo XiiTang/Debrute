@@ -58,4 +58,23 @@ describe('Canvas styles', () => {
     expect(canvasStyles).toContain('.canvas-node-resize.sw {\n  bottom: calc(-8px * var(--canvas-chrome-scale, 1));\n  left: calc(-8px * var(--canvas-chrome-scale, 1));');
     expect(canvasStyles).toContain('.canvas-node-resize.se {\n  right: calc(-8px * var(--canvas-chrome-scale, 1));\n  bottom: calc(-8px * var(--canvas-chrome-scale, 1));');
   });
+
+  it('allows the inline text editor content to show browser selection and caret', () => {
+    expect(canvasStyles).toMatch(/\.canvas-text-editor \.cm-content\s*{[^}]*\buser-select: text;/);
+    expect(canvasStyles).toMatch(/\.canvas-text-editor \.cm-content\s*{[^}]*-webkit-user-select: text;/);
+    expect(canvasStyles).toMatch(/\.canvas-text-editor\[data-pointer-focus="true"\] \.cm-cursorLayer\s*{[^}]*animation: steps\(1\) cm-blink 1\.2s infinite;/);
+    expect(canvasStyles).toMatch(/\.canvas-text-editor\[data-pointer-focus="true"\] \.cm-cursor\s*{[^}]*display: block;/);
+  });
+
+  it('keeps Canvas feedback frames as pointer-transparent node chrome below resize handles', () => {
+    expect(canvasStyles).toMatch(/\.canvas-feedback-frame\s*{[^}]*position: absolute;/);
+    expect(canvasStyles).toMatch(/\.canvas-feedback-frame\s*{[^}]*inset: calc\(-1px \* var\(--canvas-chrome-scale, 1\)\);/);
+    expect(canvasStyles).toMatch(/\.canvas-feedback-frame\s*{[^}]*z-index: 3;/);
+    expect(canvasStyles).toMatch(/\.canvas-feedback-frame\s*{[^}]*border: calc\(1px \* var\(--canvas-chrome-scale, 1\)\) solid transparent;/);
+    expect(canvasStyles).toMatch(/\.canvas-feedback-frame\s*{[^}]*border-image-source: var\(--canvas-feedback-frame-gradient\);/);
+    expect(canvasStyles).toMatch(/\.canvas-feedback-frame\s*{[^}]*border-image-slice: 1;/);
+    expect(canvasStyles).toMatch(/\.canvas-feedback-frame\s*{[^}]*pointer-events: none;/);
+    expect(canvasStyles).toMatch(/\.canvas-node-element\.canvas-node-has-feedback(?:\:hover|\.hovered|\.selected)/);
+    expect(canvasStyles).toMatch(/\.canvas-node-resize\s*{[^}]*z-index: 4;/);
+  });
 });

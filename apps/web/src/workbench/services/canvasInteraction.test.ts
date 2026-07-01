@@ -111,6 +111,14 @@ describe('canvas interaction', () => {
     expect(shouldCanvasHandleWheelTarget(focusedEditor as unknown as EventTarget)).toBe(false);
   });
 
+  it('lets focused text editor wheel gestures scroll locally', () => {
+    const textBody = mockElement('canvas-text-body', undefined, 'focus', true);
+    const textEditor = mockElement('canvas-text-editor', textBody);
+    const textContent = mockElement('cm-content', textEditor);
+
+    expect(shouldCanvasHandleWheelTarget(textContent as unknown as EventTarget)).toBe(false);
+  });
+
   it('lets canvas-owned floating bars keep wheel gestures on the canvas', () => {
     const shell = mockElement('workbench-shell');
     const surface = mockElement('canvas-surface', shell);

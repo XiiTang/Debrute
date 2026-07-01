@@ -7,6 +7,7 @@ import {
 import {
   updateCanvasNodeLayers,
   updateCanvasNodeLayouts,
+  updateCanvasVideoPlaybackState,
   type CanvasDocument,
   type CanvasProjection,
   type Diagnostic
@@ -18,7 +19,7 @@ import { assertCurrentCanvasDocument } from './CanvasProjectionService.js';
 
 export interface CanvasSessionServiceOptions {
   writeCanvasText(projectRoot: string, canvasPath: string, content: string, expectedHash: string): Promise<void>;
-  projectCanvasWithKnownAvailability(canvas: CanvasDocument, projection: CanvasProjection): CanvasProjection;
+  projectCanvasWithKnownProjection(canvas: CanvasDocument, projection: CanvasProjection): CanvasProjection;
 }
 
 export class CanvasSessionService {
@@ -50,6 +51,19 @@ export class CanvasSessionService {
     }
   ): Promise<{ canvas: CanvasDocument; snapshot: ProjectSessionSnapshot; changed: boolean }> {
     return this.updateVisualCanvas(current, input.canvasId, (canvas) => updateCanvasNodeLayers(canvas, input));
+  }
+
+  async updateCanvasVideoPlaybackState(
+    current: ProjectSessionSnapshot,
+    input: {
+      canvasId: string;
+      updates: Array<{
+        projectRelativePath: string;
+        currentTimeSeconds: number;
+      }>;
+    }
+  ): Promise<{ canvas: CanvasDocument; snapshot: ProjectSessionSnapshot; changed: boolean }> {
+    return this.updateVisualCanvas(current, input.canvasId, (canvas) => updateCanvasVideoPlaybackState(canvas, input));
   }
 
   async writeCanvasJson(projectRoot: string, canvasPath: string, canvas: CanvasDocument, expectedHash: string): Promise<void> {
@@ -130,7 +144,7 @@ export class CanvasSessionService {
     }
     await this.writeCanvasJson(current.projectRoot, canvasPath, next, expectedHash);
     this.recordCanvasDocumentTextHash(current.projectRoot, canvasId, `${JSON.stringify(next, null, 2)}\n`);
-    const projection = this.options.projectCanvasWithKnownAvailability(next, existingProjection);
+    const projection = this.options.projectCanvasWithKnownProjection(next, existingProjection);
     return {
       canvas: next,
       changed: true,

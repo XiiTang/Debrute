@@ -87,6 +87,7 @@ describe('video model executor', () => {
   it('submits, polls, downloads, and writes a Seedance mp4 artifact', async () => {
     const projectRoot = await mkdtemp(join(tmpdir(), 'debrute-video-seedance-'));
     const calls: string[] = [];
+    const recorded: unknown[] = [];
     const apiKey = 'sk-video';
     const fetch: VideoModelFetch = async (url, init) => {
       calls.push(url);
@@ -141,7 +142,10 @@ describe('video model executor', () => {
         },
         secrets: { videoModelApiKeys: { 'doubao-seedance-2-0-260128': apiKey } },
         pollIntervalMs: 0,
-        fetch
+        fetch,
+        recordGeneratedAsset: async (input) => {
+          recorded.push(input);
+        }
       });
 
       expect(result.status).toBe('ok');
@@ -157,6 +161,11 @@ describe('video model executor', () => {
         mimeType: 'image/png'
       });
       await expect(readFile(join(projectRoot, result.artifacts[0]!.projectRelativePath))).resolves.toEqual(tinyMp4);
+      expect(recorded).toEqual([
+        expect.objectContaining({ artifactRole: 'primary-video', artifactIndex: 0 }),
+        expect.objectContaining({ artifactRole: 'last-frame', artifactIndex: 1 })
+      ]);
+      expect((recorded[0] as { modelRunId: string }).modelRunId).toBe((recorded[1] as { modelRunId: string }).modelRunId);
       expect(calls).toEqual([
         'https://ark.cn-beijing.volces.com/api/v3/contents/generations/tasks',
         'https://ark.cn-beijing.volces.com/api/v3/contents/generations/tasks/task-1',
@@ -506,7 +515,10 @@ describe('video model executor', () => {
       expect(result.status).toBe('ok');
       expect(recorded).toHaveLength(1);
       expect(recorded[0]).toMatchObject({
+        modelRunId: expect.any(String),
         projectRelativePath: expect.stringMatching(/^generated\/turn-video-metadata\/.+\.mp4$/),
+        artifactRole: 'primary-video',
+        artifactIndex: 0,
         modelRun: {
           request: {
             debrute: {
@@ -585,6 +597,9 @@ describe('video model executor', () => {
       expect(result.status).toBe('ok');
       expect(recorded).toHaveLength(1);
       expect(recorded[0]).toMatchObject({
+        modelRunId: expect.any(String),
+        artifactRole: 'primary-video',
+        artifactIndex: 0,
         modelRun: {
           request: {
             upstream: {

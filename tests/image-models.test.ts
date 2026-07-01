@@ -694,7 +694,10 @@ describe('image model executors', () => {
       expect(result.status).toBe('ok');
       expect(recorded).toHaveLength(1);
       expect(recorded[0]).toMatchObject({
+        modelRunId: expect.any(String),
         projectRelativePath: expect.stringMatching(/^generated\/turn-metadata\/.+\.png$/),
+        artifactRole: 'primary-image',
+        artifactIndex: 0,
         modelRun: {
           request: {
             method: 'POST',
@@ -762,7 +765,10 @@ describe('image model executors', () => {
       expect(result.status).toBe('ok');
       expect(recorded).toHaveLength(1);
       expect(recorded[0]).toMatchObject({
+        modelRunId: expect.any(String),
         projectRelativePath: expect.stringMatching(/^generated\/turn-edit-metadata\/.+\.png$/),
+        artifactRole: 'primary-image',
+        artifactIndex: 0,
         modelRun: {
           request: {
             method: 'POST',
@@ -2207,6 +2213,9 @@ describe('image model executors', () => {
       await expect(readFile(join(projectRoot, result.artifacts[0].projectRelativePath))).resolves.toEqual(tinyPng);
       expect(recorded).toHaveLength(1);
       expect(recorded[0]).toMatchObject({
+        modelRunId: expect.any(String),
+        artifactRole: 'primary-image',
+        artifactIndex: 0,
         modelRun: {
           request: {
             method: 'POST',

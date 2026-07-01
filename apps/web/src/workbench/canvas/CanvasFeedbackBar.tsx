@@ -1,15 +1,8 @@
 import React, { useEffect, useLayoutEffect, useRef, useState } from 'react';
 import {
-  AlertCircle,
-  Check,
-  CircleDot,
-  Heart,
   MapPin,
   Square,
-  Star,
-  ThumbsDown,
-  X,
-  type LucideIcon
+  X
 } from 'lucide-react';
 import {
   CANVAS_FEEDBACK_MARKS,
@@ -19,18 +12,9 @@ import {
 import type { WorkbenchActions } from '../../types';
 import type { CanvasOverlayRuntime } from './CanvasOverlayRuntime';
 import type { CanvasImageFeedbackMode } from './CanvasImageFeedbackLayer';
+import { CANVAS_FEEDBACK_MARK_PRESENTATION } from './canvasFeedbackPresentation';
 import { CommentPillInput, IconButton } from '../ui';
-import { useI18n, type WorkbenchTranslationKey } from '../i18n';
-
-const FEEDBACK_MARKS: Record<CanvasFeedbackMark, { labelKey: WorkbenchTranslationKey; Icon: LucideIcon }> = {
-  like: { labelKey: 'canvas.feedback.like', Icon: Heart },
-  dislike: { labelKey: 'canvas.feedback.dislike', Icon: ThumbsDown },
-  check: { labelKey: 'canvas.feedback.check', Icon: Check },
-  cross: { labelKey: 'canvas.feedback.cross', Icon: X },
-  pending: { labelKey: 'canvas.feedback.pending', Icon: CircleDot },
-  important: { labelKey: 'canvas.feedback.important', Icon: Star },
-  needs_revision: { labelKey: 'canvas.feedback.needsRevision', Icon: AlertCircle }
-};
+import { useI18n } from '../i18n';
 
 export function CanvasFeedbackBar({
   projectRelativePath,
@@ -191,7 +175,7 @@ export function CanvasFeedbackBar({
         <div className="canvas-feedback-actions" role="group" aria-label={i18n.t('canvas.feedback.actions')}>
           {CANVAS_FEEDBACK_MARKS.map((mark) => {
             const pressed = marks.includes(mark);
-            const { labelKey, Icon } = FEEDBACK_MARKS[mark];
+            const { labelKey, Icon } = CANVAS_FEEDBACK_MARK_PRESENTATION[mark];
             return (
               <IconButton
                 key={mark}

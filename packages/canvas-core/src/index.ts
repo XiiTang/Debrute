@@ -36,6 +36,7 @@ export interface CanvasNodeElement {
   height: number;
   z: number;
   layoutMode?: 'manual';
+  videoPlayback?: CanvasVideoPlaybackState;
 }
 
 export type CanvasNodeAvailability =
@@ -97,8 +98,29 @@ export interface CanvasStructureEdgeProjection {
   targetProjectRelativePath: string;
 }
 
+export interface CanvasVideoPlaybackState {
+  currentTimeSeconds: number;
+}
+
+export interface CanvasVideoTextTrack {
+  projectRelativePath: string;
+  fileUrl?: string;
+  revision: string;
+  kind: 'subtitles' | 'captions' | 'chapters' | 'metadata';
+  label: string;
+  srclang?: string;
+  default: boolean;
+}
+
+export interface CanvasVideoPresentation {
+  kind: 'video';
+  durationSeconds?: number;
+  textTracks: CanvasVideoTextTrack[];
+}
+
 export interface ProjectedCanvasNode extends CanvasNodeElement {
   availability: CanvasNodeAvailability;
+  videoPresentation?: CanvasVideoPresentation;
 }
 
 export interface CanvasProjection {
@@ -570,6 +592,41 @@ export function updateCanvasNodeLayers(
   };
 }
 
+export function updateCanvasVideoPlaybackState(
+  canvas: CanvasDocument,
+  input: {
+    updates: Array<{
+      projectRelativePath: string;
+      currentTimeSeconds: number;
+    }>;
+  }
+): CanvasDocument {
+  const updatesByPath = new Map(input.updates.map((update) => {
+    assertCanvasVideoPlaybackTime(update.currentTimeSeconds);
+    return [update.projectRelativePath, normalizeCanvasVideoPlaybackTime(update.currentTimeSeconds)] as const;
+  }));
+  if (updatesByPath.size === 0) {
+    return canvas;
+  }
+  return {
+    ...canvas,
+    nodeElements: canvas.nodeElements.map((nodeElement) => {
+      const currentTimeSeconds = updatesByPath.get(nodeElement.projectRelativePath);
+      if (currentTimeSeconds === undefined || nodeElement.nodeKind !== 'file' || nodeElement.mediaKind !== 'video') {
+        return nodeElement;
+      }
+      if (currentTimeSeconds === 0) {
+        const { videoPlayback: _videoPlayback, ...nodeWithoutPlayback } = nodeElement;
+        return nodeWithoutPlayback;
+      }
+      return {
+        ...nodeElement,
+        videoPlayback: { currentTimeSeconds }
+      };
+    })
+  };
+}
+
 export function canvasNodeLayerOrderTopFirst(canvas: Pick<CanvasDocument, 'nodeElements'>): string[] {
   return [...canvas.nodeElements]
     .sort((left, right) => compareNodeZ(right, left))
@@ -613,6 +670,9 @@ export function reconcileCanvasNodeElements(input: ReconcileCanvasNodeElementsIn
       projectRelativePath: desiredNode.projectRelativePath,
       nodeKind: desiredNode.nodeKind,
       ...(desiredNode.mediaKind ? { mediaKind: desiredNode.mediaKind } : {}),
+      ...(existing?.videoPlayback && desiredNode.nodeKind === 'file' && desiredNode.mediaKind === 'video'
+        ? { videoPlayback: existing.videoPlayback }
+        : {}),
       z: preservedZByPath.get(desiredNode.projectRelativePath) ?? allocateNewZ()
     };
     if (existing?.layoutMode === 'manual') {
@@ -648,6 +708,16 @@ function compareNodeZ(left: CanvasNodeElement, right: CanvasNodeElement): number
     return left.z - right.z;
   }
   return left.projectRelativePath.localeCompare(right.projectRelativePath);
+}
+
+function assertCanvasVideoPlaybackTime(currentTimeSeconds: number): void {
+  if (!Number.isFinite(currentTimeSeconds) || currentTimeSeconds < 0) {
+    throw new Error('Canvas video playback time must be a non-negative finite number.');
+  }
+}
+
+function normalizeCanvasVideoPlaybackTime(currentTimeSeconds: number): number {
+  return Math.round(currentTimeSeconds * 1000) / 1000;
 }
 
 function reorderCanvasNodeElementsTopFirst(

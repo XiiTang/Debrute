@@ -40,6 +40,43 @@ describe('app-server', () => {
     }
   });
 
+  it('uses the integration PATH when projecting video metadata during project refresh', async () => {
+    const projectRoot = await mkdtemp(join(tmpdir(), 'debrute-app-server-video-env-path-'));
+    const binDir = await mkdtemp(join(tmpdir(), 'debrute-app-server-video-env-bin-'));
+    const server = new DebruteAppServer({ integrationEnvPath: binDir });
+    try {
+      await mkdir(join(projectRoot, 'media'), { recursive: true });
+      await writeFile(join(projectRoot, 'media/clip.mp4'), 'video-bytes', 'utf8');
+      await writeFakeFfprobe(binDir, {
+        streams: [{ codec_type: 'video', width: 640, height: 360, duration: '5' }],
+        format: { duration: '5' }
+      });
+      await server.openProject(projectRoot, {
+        initializeIfMissing: true,
+        createDefaultCanvas: true,
+        watchFiles: false
+      });
+      await writeCanvasMap(projectRoot, 'canvas-1', canvasMapSource(['media/clip.mp4']));
+      await server.pushCanvasMapForProject(projectRoot, { canvasId: 'canvas-1' });
+
+      const snapshot = await server.refreshProject();
+      const videoNode = snapshot.projections[0]?.nodes.find((node) => node.projectRelativePath === 'media/clip.mp4');
+
+      expect(videoNode).toMatchObject({
+        projectRelativePath: 'media/clip.mp4',
+        availability: { state: 'available' },
+        videoPresentation: {
+          kind: 'video',
+          durationSeconds: 5
+        }
+      });
+    } finally {
+      server.close();
+      await rm(projectRoot, { recursive: true, force: true });
+      await rm(binDir, { recursive: true, force: true });
+    }
+  });
+
   it('creates the default Canvas registry with the default Canvas', async () => {
     const projectRoot = await mkdtemp(join(tmpdir(), 'debrute-app-server-default-canvas-registry-'));
     const server = new DebruteAppServer();
@@ -2395,6 +2432,16 @@ async function largePreviewablePngBuffer(): Promise<Buffer> {
       channels: 3
     }
   }).png().toBuffer();
+}
+
+async function writeFakeFfprobe(binDir: string, output: unknown): Promise<void> {
+  const path = join(binDir, 'ffprobe');
+  await writeFile(path, [
+    '#!/bin/sh',
+    `printf '%s\\n' ${JSON.stringify(JSON.stringify(output))}`,
+    ''
+  ].join('\n'), 'utf8');
+  await chmod(path, 0o755);
 }
 
 function expectNoAutomaticCanvasNodeOverlaps(nodes: Array<{

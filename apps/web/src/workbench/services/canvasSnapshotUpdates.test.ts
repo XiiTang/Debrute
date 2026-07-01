@@ -26,6 +26,25 @@ describe('canvas snapshot updates', () => {
     });
   });
 
+  it('preserves projected video presentation when applying a local Canvas document update', () => {
+    const original = videoCanvasDocument('canvas-1', 10, 20);
+    const updated = videoCanvasDocument('canvas-1', 80, 90);
+    const projection = videoProjectionFixture(original, 'rev-a');
+    const snapshot = snapshotFixture({
+      canvases: [original],
+      projections: [projection]
+    });
+
+    const next = applyCanvasDocumentToWorkbenchSnapshot(snapshot, updated);
+
+    expect(next.projections[0]?.nodes[0]).toMatchObject({
+      projectRelativePath: 'media/clip.mp4',
+      x: 80,
+      y: 90,
+      videoPresentation: projection.nodes[0]?.videoPresentation
+    });
+  });
+
   it('requires the current projection for availability preservation', () => {
     const snapshot = snapshotFixture({
       canvases: [canvasDocument('canvas-1', 10, 20)],
@@ -106,6 +125,50 @@ function projectionFixture(canvas: CanvasDocument, revision: string): CanvasProj
         mimeType: 'image/png',
         fileUrl: `/api/projects/p/files/raw/${node.projectRelativePath}?v=${revision}`,
         revision
+      }
+    })),
+    edges: [],
+    diagnostics: []
+  };
+}
+
+function videoCanvasDocument(canvasId: string, x: number, y: number): CanvasDocument {
+  return {
+    id: canvasId,
+    name: canvasId,
+    nodeElements: [{
+      projectRelativePath: 'media/clip.mp4',
+      nodeKind: 'file',
+      mediaKind: 'video',
+      x,
+      y,
+      width: 640,
+      height: 360,
+      z: 0
+    }],
+    annotations: [],
+    preferences: {
+      showDiagnostics: true
+    }
+  };
+}
+
+function videoProjectionFixture(canvas: CanvasDocument, revision: string): CanvasProjection {
+  return {
+    canvasId: canvas.id,
+    nodes: canvas.nodeElements.map((node) => ({
+      ...node,
+      availability: {
+        state: 'available',
+        size: 100,
+        mimeType: 'video/mp4',
+        fileUrl: `/api/projects/p/files/raw/${node.projectRelativePath}?v=${revision}`,
+        revision
+      },
+      videoPresentation: {
+        kind: 'video',
+        durationSeconds: 5,
+        textTracks: []
       }
     })),
     edges: [],

@@ -1,11 +1,12 @@
 import React, { useCallback, useEffect, useReducer, useRef, useState } from 'react';
-import { AlertTriangle, File, FileText, Folder, Image as ImageIcon, Maximize2, Music2, RefreshCw, Save, Video } from 'lucide-react';
+import { AlertTriangle, File, FileText, Folder, Image as ImageIcon, Maximize2, Music2, RefreshCw, Save } from 'lucide-react';
 import type { CanvasFeedbackEntry, CanvasFeedbackGeometry, ProjectedCanvasNode } from '@debrute/canvas-core';
 import type { TextFileBuffer, WorkbenchActions } from '../../types';
 import { CanvasTextEditor } from './CanvasTextEditor';
+import { CanvasVideoNodeContent } from './CanvasVideoNodeContent';
+import type { CanvasVideoPlayerHandle } from './CanvasVideoPlayerAdapter';
 import { useCanvasImageNodeAsset, type CanvasImageNodeAssetHookState } from './CanvasImageNodeAssetContext';
 import { CanvasImageFeedbackLayer, type CanvasImageFeedbackDraftRegion, type CanvasImageFeedbackMode } from './CanvasImageFeedbackLayer';
-import type { CanvasLoadedImage } from './canvasImagePreviews';
 import {
   canvasTextPreviewImageReducer,
   initialCanvasTextPreviewImageState,
@@ -13,6 +14,9 @@ import {
   type CanvasTextPreviewImageState,
   type CanvasTextPreviewSource
 } from './CanvasTextPreviewRuntime';
+import type { CanvasTextEditorFocusRequest } from './CanvasTextEditorRuntime';
+import type { CanvasVideoPreviewSource } from './canvasVideoPreviews';
+import { preloadCanvasImageForHandoff } from './CanvasMediaHandoff';
 import { Button, IconButton, StatusPill } from '../ui';
 import { useI18n, type WorkbenchI18n } from '../i18n';
 
@@ -24,6 +28,9 @@ export interface CanvasNodeContentProps {
   textBuffer: TextFileBuffer | undefined;
   textPreview?: CanvasTextPreviewSource | undefined;
   textPreviewError?: string | undefined;
+  videoPreview?: CanvasVideoPreviewSource | undefined;
+  videoPreviewError?: string | undefined;
+  forceVideoPlayerMounted?: boolean | undefined;
   previewInteractionActive?: boolean | undefined;
   feedbackEntry?: CanvasFeedbackEntry | undefined;
   localFeedbackMode?: CanvasImageFeedbackMode | undefined;
@@ -32,6 +39,11 @@ export interface CanvasNodeContentProps {
     projectRelativePath: string;
     geometry: CanvasFeedbackGeometry;
   }) => void) | undefined;
+  onVideoPlayerMounted: (projectRelativePath: string) => void;
+  onVideoPlayingChange: (projectRelativePath: string, playing: boolean) => void;
+  onRegisterVideoTarget: (projectRelativePath: string, target: CanvasVideoPlayerHandle | undefined) => void;
+  onUpdateVideoPlaybackTime: (projectRelativePath: string, currentTimeSeconds: number) => void | Promise<void>;
+  onVideoPreviewError?: ((projectRelativePath: string, preview: CanvasVideoPreviewSource, message: string) => void) | undefined;
   onSelectNode: () => void;
   onTitlePointerDown: (event: React.PointerEvent<Element>) => void;
   onTitlePointerMove: (event: React.PointerEvent<Element>) => void;
@@ -46,11 +58,19 @@ export function CanvasNodeContent({
   textBuffer,
   textPreview,
   textPreviewError,
+  videoPreview,
+  videoPreviewError,
+  forceVideoPlayerMounted = false,
   previewInteractionActive = false,
   feedbackEntry,
   localFeedbackMode,
   pendingFeedbackRegion,
   onLocalFeedbackDraft,
+  onVideoPlayerMounted,
+  onVideoPlayingChange,
+  onRegisterVideoTarget,
+  onUpdateVideoPlaybackTime,
+  onVideoPreviewError,
   onSelectNode,
   onTitlePointerDown,
   onTitlePointerMove,
@@ -127,6 +147,24 @@ export function CanvasNodeContent({
     );
   }
 
+  if (node.mediaKind === 'video') {
+    return (
+      <CanvasVideoNodeContent
+        node={node}
+        selected={selected}
+        videoPreview={videoPreview}
+        videoPreviewError={videoPreviewError}
+        forcePlayerMounted={forceVideoPlayerMounted}
+        onSelectNode={onSelectNode}
+        onPlayerMounted={onVideoPlayerMounted}
+        onPlayingChange={onVideoPlayingChange}
+        onRegisterVideoTarget={onRegisterVideoTarget}
+        onUpdatePlaybackTime={onUpdateVideoPlaybackTime}
+        onVideoPreviewError={onVideoPreviewError}
+      />
+    );
+  }
+
   const canRenderMediaPreview = node.availability.state === 'available'
     && (node.mediaKind === 'image' || mediaSrc !== undefined)
     && (!problem || node.mediaKind === 'image');
@@ -148,14 +186,6 @@ export function CanvasNodeContent({
                 })}
               />
             </>
-          ) : node.mediaKind === 'video' ? (
-            <video
-              key={`${mediaSrc}:${mediaRetryNonce}`}
-              controls
-              preload="none"
-              src={mediaSrc}
-              onError={() => setMediaError(i18n.t('canvas.node.unableToLoad', { path: node.projectRelativePath }))}
-            />
           ) : (
             <audio
               key={`${mediaSrc}:${mediaRetryNonce}`}
@@ -169,7 +199,7 @@ export function CanvasNodeContent({
       ) : (
         <div className="canvas-node-preview">
           <div className={problem ? 'db-canvas-node-placeholder db-canvas-node-placeholder--problem' : 'db-canvas-node-placeholder'}>
-            {problem ? <AlertTriangle size={22} /> : node.mediaKind === 'video' ? <Video size={22} /> : node.mediaKind === 'audio' ? <Music2 size={22} /> : <ImageIcon size={22} />}
+            {problem ? <AlertTriangle size={22} /> : node.mediaKind === 'audio' ? <Music2 size={22} /> : <ImageIcon size={22} />}
             <strong>{problem?.title ?? mediaKindLabel(node.mediaKind, i18n)}</strong>
             <span>{problem?.message ?? nodeDisplayName(node.projectRelativePath, i18n)}</span>
             {mediaProblem ? (
@@ -186,7 +216,7 @@ export function CanvasNodeContent({
           </div>
         </div>
       )}
-      {node.mediaKind === 'video' || node.mediaKind === 'audio' ? (
+      {node.mediaKind === 'audio' ? (
         <div className="db-canvas-node-caption">
           <span>{nodeDisplayName(node.projectRelativePath, i18n)}</span>
         </div>
@@ -288,107 +318,6 @@ export function CanvasImageNodePreview({
       onRetry={imageState.kind === 'placeholder' ? imageState.retry : undefined}
     />
   );
-}
-
-export function scheduleCanvasImageHandoffAfterPaint(
-  callback: () => void,
-  scheduler?: {
-    requestFrame: (callback: FrameRequestCallback) => number;
-    cancelFrame: (handle: number) => void;
-  }
-): () => void {
-  const requestFrame = scheduler?.requestFrame ?? window.requestAnimationFrame.bind(window);
-  const cancelFrame = scheduler?.cancelFrame ?? window.cancelAnimationFrame.bind(window);
-  let cancelled = false;
-  let firstFrame: number | undefined;
-  let secondFrame: number | undefined;
-
-  firstFrame = requestFrame(() => {
-    firstFrame = undefined;
-    if (cancelled) {
-      return;
-    }
-    secondFrame = requestFrame(() => {
-      secondFrame = undefined;
-      if (!cancelled) {
-        callback();
-      }
-    });
-  });
-
-  return () => {
-    cancelled = true;
-    if (firstFrame !== undefined) {
-      cancelFrame(firstFrame);
-    }
-    if (secondFrame !== undefined) {
-      cancelFrame(secondFrame);
-    }
-  };
-}
-
-export function preloadCanvasImageForHandoff(input: {
-  image: CanvasLoadedImage;
-  resolveLoaded: (loadKey: string) => void;
-  rejectLoaded: (loadKey: string) => void;
-  createImage?: (() => HTMLImageElement) | undefined;
-  scheduler?: Parameters<typeof scheduleCanvasImageHandoffAfterPaint>[1];
-}): () => void {
-  const image = input.createImage?.() ?? new Image();
-  let cancelled = false;
-  let settled = false;
-  let loadStarted = false;
-  let cancelHandoff: (() => void) | undefined;
-
-  const reject = () => {
-    if (cancelled || settled) {
-      return;
-    }
-    settled = true;
-    input.rejectLoaded(input.image.loadKey);
-  };
-
-  const resolveAfterDecode = () => {
-    if (cancelled || settled) {
-      return;
-    }
-    settled = true;
-    cancelHandoff = scheduleCanvasImageHandoffAfterPaint(() => {
-      cancelHandoff = undefined;
-      if (!cancelled) {
-        input.resolveLoaded(input.image.loadKey);
-      }
-    }, input.scheduler);
-  };
-
-  const load = () => {
-    if (cancelled || settled || loadStarted) {
-      return;
-    }
-    loadStarted = true;
-    void image.decode().then(resolveAfterDecode, reject);
-  };
-
-  image.decoding = 'async';
-  image.addEventListener('load', load);
-  image.addEventListener('error', reject);
-  image.src = input.image.src;
-
-  if (image.complete) {
-    if (image.naturalWidth > 0) {
-      load();
-    } else {
-      reject();
-    }
-  }
-
-  return () => {
-    cancelled = true;
-    cancelHandoff?.();
-    image.removeEventListener('load', load);
-    image.removeEventListener('error', reject);
-    image.src = '';
-  };
 }
 
 function CanvasGenericNodeContent({
@@ -506,6 +435,8 @@ function CanvasTextNodeContent({
 }): React.ReactElement {
   const { registerTextBody } = useCanvasTextPreviewRuntime();
   const active = selected;
+  const nextFocusRequestIdRef = useRef(0);
+  const [focusRequest, setFocusRequest] = useState<CanvasTextEditorFocusRequest>();
   const [textPreviewVariantError, setTextPreviewVariantError] = useState<string>();
   const textPreviewProblemMessage = textPreviewError ?? textPreviewVariantError;
   const textPreviewProblem = !active && textPreviewProblemMessage
@@ -526,6 +457,17 @@ function CanvasTextNodeContent({
     if (!selected) {
       onSelectNode();
     }
+  };
+  const focusRequestForPointerEvent = (event: React.PointerEvent<Element>): CanvasTextEditorFocusRequest | undefined => {
+    if (selected || !buffer || bodyProblem || buffer.error) {
+      return undefined;
+    }
+    nextFocusRequestIdRef.current += 1;
+    return {
+      requestId: nextFocusRequestIdRef.current,
+      clientX: event.clientX,
+      clientY: event.clientY
+    };
   };
   const reportTextPreviewVariantError = useCallback(() => {
     setTextPreviewVariantError(i18n.t('canvas.node.textPreviewVariantLoadError', {
@@ -594,6 +536,8 @@ function CanvasTextNodeContent({
         data-canvas-local-wheel="focus"
         onPointerDown={(event) => {
           event.stopPropagation();
+          const request = focusRequestForPointerEvent(event);
+          setFocusRequest(request);
           selectSelf();
         }}
         onPointerUp={(event) => {
@@ -615,9 +559,13 @@ function CanvasTextNodeContent({
             language={buffer.language}
             wordWrap={buffer.wordWrap}
             visible={!culled || selected}
+            focusRequest={focusRequest}
             onChange={(content) => actions.updateTextFileBuffer(node.projectRelativePath, content)}
             onSave={() => void actions.saveTextFileBuffer(node.projectRelativePath)}
             onToggleWordWrap={() => actions.toggleTextFileWordWrap(node.projectRelativePath)}
+            onFocusRequestConsumed={(requestId) => {
+              setFocusRequest((current) => current?.requestId === requestId ? undefined : current);
+            }}
           />
         ) : buffer ? (
           <CanvasTextPreviewImage

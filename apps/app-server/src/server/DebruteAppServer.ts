@@ -85,11 +85,13 @@ import type {
   TerminalInputWrite,
   TerminalResize,
   TerminalSessionList,
-  TerminalSessionResult
+  TerminalSessionResult,
+  UpdateCanvasVideoPlaybackStateInput
 } from '@debrute/app-protocol';
 import { GlobalConfigStore } from '../config/GlobalConfigStore.js';
 import {
   readCanvasNodeLayoutSize,
+  readCanvasVideoMetadata,
   type ReadCanvasNodeLayoutSizeInput
 } from '../canvas/CanvasNodeDimensionsService.js';
 import {
@@ -123,6 +125,12 @@ import {
   type CanvasTextPreviewSaveSourceInput,
   type CanvasTextPreviewService
 } from '../canvas/CanvasTextPreviewService.js';
+import {
+  createCanvasVideoPreviewService,
+  type CanvasVideoPreviewReadSourcesInput,
+  type CanvasVideoPreviewResolveVariantInput,
+  type CanvasVideoPreviewService
+} from '../canvas/CanvasVideoPreviewService.js';
 import { CanvasProjectionService } from '../canvas/CanvasProjectionService.js';
 import { CanvasSessionService } from '../canvas/CanvasSessionService.js';
 import { CanvasRegistryService } from '../canvas/CanvasRegistryService.js';
@@ -228,6 +236,7 @@ export class DebruteAppServer {
   private readonly canvasFeedbackService: CanvasFeedbackService;
   private readonly canvasImagePreviewService: CanvasImagePreviewService;
   private readonly canvasTextPreviewService: CanvasTextPreviewService;
+  private readonly canvasVideoPreviewService: CanvasVideoPreviewService;
   private readonly canvasProjectionService: CanvasProjectionService;
   private readonly canvasSessionService: CanvasSessionService;
   private readonly canvasRegistryService: CanvasRegistryService;
@@ -262,7 +271,15 @@ export class DebruteAppServer {
     });
     this.canvasImagePreviewService = createCanvasImagePreviewService();
     this.canvasTextPreviewService = createCanvasTextPreviewService();
-    this.canvasProjectionService = new CanvasProjectionService();
+    this.canvasVideoPreviewService = createCanvasVideoPreviewService({
+      ...(this.options.integrationEnvPath !== undefined ? { envPath: this.options.integrationEnvPath } : {})
+    });
+    this.canvasProjectionService = new CanvasProjectionService({
+      readCanvasVideoMetadata: (input) => readCanvasVideoMetadata({
+        ...input,
+        ...(this.options.integrationEnvPath !== undefined ? { envPath: this.options.integrationEnvPath } : {})
+      })
+    });
     this.canvasSessionService = new CanvasSessionService({
       writeCanvasText: (projectRoot, canvasPath, content, expectedHash) => this.writeProjectDocumentText(
         projectRoot,
@@ -271,7 +288,7 @@ export class DebruteAppServer {
         content,
         expectedHash
       ),
-      projectCanvasWithKnownAvailability: (canvas, projection) => this.canvasProjectionService.projectCanvasWithKnownAvailability(canvas, projection)
+      projectCanvasWithKnownProjection: (canvas, projection) => this.canvasProjectionService.projectCanvasWithKnownProjection(canvas, projection)
     });
     this.canvasRegistryService = new CanvasRegistryService({
       loadCanvasDocuments: (projectRoot) => this.canvasSessionService.loadCanvasDocuments(projectRoot),
@@ -636,6 +653,26 @@ export class DebruteAppServer {
     });
   }
 
+  async readCanvasVideoPreviewSources(
+    input: Omit<CanvasVideoPreviewReadSourcesInput, 'projectRoot'>
+  ) {
+    const current = this.getSnapshot();
+    return this.canvasVideoPreviewService.readSources({
+      projectRoot: current.projectRoot,
+      ...input
+    });
+  }
+
+  async resolveCanvasVideoPreviewVariant(
+    input: Omit<CanvasVideoPreviewResolveVariantInput, 'projectRoot'>
+  ) {
+    const current = this.getSnapshot();
+    return this.canvasVideoPreviewService.resolveVariant({
+      projectRoot: current.projectRoot,
+      ...input
+    });
+  }
+
   async pushCanvasMapForProject(projectRoot: string, input: { canvasId: string }): Promise<{ ok: true; command: 'canvas-map.push'; canvasId: string }> {
     try {
       return await this.canvasMapSessionService.pushCanvasMapForProject(await realpath(projectRoot), input);
@@ -767,6 +804,12 @@ export class DebruteAppServer {
   }): Promise<{ canvas: CanvasDocument; projection: CanvasProjection }> {
     return this.enqueueSessionOperation(async () => (
       this.applyCanvasSessionUpdate(await this.canvasSessionService.updateCanvasNodeLayers(this.getSnapshot(), input))
+    ));
+  }
+
+  async updateCanvasVideoPlaybackState(input: UpdateCanvasVideoPlaybackStateInput): Promise<{ canvas: CanvasDocument; projection: CanvasProjection }> {
+    return this.enqueueSessionOperation(async () => (
+      this.applyCanvasSessionUpdate(await this.canvasSessionService.updateCanvasVideoPlaybackState(this.getSnapshot(), input))
     ));
   }
 

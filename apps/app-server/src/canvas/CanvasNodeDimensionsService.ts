@@ -11,6 +11,16 @@ export interface ReadCanvasNodeLayoutSizeInput {
   envPath?: string;
 }
 
+export interface ReadCanvasVideoMetadataInput {
+  projectRoot: string;
+  projectRelativePath: string;
+  envPath?: string;
+}
+
+export interface CanvasVideoMetadata extends CanvasLayoutSize {
+  durationSeconds?: number;
+}
+
 const FIXED_CANVAS_LAYOUT_SCALE = 10;
 const GENERIC_NODE_MAX_VISUAL_WIDTH = 480;
 const LATIN_CHARACTER_VISUAL_WIDTH = 8;
@@ -48,6 +58,11 @@ export async function readCanvasNodeLayoutSize(input: ReadCanvasNodeLayoutSizeIn
   return readVideoLayoutSize(absolutePath, input.envPath);
 }
 
+export async function readCanvasVideoMetadata(input: ReadCanvasVideoMetadataInput): Promise<CanvasVideoMetadata> {
+  const absolutePath = await resolveExistingProjectPath(input.projectRoot, input.projectRelativePath);
+  return readVideoMetadata(absolutePath, input.envPath);
+}
+
 async function readImageLayoutSize(absolutePath: string): Promise<CanvasLayoutSize> {
   const metadata = await sharp(absolutePath).metadata();
   if (!isPositiveDimension(metadata.width) || !isPositiveDimension(metadata.height)) {
@@ -63,10 +78,29 @@ async function readVideoLayoutSize(
   absolutePath: string,
   envPath: string | undefined
 ): Promise<CanvasLayoutSize> {
-  return parseFfprobeDimensions(await runFfprobe(absolutePath, envPath));
+  const metadata = await readVideoMetadata(absolutePath, envPath);
+  return {
+    width: metadata.width,
+    height: metadata.height
+  };
+}
+
+async function readVideoMetadata(
+  absolutePath: string,
+  envPath: string | undefined
+): Promise<CanvasVideoMetadata> {
+  return parseFfprobeVideoMetadata(await runFfprobe(absolutePath, envPath));
 }
 
 export function parseFfprobeDimensions(stdout: string): CanvasLayoutSize {
+  const metadata = parseFfprobeVideoMetadata(stdout);
+  return {
+    width: metadata.width,
+    height: metadata.height
+  };
+}
+
+export function parseFfprobeVideoMetadata(stdout: string): CanvasVideoMetadata {
   const parsed = JSON.parse(stdout) as unknown;
   if (!isRecord(parsed) || !Array.isArray(parsed.streams)) {
     throw new Error('ffprobe output did not include streams.');
@@ -78,9 +112,13 @@ export function parseFfprobeDimensions(stdout: string): CanvasLayoutSize {
   if (!isRecord(stream) || !isPositiveDimension(stream.width) || !isPositiveDimension(stream.height)) {
     throw new Error('ffprobe output did not include video width and height.');
   }
+  const durationSeconds = positiveSeconds(stream.duration) ?? (
+    isRecord(parsed.format) ? positiveSeconds(parsed.format.duration) : undefined
+  );
   return {
     width: stream.width,
-    height: stream.height
+    height: stream.height,
+    ...(durationSeconds === undefined ? {} : { durationSeconds })
   };
 }
 
@@ -92,7 +130,7 @@ function runFfprobe(absolutePath: string, envPath: string | undefined): Promise<
       '-select_streams',
       'v:0',
       '-show_entries',
-      'stream=codec_type,width,height',
+      'stream=codec_type,width,height,duration:format=duration',
       '-of',
       'json',
       absolutePath
@@ -125,6 +163,15 @@ function runFfprobe(absolutePath: string, envPath: string | undefined): Promise<
 
 function isPositiveDimension(value: unknown): value is number {
   return typeof value === 'number' && Number.isFinite(value) && value > 0;
+}
+
+function positiveSeconds(value: unknown): number | undefined {
+  const numberValue = typeof value === 'string' && value.trim() !== ''
+    ? Number(value)
+    : typeof value === 'number'
+      ? value
+      : Number.NaN;
+  return Number.isFinite(numberValue) && numberValue > 0 ? numberValue : undefined;
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {

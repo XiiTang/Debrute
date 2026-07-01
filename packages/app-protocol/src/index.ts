@@ -344,6 +344,47 @@ export interface CanvasTextPreviewSourceAvailabilityResponse {
   sources: Record<string, CanvasTextPreviewSourceAvailabilityView>;
 }
 
+export type CanvasVideoPreviewSourceKind =
+  | 'initial-poster'
+  | 'playback-frame';
+
+export interface CanvasVideoPreviewSourceTarget {
+  projectRelativePath: string;
+  videoRevision: string;
+  currentTimeSeconds: number;
+}
+
+export type CanvasVideoPreviewSourceView = CanvasVideoPreviewSourceTarget & (
+  | {
+      status: 'available';
+      sourceKind: CanvasVideoPreviewSourceKind;
+      sourceKey: string;
+      sourceWidth: number;
+    }
+  | {
+      status: 'error';
+      sourceKind: CanvasVideoPreviewSourceKind;
+      message: string;
+    }
+);
+
+export interface CanvasVideoPreviewSourceRequest {
+  canvasId: string;
+  targets: CanvasVideoPreviewSourceTarget[];
+}
+
+export interface CanvasVideoPreviewSourceResponse {
+  sources: Record<string, CanvasVideoPreviewSourceView>;
+}
+
+export interface UpdateCanvasVideoPlaybackStateInput {
+  canvasId: string;
+  updates: Array<{
+    projectRelativePath: string;
+    currentTimeSeconds: number;
+  }>;
+}
+
 export interface ImageModelSettingRecord {
   debruteModelId: string;
   summary: string;
@@ -627,10 +668,19 @@ export interface ProductUpdateApplyResult {
   state: DebruteProductState;
 }
 
+export type GeneratedArtifactRole =
+  | 'primary-image'
+  | 'primary-video'
+  | 'last-frame'
+  | 'other';
+
 export interface GeneratedAssetRecord {
   recordId: string;
+  modelRunId: string;
   projectRelativePath: string;
   createdAt: string;
+  artifactRole: GeneratedArtifactRole;
+  artifactIndex: number;
   fingerprint: {
     algorithm: 'sha256';
     hash: string;
@@ -1041,6 +1091,7 @@ export interface WorkbenchApiClient {
   writeProjectTextFile(projectRelativePath: string, content: string): Promise<WorkbenchProjectTextFileWriteResult>;
   saveCanvasTextPreviewSource(input: SaveCanvasTextPreviewSourceInput): Promise<SaveCanvasTextPreviewSourceResult>;
   readCanvasTextPreviewSources(input: CanvasTextPreviewSourceAvailabilityRequest): Promise<CanvasTextPreviewSourceAvailabilityResponse>;
+  readCanvasVideoPreviewSources(input: CanvasVideoPreviewSourceRequest): Promise<CanvasVideoPreviewSourceResponse>;
   getDesktopPlatform(): Promise<NodeJS.Platform>;
   createProjectFile(input: { parentProjectRelativePath: string; name: string }): Promise<WorkbenchProjectFileOperationResult>;
   createProjectDirectory(input: { parentProjectRelativePath: string; name: string }): Promise<WorkbenchProjectFileOperationResult>;
@@ -1069,6 +1120,7 @@ export interface WorkbenchApiClient {
     canvasId: string;
     nodeLayouts?: Array<{ projectRelativePath: string; x: number; y: number; width?: number; height?: number }>;
   }): Promise<WorkbenchCanvasDocumentMutationResult>;
+  updateCanvasVideoPlaybackState(input: UpdateCanvasVideoPlaybackStateInput): Promise<WorkbenchCanvasDocumentMutationResult>;
   resetCanvasNodeLayouts(input: ResetCanvasNodeLayoutsInput): Promise<WorkbenchCanvasResetLayoutResult>;
   updateCanvasNodeLayers(input: {
     canvasId: string;

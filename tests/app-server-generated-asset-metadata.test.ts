@@ -15,7 +15,10 @@ describe('app-server generated asset metadata', () => {
       await server.openProject(root, { initializeIfMissing: true, createDefaultCanvas: true });
 
       await server.recordGeneratedAssetMetadata({
+        modelRunId: 'model-run-1',
         projectRelativePath: 'generated/cover.png',
+        artifactRole: 'primary-image',
+        artifactIndex: 0,
         modelRun: { request: { prompt: 'cover' }, output: { ok: true } }
       });
       await rename(join(root, 'generated/cover.png'), join(root, 'generated/renamed-cover.png'));
@@ -45,7 +48,10 @@ describe('app-server generated asset metadata', () => {
       await mkdir(join(root, '.debrute/cache/file-fingerprints.json'), { recursive: true });
 
       const record = await server.recordGeneratedAssetMetadata({
+        modelRunId: 'model-run-1',
         projectRelativePath: 'generated/cover.png',
+        artifactRole: 'primary-image',
+        artifactIndex: 0,
         modelRun: { request: { prompt: 'cover' }, output: { ok: true } }
       });
 

@@ -19,38 +19,87 @@ import {
   type Diagnostic
 } from '@debrute/canvas-core';
 import { canvasImagePreviewSourceInfo } from './CanvasImagePreviewService.js';
+import type {
+  CanvasVideoMetadata,
+  ReadCanvasVideoMetadataInput
+} from './CanvasNodeDimensionsService.js';
+import { buildCanvasVideoPresentation } from './CanvasVideoPresentationService.js';
+
+export interface CanvasProjectionServiceDependencies {
+  readCanvasVideoMetadata(input: ReadCanvasVideoMetadataInput): Promise<CanvasVideoMetadata>;
+}
 
 export class CanvasProjectionService {
+  constructor(private readonly dependencies: CanvasProjectionServiceDependencies) {}
+
   async projectCanvasDocument(
     projectRoot: string,
     canvas: CanvasDocument,
     diagnostics: Diagnostic[] = []
   ): Promise<CanvasProjection> {
-    const availabilityByPath = new Map(await Promise.all(canvas.nodeElements.map(async (node) => [
+    const inspectionByPath = new Map(await Promise.all(canvas.nodeElements.map(async (node) => [
       node.projectRelativePath,
-      await inspectCanvasNodeAvailability(projectRoot, node)
+      await inspectCanvasNode(projectRoot, node, this.dependencies)
     ] as const)));
-    return projectCanvas({
+    const projected = projectCanvas({
       canvas,
       diagnostics,
-      nodeAvailability: (node) => availabilityByPath.get(node.projectRelativePath)!
+      nodeAvailability: (node) => inspectionByPath.get(node.projectRelativePath)!.availability
     });
+    return {
+      ...projected,
+      nodes: await Promise.all(projected.nodes.map(async (node) => {
+        if (node.mediaKind !== 'video' || node.availability.state !== 'available') {
+          return node;
+        }
+        const inspection = inspectionByPath.get(node.projectRelativePath)!;
+        return {
+          ...node,
+          videoPresentation: await buildCanvasVideoPresentation({
+            projectRoot,
+            projectRelativePath: node.projectRelativePath,
+            durationSeconds: inspection.videoMetadata?.durationSeconds
+          })
+        };
+      }))
+    };
   }
 
-  projectCanvasWithKnownAvailability(canvas: CanvasDocument, projection: CanvasProjection): CanvasProjection {
-    const availabilityByPath = new Map(projection.nodes.map((node) => [node.projectRelativePath, node.availability]));
-    return projectCanvas({
+  projectCanvasWithKnownProjection(canvas: CanvasDocument, projection: CanvasProjection): CanvasProjection {
+    const projectionByPath = new Map(projection.nodes.map((node) => [node.projectRelativePath, node]));
+    const projected = projectCanvas({
       canvas,
       diagnostics: projection.diagnostics,
       nodeAvailability: (node) => {
-        const availability = availabilityByPath.get(node.projectRelativePath);
-        if (!availability) {
+        const projectedNode = projectionByPath.get(node.projectRelativePath);
+        if (!projectedNode) {
           throw new Error(`Canvas node availability is not loaded: ${node.projectRelativePath}`);
         }
-        return availability;
+        return projectedNode.availability;
       }
     });
+    return {
+      ...projected,
+      nodes: projected.nodes.map((node) => {
+        if (node.mediaKind !== 'video' || node.availability.state !== 'available') {
+          return node;
+        }
+        const projectedNode = projectionByPath.get(node.projectRelativePath);
+        if (!projectedNode?.videoPresentation) {
+          throw new Error(`Canvas video presentation is not loaded: ${node.projectRelativePath}`);
+        }
+        return {
+          ...node,
+          videoPresentation: projectedNode.videoPresentation
+        };
+      })
+    };
   }
+}
+
+interface CanvasNodeInspection {
+  availability: CanvasNodeAvailability;
+  videoMetadata?: CanvasVideoMetadata;
 }
 
 export function assertCurrentCanvasDocument(value: unknown, filePath: string): CanvasDocument {
@@ -160,6 +209,33 @@ async function inspectCanvasNodeAvailability(projectRoot: string, node: CanvasNo
   }
 }
 
+async function inspectCanvasNode(
+  projectRoot: string,
+  node: CanvasNodeElement,
+  dependencies: CanvasProjectionServiceDependencies
+): Promise<CanvasNodeInspection> {
+  const availability = await inspectCanvasNodeAvailability(projectRoot, node);
+  if (availability.state !== 'available' || node.mediaKind !== 'video') {
+    return { availability };
+  }
+  try {
+    return {
+      availability,
+      videoMetadata: await dependencies.readCanvasVideoMetadata({
+        projectRoot,
+        projectRelativePath: node.projectRelativePath
+      })
+    };
+  } catch (error) {
+    return {
+      availability: {
+        state: 'unreadable',
+        message: errorMessage(error)
+      }
+    };
+  }
+}
+
 function isCurrentCanvasDocument(value: unknown): value is CanvasDocument {
   if (!isRecord(value)) {
     return false;
@@ -193,7 +269,17 @@ function isCurrentCanvasNodeElement(value: unknown): value is CanvasNodeElement 
     && typeof value.width === 'number'
     && typeof value.height === 'number'
     && typeof value.z === 'number'
-    && (value.layoutMode === undefined || value.layoutMode === 'manual');
+    && (value.layoutMode === undefined || value.layoutMode === 'manual')
+    && (value.videoPlayback === undefined
+      || (value.nodeKind === 'file' && value.mediaKind === 'video' && isCurrentCanvasVideoPlaybackState(value.videoPlayback)));
+}
+
+function isCurrentCanvasVideoPlaybackState(value: unknown): value is NonNullable<CanvasNodeElement['videoPlayback']> {
+  const currentTimeSeconds = isRecord(value) ? value.currentTimeSeconds : undefined;
+  return isRecord(value)
+    && typeof currentTimeSeconds === 'number'
+    && Number.isFinite(currentTimeSeconds)
+    && currentTimeSeconds >= 0;
 }
 
 function mimeTypeFromProjectPath(projectRelativePath: string, firstLine?: string): string {

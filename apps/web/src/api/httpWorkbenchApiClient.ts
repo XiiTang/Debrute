@@ -3,6 +3,7 @@ import type {
   AdobeBridgeStateView,
   BrowserSessionCredential,
   CanvasTextPreviewSourceAvailabilityResponse,
+  CanvasVideoPreviewSourceResponse,
   DebruteProductState,
   DebruteRuntimeInfo,
   DebruteHttpErrorBody,
@@ -27,6 +28,7 @@ import type {
   TerminalEventSubscription,
   TerminalSessionList,
   TerminalSessionResult,
+  UpdateCanvasVideoPlaybackStateInput,
   VideoModelSettingsView,
   WorkbenchEvent,
   WorkbenchApiClient,
@@ -359,9 +361,14 @@ export function createHttpWorkbenchApiClient(options: HttpWorkbenchApiClientOpti
       projectPath('/canvas-text-previews/source'),
       canvasTextPreviewSourceFormData(input)
     ),
-    readCanvasTextPreviewSources: (input) => request<CanvasTextPreviewSourceAvailabilityResponse>(
+  readCanvasTextPreviewSources: (input) => request<CanvasTextPreviewSourceAvailabilityResponse>(
       'POST',
       projectPath('/canvas-text-previews/sources'),
+      input
+    ),
+    readCanvasVideoPreviewSources: (input) => request<CanvasVideoPreviewSourceResponse>(
+      'POST',
+      projectPath('/canvas-video-previews/sources'),
       input
     ),
     getDesktopPlatform: async () => (
@@ -451,6 +458,11 @@ export function createHttpWorkbenchApiClient(options: HttpWorkbenchApiClientOpti
     updateCanvasNodeLayers: (input) => requestRevisioned<WorkbenchCanvasDocumentMutationResult>('PATCH', projectPath(`/canvases/${encodeURIComponent(input.canvasId)}/node-layers`), {
       nodeProjectRelativePathsTopFirst: input.nodeProjectRelativePathsTopFirst
     }),
+    updateCanvasVideoPlaybackState: (input: UpdateCanvasVideoPlaybackStateInput) => requestRevisioned<WorkbenchCanvasDocumentMutationResult>(
+      'PATCH',
+      projectPath(`/canvases/${encodeURIComponent(input.canvasId)}/video-playback`),
+      { updates: input.updates }
+    ),
     imageModelGetSettings: () => request<ImageModelSettingsView>('GET', '/api/models/image'),
     imageModelSaveSetting: (modelId: string, input: SaveImageModelSettingInput) => (
       request<ImageModelSettingsView>('PUT', `/api/models/image/${encodeURIComponent(modelId)}`, input)
