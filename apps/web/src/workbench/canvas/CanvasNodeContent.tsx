@@ -15,6 +15,7 @@ import {
   type CanvasTextPreviewImageState,
   type CanvasTextPreviewSource
 } from './CanvasTextPreviewRuntime';
+import type { CanvasTextEditorFocusRequest } from './CanvasTextEditorRuntime';
 import type { CanvasVideoPreviewSource } from './canvasVideoPreviews';
 import { Button, IconButton, StatusPill } from '../ui';
 import { useI18n, type WorkbenchI18n } from '../i18n';
@@ -535,6 +536,8 @@ function CanvasTextNodeContent({
 }): React.ReactElement {
   const { registerTextBody } = useCanvasTextPreviewRuntime();
   const active = selected;
+  const nextFocusRequestIdRef = useRef(0);
+  const [focusRequest, setFocusRequest] = useState<CanvasTextEditorFocusRequest>();
   const [textPreviewVariantError, setTextPreviewVariantError] = useState<string>();
   const textPreviewProblemMessage = textPreviewError ?? textPreviewVariantError;
   const textPreviewProblem = !active && textPreviewProblemMessage
@@ -555,6 +558,17 @@ function CanvasTextNodeContent({
     if (!selected) {
       onSelectNode();
     }
+  };
+  const focusRequestForPointerEvent = (event: React.PointerEvent<Element>): CanvasTextEditorFocusRequest | undefined => {
+    if (selected || !buffer || bodyProblem || buffer.error) {
+      return undefined;
+    }
+    nextFocusRequestIdRef.current += 1;
+    return {
+      requestId: nextFocusRequestIdRef.current,
+      clientX: event.clientX,
+      clientY: event.clientY
+    };
   };
   const reportTextPreviewVariantError = useCallback(() => {
     setTextPreviewVariantError(i18n.t('canvas.node.textPreviewVariantLoadError', {
@@ -623,6 +637,8 @@ function CanvasTextNodeContent({
         data-canvas-local-wheel="focus"
         onPointerDown={(event) => {
           event.stopPropagation();
+          const request = focusRequestForPointerEvent(event);
+          setFocusRequest(request);
           selectSelf();
         }}
         onPointerUp={(event) => {
@@ -644,9 +660,13 @@ function CanvasTextNodeContent({
             language={buffer.language}
             wordWrap={buffer.wordWrap}
             visible={!culled || selected}
+            focusRequest={focusRequest}
             onChange={(content) => actions.updateTextFileBuffer(node.projectRelativePath, content)}
             onSave={() => void actions.saveTextFileBuffer(node.projectRelativePath)}
             onToggleWordWrap={() => actions.toggleTextFileWordWrap(node.projectRelativePath)}
+            onFocusRequestConsumed={(requestId) => {
+              setFocusRequest((current) => current?.requestId === requestId ? undefined : current);
+            }}
           />
         ) : buffer ? (
           <CanvasTextPreviewImage

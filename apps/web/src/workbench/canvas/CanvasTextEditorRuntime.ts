@@ -1,6 +1,7 @@
 import type { Extension } from '@codemirror/state';
-import { Annotation, EditorState, Transaction } from '@codemirror/state';
+import { Annotation, EditorSelection, EditorState, Transaction } from '@codemirror/state';
 import {
+  drawSelection,
   EditorView,
   keymap,
   lineNumbers,
@@ -26,6 +27,12 @@ export interface CanvasTextEditorCallbacks {
   onCancel: () => void;
 }
 
+export interface CanvasTextEditorFocusRequest {
+  requestId: number;
+  clientX: number;
+  clientY: number;
+}
+
 export interface CanvasTextEditorCallbackRef {
   current: CanvasTextEditorCallbacks;
 }
@@ -35,6 +42,29 @@ export interface CanvasTextEditorScrollableView {
     scrollTop: number;
     scrollLeft: number;
   };
+}
+
+interface CanvasTextEditorFocusLineBlock {
+  readonly from: number;
+  readonly to: number;
+  readonly top: number;
+  readonly height: number;
+}
+
+interface CanvasTextEditorFocusPositionRect {
+  readonly top: number;
+  readonly bottom: number;
+}
+
+export interface CanvasTextEditorFocusableView {
+  readonly state: EditorState;
+  readonly documentTop: number;
+  readonly defaultLineHeight: number;
+  focus: () => void;
+  dispatch: (transaction: Transaction) => void;
+  posAtCoords: (coords: { x: number; y: number }, precise?: false) => number | null;
+  coordsAtPos: (pos: number, side?: -1 | 1) => CanvasTextEditorFocusPositionRect | null;
+  lineBlockAtHeight: (height: number) => CanvasTextEditorFocusLineBlock;
 }
 
 export type CanvasTextEditorSyntaxReadyView = Pick<EditorView, 'state' | 'viewport' | 'visibleRanges' | 'dispatch'>;
@@ -129,6 +159,70 @@ export function canvasTextEditorApplyInitialScroll(
 ): void {
   view.scrollDOM.scrollTop = scroll.scrollTop ?? 0;
   view.scrollDOM.scrollLeft = scroll.scrollLeft ?? 0;
+}
+
+export function canvasTextEditorApplyFocusRequest(
+  view: CanvasTextEditorFocusableView,
+  request: CanvasTextEditorFocusRequest
+): void {
+  view.focus();
+  const position = canvasTextEditorFocusRequestPosition(view, request);
+  view.dispatch(view.state.update({
+    selection: EditorSelection.cursor(position),
+    scrollIntoView: true
+  }));
+}
+
+function canvasTextEditorFocusRequestPosition(
+  view: CanvasTextEditorFocusableView,
+  request: CanvasTextEditorFocusRequest
+): number {
+  const coords = { x: request.clientX, y: request.clientY };
+  const position = view.posAtCoords(coords);
+  if (position === null) {
+    return canvasTextEditorFocusRequestLineBlockPosition(view, request);
+  }
+
+  const positionRect = view.coordsAtPos(position);
+  if (positionRect && canvasTextEditorCoordinateMatchesPositionLine(view, positionRect, request.clientY)) {
+    return position;
+  }
+
+  return canvasTextEditorFocusRequestLineBlockPosition(view, request);
+}
+
+function canvasTextEditorFocusRequestLineBlockPosition(
+  view: CanvasTextEditorFocusableView,
+  request: CanvasTextEditorFocusRequest
+): number {
+  const lineBlock = view.lineBlockAtHeight(request.clientY - view.documentTop);
+  if (lineBlock.from === lineBlock.to) {
+    return lineBlock.from;
+  }
+
+  const linePosition = view.posAtCoords({
+    x: request.clientX,
+    y: view.documentTop + lineBlock.top + (lineBlock.height / 2)
+  }, false);
+  if (
+    linePosition !== null
+    && linePosition >= lineBlock.from
+    && linePosition <= lineBlock.to
+  ) {
+    return linePosition;
+  }
+  return lineBlock.to;
+}
+
+function canvasTextEditorCoordinateMatchesPositionLine(
+  view: CanvasTextEditorFocusableView,
+  rect: CanvasTextEditorFocusPositionRect,
+  clientY: number
+): boolean {
+  const rectHeight = rect.bottom - rect.top;
+  const lineHeight = rectHeight > 0 ? rectHeight : view.defaultLineHeight;
+  const tolerance = Math.max(1, lineHeight / 2);
+  return clientY >= rect.top - tolerance && clientY <= rect.bottom + tolerance;
 }
 
 export function canvasTextEditorEnsureVisibleSyntaxReady(view: CanvasTextEditorSyntaxReadyView): boolean {
@@ -229,6 +323,7 @@ export function canvasTextEditorBaseExtensions(callbacks: CanvasTextEditorCallba
   return [
     history(),
     lineNumbers(),
+    drawSelection(),
     search(),
     syntaxHighlighting(defaultHighlightStyle),
     keymap.of(canvasTextEditorKeymap(callbacks)),

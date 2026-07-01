@@ -5,6 +5,7 @@ import { EditorView } from '@codemirror/view';
 import { codeMirrorLanguageExtensionForProjectTextLanguage } from './textEditorCodeMirrorLanguages';
 import { canvasTextSurfaceCssVariables } from './CanvasTextSurface';
 import {
+  canvasTextEditorApplyFocusRequest,
   canvasTextEditorApplyInitialScroll,
   canvasTextEditorBaseExtensions,
   canvasTextEditorEnsureVisibleSyntaxReady,
@@ -12,7 +13,8 @@ import {
   canvasTextEditorSyncExternalValue,
   canvasTextEditorWordWrapExtension,
   type CanvasTextEditorCallbackRef,
-  type CanvasTextEditorCallbacks
+  type CanvasTextEditorCallbacks,
+  type CanvasTextEditorFocusRequest
 } from './CanvasTextEditorRuntime';
 
 interface CanvasTextEditorCompartments {
@@ -27,11 +29,13 @@ export function CanvasTextEditor({
   wordWrap,
   readOnly,
   visible,
+  focusRequest,
   initialScrollTop,
   initialScrollLeft,
   onChange,
   onSave,
   onToggleWordWrap,
+  onFocusRequestConsumed,
   onLayoutReady
 }: {
   value: string;
@@ -39,15 +43,22 @@ export function CanvasTextEditor({
   wordWrap: boolean;
   readOnly?: boolean;
   visible?: boolean | undefined;
+  focusRequest?: CanvasTextEditorFocusRequest | undefined;
   initialScrollTop?: number | undefined;
   initialScrollLeft?: number | undefined;
   onChange: (value: string) => void;
   onSave: () => void;
   onToggleWordWrap: () => void;
+  onFocusRequestConsumed?: ((requestId: number) => void) | undefined;
   onLayoutReady?: (() => void) | undefined;
 }): React.ReactElement {
   const hostRef = React.useRef<HTMLDivElement | null>(null);
   const viewRef = React.useRef<EditorView | null>(null);
+  const [pointerFocus, setPointerFocus] = React.useState(false);
+  const consumedFocusRequestRef = React.useRef<{
+    requestId: number;
+    view: EditorView;
+  } | undefined>(undefined);
   const onLayoutReadyRef = React.useRef(onLayoutReady);
   const callbacksRef = React.useRef<CanvasTextEditorCallbacks>({
     onChange,
@@ -171,6 +182,26 @@ export function CanvasTextEditor({
 
   React.useEffect(() => {
     const view = viewRef.current;
+    const request = focusRequest;
+    const consumedFocusRequest = consumedFocusRequestRef.current;
+    if (
+      !view
+      || !request
+      || (consumedFocusRequest?.requestId === request.requestId && consumedFocusRequest.view === view)
+    ) {
+      return;
+    }
+    consumedFocusRequestRef.current = {
+      requestId: request.requestId,
+      view
+    };
+    canvasTextEditorApplyFocusRequest(view, request);
+    setPointerFocus(true);
+    onFocusRequestConsumed?.(request.requestId);
+  }, [focusRequest, onFocusRequestConsumed]);
+
+  React.useEffect(() => {
+    const view = viewRef.current;
     const compartments = compartmentsRef.current;
     if (!view || !compartments) {
       return;
@@ -192,8 +223,10 @@ export function CanvasTextEditor({
       data-editor-engine="codemirror"
       data-editor-mode="edit"
       data-word-wrap={wordWrap ? 'on' : 'off'}
+      data-pointer-focus={pointerFocus ? 'true' : 'false'}
       className="canvas-text-editor canvas-text-editor--edit"
       style={canvasTextSurfaceCssVariables() as React.CSSProperties}
+      onPointerDownCapture={() => setPointerFocus(true)}
     />
   );
 }

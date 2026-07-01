@@ -676,6 +676,16 @@
   min-height: 100%;
   padding-block: var(--canvas-text-editor-content-padding-block);
   tab-size: var(--canvas-text-editor-tab-size);
+  user-select: text;
+  -webkit-user-select: text;
+}
+
+.canvas-text-editor[data-pointer-focus="true"] .cm-cursorLayer {
+  animation: steps(1) cm-blink 1.2s infinite;
+}
+
+.canvas-text-editor[data-pointer-focus="true"] .cm-cursor {
+  display: block;
 }
 
 .canvas-text-editor .cm-line {

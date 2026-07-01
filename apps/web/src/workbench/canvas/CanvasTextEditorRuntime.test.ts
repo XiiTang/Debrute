@@ -5,6 +5,7 @@ import { json } from '@codemirror/lang-json';
 import { syntaxTreeAvailable } from '@codemirror/language';
 import {
   canvasTextEditorApplyInitialScroll,
+  canvasTextEditorApplyFocusRequest,
   canvasTextEditorCancelInlineEditKeyBinding,
   canvasTextEditorEnsureVisibleSyntaxReady,
   canvasTextEditorExternalValueSyncAnnotation,
@@ -181,6 +182,153 @@ describe('CanvasTextEditorRuntime', () => {
       scrollTop: 84,
       scrollLeft: 12
     });
+  });
+
+  it('focuses the editor and dispatches a collapsed selection from a focus request coordinate', () => {
+    let state = EditorState.create({ doc: 'first\nsecond' });
+    const dispatch = vi.fn((transaction: Transaction) => {
+      state = transaction.state;
+    });
+    const focus = vi.fn();
+    const posAtCoords = vi.fn(() => 8);
+    const view = {
+      get state() {
+        return state;
+      },
+      documentTop: 80,
+      defaultLineHeight: 18,
+      focus,
+      dispatch,
+      posAtCoords,
+      coordsAtPos: vi.fn(() => ({ left: 144, right: 144, top: 88, bottom: 106 })),
+      lineBlockAtHeight: vi.fn()
+    };
+
+    canvasTextEditorApplyFocusRequest(view, {
+      requestId: 1,
+      clientX: 144,
+      clientY: 96
+    });
+
+    expect(focus).toHaveBeenCalledTimes(1);
+    expect(posAtCoords).toHaveBeenCalledWith({ x: 144, y: 96 });
+    expect(dispatch).toHaveBeenCalledTimes(1);
+    expect(state.selection.main.anchor).toBe(8);
+    expect(state.selection.main.head).toBe(8);
+  });
+
+  it('uses the line block under the focus request when the coordinate resolves to the document start', () => {
+    let state = EditorState.create({ doc: '# Notes\n\nClick into this text preview.\nSecond line for caret placement.\n' });
+    const dispatch = vi.fn((transaction: Transaction) => {
+      state = transaction.state;
+    });
+    const view = {
+      get state() {
+        return state;
+      },
+      documentTop: 370,
+      defaultLineHeight: 120,
+      focus: vi.fn(),
+      dispatch,
+      posAtCoords: vi.fn(() => 0),
+      coordsAtPos: vi.fn((position: number) => {
+        if (position === 0) {
+          return { left: 282, right: 282, top: 370, bottom: 388 };
+        }
+        return { left: 282, right: 282, top: 442, bottom: 460 };
+      }),
+      lineBlockAtHeight: vi.fn(() => ({
+        from: state.doc.length,
+        to: state.doc.length,
+        top: 72,
+        height: 18,
+        bottom: 90
+      }))
+    };
+
+    canvasTextEditorApplyFocusRequest(view, {
+      requestId: 1,
+      clientX: 406,
+      clientY: 436
+    });
+
+    expect(view.posAtCoords).toHaveBeenCalledWith({ x: 406, y: 436 });
+    expect(view.lineBlockAtHeight).toHaveBeenCalledWith(66);
+    expect(dispatch).toHaveBeenCalledTimes(1);
+    expect(state.selection.main.anchor).toBe(state.doc.length);
+    expect(state.selection.main.head).toBe(state.doc.length);
+  });
+
+  it('uses the line block under the focus request when the resolved position has no measured rectangle yet', () => {
+    let state = EditorState.create({ doc: '# Notes\n\nClick into this text preview.\nSecond line for caret placement.\n' });
+    const dispatch = vi.fn((transaction: Transaction) => {
+      state = transaction.state;
+    });
+    const view = {
+      get state() {
+        return state;
+      },
+      documentTop: 370,
+      defaultLineHeight: 18,
+      focus: vi.fn(),
+      dispatch,
+      posAtCoords: vi.fn(() => 0),
+      coordsAtPos: vi.fn(() => null),
+      lineBlockAtHeight: vi.fn(() => ({
+        from: state.doc.length,
+        to: state.doc.length,
+        top: 72,
+        height: 18,
+        bottom: 90
+      }))
+    };
+
+    canvasTextEditorApplyFocusRequest(view, {
+      requestId: 1,
+      clientX: 406,
+      clientY: 436
+    });
+
+    expect(view.lineBlockAtHeight).toHaveBeenCalledWith(66);
+    expect(dispatch).toHaveBeenCalledTimes(1);
+    expect(state.selection.main.anchor).toBe(state.doc.length);
+    expect(state.selection.main.head).toBe(state.doc.length);
+  });
+
+  it('uses the line block under the focus request when the coordinate has no resolved position yet', () => {
+    let state = EditorState.create({ doc: '# Notes\n\nClick into this text preview.\nSecond line for caret placement.\n' });
+    const dispatch = vi.fn((transaction: Transaction) => {
+      state = transaction.state;
+    });
+    const view = {
+      get state() {
+        return state;
+      },
+      documentTop: 370,
+      defaultLineHeight: 18,
+      focus: vi.fn(),
+      dispatch,
+      posAtCoords: vi.fn(() => null),
+      coordsAtPos: vi.fn(),
+      lineBlockAtHeight: vi.fn(() => ({
+        from: state.doc.length,
+        to: state.doc.length,
+        top: 72,
+        height: 18,
+        bottom: 90
+      }))
+    };
+
+    canvasTextEditorApplyFocusRequest(view, {
+      requestId: 1,
+      clientX: 406,
+      clientY: 436
+    });
+
+    expect(view.lineBlockAtHeight).toHaveBeenCalledWith(66);
+    expect(dispatch).toHaveBeenCalledTimes(1);
+    expect(state.selection.main.anchor).toBe(state.doc.length);
+    expect(state.selection.main.head).toBe(state.doc.length);
   });
 
   it('forces syntax parsing through the visible range before capture readiness', () => {

@@ -93,6 +93,179 @@ describe('CanvasVideoPlayerAdapter', () => {
     }
   });
 
+  it('keeps media-chrome hotkeys disabled and player picture gestures enabled', async () => {
+    const container = document.createElement('div');
+    document.body.append(container);
+    const root = createRoot(container);
+
+    try {
+      await act(async () => {
+        root.render(
+          <CanvasVideoPlayerAdapter
+            node={videoNode()}
+            initialTimeSeconds={0}
+            onPointerInside={() => undefined}
+            onFocusInside={() => undefined}
+            onError={() => undefined}
+            onPlayingChange={() => undefined}
+            onPlaybackBoundary={() => undefined}
+          />
+        );
+      });
+
+      const controller = container.querySelector('media-controller');
+      expect(controller).not.toBeNull();
+      expect(controller?.hasAttribute('nohotkeys')).toBe(true);
+      expect(controller?.hasAttribute('gesturesdisabled')).toBe(false);
+    } finally {
+      await act(async () => {
+        root.unmount();
+      });
+      container.remove();
+    }
+  });
+
+  it('plays once for each new one-shot play request', async () => {
+    const container = document.createElement('div');
+    document.body.append(container);
+    const root = createRoot(container);
+    const play = vi.fn(async () => undefined);
+
+    try {
+      await act(async () => {
+        root.render(
+          <CanvasVideoPlayerAdapter
+            node={videoNode()}
+            initialTimeSeconds={0}
+            onPointerInside={() => undefined}
+            onFocusInside={() => undefined}
+            onError={() => undefined}
+            onPlayingChange={() => undefined}
+            onPlaybackBoundary={() => undefined}
+          />
+        );
+      });
+      const video = container.querySelector('video');
+      expect(video).not.toBeNull();
+      if (!video) {
+        throw new Error('Expected video element.');
+      }
+      Object.defineProperty(video, 'play', {
+        configurable: true,
+        value: play
+      });
+
+      await act(async () => {
+        root.render(
+          <CanvasVideoPlayerAdapter
+            node={videoNode()}
+            initialTimeSeconds={0}
+            playRequest={{ requestId: 1 }}
+            onPointerInside={() => undefined}
+            onFocusInside={() => undefined}
+            onError={() => undefined}
+            onPlayingChange={() => undefined}
+            onPlaybackBoundary={() => undefined}
+          />
+        );
+      });
+      expect(play).toHaveBeenCalledTimes(1);
+
+      await act(async () => {
+        root.render(
+          <CanvasVideoPlayerAdapter
+            node={videoNode()}
+            initialTimeSeconds={0}
+            playRequest={{ requestId: 1 }}
+            onPointerInside={() => undefined}
+            onFocusInside={() => undefined}
+            onError={() => undefined}
+            onPlayingChange={() => undefined}
+            onPlaybackBoundary={() => undefined}
+          />
+        );
+      });
+      expect(play).toHaveBeenCalledTimes(1);
+
+      await act(async () => {
+        root.render(
+          <CanvasVideoPlayerAdapter
+            node={videoNode()}
+            initialTimeSeconds={0}
+            playRequest={{ requestId: 2 }}
+            onPointerInside={() => undefined}
+            onFocusInside={() => undefined}
+            onError={() => undefined}
+            onPlayingChange={() => undefined}
+            onPlaybackBoundary={() => undefined}
+          />
+        );
+      });
+      expect(play).toHaveBeenCalledTimes(2);
+    } finally {
+      await act(async () => {
+        root.unmount();
+      });
+      container.remove();
+    }
+  });
+
+  it('reports a playback error when the one-shot play request is rejected', async () => {
+    const container = document.createElement('div');
+    document.body.append(container);
+    const root = createRoot(container);
+    const onError = vi.fn();
+
+    try {
+      await act(async () => {
+        root.render(
+          <CanvasVideoPlayerAdapter
+            node={videoNode()}
+            initialTimeSeconds={0}
+            onPointerInside={() => undefined}
+            onFocusInside={() => undefined}
+            onError={onError}
+            onPlayingChange={() => undefined}
+            onPlaybackBoundary={() => undefined}
+          />
+        );
+      });
+      const video = container.querySelector('video');
+      expect(video).not.toBeNull();
+      if (!video) {
+        throw new Error('Expected video element.');
+      }
+      Object.defineProperty(video, 'play', {
+        configurable: true,
+        value: vi.fn(async () => {
+          throw new Error('not allowed');
+        })
+      });
+
+      await act(async () => {
+        root.render(
+          <CanvasVideoPlayerAdapter
+            node={videoNode()}
+            initialTimeSeconds={0}
+            playRequest={{ requestId: 1 }}
+            onPointerInside={() => undefined}
+            onFocusInside={() => undefined}
+            onError={onError}
+            onPlayingChange={() => undefined}
+            onPlaybackBoundary={() => undefined}
+          />
+        );
+      });
+
+      expect(onError).toHaveBeenCalledWith('Unable to play media/clip.mp4.');
+    } finally {
+      await act(async () => {
+        root.unmount();
+      });
+      container.remove();
+    }
+  });
+
   it('seeks to the initial time and reports playback boundary events', async () => {
     const container = document.createElement('div');
     document.body.append(container);

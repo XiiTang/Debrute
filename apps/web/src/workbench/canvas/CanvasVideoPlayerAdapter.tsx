@@ -26,27 +26,36 @@ export interface CanvasVideoPlayerHandle {
   togglePictureInPicture(): void;
 }
 
+export interface CanvasVideoPlayRequest {
+  requestId: number;
+}
+
 export interface CanvasVideoPlayerAdapterProps {
   node: ProjectedCanvasNode;
   initialTimeSeconds: number;
+  playRequest?: CanvasVideoPlayRequest | undefined;
   onPointerInside: () => void;
   onFocusInside: () => void;
   onError: (message: string) => void;
   onPlayingChange: (playing: boolean) => void;
   onPlaybackBoundary: (currentTimeSeconds: number) => void;
+  onPlayRequestConsumed?: ((requestId: number) => void) | undefined;
 }
 
 export const CanvasVideoPlayerAdapter = forwardRef<CanvasVideoPlayerHandle, CanvasVideoPlayerAdapterProps>(function CanvasVideoPlayerAdapter({
   node,
   initialTimeSeconds,
+  playRequest,
   onPointerInside,
   onFocusInside,
   onError,
   onPlayingChange,
-  onPlaybackBoundary
+  onPlaybackBoundary,
+  onPlayRequestConsumed
 }, ref) {
   const videoRef = useRef<HTMLVideoElement | null>(null);
   const lastPlaybackBoundaryRef = useRef<number | undefined>(undefined);
+  const consumedPlayRequestIdRef = useRef<number | undefined>(undefined);
   const source = node.availability.state === 'available' ? node.availability.fileUrl : '';
   const presentation = node.videoPresentation;
   if (!presentation) {
@@ -75,6 +84,19 @@ export const CanvasVideoPlayerAdapter = forwardRef<CanvasVideoPlayerHandle, Canv
     }
     publishPlaybackBoundary(video.currentTime);
   }, [publishPlaybackBoundary]);
+
+  useEffect(() => {
+    const video = videoRef.current;
+    const request = playRequest;
+    if (!video || !request || consumedPlayRequestIdRef.current === request.requestId) {
+      return;
+    }
+    consumedPlayRequestIdRef.current = request.requestId;
+    onPlayRequestConsumed?.(request.requestId);
+    void video.play().catch(() => {
+      onError(`Unable to play ${node.projectRelativePath}.`);
+    });
+  }, [node.projectRelativePath, onError, onPlayRequestConsumed, playRequest]);
 
   useImperativeHandle(ref, () => ({
     togglePlayback: () => {
@@ -138,7 +160,7 @@ export const CanvasVideoPlayerAdapter = forwardRef<CanvasVideoPlayerHandle, Canv
       }}
       onFocusCapture={onFocusInside}
     >
-      <MediaController noHotkeys gesturesDisabled>
+      <MediaController noHotkeys>
         <video
           ref={videoRef}
           slot="media"

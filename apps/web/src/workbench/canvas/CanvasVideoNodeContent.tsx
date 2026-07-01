@@ -5,6 +5,7 @@ import { Button } from '../ui';
 import { useI18n } from '../i18n';
 import {
   CanvasVideoPlayerAdapter,
+  type CanvasVideoPlayRequest,
   type CanvasVideoPlayerHandle
 } from './CanvasVideoPlayerAdapter';
 import type { CanvasVideoPreviewSource } from './canvasVideoPreviews';
@@ -41,6 +42,8 @@ export function CanvasVideoNodeContent({
   const [retryKey, setRetryKey] = useState(0);
   const [playerMounted, setPlayerMounted] = useState(() => selected || forcePlayerMounted);
   const [playing, setPlaying] = useState(false);
+  const nextPlayRequestIdRef = useRef(0);
+  const [playRequest, setPlayRequest] = useState<CanvasVideoPlayRequest>();
   const playingRef = useRef(false);
   const sourceKey = node.availability.state === 'available'
     ? `${node.projectRelativePath}\u001f${node.availability.fileUrl}\u001f${node.availability.revision}`
@@ -61,6 +64,7 @@ export function CanvasVideoNodeContent({
     setError(undefined);
     setRetryKey(0);
     setPlaying(false);
+    setPlayRequest(undefined);
     if (sourceChanged && wasPlaying) {
       onPlayingChange?.(node.projectRelativePath, false);
     }
@@ -83,6 +87,13 @@ export function CanvasVideoNodeContent({
   }, [node.projectRelativePath, onRegisterVideoTarget]);
 
   const mountPlayer = useCallback(() => {
+    setPlayerMounted(true);
+    onSelectNode();
+  }, [onSelectNode]);
+  const requestPlaybackFromPreview = useCallback((event: React.PointerEvent<HTMLImageElement>) => {
+    event.stopPropagation();
+    nextPlayRequestIdRef.current += 1;
+    setPlayRequest({ requestId: nextPlayRequestIdRef.current });
     setPlayerMounted(true);
     onSelectNode();
   }, [onSelectNode]);
@@ -178,11 +189,15 @@ export function CanvasVideoNodeContent({
             ref={register}
             node={node}
             initialTimeSeconds={initialTimeSeconds}
+            playRequest={playRequest}
             onPointerInside={mountPlayer}
             onFocusInside={mountPlayer}
             onError={setError}
             onPlayingChange={handlePlayingChange}
             onPlaybackBoundary={handlePlaybackBoundary}
+            onPlayRequestConsumed={(requestId) => {
+              setPlayRequest((current) => current?.requestId === requestId ? undefined : current);
+            }}
           />
         ) : videoPreviewError ? (
           <div className="db-canvas-node-error-overlay">
@@ -197,7 +212,7 @@ export function CanvasVideoNodeContent({
             draggable={false}
             data-preview-width={videoPreview.previewWidth}
             onError={handlePreviewImageError}
-            onPointerDown={mountPlayer}
+            onPointerDown={requestPlaybackFromPreview}
           />
         ) : (
           <div className="db-canvas-node-placeholder">

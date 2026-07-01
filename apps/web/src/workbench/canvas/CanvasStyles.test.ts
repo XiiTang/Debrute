@@ -59,6 +59,13 @@ describe('Canvas styles', () => {
     expect(canvasStyles).toContain('.canvas-node-resize.se {\n  right: calc(-8px * var(--canvas-chrome-scale, 1));\n  bottom: calc(-8px * var(--canvas-chrome-scale, 1));');
   });
 
+  it('allows the inline text editor content to show browser selection and caret', () => {
+    expect(canvasStyles).toMatch(/\.canvas-text-editor \.cm-content\s*{[^}]*\buser-select: text;/);
+    expect(canvasStyles).toMatch(/\.canvas-text-editor \.cm-content\s*{[^}]*-webkit-user-select: text;/);
+    expect(canvasStyles).toMatch(/\.canvas-text-editor\[data-pointer-focus="true"\] \.cm-cursorLayer\s*{[^}]*animation: steps\(1\) cm-blink 1\.2s infinite;/);
+    expect(canvasStyles).toMatch(/\.canvas-text-editor\[data-pointer-focus="true"\] \.cm-cursor\s*{[^}]*display: block;/);
+  });
+
   it('keeps Canvas feedback frames as pointer-transparent node chrome below resize handles', () => {
     expect(canvasStyles).toMatch(/\.canvas-feedback-frame\s*{[^}]*position: absolute;/);
     expect(canvasStyles).toMatch(/\.canvas-feedback-frame\s*{[^}]*inset: calc\(-1px \* var\(--canvas-chrome-scale, 1\)\);/);

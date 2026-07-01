@@ -5,6 +5,7 @@ import React, { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { renderToStaticMarkup } from 'react-dom/server';
 import type { ProjectedCanvasNode } from '@debrute/canvas-core';
+import { EditorView } from '@codemirror/view';
 import type { TextFileBuffer, WorkbenchActions } from '../../types';
 import {
   CanvasImageNodePreview,
@@ -236,6 +237,74 @@ describe('CanvasNodeContent text chrome', () => {
     expect(html).toContain('data-preview-width="700"');
     expect(html).not.toContain('data-canvas-text-editor="true"');
     expect(html).not.toContain('data-editor-engine="codemirror"');
+  });
+
+  it('uses the first inactive text preview click as the mounted editor caret request', async () => {
+    const restoreActEnvironment = installReactActEnvironment();
+    const frameCallbacks: FrameRequestCallback[] = [];
+    const restoreAnimationFrame = installAnimationFrameQueue(frameCallbacks);
+    const posAtCoords = vi.spyOn(EditorView.prototype, 'posAtCoords').mockReturnValue(3);
+    vi.spyOn(EditorView.prototype, 'coordsAtPos').mockReturnValue({
+      left: 144,
+      right: 144,
+      top: 88,
+      bottom: 104
+    });
+    vi.spyOn(EditorView.prototype, 'defaultLineHeight', 'get').mockReturnValue(18);
+    const container = document.createElement('div');
+    document.body.appendChild(container);
+    const root = createRoot(container);
+    const onSelectNode = vi.fn();
+    const renderNode = async (selected: boolean) => {
+      await act(async () => {
+        root.render(
+          <I18nProvider locale="en">
+            <CanvasNodeContent
+              node={textNode('flow/readme.md', 'rev-a')}
+              selected={selected}
+              culled={false}
+              actions={actionsFixture()}
+              textBuffer={textBuffer('flow/readme.md', 'rev-a')}
+              textPreview={textPreviewSource(700)}
+              onVideoPlayerMounted={() => undefined}
+              onVideoPlayingChange={() => undefined}
+              onRegisterVideoTarget={() => undefined}
+              onUpdateVideoPlaybackTime={() => undefined}
+              onSelectNode={onSelectNode}
+              onTitlePointerDown={() => undefined}
+              onTitlePointerMove={() => undefined}
+              onTitlePointerUp={() => undefined}
+            />
+          </I18nProvider>
+        );
+      });
+    };
+
+    try {
+      await renderNode(false);
+
+      await act(async () => {
+        container.querySelector<HTMLElement>('.canvas-text-body')?.dispatchEvent(new PointerEvent('pointerdown', {
+          bubbles: true,
+          clientX: 144,
+          clientY: 96
+        }));
+      });
+
+      expect(onSelectNode).toHaveBeenCalledTimes(1);
+      expect(posAtCoords).not.toHaveBeenCalled();
+
+      await renderNode(true);
+
+      expect(posAtCoords).toHaveBeenCalledWith({ x: 144, y: 96 });
+    } finally {
+      await act(async () => {
+        root.unmount();
+      });
+      container.remove();
+      restoreAnimationFrame();
+      restoreActEnvironment();
+    }
   });
 
   it('keeps the loaded text preview mounted while the preview source is unavailable and the next variant loads', async () => {

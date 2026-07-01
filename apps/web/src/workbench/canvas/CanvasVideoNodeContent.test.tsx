@@ -18,7 +18,8 @@ vi.mock('./CanvasVideoPlayerAdapter', () => ({
       onFocusInside,
       onError,
       onPlayingChange,
-      onPlaybackBoundary
+      onPlaybackBoundary,
+      playRequest
     }: {
       node: ProjectedCanvasNode;
       initialTimeSeconds: number;
@@ -27,6 +28,7 @@ vi.mock('./CanvasVideoPlayerAdapter', () => ({
       onError: (message: string) => void;
       onPlayingChange: (playing: boolean) => void;
       onPlaybackBoundary: (currentTimeSeconds: number) => void;
+      playRequest?: { requestId: number } | undefined;
     },
     ref: React.ForwardedRef<unknown>
   ) {
@@ -44,6 +46,7 @@ vi.mock('./CanvasVideoPlayerAdapter', () => ({
         data-testid="video-player-adapter"
         data-path={node.projectRelativePath}
         data-initial-time={initialTimeSeconds}
+        data-play-request-id={playRequest?.requestId}
         onPointerDown={onPointerInside}
         onFocus={onFocusInside}
       >
@@ -176,6 +179,44 @@ describe('CanvasVideoNodeContent', () => {
         'Unable to load video preview variant for media/clip.mp4.'
       );
       expect(container.querySelector('[data-testid="video-player-adapter"]')).toBeNull();
+    } finally {
+      await act(async () => {
+        root.unmount();
+      });
+      container.remove();
+    }
+  });
+
+  it('passes a one-shot play request when the inactive preview click mounts the player', async () => {
+    const container = document.createElement('div');
+    document.body.append(container);
+    const root = createRoot(container);
+    const onSelectNode = vi.fn();
+
+    try {
+      await act(async () => {
+        root.render(
+          <I18nProvider locale="en">
+            <CanvasVideoNodeContent
+              node={videoNode()}
+              selected={false}
+              videoPreview={previewSource()}
+              onSelectNode={onSelectNode}
+              onRegisterVideoTarget={() => undefined}
+              onUpdatePlaybackTime={() => undefined}
+            />
+          </I18nProvider>
+        );
+      });
+
+      await act(async () => {
+        container.querySelector<HTMLImageElement>('img.canvas-video-preview-image')?.dispatchEvent(new PointerEvent('pointerdown', {
+          bubbles: true
+        }));
+      });
+
+      expect(onSelectNode).toHaveBeenCalledTimes(1);
+      expect(container.querySelector('[data-testid="video-player-adapter"]')?.getAttribute('data-play-request-id')).toBe('1');
     } finally {
       await act(async () => {
         root.unmount();
