@@ -296,6 +296,10 @@ describe('CanvasNodeContent text chrome', () => {
 
       await renderNode(true);
 
+      await act(async () => {
+        flushAnimationFrames(frameCallbacks);
+      });
+
       expect(posAtCoords).toHaveBeenCalledWith({ x: 144, y: 96 });
     } finally {
       await act(async () => {
@@ -741,6 +745,11 @@ function installAnimationFrameQueue(frameCallbacks: FrameRequestCallback[]): () 
       value: originalCancelAnimationFrame
     });
   };
+}
+
+function flushAnimationFrames(frameCallbacks: FrameRequestCallback[]): void {
+  const callbacks = frameCallbacks.splice(0);
+  callbacks.forEach((callback) => callback(0));
 }
 
 function installTextPreviewImagePreload(): FakeTextPreviewImage[] {

@@ -111,6 +111,14 @@ describe('canvas interaction', () => {
     expect(shouldCanvasHandleWheelTarget(focusedEditor as unknown as EventTarget)).toBe(false);
   });
 
+  it('lets pointer-focused text editor wheel gestures scroll locally', () => {
+    const textBody = mockElement('canvas-text-body', undefined, 'focus', false);
+    const textEditor = mockElement('canvas-text-editor', textBody, false, false, true);
+    const textContent = mockElement('cm-content', textEditor);
+
+    expect(shouldCanvasHandleWheelTarget(textContent as unknown as EventTarget)).toBe(false);
+  });
+
   it('lets canvas-owned floating bars keep wheel gestures on the canvas', () => {
     const shell = mockElement('workbench-shell');
     const surface = mockElement('canvas-surface', shell);
@@ -150,14 +158,22 @@ function mockElement(
   className: string,
   parent?: MockElement,
   localWheel: false | true | 'focus' = false,
-  focused = false
+  focused = false,
+  pointerFocused = false
 ): MockElement {
   const element: MockElement = {
     className,
     focused,
     localWheel,
+    pointerFocused,
     parent,
     closest(selector: string): MockElement | null {
+      if (
+        selector === '[data-canvas-text-editor="true"][data-pointer-focus="true"]'
+        && element.pointerFocused
+      ) {
+        return element;
+      }
       if (selector === '[data-canvas-local-wheel="true"]' && element.localWheel === true) {
         return element;
       }
@@ -190,6 +206,7 @@ interface MockElement {
   className: string;
   focused: boolean;
   localWheel: false | true | 'focus';
+  pointerFocused: boolean;
   parent: MockElement | undefined;
   closest: (selector: string) => MockElement | null;
   matches: (selector: string) => boolean;

@@ -183,21 +183,30 @@ export function CanvasTextEditor({
   React.useEffect(() => {
     const view = viewRef.current;
     const request = focusRequest;
-    const consumedFocusRequest = consumedFocusRequestRef.current;
-    if (
-      !view
-      || !request
-      || (consumedFocusRequest?.requestId === request.requestId && consumedFocusRequest.view === view)
-    ) {
+    if (!view || !request) {
       return;
     }
-    consumedFocusRequestRef.current = {
-      requestId: request.requestId,
-      view
+    let cancelled = false;
+    const frame = window.requestAnimationFrame(() => {
+      if (cancelled || viewRef.current !== view) {
+        return;
+      }
+      const consumedFocusRequest = consumedFocusRequestRef.current;
+      if (consumedFocusRequest?.requestId === request.requestId && consumedFocusRequest.view === view) {
+        return;
+      }
+      consumedFocusRequestRef.current = {
+        requestId: request.requestId,
+        view
+      };
+      canvasTextEditorApplyFocusRequest(view, request);
+      setPointerFocus(true);
+      onFocusRequestConsumed?.(request.requestId);
+    });
+    return () => {
+      cancelled = true;
+      window.cancelAnimationFrame(frame);
     };
-    canvasTextEditorApplyFocusRequest(view, request);
-    setPointerFocus(true);
-    onFocusRequestConsumed?.(request.requestId);
   }, [focusRequest, onFocusRequestConsumed]);
 
   React.useEffect(() => {

@@ -57,11 +57,15 @@ export function normalizeCanvasWheelDelta(
 
 const CANVAS_LOCAL_WHEEL_SELECTOR = '[data-canvas-local-wheel="true"]';
 const CANVAS_FOCUS_LOCAL_WHEEL_SELECTOR = '[data-canvas-local-wheel="focus"]';
+const CANVAS_POINTER_FOCUSED_TEXT_EDITOR_SELECTOR = '[data-canvas-text-editor="true"][data-pointer-focus="true"]';
 const CANVAS_FLOATING_BAR_LAYER_SELECTOR = '.floating-bar-layer';
 const CANVAS_WORKBENCH_SHELL_SELECTOR = '.workbench-shell';
 
 export function shouldCanvasHandleWheelTarget(target: EventTarget | null): boolean {
   if (closestElement(target, CANVAS_LOCAL_WHEEL_SELECTOR) !== null) {
+    return false;
+  }
+  if (closestElement(target, CANVAS_POINTER_FOCUSED_TEXT_EDITOR_SELECTOR) !== null) {
     return false;
   }
   const focusLocalWheel = closestElement(target, CANVAS_FOCUS_LOCAL_WHEEL_SELECTOR);

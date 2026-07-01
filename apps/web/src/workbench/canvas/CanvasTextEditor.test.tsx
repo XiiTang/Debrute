@@ -92,12 +92,13 @@ describe('CanvasTextEditor', () => {
     expect(html).toContain('data-word-wrap="on"');
   });
 
-  it('marks pointer focus after applying a focus request', async () => {
+  it('applies a focus request after the first-click focus sequence', async () => {
     const restoreActEnvironment = installReactActEnvironment();
+    const frameCallbacks: Array<FrameRequestCallback | undefined> = [];
+    const restoreAnimationFrame = installAnimationFrameQueue(frameCallbacks);
     const container = document.createElement('div');
     document.body.appendChild(container);
     const root = createRoot(container);
-    vi.spyOn(EditorView.prototype, 'focus').mockImplementation(() => undefined);
     vi.spyOn(EditorView.prototype, 'posAtCoords').mockReturnValue(4);
     vi.spyOn(EditorView.prototype, 'coordsAtPos').mockReturnValue({
       left: 140,
@@ -114,6 +115,7 @@ describe('CanvasTextEditor', () => {
             value="# Notes"
             language="markdown"
             wordWrap={false}
+            visible={false}
             focusRequest={{ requestId: 1, clientX: 140, clientY: 96 }}
             onChange={() => undefined}
             onSave={() => undefined}
@@ -122,6 +124,15 @@ describe('CanvasTextEditor', () => {
         );
       });
 
+      const content = container.querySelector('.cm-content');
+      expect(document.activeElement).not.toBe(content);
+      expect(container.querySelector('.canvas-text-editor')?.getAttribute('data-pointer-focus')).toBe('false');
+
+      await act(async () => {
+        flushAnimationFrames(frameCallbacks);
+      });
+
+      expect(document.activeElement).toBe(content);
       expect(container.querySelector('.canvas-text-editor')?.getAttribute('data-pointer-focus')).toBe('true');
       expect(container.querySelector('.cm-cursorLayer')).not.toBeNull();
     } finally {
@@ -129,12 +140,15 @@ describe('CanvasTextEditor', () => {
         root.unmount();
       });
       container.remove();
+      restoreAnimationFrame();
       restoreActEnvironment();
     }
   });
 
   it('reapplies a focus request to the StrictMode-remounted editor view', async () => {
     const restoreActEnvironment = installReactActEnvironment();
+    const frameCallbacks: Array<FrameRequestCallback | undefined> = [];
+    const restoreAnimationFrame = installAnimationFrameQueue(frameCallbacks);
     const container = document.createElement('div');
     document.body.appendChild(container);
     const root = createRoot(container);
@@ -156,6 +170,7 @@ describe('CanvasTextEditor', () => {
               value="# Notes"
               language="markdown"
               wordWrap={false}
+              visible={false}
               focusRequest={{ requestId: 1, clientX: 140, clientY: 96 }}
               onChange={() => undefined}
               onSave={() => undefined}
@@ -165,12 +180,19 @@ describe('CanvasTextEditor', () => {
         );
       });
 
-      expect(focus).toHaveBeenCalledTimes(2);
+      expect(focus).not.toHaveBeenCalled();
+
+      await act(async () => {
+        flushAnimationFrames(frameCallbacks);
+      });
+
+      expect(focus).toHaveBeenCalledTimes(1);
     } finally {
       await act(async () => {
         root.unmount();
       });
       container.remove();
+      restoreAnimationFrame();
       restoreActEnvironment();
     }
   });
@@ -187,4 +209,41 @@ function installReactActEnvironment(): () => void {
     }
     globalWithActFlag.IS_REACT_ACT_ENVIRONMENT = previous;
   };
+}
+
+function installAnimationFrameQueue(frameCallbacks: Array<FrameRequestCallback | undefined>): () => void {
+  const originalRequestAnimationFrame = window.requestAnimationFrame;
+  const originalCancelAnimationFrame = window.cancelAnimationFrame;
+  Object.defineProperty(window, 'requestAnimationFrame', {
+    configurable: true,
+    writable: true,
+    value: (callback: FrameRequestCallback): number => {
+      frameCallbacks.push(callback);
+      return frameCallbacks.length;
+    }
+  });
+  Object.defineProperty(window, 'cancelAnimationFrame', {
+    configurable: true,
+    writable: true,
+    value: (handle: number) => {
+      frameCallbacks[handle - 1] = undefined;
+    }
+  });
+  return () => {
+    Object.defineProperty(window, 'requestAnimationFrame', {
+      configurable: true,
+      writable: true,
+      value: originalRequestAnimationFrame
+    });
+    Object.defineProperty(window, 'cancelAnimationFrame', {
+      configurable: true,
+      writable: true,
+      value: originalCancelAnimationFrame
+    });
+  };
+}
+
+function flushAnimationFrames(frameCallbacks: Array<FrameRequestCallback | undefined>): void {
+  const callbacks = frameCallbacks.splice(0);
+  callbacks.forEach((callback) => callback?.(0));
 }
