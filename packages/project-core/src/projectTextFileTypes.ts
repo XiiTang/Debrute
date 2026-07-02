@@ -37,7 +37,16 @@ export type ProjectTextLanguageId =
   | 'makefile'
   | 'diff'
   | 'csv'
-  | 'tsv';
+  | 'tsv'
+  | 'subtitle'
+  | 'webvtt'
+  | 'toml'
+  | 'tex'
+  | 'textile'
+  | 'protobuf'
+  | 'restructuredtext'
+  | 'asciidoc'
+  | 'org';
 
 export interface ProjectTextFileType {
   id: ProjectTextLanguageId;
@@ -113,7 +122,19 @@ const projectTextFileTypes: readonly ProjectTextFileType[] = [
   type('diff', 'text/plain', { extensions: ['.diff', '.patch', '.rej'] }),
   type('csv', 'text/csv', { extensions: ['.csv'] }),
   type('tsv', 'text/tab-separated-values', { extensions: ['.tsv'] }),
-  type('plaintext', 'text/plain', { extensions: ['.txt'], filenames: ['LICENSE', '.gitignore'] })
+  type('subtitle', 'text/plain', { extensions: ['.srt', '.ass', '.ssa', '.sbv', '.sub'] }),
+  type('webvtt', 'text/vtt', { extensions: ['.vtt'] }),
+  type('toml', 'application/toml', { extensions: ['.toml'] }),
+  type('tex', 'application/x-tex', { extensions: ['.tex', '.latex', '.ltx', '.sty', '.cls'] }),
+  type('textile', 'text/x-textile', { extensions: ['.textile'] }),
+  type('protobuf', 'text/x-protobuf', { extensions: ['.proto'] }),
+  type('restructuredtext', 'text/x-rst', { extensions: ['.rst'] }),
+  type('asciidoc', 'text/x-asciidoc', { extensions: ['.adoc', '.asciidoc'] }),
+  type('org', 'text/x-org', { extensions: ['.org'] }),
+  type('plaintext', 'text/plain', {
+    extensions: ['.txt'],
+    filenames: ['LICENSE', '.gitignore', 'README', 'CHANGELOG', 'CONTRIBUTING', 'NOTICE', 'AUTHORS', 'COPYING']
+  })
 ] as const;
 
 export function projectTextFileTypeForPath(
