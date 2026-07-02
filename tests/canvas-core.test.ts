@@ -23,6 +23,7 @@ describe('canvas-core', () => {
 
     expect(canvas).toEqual({
       id: 'main',
+      name: 'main',
       nodeElements: [],
       annotations: [],
       preferences: { showDiagnostics: true }

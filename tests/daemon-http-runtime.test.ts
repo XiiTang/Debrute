@@ -2101,7 +2101,7 @@ describe('daemon HTTP runtime', () => {
     expect(eventNode.availability.fileUrl).toBe(node.availability.fileUrl);
   });
 
-  it('serves video presentation companions with browser file URLs at the HTTP snapshot boundary', async () => {
+  it('serves video text track companions with browser file URLs at the HTTP snapshot boundary', async () => {
     const projectRoot = await mkdtemp(join(tmpdir(), 'debrute-daemon-video-presentation-urls-project-'));
     const binDir = await mkdtemp(join(tmpdir(), 'debrute-daemon-video-presentation-urls-bin-'));
     await mkdir(join(projectRoot, 'media'), { recursive: true });
@@ -2164,8 +2164,7 @@ describe('daemon HTTP runtime', () => {
           nodes: Array<{
             projectRelativePath: string;
             availability: { state: string; fileUrl?: string };
-            videoPresentation?: {
-              poster?: { projectRelativePath: string; fileUrl?: string };
+            videoPresentation?: Record<string, unknown> & {
               textTracks: Array<{ projectRelativePath: string; fileUrl?: string }>;
             };
           }>;
@@ -2178,7 +2177,7 @@ describe('daemon HTTP runtime', () => {
 
     const node = refreshed.snapshot.projections[0]!.nodes.find((item) => item.projectRelativePath === 'media/clip.mp4')!;
     expect(node.availability.fileUrl).toContain(`/api/projects/${opened.projectId}/files/raw/media/clip.mp4`);
-    expect(node.videoPresentation?.poster?.fileUrl).toContain(`/api/projects/${opened.projectId}/files/raw/media/clip.poster.webp`);
+    expect(node.videoPresentation).not.toHaveProperty('poster');
     expect(node.videoPresentation?.textTracks[0]?.fileUrl).toContain(`/api/projects/${opened.projectId}/files/raw/media/clip.en.vtt`);
   });
 
