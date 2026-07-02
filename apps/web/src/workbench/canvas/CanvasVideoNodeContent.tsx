@@ -177,6 +177,12 @@ export function CanvasVideoNodeContent({
       i18n.t('canvas.node.videoPreviewVariantLoadError', { path: node.projectRelativePath })
     );
   }, [i18n, node.projectRelativePath, onVideoPreviewError]);
+  const formatVideoPlayError = useCallback((projectRelativePath: string) => (
+    i18n.t('canvas.node.videoPlayError', { path: projectRelativePath })
+  ), [i18n]);
+  const formatVideoSeekError = useCallback((projectRelativePath: string, seconds: number) => (
+    i18n.t('canvas.node.videoSeekError', { path: projectRelativePath, seconds })
+  ), [i18n]);
   useEffect(() => {
     if (targetLayer !== 'preview' || visibleLayer !== 'player' || !videoPreview || videoPreviewError) {
       return undefined;
@@ -297,6 +303,8 @@ export function CanvasVideoNodeContent({
               playRequest={playRequest}
               onPointerInside={mountPlayer}
               onFocusInside={mountPlayer}
+              formatPlayError={formatVideoPlayError}
+              formatSeekError={formatVideoSeekError}
               onError={setError}
               onPlayingChange={handlePlayingChange}
               onPlaybackBoundary={handlePlaybackBoundary}

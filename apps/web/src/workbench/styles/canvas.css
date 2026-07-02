@@ -410,29 +410,6 @@
   background: #000;
 }
 
-.db-canvas-node-error-overlay {
-  position: absolute;
-  inset: 8px;
-  z-index: 1;
-  display: grid;
-  grid-template-columns: auto minmax(0, 1fr) auto;
-  align-items: center;
-  gap: 8px;
-  min-width: 0;
-  padding: 8px;
-  color: var(--db-text);
-  background: color-mix(in oklch, var(--db-surface) 86%, transparent);
-  border: 1px solid var(--db-border);
-  border-radius: 6px;
-}
-
-.db-canvas-node-error-overlay span {
-  min-width: 0;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
 .canvas-node-preview audio {
   width: 100%;
   display: block;

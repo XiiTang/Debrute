@@ -36,6 +36,8 @@ export interface CanvasVideoPlayerAdapterProps {
   playRequest?: CanvasVideoPlayRequest | undefined;
   onPointerInside: () => void;
   onFocusInside: () => void;
+  formatPlayError: (projectRelativePath: string) => string;
+  formatSeekError: (projectRelativePath: string, seconds: number) => string;
   onError: (message: string) => void;
   onPlayingChange: (playing: boolean) => void;
   onPlaybackBoundary: (currentTimeSeconds: number) => void;
@@ -49,6 +51,8 @@ export const CanvasVideoPlayerAdapter = forwardRef<CanvasVideoPlayerHandle, Canv
   playRequest,
   onPointerInside,
   onFocusInside,
+  formatPlayError,
+  formatSeekError,
   onError,
   onPlayingChange,
   onPlaybackBoundary,
@@ -100,7 +104,7 @@ export const CanvasVideoPlayerAdapter = forwardRef<CanvasVideoPlayerHandle, Canv
     if (initialTimeSeconds <= 0) {
       return;
     }
-    const message = `Unable to seek ${node.projectRelativePath} to ${initialTimeSeconds} seconds.`;
+    const message = formatSeekError(node.projectRelativePath, initialTimeSeconds);
     if (presentation.durationSeconds !== undefined && initialTimeSeconds > presentation.durationSeconds) {
       reportInitialSeekError(message);
       return;
@@ -111,7 +115,7 @@ export const CanvasVideoPlayerAdapter = forwardRef<CanvasVideoPlayerHandle, Canv
     } catch {
       reportInitialSeekError(message);
     }
-  }, [initialTimeSeconds, node.projectRelativePath, presentation.durationSeconds, reportInitialSeekError]);
+  }, [formatSeekError, initialTimeSeconds, node.projectRelativePath, presentation.durationSeconds, reportInitialSeekError]);
 
   const handleDisplayDataReady = useCallback(() => {
     if (!pendingInitialSeekRef.current) {
@@ -144,9 +148,9 @@ export const CanvasVideoPlayerAdapter = forwardRef<CanvasVideoPlayerHandle, Canv
     consumedPlayRequestIdRef.current = request.requestId;
     onPlayRequestConsumed?.(request.requestId);
     void video.play().catch(() => {
-      onError(`Unable to play ${node.projectRelativePath}.`);
+      onError(formatPlayError(node.projectRelativePath));
     });
-  }, [node.projectRelativePath, onError, onPlayRequestConsumed, playRequest]);
+  }, [formatPlayError, node.projectRelativePath, onError, onPlayRequestConsumed, playRequest]);
 
   useImperativeHandle(ref, () => ({
     togglePlayback: () => {
@@ -231,7 +235,7 @@ export const CanvasVideoPlayerAdapter = forwardRef<CanvasVideoPlayerHandle, Canv
             event.currentTarget.currentTime = 0;
             publishPlaybackBoundary(0);
           }}
-          onError={() => onError(`Unable to play ${node.projectRelativePath}.`)}
+          onError={() => onError(formatPlayError(node.projectRelativePath))}
         >
           {textTracks.map((track) => (
             <track

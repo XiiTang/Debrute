@@ -36,6 +36,24 @@ import {
   type CanvasVideoPlayerHandle
 } from './CanvasVideoPlayerAdapter';
 
+type TestCanvasVideoPlayerAdapterProps = Omit<
+  React.ComponentPropsWithoutRef<typeof CanvasVideoPlayerAdapter>,
+  'formatPlayError' | 'formatSeekError'
+>;
+
+const TestCanvasVideoPlayerAdapter = React.forwardRef<CanvasVideoPlayerHandle, TestCanvasVideoPlayerAdapterProps>(
+  function TestCanvasVideoPlayerAdapter(props, ref) {
+    return (
+      <CanvasVideoPlayerAdapter
+        {...props}
+        ref={ref}
+        formatPlayError={(projectRelativePath) => `Unable to play ${projectRelativePath}.`}
+        formatSeekError={(projectRelativePath, seconds) => `Unable to seek ${projectRelativePath} to ${seconds} seconds.`}
+      />
+    );
+  }
+);
+
 afterEach(() => {
   vi.restoreAllMocks();
 });
@@ -55,7 +73,7 @@ describe('CanvasVideoPlayerAdapter', () => {
     try {
       await act(async () => {
         root.render(
-          <CanvasVideoPlayerAdapter
+          <TestCanvasVideoPlayerAdapter
             ref={ref}
             node={videoNode()}
             initialTimeSeconds={0}
@@ -101,7 +119,7 @@ describe('CanvasVideoPlayerAdapter', () => {
     try {
       await act(async () => {
         root.render(
-          <CanvasVideoPlayerAdapter
+          <TestCanvasVideoPlayerAdapter
             node={videoNode()}
             initialTimeSeconds={0}
             onPointerInside={() => undefined}
@@ -134,7 +152,7 @@ describe('CanvasVideoPlayerAdapter', () => {
     try {
       await act(async () => {
         root.render(
-          <CanvasVideoPlayerAdapter
+          <TestCanvasVideoPlayerAdapter
             node={videoNode()}
             initialTimeSeconds={0}
             onPointerInside={() => undefined}
@@ -157,7 +175,7 @@ describe('CanvasVideoPlayerAdapter', () => {
 
       await act(async () => {
         root.render(
-          <CanvasVideoPlayerAdapter
+          <TestCanvasVideoPlayerAdapter
             node={videoNode()}
             initialTimeSeconds={0}
             playRequest={{ requestId: 1 }}
@@ -173,7 +191,7 @@ describe('CanvasVideoPlayerAdapter', () => {
 
       await act(async () => {
         root.render(
-          <CanvasVideoPlayerAdapter
+          <TestCanvasVideoPlayerAdapter
             node={videoNode()}
             initialTimeSeconds={0}
             playRequest={{ requestId: 1 }}
@@ -189,7 +207,7 @@ describe('CanvasVideoPlayerAdapter', () => {
 
       await act(async () => {
         root.render(
-          <CanvasVideoPlayerAdapter
+          <TestCanvasVideoPlayerAdapter
             node={videoNode()}
             initialTimeSeconds={0}
             playRequest={{ requestId: 2 }}
@@ -219,7 +237,7 @@ describe('CanvasVideoPlayerAdapter', () => {
     try {
       await act(async () => {
         root.render(
-          <CanvasVideoPlayerAdapter
+          <TestCanvasVideoPlayerAdapter
             node={videoNode()}
             initialTimeSeconds={0}
             onPointerInside={() => undefined}
@@ -244,7 +262,7 @@ describe('CanvasVideoPlayerAdapter', () => {
 
       await act(async () => {
         root.render(
-          <CanvasVideoPlayerAdapter
+          <TestCanvasVideoPlayerAdapter
             node={videoNode()}
             initialTimeSeconds={0}
             playRequest={{ requestId: 1 }}
@@ -275,7 +293,7 @@ describe('CanvasVideoPlayerAdapter', () => {
     try {
       await act(async () => {
         root.render(
-          <CanvasVideoPlayerAdapter
+          <TestCanvasVideoPlayerAdapter
             node={videoNode()}
             initialTimeSeconds={0}
             onPointerInside={() => undefined}
@@ -320,7 +338,7 @@ describe('CanvasVideoPlayerAdapter', () => {
     try {
       await act(async () => {
         root.render(
-          <CanvasVideoPlayerAdapter
+          <TestCanvasVideoPlayerAdapter
             node={videoNode({ durationSeconds: 10 })}
             initialTimeSeconds={4.5}
             onPointerInside={() => undefined}
@@ -362,7 +380,7 @@ describe('CanvasVideoPlayerAdapter', () => {
     try {
       await act(async () => {
         root.render(
-          <CanvasVideoPlayerAdapter
+          <TestCanvasVideoPlayerAdapter
             node={videoNode({ durationSeconds: 5 })}
             initialTimeSeconds={6.25}
             onPointerInside={() => undefined}
@@ -407,7 +425,7 @@ describe('CanvasVideoPlayerAdapter', () => {
     try {
       await act(async () => {
         root.render(
-          <CanvasVideoPlayerAdapter
+          <TestCanvasVideoPlayerAdapter
             node={videoNode()}
             initialTimeSeconds={4.5}
             onPointerInside={() => undefined}
@@ -465,7 +483,7 @@ describe('CanvasVideoPlayerAdapter', () => {
     try {
       await act(async () => {
         root.render(
-          <CanvasVideoPlayerAdapter
+          <TestCanvasVideoPlayerAdapter
             node={videoNode({ durationSeconds: 5 })}
             initialTimeSeconds={6.25}
             onPointerInside={() => undefined}
@@ -505,7 +523,7 @@ describe('CanvasVideoPlayerAdapter', () => {
     try {
       await act(async () => {
         root.render(
-          <CanvasVideoPlayerAdapter
+          <TestCanvasVideoPlayerAdapter
             node={videoNode({ durationSeconds: 10 })}
             initialTimeSeconds={4.5}
             onPointerInside={() => undefined}

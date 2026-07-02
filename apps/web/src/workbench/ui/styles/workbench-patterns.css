@@ -504,6 +504,13 @@
   color: var(--db-text-muted);
 }
 
+.db-integration-row__buttons {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 6px;
+}
+
 .db-integration-row__action:empty {
   min-height: 1px;
 }

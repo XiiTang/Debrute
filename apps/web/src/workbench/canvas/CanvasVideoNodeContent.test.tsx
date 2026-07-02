@@ -20,7 +20,8 @@ vi.mock('./CanvasVideoPlayerAdapter', () => ({
       onPlayingChange,
       onPlaybackBoundary,
       onReadyForDisplay,
-      playRequest
+      playRequest,
+      formatPlayError
     }: {
       node: ProjectedCanvasNode;
       initialTimeSeconds: number;
@@ -31,6 +32,7 @@ vi.mock('./CanvasVideoPlayerAdapter', () => ({
       onPlaybackBoundary: (currentTimeSeconds: number) => void;
       onReadyForDisplay: () => void;
       playRequest?: { requestId: number } | undefined;
+      formatPlayError: (projectRelativePath: string) => string;
     },
     ref: React.ForwardedRef<unknown>
   ) {
@@ -53,7 +55,7 @@ vi.mock('./CanvasVideoPlayerAdapter', () => ({
         onFocus={onFocusInside}
       >
         <video src={node.availability.state === 'available' ? node.availability.fileUrl : undefined} />
-        <button type="button" data-testid="mock-video-error" onClick={() => onError(`Unable to play ${node.projectRelativePath}.`)}>
+        <button type="button" data-testid="mock-video-error" onClick={() => onError(formatPlayError(node.projectRelativePath))}>
           trigger error
         </button>
         <button type="button" data-testid="mock-video-ready" onClick={onReadyForDisplay}>
