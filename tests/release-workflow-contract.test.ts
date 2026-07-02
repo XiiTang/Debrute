@@ -19,10 +19,29 @@ describe('GitHub release workflow contract', () => {
     expect(workflow).not.toContain('name: photoshop-plugins');
     expect(workflow).toContain('publish-release:');
     expect(workflow).toContain('CSC_IDENTITY_AUTO_DISCOVERY: false');
-    expect(workflow).toContain('debrute_SHA256SUMS');
+    expect(workflow).toContain('debrute-update-manifest.json');
+    expect(workflow).toContain('debrute-update-manifest.json.sig');
+    expect(workflow).toContain('DEBRUTE_UPDATE_SIGNING_PRIVATE_KEY_PEM: ${{ secrets.DEBRUTE_UPDATE_SIGNING_PRIVATE_KEY_PEM }}');
+    expect(workflow).toContain('node scripts/generate-update-manifest.mjs --release-dir release-upload --version "$VERSION"');
     expect(workflow).toContain('release-notes.md');
     expect(workflow).toContain('body_path: release-notes.md');
     expect(workflow).toContain('softprops/action-gh-release@v2');
+  });
+
+  it('documents the signed manifest public release contract', () => {
+    const releaseDocs = readFileSync(join(process.cwd(), 'docs/releases.md'), 'utf8');
+
+    expect(releaseDocs).toContain('debrute-update-manifest.json');
+    expect(releaseDocs).toContain('debrute-update-manifest.json.sig');
+    expect(releaseDocs).toContain('Signed Manifest Verification');
+  });
+
+  it('rejects unexpected files from the final release upload set', () => {
+    const publishReleaseBlock = workflow.slice(workflow.indexOf('publish-release:'));
+
+    expect(publishReleaseBlock).toContain('Unexpected release assets');
+    expect(publishReleaseBlock).toContain('Duplicate release asset');
+    expect(publishReleaseBlock).not.toContain('const missing = expected.filter');
   });
 
   it('does not publish directly from matrix build jobs', () => {
@@ -45,7 +64,7 @@ describe('GitHub release workflow contract', () => {
     expect(buildDesktopBlock).not.toContain('arch: universal');
     expect(buildDesktopBlock).not.toContain('Rename Desktop assets');
     expect(workflow).not.toContain('sha256sum debrute-*');
-    expect(workflow).toContain('find . -maxdepth 1 -type f ! -name debrute_SHA256SUMS');
+    expect(workflow).toContain('Generate signed update manifest');
   });
 
   it('configures the final signed macOS Desktop identity', () => {

@@ -29,7 +29,8 @@ describe('Debrute managed CLI runtime packaging', () => {
       'debrute-desktop-0.2.0-macos-x64.dmg',
       'debrute-desktop-0.2.0-windows-x64.exe',
       'debrute-desktop-0.2.0-linux-x64.AppImage',
-      'debrute_SHA256SUMS'
+      'debrute-update-manifest.json',
+      'debrute-update-manifest.json.sig'
     ]);
   });
 

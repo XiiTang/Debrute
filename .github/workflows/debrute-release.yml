@@ -186,16 +186,30 @@ jobs:
       - uses: actions/download-artifact@v4
         with:
           path: release-assets
-      - name: Flatten assets and checksums
+      - name: Flatten assets
         run: |
+          set -euo pipefail
           mkdir -p release-upload
-          find release-assets -type f -print -exec cp {} release-upload/ \;
-          cd release-upload
-          find . -maxdepth 1 -type f ! -name debrute_SHA256SUMS -printf '%P\0' | sort -z | xargs -0 sha256sum > debrute_SHA256SUMS
+          while IFS= read -r -d '' file; do
+            name="$(basename "$file")"
+            if [ -e "release-upload/$name" ]; then
+              echo "::error::Duplicate release asset: $name"
+              exit 1
+            fi
+            cp "$file" "release-upload/$name"
+          done < <(find release-assets -type f -print0)
+      - name: Generate signed update manifest
+        env:
+          DEBRUTE_UPDATE_SIGNING_PRIVATE_KEY_PEM: ${{ secrets.DEBRUTE_UPDATE_SIGNING_PRIVATE_KEY_PEM }}
+        run: |
+          VERSION="$(node -p "require('./package.json').version")"
+          node scripts/generate-update-manifest.mjs --release-dir release-upload --version "$VERSION"
+          test -f release-upload/debrute-update-manifest.json
+          test -f release-upload/debrute-update-manifest.json.sig
       - name: Verify expected assets
         run: |
           VERSION="$(node -p "require('./package.json').version")"
-          node -e "import('./scripts/release-asset-contract.mjs').then(({expectedReleaseAssets}) => { const fs = require('fs'); const expected = expectedReleaseAssets(process.argv[1]); const missing = expected.filter((name) => !fs.existsSync('release-upload/' + name)); if (missing.length) { console.error('Missing release assets:', missing.join(', ')); process.exit(1); } })" "$VERSION"
+          node -e "import('./scripts/release-asset-contract.mjs').then(({expectedReleaseAssets}) => { const fs = require('fs'); const actual = fs.readdirSync('release-upload').sort(); const expected = expectedReleaseAssets(process.argv[1]).sort(); const missingAssets = expected.filter((name) => !actual.includes(name)); const unexpectedAssets = actual.filter((name) => !expected.includes(name)); if (missingAssets.length) { console.error('Missing release assets:', missingAssets.join(', ')); process.exit(1); } if (unexpectedAssets.length) { console.error('Unexpected release assets:', unexpectedAssets.join(', ')); process.exit(1); } })" "$VERSION"
       - name: Write release notes
         run: |
           VERSION="$(node -p "require('./package.json').version")"
