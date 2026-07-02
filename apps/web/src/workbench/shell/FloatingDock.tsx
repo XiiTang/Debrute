@@ -1,6 +1,5 @@
 import React from 'react';
 import {
-  AlertTriangle,
   CircleDot,
   FolderTree,
   Settings,
@@ -17,7 +16,6 @@ import { useI18n, type WorkbenchTranslationKey } from '../i18n';
 const floatingPanelTitleKeys: Record<FloatingPanelId, WorkbenchTranslationKey> = {
   explorer: 'shell.panels.explorer',
   inspector: 'shell.panels.inspector',
-  problems: 'shell.panels.problems',
   settings: 'shell.panels.settings',
   terminal: 'shell.panels.terminal'
 };
@@ -33,7 +31,6 @@ export function FloatingDock({
   const icons: Record<FloatingPanelId, React.ReactElement> = {
     explorer: <FolderTree size={14} />,
     inspector: <CircleDot size={14} />,
-    problems: <AlertTriangle size={14} />,
     settings: <Settings size={14} />,
     terminal: <Terminal size={14} />
   };

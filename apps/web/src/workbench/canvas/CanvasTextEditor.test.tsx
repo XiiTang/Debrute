@@ -196,6 +196,131 @@ describe('CanvasTextEditor', () => {
       restoreActEnvironment();
     }
   });
+
+  it('commits the current CodeMirror scroll position', async () => {
+    const restoreActEnvironment = installReactActEnvironment();
+    const container = document.createElement('div');
+    document.body.appendChild(container);
+    const root = createRoot(container);
+    const onScrollPositionCommit = vi.fn();
+    let unmounted = false;
+
+    try {
+      await act(async () => {
+        root.render(
+          <CanvasTextEditor
+            value="# Notes"
+            language="markdown"
+            wordWrap={false}
+            initialScrollTop={12}
+            initialScrollLeft={3}
+            onChange={() => undefined}
+            onSave={() => undefined}
+            onToggleWordWrap={() => undefined}
+            onScrollPositionCommit={onScrollPositionCommit}
+          />
+        );
+      });
+
+      const scroller = container.querySelector<HTMLElement>('.cm-scroller');
+      expect(scroller).not.toBeNull();
+      if (!scroller) {
+        throw new Error('Expected CodeMirror scroller.');
+      }
+      expect(scroller.scrollTop).toBe(12);
+      expect(scroller.scrollLeft).toBe(3);
+
+      scroller.scrollTop = 72;
+      scroller.scrollLeft = 9;
+
+      await act(async () => {
+        container.querySelector<HTMLElement>('.canvas-text-editor')?.dispatchEvent(new FocusEvent('focusout', { bubbles: true }));
+      });
+
+      expect(onScrollPositionCommit).toHaveBeenLastCalledWith({ scrollTop: 72, scrollLeft: 9 });
+
+      scroller.scrollTop = 0;
+      scroller.scrollLeft = 0;
+      await act(async () => {
+        root.unmount();
+      });
+      unmounted = true;
+
+      expect(onScrollPositionCommit).toHaveBeenCalledTimes(1);
+      expect(onScrollPositionCommit).toHaveBeenLastCalledWith({ scrollTop: 72, scrollLeft: 9 });
+    } finally {
+      if (!unmounted) {
+        await act(async () => {
+          root.unmount();
+        });
+      }
+      container.remove();
+      restoreActEnvironment();
+    }
+  });
+
+  it('commits scroll before the preview handoff layout runs', async () => {
+    const restoreActEnvironment = installReactActEnvironment();
+    const container = document.createElement('div');
+    document.body.appendChild(container);
+    const root = createRoot(container);
+    const events: string[] = [];
+    const onScrollPositionCommit = vi.fn((position: { scrollTop: number; scrollLeft: number }) => {
+      events.push(`commit:${position.scrollTop}:${position.scrollLeft}`);
+    });
+
+    function PreviewProbe(): React.ReactElement {
+      React.useLayoutEffect(() => {
+        events.push(`preview:${onScrollPositionCommit.mock.calls.length}`);
+      }, []);
+      return <div className="canvas-text-preview-empty" />;
+    }
+
+    function Harness({ active }: { active: boolean }): React.ReactElement {
+      return active
+        ? (
+            <CanvasTextEditor
+              value="# Notes"
+              language="markdown"
+              wordWrap={false}
+              onChange={() => undefined}
+              onSave={() => undefined}
+              onToggleWordWrap={() => undefined}
+              onScrollPositionCommit={onScrollPositionCommit}
+            />
+          )
+        : <PreviewProbe />;
+    }
+
+    try {
+      await act(async () => {
+        root.render(<Harness active />);
+      });
+
+      const scroller = container.querySelector<HTMLElement>('.cm-scroller');
+      expect(scroller).not.toBeNull();
+      if (!scroller) {
+        throw new Error('Expected CodeMirror scroller.');
+      }
+      scroller.scrollTop = 72;
+      scroller.scrollLeft = 9;
+
+      await act(async () => {
+        root.render(<Harness active={false} />);
+      });
+
+      expect(events).toEqual([
+        'commit:72:9',
+        'preview:1'
+      ]);
+    } finally {
+      await act(async () => {
+        root.unmount();
+      });
+      container.remove();
+      restoreActEnvironment();
+    }
+  });
 });
 
 function installReactActEnvironment(): () => void {

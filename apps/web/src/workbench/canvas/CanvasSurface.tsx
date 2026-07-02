@@ -1,5 +1,13 @@
 import React, { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
-import type { CanvasDocument, CanvasFeedbackDocument, CanvasFeedbackEntry, CanvasFeedbackGeometry, CanvasProjection, ProjectedCanvasNode } from '@debrute/canvas-core';
+import type {
+  CanvasDocument,
+  CanvasFeedbackDocument,
+  CanvasFeedbackEntry,
+  CanvasFeedbackGeometry,
+  CanvasProjection,
+  CanvasTextViewportState,
+  ProjectedCanvasNode
+} from '@debrute/canvas-core';
 import type { TextFileBuffer, WorkbenchActions } from '../../types';
 import type { WorkbenchContextMenuPosition, WorkbenchContextMenuTarget } from '../shell/contextMenu';
 import {
@@ -801,6 +809,11 @@ function CanvasSurfaceRuntime({
       updates: [{ projectRelativePath, currentTimeSeconds }]
     });
   }, [actions, canvas.id]);
+  const handleUpdateTextViewport = useCallback((projectRelativePath: string, viewport: CanvasTextViewportState) => {
+    void actions.updateCanvasTextViewportState(canvas.id, {
+      updates: [{ projectRelativePath, ...viewport }]
+    });
+  }, [actions, canvas.id]);
 
   useEffect(() => {
     const videoPaths = new Set(projectedNodes.filter(isProjectedVideoNode).map((node) => node.projectRelativePath));
@@ -1074,6 +1087,7 @@ function CanvasSurfaceRuntime({
                   onVideoPlayingChange={handleVideoPlayingChange}
                   onRegisterVideoTarget={registerVideoTarget}
                   onUpdateVideoPlaybackTime={handleUpdateVideoPlaybackTime}
+                  onUpdateTextViewport={handleUpdateTextViewport}
                 />
               ))}
             </CanvasImageNodeAssetProvider>
@@ -1115,7 +1129,8 @@ function CanvasSurfaceNodeShell({
   onVideoPlayerMounted,
   onVideoPlayingChange,
   onRegisterVideoTarget,
-  onUpdateVideoPlaybackTime
+  onUpdateVideoPlaybackTime,
+  onUpdateTextViewport
 }: {
   node: ProjectedCanvasNode;
   selected: boolean;
@@ -1146,6 +1161,7 @@ function CanvasSurfaceNodeShell({
   onVideoPlayingChange: (projectRelativePath: string, playing: boolean) => void;
   onRegisterVideoTarget: (projectRelativePath: string, target: CanvasVideoPlayerHandle | undefined) => void;
   onUpdateVideoPlaybackTime: (projectRelativePath: string, currentTimeSeconds: number) => void | Promise<void>;
+  onUpdateTextViewport: (projectRelativePath: string, viewport: CanvasTextViewportState) => void | Promise<void>;
 }): React.ReactElement {
   const textPreviewRuntime = useCanvasTextPreviewRuntime();
   const videoPreviewRuntime = useCanvasVideoPreviewRuntime();
@@ -1205,6 +1221,7 @@ function CanvasSurfaceNodeShell({
       onVideoPlayingChange={onVideoPlayingChange}
       onRegisterVideoTarget={onRegisterVideoTarget}
       onUpdateVideoPlaybackTime={onUpdateVideoPlaybackTime}
+      onUpdateTextViewport={onUpdateTextViewport}
       onVideoPreviewError={reportVideoPreviewError}
     />
   );

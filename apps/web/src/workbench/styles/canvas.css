@@ -590,6 +590,7 @@
 
 .canvas-text-body,
 .floating-text-editor-body {
+  position: relative;
   min-height: 0;
   overflow: hidden;
   overscroll-behavior: contain;
@@ -740,6 +741,13 @@
   padding: 12px;
   color: var(--db-text-muted);
   text-align: center;
+}
+
+.canvas-text-message--overlay {
+  position: absolute;
+  inset: 0;
+  background: color-mix(in oklch, var(--db-danger-bg) 88%, transparent);
+  pointer-events: none;
 }
 
 .canvas-text-message svg {

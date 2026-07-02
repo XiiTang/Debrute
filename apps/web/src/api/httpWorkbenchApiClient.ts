@@ -28,6 +28,7 @@ import type {
   TerminalEventSubscription,
   TerminalSessionList,
   TerminalSessionResult,
+  UpdateCanvasTextViewportStateInput,
   UpdateCanvasVideoPlaybackStateInput,
   VideoModelSettingsView,
   WorkbenchEvent,
@@ -461,6 +462,11 @@ export function createHttpWorkbenchApiClient(options: HttpWorkbenchApiClientOpti
     updateCanvasVideoPlaybackState: (input: UpdateCanvasVideoPlaybackStateInput) => requestRevisioned<WorkbenchCanvasDocumentMutationResult>(
       'PATCH',
       projectPath(`/canvases/${encodeURIComponent(input.canvasId)}/video-playback`),
+      { updates: input.updates }
+    ),
+    updateCanvasTextViewportState: (input: UpdateCanvasTextViewportStateInput) => requestRevisioned<WorkbenchCanvasDocumentMutationResult>(
+      'PATCH',
+      projectPath(`/canvases/${encodeURIComponent(input.canvasId)}/text-viewport`),
       { updates: input.updates }
     ),
     imageModelGetSettings: () => request<ImageModelSettingsView>('GET', '/api/models/image'),

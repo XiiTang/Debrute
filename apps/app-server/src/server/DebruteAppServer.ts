@@ -86,6 +86,7 @@ import type {
   TerminalResize,
   TerminalSessionList,
   TerminalSessionResult,
+  UpdateCanvasTextViewportStateInput,
   UpdateCanvasVideoPlaybackStateInput
 } from '@debrute/app-protocol';
 import { GlobalConfigStore } from '../config/GlobalConfigStore.js';
@@ -810,6 +811,12 @@ export class DebruteAppServer {
   async updateCanvasVideoPlaybackState(input: UpdateCanvasVideoPlaybackStateInput): Promise<{ canvas: CanvasDocument; projection: CanvasProjection }> {
     return this.enqueueSessionOperation(async () => (
       this.applyCanvasSessionUpdate(await this.canvasSessionService.updateCanvasVideoPlaybackState(this.getSnapshot(), input))
+    ));
+  }
+
+  async updateCanvasTextViewportState(input: UpdateCanvasTextViewportStateInput): Promise<{ canvas: CanvasDocument; projection: CanvasProjection }> {
+    return this.enqueueSessionOperation(async () => (
+      this.applyCanvasSessionUpdate(await this.canvasSessionService.updateCanvasTextViewportState(this.getSnapshot(), input))
     ));
   }
 

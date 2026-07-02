@@ -1594,6 +1594,7 @@ function nodeShellProps(node = nodeFixture('flow/cover.png', 0, 0)): CanvasNodeS
     onVideoPlayerMounted: () => undefined,
     onVideoPlayingChange: () => undefined,
     onRegisterVideoTarget: () => undefined,
+    onUpdateTextViewport: () => undefined,
     onUpdateVideoPlaybackTime: () => undefined
   };
 }
@@ -1754,6 +1755,7 @@ const actions: WorkbenchActions = {
   },
   updateCanvasNodeLayers: async () => undefined,
   updateCanvasVideoPlaybackState: async () => undefined,
+  updateCanvasTextViewportState: async () => undefined,
   updateCanvasFeedbackEntry: async () => true,
   addProjectPathToCanvasMap: async () => undefined,
   createCanvas: async () => {

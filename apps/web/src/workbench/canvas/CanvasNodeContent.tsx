@@ -1,6 +1,6 @@
 import React, { useCallback, useEffect, useReducer, useRef, useState } from 'react';
 import { AlertTriangle, File, FileText, Folder, Image as ImageIcon, Maximize2, Music2, RefreshCw, Save } from 'lucide-react';
-import type { CanvasFeedbackEntry, CanvasFeedbackGeometry, ProjectedCanvasNode } from '@debrute/canvas-core';
+import type { CanvasFeedbackEntry, CanvasFeedbackGeometry, CanvasTextViewportState, ProjectedCanvasNode } from '@debrute/canvas-core';
 import type { TextFileBuffer, WorkbenchActions } from '../../types';
 import { CanvasTextEditor } from './CanvasTextEditor';
 import { CanvasVideoNodeContent } from './CanvasVideoNodeContent';
@@ -43,6 +43,7 @@ export interface CanvasNodeContentProps {
   onVideoPlayingChange: (projectRelativePath: string, playing: boolean) => void;
   onRegisterVideoTarget: (projectRelativePath: string, target: CanvasVideoPlayerHandle | undefined) => void;
   onUpdateVideoPlaybackTime: (projectRelativePath: string, currentTimeSeconds: number) => void | Promise<void>;
+  onUpdateTextViewport: (projectRelativePath: string, viewport: CanvasTextViewportState) => void | Promise<void>;
   onVideoPreviewError?: ((projectRelativePath: string, preview: CanvasVideoPreviewSource, message: string) => void) | undefined;
   onSelectNode: () => void;
   onTitlePointerDown: (event: React.PointerEvent<Element>) => void;
@@ -70,6 +71,7 @@ export function CanvasNodeContent({
   onVideoPlayingChange,
   onRegisterVideoTarget,
   onUpdateVideoPlaybackTime,
+  onUpdateTextViewport,
   onVideoPreviewError,
   onSelectNode,
   onTitlePointerDown,
@@ -142,6 +144,7 @@ export function CanvasNodeContent({
         onTitlePointerDown={onTitlePointerDown}
         onTitlePointerMove={onTitlePointerMove}
         onTitlePointerUp={onTitlePointerUp}
+        onUpdateTextViewport={onUpdateTextViewport}
         i18n={i18n}
       />
     );
@@ -416,6 +419,7 @@ function CanvasTextNodeContent({
   onTitlePointerDown,
   onTitlePointerMove,
   onTitlePointerUp,
+  onUpdateTextViewport,
   i18n
 }: {
   node: ProjectedCanvasNode;
@@ -431,10 +435,12 @@ function CanvasTextNodeContent({
   onTitlePointerDown: (event: React.PointerEvent<Element>) => void;
   onTitlePointerMove: (event: React.PointerEvent<Element>) => void;
   onTitlePointerUp: (event: React.PointerEvent<Element>) => void;
+  onUpdateTextViewport: (projectRelativePath: string, viewport: CanvasTextViewportState) => void | Promise<void>;
   i18n: WorkbenchI18n;
 }): React.ReactElement {
   const { registerTextBody } = useCanvasTextPreviewRuntime();
   const active = selected;
+  const [visibleTextLayer, setVisibleTextLayer] = useState<'editor' | 'preview'>(() => active ? 'editor' : 'preview');
   const nextFocusRequestIdRef = useRef(0);
   const [focusRequest, setFocusRequest] = useState<CanvasTextEditorFocusRequest>();
   const [textPreviewVariantError, setTextPreviewVariantError] = useState<string>();
@@ -442,8 +448,9 @@ function CanvasTextNodeContent({
   const textPreviewProblem = !active && textPreviewProblemMessage
     ? { title: i18n.t('canvas.node.textPreviewError'), message: textPreviewProblemMessage }
     : undefined;
-  const bodyProblem = problem ?? textPreviewProblem;
-  const status = textBufferStatus(buffer, bodyProblem, i18n);
+  const bodyProblem = problem ?? (visibleTextLayer === 'preview' ? textPreviewProblem : undefined);
+  const handoffProblem = visibleTextLayer === 'editor' ? textPreviewProblem : undefined;
+  const status = textBufferStatus(buffer, problem ?? textPreviewProblem, i18n);
   const [textPreviewImageState, dispatchTextPreviewImage] = useReducer(
     canvasTextPreviewImageReducer,
     textPreview,
@@ -474,10 +481,27 @@ function CanvasTextNodeContent({
       path: node.projectRelativePath
     }));
   }, [i18n, node.projectRelativePath]);
+  const commitTextViewport = useCallback((viewport: CanvasTextViewportState) => {
+    const current = node.textViewport ?? { scrollTop: 0, scrollLeft: 0 };
+    if (current.scrollTop === viewport.scrollTop && current.scrollLeft === viewport.scrollLeft) {
+      return;
+    }
+    void onUpdateTextViewport(node.projectRelativePath, viewport);
+  }, [
+    node.projectRelativePath,
+    node.textViewport,
+    onUpdateTextViewport
+  ]);
 
   useEffect(() => {
     setTextPreviewVariantError(undefined);
   }, [node.projectRelativePath, textPreview?.src]);
+
+  useEffect(() => {
+    if (active) {
+      setVisibleTextLayer('editor');
+    }
+  }, [active]);
 
   useEffect(() => {
     dispatchTextPreviewImage({ type: 'source-resolved', source: textPreview });
@@ -502,6 +526,37 @@ function CanvasTextNodeContent({
       }
     });
   }, [nextTextPreview, reportTextPreviewVariantError]);
+
+  useEffect(() => {
+    if (active || visibleTextLayer !== 'editor' || !textPreview || textPreviewProblemMessage) {
+      return undefined;
+    }
+    const loadKey = textPreview.src;
+    return preloadCanvasImageForHandoff({
+      image: {
+        ...textPreview,
+        loadKey
+      },
+      resolveLoaded: (resolvedLoadKey) => {
+        if (resolvedLoadKey === loadKey) {
+          setVisibleTextLayer('preview');
+        }
+      },
+      rejectLoaded: (rejectedLoadKey) => {
+        if (rejectedLoadKey === loadKey) {
+          reportTextPreviewVariantError();
+        }
+      }
+    });
+  }, [
+    active,
+    reportTextPreviewVariantError,
+    textPreview,
+    textPreviewProblemMessage,
+    visibleTextLayer
+  ]);
+
+  const showTextEditor = Boolean(buffer && (active || visibleTextLayer === 'editor'));
 
   return (
     <section className="canvas-text-node">
@@ -553,20 +608,33 @@ function CanvasTextNodeContent({
             <strong>{bodyProblem?.title ?? i18n.t('canvas.node.textError')}</strong>
             <span>{bodyProblem?.message ?? buffer?.error}</span>
           </div>
-        ) : buffer && active ? (
-          <CanvasTextEditor
-            value={buffer.content}
-            language={buffer.language}
-            wordWrap={buffer.wordWrap}
-            visible={!culled || selected}
-            focusRequest={focusRequest}
-            onChange={(content) => actions.updateTextFileBuffer(node.projectRelativePath, content)}
-            onSave={() => void actions.saveTextFileBuffer(node.projectRelativePath)}
-            onToggleWordWrap={() => actions.toggleTextFileWordWrap(node.projectRelativePath)}
-            onFocusRequestConsumed={(requestId) => {
-              setFocusRequest((current) => current?.requestId === requestId ? undefined : current);
-            }}
-          />
+        ) : buffer && showTextEditor ? (
+          <>
+            <CanvasTextEditor
+              value={buffer.content}
+              language={buffer.language}
+              wordWrap={buffer.wordWrap}
+              readOnly={!active}
+              visible={!culled || selected}
+              focusRequest={active ? focusRequest : undefined}
+              initialScrollTop={node.textViewport?.scrollTop}
+              initialScrollLeft={node.textViewport?.scrollLeft}
+              onChange={(content) => actions.updateTextFileBuffer(node.projectRelativePath, content)}
+              onSave={() => void actions.saveTextFileBuffer(node.projectRelativePath)}
+              onToggleWordWrap={() => actions.toggleTextFileWordWrap(node.projectRelativePath)}
+              onScrollPositionCommit={commitTextViewport}
+              onFocusRequestConsumed={(requestId) => {
+                setFocusRequest((current) => current?.requestId === requestId ? undefined : current);
+              }}
+            />
+            {handoffProblem ? (
+              <div className="canvas-text-message canvas-text-message--overlay">
+                <AlertTriangle size={18} />
+                <strong>{handoffProblem.title}</strong>
+                <span>{handoffProblem.message}</span>
+              </div>
+            ) : null}
+          </>
         ) : buffer ? (
           <CanvasTextPreviewImage
             state={textPreviewImageState}

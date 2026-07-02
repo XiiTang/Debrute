@@ -49,7 +49,7 @@ describe('CanvasTextPreviewRuntime', () => {
       },
       culledNodePaths: new Set(),
       measuredBodies: new Map([
-        ['notes/a.md', { width: 560, height: 280, scrollTop: 0, scrollLeft: 0 }]
+        ['notes/a.md', { width: 560, height: 280 }]
       ]),
       styleKey: 'sha256:style-a'
     });
@@ -67,7 +67,7 @@ describe('CanvasTextPreviewRuntime', () => {
       },
       culledNodePaths: new Set(),
       measuredBodies: new Map([
-        ['notes/a.md', { width: 560, height: 280, scrollTop: 0, scrollLeft: 0 }]
+        ['notes/a.md', { width: 560, height: 280 }]
       ]),
       styleKey: 'sha256:style-a'
     });
@@ -75,6 +75,34 @@ describe('CanvasTextPreviewRuntime', () => {
     expect(targets).toMatchObject([{
       projectRelativePath: 'notes/a.md',
       styleKey: 'sha256:style-a'
+    }]);
+  });
+
+  it('uses the persisted node text viewport when generating inactive preview targets', () => {
+    const node = {
+      ...textNode('notes/a.md', 600, 320),
+      textViewport: { scrollTop: 72, scrollLeft: 9 }
+    };
+    const targets = canvasTextPreviewTargetsForNodes({
+      canvasId: 'canvas-1',
+      nodes: [node],
+      selectedProjectRelativePaths: [],
+      textFileBuffers: {
+        'notes/a.md': textBuffer('notes/a.md', 'A')
+      },
+      culledNodePaths: new Set(),
+      measuredBodies: new Map([
+        ['notes/a.md', { width: 560, height: 280 }]
+      ]),
+      styleKey: 'sha256:style-a'
+    });
+
+    expect(targets).toMatchObject([{
+      projectRelativePath: 'notes/a.md',
+      contentCssWidth: 560,
+      contentCssHeight: 280,
+      scrollTop: 72,
+      scrollLeft: 9
     }]);
   });
 
@@ -152,7 +180,7 @@ describe('CanvasTextPreviewRuntime', () => {
     expect(pendingCaptureKeys.size).toBe(3);
   });
 
-  it('measures CodeMirror scroller scroll and preserves it after the editor unmounts', () => {
+  it('measures rendered text body size without storing scroll position', () => {
     const scroller = { scrollTop: 72, scrollLeft: 9 };
     const element = {
       clientWidth: 640,
@@ -166,24 +194,7 @@ describe('CanvasTextPreviewRuntime', () => {
 
     expect(measured).toEqual({
       width: 640,
-      height: 360,
-      scrollTop: 72,
-      scrollLeft: 9
-    });
-
-    const inactiveElement = {
-      clientWidth: 680,
-      clientHeight: 390,
-      scrollTop: 0,
-      scrollLeft: 0,
-      querySelector: () => null
-    } as unknown as HTMLElement;
-
-    expect(canvasTextPreviewBodyMeasurement(inactiveElement, measured)).toEqual({
-      width: 680,
-      height: 390,
-      scrollTop: 72,
-      scrollLeft: 9
+      height: 360
     });
   });
 
@@ -226,6 +237,8 @@ describe('CanvasTextPreviewRuntime', () => {
 
   it('inlines CodeMirror line metrics onto gutter elements before image capture', () => {
     const element = document.createElement('div');
+    const scroller = document.createElement('div');
+    scroller.className = 'cm-scroller';
     const content = document.createElement('div');
     content.className = 'cm-content';
     content.style.paddingTop = '6px';
@@ -237,12 +250,13 @@ describe('CanvasTextPreviewRuntime', () => {
     setLayoutRect(line, { top: 6, height: 16.8 });
     content.append(line);
     const lineNumbers = document.createElement('div');
-    lineNumbers.className = 'cm-lineNumbers';
+    lineNumbers.className = 'cm-gutter cm-lineNumbers';
     const gutterElement = document.createElement('div');
     gutterElement.className = 'cm-gutterElement';
     setLayoutRect(gutterElement, { top: 6, height: 16.8 });
     lineNumbers.append(gutterElement);
-    element.append(lineNumbers, content);
+    scroller.append(lineNumbers, content);
+    element.append(scroller);
 
     prepareCanvasTextPreviewCaptureElement(element);
     prepareCanvasTextPreviewCaptureElement(element);
@@ -251,6 +265,42 @@ describe('CanvasTextPreviewRuntime', () => {
     expect(gutterElement.style.fontSize).toBe('12px');
     expect(gutterElement.style.lineHeight).toBe('16.8px');
     expect(gutterElement.style.minHeight).toBe('16.8px');
+    expect(gutterElement.style.transform).toBe('translateY(6px)');
+  });
+
+  it('materializes CodeMirror scroll offsets into clone-stable capture styles', () => {
+    const element = document.createElement('div');
+    const scroller = document.createElement('div');
+    scroller.className = 'cm-scroller';
+    scroller.scrollTop = 72;
+    scroller.scrollLeft = 9;
+    const gutter = document.createElement('div');
+    gutter.className = 'cm-gutter cm-lineNumbers';
+    const gutterElement = document.createElement('div');
+    gutterElement.className = 'cm-gutterElement';
+    setLayoutRect(gutterElement, { top: 14, height: 16.8 });
+    gutter.append(gutterElement);
+    const content = document.createElement('div');
+    content.className = 'cm-content';
+    content.style.paddingTop = '6px';
+    const line = document.createElement('div');
+    line.className = 'cm-line';
+    line.style.fontFamily = 'monospace';
+    line.style.fontSize = '12px';
+    line.style.lineHeight = '16.8px';
+    setLayoutRect(line, { top: 14, height: 16.8 });
+    content.append(line);
+    scroller.append(gutter, content);
+    element.append(scroller);
+
+    prepareCanvasTextPreviewCaptureElement(element);
+    prepareCanvasTextPreviewCaptureElement(element);
+
+    expect(scroller.style.overflow).toBe('hidden');
+    expect(content.style.transform).toBe('translate(-9px, -72px)');
+    expect(content.style.transformOrigin).toBe('0 0');
+    expect(gutter.style.transform).toBe('translateY(-72px)');
+    expect(gutter.style.transformOrigin).toBe('0 0');
     expect(gutterElement.style.transform).toBe('translateY(6px)');
   });
 
@@ -305,6 +355,30 @@ describe('CanvasTextPreviewRuntime', () => {
       loadKey: nextSource.src
     });
     expect(promoted.next).toBeUndefined();
+  });
+
+  it('does not keep the loaded text preview visible when the preview fingerprint changes', () => {
+    const loaded = textPreviewImageState(textPreviewSource(320, 'sha256:old'));
+    const nextSource = textPreviewSource(640, 'sha256:new');
+    const next = canvasTextPreviewImageReducer(loaded, {
+      type: 'source-resolved',
+      source: nextSource
+    });
+
+    expect(next.loaded).toEqual({
+      ...nextSource,
+      loadKey: nextSource.src
+    });
+    expect(next.next).toBeUndefined();
+  });
+
+  it('clears loaded text preview state when the current source is unresolved', () => {
+    const loaded = textPreviewImageState(textPreviewSource(320));
+
+    expect(canvasTextPreviewImageReducer(loaded, {
+      type: 'source-resolved',
+      source: undefined
+    })).toEqual(initialCanvasTextPreviewImageState());
   });
 
   it('cancels pending text preview upgrades when interaction starts but keeps first loads', () => {
@@ -969,10 +1043,11 @@ function previewTarget(projectRelativePath: string) {
   };
 }
 
-function textPreviewSource(previewWidth: number) {
+function textPreviewSource(previewWidth: number, fingerprint = 'sha256:preview'): CanvasTextPreviewSource & { fingerprint: string } {
   return {
-    src: `/api/projects/p/canvas-text-preview?canvasId=canvas-1&path=flow%2Freadme.md&fingerprint=fp&w=${previewWidth}`,
-    previewWidth
+    src: `/api/projects/p/canvas-text-preview?canvasId=canvas-1&path=flow%2Freadme.md&fingerprint=${fingerprint}&w=${previewWidth}`,
+    previewWidth,
+    fingerprint
   };
 }
 

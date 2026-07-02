@@ -61,16 +61,16 @@ describe('workbench window order', () => {
       focusedWindow: panelWindowIdentity('settings')
     }, [
       panelWindowIdentity('explorer'),
-      panelWindowIdentity('problems'),
+      panelWindowIdentity('terminal'),
       textEditorWindowIdentity('drafts/a.md')
     ]);
 
     expect(synced.orderBackToFront).toEqual([
       panelWindowIdentity('explorer'),
       textEditorWindowIdentity('drafts/a.md'),
-      panelWindowIdentity('problems')
+      panelWindowIdentity('terminal')
     ]);
-    expect(synced.focusedWindow).toEqual(panelWindowIdentity('problems'));
+    expect(synced.focusedWindow).toEqual(panelWindowIdentity('terminal'));
   });
 
   it('appends newly opened windows to the front in render order', () => {

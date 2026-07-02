@@ -28,10 +28,12 @@ const CANVAS_TEXT_PREVIEW_SOURCE_CONCURRENCY = 1;
 const CANVAS_TEXT_PREVIEW_CAPTURE_LAYOUT_MAX_FRAMES = 12;
 const CANVAS_TEXT_PREVIEW_CAPTURE_LAYOUT_TOP_TOLERANCE_PX = 0.5;
 const CANVAS_TEXT_PREVIEW_CAPTURE_LAYOUT_ERROR = 'Canvas text preview CodeMirror layout did not settle before capture.';
+const CANVAS_TEXT_PREVIEW_CAPTURE_SCROLLER_ERROR = 'Canvas text preview capture target is missing CodeMirror scroller.';
 
 export interface CanvasTextPreviewSource {
   src: string;
   previewWidth: number;
+  fingerprint: string;
 }
 
 export type CanvasLoadedTextPreviewSource = CanvasTextPreviewSource & {
@@ -52,8 +54,6 @@ export type CanvasTextPreviewImageEvent =
 export interface CanvasTextPreviewMeasuredBody {
   width: number;
   height: number;
-  scrollTop: number;
-  scrollLeft: number;
 }
 
 export interface CanvasTextPreviewCandidate {
@@ -121,7 +121,7 @@ export function canvasTextPreviewImageReducer(
   switch (event.type) {
     case 'source-resolved': {
       if (!event.source) {
-        return state.loaded ? { loaded: state.loaded, next: undefined } : initialCanvasTextPreviewImageState();
+        return initialCanvasTextPreviewImageState();
       }
       const next = canvasLoadedTextPreviewSource(event.source);
       if (!state.loaded) {
@@ -129,6 +129,9 @@ export function canvasTextPreviewImageReducer(
       }
       if (state.loaded?.loadKey === next.loadKey) {
         return state.next ? { ...state, next: undefined } : state;
+      }
+      if (state.loaded.fingerprint !== next.fingerprint) {
+        return { loaded: next, next: undefined };
       }
       if (state.next?.loadKey === next.loadKey) {
         return state;
@@ -266,13 +269,11 @@ export function CanvasTextPreviewProvider({
   const commitTextBodyMeasurement = useCallback((projectRelativePath: string, element: HTMLElement) => {
     setMeasuredBodies((current) => {
       const next = new Map(current);
-      const measurement = canvasTextPreviewBodyMeasurement(element, current.get(projectRelativePath));
+      const measurement = canvasTextPreviewBodyMeasurement(element);
       const existing = current.get(projectRelativePath);
       if (existing
         && existing.width === measurement.width
-        && existing.height === measurement.height
-        && existing.scrollTop === measurement.scrollTop
-        && existing.scrollLeft === measurement.scrollLeft) {
+        && existing.height === measurement.height) {
         return current;
       }
       next.set(projectRelativePath, measurement);
@@ -284,21 +285,11 @@ export function CanvasTextPreviewProvider({
     bodyRegistrationsRef.current.get(projectRelativePath)?.();
     bodyRegistrationsRef.current.delete(projectRelativePath);
     if (!element) {
-      setMeasuredBodies((current) => {
-        if (!current.has(projectRelativePath)) {
-          return current;
-        }
-        const next = new Map(current);
-        next.delete(projectRelativePath);
-        return next;
-      });
       return;
     }
 
     const commit = () => commitTextBodyMeasurement(projectRelativePath, element);
     const cleanup: Array<() => void> = [];
-    element.addEventListener('scroll', commit, true);
-    cleanup.push(() => element.removeEventListener('scroll', commit, true));
 
     if (typeof ResizeObserver !== 'undefined') {
       const resizeObserver = new ResizeObserver(commit);
@@ -676,8 +667,8 @@ export function canvasTextPreviewTargetsForNodes(input: {
       wordWrap: buffer.wordWrap,
       contentCssWidth: measured.width,
       contentCssHeight: measured.height,
-      scrollTop: measured.scrollTop,
-      scrollLeft: measured.scrollLeft,
+      scrollTop: node.textViewport?.scrollTop ?? 0,
+      scrollLeft: node.textViewport?.scrollLeft ?? 0,
       styleKey: input.styleKey
     });
   }
@@ -708,11 +699,16 @@ export function isCanvasTextPreviewCaptureLayoutReady(element: HTMLElement): boo
 }
 
 export function prepareCanvasTextPreviewCaptureElement(element: HTMLElement): void {
+  const scroller = element.querySelector('.cm-scroller');
+  if (!(scroller instanceof HTMLElement)) {
+    throw new Error(CANVAS_TEXT_PREVIEW_CAPTURE_SCROLLER_ERROR);
+  }
   const firstLine = firstMeasuredCanvasTextPreviewElement(element.querySelectorAll('.cm-content .cm-line'));
   if (!firstLine) {
     return;
   }
   const content = element.querySelector('.cm-content');
+  materializeCanvasTextPreviewCaptureViewport(element, scroller, content);
   const contentPaddingTop = content instanceof HTMLElement
     ? window.getComputedStyle(content).paddingTop
     : '0px';
@@ -804,6 +800,29 @@ function inlineCanvasTextPreviewCaptureProperties(
     if (value) {
       element.style.setProperty(property, value, style.getPropertyPriority(property));
     }
+  }
+}
+
+function materializeCanvasTextPreviewCaptureViewport(
+  element: HTMLElement,
+  scroller: HTMLElement,
+  content: Element | null
+): void {
+  const scrollTop = scroller.scrollTop;
+  const scrollLeft = scroller.scrollLeft;
+  scroller.style.overflow = 'hidden';
+  if (content instanceof HTMLElement) {
+    content.style.transformOrigin = '0 0';
+    content.style.transform = scrollTop === 0 && scrollLeft === 0
+      ? ''
+      : `translate(${-scrollLeft}px, ${-scrollTop}px)`;
+  }
+  for (const gutter of element.querySelectorAll('.cm-gutter')) {
+    if (!(gutter instanceof HTMLElement)) {
+      continue;
+    }
+    gutter.style.transformOrigin = '0 0';
+    gutter.style.transform = scrollTop === 0 ? '' : `translateY(${-scrollTop}px)`;
   }
 }
 
@@ -963,7 +982,7 @@ function canvasTextPreviewForNode(input: {
     fingerprint: input.target.fingerprint,
     width: targetWidth
   }).toString();
-  return { src, previewWidth: targetWidth };
+  return { src, previewWidth: targetWidth, fingerprint: input.target.fingerprint };
 }
 
 export function canvasTextPreviewTargetWidthForNode(input: {
@@ -1022,15 +1041,11 @@ type CanvasTextPreviewCaptureResult =
   | { status: 'error'; message: string };
 
 export function canvasTextPreviewBodyMeasurement(
-  element: HTMLElement,
-  previous?: CanvasTextPreviewMeasuredBody | undefined
+  element: HTMLElement
 ): CanvasTextPreviewMeasuredBody {
-  const scroller = element.querySelector('.cm-scroller') as HTMLElement | null;
   return {
     width: element.clientWidth,
-    height: element.clientHeight,
-    scrollTop: scroller ? scroller.scrollTop : previous?.scrollTop ?? element.scrollTop,
-    scrollLeft: scroller ? scroller.scrollLeft : previous?.scrollLeft ?? element.scrollLeft
+    height: element.clientHeight
   };
 }
 

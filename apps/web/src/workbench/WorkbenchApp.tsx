@@ -57,6 +57,7 @@ import {
 } from './shell/contextMenu';
 import { createInlineEditState, validateInlineProjectName, type ProjectTreeInlineEditState } from './project-explorer/projectTreeEditing';
 import type { ProjectTreeFileKeyboardCommand } from './project-explorer/projectTreeKeyboardCommands';
+import { applyCanvasTextViewportStateToWorkbenchSnapshot } from './services/canvasSnapshotUpdates';
 import {
   clearCanvasSelectionAfterDeletedPath,
   clearClipboardAfterDeletedPath,
@@ -923,6 +924,30 @@ export function WorkbenchApp(): React.ReactElement {
         throw new Error(`Cannot apply Canvas document ${result.canvas.id} without a current snapshot.`);
       }
       const next = replaceCanvasMutationInSnapshot(current, result);
+      snapshotRef.current = next;
+      setSnapshot(next);
+    },
+    updateCanvasTextViewportState: async (canvasId, input) => {
+      const current = snapshotRef.current;
+      if (!current) {
+        throw new Error(`Cannot apply Canvas document ${canvasId} without a current snapshot.`);
+      }
+      const local = applyCanvasTextViewportStateToWorkbenchSnapshot(current, canvasId, input);
+      if (local === current) {
+        return;
+      }
+      snapshotRef.current = local;
+      setSnapshot(local);
+
+      const result = await api.updateCanvasTextViewportState({
+        canvasId,
+        ...input
+      });
+      const latest = snapshotRef.current;
+      if (!latest) {
+        throw new Error(`Cannot apply Canvas document ${result.canvas.id} without a current snapshot.`);
+      }
+      const next = replaceCanvasMutationInSnapshot(latest, result);
       snapshotRef.current = next;
       setSnapshot(next);
     },

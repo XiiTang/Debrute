@@ -42,7 +42,15 @@ vi.mock('./CanvasTextEditor', async () => {
   }
 
   return {
-    CanvasTextEditor: ({ onLayoutReady }: { onLayoutReady?: (() => void) | undefined }) => {
+    CanvasTextEditor: ({
+      initialScrollTop,
+      initialScrollLeft,
+      onLayoutReady
+    }: {
+      initialScrollTop?: number | undefined;
+      initialScrollLeft?: number | undefined;
+      onLayoutReady?: (() => void) | undefined;
+    }) => {
       ReactModule.useEffect(() => {
         onLayoutReady?.();
       }, [onLayoutReady]);
@@ -52,19 +60,32 @@ vi.mock('./CanvasTextEditor', async () => {
         null,
         ReactModule.createElement(
           'div',
-          { className: 'cm-lineNumbers' },
-          ReactModule.createElement('div', {
-            className: 'cm-gutterElement',
-            ref: (element: HTMLElement | null) => setRect(element, textEditorMockLayout.gutterTop)
-          })
-        ),
-        ReactModule.createElement(
-          'div',
-          { className: 'cm-content' },
-          ReactModule.createElement('div', {
-            className: 'cm-line',
-            ref: (element: HTMLElement | null) => setRect(element, textEditorMockLayout.lineTop)
-          })
+          {
+            className: 'cm-scroller',
+            ref: (element: HTMLElement | null) => {
+              if (!element) {
+                return;
+              }
+              element.scrollTop = initialScrollTop ?? 0;
+              element.scrollLeft = initialScrollLeft ?? 0;
+            }
+          },
+          ReactModule.createElement(
+            'div',
+            { className: 'cm-gutter cm-lineNumbers' },
+            ReactModule.createElement('div', {
+              className: 'cm-gutterElement',
+              ref: (element: HTMLElement | null) => setRect(element, textEditorMockLayout.gutterTop)
+            })
+          ),
+          ReactModule.createElement(
+            'div',
+            { className: 'cm-content' },
+            ReactModule.createElement('div', {
+              className: 'cm-line',
+              ref: (element: HTMLElement | null) => setRect(element, textEditorMockLayout.lineTop)
+            })
+          )
         )
       );
     }
@@ -193,6 +214,67 @@ describe('CanvasTextPreviewCaptureFlow', () => {
       await flushReactWork();
 
       expect(saveCanvasTextPreviewSource).not.toHaveBeenCalled();
+    } finally {
+      await act(async () => {
+        root.unmount();
+      });
+      container.remove();
+      restoreClientSize();
+      restoreAnimationFrame();
+      restoreActEnvironment();
+    }
+  });
+
+  it('captures text preview sources after materializing the target scroll viewport', async () => {
+    const restoreActEnvironment = installReactActEnvironment();
+    const restoreAnimationFrame = installAnimationFrame();
+    const restoreClientSize = installElementClientSize();
+    const container = document.createElement('div');
+    document.body.append(container);
+    const root = createRoot(container);
+    const node: ProjectedCanvasNode = {
+      ...textNode('notes/scrolled.md'),
+      textViewport: { scrollTop: 72, scrollLeft: 9 }
+    };
+    const saveCanvasTextPreviewSource = vi.fn<WorkbenchActions['saveCanvasTextPreviewSource']>(
+      async (input) => textPreviewSourceSaveResult(input)
+    );
+    const toBlobMock = vi.mocked(toBlob);
+    textEditorMockLayout.gutterTop = 14;
+    textEditorMockLayout.lineTop = 14;
+
+    try {
+      await act(async () => {
+        root.render(
+          <CanvasTextPreviewProvider
+            canvasId="canvas-1"
+            nodes={[node]}
+            selectedProjectRelativePaths={[]}
+            textFileBuffers={{
+              [node.projectRelativePath]: textBuffer(node.projectRelativePath, 'content')
+            }}
+            actions={textPreviewActionsFixture(saveCanvasTextPreviewSource)}
+            cameraState="idle"
+            dragState={undefined}
+            resourceZoom={0.11}
+            devicePixelRatio={2}
+            culledNodePaths={new Set()}
+            previewResourceScheduler={createImmediateScheduler()}
+            styleDependencyKey="dark"
+          >
+            <RegisteredTextBody node={node} />
+          </CanvasTextPreviewProvider>
+        );
+      });
+
+      await waitForMockCall(toBlobMock);
+
+      const [capturedElement] = toBlobMock.mock.calls[0] ?? [];
+      expect(capturedElement).toBeInstanceOf(HTMLElement);
+      const element = capturedElement as HTMLElement;
+      expect(element.querySelector<HTMLElement>('.cm-scroller')?.style.overflow).toBe('hidden');
+      expect(element.querySelector<HTMLElement>('.cm-content')?.style.transform).toBe('translate(-9px, -72px)');
+      expect(element.querySelector<HTMLElement>('.cm-gutter')?.style.transform).toBe('translateY(-72px)');
     } finally {
       await act(async () => {
         root.unmount();

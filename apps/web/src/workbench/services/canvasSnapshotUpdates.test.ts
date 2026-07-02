@@ -1,7 +1,10 @@
 import { describe, expect, it } from 'vitest';
 import type { WorkbenchProjectSessionSnapshot } from '@debrute/app-protocol';
 import type { CanvasDocument, CanvasProjection } from '@debrute/canvas-core';
-import { applyCanvasDocumentToWorkbenchSnapshot } from './canvasSnapshotUpdates';
+import {
+  applyCanvasDocumentToWorkbenchSnapshot,
+  applyCanvasTextViewportStateToWorkbenchSnapshot
+} from './canvasSnapshotUpdates';
 
 describe('canvas snapshot updates', () => {
   it('applies a returned Canvas document to the local snapshot and projection', () => {
@@ -42,6 +45,31 @@ describe('canvas snapshot updates', () => {
       x: 80,
       y: 90,
       videoPresentation: projection.nodes[0]?.videoPresentation
+    });
+  });
+
+  it('applies text viewport updates to the local snapshot and projection', () => {
+    const original = textCanvasDocument('canvas-1');
+    const snapshot = snapshotFixture({
+      canvases: [original],
+      projections: [projectionFixture(original, 'rev-a')]
+    });
+
+    const next = applyCanvasTextViewportStateToWorkbenchSnapshot(snapshot, 'canvas-1', {
+      updates: [{ projectRelativePath: 'notes/readme.md', scrollTop: 72, scrollLeft: 9 }]
+    });
+
+    expect(next.canvases[0]?.nodeElements[0]).toMatchObject({
+      projectRelativePath: 'notes/readme.md',
+      textViewport: { scrollTop: 72, scrollLeft: 9 }
+    });
+    expect(next.projections[0]?.nodes[0]).toMatchObject({
+      projectRelativePath: 'notes/readme.md',
+      textViewport: { scrollTop: 72, scrollLeft: 9 },
+      availability: {
+        state: 'available',
+        revision: 'rev-a'
+      }
     });
   });
 
@@ -89,6 +117,27 @@ function snapshotFixture(input: {
       },
       runtimeDataLocation: '/tmp/debrute',
       checkedAt: '2026-06-11T00:00:00.000Z'
+    }
+  };
+}
+
+function textCanvasDocument(canvasId: string): CanvasDocument {
+  return {
+    id: canvasId,
+    name: canvasId,
+    nodeElements: [{
+      projectRelativePath: 'notes/readme.md',
+      nodeKind: 'file',
+      mediaKind: 'text',
+      x: 10,
+      y: 20,
+      width: 420,
+      height: 260,
+      z: 0
+    }],
+    annotations: [],
+    preferences: {
+      showDiagnostics: true
     }
   };
 }

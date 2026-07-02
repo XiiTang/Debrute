@@ -1,5 +1,10 @@
 import type { WorkbenchProjectSessionSnapshot } from '@debrute/app-protocol';
-import { projectCanvas, type CanvasDocument, type CanvasNodeAvailability } from '@debrute/canvas-core';
+import {
+  projectCanvas,
+  updateCanvasTextViewportState,
+  type CanvasDocument,
+  type CanvasNodeAvailability
+} from '@debrute/canvas-core';
 
 export function applyCanvasDocumentToWorkbenchSnapshot(
   snapshot: WorkbenchProjectSessionSnapshot,
@@ -49,4 +54,25 @@ export function applyCanvasDocumentToWorkbenchSnapshot(
       projection.canvasId === canvas.id ? nextProjection : projection
     ))
   };
+}
+
+export function applyCanvasTextViewportStateToWorkbenchSnapshot(
+  snapshot: WorkbenchProjectSessionSnapshot,
+  canvasId: string,
+  input: {
+    updates: Array<{
+      projectRelativePath: string;
+      scrollTop: number;
+      scrollLeft: number;
+    }>;
+  }
+): WorkbenchProjectSessionSnapshot {
+  const canvas = snapshot.canvases.find((current) => current.id === canvasId);
+  if (!canvas) {
+    throw new Error(`Cannot apply Canvas document ${canvasId} without a current canvas.`);
+  }
+  const nextCanvas = updateCanvasTextViewportState(canvas, input);
+  return nextCanvas === canvas
+    ? snapshot
+    : applyCanvasDocumentToWorkbenchSnapshot(snapshot, nextCanvas);
 }

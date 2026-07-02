@@ -284,6 +284,49 @@ describe('DebruteAppServer Canvas video playback state', () => {
   });
 });
 
+describe('DebruteAppServer Canvas text viewport state', () => {
+  it('persists text viewport in the Canvas document', async () => {
+    const projectRoot = await mkdtemp(join(tmpdir(), 'debrute-text-viewport-state-'));
+    const server = new DebruteAppServer({
+      canvasNodeLayoutSizeReader: async () => ({ width: 420, height: 260 })
+    });
+    try {
+      await server.openProject(projectRoot, {
+        initializeIfMissing: true,
+        createDefaultCanvas: true,
+        watchFiles: false
+      });
+      await mkdir(join(projectRoot, 'notes'), { recursive: true });
+      await writeFile(join(projectRoot, 'notes/readme.md'), '# Notes', 'utf8');
+      const canvasPath = join(projectRoot, '.debrute/canvases/canvas-1.json');
+      await server.addProjectPathToCanvasMap({
+        canvasId: 'canvas-1',
+        projectRelativePath: 'notes/readme.md'
+      });
+
+      const result = await server.updateCanvasTextViewportState({
+        canvasId: 'canvas-1',
+        updates: [{ projectRelativePath: 'notes/readme.md', scrollTop: 72, scrollLeft: 9 }]
+      });
+
+      expect(result.canvas.nodeElements.find((node) => node.projectRelativePath === 'notes/readme.md')).toMatchObject({
+        projectRelativePath: 'notes/readme.md',
+        textViewport: { scrollTop: 72, scrollLeft: 9 }
+      });
+      const savedCanvas = JSON.parse(await readFile(canvasPath, 'utf8')) as {
+        nodeElements: Array<{ projectRelativePath: string; textViewport?: { scrollTop: number; scrollLeft: number } }>;
+      };
+      expect(savedCanvas.nodeElements.find((node) => node.projectRelativePath === 'notes/readme.md')).toMatchObject({
+        projectRelativePath: 'notes/readme.md',
+        textViewport: { scrollTop: 72, scrollLeft: 9 }
+      });
+    } finally {
+      server.close();
+      await rm(projectRoot, { recursive: true, force: true });
+    }
+  });
+});
+
 describe('DebruteAppServer Canvas video previews', () => {
   it('uses the integration env path for Canvas video preview frame extraction', async () => {
     const projectRoot = await mkdtemp(join(tmpdir(), 'debrute-video-preview-env-path-'));

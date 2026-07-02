@@ -5,7 +5,7 @@ import {
   type WorkbenchViewportRect
 } from './windowBounds';
 
-export type FloatingPanelId = 'explorer' | 'inspector' | 'problems' | 'settings' | 'terminal';
+export type FloatingPanelId = 'explorer' | 'inspector' | 'settings' | 'terminal';
 export const FLOATING_PANEL_RESIZE_DIRECTIONS = ['n', 's', 'e', 'w', 'ne', 'nw', 'se', 'sw'] as const;
 export type FloatingPanelResizeDirection = typeof FLOATING_PANEL_RESIZE_DIRECTIONS[number];
 
@@ -42,7 +42,6 @@ export interface FloatingPanelResizeInput extends FloatingPanelResizeRect {
 export const FLOATING_PANEL_DEFINITIONS: Record<FloatingPanelId, FloatingPanelDefinition> = {
   explorer: panelDefinition('explorer', 'Explorer', 58, 45, 320, 620, 280, 320, 720, 900),
   inspector: panelDefinition('inspector', 'Inspector', 1036, 470, 340, 420, 300, 280, 760, 760),
-  problems: panelDefinition('problems', 'Problems', 360, 680, 720, 260, 420, 180, 1200, 520),
   settings: panelDefinition('settings', 'Settings', 360, 120, 760, 580, 520, 360, 1100, 860),
   terminal: panelDefinition('terminal', 'Terminal', 96, 420, 920, 320, 520, 220, 1440, 900)
 };
@@ -64,13 +63,6 @@ export const DEFAULT_FLOATING_PANEL_STATE: FloatingPanelState = {
       y: FLOATING_PANEL_DEFINITIONS.inspector.defaultY,
       width: FLOATING_PANEL_DEFINITIONS.inspector.defaultWidth,
       height: FLOATING_PANEL_DEFINITIONS.inspector.defaultHeight
-    },
-    problems: {
-      open: false,
-      x: FLOATING_PANEL_DEFINITIONS.problems.defaultX,
-      y: FLOATING_PANEL_DEFINITIONS.problems.defaultY,
-      width: FLOATING_PANEL_DEFINITIONS.problems.defaultWidth,
-      height: FLOATING_PANEL_DEFINITIONS.problems.defaultHeight
     },
     settings: {
       open: false,

@@ -1,5 +1,5 @@
 import React, { useLayoutEffect, useRef } from 'react';
-import type { CanvasFeedbackEntry, CanvasFeedbackGeometry, ProjectedCanvasNode } from '@debrute/canvas-core';
+import type { CanvasFeedbackEntry, CanvasFeedbackGeometry, CanvasTextViewportState, ProjectedCanvasNode } from '@debrute/canvas-core';
 import type { TextFileBuffer, WorkbenchActions } from '../../types';
 import type { ResizeHandle } from '../services/canvasInteraction';
 import type { CanvasStageRuntime } from './runtime/CanvasStageRuntime';
@@ -46,6 +46,7 @@ export interface CanvasNodeShellProps {
   onVideoPlayingChange: (projectRelativePath: string, playing: boolean) => void;
   onRegisterVideoTarget: (projectRelativePath: string, target: CanvasVideoPlayerHandle | undefined) => void;
   onUpdateVideoPlaybackTime: (projectRelativePath: string, currentTimeSeconds: number) => void | Promise<void>;
+  onUpdateTextViewport: (projectRelativePath: string, viewport: CanvasTextViewportState) => void | Promise<void>;
   onVideoPreviewError?: ((projectRelativePath: string, preview: CanvasVideoPreviewSource, message: string) => void) | undefined;
 }
 
@@ -80,6 +81,7 @@ function CanvasNodeShellComponent({
   onVideoPlayingChange,
   onRegisterVideoTarget,
   onUpdateVideoPlaybackTime,
+  onUpdateTextViewport,
   onVideoPreviewError
 }: CanvasNodeShellProps): React.ReactElement {
   const elementRef = useRef<HTMLDivElement | null>(null);
@@ -151,6 +153,7 @@ function CanvasNodeShellComponent({
             onVideoPlayingChange={onVideoPlayingChange}
             onRegisterVideoTarget={onRegisterVideoTarget}
             onUpdateVideoPlaybackTime={onUpdateVideoPlaybackTime}
+            onUpdateTextViewport={onUpdateTextViewport}
             onVideoPreviewError={onVideoPreviewError}
             onSelectNode={() => onSelectNode(node)}
             onTitlePointerDown={(event) => onPointerDown(node, event)}
@@ -179,6 +182,7 @@ function CanvasNodeShellComponent({
           onVideoPlayingChange={onVideoPlayingChange}
           onRegisterVideoTarget={onRegisterVideoTarget}
           onUpdateVideoPlaybackTime={onUpdateVideoPlaybackTime}
+          onUpdateTextViewport={onUpdateTextViewport}
           onVideoPreviewError={onVideoPreviewError}
           onSelectNode={() => onSelectNode(node)}
           onTitlePointerDown={(event) => onPointerDown(node, event)}
@@ -239,6 +243,7 @@ export function areCanvasNodeShellPropsEqual(
     && previous.onVideoPlayingChange === next.onVideoPlayingChange
     && previous.onRegisterVideoTarget === next.onRegisterVideoTarget
     && previous.onUpdateVideoPlaybackTime === next.onUpdateVideoPlaybackTime
+    && previous.onUpdateTextViewport === next.onUpdateTextViewport
     && previous.onVideoPreviewError === next.onVideoPreviewError;
 }
 

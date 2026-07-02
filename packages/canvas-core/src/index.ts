@@ -37,6 +37,7 @@ export interface CanvasNodeElement {
   z: number;
   layoutMode?: 'manual';
   videoPlayback?: CanvasVideoPlaybackState;
+  textViewport?: CanvasTextViewportState;
 }
 
 export type CanvasNodeAvailability =
@@ -100,6 +101,11 @@ export interface CanvasStructureEdgeProjection {
 
 export interface CanvasVideoPlaybackState {
   currentTimeSeconds: number;
+}
+
+export interface CanvasTextViewportState {
+  scrollTop: number;
+  scrollLeft: number;
 }
 
 export interface CanvasVideoTextTrack {
@@ -627,6 +633,58 @@ export function updateCanvasVideoPlaybackState(
   };
 }
 
+export function updateCanvasTextViewportState(
+  canvas: CanvasDocument,
+  input: {
+    updates: Array<{
+      projectRelativePath: string;
+      scrollTop: number;
+      scrollLeft: number;
+    }>;
+  }
+): CanvasDocument {
+  const updatesByPath = new Map(input.updates.map((update) => {
+    assertCanvasTextViewportScroll(update.scrollTop, update.scrollLeft);
+    return [update.projectRelativePath, {
+      scrollTop: update.scrollTop,
+      scrollLeft: update.scrollLeft
+    }] as const;
+  }));
+  if (updatesByPath.size === 0) {
+    return canvas;
+  }
+  let changed = false;
+  const nodeElements = canvas.nodeElements.map((nodeElement) => {
+    const viewport = updatesByPath.get(nodeElement.projectRelativePath);
+    if (viewport === undefined || nodeElement.nodeKind !== 'file' || nodeElement.mediaKind !== 'text') {
+      return nodeElement;
+    }
+    if (viewport.scrollTop === 0 && viewport.scrollLeft === 0) {
+      if (nodeElement.textViewport === undefined) {
+        return nodeElement;
+      }
+      changed = true;
+      const { textViewport: _textViewport, ...nodeWithoutViewport } = nodeElement;
+      return nodeWithoutViewport;
+    }
+    if (nodeElement.textViewport?.scrollTop === viewport.scrollTop
+      && nodeElement.textViewport.scrollLeft === viewport.scrollLeft) {
+      return nodeElement;
+    }
+    changed = true;
+    return {
+      ...nodeElement,
+      textViewport: viewport
+    };
+  });
+  return changed
+    ? {
+        ...canvas,
+        nodeElements
+      }
+    : canvas;
+}
+
 export function canvasNodeLayerOrderTopFirst(canvas: Pick<CanvasDocument, 'nodeElements'>): string[] {
   return [...canvas.nodeElements]
     .sort((left, right) => compareNodeZ(right, left))
@@ -673,6 +731,9 @@ export function reconcileCanvasNodeElements(input: ReconcileCanvasNodeElementsIn
       ...(existing?.videoPlayback && desiredNode.nodeKind === 'file' && desiredNode.mediaKind === 'video'
         ? { videoPlayback: existing.videoPlayback }
         : {}),
+      ...(existing?.textViewport && desiredNode.nodeKind === 'file' && desiredNode.mediaKind === 'text'
+        ? { textViewport: existing.textViewport }
+        : {}),
       z: preservedZByPath.get(desiredNode.projectRelativePath) ?? allocateNewZ()
     };
     if (existing?.layoutMode === 'manual') {
@@ -713,6 +774,12 @@ function compareNodeZ(left: CanvasNodeElement, right: CanvasNodeElement): number
 function assertCanvasVideoPlaybackTime(currentTimeSeconds: number): void {
   if (!Number.isFinite(currentTimeSeconds) || currentTimeSeconds < 0) {
     throw new Error('Canvas video playback time must be a non-negative finite number.');
+  }
+}
+
+function assertCanvasTextViewportScroll(scrollTop: number, scrollLeft: number): void {
+  if (!Number.isFinite(scrollTop) || scrollTop < 0 || !Number.isFinite(scrollLeft) || scrollLeft < 0) {
+    throw new Error('Canvas text viewport scroll values must be non-negative finite numbers.');
   }
 }
 

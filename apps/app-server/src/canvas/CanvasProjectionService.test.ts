@@ -42,6 +42,46 @@ describe('CanvasProjectionService Canvas document validation', () => {
     }, '/project/.debrute/canvases/canvas-1.json')).toThrow('Invalid canvas document: /project/.debrute/canvases/canvas-1.json');
   });
 
+  it('accepts textViewport only on text file nodes', () => {
+    const canvas = createCanvasDocument({ id: 'canvas-1' });
+
+    expect(assertCurrentCanvasDocument({
+      ...canvas,
+      nodeElements: [{
+        ...canvasTextFileNode('notes/readme.md'),
+        textViewport: { scrollTop: 72, scrollLeft: 9 }
+      }]
+    }, '/project/.debrute/canvases/canvas-1.json')).toMatchObject({
+      nodeElements: [{
+        projectRelativePath: 'notes/readme.md',
+        textViewport: { scrollTop: 72, scrollLeft: 9 }
+      }]
+    });
+
+    expect(() => assertCurrentCanvasDocument({
+      ...canvas,
+      nodeElements: [{
+        projectRelativePath: 'media/image.png',
+        nodeKind: 'file' as const,
+        mediaKind: 'image' as const,
+        x: 0,
+        y: 0,
+        width: 320,
+        height: 180,
+        z: 0,
+        textViewport: { scrollTop: 72, scrollLeft: 9 }
+      }]
+    }, '/project/.debrute/canvases/canvas-1.json')).toThrow('Invalid canvas document: /project/.debrute/canvases/canvas-1.json');
+
+    expect(() => assertCurrentCanvasDocument({
+      ...canvas,
+      nodeElements: [{
+        ...canvasTextFileNode('notes/readme.md'),
+        textViewport: { scrollTop: -1, scrollLeft: 0 }
+      }]
+    }, '/project/.debrute/canvases/canvas-1.json')).toThrow('Invalid canvas document: /project/.debrute/canvases/canvas-1.json');
+  });
+
   it('projects available video nodes with video presentation companions', async () => {
     const projectRoot = await mkdtemp(join(tmpdir(), 'debrute-video-projection-'));
     try {
