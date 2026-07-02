@@ -40,7 +40,7 @@ describe('runtime product update protocol contract', () => {
         type: 'error',
         currentVersion: '0.2.0',
         operation: operations[1],
-        message: 'checksum failed',
+        message: 'signed manifest verification failed',
         updateVersion: '0.3.0',
         logPath: '/Users/me/.debrute/logs/update.log'
       }

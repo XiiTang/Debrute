@@ -1,3 +1,4 @@
+import { createHash } from 'node:crypto';
 import { mkdtemp, readFile, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -12,6 +13,7 @@ describe('runtime product update service', () => {
       await rm(cleanup.pop()!, { recursive: true, force: true });
     }
     vi.useRealTimers();
+    vi.unstubAllGlobals();
   });
 
   it('maps a newer release to available state', async () => {
@@ -72,6 +74,65 @@ describe('runtime product update service', () => {
     });
   });
 
+  it('reports a missing signed manifest from the default GitHub release source', async () => {
+    vi.stubGlobal('fetch', vi.fn(async () => new Response(JSON.stringify({
+      assets: [{
+        name: 'debrute-update-manifest.json.sig',
+        browser_download_url: 'https://github.com/xiitang/debrute/releases/download/v0.3.0/debrute-update-manifest.json.sig'
+      }]
+    }), { status: 200 })));
+    const service = new ProductUpdateService({
+      productVersion: '0.2.0',
+      platform: 'darwin',
+      platformArch: 'arm64',
+      cliDiagnostic
+    });
+
+    await expect(service.check()).resolves.toMatchObject({
+      update: {
+        type: 'error',
+        operation: 'check',
+        message: 'GitHub release is missing debrute-update-manifest.json.'
+      }
+    });
+  });
+
+  it('reports an oversized signed manifest from the default GitHub release source', async () => {
+    const fetchMock = vi.fn(async (url: string) => {
+      if (url === 'https://api.github.com/repos/xiitang/debrute/releases/latest') {
+        return new Response(JSON.stringify({
+          assets: [
+            {
+              name: 'debrute-update-manifest.json',
+              browser_download_url: 'https://github.com/xiitang/debrute/releases/download/v0.3.0/debrute-update-manifest.json'
+            },
+            {
+              name: 'debrute-update-manifest.json.sig',
+              browser_download_url: 'https://github.com/xiitang/debrute/releases/download/v0.3.0/debrute-update-manifest.json.sig'
+            }
+          ]
+        }), { status: 200 });
+      }
+      return new Response(Buffer.alloc(256 * 1024 + 1), { status: 200 });
+    });
+    vi.stubGlobal('fetch', fetchMock);
+    const service = new ProductUpdateService({
+      productVersion: '0.2.0',
+      platform: 'darwin',
+      platformArch: 'arm64',
+      cliDiagnostic
+    });
+
+    await expect(service.check()).resolves.toMatchObject({
+      update: {
+        type: 'error',
+        operation: 'check',
+        message: 'Downloaded debrute-update-manifest.json exceeds 262144 bytes.'
+      }
+    });
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+  });
+
   it('verifies the selected asset, writes a replacement plan, and spawns the helper', async () => {
     const root = await mkdtemp(join(tmpdir(), 'debrute-product-update-'));
     cleanup.push(root);
@@ -83,6 +144,7 @@ describe('runtime product update service', () => {
     const exitRuntime = vi.fn(() => {
       calls.push('runtime-exit');
     });
+    vi.stubGlobal('fetch', vi.fn(async () => new Response('asset-bytes', { status: 200 })));
     const service = new ProductUpdateService({
       productVersion: '0.2.0',
       platform: 'darwin',
@@ -92,9 +154,9 @@ describe('runtime product update service', () => {
       desktopPid: 42,
       runtimePid: 24,
       releaseSource: async () => release('0.3.0'),
-      downloadAsset: vi.fn(async (asset, destinationDir) => join(destinationDir, asset.name)),
-      downloadChecksumManifest: vi.fn(async (_release, destinationDir) => join(destinationDir, 'debrute_SHA256SUMS')),
-      verifyChecksum: vi.fn(async () => undefined),
+      verifyPlatformAsset: vi.fn(async () => {
+        calls.push('platform-verify');
+      }),
       spawnReplacementHelper,
       requestDesktopQuit,
       exitRuntime
@@ -118,9 +180,8 @@ describe('runtime product update service', () => {
       runtimePid: 24,
       relaunchDesktop: true
     });
-    await expect(readFile(planPath, 'utf8').then(JSON.parse)).resolves.not.toHaveProperty('checksumManifestPath');
     await expect(readFile(planPath, 'utf8').then(JSON.parse)).resolves.not.toHaveProperty('managedProductRoot');
-    expect(calls).toEqual(['desktop-quit', 'runtime-exit']);
+    expect(calls).toEqual(['platform-verify', 'desktop-quit', 'runtime-exit']);
   });
 
   it('does not request quit or exit when the replacement helper fails to start', async () => {
@@ -128,6 +189,7 @@ describe('runtime product update service', () => {
     cleanup.push(root);
     const requestDesktopQuit = vi.fn();
     const exitRuntime = vi.fn();
+    vi.stubGlobal('fetch', vi.fn(async () => new Response('asset-bytes', { status: 200 })));
     const service = new ProductUpdateService({
       productVersion: '0.2.0',
       platform: 'darwin',
@@ -135,9 +197,7 @@ describe('runtime product update service', () => {
       desktopInstallPath: '/Applications/Debrute.app',
       managedProductRoot: join(root, 'products'),
       releaseSource: async () => release('0.3.0'),
-      downloadAsset: vi.fn(async (asset, destinationDir) => join(destinationDir, asset.name)),
-      downloadChecksumManifest: vi.fn(async (_release, destinationDir) => join(destinationDir, 'debrute_SHA256SUMS')),
-      verifyChecksum: vi.fn(async () => undefined),
+      verifyPlatformAsset: vi.fn(async () => undefined),
       spawnReplacementHelper: vi.fn(async () => {
         throw new Error('spawn ENOENT');
       }),
@@ -159,6 +219,68 @@ describe('runtime product update service', () => {
     expect(exitRuntime).not.toHaveBeenCalled();
   });
 
+  it('does not spawn the helper when downloaded asset hash does not match the signed manifest', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'debrute-product-update-hash-'));
+    cleanup.push(root);
+    vi.stubGlobal('fetch', vi.fn(async () => new Response('tampered-bytes', { status: 200 })));
+    const spawnReplacementHelper = vi.fn(async () => undefined);
+    const service = new ProductUpdateService({
+      productVersion: '0.2.0',
+      platform: 'darwin',
+      platformArch: 'arm64',
+      cliDiagnostic,
+      desktopInstallPath: '/Applications/Debrute.app',
+      managedProductRoot: join(root, 'products'),
+      releaseSource: async () => release('0.3.0', 'expected-bytes'),
+      verifyPlatformAsset: vi.fn(async () => undefined),
+      spawnReplacementHelper,
+      requestDesktopQuit: vi.fn(),
+      exitRuntime: vi.fn()
+    });
+
+    await expect(service.apply()).resolves.toMatchObject({
+      state: {
+        update: {
+          type: 'error',
+          operation: 'apply',
+          message: expect.stringContaining('Hash mismatch')
+        }
+      }
+    });
+    expect(spawnReplacementHelper).not.toHaveBeenCalled();
+  });
+
+  it('does not spawn the helper when the default asset downloader receives the wrong size', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'debrute-product-update-size-'));
+    cleanup.push(root);
+    vi.stubGlobal('fetch', vi.fn(async () => new Response('short', { status: 200 })));
+    const spawnReplacementHelper = vi.fn(async () => undefined);
+    const service = new ProductUpdateService({
+      productVersion: '0.2.0',
+      platform: 'darwin',
+      platformArch: 'arm64',
+      cliDiagnostic,
+      desktopInstallPath: '/Applications/Debrute.app',
+      managedProductRoot: join(root, 'products'),
+      releaseSource: async () => release('0.3.0', 'expected-bytes'),
+      verifyPlatformAsset: vi.fn(async () => undefined),
+      spawnReplacementHelper,
+      requestDesktopQuit: vi.fn(),
+      exitRuntime: vi.fn()
+    });
+
+    await expect(service.apply()).resolves.toMatchObject({
+      state: {
+        update: {
+          type: 'error',
+          operation: 'apply',
+          message: expect.stringContaining('Size mismatch')
+        }
+      }
+    });
+    expect(spawnReplacementHelper).not.toHaveBeenCalled();
+  });
+
   it('requires explicit lifecycle callbacks before starting a replacement update', async () => {
     vi.useFakeTimers();
     const root = await mkdtemp(join(tmpdir(), 'debrute-product-update-lifecycle-'));
@@ -171,9 +293,7 @@ describe('runtime product update service', () => {
       desktopInstallPath: '/Applications/Debrute.app',
       managedProductRoot: join(root, 'products'),
       releaseSource: async () => release('0.3.0'),
-      downloadAsset: vi.fn(async (asset, destinationDir) => join(destinationDir, asset.name)),
-      downloadChecksumManifest: vi.fn(async (_release, destinationDir) => join(destinationDir, 'debrute_SHA256SUMS')),
-      verifyChecksum: vi.fn(async () => undefined),
+      verifyPlatformAsset: vi.fn(async () => undefined),
       spawnReplacementHelper
     });
 
@@ -200,16 +320,18 @@ const cliDiagnostic = () => ({
   skillsRoot: '/Users/me/.agents/skills'
 });
 
-function release(version: string) {
+function release(version: string, assetContent = 'asset-bytes') {
   return {
     version,
     name: `Debrute ${version}`,
     date: '2026-06-28T00:00:00.000Z',
-    checksumManifestUrl: `https://example.test/debrute-${version}/debrute_SHA256SUMS`,
     assets: [{
       platform: 'darwin' as const,
+      arch: 'arm64' as const,
       name: `debrute-desktop-${version}-macos-arm64.dmg`,
-      url: `https://example.test/debrute-${version}.dmg`
+      url: `https://github.com/xiitang/debrute/releases/download/v${version}/debrute-desktop-${version}-macos-arm64.dmg`,
+      sha256: createHash('sha256').update(assetContent).digest('hex'),
+      sizeBytes: Buffer.byteLength(assetContent)
     }]
   };
 }

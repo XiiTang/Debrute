@@ -19,7 +19,8 @@ debrute-desktop-X.Y.Z-macos-arm64.dmg
 debrute-desktop-X.Y.Z-macos-x64.dmg
 debrute-desktop-X.Y.Z-windows-x64.exe
 debrute-desktop-X.Y.Z-linux-x64.AppImage
-debrute_SHA256SUMS
+debrute-update-manifest.json
+debrute-update-manifest.json.sig
 ```
 
 ## macOS Signing
@@ -28,18 +29,18 @@ macOS Desktop release jobs require these GitHub Actions secrets: `CSC_LINK`, `CS
 
 `CSC_LINK` contains the base64-encoded Developer ID Application `.p12` certificate. `APPLE_API_KEY` contains the App Store Connect `.p8` key material; the release workflow writes both credentials to temporary files before invoking Electron Builder and `notarytool`.
 
-## Checksum Verification
+## Signed Manifest Verification
 
-Verify manual downloads against `debrute_SHA256SUMS` from the same release tag before installing.
+The product updater trusts only `debrute-update-manifest.json` after its detached Ed25519 signature in `debrute-update-manifest.json.sig` verifies against the public update key compiled into Debrute.
 
-Filter the manifest to the asset you downloaded:
+The signed manifest lists the expected `sha256` and `sizeBytes` for each Desktop installer. For manual downloads, compare the local hash output with the matching manifest entry before installing:
 
 ```sh
-grep "  debrute-desktop-X.Y.Z-macos-arm64.dmg$" debrute_SHA256SUMS | shasum -a 256 -c -
+shasum -a 256 debrute-desktop-X.Y.Z-macos-arm64.dmg
 ```
 
 On Linux, use:
 
 ```sh
-sha256sum -c --ignore-missing debrute_SHA256SUMS
+sha256sum debrute-desktop-X.Y.Z-linux-x64.AppImage
 ```

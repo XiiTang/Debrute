@@ -1,4 +1,5 @@
-export const checksumManifestName = 'debrute_SHA256SUMS';
+export const updateManifestName = 'debrute-update-manifest.json';
+export const updateManifestSignatureName = 'debrute-update-manifest.json.sig';
 
 export const desktopReleaseTargets = [
   { platform: 'macos', arch: 'arm64', extension: 'dmg' },
@@ -11,9 +12,19 @@ export function desktopReleaseAssetName(version, platform, arch, extension) {
   return `debrute-desktop-${version}-${platform}-${arch}.${extension}`;
 }
 
+export function expectedDesktopReleaseAssets(version) {
+  return desktopReleaseTargets.map((target) => desktopReleaseAssetName(
+    version,
+    target.platform,
+    target.arch,
+    target.extension
+  ));
+}
+
 export function expectedReleaseAssets(version) {
   return [
-    ...desktopReleaseTargets.map((target) => desktopReleaseAssetName(version, target.platform, target.arch, target.extension)),
-    checksumManifestName
+    ...expectedDesktopReleaseAssets(version),
+    updateManifestName,
+    updateManifestSignatureName
   ];
 }

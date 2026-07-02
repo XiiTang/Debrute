@@ -5,31 +5,32 @@ import type {
   ProductUpdateState
 } from '@debrute/app-protocol';
 import { createHash } from 'node:crypto';
-import { mkdir, readFile, writeFile } from 'node:fs/promises';
+import { createWriteStream } from 'node:fs';
+import { mkdir, writeFile } from 'node:fs/promises';
 import { arch } from 'node:os';
-import { basename, join } from 'node:path';
+import { dirname, join } from 'node:path';
+import { Readable, Transform } from 'node:stream';
+import { pipeline } from 'node:stream/promises';
+import {
+  parseTrustedProductUpdateManifest,
+  productUpdateManifestMaxBytes,
+  productUpdateManifestName,
+  productUpdateManifestSignatureMaxBytes,
+  productUpdateManifestSignatureName,
+  productUpdateReleaseFromManifest,
+  type ProductUpdateManifest,
+  type ProductUpdateRelease,
+  type ProductUpdateReleaseAsset
+} from './ProductUpdateManifest.js';
+import {
+  createProductUpdatePlatformVerifier,
+  type ProductPlatformAssetVerificationInput
+} from './ProductUpdatePlatformVerifier.js';
 import type { ProductReplacementPlan } from './ProductReplacementPlan.js';
+import { DEBRUTE_UPDATE_PUBLIC_KEY_PEM } from './updateSigningPublicKey.js';
 
-export interface ProductUpdateReleaseAsset {
-  platform: NodeJS.Platform;
-  arch?: NodeJS.Architecture;
-  name: string;
-  url: string;
-}
-
-export interface ProductUpdateRelease {
-  version: string;
-  name?: string;
-  date?: string;
-  checksumManifestUrl: string;
-  assets: ProductUpdateReleaseAsset[];
-}
-
-export interface ProductChecksumVerificationInput {
-  assetPath: string;
-  checksumManifestPath: string;
-  assetName: string;
-}
+export type { ProductUpdateRelease, ProductUpdateReleaseAsset };
+export type { ProductPlatformAssetVerificationInput };
 
 export interface ProductUpdateServiceInput {
   productVersion: string;
@@ -41,13 +42,13 @@ export interface ProductUpdateServiceInput {
   desktopPid?: number;
   runtimePid?: number;
   releaseSource?: () => Promise<ProductUpdateRelease | null>;
-  downloadAsset?: (asset: ProductUpdateReleaseAsset, destinationDir: string) => Promise<string>;
-  downloadChecksumManifest?: (release: ProductUpdateRelease, destinationDir: string) => Promise<string>;
-  verifyChecksum?: (input: ProductChecksumVerificationInput) => Promise<void>;
+  verifyPlatformAsset?: (input: ProductPlatformAssetVerificationInput) => Promise<void>;
   spawnReplacementHelper?: (planPath: string) => Promise<void>;
   requestDesktopQuit?: () => void;
   exitRuntime?: () => void;
 }
+
+const defaultVerifyPlatformAsset = createProductUpdatePlatformVerifier();
 
 export class ProductUpdateService {
   private updateState: ProductUpdateState;
@@ -97,8 +98,8 @@ export class ProductUpdateService {
         type: 'available',
         currentVersion: this.input.productVersion,
         updateVersion: release.version,
-        ...(release.name ? { releaseName: release.name } : {}),
-        ...(release.date ? { releaseDate: release.date } : {})
+        releaseName: release.name,
+        releaseDate: release.date
       };
     } catch (error) {
       this.updateState = {
@@ -132,12 +133,11 @@ export class ProductUpdateService {
       const runtimePid = this.input.runtimePid ?? process.pid;
       const destinationDir = join(managedProductRoot, 'updates', release.version);
       await mkdir(destinationDir, { recursive: true });
-      const downloadedAssetPath = await this.downloadAsset()(asset, destinationDir);
-      const checksumManifestPath = await this.downloadChecksumManifest()(release, destinationDir);
-      await this.verifyChecksum()({
+      const downloadedAssetPath = await downloadVerifiedAsset(asset, destinationDir);
+      await this.verifyPlatformAsset()({
         assetPath: downloadedAssetPath,
-        checksumManifestPath,
-        assetName: basename(asset.name)
+        asset,
+        platform: this.platform()
       });
       const plan: ProductReplacementPlan = {
         currentVersion: this.input.productVersion,
@@ -194,23 +194,15 @@ export class ProductUpdateService {
   private selectAsset(release: ProductUpdateRelease): ProductUpdateReleaseAsset | null {
     const platform = this.platform();
     const platformArch = this.platformArch();
-    return release.assets.find((asset) => asset.platform === platform && (!asset.arch || asset.arch === platformArch)) ?? null;
+    return release.assets.find((asset) => asset.platform === platform && asset.arch === platformArch) ?? null;
   }
 
   private releaseSource(): () => Promise<ProductUpdateRelease | null> {
     return this.input.releaseSource ?? defaultReleaseSource;
   }
 
-  private downloadAsset(): (asset: ProductUpdateReleaseAsset, destinationDir: string) => Promise<string> {
-    return this.input.downloadAsset ?? defaultDownloadAsset;
-  }
-
-  private downloadChecksumManifest(): (release: ProductUpdateRelease, destinationDir: string) => Promise<string> {
-    return this.input.downloadChecksumManifest ?? defaultDownloadChecksumManifest;
-  }
-
-  private verifyChecksum(): (input: ProductChecksumVerificationInput) => Promise<void> {
-    return this.input.verifyChecksum ?? defaultVerifyChecksum;
+  private verifyPlatformAsset(): (input: ProductPlatformAssetVerificationInput) => Promise<void> {
+    return this.input.verifyPlatformAsset ?? defaultVerifyPlatformAsset;
   }
 
   private spawnReplacementHelper(): (planPath: string) => Promise<void> {
@@ -219,7 +211,6 @@ export class ProductUpdateService {
     }
     return this.input.spawnReplacementHelper;
   }
-
 }
 
 async function defaultReleaseSource(): Promise<ProductUpdateRelease | null> {
@@ -232,103 +223,95 @@ async function defaultReleaseSource(): Promise<ProductUpdateRelease | null> {
   if (!response.ok) {
     throw new Error(`GitHub release check failed with HTTP ${response.status}.`);
   }
-  return parseGitHubRelease(await response.json());
+  return productUpdateReleaseFromManifest(await downloadTrustedManifestFromGitHubRelease(await response.json()));
 }
 
-function parseGitHubRelease(value: unknown): ProductUpdateRelease {
+async function downloadTrustedManifestFromGitHubRelease(value: unknown): Promise<ProductUpdateManifest> {
   if (!isRecord(value)) {
     throw new Error('GitHub release response must be an object.');
   }
-  const tagName = stringField(value, 'tag_name');
-  const version = tagName.startsWith('v') ? tagName.slice(1) : tagName;
   const assetsValue = value.assets;
   if (!Array.isArray(assetsValue)) {
     throw new Error('GitHub release assets must be an array.');
   }
-  const checksumAsset = assetsValue
-    .filter(isRecord)
-    .find((asset) => asset.name === 'debrute_SHA256SUMS');
-  if (!checksumAsset) {
-    throw new Error('GitHub release is missing debrute_SHA256SUMS.');
-  }
-  const assets = assetsValue
-    .filter(isRecord)
-    .map(parseGitHubReleaseAsset)
-    .filter((asset): asset is ProductUpdateReleaseAsset => asset !== null);
-  const releaseName = optionalStringField(value, 'name');
-  const releaseDate = optionalStringField(value, 'published_at');
-  return {
-    version,
-    checksumManifestUrl: stringField(checksumAsset, 'browser_download_url'),
-    assets,
-    ...(releaseName ? { name: releaseName } : {}),
-    ...(releaseDate ? { date: releaseDate } : {})
-  };
+  const manifestAsset = findNamedGitHubAsset(assetsValue, productUpdateManifestName);
+  const signatureAsset = findNamedGitHubAsset(assetsValue, productUpdateManifestSignatureName);
+  const manifestBytes = await downloadBytesWithLimit(
+    stringField(manifestAsset, 'browser_download_url'),
+    productUpdateManifestMaxBytes,
+    productUpdateManifestName
+  );
+  const signatureText = Buffer.from(await downloadBytesWithLimit(
+    stringField(signatureAsset, 'browser_download_url'),
+    productUpdateManifestSignatureMaxBytes,
+    productUpdateManifestSignatureName
+  )).toString('utf8');
+  return parseTrustedProductUpdateManifest({
+    manifestBytes,
+    signatureText,
+    publicKeyPem: DEBRUTE_UPDATE_PUBLIC_KEY_PEM
+  });
 }
 
-function parseGitHubReleaseAsset(value: Record<string, unknown>): ProductUpdateReleaseAsset | null {
-  const name = stringField(value, 'name');
-  const url = stringField(value, 'browser_download_url');
-  const match = /^debrute-desktop-[^-]+-(macos|windows|linux)-(arm64|x64)\.(dmg|exe|AppImage)$/.exec(name);
-  if (!match) {
-    return null;
+function findNamedGitHubAsset(assets: unknown[], name: string): Record<string, unknown> {
+  const asset = assets.filter(isRecord).find((candidate) => candidate.name === name);
+  if (!asset) {
+    throw new Error(`GitHub release is missing ${name}.`);
   }
-  const releasePlatform = match[1];
-  const releaseArch = match[2];
-  if (!releasePlatform || !releaseArch) {
-    return null;
-  }
-  return {
-    platform: platformFromReleaseName(releasePlatform),
-    arch: releaseArch === 'x64' ? 'x64' : 'arm64',
-    name,
-    url
-  };
+  return asset;
 }
 
-function platformFromReleaseName(value: string): NodeJS.Platform {
-  if (value === 'macos') {
-    return 'darwin';
+async function downloadVerifiedAsset(asset: ProductUpdateReleaseAsset, destinationDir: string): Promise<string> {
+  const destinationPath = join(destinationDir, asset.name);
+  const response = await fetch(asset.url);
+  if (!response.ok || !response.body) {
+    throw new Error(`Download failed for ${asset.url} with HTTP ${response.status}.`);
   }
-  if (value === 'windows') {
-    return 'win32';
+  await mkdir(dirname(destinationPath), { recursive: true });
+  const hash = createHash('sha256');
+  let size = 0;
+  const verifier = new Transform({
+    transform(chunk: Buffer, _encoding, callback) {
+      const bytes = Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk);
+      size += bytes.byteLength;
+      if (size > asset.sizeBytes) {
+        callback(new Error(`Downloaded update asset exceeds signed size for ${asset.name}.`));
+        return;
+      }
+      hash.update(bytes);
+      callback(null, bytes);
+    }
+  });
+  await pipeline(
+    Readable.fromWeb(response.body as Parameters<typeof Readable.fromWeb>[0]),
+    verifier,
+    createWriteStream(destinationPath)
+  );
+  if (size !== asset.sizeBytes) {
+    throw new Error(`Size mismatch for ${asset.name}.`);
   }
-  return 'linux';
+  if (hash.digest('hex') !== asset.sha256) {
+    throw new Error(`Hash mismatch for ${asset.name}.`);
+  }
+  return destinationPath;
 }
 
-async function defaultDownloadAsset(asset: ProductUpdateReleaseAsset, destinationDir: string): Promise<string> {
-  return downloadToFile(asset.url, join(destinationDir, asset.name));
-}
-
-async function defaultDownloadChecksumManifest(release: ProductUpdateRelease, destinationDir: string): Promise<string> {
-  return downloadToFile(release.checksumManifestUrl, join(destinationDir, 'debrute_SHA256SUMS'));
-}
-
-async function downloadToFile(url: string, path: string): Promise<string> {
+async function downloadBytesWithLimit(url: string, maxBytes: number, label: string): Promise<Buffer> {
   const response = await fetch(url);
-  if (!response.ok) {
+  if (!response.ok || !response.body) {
     throw new Error(`Download failed for ${url} with HTTP ${response.status}.`);
   }
-  await mkdir(join(path, '..'), { recursive: true });
-  const bytes = Buffer.from(await response.arrayBuffer());
-  await writeFile(path, bytes);
-  return path;
-}
-
-async function defaultVerifyChecksum(input: ProductChecksumVerificationInput): Promise<void> {
-  const manifest = await readFile(input.checksumManifestPath, 'utf8');
-  const expected = manifest
-    .split(/\r?\n/)
-    .map((line) => line.trim())
-    .find((line) => line.endsWith(` ${input.assetName}`) || line.endsWith(` *${input.assetName}`))
-    ?.split(/\s+/)[0];
-  if (!expected) {
-    throw new Error(`Checksum manifest does not contain ${input.assetName}.`);
+  const chunks: Buffer[] = [];
+  let size = 0;
+  for await (const chunk of Readable.fromWeb(response.body as Parameters<typeof Readable.fromWeb>[0])) {
+    const bytes = Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk);
+    size += bytes.byteLength;
+    if (size > maxBytes) {
+      throw new Error(`Downloaded ${label} exceeds ${maxBytes} bytes.`);
+    }
+    chunks.push(bytes);
   }
-  const actual = createHash('sha256').update(await readFile(input.assetPath)).digest('hex');
-  if (actual.toLowerCase() !== expected.toLowerCase()) {
-    throw new Error(`Checksum mismatch for ${input.assetName}.`);
-  }
+  return Buffer.concat(chunks, size);
 }
 
 function compareVersions(left: string, right: string): number {
@@ -368,11 +351,6 @@ function stringField(value: Record<string, unknown>, key: string): string {
     throw new Error(`GitHub release ${key} must be a non-empty string.`);
   }
   return field;
-}
-
-function optionalStringField(value: Record<string, unknown>, key: string): string | undefined {
-  const field = value[key];
-  return typeof field === 'string' && field.trim() !== '' ? field : undefined;
 }
 
 function errorMessage(error: unknown): string {
