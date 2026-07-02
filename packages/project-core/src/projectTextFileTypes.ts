@@ -122,7 +122,7 @@ const projectTextFileTypes: readonly ProjectTextFileType[] = [
   type('diff', 'text/plain', { extensions: ['.diff', '.patch', '.rej'] }),
   type('csv', 'text/csv', { extensions: ['.csv'] }),
   type('tsv', 'text/tab-separated-values', { extensions: ['.tsv'] }),
-  type('subtitle', 'text/plain', { extensions: ['.srt', '.ass', '.ssa', '.sbv', '.sub'] }),
+  type('subtitle', 'text/plain', { extensions: ['.srt', '.ass', '.ssa', '.sbv'] }),
   type('webvtt', 'text/vtt', { extensions: ['.vtt'] }),
   type('toml', 'application/toml', { extensions: ['.toml'] }),
   type('tex', 'application/x-tex', { extensions: ['.tex', '.latex', '.ltx', '.sty', '.cls'] }),

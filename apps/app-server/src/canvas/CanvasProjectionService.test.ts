@@ -189,6 +189,7 @@ describe('CanvasProjectionService Canvas document validation', () => {
   });
 
   it.each([
+    'subtitles/captions.sub',
     'brief.pdf',
     'brief.docx',
     'brief.pptx',

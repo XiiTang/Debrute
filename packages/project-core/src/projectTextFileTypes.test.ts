@@ -34,7 +34,6 @@ describe('project text file types', () => {
     ['subtitles/captions.ass', 'subtitle', 'text/plain'],
     ['subtitles/captions.ssa', 'subtitle', 'text/plain'],
     ['subtitles/captions.sbv', 'subtitle', 'text/plain'],
-    ['subtitles/captions.sub', 'subtitle', 'text/plain'],
     ['subtitles/captions.vtt', 'webvtt', 'text/vtt'],
     ['config/app.toml', 'toml', 'application/toml'],
     ['papers/story.tex', 'tex', 'application/x-tex'],
@@ -65,6 +64,7 @@ describe('project text file types', () => {
   });
 
   it.each([
+    'subtitles/captions.sub',
     'brief.pdf',
     'brief.docx',
     'brief.pptx',
