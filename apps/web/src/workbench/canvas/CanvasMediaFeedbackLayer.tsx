@@ -1,22 +1,22 @@
 import React, { useRef, useState } from 'react';
-import type { CanvasFeedbackEntry, CanvasFeedbackGeometry } from '@debrute/canvas-core';
+import type { CanvasFeedbackGeometry, CanvasFeedbackSpatialItem } from '@debrute/canvas-core';
 
-export type CanvasImageFeedbackMode = 'pin' | 'rect' | undefined;
+export type CanvasMediaFeedbackMode = 'pin' | 'rect' | undefined;
 
-export interface CanvasImageFeedbackDraftRegion {
+export interface CanvasMediaFeedbackDraftRegion {
   label: number;
   geometry: CanvasFeedbackGeometry;
 }
 
-export function CanvasImageFeedbackLayer({
-  entry,
+export function CanvasMediaFeedbackLayer({
+  items,
   mode,
   draftRegion,
   onRegionDraft
 }: {
-  entry: CanvasFeedbackEntry | undefined;
-  mode: CanvasImageFeedbackMode;
-  draftRegion?: CanvasImageFeedbackDraftRegion | undefined;
+  items: readonly CanvasFeedbackSpatialItem[];
+  mode: CanvasMediaFeedbackMode;
+  draftRegion?: CanvasMediaFeedbackDraftRegion | undefined;
   onRegionDraft: (geometry: CanvasFeedbackGeometry) => void;
 }): React.ReactElement | null {
   const dragRef = useRef<{ type: 'rect'; start: { x: number; y: number }; pointerId: number } | undefined>(undefined);
@@ -24,7 +24,7 @@ export function CanvasImageFeedbackLayer({
   const visibleDraftRegion = dragDraftRegion
     ? { geometry: dragDraftRegion, label: undefined }
     : draftRegion;
-  if (!entry?.regions.length && !mode && !visibleDraftRegion) {
+  if (items.length === 0 && !mode && !visibleDraftRegion) {
     return null;
   }
   const beginDraft = (event: React.PointerEvent<HTMLDivElement>) => {
@@ -62,24 +62,24 @@ export function CanvasImageFeedbackLayer({
   };
   return (
     <div
-      className={mode ? 'canvas-image-feedback-layer editing' : 'canvas-image-feedback-layer'}
-      data-canvas-image-feedback-layer="true"
+      className={mode ? 'canvas-media-feedback-layer editing' : 'canvas-media-feedback-layer'}
+      data-canvas-media-feedback-layer="true"
       onPointerDown={mode ? beginDraft : undefined}
       onPointerMove={mode ? updateDraft : undefined}
       onPointerUp={mode ? finishDraft : undefined}
       onClick={mode ? stopCanvasFeedbackPointerEvent : undefined}
     >
-      {entry?.regions.map((region) => {
-        const label = <span className="canvas-image-feedback-label">{region.label}</span>;
-        if (region.geometry.type === 'point') {
+      {items.map((item) => {
+        const label = <span className="canvas-media-feedback-label">{item.label}</span>;
+        if (item.geometry.type === 'point') {
           return (
             <span
-              key={region.id}
-              className="canvas-image-feedback-pin"
-              data-canvas-feedback-label={region.label}
+              key={item.id}
+              className="canvas-media-feedback-pin"
+              data-canvas-feedback-label={item.label}
               style={{
-                left: `${region.geometry.x * 100}%`,
-                top: `${region.geometry.y * 100}%`
+                left: `${item.geometry.x * 100}%`,
+                top: `${item.geometry.y * 100}%`
               }}
             >
               {label}
@@ -88,14 +88,14 @@ export function CanvasImageFeedbackLayer({
         }
         return (
           <span
-            key={region.id}
-            className={`canvas-image-feedback-region canvas-image-feedback-region--${region.geometry.type}`}
-            data-canvas-feedback-label={region.label}
+            key={item.id}
+            className={`canvas-media-feedback-region canvas-media-feedback-region--${item.geometry.type}`}
+            data-canvas-feedback-label={item.label}
             style={{
-              left: `${region.geometry.x * 100}%`,
-              top: `${region.geometry.y * 100}%`,
-              width: `${region.geometry.width * 100}%`,
-              height: `${region.geometry.height * 100}%`
+              left: `${item.geometry.x * 100}%`,
+              top: `${item.geometry.y * 100}%`,
+              width: `${item.geometry.width * 100}%`,
+              height: `${item.geometry.height * 100}%`
             }}
           >
             {label}
@@ -110,7 +110,7 @@ export function CanvasImageFeedbackLayer({
 function renderDraftRegion(region: { geometry: CanvasFeedbackGeometry; label: number | undefined }): React.ReactElement {
   const label = region.label === undefined
     ? undefined
-    : <span className="canvas-image-feedback-label">{region.label}</span>;
+    : <span className="canvas-media-feedback-label">{region.label}</span>;
   const dataAttributes = region.label === undefined
     ? {}
     : { 'data-canvas-feedback-label': region.label };
@@ -119,7 +119,7 @@ function renderDraftRegion(region: { geometry: CanvasFeedbackGeometry; label: nu
     return (
       <span
         {...dataAttributes}
-        className="canvas-image-feedback-pin draft"
+        className="canvas-media-feedback-pin draft"
         style={{
           left: `${geometry.x * 100}%`,
           top: `${geometry.y * 100}%`
@@ -132,7 +132,7 @@ function renderDraftRegion(region: { geometry: CanvasFeedbackGeometry; label: nu
   return (
     <span
       {...dataAttributes}
-      className={`canvas-image-feedback-region canvas-image-feedback-region--${geometry.type} draft`}
+      className={`canvas-media-feedback-region canvas-media-feedback-region--${geometry.type} draft`}
       style={{
         left: `${geometry.x * 100}%`,
         top: `${geometry.y * 100}%`,

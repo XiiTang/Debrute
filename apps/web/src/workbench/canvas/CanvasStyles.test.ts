@@ -66,13 +66,23 @@ describe('Canvas styles', () => {
     expect(canvasStyles).toMatch(/\.canvas-text-editor\[data-pointer-focus="true"\] \.cm-cursor\s*{[^}]*display: block;/);
   });
 
+  it('keeps text preview capture targets in the viewport without visible page chrome', () => {
+    expect(canvasStyles).toMatch(/\.canvas-text-preview-capture-layer\s*{[^}]*position: fixed;/);
+    expect(canvasStyles).toMatch(/\.canvas-text-preview-capture-layer\s*{[^}]*left: 0;/);
+    expect(canvasStyles).toMatch(/\.canvas-text-preview-capture-layer\s*{[^}]*top: 0;/);
+    expect(canvasStyles).toMatch(/\.canvas-text-preview-capture-layer\s*{[^}]*z-index: -1;/);
+    expect(canvasStyles).toMatch(/\.canvas-text-preview-capture-layer\s*{[^}]*overflow: visible;/);
+    expect(canvasStyles).not.toMatch(/\.canvas-text-preview-capture-layer\s*{[^}]*\bwidth: 0;/);
+    expect(canvasStyles).not.toMatch(/\.canvas-text-preview-capture-layer\s*{[^}]*\bheight: 0;/);
+  });
+
   it('keeps Canvas feedback frames as pointer-transparent node chrome below resize handles', () => {
     expect(canvasStyles).toMatch(/\.canvas-feedback-frame\s*{[^}]*position: absolute;/);
     expect(canvasStyles).toMatch(/\.canvas-feedback-frame\s*{[^}]*inset: calc\(-1px \* var\(--canvas-chrome-scale, 1\)\);/);
     expect(canvasStyles).toMatch(/\.canvas-feedback-frame\s*{[^}]*z-index: 3;/);
-    expect(canvasStyles).toMatch(/\.canvas-feedback-frame\s*{[^}]*border: calc\(1px \* var\(--canvas-chrome-scale, 1\)\) solid transparent;/);
-    expect(canvasStyles).toMatch(/\.canvas-feedback-frame\s*{[^}]*border-image-source: var\(--canvas-feedback-frame-gradient\);/);
-    expect(canvasStyles).toMatch(/\.canvas-feedback-frame\s*{[^}]*border-image-slice: 1;/);
+    expect(canvasStyles).toMatch(/\.canvas-feedback-frame\s*{[^}]*--canvas-feedback-frame-border: color-mix\(in oklch, var\(--db-accent\) 58%, var\(--db-border\)\);/);
+    expect(canvasStyles).toMatch(/\.canvas-feedback-frame\s*{[^}]*border: calc\(1px \* var\(--canvas-chrome-scale, 1\)\) solid var\(--canvas-feedback-frame-border\);/);
+    expect(canvasStyles).not.toContain('border-image-source: var(--canvas-feedback-frame-gradient)');
     expect(canvasStyles).toMatch(/\.canvas-feedback-frame\s*{[^}]*pointer-events: none;/);
     expect(canvasStyles).toMatch(/\.canvas-node-element\.canvas-node-has-feedback(?:\:hover|\.hovered|\.selected)/);
     expect(canvasStyles).toMatch(/\.canvas-node-resize\s*{[^}]*z-index: 4;/);

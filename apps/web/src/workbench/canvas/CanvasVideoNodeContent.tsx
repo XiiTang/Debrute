@@ -1,6 +1,6 @@
-import React, { useCallback, useEffect, useRef, useState } from 'react';
+import React, { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { AlertTriangle, RefreshCw, Video } from 'lucide-react';
-import type { ProjectedCanvasNode } from '@debrute/canvas-core';
+import type { CanvasFeedbackEntry, CanvasFeedbackGeometry, CanvasFeedbackSpatialItem, ProjectedCanvasNode } from '@debrute/canvas-core';
 import { Button } from '../ui';
 import { useI18n } from '../i18n';
 import {
@@ -10,6 +10,7 @@ import {
 } from './CanvasVideoPlayerAdapter';
 import type { CanvasVideoPreviewSource } from './canvasVideoPreviews';
 import { preloadCanvasImageForHandoff } from './CanvasMediaHandoff';
+import { CanvasMediaFeedbackLayer, type CanvasMediaFeedbackDraftRegion, type CanvasMediaFeedbackMode } from './CanvasMediaFeedbackLayer';
 
 type CanvasVideoVisibleLayer = 'preview' | 'player';
 
@@ -30,6 +31,14 @@ export interface CanvasVideoNodeContentProps {
   onRegisterVideoTarget: (projectRelativePath: string, target: CanvasVideoPlayerHandle | undefined) => void;
   onUpdatePlaybackTime: (projectRelativePath: string, currentTimeSeconds: number) => void | Promise<void>;
   onVideoPreviewError?: ((projectRelativePath: string, preview: CanvasVideoPreviewSource, message: string) => void) | undefined;
+  feedbackEntry?: CanvasFeedbackEntry | undefined;
+  localFeedbackMode?: CanvasMediaFeedbackMode | undefined;
+  pendingFeedbackRegion?: CanvasMediaFeedbackDraftRegion | undefined;
+  activeFeedbackMomentTimeSeconds?: number | undefined;
+  onLocalFeedbackDraft?: ((input: {
+    projectRelativePath: string;
+    geometry: CanvasFeedbackGeometry;
+  }) => void) | undefined;
 }
 
 function canvasVideoPreviewLoadKey(preview: CanvasVideoPreviewSource): string {
@@ -47,7 +56,12 @@ export function CanvasVideoNodeContent({
   onPlayingChange,
   onRegisterVideoTarget,
   onUpdatePlaybackTime,
-  onVideoPreviewError
+  onVideoPreviewError,
+  feedbackEntry,
+  localFeedbackMode,
+  pendingFeedbackRegion,
+  activeFeedbackMomentTimeSeconds,
+  onLocalFeedbackDraft
 }: CanvasVideoNodeContentProps): React.ReactElement {
   const i18n = useI18n();
   const [error, setError] = useState<string>();
@@ -64,6 +78,8 @@ export function CanvasVideoNodeContent({
       : undefined
   ));
   const [playerMounted, setPlayerMounted] = useState(() => initialVisibleLayer === 'player');
+  const playerShellRef = useRef<HTMLDivElement | null>(null);
+  const [playerShellSize, setPlayerShellSize] = useState<CanvasVideoFrameSize>();
   const targetLayer: CanvasVideoVisibleLayer = selected || forcePlayerMounted || playing ? 'player' : 'preview';
   const targetLayerRef = useRef(targetLayer);
   const sourceResetLayerRef = useRef<CanvasVideoVisibleLayer>(initialVisibleLayer);
@@ -139,6 +155,26 @@ export function CanvasVideoNodeContent({
     onRegisterVideoTarget(node.projectRelativePath, undefined);
   }, [node.projectRelativePath, onRegisterVideoTarget]);
 
+  useLayoutEffect(() => {
+    const element = playerShellRef.current;
+    if (!element) {
+      return;
+    }
+    const syncSize = () => {
+      const nextSize = element.clientWidth > 0 && element.clientHeight > 0
+        ? { width: element.clientWidth, height: element.clientHeight }
+        : undefined;
+      setPlayerShellSize((current) => sameFrameSize(current, nextSize) ? current : nextSize);
+    };
+    syncSize();
+    if (typeof ResizeObserver === 'undefined') {
+      return;
+    }
+    const resizeObserver = new ResizeObserver(syncSize);
+    resizeObserver.observe(element);
+    return () => resizeObserver.disconnect();
+  }, []);
+
   const mountPlayer = useCallback(() => {
     setPlayerMounted(true);
     onSelectNode();
@@ -177,6 +213,12 @@ export function CanvasVideoNodeContent({
       i18n.t('canvas.node.videoPreviewVariantLoadError', { path: node.projectRelativePath })
     );
   }, [i18n, node.projectRelativePath, onVideoPreviewError]);
+  const formatVideoPlayError = useCallback((projectRelativePath: string) => (
+    i18n.t('canvas.node.videoPlayError', { path: projectRelativePath })
+  ), [i18n]);
+  const formatVideoSeekError = useCallback((projectRelativePath: string, seconds: number) => (
+    i18n.t('canvas.node.videoSeekError', { path: projectRelativePath, seconds })
+  ), [i18n]);
   useEffect(() => {
     if (targetLayer !== 'preview' || visibleLayer !== 'player' || !videoPreview || videoPreviewError) {
       return undefined;
@@ -238,14 +280,25 @@ export function CanvasVideoNodeContent({
   if (!node.videoPresentation) {
     throw new Error(`Projected video node is missing videoPresentation: ${node.projectRelativePath}`);
   }
+  const presentation = node.videoPresentation;
   const initialTimeSeconds = node.videoPlayback?.currentTimeSeconds ?? 0;
+  const feedbackMomentTimeSeconds = playing && activeFeedbackMomentTimeSeconds === undefined
+    ? undefined
+    : activeFeedbackMomentTimeSeconds ?? initialTimeSeconds;
   const previewLayerSource = visibleLayer === 'preview' && !videoPreviewError
     ? videoPreview ?? currentVisiblePreview
     : undefined;
+  const feedbackContentBox = canvasVideoFrameContentBox({
+    shell: playerShellSize,
+    frame: {
+      width: presentation.width,
+      height: presentation.height
+    }
+  });
 
   return (
     <section className="canvas-video-node">
-      <div className="canvas-video-player-shell">
+      <div ref={playerShellRef} className="canvas-video-player-shell">
         {error ? (
           <div className="db-canvas-node-error-overlay">
             <AlertTriangle size={16} />
@@ -297,6 +350,8 @@ export function CanvasVideoNodeContent({
               playRequest={playRequest}
               onPointerInside={mountPlayer}
               onFocusInside={mountPlayer}
+              formatPlayError={formatVideoPlayError}
+              formatSeekError={formatVideoSeekError}
               onError={setError}
               onPlayingChange={handlePlayingChange}
               onPlaybackBoundary={handlePlaybackBoundary}
@@ -314,8 +369,93 @@ export function CanvasVideoNodeContent({
             <span>{node.projectRelativePath.split('/').pop() ?? node.projectRelativePath}</span>
           </div>
         ) : null}
+        <div className="canvas-video-feedback-content" style={canvasVideoFrameContentBoxStyle(feedbackContentBox)}>
+          <CanvasMediaFeedbackLayer
+            items={videoMomentSpatialItems({
+              entry: feedbackEntry,
+              currentTimeSeconds: feedbackMomentTimeSeconds
+            })}
+            mode={localFeedbackMode}
+            draftRegion={pendingFeedbackRegion}
+            onRegionDraft={(geometry) => onLocalFeedbackDraft?.({
+              projectRelativePath: node.projectRelativePath,
+              geometry
+            })}
+          />
+        </div>
       </div>
       {caption}
     </section>
   );
+}
+
+interface CanvasVideoFrameSize {
+  width: number;
+  height: number;
+}
+
+interface CanvasVideoFrameContentBox extends CanvasVideoFrameSize {
+  left: number;
+  top: number;
+}
+
+export function canvasVideoFrameContentBox(input: {
+  shell: CanvasVideoFrameSize | undefined;
+  frame: CanvasVideoFrameSize;
+}): CanvasVideoFrameContentBox | undefined {
+  if (!input.shell || input.shell.width <= 0 || input.shell.height <= 0 || input.frame.width <= 0 || input.frame.height <= 0) {
+    return undefined;
+  }
+  const shellAspect = input.shell.width / input.shell.height;
+  const frameAspect = input.frame.width / input.frame.height;
+  if (shellAspect > frameAspect) {
+    const height = input.shell.height;
+    const width = height * frameAspect;
+    return {
+      left: (input.shell.width - width) / 2,
+      top: 0,
+      width,
+      height
+    };
+  }
+  const width = input.shell.width;
+  const height = width / frameAspect;
+  return {
+    left: 0,
+    top: (input.shell.height - height) / 2,
+    width,
+    height
+  };
+}
+
+function canvasVideoFrameContentBoxStyle(box: CanvasVideoFrameContentBox | undefined): React.CSSProperties {
+  return box
+    ? {
+        left: `${box.left}px`,
+        top: `${box.top}px`,
+        width: `${box.width}px`,
+        height: `${box.height}px`
+      }
+    : { inset: 0 };
+}
+
+function sameFrameSize(
+  left: CanvasVideoFrameSize | undefined,
+  right: CanvasVideoFrameSize | undefined
+): boolean {
+  return left?.width === right?.width && left?.height === right?.height;
+}
+
+function videoMomentSpatialItems(input: {
+  entry: CanvasFeedbackEntry | undefined;
+  currentTimeSeconds: number | undefined;
+}): CanvasFeedbackSpatialItem[] {
+  if (input.currentTimeSeconds === undefined) {
+    return [];
+  }
+  return input.entry?.items.filter((item): item is CanvasFeedbackSpatialItem => (
+    (item.kind === 'pin' || item.kind === 'region')
+    && item.scope === 'moment'
+    && item.moment.currentTimeSeconds === input.currentTimeSeconds
+  )) ?? [];
 }

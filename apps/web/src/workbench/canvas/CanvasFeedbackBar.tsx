@@ -1,5 +1,6 @@
 import React, { useEffect, useLayoutEffect, useRef, useState } from 'react';
 import {
+  Clock3,
   MapPin,
   Square,
   X
@@ -7,27 +8,43 @@ import {
 import {
   CANVAS_FEEDBACK_MARKS,
   type CanvasFeedbackEntry,
+  type CanvasFeedbackItem,
   type CanvasFeedbackMark
 } from '@debrute/canvas-core';
 import type { WorkbenchActions } from '../../types';
 import type { CanvasOverlayRuntime } from './CanvasOverlayRuntime';
-import type { CanvasImageFeedbackMode } from './CanvasImageFeedbackLayer';
+import type { CanvasFeedbackLocalToolset } from '../shell/floatingBars';
+import type { CanvasMediaFeedbackMode } from './CanvasMediaFeedbackLayer';
 import { CANVAS_FEEDBACK_MARK_PRESENTATION } from './canvasFeedbackPresentation';
 import { CommentPillInput, IconButton } from '../ui';
 import { useI18n } from '../i18n';
+
+const MOMENT_PILL_COLORS = [
+  '#2563eb',
+  '#16a34a',
+  '#dc2626',
+  '#9333ea',
+  '#0891b2',
+  '#ca8a04'
+] as const;
 
 export function CanvasFeedbackBar({
   projectRelativePath,
   entry,
   onUpdate,
   overlayRuntime,
+  localToolset = 'none',
   localFeedbackMode,
   onLocalFeedbackModeChange,
-  pendingRegionLabel,
-  pendingRegionComment,
-  onPendingRegionCommentChange,
-  onSavePendingRegion,
-  onCancelPendingRegion,
+  canStartVideoMomentFeedback = false,
+  onStartVideoMomentFeedback,
+  pendingItemLabel,
+  pendingItemComment,
+  pendingItemReadyForComment = true,
+  onPendingItemCommentChange,
+  onSavePendingItem,
+  onCancelPendingItem,
+  onSeekToMoment,
   onPointerEnter,
   onPointerLeave
 }: {
@@ -35,35 +52,40 @@ export function CanvasFeedbackBar({
   entry: CanvasFeedbackEntry | undefined;
   onUpdate: WorkbenchActions['updateCanvasFeedbackEntry'];
   overlayRuntime: CanvasOverlayRuntime;
-  localFeedbackMode?: CanvasImageFeedbackMode | undefined;
-  onLocalFeedbackModeChange?: ((mode: CanvasImageFeedbackMode) => void) | undefined;
-  pendingRegionLabel?: number | undefined;
-  pendingRegionComment?: string | undefined;
-  onPendingRegionCommentChange?: ((comment: string) => void) | undefined;
-  onSavePendingRegion?: (() => void) | undefined;
-  onCancelPendingRegion?: (() => void) | undefined;
+  localToolset?: CanvasFeedbackLocalToolset | undefined;
+  localFeedbackMode?: CanvasMediaFeedbackMode | undefined;
+  onLocalFeedbackModeChange?: ((mode: CanvasMediaFeedbackMode) => void) | undefined;
+  canStartVideoMomentFeedback?: boolean | undefined;
+  onStartVideoMomentFeedback?: ((mode: 'comment' | 'pin' | 'rect') => void) | undefined;
+  pendingItemLabel?: number | string | undefined;
+  pendingItemComment?: string | undefined;
+  pendingItemReadyForComment?: boolean | undefined;
+  onPendingItemCommentChange?: ((comment: string) => void) | undefined;
+  onSavePendingItem?: (() => boolean | Promise<boolean> | undefined) | undefined;
+  onCancelPendingItem?: (() => void) | undefined;
+  onSeekToMoment?: ((seconds: number) => void) | undefined;
   onPointerEnter?: () => void;
   onPointerLeave?: () => void;
 }): React.ReactElement {
   const i18n = useI18n();
   const elementRef = useRef<HTMLDivElement | null>(null);
   const creatorInputRef = useRef<HTMLInputElement | null>(null);
-  const pendingRegionFocusTimerRef = useRef<number | undefined>(undefined);
+  const pendingItemFocusTimerRef = useRef<number | undefined>(undefined);
   const [draftComment, setDraftComment] = useState('');
   const [marks, setMarks] = useState<CanvasFeedbackMark[]>(entry?.marks ?? []);
   const draftCommentRef = useRef('');
-  const pendingRegionCommentRef = useRef(pendingRegionComment ?? '');
+  const pendingItemCommentRef = useRef(pendingItemComment ?? '');
   const creatorSaveInFlightRef = useRef<string | undefined>(undefined);
-  const localFeedbackEnabled = Boolean(onLocalFeedbackModeChange);
-  const hasPendingRegionDraft = localFeedbackEnabled && Boolean(onSavePendingRegion);
-  const hasCommentRow = Boolean((entry?.comments.length ?? 0) > 0 || (entry?.regions.length ?? 0) > 0);
-  const creatorValue = hasPendingRegionDraft ? pendingRegionComment ?? '' : draftComment;
-  const creatorLabel = hasPendingRegionDraft
+  const pendingItemSaveInFlightRef = useRef<string | undefined>(undefined);
+  const hasPendingItemDraft = Boolean(onSavePendingItem && pendingItemReadyForComment);
+  const hasItemRow = Boolean((entry?.items.length ?? 0) > 0);
+  const creatorValue = hasPendingItemDraft ? pendingItemComment ?? '' : draftComment;
+  const creatorLabel = hasPendingItemDraft
     ? i18n.t('canvas.feedback.newAnnotationCommentForFile', { path: projectRelativePath })
     : i18n.t('canvas.feedback.newFileCommentForFile', { path: projectRelativePath });
-  const creatorTitle = hasPendingRegionDraft ? i18n.t('canvas.feedback.newAnnotationComment') : i18n.t('canvas.feedback.newFileComment');
-  const pendingRegionFocusKey = hasPendingRegionDraft
-    ? `${projectRelativePath}:${pendingRegionLabel ?? 'pending'}`
+  const creatorTitle = hasPendingItemDraft ? i18n.t('canvas.feedback.newAnnotationComment') : i18n.t('canvas.feedback.newFileComment');
+  const pendingItemFocusKey = hasPendingItemDraft
+    ? `${projectRelativePath}:${pendingItemLabel ?? 'pending'}`
     : undefined;
 
   useEffect(() => {
@@ -76,8 +98,12 @@ export function CanvasFeedbackBar({
   }, [projectRelativePath]);
 
   useEffect(() => {
-    pendingRegionCommentRef.current = pendingRegionComment ?? '';
-  }, [pendingRegionComment]);
+    pendingItemCommentRef.current = pendingItemComment ?? '';
+  }, [pendingItemComment]);
+
+  useEffect(() => {
+    pendingItemSaveInFlightRef.current = undefined;
+  }, [pendingItemFocusKey, pendingItemComment]);
 
   useLayoutEffect(() => {
     if (!elementRef.current) {
@@ -87,24 +113,24 @@ export function CanvasFeedbackBar({
   }, [overlayRuntime]);
 
   useLayoutEffect(() => {
-    if (pendingRegionFocusTimerRef.current !== undefined) {
-      window.clearTimeout(pendingRegionFocusTimerRef.current);
-      pendingRegionFocusTimerRef.current = undefined;
+    if (pendingItemFocusTimerRef.current !== undefined) {
+      window.clearTimeout(pendingItemFocusTimerRef.current);
+      pendingItemFocusTimerRef.current = undefined;
     }
-    if (!pendingRegionFocusKey) {
+    if (!pendingItemFocusKey) {
       return undefined;
     }
-    pendingRegionFocusTimerRef.current = window.setTimeout(() => {
-      pendingRegionFocusTimerRef.current = undefined;
+    pendingItemFocusTimerRef.current = window.setTimeout(() => {
+      pendingItemFocusTimerRef.current = undefined;
       creatorInputRef.current?.focus();
     }, 0);
     return () => {
-      if (pendingRegionFocusTimerRef.current !== undefined) {
-        window.clearTimeout(pendingRegionFocusTimerRef.current);
-        pendingRegionFocusTimerRef.current = undefined;
+      if (pendingItemFocusTimerRef.current !== undefined) {
+        window.clearTimeout(pendingItemFocusTimerRef.current);
+        pendingItemFocusTimerRef.current = undefined;
       }
     };
-  }, [pendingRegionFocusKey]);
+  }, [pendingItemFocusKey]);
 
   const toggleMark = (mark: CanvasFeedbackMark) => {
     const nextMarks = marks.includes(mark)
@@ -130,9 +156,13 @@ export function CanvasFeedbackBar({
     }
     creatorSaveInFlightRef.current = comment;
     const saved = await onUpdate({
-      operation: 'add-comment',
+      operation: 'add-item',
       projectRelativePath,
-      comment
+      item: {
+        kind: 'comment',
+        scope: 'file',
+        comment
+      }
     });
     if (creatorSaveInFlightRef.current === comment) {
       creatorSaveInFlightRef.current = undefined;
@@ -144,9 +174,17 @@ export function CanvasFeedbackBar({
   };
 
   const saveCreatorComment = async () => {
-    if (hasPendingRegionDraft) {
-      if (pendingRegionCommentRef.current.trim()) {
-        onSavePendingRegion?.();
+    if (hasPendingItemDraft) {
+      const comment = pendingItemCommentRef.current.trim();
+      if (comment) {
+        if (pendingItemSaveInFlightRef.current === comment) {
+          return;
+        }
+        pendingItemSaveInFlightRef.current = comment;
+        const saved = await onSavePendingItem?.();
+        if (saved === false && pendingItemSaveInFlightRef.current === comment) {
+          pendingItemSaveInFlightRef.current = undefined;
+        }
       }
       return;
     }
@@ -156,7 +194,7 @@ export function CanvasFeedbackBar({
   return (
     <div
       ref={elementRef}
-      className={`db-floating-bar canvas-feedback-bar${hasCommentRow ? ' canvas-feedback-bar--has-comment-row' : ''}`}
+      className={`db-floating-bar canvas-feedback-bar${hasItemRow ? ' canvas-feedback-bar--has-comment-row' : ''}`}
       data-canvas-feedback-bar="true"
       onPointerDown={stopCanvasFeedbackBarEvent}
       onPointerMove={stopCanvasFeedbackBarEvent}
@@ -187,7 +225,7 @@ export function CanvasFeedbackBar({
               />
             );
           })}
-          {localFeedbackEnabled ? (
+          {localToolset === 'image' ? (
             <div className="canvas-feedback-local-mode" role="group" aria-label={i18n.t('canvas.feedback.imageRegionTools')}>
               <IconButton
                 className="canvas-feedback-mark"
@@ -205,6 +243,33 @@ export function CanvasFeedbackBar({
               />
             </div>
           ) : null}
+          {localToolset === 'video' ? (
+            <div className="canvas-feedback-local-mode" role="group" aria-label={i18n.t('canvas.feedback.videoMomentTools')}>
+              <IconButton
+                className="canvas-feedback-mark"
+                label={i18n.t('canvas.feedback.addMomentComment')}
+                disabled={!canStartVideoMomentFeedback}
+                icon={<Clock3 size={14} />}
+                onClick={() => onStartVideoMomentFeedback?.('comment')}
+              />
+              <IconButton
+                className="canvas-feedback-mark"
+                label={i18n.t('canvas.feedback.addPin')}
+                disabled={!canStartVideoMomentFeedback}
+                pressed={localFeedbackMode === 'pin'}
+                icon={<MapPin size={14} />}
+                onClick={() => onStartVideoMomentFeedback?.('pin')}
+              />
+              <IconButton
+                className="canvas-feedback-mark"
+                label={i18n.t('canvas.feedback.addRectangle')}
+                disabled={!canStartVideoMomentFeedback}
+                pressed={localFeedbackMode === 'rect'}
+                icon={<Square size={14} />}
+                onClick={() => onStartVideoMomentFeedback?.('rect')}
+              />
+            </div>
+          ) : null}
         </div>
         <CommentPillInput
           ref={creatorInputRef}
@@ -215,12 +280,12 @@ export function CanvasFeedbackBar({
           title={creatorTitle}
           value={creatorValue}
           placeholder={i18n.t('canvas.feedback.commentPlaceholder')}
-          autoFocus={hasPendingRegionDraft}
-          sizing={{ minWidthPx: 90, maxWidthPx: 90 }}
+          autoFocus={hasPendingItemDraft}
+          sizing={{ minWidthPx: 110, maxWidthPx: 110 }}
           onChange={(event) => {
-            if (hasPendingRegionDraft) {
-              pendingRegionCommentRef.current = event.currentTarget.value;
-              onPendingRegionCommentChange?.(event.currentTarget.value);
+            if (hasPendingItemDraft) {
+              pendingItemCommentRef.current = event.currentTarget.value;
+              onPendingItemCommentChange?.(event.currentTarget.value);
               return;
             }
             draftCommentRef.current = event.currentTarget.value;
@@ -232,9 +297,9 @@ export function CanvasFeedbackBar({
               void saveCreatorComment();
             }
             if (event.key === 'Escape') {
-              if (hasPendingRegionDraft) {
-                pendingRegionCommentRef.current = '';
-                onCancelPendingRegion?.();
+              if (hasPendingItemDraft) {
+                pendingItemCommentRef.current = '';
+                onCancelPendingItem?.();
                 return;
               }
               draftCommentRef.current = '';
@@ -245,64 +310,91 @@ export function CanvasFeedbackBar({
         />
       </div>
 
-      {hasCommentRow ? (
+      {hasItemRow ? (
         <div className="canvas-feedback-comment-strip" aria-label={i18n.t('canvas.feedback.commentsForFile', { path: projectRelativePath })}>
-          {entry?.comments.map((fileComment) => (
-            <span
-              key={fileComment.id}
-              className="canvas-feedback-comment-pill canvas-feedback-comment-pill--file"
-              title={i18n.t('canvas.feedback.fileLevelComment')}
-              data-canvas-local-wheel="true"
-            >
-              <span className="canvas-feedback-comment-pill-text">{fileComment.comment}</span>
-              <IconButton
-                className="canvas-feedback-comment-pill-close"
-                label={i18n.t('canvas.feedback.deleteFileComment', { path: projectRelativePath })}
-                title={i18n.t('canvas.feedback.deleteFileComment', { path: projectRelativePath })}
-                icon={<X size={11} strokeWidth={2.4} />}
-                onClick={(event) => {
-                  event.preventDefault();
-                  event.stopPropagation();
-                  void onUpdate({
-                    operation: 'delete-comment',
-                    projectRelativePath,
-                    commentId: fileComment.id
-                  });
-                }}
-              />
-            </span>
+          {entry?.items.map((item) => (
+            <FeedbackItemPill
+              key={item.id}
+              item={item}
+              projectRelativePath={projectRelativePath}
+              onUpdate={onUpdate}
+              onSeekToMoment={onSeekToMoment}
+            />
           ))}
-          {localFeedbackEnabled && entry?.regions.length ? entry.regions.map((region) => (
-            <span
-              key={region.id}
-              className="canvas-feedback-comment-pill canvas-feedback-comment-pill--region"
-              data-canvas-feedback-region-label={region.label}
-              data-canvas-local-wheel="true"
-              title={i18n.t('canvas.feedback.region', { index: region.label })}
-            >
-              <span className="canvas-feedback-comment-pill-text">{region.comment}</span>
-              <span className="canvas-feedback-comment-pill-badge" aria-hidden="true">{region.label}</span>
-              <IconButton
-                className="canvas-feedback-comment-pill-close"
-                label={i18n.t('canvas.feedback.deleteRegion', { index: region.label })}
-                title={i18n.t('canvas.feedback.deleteRegion', { index: region.label })}
-                icon={<X size={11} strokeWidth={2.4} />}
-                onClick={(event) => {
-                  event.preventDefault();
-                  event.stopPropagation();
-                  void onUpdate({
-                    operation: 'delete-region',
-                    projectRelativePath,
-                    regionId: region.id
-                  });
-                }}
-              />
-            </span>
-          )) : null}
         </div>
       ) : null}
     </div>
   );
+}
+
+function FeedbackItemPill({
+  item,
+  projectRelativePath,
+  onUpdate,
+  onSeekToMoment
+}: {
+  item: CanvasFeedbackItem;
+  projectRelativePath: string;
+  onUpdate: WorkbenchActions['updateCanvasFeedbackEntry'];
+  onSeekToMoment?: ((seconds: number) => void) | undefined;
+}): React.ReactElement {
+  const i18n = useI18n();
+  const spatial = item.kind === 'pin' || item.kind === 'region';
+  const moment = item.scope === 'moment' ? item.moment : undefined;
+  const className = [
+    'canvas-feedback-comment-pill',
+    item.scope === 'file' ? 'canvas-feedback-comment-pill--file' : 'canvas-feedback-comment-pill--moment',
+    spatial ? 'canvas-feedback-comment-pill--spatial' : undefined
+  ].filter(Boolean).join(' ');
+  return (
+    <span
+      className={className}
+      title={pillTitle(item, i18n, projectRelativePath)}
+      data-canvas-local-wheel="true"
+      data-canvas-feedback-moment={moment?.label}
+      data-canvas-feedback-region-label={spatial ? item.label : undefined}
+      style={moment ? { '--canvas-feedback-moment-color': momentColor(moment.label) } as React.CSSProperties : undefined}
+      onClick={() => {
+        if (moment) {
+          onSeekToMoment?.(moment.currentTimeSeconds);
+        }
+      }}
+    >
+      <span className="canvas-feedback-comment-pill-text">{item.comment}</span>
+      {spatial ? <span className="canvas-feedback-comment-pill-badge" aria-hidden="true">{item.label}</span> : null}
+      <IconButton
+        className="canvas-feedback-comment-pill-close"
+        label={i18n.t('canvas.feedback.deleteItem')}
+        title={i18n.t('canvas.feedback.deleteItem')}
+        icon={<X size={11} strokeWidth={2.4} />}
+        onClick={(event) => {
+          event.preventDefault();
+          event.stopPropagation();
+          void onUpdate({
+            operation: 'delete-item',
+            projectRelativePath,
+            itemId: item.id
+          });
+        }}
+      />
+    </span>
+  );
+}
+
+function pillTitle(item: CanvasFeedbackItem, i18n: ReturnType<typeof useI18n>, projectRelativePath: string): string {
+  if (item.scope === 'moment') {
+    return i18n.t('canvas.feedback.videoMomentItem', { seconds: item.moment.currentTimeSeconds });
+  }
+  if (item.kind === 'pin' || item.kind === 'region') {
+    return i18n.t('canvas.feedback.region', { index: item.label });
+  }
+  return i18n.t('canvas.feedback.fileLevelComment', { path: projectRelativePath });
+}
+
+function momentColor(label: string): string {
+  const match = /^M([1-9][0-9]*)$/.exec(label);
+  const index = match ? Number(match[1]) - 1 : 0;
+  return MOMENT_PILL_COLORS[index % MOMENT_PILL_COLORS.length]!;
 }
 
 function stopCanvasFeedbackBarEvent(event: React.SyntheticEvent): void {

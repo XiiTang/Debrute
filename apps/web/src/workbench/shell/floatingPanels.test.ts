@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import {
   DEFAULT_FLOATING_PANEL_STATE,
+  FLOATING_PANEL_IDS,
   type FloatingPanelResizeDirection,
   type FloatingPanelState,
   closeFloatingPanel,
@@ -14,6 +15,11 @@ import {
 const viewport = { x: 0, y: 0, width: 1000, height: 700 };
 
 describe('floating panel state', () => {
+  it('does not include a standalone Problems panel', () => {
+    expect(FLOATING_PANEL_IDS).toEqual(['explorer', 'inspector', 'settings', 'terminal']);
+    expect(Object.keys(DEFAULT_FLOATING_PANEL_STATE.panels)).toEqual(['explorer', 'inspector', 'settings', 'terminal']);
+  });
+
   it('keeps panels closed by default while preserving the Explorer spawn position', () => {
     expect(DEFAULT_FLOATING_PANEL_STATE.panels.explorer).toEqual({
       open: false,
@@ -34,14 +40,14 @@ describe('floating panel state', () => {
 
   it('opens a closed panel from the dock without assigning z-index', () => {
     const roomyViewport = { ...viewport, height: 900 };
-    const next = toggleFloatingPanel(DEFAULT_FLOATING_PANEL_STATE, 'problems', roomyViewport);
+    const next = toggleFloatingPanel(DEFAULT_FLOATING_PANEL_STATE, 'settings', roomyViewport);
 
-    expect(next.panels.problems).toEqual({
+    expect(next.panels.settings).toEqual({
       open: true,
-      x: DEFAULT_FLOATING_PANEL_STATE.panels.problems.x,
-      y: DEFAULT_FLOATING_PANEL_STATE.panels.problems.y,
-      width: DEFAULT_FLOATING_PANEL_STATE.panels.problems.width,
-      height: DEFAULT_FLOATING_PANEL_STATE.panels.problems.height
+      x: DEFAULT_FLOATING_PANEL_STATE.panels.settings.x,
+      y: DEFAULT_FLOATING_PANEL_STATE.panels.settings.y,
+      width: DEFAULT_FLOATING_PANEL_STATE.panels.settings.width,
+      height: DEFAULT_FLOATING_PANEL_STATE.panels.settings.height
     });
   });
 

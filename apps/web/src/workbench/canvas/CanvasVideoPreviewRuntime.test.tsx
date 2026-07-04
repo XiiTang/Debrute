@@ -268,6 +268,8 @@ function videoNode(projectRelativePath: string, revision: string): ProjectedCanv
     },
     videoPresentation: {
       kind: 'video',
+      width: 640,
+      height: 360,
       textTracks: []
     }
   };

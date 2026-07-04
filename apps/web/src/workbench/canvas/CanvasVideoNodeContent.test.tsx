@@ -4,8 +4,8 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import React, { act } from 'react';
 import { createRoot } from 'react-dom/client';
 import { renderToStaticMarkup } from 'react-dom/server';
-import type { ProjectedCanvasNode } from '@debrute/canvas-core';
-import { CanvasVideoNodeContent } from './CanvasVideoNodeContent';
+import type { CanvasFeedbackEntry, ProjectedCanvasNode } from '@debrute/canvas-core';
+import { CanvasVideoNodeContent, canvasVideoFrameContentBox } from './CanvasVideoNodeContent';
 import type { CanvasVideoPreviewSource } from './canvasVideoPreviews';
 import { I18nProvider } from '../i18n';
 
@@ -20,7 +20,8 @@ vi.mock('./CanvasVideoPlayerAdapter', () => ({
       onPlayingChange,
       onPlaybackBoundary,
       onReadyForDisplay,
-      playRequest
+      playRequest,
+      formatPlayError
     }: {
       node: ProjectedCanvasNode;
       initialTimeSeconds: number;
@@ -31,6 +32,7 @@ vi.mock('./CanvasVideoPlayerAdapter', () => ({
       onPlaybackBoundary: (currentTimeSeconds: number) => void;
       onReadyForDisplay: () => void;
       playRequest?: { requestId: number } | undefined;
+      formatPlayError: (projectRelativePath: string) => string;
     },
     ref: React.ForwardedRef<unknown>
   ) {
@@ -53,7 +55,7 @@ vi.mock('./CanvasVideoPlayerAdapter', () => ({
         onFocus={onFocusInside}
       >
         <video src={node.availability.state === 'available' ? node.availability.fileUrl : undefined} />
-        <button type="button" data-testid="mock-video-error" onClick={() => onError(`Unable to play ${node.projectRelativePath}.`)}>
+        <button type="button" data-testid="mock-video-error" onClick={() => onError(formatPlayError(node.projectRelativePath))}>
           trigger error
         </button>
         <button type="button" data-testid="mock-video-ready" onClick={onReadyForDisplay}>
@@ -92,6 +94,65 @@ afterEach(() => {
 });
 
 describe('CanvasVideoNodeContent', () => {
+  it('computes the video frame content box inside horizontal or vertical letterboxing', () => {
+    expect(canvasVideoFrameContentBox({
+      shell: { width: 640, height: 300 },
+      frame: { width: 640, height: 360 }
+    })).toEqual({
+      left: 53.33333333333337,
+      top: 0,
+      width: 533.3333333333333,
+      height: 300
+    });
+    expect(canvasVideoFrameContentBox({
+      shell: { width: 640, height: 500 },
+      frame: { width: 640, height: 360 }
+    })).toEqual({
+      left: 0,
+      top: 70,
+      width: 640,
+      height: 360
+    });
+  });
+
+  it('sizes the feedback content box from unscaled layout dimensions', async () => {
+    const container = document.createElement('div');
+    document.body.append(container);
+    const root = createRoot(container);
+    const restoreLayoutMeasurement = installVideoShellLayoutMeasurement({
+      layoutWidth: 640,
+      layoutHeight: 360,
+      screenWidth: 64,
+      screenHeight: 36
+    });
+
+    try {
+      await act(async () => {
+        root.render(
+          <I18nProvider locale="en">
+            <CanvasVideoNodeContent
+              node={videoNode()}
+              selected
+              onSelectNode={() => undefined}
+              onRegisterVideoTarget={() => undefined}
+              onUpdatePlaybackTime={() => undefined}
+            />
+          </I18nProvider>
+        );
+      });
+
+      const feedbackContent = container.querySelector<HTMLElement>('.canvas-video-feedback-content');
+      expect(feedbackContent?.style.width).toBe('640px');
+      expect(feedbackContent?.style.height).toBe('360px');
+    } finally {
+      restoreLayoutMeasurement();
+      await act(async () => {
+        root.unmount();
+      });
+      container.remove();
+    }
+  });
+
   it('renders the cached video preview while the video is inactive', () => {
     const html = renderToStaticMarkup(
       <I18nProvider locale="en">
@@ -856,6 +917,42 @@ describe('CanvasVideoNodeContent', () => {
     }
   });
 
+  it('hides saved moment spatial overlays while the video is playing', async () => {
+    const container = document.createElement('div');
+    document.body.append(container);
+    const root = createRoot(container);
+
+    try {
+      await act(async () => {
+        root.render(
+          <I18nProvider locale="en">
+            <CanvasVideoNodeContent
+              node={videoNode({ currentTimeSeconds: 4.25 })}
+              selected
+              feedbackEntry={videoFeedbackEntry()}
+              onSelectNode={() => undefined}
+              onRegisterVideoTarget={() => undefined}
+              onUpdatePlaybackTime={() => undefined}
+            />
+          </I18nProvider>
+        );
+      });
+
+      expect(container.querySelector('[data-canvas-feedback-label="1"]')).not.toBeNull();
+
+      await act(async () => {
+        button(container, 'mock-video-playing').click();
+      });
+
+      expect(container.querySelector('[data-canvas-feedback-label="1"]')).toBeNull();
+    } finally {
+      await act(async () => {
+        root.unmount();
+      });
+      container.remove();
+    }
+  });
+
   it('reports playback stopped when the video source changes', async () => {
     const container = document.createElement('div');
     document.body.append(container);
@@ -930,6 +1027,8 @@ function videoNode(options: {
     },
     videoPresentation: {
       kind: 'video',
+      width: 640,
+      height: 360,
       durationSeconds: 5,
       textTracks: [{
         projectRelativePath: 'media/clip.en.vtt',
@@ -954,12 +1053,91 @@ function previewSource(): CanvasVideoPreviewSource {
   };
 }
 
+function videoFeedbackEntry(): CanvasFeedbackEntry {
+  return {
+    projectRelativePath: 'media/clip.mp4',
+    marks: [],
+    nextMomentLabel: 2,
+    nextSpatialLabel: 2,
+    items: [{
+      id: 'item-pin',
+      kind: 'pin',
+      scope: 'moment',
+      label: 1,
+      geometry: { type: 'point', x: 0.25, y: 0.5 },
+      moment: { label: 'M1', currentTimeSeconds: 4.25 },
+      comment: 'look here',
+      createdAt: '2026-06-21T12:00:00.000Z',
+      updatedAt: '2026-06-21T12:00:00.000Z'
+    }],
+    updatedAt: '2026-06-21T12:00:00.000Z'
+  };
+}
+
 function button(container: HTMLElement, testId: string): HTMLButtonElement {
   const element = container.querySelector<HTMLButtonElement>(`[data-testid="${testId}"]`);
   if (!element) {
     throw new Error(`Missing button: ${testId}`);
   }
   return element;
+}
+
+function installVideoShellLayoutMeasurement(input: {
+  layoutWidth: number;
+  layoutHeight: number;
+  screenWidth: number;
+  screenHeight: number;
+}): () => void {
+  const clientWidthDescriptor = Object.getOwnPropertyDescriptor(HTMLElement.prototype, 'clientWidth');
+  const clientHeightDescriptor = Object.getOwnPropertyDescriptor(HTMLElement.prototype, 'clientHeight');
+  const getBoundingClientRect = HTMLElement.prototype.getBoundingClientRect;
+
+  Object.defineProperty(HTMLElement.prototype, 'clientWidth', {
+    configurable: true,
+    get() {
+      return (this as HTMLElement).classList.contains('canvas-video-player-shell') ? input.layoutWidth : 0;
+    }
+  });
+  Object.defineProperty(HTMLElement.prototype, 'clientHeight', {
+    configurable: true,
+    get() {
+      return (this as HTMLElement).classList.contains('canvas-video-player-shell') ? input.layoutHeight : 0;
+    }
+  });
+  HTMLElement.prototype.getBoundingClientRect = function getMockBoundingClientRect() {
+    if (this.classList.contains('canvas-video-player-shell')) {
+      return {
+        x: 0,
+        y: 0,
+        left: 0,
+        top: 0,
+        right: input.screenWidth,
+        bottom: input.screenHeight,
+        width: input.screenWidth,
+        height: input.screenHeight,
+        toJSON: () => undefined
+      };
+    }
+    return getBoundingClientRect.call(this);
+  };
+
+  return () => {
+    restorePropertyDescriptor(HTMLElement.prototype, 'clientWidth', clientWidthDescriptor);
+    restorePropertyDescriptor(HTMLElement.prototype, 'clientHeight', clientHeightDescriptor);
+    HTMLElement.prototype.getBoundingClientRect = getBoundingClientRect;
+  };
+}
+
+function restorePropertyDescriptor(
+  target: object,
+  property: string,
+  descriptor: PropertyDescriptor | undefined
+): void {
+  if (descriptor) {
+    Object.defineProperty(target, property, descriptor);
+  } else {
+    delete (target as Record<string, unknown>)[property];
+  }
 }
 
 function installFakeImageLoader(): {

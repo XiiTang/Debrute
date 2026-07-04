@@ -41,7 +41,11 @@ describe('CodeMirror text editor language mapping', () => {
     ['perl', 'perl'],
     ['r', 'r'],
     ['powershell', 'powershell'],
-    ['properties', 'properties']
+    ['properties', 'properties'],
+    ['toml', 'toml'],
+    ['tex', 'tex'],
+    ['textile', 'textile'],
+    ['protobuf', 'protobuf']
   ] as const)('maps %s to the %s legacy stream mode kind', (language, expected) => {
     expect(codeMirrorLanguageKindForProjectTextLanguage(language)).toBe(expected);
   });
@@ -54,13 +58,20 @@ describe('CodeMirror text editor language mapping', () => {
     'tsv',
     'makefile',
     'bat',
-    'ini'
+    'ini',
+    'subtitle',
+    'webvtt',
+    'restructuredtext',
+    'asciidoc',
+    'org'
   ] as const)('maps %s to plain text', (language) => {
     expect(codeMirrorLanguageKindForProjectTextLanguage(language)).toBe('plain');
   });
 
   it('uses the declared kind union for mapping expectations', () => {
-    const kind: CodeMirrorLanguageKind = codeMirrorLanguageKindForProjectTextLanguage('markdown');
-    expect(kind).toBe('markdown');
+    const markdownKind: CodeMirrorLanguageKind = codeMirrorLanguageKindForProjectTextLanguage('markdown');
+    const tomlKind: CodeMirrorLanguageKind = codeMirrorLanguageKindForProjectTextLanguage('toml');
+    expect(markdownKind).toBe('markdown');
+    expect(tomlKind).toBe('toml');
   });
 });

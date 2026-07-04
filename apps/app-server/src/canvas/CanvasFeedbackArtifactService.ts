@@ -3,35 +3,44 @@ import { dirname, join } from 'node:path';
 import sharp from 'sharp';
 import {
   canvasFeedbackRenderedProjectPath,
-  type CanvasImageFeedbackRegion,
+  canvasFeedbackSpatialItemsForMoment,
+  type CanvasFeedbackSpatialItem,
   type Diagnostic
 } from '@debrute/canvas-core';
 import {
   resolveExistingProjectPath,
   resolveProjectPath
 } from '@debrute/project-core';
+import {
+  createCanvasVideoFrameExtractor,
+  type CanvasVideoFrameExtractor
+} from './CanvasVideoFrameExtractor.js';
 import type {
+  CanvasFeedbackArtifact,
   CanvasFeedbackRenderJobInput,
   CanvasFeedbackRenderJobSuccess
-} from './CanvasFeedbackRenderedImageWorkerProtocol.js';
+} from './CanvasFeedbackArtifactWorkerProtocol.js';
 
 const RENDERED_FEEDBACK_PROJECT_PATH = '.debrute/reviews/rendered-feedback';
+const TEMPORARY_ARTIFACT_PATH_PATTERN = /\.annotated\.png\.[^/.]+\.tmp(?:\.frame\.png)?$/;
 
-export async function renderCanvasFeedbackAnnotatedImage(
-  input: CanvasFeedbackRenderJobInput
+export async function renderCanvasFeedbackArtifact(
+  input: CanvasFeedbackRenderJobInput,
+  options: { frameExtractor?: CanvasVideoFrameExtractor | undefined } = {}
 ): Promise<CanvasFeedbackRenderJobSuccess> {
-  const absoluteSourcePath = await resolveExistingProjectPath(input.projectRoot, input.entry.projectRelativePath);
-  const normalizedSourcePng = await sharp(absoluteSourcePath).rotate().png().toBuffer();
-  const metadata = await sharp(normalizedSourcePng).metadata();
+  const sourcePng = input.artifact.kind === 'image'
+    ? await imageArtifactSourcePng(input)
+    : await videoMomentArtifactSourcePng(input, options.frameExtractor ?? createCanvasVideoFrameExtractor());
+  const metadata = await sharp(sourcePng).metadata();
   if (!metadata.width || !metadata.height) {
-    throw new Error(`Canvas feedback rendered image metadata is unavailable: ${input.entry.projectRelativePath}`);
+    throw new Error(`Canvas feedback artifact metadata is unavailable: ${input.artifact.projectRelativePath}`);
   }
   const overlay = createCanvasFeedbackOverlaySvg({
     width: metadata.width,
     height: metadata.height,
-    entry: input.entry
+    items: artifactSpatialItems(input.artifact)
   });
-  const output = await sharp(normalizedSourcePng)
+  const output = await sharp(sourcePng)
     .composite([{ input: Buffer.from(overlay), left: 0, top: 0 }])
     .png()
     .toBuffer();
@@ -46,8 +55,8 @@ export async function renderCanvasFeedbackAnnotatedImage(
   };
 }
 
-export async function removeCanvasFeedbackRenderedArtifact(projectRoot: string, projectRelativePath: string): Promise<void> {
-  await rm(resolveProjectPath(projectRoot, canvasFeedbackRenderedProjectPath(projectRelativePath)), { force: true });
+export async function removeCanvasFeedbackRenderedArtifact(projectRoot: string, artifactProjectPath: string): Promise<void> {
+  await rm(resolveProjectPath(projectRoot, artifactProjectPath), { force: true });
 }
 
 export async function removeUnexpectedCanvasFeedbackRenderedArtifacts(
@@ -59,7 +68,7 @@ export async function removeUnexpectedCanvasFeedbackRenderedArtifacts(
     RENDERED_FEEDBACK_PROJECT_PATH
   );
   for (const projectRelativePath of artifactPaths) {
-    if (!projectRelativePath.endsWith('.tmp') && !expectedProjectPaths.has(projectRelativePath)) {
+    if (!isCanvasFeedbackTemporaryArtifactPath(projectRelativePath) && !expectedProjectPaths.has(projectRelativePath)) {
       await rm(resolveProjectPath(projectRoot, projectRelativePath), { force: true });
     }
   }
@@ -68,9 +77,9 @@ export async function removeUnexpectedCanvasFeedbackRenderedArtifacts(
 export function createCanvasFeedbackOverlaySvg(input: {
   width: number;
   height: number;
-  entry: { regions: CanvasImageFeedbackRegion[] };
+  items: readonly CanvasFeedbackSpatialItem[];
 }): string {
-  const content = input.entry.regions.map((region) => regionSvg(region, input.width, input.height)).join('\n');
+  const content = input.items.map((item) => spatialItemSvg(item, input.width, input.height)).join('\n');
   return `<svg xmlns="http://www.w3.org/2000/svg" width="${input.width}" height="${input.height}" viewBox="0 0 ${input.width} ${input.height}">
   <style>
     .shape { fill: none; stroke: #ffcc00; stroke-width: 4; paint-order: stroke; }
@@ -82,25 +91,68 @@ export function createCanvasFeedbackOverlaySvg(input: {
 </svg>`;
 }
 
-export function canvasFeedbackRenderDiagnostic(projectRoot: string, projectRelativePath: string, error: unknown): Diagnostic {
+export function canvasFeedbackRenderDiagnostic(
+  projectRoot: string,
+  artifact: CanvasFeedbackArtifact,
+  artifactProjectPath: string,
+  diagnosticProjectRelativePath: string,
+  error: unknown
+): Diagnostic {
+  const suffix = artifact.kind === 'video-moment' ? ` at ${artifact.moment.label}` : '';
   return {
-    id: `canvas-feedback.render_failed:${projectRelativePath}`,
+    id: `canvas-feedback.render_failed:${diagnosticProjectRelativePath}`,
     source: 'project',
     severity: 'error',
     code: 'canvas-feedback.render_failed',
-    message: `Canvas feedback rendered image could not be created for ${projectRelativePath}: ${errorMessage(error)}`,
-    filePath: resolveProjectPath(projectRoot, projectRelativePath),
-    entityId: projectRelativePath
+    message: `Canvas feedback artifact could not be created for ${artifact.projectRelativePath}${suffix}: ${errorMessage(error)}`,
+    filePath: resolveProjectPath(projectRoot, artifact.projectRelativePath),
+    entityId: diagnosticProjectRelativePath
   };
 }
 
-function regionSvg(region: CanvasImageFeedbackRegion, width: number, height: number): string {
-  const geometry = region.geometry;
+async function imageArtifactSourcePng(input: CanvasFeedbackRenderJobInput): Promise<Buffer> {
+  const absoluteSourcePath = await resolveExistingProjectPath(input.projectRoot, input.artifact.projectRelativePath);
+  return sharp(absoluteSourcePath).rotate().png().toBuffer();
+}
+
+async function videoMomentArtifactSourcePng(
+  input: CanvasFeedbackRenderJobInput,
+  frameExtractor: CanvasVideoFrameExtractor
+): Promise<Buffer> {
+  if (input.artifact.kind !== 'video-moment') {
+    throw new Error('Canvas feedback video frame extraction requires a video moment artifact.');
+  }
+  const videoAbsolutePath = await resolveExistingProjectPath(input.projectRoot, input.artifact.projectRelativePath);
+  const framePath = `${input.outputPath}.frame.png`;
+  try {
+    await frameExtractor.extractFrame({
+      videoAbsolutePath,
+      outputAbsolutePath: framePath,
+      projectRelativePath: input.artifact.projectRelativePath,
+      currentTimeSeconds: input.artifact.moment.currentTimeSeconds
+    });
+    return await sharp(framePath).rotate().png().toBuffer();
+  } finally {
+    await rm(framePath, { force: true });
+  }
+}
+
+function artifactSpatialItems(artifact: CanvasFeedbackArtifact): readonly CanvasFeedbackSpatialItem[] {
+  if (artifact.kind === 'image') {
+    return artifact.entry.items.filter((item): item is CanvasFeedbackSpatialItem => (
+      (item.kind === 'pin' || item.kind === 'region') && item.scope === 'file'
+    ));
+  }
+  return canvasFeedbackSpatialItemsForMoment(artifact.entry, artifact.moment);
+}
+
+function spatialItemSvg(item: CanvasFeedbackSpatialItem, width: number, height: number): string {
+  const geometry = item.geometry;
   switch (geometry.type) {
   case 'point': {
     const cx = Math.round(geometry.x * width);
     const cy = Math.round(geometry.y * height);
-    return `${badgeSvg(region.label, cx, cy)}
+    return `${badgeSvg(item.label, cx, cy)}
 <path class="halo" d="M ${cx} ${cy + 14} L ${cx} ${cy + 31}" />
 <path class="shape" d="M ${cx} ${cy + 14} L ${cx} ${cy + 31}" />`;
   }
@@ -111,7 +163,7 @@ function regionSvg(region: CanvasImageFeedbackRegion, width: number, height: num
     const h = Math.round(geometry.height * height);
     return `<rect class="halo" x="${x}" y="${y}" width="${w}" height="${h}" />
 <rect class="shape" x="${x}" y="${y}" width="${w}" height="${h}" />
-${badgeSvg(region.label, x, y)}`;
+${badgeSvg(item.label, x, y)}`;
   }
   }
 }
@@ -146,6 +198,10 @@ async function renderedFeedbackArtifactPaths(absoluteDirectoryPath: string, proj
 
 function isNotFoundError(error: unknown): boolean {
   return isRecord(error) && error.code === 'ENOENT';
+}
+
+function isCanvasFeedbackTemporaryArtifactPath(projectRelativePath: string): boolean {
+  return TEMPORARY_ARTIFACT_PATH_PATTERN.test(projectRelativePath);
 }
 
 function errorMessage(error: unknown): string {

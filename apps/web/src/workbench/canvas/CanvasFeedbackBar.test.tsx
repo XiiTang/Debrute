@@ -3,24 +3,20 @@ import { fileURLToPath } from 'node:url';
 import React from 'react';
 import { renderToStaticMarkup } from 'react-dom/server';
 import { describe, expect, it, vi } from 'vitest';
+import type { CanvasFeedbackEntry } from '@debrute/canvas-core';
 import { CanvasFeedbackBar } from './CanvasFeedbackBar';
 import { createCanvasOverlayRuntime } from './CanvasOverlayRuntime';
 import { I18nProvider } from '../i18n';
 
+const NOW = '2026-05-26T12:00:00.000Z';
 const canvasFeedbackBarSource = readFileSync(fileURLToPath(new URL('./CanvasFeedbackBar.tsx', import.meta.url)), 'utf8');
+const canvasCssSource = readFileSync(fileURLToPath(new URL('../styles/canvas.css', import.meta.url)), 'utf8');
 
 function renderStaticWithI18n(element: React.ReactElement): string {
-  return renderStaticWithProvider(element, I18nProvider);
-}
-
-function renderStaticWithProvider(
-  element: React.ReactElement,
-  Provider: typeof I18nProvider
-): string {
   return renderToStaticMarkup(
-    <Provider locale="en">
+    <I18nProvider locale="en">
       {element}
-    </Provider>
+    </I18nProvider>
   );
 }
 
@@ -39,108 +35,142 @@ describe('CanvasFeedbackBar', () => {
     expect(html).toContain('canvas-feedback-primary-row');
     expect(html).toContain('canvas-feedback-comment-creator');
     expect(html).toContain('aria-label="New file-level comment for flow/cover.png"');
-    expect(html).toContain('placeholder="Comment"');
-    expect(html).toContain('--db-comment-pill-min-width:90px');
-    expect(html).toContain('--db-comment-pill-max-width:90px');
-    expect(html).not.toContain('Clear draft comment for flow/cover.png');
-    expect(html).toContain('data-canvas-local-wheel="focus"');
-    expect(html).not.toContain('data-canvas-local-wheel="true"');
     expect(html).not.toContain('canvas-feedback-comment-strip');
   });
 
-  it('uses the first-row creator for a pending annotation comment without rendering a second-row input', () => {
+  it('renders image and video local toolsets from the same bar component', () => {
+    const imageHtml = renderStaticWithI18n(
+      <CanvasFeedbackBar
+        projectRelativePath="flow/cover.png"
+        entry={undefined}
+        onUpdate={async () => true}
+        overlayRuntime={createCanvasOverlayRuntime()}
+        localToolset="image"
+        localFeedbackMode="pin"
+        onLocalFeedbackModeChange={() => undefined}
+      />
+    );
+    const videoHtml = renderStaticWithI18n(
+      <CanvasFeedbackBar
+        projectRelativePath="flow/shot.mp4"
+        entry={undefined}
+        onUpdate={async () => true}
+        overlayRuntime={createCanvasOverlayRuntime()}
+        localToolset="video"
+        canStartVideoMomentFeedback
+        onStartVideoMomentFeedback={() => undefined}
+      />
+    );
+
+    expect(imageHtml).toContain('aria-label="Image region feedback tools"');
+    expect(videoHtml).toContain('aria-label="Video moment feedback tools"');
+    expect(videoHtml).toContain('aria-label="Add moment comment"');
+  });
+
+  it('uses the first-row creator for a pending feedback item', () => {
     const html = renderStaticWithI18n(
       <CanvasFeedbackBar
         projectRelativePath="flow/cover.png"
         entry={undefined}
         onUpdate={async () => true}
         overlayRuntime={createCanvasOverlayRuntime()}
+        localToolset="image"
         localFeedbackMode="pin"
         onLocalFeedbackModeChange={() => undefined}
-        pendingRegionLabel={3}
-        pendingRegionComment="new annotation"
-        onPendingRegionCommentChange={() => undefined}
-        onSavePendingRegion={() => undefined}
-        onCancelPendingRegion={() => undefined}
+        pendingItemLabel={3}
+        pendingItemComment="new annotation"
+        onPendingItemCommentChange={() => undefined}
+        onSavePendingItem={() => undefined}
+        onCancelPendingItem={() => undefined}
       />
     );
 
     expect(html).toContain('canvas-feedback-comment-creator');
     expect(html).toContain('aria-label="New annotation comment for flow/cover.png"');
     expect(html).toContain('value="new annotation"');
-    expect(html).toContain('--db-comment-pill-min-width:90px');
-    expect(html).toContain('--db-comment-pill-max-width:90px');
     expect(html).toContain('autofocus=""');
     expect(html).not.toContain('canvas-feedback-comment-strip');
-    expect(html).not.toContain('canvas-feedback-comment-pill--pending');
   });
 
-  it('defers pending annotation focus until after the confirming pointer event', () => {
-    expect(canvasFeedbackBarSource).toContain('pendingRegionFocusTimerRef');
-    expect(canvasFeedbackBarSource).toContain('window.setTimeout(() => {');
-    expect(canvasFeedbackBarSource).toContain('creatorInputRef.current?.focus();');
-    expect(canvasFeedbackBarSource).toContain('window.clearTimeout(pendingRegionFocusTimerRef.current);');
-  });
-
-  it('renders saved file comments before saved annotation comments', () => {
+  it('keeps spatial tools in placement mode until geometry is ready for a comment', () => {
     const html = renderStaticWithI18n(
       <CanvasFeedbackBar
-        projectRelativePath="flow/cover.png"
-        entry={{
-          projectRelativePath: 'flow/cover.png',
-          marks: [],
-          comments: [{
-            id: 'comment-1',
-            comment: 'overall direction',
-            createdAt: '2026-05-26T12:00:00.000Z',
-            updatedAt: '2026-05-26T12:00:00.000Z'
-          }],
-          nextRegionLabel: 2,
-          regions: [{
-            id: 'region-1',
-            label: 1,
-            kind: 'pin',
-            geometry: { type: 'point', x: 0.2, y: 0.3 },
-            comment: 'face is blurry',
-            createdAt: '2026-05-26T12:00:00.000Z',
-            updatedAt: '2026-05-26T12:00:00.000Z'
-          }],
-          updatedAt: '2026-05-26T12:00:00.000Z'
-        }}
+        projectRelativePath="flow/shot.mp4"
+        entry={undefined}
         onUpdate={async () => true}
         overlayRuntime={createCanvasOverlayRuntime()}
+        localToolset="video"
         localFeedbackMode="pin"
-        onLocalFeedbackModeChange={() => undefined}
+        canStartVideoMomentFeedback
+        pendingItemLabel={3}
+        pendingItemComment="new annotation"
+        pendingItemReadyForComment={false}
+        onPendingItemCommentChange={() => undefined}
+        onSavePendingItem={() => undefined}
+        onCancelPendingItem={() => undefined}
+      />
+    );
+
+    expect(html).toContain('aria-label="New file-level comment for flow/shot.mp4"');
+    expect(html).not.toContain('aria-label="New annotation comment for flow/shot.mp4"');
+    expect(html).not.toContain('value="new annotation"');
+    expect(html).not.toContain('autofocus=""');
+  });
+
+  it('defers pending item focus until after the confirming pointer event', () => {
+    expect(canvasFeedbackBarSource).toContain('pendingItemFocusTimerRef');
+    expect(canvasFeedbackBarSource).toContain('window.setTimeout(() => {');
+    expect(canvasFeedbackBarSource).toContain('creatorInputRef.current?.focus();');
+    expect(canvasFeedbackBarSource).toContain('window.clearTimeout(pendingItemFocusTimerRef.current);');
+  });
+
+  it('renders one pill per saved feedback item with moment coloring and spatial labels', () => {
+    const html = renderStaticWithI18n(
+      <CanvasFeedbackBar
+        projectRelativePath="flow/shot.mp4"
+        entry={entryFixture()}
+        onUpdate={async () => true}
+        overlayRuntime={createCanvasOverlayRuntime()}
+        localToolset="video"
+        canStartVideoMomentFeedback
       />
     );
 
     expect(html).toContain('canvas-feedback-comment-strip');
-    expect(html).toContain('canvas-feedback-comment-pill--file');
-    expect(html).toContain('canvas-feedback-comment-pill--region');
-    expect(html.indexOf('overall direction')).toBeLessThan(html.indexOf('face is blurry'));
-    expect(html).not.toContain('canvas-feedback-comment-pill--pending');
-    expect(html).not.toContain('aria-label="Edit file-level comment for flow/cover.png"');
-    expect(html).toContain('aria-label="Delete file-level comment for flow/cover.png"');
-    expect(html).toContain('aria-label="Delete feedback region 1"');
-    expect(html).not.toContain('value="overall direction"');
+    expect(html).toContain('overall direction');
+    expect(html).toContain('face is blurry');
+    expect(html).toContain('pause here');
+    expect(html).toContain('data-canvas-feedback-region-label="1"');
+    expect(html).toContain('data-canvas-feedback-moment="M1"');
+    expect(html).toContain('--canvas-feedback-moment-color:#2563eb');
   });
 
-  it('saves creator text as a new file-level comment', async () => {
+  it('uses the moment pill surface color without a second leading color block', () => {
+    expect(canvasCssSource).not.toContain('.canvas-feedback-comment-pill--moment::before');
+    expect(canvasCssSource).not.toContain('.canvas-feedback-comment-pill--moment .canvas-feedback-comment-pill-text');
+  });
+
+  it('keeps the first-row creator fixed-width and rounded-rectangle shaped', () => {
+    expect(canvasCssSource).toContain('padding: 3px;');
+    expect(canvasCssSource).toContain('grid-template-columns: max-content 110px;');
+    expect(canvasFeedbackBarSource).toContain('sizing={{ minWidthPx: 110, maxWidthPx: 110 }}');
+    expect(canvasCssSource).toMatch(/\.canvas-feedback-comment-input\s*{[^}]*border-radius: var\(--db-radius-md\);/);
+    expect(canvasCssSource).toContain('.canvas-feedback-comment-pill {');
+    expect(canvasCssSource).toMatch(/\.canvas-feedback-comment-pill\s*{[^}]*border-radius: 999px;/);
+  });
+
+  it('saves creator text as a new file-level item', async () => {
     const commentInputs: Array<{
       value?: string;
-      onClose?: () => void;
       onChange?: (event: { currentTarget: { value: string } }) => void;
       onKeyDown?: (event: { key: string; preventDefault: () => void }) => void;
-      onBlur?: () => void;
     }> = [];
     vi.resetModules();
     vi.doMock('../ui', () => ({
       CommentPillInput: (props: {
         value?: string;
-        onClose?: () => void;
         onChange?: (event: { currentTarget: { value: string } }) => void;
         onKeyDown?: (event: { key: string; preventDefault: () => void }) => void;
-        onBlur?: () => void;
       }) => {
         commentInputs.push(props);
         return React.createElement('input', { value: props.value, readOnly: true });
@@ -155,27 +185,31 @@ describe('CanvasFeedbackBar', () => {
       const { I18nProvider: MockedI18nProvider } = await import('../i18n');
       const updates: unknown[] = [];
 
-      renderStaticWithProvider(
-        <MockedCanvasFeedbackBar
-          projectRelativePath="flow/cover.png"
-          entry={undefined}
-          onUpdate={async (input) => {
-            updates.push(input);
-            return true;
-          }}
-          overlayRuntime={createCanvasOverlayRuntime()}
-        />,
-        MockedI18nProvider
+      renderToStaticMarkup(
+        <MockedI18nProvider locale="en">
+          <MockedCanvasFeedbackBar
+            projectRelativePath="flow/cover.png"
+            entry={undefined}
+            onUpdate={async (input) => {
+              updates.push(input);
+              return true;
+            }}
+            overlayRuntime={createCanvasOverlayRuntime()}
+          />
+        </MockedI18nProvider>
       );
 
-      expect(commentInputs[0]!.onClose).toBeUndefined();
       commentInputs[0]!.onChange?.({ currentTarget: { value: '  overall direction  ' } });
       commentInputs[0]!.onKeyDown?.({ key: 'Enter', preventDefault: () => undefined });
 
       expect(updates.at(-1)).toEqual({
-        operation: 'add-comment',
+        operation: 'add-item',
         projectRelativePath: 'flow/cover.png',
-        comment: 'overall direction'
+        item: {
+          kind: 'comment',
+          scope: 'file',
+          comment: 'overall direction'
+        }
       });
     } finally {
       vi.doUnmock('../ui');
@@ -183,22 +217,18 @@ describe('CanvasFeedbackBar', () => {
     }
   });
 
-  it('saves pending annotation text from the first-row creator', async () => {
+  it('saves pending item text through the pending item callback', async () => {
     const commentInputs: Array<{
       value?: string;
-      onClose?: () => void;
       onChange?: (event: { currentTarget: { value: string } }) => void;
       onKeyDown?: (event: { key: string; preventDefault: () => void }) => void;
-      onBlur?: () => void;
     }> = [];
     vi.resetModules();
     vi.doMock('../ui', () => ({
       CommentPillInput: (props: {
         value?: string;
-        onClose?: () => void;
         onChange?: (event: { currentTarget: { value: string } }) => void;
         onKeyDown?: (event: { key: string; preventDefault: () => void }) => void;
-        onBlur?: () => void;
       }) => {
         commentInputs.push(props);
         return React.createElement('input', { value: props.value, readOnly: true });
@@ -211,43 +241,40 @@ describe('CanvasFeedbackBar', () => {
     try {
       const { CanvasFeedbackBar: MockedCanvasFeedbackBar } = await import('./CanvasFeedbackBar');
       const { I18nProvider: MockedI18nProvider } = await import('../i18n');
-      const onPendingRegionCommentChange = vi.fn();
-      const onSavePendingRegion = vi.fn();
+      const onPendingItemCommentChange = vi.fn();
+      const onSavePendingItem = vi.fn();
 
-      renderStaticWithProvider(
-        <MockedCanvasFeedbackBar
-          projectRelativePath="flow/cover.png"
-          entry={undefined}
-          onUpdate={async () => true}
-          overlayRuntime={createCanvasOverlayRuntime()}
-          localFeedbackMode="pin"
-          onLocalFeedbackModeChange={() => undefined}
-          pendingRegionLabel={3}
-          pendingRegionComment="new annotation"
-          onPendingRegionCommentChange={onPendingRegionCommentChange}
-          onSavePendingRegion={onSavePendingRegion}
-          onCancelPendingRegion={() => undefined}
-        />,
-        MockedI18nProvider
+      renderToStaticMarkup(
+        <MockedI18nProvider locale="en">
+          <MockedCanvasFeedbackBar
+            projectRelativePath="flow/cover.png"
+            entry={undefined}
+            onUpdate={async () => true}
+            overlayRuntime={createCanvasOverlayRuntime()}
+            pendingItemLabel={3}
+            pendingItemComment="new annotation"
+            onPendingItemCommentChange={onPendingItemCommentChange}
+            onSavePendingItem={onSavePendingItem}
+            onCancelPendingItem={() => undefined}
+          />
+        </MockedI18nProvider>
       );
 
-      expect(commentInputs).toHaveLength(1);
-      expect(commentInputs[0]!.value).toBe('new annotation');
-      expect(commentInputs[0]!.onClose).toBeUndefined();
       commentInputs[0]!.onChange?.({ currentTarget: { value: ' sharper face ' } });
       commentInputs[0]!.onKeyDown?.({ key: 'Enter', preventDefault: () => undefined });
 
-      expect(onPendingRegionCommentChange).toHaveBeenCalledWith(' sharper face ');
-      expect(onSavePendingRegion).toHaveBeenCalledTimes(1);
+      expect(onPendingItemCommentChange).toHaveBeenCalledWith(' sharper face ');
+      expect(onSavePendingItem).toHaveBeenCalledTimes(1);
     } finally {
       vi.doUnmock('../ui');
       vi.resetModules();
     }
   });
 
-  it('cancels pending annotation text without saving it on a following blur', async () => {
+  it('does not submit the same pending item text twice before the save resolves', async () => {
     const commentInputs: Array<{
       value?: string;
+      onChange?: (event: { currentTarget: { value: string } }) => void;
       onKeyDown?: (event: { key: string; preventDefault: () => void }) => void;
       onBlur?: () => void;
     }> = [];
@@ -255,6 +282,7 @@ describe('CanvasFeedbackBar', () => {
     vi.doMock('../ui', () => ({
       CommentPillInput: (props: {
         value?: string;
+        onChange?: (event: { currentTarget: { value: string } }) => void;
         onKeyDown?: (event: { key: string; preventDefault: () => void }) => void;
         onBlur?: () => void;
       }) => {
@@ -269,138 +297,42 @@ describe('CanvasFeedbackBar', () => {
     try {
       const { CanvasFeedbackBar: MockedCanvasFeedbackBar } = await import('./CanvasFeedbackBar');
       const { I18nProvider: MockedI18nProvider } = await import('../i18n');
-      const onCancelPendingRegion = vi.fn();
-      const onSavePendingRegion = vi.fn();
+      let resolveSave: (saved: boolean) => void = () => undefined;
+      const pendingSave = new Promise<boolean>((resolve) => {
+        resolveSave = resolve;
+      });
+      const onSavePendingItem = vi.fn(() => pendingSave);
 
-      renderStaticWithProvider(
-        <MockedCanvasFeedbackBar
-          projectRelativePath="flow/cover.png"
-          entry={undefined}
-          onUpdate={async () => true}
-          overlayRuntime={createCanvasOverlayRuntime()}
-          localFeedbackMode="pin"
-          onLocalFeedbackModeChange={() => undefined}
-          pendingRegionLabel={3}
-          pendingRegionComment="new annotation"
-          onPendingRegionCommentChange={() => undefined}
-          onSavePendingRegion={onSavePendingRegion}
-          onCancelPendingRegion={onCancelPendingRegion}
-        />,
-        MockedI18nProvider
+      renderToStaticMarkup(
+        <MockedI18nProvider locale="en">
+          <MockedCanvasFeedbackBar
+            projectRelativePath="flow/cover.png"
+            entry={undefined}
+            onUpdate={async () => true}
+            overlayRuntime={createCanvasOverlayRuntime()}
+            pendingItemLabel={3}
+            pendingItemComment="new annotation"
+            onPendingItemCommentChange={() => undefined}
+            onSavePendingItem={onSavePendingItem}
+            onCancelPendingItem={() => undefined}
+          />
+        </MockedI18nProvider>
       );
 
-      commentInputs[0]!.onKeyDown?.({ key: 'Escape', preventDefault: () => undefined });
+      commentInputs[0]!.onKeyDown?.({ key: 'Enter', preventDefault: () => undefined });
       commentInputs[0]!.onBlur?.();
 
-      expect(onCancelPendingRegion).toHaveBeenCalledTimes(1);
-      expect(onSavePendingRegion).not.toHaveBeenCalled();
+      expect(onSavePendingItem).toHaveBeenCalledTimes(1);
+
+      resolveSave(true);
+      await pendingSave;
     } finally {
       vi.doUnmock('../ui');
       vi.resetModules();
     }
   });
 
-  it('updates marks without carrying creator draft text', async () => {
-    const iconButtons: Array<{ label: string; onClick?: () => void }> = [];
-    const commentInputs: Array<{
-      value?: string;
-      onChange?: (event: { currentTarget: { value: string } }) => void;
-    }> = [];
-    vi.resetModules();
-    vi.doMock('../ui', () => ({
-      CommentPillInput: (props: {
-        value?: string;
-        onChange?: (event: { currentTarget: { value: string } }) => void;
-      }) => {
-        commentInputs.push(props);
-        return React.createElement('input', { value: props.value, readOnly: true });
-      },
-      IconButton: (props: { label: string; onClick?: () => void }) => {
-        iconButtons.push(props);
-        return React.createElement('button', { type: 'button' }, props.label);
-      }
-    }));
-
-    try {
-      const { CanvasFeedbackBar: MockedCanvasFeedbackBar } = await import('./CanvasFeedbackBar');
-      const { I18nProvider: MockedI18nProvider } = await import('../i18n');
-      const updates: unknown[] = [];
-
-      renderStaticWithProvider(
-        <MockedCanvasFeedbackBar
-          projectRelativePath="flow/cover.png"
-          entry={undefined}
-          onUpdate={async (input) => {
-            updates.push(input);
-            return true;
-          }}
-          overlayRuntime={createCanvasOverlayRuntime()}
-        />,
-        MockedI18nProvider
-      );
-
-      commentInputs[0]!.onChange?.({ currentTarget: { value: 'draft comment' } });
-      iconButtons.find((button) => button.label === 'Check')!.onClick?.();
-
-      expect(updates.at(-1)).toEqual({
-        operation: 'set-marks',
-        projectRelativePath: 'flow/cover.png',
-        marks: ['check']
-      });
-    } finally {
-      vi.doUnmock('../ui');
-      vi.resetModules();
-    }
-  });
-
-  it('does not route saved comments through second-row input props', async () => {
-    const commentInputs: Array<{ value?: string }> = [];
-    vi.resetModules();
-    vi.doMock('../ui', () => ({
-      CommentPillInput: (props: { value?: string }) => {
-        commentInputs.push(props);
-        return React.createElement('input', { value: props.value, readOnly: true });
-      },
-      IconButton: (props: { label: string; onClick?: () => void }) => (
-        React.createElement('button', { type: 'button', onClick: props.onClick }, props.label)
-      )
-    }));
-
-    try {
-      const { CanvasFeedbackBar: MockedCanvasFeedbackBar } = await import('./CanvasFeedbackBar');
-      const { I18nProvider: MockedI18nProvider } = await import('../i18n');
-
-      renderStaticWithProvider(
-        <MockedCanvasFeedbackBar
-          projectRelativePath="flow/cover.png"
-          entry={{
-            projectRelativePath: 'flow/cover.png',
-            marks: [],
-            comments: [{
-              id: 'comment-1',
-              comment: 'old comment',
-              createdAt: '2026-05-26T12:00:00.000Z',
-              updatedAt: '2026-05-26T12:00:00.000Z'
-            }],
-            nextRegionLabel: 1,
-            regions: [],
-            updatedAt: '2026-05-26T12:00:00.000Z'
-          }}
-          onUpdate={async () => true}
-          overlayRuntime={createCanvasOverlayRuntime()}
-        />,
-        MockedI18nProvider
-      );
-
-      expect(commentInputs).toHaveLength(1);
-      expect(commentInputs[0]!.value).toBe('');
-    } finally {
-      vi.doUnmock('../ui');
-      vi.resetModules();
-    }
-  });
-
-  it('deletes saved file-level comments when their display close button is activated', async () => {
+  it('deletes saved feedback items by item id', async () => {
     const buttons: Array<{ label: string; onClick?: (event: React.MouseEvent<HTMLButtonElement>) => void }> = [];
     vi.resetModules();
     vi.doMock('../ui', () => ({
@@ -416,40 +348,29 @@ describe('CanvasFeedbackBar', () => {
       const { I18nProvider: MockedI18nProvider } = await import('../i18n');
       const updates: unknown[] = [];
 
-      renderStaticWithProvider(
-        <MockedCanvasFeedbackBar
-          projectRelativePath="flow/cover.png"
-          entry={{
-            projectRelativePath: 'flow/cover.png',
-            marks: [],
-            comments: [{
-              id: 'comment-1',
-              comment: 'old comment',
-              createdAt: '2026-05-26T12:00:00.000Z',
-              updatedAt: '2026-05-26T12:00:00.000Z'
-            }],
-            nextRegionLabel: 1,
-            regions: [],
-            updatedAt: '2026-05-26T12:00:00.000Z'
-          }}
-          onUpdate={async (input) => {
-            updates.push(input);
-            return true;
-          }}
-          overlayRuntime={createCanvasOverlayRuntime()}
-        />,
-        MockedI18nProvider
+      renderToStaticMarkup(
+        <MockedI18nProvider locale="en">
+          <MockedCanvasFeedbackBar
+            projectRelativePath="flow/shot.mp4"
+            entry={entryFixture()}
+            onUpdate={async (input) => {
+              updates.push(input);
+              return true;
+            }}
+            overlayRuntime={createCanvasOverlayRuntime()}
+          />
+        </MockedI18nProvider>
       );
 
-      buttons.find((button) => button.label === 'Delete file-level comment for flow/cover.png')!.onClick?.({
+      buttons.find((button) => button.label === 'Delete feedback item')!.onClick?.({
         preventDefault: () => undefined,
         stopPropagation: () => undefined
       } as React.MouseEvent<HTMLButtonElement>);
 
       expect(updates).toEqual([{
-        operation: 'delete-comment',
-        projectRelativePath: 'flow/cover.png',
-        commentId: 'comment-1'
+        operation: 'delete-item',
+        projectRelativePath: 'flow/shot.mp4',
+        itemId: 'comment-1'
       }]);
     } finally {
       vi.doUnmock('../ui');
@@ -457,3 +378,39 @@ describe('CanvasFeedbackBar', () => {
     }
   });
 });
+
+function entryFixture(): CanvasFeedbackEntry {
+  return {
+    projectRelativePath: 'flow/shot.mp4',
+    marks: [],
+    nextMomentLabel: 2,
+    nextSpatialLabel: 2,
+    items: [{
+      id: 'comment-1',
+      kind: 'comment',
+      scope: 'file',
+      comment: 'overall direction',
+      createdAt: NOW,
+      updatedAt: NOW
+    }, {
+      id: 'region-1',
+      label: 1,
+      kind: 'pin',
+      scope: 'moment',
+      moment: { label: 'M1', currentTimeSeconds: 12.345 },
+      geometry: { type: 'point', x: 0.2, y: 0.3 },
+      comment: 'face is blurry',
+      createdAt: NOW,
+      updatedAt: NOW
+    }, {
+      id: 'comment-2',
+      kind: 'comment',
+      scope: 'moment',
+      moment: { label: 'M1', currentTimeSeconds: 12.345 },
+      comment: 'pause here',
+      createdAt: NOW,
+      updatedAt: NOW
+    }],
+    updatedAt: NOW
+  };
+}

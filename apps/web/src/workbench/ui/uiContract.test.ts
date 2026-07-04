@@ -142,4 +142,17 @@ describe('Workbench UI system contract', () => {
     }
   });
 
+  it('defines compact wrapping styles for Canvas generic nodes', () => {
+    const patterns = readFileSync('apps/web/src/workbench/ui/styles/workbench-patterns.css', 'utf8');
+
+    expect(patterns).toMatch(/\.db-canvas-node-generic\s*{[^}]*box-sizing: border-box;/);
+    expect(patterns).toMatch(/\.db-canvas-node-generic\s*{[^}]*grid-template-columns: 20px minmax\(0, 1fr\);/);
+    expect(patterns).toMatch(/\.db-canvas-node-generic\s*{[^}]*gap: 2px 8px;/);
+    expect(patterns).toMatch(/\.db-canvas-node-generic\s*{[^}]*padding: 8px 12px;/);
+    expect(patterns).toMatch(/\.db-canvas-node-generic__label\s*{[^}]*white-space: nowrap;/);
+    expect(patterns).toMatch(/\.db-canvas-node-generic--wrap \.db-canvas-node-generic__label\s*{[^}]*white-space: normal;/);
+    expect(patterns).toMatch(/\.db-canvas-node-generic--wrap \.db-canvas-node-generic__label\s*{[^}]*overflow-wrap: anywhere;/);
+    expect(patterns).toMatch(/\.db-canvas-node-generic--wrap \.db-canvas-node-generic__label\s*{[^}]*-webkit-line-clamp: 3;/);
+  });
+
 });

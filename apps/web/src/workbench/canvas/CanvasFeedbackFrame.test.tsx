@@ -5,7 +5,6 @@ import type { CanvasFeedbackEntry } from '@debrute/canvas-core';
 import {
   CanvasFeedbackFrame,
   canvasFeedbackEntryHasFeedback,
-  canvasFeedbackFrameGradient,
   orderedCanvasFeedbackFrameKinds
 } from './CanvasFeedbackFrame';
 
@@ -26,16 +25,18 @@ describe('CanvasFeedbackFrame', () => {
   it('orders marks, comments, and regions as frame kinds', () => {
     const entry = entryFixture({
       marks: ['needs_revision', 'important', 'like', 'check'],
-      comments: [{
+      items: [{
         id: 'comment-1',
+        kind: 'comment',
+        scope: 'file',
         comment: 'overall direction',
         createdAt: NOW,
         updatedAt: NOW
-      }],
-      regions: [{
+      }, {
         id: 'region-1',
         label: 1,
         kind: 'pin',
+        scope: 'file',
         geometry: { type: 'point', x: 0.2, y: 0.3 },
         comment: 'face detail',
         createdAt: NOW,
@@ -53,35 +54,40 @@ describe('CanvasFeedbackFrame', () => {
     ]);
   });
 
-  it('renders one full-frame color segment for one feedback type', () => {
+  it('renders one metadata-only feedback frame for one feedback type', () => {
     const html = renderStatic(<CanvasFeedbackFrame entry={entryFixture({ marks: ['like'] })} />);
 
     expect(html).toContain('class="canvas-feedback-frame"');
     expect(html).toContain('data-canvas-feedback-frame="true"');
     expect(html).toContain('data-canvas-feedback-frame-kinds="like"');
-    expect(html).toContain('--canvas-feedback-frame-gradient:conic-gradient(#22c55e 0% 100%)');
+    expect(html).not.toContain('--canvas-feedback-frame-gradient');
+    expect(html).not.toContain('conic-gradient');
     expect(html).not.toContain('<svg');
     expect(html).not.toContain('+');
   });
 
-  it('renders multiple equal color segments without comments, counts, or icons', () => {
+  it('renders one metadata-only frame for multiple feedback kinds without comments, counts, or icons', () => {
     const entry = entryFixture({
       marks: ['needs_revision', 'like'],
-      comments: [{
+      items: [{
         id: 'comment-1',
+        kind: 'comment',
+        scope: 'file',
         comment: 'overall direction',
         createdAt: NOW,
         updatedAt: NOW
       }, {
         id: 'comment-2',
+        kind: 'comment',
+        scope: 'file',
         comment: 'second pass',
         createdAt: NOW,
         updatedAt: NOW
-      }],
-      regions: [{
+      }, {
         id: 'region-1',
         label: 1,
         kind: 'pin',
+        scope: 'file',
         geometry: { type: 'point', x: 0.2, y: 0.3 },
         comment: 'face detail',
         createdAt: NOW,
@@ -92,20 +98,12 @@ describe('CanvasFeedbackFrame', () => {
 
     expect(canvasFeedbackEntryHasFeedback(entry)).toBe(true);
     expect(html).toContain('data-canvas-feedback-frame-kinds="like needs_revision comments regions"');
-    expect(html).toContain('--canvas-feedback-frame-gradient:conic-gradient(#22c55e 0% 25%, #f97316 25% 50%, #3b82f6 50% 75%, #facc15 75% 100%)');
+    expect(html).not.toContain('--canvas-feedback-frame-gradient');
+    expect(html).not.toContain('conic-gradient');
     expect(html).not.toContain('overall direction');
     expect(html).not.toContain('second pass');
     expect(html).not.toContain('face detail');
     expect(html).not.toContain('<svg');
-  });
-
-  it('builds deterministic conic gradients from frame kinds', () => {
-    expect(canvasFeedbackFrameGradient(['comments'])).toBe(
-      'conic-gradient(#3b82f6 0% 100%)'
-    );
-    expect(canvasFeedbackFrameGradient(['like', 'pending', 'regions'])).toBe(
-      'conic-gradient(#22c55e 0% 33.3333%, #f59e0b 33.3333% 66.6667%, #facc15 66.6667% 100%)'
-    );
   });
 });
 
@@ -113,9 +111,9 @@ function entryFixture(overrides: Partial<CanvasFeedbackEntry> = {}): CanvasFeedb
   return {
     projectRelativePath: 'flow/cover.png',
     marks: [],
-    comments: [],
-    nextRegionLabel: 1,
-    regions: [],
+    nextMomentLabel: 1,
+    nextSpatialLabel: 1,
+    items: [],
     updatedAt: NOW,
     ...overrides
   };

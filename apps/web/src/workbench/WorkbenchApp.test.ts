@@ -22,7 +22,7 @@ describe('WorkbenchApp feedback bar target equality', () => {
       entry: target.entry ? {
         ...target.entry,
         marks: [...target.entry.marks],
-        regions: [...target.entry.regions]
+        items: [...target.entry.items]
       } : undefined
     })).toBe(true);
   });
@@ -36,19 +36,21 @@ describe('WorkbenchApp feedback bar target equality', () => {
     })).toBe(false);
   });
 
-  it('detects feedback bar target local image feedback support changes', () => {
+  it('detects feedback bar target local toolset changes', () => {
     const target = feedbackTarget();
 
     expect(sameCanvasFeedbackBarTarget(target, {
       ...target,
-      supportsImageLocalFeedback: false
+      localToolset: 'none'
     })).toBe(false);
   });
 
-  it('carries the confirming image target on local feedback drafts', () => {
+  it('carries the confirming target on local feedback drafts', () => {
     const draftTarget = feedbackTarget('flow/b.png');
     const draft: CanvasLocalFeedbackDraft = {
       projectRelativePath: 'flow/b.png',
+      kind: 'pin',
+      scope: 'file',
       geometry: { type: 'point', x: 0.4, y: 0.5 },
       feedbackBarTarget: draftTarget
     };
@@ -134,18 +136,21 @@ function feedbackTarget(projectRelativePath = 'flow/a.png'): CanvasFeedbackBarTa
     nodeRect: { x: 10, y: 20, width: 300, height: 180 },
     surfaceRect: { x: 0, y: 0, width: 1280, height: 720 },
     camera: { x: 12, y: 24, z: 1 },
-    supportsImageLocalFeedback: true,
+    localToolset: 'image',
+    canStartVideoMomentFeedback: false,
     entry: {
       projectRelativePath,
       marks: ['needs_revision'],
-      comments: [{
+      nextMomentLabel: 1,
+      nextSpatialLabel: 1,
+      items: [{
         id: 'comment-1',
+        kind: 'comment',
+        scope: 'file',
         comment: 'Needs revision',
         createdAt: '2026-06-08T00:00:00.000Z',
         updatedAt: '2026-06-08T00:00:00.000Z'
       }],
-      nextRegionLabel: 1,
-      regions: [],
       updatedAt: '2026-06-08T00:00:00.000Z'
     }
   };

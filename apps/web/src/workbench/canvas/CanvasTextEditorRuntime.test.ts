@@ -167,21 +167,21 @@ describe('CanvasTextEditorRuntime', () => {
     expect(callbacks.current.onChange).not.toHaveBeenCalled();
   });
 
-  it('applies initial scroll to the CodeMirror scroller', () => {
+  it('applies initial scroll to the CodeMirror scroller and requests measurement', () => {
+    const requestMeasure = vi.fn();
     const scrollDOM = {
       scrollTop: 0,
       scrollLeft: 0
     };
 
-    canvasTextEditorApplyInitialScroll({ scrollDOM }, {
+    canvasTextEditorApplyInitialScroll({ scrollDOM, requestMeasure }, {
       scrollTop: 84,
       scrollLeft: 12
     });
 
-    expect(scrollDOM).toEqual({
-      scrollTop: 84,
-      scrollLeft: 12
-    });
+    expect(scrollDOM.scrollTop).toBe(84);
+    expect(scrollDOM.scrollLeft).toBe(12);
+    expect(requestMeasure).toHaveBeenCalledTimes(1);
   });
 
   it('focuses the editor and dispatches a collapsed selection from a focus request coordinate', () => {

@@ -31,6 +31,7 @@ const allowedStringPatterns = [
   /^debrute:/,
   /^floating-panel/,
   /^translate[XY]?\(/,
+  /^conic-gradient\(\{value\}\)$/,
   /^M \{value\} \{value\}$/,
   /^L \{value\} \{value\}$/,
   /^0 0 \{value\} \{value\}$/,
@@ -51,6 +52,8 @@ const allowedStringPatterns = [
   /^Canvas text preview /,
   /^Canvas image /,
   /^Canvas preview/,
+  /^Canvas video preview runtime is not available\.$/,
+  /^Canvas video preview file URL must include a project id\.$/,
   /^Canvas camera /,
   /^Canvas gesture /,
   /^Canvas resource zoom must be a positive finite number\.$/,
@@ -59,6 +62,8 @@ const allowedStringPatterns = [
   /^Resize node \{value\}$/,
   /^Resize \{value\}$/,
   /^CanvasImageNodeAssetProvider is required\.$/,
+  /^Projected video node is missing videoPresentation: \{value\}$/,
+  /^Projected video companion is missing fileUrl: \{value\} -> \{value\}$/,
   /^Workbench locale must be "en" or "zh-CN"\.$/,
   /^Workbench theme preference must be "system", "dark", or "light"\.$/,
   /^\(prefers-color-scheme: dark\)$/,
@@ -84,6 +89,7 @@ const allowedStringPatterns = [
   /^\s+:\s+parts\.slice/,
   /^\) \? 1 : handle\.includes\($/,
   /^\)\.at\(-1\)\?\.replaceAll\($/,
+  /^button,input,textarea,select,media-control-bar,media-play-button,media-mute-button,media-captions-button,media-pip-button,media-fullscreen-button,media-playback-rate-button,media-time-range,media-volume-range$/,
   /^[{}()[\],.:;'"`|+\-*/\\\s]+$/
 ];
 

@@ -25,8 +25,8 @@ await Promise.all([
   }),
   build({
     ...commonBuildOptions,
-    entryPoints: ['../app-server/src/canvas/CanvasFeedbackRenderedImageWorker.ts'],
-    outfile: 'bundle/canvas-feedback-render-worker.cjs',
+    entryPoints: ['../app-server/src/canvas/CanvasFeedbackArtifactWorker.ts'],
+    outfile: 'bundle/canvas-feedback-artifact-worker.cjs',
     external: ['sharp']
   }),
   build({

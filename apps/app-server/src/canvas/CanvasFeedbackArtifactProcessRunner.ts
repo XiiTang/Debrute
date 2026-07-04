@@ -1,16 +1,16 @@
 import { spawn } from 'node:child_process';
-import { fileURLToPath } from 'node:url';
 import { join } from 'node:path';
+import { fileURLToPath } from 'node:url';
 import {
   CanvasFeedbackRenderCancelledError,
   type CanvasFeedbackRenderRunner
-} from './CanvasFeedbackRenderedImageScheduler.js';
+} from './CanvasFeedbackArtifactScheduler.js';
 import type {
   CanvasFeedbackRenderJobInput,
   CanvasFeedbackRenderJobResult
-} from './CanvasFeedbackRenderedImageWorkerProtocol.js';
+} from './CanvasFeedbackArtifactWorkerProtocol.js';
 
-export interface CanvasFeedbackRenderedImageProcessRunnerOptions {
+export interface CanvasFeedbackArtifactProcessRunnerOptions {
   readonly workerPath?: string;
   readonly execArgv?: readonly string[];
 }
@@ -20,8 +20,8 @@ export interface CanvasFeedbackRenderWorkerPathInput {
   readonly moduleDirectory?: string | undefined;
 }
 
-export function createCanvasFeedbackRenderedImageProcessRunner(
-  options: CanvasFeedbackRenderedImageProcessRunnerOptions = {}
+export function createCanvasFeedbackArtifactProcessRunner(
+  options: CanvasFeedbackArtifactProcessRunnerOptions = {}
 ): CanvasFeedbackRenderRunner {
   const workerPath = options.workerPath ?? workerEntryPath();
   const execArgv = options.execArgv ?? (workerPath.endsWith('.ts') ? process.execArgv : []);
@@ -35,10 +35,10 @@ export function createCanvasFeedbackRenderedImageProcessRunner(
 export function resolveCanvasFeedbackRenderWorkerPath(input: CanvasFeedbackRenderWorkerPathInput): string {
   if (input.moduleUrl) {
     const extension = fileURLToPath(input.moduleUrl).endsWith('.ts') ? 'ts' : 'js';
-    return fileURLToPath(new URL(`./CanvasFeedbackRenderedImageWorker.${extension}`, input.moduleUrl));
+    return fileURLToPath(new URL(`./CanvasFeedbackArtifactWorker.${extension}`, input.moduleUrl));
   }
   if (input.moduleDirectory) {
-    return join(input.moduleDirectory, 'canvas-feedback-render-worker.cjs');
+    return join(input.moduleDirectory, 'canvas-feedback-artifact-worker.cjs');
   }
   throw new Error('Canvas feedback render worker path cannot be resolved.');
 }

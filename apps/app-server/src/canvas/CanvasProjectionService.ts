@@ -53,11 +53,16 @@ export class CanvasProjectionService {
           return node;
         }
         const inspection = inspectionByPath.get(node.projectRelativePath)!;
+        if (!inspection.videoMetadata) {
+          throw new Error(`Available video node is missing video metadata: ${node.projectRelativePath}`);
+        }
         return {
           ...node,
           videoPresentation: await buildCanvasVideoPresentation({
             projectRoot,
             projectRelativePath: node.projectRelativePath,
+            width: inspection.videoMetadata.width,
+            height: inspection.videoMetadata.height,
             durationSeconds: inspection.videoMetadata?.durationSeconds
           })
         };
@@ -271,7 +276,9 @@ function isCurrentCanvasNodeElement(value: unknown): value is CanvasNodeElement 
     && typeof value.z === 'number'
     && (value.layoutMode === undefined || value.layoutMode === 'manual')
     && (value.videoPlayback === undefined
-      || (value.nodeKind === 'file' && value.mediaKind === 'video' && isCurrentCanvasVideoPlaybackState(value.videoPlayback)));
+      || (value.nodeKind === 'file' && value.mediaKind === 'video' && isCurrentCanvasVideoPlaybackState(value.videoPlayback)))
+    && (value.textViewport === undefined
+      || (value.nodeKind === 'file' && value.mediaKind === 'text' && isCurrentCanvasTextViewportState(value.textViewport)));
 }
 
 function isCurrentCanvasVideoPlaybackState(value: unknown): value is NonNullable<CanvasNodeElement['videoPlayback']> {
@@ -280,6 +287,18 @@ function isCurrentCanvasVideoPlaybackState(value: unknown): value is NonNullable
     && typeof currentTimeSeconds === 'number'
     && Number.isFinite(currentTimeSeconds)
     && currentTimeSeconds >= 0;
+}
+
+function isCurrentCanvasTextViewportState(value: unknown): value is NonNullable<CanvasNodeElement['textViewport']> {
+  const scrollTop = isRecord(value) ? value.scrollTop : undefined;
+  const scrollLeft = isRecord(value) ? value.scrollLeft : undefined;
+  return isRecord(value)
+    && typeof scrollTop === 'number'
+    && Number.isFinite(scrollTop)
+    && scrollTop >= 0
+    && typeof scrollLeft === 'number'
+    && Number.isFinite(scrollLeft)
+    && scrollLeft >= 0;
 }
 
 function mimeTypeFromProjectPath(projectRelativePath: string, firstLine?: string): string {

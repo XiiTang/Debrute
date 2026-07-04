@@ -1,12 +1,12 @@
 import React, { useCallback, useEffect, useReducer, useRef, useState } from 'react';
 import { AlertTriangle, File, FileText, Folder, Image as ImageIcon, Maximize2, Music2, RefreshCw, Save } from 'lucide-react';
-import type { CanvasFeedbackEntry, CanvasFeedbackGeometry, ProjectedCanvasNode } from '@debrute/canvas-core';
+import type { CanvasFeedbackEntry, CanvasFeedbackGeometry, CanvasFeedbackSpatialItem, CanvasTextViewportState, ProjectedCanvasNode } from '@debrute/canvas-core';
 import type { TextFileBuffer, WorkbenchActions } from '../../types';
 import { CanvasTextEditor } from './CanvasTextEditor';
 import { CanvasVideoNodeContent } from './CanvasVideoNodeContent';
 import type { CanvasVideoPlayerHandle } from './CanvasVideoPlayerAdapter';
 import { useCanvasImageNodeAsset, type CanvasImageNodeAssetHookState } from './CanvasImageNodeAssetContext';
-import { CanvasImageFeedbackLayer, type CanvasImageFeedbackDraftRegion, type CanvasImageFeedbackMode } from './CanvasImageFeedbackLayer';
+import { CanvasMediaFeedbackLayer, type CanvasMediaFeedbackDraftRegion, type CanvasMediaFeedbackMode } from './CanvasMediaFeedbackLayer';
 import {
   canvasTextPreviewImageReducer,
   initialCanvasTextPreviewImageState,
@@ -19,6 +19,9 @@ import type { CanvasVideoPreviewSource } from './canvasVideoPreviews';
 import { preloadCanvasImageForHandoff } from './CanvasMediaHandoff';
 import { Button, IconButton, StatusPill } from '../ui';
 import { useI18n, type WorkbenchI18n } from '../i18n';
+
+const FIXED_NODE_PRESENTATION_SCALE = 10;
+const GENERIC_NODE_WRAP_VISUAL_HEIGHT = 88;
 
 export interface CanvasNodeContentProps {
   node: ProjectedCanvasNode;
@@ -33,8 +36,9 @@ export interface CanvasNodeContentProps {
   forceVideoPlayerMounted?: boolean | undefined;
   previewInteractionActive?: boolean | undefined;
   feedbackEntry?: CanvasFeedbackEntry | undefined;
-  localFeedbackMode?: CanvasImageFeedbackMode | undefined;
-  pendingFeedbackRegion?: CanvasImageFeedbackDraftRegion | undefined;
+  localFeedbackMode?: CanvasMediaFeedbackMode | undefined;
+  pendingFeedbackRegion?: CanvasMediaFeedbackDraftRegion | undefined;
+  activeFeedbackMomentTimeSeconds?: number | undefined;
   onLocalFeedbackDraft?: ((input: {
     projectRelativePath: string;
     geometry: CanvasFeedbackGeometry;
@@ -43,6 +47,7 @@ export interface CanvasNodeContentProps {
   onVideoPlayingChange: (projectRelativePath: string, playing: boolean) => void;
   onRegisterVideoTarget: (projectRelativePath: string, target: CanvasVideoPlayerHandle | undefined) => void;
   onUpdateVideoPlaybackTime: (projectRelativePath: string, currentTimeSeconds: number) => void | Promise<void>;
+  onUpdateTextViewport: (projectRelativePath: string, viewport: CanvasTextViewportState) => void | Promise<void>;
   onVideoPreviewError?: ((projectRelativePath: string, preview: CanvasVideoPreviewSource, message: string) => void) | undefined;
   onSelectNode: () => void;
   onTitlePointerDown: (event: React.PointerEvent<Element>) => void;
@@ -65,11 +70,13 @@ export function CanvasNodeContent({
   feedbackEntry,
   localFeedbackMode,
   pendingFeedbackRegion,
+  activeFeedbackMomentTimeSeconds,
   onLocalFeedbackDraft,
   onVideoPlayerMounted,
   onVideoPlayingChange,
   onRegisterVideoTarget,
   onUpdateVideoPlaybackTime,
+  onUpdateTextViewport,
   onVideoPreviewError,
   onSelectNode,
   onTitlePointerDown,
@@ -142,6 +149,7 @@ export function CanvasNodeContent({
         onTitlePointerDown={onTitlePointerDown}
         onTitlePointerMove={onTitlePointerMove}
         onTitlePointerUp={onTitlePointerUp}
+        onUpdateTextViewport={onUpdateTextViewport}
         i18n={i18n}
       />
     );
@@ -161,6 +169,11 @@ export function CanvasNodeContent({
         onRegisterVideoTarget={onRegisterVideoTarget}
         onUpdatePlaybackTime={onUpdateVideoPlaybackTime}
         onVideoPreviewError={onVideoPreviewError}
+        feedbackEntry={feedbackEntry}
+        localFeedbackMode={localFeedbackMode}
+        pendingFeedbackRegion={pendingFeedbackRegion}
+        activeFeedbackMomentTimeSeconds={activeFeedbackMomentTimeSeconds}
+        onLocalFeedbackDraft={(input) => onLocalFeedbackDraft?.(input)}
       />
     );
   }
@@ -176,8 +189,8 @@ export function CanvasNodeContent({
           {node.mediaKind === 'image' ? (
             <>
               <CanvasImageNodeContent node={node} culled={culled} />
-              <CanvasImageFeedbackLayer
-                entry={feedbackEntry}
+              <CanvasMediaFeedbackLayer
+                items={imageSpatialFeedbackItems(feedbackEntry)}
                 mode={localFeedbackMode}
                 draftRegion={pendingFeedbackRegion}
                 onRegionDraft={(geometry) => onLocalFeedbackDraft?.({
@@ -223,6 +236,12 @@ export function CanvasNodeContent({
       ) : null}
     </>
   );
+}
+
+function imageSpatialFeedbackItems(entry: CanvasFeedbackEntry | undefined): CanvasFeedbackSpatialItem[] {
+  return entry?.items.filter((item): item is CanvasFeedbackSpatialItem => (
+    (item.kind === 'pin' || item.kind === 'region') && item.scope === 'file'
+  )) ?? [];
 }
 
 export function canvasTextBufferEnsureKey(
@@ -330,23 +349,32 @@ function CanvasGenericNodeContent({
   i18n: WorkbenchI18n;
 }): React.ReactElement {
   const label = nodeDisplayName(node.projectRelativePath, i18n);
+  const className = [
+    'db-canvas-node-generic',
+    problem ? 'db-canvas-node-generic--problem' : '',
+    genericNodeAllowsLabelWrap(node) ? 'db-canvas-node-generic--wrap' : ''
+  ].filter(Boolean).join(' ');
   if (problem) {
     return (
-      <div className="db-canvas-node-generic db-canvas-node-generic--problem">
+      <div className={className}>
         <AlertTriangle size={20} />
         <strong>{problem.title}</strong>
         <span>{problem.message}</span>
-        <span>{label}</span>
+        <span className="db-canvas-node-generic__label">{label}</span>
       </div>
     );
   }
 
   return (
-    <div className="db-canvas-node-generic">
+    <div className={className}>
       {node.nodeKind === 'directory' ? <Folder size={20} /> : <File size={20} />}
-      <strong>{label}</strong>
+      <strong className="db-canvas-node-generic__label">{label}</strong>
     </div>
   );
+}
+
+function genericNodeAllowsLabelWrap(node: Pick<ProjectedCanvasNode, 'height'>): boolean {
+  return node.height / FIXED_NODE_PRESENTATION_SCALE >= GENERIC_NODE_WRAP_VISUAL_HEIGHT;
 }
 
 function CanvasNodeMediaErrorOverlay({
@@ -416,6 +444,7 @@ function CanvasTextNodeContent({
   onTitlePointerDown,
   onTitlePointerMove,
   onTitlePointerUp,
+  onUpdateTextViewport,
   i18n
 }: {
   node: ProjectedCanvasNode;
@@ -431,19 +460,26 @@ function CanvasTextNodeContent({
   onTitlePointerDown: (event: React.PointerEvent<Element>) => void;
   onTitlePointerMove: (event: React.PointerEvent<Element>) => void;
   onTitlePointerUp: (event: React.PointerEvent<Element>) => void;
+  onUpdateTextViewport: (projectRelativePath: string, viewport: CanvasTextViewportState) => void | Promise<void>;
   i18n: WorkbenchI18n;
 }): React.ReactElement {
   const { registerTextBody } = useCanvasTextPreviewRuntime();
   const active = selected;
+  const [visibleTextLayer, setVisibleTextLayer] = useState<'editor' | 'preview'>(() => active ? 'editor' : 'preview');
   const nextFocusRequestIdRef = useRef(0);
   const [focusRequest, setFocusRequest] = useState<CanvasTextEditorFocusRequest>();
-  const [textPreviewVariantError, setTextPreviewVariantError] = useState<string>();
-  const textPreviewProblemMessage = textPreviewError ?? textPreviewVariantError;
+  const [textPreviewImageError, setTextPreviewImageError] = useState<string>();
+  const [textPreviewUpgradeError, setTextPreviewUpgradeError] = useState<string>();
+  const textPreviewProblemMessage = textPreviewError ?? textPreviewImageError;
   const textPreviewProblem = !active && textPreviewProblemMessage
     ? { title: i18n.t('canvas.node.textPreviewError'), message: textPreviewProblemMessage }
     : undefined;
-  const bodyProblem = problem ?? textPreviewProblem;
-  const status = textBufferStatus(buffer, bodyProblem, i18n);
+  const textPreviewUpgradeProblem = !active && textPreviewUpgradeError
+    ? { title: i18n.t('canvas.node.textPreviewError'), message: textPreviewUpgradeError }
+    : undefined;
+  const bodyProblem = problem ?? (visibleTextLayer === 'preview' ? textPreviewProblem : undefined);
+  const handoffProblem = visibleTextLayer === 'editor' ? textPreviewProblem : undefined;
+  const status = textBufferStatus(buffer, problem ?? textPreviewProblem ?? textPreviewUpgradeProblem, i18n);
   const [textPreviewImageState, dispatchTextPreviewImage] = useReducer(
     canvasTextPreviewImageReducer,
     textPreview,
@@ -469,15 +505,49 @@ function CanvasTextNodeContent({
       clientY: event.clientY
     };
   };
-  const reportTextPreviewVariantError = useCallback(() => {
-    setTextPreviewVariantError(i18n.t('canvas.node.textPreviewVariantLoadError', {
-      path: node.projectRelativePath
-    }));
-  }, [i18n, node.projectRelativePath]);
+  const formatTextPreviewVariantError = useCallback(() => i18n.t('canvas.node.textPreviewVariantLoadError', {
+    path: node.projectRelativePath
+  }), [i18n, node.projectRelativePath]);
+  const reportTextPreviewImageError = useCallback(() => {
+    setTextPreviewImageError(formatTextPreviewVariantError());
+  }, [formatTextPreviewVariantError]);
+  const reportTextPreviewUpgradeError = useCallback(() => {
+    setTextPreviewUpgradeError(formatTextPreviewVariantError());
+  }, [formatTextPreviewVariantError]);
+  const commitTextViewport = useCallback((viewport: CanvasTextViewportState) => {
+    const current = node.textViewport ?? { scrollTop: 0, scrollLeft: 0 };
+    if (current.scrollTop === viewport.scrollTop && current.scrollLeft === viewport.scrollLeft) {
+      return;
+    }
+    void onUpdateTextViewport(node.projectRelativePath, viewport);
+  }, [
+    node.projectRelativePath,
+    node.textViewport,
+    onUpdateTextViewport
+  ]);
 
   useEffect(() => {
-    setTextPreviewVariantError(undefined);
+    setTextPreviewImageError(undefined);
+    setTextPreviewUpgradeError(undefined);
   }, [node.projectRelativePath, textPreview?.src]);
+
+  const textPreviewContentIdentityKey = canvasTextPreviewContentIdentityKey(node, buffer);
+  const textPreviewContentIdentityKeyRef = useRef(textPreviewContentIdentityKey);
+  useEffect(() => {
+    if (textPreviewContentIdentityKeyRef.current === textPreviewContentIdentityKey) {
+      return;
+    }
+    textPreviewContentIdentityKeyRef.current = textPreviewContentIdentityKey;
+    setTextPreviewImageError(undefined);
+    setTextPreviewUpgradeError(undefined);
+    dispatchTextPreviewImage({ type: 'source-invalidated' });
+  }, [textPreviewContentIdentityKey]);
+
+  useEffect(() => {
+    if (active) {
+      setVisibleTextLayer('editor');
+    }
+  }, [active]);
 
   useEffect(() => {
     dispatchTextPreviewImage({ type: 'source-resolved', source: textPreview });
@@ -490,7 +560,7 @@ function CanvasTextNodeContent({
   }, [previewInteractionActive]);
 
   useEffect(() => {
-    if (!nextTextPreview) {
+    if (!nextTextPreview || visibleTextLayer === 'editor') {
       return undefined;
     }
     return preloadCanvasImageForHandoff({
@@ -498,10 +568,43 @@ function CanvasTextNodeContent({
       resolveLoaded: (loadKey) => dispatchTextPreviewImage({ type: 'next-loaded', loadKey }),
       rejectLoaded: (loadKey) => {
         dispatchTextPreviewImage({ type: 'next-failed', loadKey });
-        reportTextPreviewVariantError();
+        reportTextPreviewUpgradeError();
       }
     });
-  }, [nextTextPreview, reportTextPreviewVariantError]);
+  }, [nextTextPreview, reportTextPreviewUpgradeError, visibleTextLayer]);
+
+  useEffect(() => {
+    if (active || visibleTextLayer !== 'editor' || !textPreview || textPreviewProblemMessage) {
+      return undefined;
+    }
+    const loadKey = textPreview.src;
+    return preloadCanvasImageForHandoff({
+      image: {
+        ...textPreview,
+        loadKey
+      },
+      resolveLoaded: (resolvedLoadKey) => {
+        if (resolvedLoadKey === loadKey) {
+          dispatchTextPreviewImage({ type: 'next-loaded', loadKey: resolvedLoadKey });
+          setVisibleTextLayer('preview');
+        }
+      },
+      rejectLoaded: (rejectedLoadKey) => {
+        if (rejectedLoadKey === loadKey) {
+          dispatchTextPreviewImage({ type: 'next-failed', loadKey: rejectedLoadKey });
+          reportTextPreviewImageError();
+        }
+      }
+    });
+  }, [
+    active,
+    reportTextPreviewImageError,
+    textPreview,
+    textPreviewProblemMessage,
+    visibleTextLayer
+  ]);
+
+  const showTextEditor = Boolean(buffer && (active || visibleTextLayer === 'editor'));
 
   return (
     <section className="canvas-text-node">
@@ -553,25 +656,47 @@ function CanvasTextNodeContent({
             <strong>{bodyProblem?.title ?? i18n.t('canvas.node.textError')}</strong>
             <span>{bodyProblem?.message ?? buffer?.error}</span>
           </div>
-        ) : buffer && active ? (
-          <CanvasTextEditor
-            value={buffer.content}
-            language={buffer.language}
-            wordWrap={buffer.wordWrap}
-            visible={!culled || selected}
-            focusRequest={focusRequest}
-            onChange={(content) => actions.updateTextFileBuffer(node.projectRelativePath, content)}
-            onSave={() => void actions.saveTextFileBuffer(node.projectRelativePath)}
-            onToggleWordWrap={() => actions.toggleTextFileWordWrap(node.projectRelativePath)}
-            onFocusRequestConsumed={(requestId) => {
-              setFocusRequest((current) => current?.requestId === requestId ? undefined : current);
-            }}
-          />
+        ) : buffer && showTextEditor ? (
+          <>
+            <CanvasTextEditor
+              value={buffer.content}
+              language={buffer.language}
+              wordWrap={buffer.wordWrap}
+              readOnly={!active}
+              visible={!culled || selected}
+              focusRequest={active ? focusRequest : undefined}
+              initialScrollTop={node.textViewport?.scrollTop}
+              initialScrollLeft={node.textViewport?.scrollLeft}
+              onChange={(content) => actions.updateTextFileBuffer(node.projectRelativePath, content)}
+              onSave={() => void actions.saveTextFileBuffer(node.projectRelativePath)}
+              onToggleWordWrap={() => actions.toggleTextFileWordWrap(node.projectRelativePath)}
+              onScrollPositionCommit={commitTextViewport}
+              onFocusRequestConsumed={(requestId) => {
+                setFocusRequest((current) => current?.requestId === requestId ? undefined : current);
+              }}
+            />
+            {handoffProblem ? (
+              <div className="canvas-text-message canvas-text-message--overlay">
+                <AlertTriangle size={18} />
+                <strong>{handoffProblem.title}</strong>
+                <span>{handoffProblem.message}</span>
+              </div>
+            ) : null}
+          </>
         ) : buffer ? (
-          <CanvasTextPreviewImage
-            state={textPreviewImageState}
-            onError={reportTextPreviewVariantError}
-          />
+          <>
+            <CanvasTextPreviewImage
+              state={textPreviewImageState}
+              onError={reportTextPreviewImageError}
+            />
+            {textPreviewUpgradeProblem ? (
+              <div className="canvas-text-message canvas-text-message--overlay">
+                <AlertTriangle size={18} />
+                <strong>{textPreviewUpgradeProblem.title}</strong>
+                <span>{textPreviewUpgradeProblem.message}</span>
+              </div>
+            ) : null}
+          </>
         ) : (
           <div className="canvas-text-preview-empty" aria-hidden="true" />
         )}
@@ -601,6 +726,24 @@ function CanvasTextPreviewImage({
       onError={onError}
     />
   );
+}
+
+function canvasTextPreviewContentIdentityKey(
+  node: ProjectedCanvasNode,
+  buffer: TextFileBuffer | undefined
+): string {
+  return JSON.stringify([
+    node.projectRelativePath,
+    node.availability.state === 'available' ? node.availability.revision : node.availability.state,
+    node.width,
+    node.height,
+    node.textViewport?.scrollTop ?? 0,
+    node.textViewport?.scrollLeft ?? 0,
+    buffer?.content,
+    buffer?.language,
+    buffer?.wordWrap,
+    buffer?.error
+  ]);
 }
 
 function textBufferStatus(

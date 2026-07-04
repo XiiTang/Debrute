@@ -38,7 +38,6 @@ button {
 
 ::selection {
   background: var(--db-selection-muted);
-  color: var(--db-text);
 }
 
 * {

@@ -105,7 +105,7 @@ describe('CanvasTextPreviewCapture', () => {
     });
 
     await expect(sha256({
-      visualVersion: 'canvas-text-preview-v5',
+      visualVersion: 'canvas-text-preview-v11',
       content: 'hello',
       language: 'markdown',
       wordWrap: true,

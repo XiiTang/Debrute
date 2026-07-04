@@ -19,11 +19,15 @@ describe('CanvasVideoPresentationService', () => {
       const presentation = await buildCanvasVideoPresentation({
         projectRoot,
         projectRelativePath: 'media/clip.mp4',
+        width: 640,
+        height: 360,
         durationSeconds: 5
       });
 
       expect(presentation).not.toHaveProperty('poster');
       expect(presentation.kind).toBe('video');
+      expect(presentation.width).toBe(640);
+      expect(presentation.height).toBe(360);
       expect(presentation.durationSeconds).toBe(5);
       expect(presentation.textTracks).toEqual([
         expect.objectContaining({ projectRelativePath: 'media/clip.en.captions.vtt', kind: 'captions', srclang: 'en', default: false }),
@@ -47,7 +51,9 @@ describe('CanvasVideoPresentationService', () => {
 
       await expect(buildCanvasVideoPresentation({
         projectRoot,
-        projectRelativePath: 'media/clip.mp4'
+        projectRelativePath: 'media/clip.mp4',
+        width: 640,
+        height: 360
       })).rejects.toThrow('Project path escapes project root through a symlink: media/clip.en.captions.vtt');
     } finally {
       await rm(projectRoot, { recursive: true, force: true });

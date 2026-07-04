@@ -4,6 +4,7 @@ import {
   normalizeCanvasFeedbackProjectRelativePath,
   updateCanvasFeedbackEntry,
   type CanvasFeedbackDocument,
+  type CanvasFeedbackItem,
   type CanvasMediaKind,
   type UpdateCanvasFeedbackEntryInput
 } from '@debrute/canvas-core';
@@ -11,7 +12,7 @@ import { readFile } from 'node:fs/promises';
 import { resolveProjectPath, resolveProjectPathForWrite } from '@debrute/project-core';
 import { commitProjectDocumentTransaction, projectDocumentTextHash } from '../project-documents/ProjectDocumentTransaction.js';
 import { canvasMediaKindFromPath } from './CanvasProjectionService.js';
-import type { CanvasFeedbackRenderScheduler } from './CanvasFeedbackRenderedImageScheduler.js';
+import type { CanvasFeedbackRenderScheduler } from './CanvasFeedbackArtifactScheduler.js';
 
 const CANVAS_FEEDBACK_PROJECT_PATH = '.debrute/reviews/canvas-feedback.json';
 
@@ -56,7 +57,7 @@ export function createCanvasFeedbackService(options: CanvasFeedbackServiceOption
         const current = await readCanvasFeedbackState(projectRoot, now, readStructuredDocument);
         const next = updateCanvasFeedbackEntry(current.document, input, now());
         const projectRelativePath = normalizeCanvasFeedbackProjectRelativePath(input.projectRelativePath);
-        await assertCanvasFeedbackDocumentLocalRegionsTargetImages({
+        await assertCanvasFeedbackDocumentItemsTargetSupportedMedia({
           projectRoot,
           document: next,
           projectMediaKindForPath
@@ -83,7 +84,7 @@ export function createCanvasFeedbackService(options: CanvasFeedbackServiceOption
 
     async queueRenderedFeedbackDocument(projectRoot) {
       const current = await readCanvasFeedbackState(projectRoot, now, readStructuredDocument);
-      await assertCanvasFeedbackDocumentLocalRegionsTargetImages({
+      await assertCanvasFeedbackDocumentItemsTargetSupportedMedia({
         projectRoot,
         document: current.document,
         projectMediaKindForPath
@@ -96,7 +97,7 @@ export function createCanvasFeedbackService(options: CanvasFeedbackServiceOption
 
     async queueRenderedFeedbackForSource(projectRoot, projectRelativePath) {
       const current = await readCanvasFeedbackState(projectRoot, now, readStructuredDocument);
-      await assertCanvasFeedbackDocumentLocalRegionsTargetImages({
+      await assertCanvasFeedbackDocumentItemsTargetSupportedMedia({
         projectRoot,
         document: current.document,
         projectMediaKindForPath
@@ -112,19 +113,22 @@ export function createCanvasFeedbackService(options: CanvasFeedbackServiceOption
 }
 
 function canvasFeedbackMutationAffectsRenderedArtifact(input: UpdateCanvasFeedbackEntryInput): boolean {
-  if (input.operation === 'add-region' || input.operation === 'delete-region') {
+  if (input.operation === 'add-item') {
+    return input.item.scope === 'moment' || input.item.kind === 'pin' || input.item.kind === 'region';
+  }
+  if (input.operation === 'delete-item') {
     return true;
   }
-  return input.operation === 'update-region' && input.geometry !== undefined;
+  return input.operation === 'update-item' && input.geometry !== undefined;
 }
 
-async function assertCanvasFeedbackDocumentLocalRegionsTargetImages(input: {
+async function assertCanvasFeedbackDocumentItemsTargetSupportedMedia(input: {
   projectRoot: string;
   document: CanvasFeedbackDocument;
   projectMediaKindForPath: (projectRoot: string, projectRelativePath: string) => CanvasMediaKind | Promise<CanvasMediaKind>;
 }): Promise<void> {
   for (const projectRelativePath of Object.keys(input.document.entries)) {
-    await assertCanvasFeedbackLocalRegionsTargetImage({
+    await assertCanvasFeedbackItemsTargetSupportedMedia({
       projectRoot: input.projectRoot,
       document: input.document,
       projectRelativePath,
@@ -133,19 +137,32 @@ async function assertCanvasFeedbackDocumentLocalRegionsTargetImages(input: {
   }
 }
 
-async function assertCanvasFeedbackLocalRegionsTargetImage(input: {
+async function assertCanvasFeedbackItemsTargetSupportedMedia(input: {
   projectRoot: string;
   document: CanvasFeedbackDocument;
   projectRelativePath: string;
   projectMediaKindForPath: (projectRoot: string, projectRelativePath: string) => CanvasMediaKind | Promise<CanvasMediaKind>;
 }): Promise<void> {
   const entry = input.document.entries[input.projectRelativePath];
-  if (!entry || entry.regions.length === 0) {
+  if (!entry || entry.items.length === 0) {
     return;
   }
   const mediaKind = await input.projectMediaKindForPath(input.projectRoot, input.projectRelativePath);
-  if (mediaKind !== 'image') {
-    throw new Error(`Canvas feedback local regions require an image file: ${input.projectRelativePath}`);
+  for (const item of entry.items) {
+    assertCanvasFeedbackItemTargetsSupportedMedia(input.projectRelativePath, mediaKind, item);
+  }
+}
+
+function assertCanvasFeedbackItemTargetsSupportedMedia(
+  projectRelativePath: string,
+  mediaKind: CanvasMediaKind,
+  item: CanvasFeedbackItem
+): void {
+  if ((item.kind === 'pin' || item.kind === 'region') && item.scope === 'file' && mediaKind !== 'image') {
+    throw new Error(`Canvas feedback file-scope spatial items require an image file: ${projectRelativePath}`);
+  }
+  if (item.scope === 'moment' && mediaKind !== 'video') {
+    throw new Error(`Canvas feedback moment items require a video file: ${projectRelativePath}`);
   }
 }
 

@@ -1,4 +1,4 @@
-import type { CanvasMediaKind } from '@debrute/canvas-core';
+import type { CanvasMediaKind, CanvasNodeKind } from '@debrute/canvas-core';
 import type { CanvasPoint, CanvasRect, ResizeHandle } from '../canvas/runtime/canvasGeometry';
 import { rectsIntersect } from '../canvas/runtime/canvasGeometry';
 
@@ -15,6 +15,11 @@ export interface NormalizedCanvasWheelDelta {
   x: number;
   y: number;
   z: number;
+}
+
+export interface CanvasResizeTarget {
+  nodeKind: CanvasNodeKind;
+  mediaKind?: CanvasMediaKind;
 }
 
 const MAX_WHEEL_ZOOM_STEP = 10;
@@ -89,12 +94,14 @@ export function shouldCanvasHandleGlobalWheelTarget(
 export function getCanvasResizePreserveAspect(
   handle: ResizeHandle,
   event: Pick<MouseEvent | PointerEvent, 'shiftKey'>,
-  mediaKind?: CanvasMediaKind
+  target: CanvasResizeTarget
 ): boolean {
   if (handle.length !== 2) {
     return false;
   }
-  return mediaKind === 'text' ? event.shiftKey : !event.shiftKey;
+  return target.nodeKind === 'directory' || target.mediaKind === 'text' || target.mediaKind === 'unknown'
+    ? event.shiftKey
+    : !event.shiftKey;
 }
 
 export function buildResizeGeometry(

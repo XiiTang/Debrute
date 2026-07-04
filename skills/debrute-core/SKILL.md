@@ -112,7 +112,7 @@ When output paths are known before generation starts, add matching literal file/
 
 ## Canvas Feedback
 
-Canvas file-asset feedback is stored as current state in:
+Canvas feedback is stored as current state in:
 
 ```text
 .debrute/reviews/canvas-feedback.json
@@ -120,28 +120,38 @@ Canvas file-asset feedback is stored as current state in:
 
 Missing file means there is no Canvas feedback. Entries are keyed by project-relative path. The `marks` array contains only selected marks; unselected marks are absent. The mark set is `like`, `dislike`, `check`, `cross`, `pending`, `important`, and `needs_revision`.
 
-Image entries can contain local feedback regions:
+Entries use one unified `items` array for file-level comments, image spatial items, and video moment items:
 
 ```json
 {
   "projectRelativePath": "assets/page.png",
   "marks": ["needs_revision"],
-  "note": "overall note",
-  "nextRegionLabel": 3,
-  "regions": [
+  "nextMomentLabel": 2,
+  "nextSpatialLabel": 3,
+  "items": [
     {
-      "id": "region-1",
-      "label": 1,
+      "id": "item-file-comment",
+      "kind": "comment",
+      "scope": "file",
+      "comment": "overall note",
+      "createdAt": "2026-06-21T12:00:00.000Z",
+      "updatedAt": "2026-06-21T12:00:00.000Z"
+    },
+    {
+      "id": "item-pin-1",
       "kind": "pin",
+      "scope": "file",
+      "label": 1,
       "geometry": { "type": "point", "x": 0.42, "y": 0.31 },
       "comment": "face is blurry",
       "createdAt": "2026-06-21T12:00:00.000Z",
       "updatedAt": "2026-06-21T12:00:00.000Z"
     },
     {
-      "id": "region-2",
-      "label": 2,
+      "id": "item-rect-2",
       "kind": "region",
+      "scope": "file",
+      "label": 2,
       "geometry": { "type": "rect", "x": 0.1, "y": 0.55, "width": 0.32, "height": 0.18 },
       "comment": "make this background brighter",
       "createdAt": "2026-06-21T12:00:00.000Z",
@@ -152,7 +162,7 @@ Image entries can contain local feedback regions:
 }
 ```
 
-Local feedback geometry is normalized to image content, not Canvas screen position. Rectangle geometry uses a normalized bounding box. Use the rendered annotated image to understand the visual location. For an image at project-relative path:
+Spatial feedback geometry is normalized to media content, not Canvas screen position. Rectangle geometry uses a normalized bounding box. Use the rendered annotated image to understand the visual location. For an image at project-relative path:
 
 ```text
 <projectRelativePath>
@@ -164,17 +174,13 @@ the rendered annotated image is:
 .debrute/reviews/rendered-feedback/<projectRelativePath>.annotated.png
 ```
 
-Example:
+For a video moment item, the rendered annotated image is:
 
 ```text
-Source image:
-拼接图/韩语翻译-liked-page1-8-右到左.png
-
-Rendered feedback image:
-.debrute/reviews/rendered-feedback/拼接图/韩语翻译-liked-page1-8-右到左.png.annotated.png
+.debrute/reviews/rendered-feedback/<projectRelativePath>.moment-<M#>.annotated.png
 ```
 
-The rendered image shows only numbered pins and rectangle outlines. Match each visible number to `regions[].label`; comments are in JSON and are intentionally not rendered into the image.
+The rendered image shows only numbered pins and rectangle outlines. Match each visible number to the `label` on spatial `items`. Comment text is in JSON and is intentionally not rendered into the image. Moment labels are `M#`; moment frames provide timestamp context but do not burn the moment label into the image.
 
 No dedicated Canvas feedback CLI exists. Read `.debrute/reviews/canvas-feedback.json` and rendered annotated images with the external Agent's filesystem tools when appropriate.
 

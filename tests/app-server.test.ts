@@ -488,24 +488,24 @@ describe('app-server', () => {
       expect(first.entries['flow/a.png']).toMatchObject({
         projectRelativePath: 'flow/a.png',
         marks: ['like', 'cross'],
-        comments: [],
-        nextRegionLabel: 1,
-        regions: []
+        nextMomentLabel: 1,
+        nextSpatialLabel: 1,
+        items: []
       });
       expect(second.entries['flow/a.png']).toBeDefined();
       expect(second.entries['flow/b.png']).toMatchObject({
         marks: ['needs_revision'],
-        comments: [],
-        nextRegionLabel: 1,
-        regions: []
+        nextMomentLabel: 1,
+        nextSpatialLabel: 1,
+        items: []
       });
       expect(cleared.entries['flow/a.png']).toBeUndefined();
       expect(cleared.entries['flow/b.png']).toMatchObject({
         projectRelativePath: 'flow/b.png',
         marks: ['needs_revision'],
-        comments: [],
-        nextRegionLabel: 1,
-        regions: []
+        nextMomentLabel: 1,
+        nextSpatialLabel: 1,
+        items: []
       });
       expect(await readJson(join(projectRoot, '.debrute/reviews/canvas-feedback.json'))).toEqual(cleared);
     } finally {
@@ -526,9 +526,13 @@ describe('app-server', () => {
       const unsubscribe = server.onEvent((event) => events.push(event));
 
       await server.updateCanvasFeedbackEntry({
-        operation: 'add-comment',
+        operation: 'add-item',
         projectRelativePath: 'brief.md',
-        comment: 'Use this direction'
+        item: {
+          kind: 'comment',
+          scope: 'file',
+          comment: 'Use this direction'
+        }
       });
       unsubscribe();
 
@@ -539,9 +543,13 @@ describe('app-server', () => {
             'brief.md': {
               projectRelativePath: 'brief.md',
               marks: [],
-              comments: [expect.objectContaining({ comment: 'Use this direction' })],
-              nextRegionLabel: 1,
-              regions: []
+              nextMomentLabel: 1,
+              nextSpatialLabel: 1,
+              items: [expect.objectContaining({
+                kind: 'comment',
+                scope: 'file',
+                comment: 'Use this direction'
+              })]
             }
           }
         }

@@ -1,8 +1,8 @@
-import { renderCanvasFeedbackAnnotatedImage } from './CanvasFeedbackRenderedImageService.js';
+import { renderCanvasFeedbackArtifact } from './CanvasFeedbackArtifactService.js';
 import type {
   CanvasFeedbackRenderJobInput,
   CanvasFeedbackRenderJobResult
-} from './CanvasFeedbackRenderedImageWorkerProtocol.js';
+} from './CanvasFeedbackArtifactWorkerProtocol.js';
 
 void main();
 
@@ -12,7 +12,7 @@ async function main(): Promise<void> {
   try {
     const input = JSON.parse(inputText) as CanvasFeedbackRenderJobInput;
     jobId = input.jobId;
-    const result = await renderCanvasFeedbackAnnotatedImage(input);
+    const result = await renderCanvasFeedbackArtifact(input);
     writeResult(result);
   } catch (error) {
     writeResult({

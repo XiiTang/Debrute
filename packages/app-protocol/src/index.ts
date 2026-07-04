@@ -385,6 +385,15 @@ export interface UpdateCanvasVideoPlaybackStateInput {
   }>;
 }
 
+export interface UpdateCanvasTextViewportStateInput {
+  canvasId: string;
+  updates: Array<{
+    projectRelativePath: string;
+    scrollTop: number;
+    scrollLeft: number;
+  }>;
+}
+
 export interface ImageModelSettingRecord {
   debruteModelId: string;
   summary: string;
@@ -1121,6 +1130,7 @@ export interface WorkbenchApiClient {
     nodeLayouts?: Array<{ projectRelativePath: string; x: number; y: number; width?: number; height?: number }>;
   }): Promise<WorkbenchCanvasDocumentMutationResult>;
   updateCanvasVideoPlaybackState(input: UpdateCanvasVideoPlaybackStateInput): Promise<WorkbenchCanvasDocumentMutationResult>;
+  updateCanvasTextViewportState(input: UpdateCanvasTextViewportStateInput): Promise<WorkbenchCanvasDocumentMutationResult>;
   resetCanvasNodeLayouts(input: ResetCanvasNodeLayoutsInput): Promise<WorkbenchCanvasResetLayoutResult>;
   updateCanvasNodeLayers(input: {
     canvasId: string;

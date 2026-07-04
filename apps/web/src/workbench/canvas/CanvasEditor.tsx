@@ -1,13 +1,13 @@
 import React from 'react';
 import { Boxes } from 'lucide-react';
-import type { ProjectedCanvasNode } from '@debrute/canvas-core';
+import type { CanvasFeedbackGeometry, ProjectedCanvasNode } from '@debrute/canvas-core';
 import type { WorkbenchActions, WorkbenchState } from '../../types';
 import type { WorkbenchContextMenuPosition, WorkbenchContextMenuTarget } from '../shell/contextMenu';
 import type { CanvasFeedbackBarTarget, CanvasLocalFeedbackDraft, FloatingBarRect } from '../shell/floatingBars';
 import { getCanvasById } from '../services/canvasState';
 import { CanvasSurface } from './CanvasSurface';
 import type { CanvasOverlayRuntime } from './CanvasOverlayRuntime';
-import type { CanvasImageFeedbackDraftRegion, CanvasImageFeedbackMode } from './CanvasImageFeedbackLayer';
+import type { CanvasMediaFeedbackMode } from './CanvasMediaFeedbackLayer';
 import type { CanvasEditorRuntime } from './runtime/CanvasEditorRuntime';
 import { createCanvasEditorRuntime } from './runtime/CanvasEditorRuntime';
 import { ProjectOpenPanel } from '../project-open/ProjectOpenPanel';
@@ -25,7 +25,7 @@ export function CanvasEditor({
   onRuntimeChange,
   onOpenContextMenu,
   localFeedbackMode,
-  pendingFeedbackRegion,
+  pendingFeedbackItem,
   onLocalFeedbackDraft
 }: {
   canvasId: string | undefined;
@@ -42,8 +42,14 @@ export function CanvasEditor({
   onFeedbackBarTargetChange?: ((target: CanvasFeedbackBarTarget | undefined) => void) | undefined;
   onRuntimeChange?: ((runtime: CanvasEditorRuntime | undefined) => void) | undefined;
   onOpenContextMenu?: ((target: WorkbenchContextMenuTarget, position: WorkbenchContextMenuPosition) => void) | undefined;
-  localFeedbackMode?: CanvasImageFeedbackMode | undefined;
-  pendingFeedbackRegion?: { projectRelativePath: string } & CanvasImageFeedbackDraftRegion | undefined;
+  localFeedbackMode?: CanvasMediaFeedbackMode | undefined;
+  pendingFeedbackItem?: {
+    projectRelativePath: string;
+    scope: 'file' | 'moment';
+    momentTimeSeconds?: number | undefined;
+    label?: number | string | undefined;
+    geometry?: CanvasFeedbackGeometry | undefined;
+  } | undefined;
   onLocalFeedbackDraft?: ((input: CanvasLocalFeedbackDraft) => void) | undefined;
 }): React.ReactElement {
   const canvas = getCanvasById(state.snapshot, canvasId);
@@ -100,7 +106,7 @@ export function CanvasEditor({
         textFileBuffers={state.textFileBuffers}
         canvasFeedback={state.canvasFeedback}
         localFeedbackMode={localFeedbackMode}
-        pendingFeedbackRegion={pendingFeedbackRegion}
+        pendingFeedbackItem={pendingFeedbackItem}
         onLocalFeedbackDraft={onLocalFeedbackDraft}
         overlayRuntime={overlayRuntime}
         minimapOpen={minimapOpen}

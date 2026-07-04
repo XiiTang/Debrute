@@ -23,6 +23,7 @@ describe('canvas-core', () => {
 
     expect(canvas).toEqual({
       id: 'main',
+      name: 'main',
       nodeElements: [],
       annotations: [],
       preferences: { showDiagnostics: true }
@@ -589,9 +590,9 @@ describe('canvas-core', () => {
         'flow/a.png': {
           projectRelativePath: 'flow/a.png',
           marks: ['needs_revision', 'like', 'like', 'check'],
-          comments: [],
-          nextRegionLabel: 1,
-          regions: [],
+          nextMomentLabel: 1,
+          nextSpatialLabel: 1,
+          items: [],
           updatedAt: '2026-05-26T12:00:00.000Z'
         }
       }
@@ -609,9 +610,9 @@ describe('canvas-core', () => {
     expect(normalized.entries['flow/a.png']).toEqual({
       projectRelativePath: 'flow/a.png',
       marks: ['like', 'check', 'needs_revision'],
-      comments: [],
-      nextRegionLabel: 1,
-      regions: [],
+      nextMomentLabel: 1,
+      nextSpatialLabel: 1,
+      items: [],
       updatedAt: '2026-05-26T12:00:00.000Z'
     });
   });
@@ -630,9 +631,9 @@ describe('canvas-core', () => {
         'flow/a.png': {
           projectRelativePath: 'flow/a.png',
           marks: ['like', 'cross'],
-          comments: [],
-          nextRegionLabel: 1,
-          regions: [],
+          nextMomentLabel: 1,
+          nextSpatialLabel: 1,
+          items: [],
           updatedAt: '2026-05-26T12:01:00.000Z'
         }
       }
@@ -657,9 +658,9 @@ describe('canvas-core', () => {
         'flow/a.png': {
           projectRelativePath: 'flow/a.png',
           marks: ['unknown'],
-          comments: [],
-          nextRegionLabel: 1,
-          regions: [],
+          nextMomentLabel: 1,
+          nextSpatialLabel: 1,
+          items: [],
           updatedAt: '2026-05-26T12:00:00.000Z'
         }
       }
@@ -671,9 +672,9 @@ describe('canvas-core', () => {
         'flow/a.png': {
           projectRelativePath: 'flow/b.png',
           marks: ['like'],
-          comments: [],
-          nextRegionLabel: 1,
-          regions: [],
+          nextMomentLabel: 1,
+          nextSpatialLabel: 1,
+          items: [],
           updatedAt: '2026-05-26T12:00:00.000Z'
         }
       }

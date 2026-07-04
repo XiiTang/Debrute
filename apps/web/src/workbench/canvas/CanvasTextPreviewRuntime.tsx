@@ -1,4 +1,5 @@
 import React, { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState } from 'react';
+import { createPortal } from 'react-dom';
 import {
   canvasRasterPreviewWidth,
   type ProjectedCanvasNode
@@ -24,14 +25,14 @@ import {
   type CanvasPerfMonitor
 } from './CanvasPerfMonitor';
 
-const CANVAS_TEXT_PREVIEW_SOURCE_CONCURRENCY = 1;
-const CANVAS_TEXT_PREVIEW_CAPTURE_LAYOUT_MAX_FRAMES = 12;
+const CANVAS_TEXT_PREVIEW_SOURCE_CONCURRENCY = 3;
 const CANVAS_TEXT_PREVIEW_CAPTURE_LAYOUT_TOP_TOLERANCE_PX = 0.5;
-const CANVAS_TEXT_PREVIEW_CAPTURE_LAYOUT_ERROR = 'Canvas text preview CodeMirror layout did not settle before capture.';
+const CANVAS_TEXT_PREVIEW_CAPTURE_SCROLLER_ERROR = 'Canvas text preview capture target is missing CodeMirror scroller.';
 
 export interface CanvasTextPreviewSource {
   src: string;
   previewWidth: number;
+  fingerprint: string;
 }
 
 export type CanvasLoadedTextPreviewSource = CanvasTextPreviewSource & {
@@ -45,6 +46,7 @@ export interface CanvasTextPreviewImageState {
 
 export type CanvasTextPreviewImageEvent =
   | { type: 'source-resolved'; source: CanvasTextPreviewSource | undefined }
+  | { type: 'source-invalidated' }
   | { type: 'next-loaded'; loadKey: string }
   | { type: 'next-failed'; loadKey: string }
   | { type: 'interaction-started' };
@@ -52,8 +54,6 @@ export type CanvasTextPreviewImageEvent =
 export interface CanvasTextPreviewMeasuredBody {
   width: number;
   height: number;
-  scrollTop: number;
-  scrollLeft: number;
 }
 
 export interface CanvasTextPreviewCandidate {
@@ -121,7 +121,7 @@ export function canvasTextPreviewImageReducer(
   switch (event.type) {
     case 'source-resolved': {
       if (!event.source) {
-        return state.loaded ? { loaded: state.loaded, next: undefined } : initialCanvasTextPreviewImageState();
+        return state.next ? { ...state, next: undefined } : state;
       }
       const next = canvasLoadedTextPreviewSource(event.source);
       if (!state.loaded) {
@@ -138,6 +138,8 @@ export function canvasTextPreviewImageReducer(
         next
       };
     }
+    case 'source-invalidated':
+      return state.loaded || state.next ? initialCanvasTextPreviewImageState() : state;
     case 'next-loaded':
       if (!state.next || state.next.loadKey !== event.loadKey) {
         return state;
@@ -206,6 +208,7 @@ export function CanvasTextPreviewProvider({
   const [sourceAvailability, setSourceAvailability] = useState<Record<string, CanvasTextPreviewSourceAvailability>>({});
   const [measuredBodies, setMeasuredBodies] = useState<Map<string, CanvasTextPreviewMeasuredBody>>(() => new Map());
   const [captureTargets, setCaptureTargets] = useState<CanvasTextPreviewTarget[]>([]);
+  const [captureLayerRoot, setCaptureLayerRoot] = useState<HTMLElement | undefined>();
   const [captureSlotVersion, setCaptureSlotVersion] = useState(0);
   const [previewErrors, setPreviewErrors] = useState<Record<string, { captureKey: string; message: string }>>({});
   const [currentTargets, setCurrentTargets] = useState<Record<string, CanvasTextPreviewTarget>>({});
@@ -239,6 +242,10 @@ export function CanvasTextPreviewProvider({
   }, [perfMonitor]);
 
   useEffect(() => {
+    setCaptureLayerRoot(document.body);
+  }, []);
+
+  useEffect(() => {
     let cancelled = false;
     try {
       const snapshot = canvasTextPreviewStyleSnapshotForDocument();
@@ -266,13 +273,11 @@ export function CanvasTextPreviewProvider({
   const commitTextBodyMeasurement = useCallback((projectRelativePath: string, element: HTMLElement) => {
     setMeasuredBodies((current) => {
       const next = new Map(current);
-      const measurement = canvasTextPreviewBodyMeasurement(element, current.get(projectRelativePath));
+      const measurement = canvasTextPreviewBodyMeasurement(element);
       const existing = current.get(projectRelativePath);
       if (existing
         && existing.width === measurement.width
-        && existing.height === measurement.height
-        && existing.scrollTop === measurement.scrollTop
-        && existing.scrollLeft === measurement.scrollLeft) {
+        && existing.height === measurement.height) {
         return current;
       }
       next.set(projectRelativePath, measurement);
@@ -284,21 +289,11 @@ export function CanvasTextPreviewProvider({
     bodyRegistrationsRef.current.get(projectRelativePath)?.();
     bodyRegistrationsRef.current.delete(projectRelativePath);
     if (!element) {
-      setMeasuredBodies((current) => {
-        if (!current.has(projectRelativePath)) {
-          return current;
-        }
-        const next = new Map(current);
-        next.delete(projectRelativePath);
-        return next;
-      });
       return;
     }
 
     const commit = () => commitTextBodyMeasurement(projectRelativePath, element);
     const cleanup: Array<() => void> = [];
-    element.addEventListener('scroll', commit, true);
-    cleanup.push(() => element.removeEventListener('scroll', commit, true));
 
     if (typeof ResizeObserver !== 'undefined') {
       const resizeObserver = new ResizeObserver(commit);
@@ -358,6 +353,11 @@ export function CanvasTextPreviewProvider({
         return;
       }
       const targetKeySet = new Set(targets.map(canvasTextPreviewTargetKey));
+      for (const pendingKey of pendingCaptureKeysRef.current) {
+        if (!targetKeySet.has(pendingKey)) {
+          pendingCaptureKeysRef.current.delete(pendingKey);
+        }
+      }
       setCurrentTargets(canvasTextPreviewTargetsByPath(targets));
       currentTargetKeysRef.current = new Map(targets.map((target) => [
         target.projectRelativePath,
@@ -539,6 +539,7 @@ export function CanvasTextPreviewProvider({
 
   useEffect(() => () => {
     for (const projectRelativePath of currentTargetKeysRef.current.keys()) {
+      previewResourceScheduler.cancel('text-source', projectRelativePath);
       previewResourceScheduler.cancel('text', projectRelativePath);
     }
   }, [previewResourceScheduler]);
@@ -570,8 +571,29 @@ export function CanvasTextPreviewProvider({
       skippedCaptureKeys: failedCaptureKeys,
       concurrency: CANVAS_TEXT_PREVIEW_SOURCE_CONCURRENCY
     });
-    if (nextCaptures.length > 0) {
-      setCaptureTargets((current) => [...current, ...nextCaptures]);
+    for (const target of nextCaptures) {
+      const targetKey = canvasTextPreviewTargetKey(target);
+      previewResourceScheduler.enqueue({
+        kind: 'text-source',
+        nodeId: target.projectRelativePath,
+        sourceKey: targetKey,
+        targetWidth: Math.ceil(target.contentCssWidth * CANVAS_TEXT_PREVIEW_SOURCE_SCALE),
+        isCurrent: () => pendingCaptureKeysRef.current.has(targetKey),
+        isCulled: () => false,
+        run: () => {
+          if (!pendingCaptureKeysRef.current.has(targetKey)
+            || currentTargetKeysRef.current.get(target.projectRelativePath) !== targetKey
+            || interactionActiveRef.current
+            || currentCulledPathsRef.current.has(target.projectRelativePath)) {
+            pendingCaptureKeysRef.current.delete(targetKey);
+            setCaptureSlotVersion((current) => current + 1);
+            return;
+          }
+          setCaptureTargets((current) => current.some((item) => canvasTextPreviewTargetKey(item) === targetKey)
+            ? current
+            : [...current, target]);
+        }
+      });
     }
   }, [
     cameraState,
@@ -580,6 +602,7 @@ export function CanvasTextPreviewProvider({
     dragState,
     previewErrors,
     availabilityCheckedTargetKeys,
+    previewResourceScheduler,
     sourceAvailability
   ]);
 
@@ -627,19 +650,23 @@ export function CanvasTextPreviewProvider({
     previewErrorForNode: ({ node }) => previewErrors[node.projectRelativePath]?.message
   }), [currentTargets, previewErrors, previewSources, registerTextBody]);
 
+  const captureLayer = (
+    <div className="canvas-text-preview-capture-layer" aria-hidden="true">
+      {captureTargets.map((target) => (
+        <CanvasTextPreviewCaptureTarget
+          key={canvasTextPreviewTargetKey(target)}
+          target={target}
+          actions={actions}
+          onComplete={finishCaptureTarget}
+        />
+      ))}
+    </div>
+  );
+
   return (
     <CanvasTextPreviewRuntimeContext.Provider value={value}>
       {children}
-      <div className="canvas-text-preview-capture-layer" aria-hidden="true">
-        {captureTargets.map((target) => (
-          <CanvasTextPreviewCaptureTarget
-            key={canvasTextPreviewTargetKey(target)}
-            target={target}
-            actions={actions}
-            onComplete={finishCaptureTarget}
-          />
-        ))}
-      </div>
+      {captureLayerRoot ? createPortal(captureLayer, captureLayerRoot) : null}
     </CanvasTextPreviewRuntimeContext.Provider>
   );
 }
@@ -655,7 +682,7 @@ export function canvasTextPreviewTargetsForNodes(input: {
 }): CanvasTextPreviewCandidate[] {
   const selected = new Set(input.selectedProjectRelativePaths);
   const targets: CanvasTextPreviewCandidate[] = [];
-  for (const node of input.nodes) {
+  for (const node of [...input.nodes].sort(compareCanvasTextPreviewNodeOrder)) {
     if (node.nodeKind !== 'file'
       || node.mediaKind !== 'text'
       || node.availability.state !== 'available'
@@ -676,12 +703,18 @@ export function canvasTextPreviewTargetsForNodes(input: {
       wordWrap: buffer.wordWrap,
       contentCssWidth: measured.width,
       contentCssHeight: measured.height,
-      scrollTop: measured.scrollTop,
-      scrollLeft: measured.scrollLeft,
+      scrollTop: node.textViewport?.scrollTop ?? 0,
+      scrollLeft: node.textViewport?.scrollLeft ?? 0,
       styleKey: input.styleKey
     });
   }
   return targets;
+}
+
+function compareCanvasTextPreviewNodeOrder(left: ProjectedCanvasNode, right: ProjectedCanvasNode): number {
+  return left.y - right.y
+    || left.x - right.x
+    || left.projectRelativePath.localeCompare(right.projectRelativePath);
 }
 
 export function shouldStartCanvasTextPreviewSourceWork(input: {
@@ -695,43 +728,39 @@ export function shouldStartCanvasTextPreviewSourceWork(input: {
 }
 
 export function isCanvasTextPreviewCaptureLayoutReady(element: HTMLElement): boolean {
-  const firstLine = firstMeasuredCanvasTextPreviewElement(element.querySelectorAll('.cm-content .cm-line'));
-  const firstLineNumber = firstMeasuredCanvasTextPreviewElement(
-    element.querySelectorAll('.cm-lineNumbers .cm-gutterElement')
+  const scroller = element.querySelector('.cm-scroller');
+  if (!(scroller instanceof HTMLElement)) {
+    return false;
+  }
+  const scrollerRect = scroller.getBoundingClientRect();
+  const firstLine = firstVisibleCanvasTextPreviewElement(
+    element.querySelectorAll('.cm-content .cm-line'),
+    scroller,
+    scrollerRect
+  );
+  const firstLineNumber = firstVisibleCanvasTextPreviewElement(
+    element.querySelectorAll('.cm-lineNumbers .cm-gutterElement'),
+    scroller,
+    scrollerRect
   );
   if (!firstLine || !firstLineNumber) {
     return false;
   }
-  const lineRect = firstLine.getBoundingClientRect();
-  const lineNumberRect = firstLineNumber.getBoundingClientRect();
-  return Math.abs(lineRect.top - lineNumberRect.top) <= CANVAS_TEXT_PREVIEW_CAPTURE_LAYOUT_TOP_TOLERANCE_PX;
+  const lineBox = canvasTextPreviewViewportBox(firstLine, scrollerRect);
+  const lineNumberBox = canvasTextPreviewViewportBox(firstLineNumber, scrollerRect);
+  return canvasTextPreviewGutterTopOffset(element, lineBox, lineNumberBox) !== undefined;
 }
 
 export function prepareCanvasTextPreviewCaptureElement(element: HTMLElement): void {
+  const scroller = element.querySelector('.cm-scroller');
+  if (!(scroller instanceof HTMLElement)) {
+    throw new Error(CANVAS_TEXT_PREVIEW_CAPTURE_SCROLLER_ERROR);
+  }
   const firstLine = firstMeasuredCanvasTextPreviewElement(element.querySelectorAll('.cm-content .cm-line'));
   if (!firstLine) {
     return;
   }
-  const content = element.querySelector('.cm-content');
-  const contentPaddingTop = content instanceof HTMLElement
-    ? window.getComputedStyle(content).paddingTop
-    : '0px';
   const lineStyle = window.getComputedStyle(firstLine);
-  for (const gutter of element.querySelectorAll('.cm-gutter')) {
-    if (gutter instanceof HTMLElement) {
-      gutter.style.setProperty('display', 'flex', 'important');
-      gutter.style.flexDirection = 'column';
-      gutter.style.boxSizing = 'border-box';
-      inlineCanvasTextPreviewCaptureProperties(gutter, window.getComputedStyle(gutter), [
-        'font-family',
-        'font-size',
-        'font-variant-numeric',
-        'line-height',
-        'overflow'
-      ]);
-      moveFirstCanvasTextPreviewGutterOffsetToPadding(gutter);
-    }
-  }
   for (const gutterElement of element.querySelectorAll('.cm-gutterElement')) {
     if (!(gutterElement instanceof HTMLElement) || !isMeasuredCanvasTextPreviewElement(gutterElement)) {
       continue;
@@ -753,29 +782,22 @@ export function prepareCanvasTextPreviewCaptureElement(element: HTMLElement): vo
       'white-space'
     ]);
     gutterElement.style.minHeight = lineStyle.lineHeight;
-    translateCanvasTextPreviewCaptureElement(gutterElement, contentPaddingTop);
   }
+  materializeCanvasTextPreviewCaptureViewport(element, scroller);
 }
 
 export async function waitForCanvasTextPreviewCaptureLayout(
   element: HTMLElement,
   options: {
-    maxFrames?: number | undefined;
     isCancelled?: (() => boolean) | undefined;
   } = {}
 ): Promise<boolean> {
   await canvasTextPreviewFontsReady();
-  const maxFrames = options.maxFrames ?? CANVAS_TEXT_PREVIEW_CAPTURE_LAYOUT_MAX_FRAMES;
-  for (let frame = 0; frame <= maxFrames; frame += 1) {
-    if (options.isCancelled?.()) {
-      return false;
-    }
+  while (!options.isCancelled?.()) {
     if (isCanvasTextPreviewCaptureLayoutReady(element)) {
       return true;
     }
-    if (frame < maxFrames) {
-      await canvasTextPreviewAnimationFrame();
-    }
+    await canvasTextPreviewAnimationFrame();
   }
   return false;
 }
@@ -783,6 +805,21 @@ export async function waitForCanvasTextPreviewCaptureLayout(
 function firstMeasuredCanvasTextPreviewElement(elements: NodeListOf<Element>): HTMLElement | undefined {
   for (const element of elements) {
     if (element instanceof HTMLElement && isMeasuredCanvasTextPreviewElement(element)) {
+      return element;
+    }
+  }
+  return undefined;
+}
+
+function firstVisibleCanvasTextPreviewElement(
+  elements: NodeListOf<Element>,
+  scroller: HTMLElement,
+  scrollerRect: DOMRect
+): HTMLElement | undefined {
+  for (const element of elements) {
+    if (element instanceof HTMLElement
+      && isMeasuredCanvasTextPreviewElement(element)
+      && canvasTextPreviewBoxIntersectsScroller(element, scroller, scrollerRect)) {
       return element;
     }
   }
@@ -807,27 +844,158 @@ function inlineCanvasTextPreviewCaptureProperties(
   }
 }
 
-function moveFirstCanvasTextPreviewGutterOffsetToPadding(gutter: HTMLElement): void {
-  const firstVisibleGutterElement = firstMeasuredCanvasTextPreviewElement(gutter.querySelectorAll('.cm-gutterElement'));
-  if (!firstVisibleGutterElement) {
-    return;
+function materializeCanvasTextPreviewCaptureViewport(
+  element: HTMLElement,
+  scroller: HTMLElement
+): void {
+  for (const existing of scroller.querySelectorAll('.canvas-text-preview-static-viewport')) {
+    existing.remove();
   }
-  const marginTop = parseFloat(window.getComputedStyle(firstVisibleGutterElement).marginTop);
-  if (!Number.isFinite(marginTop) || marginTop <= 0) {
-    return;
+  scroller.style.overflow = 'hidden';
+  scroller.style.position = 'relative';
+  const scrollerRect = scroller.getBoundingClientRect();
+  const staticViewport = document.createElement('div');
+  staticViewport.className = 'canvas-text-preview-static-viewport';
+  staticViewport.style.position = 'absolute';
+  staticViewport.style.inset = '0';
+  staticViewport.style.overflow = 'hidden';
+  staticViewport.style.pointerEvents = 'none';
+
+  const staticGutter = document.createElement('div');
+  staticGutter.className = 'cm-lineNumbers canvas-text-preview-static-line-numbers';
+  staticGutter.style.position = 'absolute';
+  staticGutter.style.inset = '0';
+  staticViewport.append(staticGutter);
+
+  const staticContent = document.createElement('div');
+  staticContent.className = 'cm-content canvas-text-preview-static-content';
+  staticContent.style.position = 'absolute';
+  staticContent.style.inset = '0';
+  staticContent.style.padding = '0';
+  staticContent.style.minHeight = '0';
+  staticViewport.append(staticContent);
+
+  const firstLine = firstVisibleCanvasTextPreviewElement(
+    element.querySelectorAll('.cm-content .cm-line'),
+    scroller,
+    scrollerRect
+  );
+  const firstLineNumber = firstVisibleCanvasTextPreviewElement(
+    element.querySelectorAll('.cm-lineNumbers .cm-gutterElement'),
+    scroller,
+    scrollerRect
+  );
+  const gutterTopOffset = firstLine && firstLineNumber
+    ? canvasTextPreviewGutterTopOffset(
+      element,
+      canvasTextPreviewViewportBox(firstLine, scrollerRect),
+      canvasTextPreviewViewportBox(firstLineNumber, scrollerRect)
+    ) ?? 0
+    : 0;
+  for (const gutterElement of element.querySelectorAll('.cm-lineNumbers .cm-gutterElement')) {
+    if (gutterElement instanceof HTMLElement
+      && canvasTextPreviewBoxIntersectsScroller(gutterElement, scroller, scrollerRect)) {
+      staticGutter.append(cloneCanvasTextPreviewVisibleElement(
+        gutterElement,
+        scrollerRect,
+        gutterTopOffset
+      ));
+    }
   }
-  const gutterStyle = window.getComputedStyle(gutter);
-  const paddingTop = parseFloat(gutterStyle.paddingTop);
-  gutter.style.paddingTop = `${(Number.isFinite(paddingTop) ? paddingTop : 0) + marginTop}px`;
-  firstVisibleGutterElement.style.marginTop = '0px';
+  for (const line of element.querySelectorAll('.cm-content .cm-line')) {
+    if (line instanceof HTMLElement
+      && canvasTextPreviewBoxIntersectsScroller(line, scroller, scrollerRect)) {
+      staticContent.append(cloneCanvasTextPreviewVisibleElement(line, scrollerRect));
+    }
+  }
+
+  for (const content of element.querySelectorAll('.cm-content')) {
+    if (content instanceof HTMLElement) {
+      content.style.display = 'none';
+    }
+  }
+  for (const gutter of element.querySelectorAll('.cm-gutters, .cm-gutter')) {
+    if (gutter instanceof HTMLElement) {
+      gutter.style.display = 'none';
+    }
+  }
+  scroller.append(staticViewport);
+  scroller.scrollTop = 0;
+  scroller.scrollLeft = 0;
 }
 
-function translateCanvasTextPreviewCaptureElement(element: HTMLElement, translateY: string): void {
-  const offset = parseFloat(translateY);
-  if (!Number.isFinite(offset) || offset === 0) {
-    return;
+function canvasTextPreviewContentPaddingTop(element: HTMLElement): number {
+  const content = element.querySelector('.cm-content');
+  if (!(content instanceof HTMLElement)) {
+    return 0;
   }
-  element.style.transform = `translateY(${translateY})`;
+  const paddingTop = parseFloat(window.getComputedStyle(content).paddingTop);
+  return Number.isFinite(paddingTop) ? paddingTop : 0;
+}
+
+function canvasTextPreviewGutterTopOffset(
+  element: HTMLElement,
+  lineBox: { top: number },
+  lineNumberBox: { top: number }
+): number | undefined {
+  const topDelta = lineBox.top - lineNumberBox.top;
+  if (Math.abs(topDelta) <= CANVAS_TEXT_PREVIEW_CAPTURE_LAYOUT_TOP_TOLERANCE_PX) {
+    return 0;
+  }
+  const contentPaddingTop = canvasTextPreviewContentPaddingTop(element);
+  if (Math.abs(topDelta - contentPaddingTop) <= CANVAS_TEXT_PREVIEW_CAPTURE_LAYOUT_TOP_TOLERANCE_PX) {
+    return contentPaddingTop;
+  }
+  return undefined;
+}
+
+function canvasTextPreviewBoxIntersectsScroller(
+  element: HTMLElement,
+  scroller: HTMLElement,
+  scrollerRect: DOMRect
+): boolean {
+  const box = canvasTextPreviewViewportBox(element, scrollerRect);
+  const viewportHeight = scroller.clientHeight;
+  return Number.isFinite(box.top)
+    && Number.isFinite(box.height)
+    && Number.isFinite(viewportHeight)
+    && box.height > 0
+    && viewportHeight > 0
+    && box.top + box.height >= 0
+    && box.top <= viewportHeight;
+}
+
+function canvasTextPreviewViewportBox(
+  element: HTMLElement,
+  scrollerRect: DOMRect
+): { top: number; left: number; width: number; height: number } {
+  const rect = element.getBoundingClientRect();
+  return {
+    top: rect.top - scrollerRect.top,
+    left: rect.left - scrollerRect.left,
+    width: rect.width,
+    height: rect.height
+  };
+}
+
+function cloneCanvasTextPreviewVisibleElement(
+  element: HTMLElement,
+  scrollerRect: DOMRect,
+  topOffset = 0
+): HTMLElement {
+  const box = canvasTextPreviewViewportBox(element, scrollerRect);
+  const clone = element.cloneNode(true) as HTMLElement;
+  clone.style.position = 'absolute';
+  clone.style.display = 'block';
+  clone.style.boxSizing = 'border-box';
+  clone.style.top = `${box.top + topOffset}px`;
+  clone.style.left = `${box.left}px`;
+  clone.style.width = `${box.width}px`;
+  clone.style.height = `${box.height}px`;
+  clone.style.minHeight = `${box.height}px`;
+  clone.style.margin = '0';
+  clone.style.transform = 'none';
+  return clone;
 }
 
 async function canvasTextPreviewFontsReady(): Promise<void> {
@@ -869,20 +1037,13 @@ function CanvasTextPreviewCaptureTarget({
     const frame = window.requestAnimationFrame(() => {
       void (async () => {
         try {
-          prepareCanvasTextPreviewCaptureElement(element);
           const layoutReady = await waitForCanvasTextPreviewCaptureLayout(element, {
             isCancelled: () => cancelled
           });
-          if (cancelled) {
+          if (cancelled || !layoutReady) {
             return;
           }
-          if (!layoutReady) {
-            onComplete(target, {
-              status: 'error',
-              message: CANVAS_TEXT_PREVIEW_CAPTURE_LAYOUT_ERROR
-            });
-            return;
-          }
+          prepareCanvasTextPreviewCaptureElement(element);
           const sourcePng = await captureCanvasTextPreviewSource({ element });
           if (cancelled) {
             return;
@@ -963,7 +1124,7 @@ function canvasTextPreviewForNode(input: {
     fingerprint: input.target.fingerprint,
     width: targetWidth
   }).toString();
-  return { src, previewWidth: targetWidth };
+  return { src, previewWidth: targetWidth, fingerprint: input.target.fingerprint };
 }
 
 export function canvasTextPreviewTargetWidthForNode(input: {
@@ -1015,22 +1176,16 @@ function canvasTextPreviewTargetKey(target: CanvasTextPreviewTarget): string {
   return `${target.canvasId}\u001f${target.projectRelativePath}\u001f${target.fingerprint}`;
 }
 
-export type CanvasTextPreviewScheduledCapture = CanvasTextPreviewTarget & { captureKey: string };
-
 type CanvasTextPreviewCaptureResult =
   | { status: 'ok' }
   | { status: 'error'; message: string };
 
 export function canvasTextPreviewBodyMeasurement(
-  element: HTMLElement,
-  previous?: CanvasTextPreviewMeasuredBody | undefined
+  element: HTMLElement
 ): CanvasTextPreviewMeasuredBody {
-  const scroller = element.querySelector('.cm-scroller') as HTMLElement | null;
   return {
     width: element.clientWidth,
-    height: element.clientHeight,
-    scrollTop: scroller ? scroller.scrollTop : previous?.scrollTop ?? element.scrollTop,
-    scrollLeft: scroller ? scroller.scrollLeft : previous?.scrollLeft ?? element.scrollLeft
+    height: element.clientHeight
   };
 }
 
@@ -1040,12 +1195,12 @@ export function canvasTextPreviewNextCaptureTargets(input: {
   pendingCaptureKeys: Set<string>;
   skippedCaptureKeys?: ReadonlySet<string> | undefined;
   concurrency: number;
-}): CanvasTextPreviewScheduledCapture[] {
+}): CanvasTextPreviewTarget[] {
   const slots = Math.max(0, input.concurrency - input.pendingCaptureKeys.size);
   if (slots === 0) {
     return [];
   }
-  const nextCaptures: CanvasTextPreviewScheduledCapture[] = [];
+  const nextCaptures: CanvasTextPreviewTarget[] = [];
   for (const target of input.targets) {
     if (nextCaptures.length >= slots) {
       break;
@@ -1059,7 +1214,7 @@ export function canvasTextPreviewNextCaptureTargets(input: {
       continue;
     }
     input.pendingCaptureKeys.add(captureKey);
-    nextCaptures.push({ ...target, captureKey });
+    nextCaptures.push(target);
   }
   return nextCaptures;
 }

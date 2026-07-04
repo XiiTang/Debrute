@@ -2,7 +2,10 @@ import { randomUUID } from 'node:crypto';
 import { mkdir, rename, rm } from 'node:fs/promises';
 import { dirname } from 'node:path';
 import {
-  canvasFeedbackEntryHasLocalRegions,
+  canvasFeedbackEntryHasFileSpatialItems,
+  canvasFeedbackItemsForMoment,
+  canvasFeedbackMomentRefs,
+  canvasFeedbackRenderedMomentProjectPath,
   canvasFeedbackRenderedProjectPath,
   normalizeCanvasFeedbackProjectRelativePath,
   type CanvasFeedbackDocument,
@@ -14,13 +17,14 @@ import {
   canvasFeedbackRenderDiagnostic,
   removeCanvasFeedbackRenderedArtifact,
   removeUnexpectedCanvasFeedbackRenderedArtifacts
-} from './CanvasFeedbackRenderedImageService.js';
+} from './CanvasFeedbackArtifactService.js';
 import type {
+  CanvasFeedbackArtifact,
   CanvasFeedbackRenderJobInput,
   CanvasFeedbackRenderJobResult
-} from './CanvasFeedbackRenderedImageWorkerProtocol.js';
+} from './CanvasFeedbackArtifactWorkerProtocol.js';
 
-const DEFAULT_MAX_CONCURRENT_IMAGES = 2;
+const DEFAULT_MAX_CONCURRENT_ARTIFACTS = 2;
 
 export interface CanvasFeedbackRenderDiagnosticUpdate {
   readonly diagnostics: Diagnostic[];
@@ -49,14 +53,19 @@ export interface CanvasFeedbackRenderScheduler {
 
 export interface CanvasFeedbackRenderSchedulerOptions {
   readonly runner: CanvasFeedbackRenderRunner;
-  readonly maxConcurrentImages?: number;
+  readonly maxConcurrentArtifacts?: number;
   readonly onDiagnostic: (diagnostic: CanvasFeedbackRenderDiagnosticUpdate) => void;
 }
 
-interface RenderKeyState {
+interface CanvasFeedbackArtifactDescriptor {
+  readonly artifactProjectPath: string;
+  readonly diagnosticProjectRelativePath: string;
+  readonly artifact: CanvasFeedbackArtifact;
+}
+
+interface RenderKeyState extends CanvasFeedbackArtifactDescriptor {
   readonly key: string;
   readonly projectRoot: string;
-  readonly projectRelativePath: string;
   generation: number;
   queued: RenderGeneration | undefined;
   active: ActiveRenderGeneration | undefined;
@@ -66,7 +75,7 @@ interface RenderKeyState {
 interface RenderGeneration {
   readonly generation: number;
   readonly jobId: string;
-  readonly entry: CanvasFeedbackEntry;
+  readonly artifact: CanvasFeedbackArtifact;
 }
 
 interface ActiveRenderGeneration extends RenderGeneration {
@@ -90,7 +99,7 @@ export function createCanvasFeedbackRenderScheduler(
 
 class LocalCanvasFeedbackRenderScheduler implements CanvasFeedbackRenderScheduler {
   private readonly runner: CanvasFeedbackRenderRunner;
-  private readonly maxConcurrentImages: number;
+  private readonly maxConcurrentArtifacts: number;
   private readonly onDiagnostic: (diagnostic: CanvasFeedbackRenderDiagnosticUpdate) => void;
   private readonly states = new Map<string, RenderKeyState>();
   private readonly readyQueue: RenderKeyState[] = [];
@@ -99,7 +108,7 @@ class LocalCanvasFeedbackRenderScheduler implements CanvasFeedbackRenderSchedule
 
   constructor(options: CanvasFeedbackRenderSchedulerOptions) {
     this.runner = options.runner;
-    this.maxConcurrentImages = options.maxConcurrentImages ?? DEFAULT_MAX_CONCURRENT_IMAGES;
+    this.maxConcurrentArtifacts = options.maxConcurrentArtifacts ?? DEFAULT_MAX_CONCURRENT_ARTIFACTS;
     this.onDiagnostic = options.onDiagnostic;
   }
 
@@ -107,31 +116,23 @@ class LocalCanvasFeedbackRenderScheduler implements CanvasFeedbackRenderSchedule
     if (this.disposed) {
       return;
     }
-    const expectedRenderedPaths = new Set<string>();
-    const activeProjectRelativePaths = new Set<string>();
-    for (const entry of Object.values(input.document.entries)) {
-      if (!canvasFeedbackEntryHasLocalRegions(entry)) {
-        continue;
-      }
-      expectedRenderedPaths.add(canvasFeedbackRenderedProjectPath(entry.projectRelativePath));
-      activeProjectRelativePaths.add(entry.projectRelativePath);
-      this.enqueueSource({
-        projectRoot: input.projectRoot,
-        projectRelativePath: entry.projectRelativePath,
-        document: input.document
-      });
+    const descriptors = canvasFeedbackArtifactDescriptorsForDocument(input.document);
+    const expectedArtifactPaths = new Set(descriptors.map((descriptor) => descriptor.artifactProjectPath));
+    const retainedProjectRelativePaths = new Set(descriptors.map((descriptor) => descriptor.diagnosticProjectRelativePath));
+    for (const descriptor of descriptors) {
+      this.enqueueArtifact(input.projectRoot, descriptor);
     }
     for (const state of this.states.values()) {
-      if (state.projectRoot === input.projectRoot && !activeProjectRelativePaths.has(state.projectRelativePath)) {
-        this.removeSource(input.projectRoot, state.projectRelativePath);
+      if (state.projectRoot === input.projectRoot && !expectedArtifactPaths.has(state.artifactProjectPath)) {
+        this.removeArtifact(state);
       }
     }
-    void removeUnexpectedCanvasFeedbackRenderedArtifacts(input.projectRoot, expectedRenderedPaths);
+    void removeUnexpectedCanvasFeedbackRenderedArtifacts(input.projectRoot, expectedArtifactPaths);
     this.onDiagnostic({
       diagnostics: [],
       checkedProjectRelativePaths: [],
       checkedAllEntries: true,
-      retainedProjectRelativePaths: [...activeProjectRelativePaths].sort()
+      retainedProjectRelativePaths: [...retainedProjectRelativePaths].sort()
     });
   }
 
@@ -140,21 +141,27 @@ class LocalCanvasFeedbackRenderScheduler implements CanvasFeedbackRenderSchedule
       return;
     }
     const projectRelativePath = normalizeCanvasFeedbackProjectRelativePath(input.projectRelativePath);
-    const entry = input.document.entries[projectRelativePath];
-    if (!entry || !canvasFeedbackEntryHasLocalRegions(entry)) {
-      this.removeSource(input.projectRoot, projectRelativePath);
+    const descriptors = canvasFeedbackArtifactDescriptorsForEntry(input.document.entries[projectRelativePath]);
+    const expectedDocumentArtifactPaths = new Set(canvasFeedbackArtifactDescriptorsForDocument(input.document).map((descriptor) => descriptor.artifactProjectPath));
+    const expectedSourceArtifactPaths = new Set(descriptors.map((descriptor) => descriptor.artifactProjectPath));
+    for (const state of this.states.values()) {
+      if (state.projectRoot === input.projectRoot
+        && state.artifact.projectRelativePath === projectRelativePath
+        && !expectedSourceArtifactPaths.has(state.artifactProjectPath)) {
+        this.removeArtifact(state);
+      }
+    }
+    void removeUnexpectedCanvasFeedbackRenderedArtifacts(input.projectRoot, expectedDocumentArtifactPaths);
+    if (descriptors.length === 0) {
+      this.onDiagnostic({
+        diagnostics: [],
+        checkedProjectRelativePaths: [projectRelativePath]
+      });
       return;
     }
-    const state = this.stateFor(input.projectRoot, projectRelativePath);
-    state.generation += 1;
-    state.queued = {
-      generation: state.generation,
-      jobId: randomUUID(),
-      entry
-    };
-    state.active?.controller.abort();
-    this.queueForStart(state);
-    this.startReadyJobs();
+    for (const descriptor of descriptors) {
+      this.enqueueArtifact(input.projectRoot, descriptor);
+    }
   }
 
   cancelProject(projectRoot: string): void {
@@ -181,24 +188,34 @@ class LocalCanvasFeedbackRenderScheduler implements CanvasFeedbackRenderSchedule
     await Promise.all(activePromises);
   }
 
-  private removeSource(projectRoot: string, projectRelativePath: string): void {
-    const state = this.states.get(renderKey(projectRoot, projectRelativePath));
-    if (state) {
-      state.generation += 1;
-      state.queued = undefined;
-      state.queuedForStart = false;
-      state.active?.controller.abort();
-    }
-    void removeCanvasFeedbackRenderedArtifact(projectRoot, projectRelativePath).then(() => {
+  private enqueueArtifact(projectRoot: string, descriptor: CanvasFeedbackArtifactDescriptor): void {
+    const state = this.stateFor(projectRoot, descriptor);
+    state.generation += 1;
+    state.queued = {
+      generation: state.generation,
+      jobId: randomUUID(),
+      artifact: descriptor.artifact
+    };
+    state.active?.controller.abort();
+    this.queueForStart(state);
+    this.startReadyJobs();
+  }
+
+  private removeArtifact(state: RenderKeyState): void {
+    state.generation += 1;
+    state.queued = undefined;
+    state.queuedForStart = false;
+    state.active?.controller.abort();
+    void removeCanvasFeedbackRenderedArtifact(state.projectRoot, state.artifactProjectPath).then(() => {
       this.onDiagnostic({
         diagnostics: [],
-        checkedProjectRelativePaths: [projectRelativePath]
+        checkedProjectRelativePaths: [state.diagnosticProjectRelativePath]
       });
     });
   }
 
-  private stateFor(projectRoot: string, projectRelativePath: string): RenderKeyState {
-    const key = renderKey(projectRoot, projectRelativePath);
+  private stateFor(projectRoot: string, descriptor: CanvasFeedbackArtifactDescriptor): RenderKeyState {
+    const key = renderKey(projectRoot, descriptor.artifactProjectPath);
     const existing = this.states.get(key);
     if (existing) {
       return existing;
@@ -206,7 +223,9 @@ class LocalCanvasFeedbackRenderScheduler implements CanvasFeedbackRenderSchedule
     const state: RenderKeyState = {
       key,
       projectRoot,
-      projectRelativePath,
+      artifactProjectPath: descriptor.artifactProjectPath,
+      diagnosticProjectRelativePath: descriptor.diagnosticProjectRelativePath,
+      artifact: descriptor.artifact,
       generation: 0,
       queued: undefined,
       active: undefined,
@@ -225,7 +244,7 @@ class LocalCanvasFeedbackRenderScheduler implements CanvasFeedbackRenderSchedule
   }
 
   private startReadyJobs(): void {
-    while (!this.disposed && this.activeCount < this.maxConcurrentImages) {
+    while (!this.disposed && this.activeCount < this.maxConcurrentArtifacts) {
       const state = this.readyQueue.shift();
       if (!state) {
         return;
@@ -241,7 +260,7 @@ class LocalCanvasFeedbackRenderScheduler implements CanvasFeedbackRenderSchedule
   private startJob(state: RenderKeyState, generation: RenderGeneration): void {
     state.queued = undefined;
     const controller = new AbortController();
-    const finalPath = resolveProjectPath(state.projectRoot, canvasFeedbackRenderedProjectPath(state.projectRelativePath));
+    const finalPath = resolveProjectPath(state.projectRoot, state.artifactProjectPath);
     const tempPath = `${finalPath}.${generation.jobId}.tmp`;
     const active: ActiveRenderGeneration = {
       ...generation,
@@ -260,35 +279,47 @@ class LocalCanvasFeedbackRenderScheduler implements CanvasFeedbackRenderSchedule
       const result = await this.runner.render({
         jobId: active.jobId,
         projectRoot: state.projectRoot,
-        entry: active.entry,
+        artifact: active.artifact,
         outputPath: active.tempPath
       }, active.controller.signal);
       if (!this.isLatestActiveGeneration(state, active)) {
         return;
       }
       if (result.ok) {
-        await mkdir(dirname(resolveProjectPath(state.projectRoot, canvasFeedbackRenderedProjectPath(state.projectRelativePath))), { recursive: true });
-        await rename(result.outputPath, resolveProjectPath(state.projectRoot, canvasFeedbackRenderedProjectPath(state.projectRelativePath)));
+        await mkdir(dirname(resolveProjectPath(state.projectRoot, state.artifactProjectPath)), { recursive: true });
+        await rename(result.outputPath, resolveProjectPath(state.projectRoot, state.artifactProjectPath));
         published = true;
         this.onDiagnostic({
           diagnostics: [],
-          checkedProjectRelativePaths: [state.projectRelativePath]
+          checkedProjectRelativePaths: [state.diagnosticProjectRelativePath]
         });
       } else {
-        await removeCanvasFeedbackRenderedArtifact(state.projectRoot, state.projectRelativePath);
+        await removeCanvasFeedbackRenderedArtifact(state.projectRoot, state.artifactProjectPath);
         this.onDiagnostic({
-          diagnostics: [canvasFeedbackRenderDiagnostic(state.projectRoot, state.projectRelativePath, result.message)],
-          checkedProjectRelativePaths: [state.projectRelativePath]
+          diagnostics: [canvasFeedbackRenderDiagnostic(
+            state.projectRoot,
+            state.artifact,
+            state.artifactProjectPath,
+            state.diagnosticProjectRelativePath,
+            result.message
+          )],
+          checkedProjectRelativePaths: [state.diagnosticProjectRelativePath]
         });
       }
     } catch (error) {
       if (!this.isLatestActiveGeneration(state, active) || error instanceof CanvasFeedbackRenderCancelledError) {
         return;
       }
-      await removeCanvasFeedbackRenderedArtifact(state.projectRoot, state.projectRelativePath);
+      await removeCanvasFeedbackRenderedArtifact(state.projectRoot, state.artifactProjectPath);
       this.onDiagnostic({
-        diagnostics: [canvasFeedbackRenderDiagnostic(state.projectRoot, state.projectRelativePath, error)],
-        checkedProjectRelativePaths: [state.projectRelativePath]
+        diagnostics: [canvasFeedbackRenderDiagnostic(
+          state.projectRoot,
+          state.artifact,
+          state.artifactProjectPath,
+          state.diagnosticProjectRelativePath,
+          error
+        )],
+        checkedProjectRelativePaths: [state.diagnosticProjectRelativePath]
       });
     } finally {
       if (!published) {
@@ -312,6 +343,44 @@ class LocalCanvasFeedbackRenderScheduler implements CanvasFeedbackRenderSchedule
   }
 }
 
-function renderKey(projectRoot: string, projectRelativePath: string): string {
-  return `${projectRoot}\0${projectRelativePath}`;
+function canvasFeedbackArtifactDescriptorsForDocument(document: CanvasFeedbackDocument): CanvasFeedbackArtifactDescriptor[] {
+  return Object.values(document.entries).flatMap(canvasFeedbackArtifactDescriptorsForEntry);
+}
+
+function canvasFeedbackArtifactDescriptorsForEntry(entry: CanvasFeedbackEntry | undefined): CanvasFeedbackArtifactDescriptor[] {
+  if (!entry) {
+    return [];
+  }
+  const descriptors: CanvasFeedbackArtifactDescriptor[] = [];
+  if (canvasFeedbackEntryHasFileSpatialItems(entry)) {
+    descriptors.push({
+      artifactProjectPath: canvasFeedbackRenderedProjectPath(entry.projectRelativePath),
+      diagnosticProjectRelativePath: entry.projectRelativePath,
+      artifact: {
+        kind: 'image',
+        projectRelativePath: entry.projectRelativePath,
+        entry
+      }
+    });
+  }
+  for (const moment of canvasFeedbackMomentRefs(entry)) {
+    if (canvasFeedbackItemsForMoment(entry, moment).length === 0) {
+      continue;
+    }
+    descriptors.push({
+      artifactProjectPath: canvasFeedbackRenderedMomentProjectPath(entry.projectRelativePath, moment.label),
+      diagnosticProjectRelativePath: `${entry.projectRelativePath}#${moment.label}`,
+      artifact: {
+        kind: 'video-moment',
+        projectRelativePath: entry.projectRelativePath,
+        moment,
+        entry
+      }
+    });
+  }
+  return descriptors;
+}
+
+function renderKey(projectRoot: string, artifactProjectPath: string): string {
+  return `${projectRoot}\0${artifactProjectPath}`;
 }

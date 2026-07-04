@@ -149,8 +149,25 @@ describe('canvas interaction', () => {
       width: 170,
       height: 100
     });
-    expect(getCanvasResizePreserveAspect('se', { shiftKey: false }, 'image')).toBe(true);
-    expect(getCanvasResizePreserveAspect('se', { shiftKey: true }, 'text')).toBe(true);
+    expect(getCanvasResizePreserveAspect('se', { shiftKey: false }, { nodeKind: 'file', mediaKind: 'image' })).toBe(true);
+    expect(getCanvasResizePreserveAspect('se', { shiftKey: true }, { nodeKind: 'file', mediaKind: 'text' })).toBe(true);
+  });
+
+  it('makes generic corner resize freeform unless Shift preserves aspect', () => {
+    expect(getCanvasResizePreserveAspect('se', { shiftKey: false }, { nodeKind: 'directory' })).toBe(false);
+    expect(getCanvasResizePreserveAspect('se', { shiftKey: true }, { nodeKind: 'directory' })).toBe(true);
+    expect(getCanvasResizePreserveAspect('nw', { shiftKey: false }, { nodeKind: 'file', mediaKind: 'unknown' })).toBe(false);
+    expect(getCanvasResizePreserveAspect('nw', { shiftKey: true }, { nodeKind: 'file', mediaKind: 'unknown' })).toBe(true);
+    expect(getCanvasResizePreserveAspect('e', { shiftKey: true }, { nodeKind: 'directory' })).toBe(false);
+  });
+
+  it('keeps existing resize modifier semantics for non-generic nodes', () => {
+    expect(getCanvasResizePreserveAspect('se', { shiftKey: false }, { nodeKind: 'file', mediaKind: 'image' })).toBe(true);
+    expect(getCanvasResizePreserveAspect('se', { shiftKey: true }, { nodeKind: 'file', mediaKind: 'image' })).toBe(false);
+    expect(getCanvasResizePreserveAspect('se', { shiftKey: false }, { nodeKind: 'file', mediaKind: 'video' })).toBe(true);
+    expect(getCanvasResizePreserveAspect('se', { shiftKey: false }, { nodeKind: 'file', mediaKind: 'audio' })).toBe(true);
+    expect(getCanvasResizePreserveAspect('se', { shiftKey: false }, { nodeKind: 'file', mediaKind: 'text' })).toBe(false);
+    expect(getCanvasResizePreserveAspect('se', { shiftKey: true }, { nodeKind: 'file', mediaKind: 'text' })).toBe(true);
   });
 });
 

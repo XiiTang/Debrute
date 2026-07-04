@@ -37,6 +37,7 @@ export interface CanvasNodeElement {
   z: number;
   layoutMode?: 'manual';
   videoPlayback?: CanvasVideoPlaybackState;
+  textViewport?: CanvasTextViewportState;
 }
 
 export type CanvasNodeAvailability =
@@ -102,6 +103,11 @@ export interface CanvasVideoPlaybackState {
   currentTimeSeconds: number;
 }
 
+export interface CanvasTextViewportState {
+  scrollTop: number;
+  scrollLeft: number;
+}
+
 export interface CanvasVideoTextTrack {
   projectRelativePath: string;
   fileUrl?: string;
@@ -114,6 +120,8 @@ export interface CanvasVideoTextTrack {
 
 export interface CanvasVideoPresentation {
   kind: 'video';
+  width: number;
+  height: number;
   durationSeconds?: number;
   textTracks: CanvasVideoTextTrack[];
 }
@@ -175,29 +183,54 @@ export type CanvasFeedbackGeometry =
   | { type: 'point'; x: number; y: number }
   | { type: 'rect'; x: number; y: number; width: number; height: number };
 
-export interface CanvasFeedbackComment {
+export interface CanvasFeedbackMomentRef {
+  label: string;
+  currentTimeSeconds: number;
+}
+
+export interface CanvasFeedbackItemBase {
   id: string;
   comment: string;
   createdAt: string;
   updatedAt: string;
 }
 
-export interface CanvasImageFeedbackRegion {
-  id: string;
-  label: number;
-  kind: 'pin' | 'region';
-  geometry: CanvasFeedbackGeometry;
-  comment: string;
-  createdAt: string;
-  updatedAt: string;
+export interface CanvasFeedbackFileCommentItem extends CanvasFeedbackItemBase {
+  kind: 'comment';
+  scope: 'file';
 }
+
+export interface CanvasFeedbackMomentCommentItem extends CanvasFeedbackItemBase {
+  kind: 'comment';
+  scope: 'moment';
+  moment: CanvasFeedbackMomentRef;
+}
+
+export interface CanvasFeedbackFileSpatialItem extends CanvasFeedbackItemBase {
+  kind: 'pin' | 'region';
+  scope: 'file';
+  label: number;
+  geometry: CanvasFeedbackGeometry;
+}
+
+export interface CanvasFeedbackMomentSpatialItem extends CanvasFeedbackItemBase {
+  kind: 'pin' | 'region';
+  scope: 'moment';
+  label: number;
+  geometry: CanvasFeedbackGeometry;
+  moment: CanvasFeedbackMomentRef;
+}
+
+export type CanvasFeedbackCommentItem = CanvasFeedbackFileCommentItem | CanvasFeedbackMomentCommentItem;
+export type CanvasFeedbackSpatialItem = CanvasFeedbackFileSpatialItem | CanvasFeedbackMomentSpatialItem;
+export type CanvasFeedbackItem = CanvasFeedbackCommentItem | CanvasFeedbackSpatialItem;
 
 export interface CanvasFeedbackEntry {
   projectRelativePath: string;
   marks: CanvasFeedbackMark[];
-  comments: CanvasFeedbackComment[];
-  nextRegionLabel: number;
-  regions: CanvasImageFeedbackRegion[];
+  nextMomentLabel: number;
+  nextSpatialLabel: number;
+  items: CanvasFeedbackItem[];
   updatedAt: string;
 }
 
@@ -213,41 +246,25 @@ export type UpdateCanvasFeedbackEntryInput =
       marks: CanvasFeedbackMark[];
     }
   | {
-      operation: 'add-comment';
+      operation: 'add-item';
       projectRelativePath: string;
-      comment: string;
+      item:
+        | { kind: 'comment'; scope: 'file'; comment: string }
+        | { kind: 'comment'; scope: 'moment'; momentTimeSeconds: number; comment: string }
+        | { kind: 'pin' | 'region'; scope: 'file'; geometry: CanvasFeedbackGeometry; comment: string }
+        | { kind: 'pin' | 'region'; scope: 'moment'; momentTimeSeconds: number; geometry: CanvasFeedbackGeometry; comment: string };
     }
   | {
-      operation: 'update-comment';
+      operation: 'update-item';
       projectRelativePath: string;
-      commentId: string;
-      comment: string;
-    }
-  | {
-      operation: 'delete-comment';
-      projectRelativePath: string;
-      commentId: string;
-    }
-  | {
-      operation: 'add-region';
-      projectRelativePath: string;
-      region: {
-        kind: 'pin' | 'region';
-        geometry: CanvasFeedbackGeometry;
-        comment: string;
-      };
-    }
-  | {
-      operation: 'update-region';
-      projectRelativePath: string;
-      regionId: string;
+      itemId: string;
       geometry?: CanvasFeedbackGeometry;
       comment?: string;
     }
   | {
-      operation: 'delete-region';
+      operation: 'delete-item';
       projectRelativePath: string;
-      regionId: string;
+      itemId: string;
     };
 
 const CANVAS_FEEDBACK_MARK_ORDER = new Map<string, number>(
@@ -278,7 +295,7 @@ export function normalizeCanvasFeedbackDocument(value: unknown): CanvasFeedbackD
     if (normalizedKey !== normalizedEntry.projectRelativePath) {
       throw new Error(`Canvas feedback entry key must match projectRelativePath: ${key}`);
     }
-    if (normalizedEntry.marks.length > 0 || normalizedEntry.comments.length > 0 || normalizedEntry.regions.length > 0) {
+    if (normalizedEntry.marks.length > 0 || normalizedEntry.items.length > 0) {
       entries[normalizedKey] = normalizedEntry;
     }
   }
@@ -300,7 +317,7 @@ export function updateCanvasFeedbackEntry(
     ?? createEmptyCanvasFeedbackEntry(projectRelativePath, updatedAt);
   const nextEntry = normalizedCanvasFeedbackEntryForOperation(currentEntry, input, updatedAt);
   const entries = { ...normalizedDocument.entries };
-  if (nextEntry.marks.length === 0 && nextEntry.comments.length === 0 && nextEntry.regions.length === 0) {
+  if (nextEntry.marks.length === 0 && nextEntry.items.length === 0) {
     delete entries[projectRelativePath];
   } else {
     entries[projectRelativePath] = nextEntry;
@@ -316,8 +333,56 @@ export function canvasFeedbackRenderedProjectPath(projectRelativePath: string): 
   return `.debrute/reviews/rendered-feedback/${normalized}.annotated.png`;
 }
 
-export function canvasFeedbackEntryHasLocalRegions(entry: CanvasFeedbackEntry | undefined): boolean {
-  return Boolean(entry && entry.regions.length > 0);
+export function canvasFeedbackRenderedMomentProjectPath(projectRelativePath: string, momentLabel: string): string {
+  const normalized = normalizeCanvasFeedbackProjectRelativePath(projectRelativePath);
+  const label = `M${momentLabelNumber(momentLabel)}`;
+  return `.debrute/reviews/rendered-feedback/${normalized}.moment-${label}.annotated.png`;
+}
+
+export function canvasFeedbackEntryHasFileSpatialItems(entry: CanvasFeedbackEntry | undefined): boolean {
+  return Boolean(entry?.items.some((item) => isCanvasFeedbackSpatialItem(item) && item.scope === 'file'));
+}
+
+export function canvasFeedbackEntryHasMomentItems(entry: CanvasFeedbackEntry | undefined): boolean {
+  return Boolean(entry?.items.some((item) => item.scope === 'moment'));
+}
+
+export function canvasFeedbackMomentRefs(entry: CanvasFeedbackEntry | undefined): CanvasFeedbackMomentRef[] {
+  if (!entry) {
+    return [];
+  }
+  const seen = new Set<string>();
+  const moments: CanvasFeedbackMomentRef[] = [];
+  for (const item of entry.items) {
+    if (item.scope !== 'moment') {
+      continue;
+    }
+    const key = `${item.moment.label}:${item.moment.currentTimeSeconds}`;
+    if (seen.has(key)) {
+      continue;
+    }
+    seen.add(key);
+    moments.push(item.moment);
+  }
+  return moments;
+}
+
+export function canvasFeedbackItemsForMoment(
+  entry: CanvasFeedbackEntry | undefined,
+  moment: CanvasFeedbackMomentRef
+): CanvasFeedbackItem[] {
+  return entry?.items.filter((item) => (
+    item.scope === 'moment'
+    && item.moment.label === moment.label
+    && item.moment.currentTimeSeconds === moment.currentTimeSeconds
+  )) ?? [];
+}
+
+export function canvasFeedbackSpatialItemsForMoment(
+  entry: CanvasFeedbackEntry | undefined,
+  moment: CanvasFeedbackMomentRef
+): CanvasFeedbackSpatialItem[] {
+  return canvasFeedbackItemsForMoment(entry, moment).filter(isCanvasFeedbackSpatialItem);
 }
 
 export function normalizeCanvasFeedbackMarks(marks: unknown): CanvasFeedbackMark[] {
@@ -356,24 +421,43 @@ function createEmptyCanvasFeedbackEntry(projectRelativePath: string, updatedAt: 
   return {
     projectRelativePath,
     marks: [],
-    comments: [],
-    nextRegionLabel: 1,
-    regions: [],
+    nextMomentLabel: 1,
+    nextSpatialLabel: 1,
+    items: [],
     updatedAt
   };
 }
 
-function nextCanvasFeedbackCommentId(comments: CanvasFeedbackComment[], updatedAt: string): string {
+function nextCanvasFeedbackItemId(items: CanvasFeedbackItem[], updatedAt: string): string {
   const timestamp = updatedAt.replace(/[^0-9]/g, '');
-  const prefix = `comment-${timestamp}-`;
-  const maxExistingSuffix = comments.reduce((max, comment) => {
-    if (!comment.id.startsWith(prefix)) {
+  const prefix = `item-${timestamp}-`;
+  const maxExistingSuffix = items.reduce((max, item) => {
+    if (!item.id.startsWith(prefix)) {
       return max;
     }
-    const suffix = Number(comment.id.slice(prefix.length));
+    const suffix = Number(item.id.slice(prefix.length));
     return Number.isInteger(suffix) && suffix > max ? suffix : max;
   }, 0);
   return `${prefix}${maxExistingSuffix + 1}`;
+}
+
+function momentRefForTime(entry: CanvasFeedbackEntry, currentTimeSeconds: number): { entry: CanvasFeedbackEntry; moment: CanvasFeedbackMomentRef } {
+  const normalizedTime = normalizeCanvasVideoPlaybackTime(currentTimeSeconds);
+  const existing = entry.items.find((item) => item.scope === 'moment' && item.moment.currentTimeSeconds === normalizedTime);
+  if (existing?.scope === 'moment') {
+    return { entry, moment: existing.moment };
+  }
+  const moment = {
+    label: `M${entry.nextMomentLabel}`,
+    currentTimeSeconds: normalizedTime
+  };
+  return {
+    entry: {
+      ...entry,
+      nextMomentLabel: entry.nextMomentLabel + 1
+    },
+    moment
+  };
 }
 
 function normalizedCanvasFeedbackEntryForOperation(
@@ -388,14 +472,83 @@ function normalizedCanvasFeedbackEntryForOperation(
       updatedAt
     };
   }
-  if (input.operation === 'add-comment') {
-    const comment = normalizeCanvasFeedbackComment(input.comment);
+  if (input.operation === 'add-item') {
+    const id = nextCanvasFeedbackItemId(entry.items, updatedAt);
+    const comment = normalizeCanvasFeedbackComment(input.item.comment);
+    if (input.item.kind === 'comment' && input.item.scope === 'file') {
+      return {
+        ...entry,
+        items: [
+          ...entry.items,
+          {
+            id,
+            kind: 'comment',
+            scope: 'file',
+            comment,
+            createdAt: updatedAt,
+            updatedAt
+          }
+        ],
+        updatedAt
+      };
+    }
+    if (input.item.kind === 'comment' && input.item.scope === 'moment') {
+      assertCanvasVideoPlaybackTime(input.item.momentTimeSeconds);
+      const { entry: momentEntry, moment } = momentRefForTime(entry, input.item.momentTimeSeconds);
+      return {
+        ...momentEntry,
+        items: [
+          ...momentEntry.items,
+          {
+            id,
+            kind: 'comment',
+            scope: 'moment',
+            moment,
+            comment,
+            createdAt: updatedAt,
+            updatedAt
+          }
+        ],
+        updatedAt
+      };
+    }
+    const geometry = normalizeCanvasFeedbackGeometry(input.item.geometry);
+    validateCanvasFeedbackSpatialKindGeometry(input.item.kind, geometry);
+    const label = entry.nextSpatialLabel;
+    if (input.item.scope === 'file') {
+      return {
+        ...entry,
+        nextSpatialLabel: label + 1,
+        items: [
+          ...entry.items,
+          {
+            id,
+            kind: input.item.kind,
+            scope: 'file',
+            label,
+            geometry,
+            comment,
+            createdAt: updatedAt,
+            updatedAt
+          }
+        ],
+        updatedAt
+      };
+    }
+    assertCanvasVideoPlaybackTime(input.item.momentTimeSeconds);
+    const { entry: momentEntry, moment } = momentRefForTime(entry, input.item.momentTimeSeconds);
     return {
-      ...entry,
-      comments: [
-        ...entry.comments,
+      ...momentEntry,
+      nextSpatialLabel: label + 1,
+      items: [
+        ...momentEntry.items,
         {
-          id: nextCanvasFeedbackCommentId(entry.comments, updatedAt),
+          id,
+          kind: input.item.kind,
+          scope: 'moment',
+          label,
+          geometry,
+          moment,
           comment,
           createdAt: updatedAt,
           updatedAt
@@ -404,93 +557,52 @@ function normalizedCanvasFeedbackEntryForOperation(
       updatedAt
     };
   }
-  if (input.operation === 'update-comment') {
+  if (input.operation === 'update-item') {
     let changed = false;
-    const comments = entry.comments.map((item) => {
-      if (item.id !== input.commentId) {
+    const items = entry.items.map((item) => {
+      if (item.id !== input.itemId) {
         return item;
       }
       changed = true;
+      const comment = input.comment !== undefined
+        ? normalizeCanvasFeedbackComment(input.comment)
+        : item.comment;
+      if (input.geometry !== undefined) {
+        if (!isCanvasFeedbackSpatialItem(item)) {
+          throw new Error(`Canvas feedback item is not spatial: ${input.itemId}`);
+        }
+        const geometry = normalizeCanvasFeedbackGeometry(input.geometry);
+        validateCanvasFeedbackSpatialKindGeometry(item.kind, geometry);
+        return {
+          ...item,
+          geometry,
+          comment,
+          updatedAt
+        };
+      }
       return {
         ...item,
-        comment: normalizeCanvasFeedbackComment(input.comment),
+        comment,
         updatedAt
       };
     });
     if (!changed) {
-      throw new Error(`Canvas feedback comment not found: ${input.commentId}`);
+      throw new Error(`Canvas feedback item not found: ${input.itemId}`);
     }
-    return { ...entry, comments, updatedAt };
-  }
-  if (input.operation === 'delete-comment') {
-    let removed = false;
-    const comments = entry.comments.filter((item) => {
-      if (item.id === input.commentId) {
-        removed = true;
-        return false;
-      }
-      return true;
-    });
-    if (!removed) {
-      throw new Error(`Canvas feedback comment not found: ${input.commentId}`);
-    }
-    return { ...entry, comments, updatedAt };
-  }
-  if (input.operation === 'add-region') {
-    const label = entry.nextRegionLabel;
-    const geometry = normalizeCanvasFeedbackGeometry(input.region.geometry);
-    validateCanvasFeedbackRegionKindGeometry(input.region.kind, geometry);
-    return {
-      ...entry,
-      nextRegionLabel: label + 1,
-      regions: [
-        ...entry.regions,
-        {
-          id: `region-${updatedAt.replace(/[^0-9]/g, '')}-${label}`,
-          label,
-          kind: input.region.kind,
-          geometry,
-          comment: normalizeCanvasFeedbackRegionComment(input.region.comment),
-          createdAt: updatedAt,
-          updatedAt
-        }
-      ],
-      updatedAt
-    };
-  }
-  if (input.operation === 'update-region') {
-    let changed = false;
-    const regions = entry.regions.map((region) => {
-      if (region.id !== input.regionId) {
-        return region;
-      }
-      changed = true;
-      const geometry = input.geometry ? normalizeCanvasFeedbackGeometry(input.geometry) : region.geometry;
-      validateCanvasFeedbackRegionKindGeometry(region.kind, geometry);
-      return {
-        ...region,
-        geometry,
-        ...(input.comment !== undefined ? { comment: normalizeCanvasFeedbackRegionComment(input.comment) } : {}),
-        updatedAt
-      };
-    });
-    if (!changed) {
-      throw new Error(`Canvas feedback region not found: ${input.regionId}`);
-    }
-    return { ...entry, regions, updatedAt };
+    return { ...entry, items, updatedAt };
   }
   let removed = false;
-  const regions = entry.regions.filter((region) => {
-    if (region.id === input.regionId) {
+  const items = entry.items.filter((item) => {
+    if (item.id === input.itemId) {
       removed = true;
       return false;
     }
     return true;
   });
   if (!removed) {
-    throw new Error(`Canvas feedback region not found: ${input.regionId}`);
+    throw new Error(`Canvas feedback item not found: ${input.itemId}`);
   }
-  return { ...entry, regions, updatedAt };
+  return { ...entry, items, updatedAt };
 }
 
 export function createCanvasDocument(input: { id: string }): CanvasDocument {
@@ -627,6 +739,58 @@ export function updateCanvasVideoPlaybackState(
   };
 }
 
+export function updateCanvasTextViewportState(
+  canvas: CanvasDocument,
+  input: {
+    updates: Array<{
+      projectRelativePath: string;
+      scrollTop: number;
+      scrollLeft: number;
+    }>;
+  }
+): CanvasDocument {
+  const updatesByPath = new Map(input.updates.map((update) => {
+    assertCanvasTextViewportScroll(update.scrollTop, update.scrollLeft);
+    return [update.projectRelativePath, {
+      scrollTop: update.scrollTop,
+      scrollLeft: update.scrollLeft
+    }] as const;
+  }));
+  if (updatesByPath.size === 0) {
+    return canvas;
+  }
+  let changed = false;
+  const nodeElements = canvas.nodeElements.map((nodeElement) => {
+    const viewport = updatesByPath.get(nodeElement.projectRelativePath);
+    if (viewport === undefined || nodeElement.nodeKind !== 'file' || nodeElement.mediaKind !== 'text') {
+      return nodeElement;
+    }
+    if (viewport.scrollTop === 0 && viewport.scrollLeft === 0) {
+      if (nodeElement.textViewport === undefined) {
+        return nodeElement;
+      }
+      changed = true;
+      const { textViewport: _textViewport, ...nodeWithoutViewport } = nodeElement;
+      return nodeWithoutViewport;
+    }
+    if (nodeElement.textViewport?.scrollTop === viewport.scrollTop
+      && nodeElement.textViewport.scrollLeft === viewport.scrollLeft) {
+      return nodeElement;
+    }
+    changed = true;
+    return {
+      ...nodeElement,
+      textViewport: viewport
+    };
+  });
+  return changed
+    ? {
+        ...canvas,
+        nodeElements
+      }
+    : canvas;
+}
+
 export function canvasNodeLayerOrderTopFirst(canvas: Pick<CanvasDocument, 'nodeElements'>): string[] {
   return [...canvas.nodeElements]
     .sort((left, right) => compareNodeZ(right, left))
@@ -673,6 +837,9 @@ export function reconcileCanvasNodeElements(input: ReconcileCanvasNodeElementsIn
       ...(existing?.videoPlayback && desiredNode.nodeKind === 'file' && desiredNode.mediaKind === 'video'
         ? { videoPlayback: existing.videoPlayback }
         : {}),
+      ...(existing?.textViewport && desiredNode.nodeKind === 'file' && desiredNode.mediaKind === 'text'
+        ? { textViewport: existing.textViewport }
+        : {}),
       z: preservedZByPath.get(desiredNode.projectRelativePath) ?? allocateNewZ()
     };
     if (existing?.layoutMode === 'manual') {
@@ -716,7 +883,14 @@ function assertCanvasVideoPlaybackTime(currentTimeSeconds: number): void {
   }
 }
 
-function normalizeCanvasVideoPlaybackTime(currentTimeSeconds: number): number {
+function assertCanvasTextViewportScroll(scrollTop: number, scrollLeft: number): void {
+  if (!Number.isFinite(scrollTop) || scrollTop < 0 || !Number.isFinite(scrollLeft) || scrollLeft < 0) {
+    throw new Error('Canvas text viewport scroll values must be non-negative finite numbers.');
+  }
+}
+
+export function normalizeCanvasVideoPlaybackTime(currentTimeSeconds: number): number {
+  assertCanvasVideoPlaybackTime(currentTimeSeconds);
   return Math.round(currentTimeSeconds * 1000) / 1000;
 }
 
@@ -789,114 +963,178 @@ function parentPath(path: string): string | undefined {
 }
 
 function normalizeCanvasFeedbackEntry(value: unknown): CanvasFeedbackEntry {
-  const nextRegionLabel = isRecord(value) ? value.nextRegionLabel : undefined;
+  const nextMomentLabel = isRecord(value) ? value.nextMomentLabel : undefined;
+  const nextSpatialLabel = isRecord(value) ? value.nextSpatialLabel : undefined;
   if (!isRecord(value)
-    || !hasOnlyKeys(value, ['projectRelativePath', 'marks', 'comments', 'nextRegionLabel', 'regions', 'updatedAt'])
+    || !hasOnlyKeys(value, ['projectRelativePath', 'marks', 'nextMomentLabel', 'nextSpatialLabel', 'items', 'updatedAt'])
     || typeof value.projectRelativePath !== 'string'
-    || typeof nextRegionLabel !== 'number'
-    || !Number.isInteger(nextRegionLabel)
-    || nextRegionLabel <= 0
-    || !Array.isArray(value.comments)
-    || !Array.isArray(value.regions)
+    || typeof nextMomentLabel !== 'number'
+    || !Number.isInteger(nextMomentLabel)
+    || nextMomentLabel <= 0
+    || typeof nextSpatialLabel !== 'number'
+    || !Number.isInteger(nextSpatialLabel)
+    || nextSpatialLabel <= 0
+    || !Array.isArray(value.items)
     || typeof value.updatedAt !== 'string') {
     throw new Error('Invalid Canvas feedback entry.');
   }
   assertIsoDateTime(value.updatedAt, 'Canvas feedback entry updatedAt must be an ISO date-time string.');
-  const comments = value.comments.map(normalizeCanvasFeedbackCommentEntry);
-  assertUniqueCanvasFeedbackCommentIds(comments);
-  const regions = value.regions.map(normalizeCanvasFeedbackRegion);
-  assertUniqueCanvasFeedbackRegionIds(regions);
-  assertUniqueCanvasFeedbackRegionLabels(regions);
-  const maxLabel = Math.max(0, ...regions.map((region) => region.label));
-  if (nextRegionLabel <= maxLabel) {
-    throw new Error('Canvas feedback nextRegionLabel must exceed existing region labels.');
+  const items = value.items.map(normalizeCanvasFeedbackItem);
+  assertUniqueCanvasFeedbackItemIds(items);
+  assertUniqueCanvasFeedbackSpatialLabels(items);
+  assertConsistentCanvasFeedbackMoments(items);
+  const maxMomentLabel = Math.max(0, ...items.map((item) => item.scope === 'moment' ? momentLabelNumber(item.moment.label) : 0));
+  const maxSpatialLabel = Math.max(0, ...items.map((item) => isCanvasFeedbackSpatialItem(item) ? item.label : 0));
+  if (nextMomentLabel <= maxMomentLabel) {
+    throw new Error('Canvas feedback nextMomentLabel must exceed existing moment labels.');
+  }
+  if (nextSpatialLabel <= maxSpatialLabel) {
+    throw new Error('Canvas feedback nextSpatialLabel must exceed existing spatial labels.');
   }
   return {
     projectRelativePath: normalizeCanvasFeedbackProjectRelativePath(value.projectRelativePath),
     marks: normalizeCanvasFeedbackMarks(value.marks),
-    comments,
-    nextRegionLabel,
-    regions,
+    nextMomentLabel,
+    nextSpatialLabel,
+    items,
     updatedAt: value.updatedAt
   };
 }
 
-function assertUniqueCanvasFeedbackCommentIds(comments: CanvasFeedbackComment[]): void {
-  const ids = new Set<string>();
-  for (const comment of comments) {
-    if (ids.has(comment.id)) {
-      throw new Error('Canvas feedback comment ids must be unique.');
-    }
-    ids.add(comment.id);
-  }
-}
-
-function assertUniqueCanvasFeedbackRegionIds(regions: CanvasImageFeedbackRegion[]): void {
-  const ids = new Set<string>();
-  for (const region of regions) {
-    if (ids.has(region.id)) {
-      throw new Error('Canvas feedback region ids must be unique.');
-    }
-    ids.add(region.id);
-  }
-}
-
-function assertUniqueCanvasFeedbackRegionLabels(regions: CanvasImageFeedbackRegion[]): void {
-  const labels = new Set<number>();
-  for (const region of regions) {
-    if (labels.has(region.label)) {
-      throw new Error('Canvas feedback region labels must be unique.');
-    }
-    labels.add(region.label);
-  }
-}
-
-function normalizeCanvasFeedbackCommentEntry(value: unknown): CanvasFeedbackComment {
+function normalizeCanvasFeedbackItem(value: unknown): CanvasFeedbackItem {
   if (!isRecord(value)
-    || !hasOnlyKeys(value, ['id', 'comment', 'createdAt', 'updatedAt'])
+    || typeof value.kind !== 'string'
+    || typeof value.scope !== 'string'
     || typeof value.id !== 'string'
     || !value.id.trim()
     || typeof value.createdAt !== 'string'
     || typeof value.updatedAt !== 'string') {
-    throw new Error('Invalid Canvas feedback comment.');
+    throw new Error('Invalid Canvas feedback item.');
   }
-  assertIsoDateTime(value.createdAt, 'Canvas feedback comment createdAt must be an ISO date-time string.');
-  assertIsoDateTime(value.updatedAt, 'Canvas feedback comment updatedAt must be an ISO date-time string.');
-  return {
+  assertIsoDateTime(value.createdAt, 'Canvas feedback item createdAt must be an ISO date-time string.');
+  assertIsoDateTime(value.updatedAt, 'Canvas feedback item updatedAt must be an ISO date-time string.');
+  const base = {
     id: value.id.trim(),
     comment: normalizeCanvasFeedbackComment(value.comment),
     createdAt: value.createdAt,
     updatedAt: value.updatedAt
   };
+  if (value.kind === 'comment' && value.scope === 'file') {
+    if (!hasOnlyKeys(value, ['id', 'kind', 'scope', 'comment', 'createdAt', 'updatedAt'])) {
+      throw new Error('Invalid Canvas feedback item.');
+    }
+    return { ...base, kind: 'comment', scope: 'file' };
+  }
+  if (value.kind === 'comment' && value.scope === 'moment') {
+    if (!hasOnlyKeys(value, ['id', 'kind', 'scope', 'moment', 'comment', 'createdAt', 'updatedAt'])) {
+      throw new Error('Invalid Canvas feedback item.');
+    }
+    return {
+      ...base,
+      kind: 'comment',
+      scope: 'moment',
+      moment: normalizeCanvasFeedbackMomentRef(value.moment)
+    };
+  }
+  if ((value.kind === 'pin' || value.kind === 'region') && (value.scope === 'file' || value.scope === 'moment')) {
+    const label = value.label;
+    if (typeof label !== 'number' || !Number.isInteger(label) || label <= 0) {
+      throw new Error('Invalid Canvas feedback item.');
+    }
+    const geometry = normalizeCanvasFeedbackGeometry(value.geometry);
+    validateCanvasFeedbackSpatialKindGeometry(value.kind, geometry);
+    if (value.scope === 'file') {
+      if (!hasOnlyKeys(value, ['id', 'kind', 'scope', 'label', 'geometry', 'comment', 'createdAt', 'updatedAt'])) {
+        throw new Error('Invalid Canvas feedback item.');
+      }
+      return {
+        ...base,
+        kind: value.kind,
+        scope: 'file',
+        label,
+        geometry
+      };
+    }
+    if (!hasOnlyKeys(value, ['id', 'kind', 'scope', 'label', 'geometry', 'moment', 'comment', 'createdAt', 'updatedAt'])) {
+      throw new Error('Invalid Canvas feedback item.');
+    }
+    return {
+      ...base,
+      kind: value.kind,
+      scope: 'moment',
+      label,
+      geometry,
+      moment: normalizeCanvasFeedbackMomentRef(value.moment)
+    };
+  }
+  throw new Error('Invalid Canvas feedback item.');
 }
 
-function normalizeCanvasFeedbackRegion(value: unknown): CanvasImageFeedbackRegion {
-  const label = isRecord(value) ? value.label : undefined;
-  if (!isRecord(value)
-    || !hasOnlyKeys(value, ['id', 'label', 'kind', 'geometry', 'comment', 'createdAt', 'updatedAt'])
-    || typeof value.id !== 'string'
-    || !value.id.trim()
-    || typeof label !== 'number'
-    || !Number.isInteger(label)
-    || label <= 0
-    || (value.kind !== 'pin' && value.kind !== 'region')
-    || typeof value.createdAt !== 'string'
-    || typeof value.updatedAt !== 'string') {
-    throw new Error('Invalid Canvas feedback region.');
+function normalizeCanvasFeedbackMomentRef(value: unknown): CanvasFeedbackMomentRef {
+  if (!isRecord(value) || typeof value.label !== 'string' || typeof value.currentTimeSeconds !== 'number') {
+    throw new Error('Invalid Canvas feedback moment.');
   }
-  assertIsoDateTime(value.createdAt, 'Canvas feedback region createdAt must be an ISO date-time string.');
-  assertIsoDateTime(value.updatedAt, 'Canvas feedback region updatedAt must be an ISO date-time string.');
-  const geometry = normalizeCanvasFeedbackGeometry(value.geometry);
-  validateCanvasFeedbackRegionKindGeometry(value.kind, geometry);
+  const labelNumber = momentLabelNumber(value.label);
+  assertCanvasVideoPlaybackTime(value.currentTimeSeconds);
   return {
-    id: value.id.trim(),
-    label,
-    kind: value.kind,
-    geometry,
-    comment: normalizeCanvasFeedbackRegionComment(value.comment),
-    createdAt: value.createdAt,
-    updatedAt: value.updatedAt
+    label: `M${labelNumber}`,
+    currentTimeSeconds: normalizeCanvasVideoPlaybackTime(value.currentTimeSeconds)
   };
+}
+
+function momentLabelNumber(label: string): number {
+  const match = /^M([1-9][0-9]*)$/.exec(label);
+  if (!match) {
+    throw new Error(`Invalid Canvas feedback moment label: ${label}`);
+  }
+  return Number(match[1]);
+}
+
+function isCanvasFeedbackSpatialItem(item: CanvasFeedbackItem): item is CanvasFeedbackSpatialItem {
+  return item.kind === 'pin' || item.kind === 'region';
+}
+
+function assertUniqueCanvasFeedbackItemIds(items: CanvasFeedbackItem[]): void {
+  const ids = new Set<string>();
+  for (const item of items) {
+    if (ids.has(item.id)) {
+      throw new Error('Canvas feedback item ids must be unique.');
+    }
+    ids.add(item.id);
+  }
+}
+
+function assertUniqueCanvasFeedbackSpatialLabels(items: CanvasFeedbackItem[]): void {
+  const labels = new Set<number>();
+  for (const item of items) {
+    if (!isCanvasFeedbackSpatialItem(item)) {
+      continue;
+    }
+    if (labels.has(item.label)) {
+      throw new Error('Canvas feedback spatial labels must be unique.');
+    }
+    labels.add(item.label);
+  }
+}
+
+function assertConsistentCanvasFeedbackMoments(items: CanvasFeedbackItem[]): void {
+  const labelByTime = new Map<number, string>();
+  const timeByLabel = new Map<string, number>();
+  for (const item of items) {
+    if (item.scope !== 'moment') {
+      continue;
+    }
+    const existingLabel = labelByTime.get(item.moment.currentTimeSeconds);
+    if (existingLabel !== undefined && existingLabel !== item.moment.label) {
+      throw new Error('Canvas feedback moment times must use one label per timestamp.');
+    }
+    const existingTime = timeByLabel.get(item.moment.label);
+    if (existingTime !== undefined && existingTime !== item.moment.currentTimeSeconds) {
+      throw new Error('Canvas feedback moment labels must use one timestamp per label.');
+    }
+    labelByTime.set(item.moment.currentTimeSeconds, item.moment.label);
+    timeByLabel.set(item.moment.label, item.moment.currentTimeSeconds);
+  }
 }
 
 function normalizeCanvasFeedbackGeometry(value: unknown): CanvasFeedbackGeometry {
@@ -926,7 +1164,7 @@ function normalizeCanvasFeedbackGeometry(value: unknown): CanvasFeedbackGeometry
   throw new Error(`Invalid Canvas feedback geometry type: ${String(value.type)}`);
 }
 
-function validateCanvasFeedbackRegionKindGeometry(kind: CanvasImageFeedbackRegion['kind'], geometry: CanvasFeedbackGeometry): void {
+function validateCanvasFeedbackSpatialKindGeometry(kind: CanvasFeedbackSpatialItem['kind'], geometry: CanvasFeedbackGeometry): void {
   if (kind === 'pin' && geometry.type !== 'point') {
     throw new Error('Canvas feedback pin geometry must be a point.');
   }
@@ -956,17 +1194,6 @@ function normalizeCanvasFeedbackComment(comment: unknown): string {
   const trimmed = comment.trim();
   if (!trimmed) {
     throw new Error('Canvas feedback comment must be non-empty.');
-  }
-  return trimmed;
-}
-
-function normalizeCanvasFeedbackRegionComment(comment: unknown): string {
-  if (typeof comment !== 'string') {
-    throw new Error('Canvas feedback region comment must be a string.');
-  }
-  const trimmed = comment.trim();
-  if (!trimmed) {
-    throw new Error('Canvas feedback region comment must be non-empty.');
   }
   return trimmed;
 }

@@ -86,6 +86,7 @@ import type {
   TerminalResize,
   TerminalSessionList,
   TerminalSessionResult,
+  UpdateCanvasTextViewportStateInput,
   UpdateCanvasVideoPlaybackStateInput
 } from '@debrute/app-protocol';
 import { GlobalConfigStore } from '../config/GlobalConfigStore.js';
@@ -109,8 +110,8 @@ import {
   type CanvasFeedbackRenderDiagnosticUpdate,
   type CanvasFeedbackRenderRunner,
   type CanvasFeedbackRenderScheduler
-} from '../canvas/CanvasFeedbackRenderedImageScheduler.js';
-import { createCanvasFeedbackRenderedImageProcessRunner } from '../canvas/CanvasFeedbackRenderedImageProcessRunner.js';
+} from '../canvas/CanvasFeedbackArtifactScheduler.js';
+import { createCanvasFeedbackArtifactProcessRunner } from '../canvas/CanvasFeedbackArtifactProcessRunner.js';
 import {
   createCanvasImagePreviewService,
   type CanvasImagePreviewResult,
@@ -206,7 +207,7 @@ export interface DebruteAppServerOptions {
   canvasNodeLayoutSizeReader?: (input: ReadCanvasNodeLayoutSizeInput) => Promise<CanvasLayoutSize>;
   terminalPtyFactory?: TerminalPtyFactory;
   canvasFeedbackRenderRunner?: CanvasFeedbackRenderRunner;
-  canvasFeedbackRenderMaxConcurrentImages?: number;
+  canvasFeedbackRenderMaxConcurrentArtifacts?: number;
 }
 
 export type { CliImageModelDetail, CliImageModelListEntry, CliModelDetail, CliModelSummary, CliRuntimeDiagnostic, CliRuntimeStatus, CliVideoModelDetail, CliVideoModelListEntry };
@@ -255,8 +256,8 @@ export class DebruteAppServer {
       onDiagnostic: (diagnostic) => this.recordGeneratedAssetMetadataDiagnostic(diagnostic)
     });
     this.canvasFeedbackRenderScheduler = createCanvasFeedbackRenderScheduler({
-      runner: options.canvasFeedbackRenderRunner ?? createCanvasFeedbackRenderedImageProcessRunner(),
-      ...(options.canvasFeedbackRenderMaxConcurrentImages !== undefined ? { maxConcurrentImages: options.canvasFeedbackRenderMaxConcurrentImages } : {}),
+      runner: options.canvasFeedbackRenderRunner ?? createCanvasFeedbackArtifactProcessRunner(),
+      ...(options.canvasFeedbackRenderMaxConcurrentArtifacts !== undefined ? { maxConcurrentArtifacts: options.canvasFeedbackRenderMaxConcurrentArtifacts } : {}),
       onDiagnostic: (diagnostic) => this.applyCanvasFeedbackRenderedDiagnostics(diagnostic)
     });
     this.canvasFeedbackService = createCanvasFeedbackService({
@@ -813,6 +814,12 @@ export class DebruteAppServer {
     ));
   }
 
+  async updateCanvasTextViewportState(input: UpdateCanvasTextViewportStateInput): Promise<{ canvas: CanvasDocument; projection: CanvasProjection }> {
+    return this.enqueueSessionOperation(async () => (
+      this.applyCanvasSessionUpdate(await this.canvasSessionService.updateCanvasTextViewportState(this.getSnapshot(), input))
+    ));
+  }
+
   async listImageModelsForCli(): Promise<CliImageModelListEntry[]> {
     const settings = await this.readImageModelSettings();
     const configured = new Set(settings.models.filter((model) => model.apiKeySet).map((model) => model.debruteModelId));
@@ -1337,15 +1344,13 @@ function snapshotWithCanvasFeedbackRenderedDiagnostics(
     && renderedFeedback.diagnostics.length === 0) {
     return snapshot;
   }
-  const checkedDiagnosticIds = new Set(
-    renderedFeedback.checkedProjectRelativePaths.map(canvasFeedbackRenderDiagnosticId)
-  );
+  const checkedProjectRelativePaths = new Set(renderedFeedback.checkedProjectRelativePaths);
   const retainedProjectRelativePaths = new Set(renderedFeedback.retainedProjectRelativePaths ?? []);
   const retainedDiagnostics = snapshot.diagnostics.filter((diagnostic) => {
     if (renderedFeedback.checkedAllEntries && diagnostic.id.startsWith(CANVAS_FEEDBACK_RENDER_DIAGNOSTIC_PREFIX)) {
       return typeof diagnostic.entityId === 'string' && retainedProjectRelativePaths.has(diagnostic.entityId);
     }
-    return !checkedDiagnosticIds.has(diagnostic.id);
+    return !canvasFeedbackRenderDiagnosticMatchesCheckedPath(diagnostic, checkedProjectRelativePaths);
   });
   const diagnostics = uniqueDiagnostics([
     ...renderedFeedback.diagnostics,
@@ -1405,8 +1410,21 @@ function snapshotWithDiagnostics(snapshot: ProjectSessionSnapshot, diagnostics: 
   };
 }
 
-function canvasFeedbackRenderDiagnosticId(projectRelativePath: string): string {
-  return `${CANVAS_FEEDBACK_RENDER_DIAGNOSTIC_PREFIX}${projectRelativePath}`;
+function canvasFeedbackRenderDiagnosticMatchesCheckedPath(
+  diagnostic: Diagnostic,
+  checkedProjectRelativePaths: Set<string>
+): boolean {
+  if (!diagnostic.id.startsWith(CANVAS_FEEDBACK_RENDER_DIAGNOSTIC_PREFIX)) {
+    return false;
+  }
+  const diagnosticProjectRelativePath = diagnostic.id.slice(CANVAS_FEEDBACK_RENDER_DIAGNOSTIC_PREFIX.length);
+  for (const checkedProjectRelativePath of checkedProjectRelativePaths) {
+    if (diagnosticProjectRelativePath === checkedProjectRelativePath
+      || diagnosticProjectRelativePath.startsWith(`${checkedProjectRelativePath}#`)) {
+      return true;
+    }
+  }
+  return false;
 }
 
 function uniqueDiagnostics(diagnostics: Diagnostic[]): Diagnostic[] {

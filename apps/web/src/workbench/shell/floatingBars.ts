@@ -1,9 +1,9 @@
-import type {
-  CanvasFeedbackComment,
-  CanvasFeedbackDocument,
-  CanvasFeedbackEntry,
-  CanvasFeedbackGeometry,
-  CanvasImageFeedbackRegion
+import {
+  CANVAS_FEEDBACK_MARKS,
+  type CanvasFeedbackDocument,
+  type CanvasFeedbackEntry,
+  type CanvasFeedbackGeometry,
+  type CanvasFeedbackItem
 } from '@debrute/canvas-core';
 import type { CanvasCamera } from '../canvas/runtime/canvasCamera';
 import { WORKBENCH_FLOATING_DOCK_EDGE_INSET } from './workbenchLayers';
@@ -15,18 +15,26 @@ export interface FloatingBarRect {
   height: number;
 }
 
+export type CanvasFeedbackLocalToolset = 'none' | 'image' | 'video';
+
 export interface CanvasFeedbackBarTarget {
   projectRelativePath: string;
   nodeRect: FloatingBarRect;
   surfaceRect: FloatingBarRect;
   camera: CanvasCamera;
   entry: CanvasFeedbackEntry | undefined;
-  supportsImageLocalFeedback: boolean;
+  localToolset: CanvasFeedbackLocalToolset;
+  canStartVideoMomentFeedback: boolean;
+  startVideoMomentFeedback?: ((mode: 'comment' | 'pin' | 'rect') => void) | undefined;
+  seekToMoment?: ((seconds: number) => void) | undefined;
 }
 
 export interface CanvasLocalFeedbackDraft {
   projectRelativePath: string;
-  geometry: CanvasFeedbackGeometry;
+  kind: 'comment' | 'pin' | 'region';
+  scope: 'file' | 'moment';
+  geometry?: CanvasFeedbackGeometry | undefined;
+  momentTimeSeconds?: number | undefined;
   feedbackBarTarget: CanvasFeedbackBarTarget;
 }
 
@@ -46,7 +54,8 @@ export function sameCanvasFeedbackBarTarget(
     && left.camera.x === right.camera.x
     && left.camera.y === right.camera.y
     && left.camera.z === right.camera.z
-    && left.supportsImageLocalFeedback === right.supportsImageLocalFeedback
+    && left.localToolset === right.localToolset
+    && left.canStartVideoMomentFeedback === right.canStartVideoMomentFeedback
     && sameCanvasFeedbackEntry(left.entry, right.entry);
 }
 
@@ -54,9 +63,20 @@ export interface FloatingBarPlacement extends FloatingBarRect {
   placement: 'below' | 'above';
 }
 
-export const CANVAS_FEEDBACK_BAR_SIZE = {
-  fileOnlyWidth: 325,
-  imageWidth: 397,
+export const CANVAS_FEEDBACK_BAR_LAYOUT = {
+  containerBorderWidth: 1,
+  containerPadding: 3,
+  primaryRowHeight: 30,
+  itemRowHeight: 36,
+  rowGap: 2,
+  actionButtonSize: 28,
+  actionGap: 4,
+  localActionGap: 2,
+  localModeMarginLeft: 2,
+  localModePaddingLeft: 6,
+  localModeBorderWidth: 1,
+  primaryRowGap: 6,
+  creatorWidth: 110,
   oneRowHeight: 38,
   twoRowHeight: 76
 } as const;
@@ -112,7 +132,7 @@ export function canvasNodeToViewportRect(input: {
 }
 
 export function feedbackBarPlacementForCanvasTarget(input: {
-  target: Pick<CanvasFeedbackBarTarget, 'nodeRect' | 'surfaceRect' | 'supportsImageLocalFeedback' | 'entry'>;
+  target: Pick<CanvasFeedbackBarTarget, 'nodeRect' | 'surfaceRect' | 'localToolset' | 'entry'>;
   camera: CanvasCamera;
   viewportRect: FloatingBarRect;
   reservedRects: readonly FloatingBarRect[];
@@ -126,8 +146,8 @@ export function feedbackBarPlacementForCanvasTarget(input: {
     viewportRect: input.viewportRect,
     reservedRects: [...input.reservedRects],
     barSize: canvasFeedbackBarSizeForTarget({
-      supportsImageLocalFeedback: input.target.supportsImageLocalFeedback,
-      hasCommentRow: canvasFeedbackEntryHasCommentRow(input.target.entry)
+      localToolset: input.target.localToolset,
+      hasItemRow: canvasFeedbackEntryHasItemRow(input.target.entry)
     })
   });
 }
@@ -164,10 +184,10 @@ export function placeCanvasFeedbackBar(input: {
   ));
 }
 
-export function canvasFeedbackEntryHasCommentRow(
+export function canvasFeedbackEntryHasItemRow(
   entry: CanvasFeedbackEntry | undefined
 ): boolean {
-  return Boolean((entry?.comments.length ?? 0) > 0 || (entry?.regions.length ?? 0) > 0);
+  return Boolean((entry?.items.length ?? 0) > 0);
 }
 
 export function canvasFeedbackBarTargetWithCurrentEntry(
@@ -179,17 +199,57 @@ export function canvasFeedbackBarTargetWithCurrentEntry(
 }
 
 export function canvasFeedbackBarSizeForTarget(input: {
-  supportsImageLocalFeedback: boolean;
-  hasCommentRow: boolean;
+  localToolset: CanvasFeedbackLocalToolset;
+  hasItemRow: boolean;
+  extraActionCount?: number | undefined;
 }): Pick<FloatingBarRect, 'width' | 'height'> {
+  const baseActionCount = CANVAS_FEEDBACK_MARKS.length + Math.max(0, input.extraActionCount ?? 0);
+  const localActionCount = canvasFeedbackLocalActionCount(input.localToolset);
+  const actionWidth = feedbackActionGroupWidth(baseActionCount, CANVAS_FEEDBACK_BAR_LAYOUT.actionGap)
+    + (localActionCount > 0
+      ? CANVAS_FEEDBACK_BAR_LAYOUT.actionGap
+        + CANVAS_FEEDBACK_BAR_LAYOUT.localModeMarginLeft
+        + CANVAS_FEEDBACK_BAR_LAYOUT.localModeBorderWidth
+        + CANVAS_FEEDBACK_BAR_LAYOUT.localModePaddingLeft
+        + feedbackActionGroupWidth(localActionCount, CANVAS_FEEDBACK_BAR_LAYOUT.localActionGap)
+      : 0);
+  const rowWidth = actionWidth
+    + CANVAS_FEEDBACK_BAR_LAYOUT.primaryRowGap
+    + CANVAS_FEEDBACK_BAR_LAYOUT.creatorWidth;
   return {
-    width: input.supportsImageLocalFeedback
-      ? CANVAS_FEEDBACK_BAR_SIZE.imageWidth
-      : CANVAS_FEEDBACK_BAR_SIZE.fileOnlyWidth,
-    height: input.hasCommentRow
-      ? CANVAS_FEEDBACK_BAR_SIZE.twoRowHeight
-      : CANVAS_FEEDBACK_BAR_SIZE.oneRowHeight
+    width: rowWidth
+      + CANVAS_FEEDBACK_BAR_LAYOUT.containerPadding * 2
+      + CANVAS_FEEDBACK_BAR_LAYOUT.containerBorderWidth * 2,
+    height: input.hasItemRow
+      ? CANVAS_FEEDBACK_BAR_LAYOUT.twoRowHeight
+      : CANVAS_FEEDBACK_BAR_LAYOUT.oneRowHeight
   };
+}
+
+function canvasFeedbackLocalActionCount(localToolset: CanvasFeedbackLocalToolset): number {
+  if (localToolset === 'image') {
+    return 2;
+  }
+  if (localToolset === 'video') {
+    return 3;
+  }
+  return 0;
+}
+
+function feedbackActionGroupWidth(count: number, gap: number): number {
+  if (count <= 0) {
+    return 0;
+  }
+  return count * CANVAS_FEEDBACK_BAR_LAYOUT.actionButtonSize
+    + (count - 1) * gap;
+}
+
+export function canvasFeedbackLocalToolsetForMediaKind(mediaKind: string | undefined): CanvasFeedbackLocalToolset {
+  return mediaKind === 'image'
+    ? 'image'
+    : mediaKind === 'video'
+      ? 'video'
+      : 'none';
 }
 
 export function canvasMinimapButtonRect(viewportRect: FloatingBarRect): FloatingBarRect {
@@ -279,44 +339,38 @@ function sameCanvasFeedbackEntry(
   if (!left
     || !right
     || left.marks.length !== right.marks.length
-    || left.comments.length !== right.comments.length
-    || left.regions.length !== right.regions.length) {
+    || left.items.length !== right.items.length) {
     return false;
   }
   return left.projectRelativePath === right.projectRelativePath
-    && left.nextRegionLabel === right.nextRegionLabel
+    && left.nextMomentLabel === right.nextMomentLabel
+    && left.nextSpatialLabel === right.nextSpatialLabel
     && left.updatedAt === right.updatedAt
     && left.marks.every((mark, index) => mark === right.marks[index])
-    && left.comments.every((comment, index) => sameCanvasFeedbackComment(comment, right.comments[index]))
-    && left.regions.every((region, index) => sameCanvasFeedbackRegion(region, right.regions[index]));
+    && left.items.every((item, index) => sameCanvasFeedbackItem(item, right.items[index]));
 }
 
-function sameCanvasFeedbackComment(
-  left: CanvasFeedbackComment,
-  right: CanvasFeedbackComment | undefined
-): boolean {
-  if (!right) {
+function sameCanvasFeedbackItem(left: CanvasFeedbackItem, right: CanvasFeedbackItem | undefined): boolean {
+  if (!right
+    || left.id !== right.id
+    || left.kind !== right.kind
+    || left.scope !== right.scope
+    || left.comment !== right.comment
+    || left.createdAt !== right.createdAt
+    || left.updatedAt !== right.updatedAt) {
     return false;
   }
-  return left.id === right.id
-    && left.comment === right.comment
-    && left.createdAt === right.createdAt
-    && left.updatedAt === right.updatedAt;
-}
-
-function sameCanvasFeedbackRegion(
-  left: CanvasImageFeedbackRegion,
-  right: CanvasImageFeedbackRegion | undefined
-): boolean {
-  if (!right) {
-    return false;
+  if (left.scope === 'moment') {
+    if (right.scope !== 'moment'
+      || left.moment.label !== right.moment.label
+      || left.moment.currentTimeSeconds !== right.moment.currentTimeSeconds) {
+      return false;
+    }
   }
-  return left.id === right.id
-    && left.label === right.label
-    && left.kind === right.kind
-    && left.comment === right.comment
-    && left.updatedAt === right.updatedAt
-    && sameCanvasFeedbackGeometry(left.geometry, right.geometry);
+  if ((left.kind === 'pin' || left.kind === 'region') && (right.kind === 'pin' || right.kind === 'region')) {
+    return left.label === right.label && sameCanvasFeedbackGeometry(left.geometry, right.geometry);
+  }
+  return left.kind === 'comment' && right.kind === 'comment';
 }
 
 function sameCanvasFeedbackGeometry(left: CanvasFeedbackGeometry, right: CanvasFeedbackGeometry): boolean {

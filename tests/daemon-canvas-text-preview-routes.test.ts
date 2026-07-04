@@ -25,22 +25,10 @@ describe('daemon Canvas text preview routes', () => {
     });
   });
 
-  it('requires project-scoped text preview descriptor reads to use POST', async () => {
+  it('requires project-scoped text preview source availability reads to use POST', async () => {
     const response = await requestOpenProjectRoute({
       method: 'GET',
-      path: '/canvas-text-previews/descriptors'
-    });
-
-    expect(response.status).toBe(405);
-    await expect(response.json()).resolves.toMatchObject({
-      error: { code: 'method_not_allowed' }
-    });
-  });
-
-  it('requires project-scoped text preview reconcile to use POST', async () => {
-    const response = await requestOpenProjectRoute({
-      method: 'GET',
-      path: '/canvas-text-previews/reconcile'
+      path: '/canvas-text-previews/sources'
     });
 
     expect(response.status).toBe(405);

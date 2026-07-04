@@ -11,13 +11,13 @@ import type {
   WorkbenchTitleBarState
 } from '@debrute/app-protocol';
 import { unavailableWorkbenchTitleBarState } from '@debrute/app-protocol';
-import type { ProjectedCanvasNode } from '@debrute/canvas-core';
+import type { CanvasFeedbackEntry, CanvasFeedbackGeometry, ProjectedCanvasNode, UpdateCanvasFeedbackEntryInput } from '@debrute/canvas-core';
 import { createWorkbenchApiClient } from './api/workbenchApiClient';
 import { getDebruteShellApi } from '../api/shellApi';
 import { CanvasEditor } from './canvas/CanvasEditor';
 import { CanvasCardBar } from './canvas/CanvasCardBar';
 import { CanvasFeedbackBar } from './canvas/CanvasFeedbackBar';
-import type { CanvasImageFeedbackDraftRegion, CanvasImageFeedbackMode } from './canvas/CanvasImageFeedbackLayer';
+import type { CanvasMediaFeedbackMode } from './canvas/CanvasMediaFeedbackLayer';
 import { CanvasMinimapBar } from './canvas/CanvasMinimapBar';
 import { CanvasResetLayoutButton } from './canvas/CanvasResetLayoutButton';
 import { createCanvasOverlayRuntime } from './canvas/CanvasOverlayRuntime';
@@ -57,6 +57,7 @@ import {
 } from './shell/contextMenu';
 import { createInlineEditState, validateInlineProjectName, type ProjectTreeInlineEditState } from './project-explorer/projectTreeEditing';
 import type { ProjectTreeFileKeyboardCommand } from './project-explorer/projectTreeKeyboardCommands';
+import { createCanvasTextViewportStateUpdater } from './services/canvasSnapshotUpdates';
 import {
   clearCanvasSelectionAfterDeletedPath,
   clearClipboardAfterDeletedPath,
@@ -125,6 +126,17 @@ import {
 
 const api = createWorkbenchApiClient();
 
+interface PendingCanvasFeedbackItem {
+  projectRelativePath: string;
+  kind: 'comment' | 'pin' | 'region';
+  scope: 'file' | 'moment';
+  momentTimeSeconds?: number | undefined;
+  geometry?: CanvasFeedbackGeometry | undefined;
+  label?: number | string | undefined;
+}
+
+type CanvasFeedbackAddItemInput = Extract<UpdateCanvasFeedbackEntryInput, { operation: 'add-item' }>['item'];
+
 export function WorkbenchApp(): React.ReactElement {
   const initialRoute = useMemo(() => currentDebruteWorkbenchRoute(), []);
   const [snapshot, setSnapshot] = useState<WorkbenchProjectSessionSnapshot>();
@@ -153,11 +165,9 @@ export function WorkbenchApp(): React.ReactElement {
   const [textEditorWindows, setTextEditorWindows] = useState<Record<string, FloatingTextEditorWindowState>>({});
   const [windowOrder, setWindowOrder] = useState<WorkbenchWindowOrderState>(DEFAULT_WORKBENCH_WINDOW_ORDER);
   const [feedbackBarTarget, setFeedbackBarTarget] = useState<CanvasFeedbackBarTarget>();
-  const [localFeedbackMode, setLocalFeedbackMode] = useState<CanvasImageFeedbackMode>();
-  const [pendingFeedbackRegion, setPendingFeedbackRegion] = useState<
-    ({ projectRelativePath: string } & CanvasImageFeedbackDraftRegion) | undefined
-  >();
-  const [pendingFeedbackRegionComment, setPendingFeedbackRegionComment] = useState('');
+  const [localFeedbackMode, setLocalFeedbackMode] = useState<CanvasMediaFeedbackMode>();
+  const [pendingFeedbackItem, setPendingFeedbackItem] = useState<PendingCanvasFeedbackItem>();
+  const [pendingFeedbackItemComment, setPendingFeedbackItemComment] = useState('');
   const [canvasMinimapOpen, setCanvasMinimapOpen] = useState(false);
   const [contextMenu, setContextMenu] = useState<{
     target: WorkbenchContextMenuTarget;
@@ -492,7 +502,9 @@ export function WorkbenchApp(): React.ReactElement {
 
   useEffect(() => {
     return api.onEvent((event) => {
-      setSnapshot((current) => nextSnapshotFromAppServerEvent(event, current));
+      const nextSnapshot = nextSnapshotFromAppServerEvent(event, snapshotRef.current);
+      snapshotRef.current = nextSnapshot;
+      setSnapshot(nextSnapshot);
       if ('projectId' in event) {
         setDaemonProjectId(event.projectId);
       }
@@ -576,6 +588,17 @@ export function WorkbenchApp(): React.ReactElement {
       notifyCanvasFeedbackUnavailable(message);
     }
   }), [notifyCanvasFeedbackUnavailable]);
+  const updateCanvasTextViewportState = useMemo(() => createCanvasTextViewportStateUpdater({
+    getSnapshot: () => snapshotRef.current,
+    commitSnapshot: (next) => {
+      snapshotRef.current = next;
+      setSnapshot(next);
+    },
+    updateCanvasTextViewportState: (canvasId, input) => api.updateCanvasTextViewportState({
+      canvasId,
+      ...input
+    })
+  }), []);
 
   const clearFeedbackBarHideTimer = useCallback(() => {
     if (feedbackBarClearTimerRef.current !== undefined) {
@@ -926,6 +949,7 @@ export function WorkbenchApp(): React.ReactElement {
       snapshotRef.current = next;
       setSnapshot(next);
     },
+    updateCanvasTextViewportState,
     updateCanvasFeedbackEntry,
     addProjectPathToCanvasMap: async (input) => {
       try {
@@ -996,56 +1020,75 @@ export function WorkbenchApp(): React.ReactElement {
     snapshot,
     toggleTextFileWordWrap,
     updateCanvasFeedbackEntry,
+    updateCanvasTextViewportState,
     updateTextFileBuffer,
     workbenchPreferences,
     writeProjectTextFile
   ]);
 
-  const handleLocalFeedbackModeChange = useCallback((mode: CanvasImageFeedbackMode) => {
+  const handleLocalFeedbackModeChange = useCallback((mode: CanvasMediaFeedbackMode) => {
     setLocalFeedbackMode(mode);
-    setPendingFeedbackRegion(undefined);
-    setPendingFeedbackRegionComment('');
+    setPendingFeedbackItem(undefined);
+    setPendingFeedbackItemComment('');
   }, []);
 
   const handleLocalFeedbackDraft = useCallback((draft: CanvasLocalFeedbackDraft) => {
     clearFeedbackBarHideTimer();
     setFeedbackBarTarget(draft.feedbackBarTarget);
-    setPendingFeedbackRegion({
+    const currentEntry = canvasFeedback?.entries[draft.projectRelativePath];
+    const shouldKeepComment = pendingFeedbackItem?.projectRelativePath === draft.projectRelativePath
+      && pendingFeedbackItem.kind === draft.kind
+      && pendingFeedbackItem.scope === draft.scope
+      && pendingFeedbackItem.momentTimeSeconds === draft.momentTimeSeconds;
+    setPendingFeedbackItem({
       projectRelativePath: draft.projectRelativePath,
+      kind: draft.kind,
+      scope: draft.scope,
+      momentTimeSeconds: draft.momentTimeSeconds,
       geometry: draft.geometry,
-      label: canvasFeedback?.entries[draft.projectRelativePath]?.nextRegionLabel ?? 1
+      label: pendingCanvasFeedbackItemLabel(draft, currentEntry)
     });
-    setPendingFeedbackRegionComment('');
-  }, [canvasFeedback, clearFeedbackBarHideTimer]);
-
-  const cancelPendingFeedbackRegion = useCallback(() => {
-    setPendingFeedbackRegion(undefined);
-    setPendingFeedbackRegionComment('');
-  }, []);
-
-  const savePendingFeedbackRegion = useCallback(async () => {
-    if (!pendingFeedbackRegion || !localFeedbackMode) {
-      return;
+    setLocalFeedbackMode(draft.kind === 'pin' ? 'pin' : draft.kind === 'region' ? 'rect' : undefined);
+    if (!shouldKeepComment) {
+      setPendingFeedbackItemComment('');
     }
-    const comment = pendingFeedbackRegionComment.trim();
+  }, [canvasFeedback, clearFeedbackBarHideTimer, pendingFeedbackItem]);
+
+  const cancelPendingFeedbackItem = useCallback(() => {
+    if (pendingFeedbackItem?.scope === 'moment') {
+      setLocalFeedbackMode(undefined);
+    }
+    setPendingFeedbackItem(undefined);
+    setPendingFeedbackItemComment('');
+  }, [pendingFeedbackItem]);
+
+  const savePendingFeedbackItem = useCallback(async () => {
+    if (!pendingFeedbackItem) {
+      return false;
+    }
+    const comment = pendingFeedbackItemComment.trim();
     if (!comment) {
-      return;
+      return false;
+    }
+    const item = canvasFeedbackAddItemForPending(pendingFeedbackItem, comment);
+    if (!item) {
+      return false;
     }
     const saved = await updateCanvasFeedbackEntry({
-      operation: 'add-region',
-      projectRelativePath: pendingFeedbackRegion.projectRelativePath,
-      region: {
-        kind: localFeedbackMode === 'pin' ? 'pin' : 'region',
-        geometry: pendingFeedbackRegion.geometry,
-        comment
-      }
+      operation: 'add-item',
+      projectRelativePath: pendingFeedbackItem.projectRelativePath,
+      item
     });
     if (!saved) {
-      return;
+      return false;
     }
-    setPendingFeedbackRegion(undefined);
-    setPendingFeedbackRegionComment('');
-  }, [localFeedbackMode, pendingFeedbackRegion, pendingFeedbackRegionComment, updateCanvasFeedbackEntry]);
+    if (pendingFeedbackItem.scope === 'moment') {
+      setLocalFeedbackMode(undefined);
+    }
+    setPendingFeedbackItem(undefined);
+    setPendingFeedbackItemComment('');
+    return true;
+  }, [pendingFeedbackItem, pendingFeedbackItemComment, updateCanvasFeedbackEntry]);
 
   const updateInlineProjectTreeEditValue = useCallback((value: string) => {
     setInlineProjectTreeEdit((current) => current ? { ...current, value } : current);
@@ -1454,7 +1497,7 @@ export function WorkbenchApp(): React.ReactElement {
             onRuntimeChange={setActiveCanvasRuntime}
             onOpenContextMenu={openWorkbenchContextMenu}
             localFeedbackMode={localFeedbackMode}
-            pendingFeedbackRegion={pendingFeedbackRegion}
+            pendingFeedbackItem={pendingFeedbackItem}
             onLocalFeedbackDraft={handleLocalFeedbackDraft}
           />
         )}
@@ -1493,31 +1536,40 @@ export function WorkbenchApp(): React.ReactElement {
             entry={currentFeedbackBarTarget.entry}
             onUpdate={actions.updateCanvasFeedbackEntry}
             overlayRuntime={canvasOverlayRuntime}
-            localFeedbackMode={currentFeedbackBarTarget.supportsImageLocalFeedback ? localFeedbackMode : undefined}
-            onLocalFeedbackModeChange={currentFeedbackBarTarget.supportsImageLocalFeedback ? handleLocalFeedbackModeChange : undefined}
-            pendingRegionComment={
-              currentFeedbackBarTarget.supportsImageLocalFeedback && pendingFeedbackRegion?.projectRelativePath === currentFeedbackBarTarget.projectRelativePath
-                ? pendingFeedbackRegionComment
+            localToolset={currentFeedbackBarTarget.localToolset}
+            localFeedbackMode={currentFeedbackBarTarget.localToolset !== 'none' ? localFeedbackMode : undefined}
+            onLocalFeedbackModeChange={currentFeedbackBarTarget.localToolset === 'image' ? handleLocalFeedbackModeChange : undefined}
+            canStartVideoMomentFeedback={currentFeedbackBarTarget.canStartVideoMomentFeedback}
+            onStartVideoMomentFeedback={currentFeedbackBarTarget.startVideoMomentFeedback}
+            onSeekToMoment={currentFeedbackBarTarget.seekToMoment}
+            pendingItemComment={
+              pendingFeedbackItem?.projectRelativePath === currentFeedbackBarTarget.projectRelativePath
+                ? pendingFeedbackItemComment
                 : undefined
             }
-            pendingRegionLabel={
-              currentFeedbackBarTarget.supportsImageLocalFeedback && pendingFeedbackRegion?.projectRelativePath === currentFeedbackBarTarget.projectRelativePath
-                ? pendingFeedbackRegion.label
+            pendingItemLabel={
+              pendingFeedbackItem?.projectRelativePath === currentFeedbackBarTarget.projectRelativePath
+                ? pendingFeedbackItem.label
                 : undefined
             }
-            onPendingRegionCommentChange={
-              currentFeedbackBarTarget.supportsImageLocalFeedback && pendingFeedbackRegion?.projectRelativePath === currentFeedbackBarTarget.projectRelativePath
-                ? setPendingFeedbackRegionComment
+            pendingItemReadyForComment={
+              pendingFeedbackItem?.projectRelativePath === currentFeedbackBarTarget.projectRelativePath
+                ? pendingFeedbackItem.kind === 'comment' || pendingFeedbackItem.geometry !== undefined
                 : undefined
             }
-            onSavePendingRegion={
-              currentFeedbackBarTarget.supportsImageLocalFeedback && pendingFeedbackRegion?.projectRelativePath === currentFeedbackBarTarget.projectRelativePath
-                ? () => { void savePendingFeedbackRegion(); }
+            onPendingItemCommentChange={
+              pendingFeedbackItem?.projectRelativePath === currentFeedbackBarTarget.projectRelativePath
+                ? setPendingFeedbackItemComment
                 : undefined
             }
-            onCancelPendingRegion={
-              currentFeedbackBarTarget.supportsImageLocalFeedback && pendingFeedbackRegion?.projectRelativePath === currentFeedbackBarTarget.projectRelativePath
-                ? cancelPendingFeedbackRegion
+            onSavePendingItem={
+              pendingFeedbackItem?.projectRelativePath === currentFeedbackBarTarget.projectRelativePath
+                ? savePendingFeedbackItem
+                : undefined
+            }
+            onCancelPendingItem={
+              pendingFeedbackItem?.projectRelativePath === currentFeedbackBarTarget.projectRelativePath
+                ? cancelPendingFeedbackItem
                 : undefined
             }
             onPointerEnter={handleFeedbackBarPointerEnter}
@@ -1755,6 +1807,68 @@ function externalUploadPathRelativeToTarget(projectRelativePath: string, targetD
 function nativePathBasename(path: string): string {
   const normalized = path.replaceAll('\\', '/').replace(/\/$/, '');
   return normalized.slice(normalized.lastIndexOf('/') + 1);
+}
+
+function pendingCanvasFeedbackItemLabel(
+  draft: CanvasLocalFeedbackDraft,
+  entry: CanvasFeedbackEntry | undefined
+): number | string | undefined {
+  if (draft.kind === 'pin' || draft.kind === 'region') {
+    return entry?.nextSpatialLabel ?? 1;
+  }
+  if (draft.scope === 'moment' && draft.momentTimeSeconds !== undefined) {
+    for (const item of entry?.items ?? []) {
+      if (item.scope === 'moment' && item.moment.currentTimeSeconds === draft.momentTimeSeconds) {
+        return item.moment.label;
+      }
+    }
+  }
+  return undefined;
+}
+
+function canvasFeedbackAddItemForPending(
+  pending: PendingCanvasFeedbackItem,
+  comment: string
+): CanvasFeedbackAddItemInput | undefined {
+  if (pending.scope === 'file') {
+    if (pending.kind === 'comment') {
+      return {
+        kind: 'comment',
+        scope: 'file',
+        comment
+      };
+    }
+    if (!pending.geometry) {
+      return undefined;
+    }
+    return {
+      kind: pending.kind,
+      scope: 'file',
+      geometry: pending.geometry,
+      comment
+    };
+  }
+  if (pending.momentTimeSeconds === undefined) {
+    return undefined;
+  }
+  if (pending.kind === 'comment') {
+    return {
+      kind: 'comment',
+      scope: 'moment',
+      momentTimeSeconds: pending.momentTimeSeconds,
+      comment
+    };
+  }
+  if (!pending.geometry) {
+    return undefined;
+  }
+  return {
+    kind: pending.kind,
+    scope: 'moment',
+    momentTimeSeconds: pending.momentTimeSeconds,
+    geometry: pending.geometry,
+    comment
+  };
 }
 
 function sessionProjectViewStorage(): Storage | undefined {

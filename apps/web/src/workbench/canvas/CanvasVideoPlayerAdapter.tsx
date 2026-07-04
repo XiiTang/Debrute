@@ -14,9 +14,11 @@ import {
   MediaTimeRange,
   MediaVolumeRange
 } from 'media-chrome/react';
-import type { ProjectedCanvasNode } from '@debrute/canvas-core';
+import { normalizeCanvasVideoPlaybackTime, type ProjectedCanvasNode } from '@debrute/canvas-core';
 
 export interface CanvasVideoPlayerHandle {
+  readCurrentTimeSeconds(): number | undefined;
+  pauseAt(seconds: number): void;
   togglePlayback(): void;
   seekBy(seconds: number): void;
   toggleMuted(): void;
@@ -36,6 +38,8 @@ export interface CanvasVideoPlayerAdapterProps {
   playRequest?: CanvasVideoPlayRequest | undefined;
   onPointerInside: () => void;
   onFocusInside: () => void;
+  formatPlayError: (projectRelativePath: string) => string;
+  formatSeekError: (projectRelativePath: string, seconds: number) => string;
   onError: (message: string) => void;
   onPlayingChange: (playing: boolean) => void;
   onPlaybackBoundary: (currentTimeSeconds: number) => void;
@@ -49,6 +53,8 @@ export const CanvasVideoPlayerAdapter = forwardRef<CanvasVideoPlayerHandle, Canv
   playRequest,
   onPointerInside,
   onFocusInside,
+  formatPlayError,
+  formatSeekError,
   onError,
   onPlayingChange,
   onPlaybackBoundary,
@@ -100,7 +106,7 @@ export const CanvasVideoPlayerAdapter = forwardRef<CanvasVideoPlayerHandle, Canv
     if (initialTimeSeconds <= 0) {
       return;
     }
-    const message = `Unable to seek ${node.projectRelativePath} to ${initialTimeSeconds} seconds.`;
+    const message = formatSeekError(node.projectRelativePath, initialTimeSeconds);
     if (presentation.durationSeconds !== undefined && initialTimeSeconds > presentation.durationSeconds) {
       reportInitialSeekError(message);
       return;
@@ -111,7 +117,7 @@ export const CanvasVideoPlayerAdapter = forwardRef<CanvasVideoPlayerHandle, Canv
     } catch {
       reportInitialSeekError(message);
     }
-  }, [initialTimeSeconds, node.projectRelativePath, presentation.durationSeconds, reportInitialSeekError]);
+  }, [formatSeekError, initialTimeSeconds, node.projectRelativePath, presentation.durationSeconds, reportInitialSeekError]);
 
   const handleDisplayDataReady = useCallback(() => {
     if (!pendingInitialSeekRef.current) {
@@ -119,13 +125,18 @@ export const CanvasVideoPlayerAdapter = forwardRef<CanvasVideoPlayerHandle, Canv
     }
   }, [reportReadyForDisplay]);
 
-  const handleSeeked = useCallback(() => {
-    if (!pendingInitialSeekRef.current) {
+  const handleSeeked = useCallback((event: React.SyntheticEvent<HTMLVideoElement>) => {
+    const video = event.currentTarget;
+    if (pendingInitialSeekRef.current) {
+      pendingInitialSeekRef.current = false;
+      publishPlaybackBoundary(video.currentTime);
+      reportReadyForDisplay();
       return;
     }
-    pendingInitialSeekRef.current = false;
-    reportReadyForDisplay();
-  }, [reportReadyForDisplay]);
+    if (video.paused) {
+      publishPlaybackBoundary(video.currentTime);
+    }
+  }, [publishPlaybackBoundary, reportReadyForDisplay]);
 
   useEffect(() => () => {
     const video = videoRef.current;
@@ -144,11 +155,26 @@ export const CanvasVideoPlayerAdapter = forwardRef<CanvasVideoPlayerHandle, Canv
     consumedPlayRequestIdRef.current = request.requestId;
     onPlayRequestConsumed?.(request.requestId);
     void video.play().catch(() => {
-      onError(`Unable to play ${node.projectRelativePath}.`);
+      onError(formatPlayError(node.projectRelativePath));
     });
-  }, [node.projectRelativePath, onError, onPlayRequestConsumed, playRequest]);
+  }, [formatPlayError, node.projectRelativePath, onError, onPlayRequestConsumed, playRequest]);
 
   useImperativeHandle(ref, () => ({
+    readCurrentTimeSeconds: () => {
+      const video = videoRef.current;
+      return video && Number.isFinite(video.currentTime)
+        ? normalizeCanvasVideoPlaybackTime(Math.max(0, video.currentTime))
+        : undefined;
+    },
+    pauseAt: (seconds) => {
+      const video = videoRef.current;
+      if (!video) return;
+      const currentTimeSeconds = normalizeCanvasVideoPlaybackTime(Math.max(0, seconds));
+      video.pause();
+      video.currentTime = currentTimeSeconds;
+      publishPlaybackBoundary(currentTimeSeconds);
+      onPlayingChange(false);
+    },
     togglePlayback: () => {
       const video = videoRef.current;
       if (!video) return;
@@ -199,7 +225,7 @@ export const CanvasVideoPlayerAdapter = forwardRef<CanvasVideoPlayerHandle, Canv
         void video.requestPictureInPicture?.();
       }
     }
-  }), []);
+  }), [onPlayingChange, publishPlaybackBoundary]);
 
   return (
     <div
@@ -231,7 +257,7 @@ export const CanvasVideoPlayerAdapter = forwardRef<CanvasVideoPlayerHandle, Canv
             event.currentTarget.currentTime = 0;
             publishPlaybackBoundary(0);
           }}
-          onError={() => onError(`Unable to play ${node.projectRelativePath}.`)}
+          onError={() => onError(formatPlayError(node.projectRelativePath))}
         >
           {textTracks.map((track) => (
             <track

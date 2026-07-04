@@ -1,9 +1,25 @@
-import type { CanvasFeedbackEntry } from '@debrute/canvas-core';
+import type {
+  CanvasFeedbackEntry,
+  CanvasFeedbackMomentRef
+} from '@debrute/canvas-core';
+
+export type CanvasFeedbackArtifact =
+  | {
+      readonly kind: 'image';
+      readonly projectRelativePath: string;
+      readonly entry: CanvasFeedbackEntry;
+    }
+  | {
+      readonly kind: 'video-moment';
+      readonly projectRelativePath: string;
+      readonly moment: CanvasFeedbackMomentRef;
+      readonly entry: CanvasFeedbackEntry;
+    };
 
 export interface CanvasFeedbackRenderJobInput {
   readonly jobId: string;
   readonly projectRoot: string;
-  readonly entry: CanvasFeedbackEntry;
+  readonly artifact: CanvasFeedbackArtifact;
   readonly outputPath: string;
 }
 

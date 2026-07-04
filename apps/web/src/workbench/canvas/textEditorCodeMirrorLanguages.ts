@@ -26,6 +26,10 @@ import { perl } from '@codemirror/legacy-modes/mode/perl';
 import { r } from '@codemirror/legacy-modes/mode/r';
 import { powerShell } from '@codemirror/legacy-modes/mode/powershell';
 import { properties } from '@codemirror/legacy-modes/mode/properties';
+import { toml } from '@codemirror/legacy-modes/mode/toml';
+import { stex } from '@codemirror/legacy-modes/mode/stex';
+import { textile } from '@codemirror/legacy-modes/mode/textile';
+import { protobuf } from '@codemirror/legacy-modes/mode/protobuf';
 
 export type CodeMirrorLanguageKind =
   | 'plain'
@@ -56,7 +60,11 @@ export type CodeMirrorLanguageKind =
   | 'perl'
   | 'r'
   | 'powershell'
-  | 'properties';
+  | 'properties'
+  | 'toml'
+  | 'tex'
+  | 'textile'
+  | 'protobuf';
 
 const codeMirrorLanguageKinds = {
   plaintext: 'plain',
@@ -97,7 +105,16 @@ const codeMirrorLanguageKinds = {
   makefile: 'plain',
   diff: 'diff',
   csv: 'plain',
-  tsv: 'plain'
+  tsv: 'plain',
+  subtitle: 'plain',
+  webvtt: 'plain',
+  toml: 'toml',
+  tex: 'tex',
+  textile: 'textile',
+  protobuf: 'protobuf',
+  restructuredtext: 'plain',
+  asciidoc: 'plain',
+  org: 'plain'
 } satisfies Record<ProjectTextLanguageId, CodeMirrorLanguageKind>;
 
 export function codeMirrorLanguageKindForProjectTextLanguage(
@@ -166,6 +183,14 @@ export function codeMirrorLanguageExtensionForProjectTextLanguage(
       return StreamLanguage.define(powerShell);
     case 'properties':
       return StreamLanguage.define(properties);
+    case 'toml':
+      return StreamLanguage.define(toml);
+    case 'tex':
+      return StreamLanguage.define(stex);
+    case 'textile':
+      return StreamLanguage.define(textile);
+    case 'protobuf':
+      return StreamLanguage.define(protobuf);
     case 'plain':
       return [];
   }

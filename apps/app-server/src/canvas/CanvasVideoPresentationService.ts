@@ -13,13 +13,19 @@ import type {
 export interface BuildCanvasVideoPresentationInput {
   projectRoot: string;
   projectRelativePath: string;
+  width: number;
+  height: number;
   durationSeconds?: number | undefined;
 }
 
 export async function buildCanvasVideoPresentation(input: BuildCanvasVideoPresentationInput): Promise<CanvasVideoPresentation> {
   const projectRelativePath = normalizeProjectRelativePath(input.projectRelativePath);
+  assertPositiveInteger(input.width, 'Canvas video presentation width must be a positive integer.');
+  assertPositiveInteger(input.height, 'Canvas video presentation height must be a positive integer.');
   return {
     kind: 'video',
+    width: input.width,
+    height: input.height,
     ...(input.durationSeconds === undefined ? {} : { durationSeconds: input.durationSeconds }),
     textTracks: await textTracks(input, projectRelativePath)
   };
@@ -158,6 +164,12 @@ function basenameWithoutMediaExtension(projectRelativePath: string): string {
   const name = projectRelativePath.split('/').pop() ?? projectRelativePath;
   const extension = extname(name);
   return extension ? name.slice(0, -extension.length) : name;
+}
+
+function assertPositiveInteger(value: number, message: string): void {
+  if (!Number.isInteger(value) || value <= 0) {
+    throw new Error(message);
+  }
 }
 
 function isNotFoundError(error: unknown): boolean {

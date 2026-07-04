@@ -36,6 +36,24 @@ import {
   type CanvasVideoPlayerHandle
 } from './CanvasVideoPlayerAdapter';
 
+type TestCanvasVideoPlayerAdapterProps = Omit<
+  React.ComponentPropsWithoutRef<typeof CanvasVideoPlayerAdapter>,
+  'formatPlayError' | 'formatSeekError'
+>;
+
+const TestCanvasVideoPlayerAdapter = React.forwardRef<CanvasVideoPlayerHandle, TestCanvasVideoPlayerAdapterProps>(
+  function TestCanvasVideoPlayerAdapter(props, ref) {
+    return (
+      <CanvasVideoPlayerAdapter
+        {...props}
+        ref={ref}
+        formatPlayError={(projectRelativePath) => `Unable to play ${projectRelativePath}.`}
+        formatSeekError={(projectRelativePath, seconds) => `Unable to seek ${projectRelativePath} to ${seconds} seconds.`}
+      />
+    );
+  }
+);
+
 afterEach(() => {
   vi.restoreAllMocks();
 });
@@ -55,7 +73,7 @@ describe('CanvasVideoPlayerAdapter', () => {
     try {
       await act(async () => {
         root.render(
-          <CanvasVideoPlayerAdapter
+          <TestCanvasVideoPlayerAdapter
             ref={ref}
             node={videoNode()}
             initialTimeSeconds={0}
@@ -101,7 +119,7 @@ describe('CanvasVideoPlayerAdapter', () => {
     try {
       await act(async () => {
         root.render(
-          <CanvasVideoPlayerAdapter
+          <TestCanvasVideoPlayerAdapter
             node={videoNode()}
             initialTimeSeconds={0}
             onPointerInside={() => undefined}
@@ -134,7 +152,7 @@ describe('CanvasVideoPlayerAdapter', () => {
     try {
       await act(async () => {
         root.render(
-          <CanvasVideoPlayerAdapter
+          <TestCanvasVideoPlayerAdapter
             node={videoNode()}
             initialTimeSeconds={0}
             onPointerInside={() => undefined}
@@ -157,7 +175,7 @@ describe('CanvasVideoPlayerAdapter', () => {
 
       await act(async () => {
         root.render(
-          <CanvasVideoPlayerAdapter
+          <TestCanvasVideoPlayerAdapter
             node={videoNode()}
             initialTimeSeconds={0}
             playRequest={{ requestId: 1 }}
@@ -173,7 +191,7 @@ describe('CanvasVideoPlayerAdapter', () => {
 
       await act(async () => {
         root.render(
-          <CanvasVideoPlayerAdapter
+          <TestCanvasVideoPlayerAdapter
             node={videoNode()}
             initialTimeSeconds={0}
             playRequest={{ requestId: 1 }}
@@ -189,7 +207,7 @@ describe('CanvasVideoPlayerAdapter', () => {
 
       await act(async () => {
         root.render(
-          <CanvasVideoPlayerAdapter
+          <TestCanvasVideoPlayerAdapter
             node={videoNode()}
             initialTimeSeconds={0}
             playRequest={{ requestId: 2 }}
@@ -219,7 +237,7 @@ describe('CanvasVideoPlayerAdapter', () => {
     try {
       await act(async () => {
         root.render(
-          <CanvasVideoPlayerAdapter
+          <TestCanvasVideoPlayerAdapter
             node={videoNode()}
             initialTimeSeconds={0}
             onPointerInside={() => undefined}
@@ -244,7 +262,7 @@ describe('CanvasVideoPlayerAdapter', () => {
 
       await act(async () => {
         root.render(
-          <CanvasVideoPlayerAdapter
+          <TestCanvasVideoPlayerAdapter
             node={videoNode()}
             initialTimeSeconds={0}
             playRequest={{ requestId: 1 }}
@@ -275,7 +293,7 @@ describe('CanvasVideoPlayerAdapter', () => {
     try {
       await act(async () => {
         root.render(
-          <CanvasVideoPlayerAdapter
+          <TestCanvasVideoPlayerAdapter
             node={videoNode()}
             initialTimeSeconds={0}
             onPointerInside={() => undefined}
@@ -320,7 +338,7 @@ describe('CanvasVideoPlayerAdapter', () => {
     try {
       await act(async () => {
         root.render(
-          <CanvasVideoPlayerAdapter
+          <TestCanvasVideoPlayerAdapter
             node={videoNode({ durationSeconds: 10 })}
             initialTimeSeconds={4.5}
             onPointerInside={() => undefined}
@@ -362,7 +380,7 @@ describe('CanvasVideoPlayerAdapter', () => {
     try {
       await act(async () => {
         root.render(
-          <CanvasVideoPlayerAdapter
+          <TestCanvasVideoPlayerAdapter
             node={videoNode({ durationSeconds: 5 })}
             initialTimeSeconds={6.25}
             onPointerInside={() => undefined}
@@ -407,7 +425,7 @@ describe('CanvasVideoPlayerAdapter', () => {
     try {
       await act(async () => {
         root.render(
-          <CanvasVideoPlayerAdapter
+          <TestCanvasVideoPlayerAdapter
             node={videoNode()}
             initialTimeSeconds={4.5}
             onPointerInside={() => undefined}
@@ -456,6 +474,51 @@ describe('CanvasVideoPlayerAdapter', () => {
     }
   });
 
+  it('reports playback boundary events when a paused seek completes', async () => {
+    const container = document.createElement('div');
+    document.body.append(container);
+    const root = createRoot(container);
+    const onPlaybackBoundary = vi.fn();
+
+    try {
+      await act(async () => {
+        root.render(
+          <TestCanvasVideoPlayerAdapter
+            node={videoNode()}
+            initialTimeSeconds={0}
+            onPointerInside={() => undefined}
+            onFocusInside={() => undefined}
+            onError={() => undefined}
+            onPlayingChange={() => undefined}
+            onPlaybackBoundary={onPlaybackBoundary}
+          />
+        );
+      });
+      const video = requiredVideo(container);
+
+      video.currentTime = 6.25;
+      act(() => {
+        video.dispatchEvent(new Event('seeked', { bubbles: true }));
+      });
+
+      expect(onPlaybackBoundary).toHaveBeenCalledTimes(1);
+      expect(onPlaybackBoundary).toHaveBeenLastCalledWith(6.25);
+
+      video.currentTime = 0;
+      act(() => {
+        video.dispatchEvent(new Event('seeked', { bubbles: true }));
+      });
+
+      expect(onPlaybackBoundary).toHaveBeenCalledTimes(2);
+      expect(onPlaybackBoundary).toHaveBeenLastCalledWith(0);
+    } finally {
+      await act(async () => {
+        root.unmount();
+      });
+      container.remove();
+    }
+  });
+
   it('reports a playback error when the initial time is outside the projected duration', async () => {
     const container = document.createElement('div');
     document.body.append(container);
@@ -465,7 +528,7 @@ describe('CanvasVideoPlayerAdapter', () => {
     try {
       await act(async () => {
         root.render(
-          <CanvasVideoPlayerAdapter
+          <TestCanvasVideoPlayerAdapter
             node={videoNode({ durationSeconds: 5 })}
             initialTimeSeconds={6.25}
             onPointerInside={() => undefined}
@@ -505,7 +568,7 @@ describe('CanvasVideoPlayerAdapter', () => {
     try {
       await act(async () => {
         root.render(
-          <CanvasVideoPlayerAdapter
+          <TestCanvasVideoPlayerAdapter
             node={videoNode({ durationSeconds: 10 })}
             initialTimeSeconds={4.5}
             onPointerInside={() => undefined}
@@ -561,6 +624,8 @@ function requiredVideo(container: HTMLElement): HTMLVideoElement {
 function videoNode(options: { durationSeconds?: number } = {}): ProjectedCanvasNode {
   const videoPresentation: ProjectedCanvasNode['videoPresentation'] = {
     kind: 'video',
+    width: 640,
+    height: 360,
     textTracks: []
   };
   if (options.durationSeconds !== undefined) {

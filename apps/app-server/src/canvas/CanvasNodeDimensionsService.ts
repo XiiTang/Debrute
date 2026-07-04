@@ -22,22 +22,21 @@ export interface CanvasVideoMetadata extends CanvasLayoutSize {
 }
 
 const FIXED_CANVAS_LAYOUT_SCALE = 10;
-const GENERIC_NODE_MAX_VISUAL_WIDTH = 480;
+const GENERIC_NODE_MIN_VISUAL_WIDTH = 180;
+const GENERIC_NODE_MAX_VISUAL_WIDTH = 720;
+const GENERIC_NODE_VISUAL_HEIGHT = 64;
+const GENERIC_NODE_ICON_VISUAL_WIDTH = 24;
+const GENERIC_NODE_TEXT_GAP_VISUAL_WIDTH = 8;
+const GENERIC_NODE_HORIZONTAL_PADDING_VISUAL_WIDTH = 24;
 const LATIN_CHARACTER_VISUAL_WIDTH = 8;
 const FULL_WIDTH_CHARACTER_VISUAL_WIDTH = 16;
-const DIRECTORY_CANVAS_LAYOUT_HEIGHT = 96;
-const GENERIC_NODE_MIN_VISUAL_WIDTH = 150;
 const TEXT_CANVAS_LAYOUT_SIZE = scaledFixedCanvasLayoutSize({ width: 420, height: 280 });
 const AUDIO_CANVAS_LAYOUT_SIZE = scaledFixedCanvasLayoutSize({ width: 320, height: 96 });
-const UNKNOWN_CANVAS_LAYOUT_HEIGHT = 120;
 const PROJECT_ROOT_DISPLAY_NAME = 'Project Root';
 
 export async function readCanvasNodeLayoutSize(input: ReadCanvasNodeLayoutSizeInput): Promise<CanvasLayoutSize> {
   if (input.nodeKind === 'directory') {
-    return genericCanvasLayoutSize({
-      projectRelativePath: input.projectRelativePath,
-      height: DIRECTORY_CANVAS_LAYOUT_HEIGHT
-    });
+    return genericCanvasLayoutSize(input.projectRelativePath);
   }
   if (input.mediaKind === 'text') {
     return TEXT_CANVAS_LAYOUT_SIZE;
@@ -46,10 +45,7 @@ export async function readCanvasNodeLayoutSize(input: ReadCanvasNodeLayoutSizeIn
     return AUDIO_CANVAS_LAYOUT_SIZE;
   }
   if (input.mediaKind === 'unknown') {
-    return genericCanvasLayoutSize({
-      projectRelativePath: input.projectRelativePath,
-      height: UNKNOWN_CANVAS_LAYOUT_HEIGHT
-    });
+    return genericCanvasLayoutSize(input.projectRelativePath);
   }
   const absolutePath = await resolveExistingProjectPath(input.projectRoot, input.projectRelativePath);
   if (input.mediaKind === 'image') {
@@ -185,13 +181,10 @@ function scaledFixedCanvasLayoutSize(size: CanvasLayoutSize): CanvasLayoutSize {
   };
 }
 
-function genericCanvasLayoutSize(input: {
-  projectRelativePath: string;
-  height: number;
-}): CanvasLayoutSize {
+function genericCanvasLayoutSize(projectRelativePath: string): CanvasLayoutSize {
   return scaledFixedCanvasLayoutSize({
-    width: genericVisualWidthForDisplayName(displayNameForCanvasLayout(input.projectRelativePath)),
-    height: input.height
+    width: genericVisualWidthForDisplayName(displayNameForCanvasLayout(projectRelativePath)),
+    height: GENERIC_NODE_VISUAL_HEIGHT
   });
 }
 
@@ -207,9 +200,14 @@ function genericVisualWidthForDisplayName(displayName: string): number {
     (width, character) => width + visualWidthForDisplayNameCharacter(character),
     0
   );
+  const contentWidth =
+    GENERIC_NODE_ICON_VISUAL_WIDTH
+    + GENERIC_NODE_TEXT_GAP_VISUAL_WIDTH
+    + GENERIC_NODE_HORIZONTAL_PADDING_VISUAL_WIDTH
+    + labelWidth;
   return Math.min(
     GENERIC_NODE_MAX_VISUAL_WIDTH,
-    Math.max(GENERIC_NODE_MIN_VISUAL_WIDTH, labelWidth)
+    Math.max(GENERIC_NODE_MIN_VISUAL_WIDTH, contentWidth)
   );
 }
 

@@ -5,6 +5,7 @@ import { describe, expect, it } from 'vitest';
 import { createCanvasDocument, type CanvasProjection } from '@debrute/canvas-core';
 import {
   assertCurrentCanvasDocument,
+  canvasMediaKindFromPath,
   CanvasProjectionService
 } from './CanvasProjectionService';
 
@@ -41,6 +42,46 @@ describe('CanvasProjectionService Canvas document validation', () => {
     }, '/project/.debrute/canvases/canvas-1.json')).toThrow('Invalid canvas document: /project/.debrute/canvases/canvas-1.json');
   });
 
+  it('accepts textViewport only on text file nodes', () => {
+    const canvas = createCanvasDocument({ id: 'canvas-1' });
+
+    expect(assertCurrentCanvasDocument({
+      ...canvas,
+      nodeElements: [{
+        ...canvasTextFileNode('notes/readme.md'),
+        textViewport: { scrollTop: 72, scrollLeft: 9 }
+      }]
+    }, '/project/.debrute/canvases/canvas-1.json')).toMatchObject({
+      nodeElements: [{
+        projectRelativePath: 'notes/readme.md',
+        textViewport: { scrollTop: 72, scrollLeft: 9 }
+      }]
+    });
+
+    expect(() => assertCurrentCanvasDocument({
+      ...canvas,
+      nodeElements: [{
+        projectRelativePath: 'media/image.png',
+        nodeKind: 'file' as const,
+        mediaKind: 'image' as const,
+        x: 0,
+        y: 0,
+        width: 320,
+        height: 180,
+        z: 0,
+        textViewport: { scrollTop: 72, scrollLeft: 9 }
+      }]
+    }, '/project/.debrute/canvases/canvas-1.json')).toThrow('Invalid canvas document: /project/.debrute/canvases/canvas-1.json');
+
+    expect(() => assertCurrentCanvasDocument({
+      ...canvas,
+      nodeElements: [{
+        ...canvasTextFileNode('notes/readme.md'),
+        textViewport: { scrollTop: -1, scrollLeft: 0 }
+      }]
+    }, '/project/.debrute/canvases/canvas-1.json')).toThrow('Invalid canvas document: /project/.debrute/canvases/canvas-1.json');
+  });
+
   it('projects available video nodes with video presentation companions', async () => {
     const projectRoot = await mkdtemp(join(tmpdir(), 'debrute-video-projection-'));
     try {
@@ -70,6 +111,8 @@ describe('CanvasProjectionService Canvas document validation', () => {
         mediaKind: 'video',
         videoPresentation: {
           kind: 'video',
+          width: 640,
+          height: 360,
           durationSeconds: 5,
           textTracks: [
             expect.objectContaining({
@@ -139,4 +182,75 @@ describe('CanvasProjectionService Canvas document validation', () => {
       videoPresentation: presentation
     });
   });
+
+  it.each([
+    ['subtitles/captions.srt', 'text/plain'],
+    ['subtitles/captions.vtt', 'text/vtt'],
+    ['config/app.toml', 'application/toml'],
+    ['papers/story.tex', 'application/x-tex'],
+    ['docs/page.textile', 'text/x-textile'],
+    ['schema/messages.proto', 'text/x-protobuf'],
+    ['docs/index.rst', 'text/x-rst'],
+    ['docs/guide.adoc', 'text/x-asciidoc'],
+    ['notes/tasks.org', 'text/x-org'],
+    ['README', 'text/plain']
+  ] as const)('projects %s as a text Canvas node with %s', async (projectRelativePath, mimeType) => {
+    const projectRoot = await mkdtemp(join(tmpdir(), 'debrute-text-format-projection-'));
+    try {
+      await mkdir(join(projectRoot, 'subtitles'), { recursive: true });
+      await mkdir(join(projectRoot, 'config'), { recursive: true });
+      await mkdir(join(projectRoot, 'papers'), { recursive: true });
+      await mkdir(join(projectRoot, 'docs'), { recursive: true });
+      await mkdir(join(projectRoot, 'schema'), { recursive: true });
+      await mkdir(join(projectRoot, 'notes'), { recursive: true });
+      await writeFile(join(projectRoot, projectRelativePath), 'sample text\n', 'utf8');
+
+      expect(canvasMediaKindFromPath(projectRelativePath)).toBe('text');
+
+      const canvas = {
+        ...createCanvasDocument({ id: 'canvas-1' }),
+        nodeElements: [canvasTextFileNode(projectRelativePath)]
+      };
+      const projectionService = new CanvasProjectionService({
+        readCanvasVideoMetadata: async () => ({ width: 640, height: 360 })
+      });
+
+      const projection = await projectionService.projectCanvasDocument(projectRoot, canvas);
+
+      expect(projection.nodes[0]).toMatchObject({
+        projectRelativePath,
+        mediaKind: 'text',
+        availability: {
+          state: 'available',
+          mimeType
+        }
+      });
+    } finally {
+      await rm(projectRoot, { recursive: true, force: true });
+    }
+  });
+
+  it.each([
+    'subtitles/captions.sub',
+    'brief.pdf',
+    'brief.docx',
+    'brief.pptx',
+    'brief.xlsx',
+    'brief.epub'
+  ])('does not classify unsupported binary document %s as Canvas text', (projectRelativePath) => {
+    expect(canvasMediaKindFromPath(projectRelativePath)).toBe('unknown');
+  });
 });
+
+function canvasTextFileNode(projectRelativePath: string) {
+  return {
+    projectRelativePath,
+    nodeKind: 'file' as const,
+    mediaKind: 'text' as const,
+    x: 0,
+    y: 0,
+    width: 420,
+    height: 260,
+    z: 0
+  };
+}

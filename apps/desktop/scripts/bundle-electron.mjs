@@ -49,13 +49,13 @@ await Promise.all([
 ]);
 
 await cp('../runtime-host/bundle/runtime-host.cjs', 'dist-electron/runtime-host.cjs');
-await cp('../runtime-host/bundle/canvas-feedback-render-worker.cjs', 'dist-electron/canvas-feedback-render-worker.cjs');
+await cp('../runtime-host/bundle/canvas-feedback-artifact-worker.cjs', 'dist-electron/canvas-feedback-artifact-worker.cjs');
 await cp('../runtime-host/bundle/official-docs', 'dist-electron/official-docs', { recursive: true });
 await cp('../runtime-host/bundle/product-replacement-helper.cjs', 'dist-electron/product-replacement-helper.cjs');
 
 if (withSourcemap) {
   await cp('../runtime-host/bundle/runtime-host.cjs.map', 'dist-electron/runtime-host.cjs.map');
-  await cp('../runtime-host/bundle/canvas-feedback-render-worker.cjs.map', 'dist-electron/canvas-feedback-render-worker.cjs.map');
+  await cp('../runtime-host/bundle/canvas-feedback-artifact-worker.cjs.map', 'dist-electron/canvas-feedback-artifact-worker.cjs.map');
   await cp('../runtime-host/bundle/product-replacement-helper.cjs.map', 'dist-electron/product-replacement-helper.cjs.map');
 }
 

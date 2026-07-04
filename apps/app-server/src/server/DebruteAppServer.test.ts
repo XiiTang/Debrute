@@ -18,8 +18,8 @@ import { DebruteAppServer } from './DebruteAppServer';
 import {
   CanvasFeedbackRenderCancelledError,
   type CanvasFeedbackRenderRunner
-} from '../canvas/CanvasFeedbackRenderedImageScheduler';
-import type { CanvasFeedbackRenderJobInput, CanvasFeedbackRenderJobResult } from '../canvas/CanvasFeedbackRenderedImageWorkerProtocol';
+} from '../canvas/CanvasFeedbackArtifactScheduler';
+import type { CanvasFeedbackRenderJobInput, CanvasFeedbackRenderJobResult } from '../canvas/CanvasFeedbackArtifactWorkerProtocol';
 
 const NOW = '2026-06-21T12:00:00.000Z';
 const PROTECTED_BATCH_OUTPUT_PATHS = ['.git/config', '.debrute/project.json'] as const;
@@ -284,6 +284,49 @@ describe('DebruteAppServer Canvas video playback state', () => {
   });
 });
 
+describe('DebruteAppServer Canvas text viewport state', () => {
+  it('persists text viewport in the Canvas document', async () => {
+    const projectRoot = await mkdtemp(join(tmpdir(), 'debrute-text-viewport-state-'));
+    const server = new DebruteAppServer({
+      canvasNodeLayoutSizeReader: async () => ({ width: 420, height: 260 })
+    });
+    try {
+      await server.openProject(projectRoot, {
+        initializeIfMissing: true,
+        createDefaultCanvas: true,
+        watchFiles: false
+      });
+      await mkdir(join(projectRoot, 'notes'), { recursive: true });
+      await writeFile(join(projectRoot, 'notes/readme.md'), '# Notes', 'utf8');
+      const canvasPath = join(projectRoot, '.debrute/canvases/canvas-1.json');
+      await server.addProjectPathToCanvasMap({
+        canvasId: 'canvas-1',
+        projectRelativePath: 'notes/readme.md'
+      });
+
+      const result = await server.updateCanvasTextViewportState({
+        canvasId: 'canvas-1',
+        updates: [{ projectRelativePath: 'notes/readme.md', scrollTop: 72, scrollLeft: 9 }]
+      });
+
+      expect(result.canvas.nodeElements.find((node) => node.projectRelativePath === 'notes/readme.md')).toMatchObject({
+        projectRelativePath: 'notes/readme.md',
+        textViewport: { scrollTop: 72, scrollLeft: 9 }
+      });
+      const savedCanvas = JSON.parse(await readFile(canvasPath, 'utf8')) as {
+        nodeElements: Array<{ projectRelativePath: string; textViewport?: { scrollTop: number; scrollLeft: number } }>;
+      };
+      expect(savedCanvas.nodeElements.find((node) => node.projectRelativePath === 'notes/readme.md')).toMatchObject({
+        projectRelativePath: 'notes/readme.md',
+        textViewport: { scrollTop: 72, scrollLeft: 9 }
+      });
+    } finally {
+      server.close();
+      await rm(projectRoot, { recursive: true, force: true });
+    }
+  });
+});
+
 describe('DebruteAppServer Canvas video previews', () => {
   it('uses the integration env path for Canvas video preview frame extraction', async () => {
     const projectRoot = await mkdtemp(join(tmpdir(), 'debrute-video-preview-env-path-'));
@@ -342,7 +385,7 @@ describe('DebruteAppServer Canvas feedback materialization', () => {
       });
 
       expect(runner.jobs).toHaveLength(1);
-      expect(runner.jobs[0]!.input.entry.projectRelativePath).toBe('page.png');
+      expect(runner.jobs[0]!.input.artifact.projectRelativePath).toBe('page.png');
       await expect(stat(join(projectRoot, canvasFeedbackRenderedProjectPath('page.png')))).rejects.toMatchObject({ code: 'ENOENT' });
     } finally {
       server.close();
@@ -369,18 +412,19 @@ describe('DebruteAppServer Canvas feedback materialization', () => {
       });
 
       const feedback = await server.updateCanvasFeedbackEntry({
-        operation: 'add-region',
+        operation: 'add-item',
         projectRelativePath: 'page.png',
-        region: {
+        item: {
           kind: 'pin',
+          scope: 'file',
           geometry: { type: 'point', x: 0.2, y: 0.3 },
           comment: 'fix this'
         }
       });
 
-      expect(feedback.entries['page.png']?.regions).toHaveLength(1);
+      expect(feedback.entries['page.png']?.items).toHaveLength(1);
       expect(feedbackChanges).toHaveLength(1);
-      expect(runner.jobs.at(-1)?.input.entry.projectRelativePath).toBe('page.png');
+      expect(runner.jobs.at(-1)?.input.artifact.projectRelativePath).toBe('page.png');
     } finally {
       server.close();
       await rm(projectRoot, { recursive: true, force: true });
@@ -410,6 +454,65 @@ describe('DebruteAppServer Canvas feedback materialization', () => {
           entityId: 'page.png'
         })
       ]));
+    } finally {
+      server.close();
+      await rm(projectRoot, { recursive: true, force: true });
+    }
+  });
+
+  it('clears render_failed diagnostics after the same artifact rerenders successfully', async () => {
+    const projectRoot = await mkdtemp(join(tmpdir(), 'debrute-feedback-render-diagnostic-clear-'));
+    const runner = new ManualRenderRunner();
+    const server = new DebruteAppServer({ canvasFeedbackRenderRunner: runner });
+    try {
+      await writeImageFixture(projectRoot, 'page.png');
+      await writeFeedbackDocument(projectRoot, ['page.png']);
+      await server.openProject(projectRoot, {
+        initializeIfMissing: true,
+        createDefaultCanvas: true,
+        watchFiles: false
+      });
+
+      await runner.jobs[0]!.resolveFailure('render failed');
+      await waitFor(() => server.currentSnapshot()?.diagnostics.some((diagnostic) => diagnostic.code === 'canvas-feedback.render_failed') === true);
+
+      await server.updateCanvasFeedbackEntry({
+        operation: 'update-item',
+        projectRelativePath: 'page.png',
+        itemId: 'region-1',
+        geometry: { type: 'point', x: 0.25, y: 0.5 }
+      });
+      await waitFor(() => runner.jobs.length === 2);
+      await runner.jobs[1]!.resolveSuccess();
+
+      await waitFor(() => server.currentSnapshot()?.diagnostics.some((diagnostic) => diagnostic.code === 'canvas-feedback.render_failed') === false);
+    } finally {
+      server.close();
+      await rm(projectRoot, { recursive: true, force: true });
+    }
+  });
+
+  it('uses the artifact concurrency limit for Canvas feedback materialization', async () => {
+    const projectRoot = await mkdtemp(join(tmpdir(), 'debrute-feedback-artifact-concurrency-'));
+    const runner = new ManualRenderRunner();
+    const server = new DebruteAppServer({
+      canvasFeedbackRenderRunner: runner,
+      canvasFeedbackRenderMaxConcurrentArtifacts: 1
+    });
+    try {
+      await writeImageFixture(projectRoot, 'page-a.png');
+      await writeImageFixture(projectRoot, 'page-b.png');
+      await writeFeedbackDocument(projectRoot, ['page-a.png', 'page-b.png']);
+
+      await server.openProject(projectRoot, {
+        initializeIfMissing: true,
+        createDefaultCanvas: true,
+        watchFiles: false
+      });
+
+      expect(runner.jobs).toHaveLength(1);
+      await runner.jobs[0]!.resolveSuccess();
+      await waitFor(() => runner.jobs.length === 2);
     } finally {
       server.close();
       await rm(projectRoot, { recursive: true, force: true });
@@ -498,12 +601,13 @@ describe('DebruteAppServer Canvas feedback materialization', () => {
           'copy.md': {
             projectRelativePath: 'copy.md',
             marks: [],
-            comments: [],
-            nextRegionLabel: 2,
-            regions: [{
+            nextMomentLabel: 1,
+            nextSpatialLabel: 2,
+            items: [{
               id: 'region-1',
               label: 1,
               kind: 'pin',
+              scope: 'file',
               geometry: { type: 'point', x: 0.5, y: 0.5 },
               comment: 'center',
               createdAt: NOW,
@@ -663,12 +767,13 @@ async function writeFeedbackDocument(projectRoot: string, projectRelativePaths: 
       {
         projectRelativePath,
         marks: [],
-        comments: [],
-        nextRegionLabel: 2,
-        regions: [{
+        nextMomentLabel: 1,
+        nextSpatialLabel: 2,
+        items: [{
           id: 'region-1',
           label: 1,
           kind: 'pin',
+          scope: 'file',
           geometry: { type: 'point', x: 0.5, y: 0.5 },
           comment: 'center',
           createdAt: NOW,

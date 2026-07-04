@@ -28,14 +28,13 @@ import type {
   WorkbenchFileClipboard
 } from './contextMenu';
 import type { WorkbenchActions, WorkbenchState } from '../../types';
-import { DiagnosticList, Inspector } from './Inspector';
+import { Inspector } from './Inspector';
 import type { CanvasEditorRuntime } from '../canvas/runtime/CanvasEditorRuntime';
 import { useI18n, type WorkbenchI18n, type WorkbenchTranslationKey } from '../i18n';
 
 const floatingPanelTitleKeys: Record<FloatingPanelId, WorkbenchTranslationKey> = {
   explorer: 'shell.panels.explorer',
   inspector: 'shell.panels.inspector',
-  problems: 'shell.panels.problems',
   settings: 'shell.panels.settings',
   terminal: 'shell.panels.terminal'
 };
@@ -198,9 +197,6 @@ export function FloatingPanelContent({
   }
   if (panelId === 'inspector') {
     return <Inspector state={state} activeCanvasId={activeCanvasId} selection={activeCanvasRuntime?.getSnapshot().selection} actions={actions} />;
-  }
-  if (panelId === 'problems') {
-    return <DiagnosticList diagnostics={state.snapshot?.diagnostics ?? []} onSelect={(diagnostic) => activeCanvasRuntime?.setSelection({ kind: 'diagnostic', id: diagnostic.id })} />;
   }
   if (panelId === 'terminal') {
     return terminalPanel;

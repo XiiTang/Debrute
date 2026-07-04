@@ -38,10 +38,11 @@ describe('canvas feedback updates', () => {
 
     const firstUpdate = updateCanvasFeedbackEntry(input);
     const secondUpdate = updateCanvasFeedbackEntry({
-      operation: 'add-region',
+      operation: 'add-item',
       projectRelativePath: 'flow/b.png',
-      region: {
+      item: {
         kind: 'pin',
+        scope: 'file',
         geometry: { type: 'point', x: 0.2, y: 0.3 },
         comment: 'fix face'
       }
@@ -64,9 +65,9 @@ function feedbackDocument(projectRelativePath: string): CanvasFeedbackDocument {
       [projectRelativePath]: {
         projectRelativePath,
         marks: ['like'],
-        comments: [],
-        nextRegionLabel: 1,
-        regions: [],
+        nextMomentLabel: 1,
+        nextSpatialLabel: 1,
+        items: [],
         updatedAt: '2026-05-26T12:00:00.000Z'
       }
     }

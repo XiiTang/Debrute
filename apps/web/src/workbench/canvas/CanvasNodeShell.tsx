@@ -1,11 +1,11 @@
 import React, { useLayoutEffect, useRef } from 'react';
-import type { CanvasFeedbackEntry, CanvasFeedbackGeometry, ProjectedCanvasNode } from '@debrute/canvas-core';
+import type { CanvasFeedbackEntry, CanvasFeedbackGeometry, CanvasTextViewportState, ProjectedCanvasNode } from '@debrute/canvas-core';
 import type { TextFileBuffer, WorkbenchActions } from '../../types';
 import type { ResizeHandle } from '../services/canvasInteraction';
 import type { CanvasStageRuntime } from './runtime/CanvasStageRuntime';
 import { CanvasFeedbackFrame, canvasFeedbackEntryHasFeedback } from './CanvasFeedbackFrame';
 import { CanvasNodeContent } from './CanvasNodeContent';
-import type { CanvasImageFeedbackDraftRegion, CanvasImageFeedbackMode } from './CanvasImageFeedbackLayer';
+import type { CanvasMediaFeedbackDraftRegion, CanvasMediaFeedbackMode } from './CanvasMediaFeedbackLayer';
 import type { CanvasTextPreviewSource } from './CanvasTextPreviewRuntime';
 import type { CanvasVideoPreviewSource } from './canvasVideoPreviews';
 import type { CanvasVideoPlayerHandle } from './CanvasVideoPlayerAdapter';
@@ -28,8 +28,9 @@ export interface CanvasNodeShellProps {
   forceVideoPlayerMounted?: boolean | undefined;
   previewInteractionActive: boolean;
   feedbackEntry?: CanvasFeedbackEntry | undefined;
-  localFeedbackMode?: CanvasImageFeedbackMode | undefined;
-  pendingFeedbackRegion?: CanvasImageFeedbackDraftRegion | undefined;
+  localFeedbackMode?: CanvasMediaFeedbackMode | undefined;
+  pendingFeedbackRegion?: CanvasMediaFeedbackDraftRegion | undefined;
+  activeFeedbackMomentTimeSeconds?: number | undefined;
   onLocalFeedbackDraft?: ((input: {
     projectRelativePath: string;
     geometry: CanvasFeedbackGeometry;
@@ -46,6 +47,7 @@ export interface CanvasNodeShellProps {
   onVideoPlayingChange: (projectRelativePath: string, playing: boolean) => void;
   onRegisterVideoTarget: (projectRelativePath: string, target: CanvasVideoPlayerHandle | undefined) => void;
   onUpdateVideoPlaybackTime: (projectRelativePath: string, currentTimeSeconds: number) => void | Promise<void>;
+  onUpdateTextViewport: (projectRelativePath: string, viewport: CanvasTextViewportState) => void | Promise<void>;
   onVideoPreviewError?: ((projectRelativePath: string, preview: CanvasVideoPreviewSource, message: string) => void) | undefined;
 }
 
@@ -67,6 +69,7 @@ function CanvasNodeShellComponent({
   feedbackEntry,
   localFeedbackMode,
   pendingFeedbackRegion,
+  activeFeedbackMomentTimeSeconds,
   onLocalFeedbackDraft,
   onPointerDown,
   onPointerMove,
@@ -80,6 +83,7 @@ function CanvasNodeShellComponent({
   onVideoPlayingChange,
   onRegisterVideoTarget,
   onUpdateVideoPlaybackTime,
+  onUpdateTextViewport,
   onVideoPreviewError
 }: CanvasNodeShellProps): React.ReactElement {
   const elementRef = useRef<HTMLDivElement | null>(null);
@@ -146,11 +150,13 @@ function CanvasNodeShellComponent({
             feedbackEntry={feedbackEntry}
             localFeedbackMode={localFeedbackMode}
             pendingFeedbackRegion={pendingFeedbackRegion}
+            activeFeedbackMomentTimeSeconds={activeFeedbackMomentTimeSeconds}
             onLocalFeedbackDraft={onLocalFeedbackDraft}
             onVideoPlayerMounted={onVideoPlayerMounted}
             onVideoPlayingChange={onVideoPlayingChange}
             onRegisterVideoTarget={onRegisterVideoTarget}
             onUpdateVideoPlaybackTime={onUpdateVideoPlaybackTime}
+            onUpdateTextViewport={onUpdateTextViewport}
             onVideoPreviewError={onVideoPreviewError}
             onSelectNode={() => onSelectNode(node)}
             onTitlePointerDown={(event) => onPointerDown(node, event)}
@@ -174,11 +180,13 @@ function CanvasNodeShellComponent({
           feedbackEntry={feedbackEntry}
           localFeedbackMode={localFeedbackMode}
           pendingFeedbackRegion={pendingFeedbackRegion}
+          activeFeedbackMomentTimeSeconds={activeFeedbackMomentTimeSeconds}
           onLocalFeedbackDraft={onLocalFeedbackDraft}
           onVideoPlayerMounted={onVideoPlayerMounted}
           onVideoPlayingChange={onVideoPlayingChange}
           onRegisterVideoTarget={onRegisterVideoTarget}
           onUpdateVideoPlaybackTime={onUpdateVideoPlaybackTime}
+          onUpdateTextViewport={onUpdateTextViewport}
           onVideoPreviewError={onVideoPreviewError}
           onSelectNode={() => onSelectNode(node)}
           onTitlePointerDown={(event) => onPointerDown(node, event)}
@@ -226,6 +234,7 @@ export function areCanvasNodeShellPropsEqual(
     && previous.feedbackEntry === next.feedbackEntry
     && previous.localFeedbackMode === next.localFeedbackMode
     && previous.pendingFeedbackRegion === next.pendingFeedbackRegion
+    && previous.activeFeedbackMomentTimeSeconds === next.activeFeedbackMomentTimeSeconds
     && previous.onLocalFeedbackDraft === next.onLocalFeedbackDraft
     && previous.onPointerDown === next.onPointerDown
     && previous.onPointerMove === next.onPointerMove
@@ -239,6 +248,7 @@ export function areCanvasNodeShellPropsEqual(
     && previous.onVideoPlayingChange === next.onVideoPlayingChange
     && previous.onRegisterVideoTarget === next.onRegisterVideoTarget
     && previous.onUpdateVideoPlaybackTime === next.onUpdateVideoPlaybackTime
+    && previous.onUpdateTextViewport === next.onUpdateTextViewport
     && previous.onVideoPreviewError === next.onVideoPreviewError;
 }
 

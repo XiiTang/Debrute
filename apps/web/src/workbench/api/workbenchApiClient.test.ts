@@ -435,6 +435,10 @@ describe('workbench API client', () => {
       canvasId: 'canvas-1',
       pathRules: { paths: ['outputs/gpt/', 'prompts/cover.md'] }
     });
+    await client.updateCanvasTextViewportState({
+      canvasId: 'canvas-1',
+      updates: [{ projectRelativePath: 'notes/readme.md', scrollTop: 72, scrollLeft: 9 }]
+    });
 
     expect(requests.slice(1)).toEqual([
       { method: 'POST', url: `http://127.0.0.1:17321/api/projects/${projectId}/canvases`, body: { baseRevision: 1 } },
@@ -443,7 +447,12 @@ describe('workbench API client', () => {
       { method: 'PUT', url: `http://127.0.0.1:17321/api/projects/${projectId}/canvases/index`, body: { baseRevision: 4, canvasOrder: ['canvas-2', 'canvas-1'] } },
       { method: 'POST', url: `http://127.0.0.1:17321/api/projects/${projectId}/canvases/index/repair`, body: { baseRevision: 5 } },
       { method: 'POST', url: `http://127.0.0.1:17321/api/projects/${projectId}/canvases/canvas-1/reset-layout`, body: { baseRevision: 6, all: true } },
-      { method: 'POST', url: `http://127.0.0.1:17321/api/projects/${projectId}/canvases/canvas-1/reset-layout`, body: { baseRevision: 7, pathRules: { paths: ['outputs/gpt/', 'prompts/cover.md'] } } }
+      { method: 'POST', url: `http://127.0.0.1:17321/api/projects/${projectId}/canvases/canvas-1/reset-layout`, body: { baseRevision: 7, pathRules: { paths: ['outputs/gpt/', 'prompts/cover.md'] } } },
+      {
+        method: 'PATCH',
+        url: `http://127.0.0.1:17321/api/projects/${projectId}/canvases/canvas-1/text-viewport`,
+        body: { baseRevision: 8, updates: [{ projectRelativePath: 'notes/readme.md', scrollTop: 72, scrollLeft: 9 }] }
+      }
     ]);
   });
 

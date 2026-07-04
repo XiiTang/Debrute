@@ -49,7 +49,7 @@ describe('CanvasTextPreviewRuntime', () => {
       },
       culledNodePaths: new Set(),
       measuredBodies: new Map([
-        ['notes/a.md', { width: 560, height: 280, scrollTop: 0, scrollLeft: 0 }]
+        ['notes/a.md', { width: 560, height: 280 }]
       ]),
       styleKey: 'sha256:style-a'
     });
@@ -67,7 +67,7 @@ describe('CanvasTextPreviewRuntime', () => {
       },
       culledNodePaths: new Set(),
       measuredBodies: new Map([
-        ['notes/a.md', { width: 560, height: 280, scrollTop: 0, scrollLeft: 0 }]
+        ['notes/a.md', { width: 560, height: 280 }]
       ]),
       styleKey: 'sha256:style-a'
     });
@@ -76,6 +76,64 @@ describe('CanvasTextPreviewRuntime', () => {
       projectRelativePath: 'notes/a.md',
       styleKey: 'sha256:style-a'
     }]);
+  });
+
+  it('uses the persisted node text viewport when generating inactive preview targets', () => {
+    const node = {
+      ...textNode('notes/a.md', 600, 320),
+      textViewport: { scrollTop: 72, scrollLeft: 9 }
+    };
+    const targets = canvasTextPreviewTargetsForNodes({
+      canvasId: 'canvas-1',
+      nodes: [node],
+      selectedProjectRelativePaths: [],
+      textFileBuffers: {
+        'notes/a.md': textBuffer('notes/a.md', 'A')
+      },
+      culledNodePaths: new Set(),
+      measuredBodies: new Map([
+        ['notes/a.md', { width: 560, height: 280 }]
+      ]),
+      styleKey: 'sha256:style-a'
+    });
+
+    expect(targets).toMatchObject([{
+      projectRelativePath: 'notes/a.md',
+      contentCssWidth: 560,
+      contentCssHeight: 280,
+      scrollTop: 72,
+      scrollLeft: 9
+    }]);
+  });
+
+  it('orders inactive preview targets by their canvas position', () => {
+    const targets = canvasTextPreviewTargetsForNodes({
+      canvasId: 'canvas-1',
+      nodes: [
+        { ...textNode('notes/lower.md', 600, 320), x: 20, y: 200 },
+        { ...textNode('notes/upper-right.md', 600, 320), x: 120, y: 100 },
+        { ...textNode('notes/upper-left.md', 600, 320), x: 40, y: 100 }
+      ],
+      selectedProjectRelativePaths: [],
+      textFileBuffers: {
+        'notes/lower.md': textBuffer('notes/lower.md', 'lower'),
+        'notes/upper-right.md': textBuffer('notes/upper-right.md', 'right'),
+        'notes/upper-left.md': textBuffer('notes/upper-left.md', 'left')
+      },
+      culledNodePaths: new Set(),
+      measuredBodies: new Map([
+        ['notes/lower.md', { width: 560, height: 280 }],
+        ['notes/upper-right.md', { width: 560, height: 280 }],
+        ['notes/upper-left.md', { width: 560, height: 280 }]
+      ]),
+      styleKey: 'sha256:style-a'
+    });
+
+    expect(targets.map((target) => target.projectRelativePath)).toEqual([
+      'notes/upper-left.md',
+      'notes/upper-right.md',
+      'notes/lower.md'
+    ]);
   });
 
   it('computes text preview target width from the source scale', () => {
@@ -131,7 +189,8 @@ describe('CanvasTextPreviewRuntime', () => {
     if (!completedCapture) {
       throw new Error('Expected a scheduled text preview capture.');
     }
-    pendingCaptureKeys.delete(completedCapture.captureKey);
+    expect(completedCapture).not.toHaveProperty('captureKey');
+    pendingCaptureKeys.delete([...pendingCaptureKeys][0]!);
     const secondBatch = canvasTextPreviewNextCaptureTargets({
       targets,
       sourceAvailability: {
@@ -152,7 +211,7 @@ describe('CanvasTextPreviewRuntime', () => {
     expect(pendingCaptureKeys.size).toBe(3);
   });
 
-  it('measures CodeMirror scroller scroll and preserves it after the editor unmounts', () => {
+  it('measures rendered text body size without storing scroll position', () => {
     const scroller = { scrollTop: 72, scrollLeft: 9 };
     const element = {
       clientWidth: 640,
@@ -166,29 +225,14 @@ describe('CanvasTextPreviewRuntime', () => {
 
     expect(measured).toEqual({
       width: 640,
-      height: 360,
-      scrollTop: 72,
-      scrollLeft: 9
-    });
-
-    const inactiveElement = {
-      clientWidth: 680,
-      clientHeight: 390,
-      scrollTop: 0,
-      scrollLeft: 0,
-      querySelector: () => null
-    } as unknown as HTMLElement;
-
-    expect(canvasTextPreviewBodyMeasurement(inactiveElement, measured)).toEqual({
-      width: 680,
-      height: 390,
-      scrollTop: 72,
-      scrollLeft: 9
+      height: 360
     });
   });
 
-  it('requires the first visible line number to align with the first content line before capture', () => {
+  it('requires the first visible line number to align with the first content line padding before capture', () => {
     const element = document.createElement('div');
+    const scroller = layoutElement('cm-scroller', { top: 10, height: 40 });
+    setClientSize(scroller, { width: 100, height: 40 });
     const lineNumbers = document.createElement('div');
     lineNumbers.className = 'cm-lineNumbers';
     const spacer = layoutElement('cm-gutterElement', { top: 0, height: 0 });
@@ -198,34 +242,125 @@ describe('CanvasTextPreviewRuntime', () => {
     content.className = 'cm-content';
     const line = layoutElement('cm-line', { top: 14, height: 16.8 });
     content.append(line);
-    element.append(lineNumbers, content);
+    scroller.append(lineNumbers, content);
+    element.append(scroller);
+    document.body.append(element);
+    try {
+      expect(isCanvasTextPreviewCaptureLayoutReady(element)).toBe(false);
+
+      content.style.paddingTop = '4px';
+
+      expect(isCanvasTextPreviewCaptureLayoutReady(element)).toBe(true);
+    } finally {
+      element.remove();
+    }
+  });
+
+  it('accepts scrolled CodeMirror line and gutter layout when content padding is already reflected', () => {
+    const element = document.createElement('div');
+    const scroller = layoutElement('cm-scroller', { top: 10, height: 40 });
+    setClientSize(scroller, { width: 100, height: 40 });
+    const lineNumbers = document.createElement('div');
+    lineNumbers.className = 'cm-lineNumbers';
+    lineNumbers.append(layoutElement('cm-gutterElement', { top: 10, height: 16.8 }));
+    const content = document.createElement('div');
+    content.className = 'cm-content';
+    content.style.paddingTop = '4px';
+    content.append(layoutElement('cm-line', { top: 10, height: 16.8 }));
+    scroller.append(lineNumbers, content);
+    element.append(scroller);
+    document.body.append(element);
+
+    try {
+      expect(isCanvasTextPreviewCaptureLayoutReady(element)).toBe(true);
+    } finally {
+      element.remove();
+    }
+  });
+
+  it('does not treat offscreen aligned CodeMirror lines as capture-ready', () => {
+    const element = document.createElement('div');
+    const scroller = layoutElement('cm-scroller', { top: 100, height: 40 });
+    setClientSize(scroller, { width: 100, height: 40 });
+    const lineNumbers = document.createElement('div');
+    lineNumbers.className = 'cm-lineNumbers';
+    lineNumbers.append(layoutElement('cm-gutterElement', { top: 20, height: 16.8 }));
+    const content = document.createElement('div');
+    content.className = 'cm-content';
+    content.append(layoutElement('cm-line', { top: 20, height: 16.8 }));
+    scroller.append(lineNumbers, content);
+    element.append(scroller);
 
     expect(isCanvasTextPreviewCaptureLayoutReady(element)).toBe(false);
 
-    setLayoutRect(visibleLineNumber, { top: 14, height: 16.8 });
+    lineNumbers.append(layoutElement('cm-gutterElement', { top: 110, height: 16.8 }));
+    content.append(layoutElement('cm-line', { top: 110, height: 16.8 }));
 
     expect(isCanvasTextPreviewCaptureLayoutReady(element)).toBe(true);
   });
 
-  it('reports capture layout readiness instead of continuing when readiness cannot be proven', async () => {
+  it('stops waiting for capture layout when the target is cancelled', async () => {
     const element = document.createElement('div');
+    const scroller = layoutElement('cm-scroller', { top: 10, height: 40 });
+    setClientSize(scroller, { width: 100, height: 40 });
     const lineNumbers = document.createElement('div');
     lineNumbers.className = 'cm-lineNumbers';
     lineNumbers.append(layoutElement('cm-gutterElement', { top: 10, height: 16.8 }));
     const content = document.createElement('div');
     content.className = 'cm-content';
     content.append(layoutElement('cm-line', { top: 14, height: 16.8 }));
-    element.append(lineNumbers, content);
+    scroller.append(lineNumbers, content);
+    element.append(scroller);
+    document.body.append(element);
 
-    await expect(waitForCanvasTextPreviewCaptureLayout(element, { maxFrames: 0 })).resolves.toBe(false);
-
-    setLayoutRect(lineNumbers.querySelector('.cm-gutterElement') as HTMLElement, { top: 14, height: 16.8 });
-
-    await expect(waitForCanvasTextPreviewCaptureLayout(element, { maxFrames: 0 })).resolves.toBe(true);
+    try {
+      await expect(waitForCanvasTextPreviewCaptureLayout(element, {
+        isCancelled: () => true
+      })).resolves.toBe(false);
+    } finally {
+      element.remove();
+    }
   });
 
-  it('inlines CodeMirror line metrics onto gutter elements before image capture', () => {
+  it('waits past the first capture frames until CodeMirror layout is ready', async () => {
+    const previousRequestAnimationFrame = window.requestAnimationFrame;
+    const previousCancelAnimationFrame = window.cancelAnimationFrame;
+    let frameCount = 0;
     const element = document.createElement('div');
+    const scroller = layoutElement('cm-scroller', { top: 10, height: 40 });
+    setClientSize(scroller, { width: 100, height: 40 });
+    const lineNumbers = document.createElement('div');
+    lineNumbers.className = 'cm-lineNumbers';
+    lineNumbers.append(layoutElement('cm-gutterElement', { top: 10, height: 16.8 }));
+    const content = document.createElement('div');
+    content.className = 'cm-content';
+    content.append(layoutElement('cm-line', { top: 14, height: 16.8 }));
+    scroller.append(lineNumbers, content);
+    element.append(scroller);
+    document.body.append(element);
+    window.requestAnimationFrame = (callback) => window.setTimeout(() => {
+      frameCount += 1;
+      if (frameCount === 14) {
+        content.style.paddingTop = '4px';
+      }
+      callback(performance.now());
+    }, 0);
+    window.cancelAnimationFrame = (handle) => window.clearTimeout(handle);
+
+    try {
+      await expect(waitForCanvasTextPreviewCaptureLayout(element)).resolves.toBe(true);
+      expect(frameCount).toBeGreaterThan(12);
+    } finally {
+      element.remove();
+      window.requestAnimationFrame = previousRequestAnimationFrame;
+      window.cancelAnimationFrame = previousCancelAnimationFrame;
+    }
+  });
+
+  it('inlines CodeMirror line metrics onto gutter elements without mutating the hidden gutter container', () => {
+    const element = document.createElement('div');
+    const scroller = document.createElement('div');
+    scroller.className = 'cm-scroller';
     const content = document.createElement('div');
     content.className = 'cm-content';
     content.style.paddingTop = '6px';
@@ -237,12 +372,13 @@ describe('CanvasTextPreviewRuntime', () => {
     setLayoutRect(line, { top: 6, height: 16.8 });
     content.append(line);
     const lineNumbers = document.createElement('div');
-    lineNumbers.className = 'cm-lineNumbers';
+    lineNumbers.className = 'cm-gutter cm-lineNumbers';
     const gutterElement = document.createElement('div');
     gutterElement.className = 'cm-gutterElement';
     setLayoutRect(gutterElement, { top: 6, height: 16.8 });
     lineNumbers.append(gutterElement);
-    element.append(lineNumbers, content);
+    scroller.append(lineNumbers, content);
+    element.append(scroller);
 
     prepareCanvasTextPreviewCaptureElement(element);
     prepareCanvasTextPreviewCaptureElement(element);
@@ -251,7 +387,97 @@ describe('CanvasTextPreviewRuntime', () => {
     expect(gutterElement.style.fontSize).toBe('12px');
     expect(gutterElement.style.lineHeight).toBe('16.8px');
     expect(gutterElement.style.minHeight).toBe('16.8px');
-    expect(gutterElement.style.transform).toBe('translateY(6px)');
+    expect(gutterElement.style.transform).toBe('');
+    expect(lineNumbers.style.flexDirection).toBe('');
+    expect(lineNumbers.style.boxSizing).toBe('');
+  });
+
+  it('materializes the visible CodeMirror viewport into static capture layers', () => {
+    const element = document.createElement('div');
+    const scroller = layoutElement('cm-scroller', { top: 100, height: 40, width: 500 });
+    scroller.className = 'cm-scroller';
+    scroller.scrollTop = 72;
+    scroller.scrollLeft = 9;
+    setClientSize(scroller, { width: 500, height: 40 });
+    const gutter = document.createElement('div');
+    gutter.className = 'cm-gutter cm-lineNumbers';
+    const gutterElement = document.createElement('div');
+    gutterElement.className = 'cm-gutterElement';
+    setLayoutRect(gutterElement, { top: 110, height: 16.8 });
+    const hiddenGutterElement = document.createElement('div');
+    hiddenGutterElement.className = 'cm-gutterElement';
+    setLayoutRect(hiddenGutterElement, { top: 150, height: 16.8 });
+    gutter.append(gutterElement, hiddenGutterElement);
+    const content = document.createElement('div');
+    content.className = 'cm-content';
+    content.style.paddingTop = '6px';
+    const line = document.createElement('div');
+    line.className = 'cm-line';
+    line.style.fontFamily = 'monospace';
+    line.style.fontSize = '12px';
+    line.style.lineHeight = '16.8px';
+    line.textContent = 'visible line';
+    setLayoutRect(line, { top: 116, height: 16.8, width: 240 });
+    const hiddenLine = document.createElement('div');
+    hiddenLine.className = 'cm-line';
+    hiddenLine.textContent = 'hidden line';
+    setLayoutRect(hiddenLine, { top: 150, height: 16.8, width: 240 });
+    content.append(line, hiddenLine);
+    scroller.append(gutter, content);
+    element.append(scroller);
+
+    prepareCanvasTextPreviewCaptureElement(element);
+    prepareCanvasTextPreviewCaptureElement(element);
+
+    expect(scroller.style.overflow).toBe('hidden');
+    expect(scroller.scrollTop).toBe(0);
+    expect(scroller.scrollLeft).toBe(0);
+    expect(content.style.display).toBe('none');
+    expect(gutter.style.display).toBe('none');
+    expect(content.style.transform).toBe('');
+    expect(gutter.style.transform).toBe('');
+    const staticViewport = scroller.querySelector<HTMLElement>('.canvas-text-preview-static-viewport');
+    expect(staticViewport).not.toBeNull();
+    expect(staticViewport?.querySelector<HTMLElement>('.canvas-text-preview-static-content')?.style.display).toBe('');
+    expect(staticViewport?.querySelectorAll('.cm-line')).toHaveLength(1);
+    expect(staticViewport?.querySelector('.cm-line')?.textContent).toBe('visible line');
+    const staticLine = staticViewport?.querySelector<HTMLElement>('.cm-line');
+    const staticGutterElement = staticViewport?.querySelector<HTMLElement>('.cm-gutterElement');
+    expect(staticLine?.style.display).toBe('block');
+    expect(parseFloat(staticLine?.style.top ?? '')).toBeCloseTo(16);
+    expect(parseFloat(staticGutterElement?.style.top ?? '')).toBeCloseTo(16);
+    expect(gutterElement.style.transform).toBe('');
+  });
+
+  it('does not add content padding to static gutter lines that already match scrolled content lines', () => {
+    const element = document.createElement('div');
+    const scroller = layoutElement('cm-scroller', { top: 100, height: 40, width: 500 });
+    scroller.className = 'cm-scroller';
+    setClientSize(scroller, { width: 500, height: 40 });
+    const gutter = document.createElement('div');
+    gutter.className = 'cm-gutter cm-lineNumbers';
+    const gutterElement = document.createElement('div');
+    gutterElement.className = 'cm-gutterElement';
+    setLayoutRect(gutterElement, { top: 108, height: 16.8 });
+    gutter.append(gutterElement);
+    const content = document.createElement('div');
+    content.className = 'cm-content';
+    content.style.paddingTop = '6px';
+    const line = document.createElement('div');
+    line.className = 'cm-line';
+    line.textContent = 'already aligned';
+    setLayoutRect(line, { top: 108, height: 16.8, width: 240 });
+    content.append(line);
+    scroller.append(gutter, content);
+    element.append(scroller);
+
+    prepareCanvasTextPreviewCaptureElement(element);
+
+    const staticViewport = scroller.querySelector<HTMLElement>('.canvas-text-preview-static-viewport');
+    const staticLine = staticViewport?.querySelector<HTMLElement>('.cm-line');
+    const staticGutterElement = staticViewport?.querySelector<HTMLElement>('.cm-gutterElement');
+    expect(parseFloat(staticLine?.style.top ?? '')).toBeCloseTo(8);
+    expect(parseFloat(staticGutterElement?.style.top ?? '')).toBeCloseTo(8);
   });
 
   it('keeps source availability only when it matches the current text preview target', () => {
@@ -305,6 +531,49 @@ describe('CanvasTextPreviewRuntime', () => {
       loadKey: nextSource.src
     });
     expect(promoted.next).toBeUndefined();
+  });
+
+  it('keeps the loaded text preview visible while a changed fingerprint loads', () => {
+    const loaded = textPreviewImageState(textPreviewSource(320, 'sha256:old'));
+    const nextSource = textPreviewSource(640, 'sha256:new');
+    const loading = canvasTextPreviewImageReducer(loaded, {
+      type: 'source-resolved',
+      source: nextSource
+    });
+
+    expect(loading.loaded).toEqual(loaded.loaded);
+    expect(loading.next).toEqual({
+      ...nextSource,
+      loadKey: nextSource.src
+    });
+
+    const promoted = canvasTextPreviewImageReducer(loading, {
+      type: 'next-loaded',
+      loadKey: nextSource.src
+    });
+
+    expect(promoted.loaded).toEqual({
+      ...nextSource,
+      loadKey: nextSource.src
+    });
+    expect(promoted.next).toBeUndefined();
+  });
+
+  it('keeps loaded text preview state when the current source is temporarily unresolved', () => {
+    const loaded = textPreviewImageState(textPreviewSource(320));
+
+    expect(canvasTextPreviewImageReducer(loaded, {
+      type: 'source-resolved',
+      source: undefined
+    })).toEqual(loaded);
+  });
+
+  it('clears loaded text preview state when the content identity is invalidated', () => {
+    const loaded = textPreviewImageState(textPreviewSource(320, 'sha256:old'));
+
+    expect(canvasTextPreviewImageReducer(loaded, {
+      type: 'source-invalidated'
+    })).toEqual(initialCanvasTextPreviewImageState());
   });
 
   it('cancels pending text preview upgrades when interaction starts but keeps first loads', () => {
@@ -479,8 +748,12 @@ describe('CanvasTextPreviewRuntime', () => {
           </CanvasTextPreviewProvider>
         );
       });
-      await flushReactWork();
 
+      await waitForRecordedCounters(counters, [
+        'text-preview-source-check-requested',
+        'text-preview-source-availability-resolved',
+        'text-preview-publish-critical'
+      ]);
       expect(counters).toContain('text-preview-source-check-requested');
       expect(counters).toContain('text-preview-source-availability-resolved');
       expect(counters).toContain('text-preview-publish-critical');
@@ -553,8 +826,8 @@ describe('CanvasTextPreviewRuntime', () => {
     document.body.append(container);
     const root = createRoot(container);
     const nodes = [
-      textNode('notes/a.md', 4134, 2410),
-      textNode('notes/b.md', 4134, 2410)
+      { ...textNode('notes/b.md', 4134, 2410), x: 0, y: 100 },
+      { ...textNode('notes/a.md', 4134, 2410), x: 0, y: 0 }
     ];
     const enqueued: string[] = [];
     const scheduler = createRecordingImmediateScheduler(enqueued);
@@ -589,6 +862,144 @@ describe('CanvasTextPreviewRuntime', () => {
 
       expect(enqueued).toEqual([]);
       expect(records).toEqual([['notes/a.md']]);
+    } finally {
+      await act(async () => {
+        root.unmount();
+      });
+      container.remove();
+      restoreAnimationFrame();
+      restoreActEnvironment();
+    }
+  });
+
+  it('queues missing source capture through the preview resource scheduler before mounting capture targets', async () => {
+    const restoreActEnvironment = installReactActEnvironment();
+    const restoreAnimationFrame = installAnimationFrame();
+    const records: string[][] = [];
+    const queued: CanvasPreviewResourceRequest[] = [];
+    const container = document.createElement('div');
+    document.body.append(container);
+    const root = createRoot(container);
+    const nodes = [
+      textNode('notes/a.md', 4134, 2410),
+      textNode('notes/b.md', 4134, 2410)
+    ];
+
+    try {
+      await act(async () => {
+        root.render(
+          <CanvasTextPreviewProvider
+            canvasId="canvas-1"
+            nodes={nodes}
+            selectedProjectRelativePaths={[]}
+            textFileBuffers={{
+              'notes/a.md': textBuffer('notes/a.md', 'A'),
+              'notes/b.md': textBuffer('notes/b.md', 'B')
+            }}
+            actions={missingSourceTextPreviewActionsFixture(records)}
+            cameraState="idle"
+            dragState={undefined}
+            resourceZoom={0.11}
+            devicePixelRatio={2}
+            culledNodePaths={new Set()}
+            previewResourceScheduler={createQueuedScheduler(queued)}
+            styleDependencyKey="dark"
+          >
+            <TextPreviewSelectionProbe node={nodes[0]!} onPreview={() => undefined} />
+            <TextPreviewSelectionProbe node={nodes[1]!} onPreview={() => undefined} />
+          </CanvasTextPreviewProvider>
+        );
+      });
+
+      await waitForRecordedSourceReads(records, [['notes/a.md', 'notes/b.md']]);
+      await flushReactWork();
+
+      expect(document.body.querySelectorAll('.canvas-text-preview-capture-target')).toHaveLength(0);
+      expect(queued.map((request) => [request.kind, request.nodeId])).toEqual([
+        ['text-source', 'notes/a.md'],
+        ['text-source', 'notes/b.md']
+      ]);
+
+      await act(async () => {
+        queued.shift()?.run();
+      });
+      await flushReactWork();
+
+      expect(document.body.querySelectorAll('.canvas-text-preview-capture-target')).toHaveLength(1);
+    } finally {
+      await act(async () => {
+        root.unmount();
+      });
+      container.remove();
+      restoreAnimationFrame();
+      restoreActEnvironment();
+    }
+  });
+
+  it('releases queued source capture slots when a target is culled before capture starts', async () => {
+    const restoreActEnvironment = installReactActEnvironment();
+    const restoreAnimationFrame = installAnimationFrame();
+    const records: string[][] = [];
+    const queued: CanvasPreviewResourceRequest[] = [];
+    const container = document.createElement('div');
+    document.body.append(container);
+    const root = createRoot(container);
+    const scheduler = createQueuedScheduler(queued);
+    const nodes = [
+      textNode('notes/a.md', 4134, 2410),
+      textNode('notes/b.md', 4134, 2410),
+      textNode('notes/c.md', 4134, 2410),
+      textNode('notes/d.md', 4134, 2410)
+    ];
+
+    const render = async (culledNodePaths: ReadonlySet<string>) => {
+      await act(async () => {
+        root.render(
+          <CanvasTextPreviewProvider
+            canvasId="canvas-1"
+            nodes={nodes}
+            selectedProjectRelativePaths={[]}
+            textFileBuffers={{
+              'notes/a.md': textBuffer('notes/a.md', 'A'),
+              'notes/b.md': textBuffer('notes/b.md', 'B'),
+              'notes/c.md': textBuffer('notes/c.md', 'C'),
+              'notes/d.md': textBuffer('notes/d.md', 'D')
+            }}
+            actions={missingSourceTextPreviewActionsFixture(records)}
+            cameraState="idle"
+            dragState={undefined}
+            resourceZoom={0.11}
+            devicePixelRatio={2}
+            culledNodePaths={culledNodePaths}
+            previewResourceScheduler={scheduler}
+            styleDependencyKey="dark"
+          >
+            {nodes.map((node) => (
+              <TextPreviewSelectionProbe key={node.projectRelativePath} node={node} onPreview={() => undefined} />
+            ))}
+          </CanvasTextPreviewProvider>
+        );
+      });
+      await flushReactWork();
+    };
+
+    try {
+      await render(new Set());
+      await waitForRecordedSourceReads(records, [['notes/a.md', 'notes/b.md', 'notes/c.md', 'notes/d.md']]);
+      await flushReactWork();
+
+      expect(queued.map((request) => request.nodeId)).toEqual(['notes/a.md', 'notes/b.md', 'notes/c.md']);
+
+      await render(new Set(['notes/a.md']));
+
+      expect(queued.map((request) => request.nodeId)).toEqual(['notes/a.md', 'notes/b.md', 'notes/c.md', 'notes/d.md']);
+
+      await act(async () => {
+        queued.shift()?.run();
+      });
+      await flushReactWork();
+
+      expect(document.body.querySelectorAll('.canvas-text-preview-capture-target')).toHaveLength(0);
     } finally {
       await act(async () => {
         root.unmount();
@@ -834,6 +1245,27 @@ function recordingTextPreviewActionsFixture(records: string[][]): WorkbenchActio
   } as unknown as WorkbenchActions;
 }
 
+function missingSourceTextPreviewActionsFixture(records: string[][]): WorkbenchActions {
+  return {
+    readCanvasTextPreviewSources: async (input: Parameters<WorkbenchActions['readCanvasTextPreviewSources']>[0]) => {
+      records.push(input.sources.map((source) => source.projectRelativePath));
+      return {
+        sources: Object.fromEntries(input.sources.map((source) => [
+          source.projectRelativePath,
+          {
+            projectRelativePath: source.projectRelativePath,
+            fingerprint: source.fingerprint,
+            available: false
+          }
+        ]))
+      };
+    },
+    saveCanvasTextPreviewSource: async () => {
+      throw new Error('Unexpected source save in scheduling test.');
+    }
+  } as unknown as WorkbenchActions;
+}
+
 function recordingFingerprintTextPreviewActionsFixture(fingerprints: string[]): WorkbenchActions {
   return {
     readCanvasTextPreviewSources: async (input: Parameters<WorkbenchActions['readCanvasTextPreviewSources']>[0]) => ({
@@ -946,6 +1378,16 @@ async function waitForRecordedSourceReads(records: string[][], expected: string[
   throw new Error(`Expected text preview source reads ${JSON.stringify(expected)}, got ${JSON.stringify(records)}.`);
 }
 
+async function waitForRecordedCounters(counters: string[], expected: string[]): Promise<void> {
+  for (let index = 0; index < 20; index += 1) {
+    if (expected.every((counter) => counters.includes(counter))) {
+      return;
+    }
+    await flushReactWork();
+  }
+  throw new Error(`Expected text preview counters ${JSON.stringify(expected)}, got ${JSON.stringify(counters)}.`);
+}
+
 function textPreviewBodyElement(width: number, height: number): HTMLElement {
   const element = document.createElement('div');
   Object.defineProperty(element, 'clientWidth', { value: width });
@@ -969,10 +1411,11 @@ function previewTarget(projectRelativePath: string) {
   };
 }
 
-function textPreviewSource(previewWidth: number) {
+function textPreviewSource(previewWidth: number, fingerprint = 'sha256:preview'): CanvasTextPreviewSource & { fingerprint: string } {
   return {
-    src: `/api/projects/p/canvas-text-preview?canvasId=canvas-1&path=flow%2Freadme.md&fingerprint=fp&w=${previewWidth}`,
-    previewWidth
+    src: `/api/projects/p/canvas-text-preview?canvasId=canvas-1&path=flow%2Freadme.md&fingerprint=${fingerprint}&w=${previewWidth}`,
+    previewWidth,
+    fingerprint
   };
 }
 
@@ -1058,23 +1501,38 @@ function textPreviewImageState(source: ReturnType<typeof textPreviewSource>): Ca
   };
 }
 
-function layoutElement(className: string, rect: { top: number; height: number }): HTMLElement {
+function layoutElement(
+  className: string,
+  rect: { top: number; height: number; width?: number | undefined }
+): HTMLElement {
   const element = document.createElement('div');
   element.className = className;
   setLayoutRect(element, rect);
   return element;
 }
 
-function setLayoutRect(element: HTMLElement, rect: { top: number; height: number }): void {
+function setLayoutRect(element: HTMLElement, rect: { top: number; height: number; width?: number | undefined }): void {
+  const width = rect.width ?? 10;
   element.getBoundingClientRect = () => ({
     x: 0,
     y: rect.top,
     top: rect.top,
     bottom: rect.top + rect.height,
     left: 0,
-    right: 10,
-    width: 10,
+    right: width,
+    width,
     height: rect.height,
     toJSON: () => undefined
+  });
+}
+
+function setClientSize(element: HTMLElement, size: { width: number; height: number }): void {
+  Object.defineProperty(element, 'clientWidth', {
+    configurable: true,
+    value: size.width
+  });
+  Object.defineProperty(element, 'clientHeight', {
+    configurable: true,
+    value: size.height
   });
 }

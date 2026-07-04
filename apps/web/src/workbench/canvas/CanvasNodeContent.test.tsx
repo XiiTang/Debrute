@@ -14,7 +14,9 @@ import {
   type CanvasNodeContentProps
 } from './CanvasNodeContent';
 import type { CanvasImageNodeAssetHookState } from './CanvasImageNodeAssetContext';
-import type { CanvasTextPreviewSource } from './CanvasTextPreviewRuntime';
+import {
+  type CanvasTextPreviewSource
+} from './CanvasTextPreviewRuntime';
 import { I18nProvider } from '../i18n';
 
 afterEach(() => {
@@ -123,6 +125,7 @@ describe('CanvasNodeContent text chrome', () => {
         onVideoPlayingChange={() => undefined}
         onRegisterVideoTarget={() => undefined}
         onUpdateVideoPlaybackTime={() => undefined}
+        onUpdateTextViewport={() => undefined}
         onSelectNode={() => undefined}
         onTitlePointerDown={() => undefined}
         onTitlePointerMove={() => undefined}
@@ -145,6 +148,7 @@ describe('CanvasNodeContent text chrome', () => {
         onVideoPlayingChange={() => undefined}
         onRegisterVideoTarget={() => undefined}
         onUpdateVideoPlaybackTime={() => undefined}
+        onUpdateTextViewport={() => undefined}
         onSelectNode={() => undefined}
         onTitlePointerDown={() => undefined}
         onTitlePointerMove={() => undefined}
@@ -152,9 +156,39 @@ describe('CanvasNodeContent text chrome', () => {
       />
     );
 
-    expect(html).toContain('<strong>archive</strong>');
+    expect(html).toContain('<strong class="db-canvas-node-generic__label">archive</strong>');
     expect(html).toContain('db-canvas-node-generic');
+    expect(html).not.toContain('db-canvas-node-generic--wrap');
     expect(html).not.toContain('<span>archive</span>');
+  });
+
+  it('marks manually taller generic nodes for bounded label wrapping', () => {
+    const html = renderStaticWithI18n(
+      <CanvasNodeContent
+        node={{
+          ...directoryNode('references/very-long-directory-name-that-needs-wrapping'),
+          width: 2200,
+          height: 1000,
+          layoutMode: 'manual'
+        }}
+        selected
+        culled={false}
+        actions={actionsFixture()}
+        textBuffer={undefined}
+        onVideoPlayerMounted={() => undefined}
+        onVideoPlayingChange={() => undefined}
+        onRegisterVideoTarget={() => undefined}
+        onUpdateVideoPlaybackTime={() => undefined}
+        onUpdateTextViewport={() => undefined}
+        onSelectNode={() => undefined}
+        onTitlePointerDown={() => undefined}
+        onTitlePointerMove={() => undefined}
+        onTitlePointerUp={() => undefined}
+      />
+    );
+
+    expect(html).toContain('db-canvas-node-generic db-canvas-node-generic--wrap');
+    expect(html).toContain('<strong class="db-canvas-node-generic__label">very-long-directory-name-that-needs-wrapping</strong>');
   });
 
   it('keeps the generic node label as error context when unavailable', () => {
@@ -169,6 +203,7 @@ describe('CanvasNodeContent text chrome', () => {
         onVideoPlayingChange={() => undefined}
         onRegisterVideoTarget={() => undefined}
         onUpdateVideoPlaybackTime={() => undefined}
+        onUpdateTextViewport={() => undefined}
         onSelectNode={() => undefined}
         onTitlePointerDown={() => undefined}
         onTitlePointerMove={() => undefined}
@@ -179,7 +214,7 @@ describe('CanvasNodeContent text chrome', () => {
     expect(html).toContain('<strong>Missing File</strong>');
     expect(html).toContain('db-canvas-node-generic db-canvas-node-generic--problem');
     expect(html).toContain('<span>Unable to read references/archive.</span>');
-    expect(html).toContain('<span>archive</span>');
+    expect(html).toContain('<span class="db-canvas-node-generic__label">archive</span>');
   });
 
   it('renders available text nodes as live CodeMirror editors', () => {
@@ -194,6 +229,7 @@ describe('CanvasNodeContent text chrome', () => {
         onVideoPlayingChange={() => undefined}
         onRegisterVideoTarget={() => undefined}
         onUpdateVideoPlaybackTime={() => undefined}
+        onUpdateTextViewport={() => undefined}
         onSelectNode={() => undefined}
         onTitlePointerDown={() => undefined}
         onTitlePointerMove={() => undefined}
@@ -220,12 +256,14 @@ describe('CanvasNodeContent text chrome', () => {
         textBuffer={textBuffer('flow/readme.md', 'rev-a')}
         textPreview={{
           src: '/api/projects/p/canvas-text-preview?canvasId=canvas-1&path=flow%2Freadme.md&fingerprint=fp&w=700',
-          previewWidth: 700
+          previewWidth: 700,
+          fingerprint: 'fp'
         }}
         onVideoPlayerMounted={() => undefined}
         onVideoPlayingChange={() => undefined}
         onRegisterVideoTarget={() => undefined}
         onUpdateVideoPlaybackTime={() => undefined}
+        onUpdateTextViewport={() => undefined}
         onSelectNode={() => undefined}
         onTitlePointerDown={() => undefined}
         onTitlePointerMove={() => undefined}
@@ -270,6 +308,7 @@ describe('CanvasNodeContent text chrome', () => {
               onVideoPlayingChange={() => undefined}
               onRegisterVideoTarget={() => undefined}
               onUpdateVideoPlaybackTime={() => undefined}
+              onUpdateTextViewport={() => undefined}
               onSelectNode={onSelectNode}
               onTitlePointerDown={() => undefined}
               onTitlePointerMove={() => undefined}
@@ -311,7 +350,7 @@ describe('CanvasNodeContent text chrome', () => {
     }
   });
 
-  it('keeps the loaded text preview mounted while the preview source is unavailable and the next variant loads', async () => {
+  it('keeps the loaded text preview mounted while a same-fingerprint next variant loads', async () => {
     const restoreActEnvironment = installReactActEnvironment();
     const frameCallbacks: FrameRequestCallback[] = [];
     const restoreAnimationFrame = installAnimationFrameQueue(frameCallbacks);
@@ -327,11 +366,6 @@ describe('CanvasNodeContent text chrome', () => {
 
       expect(textPreviewImage(container)?.getAttribute('src')).toBe(firstPreview.src);
       expect(textPreviewImage(container)?.getAttribute('data-preview-width')).toBe('320');
-
-      await renderTextPreviewNode(root, undefined);
-
-      expect(textPreviewImage(container)?.getAttribute('src')).toBe(firstPreview.src);
-      expect(container.querySelector('.canvas-text-preview-empty')).toBeNull();
 
       await renderTextPreviewNode(root, nextPreview);
 
@@ -370,6 +404,31 @@ describe('CanvasNodeContent text chrome', () => {
     }
   });
 
+  it('keeps the loaded text preview mounted while a changed fingerprint source is unresolved', async () => {
+    const restoreActEnvironment = installReactActEnvironment();
+    const container = document.createElement('div');
+    document.body.appendChild(container);
+    const root = createRoot(container);
+    const firstPreview = textPreviewSource(320, 'sha256:old');
+
+    try {
+      await renderTextPreviewNode(root, firstPreview);
+
+      expect(textPreviewImage(container)?.getAttribute('src')).toBe(firstPreview.src);
+
+      await renderTextPreviewNode(root, undefined);
+
+      expect(textPreviewImage(container)?.getAttribute('src')).toBe(firstPreview.src);
+      expect(container.querySelector('.canvas-text-preview-empty')).toBeNull();
+    } finally {
+      await act(async () => {
+        root.unmount();
+      });
+      container.remove();
+      restoreActEnvironment();
+    }
+  });
+
   it('renders a text preview variant error when the first preview image fails to load', async () => {
     const restoreActEnvironment = installReactActEnvironment();
     const container = document.createElement('div');
@@ -397,7 +456,7 @@ describe('CanvasNodeContent text chrome', () => {
     }
   });
 
-  it('renders a text preview variant error when the next preview variant fails to preload', async () => {
+  it('keeps the loaded text preview mounted when the next preview variant fails to preload', async () => {
     const restoreActEnvironment = installReactActEnvironment();
     const preloadImages = installTextPreviewImagePreload();
     const container = document.createElement('div');
@@ -419,7 +478,9 @@ describe('CanvasNodeContent text chrome', () => {
 
       expect(container.textContent).toContain('Unable to load text preview variant for flow/readme.md.');
       expect(container.textContent).toContain('Text Preview Error');
-      expect(textPreviewImage(container)).toBeNull();
+      expect(textPreviewImage(container)?.getAttribute('src')).toBe(firstPreview.src);
+      expect(textPreviewImage(container)?.getAttribute('data-preview-width')).toBe('320');
+      expect(container.querySelector('.canvas-text-message--overlay')).not.toBeNull();
     } finally {
       await act(async () => {
         root.unmount();
@@ -429,12 +490,16 @@ describe('CanvasNodeContent text chrome', () => {
     }
   });
 
-  it('keeps the loaded text preview visible when a selected text node loses focus before the next preview resolves', async () => {
+  it('keeps the just-blurred text editor visible until the exact preview image loads', async () => {
     const restoreActEnvironment = installReactActEnvironment();
+    const frameCallbacks: FrameRequestCallback[] = [];
+    const restoreAnimationFrame = installAnimationFrameQueue(frameCallbacks);
+    const preloadImages = installTextPreviewImagePreload();
     const container = document.createElement('div');
     document.body.appendChild(container);
     const root = createRoot(container);
-    const firstPreview = textPreviewSource(320);
+    const firstPreview = textPreviewSource(320, 'sha256:old-scroll');
+    const exactPreview = textPreviewSource(640, 'sha256:new-scroll');
 
     try {
       await renderTextPreviewNode(root, firstPreview);
@@ -448,8 +513,70 @@ describe('CanvasNodeContent text chrome', () => {
 
       await renderTextPreviewNode(root, undefined);
 
-      expect(textPreviewImage(container)?.getAttribute('src')).toBe(firstPreview.src);
+      expect(container.querySelector('[data-canvas-text-editor="true"]')).not.toBeNull();
+      expect(textPreviewImage(container)).toBeNull();
       expect(container.querySelector('.canvas-text-preview-empty')).toBeNull();
+
+      await renderTextPreviewNode(root, exactPreview);
+
+      expect(container.querySelector('[data-canvas-text-editor="true"]')).not.toBeNull();
+      expect(textPreviewImage(container)).toBeNull();
+      expect(preloadImages).toHaveLength(1);
+      expect(preloadImages[0]?.src).toBe(exactPreview.src);
+
+      await act(async () => {
+        preloadImages[0]?.emit('load', exactPreview.previewWidth);
+        await Promise.resolve();
+      });
+      await act(async () => {
+        flushAnimationFrames(frameCallbacks);
+      });
+      await act(async () => {
+        flushAnimationFrames(frameCallbacks);
+      });
+      await act(async () => {
+        flushAnimationFrames(frameCallbacks);
+      });
+
+      expect(container.querySelector('[data-canvas-text-editor="true"]')).toBeNull();
+      expect(textPreviewImage(container)?.getAttribute('src')).toBe(exactPreview.src);
+    } finally {
+      await act(async () => {
+        root.unmount();
+      });
+      container.remove();
+      restoreAnimationFrame();
+      restoreActEnvironment();
+    }
+  });
+
+  it('keeps the just-blurred text editor visible and reports an error when exact preview image loading fails', async () => {
+    const restoreActEnvironment = installReactActEnvironment();
+    const preloadImages = installTextPreviewImagePreload();
+    const container = document.createElement('div');
+    document.body.appendChild(container);
+    const root = createRoot(container);
+    const exactPreview = textPreviewSource(640, 'sha256:new-scroll');
+
+    try {
+      await renderTextPreviewNode(root, undefined, { selected: true });
+
+      expect(container.querySelector('[data-canvas-text-editor="true"]')).not.toBeNull();
+
+      await renderTextPreviewNode(root, exactPreview);
+
+      expect(container.querySelector('[data-canvas-text-editor="true"]')).not.toBeNull();
+      expect(textPreviewImage(container)).toBeNull();
+      expect(preloadImages).toHaveLength(1);
+
+      await act(async () => {
+        preloadImages[0]?.emit('error');
+        await Promise.resolve();
+      });
+
+      expect(container.querySelector('[data-canvas-text-editor="true"]')).not.toBeNull();
+      expect(container.textContent).toContain('Unable to load text preview variant for flow/readme.md.');
+      expect(textPreviewImage(container)).toBeNull();
     } finally {
       await act(async () => {
         root.unmount();
@@ -472,6 +599,7 @@ describe('CanvasNodeContent text chrome', () => {
         onVideoPlayingChange={() => undefined}
         onRegisterVideoTarget={() => undefined}
         onUpdateVideoPlaybackTime={() => undefined}
+        onUpdateTextViewport={() => undefined}
         onSelectNode={() => undefined}
         onTitlePointerDown={() => undefined}
         onTitlePointerMove={() => undefined}
@@ -495,12 +623,14 @@ describe('CanvasNodeContent text chrome', () => {
         textBuffer={textBuffer('flow/readme.md', 'rev-a')}
         textPreview={{
           src: '/api/projects/p/canvas-text-preview?canvasId=canvas-1&path=flow%2Freadme.md&fingerprint=fp&w=700',
-          previewWidth: 700
+          previewWidth: 700,
+          fingerprint: 'fp'
         }}
         onVideoPlayerMounted={() => undefined}
         onVideoPlayingChange={() => undefined}
         onRegisterVideoTarget={() => undefined}
         onUpdateVideoPlaybackTime={() => undefined}
+        onUpdateTextViewport={() => undefined}
         onSelectNode={() => undefined}
         onTitlePointerDown={() => undefined}
         onTitlePointerMove={() => undefined}
@@ -510,6 +640,200 @@ describe('CanvasNodeContent text chrome', () => {
 
     expect(html).toContain('data-editor-engine="codemirror"');
     expect(html).not.toContain('canvas-text-preview-image');
+  });
+
+  it('opens the selected text editor at the persisted text viewport position', async () => {
+    const restoreActEnvironment = installReactActEnvironment();
+    const container = document.createElement('div');
+    document.body.appendChild(container);
+    const root = createRoot(container);
+    const node: ProjectedCanvasNode = {
+      ...textNode('flow/readme.md', 'rev-a'),
+      textViewport: { scrollTop: 72, scrollLeft: 9 }
+    };
+
+    try {
+      await act(async () => {
+        root.render(
+          <I18nProvider locale="en">
+            <CanvasNodeContent
+              node={node}
+              selected
+              culled={false}
+              actions={actionsFixture()}
+              textBuffer={textBuffer(node.projectRelativePath, 'rev-a')}
+              onVideoPlayerMounted={() => undefined}
+              onVideoPlayingChange={() => undefined}
+              onRegisterVideoTarget={() => undefined}
+              onUpdateVideoPlaybackTime={() => undefined}
+              onUpdateTextViewport={() => undefined}
+              onSelectNode={() => undefined}
+              onTitlePointerDown={() => undefined}
+              onTitlePointerMove={() => undefined}
+              onTitlePointerUp={() => undefined}
+            />
+          </I18nProvider>
+        );
+      });
+
+      const scroller = container.querySelector<HTMLElement>('.cm-scroller');
+      expect(scroller?.scrollTop).toBe(72);
+      expect(scroller?.scrollLeft).toBe(9);
+    } finally {
+      await act(async () => {
+        root.unmount();
+      });
+      container.remove();
+      restoreActEnvironment();
+    }
+  });
+
+  it('commits the selected text editor scroll position when the editor blurs and unmounts without duplicates', async () => {
+    const restoreActEnvironment = installReactActEnvironment();
+    const container = document.createElement('div');
+    document.body.appendChild(container);
+    const root = createRoot(container);
+    const node = textNode('flow/readme.md', 'rev-a');
+    const onUpdateTextViewport = vi.fn();
+
+    try {
+      await act(async () => {
+        root.render(
+          <I18nProvider locale="en">
+            <CanvasNodeContent
+              node={node}
+              selected
+              culled={false}
+              actions={actionsFixture()}
+              textBuffer={textBuffer(node.projectRelativePath, 'rev-a')}
+              onVideoPlayerMounted={() => undefined}
+              onVideoPlayingChange={() => undefined}
+              onRegisterVideoTarget={() => undefined}
+              onUpdateVideoPlaybackTime={() => undefined}
+              onUpdateTextViewport={onUpdateTextViewport}
+              onSelectNode={() => undefined}
+              onTitlePointerDown={() => undefined}
+              onTitlePointerMove={() => undefined}
+              onTitlePointerUp={() => undefined}
+            />
+          </I18nProvider>
+        );
+      });
+
+      const scroller = container.querySelector<HTMLElement>('.cm-scroller');
+      expect(scroller).not.toBeNull();
+      if (!scroller) {
+        throw new Error('Expected CodeMirror scroller.');
+      }
+
+      scroller.scrollTop = 72;
+      scroller.scrollLeft = 9;
+      await act(async () => {
+        scroller.dispatchEvent(new Event('scroll', { bubbles: true }));
+        container.querySelector<HTMLElement>('.canvas-text-editor')?.dispatchEvent(new FocusEvent('focusout', { bubbles: true }));
+      });
+
+      expect(onUpdateTextViewport).toHaveBeenLastCalledWith(node.projectRelativePath, { scrollTop: 72, scrollLeft: 9 });
+      expect(onUpdateTextViewport).toHaveBeenCalledTimes(1);
+
+      await act(async () => {
+        root.render(
+          <I18nProvider locale="en">
+            <CanvasNodeContent
+              node={node}
+              selected={false}
+              culled={false}
+              actions={actionsFixture()}
+              textBuffer={textBuffer(node.projectRelativePath, 'rev-a')}
+              onVideoPlayerMounted={() => undefined}
+              onVideoPlayingChange={() => undefined}
+              onRegisterVideoTarget={() => undefined}
+              onUpdateVideoPlaybackTime={() => undefined}
+              onUpdateTextViewport={onUpdateTextViewport}
+              onSelectNode={() => undefined}
+              onTitlePointerDown={() => undefined}
+              onTitlePointerMove={() => undefined}
+              onTitlePointerUp={() => undefined}
+            />
+          </I18nProvider>
+        );
+      });
+
+      expect(onUpdateTextViewport).toHaveBeenCalledTimes(1);
+
+      const persistedNode: ProjectedCanvasNode = {
+        ...node,
+        textViewport: { scrollTop: 72, scrollLeft: 9 }
+      };
+
+      await act(async () => {
+        root.render(
+          <I18nProvider locale="en">
+            <CanvasNodeContent
+              node={persistedNode}
+              selected
+              culled={false}
+              actions={actionsFixture()}
+              textBuffer={textBuffer(node.projectRelativePath, 'rev-a')}
+              onVideoPlayerMounted={() => undefined}
+              onVideoPlayingChange={() => undefined}
+              onRegisterVideoTarget={() => undefined}
+              onUpdateVideoPlaybackTime={() => undefined}
+              onUpdateTextViewport={onUpdateTextViewport}
+              onSelectNode={() => undefined}
+              onTitlePointerDown={() => undefined}
+              onTitlePointerMove={() => undefined}
+              onTitlePointerUp={() => undefined}
+            />
+          </I18nProvider>
+        );
+      });
+
+      const remountedScroller = container.querySelector<HTMLElement>('.cm-scroller');
+      expect(remountedScroller).not.toBeNull();
+      if (!remountedScroller) {
+        throw new Error('Expected remounted CodeMirror scroller.');
+      }
+
+      remountedScroller.scrollTop = 84;
+      remountedScroller.scrollLeft = 11;
+      await act(async () => {
+        container.querySelector<HTMLElement>('.canvas-text-editor')?.dispatchEvent(new FocusEvent('focusin', { bubbles: true }));
+        remountedScroller.dispatchEvent(new Event('scroll', { bubbles: true }));
+        container.querySelector<HTMLElement>('.canvas-text-editor')?.dispatchEvent(new FocusEvent('focusout', { bubbles: true }));
+      });
+      await act(async () => {
+        root.render(
+          <I18nProvider locale="en">
+            <CanvasNodeContent
+              node={persistedNode}
+              selected={false}
+              culled={false}
+              actions={actionsFixture()}
+              textBuffer={textBuffer(node.projectRelativePath, 'rev-a')}
+              onVideoPlayerMounted={() => undefined}
+              onVideoPlayingChange={() => undefined}
+              onRegisterVideoTarget={() => undefined}
+              onUpdateVideoPlaybackTime={() => undefined}
+              onUpdateTextViewport={onUpdateTextViewport}
+              onSelectNode={() => undefined}
+              onTitlePointerDown={() => undefined}
+              onTitlePointerMove={() => undefined}
+              onTitlePointerUp={() => undefined}
+            />
+          </I18nProvider>
+        );
+      });
+
+      expect(onUpdateTextViewport).toHaveBeenLastCalledWith(node.projectRelativePath, { scrollTop: 84, scrollLeft: 11 });
+      expect(onUpdateTextViewport).toHaveBeenCalledTimes(2);
+    } finally {
+      await act(async () => {
+        root.unmount();
+      });
+      container.remove();
+      restoreActEnvironment();
+    }
   });
 
   it('keeps text bodies focus-gated for Canvas wheel routing', () => {
@@ -524,6 +848,7 @@ describe('CanvasNodeContent text chrome', () => {
         onVideoPlayingChange={() => undefined}
         onRegisterVideoTarget={() => undefined}
         onUpdateVideoPlaybackTime={() => undefined}
+        onUpdateTextViewport={() => undefined}
         onSelectNode={() => undefined}
         onTitlePointerDown={() => undefined}
         onTitlePointerMove={() => undefined}
@@ -557,6 +882,7 @@ describe('CanvasNodeContent text chrome', () => {
         onVideoPlayingChange={() => undefined}
         onRegisterVideoTarget={() => undefined}
         onUpdateVideoPlaybackTime={() => undefined}
+        onUpdateTextViewport={() => undefined}
         onSelectNode={() => undefined}
         onTitlePointerDown={() => undefined}
         onTitlePointerMove={() => undefined}
@@ -579,6 +905,7 @@ describe('CanvasNodeContent text chrome', () => {
         onVideoPlayingChange={() => undefined}
         onRegisterVideoTarget={() => undefined}
         onUpdateVideoPlaybackTime={() => undefined}
+        onUpdateTextViewport={() => undefined}
         onSelectNode={() => undefined}
         onTitlePointerDown={() => undefined}
         onTitlePointerMove={() => undefined}
@@ -603,6 +930,7 @@ describe('CanvasNodeContent text chrome', () => {
         onVideoPlayingChange={() => undefined}
         onRegisterVideoTarget={() => undefined}
         onUpdateVideoPlaybackTime={() => undefined}
+        onUpdateTextViewport={() => undefined}
         onSelectNode={() => undefined}
         onTitlePointerDown={() => undefined}
         onTitlePointerMove={() => undefined}
@@ -683,6 +1011,7 @@ async function renderTextPreviewNode(
           onVideoPlayingChange={() => undefined}
           onRegisterVideoTarget={() => undefined}
           onUpdateVideoPlaybackTime={() => undefined}
+          onUpdateTextViewport={() => undefined}
           onSelectNode={() => undefined}
           onTitlePointerDown={() => undefined}
           onTitlePointerMove={() => undefined}
@@ -693,10 +1022,11 @@ async function renderTextPreviewNode(
   });
 }
 
-function textPreviewSource(previewWidth: number): CanvasTextPreviewSource {
+function textPreviewSource(previewWidth: number, fingerprint = 'sha256:preview'): CanvasTextPreviewSource & { fingerprint: string } {
   return {
-    src: `/api/projects/p/canvas-text-preview?canvasId=canvas-1&path=flow%2Freadme.md&fingerprint=fp&w=${previewWidth}`,
-    previewWidth
+    src: `/api/projects/p/canvas-text-preview?canvasId=canvas-1&path=flow%2Freadme.md&fingerprint=${fingerprint}&w=${previewWidth}`,
+    previewWidth,
+    fingerprint
   };
 }
 

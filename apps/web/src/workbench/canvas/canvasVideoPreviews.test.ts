@@ -69,6 +69,8 @@ function videoNode(
     },
     videoPresentation: {
       kind: 'video',
+      width: 640,
+      height: 360,
       textTracks: []
     }
   };

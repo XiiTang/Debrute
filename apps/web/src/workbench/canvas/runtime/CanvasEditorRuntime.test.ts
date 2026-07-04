@@ -255,6 +255,36 @@ describe('CanvasEditorRuntime', () => {
     expect(updated).toBe(true);
     expect(snapshots).toEqual([]);
   });
+
+  it('updates directory resize aspect behavior from live modifiers', () => {
+    const runtime = createCanvasEditorRuntime();
+
+    runtime.input.beginNodeResize({
+      pointerId: 9,
+      handle: 'se',
+      start: { x: 0, y: 0 },
+      node: { projectRelativePath: 'assets', nodeKind: 'directory' },
+      origin: { x: 10, y: 20, width: 1800, height: 640 },
+      modifiers: { shiftKey: false }
+    });
+
+    expect(runtime.getSnapshot().dragState).toMatchObject({
+      kind: 'resize-node',
+      preserveAspect: false,
+      node: { projectRelativePath: 'assets', nodeKind: 'directory' }
+    });
+
+    runtime.input.updatePointer({
+      pointerId: 9,
+      point: { x: 30, y: 40 },
+      modifiers: { shiftKey: true }
+    });
+
+    expect(runtime.getSnapshot().dragState).toMatchObject({
+      kind: 'resize-node',
+      preserveAspect: true
+    });
+  });
 });
 
 function fakeElement(rect = { left: 0, top: 0, width: 1, height: 1 }): {

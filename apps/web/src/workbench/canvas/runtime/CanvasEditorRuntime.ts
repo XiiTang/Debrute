@@ -96,7 +96,7 @@ export interface CanvasEditorRuntime {
 }
 
 export type CanvasRuntimeMoveOrigin = Pick<ProjectedCanvasNode, 'projectRelativePath' | 'x' | 'y' | 'width' | 'height'>;
-export type CanvasRuntimeResizeNode = Pick<ProjectedCanvasNode, 'projectRelativePath' | 'mediaKind'>;
+export type CanvasRuntimeResizeNode = Pick<ProjectedCanvasNode, 'projectRelativePath' | 'nodeKind' | 'mediaKind'>;
 export interface CanvasRuntimePointerModifiers {
   shiftKey: boolean;
 }
@@ -339,7 +339,7 @@ export function createCanvasEditorRuntime(initial?: {
   const resizePreserveAspect = (
     state: Pick<Extract<CanvasRuntimeDragState, { kind: 'resize-node' }>, 'handle' | 'node'>,
     modifiers: CanvasRuntimePointerModifiers
-  ): boolean => getCanvasResizePreserveAspect(state.handle, modifiers, state.node.mediaKind);
+  ): boolean => getCanvasResizePreserveAspect(state.handle, modifiers, state.node);
 
   const dragStateWithPointer = (
     active: CanvasRuntimeDragState,

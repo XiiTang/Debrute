@@ -23,6 +23,11 @@ interface CanvasTextEditorCompartments {
   wordWrap: Compartment;
 }
 
+export interface CanvasTextEditorScrollPosition {
+  scrollTop: number;
+  scrollLeft: number;
+}
+
 export function CanvasTextEditor({
   value,
   language,
@@ -36,6 +41,7 @@ export function CanvasTextEditor({
   onSave,
   onToggleWordWrap,
   onFocusRequestConsumed,
+  onScrollPositionCommit,
   onLayoutReady
 }: {
   value: string;
@@ -50,6 +56,7 @@ export function CanvasTextEditor({
   onSave: () => void;
   onToggleWordWrap: () => void;
   onFocusRequestConsumed?: ((requestId: number) => void) | undefined;
+  onScrollPositionCommit?: ((position: CanvasTextEditorScrollPosition) => void) | undefined;
   onLayoutReady?: (() => void) | undefined;
 }): React.ReactElement {
   const hostRef = React.useRef<HTMLDivElement | null>(null);
@@ -60,6 +67,7 @@ export function CanvasTextEditor({
     view: EditorView;
   } | undefined>(undefined);
   const onLayoutReadyRef = React.useRef(onLayoutReady);
+  const onScrollPositionCommitRef = React.useRef(onScrollPositionCommit);
   const callbacksRef = React.useRef<CanvasTextEditorCallbacks>({
     onChange,
     onSave,
@@ -94,6 +102,10 @@ export function CanvasTextEditor({
   }, [onLayoutReady]);
 
   React.useEffect(() => {
+    onScrollPositionCommitRef.current = onScrollPositionCommit;
+  }, [onScrollPositionCommit]);
+
+  React.useLayoutEffect(() => {
     const host = hostRef.current;
     const compartments = compartmentsRef.current;
     if (!host || !compartments || viewRef.current) {
@@ -112,12 +124,67 @@ export function CanvasTextEditor({
       parent: host
     });
     viewRef.current = view;
-    canvasTextEditorApplyInitialScroll(view, {
+    const initialScrollPosition = {
       scrollTop: initialScrollTop,
       scrollLeft: initialScrollLeft
+    };
+    canvasTextEditorApplyInitialScroll(view, {
+      scrollTop: initialScrollPosition.scrollTop,
+      scrollLeft: initialScrollPosition.scrollLeft
     });
+    const readScrollPosition = (): CanvasTextEditorScrollPosition => ({
+      scrollTop: view.scrollDOM.scrollTop,
+      scrollLeft: view.scrollDOM.scrollLeft
+    });
+    let lastObservedScrollPosition = readScrollPosition();
+    let lastCommittedScrollPosition: CanvasTextEditorScrollPosition | undefined;
+    let blurred = false;
+    const observeScrollPosition = () => {
+      if (!blurred) {
+        lastObservedScrollPosition = readScrollPosition();
+      }
+    };
+    const commitObservedScrollPosition = () => {
+      const position = lastObservedScrollPosition;
+      if (lastCommittedScrollPosition
+        && lastCommittedScrollPosition.scrollTop === position.scrollTop
+        && lastCommittedScrollPosition.scrollLeft === position.scrollLeft) {
+        return;
+      }
+      lastCommittedScrollPosition = position;
+      onScrollPositionCommitRef.current?.(position);
+    };
+    const commitScrollPosition = () => {
+      blurred = true;
+      commitObservedScrollPosition();
+    };
+    const restoreScrollObservation = () => {
+      blurred = false;
+      observeScrollPosition();
+    };
+    view.scrollDOM.addEventListener('scroll', observeScrollPosition);
+    host.addEventListener('focusin', restoreScrollObservation);
+    host.addEventListener('focusout', commitScrollPosition);
+    let initialScrollFrame: number | undefined;
+    if ((initialScrollPosition.scrollTop ?? 0) !== 0 || (initialScrollPosition.scrollLeft ?? 0) !== 0) {
+      initialScrollFrame = window.requestAnimationFrame(() => {
+        initialScrollFrame = undefined;
+        canvasTextEditorApplyInitialScroll(view, {
+          scrollTop: initialScrollPosition.scrollTop,
+          scrollLeft: initialScrollPosition.scrollLeft
+        });
+        observeScrollPosition();
+      });
+    }
 
     return () => {
+      if (initialScrollFrame !== undefined) {
+        window.cancelAnimationFrame(initialScrollFrame);
+      }
+      commitObservedScrollPosition();
+      view.scrollDOM.removeEventListener('scroll', observeScrollPosition);
+      host.removeEventListener('focusin', restoreScrollObservation);
+      host.removeEventListener('focusout', commitScrollPosition);
       view.destroy();
       viewRef.current = null;
     };

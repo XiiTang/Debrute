@@ -252,11 +252,10 @@ describe('Workbench UI source contract', () => {
     expect(floatingPanelRule).toContain('--db-floating-panel-content-bg: var(--db-panel-bg);');
     expect(floatingPanelRule).toContain('background: var(--db-floating-panel-content-bg);');
     expect(floatingPanelBodyRule).toContain('background: var(--db-floating-panel-content-bg);');
-    expect(shell).toContain('.floating-panel-inspector,\n.floating-panel-problems {\n  --db-floating-panel-content-bg: var(--db-surface-1);');
+    expect(shell).toContain('.floating-panel-inspector {\n  --db-floating-panel-content-bg: var(--db-surface-1);');
     expect(shell).toContain('.floating-panel-settings,\n.floating-panel-terminal {\n  --db-floating-panel-content-bg: var(--db-bg);');
     expect(shell).not.toContain('.floating-panel-terminal {\n  --db-floating-panel-content-bg: var(--db-terminal-bg);');
     expect(shell).not.toContain('.floating-panel-inspector .floating-panel-body');
-    expect(shell).not.toContain('.floating-panel-problems .floating-panel-body');
     expect(shell).not.toContain('.floating-panel-settings .floating-panel-body');
   });
 
@@ -272,6 +271,14 @@ describe('Workbench UI source contract', () => {
     expect(terminalTabRule).toContain('font-size: var(--db-font-sm);');
     expect(terminalTabRule).toContain('line-height: 1.4;');
     expect(terminalTabRule).toContain('letter-spacing: 0;');
+  });
+
+  it('keeps native text selection from flattening foreground colors', () => {
+    const base = css('apps/web/src/workbench/ui/styles/base.css');
+    const selectionRule = rule(base, '::selection');
+
+    expect(selectionRule).toContain('background: var(--db-selection-muted);');
+    expect(selectionRule).not.toContain('color:');
   });
 
   it('keeps Terminal tab controls at one height and prevents tab close controls from overlapping the end slot', () => {
@@ -590,6 +597,7 @@ describe('Workbench UI source contract', () => {
     expect(feedbackCommentCreatorRule).toContain('justify-self: start;');
     expect(feedbackCommentStripRule).toContain('padding: 3px 2px 3px 0;');
     expect(feedbackSource).toContain('db-floating-bar canvas-feedback-bar');
+    expect(feedbackSource).toContain('sizing={{ minWidthPx: 90, maxWidthPx: 90 }}');
   });
 
   it('keeps Canvas cards and dock icons on the compact control rhythm', () => {
@@ -790,12 +798,12 @@ describe('Workbench UI source contract', () => {
       '.canvas-text-message',
       '.canvas-text-editor',
       '.canvas-text-preview',
-      '.canvas-image-feedback',
+      '.canvas-media-feedback',
       '.canvas-feedback'
     ];
     const violations = cssRuleBlocks(styles)
       .flatMap((ruleBlock) => ruleBlock.selector.split(',').map((selector) => selector.trim()))
-      .filter((selector) => selector.includes('canvas-node') || selector.includes('canvas-text') || selector.includes('canvas-feedback'))
+      .filter((selector) => selector.includes('canvas-node') || selector.includes('canvas-text') || selector.includes('canvas-feedback') || selector.includes('canvas-media-feedback'))
       .filter((selector) => !featureOwnedPrefixes.some((prefix) => selector.startsWith(prefix)));
 
     expect(violations).toEqual([]);

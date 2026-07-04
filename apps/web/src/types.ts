@@ -21,6 +21,7 @@ import type {
   SendProjectFileToPhotoshopInput,
   SendProjectFileToPhotoshopResult,
   IntegrationSettingsView,
+  UpdateCanvasTextViewportStateInput,
   UpdateCanvasVideoPlaybackStateInput,
   VideoModelSettingsView,
   WorkbenchCanvasManagementResult,
@@ -131,6 +132,7 @@ export interface WorkbenchActions {
     nodeProjectRelativePathsTopFirst?: string[];
   }) => Promise<void>;
   updateCanvasVideoPlaybackState: (canvasId: string, input: Omit<UpdateCanvasVideoPlaybackStateInput, 'canvasId'>) => Promise<void>;
+  updateCanvasTextViewportState: (canvasId: string, input: Omit<UpdateCanvasTextViewportStateInput, 'canvasId'>) => Promise<void>;
   updateCanvasFeedbackEntry: (input: UpdateCanvasFeedbackEntryInput) => Promise<boolean>;
   addProjectPathToCanvasMap: (input: AddProjectPathToCanvasMapInput) => Promise<void>;
   createCanvas: () => Promise<WorkbenchCanvasManagementResult>;

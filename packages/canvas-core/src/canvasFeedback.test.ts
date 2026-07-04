@@ -1,10 +1,15 @@
 import { describe, expect, it } from 'vitest';
 import {
+  canvasFeedbackEntryHasFileSpatialItems,
+  canvasFeedbackItemsForMoment,
+  canvasFeedbackMomentRefs,
+  canvasFeedbackRenderedMomentProjectPath,
   canvasFeedbackRenderedProjectPath,
   createEmptyCanvasFeedbackDocument,
   normalizeCanvasFeedbackDocument,
   updateCanvasFeedbackEntry,
-  type CanvasFeedbackDocument
+  type CanvasFeedbackDocument,
+  type CanvasFeedbackEntry
 } from './index';
 
 const NOW = '2026-06-21T12:00:00.000Z';
@@ -25,17 +30,49 @@ describe('Canvas feedback', () => {
     })).toThrow('Invalid Canvas feedback document.');
   });
 
-  it('updates marks independently from file-level comments and local regions', () => {
-    const withComment = updateCanvasFeedbackEntry(createEmptyCanvasFeedbackDocument(NOW), {
-      operation: 'add-comment',
+  it('normalizes the final unified feedback item document shape', () => {
+    const document: CanvasFeedbackDocument = {
+      updatedAt: NOW,
+      entries: {
+        'assets/page.png': {
+          projectRelativePath: 'assets/page.png',
+          marks: ['like'],
+          nextMomentLabel: 1,
+          nextSpatialLabel: 2,
+          items: [{
+            id: 'item-1',
+            kind: 'pin',
+            scope: 'file',
+            label: 1,
+            geometry: { type: 'point', x: 0.5, y: 0.5 },
+            comment: 'center',
+            createdAt: NOW,
+            updatedAt: NOW
+          }],
+          updatedAt: NOW
+        }
+      }
+    };
+
+    expect(normalizeCanvasFeedbackDocument(document)).toEqual(document);
+  });
+
+  it('updates marks independently from file and local items', () => {
+    const withFileComment = updateCanvasFeedbackEntry(createEmptyCanvasFeedbackDocument(NOW), {
+      operation: 'add-item',
       projectRelativePath: 'assets/page.png',
-      comment: 'overall direction works'
+      item: {
+        kind: 'comment',
+        scope: 'file',
+        comment: 'overall direction works'
+      }
     }, NOW);
-    const withRegion = updateCanvasFeedbackEntry(withComment, {
-      operation: 'add-region',
+    const withRegion = updateCanvasFeedbackEntry(withFileComment, {
+      operation: 'add-item',
       projectRelativePath: 'assets/page.png',
-      region: {
+      item: {
         kind: 'pin',
+        scope: 'file',
         geometry: { type: 'point', x: 0.42, y: 0.31 },
         comment: 'face is blurry'
       }
@@ -50,91 +87,205 @@ describe('Canvas feedback', () => {
     expect(next.entries['assets/page.png']).toMatchObject({
       projectRelativePath: 'assets/page.png',
       marks: ['like', 'needs_revision'],
-      comments: [{
+      nextMomentLabel: 1,
+      nextSpatialLabel: 2,
+      items: [{
+        kind: 'comment',
+        scope: 'file',
         comment: 'overall direction works',
         createdAt: NOW,
         updatedAt: NOW
-      }],
-      nextRegionLabel: 2,
-      regions: [{
+      }, {
         label: 1,
         kind: 'pin',
+        scope: 'file',
         geometry: { type: 'point', x: 0.42, y: 0.31 },
         comment: 'face is blurry'
       }]
     });
   });
 
-  it('adds updates and deletes file-level comments', () => {
+  it('adds updates and deletes file-level comments through unified item mutations', () => {
     const first = updateCanvasFeedbackEntry(createEmptyCanvasFeedbackDocument(NOW), {
-      operation: 'add-comment',
+      operation: 'add-item',
       projectRelativePath: 'assets/page.png',
-      comment: ' first comment '
+      item: { kind: 'comment', scope: 'file', comment: ' first comment ' }
     }, NOW);
-    const commentId = first.entries['assets/page.png']!.comments[0]!.id;
+    const commentId = first.entries['assets/page.png']!.items[0]!.id;
     const second = updateCanvasFeedbackEntry(first, {
-      operation: 'add-comment',
+      operation: 'add-item',
       projectRelativePath: 'assets/page.png',
-      comment: 'second comment'
+      item: { kind: 'comment', scope: 'file', comment: 'second comment' }
     }, LATER);
     const updated = updateCanvasFeedbackEntry(second, {
-      operation: 'update-comment',
+      operation: 'update-item',
       projectRelativePath: 'assets/page.png',
-      commentId,
+      itemId: commentId,
       comment: 'updated comment'
     }, LATER);
     const deleted = updateCanvasFeedbackEntry(updated, {
-      operation: 'delete-comment',
+      operation: 'delete-item',
       projectRelativePath: 'assets/page.png',
-      commentId
+      itemId: commentId
     }, LATER);
 
-    expect(first.entries['assets/page.png']!.comments).toMatchObject([{
+    expect(first.entries['assets/page.png']!.items).toMatchObject([{
       id: commentId,
+      kind: 'comment',
+      scope: 'file',
       comment: 'first comment',
       createdAt: NOW,
       updatedAt: NOW
     }]);
-    expect(second.entries['assets/page.png']!.comments).toHaveLength(2);
-    expect(updated.entries['assets/page.png']!.comments[0]).toMatchObject({
+    expect(second.entries['assets/page.png']!.items).toHaveLength(2);
+    expect(updated.entries['assets/page.png']!.items[0]).toMatchObject({
       id: commentId,
+      kind: 'comment',
+      scope: 'file',
       comment: 'updated comment',
       createdAt: NOW,
       updatedAt: LATER
     });
-    expect(deleted.entries['assets/page.png']!.comments.map((item) => item.comment)).toEqual(['second comment']);
+    expect(deleted.entries['assets/page.png']!.items.map((item) => item.comment)).toEqual(['second comment']);
   });
 
-  it('allocates non-conflicting comment ids for one timestamp', () => {
-    const first = updateCanvasFeedbackEntry(createEmptyCanvasFeedbackDocument(NOW), {
-      operation: 'add-comment',
-      projectRelativePath: 'assets/page.png',
-      comment: 'first'
+  it('adds file comments, moment comments, and spatial items through unified item mutations', () => {
+    const withFileComment = updateCanvasFeedbackEntry(createEmptyCanvasFeedbackDocument(NOW), {
+      operation: 'add-item',
+      projectRelativePath: 'assets/clip.mp4',
+      item: {
+        kind: 'comment',
+        scope: 'file',
+        comment: 'overall direction works'
+      }
     }, NOW);
-    const firstId = first.entries['assets/page.png']!.comments[0]!.id;
-    const second = updateCanvasFeedbackEntry(first, {
-      operation: 'add-comment',
+    const withMomentComment = updateCanvasFeedbackEntry(withFileComment, {
+      operation: 'add-item',
+      projectRelativePath: 'assets/clip.mp4',
+      item: {
+        kind: 'comment',
+        scope: 'moment',
+        momentTimeSeconds: 12.345,
+        comment: 'cut here'
+      }
+    }, NOW);
+    const withMomentPin = updateCanvasFeedbackEntry(withMomentComment, {
+      operation: 'add-item',
+      projectRelativePath: 'assets/clip.mp4',
+      item: {
+        kind: 'pin',
+        scope: 'moment',
+        momentTimeSeconds: 12.345,
+        geometry: { type: 'point', x: 0.42, y: 0.31 },
+        comment: 'face is blurry'
+      }
+    }, LATER);
+
+    expect(withMomentPin.entries['assets/clip.mp4']).toMatchObject({
+      nextMomentLabel: 2,
+      nextSpatialLabel: 2,
+      items: [{
+        kind: 'comment',
+        scope: 'file',
+        comment: 'overall direction works'
+      }, {
+        kind: 'comment',
+        scope: 'moment',
+        moment: { label: 'M1', currentTimeSeconds: 12.345 },
+        comment: 'cut here'
+      }, {
+        kind: 'pin',
+        scope: 'moment',
+        label: 1,
+        moment: { label: 'M1', currentTimeSeconds: 12.345 },
+        geometry: { type: 'point', x: 0.42, y: 0.31 },
+        comment: 'face is blurry'
+      }]
+    });
+  });
+
+  it('allocates non-conflicting item ids for one timestamp', () => {
+    const first = updateCanvasFeedbackEntry(createEmptyCanvasFeedbackDocument(NOW), {
+      operation: 'add-item',
       projectRelativePath: 'assets/page.png',
-      comment: 'second'
+      item: { kind: 'comment', scope: 'file', comment: 'first' }
+    }, NOW);
+    const firstId = first.entries['assets/page.png']!.items[0]!.id;
+    const second = updateCanvasFeedbackEntry(first, {
+      operation: 'add-item',
+      projectRelativePath: 'assets/page.png',
+      item: { kind: 'comment', scope: 'file', comment: 'second' }
     }, NOW);
     const deleted = updateCanvasFeedbackEntry(second, {
-      operation: 'delete-comment',
+      operation: 'delete-item',
       projectRelativePath: 'assets/page.png',
-      commentId: firstId
+      itemId: firstId
     }, NOW);
     const third = updateCanvasFeedbackEntry(deleted, {
-      operation: 'add-comment',
+      operation: 'add-item',
       projectRelativePath: 'assets/page.png',
-      comment: 'third'
+      item: { kind: 'comment', scope: 'file', comment: 'third' }
     }, NOW);
 
-    expect(third.entries['assets/page.png']!.comments.map((comment) => comment.id)).toEqual([
-      `comment-${NOW.replace(/[^0-9]/g, '')}-2`,
-      `comment-${NOW.replace(/[^0-9]/g, '')}-3`
+    expect(third.entries['assets/page.png']!.items.map((item) => item.id)).toEqual([
+      `item-${NOW.replace(/[^0-9]/g, '')}-2`,
+      `item-${NOW.replace(/[^0-9]/g, '')}-3`
     ]);
   });
 
-  it('removes an entry when the last mark comment and region are removed', () => {
+  it('allocates exact-time moments and entry-local spatial labels without reuse', () => {
+    const first = updateCanvasFeedbackEntry(createEmptyCanvasFeedbackDocument(NOW), {
+      operation: 'add-item',
+      projectRelativePath: 'assets/clip.mp4',
+      item: { kind: 'comment', scope: 'moment', momentTimeSeconds: 1.111, comment: 'first moment' }
+    }, NOW);
+    const sameMoment = updateCanvasFeedbackEntry(first, {
+      operation: 'add-item',
+      projectRelativePath: 'assets/clip.mp4',
+      item: {
+        kind: 'region',
+        scope: 'moment',
+        momentTimeSeconds: 1.111,
+        geometry: { type: 'rect', x: 0.1, y: 0.1, width: 0.2, height: 0.2 },
+        comment: 'same moment'
+      }
+    }, NOW);
+    const newMoment = updateCanvasFeedbackEntry(sameMoment, {
+      operation: 'add-item',
+      projectRelativePath: 'assets/clip.mp4',
+      item: {
+        kind: 'pin',
+        scope: 'moment',
+        momentTimeSeconds: 1.112,
+        geometry: { type: 'point', x: 0.4, y: 0.5 },
+        comment: 'new moment'
+      }
+    }, LATER);
+    const firstSpatialId = newMoment.entries['assets/clip.mp4']!.items.find((item) => item.kind === 'region')!.id;
+    const afterDelete = updateCanvasFeedbackEntry(newMoment, {
+      operation: 'delete-item',
+      projectRelativePath: 'assets/clip.mp4',
+      itemId: firstSpatialId
+    }, LATER);
+    const afterAdd = updateCanvasFeedbackEntry(afterDelete, {
+      operation: 'add-item',
+      projectRelativePath: 'assets/clip.mp4',
+      item: {
+        kind: 'region',
+        scope: 'moment',
+        momentTimeSeconds: 1.111,
+        geometry: { type: 'rect', x: 0.2, y: 0.2, width: 0.2, height: 0.2 },
+        comment: 'new region label'
+      }
+    }, LATER);
+
+    expect(afterAdd.entries['assets/clip.mp4']!.items.map((item) => item.scope === 'moment' ? item.moment.label : '')).toEqual(['M1', 'M2', 'M1']);
+    expect(afterAdd.entries['assets/clip.mp4']!.items.filter((item) => item.kind !== 'comment').map((item) => item.label)).toEqual([2, 3]);
+    expect(afterAdd.entries['assets/clip.mp4']!.nextMomentLabel).toBe(3);
+    expect(afterAdd.entries['assets/clip.mp4']!.nextSpatialLabel).toBe(4);
+  });
+
+  it('removes an entry when the last mark or item is removed', () => {
     const withMark = updateCanvasFeedbackEntry(createEmptyCanvasFeedbackDocument(NOW), {
       operation: 'set-marks',
       projectRelativePath: 'assets/page.png',
@@ -150,90 +301,63 @@ describe('Canvas feedback', () => {
     expect(withoutMark.entries['assets/page.png']).toBeUndefined();
   });
 
-  it('allocates stable non-reused labels for pins and rectangles', () => {
-    const first = updateCanvasFeedbackEntry(createEmptyCanvasFeedbackDocument(NOW), {
-      operation: 'add-region',
-      projectRelativePath: 'assets/page.png',
-      region: {
-        kind: 'pin',
-        geometry: { type: 'point', x: 0.1, y: 0.2 },
-        comment: 'pin comment'
-      }
-    }, NOW);
-    const firstRegionId = first.entries['assets/page.png']!.regions[0]!.id;
-    const second = updateCanvasFeedbackEntry(first, {
-      operation: 'add-region',
-      projectRelativePath: 'assets/page.png',
-      region: {
-        kind: 'region',
-        geometry: { type: 'rect', x: 0.2, y: 0.3, width: 0.4, height: 0.2 },
-        comment: 'rect comment'
-      }
-    }, NOW);
-    const third = updateCanvasFeedbackEntry(second, {
-      operation: 'delete-region',
-      projectRelativePath: 'assets/page.png',
-      regionId: firstRegionId
-    }, LATER);
-    const fourth = updateCanvasFeedbackEntry(third, {
-      operation: 'add-region',
-      projectRelativePath: 'assets/page.png',
-      region: {
-        kind: 'region',
-        geometry: { type: 'rect', x: 0.5, y: 0.5, width: 0.2, height: 0.2 },
-        comment: 'second rect comment'
-      }
-    }, LATER);
-
-    expect(fourth.entries['assets/page.png']!.regions.map((region) => region.label)).toEqual([2, 3]);
-    expect(fourth.entries['assets/page.png']!.nextRegionLabel).toBe(4);
-  });
-
-  it('rejects invalid geometry and empty durable comments', () => {
+  it('rejects invalid geometry, empty durable comments, and invalid moment times', () => {
     const document = createEmptyCanvasFeedbackDocument(NOW);
     expect(() => updateCanvasFeedbackEntry(document, {
-      operation: 'add-region',
+      operation: 'add-item',
       projectRelativePath: 'assets/page.png',
-      region: {
+      item: {
         kind: 'pin',
+        scope: 'file',
         geometry: { type: 'point', x: 1.2, y: 0.2 },
         comment: 'outside'
       }
     }, NOW)).toThrow('Canvas feedback point x must be between 0 and 1.');
 
     expect(() => updateCanvasFeedbackEntry(document, {
-      operation: 'add-region',
+      operation: 'add-item',
       projectRelativePath: 'assets/page.png',
-      region: {
+      item: {
         kind: 'region',
+        scope: 'file',
         geometry: { type: 'rect', x: 0.2, y: 0.2, width: 0, height: 0.1 },
         comment: 'bad size'
       }
     }, NOW)).toThrow('Canvas feedback region width must be greater than 0.');
 
     expect(() => updateCanvasFeedbackEntry(document, {
-      operation: 'add-region',
+      operation: 'add-item',
       projectRelativePath: 'assets/page.png',
-      region: {
+      item: {
         kind: 'pin',
+        scope: 'file',
         geometry: { type: 'point', x: 0.2, y: 0.2 },
         comment: '   '
       }
-    }, NOW)).toThrow('Canvas feedback region comment must be non-empty.');
+    }, NOW)).toThrow('Canvas feedback comment must be non-empty.');
 
     expect(() => updateCanvasFeedbackEntry(document, {
-      operation: 'add-comment',
+      operation: 'add-item',
       projectRelativePath: 'assets/page.png',
-      comment: '   '
+      item: { kind: 'comment', scope: 'file', comment: '   ' }
     }, NOW)).toThrow('Canvas feedback comment must be non-empty.');
+
+    expect(() => updateCanvasFeedbackEntry(document, {
+      operation: 'add-item',
+      projectRelativePath: 'assets/clip.mp4',
+      item: { kind: 'comment', scope: 'moment', momentTimeSeconds: -1, comment: 'bad time' }
+    }, NOW)).toThrow('Canvas video playback time must be a non-negative finite number.');
   });
 
-  it('derives rendered feedback paths without storing them in the feedback document', () => {
+  it('derives image and video moment feedback artifact paths without storing them in the document', () => {
     expect(canvasFeedbackRenderedProjectPath('拼接图/韩语翻译-liked-page1-8-右到左.png')).toBe(
       '.debrute/reviews/rendered-feedback/拼接图/韩语翻译-liked-page1-8-右到左.png.annotated.png'
     );
     expect(canvasFeedbackRenderedProjectPath('assets/page.01.jpg')).toBe(
       '.debrute/reviews/rendered-feedback/assets/page.01.jpg.annotated.png'
+    );
+    expect(canvasFeedbackRenderedMomentProjectPath('assets/clip.mp4', 'M12')).toBe(
+      '.debrute/reviews/rendered-feedback/assets/clip.mp4.moment-M12.annotated.png'
     );
     expect(() => canvasFeedbackRenderedProjectPath('.debrute/reviews/rendered-feedback/assets/page.png.annotated.png')).toThrow(
       'Canvas feedback cannot target rendered feedback artifacts.'
@@ -247,17 +371,13 @@ describe('Canvas feedback', () => {
         'assets/page.png': {
           projectRelativePath: 'assets/page.png',
           marks: ['like'],
-          comments: [{
-            id: 'comment-1',
-            comment: 'overall',
-            createdAt: NOW,
-            updatedAt: NOW
-          }],
-          nextRegionLabel: 2,
-          regions: [{
-            id: 'region-1',
-            label: 1,
+          nextMomentLabel: 1,
+          nextSpatialLabel: 2,
+          items: [{
+            id: 'item-1',
             kind: 'pin',
+            scope: 'file',
+            label: 1,
             geometry: { type: 'point', x: 0.5, y: 0.5 },
             comment: 'center',
             createdAt: NOW,
@@ -281,39 +401,36 @@ describe('Canvas feedback', () => {
       updatedAt: NOW,
       entries: {
         'assets/page.png': {
-          projectRelativePath: 'assets/page.png',
-          marks: [],
-          comments: [],
-          nextRegionLabel: 1,
-          regions: [],
-          updatedAt: NOW,
+          ...feedbackEntry('assets/page.png'),
           extra: 'unexpected'
         }
       }
     })).toThrow('Invalid Canvas feedback entry.');
   });
 
-  it('rejects duplicate local feedback ids labels and comment ids', () => {
+  it('rejects duplicate item ids and duplicate spatial labels', () => {
     const duplicateLabel: CanvasFeedbackDocument = {
       updatedAt: NOW,
       entries: {
         'assets/page.png': {
           projectRelativePath: 'assets/page.png',
           marks: [],
-          comments: [],
-          nextRegionLabel: 3,
-          regions: [{
-            id: 'region-1',
-            label: 1,
+          nextMomentLabel: 1,
+          nextSpatialLabel: 3,
+          items: [{
+            id: 'item-1',
             kind: 'pin',
+            scope: 'file',
+            label: 1,
             geometry: { type: 'point', x: 0.2, y: 0.3 },
             comment: 'first',
             createdAt: NOW,
             updatedAt: NOW
           }, {
-            id: 'region-2',
-            label: 1,
+            id: 'item-2',
             kind: 'pin',
+            scope: 'file',
+            label: 1,
             geometry: { type: 'point', x: 0.4, y: 0.5 },
             comment: 'second',
             createdAt: NOW,
@@ -323,48 +440,153 @@ describe('Canvas feedback', () => {
         }
       }
     };
-    const duplicateCommentId: CanvasFeedbackDocument = {
+    const duplicateItemId: CanvasFeedbackDocument = {
       updatedAt: NOW,
       entries: {
         'assets/page.png': {
           projectRelativePath: 'assets/page.png',
           marks: [],
-          comments: [{
-            id: 'comment-1',
+          nextMomentLabel: 1,
+          nextSpatialLabel: 1,
+          items: [{
+            id: 'item-1',
+            kind: 'comment',
+            scope: 'file',
             comment: 'first',
             createdAt: NOW,
             updatedAt: NOW
           }, {
-            id: 'comment-1',
+            id: 'item-1',
+            kind: 'comment',
+            scope: 'file',
             comment: 'second',
             createdAt: NOW,
             updatedAt: NOW
           }],
-          nextRegionLabel: 1,
-          regions: [],
           updatedAt: NOW
         }
       }
     };
 
     expect(() => normalizeCanvasFeedbackDocument(duplicateLabel)).toThrow(
-      'Canvas feedback region labels must be unique.'
+      'Canvas feedback spatial labels must be unique.'
     );
-    expect(() => normalizeCanvasFeedbackDocument({
-      ...duplicateLabel,
-      entries: {
-        'assets/page.png': {
-          ...duplicateLabel.entries['assets/page.png']!,
-          regions: duplicateLabel.entries['assets/page.png']!.regions.map((region, index) => ({
-            ...region,
-            id: 'region-1',
-            label: index + 1
-          }))
-        }
-      }
-    })).toThrow('Canvas feedback region ids must be unique.');
-    expect(() => normalizeCanvasFeedbackDocument(duplicateCommentId)).toThrow(
-      'Canvas feedback comment ids must be unique.'
+    expect(() => normalizeCanvasFeedbackDocument(duplicateItemId)).toThrow(
+      'Canvas feedback item ids must be unique.'
     );
   });
+
+  it('requires next labels to exceed existing labels', () => {
+    expect(() => normalizeCanvasFeedbackDocument({
+      updatedAt: NOW,
+      entries: {
+        'assets/clip.mp4': {
+          projectRelativePath: 'assets/clip.mp4',
+          marks: [],
+          nextMomentLabel: 1,
+          nextSpatialLabel: 1,
+          items: [{
+            id: 'item-1',
+            kind: 'comment',
+            scope: 'moment',
+            moment: { label: 'M1', currentTimeSeconds: 2 },
+            comment: 'cut here',
+            createdAt: NOW,
+            updatedAt: NOW
+          }],
+          updatedAt: NOW
+        }
+      }
+    })).toThrow('Canvas feedback nextMomentLabel must exceed existing moment labels.');
+
+    expect(() => normalizeCanvasFeedbackDocument({
+      updatedAt: NOW,
+      entries: {
+        'assets/page.png': {
+          projectRelativePath: 'assets/page.png',
+          marks: [],
+          nextMomentLabel: 1,
+          nextSpatialLabel: 1,
+          items: [{
+            id: 'item-1',
+            kind: 'pin',
+            scope: 'file',
+            label: 1,
+            geometry: { type: 'point', x: 0.2, y: 0.3 },
+            comment: 'pin',
+            createdAt: NOW,
+            updatedAt: NOW
+          }],
+          updatedAt: NOW
+        }
+      }
+    })).toThrow('Canvas feedback nextSpatialLabel must exceed existing spatial labels.');
+  });
+
+  it('exposes helpers for file spatial items and moment item groups', () => {
+    const entry: CanvasFeedbackEntry = {
+      projectRelativePath: 'assets/clip.mp4',
+      marks: [],
+      nextMomentLabel: 3,
+      nextSpatialLabel: 3,
+      items: [{
+        id: 'item-file',
+        kind: 'comment',
+        scope: 'file',
+        comment: 'overall',
+        createdAt: NOW,
+        updatedAt: NOW
+      }, {
+        id: 'item-moment',
+        kind: 'comment',
+        scope: 'moment',
+        moment: { label: 'M1', currentTimeSeconds: 4.25 },
+        comment: 'moment',
+        createdAt: NOW,
+        updatedAt: NOW
+      }, {
+        id: 'item-pin',
+        kind: 'pin',
+        scope: 'moment',
+        label: 1,
+        moment: { label: 'M1', currentTimeSeconds: 4.25 },
+        geometry: { type: 'point', x: 0.2, y: 0.3 },
+        comment: 'pin',
+        createdAt: NOW,
+        updatedAt: NOW
+      }, {
+        id: 'item-region',
+        kind: 'region',
+        scope: 'moment',
+        label: 2,
+        moment: { label: 'M2', currentTimeSeconds: 8 },
+        geometry: { type: 'rect', x: 0.2, y: 0.2, width: 0.2, height: 0.2 },
+        comment: 'region',
+        createdAt: NOW,
+        updatedAt: NOW
+      }],
+      updatedAt: NOW
+    };
+
+    expect(canvasFeedbackEntryHasFileSpatialItems(entry)).toBe(false);
+    expect(canvasFeedbackMomentRefs(entry)).toEqual([
+      { label: 'M1', currentTimeSeconds: 4.25 },
+      { label: 'M2', currentTimeSeconds: 8 }
+    ]);
+    expect(canvasFeedbackItemsForMoment(entry, { label: 'M1', currentTimeSeconds: 4.25 }).map((item) => item.id)).toEqual([
+      'item-moment',
+      'item-pin'
+    ]);
+  });
 });
+
+function feedbackEntry(projectRelativePath = 'assets/page.png'): CanvasFeedbackEntry {
+  return {
+    projectRelativePath,
+    marks: [],
+    nextMomentLabel: 1,
+    nextSpatialLabel: 1,
+    items: [],
+    updatedAt: NOW
+  };
+}

@@ -228,7 +228,7 @@ function resizeState(input: {
     pointerId: 1,
     handle: input.handle,
     start: input.start,
-    node: { projectRelativePath: 'flow/a.png', mediaKind: 'image' },
+    node: { projectRelativePath: 'flow/a.png', nodeKind: 'file', mediaKind: 'image' },
     origin: input.origin,
     preserveAspect: input.preserveAspect,
     ...(input.current ? { current: input.current } : {})

@@ -42,6 +42,7 @@ export interface CanvasTextEditorScrollableView {
     scrollTop: number;
     scrollLeft: number;
   };
+  requestMeasure: () => void;
 }
 
 interface CanvasTextEditorFocusLineBlock {
@@ -159,6 +160,7 @@ export function canvasTextEditorApplyInitialScroll(
 ): void {
   view.scrollDOM.scrollTop = scroll.scrollTop ?? 0;
   view.scrollDOM.scrollLeft = scroll.scrollLeft ?? 0;
+  view.requestMeasure();
 }
 
 export function canvasTextEditorApplyFocusRequest(
@@ -168,8 +170,7 @@ export function canvasTextEditorApplyFocusRequest(
   view.focus();
   const position = canvasTextEditorFocusRequestPosition(view, request);
   view.dispatch(view.state.update({
-    selection: EditorSelection.cursor(position),
-    scrollIntoView: true
+    selection: EditorSelection.cursor(position)
   }));
 }
 

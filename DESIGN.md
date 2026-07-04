@@ -284,9 +284,12 @@ Canvas is both a Workbench surface and a creative object space. It has stricter 
 - Canvas chrome uses Debrute primitives and patterns.
 - Canvas fixed lower-left overlay controls use Canvas control patterns without floating-bar surface, border, shadow, or backdrop treatment.
 - Canvas floating overlay containers use shared floating-bar chrome only when they render panel-like content, such as feedback or an expanded minimap panel.
+- Canvas floating feedback bars size themselves from visible fixed-size controls, fixed row geometry, a 110px comment creator, and 3px container padding. They do not use media-type width buckets.
+- Canvas feedback comment creators use compact rounded-rectangle inputs. Saved feedback item chips may remain pill-shaped.
 - Fixed lower-left Canvas overlays align their first control to the top-left floating dock's 18px horizontal inset, sit 14px above the bottom edge, and use the top-left dock's compact 4px gap between adjacent fixed controls, including the Canvas card-to-add-canvas control gap.
 - Canvas feature CSS owns overlay placement and intrinsic Canvas geometry only; it does not define per-control background, border, shadow, backdrop, hover, pressed, or disabled chrome.
 - Canvas content can define local geometry for zoom, hit targets, resize handles, node dimensions, media previews, and overlay alignment.
+- Canvas node feedback frames are single-color feedback-presence borders. Feedback type details belong in the floating feedback bar and annotation layers, not in frame colors.
 - Selection, handles, region feedback, pins, and annotation overlays may use high-contrast local treatments when needed for media visibility.
 - Canvas-specific values are named by purpose when they represent reusable Canvas UI, and kept local when they are intrinsic rendering math.
 

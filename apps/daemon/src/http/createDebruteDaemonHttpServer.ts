@@ -1238,6 +1238,21 @@ async function handleCanvasRoute(
     writeJson(context.response, 200, result);
     return;
   }
+  if (path.endsWith('/text-viewport') && context.request.method === 'PATCH') {
+    const body = await readJsonBody<Record<string, unknown>>(context.request);
+    const result = await runRevisionedMutation(context, baseRevisionField(body), async () => {
+      const updated = await server.updateCanvasTextViewportState({
+        canvasId,
+        updates: canvasTextViewportUpdatesField(body.updates)
+      });
+      return {
+        canvas: updated.canvas,
+        projection: projectionForHttp(updated.projection, context.runtime.daemonUrl, session.projectId, context.runtime.token)
+      };
+    });
+    writeJson(context.response, 200, result);
+    return;
+  }
   if (context.request.method === 'GET') {
     const snapshot = server.getSnapshot();
     writeJson(context.response, 200, snapshot.canvases.find((canvas) => canvas.id === canvasId));
@@ -2374,6 +2389,22 @@ function canvasVideoPlaybackUpdatesField(value: unknown): Array<{ projectRelativ
     return {
       projectRelativePath: stringField(item.projectRelativePath, `updates[${index}].projectRelativePath`),
       currentTimeSeconds: nonNegativeFiniteNumberField(item.currentTimeSeconds, `updates[${index}].currentTimeSeconds`)
+    };
+  });
+}
+
+function canvasTextViewportUpdatesField(value: unknown): Array<{ projectRelativePath: string; scrollTop: number; scrollLeft: number }> {
+  if (!Array.isArray(value)) {
+    throw new DebruteDaemonHttpError(400, 'invalid_input', 'updates must be an array.');
+  }
+  return value.map((item, index) => {
+    if (!isRecord(item)) {
+      throw new DebruteDaemonHttpError(400, 'invalid_input', `updates[${index}] must be an object.`);
+    }
+    return {
+      projectRelativePath: stringField(item.projectRelativePath, `updates[${index}].projectRelativePath`),
+      scrollTop: nonNegativeFiniteNumberField(item.scrollTop, `updates[${index}].scrollTop`),
+      scrollLeft: nonNegativeFiniteNumberField(item.scrollLeft, `updates[${index}].scrollLeft`)
     };
   });
 }

@@ -15,7 +15,7 @@ describe('desktop fresh install product payload', () => {
     expect(desktopPackage.build?.asar).toBe(true);
     expect(desktopPackage.build?.asarUnpack).toEqual([
       'dist-electron/runtime-host.cjs',
-      'dist-electron/canvas-feedback-render-worker.cjs',
+      'dist-electron/canvas-feedback-artifact-worker.cjs',
       'dist-electron/product-replacement-helper.cjs',
       'dist-electron/runtime-product/**'
     ]);
