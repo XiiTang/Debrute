@@ -84,6 +84,9 @@ describe('WorkbenchApp global preference events', () => {
     });
 
     expect(apiState.api!.openProject).toHaveBeenCalledWith({ projectId: 'project-1' });
+    expect(apiState.api!.imageModelGetSettings).toHaveBeenCalled();
+    expect(apiState.api!.videoModelGetSettings).toHaveBeenCalled();
+    expect(apiState.api!.audioModelGetSettings).toHaveBeenCalled();
 
     await act(async () => {
       emitWorkbenchEvent({
@@ -149,6 +152,7 @@ function apiFixture(): WorkbenchApiClient {
     adobeBridgeGetState: vi.fn(async () => ({ settings: { enabled: true }, clients: [], links: [], transfers: [] })),
     imageModelGetSettings: vi.fn(async () => ({ models: [] })),
     videoModelGetSettings: vi.fn(async () => ({ models: [] })),
+    audioModelGetSettings: vi.fn(async () => ({ models: [] })),
     openProject: vi.fn(async () => ({
       projectId: 'project-1',
       projectRevision: 1,

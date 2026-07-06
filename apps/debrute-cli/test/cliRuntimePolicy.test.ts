@@ -23,6 +23,12 @@ describe('CLI runtime policy', () => {
       'models.image.describe',
       'models.video.list',
       'models.video.describe',
+      'models.tts.list',
+      'models.tts.describe',
+      'models.music.list',
+      'models.music.describe',
+      'models.sfx.list',
+      'models.sfx.describe',
       'project.init',
       'project.status',
       'project.validate',
@@ -36,7 +42,10 @@ describe('CLI runtime policy', () => {
       'generated-asset.lookup',
       'generate.image',
       'generate.image-batch',
-      'generate.video'
+      'generate.video',
+      'generate.tts',
+      'generate.music',
+      'generate.sfx'
     ]) {
       expect(runtimePolicyForCommand(command)).toBe('ensure-runtime');
     }

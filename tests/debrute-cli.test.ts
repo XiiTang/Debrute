@@ -45,6 +45,8 @@ describe('debrute-cli', () => {
 
     expect(output[0]?.split('\n')[0]).toBe('debrute/1 ok cmd=commands');
     expect(output[0]).toContain('command name=generate.image-batch scope=generation risk=generate requires=project-session writes=assets');
+    expect(output[0]).toContain('command name=models.tts.list scope=runtime risk=read requires=model-config writes=none');
+    expect(output[0]).toContain('command name=generate.sfx scope=generation risk=generate requires=project-session writes=assets');
     expect(output[1]).toContain('debrute/1 ok cmd=help');
     expect(output[1]).toContain('command name=generate.image-batch scope=generation risk=generate requires=project-session writes=assets');
     expect(output[1]).toContain('[--timeout-ms <ms>]');

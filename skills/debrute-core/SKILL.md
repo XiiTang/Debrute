@@ -38,6 +38,15 @@ debrute generate image-batch /path/to/project --manifest image-requests.json --t
 debrute models video list
 debrute models video describe doubao-seedance-2-0-260128
 debrute generate video /path/to/project --input-json '{"model":"doubao-seedance-2-0-260128","arguments":{"prompt":"Short video brief","intent":"generate"}}' --timeout-ms 600000
+debrute models tts list
+debrute models tts describe openai-gpt-4o-mini-tts
+debrute generate tts /path/to/project --input-json '{"model":"openai-gpt-4o-mini-tts","arguments":{"text":"Welcome to Debrute.","voice":"alloy","output_path":"generated/welcome.mp3"}}' --timeout-ms 600000
+debrute models music list
+debrute models music describe elevenlabs-music
+debrute generate music /path/to/project --input-json '{"model":"elevenlabs-music","arguments":{"prompt":"Warm ambient electronic music for a product demo.","output_path":"generated/demo-music.mp3"}}' --timeout-ms 600000
+debrute models sfx list
+debrute models sfx describe elevenlabs-sound-effects
+debrute generate sfx /path/to/project --input-json '{"model":"elevenlabs-sound-effects","arguments":{"prompt":"Short glass chime.","output_path":"generated/chime.wav"}}' --timeout-ms 600000
 debrute commands
 ```
 

@@ -27,6 +27,7 @@ export function managedCliRuntimePayloadEntries(root, releaseTarget = releaseTar
   return [
     { from: join(root, 'packages/capability-runtime/src/imageModels/officialDocs/snapshots'), to: 'official-docs/imageModels/snapshots', recursive: true, dereference: false },
     { from: join(root, 'packages/capability-runtime/src/videoModels/officialDocs/snapshots'), to: 'official-docs/videoModels/snapshots', recursive: true, dereference: false },
+    { from: join(root, 'packages/capability-runtime/src/audioModels/officialDocs/snapshots'), to: 'official-docs/audioModels/snapshots', recursive: true, dereference: false },
     ...sharpRuntimePayloadEntries(root, releaseTarget),
     ...nodePtyRuntimePayloadEntries(root, releaseTarget)
   ];

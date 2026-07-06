@@ -5,11 +5,13 @@ import {
   type WorkbenchTitleBarState,
   AdobeBridgeSettings,
   AppServerEvent,
+  AudioModelSettingsView,
   ImageModelSettingsView,
   IntegrationSettingsView,
   RunIntegrationOperationInput,
   RunIntegrationOperationResult,
   SaveAdobeBridgeSettingsInput,
+  SaveAudioModelSettingInput,
   SaveImageModelSettingInput,
   SaveWorkbenchPreferencesInput,
   SaveVideoModelSettingInput,
@@ -19,6 +21,7 @@ import {
 import { AdobeBridgeSettingsService } from '../adobe-bridge/AdobeBridgeSettingsService.js';
 import { GlobalConfigStore } from '../config/GlobalConfigStore.js';
 import { IntegrationsService } from '../integrations/IntegrationsService.js';
+import { AudioModelService } from '../models/AudioModelService.js';
 import { ImageModelService } from '../models/ImageModelService.js';
 import { VideoModelService } from '../models/VideoModelService.js';
 
@@ -34,6 +37,7 @@ export class DebruteGlobalRuntimeServer {
   private readonly configStore: GlobalConfigStore;
   private readonly imageModelService: ImageModelService;
   private readonly videoModelService: VideoModelService;
+  private readonly audioModelService: AudioModelService;
   private readonly integrationsService: IntegrationsService;
   private readonly adobeBridgeSettingsService: AdobeBridgeSettingsService;
 
@@ -41,6 +45,7 @@ export class DebruteGlobalRuntimeServer {
     this.configStore = options.globalConfigStore ?? new GlobalConfigStore();
     this.imageModelService = new ImageModelService({ configStore: this.configStore });
     this.videoModelService = new VideoModelService({ configStore: this.configStore });
+    this.audioModelService = new AudioModelService({ configStore: this.configStore });
     this.adobeBridgeSettingsService = new AdobeBridgeSettingsService({ configStore: this.configStore });
     this.integrationsService = new IntegrationsService({
       ...(options.integrationEnvPath !== undefined ? { envPath: options.integrationEnvPath } : {}),
@@ -71,6 +76,16 @@ export class DebruteGlobalRuntimeServer {
   async videoModelSaveSetting(modelId: string, input: SaveVideoModelSettingInput): Promise<VideoModelSettingsView> {
     const settings = await this.videoModelService.saveSetting(modelId, input);
     this.emit({ type: 'videoModel.settings.changed', settings });
+    return settings;
+  }
+
+  async audioModelGetSettings(): Promise<AudioModelSettingsView> {
+    return this.audioModelService.getSettings();
+  }
+
+  async audioModelSaveSetting(modelId: string, input: SaveAudioModelSettingInput): Promise<AudioModelSettingsView> {
+    const settings = await this.audioModelService.saveSetting(modelId, input);
+    this.emit({ type: 'audioModel.settings.changed', settings });
     return settings;
   }
 

@@ -11,6 +11,12 @@ export type DebruteCliCommand =
   | 'models.image.describe'
   | 'models.video.list'
   | 'models.video.describe'
+  | 'models.tts.list'
+  | 'models.tts.describe'
+  | 'models.music.list'
+  | 'models.music.describe'
+  | 'models.sfx.list'
+  | 'models.sfx.describe'
   | 'project.init'
   | 'project.status'
   | 'project.validate'
@@ -26,6 +32,9 @@ export type DebruteCliCommand =
   | 'generate.image'
   | 'generate.image-batch'
   | 'generate.video'
+  | 'generate.tts'
+  | 'generate.music'
+  | 'generate.sfx'
   | 'commands'
   | 'help';
 
@@ -47,6 +56,12 @@ const POSITIONAL_COUNTS: Record<DebruteCliCommand, { min: number; max: number }>
   'models.image.describe': { min: 1, max: 1 },
   'models.video.list': { min: 0, max: 0 },
   'models.video.describe': { min: 1, max: 1 },
+  'models.tts.list': { min: 0, max: 0 },
+  'models.tts.describe': { min: 1, max: 1 },
+  'models.music.list': { min: 0, max: 0 },
+  'models.music.describe': { min: 1, max: 1 },
+  'models.sfx.list': { min: 0, max: 0 },
+  'models.sfx.describe': { min: 1, max: 1 },
   'project.init': { min: 1, max: 1 },
   'project.status': { min: 1, max: 1 },
   'project.validate': { min: 1, max: 1 },
@@ -62,6 +77,9 @@ const POSITIONAL_COUNTS: Record<DebruteCliCommand, { min: number; max: number }>
   'generate.image': { min: 1, max: 1 },
   'generate.image-batch': { min: 1, max: 1 },
   'generate.video': { min: 1, max: 1 },
+  'generate.tts': { min: 1, max: 1 },
+  'generate.music': { min: 1, max: 1 },
+  'generate.sfx': { min: 1, max: 1 },
   commands: { min: 0, max: 0 },
   help: { min: 1, max: 3 }
 };
@@ -75,6 +93,12 @@ const ALLOWED_OPTIONS: Record<DebruteCliCommand, Set<string>> = {
   'models.image.describe': new Set(),
   'models.video.list': new Set(),
   'models.video.describe': new Set(),
+  'models.tts.list': new Set(),
+  'models.tts.describe': new Set(),
+  'models.music.list': new Set(),
+  'models.music.describe': new Set(),
+  'models.sfx.list': new Set(),
+  'models.sfx.describe': new Set(),
   'project.init': new Set(),
   'project.status': new Set(),
   'project.validate': new Set(),
@@ -90,6 +114,9 @@ const ALLOWED_OPTIONS: Record<DebruteCliCommand, Set<string>> = {
   'generate.image': new Set(['input-json', 'timeout-ms']),
   'generate.image-batch': new Set(['manifest', 'input-jsonl', 'log', 'summary', 'concurrency', 'retries', 'timeout-ms', 'overwrite-existing']),
   'generate.video': new Set(['input-json', 'timeout-ms']),
+  'generate.tts': new Set(['input-json', 'timeout-ms']),
+  'generate.music': new Set(['input-json', 'timeout-ms']),
+  'generate.sfx': new Set(['input-json', 'timeout-ms']),
   commands: new Set(),
   help: new Set()
 };
@@ -117,7 +144,10 @@ const PROJECT_COMMANDS = new Set<DebruteCliCommand>([
   'generated-asset.lookup',
   'generate.image',
   'generate.image-batch',
-  'generate.video'
+  'generate.video',
+  'generate.tts',
+  'generate.music',
+  'generate.sfx'
 ]);
 
 export function parseDebruteArgs(argv: string[]): ParsedDebruteArgs {
@@ -237,7 +267,11 @@ function validatePositionals(command: DebruteCliCommand, positionals: string[]):
 }
 
 function validateRequiredOptions(command: DebruteCliCommand, options: Record<string, string>): void {
-  if ((command === 'generate.image' || command === 'generate.video') && !options['input-json']) {
+  if ((command === 'generate.image'
+    || command === 'generate.video'
+    || command === 'generate.tts'
+    || command === 'generate.music'
+    || command === 'generate.sfx') && !options['input-json']) {
     throw cliError('missing_argument', '--input-json is required.', { command });
   }
   if (command === 'generated-asset.lookup' && !options.path) {
@@ -264,7 +298,11 @@ function requiredPositionals(command: DebruteCliCommand): string {
   if (command === 'help') {
     return '<command-path>';
   }
-  if (command === 'models.image.describe' || command === 'models.video.describe') {
+  if (command === 'models.image.describe'
+    || command === 'models.video.describe'
+    || command === 'models.tts.describe'
+    || command === 'models.music.describe'
+    || command === 'models.sfx.describe') {
     return '<model-id>';
   }
   if (command === 'canvas-map.push') {

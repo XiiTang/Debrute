@@ -1,46 +1,45 @@
 import React, { useEffect, useState } from 'react';
-import { Cable, Eye, EyeOff, Image as ImageIcon, Settings, Video, Wrench } from 'lucide-react';
+import { AudioLines, Cable, Image as ImageIcon, Music, Settings, Video, WandSparkles, Wrench } from 'lucide-react';
 import type {
+  AudioModelKind,
+  AudioModelSettingRecord,
   ImageModelSettingRecord,
+  SaveModelApiKeyEntryInput,
   VideoModelSettingRecord
 } from '@debrute/app-protocol';
 import type { WorkbenchActions, WorkbenchState } from '../../types';
 import {
-  Button,
   Card,
   Field,
-  IconButton,
   Input,
-  SecretInput,
   StatusPill
 } from '../ui';
 import { GeneralSettingsPage } from './general/GeneralSettingsPage';
 import { IntegrationsSettingsPage } from './integrations/IntegrationsSettingsPage';
 import { AdobeBridgeSettingsPage } from './adobe-bridge/AdobeBridgeSettingsPage';
 import { useI18n } from '../i18n';
+import { ModelApiKeyListEditor } from './ModelApiKeyListEditor';
 
 export interface ModelDraft {
   baseUrlOverride: string;
   requestModelIdOverride: string;
-  apiKeyInput: string;
 }
 
 type SaveStatus = { status: 'idle' } | { status: 'error'; message: string };
 
-interface ApiKeyInputProps {
-  value: string;
-  onChange: (value: string) => void;
-  ariaLabel?: string;
-  label?: string;
-  onBlur?: () => void;
-  placeholder?: string;
-  resetKey?: string;
-}
+type MediaModelSaveInput = {
+  baseUrlOverride: string | null;
+  requestModelIdOverride: string | null;
+  apiKeys?: SaveModelApiKeyEntryInput[];
+};
 
 const SETTINGS_NAV_ITEMS = [
   { id: 'general', labelKey: 'settings.nav.general', icon: Settings },
   { id: 'image-models', labelKey: 'settings.nav.imageModels', icon: ImageIcon },
   { id: 'video-models', labelKey: 'settings.nav.videoModels', icon: Video },
+  { id: 'tts-models', labelKey: 'settings.nav.ttsModels', icon: AudioLines },
+  { id: 'music-models', labelKey: 'settings.nav.musicModels', icon: Music },
+  { id: 'sfx-models', labelKey: 'settings.nav.sfxModels', icon: WandSparkles },
   { id: 'integrations', labelKey: 'settings.nav.integrations', icon: Wrench },
   { id: 'adobe-bridge', labelKey: 'settings.nav.adobeBridge', icon: Cable }
 ] as const;
@@ -81,6 +80,12 @@ export function SettingsPanel({ state, actions }: { state: WorkbenchState; actio
           <ImageModelSettings state={state} actions={actions} />
         ) : activePage === 'video-models' ? (
           <VideoModelSettings state={state} actions={actions} />
+        ) : activePage === 'tts-models' ? (
+          <AudioModelSettings state={state} actions={actions} kind="tts" title={i18n.t('settings.models.ttsTitle')} />
+        ) : activePage === 'music-models' ? (
+          <AudioModelSettings state={state} actions={actions} kind="music" title={i18n.t('settings.models.musicTitle')} />
+        ) : activePage === 'sfx-models' ? (
+          <AudioModelSettings state={state} actions={actions} kind="sound-effect" title={i18n.t('settings.models.sfxTitle')} />
         ) : activePage === 'integrations' ? (
           <IntegrationsSettingsPage state={state} actions={actions} />
         ) : activePage === 'adobe-bridge' ? (
@@ -131,6 +136,35 @@ export function VideoModelSettings({ state, actions }: { state: WorkbenchState; 
   );
 }
 
+export function AudioModelSettings({
+  state,
+  actions,
+  kind,
+  title
+}: {
+  state: WorkbenchState;
+  actions: WorkbenchActions;
+  kind: AudioModelKind;
+  title: string;
+}): React.ReactElement {
+  const models = (state.audioModelSettings?.models ?? []).filter((model) => model.kind === kind);
+
+  return (
+    <section className="db-settings-section">
+      <SettingsSectionHeader title={title} />
+      <div className="db-form-grid">
+        {models.map((model) => (
+          <MediaModelCard
+            key={model.debruteModelId}
+            model={model}
+            onSave={(input) => actions.saveAudioModelSetting(model.debruteModelId, input)}
+          />
+        ))}
+      </div>
+    </section>
+  );
+}
+
 function SettingsSectionHeader({
   title
 }: {
@@ -147,8 +181,8 @@ function MediaModelCard({
   model,
   onSave
 }: {
-  model: ImageModelSettingRecord | VideoModelSettingRecord;
-  onSave: (input: ReturnType<typeof modelDraftToSaveInput>) => Promise<void>;
+  model: ImageModelSettingRecord | VideoModelSettingRecord | AudioModelSettingRecord;
+  onSave: (input: MediaModelSaveInput) => Promise<void>;
 }): React.ReactElement {
   const i18n = useI18n();
   const [draft, setDraft] = useState(() => modelToDraft(model));
@@ -171,40 +205,32 @@ function MediaModelCard({
     }
   };
 
-  const clearApiKey = async () => {
-    setStatus({ status: 'idle' });
-    try {
-      await onSave(modelDraftToClearApiKeyInput(draft));
-    } catch (error) {
-      setStatus({ status: 'error', message: errorMessage(error) });
-    }
-  };
-
   return (
     <Card className="db-model-card">
       <div className="db-model-card__header">
         <div>
           <strong>{model.debruteModelId}</strong>
-          {model.apiKeySet
-            ? <StatusPill>{i18n.t('settings.models.apiKeyConfigured', { preview: requireApiKeyPreview(model.apiKeyPreview) })}</StatusPill>
-            : <StatusPill tone="neutral">{i18n.t('settings.models.apiKeyMissing')}</StatusPill>}
+          <div className="db-model-card__key-summary">
+            <StatusPill tone={model.apiKeySet ? 'success' : 'neutral'}>
+              {model.apiKeySet
+                ? i18n.t('settings.models.apiKeysEnabledSummary', {
+                  enabled: model.enabledApiKeyCount,
+                  total: model.apiKeyCount
+                })
+                : i18n.t('settings.models.apiKeyMissing')}
+            </StatusPill>
+          </div>
         </div>
-        {model.apiKeySet ? (
-          <Button type="button" variant="danger" onClick={() => void clearApiKey()}>
-            {i18n.t('settings.models.clearApiKey')}
-          </Button>
-        ) : null}
       </div>
       <div className="db-model-card__fields">
-        <div className="db-form-row">
-          <ApiKeyInput
-            ariaLabel={i18n.t('settings.models.apiKey')}
-            value={draft.apiKeyInput}
-            onChange={(apiKeyInput) => setDraft({ ...draft, apiKeyInput })}
-            onBlur={() => void saveDraft(draft)}
-            placeholder={i18n.t('settings.models.apiKey')}
-          />
-        </div>
+        <ModelApiKeyListEditor
+          previews={model.apiKeyPreviews}
+          onSave={(apiKeys) => onSave({
+            baseUrlOverride: draft.baseUrlOverride.trim() || null,
+            requestModelIdOverride: draft.requestModelIdOverride.trim() || null,
+            apiKeys
+          })}
+        />
         <div className="db-form-grid db-form-grid--two">
           <div className="db-form-row">
             <Field label={i18n.t('settings.models.baseUrlOverride')}>
@@ -237,93 +263,25 @@ function MediaModelCard({
   );
 }
 
-function ApiKeyInput({
-  value,
-  onChange,
-  ariaLabel,
-  label,
-  onBlur,
-  placeholder,
-  resetKey
-}: ApiKeyInputProps): React.ReactElement {
-  const i18n = useI18n();
-  const [visible, setVisible] = useState(false);
-
-  useEffect(() => {
-    setVisible(false);
-  }, [resetKey]);
-
-  const visibilityLabel = visible ? i18n.t('settings.models.hideApiKey') : i18n.t('settings.models.showApiKey');
-  const effectivePlaceholder = value ? undefined : placeholder;
-  const input = (
-    <span className="db-secret-field">
-      <SecretInput
-        className="db-secret-field__control"
-        aria-label={ariaLabel}
-        masked={!visible && Boolean(value)}
-        value={value}
-        onChange={(event) => onChange(event.currentTarget.value)}
-        onBlur={onBlur}
-        placeholder={effectivePlaceholder}
-        spellCheck={false}
-      />
-      <IconButton
-        className="db-secret-field__visibility"
-        label={visibilityLabel}
-        size="xs"
-        pressed={visible}
-        icon={visible ? <EyeOff size={13} /> : <Eye size={13} />}
-        onMouseDown={(event) => event.preventDefault()}
-        onClick={() => setVisible((current) => !current)}
-      />
-    </span>
-  );
-
-  if (!label) {
-    return input;
-  }
-
-  return <Field label={label}>{input}</Field>;
-}
-
-export function modelToDraft(model: ImageModelSettingRecord | VideoModelSettingRecord): ModelDraft {
+export function modelToDraft(model: ImageModelSettingRecord | VideoModelSettingRecord | AudioModelSettingRecord): ModelDraft {
   return {
     baseUrlOverride: model.baseUrlOverride ?? '',
-    requestModelIdOverride: model.requestModelIdOverride ?? '',
-    apiKeyInput: ''
+    requestModelIdOverride: model.requestModelIdOverride ?? ''
   };
 }
 
 export function modelDraftToSaveInput(draft: ModelDraft) {
-  const apiKey = draft.apiKeyInput.trim();
   return {
     baseUrlOverride: draft.baseUrlOverride.trim() || null,
-    requestModelIdOverride: draft.requestModelIdOverride.trim() || null,
-    ...(apiKey ? { apiKey } : {})
+    requestModelIdOverride: draft.requestModelIdOverride.trim() || null
   };
-}
-
-export function modelDraftToClearApiKeyInput(draft: ModelDraft) {
-  return {
-    baseUrlOverride: draft.baseUrlOverride.trim() || null,
-    requestModelIdOverride: draft.requestModelIdOverride.trim() || null,
-    apiKey: ''
-  };
-}
-
-function requireApiKeyPreview(preview: string | undefined): string {
-  if (preview === undefined) {
-    throw new Error('[debrute:settings] Missing API key preview.');
-  }
-  return preview;
 }
 
 function errorMessage(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
 }
 
-function modelDraftMatchesPersisted(draft: ModelDraft, model: ImageModelSettingRecord | VideoModelSettingRecord): boolean {
+function modelDraftMatchesPersisted(draft: ModelDraft, model: ImageModelSettingRecord | VideoModelSettingRecord | AudioModelSettingRecord): boolean {
   return draft.baseUrlOverride.trim() === (model.baseUrlOverride ?? '')
-    && draft.requestModelIdOverride.trim() === (model.requestModelIdOverride ?? '')
-    && draft.apiKeyInput.trim() === '';
+    && draft.requestModelIdOverride.trim() === (model.requestModelIdOverride ?? '');
 }

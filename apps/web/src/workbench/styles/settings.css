@@ -32,3 +32,25 @@
 .general-settings-page {
   gap: 14px;
 }
+
+.db-api-key-list {
+  display: grid;
+  gap: var(--db-space-2);
+}
+
+.db-api-key-list__rows {
+  display: grid;
+  gap: var(--db-space-2);
+}
+
+.db-api-key-row {
+  display: grid;
+  grid-template-columns: minmax(150px, 1.4fr) minmax(120px, 1fr) auto auto auto;
+  gap: var(--db-space-2);
+  align-items: center;
+}
+
+.db-api-key-row__key,
+.db-api-key-row__label {
+  min-width: 0;
+}

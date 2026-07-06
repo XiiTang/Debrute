@@ -505,6 +505,9 @@ function isGeneratedArtifactRole(value: unknown): value is GeneratedArtifactRole
   return value === 'primary-image'
     || value === 'primary-video'
     || value === 'last-frame'
+    || value === 'tts-audio'
+    || value === 'music-audio'
+    || value === 'sound-effect-audio'
     || value === 'other';
 }
 

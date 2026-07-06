@@ -140,7 +140,7 @@ describe('video model executor', () => {
             requestModelIdOverride: null
           }]
         },
-        secrets: { videoModelApiKeys: { 'doubao-seedance-2-0-260128': apiKey } },
+        secrets: { videoModelApiKeys: { 'doubao-seedance-2-0-260128': [{ id: 'vid-a', key: apiKey, label: null, enabled: true }] } },
         pollIntervalMs: 0,
         fetch,
         recordGeneratedAsset: async (input) => {
@@ -173,6 +173,58 @@ describe('video model executor', () => {
         'https://cdn.example/last-frame.png'
       ]);
       expect(JSON.stringify(result.logs)).not.toContain('sk-video');
+    } finally {
+      await rm(projectRoot, { recursive: true, force: true });
+    }
+  });
+
+  it('rotates enabled API keys for consecutive video requests', async () => {
+    const projectRoot = await mkdtemp(join(tmpdir(), 'debrute-video-key-rotation-'));
+    const seenAuth: string[] = [];
+    const fetch: VideoModelFetch = async (url, init) => {
+      if (url.endsWith('/contents/generations/tasks') && init?.method === 'POST') {
+        seenAuth.push(String((init.headers as Record<string, string>).authorization));
+        return jsonResponse({ id: `task-${seenAuth.length}`, status: 'queued' });
+      }
+      if (url.includes('/contents/generations/tasks/task-')) {
+        return jsonResponse({
+          id: 'task',
+          status: 'succeeded',
+          content: { video_url: 'https://cdn.example/video.mp4' }
+        });
+      }
+      if (url === 'https://cdn.example/video.mp4') {
+        return new Response(tinyMp4, { status: 200, headers: { 'content-type': 'video/mp4' } });
+      }
+      throw new Error(`unexpected URL: ${url}`);
+    };
+    try {
+      const baseInput = {
+        projectRoot,
+        invocationId: 'turn-video',
+        input: {
+          model: 'doubao-seedance-2-0-260128',
+          arguments: { prompt: 'camera moves', duration: 5 }
+        },
+        settings: {
+          videoModels: [{ debruteModelId: 'doubao-seedance-2-0-260128', baseUrlOverride: null, requestModelIdOverride: null }]
+        },
+        secrets: {
+          videoModelApiKeys: {
+            'doubao-seedance-2-0-260128': [
+              { id: 'vid-a', key: 'sk-video-a', label: null, enabled: true },
+              { id: 'vid-b', key: 'sk-video-b', label: null, enabled: true }
+            ]
+          }
+        },
+        pollIntervalMs: 0,
+        fetch
+      } satisfies ExecuteVideoModelRequestInput;
+
+      await executeVideoModelRequest(baseInput);
+      await executeVideoModelRequest({ ...baseInput, invocationId: 'turn-video-2' });
+
+      expect(seenAuth).toEqual(['Bearer sk-video-a', 'Bearer sk-video-b']);
     } finally {
       await rm(projectRoot, { recursive: true, force: true });
     }
@@ -217,7 +269,7 @@ describe('video model executor', () => {
             requestModelIdOverride: null
           }]
         },
-        secrets: { videoModelApiKeys: { 'doubao-seedance-2-0-260128': 'sk-video' } },
+        secrets: { videoModelApiKeys: { 'doubao-seedance-2-0-260128': [{ id: 'vid-a', key: 'sk-video', label: null, enabled: true }] } },
         pollIntervalMs: 0,
         fetch
       });
@@ -276,7 +328,7 @@ describe('video model executor', () => {
             requestModelIdOverride: null
           }]
         },
-        secrets: { videoModelApiKeys: { 'doubao-seedance-2-0-260128': 'sk-video' } },
+        secrets: { videoModelApiKeys: { 'doubao-seedance-2-0-260128': [{ id: 'vid-a', key: 'sk-video', label: null, enabled: true }] } },
         pollIntervalMs: 0,
         fetch
       });
@@ -323,7 +375,7 @@ describe('video model executor', () => {
             requestModelIdOverride: null
           }]
         },
-        secrets: { videoModelApiKeys: { 'doubao-seedance-2-0-260128': 'sk-video' } },
+        secrets: { videoModelApiKeys: { 'doubao-seedance-2-0-260128': [{ id: 'vid-a', key: 'sk-video', label: null, enabled: true }] } },
         pollIntervalMs: 0,
         fetch
       });
@@ -372,7 +424,7 @@ describe('video model executor', () => {
             requestModelIdOverride: null
           }]
         },
-        secrets: { videoModelApiKeys: { 'doubao-seedance-2-0-260128': 'sk-video' } },
+        secrets: { videoModelApiKeys: { 'doubao-seedance-2-0-260128': [{ id: 'vid-a', key: 'sk-video', label: null, enabled: true }] } },
         pollIntervalMs: 0,
         fetch,
         remoteUrlLookup: privateRemoteLookup
@@ -416,7 +468,7 @@ describe('video model executor', () => {
         settings: {
           videoModels: [{ debruteModelId: 'doubao-seedance-2-0-260128', baseUrlOverride: null, requestModelIdOverride: null }]
         },
-        secrets: { videoModelApiKeys: { 'doubao-seedance-2-0-260128': 'sk-video' } },
+        secrets: { videoModelApiKeys: { 'doubao-seedance-2-0-260128': [{ id: 'vid-a', key: 'sk-video', label: null, enabled: true }] } },
         pollIntervalMs: 0,
         fetch,
         remoteHttpTransport: async (input) => {
@@ -463,7 +515,7 @@ describe('video model executor', () => {
           arguments: { prompt: 'camera move' }
         },
         settings: { videoModels: [] },
-        secrets: { videoModelApiKeys: { 'doubao-seedance-2-0-260128': 'sk-video' } },
+        secrets: { videoModelApiKeys: { 'doubao-seedance-2-0-260128': [{ id: 'vid-a', key: 'sk-video', label: null, enabled: true }] } },
         fetch,
         pollIntervalMs: 0
       });
@@ -504,7 +556,7 @@ describe('video model executor', () => {
         settings: {
           videoModels: [{ debruteModelId: 'doubao-seedance-2-0-260128', baseUrlOverride: null, requestModelIdOverride: null }]
         },
-        secrets: { videoModelApiKeys: { 'doubao-seedance-2-0-260128': 'sk-video' } },
+        secrets: { videoModelApiKeys: { 'doubao-seedance-2-0-260128': [{ id: 'vid-a', key: 'sk-video', label: null, enabled: true }] } },
         pollIntervalMs: 0,
         fetch,
         recordGeneratedAsset: async (input) => {
@@ -586,7 +638,7 @@ describe('video model executor', () => {
         settings: {
           videoModels: [{ debruteModelId: 'doubao-seedance-2-0-260128', baseUrlOverride: null, requestModelIdOverride: null }]
         },
-        secrets: { videoModelApiKeys: { 'doubao-seedance-2-0-260128': 'sk-video' } },
+        secrets: { videoModelApiKeys: { 'doubao-seedance-2-0-260128': [{ id: 'vid-a', key: 'sk-video', label: null, enabled: true }] } },
         pollIntervalMs: 0,
         fetch,
         recordGeneratedAsset: async (input) => {
@@ -781,7 +833,7 @@ describe('video model executor', () => {
         settings: {
           videoModels: [{ debruteModelId: 'doubao-seedance-2-0-260128', baseUrlOverride: null, requestModelIdOverride: null }]
         },
-        secrets: { videoModelApiKeys: { 'doubao-seedance-2-0-260128': 'sk-video' } },
+        secrets: { videoModelApiKeys: { 'doubao-seedance-2-0-260128': [{ id: 'vid-a', key: 'sk-video', label: null, enabled: true }] } },
         fetch: async () => {
           throw new Error('upstream request should not run without upload service');
         }
@@ -872,7 +924,7 @@ describe('video model executor', () => {
         settings: {
           videoModels: [{ debruteModelId: 'doubao-seedance-2-0-260128', baseUrlOverride: null, requestModelIdOverride: null }]
         },
-        secrets: { videoModelApiKeys: { 'doubao-seedance-2-0-260128': 'sk-video' } },
+        secrets: { videoModelApiKeys: { 'doubao-seedance-2-0-260128': [{ id: 'vid-a', key: 'sk-video', label: null, enabled: true }] } },
         fetch: async () => {
           throw new Error('upstream request should not run for unsupported reference fields');
         }
@@ -916,7 +968,7 @@ describe('video model executor', () => {
         settings: {
           videoModels: [{ debruteModelId: 'doubao-seedance-2-0-260128', baseUrlOverride: null, requestModelIdOverride: null }]
         },
-        secrets: { videoModelApiKeys: { 'doubao-seedance-2-0-260128': 'sk-video' } },
+        secrets: { videoModelApiKeys: { 'doubao-seedance-2-0-260128': [{ id: 'vid-a', key: 'sk-video', label: null, enabled: true }] } },
         fetch: async () => {
           throw new Error('upstream request should not run for unsupported image data URLs');
         }
@@ -947,7 +999,7 @@ describe('video model executor', () => {
         settings: {
           videoModels: [{ debruteModelId: 'doubao-seedance-2-0-260128', baseUrlOverride: null, requestModelIdOverride: null }]
         },
-        secrets: { videoModelApiKeys: { 'doubao-seedance-2-0-260128': 'sk-video' } },
+        secrets: { videoModelApiKeys: { 'doubao-seedance-2-0-260128': [{ id: 'vid-a', key: 'sk-video', label: null, enabled: true }] } },
         fetch: async () => {
           throw new Error('upstream request should not run for unsupported image URL paths');
         }
@@ -979,7 +1031,7 @@ describe('video model executor', () => {
         settings: {
           videoModels: [{ debruteModelId: 'doubao-seedance-2-0-260128', baseUrlOverride: null, requestModelIdOverride: null }]
         },
-        secrets: { videoModelApiKeys: { 'doubao-seedance-2-0-260128': 'sk-video' } },
+        secrets: { videoModelApiKeys: { 'doubao-seedance-2-0-260128': [{ id: 'vid-a', key: 'sk-video', label: null, enabled: true }] } },
         fetch: async () => {
           modelRuned = true;
           throw new Error('upstream request should not run for unsafe reference URLs');
@@ -1008,7 +1060,7 @@ describe('video model executor', () => {
         settings: {
           videoModels: [{ debruteModelId: 'doubao-seedance-2-0-260128', baseUrlOverride: null, requestModelIdOverride: null }]
         },
-        secrets: { videoModelApiKeys: { 'doubao-seedance-2-0-260128': 'sk-video' } },
+        secrets: { videoModelApiKeys: { 'doubao-seedance-2-0-260128': [{ id: 'vid-a', key: 'sk-video', label: null, enabled: true }] } },
         fetch: async () => {
           throw new Error('upstream request should not run for unsupported arguments');
         }
@@ -1042,7 +1094,7 @@ describe('video model executor', () => {
           settings: {
             videoModels: [{ debruteModelId: 'doubao-seedance-2-0-fast-260128', baseUrlOverride: null, requestModelIdOverride: null }]
           },
-          secrets: { videoModelApiKeys: { 'doubao-seedance-2-0-fast-260128': 'sk-video' } },
+          secrets: { videoModelApiKeys: { 'doubao-seedance-2-0-fast-260128': [{ id: 'vid-a', key: 'sk-video', label: null, enabled: true }] } },
           fetch: async () => {
             throw new Error('upstream request should not run for invalid argument values');
           }
@@ -1076,7 +1128,7 @@ describe('video model executor', () => {
             requestModelIdOverride: null
           }]
         },
-        secrets: { videoModelApiKeys: { 'doubao-seedance-2-0-260128': 'sk-video' } },
+        secrets: { videoModelApiKeys: { 'doubao-seedance-2-0-260128': [{ id: 'vid-a', key: 'sk-video', label: null, enabled: true }] } },
         fetch: async () => {
           throw new Error('upstream request should not run for unsafe reference URLs');
         }
@@ -1109,7 +1161,7 @@ describe('video model executor', () => {
         settings: {
           videoModels: [{ debruteModelId: 'doubao-seedance-2-0-260128', baseUrlOverride: null, requestModelIdOverride: null }]
         },
-        secrets: { videoModelApiKeys: { 'doubao-seedance-2-0-260128': 'sk-video' } },
+        secrets: { videoModelApiKeys: { 'doubao-seedance-2-0-260128': [{ id: 'vid-a', key: 'sk-video', label: null, enabled: true }] } },
         uploadVideoReference: async () => {
           uploadCalls += 1;
           return { url: 'https://uploads.example/clip.mp4' };
@@ -1155,7 +1207,7 @@ describe('video model executor', () => {
         settings: {
           videoModels: [{ debruteModelId: 'doubao-seedance-2-0-260128', baseUrlOverride: null, requestModelIdOverride: null }]
         },
-        secrets: { videoModelApiKeys: { 'doubao-seedance-2-0-260128': 'sk-video' } },
+        secrets: { videoModelApiKeys: { 'doubao-seedance-2-0-260128': [{ id: 'vid-a', key: 'sk-video', label: null, enabled: true }] } },
         pollIntervalMs: 10,
         pollMaxAttempts: 1000,
         fetch,
@@ -1197,7 +1249,7 @@ describe('video model executor', () => {
         settings: {
           videoModels: [{ debruteModelId: 'doubao-seedance-2-0-260128', baseUrlOverride: null, requestModelIdOverride: null }]
         },
-        secrets: { videoModelApiKeys: { 'doubao-seedance-2-0-260128': 'sk-video' } },
+        secrets: { videoModelApiKeys: { 'doubao-seedance-2-0-260128': [{ id: 'vid-a', key: 'sk-video', label: null, enabled: true }] } },
         requestTimeoutMs: 5,
         fetch
       });
@@ -1251,7 +1303,7 @@ describe('video model executor', () => {
         settings: {
           videoModels: [{ debruteModelId: 'doubao-seedance-2-0-260128', baseUrlOverride: null, requestModelIdOverride: null }]
         },
-        secrets: { videoModelApiKeys: { 'doubao-seedance-2-0-260128': 'sk-video' } },
+        secrets: { videoModelApiKeys: { 'doubao-seedance-2-0-260128': [{ id: 'vid-a', key: 'sk-video', label: null, enabled: true }] } },
         requestTimeoutMs: 5,
         fetch
       });
@@ -1285,7 +1337,7 @@ describe('video model executor', () => {
         settings: {
           videoModels: [{ debruteModelId: 'doubao-seedance-2-0-260128', baseUrlOverride: null, requestModelIdOverride: null }]
         },
-        secrets: { videoModelApiKeys: { 'doubao-seedance-2-0-260128': 'sk-video' } },
+        secrets: { videoModelApiKeys: { 'doubao-seedance-2-0-260128': [{ id: 'vid-a', key: 'sk-video', label: null, enabled: true }] } },
         fetch: async () => new Response(JSON.stringify({ error: { code: 'BadRequest', message: 'prompt rejected', apiKey: 'sk-video' } }), {
           status: 400,
           headers: { 'content-type': 'application/json' }
@@ -1350,7 +1402,7 @@ async function runVideoRequestAndCaptureBody(input: {
         requestModelIdOverride: null
       }]
     },
-    secrets: { videoModelApiKeys: { 'doubao-seedance-2-0-260128': 'sk-video' } },
+    secrets: { videoModelApiKeys: { 'doubao-seedance-2-0-260128': [{ id: 'vid-a', key: 'sk-video', label: null, enabled: true }] } },
     pollIntervalMs: 0,
     fetch,
     ...(input.uploadVideoReference ? { uploadVideoReference: input.uploadVideoReference } : {})

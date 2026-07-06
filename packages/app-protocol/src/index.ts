@@ -394,7 +394,35 @@ export interface UpdateCanvasTextViewportStateInput {
   }>;
 }
 
-export interface ImageModelSettingRecord {
+export interface ModelApiKeyEntry {
+  id: string;
+  key: string;
+  label: string | null;
+  enabled: boolean;
+}
+
+export interface ApiKeyPreviewRecord {
+  id: string;
+  label: string | null;
+  enabled: boolean;
+  preview: string;
+}
+
+export interface MediaModelKeyState {
+  apiKeySet: boolean;
+  apiKeyCount: number;
+  enabledApiKeyCount: number;
+  apiKeyPreviews: ApiKeyPreviewRecord[];
+}
+
+export interface SaveModelApiKeyEntryInput {
+  id: string;
+  key?: string;
+  label: string | null;
+  enabled: boolean;
+}
+
+export interface ImageModelSettingRecord extends MediaModelKeyState {
   debruteModelId: string;
   summary: string;
   supportsEditing: boolean;
@@ -403,8 +431,6 @@ export interface ImageModelSettingRecord {
   defaultRequestModelId: string;
   baseUrlOverride: string | null;
   requestModelIdOverride: string | null;
-  apiKeySet: boolean;
-  apiKeyPreview?: string;
 }
 
 export interface ImageModelSettingsView {
@@ -414,10 +440,10 @@ export interface ImageModelSettingsView {
 export interface SaveImageModelSettingInput {
   baseUrlOverride: string | null;
   requestModelIdOverride: string | null;
-  apiKey?: string;
+  apiKeys?: SaveModelApiKeyEntryInput[];
 }
 
-export interface VideoModelSettingRecord {
+export interface VideoModelSettingRecord extends MediaModelKeyState {
   debruteModelId: string;
   summary: string;
   supportsTextToVideo: boolean;
@@ -429,8 +455,6 @@ export interface VideoModelSettingRecord {
   defaultRequestModelId: string;
   baseUrlOverride: string | null;
   requestModelIdOverride: string | null;
-  apiKeySet: boolean;
-  apiKeyPreview?: string;
 }
 
 export interface VideoModelSettingsView {
@@ -440,7 +464,29 @@ export interface VideoModelSettingsView {
 export interface SaveVideoModelSettingInput {
   baseUrlOverride: string | null;
   requestModelIdOverride: string | null;
-  apiKey?: string;
+  apiKeys?: SaveModelApiKeyEntryInput[];
+}
+
+export type AudioModelKind = 'tts' | 'music' | 'sound-effect';
+
+export interface AudioModelSettingRecord extends MediaModelKeyState {
+  debruteModelId: string;
+  kind: AudioModelKind;
+  summary: string;
+  defaultBaseUrl: string;
+  defaultRequestModelId: string;
+  baseUrlOverride: string | null;
+  requestModelIdOverride: string | null;
+}
+
+export interface AudioModelSettingsView {
+  models: AudioModelSettingRecord[];
+}
+
+export interface SaveAudioModelSettingInput {
+  baseUrlOverride: string | null;
+  requestModelIdOverride: string | null;
+  apiKeys?: SaveModelApiKeyEntryInput[];
 }
 
 export interface RunImageModelBatchInput {
@@ -681,6 +727,9 @@ export type GeneratedArtifactRole =
   | 'primary-image'
   | 'primary-video'
   | 'last-frame'
+  | 'tts-audio'
+  | 'music-audio'
+  | 'sound-effect-audio'
   | 'other';
 
 export interface GeneratedAssetRecord {
@@ -1047,6 +1096,7 @@ export type AppServerEvent =
   | { type: 'generatedAsset.metadata.changed'; record: GeneratedAssetRecord }
   | { type: 'imageModel.settings.changed'; settings: ImageModelSettingsView }
   | { type: 'videoModel.settings.changed'; settings: VideoModelSettingsView }
+  | { type: 'audioModel.settings.changed'; settings: AudioModelSettingsView }
   | { type: 'integrations.settings.changed'; settings: IntegrationSettingsView }
   | { type: 'adobeBridge.settings.changed'; settings: AdobeBridgeSettings }
   | { type: 'workbench.preferences.changed'; preferences: WorkbenchPreferencesView };
@@ -1062,6 +1112,7 @@ export type WorkbenchEvent =
   | { type: 'generatedAsset.metadata.changed'; projectId: string; projectRevision: number; record: GeneratedAssetRecord }
   | { type: 'imageModel.settings.changed'; settings: ImageModelSettingsView }
   | { type: 'videoModel.settings.changed'; settings: VideoModelSettingsView }
+  | { type: 'audioModel.settings.changed'; settings: AudioModelSettingsView }
   | { type: 'integrations.settings.changed'; settings: IntegrationSettingsView }
   | { type: 'adobeBridge.settings.changed'; settings: AdobeBridgeSettings }
   | { type: 'workbench.preferences.changed'; preferences: WorkbenchPreferencesView }
@@ -1140,6 +1191,8 @@ export interface WorkbenchApiClient {
   imageModelSaveSetting(modelId: string, input: SaveImageModelSettingInput): Promise<ImageModelSettingsView>;
   videoModelGetSettings(): Promise<VideoModelSettingsView>;
   videoModelSaveSetting(modelId: string, input: SaveVideoModelSettingInput): Promise<VideoModelSettingsView>;
+  audioModelGetSettings(): Promise<AudioModelSettingsView>;
+  audioModelSaveSetting(modelId: string, input: SaveAudioModelSettingInput): Promise<AudioModelSettingsView>;
   integrationsListStatus(): Promise<IntegrationSettingsView>;
   integrationsRescan(): Promise<IntegrationSettingsView>;
   integrationsRunOperation(input: RunIntegrationOperationInput): Promise<RunIntegrationOperationResult>;

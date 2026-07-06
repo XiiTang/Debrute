@@ -48,7 +48,8 @@ describe('Debrute rename contract', () => {
     for (const skillPath of [
       'skills/debrute-core/SKILL.md',
       'skills/debrute-image-director/SKILL.md',
-      'skills/debrute-video-director/SKILL.md'
+      'skills/debrute-video-director/SKILL.md',
+      'skills/debrute-audio-director/SKILL.md'
     ]) {
       const frontmatter = skillFrontmatter(skillPath);
       const metadata = frontmatter.metadata as Record<string, unknown>;

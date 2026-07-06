@@ -108,6 +108,7 @@ function createState(overrides: Partial<WorkbenchState> = {}): WorkbenchState {
     explorerSelection: { selectedPaths: [], focusedPath: null, anchorPath: null },
     imageModelSettings: { models: [] },
     videoModelSettings: { models: [] },
+    audioModelSettings: { models: [] },
     integrationsSettings: { integrations: [], backends: [] },
     adobeBridge: {
       settings: { enabled: true, discoveryStatus: 'available' },

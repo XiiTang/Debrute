@@ -1584,6 +1584,7 @@ async function handleSettingsRoute(context: GlobalRuntimeRequestContext): Promis
     writeJson(context.response, 200, {
       imageModels: await server.imageModelGetSettings(),
       videoModels: await server.videoModelGetSettings(),
+      audioModels: await server.audioModelGetSettings(),
       integrations: await server.integrationsListStatus()
     });
     return;
@@ -1610,6 +1611,14 @@ async function handleSettingsRoute(context: GlobalRuntimeRequestContext): Promis
   }
   if (method === 'PUT' && path.startsWith('/api/models/video/')) {
     writeJson(context.response, 200, await server.videoModelSaveSetting(decodePathSegment(path.split('/').at(-1)!), await readJsonBody(context.request)));
+    return;
+  }
+  if (method === 'GET' && path === '/api/models/audio') {
+    writeJson(context.response, 200, await server.audioModelGetSettings());
+    return;
+  }
+  if (method === 'PUT' && path.startsWith('/api/models/audio/')) {
+    writeJson(context.response, 200, await server.audioModelSaveSetting(decodePathSegment(path.split('/').at(-1)!), await readJsonBody(context.request)));
     return;
   }
   if (method === 'GET' && path === '/api/integrations') {
@@ -1646,6 +1655,7 @@ type GlobalWorkbenchEvent = Extract<WorkbenchEvent, {
   type:
     | 'imageModel.settings.changed'
     | 'videoModel.settings.changed'
+    | 'audioModel.settings.changed'
     | 'integrations.settings.changed'
     | 'adobeBridge.settings.changed'
     | 'workbench.preferences.changed'
@@ -1683,6 +1693,7 @@ function writeSseWorkbenchEvent(response: ServerResponse, event: WorkbenchEvent)
 function isGlobalWorkbenchEvent(event: AppServerEvent): event is GlobalWorkbenchEvent {
   return event.type === 'imageModel.settings.changed'
     || event.type === 'videoModel.settings.changed'
+    || event.type === 'audioModel.settings.changed'
     || event.type === 'integrations.settings.changed'
     || event.type === 'adobeBridge.settings.changed'
     || event.type === 'workbench.preferences.changed';

@@ -154,6 +154,7 @@ export function WorkbenchApp(): React.ReactElement {
   const [requestedTerminalCwd, setRequestedTerminalCwd] = useState<string | null>(null);
   const [imageModelSettings, setImageModelSettings] = useState<WorkbenchState['imageModelSettings']>();
   const [videoModelSettings, setVideoModelSettings] = useState<WorkbenchState['videoModelSettings']>();
+  const [audioModelSettings, setAudioModelSettings] = useState<WorkbenchState['audioModelSettings']>();
   const [integrationsSettings, setIntegrationsSettings] = useState<WorkbenchState['integrationsSettings']>();
   const [adobeBridge, setAdobeBridge] = useState<WorkbenchState['adobeBridge']>();
   const [workbenchPreferences, setWorkbenchPreferences] = useState<WorkbenchPreferencesView>();
@@ -293,6 +294,7 @@ export function WorkbenchApp(): React.ReactElement {
     setProjectOpenError(undefined);
     setImageModelSettings(await api.imageModelGetSettings());
     setVideoModelSettings(await api.videoModelGetSettings());
+    setAudioModelSettings(await api.audioModelGetSettings());
     setIntegrationsSettings(await api.integrationsListStatus());
     setAdobeBridge(await api.adobeBridgeGetState());
     await loadCanvasFeedback(api, setCanvasFeedback, notifyCanvasFeedbackUnavailable);
@@ -538,6 +540,9 @@ export function WorkbenchApp(): React.ReactElement {
       if (event.type === 'videoModel.settings.changed') {
         setVideoModelSettings(event.settings);
       }
+      if (event.type === 'audioModel.settings.changed') {
+        setAudioModelSettings(event.settings);
+      }
       if (event.type === 'integrations.settings.changed') {
         setIntegrationsSettings(event.settings);
       }
@@ -719,6 +724,7 @@ export function WorkbenchApp(): React.ReactElement {
     explorerSelection,
     imageModelSettings,
     videoModelSettings,
+    audioModelSettings,
     integrationsSettings,
     adobeBridge,
     canvasFeedback,
@@ -775,6 +781,10 @@ export function WorkbenchApp(): React.ReactElement {
     saveVideoModelSetting: async (modelId, input) => {
       const videoModels = await api.videoModelSaveSetting(modelId, input);
       setVideoModelSettings(videoModels);
+    },
+    saveAudioModelSetting: async (modelId, input) => {
+      const audioModels = await api.audioModelSaveSetting(modelId, input);
+      setAudioModelSettings(audioModels);
     },
     rescanIntegrations: async () => {
       const settings = await api.integrationsRescan();

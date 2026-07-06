@@ -69,7 +69,7 @@ describe('video model artifact write timeout', () => {
         settings: {
           videoModels: [{ debruteModelId: 'doubao-seedance-2-0-260128', baseUrlOverride: null, requestModelIdOverride: null }]
         },
-        secrets: { videoModelApiKeys: { 'doubao-seedance-2-0-260128': 'sk-video' } },
+        secrets: { videoModelApiKeys: { 'doubao-seedance-2-0-260128': [{ id: 'vid-a', key: 'sk-video', label: null, enabled: true }] } },
         pollIntervalMs: 0,
         remoteUrlLookup: async (hostname) => {
           expect(hostname).toBe('cdn.example');

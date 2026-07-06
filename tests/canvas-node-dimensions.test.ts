@@ -16,14 +16,14 @@ describe('canvas node dimensions', () => {
       projectRelativePath: 'image-production',
       nodeKind: 'directory',
       mediaKind: 'unknown'
-    })).resolves.toEqual({ width: 1500, height: 960 });
+    })).resolves.toEqual({ width: 1840, height: 640 });
 
     await expect(readCanvasNodeLayoutSize({
       projectRoot: process.cwd(),
       projectRelativePath: 'image-production/archive.bin',
       nodeKind: 'file',
       mediaKind: 'unknown'
-    })).resolves.toEqual({ width: 1500, height: 1200 });
+    })).resolves.toEqual({ width: 1800, height: 640 });
   });
 
   it('expands directory and unknown-file Canvas widths from long display names', async () => {
@@ -32,14 +32,14 @@ describe('canvas node dimensions', () => {
       projectRelativePath: 'references/long-folder-name-for-rendering-output-archive',
       nodeKind: 'directory',
       mediaKind: 'unknown'
-    })).resolves.toEqual({ width: 3600, height: 960 });
+    })).resolves.toEqual({ width: 4160, height: 640 });
 
     await expect(readCanvasNodeLayoutSize({
       projectRoot: process.cwd(),
       projectRelativePath: 'references/unsupported-reference-render-settings.archive',
       nodeKind: 'file',
       mediaKind: 'unknown'
-    })).resolves.toEqual({ width: 3600, height: 1200 });
+    })).resolves.toEqual({ width: 4160, height: 640 });
   });
 
   it('caps generic Canvas widths for very long directory and unknown-file names', async () => {
@@ -48,14 +48,14 @@ describe('canvas node dimensions', () => {
       projectRelativePath: 'outputs/this-is-an-extremely-long-folder-name-that-should-hit-the-generic-node-width-cap',
       nodeKind: 'directory',
       mediaKind: 'unknown'
-    })).resolves.toEqual({ width: 4800, height: 960 });
+    })).resolves.toEqual({ width: 6960, height: 640 });
 
     await expect(readCanvasNodeLayoutSize({
       projectRoot: process.cwd(),
       projectRelativePath: 'outputs/this-is-an-extremely-long-unsupported-file-name-that-should-hit-the-generic-node-width-cap.bin',
       nodeKind: 'file',
       mediaKind: 'unknown'
-    })).resolves.toEqual({ width: 4800, height: 1200 });
+    })).resolves.toEqual({ width: 7200, height: 640 });
   });
 
   it('counts full-width display name characters wider than Latin characters', async () => {
@@ -64,7 +64,7 @@ describe('canvas node dimensions', () => {
       projectRelativePath: 'references/中文资料归档文件夹名称很长',
       nodeKind: 'directory',
       mediaKind: 'unknown'
-    })).resolves.toEqual({ width: 2080, height: 960 });
+    })).resolves.toEqual({ width: 2640, height: 640 });
   });
 
   it('uses fixed intrinsic Canvas sizes for text and audio', async () => {

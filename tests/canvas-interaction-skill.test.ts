@@ -24,5 +24,8 @@ describe('Debrute repository Skill', () => {
     expect(skill).toContain('Codex app:');
     expect(skill).toContain('await (await browser.capabilities.get("visibility")).set(true)');
     expect(skill).toContain('generate image-batch --manifest');
+    expect(skill).toContain('debrute models tts describe openai-gpt-4o-mini-tts');
+    expect(skill).toContain('debrute models music describe elevenlabs-music');
+    expect(skill).toContain('debrute models sfx describe elevenlabs-sound-effects');
   });
 });

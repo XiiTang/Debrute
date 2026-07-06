@@ -593,11 +593,11 @@ describe('Workbench UI source contract', () => {
     expect(feedbackNoteRule).toContain('height: 30px;');
     expect(feedbackNoteRule).not.toContain('min-height: 30px;');
     expect(feedbackNoteRule).toContain('padding: 5px 30px 5px 12px;');
-    expect(feedbackPrimaryRowRule).toContain('grid-template-columns: max-content 90px;');
+    expect(feedbackPrimaryRowRule).toContain('grid-template-columns: max-content 110px;');
     expect(feedbackCommentCreatorRule).toContain('justify-self: start;');
     expect(feedbackCommentStripRule).toContain('padding: 3px 2px 3px 0;');
     expect(feedbackSource).toContain('db-floating-bar canvas-feedback-bar');
-    expect(feedbackSource).toContain('sizing={{ minWidthPx: 90, maxWidthPx: 90 }}');
+    expect(feedbackSource).toContain('sizing={{ minWidthPx: 110, maxWidthPx: 110 }}');
   });
 
   it('keeps Canvas cards and dock icons on the compact control rhythm', () => {

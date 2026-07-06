@@ -47,5 +47,10 @@ await Promise.all([
     '../../packages/capability-runtime/src/videoModels/officialDocs/snapshots',
     'bundle/official-docs/videoModels/snapshots',
     { recursive: true }
+  ),
+  cp(
+    '../../packages/capability-runtime/src/audioModels/officialDocs/snapshots',
+    'bundle/official-docs/audioModels/snapshots',
+    { recursive: true }
   )
 ]);

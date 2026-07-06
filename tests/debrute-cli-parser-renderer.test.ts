@@ -166,6 +166,21 @@ describe('debrute cli parser and renderer', () => {
 
     expect(parseDebruteArgs([
       'generate',
+      'tts',
+      '/tmp/project',
+      '--input-json',
+      '{"model":"openai-gpt-4o-mini-tts","arguments":{"text":"voice line"}}',
+      '--timeout-ms',
+      '600000'
+    ])).toMatchObject({
+      command: 'generate.tts',
+      options: {
+        'timeout-ms': '600000'
+      }
+    });
+
+    expect(parseDebruteArgs([
+      'generate',
       'image-batch',
       '/tmp/project',
       '--input-jsonl',
@@ -251,6 +266,12 @@ describe('debrute cli parser and renderer', () => {
       'models.image.describe',
       'models.video.list',
       'models.video.describe',
+      'models.tts.list',
+      'models.tts.describe',
+      'models.music.list',
+      'models.music.describe',
+      'models.sfx.list',
+      'models.sfx.describe',
       'project.init',
       'project.status',
       'project.validate',
@@ -266,6 +287,9 @@ describe('debrute cli parser and renderer', () => {
       'generate.image',
       'generate.image-batch',
       'generate.video',
+      'generate.tts',
+      'generate.music',
+      'generate.sfx',
       'commands',
       'help'
     ]);
@@ -280,6 +304,15 @@ describe('debrute cli parser and renderer', () => {
     expect(imageBatchSpec?.input).toContain('--summary <project-relative-path>');
     expect(imageBatchSpec?.input).toContain('--concurrency <n>');
     expect(imageBatchSpec?.input).toContain('--retries <n>');
+    expect(specForCommandPath(['models', 'tts', 'describe'])).toMatchObject({
+      command: 'models.tts.describe',
+      requires: 'model-config'
+    });
+    expect(specForCommandPath(['generate', 'music'])).toMatchObject({
+      command: 'generate.music',
+      scope: 'generation',
+      writes: 'assets'
+    });
     expect(specForCommandPath(['project', 'status'])?.errors).toContain('project_not_found');
     expect(specForCommandPath(['workbench', 'start'])).toMatchObject({
       command: 'workbench.start',
@@ -321,5 +354,22 @@ describe('debrute cli parser and renderer', () => {
       'model_unavailable',
       'model_request_failed'
     ]);
+    expect(specForCommandPath(['generate', 'tts'])?.errors).toEqual(expect.arrayContaining([
+      'audio_task_failed',
+      'audio_task_timeout'
+    ]));
+    expect(specForCommandPath(['generate', 'music'])?.errors).toEqual(expect.arrayContaining([
+      'audio_task_failed',
+      'audio_task_timeout'
+    ]));
+    expect(specForCommandPath(['generate', 'sfx'])?.errors).toEqual(expect.arrayContaining([
+      'audio_task_failed',
+      'audio_task_timeout'
+    ]));
+    for (const path of [['models', 'tts', 'describe'], ['models', 'music', 'describe'], ['models', 'sfx', 'describe']]) {
+      expect(specForCommandPath(path)?.errors).toEqual(expect.arrayContaining([
+        'audio_model_kind_mismatch'
+      ]));
+    }
   });
 });

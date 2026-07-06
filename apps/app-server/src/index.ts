@@ -1,6 +1,8 @@
 export {
   DebruteAppServer,
   type DebruteAppServerOptions,
+  type CliAudioModelDetail,
+  type CliAudioModelListEntry,
   type CliImageModelDetail,
   type CliVideoModelDetail,
   type CliVideoModelListEntry,
@@ -47,6 +49,8 @@ export type {
 export type {
   AddProjectPathToCanvasMapInput,
   AppServerEvent,
+  AudioModelSettingRecord,
+  AudioModelSettingsView,
   GeneratedAssetMetadataLookup,
   GeneratedAssetRecord,
   ImageModelBatchSummary,
@@ -58,6 +62,7 @@ export type {
   ProjectSessionSnapshot,
   ProjectTextFile,
   RunImageModelBatchInput,
+  SaveAudioModelSettingInput,
   SaveImageModelSettingInput,
   SaveVideoModelSettingInput,
   VideoModelSettingRecord,

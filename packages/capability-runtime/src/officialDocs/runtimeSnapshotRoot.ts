@@ -1,7 +1,7 @@
 import { dirname, resolve, sep } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
-export type OfficialDocSnapshotModelKind = 'imageModels' | 'videoModels';
+export type OfficialDocSnapshotModelKind = 'imageModels' | 'videoModels' | 'audioModels';
 
 interface RuntimeOfficialDocSnapshotRootInput {
   modelKind: OfficialDocSnapshotModelKind;

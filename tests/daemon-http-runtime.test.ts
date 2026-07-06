@@ -1680,13 +1680,18 @@ describe('daemon HTTP runtime', () => {
   });
 
   it('does not expose Canvas settings HTTP routes', async () => {
+    const debruteHome = await mkdtemp(join(tmpdir(), 'debrute-daemon-no-canvas-settings-home-'));
     const daemon = createDebruteDaemonHttpServer({
       host: '127.0.0.1',
       port: 0,
       token: 'test-token',
-      webBaseUrl: null
+      webBaseUrl: null,
+      appServerOptions: {
+        globalConfigStore: new GlobalConfigStore({ debruteHome })
+      }
     });
     cleanups.push(() => daemon.close());
+    cleanups.push(() => rm(debruteHome, { recursive: true, force: true }));
     const runtime = await daemon.listen();
 
     const [aggregateResponse, getResponse, putResponse] = await Promise.all([
@@ -1712,6 +1717,7 @@ describe('daemon HTTP runtime', () => {
 
     expect(aggregateResponse.status).toBe(200);
     expect(aggregate).not.toHaveProperty('canvas');
+    expect(aggregate).toHaveProperty('audioModels');
     expect(getResponse.status).toBe(404);
     expect(putResponse.status).toBe(404);
   }, 30_000);

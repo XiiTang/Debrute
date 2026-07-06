@@ -14,6 +14,7 @@ import {
   readResponseTextWithTimeout as readResponseTextBodyWithTimeout
 } from '../requestTimeout.js';
 import { redactRuntimeSecretString, redactRuntimeSecrets } from '../modelRunMetadataRedaction.js';
+import { selectModelApiKey } from '../modelApiKeySelection.js';
 import {
   assertPublicHttpUrl,
   fetchPublicHttpUrl,
@@ -139,8 +140,6 @@ export async function executeImageModelRequest(input: ExecuteImageModelRequestIn
   const logs: Array<Record<string, unknown>> = [];
   const catalog = createImageModelCatalog();
   const entry = catalog.get(input.input.model);
-  const modelSettings = input.settings.imageModels.find((model) => model.debruteModelId === input.input.model);
-  const apiKey = input.secrets.imageModelApiKeys[input.input.model]?.trim() ?? '';
   if (!entry) {
     return {
       status: 'error',
@@ -149,6 +148,12 @@ export async function executeImageModelRequest(input: ExecuteImageModelRequestIn
       logs
     };
   }
+  const selectedApiKey = selectModelApiKey({
+    kind: 'image',
+    modelId: input.input.model,
+    entries: input.secrets.imageModelApiKeys[input.input.model]
+  });
+  const apiKey = selectedApiKey?.key ?? '';
   if (!apiKey) {
     return {
       status: 'error',
@@ -170,6 +175,7 @@ export async function executeImageModelRequest(input: ExecuteImageModelRequestIn
     };
   }
 
+  const modelSettings = input.settings.imageModels.find((model) => model.debruteModelId === input.input.model);
   const state: RequestState = {
     projectRoot: input.projectRoot,
     invocationId: input.invocationId,

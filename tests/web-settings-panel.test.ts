@@ -15,7 +15,7 @@ describe('web Settings pages', () => {
       actions: actionsFixture()
     }));
 
-    expect(html.match(/class="db-nav-row(?: db-nav-row--active)?"/g)).toHaveLength(5);
+    expect(html.match(/class="db-nav-row(?: db-nav-row--active)?"/g)).toHaveLength(8);
     expect(html).toContain('Application');
     expect(html).toContain('Updates');
     expect(html.match(/Debrute CLI/g)).toHaveLength(1);
@@ -114,6 +114,7 @@ function stateFixture(): WorkbenchState {
     explorerSelection: createEmptyProjectTreeSelection(),
     imageModelSettings: { models: [] },
     videoModelSettings: { models: [] },
+    audioModelSettings: { models: [] },
     integrationsSettings: undefined,
     adobeBridge: undefined,
     canvasFeedback: undefined,
@@ -129,6 +130,9 @@ function actionsFixture(): WorkbenchActions {
     checkProductUpdate: vi.fn(async () => productState()),
     applyProductUpdate: vi.fn(async () => ({ state: productState() })),
     saveWorkbenchPreferences: vi.fn(async () => undefined),
+    saveImageModelSetting: vi.fn(async () => undefined),
+    saveVideoModelSetting: vi.fn(async () => undefined),
+    saveAudioModelSetting: vi.fn(async () => undefined),
     runIntegrationOperation: vi.fn(async (input) => ({
       ok: true,
       integrationId: input.integrationId,

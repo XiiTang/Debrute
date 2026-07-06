@@ -74,12 +74,12 @@ Debrute ships standard Skills for external agents:
 - `debrute-core` for project semantics, Workbench URLs, Canvas Map pushes, generated assets, and model-backed generation.
 - `debrute-image-director` for image generation and editing through the `debrute` command.
 - `debrute-video-director` for video generation and editing through the `debrute` command.
+- `debrute-audio-director` for TTS, music generation, and sound effect generation through the `debrute` command.
 
 The Skills explain how to call Debrute. They are not hidden APIs and they do not replace the agent's own tools.
 
 ## Roadmap
 
-- Voice and audio generation.
 - 3D asset generation and review.
 - Richer previews for more binary asset types.
 - More plugins for professional creative tools.

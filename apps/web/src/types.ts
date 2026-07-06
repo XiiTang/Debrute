@@ -1,6 +1,7 @@
 import type {
   AddProjectPathToCanvasMapInput,
   AdobeBridgeStateView,
+  AudioModelSettingsView,
   DebruteProductState,
   ImageModelSettingsView,
   CanvasTextPreviewSourceAvailabilityRequest,
@@ -13,6 +14,7 @@ import type {
   RunIntegrationOperationInput,
   RunIntegrationOperationResult,
   SaveAdobeBridgeSettingsInput,
+  SaveAudioModelSettingInput,
   SaveCanvasTextPreviewSourceInput,
   SaveCanvasTextPreviewSourceResult,
   SaveWorkbenchPreferencesInput,
@@ -52,6 +54,7 @@ export interface WorkbenchState {
   explorerSelection: ProjectTreeSelectionState;
   imageModelSettings: ImageModelSettingsView | undefined;
   videoModelSettings: VideoModelSettingsView | undefined;
+  audioModelSettings: AudioModelSettingsView | undefined;
   integrationsSettings: IntegrationSettingsView | undefined;
   adobeBridge: AdobeBridgeStateView | undefined;
   canvasFeedback: CanvasFeedbackDocument | undefined;
@@ -95,6 +98,7 @@ export interface WorkbenchActions {
   saveWorkbenchPreferences: (input: SaveWorkbenchPreferencesInput) => Promise<void>;
   saveImageModelSetting: (modelId: string, input: SaveImageModelSettingInput) => Promise<void>;
   saveVideoModelSetting: (modelId: string, input: SaveVideoModelSettingInput) => Promise<void>;
+  saveAudioModelSetting: (modelId: string, input: SaveAudioModelSettingInput) => Promise<void>;
   rescanIntegrations: () => Promise<IntegrationSettingsView>;
   runIntegrationOperation: (input: RunIntegrationOperationInput) => Promise<RunIntegrationOperationResult>;
   saveAdobeBridgeSettings: (input: SaveAdobeBridgeSettingsInput) => Promise<void>;

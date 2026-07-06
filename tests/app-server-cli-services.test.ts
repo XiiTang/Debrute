@@ -3,7 +3,13 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
 import { DebruteAppServer, DebruteGlobalRuntimeServer, GlobalConfigStore } from '../apps/app-server/src/index';
-import { createImageModelCatalog, createVideoModelCatalog, type SecretsConfig, type VideoModelsConfig } from '@debrute/capability-runtime';
+import {
+  createAudioModelCatalog,
+  createImageModelCatalog,
+  createVideoModelCatalog,
+  type SecretsConfig,
+  type VideoModelsConfig
+} from '@debrute/capability-runtime';
 
 class CountingGlobalConfigStore extends GlobalConfigStore {
   readVideoModelsCount = 0;
@@ -54,7 +60,7 @@ describe('DebruteAppServer CLI service methods', () => {
       await globalRuntime.videoModelSaveSetting('doubao-seedance-2-0-260128', {
         baseUrlOverride: null,
         requestModelIdOverride: null,
-        apiKey: 'sk-video'
+        apiKeys: [{ id: 'vid-a', key: 'sk-video', label: null, enabled: true }]
       });
 
       const videoModels = await server.listVideoModelsForCli();
@@ -84,7 +90,7 @@ describe('DebruteAppServer CLI service methods', () => {
       await globalRuntime.imageModelSaveSetting('gpt-image-2', {
         baseUrlOverride: null,
         requestModelIdOverride: null,
-        apiKey: 'sk-image'
+        apiKeys: [{ id: 'img-a', key: 'sk-image', label: null, enabled: true }]
       });
       const imageModels = await server.listImageModelsForCli();
 
@@ -97,6 +103,45 @@ describe('DebruteAppServer CLI service methods', () => {
           mask: expect.stringContaining('alpha channel')
         })
       })]);
+    } finally {
+      globalRuntime.close();
+      server.close();
+      await rm(home, { recursive: true, force: true });
+    }
+  });
+
+  it('lists only API-key configured audio models by CLI kind', async () => {
+    const home = await mkdtemp(join(tmpdir(), 'debrute-cli-audio-list-parameters-home-'));
+    const configStore = new GlobalConfigStore({ debruteHome: home });
+    const globalRuntime = new DebruteGlobalRuntimeServer({ globalConfigStore: configStore });
+    const server = new DebruteAppServer({ globalConfigStore: configStore });
+    try {
+      await globalRuntime.audioModelSaveSetting('openai-gpt-4o-mini-tts', {
+        baseUrlOverride: null,
+        requestModelIdOverride: null,
+        apiKeys: [{ id: 'aud-a', key: 'sk-audio', label: null, enabled: true }]
+      });
+      await globalRuntime.audioModelSaveSetting('elevenlabs-music', {
+        baseUrlOverride: null,
+        requestModelIdOverride: null,
+        apiKeys: [{ id: 'aud-a', key: 'sk-music', label: null, enabled: true }]
+      });
+
+      await expect(server.listAudioModelsForCli('tts')).resolves.toEqual([expect.objectContaining({
+        id: 'openai-gpt-4o-mini-tts',
+        kind: 'tts',
+        parameters: expect.objectContaining({
+          text: expect.stringContaining('required')
+        })
+      })]);
+      await expect(server.listAudioModelsForCli('music')).resolves.toEqual([expect.objectContaining({
+        id: 'elevenlabs-music',
+        kind: 'music',
+        parameters: expect.objectContaining({
+          prompt: expect.stringContaining('required')
+        })
+      })]);
+      await expect(server.listAudioModelsForCli('sound-effect')).resolves.toEqual([]);
     } finally {
       globalRuntime.close();
       server.close();
@@ -120,7 +165,7 @@ describe('DebruteAppServer CLI service methods', () => {
       await globalRuntime.imageModelSaveSetting('gpt-image-2', {
         baseUrlOverride: null,
         requestModelIdOverride: null,
-        apiKey: 'sk-image'
+        apiKeys: [{ id: 'img-a', key: 'sk-image', label: null, enabled: true }]
       });
 
       await expect(server.runtimeStatusForCli()).resolves.toMatchObject({
@@ -149,7 +194,7 @@ describe('DebruteAppServer CLI service methods', () => {
       await globalRuntime.videoModelSaveSetting('doubao-seedance-2-0-260128', {
         baseUrlOverride: null,
         requestModelIdOverride: null,
-        apiKey: 'sk-video'
+        apiKeys: [{ id: 'vid-a', key: 'sk-video', label: null, enabled: true }]
       });
 
       await expect(server.runtimeStatusForCli()).resolves.toMatchObject({
@@ -163,8 +208,40 @@ describe('DebruteAppServer CLI service methods', () => {
     }
   });
 
+  it('reports catalog audio model count separately from API-key configured audio models', async () => {
+    const home = await mkdtemp(join(tmpdir(), 'debrute-cli-runtime-status-audio-count-home-'));
+    const configStore = new GlobalConfigStore({ debruteHome: home });
+    const globalRuntime = new DebruteGlobalRuntimeServer({ globalConfigStore: configStore });
+    const server = new DebruteAppServer({ globalConfigStore: configStore });
+    try {
+      const catalogCount = createAudioModelCatalog().listAll().length;
+      await expect(server.runtimeStatusForCli()).resolves.toMatchObject({
+        audioModels: catalogCount,
+        availableAudioModels: 0
+      });
+
+      await globalRuntime.audioModelSaveSetting('openai-gpt-4o-mini-tts', {
+        baseUrlOverride: null,
+        requestModelIdOverride: null,
+        apiKeys: [{ id: 'aud-a', key: 'sk-audio', label: null, enabled: true }]
+      });
+
+      await expect(server.runtimeStatusForCli()).resolves.toMatchObject({
+        audioModels: catalogCount,
+        availableAudioModels: 1
+      });
+    } finally {
+      globalRuntime.close();
+      server.close();
+      await rm(home, { recursive: true, force: true });
+    }
+  });
+
   it('describes image models with official documentation details without opening a project', async () => {
-    const server = new DebruteAppServer();
+    const home = await mkdtemp(join(tmpdir(), 'debrute-cli-describe-image-home-'));
+    const server = new DebruteAppServer({
+      globalConfigStore: new GlobalConfigStore({ debruteHome: home })
+    });
     try {
       const detail = await server.describeImageModelForCli('gpt-image-2');
 
@@ -179,11 +256,15 @@ describe('DebruteAppServer CLI service methods', () => {
       expect(detail.argumentsSchema).toHaveProperty('properties');
     } finally {
       server.close();
+      await rm(home, { recursive: true, force: true });
     }
   });
 
   it('describes video models with official documentation details without opening a project', async () => {
-    const server = new DebruteAppServer();
+    const home = await mkdtemp(join(tmpdir(), 'debrute-cli-describe-video-home-'));
+    const server = new DebruteAppServer({
+      globalConfigStore: new GlobalConfigStore({ debruteHome: home })
+    });
     try {
       const detail = await server.describeVideoModelForCli('doubao-seedance-2-0-260128');
 
@@ -198,6 +279,31 @@ describe('DebruteAppServer CLI service methods', () => {
       expect(JSON.stringify(detail.argumentsSchema)).not.toContain('"content"');
     } finally {
       server.close();
+      await rm(home, { recursive: true, force: true });
+    }
+  });
+
+  it('describes audio models with official documentation details without opening a project', async () => {
+    const home = await mkdtemp(join(tmpdir(), 'debrute-cli-describe-audio-home-'));
+    const server = new DebruteAppServer({
+      globalConfigStore: new GlobalConfigStore({ debruteHome: home })
+    });
+    try {
+      const detail = await server.describeAudioModelForCli('tts', 'openai-gpt-4o-mini-tts');
+
+      expect(() => server.getSnapshot()).toThrow('No project session is open.');
+      expect(detail.kind).toBe('tts');
+      expect(detail.officialDocUrls).toContain('https://developers.openai.com/api/docs/guides/text-to-speech');
+      expect(detail.officialSnapshotPath).toBe('packages/capability-runtime/src/audioModels/officialDocs/snapshots/openai/tts.md');
+      expect(detail.officialCapturedAt).toMatch(/^\d{4}-\d{2}-\d{2}$/);
+      expect(detail.descriptionMarkdown).toContain('# openai-gpt-4o-mini-tts');
+      expect(detail.descriptionMarkdown).toContain('debrute generate tts <project> --input-json');
+      expect(detail.descriptionMarkdown).toContain('--timeout-ms');
+      expect(detail.descriptionMarkdown).toContain('"text"');
+      expect(detail.argumentsSchema).toHaveProperty('properties');
+    } finally {
+      server.close();
+      await rm(home, { recursive: true, force: true });
     }
   });
 
@@ -376,6 +482,29 @@ describe('DebruteAppServer CLI service methods', () => {
     }
   });
 
+  it('rejects wrong-kind audio CLI requests before missing API key checks', async () => {
+    const home = await mkdtemp(join(tmpdir(), 'debrute-cli-audio-kind-config-home-'));
+    const projectRoot = await mkdtemp(join(tmpdir(), 'debrute-cli-audio-kind-config-project-'));
+    const server = new DebruteAppServer({
+      globalConfigStore: new GlobalConfigStore({ debruteHome: home })
+    });
+    try {
+      await server.openProject(projectRoot, { initializeIfMissing: true, createDefaultCanvas: true });
+
+      await expect(server.runAudioModelRequestForCli('tts', {
+        model: 'elevenlabs-music',
+        arguments: { prompt: 'Warm ambient electronic music.' }
+      })).resolves.toMatchObject({
+        status: 'error',
+        error: { code: 'audio_model_kind_mismatch' }
+      });
+    } finally {
+      server.close();
+      await rm(home, { recursive: true, force: true });
+      await rm(projectRoot, { recursive: true, force: true });
+    }
+  });
+
   it('returns configuration errors when video model API keys are missing', async () => {
     const home = await mkdtemp(join(tmpdir(), 'debrute-cli-video-auth-home-'));
     const projectRoot = await mkdtemp(join(tmpdir(), 'debrute-cli-video-auth-project-'));
@@ -443,7 +572,7 @@ describe('DebruteAppServer CLI service methods', () => {
       await globalRuntime.videoModelSaveSetting('doubao-seedance-2-0-260128', {
         baseUrlOverride: null,
         requestModelIdOverride: null,
-        apiKey: 'sk-video'
+        apiKeys: [{ id: 'vid-a', key: 'sk-video', label: null, enabled: true }]
       });
       configStore.resetCounts();
 

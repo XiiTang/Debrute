@@ -316,6 +316,7 @@ function createState(overrides: Partial<WorkbenchState> = {}): WorkbenchState {
     explorerSelection: { selectedPaths: [], focusedPath: null, anchorPath: null },
     imageModelSettings: { models: [] },
     videoModelSettings: { models: [] },
+    audioModelSettings: { models: [] },
     integrationsSettings: {
       backends: [
         { kind: 'system-package-manager', backend: 'brew', available: true },

@@ -12,6 +12,7 @@ import {
   readResponseTextWithTimeout as readResponseTextBodyWithTimeout
 } from '../requestTimeout.js';
 import { redactRuntimeSecrets } from '../modelRunMetadataRedaction.js';
+import { selectModelApiKey } from '../modelApiKeySelection.js';
 import {
   fetchPublicHttpUrl,
   resolveHttpRedirectUrl,
@@ -140,8 +141,6 @@ export async function executeVideoModelRequest(input: ExecuteVideoModelRequestIn
   const logs: Array<Record<string, unknown>> = [];
   const catalog = createVideoModelCatalog();
   const entry = catalog.get(input.input.model);
-  const modelSettings = input.settings.videoModels.find((model) => model.debruteModelId === input.input.model);
-  const apiKey = input.secrets.videoModelApiKeys[input.input.model]?.trim() ?? '';
   if (!entry) {
     return {
       status: 'error',
@@ -150,6 +149,12 @@ export async function executeVideoModelRequest(input: ExecuteVideoModelRequestIn
       logs
     };
   }
+  const selectedApiKey = selectModelApiKey({
+    kind: 'video',
+    modelId: input.input.model,
+    entries: input.secrets.videoModelApiKeys[input.input.model]
+  });
+  const apiKey = selectedApiKey?.key ?? '';
   if (!apiKey) {
     return {
       status: 'error',
@@ -159,6 +164,7 @@ export async function executeVideoModelRequest(input: ExecuteVideoModelRequestIn
     };
   }
 
+  const modelSettings = input.settings.videoModels.find((model) => model.debruteModelId === input.input.model);
   let normalized: Awaited<ReturnType<typeof normalizeSeedanceVideoArguments>>;
   try {
     normalized = await normalizeSeedanceVideoArguments({

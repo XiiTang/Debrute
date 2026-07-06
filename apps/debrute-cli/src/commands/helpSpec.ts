@@ -19,6 +19,17 @@ const PARSE_ERRORS = ['invalid_command', 'invalid_argument', 'missing_argument',
 const PROJECT_LOAD_ERRORS = ['project_not_found', 'project_invalid'];
 const CANVAS_REGISTRY_ERRORS = ['canvas_registry_missing', 'canvas_registry_invalid', 'canvas_registry_conflict', 'canvas_registry_repair_failed', 'canvas_map_conflict'];
 const MODEL_RUNTIME_ERRORS = ['model_not_configured', 'model_unavailable', 'model_request_failed'];
+const AUDIO_MODEL_RUNTIME_ERRORS = [
+  'audio_model_not_configured',
+  'audio_model_unavailable',
+  'audio_model_kind_mismatch',
+  'audio_argument_invalid',
+  'audio_request_failed',
+  'audio_artifact_download_failed',
+  'audio_task_failed',
+  'audio_task_timeout'
+];
+const AUDIO_MODEL_DESCRIBE_ERRORS = ['audio_model_unavailable', 'audio_model_kind_mismatch', 'runtime_config_error'];
 const WORKBENCH_RUNTIME_ERRORS = [
   'runtime_launch_failed',
   'runtime_health_failed',
@@ -40,6 +51,12 @@ export const commandSpecs: DebruteCommandSpec[] = [
   spec('models.image.describe', ['models', 'image', 'describe'], 'runtime', 'read', 'model-config', 'none', '<model-id>', 'image model detail record', ['model_unavailable', 'runtime_config_error']),
   spec('models.video.list', ['models', 'video', 'list'], 'runtime', 'read', 'model-config', 'none', 'no args', 'video model records', ['runtime_config_error']),
   spec('models.video.describe', ['models', 'video', 'describe'], 'runtime', 'read', 'model-config', 'none', '<model-id>', 'video model detail record', ['model_unavailable', 'runtime_config_error']),
+  spec('models.tts.list', ['models', 'tts', 'list'], 'runtime', 'read', 'model-config', 'none', 'no args', 'TTS model records', ['runtime_config_error']),
+  spec('models.tts.describe', ['models', 'tts', 'describe'], 'runtime', 'read', 'model-config', 'none', '<model-id>', 'TTS model detail record', AUDIO_MODEL_DESCRIBE_ERRORS),
+  spec('models.music.list', ['models', 'music', 'list'], 'runtime', 'read', 'model-config', 'none', 'no args', 'music model records', ['runtime_config_error']),
+  spec('models.music.describe', ['models', 'music', 'describe'], 'runtime', 'read', 'model-config', 'none', '<model-id>', 'music model detail record', AUDIO_MODEL_DESCRIBE_ERRORS),
+  spec('models.sfx.list', ['models', 'sfx', 'list'], 'runtime', 'read', 'model-config', 'none', 'no args', 'sound effect model records', ['runtime_config_error']),
+  spec('models.sfx.describe', ['models', 'sfx', 'describe'], 'runtime', 'read', 'model-config', 'none', '<model-id>', 'sound effect model detail record', AUDIO_MODEL_DESCRIBE_ERRORS),
   spec('project.init', ['project', 'init'], 'project', 'write', 'project', 'debrute-project', '<project>', 'project status record', ['project_invalid']),
   spec('project.status', ['project', 'status'], 'project', 'read', 'project', 'none', '<project>', 'project status record', PROJECT_LOAD_ERRORS),
   spec('project.validate', ['project', 'validate'], 'project', 'read', 'project', 'none', '<project>', 'validation problem records', [...PROJECT_LOAD_ERRORS, 'project_validation_failed']),
@@ -55,6 +72,9 @@ export const commandSpecs: DebruteCommandSpec[] = [
   spec('generate.image', ['generate', 'image'], 'generation', 'generate', 'project-session', 'assets', '<project> --input-json <json> [--timeout-ms <ms>]', 'generated image artifact records', [...PROJECT_LOAD_ERRORS, 'invalid_json_input', ...MODEL_RUNTIME_ERRORS]),
   spec('generate.image-batch', ['generate', 'image-batch'], 'generation', 'generate', 'project-session', 'assets', '<project> --manifest <project-relative-path> --log <project-relative-path> [--summary <project-relative-path>] [--concurrency <n>] [--retries <n>] [--timeout-ms <ms>] [--overwrite-existing] | <project> --input-jsonl <project-relative-path> --log <project-relative-path> [--summary <project-relative-path>] [--concurrency <n>] [--retries <n>] [--timeout-ms <ms>] [--overwrite-existing]', 'batch progress and summary records', [...PROJECT_LOAD_ERRORS, ...MODEL_RUNTIME_ERRORS]),
   spec('generate.video', ['generate', 'video'], 'generation', 'generate', 'project-session', 'assets', '<project> --input-json <json> [--timeout-ms <ms>]', 'generated video artifact records', [...PROJECT_LOAD_ERRORS, 'invalid_json_input', ...MODEL_RUNTIME_ERRORS]),
+  spec('generate.tts', ['generate', 'tts'], 'generation', 'generate', 'project-session', 'assets', '<project> --input-json <json> [--timeout-ms <ms>]', 'generated TTS audio artifact records', [...PROJECT_LOAD_ERRORS, 'invalid_json_input', ...AUDIO_MODEL_RUNTIME_ERRORS]),
+  spec('generate.music', ['generate', 'music'], 'generation', 'generate', 'project-session', 'assets', '<project> --input-json <json> [--timeout-ms <ms>]', 'generated music audio artifact records', [...PROJECT_LOAD_ERRORS, 'invalid_json_input', ...AUDIO_MODEL_RUNTIME_ERRORS]),
+  spec('generate.sfx', ['generate', 'sfx'], 'generation', 'generate', 'project-session', 'assets', '<project> --input-json <json> [--timeout-ms <ms>]', 'generated sound effect audio artifact records', [...PROJECT_LOAD_ERRORS, 'invalid_json_input', ...AUDIO_MODEL_RUNTIME_ERRORS]),
   spec('commands', ['commands'], 'runtime', 'read', 'none', 'none', 'no args', 'command spec records'),
   spec('help', ['help'], 'runtime', 'read', 'none', 'none', '<command-path>', 'one command spec record')
 ];

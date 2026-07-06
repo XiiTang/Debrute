@@ -14,6 +14,7 @@ import {
   projectRevisionCacheKey,
   type NormalizedFileWatchEvent
 } from '@debrute/project-core';
+import { GlobalConfigStore } from '../config/GlobalConfigStore';
 import { DebruteAppServer } from './DebruteAppServer';
 import {
   CanvasFeedbackRenderCancelledError,
@@ -70,7 +71,10 @@ describe('DebruteAppServer image model batch paths', () => {
 
   it('allows visible batch log and summary paths', async () => {
     const projectRoot = await mkdtemp(join(tmpdir(), 'debrute-image-batch-visible-paths-'));
-    const server = new DebruteAppServer();
+    const debruteHome = await mkdtemp(join(tmpdir(), 'debrute-image-batch-visible-paths-home-'));
+    const server = new DebruteAppServer({
+      globalConfigStore: new GlobalConfigStore({ debruteHome })
+    });
     try {
       await server.openProject(projectRoot, {
         initializeIfMissing: true,
@@ -99,6 +103,7 @@ describe('DebruteAppServer image model batch paths', () => {
     } finally {
       server.close();
       await rm(projectRoot, { recursive: true, force: true });
+      await rm(debruteHome, { recursive: true, force: true });
     }
   });
 });

@@ -42,14 +42,21 @@ import {
   type DebruteCapabilityResult
 } from '@debrute/capability-core';
 import {
+  createAudioModelCatalog,
+  createAudioModelSettingsView,
   createImageModelCatalog,
   createImageModelSettingsView,
   createVideoModelCatalog,
   createVideoModelSettingsView,
+  describeAudioModelOfficialDoc,
   describeImageModelOfficialDoc,
   describeVideoModelOfficialDoc,
+  executeAudioModelRequest,
   executeImageModelRequest,
   executeVideoModelRequest,
+  type AudioModelFetch,
+  type AudioModelKind,
+  type AudioModelRequestInput,
   type ExecuteImageModelRequestResult,
   type ImageModelCatalogEntry,
   type ImageModelFetch,
@@ -171,12 +178,17 @@ import {
   type ResolvedImageModelBatchInput
 } from '../models/ImageModelBatchService.js';
 import {
+  audioModelReadinessFailure,
+  cliAudioModelDetail,
+  cliAudioModelListEntry,
   cliImageModelDetail,
   cliImageModelListEntry,
   cliVideoModelDetail,
   cliVideoModelListEntry,
   imageModelBatchResultFromExecution,
   imageModelReadinessFailure,
+  type CliAudioModelDetail,
+  type CliAudioModelListEntry,
   type CliImageModelDetail,
   type CliImageModelListEntry,
   type CliModelDetail,
@@ -199,6 +211,7 @@ export interface DebruteAppServerOptions {
   globalConfigStore?: GlobalConfigStore;
   imageModelFetch?: ImageModelFetch;
   videoModelFetch?: VideoModelFetch;
+  audioModelFetch?: AudioModelFetch;
   remoteUrlLookup?: PublicRemoteHostLookup;
   remoteHttpTransport?: PublicRemoteHttpTransport;
   integrationEnvPath?: string;
@@ -210,7 +223,7 @@ export interface DebruteAppServerOptions {
   canvasFeedbackRenderMaxConcurrentArtifacts?: number;
 }
 
-export type { CliImageModelDetail, CliImageModelListEntry, CliModelDetail, CliModelSummary, CliRuntimeDiagnostic, CliRuntimeStatus, CliVideoModelDetail, CliVideoModelListEntry };
+export type { CliAudioModelDetail, CliAudioModelListEntry, CliImageModelDetail, CliImageModelListEntry, CliModelDetail, CliModelSummary, CliRuntimeDiagnostic, CliRuntimeStatus, CliVideoModelDetail, CliVideoModelListEntry };
 
 interface AppServerImageModelRequestExecutor {
   catalog: ImageModelCatalogEntry[];
@@ -449,9 +462,10 @@ export class DebruteAppServer {
   }
 
   async runtimeStatusForCli(): Promise<CliRuntimeStatus> {
-    const [configuredImageModels, configuredVideoModels] = await Promise.all([
+    const [configuredImageModels, configuredVideoModels, configuredAudioModels] = await Promise.all([
       this.listImageModelsForCli(),
-      this.listVideoModelsForCli()
+      this.listVideoModelsForCli(),
+      this.listAudioModelsForCli()
     ]);
     return {
       ok: true,
@@ -459,6 +473,8 @@ export class DebruteAppServer {
       availableImageModels: configuredImageModels.length,
       videoModels: createVideoModelCatalog().listAll().length,
       availableVideoModels: configuredVideoModels.length,
+      audioModels: createAudioModelCatalog().listAll().length,
+      availableAudioModels: configuredAudioModels.length,
       diagnostics: 0
     };
   }
@@ -471,6 +487,9 @@ export class DebruteAppServer {
     }
     if (status.availableVideoModels === 0) {
       diagnostics.push({ severity: 'warning', code: 'video_model_not_configured', message: 'No available video model is configured.' });
+    }
+    if (status.availableAudioModels === 0) {
+      diagnostics.push({ severity: 'warning', code: 'audio_model_not_configured', message: 'No available audio model is configured.' });
     }
     if (diagnostics.length === 0) {
       diagnostics.push({ severity: 'info', code: 'runtime_ok', message: 'Debrute runtime configuration is usable.' });
@@ -994,6 +1013,111 @@ export class DebruteAppServer {
     });
   }
 
+  async listAudioModelsForCli(kind?: AudioModelKind): Promise<CliAudioModelListEntry[]> {
+    const settings = await this.readAudioModelSettings();
+    const configured = new Set(settings.models.filter((model) => model.apiKeySet).map((model) => model.debruteModelId));
+    const catalog = createAudioModelCatalog();
+    const entries = kind ? catalog.listByKind(kind) : catalog.listAll();
+    return entries
+      .filter((entry) => configured.has(entry.debruteModelId))
+      .map(cliAudioModelListEntry);
+  }
+
+  async describeAudioModelForCli(kind: AudioModelKind, modelId: string): Promise<CliAudioModelDetail> {
+    const settings = await this.readAudioModelSettings();
+    const setting = settings.models.find((model) => model.debruteModelId === modelId);
+    const catalog = createAudioModelCatalog();
+    const detail = catalog.details([modelId], catalog.listAll()).details[0];
+    if (!setting || !detail) {
+      throw serviceError('audio_model_unavailable', `Audio model is unknown: ${modelId}`, { model: modelId });
+    }
+    if (detail.kind !== kind) {
+      throw serviceError('audio_model_kind_mismatch', `Audio model kind mismatch: ${modelId} is ${detail.kind}, not ${kind}`, {
+        model: modelId,
+        expected_kind: kind,
+        actual_kind: detail.kind
+      });
+    }
+    const officialDescription = await describeAudioModelOfficialDoc(modelId);
+    if (!officialDescription) {
+      throw serviceError('audio_model_official_doc_missing', `Official audio model documentation is missing: ${modelId}`, { model: modelId });
+    }
+    return cliAudioModelDetail(setting, detail, officialDescription);
+  }
+
+  async runAudioModelRequestForCli(kind: AudioModelKind, input: AudioModelRequestInput): Promise<DebruteCapabilityResult> {
+    const current = this.getSnapshot();
+    const entry = createAudioModelCatalog().get(input.model);
+    if (!entry) {
+      const message = `Audio model is unavailable: ${input.model}`;
+      return capabilityError('audio_model_unavailable', message, undefined, {
+        outputs: {
+          content: message,
+          model: input.model
+        },
+        logs: [{ stage: 'resolve_model' }]
+      });
+    }
+    if (entry.kind !== kind) {
+      const message = `Audio model kind mismatch: ${input.model} is ${entry.kind}, not ${kind}`;
+      return capabilityError('audio_model_kind_mismatch', message, {
+        model: input.model,
+        expected_kind: kind,
+        actual_kind: entry.kind
+      }, {
+        outputs: {
+          content: message,
+          model: input.model
+        },
+        logs: [{ stage: 'resolve_model_kind' }]
+      });
+    }
+    const [settingsView, settings, secrets] = await Promise.all([
+      this.readAudioModelSettings(),
+      this.configStore.readAudioModels(),
+      this.configStore.readSecrets()
+    ]);
+    const readinessFailure = audioModelReadinessFailure(input.model, settingsView.models);
+    if (readinessFailure) {
+      return capabilityError(readinessFailure.code, readinessFailure.message, undefined, {
+        outputs: {
+          content: readinessFailure.message,
+          model: input.model
+        },
+        logs: [{ stage: readinessFailure.stage }]
+      });
+    }
+    const result = await executeAudioModelRequest({
+      projectRoot: current.projectRoot,
+      invocationId: `audio-${kind}-${randomUUID()}`,
+      requestedKind: kind,
+      input,
+      settings,
+      secrets: { audioModelApiKeys: secrets.audioModelApiKeys },
+      recordGeneratedAsset: (metadata) => this.recordGeneratedAssetMetadata(metadata).then(() => undefined),
+      ...(this.options.audioModelFetch ? { fetch: this.options.audioModelFetch } : {}),
+      ...(this.options.remoteUrlLookup ? { remoteUrlLookup: this.options.remoteUrlLookup } : {}),
+      ...(this.options.remoteHttpTransport ? { remoteHttpTransport: this.options.remoteHttpTransport } : {})
+    });
+    if (result.status === 'error') {
+      return capabilityError(result.error, result.content, undefined, {
+        outputs: {
+          content: result.content,
+          model: input.model
+        },
+        logs: result.logs
+      });
+    }
+    await this.refreshProject();
+    return capabilityOk({
+      content: result.content,
+      model: entry.debruteModelId
+    }, {
+      artifacts: projectArtifactPointers(result.artifacts),
+      logs: result.logs
+    });
+  }
+
   close(): void {
     if (this.snapshot) {
       this.canvasFeedbackRenderScheduler.cancelProject(this.snapshot.projectRoot);
@@ -1307,6 +1431,14 @@ export class DebruteAppServer {
       await this.configStore.readVideoModels(),
       await this.configStore.readSecrets(),
       createVideoModelCatalog().listAll()
+    );
+  }
+
+  private async readAudioModelSettings() {
+    return createAudioModelSettingsView(
+      await this.configStore.readAudioModels(),
+      await this.configStore.readSecrets(),
+      createAudioModelCatalog().listAll()
     );
   }
 

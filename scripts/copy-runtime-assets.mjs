@@ -6,6 +6,7 @@ const root = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 
 await copyOfficialDocs('imageModels');
 await copyOfficialDocs('videoModels');
+await copyOfficialDocs('audioModels');
 
 async function copyOfficialDocs(modelKind) {
   const source = resolve(root, `packages/capability-runtime/src/${modelKind}/officialDocs/snapshots`);

@@ -1,4 +1,5 @@
-import type { DebruteAppServer, CliImageModelDetail, CliRuntimeDiagnostic, CliVideoModelDetail } from '@debrute/app-server';
+import type { DebruteAppServer, CliAudioModelDetail, CliImageModelDetail, CliRuntimeDiagnostic, CliVideoModelDetail } from '@debrute/app-server';
+import type { DebruteCapabilityResult } from '@debrute/capability-core';
 import type {
   DaemonCliCommandRequest,
   DebruteAgentCommandResult,
@@ -79,6 +80,8 @@ async function runDaemonCliCommandUnsafe(
         available_image_models: status.availableImageModels,
         video_models: status.videoModels,
         available_video_models: status.availableVideoModels,
+        audio_models: status.audioModels,
+        available_audio_models: status.availableAudioModels,
         diagnostics: status.diagnostics,
         ...product
       }
@@ -135,11 +138,30 @@ async function runDaemonCliCommandUnsafe(
       fields: { count: models.length }
     };
   }
+  if (request.command === 'models.tts.list' || request.command === 'models.music.list' || request.command === 'models.sfx.list') {
+    const models = await server.listAudioModelsForCli(audioKindForCommand(request.command));
+    return {
+      status: 'ok',
+      command: request.command,
+      records: models.map((model) => ({
+        name: 'model',
+        fields: {
+          id: model.id,
+          kind: model.kind,
+          parameters: JSON.stringify(model.parameters)
+        }
+      })),
+      fields: { count: models.length }
+    };
+  }
   if (request.command === 'models.image.describe') {
     return imageModelDetailResult(request.command, await server.describeImageModelForCli(request.positional[0] ?? ''));
   }
   if (request.command === 'models.video.describe') {
     return videoModelDetailResult(request.command, await server.describeVideoModelForCli(request.positional[0] ?? ''));
+  }
+  if (request.command === 'models.tts.describe' || request.command === 'models.music.describe' || request.command === 'models.sfx.describe') {
+    return audioModelDetailResult(request.command, await server.describeAudioModelForCli(audioKindForCommand(request.command), request.positional[0] ?? ''));
   }
   if (request.command === 'project.init') {
     return projectSnapshotResult(request.command, await server.initProjectForCli(requiredProjectRoot(request)));
@@ -233,6 +255,10 @@ async function runDaemonCliCommandUnsafe(
   if (request.command === 'generate.video') {
     await openCliProject(server, request);
     return capabilityResult(request.command, await server.runVideoModelRequestForCli(requestInput(request)));
+  }
+  if (request.command === 'generate.tts' || request.command === 'generate.music' || request.command === 'generate.sfx') {
+    await openCliProject(server, request);
+    return capabilityResult(request.command, await server.runAudioModelRequestForCli(audioKindForCommand(request.command), requestInput(request)));
   }
   if (request.command === 'generate.image-batch') {
     const input = imageBatchInputFromRequest(request);
@@ -619,7 +645,7 @@ function canvasManagementResult(command: string, activeCanvasId?: string): Debru
   };
 }
 
-function capabilityResult(command: string, result: Awaited<ReturnType<DebruteAppServer['runImageModelRequestForCli']>>): DebruteAgentCommandResult {
+function capabilityResult(command: string, result: DebruteCapabilityResult): DebruteAgentCommandResult {
   if (result.status === 'error') {
     return {
       status: 'error',
@@ -658,12 +684,16 @@ function videoModelDetailResult(command: string, model: CliVideoModelDetail): De
   return modelDetailResult(command, model);
 }
 
-function modelDetailResult(command: string, model: CliImageModelDetail | CliVideoModelDetail): DebruteAgentCommandResult {
+function audioModelDetailResult(command: string, model: CliAudioModelDetail): DebruteAgentCommandResult {
+  return modelDetailResult(command, model);
+}
+
+function modelDetailResult(command: string, model: CliImageModelDetail | CliVideoModelDetail | CliAudioModelDetail): DebruteAgentCommandResult {
   return {
     status: 'ok',
     command,
     records: [
-      { name: 'model', fields: { id: model.id } },
+      { name: 'model', fields: { id: model.id, ...('kind' in model ? { kind: model.kind } : {}) } },
       {
         name: 'official_doc',
         fields: {
@@ -680,6 +710,25 @@ function modelDetailResult(command: string, model: CliImageModelDetail | CliVide
       description_markdown: model.descriptionMarkdown
     }
   };
+}
+
+function audioKindForCommand(command: string): 'tts' | 'music' | 'sound-effect' {
+  switch (command) {
+    case 'models.tts.list':
+    case 'models.tts.describe':
+    case 'generate.tts':
+      return 'tts';
+    case 'models.music.list':
+    case 'models.music.describe':
+    case 'generate.music':
+      return 'music';
+    case 'models.sfx.list':
+    case 'models.sfx.describe':
+    case 'generate.sfx':
+      return 'sound-effect';
+    default:
+      throw cliCommandError('invalid_command', `Unknown audio command: ${command}`);
+  }
 }
 
 function generatedAssetLookupFields(lookup: Awaited<ReturnType<DebruteAppServer['lookupGeneratedAssetMetadataForCli']>>) {
@@ -743,7 +792,11 @@ function normalizeServiceErrorCode(code: string): string {
   ) {
     return 'model_not_configured';
   }
-  if (code === 'image_model_official_doc_missing' || code === 'video_model_official_doc_missing') {
+  if (
+    code === 'image_model_official_doc_missing'
+    || code === 'video_model_official_doc_missing'
+    || code === 'audio_model_official_doc_missing'
+  ) {
     return 'runtime_config_error';
   }
   if (

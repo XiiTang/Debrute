@@ -74,12 +74,12 @@ Debrute 提供面向外部 agent 的标准 Skills：
 - `debrute-core`：项目语义、Workbench URL、Canvas Map 推送、生成资产和基于模型的生成。
 - `debrute-image-director`：通过 `debrute` 命令进行图片生成和编辑。
 - `debrute-video-director`：通过 `debrute` 命令进行视频生成和编辑。
+- `debrute-audio-director`：通过 `debrute` 命令进行 TTS、音乐生成和音效生成。
 
 这些 Skills 说明如何调用 Debrute。它们不是隐藏 API，也不会替代 agent 自己的工具能力。
 
 ## Roadmap
 
-- 语音和音频生成。
 - 3D 资产生成和查看。
 - 支持更多二进制资产类型的丰富预览。
 - 更多面向专业创意工具的插件。

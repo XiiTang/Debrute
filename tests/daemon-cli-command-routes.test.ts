@@ -5,6 +5,34 @@ import { createDebruteDaemonHttpServer } from '../apps/daemon/src/http/createDeb
 import { runDaemonCliCommand } from '../apps/daemon/src/http/cliCommandRoutes';
 
 describe('daemon CLI command routes', () => {
+  it('returns audio model counts in runtime status records', async () => {
+    const server = {
+      runtimeStatusForCli: vi.fn(async () => ({
+        ok: true,
+        imageModels: 11,
+        availableImageModels: 1,
+        videoModels: 2,
+        availableVideoModels: 1,
+        audioModels: 16,
+        availableAudioModels: 3,
+        diagnostics: 0
+      }))
+    } as unknown as DebruteAppServer;
+
+    await expect(runDaemonCliCommand({
+      command: 'runtime.status',
+      positional: [],
+      options: {}
+    }, { server })).resolves.toMatchObject({
+      status: 'ok',
+      command: 'runtime.status',
+      fields: {
+        audio_models: 16,
+        available_audio_models: 3
+      }
+    });
+  });
+
   it('preserves CLI invalid_input errors for malformed generation input', async () => {
     const server = {
       openProject: vi.fn(async () => undefined),
@@ -21,6 +49,69 @@ describe('daemon CLI command routes', () => {
       command: 'generate.image',
       code: 'invalid_input',
       message: '--input-json requires string field "model".'
+    });
+  });
+
+  it('routes TTS generation through the audio model CLI service', async () => {
+    const server = {
+      openProject: vi.fn(async () => undefined),
+      runAudioModelRequestForCli: vi.fn(async () => ({
+        status: 'ok',
+        artifacts: [{
+          artifactId: 'artifact-1',
+          title: 'voice.mp3',
+          projectRelativePath: 'generated/voice.mp3',
+          mimeType: 'audio/mpeg'
+        }],
+        outputs: {}
+      }))
+    } as unknown as DebruteAppServer;
+
+    const result = await runDaemonCliCommand({
+      command: 'generate.tts',
+      positional: ['/tmp/project'],
+      projectRoot: '/tmp/project',
+      options: {
+        'input-json': JSON.stringify({ model: 'openai-gpt-4o-mini-tts', arguments: { text: 'line' } })
+      }
+    }, { server });
+
+    expect(server.runAudioModelRequestForCli).toHaveBeenCalledWith('tts', {
+      model: 'openai-gpt-4o-mini-tts',
+      arguments: { text: 'line' }
+    });
+    expect(result).toMatchObject({
+      status: 'ok',
+      command: 'generate.tts',
+      fields: { artifacts: 1 },
+      records: [expect.objectContaining({
+        fields: expect.objectContaining({
+          path: 'generated/voice.mp3',
+          mime: 'audio/mpeg'
+        })
+      })]
+    });
+  });
+
+  it('normalizes missing audio official docs as runtime config errors', async () => {
+    const error = Object.assign(new Error('Official docs are missing.'), {
+      code: 'audio_model_official_doc_missing'
+    });
+    const server = {
+      describeAudioModelForCli: vi.fn(async () => {
+        throw error;
+      })
+    } as unknown as DebruteAppServer;
+
+    await expect(runDaemonCliCommand({
+      command: 'models.tts.describe',
+      positional: ['openai-gpt-4o-mini-tts'],
+      options: {}
+    }, { server })).resolves.toMatchObject({
+      status: 'error',
+      command: 'models.tts.describe',
+      code: 'runtime_config_error',
+      message: 'Official docs are missing.'
     });
   });
 

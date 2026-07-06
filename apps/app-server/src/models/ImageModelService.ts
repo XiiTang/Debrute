@@ -1,7 +1,8 @@
-import { createImageModelCatalog, createImageModelSettingsView } from '@debrute/capability-runtime';
-import type { ImageModelSettingsView, SaveImageModelSettingInput } from '@debrute/app-protocol';
+import { createImageModelCatalog, createImageModelSettingsView, type SecretsConfig } from '@debrute/capability-runtime';
+import type { ImageModelSettingsView, SaveImageModelSettingInput, SaveModelApiKeyEntryInput } from '@debrute/app-protocol';
 import type { GlobalConfigStore } from '../config/GlobalConfigStore.js';
 import { serviceError } from '../server/ServiceErrors.js';
+import { normalizeModelApiKeySaveEntries, resolveModelApiKeyEntries } from './ModelApiKeySaveInput.js';
 
 export class ImageModelService {
   private readonly catalog = createImageModelCatalog();
@@ -31,20 +32,26 @@ export class ImageModelService {
       });
     }
     imageModels.sort((left, right) => left.debruteModelId.localeCompare(right.debruteModelId));
-    await this.input.configStore.saveImageModels({ imageModels });
-    if (saveInput.apiKey !== undefined) {
+    const nextImageModels = { imageModels };
+    let nextSecrets: SecretsConfig | undefined;
+    if (saveInput.apiKeys !== undefined) {
       const secrets = await this.input.configStore.readSecrets();
       const imageModelApiKeys = { ...secrets.imageModelApiKeys };
-      const apiKey = saveInput.apiKey.trim();
-      if (apiKey) {
-        imageModelApiKeys[modelId] = apiKey;
-      } else {
-        delete imageModelApiKeys[modelId];
-      }
-      await this.input.configStore.saveSecrets({
+      imageModelApiKeys[modelId] = resolveModelApiKeyEntries(
+        saveInput.apiKeys,
+        secrets.imageModelApiKeys[modelId] ?? [],
+        'Image model',
+        imageModelInputError
+      );
+      nextSecrets = {
         imageModelApiKeys,
-        videoModelApiKeys: { ...secrets.videoModelApiKeys }
-      });
+        videoModelApiKeys: { ...secrets.videoModelApiKeys },
+        audioModelApiKeys: { ...secrets.audioModelApiKeys }
+      };
+    }
+    await this.input.configStore.saveImageModels(nextImageModels);
+    if (nextSecrets !== undefined) {
+      await this.input.configStore.saveSecrets(nextSecrets);
     }
     return this.getSettings();
   }
@@ -53,20 +60,19 @@ export class ImageModelService {
 function normalizeImageModelSaveInput(input: SaveImageModelSettingInput): {
   baseUrlOverride: string | null;
   requestModelIdOverride: string | null;
-  apiKey?: string;
+  apiKeys?: SaveModelApiKeyEntryInput[];
 } {
   if (!isRecord(input)) {
     throw imageModelInputError('Image model setting must be an object.', 'mediaModelSetting');
   }
   const baseUrlOverride = normalizeImageModelBaseUrlOverride(input.baseUrlOverride);
   const requestModelIdOverride = normalizeImageModelRequestModelIdOverride(input.requestModelIdOverride);
-  if (input.apiKey !== undefined && typeof input.apiKey !== 'string') {
-    throw imageModelInputError('Image model apiKey must be a string when provided.', 'apiKey');
-  }
   return {
     baseUrlOverride,
     requestModelIdOverride,
-    ...(input.apiKey !== undefined ? { apiKey: input.apiKey } : {})
+    ...(input.apiKeys !== undefined
+      ? { apiKeys: normalizeModelApiKeySaveEntries(input.apiKeys, 'Image model', imageModelInputError) }
+      : {})
   };
 }
 

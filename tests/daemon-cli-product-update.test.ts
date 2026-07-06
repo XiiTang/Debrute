@@ -159,6 +159,8 @@ describe('daemon CLI product commands', () => {
           availableImageModels: 0,
           videoModels: 0,
           availableVideoModels: 0,
+          audioModels: 0,
+          availableAudioModels: 0,
           diagnostics: 0
         })),
         runtimeDoctorForCli: vi.fn(async () => ({ diagnostics: [] }))

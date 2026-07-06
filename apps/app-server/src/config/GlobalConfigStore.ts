@@ -3,8 +3,11 @@ import { chmod, mkdir, readFile, rename, writeFile } from 'node:fs/promises';
 import { dirname, join } from 'node:path';
 import { debruteHomeDir } from '@debrute/project-core';
 import type {
+  AudioModelConfig,
+  AudioModelsConfig,
   ImageModelConfig,
   ImageModelsConfig,
+  ModelApiKeyEntry,
   SecretsConfig,
   VideoModelConfig,
   VideoModelsConfig
@@ -15,6 +18,7 @@ export interface GlobalConfigPaths {
   root: string;
   imageModelsFile: string;
   videoModelsFile: string;
+  audioModelsFile: string;
   secretsFile: string;
   adobeBridgeFile: string;
   workbenchChromeFile: string;
@@ -44,6 +48,7 @@ export class GlobalConfigStore {
       root,
       imageModelsFile: join(root, 'image_models.json'),
       videoModelsFile: join(root, 'video_models.json'),
+      audioModelsFile: join(root, 'audio_models.json'),
       secretsFile: join(root, 'secrets.json'),
       adobeBridgeFile: join(root, 'adobe_bridge.json'),
       workbenchChromeFile: join(root, 'workbench_chrome.json'),
@@ -65,6 +70,14 @@ export class GlobalConfigStore {
 
   async saveVideoModels(config: VideoModelsConfig): Promise<void> {
     await writeJsonAtomic(this.paths().videoModelsFile, normalizeVideoModelsConfig(config));
+  }
+
+  async readAudioModels(): Promise<AudioModelsConfig> {
+    return normalizeAudioModelsConfig(await readJsonOrDefault(this.paths().audioModelsFile, { audioModels: [] }));
+  }
+
+  async saveAudioModels(config: AudioModelsConfig): Promise<void> {
+    await writeJsonAtomic(this.paths().audioModelsFile, normalizeAudioModelsConfig(config));
   }
 
   async readAdobeBridge(): Promise<AdobeBridgeConfig> {
@@ -99,13 +112,19 @@ export class GlobalConfigStore {
   }
 
   async readSecrets(): Promise<SecretsConfig> {
-    return readJsonOrDefault(this.paths().secretsFile, { imageModelApiKeys: {}, videoModelApiKeys: {} });
+    return normalizeSecretsConfig(await readJsonOrDefault(this.paths().secretsFile, {
+      imageModelApiKeys: {},
+      videoModelApiKeys: {},
+      audioModelApiKeys: {}
+    }));
   }
 
   async saveSecrets(config: SecretsConfig): Promise<void> {
+    const normalized = normalizeSecretsConfig(config);
     await writeSecretJsonAtomic(this.paths().secretsFile, {
-      imageModelApiKeys: { ...config.imageModelApiKeys },
-      videoModelApiKeys: { ...config.videoModelApiKeys }
+      imageModelApiKeys: { ...normalized.imageModelApiKeys },
+      videoModelApiKeys: { ...normalized.videoModelApiKeys },
+      audioModelApiKeys: { ...normalized.audioModelApiKeys }
     });
   }
 
@@ -161,6 +180,26 @@ function normalizeVideoModelsConfig(config: unknown): VideoModelsConfig {
   };
 }
 
+function normalizeAudioModelsConfig(config: unknown): AudioModelsConfig {
+  if (!isRecord(config) || !Array.isArray(config.audioModels)) {
+    throw new Error('Audio models config must contain audioModels.');
+  }
+  return {
+    audioModels: config.audioModels.map(normalizeAudioModelConfig)
+  };
+}
+
+function normalizeSecretsConfig(config: unknown): SecretsConfig {
+  if (!isRecord(config)) {
+    throw new Error('Secrets config must be an object.');
+  }
+  return {
+    imageModelApiKeys: normalizeSecretRecord(config.imageModelApiKeys, 'imageModelApiKeys'),
+    videoModelApiKeys: normalizeSecretRecord(config.videoModelApiKeys, 'videoModelApiKeys'),
+    audioModelApiKeys: normalizeSecretRecord(config.audioModelApiKeys, 'audioModelApiKeys')
+  };
+}
+
 function normalizeImageModelConfig(model: unknown): ImageModelConfig {
   if (!isRecord(model)) {
     throw new Error('Image model config must be an object.');
@@ -191,7 +230,82 @@ function normalizeVideoModelConfig(model: unknown): VideoModelConfig {
   };
 }
 
-function normalizeMediaBaseUrlOverride(value: unknown, label: 'Image model' | 'Video model'): string | null {
+function normalizeAudioModelConfig(model: unknown): AudioModelConfig {
+  if (!isRecord(model)) {
+    throw new Error('Audio model config must be an object.');
+  }
+  const debruteModelId = requireStringProperty(model, 'debruteModelId', 'Audio model debruteModelId').trim();
+  if (!debruteModelId) {
+    throw new Error('Audio model debruteModelId must be a non-empty string.');
+  }
+  return {
+    debruteModelId,
+    baseUrlOverride: normalizeMediaBaseUrlOverride(model.baseUrlOverride, 'Audio model'),
+    requestModelIdOverride: normalizeMediaRequestModelIdOverride(model.requestModelIdOverride, 'Audio model')
+  };
+}
+
+function normalizeSecretRecord(value: unknown, field: string): Record<string, ModelApiKeyEntry[]> {
+  if (!isRecord(value)) {
+    throw new Error(`Secrets config ${field} must be an object.`);
+  }
+  const output: Record<string, ModelApiKeyEntry[]> = {};
+  for (const [modelId, entries] of Object.entries(value)) {
+    const trimmedModelId = modelId.trim();
+    if (!trimmedModelId) {
+      throw new Error(`Secrets config ${field} keys must be non-empty strings.`);
+    }
+    if (!Array.isArray(entries)) {
+      throw new Error(`Secrets config ${field} values must be arrays.`);
+    }
+    output[trimmedModelId] = normalizeModelApiKeyEntries(entries, field, trimmedModelId);
+  }
+  return output;
+}
+
+function normalizeModelApiKeyEntries(entries: unknown[], field: string, modelId: string): ModelApiKeyEntry[] {
+  const seenIds = new Set<string>();
+  const seenKeys = new Set<string>();
+  return entries.map((entry) => {
+    if (!isRecord(entry)) {
+      throw new Error(`Secrets config ${field} entries must be objects.`);
+    }
+    const id = requireStringProperty(entry, 'id', `Secrets config ${field} entry id`).trim();
+    const key = requireStringProperty(entry, 'key', `Secrets config ${field} entry key`).trim();
+    if (!id) {
+      throw new Error(`Secrets config ${field} entry id must be a non-empty string.`);
+    }
+    if (seenIds.has(id)) {
+      throw new Error(`Secrets config ${field} contains duplicate API key ids for ${modelId}.`);
+    }
+    seenIds.add(id);
+    if (!key) {
+      throw new Error(`Secrets config ${field} entry key must be a non-empty string.`);
+    }
+    if (seenKeys.has(key)) {
+      throw new Error(`Secrets config ${field} contains duplicate API keys for ${modelId}.`);
+    }
+    seenKeys.add(key);
+    const label = normalizeNullableLabel(entry.label, `Secrets config ${field} entry label`);
+    if (typeof entry.enabled !== 'boolean') {
+      throw new Error(`Secrets config ${field} entry enabled must be a boolean.`);
+    }
+    return { id, key, label, enabled: entry.enabled };
+  });
+}
+
+function normalizeNullableLabel(value: unknown, label: string): string | null {
+  if (value === null) {
+    return null;
+  }
+  if (typeof value !== 'string') {
+    throw new Error(`${label} must be a string or null.`);
+  }
+  const trimmed = value.trim();
+  return trimmed || null;
+}
+
+function normalizeMediaBaseUrlOverride(value: unknown, label: 'Image model' | 'Video model' | 'Audio model'): string | null {
   if (value === null) {
     return null;
   }
@@ -205,7 +319,7 @@ function normalizeMediaBaseUrlOverride(value: unknown, label: 'Image model' | 'V
   return trimmed;
 }
 
-function normalizeMediaRequestModelIdOverride(value: unknown, label: 'Image model' | 'Video model'): string | null {
+function normalizeMediaRequestModelIdOverride(value: unknown, label: 'Image model' | 'Video model' | 'Audio model'): string | null {
   if (value === null) {
     return null;
   }

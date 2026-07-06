@@ -1,19 +1,28 @@
-# Agent Instructions
+# Repository Guidelines
 
-This repository is public.
+## Project Structure & Module Organization
 
-Generated file assets (images, videos, audio, and similar outputs) are implemented per model, with no provider concept.
+Debrute is a pnpm TypeScript monorepo. Main apps: `apps/web` Vite/React workbench, `apps/daemon` loopback HTTP/SSE runtime, `apps/desktop` Electron shell, `apps/app-server` services, `apps/debrute-cli` agent CLI, `apps/runtime-host` packaged runtime support, and `apps/photoshop-*` plugins. Shared libraries live in `packages/*`; tests are under `tests/`; colocated tests use `*.test.ts` or `*.test.tsx`. Public docs live in `docs/`, standard agent skills in `skills/`, and static assets in `assets/`.
 
-Do not create private design docs, implementation plans, notes, or generated Superpowers documents under `docs/`.
+## Build, Test, and Development Commands
 
-When using Superpowers in this project, save generated documents under:
+- `pnpm install` installs the workspace.
+- `pnpm doctor` checks local tooling.
+- `pnpm dev` starts or reuses the Workbench runtime and prints its URL.
+- `pnpm dev:web`, `pnpm dev:daemon`, and `pnpm dev:electron` run individual surfaces.
+- `pnpm check` runs TypeScript project references.
+- `pnpm test` runs the Vitest suite; use `pnpm exec vitest run <file>` for focused tests.
+- `pnpm lint:arch` validates package boundary rules.
+- `pnpm build` builds TypeScript, assets, and desktop output.
+- `pnpm verify` runs doctor, type checking, tests, architecture lint, and build.
 
-- `debrute-docs-private/superpowers/specs/YYYY-MM-DD-<topic>-design.md`
-- `debrute-docs-private/superpowers/plans/YYYY-MM-DD-<feature-name>.md`
+## Coding Style & Naming Conventions
 
-`debrute-docs-private/` is a separate private Git repository.
+Use strict TypeScript ESM with `.js` extensions in relative imports that compile to JavaScript. Follow existing formatting: two-space indentation, single quotes, semicolons, `camelCase` functions/variables, `PascalCase` classes/types/components, and `UPPER_SNAKE_CASE` only for true constants. Prefer `@debrute/*` workspace aliases over deep cross-package imports. Keep package boundaries aligned with `packages/architecture-rules`.
 
-For Debrute Canvas performance, interaction, image-loading, virtualization, render scheduler, stage DOM write, or trace/debug work, use the existing focused Canvas tests before broad verification. Run:
+## Testing Guidelines
+
+Vitest discovers `tests/**/*.test.ts`, `packages/**/*.test.ts`, `apps/**/*.test.ts`, and `apps/**/*.test.tsx`. Add tests near changed behavior or in top-level `tests/` for cross-package contracts. For Canvas performance, interaction, image loading, virtualization, render scheduler, stage DOM write, or trace/debug work, start with:
 
 ```bash
 pnpm exec vitest run \
@@ -29,8 +38,12 @@ pnpm exec vitest run \
 pnpm check
 ```
 
-Prefer `pnpm exec vitest run <files>` over `pnpm test -- <files>` for focused verification.
+Do not run real browser tests or diagnostics unless explicitly requested. For requested live Canvas diagnostics, use `window.__debruteCanvasPerf.startCapture()` before the interaction and `window.__debruteCanvasPerf.stopCapture()` after it, then inspect `trace.events`, `trace.sessions`, `counterTotals`, and `canvas`.
 
-Do not run real browser tests or real browser diagnostics unless the user explicitly asks for them.
+## Commit & Pull Request Guidelines
 
-For real browser Canvas diagnostics in a dev/test workbench, use `window.__debruteCanvasPerf.startCapture()` before the interaction and `window.__debruteCanvasPerf.stopCapture()` after it, then inspect `trace.events`, `trace.sessions`, `counterTotals`, and `canvas`.
+Recent history mostly uses `feat:`, `fix:`, and `docs:` prefixes with specific summaries. Keep commits scoped to one logical change. PRs should explain the user-visible change, list verification commands, link issues, and include screenshots for UI, Canvas, Electron, or Photoshop plugin changes.
+
+## Agent-Specific Instructions
+
+This repository is public. Do not place private design docs, implementation plans, notes, or generated Superpowers documents under `docs/`; use `debrute-docs-private/superpowers/specs/YYYY-MM-DD-<topic>-design.md` or `debrute-docs-private/superpowers/plans/YYYY-MM-DD-<feature-name>.md`. `debrute-docs-private/` is a separate private Git repository. Generated file assets are implemented per model, with no provider concept.

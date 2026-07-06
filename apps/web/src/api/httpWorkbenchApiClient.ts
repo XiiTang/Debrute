@@ -1,6 +1,7 @@
 import type {
   AddProjectPathToCanvasMapInput,
   AdobeBridgeStateView,
+  AudioModelSettingsView,
   BrowserSessionCredential,
   CanvasTextPreviewSourceAvailabilityResponse,
   CanvasVideoPreviewSourceResponse,
@@ -20,6 +21,7 @@ import type {
   SaveCanvasTextPreviewSourceResult,
   SaveCanvasTextPreviewSourceInput,
   SaveAdobeBridgeSettingsInput,
+  SaveAudioModelSettingInput,
   SaveImageModelSettingInput,
   SaveWorkbenchPreferencesInput,
   SaveVideoModelSettingInput,
@@ -476,6 +478,10 @@ export function createHttpWorkbenchApiClient(options: HttpWorkbenchApiClientOpti
     videoModelGetSettings: () => request<VideoModelSettingsView>('GET', '/api/models/video'),
     videoModelSaveSetting: (modelId: string, input: SaveVideoModelSettingInput) => (
       request<VideoModelSettingsView>('PUT', `/api/models/video/${encodeURIComponent(modelId)}`, input)
+    ),
+    audioModelGetSettings: () => request<AudioModelSettingsView>('GET', '/api/models/audio'),
+    audioModelSaveSetting: (modelId: string, input: SaveAudioModelSettingInput) => (
+      request<AudioModelSettingsView>('PUT', `/api/models/audio/${encodeURIComponent(modelId)}`, input)
     ),
     integrationsListStatus: () => request<IntegrationSettingsView>('GET', '/api/integrations'),
     integrationsRescan: () => request<IntegrationSettingsView>('POST', '/api/integrations/rescan', {}),

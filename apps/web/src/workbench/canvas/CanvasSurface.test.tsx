@@ -1779,6 +1779,7 @@ function workbenchStateFixture(
     explorerSelection: { selectedPaths: [], focusedPath: null, anchorPath: null },
     imageModelSettings: undefined,
     videoModelSettings: undefined,
+    audioModelSettings: undefined,
     integrationsSettings: undefined,
     adobeBridge: undefined,
     workbenchPreferences: { locale: 'en', themePreference: 'system' },
@@ -1796,6 +1797,7 @@ const actions: WorkbenchActions = {
   applyProductUpdate: async () => ({ state: productState() }),
   saveImageModelSetting: async () => undefined,
   saveVideoModelSetting: async () => undefined,
+  saveAudioModelSetting: async () => undefined,
   saveWorkbenchPreferences: async () => undefined,
   rescanIntegrations: async () => emptyIntegrationsSettings,
   runIntegrationOperation: async (input) => ({

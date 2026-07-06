@@ -26,6 +26,15 @@ pnpm exec tsx apps/debrute-cli/src/index.ts generate image-batch path/to/project
 pnpm exec tsx apps/debrute-cli/src/index.ts models video list
 pnpm exec tsx apps/debrute-cli/src/index.ts models video describe doubao-seedance-2-0-260128
 pnpm exec tsx apps/debrute-cli/src/index.ts generate video path/to/project --input-json '{"model":"doubao-seedance-2-0-260128","arguments":{"prompt":"Short video brief","intent":"generate"}}' --timeout-ms 600000
+pnpm exec tsx apps/debrute-cli/src/index.ts models tts list
+pnpm exec tsx apps/debrute-cli/src/index.ts models tts describe openai-gpt-4o-mini-tts
+pnpm exec tsx apps/debrute-cli/src/index.ts generate tts path/to/project --input-json '{"model":"openai-gpt-4o-mini-tts","arguments":{"text":"Welcome to Debrute.","voice":"alloy","output_path":"generated/welcome.mp3"}}' --timeout-ms 600000
+pnpm exec tsx apps/debrute-cli/src/index.ts models music list
+pnpm exec tsx apps/debrute-cli/src/index.ts models music describe elevenlabs-music
+pnpm exec tsx apps/debrute-cli/src/index.ts generate music path/to/project --input-json '{"model":"elevenlabs-music","arguments":{"prompt":"Warm ambient electronic music for a product demo.","output_path":"generated/demo-music.mp3"}}' --timeout-ms 600000
+pnpm exec tsx apps/debrute-cli/src/index.ts models sfx list
+pnpm exec tsx apps/debrute-cli/src/index.ts models sfx describe elevenlabs-sound-effects
+pnpm exec tsx apps/debrute-cli/src/index.ts generate sfx path/to/project --input-json '{"model":"elevenlabs-sound-effects","arguments":{"prompt":"Short glass chime.","output_path":"generated/chime.wav"}}' --timeout-ms 600000
 pnpm exec tsx apps/debrute-cli/src/index.ts commands
 ```
 
@@ -62,6 +71,20 @@ Project-local image and audio references can be normalized by Debrute when the s
 Do not include model API keys in generation requests; Debrute reads configured keys locally. Use the original model parameter names shown by `models image list` and confirmed by `models image describe`.
 
 Model request failures keep the stable CLI error code and include the Debrute model id, message, and structured logs when available.
+
+## Audio Generation
+
+Audio is exposed as three separate CLI surfaces:
+
+- TTS: `models tts list`, `models tts describe <model-id>`, and `generate tts`.
+- Music: `models music list`, `models music describe <model-id>`, and `generate music`.
+- Sound effects: `models sfx list`, `models sfx describe <model-id>`, and `generate sfx`.
+
+Use the matching list command to compare configured models for that use case. Before generation, run the matching describe command once for the selected model. Descriptions return official documentation URLs, a repository snapshot path, official-documentation-backed `description_markdown`, Debrute examples, and the machine-readable `arguments_schema`.
+
+Audio `--timeout-ms` defaults to 600000ms and covers task submission, polling when the official API is task-based, response reads, artifact download, and artifact write.
+
+Do not include model API keys in generation requests; Debrute reads configured keys locally. Use the original model parameter names shown by the matching `models ... list` command and confirmed by the matching `models ... describe` command.
 
 ## Minimal Canvas Map
 

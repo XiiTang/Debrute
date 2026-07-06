@@ -21,6 +21,7 @@ describe('release version contract', () => {
       'Photoshop UXP manifest',
       'Photoshop CEP package',
       'Photoshop CEP manifest',
+      'debrute-audio-director Skill',
       'debrute-core Skill',
       'debrute-image-director Skill',
       'debrute-video-director Skill'
