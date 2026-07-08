@@ -1866,6 +1866,7 @@ const actions: WorkbenchActions = {
   ensureTextFileBuffer: async () => undefined,
   updateTextFileBuffer: () => undefined,
   saveTextFileBuffer: async () => undefined,
+  discardTextFileBuffer: async () => undefined,
   reloadTextFileBuffer: async () => undefined,
   openTextEditorWindow: () => undefined,
   toggleTextFileWordWrap: () => undefined,

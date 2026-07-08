@@ -17,7 +17,8 @@ import {
 import type { CanvasTextEditorFocusRequest } from './CanvasTextEditorRuntime';
 import type { CanvasVideoPreviewSource } from './canvasVideoPreviews';
 import { preloadCanvasImageForHandoff } from './CanvasMediaHandoff';
-import { Button, IconButton, StatusPill } from '../ui';
+import { CanvasNodeTitleBar } from './CanvasNodeTitleBar';
+import { Button, DiscardChangesIcon, IconButton, StatusPill } from '../ui';
 import { useI18n, type WorkbenchI18n } from '../i18n';
 
 const FIXED_NODE_PRESENTATION_SCALE = 10;
@@ -173,6 +174,9 @@ export function CanvasNodeContent({
         localFeedbackMode={localFeedbackMode}
         pendingFeedbackRegion={pendingFeedbackRegion}
         activeFeedbackMomentTimeSeconds={activeFeedbackMomentTimeSeconds}
+        onTitlePointerDown={onTitlePointerDown}
+        onTitlePointerMove={onTitlePointerMove}
+        onTitlePointerUp={onTitlePointerUp}
         onLocalFeedbackDraft={(input) => onLocalFeedbackDraft?.(input)}
       />
     );
@@ -608,31 +612,42 @@ function CanvasTextNodeContent({
 
   return (
     <section className="canvas-text-node">
-      <div
-        className="db-canvas-node-titlebar"
+      <CanvasNodeTitleBar
+        icon={<FileText size={13} />}
+        title={nodeDisplayName(node.projectRelativePath, i18n)}
+        status={status ? <StatusPill tone={status.tone}>{status.label}</StatusPill> : null}
+        actions={(
+          <>
+            <IconButton
+              label={i18n.t('canvas.node.saveFile', { path: node.projectRelativePath })}
+              title={i18n.t('canvas.node.save')}
+              disabled={!buffer || !buffer.dirty || buffer.saving}
+              icon={<Save size={13} />}
+              onPointerDown={(event) => event.stopPropagation()}
+              onClick={() => void actions.saveTextFileBuffer(node.projectRelativePath)}
+            />
+            <IconButton
+              label={i18n.t('canvas.node.discardFileChanges', { path: node.projectRelativePath })}
+              title={i18n.t('canvas.node.discardChanges')}
+              variant="danger"
+              disabled={!buffer || !buffer.dirty || buffer.saving}
+              icon={<DiscardChangesIcon size={13} />}
+              onPointerDown={(event) => event.stopPropagation()}
+              onClick={() => void actions.discardTextFileBuffer(node.projectRelativePath)}
+            />
+            <IconButton
+              label={i18n.t('canvas.node.openLargeEditorForFile', { path: node.projectRelativePath })}
+              title={i18n.t('canvas.node.openLargeEditor')}
+              icon={<Maximize2 size={13} />}
+              onPointerDown={(event) => event.stopPropagation()}
+              onClick={() => actions.openTextEditorWindow(node.projectRelativePath)}
+            />
+          </>
+        )}
         onPointerDown={onTitlePointerDown}
         onPointerMove={onTitlePointerMove}
         onPointerUp={onTitlePointerUp}
-      >
-        <FileText size={13} />
-        <strong>{nodeDisplayName(node.projectRelativePath, i18n)}</strong>
-        {status ? <StatusPill tone={status.tone}>{status.label}</StatusPill> : null}
-        <IconButton
-          label={i18n.t('canvas.node.saveFile', { path: node.projectRelativePath })}
-          title={i18n.t('canvas.node.save')}
-          disabled={!buffer || !buffer.dirty || buffer.saving}
-          icon={<Save size={13} />}
-          onPointerDown={(event) => event.stopPropagation()}
-          onClick={() => void actions.saveTextFileBuffer(node.projectRelativePath)}
-        />
-        <IconButton
-          label={i18n.t('canvas.node.openLargeEditorForFile', { path: node.projectRelativePath })}
-          title={i18n.t('canvas.node.openLargeEditor')}
-          icon={<Maximize2 size={13} />}
-          onPointerDown={(event) => event.stopPropagation()}
-          onClick={() => actions.openTextEditorWindow(node.projectRelativePath)}
-        />
-      </div>
+      />
       <div
         ref={bodyRef}
         className={bodyProblem || buffer?.error ? 'canvas-text-body problem' : 'canvas-text-body'}
@@ -750,7 +765,7 @@ function textBufferStatus(
   buffer: TextFileBuffer | undefined,
   problem: { title: string; message: string } | undefined,
   i18n: WorkbenchI18n
-): { label: string; tone: 'warning' | 'danger' | 'info' | 'loading' } | undefined {
+): { label: string; tone: 'danger' | 'info' | 'loading' } | undefined {
   if (problem || buffer?.error) {
     return { label: i18n.t('canvas.node.error'), tone: 'danger' };
   }
@@ -762,9 +777,6 @@ function textBufferStatus(
   }
   if (buffer.saving) {
     return { label: i18n.t('canvas.node.saving'), tone: 'loading' };
-  }
-  if (buffer.dirty) {
-    return { label: i18n.t('canvas.node.unsaved'), tone: 'warning' };
   }
   return undefined;
 }

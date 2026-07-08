@@ -4,6 +4,7 @@ import {
   constrainOpenTextEditorWindowsToViewport,
   dragTextEditorWindowState,
   openTextEditorWindowState,
+  resizeTextEditorWindowState,
   textBufferStatus
 } from './textEditorWindows';
 
@@ -12,8 +13,7 @@ const statusLabels = {
   loading: 'Loading',
   error: 'Error',
   externalChange: 'External change',
-  saving: 'Saving',
-  unsaved: 'Unsaved'
+  saving: 'Saving'
 };
 
 describe('text editor window state', () => {
@@ -101,6 +101,53 @@ describe('text editor window state', () => {
       height: 720
     });
     expect(next['notes/closed.md']).toEqual(windows['notes/closed.md']);
+  });
+
+  it('resizes expanded text editor windows and clamps undersized west-edge drags', () => {
+    const windows = {
+      'notes/brief.md': {
+        projectRelativePath: 'notes/brief.md',
+        open: true,
+        x: 100,
+        y: 120,
+        width: 600,
+        height: 420
+      }
+    };
+
+    expect(resizeTextEditorWindowState(windows, 'missing.md', {
+      direction: 'se',
+      x: 100,
+      y: 120,
+      width: 720,
+      height: 500
+    }, viewport)).toBe(windows);
+
+    expect(resizeTextEditorWindowState(windows, 'notes/brief.md', {
+      direction: 'se',
+      x: 100,
+      y: 120,
+      width: 720,
+      height: 500
+    }, viewport)['notes/brief.md']).toMatchObject({
+      x: 100,
+      y: 120,
+      width: 720,
+      height: 500
+    });
+
+    expect(resizeTextEditorWindowState(windows, 'notes/brief.md', {
+      direction: 'w',
+      x: 660,
+      y: 120,
+      width: 40,
+      height: 420
+    }, viewport)['notes/brief.md']).toMatchObject({
+      x: 280,
+      y: 120,
+      width: 420,
+      height: 420
+    });
   });
 
   it('does not surface the default saved text buffer state', () => {

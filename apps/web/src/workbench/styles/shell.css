@@ -39,7 +39,7 @@
 .floating-dock {
   position: absolute;
   left: 18px;
-  top: calc(32px + 13px);
+  top: calc(28px + 13px);
   display: flex;
   flex-direction: column;
   gap: var(--db-space-1);
@@ -85,7 +85,7 @@
   top: 2px;
   left: 8px;
   z-index: 1;
-  max-width: calc(var(--db-floating-panel-title-slot-width) - 14px);
+  max-width: calc(var(--db-floating-panel-title-slot-width) - 12px);
   overflow: hidden;
   color: var(--db-text-subtle);
   font-size: var(--db-font-xs);

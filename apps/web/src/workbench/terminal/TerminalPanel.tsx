@@ -154,30 +154,33 @@ export function TerminalPanel({
 
   useEffect(() => {
     let disposed = false;
-    void api.listTerminalSessions().then(async (result) => {
-      if (disposed) {
-        return;
-      }
-      if (result.sessions.length === 0) {
-        if (requestedCwdProjectRelativePath !== null) {
-          setState((current) => ({ ...current, isLoading: false }));
+    void (async () => {
+      try {
+        const result = await api.listTerminalSessions();
+        if (disposed) {
           return;
         }
-        await createSession('');
-        return;
+        if (result.sessions.length === 0) {
+          if (requestedCwdProjectRelativePath !== null) {
+            setState((current) => ({ ...current, isLoading: false }));
+            return;
+          }
+          await createSession('');
+          return;
+        }
+        setState({
+          sessions: result.sessions,
+          activeSessionId: result.sessions[0]!.id,
+          isLoading: false,
+          error: null,
+          closingSessionIds: []
+        });
+      } catch (error) {
+        if (!disposed) {
+          setState((current) => ({ ...current, isLoading: false, error: error instanceof Error ? error.message : String(error) }));
+        }
       }
-      setState({
-        sessions: result.sessions,
-        activeSessionId: result.sessions[0]!.id,
-        isLoading: false,
-        error: null,
-        closingSessionIds: []
-      });
-    }).catch((error: Error) => {
-      if (!disposed) {
-        setState((current) => ({ ...current, isLoading: false, error: error.message }));
-      }
-    });
+    })();
     return () => {
       disposed = true;
     };

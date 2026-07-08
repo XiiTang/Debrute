@@ -2,8 +2,7 @@ import React, { useEffect, useLayoutEffect, useRef, useState } from 'react';
 import {
   Clock3,
   MapPin,
-  Square,
-  X
+  Square
 } from 'lucide-react';
 import {
   CANVAS_FEEDBACK_MARKS,
@@ -16,7 +15,7 @@ import type { CanvasOverlayRuntime } from './CanvasOverlayRuntime';
 import type { CanvasFeedbackLocalToolset } from '../shell/floatingBars';
 import type { CanvasMediaFeedbackMode } from './CanvasMediaFeedbackLayer';
 import { CANVAS_FEEDBACK_MARK_PRESENTATION } from './canvasFeedbackPresentation';
-import { CommentPillInput, IconButton } from '../ui';
+import { CloseButton, CommentPillInput, IconButton } from '../ui';
 import { useI18n } from '../i18n';
 
 const MOMENT_PILL_COLORS = [
@@ -362,11 +361,10 @@ function FeedbackItemPill({
     >
       <span className="canvas-feedback-comment-pill-text">{item.comment}</span>
       {spatial ? <span className="canvas-feedback-comment-pill-badge" aria-hidden="true">{item.label}</span> : null}
-      <IconButton
+      <CloseButton
         className="canvas-feedback-comment-pill-close"
         label={i18n.t('canvas.feedback.deleteItem')}
         title={i18n.t('canvas.feedback.deleteItem')}
-        icon={<X size={11} strokeWidth={2.4} />}
         onClick={(event) => {
           event.preventDefault();
           event.stopPropagation();

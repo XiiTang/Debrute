@@ -13,9 +13,10 @@ import {
   workbenchWindowZIndex,
   type WorkbenchWindowOrderState
 } from './workbenchWindowOrder';
-import { floatingPanelDragHandleProps } from './FloatingPanel';
+import { FloatingPanelResizeHandles, floatingPanelDragHandleProps } from './FloatingPanel';
+import type { FloatingPanelResizeInput } from './floatingPanels';
 import { basenameFromProjectPath, textBufferStatus } from '../services/textEditorWindows';
-import { IconButton, Panel, PanelBody, PanelHeader, PanelTitle, StatusPill } from '../ui';
+import { DiscardChangesIcon, IconButton, Panel, PanelBody, PanelHeader, PanelTitle, StatusPill } from '../ui';
 import {
   FLOATING_TEXT_EDITOR_TITLEBAR_CSS_PROPERTY,
   FLOATING_TEXT_EDITOR_TITLEBAR_CSS_VALUE
@@ -29,7 +30,8 @@ export function FloatingTextEditorWindow({
   actions,
   onBringToFront,
   onClose,
-  onDrag
+  onDrag,
+  onResize
 }: {
   windowState: FloatingTextEditorWindowState;
   orderState: WorkbenchWindowOrderState;
@@ -38,6 +40,7 @@ export function FloatingTextEditorWindow({
   onBringToFront: () => void;
   onClose: () => void;
   onDrag: (dx: number, dy: number) => void;
+  onResize: (input: FloatingPanelResizeInput) => void;
 }): React.ReactElement {
   const i18n = useI18n();
   const dragStart = React.useRef<{ x: number; y: number } | undefined>(undefined);
@@ -50,8 +53,7 @@ export function FloatingTextEditorWindow({
     loading: i18n.t('canvas.node.loading'),
     error: i18n.t('canvas.node.error'),
     externalChange: i18n.t('canvas.node.externalChange'),
-    saving: i18n.t('canvas.node.saving'),
-    unsaved: i18n.t('canvas.node.unsaved')
+    saving: i18n.t('canvas.node.saving')
   });
 
   useEffect(() => {
@@ -85,7 +87,16 @@ export function FloatingTextEditorWindow({
           onPointerDown={(event) => event.stopPropagation()}
           onClick={() => void actions.saveTextFileBuffer(windowState.projectRelativePath)}
         />
-        {buffer?.externalChange ? (
+        <IconButton
+          label={i18n.t('canvas.node.discardFileChanges', { path: windowState.projectRelativePath })}
+          title={i18n.t('canvas.node.discardChanges')}
+          variant="danger"
+          disabled={!buffer || !buffer.dirty || buffer.saving}
+          icon={<DiscardChangesIcon size={14} />}
+          onPointerDown={(event) => event.stopPropagation()}
+          onClick={() => void actions.discardTextFileBuffer(windowState.projectRelativePath)}
+        />
+        {buffer?.externalChange && !buffer.dirty ? (
           <IconButton
             label={i18n.t('canvas.node.reloadFile', { path: windowState.projectRelativePath })}
             icon={<RefreshCw size={14} />}
@@ -123,6 +134,11 @@ export function FloatingTextEditorWindow({
           </div>
         )}
       </PanelBody>
+      <FloatingPanelResizeHandles
+        layout={windowState}
+        onBringToFront={onBringToFront}
+        onResize={onResize}
+      />
     </Panel>
   );
 }

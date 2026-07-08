@@ -2,6 +2,7 @@ export { Button } from './Button';
 export type { ButtonProps, ButtonSize, ButtonVariant } from './Button';
 export { IconButton } from './IconButton';
 export type { IconButtonProps } from './IconButton';
+export { DiscardChangesIcon } from './DiscardChangesIcon';
 export { WorkbenchIconProvider } from './WorkbenchIconProvider';
 export { CloseButton } from './CloseButton';
 export type { CloseButtonProps } from './CloseButton';

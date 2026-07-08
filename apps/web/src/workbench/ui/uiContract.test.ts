@@ -155,4 +155,11 @@ describe('Workbench UI system contract', () => {
     expect(patterns).toMatch(/\.db-canvas-node-generic--wrap \.db-canvas-node-generic__label\s*{[^}]*-webkit-line-clamp: 3;/);
   });
 
+  it('keeps Canvas text node title bars flush with their text bodies', () => {
+    const patterns = readFileSync('apps/web/src/workbench/ui/styles/workbench-patterns.css', 'utf8');
+
+    expect(patterns).toMatch(/\.db-canvas-node-titlebar\s*{/);
+    expect(patterns).not.toMatch(/\.db-canvas-node-titlebar\s*{[^}]*border-bottom:/);
+  });
+
 });

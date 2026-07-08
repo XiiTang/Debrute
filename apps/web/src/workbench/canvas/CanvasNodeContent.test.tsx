@@ -246,6 +246,55 @@ describe('CanvasNodeContent text chrome', () => {
     expect(html).not.toContain(`data-editor-mode="${'pre'}${'view'}"`);
   });
 
+  it('routes video title bar pointer events through the shared Canvas node title handlers', async () => {
+    const restoreActEnvironment = installReactActEnvironment();
+    const container = document.createElement('div');
+    document.body.appendChild(container);
+    const root = createRoot(container);
+    const onTitlePointerDown = vi.fn();
+
+    try {
+      await act(async () => {
+        root.render(
+          <I18nProvider locale="en">
+            <CanvasNodeContent
+              node={videoNode('media/clip.mp4', 'rev-a')}
+              selected={false}
+              culled={false}
+              actions={actionsFixture()}
+              textBuffer={undefined}
+              videoPreview={{
+                src: 'http://127.0.0.1:17321/api/projects/p/canvas-video-preview/media%2Fclip.mp4.jpg',
+                previewWidth: 320
+              }}
+              onVideoPlayerMounted={() => undefined}
+              onVideoPlayingChange={() => undefined}
+              onRegisterVideoTarget={() => undefined}
+              onUpdateVideoPlaybackTime={() => undefined}
+              onUpdateTextViewport={() => undefined}
+              onSelectNode={() => undefined}
+              onTitlePointerDown={onTitlePointerDown}
+              onTitlePointerMove={() => undefined}
+              onTitlePointerUp={() => undefined}
+            />
+          </I18nProvider>
+        );
+      });
+
+      const titleBar = container.querySelector<HTMLElement>('.db-canvas-node-titlebar');
+      expect(titleBar).not.toBeNull();
+      titleBar?.dispatchEvent(new PointerEvent('pointerdown', { bubbles: true, pointerId: 1 }));
+
+      expect(onTitlePointerDown).toHaveBeenCalledTimes(1);
+    } finally {
+      await act(async () => {
+        root.unmount();
+      });
+      container.remove();
+      restoreActEnvironment();
+    }
+  });
+
   it('renders inactive available text nodes as preview images', () => {
     const html = renderStaticWithI18n(
       <CanvasNodeContent
@@ -1038,6 +1087,33 @@ function textNode(path: string, revision: string): ProjectedCanvasNode {
   };
 }
 
+function videoNode(path: string, revision: string): ProjectedCanvasNode {
+  return {
+    projectRelativePath: path,
+    nodeKind: 'file',
+    mediaKind: 'video',
+    x: 0,
+    y: 0,
+    width: 320,
+    height: 180,
+    z: 0,
+    availability: {
+      state: 'available',
+      size: 10_000,
+      mimeType: 'video/mp4',
+      fileUrl: `http://127.0.0.1:17321/api/projects/p/files/raw/${path}?v=${revision}`,
+      revision
+    },
+    videoPresentation: {
+      kind: 'video',
+      width: 640,
+      height: 360,
+      durationSeconds: 12,
+      textTracks: []
+    }
+  };
+}
+
 function textBuffer(path: string, revision: string): TextFileBuffer {
   return {
     projectRelativePath: path,
@@ -1199,6 +1275,7 @@ function actionsFixture(): WorkbenchActions {
   return {
     ensureTextFileBuffer: async () => undefined,
     saveTextFileBuffer: async () => undefined,
+    discardTextFileBuffer: async () => undefined,
     openTextEditorWindow: () => undefined,
     updateTextFileBuffer: () => undefined,
     toggleTextFileWordWrap: () => undefined

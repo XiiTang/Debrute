@@ -35,6 +35,10 @@ describe('Canvas styles', () => {
     expect(canvasStyles).toMatch(/\.canvas-reset-layout-button\s*{[^}]*\bbottom: 14px;/);
   });
 
+  it('places the video node title bar above the video frame', () => {
+    expect(canvasStyles).toMatch(/\.canvas-video-node\s*{[^}]*\bgrid-template-rows: 32px minmax\(0, 1fr\);/);
+  });
+
   it('pins the Canvas card delete control to the card border corner', () => {
     expect(canvasStyles).toContain('--canvas-card-delete-overlap: 7px;');
     expect(canvasStyles).toContain('height: calc(100% + var(--canvas-card-delete-overlap) + 2px);\n  margin-top: calc(-1 * var(--canvas-card-delete-overlap));\n  margin-right: calc(-1 * var(--canvas-card-delete-overlap));\n  padding-top: var(--canvas-card-delete-overlap);\n  padding-right: var(--canvas-card-delete-overlap);\n  padding-bottom: 2px;\n  padding-left: 2px;');
@@ -62,6 +66,8 @@ describe('Canvas styles', () => {
   it('allows the inline text editor content to show browser selection and caret', () => {
     expect(canvasStyles).toMatch(/\.canvas-text-editor \.cm-content\s*{[^}]*\buser-select: text;/);
     expect(canvasStyles).toMatch(/\.canvas-text-editor \.cm-content\s*{[^}]*-webkit-user-select: text;/);
+    expect(canvasStyles).not.toContain('--canvas-text-editor-content-padding-block');
+    expect(canvasStyles).not.toMatch(/\.canvas-text-editor \.cm-content\s*{[^}]*\bpadding-block:/);
     expect(canvasStyles).toMatch(/\.canvas-text-editor\[data-pointer-focus="true"\] \.cm-cursorLayer\s*{[^}]*animation: steps\(1\) cm-blink 1\.2s infinite;/);
     expect(canvasStyles).toMatch(/\.canvas-text-editor\[data-pointer-focus="true"\] \.cm-cursor\s*{[^}]*display: block;/);
   });

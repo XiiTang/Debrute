@@ -1,6 +1,6 @@
 import type { FloatingBarRect } from './floatingBars';
 
-export const WORKBENCH_TITLE_BAR_HEIGHT = 32;
+export const WORKBENCH_TITLE_BAR_HEIGHT = 28;
 export const WORKBENCH_FLOATING_DOCK_EDGE_INSET = {
   horizontal: 18,
   vertical: WORKBENCH_TITLE_BAR_HEIGHT + 13

@@ -44,8 +44,8 @@ describe('FloatingPanel', () => {
     }
     expect(html).toContain('Close Explorer');
     expect(html).toContain('db-workbench-close-button');
-    expect(html).toContain('width="10"');
-    expect(html).toContain('height="10"');
+    expect(html).toContain('width="9"');
+    expect(html).toContain('height="9"');
     expect(html).not.toContain('db-panel__header');
     expect(html).not.toContain('db-panel__title');
     expect(html).toContain('>Explorer<');

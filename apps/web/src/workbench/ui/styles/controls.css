@@ -126,6 +126,32 @@
   color: var(--db-text);
 }
 
+.db-icon-button--danger {
+  border-color: transparent;
+  background: transparent;
+  color: color-mix(in oklch, var(--db-danger) 84%, white);
+}
+
+.db-icon-button--danger:hover:not(:disabled),
+.db-icon-button--danger:focus-visible {
+  border-color: color-mix(in oklch, var(--db-danger) 74%, var(--db-border));
+  background: color-mix(in oklch, var(--db-danger-bg) 76%, var(--db-surface-3));
+  color: color-mix(in oklch, var(--db-danger) 88%, white);
+}
+
+.db-discard-changes-icon {
+  position: relative;
+  display: grid;
+  place-items: center;
+}
+
+.db-discard-changes-icon svg:last-child {
+  position: absolute;
+  top: -4px;
+  right: -5px;
+  stroke-width: 3;
+}
+
 .db-toolbar {
   min-width: 0;
   display: flex;

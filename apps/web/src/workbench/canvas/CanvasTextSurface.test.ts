@@ -10,7 +10,6 @@ describe('CanvasTextSurface', () => {
       '--canvas-text-editor-font-family': CANVAS_TEXT_SURFACE_METRICS.fontFamily,
       '--canvas-text-editor-font-size': '12px',
       '--canvas-text-editor-line-height': '16.8px',
-      '--canvas-text-editor-content-padding-block': '6px',
       '--canvas-text-editor-line-padding-inline': '8px',
       '--canvas-text-editor-gutter-padding-left': '5px',
       '--canvas-text-editor-gutter-padding-right': '3px',

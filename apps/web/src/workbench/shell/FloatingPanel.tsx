@@ -68,7 +68,6 @@ export function WorkbenchFloatingPanelShell({
   const title = floatingPanelTitle(panelId, i18n);
   const layout = state.panels[panelId];
   const dragStart = React.useRef<{ x: number; y: number } | undefined>(undefined);
-  const resizeStart = React.useRef<FloatingPanelResizeStart | undefined>(undefined);
   const dragHandleProps = floatingPanelDragHandleProps({
     dragStart,
     onBringToFront,
@@ -101,6 +100,27 @@ export function WorkbenchFloatingPanelShell({
       <PanelBody className="floating-panel-body">
         {children}
       </PanelBody>
+      <FloatingPanelResizeHandles
+        layout={layout}
+        onBringToFront={onBringToFront}
+        onResize={onResize}
+      />
+    </Panel>
+  );
+}
+
+export function FloatingPanelResizeHandles({
+  layout,
+  onBringToFront,
+  onResize
+}: {
+  layout: FloatingPanelResizeRect;
+  onBringToFront: () => void;
+  onResize: (input: FloatingPanelResizeInput) => void;
+}): React.ReactElement {
+  const resizeStart = React.useRef<FloatingPanelResizeStart | undefined>(undefined);
+  return (
+    <>
       {FLOATING_PANEL_RESIZE_DIRECTIONS.map((direction) => (
         <div
           key={direction}
@@ -115,7 +135,7 @@ export function WorkbenchFloatingPanelShell({
           })}
         />
       ))}
-    </Panel>
+    </>
   );
 }
 

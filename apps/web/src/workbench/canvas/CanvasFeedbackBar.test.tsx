@@ -143,6 +143,8 @@ describe('CanvasFeedbackBar', () => {
     expect(html).toContain('data-canvas-feedback-region-label="1"');
     expect(html).toContain('data-canvas-feedback-moment="M1"');
     expect(html).toContain('--canvas-feedback-moment-color:#2563eb');
+    expect(html).toContain('db-workbench-close-button');
+    expect(html).toContain('canvas-feedback-comment-pill-close');
   });
 
   it('uses the moment pill surface color without a second leading color block', () => {
@@ -157,6 +159,16 @@ describe('CanvasFeedbackBar', () => {
     expect(canvasCssSource).toMatch(/\.canvas-feedback-comment-input\s*{[^}]*border-radius: var\(--db-radius-md\);/);
     expect(canvasCssSource).toContain('.canvas-feedback-comment-pill {');
     expect(canvasCssSource).toMatch(/\.canvas-feedback-comment-pill\s*{[^}]*border-radius: 999px;/);
+    expect(canvasCssSource).toMatch(/\.canvas-feedback-comment-pill\s*{[^}]*max-width: 280px;/);
+    expect(canvasCssSource).toMatch(/\.canvas-feedback-comment-pill\s*{[^}]*padding: 5px 12px;/);
+    expect(canvasCssSource).not.toMatch(/\.canvas-feedback-comment-pill\s*{[^}]*padding: 5px 30px 5px 12px;/);
+    expect(canvasCssSource).not.toMatch(/\.canvas-feedback-comment-pill\s*{[^}]*min-width:/);
+    expect(canvasCssSource).toMatch(/\.canvas-feedback-comment-pill-close\.db-workbench-close-button\s*{[^}]*top: -5px;/);
+    expect(canvasCssSource).toMatch(/\.canvas-feedback-comment-pill-close\.db-workbench-close-button\s*{[^}]*opacity: 0;/);
+    expect(canvasCssSource).toMatch(/\.canvas-feedback-comment-pill:hover \.canvas-feedback-comment-pill-close\.db-workbench-close-button,\n\.canvas-feedback-comment-pill:focus-within \.canvas-feedback-comment-pill-close\.db-workbench-close-button\s*{[^}]*opacity: 1;/);
+    expect(canvasCssSource).toMatch(/\.canvas-feedback-comment-pill:hover \.canvas-feedback-comment-pill-close\.db-workbench-close-button,\n\.canvas-feedback-comment-pill:focus-within \.canvas-feedback-comment-pill-close\.db-workbench-close-button\s*{[^}]*background: color-mix\(in oklch, var\(--db-surface-3\) 82%, var\(--db-accent\)\);/);
+    expect(canvasCssSource).not.toMatch(/\.canvas-feedback-comment-pill-close\s*{[^}]*background:/);
+    expect(canvasCssSource).not.toMatch(/\.canvas-feedback-comment-pill-close:hover/);
   });
 
   it('saves creator text as a new file-level item', async () => {
@@ -337,7 +349,10 @@ describe('CanvasFeedbackBar', () => {
     vi.resetModules();
     vi.doMock('../ui', () => ({
       CommentPillInput: (props: { value?: string }) => React.createElement('input', { value: props.value, readOnly: true }),
-      IconButton: (props: { label: string; onClick?: (event: React.MouseEvent<HTMLButtonElement>) => void }) => {
+      IconButton: (props: { label: string; onClick?: (event: React.MouseEvent<HTMLButtonElement>) => void }) => (
+        React.createElement('button', { type: 'button', onClick: props.onClick }, props.label)
+      ),
+      CloseButton: (props: { label: string; onClick?: (event: React.MouseEvent<HTMLButtonElement>) => void }) => {
         buttons.push(props);
         return React.createElement('button', { type: 'button' }, props.label);
       }

@@ -308,12 +308,12 @@ describe('floating bar placement', () => {
   });
 
   it('reserves the title bar at the top of the viewport', () => {
-    expect(WORKBENCH_TITLE_BAR_HEIGHT).toBe(32);
+    expect(WORKBENCH_TITLE_BAR_HEIGHT).toBe(28);
     expect(TITLE_BAR_RESERVED_RECT(1280)).toEqual({
       x: 0,
       y: 0,
       width: 1280,
-      height: 32
+      height: 28
     });
   });
 });

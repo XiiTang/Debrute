@@ -48,8 +48,8 @@ describe('Workbench UI primitives', () => {
     expect(html).toContain('aria-label="Close example"');
     expect(html).toContain('db-workbench-close-button');
     expect(html).toContain('example-close-button');
-    expect(html).toContain('width="10"');
-    expect(html).toContain('height="10"');
+    expect(html).toContain('width="9"');
+    expect(html).toContain('height="9"');
   });
 
   it('renders fields, cards, menus, pills, and empty states through shared classes', () => {

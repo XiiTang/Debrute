@@ -285,7 +285,6 @@ export function canvasTextEditorTheme(): Extension {
     },
     '.cm-content': {
       minHeight: '100%',
-      padding: 'var(--canvas-text-editor-content-padding-block) 0',
       caretColor: 'var(--db-text)',
       tabSize: 'var(--canvas-text-editor-tab-size)'
     },

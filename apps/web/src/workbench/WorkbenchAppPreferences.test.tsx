@@ -76,6 +76,14 @@ describe('WorkbenchApp global preference events', () => {
     await unmount(root, container);
   });
 
+  it('disables the Terminal panel before a project is open', async () => {
+    const { container, root } = await renderWorkbenchApp('/');
+
+    expect(requireButton(container, 'Terminal').disabled).toBe(true);
+
+    await unmount(root, container);
+  });
+
   it('loads global model settings before a project is open', async () => {
     const { container, root } = await renderWorkbenchApp('/');
 

@@ -39,7 +39,8 @@ import { reconcileWorkbenchViewportLayout } from './services/workbenchViewportLa
 import {
   closeTextEditorWindowState,
   dragTextEditorWindowState,
-  openTextEditorWindowState
+  openTextEditorWindowState,
+  resizeTextEditorWindowState
 } from './services/textEditorWindows';
 import { useTextFileBufferActions } from './services/textFileBufferActions';
 import { runWorkbenchContextMenuCommand } from './services/workbenchContextMenuCommands';
@@ -93,6 +94,7 @@ import {
   openFloatingPanel,
   resizeFloatingPanel,
   toggleFloatingPanel,
+  type FloatingPanelId,
   type FloatingPanelState
 } from './shell/floatingPanels';
 import { FloatingDock } from './shell/FloatingDock';
@@ -604,6 +606,7 @@ export function WorkbenchApp(): React.ReactElement {
     ensureTextFileBuffer,
     updateTextFileBuffer,
     saveTextFileBuffer,
+    discardTextFileBuffer,
     reloadTextFileBuffer,
     refreshTextFileBuffer
   } = useTextFileBufferActions({
@@ -832,6 +835,9 @@ export function WorkbenchApp(): React.ReactElement {
     centerCanvasProjectionNode(activeProjection, projectRelativePath);
   }, [activeProjection, centerCanvasProjectionNode]);
   const effectiveTitleBarState = titleBarState ?? unavailableWorkbenchTitleBarState();
+  const disabledFloatingPanelIds = useMemo<readonly FloatingPanelId[]>(() => (
+    daemonProjectId ? [] : ['terminal']
+  ), [daemonProjectId]);
 
   const state: WorkbenchState = {
     snapshot,
@@ -1040,6 +1046,7 @@ export function WorkbenchApp(): React.ReactElement {
     ensureTextFileBuffer,
     updateTextFileBuffer,
     saveTextFileBuffer,
+    discardTextFileBuffer,
     reloadTextFileBuffer,
     openTextEditorWindow,
     toggleTextFileWordWrap,
@@ -1159,6 +1166,7 @@ export function WorkbenchApp(): React.ReactElement {
     centerCanvasProjectionNode,
     locateProjectFileInCanvas,
     chooseActiveCanvasForProject,
+    discardTextFileBuffer,
     ensureTextFileBuffer,
     i18n,
     loadFloatingPanelsForProject,
@@ -1667,7 +1675,11 @@ export function WorkbenchApp(): React.ReactElement {
           <div className="floating-bar-layer" data-testid="floating-bar-layer">
             <FloatingDock
               panelState={floatingPanels}
+              disabledPanelIds={disabledFloatingPanelIds}
               onToggle={(panelId) => {
+                if (disabledFloatingPanelIds.includes(panelId)) {
+                  return;
+                }
                 const isOpen = floatingPanels.panels[panelId].open;
                 setFloatingPanels((current) => toggleFloatingPanel(current, panelId, workbenchViewportRect));
                 setWindowOrder((current) => (
@@ -1764,6 +1776,7 @@ export function WorkbenchApp(): React.ReactElement {
                   setWindowOrder((current) => closeWorkbenchWindow(current, textEditorWindowIdentity(windowState.projectRelativePath)));
                 }}
                 onDrag={(dx, dy) => setTextEditorWindows((windows) => dragTextEditorWindowState(windows, windowState.projectRelativePath, { dx, dy }, workbenchViewportRect))}
+                onResize={(rect) => setTextEditorWindows((windows) => resizeTextEditorWindowState(windows, windowState.projectRelativePath, rect, workbenchViewportRect))}
               />
             ))}
           </div>

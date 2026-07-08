@@ -36,6 +36,7 @@ describe('FloatingTextEditorWindow', () => {
         onBringToFront={() => undefined}
         onClose={() => undefined}
         onDrag={() => undefined}
+        onResize={() => undefined}
       />
     );
 
@@ -46,6 +47,34 @@ describe('FloatingTextEditorWindow', () => {
     expect(html).toContain('data-canvas-text-editor="true"');
     expect(html).toContain('data-editor-mode="edit"');
     expect(html).not.toContain(`data-editor-mode="${'pre'}${'view'}"`);
+  });
+
+  it('renders resize handles for the expanded text editor panel', () => {
+    const html = renderStaticWithI18n(
+      <FloatingTextEditorWindow
+        windowState={{
+          projectRelativePath: 'notes/readme.md',
+          open: true,
+          x: 20,
+          y: 30,
+          width: 640,
+          height: 420
+        }}
+        orderState={{
+          orderBackToFront: [textEditorWindowIdentity('notes/readme.md')],
+          focusedWindow: textEditorWindowIdentity('notes/readme.md')
+        }}
+        buffer={textBuffer()}
+        actions={actionsFixture()}
+        onBringToFront={() => undefined}
+        onClose={() => undefined}
+        onDrag={() => undefined}
+        onResize={() => undefined}
+      />
+    );
+
+    expect(html.match(/class="floating-panel-resize-handle /g) ?? []).toHaveLength(8);
+    expect(html).toContain('floating-panel-resize-handle--se');
   });
 });
 
@@ -67,6 +96,7 @@ function actionsFixture(): WorkbenchActions {
   return {
     ensureTextFileBuffer: async () => undefined,
     saveTextFileBuffer: async () => undefined,
+    discardTextFileBuffer: async () => undefined,
     reloadTextFileBuffer: async () => undefined,
     updateTextFileBuffer: () => undefined,
     toggleTextFileWordWrap: () => undefined

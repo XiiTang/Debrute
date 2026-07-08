@@ -11,6 +11,7 @@ import {
 import type { CanvasVideoPreviewSource } from './canvasVideoPreviews';
 import { preloadCanvasImageForHandoff } from './CanvasMediaHandoff';
 import { CanvasMediaFeedbackLayer, type CanvasMediaFeedbackDraftRegion, type CanvasMediaFeedbackMode } from './CanvasMediaFeedbackLayer';
+import { CanvasNodeTitleBar } from './CanvasNodeTitleBar';
 
 type CanvasVideoVisibleLayer = 'preview' | 'player';
 
@@ -35,6 +36,9 @@ export interface CanvasVideoNodeContentProps {
   localFeedbackMode?: CanvasMediaFeedbackMode | undefined;
   pendingFeedbackRegion?: CanvasMediaFeedbackDraftRegion | undefined;
   activeFeedbackMomentTimeSeconds?: number | undefined;
+  onTitlePointerDown?: ((event: React.PointerEvent<Element>) => void) | undefined;
+  onTitlePointerMove?: ((event: React.PointerEvent<Element>) => void) | undefined;
+  onTitlePointerUp?: ((event: React.PointerEvent<Element>) => void) | undefined;
   onLocalFeedbackDraft?: ((input: {
     projectRelativePath: string;
     geometry: CanvasFeedbackGeometry;
@@ -61,6 +65,9 @@ export function CanvasVideoNodeContent({
   localFeedbackMode,
   pendingFeedbackRegion,
   activeFeedbackMomentTimeSeconds,
+  onTitlePointerDown,
+  onTitlePointerMove,
+  onTitlePointerUp,
   onLocalFeedbackDraft
 }: CanvasVideoNodeContentProps): React.ReactElement {
   const i18n = useI18n();
@@ -256,16 +263,20 @@ export function CanvasVideoNodeContent({
     }
   }, []);
 
-  const caption = (
-    <div className="db-canvas-node-caption">
-      <Video size={13} />
-      <span>{node.projectRelativePath.split('/').pop() ?? node.projectRelativePath}</span>
-    </div>
+  const titleBar = (
+    <CanvasNodeTitleBar
+      icon={<Video size={13} />}
+      title={node.projectRelativePath.split('/').pop() ?? node.projectRelativePath}
+      onPointerDown={onTitlePointerDown}
+      onPointerMove={onTitlePointerMove}
+      onPointerUp={onTitlePointerUp}
+    />
   );
 
   if (node.availability.state !== 'available') {
     return (
       <section className="canvas-video-node">
+        {titleBar}
         <div className="canvas-video-player-shell">
           <div className="db-canvas-node-placeholder db-canvas-node-placeholder--problem">
             <AlertTriangle size={22} />
@@ -273,7 +284,6 @@ export function CanvasVideoNodeContent({
             <span>{node.availability.message}</span>
           </div>
         </div>
-        {caption}
       </section>
     );
   }
@@ -298,6 +308,7 @@ export function CanvasVideoNodeContent({
 
   return (
     <section className="canvas-video-node">
+      {titleBar}
       <div ref={playerShellRef} className="canvas-video-player-shell">
         {error ? (
           <div className="db-canvas-node-error-overlay">
@@ -384,7 +395,6 @@ export function CanvasVideoNodeContent({
           />
         </div>
       </div>
-      {caption}
     </section>
   );
 }

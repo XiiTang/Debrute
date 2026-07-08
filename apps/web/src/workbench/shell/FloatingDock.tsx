@@ -22,12 +22,15 @@ const floatingPanelTitleKeys: Record<FloatingPanelId, WorkbenchTranslationKey> =
 
 export function FloatingDock({
   panelState,
+  disabledPanelIds = [],
   onToggle
 }: {
   panelState: FloatingPanelState;
+  disabledPanelIds?: readonly FloatingPanelId[];
   onToggle: (panelId: FloatingPanelId) => void;
 }): React.ReactElement {
   const i18n = useI18n();
+  const disabledPanels = new Set(disabledPanelIds);
   const icons: Record<FloatingPanelId, React.ReactElement> = {
     explorer: <FolderTree />,
     inspector: <CircleDot />,
@@ -43,6 +46,7 @@ export function FloatingDock({
           label={i18n.t(floatingPanelTitleKeys[panelId])}
           pressed={panelState.panels[panelId].open}
           icon={icons[panelId]}
+          disabled={disabledPanels.has(panelId)}
           onClick={() => onToggle(panelId)}
         />
       ))}

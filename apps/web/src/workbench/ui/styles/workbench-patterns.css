@@ -183,8 +183,8 @@
 }
 
 .db-workbench-close-button.db-icon-button {
-  width: 14px;
-  height: 14px;
+  width: 12px;
+  height: 12px;
   border: 0;
   border-radius: 999px;
   background: transparent;
@@ -261,7 +261,7 @@
 
 .db-terminal-tab__close.db-icon-button {
   position: absolute;
-  top: calc((var(--db-floating-panel-drag-hit-area-height) - 14px) / 2);
+  top: calc((var(--db-floating-panel-drag-hit-area-height) - 12px) / 2);
   right: 2px;
 }
 
@@ -769,7 +769,6 @@
   align-items: center;
   gap: var(--db-space-2);
   padding: 0 7px;
-  border-bottom: calc(1px * var(--canvas-chrome-scale, 1)) solid var(--db-border);
   background: color-mix(in oklch, var(--db-surface-1) 94%, transparent);
   color: var(--db-text);
   cursor: grab;

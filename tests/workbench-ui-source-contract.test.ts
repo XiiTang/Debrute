@@ -128,14 +128,14 @@ describe('Workbench UI source contract', () => {
     expect(floatingPanelTitleRule).toContain('position: absolute;');
     expect(floatingPanelTitleRule).toContain('top: 2px;');
     expect(floatingPanelTitleRule).toContain('left: 8px;');
-    expect(floatingPanelTitleRule).toContain('max-width: calc(var(--db-floating-panel-title-slot-width) - 14px);');
+    expect(floatingPanelTitleRule).toContain('max-width: calc(var(--db-floating-panel-title-slot-width) - 12px);');
     expect(floatingPanelTitleRule).toContain('font-size: var(--db-font-xs);');
     expect(floatingPanelTitleRule).toContain('line-height: 14px;');
     expect(floatingPanelTitleRule).toContain('color: var(--db-text-subtle);');
     expect(floatingPanelTitleRule).toContain('pointer-events: none;');
     expect(floatingPanelTitleRule).toContain('text-overflow: ellipsis;');
-    expect(workbenchCloseButtonRule).toContain('width: 14px;');
-    expect(workbenchCloseButtonRule).toContain('height: 14px;');
+    expect(workbenchCloseButtonRule).toContain('width: 12px;');
+    expect(workbenchCloseButtonRule).toContain('height: 12px;');
     expect(workbenchCloseButtonRule).toContain('border: 0;');
     expect(workbenchCloseButtonRule).toContain('border-radius: 999px;');
     expect(workbenchCloseButtonRule).toContain('background: transparent;');
@@ -297,7 +297,7 @@ describe('Workbench UI source contract', () => {
     expect(rule(patterns, '.db-terminal-tab:hover, .db-terminal-tab.db-tab--active')).toContain('background: transparent;');
     expect(rule(patterns, '.db-terminal-tab:hover, .db-terminal-tab.db-tab--active')).not.toContain('border-radius:');
     expect(terminalTabActiveRule).toContain('box-shadow: inset 0 -1px 0 var(--db-terminal-tab-active-line);');
-    expect(terminalTabCloseRule).toContain('top: calc((var(--db-floating-panel-drag-hit-area-height) - 14px) / 2);');
+    expect(terminalTabCloseRule).toContain('top: calc((var(--db-floating-panel-drag-hit-area-height) - 12px) / 2);');
     expect(terminalTabCloseRule).not.toContain('width:');
     expect(terminalTabCloseRule).not.toContain('height:');
     expect(terminalTabCloseRule).not.toContain('border:');
@@ -571,7 +571,10 @@ describe('Workbench UI source contract', () => {
     expect(feedbackMarkIconRule).toContain('transform: translateY(-0.5px);');
     expect(feedbackNoteRule).toContain('height: 30px;');
     expect(feedbackNoteRule).not.toContain('min-height: 30px;');
-    expect(feedbackNoteRule).toContain('padding: 5px 30px 5px 12px;');
+    expect(feedbackNoteRule).not.toContain('min-width:');
+    expect(feedbackNoteRule).toContain('max-width: 280px;');
+    expect(feedbackNoteRule).toContain('padding: 5px 12px;');
+    expect(feedbackNoteRule).not.toContain('padding: 5px 30px 5px 12px;');
     expect(feedbackPrimaryRowRule).toContain('grid-template-columns: max-content 110px;');
     expect(feedbackCommentCreatorRule).toContain('justify-self: start;');
     expect(feedbackCommentStripRule).toContain('padding: 3px 2px 3px 0;');
@@ -591,7 +594,7 @@ describe('Workbench UI source contract', () => {
 
     expect(cardBarRule).toContain('height: 28px;');
     expect(cardBarRule).toContain('padding: 0;');
-    expect(dockRule).toContain('top: calc(32px + 13px);');
+    expect(dockRule).toContain('top: calc(28px + 13px);');
     expect(dockRule).toContain('width: 28px;');
     expect(dockRule).toContain('padding: 0;');
     expect(shellStyles).not.toContain('.floating-dock .db-icon-button');

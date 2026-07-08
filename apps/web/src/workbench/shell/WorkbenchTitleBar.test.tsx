@@ -99,4 +99,13 @@ describe('WorkbenchTitleBar', () => {
     expect(source).toContain('transparent 100%');
     expect(source).not.toContain('inset 0 -1px 0');
   });
+
+  it('keeps the project title optically centered inside the compact title bar', () => {
+    const source = readFileSync('apps/web/src/workbench/styles/titlebar.css', 'utf8');
+
+    expect(source).toContain('top: 50%;');
+    expect(source).toContain('transform: translateY(calc(-50% - 2px));');
+    expect(source).toContain('line-height: 1;');
+    expect(source).not.toContain('transform: translateX(-50%);');
+  });
 });

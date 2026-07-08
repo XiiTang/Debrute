@@ -8,6 +8,7 @@ export interface TextFileBufferActions {
   ensureTextFileBuffer(projectRelativePath: string, diskRevision?: string): Promise<void>;
   updateTextFileBuffer(projectRelativePath: string, content: string): void;
   saveTextFileBuffer(projectRelativePath: string): Promise<void>;
+  discardTextFileBuffer(projectRelativePath: string): Promise<void>;
   reloadTextFileBuffer(projectRelativePath: string): Promise<void>;
   refreshTextFileBuffer(projectRelativePath: string): Promise<void>;
 }
@@ -144,6 +145,10 @@ export function useTextFileBufferActions(input: {
     }
   }, [api, setTextFileBuffers]);
 
+  const discardTextFileBuffer = useCallback(async (projectRelativePath: string) => {
+    await reloadTextFileBuffer(projectRelativePath);
+  }, [reloadTextFileBuffer]);
+
   const refreshTextFileBuffer = useCallback(async (projectRelativePath: string) => {
     const current = textFileBuffersRef.current[projectRelativePath];
     const windowState = textEditorWindowsRef.current[projectRelativePath];
@@ -174,6 +179,7 @@ export function useTextFileBufferActions(input: {
     ensureTextFileBuffer,
     updateTextFileBuffer,
     saveTextFileBuffer,
+    discardTextFileBuffer,
     reloadTextFileBuffer,
     refreshTextFileBuffer
   };

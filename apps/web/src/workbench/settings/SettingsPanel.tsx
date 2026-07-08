@@ -11,13 +11,12 @@ import type {
 } from '@debrute/app-protocol';
 import type { WorkbenchActions, WorkbenchState } from '../../types';
 import {
-  Button,
   Card,
+  CloseButton,
   Field,
   IconButton,
   Input,
-  SecretInput,
-  StatusPill
+  SecretInput
 } from '../ui';
 import { GeneralSettingsPage } from './general/GeneralSettingsPage';
 import { IntegrationsSettingsPage } from './integrations/IntegrationsSettingsPage';
@@ -271,10 +270,10 @@ function MediaModelCard({
     }
   };
 
-  const clearApiKey = async () => {
+  const deleteApiKey = async () => {
     setStatus({ status: 'idle' });
     try {
-      await onSave(modelDraftToClearApiKeyInput(draft));
+      await onSave(modelDraftToDeleteApiKeyInput(draft));
     } catch (error) {
       setStatus({ status: 'error', message: errorMessage(error) });
     }
@@ -285,19 +284,22 @@ function MediaModelCard({
       <div className="db-model-card__header">
         <div>
           <strong>{model.debruteModelId}</strong>
-          <div className="db-model-card__key-summary">
-            <StatusPill tone={model.apiKeySet ? 'success' : 'neutral'}>
-              {model.apiKeySet
-                ? i18n.t('settings.models.apiKeyConfigured', { preview: model.apiKeyPreview })
-                : i18n.t('settings.models.apiKeyMissing')}
-            </StatusPill>
-          </div>
+          {model.apiKeySet ? (
+            <div className="db-model-card__key-summary">
+              <span className="canvas-feedback-comment-pill">
+                <span className="canvas-feedback-comment-pill-text">
+                  {i18n.t('settings.models.apiKeyConfigured', { preview: model.apiKeyPreview })}
+                </span>
+                <CloseButton
+                  className="canvas-feedback-comment-pill-close"
+                  label={i18n.t('settings.models.deleteApiKey')}
+                  title={i18n.t('settings.models.deleteApiKey')}
+                  onClick={() => void deleteApiKey()}
+                />
+              </span>
+            </div>
+          ) : null}
         </div>
-        {model.apiKeySet ? (
-          <Button type="button" variant="danger" onClick={() => void clearApiKey()}>
-            {i18n.t('settings.models.clearApiKey')}
-          </Button>
-        ) : null}
       </div>
       <div className="db-model-card__fields">
         <div className="db-form-row">
@@ -408,7 +410,7 @@ export function modelDraftToSaveInput(draft: ModelDraft) {
   };
 }
 
-export function modelDraftToClearApiKeyInput(draft: ModelDraft) {
+export function modelDraftToDeleteApiKeyInput(draft: ModelDraft) {
   return {
     baseUrlOverride: draft.baseUrlOverride.trim() || null,
     requestModelIdOverride: draft.requestModelIdOverride.trim() || null,

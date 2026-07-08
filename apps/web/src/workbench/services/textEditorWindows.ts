@@ -1,4 +1,5 @@
 import type { FloatingTextEditorWindowState, TextFileBuffer } from '../../types';
+import type { FloatingPanelResizeInput } from '../shell/floatingPanels';
 import {
   constrainContainedRect,
   sameWindowRect,
@@ -11,6 +12,8 @@ const DEFAULT_TEXT_EDITOR_WINDOW_RECT = {
   width: 820,
   height: 620
 };
+const TEXT_EDITOR_WINDOW_MIN_WIDTH = 420;
+const TEXT_EDITOR_WINDOW_MIN_HEIGHT = 260;
 
 export function openTextEditorWindowState(
   windows: Record<string, FloatingTextEditorWindowState>,
@@ -68,6 +71,30 @@ export function dragTextEditorWindowState(
   };
 }
 
+export function resizeTextEditorWindowState(
+  windows: Record<string, FloatingTextEditorWindowState>,
+  projectRelativePath: string,
+  input: FloatingPanelResizeInput,
+  viewport: WorkbenchViewportRect
+): Record<string, FloatingTextEditorWindowState> {
+  const existing = windows[projectRelativePath];
+  if (!existing) {
+    return windows;
+  }
+  const width = Math.max(TEXT_EDITOR_WINDOW_MIN_WIDTH, Math.round(input.width));
+  const height = Math.max(TEXT_EDITOR_WINDOW_MIN_HEIGHT, Math.round(input.height));
+  return {
+    ...windows,
+    [projectRelativePath]: constrainTextEditorWindowState({
+      ...existing,
+      x: input.direction.includes('w') ? input.x + input.width - width : input.x,
+      y: input.direction.includes('n') ? input.y + input.height - height : input.y,
+      width,
+      height
+    }, viewport)
+  };
+}
+
 export function constrainOpenTextEditorWindowsToViewport(
   windows: Record<string, FloatingTextEditorWindowState>,
   viewport: WorkbenchViewportRect
@@ -106,14 +133,13 @@ function sameTextEditorWindowState(
     && sameWindowRect(left, right);
 }
 
-export type TextBufferStatusTone = 'warning' | 'danger' | 'info' | 'loading';
+export type TextBufferStatusTone = 'danger' | 'info' | 'loading';
 
 export interface TextBufferStatusLabels {
   loading: string;
   error: string;
   externalChange: string;
   saving: string;
-  unsaved: string;
 }
 
 export function textBufferStatus(
@@ -131,9 +157,6 @@ export function textBufferStatus(
   }
   if (buffer.saving) {
     return { label: labels.saving, tone: 'loading' };
-  }
-  if (buffer.dirty) {
-    return { label: labels.unsaved, tone: 'warning' };
   }
   return undefined;
 }

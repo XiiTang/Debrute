@@ -27,9 +27,13 @@ describe('SettingsPanel shared UI composition', () => {
     expect(html).toContain('db-model-card__header');
     expect(html).toContain('db-model-card__fields');
     expect(html).toContain('db-secret-field');
-    expect(html).toContain('key sk****************************aa');
-    expect(html).toContain('Clear API key');
+    expect(html).toContain('canvas-feedback-comment-pill');
+    expect(html).toContain('aria-label="Delete API key"');
+    expect(html).toContain('db-workbench-close-button');
+    expect(html).toContain('canvas-feedback-comment-pill-close');
     expect(html).toContain('sk****************************aa');
+    expect(html).not.toContain('key sk****************************aa');
+    expect(html).not.toContain('db-button--danger');
     expect(html).not.toContain('db-api-key-list');
     expect(html).not.toContain('1 enabled / 2 keys');
     expect(html).not.toContain('settings-model-card');
@@ -78,7 +82,7 @@ describe('SettingsPanel shared UI composition', () => {
     }
   });
 
-  it('clears a configured single media model API key', async () => {
+  it('deletes a configured single media model API key from the preview pill', async () => {
     const restoreActEnvironment = installReactActEnvironment();
     const container = document.createElement('div');
     document.body.append(container);
@@ -97,9 +101,9 @@ describe('SettingsPanel shared UI composition', () => {
         );
       });
 
-      const clearButton = requireButton(container, 'Clear API key');
+      const deleteButton = requireButton(container, 'Delete API key');
       await act(async () => {
-        clearButton.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+        deleteButton.dispatchEvent(new MouseEvent('click', { bubbles: true }));
       });
 
       expect(saveImageModelSetting).toHaveBeenCalledWith('image/openai/gpt-image-1', {
@@ -111,6 +115,40 @@ describe('SettingsPanel shared UI composition', () => {
       await unmount(root, container);
       restoreActEnvironment();
     }
+  });
+
+  it('omits missing API key status text from model cards', () => {
+    const html = renderToStaticMarkup(
+      <I18nProvider locale="zh-CN">
+        <ImageModelSettings
+          settings={readyResourceValue(stateWithSettings({
+            imageModelSettings: {
+              status: 'ready',
+              value: {
+                models: [{
+                  debruteModelId: 'image/openai/gpt-image-1',
+                  summary: 'OpenAI gpt-image-1 image generation and edits.',
+                  supportsEditing: true,
+                  supportsTextRendering: true,
+                  defaultBaseUrl: 'https://api.openai.com/v1',
+                  defaultRequestModelId: 'gpt-image-1',
+                  baseUrlOverride: null,
+                  requestModelIdOverride: null,
+                  apiKeySet: false,
+                  apiKeyPreview: null
+                }]
+              }
+            }
+          }).imageModelSettings)}
+          actions={actions()}
+        />
+      </I18nProvider>
+    );
+
+    expect(html).toContain('db-model-card');
+    expect(html).toContain('API 密钥');
+    expect(html).not.toContain('db-model-card__key-summary');
+    expect(html).not.toContain('canvas-feedback-comment-pill');
   });
 
   it('renders Workbench language and appearance preferences in General settings', () => {
@@ -397,7 +435,11 @@ async function unmount(root: Root, container: HTMLDivElement): Promise<void> {
 }
 
 function requireButton(container: HTMLElement, label: string): HTMLButtonElement {
-  const button = Array.from(container.querySelectorAll('button')).find((candidate) => candidate.textContent === label);
+  const button = Array.from(container.querySelectorAll('button')).find((candidate) => (
+    candidate.textContent === label
+    || candidate.getAttribute('aria-label') === label
+    || candidate.getAttribute('title') === label
+  ));
   if (!(button instanceof HTMLButtonElement)) {
     throw new Error(`Expected button ${label}.`);
   }

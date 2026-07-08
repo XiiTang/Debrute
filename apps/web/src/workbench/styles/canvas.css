@@ -365,7 +365,7 @@
   width: 100%;
   height: 100%;
   display: grid;
-  grid-template-rows: minmax(0, 1fr) 30px;
+  grid-template-rows: 32px minmax(0, 1fr);
   background: transparent;
 }
 
@@ -490,13 +490,12 @@
 
 .canvas-feedback-comment-pill {
   position: relative;
-  min-width: 112px;
   max-width: 280px;
   height: 30px;
   display: inline-flex;
   align-items: center;
   flex: 0 0 auto;
-  padding: 5px 30px 5px 12px;
+  padding: 5px 12px;
   border: 1px solid color-mix(in oklch, var(--db-border) 88%, transparent);
   border-radius: 999px;
   background: color-mix(in oklch, var(--db-bg) 86%, transparent);
@@ -512,8 +511,7 @@
   white-space: nowrap;
 }
 
-.canvas-feedback-comment-pill-badge,
-.canvas-feedback-comment-pill-close {
+.canvas-feedback-comment-pill-badge {
   position: absolute;
   top: -5px;
   right: -5px;
@@ -539,19 +537,12 @@
   pointer-events: none;
 }
 
-.canvas-feedback-comment-pill-close {
-  padding: 0;
-  background: color-mix(in oklch, var(--db-surface-3) 94%, var(--db-bg));
-  color: var(--db-text);
-  cursor: pointer;
-}
-
-.canvas-feedback-comment-pill-close svg {
-  display: block;
-}
-
-.canvas-feedback-comment-pill--spatial {
-  padding-left: 12px;
+.canvas-feedback-comment-pill-close.db-workbench-close-button {
+  position: absolute;
+  top: -5px;
+  right: -5px;
+  opacity: 0;
+  pointer-events: none;
 }
 
 .canvas-feedback-comment-pill--moment {
@@ -559,28 +550,17 @@
   background: color-mix(in oklch, var(--canvas-feedback-moment-color, #2563eb) 18%, var(--db-bg));
 }
 
-.canvas-feedback-comment-pill--spatial .canvas-feedback-comment-pill-close {
-  opacity: 0;
-  pointer-events: none;
-  background: #ffcc00;
-  color: #101010;
-}
-
 .canvas-feedback-comment-pill--spatial:hover .canvas-feedback-comment-pill-badge,
 .canvas-feedback-comment-pill--spatial:focus-within .canvas-feedback-comment-pill-badge {
   opacity: 0;
 }
 
-.canvas-feedback-comment-pill--spatial:hover .canvas-feedback-comment-pill-close,
-.canvas-feedback-comment-pill--spatial:focus-within .canvas-feedback-comment-pill-close {
+.canvas-feedback-comment-pill:hover .canvas-feedback-comment-pill-close.db-workbench-close-button,
+.canvas-feedback-comment-pill:focus-within .canvas-feedback-comment-pill-close.db-workbench-close-button {
+  background: color-mix(in oklch, var(--db-surface-3) 82%, var(--db-accent));
+  color: var(--db-text);
   opacity: 1;
   pointer-events: auto;
-}
-
-.canvas-feedback-comment-pill-close:hover:not(:disabled),
-.canvas-feedback-comment-pill-close:focus-visible {
-  border-color: color-mix(in oklch, var(--db-accent) 48%, var(--db-border));
-  background: color-mix(in oklch, var(--db-surface-3) 82%, var(--db-accent));
 }
 
 .canvas-feedback-comment-input,
@@ -674,7 +654,6 @@
 .canvas-text-editor .cm-content {
   flex: 1 1 auto;
   min-height: 100%;
-  padding-block: var(--canvas-text-editor-content-padding-block);
   tab-size: var(--canvas-text-editor-tab-size);
   user-select: text;
   -webkit-user-select: text;

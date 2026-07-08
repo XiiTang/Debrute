@@ -136,6 +136,7 @@ export interface WorkbenchActions {
   ensureTextFileBuffer: (projectRelativePath: string, diskRevision?: string) => Promise<void>;
   updateTextFileBuffer: (projectRelativePath: string, content: string) => void;
   saveTextFileBuffer: (projectRelativePath: string) => Promise<void>;
+  discardTextFileBuffer: (projectRelativePath: string) => Promise<void>;
   reloadTextFileBuffer: (projectRelativePath: string) => Promise<void>;
   openTextEditorWindow: (projectRelativePath: string) => void;
   toggleTextFileWordWrap: (projectRelativePath: string) => void;

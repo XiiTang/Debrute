@@ -13,7 +13,7 @@ export function CloseButton({
     <IconButton
       {...props}
       className={cx('db-workbench-close-button', className)}
-      icon={<X size={10} />}
+      icon={<X size={9} />}
     />
   );
 }

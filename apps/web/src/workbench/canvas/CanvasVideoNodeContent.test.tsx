@@ -169,8 +169,25 @@ describe('CanvasVideoNodeContent', () => {
 
     expect(html).toContain('canvas-video-preview-image');
     expect(html).toContain('preview.jpg');
-    expect(html).toContain('db-canvas-node-caption');
+    expect(html).toContain('db-canvas-node-titlebar');
     expect(html).not.toContain('data-testid="video-player-adapter"');
+  });
+
+  it('renders the video title bar before the player shell', () => {
+    const html = renderToStaticMarkup(
+      <I18nProvider locale="en">
+        <CanvasVideoNodeContent
+          node={videoNode()}
+          selected={false}
+          videoPreview={previewSource()}
+          onSelectNode={() => undefined}
+          onRegisterVideoTarget={() => undefined}
+          onUpdatePlaybackTime={() => undefined}
+        />
+      </I18nProvider>
+    );
+
+    expect(html.indexOf('db-canvas-node-titlebar')).toBeLessThan(html.indexOf('canvas-video-player-shell'));
   });
 
   it('mounts the real player with the persisted timestamp when selected', () => {
@@ -607,7 +624,7 @@ describe('CanvasVideoNodeContent', () => {
     }
   });
 
-  it('keeps the Canvas caption when a video file is unavailable', () => {
+  it('keeps the Canvas title bar when a video file is unavailable', () => {
     const { videoPresentation: _videoPresentation, ...node } = videoNode();
 
     const html = renderToStaticMarkup(
@@ -629,7 +646,7 @@ describe('CanvasVideoNodeContent', () => {
     );
 
     expect(html).toContain('db-canvas-node-placeholder');
-    expect(html).toContain('db-canvas-node-caption');
+    expect(html).toContain('db-canvas-node-titlebar');
     expect(html).toContain('clip.mp4');
   });
 
