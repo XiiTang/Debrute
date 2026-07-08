@@ -20,6 +20,7 @@ describe('runtime product update service', () => {
     const service = new ProductUpdateService({
       productVersion: '0.2.0',
       platform: 'darwin',
+      platformArch: 'arm64',
       cliDiagnostic,
       releaseSource: async () => release('0.3.0')
     });
@@ -148,6 +149,7 @@ describe('runtime product update service', () => {
     const service = new ProductUpdateService({
       productVersion: '0.2.0',
       platform: 'darwin',
+      platformArch: 'arm64',
       cliDiagnostic,
       desktopInstallPath: '/Applications/Debrute.app',
       managedProductRoot: join(root, 'products'),
@@ -193,6 +195,7 @@ describe('runtime product update service', () => {
     const service = new ProductUpdateService({
       productVersion: '0.2.0',
       platform: 'darwin',
+      platformArch: 'arm64',
       cliDiagnostic,
       desktopInstallPath: '/Applications/Debrute.app',
       managedProductRoot: join(root, 'products'),
@@ -289,6 +292,7 @@ describe('runtime product update service', () => {
     const service = new ProductUpdateService({
       productVersion: '0.2.0',
       platform: 'darwin',
+      platformArch: 'arm64',
       cliDiagnostic,
       desktopInstallPath: '/Applications/Debrute.app',
       managedProductRoot: join(root, 'products'),

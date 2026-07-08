@@ -11,7 +11,7 @@ describe('Debrute repository Skill', () => {
     expect(skill).toContain('metadata:');
     expect(skill).toContain('debrute.managed: "true"');
     expect(skill).toContain('debrute.package: "debrute"');
-    expect(skill).toContain('debrute.version: 0.0.2');
+    expect(skill).toContain('debrute.version: 0.0.3');
     expect(skill).toContain('debrute commands');
     expect(skill).toContain('## Visual Workbench');
     expect(skill).toContain('debrute workbench start --next "/open?path=<encodeURIComponent(absProjectPath)>"');

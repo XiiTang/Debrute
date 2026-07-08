@@ -4,7 +4,7 @@ description: Use for any task related to TTS, music generation, or sound effect 
 metadata:
   debrute.managed: "true"
   debrute.package: "debrute"
-  debrute.version: 0.0.2
+  debrute.version: 0.0.3
 ---
 
 # Debrute Audio Director

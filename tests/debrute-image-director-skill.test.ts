@@ -19,7 +19,7 @@ describe('Debrute image director Skill', () => {
     expect(skill).toContain('metadata:');
     expect(skill).toContain('debrute.managed: "true"');
     expect(skill).toContain('debrute.package: "debrute"');
-    expect(skill).toContain('debrute.version: 0.0.2');
+    expect(skill).toContain('debrute.version: 0.0.3');
     expect(skill).toContain('Use for any task related to image generation or image editing.');
     expect(skill).not.toContain('debrute-cli');
     expect(skill).toContain('Run `debrute models image list` to compare configured image models by original model parameters and constraints.');

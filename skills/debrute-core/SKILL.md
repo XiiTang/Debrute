@@ -4,7 +4,7 @@ description: Use when an external Agent needs Debrute project semantics through 
 metadata:
   debrute.managed: "true"
   debrute.package: "debrute"
-  debrute.version: 0.0.2
+  debrute.version: 0.0.3
 ---
 
 # Debrute Core

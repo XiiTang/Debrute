@@ -31,18 +31,18 @@ function skillFrontmatter(relativePath: string): Record<string, unknown> {
 }
 
 describe('Debrute rename contract', () => {
-  it('uses Debrute package names and version 0.0.2 on every release surface', () => {
+  it('uses Debrute package names and version 0.0.3 on every release surface', () => {
     expect(readJson('package.json')).toMatchObject({
       name: 'debrute',
-      version: '0.0.2'
+      version: '0.0.3'
     });
     expect(readJson('apps/desktop/package.json')).toMatchObject({
       name: '@debrute/desktop',
-      version: '0.0.2'
+      version: '0.0.3'
     });
     expect(readJson('apps/debrute-cli/package.json')).toMatchObject({
       name: '@debrute/cli',
-      version: '0.0.2',
+      version: '0.0.3',
       bin: { debrute: 'dist/index.js' }
     });
     for (const skillPath of [
@@ -55,7 +55,7 @@ describe('Debrute rename contract', () => {
       const metadata = frontmatter.metadata as Record<string, unknown>;
       expect(metadata['debrute.managed']).toBe('true');
       expect(metadata['debrute.package']).toBe('debrute');
-      expect(metadata['debrute.version']).toBe('0.0.2');
+      expect(metadata['debrute.version']).toBe('0.0.3');
     }
   });
 
