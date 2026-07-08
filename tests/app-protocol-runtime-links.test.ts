@@ -3,7 +3,6 @@ import {
   isDebruteMutatingMethod,
   normalizeDebruteRuntimeInfo,
   parseDebruteWorkbenchPath,
-  type BrowserSessionCredential,
   type LiveProjectsView,
   type WorkbenchApiClient,
   type WorkbenchProjectOpenResult,
@@ -39,6 +38,7 @@ describe('app-protocol runtime metadata', () => {
       webBaseUrl: 'http://127.0.0.1:17573',
       platform: 'darwin'
     });
+    expect(JSON.stringify(runtime)).not.toContain('token');
   });
 
   it('parses final Web Workbench routes', () => {
@@ -55,21 +55,6 @@ describe('app-protocol runtime metadata', () => {
 
     expect(parseDebruteWorkbenchPath('/projects/123e4567-e89b-42d3-a456-426614174000/files/briefs/cover%20art.png')).toEqual({ kind: 'workbench' });
     expect(parseDebruteWorkbenchPath('/settings')).toEqual({ kind: 'workbench' });
-  });
-
-  it('models browser session credentials without project state', () => {
-    const credential: BrowserSessionCredential = {
-      token: 'secret',
-      runtime: {
-        daemonUrl: 'http://127.0.0.1:17321',
-        webBaseUrl: 'http://127.0.0.1:17322',
-        platform: 'darwin'
-      }
-    };
-
-    expect(credential.token).toBe('secret');
-    expect(JSON.stringify(credential)).not.toContain('projectRoot');
-    expect(JSON.stringify(credential)).not.toContain('projectId');
   });
 
   it('models live projects as a collection instead of an active project alias', () => {

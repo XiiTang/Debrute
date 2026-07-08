@@ -23,12 +23,12 @@ describe('model-owned generated asset contracts', () => {
 
     const imageSettings = createImageModelSettingsView(
       { imageModels: [{ debruteModelId: 'gpt-image-2', baseUrlOverride: null, requestModelIdOverride: 'gpt-image-2-custom' }] },
-      { imageModelApiKeys: { 'gpt-image-2': [{ id: 'img-a', key: 'sk-image', label: null, enabled: true }] }, videoModelApiKeys: {}, audioModelApiKeys: {} },
+      { imageModelApiKeys: { 'gpt-image-2': 'sk-image' }, videoModelApiKeys: {}, audioModelApiKeys: {} },
       [imageEntry]
     );
     const videoSettings = createVideoModelSettingsView(
       { videoModels: [{ debruteModelId: 'doubao-seedance-2-0-260128', baseUrlOverride: null, requestModelIdOverride: 'seedance-custom' }] },
-      { imageModelApiKeys: {}, videoModelApiKeys: { 'doubao-seedance-2-0-260128': [{ id: 'vid-a', key: 'sk-video', label: null, enabled: true }] }, audioModelApiKeys: {} },
+      { imageModelApiKeys: {}, videoModelApiKeys: { 'doubao-seedance-2-0-260128': 'sk-video' }, audioModelApiKeys: {} },
       [videoEntry]
     );
 
@@ -42,9 +42,7 @@ describe('model-owned generated asset contracts', () => {
       defaultRequestModelId: 'gpt-image-2',
       requestModelIdOverride: 'gpt-image-2-custom',
       apiKeySet: true,
-      apiKeyCount: 1,
-      enabledApiKeyCount: 1,
-      apiKeyPreviews: [{ id: 'img-a', label: null, enabled: true, preview: 'sk****************************ge' }]
+      apiKeyPreview: 'sk****************************ge'
     });
     expect(videoSettings.models[0]).toEqual({
       debruteModelId: 'doubao-seedance-2-0-260128',
@@ -59,9 +57,7 @@ describe('model-owned generated asset contracts', () => {
       defaultRequestModelId: 'doubao-seedance-2-0-260128',
       requestModelIdOverride: 'seedance-custom',
       apiKeySet: true,
-      apiKeyCount: 1,
-      enabledApiKeyCount: 1,
-      apiKeyPreviews: [{ id: 'vid-a', label: null, enabled: true, preview: 'sk****************************eo' }]
+      apiKeyPreview: 'sk****************************eo'
     });
   });
 

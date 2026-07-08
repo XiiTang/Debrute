@@ -35,7 +35,7 @@ export function buildProjectFileTree(entries: ProjectFileEntryLike[]): ProjectFi
 
   for (const entry of entries) {
     const normalizedPath = normalizeProjectPath(entry.projectRelativePath);
-    if (!normalizedPath || normalizedPath === '.git' || normalizedPath.startsWith('.git/')) {
+    if (!normalizedPath || isGitMetadataPath(normalizedPath)) {
       continue;
     }
 
@@ -69,6 +69,11 @@ export function buildProjectFileTree(entries: ProjectFileEntryLike[]): ProjectFi
   }
 
   return finalizeDirectory(root).children;
+}
+
+function isGitMetadataPath(projectRelativePath: string): boolean {
+  const firstSegment = projectRelativePath.split('/', 1)[0];
+  return firstSegment?.toLowerCase() === '.git';
 }
 
 export function expandedProjectTreePaths(tree: ProjectFileTreeNode[], selectedPaths: readonly string[]): Set<string> {

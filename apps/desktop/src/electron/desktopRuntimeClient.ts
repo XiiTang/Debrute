@@ -1,9 +1,10 @@
 import {
   openProjectFromPickerThroughDaemon,
   openProjectThroughDaemon,
-  projectWebShellUrl,
+  projectWebShellNavigation,
   type DebruteDaemonRuntimeLike
 } from './daemonProjectOpen.js';
+import type { DebruteShellNavigation } from './desktopShellLoad.js';
 import type { WorkbenchPreferencesView, WorkbenchTitleBarState } from '@debrute/app-protocol';
 
 type DesktopRuntimeFetch = (url: string, init?: RequestInit) => Promise<Response>;
@@ -11,9 +12,9 @@ type DesktopRuntimeFetch = (url: string, init?: RequestInit) => Promise<Response
 export interface DesktopRuntimeClient {
   readonly mode: 'attached';
   runtime(): DebruteDaemonRuntimeLike;
-  shellUrl(projectId?: string): string;
-  openProject(projectRoot: string): Promise<{ projectId: string; url: string }>;
-  openProjectFromPicker(): Promise<{ opened: false } | { opened: true; projectId: string; url: string }>;
+  shellNavigation(projectId?: string): DebruteShellNavigation;
+  openProject(projectRoot: string): Promise<{ projectId: string; navigation: DebruteShellNavigation }>;
+  openProjectFromPicker(): Promise<{ opened: false } | { opened: true; projectId: string; navigation: DebruteShellNavigation }>;
   getWorkbenchTitleBarState(projectId?: string): Promise<WorkbenchTitleBarState>;
   workbenchPreferencesGet(): Promise<WorkbenchPreferencesView>;
   clearRecentProjectRoots(): Promise<{ ok: true }>;
@@ -34,7 +35,7 @@ export function createAttachedDesktopRuntimeClient(
   return {
     mode: 'attached',
     runtime: () => attachedRuntime,
-    shellUrl: (projectId) => projectWebShellUrl(attachedRuntime, projectId),
+    shellNavigation: (projectId) => projectWebShellNavigation(attachedRuntime, projectId),
     openProject: (projectRoot) => openProjectThroughDaemon(attachedRuntime, projectRoot, fetchImpl),
     openProjectFromPicker: () => openProjectFromPickerThroughDaemon(attachedRuntime, fetchImpl),
     getWorkbenchTitleBarState: (projectId) => getWorkbenchTitleBarState(attachedRuntime, fetchImpl, projectId),

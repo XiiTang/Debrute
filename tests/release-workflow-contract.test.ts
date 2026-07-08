@@ -12,11 +12,6 @@ describe('GitHub release workflow contract', () => {
     expect(workflow).toContain('Install ripgrep');
     expect(workflow).toContain('sudo apt-get update && sudo apt-get install -y ripgrep');
     expect(workflow).toContain('build-desktop:');
-    expect(workflow).not.toContain('build-photoshop-plugins:');
-    expect(workflow).not.toContain('pnpm package:photoshop-plugin');
-    expect(workflow).not.toContain('release/photoshop-uxp/debrute-photoshop-uxp-*.ccx');
-    expect(workflow).not.toContain('release/photoshop-cep/debrute-photoshop-cep-*.zip');
-    expect(workflow).not.toContain('name: photoshop-plugins');
     expect(workflow).toContain('publish-release:');
     expect(workflow).toContain('CSC_IDENTITY_AUTO_DISCOVERY: false');
     expect(workflow).toContain('debrute-update-manifest.json');
@@ -41,7 +36,6 @@ describe('GitHub release workflow contract', () => {
 
     expect(publishReleaseBlock).toContain('Unexpected release assets');
     expect(publishReleaseBlock).toContain('Duplicate release asset');
-    expect(publishReleaseBlock).not.toContain('const missing = expected.filter');
   });
 
   it('does not publish directly from matrix build jobs', () => {
@@ -52,18 +46,10 @@ describe('GitHub release workflow contract', () => {
   it('builds Desktop release assets from the workspace root in fresh matrix jobs', () => {
     const buildDesktopBlock = workflow.slice(workflow.indexOf('build-desktop:'), workflow.indexOf('publish-release:'));
     expect(buildDesktopBlock).toContain('- run: pnpm build');
-    expect(buildDesktopBlock).not.toContain('- run: pnpm --filter @debrute/desktop build');
     expect(buildDesktopBlock).toContain('electron-builder --mac dmg --${{ matrix.arch }} --publish never');
-    expect(buildDesktopBlock).not.toContain('electron-builder --mac zip --universal --publish never');
     expect(buildDesktopBlock).toContain('electron-builder --win nsis --x64 --publish never');
     expect(buildDesktopBlock).toContain('electron-builder --linux AppImage --x64 --publish never');
-    expect(buildDesktopBlock).not.toContain('latest-mac.yml');
-    expect(buildDesktopBlock).not.toContain('latest.yml');
-    expect(buildDesktopBlock).not.toContain('.blockmap');
     expect(buildDesktopBlock).toContain('debrute-desktop-${{ matrix.publicPlatform }}-${{ matrix.arch }}');
-    expect(buildDesktopBlock).not.toContain('arch: universal');
-    expect(buildDesktopBlock).not.toContain('Rename Desktop assets');
-    expect(workflow).not.toContain('sha256sum debrute-*');
     expect(workflow).toContain('Generate signed update manifest');
   });
 

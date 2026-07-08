@@ -16,7 +16,6 @@ export default defineConfig({
       { find: /^react\/jsx-dev-runtime$/, replacement: resolve(workspaceRoot, 'node_modules/react/jsx-dev-runtime.js') },
       { find: /^react-dom$/, replacement: resolve(workspaceRoot, 'node_modules/react-dom/index.js') },
       { find: /^react-dom\/server$/, replacement: resolve(workspaceRoot, 'node_modules/react-dom/server.node.js') },
-      { find: /^sharp$/, replacement: resolve(workspaceRoot, 'node_modules/sharp/lib/index.js') },
       { find: '@debrute/app-protocol', replacement: resolve(workspaceRoot, 'packages/app-protocol/src/index.ts') },
       { find: '@debrute/capability-core', replacement: resolve(workspaceRoot, 'packages/capability-core/src/index.ts') },
       { find: '@debrute/capability-runtime', replacement: resolve(workspaceRoot, 'packages/capability-runtime/src/index.ts') },

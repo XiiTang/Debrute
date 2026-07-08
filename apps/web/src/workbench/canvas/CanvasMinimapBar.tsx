@@ -50,7 +50,7 @@ export function CanvasMinimapBar({
       testId="canvas-minimap-button-zoom"
     />
   ) : (
-    <Map size={13} />
+    <Map />
   );
   const enabled = Boolean(
     canvas

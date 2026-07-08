@@ -38,15 +38,16 @@ export async function executeFalAudioModel(input: AudioModelAdapterInput): Promi
 }
 
 function requestBody(input: AudioModelAdapterInput): Record<string, unknown> {
+  const prompt = input.args.prompt as string;
   if (input.entry.debruteModelId === 'fal-stable-audio-text-to-audio') {
     return {
-      prompt: stringArg(input.args, 'prompt') ?? '',
+      prompt,
       ...(numberArg(input.args, 'duration_seconds') !== undefined ? { seconds_total: numberArg(input.args, 'duration_seconds') } : {}),
       ...(numberArg(input.args, 'seed') !== undefined ? { seed: numberArg(input.args, 'seed') } : {})
     };
   }
   return {
-    prompt: stringArg(input.args, 'prompt') ?? '',
+    prompt,
     ...(numberArg(input.args, 'duration_seconds') !== undefined ? { duration: numberArg(input.args, 'duration_seconds') } : {}),
     ...(stringArg(input.args, 'format') ? { output_format: stringArg(input.args, 'format') } : {}),
     ...(numberArg(input.args, 'seed') !== undefined ? { seed: numberArg(input.args, 'seed') } : {}),

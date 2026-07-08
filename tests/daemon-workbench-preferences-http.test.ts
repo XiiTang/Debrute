@@ -86,7 +86,9 @@ describe('daemon Workbench preferences HTTP routes', () => {
     cleanups.push(() => daemon.close(), () => rm(home, { recursive: true, force: true }));
     const runtime = await daemon.listen();
 
-    const eventPromise = onceWorkbenchEvent(`${runtime.daemonUrl}/api/workbench/events?clientId=test-client&debrute-token=test-token`);
+    const eventPromise = onceWorkbenchEvent(`${runtime.daemonUrl}/api/workbench/events?clientId=test-client`, {
+      headers: { 'x-debrute-daemon-token': 'test-token' }
+    });
     await requestJson(`${runtime.daemonUrl}/api/settings/workbench-preferences`, {
       method: 'PUT',
       headers: { 'content-type': 'application/json', 'x-debrute-daemon-token': 'test-token' },
@@ -119,9 +121,9 @@ async function requestJson<T = any>(url: string, init?: RequestInit): Promise<T>
   return response.json() as Promise<T>;
 }
 
-async function onceWorkbenchEvent(url: string): Promise<unknown> {
+async function onceWorkbenchEvent(url: string, init: RequestInit = {}): Promise<unknown> {
   const controller = new AbortController();
-  const response = await fetch(url, { signal: controller.signal });
+  const response = await fetch(url, { ...init, signal: controller.signal });
   if (!response.ok || !response.body) {
     throw new Error(`Failed to open event stream: ${response.status}`);
   }

@@ -60,7 +60,7 @@ describe('DebruteAppServer CLI service methods', () => {
       await globalRuntime.videoModelSaveSetting('doubao-seedance-2-0-260128', {
         baseUrlOverride: null,
         requestModelIdOverride: null,
-        apiKeys: [{ id: 'vid-a', key: 'sk-video', label: null, enabled: true }]
+        apiKey: 'sk-video'
       });
 
       const videoModels = await server.listVideoModelsForCli();
@@ -90,7 +90,7 @@ describe('DebruteAppServer CLI service methods', () => {
       await globalRuntime.imageModelSaveSetting('gpt-image-2', {
         baseUrlOverride: null,
         requestModelIdOverride: null,
-        apiKeys: [{ id: 'img-a', key: 'sk-image', label: null, enabled: true }]
+        apiKey: 'sk-image'
       });
       const imageModels = await server.listImageModelsForCli();
 
@@ -119,12 +119,12 @@ describe('DebruteAppServer CLI service methods', () => {
       await globalRuntime.audioModelSaveSetting('openai-gpt-4o-mini-tts', {
         baseUrlOverride: null,
         requestModelIdOverride: null,
-        apiKeys: [{ id: 'aud-a', key: 'sk-audio', label: null, enabled: true }]
+        apiKey: 'sk-audio'
       });
       await globalRuntime.audioModelSaveSetting('elevenlabs-music', {
         baseUrlOverride: null,
         requestModelIdOverride: null,
-        apiKeys: [{ id: 'aud-a', key: 'sk-music', label: null, enabled: true }]
+        apiKey: 'sk-music'
       });
 
       await expect(server.listAudioModelsForCli('tts')).resolves.toEqual([expect.objectContaining({
@@ -165,7 +165,7 @@ describe('DebruteAppServer CLI service methods', () => {
       await globalRuntime.imageModelSaveSetting('gpt-image-2', {
         baseUrlOverride: null,
         requestModelIdOverride: null,
-        apiKeys: [{ id: 'img-a', key: 'sk-image', label: null, enabled: true }]
+        apiKey: 'sk-image'
       });
 
       await expect(server.runtimeStatusForCli()).resolves.toMatchObject({
@@ -194,7 +194,7 @@ describe('DebruteAppServer CLI service methods', () => {
       await globalRuntime.videoModelSaveSetting('doubao-seedance-2-0-260128', {
         baseUrlOverride: null,
         requestModelIdOverride: null,
-        apiKeys: [{ id: 'vid-a', key: 'sk-video', label: null, enabled: true }]
+        apiKey: 'sk-video'
       });
 
       await expect(server.runtimeStatusForCli()).resolves.toMatchObject({
@@ -223,7 +223,7 @@ describe('DebruteAppServer CLI service methods', () => {
       await globalRuntime.audioModelSaveSetting('openai-gpt-4o-mini-tts', {
         baseUrlOverride: null,
         requestModelIdOverride: null,
-        apiKeys: [{ id: 'aud-a', key: 'sk-audio', label: null, enabled: true }]
+        apiKey: 'sk-audio'
       });
 
       await expect(server.runtimeStatusForCli()).resolves.toMatchObject({
@@ -572,7 +572,7 @@ describe('DebruteAppServer CLI service methods', () => {
       await globalRuntime.videoModelSaveSetting('doubao-seedance-2-0-260128', {
         baseUrlOverride: null,
         requestModelIdOverride: null,
-        apiKeys: [{ id: 'vid-a', key: 'sk-video', label: null, enabled: true }]
+        apiKey: 'sk-video'
       });
       configStore.resetCounts();
 

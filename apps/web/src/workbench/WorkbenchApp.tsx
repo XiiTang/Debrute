@@ -100,7 +100,7 @@ import { FloatingPanelContent, WorkbenchFloatingPanelShell } from './shell/Float
 import { FloatingTextEditorWindow } from './shell/FloatingTextEditorWindow';
 import { NotificationStack } from './shell/NotificationStack';
 import { TerminalPanel } from './terminal/TerminalPanel';
-import { Button } from './ui';
+import { Button, WorkbenchIconProvider } from './ui';
 import { FIXED_TOP_FLOATING_BAR_RECTS, TITLE_BAR_RESERVED_RECT } from './shell/workbenchLayers';
 import {
   DEFAULT_WORKBENCH_WINDOW_ORDER,
@@ -152,12 +152,12 @@ export function WorkbenchApp(): React.ReactElement {
   const [explorerSelection, setExplorerSelection] = useState<ProjectTreeSelectionState>(() => createEmptyProjectTreeSelection());
   const [floatingPanels, setFloatingPanels] = useState<FloatingPanelState>(DEFAULT_FLOATING_PANEL_STATE);
   const [requestedTerminalCwd, setRequestedTerminalCwd] = useState<string | null>(null);
-  const [imageModelSettings, setImageModelSettings] = useState<WorkbenchState['imageModelSettings']>();
-  const [videoModelSettings, setVideoModelSettings] = useState<WorkbenchState['videoModelSettings']>();
-  const [audioModelSettings, setAudioModelSettings] = useState<WorkbenchState['audioModelSettings']>();
-  const [integrationsSettings, setIntegrationsSettings] = useState<WorkbenchState['integrationsSettings']>();
-  const [adobeBridge, setAdobeBridge] = useState<WorkbenchState['adobeBridge']>();
-  const [workbenchPreferences, setWorkbenchPreferences] = useState<WorkbenchPreferencesView>();
+  const [workbenchPreferencesResource, setWorkbenchPreferencesResource] = useState<WorkbenchState['workbenchPreferences']>({ status: 'loading' });
+  const [imageModelSettings, setImageModelSettings] = useState<WorkbenchState['imageModelSettings']>({ status: 'loading' });
+  const [videoModelSettings, setVideoModelSettings] = useState<WorkbenchState['videoModelSettings']>({ status: 'loading' });
+  const [audioModelSettings, setAudioModelSettings] = useState<WorkbenchState['audioModelSettings']>({ status: 'loading' });
+  const [integrationsSettings, setIntegrationsSettings] = useState<WorkbenchState['integrationsSettings']>({ status: 'loading' });
+  const [adobeBridge, setAdobeBridge] = useState<WorkbenchState['adobeBridge']>({ status: 'loading' });
   const [locale, setLocale] = useState<WorkbenchLocale>('en');
   const [themePreference, setThemePreference] = useState<WorkbenchThemePreference>('system');
   const [resolvedTheme, setResolvedTheme] = useState<WorkbenchResolvedTheme>(() => resolveWorkbenchThemePreference('system'));
@@ -194,10 +194,16 @@ export function WorkbenchApp(): React.ReactElement {
   const textEditorWindowsRef = useRef(textEditorWindows);
   const feedbackBarClearTimerRef = useRef<number | undefined>(undefined);
   const feedbackBarHoveredRef = useRef(false);
+  const workbenchPreferencesLoadVersionRef = useRef(0);
+  const integrationsSettingsLoadVersionRef = useRef(0);
+  const imageModelSettingsLoadVersionRef = useRef(0);
+  const videoModelSettingsLoadVersionRef = useRef(0);
+  const audioModelSettingsLoadVersionRef = useRef(0);
+  const adobeBridgeLoadVersionRef = useRef(0);
   const i18n = useMemo(() => createI18n(locale), [locale]);
   const localeRef = useRef<WorkbenchLocale>(locale);
 
-  const applyWorkbenchPreferences = useCallback((preferences: WorkbenchPreferencesView) => {
+  const applyWorkbenchPreferenceEffects = useCallback((preferences: WorkbenchPreferencesView): WorkbenchPreferencesView => {
     const nextLocale = parseWorkbenchLocale(preferences.locale);
     const nextThemePreference = parseWorkbenchThemePreference(preferences.themePreference);
     const nextPreferences: WorkbenchPreferencesView = {
@@ -205,10 +211,16 @@ export function WorkbenchApp(): React.ReactElement {
       themePreference: nextThemePreference
     };
     localeRef.current = nextLocale;
-    setWorkbenchPreferences(nextPreferences);
     setLocale(nextLocale);
     setThemePreference(nextThemePreference);
+    return nextPreferences;
   }, []);
+
+  const applyLoadedWorkbenchPreferences = useCallback((preferences: WorkbenchPreferencesView) => {
+    workbenchPreferencesLoadVersionRef.current += 1;
+    const nextPreferences = applyWorkbenchPreferenceEffects(preferences);
+    setWorkbenchPreferencesResource({ status: 'ready', value: nextPreferences });
+  }, [applyWorkbenchPreferenceEffects]);
 
   useEffect(() => {
     localeRef.current = locale;
@@ -229,6 +241,115 @@ export function WorkbenchApp(): React.ReactElement {
   const notifyCanvasFeedbackUnavailable = useCallback((message: string) => {
     const currentI18n = createI18n(localeRef.current);
     setNotifications((current) => [currentI18n.t('canvas.feedback.unavailable', { message }), ...current].slice(0, 4));
+  }, []);
+
+  const reloadWorkbenchPreferences = useCallback(async () => {
+    const loadVersion = workbenchPreferencesLoadVersionRef.current + 1;
+    workbenchPreferencesLoadVersionRef.current = loadVersion;
+    setWorkbenchPreferencesResource({ status: 'loading' });
+    try {
+      const preferences = await api.workbenchPreferencesGet();
+      if (workbenchPreferencesLoadVersionRef.current !== loadVersion) {
+        return;
+      }
+      const nextPreferences = applyWorkbenchPreferenceEffects(preferences);
+      setWorkbenchPreferencesResource({ status: 'ready', value: nextPreferences });
+    } catch (error) {
+      if (workbenchPreferencesLoadVersionRef.current !== loadVersion) {
+        return;
+      }
+      applyWorkbenchPreferenceEffects(DEFAULT_WORKBENCH_PREFERENCES);
+      setWorkbenchPreferencesResource({ status: 'error', message: errorMessage(error) });
+    }
+  }, [applyWorkbenchPreferenceEffects]);
+
+  const reloadIntegrationsSettings = useCallback(async () => {
+    const loadVersion = integrationsSettingsLoadVersionRef.current + 1;
+    integrationsSettingsLoadVersionRef.current = loadVersion;
+    setIntegrationsSettings({ status: 'loading' });
+    try {
+      const settings = await api.integrationsListStatus();
+      if (integrationsSettingsLoadVersionRef.current === loadVersion) {
+        setIntegrationsSettings({ status: 'ready', value: settings });
+      }
+    } catch (error) {
+      if (integrationsSettingsLoadVersionRef.current === loadVersion) {
+        setIntegrationsSettings({ status: 'error', message: errorMessage(error) });
+      }
+    }
+  }, []);
+
+  const reloadImageModelSettings = useCallback(async () => {
+    const loadVersion = imageModelSettingsLoadVersionRef.current + 1;
+    imageModelSettingsLoadVersionRef.current = loadVersion;
+    setImageModelSettings({ status: 'loading' });
+    try {
+      const settings = await api.imageModelGetSettings();
+      if (imageModelSettingsLoadVersionRef.current === loadVersion) {
+        setImageModelSettings({ status: 'ready', value: settings });
+      }
+    } catch (error) {
+      if (imageModelSettingsLoadVersionRef.current === loadVersion) {
+        setImageModelSettings({ status: 'error', message: errorMessage(error) });
+      }
+    }
+  }, []);
+
+  const reloadVideoModelSettings = useCallback(async () => {
+    const loadVersion = videoModelSettingsLoadVersionRef.current + 1;
+    videoModelSettingsLoadVersionRef.current = loadVersion;
+    setVideoModelSettings({ status: 'loading' });
+    try {
+      const settings = await api.videoModelGetSettings();
+      if (videoModelSettingsLoadVersionRef.current === loadVersion) {
+        setVideoModelSettings({ status: 'ready', value: settings });
+      }
+    } catch (error) {
+      if (videoModelSettingsLoadVersionRef.current === loadVersion) {
+        setVideoModelSettings({ status: 'error', message: errorMessage(error) });
+      }
+    }
+  }, []);
+
+  const reloadAudioModelSettings = useCallback(async () => {
+    const loadVersion = audioModelSettingsLoadVersionRef.current + 1;
+    audioModelSettingsLoadVersionRef.current = loadVersion;
+    setAudioModelSettings({ status: 'loading' });
+    try {
+      const settings = await api.audioModelGetSettings();
+      if (audioModelSettingsLoadVersionRef.current === loadVersion) {
+        setAudioModelSettings({ status: 'ready', value: settings });
+      }
+    } catch (error) {
+      if (audioModelSettingsLoadVersionRef.current === loadVersion) {
+        setAudioModelSettings({ status: 'error', message: errorMessage(error) });
+      }
+    }
+  }, []);
+
+  const reloadAdobeBridge = useCallback(async () => {
+    const loadVersion = adobeBridgeLoadVersionRef.current + 1;
+    adobeBridgeLoadVersionRef.current = loadVersion;
+    setAdobeBridge({ status: 'loading' });
+    try {
+      const bridge = await api.adobeBridgeGetState();
+      if (adobeBridgeLoadVersionRef.current === loadVersion) {
+        setAdobeBridge({ status: 'ready', value: bridge });
+      }
+    } catch (error) {
+      if (adobeBridgeLoadVersionRef.current === loadVersion) {
+        setAdobeBridge({ status: 'error', message: errorMessage(error) });
+      }
+    }
+  }, []);
+
+  const invalidateSettingsResourceLoads = useCallback(() => {
+    workbenchPreferencesLoadVersionRef.current += 1;
+    integrationsSettingsLoadVersionRef.current += 1;
+    imageModelSettingsLoadVersionRef.current += 1;
+    videoModelSettingsLoadVersionRef.current += 1;
+    audioModelSettingsLoadVersionRef.current += 1;
+    adobeBridgeLoadVersionRef.current += 1;
   }, []);
 
   const refreshTitleBarState = useCallback(async (projectId?: string) => {
@@ -292,16 +413,18 @@ export function WorkbenchApp(): React.ReactElement {
     setCanvasMinimapOpen(false);
     setProjectOpenAttemptedPath(undefined);
     setProjectOpenError(undefined);
-    setImageModelSettings(await api.imageModelGetSettings());
-    setVideoModelSettings(await api.videoModelGetSettings());
-    setAudioModelSettings(await api.audioModelGetSettings());
-    setIntegrationsSettings(await api.integrationsListStatus());
-    setAdobeBridge(await api.adobeBridgeGetState());
     await loadCanvasFeedback(api, setCanvasFeedback, notifyCanvasFeedbackUnavailable);
+    await reloadAdobeBridge();
     await refreshTitleBarState(opened.projectId);
     const currentI18n = createI18n(localeRef.current);
     setNotifications((current) => [currentI18n.t('shell.notifications.projectOpened', { name: opened.snapshot.metadata.project.name }), ...current].slice(0, 4));
-  }, [chooseActiveCanvasForProject, loadFloatingPanelsForProject, notifyCanvasFeedbackUnavailable, refreshTitleBarState]);
+  }, [
+    chooseActiveCanvasForProject,
+    loadFloatingPanelsForProject,
+    notifyCanvasFeedbackUnavailable,
+    refreshTitleBarState,
+    reloadAdobeBridge
+  ]);
 
   useEffect(() => {
     workbenchViewportRectRef.current = workbenchViewportRect;
@@ -360,16 +483,12 @@ export function WorkbenchApp(): React.ReactElement {
 
   useEffect(() => {
     let disposed = false;
-    void api.integrationsListStatus().then((settings) => {
-      if (!disposed) {
-        setIntegrationsSettings(settings);
-      }
-    });
-    void api.adobeBridgeGetState().then((state) => {
-      if (!disposed) {
-        setAdobeBridge(state);
-      }
-    });
+    void reloadIntegrationsSettings();
+    void reloadImageModelSettings();
+    void reloadVideoModelSettings();
+    void reloadAudioModelSettings();
+    void reloadAdobeBridge();
+    void reloadWorkbenchPreferences();
     void api.getDesktopPlatform().then((platform) => {
       if (!disposed) {
         setDesktopPlatform(platform);
@@ -381,24 +500,6 @@ export function WorkbenchApp(): React.ReactElement {
       }
     });
     void (async () => {
-      try {
-        const preferences = await api.workbenchPreferencesGet();
-        if (disposed) {
-          return;
-        }
-        applyWorkbenchPreferences(preferences);
-      } catch (error) {
-        if (disposed) {
-          return;
-        }
-        const englishI18n = createI18n('en');
-        applyWorkbenchPreferences(DEFAULT_WORKBENCH_PREFERENCES);
-        setNotifications((current) => [
-          englishI18n.t('shell.notifications.languagePreferenceLoadFailed', { message: errorMessage(error) }),
-          ...current
-        ].slice(0, 4));
-      }
-
       try {
         const result = await openInitialProject(api, initialRoute);
         if (disposed) {
@@ -424,8 +525,19 @@ export function WorkbenchApp(): React.ReactElement {
     })();
     return () => {
       disposed = true;
+      invalidateSettingsResourceLoads();
     };
-  }, [applyOpenedProject, applyWorkbenchPreferences, initialRoute]);
+  }, [
+    applyOpenedProject,
+    invalidateSettingsResourceLoads,
+    initialRoute,
+    reloadAdobeBridge,
+    reloadAudioModelSettings,
+    reloadImageModelSettings,
+    reloadIntegrationsSettings,
+    reloadVideoModelSettings,
+    reloadWorkbenchPreferences
+  ]);
 
   useEffect(() => {
     void refreshTitleBarState(daemonProjectId);
@@ -523,7 +635,7 @@ export function WorkbenchApp(): React.ReactElement {
         void loadCanvasFeedback(api, setCanvasFeedback, notifyCanvasFeedbackUnavailable);
       }
       if (event.type === 'workbench.preferences.changed') {
-        applyWorkbenchPreferences(event.preferences);
+        applyLoadedWorkbenchPreferences(event.preferences);
       }
       if (event.type === 'project.fileChanged') {
         void refreshTextFileBuffer(event.event.projectRelativePath);
@@ -535,25 +647,36 @@ export function WorkbenchApp(): React.ReactElement {
         setCanvasFeedback(event.feedback);
       }
       if (event.type === 'imageModel.settings.changed') {
-        setImageModelSettings(event.settings);
+        imageModelSettingsLoadVersionRef.current += 1;
+        setImageModelSettings({ status: 'ready', value: event.settings });
       }
       if (event.type === 'videoModel.settings.changed') {
-        setVideoModelSettings(event.settings);
+        videoModelSettingsLoadVersionRef.current += 1;
+        setVideoModelSettings({ status: 'ready', value: event.settings });
       }
       if (event.type === 'audioModel.settings.changed') {
-        setAudioModelSettings(event.settings);
+        audioModelSettingsLoadVersionRef.current += 1;
+        setAudioModelSettings({ status: 'ready', value: event.settings });
       }
       if (event.type === 'integrations.settings.changed') {
-        setIntegrationsSettings(event.settings);
+        integrationsSettingsLoadVersionRef.current += 1;
+        setIntegrationsSettings({ status: 'ready', value: event.settings });
       }
       if (event.type === 'adobeBridge.settings.changed') {
-        setAdobeBridge((current) => current ? { ...current, settings: event.settings } : current);
+        setAdobeBridge((current) => {
+          if (current.status !== 'ready') {
+            return current;
+          }
+          adobeBridgeLoadVersionRef.current += 1;
+          return { status: 'ready', value: { ...current.value, settings: event.settings } };
+        });
       }
       if (event.type === 'adobeBridge.state.changed') {
-        setAdobeBridge(event.state);
+        adobeBridgeLoadVersionRef.current += 1;
+        setAdobeBridge({ status: 'ready', value: event.state });
       }
     });
-  }, [applyWorkbenchPreferences, chooseActiveCanvasForProject, loadFloatingPanelsForProject, notifyCanvasFeedbackUnavailable, refreshTextFileBuffer]);
+  }, [applyLoadedWorkbenchPreferences, chooseActiveCanvasForProject, loadFloatingPanelsForProject, notifyCanvasFeedbackUnavailable, refreshTextFileBuffer]);
 
   useEffect(() => {
     if (!snapshot || snapshot.canvasRegistry.status !== 'ready') {
@@ -714,7 +837,7 @@ export function WorkbenchApp(): React.ReactElement {
     snapshot,
     projectId: daemonProjectId,
     titleBarState: effectiveTitleBarState,
-    workbenchPreferences,
+    workbenchPreferences: workbenchPreferencesResource,
     resolvedTheme,
     projectOpen: {
       ...(projectOpenAttemptedPath ? { attemptedPath: projectOpenAttemptedPath } : {}),
@@ -743,18 +866,26 @@ export function WorkbenchApp(): React.ReactElement {
     getProductState: () => api.getProductState(),
     checkProductUpdate: () => api.checkProductUpdate(),
     applyProductUpdate: () => api.applyProductUpdate(),
+    reloadWorkbenchPreferences,
+    reloadImageModelSettings,
+    reloadVideoModelSettings,
+    reloadAudioModelSettings,
+    reloadIntegrationsSettings,
+    reloadAdobeBridge,
     saveWorkbenchPreferences: async (input) => {
-      const previousPreferences = workbenchPreferences ?? DEFAULT_WORKBENCH_PREFERENCES;
+      const previousPreferences = workbenchPreferencesResource.status === 'ready'
+        ? workbenchPreferencesResource.value
+        : DEFAULT_WORKBENCH_PREFERENCES;
       const nextPreferences: WorkbenchPreferencesView = {
         locale: parseWorkbenchLocale(input.locale),
         themePreference: parseWorkbenchThemePreference(input.themePreference)
       };
-      applyWorkbenchPreferences(nextPreferences);
+      applyLoadedWorkbenchPreferences(nextPreferences);
       try {
         const preferences = await api.workbenchPreferencesSave(nextPreferences);
-        applyWorkbenchPreferences(preferences);
+        applyLoadedWorkbenchPreferences(preferences);
       } catch (error) {
-        applyWorkbenchPreferences(previousPreferences);
+        applyLoadedWorkbenchPreferences(previousPreferences);
         throw error;
       }
     },
@@ -776,24 +907,29 @@ export function WorkbenchApp(): React.ReactElement {
     },
     saveImageModelSetting: async (modelId, input) => {
       const imageModels = await api.imageModelSaveSetting(modelId, input);
-      setImageModelSettings(imageModels);
+      imageModelSettingsLoadVersionRef.current += 1;
+      setImageModelSettings({ status: 'ready', value: imageModels });
     },
     saveVideoModelSetting: async (modelId, input) => {
       const videoModels = await api.videoModelSaveSetting(modelId, input);
-      setVideoModelSettings(videoModels);
+      videoModelSettingsLoadVersionRef.current += 1;
+      setVideoModelSettings({ status: 'ready', value: videoModels });
     },
     saveAudioModelSetting: async (modelId, input) => {
       const audioModels = await api.audioModelSaveSetting(modelId, input);
-      setAudioModelSettings(audioModels);
+      audioModelSettingsLoadVersionRef.current += 1;
+      setAudioModelSettings({ status: 'ready', value: audioModels });
     },
     rescanIntegrations: async () => {
       const settings = await api.integrationsRescan();
-      setIntegrationsSettings(settings);
+      integrationsSettingsLoadVersionRef.current += 1;
+      setIntegrationsSettings({ status: 'ready', value: settings });
       return settings;
     },
     runIntegrationOperation: async (input) => {
       const result = await api.integrationsRunOperation(input);
-      setIntegrationsSettings(result.settings);
+      integrationsSettingsLoadVersionRef.current += 1;
+      setIntegrationsSettings({ status: 'ready', value: result.settings });
       if (!result.ok) {
         const currentI18n = createI18n(localeRef.current);
         const diagnostic = result.diagnostic?.stderrTail
@@ -812,13 +948,19 @@ export function WorkbenchApp(): React.ReactElement {
       return result;
     },
     saveAdobeBridgeSettings: async (input) => {
-      setAdobeBridge(await api.adobeBridgeSaveSettings(input));
+      const bridge = await api.adobeBridgeSaveSettings(input);
+      adobeBridgeLoadVersionRef.current += 1;
+      setAdobeBridge({ status: 'ready', value: bridge });
     },
     linkAdobeBridgePhotoshop: async (input) => {
-      setAdobeBridge(await api.adobeBridgeLinkPhotoshop(input));
+      const bridge = await api.adobeBridgeLinkPhotoshop(input);
+      adobeBridgeLoadVersionRef.current += 1;
+      setAdobeBridge({ status: 'ready', value: bridge });
     },
     unlinkAdobeBridgePhotoshop: async (adobeClientId) => {
-      setAdobeBridge(await api.adobeBridgeUnlinkPhotoshop(adobeClientId));
+      const bridge = await api.adobeBridgeUnlinkPhotoshop(adobeClientId);
+      adobeBridgeLoadVersionRef.current += 1;
+      setAdobeBridge({ status: 'ready', value: bridge });
     },
     sendProjectFileToPhotoshop: async (input) => {
       const result = await api.sendProjectFileToPhotoshop(input);
@@ -1012,7 +1154,7 @@ export function WorkbenchApp(): React.ReactElement {
   }), [
     activeCanvasId,
     activeCanvasRuntime,
-    applyWorkbenchPreferences,
+    applyLoadedWorkbenchPreferences,
     applyOpenedProject,
     centerCanvasProjectionNode,
     locateProjectFileInCanvas,
@@ -1025,6 +1167,12 @@ export function WorkbenchApp(): React.ReactElement {
     openTextEditorWindow,
     readGeneratedAsset,
     readProjectTextFile,
+    reloadAdobeBridge,
+    reloadAudioModelSettings,
+    reloadImageModelSettings,
+    reloadIntegrationsSettings,
+    reloadVideoModelSettings,
+    reloadWorkbenchPreferences,
     reloadTextFileBuffer,
     saveTextFileBuffer,
     snapshot,
@@ -1032,7 +1180,7 @@ export function WorkbenchApp(): React.ReactElement {
     updateCanvasFeedbackEntry,
     updateCanvasTextViewportState,
     updateTextFileBuffer,
-    workbenchPreferences,
+    workbenchPreferencesResource,
     writeProjectTextFile
   ]);
 
@@ -1251,6 +1399,7 @@ export function WorkbenchApp(): React.ReactElement {
     });
   }, [actions, activeCanvasId, i18n, notify]);
   const canRevealInCanvas = Boolean(activeCanvasRuntime && activeCanvasRuntimeSnapshot?.surfaceSize);
+  const readyAdobeBridge = adobeBridge.status === 'ready' ? adobeBridge.value : undefined;
   const contextMenuItems = useMemo(() => contextMenu
       ? buildWorkbenchContextMenuItems({
           target: contextMenu.target,
@@ -1259,9 +1408,9 @@ export function WorkbenchApp(): React.ReactElement {
           canRevealInCanvas,
           fileClipboard,
           desktopPlatform,
-          adobeBridgeEnabled: adobeBridge?.settings.enabled === true
+          adobeBridgeEnabled: readyAdobeBridge?.settings.enabled === true
         })
-    : [], [activeCanvasRuntime, activeProjection, adobeBridge?.settings.enabled, canRevealInCanvas, contextMenu, desktopPlatform, fileClipboard]);
+    : [], [activeCanvasRuntime, activeProjection, canRevealInCanvas, contextMenu, desktopPlatform, fileClipboard, readyAdobeBridge?.settings.enabled]);
   const canvasOrder = snapshot?.canvasRegistry.status === 'ready'
     ? snapshot.canvasRegistry.canvasOrder
     : [];
@@ -1454,6 +1603,27 @@ export function WorkbenchApp(): React.ReactElement {
   if (isLoading) {
     return (
       <I18nProvider locale={locale}>
+        <WorkbenchIconProvider>
+          <div className="workbench-shell" data-theme={resolvedTheme} data-testid="workbench-shell">
+            <WorkbenchTitleBar
+              state={effectiveTitleBarState}
+              nativeWindowState={nativeWindowState}
+              onCommand={handleTitleBarCommand}
+              onWindowCommand={handleTitleBarWindowCommand}
+            />
+            <div className="boot-screen boot-screen--with-titlebar">
+              <Loader2 className="spin" size={22} />
+              <span>{i18n.t('shell.boot.openingProject')}</span>
+            </div>
+          </div>
+        </WorkbenchIconProvider>
+      </I18nProvider>
+    );
+  }
+
+  return (
+    <I18nProvider locale={locale}>
+      <WorkbenchIconProvider>
         <div className="workbench-shell" data-theme={resolvedTheme} data-testid="workbench-shell">
           <WorkbenchTitleBar
             state={effectiveTitleBarState}
@@ -1461,242 +1631,225 @@ export function WorkbenchApp(): React.ReactElement {
             onCommand={handleTitleBarCommand}
             onWindowCommand={handleTitleBarWindowCommand}
           />
-          <div className="boot-screen boot-screen--with-titlebar">
-            <Loader2 className="spin" size={22} />
-            <span>{i18n.t('shell.boot.openingProject')}</span>
-          </div>
-        </div>
-      </I18nProvider>
-    );
-  }
-
-  return (
-    <I18nProvider locale={locale}>
-      <div className="workbench-shell" data-theme={resolvedTheme} data-testid="workbench-shell">
-      <WorkbenchTitleBar
-        state={effectiveTitleBarState}
-        nativeWindowState={nativeWindowState}
-        onCommand={handleTitleBarCommand}
-        onWindowCommand={handleTitleBarWindowCommand}
-      />
-      <div className="canvas-layer" data-testid="canvas-layer">
-        {registryInvalid ? (
-          <div className="empty-editor empty-project">
-            <strong>{i18n.t('canvas.registry.needsRepair')}</strong>
-            <span>{registryInvalid.message}</span>
-            <Button
-              onClick={() => { void actions.repairCanvasIndex().catch((error) => notify(i18n.t('shell.notifications.canvasRegistryRepairFailed', { message: errorMessage(error) }))); }}
-            >
-              {i18n.t('canvas.registry.autoRepair')}
-            </Button>
-          </div>
-        ) : (
-          <CanvasEditor
-            canvasId={activeCanvasId}
-            state={state}
-            actions={actions}
-            runtimeScopeKey={canvasRuntimeScopeKey}
-            overlayRuntime={canvasOverlayRuntime}
-            minimapOpen={canvasMinimapOpen}
-            feedbackPlacementContext={{
-              viewportRect: workbenchViewportRect,
-              reservedRects: floatingBarReservedRects
-            }}
-            onCurrentNodesChange={handleActiveCanvasCurrentNodesChange}
-            onFeedbackBarTargetChange={handleFeedbackBarTargetChange}
-            onRuntimeChange={setActiveCanvasRuntime}
-            onOpenContextMenu={openWorkbenchContextMenu}
-            localFeedbackMode={localFeedbackMode}
-            pendingFeedbackItem={pendingFeedbackItem}
-            onLocalFeedbackDraft={handleLocalFeedbackDraft}
-          />
-        )}
-      </div>
-      <div className="floating-bar-layer" data-testid="floating-bar-layer">
-        <FloatingDock
-          panelState={floatingPanels}
-          onToggle={(panelId) => {
-            const isOpen = floatingPanels.panels[panelId].open;
-            setFloatingPanels((current) => toggleFloatingPanel(current, panelId, workbenchViewportRect));
-            setWindowOrder((current) => (
-              isOpen
-                ? closeWorkbenchWindow(current, panelWindowIdentity(panelId))
-                : focusWorkbenchWindow(current, panelWindowIdentity(panelId))
-            ));
-          }}
-        />
-        <CanvasMinimapBar
-          canvas={activeCanvas}
-          nodes={activeCanvasMinimapNodes}
-          runtime={activeCanvasRuntime}
-          overlayRuntime={canvasOverlayRuntime}
-          open={canvasMinimapOpen}
-          onOpenChange={setCanvasMinimapOpen}
-          panelPlacement={minimapPanelPlacement}
-        />
-        {snapshot?.canvasRegistry.status === 'ready' ? (
-          <CanvasResetLayoutButton
-            enabled={canResetActiveCanvasLayout}
-            onResetCanvasLayout={resetActiveCanvasLayout}
-          />
-        ) : null}
-        {currentFeedbackBarTarget ? (
-          <CanvasFeedbackBar
-            projectRelativePath={currentFeedbackBarTarget.projectRelativePath}
-            entry={currentFeedbackBarTarget.entry}
-            onUpdate={actions.updateCanvasFeedbackEntry}
-            overlayRuntime={canvasOverlayRuntime}
-            localToolset={currentFeedbackBarTarget.localToolset}
-            localFeedbackMode={currentFeedbackBarTarget.localToolset !== 'none' ? localFeedbackMode : undefined}
-            onLocalFeedbackModeChange={currentFeedbackBarTarget.localToolset === 'image' ? handleLocalFeedbackModeChange : undefined}
-            canStartVideoMomentFeedback={currentFeedbackBarTarget.canStartVideoMomentFeedback}
-            onStartVideoMomentFeedback={currentFeedbackBarTarget.startVideoMomentFeedback}
-            onSeekToMoment={currentFeedbackBarTarget.seekToMoment}
-            pendingItemComment={
-              pendingFeedbackItem?.projectRelativePath === currentFeedbackBarTarget.projectRelativePath
-                ? pendingFeedbackItemComment
-                : undefined
-            }
-            pendingItemLabel={
-              pendingFeedbackItem?.projectRelativePath === currentFeedbackBarTarget.projectRelativePath
-                ? pendingFeedbackItem.label
-                : undefined
-            }
-            pendingItemReadyForComment={
-              pendingFeedbackItem?.projectRelativePath === currentFeedbackBarTarget.projectRelativePath
-                ? pendingFeedbackItem.kind === 'comment' || pendingFeedbackItem.geometry !== undefined
-                : undefined
-            }
-            onPendingItemCommentChange={
-              pendingFeedbackItem?.projectRelativePath === currentFeedbackBarTarget.projectRelativePath
-                ? setPendingFeedbackItemComment
-                : undefined
-            }
-            onSavePendingItem={
-              pendingFeedbackItem?.projectRelativePath === currentFeedbackBarTarget.projectRelativePath
-                ? savePendingFeedbackItem
-                : undefined
-            }
-            onCancelPendingItem={
-              pendingFeedbackItem?.projectRelativePath === currentFeedbackBarTarget.projectRelativePath
-                ? cancelPendingFeedbackItem
-                : undefined
-            }
-            onPointerEnter={handleFeedbackBarPointerEnter}
-            onPointerLeave={handleFeedbackBarPointerLeave}
-          />
-        ) : null}
-        {snapshot?.canvasRegistry.status === 'ready' ? (
-          <CanvasCardBar
-            canvases={canvasCards}
-            activeCanvasId={activeCanvasId}
-            onActiveCanvasChange={setActiveCanvasId}
-            onCreateCanvas={() => actions.createCanvas().then(() => undefined).catch((error) => notify(i18n.t('shell.notifications.createCanvasFailed', { message: errorMessage(error) })))}
-            onRenameCanvas={(input) => actions.renameCanvas(input).then(() => undefined).catch((error) => notify(i18n.t('shell.notifications.renameCanvasFailed', { message: errorMessage(error) })))}
-            onDeleteCanvas={(input) => actions.deleteCanvas(input).then(() => undefined).catch((error) => notify(i18n.t('shell.notifications.deleteCanvasFailed', { message: errorMessage(error) })))}
-            onReorderCanvases={(input) => actions.reorderCanvases(input).then(() => undefined).catch((error) => notify(i18n.t('shell.notifications.reorderCanvasesFailed', { message: errorMessage(error) })))}
-          />
-        ) : null}
-        {Object.values(textEditorWindows).filter((windowState) => windowState.open).map((windowState) => (
-          <FloatingTextEditorWindow
-            key={windowState.projectRelativePath}
-            windowState={windowState}
-            orderState={renderWindowOrder}
-            buffer={textFileBuffers[windowState.projectRelativePath]}
-            actions={actions}
-            onBringToFront={() => setWindowOrder((current) => (
-              focusWorkbenchWindow(current, textEditorWindowIdentity(windowState.projectRelativePath))
-            ))}
-            onClose={() => {
-              setTextEditorWindows((windows) => closeTextEditorWindowState(windows, windowState.projectRelativePath));
-              setWindowOrder((current) => closeWorkbenchWindow(current, textEditorWindowIdentity(windowState.projectRelativePath)));
-            }}
-            onDrag={(dx, dy) => setTextEditorWindows((windows) => dragTextEditorWindowState(windows, windowState.projectRelativePath, { dx, dy }, workbenchViewportRect))}
-          />
-        ))}
-      </div>
-      <div className="panel-layer" data-testid="panel-layer">
-        {FLOATING_PANEL_IDS.map((panelId) => (
-          floatingPanels.panels[panelId].open ? (
-            <WorkbenchFloatingPanelShell
-              key={panelId}
-              panelId={panelId}
-              state={floatingPanels}
-              orderState={renderWindowOrder}
-              onClose={() => {
-                setFloatingPanels((current) => closeFloatingPanel(current, panelId));
-                setWindowOrder((current) => closeWorkbenchWindow(current, panelWindowIdentity(panelId)));
-              }}
-              onBringToFront={() => setWindowOrder((current) => focusWorkbenchWindow(current, panelWindowIdentity(panelId)))}
-              onDrag={(dx, dy) => setFloatingPanels((current) => dragFloatingPanel(current, panelId, { dx, dy }, workbenchViewportRect))}
-              onResize={(rect) => setFloatingPanels((current) => resizeFloatingPanel(current, panelId, rect, workbenchViewportRect))}
-            >
-              <FloatingPanelContent
-                panelId={panelId}
+          <div className="canvas-layer" data-testid="canvas-layer">
+            {registryInvalid ? (
+              <div className="empty-editor empty-project">
+                <strong>{i18n.t('canvas.registry.needsRepair')}</strong>
+                <span>{registryInvalid.message}</span>
+                <Button
+                  onClick={() => { void actions.repairCanvasIndex().catch((error) => notify(i18n.t('shell.notifications.canvasRegistryRepairFailed', { message: errorMessage(error) }))); }}
+                >
+                  {i18n.t('canvas.registry.autoRepair')}
+                </Button>
+              </div>
+            ) : (
+              <CanvasEditor
+                canvasId={activeCanvasId}
                 state={state}
-                activeCanvasId={activeCanvasId}
-                activeCanvasRuntime={activeCanvasRuntime}
                 actions={actions}
+                runtimeScopeKey={canvasRuntimeScopeKey}
+                overlayRuntime={canvasOverlayRuntime}
+                minimapOpen={canvasMinimapOpen}
+                feedbackPlacementContext={{
+                  viewportRect: workbenchViewportRect,
+                  reservedRects: floatingBarReservedRects
+                }}
+                onCurrentNodesChange={handleActiveCanvasCurrentNodesChange}
+                onFeedbackBarTargetChange={handleFeedbackBarTargetChange}
+                onRuntimeChange={setActiveCanvasRuntime}
                 onOpenContextMenu={openWorkbenchContextMenu}
-                fileClipboard={fileClipboard}
-                inlineProjectTreeEdit={inlineProjectTreeEdit}
-                onEditValueChange={updateInlineProjectTreeEditValue}
-                onEditSubmit={() => void submitInlineProjectTreeEdit()}
-                onEditCancel={() => setInlineProjectTreeEdit(undefined)}
-                onClearCut={() => setFileClipboard((current) => current?.operation === 'cut' ? undefined : current)}
-                onExplorerSelectionChange={setExplorerSelection}
-                onLocateFileInCanvas={locateProjectFileInCanvas}
-                onProjectTreeInternalDrop={handleProjectTreeInternalDrop}
-                onProjectTreeExternalDrop={handleProjectTreeExternalDrop}
-                onCreateRootFile={() => setInlineProjectTreeEdit(createInlineEditState('creating-file', ''))}
-                desktopPlatform={desktopPlatform}
-                onKeyboardFileCommand={handleProjectTreeKeyboardFileCommand}
-                terminalPanel={(
-                  <TerminalPanel
-                    api={api}
-                    resolvedTheme={resolvedTheme}
-                    requestedCwdProjectRelativePath={requestedTerminalCwd}
-                    onRequestedCwdConsumed={() => setRequestedTerminalCwd(null)}
-                  />
-                )}
+                localFeedbackMode={localFeedbackMode}
+                pendingFeedbackItem={pendingFeedbackItem}
+                onLocalFeedbackDraft={handleLocalFeedbackDraft}
               />
-            </WorkbenchFloatingPanelShell>
-          ) : null
-        ))}
-      </div>
-      {contextMenu ? (
-        <WorkbenchContextMenu
-          items={contextMenuItems}
-          position={contextMenu.position}
-          desktopPlatform={desktopPlatform}
-          onCommand={handleWorkbenchContextMenuCommand}
-          onClose={closeWorkbenchContextMenu}
-        />
-      ) : null}
-      {sendToPhotoshopPath && daemonProjectId ? (
-        <SendToPhotoshopDialog
-          projectId={daemonProjectId}
-          projectRelativePath={sendToPhotoshopPath}
-          bridge={adobeBridge}
-          sending={sendingToPhotoshop}
-          onClose={() => setSendToPhotoshopPath(undefined)}
-          onSend={(adobeClientId) => {
-            setSendingToPhotoshop(true);
-            void actions.sendProjectFileToPhotoshop({
-              projectRelativePath: sendToPhotoshopPath,
-              adobeClientId
-            }).then(() => {
-              setSendToPhotoshopPath(undefined);
-            }).catch((error) => {
-              notify(i18n.t('shell.notifications.sendToPhotoshopFailed', { message: errorMessage(error) }));
-            }).finally(() => {
-              setSendingToPhotoshop(false);
-            });
-          }}
-        />
-      ) : null}
-        <NotificationStack notifications={notifications} />
-      </div>
+            )}
+          </div>
+          <div className="floating-bar-layer" data-testid="floating-bar-layer">
+            <FloatingDock
+              panelState={floatingPanels}
+              onToggle={(panelId) => {
+                const isOpen = floatingPanels.panels[panelId].open;
+                setFloatingPanels((current) => toggleFloatingPanel(current, panelId, workbenchViewportRect));
+                setWindowOrder((current) => (
+                  isOpen
+                    ? closeWorkbenchWindow(current, panelWindowIdentity(panelId))
+                    : focusWorkbenchWindow(current, panelWindowIdentity(panelId))
+                ));
+              }}
+            />
+            <CanvasMinimapBar
+              canvas={activeCanvas}
+              nodes={activeCanvasMinimapNodes}
+              runtime={activeCanvasRuntime}
+              overlayRuntime={canvasOverlayRuntime}
+              open={canvasMinimapOpen}
+              onOpenChange={setCanvasMinimapOpen}
+              panelPlacement={minimapPanelPlacement}
+            />
+            {snapshot?.canvasRegistry.status === 'ready' ? (
+              <CanvasResetLayoutButton
+                enabled={canResetActiveCanvasLayout}
+                onResetCanvasLayout={resetActiveCanvasLayout}
+              />
+            ) : null}
+            {currentFeedbackBarTarget ? (
+              <CanvasFeedbackBar
+                projectRelativePath={currentFeedbackBarTarget.projectRelativePath}
+                entry={currentFeedbackBarTarget.entry}
+                onUpdate={actions.updateCanvasFeedbackEntry}
+                overlayRuntime={canvasOverlayRuntime}
+                localToolset={currentFeedbackBarTarget.localToolset}
+                localFeedbackMode={currentFeedbackBarTarget.localToolset !== 'none' ? localFeedbackMode : undefined}
+                onLocalFeedbackModeChange={currentFeedbackBarTarget.localToolset === 'image' ? handleLocalFeedbackModeChange : undefined}
+                canStartVideoMomentFeedback={currentFeedbackBarTarget.canStartVideoMomentFeedback}
+                onStartVideoMomentFeedback={currentFeedbackBarTarget.startVideoMomentFeedback}
+                onSeekToMoment={currentFeedbackBarTarget.seekToMoment}
+                pendingItemComment={
+                  pendingFeedbackItem?.projectRelativePath === currentFeedbackBarTarget.projectRelativePath
+                    ? pendingFeedbackItemComment
+                    : undefined
+                }
+                pendingItemLabel={
+                  pendingFeedbackItem?.projectRelativePath === currentFeedbackBarTarget.projectRelativePath
+                    ? pendingFeedbackItem.label
+                    : undefined
+                }
+                pendingItemReadyForComment={
+                  pendingFeedbackItem?.projectRelativePath === currentFeedbackBarTarget.projectRelativePath
+                    ? pendingFeedbackItem.kind === 'comment' || pendingFeedbackItem.geometry !== undefined
+                    : undefined
+                }
+                onPendingItemCommentChange={
+                  pendingFeedbackItem?.projectRelativePath === currentFeedbackBarTarget.projectRelativePath
+                    ? setPendingFeedbackItemComment
+                    : undefined
+                }
+                onSavePendingItem={
+                  pendingFeedbackItem?.projectRelativePath === currentFeedbackBarTarget.projectRelativePath
+                    ? savePendingFeedbackItem
+                    : undefined
+                }
+                onCancelPendingItem={
+                  pendingFeedbackItem?.projectRelativePath === currentFeedbackBarTarget.projectRelativePath
+                    ? cancelPendingFeedbackItem
+                    : undefined
+                }
+                onPointerEnter={handleFeedbackBarPointerEnter}
+                onPointerLeave={handleFeedbackBarPointerLeave}
+              />
+            ) : null}
+            {snapshot?.canvasRegistry.status === 'ready' ? (
+              <CanvasCardBar
+                canvases={canvasCards}
+                activeCanvasId={activeCanvasId}
+                onActiveCanvasChange={setActiveCanvasId}
+                onCreateCanvas={() => actions.createCanvas().then(() => undefined).catch((error) => notify(i18n.t('shell.notifications.createCanvasFailed', { message: errorMessage(error) })))}
+                onRenameCanvas={(input) => actions.renameCanvas(input).then(() => undefined).catch((error) => notify(i18n.t('shell.notifications.renameCanvasFailed', { message: errorMessage(error) })))}
+                onDeleteCanvas={(input) => actions.deleteCanvas(input).then(() => undefined).catch((error) => notify(i18n.t('shell.notifications.deleteCanvasFailed', { message: errorMessage(error) })))}
+                onReorderCanvases={(input) => actions.reorderCanvases(input).then(() => undefined).catch((error) => notify(i18n.t('shell.notifications.reorderCanvasesFailed', { message: errorMessage(error) })))}
+              />
+            ) : null}
+            {Object.values(textEditorWindows).filter((windowState) => windowState.open).map((windowState) => (
+              <FloatingTextEditorWindow
+                key={windowState.projectRelativePath}
+                windowState={windowState}
+                orderState={renderWindowOrder}
+                buffer={textFileBuffers[windowState.projectRelativePath]}
+                actions={actions}
+                onBringToFront={() => setWindowOrder((current) => (
+                  focusWorkbenchWindow(current, textEditorWindowIdentity(windowState.projectRelativePath))
+                ))}
+                onClose={() => {
+                  setTextEditorWindows((windows) => closeTextEditorWindowState(windows, windowState.projectRelativePath));
+                  setWindowOrder((current) => closeWorkbenchWindow(current, textEditorWindowIdentity(windowState.projectRelativePath)));
+                }}
+                onDrag={(dx, dy) => setTextEditorWindows((windows) => dragTextEditorWindowState(windows, windowState.projectRelativePath, { dx, dy }, workbenchViewportRect))}
+              />
+            ))}
+          </div>
+          <div className="panel-layer" data-testid="panel-layer">
+            {FLOATING_PANEL_IDS.map((panelId) => (
+              floatingPanels.panels[panelId].open ? (
+                <WorkbenchFloatingPanelShell
+                  key={panelId}
+                  panelId={panelId}
+                  state={floatingPanels}
+                  orderState={renderWindowOrder}
+                  onClose={() => {
+                    setFloatingPanels((current) => closeFloatingPanel(current, panelId));
+                    setWindowOrder((current) => closeWorkbenchWindow(current, panelWindowIdentity(panelId)));
+                  }}
+                  onBringToFront={() => setWindowOrder((current) => focusWorkbenchWindow(current, panelWindowIdentity(panelId)))}
+                  onDrag={(dx, dy) => setFloatingPanels((current) => dragFloatingPanel(current, panelId, { dx, dy }, workbenchViewportRect))}
+                  onResize={(rect) => setFloatingPanels((current) => resizeFloatingPanel(current, panelId, rect, workbenchViewportRect))}
+                >
+                  <FloatingPanelContent
+                    panelId={panelId}
+                    state={state}
+                    activeCanvasId={activeCanvasId}
+                    activeCanvasRuntime={activeCanvasRuntime}
+                    actions={actions}
+                    onOpenContextMenu={openWorkbenchContextMenu}
+                    fileClipboard={fileClipboard}
+                    inlineProjectTreeEdit={inlineProjectTreeEdit}
+                    onEditValueChange={updateInlineProjectTreeEditValue}
+                    onEditSubmit={() => void submitInlineProjectTreeEdit()}
+                    onEditCancel={() => setInlineProjectTreeEdit(undefined)}
+                    onClearCut={() => setFileClipboard((current) => current?.operation === 'cut' ? undefined : current)}
+                    onExplorerSelectionChange={setExplorerSelection}
+                    onLocateFileInCanvas={locateProjectFileInCanvas}
+                    onProjectTreeInternalDrop={handleProjectTreeInternalDrop}
+                    onProjectTreeExternalDrop={handleProjectTreeExternalDrop}
+                    onCreateRootFile={() => setInlineProjectTreeEdit(createInlineEditState('creating-file', ''))}
+                    desktopPlatform={desktopPlatform}
+                    onKeyboardFileCommand={handleProjectTreeKeyboardFileCommand}
+                    terminalPanel={(
+                      <TerminalPanel
+                        api={api}
+                        resolvedTheme={resolvedTheme}
+                        requestedCwdProjectRelativePath={requestedTerminalCwd}
+                        onRequestedCwdConsumed={() => setRequestedTerminalCwd(null)}
+                      />
+                    )}
+                  />
+                </WorkbenchFloatingPanelShell>
+              ) : null
+            ))}
+          </div>
+          {contextMenu ? (
+            <WorkbenchContextMenu
+              items={contextMenuItems}
+              position={contextMenu.position}
+              desktopPlatform={desktopPlatform}
+              onCommand={handleWorkbenchContextMenuCommand}
+              onClose={closeWorkbenchContextMenu}
+            />
+          ) : null}
+          {sendToPhotoshopPath && daemonProjectId ? (
+            <SendToPhotoshopDialog
+              projectId={daemonProjectId}
+              projectRelativePath={sendToPhotoshopPath}
+              bridge={readyAdobeBridge}
+              sending={sendingToPhotoshop}
+              onClose={() => setSendToPhotoshopPath(undefined)}
+              onSend={(adobeClientId) => {
+                setSendingToPhotoshop(true);
+                void actions.sendProjectFileToPhotoshop({
+                  projectRelativePath: sendToPhotoshopPath,
+                  adobeClientId
+                }).then(() => {
+                  setSendToPhotoshopPath(undefined);
+                }).catch((error) => {
+                  notify(i18n.t('shell.notifications.sendToPhotoshopFailed', { message: errorMessage(error) }));
+                }).finally(() => {
+                  setSendingToPhotoshop(false);
+                });
+              }}
+            />
+          ) : null}
+          <NotificationStack notifications={notifications} />
+        </div>
+      </WorkbenchIconProvider>
     </I18nProvider>
   );
 }

@@ -151,7 +151,7 @@ export function CanvasCardBar({
           );
         })}
       </div>
-      <IconButton className="canvas-card-add db-canvas-control" label={i18n.t('canvas.cardBar.new')} icon={<Plus size={14} />} onClick={() => { void onCreateCanvas(); }} />
+      <IconButton className="canvas-card-add db-canvas-control" label={i18n.t('canvas.cardBar.new')} icon={<Plus />} onClick={() => { void onCreateCanvas(); }} />
     </nav>
   );
 }

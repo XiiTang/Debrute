@@ -153,9 +153,9 @@ describe('daemon terminal routes', () => {
     const tokenless = await fetch(`${runtime.daemonUrl}/api/projects/${opened.projectId}/terminals/${created.session.id}/events`);
     expect(tokenless.status).toBe(403);
 
-    const response = await fetch(
-      `${runtime.daemonUrl}/api/projects/${opened.projectId}/terminals/${created.session.id}/events?debrute-token=test-token`
-    );
+    const response = await fetch(`${runtime.daemonUrl}/api/projects/${opened.projectId}/terminals/${created.session.id}/events`, {
+      headers: { 'x-debrute-daemon-token': 'test-token' }
+    });
     const stream = new SseTestReader(response);
     try {
       await expect(stream.next()).resolves.toEqual({
@@ -203,9 +203,9 @@ describe('daemon terminal routes', () => {
       body: JSON.stringify({ projectRoot })
     });
 
-    const response = await fetch(
-      `${runtime.daemonUrl}/api/projects/${opened.projectId}/terminals/missing/events?debrute-token=test-token`
-    );
+    const response = await fetch(`${runtime.daemonUrl}/api/projects/${opened.projectId}/terminals/missing/events`, {
+      headers: { 'x-debrute-daemon-token': 'test-token' }
+    });
 
     expect(response.status).toBe(404);
     await expect(response.json()).resolves.toEqual({

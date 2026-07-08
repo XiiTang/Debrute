@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 import {
   dispatchCanvasWheelSequence,
   parseCliArgs,
+  startCanvasPanRoundTripCapture,
   summarizePanRoundTripResult
 } from '../scripts/canvas-pan-roundtrip-diagnostic.mjs';
 
@@ -199,6 +200,31 @@ describe('canvas pan round-trip diagnostic CLI args', () => {
 
   it('parses summary-only output mode', () => {
     expect(parseCliArgs(['--summary-only'])).toMatchObject({ summaryOnly: true });
+  });
+});
+
+describe('canvas pan round-trip diagnostic capture setup', () => {
+  it('propagates stopCapture failures before starting a fresh capture', async () => {
+    const client = {
+      evaluate: async (expression: string) => {
+        const window = {
+          __debruteCanvasPerf: {
+            stopCapture: () => {
+              throw new Error('stop failed');
+            },
+            startCapture: () => {
+              throw new Error('startCapture should not run');
+            }
+          }
+        };
+        const performance = {
+          clearResourceTimings: () => undefined
+        };
+        return Function('window', 'performance', `return ${expression};`)(window, performance);
+      }
+    };
+
+    await expect(startCanvasPanRoundTripCapture(client)).rejects.toThrow('stop failed');
   });
 });
 

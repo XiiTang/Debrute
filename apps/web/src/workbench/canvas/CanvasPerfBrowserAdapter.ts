@@ -163,11 +163,7 @@ function safeMark(api: CanvasPerfPerformanceApi, name: string, detail?: Record<s
   try {
     api.mark(name, detail ? { detail } : undefined);
   } catch {
-    try {
-      api.mark(name);
-    } catch {
-      // Browser performance APIs must never break Canvas interaction.
-    }
+    // Browser performance APIs must never break Canvas interaction.
   }
 }
 

@@ -10,10 +10,9 @@ describe('desktop runtime client', () => {
       return new Response(JSON.stringify({ projectId: 'project-1' }), { status: 200 });
     });
 
-    await expect(client.openProject('/tmp/debrute-project')).resolves.toEqual({
-      projectId: 'project-1',
-      url: 'http://127.0.0.1:17322/projects/project-1?debrute-token=secret'
-    });
+    const opened = await client.openProject('/tmp/debrute-project');
+    expect(opened.projectId).toBe('project-1');
+    expectWorkbenchNavigation(opened.navigation, '/projects/project-1');
     expect(client.mode).toBe('attached');
     expect(requests[0]?.url).toBe('http://127.0.0.1:17321/api/projects/open');
     expect((requests[0]?.init?.headers as Record<string, string>)['x-debrute-daemon-token']).toBe('secret');
@@ -82,11 +81,14 @@ describe('desktop runtime client', () => {
       }), { status: 200 });
     });
 
-    await expect(client.openProjectFromPicker()).resolves.toEqual({
+    const opened = await client.openProjectFromPicker();
+    expect(opened).toMatchObject({
       opened: true,
-      projectId: 'project-1',
-      url: 'http://127.0.0.1:17322/projects/project-1?debrute-token=secret'
+      projectId: 'project-1'
     });
+    if (opened.opened) {
+      expectWorkbenchNavigation(opened.navigation, '/projects/project-1');
+    }
     expect(requests).toEqual([{
       url: 'http://127.0.0.1:17321/api/projects/open-picker',
       init: {
@@ -157,4 +159,12 @@ function runtimeFixture(): DebruteDaemonRuntimeLike {
     platform: 'darwin',
     token: 'secret'
   };
+}
+
+function expectWorkbenchNavigation(navigation: { readyUrl: string; loadUrl: string }, next: string): void {
+  expect(navigation.readyUrl).toBe(`http://127.0.0.1:17322${next}`);
+  const parsed = new URL(navigation.loadUrl);
+  expect(parsed.origin).toBe('http://127.0.0.1:17322');
+  expect(parsed.pathname).toMatch(/^\/__debrute\/session\/.+/);
+  expect(parsed.searchParams.get('next')).toBe(next);
 }

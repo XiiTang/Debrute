@@ -7,7 +7,8 @@ import {
   normalizeProjectRelativePath,
   readJsonFile,
   resolveExistingProjectPath,
-  resolveProjectPathForWrite
+  resolveProjectPathForWrite,
+  isProtectedProjectDocumentMutationPath
 } from '@debrute/project-core';
 import type {
   GeneratedArtifactRole,
@@ -314,7 +315,7 @@ async function findCurrentProjectPathForGeneratedAsset(
     return directPath;
   }
   const candidateProjectRelativePaths = input.candidateProjectRelativePaths ?? (await listDebruteProjectFiles(projectRoot))
-    .filter((entry) => entry.kind === 'file' && !entry.projectRelativePath.startsWith('.debrute/'))
+    .filter((entry) => entry.kind === 'file' && !isProtectedProjectDocumentMutationPath(entry.projectRelativePath))
     .map((entry) => entry.projectRelativePath);
   for (const projectRelativePath of candidateProjectRelativePaths) {
     if (projectRelativePath === input.record.projectRelativePath) {

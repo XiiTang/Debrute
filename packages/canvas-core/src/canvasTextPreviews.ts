@@ -31,7 +31,7 @@ function normalizeCanvasTextPreviewCanvasId(canvasId: string): string {
 }
 
 function assertCanvasTextPreviewProjectRelativePath(projectRelativePath: string): void {
-  if (projectRelativePath === '.debrute' || projectRelativePath.startsWith('.debrute/')) {
+  if (projectRelativePath.split('/', 1)[0]?.toLowerCase() === '.debrute') {
     throw new Error('Canvas text preview cannot target Debrute internal files.');
   }
 }

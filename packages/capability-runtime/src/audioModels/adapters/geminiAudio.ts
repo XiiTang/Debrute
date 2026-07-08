@@ -14,7 +14,7 @@ const GEMINI_TTS_PCM = { sampleRate: 24000, channels: 1, bitsPerSample: 16 };
 
 export async function executeGeminiTtsModel(input: AudioModelAdapterInput): Promise<AudioModelAdapterResult> {
   const url = `${input.baseUrl.replace(/\/$/, '')}/interactions`;
-  const text = stringArg(input.args, 'text') ?? '';
+  const text = input.args.text as string;
   const instructions = stringArg(input.args, 'instructions');
   const body = {
     model: input.requestModelId,
@@ -47,7 +47,7 @@ export async function executeGoogleLyriaModel(input: AudioModelAdapterInput): Pr
   const format = stringArg(input.args, 'format') ?? 'mp3';
   const body = {
     model: input.requestModelId,
-    input: stringArg(input.args, 'prompt') ?? '',
+    input: input.args.prompt as string,
     ...(format === 'wav' ? { response_format: { type: 'audio' } } : {})
   };
   const { response, body: parsed } = await requestJson(input, url, {

@@ -2,7 +2,6 @@ import type {
   AddProjectPathToCanvasMapInput,
   AdobeBridgeStateView,
   AudioModelSettingsView,
-  BrowserSessionCredential,
   CanvasTextPreviewSourceAvailabilityResponse,
   CanvasVideoPreviewSourceResponse,
   DebruteProductState,
@@ -59,8 +58,6 @@ import type {
 import { getDebruteShellApi, type DebruteShellApi } from './shellApi';
 
 export interface HttpWorkbenchApiClientOptions {
-  daemonUrl?: string;
-  token?: string;
   fetch?: typeof fetch;
   shell?: DebruteShellApi;
 }
@@ -82,48 +79,19 @@ class DebruteHttpRequestError extends Error {
 }
 
 export function createHttpWorkbenchApiClient(options: HttpWorkbenchApiClientOptions = {}): WorkbenchApiClient {
-  const daemonUrl = trimTrailingSlash(options.daemonUrl ?? browserDaemonUrl());
-  let token = options.token ?? browserToken();
   const transportFetch = options.fetch ?? fetch;
   const shell = () => options.shell ?? getDebruteShellApi();
   const eventClientId = browserEventClientId();
-  const workbenchOrigin = browserWorkbenchOrigin(daemonUrl);
-
-  const routeNeedsDaemonToken = (path: string): boolean => (
-    path !== '/api/runtime'
-    && path !== '/api/status'
-    && path !== '/api/browser-session'
-  );
-
-  const daemonToken = async (): Promise<string | undefined> => {
-    if (token) {
-      return token;
-    }
-    const response = await transportFetch(`${daemonUrl}/api/browser-session`, {
-      method: 'GET',
-      headers: { 'x-debrute-web-origin': workbenchOrigin }
-    });
-    if (!response.ok) {
-      throw await responseError(response);
-    }
-    const credential = await response.json() as BrowserSessionCredential;
-    token = credential.token;
-    rememberBrowserToken(credential.token);
-    return token;
-  };
 
   const request = async <T>(method: string, path: string, body?: unknown): Promise<T> => {
     const headers: Record<string, string> = {};
     if (body !== undefined) {
       headers['content-type'] = 'application/json';
     }
-    const resolvedToken = routeNeedsDaemonToken(path) ? await daemonToken() : token;
-    if (resolvedToken) {
-      headers['x-debrute-daemon-token'] = resolvedToken;
-    }
-    const response = await transportFetch(`${daemonUrl}${path}`, {
+    const response = await transportFetch(path, {
       method,
       headers,
+      credentials: 'same-origin',
       ...(body === undefined ? {} : { body: JSON.stringify(body) })
     });
     if (!response.ok) {
@@ -135,15 +103,10 @@ export function createHttpWorkbenchApiClient(options: HttpWorkbenchApiClientOpti
     return response.json() as Promise<T>;
   };
   const requestFormData = async <T>(method: string, path: string, body: FormData): Promise<T> => {
-    const headers: Record<string, string> = {};
-    const resolvedToken = routeNeedsDaemonToken(path) ? await daemonToken() : token;
-    if (resolvedToken) {
-      headers['x-debrute-daemon-token'] = resolvedToken;
-    }
-    const response = await transportFetch(`${daemonUrl}${path}`, {
+    const response = await transportFetch(path, {
       method,
-      headers,
-      body
+      body,
+      credentials: 'same-origin'
     });
     if (!response.ok) {
       throw await responseError(response);
@@ -214,8 +177,8 @@ export function createHttpWorkbenchApiClient(options: HttpWorkbenchApiClientOpti
       listener(event);
     }
   };
-  const openWorkbenchEventSource = (url: URL): EventSource => {
-    const source = new EventSource(url.toString());
+  const openWorkbenchEventSource = (url: string): EventSource => {
+    const source = new EventSource(url);
     source.onmessage = (event) => {
       dispatchWorkbenchEvent(JSON.parse(event.data) as WorkbenchEvent);
     };
@@ -229,22 +192,12 @@ export function createHttpWorkbenchApiClient(options: HttpWorkbenchApiClientOpti
     if (eventListeners.size === 0) {
       return;
     }
-    const openGlobalEventSource = (resolvedToken: string | undefined): void => {
-      if (requestId !== globalEventSourceRequestId || eventListeners.size === 0) {
-        return;
-      }
-      const eventUrl = new URL(`${daemonUrl}/api/workbench/events`);
-      eventUrl.searchParams.set('clientId', eventClientId);
-      if (resolvedToken) {
-        eventUrl.searchParams.set('debrute-token', resolvedToken);
-      }
-      globalEventSource = openWorkbenchEventSource(eventUrl);
-    };
-    if (token) {
-      openGlobalEventSource(token);
+    if (requestId !== globalEventSourceRequestId || eventListeners.size === 0) {
       return;
     }
-    void daemonToken().then(openGlobalEventSource);
+    const eventUrl = new URL('/api/workbench/events', browserEventSourceBaseUrl());
+    eventUrl.searchParams.set('clientId', eventClientId);
+    globalEventSource = openWorkbenchEventSource(relativeUrlString(eventUrl));
   };
   const reconnectProjectEventSource = (): void => {
     projectEventSource?.close();
@@ -252,12 +205,9 @@ export function createHttpWorkbenchApiClient(options: HttpWorkbenchApiClientOpti
     if (!currentProjectId || eventListeners.size === 0) {
       return;
     }
-    const eventUrl = new URL(`${daemonUrl}${projectPath('/events')}`);
+    const eventUrl = new URL(projectPath('/events'), browserEventSourceBaseUrl());
     eventUrl.searchParams.set('clientId', eventClientId);
-    if (token) {
-      eventUrl.searchParams.set('debrute-token', token);
-    }
-    projectEventSource = openWorkbenchEventSource(eventUrl);
+    projectEventSource = openWorkbenchEventSource(relativeUrlString(eventUrl));
   };
 
   return {
@@ -328,11 +278,8 @@ export function createHttpWorkbenchApiClient(options: HttpWorkbenchApiClientOpti
       projectPath(`/terminals/${encodeURIComponent(input.terminalId)}`)
     ),
     subscribeTerminalEvents: (terminalId, listener, onError): TerminalEventSubscription => {
-      const eventUrl = new URL(`${daemonUrl}${projectPath(`/terminals/${encodeURIComponent(terminalId)}/events`)}`);
-      if (token) {
-        eventUrl.searchParams.set('debrute-token', token);
-      }
-      const source = new EventSource(eventUrl.toString());
+      const eventUrl = new URL(projectPath(`/terminals/${encodeURIComponent(terminalId)}/events`), browserEventSourceBaseUrl());
+      const source = new EventSource(relativeUrlString(eventUrl));
       let streamClosed = false;
       source.addEventListener('terminal', (event) => {
         const terminalEvent = JSON.parse((event as MessageEvent).data) as TerminalEvent;
@@ -466,11 +413,15 @@ export function createHttpWorkbenchApiClient(options: HttpWorkbenchApiClientOpti
       projectPath(`/canvases/${encodeURIComponent(input.canvasId)}/video-playback`),
       { updates: input.updates }
     ),
-    updateCanvasTextViewportState: (input: UpdateCanvasTextViewportStateInput) => requestRevisioned<WorkbenchCanvasDocumentMutationResult>(
-      'PATCH',
-      projectPath(`/canvases/${encodeURIComponent(input.canvasId)}/text-viewport`),
-      { updates: input.updates }
-    ),
+    updateCanvasTextViewportState: async (input: UpdateCanvasTextViewportStateInput) => {
+      const result = await request<WorkbenchCanvasDocumentMutationResult>(
+        'PATCH',
+        projectPath(`/canvases/${encodeURIComponent(input.canvasId)}/text-viewport`),
+        { updates: input.updates }
+      );
+      rememberProjectRevision(result);
+      return result;
+    },
     imageModelGetSettings: () => request<ImageModelSettingsView>('GET', '/api/models/image'),
     imageModelSaveSetting: (modelId: string, input: SaveImageModelSettingInput) => (
       request<ImageModelSettingsView>('PUT', `/api/models/image/${encodeURIComponent(modelId)}`, input)
@@ -511,65 +462,12 @@ export function createHttpWorkbenchApiClient(options: HttpWorkbenchApiClientOpti
   };
 }
 
-function browserDaemonUrl(): string {
-  if (typeof window === 'undefined') {
-    throw new Error('Debrute daemon URL must be provided outside a browser window.');
-  }
-  return window.location.origin;
+function browserEventSourceBaseUrl(): string {
+  return typeof window === 'undefined' ? 'http://debrute.local' : window.location.origin;
 }
 
-function browserWorkbenchOrigin(daemonUrl: string): string {
-  if (typeof window !== 'undefined') {
-    return window.location.origin;
-  }
-  return daemonUrl;
-}
-
-function browserToken(): string | undefined {
-  if (typeof window === 'undefined') {
-    return undefined;
-  }
-  const params = new URLSearchParams(window.location.search);
-  const fromUrl = params.get('debrute-token') ?? undefined;
-  if (fromUrl) {
-    params.delete('debrute-token');
-    const nextSearch = params.toString();
-    const nextUrl = `${window.location.pathname}${nextSearch ? `?${nextSearch}` : ''}${window.location.hash}`;
-    window.history.replaceState(historyStateWithDaemonToken(fromUrl), '', nextUrl);
-    return fromUrl;
-  }
-  return daemonTokenFromHistoryState();
-}
-
-function daemonTokenFromHistoryState(): string | undefined {
-  const state = (window as { history?: { state?: unknown } }).history?.state;
-  if (!state || typeof state !== 'object' || Array.isArray(state)) {
-    return undefined;
-  }
-  const token = (state as { debruteDaemonToken?: unknown }).debruteDaemonToken;
-  return typeof token === 'string' && token.length > 0 ? token : undefined;
-}
-
-function rememberBrowserToken(token: string): void {
-  if (typeof window === 'undefined') {
-    return;
-  }
-  window.history.replaceState(
-    historyStateWithDaemonToken(token),
-    '',
-    `${window.location.pathname}${window.location.search}${window.location.hash}`
-  );
-}
-
-function historyStateWithDaemonToken(token: string): Record<string, unknown> {
-  const state = (window as { history?: { state?: unknown } }).history?.state;
-  const current = state && typeof state === 'object' && !Array.isArray(state)
-    ? state as Record<string, unknown>
-    : {};
-  return {
-    ...current,
-    debruteDaemonToken: token
-  };
+function relativeUrlString(url: URL): string {
+  return `${url.pathname}${url.search}${url.hash}`;
 }
 
 function browserEventClientId(): string {
@@ -651,8 +549,4 @@ function isRevisionedProjectResponse(value: unknown): value is RevisionedProject
     && !Array.isArray(value)
     && typeof (value as { projectId?: unknown }).projectId === 'string'
     && typeof (value as { projectRevision?: unknown }).projectRevision === 'number';
-}
-
-function trimTrailingSlash(value: string): string {
-  return value.endsWith('/') ? value.slice(0, -1) : value;
 }

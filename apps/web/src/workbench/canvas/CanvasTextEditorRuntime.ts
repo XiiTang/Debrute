@@ -17,8 +17,16 @@ import {
   syntaxTreeAvailable
 } from '@codemirror/language';
 import { search, searchKeymap } from '@codemirror/search';
+import { CANVAS_TEXT_SURFACE_METRICS } from './CanvasTextSurface';
 
 export const CANVAS_TEXT_EDITOR_SYNTAX_HIGHLIGHT_STYLE_ID = 'codemirror-default-highlight-style-v1';
+
+const CANVAS_TEXT_EDITOR_CURSOR_SCROLL_MARGIN_LINES = 2;
+
+export const CANVAS_TEXT_EDITOR_CURSOR_SCROLL_MARGIN = {
+  x: CANVAS_TEXT_SURFACE_METRICS.linePaddingInlinePx,
+  y: Math.ceil(CANVAS_TEXT_SURFACE_METRICS.lineHeightPx * CANVAS_TEXT_EDITOR_CURSOR_SCROLL_MARGIN_LINES)
+} as const;
 
 export interface CanvasTextEditorCallbacks {
   onChange: (value: string) => void;
@@ -255,6 +263,10 @@ export function canvasTextEditorWordWrapExtension(wordWrap: boolean): Extension 
   return wordWrap ? EditorView.lineWrapping : [];
 }
 
+export function canvasTextEditorCursorScrollMarginExtension(): Extension {
+  return EditorView.cursorScrollMargin.of(CANVAS_TEXT_EDITOR_CURSOR_SCROLL_MARGIN);
+}
+
 export function canvasTextEditorTheme(): Extension {
   return EditorView.theme({
     '&': {
@@ -329,6 +341,7 @@ export function canvasTextEditorBaseExtensions(callbacks: CanvasTextEditorCallba
     syntaxHighlighting(defaultHighlightStyle),
     keymap.of(canvasTextEditorKeymap(callbacks)),
     EditorView.updateListener.of(canvasTextEditorUpdateListener(callbacks)),
+    canvasTextEditorCursorScrollMarginExtension(),
     canvasTextEditorTheme()
   ];
 }

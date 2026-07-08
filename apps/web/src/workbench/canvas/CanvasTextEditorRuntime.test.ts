@@ -1,5 +1,7 @@
+// @vitest-environment jsdom
 import { describe, expect, it, vi } from 'vitest';
 import { EditorState, type Transaction } from '@codemirror/state';
+import { EditorView } from '@codemirror/view';
 import { history, undoDepth } from '@codemirror/commands';
 import { json } from '@codemirror/lang-json';
 import { syntaxTreeAvailable } from '@codemirror/language';
@@ -7,6 +9,7 @@ import {
   canvasTextEditorApplyInitialScroll,
   canvasTextEditorApplyFocusRequest,
   canvasTextEditorCancelInlineEditKeyBinding,
+  canvasTextEditorCursorScrollMarginExtension,
   canvasTextEditorEnsureVisibleSyntaxReady,
   canvasTextEditorExternalValueSyncAnnotation,
   canvasTextEditorKeymap,
@@ -14,8 +17,20 @@ import {
   canvasTextEditorUpdateListener,
   type CanvasTextEditorCallbackRef
 } from './CanvasTextEditorRuntime';
+import { CANVAS_TEXT_SURFACE_METRICS } from './CanvasTextSurface';
 
 describe('CanvasTextEditorRuntime', () => {
+  it('configures the cursor scroll margin from text surface metrics', () => {
+    const state = EditorState.create({
+      extensions: [canvasTextEditorCursorScrollMarginExtension()]
+    });
+
+    expect(state.facet(EditorView.cursorScrollMargin)).toEqual({
+      x: CANVAS_TEXT_SURFACE_METRICS.linePaddingInlinePx,
+      y: Math.ceil(CANVAS_TEXT_SURFACE_METRICS.lineHeightPx * 2)
+    });
+  });
+
   it('binds Mod-s to save', () => {
     const callbacks: CanvasTextEditorCallbackRef = {
       current: {
@@ -333,25 +348,26 @@ describe('CanvasTextEditorRuntime', () => {
 
   it('forces syntax parsing through the visible range before capture readiness', () => {
     const content = jsonlFixture();
-    let state = EditorState.create({
-      doc: content,
-      extensions: [json()]
+    const parent = document.createElement('div');
+    document.body.appendChild(parent);
+    const view = new EditorView({
+      parent,
+      state: EditorState.create({
+        doc: content,
+        extensions: [json()]
+      })
     });
-    const view = {
-      get state() {
-        return state;
-      },
-      viewport: { from: 0, to: state.doc.length },
-      visibleRanges: [{ from: 0, to: state.doc.length }],
-      dispatch(spec: Parameters<typeof state.update>[0]) {
-        state = state.update(spec).state;
-      }
-    };
 
-    expect(syntaxTreeAvailable(state, state.doc.length)).toBe(false);
-    expect(canvasTextEditorEnsureVisibleSyntaxReady(view as never)).toBe(true);
-    expect(syntaxTreeAvailable(state, state.doc.length)).toBe(true);
+    try {
+      expect(syntaxTreeAvailable(view.state, view.state.doc.length)).toBe(false);
+      expect(canvasTextEditorEnsureVisibleSyntaxReady(view)).toBe(true);
+      expect(syntaxTreeAvailable(view.state, view.state.doc.length)).toBe(true);
+    } finally {
+      view.destroy();
+      parent.remove();
+    }
   });
+
 });
 
 function jsonlFixture(): string {

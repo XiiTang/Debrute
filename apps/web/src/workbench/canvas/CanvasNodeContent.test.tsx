@@ -836,6 +836,66 @@ describe('CanvasNodeContent text chrome', () => {
     }
   });
 
+  it('commits the selected text editor scroll position when selection ends before preview handoff', async () => {
+    const restoreActEnvironment = installReactActEnvironment();
+    const container = document.createElement('div');
+    document.body.appendChild(container);
+    const root = createRoot(container);
+    const node = textNode('flow/readme.md', 'rev-a');
+    const onUpdateTextViewport = vi.fn();
+    const renderNode = async (selected: boolean) => {
+      await act(async () => {
+        root.render(
+          <I18nProvider locale="en">
+            <CanvasNodeContent
+              node={node}
+              selected={selected}
+              culled={false}
+              actions={actionsFixture()}
+              textBuffer={textBuffer(node.projectRelativePath, 'rev-a')}
+              onVideoPlayerMounted={() => undefined}
+              onVideoPlayingChange={() => undefined}
+              onRegisterVideoTarget={() => undefined}
+              onUpdateVideoPlaybackTime={() => undefined}
+              onUpdateTextViewport={onUpdateTextViewport}
+              onSelectNode={() => undefined}
+              onTitlePointerDown={() => undefined}
+              onTitlePointerMove={() => undefined}
+              onTitlePointerUp={() => undefined}
+            />
+          </I18nProvider>
+        );
+      });
+    };
+
+    try {
+      await renderNode(true);
+
+      const scroller = container.querySelector<HTMLElement>('.cm-scroller');
+      expect(scroller).not.toBeNull();
+      if (!scroller) {
+        throw new Error('Expected CodeMirror scroller.');
+      }
+
+      scroller.scrollTop = 96;
+      scroller.scrollLeft = 12;
+      await act(async () => {
+        scroller.dispatchEvent(new Event('scroll', { bubbles: true }));
+      });
+
+      await renderNode(false);
+
+      expect(onUpdateTextViewport).toHaveBeenLastCalledWith(node.projectRelativePath, { scrollTop: 96, scrollLeft: 12 });
+      expect(onUpdateTextViewport).toHaveBeenCalledTimes(1);
+    } finally {
+      await act(async () => {
+        root.unmount();
+      });
+      container.remove();
+      restoreActEnvironment();
+    }
+  });
+
   it('keeps text bodies focus-gated for Canvas wheel routing', () => {
     const html = renderStaticWithI18n(
       <CanvasNodeContent

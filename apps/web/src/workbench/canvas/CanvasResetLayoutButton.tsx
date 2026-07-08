@@ -19,7 +19,7 @@ export function CanvasResetLayoutButton({
       data-testid="canvas-reset-layout-button"
       data-canvas-local-wheel="true"
       label={i18n.t('canvas.resetLayout')}
-      icon={<RotateCcw size={13} />}
+      icon={<RotateCcw />}
       disabled={!enabled}
       onPointerDown={stopCanvasResetLayoutEvent}
       onPointerMove={stopCanvasResetLayoutEvent}

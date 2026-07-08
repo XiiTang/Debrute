@@ -60,7 +60,7 @@ export const commandSpecs: DebruteCommandSpec[] = [
   spec('project.init', ['project', 'init'], 'project', 'write', 'project', 'debrute-project', '<project>', 'project status record', ['project_invalid']),
   spec('project.status', ['project', 'status'], 'project', 'read', 'project', 'none', '<project>', 'project status record', PROJECT_LOAD_ERRORS),
   spec('project.validate', ['project', 'validate'], 'project', 'read', 'project', 'none', '<project>', 'validation problem records', [...PROJECT_LOAD_ERRORS, 'project_validation_failed']),
-  spec('workbench.start', ['workbench', 'start'], 'runtime', 'write', 'none', 'logs', 'no args', 'Workbench runtime URL and port fields', WORKBENCH_RUNTIME_ERRORS),
+  spec('workbench.start', ['workbench', 'start'], 'runtime', 'write', 'none', 'logs', '[--next <same-origin-path>]', 'Workbench stable URL, launch URL, and port fields', WORKBENCH_RUNTIME_ERRORS),
   spec('canvas-map.push', ['canvas-map', 'push'], 'project', 'write', 'project', 'canvas-map', '<project> <canvas-id>', 'Canvas Map push record', [...PROJECT_LOAD_ERRORS, 'canvas_map_invalid_canvas_id', 'canvas_map_invalid_path', 'canvas_map_layout_conflict', 'canvas_map_read_failed', 'canvas_map_invalid_yaml', 'canvas_map_canvas_missing']),
   spec('canvas.create', ['canvas', 'create'], 'project', 'write', 'project', 'canvas-registry', '<project>', 'Canvas create record', [...PROJECT_LOAD_ERRORS, ...CANVAS_REGISTRY_ERRORS]),
   spec('canvas.rename', ['canvas', 'rename'], 'project', 'write', 'project', 'canvas-registry', '<project> <canvas-id> <name>', 'Canvas rename record', [...PROJECT_LOAD_ERRORS, ...CANVAS_REGISTRY_ERRORS]),

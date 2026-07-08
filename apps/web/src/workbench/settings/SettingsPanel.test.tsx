@@ -6,19 +6,18 @@ import { createRoot, type Root } from 'react-dom/client';
 import { renderToStaticMarkup } from 'react-dom/server';
 import { describe, expect, it, vi } from 'vitest';
 import { unavailableWorkbenchTitleBarState, type DebruteProductState } from '@debrute/app-protocol';
-import type { WorkbenchActions, WorkbenchState } from '../../types';
+import type { SettingsResource, WorkbenchActions, WorkbenchState } from '../../types';
 import { I18nProvider } from '../i18n';
 import { createEmptyProjectTreeSelection } from '../project-explorer/projectTreeInteraction';
 import { AudioModelSettings, ImageModelSettings, SettingsPanel } from './SettingsPanel';
 import { GeneralSettingsPage } from './general/GeneralSettingsPage';
-import { ModelApiKeyListEditor } from './ModelApiKeyListEditor';
 
 describe('SettingsPanel shared UI composition', () => {
   it('renders media model settings through shared model-card patterns', () => {
     const html = renderToStaticMarkup(
       <I18nProvider locale="en">
         <ImageModelSettings
-          state={stateWithSettings()}
+          settings={readyResourceValue(stateWithSettings().imageModelSettings)}
           actions={actions()}
         />
       </I18nProvider>
@@ -27,15 +26,17 @@ describe('SettingsPanel shared UI composition', () => {
     expect(html).toContain('db-model-card');
     expect(html).toContain('db-model-card__header');
     expect(html).toContain('db-model-card__fields');
-    expect(html).toContain('db-api-key-list');
-    expect(html).toContain('1 enabled / 2 keys');
-    expect(html).toContain('Primary');
+    expect(html).toContain('db-secret-field');
+    expect(html).toContain('key sk****************************aa');
+    expect(html).toContain('Clear API key');
     expect(html).toContain('sk****************************aa');
+    expect(html).not.toContain('db-api-key-list');
+    expect(html).not.toContain('1 enabled / 2 keys');
     expect(html).not.toContain('settings-model-card');
     expect(html).not.toContain('settings-key-input');
   });
 
-  it('saves media model API key list edits', async () => {
+  it('saves a single media model API key from the model card', async () => {
     const restoreActEnvironment = installReactActEnvironment();
     const container = document.createElement('div');
     document.body.append(container);
@@ -47,131 +48,65 @@ describe('SettingsPanel shared UI composition', () => {
         root.render(
           <I18nProvider locale="en">
             <ImageModelSettings
-              state={stateWithSettings()}
+              settings={readyResourceValue(stateWithSettings().imageModelSettings)}
               actions={{ ...actions(), saveImageModelSetting } as WorkbenchActions}
             />
           </I18nProvider>
         );
       });
 
-      const addButton = requireButton(container, 'Add key');
-      await act(async () => {
-        addButton.dispatchEvent(new MouseEvent('click', { bubbles: true }));
-      });
-
-      const keyInput = container.querySelector('input[aria-label="New API key"]');
+      const keyInput = container.querySelector('input[aria-label="API Key"]');
       if (!(keyInput instanceof HTMLInputElement)) {
-        throw new Error('Expected new API key input.');
+        throw new Error('Expected API key input.');
       }
       await act(async () => {
         setInputValue(keyInput, 'sk-new');
         keyInput.dispatchEvent(new Event('input', { bubbles: true }));
       });
-
-      const saveButton = container.querySelector('button[aria-label="Save key"]');
-      if (!(saveButton instanceof HTMLButtonElement)) {
-        throw new Error('Expected save key button.');
-      }
       await act(async () => {
-        saveButton.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+        keyInput.dispatchEvent(new FocusEvent('focusout', { bubbles: true }));
       });
 
-      expect(saveImageModelSetting).toHaveBeenCalledWith('image/openai/gpt-image-1', expect.objectContaining({
-        apiKeys: expect.arrayContaining([
-          expect.objectContaining({ key: 'sk-new', enabled: true })
-        ])
-      }));
+      expect(saveImageModelSetting).toHaveBeenCalledWith('image/openai/gpt-image-1', {
+        baseUrlOverride: null,
+        requestModelIdOverride: null,
+        apiKey: 'sk-new'
+      });
     } finally {
       await unmount(root, container);
       restoreActEnvironment();
     }
   });
 
-  it('saves label, enabled, delete, and clear edits from the API key list editor', async () => {
+  it('clears a configured single media model API key', async () => {
     const restoreActEnvironment = installReactActEnvironment();
     const container = document.createElement('div');
     document.body.append(container);
     const root = createRoot(container);
-    const onSave = vi.fn(async () => undefined);
+    const saveImageModelSetting = vi.fn(async () => undefined);
 
     try {
       await act(async () => {
         root.render(
           <I18nProvider locale="en">
-            <ModelApiKeyListEditor
-              previews={[
-                { id: 'key-a', label: 'Primary', enabled: true, preview: 'sk****************************aa' },
-                { id: 'key-b', label: null, enabled: false, preview: 'sk****************************bb' }
-              ]}
-              onSave={onSave}
+            <ImageModelSettings
+              settings={readyResourceValue(stateWithSettings().imageModelSettings)}
+              actions={{ ...actions(), saveImageModelSetting } as WorkbenchActions}
             />
           </I18nProvider>
         );
       });
 
-      const labelInputs = Array.from(container.querySelectorAll('input[aria-label="Key label"]'));
-      const firstLabel = labelInputs[0];
-      if (!(firstLabel instanceof HTMLInputElement)) {
-        throw new Error('Expected first key label input.');
-      }
+      const clearButton = requireButton(container, 'Clear API key');
       await act(async () => {
-        setInputValue(firstLabel, 'Renamed');
-        firstLabel.dispatchEvent(new Event('input', { bubbles: true }));
+        clearButton.dispatchEvent(new MouseEvent('click', { bubbles: true }));
       });
-      await act(async () => {
-        firstLabel.dispatchEvent(new FocusEvent('focusout', { bubbles: true }));
-      });
-      expect(onSave).toHaveBeenLastCalledWith([
-        { id: 'key-a', label: 'Renamed', enabled: true },
-        { id: 'key-b', label: null, enabled: false }
-      ]);
 
-      const switches = Array.from(container.querySelectorAll('input[type="checkbox"]'));
-      const secondSwitch = switches[1];
-      if (!(secondSwitch instanceof HTMLInputElement)) {
-        throw new Error('Expected second enabled switch.');
-      }
-      await act(async () => {
-        secondSwitch.click();
+      expect(saveImageModelSetting).toHaveBeenCalledWith('image/openai/gpt-image-1', {
+        baseUrlOverride: null,
+        requestModelIdOverride: null,
+        apiKey: ''
       });
-      expect(onSave).toHaveBeenLastCalledWith([
-        { id: 'key-a', label: 'Renamed', enabled: true },
-        { id: 'key-b', label: null, enabled: true }
-      ]);
-
-      const deleteButtons = Array.from(container.querySelectorAll('button[aria-label="Delete key"]'));
-      const firstDelete = deleteButtons[0];
-      if (!(firstDelete instanceof HTMLButtonElement)) {
-        throw new Error('Expected delete key button.');
-      }
-      await act(async () => {
-        firstDelete.click();
-      });
-      expect(onSave).toHaveBeenLastCalledWith([
-        { id: 'key-b', label: null, enabled: false }
-      ]);
-
-      onSave.mockClear();
-      await act(async () => {
-        root.render(
-          <I18nProvider locale="en">
-            <ModelApiKeyListEditor
-              previews={[
-                { id: 'only-key', label: null, enabled: true, preview: 'sk****************************aa' }
-              ]}
-              onSave={onSave}
-            />
-          </I18nProvider>
-        );
-      });
-      const clearButton = container.querySelector('button[aria-label="Delete key"]');
-      if (!(clearButton instanceof HTMLButtonElement)) {
-        throw new Error('Expected clear-by-delete button.');
-      }
-      await act(async () => {
-        clearButton.click();
-      });
-      expect(onSave).toHaveBeenLastCalledWith([]);
     } finally {
       await unmount(root, container);
       restoreActEnvironment();
@@ -209,7 +144,7 @@ describe('SettingsPanel shared UI composition', () => {
     const html = renderToStaticMarkup(
       <I18nProvider locale="en">
         <AudioModelSettings
-          state={stateWithSettings()}
+          settings={readyResourceValue(stateWithSettings().audioModelSettings)}
           actions={actions()}
           kind="tts"
           title="TTS Models"
@@ -289,111 +224,137 @@ describe('SettingsPanel shared UI composition', () => {
       restoreActEnvironment();
     }
   });
+
+  it('renders model settings load failures with retry instead of an empty model grid', async () => {
+    const restoreActEnvironment = installReactActEnvironment();
+    const container = document.createElement('div');
+    document.body.append(container);
+    const root = createRoot(container);
+    const reloadImageModelSettings = vi.fn(async () => undefined);
+
+    try {
+      await act(async () => {
+        root.render(
+          <I18nProvider locale="en">
+            <SettingsPanel
+              state={stateWithSettings({
+                imageModelSettings: { status: 'error', message: 'Secrets config imageModelApiKeys values must be strings.' }
+              })}
+              actions={{ ...actions(), reloadImageModelSettings } as WorkbenchActions}
+            />
+          </I18nProvider>
+        );
+      });
+
+      await act(async () => {
+        requireButton(container, 'Image Models').dispatchEvent(new MouseEvent('click', { bubbles: true }));
+      });
+
+      expect(container.querySelector('.settings-page')?.textContent).toContain('Failed to load settings: Secrets config imageModelApiKeys values must be strings.');
+      expect(container.querySelector('.settings-page')?.textContent).not.toContain('image/openai/gpt-image-1');
+      expect(container.querySelector('.settings-page .db-model-card')).toBeNull();
+
+      await act(async () => {
+        requireButton(container, 'Retry').dispatchEvent(new MouseEvent('click', { bubbles: true }));
+        await Promise.resolve();
+      });
+
+      expect(reloadImageModelSettings).toHaveBeenCalledTimes(1);
+    } finally {
+      await unmount(root, container);
+      restoreActEnvironment();
+    }
+  });
 });
 
-function stateWithSettings(): WorkbenchState {
+function stateWithSettings(overrides: Partial<WorkbenchState> = {}): WorkbenchState {
   return {
     snapshot: undefined,
     titleBarState: unavailableWorkbenchTitleBarState(),
-    workbenchPreferences: { locale: 'en', themePreference: 'system' },
+    workbenchPreferences: { status: 'ready', value: { locale: 'en', themePreference: 'system' } },
     resolvedTheme: 'dark',
     projectOpen: { opening: false },
     explorerSelection: createEmptyProjectTreeSelection(),
     imageModelSettings: {
-      models: [{
-        debruteModelId: 'image/openai/gpt-image-1',
-        summary: 'OpenAI gpt-image-1 image generation and edits.',
-        supportsEditing: true,
-        supportsTextRendering: true,
-        defaultBaseUrl: 'https://api.openai.com/v1',
-        defaultRequestModelId: 'gpt-image-1',
-        baseUrlOverride: null,
-        requestModelIdOverride: null,
-        apiKeySet: true,
-        apiKeyCount: 2,
-        enabledApiKeyCount: 1,
-        apiKeyPreviews: [
-          { id: 'key-a', label: 'Primary', enabled: true, preview: 'sk****************************aa' },
-          { id: 'key-b', label: null, enabled: false, preview: 'sk****************************bb' }
-        ]
-      }]
+      status: 'ready',
+      value: {
+        models: [{
+          debruteModelId: 'image/openai/gpt-image-1',
+          summary: 'OpenAI gpt-image-1 image generation and edits.',
+          supportsEditing: true,
+          supportsTextRendering: true,
+          defaultBaseUrl: 'https://api.openai.com/v1',
+          defaultRequestModelId: 'gpt-image-1',
+          baseUrlOverride: null,
+          requestModelIdOverride: null,
+          apiKeySet: true,
+          apiKeyPreview: 'sk****************************aa'
+        }]
+      }
     },
     videoModelSettings: {
-      models: [{
-        debruteModelId: 'video/google/veo-3',
-        summary: 'Google Veo 3 video generation.',
-        supportsTextToVideo: true,
-        supportsImageReferences: true,
-        supportsVideoReferences: false,
-        supportsAudioReferences: false,
-        supportsGeneratedAudio: true,
-        defaultBaseUrl: 'https://generativelanguage.googleapis.com/v1beta',
-        defaultRequestModelId: 'veo-3.0-generate-preview',
-        baseUrlOverride: null,
-        requestModelIdOverride: null,
-        apiKeySet: true,
-        apiKeyCount: 2,
-        enabledApiKeyCount: 1,
-        apiKeyPreviews: [
-          { id: 'key-a', label: 'Primary', enabled: true, preview: 'sk****************************aa' },
-          { id: 'key-b', label: null, enabled: false, preview: 'sk****************************bb' }
-        ]
-      }]
+      status: 'ready',
+      value: {
+        models: [{
+          debruteModelId: 'video/google/veo-3',
+          summary: 'Google Veo 3 video generation.',
+          supportsTextToVideo: true,
+          supportsImageReferences: true,
+          supportsVideoReferences: false,
+          supportsAudioReferences: false,
+          supportsGeneratedAudio: true,
+          defaultBaseUrl: 'https://generativelanguage.googleapis.com/v1beta',
+          defaultRequestModelId: 'veo-3.0-generate-preview',
+          baseUrlOverride: null,
+          requestModelIdOverride: null,
+          apiKeySet: false,
+          apiKeyPreview: null
+        }]
+      }
     },
     audioModelSettings: {
-      models: [{
-        debruteModelId: 'audio/openai/gpt-4o-mini-tts',
-        kind: 'tts',
-        summary: 'OpenAI gpt-4o-mini-tts TTS generation.',
-        defaultBaseUrl: 'https://api.openai.com/v1',
-        defaultRequestModelId: 'gpt-4o-mini-tts',
-        baseUrlOverride: null,
-        requestModelIdOverride: null,
-        apiKeySet: true,
-        apiKeyCount: 2,
-        enabledApiKeyCount: 1,
-        apiKeyPreviews: [
-          { id: 'key-a', label: 'Primary', enabled: true, preview: 'sk****************************aa' },
-          { id: 'key-b', label: null, enabled: false, preview: 'sk****************************bb' }
-        ]
-      }, {
-        debruteModelId: 'audio/elevenlabs/music',
-        kind: 'music',
-        summary: 'ElevenLabs music generation.',
-        defaultBaseUrl: 'https://api.elevenlabs.io/v1',
-        defaultRequestModelId: 'music',
-        baseUrlOverride: null,
-        requestModelIdOverride: null,
-        apiKeySet: true,
-        apiKeyCount: 2,
-        enabledApiKeyCount: 1,
-        apiKeyPreviews: [
-          { id: 'key-a', label: 'Primary', enabled: true, preview: 'sk****************************aa' },
-          { id: 'key-b', label: null, enabled: false, preview: 'sk****************************bb' }
-        ]
-      }, {
-        debruteModelId: 'audio/elevenlabs/sfx',
-        kind: 'sound-effect',
-        summary: 'ElevenLabs sound effects generation.',
-        defaultBaseUrl: 'https://api.elevenlabs.io/v1',
-        defaultRequestModelId: 'sound-generation',
-        baseUrlOverride: null,
-        requestModelIdOverride: null,
-        apiKeySet: true,
-        apiKeyCount: 2,
-        enabledApiKeyCount: 1,
-        apiKeyPreviews: [
-          { id: 'key-a', label: 'Primary', enabled: true, preview: 'sk****************************aa' },
-          { id: 'key-b', label: null, enabled: false, preview: 'sk****************************bb' }
-        ]
-      }]
+      status: 'ready',
+      value: {
+        models: [{
+          debruteModelId: 'audio/openai/gpt-4o-mini-tts',
+          kind: 'tts',
+          summary: 'OpenAI gpt-4o-mini-tts TTS generation.',
+          defaultBaseUrl: 'https://api.openai.com/v1',
+          defaultRequestModelId: 'gpt-4o-mini-tts',
+          baseUrlOverride: null,
+          requestModelIdOverride: null,
+          apiKeySet: false,
+          apiKeyPreview: null
+        }, {
+          debruteModelId: 'audio/elevenlabs/music',
+          kind: 'music',
+          summary: 'ElevenLabs music generation.',
+          defaultBaseUrl: 'https://api.elevenlabs.io/v1',
+          defaultRequestModelId: 'music',
+          baseUrlOverride: null,
+          requestModelIdOverride: null,
+          apiKeySet: false,
+          apiKeyPreview: null
+        }, {
+          debruteModelId: 'audio/elevenlabs/sfx',
+          kind: 'sound-effect',
+          summary: 'ElevenLabs sound effects generation.',
+          defaultBaseUrl: 'https://api.elevenlabs.io/v1',
+          defaultRequestModelId: 'sound-generation',
+          baseUrlOverride: null,
+          requestModelIdOverride: null,
+          apiKeySet: false,
+          apiKeyPreview: null
+        }]
+      }
     },
-    integrationsSettings: undefined,
-    adobeBridge: undefined,
+    integrationsSettings: { status: 'ready', value: { integrations: [], backends: [] } },
+    adobeBridge: { status: 'ready', value: { settings: { enabled: true, discoveryStatus: 'available' }, adobeClients: [], projects: [], links: [], transfers: [] } },
     canvasFeedback: undefined,
     textFileBuffers: {},
     textEditorWindows: {},
-    notifications: []
+    notifications: [],
+    ...overrides
   };
 }
 
@@ -402,6 +363,12 @@ function actions(): WorkbenchActions {
     getProductState: vi.fn(async () => productState()),
     checkProductUpdate: vi.fn(async () => productState()),
     applyProductUpdate: vi.fn(async () => ({ state: productState() })),
+    reloadWorkbenchPreferences: vi.fn(async () => undefined),
+    reloadImageModelSettings: vi.fn(async () => undefined),
+    reloadVideoModelSettings: vi.fn(async () => undefined),
+    reloadAudioModelSettings: vi.fn(async () => undefined),
+    reloadIntegrationsSettings: vi.fn(async () => undefined),
+    reloadAdobeBridge: vi.fn(async () => undefined),
     saveWorkbenchPreferences: vi.fn(async () => undefined),
     saveImageModelSetting: vi.fn(async () => undefined),
     saveVideoModelSetting: vi.fn(async () => undefined),
@@ -413,6 +380,13 @@ function actions(): WorkbenchActions {
       settings: { integrations: [], backends: [] }
     }))
   } as unknown as WorkbenchActions;
+}
+
+function readyResourceValue<T>(resource: SettingsResource<T>): T {
+  if (resource.status !== 'ready') {
+    throw new Error(`Expected ready resource, got ${resource.status}.`);
+  }
+  return resource.value;
 }
 
 async function unmount(root: Root, container: HTMLDivElement): Promise<void> {

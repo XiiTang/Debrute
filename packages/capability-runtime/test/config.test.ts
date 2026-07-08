@@ -8,12 +8,20 @@ import {
 
 describe('settings secret view contract', () => {
   it('builds fixed-length API key previews without exposing full keys', () => {
-    expect(apiKeyPreview('sk-1234567890abcdefg')).toEqual('sk****************************fg');
-    expect(apiKeyPreview('  ab123456cd  ')).toEqual('ab****************************cd');
-    expect(apiKeyPreview('short')).toEqual('****');
+    expect(apiKeyPreview('sk-1234567890abcdefg')).toEqual({
+      apiKeySet: true,
+      apiKeyPreview: 'sk****************************fg'
+    });
+    expect(apiKeyPreview('  ab123456cd  ')).toEqual({
+      apiKeySet: true,
+      apiKeyPreview: 'ab****************************cd'
+    });
+    expect(apiKeyPreview('short')).toEqual({ apiKeySet: true, apiKeyPreview: '****' });
+    expect(apiKeyPreview('   ')).toEqual({ apiKeySet: false, apiKeyPreview: null });
+    expect(apiKeyPreview(undefined)).toEqual({ apiKeySet: false, apiKeyPreview: null });
   });
 
-  it('projects key counts and previews without plaintext secrets', () => {
+  it('projects single-key state without plaintext secrets', () => {
     const image = createImageModelSettingsView({
       imageModels: [{
         debruteModelId: 'gpt-image-2',
@@ -21,12 +29,7 @@ describe('settings secret view contract', () => {
         requestModelIdOverride: null
       }]
     }, {
-      imageModelApiKeys: {
-        'gpt-image-2': [
-          { id: 'img-a', key: 'sk-image-123456fg', label: 'Primary', enabled: true },
-          { id: 'img-b', key: 'sk-image-disabled', label: null, enabled: false }
-        ]
-      },
+      imageModelApiKeys: { 'gpt-image-2': 'sk-image-123456fg' },
       videoModelApiKeys: {},
       audioModelApiKeys: {}
     }, [{
@@ -46,9 +49,7 @@ describe('settings secret view contract', () => {
       }]
     }, {
       imageModelApiKeys: {},
-      videoModelApiKeys: {
-        'sora-2': [{ id: 'vid-a', key: 'sk-video-123456fg', label: null, enabled: true }]
-      },
+      videoModelApiKeys: { 'sora-2': 'sk-video-123456fg' },
       audioModelApiKeys: {}
     }, [{
       debruteModelId: 'sora-2',
@@ -71,9 +72,7 @@ describe('settings secret view contract', () => {
     }, {
       imageModelApiKeys: {},
       videoModelApiKeys: {},
-      audioModelApiKeys: {
-        'openai-gpt-4o-mini-tts': [{ id: 'aud-a', key: 'sk-audio-123456fg', label: 'TTS', enabled: true }]
-      }
+      audioModelApiKeys: { 'openai-gpt-4o-mini-tts': 'sk-audio-123456fg' }
     }, [{
       debruteModelId: 'openai-gpt-4o-mini-tts',
       kind: 'tts',
@@ -84,22 +83,15 @@ describe('settings secret view contract', () => {
 
     expect(image.models[0]).toMatchObject({
       apiKeySet: true,
-      apiKeyCount: 2,
-      enabledApiKeyCount: 1,
-      apiKeyPreviews: [
-        { id: 'img-a', label: 'Primary', enabled: true, preview: 'sk****************************fg' },
-        { id: 'img-b', label: null, enabled: false, preview: 'sk****************************ed' }
-      ]
+      apiKeyPreview: 'sk****************************fg'
     });
     expect(video.models[0]).toMatchObject({
       apiKeySet: true,
-      apiKeyCount: 1,
-      enabledApiKeyCount: 1
+      apiKeyPreview: 'sk****************************fg'
     });
     expect(audio.models[0]).toMatchObject({
       apiKeySet: true,
-      apiKeyCount: 1,
-      enabledApiKeyCount: 1
+      apiKeyPreview: 'sk****************************fg'
     });
     expect(image.models[0] as Record<string, unknown>).not.toHaveProperty('apiKey');
     expect(video.models[0] as Record<string, unknown>).not.toHaveProperty('apiKey');
@@ -109,11 +101,9 @@ describe('settings secret view contract', () => {
     expect(JSON.stringify({ image, video, audio })).not.toContain('sk-audio-123456fg');
   });
 
-  it('requires at least one enabled key for apiKeySet', () => {
+  it('treats missing and blank keys as not configured', () => {
     const view = createImageModelSettingsView({ imageModels: [] }, {
-      imageModelApiKeys: {
-        'gpt-image-2': [{ id: 'disabled', key: 'sk-disabled', label: null, enabled: false }]
-      },
+      imageModelApiKeys: { 'gpt-image-2': '   ' },
       videoModelApiKeys: {},
       audioModelApiKeys: {}
     }, [{
@@ -123,12 +113,22 @@ describe('settings secret view contract', () => {
       supportsTextRendering: true,
       defaultBaseUrl: 'https://api.openai.com/v1',
       defaultRequestModelId: 'gpt-image-2'
+    }, {
+      debruteModelId: 'wan2.7-image',
+      summary: 'Wan image generation',
+      supportsEditing: false,
+      supportsTextRendering: false,
+      defaultBaseUrl: 'https://dashscope.aliyuncs.com/api/v1',
+      defaultRequestModelId: 'wan2.7-image'
     }]);
 
-    expect(view.models[0]).toMatchObject({
+    expect(view.models.find((model) => model.debruteModelId === 'gpt-image-2')).toMatchObject({
       apiKeySet: false,
-      apiKeyCount: 1,
-      enabledApiKeyCount: 0
+      apiKeyPreview: null
+    });
+    expect(view.models.find((model) => model.debruteModelId === 'wan2.7-image')).toMatchObject({
+      apiKeySet: false,
+      apiKeyPreview: null
     });
   });
 });

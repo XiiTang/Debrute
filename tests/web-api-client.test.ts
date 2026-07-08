@@ -8,9 +8,8 @@ describe('HTTP workbench API client', () => {
   it('reads the daemon runtime platform instead of guessing from the browser', async () => {
     const requests: Array<{ method: string; path: string }> = [];
     const client = createHttpWorkbenchApiClient({
-      daemonUrl: 'http://127.0.0.1:17456/',
       fetch: async (url, init) => {
-        const parsed = new URL(String(url));
+        const parsed = new URL(String(url), 'http://127.0.0.1:17456');
         requests.push({ method: init?.method ?? 'GET', path: parsed.pathname });
         return jsonResponse(routeResponse(String(url), init));
       }
@@ -23,12 +22,10 @@ describe('HTTP workbench API client', () => {
   it('uses daemon HTTP routes for workbench operations', async () => {
     const requests: Array<{ url: string; init?: RequestInit }> = [];
     const client = createHttpWorkbenchApiClient({
-      daemonUrl: 'http://127.0.0.1:17456/',
-      token: 'secret',
       fetch: async (url, init) => {
         requests.push({ url: String(url), init });
         const body = routeResponse(String(url), init);
-        if (new URL(String(url)).pathname === '/api/projects/open') {
+        if (new URL(String(url), 'http://127.0.0.1:17456').pathname === '/api/projects/open') {
           expect(JSON.stringify(body)).not.toContain('projectRoot');
           expect(JSON.stringify(body)).not.toContain('/tmp/project');
         }
@@ -46,21 +43,19 @@ describe('HTTP workbench API client', () => {
     await client.readGeneratedAsset('asset-1');
 
     expect(requests.map((request) => [request.init?.method ?? 'GET', request.url])).toEqual([
-      ['POST', 'http://127.0.0.1:17456/api/projects/open'],
-      ['GET', `http://127.0.0.1:17456/api/projects/${projectId}/files/text/briefs/outline.md`],
-      ['PUT', `http://127.0.0.1:17456/api/projects/${projectId}/files/text/briefs/outline.md`],
-      ['GET', `http://127.0.0.1:17456/api/projects/${projectId}/generated-assets/asset-1`]
+      ['POST', '/api/projects/open'],
+      ['GET', `/api/projects/${projectId}/files/text/briefs/outline.md`],
+      ['PUT', `/api/projects/${projectId}/files/text/briefs/outline.md`],
+      ['GET', `/api/projects/${projectId}/generated-assets/asset-1`]
     ]);
-    expect(requests[0]!.init?.headers).toMatchObject({ 'x-debrute-daemon-token': 'secret' });
+    expect(JSON.stringify(requests)).not.toContain('x-debrute-daemon-token');
   });
 
   it('runs integration operations through daemon HTTP routes', async () => {
     const requests: Array<{ method: string; path: string; body: unknown }> = [];
     const client = createHttpWorkbenchApiClient({
-      daemonUrl: 'http://127.0.0.1:17456/',
-      token: 'secret',
       fetch: async (url, init) => {
-        const parsed = new URL(String(url));
+        const parsed = new URL(String(url), 'http://127.0.0.1:17456');
         requests.push({
           method: init?.method ?? 'GET',
           path: parsed.pathname,
@@ -87,23 +82,12 @@ describe('HTTP workbench API client', () => {
     }]);
   });
 
-  it('bootstraps a daemon token for HTTP clients without an explicit token', async () => {
+  it('does not bootstrap or send daemon tokens from browser requests', async () => {
     const requests: Array<{ method: string; path: string; headers?: RequestInit['headers'] }> = [];
     const client = createHttpWorkbenchApiClient({
-      daemonUrl: 'http://127.0.0.1:17456/',
       fetch: async (url, init) => {
-        const parsed = new URL(String(url));
+        const parsed = new URL(String(url), 'http://127.0.0.1:17456');
         requests.push({ method: init?.method ?? 'GET', path: parsed.pathname, headers: init?.headers });
-        if (parsed.pathname === '/api/browser-session') {
-          return jsonResponse({
-            token: 'bootstrapped-secret',
-            runtime: {
-              daemonUrl: 'http://127.0.0.1:17456',
-              webBaseUrl: 'http://127.0.0.1:17456',
-              platform: 'darwin'
-            }
-          });
-        }
         return jsonResponse(routeResponse(String(url), init));
       }
     });
@@ -112,22 +96,17 @@ describe('HTTP workbench API client', () => {
     await client.readProjectTextFile('briefs/outline.md');
 
     expect(requests.map((request) => [request.method, request.path])).toEqual([
-      ['GET', '/api/browser-session'],
       ['POST', '/api/projects/open'],
       ['GET', `/api/projects/${projectId}/files/text/briefs/outline.md`]
     ]);
-    expect(requests[0]!.headers).toMatchObject({ 'x-debrute-web-origin': 'http://127.0.0.1:17456' });
-    expect(requests[1]!.headers).toMatchObject({ 'x-debrute-daemon-token': 'bootstrapped-secret' });
-    expect(requests[2]!.headers).toMatchObject({ 'x-debrute-daemon-token': 'bootstrapped-secret' });
+    expect(JSON.stringify(requests)).not.toContain('x-debrute-daemon-token');
   });
 
   it('opens projects from the daemon picker and tracks the opened project', async () => {
     const requests: Array<{ method: string; path: string; headers?: RequestInit['headers'] }> = [];
     const client = createHttpWorkbenchApiClient({
-      daemonUrl: 'http://127.0.0.1:17456/',
-      token: 'secret',
       fetch: async (url, init) => {
-        const parsed = new URL(String(url));
+        const parsed = new URL(String(url), 'http://127.0.0.1:17456');
         requests.push({ method: init?.method ?? 'GET', path: parsed.pathname, headers: init?.headers });
         return jsonResponse(routeResponse(String(url), init));
       }
@@ -144,15 +123,13 @@ describe('HTTP workbench API client', () => {
       ['POST', '/api/projects/open-picker'],
       ['GET', `/api/projects/${projectId}/files/text/briefs/outline.md`]
     ]);
-    expect(requests[0]!.headers).toMatchObject({ 'x-debrute-daemon-token': 'secret' });
+    expect(JSON.stringify(requests)).not.toContain('x-debrute-daemon-token');
   });
 
   it('keeps the client unopened when the daemon picker is canceled', async () => {
     const client = createHttpWorkbenchApiClient({
-      daemonUrl: 'http://127.0.0.1:17456/',
-      token: 'secret',
       fetch: async (url) => {
-        const parsed = new URL(String(url));
+        const parsed = new URL(String(url), 'http://127.0.0.1:17456');
         if (parsed.pathname === '/api/projects/open-picker') {
           return jsonResponse({ opened: false });
         }
@@ -167,11 +144,9 @@ describe('HTTP workbench API client', () => {
   it('opens the global event stream before adding the project event stream for an opaque project id', async () => {
     const eventSourceUrls: string[] = [];
     const client = createHttpWorkbenchApiClient({
-      daemonUrl: 'http://127.0.0.1:17456/',
-      token: 'secret',
       fetch: async (url, init) => {
         const body = routeResponse(String(url), init);
-        if (new URL(String(url)).pathname === '/api/projects/open') {
+        if (new URL(String(url), 'http://127.0.0.1:17456').pathname === '/api/projects/open') {
           expect(JSON.stringify(body)).not.toContain('projectRoot');
           expect(JSON.stringify(body)).not.toContain('/tmp/project');
         }
@@ -189,19 +164,19 @@ describe('HTTP workbench API client', () => {
     try {
       const unsubscribe = client.onEvent(() => {});
       expect(eventSourceUrls).toHaveLength(1);
-      const globalEventUrl = new URL(eventSourceUrls[0]!);
-      expect(globalEventUrl.origin + globalEventUrl.pathname).toBe('http://127.0.0.1:17456/api/workbench/events');
+      const globalEventUrl = new URL(eventSourceUrls[0]!, 'http://127.0.0.1:17456');
+      expect(globalEventUrl.pathname).toBe('/api/workbench/events');
       expect(globalEventUrl.searchParams.get('clientId')).toMatch(/^web:/);
-      expect(globalEventUrl.searchParams.get('debrute-token')).toBe('secret');
+      expect([...globalEventUrl.searchParams.keys()]).toEqual(['clientId']);
 
       await client.openProject({ projectRoot: '/tmp/project' });
       expect(eventSourceUrls).toHaveLength(2);
-      const eventUrl = new URL(eventSourceUrls[1]!);
-      expect(eventUrl.origin + eventUrl.pathname).toBe(`http://127.0.0.1:17456/api/projects/${projectId}/events`);
+      const eventUrl = new URL(eventSourceUrls[1]!, 'http://127.0.0.1:17456');
+      expect(eventUrl.pathname).toBe(`/api/projects/${projectId}/events`);
       const clientId = eventUrl.searchParams.get('clientId');
       expect(clientId).not.toBeNull();
       expect(clientId!).toMatch(/^web:/);
-      expect(eventUrl.searchParams.get('debrute-token')).toBe('secret');
+      expect([...eventUrl.searchParams.keys()]).toEqual(['clientId']);
 
       unsubscribe();
     } finally {
@@ -212,10 +187,8 @@ describe('HTTP workbench API client', () => {
   it('uses the daemon route to copy absolute project path batches', async () => {
     const requests: Array<{ method: string; path: string; body?: unknown }> = [];
     const client = createHttpWorkbenchApiClient({
-      daemonUrl: 'http://127.0.0.1:17456/',
-      token: 'secret',
       fetch: async (url, init) => {
-        const parsed = new URL(String(url));
+        const parsed = new URL(String(url), 'http://127.0.0.1:17456');
         requests.push({
           method: init?.method ?? 'GET',
           path: parsed.pathname,
@@ -250,10 +223,8 @@ describe('HTTP workbench API client', () => {
   it('uses daemon native routes for reveal and batch trash', async () => {
     const requests: Array<{ method: string; path: string; body?: unknown }> = [];
     const client = createHttpWorkbenchApiClient({
-      daemonUrl: 'http://127.0.0.1:17456/',
-      token: 'secret',
       fetch: async (url, init) => {
-        const parsed = new URL(String(url));
+        const parsed = new URL(String(url), 'http://127.0.0.1:17456');
         requests.push({
           method: init?.method ?? 'GET',
           path: parsed.pathname,
@@ -312,10 +283,8 @@ describe('HTTP workbench API client', () => {
     try {
       const terminalEvents: unknown[] = [];
       const client = createHttpWorkbenchApiClient({
-        daemonUrl: 'http://127.0.0.1:17456/',
-        token: 'secret',
         fetch: async (url, init) => {
-          const parsed = new URL(String(url));
+          const parsed = new URL(String(url), 'http://127.0.0.1:17456');
           requests.push({
             method: init?.method ?? 'GET',
             path: parsed.pathname,
@@ -359,9 +328,9 @@ describe('HTTP workbench API client', () => {
         { method: 'DELETE', path: `/api/projects/${projectId}/terminals/terminal-1`, body: undefined }
       ]));
       expect(eventSourceUrls).toHaveLength(1);
-      const eventUrl = new URL(eventSourceUrls[0]!);
-      expect(eventUrl.origin + eventUrl.pathname).toBe(`http://127.0.0.1:17456/api/projects/${projectId}/terminals/terminal-1/events`);
-      expect(eventUrl.searchParams.get('debrute-token')).toBe('secret');
+      const eventUrl = new URL(eventSourceUrls[0]!, 'http://127.0.0.1:17456');
+      expect(eventUrl.pathname).toBe(`/api/projects/${projectId}/terminals/terminal-1/events`);
+      expect([...eventUrl.searchParams.keys()]).toEqual([]);
       expect(terminalEvents).toEqual([{ type: 'data', terminalId: 'terminal-1', sequence: 1, data: 'ok\r\n' }]);
     } finally {
       globalThis.EventSource = originalEventSource;
@@ -393,7 +362,6 @@ describe('HTTP workbench API client', () => {
     } as typeof EventSource;
     try {
       const client = createHttpWorkbenchApiClient({
-        daemonUrl: 'http://127.0.0.1:17456/',
         fetch: async (url, init) => jsonResponse(routeResponse(String(url), init))
       });
       await client.openProject({ projectRoot: '/tmp/project' });
@@ -424,10 +392,8 @@ describe('HTTP workbench API client', () => {
     const requests: Array<{ method: string; path: string; body?: unknown }> = [];
     const uploadBody = new File(['page'], 'page.png');
     const client = createHttpWorkbenchApiClient({
-      daemonUrl: 'http://127.0.0.1:17456/',
-      token: 'secret',
       fetch: async (url, init) => {
-        const parsed = new URL(String(url));
+        const parsed = new URL(String(url), 'http://127.0.0.1:17456');
         requests.push({
           method: init?.method ?? 'GET',
           path: parsed.pathname,
@@ -496,10 +462,8 @@ describe('HTTP workbench API client', () => {
   it('sends the current project revision as baseRevision for shared-state mutations', async () => {
     const requests: Array<{ method: string; path: string; body?: unknown }> = [];
     const client = createHttpWorkbenchApiClient({
-      daemonUrl: 'http://127.0.0.1:17456/',
-      token: 'secret',
       fetch: async (url, init) => {
-        const parsed = new URL(String(url));
+        const parsed = new URL(String(url), 'http://127.0.0.1:17456');
         requests.push({
           method: init?.method ?? 'GET',
           path: parsed.pathname,
@@ -547,9 +511,8 @@ describe('HTTP workbench API client', () => {
     } as typeof EventSource;
     try {
       const client = createHttpWorkbenchApiClient({
-        daemonUrl: 'http://127.0.0.1:17456/',
         fetch: async (url, init) => {
-          const parsed = new URL(String(url));
+          const parsed = new URL(String(url), 'http://127.0.0.1:17456');
           requests.push({
             path: parsed.pathname,
             body: init?.body ? JSON.parse(String(init.body)) : undefined
@@ -583,9 +546,8 @@ describe('HTTP workbench API client', () => {
     const requests: Array<{ path: string; body?: unknown }> = [];
     let staleResponseSent = false;
     const client = createHttpWorkbenchApiClient({
-      daemonUrl: 'http://127.0.0.1:17456/',
       fetch: async (url, init) => {
-        const parsed = new URL(String(url));
+        const parsed = new URL(String(url), 'http://127.0.0.1:17456');
         requests.push({
           path: parsed.pathname,
           body: init?.body ? JSON.parse(String(init.body)) : undefined
@@ -628,9 +590,8 @@ describe('HTTP workbench API client', () => {
     const requests: Array<{ path: string; body?: unknown }> = [];
     let staleResponseSent = false;
     const client = createHttpWorkbenchApiClient({
-      daemonUrl: 'http://127.0.0.1:17456/',
       fetch: async (url, init) => {
-        const parsed = new URL(String(url));
+        const parsed = new URL(String(url), 'http://127.0.0.1:17456');
         requests.push({
           path: parsed.pathname,
           body: init?.body instanceof FormData
@@ -680,7 +641,6 @@ describe('HTTP workbench API client', () => {
     const boundProjectIds: string[] = [];
     const secondProjectId = '22222222-2222-4222-8222-222222222222';
     const client = createHttpWorkbenchApiClient({
-      daemonUrl: 'http://127.0.0.1:17456/',
       fetch: async (url, init) => jsonResponse(routeResponse(String(url), init)),
       shell: {
         bindProjectWindowToProject: async (input) => {
@@ -699,10 +659,8 @@ describe('HTTP workbench API client', () => {
   it('reads and clears Workbench title-bar state through daemon HTTP', async () => {
     const requests: Array<{ method: string; path: string; search: string }> = [];
     const client = createHttpWorkbenchApiClient({
-      daemonUrl: 'http://127.0.0.1:17456/',
-      token: 'secret',
       fetch: async (url, init) => {
-        const parsed = new URL(String(url));
+        const parsed = new URL(String(url), 'http://127.0.0.1:17456');
         requests.push({ method: init?.method ?? 'GET', path: parsed.pathname, search: parsed.search });
         if (parsed.pathname === '/api/workbench/title-bar') {
           return jsonResponse({
@@ -747,10 +705,9 @@ function formDataSummary(formData: FormData): unknown {
 }
 
 function routeResponse(url: string, init?: RequestInit): unknown {
-  const path = new URL(url).pathname;
+  const path = new URL(url, 'http://127.0.0.1:17456').pathname;
   if (path === '/api/runtime') {
     return {
-      daemonUrl: 'http://127.0.0.1:17456',
       webBaseUrl: 'http://127.0.0.1:17456',
       platform: 'darwin'
     };

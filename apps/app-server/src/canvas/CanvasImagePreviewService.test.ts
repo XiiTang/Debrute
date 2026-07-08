@@ -58,6 +58,28 @@ describe('CanvasImagePreviewService image format support', () => {
     }
   });
 
+  it('rejects a supported extension when Sharp reports a different media type', async () => {
+    const projectRoot = await mkdtemp(join(tmpdir(), 'debrute-canvas-preview-media-type-'));
+    try {
+      await mkdir(join(projectRoot, 'assets'), { recursive: true });
+      await writeFile(join(projectRoot, 'assets/cover.png'), await rasterFixture(64, 40).jpeg().toBuffer());
+      const service = createCanvasImagePreviewService();
+      const revision = await canvasImageSourceRevision(projectRoot, 'assets/cover.png');
+
+      await expect(canvasImagePreviewSourceInfo(projectRoot, 'assets/cover.png')).resolves.toEqual({
+        previewable: false
+      });
+      await expect(service.resolve({
+        projectRoot,
+        projectRelativePath: 'assets/cover.png',
+        revision,
+        width: 32
+      })).rejects.toThrow('Canvas image is not previewable: assets/cover.png');
+    } finally {
+      await rm(projectRoot, { recursive: true, force: true });
+    }
+  });
+
   it('resolves a preview for a newly supported AVIF source', async () => {
     const projectRoot = await mkdtemp(join(tmpdir(), 'debrute-canvas-preview-avif-'));
     try {

@@ -17,7 +17,7 @@ export async function executeVolcengineTtsModel(input: AudioModelAdapterInput): 
   const body = {
     user: { uid: 'debrute' },
     req_params: {
-      text: stringArg(input.args, 'text') ?? '',
+      text: input.args.text as string,
       speaker: stringArg(input.args, 'voice') ?? 'BV700_V2_streaming',
       audio_params: {
         format,

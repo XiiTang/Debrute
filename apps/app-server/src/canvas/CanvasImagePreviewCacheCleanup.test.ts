@@ -112,4 +112,36 @@ describe('Canvas image preview cache cleanup', () => {
       await rm(projectRoot, { recursive: true, force: true });
     }
   });
+
+  it('removes cache directories when source path and decoded media type differ', async () => {
+    const projectRoot = await mkdtemp(join(tmpdir(), 'debrute-preview-cleanup-media-type-'));
+    try {
+      await mkdir(join(projectRoot, 'images'), { recursive: true });
+      const sourcePath = join(projectRoot, 'images/cover.png');
+      await sharp({
+        create: {
+          width: 64,
+          height: 32,
+          channels: 3,
+          background: '#223344'
+        }
+      }).jpeg().toFile(sourcePath);
+      const sourceStat = await stat(sourcePath);
+      const currentRevisionKey = projectRevisionCacheKey(projectFileRevision(sourceStat.size, sourceStat.mtimeMs));
+      const sourceKey = projectRelativePathCacheKey('images/cover.png');
+      const sourceCacheRoot = join(projectRoot, '.debrute/cache/canvas-image-previews', sourceKey);
+      await mkdir(join(sourceCacheRoot, currentRevisionKey), { recursive: true });
+      await writeFile(join(sourceCacheRoot, currentRevisionKey, 'preview-w32.jpg'), 'current');
+
+      await reconcileCanvasImagePreviewCache({
+        projectRoot,
+        files: [{ projectRelativePath: 'images/cover.png', kind: 'file' }]
+      });
+
+      await expect(stat(sourceCacheRoot))
+        .rejects.toMatchObject({ code: 'ENOENT' });
+    } finally {
+      await rm(projectRoot, { recursive: true, force: true });
+    }
+  });
 });

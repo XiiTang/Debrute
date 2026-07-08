@@ -8,7 +8,8 @@ export default defineConfig({
   build: {
     outDir: '../dist',
     emptyOutDir: true,
-    rollupOptions: {
+    license: true,
+    rolldownOptions: {
       input: resolve(import.meta.dirname, 'src/index.html'),
       output: {
         entryFileNames: 'assets/[name].js',

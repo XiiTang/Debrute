@@ -36,6 +36,11 @@ export function projectImageMimeTypeFromPath(projectRelativePath: string): Proje
   return projectImageFileTypeForPath(projectRelativePath)?.mimeType;
 }
 
+export function projectImageMimeTypeMatchesPath(mimeType: string | undefined, projectRelativePath: string): boolean {
+  const expectedMimeType = projectImageMimeTypeFromPath(projectRelativePath);
+  return expectedMimeType !== undefined && normalizeImageMimeType(mimeType ?? '') === expectedMimeType;
+}
+
 export function isSupportedProjectImagePath(projectRelativePath: string): boolean {
   return projectImageFileTypeForPath(projectRelativePath) !== undefined;
 }

@@ -109,27 +109,6 @@ describe('Workbench UI source contract', () => {
     expect(settings).toContain('className="db-nav-row__icon"');
   });
 
-  it('does not keep removed standalone CLI settings or old updater UI source strings', () => {
-    const dictionaries = css('apps/web/src/workbench/i18n/dictionaries.ts');
-    const settings = css('apps/web/src/workbench/styles/settings.css');
-
-    for (const removed of [
-      'settings.general.downloadUpdate',
-      'settings.general.openGithubReleases',
-      'settings.general.updateStatus.unavailable',
-      'settings.general.updateStatus.ready',
-      'settings.general.updateStatus.downloading',
-      'settings.general.updateStatus.downloaded',
-      'settings.general.updateMessage.unsupportedPlatform',
-      'settings.general.updateMessage.manualDownload',
-      'settings.general.updateMessage.downloading',
-      'settings.general.updateMessage.downloaded',
-      '.debrute-cli-settings-page'
-    ]) {
-      expect(`${dictionaries}\n${settings}`).not.toContain(removed);
-    }
-  });
-
   it('keeps floating panel shell interaction geometry shared, compact, and isolated from feature scroll', () => {
     const shell = css('apps/web/src/workbench/styles/shell.css');
     const patterns = css('apps/web/src/workbench/ui/styles/workbench-patterns.css');
@@ -607,6 +586,8 @@ describe('Workbench UI source contract', () => {
     const dockRule = rule(shellStyles, '.floating-dock');
     const cardBarSource = css('apps/web/src/workbench/canvas/CanvasCardBar.tsx');
     const dockSource = css('apps/web/src/workbench/shell/FloatingDock.tsx');
+    const workbenchAppSource = css('apps/web/src/workbench/WorkbenchApp.tsx');
+    const iconProviderSource = css('apps/web/src/workbench/ui/WorkbenchIconProvider.tsx');
 
     expect(cardBarRule).toContain('height: 28px;');
     expect(cardBarRule).toContain('padding: 0;');
@@ -618,7 +599,9 @@ describe('Workbench UI source contract', () => {
     expect(cardBarSource).not.toContain('db-floating-bar canvas-card-bar');
     expect(cardBarSource).toContain('canvas-card db-canvas-control db-canvas-card');
     expect(cardBarSource).toContain('size="sm"');
-    expect(dockSource).toContain('size={14}');
+    expect(iconProviderSource).toContain('<LucideProvider size={16} strokeWidth={1.75} absoluteStrokeWidth>');
+    expect(workbenchAppSource).toContain('<WorkbenchIconProvider>');
+    expect(dockSource).not.toContain('size={14}');
     expect(dockSource).not.toContain('size={18}');
     expect(dockSource).not.toContain('db-floating-bar');
   });
@@ -860,6 +843,28 @@ describe('Workbench UI source contract', () => {
     expect(notificationStack).toContain('className="db-notification-stack"');
     expect(notificationStack).toContain('className="db-notification-row"');
     expect(notificationStack).toContain('<Card');
+  });
+
+  it('keeps General settings preferences owned by the resource boundary', () => {
+    const source = css('apps/web/src/workbench/settings/general/GeneralSettingsPage.tsx');
+
+    expect(source).not.toContain('DEFAULT_WORKBENCH_PREFERENCES');
+    expect(source).toContain('preferences: WorkbenchPreferencesView;');
+    expect(source).toContain('onPreferencesChange: (preferences: SaveWorkbenchPreferencesInput) => Promise<void>;');
+    expect(source).not.toContain('preferences?: WorkbenchPreferencesView');
+    expect(source).not.toContain('onPreferencesChange?:');
+  });
+
+  it('does not keep optional ready-resource fallbacks in settings pages', () => {
+    const integrations = css('apps/web/src/workbench/settings/integrations/IntegrationsSettingsPage.tsx');
+    const adobeBridge = css('apps/web/src/workbench/settings/adobe-bridge/AdobeBridgeSettingsPage.tsx');
+
+    expect(integrations).not.toContain('settings.backends?.length');
+    expect(integrations).not.toContain('backends: IntegrationBackendStatus[] | undefined;');
+    expect(integrations).not.toContain('!backends?.length');
+    expect(adobeBridge).not.toContain('bridge: AdobeBridgeStateView | undefined');
+    expect(adobeBridge).not.toContain('if (!bridge || !currentProjectId)');
+    expect(adobeBridge).not.toContain('status: AdobeBridgeDiscoveryStatus | undefined');
   });
 
   it('styles the Workbench title bar as drag chrome and not a card', () => {

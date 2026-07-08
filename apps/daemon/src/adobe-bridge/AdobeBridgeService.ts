@@ -12,6 +12,7 @@ import {
   type ProjectBridgeClient
 } from '@debrute/app-protocol';
 import {
+  isProjectGitMetadataPath,
   isIgnoredProjectFilePath,
   isProtectedProjectDocumentMutationPath,
   type ProjectFileEntry
@@ -365,8 +366,7 @@ export class AdobeBridgeService {
 }
 
 function isAdobeBridgeVisibleProjectDirectory(projectRelativePath: string): boolean {
-  return projectRelativePath !== '.git'
-    && !projectRelativePath.startsWith('.git/')
+  return !isProjectGitMetadataPath(projectRelativePath)
     && !isIgnoredProjectFilePath(projectRelativePath)
     && !isProtectedProjectDocumentMutationPath(projectRelativePath);
 }

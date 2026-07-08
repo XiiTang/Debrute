@@ -119,7 +119,7 @@ describe('audio model catalog and executor', () => {
             requestModelIdOverride: null
           }]
         },
-        secrets: { audioModelApiKeys: { 'openai-gpt-4o-mini-tts': [{ id: 'aud-a', key: 'sk-audio', label: null, enabled: true }] } },
+        secrets: { audioModelApiKeys: { 'openai-gpt-4o-mini-tts': 'sk-audio' } },
         fetch,
         recordGeneratedAsset: async (input) => {
           recorded.push(input);
@@ -141,49 +141,6 @@ describe('audio model catalog and executor', () => {
         artifactIndex: 0
       })]);
       expect(JSON.stringify(result.logs)).not.toContain('sk-audio');
-    } finally {
-      await rm(projectRoot, { recursive: true, force: true });
-    }
-  });
-
-  it('rotates enabled API keys for consecutive audio requests', async () => {
-    const projectRoot = await mkdtemp(join(tmpdir(), 'debrute-audio-key-rotation-'));
-    const seenAuth: string[] = [];
-    const fetch: AudioModelFetch = async (_url, init) => {
-      seenAuth.push(String((init?.headers as Record<string, string>).authorization));
-      return new Response(tinyMp3, { status: 200, headers: { 'content-type': 'audio/mpeg' } });
-    };
-    try {
-      const baseInput = {
-        projectRoot,
-        invocationId: 'turn-audio',
-        requestedKind: 'tts',
-        input: {
-          model: 'openai-gpt-4o-mini-tts',
-          arguments: {
-            text: 'Read this line.',
-            voice: 'alloy',
-            format: 'mp3'
-          }
-        },
-        settings: {
-          audioModels: [{ debruteModelId: 'openai-gpt-4o-mini-tts', baseUrlOverride: null, requestModelIdOverride: null }]
-        },
-        secrets: {
-          audioModelApiKeys: {
-            'openai-gpt-4o-mini-tts': [
-              { id: 'aud-a', key: 'sk-audio-a', label: null, enabled: true },
-              { id: 'aud-b', key: 'sk-audio-b', label: null, enabled: true }
-            ]
-          }
-        },
-        fetch
-      } satisfies Parameters<typeof executeAudioModelRequest>[0];
-
-      await executeAudioModelRequest(baseInput);
-      await executeAudioModelRequest({ ...baseInput, invocationId: 'turn-audio-2' });
-
-      expect(seenAuth).toEqual(['Bearer sk-audio-a', 'Bearer sk-audio-b']);
     } finally {
       await rm(projectRoot, { recursive: true, force: true });
     }
@@ -1025,7 +982,7 @@ describe('audio model catalog and executor', () => {
           arguments: { text: 'Read this line.' }
         },
         settings: { audioModels: [] },
-        secrets: { audioModelApiKeys: { 'openai-gpt-4o-mini-tts': [{ id: 'aud-a', key: 'sk-audio', label: null, enabled: true }] } },
+        secrets: { audioModelApiKeys: { 'openai-gpt-4o-mini-tts': 'sk-audio' } },
         fetch: async () => {
           throw new Error('adapter should not run');
         }
@@ -1052,7 +1009,7 @@ describe('audio model catalog and executor', () => {
           arguments: { text: 'Read this line.' }
         },
         settings: { audioModels: [] },
-        secrets: { audioModelApiKeys: { 'missing-audio-model': [{ id: 'aud-a', key: 'sk-audio', label: null, enabled: true }] } },
+        secrets: { audioModelApiKeys: { 'missing-audio-model': 'sk-audio' } },
         fetch: async () => {
           throw new Error('adapter should not run');
         }
@@ -1081,10 +1038,28 @@ describe('audio model catalog and executor', () => {
         expectedMessage: 'TTS audio arguments require string field "text".'
       },
       {
+        model: 'openai-gpt-4o-mini-tts',
+        requestedKind: 'tts',
+        args: { text: '   ' },
+        expectedMessage: 'TTS audio arguments require string field "text".'
+      },
+      {
+        model: 'elevenlabs-music',
+        requestedKind: 'music',
+        args: {},
+        expectedMessage: 'Music audio arguments require string field "prompt".'
+      },
+      {
         model: 'elevenlabs-music',
         requestedKind: 'music',
         args: { prompt: 'Warm loop.', duration_seconds: '30' },
         expectedMessage: 'Music audio arguments duration_seconds must be a number.'
+      },
+      {
+        model: 'elevenlabs-sound-effects',
+        requestedKind: 'sound-effect',
+        args: { prompt: '   ' },
+        expectedMessage: 'Sound effect audio arguments require string field "prompt".'
       },
       {
         model: 'elevenlabs-sound-effects',
@@ -1184,7 +1159,11 @@ async function runAudioModelForTest(input: {
         requestModelIdOverride: null
       }]
     },
-    secrets: { audioModelApiKeys: { [input.model]: [{ id: 'aud-a', key: input.apiKey ?? 'sk-audio', label: null, enabled: true }] } },
+    secrets: {
+      audioModelApiKeys: {
+        [input.model]: input.apiKey ?? 'sk-audio'
+      }
+    },
     fetch,
     ...(input.taskPolling ? { taskPolling: input.taskPolling } : {}),
     remoteUrlLookup: async () => [{ address: '93.184.216.34', family: 4 }],

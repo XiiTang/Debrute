@@ -7,7 +7,6 @@ import {
 } from '../remoteFetchPolicy.js';
 import { createRequestTimeoutSignal } from '../requestTimeout.js';
 import { redactRuntimeSecrets, redactRuntimeSecretString } from '../modelRunMetadataRedaction.js';
-import { selectModelApiKey } from '../modelApiKeySelection.js';
 import { createAudioModelCatalog, type AudioModelCatalogEntry, type AudioModelKind } from './catalog.js';
 import {
   writeAudioArtifactSources,
@@ -157,12 +156,7 @@ export async function executeAudioModelRequest(input: ExecuteAudioModelRequestIn
       details: { model: input.input.model, expected_kind: input.requestedKind, actual_kind: entry.kind }
     };
   }
-  const selectedApiKey = selectModelApiKey({
-    kind: 'audio',
-    modelId: input.input.model,
-    entries: input.secrets.audioModelApiKeys[input.input.model]
-  });
-  const apiKey = selectedApiKey?.key ?? '';
+  const apiKey = input.secrets.audioModelApiKeys[input.input.model]?.trim() ?? '';
   if (!apiKey) {
     return {
       status: 'error',

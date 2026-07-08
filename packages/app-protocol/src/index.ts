@@ -87,11 +87,6 @@ export interface DebruteRuntimeInfo {
   platform: NodeJS.Platform;
 }
 
-export interface BrowserSessionCredential {
-  token: string;
-  runtime: DebruteRuntimeInfo;
-}
-
 export interface RevisionedProjectResult {
   projectId: string;
   projectRevision: number;
@@ -394,35 +389,11 @@ export interface UpdateCanvasTextViewportStateInput {
   }>;
 }
 
-export interface ModelApiKeyEntry {
-  id: string;
-  key: string;
-  label: string | null;
-  enabled: boolean;
-}
+export type ApiKeySettingState =
+  | { apiKeySet: false; apiKeyPreview: null }
+  | { apiKeySet: true; apiKeyPreview: string };
 
-export interface ApiKeyPreviewRecord {
-  id: string;
-  label: string | null;
-  enabled: boolean;
-  preview: string;
-}
-
-export interface MediaModelKeyState {
-  apiKeySet: boolean;
-  apiKeyCount: number;
-  enabledApiKeyCount: number;
-  apiKeyPreviews: ApiKeyPreviewRecord[];
-}
-
-export interface SaveModelApiKeyEntryInput {
-  id: string;
-  key?: string;
-  label: string | null;
-  enabled: boolean;
-}
-
-export interface ImageModelSettingRecord extends MediaModelKeyState {
+export type ImageModelSettingRecord = {
   debruteModelId: string;
   summary: string;
   supportsEditing: boolean;
@@ -431,7 +402,7 @@ export interface ImageModelSettingRecord extends MediaModelKeyState {
   defaultRequestModelId: string;
   baseUrlOverride: string | null;
   requestModelIdOverride: string | null;
-}
+} & ApiKeySettingState;
 
 export interface ImageModelSettingsView {
   models: ImageModelSettingRecord[];
@@ -440,10 +411,10 @@ export interface ImageModelSettingsView {
 export interface SaveImageModelSettingInput {
   baseUrlOverride: string | null;
   requestModelIdOverride: string | null;
-  apiKeys?: SaveModelApiKeyEntryInput[];
+  apiKey?: string;
 }
 
-export interface VideoModelSettingRecord extends MediaModelKeyState {
+export type VideoModelSettingRecord = {
   debruteModelId: string;
   summary: string;
   supportsTextToVideo: boolean;
@@ -455,7 +426,7 @@ export interface VideoModelSettingRecord extends MediaModelKeyState {
   defaultRequestModelId: string;
   baseUrlOverride: string | null;
   requestModelIdOverride: string | null;
-}
+} & ApiKeySettingState;
 
 export interface VideoModelSettingsView {
   models: VideoModelSettingRecord[];
@@ -464,12 +435,12 @@ export interface VideoModelSettingsView {
 export interface SaveVideoModelSettingInput {
   baseUrlOverride: string | null;
   requestModelIdOverride: string | null;
-  apiKeys?: SaveModelApiKeyEntryInput[];
+  apiKey?: string;
 }
 
 export type AudioModelKind = 'tts' | 'music' | 'sound-effect';
 
-export interface AudioModelSettingRecord extends MediaModelKeyState {
+export type AudioModelSettingRecord = {
   debruteModelId: string;
   kind: AudioModelKind;
   summary: string;
@@ -477,7 +448,7 @@ export interface AudioModelSettingRecord extends MediaModelKeyState {
   defaultRequestModelId: string;
   baseUrlOverride: string | null;
   requestModelIdOverride: string | null;
-}
+} & ApiKeySettingState;
 
 export interface AudioModelSettingsView {
   models: AudioModelSettingRecord[];
@@ -486,7 +457,7 @@ export interface AudioModelSettingsView {
 export interface SaveAudioModelSettingInput {
   baseUrlOverride: string | null;
   requestModelIdOverride: string | null;
-  apiKeys?: SaveModelApiKeyEntryInput[];
+  apiKey?: string;
 }
 
 export interface RunImageModelBatchInput {

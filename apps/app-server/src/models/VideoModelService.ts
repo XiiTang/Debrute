@@ -1,8 +1,7 @@
-import { createVideoModelCatalog, createVideoModelSettingsView, type SecretsConfig } from '@debrute/capability-runtime';
-import type { SaveModelApiKeyEntryInput, SaveVideoModelSettingInput, VideoModelSettingsView } from '@debrute/app-protocol';
+import { createVideoModelCatalog, createVideoModelSettingsView } from '@debrute/capability-runtime';
+import type { SaveVideoModelSettingInput, VideoModelSettingsView } from '@debrute/app-protocol';
 import type { GlobalConfigStore } from '../config/GlobalConfigStore.js';
 import { serviceError } from '../server/ServiceErrors.js';
-import { normalizeModelApiKeySaveEntries, resolveModelApiKeyEntries } from './ModelApiKeySaveInput.js';
 
 export class VideoModelService {
   private readonly catalog = createVideoModelCatalog();
@@ -32,26 +31,21 @@ export class VideoModelService {
       });
     }
     videoModels.sort((left, right) => left.debruteModelId.localeCompare(right.debruteModelId));
-    const nextVideoModels = { videoModels };
-    let nextSecrets: SecretsConfig | undefined;
-    if (saveInput.apiKeys !== undefined) {
+    await this.input.configStore.saveVideoModels({ videoModels });
+    if (saveInput.apiKey !== undefined) {
       const secrets = await this.input.configStore.readSecrets();
       const videoModelApiKeys = { ...secrets.videoModelApiKeys };
-      videoModelApiKeys[modelId] = resolveModelApiKeyEntries(
-        saveInput.apiKeys,
-        secrets.videoModelApiKeys[modelId] ?? [],
-        'Video model',
-        videoModelInputError
-      );
-      nextSecrets = {
+      const apiKey = saveInput.apiKey.trim();
+      if (apiKey) {
+        videoModelApiKeys[modelId] = apiKey;
+      } else {
+        delete videoModelApiKeys[modelId];
+      }
+      await this.input.configStore.saveSecrets({
         imageModelApiKeys: { ...secrets.imageModelApiKeys },
         videoModelApiKeys,
         audioModelApiKeys: { ...secrets.audioModelApiKeys }
-      };
-    }
-    await this.input.configStore.saveVideoModels(nextVideoModels);
-    if (nextSecrets !== undefined) {
-      await this.input.configStore.saveSecrets(nextSecrets);
+      });
     }
     return this.getSettings();
   }
@@ -60,19 +54,20 @@ export class VideoModelService {
 function normalizeVideoModelSaveInput(input: SaveVideoModelSettingInput): {
   baseUrlOverride: string | null;
   requestModelIdOverride: string | null;
-  apiKeys?: SaveModelApiKeyEntryInput[];
+  apiKey?: string;
 } {
   if (!isRecord(input)) {
     throw videoModelInputError('Video model setting must be an object.', 'mediaModelSetting');
   }
   const baseUrlOverride = normalizeVideoModelBaseUrlOverride(input.baseUrlOverride);
   const requestModelIdOverride = normalizeVideoModelRequestModelIdOverride(input.requestModelIdOverride);
+  if (input.apiKey !== undefined && typeof input.apiKey !== 'string') {
+    throw videoModelInputError('Video model apiKey must be a string when provided.', 'apiKey');
+  }
   return {
     baseUrlOverride,
     requestModelIdOverride,
-    ...(input.apiKeys !== undefined
-      ? { apiKeys: normalizeModelApiKeySaveEntries(input.apiKeys, 'Video model', videoModelInputError) }
-      : {})
+    ...(input.apiKey !== undefined ? { apiKey: input.apiKey } : {})
   };
 }
 

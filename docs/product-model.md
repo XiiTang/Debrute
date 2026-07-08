@@ -76,10 +76,12 @@ Renderer code does not read or write project files, generated asset metadata, mo
 
 The CLI and Skills product posture is command-first: Debrute provides commands, structured output, safety guidance, and Skills for external Agents while not being the Agent itself.
 
-`debrute workbench start` starts or reuses the local Workbench runtime and returns base URLs and ports without opening a browser. Interactive users open projects through the Workbench `Open Project` picker. Agents open projects by constructing:
+`debrute workbench start` starts or reuses the local Workbench runtime and returns the stable Workbench origin, one-time launch URL, and ports without opening a browser. Interactive users open projects through the Workbench `Open Project` picker. Agents open projects by requesting the same-origin `/open` route as the launch target:
 
-```text
-<web_url>/open?path=<encodeURIComponent(absProjectPath)>
+```sh
+debrute workbench start --next "/open?path=<encodeURIComponent(absProjectPath)>"
 ```
+
+Agents then open the returned `launch_url`.
 
 Project, Canvas Map, and generation commands are runtime-backed. The CLI starts or reuses the local runtime for those operations so project state, settings, generated asset metadata, managed CLI diagnostics, and official Skills status stay behind the daemon boundary.

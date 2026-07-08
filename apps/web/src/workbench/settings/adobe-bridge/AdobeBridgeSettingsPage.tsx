@@ -5,21 +5,22 @@ import type {
   AdobeBridgeStateView,
   AdobeBridgeTransferView
 } from '@debrute/app-protocol';
-import type { WorkbenchActions, WorkbenchState } from '../../../types';
+import type { WorkbenchActions } from '../../../types';
 import { adobeBridgeErrorLabel } from '../../adobe-bridge/adobeBridgeLabels';
 import { Button, StatusPill, Switch, Toolbar } from '../../ui';
 import { useI18n, type WorkbenchI18n } from '../../i18n';
 
 export function AdobeBridgeSettingsPage({
-  state,
+  bridge,
+  projectId,
   actions
 }: {
-  state: WorkbenchState;
+  bridge: AdobeBridgeStateView;
+  projectId: string | undefined;
   actions: WorkbenchActions;
 }): React.ReactElement {
   const i18n = useI18n();
-  const bridge = state.adobeBridge;
-  const currentProjectId = state.projectId;
+  const currentProjectId = projectId;
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string>();
   const failedTransfers = recentFailedTransfers(bridge);
@@ -43,7 +44,7 @@ export function AdobeBridgeSettingsPage({
         <Toolbar ariaLabel={i18n.t('settings.adobeBridge.actions')} className="db-action-row">
           <Switch
             label={i18n.t('settings.adobeBridge.enable')}
-            checked={bridge?.settings.enabled === true}
+            checked={bridge.settings.enabled === true}
             disabled={saving}
             onChange={(event) => void setEnabled(event.currentTarget.checked)}
           />
@@ -51,12 +52,12 @@ export function AdobeBridgeSettingsPage({
       </header>
       {error ? <small className="db-form-error">{error}</small> : null}
       <div className="db-integration-summary">
-        <StatusPill tone={bridge?.settings.discoveryStatus === 'available' ? 'success' : bridge?.settings.discoveryStatus === 'disabled' ? 'neutral' : 'danger'}>
-          {discoveryLabel(bridge?.settings.discoveryStatus, i18n)}
+        <StatusPill tone={bridge.settings.discoveryStatus === 'available' ? 'success' : bridge.settings.discoveryStatus === 'disabled' ? 'neutral' : 'danger'}>
+          {discoveryLabel(bridge.settings.discoveryStatus, i18n)}
         </StatusPill>
       </div>
       <div className="db-integration-list">
-        {(bridge?.adobeClients ?? []).map((client) => {
+        {bridge.adobeClients.map((client) => {
           const linked = isPhotoshopLinkedToCurrentProject(bridge, currentProjectId, client.adobeClientId);
           return (
             <div className="db-integration-row" key={client.adobeClientId}>
@@ -79,7 +80,7 @@ export function AdobeBridgeSettingsPage({
             </div>
           );
         })}
-        {(bridge?.projects ?? []).map((project) => (
+        {bridge.projects.map((project) => (
           <div className="db-integration-row" key={project.projectId}>
             <span>{project.projectName}</span>
             <StatusPill tone="success">{i18n.t('settings.adobeBridge.openProject')}</StatusPill>
@@ -108,11 +109,11 @@ export function AdobeBridgeSettingsPage({
 }
 
 export function isPhotoshopLinkedToCurrentProject(
-  bridge: AdobeBridgeStateView | undefined,
+  bridge: AdobeBridgeStateView,
   currentProjectId: string | undefined,
   adobeClientId: string
 ): boolean {
-  if (!bridge || !currentProjectId) {
+  if (!currentProjectId) {
     return false;
   }
   return bridge.links.some((link) => (
@@ -122,14 +123,14 @@ export function isPhotoshopLinkedToCurrentProject(
   ));
 }
 
-function discoveryLabel(status: AdobeBridgeDiscoveryStatus | undefined, i18n: WorkbenchI18n): string {
+function discoveryLabel(status: AdobeBridgeDiscoveryStatus, i18n: WorkbenchI18n): string {
   if (status === 'available') return i18n.t('settings.adobeBridge.available');
   if (status === 'disabled') return i18n.t('settings.adobeBridge.disabled');
   return i18n.t('settings.adobeBridge.unavailable');
 }
 
-function recentFailedTransfers(bridge: AdobeBridgeStateView | undefined): AdobeBridgeTransferView[] {
-  return [...(bridge?.transfers ?? [])]
+function recentFailedTransfers(bridge: AdobeBridgeStateView): AdobeBridgeTransferView[] {
+  return [...bridge.transfers]
     .filter((transfer) => transfer.status === 'failed')
     .sort((left, right) => right.updatedAt.localeCompare(left.updatedAt))
     .slice(0, 5);

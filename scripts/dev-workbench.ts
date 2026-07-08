@@ -9,6 +9,7 @@ import {
   DEFAULT_WORKBENCH_DAEMON_PORT,
   DEFAULT_WORKBENCH_WEB_PORT,
   chooseLoopbackPort,
+  createWorkbenchLaunchUrl,
   deleteWorkbenchRuntimeState,
   ensureRegisteredWorkbenchRuntime,
   readWorkbenchRuntimeState,
@@ -37,7 +38,13 @@ const result = await ensureRegisteredWorkbenchRuntime({
 currentRuntimeState = result.state;
 deleteOwnState = result.runtimeStarted;
 
-process.stdout.write(`Debrute Workbench: ${result.state.webUrl}\n`);
+const launchUrl = createWorkbenchLaunchUrl({
+  webUrl: result.state.webUrl,
+  token: result.state.token,
+  next: '/'
+});
+process.stdout.write(`Debrute Workbench launch URL: ${launchUrl}\n`);
+process.stdout.write(`Debrute Workbench origin: ${result.state.webUrl}\n`);
 
 if (!deleteOwnState) {
   process.exit(0);
@@ -82,7 +89,8 @@ async function launchSourceDevRuntime(): Promise<WorkbenchRuntimeState> {
     String(webPort),
     '--strictPort'
   ], {
-    DEBRUTE_DAEMON_URL: daemonUrl
+    DEBRUTE_DAEMON_URL: daemonUrl,
+    DEBRUTE_DAEMON_TOKEN_FILE: paths.tokenPath
   });
   children.push(daemon, web);
   const now = new Date().toISOString();

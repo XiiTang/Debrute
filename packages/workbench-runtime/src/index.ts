@@ -1,4 +1,20 @@
 export {
+  WORKBENCH_LAUNCH_NONCE_TTL_MS,
+  WORKBENCH_SESSION_COOKIE,
+  WORKBENCH_SESSION_ROUTE_PREFIX,
+  createWorkbenchLaunchNonce,
+  createWorkbenchLaunchUrl,
+  createWorkbenchSessionId,
+  normalizeWorkbenchLaunchNextPath,
+  readWorkbenchSessionCookie,
+  serializeWorkbenchSessionCookie,
+  timingSafeStringEquals,
+  verifyWorkbenchLaunchNonce,
+  type CreateWorkbenchLaunchNonceOptions,
+  type CreateWorkbenchLaunchUrlOptions,
+  type VerifyWorkbenchLaunchNonceOptions
+} from './browserSession.js';
+export {
   WorkbenchRuntimeRegistryError,
   isWorkbenchRuntimeRegistryError,
   type WorkbenchRuntimeRegistryErrorCode

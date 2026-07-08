@@ -1,10 +1,11 @@
 import type { Stats } from 'node:fs';
 import { access, stat } from 'node:fs/promises';
-import type sharp from 'sharp';
+import type { Metadata } from 'sharp';
 import {
   isCanvasPreviewableProjectImagePath,
   normalizeProjectRelativePath,
   projectFileRevision,
+  projectImageMimeTypeMatchesPath,
   projectRelativePathCacheKey,
   projectRevisionCacheKey,
   resolveExistingProjectPath,
@@ -101,8 +102,8 @@ export async function canvasImagePreviewSourceInfo(
   }
   const absolutePath = await resolveExistingProjectPath(projectRoot, normalizedPath);
   const sourceMetadata = await readCanvasImagePreviewMetadata(absolutePath, projectRelativePath);
-  const sourceWidth = sourceMetadata.width;
-  if ((sourceMetadata.pages ?? 1) > 1 || typeof sourceWidth !== 'number' || !Number.isFinite(sourceWidth) || sourceWidth <= 0) {
+  const sourceWidth = previewableRasterImageSourceWidth(normalizedPath, sourceMetadata);
+  if (sourceWidth === undefined) {
     return { previewable: false };
   }
   return {
@@ -227,10 +228,11 @@ class LocalCanvasImagePreviewService implements CanvasImagePreviewService {
     }
     const sourceMetadata = await readCanvasImagePreviewMetadata(absoluteSourcePath, input.projectRelativePath, input.abortSignal);
     throwIfCanvasPreviewAborted(input.abortSignal);
-    if ((sourceMetadata.pages ?? 1) > 1) {
+    const sourceWidth = previewableRasterImageSourceWidth(input.projectRelativePath, sourceMetadata);
+    if (sourceWidth === undefined) {
       throw new Error(`Canvas image is not previewable: ${input.projectRelativePath}`);
     }
-    assertCanvasImagePreviewWidthWithinSource(input.width, sourceMetadata.width, input.projectRelativePath);
+    assertCanvasImagePreviewWidthWithinSource(input.width, sourceWidth, input.projectRelativePath);
 
     const previewBaseProjectPath = canvasImagePreviewCacheBaseProjectPath({
       projectRelativePath: input.projectRelativePath,
@@ -279,7 +281,7 @@ async function readCanvasImagePreviewMetadata(
   absolutePath: string,
   projectRelativePath: string,
   abortSignal?: AbortSignal
-): Promise<sharp.Metadata> {
+): Promise<Metadata> {
   try {
     return await readCanvasRasterPreviewMetadata(absolutePath, projectRelativePath, abortSignal);
   } catch (error) {
@@ -324,6 +326,20 @@ function normalizePreviewProjectRelativePath(projectRelativePath: string): strin
 
 function isPreviewableRasterImagePath(projectRelativePath: string): boolean {
   return isCanvasPreviewableProjectImagePath(projectRelativePath);
+}
+
+function previewableRasterImageSourceWidth(projectRelativePath: string, metadata: Metadata): number | undefined {
+  const sourceWidth = metadata.width;
+  if (!projectImageMimeTypeMatchesPath(metadata.mediaType, projectRelativePath)) {
+    return undefined;
+  }
+  if ((metadata.pages ?? 1) > 1) {
+    return undefined;
+  }
+  if (typeof sourceWidth !== 'number' || !Number.isFinite(sourceWidth) || sourceWidth <= 0) {
+    return undefined;
+  }
+  return sourceWidth;
 }
 
 async function fileExists(path: string): Promise<boolean> {

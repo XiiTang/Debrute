@@ -416,8 +416,11 @@ function projectRelativeDocumentPathIfInside(projectRoot: string, absolutePath: 
 async function realpathIfExisting(path: string): Promise<string | undefined> {
   try {
     return await realpath(path);
-  } catch {
-    return undefined;
+  } catch (error) {
+    if (isMissingPathError(error)) {
+      return undefined;
+    }
+    throw error;
   }
 }
 

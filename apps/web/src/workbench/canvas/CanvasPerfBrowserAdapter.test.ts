@@ -34,37 +34,22 @@ describe('CanvasPerfBrowserAdapter', () => {
     }]);
   });
 
-  it('tolerates browsers that reject mark detail or missing start marks', () => {
-    const mark = vi.fn((_: string, options?: PerformanceMarkOptions) => {
-      if (options?.detail) {
-        throw new Error('detail rejected');
-      }
+  it('isolates mark and measure failures without retrying alternate mark shapes', () => {
+    const mark = vi.fn(() => {
+      throw new Error('mark unavailable');
     });
     const measure = vi.fn(() => {
-      throw new Error('start mark missing');
+      throw new Error('measure unavailable');
     });
     const adapter = createCanvasPerfBrowserAdapter({
       performanceApi: { mark, measure }
     });
 
-    adapter.recordEvent(sessionEnd('camera-pan:1', 'camera-pan'));
+    expect(() => adapter.recordEvent(sessionEnd('camera-pan:1', 'camera-pan'))).not.toThrow();
 
+    expect(mark).toHaveBeenCalledTimes(1);
     expect(mark).toHaveBeenCalledWith('debrute:canvas:camera-pan:camera-pan:1:end', expect.any(Object));
-    expect(mark).toHaveBeenCalledWith('debrute:canvas:camera-pan:camera-pan:1:end');
-    expect(measure).toHaveBeenCalled();
-  });
-
-  it('swallows mark failures after detail fallback also fails', () => {
-    const adapter = createCanvasPerfBrowserAdapter({
-      performanceApi: {
-        mark: () => {
-          throw new Error('mark unavailable');
-        },
-        measure: vi.fn()
-      }
-    });
-
-    expect(() => adapter.recordEvent(sessionStart('camera-pan:1', 'camera-pan'))).not.toThrow();
+    expect(measure).toHaveBeenCalledTimes(1);
   });
 
   it('observes long animation frames only while sessions are active', () => {

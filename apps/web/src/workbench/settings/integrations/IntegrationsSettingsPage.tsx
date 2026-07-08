@@ -1,21 +1,23 @@
 import React, { useEffect, useState } from 'react';
 import { Download, Loader2, RefreshCw, Trash2, Upload } from 'lucide-react';
 import type {
+  IntegrationBackendId,
   IntegrationBackendStatus,
+  IntegrationSettingsView,
   IntegrationOperationDiagnostic,
   IntegrationOperationInFlight,
   IntegrationOperationKind,
   IntegrationStatus
 } from '@debrute/app-protocol';
-import type { WorkbenchActions, WorkbenchState } from '../../../types';
+import type { WorkbenchActions } from '../../../types';
 import { Button, StatusPill, Toolbar } from '../../ui';
 import { useI18n, type WorkbenchI18n } from '../../i18n';
 
 export function IntegrationsSettingsPage({
-  state,
+  settings,
   actions
 }: {
-  state: WorkbenchState;
+  settings: IntegrationSettingsView;
   actions: WorkbenchActions;
 }): React.ReactElement {
   const i18n = useI18n();
@@ -29,8 +31,8 @@ export function IntegrationsSettingsPage({
     diagnostic?: IntegrationOperationDiagnostic;
     message?: string;
   }>();
-  const integrations = state.integrationsSettings?.integrations ?? [];
-  const runningOperation = state.integrationsSettings?.runningOperation ?? localRunningOperation;
+  const integrations = settings.integrations;
+  const runningOperation = settings.runningOperation ?? localRunningOperation;
   const operationRunning = Boolean(runningOperation);
   const rescanRunning = rescanning;
 
@@ -38,10 +40,10 @@ export function IntegrationsSettingsPage({
     if (!operationFailure) {
       return;
     }
-    if (integrationFailureStateKey(state.integrationsSettings, operationFailure.integrationId) !== operationFailure.stateKey) {
+    if (integrationFailureStateKey(settings, operationFailure.integrationId) !== operationFailure.stateKey) {
       setOperationFailure(undefined);
     }
-  }, [operationFailure, state.integrationsSettings]);
+  }, [operationFailure, settings]);
 
   const rescan = async () => {
     setRescanning(true);
@@ -69,8 +71,8 @@ export function IntegrationsSettingsPage({
 
       {error ? <small className="db-form-error">{error}</small> : null}
       <BackendSummary
-        backends={state.integrationsSettings?.backends}
-        checking={rescanning || (!state.integrationsSettings?.backends?.length && rescanRunning)}
+        backends={settings.backends}
+        checking={rescanning || (settings.backends.length === 0 && rescanRunning)}
         i18n={i18n}
       />
 
@@ -101,7 +103,7 @@ export function IntegrationsSettingsPage({
                 setOperationFailure({
                   integrationId: integration.integrationId,
                   operation,
-                  stateKey: integrationFailureStateKey(state.integrationsSettings, integration.integrationId),
+                  stateKey: integrationFailureStateKey(settings, integration.integrationId),
                   message: errorMessage(err)
                 });
               } finally {
@@ -163,19 +165,18 @@ function BackendSummary({
   checking,
   i18n
 }: {
-  backends: IntegrationBackendStatus[] | undefined;
+  backends: IntegrationBackendStatus[];
   checking: boolean;
   i18n: WorkbenchI18n;
 }): React.ReactElement | null {
   if (checking) {
     return <small className="db-integration-summary">{i18n.t('settings.integrations.checkingBackends')}</small>;
   }
-  if (!backends?.length) {
+  if (backends.length === 0) {
     return null;
   }
   const labels = backends
-    .filter((backend) => backend.available && backend.backend)
-    .map((backend) => backendLabel(backend.backend));
+    .flatMap((backend) => backend.available && backend.backend ? [backendLabel(backend.backend)] : []);
   const summary = labels.length > 0
     ? labels.join(', ')
     : backends.map((backend) => backend.unavailableReason ?? i18n.t('settings.integrations.unavailable')).join(', ');
@@ -288,12 +289,11 @@ function statusLabel(status: string, i18n: WorkbenchI18n): string {
   return status;
 }
 
-function backendLabel(backend: string | undefined): string {
+function backendLabel(backend: IntegrationBackendId): string {
   if (backend === 'brew') return 'Homebrew';
   if (backend === 'winget') return 'winget';
   if (backend === 'uv') return 'uv';
-  if (backend === 'pipx') return 'pipx';
-  return 'unavailable';
+  return 'pipx';
 }
 
 function operationIcon(kind: IntegrationOperationKind): React.ReactElement {
@@ -318,8 +318,8 @@ function operationFailureLabel(kind: IntegrationOperationKind, i18n: WorkbenchI1
   return i18n.t('settings.integrations.uninstallFailed');
 }
 
-function integrationFailureStateKey(settings: WorkbenchState['integrationsSettings'], integrationId: string): string {
-  return JSON.stringify(settings?.integrations.find((integration) => integration.integrationId === integrationId) ?? null);
+function integrationFailureStateKey(settings: IntegrationSettingsView, integrationId: string): string {
+  return JSON.stringify(settings.integrations.find((integration) => integration.integrationId === integrationId) ?? null);
 }
 
 function errorMessage(error: unknown): string {

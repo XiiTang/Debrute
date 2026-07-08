@@ -124,6 +124,9 @@ function CanvasNodeShellComponent({
       ref={elementRef}
       data-canvas-entity="node"
       data-canvas-node-path={node.projectRelativePath}
+      data-canvas-node-kind={node.nodeKind}
+      data-canvas-media-kind={node.mediaKind}
+      data-project-relative-path={node.projectRelativePath}
       className={className}
       style={{ left: 0, top: 0 } as React.CSSProperties}
       onPointerDown={node.mediaKind === 'text' ? undefined : (event) => onPointerDown(node, event)}

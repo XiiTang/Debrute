@@ -26,11 +26,8 @@ describe('runtime managed CLI service', () => {
     expect(() => parseProductPayloadManifest({
       schemaVersion: 1,
       productVersion: '0.2.0',
-      cliRoot: 'runtime-product/cli',
-      skillsRoot: 'runtime-product/skills',
-      webRoot: 'dist',
-      replacementHelper: 'product-replacement-helper.cjs'
-    })).toThrow(/must not declare path fields/);
+      unexpected: 'value'
+    })).toThrow(/unsupported fields: unexpected/);
 
     expect(() => parseProductPayloadManifest({ schemaVersion: 2 })).toThrow(/schemaVersion/);
   });

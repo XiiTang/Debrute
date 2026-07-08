@@ -69,7 +69,7 @@ describe('CanvasVideoPreviewRuntime', () => {
     await act(async () => undefined);
 
     expect(container?.querySelector('[data-preview-src]')?.getAttribute('data-preview-src')).toBe(
-      'http://127.0.0.1:17321/api/projects/p/canvas-video-preview?canvasId=canvas-1&path=media%2Fa.mp4&videoRevision=rev-a&t=0&sourceKey=v1--explicit--poster&w=300'
+      '/api/projects/p/canvas-video-preview?canvasId=canvas-1&path=media%2Fa.mp4&videoRevision=rev-a&t=0&sourceKey=v1--explicit--poster&w=300'
     );
   });
 

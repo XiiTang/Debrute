@@ -176,14 +176,7 @@ export async function runPanRoundTripDiagnostic(options = {}) {
       maxTotalBufferSize: 100000000,
       maxResourceBufferSize: 10000000
     });
-    await client.evaluate(`(() => {
-      if (!window.__debruteCanvasPerf) {
-        throw new Error('window.__debruteCanvasPerf is not available. Enable canvas perf debug and use a main-world CDP target.');
-      }
-      try { window.__debruteCanvasPerf.stopCapture(); } catch (_) {}
-      performance.clearResourceTimings();
-      window.__debruteCanvasPerf.startCapture({ label: 'canvas-pan-roundtrip-diagnostic' });
-    })()`);
+    await startCanvasPanRoundTripCapture(client);
 
     const snapshots = [];
     const motionSamples = [];
@@ -238,6 +231,17 @@ export async function runPanRoundTripDiagnostic(options = {}) {
   } finally {
     await client.close();
   }
+}
+
+export async function startCanvasPanRoundTripCapture(client) {
+  await client.evaluate(`(() => {
+    if (!window.__debruteCanvasPerf) {
+      throw new Error('window.__debruteCanvasPerf is not available. Enable canvas perf debug and use a main-world CDP target.');
+    }
+    window.__debruteCanvasPerf.stopCapture();
+    performance.clearResourceTimings();
+    window.__debruteCanvasPerf.startCapture({ label: 'canvas-pan-roundtrip-diagnostic' });
+  })()`);
 }
 
 async function connectToPageTarget(cdpUrl, targetUrl) {

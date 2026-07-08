@@ -17,7 +17,7 @@ describe('canvas image preview active aborts', () => {
     vi.doMock('sharp', () => ({
       default: () => {
         const api = {
-          metadata: async () => ({ width: 800, pages: 1, hasAlpha: false }),
+          metadata: async () => ({ width: 800, pages: 1, hasAlpha: false, mediaType: 'image/png' }),
           rotate: () => api,
           resize: () => api,
           jpeg: () => api,
@@ -26,7 +26,10 @@ describe('canvas image preview active aborts', () => {
             toBufferCalls += 1;
             generation.resolve();
             await finishGeneration.promise;
-            return Buffer.from('preview-cache-bytes');
+            return {
+              data: Buffer.from('preview-cache-bytes'),
+              info: { hasAlpha: false }
+            };
           }
         };
         return api;

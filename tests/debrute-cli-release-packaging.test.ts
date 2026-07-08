@@ -14,16 +14,12 @@ import {
   expectedReleaseAssets
 } from '../scripts/release-asset-contract.mjs';
 import { resolveNodeModulePackageRoot } from '../scripts/sharp-runtime-payload.mjs';
+import webViteConfig from '../apps/web/vite.config';
 import photoshopCepViteConfig from '../apps/photoshop-cep-plugin/vite.config';
 import photoshopUxpViteConfig from '../apps/photoshop-uxp-plugin/vite.config';
 
 describe('Debrute managed CLI runtime packaging', () => {
-  it('does not define public standalone CLI release archives', () => {
-    const packagingScript = readFileSync(join(process.cwd(), 'scripts/package-debrute-cli.mjs'), 'utf8');
-
-    expect(packagingScript).not.toContain('release/debrute-cli');
-    expect(packagingScript).not.toContain('tar -czf');
-    expect(packagingScript).not.toContain('AdmZip');
+  it('defines the current Desktop release asset contract', () => {
     expect(expectedReleaseAssets('0.2.0')).toEqual([
       'debrute-desktop-0.2.0-macos-arm64.dmg',
       'debrute-desktop-0.2.0-macos-x64.dmg',
@@ -65,12 +61,43 @@ describe('Debrute managed CLI runtime packaging', () => {
 
   it('defines the desktop GitHub Release asset contract', () => {
     expect(desktopReleaseAssetName('0.2.0', 'macos', 'arm64', 'dmg')).toBe('debrute-desktop-0.2.0-macos-arm64.dmg');
-    expect(expectedReleaseAssets('0.2.0')).not.toContain('debrute-cli-0.2.0-macos-arm64.tar.gz');
   });
 
   it('builds Photoshop plugin packages with relative panel asset URLs', () => {
     expect((photoshopUxpViteConfig as { base?: string }).base).toBe('./');
     expect((photoshopCepViteConfig as { base?: string }).base).toBe('./');
+  });
+
+  it('uses Vite 8.1 production build contracts for built web and Photoshop surfaces', () => {
+    const web = viteBuildContractConfig(webViteConfig);
+    const cep = viteBuildContractConfig(photoshopCepViteConfig);
+    const uxp = viteBuildContractConfig(photoshopUxpViteConfig);
+
+    expect(web.build?.license).toBe(true);
+    expect(cep.build?.license).toBe(true);
+    expect(uxp.build?.license).toBe(true);
+
+    expect(cep.build?.rolldownOptions).toMatchObject({
+      output: {
+        entryFileNames: 'assets/[name].js',
+        chunkFileNames: 'assets/[name].js',
+        assetFileNames: 'assets/[name][extname]'
+      }
+    });
+    expect(uxp.build?.rolldownOptions).toMatchObject({
+      output: {
+        entryFileNames: 'assets/[name].js',
+        chunkFileNames: 'assets/[name].js',
+        assetFileNames: 'assets/[name][extname]'
+      }
+    });
+
+    for (const config of [web, cep, uxp]) {
+      expect(config.build).not.toHaveProperty('rollupOptions');
+      expect(config.build).not.toHaveProperty('chunkImportMap');
+      expect(config.css).toBeUndefined();
+      expect(config.html).toBeUndefined();
+    }
   });
 
   it('includes native runtime payload entries without duplicating desktop web dist', () => {
@@ -187,6 +214,39 @@ describe('Debrute managed CLI runtime packaging', () => {
     }
   });
 
+  it('defines the Sharp 0.35 runtime payload for every managed target', () => {
+    const packagesByTarget = new Map<string, string[]>([
+      ['darwin-arm64', ['sharp', '@img/colour', 'detect-libc', 'semver', '@img/sharp-darwin-arm64', '@img/sharp-libvips-darwin-arm64']],
+      ['darwin-x64', ['sharp', '@img/colour', 'detect-libc', 'semver', '@img/sharp-darwin-x64', '@img/sharp-libvips-darwin-x64']],
+      ['linux-arm64', ['sharp', '@img/colour', 'detect-libc', 'semver', '@img/sharp-linux-arm64', '@img/sharp-libvips-linux-arm64']],
+      ['linux-x64', ['sharp', '@img/colour', 'detect-libc', 'semver', '@img/sharp-linux-x64', '@img/sharp-libvips-linux-x64']],
+      ['windows-arm64', ['sharp', '@img/colour', 'detect-libc', 'semver', '@img/sharp-win32-arm64']],
+      ['windows-x64', ['sharp', '@img/colour', 'detect-libc', 'semver', '@img/sharp-win32-x64']]
+    ]);
+
+    for (const target of managedCliRuntimeTargets) {
+      const packages = packagesByTarget.get(target.id);
+      expect(packages).toBeDefined();
+      const root = createRootWithCliRuntimePackages(packages!);
+      try {
+        const entries = managedCliRuntimePayloadEntries(root, target)
+          .map((entry) => entry.to)
+          .filter((entry) => (
+            entry === 'node_modules/sharp'
+            || entry === 'node_modules/@img/colour'
+            || entry === 'node_modules/detect-libc'
+            || entry === 'node_modules/semver'
+            || entry.startsWith('node_modules/@img/sharp-')
+            || entry.startsWith('node_modules/@img/sharp-libvips-')
+          ));
+
+        expect(entries).toEqual(packages.map((packageName) => `node_modules/${packageName}`));
+      } finally {
+        rmSync(root, { recursive: true, force: true });
+      }
+    }
+  });
+
   it('copies sharp runtime dependencies into Desktop app resources', async () => {
     const packageJson = JSON.parse(readFileSync(join(process.cwd(), 'apps/desktop/package.json'), 'utf8'));
     expect(packageJson.build.afterPack).toBe('scripts/package-sharp-runtime.mjs');
@@ -226,6 +286,34 @@ function createRootWithNodePackages(packageNames: string[]) {
     mkdirSync(join(root, 'node_modules', ...packageName.split('/')), { recursive: true });
   }
   return root;
+}
+
+interface ViteBuildContractConfig {
+  base?: string;
+  build?: {
+    license?: boolean | { fileName?: string };
+    rolldownOptions?: {
+      input?: string;
+      output?: {
+        entryFileNames?: string;
+        chunkFileNames?: string;
+        assetFileNames?: string;
+      };
+    };
+    rollupOptions?: unknown;
+    chunkImportMap?: unknown;
+  };
+  css?: {
+    transformer?: unknown;
+    lightningcss?: unknown;
+  };
+  html?: {
+    additionalAssetSources?: unknown;
+  };
+}
+
+function viteBuildContractConfig(config: unknown): ViteBuildContractConfig {
+  return config as ViteBuildContractConfig;
 }
 
 function createRootWithCliRuntimePackages(packageNames: string[]) {

@@ -504,5 +504,5 @@ function imageNode(
 }
 
 function previewUrl(path: string, revision: string, width: number): string {
-  return `http://127.0.0.1:17321/api/projects/p/canvas-image-preview?path=${encodeURIComponent(path)}&v=${revision}&w=${width}`;
+  return `/api/projects/p/canvas-image-preview?path=${encodeURIComponent(path)}&v=${revision}&w=${width}`;
 }

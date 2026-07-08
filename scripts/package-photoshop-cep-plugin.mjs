@@ -5,6 +5,7 @@ import { promisify } from 'node:util';
 import { fileURLToPath } from 'node:url';
 import AdmZip from 'adm-zip';
 import { packageManagerCommand } from './package-manager-command.mjs';
+import { validateZipEntries } from './package-validation.mjs';
 import { validateReleaseVersionContract } from './validate-release-version-contract.mjs';
 
 const execFileAsync = promisify(execFile);
@@ -31,6 +32,13 @@ export async function packagePhotoshopCepPlugin({ outDir = join(workspaceRoot, '
   await new Promise((resolvePackage, rejectPackage) => {
     zip.writeZip(assetPath, (error) => error ? rejectPackage(error) : resolvePackage());
   });
+  validateZipEntries(assetPath, [
+    'com.debrute.photoshop.bridge.cep/CSXS/manifest.xml',
+    'com.debrute.photoshop.bridge.cep/index.html',
+    'com.debrute.photoshop.bridge.cep/assets/index.js',
+    'com.debrute.photoshop.bridge.cep/assets/index.css',
+    'com.debrute.photoshop.bridge.cep/jsx/debruteBridge.jsx'
+  ]);
   return { outDir, assetName, assetPath };
 }
 

@@ -8,7 +8,7 @@ describe('@debrute/runtime-host config', () => {
     const config = parseRuntimeHostConfig({
       env: {
         DEBRUTE_RUNTIME_HOST_DAEMON_PORT: '17321',
-        DEBRUTE_RUNTIME_HOST_TOKEN_FILE: '/tmp/debrute-token',
+        DEBRUTE_RUNTIME_HOST_TOKEN_FILE: '/tmp/debrute-runtime-token',
         DEBRUTE_RUNTIME_HOST_WEB_DIST_DIR: '/Applications/Debrute.app/Contents/Resources/app.asar/dist',
         DEBRUTE_RUNTIME_HOST_PRODUCT_VERSION: '0.2.0',
         DEBRUTE_RUNTIME_HOST_CLI_PAYLOAD_DIR: '/Applications/Debrute.app/Contents/Resources/app.asar.unpacked/dist-electron/runtime-product/cli',
@@ -25,7 +25,7 @@ describe('@debrute/runtime-host config', () => {
     expect(config).toEqual({
       host: '127.0.0.1',
       daemonPort: 17321,
-      tokenFile: '/tmp/debrute-token',
+      tokenFile: '/tmp/debrute-runtime-token',
       webDistDir: '/Applications/Debrute.app/Contents/Resources/app.asar/dist',
       productVersion: '0.2.0',
       cliPayloadDir: '/Applications/Debrute.app/Contents/Resources/app.asar.unpacked/dist-electron/runtime-product/cli',

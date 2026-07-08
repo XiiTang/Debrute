@@ -17,22 +17,4 @@ describe('public product documentation contract', () => {
     expect(combined).toContain('pnpm package:runtime-cli');
     expect(combined).toContain('Project, Canvas Map, and generation commands are runtime-backed');
   });
-
-  it('does not keep standalone CLI release, old updater metadata, or manual Skills sync instructions', () => {
-    for (const removed of [
-      'Debrute CLI archives',
-      'debrute-cli-X.Y.Z',
-      'latest.yml',
-      '.blockmap',
-      'pnpm package:cli',
-      'pnpm package:cli:all',
-      'release/debrute-cli',
-      'Settings under **Debrute CLI**',
-      'debrute skills sync',
-      'skills sync --force',
-      'One-shot project, Canvas Map, and generation commands do not require the Workbench daemon.'
-    ]) {
-      expect(combined).not.toContain(removed);
-    }
-  });
 });

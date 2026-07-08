@@ -29,10 +29,36 @@ describe('CanvasRasterPreviewService', () => {
     });
 
     expect(result.absolutePath).toBe(join(root, '.debrute/cache/test.preview-w40.png'));
-    const metadata = await sharp(result.absolutePath).metadata();
-    expect(metadata.width).toBe(40);
-    expect(metadata.height).toBe(20);
-    expect(metadata.hasAlpha).toBe(true);
+    const output = await sharp(result.absolutePath).toBuffer({ resolveWithObject: true });
+    expect(output.info.width).toBe(40);
+    expect(output.info.height).toBe(20);
+    expect(output.info.hasAlpha).toBe(true);
+  });
+
+  it('writes a resized JPEG preview for opaque sources and reports output without alpha', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'debrute-raster-preview-opaque-'));
+    await mkdir(join(root, 'assets'), { recursive: true });
+    await sharp({
+      create: {
+        width: 100,
+        height: 50,
+        channels: 3,
+        background: { r: 255, g: 0, b: 0 }
+      }
+    }).jpeg().toFile(join(root, 'assets/source.jpg'));
+
+    const service = createCanvasRasterPreviewService({ generationConcurrency: 4, metadataConcurrency: 4 });
+    const result = await service.generate({
+      sourceAbsolutePath: join(root, 'assets/source.jpg'),
+      outputAbsolutePath: join(root, '.debrute/cache/test.preview-w40.jpg'),
+      width: 40
+    });
+
+    expect(result.absolutePath).toBe(join(root, '.debrute/cache/test.preview-w40.jpg'));
+    const output = await sharp(result.absolutePath).toBuffer({ resolveWithObject: true });
+    expect(output.info.width).toBe(40);
+    expect(output.info.height).toBe(20);
+    expect(output.info.hasAlpha).toBe(false);
   });
 
   it('reads source metadata through the shared metadata helper', async () => {

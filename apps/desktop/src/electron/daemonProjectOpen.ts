@@ -1,3 +1,6 @@
+import { createWorkbenchLaunchUrl } from '@debrute/workbench-runtime';
+import type { DebruteShellNavigation } from './desktopShellLoad.js';
+
 type DesktopProjectOpenFetch = (url: string, init?: RequestInit) => Promise<Response>;
 
 interface OpenProjectResponse {
@@ -19,7 +22,7 @@ export async function openProjectThroughDaemon(
   runtime: DebruteDaemonRuntimeLike,
   projectRoot: string,
   fetchImpl: DesktopProjectOpenFetch = fetch
-): Promise<{ projectId: string; url: string }> {
+): Promise<{ projectId: string; navigation: DebruteShellNavigation }> {
   const response = await fetchImpl(new URL('/api/projects/open', runtime.daemonUrl).toString(), {
     method: 'POST',
     headers: {
@@ -34,14 +37,14 @@ export async function openProjectThroughDaemon(
   const opened = await response.json() as OpenProjectResponse;
   return {
     projectId: opened.projectId,
-    url: projectWebShellUrl(runtime, opened.projectId)
+    navigation: projectWebShellNavigation(runtime, opened.projectId)
   };
 }
 
 export async function openProjectFromPickerThroughDaemon(
   runtime: DebruteDaemonRuntimeLike,
   fetchImpl: DesktopProjectOpenFetch = fetch
-): Promise<{ opened: false } | { opened: true; projectId: string; url: string }> {
+): Promise<{ opened: false } | { opened: true; projectId: string; navigation: DebruteShellNavigation }> {
   const response = await fetchImpl(new URL('/api/projects/open-picker', runtime.daemonUrl).toString(), {
     method: 'POST',
     headers: {
@@ -58,7 +61,7 @@ export async function openProjectFromPickerThroughDaemon(
   return {
     opened: true,
     projectId: opened.projectId,
-    url: projectWebShellUrl(runtime, opened.projectId)
+    navigation: projectWebShellNavigation(runtime, opened.projectId)
   };
 }
 
@@ -75,11 +78,15 @@ async function daemonErrorMessage(response: Response): Promise<string> {
   }
 }
 
-export function projectWebShellUrl(runtime: DebruteDaemonRuntimeLike, projectId?: string): string {
-  const url = new URL(runtime.webBaseUrl ?? runtime.daemonUrl);
-  if (projectId) {
-    url.pathname = `/projects/${encodeURIComponent(projectId)}`;
-  }
-  url.searchParams.set('debrute-token', runtime.token);
-  return url.toString();
+export function projectWebShellNavigation(runtime: DebruteDaemonRuntimeLike, projectId?: string): DebruteShellNavigation {
+  const webUrl = runtime.webBaseUrl ?? runtime.daemonUrl;
+  const next = projectId ? `/projects/${encodeURIComponent(projectId)}` : '/';
+  return {
+    readyUrl: new URL(next, webUrl).toString(),
+    loadUrl: createWorkbenchLaunchUrl({
+      webUrl,
+      token: runtime.token,
+      next
+    })
+  };
 }

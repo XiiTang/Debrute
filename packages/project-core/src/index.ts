@@ -5,6 +5,7 @@ import { randomUUID } from 'node:crypto';
 import {
   assertProjectTreeVisibleMutationPath,
   debruteHomeDir,
+  isProjectGitMetadataPath,
   isIgnoredProjectFilePath,
   normalizeProjectRelativePath,
   resolveExistingProjectPath,
@@ -115,7 +116,7 @@ export async function readProjectMetadata(projectRoot: string): Promise<DebruteP
 export async function listDebruteProjectFiles(projectRoot: string): Promise<ProjectFileEntry[]> {
   const entries = await walkEntries(projectRoot);
   return entries
-    .filter((entry) => !entry.projectRelativePath.startsWith('.git/'))
+    .filter((entry) => !isProjectGitMetadataPath(entry.projectRelativePath))
     .filter((entry) => !isIgnoredProjectFilePath(entry.projectRelativePath))
     .sort((a, b) => a.projectRelativePath.localeCompare(b.projectRelativePath));
 }
@@ -132,7 +133,7 @@ export function watchProjectFiles(
       return;
     }
     const projectRelativePath = String(fileName).replaceAll('\\', '/');
-    if (projectRelativePath.startsWith('.git/') || isIgnoredProjectFilePath(projectRelativePath) || projectRelativePath.includes('.tmp')) {
+    if (isProjectGitMetadataPath(projectRelativePath) || isIgnoredProjectFilePath(projectRelativePath) || projectRelativePath.includes('.tmp')) {
       return;
     }
     const observedAt = Date.now();
@@ -274,6 +275,7 @@ export {
   isSupportedProjectImagePath,
   projectImageExtensionForMimeType,
   projectImageFileTypeForPath,
+  projectImageMimeTypeMatchesPath,
   projectImageMimeTypeFromDataUrl,
   projectImageMimeTypeFromPath,
   type ProjectImageFileType,
@@ -292,6 +294,7 @@ export {
 export {
   assertProjectTreeVisibleMutationPath,
   debruteHomeDir,
+  isProjectGitMetadataPath,
   isIgnoredProjectFilePath,
   isProtectedProjectDocumentMutationPath,
   joinProjectPath,

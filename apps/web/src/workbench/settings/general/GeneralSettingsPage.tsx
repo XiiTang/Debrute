@@ -11,7 +11,7 @@ import type {
 } from '@debrute/app-protocol';
 import type { WorkbenchActions } from '../../../types';
 import { useI18n, type WorkbenchI18n } from '../../i18n';
-import { DEFAULT_WORKBENCH_PREFERENCES, type WorkbenchResolvedTheme } from '../../services/workbenchTheme';
+import type { WorkbenchResolvedTheme } from '../../services/workbenchTheme';
 import { Button, Card, Field, Select, StatusPill, Toolbar, type StatusTone } from '../../ui';
 
 type OperationState =
@@ -26,15 +26,15 @@ type ProductActions = Pick<WorkbenchActions, 'getProductState' | 'checkProductUp
 export function GeneralSettingsPage({
   actions,
   initialProductState,
-  preferences = DEFAULT_WORKBENCH_PREFERENCES,
-  resolvedTheme = 'dark',
+  preferences,
+  resolvedTheme,
   onPreferencesChange
 }: {
   actions: ProductActions;
   initialProductState?: DebruteProductState;
-  preferences?: WorkbenchPreferencesView;
-  resolvedTheme?: WorkbenchResolvedTheme;
-  onPreferencesChange?: (preferences: SaveWorkbenchPreferencesInput) => Promise<void>;
+  preferences: WorkbenchPreferencesView;
+  resolvedTheme: WorkbenchResolvedTheme;
+  onPreferencesChange: (preferences: SaveWorkbenchPreferencesInput) => Promise<void>;
 }): React.ReactElement {
   const i18n = useI18n();
   const [productState, setProductState] = useState<DebruteProductState>(initialProductState ?? defaultProductState());
@@ -62,9 +62,6 @@ export function GeneralSettingsPage({
   };
 
   const savePreferences = async (nextPreferences: SaveWorkbenchPreferencesInput) => {
-    if (!onPreferencesChange) {
-      return;
-    }
     setPreferenceOperation({ status: 'loading' });
     try {
       await onPreferencesChange(nextPreferences);

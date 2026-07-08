@@ -44,19 +44,24 @@ import type {
 import type { ProjectTreeSelectionState } from './workbench/project-explorer/projectTreeInteraction';
 import type { WorkbenchResolvedTheme } from './workbench/services/workbenchTheme';
 
+export type SettingsResource<T> =
+  | { status: 'loading' }
+  | { status: 'ready'; value: T }
+  | { status: 'error'; message: string };
+
 export interface WorkbenchState {
   snapshot: WorkbenchProjectSessionSnapshot | undefined;
   projectId?: string | undefined;
   titleBarState: WorkbenchTitleBarState;
-  workbenchPreferences: WorkbenchPreferencesView | undefined;
+  workbenchPreferences: SettingsResource<WorkbenchPreferencesView>;
   resolvedTheme: WorkbenchResolvedTheme;
   projectOpen: ProjectOpenState;
   explorerSelection: ProjectTreeSelectionState;
-  imageModelSettings: ImageModelSettingsView | undefined;
-  videoModelSettings: VideoModelSettingsView | undefined;
-  audioModelSettings: AudioModelSettingsView | undefined;
-  integrationsSettings: IntegrationSettingsView | undefined;
-  adobeBridge: AdobeBridgeStateView | undefined;
+  imageModelSettings: SettingsResource<ImageModelSettingsView>;
+  videoModelSettings: SettingsResource<VideoModelSettingsView>;
+  audioModelSettings: SettingsResource<AudioModelSettingsView>;
+  integrationsSettings: SettingsResource<IntegrationSettingsView>;
+  adobeBridge: SettingsResource<AdobeBridgeStateView>;
   canvasFeedback: CanvasFeedbackDocument | undefined;
   textFileBuffers: Record<string, TextFileBuffer>;
   textEditorWindows: Record<string, FloatingTextEditorWindowState>;
@@ -95,6 +100,12 @@ export interface WorkbenchActions {
   getProductState: () => Promise<DebruteProductState>;
   checkProductUpdate: () => Promise<DebruteProductState>;
   applyProductUpdate: () => Promise<ProductUpdateApplyResult>;
+  reloadWorkbenchPreferences: () => Promise<void>;
+  reloadImageModelSettings: () => Promise<void>;
+  reloadVideoModelSettings: () => Promise<void>;
+  reloadAudioModelSettings: () => Promise<void>;
+  reloadIntegrationsSettings: () => Promise<void>;
+  reloadAdobeBridge: () => Promise<void>;
   saveWorkbenchPreferences: (input: SaveWorkbenchPreferencesInput) => Promise<void>;
   saveImageModelSetting: (modelId: string, input: SaveImageModelSettingInput) => Promise<void>;
   saveVideoModelSetting: (modelId: string, input: SaveVideoModelSettingInput) => Promise<void>;

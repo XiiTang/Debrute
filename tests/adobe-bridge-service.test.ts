@@ -31,7 +31,9 @@ describe('AdobeBridgeService', () => {
         { projectRelativePath: 'briefs', kind: 'directory' },
         { projectRelativePath: '.debrute', kind: 'directory' },
         { projectRelativePath: '.debrute/canvases', kind: 'directory' },
-        { projectRelativePath: '.git', kind: 'directory' }
+        { projectRelativePath: '.DeBrute/canvases', kind: 'directory' },
+        { projectRelativePath: '.git', kind: 'directory' },
+        { projectRelativePath: '.GIT/objects', kind: 'directory' }
       ]
     }]);
 

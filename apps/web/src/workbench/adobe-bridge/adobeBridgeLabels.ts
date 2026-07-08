@@ -25,12 +25,7 @@ export function adobeBridgeErrorLabel(code: AdobeBridgeErrorCode, i18n: Workbenc
 }
 
 export function isSupportedAdobeBridgeWorkbenchFile(projectRelativePath: string): boolean {
-  if (
-    projectRelativePath === '.git'
-    || projectRelativePath.startsWith('.git/')
-    || projectRelativePath === '.debrute'
-    || projectRelativePath.startsWith('.debrute/')
-  ) {
+  if (isProjectInternalNamespacePath(projectRelativePath)) {
     return false;
   }
   const dotIndex = projectRelativePath.lastIndexOf('.');
@@ -38,4 +33,10 @@ export function isSupportedAdobeBridgeWorkbenchFile(projectRelativePath: string)
     return false;
   }
   return SUPPORTED_SEND_EXTENSIONS.has(projectRelativePath.slice(dotIndex).toLowerCase());
+}
+
+function isProjectInternalNamespacePath(projectRelativePath: string): boolean {
+  const firstSegment = projectRelativePath.split('/', 1)[0];
+  const firstSegmentKey = firstSegment?.toLowerCase();
+  return firstSegmentKey === '.git' || firstSegmentKey === '.debrute';
 }

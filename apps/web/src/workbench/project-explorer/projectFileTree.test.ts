@@ -42,6 +42,8 @@ describe('project file tree', () => {
     const tree = buildProjectFileTree([
       { kind: 'file', projectRelativePath: '.git/config' },
       { kind: 'directory', projectRelativePath: '.git/objects' },
+      { kind: 'directory', projectRelativePath: '.GIT/objects' },
+      { kind: 'file', projectRelativePath: '.GIT/config' },
       { kind: 'file', projectRelativePath: '.gitignore' },
       { kind: 'file', projectRelativePath: 'assets/cover.png' }
     ]);

@@ -29,10 +29,10 @@ export function FloatingDock({
 }): React.ReactElement {
   const i18n = useI18n();
   const icons: Record<FloatingPanelId, React.ReactElement> = {
-    explorer: <FolderTree size={14} />,
-    inspector: <CircleDot size={14} />,
-    settings: <Settings size={14} />,
-    terminal: <Terminal size={14} />
+    explorer: <FolderTree />,
+    inspector: <CircleDot />,
+    settings: <Settings />,
+    terminal: <Terminal />
   };
 
   return (

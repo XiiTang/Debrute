@@ -222,6 +222,38 @@ describe('ProjectDocumentTransaction', () => {
     }
   });
 
+  it('propagates non-missing realpath failures before mutating registered documents', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'debrute-doc-tx-realpath-error-'));
+    const externalRoot = await mkdtemp(join(tmpdir(), 'debrute-doc-tx-realpath-error-external-'));
+    try {
+      const file = join(root, '.debrute/canvases/canvas-1.json');
+      await mkdir(dirname(file), { recursive: true });
+      await writeFile(file, '{"before":true}\n', 'utf8');
+
+      const loop = join(externalRoot, 'loop');
+      await symlink(loop, loop);
+
+      let error: unknown;
+      try {
+        await commitProjectDocumentTransaction({
+          projectRoot: root,
+          owner: 'canvas',
+          reads: [{ absolutePath: join(loop, '.debrute/canvases/canvas-1.json'), expectedHash: null }],
+          writes: [{ absolutePath: file, content: '{"after":true}\n' }]
+        });
+      } catch (caught) {
+        error = caught;
+      }
+
+      expect(error).toMatchObject({ code: 'document_push_failed' });
+      expect(error).not.toMatchObject({ code: 'document_descriptor_violation' });
+      await expect(readFile(file, 'utf8')).resolves.toBe('{"before":true}\n');
+    } finally {
+      await rm(root, { recursive: true, force: true });
+      await rm(externalRoot, { recursive: true, force: true });
+    }
+  });
+
   it('rejects structured document writes through symlinked descriptor directories before outside mutation', async () => {
     const root = await mkdtemp(join(tmpdir(), 'debrute-doc-tx-symlink-write-'));
     const externalRoot = await mkdtemp(join(tmpdir(), 'debrute-doc-tx-symlink-write-external-'));

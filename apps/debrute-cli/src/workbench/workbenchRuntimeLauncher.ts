@@ -114,7 +114,8 @@ async function launchSourceDevRuntime(
     '--strictPort'
   ]);
   const web = spawnDetached(webCommand.command, webCommand.args, sourceRoot, paths.webLogPath, {
-    DEBRUTE_DAEMON_URL: daemonUrl
+    DEBRUTE_DAEMON_URL: daemonUrl,
+    DEBRUTE_DAEMON_TOKEN_FILE: paths.tokenPath
   });
   const daemonPid = requirePid(daemon, 'daemon');
   const webPid = requirePid(web, 'web');

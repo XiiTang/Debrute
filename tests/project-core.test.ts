@@ -24,6 +24,7 @@ import {
   isProjectImageReferencePath,
   isSupportedProjectImagePath,
   projectImageExtensionForMimeType,
+  projectImageMimeTypeMatchesPath,
   projectImageMimeTypeFromDataUrl,
   projectImageMimeTypeFromPath,
   projectTextFileTypeForPath,
@@ -153,6 +154,13 @@ describe('project-core', () => {
     expect(projectImageExtensionForMimeType('image/avif')).toBe('avif');
     expect(projectImageExtensionForMimeType('image/tiff')).toBe('tiff');
     expect(projectImageExtensionForMimeType('image/svg+xml')).toBe('svg');
+    expect(projectImageMimeTypeMatchesPath('image/png', 'assets/cover.png')).toBe(true);
+    expect(projectImageMimeTypeMatchesPath('IMAGE/PNG', 'assets/cover.png')).toBe(true);
+    expect(projectImageMimeTypeMatchesPath('image/jpeg', 'assets/photo.jpe')).toBe(true);
+    expect(projectImageMimeTypeMatchesPath('image/svg+xml', 'assets/icon.svgz')).toBe(true);
+    expect(projectImageMimeTypeMatchesPath('image/jpeg', 'assets/cover.png')).toBe(false);
+    expect(projectImageMimeTypeMatchesPath('image/gif', 'assets/cover.png')).toBe(false);
+    expect(projectImageMimeTypeMatchesPath(undefined, 'assets/cover.png')).toBe(false);
 
     for (const unsupported of [
       'assets/animated.gif',
@@ -337,7 +345,7 @@ describe('project-core', () => {
         }, { debounceMs: 5 });
       });
       await new Promise<void>((resolve) => {
-        setTimeout(resolve, 0);
+        setTimeout(resolve, 25);
       });
       await writeFile(join(root, 'notes/brief.md'), 'hello\n', 'utf8');
       await expect(eventPromise).resolves.toBe('notes/brief.md');
@@ -908,7 +916,10 @@ describe('project-core', () => {
 
       await expect(writeProjectTextFile(root, '.git/config', '[core]\n'))
         .rejects.toThrow('Project path is not visible in the Project Tree');
+      await expect(writeProjectTextFile(root, '.GIT/config', '[core]\n'))
+        .rejects.toThrow('Project path is not visible in the Project Tree');
       expect(existsSync(join(root, '.git/config'))).toBe(false);
+      expect(existsSync(join(root, '.GIT/config'))).toBe(false);
     } finally {
       await rm(root, { recursive: true, force: true });
     }
@@ -928,12 +939,32 @@ describe('project-core', () => {
         .toThrow('Project path is protected by the Project Document System');
       expect(() => assertProjectTreeVisibleMutationPath('.debrute/canvas-maps/canvas-1.yaml'))
         .toThrow('Project path is protected by the Project Document System');
+      expect(() => assertProjectTreeVisibleMutationPath('.DeBrute/canvases/canvas-1.json'))
+        .toThrow('Project path is protected by the Project Document System');
       await expect(writeProjectTextFile(root, '.debrute/canvases/canvas-1.json', '{"changed":true}\n'))
+        .rejects.toThrow('Project path is protected by the Project Document System');
+      await expect(writeProjectTextFile(root, '.DeBrute/canvases/canvas-1.json', '{"changed":true}\n'))
         .rejects.toThrow('Project path is protected by the Project Document System');
       await expect(deleteProjectPathsPermanently(root, {
         entries: [{ projectRelativePath: '.debrute/canvases/canvas-1.json', kind: 'file' }]
       })).rejects.toThrow('Project path is protected by the Project Document System');
       await expect(readFile(join(root, '.debrute/canvases/canvas-1.json'), 'utf8')).resolves.toBe('{}\n');
+    } finally {
+      await rm(root, { recursive: true, force: true });
+    }
+  });
+
+  it('rejects browser upload entries targeting mixed-case project-internal paths', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'debrute-project-upload-internal-case-'));
+    try {
+      await expect(importExternalUploadProjectEntries(root, {
+        targetDirectoryProjectRelativePath: '',
+        entries: [
+          { kind: 'file', projectRelativePath: '.DeBrute/canvases/index.json', content: Buffer.from('{}\n') }
+        ]
+      })).rejects.toThrow('Project path is protected by the Project Document System');
+
+      expect(existsSync(join(root, '.DeBrute/canvases/index.json'))).toBe(false);
     } finally {
       await rm(root, { recursive: true, force: true });
     }
@@ -948,6 +979,10 @@ describe('project-core', () => {
     expect(() => assertProjectTreeVisibleMutationPath('.debrute/canvases/canvas-1.json'))
       .toThrow('Project path is protected by the Project Document System');
     expect(() => assertProjectTreeVisibleMutationPath('.git/config'))
+      .toThrow('Project path is not visible in the Project Tree');
+    expect(() => assertProjectTreeVisibleMutationPath('.DeBrute/canvases/canvas-1.json'))
+      .toThrow('Project path is protected by the Project Document System');
+    expect(() => assertProjectTreeVisibleMutationPath('.GIT/config'))
       .toThrow('Project path is not visible in the Project Tree');
   });
 

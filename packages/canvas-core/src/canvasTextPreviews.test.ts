@@ -41,6 +41,12 @@ describe('Canvas text preview paths', () => {
 
     expect(() => canvasTextPreviewSourceProjectPath({
       canvasId: 'canvas-1',
+      projectRelativePath: '.DeBrute/cache/file.md',
+      fingerprint: 'fingerprint-a'
+    })).toThrow('Canvas text preview cannot target Debrute internal files.');
+
+    expect(() => canvasTextPreviewSourceProjectPath({
+      canvasId: 'canvas-1',
       projectRelativePath: 'notes\\scene.md',
       fingerprint: 'fingerprint-a'
     })).toThrow('Project path must not contain backslashes');

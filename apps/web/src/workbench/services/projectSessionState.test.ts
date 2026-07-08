@@ -99,7 +99,7 @@ describe('project session startup', () => {
     const snapshot = { canvases: [{ id: 'canvas-1', name: 'canvas-1' }] } as WorkbenchProjectSessionSnapshot;
     (globalThis as { window?: unknown }).window = {
       location: { pathname: '/open', search: '?path=%2FUsers%2Fme%2FProject%20A', hash: '' },
-      history: { state: { debruteDaemonToken: 'secret' }, replaceState }
+      history: { state: { preserved: true }, replaceState }
     };
     const calls: unknown[] = [];
     const api = {
@@ -117,7 +117,7 @@ describe('project session startup', () => {
     });
     expect(calls).toEqual([{ projectRoot: '/Users/me/Project A' }]);
     expect(replaceState).toHaveBeenCalledWith(
-      { debruteDaemonToken: 'secret' },
+      { preserved: true },
       '',
       '/projects/project-live-id'
     );
@@ -198,7 +198,7 @@ describe('project session startup', () => {
 
   it('preserves browser history state when replacing the active project route', () => {
     const replaceState = vi.fn();
-    const state = { debruteDaemonToken: 'secret' };
+    const state = { preserved: true };
     (globalThis as { window?: unknown }).window = {
       location: { pathname: '/', search: '?view=canvas', hash: '#selection' },
       history: { state, replaceState }

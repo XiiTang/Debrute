@@ -2,6 +2,7 @@ import { cliError, isDebruteCliError, messageFromUnknown } from '../errors/cliEr
 import type { ParsedDebruteArgs } from '../parser/parseDebruteArgs.js';
 import type { DebruteAgentResult } from '../output/renderAgentRecord.js';
 import { ensureWorkbenchRuntime, type EnsureWorkbenchRuntimeResult } from '../workbench/workbenchRuntimeLauncher.js';
+import { createWorkbenchLaunchUrl, normalizeWorkbenchLaunchNextPath } from '@debrute/workbench-runtime';
 
 export interface WorkbenchCommandServices {
   ensureRuntime?: () => Promise<EnsureWorkbenchRuntimeResult>;
@@ -16,12 +17,19 @@ export async function runWorkbenchCommand(
   }
 
   try {
+    const next = launchNextPath(args.options.next);
     const runtime = await (services.ensureRuntime ?? ensureWorkbenchRuntime)();
+    const launchUrl = createWorkbenchLaunchUrl({
+      webUrl: runtime.state.webUrl,
+      token: runtime.state.token,
+      next
+    });
     return {
       status: 'ok',
       command: args.command,
       fields: {
         web_url: runtime.state.webUrl,
+        launch_url: launchUrl,
         daemon_url: runtime.state.daemonUrl,
         web_port: portFromUrl(runtime.state.webUrl),
         daemon_port: portFromUrl(runtime.state.daemonUrl),
@@ -47,6 +55,17 @@ export async function runWorkbenchCommand(
       message: messageFromUnknown(error)
     };
   }
+}
+
+function launchNextPath(input: string | undefined): string {
+  const next = input ?? '/';
+  const normalized = normalizeWorkbenchLaunchNextPath(next);
+  if (!normalized) {
+    throw cliError('invalid_input', `Debrute Workbench launch next path must be a normalized same-origin path: ${next}`, {
+      next
+    });
+  }
+  return normalized;
 }
 
 function portFromUrl(url: string): number {

@@ -62,26 +62,26 @@ Start or discover the local Workbench runtime:
 debrute workbench start
 ```
 
-Read `web_url` from stdout. Interactive users open projects from the Workbench `Open Project` picker. Agents and automation build the project URL from the absolute local project path:
+Read `launch_url` from stdout. Interactive users open projects from the Workbench `Open Project` picker. Agents and automation start or discover the runtime with a same-origin next path built from the absolute local project path:
 
-```text
-project_url=<web_url>/open?path=<encodeURIComponent(absProjectPath)>
+```sh
+debrute workbench start --next "/open?path=<encodeURIComponent(absProjectPath)>"
 ```
 
-Open that URL with the current agent environment's own GUI/browser capability. Debrute CLI returns the runtime base URL and ports; it does not open browsers or projects.
+Open `launch_url` with the current agent environment's own GUI/browser capability. Debrute CLI returns the stable Workbench origin, one-time launch URL, and ports; it does not open browsers or projects.
 
 Examples:
 
 ```text
-Qoder: /browser Open <project_url>
-Antigravity: /browser Open <project_url>
-Cline: Use the browser to check <project_url>
+Qoder: /browser Open <launch_url>
+Antigravity: /browser Open <launch_url>
+Cline: Use the browser to check <launch_url>
 Codex app:
   await (await browser.capabilities.get("visibility")).set(true)
-  await tab.goto(projectUrl)
+  await tab.goto(launchUrl)
 ```
 
-If the agent cannot control a browser, report `project_url` to the user.
+If the agent cannot control a browser, report `launch_url` to the user.
 
 ## Canvas Maps
 

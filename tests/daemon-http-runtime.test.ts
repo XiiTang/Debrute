@@ -4,6 +4,7 @@ import { join } from 'node:path';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { DebruteAppServer, GlobalConfigStore } from '@debrute/app-server';
 import { createDebruteDaemonHttpServer } from '@debrute/daemon';
+import { createWorkbenchLaunchUrl } from '@debrute/workbench-runtime';
 import type {
   AppServerEvent,
   RunIntegrationOperationResult,
@@ -86,64 +87,81 @@ describe('daemon HTTP runtime', () => {
 
   });
 
-  it('serves browser session credentials only through the bootstrap route', async () => {
+  it('accepts a single-port Workbench web session cookie without exposing the daemon token to the browser', async () => {
+    const projectRoot = await mkdtemp(join(tmpdir(), 'debrute-daemon-web-session-'));
+    await writeFile(join(projectRoot, 'brief.md'), '# Brief', 'utf8');
     const daemon = createDebruteDaemonHttpServer({
       host: '127.0.0.1',
       port: 0,
       token: 'test-token',
-      webBaseUrl: 'http://127.0.0.1:17322'
+      webBaseUrl: null
+    });
+    cleanups.push(
+      () => daemon.close(),
+      () => rm(projectRoot, { recursive: true, force: true })
+    );
+    const runtime = await daemon.listen();
+    const launchUrl = createWorkbenchLaunchUrl({
+      webUrl: runtime.daemonUrl,
+      token: runtime.token,
+      next: '/projects/project-1'
+    });
+
+    const launch = await fetch(launchUrl, { redirect: 'manual' });
+    const cookie = launch.headers.get('set-cookie');
+    expect(launch.status).toBe(303);
+    expect(launch.headers.get('location')).toBe('/projects/project-1');
+    expect(cookie).toContain('debrute_web_session=');
+    expect(cookie).not.toContain('test-token');
+
+    const opened = await requestJson<WorkbenchProjectOpenResult>(`${runtime.daemonUrl}/api/projects/open`, {
+      method: 'POST',
+      headers: {
+        'content-type': 'application/json',
+        cookie: cookie!
+      },
+      body: JSON.stringify({ projectRoot })
+    });
+
+    expect(opened.projectId).toBeTruthy();
+    expect(JSON.stringify(opened)).not.toContain('test-token');
+  });
+
+  it('does not accept daemon tokens in old browser query strings', async () => {
+    const daemon = createDebruteDaemonHttpServer({
+      host: '127.0.0.1',
+      port: 0,
+      token: 'test-token'
     });
     cleanups.push(() => daemon.close());
     const runtime = await daemon.listen();
 
-    const credential = await fetch(`${runtime.daemonUrl}/api/browser-session`, {
-      headers: { origin: 'http://127.0.0.1:17322' }
-    });
-    expect(credential.status).toBe(200);
-    expect(credential.headers.get('access-control-allow-origin')).toBe('http://127.0.0.1:17322');
-    await expect(credential.json()).resolves.toEqual({
-      token: 'test-token',
-      runtime: {
-        daemonUrl: runtime.daemonUrl,
-        webBaseUrl: runtime.webBaseUrl,
-        platform: process.platform
-      }
-    });
+    const url = new URL('/api/runtime/product', runtime.daemonUrl);
+    url.searchParams.set('debrute-token', 'test-token');
+    const response = await fetch(url);
 
-    const tokenlessLoopback = await fetch(`${runtime.daemonUrl}/api/browser-session`);
-    expect(tokenlessLoopback.status).toBe(403);
-    await expect(tokenlessLoopback.json()).resolves.toMatchObject({
-      error: { code: 'forbidden' }
-    });
+    expect(response.status).toBe(403);
+  });
 
-    const workbenchClaimed = await fetch(`${runtime.daemonUrl}/api/browser-session`, {
-      headers: { 'x-debrute-web-origin': 'http://127.0.0.1:17322' }
-    });
-    expect(workbenchClaimed.status).toBe(200);
-    await expect(workbenchClaimed.json()).resolves.toMatchObject({
+  it('returns an API 404 for removed browser-session routes after authentication', async () => {
+    const daemon = createDebruteDaemonHttpServer({
+      host: '127.0.0.1',
+      port: 0,
       token: 'test-token'
     });
+    cleanups.push(() => daemon.close());
+    const runtime = await daemon.listen();
 
-    const rejectedDaemonOrigin = await fetch(`${runtime.daemonUrl}/api/browser-session`, {
-      headers: {
-        origin: runtime.daemonUrl,
-        'x-debrute-web-origin': 'http://127.0.0.1:17322'
+    const response = await fetch(`${runtime.daemonUrl}/api/browser-session`, {
+      headers: { 'x-debrute-daemon-token': 'test-token' }
+    });
+
+    expect(response.status).toBe(404);
+    await expect(response.json()).resolves.toMatchObject({
+      error: {
+        code: 'not_found',
+        message: 'Unknown Debrute API route: /api/browser-session'
       }
-    });
-    expect(rejectedDaemonOrigin.status).toBe(403);
-
-    const rejectedOrigin = await fetch(`${runtime.daemonUrl}/api/browser-session`, {
-      headers: { origin: 'http://example.com' }
-    });
-    expect(rejectedOrigin.status).toBe(403);
-
-    const rejectedMethod = await fetch(`${runtime.daemonUrl}/api/browser-session`, {
-      method: 'POST',
-      headers: { origin: 'http://127.0.0.1:17322' }
-    });
-    expect(rejectedMethod.status).toBe(405);
-    await expect(rejectedMethod.json()).resolves.toMatchObject({
-      error: { code: 'method_not_allowed' }
     });
   });
 
@@ -316,7 +334,9 @@ describe('daemon HTTP runtime', () => {
     const tokenlessEvents = await fetch(`${runtime.daemonUrl}/api/projects/${opened.projectId}/events?clientId=security-test`);
     expect(tokenlessEvents.status).toBe(403);
 
-    const authorizedEvents = await fetch(`${runtime.daemonUrl}/api/projects/${opened.projectId}/events?clientId=security-test&debrute-token=test-token`);
+    const authorizedEvents = await fetch(`${runtime.daemonUrl}/api/projects/${opened.projectId}/events?clientId=security-test`, {
+      headers: { 'x-debrute-daemon-token': 'test-token' }
+    });
     expect(authorizedEvents.status).toBe(200);
     await authorizedEvents.body?.cancel();
   });
@@ -685,7 +705,9 @@ describe('daemon HTTP runtime', () => {
       body: JSON.stringify({ projectRoot })
     });
 
-    const events = await fetch(`${runtime.daemonUrl}/api/projects/${opened.projectId}/events?clientId=client-a&debrute-token=test-token`);
+    const events = await fetch(`${runtime.daemonUrl}/api/projects/${opened.projectId}/events?clientId=client-a`, {
+      headers: { 'x-debrute-daemon-token': 'test-token' }
+    });
     expect(events.status).toBe(200);
     await requestJson(`${runtime.daemonUrl}/api/projects/${opened.projectId}/files`, {
       method: 'POST',
@@ -1482,7 +1504,9 @@ describe('daemon HTTP runtime', () => {
       throw new Error('Daemon did not create a project app server.');
     }
     expect(opened.projectRevision).toBe(1);
-    const events = await fetch(`${runtime.daemonUrl}/api/projects/${opened.projectId}/events?clientId=generated-assets-client&debrute-token=test-token`);
+    const events = await fetch(`${runtime.daemonUrl}/api/projects/${opened.projectId}/events?clientId=generated-assets-client`, {
+      headers: { 'x-debrute-daemon-token': 'test-token' }
+    });
     expect(events.status).toBe(200);
     const record = await appServer.recordGeneratedAssetMetadata({
       modelRunId: 'model-run-1',
@@ -1509,7 +1533,9 @@ describe('daemon HTTP runtime', () => {
         projectRelativePath: 'generated/cover.png'
       }
     });
-    const liveProjects = await requestJson<{ projects: Array<{ projectId: string; projectRevision: number }> }>(`${runtime.daemonUrl}/api/projects`);
+    const liveProjects = await requestJson<{ projects: Array<{ projectId: string; projectRevision: number }> }>(`${runtime.daemonUrl}/api/projects`, {
+      headers: { 'x-debrute-daemon-token': 'test-token' }
+    });
     expect(liveProjects.projects).toEqual([
       expect.objectContaining({
         projectId: opened.projectId,
@@ -1519,17 +1545,21 @@ describe('daemon HTTP runtime', () => {
 
     const list = await requestJson<{
       assets: Array<{ assetId: string; projectRelativePath: string; rawUrl: string }>;
-    }>(`${runtime.daemonUrl}/api/projects/${opened.projectId}/generated-assets`);
+    }>(`${runtime.daemonUrl}/api/projects/${opened.projectId}/generated-assets`, {
+      headers: { 'x-debrute-daemon-token': 'test-token' }
+    });
     expect(list.assets).toEqual([
       expect.objectContaining({
         assetId: record.recordId,
         projectRelativePath: 'generated/cover.png',
-        rawUrl: `${runtime.daemonUrl}/api/projects/${opened.projectId}/generated-assets/${record.recordId}/raw?debrute-token=test-token`
+        rawUrl: `/api/projects/${opened.projectId}/generated-assets/${record.recordId}/raw`
       })
     ]);
     expect(JSON.stringify(list)).not.toContain(projectRoot);
 
-    const detail = await requestJson<Record<string, unknown>>(`${runtime.daemonUrl}/api/projects/${opened.projectId}/generated-assets/${record.recordId}`);
+    const detail = await requestJson<Record<string, unknown>>(`${runtime.daemonUrl}/api/projects/${opened.projectId}/generated-assets/${record.recordId}`, {
+      headers: { 'x-debrute-daemon-token': 'test-token' }
+    });
     expect(detail).toMatchObject({
       assetId: record.recordId,
       projectRelativePath: 'generated/cover.png',
@@ -1537,7 +1567,9 @@ describe('daemon HTTP runtime', () => {
     });
     expect(JSON.stringify(detail)).not.toContain(projectRoot);
 
-    await expect(fetch(list.assets[0]!.rawUrl).then((response) => response.text()))
+    await expect(fetch(new URL(list.assets[0]!.rawUrl, runtime.daemonUrl), {
+      headers: { 'x-debrute-daemon-token': 'test-token' }
+    }).then((response) => response.text()))
       .resolves.toBe('asset-bytes');
   });
 
@@ -1630,7 +1662,9 @@ describe('daemon HTTP runtime', () => {
       body: JSON.stringify({ projectRoot })
     });
 
-    const response = await fetch(`${runtime.daemonUrl}/api/projects/${opened.projectId}/events?debrute-token=test-token`);
+    const response = await fetch(`${runtime.daemonUrl}/api/projects/${opened.projectId}/events`, {
+      headers: { 'x-debrute-daemon-token': 'test-token' }
+    });
     expect(response.status).toBe(200);
     expect(response.headers.get('content-type')).toContain('text/event-stream');
 
@@ -1662,8 +1696,12 @@ describe('daemon HTTP runtime', () => {
       body: JSON.stringify({ projectRoot: betaRoot })
     });
 
-    const alphaEvents = await fetch(`${runtime.daemonUrl}/api/projects/${alpha.projectId}/events?clientId=alpha-client&debrute-token=test-token`);
-    const betaEvents = await fetch(`${runtime.daemonUrl}/api/projects/${beta.projectId}/events?clientId=beta-client&debrute-token=test-token`);
+    const alphaEvents = await fetch(`${runtime.daemonUrl}/api/projects/${alpha.projectId}/events?clientId=alpha-client`, {
+      headers: { 'x-debrute-daemon-token': 'test-token' }
+    });
+    const betaEvents = await fetch(`${runtime.daemonUrl}/api/projects/${beta.projectId}/events?clientId=beta-client`, {
+      headers: { 'x-debrute-daemon-token': 'test-token' }
+    });
     await requestJson(`${runtime.daemonUrl}/api/projects/${beta.projectId}/files/text/brief.md`, {
       method: 'PUT',
       headers: {
@@ -1798,7 +1836,9 @@ describe('daemon HTTP runtime', () => {
       body: JSON.stringify({ projectRoot })
     });
 
-    const events = await fetch(`${runtime.daemonUrl}/api/projects/${opened.projectId}/events?clientId=client-a&debrute-token=test-token`);
+    const events = await fetch(`${runtime.daemonUrl}/api/projects/${opened.projectId}/events?clientId=client-a`, {
+      headers: { 'x-debrute-daemon-token': 'test-token' }
+    });
     expect(events.status).toBe(200);
     await expect(apiFetch(`${runtime.daemonUrl}/api/projects`).then((response) => response.json())).resolves.toMatchObject({
       projects: [{ projectId: opened.projectId, clients: { liveCount: 1 } }]
@@ -1839,8 +1879,12 @@ describe('daemon HTTP runtime', () => {
       body: JSON.stringify({ projectRoot })
     });
 
-    const first = await fetch(`${runtime.daemonUrl}/api/projects/${opened.projectId}/events?clientId=client-a&debrute-token=test-token`);
-    const second = await fetch(`${runtime.daemonUrl}/api/projects/${opened.projectId}/events?clientId=client-b&debrute-token=test-token`);
+    const first = await fetch(`${runtime.daemonUrl}/api/projects/${opened.projectId}/events?clientId=client-a`, {
+      headers: { 'x-debrute-daemon-token': 'test-token' }
+    });
+    const second = await fetch(`${runtime.daemonUrl}/api/projects/${opened.projectId}/events?clientId=client-b`, {
+      headers: { 'x-debrute-daemon-token': 'test-token' }
+    });
     expect(first.status).toBe(200);
     expect(second.status).toBe(200);
 
@@ -1877,7 +1921,9 @@ describe('daemon HTTP runtime', () => {
       },
       body: JSON.stringify({ projectRoot })
     });
-    const events = await fetch(`${runtime.daemonUrl}/api/projects/${opened.projectId}/events?clientId=client-a&debrute-token=test-token`);
+    const events = await fetch(`${runtime.daemonUrl}/api/projects/${opened.projectId}/events?clientId=client-a`, {
+      headers: { 'x-debrute-daemon-token': 'test-token' }
+    });
     expect(events.status).toBe(200);
 
     await events.body?.cancel();
@@ -2078,13 +2124,17 @@ describe('daemon HTTP runtime', () => {
     if (!node.availability.fileUrl) {
       throw new Error('Canvas node did not include a browser file URL.');
     }
-    const rawFileResponse = await fetch(node.availability.fileUrl);
+    const rawFileResponse = await fetch(new URL(node.availability.fileUrl, runtime.daemonUrl), {
+      headers: { 'x-debrute-daemon-token': 'test-token' }
+    });
     expect(rawFileResponse.status).toBe(200);
     expect(rawFileResponse.headers.get('cache-control')).toBe('public, max-age=31536000, immutable');
     expect(rawFileResponse.headers.get('content-type')).toBe('image/png');
     expect(Buffer.from(await rawFileResponse.arrayBuffer()).length).toBeGreaterThan(0);
 
-    const response = await fetch(`${runtime.daemonUrl}/api/projects/${opened.projectId}/events?debrute-token=test-token`);
+    const response = await fetch(`${runtime.daemonUrl}/api/projects/${opened.projectId}/events`, {
+      headers: { 'x-debrute-daemon-token': 'test-token' }
+    });
     await requestJson(`${runtime.daemonUrl}/api/projects/${opened.projectId}/canvases/canvas-1/node-layouts`, {
       method: 'PATCH',
       headers: {
@@ -2314,6 +2364,11 @@ describe('daemon HTTP runtime', () => {
       throw new Error('Daemon did not create a project app server.');
     }
     await appServer.pushCanvasMapForProject(projectRoot, { canvasId: 'canvas-1' });
+    const currentProject = await requestJson<{ projectRevision: number }>(`${runtime.daemonUrl}/api/projects/${opened.projectId}`, {
+      headers: {
+        'x-debrute-daemon-token': 'test-token'
+      }
+    });
 
     const result = await requestJson<{
       projectRevision: number;
@@ -2327,7 +2382,7 @@ describe('daemon HTTP runtime', () => {
         'x-debrute-daemon-token': 'test-token'
       },
       body: JSON.stringify({
-        baseRevision: opened.projectRevision,
+        baseRevision: currentProject.projectRevision,
         projectRelativePath: 'prompts/alt.md'
       })
     });

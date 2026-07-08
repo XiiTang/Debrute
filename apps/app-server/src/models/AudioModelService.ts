@@ -1,8 +1,7 @@
-import { createAudioModelCatalog, createAudioModelSettingsView, type SecretsConfig } from '@debrute/capability-runtime';
-import type { AudioModelSettingsView, SaveAudioModelSettingInput, SaveModelApiKeyEntryInput } from '@debrute/app-protocol';
+import { createAudioModelCatalog, createAudioModelSettingsView } from '@debrute/capability-runtime';
+import type { AudioModelSettingsView, SaveAudioModelSettingInput } from '@debrute/app-protocol';
 import type { GlobalConfigStore } from '../config/GlobalConfigStore.js';
 import { serviceError } from '../server/ServiceErrors.js';
-import { normalizeModelApiKeySaveEntries, resolveModelApiKeyEntries } from './ModelApiKeySaveInput.js';
 
 export class AudioModelService {
   private readonly catalog = createAudioModelCatalog();
@@ -32,26 +31,21 @@ export class AudioModelService {
       });
     }
     audioModels.sort((left, right) => left.debruteModelId.localeCompare(right.debruteModelId));
-    const nextAudioModels = { audioModels };
-    let nextSecrets: SecretsConfig | undefined;
-    if (saveInput.apiKeys !== undefined) {
+    await this.input.configStore.saveAudioModels({ audioModels });
+    if (saveInput.apiKey !== undefined) {
       const secrets = await this.input.configStore.readSecrets();
       const audioModelApiKeys = { ...secrets.audioModelApiKeys };
-      audioModelApiKeys[modelId] = resolveModelApiKeyEntries(
-        saveInput.apiKeys,
-        secrets.audioModelApiKeys[modelId] ?? [],
-        'Audio model',
-        audioModelInputError
-      );
-      nextSecrets = {
+      const apiKey = saveInput.apiKey.trim();
+      if (apiKey) {
+        audioModelApiKeys[modelId] = apiKey;
+      } else {
+        delete audioModelApiKeys[modelId];
+      }
+      await this.input.configStore.saveSecrets({
         imageModelApiKeys: { ...secrets.imageModelApiKeys },
         videoModelApiKeys: { ...secrets.videoModelApiKeys },
         audioModelApiKeys
-      };
-    }
-    await this.input.configStore.saveAudioModels(nextAudioModels);
-    if (nextSecrets !== undefined) {
-      await this.input.configStore.saveSecrets(nextSecrets);
+      });
     }
     return this.getSettings();
   }
@@ -60,19 +54,20 @@ export class AudioModelService {
 function normalizeAudioModelSaveInput(input: SaveAudioModelSettingInput): {
   baseUrlOverride: string | null;
   requestModelIdOverride: string | null;
-  apiKeys?: SaveModelApiKeyEntryInput[];
+  apiKey?: string;
 } {
   if (!isRecord(input)) {
     throw audioModelInputError('Audio model setting must be an object.', 'audioModelSetting');
   }
   const baseUrlOverride = normalizeAudioModelBaseUrlOverride(input.baseUrlOverride);
   const requestModelIdOverride = normalizeAudioModelRequestModelIdOverride(input.requestModelIdOverride);
+  if (input.apiKey !== undefined && typeof input.apiKey !== 'string') {
+    throw audioModelInputError('Audio model apiKey must be a string when provided.', 'apiKey');
+  }
   return {
     baseUrlOverride,
     requestModelIdOverride,
-    ...(input.apiKeys !== undefined
-      ? { apiKeys: normalizeModelApiKeySaveEntries(input.apiKeys, 'Audio model', audioModelInputError) }
-      : {})
+    ...(input.apiKey !== undefined ? { apiKey: input.apiKey } : {})
   };
 }
 

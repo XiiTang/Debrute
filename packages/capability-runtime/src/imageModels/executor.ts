@@ -14,7 +14,6 @@ import {
   readResponseTextWithTimeout as readResponseTextBodyWithTimeout
 } from '../requestTimeout.js';
 import { redactRuntimeSecretString, redactRuntimeSecrets } from '../modelRunMetadataRedaction.js';
-import { selectModelApiKey } from '../modelApiKeySelection.js';
 import {
   assertPublicHttpUrl,
   fetchPublicHttpUrl,
@@ -148,12 +147,7 @@ export async function executeImageModelRequest(input: ExecuteImageModelRequestIn
       logs
     };
   }
-  const selectedApiKey = selectModelApiKey({
-    kind: 'image',
-    modelId: input.input.model,
-    entries: input.secrets.imageModelApiKeys[input.input.model]
-  });
-  const apiKey = selectedApiKey?.key ?? '';
+  const apiKey = input.secrets.imageModelApiKeys[input.input.model]?.trim() ?? '';
   if (!apiKey) {
     return {
       status: 'error',
@@ -181,9 +175,9 @@ export async function executeImageModelRequest(input: ExecuteImageModelRequestIn
     invocationId: input.invocationId,
     modelRunId: randomUUID(),
     entry,
-    baseUrl: modelSettings?.baseUrlOverride?.trim() || entry.defaultBaseUrl,
+    baseUrl: modelSettings?.baseUrlOverride ?? entry.defaultBaseUrl,
     apiKey,
-    requestModelId: modelSettings?.requestModelIdOverride?.trim() || entry.defaultRequestModelId,
+    requestModelId: modelSettings?.requestModelIdOverride ?? entry.defaultRequestModelId,
     args,
     fetch: input.fetch ?? fetch,
     ...(input.recordGeneratedAsset ? { recordGeneratedAsset: input.recordGeneratedAsset } : {}),
@@ -1246,14 +1240,30 @@ function truncateString(value: string): string {
 }
 
 function detectMimeType(content: Buffer, sourceName: string, headers?: Headers): string {
-  const headerMime = headers?.get('content-type')?.split(';', 1)[0]?.trim().toLowerCase();
-  if (headerMime?.startsWith('image/')) {
-    return headerMime;
+  const headerMime = normalizedHeaderMime(headers);
+  if (headerMime && headerMime !== 'application/octet-stream') {
+    if (projectImageExtensionForMimeType(headerMime)) {
+      return headerMime;
+    }
+    throw new Error(`Unsupported image artifact MIME type: ${headerMime}`);
   }
   const fromPath = projectImageMimeTypeFromPath(pathForImageExtension(sourceName));
   if (fromPath) {
     return fromPath;
   }
+  const fromSignature = detectImageMimeTypeFromSignature(content);
+  if (fromSignature) {
+    return fromSignature;
+  }
+  throw new Error(`Unsupported image artifact MIME type: ${headerMime ?? 'missing'}`);
+}
+
+function normalizedHeaderMime(headers?: Headers): string | undefined {
+  const value = headers?.get('content-type')?.split(';', 1)[0]?.trim().toLowerCase();
+  return value || undefined;
+}
+
+function detectImageMimeTypeFromSignature(content: Buffer): string | undefined {
   if (content.subarray(0, PNG_SIGNATURE.length).equals(PNG_SIGNATURE)) {
     return 'image/png';
   }
@@ -1263,7 +1273,7 @@ function detectMimeType(content: Buffer, sourceName: string, headers?: Headers):
   if (content.subarray(0, 4).toString('ascii') === 'RIFF' && content.subarray(8, 12).toString('ascii') === 'WEBP') {
     return 'image/webp';
   }
-  return 'application/octet-stream';
+  return undefined;
 }
 
 function detectDimensions(content: Buffer, mimeType: string): [number, number] {
@@ -1304,7 +1314,11 @@ function detectWebpDimensions(content: Buffer): [number, number] {
 }
 
 function extensionForMimeType(mimeType: string): string {
-  return projectImageExtensionForMimeType(mimeType) ?? 'bin';
+  const extension = projectImageExtensionForMimeType(mimeType);
+  if (!extension) {
+    throw new Error(`Unsupported image artifact MIME type: ${mimeType}`);
+  }
+  return extension;
 }
 
 function joinUrl(base: string, path: string): string {

@@ -45,11 +45,11 @@ pnpm exec tsx apps/debrute-cli/src/index.ts project validate path/to/project
 
 `pnpm doctor` checks the local Node/pnpm/tooling surface needed for development and macOS packaging. `pnpm verify` runs doctor, type checking, tests, architecture lint, and the production build.
 
-`pnpm dev` starts or reuses the shared local Workbench runtime and prints the Web URL. It prefers daemon port `17321` and Web port `17322` when they are free, but they are not required ports. The Web workbench is the primary product surface and can be opened directly in a normal browser.
+`pnpm dev` starts or reuses the shared local Workbench runtime and prints a one-time Workbench launch URL plus the stable Web origin. It prefers daemon port `17321` and Web port `17322` when they are free, but they are not required ports. Open the launch URL in a normal browser to create the local Workbench session.
 
 `pnpm dev:electron` participates in the same runtime registry, so it attaches to an existing healthy daemon/Web pair instead of starting a competing one.
 
-One daemon can host multiple live project sessions, and browser tabs or Electron windows connected to that daemon attach to `/projects/:projectId` routes with daemon-issued opaque project ids. Interactive users open projects with the Workbench `Open Project` action, which asks the local runtime daemon to present the native directory picker. Agents and automation can open an explicit absolute path through `/open?path=<encoded-absolute-local-path>`. The root workbench route does not reopen the last project.
+One daemon can host multiple live project sessions, and browser tabs or Electron windows connected to that daemon attach to `/projects/:projectId` routes with daemon-issued opaque project ids. Interactive users open projects with the Workbench `Open Project` action, which asks the local runtime daemon to present the native directory picker. Agents and automation open an explicit absolute path by running `debrute workbench start --next "/open?path=<encoded-absolute-local-path>"` and opening the returned `launch_url`. The root workbench route does not reopen the last project.
 
 `pnpm preview` serves the production Web build for smoke testing after `pnpm build`. `pnpm clean` removes generated build, release, and TypeScript build-info files.
 

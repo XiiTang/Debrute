@@ -11,7 +11,7 @@ export async function executeOpenAiTtsModel(input: AudioModelAdapterInput): Prom
   const url = `${input.baseUrl.replace(/\/$/, '')}/audio/speech`;
   const responseBody = {
     model: input.requestModelId,
-    input: stringArg(input.args, 'text') ?? '',
+    input: input.args.text as string,
     voice: stringArg(input.args, 'voice') ?? 'alloy',
     response_format: stringArg(input.args, 'format') ?? 'mp3',
     ...(typeof input.args.speed === 'number' ? { speed: input.args.speed } : {}),

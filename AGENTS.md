@@ -8,8 +8,8 @@ Debrute is a pnpm TypeScript monorepo. Main apps: `apps/web` Vite/React workbenc
 
 - `pnpm install` installs the workspace.
 - `pnpm doctor` checks local tooling.
-- `pnpm dev` starts or reuses the Workbench runtime and prints its URL.
-- `pnpm dev:web`, `pnpm dev:daemon`, and `pnpm dev:electron` run individual surfaces.
+- `pnpm dev` starts or reuses the Workbench runtime and prints its launch URL.
+- `pnpm dev:daemon` runs the daemon surface; `pnpm dev:electron` starts or attaches Electron to the shared Workbench runtime. Source-dev Web is launched by `pnpm dev` or `pnpm dev:electron` so the server-side proxy receives the runtime token file.
 - `pnpm check` runs TypeScript project references.
 - `pnpm test` runs the Vitest suite; use `pnpm exec vitest run <file>` for focused tests.
 - `pnpm lint:arch` validates package boundary rules.

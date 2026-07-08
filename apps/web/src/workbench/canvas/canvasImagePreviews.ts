@@ -35,7 +35,7 @@ export function canvasImageSource(input: {
     input.node.projectRelativePath,
     input.node.availability.revision,
     previewWidth
-  ).toString();
+  );
   return {
     src,
     previewWidth
@@ -85,21 +85,18 @@ export function canvasImagePreviewWidthForNode(
   });
 }
 
-function canvasImagePreviewUrl(fileUrl: string, projectRelativePath: string, revision: string, width: number): URL {
-  const sourceUrl = new URL(fileUrl);
+function canvasImagePreviewUrl(fileUrl: string, projectRelativePath: string, revision: string, width: number): string {
+  const sourceUrl = new URL(fileUrl, 'http://debrute.local');
   const projectMatch = sourceUrl.pathname.match(/^\/api\/projects\/([^/]+)\//);
   if (!projectMatch?.[1]) {
     throw new Error('Canvas preview file URL must include a project id.');
   }
-  const url = new URL(`/api/projects/${projectMatch[1]}/canvas-image-preview`, sourceUrl);
-  url.searchParams.set('path', projectRelativePath);
-  url.searchParams.set('v', revision);
-  url.searchParams.set('w', String(width));
-  const daemonToken = sourceUrl.searchParams.get('debrute-token');
-  if (daemonToken) {
-    url.searchParams.set('debrute-token', daemonToken);
-  }
-  return url;
+  const params = new URLSearchParams({
+    path: projectRelativePath,
+    v: revision,
+    w: String(width)
+  });
+  return `/api/projects/${projectMatch[1]}/canvas-image-preview?${params.toString()}`;
 }
 
 function isPreviewableImageNode(node: ProjectedCanvasNode): boolean {

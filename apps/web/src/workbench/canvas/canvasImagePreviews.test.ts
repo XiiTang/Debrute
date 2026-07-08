@@ -147,23 +147,26 @@ describe('canvas image preview URLs', () => {
       resourceZoom: 0.2,
       devicePixelRatio: 1
     })).toEqual({
-      src: 'http://127.0.0.1:17321/api/projects/123e4567-e89b-42d3-a456-426614174000/canvas-image-preview?path=flow%2Fcover+art.png&v=rev&w=250',
+      src: '/api/projects/123e4567-e89b-42d3-a456-426614174000/canvas-image-preview?path=flow%2Fcover+art.png&v=rev&w=250',
       previewWidth: 250
     });
   });
 
-  it('preserves the daemon token from raw file URLs for browser image preview requests', () => {
+  it('does not copy source file query params into preview URLs', () => {
     const path = '阿咕/阿咕-形象总览.png';
     const node = nodeFixture(path, 5120, 'image/png', true, 5120, rawUrl(path, 'test-token'));
 
-    expect(canvasImageSource({
+    const source = canvasImageSource({
       node,
       resourceZoom: 0.1,
       devicePixelRatio: 1
-    })).toEqual({
-      src: previewUrl(path, 640, 'test-token'),
+    });
+
+    expect(source).toEqual({
+      src: previewUrl(path, 640),
       previewWidth: 640
     });
+    expect(source!.src).not.toContain('test-token');
   });
 
 });
@@ -201,20 +204,18 @@ function rawUrl(path: string, daemonToken?: string): string {
   const url = new URL(`http://127.0.0.1:17321/api/projects/123e4567-e89b-42d3-a456-426614174000/files/raw/${path.split('/').map(encodeURIComponent).join('/')}`);
   url.searchParams.set('v', 'rev');
   if (daemonToken) {
-    url.searchParams.set('debrute-token', daemonToken);
+    url.searchParams.set('ignored', daemonToken);
   }
   return url.toString();
 }
 
-function previewUrl(path: string, width: number, daemonToken?: string): string {
-  const url = new URL('http://127.0.0.1:17321/api/projects/123e4567-e89b-42d3-a456-426614174000/canvas-image-preview');
-  url.searchParams.set('path', path);
-  url.searchParams.set('v', 'rev');
-  url.searchParams.set('w', String(width));
-  if (daemonToken) {
-    url.searchParams.set('debrute-token', daemonToken);
-  }
-  return url.toString();
+function previewUrl(path: string, width: number): string {
+  const params = new URLSearchParams({
+    path,
+    v: 'rev',
+    w: String(width)
+  });
+  return `/api/projects/123e4567-e89b-42d3-a456-426614174000/canvas-image-preview?${params.toString()}`;
 }
 
 function isStillRasterMimeType(mimeType: string): boolean {

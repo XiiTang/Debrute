@@ -2,7 +2,7 @@ import { randomUUID } from 'node:crypto';
 import electron from 'electron';
 import { join } from 'node:path';
 import { createAttachedDesktopRuntimeClient, type DesktopRuntimeClient } from './desktopRuntimeClient.js';
-import { loadDebruteProjectShellWindow, waitForDebruteShellUrl } from './desktopShellLoad.js';
+import { loadDebruteProjectShellWindow, waitForDebruteShellUrl, type DebruteShellNavigation } from './desktopShellLoad.js';
 import { createApplicationMenuController } from './menu/registerApplicationMenu.js';
 import type { ApplicationMenuCommand } from './menu/applicationMenu.js';
 import { parseDesktopOpenIntent, syncNativeRecentProjects, type DesktopOpenIntent } from './nativeRecentProjects.js';
@@ -50,7 +50,7 @@ const applicationMenu = createApplicationMenuController({
 const projectIconPath = join(__dirname, 'icon.png');
 const dockIconPath = join(__dirname, 'dock_icon.png');
 
-async function createWindow(initialUrl?: string, projectId?: string, projectRoot?: string): Promise<Electron.BrowserWindow> {
+async function createWindow(initialNavigation?: DebruteShellNavigation, projectId?: string, projectRoot?: string): Promise<Electron.BrowserWindow> {
   const client = requireRuntimeClient();
   const backgroundColor = await workbenchStartupBackgroundColorForRuntime(client, nativeTheme);
   const window = new BrowserWindow({
@@ -58,6 +58,7 @@ async function createWindow(initialUrl?: string, projectId?: string, projectRoot
     height: 940,
     minWidth: 1100,
     minHeight: 720,
+    show: false,
     ...desktopBrowserWindowChromeOptions(process.platform),
     backgroundColor,
     icon: projectIconPath,
@@ -92,14 +93,30 @@ async function createWindow(initialUrl?: string, projectId?: string, projectRoot
   window.on('unmaximize', sendNativeWindowState);
   window.on('restore', sendNativeWindowState);
 
-  const urlToLoad = initialUrl ?? client.shellUrl();
-  if (projectId) {
-    await loadDebruteProjectShellWindow(window, urlToLoad, () => prepareProjectWindowBinding(window, projectId, projectRoot));
-  } else {
-    await waitForDebruteShellUrl(urlToLoad);
-    await window.loadURL(urlToLoad);
-  }
+  const navigation = initialNavigation ?? client.shellNavigation();
+  await revealLoadedWorkbenchWindow(window, async () => {
+    if (projectId) {
+      await loadDebruteProjectShellWindow(window, navigation, () => prepareProjectWindowBinding(window, projectId, projectRoot));
+    } else {
+      await waitForDebruteShellUrl(navigation.readyUrl);
+      await window.loadURL(navigation.loadUrl);
+    }
+  });
   return window;
+}
+
+async function revealLoadedWorkbenchWindow(window: Electron.BrowserWindow, load: () => Promise<void>): Promise<void> {
+  try {
+    await load();
+    if (!window.isDestroyed()) {
+      window.show();
+    }
+  } catch (error) {
+    if (!window.isDestroyed()) {
+      window.destroy();
+    }
+    throw error;
+  }
 }
 
 function desktopBrowserWindowChromeOptions(platform: NodeJS.Platform): Electron.BrowserWindowConstructorOptions {
@@ -397,7 +414,7 @@ async function openProjectFromPickerFromShell(
 }
 
 async function openProjectInWindow(
-  opened: { projectId: string; url: string; projectRoot?: string },
+  opened: { projectId: string; navigation: DebruteShellNavigation; projectRoot?: string },
   options: { sourceWindow?: Electron.BrowserWindow; forceNewWindow?: boolean }
 ): Promise<void> {
   const liveWindowIds = new Set(BrowserWindow.getAllWindows().filter((window) => !window.isDestroyed()).map((window) => window.id));
@@ -420,12 +437,12 @@ async function openProjectInWindow(
   if (target.kind === 'reuse') {
     const window = BrowserWindow.fromId(target.windowId);
     if (window && !window.isDestroyed()) {
-      await loadDebruteProjectShellWindow(window, opened.url, () => prepareProjectWindowBinding(window, opened.projectId, opened.projectRoot));
+      await loadDebruteProjectShellWindow(window, opened.navigation, () => prepareProjectWindowBinding(window, opened.projectId, opened.projectRoot));
       window.focus();
       return;
     }
   }
-  await createWindow(opened.url, opened.projectId, opened.projectRoot);
+  await createWindow(opened.navigation, opened.projectId, opened.projectRoot);
 }
 
 function requireRuntimeClient(): DesktopRuntimeClient {
@@ -475,11 +492,11 @@ async function restartRuntimeAndReloadWindows(): Promise<void> {
     }
     if (projectRoot) {
       const opened = await runtimeClient.openProject(projectRoot);
-      await loadDebruteProjectShellWindow(window, opened.url, () => prepareProjectWindowBinding(window, opened.projectId, projectRoot));
+      await loadDebruteProjectShellWindow(window, opened.navigation, () => prepareProjectWindowBinding(window, opened.projectId, projectRoot));
     } else {
-      const url = runtimeClient.shellUrl();
-      await waitForDebruteShellUrl(url);
-      await window.loadURL(url);
+      const navigation = runtimeClient.shellNavigation();
+      await waitForDebruteShellUrl(navigation.readyUrl);
+      await window.loadURL(navigation.loadUrl);
       dropProjectWindowBinding(window.id);
     }
   }

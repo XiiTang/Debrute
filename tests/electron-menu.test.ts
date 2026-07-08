@@ -3,7 +3,7 @@ import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { describe, expect, it, vi } from 'vitest';
 import { buildWorkbenchTitleBarState } from '@debrute/app-protocol';
-import { openProjectFromPickerThroughDaemon, openProjectThroughDaemon, projectWebShellUrl } from '../apps/desktop/src/electron/daemonProjectOpen';
+import { openProjectFromPickerThroughDaemon, openProjectThroughDaemon, projectWebShellNavigation } from '../apps/desktop/src/electron/daemonProjectOpen';
 import { buildApplicationMenuTemplate } from '../apps/desktop/src/electron/menu/applicationMenu';
 import { createApplicationMenuController } from '../apps/desktop/src/electron/menu/registerApplicationMenu';
 
@@ -153,20 +153,20 @@ describe('desktop application menu', () => {
   it('opens menu-selected projects through the daemon route', async () => {
     const requests: Array<{ url: string; init?: RequestInit }> = [];
     const runtime = daemonRuntimeFixture();
-    expect(projectWebShellUrl(runtime, '123e4567-e89b-42d3-a456-426614174000')).toBe(
-      'http://127.0.0.1:17322/projects/123e4567-e89b-42d3-a456-426614174000?debrute-token=secret'
+    expectWorkbenchNavigation(
+      projectWebShellNavigation(runtime, '123e4567-e89b-42d3-a456-426614174000'),
+      '/projects/123e4567-e89b-42d3-a456-426614174000'
     );
 
-    await expect(openProjectThroughDaemon(runtime, '/tmp/debrute-project', async (url, init) => {
+    const opened = await openProjectThroughDaemon(runtime, '/tmp/debrute-project', async (url, init) => {
       requests.push({ url: String(url), init });
       return new Response(JSON.stringify({
         projectId: '123e4567-e89b-42d3-a456-426614174000',
         snapshot: { canvases: [] }
       }), { status: 200, headers: { 'content-type': 'application/json' } });
-    })).resolves.toEqual({
-      projectId: '123e4567-e89b-42d3-a456-426614174000',
-      url: 'http://127.0.0.1:17322/projects/123e4567-e89b-42d3-a456-426614174000?debrute-token=secret'
     });
+    expect(opened.projectId).toBe('123e4567-e89b-42d3-a456-426614174000');
+    expectWorkbenchNavigation(opened.navigation, '/projects/123e4567-e89b-42d3-a456-426614174000');
 
     expect(requests).toEqual([{
       url: 'http://127.0.0.1:17321/api/projects/open',
@@ -185,7 +185,7 @@ describe('desktop application menu', () => {
     const requests: Array<{ url: string; init?: RequestInit }> = [];
     const runtime = daemonRuntimeFixture();
 
-    await expect(openProjectFromPickerThroughDaemon(runtime, async (url, init) => {
+    const opened = await openProjectFromPickerThroughDaemon(runtime, async (url, init) => {
       requests.push({ url: String(url), init });
       return new Response(JSON.stringify({
         opened: true,
@@ -193,11 +193,14 @@ describe('desktop application menu', () => {
         projectRevision: 1,
         snapshot: { canvases: [] }
       }), { status: 200, headers: { 'content-type': 'application/json' } });
-    })).resolves.toEqual({
-      opened: true,
-      projectId: '123e4567-e89b-42d3-a456-426614174000',
-      url: 'http://127.0.0.1:17322/projects/123e4567-e89b-42d3-a456-426614174000?debrute-token=secret'
     });
+    expect(opened).toMatchObject({
+      opened: true,
+      projectId: '123e4567-e89b-42d3-a456-426614174000'
+    });
+    if (opened.opened) {
+      expectWorkbenchNavigation(opened.navigation, '/projects/123e4567-e89b-42d3-a456-426614174000');
+    }
 
     expect(requests).toEqual([{
       url: 'http://127.0.0.1:17321/api/projects/open-picker',
@@ -234,7 +237,7 @@ describe('desktop application menu', () => {
     const main = readFileSync(join(process.cwd(), 'apps/desktop/src/electron/main.ts'), 'utf8');
 
     expect(main).toContain('waitForDebruteShellUrl');
-    expect(main.indexOf('await waitForDebruteShellUrl(urlToLoad)')).toBeLessThan(main.indexOf('await window.loadURL(urlToLoad)'));
+    expect(main.indexOf('await waitForDebruteShellUrl(navigation.readyUrl)')).toBeLessThan(main.indexOf('await window.loadURL(navigation.loadUrl)'));
   });
 
   it('syncs desktop project history to native recent project surfaces', () => {
@@ -296,7 +299,9 @@ describe('desktop application menu', () => {
     expect(restartBody).not.toContain('clearProjectWindowBindings()');
     expect(restartBody).toContain('const projectRoot = projectRootsByWindowId.get(window.id)');
     expect(restartBody).toContain('await runtimeClient.openProject(projectRoot)');
-    expect(restartBody).not.toContain('shellUrl(projectId)');
+    expect(restartBody).toContain('const navigation = runtimeClient.shellNavigation()');
+    expect(restartBody).toContain('await waitForDebruteShellUrl(navigation.readyUrl)');
+    expect(restartBody).toContain('await window.loadURL(navigation.loadUrl)');
     expect(restartBody).not.toContain('bindProjectWindow(window, projectId)');
   });
 
@@ -337,4 +342,12 @@ function daemonRuntimeFixture() {
     platform: 'darwin',
     token: 'secret'
   };
+}
+
+function expectWorkbenchNavigation(navigation: { readyUrl: string; loadUrl: string }, next: string): void {
+  expect(navigation.readyUrl).toBe(`http://127.0.0.1:17322${next}`);
+  const parsed = new URL(navigation.loadUrl);
+  expect(parsed.origin).toBe('http://127.0.0.1:17322');
+  expect(parsed.pathname).toMatch(/^\/__debrute\/session\/.+/);
+  expect(parsed.searchParams.get('next')).toBe(next);
 }

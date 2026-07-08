@@ -16,7 +16,7 @@ describe('canvas video preview URLs', () => {
   });
 
   it('builds video preview URLs from raw file URLs and explicit canvas id', () => {
-    expect(canvasVideoPreviewSource({
+    const source = canvasVideoPreviewSource({
       canvasId: 'canvas-1',
       node: videoNode('media/clip.mp4', 'rev-video', rawUrl('media/clip.mp4', 'test-token')),
       sourceKey: 'v1--explicit--poster',
@@ -24,10 +24,13 @@ describe('canvas video preview URLs', () => {
       currentTimeSeconds: 0,
       resourceZoom: 0.1,
       devicePixelRatio: 2
-    })).toEqual({
-      previewWidth: 300,
-      src: 'http://127.0.0.1:17321/api/projects/123e4567-e89b-42d3-a456-426614174000/canvas-video-preview?canvasId=canvas-1&path=media%2Fclip.mp4&videoRevision=rev-video&t=0&sourceKey=v1--explicit--poster&w=300&debrute-token=test-token'
     });
+
+    expect(source).toEqual({
+      previewWidth: 300,
+      src: '/api/projects/123e4567-e89b-42d3-a456-426614174000/canvas-video-preview?canvasId=canvas-1&path=media%2Fclip.mp4&videoRevision=rev-video&t=0&sourceKey=v1--explicit--poster&w=300'
+    });
+    expect(source!.src).not.toContain('test-token');
   });
 
   it('returns undefined for unavailable video nodes', () => {
@@ -80,7 +83,7 @@ function rawUrl(path: string, daemonToken?: string): string {
   const url = new URL(`http://127.0.0.1:17321/api/projects/123e4567-e89b-42d3-a456-426614174000/files/raw/${path.split('/').map(encodeURIComponent).join('/')}`);
   url.searchParams.set('v', 'rev-video');
   if (daemonToken) {
-    url.searchParams.set('debrute-token', daemonToken);
+    url.searchParams.set('ignored', daemonToken);
   }
   return url.toString();
 }

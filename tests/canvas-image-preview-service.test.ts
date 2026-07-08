@@ -26,7 +26,7 @@ describe('canvas image preview service', () => {
         width: 300
       });
       const firstStat = await stat(first.absolutePath);
-      const firstMetadata = await sharp(first.absolutePath).metadata();
+      const firstOutput = await sharp(first.absolutePath).toBuffer({ resolveWithObject: true });
       const second = await service.resolve({
         projectRoot,
         projectRelativePath: 'images/cover.png',
@@ -39,8 +39,9 @@ describe('canvas image preview service', () => {
       expect(normalizedPath).toMatch(
         /\/\.debrute\/cache\/canvas-image-previews\/images%2Fcover\.png--[a-f0-9]{16}\/[^/]+%3A\d+\/preview-w300\.(jpg|png)$/
       );
-      expect(firstMetadata.width).toBe(300);
-      expect(firstMetadata.height).toBe(150);
+      expect(firstOutput.info.width).toBe(300);
+      expect(firstOutput.info.height).toBe(150);
+      expect(firstOutput.info.hasAlpha).toBe(false);
       expect(second.absolutePath).toBe(first.absolutePath);
       await expect(stat(second.absolutePath)).resolves.toMatchObject({ mtimeMs: firstStat.mtimeMs });
     } finally {

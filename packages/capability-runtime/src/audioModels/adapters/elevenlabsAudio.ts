@@ -2,7 +2,6 @@ import {
   assertOkResponse,
   numberArg,
   requestBytes,
-  requiredStringField,
   responseHeaders,
   stringArg,
   type AudioModelAdapterInput,
@@ -10,12 +9,12 @@ import {
 } from './types.js';
 
 export async function executeElevenLabsTtsModel(input: AudioModelAdapterInput): Promise<AudioModelAdapterResult> {
-  const voiceId = requiredStringField(input.args, 'voice_id', 'ElevenLabs TTS arguments');
+  const voiceId = input.args.voice_id as string;
   const outputFormat = outputFormatFor(stringArg(input.args, 'format') ?? 'mp3');
   const settings = voiceSettings(input.args);
   const url = `${input.baseUrl.replace(/\/$/, '')}/text-to-speech/${encodeURIComponent(voiceId)}?output_format=${encodeURIComponent(outputFormat)}`;
   const body = {
-    text: stringArg(input.args, 'text') ?? '',
+    text: input.args.text as string,
     model_id: input.requestModelId,
     ...(settings ? { voice_settings: settings } : {})
   };
@@ -44,7 +43,7 @@ export async function executeElevenLabsMusicModel(input: AudioModelAdapterInput)
   const outputFormat = outputFormatFor(stringArg(input.args, 'format') ?? 'mp3');
   const durationSeconds = numberArg(input.args, 'duration_seconds');
   return executeElevenLabsBytes(input, `${input.baseUrl.replace(/\/$/, '')}/music?output_format=${encodeURIComponent(outputFormat)}`, {
-    prompt: stringArg(input.args, 'prompt') ?? '',
+    prompt: input.args.prompt as string,
     model_id: input.requestModelId,
     ...(durationSeconds !== undefined ? { music_length_ms: Math.round(durationSeconds * 1000) } : {}),
     ...(numberArg(input.args, 'seed') !== undefined ? { seed: numberArg(input.args, 'seed') } : {}),
@@ -56,7 +55,7 @@ export async function executeElevenLabsSoundEffectsModel(input: AudioModelAdapte
   const outputFormat = outputFormatFor(stringArg(input.args, 'format') ?? 'mp3');
   const durationSeconds = numberArg(input.args, 'duration_seconds');
   return executeElevenLabsBytes(input, `${input.baseUrl.replace(/\/$/, '')}/sound-generation?output_format=${encodeURIComponent(outputFormat)}`, {
-    text: stringArg(input.args, 'prompt') ?? '',
+    text: input.args.prompt as string,
     model_id: input.requestModelId,
     ...(durationSeconds !== undefined ? { duration_seconds: durationSeconds } : {}),
     ...(typeof input.args.loop === 'boolean' ? { loop: input.args.loop } : {})

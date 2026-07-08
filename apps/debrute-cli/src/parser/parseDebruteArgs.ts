@@ -102,7 +102,7 @@ const ALLOWED_OPTIONS: Record<DebruteCliCommand, Set<string>> = {
   'project.init': new Set(),
   'project.status': new Set(),
   'project.validate': new Set(),
-  'workbench.start': new Set(),
+  'workbench.start': new Set(['next']),
   'canvas-map.push': new Set(),
   'canvas.create': new Set(),
   'canvas.rename': new Set(),

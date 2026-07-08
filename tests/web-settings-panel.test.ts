@@ -26,6 +26,9 @@ describe('web Settings pages', () => {
   it('renders runtime product update state and exactly one read-only CLI diagnostic line in General', () => {
     const html = renderWithI18n(React.createElement(GeneralSettingsPage, {
       actions: actionsFixture(),
+      preferences: { locale: 'en', themePreference: 'system' },
+      resolvedTheme: 'dark',
+      onPreferencesChange: async () => undefined,
       initialProductState: productState({
         update: {
           type: 'available',
@@ -56,6 +59,9 @@ describe('web Settings pages', () => {
   it('renders product errors without exposing standalone CLI install actions', () => {
     const html = renderWithI18n(React.createElement(GeneralSettingsPage, {
       actions: actionsFixture(),
+      preferences: { locale: 'en', themePreference: 'system' },
+      resolvedTheme: 'dark',
+      onPreferencesChange: async () => undefined,
       initialProductState: productState({
         cli: {
           status: 'error',
@@ -108,15 +114,15 @@ function stateFixture(): WorkbenchState {
   return {
     snapshot: undefined,
     titleBarState: unavailableWorkbenchTitleBarState(),
-    workbenchPreferences: { locale: 'en', themePreference: 'system' },
+    workbenchPreferences: { status: 'ready', value: { locale: 'en', themePreference: 'system' } },
     resolvedTheme: 'dark',
     projectOpen: { opening: false },
     explorerSelection: createEmptyProjectTreeSelection(),
-    imageModelSettings: { models: [] },
-    videoModelSettings: { models: [] },
-    audioModelSettings: { models: [] },
-    integrationsSettings: undefined,
-    adobeBridge: undefined,
+    imageModelSettings: { status: 'ready', value: { models: [] } },
+    videoModelSettings: { status: 'ready', value: { models: [] } },
+    audioModelSettings: { status: 'ready', value: { models: [] } },
+    integrationsSettings: { status: 'ready', value: { integrations: [], backends: [] } },
+    adobeBridge: { status: 'ready', value: { settings: { enabled: true, discoveryStatus: 'available' }, adobeClients: [], projects: [], links: [], transfers: [] } },
     canvasFeedback: undefined,
     textFileBuffers: {},
     textEditorWindows: {},
@@ -129,6 +135,12 @@ function actionsFixture(): WorkbenchActions {
     getProductState: vi.fn(async () => productState()),
     checkProductUpdate: vi.fn(async () => productState()),
     applyProductUpdate: vi.fn(async () => ({ state: productState() })),
+    reloadWorkbenchPreferences: vi.fn(async () => undefined),
+    reloadImageModelSettings: vi.fn(async () => undefined),
+    reloadVideoModelSettings: vi.fn(async () => undefined),
+    reloadAudioModelSettings: vi.fn(async () => undefined),
+    reloadIntegrationsSettings: vi.fn(async () => undefined),
+    reloadAdobeBridge: vi.fn(async () => undefined),
     saveWorkbenchPreferences: vi.fn(async () => undefined),
     saveImageModelSetting: vi.fn(async () => undefined),
     saveVideoModelSetting: vi.fn(async () => undefined),

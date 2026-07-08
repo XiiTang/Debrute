@@ -1,19 +1,15 @@
 import type {
-  ApiKeyPreviewRecord,
+  ApiKeySettingState,
   AudioModelKind,
   AudioModelSettingsView,
   ImageModelSettingsView,
-  MediaModelKeyState,
-  ModelApiKeyEntry,
   VideoModelSettingsView
 } from '@debrute/app-protocol';
 
 export type {
-  ApiKeyPreviewRecord,
+  ApiKeySettingState,
   AudioModelSettingRecord,
   AudioModelSettingsView,
-  MediaModelKeyState,
-  ModelApiKeyEntry,
   SaveAudioModelSettingInput,
   ImageModelSettingRecord,
   ImageModelSettingsView,
@@ -54,9 +50,9 @@ export interface AudioModelConfig {
 }
 
 export interface SecretsConfig {
-  imageModelApiKeys: Record<string, ModelApiKeyEntry[]>;
-  videoModelApiKeys: Record<string, ModelApiKeyEntry[]>;
-  audioModelApiKeys: Record<string, ModelApiKeyEntry[]>;
+  imageModelApiKeys: Record<string, string>;
+  videoModelApiKeys: Record<string, string>;
+  audioModelApiKeys: Record<string, string>;
 }
 
 export interface ImageModelCatalogViewEntry {
@@ -91,27 +87,17 @@ export interface AudioModelCatalogViewEntry {
 const API_KEY_PREVIEW_MASK = '****************************';
 const API_KEY_PREVIEW_MIN_LENGTH = 8;
 
-export function apiKeyPreview(apiKey: string): string {
-  const trimmed = apiKey.trim();
-  if (trimmed.length < API_KEY_PREVIEW_MIN_LENGTH) {
-    return '****';
+export function apiKeyPreview(apiKey: string | undefined): ApiKeySettingState {
+  const trimmed = apiKey?.trim() ?? '';
+  if (!trimmed) {
+    return { apiKeySet: false, apiKeyPreview: null };
   }
-  return `${trimmed.slice(0, 2)}${API_KEY_PREVIEW_MASK}${trimmed.slice(-2)}`;
-}
-
-export function createApiKeyState(entries: ModelApiKeyEntry[] | undefined): MediaModelKeyState {
-  const apiKeys = entries ?? [];
-  const enabledApiKeyCount = apiKeys.filter((entry) => entry.enabled && entry.key.trim()).length;
+  if (trimmed.length < API_KEY_PREVIEW_MIN_LENGTH) {
+    return { apiKeySet: true, apiKeyPreview: '****' };
+  }
   return {
-    apiKeySet: enabledApiKeyCount > 0,
-    apiKeyCount: apiKeys.length,
-    enabledApiKeyCount,
-    apiKeyPreviews: apiKeys.map((entry): ApiKeyPreviewRecord => ({
-      id: entry.id,
-      label: entry.label,
-      enabled: entry.enabled,
-      preview: apiKeyPreview(entry.key)
-    }))
+    apiKeySet: true,
+    apiKeyPreview: `${trimmed.slice(0, 2)}${API_KEY_PREVIEW_MASK}${trimmed.slice(-2)}`
   };
 }
 
@@ -124,7 +110,7 @@ export function createImageModelSettingsView(
   return {
     models: catalog.map((entry) => {
       const configured = configuredById.get(entry.debruteModelId);
-      const keyState = createApiKeyState(secrets.imageModelApiKeys[entry.debruteModelId]);
+      const keyState = apiKeyPreview(secrets.imageModelApiKeys[entry.debruteModelId]);
       return {
         debruteModelId: entry.debruteModelId,
         summary: entry.summary,
@@ -149,7 +135,7 @@ export function createVideoModelSettingsView(
   return {
     models: catalog.map((entry) => {
       const configured = configuredById.get(entry.debruteModelId);
-      const keyState = createApiKeyState(secrets.videoModelApiKeys[entry.debruteModelId]);
+      const keyState = apiKeyPreview(secrets.videoModelApiKeys[entry.debruteModelId]);
       return {
         debruteModelId: entry.debruteModelId,
         summary: entry.summary,
@@ -177,7 +163,7 @@ export function createAudioModelSettingsView(
   return {
     models: catalog.map((entry) => {
       const configured = configuredById.get(entry.debruteModelId);
-      const keyState = createApiKeyState(secrets.audioModelApiKeys[entry.debruteModelId]);
+      const keyState = apiKeyPreview(secrets.audioModelApiKeys[entry.debruteModelId]);
       return {
         debruteModelId: entry.debruteModelId,
         kind: entry.kind,

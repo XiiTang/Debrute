@@ -124,13 +124,13 @@ export function WorkbenchTitleBar({
       <div className="workbench-titlebar__right">
         {state.presentation.showWindowControls ? (
           <div className="workbench-titlebar__window-controls" style={{ WebkitAppRegion: 'no-drag' } as React.CSSProperties}>
-            <IconButton label={i18n.t('shell.titleBar.minimizeWindow')} icon={<Minus size={13} />} onClick={() => onWindowCommand('minimize')} />
+            <IconButton label={i18n.t('shell.titleBar.minimizeWindow')} icon={<Minus />} onClick={() => onWindowCommand('minimize')} />
             <IconButton
               label={nativeWindowState.maximized ? i18n.t('shell.titleBar.restoreWindow') : i18n.t('shell.titleBar.maximizeWindow')}
-              icon={nativeWindowState.maximized ? <Square size={12} /> : <Maximize2 size={13} />}
+              icon={nativeWindowState.maximized ? <Square /> : <Maximize2 />}
               onClick={() => onWindowCommand('toggle-maximize')}
             />
-            <IconButton label={i18n.t('shell.titleBar.closeWindow')} icon={<X size={14} />} onClick={() => onWindowCommand('close')} />
+            <IconButton label={i18n.t('shell.titleBar.closeWindow')} icon={<X />} onClick={() => onWindowCommand('close')} />
           </div>
         ) : null}
       </div>
@@ -185,7 +185,7 @@ function renderMenuItem(
         <Menu.Item
           className="workbench-titlebar__submenu-trigger"
           disabled={!item.enabled}
-          icon={<ChevronRight size={13} />}
+          icon={<ChevronRight />}
           aria-haspopup="menu"
           aria-expanded={submenuOpen}
           aria-controls={submenuId}

@@ -15,7 +15,7 @@ export async function executeDashScopeTtsModel(input: AudioModelAdapterInput): P
   const body = {
     model: input.requestModelId,
     input: {
-      text: stringArg(input.args, 'text') ?? '',
+      text: input.args.text as string,
       voice: stringArg(input.args, 'voice') ?? 'Cherry',
       ...(stringArg(input.args, 'language') ? { language_type: stringArg(input.args, 'language') } : {})
     }

@@ -1,5 +1,8 @@
 import { describe, expect, it } from 'vitest';
-import { isIgnoredProjectFilePath } from './projectPaths';
+import {
+  assertProjectTreeVisibleMutationPath,
+  isIgnoredProjectFilePath
+} from './projectPaths';
 import { normalizeFileWatchEvent } from './index';
 
 describe('project path ignore rules', () => {
@@ -20,6 +23,18 @@ describe('project path ignore rules', () => {
     expect(isIgnoredProjectFilePath('.debrute/cache/canvas-video-previews')).toBe(true);
     expect(isIgnoredProjectFilePath('.debrute/cache/canvas-video-previews/canvas-1/media%2Fclip.mp4--123/video-rev/initial-poster/source.jpg')).toBe(true);
     expect(isIgnoredProjectFilePath('.debrute/cache/canvas-video-previews/canvas-1/media%2Fclip.mp4--123/video-rev/playback-frame/preview-w700.jpg')).toBe(true);
+  });
+
+  it('reserves project-internal path namespaces case-insensitively', () => {
+    expect(() => assertProjectTreeVisibleMutationPath('.GIT/config'))
+      .toThrow('Project path is not visible in the Project Tree');
+    expect(() => assertProjectTreeVisibleMutationPath('.DeBrute/canvases/index.json'))
+      .toThrow('Project path is protected by the Project Document System');
+    expect(isIgnoredProjectFilePath('.DeBrute/cache/canvas-image-previews')).toBe(true);
+    expect(isIgnoredProjectFilePath('.DeBrute/cache/canvas-text-previews/canvas-1/preview.png')).toBe(true);
+    expect(isIgnoredProjectFilePath('.DeBrute/reviews/rendered-feedback/page.png.annotated.png')).toBe(true);
+    expect(isIgnoredProjectFilePath('.DeBrute/project.lock')).toBe(true);
+    expect(() => assertProjectTreeVisibleMutationPath('.debrute-not-internal/file.md')).not.toThrow();
   });
 
   it('classifies Canvas feedback document changes separately from source content', () => {

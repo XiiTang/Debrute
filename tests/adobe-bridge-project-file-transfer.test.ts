@@ -18,6 +18,8 @@ describe('Adobe Bridge project file transfer', () => {
     expect(isSupportedAdobeBridgeProjectImageFile('assets/edit.psd')).toBe(true);
     expect(isSupportedAdobeBridgeProjectImageFile('assets/brief.md')).toBe(false);
     expect(isSupportedAdobeBridgeProjectImageFile('.debrute/cache/cover.png')).toBe(false);
+    expect(isSupportedAdobeBridgeProjectImageFile('.DeBrute/cache/cover.png')).toBe(false);
+    expect(isSupportedAdobeBridgeProjectImageFile('.GIT/objects/cover.png')).toBe(false);
   });
 
   it('sanitizes Photoshop layer names without copy suffixes', () => {
@@ -57,6 +59,13 @@ describe('Adobe Bridge project file transfer', () => {
       await mkdir(join(projectRoot, '.debrute'), { recursive: true });
       await expect(importAdobeBridgePngTransfer(projectRoot, {
         targetDirectoryProjectRelativePath: '.debrute',
+        suggestedName: 'Layer',
+        content: new Uint8Array([1]),
+        byteLength: 1,
+        mimeType: 'image/png'
+      })).rejects.toThrow('not visible');
+      await expect(importAdobeBridgePngTransfer(projectRoot, {
+        targetDirectoryProjectRelativePath: '.DeBrute',
         suggestedName: 'Layer',
         content: new Uint8Array([1]),
         byteLength: 1,

@@ -19,7 +19,7 @@ export async function executeMiniMaxTtsModel(input: AudioModelAdapterInput): Pro
   const format = stringArg(input.args, 'format') ?? 'mp3';
   const body = {
     model: input.requestModelId,
-    text: stringArg(input.args, 'text') ?? '',
+    text: input.args.text as string,
     stream: false,
     output_format: 'hex',
     voice_setting: {
@@ -49,7 +49,7 @@ export async function executeMiniMaxMusicModel(input: AudioModelAdapterInput): P
   const lyrics = stringArg(input.args, 'lyrics');
   const body = {
     model: input.requestModelId,
-    prompt: stringArg(input.args, 'prompt') ?? '',
+    prompt: input.args.prompt as string,
     output_format: 'hex',
     ...(lyrics ? { lyrics } : {}),
     is_instrumental: booleanArg(input.args, 'instrumental') ?? !lyrics,

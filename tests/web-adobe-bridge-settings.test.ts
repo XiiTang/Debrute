@@ -1,7 +1,8 @@
 import React from 'react';
 import { renderToStaticMarkup } from 'react-dom/server';
 import { describe, expect, it } from 'vitest';
-import type { WorkbenchActions, WorkbenchState } from '../apps/web/src/types';
+import { unavailableWorkbenchTitleBarState } from '@debrute/app-protocol';
+import type { SettingsResource, WorkbenchActions, WorkbenchState } from '../apps/web/src/types';
 import {
   AdobeBridgeSettingsPage,
   isPhotoshopLinkedToCurrentProject
@@ -21,8 +22,10 @@ describe('web Adobe Bridge settings page', () => {
   });
 
   it('renders bridge status, Photoshop clients, projects, and link actions', () => {
+    const state = createState();
     const html = renderWithI18n(React.createElement(AdobeBridgeSettingsPage, {
-      state: createState(),
+      bridge: readyResourceValue(state.adobeBridge),
+      projectId: state.projectId,
       actions: createActions()
     }));
 
@@ -34,10 +37,11 @@ describe('web Adobe Bridge settings page', () => {
   });
 
   it('renders Adobe Bridge transfer failures with stable error labels', () => {
-    const html = renderWithI18n(React.createElement(AdobeBridgeSettingsPage, {
-      state: createState({
-        adobeBridge: {
-          ...createState().adobeBridge!,
+    const state = createState({
+      adobeBridge: {
+        status: 'ready',
+        value: {
+          ...readyResourceValue(createState().adobeBridge),
           transfers: [{
             transferId: 'transfer-failed',
             direction: 'debrute-to-photoshop',
@@ -51,7 +55,11 @@ describe('web Adobe Bridge settings page', () => {
             updatedAt: '2026-06-18T00:00:03.000Z'
           }]
         }
-      }),
+      }
+    });
+    const html = renderWithI18n(React.createElement(AdobeBridgeSettingsPage, {
+      bridge: readyResourceValue(state.adobeBridge),
+      projectId: state.projectId,
       actions: createActions()
     }));
 
@@ -65,35 +73,39 @@ describe('web Adobe Bridge settings page', () => {
     const state = createState({
       projectId: 'project-1',
       adobeBridge: {
-        ...createState().adobeBridge!,
-        adobeClients: [
-          ...createState().adobeBridge!.adobeClients,
-          {
-            adobeClientId: 'ps-other-project',
-            hostApp: 'photoshop',
-            hostVersion: '2026',
-            displayName: 'Photoshop 2026 · other.psd',
-            documentCount: 1,
-            activeDocumentTitle: 'other.psd',
-            connectedAt: '2026-06-18T00:00:00.000Z',
-            lastSeenAt: '2026-06-18T00:00:01.000Z'
-          }
-        ],
-        links: [
-          ...createState().adobeBridge!.links,
-          {
-            linkId: 'link-other-project',
-            projectId: 'project-2',
-            adobeClientId: 'ps-other-project',
-            createdAt: '2026-06-18T00:00:01.000Z',
-            status: 'active'
-          }
-        ]
+        status: 'ready',
+        value: {
+          ...readyResourceValue(createState().adobeBridge),
+          adobeClients: [
+            ...readyResourceValue(createState().adobeBridge).adobeClients,
+            {
+              adobeClientId: 'ps-other-project',
+              hostApp: 'photoshop',
+              hostVersion: '2026',
+              displayName: 'Photoshop 2026 · other.psd',
+              documentCount: 1,
+              activeDocumentTitle: 'other.psd',
+              connectedAt: '2026-06-18T00:00:00.000Z',
+              lastSeenAt: '2026-06-18T00:00:01.000Z'
+            }
+          ],
+          links: [
+            ...readyResourceValue(createState().adobeBridge).links,
+            {
+              linkId: 'link-other-project',
+              projectId: 'project-2',
+              adobeClientId: 'ps-other-project',
+              createdAt: '2026-06-18T00:00:01.000Z',
+              status: 'active'
+            }
+          ]
+        }
       }
     });
 
-    expect(isPhotoshopLinkedToCurrentProject(state.adobeBridge, state.projectId, 'ps-1')).toBe(true);
-    expect(isPhotoshopLinkedToCurrentProject(state.adobeBridge, state.projectId, 'ps-other-project')).toBe(false);
+    const bridge = readyResourceValue(state.adobeBridge);
+    expect(isPhotoshopLinkedToCurrentProject(bridge, state.projectId, 'ps-1')).toBe(true);
+    expect(isPhotoshopLinkedToCurrentProject(bridge, state.projectId, 'ps-other-project')).toBe(false);
   });
 });
 
@@ -105,38 +117,45 @@ function createState(overrides: Partial<WorkbenchState> = {}): WorkbenchState {
   return {
     snapshot: undefined,
     projectId: 'project-1',
+    titleBarState: unavailableWorkbenchTitleBarState(),
+    workbenchPreferences: { status: 'ready', value: { locale: 'en', themePreference: 'system' } },
+    resolvedTheme: 'dark',
+    projectOpen: { opening: false },
     explorerSelection: { selectedPaths: [], focusedPath: null, anchorPath: null },
-    imageModelSettings: { models: [] },
-    videoModelSettings: { models: [] },
-    audioModelSettings: { models: [] },
-    integrationsSettings: { integrations: [], backends: [] },
+    imageModelSettings: { status: 'ready', value: { models: [] } },
+    videoModelSettings: { status: 'ready', value: { models: [] } },
+    audioModelSettings: { status: 'ready', value: { models: [] } },
+    integrationsSettings: { status: 'ready', value: { integrations: [], backends: [] } },
     adobeBridge: {
-      settings: { enabled: true, discoveryStatus: 'available' },
-      adobeClients: [{
-        adobeClientId: 'ps-1',
-        hostApp: 'photoshop',
-        hostVersion: '2026',
-        displayName: 'Photoshop 2026 · poster.psd',
-        documentCount: 1,
-        activeDocumentTitle: 'poster.psd',
-        connectedAt: '2026-06-18T00:00:00.000Z',
-        lastSeenAt: '2026-06-18T00:00:01.000Z'
-      }],
-      projects: [{
-        projectId: 'project-1',
-        projectName: 'Campaign',
-        projectRevision: 1,
-        connectedWorkbenchClientCount: 1,
-        directories: [{ projectRelativePath: 'assets', name: 'assets', depth: 1 }]
-      }],
-      links: [{
-        linkId: 'link-1',
-        projectId: 'project-1',
-        adobeClientId: 'ps-1',
-        createdAt: '2026-06-18T00:00:01.000Z',
-        status: 'active'
-      }],
-      transfers: []
+      status: 'ready',
+      value: {
+        settings: { enabled: true, discoveryStatus: 'available' },
+        adobeClients: [{
+          adobeClientId: 'ps-1',
+          hostApp: 'photoshop',
+          hostVersion: '2026',
+          displayName: 'Photoshop 2026 · poster.psd',
+          documentCount: 1,
+          activeDocumentTitle: 'poster.psd',
+          connectedAt: '2026-06-18T00:00:00.000Z',
+          lastSeenAt: '2026-06-18T00:00:01.000Z'
+        }],
+        projects: [{
+          projectId: 'project-1',
+          projectName: 'Campaign',
+          projectRevision: 1,
+          connectedWorkbenchClientCount: 1,
+          directories: [{ projectRelativePath: 'assets', name: 'assets', depth: 1 }]
+        }],
+        links: [{
+          linkId: 'link-1',
+          projectId: 'project-1',
+          adobeClientId: 'ps-1',
+          createdAt: '2026-06-18T00:00:01.000Z',
+          status: 'active'
+        }],
+        transfers: []
+      }
     },
     canvasFeedback: undefined,
     textFileBuffers: {},
@@ -148,8 +167,21 @@ function createState(overrides: Partial<WorkbenchState> = {}): WorkbenchState {
 
 function createActions(): WorkbenchActions {
   return {
+    reloadWorkbenchPreferences: async () => undefined,
+    reloadImageModelSettings: async () => undefined,
+    reloadVideoModelSettings: async () => undefined,
+    reloadAudioModelSettings: async () => undefined,
+    reloadIntegrationsSettings: async () => undefined,
+    reloadAdobeBridge: async () => undefined,
     saveAdobeBridgeSettings: async () => undefined,
     linkAdobeBridgePhotoshop: async () => undefined,
     unlinkAdobeBridgePhotoshop: async () => undefined
   } as unknown as WorkbenchActions;
+}
+
+function readyResourceValue<T>(resource: SettingsResource<T>): T {
+  if (resource.status !== 'ready') {
+    throw new Error(`Expected ready resource, got ${resource.status}.`);
+  }
+  return resource.value;
 }

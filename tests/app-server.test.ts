@@ -798,7 +798,7 @@ describe('app-server', () => {
       await globalRuntime.imageModelSaveSetting('gpt-image-2', {
         baseUrlOverride: null,
         requestModelIdOverride: null,
-        apiKeys: [{ id: 'img-a', key: 'sk-image', label: null, enabled: true }]
+        apiKey: 'sk-image'
       });
 
       const result = await server.runImageModelRequestForCli({
@@ -831,7 +831,7 @@ describe('app-server', () => {
       await globalRuntime.imageModelSaveSetting('gpt-image-2', {
         baseUrlOverride: null,
         requestModelIdOverride: 'gpt-image-2',
-        apiKeys: [{ id: 'img-initial', key: 'sk-image-initial', label: 'Initial', enabled: true }]
+        apiKey: 'sk-image-initial'
       });
       await globalRuntime.imageModelSaveSetting('gpt-image-2', {
         baseUrlOverride: null,
@@ -840,7 +840,7 @@ describe('app-server', () => {
       await globalRuntime.videoModelSaveSetting('doubao-seedance-2-0-260128', {
         baseUrlOverride: null,
         requestModelIdOverride: null,
-        apiKeys: [{ id: 'vid-initial', key: 'sk-video-initial', label: null, enabled: true }]
+        apiKey: 'sk-video-initial'
       });
       await globalRuntime.videoModelSaveSetting('doubao-seedance-2-0-260128', {
         baseUrlOverride: null,
@@ -848,114 +848,57 @@ describe('app-server', () => {
       });
 
       let secrets = await configStore.readSecrets();
-      expect(secrets.imageModelApiKeys['gpt-image-2']).toEqual([
-        { id: 'img-initial', key: 'sk-image-initial', label: 'Initial', enabled: true }
-      ]);
-      expect(secrets.videoModelApiKeys['doubao-seedance-2-0-260128']).toEqual([
-        { id: 'vid-initial', key: 'sk-video-initial', label: null, enabled: true }
-      ]);
+      expect(secrets.imageModelApiKeys['gpt-image-2']).toBe('sk-image-initial');
+      expect(secrets.videoModelApiKeys['doubao-seedance-2-0-260128']).toBe('sk-video-initial');
 
       await globalRuntime.imageModelSaveSetting('gpt-image-2', {
         baseUrlOverride: null,
         requestModelIdOverride: null,
-        apiKeys: [{ id: 'img-replaced', key: 'sk-image-replaced', label: null, enabled: true }]
+        apiKey: 'sk-image-replaced'
       });
       await globalRuntime.videoModelSaveSetting('doubao-seedance-2-0-260128', {
         baseUrlOverride: null,
         requestModelIdOverride: null,
-        apiKeys: [{ id: 'vid-replaced', key: 'sk-video-replaced', label: null, enabled: true }]
+        apiKey: 'sk-video-replaced'
       });
 
       secrets = await configStore.readSecrets();
-      expect(secrets.imageModelApiKeys['gpt-image-2']).toEqual([
-        { id: 'img-replaced', key: 'sk-image-replaced', label: null, enabled: true }
-      ]);
-      expect(secrets.videoModelApiKeys['doubao-seedance-2-0-260128']).toEqual([
-        { id: 'vid-replaced', key: 'sk-video-replaced', label: null, enabled: true }
-      ]);
-
-      await globalRuntime.imageModelSaveSetting('gpt-image-2', {
-        baseUrlOverride: null,
-        requestModelIdOverride: null,
-        apiKeys: [{ id: 'img-replaced', label: 'Renamed', enabled: false }]
-      });
-      secrets = await configStore.readSecrets();
-      expect(secrets.imageModelApiKeys['gpt-image-2']).toEqual([
-        { id: 'img-replaced', key: 'sk-image-replaced', label: 'Renamed', enabled: false }
-      ]);
-
-      await expect(globalRuntime.imageModelSaveSetting('gpt-image-2', {
-        baseUrlOverride: null,
-        requestModelIdOverride: null,
-        apiKeys: [{ id: 'img-missing-key', label: null, enabled: true }]
-      })).rejects.toMatchObject({
-        code: 'invalid_input',
-        fields: { field: 'apiKeys.0.key' }
-      });
+      expect(secrets.imageModelApiKeys['gpt-image-2']).toBe('sk-image-replaced');
+      expect(secrets.videoModelApiKeys['doubao-seedance-2-0-260128']).toBe('sk-video-replaced');
 
       const imageView = await globalRuntime.imageModelSaveSetting('gpt-image-2', {
         baseUrlOverride: null,
         requestModelIdOverride: null,
-        apiKeys: []
+        apiKey: ''
       });
       const videoView = await globalRuntime.videoModelSaveSetting('doubao-seedance-2-0-260128', {
         baseUrlOverride: null,
         requestModelIdOverride: null,
-        apiKeys: []
+        apiKey: ''
+      });
+      const audioView = await globalRuntime.audioModelSaveSetting('openai-gpt-4o-mini-tts', {
+        baseUrlOverride: null,
+        requestModelIdOverride: null,
+        apiKey: '   '
       });
 
       secrets = await configStore.readSecrets();
-      expect(secrets.imageModelApiKeys['gpt-image-2']).toEqual([]);
-      expect(secrets.videoModelApiKeys['doubao-seedance-2-0-260128']).toEqual([]);
-      expect(imageView.models.find((model) => model.debruteModelId === 'gpt-image-2')).toMatchObject({ apiKeySet: false });
-      expect(videoView.models.find((model) => model.debruteModelId === 'doubao-seedance-2-0-260128')).toMatchObject({ apiKeySet: false });
-      expect(JSON.stringify({ imageView, videoView })).not.toContain('sk-');
-    } finally {
-      globalRuntime.close();
-      await rm(home, { recursive: true, force: true });
-    }
-  });
-
-  it('does not save media model overrides when API key list resolution fails', async () => {
-    const home = await mkdtemp(join(tmpdir(), 'debrute-settings-invalid-secret-atomic-home-'));
-    const configStore = new GlobalConfigStore({ debruteHome: home });
-    const globalRuntime = new DebruteGlobalRuntimeServer({ globalConfigStore: configStore });
-    try {
-      await expect(globalRuntime.imageModelSaveSetting('gpt-image-2', {
-        baseUrlOverride: 'https://images.example.test/v1',
-        requestModelIdOverride: null,
-        apiKeys: [{ id: 'img-missing-key', label: null, enabled: true }]
-      })).rejects.toMatchObject({
-        code: 'invalid_input',
-        fields: { field: 'apiKeys.0.key' }
+      expect(secrets.imageModelApiKeys).not.toHaveProperty('gpt-image-2');
+      expect(secrets.videoModelApiKeys).not.toHaveProperty('doubao-seedance-2-0-260128');
+      expect(secrets.audioModelApiKeys).not.toHaveProperty('openai-gpt-4o-mini-tts');
+      expect(imageView.models.find((model) => model.debruteModelId === 'gpt-image-2')).toMatchObject({
+        apiKeySet: false,
+        apiKeyPreview: null
       });
-
-      await expect(globalRuntime.videoModelSaveSetting('doubao-seedance-2-0-260128', {
-        baseUrlOverride: 'https://videos.example.test/v1',
-        requestModelIdOverride: null,
-        apiKeys: [{ id: 'vid-missing-key', label: null, enabled: true }]
-      })).rejects.toMatchObject({
-        code: 'invalid_input',
-        fields: { field: 'apiKeys.0.key' }
+      expect(videoView.models.find((model) => model.debruteModelId === 'doubao-seedance-2-0-260128')).toMatchObject({
+        apiKeySet: false,
+        apiKeyPreview: null
       });
-
-      await expect(globalRuntime.audioModelSaveSetting('openai-gpt-4o-mini-tts', {
-        baseUrlOverride: 'https://audio.example.test/v1',
-        requestModelIdOverride: null,
-        apiKeys: [{ id: 'aud-missing-key', label: null, enabled: true }]
-      })).rejects.toMatchObject({
-        code: 'invalid_input',
-        fields: { field: 'apiKeys.0.key' }
+      expect(audioView.models.find((model) => model.debruteModelId === 'openai-gpt-4o-mini-tts')).toMatchObject({
+        apiKeySet: false,
+        apiKeyPreview: null
       });
-
-      await expect(configStore.readImageModels()).resolves.toEqual({ imageModels: [] });
-      await expect(configStore.readVideoModels()).resolves.toEqual({ videoModels: [] });
-      await expect(configStore.readAudioModels()).resolves.toEqual({ audioModels: [] });
-      await expect(configStore.readSecrets()).resolves.toEqual({
-        imageModelApiKeys: {},
-        videoModelApiKeys: {},
-        audioModelApiKeys: {}
-      });
+      expect(JSON.stringify({ imageView, videoView, audioView })).not.toContain('sk-');
     } finally {
       globalRuntime.close();
       await rm(home, { recursive: true, force: true });
@@ -971,12 +914,12 @@ describe('app-server', () => {
       const imageSettings = await globalRuntime.imageModelSaveSetting('gpt-image-2', {
         baseUrlOverride: 'https://images.example.test/v1',
         requestModelIdOverride: 'custom-image-model',
-        apiKeys: [{ id: 'img-a', key: 'sk-image', label: null, enabled: true }]
+        apiKey: 'sk-image'
       });
       const videoSettings = await globalRuntime.videoModelSaveSetting('doubao-seedance-2-0-260128', {
         baseUrlOverride: 'https://videos.example.test/v1',
         requestModelIdOverride: 'custom-video-model',
-        apiKeys: [{ id: 'vid-a', key: 'sk-video', label: null, enabled: true }]
+        apiKey: 'sk-video'
       });
 
       const imageModel = imageSettings.models.find((model) => model.debruteModelId === 'gpt-image-2');
@@ -992,9 +935,7 @@ describe('app-server', () => {
         baseUrlOverride: 'https://images.example.test/v1',
         requestModelIdOverride: 'custom-image-model',
         apiKeySet: true,
-        apiKeyCount: 1,
-        enabledApiKeyCount: 1,
-        apiKeyPreviews: [{ id: 'img-a', label: null, enabled: true, preview: 'sk****************************ge' }]
+        apiKeyPreview: 'sk****************************ge'
       });
       expect(videoModel).toEqual({
         debruteModelId: 'doubao-seedance-2-0-260128',
@@ -1009,9 +950,7 @@ describe('app-server', () => {
         baseUrlOverride: 'https://videos.example.test/v1',
         requestModelIdOverride: 'custom-video-model',
         apiKeySet: true,
-        apiKeyCount: 1,
-        enabledApiKeyCount: 1,
-        apiKeyPreviews: [{ id: 'vid-a', label: null, enabled: true, preview: 'sk****************************eo' }]
+        apiKeyPreview: 'sk****************************eo'
       });
       expect(imageModel as Record<string, unknown>).not.toHaveProperty('apiKey');
       expect(videoModel as Record<string, unknown>).not.toHaveProperty('apiKey');
@@ -1050,7 +989,7 @@ describe('app-server', () => {
       const settings = await globalRuntime.imageModelSaveSetting('gpt-image-2', {
         baseUrlOverride: null,
         requestModelIdOverride: null,
-        apiKeys: [{ id: 'img-a', key: 'sk-image', label: null, enabled: true }]
+        apiKey: 'sk-image'
       });
 
       const imageModel = settings.models.find((model) => model.debruteModelId === 'gpt-image-2');
@@ -1064,14 +1003,12 @@ describe('app-server', () => {
         baseUrlOverride: null,
         requestModelIdOverride: null,
         apiKeySet: true,
-        apiKeyCount: 1,
-        enabledApiKeyCount: 1,
-        apiKeyPreviews: [{ id: 'img-a', label: null, enabled: true, preview: 'sk****************************ge' }]
+        apiKeyPreview: 'sk****************************ge'
       });
       expect(imageModel as Record<string, unknown>).not.toHaveProperty('apiKey');
       await expect(configStore.readImageModels()).resolves.toEqual({ imageModels: [] });
       await expect(configStore.readSecrets()).resolves.toMatchObject({
-        imageModelApiKeys: { 'gpt-image-2': [{ id: 'img-a', key: 'sk-image', label: null, enabled: true }] }
+        imageModelApiKeys: { 'gpt-image-2': 'sk-image' }
       });
     } finally {
       globalRuntime.close();
@@ -1087,7 +1024,7 @@ describe('app-server', () => {
       await globalRuntime.imageModelSaveSetting('gpt-image-2', {
         baseUrlOverride: 'https://images.example.test/v1',
         requestModelIdOverride: null,
-        apiKeys: [{ id: 'img-a', key: 'sk-image', label: null, enabled: true }]
+        apiKey: 'sk-image'
       });
 
       const settings = await globalRuntime.imageModelSaveSetting('gpt-image-2', {
@@ -1100,13 +1037,11 @@ describe('app-server', () => {
         baseUrlOverride: null,
         requestModelIdOverride: null,
         apiKeySet: true,
-        apiKeyCount: 1,
-        enabledApiKeyCount: 1,
-        apiKeyPreviews: [{ id: 'img-a', label: null, enabled: true, preview: 'sk****************************ge' }]
+        apiKeyPreview: 'sk****************************ge'
       });
       await expect(configStore.readImageModels()).resolves.toEqual({ imageModels: [] });
       await expect(configStore.readSecrets()).resolves.toMatchObject({
-        imageModelApiKeys: { 'gpt-image-2': [{ id: 'img-a', key: 'sk-image', label: null, enabled: true }] }
+        imageModelApiKeys: { 'gpt-image-2': 'sk-image' }
       });
     } finally {
       globalRuntime.close();
@@ -1138,51 +1073,13 @@ describe('app-server', () => {
       await mkdir(paths.root, { recursive: true });
       await writeFile(paths.secretsFile, JSON.stringify({
         imageModelApiKeys: {
-          'gpt-image-2': [{ id: 'img-a', key: 'sk-image', label: null, enabled: 'yes' }]
+          'gpt-image-2': 42
         },
         videoModelApiKeys: {},
         audioModelApiKeys: {}
       }), 'utf8');
 
-      await expect(configStore.readSecrets()).rejects.toThrow('Secrets config imageModelApiKeys entry enabled must be a boolean.');
-    } finally {
-      await rm(home, { recursive: true, force: true });
-    }
-  });
-
-  it('rejects duplicate API keys for one media model', async () => {
-    const home = await mkdtemp(join(tmpdir(), 'debrute-duplicate-secret-home-'));
-    const configStore = new GlobalConfigStore({ debruteHome: home });
-    try {
-      await expect(configStore.saveSecrets({
-        imageModelApiKeys: {
-          'gpt-image-2': [
-            { id: 'img-a', key: 'sk-same', label: null, enabled: true },
-            { id: 'img-b', key: ' sk-same ', label: 'duplicate', enabled: false }
-          ]
-        },
-        videoModelApiKeys: {},
-        audioModelApiKeys: {}
-      })).rejects.toThrow('Secrets config imageModelApiKeys contains duplicate API keys for gpt-image-2.');
-    } finally {
-      await rm(home, { recursive: true, force: true });
-    }
-  });
-
-  it('rejects duplicate API key ids for one media model', async () => {
-    const home = await mkdtemp(join(tmpdir(), 'debrute-duplicate-secret-id-home-'));
-    const configStore = new GlobalConfigStore({ debruteHome: home });
-    try {
-      await expect(configStore.saveSecrets({
-        imageModelApiKeys: {
-          'gpt-image-2': [
-            { id: 'img-a', key: 'sk-first', label: null, enabled: true },
-            { id: ' img-a ', key: 'sk-second', label: null, enabled: true }
-          ]
-        },
-        videoModelApiKeys: {},
-        audioModelApiKeys: {}
-      })).rejects.toThrow('Secrets config imageModelApiKeys contains duplicate API key ids for gpt-image-2.');
+      await expect(configStore.readSecrets()).rejects.toThrow('Secrets config imageModelApiKeys values must be strings.');
     } finally {
       await rm(home, { recursive: true, force: true });
     }
@@ -1195,9 +1092,9 @@ describe('app-server', () => {
     const secretsFile = join(configDir, 'secrets.json');
     try {
       await configStore.saveSecrets({
-        imageModelApiKeys: { 'gpt-image-2': [{ id: 'img-a', key: 'sk-image', label: null, enabled: true }] },
-        videoModelApiKeys: { 'doubao-seedance-2-0-260128': [{ id: 'vid-a', key: 'sk-video', label: null, enabled: true }] },
-        audioModelApiKeys: { 'openai-gpt-4o-mini-tts': [{ id: 'aud-a', key: 'sk-audio', label: null, enabled: true }] }
+        imageModelApiKeys: { 'gpt-image-2': 'sk-image' },
+        videoModelApiKeys: { 'doubao-seedance-2-0-260128': 'sk-video' },
+        audioModelApiKeys: { 'openai-gpt-4o-mini-tts': 'sk-audio' }
       });
 
       expect((await stat(configDir)).mode & 0o777).toBe(0o700);
@@ -1207,7 +1104,7 @@ describe('app-server', () => {
       expect((await stat(secretsFile)).mode & 0o777).toBe(0o644);
 
       await configStore.saveSecrets({
-        imageModelApiKeys: { 'gpt-image-2': [{ id: 'img-a', key: 'sk-image-next', label: null, enabled: true }] },
+        imageModelApiKeys: { 'gpt-image-2': 'sk-image-next' },
         videoModelApiKeys: {},
         audioModelApiKeys: {}
       });

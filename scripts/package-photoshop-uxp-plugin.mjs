@@ -5,6 +5,7 @@ import { promisify } from 'node:util';
 import { fileURLToPath } from 'node:url';
 import AdmZip from 'adm-zip';
 import { packageManagerCommand } from './package-manager-command.mjs';
+import { validateZipEntries } from './package-validation.mjs';
 import { validateReleaseVersionContract } from './validate-release-version-contract.mjs';
 
 const execFileAsync = promisify(execFile);
@@ -28,6 +29,12 @@ export async function packagePhotoshopUxpPlugin({ outDir = join(workspaceRoot, '
   await new Promise((resolvePackage, rejectPackage) => {
     zip.writeZip(assetPath, (error) => error ? rejectPackage(error) : resolvePackage());
   });
+  validateZipEntries(assetPath, [
+    'manifest.json',
+    'index.html',
+    'assets/index.js',
+    'assets/index.css'
+  ]);
   return { outDir, assetName, assetPath };
 }
 

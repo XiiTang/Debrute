@@ -130,6 +130,48 @@ describe('canvas snapshot updates', () => {
     expect(textViewport(snapshot)).toEqual({ scrollTop: 84, scrollLeft: 11 });
   });
 
+  it('propagates text viewport persistence errors without replaying updates', async () => {
+    let snapshot = snapshotFixture({
+      canvases: [textCanvasDocument('canvas-1')],
+      projections: [projectionFixture(textCanvasDocument('canvas-1'), 'rev-a')]
+    });
+    const requests: Array<{
+      canvasId: string;
+      updates: Array<{ projectRelativePath: string; scrollTop: number; scrollLeft: number }>;
+      resolve: (result: WorkbenchCanvasDocumentMutationResult) => void;
+      reject: (error: unknown) => void;
+    }> = [];
+    const updateTextViewport = createCanvasTextViewportStateUpdater({
+      getSnapshot: () => snapshot,
+      commitSnapshot: (next) => {
+        snapshot = next;
+      },
+      updateCanvasTextViewportState: async (canvasId, input) => new Promise((resolve, reject) => {
+        requests.push({
+          canvasId,
+          updates: input.updates,
+          resolve,
+          reject
+        });
+      })
+    });
+
+    const updateError = new Error('Text viewport persistence failed.');
+    const updateResult = updateTextViewport('canvas-1', {
+      updates: [{ projectRelativePath: 'notes/readme.md', scrollTop: 72, scrollLeft: 9 }]
+    });
+
+    expect(requests).toHaveLength(1);
+    expect(textViewport(snapshot)).toEqual({ scrollTop: 72, scrollLeft: 9 });
+
+    requests[0]?.reject(updateError);
+    await Promise.resolve();
+
+    expect(textViewport(snapshot)).toEqual({ scrollTop: 72, scrollLeft: 9 });
+    expect(requests).toHaveLength(1);
+    await expect(updateResult).rejects.toBe(updateError);
+  });
+
   it('requires the current projection for availability preservation', () => {
     const snapshot = snapshotFixture({
       canvases: [canvasDocument('canvas-1', 10, 20)],

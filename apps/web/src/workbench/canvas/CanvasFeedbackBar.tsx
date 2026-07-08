@@ -220,7 +220,7 @@ export function CanvasFeedbackBar({
                 className="canvas-feedback-mark"
                 label={i18n.t(labelKey)}
                 pressed={pressed}
-                icon={<Icon size={14} />}
+                icon={<Icon />}
                 onClick={() => toggleMark(mark)}
               />
             );
@@ -231,14 +231,14 @@ export function CanvasFeedbackBar({
                 className="canvas-feedback-mark"
                 label={i18n.t('canvas.feedback.addPin')}
                 pressed={localFeedbackMode === 'pin'}
-                icon={<MapPin size={14} />}
+                icon={<MapPin />}
                 onClick={() => onLocalFeedbackModeChange?.(localFeedbackMode === 'pin' ? undefined : 'pin')}
               />
               <IconButton
                 className="canvas-feedback-mark"
                 label={i18n.t('canvas.feedback.addRectangle')}
                 pressed={localFeedbackMode === 'rect'}
-                icon={<Square size={14} />}
+                icon={<Square />}
                 onClick={() => onLocalFeedbackModeChange?.(localFeedbackMode === 'rect' ? undefined : 'rect')}
               />
             </div>
@@ -249,7 +249,7 @@ export function CanvasFeedbackBar({
                 className="canvas-feedback-mark"
                 label={i18n.t('canvas.feedback.addMomentComment')}
                 disabled={!canStartVideoMomentFeedback}
-                icon={<Clock3 size={14} />}
+                icon={<Clock3 />}
                 onClick={() => onStartVideoMomentFeedback?.('comment')}
               />
               <IconButton
@@ -257,7 +257,7 @@ export function CanvasFeedbackBar({
                 label={i18n.t('canvas.feedback.addPin')}
                 disabled={!canStartVideoMomentFeedback}
                 pressed={localFeedbackMode === 'pin'}
-                icon={<MapPin size={14} />}
+                icon={<MapPin />}
                 onClick={() => onStartVideoMomentFeedback?.('pin')}
               />
               <IconButton
@@ -265,7 +265,7 @@ export function CanvasFeedbackBar({
                 label={i18n.t('canvas.feedback.addRectangle')}
                 disabled={!canStartVideoMomentFeedback}
                 pressed={localFeedbackMode === 'rect'}
-                icon={<Square size={14} />}
+                icon={<Square />}
                 onClick={() => onStartVideoMomentFeedback?.('rect')}
               />
             </div>

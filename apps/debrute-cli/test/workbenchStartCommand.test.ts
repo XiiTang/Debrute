@@ -38,6 +38,18 @@ describe('debrute workbench start CLI metadata', () => {
     expect(parsed.positional).toEqual([]);
   });
 
+  it('parses workbench start launch next path', () => {
+    const parsed = parseDebruteArgs(['workbench', 'start', '--next', '/open?path=%2Ftmp%2Fproject']);
+
+    expect(parsed).toMatchObject({
+      command: 'workbench.start',
+      positional: [],
+      options: {
+        next: '/open?path=%2Ftmp%2Fproject'
+      }
+    });
+  });
+
   it('lists workbench start in command specs', () => {
     expect(commandSpecs).toContainEqual(expect.objectContaining({
       command: 'workbench.start',
@@ -46,8 +58,8 @@ describe('debrute workbench start CLI metadata', () => {
       risk: 'write',
       requires: 'none',
       writes: 'logs',
-      input: 'no args',
-      output: 'Workbench runtime URL and port fields'
+      input: '[--next <same-origin-path>]',
+      output: 'Workbench stable URL, launch URL, and port fields'
     }));
     expect(specForCommandPath(['workbench', 'start'])?.errors).toEqual(expect.arrayContaining([
       'runtime_launch_failed',
@@ -81,7 +93,7 @@ describe('runWorkbenchCommand', () => {
     }
   });
 
-  it('starts or reuses the runtime and returns base URL fields', async () => {
+  it('starts or reuses the runtime and returns stable and launch URL fields', async () => {
     const result = await runWorkbenchCommand(parseDebruteArgs(['workbench', 'start']), {
       ensureRuntime: async () => ({
         runtimeStarted: false,
@@ -95,6 +107,7 @@ describe('runWorkbenchCommand', () => {
       command: 'workbench.start',
       fields: {
         web_url: 'http://127.0.0.1:17322',
+        launch_url: expect.stringMatching(/^http:\/\/127\.0\.0\.1:17322\/__debrute\/session\/.+/),
         daemon_url: 'http://127.0.0.1:17321',
         web_port: 17322,
         daemon_port: 17321,
@@ -103,8 +116,49 @@ describe('runWorkbenchCommand', () => {
         state_path: '/home/user/.debrute/runtime/workbench-runtime.json'
       }
     });
+    const launchUrl = new URL(String(result.fields.launch_url));
+    expect(launchUrl.searchParams.get('next')).toBe('/');
     expect(renderAgentRecord(result)).not.toContain('project_url');
     expect(renderAgentRecord(result)).not.toContain('project_id');
+  });
+
+  it('uses the requested same-origin next path in the launch URL', async () => {
+    const result = await runWorkbenchCommand(
+      parseDebruteArgs(['workbench', 'start', '--next', '/open?path=%2Ftmp%2Fproject']),
+      {
+        ensureRuntime: async () => ({
+          runtimeStarted: false,
+          statePath: '/home/user/.debrute/runtime/workbench-runtime.json',
+          state: runtimeState()
+        })
+      }
+    );
+
+    expect(result).toMatchObject({
+      status: 'ok',
+      fields: {
+        web_url: 'http://127.0.0.1:17322',
+        launch_url: expect.stringMatching(/^http:\/\/127\.0\.0\.1:17322\/__debrute\/session\/.+/)
+      }
+    });
+    const launchUrl = new URL(String(result.fields.launch_url));
+    expect(launchUrl.searchParams.get('next')).toBe('/open?path=%2Ftmp%2Fproject');
+  });
+
+  it('rejects invalid launch next paths without starting the runtime', async () => {
+    const ensureRuntime = vi.fn();
+    const result = await runWorkbenchCommand(
+      parseDebruteArgs(['workbench', 'start', '--next', 'https://example.com/open']),
+      { ensureRuntime }
+    );
+
+    expect(result).toMatchObject({
+      status: 'error',
+      command: 'workbench.start',
+      code: 'invalid_input',
+      message: 'Debrute Workbench launch next path must be a normalized same-origin path: https://example.com/open'
+    });
+    expect(ensureRuntime).not.toHaveBeenCalled();
   });
 
   it('reports desktop runtime kind when reusing a registered desktop runtime', async () => {

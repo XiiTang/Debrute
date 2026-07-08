@@ -13,7 +13,8 @@
   "references": [
     { "path": "../../packages/app-protocol" },
     { "path": "../../packages/project-core" },
-    { "path": "../../apps/app-server" }
+    { "path": "../../apps/app-server" },
+    { "path": "../../packages/workbench-runtime" }
   ],
   "include": ["src/**/*.ts"],
   "exclude": ["src/**/*.test.ts", "src/**/*.test.tsx"]

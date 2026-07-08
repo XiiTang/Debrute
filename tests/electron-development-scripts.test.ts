@@ -101,6 +101,21 @@ describe('Electron development scripts', () => {
     );
   });
 
+  it('does not show a newly created Electron window until Workbench navigation succeeds', () => {
+    const main = readFileSync(join(process.cwd(), 'apps/desktop/src/electron/main.ts'), 'utf8');
+
+    expect(main).toContain('show: false');
+    expect(main).toContain('await revealLoadedWorkbenchWindow(window, async () => {');
+    expect(main).toContain('window.show();');
+    expect(main).toContain('window.destroy();');
+    expect(main.indexOf('show: false')).toBeLessThan(
+      main.indexOf('await revealLoadedWorkbenchWindow(window, async () => {')
+    );
+    expect(main.indexOf('await revealLoadedWorkbenchWindow(window, async () => {')).toBeLessThan(
+      main.indexOf('window.show();')
+    );
+  });
+
   it('keeps native Electron runtime modules external so their native packages resolve from pnpm', () => {
     const script = readFileSync(join(process.cwd(), 'apps/desktop/scripts/bundle-electron.mjs'), 'utf8');
 

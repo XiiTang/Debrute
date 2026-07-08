@@ -45,12 +45,9 @@ export interface AdobeBridgeProjectFileResult {
 }
 
 export function isSupportedAdobeBridgeProjectImageFile(projectRelativePath: string): boolean {
-  if (
-    projectRelativePath === '.git'
-    || projectRelativePath.startsWith('.git/')
-    || projectRelativePath === '.debrute'
-    || projectRelativePath.startsWith('.debrute/')
-  ) {
+  try {
+    assertProjectTreeVisibleMutationPath(projectRelativePath);
+  } catch {
     return false;
   }
   return SUPPORTED_PROJECT_IMAGE_EXTENSIONS.has(extname(projectRelativePath).toLowerCase());

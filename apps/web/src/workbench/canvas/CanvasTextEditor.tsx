@@ -68,6 +68,8 @@ export function CanvasTextEditor({
   } | undefined>(undefined);
   const onLayoutReadyRef = React.useRef(onLayoutReady);
   const onScrollPositionCommitRef = React.useRef(onScrollPositionCommit);
+  const commitObservedScrollPositionRef = React.useRef<(() => void) | undefined>(undefined);
+  const previousReadOnlyRef = React.useRef(Boolean(readOnly));
   const callbacksRef = React.useRef<CanvasTextEditorCallbacks>({
     onChange,
     onSave,
@@ -154,6 +156,7 @@ export function CanvasTextEditor({
       lastCommittedScrollPosition = position;
       onScrollPositionCommitRef.current?.(position);
     };
+    commitObservedScrollPositionRef.current = commitObservedScrollPosition;
     const commitScrollPosition = () => {
       blurred = true;
       commitObservedScrollPosition();
@@ -185,6 +188,7 @@ export function CanvasTextEditor({
       view.scrollDOM.removeEventListener('scroll', observeScrollPosition);
       host.removeEventListener('focusin', restoreScrollObservation);
       host.removeEventListener('focusout', commitScrollPosition);
+      commitObservedScrollPositionRef.current = undefined;
       view.destroy();
       viewRef.current = null;
     };
@@ -291,6 +295,15 @@ export function CanvasTextEditor({
       ]
     });
   }, [language, readOnly, wordWrap]);
+
+  React.useEffect(() => {
+    const wasReadOnly = previousReadOnlyRef.current;
+    const nextReadOnly = Boolean(readOnly);
+    previousReadOnlyRef.current = nextReadOnly;
+    if (!wasReadOnly && nextReadOnly) {
+      commitObservedScrollPositionRef.current?.();
+    }
+  }, [readOnly]);
 
   return (
     <div

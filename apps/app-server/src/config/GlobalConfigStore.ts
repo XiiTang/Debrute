@@ -7,7 +7,6 @@ import type {
   AudioModelsConfig,
   ImageModelConfig,
   ImageModelsConfig,
-  ModelApiKeyEntry,
   SecretsConfig,
   VideoModelConfig,
   VideoModelsConfig
@@ -245,64 +244,22 @@ function normalizeAudioModelConfig(model: unknown): AudioModelConfig {
   };
 }
 
-function normalizeSecretRecord(value: unknown, field: string): Record<string, ModelApiKeyEntry[]> {
+function normalizeSecretRecord(value: unknown, field: string): Record<string, string> {
   if (!isRecord(value)) {
     throw new Error(`Secrets config ${field} must be an object.`);
   }
-  const output: Record<string, ModelApiKeyEntry[]> = {};
-  for (const [modelId, entries] of Object.entries(value)) {
-    const trimmedModelId = modelId.trim();
-    if (!trimmedModelId) {
+  const output: Record<string, string> = {};
+  for (const [key, secret] of Object.entries(value)) {
+    if (typeof secret !== 'string') {
+      throw new Error(`Secrets config ${field} values must be strings.`);
+    }
+    const trimmedKey = key.trim();
+    if (!trimmedKey) {
       throw new Error(`Secrets config ${field} keys must be non-empty strings.`);
     }
-    if (!Array.isArray(entries)) {
-      throw new Error(`Secrets config ${field} values must be arrays.`);
-    }
-    output[trimmedModelId] = normalizeModelApiKeyEntries(entries, field, trimmedModelId);
+    output[trimmedKey] = secret;
   }
   return output;
-}
-
-function normalizeModelApiKeyEntries(entries: unknown[], field: string, modelId: string): ModelApiKeyEntry[] {
-  const seenIds = new Set<string>();
-  const seenKeys = new Set<string>();
-  return entries.map((entry) => {
-    if (!isRecord(entry)) {
-      throw new Error(`Secrets config ${field} entries must be objects.`);
-    }
-    const id = requireStringProperty(entry, 'id', `Secrets config ${field} entry id`).trim();
-    const key = requireStringProperty(entry, 'key', `Secrets config ${field} entry key`).trim();
-    if (!id) {
-      throw new Error(`Secrets config ${field} entry id must be a non-empty string.`);
-    }
-    if (seenIds.has(id)) {
-      throw new Error(`Secrets config ${field} contains duplicate API key ids for ${modelId}.`);
-    }
-    seenIds.add(id);
-    if (!key) {
-      throw new Error(`Secrets config ${field} entry key must be a non-empty string.`);
-    }
-    if (seenKeys.has(key)) {
-      throw new Error(`Secrets config ${field} contains duplicate API keys for ${modelId}.`);
-    }
-    seenKeys.add(key);
-    const label = normalizeNullableLabel(entry.label, `Secrets config ${field} entry label`);
-    if (typeof entry.enabled !== 'boolean') {
-      throw new Error(`Secrets config ${field} entry enabled must be a boolean.`);
-    }
-    return { id, key, label, enabled: entry.enabled };
-  });
-}
-
-function normalizeNullableLabel(value: unknown, label: string): string | null {
-  if (value === null) {
-    return null;
-  }
-  if (typeof value !== 'string') {
-    throw new Error(`${label} must be a string or null.`);
-  }
-  const trimmed = value.trim();
-  return trimmed || null;
 }
 
 function normalizeMediaBaseUrlOverride(value: unknown, label: 'Image model' | 'Video model' | 'Audio model'): string | null {

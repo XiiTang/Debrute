@@ -36,7 +36,7 @@ export function canvasVideoPreviewSource(input: {
       currentTimeSeconds: input.currentTimeSeconds,
       sourceKey: input.sourceKey,
       width: previewWidth
-    }).toString()
+    })
   };
 }
 
@@ -57,22 +57,19 @@ export function canvasVideoPreviewUrl(input: {
   currentTimeSeconds: number;
   sourceKey: string;
   width: number;
-}): URL {
-  const sourceUrl = new URL(input.fileUrl);
+}): string {
+  const sourceUrl = new URL(input.fileUrl, 'http://debrute.local');
   const projectMatch = sourceUrl.pathname.match(/^\/api\/projects\/([^/]+)\//);
   if (!projectMatch?.[1]) {
     throw new Error('Canvas video preview file URL must include a project id.');
   }
-  const url = new URL(`/api/projects/${projectMatch[1]}/canvas-video-preview`, sourceUrl);
-  url.searchParams.set('canvasId', input.canvasId);
-  url.searchParams.set('path', input.projectRelativePath);
-  url.searchParams.set('videoRevision', input.videoRevision);
-  url.searchParams.set('t', String(input.currentTimeSeconds));
-  url.searchParams.set('sourceKey', input.sourceKey);
-  url.searchParams.set('w', String(input.width));
-  const daemonToken = sourceUrl.searchParams.get('debrute-token');
-  if (daemonToken) {
-    url.searchParams.set('debrute-token', daemonToken);
-  }
-  return url;
+  const params = new URLSearchParams({
+    canvasId: input.canvasId,
+    path: input.projectRelativePath,
+    videoRevision: input.videoRevision,
+    t: String(input.currentTimeSeconds),
+    sourceKey: input.sourceKey,
+    w: String(input.width)
+  });
+  return `/api/projects/${projectMatch[1]}/canvas-video-preview?${params.toString()}`;
 }

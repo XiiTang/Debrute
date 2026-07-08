@@ -14,6 +14,11 @@ export interface DebruteShellWindow {
   loadURL(url: string): Promise<void>;
 }
 
+export interface DebruteShellNavigation {
+  readyUrl: string;
+  loadUrl: string;
+}
+
 export interface PreparedDebruteProjectWindowBinding {
   commit(): void | Promise<void>;
   rollback(): void | Promise<void>;
@@ -52,15 +57,15 @@ export async function waitForDebruteShellUrl(
 
 export async function loadDebruteProjectShellWindow(
   window: DebruteShellWindow,
-  url: string,
+  navigation: DebruteShellNavigation,
   prepareProjectWindowBinding: () => PreparedDebruteProjectWindowBinding | Promise<PreparedDebruteProjectWindowBinding>,
   services: Partial<DebruteShellLoadServices> = {},
   options: Partial<DebruteShellLoadOptions> = {}
 ): Promise<void> {
   const binding = await prepareProjectWindowBinding();
   try {
-    await waitForDebruteShellUrl(url, services, options);
-    await window.loadURL(url);
+    await waitForDebruteShellUrl(navigation.readyUrl, services, options);
+    await window.loadURL(navigation.loadUrl);
     await binding.commit();
   } catch (error) {
     await binding.rollback();

@@ -1,7 +1,7 @@
 import { randomUUID } from 'node:crypto';
 import { mkdir, rename, writeFile } from 'node:fs/promises';
 import { dirname } from 'node:path';
-import sharp from 'sharp';
+import sharp, { type Metadata } from 'sharp';
 
 export interface CanvasRasterPreviewService {
   generate(input: {
@@ -83,7 +83,7 @@ export async function readCanvasRasterPreviewMetadata(
   absolutePath: string,
   label: string,
   abortSignal?: AbortSignal
-): Promise<sharp.Metadata> {
+): Promise<Metadata> {
   throwIfCanvasRasterPreviewAborted(abortSignal);
   const metadata = await sharp(absolutePath).metadata();
   throwIfCanvasRasterPreviewAborted(abortSignal);
@@ -126,11 +126,11 @@ class LocalCanvasRasterPreviewService implements CanvasRasterPreviewService {
         .rotate()
         .resize({ width: input.width, withoutEnlargement: true });
       const outputFormat = input.outputFormat ?? (metadata.hasAlpha === true ? 'png' : 'jpeg');
-      const bytes = outputFormat === 'png'
-        ? await pipeline.png().toBuffer()
-        : await pipeline.jpeg({ quality: 82 }).toBuffer();
+      const output = outputFormat === 'png'
+        ? await pipeline.png().toBuffer({ resolveWithObject: true })
+        : await pipeline.jpeg({ quality: 82 }).toBuffer({ resolveWithObject: true });
       throwIfCanvasRasterPreviewAborted(input.abortSignal);
-      await writeFileAtomic(input.outputAbsolutePath, bytes);
+      await writeFileAtomic(input.outputAbsolutePath, output.data);
       return { absolutePath: input.outputAbsolutePath };
     }, input.abortSignal);
   }

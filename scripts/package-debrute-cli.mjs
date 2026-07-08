@@ -7,6 +7,7 @@ import { promisify } from 'node:util';
 import { build } from 'esbuild';
 import { sharpRuntimePayloadEntries } from './sharp-runtime-payload.mjs';
 import { nodePtyRuntimePayloadEntries } from './node-pty-runtime-payload.mjs';
+import { validateDebruteCliRuntimePayload } from './package-validation.mjs';
 
 const execFileAsync = promisify(execFile);
 const workspaceRoot = resolve(dirname(fileURLToPath(import.meta.url)), '..');
@@ -68,10 +69,12 @@ export async function packageDebruteCliRuntimePayload({
     ...managedCliPkgFlags
   ], { cwd: workspaceRoot });
   await cp(executablePath, join(outDir, releaseTarget.executableName));
-  for (const entry of managedCliRuntimePayloadEntries(workspaceRoot, releaseTarget)) {
+  const runtimePayloadEntries = managedCliRuntimePayloadEntries(workspaceRoot, releaseTarget);
+  for (const entry of runtimePayloadEntries) {
     await copyPayloadEntry(outDir, entry);
   }
   await writeFile(join(outDir, 'package.json'), `${JSON.stringify({ version }, null, 2)}\n`, 'utf8');
+  await validateDebruteCliRuntimePayload(outDir, releaseTarget, runtimePayloadEntries);
   return { outDir, target: releaseTarget.id };
 }
 

@@ -117,7 +117,7 @@ export async function resolveNoSymlinkProjectPathForWrite(projectRoot: string, p
 
 export function assertProjectTreeVisibleMutationPath(projectRelativePath: string): void {
   const normalizedPath = normalizeProjectRelativePath(projectRelativePath);
-  if (normalizedPath === '.git' || normalizedPath.startsWith('.git/') || isIgnoredProjectFilePath(normalizedPath)) {
+  if (isProjectGitMetadataPath(normalizedPath) || isIgnoredProjectFilePath(normalizedPath)) {
     throw new Error(`Project path is not visible in the Project Tree: ${projectRelativePath}`);
   }
   if (isProtectedProjectDocumentMutationPath(normalizedPath)) {
@@ -125,21 +125,40 @@ export function assertProjectTreeVisibleMutationPath(projectRelativePath: string
   }
 }
 
+export function isProjectGitMetadataPath(projectRelativePath: string): boolean {
+  return isProjectPathSameOrChild(projectReservedNamespacePolicyPath(projectRelativePath), '.git');
+}
+
 export function isIgnoredProjectFilePath(projectRelativePath: string): boolean {
-  return projectRelativePath === '.debrute/cache/canvas-image-previews'
-    || projectRelativePath.startsWith('.debrute/cache/canvas-image-previews/')
-    || projectRelativePath === '.debrute/cache/canvas-text-previews'
-    || projectRelativePath.startsWith('.debrute/cache/canvas-text-previews/')
-    || projectRelativePath === '.debrute/cache/canvas-video-previews'
-    || projectRelativePath.startsWith('.debrute/cache/canvas-video-previews/')
-    || projectRelativePath === '.debrute/reviews/rendered-feedback'
-    || projectRelativePath.startsWith('.debrute/reviews/rendered-feedback/')
-    || (projectRelativePath.startsWith('.debrute/') && projectRelativePath.endsWith('.lock'));
+  const policyPath = projectReservedNamespacePolicyPath(projectRelativePath);
+  return isProjectPathSameOrChild(policyPath, '.debrute/cache/canvas-image-previews')
+    || isProjectPathSameOrChild(policyPath, '.debrute/cache/canvas-text-previews')
+    || isProjectPathSameOrChild(policyPath, '.debrute/cache/canvas-video-previews')
+    || isProjectPathSameOrChild(policyPath, '.debrute/reviews/rendered-feedback')
+    || (isProjectPathSameOrChild(policyPath, '.debrute') && policyPath.endsWith('.lock'));
 }
 
 export function isProtectedProjectDocumentMutationPath(projectRelativePath: string): boolean {
-  return projectRelativePath === '.debrute'
-    || projectRelativePath.startsWith('.debrute/');
+  return isProjectPathSameOrChild(projectReservedNamespacePolicyPath(projectRelativePath), '.debrute');
+}
+
+function projectReservedNamespacePolicyPath(projectRelativePath: string): string {
+  const firstSeparatorIndex = projectRelativePath.indexOf('/');
+  const firstSegment = firstSeparatorIndex === -1
+    ? projectRelativePath
+    : projectRelativePath.slice(0, firstSeparatorIndex);
+  const firstSegmentKey = firstSegment.toLowerCase();
+  const policyFirstSegment = firstSegmentKey === '.git' || firstSegmentKey === '.debrute'
+    ? firstSegmentKey
+    : firstSegment;
+  return firstSeparatorIndex === -1
+    ? policyFirstSegment
+    : `${policyFirstSegment}${projectRelativePath.slice(firstSeparatorIndex)}`;
+}
+
+function isProjectPathSameOrChild(projectRelativePath: string, parentProjectRelativePath: string): boolean {
+  return projectRelativePath === parentProjectRelativePath
+    || projectRelativePath.startsWith(`${parentProjectRelativePath}/`);
 }
 
 async function nearestExistingParentRealPath(projectRoot: string, absoluteParentPath: string): Promise<string> {

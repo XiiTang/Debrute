@@ -41,7 +41,7 @@ describe('desktop shell loading', () => {
       loadURL: async () => {
         events.push('loadURL');
       }
-    }, 'http://127.0.0.1:17322/projects/project-1', () => {
+    }, shellNavigation('http://127.0.0.1:17322/projects/project-1'), () => {
       events.push('bind');
       return {
         commit: () => {
@@ -66,12 +66,51 @@ describe('desktop shell loading', () => {
     expect(events).toEqual(['bind', 'probe', 'loadURL', 'commit']);
   });
 
+  it('probes a stable ready URL before loading a single-use launch URL', async () => {
+    const events: string[] = [];
+    const loadUrl = 'http://127.0.0.1:17322/__debrute/session/nonce?next=%2Fprojects%2Fproject-1';
+    const readyUrl = 'http://127.0.0.1:17322/projects/project-1';
+
+    await loadDebruteProjectShellWindow({
+      loadURL: async (url) => {
+        events.push(`load:${url}`);
+      }
+    }, { loadUrl, readyUrl }, () => {
+      events.push('bind');
+      return {
+        commit: () => {
+          events.push('commit');
+        },
+        rollback: () => {
+          events.push('rollback');
+        }
+      };
+    }, {
+      fetch: async (url) => {
+        events.push(`probe:${String(url)}`);
+        return new Response('', { status: 200 });
+      },
+      sleep: async () => undefined,
+      now: sequenceNow([0])
+    }, {
+      timeoutMs: 1000,
+      intervalMs: 25
+    });
+
+    expect(events).toEqual([
+      'bind',
+      `probe:${readyUrl}`,
+      `load:${loadUrl}`,
+      'commit'
+    ]);
+  });
+
   it('does not load project windows when binding fails', async () => {
     const loadURL = vi.fn();
 
     await expect(loadDebruteProjectShellWindow({
       loadURL
-    }, 'http://127.0.0.1:17322/projects/project-1', () => {
+    }, shellNavigation('http://127.0.0.1:17322/projects/project-1'), () => {
       throw new Error('lease failed');
     }, {
       fetch: async () => new Response('', { status: 200 }),
@@ -93,7 +132,7 @@ describe('desktop shell loading', () => {
         events.push('loadURL');
         throw new Error('navigation failed');
       }
-    }, 'http://127.0.0.1:17322/projects/project-1', () => {
+    }, shellNavigation('http://127.0.0.1:17322/projects/project-1'), () => {
       events.push('bind');
       return {
         commit: () => {
@@ -125,7 +164,7 @@ describe('desktop shell loading', () => {
       loadURL: async () => {
         events.push('loadURL');
       }
-    }, 'http://127.0.0.1:17322/projects/project-1', () => {
+    }, shellNavigation('http://127.0.0.1:17322/projects/project-1'), () => {
       events.push('bind');
       return {
         commit: () => {
@@ -159,7 +198,7 @@ describe('desktop shell loading', () => {
 
     const load = loadDebruteProjectShellWindow({
       loadURL: async () => undefined
-    }, 'http://127.0.0.1:17322/projects/project-1', async () => {
+    }, shellNavigation('http://127.0.0.1:17322/projects/project-1'), async () => {
       await bindFinished;
       return {
         commit: () => undefined,
@@ -187,7 +226,7 @@ describe('desktop shell loading', () => {
   it('fails when asynchronous project window binding fails', async () => {
     await expect(loadDebruteProjectShellWindow({
       loadURL: async () => undefined
-    }, 'http://127.0.0.1:17322/projects/project-1', async () => {
+    }, shellNavigation('http://127.0.0.1:17322/projects/project-1'), async () => {
       await Promise.resolve();
       throw new Error('lease failed');
     }, {
@@ -204,4 +243,8 @@ describe('desktop shell loading', () => {
 function sequenceNow(values: number[]): () => number {
   let index = 0;
   return () => values[Math.min(index++, values.length - 1)]!;
+}
+
+function shellNavigation(url: string): { readyUrl: string; loadUrl: string } {
+  return { readyUrl: url, loadUrl: url };
 }

@@ -2,6 +2,7 @@ import { randomUUID } from 'node:crypto';
 import { basename } from 'node:path';
 import {
   projectImageExtensionForMimeType,
+  projectImageMimeTypeFromPath,
   writeProjectFile
 } from '@debrute/project-core';
 import type { SecretsConfig, VideoModelsConfig } from '../config.js';
@@ -12,7 +13,6 @@ import {
   readResponseTextWithTimeout as readResponseTextBodyWithTimeout
 } from '../requestTimeout.js';
 import { redactRuntimeSecrets } from '../modelRunMetadataRedaction.js';
-import { selectModelApiKey } from '../modelApiKeySelection.js';
 import {
   fetchPublicHttpUrl,
   resolveHttpRedirectUrl,
@@ -129,6 +129,18 @@ interface ModelResponseLog {
   body: unknown;
 }
 
+interface VideoArtifactInput {
+  url: string;
+  artifactIndex: number;
+  artifactRole: VideoGeneratedAssetRecorderInput['artifactRole'];
+}
+
+interface DownloadedVideoArtifact extends VideoArtifactInput {
+  artifactId: string;
+  bytes: Uint8Array;
+  mimeType: string;
+}
+
 type VideoRequestError = Extract<ExecuteVideoModelRequestResult, { status: 'error' }>;
 type JsonResponseResult = { ok: true; payload: Record<string, unknown>; endpointResponse: ModelEndpointResponse } | { ok: false; result: VideoRequestError };
 type VideoTaskStatus = 'queued' | 'running' | 'succeeded' | 'failed' | 'expired' | 'canceled';
@@ -136,6 +148,8 @@ type VideoTaskStatus = 'queued' | 'running' | 'succeeded' | 'failed' | 'expired'
 const DEFAULT_POLL_ATTEMPTS = 180;
 const DEFAULT_POLL_INTERVAL_MS = 2_000;
 const DEFAULT_VIDEO_REQUEST_TIMEOUT_MS = 600_000;
+const PNG_SIGNATURE = Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]);
+const JPEG_SIGNATURE = Buffer.from([0xff, 0xd8, 0xff]);
 
 export async function executeVideoModelRequest(input: ExecuteVideoModelRequestInput): Promise<ExecuteVideoModelRequestResult> {
   const logs: Array<Record<string, unknown>> = [];
@@ -149,12 +163,7 @@ export async function executeVideoModelRequest(input: ExecuteVideoModelRequestIn
       logs
     };
   }
-  const selectedApiKey = selectModelApiKey({
-    kind: 'video',
-    modelId: input.input.model,
-    entries: input.secrets.videoModelApiKeys[input.input.model]
-  });
-  const apiKey = selectedApiKey?.key ?? '';
+  const apiKey = input.secrets.videoModelApiKeys[input.input.model]?.trim() ?? '';
   if (!apiKey) {
     return {
       status: 'error',
@@ -202,9 +211,9 @@ export async function executeVideoModelRequest(input: ExecuteVideoModelRequestIn
     invocationId: input.invocationId,
     modelRunId: randomUUID(),
     entry,
-    baseUrl: modelSettings?.baseUrlOverride?.trim() || entry.defaultBaseUrl,
+    baseUrl: modelSettings?.baseUrlOverride ?? entry.defaultBaseUrl,
     apiKey,
-    requestModelId: modelSettings?.requestModelIdOverride?.trim() || entry.defaultRequestModelId,
+    requestModelId: modelSettings?.requestModelIdOverride ?? entry.defaultRequestModelId,
     args: normalized.upstreamArgs,
     redactedDebruteArgs: normalized.redactedDebruteArgs,
     fetch: input.fetch ?? fetch,
@@ -279,12 +288,20 @@ async function executeVolcengineArk(
       if (!videoUrl) {
         return modelFailure(state, 'Video request failed: model response did not include content.video_url.', poll.endpointResponse);
       }
-      const artifacts: VideoModelRequestArtifact[] = [await storeDownloadedArtifact(state, videoUrl, 0, 'video/mp4')];
+      const artifactInputs: VideoArtifactInput[] = [{ url: videoUrl, artifactIndex: 0, artifactRole: 'primary-video' }];
       if (state.args.return_last_frame === true) {
         const lastFrameUrl = extractOutputUrl(poll.payload, 'last_frame_url');
         if (lastFrameUrl) {
-          artifacts.push(await storeDownloadedArtifact(state, lastFrameUrl, 1, 'image/png'));
+          artifactInputs.push({ url: lastFrameUrl, artifactIndex: 1, artifactRole: 'last-frame' });
         }
+      }
+      const downloadedArtifacts: DownloadedVideoArtifact[] = [];
+      for (const artifactInput of artifactInputs) {
+        downloadedArtifacts.push(await downloadVideoArtifact(state, artifactInput));
+      }
+      const artifacts: VideoModelRequestArtifact[] = [];
+      for (const artifact of downloadedArtifacts) {
+        artifacts.push(await storeDownloadedArtifact(state, artifact));
       }
       log(state, 'store_artifacts', { count: artifacts.length });
       return { status: 'ok', artifacts };
@@ -381,47 +398,124 @@ async function readResponseArrayBufferWithTimeout(state: RequestState, response:
   });
 }
 
-async function storeDownloadedArtifact(state: RequestState, url: string, index: number, fallbackMimeType: string): Promise<VideoModelRequestArtifact> {
-  const response = await fetchRemoteArtifact(state, url);
+async function downloadVideoArtifact(
+  state: RequestState,
+  input: VideoArtifactInput
+): Promise<DownloadedVideoArtifact> {
+  const response = await fetchRemoteArtifact(state, input.url);
   const bytes = new Uint8Array(await readResponseArrayBufferWithTimeout(state, response));
   if (!response.ok) {
     throw new Error(`Video artifact download failed: ${response.status}`);
   }
-  const mimeType = response.headers.get('content-type')?.split(';')[0]?.trim() || fallbackMimeType;
-  const artifactId = randomUUID();
-  const extension = extensionForMimeType(mimeType);
+  const mimeType = resolveVideoArtifactMimeType({
+    artifactRole: input.artifactRole,
+    url: input.url,
+    headers: response.headers,
+    bytes: Buffer.from(bytes)
+  });
+  return {
+    ...input,
+    artifactId: randomUUID(),
+    bytes,
+    mimeType
+  };
+}
+
+async function storeDownloadedArtifact(
+  state: RequestState,
+  artifact: DownloadedVideoArtifact
+): Promise<VideoModelRequestArtifact> {
+  const extension = extensionForMimeType(artifact.mimeType, artifact.artifactRole);
   const outputPath = stringArg(state.args, 'output_path');
   const outputDirectory = stringArg(state.args, 'output_directory') ?? `generated/${state.invocationId}`;
-  const projectRelativePath = outputPath && index === 0
+  const projectRelativePath = outputPath && artifact.artifactIndex === 0
     ? outputPath
-    : `${outputDirectory.replace(/\/$/, '')}/${artifactId}.${extension}`;
+    : `${outputDirectory.replace(/\/$/, '')}/${artifact.artifactId}.${extension}`;
   const normalizedPath = await writeProjectFile(
     state.projectRoot,
     projectRelativePath,
-    bytes,
+    artifact.bytes,
     state.signal ? { signal: state.signal } : undefined
   );
-  const artifactRole = index === 0 ? 'primary-video' : 'last-frame';
   await state.recordGeneratedAsset?.({
     modelRunId: state.modelRunId,
     projectRelativePath: normalizedPath,
-    artifactRole,
-    artifactIndex: index,
+    artifactRole: artifact.artifactRole,
+    artifactIndex: artifact.artifactIndex,
     modelRun: {
       request: redactModelRunValue(state, state.modelRun.request ?? null),
       output: redactModelRunValue(state, {
         responses: [...state.modelRun.responses],
-        artifactIndex: index,
-        sourceUrl: url
+        artifactIndex: artifact.artifactIndex
       })
     }
   });
   return {
-    artifactId,
+    artifactId: artifact.artifactId,
     title: basename(normalizedPath),
     projectRelativePath: normalizedPath,
-    mimeType
+    mimeType: artifact.mimeType
   };
+}
+
+function resolveVideoArtifactMimeType(input: {
+  artifactRole: VideoGeneratedAssetRecorderInput['artifactRole'];
+  url: string;
+  headers: Headers;
+  bytes: Buffer;
+}): string {
+  const headerMime = normalizedHeaderMime(input.headers);
+  if (headerMime && headerMime !== 'application/octet-stream') {
+    if (input.artifactRole === 'primary-video' && headerMime === 'video/mp4') {
+      return headerMime;
+    }
+    if (input.artifactRole === 'last-frame' && projectImageExtensionForMimeType(headerMime)) {
+      return headerMime;
+    }
+    throw new Error(`Unsupported ${artifactLabel(input.artifactRole)} artifact MIME type: ${headerMime}`);
+  }
+
+  const path = pathForArtifactExtension(input.url);
+  if (input.artifactRole === 'primary-video' && path.toLowerCase().endsWith('.mp4')) {
+    return 'video/mp4';
+  }
+  if (input.artifactRole === 'last-frame') {
+    const fromPath = projectImageMimeTypeFromPath(path);
+    if (fromPath) {
+      return fromPath;
+    }
+    const fromSignature = detectImageMimeTypeFromSignature(input.bytes);
+    if (fromSignature) {
+      return fromSignature;
+    }
+  }
+  throw new Error(`Unsupported ${artifactLabel(input.artifactRole)} artifact MIME type: ${headerMime ?? 'missing'}`);
+}
+
+function normalizedHeaderMime(headers: Headers): string | undefined {
+  const value = headers.get('content-type')?.split(';', 1)[0]?.trim().toLowerCase();
+  return value || undefined;
+}
+
+function pathForArtifactExtension(url: string): string {
+  return new URL(url).pathname;
+}
+
+function detectImageMimeTypeFromSignature(content: Buffer): string | undefined {
+  if (content.subarray(0, PNG_SIGNATURE.length).equals(PNG_SIGNATURE)) {
+    return 'image/png';
+  }
+  if (content.subarray(0, JPEG_SIGNATURE.length).equals(JPEG_SIGNATURE)) {
+    return 'image/jpeg';
+  }
+  if (content.subarray(0, 4).toString('ascii') === 'RIFF' && content.subarray(8, 12).toString('ascii') === 'WEBP') {
+    return 'image/webp';
+  }
+  return undefined;
+}
+
+function artifactLabel(artifactRole: VideoGeneratedAssetRecorderInput['artifactRole']): string {
+  return artifactRole === 'primary-video' ? 'primary video' : 'last-frame';
 }
 
 async function fetchRemoteArtifact(state: RequestState, url: string, redirectCount = 0): Promise<Response> {
@@ -526,17 +620,17 @@ function joinUrl(baseUrl: string, path: string): string {
   return `${baseUrl.replace(/\/$/, '')}/${path.replace(/^\//, '')}`;
 }
 
-function extensionForMimeType(mimeType: string): string {
-  const imageExtension = projectImageExtensionForMimeType(mimeType);
-  if (imageExtension) {
-    return imageExtension;
+function extensionForMimeType(mimeType: string, artifactRole: VideoGeneratedAssetRecorderInput['artifactRole']): string {
+  if (artifactRole === 'primary-video' && mimeType === 'video/mp4') {
+    return 'mp4';
   }
-  switch (mimeType) {
-    case 'video/mp4':
-      return 'mp4';
-    default:
-      return 'bin';
+  if (artifactRole === 'last-frame') {
+    const imageExtension = projectImageExtensionForMimeType(mimeType);
+    if (imageExtension) {
+      return imageExtension;
+    }
   }
+  throw new Error(`Unsupported ${artifactLabel(artifactRole)} artifact MIME type: ${mimeType}`);
 }
 
 function parseJsonObject(rawBody: string): Record<string, unknown> {

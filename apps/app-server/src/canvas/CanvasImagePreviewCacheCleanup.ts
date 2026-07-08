@@ -3,6 +3,7 @@ import { readdir, rm, stat } from 'node:fs/promises';
 import {
   isCanvasPreviewableProjectImagePath,
   projectFileRevision,
+  projectImageMimeTypeMatchesPath,
   projectRelativePathCacheKey,
   projectRevisionCacheKey,
   resolveProjectPath,
@@ -65,6 +66,9 @@ async function currentCanvasImagePreviewRevisionKey(
   }
   try {
     const metadata = await readCanvasRasterPreviewMetadata(sourcePath, projectRelativePath);
+    if (!projectImageMimeTypeMatchesPath(metadata.mediaType, projectRelativePath)) {
+      return undefined;
+    }
     const sourceWidth = metadata.width;
     if (typeof sourceWidth !== 'number' || !Number.isFinite(sourceWidth) || sourceWidth <= 0) {
       return undefined;

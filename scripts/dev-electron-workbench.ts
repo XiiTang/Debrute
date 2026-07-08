@@ -100,7 +100,8 @@ async function launchDesktopDevRuntime(): Promise<WorkbenchRuntimeState> {
     String(webPort),
     '--strictPort'
   ], {
-    DEBRUTE_DAEMON_URL: daemonUrl
+    DEBRUTE_DAEMON_URL: daemonUrl,
+    DEBRUTE_DAEMON_TOKEN_FILE: paths.tokenPath
   });
   const now = new Date().toISOString();
   const state: WorkbenchRuntimeState = {

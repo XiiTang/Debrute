@@ -92,7 +92,7 @@ describe('@debrute/workbench-runtime state', () => {
       const paths = resolveWorkbenchRuntimePaths(root);
       await mkdir(paths.runtimeDir, { recursive: true });
       await writeFile(paths.statePath, JSON.stringify(runtimeState({
-        webUrl: 'http://127.0.0.1:17322/projects/project-1?debrute-token=secret'
+        webUrl: 'http://127.0.0.1:17322/projects/project-1'
       })), 'utf8');
 
       await expect(readWorkbenchRuntimeState(paths.statePath)).rejects.toThrow(/origin/);
