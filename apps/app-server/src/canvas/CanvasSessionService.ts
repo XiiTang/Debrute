@@ -5,7 +5,7 @@ import {
   listDebruteProjectFiles,
 } from '@debrute/project-core';
 import {
-  updateCanvasNodeLayers,
+  bringCanvasNodeToFront,
   updateCanvasNodeLayouts,
   updateCanvasTextViewportState,
   updateCanvasVideoPlaybackState,
@@ -44,14 +44,14 @@ export class CanvasSessionService {
     return this.updateVisualCanvas(current, input.canvasId, (canvas) => updateCanvasNodeLayouts(canvas, input));
   }
 
-  async updateCanvasNodeLayers(
+  async bringCanvasNodeToFront(
     current: ProjectSessionSnapshot,
     input: {
       canvasId: string;
-      nodeProjectRelativePathsTopFirst?: string[];
+      projectRelativePath: string;
     }
   ): Promise<{ canvas: CanvasDocument; snapshot: ProjectSessionSnapshot; changed: boolean }> {
-    return this.updateVisualCanvas(current, input.canvasId, (canvas) => updateCanvasNodeLayers(canvas, input));
+    return this.updateVisualCanvas(current, input.canvasId, (canvas) => bringCanvasNodeToFront(canvas, input));
   }
 
   async updateCanvasVideoPlaybackState(

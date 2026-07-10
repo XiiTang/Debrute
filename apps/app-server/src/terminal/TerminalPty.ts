@@ -11,7 +11,8 @@ export interface TerminalPty {
   readonly pid: number;
   write(data: string): void;
   resize(cols: number, rows: number): void;
-  kill(signal?: string): void;
+  terminate(): void;
+  forceKill(): void;
   onData(listener: (data: string) => void): TerminalPtyDisposable;
   onExit(listener: (event: TerminalPtyExit) => void): TerminalPtyDisposable;
 }

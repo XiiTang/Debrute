@@ -1,7 +1,7 @@
 import React from 'react';
 import { renderToStaticMarkup } from 'react-dom/server';
 import { describe, expect, it } from 'vitest';
-import { unavailableWorkbenchTitleBarState } from '@debrute/app-protocol';
+import { unavailableWorkbenchTitleBarState, type DebruteGlobalSettingsView } from '@debrute/app-protocol';
 import type { SettingsResource, WorkbenchActions, WorkbenchState } from '../apps/web/src/types';
 import {
   AdobeBridgeSettingsPage,
@@ -24,16 +24,19 @@ describe('web Adobe Bridge settings page', () => {
   it('renders bridge status, Photoshop clients, projects, and link actions', () => {
     const state = createState();
     const html = renderWithI18n(React.createElement(AdobeBridgeSettingsPage, {
+      persistedSettings: readyResourceValue(state.globalSettings).adobeBridge,
       bridge: readyResourceValue(state.adobeBridge),
       projectId: state.projectId,
       actions: createActions()
     }));
 
-    expect(html).toContain('<h2>Adobe Bridge</h2>');
+    expect(html).not.toContain('<h2');
     expect(html).toContain('Available');
     expect(html).toContain('Photoshop 2026 · poster.psd');
     expect(html).toContain('Campaign');
     expect(html).toContain('Disconnect');
+    expect(html).toContain('db-status-pill--neutral');
+    expect(html).not.toContain('db-status-pill--success');
   });
 
   it('renders Adobe Bridge transfer failures with stable error labels', () => {
@@ -58,6 +61,7 @@ describe('web Adobe Bridge settings page', () => {
       }
     });
     const html = renderWithI18n(React.createElement(AdobeBridgeSettingsPage, {
+      persistedSettings: readyResourceValue(state.globalSettings).adobeBridge,
       bridge: readyResourceValue(state.adobeBridge),
       projectId: state.projectId,
       actions: createActions()
@@ -67,6 +71,22 @@ describe('web Adobe Bridge settings page', () => {
     expect(html).toContain('assets/cover.png');
     expect(html).toContain('Photoshop could not place the file as a Smart Object.');
     expect(html).not.toContain('Action failed');
+  });
+
+  it('uses persisted enabled state and live discovery state', () => {
+    const state = createState();
+    const html = renderWithI18n(React.createElement(AdobeBridgeSettingsPage, {
+      persistedSettings: { enabled: false },
+      bridge: {
+        ...readyResourceValue(state.adobeBridge),
+        settings: { enabled: true, discoveryStatus: 'available' }
+      },
+      projectId: state.projectId,
+      actions: createActions()
+    }));
+
+    expect(html).not.toContain('checked=""');
+    expect(html).toContain('Available');
   });
 
   it('treats Photoshop links as project-scoped in Settings', () => {
@@ -118,14 +138,10 @@ function createState(overrides: Partial<WorkbenchState> = {}): WorkbenchState {
     snapshot: undefined,
     projectId: 'project-1',
     titleBarState: unavailableWorkbenchTitleBarState(),
-    workbenchPreferences: { status: 'ready', value: { locale: 'en', themePreference: 'system' } },
+    globalSettings: { status: 'ready', value: globalSettingsFixture() },
     resolvedTheme: 'dark',
     projectOpen: { opening: false },
     explorerSelection: { selectedPaths: [], focusedPath: null, anchorPath: null },
-    imageModelSettings: { status: 'ready', value: { models: [] } },
-    videoModelSettings: { status: 'ready', value: { models: [] } },
-    audioModelSettings: { status: 'ready', value: { models: [] } },
-    integrationsSettings: { status: 'ready', value: { integrations: [], backends: [] } },
     adobeBridge: {
       status: 'ready',
       value: {
@@ -167,16 +183,23 @@ function createState(overrides: Partial<WorkbenchState> = {}): WorkbenchState {
 
 function createActions(): WorkbenchActions {
   return {
-    reloadWorkbenchPreferences: async () => undefined,
-    reloadImageModelSettings: async () => undefined,
-    reloadVideoModelSettings: async () => undefined,
-    reloadAudioModelSettings: async () => undefined,
-    reloadIntegrationsSettings: async () => undefined,
+    reloadGlobalSettings: async () => undefined,
     reloadAdobeBridge: async () => undefined,
-    saveAdobeBridgeSettings: async () => undefined,
+    saveGlobalSettings: async () => undefined,
     linkAdobeBridgePhotoshop: async () => undefined,
     unlinkAdobeBridgePhotoshop: async () => undefined
   } as unknown as WorkbenchActions;
+}
+
+function globalSettingsFixture(overrides: Partial<DebruteGlobalSettingsView> = {}): DebruteGlobalSettingsView {
+  return {
+    workbench: { locale: 'en', themePreference: 'system', defaultFrontend: 'electron' },
+    chrome: { recentProjectRoots: [] },
+    models: { image: { models: [] }, video: { models: [] }, audio: { models: [] } },
+    integrations: { integrations: [], backends: [] },
+    adobeBridge: { enabled: true },
+    ...overrides
+  };
 }
 
 function readyResourceValue<T>(resource: SettingsResource<T>): T {

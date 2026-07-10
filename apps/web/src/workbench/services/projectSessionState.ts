@@ -1,6 +1,4 @@
-import type React from 'react';
 import { parseDebruteWorkbenchPath, type DebruteWorkbenchRoute, type WorkbenchApiClient, type WorkbenchProjectSessionSnapshot } from '@debrute/app-protocol';
-import type { WorkbenchState } from '../../types';
 
 export interface OpenInitialProjectResult {
   projectId?: string;
@@ -91,19 +89,6 @@ export async function openInitialProject(
 
 export function shouldShowInitialProjectLoader(route: DebruteWorkbenchRoute): boolean {
   return route.kind !== 'workbench';
-}
-
-export async function loadCanvasFeedback(
-  api: WorkbenchApiClient,
-  setCanvasFeedback: React.Dispatch<React.SetStateAction<WorkbenchState['canvasFeedback']>>,
-  notifyUnavailable: (message: string) => void
-): Promise<void> {
-  try {
-    setCanvasFeedback(await api.readCanvasFeedback());
-  } catch (error) {
-    setCanvasFeedback(undefined);
-    notifyUnavailable(errorMessage(error));
-  }
 }
 
 export function errorMessage(error: unknown): string {

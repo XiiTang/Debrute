@@ -1,27 +1,18 @@
 import { describe, expect, it, vi } from 'vitest';
 import {
-  DEFAULT_WORKBENCH_PREFERENCES,
-  parseWorkbenchThemePreference,
+  DEFAULT_GLOBAL_WORKBENCH_SETTINGS,
   resolveWorkbenchThemePreference,
   setDocumentTheme,
   subscribeSystemThemeChanges
 } from './workbenchTheme';
 
 describe('Workbench theme helpers', () => {
-  it('defines the current default Workbench preferences', () => {
-    expect(DEFAULT_WORKBENCH_PREFERENCES).toEqual({
+  it('defines the current default global Workbench settings', () => {
+    expect(DEFAULT_GLOBAL_WORKBENCH_SETTINGS).toEqual({
       locale: 'en',
-      themePreference: 'system'
+      themePreference: 'system',
+      defaultFrontend: 'electron'
     });
-  });
-
-  it('accepts supported theme preferences and rejects unsupported values', () => {
-    expect(parseWorkbenchThemePreference('system')).toBe('system');
-    expect(parseWorkbenchThemePreference('dark')).toBe('dark');
-    expect(parseWorkbenchThemePreference('light')).toBe('light');
-    expect(() => parseWorkbenchThemePreference('solarized')).toThrow(
-      'Workbench theme preference must be "system", "dark", or "light".'
-    );
   });
 
   it('resolves explicit preferences without consulting system state', () => {

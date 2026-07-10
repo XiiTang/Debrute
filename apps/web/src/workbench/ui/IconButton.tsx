@@ -5,8 +5,8 @@ import { cx } from './cx';
 export interface IconButtonProps extends Omit<React.ButtonHTMLAttributes<HTMLButtonElement>, 'children'> {
   label: string;
   icon: React.ReactNode;
-  variant?: Exclude<ButtonVariant, 'primary'>;
-  size?: ButtonSize;
+  variant?: Exclude<ButtonVariant, 'primary'> | 'chrome' | 'window-close';
+  size?: ButtonSize | 'window';
   pressed?: boolean;
 }
 

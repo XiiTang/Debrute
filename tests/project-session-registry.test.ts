@@ -68,21 +68,29 @@ describe('ProjectSessionRegistry', () => {
   it('tracks duplicate client ids as independent live leases', async () => {
     const projectRoot = await mkdtemp(join(tmpdir(), 'debrute-registry-duplicate-client-'));
     cleanups.push(() => rm(projectRoot, { recursive: true, force: true }));
+    let changeCount = 0;
     const registry = new ProjectSessionRegistry({
       idleTtlMs: 1000,
-      createAppServer: () => appServerFixture(async (root) => snapshotFixture(root))
+      createAppServer: () => appServerFixture(async (root) => snapshotFixture(root)),
+      onChange: () => {
+        changeCount += 1;
+      }
     });
     cleanups.push(() => registry.close());
     const session = await registry.openProject(projectRoot);
+    expect(changeCount).toBe(1);
 
     const releaseFirst = registry.registerClient(session.projectId, { clientId: 'web:client', kind: 'sse' });
     const releaseSecond = registry.registerClient(session.projectId, { clientId: 'web:client', kind: 'sse' });
 
     expect(registry.list()[0]?.clients.size).toBe(2);
+    expect(changeCount).toBe(3);
     releaseFirst?.();
     expect(registry.list()[0]?.clients.size).toBe(1);
+    expect(changeCount).toBe(4);
     releaseSecond?.();
     expect(registry.list()[0]?.clients.size).toBe(0);
+    expect(changeCount).toBe(5);
   });
 
   it('releases a never-attached project session after the idle TTL', async () => {

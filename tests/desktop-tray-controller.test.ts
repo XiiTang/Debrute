@@ -6,7 +6,11 @@ describe('runtime tray menu', () => {
   it('shows runtime state and enables owned actions only when allowed', () => {
     const actions = {
       openDebrute: vi.fn(),
-      openRecent: vi.fn(),
+      openInElectron: vi.fn(),
+      openInBrowser: vi.fn(),
+      copyBrowserUrl: vi.fn(),
+      openProjectInElectron: vi.fn(),
+      openRecentInElectron: vi.fn(),
       showRuntimeStatus: vi.fn(),
       restartRuntime: vi.fn(),
       quitDebrute: vi.fn()
@@ -24,13 +28,19 @@ describe('runtime tray menu', () => {
     expect(template.map((item) => item.label ?? item.type)).toEqual([
       'Runtime: running',
       'Open Debrute',
-      'Open Recent',
+      'Open in Electron',
+      'Open in Browser',
+      'Copy Browser URL',
+      'Open Project in Electron...',
+      'Open Recent in Electron',
       'Runtime Status',
       'Restart Runtime',
       'separator',
       'Quit Debrute'
     ]);
     expect(template.find((item) => item.label === 'Open Debrute')?.enabled).toBe(true);
+    expect(template.find((item) => item.label === 'Open Project in Electron...')?.enabled).toBe(true);
+    expect(template.find((item) => item.label === 'Open Recent in Electron')?.enabled).toBe(true);
     expect(template.find((item) => item.label === 'Restart Runtime')?.enabled).toBe(true);
   });
 
@@ -41,7 +51,11 @@ describe('runtime tray menu', () => {
       recentProjectRoots: [],
       actions: {
         openDebrute: vi.fn(),
-        openRecent: vi.fn(),
+        openInElectron: vi.fn(),
+        openInBrowser: vi.fn(),
+        copyBrowserUrl: vi.fn(),
+        openProjectInElectron: vi.fn(),
+        openRecentInElectron: vi.fn(),
         showRuntimeStatus: vi.fn(),
         restartRuntime: vi.fn(),
         quitDebrute: vi.fn()
@@ -159,7 +173,11 @@ function fakeRuntimeSupervisor(status: 'running') {
 function fakeActions() {
   return {
     openDebrute: vi.fn(),
-    openRecent: vi.fn(),
+    openInElectron: vi.fn(),
+    openInBrowser: vi.fn(),
+    copyBrowserUrl: vi.fn(),
+    openProjectInElectron: vi.fn(),
+    openRecentInElectron: vi.fn(),
     showRuntimeStatus: vi.fn(),
     restartRuntime: vi.fn(),
     quitDebrute: vi.fn()

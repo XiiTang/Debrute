@@ -1,5 +1,3 @@
-import { readFileSync } from 'node:fs';
-import { fileURLToPath } from 'node:url';
 import React from 'react';
 import { renderToStaticMarkup } from 'react-dom/server';
 import { describe, expect, it, vi } from 'vitest';
@@ -9,8 +7,6 @@ import { createCanvasOverlayRuntime } from './CanvasOverlayRuntime';
 import { I18nProvider } from '../i18n';
 
 const NOW = '2026-05-26T12:00:00.000Z';
-const canvasFeedbackBarSource = readFileSync(fileURLToPath(new URL('./CanvasFeedbackBar.tsx', import.meta.url)), 'utf8');
-const canvasCssSource = readFileSync(fileURLToPath(new URL('../styles/canvas.css', import.meta.url)), 'utf8');
 
 function renderStaticWithI18n(element: React.ReactElement): string {
   return renderToStaticMarkup(
@@ -117,13 +113,6 @@ describe('CanvasFeedbackBar', () => {
     expect(html).not.toContain('autofocus=""');
   });
 
-  it('defers pending item focus until after the confirming pointer event', () => {
-    expect(canvasFeedbackBarSource).toContain('pendingItemFocusTimerRef');
-    expect(canvasFeedbackBarSource).toContain('window.setTimeout(() => {');
-    expect(canvasFeedbackBarSource).toContain('creatorInputRef.current?.focus();');
-    expect(canvasFeedbackBarSource).toContain('window.clearTimeout(pendingItemFocusTimerRef.current);');
-  });
-
   it('renders one pill per saved feedback item with moment coloring and spatial labels', () => {
     const html = renderStaticWithI18n(
       <CanvasFeedbackBar
@@ -145,30 +134,6 @@ describe('CanvasFeedbackBar', () => {
     expect(html).toContain('--canvas-feedback-moment-color:#2563eb');
     expect(html).toContain('db-workbench-close-button');
     expect(html).toContain('canvas-feedback-comment-pill-close');
-  });
-
-  it('uses the moment pill surface color without a second leading color block', () => {
-    expect(canvasCssSource).not.toContain('.canvas-feedback-comment-pill--moment::before');
-    expect(canvasCssSource).not.toContain('.canvas-feedback-comment-pill--moment .canvas-feedback-comment-pill-text');
-  });
-
-  it('keeps the first-row creator fixed-width and rounded-rectangle shaped', () => {
-    expect(canvasCssSource).toContain('padding: 3px;');
-    expect(canvasCssSource).toContain('grid-template-columns: max-content 110px;');
-    expect(canvasFeedbackBarSource).toContain('sizing={{ minWidthPx: 110, maxWidthPx: 110 }}');
-    expect(canvasCssSource).toMatch(/\.canvas-feedback-comment-input\s*{[^}]*border-radius: var\(--db-radius-md\);/);
-    expect(canvasCssSource).toContain('.canvas-feedback-comment-pill {');
-    expect(canvasCssSource).toMatch(/\.canvas-feedback-comment-pill\s*{[^}]*border-radius: 999px;/);
-    expect(canvasCssSource).toMatch(/\.canvas-feedback-comment-pill\s*{[^}]*max-width: 280px;/);
-    expect(canvasCssSource).toMatch(/\.canvas-feedback-comment-pill\s*{[^}]*padding: 5px 12px;/);
-    expect(canvasCssSource).not.toMatch(/\.canvas-feedback-comment-pill\s*{[^}]*padding: 5px 30px 5px 12px;/);
-    expect(canvasCssSource).not.toMatch(/\.canvas-feedback-comment-pill\s*{[^}]*min-width:/);
-    expect(canvasCssSource).toMatch(/\.canvas-feedback-comment-pill-close\.db-workbench-close-button\s*{[^}]*top: -5px;/);
-    expect(canvasCssSource).toMatch(/\.canvas-feedback-comment-pill-close\.db-workbench-close-button\s*{[^}]*opacity: 0;/);
-    expect(canvasCssSource).toMatch(/\.canvas-feedback-comment-pill:hover \.canvas-feedback-comment-pill-close\.db-workbench-close-button,\n\.canvas-feedback-comment-pill:focus-within \.canvas-feedback-comment-pill-close\.db-workbench-close-button\s*{[^}]*opacity: 1;/);
-    expect(canvasCssSource).toMatch(/\.canvas-feedback-comment-pill:hover \.canvas-feedback-comment-pill-close\.db-workbench-close-button,\n\.canvas-feedback-comment-pill:focus-within \.canvas-feedback-comment-pill-close\.db-workbench-close-button\s*{[^}]*background: color-mix\(in oklch, var\(--db-surface-3\) 82%, var\(--db-accent\)\);/);
-    expect(canvasCssSource).not.toMatch(/\.canvas-feedback-comment-pill-close\s*{[^}]*background:/);
-    expect(canvasCssSource).not.toMatch(/\.canvas-feedback-comment-pill-close:hover/);
   });
 
   it('saves creator text as a new file-level item', async () => {

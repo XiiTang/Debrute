@@ -7,7 +7,7 @@ import { extname, join as joinFileSystemPath, resolve } from 'node:path';
 import { pipeline } from 'node:stream/promises';
 import { fileURLToPath } from 'node:url';
 import Busboy from 'busboy';
-import { DebruteAppServer, DebruteGlobalRuntimeServer, GlobalConfigStore, type DebruteAppServerOptions } from '@debrute/app-server';
+import { DebruteAppServer, DebruteGlobalRuntimeServer, GlobalConfigStore, GlobalSettingsValidationError, type DebruteAppServerOptions } from '@debrute/app-server';
 import { redactRuntimeSecretString, redactRuntimeSecrets } from '@debrute/capability-runtime';
 import type { CanvasMapPathRuleSet } from '@debrute/canvas-map-core';
 import {
@@ -21,6 +21,7 @@ import {
   type DaemonBridgeImportRequestMessage,
   type DaemonCliCommandRequest,
   type DaemonProjectUploadImportPlan,
+  type DebruteGlobalAdobeBridgeSettings,
   type DebruteProductState,
   type DebruteHttpErrorBody,
   type ManagedCliDiagnostic,
@@ -41,7 +42,7 @@ import {
   type WorkbenchProjectSessionSnapshot,
   type WorkbenchProjectTextFile,
   type WorkbenchHostKind,
-  type SaveWorkbenchPreferencesInput,
+  type SaveDebruteGlobalSettingsInput,
   type WorkbenchTitleBarState
 } from '@debrute/app-protocol';
 import { projectFileRevision, projectImageMimeTypeFromPath, resolveExistingProjectPath, type ProjectUploadImportEntry } from '@debrute/project-core';
@@ -136,6 +137,7 @@ interface ProjectRequestContext extends RequestContext {
 
 interface GlobalRuntimeRequestContext extends RequestContext {
   globalRuntime: DebruteGlobalRuntimeServer;
+  applyAdobeBridgeSettings(settings: DebruteGlobalAdobeBridgeSettings): void;
 }
 
 interface ProjectApiRoute {
@@ -433,7 +435,7 @@ export function createDebruteDaemonHttpServer(options: DebruteDaemonHttpServerOp
         writeError(context.response, 405, 'method_not_allowed', 'Unsupported Workbench event stream method.');
         return true;
       }
-      writeGlobalWorkbenchEventStream(context, globalRuntime);
+      writeGlobalWorkbenchEventStream(context, globalRuntime, adobeBridge);
       return true;
     }
     if (method === 'GET' && path === '/api/projects') {
@@ -467,12 +469,17 @@ export function createDebruteDaemonHttpServer(options: DebruteDaemonHttpServerOp
         return true;
       }
       const session = await sessions.openProject(projectRoot);
-      await globalRuntime.rememberRecentProjectRoot(session.projectRoot);
-      const body: WorkbenchProjectPickerOpenResult = {
-        opened: true,
-        ...projectOpenResultForHttp(session)
-      };
-      writeJson(context.response, 200, body);
+      const releaseRequest = sessions.registerRequest(session.projectId)!;
+      try {
+        await globalRuntime.rememberRecentProjectRoot(session.projectRoot);
+        const body: WorkbenchProjectPickerOpenResult = {
+          opened: true,
+          ...projectOpenResultForHttp(session)
+        };
+        writeJson(context.response, 200, body);
+      } finally {
+        releaseRequest();
+      }
       return true;
     }
     if (method === 'POST' && path === '/api/projects/open') {
@@ -493,8 +500,13 @@ export function createDebruteDaemonHttpServer(options: DebruteDaemonHttpServerOp
         return true;
       }
       const session = await sessions.openProject(projectRoot);
-      await globalRuntime.rememberRecentProjectRoot(session.projectRoot);
-      writeJson(context.response, 200, projectOpenResultForHttp(session));
+      const releaseRequest = sessions.registerRequest(session.projectId)!;
+      try {
+        await globalRuntime.rememberRecentProjectRoot(session.projectRoot);
+        writeJson(context.response, 200, projectOpenResultForHttp(session));
+      } finally {
+        releaseRequest();
+      }
       return true;
     }
     if (method === 'POST' && path === '/api/cli/run') {
@@ -520,8 +532,6 @@ export function createDebruteDaemonHttpServer(options: DebruteDaemonHttpServerOp
       daemonUrl: currentRuntime().daemonUrl,
       bridge: adobeBridge,
       sessions,
-      getSettings: adobeBridgeSettings,
-      saveSettings: saveAdobeBridgeSettings,
       readJsonBody,
       sendImportRequest: sendAdobeBridgeImportRequest,
       transferContents: adobeBridgeTransferContents
@@ -550,12 +560,12 @@ export function createDebruteDaemonHttpServer(options: DebruteDaemonHttpServerOp
       return true;
     }
 
-    if (
-      path.startsWith('/api/settings')
-      || path.startsWith('/api/models')
-      || path.startsWith('/api/integrations')
-    ) {
-      await handleSettingsRoute({ ...context, globalRuntime });
+    if (path.startsWith('/api/settings') || path.startsWith('/api/integrations')) {
+      await handleSettingsRoute({
+        ...context,
+        globalRuntime,
+        applyAdobeBridgeSettings
+      });
       return true;
     }
     if (path.startsWith('/api/')) {
@@ -597,7 +607,7 @@ export function createDebruteDaemonHttpServer(options: DebruteDaemonHttpServerOp
     const path = context.url.pathname;
     const tail = projectRoute.tail;
     if (method === 'GET' && tail === '/events') {
-      writeEventStream(context, session, sessions, adobeBridge);
+      writeEventStream(context, session, sessions);
       return;
     }
     if (method === 'GET' && tail === '') {
@@ -766,8 +776,15 @@ export function createDebruteDaemonHttpServer(options: DebruteDaemonHttpServerOp
   }
 
   async function adobeBridgeSettings(): Promise<AdobeBridgeSettings> {
-    const settings = await globalRuntime.adobeBridgeGetSettings();
-    if (!settings.enabled) {
+    return adobeBridgeSettingsFromPersisted(
+      await globalRuntime.adobeBridgeGetPersistedSettings()
+    );
+  }
+
+  function adobeBridgeSettingsFromPersisted(
+    persisted: DebruteGlobalAdobeBridgeSettings
+  ): AdobeBridgeSettings {
+    if (!persisted.enabled) {
       return { enabled: false, discoveryStatus: 'disabled' };
     }
     return {
@@ -776,13 +793,22 @@ export function createDebruteDaemonHttpServer(options: DebruteDaemonHttpServerOp
     };
   }
 
-  async function saveAdobeBridgeSettings(input: { enabled: boolean }): Promise<AdobeBridgeSettings> {
-    await globalRuntime.adobeBridgeSaveSettings(input);
-    return adobeBridgeSettings();
-  }
-
   function syncAdobeBridgeProjectState(): void {
     syncAdobeBridgeProjects({ bridge: adobeBridge, sessions });
+  }
+
+  function applyAdobeBridgeSettings(
+    persisted: DebruteGlobalAdobeBridgeSettings
+  ): void {
+    const next = adobeBridgeSettingsFromPersisted(persisted);
+    const current = adobeBridge.state().settings;
+    if (
+      current.enabled === next.enabled
+      && current.discoveryStatus === next.discoveryStatus
+    ) {
+      return;
+    }
+    adobeBridge.setSettings(next);
   }
 
   function scheduleAdobeBridgeProjectSync(): void {
@@ -1246,12 +1272,13 @@ async function handleCanvasRoute(
     writeJson(context.response, 200, result);
     return;
   }
-  if (path.endsWith('/node-layers') && context.request.method === 'PATCH') {
+  if (path.endsWith('/node-stack-order/bring-to-front') && context.request.method === 'POST') {
     const body = await readJsonBody<Record<string, unknown>>(context.request);
+    const projectRelativePath = stringField(body.projectRelativePath, 'projectRelativePath');
     const result = await runRevisionedMutation(context, baseRevisionField(body), async () => {
-      const updated = await server.updateCanvasNodeLayers({
+      const updated = await server.bringCanvasNodeToFront({
         canvasId,
-        nodeProjectRelativePathsTopFirst: body.nodeProjectRelativePathsTopFirst as never
+        projectRelativePath
       });
       return {
         canvas: updated.canvas,
@@ -1278,14 +1305,14 @@ async function handleCanvasRoute(
   }
   if (path.endsWith('/text-viewport') && context.request.method === 'PATCH') {
     const body = await readJsonBody<Record<string, unknown>>(context.request);
-    const result = await context.sessions.runProjectOperation(session.projectId, async (record) => {
-      const updated = await record.appServer.updateCanvasTextViewportState({
+    const result = await runRevisionedMutation(context, baseRevisionField(body), async () => {
+      const updated = await server.updateCanvasTextViewportState({
         canvasId,
         updates: canvasTextViewportUpdatesField(body.updates)
       });
       return {
         canvas: updated.canvas,
-        projection: projectionForHttp(updated.projection, record.projectId)
+        projection: projectionForHttp(updated.projection, session.projectId)
       };
     });
     writeJson(context.response, 200, result);
@@ -1472,7 +1499,7 @@ async function handleTerminalRoute(context: ProjectRequestContext, tail: string)
       writeError(context.response, 405, 'method_not_allowed', 'Unsupported terminal session method.');
       return;
     }
-    writeJson(context.response, 200, daemonAppServer(context).closeTerminalSession({
+    writeJson(context.response, 200, await daemonAppServer(context).closeTerminalSession({
       terminalId: route.terminalId
     }));
     return;
@@ -1618,49 +1645,17 @@ async function handleSettingsRoute(context: GlobalRuntimeRequestContext): Promis
   const server = context.globalRuntime;
   const method = context.request.method ?? 'GET';
   const path = context.url.pathname;
-  if (method === 'GET' && path === '/api/settings') {
-    writeJson(context.response, 200, {
-      imageModels: await server.imageModelGetSettings(),
-      videoModels: await server.videoModelGetSettings(),
-      audioModels: await server.audioModelGetSettings(),
-      integrations: await server.integrationsListStatus()
-    });
+  if (method === 'GET' && path === '/api/settings/global') {
+    writeJson(context.response, 200, await server.globalSettingsGet());
     return;
   }
-  if (method === 'GET' && path === '/api/settings/workbench-preferences') {
-    writeJson(context.response, 200, await server.workbenchPreferencesGet());
-    return;
-  }
-  if (method === 'PUT' && path === '/api/settings/workbench-preferences') {
-    writeJson(context.response, 200, await server.workbenchPreferencesSave(await readJsonBody<SaveWorkbenchPreferencesInput>(context.request)));
-    return;
-  }
-  if (method === 'GET' && path === '/api/models/image') {
-    writeJson(context.response, 200, await server.imageModelGetSettings());
-    return;
-  }
-  if (method === 'PUT' && path.startsWith('/api/models/image/')) {
-    writeJson(context.response, 200, await server.imageModelSaveSetting(decodePathSegment(path.split('/').at(-1)!), await readJsonBody(context.request)));
-    return;
-  }
-  if (method === 'GET' && path === '/api/models/video') {
-    writeJson(context.response, 200, await server.videoModelGetSettings());
-    return;
-  }
-  if (method === 'PUT' && path.startsWith('/api/models/video/')) {
-    writeJson(context.response, 200, await server.videoModelSaveSetting(decodePathSegment(path.split('/').at(-1)!), await readJsonBody(context.request)));
-    return;
-  }
-  if (method === 'GET' && path === '/api/models/audio') {
-    writeJson(context.response, 200, await server.audioModelGetSettings());
-    return;
-  }
-  if (method === 'PUT' && path.startsWith('/api/models/audio/')) {
-    writeJson(context.response, 200, await server.audioModelSaveSetting(decodePathSegment(path.split('/').at(-1)!), await readJsonBody(context.request)));
-    return;
-  }
-  if (method === 'GET' && path === '/api/integrations') {
-    writeJson(context.response, 200, await server.integrationsListStatus());
+  if (method === 'PATCH' && path === '/api/settings/global') {
+    const input = await readJsonBody<SaveDebruteGlobalSettingsInput>(context.request);
+    const settings = await server.globalSettingsSave(input);
+    if (isRecord(input) && input.adobeBridge !== undefined) {
+      context.applyAdobeBridgeSettings(settings.adobeBridge);
+    }
+    writeJson(context.response, 200, settings);
     return;
   }
   if (method === 'POST' && path === '/api/integrations/rescan') {
@@ -1690,18 +1685,13 @@ async function handleSettingsRoute(context: GlobalRuntimeRequestContext): Promis
 }
 
 type GlobalWorkbenchEvent = Extract<WorkbenchEvent, {
-  type:
-    | 'imageModel.settings.changed'
-    | 'videoModel.settings.changed'
-    | 'audioModel.settings.changed'
-    | 'integrations.settings.changed'
-    | 'adobeBridge.settings.changed'
-    | 'workbench.preferences.changed'
+  type: 'globalSettings.changed'
 }>;
 
 function writeGlobalWorkbenchEventStream(
   context: RequestContext,
-  globalRuntime: DebruteGlobalRuntimeServer
+  globalRuntime: DebruteGlobalRuntimeServer,
+  bridge: AdobeBridgeService
 ): void {
   context.response.writeHead(200, {
     'content-type': 'text/event-stream',
@@ -1714,12 +1704,19 @@ function writeGlobalWorkbenchEventStream(
       writeSseWorkbenchEvent(context.response, event);
     }
   });
+  const unsubscribeBridge = bridge.onEvent((state) => {
+    writeSseWorkbenchEvent(context.response, {
+      type: 'adobeBridge.state.changed',
+      state
+    });
+  });
   const keepalive = setInterval(() => {
     context.response.write(': keepalive\n\n');
   }, 15_000);
   const cleanup = (): void => {
     clearInterval(keepalive);
     unsubscribeGlobal();
+    unsubscribeBridge();
   };
   context.request.once('close', cleanup);
 }
@@ -1729,19 +1726,13 @@ function writeSseWorkbenchEvent(response: ServerResponse, event: WorkbenchEvent)
 }
 
 function isGlobalWorkbenchEvent(event: AppServerEvent): event is GlobalWorkbenchEvent {
-  return event.type === 'imageModel.settings.changed'
-    || event.type === 'videoModel.settings.changed'
-    || event.type === 'audioModel.settings.changed'
-    || event.type === 'integrations.settings.changed'
-    || event.type === 'adobeBridge.settings.changed'
-    || event.type === 'workbench.preferences.changed';
+  return event.type === 'globalSettings.changed';
 }
 
 function writeEventStream(
   context: RequestContext,
   session: ProjectSessionRecord,
-  sessions: ProjectSessionRegistry,
-  bridge?: AdobeBridgeService
+  sessions: ProjectSessionRegistry
 ): void {
   const clientId = context.url.searchParams.get('clientId') || randomUUID();
   const releaseClient = sessions.registerClient(session.projectId, { clientId, kind: 'sse' });
@@ -1758,19 +1749,12 @@ function writeEventStream(
       session.projectRevision
     ));
   });
-  const unsubscribeBridge = bridge?.onEvent((state) => {
-    writeSseWorkbenchEvent(context.response, {
-      type: 'adobeBridge.state.changed',
-      state
-    });
-  }) ?? (() => undefined);
   const keepalive = setInterval(() => {
     context.response.write(': keepalive\n\n');
   }, 15_000);
   const cleanup = (): void => {
     clearInterval(keepalive);
     unsubscribeProject();
-    unsubscribeBridge();
     releaseClient?.();
   };
   context.request.once('close', cleanup);
@@ -2276,13 +2260,7 @@ function writeCaughtError(response: ServerResponse, error: unknown): void {
   if (writeAdobeBridgeCaughtError(response, error)) {
     return;
   }
-  if (
-    error instanceof Error
-    && (
-      error.message === 'Workbench locale must be "en" or "zh-CN".'
-      || error.message === 'Workbench theme preference must be "system", "dark", or "light".'
-    )
-  ) {
+  if (error instanceof GlobalSettingsValidationError) {
     writeError(response, 400, 'invalid_input', error.message);
     return;
   }
@@ -2316,6 +2294,9 @@ function isServiceError(error: unknown): error is Error & { code: string; fields
 function serviceErrorStatusCode(code: string): number {
   if (code === 'canvas_map_conflict' || code === 'canvas_registry_conflict') {
     return 409;
+  }
+  if (code === 'terminal_close_failed') {
+    return 500;
   }
   if (code === 'canvas_map_canvas_missing'
     || code === 'canvas_map_target_missing'

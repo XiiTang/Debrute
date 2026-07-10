@@ -5,9 +5,7 @@ import type { IncomingMessage, ServerResponse } from 'node:http';
 import { basename, extname } from 'node:path';
 import type {
   AdobeBridgeStateView,
-  AdobeBridgeSettings,
   DaemonBridgeImportRequestMessage,
-  SaveAdobeBridgeSettingsInput,
   SendProjectFileToPhotoshopInput,
   SendProjectFileToPhotoshopResult
 } from '@debrute/app-protocol';
@@ -37,8 +35,6 @@ export interface AdobeBridgeHttpRouteContext {
   daemonUrl: string;
   bridge: AdobeBridgeService;
   sessions: ProjectSessionRegistry;
-  getSettings(): Promise<AdobeBridgeSettings>;
-  saveSettings(input: SaveAdobeBridgeSettingsInput): Promise<AdobeBridgeSettings>;
   readJsonBody<T>(request: IncomingMessage): Promise<T>;
   sendImportRequest(adobeClientId: string, message: DaemonBridgeImportRequestMessage): boolean;
   transferContents: Map<string, AdobeBridgeTransferContentEntry>;
@@ -49,16 +45,6 @@ export async function routeAdobeBridgeHttp(context: AdobeBridgeHttpRouteContext)
   const path = context.url.pathname;
 
   if (method === 'GET' && path === '/api/adobe-bridge') {
-    context.bridge.setSettings(await context.getSettings());
-    syncAdobeBridgeProjects(context);
-    writeJson(context.response, 200, context.bridge.state());
-    return true;
-  }
-
-  if (method === 'PUT' && path === '/api/adobe-bridge/settings') {
-    const settings = await context.saveSettings(await context.readJsonBody<SaveAdobeBridgeSettingsInput>(context.request));
-    context.bridge.setSettings(settings);
-    syncAdobeBridgeProjects(context);
     writeJson(context.response, 200, context.bridge.state());
     return true;
   }
@@ -115,8 +101,6 @@ async function handleLinkRoute(
   projectId: string,
   adobeClientIdFromPath: string | undefined
 ): Promise<void> {
-  syncAdobeBridgeProjects(context);
-  context.bridge.setSettings(await context.getSettings());
   if (method === 'POST' && !adobeClientIdFromPath) {
     const body = await context.readJsonBody<{ adobeClientId?: unknown }>(context.request);
     const adobeClientId = stringField(body.adobeClientId, 'adobeClientId');
@@ -135,8 +119,6 @@ async function handlePluginLinkRoute(
   method: string,
   projectId: string
 ): Promise<void> {
-  syncAdobeBridgeProjects(context);
-  context.bridge.setSettings(await context.getSettings());
   const adobeClientId = requiredHeader(context.request, 'x-debrute-adobe-client-id');
   if (method === 'POST') {
     context.bridge.linkProjectToPhotoshop(projectId, adobeClientId);
@@ -155,8 +137,6 @@ async function handleSendProjectFileToPhotoshop(
   context: AdobeBridgeHttpRouteContext,
   projectId: string
 ): Promise<void> {
-  syncAdobeBridgeProjects(context);
-  context.bridge.setSettings(await context.getSettings());
   const body = await context.readJsonBody<SendProjectFileToPhotoshopInput>(context.request);
   const adobeClientId = stringField(body.adobeClientId, 'adobeClientId');
   const projectRelativePath = stringField(body.projectRelativePath, 'projectRelativePath');
@@ -216,8 +196,6 @@ async function handleSendProjectFileToPhotoshop(
 }
 
 async function handlePhotoshopUpload(context: AdobeBridgeHttpRouteContext, projectId: string): Promise<void> {
-  syncAdobeBridgeProjects(context);
-  context.bridge.setSettings(await context.getSettings());
   const adobeClientId = requiredHeader(context.request, 'x-debrute-adobe-client-id');
   const transferId = requiredHeader(context.request, 'x-debrute-transfer-id');
   const targetDirectoryProjectRelativePath = requiredPercentEncodedHeader(context.request, 'x-debrute-target-directory');
@@ -288,7 +266,6 @@ function adobeBridgeTransferFailure(error: unknown): { errorCode?: AdobeBridgeEr
 }
 
 async function handleTransferContent(context: AdobeBridgeHttpRouteContext, transferId: string): Promise<void> {
-  context.bridge.setSettings(await context.getSettings());
   if (!context.bridge.state().settings.enabled) {
     throw createAdobeBridgeError('adobe_bridge_disabled');
   }

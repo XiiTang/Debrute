@@ -214,6 +214,7 @@ export class ProjectSessionRegistry {
       clientId: input.clientId,
       kind: input.kind
     });
+    this.onChange();
     return once(() => this.releaseClientLease(projectId, leaseId));
   }
 
@@ -235,6 +236,7 @@ export class ProjectSessionRegistry {
     }
 
     record.clients.delete(leaseId);
+    this.onChange();
     this.scheduleIdleCleanupIfUnused(record);
   }
 

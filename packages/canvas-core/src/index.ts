@@ -690,20 +690,6 @@ export function clearCanvasNodeManualLayouts(
   };
 }
 
-export function updateCanvasNodeLayers(
-  canvas: CanvasDocument,
-  input: {
-    nodeProjectRelativePathsTopFirst?: string[];
-  }
-): CanvasDocument {
-  return {
-    ...canvas,
-    nodeElements: input.nodeProjectRelativePathsTopFirst
-      ? reorderCanvasNodeElementsTopFirst(canvas.nodeElements, input.nodeProjectRelativePathsTopFirst)
-      : canvas.nodeElements
-  };
-}
-
 export function updateCanvasVideoPlaybackState(
   canvas: CanvasDocument,
   input: {
@@ -791,10 +777,24 @@ export function updateCanvasTextViewportState(
     : canvas;
 }
 
-export function canvasNodeLayerOrderTopFirst(canvas: Pick<CanvasDocument, 'nodeElements'>): string[] {
+export function canvasNodeStackOrderTopFirst(canvas: Pick<CanvasDocument, 'nodeElements'>): string[] {
   return [...canvas.nodeElements]
     .sort((left, right) => compareNodeZ(right, left))
     .map((nodeElement) => nodeElement.projectRelativePath);
+}
+
+export function bringCanvasNodeToFront(
+  canvas: CanvasDocument,
+  input: { projectRelativePath: string }
+): CanvasDocument {
+  const nodeElements = bringCanvasNodeElementToFront(canvas.nodeElements, input.projectRelativePath);
+  if (nodeElements === canvas.nodeElements) {
+    return canvas;
+  }
+  return {
+    ...canvas,
+    nodeElements
+  };
 }
 
 export function reconcileCanvasNodeElements(input: ReconcileCanvasNodeElementsInput): CanvasNodeElement[] {
@@ -894,29 +894,28 @@ export function normalizeCanvasVideoPlaybackTime(currentTimeSeconds: number): nu
   return Math.round(currentTimeSeconds * 1000) / 1000;
 }
 
-function reorderCanvasNodeElementsTopFirst(
+function bringCanvasNodeElementToFront(
   nodeElements: CanvasNodeElement[],
-  projectRelativePathsTopFirst: string[]
+  projectRelativePath: string
 ): CanvasNodeElement[] {
-  const existingPaths = new Set(nodeElements.map((node) => node.projectRelativePath));
-  const requested = [...new Set(projectRelativePathsTopFirst.filter((path) => existingPaths.has(path)))];
-  if (requested.length === 0) {
+  const orderedBackToFront = [...nodeElements].sort(compareNodeZ);
+  const targetIndex = orderedBackToFront.findIndex((node) => node.projectRelativePath === projectRelativePath);
+  if (targetIndex < 0) {
+    throw new Error(`Canvas node not found: ${projectRelativePath}`);
+  }
+  if (targetIndex === orderedBackToFront.length - 1) {
     return nodeElements;
   }
-  const requestedSet = new Set(requested);
-  const remaining = [...nodeElements]
-    .filter((node) => !requestedSet.has(node.projectRelativePath))
-    .sort((left, right) => compareNodeZ(right, left))
-    .map((node) => node.projectRelativePath);
-  const orderedPathsTopFirst = [...requested, ...remaining];
+  const nextBackToFront = [
+    ...orderedBackToFront.slice(0, targetIndex),
+    ...orderedBackToFront.slice(targetIndex + 1),
+    orderedBackToFront[targetIndex]!
+  ];
   const zByPath = new Map<string, number>();
-  for (const [index, path] of [...orderedPathsTopFirst].reverse().entries()) {
-    zByPath.set(path, index);
+  for (const [index, node] of nextBackToFront.entries()) {
+    zByPath.set(node.projectRelativePath, index);
   }
-  return nodeElements.map((node) => {
-    const z = zByPath.get(node.projectRelativePath);
-    return z === undefined ? node : { ...node, z };
-  });
+  return nodeElements.map((node) => ({ ...node, z: zByPath.get(node.projectRelativePath)! }));
 }
 
 function structureEdgesForCanvasNodes(nodes: CanvasNodeElement[]): CanvasStructureEdgeProjection[] {

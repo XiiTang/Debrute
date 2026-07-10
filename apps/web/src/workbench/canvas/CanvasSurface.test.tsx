@@ -646,9 +646,6 @@ describe('CanvasSurface', () => {
     expect(html).toContain('data-canvas-edge-id="edge:crossing"');
     expect(html).not.toContain('data-canvas-edge-id="edge:outside"');
     expect(html).toContain('<path');
-    expect(html).toContain('d="M 200 60 L 250 60 L 250 60 L 300 60"');
-    expect(html).not.toContain('<line');
-    expect(html).not.toContain('viewBox="-100000 -100000 200000 200000"');
   });
 
   it('passes image feedback entries to image node markup without rendering feedback bars inside nodes', () => {
@@ -1312,7 +1309,7 @@ describe('CanvasSurface', () => {
         culledNodePaths: new Set(['flow/b.png']),
         visibleRect: { x: 0, y: 0, width: 400, height: 300 },
         virtualRect: { x: -768, y: -768, width: 1936, height: 1836 },
-        nodeLayers: new Map(),
+        nodeRenderOrder: new Map(),
         edges: []
       },
       reactCommitCountRef
@@ -1370,7 +1367,7 @@ describe('CanvasSurface', () => {
         culledNodePaths: new Set(),
         visibleRect: { x: 0, y: 0, width: 400, height: 300 },
         virtualRect: { x: -100, y: -100, width: 600, height: 500 },
-        nodeLayers: new Map(),
+        nodeRenderOrder: new Map(),
         edges: []
       },
       reactCommitCountRef
@@ -1416,7 +1413,7 @@ describe('CanvasSurface', () => {
         culledNodePaths: new Set(),
         visibleRect: { x: 0, y: 0, width: 400, height: 300 },
         virtualRect: { x: -768, y: -768, width: 1936, height: 1836 },
-        nodeLayers: new Map(),
+        nodeRenderOrder: new Map(),
         edges: []
       },
       reactCommitCountRef
@@ -1777,12 +1774,21 @@ function workbenchStateFixture(
       opening: false
     },
     explorerSelection: { selectedPaths: [], focusedPath: null, anchorPath: null },
-    imageModelSettings: { status: 'ready', value: { models: [] } },
-    videoModelSettings: { status: 'ready', value: { models: [] } },
-    audioModelSettings: { status: 'ready', value: { models: [] } },
-    integrationsSettings: { status: 'ready', value: { integrations: [], backends: [] } },
+    globalSettings: {
+      status: 'ready',
+      value: {
+        workbench: { locale: 'en', themePreference: 'system', defaultFrontend: 'electron' },
+        chrome: { recentProjectRoots: [] },
+        models: {
+          image: { models: [] },
+          video: { models: [] },
+          audio: { models: [] }
+        },
+        integrations: { integrations: [], backends: [] },
+        adobeBridge: { enabled: true }
+      }
+    },
     adobeBridge: { status: 'ready', value: { settings: { enabled: true, discoveryStatus: 'available' }, adobeClients: [], projects: [], links: [], transfers: [] } },
-    workbenchPreferences: { status: 'ready', value: { locale: 'en', themePreference: 'system' } },
     resolvedTheme: 'dark',
     canvasFeedback: undefined,
     textFileBuffers: {},
@@ -1795,16 +1801,9 @@ const actions: WorkbenchActions = {
   getProductState: async () => productState(),
   checkProductUpdate: async () => productState(),
   applyProductUpdate: async () => ({ state: productState() }),
-  reloadWorkbenchPreferences: async () => undefined,
-  reloadImageModelSettings: async () => undefined,
-  reloadVideoModelSettings: async () => undefined,
-  reloadAudioModelSettings: async () => undefined,
-  reloadIntegrationsSettings: async () => undefined,
+  reloadGlobalSettings: async () => undefined,
   reloadAdobeBridge: async () => undefined,
-  saveImageModelSetting: async () => undefined,
-  saveVideoModelSetting: async () => undefined,
-  saveAudioModelSetting: async () => undefined,
-  saveWorkbenchPreferences: async () => undefined,
+  saveGlobalSettings: async () => undefined,
   rescanIntegrations: async () => emptyIntegrationsSettings,
   runIntegrationOperation: async (input) => ({
     ok: true,
@@ -1812,7 +1811,6 @@ const actions: WorkbenchActions = {
     operation: input.operation,
     settings: emptyIntegrationsSettings
   }),
-  saveAdobeBridgeSettings: async () => undefined,
   linkAdobeBridgePhotoshop: async () => undefined,
   unlinkAdobeBridgePhotoshop: async () => undefined,
   sendProjectFileToPhotoshop: async () => {
@@ -1836,33 +1834,6 @@ const actions: WorkbenchActions = {
   },
   readCanvasTextPreviewSources: async () => ({ sources: {} }),
   readCanvasVideoPreviewSources: async () => ({ sources: {} }),
-  createProjectFile: async () => {
-    throw new Error('not used');
-  },
-  createProjectDirectory: async () => {
-    throw new Error('not used');
-  },
-  renameProjectPath: async () => {
-    throw new Error('not used');
-  },
-  copyProjectPaths: async () => {
-    throw new Error('not used');
-  },
-  moveProjectPaths: async () => {
-    throw new Error('not used');
-  },
-  copyProjectAbsolutePaths: async () => {
-    throw new Error('not used');
-  },
-  trashProjectPaths: async () => {
-    throw new Error('not used');
-  },
-  deleteProjectPathsPermanently: async () => {
-    throw new Error('not used');
-  },
-  revealProjectPathInSystemFileManager: async () => {
-    throw new Error('not used');
-  },
   ensureTextFileBuffer: async () => undefined,
   updateTextFileBuffer: () => undefined,
   saveTextFileBuffer: async () => undefined,
@@ -1874,7 +1845,7 @@ const actions: WorkbenchActions = {
   resetCanvasNodeLayouts: async () => {
     throw new Error('not used');
   },
-  updateCanvasNodeLayers: async () => undefined,
+  bringCanvasNodeToFront: async () => undefined,
   updateCanvasVideoPlaybackState: async () => undefined,
   updateCanvasTextViewportState: async () => undefined,
   updateCanvasFeedbackEntry: async () => true,

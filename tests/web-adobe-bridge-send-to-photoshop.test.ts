@@ -11,6 +11,7 @@ describe('SendToPhotoshopDialog', () => {
       React.createElement(I18nProvider, { locale: 'en' }, React.createElement(SendToPhotoshopDialog, {
         projectId: 'project-1',
         projectRelativePath: 'assets/cover.png',
+        enabled: true,
         bridge: bridgeState(),
         sending: false,
         onSend: () => undefined,
@@ -22,6 +23,41 @@ describe('SendToPhotoshopDialog', () => {
     expect(html).toContain('Photoshop 2026 · No document open');
     expect(html).not.toContain('Unlinked Photoshop');
     expect(html).toContain('disabled=""');
+  });
+
+  it('does not list live linked clients when persisted settings are disabled', () => {
+    const html = renderToStaticMarkup(
+      React.createElement(I18nProvider, { locale: 'en' }, React.createElement(SendToPhotoshopDialog, {
+        projectId: 'project-1',
+        projectRelativePath: 'assets/cover.png',
+        enabled: false,
+        bridge: bridgeState(),
+        sending: false,
+        onSend: () => undefined,
+        onClose: () => undefined
+      }))
+    );
+
+    expect(html).not.toContain('Photoshop 2026 · poster.psd');
+    expect(html).not.toContain('Photoshop 2026 · No document open');
+  });
+
+  it('renders an explicit empty state when no Photoshop clients are linked', () => {
+    const html = renderToStaticMarkup(
+      React.createElement(I18nProvider, { locale: 'en' }, React.createElement(SendToPhotoshopDialog, {
+        projectId: 'project-1',
+        projectRelativePath: 'assets/cover.png',
+        enabled: true,
+        bridge: { ...bridgeState(), links: [] },
+        sending: false,
+        onSend: () => undefined,
+        onClose: () => undefined
+      }))
+    );
+
+    expect(html).toContain('class="db-empty-state"');
+    expect(html).toContain('No linked Photoshop clients.');
+    expect(html).not.toContain('class="db-record-row"');
   });
 });
 

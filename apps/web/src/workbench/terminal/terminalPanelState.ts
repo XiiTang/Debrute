@@ -48,7 +48,8 @@ export function finishClosingTerminalSession(
 }
 
 export function isTerminalSessionClosing(state: TerminalPanelState, terminalId: string): boolean {
-  return state.closingSessionIds.includes(terminalId);
+  return state.closingSessionIds.includes(terminalId)
+    || state.sessions.some((session) => session.id === terminalId && session.status === 'terminating');
 }
 
 export function shouldShowTerminalEmptyState(state: TerminalPanelState): boolean {

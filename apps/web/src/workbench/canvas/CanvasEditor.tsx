@@ -1,12 +1,13 @@
 import React from 'react';
 import { Boxes } from 'lucide-react';
-import type { CanvasFeedbackGeometry, ProjectedCanvasNode } from '@debrute/canvas-core';
+import type { ProjectedCanvasNode } from '@debrute/canvas-core';
 import type { WorkbenchActions, WorkbenchState } from '../../types';
 import type { WorkbenchContextMenuPosition, WorkbenchContextMenuTarget } from '../shell/contextMenu';
 import type { CanvasFeedbackBarTarget, CanvasLocalFeedbackDraft, FloatingBarRect } from '../shell/floatingBars';
 import { getCanvasById } from '../services/canvasState';
 import { CanvasSurface } from './CanvasSurface';
 import type { CanvasOverlayRuntime } from './CanvasOverlayRuntime';
+import type { PendingCanvasFeedbackItem } from './canvasFeedbackDraft';
 import type { CanvasMediaFeedbackMode } from './CanvasMediaFeedbackLayer';
 import type { CanvasEditorRuntime } from './runtime/CanvasEditorRuntime';
 import { createCanvasEditorRuntime } from './runtime/CanvasEditorRuntime';
@@ -43,13 +44,7 @@ export function CanvasEditor({
   onRuntimeChange?: ((runtime: CanvasEditorRuntime | undefined) => void) | undefined;
   onOpenContextMenu?: ((target: WorkbenchContextMenuTarget, position: WorkbenchContextMenuPosition) => void) | undefined;
   localFeedbackMode?: CanvasMediaFeedbackMode | undefined;
-  pendingFeedbackItem?: {
-    projectRelativePath: string;
-    scope: 'file' | 'moment';
-    momentTimeSeconds?: number | undefined;
-    label?: number | string | undefined;
-    geometry?: CanvasFeedbackGeometry | undefined;
-  } | undefined;
+  pendingFeedbackItem?: PendingCanvasFeedbackItem | undefined;
   onLocalFeedbackDraft?: ((input: CanvasLocalFeedbackDraft) => void) | undefined;
 }): React.ReactElement {
   const canvas = getCanvasById(state.snapshot, canvasId);

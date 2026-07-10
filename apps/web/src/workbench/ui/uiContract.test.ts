@@ -74,6 +74,7 @@ describe('Workbench UI system contract', () => {
     for (const exportName of [
       'Button',
       'IconButton',
+      'CloseButton',
       'Field',
       'Input',
       'SecretInput',
@@ -82,9 +83,7 @@ describe('Workbench UI system contract', () => {
       'Switch',
       'Card',
       'Panel',
-      'PanelHeader',
       'PanelBody',
-      'PanelTitle',
       'Toolbar',
       'Menu',
       'Tab',
@@ -96,70 +95,23 @@ describe('Workbench UI system contract', () => {
     ]) {
       expect(contents).toContain(exportName);
     }
-    for (const unusedExport of [
-      'Checkbox',
-      'Slider',
-      'Tooltip',
-      'Dialog',
-      'Popover',
-      'Spinner',
-      'Command',
-      'Combobox',
-      'CommentPillInputBadgeMode',
-      'CommentPillInputContainerProps'
-    ]) {
-      expect(contents).not.toContain(unusedExport);
+  });
+
+  it('keeps primitive control chrome with the control stylesheet', () => {
+    const controls = readFileSync('apps/web/src/workbench/ui/styles/controls.css', 'utf8');
+
+    for (const selector of ['.db-tabs', '.db-tab', '.db-workbench-close-button']) {
+      expect(controls).toContain(selector);
     }
   });
 
-  it('defines final project-level Workbench pattern selectors', () => {
-    const patterns = readFileSync('apps/web/src/workbench/ui/styles/workbench-patterns.css', 'utf8');
+  it('keeps domain chrome with its owning feature stylesheet', () => {
+    const explorer = readFileSync('apps/web/src/workbench/styles/explorer.css', 'utf8');
+    const terminal = readFileSync('apps/web/src/workbench/styles/terminal.css', 'utf8');
+    const canvas = readFileSync('apps/web/src/workbench/styles/canvas.css', 'utf8');
 
-    for (const selector of [
-      '.db-settings-section',
-      '.db-settings-section__header',
-      '.db-form-grid',
-      '.db-form-row',
-      '.db-action-row',
-      '.db-model-card',
-      '.db-model-card__header',
-      '.db-model-card__fields',
-      '.db-secret-field',
-      '.db-status-list',
-      '.db-project-open',
-      '.db-project-open__meta',
-      '.db-integration-list',
-      '.db-integration-row',
-      '.db-integration-row__action',
-      '.db-integration-summary',
-      '.db-object-properties',
-      '.db-diagnostic-row',
-      '.db-floating-bar',
-      '.db-canvas-control',
-      '.db-canvas-card'
-    ]) {
-      expect(patterns).toContain(selector);
-    }
+    expect(explorer).toContain('.db-tree-row');
+    expect(terminal).toContain('.db-terminal-tabs');
+    expect(canvas).toContain('.db-canvas-control');
   });
-
-  it('defines compact wrapping styles for Canvas generic nodes', () => {
-    const patterns = readFileSync('apps/web/src/workbench/ui/styles/workbench-patterns.css', 'utf8');
-
-    expect(patterns).toMatch(/\.db-canvas-node-generic\s*{[^}]*box-sizing: border-box;/);
-    expect(patterns).toMatch(/\.db-canvas-node-generic\s*{[^}]*grid-template-columns: 20px minmax\(0, 1fr\);/);
-    expect(patterns).toMatch(/\.db-canvas-node-generic\s*{[^}]*gap: 2px 8px;/);
-    expect(patterns).toMatch(/\.db-canvas-node-generic\s*{[^}]*padding: 8px 12px;/);
-    expect(patterns).toMatch(/\.db-canvas-node-generic__label\s*{[^}]*white-space: nowrap;/);
-    expect(patterns).toMatch(/\.db-canvas-node-generic--wrap \.db-canvas-node-generic__label\s*{[^}]*white-space: normal;/);
-    expect(patterns).toMatch(/\.db-canvas-node-generic--wrap \.db-canvas-node-generic__label\s*{[^}]*overflow-wrap: anywhere;/);
-    expect(patterns).toMatch(/\.db-canvas-node-generic--wrap \.db-canvas-node-generic__label\s*{[^}]*-webkit-line-clamp: 3;/);
-  });
-
-  it('keeps Canvas text node title bars flush with their text bodies', () => {
-    const patterns = readFileSync('apps/web/src/workbench/ui/styles/workbench-patterns.css', 'utf8');
-
-    expect(patterns).toMatch(/\.db-canvas-node-titlebar\s*{/);
-    expect(patterns).not.toMatch(/\.db-canvas-node-titlebar\s*{[^}]*border-bottom:/);
-  });
-
 });

@@ -17,4 +17,9 @@ describe('public product documentation contract', () => {
     expect(combined).toContain('pnpm package:runtime-cli');
     expect(combined).toContain('Project, Canvas Map, and generation commands are runtime-backed');
   });
+
+  it('describes Canvas node ordering as stack order, not layers', () => {
+    expect(combined).toContain('node layout, stack order, annotations, and preferences');
+    expect(combined).not.toContain('node layout, z-order, annotations, and preferences');
+  });
 });

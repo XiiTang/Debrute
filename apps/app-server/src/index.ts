@@ -20,9 +20,11 @@ export {
 
 export {
   GlobalConfigStore,
-  type AdobeBridgeConfig,
-  type GlobalConfigPaths,
-  type WorkbenchChromeConfig
+  GlobalSettingsValidationError,
+  type DebruteGlobalConfigSnapshot,
+  type DebruteGlobalSettingsConfig,
+  type GlobalConfigMutation,
+  type GlobalConfigMutationResult
 } from './config/GlobalConfigStore.js';
 
 export type {

@@ -1,7 +1,7 @@
 import { mkdir, mkdtemp, realpath, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { afterEach, describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import { DebruteAppServer } from '@debrute/app-server';
 import { TerminalService } from '../apps/app-server/src/terminal/TerminalService';
 import type {
@@ -164,9 +164,30 @@ describe('TerminalService', () => {
 
     service.closeAll();
 
-    expect(factory.ptys[1]!.killedWith).toBeUndefined();
+    expect(factory.ptys[1]!.terminated).toBe(true);
+    expect(factory.ptys[1]!.forceKilled).toBe(true);
     expect(service.listSessions()).toEqual([]);
     expect(second.id).toBe('terminal-2');
+  });
+
+  it('clears all sessions during shutdown when one PTY termination fails', async () => {
+    const projectRoot = await tempProjectRoot('terminal-service-close-all-error-');
+    const factory = createFakePtyFactory();
+    const service = new TerminalService({
+      projectRoot,
+      ptyFactory: factory.factory,
+      idFactory: sequentialIds('terminal-'),
+      now: fixedNow
+    });
+    await service.createSession();
+    await service.createSession();
+    factory.ptys[0]!.terminateError = new Error('terminate denied');
+
+    service.closeAll();
+
+    expect(factory.ptys[1]!.terminated).toBe(true);
+    expect(factory.ptys[1]!.forceKilled).toBe(true);
+    expect(service.listSessions()).toEqual([]);
   });
 
   it('sends current exited status to subscribers that attach after PTY exit', async () => {
@@ -238,8 +259,8 @@ describe('TerminalService', () => {
     ]);
   });
 
-  it('publishes a closed event before removing a terminal session', async () => {
-    const projectRoot = await tempProjectRoot('terminal-service-close-event-');
+  it('publishes terminating, waits for PTY exit, then closes and removes a running session', async () => {
+    const projectRoot = await tempProjectRoot('terminal-service-close-running-');
     const factory = createFakePtyFactory();
     const service = new TerminalService({
       projectRoot,
@@ -251,10 +272,174 @@ describe('TerminalService', () => {
     const events: unknown[] = [];
     service.subscribe(session.id, (event) => events.push(event));
 
-    service.close({ terminalId: session.id });
+    const closePromise = service.close({ terminalId: session.id });
 
-    expect(events).toContainEqual({ type: 'closed', terminalId: session.id });
+    expect(closePromise).toBeInstanceOf(Promise);
+    expect(factory.ptys[0]!.terminated).toBe(true);
+    expect(service.listSessions()).toEqual([
+      expect.objectContaining({ id: session.id, status: 'terminating' })
+    ]);
+    expect(() => service.writeInput({ terminalId: session.id, data: 'x' })).toThrow('Terminal is not running');
+
+    factory.ptys[0]!.emitExit({ exitCode: 0, signal: 'SIGHUP' });
+    await closePromise;
+
+    expect(events).toEqual([
+      { type: 'replay', terminalId: session.id, chunks: [], lastSequence: 0 },
+      expect.objectContaining({
+        type: 'status',
+        terminalId: session.id,
+        session: expect.objectContaining({ status: 'terminating' })
+      }),
+      { type: 'exit', terminalId: session.id, exitCode: 0, signal: 'SIGHUP' },
+      expect.objectContaining({
+        type: 'status',
+        terminalId: session.id,
+        session: expect.objectContaining({ status: 'exited', exitCode: 0, signal: 'SIGHUP' })
+      }),
+      { type: 'closed', terminalId: session.id }
+    ]);
     expect(service.listSessions()).toEqual([]);
+  });
+
+  it('deduplicates duplicate close requests for one session', async () => {
+    const projectRoot = await tempProjectRoot('terminal-service-close-dedupe-');
+    const factory = createFakePtyFactory();
+    const service = new TerminalService({
+      projectRoot,
+      ptyFactory: factory.factory,
+      idFactory: () => 'terminal-1',
+      now: fixedNow
+    });
+    const session = await service.createSession();
+
+    const first = service.close({ terminalId: session.id });
+    const second = service.close({ terminalId: session.id });
+
+    expect(second).toBe(first);
+    factory.ptys[0]!.emitExit({ exitCode: 0, signal: 'SIGHUP' });
+    await Promise.all([first, second]);
+    expect(service.listSessions()).toEqual([]);
+  });
+
+  it('force-kills a terminal that does not exit within the close grace window', async () => {
+    vi.useFakeTimers();
+    try {
+      const projectRoot = await tempProjectRoot('terminal-service-close-force-');
+      const factory = createFakePtyFactory();
+      const service = new TerminalService({
+        projectRoot,
+        ptyFactory: factory.factory,
+        idFactory: () => 'terminal-1',
+        now: fixedNow
+      });
+      const session = await service.createSession();
+
+      const closePromise = service.close({ terminalId: session.id });
+      await vi.advanceTimersByTimeAsync(1000);
+      await closePromise;
+
+      expect(factory.ptys[0]!.terminated).toBe(true);
+      expect(factory.ptys[0]!.forceKilled).toBe(true);
+      expect(service.listSessions()).toEqual([]);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('restores a running session and permits retry when PTY termination fails', async () => {
+    const projectRoot = await tempProjectRoot('terminal-service-close-terminate-error-');
+    const factory = createFakePtyFactory();
+    const service = new TerminalService({
+      projectRoot,
+      ptyFactory: factory.factory,
+      idFactory: () => 'terminal-1',
+      now: fixedNow
+    });
+    const session = await service.createSession();
+    const events: unknown[] = [];
+    service.subscribe(session.id, (event) => events.push(event));
+    factory.ptys[0]!.terminateError = new Error('terminate denied');
+
+    const closeError = await captureError(() => service.close({ terminalId: session.id }));
+    expect(closeError).toBeInstanceOf(Error);
+    expect((closeError as { code?: unknown }).code).toBe('terminal_close_failed');
+    expect((closeError as Error).message).toBe('Terminal close failed: terminate denied');
+
+    expect(service.listSessions()).toEqual([
+      expect.objectContaining({ id: session.id, status: 'running' })
+    ]);
+    expect(events).toEqual([
+      { type: 'replay', terminalId: session.id, chunks: [], lastSequence: 0 },
+      expect.objectContaining({
+        type: 'status',
+        terminalId: session.id,
+        session: expect.objectContaining({ status: 'terminating' })
+      }),
+      {
+        type: 'error',
+        terminalId: session.id,
+        code: 'terminal_close_failed',
+        message: 'Terminal close failed: terminate denied'
+      },
+      expect.objectContaining({
+        type: 'status',
+        terminalId: session.id,
+        session: expect.objectContaining({ status: 'running' })
+      })
+    ]);
+
+    factory.ptys[0]!.terminateError = undefined;
+    const retry = service.close({ terminalId: session.id });
+    factory.ptys[0]!.emitExit({ exitCode: 0, signal: 'SIGHUP' });
+    await retry;
+
+    expect(service.listSessions()).toEqual([]);
+  });
+
+  it('restores a running session and permits retry when PTY force kill fails', async () => {
+    vi.useFakeTimers();
+    try {
+      const projectRoot = await tempProjectRoot('terminal-service-close-force-error-');
+      const factory = createFakePtyFactory();
+      const service = new TerminalService({
+        projectRoot,
+        ptyFactory: factory.factory,
+        idFactory: () => 'terminal-1',
+        now: fixedNow
+      });
+      const session = await service.createSession();
+      const events: unknown[] = [];
+      service.subscribe(session.id, (event) => events.push(event));
+      factory.ptys[0]!.forceKillError = new Error('kill denied');
+
+      const closePromise = service.close({ terminalId: session.id });
+      const closeErrorPromise = closePromise.catch((error: unknown) => error);
+      await vi.advanceTimersByTimeAsync(1000);
+
+      const closeError = await closeErrorPromise;
+      expect(closeError).toBeInstanceOf(Error);
+      expect((closeError as { code?: unknown }).code).toBe('terminal_close_failed');
+      expect((closeError as Error).message).toBe('Terminal close failed: kill denied');
+      expect(service.listSessions()).toEqual([
+        expect.objectContaining({ id: session.id, status: 'running' })
+      ]);
+      expect(events).toContainEqual({
+        type: 'error',
+        terminalId: session.id,
+        code: 'terminal_close_failed',
+        message: 'Terminal close failed: kill denied'
+      });
+
+      factory.ptys[0]!.forceKillError = undefined;
+      const retry = service.close({ terminalId: session.id });
+      await vi.advanceTimersByTimeAsync(1000);
+      await retry;
+
+      expect(service.listSessions()).toEqual([]);
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it('keeps a failed spawn session inspectable without accepting input', async () => {
@@ -291,6 +476,8 @@ describe('TerminalService', () => {
       }
     ]);
 
+    await service.close({ terminalId: failed.id });
+    expect(service.listSessions()).toEqual([]);
   });
 
   it('exposes terminal methods through DebruteAppServer and closes PTYs with the server', async () => {
@@ -313,7 +500,8 @@ describe('TerminalService', () => {
 
       server.close();
 
-      expect(factory.ptys[0]!.killedWith).toBeUndefined();
+      expect(factory.ptys[0]!.terminated).toBe(true);
+      expect(factory.ptys[0]!.forceKilled).toBe(true);
       expect(() => server.listTerminalSessions()).toThrow('Terminal service is unavailable');
     } finally {
       server.close();
@@ -363,7 +551,10 @@ function createFakePtyFactory(options: { failFirstSpawn?: boolean } = {}): {
 class FakeTerminalPty implements TerminalPty {
   writes: string[] = [];
   resizes: Array<{ cols: number; rows: number }> = [];
-  killedWith: string | undefined;
+  terminated = false;
+  forceKilled = false;
+  terminateError: Error | undefined;
+  forceKillError: Error | undefined;
   private readonly dataListeners = new Set<(data: string) => void>();
   private readonly exitListeners = new Set<(event: TerminalPtyExit) => void>();
 
@@ -377,8 +568,18 @@ class FakeTerminalPty implements TerminalPty {
     this.resizes.push({ cols, rows });
   }
 
-  kill(signal?: string): void {
-    this.killedWith = signal;
+  terminate(): void {
+    if (this.terminateError) {
+      throw this.terminateError;
+    }
+    this.terminated = true;
+  }
+
+  forceKill(): void {
+    if (this.forceKillError) {
+      throw this.forceKillError;
+    }
+    this.forceKilled = true;
   }
 
   onData(listener: (data: string) => void): TerminalPtyDisposable {
@@ -401,5 +602,14 @@ class FakeTerminalPty implements TerminalPty {
     for (const listener of this.exitListeners) {
       listener(event);
     }
+  }
+}
+
+async function captureError(action: () => Promise<unknown>): Promise<unknown> {
+  try {
+    await action();
+    return undefined;
+  } catch (error) {
+    return error;
   }
 }

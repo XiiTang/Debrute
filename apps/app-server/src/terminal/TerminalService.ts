@@ -31,12 +31,15 @@ interface TerminalSession {
   replayBuffer: TerminalReplayBuffer;
   disposables: TerminalPtyDisposable[];
   subscribers: Set<(event: TerminalEvent) => void>;
+  closePromise: Promise<void> | null;
+  exitWaiters: Set<() => void>;
 }
 
 const DEFAULT_COLS = 80;
 const DEFAULT_ROWS = 24;
 const DEFAULT_REPLAY_MAX_LINES = 10_000;
 const DEFAULT_REPLAY_MAX_BYTES = 4 * 1024 * 1024;
+export const TERMINAL_CLOSE_GRACE_MS = 1000;
 
 export class TerminalService {
   private readonly ptyFactory: TerminalPtyFactory;
@@ -82,7 +85,9 @@ export class TerminalService {
       pty: null,
       replayBuffer: this.createReplayBuffer(),
       disposables: [],
-      subscribers: new Set()
+      subscribers: new Set(),
+      closePromise: null,
+      exitWaiters: new Set()
     };
     this.sessions.set(session.view.id, session);
     this.spawnSession(session, cwd);
@@ -111,14 +116,25 @@ export class TerminalService {
     return { ...session.view };
   }
 
-  close(input: CloseTerminalSessionInput): void {
+  close(input: CloseTerminalSessionInput): Promise<void> {
     const session = this.requireSession(input.terminalId);
-    this.closeSession(session);
+    if (session.closePromise) {
+      return session.closePromise;
+    }
+    let resolveClose!: () => void;
+    let rejectClose!: (error: unknown) => void;
+    const closePromise = new Promise<void>((resolve, reject) => {
+      resolveClose = resolve;
+      rejectClose = reject;
+    });
+    session.closePromise = closePromise;
+    void this.closeSession(session).then(resolveClose, rejectClose);
+    return closePromise;
   }
 
   closeAll(): void {
     for (const session of [...this.sessions.values()]) {
-      this.closeSession(session);
+      this.terminateSessionForShutdown(session);
     }
   }
 
@@ -192,6 +208,10 @@ export class TerminalService {
       signal
     });
     this.publish(session, { type: 'status', terminalId: session.view.id, session: { ...session.view } });
+    for (const resolve of session.exitWaiters) {
+      resolve();
+    }
+    session.exitWaiters.clear();
   }
 
   private handleSpawnFailure(session: TerminalSession, message: string): void {
@@ -225,27 +245,86 @@ export class TerminalService {
     this.publish(session, { type: 'status', terminalId: session.view.id, session: { ...session.view } });
   }
 
-  private disposePty(session: TerminalSession): void {
-    const pty = session.pty;
-    this.disposeSubscriptions(session);
-    session.pty = null;
-    if (pty) {
-      pty.kill();
+  private disposePtyListeners(session: TerminalSession): void {
+    for (const disposable of session.disposables) {
+      disposable.dispose();
+    }
+    session.disposables = [];
+    session.exitWaiters.clear();
+  }
+
+  private async closeSession(session: TerminalSession): Promise<void> {
+    const previousStatus = session.view.status;
+    try {
+      if (session.view.status === 'running' || session.view.status === 'starting') {
+        this.updateStatus(session, 'terminating');
+        session.pty?.terminate();
+        const exited = await this.waitForExit(session, TERMINAL_CLOSE_GRACE_MS);
+        if (!exited && session.pty) {
+          session.pty.forceKill();
+        }
+      }
+
+      this.disposePtyListeners(session);
+      session.pty = null;
+      this.publish(session, { type: 'closed', terminalId: session.view.id });
+      this.sessions.delete(session.view.id);
+      session.subscribers.clear();
+    } catch (error) {
+      session.closePromise = null;
+      const closeError = terminalCloseFailedError(error);
+      this.publish(session, {
+        type: 'error',
+        terminalId: session.view.id,
+        code: closeError.code,
+        message: closeError.message
+      });
+      if (session.view.status === 'terminating') {
+        this.updateStatus(session, previousStatus);
+      }
+      throw closeError;
     }
   }
 
-  private closeSession(session: TerminalSession): void {
-    this.disposePty(session);
+  private terminateSessionForShutdown(session: TerminalSession): void {
+    if (session.view.status === 'running' || session.view.status === 'starting' || session.view.status === 'terminating') {
+      this.runShutdownPtyCleanup(() => session.pty?.terminate());
+      this.runShutdownPtyCleanup(() => session.pty?.forceKill());
+    }
+    this.disposePtyListeners(session);
+    session.pty = null;
     this.publish(session, { type: 'closed', terminalId: session.view.id });
     this.sessions.delete(session.view.id);
     session.subscribers.clear();
   }
 
-  private disposeSubscriptions(session: TerminalSession): void {
-    for (const disposable of session.disposables) {
-      disposable.dispose();
+  private runShutdownPtyCleanup(cleanup: () => void): void {
+    try {
+      cleanup();
+    } catch {
+      // Project/runtime shutdown must continue clearing every owned terminal session.
     }
-    session.disposables = [];
+  }
+
+  private waitForExit(session: TerminalSession, timeoutMs: number): Promise<boolean> {
+    if (!session.pty) {
+      return Promise.resolve(true);
+    }
+    return new Promise((resolve) => {
+      let settled = false;
+      const finish = (exited: boolean) => {
+        if (settled) {
+          return;
+        }
+        settled = true;
+        clearTimeout(timer);
+        session.exitWaiters.delete(onExit);
+        resolve(exited);
+      };
+      const onExit = () => finish(true);
+      const timer = setTimeout(() => finish(false), timeoutMs);
+      session.exitWaiters.add(onExit);
+    });
   }
 
   private publish(session: TerminalSession, event: TerminalEvent): void {
@@ -306,4 +385,12 @@ function defaultShell(): string {
     return process.env.ComSpec ?? 'cmd.exe';
   }
   return process.env.SHELL ?? '/bin/sh';
+}
+
+function terminalCloseFailedError(error: unknown): ReturnType<typeof serviceError> {
+  return serviceError('terminal_close_failed', `Terminal close failed: ${errorMessage(error)}`);
+}
+
+function errorMessage(error: unknown): string {
+  return error instanceof Error ? error.message : String(error);
 }

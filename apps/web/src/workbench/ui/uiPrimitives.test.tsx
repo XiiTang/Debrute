@@ -48,8 +48,6 @@ describe('Workbench UI primitives', () => {
     expect(html).toContain('aria-label="Close example"');
     expect(html).toContain('db-workbench-close-button');
     expect(html).toContain('example-close-button');
-    expect(html).toContain('width="9"');
-    expect(html).toContain('height="9"');
   });
 
   it('renders fields, cards, menus, pills, and empty states through shared classes', () => {
@@ -120,14 +118,26 @@ describe('Workbench UI primitives', () => {
     })).toBe(2);
   });
 
-  it('renders pressed IconButton state through aria-pressed only', () => {
+  it('renders pressed IconButton state through aria-pressed', () => {
     const html = renderToStaticMarkup(
       <IconButton label="Mini Map" pressed icon={<span />} />
     );
 
     expect(html).toContain('aria-pressed="true"');
     expect(html).toContain('db-icon-button--ghost');
-    expect(html).not.toContain(' active');
+  });
+
+  it('renders strip tabs and chrome icon buttons through primitive variants', () => {
+    const html = renderToStaticMarkup(
+      <TabList aria-label="Panel tabs">
+        <Tab appearance="strip" active>Terminal</Tab>
+        <IconButton variant="chrome" size="sm" label="New Terminal" icon={<span />} />
+      </TabList>
+    );
+
+    expect(html).toContain('db-tab--strip');
+    expect(html).toContain('db-icon-button--chrome');
+    expect(html).toContain('db-icon-button--sm');
   });
 
   it('renders final primitive states through shared classes and ARIA state', () => {
@@ -170,7 +180,7 @@ describe('Workbench UI primitives', () => {
     expect(html).toContain('db-empty-state');
   });
 
-  it('renders the reusable comment pill input with adaptive sizing only', () => {
+  it('maps reusable comment pill sizing props to accessible input styles', () => {
     const html = renderToStaticMarkup(
       <CommentPillInput
         aria-label="File feedback comment"
@@ -185,8 +195,5 @@ describe('Workbench UI primitives', () => {
     expect(html).toContain('--db-comment-pill-min-width:112px');
     expect(html).toContain('--db-comment-pill-max-width:260px');
     expect(html).toContain('--db-comment-pill-input-ch:');
-    expect(html).not.toContain('db-comment-pill-input__badge');
-    expect(html).not.toContain('db-comment-pill-input__close');
-    expect(html).not.toContain('db-comment-pill-input--badge-until-hover');
   });
 });

@@ -132,15 +132,42 @@ export interface DebruteHttpErrorBody {
 
 export type WorkbenchLocale = 'en' | 'zh-CN';
 export type WorkbenchThemePreference = 'system' | 'dark' | 'light';
+export type DebruteDefaultFrontend = 'electron' | 'browser' | 'runtime-only';
 
-export interface WorkbenchPreferencesView {
+export interface DebruteGlobalWorkbenchSettings {
   locale: WorkbenchLocale;
   themePreference: WorkbenchThemePreference;
+  defaultFrontend: DebruteDefaultFrontend;
 }
 
-export interface SaveWorkbenchPreferencesInput {
-  locale: WorkbenchLocale;
-  themePreference: WorkbenchThemePreference;
+export interface DebruteGlobalChromeSettings {
+  recentProjectRoots: string[];
+}
+
+export interface DebruteGlobalAdobeBridgeSettings {
+  enabled: boolean;
+}
+
+export interface DebruteGlobalSettingsView {
+  workbench: DebruteGlobalWorkbenchSettings;
+  chrome: DebruteGlobalChromeSettings;
+  models: {
+    image: ImageModelSettingsView;
+    video: VideoModelSettingsView;
+    audio: AudioModelSettingsView;
+  };
+  integrations: IntegrationSettingsView;
+  adobeBridge: DebruteGlobalAdobeBridgeSettings;
+}
+
+export interface SaveDebruteGlobalSettingsInput {
+  workbench?: Partial<DebruteGlobalWorkbenchSettings>;
+  models?: {
+    image?: { modelId: string; setting: SaveImageModelSettingInput };
+    video?: { modelId: string; setting: SaveVideoModelSettingInput };
+    audio?: { modelId: string; setting: SaveAudioModelSettingInput };
+  };
+  adobeBridge?: SaveAdobeBridgeSettingsInput;
 }
 
 export type DebruteAgentFieldValue = string | number | boolean | null;
@@ -763,7 +790,7 @@ export interface GeneratedAssetsView {
   assets: GeneratedAssetView[];
 }
 
-export type TerminalSessionStatus = 'starting' | 'running' | 'exited' | 'failed';
+export type TerminalSessionStatus = 'starting' | 'running' | 'terminating' | 'exited' | 'failed';
 
 export interface TerminalSessionView {
   id: string;
@@ -1065,12 +1092,7 @@ export type AppServerEvent =
   | { type: 'canvas.changed'; canvas: CanvasDocument; projection: CanvasProjection }
   | { type: 'canvas.feedback.changed'; feedback: CanvasFeedbackDocument }
   | { type: 'generatedAsset.metadata.changed'; record: GeneratedAssetRecord }
-  | { type: 'imageModel.settings.changed'; settings: ImageModelSettingsView }
-  | { type: 'videoModel.settings.changed'; settings: VideoModelSettingsView }
-  | { type: 'audioModel.settings.changed'; settings: AudioModelSettingsView }
-  | { type: 'integrations.settings.changed'; settings: IntegrationSettingsView }
-  | { type: 'adobeBridge.settings.changed'; settings: AdobeBridgeSettings }
-  | { type: 'workbench.preferences.changed'; preferences: WorkbenchPreferencesView };
+  | { type: 'globalSettings.changed'; settings: DebruteGlobalSettingsView };
 
 export type WorkbenchFileWatchEvent = Omit<NormalizedFileWatchEvent, 'absolutePath'>;
 
@@ -1081,19 +1103,13 @@ export type WorkbenchEvent =
   | { type: 'canvas.changed'; projectId: string; projectRevision: number; canvas: CanvasDocument; projection: CanvasProjection }
   | { type: 'canvas.feedback.changed'; projectId: string; projectRevision: number; feedback: CanvasFeedbackDocument }
   | { type: 'generatedAsset.metadata.changed'; projectId: string; projectRevision: number; record: GeneratedAssetRecord }
-  | { type: 'imageModel.settings.changed'; settings: ImageModelSettingsView }
-  | { type: 'videoModel.settings.changed'; settings: VideoModelSettingsView }
-  | { type: 'audioModel.settings.changed'; settings: AudioModelSettingsView }
-  | { type: 'integrations.settings.changed'; settings: IntegrationSettingsView }
-  | { type: 'adobeBridge.settings.changed'; settings: AdobeBridgeSettings }
-  | { type: 'workbench.preferences.changed'; preferences: WorkbenchPreferencesView }
+  | { type: 'globalSettings.changed'; settings: DebruteGlobalSettingsView }
   | { type: 'adobeBridge.state.changed'; state: AdobeBridgeStateView };
 
 export interface WorkbenchApiClient {
   readonly mode: 'web' | 'desktop';
   readonly clientId: string;
   adobeBridgeGetState(): Promise<AdobeBridgeStateView>;
-  adobeBridgeSaveSettings(input: SaveAdobeBridgeSettingsInput): Promise<AdobeBridgeStateView>;
   adobeBridgeLinkPhotoshop(input: CreateAdobeBridgeLinkInput): Promise<AdobeBridgeStateView>;
   adobeBridgeUnlinkPhotoshop(adobeClientId: string): Promise<AdobeBridgeStateView>;
   sendProjectFileToPhotoshop(input: SendProjectFileToPhotoshopInput): Promise<SendProjectFileToPhotoshopResult>;
@@ -1104,8 +1120,8 @@ export interface WorkbenchApiClient {
   getProductState(): Promise<DebruteProductState>;
   checkProductUpdate(): Promise<DebruteProductState>;
   applyProductUpdate(): Promise<ProductUpdateApplyResult>;
-  workbenchPreferencesGet(): Promise<WorkbenchPreferencesView>;
-  workbenchPreferencesSave(input: SaveWorkbenchPreferencesInput): Promise<WorkbenchPreferencesView>;
+  globalSettingsGet(): Promise<DebruteGlobalSettingsView>;
+  globalSettingsSave(input: SaveDebruteGlobalSettingsInput): Promise<DebruteGlobalSettingsView>;
   getSnapshot(): Promise<WorkbenchProjectRefreshResult>;
   getProjectHealth(): Promise<ProjectHealthSummary>;
   listTerminalSessions(): Promise<TerminalSessionList>;
@@ -1154,17 +1170,10 @@ export interface WorkbenchApiClient {
   updateCanvasVideoPlaybackState(input: UpdateCanvasVideoPlaybackStateInput): Promise<WorkbenchCanvasDocumentMutationResult>;
   updateCanvasTextViewportState(input: UpdateCanvasTextViewportStateInput): Promise<WorkbenchCanvasDocumentMutationResult>;
   resetCanvasNodeLayouts(input: ResetCanvasNodeLayoutsInput): Promise<WorkbenchCanvasResetLayoutResult>;
-  updateCanvasNodeLayers(input: {
+  bringCanvasNodeToFront(input: {
     canvasId: string;
-    nodeProjectRelativePathsTopFirst?: string[];
+    projectRelativePath: string;
   }): Promise<WorkbenchCanvasDocumentMutationResult>;
-  imageModelGetSettings(): Promise<ImageModelSettingsView>;
-  imageModelSaveSetting(modelId: string, input: SaveImageModelSettingInput): Promise<ImageModelSettingsView>;
-  videoModelGetSettings(): Promise<VideoModelSettingsView>;
-  videoModelSaveSetting(modelId: string, input: SaveVideoModelSettingInput): Promise<VideoModelSettingsView>;
-  audioModelGetSettings(): Promise<AudioModelSettingsView>;
-  audioModelSaveSetting(modelId: string, input: SaveAudioModelSettingInput): Promise<AudioModelSettingsView>;
-  integrationsListStatus(): Promise<IntegrationSettingsView>;
   integrationsRescan(): Promise<IntegrationSettingsView>;
   integrationsRunOperation(input: RunIntegrationOperationInput): Promise<RunIntegrationOperationResult>;
   onEvent(listener: (event: WorkbenchEvent) => void): () => void;

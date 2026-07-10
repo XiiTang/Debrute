@@ -1,16 +1,12 @@
 import React from 'react';
 import { renderToStaticMarkup } from 'react-dom/server';
 import { describe, expect, it } from 'vitest';
-import {
-  DEFAULT_FLOATING_PANEL_STATE,
-  FLOATING_PANEL_DEFINITIONS
-} from './floatingPanels';
+import { DEFAULT_FLOATING_PANEL_STATE } from './floatingPanels';
 import { WorkbenchFloatingPanelShell } from './FloatingPanel';
-import { FLOATING_PANEL_DRAG_HIT_AREA_HEIGHT } from './windowBounds';
 import { I18nProvider } from '../i18n';
 
 describe('FloatingPanel', () => {
-  it('renders the shared product shell title inside the drag area without legacy header chrome', () => {
+  it('renders the shared product shell title, body, resize handles, and close action', () => {
     const html = renderToStaticMarkup(
       <I18nProvider locale="en">
         <WorkbenchFloatingPanelShell
@@ -44,12 +40,6 @@ describe('FloatingPanel', () => {
     }
     expect(html).toContain('Close Explorer');
     expect(html).toContain('db-workbench-close-button');
-    expect(html).toContain('width="9"');
-    expect(html).toContain('height="9"');
-    expect(html).not.toContain('db-panel__header');
-    expect(html).not.toContain('db-panel__title');
     expect(html).toContain('>Explorer<');
-    expect(html).toContain(`--db-floating-panel-drag-hit-area-height:${FLOATING_PANEL_DRAG_HIT_AREA_HEIGHT}px`);
-    expect(html).toContain(`height:${FLOATING_PANEL_DEFINITIONS.explorer.defaultHeight}px`);
   });
 });

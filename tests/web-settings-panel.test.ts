@@ -4,7 +4,7 @@ import { describe, expect, it, vi } from 'vitest';
 import { SettingsPanel } from '../apps/web/src/workbench/settings/SettingsPanel';
 import { GeneralSettingsPage } from '../apps/web/src/workbench/settings/general/GeneralSettingsPage';
 import { I18nProvider } from '../apps/web/src/workbench/i18n';
-import { unavailableWorkbenchTitleBarState, type DebruteProductState } from '@debrute/app-protocol';
+import { unavailableWorkbenchTitleBarState, type DebruteGlobalSettingsView, type DebruteProductState } from '@debrute/app-protocol';
 import { createEmptyProjectTreeSelection } from '../apps/web/src/workbench/project-explorer/projectTreeInteraction';
 import type { WorkbenchActions, WorkbenchState } from '../apps/web/src/types';
 
@@ -18,7 +18,6 @@ describe('web Settings pages', () => {
     expect(html.match(/class="db-nav-row(?: db-nav-row--active)?"/g)).toHaveLength(8);
     expect(html).toContain('Application');
     expect(html).toContain('Updates');
-    expect(html.match(/Debrute CLI/g)).toHaveLength(1);
     expect(html).not.toContain('settings.debruteCli');
     expect(html).not.toContain('Install Debrute CLI');
   });
@@ -26,9 +25,9 @@ describe('web Settings pages', () => {
   it('renders runtime product update state and exactly one read-only CLI diagnostic line in General', () => {
     const html = renderWithI18n(React.createElement(GeneralSettingsPage, {
       actions: actionsFixture(),
-      preferences: { locale: 'en', themePreference: 'system' },
+      settings: globalSettingsFixture(),
       resolvedTheme: 'dark',
-      onPreferencesChange: async () => undefined,
+      onSettingsChange: async () => undefined,
       initialProductState: productState({
         update: {
           type: 'available',
@@ -39,7 +38,6 @@ describe('web Settings pages', () => {
       })
     }));
 
-    expect(html).toContain('General');
     expect(html).toContain('Application');
     expect(html).toContain('Updates');
     expect(html).toContain('Current version');
@@ -59,9 +57,9 @@ describe('web Settings pages', () => {
   it('renders product errors without exposing standalone CLI install actions', () => {
     const html = renderWithI18n(React.createElement(GeneralSettingsPage, {
       actions: actionsFixture(),
-      preferences: { locale: 'en', themePreference: 'system' },
+      settings: globalSettingsFixture(),
       resolvedTheme: 'dark',
-      onPreferencesChange: async () => undefined,
+      onSettingsChange: async () => undefined,
       initialProductState: productState({
         cli: {
           status: 'error',
@@ -114,14 +112,10 @@ function stateFixture(): WorkbenchState {
   return {
     snapshot: undefined,
     titleBarState: unavailableWorkbenchTitleBarState(),
-    workbenchPreferences: { status: 'ready', value: { locale: 'en', themePreference: 'system' } },
+    globalSettings: { status: 'ready', value: globalSettingsFixture() },
     resolvedTheme: 'dark',
     projectOpen: { opening: false },
     explorerSelection: createEmptyProjectTreeSelection(),
-    imageModelSettings: { status: 'ready', value: { models: [] } },
-    videoModelSettings: { status: 'ready', value: { models: [] } },
-    audioModelSettings: { status: 'ready', value: { models: [] } },
-    integrationsSettings: { status: 'ready', value: { integrations: [], backends: [] } },
     adobeBridge: { status: 'ready', value: { settings: { enabled: true, discoveryStatus: 'available' }, adobeClients: [], projects: [], links: [], transfers: [] } },
     canvasFeedback: undefined,
     textFileBuffers: {},
@@ -135,16 +129,9 @@ function actionsFixture(): WorkbenchActions {
     getProductState: vi.fn(async () => productState()),
     checkProductUpdate: vi.fn(async () => productState()),
     applyProductUpdate: vi.fn(async () => ({ state: productState() })),
-    reloadWorkbenchPreferences: vi.fn(async () => undefined),
-    reloadImageModelSettings: vi.fn(async () => undefined),
-    reloadVideoModelSettings: vi.fn(async () => undefined),
-    reloadAudioModelSettings: vi.fn(async () => undefined),
-    reloadIntegrationsSettings: vi.fn(async () => undefined),
+    reloadGlobalSettings: vi.fn(async () => undefined),
     reloadAdobeBridge: vi.fn(async () => undefined),
-    saveWorkbenchPreferences: vi.fn(async () => undefined),
-    saveImageModelSetting: vi.fn(async () => undefined),
-    saveVideoModelSetting: vi.fn(async () => undefined),
-    saveAudioModelSetting: vi.fn(async () => undefined),
+    saveGlobalSettings: vi.fn(async () => undefined),
     runIntegrationOperation: vi.fn(async (input) => ({
       ok: true,
       integrationId: input.integrationId,
@@ -152,4 +139,15 @@ function actionsFixture(): WorkbenchActions {
       settings: { integrations: [], backends: [] }
     }))
   } as unknown as WorkbenchActions;
+}
+
+function globalSettingsFixture(overrides: Partial<DebruteGlobalSettingsView> = {}): DebruteGlobalSettingsView {
+  return {
+    workbench: { locale: 'en', themePreference: 'system', defaultFrontend: 'electron' },
+    chrome: { recentProjectRoots: [] },
+    models: { image: { models: [] }, video: { models: [] }, audio: { models: [] } },
+    integrations: { integrations: [], backends: [] },
+    adobeBridge: { enabled: true },
+    ...overrides
+  };
 }

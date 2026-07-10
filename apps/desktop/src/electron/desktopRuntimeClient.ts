@@ -1,11 +1,12 @@
 import {
   openProjectFromPickerThroughDaemon,
+  projectWebBrowserLaunchUrl,
   openProjectThroughDaemon,
   projectWebShellNavigation,
   type DebruteDaemonRuntimeLike
 } from './daemonProjectOpen.js';
 import type { DebruteShellNavigation } from './desktopShellLoad.js';
-import type { WorkbenchPreferencesView, WorkbenchTitleBarState } from '@debrute/app-protocol';
+import type { DebruteGlobalSettingsView, WorkbenchTitleBarState } from '@debrute/app-protocol';
 
 type DesktopRuntimeFetch = (url: string, init?: RequestInit) => Promise<Response>;
 
@@ -13,10 +14,11 @@ export interface DesktopRuntimeClient {
   readonly mode: 'attached';
   runtime(): DebruteDaemonRuntimeLike;
   shellNavigation(projectId?: string): DebruteShellNavigation;
+  browserLaunchUrl(projectId?: string): string;
   openProject(projectRoot: string): Promise<{ projectId: string; navigation: DebruteShellNavigation }>;
   openProjectFromPicker(): Promise<{ opened: false } | { opened: true; projectId: string; navigation: DebruteShellNavigation }>;
   getWorkbenchTitleBarState(projectId?: string): Promise<WorkbenchTitleBarState>;
-  workbenchPreferencesGet(): Promise<WorkbenchPreferencesView>;
+  globalSettingsGet(): Promise<DebruteGlobalSettingsView>;
   clearRecentProjectRoots(): Promise<{ ok: true }>;
   registerElectronProjectWindow(projectId: string, windowId: number): Promise<{ projectRoot: string; release: () => Promise<void> }>;
   close(): Promise<void>;
@@ -36,27 +38,28 @@ export function createAttachedDesktopRuntimeClient(
     mode: 'attached',
     runtime: () => attachedRuntime,
     shellNavigation: (projectId) => projectWebShellNavigation(attachedRuntime, projectId),
+    browserLaunchUrl: (projectId) => projectWebBrowserLaunchUrl(attachedRuntime, projectId),
     openProject: (projectRoot) => openProjectThroughDaemon(attachedRuntime, projectRoot, fetchImpl),
     openProjectFromPicker: () => openProjectFromPickerThroughDaemon(attachedRuntime, fetchImpl),
     getWorkbenchTitleBarState: (projectId) => getWorkbenchTitleBarState(attachedRuntime, fetchImpl, projectId),
-    workbenchPreferencesGet: () => workbenchPreferencesGet(attachedRuntime, fetchImpl),
+    globalSettingsGet: () => globalSettingsGet(attachedRuntime, fetchImpl),
     clearRecentProjectRoots: () => clearRecentProjectRoots(attachedRuntime, fetchImpl),
     registerElectronProjectWindow: (projectId, windowId) => registerElectronProjectWindow(attachedRuntime, projectId, windowId, fetchImpl),
     close: async () => undefined
   };
 }
 
-async function workbenchPreferencesGet(
+async function globalSettingsGet(
   runtime: DebruteDaemonRuntimeLike,
   fetchImpl: DesktopRuntimeFetch
-): Promise<WorkbenchPreferencesView> {
-  const response = await fetchImpl(new URL('/api/settings/workbench-preferences', runtime.daemonUrl).toString(), {
+): Promise<DebruteGlobalSettingsView> {
+  const response = await fetchImpl(new URL('/api/settings/global', runtime.daemonUrl).toString(), {
     headers: { 'x-debrute-daemon-token': runtime.token }
   });
   if (!response.ok) {
-    throw new Error(`Debrute daemon Workbench preferences request failed: ${response.status}`);
+    throw new Error(`Debrute daemon global settings request failed: ${response.status}`);
   }
-  return response.json() as Promise<WorkbenchPreferencesView>;
+  return response.json() as Promise<DebruteGlobalSettingsView>;
 }
 
 async function getWorkbenchTitleBarState(

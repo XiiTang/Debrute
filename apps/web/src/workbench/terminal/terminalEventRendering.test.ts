@@ -45,6 +45,21 @@ describe('terminal event rendering', () => {
 
     expect(onSessionClose).toHaveBeenCalledWith('terminal-1');
   });
+
+  it('forwards terminating status updates to the panel state owner', () => {
+    const onSessionUpdate = vi.fn();
+    const render = createTerminalEventRenderer({
+      write: vi.fn(),
+      onSessionUpdate,
+      onSessionClose: vi.fn(),
+      onError: vi.fn()
+    });
+    const session = sessionFixture('terminal-1', 'terminating');
+
+    render({ type: 'status', terminalId: 'terminal-1', session });
+
+    expect(onSessionUpdate).toHaveBeenCalledExactlyOnceWith(session);
+  });
 });
 
 function replayEvent(chunks: Array<{ sequence: number; data: string }>): TerminalEvent {
@@ -53,5 +68,20 @@ function replayEvent(chunks: Array<{ sequence: number; data: string }>): Termina
     terminalId: 'terminal-1',
     chunks,
     lastSequence: chunks.at(-1)?.sequence ?? 0
+  };
+}
+
+function sessionFixture(id: string, status: 'running' | 'terminating') {
+  return {
+    id,
+    title: id,
+    cwdProjectRelativePath: '',
+    cols: 80,
+    rows: 24,
+    status,
+    exitCode: null,
+    signal: null,
+    createdAt: '2026-06-12T00:00:00.000Z',
+    updatedAt: '2026-06-12T00:00:00.000Z'
   };
 }

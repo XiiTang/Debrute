@@ -3,27 +3,29 @@ import {
   buildWorkbenchTitleBarState,
   type WorkbenchHostKind,
   type WorkbenchTitleBarState,
-  AdobeBridgeSettings,
   AppServerEvent,
-  AudioModelSettingsView,
-  ImageModelSettingsView,
+  DebruteGlobalAdobeBridgeSettings,
+  DebruteGlobalSettingsView,
   IntegrationSettingsView,
   RunIntegrationOperationInput,
   RunIntegrationOperationResult,
-  SaveAdobeBridgeSettingsInput,
-  SaveAudioModelSettingInput,
-  SaveImageModelSettingInput,
-  SaveWorkbenchPreferencesInput,
-  SaveVideoModelSettingInput,
-  VideoModelSettingsView,
-  WorkbenchPreferencesView
+  SaveDebruteGlobalSettingsInput
 } from '@debrute/app-protocol';
-import { AdobeBridgeSettingsService } from '../adobe-bridge/AdobeBridgeSettingsService.js';
-import { GlobalConfigStore } from '../config/GlobalConfigStore.js';
+import {
+  createAudioModelCatalog,
+  createAudioModelSettingsView,
+  createImageModelCatalog,
+  createImageModelSettingsView,
+  createVideoModelCatalog,
+  createVideoModelSettingsView
+} from '@debrute/capability-runtime';
+import {
+  GlobalConfigStore,
+  GlobalSettingsValidationError,
+  type DebruteGlobalConfigSnapshot,
+  type GlobalConfigMutationResult
+} from '../config/GlobalConfigStore.js';
 import { IntegrationsService } from '../integrations/IntegrationsService.js';
-import { AudioModelService } from '../models/AudioModelService.js';
-import { ImageModelService } from '../models/ImageModelService.js';
-import { VideoModelService } from '../models/VideoModelService.js';
 
 export interface DebruteGlobalRuntimeServerOptions {
   globalConfigStore?: GlobalConfigStore;
@@ -35,18 +37,13 @@ export interface DebruteGlobalRuntimeServerOptions {
 export class DebruteGlobalRuntimeServer {
   private readonly events = new EventEmitter();
   private readonly configStore: GlobalConfigStore;
-  private readonly imageModelService: ImageModelService;
-  private readonly videoModelService: VideoModelService;
-  private readonly audioModelService: AudioModelService;
+  private readonly imageCatalog = createImageModelCatalog();
+  private readonly videoCatalog = createVideoModelCatalog();
+  private readonly audioCatalog = createAudioModelCatalog();
   private readonly integrationsService: IntegrationsService;
-  private readonly adobeBridgeSettingsService: AdobeBridgeSettingsService;
 
   constructor(options: DebruteGlobalRuntimeServerOptions = {}) {
     this.configStore = options.globalConfigStore ?? new GlobalConfigStore();
-    this.imageModelService = new ImageModelService({ configStore: this.configStore });
-    this.videoModelService = new VideoModelService({ configStore: this.configStore });
-    this.audioModelService = new AudioModelService({ configStore: this.configStore });
-    this.adobeBridgeSettingsService = new AdobeBridgeSettingsService({ configStore: this.configStore });
     this.integrationsService = new IntegrationsService({
       ...(options.integrationEnvPath !== undefined ? { envPath: options.integrationEnvPath } : {}),
       ...(options.integrationPathExt !== undefined ? { pathExt: options.integrationPathExt } : {}),
@@ -59,90 +56,59 @@ export class DebruteGlobalRuntimeServer {
     return () => this.events.off('event', listener);
   }
 
-  async imageModelGetSettings(): Promise<ImageModelSettingsView> {
-    return this.imageModelService.getSettings();
-  }
-
-  async imageModelSaveSetting(modelId: string, input: SaveImageModelSettingInput): Promise<ImageModelSettingsView> {
-    const settings = await this.imageModelService.saveSetting(modelId, input);
-    this.emit({ type: 'imageModel.settings.changed', settings });
-    return settings;
-  }
-
-  async videoModelGetSettings(): Promise<VideoModelSettingsView> {
-    return this.videoModelService.getSettings();
-  }
-
-  async videoModelSaveSetting(modelId: string, input: SaveVideoModelSettingInput): Promise<VideoModelSettingsView> {
-    const settings = await this.videoModelService.saveSetting(modelId, input);
-    this.emit({ type: 'videoModel.settings.changed', settings });
-    return settings;
-  }
-
-  async audioModelGetSettings(): Promise<AudioModelSettingsView> {
-    return this.audioModelService.getSettings();
-  }
-
-  async audioModelSaveSetting(modelId: string, input: SaveAudioModelSettingInput): Promise<AudioModelSettingsView> {
-    const settings = await this.audioModelService.saveSetting(modelId, input);
-    this.emit({ type: 'audioModel.settings.changed', settings });
-    return settings;
-  }
-
-  async integrationsListStatus(): Promise<IntegrationSettingsView> {
-    return this.integrationsService.listStatus();
-  }
-
   async integrationsRescan(): Promise<IntegrationSettingsView> {
     const settings = await this.integrationsService.rescan();
-    this.emit({ type: 'integrations.settings.changed', settings });
+    await this.emitIntegrationSettingsChanged(settings);
     return settings;
   }
 
   async integrationsRunOperation(input: RunIntegrationOperationInput): Promise<RunIntegrationOperationResult> {
     return this.integrationsService.runOperation(input, {
-      onStarted: (settings) => this.emit({ type: 'integrations.settings.changed', settings }),
-      onSettled: (settings) => this.emit({ type: 'integrations.settings.changed', settings })
+      onStarted: async (settings) => {
+        await this.emitIntegrationSettingsChanged(settings);
+      },
+      onSettled: async (settings) => {
+        await this.emitIntegrationSettingsChanged(settings);
+      }
     });
   }
 
-  async adobeBridgeGetSettings(): Promise<AdobeBridgeSettings> {
-    return this.adobeBridgeSettingsService.getSettings();
+  async adobeBridgeGetPersistedSettings(): Promise<DebruteGlobalAdobeBridgeSettings> {
+    return (await this.configStore.readGlobalSettings()).adobeBridge;
   }
 
-  async adobeBridgeSaveSettings(input: SaveAdobeBridgeSettingsInput): Promise<AdobeBridgeSettings> {
-    const settings = await this.adobeBridgeSettingsService.saveSettings(input);
-    this.emit({ type: 'adobeBridge.settings.changed', settings });
+  async globalSettingsGet(): Promise<DebruteGlobalSettingsView> {
+    const [snapshot, integrations] = await Promise.all([
+      this.configStore.readGlobalSnapshot(),
+      this.integrationsService.listStatus()
+    ]);
+    return this.globalSettingsView(snapshot, integrations);
+  }
+
+  async globalSettingsSave(input: SaveDebruteGlobalSettingsInput): Promise<DebruteGlobalSettingsView> {
+    this.validateKnownModelPatches(input);
+    const integrations = await this.integrationsService.listStatus();
+    const result = await this.configStore.mutateGlobalSettings({ kind: 'patch', input });
+    const settings = this.globalSettingsView(result.snapshot, integrations);
+    if (result.changed) {
+      this.emit({ type: 'globalSettings.changed', settings });
+    }
     return settings;
   }
 
   async rememberRecentProjectRoot(projectRoot: string): Promise<void> {
-    const trimmed = projectRoot.trim();
-    if (!trimmed) {
-      return;
-    }
-    const current = await this.configStore.readWorkbenchChrome();
-    await this.configStore.saveWorkbenchChrome({
-      recentProjectRoots: [
-        trimmed,
-        ...current.recentProjectRoots.filter((item) => item !== trimmed)
-      ].slice(0, 12)
-    });
+    const integrations = await this.integrationsService.listStatus();
+    this.emitChangedMutation(await this.configStore.mutateGlobalSettings({
+      kind: 'rememberRecentProjectRoot',
+      projectRoot
+    }), integrations);
   }
 
   async clearRecentProjectRoots(): Promise<void> {
-    await this.configStore.saveWorkbenchChrome({ recentProjectRoots: [] });
-  }
-
-  async workbenchPreferencesGet(): Promise<WorkbenchPreferencesView> {
-    return this.configStore.readWorkbenchPreferences();
-  }
-
-  async workbenchPreferencesSave(input: SaveWorkbenchPreferencesInput): Promise<WorkbenchPreferencesView> {
-    await this.configStore.saveWorkbenchPreferences(input);
-    const preferences = await this.configStore.readWorkbenchPreferences();
-    this.emit({ type: 'workbench.preferences.changed', preferences });
-    return preferences;
+    const integrations = await this.integrationsService.listStatus();
+    this.emitChangedMutation(await this.configStore.mutateGlobalSettings({
+      kind: 'clearRecentProjectRoots'
+    }), integrations);
   }
 
   async workbenchTitleBarState(input: {
@@ -150,12 +116,12 @@ export class DebruteGlobalRuntimeServer {
     platform: NodeJS.Platform;
     projectTitle?: string | undefined;
   }): Promise<WorkbenchTitleBarState> {
-    const chrome = await this.configStore.readWorkbenchChrome();
+    const settings = await this.configStore.readGlobalSettings();
     return buildWorkbenchTitleBarState({
       host: input.host,
       platform: input.platform,
       projectTitle: input.projectTitle,
-      recentProjectRoots: chrome.recentProjectRoots
+      recentProjectRoots: settings.chrome.recentProjectRoots
     });
   }
 
@@ -166,4 +132,91 @@ export class DebruteGlobalRuntimeServer {
   private emit(event: AppServerEvent): void {
     this.events.emit('event', event);
   }
+
+  private globalSettingsView(
+    snapshot: DebruteGlobalConfigSnapshot,
+    integrations: IntegrationSettingsView
+  ): DebruteGlobalSettingsView {
+    return {
+      workbench: snapshot.settings.workbench,
+      chrome: snapshot.settings.chrome,
+      models: {
+        image: createImageModelSettingsView(
+          snapshot.settings.models.image,
+          snapshot.secrets,
+          this.imageCatalog.listAll()
+        ),
+        video: createVideoModelSettingsView(
+          snapshot.settings.models.video,
+          snapshot.secrets,
+          this.videoCatalog.listAll()
+        ),
+        audio: createAudioModelSettingsView(
+          snapshot.settings.models.audio,
+          snapshot.secrets,
+          this.audioCatalog.listAll()
+        )
+      },
+      integrations,
+      adobeBridge: snapshot.settings.adobeBridge
+    };
+  }
+
+  private emitChangedMutation(
+    result: GlobalConfigMutationResult,
+    integrations: IntegrationSettingsView
+  ): void {
+    if (!result.changed) {
+      return;
+    }
+    this.emit({
+      type: 'globalSettings.changed',
+      settings: this.globalSettingsView(result.snapshot, integrations)
+    });
+  }
+
+  private async emitIntegrationSettingsChanged(integrations: IntegrationSettingsView): Promise<void> {
+    const snapshot = await this.configStore.readGlobalSnapshot();
+    this.emit({
+      type: 'globalSettings.changed',
+      settings: this.globalSettingsView(snapshot, integrations)
+    });
+  }
+
+  private validateKnownModelPatches(input: SaveDebruteGlobalSettingsInput): void {
+    if (!isRecord(input)) {
+      return;
+    }
+    const models = input.models;
+    if (!isRecord(models)) {
+      return;
+    }
+    const image = models.image;
+    if (isRecord(image)) {
+      this.assertKnownModelPatch(image, 'image', this.imageCatalog);
+    }
+    const video = models.video;
+    if (isRecord(video)) {
+      this.assertKnownModelPatch(video, 'video', this.videoCatalog);
+    }
+    const audio = models.audio;
+    if (isRecord(audio)) {
+      this.assertKnownModelPatch(audio, 'audio', this.audioCatalog);
+    }
+  }
+
+  private assertKnownModelPatch(
+    patch: Record<string, unknown>,
+    kind: 'image' | 'video' | 'audio',
+    catalog: { get(modelId: string): unknown }
+  ): void {
+    const modelId = patch.modelId;
+    if (typeof modelId !== 'string' || !catalog.get(modelId)) {
+      throw new GlobalSettingsValidationError(`Unknown ${kind} model: ${String(modelId)}`);
+    }
+  }
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null && !Array.isArray(value);
 }

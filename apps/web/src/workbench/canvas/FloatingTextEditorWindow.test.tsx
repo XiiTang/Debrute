@@ -3,8 +3,8 @@ import React from 'react';
 import { renderToStaticMarkup } from 'react-dom/server';
 import type { TextFileBuffer, WorkbenchActions } from '../../types';
 import { FloatingTextEditorWindow } from './FloatingTextEditorWindow';
-import { textEditorWindowIdentity } from './workbenchWindowOrder';
-import { FLOATING_TEXT_EDITOR_TITLEBAR_HEIGHT } from './windowBounds';
+import { textEditorWindowIdentity } from '../shell/workbenchWindowOrder';
+import { FLOATING_TEXT_EDITOR_TITLEBAR_HEIGHT } from '../shell/windowBounds';
 import { I18nProvider } from '../i18n';
 
 function renderStaticWithI18n(element: React.ReactElement): string {

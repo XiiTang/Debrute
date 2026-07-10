@@ -63,7 +63,9 @@ describe('SettingsResourcePanel', () => {
       </SettingsResourcePanel>
     );
 
+    expect(html).toContain('<h2>Image Models</h2>');
     expect(html).toContain('loaded');
+    expect((html.match(/<h2/g) ?? []).length).toBe(1);
     expect(html).not.toContain('Loading settings');
     expect(html).not.toContain('Failed to load settings');
   });

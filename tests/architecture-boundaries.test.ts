@@ -293,7 +293,7 @@ describe('Debrute architecture boundaries', () => {
       'apps/web/src/workbench/shell/NotificationStack.tsx',
       'apps/web/src/workbench/shell/FloatingDock.tsx',
       'apps/web/src/workbench/shell/FloatingPanel.tsx',
-      'apps/web/src/workbench/shell/FloatingTextEditorWindow.tsx',
+      'apps/web/src/workbench/canvas/FloatingTextEditorWindow.tsx',
       'apps/web/src/workbench/shell/Inspector.tsx',
       'apps/web/src/workbench/shell/workbenchLayers.ts'
     ]) {
@@ -407,29 +407,13 @@ describe('Debrute architecture boundaries', () => {
 
     expect(text).not.toContain('getGlobalRuntime');
     for (const method of [
-      'imageModelGetSettings',
-      'imageModelSaveSetting',
-      'videoModelGetSettings',
-      'videoModelSaveSetting',
-      'integrationsListStatus',
+      'globalSettingsGet',
+      'globalSettingsSave',
       'integrationsRescan',
       'integrationsRunOperation'
     ]) {
       expect(text).not.toContain(`async ${method}(`);
     }
-  });
-
-  it('does not keep stale integration command preview styling', () => {
-    const text = readFileSync(join(root, 'apps/web/src/workbench/ui/styles/workbench-patterns.css'), 'utf8');
-
-    expect(text).not.toContain('db-integration-command');
-  });
-
-  it('does not keep stale optional project-open result guards in the Web workbench', () => {
-    const text = readFileSync(join(root, 'apps/web/src/workbench/WorkbenchApp.tsx'), 'utf8');
-
-    expect(text).not.toContain('if (!opened)');
-    expect(text).not.toContain('opened?.');
   });
 
   it('keeps Electron multi-window project ownership in the daemon', () => {

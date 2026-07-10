@@ -118,17 +118,6 @@
   height: 100%;
 }
 
-.workbench-titlebar__window-controls .db-icon-button {
-  width: 38px;
-  height: 28px;
-  border-radius: 0;
-}
-
-.workbench-titlebar__window-controls .db-icon-button:last-child:hover {
-  color: var(--db-text);
-  background: color-mix(in srgb, var(--db-danger) 72%, transparent);
-}
-
 .workbench-titlebar__menu-popover {
   position: absolute;
   top: 28px;

@@ -14,7 +14,7 @@ import type { CanvasRect, CanvasSize } from './runtime/canvasGeometry';
 import { rectsIntersect } from './runtime/canvasGeometry';
 import { selectedNodeProjectRelativePaths, type CanvasSelection } from './runtime/canvasSelection';
 
-export interface CanvasNodeLayerView {
+export interface CanvasNodeRenderOrderView {
   domOrder: string;
   zIndex: number;
 }
@@ -24,7 +24,7 @@ export interface CanvasRenderCoordinatorSnapshot {
   virtualRect: CanvasRect;
   culledNodePaths: ReadonlySet<string>;
   nodesByPath: ReadonlyMap<string, ProjectedCanvasNode>;
-  nodeLayers: ReadonlyMap<string, CanvasNodeLayerView>;
+  nodeRenderOrder: ReadonlyMap<string, CanvasNodeRenderOrderView>;
   edges: CanvasEdgeSegment[];
 }
 
@@ -106,7 +106,7 @@ export function createCanvasRenderCoordinator(input: CanvasRenderCoordinatorInpu
       virtualRect: rendered.virtualRect,
       culledNodePaths,
       nodesByPath,
-      nodeLayers: nodeLayersFor(nodes),
+      nodeRenderOrder: nodeRenderOrderFor(nodes),
       edges
     };
   };
@@ -246,15 +246,15 @@ function uniqueNodePathPredicate(): (node: ProjectedCanvasNode) => boolean {
   };
 }
 
-function nodeLayersFor(nodes: ProjectedCanvasNode[]): Map<string, CanvasNodeLayerView> {
-  const layers = new Map<string, CanvasNodeLayerView>();
+function nodeRenderOrderFor(nodes: ProjectedCanvasNode[]): Map<string, CanvasNodeRenderOrderView> {
+  const renderOrder = new Map<string, CanvasNodeRenderOrderView>();
   for (const node of nodes) {
-    layers.set(node.projectRelativePath, {
+    renderOrder.set(node.projectRelativePath, {
       domOrder: node.projectRelativePath,
       zIndex: node.z
     });
   }
-  return layers;
+  return renderOrder;
 }
 
 function canvasRenderPerfTimestamp(): number {

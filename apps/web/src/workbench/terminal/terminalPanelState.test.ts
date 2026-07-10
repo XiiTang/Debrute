@@ -48,6 +48,18 @@ describe('terminalPanelState', () => {
     expect(duplicate.closingSessionIds).toEqual(['one']);
   });
 
+  it('treats backend terminating status as a closing session', () => {
+    const state: TerminalPanelState = {
+      sessions: [sessionFixture('one', 'terminating')],
+      activeSessionId: 'one',
+      isLoading: false,
+      error: null,
+      closingSessionIds: []
+    };
+
+    expect(isTerminalSessionClosing(state, 'one')).toBe(true);
+  });
+
   it('shows the empty state only after loading finishes without sessions or errors', () => {
     const emptyState: TerminalPanelState = {
       sessions: [],
@@ -64,15 +76,15 @@ describe('terminalPanelState', () => {
   });
 });
 
-function sessionFixture(id: string): TerminalSessionView {
+function sessionFixture(id: string, status: TerminalSessionView['status'] = 'running'): TerminalSessionView {
   return {
     id,
     title: id,
     cwdProjectRelativePath: '',
     cols: 80,
     rows: 24,
-    status: 'running',
-    exitCode: null,
+    status,
+    exitCode: status === 'exited' ? 0 : null,
     signal: null,
     createdAt: '2026-06-12T00:00:00.000Z',
     updatedAt: '2026-06-12T00:00:00.000Z'

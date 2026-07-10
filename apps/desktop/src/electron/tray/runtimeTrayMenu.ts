@@ -3,7 +3,11 @@ import type { DesktopRuntimeSnapshot } from '../runtime/runtimeStatus.js';
 
 export interface RuntimeTrayActions {
   openDebrute(): void;
-  openRecent(projectRoot: string): void;
+  openInElectron(): void;
+  openInBrowser(): void;
+  copyBrowserUrl(): void;
+  openProjectInElectron(): void;
+  openRecentInElectron(projectRoot: string): void;
   showRuntimeStatus(): void;
   restartRuntime(): void;
   quitDebrute(): void;
@@ -21,13 +25,17 @@ export function buildRuntimeTrayMenuTemplate(input: BuildRuntimeTrayMenuInput): 
   return [
     { label: `Runtime: ${input.snapshot.status}`, enabled: false },
     { label: 'Open Debrute', enabled: runtimeUsable, click: input.actions.openDebrute },
+    { label: 'Open in Electron', enabled: runtimeUsable, click: input.actions.openInElectron },
+    { label: 'Open in Browser', enabled: runtimeUsable, click: input.actions.openInBrowser },
+    { label: 'Copy Browser URL', enabled: runtimeUsable, click: input.actions.copyBrowserUrl },
+    { label: 'Open Project in Electron...', enabled: runtimeUsable, click: input.actions.openProjectInElectron },
     {
-      label: 'Open Recent',
+      label: 'Open Recent in Electron',
       enabled: runtimeUsable && input.recentProjectRoots.length > 0,
       submenu: input.recentProjectRoots.length > 0
         ? input.recentProjectRoots.map((projectRoot) => ({
           label: projectRoot,
-          click: () => input.actions.openRecent(projectRoot)
+          click: () => input.actions.openRecentInElectron(projectRoot)
         }))
         : [{ label: 'No Recent Projects', enabled: false }]
     },

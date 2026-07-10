@@ -7,6 +7,24 @@ import { describe, expect, test } from 'vitest';
 
 const tinyPngBase64 = 'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADElEQVR42mP8z8AARQAHSQGmK3P7WAAAAABJRU5ErkJggg==';
 
+async function configureBatchImageModel(configStore: GlobalConfigStore, apiKey: string): Promise<void> {
+  await configStore.mutateGlobalSettings({
+    kind: 'patch',
+    input: {
+      models: {
+        image: {
+          modelId: 'gpt-image-2',
+          setting: {
+            baseUrlOverride: null,
+            requestModelIdOverride: 'gpt-image-2',
+            apiKey
+          }
+        }
+      }
+    }
+  });
+}
+
 describe('DebruteAppServer image model batch', () => {
   test('runs a batch through configured image model execution and records generated metadata', async () => {
     const projectRoot = await mkdtemp(join(tmpdir(), 'debrute-app-server-batch-project-'));
@@ -14,20 +32,7 @@ describe('DebruteAppServer image model batch', () => {
     const logPath = 'batch-results.jsonl';
     const summaryPath = 'batch-summary.json';
     const configStore = new GlobalConfigStore({ debruteHome });
-    await configStore.saveImageModels({
-      imageModels: [
-        {
-          debruteModelId: 'gpt-image-2',
-          baseUrlOverride: null,
-          requestModelIdOverride: 'gpt-image-2'
-        }
-      ]
-    });
-    await configStore.saveSecrets({
-      imageModelApiKeys: { 'gpt-image-2': 'sk-image' },
-      videoModelApiKeys: {},
-      audioModelApiKeys: {}
-    });
+    await configureBatchImageModel(configStore, 'sk-image');
     const fetch: ImageModelFetch = async (url, init) => {
       expect(url).toBe('https://api.openai.com/v1/images/generations');
       expect(JSON.parse(String(init?.body))).toMatchObject({
@@ -217,14 +222,7 @@ describe('DebruteAppServer image model batch', () => {
     const debruteHome = await mkdtemp(join(tmpdir(), 'debrute-app-server-batch-overwrite-home-'));
     const logPath = 'batch-results.jsonl';
     const configStore = new GlobalConfigStore({ debruteHome });
-    await configStore.saveImageModels({
-      imageModels: [{ debruteModelId: 'gpt-image-2', baseUrlOverride: null, requestModelIdOverride: 'gpt-image-2' }]
-    });
-    await configStore.saveSecrets({
-      imageModelApiKeys: { 'gpt-image-2': 'sk-image' },
-      videoModelApiKeys: {},
-      audioModelApiKeys: {}
-    });
+    await configureBatchImageModel(configStore, 'sk-image');
     let executions = 0;
     const server = new DebruteAppServer({
       globalConfigStore: configStore,
@@ -268,12 +266,8 @@ describe('DebruteAppServer image model batch', () => {
     const projectRoot = await mkdtemp(join(tmpdir(), 'debrute-app-server-batch-skip-config-project-'));
     const logPath = 'batch-results.jsonl';
     class ThrowingImageConfigStore extends GlobalConfigStore {
-      override async readImageModels(): ReturnType<GlobalConfigStore['readImageModels']> {
-        throw new Error('image model settings should not be read for skipped outputs');
-      }
-
-      override async readSecrets(): ReturnType<GlobalConfigStore['readSecrets']> {
-        throw new Error('secrets should not be read for skipped outputs');
+      override async readGlobalSnapshot(): ReturnType<GlobalConfigStore['readGlobalSnapshot']> {
+        throw new Error('global model settings should not be read for skipped outputs');
       }
     }
     const server = new DebruteAppServer({
@@ -327,20 +321,7 @@ describe('DebruteAppServer image model batch', () => {
     const debruteHome = await mkdtemp(join(tmpdir(), 'debrute-app-server-batch-failed-home-'));
     const logPath = 'batch-results.jsonl';
     const configStore = new GlobalConfigStore({ debruteHome });
-    await configStore.saveImageModels({
-      imageModels: [
-        {
-          debruteModelId: 'gpt-image-2',
-          baseUrlOverride: null,
-          requestModelIdOverride: 'gpt-image-2'
-        }
-      ]
-    });
-    await configStore.saveSecrets({
-      imageModelApiKeys: { 'gpt-image-2': 'sk-image' },
-      videoModelApiKeys: {},
-      audioModelApiKeys: {}
-    });
+    await configureBatchImageModel(configStore, 'sk-image');
     const server = new DebruteAppServer({
       globalConfigStore: configStore,
       imageModelFetch: async () => jsonResponse({ error: { message: 'model endpoint rejected request' } }, 500)
@@ -400,14 +381,7 @@ describe('DebruteAppServer image model batch', () => {
     const debruteHome = await mkdtemp(join(tmpdir(), 'debrute-app-server-batch-redaction-home-'));
     const logPath = 'batch-results.jsonl';
     const configStore = new GlobalConfigStore({ debruteHome });
-    await configStore.saveImageModels({
-      imageModels: [{ debruteModelId: 'gpt-image-2', baseUrlOverride: null, requestModelIdOverride: 'gpt-image-2' }]
-    });
-    await configStore.saveSecrets({
-      imageModelApiKeys: { 'gpt-image-2': 'sk-image-batch-secret' },
-      videoModelApiKeys: {},
-      audioModelApiKeys: {}
-    });
+    await configureBatchImageModel(configStore, 'sk-image-batch-secret');
     const server = new DebruteAppServer({
       globalConfigStore: configStore,
       imageModelFetch: async () => new Response(JSON.stringify({

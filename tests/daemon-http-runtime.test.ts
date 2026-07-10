@@ -1711,10 +1711,10 @@ describe('daemon HTTP runtime', () => {
       body: JSON.stringify({ baseRevision: beta.projectRevision, content: '# Beta Updated' })
     });
 
-    await expect(readNextNonBridgeSseMessage<{ type: string }>(betaEvents)).resolves.toMatchObject({
+    await expect(readNextSseMessage<{ type: string }>(betaEvents)).resolves.toMatchObject({
       type: 'project.changed'
     });
-    await expect(readNextNonBridgeSseMessage(alphaEvents)).rejects.toThrow('Timed out waiting for SSE event.');
+    await expect(readNextSseMessage(alphaEvents)).rejects.toThrow('Timed out waiting for SSE event.');
   });
 
   it('does not expose Canvas settings HTTP routes', async () => {
@@ -1725,7 +1725,8 @@ describe('daemon HTTP runtime', () => {
       token: 'test-token',
       webBaseUrl: null,
       appServerOptions: {
-        globalConfigStore: new GlobalConfigStore({ debruteHome })
+        globalConfigStore: new GlobalConfigStore({ debruteHome }),
+        integrationEnvPath: ''
       }
     });
     cleanups.push(() => daemon.close());
@@ -1733,7 +1734,7 @@ describe('daemon HTTP runtime', () => {
     const runtime = await daemon.listen();
 
     const [aggregateResponse, getResponse, putResponse] = await Promise.all([
-      fetch(`${runtime.daemonUrl}/api/settings`, {
+      fetch(`${runtime.daemonUrl}/api/settings/global`, {
         headers: { 'connection': 'close', 'x-debrute-daemon-token': 'test-token' }
       }),
       fetch(`${runtime.daemonUrl}/api/settings/canvas`, {
@@ -1755,7 +1756,7 @@ describe('daemon HTTP runtime', () => {
 
     expect(aggregateResponse.status).toBe(200);
     expect(aggregate).not.toHaveProperty('canvas');
-    expect(aggregate).toHaveProperty('audioModels');
+    expect(aggregate).toHaveProperty('models.audio');
     expect(getResponse.status).toBe(404);
     expect(putResponse.status).toBe(404);
   }, 30_000);
@@ -2704,41 +2705,6 @@ async function readNextSseMessage<T>(response: Response): Promise<T> {
       const dataLine = content.split('\n').find((line) => line.startsWith('data: '));
       if (dataLine) {
         return JSON.parse(dataLine.slice('data: '.length)) as T;
-      }
-    }
-  } finally {
-    await reader.cancel().catch(() => undefined);
-    reader.releaseLock();
-  }
-  throw new Error('SSE response did not include an event payload.');
-}
-
-async function readNextNonBridgeSseMessage<T>(response: Response): Promise<T> {
-  expect(response.status).toBe(200);
-  const reader = response.body?.getReader();
-  if (!reader) {
-    throw new Error('SSE response did not include a body.');
-  }
-  let content = '';
-  try {
-    while (true) {
-      const chunk = await readWithTimeout(reader);
-      if (chunk.done) {
-        break;
-      }
-      content += new TextDecoder().decode(chunk.value);
-      let eventEnd = content.indexOf('\n\n');
-      while (eventEnd !== -1) {
-        const eventBlock = content.slice(0, eventEnd);
-        content = content.slice(eventEnd + 2);
-        const dataLine = eventBlock.split('\n').find((line) => line.startsWith('data: '));
-        if (dataLine) {
-          const parsed = JSON.parse(dataLine.slice('data: '.length)) as { type?: string };
-          if (parsed.type !== 'adobeBridge.state.changed') {
-            return parsed as T;
-          }
-        }
-        eventEnd = content.indexOf('\n\n');
       }
     }
   } finally {

@@ -6,21 +6,21 @@ import {
   Save,
   X
 } from 'lucide-react';
-import { CanvasTextEditor } from '../canvas/CanvasTextEditor';
+import { CanvasTextEditor } from './CanvasTextEditor';
 import type { FloatingTextEditorWindowState, TextFileBuffer, WorkbenchActions } from '../../types';
 import {
   textEditorWindowIdentity,
   workbenchWindowZIndex,
   type WorkbenchWindowOrderState
-} from './workbenchWindowOrder';
-import { FloatingPanelResizeHandles, floatingPanelDragHandleProps } from './FloatingPanel';
-import type { FloatingPanelResizeInput } from './floatingPanels';
+} from '../shell/workbenchWindowOrder';
+import { FloatingPanelResizeHandles, floatingPanelDragHandleProps } from '../shell/FloatingPanel';
+import type { FloatingPanelResizeInput } from '../shell/floatingPanels';
 import { basenameFromProjectPath, textBufferStatus } from '../services/textEditorWindows';
 import { DiscardChangesIcon, IconButton, Panel, PanelBody, PanelHeader, PanelTitle, StatusPill } from '../ui';
 import {
   FLOATING_TEXT_EDITOR_TITLEBAR_CSS_PROPERTY,
   FLOATING_TEXT_EDITOR_TITLEBAR_CSS_VALUE
-} from './windowBounds';
+} from '../shell/windowBounds';
 import { useI18n } from '../i18n';
 
 export function FloatingTextEditorWindow({

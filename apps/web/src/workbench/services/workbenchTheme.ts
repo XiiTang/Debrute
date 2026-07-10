@@ -1,21 +1,15 @@
 import type {
-  WorkbenchPreferencesView,
+  DebruteGlobalSettingsView,
   WorkbenchThemePreference
 } from '@debrute/app-protocol';
 
 export type WorkbenchResolvedTheme = 'dark' | 'light';
 
-export const DEFAULT_WORKBENCH_PREFERENCES: WorkbenchPreferencesView = {
+export const DEFAULT_GLOBAL_WORKBENCH_SETTINGS: DebruteGlobalSettingsView['workbench'] = {
   locale: 'en',
-  themePreference: 'system'
+  themePreference: 'system',
+  defaultFrontend: 'electron'
 };
-
-export function parseWorkbenchThemePreference(value: unknown): WorkbenchThemePreference {
-  if (value === 'system' || value === 'dark' || value === 'light') {
-    return value;
-  }
-  throw new Error('Workbench theme preference must be "system", "dark", or "light".');
-}
 
 export function resolveWorkbenchThemePreference(
   preference: WorkbenchThemePreference,

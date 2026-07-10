@@ -17,7 +17,7 @@ describe('DebruteGlobalRuntimeServer integration settings', () => {
     try {
       await globalRuntime.integrationsRescan();
 
-      expect(events).toContain('integrations.settings.changed');
+      expect(events).toContain('globalSettings.changed');
     } finally {
       globalRuntime.close();
       await rm(home, { recursive: true, force: true });
@@ -42,16 +42,16 @@ describe('DebruteGlobalRuntimeServer integration settings', () => {
       integrationEnvPath: binDir,
       integrationPlatform: 'darwin'
     });
-    const events: Array<{ type: string; settings?: { runningOperation?: unknown } }> = [];
+      const events: Array<{ type: string; settings?: { integrations?: { runningOperation?: unknown } } }> = [];
     globalRuntime.onEvent((event) => events.push(event));
 
     try {
       const result = await globalRuntime.integrationsRunOperation({ integrationId: 'imagemagick', operation: 'install' });
 
       expect(result.ok).toBe(true);
-      expect(events.filter((event) => event.type === 'integrations.settings.changed')).toHaveLength(2);
-      expect(events[0]?.settings?.runningOperation).toEqual({ integrationId: 'imagemagick', operation: 'install' });
-      expect(events.at(-1)?.settings?.runningOperation).toBeUndefined();
+      expect(events.filter((event) => event.type === 'globalSettings.changed')).toHaveLength(2);
+      expect(events[0]?.settings?.integrations?.runningOperation).toEqual({ integrationId: 'imagemagick', operation: 'install' });
+      expect(events.at(-1)?.settings?.integrations?.runningOperation).toBeUndefined();
     } finally {
       globalRuntime.close();
       await rm(home, { recursive: true, force: true });
@@ -72,7 +72,7 @@ describe('DebruteGlobalRuntimeServer integration settings', () => {
       integrationEnvPath: binDir,
       integrationPlatform: 'darwin'
     });
-    const events: Array<{ type: string; settings?: { runningOperation?: unknown; integrations?: unknown[] } }> = [];
+      const events: Array<{ type: string; settings?: { integrations?: { runningOperation?: unknown; integrations?: unknown[] } } }> = [];
     globalRuntime.onEvent((event) => events.push(event));
 
     try {
@@ -84,7 +84,7 @@ describe('DebruteGlobalRuntimeServer integration settings', () => {
       });
       expect(result.settings.runningOperation).toBeUndefined();
       expect(result.settings.integrations).not.toHaveLength(0);
-      expect(events.filter((event) => event.type === 'integrations.settings.changed')).toEqual([]);
+      expect(events.filter((event) => event.type === 'globalSettings.changed')).toEqual([]);
     } finally {
       globalRuntime.close();
       await rm(home, { recursive: true, force: true });

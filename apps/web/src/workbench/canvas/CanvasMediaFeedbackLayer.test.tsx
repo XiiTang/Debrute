@@ -1,4 +1,3 @@
-import { readFile } from 'node:fs/promises';
 import React from 'react';
 import { renderToStaticMarkup } from 'react-dom/server';
 import { describe, expect, it } from 'vitest';
@@ -64,13 +63,6 @@ describe('CanvasMediaFeedbackLayer', () => {
     expect(rectHtml).toContain('height:40%');
   });
 
-  it('keeps rectangle labels at the top-left anchor', async () => {
-    const css = await readFile(new URL('../styles/canvas.css', import.meta.url), 'utf8');
-
-    expect(css).toContain('.canvas-media-feedback-region .canvas-media-feedback-label');
-    expect(css).toContain('left: 0;');
-    expect(css).toContain('top: 0;');
-  });
 });
 
 function spatialItemsFixture(): CanvasFeedbackSpatialItem[] {

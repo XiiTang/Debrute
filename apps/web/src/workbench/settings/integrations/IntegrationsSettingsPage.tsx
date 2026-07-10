@@ -10,7 +10,7 @@ import type {
   IntegrationStatus
 } from '@debrute/app-protocol';
 import type { WorkbenchActions } from '../../../types';
-import { Button, StatusPill, Toolbar } from '../../ui';
+import { Button, EmptyState, StatusPill, Toolbar } from '../../ui';
 import { useI18n, type WorkbenchI18n } from '../../i18n';
 
 export function IntegrationsSettingsPage({
@@ -34,7 +34,6 @@ export function IntegrationsSettingsPage({
   const integrations = settings.integrations;
   const runningOperation = settings.runningOperation ?? localRunningOperation;
   const operationRunning = Boolean(runningOperation);
-  const rescanRunning = rescanning;
 
   useEffect(() => {
     if (!operationFailure) {
@@ -59,64 +58,67 @@ export function IntegrationsSettingsPage({
   };
 
   return (
-    <section className="db-settings-section integrations-settings-page">
-      <header className="db-settings-section__header">
-        <h2>{i18n.t('settings.integrations.title')}</h2>
-        <Toolbar ariaLabel={i18n.t('settings.integrations.actions')} className="db-action-row">
-          <Button type="button" disabled={rescanRunning || operationRunning} iconStart={<RefreshCw size={14} />} onClick={() => void rescan()}>
-            {rescanning ? i18n.t('settings.integrations.rescanning') : i18n.t('settings.integrations.rescan')}
-          </Button>
-        </Toolbar>
-      </header>
+    <section className="settings-page-body integrations-settings-page">
+      <Toolbar ariaLabel={i18n.t('settings.integrations.actions')} className="db-action-row">
+        <Button type="button" disabled={rescanning || operationRunning} iconStart={<RefreshCw size={14} />} onClick={() => void rescan()}>
+          {rescanning ? i18n.t('settings.integrations.rescanning') : i18n.t('settings.integrations.rescan')}
+        </Button>
+      </Toolbar>
 
       {error ? <small className="db-form-error">{error}</small> : null}
-      <BackendSummary
-        backends={settings.backends}
-        checking={rescanning || (settings.backends.length === 0 && rescanRunning)}
-        i18n={i18n}
-      />
+      {integrations.length > 0 ? (
+        <BackendSummary
+          backends={settings.backends}
+          checking={rescanning}
+          i18n={i18n}
+        />
+      ) : null}
 
-      <div className="db-integration-list">
-        {integrations.map((integration) => (
-          <IntegrationRow
-            key={integration.integrationId}
-            integration={integration}
-            i18n={i18n}
-            operationRunning={operationRunning}
-            runningOperation={runningOperation}
-            operationFailure={operationFailure?.integrationId === integration.integrationId ? operationFailure : undefined}
-            onRunOperation={async (operation) => {
-              const localOperation = { integrationId: integration.integrationId, operation };
-              setLocalRunningOperation(localOperation);
-              setOperationFailure(undefined);
-              try {
-                const result = await actions.runIntegrationOperation({ integrationId: integration.integrationId, operation });
-                if (!result.ok) {
+      {integrations.length === 0 ? (
+        <EmptyState title={i18n.t('settings.integrations.noneAvailable')} />
+      ) : (
+        <div className="db-record-list">
+          {integrations.map((integration) => (
+            <IntegrationRow
+              key={integration.integrationId}
+              integration={integration}
+              i18n={i18n}
+              operationRunning={operationRunning}
+              runningOperation={runningOperation}
+              operationFailure={operationFailure?.integrationId === integration.integrationId ? operationFailure : undefined}
+              onRunOperation={async (operation) => {
+                const localOperation = { integrationId: integration.integrationId, operation };
+                setLocalRunningOperation(localOperation);
+                setOperationFailure(undefined);
+                try {
+                  const result = await actions.runIntegrationOperation({ integrationId: integration.integrationId, operation });
+                  if (!result.ok) {
+                    setOperationFailure({
+                      integrationId: result.integrationId,
+                      operation: result.operation,
+                      stateKey: integrationFailureStateKey(result.settings, result.integrationId),
+                      ...(result.diagnostic ? { diagnostic: result.diagnostic } : {})
+                    });
+                  }
+                } catch (err) {
                   setOperationFailure({
-                    integrationId: result.integrationId,
-                    operation: result.operation,
-                    stateKey: integrationFailureStateKey(result.settings, result.integrationId),
-                    ...(result.diagnostic ? { diagnostic: result.diagnostic } : {})
+                    integrationId: integration.integrationId,
+                    operation,
+                    stateKey: integrationFailureStateKey(settings, integration.integrationId),
+                    message: errorMessage(err)
                   });
+                } finally {
+                  setLocalRunningOperation((current) => (
+                    current?.integrationId === localOperation.integrationId && current.operation === localOperation.operation
+                      ? undefined
+                      : current
+                  ));
                 }
-              } catch (err) {
-                setOperationFailure({
-                  integrationId: integration.integrationId,
-                  operation,
-                  stateKey: integrationFailureStateKey(settings, integration.integrationId),
-                  message: errorMessage(err)
-                });
-              } finally {
-                setLocalRunningOperation((current) => (
-                  current?.integrationId === localOperation.integrationId && current.operation === localOperation.operation
-                    ? undefined
-                    : current
-                ));
-              }
-            }}
-          />
-        ))}
-      </div>
+              }}
+            />
+          ))}
+        </div>
+      )}
     </section>
   );
 }
@@ -140,13 +142,13 @@ function IntegrationRow({
     ? integration.binaries.find((binary) => binary.status === 'ready' && binary.version)?.version
     : undefined;
   return (
-    <div className="db-integration-row">
+    <div className="db-record-row">
       <span>{integration.displayName}</span>
-      <StatusPill tone={integration.status === 'ready' ? 'success' : integration.status === 'probe_failed' ? 'danger' : 'neutral'}>
+      <StatusPill tone={integration.status === 'probe_failed' ? 'danger' : 'neutral'}>
         {statusLabel(integration.status, i18n)}
       </StatusPill>
       <small>{version ?? ''}</small>
-      <div className="db-integration-row__action">
+      <div className="db-record-row__action">
         <IntegrationRowAction
           integration={integration}
           i18n={i18n}
@@ -168,19 +170,19 @@ function BackendSummary({
   backends: IntegrationBackendStatus[];
   checking: boolean;
   i18n: WorkbenchI18n;
-}): React.ReactElement | null {
+}): React.ReactElement {
   if (checking) {
-    return <small className="db-integration-summary">{i18n.t('settings.integrations.checkingBackends')}</small>;
+    return <small className="db-record-summary">{i18n.t('settings.integrations.checkingBackends')}</small>;
   }
   if (backends.length === 0) {
-    return null;
+    return <small className="db-record-summary">{i18n.t('settings.integrations.noBackends')}</small>;
   }
   const labels = backends
     .flatMap((backend) => backend.available && backend.backend ? [backendLabel(backend.backend)] : []);
   const summary = labels.length > 0
     ? labels.join(', ')
     : backends.map((backend) => backend.unavailableReason ?? i18n.t('settings.integrations.unavailable')).join(', ');
-  return <small className="db-integration-summary">{summary}</small>;
+  return <small className="db-record-summary">{summary}</small>;
 }
 
 function IntegrationRowAction({
@@ -211,7 +213,7 @@ function IntegrationRowAction({
   return (
     <>
       {operations.length > 0 ? (
-        <div className="db-integration-row__buttons">
+        <div className="db-record-row__buttons">
           {operations.map((operation) => (
             <Button
               key={operation}

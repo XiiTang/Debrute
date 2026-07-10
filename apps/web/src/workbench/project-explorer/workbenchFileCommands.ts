@@ -1,6 +1,47 @@
-import type { WorkbenchProjectFileBatchOperationResult } from '@debrute/app-protocol';
+import type {
+  WorkbenchProjectFileBatchOperationResult,
+  WorkbenchProjectSessionSnapshot
+} from '@debrute/app-protocol';
 import type { CanvasSelection } from '../canvas/runtime/canvasSelection';
 import type { WorkbenchFileClipboard } from '../shell/contextMenu';
+import type { ProjectTreeSelectionState } from './projectTreeInteraction';
+
+export function projectTreeSelectionFromPaths(paths: string[]): ProjectTreeSelectionState {
+  const selectedPaths = [...paths];
+  const focusedPath = selectedPaths.at(-1) ?? null;
+  return {
+    selectedPaths,
+    focusedPath,
+    anchorPath: focusedPath
+  };
+}
+
+export function singleFileBatchResultPath(
+  results: WorkbenchProjectFileBatchOperationResult['results']
+): string | undefined {
+  const completed = results.filter((result) => result.status === 'ok');
+  if (completed.length === 1 && completed[0]!.kind === 'file') {
+    return completed[0]!.projectRelativePath;
+  }
+  return undefined;
+}
+
+export function externalDropPlanHasConflict(input: {
+  snapshot: WorkbenchProjectSessionSnapshot | undefined;
+  localPaths: string[];
+  uploads: Array<{ projectRelativePath: string }>;
+  targetDirectoryProjectRelativePath: string;
+}): boolean {
+  const existingPaths = new Set(input.snapshot?.files.map((file) => file.projectRelativePath) ?? []);
+  return [
+    ...input.localPaths.map((path) => (
+      input.targetDirectoryProjectRelativePath
+        ? `${input.targetDirectoryProjectRelativePath}/${nativePathBasename(path)}`
+        : nativePathBasename(path)
+    )),
+    ...externalUploadTopLevelProjectPaths(input.uploads, input.targetDirectoryProjectRelativePath)
+  ].some((path) => existingPaths.has(path));
+}
 
 export function clearClipboardAfterPaste(clipboard: WorkbenchFileClipboard): WorkbenchFileClipboard | undefined {
   return clipboard.operation === 'cut' ? undefined : clipboard;
@@ -92,6 +133,39 @@ function isDeletedNodeSelection(
 ): boolean {
   return selection.kind === 'node'
     && isProjectPathContainedByDeletedPath(selection.projectRelativePath, deletedProjectRelativePath);
+}
+
+function externalUploadTopLevelProjectPaths(
+  uploads: Array<{ projectRelativePath: string }>,
+  targetDirectoryProjectRelativePath: string
+): string[] {
+  return [...new Set(uploads.map((upload) => {
+    const relativePath = externalUploadPathRelativeToTarget(upload.projectRelativePath, targetDirectoryProjectRelativePath);
+    const topLevelName = relativePath.split('/')[0]!;
+    return targetDirectoryProjectRelativePath ? `${targetDirectoryProjectRelativePath}/${topLevelName}` : topLevelName;
+  }))];
+}
+
+function externalUploadPathRelativeToTarget(projectRelativePath: string, targetDirectoryProjectRelativePath: string): string {
+  if (!targetDirectoryProjectRelativePath) {
+    if (!projectRelativePath) {
+      throw new Error('Upload import path is empty.');
+    }
+    return projectRelativePath;
+  }
+  if (!projectRelativePath.startsWith(`${targetDirectoryProjectRelativePath}/`)) {
+    throw new Error(`Upload import path is outside the target directory: ${projectRelativePath}`);
+  }
+  const relativePath = projectRelativePath.slice(targetDirectoryProjectRelativePath.length + 1);
+  if (!relativePath) {
+    throw new Error(`Upload import path is outside the target directory: ${projectRelativePath}`);
+  }
+  return relativePath;
+}
+
+function nativePathBasename(path: string): string {
+  const normalized = path.replaceAll('\\', '/').replace(/\/$/, '');
+  return normalized.slice(normalized.lastIndexOf('/') + 1);
 }
 
 function isProjectPathContainedByDeletedPath(projectRelativePath: string, deletedProjectRelativePath: string): boolean {

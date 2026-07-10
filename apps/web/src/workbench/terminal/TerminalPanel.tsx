@@ -47,18 +47,19 @@ export function TerminalPanelToolbar({
           <div key={session.id} className="db-terminal-tab-shell">
             <Tab
               active={session.id === activeSessionId}
+              appearance="strip"
               className="db-terminal-tab"
               onClick={() => onSelectSession(session.id)}
             >
               <span>{session.title}</span>
-              {session.status === 'exited' || session.status === 'failed' ? (
+              {session.status === 'terminating' || session.status === 'exited' || session.status === 'failed' ? (
                 <small>{terminalStatusLabel(session.status, i18n)}</small>
               ) : null}
             </Tab>
             <CloseButton
               className="db-terminal-tab__close"
               label={i18n.t('terminal.closeSession', { title: session.title })}
-              disabled={closingSessionIds.includes(session.id)}
+              disabled={closingSessionIds.includes(session.id) || session.status === 'terminating'}
               onPointerDown={(event) => event.stopPropagation()}
               onClick={() => onCloseSession(session)}
             />
@@ -67,10 +68,10 @@ export function TerminalPanelToolbar({
       </TabList>
       <div className="db-terminal-tab-end-slot">
         <IconButton
-          className="db-terminal-tab-new-button"
           label={i18n.t('terminal.new')}
           icon={<Plus size={14} />}
-          size="xs"
+          size="sm"
+          variant="chrome"
           onClick={onCreateSession}
         />
       </div>
@@ -79,6 +80,9 @@ export function TerminalPanelToolbar({
 }
 
 function terminalStatusLabel(status: TerminalSessionView['status'], i18n: WorkbenchI18n): string {
+  if (status === 'terminating') {
+    return i18n.t('terminal.statusTerminating');
+  }
   if (status === 'exited') {
     return i18n.t('terminal.statusExited');
   }
@@ -229,13 +233,16 @@ export function TerminalPanel({
     }
     closingSessionIdsRef.current.add(session.id);
     setState((current) => beginClosingTerminalSession(current, session.id));
-    void api.closeTerminalSession({ terminalId: session.id }).then(() => {
-      removeSession(session.id);
-    }).catch((error: Error) => {
-      closingSessionIdsRef.current.delete(session.id);
-      setState((current) => finishClosingTerminalSession(current, session.id));
-      showError(error);
-    });
+    void (async () => {
+      try {
+        await api.closeTerminalSession({ terminalId: session.id });
+        removeSession(session.id);
+      } catch (error) {
+        closingSessionIdsRef.current.delete(session.id);
+        setState((current) => finishClosingTerminalSession(current, session.id));
+        showError(error instanceof Error ? error : new Error(String(error)));
+      }
+    })();
   }, [api, removeSession, showError]);
 
   const showEmptyState = shouldShowTerminalEmptyState(state);

@@ -222,6 +222,20 @@ describe('desktop application menu', () => {
     expect(main).not.toContain('appServer.openProject(projectRoot)');
   });
 
+  it('routes desktop startup and tray default actions through runtime default frontend', () => {
+    const main = readFileSync(join(process.cwd(), 'apps/desktop/src/electron/main.ts'), 'utf8');
+    const defaultFrontend = readFileSync(join(process.cwd(), 'apps/desktop/src/electron/defaultFrontend.ts'), 'utf8');
+
+    expect(main).toContain('async function executeDefaultFrontend(source: string)');
+    expect(main).toContain('executeConfiguredDefaultFrontend');
+    expect(defaultFrontend).toContain("settings.workbench.defaultFrontend === 'browser'");
+    expect(main).toContain('await shell.openExternal(requireRuntimeClient().browserLaunchUrl())');
+    expect(main).toContain('clipboard.writeText(requireRuntimeClient().browserLaunchUrl())');
+    expect(main).toContain("void executeDefaultFrontend('tray-open-debrute');");
+    expect(main).toContain("await executeDefaultFrontend('startup');");
+    expect(main).not.toContain('await createWindow();\n  }\n  await flushPendingDesktopOpenIntents();');
+  });
+
   it('keeps Electron project windows scoped by daemon project id', () => {
     const main = readFileSync(join(process.cwd(), 'apps/desktop/src/electron/main.ts'), 'utf8');
 
@@ -240,13 +254,15 @@ describe('desktop application menu', () => {
     expect(main.indexOf('await waitForDebruteShellUrl(navigation.readyUrl)')).toBeLessThan(main.indexOf('await window.loadURL(navigation.loadUrl)'));
   });
 
-  it('syncs desktop project history to native recent project surfaces', () => {
+  it('syncs desktop project history from a narrow title-bar source', () => {
     const main = readFileSync(join(process.cwd(), 'apps/desktop/src/electron/main.ts'), 'utf8');
 
     expect(main).toContain('syncNativeRecentProjects');
     expect(main).toContain("app.on('open-file'");
     expect(main).toContain("app.on('second-instance'");
     expect(main).toContain('parseDesktopOpenIntent');
+    expect(main).toContain('(await runtimeClient.getWorkbenchTitleBarState()).recentProjectRoots');
+    expect(main).not.toContain('(await runtimeClient.globalSettingsGet()).chrome.recentProjectRoots');
   });
 
   it('does not host the daemon inside Electron main', () => {

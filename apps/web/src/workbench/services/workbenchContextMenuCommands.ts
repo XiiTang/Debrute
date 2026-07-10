@@ -2,16 +2,10 @@ import type { WorkbenchProjectSessionSnapshot } from '@debrute/app-protocol';
 import type { CanvasProjection } from '@debrute/canvas-core';
 import type { WorkbenchActions } from '../../types';
 import type { CanvasEditorRuntime } from '../canvas/runtime/CanvasEditorRuntime';
-import {
-  createInlineEditState,
-  projectTreePasteTargetDirectory,
-  type ProjectTreeInlineEditState
-} from '../project-explorer/projectTreeEditing';
+import { projectTreePasteTargetDirectory } from '../project-explorer/projectTreeEditing';
 import { projectTreeBatchMoveHasConflict } from '../project-explorer/projectTreeInteraction';
-import {
-  clearClipboardAfterPaste,
-  notificationMessageForFileCommandError
-} from '../project-explorer/workbenchFileCommands';
+import type { ProjectExplorerController } from '../project-explorer/useProjectExplorerController';
+import { notificationMessageForFileCommandError } from '../project-explorer/workbenchFileCommands';
 import {
   cameraCenteredOnNode,
   explorerContextMenuEntries,
@@ -25,15 +19,23 @@ import {
   type WorkbenchFileClipboard
 } from '../shell/contextMenu';
 
-type SetState<T> = (value: T | ((current: T) => T)) => void;
-
 export interface WorkbenchContextMenuCommandErrorLabels {
   copyPathFailed: string;
-  revealFailed: string;
-  deleteFailed: string;
-  pasteFailed: string;
   resetAutoLayoutFailed: string;
 }
+
+type ExplorerContextCommands = Pick<ProjectExplorerController,
+  | 'beginCreateFile'
+  | 'beginCreateDirectory'
+  | 'beginRename'
+  | 'copyEntries'
+  | 'cutEntries'
+  | 'pasteEntries'
+  | 'copyAbsolutePaths'
+  | 'revealEntry'
+  | 'trashEntries'
+  | 'deleteEntriesPermanently'
+>;
 
 export function runWorkbenchContextMenuCommand(input: {
   command: WorkbenchContextMenuCommand;
@@ -42,8 +44,7 @@ export function runWorkbenchContextMenuCommand(input: {
   activeCanvasRuntime: CanvasEditorRuntime | undefined;
   fileClipboard: WorkbenchFileClipboard | undefined;
   actions: WorkbenchActions;
-  setInlineProjectTreeEdit: SetState<ProjectTreeInlineEditState | undefined>;
-  setFileClipboard: SetState<WorkbenchFileClipboard | undefined>;
+  explorerCommands: ExplorerContextCommands;
   copyText: (text: string) => void | Promise<void>;
   notify: (message: string) => void;
   closeContextMenu: () => void;
@@ -162,7 +163,7 @@ function runSinglePathFileCommand(
       input.closeContextMenu();
       return true;
     }
-    input.setFileClipboard({ operation: 'cut', entries });
+    input.explorerCommands.cutEntries(entries);
     input.closeContextMenu();
     return true;
   }
@@ -171,7 +172,7 @@ function runSinglePathFileCommand(
       input.closeContextMenu();
       return true;
     }
-    input.setFileClipboard({ operation: 'copy', entries });
+    input.explorerCommands.copyEntries(entries);
     input.closeContextMenu();
     return true;
   }
@@ -185,8 +186,8 @@ function runSinglePathFileCommand(
     return true;
   }
   if (input.command === 'copy-path') {
-    void input.actions.copyProjectAbsolutePaths({ entries })
-      .then((result) => input.copyText(result.paths.join('\n')))
+    void input.explorerCommands.copyAbsolutePaths(entries)
+      .then((paths) => paths ? input.copyText(paths.join('\n')) : undefined)
       .catch((error) => input.notify(notificationMessageForFileCommandError(input.errorLabels.copyPathFailed, error)));
     input.closeContextMenu();
     return true;
@@ -213,8 +214,7 @@ function runSinglePathFileCommand(
     return true;
   }
   if (input.command === 'reveal-in-system-file-manager') {
-    void input.actions.revealProjectPathInSystemFileManager(primaryEntry)
-      .catch((error) => input.notify(notificationMessageForFileCommandError(input.errorLabels.revealFailed, error)));
+    input.explorerCommands.revealEntry(primaryEntry);
     input.closeContextMenu();
     return true;
   }
@@ -223,8 +223,7 @@ function runSinglePathFileCommand(
       input.closeContextMenu();
       return true;
     }
-    void input.actions.trashProjectPaths({ entries })
-      .catch((error) => input.notify(notificationMessageForFileCommandError(input.errorLabels.deleteFailed, error)));
+    input.explorerCommands.trashEntries(entries);
     input.closeContextMenu();
     return true;
   }
@@ -239,12 +238,12 @@ function runExplorerSpecificCommand(
   const primaryEntry = explorerContextMenuPrimaryEntry(target);
   if (target.targetKind === 'root') {
     if (input.command === 'create-file') {
-      input.setInlineProjectTreeEdit(createInlineEditState('creating-file', projectTreePasteTargetDirectory(target)));
+      input.explorerCommands.beginCreateFile(projectTreePasteTargetDirectory(target));
       input.closeContextMenu();
       return true;
     }
     if (input.command === 'create-directory') {
-      input.setInlineProjectTreeEdit(createInlineEditState('creating-directory', projectTreePasteTargetDirectory(target)));
+      input.explorerCommands.beginCreateDirectory(projectTreePasteTargetDirectory(target));
       input.closeContextMenu();
       return true;
     }
@@ -265,7 +264,7 @@ function runExplorerSpecificCommand(
       input.closeContextMenu();
       return true;
     }
-    input.setInlineProjectTreeEdit(createInlineEditState('creating-file', projectTreePasteTargetDirectory(target)));
+    input.explorerCommands.beginCreateFile(projectTreePasteTargetDirectory(target));
     input.closeContextMenu();
     return true;
   }
@@ -274,13 +273,13 @@ function runExplorerSpecificCommand(
       input.closeContextMenu();
       return true;
     }
-    input.setInlineProjectTreeEdit(createInlineEditState('creating-directory', projectTreePasteTargetDirectory(target)));
+    input.explorerCommands.beginCreateDirectory(projectTreePasteTargetDirectory(target));
     input.closeContextMenu();
     return true;
   }
   if (input.command === 'rename') {
     if (primaryEntry && entries.length === 1) {
-      input.setInlineProjectTreeEdit(createInlineEditState('renaming', primaryEntry.projectRelativePath));
+      input.explorerCommands.beginRename(primaryEntry);
     }
     input.closeContextMenu();
     return true;
@@ -290,8 +289,7 @@ function runExplorerSpecificCommand(
       input.closeContextMenu();
       return true;
     }
-    void input.actions.deleteProjectPathsPermanently({ entries })
-      .catch((error) => input.notify(notificationMessageForFileCommandError(input.errorLabels.deleteFailed, error)));
+    input.explorerCommands.deleteEntriesPermanently(entries);
     input.closeContextMenu();
     return true;
   }
@@ -336,23 +334,15 @@ function runPasteCommand(
     })) {
       return;
     }
-    void input.actions.moveProjectPaths({
-      entries: fileClipboard.entries,
+    input.explorerCommands.pasteEntries({
+      clipboard: fileClipboard,
       targetDirectoryProjectRelativePath,
       ...(overwrite ? { overwrite: true } : {})
-    }).then(() => {
-      input.setFileClipboard(clearClipboardAfterPaste(fileClipboard));
-    }).catch((error) => {
-      input.notify(notificationMessageForFileCommandError(input.errorLabels.pasteFailed, error));
     });
     return;
   }
-  void input.actions.copyProjectPaths({
-    entries: fileClipboard.entries,
+  input.explorerCommands.pasteEntries({
+    clipboard: fileClipboard,
     targetDirectoryProjectRelativePath
-  }).then(() => {
-    input.setFileClipboard(clearClipboardAfterPaste(fileClipboard));
-  }).catch((error) => {
-    input.notify(notificationMessageForFileCommandError(input.errorLabels.pasteFailed, error));
   });
 }

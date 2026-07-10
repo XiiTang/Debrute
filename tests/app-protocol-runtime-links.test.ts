@@ -3,7 +3,11 @@ import {
   isDebruteMutatingMethod,
   normalizeDebruteRuntimeInfo,
   parseDebruteWorkbenchPath,
+  type DebruteDefaultFrontend,
+  type DebruteGlobalSettingsView,
   type LiveProjectsView,
+  type SaveDebruteGlobalSettingsInput,
+  type WorkbenchEvent,
   type WorkbenchApiClient,
   type WorkbenchProjectOpenResult,
   type WorkbenchProjectPickerOpenResult,
@@ -26,6 +30,42 @@ type OpenProjectFromPickerReturnIsExact = AssertTrue<IsExactType<
 >>;
 
 describe('app-protocol runtime metadata', () => {
+  it('models runtime-owned global settings and default frontend', () => {
+    const frontend: DebruteDefaultFrontend = 'runtime-only';
+    const settings: DebruteGlobalSettingsView = {
+      workbench: {
+        locale: 'en',
+        themePreference: 'system',
+        defaultFrontend: frontend
+      },
+      chrome: {
+        recentProjectRoots: ['/tmp/project-a']
+      },
+      models: {
+        image: { models: [] },
+        video: { models: [] },
+        audio: { models: [] }
+      },
+      integrations: {
+        integrations: [],
+        backends: []
+      },
+      adobeBridge: { enabled: true }
+    };
+    const input: SaveDebruteGlobalSettingsInput = {
+      workbench: { defaultFrontend: 'browser' },
+      adobeBridge: { enabled: false }
+    };
+    const event: WorkbenchEvent = { type: 'globalSettings.changed', settings };
+
+    expect(settings.workbench.defaultFrontend).toBe('runtime-only');
+    expect(input).toEqual({
+      workbench: { defaultFrontend: 'browser' },
+      adobeBridge: { enabled: false }
+    });
+    expect(event.type).toBe('globalSettings.changed');
+  });
+
   it('normalizes runtime info without active project state', () => {
     const runtime = normalizeDebruteRuntimeInfo({
       daemonUrl: 'http://127.0.0.1:17456/',

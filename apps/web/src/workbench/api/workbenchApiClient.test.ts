@@ -118,13 +118,25 @@ describe('workbench API client', () => {
     expect(FakeEventSource.instances[0]!.url).toBe('/api/workbench/events?clientId=debrute-web-client');
 
     FakeEventSource.instances[0]!.emit({
-      type: 'workbench.preferences.changed',
-      preferences: { locale: 'zh-CN', themePreference: 'light' }
+      type: 'globalSettings.changed',
+      settings: {
+        workbench: { locale: 'zh-CN', themePreference: 'light', defaultFrontend: 'browser' },
+        chrome: { recentProjectRoots: [] },
+        models: { image: { models: [] }, video: { models: [] }, audio: { models: [] } },
+        integrations: { integrations: [], backends: [] },
+        adobeBridge: { enabled: true }
+      }
     });
 
     expect(events).toEqual([{
-      type: 'workbench.preferences.changed',
-      preferences: { locale: 'zh-CN', themePreference: 'light' }
+      type: 'globalSettings.changed',
+      settings: {
+        workbench: { locale: 'zh-CN', themePreference: 'light', defaultFrontend: 'browser' },
+        chrome: { recentProjectRoots: [] },
+        models: { image: { models: [] }, video: { models: [] }, audio: { models: [] } },
+        integrations: { integrations: [], backends: [] },
+        adobeBridge: { enabled: true }
+      }
     }]);
 
     unsubscribe();
@@ -169,7 +181,7 @@ describe('workbench API client', () => {
     expect(FakeEventSource.instances.every((source) => source.closed)).toBe(true);
   });
 
-  it('calls Workbench preferences routes without daemon token headers', async () => {
+  it('reads and patches global settings through the runtime API', async () => {
     const requests: Array<{ method: string | undefined; path: string; body?: unknown; headers?: RequestInit['headers'] }> = [];
     installWindow();
     vi.stubGlobal('fetch', async (url: string, init: RequestInit = {}) => {
@@ -181,8 +193,19 @@ describe('workbench API client', () => {
         headers: init.headers
       });
       return new Response(JSON.stringify({
-        locale: parsed.pathname === '/api/settings/workbench-preferences' && init.method === 'PUT' ? 'zh-CN' : 'en',
-        themePreference: parsed.pathname === '/api/settings/workbench-preferences' && init.method === 'PUT' ? 'light' : 'system'
+        workbench: {
+          locale: init.method === 'PATCH' ? 'zh-CN' : 'en',
+          themePreference: init.method === 'PATCH' ? 'light' : 'system',
+          defaultFrontend: init.method === 'PATCH' ? 'browser' : 'electron'
+        },
+        chrome: { recentProjectRoots: [] },
+        models: {
+          image: { models: [] },
+          video: { models: [] },
+          audio: { models: [] }
+        },
+        integrations: { integrations: [], backends: [] },
+        adobeBridge: { enabled: true }
       }), {
         status: 200,
         headers: { 'content-type': 'application/json' }
@@ -191,29 +214,36 @@ describe('workbench API client', () => {
 
     const client = createWorkbenchApiClient();
 
-    await expect(client.workbenchPreferencesGet()).resolves.toEqual({
-      locale: 'en',
-      themePreference: 'system'
+    await expect(client.globalSettingsGet()).resolves.toMatchObject({
+      workbench: { defaultFrontend: 'electron' }
     });
-    await expect(client.workbenchPreferencesSave({
-      locale: 'zh-CN',
-      themePreference: 'light'
-    })).resolves.toEqual({
-      locale: 'zh-CN',
-      themePreference: 'light'
+    await expect(client.globalSettingsSave({
+      workbench: {
+        locale: 'zh-CN',
+        themePreference: 'light',
+        defaultFrontend: 'browser'
+      }
+    })).resolves.toMatchObject({
+      workbench: { defaultFrontend: 'browser' }
     });
 
     expect(requests).toEqual([
       {
         method: 'GET',
-        path: '/api/settings/workbench-preferences',
+        path: '/api/settings/global',
         body: undefined,
         headers: {}
       },
       {
-        method: 'PUT',
-        path: '/api/settings/workbench-preferences',
-        body: { locale: 'zh-CN', themePreference: 'light' },
+        method: 'PATCH',
+        path: '/api/settings/global',
+        body: {
+          workbench: {
+            locale: 'zh-CN',
+            themePreference: 'light',
+            defaultFrontend: 'browser'
+          }
+        },
         headers: { 'content-type': 'application/json' }
       }
     ]);
@@ -257,7 +287,7 @@ describe('workbench API client', () => {
     expect(JSON.stringify(requests)).not.toContain('x-debrute-daemon-token');
   });
 
-  it('persists text viewport state without a base revision and remembers the returned revision', async () => {
+  it('persists text viewport state with a base revision and remembers the returned revision', async () => {
     const requests: Array<{ method: string | undefined; url: string; body?: unknown }> = [];
     installWindow({ pathname: `/projects/${projectId}` });
     vi.stubGlobal('fetch', async (url: string, init: RequestInit = {}) => {
@@ -266,7 +296,7 @@ describe('workbench API client', () => {
         url,
         body: init.body ? JSON.parse(String(init.body)) : undefined
       });
-      const projectRevision = url.includes('/text-viewport') ? 8 : requests.length;
+      const projectRevision = url.includes('/text-viewport') ? 8 : requests.length === 1 ? 1 : 9;
       return new Response(JSON.stringify({
         projectId,
         projectRevision,
@@ -294,6 +324,7 @@ describe('workbench API client', () => {
     expect(requests.map((request) => [request.method, request.url, request.body])).toEqual([
       ['GET', `/api/projects/${projectId}`, undefined],
       ['PATCH', `/api/projects/${projectId}/canvases/canvas-1/text-viewport`, {
+        baseRevision: 1,
         updates: [{ projectRelativePath: 'notes/readme.md', scrollTop: 72, scrollLeft: 9 }]
       }],
       ['POST', `/api/projects/${projectId}/canvases`, { baseRevision: 8 }]

@@ -1,34 +1,31 @@
-import React, { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Loader2 } from 'lucide-react';
 import type {
   WorkbenchMenuItem,
   WorkbenchCanvasDocumentMutationResult,
-  WorkbenchProjectFileBatchOperationResult,
+  WorkbenchEvent,
   WorkbenchProjectPathEntry,
   WorkbenchProjectSessionSnapshot,
-  WorkbenchPreferencesView,
-  WorkbenchThemePreference,
   WorkbenchTitleBarState
 } from '@debrute/app-protocol';
 import { unavailableWorkbenchTitleBarState } from '@debrute/app-protocol';
-import type { CanvasFeedbackEntry, CanvasFeedbackGeometry, ProjectedCanvasNode, UpdateCanvasFeedbackEntryInput } from '@debrute/canvas-core';
+import type { ProjectedCanvasNode } from '@debrute/canvas-core';
 import { createWorkbenchApiClient } from './api/workbenchApiClient';
-import { getDebruteShellApi } from '../api/shellApi';
+import { getDebruteShellApi, type NativeWindowState } from '../api/shellApi';
 import { CanvasEditor } from './canvas/CanvasEditor';
 import { CanvasCardBar } from './canvas/CanvasCardBar';
 import { CanvasFeedbackBar } from './canvas/CanvasFeedbackBar';
-import type { CanvasMediaFeedbackMode } from './canvas/CanvasMediaFeedbackLayer';
 import { CanvasMinimapBar } from './canvas/CanvasMinimapBar';
 import { CanvasResetLayoutButton } from './canvas/CanvasResetLayoutButton';
 import { createCanvasOverlayRuntime } from './canvas/CanvasOverlayRuntime';
+import { useCanvasFeedbackController } from './canvas/useCanvasFeedbackController';
 import type { CanvasEditorRuntime, CanvasRuntimeSnapshot } from './canvas/runtime/CanvasEditorRuntime';
-import { createCanvasFeedbackEntryUpdater } from './services/canvasFeedbackUpdates';
 import { nextSnapshotFromAppServerEvent } from './services/appServerEvents';
 import { getCanvasById } from './services/canvasState';
+import { createCanvasSelectionStackOrderSync } from './services/canvasStackOrderSelection';
 import { chooseInitialActiveCanvasId } from './canvas/canvasCardBarState';
 import {
   currentDebruteWorkbenchRoute,
-  loadCanvasFeedback,
   openInitialProject,
   replaceWorkbenchProjectRoute,
   shouldShowInitialProjectLoader,
@@ -52,38 +49,22 @@ import {
   buildWorkbenchContextMenuItems,
   cameraCenteredOnNode,
   type WorkbenchContextMenuCommand,
-  type WorkbenchFileClipboard,
   type WorkbenchContextMenuPosition,
   type WorkbenchContextMenuTarget
 } from './shell/contextMenu';
-import { createInlineEditState, validateInlineProjectName, type ProjectTreeInlineEditState } from './project-explorer/projectTreeEditing';
 import type { ProjectTreeFileKeyboardCommand } from './project-explorer/projectTreeKeyboardCommands';
 import { createCanvasTextViewportStateUpdater } from './services/canvasSnapshotUpdates';
 import {
-  clearCanvasSelectionAfterDeletedPath,
-  clearClipboardAfterDeletedPath,
-  batchResultSelectionPaths,
-  nearestExistingParentSelection,
-  permanentDeleteConfirmationMessageForEntries
+  permanentDeleteConfirmationMessageForEntries,
+  projectTreeSelectionFromPaths
 } from './project-explorer/workbenchFileCommands';
-import {
-  createEmptyProjectTreeSelection,
-  isProjectTreeMoveNoop,
-  projectTreeBatchMoveHasConflict,
-  projectTreeBasename,
-  type ProjectTreeSelectionState
-} from './project-explorer/projectTreeInteraction';
-import { createProjectTreeExternalDropPlan } from './project-explorer/projectTreeExternalDrop';
+import { useProjectExplorerController } from './project-explorer/useProjectExplorerController';
 import {
   canvasCardBarRect,
-  canvasFeedbackBarTargetWithCurrentEntry,
   feedbackBarPlacementForCanvasTarget,
   canvasMinimapButtonRect,
   canvasResetLayoutButtonRect,
-  placeCanvasMinimapPanel,
-  sameCanvasFeedbackBarTarget,
-  type CanvasFeedbackBarTarget,
-  type CanvasLocalFeedbackDraft
+  placeCanvasMinimapPanel
 } from './shell/floatingBars';
 import {
   DEFAULT_FLOATING_PANEL_STATE,
@@ -99,7 +80,7 @@ import {
 } from './shell/floatingPanels';
 import { FloatingDock } from './shell/FloatingDock';
 import { FloatingPanelContent, WorkbenchFloatingPanelShell } from './shell/FloatingPanel';
-import { FloatingTextEditorWindow } from './shell/FloatingTextEditorWindow';
+import { FloatingTextEditorWindow } from './canvas/FloatingTextEditorWindow';
 import { NotificationStack } from './shell/NotificationStack';
 import { TerminalPanel } from './terminal/TerminalPanel';
 import { Button, WorkbenchIconProvider } from './ui';
@@ -116,28 +97,10 @@ import {
 } from './shell/workbenchWindowOrder';
 import { readWorkbenchViewportRect } from './shell/windowBounds';
 import type { FloatingTextEditorWindowState, TextFileBuffer, WorkbenchActions, WorkbenchState } from '../types';
-import { I18nProvider, createI18n, parseWorkbenchLocale, type WorkbenchI18n, type WorkbenchLocale } from './i18n';
-import {
-  DEFAULT_WORKBENCH_PREFERENCES,
-  parseWorkbenchThemePreference,
-  resolveWorkbenchThemePreference,
-  setDocumentTheme,
-  subscribeSystemThemeChanges,
-  type WorkbenchResolvedTheme
-} from './services/workbenchTheme';
+import { I18nProvider, createI18n, type WorkbenchI18n } from './i18n';
+import { useWorkbenchSettingsController } from './settings/useWorkbenchSettingsController';
 
 const api = createWorkbenchApiClient();
-
-interface PendingCanvasFeedbackItem {
-  projectRelativePath: string;
-  kind: 'comment' | 'pin' | 'region';
-  scope: 'file' | 'moment';
-  momentTimeSeconds?: number | undefined;
-  geometry?: CanvasFeedbackGeometry | undefined;
-  label?: number | string | undefined;
-}
-
-type CanvasFeedbackAddItemInput = Extract<UpdateCanvasFeedbackEntryInput, { operation: 'add-item' }>['item'];
 
 export function WorkbenchApp(): React.ReactElement {
   const initialRoute = useMemo(() => currentDebruteWorkbenchRoute(), []);
@@ -151,26 +114,11 @@ export function WorkbenchApp(): React.ReactElement {
     nodes: ProjectedCanvasNode[];
   }>();
   const [canvasRuntimeScopeKey, setCanvasRuntimeScopeKey] = useState(0);
-  const [explorerSelection, setExplorerSelection] = useState<ProjectTreeSelectionState>(() => createEmptyProjectTreeSelection());
   const [floatingPanels, setFloatingPanels] = useState<FloatingPanelState>(DEFAULT_FLOATING_PANEL_STATE);
   const [requestedTerminalCwd, setRequestedTerminalCwd] = useState<string | null>(null);
-  const [workbenchPreferencesResource, setWorkbenchPreferencesResource] = useState<WorkbenchState['workbenchPreferences']>({ status: 'loading' });
-  const [imageModelSettings, setImageModelSettings] = useState<WorkbenchState['imageModelSettings']>({ status: 'loading' });
-  const [videoModelSettings, setVideoModelSettings] = useState<WorkbenchState['videoModelSettings']>({ status: 'loading' });
-  const [audioModelSettings, setAudioModelSettings] = useState<WorkbenchState['audioModelSettings']>({ status: 'loading' });
-  const [integrationsSettings, setIntegrationsSettings] = useState<WorkbenchState['integrationsSettings']>({ status: 'loading' });
-  const [adobeBridge, setAdobeBridge] = useState<WorkbenchState['adobeBridge']>({ status: 'loading' });
-  const [locale, setLocale] = useState<WorkbenchLocale>('en');
-  const [themePreference, setThemePreference] = useState<WorkbenchThemePreference>('system');
-  const [resolvedTheme, setResolvedTheme] = useState<WorkbenchResolvedTheme>(() => resolveWorkbenchThemePreference('system'));
-  const [canvasFeedback, setCanvasFeedback] = useState<WorkbenchState['canvasFeedback']>();
   const [textFileBuffers, setTextFileBuffers] = useState<Record<string, TextFileBuffer>>({});
   const [textEditorWindows, setTextEditorWindows] = useState<Record<string, FloatingTextEditorWindowState>>({});
   const [windowOrder, setWindowOrder] = useState<WorkbenchWindowOrderState>(DEFAULT_WORKBENCH_WINDOW_ORDER);
-  const [feedbackBarTarget, setFeedbackBarTarget] = useState<CanvasFeedbackBarTarget>();
-  const [localFeedbackMode, setLocalFeedbackMode] = useState<CanvasMediaFeedbackMode>();
-  const [pendingFeedbackItem, setPendingFeedbackItem] = useState<PendingCanvasFeedbackItem>();
-  const [pendingFeedbackItemComment, setPendingFeedbackItemComment] = useState('');
   const [canvasMinimapOpen, setCanvasMinimapOpen] = useState(false);
   const [contextMenu, setContextMenu] = useState<{
     target: WorkbenchContextMenuTarget;
@@ -178,11 +126,9 @@ export function WorkbenchApp(): React.ReactElement {
   }>();
   const [sendToPhotoshopPath, setSendToPhotoshopPath] = useState<string>();
   const [sendingToPhotoshop, setSendingToPhotoshop] = useState(false);
-  const [fileClipboard, setFileClipboard] = useState<WorkbenchFileClipboard>();
   const [titleBarState, setTitleBarState] = useState<WorkbenchTitleBarState>();
-  const [nativeWindowState, setNativeWindowState] = useState({ maximized: false });
+  const [nativeWindowState, setNativeWindowState] = useState<NativeWindowState>();
   const [desktopPlatform, setDesktopPlatform] = useState<NodeJS.Platform>();
-  const [inlineProjectTreeEdit, setInlineProjectTreeEdit] = useState<ProjectTreeInlineEditState>();
   const [notifications, setNotifications] = useState<string[]>([]);
   const [isLoading, setIsLoading] = useState(() => shouldShowInitialProjectLoader(initialRoute));
   const [projectOpenAttemptedPath, setProjectOpenAttemptedPath] = useState<string>();
@@ -194,167 +140,60 @@ export function WorkbenchApp(): React.ReactElement {
   const snapshotRef = useRef(snapshot);
   const textFileBuffersRef = useRef(textFileBuffers);
   const textEditorWindowsRef = useRef(textEditorWindows);
-  const feedbackBarClearTimerRef = useRef<number | undefined>(undefined);
-  const feedbackBarHoveredRef = useRef(false);
-  const workbenchPreferencesLoadVersionRef = useRef(0);
-  const integrationsSettingsLoadVersionRef = useRef(0);
-  const imageModelSettingsLoadVersionRef = useRef(0);
-  const videoModelSettingsLoadVersionRef = useRef(0);
-  const audioModelSettingsLoadVersionRef = useRef(0);
-  const adobeBridgeLoadVersionRef = useRef(0);
-  const i18n = useMemo(() => createI18n(locale), [locale]);
-  const localeRef = useRef<WorkbenchLocale>(locale);
-
-  const applyWorkbenchPreferenceEffects = useCallback((preferences: WorkbenchPreferencesView): WorkbenchPreferencesView => {
-    const nextLocale = parseWorkbenchLocale(preferences.locale);
-    const nextThemePreference = parseWorkbenchThemePreference(preferences.themePreference);
-    const nextPreferences: WorkbenchPreferencesView = {
-      locale: nextLocale,
-      themePreference: nextThemePreference
-    };
-    localeRef.current = nextLocale;
-    setLocale(nextLocale);
-    setThemePreference(nextThemePreference);
-    return nextPreferences;
+  const titleBarRequestVersionRef = useRef(0);
+  const notify = useCallback((message: string) => {
+    setNotifications((current) => [message, ...current].slice(0, 4));
   }, []);
-
-  const applyLoadedWorkbenchPreferences = useCallback((preferences: WorkbenchPreferencesView) => {
-    workbenchPreferencesLoadVersionRef.current += 1;
-    const nextPreferences = applyWorkbenchPreferenceEffects(preferences);
-    setWorkbenchPreferencesResource({ status: 'ready', value: nextPreferences });
-  }, [applyWorkbenchPreferenceEffects]);
-
-  useEffect(() => {
-    localeRef.current = locale;
-  }, [locale]);
-
-  useEffect(() => {
-    setResolvedTheme(resolveWorkbenchThemePreference(themePreference));
-    if (themePreference !== 'system') {
+  const settingsController = useWorkbenchSettingsController({ api, projectId: daemonProjectId, notify });
+  const i18n = useMemo(() => createI18n(settingsController.locale), [settingsController.locale]);
+  const activeCanvas = getCanvasById(snapshot, activeCanvasId);
+  const activeProjection = activeCanvas
+    ? snapshot?.projections.find((item) => item.canvasId === activeCanvas.id)
+    : undefined;
+  const centerCanvasProjectionNode = useCallback((
+    projection: WorkbenchProjectSessionSnapshot['projections'][number] | undefined,
+    projectRelativePath: string
+  ) => {
+    const node = projection?.nodes.find((item) => item.projectRelativePath === projectRelativePath);
+    const runtimeSnapshot = activeCanvasRuntime?.getSnapshot();
+    if (!node || !activeCanvasRuntime || !runtimeSnapshot?.surfaceSize) {
       return;
     }
-    return subscribeSystemThemeChanges(setResolvedTheme);
-  }, [themePreference]);
-
-  useLayoutEffect(() => {
-    setDocumentTheme(resolvedTheme);
-  }, [resolvedTheme]);
+    activeCanvasRuntime.setSelection({ kind: 'node', projectRelativePath });
+    activeCanvasRuntime.camera.setCamera(cameraCenteredOnNode({
+      node,
+      surfaceSize: runtimeSnapshot.surfaceSize,
+      camera: runtimeSnapshot.camera
+    }));
+  }, [activeCanvasRuntime]);
+  const locateProjectFileInCanvas = useCallback((projectRelativePath: string) => {
+    centerCanvasProjectionNode(activeProjection, projectRelativePath);
+  }, [activeProjection, centerCanvasProjectionNode]);
+  const explorerController = useProjectExplorerController({
+    api,
+    projectId: daemonProjectId,
+    snapshot,
+    setSnapshot,
+    activeCanvasRuntime,
+    locateProjectFileInCanvas,
+    notify,
+    i18n
+  });
+  const { fileClipboard, inlineEdit: inlineProjectTreeEdit } = explorerController;
 
   const notifyCanvasFeedbackUnavailable = useCallback((message: string) => {
-    const currentI18n = createI18n(localeRef.current);
+    const currentI18n = settingsController.getCurrentI18n();
     setNotifications((current) => [currentI18n.t('canvas.feedback.unavailable', { message }), ...current].slice(0, 4));
-  }, []);
-
-  const reloadWorkbenchPreferences = useCallback(async () => {
-    const loadVersion = workbenchPreferencesLoadVersionRef.current + 1;
-    workbenchPreferencesLoadVersionRef.current = loadVersion;
-    setWorkbenchPreferencesResource({ status: 'loading' });
-    try {
-      const preferences = await api.workbenchPreferencesGet();
-      if (workbenchPreferencesLoadVersionRef.current !== loadVersion) {
-        return;
-      }
-      const nextPreferences = applyWorkbenchPreferenceEffects(preferences);
-      setWorkbenchPreferencesResource({ status: 'ready', value: nextPreferences });
-    } catch (error) {
-      if (workbenchPreferencesLoadVersionRef.current !== loadVersion) {
-        return;
-      }
-      applyWorkbenchPreferenceEffects(DEFAULT_WORKBENCH_PREFERENCES);
-      setWorkbenchPreferencesResource({ status: 'error', message: errorMessage(error) });
-    }
-  }, [applyWorkbenchPreferenceEffects]);
-
-  const reloadIntegrationsSettings = useCallback(async () => {
-    const loadVersion = integrationsSettingsLoadVersionRef.current + 1;
-    integrationsSettingsLoadVersionRef.current = loadVersion;
-    setIntegrationsSettings({ status: 'loading' });
-    try {
-      const settings = await api.integrationsListStatus();
-      if (integrationsSettingsLoadVersionRef.current === loadVersion) {
-        setIntegrationsSettings({ status: 'ready', value: settings });
-      }
-    } catch (error) {
-      if (integrationsSettingsLoadVersionRef.current === loadVersion) {
-        setIntegrationsSettings({ status: 'error', message: errorMessage(error) });
-      }
-    }
-  }, []);
-
-  const reloadImageModelSettings = useCallback(async () => {
-    const loadVersion = imageModelSettingsLoadVersionRef.current + 1;
-    imageModelSettingsLoadVersionRef.current = loadVersion;
-    setImageModelSettings({ status: 'loading' });
-    try {
-      const settings = await api.imageModelGetSettings();
-      if (imageModelSettingsLoadVersionRef.current === loadVersion) {
-        setImageModelSettings({ status: 'ready', value: settings });
-      }
-    } catch (error) {
-      if (imageModelSettingsLoadVersionRef.current === loadVersion) {
-        setImageModelSettings({ status: 'error', message: errorMessage(error) });
-      }
-    }
-  }, []);
-
-  const reloadVideoModelSettings = useCallback(async () => {
-    const loadVersion = videoModelSettingsLoadVersionRef.current + 1;
-    videoModelSettingsLoadVersionRef.current = loadVersion;
-    setVideoModelSettings({ status: 'loading' });
-    try {
-      const settings = await api.videoModelGetSettings();
-      if (videoModelSettingsLoadVersionRef.current === loadVersion) {
-        setVideoModelSettings({ status: 'ready', value: settings });
-      }
-    } catch (error) {
-      if (videoModelSettingsLoadVersionRef.current === loadVersion) {
-        setVideoModelSettings({ status: 'error', message: errorMessage(error) });
-      }
-    }
-  }, []);
-
-  const reloadAudioModelSettings = useCallback(async () => {
-    const loadVersion = audioModelSettingsLoadVersionRef.current + 1;
-    audioModelSettingsLoadVersionRef.current = loadVersion;
-    setAudioModelSettings({ status: 'loading' });
-    try {
-      const settings = await api.audioModelGetSettings();
-      if (audioModelSettingsLoadVersionRef.current === loadVersion) {
-        setAudioModelSettings({ status: 'ready', value: settings });
-      }
-    } catch (error) {
-      if (audioModelSettingsLoadVersionRef.current === loadVersion) {
-        setAudioModelSettings({ status: 'error', message: errorMessage(error) });
-      }
-    }
-  }, []);
-
-  const reloadAdobeBridge = useCallback(async () => {
-    const loadVersion = adobeBridgeLoadVersionRef.current + 1;
-    adobeBridgeLoadVersionRef.current = loadVersion;
-    setAdobeBridge({ status: 'loading' });
-    try {
-      const bridge = await api.adobeBridgeGetState();
-      if (adobeBridgeLoadVersionRef.current === loadVersion) {
-        setAdobeBridge({ status: 'ready', value: bridge });
-      }
-    } catch (error) {
-      if (adobeBridgeLoadVersionRef.current === loadVersion) {
-        setAdobeBridge({ status: 'error', message: errorMessage(error) });
-      }
-    }
-  }, []);
-
-  const invalidateSettingsResourceLoads = useCallback(() => {
-    workbenchPreferencesLoadVersionRef.current += 1;
-    integrationsSettingsLoadVersionRef.current += 1;
-    imageModelSettingsLoadVersionRef.current += 1;
-    videoModelSettingsLoadVersionRef.current += 1;
-    audioModelSettingsLoadVersionRef.current += 1;
-    adobeBridgeLoadVersionRef.current += 1;
-  }, []);
+  }, [settingsController.getCurrentI18n]);
+  const feedbackController = useCanvasFeedbackController({
+    api,
+    overlayRuntime: canvasOverlayRuntime,
+    notifyUnavailable: notifyCanvasFeedbackUnavailable
+  });
 
   const refreshTitleBarState = useCallback(async (projectId?: string) => {
+    const requestVersion = titleBarRequestVersionRef.current + 1;
+    titleBarRequestVersionRef.current = requestVersion;
     const shell = getDebruteShellApi();
     try {
       const state = shell?.getWorkbenchTitleBarState
@@ -363,13 +202,19 @@ export function WorkbenchApp(): React.ReactElement {
             host: 'web',
             ...(projectId ? { projectId } : {})
           });
+      if (titleBarRequestVersionRef.current !== requestVersion) {
+        return;
+      }
       setTitleBarState(state);
     } catch (error) {
+      if (titleBarRequestVersionRef.current !== requestVersion) {
+        return;
+      }
       setTitleBarState(unavailableWorkbenchTitleBarState());
-      const currentI18n = createI18n(localeRef.current);
+      const currentI18n = settingsController.getCurrentI18n();
       setNotifications((current) => [currentI18n.t('shell.notifications.titleBarStateFailed', { message: errorMessage(error) }), ...current].slice(0, 4));
     }
-  }, []);
+  }, [settingsController.getCurrentI18n]);
 
   const chooseActiveCanvasForProject = useCallback((input: {
     projectId: string;
@@ -397,7 +242,7 @@ export function WorkbenchApp(): React.ReactElement {
     }).floatingPanels ?? DEFAULT_FLOATING_PANEL_STATE, workbenchViewportRectRef.current);
   }, []);
 
-  const applyOpenedProject = useCallback(async (opened: { projectId: string; snapshot: WorkbenchProjectSessionSnapshot }) => {
+  const applyOpenedProject = useCallback((opened: { projectId: string; snapshot: WorkbenchProjectSessionSnapshot }) => {
     replaceWorkbenchProjectRoute(opened.projectId, { search: '', hash: '' });
     setSnapshot(opened.snapshot);
     setDaemonProjectId(opened.projectId);
@@ -405,27 +250,24 @@ export function WorkbenchApp(): React.ReactElement {
     setActiveCanvasId(chooseActiveCanvasForProject({ projectId: opened.projectId, snapshot: opened.snapshot }));
     setActiveCanvasRuntime(undefined);
     setCanvasRuntimeScopeKey((current) => current + 1);
-    setExplorerSelection(createEmptyProjectTreeSelection());
-    setFileClipboard(undefined);
-    setInlineProjectTreeEdit(undefined);
+    explorerController.resetForProject(opened.projectId);
     setTextFileBuffers({});
     setTextEditorWindows({});
     setWindowOrder(DEFAULT_WORKBENCH_WINDOW_ORDER);
-    setFeedbackBarTarget(undefined);
+    feedbackController.reset();
     setCanvasMinimapOpen(false);
     setProjectOpenAttemptedPath(undefined);
     setProjectOpenError(undefined);
-    await loadCanvasFeedback(api, setCanvasFeedback, notifyCanvasFeedbackUnavailable);
-    await reloadAdobeBridge();
-    await refreshTitleBarState(opened.projectId);
-    const currentI18n = createI18n(localeRef.current);
+    void feedbackController.load();
+    const currentI18n = settingsController.getCurrentI18n();
     setNotifications((current) => [currentI18n.t('shell.notifications.projectOpened', { name: opened.snapshot.metadata.project.name }), ...current].slice(0, 4));
   }, [
     chooseActiveCanvasForProject,
+    explorerController.resetForProject,
+    feedbackController.load,
+    feedbackController.reset,
     loadFloatingPanelsForProject,
-    notifyCanvasFeedbackUnavailable,
-    refreshTitleBarState,
-    reloadAdobeBridge
+    settingsController.getCurrentI18n
   ]);
 
   useEffect(() => {
@@ -474,30 +316,18 @@ export function WorkbenchApp(): React.ReactElement {
   }, [activeCanvasRuntime]);
 
   useEffect(() => () => {
-    if (feedbackBarClearTimerRef.current !== undefined) {
-      window.clearTimeout(feedbackBarClearTimerRef.current);
-    }
-  }, []);
-
-  useEffect(() => () => {
     canvasOverlayRuntime.dispose();
   }, [canvasOverlayRuntime]);
 
   useEffect(() => {
     let disposed = false;
-    void reloadIntegrationsSettings();
-    void reloadImageModelSettings();
-    void reloadVideoModelSettings();
-    void reloadAudioModelSettings();
-    void reloadAdobeBridge();
-    void reloadWorkbenchPreferences();
     void api.getDesktopPlatform().then((platform) => {
       if (!disposed) {
         setDesktopPlatform(platform);
       }
     }).catch((error) => {
       if (!disposed) {
-        const currentI18n = createI18n(localeRef.current);
+        const currentI18n = settingsController.getCurrentI18n();
         setNotifications((current) => [currentI18n.t('shell.notifications.desktopPlatformFailed', { message: errorMessage(error) }), ...current].slice(0, 4));
       }
     });
@@ -508,15 +338,15 @@ export function WorkbenchApp(): React.ReactElement {
           return;
         }
         setProjectOpenAttemptedPath(result.projectOpen?.attemptedPath);
-        setProjectOpenError(localizedProjectOpenError(result.projectOpen?.error, createI18n(localeRef.current)));
+        setProjectOpenError(localizedProjectOpenError(result.projectOpen?.error, settingsController.getCurrentI18n()));
         const { projectId: routeProjectId, snapshot: opened } = result;
         if (!opened || !routeProjectId) {
           return;
         }
-        await applyOpenedProject({ projectId: routeProjectId, snapshot: opened });
+        applyOpenedProject({ projectId: routeProjectId, snapshot: opened });
       } catch (error) {
         if (!disposed) {
-          const currentI18n = createI18n(localeRef.current);
+          const currentI18n = settingsController.getCurrentI18n();
           setNotifications((current) => [currentI18n.t('shell.notifications.projectStartupFailed', { message: errorMessage(error) }), ...current].slice(0, 4));
         }
       } finally {
@@ -527,18 +357,11 @@ export function WorkbenchApp(): React.ReactElement {
     })();
     return () => {
       disposed = true;
-      invalidateSettingsResourceLoads();
     };
   }, [
     applyOpenedProject,
-    invalidateSettingsResourceLoads,
     initialRoute,
-    reloadAdobeBridge,
-    reloadAudioModelSettings,
-    reloadImageModelSettings,
-    reloadIntegrationsSettings,
-    reloadVideoModelSettings,
-    reloadWorkbenchPreferences
+    settingsController.getCurrentI18n
   ]);
 
   useEffect(() => {
@@ -547,15 +370,20 @@ export function WorkbenchApp(): React.ReactElement {
 
   useEffect(() => {
     const shell = getDebruteShellApi();
-    void shell?.getNativeWindowState?.().then((state) => {
-      setNativeWindowState(state);
-      reconcileCurrentWorkbenchViewportLayout();
-    }).catch(() => undefined);
+    if (shell?.getNativeWindowState) {
+      void shell.getNativeWindowState().then((state) => {
+        setNativeWindowState(state);
+        reconcileCurrentWorkbenchViewportLayout();
+      }).catch((error) => {
+        const currentI18n = settingsController.getCurrentI18n();
+        notify(currentI18n.t('shell.notifications.windowStateFailed', { message: errorMessage(error) }));
+      });
+    }
     return shell?.onNativeWindowStateChanged?.((state) => {
       setNativeWindowState(state);
       reconcileCurrentWorkbenchViewportLayout();
     });
-  }, [reconcileCurrentWorkbenchViewportLayout]);
+  }, [notify, reconcileCurrentWorkbenchViewportLayout, settingsController.getCurrentI18n]);
 
   useEffect(() => {
     if (!daemonProjectId || !activeCanvasId) {
@@ -601,6 +429,17 @@ export function WorkbenchApp(): React.ReactElement {
   const writeProjectTextFile = useCallback((projectRelativePath: string, content: string) => api.writeProjectTextFile(projectRelativePath, content), []);
   const lookupGeneratedAssetMetadata = useCallback<WorkbenchActions['lookupGeneratedAssetMetadata']>((input) => api.lookupGeneratedAssetMetadata(input), []);
   const readGeneratedAsset = useCallback<WorkbenchActions['readGeneratedAsset']>((assetId) => api.readGeneratedAsset(assetId), []);
+  const saveCanvasTextPreviewSource = useCallback<WorkbenchActions['saveCanvasTextPreviewSource']>((input) => api.saveCanvasTextPreviewSource(input), []);
+  const readCanvasTextPreviewSources = useCallback<WorkbenchActions['readCanvasTextPreviewSources']>((input) => api.readCanvasTextPreviewSources(input), []);
+  const readCanvasVideoPreviewSources = useCallback<WorkbenchActions['readCanvasVideoPreviewSources']>((input) => api.readCanvasVideoPreviewSources(input), []);
+  const sendProjectFileToPhotoshop = useCallback<WorkbenchActions['sendProjectFileToPhotoshop']>(async (input) => {
+    const result = await api.sendProjectFileToPhotoshop(input);
+    notify(i18n.t('shell.notifications.sentToPhotoshop', { path: input.projectRelativePath }));
+    return result;
+  }, [i18n, notify]);
+  const openSendToPhotoshopPicker = useCallback<WorkbenchActions['openSendToPhotoshopPicker']>((projectRelativePath) => {
+    setSendToPhotoshopPath(projectRelativePath);
+  }, []);
 
   const {
     ensureTextFileBuffer,
@@ -617,69 +456,49 @@ export function WorkbenchApp(): React.ReactElement {
     textEditorWindowsRef
   });
 
+  const applyProjectOpenedEvent = useCallback((event: Extract<WorkbenchEvent, { type: 'project.opened' }>) => {
+    setFloatingPanels(loadFloatingPanelsForProject(event.projectId));
+    setActiveCanvasId(chooseActiveCanvasForProject({ projectId: event.projectId, snapshot: event.snapshot }));
+    setContextMenu(undefined);
+    setActiveCanvasRuntime(undefined);
+    setCanvasRuntimeScopeKey((current) => current + 1);
+    setCanvasMinimapOpen(false);
+  }, [chooseActiveCanvasForProject, loadFloatingPanelsForProject]);
+
   useEffect(() => {
     return api.onEvent((event) => {
+      settingsController.applyEvent(event);
+      feedbackController.applyEvent(event);
+
       const nextSnapshot = nextSnapshotFromAppServerEvent(event, snapshotRef.current);
       snapshotRef.current = nextSnapshot;
       setSnapshot(nextSnapshot);
+
       if ('projectId' in event) {
         setDaemonProjectId(event.projectId);
       }
       if (event.type === 'project.opened') {
-        setFloatingPanels(loadFloatingPanelsForProject(event.projectId));
-        setActiveCanvasId(chooseActiveCanvasForProject({ projectId: event.projectId, snapshot: event.snapshot }));
-        setExplorerSelection(createEmptyProjectTreeSelection());
-        setContextMenu(undefined);
-        setFileClipboard(undefined);
-        setInlineProjectTreeEdit(undefined);
-        setActiveCanvasRuntime(undefined);
-        setCanvasRuntimeScopeKey((current) => current + 1);
-        setCanvasMinimapOpen(false);
-        void loadCanvasFeedback(api, setCanvasFeedback, notifyCanvasFeedbackUnavailable);
-      }
-      if (event.type === 'workbench.preferences.changed') {
-        applyLoadedWorkbenchPreferences(event.preferences);
+        explorerController.resetForProject(event.projectId);
+        feedbackController.reset();
+        applyProjectOpenedEvent(event);
+        void feedbackController.load();
       }
       if (event.type === 'project.fileChanged') {
         void refreshTextFileBuffer(event.event.projectRelativePath);
         if (event.event.projectRelativePath === '.debrute/reviews/canvas-feedback.json') {
-          void loadCanvasFeedback(api, setCanvasFeedback, notifyCanvasFeedbackUnavailable);
+          void feedbackController.load();
         }
       }
-      if (event.type === 'canvas.feedback.changed') {
-        setCanvasFeedback(event.feedback);
-      }
-      if (event.type === 'imageModel.settings.changed') {
-        imageModelSettingsLoadVersionRef.current += 1;
-        setImageModelSettings({ status: 'ready', value: event.settings });
-      }
-      if (event.type === 'videoModel.settings.changed') {
-        videoModelSettingsLoadVersionRef.current += 1;
-        setVideoModelSettings({ status: 'ready', value: event.settings });
-      }
-      if (event.type === 'audioModel.settings.changed') {
-        audioModelSettingsLoadVersionRef.current += 1;
-        setAudioModelSettings({ status: 'ready', value: event.settings });
-      }
-      if (event.type === 'integrations.settings.changed') {
-        integrationsSettingsLoadVersionRef.current += 1;
-        setIntegrationsSettings({ status: 'ready', value: event.settings });
-      }
-      if (event.type === 'adobeBridge.settings.changed') {
-        setAdobeBridge((current) => {
-          if (current.status !== 'ready') {
-            return current;
-          }
-          adobeBridgeLoadVersionRef.current += 1;
-          return { status: 'ready', value: { ...current.value, settings: event.settings } };
-        });
-      }
-      if (event.type === 'adobeBridge.state.changed') {
-        adobeBridgeLoadVersionRef.current += 1;
-        setAdobeBridge({ status: 'ready', value: event.state });
-      }
     });
-  }, [applyLoadedWorkbenchPreferences, chooseActiveCanvasForProject, loadFloatingPanelsForProject, notifyCanvasFeedbackUnavailable, refreshTextFileBuffer]);
+  }, [
+    applyProjectOpenedEvent,
+    explorerController.resetForProject,
+    feedbackController.applyEvent,
+    feedbackController.load,
+    feedbackController.reset,
+    refreshTextFileBuffer,
+    settingsController.applyEvent
+  ]);
 
   useEffect(() => {
     if (!snapshot || snapshot.canvasRegistry.status !== 'ready') {
@@ -712,13 +531,6 @@ export function WorkbenchApp(): React.ReactElement {
     void ensureTextFileBuffer(projectRelativePath);
   }, [ensureTextFileBuffer]);
 
-  const updateCanvasFeedbackEntry = useMemo(() => createCanvasFeedbackEntryUpdater({
-    requestUpdate: async (input) => (await api.updateCanvasFeedbackEntry(input)).feedback,
-    applyFeedback: setCanvasFeedback,
-    notifyUnavailable: (message) => {
-      notifyCanvasFeedbackUnavailable(message);
-    }
-  }), [notifyCanvasFeedbackUnavailable]);
   const updateCanvasTextViewportState = useMemo(() => createCanvasTextViewportStateUpdater({
     getSnapshot: () => snapshotRef.current,
     commitSnapshot: (next) => {
@@ -731,44 +543,137 @@ export function WorkbenchApp(): React.ReactElement {
     })
   }), []);
 
-  const clearFeedbackBarHideTimer = useCallback(() => {
-    if (feedbackBarClearTimerRef.current !== undefined) {
-      window.clearTimeout(feedbackBarClearTimerRef.current);
-      feedbackBarClearTimerRef.current = undefined;
+  const updateCanvasNodeLayouts = useCallback<WorkbenchActions['updateCanvasNodeLayouts']>(async (canvasId, input) => {
+    try {
+      const result = await api.updateCanvasNodeLayouts({
+        canvasId,
+        ...input
+      });
+      const current = snapshotRef.current;
+      if (!current) {
+        throw new Error(`Cannot apply Canvas document ${result.canvas.id} without a current snapshot.`);
+      }
+      const next = replaceCanvasMutationInSnapshot(current, result);
+      snapshotRef.current = next;
+      setSnapshot(next);
+    } catch (error) {
+      notify(i18n.t('shell.notifications.updateCanvasLayoutFailed', { message: errorMessage(error) }));
+      throw error;
     }
+  }, [i18n, notify]);
+
+  const resetCanvasNodeLayouts = useCallback<WorkbenchActions['resetCanvasNodeLayouts']>(async (canvasId, input) => {
+    const result = await api.resetCanvasNodeLayouts({
+      canvasId,
+      ...input
+    });
+    const current = snapshotRef.current;
+    if (!current) {
+      throw new Error(`Cannot apply Canvas document ${result.canvas.id} without a current snapshot.`);
+    }
+    const next = replaceCanvasMutationInSnapshot(current, result);
+    snapshotRef.current = next;
+    setSnapshot(next);
+    return result;
   }, []);
 
-  const clearFeedbackBarTarget = useCallback(() => {
-    canvasOverlayRuntime.clearFeedbackBarPlacement();
-    setFeedbackBarTarget(undefined);
-  }, [canvasOverlayRuntime]);
-
-  const handleFeedbackBarTargetChange = useCallback((target: CanvasFeedbackBarTarget | undefined) => {
-    clearFeedbackBarHideTimer();
-    if (target) {
-      setFeedbackBarTarget((current) => (
-        sameCanvasFeedbackBarTarget(current, target) ? current : target
-      ));
-      return;
+  const bringCanvasNodeToFront = useCallback<WorkbenchActions['bringCanvasNodeToFront']>(async (canvasId, input) => {
+    const result = await api.bringCanvasNodeToFront({
+      canvasId,
+      ...input
+    });
+    const current = snapshotRef.current;
+    if (!current) {
+      throw new Error(`Cannot apply Canvas document ${result.canvas.id} without a current snapshot.`);
     }
-    feedbackBarClearTimerRef.current = window.setTimeout(() => {
-      feedbackBarClearTimerRef.current = undefined;
-      if (!feedbackBarHoveredRef.current) {
-        clearFeedbackBarTarget();
+    const next = replaceCanvasMutationInSnapshot(current, result);
+    snapshotRef.current = next;
+    setSnapshot(next);
+  }, []);
+
+  const updateCanvasVideoPlaybackState = useCallback<WorkbenchActions['updateCanvasVideoPlaybackState']>(async (canvasId, input) => {
+    const result = await api.updateCanvasVideoPlaybackState({
+      canvasId,
+      ...input
+    });
+    const current = snapshotRef.current;
+    if (!current) {
+      throw new Error(`Cannot apply Canvas document ${result.canvas.id} without a current snapshot.`);
+    }
+    const next = replaceCanvasMutationInSnapshot(current, result);
+    snapshotRef.current = next;
+    setSnapshot(next);
+  }, []);
+
+  const addProjectPathToCanvasMap = useCallback<WorkbenchActions['addProjectPathToCanvasMap']>(async (input) => {
+    try {
+      const result = await api.addProjectPathToCanvasMap(input);
+      setSnapshot(result.snapshot);
+      setActiveCanvasId(result.canvas.id);
+      explorerController.setSelection(projectTreeSelectionFromPaths([result.centerProjectRelativePath]));
+      centerCanvasProjectionNode(result.projection, result.centerProjectRelativePath);
+    } catch (error) {
+      notify(i18n.t('shell.notifications.addToCanvasMapFailed', { message: errorMessage(error) }));
+    }
+  }, [centerCanvasProjectionNode, explorerController.setSelection, i18n, notify]);
+
+  const createCanvas = useCallback<WorkbenchActions['createCanvas']>(async () => {
+    const result = await api.createCanvas();
+    setSnapshot(result.snapshot);
+    setActiveCanvasId(result.activeCanvasId);
+    return result;
+  }, []);
+
+  const renameCanvas = useCallback<WorkbenchActions['renameCanvas']>(async (input) => {
+    const result = await api.renameCanvas(input);
+    setSnapshot(result.snapshot);
+    return result;
+  }, []);
+
+  const deleteCanvas = useCallback<WorkbenchActions['deleteCanvas']>(async (input) => {
+    const result = await api.deleteCanvas(input);
+    setSnapshot(result.snapshot);
+    if (activeCanvasId === input.canvasId) {
+      setActiveCanvasId(result.activeCanvasId);
+    }
+    return result;
+  }, [activeCanvasId]);
+
+  const reorderCanvases = useCallback<WorkbenchActions['reorderCanvases']>(async (input) => {
+    const result = await api.reorderCanvases(input);
+    setSnapshot(result.snapshot);
+    return result;
+  }, []);
+
+  const repairCanvasIndex = useCallback<WorkbenchActions['repairCanvasIndex']>(async () => {
+    const result = await api.repairCanvasIndex();
+    setSnapshot(result.snapshot);
+    const repairedOrder = result.snapshot.canvasRegistry.status === 'ready'
+      ? result.snapshot.canvasRegistry.canvasOrder
+      : [];
+    const repairedActiveCanvasId = activeCanvasId && repairedOrder.includes(activeCanvasId)
+      ? activeCanvasId
+      : result.activeCanvasId ?? repairedOrder[0];
+    setActiveCanvasId(repairedActiveCanvasId);
+    return result;
+  }, [activeCanvasId]);
+
+  const openProject = useCallback<WorkbenchActions['openProject']>(async () => {
+    setIsProjectOpening(true);
+    setProjectOpenError(undefined);
+    setProjectOpenAttemptedPath(undefined);
+    try {
+      const result = await api.openProjectFromPicker();
+      if (!result.opened) {
+        return;
       }
-    }, 120);
-  }, [clearFeedbackBarHideTimer, clearFeedbackBarTarget]);
-
-  const handleFeedbackBarPointerEnter = useCallback(() => {
-    feedbackBarHoveredRef.current = true;
-    clearFeedbackBarHideTimer();
-  }, [clearFeedbackBarHideTimer]);
-
-  const handleFeedbackBarPointerLeave = useCallback(() => {
-    feedbackBarHoveredRef.current = false;
-    clearFeedbackBarHideTimer();
-    clearFeedbackBarTarget();
-  }, [clearFeedbackBarHideTimer, clearFeedbackBarTarget]);
+      applyOpenedProject(result);
+    } catch (error) {
+      setProjectOpenError(i18n.t('projectOpen.openFailed', { message: errorMessage(error) }));
+    } finally {
+      setIsProjectOpening(false);
+    }
+  }, [applyOpenedProject, i18n]);
 
   const openWorkbenchContextMenu = useCallback((target: WorkbenchContextMenuTarget, position: WorkbenchContextMenuPosition) => {
     setContextMenu({ target, position });
@@ -794,10 +699,6 @@ export function WorkbenchApp(): React.ReactElement {
     }
   }, [i18n]);
 
-  const activeCanvas = getCanvasById(snapshot, activeCanvasId);
-  const activeProjection = activeCanvas
-    ? snapshot?.projections.find((item) => item.canvasId === activeCanvas.id)
-    : undefined;
   const currentNodesForActiveCanvas = activeCanvasCurrentNodes?.canvasId === activeCanvas?.id
     ? activeCanvasCurrentNodes
     : undefined;
@@ -815,25 +716,6 @@ export function WorkbenchApp(): React.ReactElement {
       return { canvasId, nodes };
     });
   }, []);
-  const centerCanvasProjectionNode = useCallback((
-    projection: WorkbenchProjectSessionSnapshot['projections'][number] | undefined,
-    projectRelativePath: string
-  ) => {
-    const node = projection?.nodes.find((item) => item.projectRelativePath === projectRelativePath);
-    const runtimeSnapshot = activeCanvasRuntime?.getSnapshot();
-    if (!node || !activeCanvasRuntime || !runtimeSnapshot?.surfaceSize) {
-      return;
-    }
-    activeCanvasRuntime.setSelection({ kind: 'node', projectRelativePath });
-    activeCanvasRuntime.camera.setCamera(cameraCenteredOnNode({
-      node,
-      surfaceSize: runtimeSnapshot.surfaceSize,
-      camera: runtimeSnapshot.camera
-    }));
-  }, [activeCanvasRuntime]);
-  const locateProjectFileInCanvas = useCallback((projectRelativePath: string) => {
-    centerCanvasProjectionNode(activeProjection, projectRelativePath);
-  }, [activeProjection, centerCanvasProjectionNode]);
   const effectiveTitleBarState = titleBarState ?? unavailableWorkbenchTitleBarState();
   const disabledFloatingPanelIds = useMemo<readonly FloatingPanelId[]>(() => (
     daemonProjectId ? [] : ['terminal']
@@ -843,20 +725,16 @@ export function WorkbenchApp(): React.ReactElement {
     snapshot,
     projectId: daemonProjectId,
     titleBarState: effectiveTitleBarState,
-    workbenchPreferences: workbenchPreferencesResource,
-    resolvedTheme,
+    globalSettings: settingsController.globalSettings,
+    resolvedTheme: settingsController.resolvedTheme,
     projectOpen: {
       ...(projectOpenAttemptedPath ? { attemptedPath: projectOpenAttemptedPath } : {}),
       ...(projectOpenError ? { error: projectOpenError } : {}),
       opening: isProjectOpening
     },
-    explorerSelection,
-    imageModelSettings,
-    videoModelSettings,
-    audioModelSettings,
-    integrationsSettings,
-    adobeBridge,
-    canvasFeedback,
+    explorerSelection: explorerController.selection,
+    adobeBridge: settingsController.adobeBridge,
+    canvasFeedback: feedbackController.feedback,
     textFileBuffers,
     textEditorWindows,
     notifications
@@ -869,180 +747,16 @@ export function WorkbenchApp(): React.ReactElement {
   }, []);
 
   const actions: WorkbenchActions = useMemo(() => ({
-    getProductState: () => api.getProductState(),
-    checkProductUpdate: () => api.checkProductUpdate(),
-    applyProductUpdate: () => api.applyProductUpdate(),
-    reloadWorkbenchPreferences,
-    reloadImageModelSettings,
-    reloadVideoModelSettings,
-    reloadAudioModelSettings,
-    reloadIntegrationsSettings,
-    reloadAdobeBridge,
-    saveWorkbenchPreferences: async (input) => {
-      const previousPreferences = workbenchPreferencesResource.status === 'ready'
-        ? workbenchPreferencesResource.value
-        : DEFAULT_WORKBENCH_PREFERENCES;
-      const nextPreferences: WorkbenchPreferencesView = {
-        locale: parseWorkbenchLocale(input.locale),
-        themePreference: parseWorkbenchThemePreference(input.themePreference)
-      };
-      applyLoadedWorkbenchPreferences(nextPreferences);
-      try {
-        const preferences = await api.workbenchPreferencesSave(nextPreferences);
-        applyLoadedWorkbenchPreferences(preferences);
-      } catch (error) {
-        applyLoadedWorkbenchPreferences(previousPreferences);
-        throw error;
-      }
-    },
-    openProject: async () => {
-      setIsProjectOpening(true);
-      setProjectOpenError(undefined);
-      setProjectOpenAttemptedPath(undefined);
-      try {
-        const result = await api.openProjectFromPicker();
-        if (!result.opened) {
-          return;
-        }
-        await applyOpenedProject(result);
-      } catch (error) {
-        setProjectOpenError(i18n.t('projectOpen.openFailed', { message: errorMessage(error) }));
-      } finally {
-        setIsProjectOpening(false);
-      }
-    },
-    saveImageModelSetting: async (modelId, input) => {
-      const imageModels = await api.imageModelSaveSetting(modelId, input);
-      imageModelSettingsLoadVersionRef.current += 1;
-      setImageModelSettings({ status: 'ready', value: imageModels });
-    },
-    saveVideoModelSetting: async (modelId, input) => {
-      const videoModels = await api.videoModelSaveSetting(modelId, input);
-      videoModelSettingsLoadVersionRef.current += 1;
-      setVideoModelSettings({ status: 'ready', value: videoModels });
-    },
-    saveAudioModelSetting: async (modelId, input) => {
-      const audioModels = await api.audioModelSaveSetting(modelId, input);
-      audioModelSettingsLoadVersionRef.current += 1;
-      setAudioModelSettings({ status: 'ready', value: audioModels });
-    },
-    rescanIntegrations: async () => {
-      const settings = await api.integrationsRescan();
-      integrationsSettingsLoadVersionRef.current += 1;
-      setIntegrationsSettings({ status: 'ready', value: settings });
-      return settings;
-    },
-    runIntegrationOperation: async (input) => {
-      const result = await api.integrationsRunOperation(input);
-      integrationsSettingsLoadVersionRef.current += 1;
-      setIntegrationsSettings({ status: 'ready', value: result.settings });
-      if (!result.ok) {
-        const currentI18n = createI18n(localeRef.current);
-        const diagnostic = result.diagnostic?.stderrTail
-          ?? result.diagnostic?.stdoutTail
-          ?? result.diagnostic?.errorKind
-          ?? currentI18n.t('settings.integrations.unknownOperationFailure');
-        setNotifications((current) => [
-          currentI18n.t('settings.integrations.operationFailedNotification', {
-            operation: currentI18n.t(integrationOperationLabelKey(result.operation)),
-            integration: result.integrationId,
-            message: diagnostic
-          }),
-          ...current
-        ].slice(0, 4));
-      }
-      return result;
-    },
-    saveAdobeBridgeSettings: async (input) => {
-      const bridge = await api.adobeBridgeSaveSettings(input);
-      adobeBridgeLoadVersionRef.current += 1;
-      setAdobeBridge({ status: 'ready', value: bridge });
-    },
-    linkAdobeBridgePhotoshop: async (input) => {
-      const bridge = await api.adobeBridgeLinkPhotoshop(input);
-      adobeBridgeLoadVersionRef.current += 1;
-      setAdobeBridge({ status: 'ready', value: bridge });
-    },
-    unlinkAdobeBridgePhotoshop: async (adobeClientId) => {
-      const bridge = await api.adobeBridgeUnlinkPhotoshop(adobeClientId);
-      adobeBridgeLoadVersionRef.current += 1;
-      setAdobeBridge({ status: 'ready', value: bridge });
-    },
-    sendProjectFileToPhotoshop: async (input) => {
-      const result = await api.sendProjectFileToPhotoshop(input);
-      setNotifications((current) => [i18n.t('shell.notifications.sentToPhotoshop', { path: input.projectRelativePath }), ...current].slice(0, 4));
-      return result;
-    },
-    openSendToPhotoshopPicker: (projectRelativePath) => {
-      setSendToPhotoshopPath(projectRelativePath);
-    },
+    ...settingsController.actions,
+    sendProjectFileToPhotoshop,
+    openSendToPhotoshopPicker,
     lookupGeneratedAssetMetadata,
     readGeneratedAsset,
     readProjectTextFile,
     writeProjectTextFile,
-    saveCanvasTextPreviewSource: (input) => api.saveCanvasTextPreviewSource(input),
-    readCanvasTextPreviewSources: (input) => api.readCanvasTextPreviewSources(input),
-    readCanvasVideoPreviewSources: (input) => api.readCanvasVideoPreviewSources(input),
-    createProjectFile: async (input) => {
-      const result = await api.createProjectFile(input);
-      setSnapshot(result.snapshot);
-      setExplorerSelection(projectTreeSelectionFromPaths([result.projectRelativePath]));
-      return result;
-    },
-    createProjectDirectory: async (input) => {
-      const result = await api.createProjectDirectory(input);
-      setSnapshot(result.snapshot);
-      setExplorerSelection(projectTreeSelectionFromPaths([result.projectRelativePath]));
-      return result;
-    },
-    renameProjectPath: async (input) => {
-      const result = await api.renameProjectPath(input);
-      setSnapshot(result.snapshot);
-      setExplorerSelection(projectTreeSelectionFromPaths([result.projectRelativePath]));
-      return result;
-    },
-    copyProjectPaths: async (input) => {
-      const result = await api.copyProjectPaths(input);
-      setSnapshot(result.snapshot);
-      const selectedPaths = batchResultSelectionPaths(result.results);
-      setExplorerSelection(projectTreeSelectionFromPaths(selectedPaths));
-      locateSingleFileBatchResult(result.results, locateProjectFileInCanvas);
-      return result;
-    },
-    moveProjectPaths: async (input) => {
-      const result = await api.moveProjectPaths(input);
-      setSnapshot(result.snapshot);
-      const selectedPaths = batchResultSelectionPaths(result.results);
-      setExplorerSelection(projectTreeSelectionFromPaths(selectedPaths));
-      locateSingleFileBatchResult(result.results, locateProjectFileInCanvas);
-      return result;
-    },
-    copyProjectAbsolutePaths: (input) => api.copyProjectAbsolutePaths(input),
-    trashProjectPaths: async (input) => {
-      const result = await api.trashProjectPaths(input);
-      setSnapshot(result.snapshot);
-      applyDeletedProjectEntries({
-        entries: input.entries,
-        snapshot: result.snapshot,
-        activeCanvasRuntime,
-        setExplorerSelection,
-        setFileClipboard
-      });
-      return result;
-    },
-    deleteProjectPathsPermanently: async (input) => {
-      const result = await api.deleteProjectPathsPermanently(input);
-      setSnapshot(result.snapshot);
-      applyDeletedProjectEntries({
-        entries: input.entries,
-        snapshot: result.snapshot,
-        activeCanvasRuntime,
-        setExplorerSelection,
-        setFileClipboard
-      });
-      return result;
-    },
-    revealProjectPathInSystemFileManager: (input) => api.revealProjectPathInSystemFileManager(input),
+    saveCanvasTextPreviewSource,
+    readCanvasTextPreviewSources,
+    readCanvasVideoPreviewSources,
     ensureTextFileBuffer,
     updateTextFileBuffer,
     saveTextFileBuffer,
@@ -1050,253 +764,72 @@ export function WorkbenchApp(): React.ReactElement {
     reloadTextFileBuffer,
     openTextEditorWindow,
     toggleTextFileWordWrap,
-    updateCanvasNodeLayouts: async (canvasId, input) => {
-      try {
-        const result = await api.updateCanvasNodeLayouts({
-          canvasId,
-          ...input
-        });
-        const current = snapshotRef.current;
-        if (!current) {
-          throw new Error(`Cannot apply Canvas document ${result.canvas.id} without a current snapshot.`);
-        }
-        const next = replaceCanvasMutationInSnapshot(current, result);
-        snapshotRef.current = next;
-        setSnapshot(next);
-      } catch (error) {
-        setNotifications((current) => [i18n.t('shell.notifications.updateCanvasLayoutFailed', { message: errorMessage(error) }), ...current].slice(0, 4));
-        throw error;
-      }
-    },
-    resetCanvasNodeLayouts: async (canvasId, input) => {
-      const result = await api.resetCanvasNodeLayouts({
-        canvasId,
-        ...input
-      });
-      const current = snapshotRef.current;
-      if (!current) {
-        throw new Error(`Cannot apply Canvas document ${result.canvas.id} without a current snapshot.`);
-      }
-      const next = replaceCanvasMutationInSnapshot(current, result);
-      snapshotRef.current = next;
-      setSnapshot(next);
-      return result;
-    },
-    updateCanvasNodeLayers: async (canvasId, input) => {
-      const result = await api.updateCanvasNodeLayers({
-        canvasId,
-        ...input
-      });
-      const current = snapshotRef.current;
-      if (!current) {
-        throw new Error(`Cannot apply Canvas document ${result.canvas.id} without a current snapshot.`);
-      }
-      const next = replaceCanvasMutationInSnapshot(current, result);
-      snapshotRef.current = next;
-      setSnapshot(next);
-    },
-    updateCanvasVideoPlaybackState: async (canvasId, input) => {
-      const result = await api.updateCanvasVideoPlaybackState({
-        canvasId,
-        ...input
-      });
-      const current = snapshotRef.current;
-      if (!current) {
-        throw new Error(`Cannot apply Canvas document ${result.canvas.id} without a current snapshot.`);
-      }
-      const next = replaceCanvasMutationInSnapshot(current, result);
-      snapshotRef.current = next;
-      setSnapshot(next);
-    },
+    updateCanvasNodeLayouts,
+    resetCanvasNodeLayouts,
+    bringCanvasNodeToFront,
+    updateCanvasVideoPlaybackState,
     updateCanvasTextViewportState,
-    updateCanvasFeedbackEntry,
-    addProjectPathToCanvasMap: async (input) => {
-      try {
-        const result = await api.addProjectPathToCanvasMap(input);
-        setSnapshot(result.snapshot);
-        setActiveCanvasId(result.canvas.id);
-        setExplorerSelection(projectTreeSelectionFromPaths([result.centerProjectRelativePath]));
-        centerCanvasProjectionNode(result.projection, result.centerProjectRelativePath);
-      } catch (error) {
-        setNotifications((current) => [i18n.t('shell.notifications.addToCanvasMapFailed', { message: errorMessage(error) }), ...current].slice(0, 4));
-      }
-    },
-    createCanvas: async () => {
-      const result = await api.createCanvas();
-      setSnapshot(result.snapshot);
-      setActiveCanvasId(result.activeCanvasId);
-      return result;
-    },
-    renameCanvas: async (input) => {
-      const result = await api.renameCanvas(input);
-      setSnapshot(result.snapshot);
-      return result;
-    },
-    deleteCanvas: async (input) => {
-      const result = await api.deleteCanvas(input);
-      setSnapshot(result.snapshot);
-      if (activeCanvasId === input.canvasId) {
-        setActiveCanvasId(result.activeCanvasId);
-      }
-      return result;
-    },
-    reorderCanvases: async (input) => {
-      const result = await api.reorderCanvases(input);
-      setSnapshot(result.snapshot);
-      return result;
-    },
-    repairCanvasIndex: async () => {
-      const result = await api.repairCanvasIndex();
-      setSnapshot(result.snapshot);
-      const repairedOrder = result.snapshot.canvasRegistry.status === 'ready'
-        ? result.snapshot.canvasRegistry.canvasOrder
-        : [];
-      const repairedActiveCanvasId = activeCanvasId && repairedOrder.includes(activeCanvasId)
-        ? activeCanvasId
-        : result.activeCanvasId ?? repairedOrder[0];
-      setActiveCanvasId(repairedActiveCanvasId);
-      return result;
-    },
+    updateCanvasFeedbackEntry: feedbackController.updateEntry,
+    addProjectPathToCanvasMap,
+    createCanvas,
+    renameCanvas,
+    deleteCanvas,
+    reorderCanvases,
+    repairCanvasIndex,
+    openProject,
     openTerminalPanel
   }), [
-    activeCanvasId,
-    activeCanvasRuntime,
-    applyLoadedWorkbenchPreferences,
-    applyOpenedProject,
-    centerCanvasProjectionNode,
-    locateProjectFileInCanvas,
-    chooseActiveCanvasForProject,
-    discardTextFileBuffer,
-    ensureTextFileBuffer,
-    i18n,
-    loadFloatingPanelsForProject,
+    settingsController.actions,
+    feedbackController.updateEntry,
+    sendProjectFileToPhotoshop,
+    openSendToPhotoshopPicker,
     lookupGeneratedAssetMetadata,
-    openTerminalPanel,
-    openTextEditorWindow,
     readGeneratedAsset,
     readProjectTextFile,
-    reloadAdobeBridge,
-    reloadAudioModelSettings,
-    reloadImageModelSettings,
-    reloadIntegrationsSettings,
-    reloadVideoModelSettings,
-    reloadWorkbenchPreferences,
-    reloadTextFileBuffer,
-    saveTextFileBuffer,
-    snapshot,
-    toggleTextFileWordWrap,
-    updateCanvasFeedbackEntry,
-    updateCanvasTextViewportState,
+    writeProjectTextFile,
+    saveCanvasTextPreviewSource,
+    readCanvasTextPreviewSources,
+    readCanvasVideoPreviewSources,
+    ensureTextFileBuffer,
     updateTextFileBuffer,
-    workbenchPreferencesResource,
-    writeProjectTextFile
+    saveTextFileBuffer,
+    discardTextFileBuffer,
+    reloadTextFileBuffer,
+    openTextEditorWindow,
+    toggleTextFileWordWrap,
+    updateCanvasNodeLayouts,
+    resetCanvasNodeLayouts,
+    bringCanvasNodeToFront,
+    updateCanvasVideoPlaybackState,
+    updateCanvasTextViewportState,
+    addProjectPathToCanvasMap,
+    createCanvas,
+    renameCanvas,
+    deleteCanvas,
+    reorderCanvases,
+    repairCanvasIndex,
+    openProject,
+    openTerminalPanel
   ]);
 
-  const handleLocalFeedbackModeChange = useCallback((mode: CanvasMediaFeedbackMode) => {
-    setLocalFeedbackMode(mode);
-    setPendingFeedbackItem(undefined);
-    setPendingFeedbackItemComment('');
-  }, []);
-
-  const handleLocalFeedbackDraft = useCallback((draft: CanvasLocalFeedbackDraft) => {
-    clearFeedbackBarHideTimer();
-    setFeedbackBarTarget(draft.feedbackBarTarget);
-    const currentEntry = canvasFeedback?.entries[draft.projectRelativePath];
-    const shouldKeepComment = pendingFeedbackItem?.projectRelativePath === draft.projectRelativePath
-      && pendingFeedbackItem.kind === draft.kind
-      && pendingFeedbackItem.scope === draft.scope
-      && pendingFeedbackItem.momentTimeSeconds === draft.momentTimeSeconds;
-    setPendingFeedbackItem({
-      projectRelativePath: draft.projectRelativePath,
-      kind: draft.kind,
-      scope: draft.scope,
-      momentTimeSeconds: draft.momentTimeSeconds,
-      geometry: draft.geometry,
-      label: pendingCanvasFeedbackItemLabel(draft, currentEntry)
-    });
-    setLocalFeedbackMode(draft.kind === 'pin' ? 'pin' : draft.kind === 'region' ? 'rect' : undefined);
-    if (!shouldKeepComment) {
-      setPendingFeedbackItemComment('');
-    }
-  }, [canvasFeedback, clearFeedbackBarHideTimer, pendingFeedbackItem]);
-
-  const cancelPendingFeedbackItem = useCallback(() => {
-    if (pendingFeedbackItem?.scope === 'moment') {
-      setLocalFeedbackMode(undefined);
-    }
-    setPendingFeedbackItem(undefined);
-    setPendingFeedbackItemComment('');
-  }, [pendingFeedbackItem]);
-
-  const savePendingFeedbackItem = useCallback(async () => {
-    if (!pendingFeedbackItem) {
-      return false;
-    }
-    const comment = pendingFeedbackItemComment.trim();
-    if (!comment) {
-      return false;
-    }
-    const item = canvasFeedbackAddItemForPending(pendingFeedbackItem, comment);
-    if (!item) {
-      return false;
-    }
-    const saved = await updateCanvasFeedbackEntry({
-      operation: 'add-item',
-      projectRelativePath: pendingFeedbackItem.projectRelativePath,
-      item
-    });
-    if (!saved) {
-      return false;
-    }
-    if (pendingFeedbackItem.scope === 'moment') {
-      setLocalFeedbackMode(undefined);
-    }
-    setPendingFeedbackItem(undefined);
-    setPendingFeedbackItemComment('');
-    return true;
-  }, [pendingFeedbackItem, pendingFeedbackItemComment, updateCanvasFeedbackEntry]);
-
-  const updateInlineProjectTreeEditValue = useCallback((value: string) => {
-    setInlineProjectTreeEdit((current) => current ? { ...current, value } : current);
-  }, []);
-
-  const submitInlineProjectTreeEdit = useCallback(async () => {
-    const current = inlineProjectTreeEdit;
-    if (!current || current.submitting) {
+  useEffect(() => {
+    if (!activeCanvasRuntime || !activeCanvasId) {
       return;
     }
-    const validation = validateInlineProjectName(current.value);
-    if (!validation.ok) {
-      setInlineProjectTreeEdit({
-        ...current,
-        error: i18n.t(validation.message === 'required' ? 'explorer.nameRequired' : 'explorer.namePathSeparators')
+    const stackOrderSync = createCanvasSelectionStackOrderSync({
+      getSnapshot: () => snapshotRef.current,
+      getActiveCanvasId: () => activeCanvasId,
+      getSelection: () => activeCanvasRuntime.getSnapshot().selection,
+      bringCanvasNodeToFront
+    });
+    return activeCanvasRuntime.subscribeSelection(() => {
+      void stackOrderSync.syncSelectedNode().catch((error) => {
+        notify(i18n.t('shell.notifications.bringCanvasNodeToFrontFailed', {
+          message: errorMessage(error)
+        }));
       });
-      return;
-    }
-    const { error: _error, ...submittingEdit } = current;
-    setInlineProjectTreeEdit({ ...submittingEdit, submitting: true });
-    try {
-      if (current.kind === 'renaming') {
-        await actions.renameProjectPath({
-          projectRelativePath: current.projectRelativePath,
-          name: validation.name
-        });
-      } else if (current.kind === 'creating-file') {
-        await actions.createProjectFile({
-          parentProjectRelativePath: current.parentProjectRelativePath,
-          name: validation.name
-        });
-      } else {
-        await actions.createProjectDirectory({
-          parentProjectRelativePath: current.parentProjectRelativePath,
-          name: validation.name
-        });
-      }
-      setInlineProjectTreeEdit(undefined);
-    } catch (error) {
-      setInlineProjectTreeEdit({ ...current, submitting: false, error: errorMessage(error) });
-    }
-  }, [actions, i18n, inlineProjectTreeEdit]);
+    });
+  }, [activeCanvasId, activeCanvasRuntime, bringCanvasNodeToFront, i18n, notify]);
 
   const openWorkbenchWindows = useMemo<WorkbenchWindowIdentity[]>(() => [
     ...FLOATING_PANEL_IDS
@@ -1311,9 +844,6 @@ export function WorkbenchApp(): React.ReactElement {
     () => syncOpenWorkbenchWindows(windowOrder, openWorkbenchWindows),
     [openWorkbenchWindows, windowOrder]
   );
-  const notify = useCallback((message: string) => {
-    setNotifications((current) => [message, ...current].slice(0, 4));
-  }, []);
   const handleTitleBarCommand = useCallback((item: Extract<WorkbenchMenuItem, { kind: 'command' }>) => {
     void executeTitleBarMenuCommand(item, {
       api,
@@ -1325,7 +855,7 @@ export function WorkbenchApp(): React.ReactElement {
         setProjectOpenError(undefined);
         setProjectOpenAttemptedPath(projectRoot);
         try {
-          await applyOpenedProject(await api.openProject({ projectRoot }));
+          applyOpenedProject(await api.openProject({ projectRoot }));
         } finally {
           setIsProjectOpening(false);
         }
@@ -1368,16 +898,14 @@ export function WorkbenchApp(): React.ReactElement {
     ...(canvasMinimapOpen ? [minimapPanelPlacement] : []),
     ...(cardBarRect ? [cardBarRect] : [])
   ];
-  const currentFeedbackBarTarget = useMemo(() => (
-    feedbackBarTarget ? canvasFeedbackBarTargetWithCurrentEntry(feedbackBarTarget, canvasFeedback) : undefined
-  ), [canvasFeedback, feedbackBarTarget]);
   useEffect(() => {
-    if (!activeCanvasRuntime || !currentFeedbackBarTarget) {
+    const target = feedbackController.currentTarget;
+    if (!activeCanvasRuntime || !target) {
       return;
     }
     const syncFeedbackBarPlacement = (camera: CanvasRuntimeSnapshot['camera']) => {
       const placement = feedbackBarPlacementForCanvasTarget({
-        target: currentFeedbackBarTarget,
+        target,
         camera,
         viewportRect: workbenchViewportRect,
         reservedRects: floatingBarReservedRects
@@ -1393,7 +921,7 @@ export function WorkbenchApp(): React.ReactElement {
   }, [
     activeCanvasRuntime,
     canvasOverlayRuntime,
-    currentFeedbackBarTarget,
+    feedbackController.currentTarget,
     floatingBarReservedRects,
     workbenchViewportRect
   ]);
@@ -1407,7 +935,11 @@ export function WorkbenchApp(): React.ReactElement {
     });
   }, [actions, activeCanvasId, i18n, notify]);
   const canRevealInCanvas = Boolean(activeCanvasRuntime && activeCanvasRuntimeSnapshot?.surfaceSize);
-  const readyAdobeBridge = adobeBridge.status === 'ready' ? adobeBridge.value : undefined;
+  const persistedAdobeBridgeEnabled = settingsController.globalSettings.status === 'ready'
+    && settingsController.globalSettings.value.adobeBridge.enabled;
+  const readyAdobeBridge = settingsController.adobeBridge.status === 'ready'
+    ? settingsController.adobeBridge.value
+    : undefined;
   const contextMenuItems = useMemo(() => contextMenu
       ? buildWorkbenchContextMenuItems({
           target: contextMenu.target,
@@ -1416,9 +948,9 @@ export function WorkbenchApp(): React.ReactElement {
           canRevealInCanvas,
           fileClipboard,
           desktopPlatform,
-          adobeBridgeEnabled: readyAdobeBridge?.settings.enabled === true
+          adobeBridgeEnabled: persistedAdobeBridgeEnabled
         })
-    : [], [activeCanvasRuntime, activeProjection, canRevealInCanvas, contextMenu, desktopPlatform, fileClipboard, readyAdobeBridge?.settings.enabled]);
+    : [], [activeCanvasRuntime, activeProjection, canRevealInCanvas, contextMenu, desktopPlatform, fileClipboard, persistedAdobeBridgeEnabled]);
   const canvasOrder = snapshot?.canvasRegistry.status === 'ready'
     ? snapshot.canvasRegistry.canvasOrder
     : [];
@@ -1450,9 +982,6 @@ export function WorkbenchApp(): React.ReactElement {
   ), [i18n]);
   const contextMenuCommandErrorLabels = useMemo(() => ({
     copyPathFailed: i18n.t('shell.notifications.copyPathFailed'),
-    revealFailed: i18n.t('shell.notifications.revealFailed'),
-    deleteFailed: i18n.t('shell.notifications.deleteFailed'),
-    pasteFailed: i18n.t('shell.notifications.pasteFailed'),
     resetAutoLayoutFailed: i18n.t('shell.notifications.resetAutoLayoutFailed')
   }), [i18n]);
   const handleWorkbenchContextMenuCommand = useCallback((command: WorkbenchContextMenuCommand) => {
@@ -1463,8 +992,7 @@ export function WorkbenchApp(): React.ReactElement {
       activeCanvasRuntime,
       fileClipboard,
       actions,
-      setInlineProjectTreeEdit,
-      setFileClipboard,
+      explorerCommands: explorerController,
       copyText: copyProjectRelativePath,
       notify,
       closeContextMenu: closeWorkbenchContextMenu,
@@ -1485,6 +1013,7 @@ export function WorkbenchApp(): React.ReactElement {
     copyProjectRelativePath,
     confirmPermanentDelete,
     fileClipboard,
+    explorerController,
     notify,
     openInspectorPanel,
     snapshot
@@ -1500,8 +1029,7 @@ export function WorkbenchApp(): React.ReactElement {
       activeCanvasRuntime,
       fileClipboard,
       actions,
-      setInlineProjectTreeEdit,
-      setFileClipboard,
+      explorerCommands: explorerController,
       copyText: copyProjectRelativePath,
       notify,
       closeContextMenu: closeWorkbenchContextMenu,
@@ -1521,98 +1049,16 @@ export function WorkbenchApp(): React.ReactElement {
     confirmPermanentDelete,
     copyProjectRelativePath,
     fileClipboard,
+    explorerController,
     notify,
     openInspectorPanel,
     snapshot
   ]);
-  const handleProjectTreeInternalDrop = useCallback((input: {
-    entries: WorkbenchProjectPathEntry[];
-    targetDirectoryProjectRelativePath: string;
-    operation: 'copy' | 'move';
-  }) => {
-    if (input.operation === 'copy') {
-      void actions.copyProjectPaths({
-        entries: input.entries,
-        targetDirectoryProjectRelativePath: input.targetDirectoryProjectRelativePath
-      }).catch((error) => notify(i18n.t('shell.notifications.copyFailed', { message: errorMessage(error) })));
-      return;
-    }
-    if (isProjectTreeMoveNoop({
-      entries: input.entries,
-      targetDirectoryProjectRelativePath: input.targetDirectoryProjectRelativePath
-    })) {
-      return;
-    }
-    const overwrite = projectTreeBatchMoveHasConflict({
-      existingProjectRelativePaths: new Set(snapshot?.files.map((file) => file.projectRelativePath) ?? []),
-      entries: input.entries,
-      targetDirectoryProjectRelativePath: input.targetDirectoryProjectRelativePath
-    });
-    const target = input.targetDirectoryProjectRelativePath || i18n.t('shell.confirm.projectRoot');
-    const confirmed = window.confirm(overwrite
-      ? i18n.t('shell.confirm.moveOverwrite', { target })
-      : i18n.t('shell.confirm.moveItems', { count: input.entries.length, target }));
-    if (!confirmed) {
-      return;
-    }
-    void actions.moveProjectPaths({
-      entries: input.entries,
-      targetDirectoryProjectRelativePath: input.targetDirectoryProjectRelativePath,
-      ...(overwrite ? { overwrite: true } : {})
-    }).catch((error) => notify(i18n.t('shell.notifications.moveFailed', { message: errorMessage(error) })));
-  }, [actions, i18n, notify, snapshot]);
-  const handleProjectTreeExternalDrop = useCallback((input: {
-    dataTransfer: DataTransfer;
-    targetDirectoryProjectRelativePath: string;
-  }) => {
-    void createProjectTreeExternalDropPlan({
-      dataTransfer: input.dataTransfer,
-      shell: getDebruteShellApi(),
-      targetDirectoryProjectRelativePath: input.targetDirectoryProjectRelativePath
-    }).then(async (plan) => {
-      const overwrite = externalDropPlanHasConflict({
-        snapshot,
-        localPaths: plan.localPaths,
-        uploads: plan.uploads,
-        targetDirectoryProjectRelativePath: plan.targetDirectoryProjectRelativePath
-      });
-      if (overwrite && !window.confirm(i18n.t('shell.confirm.moveOverwrite', {
-        target: plan.targetDirectoryProjectRelativePath || i18n.t('shell.confirm.projectRoot')
-      }))) {
-        return;
-      }
-      if (plan.localPaths.length > 0) {
-        const result = await api.importExternalLocalProjectPaths({
-          sources: plan.localPaths,
-          targetDirectoryProjectRelativePath: plan.targetDirectoryProjectRelativePath,
-          ...(overwrite ? { overwrite: true } : {})
-        });
-        setSnapshot(result.snapshot);
-        const selectedPaths = batchResultSelectionPaths(result.results);
-        setExplorerSelection(projectTreeSelectionFromPaths(selectedPaths));
-        locateSingleFileBatchResult(result.results, locateProjectFileInCanvas);
-        return;
-      }
-      const result = await api.importExternalProjectUploads({
-        entries: plan.uploads.map((upload) => (
-          upload.kind === 'file'
-            ? { kind: 'file', projectRelativePath: upload.projectRelativePath, file: upload.file }
-            : upload
-        )),
-        targetDirectoryProjectRelativePath: plan.targetDirectoryProjectRelativePath,
-        ...(overwrite ? { overwrite: true } : {})
-      });
-      setSnapshot(result.snapshot);
-      const selectedPaths = batchResultSelectionPaths(result.results);
-      setExplorerSelection(projectTreeSelectionFromPaths(selectedPaths));
-      locateSingleFileBatchResult(result.results, locateProjectFileInCanvas);
-    }).catch((error) => notify(i18n.t('shell.notifications.importFailed', { message: errorMessage(error) })));
-  }, [i18n, locateProjectFileInCanvas, notify, snapshot]);
   if (isLoading) {
     return (
-      <I18nProvider locale={locale}>
+      <I18nProvider locale={settingsController.locale}>
         <WorkbenchIconProvider>
-          <div className="workbench-shell" data-theme={resolvedTheme} data-testid="workbench-shell">
+          <div className="workbench-shell" data-theme={settingsController.resolvedTheme} data-testid="workbench-shell">
             <WorkbenchTitleBar
               state={effectiveTitleBarState}
               nativeWindowState={nativeWindowState}
@@ -1630,9 +1076,9 @@ export function WorkbenchApp(): React.ReactElement {
   }
 
   return (
-    <I18nProvider locale={locale}>
+    <I18nProvider locale={settingsController.locale}>
       <WorkbenchIconProvider>
-        <div className="workbench-shell" data-theme={resolvedTheme} data-testid="workbench-shell">
+        <div className="workbench-shell" data-theme={settingsController.resolvedTheme} data-testid="workbench-shell">
           <WorkbenchTitleBar
             state={effectiveTitleBarState}
             nativeWindowState={nativeWindowState}
@@ -1663,12 +1109,12 @@ export function WorkbenchApp(): React.ReactElement {
                   reservedRects: floatingBarReservedRects
                 }}
                 onCurrentNodesChange={handleActiveCanvasCurrentNodesChange}
-                onFeedbackBarTargetChange={handleFeedbackBarTargetChange}
+                onFeedbackBarTargetChange={feedbackController.handleTargetChange}
                 onRuntimeChange={setActiveCanvasRuntime}
                 onOpenContextMenu={openWorkbenchContextMenu}
-                localFeedbackMode={localFeedbackMode}
-                pendingFeedbackItem={pendingFeedbackItem}
-                onLocalFeedbackDraft={handleLocalFeedbackDraft}
+                localFeedbackMode={feedbackController.localMode}
+                pendingFeedbackItem={feedbackController.pendingItem}
+                onLocalFeedbackDraft={feedbackController.handleDraft}
               />
             )}
           </div>
@@ -1704,50 +1150,50 @@ export function WorkbenchApp(): React.ReactElement {
                 onResetCanvasLayout={resetActiveCanvasLayout}
               />
             ) : null}
-            {currentFeedbackBarTarget ? (
+            {feedbackController.currentTarget ? (
               <CanvasFeedbackBar
-                projectRelativePath={currentFeedbackBarTarget.projectRelativePath}
-                entry={currentFeedbackBarTarget.entry}
+                projectRelativePath={feedbackController.currentTarget.projectRelativePath}
+                entry={feedbackController.currentTarget.entry}
                 onUpdate={actions.updateCanvasFeedbackEntry}
                 overlayRuntime={canvasOverlayRuntime}
-                localToolset={currentFeedbackBarTarget.localToolset}
-                localFeedbackMode={currentFeedbackBarTarget.localToolset !== 'none' ? localFeedbackMode : undefined}
-                onLocalFeedbackModeChange={currentFeedbackBarTarget.localToolset === 'image' ? handleLocalFeedbackModeChange : undefined}
-                canStartVideoMomentFeedback={currentFeedbackBarTarget.canStartVideoMomentFeedback}
-                onStartVideoMomentFeedback={currentFeedbackBarTarget.startVideoMomentFeedback}
-                onSeekToMoment={currentFeedbackBarTarget.seekToMoment}
+                localToolset={feedbackController.currentTarget.localToolset}
+                localFeedbackMode={feedbackController.currentTarget.localToolset !== 'none' ? feedbackController.localMode : undefined}
+                onLocalFeedbackModeChange={feedbackController.currentTarget.localToolset === 'image' ? feedbackController.handleModeChange : undefined}
+                canStartVideoMomentFeedback={feedbackController.currentTarget.canStartVideoMomentFeedback}
+                onStartVideoMomentFeedback={feedbackController.currentTarget.startVideoMomentFeedback}
+                onSeekToMoment={feedbackController.currentTarget.seekToMoment}
                 pendingItemComment={
-                  pendingFeedbackItem?.projectRelativePath === currentFeedbackBarTarget.projectRelativePath
-                    ? pendingFeedbackItemComment
+                  feedbackController.pendingItem?.projectRelativePath === feedbackController.currentTarget.projectRelativePath
+                    ? feedbackController.pendingComment
                     : undefined
                 }
                 pendingItemLabel={
-                  pendingFeedbackItem?.projectRelativePath === currentFeedbackBarTarget.projectRelativePath
-                    ? pendingFeedbackItem.label
+                  feedbackController.pendingItem?.projectRelativePath === feedbackController.currentTarget.projectRelativePath
+                    ? feedbackController.pendingItem.label
                     : undefined
                 }
                 pendingItemReadyForComment={
-                  pendingFeedbackItem?.projectRelativePath === currentFeedbackBarTarget.projectRelativePath
-                    ? pendingFeedbackItem.kind === 'comment' || pendingFeedbackItem.geometry !== undefined
+                  feedbackController.pendingItem?.projectRelativePath === feedbackController.currentTarget.projectRelativePath
+                    ? feedbackController.pendingItem.kind === 'comment' || feedbackController.pendingItem.geometry !== undefined
                     : undefined
                 }
                 onPendingItemCommentChange={
-                  pendingFeedbackItem?.projectRelativePath === currentFeedbackBarTarget.projectRelativePath
-                    ? setPendingFeedbackItemComment
+                  feedbackController.pendingItem?.projectRelativePath === feedbackController.currentTarget.projectRelativePath
+                    ? feedbackController.setPendingComment
                     : undefined
                 }
                 onSavePendingItem={
-                  pendingFeedbackItem?.projectRelativePath === currentFeedbackBarTarget.projectRelativePath
-                    ? savePendingFeedbackItem
+                  feedbackController.pendingItem?.projectRelativePath === feedbackController.currentTarget.projectRelativePath
+                    ? feedbackController.savePending
                     : undefined
                 }
                 onCancelPendingItem={
-                  pendingFeedbackItem?.projectRelativePath === currentFeedbackBarTarget.projectRelativePath
-                    ? cancelPendingFeedbackItem
+                  feedbackController.pendingItem?.projectRelativePath === feedbackController.currentTarget.projectRelativePath
+                    ? feedbackController.cancelPending
                     : undefined
                 }
-                onPointerEnter={handleFeedbackBarPointerEnter}
-                onPointerLeave={handleFeedbackBarPointerLeave}
+                onPointerEnter={feedbackController.handlePointerEnter}
+                onPointerLeave={feedbackController.handlePointerLeave}
               />
             ) : null}
             {snapshot?.canvasRegistry.status === 'ready' ? (
@@ -1805,21 +1251,21 @@ export function WorkbenchApp(): React.ReactElement {
                     onOpenContextMenu={openWorkbenchContextMenu}
                     fileClipboard={fileClipboard}
                     inlineProjectTreeEdit={inlineProjectTreeEdit}
-                    onEditValueChange={updateInlineProjectTreeEditValue}
-                    onEditSubmit={() => void submitInlineProjectTreeEdit()}
-                    onEditCancel={() => setInlineProjectTreeEdit(undefined)}
-                    onClearCut={() => setFileClipboard((current) => current?.operation === 'cut' ? undefined : current)}
-                    onExplorerSelectionChange={setExplorerSelection}
+                    onEditValueChange={explorerController.updateEditValue}
+                    onEditSubmit={() => void explorerController.submitEdit()}
+                    onEditCancel={explorerController.cancelEdit}
+                    onClearCut={explorerController.clearCut}
+                    onExplorerSelectionChange={explorerController.setSelection}
                     onLocateFileInCanvas={locateProjectFileInCanvas}
-                    onProjectTreeInternalDrop={handleProjectTreeInternalDrop}
-                    onProjectTreeExternalDrop={handleProjectTreeExternalDrop}
-                    onCreateRootFile={() => setInlineProjectTreeEdit(createInlineEditState('creating-file', ''))}
+                    onProjectTreeInternalDrop={explorerController.handleInternalDrop}
+                    onProjectTreeExternalDrop={explorerController.handleExternalDrop}
+                    onCreateRootFile={() => explorerController.beginCreateFile('')}
                     desktopPlatform={desktopPlatform}
                     onKeyboardFileCommand={handleProjectTreeKeyboardFileCommand}
                     terminalPanel={(
                       <TerminalPanel
                         api={api}
-                        resolvedTheme={resolvedTheme}
+                        resolvedTheme={settingsController.resolvedTheme}
                         requestedCwdProjectRelativePath={requestedTerminalCwd}
                         onRequestedCwdConsumed={() => setRequestedTerminalCwd(null)}
                       />
@@ -1842,6 +1288,7 @@ export function WorkbenchApp(): React.ReactElement {
             <SendToPhotoshopDialog
               projectId={daemonProjectId}
               projectRelativePath={sendToPhotoshopPath}
+              enabled={persistedAdobeBridgeEnabled}
               bridge={readyAdobeBridge}
               sending={sendingToPhotoshop}
               onClose={() => setSendToPhotoshopPath(undefined)}
@@ -1867,61 +1314,6 @@ export function WorkbenchApp(): React.ReactElement {
   );
 }
 
-type SetState<T> = (value: T | ((current: T) => T)) => void;
-
-function projectTreeSelectionFromPaths(paths: string[]): ProjectTreeSelectionState {
-  const selectedPaths = [...paths];
-  const focusedPath = selectedPaths.at(-1) ?? null;
-  return {
-    selectedPaths,
-    focusedPath,
-    anchorPath: focusedPath
-  };
-}
-
-type WorkbenchProjectFileBatchItemResult = WorkbenchProjectFileBatchOperationResult['results'][number];
-
-function locateSingleFileBatchResult(
-  results: WorkbenchProjectFileBatchItemResult[],
-  locateProjectFileInCanvas: (projectRelativePath: string) => void
-): void {
-  const completed = results.filter((result) => result.status === 'ok');
-  if (completed.length === 1 && completed[0]!.kind === 'file') {
-    locateProjectFileInCanvas(completed[0]!.projectRelativePath);
-  }
-}
-
-function applyDeletedProjectEntries(input: {
-  entries: WorkbenchProjectPathEntry[];
-  snapshot: WorkbenchProjectSessionSnapshot;
-  activeCanvasRuntime: CanvasEditorRuntime | undefined;
-  setExplorerSelection: SetState<ProjectTreeSelectionState>;
-  setFileClipboard: SetState<WorkbenchFileClipboard | undefined>;
-}): void {
-  const deletedPaths = input.entries.map((entry) => entry.projectRelativePath);
-  if (input.activeCanvasRuntime) {
-    const currentSelection = input.activeCanvasRuntime.getSnapshot().selection;
-    input.activeCanvasRuntime.setSelection(deletedPaths.reduce(
-      (selection, deletedPath) => clearCanvasSelectionAfterDeletedPath(selection, deletedPath),
-      currentSelection
-    ));
-  }
-  const existingPaths = new Set(input.snapshot.files.map((file) => file.projectRelativePath));
-  input.setExplorerSelection((current) => {
-    if (!current.selectedPaths.some((path) => deletedPaths.some((deletedPath) => isProjectPathContainedByDeletedPath(path, deletedPath)))) {
-      return current;
-    }
-    const fallback = current.focusedPath
-      ? nearestExistingParentSelection(current.focusedPath, existingPaths)
-      : undefined;
-    return projectTreeSelectionFromPaths(fallback ? [fallback] : []);
-  });
-  input.setFileClipboard((current) => deletedPaths.reduce(
-    (clipboard, deletedPath) => clearClipboardAfterDeletedPath(clipboard, deletedPath),
-    current
-  ));
-}
-
 function replaceCanvasMutationInSnapshot(
   snapshot: WorkbenchProjectSessionSnapshot,
   result: WorkbenchCanvasDocumentMutationResult
@@ -1935,124 +1327,8 @@ function replaceCanvasMutationInSnapshot(
   };
 }
 
-function externalDropPlanHasConflict(input: {
-  snapshot: WorkbenchProjectSessionSnapshot | undefined;
-  localPaths: string[];
-  uploads: Array<{ projectRelativePath: string }>;
-  targetDirectoryProjectRelativePath: string;
-}): boolean {
-  const existingPaths = new Set(input.snapshot?.files.map((file) => file.projectRelativePath) ?? []);
-  return [
-    ...input.localPaths.map((path) => (
-      input.targetDirectoryProjectRelativePath
-        ? `${input.targetDirectoryProjectRelativePath}/${nativePathBasename(path)}`
-        : nativePathBasename(path)
-    )),
-    ...externalUploadTopLevelProjectPaths(input.uploads, input.targetDirectoryProjectRelativePath)
-  ].some((path) => existingPaths.has(path));
-}
-
-function externalUploadTopLevelProjectPaths(
-  uploads: Array<{ projectRelativePath: string }>,
-  targetDirectoryProjectRelativePath: string
-): string[] {
-  return [...new Set(uploads.map((upload) => {
-    const relativePath = externalUploadPathRelativeToTarget(upload.projectRelativePath, targetDirectoryProjectRelativePath);
-    const topLevelName = relativePath.split('/')[0]!;
-    return targetDirectoryProjectRelativePath ? `${targetDirectoryProjectRelativePath}/${topLevelName}` : topLevelName;
-  }))];
-}
-
-function externalUploadPathRelativeToTarget(projectRelativePath: string, targetDirectoryProjectRelativePath: string): string {
-  if (!targetDirectoryProjectRelativePath) {
-    if (!projectRelativePath) {
-      throw new Error('Upload import path is empty.');
-    }
-    return projectRelativePath;
-  }
-  if (!projectRelativePath.startsWith(`${targetDirectoryProjectRelativePath}/`)) {
-    throw new Error(`Upload import path is outside the target directory: ${projectRelativePath}`);
-  }
-  const relativePath = projectRelativePath.slice(targetDirectoryProjectRelativePath.length + 1);
-  if (!relativePath) {
-    throw new Error(`Upload import path is outside the target directory: ${projectRelativePath}`);
-  }
-  return relativePath;
-}
-
-function nativePathBasename(path: string): string {
-  const normalized = path.replaceAll('\\', '/').replace(/\/$/, '');
-  return normalized.slice(normalized.lastIndexOf('/') + 1);
-}
-
-function pendingCanvasFeedbackItemLabel(
-  draft: CanvasLocalFeedbackDraft,
-  entry: CanvasFeedbackEntry | undefined
-): number | string | undefined {
-  if (draft.kind === 'pin' || draft.kind === 'region') {
-    return entry?.nextSpatialLabel ?? 1;
-  }
-  if (draft.scope === 'moment' && draft.momentTimeSeconds !== undefined) {
-    for (const item of entry?.items ?? []) {
-      if (item.scope === 'moment' && item.moment.currentTimeSeconds === draft.momentTimeSeconds) {
-        return item.moment.label;
-      }
-    }
-  }
-  return undefined;
-}
-
-function canvasFeedbackAddItemForPending(
-  pending: PendingCanvasFeedbackItem,
-  comment: string
-): CanvasFeedbackAddItemInput | undefined {
-  if (pending.scope === 'file') {
-    if (pending.kind === 'comment') {
-      return {
-        kind: 'comment',
-        scope: 'file',
-        comment
-      };
-    }
-    if (!pending.geometry) {
-      return undefined;
-    }
-    return {
-      kind: pending.kind,
-      scope: 'file',
-      geometry: pending.geometry,
-      comment
-    };
-  }
-  if (pending.momentTimeSeconds === undefined) {
-    return undefined;
-  }
-  if (pending.kind === 'comment') {
-    return {
-      kind: 'comment',
-      scope: 'moment',
-      momentTimeSeconds: pending.momentTimeSeconds,
-      comment
-    };
-  }
-  if (!pending.geometry) {
-    return undefined;
-  }
-  return {
-    kind: pending.kind,
-    scope: 'moment',
-    momentTimeSeconds: pending.momentTimeSeconds,
-    geometry: pending.geometry,
-    comment
-  };
-}
-
 function sessionProjectViewStorage(): Storage | undefined {
   return typeof window === 'undefined' ? undefined : window.sessionStorage;
-}
-
-function isProjectPathContainedByDeletedPath(projectRelativePath: string, deletedProjectRelativePath: string): boolean {
-  return projectRelativePath === deletedProjectRelativePath || projectRelativePath.startsWith(`${deletedProjectRelativePath}/`);
 }
 
 function sameWorkbenchRuntimeSnapshot(
@@ -2073,12 +1349,6 @@ function sameWorkbenchRuntimeSnapshot(
 
 function errorMessage(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
-}
-
-function integrationOperationLabelKey(operation: 'install' | 'update' | 'uninstall'): 'settings.integrations.install' | 'settings.integrations.update' | 'settings.integrations.uninstall' {
-  if (operation === 'install') return 'settings.integrations.install';
-  if (operation === 'update') return 'settings.integrations.update';
-  return 'settings.integrations.uninstall';
 }
 
 function localizedProjectOpenError(error: ProjectOpenStartupError | undefined, i18n: WorkbenchI18n): string | undefined {

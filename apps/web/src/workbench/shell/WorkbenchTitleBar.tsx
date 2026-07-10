@@ -16,7 +16,7 @@ type WorkbenchMenuCommandItem = Extract<WorkbenchMenuItem, { kind: 'command' }>;
 
 export interface WorkbenchTitleBarProps {
   state: WorkbenchTitleBarState;
-  nativeWindowState: { maximized: boolean };
+  nativeWindowState: { maximized: boolean } | undefined;
   onCommand(item: WorkbenchMenuCommandItem): void;
   onWindowCommand(command: 'minimize' | 'toggle-maximize' | 'close'): void;
 }
@@ -124,13 +124,16 @@ export function WorkbenchTitleBar({
       <div className="workbench-titlebar__right">
         {state.presentation.showWindowControls ? (
           <div className="workbench-titlebar__window-controls" style={{ WebkitAppRegion: 'no-drag' } as React.CSSProperties}>
-            <IconButton label={i18n.t('shell.titleBar.minimizeWindow')} icon={<Minus />} onClick={() => onWindowCommand('minimize')} />
+            <IconButton variant="chrome" size="window" label={i18n.t('shell.titleBar.minimizeWindow')} icon={<Minus />} onClick={() => onWindowCommand('minimize')} />
             <IconButton
-              label={nativeWindowState.maximized ? i18n.t('shell.titleBar.restoreWindow') : i18n.t('shell.titleBar.maximizeWindow')}
-              icon={nativeWindowState.maximized ? <Square /> : <Maximize2 />}
+              variant="chrome"
+              size="window"
+              label={nativeWindowState?.maximized ? i18n.t('shell.titleBar.restoreWindow') : i18n.t('shell.titleBar.maximizeWindow')}
+              icon={nativeWindowState?.maximized ? <Square /> : <Maximize2 />}
+              disabled={!nativeWindowState}
               onClick={() => onWindowCommand('toggle-maximize')}
             />
-            <IconButton label={i18n.t('shell.titleBar.closeWindow')} icon={<X />} onClick={() => onWindowCommand('close')} />
+            <IconButton variant="window-close" size="window" label={i18n.t('shell.titleBar.closeWindow')} icon={<X />} onClick={() => onWindowCommand('close')} />
           </div>
         ) : null}
       </div>
@@ -223,10 +226,10 @@ function renderMenuItem(
                 return;
               }
               event.preventDefault();
-              options.setOpenSubmenu(undefined);
               event.currentTarget.parentElement
                 ?.querySelector<HTMLButtonElement>('.workbench-titlebar__submenu-trigger')
                 ?.focus();
+              options.setOpenSubmenu(undefined);
             }}
           >
             {item.items.map((subItem) => renderMenuItem(subItem, options))}

@@ -3,13 +3,3 @@
   min-width: 0;
   gap: 14px;
 }
-
-.db-spin {
-  animation: db-spin 0.9s linear infinite;
-}
-
-@keyframes db-spin {
-  to {
-    transform: rotate(360deg);
-  }
-}

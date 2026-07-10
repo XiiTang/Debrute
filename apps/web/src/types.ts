@@ -1,40 +1,30 @@
 import type {
   AddProjectPathToCanvasMapInput,
   AdobeBridgeStateView,
-  AudioModelSettingsView,
+  DebruteGlobalSettingsView,
   DebruteProductState,
-  ImageModelSettingsView,
   CanvasTextPreviewSourceAvailabilityRequest,
   CanvasTextPreviewSourceAvailabilityResponse,
   CanvasVideoPreviewSourceRequest,
   CanvasVideoPreviewSourceResponse,
   GeneratedAssetView,
   GeneratedAssetMetadataLookup,
+  IntegrationSettingsView,
   ProductUpdateApplyResult,
   RunIntegrationOperationInput,
   RunIntegrationOperationResult,
-  SaveAdobeBridgeSettingsInput,
-  SaveAudioModelSettingInput,
   SaveCanvasTextPreviewSourceInput,
   SaveCanvasTextPreviewSourceResult,
-  SaveWorkbenchPreferencesInput,
-  SaveImageModelSettingInput,
-  SaveVideoModelSettingInput,
+  SaveDebruteGlobalSettingsInput,
   SendProjectFileToPhotoshopInput,
   SendProjectFileToPhotoshopResult,
-  IntegrationSettingsView,
   UpdateCanvasTextViewportStateInput,
   UpdateCanvasVideoPlaybackStateInput,
-  VideoModelSettingsView,
   WorkbenchCanvasManagementResult,
   WorkbenchCanvasResetLayoutResult,
-  WorkbenchProjectFileBatchOperationResult,
-  WorkbenchProjectFileOperationResult,
-  WorkbenchProjectPathEntry,
   WorkbenchProjectSessionSnapshot,
   WorkbenchProjectTextFile,
   WorkbenchProjectTextFileWriteResult,
-  WorkbenchPreferencesView,
   WorkbenchTitleBarState
 } from '@debrute/app-protocol';
 import type {
@@ -53,14 +43,10 @@ export interface WorkbenchState {
   snapshot: WorkbenchProjectSessionSnapshot | undefined;
   projectId?: string | undefined;
   titleBarState: WorkbenchTitleBarState;
-  workbenchPreferences: SettingsResource<WorkbenchPreferencesView>;
+  globalSettings: SettingsResource<DebruteGlobalSettingsView>;
   resolvedTheme: WorkbenchResolvedTheme;
   projectOpen: ProjectOpenState;
   explorerSelection: ProjectTreeSelectionState;
-  imageModelSettings: SettingsResource<ImageModelSettingsView>;
-  videoModelSettings: SettingsResource<VideoModelSettingsView>;
-  audioModelSettings: SettingsResource<AudioModelSettingsView>;
-  integrationsSettings: SettingsResource<IntegrationSettingsView>;
   adobeBridge: SettingsResource<AdobeBridgeStateView>;
   canvasFeedback: CanvasFeedbackDocument | undefined;
   textFileBuffers: Record<string, TextFileBuffer>;
@@ -100,19 +86,11 @@ export interface WorkbenchActions {
   getProductState: () => Promise<DebruteProductState>;
   checkProductUpdate: () => Promise<DebruteProductState>;
   applyProductUpdate: () => Promise<ProductUpdateApplyResult>;
-  reloadWorkbenchPreferences: () => Promise<void>;
-  reloadImageModelSettings: () => Promise<void>;
-  reloadVideoModelSettings: () => Promise<void>;
-  reloadAudioModelSettings: () => Promise<void>;
-  reloadIntegrationsSettings: () => Promise<void>;
+  reloadGlobalSettings: () => Promise<void>;
   reloadAdobeBridge: () => Promise<void>;
-  saveWorkbenchPreferences: (input: SaveWorkbenchPreferencesInput) => Promise<void>;
-  saveImageModelSetting: (modelId: string, input: SaveImageModelSettingInput) => Promise<void>;
-  saveVideoModelSetting: (modelId: string, input: SaveVideoModelSettingInput) => Promise<void>;
-  saveAudioModelSetting: (modelId: string, input: SaveAudioModelSettingInput) => Promise<void>;
+  saveGlobalSettings: (input: SaveDebruteGlobalSettingsInput) => Promise<void>;
   rescanIntegrations: () => Promise<IntegrationSettingsView>;
   runIntegrationOperation: (input: RunIntegrationOperationInput) => Promise<RunIntegrationOperationResult>;
-  saveAdobeBridgeSettings: (input: SaveAdobeBridgeSettingsInput) => Promise<void>;
   linkAdobeBridgePhotoshop: (input: { adobeClientId: string }) => Promise<void>;
   unlinkAdobeBridgePhotoshop: (adobeClientId: string) => Promise<void>;
   sendProjectFileToPhotoshop: (input: SendProjectFileToPhotoshopInput) => Promise<SendProjectFileToPhotoshopResult>;
@@ -124,15 +102,6 @@ export interface WorkbenchActions {
   saveCanvasTextPreviewSource: (input: SaveCanvasTextPreviewSourceInput) => Promise<SaveCanvasTextPreviewSourceResult>;
   readCanvasTextPreviewSources: (input: CanvasTextPreviewSourceAvailabilityRequest) => Promise<CanvasTextPreviewSourceAvailabilityResponse>;
   readCanvasVideoPreviewSources: (input: CanvasVideoPreviewSourceRequest) => Promise<CanvasVideoPreviewSourceResponse>;
-  createProjectFile: (input: { parentProjectRelativePath: string; name: string }) => Promise<WorkbenchProjectFileOperationResult>;
-  createProjectDirectory: (input: { parentProjectRelativePath: string; name: string }) => Promise<WorkbenchProjectFileOperationResult>;
-  renameProjectPath: (input: { projectRelativePath: string; name: string }) => Promise<WorkbenchProjectFileOperationResult>;
-  copyProjectPaths: (input: { entries: WorkbenchProjectPathEntry[]; targetDirectoryProjectRelativePath: string }) => Promise<WorkbenchProjectFileBatchOperationResult>;
-  moveProjectPaths: (input: { entries: WorkbenchProjectPathEntry[]; targetDirectoryProjectRelativePath: string; overwrite?: boolean }) => Promise<WorkbenchProjectFileBatchOperationResult>;
-  copyProjectAbsolutePaths: (input: { entries: WorkbenchProjectPathEntry[] }) => Promise<{ paths: string[] }>;
-  trashProjectPaths: (input: { entries: WorkbenchProjectPathEntry[] }) => Promise<WorkbenchProjectFileBatchOperationResult>;
-  deleteProjectPathsPermanently: (input: { entries: WorkbenchProjectPathEntry[] }) => Promise<WorkbenchProjectFileBatchOperationResult>;
-  revealProjectPathInSystemFileManager: (input: { projectRelativePath: string; kind: 'file' | 'directory' }) => Promise<{ ok: true }>;
   ensureTextFileBuffer: (projectRelativePath: string, diskRevision?: string) => Promise<void>;
   updateTextFileBuffer: (projectRelativePath: string, content: string) => void;
   saveTextFileBuffer: (projectRelativePath: string) => Promise<void>;
@@ -144,8 +113,8 @@ export interface WorkbenchActions {
     nodeLayouts?: Array<{ projectRelativePath: string; x: number; y: number; width?: number; height?: number }>;
   }) => Promise<void>;
   resetCanvasNodeLayouts: (canvasId: string, input: { all: true } | { pathRules: { paths?: string[]; globs?: string[] } }) => Promise<WorkbenchCanvasResetLayoutResult>;
-  updateCanvasNodeLayers: (canvasId: string, input: {
-    nodeProjectRelativePathsTopFirst?: string[];
+  bringCanvasNodeToFront: (canvasId: string, input: {
+    projectRelativePath: string;
   }) => Promise<void>;
   updateCanvasVideoPlaybackState: (canvasId: string, input: Omit<UpdateCanvasVideoPlaybackStateInput, 'canvasId'>) => Promise<void>;
   updateCanvasTextViewportState: (canvasId: string, input: Omit<UpdateCanvasTextViewportStateInput, 'canvasId'>) => Promise<void>;

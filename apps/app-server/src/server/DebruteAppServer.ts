@@ -441,8 +441,8 @@ export class DebruteAppServer {
     return { session: this.getTerminalService().resize(input) };
   }
 
-  closeTerminalSession(input: CloseTerminalSessionInput): { ok: true } {
-    this.getTerminalService().close(input);
+  async closeTerminalSession(input: CloseTerminalSessionInput): Promise<{ ok: true }> {
+    await this.getTerminalService().close(input);
     return { ok: true };
   }
 
@@ -818,12 +818,12 @@ export class DebruteAppServer {
     });
   }
 
-  async updateCanvasNodeLayers(input: {
+  async bringCanvasNodeToFront(input: {
     canvasId: string;
-    nodeProjectRelativePathsTopFirst?: string[];
+    projectRelativePath: string;
   }): Promise<{ canvas: CanvasDocument; projection: CanvasProjection }> {
     return this.enqueueSessionOperation(async () => (
-      this.applyCanvasSessionUpdate(await this.canvasSessionService.updateCanvasNodeLayers(this.getSnapshot(), input))
+      this.applyCanvasSessionUpdate(await this.canvasSessionService.bringCanvasNodeToFront(this.getSnapshot(), input))
     ));
   }
 
@@ -975,10 +975,9 @@ export class DebruteAppServer {
 
   async runVideoModelRequestForCli(input: VideoModelRequestInput): Promise<DebruteCapabilityResult> {
     const current = this.getSnapshot();
-    const [settings, secrets] = await Promise.all([
-      this.configStore.readVideoModels(),
-      this.configStore.readSecrets()
-    ]);
+    const snapshot = await this.configStore.readGlobalSnapshot();
+    const settings = snapshot.settings.models.video;
+    const secrets = snapshot.secrets;
     const result = await executeVideoModelRequest({
       projectRoot: current.projectRoot,
       invocationId: `video-${randomUUID()}`,
@@ -1072,11 +1071,14 @@ export class DebruteAppServer {
         logs: [{ stage: 'resolve_model_kind' }]
       });
     }
-    const [settingsView, settings, secrets] = await Promise.all([
-      this.readAudioModelSettings(),
-      this.configStore.readAudioModels(),
-      this.configStore.readSecrets()
-    ]);
+    const snapshot = await this.configStore.readGlobalSnapshot();
+    const settings = snapshot.settings.models.audio;
+    const secrets = snapshot.secrets;
+    const settingsView = createAudioModelSettingsView(
+      settings,
+      secrets,
+      createAudioModelCatalog().listAll()
+    );
     const readinessFailure = audioModelReadinessFailure(input.model, settingsView.models);
     if (readinessFailure) {
       return capabilityError(readinessFailure.code, readinessFailure.message, undefined, {
@@ -1147,10 +1149,9 @@ export class DebruteAppServer {
   }
 
   private async createImageModelRequestExecutor(projectRoot: string): Promise<AppServerImageModelRequestExecutor> {
-    const [settings, secrets] = await Promise.all([
-      this.configStore.readImageModels(),
-      this.configStore.readSecrets()
-    ]);
+    const snapshot = await this.configStore.readGlobalSnapshot();
+    const settings = snapshot.settings.models.image;
+    const secrets = snapshot.secrets;
     const catalogApi = createImageModelCatalog();
     const settingsView = createImageModelSettingsView(settings, secrets, catalogApi.listAll());
     const catalog = catalogApi.listConfigured(settingsView.models
@@ -1419,25 +1420,28 @@ export class DebruteAppServer {
   }
 
   private async readImageModelSettings() {
+    const snapshot = await this.configStore.readGlobalSnapshot();
     return createImageModelSettingsView(
-      await this.configStore.readImageModels(),
-      await this.configStore.readSecrets(),
+      snapshot.settings.models.image,
+      snapshot.secrets,
       createImageModelCatalog().listAll()
     );
   }
 
   private async readVideoModelSettings() {
+    const snapshot = await this.configStore.readGlobalSnapshot();
     return createVideoModelSettingsView(
-      await this.configStore.readVideoModels(),
-      await this.configStore.readSecrets(),
+      snapshot.settings.models.video,
+      snapshot.secrets,
       createVideoModelCatalog().listAll()
     );
   }
 
   private async readAudioModelSettings() {
+    const snapshot = await this.configStore.readGlobalSnapshot();
     return createAudioModelSettingsView(
-      await this.configStore.readAudioModels(),
-      await this.configStore.readSecrets(),
+      snapshot.settings.models.audio,
+      snapshot.secrets,
       createAudioModelCatalog().listAll()
     );
   }

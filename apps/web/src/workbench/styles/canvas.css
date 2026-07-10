@@ -1,3 +1,43 @@
+.db-floating-bar {
+  border: 1px solid var(--db-border-muted);
+  border-radius: var(--db-radius-lg);
+  background: var(--db-floating-bg);
+  box-shadow: var(--db-shadow-floating);
+  backdrop-filter: blur(14px);
+}
+
+.db-canvas-control {
+  border: 0;
+  background: transparent;
+  color: var(--db-text-muted);
+}
+
+.db-canvas-control:hover:not(:disabled),
+.db-canvas-control[aria-pressed="true"] {
+  border: 0;
+  background: var(--db-surface-3);
+  color: var(--db-text);
+}
+
+.db-canvas-control[aria-pressed="true"] {
+  outline: 0;
+}
+
+.db-canvas-control:disabled {
+  background: transparent;
+  color: var(--db-text-subtle);
+}
+
+.db-canvas-card {
+  height: var(--db-control-sm);
+  border: 0;
+  max-width: 180px;
+}
+
+.db-floating-bar.canvas-feedback-bar {
+  pointer-events: auto;
+}
+
 .canvas-card-bar {
   --canvas-card-width: 78px;
   --canvas-card-delete-overlap: 7px;
@@ -247,6 +287,223 @@
   color: var(--db-text-muted);
   font-size: 13px;
   font-weight: 700;
+}
+
+.db-canvas-node-frame {
+  border: 0;
+  border-radius: 0;
+  outline: 0 solid transparent;
+  outline-offset: 0;
+  background: transparent;
+  box-shadow: none;
+}
+
+.db-canvas-node-frame:hover,
+.db-canvas-node-frame.hovered,
+.db-canvas-node-frame.selected {
+  outline: calc(1px * var(--canvas-chrome-scale, 1)) solid var(--db-selection);
+}
+
+.db-canvas-node-frame.video,
+.db-canvas-node-frame.text,
+.db-canvas-node-frame:not(.image) {
+  border: calc(1px * var(--canvas-chrome-scale, 1)) solid var(--db-border-muted);
+  background: color-mix(in oklch, var(--db-bg) 66%, transparent);
+}
+
+.db-canvas-node-frame.video:hover,
+.db-canvas-node-frame.video.hovered,
+.db-canvas-node-frame.video.selected,
+.db-canvas-node-frame.text:hover,
+.db-canvas-node-frame.text.hovered,
+.db-canvas-node-frame.text.selected,
+.db-canvas-node-frame:not(.image):hover,
+.db-canvas-node-frame:not(.image).hovered,
+.db-canvas-node-frame:not(.image).selected {
+  border-color: var(--db-selection);
+}
+
+.db-canvas-node-placeholder {
+  width: 100%;
+  height: 100%;
+  display: grid;
+  place-items: center;
+  align-content: center;
+  gap: var(--db-space-2);
+  padding: var(--db-space-5);
+  color: var(--db-text-muted);
+  text-align: center;
+}
+
+.db-canvas-node-placeholder strong {
+  color: var(--db-text);
+  font-size: var(--db-font-md);
+}
+
+.db-canvas-node-placeholder span {
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: var(--db-font-sm);
+}
+
+.db-canvas-node-placeholder--problem svg {
+  color: var(--db-danger);
+}
+
+.db-canvas-node-placeholder svg {
+  width: 22px;
+  height: 22px;
+}
+
+.db-canvas-node-error-overlay {
+  position: absolute;
+  left: var(--db-space-3);
+  right: var(--db-space-3);
+  bottom: var(--db-space-3);
+  z-index: 2;
+  min-height: 32px;
+  display: grid;
+  grid-template-columns: 18px minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 7px;
+  padding: 6px var(--db-space-3);
+  border: 1px solid color-mix(in oklch, var(--db-danger) 64%, var(--db-border));
+  border-radius: var(--db-radius-md);
+  background: var(--db-danger-bg);
+  color: var(--db-text);
+}
+
+.db-canvas-node-error-overlay svg {
+  color: var(--db-danger);
+  width: 16px;
+  height: 16px;
+}
+
+.db-canvas-node-error-overlay span {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: var(--db-font-sm);
+}
+
+.db-canvas-node-generic {
+  width: 100%;
+  height: 100%;
+  box-sizing: border-box;
+  display: grid;
+  grid-template-columns: 20px minmax(0, 1fr);
+  grid-auto-rows: min-content;
+  align-content: center;
+  align-items: center;
+  gap: 2px 8px;
+  padding: 8px 12px;
+  color: var(--db-text-muted);
+}
+
+.db-canvas-node-generic svg {
+  grid-column: 1;
+  grid-row: 1;
+  color: color-mix(in oklch, var(--db-accent) 64%, white);
+  width: 20px;
+  height: 20px;
+}
+
+.db-canvas-node-generic strong,
+.db-canvas-node-generic span {
+  grid-column: 2;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.db-canvas-node-generic strong {
+  color: var(--db-text);
+  font-size: var(--db-font-md);
+}
+
+.db-canvas-node-generic span {
+  font-size: var(--db-font-xs);
+}
+
+.db-canvas-node-generic__label {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.db-canvas-node-generic--wrap .db-canvas-node-generic__label {
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 3;
+  overflow-wrap: anywhere;
+  white-space: normal;
+}
+
+.db-canvas-node-generic--problem svg {
+  grid-row: 1 / span 3;
+  color: var(--db-danger);
+}
+
+.db-canvas-node-caption {
+  min-width: 0;
+  height: 30px;
+  display: flex;
+  align-items: center;
+  padding: 0 var(--db-space-4);
+  background: color-mix(in oklch, var(--db-bg) 72%, transparent);
+  color: var(--db-text-muted);
+  font-size: var(--db-font-sm);
+}
+
+.db-canvas-node-caption span {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.db-canvas-node-titlebar {
+  min-width: 0;
+  height: 32px;
+  display: grid;
+  grid-template-columns: 18px minmax(0, 1fr);
+  grid-auto-flow: column;
+  grid-auto-columns: max-content;
+  align-items: center;
+  gap: var(--db-space-2);
+  padding: 0 7px;
+  background: color-mix(in oklch, var(--db-surface-1) 94%, transparent);
+  color: var(--db-text);
+  cursor: grab;
+}
+
+.db-canvas-node-titlebar strong {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: var(--db-font-sm);
+  font-weight: 700;
+}
+
+.db-canvas-node-titlebar svg {
+  width: 13px;
+  height: 13px;
+}
+
+.db-canvas-node-retry {
+  margin-top: 2px;
+  font-size: var(--db-font-sm);
+}
+
+.db-canvas-node-retry svg {
+  width: 12px;
+  height: 12px;
 }
 
 .canvas-node-element {

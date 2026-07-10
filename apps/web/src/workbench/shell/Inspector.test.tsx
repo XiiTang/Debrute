@@ -1,6 +1,9 @@
-import React from 'react';
+// @vitest-environment jsdom
+
+import React, { act } from 'react';
+import { createRoot, type Root } from 'react-dom/client';
 import { renderToStaticMarkup } from 'react-dom/server';
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import type { Diagnostic } from '@debrute/canvas-core';
 import type { WorkbenchActions, WorkbenchState } from '../../types';
 import { DiagnosticList, Inspector } from './Inspector';
@@ -15,28 +18,63 @@ function renderStaticWithI18n(element: React.ReactElement): string {
 }
 
 describe('DiagnosticList', () => {
-  it('keeps diagnostic icon, message, and code as direct grid children', () => {
-    const html = renderStaticWithI18n(
-      <DiagnosticList
-        diagnostics={[{
-          id: 'diag-1',
-          source: 'project',
-          severity: 'warning',
-          code: 'missing_asset',
-          message: 'Missing asset',
-          filePath: 'briefs/scene.md'
-        } satisfies Diagnostic]}
-        onSelect={() => undefined}
-      />
-    );
+  it('exposes selectable diagnostics as buttons and reports the selected diagnostic', async () => {
+    const diagnostic = {
+      id: 'diag-1',
+      source: 'project',
+      severity: 'warning',
+      code: 'missing_asset',
+      message: 'Missing asset',
+      filePath: 'briefs/scene.md'
+    } satisfies Diagnostic;
+    const onSelect = vi.fn();
+    const restoreActEnvironment = installReactActEnvironment();
+    const container = document.createElement('div');
+    document.body.append(container);
+    const root = createRoot(container);
 
-    expect(html).toContain('db-diagnostic-list');
-    expect(html).toMatch(/<button[^>]*class="[^"]*db-diagnostic-row db-diagnostic-row--warning[^"]*"[^>]*><svg[\s\S]*<\/svg><span class="db-diagnostic-row__message">Missing asset<\/span><small class="db-diagnostic-row__source">briefs\/scene\.md \/ missing_asset<\/small><\/button>/);
-    expect(html).not.toContain('db-button__label');
+    try {
+      await act(async () => {
+        root.render(
+          <I18nProvider locale="en">
+            <DiagnosticList diagnostics={[diagnostic]} onSelect={onSelect} />
+          </I18nProvider>
+        );
+      });
+
+      const row = container.querySelector('button');
+      expect(row).toBeInstanceOf(HTMLButtonElement);
+      expect(row?.getAttribute('type')).toBe('button');
+      expect(row?.textContent).toContain('Missing asset');
+      expect(row?.textContent).toContain('briefs/scene.md / missing_asset');
+
+      await act(async () => {
+        row?.click();
+      });
+      expect(onSelect).toHaveBeenCalledOnce();
+      expect(onSelect).toHaveBeenCalledWith(diagnostic);
+    } finally {
+      await unmount(root, container);
+      restoreActEnvironment();
+    }
   });
 });
 
 describe('Inspector property density', () => {
+  it('starts with selection content and does not repeat the shell title', () => {
+    const html = renderStaticWithI18n(
+      <Inspector
+        activeCanvasId={undefined}
+        selection={undefined}
+        state={{ snapshot: undefined } as unknown as WorkbenchState}
+        actions={{} as WorkbenchActions}
+      />
+    );
+
+    expect(html).not.toContain('>Inspector<');
+    expect(html).toContain('Select a node or diagnostic');
+  });
+
   it('keeps default selected-node details focused on actionable properties', () => {
     const html = renderStaticWithI18n(
       <Inspector
@@ -87,9 +125,32 @@ describe('Inspector property density', () => {
     expect(html).toContain('<dt>Type</dt>');
     expect(html).toContain('<dt>Position</dt>');
     expect(html).toContain('<dt>Size</dt>');
+    expect(html).not.toContain('<dt>Layer</dt>');
+    expect(html).not.toContain('Move forward');
+    expect(html).not.toContain('Move backward');
     expect(html).not.toContain('<dt>Path</dt>');
     expect(html).not.toContain('<dt>Visible</dt>');
     expect(html).not.toContain('<dt>Locked</dt>');
     expect(html).not.toContain('<dt>Status</dt>');
   });
 });
+
+function installReactActEnvironment(): () => void {
+  const globalWithAct = globalThis as typeof globalThis & { IS_REACT_ACT_ENVIRONMENT?: boolean };
+  const previous = globalWithAct.IS_REACT_ACT_ENVIRONMENT;
+  globalWithAct.IS_REACT_ACT_ENVIRONMENT = true;
+  return () => {
+    if (previous === undefined) {
+      delete globalWithAct.IS_REACT_ACT_ENVIRONMENT;
+    } else {
+      globalWithAct.IS_REACT_ACT_ENVIRONMENT = previous;
+    }
+  };
+}
+
+async function unmount(root: Root, container: HTMLElement): Promise<void> {
+  await act(async () => {
+    root.unmount();
+  });
+  container.remove();
+}

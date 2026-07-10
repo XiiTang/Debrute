@@ -1,8 +1,9 @@
 import type { WorkbenchProjectSessionSnapshot } from '@debrute/app-protocol';
-import type {
-  CanvasDocument,
-  Diagnostic,
-  ProjectedCanvasNode
+import {
+  canvasNodeStackOrderTopFirst,
+  type CanvasDocument,
+  type Diagnostic,
+  type ProjectedCanvasNode
 } from '@debrute/canvas-core';
 import type { WorkbenchState } from '../../types';
 import type { CanvasSelection, CanvasSelectionItem } from '../canvas/runtime/canvasSelection';
@@ -46,6 +47,18 @@ export function getSelectionContext(
 
 export function getCanvasById(snapshot: WorkbenchProjectSessionSnapshot | undefined, canvasId: string | undefined): CanvasDocument | undefined {
   return canvasId ? snapshot?.canvases.find((canvas) => canvas.id === canvasId) : undefined;
+}
+
+export function selectedCanvasNodeNeedsStackOrderUpdate(
+  canvas: CanvasDocument | undefined,
+  selection: CanvasSelection | undefined
+): boolean {
+  return Boolean(
+    canvas
+    && selection?.kind === 'node'
+    && canvas.nodeElements.some((node) => node.projectRelativePath === selection.projectRelativePath)
+    && canvasNodeStackOrderTopFirst(canvas)[0] !== selection.projectRelativePath
+  );
 }
 
 export function nodeStatusLabel(node: ProjectedCanvasNode): string {

@@ -43,6 +43,7 @@ import { CanvasTextPreviewProvider, useCanvasTextPreviewRuntime } from './Canvas
 import { CanvasVideoPreviewProvider, useCanvasVideoPreviewRuntime } from './CanvasVideoPreviewRuntime';
 import type { CanvasVideoPreviewSource } from './canvasVideoPreviews';
 import type { CanvasOverlayRuntime } from './CanvasOverlayRuntime';
+import type { PendingCanvasFeedbackItem } from './canvasFeedbackDraft';
 import { createCanvasPerfBrowserAdapter } from './CanvasPerfBrowserAdapter';
 import { createCanvasPerfDebugBridge, type DebruteCanvasPerfCanvasSnapshot } from './CanvasPerfDebugBridge';
 import {
@@ -87,13 +88,7 @@ interface CanvasSurfaceProps {
   textFileBuffers: Record<string, TextFileBuffer>;
   canvasFeedback: CanvasFeedbackDocument | undefined;
   localFeedbackMode?: CanvasMediaFeedbackMode | undefined;
-  pendingFeedbackItem?: {
-    projectRelativePath: string;
-    scope: 'file' | 'moment';
-    momentTimeSeconds?: number | undefined;
-    label?: number | string | undefined;
-    geometry?: CanvasFeedbackGeometry | undefined;
-  } | undefined;
+  pendingFeedbackItem?: PendingCanvasFeedbackItem | undefined;
   onLocalFeedbackDraft?: ((input: CanvasLocalFeedbackDraft) => void) | undefined;
   overlayRuntime: CanvasOverlayRuntime;
   minimapOpen?: boolean | undefined;
@@ -1133,7 +1128,7 @@ function CanvasSurfaceRuntime({
                   selected={isCanvasItemSelected(selection, { kind: 'node', projectRelativePath: node.projectRelativePath })}
                   hovered={hoveredNodePath === node.projectRelativePath}
                   culled={renderSnapshot.culledNodePaths.has(node.projectRelativePath)}
-                  zIndex={renderSnapshot.nodeLayers.get(node.projectRelativePath)?.zIndex ?? node.z}
+                  zIndex={renderSnapshot.nodeRenderOrder.get(node.projectRelativePath)?.zIndex ?? node.z}
                   stageRuntime={stageRuntime}
                   actions={actions}
                   textBuffer={textFileBuffers[node.projectRelativePath]}

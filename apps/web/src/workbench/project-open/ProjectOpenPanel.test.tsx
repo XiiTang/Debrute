@@ -24,7 +24,7 @@ describe('ProjectOpenPanel', () => {
     const html = renderToStaticMarkup(
       <I18nProvider locale="en">
         <ProjectOpenPanel
-          error="Open project failed: projectRoot must resolve to a directory."
+          error="Could not open project"
           attemptedPath="/missing/project"
           opening={true}
           onOpenProject={() => undefined}
@@ -32,10 +32,13 @@ describe('ProjectOpenPanel', () => {
       </I18nProvider>
     );
 
-    expect(html).toContain('Open project failed: projectRoot must resolve to a directory.');
+    expect(html).toContain('role="alert"');
+    expect(html).toContain('Could not open project');
     expect(html).toContain('/missing/project');
     expect(html).toContain('Open Project');
-    expect(html).toContain('db-project-open');
+    expect(html).toContain('project-open-panel');
+    expect(html).toContain('project-open-panel__meta');
+    expect(html).toContain('project-open-panel__error');
     expect(html).toContain('db-empty-state');
     expect(html).toContain('db-action-row');
     expect(html).toContain('db-button--primary');

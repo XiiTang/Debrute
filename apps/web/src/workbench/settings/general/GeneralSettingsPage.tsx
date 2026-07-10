@@ -1,18 +1,19 @@
-import React, { useEffect, useState } from 'react';
+import React, { useCallback, useEffect, useState } from 'react';
 import { RefreshCw, RotateCw } from 'lucide-react';
 import type {
+  DebruteDefaultFrontend,
+  DebruteGlobalSettingsView,
   DebruteProductState,
   ManagedCliDiagnostic,
   ProductUpdateState,
-  SaveWorkbenchPreferencesInput,
+  SaveDebruteGlobalSettingsInput,
   WorkbenchLocale,
-  WorkbenchPreferencesView,
   WorkbenchThemePreference
 } from '@debrute/app-protocol';
-import type { WorkbenchActions } from '../../../types';
+import type { SettingsResource, WorkbenchActions } from '../../../types';
 import { useI18n, type WorkbenchI18n } from '../../i18n';
 import type { WorkbenchResolvedTheme } from '../../services/workbenchTheme';
-import { Button, Card, Field, Select, StatusPill, Toolbar, type StatusTone } from '../../ui';
+import { Button, Field, Select, StatusPill, Toolbar, type StatusTone } from '../../ui';
 
 type OperationState =
   | { status: 'idle' }
@@ -26,115 +27,214 @@ type ProductActions = Pick<WorkbenchActions, 'getProductState' | 'checkProductUp
 export function GeneralSettingsPage({
   actions,
   initialProductState,
-  preferences,
+  settings,
   resolvedTheme,
-  onPreferencesChange
+  onSettingsChange
 }: {
   actions: ProductActions;
   initialProductState?: DebruteProductState;
-  preferences: WorkbenchPreferencesView;
+  settings: DebruteGlobalSettingsView;
   resolvedTheme: WorkbenchResolvedTheme;
-  onPreferencesChange: (preferences: SaveWorkbenchPreferencesInput) => Promise<void>;
+  onSettingsChange: (settings: SaveDebruteGlobalSettingsInput) => Promise<void>;
 }): React.ReactElement {
   const i18n = useI18n();
-  const [productState, setProductState] = useState<DebruteProductState>(initialProductState ?? defaultProductState());
+  const [productState, setProductState] = useState<SettingsResource<DebruteProductState>>(() => (
+    initialProductState
+      ? { status: 'ready', value: initialProductState }
+      : { status: 'loading' }
+  ));
   const [operation, setOperation] = useState<OperationState>({ status: 'idle' });
-  const [preferenceOperation, setPreferenceOperation] = useState<OperationState>({ status: 'idle' });
+  const [themeDraft, setThemeDraft] = useState(settings.workbench.themePreference);
+  const [localeDraft, setLocaleDraft] = useState(settings.workbench.locale);
+  const [defaultFrontendDraft, setDefaultFrontendDraft] = useState(settings.workbench.defaultFrontend);
+  const [themeOperation, setThemeOperation] = useState<OperationState>({ status: 'idle' });
+  const [localeOperation, setLocaleOperation] = useState<OperationState>({ status: 'idle' });
+  const [defaultFrontendOperation, setDefaultFrontendOperation] = useState<OperationState>({ status: 'idle' });
 
   useEffect(() => {
-    if (initialProductState) {
-      return;
+    setThemeDraft(settings.workbench.themePreference);
+  }, [settings.workbench.themePreference]);
+
+  useEffect(() => {
+    setLocaleDraft(settings.workbench.locale);
+  }, [settings.workbench.locale]);
+
+  useEffect(() => {
+    setDefaultFrontendDraft(settings.workbench.defaultFrontend);
+  }, [settings.workbench.defaultFrontend]);
+
+  const loadProductState = useCallback(async () => {
+    setProductState({ status: 'loading' });
+    try {
+      setProductState({ status: 'ready', value: await actions.getProductState() });
+    } catch (error) {
+      setProductState({ status: 'error', message: errorMessage(error) });
     }
-    void actions.getProductState()
-      .then(setProductState)
-      .catch((error) => setOperation({ status: 'error', message: errorMessage(error) }));
-  }, [actions, initialProductState]);
+  }, [actions]);
+
+  useEffect(() => {
+    if (!initialProductState) {
+      void loadProductState();
+    }
+  }, [initialProductState, loadProductState]);
 
   const run = async (action: () => Promise<DebruteProductState | { state: DebruteProductState }>) => {
     setOperation({ status: 'loading' });
     try {
       const result = await action();
-      setProductState('state' in result ? result.state : result);
+      setProductState({ status: 'ready', value: 'state' in result ? result.state : result });
       setOperation({ status: 'idle' });
     } catch (error) {
       setOperation({ status: 'error', message: errorMessage(error) });
     }
   };
 
-  const savePreferences = async (nextPreferences: SaveWorkbenchPreferencesInput) => {
-    setPreferenceOperation({ status: 'loading' });
+  const saveTheme = async (themePreference: WorkbenchThemePreference) => {
+    setThemeOperation({ status: 'loading' });
     try {
-      await onPreferencesChange(nextPreferences);
-      setPreferenceOperation({ status: 'idle' });
+      await onSettingsChange({ workbench: { themePreference } });
+      setThemeOperation({ status: 'idle' });
     } catch (error) {
-      setPreferenceOperation({ status: 'error', message: errorMessage(error) });
+      setThemeOperation({ status: 'error', message: errorMessage(error) });
+    }
+  };
+
+  const saveLocale = async (locale: WorkbenchLocale) => {
+    setLocaleOperation({ status: 'loading' });
+    try {
+      await onSettingsChange({ workbench: { locale } });
+      setLocaleOperation({ status: 'idle' });
+    } catch (error) {
+      setLocaleOperation({ status: 'error', message: errorMessage(error) });
+    }
+  };
+
+  const saveDefaultFrontend = async (defaultFrontend: DebruteDefaultFrontend) => {
+    setDefaultFrontendOperation({ status: 'loading' });
+    try {
+      await onSettingsChange({ workbench: { defaultFrontend } });
+      setDefaultFrontendOperation({ status: 'idle' });
+    } catch (error) {
+      setDefaultFrontendOperation({ status: 'error', message: errorMessage(error) });
     }
   };
 
   return (
-    <section className="db-settings-section general-settings-page">
-      <header className="db-settings-section__header">
-        <h2>{i18n.t('settings.general.title')}</h2>
-      </header>
-      <Card className="db-model-card">
-        <strong>{i18n.t('settings.general.appearance')}</strong>
+    <div className="general-settings-page">
+      <section className="settings-group">
+        <h3>{i18n.t('settings.general.appearance')}</h3>
         <Field
           label={i18n.t('settings.general.theme.label')}
-          description={themeHelpText(preferences.themePreference, resolvedTheme, i18n)}
+          description={themeHelpText(themeDraft, resolvedTheme, i18n)}
         >
           <Select
-            value={preferences.themePreference}
-            disabled={preferenceOperation.status === 'loading'}
-            onChange={(event) => void savePreferences({
-              ...preferences,
-              themePreference: event.currentTarget.value as WorkbenchThemePreference
-            })}
+            value={themeDraft}
+            invalid={themeOperation.status === 'error'}
+            disabled={themeOperation.status === 'loading'}
+            onChange={(event) => {
+              const themePreference = event.currentTarget.value as WorkbenchThemePreference;
+              setThemeDraft(themePreference);
+              void saveTheme(themePreference);
+            }}
           >
             <option value="system">{i18n.t('settings.general.theme.system')}</option>
             <option value="dark">{i18n.t('settings.general.theme.dark')}</option>
             <option value="light">{i18n.t('settings.general.theme.light')}</option>
           </Select>
         </Field>
-        {preferenceOperation.status === 'error' ? (
+        {themeOperation.status === 'error' ? (
           <small className="db-form-error">
-            {i18n.t('settings.general.theme.saveFailed', { message: preferenceOperation.message })}
+            {i18n.t('settings.general.theme.saveFailed', { message: themeOperation.message })}
           </small>
         ) : null}
-      </Card>
-      <Card className="db-model-card">
-        <strong>{i18n.t('settings.general.language.label')}</strong>
+      </section>
+      <section className="settings-group">
+        <h3>{i18n.t('settings.general.language.label')}</h3>
         <Field label={i18n.t('settings.general.language.label')}>
           <Select
-            value={preferences.locale}
-            disabled={preferenceOperation.status === 'loading'}
-            onChange={(event) => void savePreferences({
-              ...preferences,
-              locale: event.currentTarget.value as WorkbenchLocale
-            })}
+            value={localeDraft}
+            invalid={localeOperation.status === 'error'}
+            disabled={localeOperation.status === 'loading'}
+            onChange={(event) => {
+              const locale = event.currentTarget.value as WorkbenchLocale;
+              setLocaleDraft(locale);
+              void saveLocale(locale);
+            }}
           >
             <option value="en">{i18n.t('settings.general.language.english')}</option>
             <option value="zh-CN">{i18n.t('settings.general.language.simplifiedChinese')}</option>
           </Select>
         </Field>
-      </Card>
-      <Card className="db-model-card">
-        <strong>{i18n.t('settings.general.application')}</strong>
-        <div className="db-property-grid">
+        {localeOperation.status === 'error' ? (
+          <small className="db-form-error">
+            {i18n.t('settings.general.language.saveFailed', { message: localeOperation.message })}
+          </small>
+        ) : null}
+      </section>
+      <section className="settings-group">
+        <h3>{i18n.t('settings.general.application')}</h3>
+        <Field
+          label={i18n.t('settings.general.defaultFrontend.label')}
+          description={i18n.t('settings.general.defaultFrontend.description')}
+        >
+          <Select
+            value={defaultFrontendDraft}
+            invalid={defaultFrontendOperation.status === 'error'}
+            disabled={defaultFrontendOperation.status === 'loading'}
+            onChange={(event) => {
+              const defaultFrontend = event.currentTarget.value as DebruteDefaultFrontend;
+              setDefaultFrontendDraft(defaultFrontend);
+              void saveDefaultFrontend(defaultFrontend);
+            }}
+          >
+            <option value="electron">{i18n.t('settings.general.defaultFrontend.electron')}</option>
+            <option value="browser">{i18n.t('settings.general.defaultFrontend.browser')}</option>
+            <option value="runtime-only">{i18n.t('settings.general.defaultFrontend.runtimeOnly')}</option>
+          </Select>
+        </Field>
+        {defaultFrontendOperation.status === 'error' ? (
+          <small className="db-form-error">
+            {i18n.t('settings.general.defaultFrontend.saveFailed', { message: defaultFrontendOperation.message })}
+          </small>
+        ) : null}
+        <div className="settings-property-grid">
           <small><span>{i18n.t('settings.general.name')}</span>Debrute</small>
-          <small><span>{i18n.t('settings.general.currentVersion')}</span>{productState.productVersion}</small>
           <small><span>{i18n.t('settings.general.surface')}</span>{i18n.t('settings.general.surface.desktopPackaged')}</small>
-          <small><span>{i18n.t('settings.general.platform')}</span>{productState.platform}</small>
-          <small><span>{i18n.t('settings.general.cliDiagnostic')}</span>{cliDiagnosticLabel(productState.cli, i18n)}</small>
+          {productState.status === 'ready' ? (
+            <>
+              <small><span>{i18n.t('settings.general.currentVersion')}</span>{productState.value.productVersion}</small>
+              <small><span>{i18n.t('settings.general.platform')}</span>{productState.value.platform}</small>
+              <small><span>{i18n.t('settings.general.cliDiagnostic')}</span>{cliDiagnosticLabel(productState.value.cli, i18n)}</small>
+            </>
+          ) : null}
         </div>
-      </Card>
-      <ProductUpdateCard
-        state={productState.update}
-        operation={operation}
-        actions={actions}
-        run={run}
-        i18n={i18n}
-      />
-    </section>
+      </section>
+      {productState.status === 'ready' ? (
+        <ProductUpdateSection
+          state={productState.value.update}
+          operation={operation}
+          actions={actions}
+          run={run}
+          i18n={i18n}
+        />
+      ) : (
+        <section className="settings-group">
+          <h3>{i18n.t('settings.general.updates')}</h3>
+          {productState.status === 'loading' ? (
+            <div className="settings-resource-state" aria-busy="true">
+              <small>{i18n.t('settings.general.productState.loading')}</small>
+            </div>
+          ) : (
+            <div className="settings-resource-state settings-resource-state--error" role="alert">
+              <small>{i18n.t('settings.general.productState.loadFailed', { message: productState.message })}</small>
+              <Button type="button" iconStart={<RefreshCw size={14} />} onClick={() => void loadProductState()}>
+                {i18n.t('settings.resource.retry')}
+              </Button>
+            </div>
+          )}
+        </section>
+      )}
+    </div>
   );
 }
 
@@ -153,7 +253,7 @@ function themeHelpText(
   return i18n.t('settings.general.theme.appliedGlobal');
 }
 
-function ProductUpdateCard({
+function ProductUpdateSection({
   state,
   operation,
   actions,
@@ -169,12 +269,12 @@ function ProductUpdateCard({
   const action = productUpdateActionForState(state);
   const busy = operation.status === 'loading';
   return (
-    <Card className="db-model-card">
-      <div className="db-model-card__header">
-        <strong>{i18n.t('settings.general.updates')}</strong>
+    <section className="settings-group">
+      <div className="settings-group__header">
+        <h3>{i18n.t('settings.general.updates')}</h3>
         <StatusPill tone={statusTone(state)}>{statusLabel(state, i18n)}</StatusPill>
       </div>
-      <div className="db-property-grid">
+      <div className="settings-property-grid">
         <small><span>{i18n.t('settings.general.currentVersion')}</span>{state.currentVersion}</small>
         {'updateVersion' in state && state.updateVersion ? <small><span>{i18n.t('settings.general.latestVersion')}</span>{state.updateVersion}</small> : null}
         {'lastCheckedAt' in state && state.lastCheckedAt ? <small><span>{i18n.t('settings.general.lastChecked')}</span>{state.lastCheckedAt}</small> : null}
@@ -194,7 +294,7 @@ function ProductUpdateCard({
           </Button>
         ) : null}
       </Toolbar>
-    </Card>
+    </section>
   );
 }
 
@@ -220,9 +320,6 @@ function statusTone(state: ProductUpdateState): StatusTone {
   }
   if (state.type === 'available') {
     return 'warning';
-  }
-  if (state.type === 'idle') {
-    return 'success';
   }
   if (state.type === 'checking' || state.type === 'installing') {
     return 'loading';
@@ -272,24 +369,6 @@ export function cliDiagnosticLabel(cli: ManagedCliDiagnostic, i18n: WorkbenchI18
     message: cli.message,
     path: cli.path ?? i18n.t('common.none')
   });
-}
-
-function defaultProductState(): DebruteProductState {
-  const platform = (globalThis as { process?: { platform?: NodeJS.Platform } }).process?.platform ?? 'linux';
-  return {
-    productVersion: 'unknown',
-    platform,
-    cli: {
-      status: 'error',
-      version: 'unknown',
-      message: 'Debrute runtime product state has not loaded.'
-    },
-    update: {
-      type: 'idle',
-      currentVersion: 'unknown',
-      updateAvailable: false
-    }
-  };
 }
 
 function errorMessage(error: unknown): string {

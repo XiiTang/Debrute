@@ -90,3 +90,7 @@ export function projectWebShellNavigation(runtime: DebruteDaemonRuntimeLike, pro
     })
   };
 }
+
+export function projectWebBrowserLaunchUrl(runtime: DebruteDaemonRuntimeLike, projectId?: string): string {
+  return projectWebShellNavigation(runtime, projectId).loadUrl;
+}

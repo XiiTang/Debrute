@@ -8,6 +8,7 @@ import { createDebruteDaemonHttpServer } from './createDebruteDaemonHttpServer.j
 import type {
   CanvasVideoPreviewSourceResponse,
   DebruteHttpErrorBody,
+  WorkbenchCanvasDocumentMutationResult,
   WorkbenchProjectOpenResult
 } from '@debrute/app-protocol';
 
@@ -133,6 +134,186 @@ describe('createDebruteDaemonHttpServer Canvas video playback route', () => {
   });
 });
 
+describe('createDebruteDaemonHttpServer Canvas text viewport route', () => {
+  it('rejects stale text viewport mutations', async () => {
+    const projectRoot = await mkdtemp(join(tmpdir(), 'debrute-daemon-text-viewport-stale-'));
+    const server = createDebruteDaemonHttpServer({
+      port: 0,
+      token: 'test-token',
+      adobeBridgeDiscoveryPort: 0
+    });
+    try {
+      const runtime = await server.listen();
+      const open = await fetch(`${runtime.daemonUrl}/api/projects/open`, {
+        method: 'POST',
+        headers: {
+          'content-type': 'application/json',
+          'x-debrute-daemon-token': server.token
+        },
+        body: JSON.stringify({ projectRoot })
+      });
+      expect(open.status).toBe(200);
+      const project = await open.json() as WorkbenchProjectOpenResult;
+
+      const createCanvas = await fetch(`${runtime.daemonUrl}/api/projects/${project.projectId}/canvases`, {
+        method: 'POST',
+        headers: {
+          'content-type': 'application/json',
+          'x-debrute-daemon-token': server.token
+        },
+        body: JSON.stringify({ baseRevision: project.projectRevision })
+      });
+      expect(createCanvas.status).toBe(200);
+
+      const stale = await fetch(`${runtime.daemonUrl}/api/projects/${project.projectId}/canvases/canvas-1/text-viewport`, {
+        method: 'PATCH',
+        headers: {
+          'content-type': 'application/json',
+          'x-debrute-daemon-token': server.token
+        },
+        body: JSON.stringify({
+          baseRevision: project.projectRevision,
+          updates: [{ projectRelativePath: 'notes/a.md', scrollTop: 20, scrollLeft: 4 }]
+        })
+      });
+
+      expect(stale.status).toBe(409);
+      await expect(stale.json()).resolves.toMatchObject({
+        error: {
+          code: 'stale_project_revision'
+        }
+      } satisfies Partial<DebruteHttpErrorBody>);
+    } finally {
+      await server.close();
+      await rm(projectRoot, { recursive: true, force: true });
+    }
+  });
+});
+
+describe('createDebruteDaemonHttpServer Canvas stack-order route', () => {
+  it('returns invalid-input when bring-to-front projectRelativePath is not a string', async () => {
+    const projectRoot = await mkdtemp(join(tmpdir(), 'debrute-daemon-stack-order-invalid-'));
+    const server = createDebruteDaemonHttpServer({
+      port: 0,
+      token: 'test-token',
+      adobeBridgeDiscoveryPort: 0
+    });
+    try {
+      const runtime = await server.listen();
+      const open = await fetch(`${runtime.daemonUrl}/api/projects/open`, {
+        method: 'POST',
+        headers: {
+          'content-type': 'application/json',
+          'x-debrute-daemon-token': server.token
+        },
+        body: JSON.stringify({ projectRoot })
+      });
+      expect(open.status).toBe(200);
+      const project = await open.json() as WorkbenchProjectOpenResult;
+
+      const response = await fetch(`${runtime.daemonUrl}/api/projects/${project.projectId}/canvases/canvas-1/node-stack-order/bring-to-front`, {
+        method: 'POST',
+        headers: {
+          'content-type': 'application/json',
+          'x-debrute-daemon-token': server.token
+        },
+        body: JSON.stringify({
+          baseRevision: project.projectRevision,
+          projectRelativePath: 12
+        })
+      });
+
+      expect(response.status).toBe(400);
+      await expect(response.json()).resolves.toMatchObject({
+        error: {
+          code: 'invalid_input',
+          message: 'projectRelativePath must be a string.'
+        }
+      } satisfies Partial<DebruteHttpErrorBody>);
+    } finally {
+      await server.close();
+      await rm(projectRoot, { recursive: true, force: true });
+    }
+  });
+
+  it('brings a Canvas node to the top through the stack-order route', async () => {
+    const projectRoot = await mkdtemp(join(tmpdir(), 'debrute-daemon-stack-order-'));
+    const server = createDebruteDaemonHttpServer({
+      port: 0,
+      token: 'test-token',
+      adobeBridgeDiscoveryPort: 0,
+      appServerOptions: {
+        canvasNodeLayoutSizeReader: async () => ({ width: 120, height: 80 })
+      }
+    });
+    try {
+      await mkdir(join(projectRoot, 'flow'), { recursive: true });
+      await writeFile(join(projectRoot, 'flow/a.png'), 'a', 'utf8');
+      await writeFile(join(projectRoot, 'flow/b.png'), 'b', 'utf8');
+      const runtime = await server.listen();
+      const open = await fetch(`${runtime.daemonUrl}/api/projects/open`, {
+        method: 'POST',
+        headers: {
+          'content-type': 'application/json',
+          'x-debrute-daemon-token': server.token
+        },
+        body: JSON.stringify({ projectRoot })
+      });
+      expect(open.status).toBe(200);
+      const project = await open.json() as WorkbenchProjectOpenResult;
+
+      const addA = await fetch(`${runtime.daemonUrl}/api/projects/${project.projectId}/canvases/canvas-1/canvas-map/project-paths`, {
+        method: 'POST',
+        headers: {
+          'content-type': 'application/json',
+          'x-debrute-daemon-token': server.token
+        },
+        body: JSON.stringify({
+          baseRevision: project.projectRevision,
+          projectRelativePath: 'flow/a.png'
+        })
+      });
+      expect(addA.status).toBe(200);
+      const addAResult = await addA.json() as { projectRevision: number };
+
+      const addB = await fetch(`${runtime.daemonUrl}/api/projects/${project.projectId}/canvases/canvas-1/canvas-map/project-paths`, {
+        method: 'POST',
+        headers: {
+          'content-type': 'application/json',
+          'x-debrute-daemon-token': server.token
+        },
+        body: JSON.stringify({
+          baseRevision: addAResult.projectRevision,
+          projectRelativePath: 'flow/b.png'
+        })
+      });
+      expect(addB.status).toBe(200);
+      const addBResult = await addB.json() as { projectRevision: number };
+
+      const response = await fetch(`${runtime.daemonUrl}/api/projects/${project.projectId}/canvases/canvas-1/node-stack-order/bring-to-front`, {
+        method: 'POST',
+        headers: {
+          'content-type': 'application/json',
+          'x-debrute-daemon-token': server.token
+        },
+        body: JSON.stringify({
+          baseRevision: addBResult.projectRevision,
+          projectRelativePath: 'flow/a.png'
+        })
+      });
+
+      expect(response.status).toBe(200);
+      const body = await response.json() as WorkbenchCanvasDocumentMutationResult;
+      const a = body.canvas.nodeElements.find((node) => node.projectRelativePath === 'flow/a.png');
+      const b = body.canvas.nodeElements.find((node) => node.projectRelativePath === 'flow/b.png');
+      expect(a?.z).toBeGreaterThan(b?.z ?? -1);
+    } finally {
+      await server.close();
+      await rm(projectRoot, { recursive: true, force: true });
+    }
+  });
+});
+
 describe('createDebruteDaemonHttpServer Canvas video preview routes', () => {
   it('creates an explicit poster source and serves a cached preview variant', async () => {
     const projectRoot = await mkdtemp(join(tmpdir(), 'debrute-daemon-video-preview-'));
@@ -211,5 +392,5 @@ describe('createDebruteDaemonHttpServer Canvas video preview routes', () => {
       await server.close();
       await rm(projectRoot, { recursive: true, force: true });
     }
-  });
+  }, 15_000);
 });

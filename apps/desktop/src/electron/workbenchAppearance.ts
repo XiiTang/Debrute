@@ -1,10 +1,10 @@
-import type { WorkbenchPreferencesView } from '@debrute/app-protocol';
+import type { DebruteGlobalSettingsView } from '@debrute/app-protocol';
 
 export const WORKBENCH_DARK_BACKGROUND = '#181818';
 export const WORKBENCH_LIGHT_BACKGROUND = '#f4f5f7';
 
 export interface WorkbenchStartupBackgroundRuntime {
-  workbenchPreferencesGet(): Promise<WorkbenchPreferencesView>;
+  globalSettingsGet(): Promise<DebruteGlobalSettingsView>;
 }
 
 export interface WorkbenchNativeThemeState {
@@ -12,13 +12,13 @@ export interface WorkbenchNativeThemeState {
 }
 
 export function workbenchStartupBackgroundColor(input: {
-  preferences: WorkbenchPreferencesView;
+  workbench: DebruteGlobalSettingsView['workbench'];
   nativeTheme: WorkbenchNativeThemeState;
 }): string {
-  if (input.preferences.themePreference === 'dark') {
+  if (input.workbench.themePreference === 'dark') {
     return WORKBENCH_DARK_BACKGROUND;
   }
-  if (input.preferences.themePreference === 'light') {
+  if (input.workbench.themePreference === 'light') {
     return WORKBENCH_LIGHT_BACKGROUND;
   }
   return input.nativeTheme.shouldUseDarkColors ? WORKBENCH_DARK_BACKGROUND : WORKBENCH_LIGHT_BACKGROUND;
@@ -28,8 +28,9 @@ export async function workbenchStartupBackgroundColorForRuntime(
   runtime: WorkbenchStartupBackgroundRuntime,
   nativeTheme: WorkbenchNativeThemeState
 ): Promise<string> {
+  const settings = await runtime.globalSettingsGet();
   return workbenchStartupBackgroundColor({
-    preferences: await runtime.workbenchPreferencesGet(),
+    workbench: settings.workbench,
     nativeTheme
   });
 }

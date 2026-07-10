@@ -109,6 +109,10 @@ export class RuntimeSupervisor extends EventEmitter {
     }
   }
 
+  recordActionFailure(message: string): void {
+    this.publish({ ...this.current, lastError: message });
+  }
+
   private async applyRegistryResult(result: EnsureRegisteredWorkbenchRuntimeResult): Promise<void> {
     const health = await this.checkHealth(result.state);
     this.statePath = result.statePath;

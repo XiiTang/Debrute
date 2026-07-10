@@ -7,7 +7,8 @@ const workspaceRoot = fileURLToPath(new URL('.', import.meta.url));
 export default defineConfig({
   test: {
     environment: 'node',
-    include: ['tests/**/*.test.ts', 'packages/**/*.test.ts', 'apps/**/*.test.ts', 'apps/**/*.test.tsx']
+    include: ['tests/**/*.test.ts', 'packages/**/*.test.ts', 'apps/**/*.test.ts', 'apps/**/*.test.tsx'],
+    maxWorkers: 1
   },
   resolve: {
     alias: [

@@ -12,7 +12,7 @@ describe('terminalMetadataEvents', () => {
       onSessionClose,
       onError
     });
-    const session = sessionFixture('terminal-1', 'exited');
+    const session = sessionFixture('terminal-1', 'terminating');
 
     handleEvent({ type: 'replay', terminalId: 'terminal-1', chunks: [{ sequence: 1, data: 'ignored' }], lastSequence: 1 });
     handleEvent({ type: 'data', terminalId: 'terminal-1', sequence: 2, data: 'ignored' });

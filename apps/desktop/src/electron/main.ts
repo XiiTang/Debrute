@@ -1,6 +1,7 @@
 import { randomUUID } from 'node:crypto';
 import electron from 'electron';
 import { join } from 'node:path';
+import { executeDefaultFrontend as executeConfiguredDefaultFrontend } from './defaultFrontend.js';
 import { createAttachedDesktopRuntimeClient, type DesktopRuntimeClient } from './desktopRuntimeClient.js';
 import { loadDebruteProjectShellWindow, waitForDebruteShellUrl, type DebruteShellNavigation } from './desktopShellLoad.js';
 import { createApplicationMenuController } from './menu/registerApplicationMenu.js';
@@ -12,7 +13,7 @@ import { TrayController } from './tray/trayController.js';
 import { workbenchStartupBackgroundColorForRuntime } from './workbenchAppearance.js';
 import { runProjectWindowOpenOnce, selectProjectWindowOpenTarget } from './windowProjectRouting.js';
 
-const { app, BrowserWindow, dialog, ipcMain, Menu, nativeTheme } = electron;
+const { app, BrowserWindow, clipboard, dialog, ipcMain, Menu, nativeTheme, shell } = electron;
 let runtimeSupervisor: RuntimeSupervisor | undefined;
 let runtimeClient: DesktopRuntimeClient | undefined;
 let trayController: TrayController | undefined;
@@ -172,9 +173,21 @@ app.whenReady().then(async () => {
     ),
     actions: {
       openDebrute: () => {
+        void executeDefaultFrontend('tray-open-debrute');
+      },
+      openInElectron: () => {
         void openDebruteRootWindow();
       },
-      openRecent: (projectRoot) => {
+      openInBrowser: () => {
+        void openDebruteInBrowser();
+      },
+      copyBrowserUrl: () => {
+        copyDebruteBrowserUrl();
+      },
+      openProjectInElectron: () => {
+        void openProjectFromPickerInElectron();
+      },
+      openRecentInElectron: (projectRoot) => {
         void openProjectRootFromDesktop(projectRoot, { forceNewWindow: false });
       },
       showRuntimeStatus: () => {
@@ -210,7 +223,7 @@ app.whenReady().then(async () => {
   if (initialIntent) {
     await handleDesktopOpenIntent(initialIntent);
   } else if (pendingDesktopOpenIntents.length === 0) {
-    await createWindow();
+    await executeDefaultFrontend('startup');
   }
   await flushPendingDesktopOpenIntents();
 });
@@ -221,7 +234,7 @@ app.on('window-all-closed', () => {
 
 app.on('activate', () => {
   if (BrowserWindow.getAllWindows().length === 0) {
-    void createWindow();
+    void executeDefaultFrontend('app-activate');
   }
 });
 
@@ -469,6 +482,33 @@ async function openDebruteRootWindow(): Promise<void> {
     return;
   }
   await createWindow();
+}
+
+async function executeDefaultFrontend(source: string): Promise<void> {
+  await executeConfiguredDefaultFrontend({
+    runtimeClient: requireRuntimeClient(),
+    openElectron: openDebruteRootWindow,
+    openBrowser: openDebruteInBrowser,
+    source,
+    recordFailure: (failure) => {
+      const message = `Default frontend ${failure.source} failed: ${failure.message}`;
+      requireRuntimeSupervisor().recordActionFailure(message);
+      console.error(`Debrute ${message}`);
+      void refreshTray();
+    }
+  });
+}
+
+async function openDebruteInBrowser(): Promise<void> {
+  await shell.openExternal(requireRuntimeClient().browserLaunchUrl());
+}
+
+function copyDebruteBrowserUrl(): void {
+  clipboard.writeText(requireRuntimeClient().browserLaunchUrl());
+}
+
+async function openProjectFromPickerInElectron(): Promise<void> {
+  await openProjectFromPickerFromShell({ forceNewWindow: false });
 }
 
 async function restartRuntimeAndReloadWindows(): Promise<void> {

@@ -1,7 +1,8 @@
 import { describe, expect, it } from 'vitest';
 import {
   CANVAS_FEEDBACK_MARKS,
-  canvasNodeLayerOrderTopFirst,
+  bringCanvasNodeToFront,
+  canvasNodeStackOrderTopFirst,
   clearCanvasNodeManualLayouts,
   createCanvasDocument,
   createEmptyCanvasFeedbackDocument,
@@ -9,7 +10,6 @@ import {
   projectCanvas,
   reconcileCanvasNodeElements,
   updateCanvasFeedbackEntry,
-  updateCanvasNodeLayers,
   updateCanvasNodeLayouts,
   type CanvasDesiredNode,
   type CanvasDocument,
@@ -137,7 +137,7 @@ describe('canvas-core', () => {
     expect(all.resetCount).toBe(3);
   });
 
-  it('assigns deterministic node z-order and projects all nodes by z order', () => {
+  it('assigns deterministic node stack order and projects all nodes by render order', () => {
     const canvas = createCanvasWithNodes([
       { projectRelativePath: 'flow/bottom.png', nodeKind: 'file', mediaKind: 'image', x: 0, y: 0, width: 100, height: 100 },
       { projectRelativePath: 'flow/top.png', nodeKind: 'file', mediaKind: 'image', x: 20, y: 20, width: 100, height: 100 }
@@ -149,21 +149,40 @@ describe('canvas-core', () => {
       { projectRelativePath: 'flow/top.png', z: 1 }
     ]);
     expect(projection.nodes.map((node) => node.projectRelativePath)).toEqual(['flow/bottom.png', 'flow/top.png']);
-    expect(canvasNodeLayerOrderTopFirst(canvas)).toEqual(['flow/top.png', 'flow/bottom.png']);
+    expect(canvasNodeStackOrderTopFirst(canvas)).toEqual(['flow/top.png', 'flow/bottom.png']);
   });
 
-  it('applies requested top-first layer order without reversing it', () => {
+  it('brings one node to the top of stack order and preserves the other relative order', () => {
     const canvas = createCanvasWithNodes([
       { projectRelativePath: 'flow/a.png', nodeKind: 'file', mediaKind: 'image', x: 0, y: 0, width: 100, height: 100 },
       { projectRelativePath: 'flow/b.png', nodeKind: 'file', mediaKind: 'image', x: 0, y: 0, width: 100, height: 100 },
       { projectRelativePath: 'flow/c.png', nodeKind: 'file', mediaKind: 'image', x: 0, y: 0, width: 100, height: 100 }
     ]);
 
-    const reordered = updateCanvasNodeLayers(canvas, {
-      nodeProjectRelativePathsTopFirst: ['flow/a.png', 'flow/b.png', 'flow/c.png']
-    });
+    const reordered = bringCanvasNodeToFront(canvas, { projectRelativePath: 'flow/b.png' });
 
-    expect(canvasNodeLayerOrderTopFirst(reordered)).toEqual(['flow/a.png', 'flow/b.png', 'flow/c.png']);
+    expect(canvasNodeStackOrderTopFirst(reordered)).toEqual(['flow/b.png', 'flow/c.png', 'flow/a.png']);
+    expect(nodeByPath(reordered.nodeElements, 'flow/a.png')).toMatchObject({ z: 0 });
+    expect(nodeByPath(reordered.nodeElements, 'flow/c.png')).toMatchObject({ z: 1 });
+    expect(nodeByPath(reordered.nodeElements, 'flow/b.png')).toMatchObject({ z: 2 });
+  });
+
+  it('does not rewrite a canvas when the selected node is already top of stack order', () => {
+    const canvas = createCanvasWithNodes([
+      { projectRelativePath: 'flow/a.png', nodeKind: 'file', mediaKind: 'image', x: 0, y: 0, width: 100, height: 100 },
+      { projectRelativePath: 'flow/b.png', nodeKind: 'file', mediaKind: 'image', x: 0, y: 0, width: 100, height: 100 }
+    ]);
+
+    expect(bringCanvasNodeToFront(canvas, { projectRelativePath: 'flow/b.png' })).toBe(canvas);
+  });
+
+  it('rejects bring-to-front for a path that is not a canvas node', () => {
+    const canvas = createCanvasWithNodes([
+      { projectRelativePath: 'flow/a.png', nodeKind: 'file', mediaKind: 'image', x: 0, y: 0, width: 100, height: 100 }
+    ]);
+
+    expect(() => bringCanvasNodeToFront(canvas, { projectRelativePath: 'flow/missing.png' }))
+      .toThrow('Canvas node not found: flow/missing.png');
   });
 
   it('reconciles desired file tree nodes with compact tree layout and preserves manual nodes', () => {
@@ -548,7 +567,7 @@ describe('canvas-core', () => {
     })).toThrow('Canvas layout row member is not a direct child of its row parent: flow/other/c.png');
   });
 
-  it('assigns unique layer values when new automatic nodes are inserted before existing nodes', () => {
+  it('assigns unique stack order values when new automatic nodes are inserted before existing nodes', () => {
     const existing = createCanvasWithNodes([
       { projectRelativePath: 'flow', nodeKind: 'directory', x: 0, y: 0, width: 240, height: 96 },
       { projectRelativePath: 'flow/z.png', nodeKind: 'file', mediaKind: 'image', x: 0, y: 0, width: 100, height: 100 }

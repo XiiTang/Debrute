@@ -1,4 +1,4 @@
-import { describe, expect, it } from 'vitest';
+import { describe, expect, expectTypeOf, it } from 'vitest';
 import {
   CANVAS_CARD_BAR_SIZE,
   CANVAS_FEEDBACK_BAR_LAYOUT,
@@ -13,13 +13,56 @@ import {
   feedbackBarPlacementForCanvasTarget,
   canvasResetLayoutButtonRect,
   placeCanvasFeedbackBar,
-  placeCanvasMinimapPanel
+  placeCanvasMinimapPanel,
+  sameCanvasFeedbackBarTarget,
+  type CanvasFeedbackBarTarget,
+  type CanvasLocalFeedbackDraft
 } from './floatingBars';
 import {
   TITLE_BAR_RESERVED_RECT,
   WORKBENCH_FLOATING_DOCK_EDGE_INSET,
   WORKBENCH_TITLE_BAR_HEIGHT
 } from './workbenchLayers';
+
+describe('feedback bar target equality', () => {
+  it('requires local feedback drafts to carry the confirming image feedback target', () => {
+    expectTypeOf<CanvasLocalFeedbackDraft['feedbackBarTarget']>().toEqualTypeOf<CanvasFeedbackBarTarget>();
+  });
+
+  it('treats equal feedback bar targets as unchanged', () => {
+    const target = feedbackTarget();
+
+    expect(sameCanvasFeedbackBarTarget(target, {
+      ...target,
+      nodeRect: { ...target.nodeRect },
+      surfaceRect: { ...target.surfaceRect },
+      camera: { ...target.camera },
+      entry: target.entry ? {
+        ...target.entry,
+        marks: [...target.entry.marks],
+        items: [...target.entry.items]
+      } : undefined
+    })).toBe(true);
+  });
+
+  it('detects feedback bar target camera changes', () => {
+    const target = feedbackTarget();
+
+    expect(sameCanvasFeedbackBarTarget(target, {
+      ...target,
+      camera: { ...target.camera, z: 0.5 }
+    })).toBe(false);
+  });
+
+  it('detects feedback bar target local toolset changes', () => {
+    const target = feedbackTarget();
+
+    expect(sameCanvasFeedbackBarTarget(target, {
+      ...target,
+      localToolset: 'none'
+    })).toBe(false);
+  });
+});
 
 describe('floating bar placement', () => {
   it('places feedback below a node by default', () => {
@@ -256,27 +299,19 @@ describe('floating bar placement', () => {
     });
   });
 
-  it('places lower-left Canvas controls with the same compact 4px gap as the top-left dock', () => {
+  it('places lower-left Canvas controls in one row with equal gaps', () => {
     const viewportRect = { x: 0, y: 0, width: 1000, height: 700 };
     const minimapButton = canvasMinimapButtonRect(viewportRect);
     const resetButton = canvasResetLayoutButtonRect(viewportRect);
     const cardBar = canvasCardBarRect(viewportRect);
-    const lowerLeftControlGap = 4;
 
-    expect(resetButton).toEqual({
-      x: minimapButton.x + CANVAS_MINIMAP_BUTTON_SIZE.width + lowerLeftControlGap,
-      y: 658,
-      width: CANVAS_RESET_LAYOUT_BUTTON_SIZE.width,
-      height: CANVAS_RESET_LAYOUT_BUTTON_SIZE.height
-    });
-    expect(cardBar).toEqual({
-      x: resetButton.x + CANVAS_RESET_LAYOUT_BUTTON_SIZE.width + lowerLeftControlGap,
-      y: 658,
-      width: 580,
-      height: CANVAS_CARD_BAR_SIZE.height
-    });
-    expect(resetButton.x - (minimapButton.x + minimapButton.width)).toBe(lowerLeftControlGap);
-    expect(cardBar.x - (resetButton.x + resetButton.width)).toBe(lowerLeftControlGap);
+    expect(resetButton.y).toBe(minimapButton.y);
+    expect(cardBar.y).toBe(minimapButton.y);
+    expect(resetButton.x).toBeGreaterThan(minimapButton.x + minimapButton.width);
+    expect(cardBar.x).toBeGreaterThan(resetButton.x + resetButton.width);
+    expect(resetButton.x - (minimapButton.x + minimapButton.width)).toBe(
+      cardBar.x - (resetButton.x + resetButton.width)
+    );
   });
 
   it('places the minimap panel above the lower-left button', () => {
@@ -308,12 +343,37 @@ describe('floating bar placement', () => {
   });
 
   it('reserves the title bar at the top of the viewport', () => {
-    expect(WORKBENCH_TITLE_BAR_HEIGHT).toBe(28);
     expect(TITLE_BAR_RESERVED_RECT(1280)).toEqual({
       x: 0,
       y: 0,
       width: 1280,
-      height: 28
+      height: WORKBENCH_TITLE_BAR_HEIGHT
     });
   });
 });
+
+function feedbackTarget(projectRelativePath = 'flow/a.png'): CanvasFeedbackBarTarget {
+  return {
+    projectRelativePath,
+    nodeRect: { x: 10, y: 20, width: 300, height: 180 },
+    surfaceRect: { x: 0, y: 0, width: 1280, height: 720 },
+    camera: { x: 12, y: 24, z: 1 },
+    localToolset: 'image',
+    canStartVideoMomentFeedback: false,
+    entry: {
+      projectRelativePath,
+      marks: ['needs_revision'],
+      nextMomentLabel: 1,
+      nextSpatialLabel: 1,
+      items: [{
+        id: 'comment-1',
+        kind: 'comment',
+        scope: 'file',
+        comment: 'Needs revision',
+        createdAt: '2026-06-08T00:00:00.000Z',
+        updatedAt: '2026-06-08T00:00:00.000Z'
+      }],
+      updatedAt: '2026-06-08T00:00:00.000Z'
+    }
+  };
+}

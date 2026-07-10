@@ -82,12 +82,95 @@ describe('daemon terminal routes', () => {
     });
     expect(factory.ptys[0]!.resizes).toEqual([{ cols: 100, rows: 24 }]);
 
-    await requestJson(`${runtime.daemonUrl}/api/projects/${opened.projectId}/terminals/${created.session.id}`, {
+    const deleteRequest = requestJson(`${runtime.daemonUrl}/api/projects/${opened.projectId}/terminals/${created.session.id}`, {
       method: 'DELETE'
     });
-    expect(factory.ptys[0]!.killedWith).toBeUndefined();
+    await waitForPtyTermination(factory.ptys[0]!);
+    factory.ptys[0]!.emitExit({ exitCode: 0, signal: 'SIGHUP' });
+    await expect(deleteRequest).resolves.toEqual({ ok: true });
     await expect(requestJson(`${runtime.daemonUrl}/api/projects/${opened.projectId}/terminals`)).resolves.toEqual({
       sessions: []
+    });
+  });
+
+  it('waits for terminal close cleanup before returning from DELETE', async () => {
+    const projectRoot = await mkdtemp(join(tmpdir(), 'debrute-daemon-terminal-close-wait-'));
+    const factory = createFakePtyFactory();
+    const daemon = createDebruteDaemonHttpServer({
+      host: '127.0.0.1',
+      port: 0,
+      token: 'test-token',
+      webBaseUrl: null,
+      appServerOptions: {
+        terminalPtyFactory: factory.factory
+      }
+    });
+    cleanups.push(() => daemon.close(), () => rm(projectRoot, { recursive: true, force: true }));
+    const runtime = await daemon.listen();
+    const opened = await requestJson<{ projectId: string }>(`${runtime.daemonUrl}/api/projects/open`, {
+      method: 'POST',
+      body: JSON.stringify({ projectRoot })
+    });
+    const created = await requestJson<{ session: { id: string } }>(
+      `${runtime.daemonUrl}/api/projects/${opened.projectId}/terminals`,
+      { method: 'POST', body: JSON.stringify({}) }
+    );
+
+    let deleteResolved = false;
+    const deleteRequest = requestJson(`${runtime.daemonUrl}/api/projects/${opened.projectId}/terminals/${created.session.id}`, {
+      method: 'DELETE'
+    }).then((result) => {
+      deleteResolved = true;
+      return result;
+    });
+
+    await waitForPtyTermination(factory.ptys[0]!);
+    expect(deleteResolved).toBe(false);
+
+    factory.ptys[0]!.emitExit({ exitCode: 0, signal: 'SIGHUP' });
+    await expect(deleteRequest).resolves.toEqual({ ok: true });
+    expect(deleteResolved).toBe(true);
+  });
+
+  it('returns terminal_close_failed and keeps the session listed when DELETE termination fails', async () => {
+    const projectRoot = await mkdtemp(join(tmpdir(), 'debrute-daemon-terminal-close-error-'));
+    const factory = createFakePtyFactory();
+    const daemon = createDebruteDaemonHttpServer({
+      host: '127.0.0.1',
+      port: 0,
+      token: 'test-token',
+      webBaseUrl: null,
+      appServerOptions: {
+        terminalPtyFactory: factory.factory
+      }
+    });
+    cleanups.push(() => daemon.close(), () => rm(projectRoot, { recursive: true, force: true }));
+    const runtime = await daemon.listen();
+    const opened = await requestJson<{ projectId: string }>(`${runtime.daemonUrl}/api/projects/open`, {
+      method: 'POST',
+      body: JSON.stringify({ projectRoot })
+    });
+    const created = await requestJson<{ session: { id: string } }>(
+      `${runtime.daemonUrl}/api/projects/${opened.projectId}/terminals`,
+      { method: 'POST', body: JSON.stringify({}) }
+    );
+    factory.ptys[0]!.terminateError = new Error('terminate denied');
+
+    const response = await fetch(`${runtime.daemonUrl}/api/projects/${opened.projectId}/terminals/${created.session.id}`, {
+      method: 'DELETE',
+      headers: { 'x-debrute-daemon-token': 'test-token' }
+    });
+
+    expect(response.status).toBe(500);
+    await expect(response.json()).resolves.toEqual({
+      error: {
+        code: 'terminal_close_failed',
+        message: 'Terminal close failed: terminate denied',
+        details: {}
+      }
+    });
+    await expect(requestJson(`${runtime.daemonUrl}/api/projects/${opened.projectId}/terminals`)).resolves.toEqual({
+      sessions: [expect.objectContaining({ id: created.session.id, status: 'running' })]
     });
   });
 
@@ -174,10 +257,30 @@ describe('daemon terminal routes', () => {
         data: 'after attach\r\n'
       });
 
-      await requestJson(`${runtime.daemonUrl}/api/projects/${opened.projectId}/terminals/${created.session.id}`, {
+      const deleteRequest = requestJson(`${runtime.daemonUrl}/api/projects/${opened.projectId}/terminals/${created.session.id}`, {
         method: 'DELETE'
       });
 
+      await expect(stream.next()).resolves.toMatchObject({
+        type: 'status',
+        terminalId: created.session.id,
+        session: { status: 'terminating' }
+      });
+
+      factory.ptys[0]!.emitExit({ exitCode: 0, signal: 'SIGHUP' });
+      await deleteRequest;
+
+      await expect(stream.next()).resolves.toEqual({
+        type: 'exit',
+        terminalId: created.session.id,
+        exitCode: 0,
+        signal: 'SIGHUP'
+      });
+      await expect(stream.next()).resolves.toMatchObject({
+        type: 'status',
+        terminalId: created.session.id,
+        session: { status: 'exited', exitCode: 0, signal: 'SIGHUP' }
+      });
       await expect(stream.next()).resolves.toEqual({
         type: 'closed',
         terminalId: created.session.id
@@ -204,6 +307,36 @@ describe('daemon terminal routes', () => {
     });
 
     const response = await fetch(`${runtime.daemonUrl}/api/projects/${opened.projectId}/terminals/missing/events`, {
+      headers: { 'x-debrute-daemon-token': 'test-token' }
+    });
+
+    expect(response.status).toBe(404);
+    await expect(response.json()).resolves.toEqual({
+      error: {
+        code: 'terminal_not_found',
+        message: 'Terminal session not found: missing',
+        details: { terminalId: 'missing' }
+      }
+    });
+  });
+
+  it('returns terminal_not_found when deleting a missing terminal', async () => {
+    const projectRoot = await mkdtemp(join(tmpdir(), 'debrute-daemon-terminal-delete-missing-'));
+    const daemon = createDebruteDaemonHttpServer({
+      host: '127.0.0.1',
+      port: 0,
+      token: 'test-token',
+      webBaseUrl: null
+    });
+    cleanups.push(() => daemon.close(), () => rm(projectRoot, { recursive: true, force: true }));
+    const runtime = await daemon.listen();
+    const opened = await requestJson<{ projectId: string }>(`${runtime.daemonUrl}/api/projects/open`, {
+      method: 'POST',
+      body: JSON.stringify({ projectRoot })
+    });
+
+    const response = await fetch(`${runtime.daemonUrl}/api/projects/${opened.projectId}/terminals/missing`, {
+      method: 'DELETE',
       headers: { 'x-debrute-daemon-token': 'test-token' }
     });
 
@@ -322,7 +455,10 @@ function createFakePtyFactory(): {
 class FakeTerminalPty implements TerminalPty {
   writes: string[] = [];
   resizes: Array<{ cols: number; rows: number }> = [];
-  killedWith: string | undefined;
+  terminated = false;
+  forceKilled = false;
+  terminateError: Error | undefined;
+  forceKillError: Error | undefined;
   private readonly dataListeners = new Set<(data: string) => void>();
   private readonly exitListeners = new Set<(event: TerminalPtyExit) => void>();
 
@@ -336,8 +472,18 @@ class FakeTerminalPty implements TerminalPty {
     this.resizes.push({ cols, rows });
   }
 
-  kill(signal?: string): void {
-    this.killedWith = signal;
+  terminate(): void {
+    if (this.terminateError) {
+      throw this.terminateError;
+    }
+    this.terminated = true;
+  }
+
+  forceKill(): void {
+    if (this.forceKillError) {
+      throw this.forceKillError;
+    }
+    this.forceKilled = true;
   }
 
   onData(listener: (data: string) => void): TerminalPtyDisposable {
@@ -355,4 +501,21 @@ class FakeTerminalPty implements TerminalPty {
       listener(data);
     }
   }
+
+  emitExit(event: TerminalPtyExit): void {
+    for (const listener of this.exitListeners) {
+      listener(event);
+    }
+  }
+}
+
+async function waitForPtyTermination(pty: FakeTerminalPty): Promise<void> {
+  const deadline = Date.now() + 1000;
+  while (Date.now() < deadline) {
+    if (pty.terminated) {
+      return;
+    }
+    await new Promise((resolve) => setTimeout(resolve, 5));
+  }
+  expect(pty.terminated).toBe(true);
 }

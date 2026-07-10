@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from 'vitest';
-import type { WorkbenchProjectFileBatchOperationResult, WorkbenchProjectSessionSnapshot } from '@debrute/app-protocol';
+import type { WorkbenchProjectSessionSnapshot } from '@debrute/app-protocol';
 import type { CanvasProjection } from '@debrute/canvas-core';
 import type { CanvasEditorRuntime } from '../canvas/runtime/CanvasEditorRuntime';
 import type { WorkbenchContextMenuCommand } from '../shell/contextMenu';
@@ -7,82 +7,62 @@ import { runWorkbenchContextMenuCommand } from './workbenchContextMenuCommands';
 
 describe('workbench context menu commands', () => {
   it('confirms permanent delete before deleting', () => {
-    const deleteProjectPathsPermanently = vi.fn(async () => ({
-      ...batchResult(),
-      results: []
-    }));
+    const deleteEntriesPermanently = vi.fn();
     runWorkbenchContextMenuCommand(commandInput({
       command: 'delete-permanently',
-      actions: {
-        deleteProjectPathsPermanently
-      },
+      actions: {},
+      explorerCommands: { deleteEntriesPermanently },
       confirmPermanentDelete: () => false
     }));
 
-    expect(deleteProjectPathsPermanently).not.toHaveBeenCalled();
+    expect(deleteEntriesPermanently).not.toHaveBeenCalled();
   });
 
   it('runs trash delete for the visible Delete command', () => {
-    const trashProjectPaths = vi.fn(async () => ({
-      ...batchResult(),
-      results: [{
-        sourceProjectRelativePath: 'briefs/concept.md',
-        projectRelativePath: 'briefs/concept.md',
-        kind: 'file' as const,
-        status: 'ok' as const
-      }]
-    }));
+    const trashEntries = vi.fn();
     runWorkbenchContextMenuCommand(commandInput({
       command: 'delete',
-      actions: {
-        trashProjectPaths
-      }
+      actions: {},
+      explorerCommands: { trashEntries }
     }));
 
-    expect(trashProjectPaths).toHaveBeenCalledWith({
-      entries: [{ projectRelativePath: 'briefs/concept.md', kind: 'file' }]
-    });
+    expect(trashEntries).toHaveBeenCalledWith([
+      { projectRelativePath: 'briefs/concept.md', kind: 'file' }
+    ]);
   });
 
   it('does not run item commands for the Project Tree root target', () => {
-    const setFileClipboard = vi.fn();
-    const trashProjectPaths = vi.fn(async () => ({
-      ...batchResult(),
-      results: []
-    }));
+    const copyEntries = vi.fn();
+    const trashEntries = vi.fn();
 
     runWorkbenchContextMenuCommand(commandInput({
       command: 'copy',
       target: rootTarget(),
-      actions: {
-        trashProjectPaths
-      },
-      setFileClipboard
+      actions: {},
+      explorerCommands: { copyEntries, trashEntries }
     }));
     runWorkbenchContextMenuCommand(commandInput({
       command: 'delete',
       target: rootTarget(),
-      actions: {
-        trashProjectPaths
-      },
-      setFileClipboard
+      actions: {},
+      explorerCommands: { copyEntries, trashEntries }
     }));
 
-    expect(setFileClipboard).not.toHaveBeenCalled();
-    expect(trashProjectPaths).not.toHaveBeenCalled();
+    expect(copyEntries).not.toHaveBeenCalled();
+    expect(trashEntries).not.toHaveBeenCalled();
   });
 
   it('copies daemon-returned absolute paths for Copy Path', async () => {
     const copiedText: string[] = [];
-    const copyProjectAbsolutePaths = vi.fn(async () => ({
-      paths: ['/tmp/debrute-project/briefs/concept.md', '/tmp/debrute-project/assets']
-    }));
+    const copyAbsolutePaths = vi.fn(async () => [
+      '/tmp/debrute-project/briefs/concept.md',
+      '/tmp/debrute-project/assets'
+    ]);
 
     runWorkbenchContextMenuCommand(commandInput({
       command: 'copy-path',
-      actions: {
-        copyProjectAbsolutePaths
-      },
+      actions: {},
+      explorerCommands: { copyAbsolutePaths },
       target: {
         source: 'explorer',
         targetKind: 'selection',
@@ -100,12 +80,10 @@ describe('workbench context menu commands', () => {
 
     await Promise.resolve();
 
-    expect(copyProjectAbsolutePaths).toHaveBeenCalledWith({
-      entries: [
-        { projectRelativePath: 'briefs/concept.md', kind: 'file' },
-        { projectRelativePath: 'assets', kind: 'directory' }
-      ]
-    });
+    expect(copyAbsolutePaths).toHaveBeenCalledWith([
+      { projectRelativePath: 'briefs/concept.md', kind: 'file' },
+      { projectRelativePath: 'assets', kind: 'directory' }
+    ]);
     expect(copiedText).toEqual(['/tmp/debrute-project/briefs/concept.md\n/tmp/debrute-project/assets']);
   });
 
@@ -164,16 +142,12 @@ describe('workbench context menu commands', () => {
   });
 
   it('does not paste when the internal clipboard has no entries', async () => {
-    const copyProjectPaths = vi.fn(async () => ({
-      ...batchResult(),
-      results: []
-    }));
+    const pasteEntries = vi.fn();
 
     runWorkbenchContextMenuCommand(commandInput({
       command: 'paste',
-      actions: {
-        copyProjectPaths
-      },
+      actions: {},
+      explorerCommands: { pasteEntries },
       fileClipboard: {
         operation: 'copy',
         entries: []
@@ -183,26 +157,17 @@ describe('workbench context menu commands', () => {
 
     await Promise.resolve();
 
-    expect(copyProjectPaths).not.toHaveBeenCalled();
+    expect(pasteEntries).not.toHaveBeenCalled();
   });
 
   it('confirms and overwrites conflicting cut paste targets', async () => {
-    const moveProjectPaths = vi.fn(async () => ({
-      ...batchResult(),
-      results: [{
-        sourceProjectRelativePath: 'cover.png',
-        projectRelativePath: 'assets/cover.png',
-        kind: 'file' as const,
-        status: 'ok' as const
-      }]
-    }));
+    const pasteEntries = vi.fn();
     const confirmMoveOverwrite = vi.fn(() => true);
 
     runWorkbenchContextMenuCommand(commandInput({
       command: 'paste',
-      actions: {
-        moveProjectPaths
-      },
+      actions: {},
+      explorerCommands: { pasteEntries },
       fileClipboard: {
         operation: 'cut',
         entries: [{ projectRelativePath: 'cover.png', kind: 'file' }]
@@ -231,15 +196,18 @@ describe('workbench context menu commands', () => {
       entries: [{ projectRelativePath: 'cover.png', kind: 'file' }],
       targetDirectoryProjectRelativePath: 'assets'
     });
-    expect(moveProjectPaths).toHaveBeenCalledWith({
-      entries: [{ projectRelativePath: 'cover.png', kind: 'file' }],
+    expect(pasteEntries).toHaveBeenCalledWith({
+      clipboard: {
+        operation: 'cut',
+        entries: [{ projectRelativePath: 'cover.png', kind: 'file' }]
+      },
       targetDirectoryProjectRelativePath: 'assets',
       overwrite: true
     });
   });
 
   it('sets the file clipboard from a Canvas Cut command', () => {
-    const setFileClipboard = vi.fn();
+    const cutEntries = vi.fn();
 
     runWorkbenchContextMenuCommand(commandInput({
       command: 'cut',
@@ -252,27 +220,23 @@ describe('workbench context menu commands', () => {
         height: 50
       }),
       actions: {},
-      setFileClipboard
+      explorerCommands: { cutEntries }
     }));
 
-    expect(setFileClipboard).toHaveBeenCalledWith({
-      operation: 'cut',
-      entries: [{ projectRelativePath: 'flow/cover.png', kind: 'file' }]
-    });
+    expect(cutEntries).toHaveBeenCalledWith([
+      { projectRelativePath: 'flow/cover.png', kind: 'file' }
+    ]);
   });
 
   it('copies daemon-returned absolute paths for a Canvas Copy Path command', async () => {
     const copiedText: string[] = [];
-    const copyProjectAbsolutePaths = vi.fn(async () => ({
-      paths: ['/tmp/debrute-project/flow/cover.png']
-    }));
+    const copyAbsolutePaths = vi.fn(async () => ['/tmp/debrute-project/flow/cover.png']);
 
     runWorkbenchContextMenuCommand(commandInput({
       command: 'copy-path',
       target: { source: 'canvas', kind: 'file', projectRelativePath: 'flow/cover.png' },
-      actions: {
-        copyProjectAbsolutePaths
-      },
+      actions: {},
+      explorerCommands: { copyAbsolutePaths },
       copyText: (text) => {
         copiedText.push(text);
       }
@@ -280,9 +244,9 @@ describe('workbench context menu commands', () => {
 
     await Promise.resolve();
 
-    expect(copyProjectAbsolutePaths).toHaveBeenCalledWith({
-      entries: [{ projectRelativePath: 'flow/cover.png', kind: 'file' }]
-    });
+    expect(copyAbsolutePaths).toHaveBeenCalledWith([
+      { projectRelativePath: 'flow/cover.png', kind: 'file' }
+    ]);
     expect(copiedText).toEqual(['/tmp/debrute-project/flow/cover.png']);
   });
 
@@ -315,16 +279,7 @@ describe('workbench context menu commands', () => {
   });
 
   it('pastes into a Canvas directory node', async () => {
-    const copyProjectPaths = vi.fn(async () => ({
-      ...batchResult(),
-      results: [{
-        sourceProjectRelativePath: 'briefs/concept.md',
-        projectRelativePath: 'assets/concept.md',
-        kind: 'file' as const,
-        status: 'ok' as const
-      }]
-    }));
-    const setFileClipboard = vi.fn();
+    const pasteEntries = vi.fn();
     const clipboard = {
       operation: 'copy' as const,
       entries: [{ projectRelativePath: 'briefs/concept.md', kind: 'file' as const }]
@@ -333,34 +288,27 @@ describe('workbench context menu commands', () => {
     runWorkbenchContextMenuCommand(commandInput({
       command: 'paste',
       target: { source: 'canvas', kind: 'directory', projectRelativePath: 'assets' },
-      actions: {
-        copyProjectPaths
-      },
+      actions: {},
+      explorerCommands: { pasteEntries },
       fileClipboard: clipboard,
-      setFileClipboard
     }));
 
     await Promise.resolve();
 
-    expect(copyProjectPaths).toHaveBeenCalledWith({
-      entries: [{ projectRelativePath: 'briefs/concept.md', kind: 'file' }],
+    expect(pasteEntries).toHaveBeenCalledWith({
+      clipboard,
       targetDirectoryProjectRelativePath: 'assets'
     });
-    expect(setFileClipboard).toHaveBeenCalledWith(clipboard);
   });
 
   it('does not paste from a stale Canvas file target command', async () => {
-    const copyProjectPaths = vi.fn(async () => ({
-      ...batchResult(),
-      results: []
-    }));
+    const pasteEntries = vi.fn();
 
     runWorkbenchContextMenuCommand(commandInput({
       command: 'paste',
       target: { source: 'canvas', kind: 'file', projectRelativePath: 'flow/cover.png' },
-      actions: {
-        copyProjectPaths
-      },
+      actions: {},
+      explorerCommands: { pasteEntries },
       fileClipboard: {
         operation: 'copy',
         entries: [{ projectRelativePath: 'briefs/concept.md', kind: 'file' }]
@@ -369,61 +317,49 @@ describe('workbench context menu commands', () => {
 
     await Promise.resolve();
 
-    expect(copyProjectPaths).not.toHaveBeenCalled();
+    expect(pasteEntries).not.toHaveBeenCalled();
   });
 
   it('reveals a Canvas path in the system file manager', async () => {
-    const revealProjectPathInSystemFileManager = vi.fn(async () => ({ ok: true as const }));
+    const revealEntry = vi.fn();
 
     runWorkbenchContextMenuCommand(commandInput({
       command: 'reveal-in-system-file-manager',
       target: { source: 'canvas', kind: 'file', projectRelativePath: 'flow/cover.png' },
-      actions: {
-        revealProjectPathInSystemFileManager
-      }
+      actions: {},
+      explorerCommands: { revealEntry }
     }));
 
     await Promise.resolve();
 
-    expect(revealProjectPathInSystemFileManager).toHaveBeenCalledWith({
+    expect(revealEntry).toHaveBeenCalledWith({
       projectRelativePath: 'flow/cover.png',
       kind: 'file'
     });
   });
 
   it('deletes a Canvas path through the project trash flow', async () => {
-    const trashProjectPaths = vi.fn(async () => ({
-      ...batchResult(),
-      results: [{
-        sourceProjectRelativePath: 'flow/cover.png',
-        projectRelativePath: 'flow/cover.png',
-        kind: 'file' as const,
-        status: 'ok' as const
-      }]
-    }));
+    const trashEntries = vi.fn();
 
     runWorkbenchContextMenuCommand(commandInput({
       command: 'delete',
       target: { source: 'canvas', kind: 'file', projectRelativePath: 'flow/cover.png' },
-      actions: {
-        trashProjectPaths
-      }
+      actions: {},
+      explorerCommands: { trashEntries }
     }));
 
     await Promise.resolve();
 
-    expect(trashProjectPaths).toHaveBeenCalledWith({
-      entries: [{ projectRelativePath: 'flow/cover.png', kind: 'file' }]
-    });
+    expect(trashEntries).toHaveBeenCalledWith([
+      { projectRelativePath: 'flow/cover.png', kind: 'file' }
+    ]);
   });
 
   it('does not run root entry file commands from stale Canvas project root commands', async () => {
-    const setFileClipboard = vi.fn();
+    const copyEntries = vi.fn();
+    const cutEntries = vi.fn();
     const copyText = vi.fn();
-    const trashProjectPaths = vi.fn(async () => ({
-      ...batchResult(),
-      results: []
-    }));
+    const trashEntries = vi.fn();
     const rootTarget = { source: 'canvas' as const, kind: 'directory' as const, projectRelativePath: '' };
     const rootProjection = canvasProjectionFixture('canvas-1', {
       projectRelativePath: '',
@@ -441,19 +377,18 @@ describe('workbench context menu commands', () => {
         target: rootTarget,
         activeProjection: rootProjection,
         activeCanvasRuntime: canvasRuntimeFixture(),
-        actions: {
-          trashProjectPaths
-        },
-        setFileClipboard,
+        actions: {},
+        explorerCommands: { copyEntries, cutEntries, trashEntries },
         copyText
       }));
     }
 
     await Promise.resolve();
 
-    expect(setFileClipboard).not.toHaveBeenCalled();
+    expect(copyEntries).not.toHaveBeenCalled();
+    expect(cutEntries).not.toHaveBeenCalled();
     expect(copyText).not.toHaveBeenCalled();
-    expect(trashProjectPaths).not.toHaveBeenCalled();
+    expect(trashEntries).not.toHaveBeenCalled();
   });
 
   it('runs Show Details from a Project Explorer item that exists in the Canvas projection', () => {
@@ -691,7 +626,8 @@ describe('workbench context menu commands', () => {
 
 function commandInput(overrides: {
   command: WorkbenchContextMenuCommand;
-  actions: Partial<Parameters<typeof runWorkbenchContextMenuCommand>[0]['actions']>;
+  actions?: Partial<Parameters<typeof runWorkbenchContextMenuCommand>[0]['actions']>;
+  explorerCommands?: Partial<Parameters<typeof runWorkbenchContextMenuCommand>[0]['explorerCommands']>;
   target?: Parameters<typeof runWorkbenchContextMenuCommand>[0]['contextMenu'] extends infer T
     ? T extends { target: infer U }
       ? U
@@ -702,7 +638,6 @@ function commandInput(overrides: {
   fileClipboard?: Parameters<typeof runWorkbenchContextMenuCommand>[0]['fileClipboard'];
   snapshot?: WorkbenchProjectSessionSnapshot;
   copyText?: Parameters<typeof runWorkbenchContextMenuCommand>[0]['copyText'];
-  setFileClipboard?: Parameters<typeof runWorkbenchContextMenuCommand>[0]['setFileClipboard'];
   openInspectorPanel?: Parameters<typeof runWorkbenchContextMenuCommand>[0]['openInspectorPanel'];
   confirmPermanentDelete?: Parameters<typeof runWorkbenchContextMenuCommand>[0]['confirmPermanentDelete'];
   confirmMoveOverwrite?: (input: { entries: Array<{ projectRelativePath: string; kind: 'file' | 'directory' }>; targetDirectoryProjectRelativePath: string }) => boolean;
@@ -723,15 +658,22 @@ function commandInput(overrides: {
     activeCanvasRuntime: overrides.activeCanvasRuntime as Parameters<typeof runWorkbenchContextMenuCommand>[0]['activeCanvasRuntime'],
     fileClipboard: overrides.fileClipboard,
     actions: {
-      copyProjectAbsolutePaths: async () => ({ paths: ['/tmp/debrute-project/unused'] }),
-      trashProjectPaths: async () => batchResult(),
-      deleteProjectPathsPermanently: async () => batchResult(),
-      moveProjectPaths: async () => batchResult(),
       openTerminalPanel: () => undefined,
       ...overrides.actions
     } as Parameters<typeof runWorkbenchContextMenuCommand>[0]['actions'],
-    setInlineProjectTreeEdit: () => undefined,
-    setFileClipboard: overrides.setFileClipboard ?? (() => undefined),
+    explorerCommands: {
+      beginCreateFile: () => undefined,
+      beginCreateDirectory: () => undefined,
+      beginRename: () => undefined,
+      copyEntries: () => undefined,
+      cutEntries: () => undefined,
+      pasteEntries: () => undefined,
+      copyAbsolutePaths: async () => ['/tmp/debrute-project/unused'],
+      revealEntry: () => undefined,
+      trashEntries: () => undefined,
+      deleteEntriesPermanently: () => undefined,
+      ...overrides.explorerCommands
+    },
     copyText: overrides.copyText ?? (() => undefined),
     notify: () => undefined,
     closeContextMenu: () => undefined,
@@ -741,9 +683,6 @@ function commandInput(overrides: {
     confirmMoveOverwrite: overrides.confirmMoveOverwrite ?? (() => true),
     errorLabels: {
       copyPathFailed: 'Copy Path failed',
-      revealFailed: 'Reveal failed',
-      deleteFailed: 'Delete failed',
-      pasteFailed: 'Paste failed',
       resetAutoLayoutFailed: 'Reset auto layout failed'
     }
   };
@@ -814,15 +753,6 @@ function canvasProjectionFixture(
     }],
     edges: [],
     diagnostics: []
-  };
-}
-
-function batchResult(): WorkbenchProjectFileBatchOperationResult {
-  return {
-    projectId: 'project-live-id',
-    projectRevision: 2,
-    results: [],
-    snapshot: snapshotFixture()
   };
 }
 

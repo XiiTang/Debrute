@@ -19,6 +19,8 @@ export interface UseXtermTerminalInput {
 
 export function useXtermTerminal(input: UseXtermTerminalInput): void {
   const terminalRef = useRef<Terminal | null>(null);
+  const sessionStatusRef = useRef<TerminalSessionView['status'] | null>(null);
+  sessionStatusRef.current = input.session?.status ?? null;
 
   useEffect(() => {
     const session = input.session;
@@ -58,6 +60,9 @@ export function useXtermTerminal(input: UseXtermTerminalInput): void {
     resizeToFit();
 
     const dataDisposable = terminal.onData((data) => {
+      if (sessionStatusRef.current !== 'running') {
+        return;
+      }
       void input.api.writeTerminalInput({ terminalId: session.id, data }).catch(input.onError);
     });
     const renderTerminalEvent = createTerminalEventRenderer({

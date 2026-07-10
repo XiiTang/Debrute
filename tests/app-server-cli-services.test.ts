@@ -6,29 +6,49 @@ import { DebruteAppServer, DebruteGlobalRuntimeServer, GlobalConfigStore } from 
 import {
   createAudioModelCatalog,
   createImageModelCatalog,
-  createVideoModelCatalog,
-  type SecretsConfig,
-  type VideoModelsConfig
+  createVideoModelCatalog
 } from '@debrute/capability-runtime';
+import type {
+  SaveAudioModelSettingInput,
+  SaveImageModelSettingInput,
+  SaveVideoModelSettingInput
+} from '@debrute/app-protocol';
 
 class CountingGlobalConfigStore extends GlobalConfigStore {
-  readVideoModelsCount = 0;
-  readSecretsCount = 0;
+  readGlobalSnapshotCount = 0;
 
-  override async readVideoModels(): Promise<VideoModelsConfig> {
-    this.readVideoModelsCount += 1;
-    return super.readVideoModels();
-  }
-
-  override async readSecrets(): Promise<SecretsConfig> {
-    this.readSecretsCount += 1;
-    return super.readSecrets();
+  override async readGlobalSnapshot(): ReturnType<GlobalConfigStore['readGlobalSnapshot']> {
+    this.readGlobalSnapshotCount += 1;
+    return super.readGlobalSnapshot();
   }
 
   resetCounts(): void {
-    this.readVideoModelsCount = 0;
-    this.readSecretsCount = 0;
+    this.readGlobalSnapshotCount = 0;
   }
+}
+
+async function saveGlobalImageModelSetting(
+  runtime: DebruteGlobalRuntimeServer,
+  modelId: string,
+  setting: SaveImageModelSettingInput
+): Promise<void> {
+  await runtime.globalSettingsSave({ models: { image: { modelId, setting } } });
+}
+
+async function saveGlobalVideoModelSetting(
+  runtime: DebruteGlobalRuntimeServer,
+  modelId: string,
+  setting: SaveVideoModelSettingInput
+): Promise<void> {
+  await runtime.globalSettingsSave({ models: { video: { modelId, setting } } });
+}
+
+async function saveGlobalAudioModelSetting(
+  runtime: DebruteGlobalRuntimeServer,
+  modelId: string,
+  setting: SaveAudioModelSettingInput
+): Promise<void> {
+  await runtime.globalSettingsSave({ models: { audio: { modelId, setting } } });
 }
 
 describe('DebruteAppServer CLI service methods', () => {
@@ -53,11 +73,11 @@ describe('DebruteAppServer CLI service methods', () => {
   it('lists only API-key configured video models with native parameter summaries', async () => {
     const home = await mkdtemp(join(tmpdir(), 'debrute-cli-video-list-parameters-home-'));
     const configStore = new GlobalConfigStore({ debruteHome: home });
-    const globalRuntime = new DebruteGlobalRuntimeServer({ globalConfigStore: configStore });
+    const globalRuntime = new DebruteGlobalRuntimeServer({ globalConfigStore: configStore, integrationEnvPath: '' });
     const server = new DebruteAppServer({ globalConfigStore: configStore });
     try {
       await expect(server.listVideoModelsForCli()).resolves.toEqual([]);
-      await globalRuntime.videoModelSaveSetting('doubao-seedance-2-0-260128', {
+      await saveGlobalVideoModelSetting(globalRuntime, 'doubao-seedance-2-0-260128', {
         baseUrlOverride: null,
         requestModelIdOverride: null,
         apiKey: 'sk-video'
@@ -84,10 +104,10 @@ describe('DebruteAppServer CLI service methods', () => {
   it('lists only API-key configured image models with original parameter summaries', async () => {
     const home = await mkdtemp(join(tmpdir(), 'debrute-cli-image-list-parameters-home-'));
     const configStore = new GlobalConfigStore({ debruteHome: home });
-    const globalRuntime = new DebruteGlobalRuntimeServer({ globalConfigStore: configStore });
+    const globalRuntime = new DebruteGlobalRuntimeServer({ globalConfigStore: configStore, integrationEnvPath: '' });
     const server = new DebruteAppServer({ globalConfigStore: configStore });
     try {
-      await globalRuntime.imageModelSaveSetting('gpt-image-2', {
+      await saveGlobalImageModelSetting(globalRuntime, 'gpt-image-2', {
         baseUrlOverride: null,
         requestModelIdOverride: null,
         apiKey: 'sk-image'
@@ -113,15 +133,15 @@ describe('DebruteAppServer CLI service methods', () => {
   it('lists only API-key configured audio models by CLI kind', async () => {
     const home = await mkdtemp(join(tmpdir(), 'debrute-cli-audio-list-parameters-home-'));
     const configStore = new GlobalConfigStore({ debruteHome: home });
-    const globalRuntime = new DebruteGlobalRuntimeServer({ globalConfigStore: configStore });
+    const globalRuntime = new DebruteGlobalRuntimeServer({ globalConfigStore: configStore, integrationEnvPath: '' });
     const server = new DebruteAppServer({ globalConfigStore: configStore });
     try {
-      await globalRuntime.audioModelSaveSetting('openai-gpt-4o-mini-tts', {
+      await saveGlobalAudioModelSetting(globalRuntime, 'openai-gpt-4o-mini-tts', {
         baseUrlOverride: null,
         requestModelIdOverride: null,
         apiKey: 'sk-audio'
       });
-      await globalRuntime.audioModelSaveSetting('elevenlabs-music', {
+      await saveGlobalAudioModelSetting(globalRuntime, 'elevenlabs-music', {
         baseUrlOverride: null,
         requestModelIdOverride: null,
         apiKey: 'sk-music'
@@ -152,7 +172,7 @@ describe('DebruteAppServer CLI service methods', () => {
   it('reports catalog image model count separately from API-key configured image models', async () => {
     const home = await mkdtemp(join(tmpdir(), 'debrute-cli-runtime-status-image-count-home-'));
     const configStore = new GlobalConfigStore({ debruteHome: home });
-    const globalRuntime = new DebruteGlobalRuntimeServer({ globalConfigStore: configStore });
+    const globalRuntime = new DebruteGlobalRuntimeServer({ globalConfigStore: configStore, integrationEnvPath: '' });
     const server = new DebruteAppServer({ globalConfigStore: configStore });
     try {
       const catalogCount = createImageModelCatalog().listAll().length;
@@ -162,7 +182,7 @@ describe('DebruteAppServer CLI service methods', () => {
         diagnostics: 0
       });
 
-      await globalRuntime.imageModelSaveSetting('gpt-image-2', {
+      await saveGlobalImageModelSetting(globalRuntime, 'gpt-image-2', {
         baseUrlOverride: null,
         requestModelIdOverride: null,
         apiKey: 'sk-image'
@@ -182,7 +202,7 @@ describe('DebruteAppServer CLI service methods', () => {
   it('reports catalog video model count separately from API-key configured video models', async () => {
     const home = await mkdtemp(join(tmpdir(), 'debrute-cli-runtime-status-video-count-home-'));
     const configStore = new GlobalConfigStore({ debruteHome: home });
-    const globalRuntime = new DebruteGlobalRuntimeServer({ globalConfigStore: configStore });
+    const globalRuntime = new DebruteGlobalRuntimeServer({ globalConfigStore: configStore, integrationEnvPath: '' });
     const server = new DebruteAppServer({ globalConfigStore: configStore });
     try {
       const catalogCount = createVideoModelCatalog().listAll().length;
@@ -191,7 +211,7 @@ describe('DebruteAppServer CLI service methods', () => {
         availableVideoModels: 0
       });
 
-      await globalRuntime.videoModelSaveSetting('doubao-seedance-2-0-260128', {
+      await saveGlobalVideoModelSetting(globalRuntime, 'doubao-seedance-2-0-260128', {
         baseUrlOverride: null,
         requestModelIdOverride: null,
         apiKey: 'sk-video'
@@ -211,7 +231,7 @@ describe('DebruteAppServer CLI service methods', () => {
   it('reports catalog audio model count separately from API-key configured audio models', async () => {
     const home = await mkdtemp(join(tmpdir(), 'debrute-cli-runtime-status-audio-count-home-'));
     const configStore = new GlobalConfigStore({ debruteHome: home });
-    const globalRuntime = new DebruteGlobalRuntimeServer({ globalConfigStore: configStore });
+    const globalRuntime = new DebruteGlobalRuntimeServer({ globalConfigStore: configStore, integrationEnvPath: '' });
     const server = new DebruteAppServer({ globalConfigStore: configStore });
     try {
       const catalogCount = createAudioModelCatalog().listAll().length;
@@ -220,7 +240,7 @@ describe('DebruteAppServer CLI service methods', () => {
         availableAudioModels: 0
       });
 
-      await globalRuntime.audioModelSaveSetting('openai-gpt-4o-mini-tts', {
+      await saveGlobalAudioModelSetting(globalRuntime, 'openai-gpt-4o-mini-tts', {
         baseUrlOverride: null,
         requestModelIdOverride: null,
         apiKey: 'sk-audio'
@@ -427,11 +447,11 @@ describe('DebruteAppServer CLI service methods', () => {
     const home = await mkdtemp(join(tmpdir(), 'debrute-cli-image-auth-home-'));
     const projectRoot = await mkdtemp(join(tmpdir(), 'debrute-cli-image-auth-project-'));
     const configStore = new GlobalConfigStore({ debruteHome: home });
-    const globalRuntime = new DebruteGlobalRuntimeServer({ globalConfigStore: configStore });
+    const globalRuntime = new DebruteGlobalRuntimeServer({ globalConfigStore: configStore, integrationEnvPath: '' });
     const server = new DebruteAppServer({ globalConfigStore: configStore });
     try {
       await server.openProject(projectRoot, { initializeIfMissing: true, createDefaultCanvas: true });
-      await globalRuntime.imageModelSaveSetting('gpt-image-2', {
+      await saveGlobalImageModelSetting(globalRuntime, 'gpt-image-2', {
         baseUrlOverride: null,
         requestModelIdOverride: 'gpt-image-2'
       });
@@ -509,11 +529,11 @@ describe('DebruteAppServer CLI service methods', () => {
     const home = await mkdtemp(join(tmpdir(), 'debrute-cli-video-auth-home-'));
     const projectRoot = await mkdtemp(join(tmpdir(), 'debrute-cli-video-auth-project-'));
     const configStore = new GlobalConfigStore({ debruteHome: home });
-    const globalRuntime = new DebruteGlobalRuntimeServer({ globalConfigStore: configStore });
+    const globalRuntime = new DebruteGlobalRuntimeServer({ globalConfigStore: configStore, integrationEnvPath: '' });
     const server = new DebruteAppServer({ globalConfigStore: configStore });
     try {
       await server.openProject(projectRoot, { initializeIfMissing: true, createDefaultCanvas: true });
-      await globalRuntime.videoModelSaveSetting('doubao-seedance-2-0-260128', {
+      await saveGlobalVideoModelSetting(globalRuntime, 'doubao-seedance-2-0-260128', {
         baseUrlOverride: null,
         requestModelIdOverride: null
       });
@@ -537,7 +557,7 @@ describe('DebruteAppServer CLI service methods', () => {
     const home = await mkdtemp(join(tmpdir(), 'debrute-cli-video-single-config-read-home-'));
     const projectRoot = await mkdtemp(join(tmpdir(), 'debrute-cli-video-single-config-read-project-'));
     const configStore = new CountingGlobalConfigStore({ debruteHome: home });
-    const globalRuntime = new DebruteGlobalRuntimeServer({ globalConfigStore: configStore });
+    const globalRuntime = new DebruteGlobalRuntimeServer({ globalConfigStore: configStore, integrationEnvPath: '' });
     const server = new DebruteAppServer({
       globalConfigStore: configStore,
       videoModelFetch: async (url, init) => {
@@ -569,7 +589,7 @@ describe('DebruteAppServer CLI service methods', () => {
     });
     try {
       await server.openProject(projectRoot, { initializeIfMissing: true, createDefaultCanvas: true });
-      await globalRuntime.videoModelSaveSetting('doubao-seedance-2-0-260128', {
+      await saveGlobalVideoModelSetting(globalRuntime, 'doubao-seedance-2-0-260128', {
         baseUrlOverride: null,
         requestModelIdOverride: null,
         apiKey: 'sk-video'
@@ -584,8 +604,7 @@ describe('DebruteAppServer CLI service methods', () => {
         outputs: { model: 'doubao-seedance-2-0-260128' }
       });
 
-      expect(configStore.readVideoModelsCount).toBe(1);
-      expect(configStore.readSecretsCount).toBe(1);
+      expect(configStore.readGlobalSnapshotCount).toBe(1);
     } finally {
       globalRuntime.close();
       server.close();

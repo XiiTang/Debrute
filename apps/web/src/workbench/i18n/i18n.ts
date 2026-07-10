@@ -2,13 +2,6 @@ import { dictionaries as defaultDictionaries } from './dictionaries';
 import type { WorkbenchDictionary, WorkbenchTranslationKey } from './dictionaries';
 import type { WorkbenchI18n, WorkbenchLocale, WorkbenchTranslationParams } from './types';
 
-export function parseWorkbenchLocale(value: unknown): WorkbenchLocale {
-  if (value === 'zh-CN' || value === 'en') {
-    return value;
-  }
-  throw new Error('Workbench locale must be "en" or "zh-CN".');
-}
-
 export function createI18n(
   locale: WorkbenchLocale,
   options: {

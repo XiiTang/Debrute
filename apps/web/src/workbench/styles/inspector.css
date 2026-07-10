@@ -5,19 +5,6 @@
   background: var(--db-surface-1);
 }
 
-.inspector-title {
-  height: 38px;
-  padding: 0 12px;
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  border-bottom: 1px solid var(--db-border);
-  color: var(--db-text-muted);
-  font-size: 12px;
-  font-weight: 700;
-  text-transform: uppercase;
-}
-
 .inspector-section {
   padding: 14px;
   border-bottom: 1px solid var(--db-border);
@@ -27,6 +14,74 @@
 .inspector-section h3 {
   margin: 0 0 12px;
   font-size: 15px;
+}
+
+.db-object-properties {
+  display: grid;
+  grid-template-columns: minmax(62px, max-content) minmax(0, 1fr);
+  gap: var(--db-space-2) var(--db-space-4);
+  margin: 0;
+  font-size: var(--db-font-sm);
+}
+
+.db-object-properties dt {
+  color: var(--db-text-subtle);
+}
+
+.db-object-properties dd {
+  min-width: 0;
+  margin: 0;
+  overflow-wrap: anywhere;
+  color: var(--db-text);
+}
+
+.db-diagnostic-list {
+  display: grid;
+  gap: var(--db-space-2);
+  min-width: 0;
+}
+
+.db-diagnostic-list--compact {
+  gap: var(--db-space-1);
+}
+
+.db-diagnostic-row {
+  min-width: 0;
+  display: grid;
+  grid-template-columns: 18px minmax(0, 1fr);
+  gap: var(--db-space-2);
+  align-items: start;
+  border: 1px solid color-mix(in oklch, var(--db-border) 72%, transparent);
+  border-radius: var(--db-radius-md);
+  padding: var(--db-space-3);
+  background: color-mix(in oklch, var(--db-surface-2) 70%, transparent);
+  color: var(--db-text);
+  cursor: pointer;
+  text-align: left;
+}
+
+.db-diagnostic-row:disabled {
+  cursor: default;
+}
+
+.db-diagnostic-row--warning svg {
+  color: var(--db-warning);
+}
+
+.db-diagnostic-row--error svg {
+  color: var(--db-danger);
+}
+
+.db-diagnostic-row__message,
+.db-diagnostic-row__source {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.db-diagnostic-row__source {
+  grid-column: 2;
+  color: var(--db-text-subtle);
+  font-size: var(--db-font-xs);
 }
 
 .inspector-node-controls {

@@ -1,3 +1,4 @@
+import type { WorkbenchProjectSessionSnapshot } from '@debrute/app-protocol';
 import { describe, expect, it } from 'vitest';
 import type { WorkbenchFileClipboard } from '../shell/contextMenu';
 import {
@@ -5,12 +6,41 @@ import {
   clearClipboardAfterDeletedPath,
   clearClipboardAfterPaste,
   clearCanvasSelectionAfterDeletedPath,
+  externalDropPlanHasConflict,
   nearestExistingParentSelection,
   permanentDeleteConfirmationMessage,
-  notificationMessageForFileCommandError
+  notificationMessageForFileCommandError,
+  projectTreeSelectionFromPaths,
+  singleFileBatchResultPath
 } from './workbenchFileCommands';
 
 describe('workbench file command helpers', () => {
+  it('creates a stable tree selection from ordered paths', () => {
+    expect(projectTreeSelectionFromPaths(['a.md', 'b.md'])).toEqual({
+      selectedPaths: ['a.md', 'b.md'],
+      focusedPath: 'b.md',
+      anchorPath: 'b.md'
+    });
+  });
+
+  it('locates only one completed file result', () => {
+    expect(singleFileBatchResultPath([{
+      sourceProjectRelativePath: 'a.md',
+      projectRelativePath: 'target/a.md',
+      kind: 'file',
+      status: 'ok'
+    }])).toBe('target/a.md');
+  });
+
+  it('detects top-level external-drop conflicts', () => {
+    expect(externalDropPlanHasConflict({
+      snapshot: snapshotWithFiles(['assets/photo.png']),
+      localPaths: ['/tmp/photo.png'],
+      uploads: [],
+      targetDirectoryProjectRelativePath: 'assets'
+    })).toBe(true);
+  });
+
   it('clears only completed cut clipboards after paste', () => {
     const copy: WorkbenchFileClipboard = { operation: 'copy', entries: [{ projectRelativePath: 'a.md', kind: 'file' }] };
     const cut: WorkbenchFileClipboard = { operation: 'cut', entries: [{ projectRelativePath: 'a.md', kind: 'file' }] };
@@ -104,3 +134,28 @@ const permanentDeleteLabels = {
   file: (path: string) => `Permanently delete file "${path}"? This cannot be undone.`,
   selectedItems: (count: number) => `Permanently delete ${count} selected items? This cannot be undone.`
 };
+
+function snapshotWithFiles(paths: string[]): WorkbenchProjectSessionSnapshot {
+  return {
+    metadata: {
+      project: {
+        id: 'project-1',
+        name: 'Demo',
+        createdAt: '2026-07-10T00:00:00.000Z',
+        updatedAt: '2026-07-10T00:00:00.000Z'
+      }
+    },
+    files: paths.map((projectRelativePath) => ({ projectRelativePath, kind: 'file' as const })),
+    canvases: [],
+    projections: [],
+    diagnostics: [],
+    canvasRegistry: { status: 'ready', canvasOrder: [] },
+    health: {
+      projectName: 'Demo',
+      canvasCount: 0,
+      diagnosticCounts: { errors: 0, warnings: 0, infos: 0 },
+      runtimeDataLocation: 'project',
+      checkedAt: '2026-07-10T00:00:00.000Z'
+    }
+  };
+}

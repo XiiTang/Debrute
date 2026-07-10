@@ -131,23 +131,41 @@ describe('desktop runtime client', () => {
     ]);
   });
 
-  it('reads Workbench preferences for Electron startup appearance', async () => {
+  it('reads global settings and builds browser launch URLs from the attached runtime', async () => {
     const requests: Array<{ method: string; path: string }> = [];
     const client = createAttachedDesktopRuntimeClient(runtimeFixture(), async (url, init) => {
       const parsed = new URL(String(url));
       requests.push({ method: init?.method ?? 'GET', path: parsed.pathname });
-      return new Response(JSON.stringify({ locale: 'en', themePreference: 'light' }), {
+      return new Response(JSON.stringify({
+        workbench: {
+          locale: 'en',
+          themePreference: 'light',
+          defaultFrontend: 'browser'
+        },
+        chrome: { recentProjectRoots: ['/tmp/project-a'] },
+        models: {
+          image: { models: [] },
+          video: { models: [] },
+          audio: { models: [] }
+        },
+        integrations: { integrations: [], backends: [] },
+        adobeBridge: { enabled: true }
+      }), {
         status: 200,
         headers: { 'content-type': 'application/json' }
       });
     });
 
-    await expect(client.workbenchPreferencesGet()).resolves.toEqual({
-      locale: 'en',
-      themePreference: 'light'
+    await expect(client.globalSettingsGet()).resolves.toMatchObject({
+      workbench: { defaultFrontend: 'browser' },
+      chrome: { recentProjectRoots: ['/tmp/project-a'] }
     });
+    const launchUrl = new URL(client.browserLaunchUrl('project-1'));
+    expect(launchUrl.origin).toBe('http://127.0.0.1:17322');
+    expect(launchUrl.pathname).toMatch(/^\/__debrute\/session\/.+/);
+    expect(launchUrl.searchParams.get('next')).toBe('/projects/project-1');
     expect(requests).toEqual([
-      { method: 'GET', path: '/api/settings/workbench-preferences' }
+      { method: 'GET', path: '/api/settings/global' }
     ]);
   });
 });

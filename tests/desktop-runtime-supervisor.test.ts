@@ -53,6 +53,33 @@ describe('RuntimeSupervisor', () => {
     });
   });
 
+  it('records runtime action failures without marking a running runtime as stopped or errored', async () => {
+    const external = runtimeState({
+      processControl: 'external',
+      owner: { kind: 'dev', ownerId: 'dev-owner', pid: 111 }
+    });
+    const supervisor = new RuntimeSupervisor({
+      owner: { kind: 'desktop', ownerId: 'desktop-owner', pid: 222 },
+      ensureRuntime: vi.fn(async () => ({ runtimeStarted: false, statePath: '/tmp/state.json', state: external })),
+      readState: vi.fn(async () => external),
+      deleteState: vi.fn(async () => undefined),
+      terminateOwned: vi.fn(),
+      launchRuntime: vi.fn(),
+      checkHealth: vi.fn(async () => 'healthy')
+    });
+
+    await supervisor.start();
+    (supervisor as unknown as { recordActionFailure(message: string): void })
+      .recordActionFailure('Default frontend startup failed: Browser launch failed.');
+
+    expect(supervisor.snapshot()).toMatchObject({
+      status: 'running',
+      state: external,
+      ownsRuntime: false,
+      lastError: 'Default frontend startup failed: Browser launch failed.'
+    });
+  });
+
   it('terminates an owned runtime when Desktop launch fails health validation', async () => {
     const owned = runtimeState({
       owner: { kind: 'desktop', ownerId: 'desktop-owner', pid: 222 }

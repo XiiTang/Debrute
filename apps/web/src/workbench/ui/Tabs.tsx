@@ -71,10 +71,14 @@ export function TabList({ className, onKeyDown, ...props }: React.HTMLAttributes
 
 export function Tab({
   active,
+  appearance = 'default',
   className,
   type = 'button',
   ...props
-}: React.ButtonHTMLAttributes<HTMLButtonElement> & { active?: boolean }): React.ReactElement {
+}: React.ButtonHTMLAttributes<HTMLButtonElement> & {
+  active?: boolean;
+  appearance?: 'default' | 'strip';
+}): React.ReactElement {
   return (
     <button
       {...props}
@@ -82,7 +86,7 @@ export function Tab({
       role="tab"
       aria-selected={active}
       tabIndex={active ? 0 : -1}
-      className={cx('db-tab', active && 'db-tab--active', className)}
+      className={cx('db-tab', `db-tab--${appearance}`, active && 'db-tab--active', className)}
     />
   );
 }

@@ -15,7 +15,7 @@ describe('daemon Adobe Bridge HTTP routes', () => {
     }
   });
 
-  it('loads and saves Adobe Bridge settings through tokened Workbench routes', async () => {
+  it('loads Adobe Bridge state and saves settings through the global settings route', async () => {
     const home = await mkdtemp(join(tmpdir(), 'debrute-bridge-settings-home-'));
     const daemon = createDebruteDaemonHttpServer({
       host: '127.0.0.1',
@@ -23,7 +23,7 @@ describe('daemon Adobe Bridge HTTP routes', () => {
       token: 'test-token',
       webBaseUrl: null,
       adobeBridgeDiscoveryPort: 0,
-      appServerOptions: { globalConfigStore: new GlobalConfigStore({ debruteHome: home }) }
+      appServerOptions: { globalConfigStore: new GlobalConfigStore({ debruteHome: home }), integrationEnvPath: '' }
     });
     cleanups.push(() => daemon.close(), () => rm(home, { recursive: true, force: true }));
     const runtime = await daemon.listen();
@@ -33,15 +33,15 @@ describe('daemon Adobe Bridge HTTP routes', () => {
     });
     expect(initial.settings.enabled).toBe(true);
 
-    const saved = await requestJson(`${runtime.daemonUrl}/api/adobe-bridge/settings`, {
-      method: 'PUT',
+    const saved = await requestJson(`${runtime.daemonUrl}/api/settings/global`, {
+      method: 'PATCH',
       headers: { 'content-type': 'application/json', 'x-debrute-daemon-token': 'test-token' },
-      body: JSON.stringify({ enabled: false })
+      body: JSON.stringify({ adobeBridge: { enabled: false } })
     });
-    expect(saved.settings).toMatchObject({ enabled: false, discoveryStatus: 'disabled' });
+    expect(saved.adobeBridge).toEqual({ enabled: false });
   });
 
-  it('uses the daemon JSON parser for Adobe Bridge JSON request bodies', async () => {
+  it('uses the daemon JSON parser for global settings request bodies', async () => {
     const home = await mkdtemp(join(tmpdir(), 'debrute-bridge-json-home-'));
     const daemon = createDebruteDaemonHttpServer({
       host: '127.0.0.1',
@@ -49,13 +49,13 @@ describe('daemon Adobe Bridge HTTP routes', () => {
       token: 'test-token',
       webBaseUrl: null,
       adobeBridgeDiscoveryPort: 0,
-      appServerOptions: { globalConfigStore: new GlobalConfigStore({ debruteHome: home }) }
+      appServerOptions: { globalConfigStore: new GlobalConfigStore({ debruteHome: home }), integrationEnvPath: '' }
     });
     cleanups.push(() => daemon.close(), () => rm(home, { recursive: true, force: true }));
     const runtime = await daemon.listen();
 
-    const invalid = await fetch(`${runtime.daemonUrl}/api/adobe-bridge/settings`, {
-      method: 'PUT',
+    const invalid = await fetch(`${runtime.daemonUrl}/api/settings/global`, {
+      method: 'PATCH',
       headers: { 'content-type': 'application/json', 'x-debrute-daemon-token': 'test-token' },
       body: '{'
     });
@@ -64,10 +64,10 @@ describe('daemon Adobe Bridge HTTP routes', () => {
       error: { code: 'invalid_json' }
     });
 
-    const oversized = await fetch(`${runtime.daemonUrl}/api/adobe-bridge/settings`, {
-      method: 'PUT',
+    const oversized = await fetch(`${runtime.daemonUrl}/api/settings/global`, {
+      method: 'PATCH',
       headers: { 'content-type': 'application/json', 'x-debrute-daemon-token': 'test-token' },
-      body: JSON.stringify({ enabled: true, padding: 'x'.repeat(2 * 1024 * 1024) })
+      body: JSON.stringify({ adobeBridge: { enabled: true }, padding: 'x'.repeat(2 * 1024 * 1024) })
     });
     expect(oversized.status).toBe(413);
     await expect(oversized.json()).resolves.toMatchObject({
@@ -143,7 +143,7 @@ describe('daemon Adobe Bridge HTTP routes', () => {
       token: 'test-token',
       webBaseUrl: null,
       adobeBridgeDiscoveryPort: 0,
-      appServerOptions: { globalConfigStore: new GlobalConfigStore({ debruteHome: home }) }
+      appServerOptions: { globalConfigStore: new GlobalConfigStore({ debruteHome: home }), integrationEnvPath: '' }
     });
     cleanups.push(() => daemon.close(), () => rm(home, { recursive: true, force: true }));
     const runtime = await daemon.listen();
@@ -182,7 +182,7 @@ describe('daemon Adobe Bridge HTTP routes', () => {
       token: 'test-token',
       webBaseUrl: null,
       adobeBridgeDiscoveryPort: 0,
-      appServerOptions: { globalConfigStore: new GlobalConfigStore({ debruteHome: home }) }
+      appServerOptions: { globalConfigStore: new GlobalConfigStore({ debruteHome: home }), integrationEnvPath: '' }
     });
     cleanups.push(() => daemon.close(), () => rm(home, { recursive: true, force: true }));
     const runtime = await daemon.listen();
@@ -215,7 +215,7 @@ describe('daemon Adobe Bridge HTTP routes', () => {
       token: 'test-token',
       webBaseUrl: null,
       adobeBridgeDiscoveryPort: 0,
-      appServerOptions: { globalConfigStore: new GlobalConfigStore({ debruteHome: home }) }
+      appServerOptions: { globalConfigStore: new GlobalConfigStore({ debruteHome: home }), integrationEnvPath: '' }
     });
     cleanups.push(() => daemon.close(), () => rm(projectRoot, { recursive: true, force: true }), () => rm(home, { recursive: true, force: true }));
     const runtime = await daemon.listen();
@@ -254,7 +254,7 @@ describe('daemon Adobe Bridge HTTP routes', () => {
       token: 'test-token',
       webBaseUrl: null,
       adobeBridgeDiscoveryPort: 0,
-      appServerOptions: { globalConfigStore: new GlobalConfigStore({ debruteHome: home }) }
+      appServerOptions: { globalConfigStore: new GlobalConfigStore({ debruteHome: home }), integrationEnvPath: '' }
     });
     cleanups.push(() => daemon.close(), () => rm(projectRoot, { recursive: true, force: true }), () => rm(home, { recursive: true, force: true }));
     const runtime = await daemon.listen();
@@ -318,7 +318,7 @@ describe('daemon Adobe Bridge HTTP routes', () => {
       token: 'test-token',
       webBaseUrl: null,
       adobeBridgeDiscoveryPort: 0,
-      appServerOptions: { globalConfigStore: new GlobalConfigStore({ debruteHome: home }) }
+      appServerOptions: { globalConfigStore: new GlobalConfigStore({ debruteHome: home }), integrationEnvPath: '' }
     });
     cleanups.push(() => daemon.close(), () => rm(projectRoot, { recursive: true, force: true }), () => rm(home, { recursive: true, force: true }));
     const runtime = await daemon.listen();
@@ -377,7 +377,7 @@ describe('daemon Adobe Bridge HTTP routes', () => {
       token: 'test-token',
       webBaseUrl: null,
       adobeBridgeDiscoveryPort: 0,
-      appServerOptions: { globalConfigStore: new GlobalConfigStore({ debruteHome: home }) }
+      appServerOptions: { globalConfigStore: new GlobalConfigStore({ debruteHome: home }), integrationEnvPath: '' }
     });
     cleanups.push(() => daemon.close(), () => rm(projectRoot, { recursive: true, force: true }), () => rm(home, { recursive: true, force: true }));
     const runtime = await daemon.listen();
@@ -435,7 +435,7 @@ describe('daemon Adobe Bridge HTTP routes', () => {
       token: 'test-token',
       webBaseUrl: null,
       adobeBridgeDiscoveryPort: 0,
-      appServerOptions: { globalConfigStore: new GlobalConfigStore({ debruteHome: home }) }
+      appServerOptions: { globalConfigStore: new GlobalConfigStore({ debruteHome: home }), integrationEnvPath: '' }
     });
     cleanups.push(() => daemon.close(), () => rm(projectRoot, { recursive: true, force: true }), () => rm(home, { recursive: true, force: true }));
     const runtime = await daemon.listen();
@@ -496,7 +496,7 @@ describe('daemon Adobe Bridge HTTP routes', () => {
       token: 'test-token',
       webBaseUrl: null,
       adobeBridgeDiscoveryPort: 0,
-      appServerOptions: { globalConfigStore: new GlobalConfigStore({ debruteHome: home }) }
+      appServerOptions: { globalConfigStore: new GlobalConfigStore({ debruteHome: home }), integrationEnvPath: '' }
     });
     cleanups.push(() => daemon.close(), () => rm(projectRoot, { recursive: true, force: true }), () => rm(home, { recursive: true, force: true }));
     const runtime = await daemon.listen();
@@ -530,10 +530,10 @@ describe('daemon Adobe Bridge HTTP routes', () => {
     });
     const importRequest = JSON.parse(await importRequestMessage);
 
-    await requestJson(`${runtime.daemonUrl}/api/adobe-bridge/settings`, {
-      method: 'PUT',
+    await requestJson(`${runtime.daemonUrl}/api/settings/global`, {
+      method: 'PATCH',
       headers: { 'content-type': 'application/json', 'x-debrute-daemon-token': 'test-token' },
-      body: JSON.stringify({ enabled: false })
+      body: JSON.stringify({ adobeBridge: { enabled: false } })
     });
     const rejected = await fetch(importRequest.downloadUrl);
 

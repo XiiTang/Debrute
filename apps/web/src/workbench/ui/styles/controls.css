@@ -120,9 +120,42 @@
   height: var(--db-control-md);
 }
 
+.db-icon-button--window {
+  width: calc(var(--db-control-sm) + var(--db-space-4));
+  height: var(--db-control-sm);
+}
+
 .db-icon-button--ghost {
   border-color: transparent;
   background: transparent;
+  color: var(--db-text);
+}
+
+.db-icon-button--chrome {
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+  color: var(--db-text-muted);
+}
+
+.db-icon-button--chrome:hover:not(:disabled),
+.db-icon-button--chrome:focus-visible {
+  border: 0;
+  background: transparent;
+  color: var(--db-text);
+}
+
+.db-icon-button--window-close {
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+  color: var(--db-text-muted);
+}
+
+.db-icon-button--window-close:hover:not(:disabled),
+.db-icon-button--window-close:focus-visible {
+  border: 0;
+  background: color-mix(in srgb, var(--db-danger) 72%, transparent);
   color: var(--db-text);
 }
 
@@ -137,6 +170,69 @@
   border-color: color-mix(in oklch, var(--db-danger) 74%, var(--db-border));
   background: color-mix(in oklch, var(--db-danger-bg) 76%, var(--db-surface-3));
   color: color-mix(in oklch, var(--db-danger) 88%, white);
+}
+
+.db-tabs {
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  gap: var(--db-space-1);
+}
+
+.db-tab {
+  min-width: 0;
+  min-height: var(--db-control-xs);
+  border: 1px solid transparent;
+  border-radius: var(--db-radius-md);
+  background: transparent;
+  color: var(--db-text-muted);
+  cursor: pointer;
+}
+
+.db-tab:hover,
+.db-tab--active {
+  border-color: color-mix(in oklch, var(--db-border) 78%, transparent);
+  background: color-mix(in oklch, var(--db-surface-1) 86%, transparent);
+  color: var(--db-text);
+}
+
+.db-tab--strip {
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+  color: var(--db-text-muted);
+  font-size: var(--db-font-sm);
+  line-height: 1.4;
+  letter-spacing: 0;
+}
+
+.db-tab--strip:hover,
+.db-tab--strip.db-tab--active {
+  border: 0;
+  background: transparent;
+  color: var(--db-text);
+}
+
+.db-tab--strip.db-tab--active {
+  box-shadow: inset 0 -1px 0 var(--db-tab-strip-active-line, var(--db-accent));
+}
+
+.db-workbench-close-button.db-icon-button {
+  width: 12px;
+  height: 12px;
+  border: 0;
+  border-radius: 999px;
+  background: transparent;
+  color: var(--db-text-muted);
+  opacity: 0.42;
+}
+
+.db-workbench-close-button.db-icon-button:hover:not(:disabled),
+.db-workbench-close-button.db-icon-button:focus-visible {
+  border: 0;
+  background: color-mix(in oklch, var(--db-surface-3) 82%, var(--db-accent));
+  color: var(--db-text);
+  opacity: 1;
 }
 
 .db-discard-changes-icon {

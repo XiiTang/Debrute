@@ -3,18 +3,25 @@ import { AlertTriangle, Cable, Link2, Unlink } from 'lucide-react';
 import type {
   AdobeBridgeDiscoveryStatus,
   AdobeBridgeStateView,
-  AdobeBridgeTransferView
+  AdobeBridgeTransferView,
+  DebruteGlobalAdobeBridgeSettings
 } from '@debrute/app-protocol';
 import type { WorkbenchActions } from '../../../types';
 import { adobeBridgeErrorLabel } from '../../adobe-bridge/adobeBridgeLabels';
 import { Button, StatusPill, Switch, Toolbar } from '../../ui';
 import { useI18n, type WorkbenchI18n } from '../../i18n';
 
+type ClientOperation =
+  | { status: 'loading' }
+  | { status: 'error'; message: string };
+
 export function AdobeBridgeSettingsPage({
+  persistedSettings,
   bridge,
   projectId,
   actions
 }: {
+  persistedSettings: DebruteGlobalAdobeBridgeSettings;
   bridge: AdobeBridgeStateView;
   projectId: string | undefined;
   actions: WorkbenchActions;
@@ -23,13 +30,14 @@ export function AdobeBridgeSettingsPage({
   const currentProjectId = projectId;
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string>();
+  const [clientOperations, setClientOperations] = useState<Record<string, ClientOperation | undefined>>({});
   const failedTransfers = recentFailedTransfers(bridge);
 
   const setEnabled = async (enabled: boolean) => {
     setSaving(true);
     setError(undefined);
     try {
-      await actions.saveAdobeBridgeSettings({ enabled });
+      await actions.saveGlobalSettings({ adobeBridge: { enabled } });
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err));
     } finally {
@@ -37,68 +45,103 @@ export function AdobeBridgeSettingsPage({
     }
   };
 
+  const runClientOperation = async (adobeClientId: string, operation: () => Promise<void>) => {
+    setClientOperations((current) => ({
+      ...current,
+      [adobeClientId]: { status: 'loading' }
+    }));
+    try {
+      await operation();
+      setClientOperations((current) => ({ ...current, [adobeClientId]: undefined }));
+    } catch (err) {
+      setClientOperations((current) => ({
+        ...current,
+        [adobeClientId]: { status: 'error', message: errorMessage(err) }
+      }));
+    }
+  };
+
   return (
-    <section className="db-settings-section adobe-bridge-settings-page">
-      <header className="db-settings-section__header">
-        <h2>{i18n.t('settings.adobeBridge.title')}</h2>
-        <Toolbar ariaLabel={i18n.t('settings.adobeBridge.actions')} className="db-action-row">
-          <Switch
-            label={i18n.t('settings.adobeBridge.enable')}
-            checked={bridge.settings.enabled === true}
-            disabled={saving}
-            onChange={(event) => void setEnabled(event.currentTarget.checked)}
-          />
-        </Toolbar>
-      </header>
+    <section className="settings-page-body adobe-bridge-settings-page">
+      <Toolbar ariaLabel={i18n.t('settings.adobeBridge.actions')} className="db-action-row">
+        <Switch
+          label={i18n.t('settings.adobeBridge.enable')}
+          checked={persistedSettings.enabled}
+          disabled={saving}
+          onChange={(event) => void setEnabled(event.currentTarget.checked)}
+        />
+      </Toolbar>
       {error ? <small className="db-form-error">{error}</small> : null}
-      <div className="db-integration-summary">
-        <StatusPill tone={bridge.settings.discoveryStatus === 'available' ? 'success' : bridge.settings.discoveryStatus === 'disabled' ? 'neutral' : 'danger'}>
+      <div className="db-record-summary">
+        <StatusPill tone={bridge.settings.discoveryStatus === 'available' || bridge.settings.discoveryStatus === 'disabled' ? 'neutral' : 'danger'}>
           {discoveryLabel(bridge.settings.discoveryStatus, i18n)}
         </StatusPill>
       </div>
-      <div className="db-integration-list">
+      <div className="db-record-list">
         {bridge.adobeClients.map((client) => {
           const linked = isPhotoshopLinkedToCurrentProject(bridge, currentProjectId, client.adobeClientId);
+          const clientOperation = clientOperations[client.adobeClientId];
+          const clientOperationLoading = clientOperation?.status === 'loading';
           return (
-            <div className="db-integration-row" key={client.adobeClientId}>
+            <div className="db-record-row" key={client.adobeClientId}>
               <span><Cable size={14} /> {client.displayName}</span>
-              <StatusPill tone={client.activeDocumentTitle ? 'success' : 'neutral'}>
+              <StatusPill tone="neutral">
                 {client.activeDocumentTitle ? i18n.t('settings.adobeBridge.documentOpen') : i18n.t('settings.adobeBridge.noDocumentOpen')}
               </StatusPill>
               <small>{linked ? i18n.t('settings.adobeBridge.linked') : i18n.t('settings.adobeBridge.available')}</small>
-              <div className="db-integration-row__action">
+              <div className="db-record-row__action">
                 {linked ? (
-                  <Button type="button" iconStart={<Unlink size={14} />} onClick={() => void actions.unlinkAdobeBridgePhotoshop(client.adobeClientId)}>
+                  <Button
+                    type="button"
+                    loading={clientOperationLoading}
+                    iconStart={<Unlink size={14} />}
+                    onClick={() => void runClientOperation(
+                      client.adobeClientId,
+                      () => actions.unlinkAdobeBridgePhotoshop(client.adobeClientId)
+                    )}
+                  >
                     {i18n.t('settings.adobeBridge.disconnect')}
                   </Button>
                 ) : (
-                  <Button type="button" disabled={!currentProjectId} iconStart={<Link2 size={14} />} onClick={() => void actions.linkAdobeBridgePhotoshop({ adobeClientId: client.adobeClientId })}>
+                  <Button
+                    type="button"
+                    disabled={!currentProjectId}
+                    loading={clientOperationLoading}
+                    iconStart={<Link2 size={14} />}
+                    onClick={() => void runClientOperation(
+                      client.adobeClientId,
+                      () => actions.linkAdobeBridgePhotoshop({ adobeClientId: client.adobeClientId })
+                    )}
+                  >
                     {i18n.t('settings.adobeBridge.connect')}
                   </Button>
                 )}
+                {clientOperation?.status === 'error' ? (
+                  <small className="db-form-error">{clientOperation.message}</small>
+                ) : null}
               </div>
             </div>
           );
         })}
         {bridge.projects.map((project) => (
-          <div className="db-integration-row" key={project.projectId}>
+          <div className="db-record-row" key={project.projectId}>
             <span>{project.projectName}</span>
-            <StatusPill tone="success">{i18n.t('settings.adobeBridge.openProject')}</StatusPill>
+            <StatusPill tone="neutral">{i18n.t('settings.adobeBridge.openProject')}</StatusPill>
             <small>{i18n.t('settings.adobeBridge.directories', { count: project.directories.length })}</small>
-            <div className="db-integration-row__action" />
+            <div className="db-record-row__action" />
           </div>
         ))}
       </div>
       {failedTransfers.length > 0 ? (
         <>
           <h3>{i18n.t('settings.adobeBridge.recentTransferFailures')}</h3>
-          <div className="db-integration-list">
+          <div className="db-record-list">
             {failedTransfers.map((transfer) => (
-              <div className="db-integration-row" key={transfer.transferId}>
+              <div className="db-record-row" key={transfer.transferId}>
                 <span><AlertTriangle size={14} /> {transfer.projectRelativePath ?? transfer.direction}</span>
                 <StatusPill tone="danger">{i18n.t('settings.adobeBridge.failed')}</StatusPill>
                 <small>{transferFailureLabel(transfer, i18n)}</small>
-                <div className="db-integration-row__action" />
+                <div className="db-record-row__action" />
               </div>
             ))}
           </div>
@@ -138,4 +181,8 @@ function recentFailedTransfers(bridge: AdobeBridgeStateView): AdobeBridgeTransfe
 
 function transferFailureLabel(transfer: AdobeBridgeTransferView, i18n: WorkbenchI18n): string {
   return transfer.errorCode ? adobeBridgeErrorLabel(transfer.errorCode, i18n) : i18n.t('settings.adobeBridge.transferFailed');
+}
+
+function errorMessage(error: unknown): string {
+  return error instanceof Error ? error.message : String(error);
 }

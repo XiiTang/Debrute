@@ -19,7 +19,7 @@ export function ProjectOpenPanel({
   const i18n = useI18n();
   return (
     <form
-      className="project-open-panel db-project-open"
+      className="project-open-panel"
       onSubmit={(event) => {
         event.preventDefault();
         onOpenProject();
@@ -27,7 +27,7 @@ export function ProjectOpenPanel({
     >
       <EmptyState
         title={i18n.t('projectOpen.title')}
-        description={attemptedPath ? <span className="db-project-open__meta">{attemptedPath}</span> : undefined}
+        description={attemptedPath ? <span className="project-open-panel__meta">{attemptedPath}</span> : undefined}
         action={(
           <Toolbar ariaLabel={i18n.t('projectOpen.actions')} className="db-action-row">
             <Button type="submit" variant="primary" iconStart={<FolderOpen size={15} />} loading={opening} disabled={opening}>
@@ -36,7 +36,7 @@ export function ProjectOpenPanel({
           </Toolbar>
         )}
       />
-      {error ? <span className="db-form-error">{error}</span> : null}
+      {error ? <span className="project-open-panel__error" role="alert">{error}</span> : null}
     </form>
   );
 }

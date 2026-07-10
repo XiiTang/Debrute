@@ -7,9 +7,45 @@ import { gzip } from 'node:zlib';
 import sharp from 'sharp';
 import { describe, expect, it } from 'vitest';
 import { DebruteAppServer, DebruteGlobalRuntimeServer, GlobalConfigStore } from '@debrute/app-server';
-import type { AppServerEvent } from '@debrute/app-protocol';
+import type {
+  AppServerEvent,
+  AudioModelSettingsView,
+  ImageModelSettingsView,
+  SaveAudioModelSettingInput,
+  SaveImageModelSettingInput,
+  SaveVideoModelSettingInput,
+  VideoModelSettingsView
+} from '@debrute/app-protocol';
+import { canvasNodeStackOrderTopFirst } from '@debrute/canvas-core';
 
 const gzipBuffer = promisify(gzip);
+
+async function saveGlobalImageModelSetting(
+  runtime: DebruteGlobalRuntimeServer,
+  modelId: string,
+  setting: SaveImageModelSettingInput
+): Promise<ImageModelSettingsView> {
+  const settings = await runtime.globalSettingsSave({ models: { image: { modelId, setting } } });
+  return settings.models.image;
+}
+
+async function saveGlobalVideoModelSetting(
+  runtime: DebruteGlobalRuntimeServer,
+  modelId: string,
+  setting: SaveVideoModelSettingInput
+): Promise<VideoModelSettingsView> {
+  const settings = await runtime.globalSettingsSave({ models: { video: { modelId, setting } } });
+  return settings.models.video;
+}
+
+async function saveGlobalAudioModelSetting(
+  runtime: DebruteGlobalRuntimeServer,
+  modelId: string,
+  setting: SaveAudioModelSettingInput
+): Promise<AudioModelSettingsView> {
+  const settings = await runtime.globalSettingsSave({ models: { audio: { modelId, setting } } });
+  return settings.models.audio;
+}
 
 describe('app-server', () => {
   it('opens a project with current Canvas snapshot and health fields', async () => {
@@ -438,29 +474,6 @@ describe('app-server', () => {
     }
   });
 
-  it('does not expose a persisted Canvas settings config path', async () => {
-    const debruteHome = await mkdtemp(join(tmpdir(), 'debrute-app-server-no-canvas-settings-home-'));
-    const globalConfigStore = new GlobalConfigStore({ debruteHome });
-    const globalRuntime = new DebruteGlobalRuntimeServer({
-      globalConfigStore
-    });
-    try {
-      expect(Object.keys(globalConfigStore.paths()).sort()).toEqual([
-        'adobeBridgeFile',
-        'audioModelsFile',
-        'imageModelsFile',
-        'root',
-        'secretsFile',
-        'videoModelsFile',
-        'workbenchChromeFile',
-        'workbenchPreferencesFile'
-      ]);
-    } finally {
-      globalRuntime.close();
-      await rm(debruteHome, { recursive: true, force: true });
-    }
-  });
-
   it('writes, preserves, and clears Canvas feedback mark entries', async () => {
     const projectRoot = await mkdtemp(join(tmpdir(), 'debrute-app-server-feedback-write-'));
     const server = new DebruteAppServer();
@@ -783,7 +796,7 @@ describe('app-server', () => {
     const home = await mkdtemp(join(tmpdir(), 'debrute-image-model-error-home-'));
     const projectRoot = await mkdtemp(join(tmpdir(), 'debrute-image-model-error-project-'));
     const configStore = new GlobalConfigStore({ debruteHome: home });
-    const globalRuntime = new DebruteGlobalRuntimeServer({ globalConfigStore: configStore });
+    const globalRuntime = new DebruteGlobalRuntimeServer({ globalConfigStore: configStore, integrationEnvPath: '' });
     const server = new DebruteAppServer({
       globalConfigStore: configStore,
       imageModelFetch: async () => new Response(JSON.stringify({
@@ -795,7 +808,7 @@ describe('app-server', () => {
     });
     try {
       await server.openProject(projectRoot, { initializeIfMissing: true, createDefaultCanvas: true });
-      await globalRuntime.imageModelSaveSetting('gpt-image-2', {
+      await saveGlobalImageModelSetting(globalRuntime, 'gpt-image-2', {
         baseUrlOverride: null,
         requestModelIdOverride: null,
         apiKey: 'sk-image'
@@ -826,63 +839,63 @@ describe('app-server', () => {
   it('preserves, replaces, and clears media model API keys through settings saves', async () => {
     const home = await mkdtemp(join(tmpdir(), 'debrute-settings-secret-semantics-home-'));
     const configStore = new GlobalConfigStore({ debruteHome: home });
-    const globalRuntime = new DebruteGlobalRuntimeServer({ globalConfigStore: configStore });
+    const globalRuntime = new DebruteGlobalRuntimeServer({ globalConfigStore: configStore, integrationEnvPath: '' });
     try {
-      await globalRuntime.imageModelSaveSetting('gpt-image-2', {
+      await saveGlobalImageModelSetting(globalRuntime, 'gpt-image-2', {
         baseUrlOverride: null,
         requestModelIdOverride: 'gpt-image-2',
         apiKey: 'sk-image-initial'
       });
-      await globalRuntime.imageModelSaveSetting('gpt-image-2', {
+      await saveGlobalImageModelSetting(globalRuntime, 'gpt-image-2', {
         baseUrlOverride: null,
         requestModelIdOverride: null
       });
-      await globalRuntime.videoModelSaveSetting('doubao-seedance-2-0-260128', {
+      await saveGlobalVideoModelSetting(globalRuntime, 'doubao-seedance-2-0-260128', {
         baseUrlOverride: null,
         requestModelIdOverride: null,
         apiKey: 'sk-video-initial'
       });
-      await globalRuntime.videoModelSaveSetting('doubao-seedance-2-0-260128', {
+      await saveGlobalVideoModelSetting(globalRuntime, 'doubao-seedance-2-0-260128', {
         baseUrlOverride: null,
         requestModelIdOverride: 'doubao-seedance-2-0-260128'
       });
 
-      let secrets = await configStore.readSecrets();
+      let secrets = (await configStore.readGlobalSnapshot()).secrets;
       expect(secrets.imageModelApiKeys['gpt-image-2']).toBe('sk-image-initial');
       expect(secrets.videoModelApiKeys['doubao-seedance-2-0-260128']).toBe('sk-video-initial');
 
-      await globalRuntime.imageModelSaveSetting('gpt-image-2', {
+      await saveGlobalImageModelSetting(globalRuntime, 'gpt-image-2', {
         baseUrlOverride: null,
         requestModelIdOverride: null,
         apiKey: 'sk-image-replaced'
       });
-      await globalRuntime.videoModelSaveSetting('doubao-seedance-2-0-260128', {
+      await saveGlobalVideoModelSetting(globalRuntime, 'doubao-seedance-2-0-260128', {
         baseUrlOverride: null,
         requestModelIdOverride: null,
         apiKey: 'sk-video-replaced'
       });
 
-      secrets = await configStore.readSecrets();
+      secrets = (await configStore.readGlobalSnapshot()).secrets;
       expect(secrets.imageModelApiKeys['gpt-image-2']).toBe('sk-image-replaced');
       expect(secrets.videoModelApiKeys['doubao-seedance-2-0-260128']).toBe('sk-video-replaced');
 
-      const imageView = await globalRuntime.imageModelSaveSetting('gpt-image-2', {
+      const imageView = await saveGlobalImageModelSetting(globalRuntime, 'gpt-image-2', {
         baseUrlOverride: null,
         requestModelIdOverride: null,
         apiKey: ''
       });
-      const videoView = await globalRuntime.videoModelSaveSetting('doubao-seedance-2-0-260128', {
+      const videoView = await saveGlobalVideoModelSetting(globalRuntime, 'doubao-seedance-2-0-260128', {
         baseUrlOverride: null,
         requestModelIdOverride: null,
         apiKey: ''
       });
-      const audioView = await globalRuntime.audioModelSaveSetting('openai-gpt-4o-mini-tts', {
+      const audioView = await saveGlobalAudioModelSetting(globalRuntime, 'openai-gpt-4o-mini-tts', {
         baseUrlOverride: null,
         requestModelIdOverride: null,
         apiKey: '   '
       });
 
-      secrets = await configStore.readSecrets();
+      secrets = (await configStore.readGlobalSnapshot()).secrets;
       expect(secrets.imageModelApiKeys).not.toHaveProperty('gpt-image-2');
       expect(secrets.videoModelApiKeys).not.toHaveProperty('doubao-seedance-2-0-260128');
       expect(secrets.audioModelApiKeys).not.toHaveProperty('openai-gpt-4o-mini-tts');
@@ -908,15 +921,16 @@ describe('app-server', () => {
   it('saves media model request-model overrides and derives configured state from API keys', async () => {
     const home = await mkdtemp(join(tmpdir(), 'debrute-media-model-settings-home-'));
     const globalRuntime = new DebruteGlobalRuntimeServer({
-      globalConfigStore: new GlobalConfigStore({ debruteHome: home })
+      globalConfigStore: new GlobalConfigStore({ debruteHome: home }),
+      integrationEnvPath: ''
     });
     try {
-      const imageSettings = await globalRuntime.imageModelSaveSetting('gpt-image-2', {
+      const imageSettings = await saveGlobalImageModelSetting(globalRuntime, 'gpt-image-2', {
         baseUrlOverride: 'https://images.example.test/v1',
         requestModelIdOverride: 'custom-image-model',
         apiKey: 'sk-image'
       });
-      const videoSettings = await globalRuntime.videoModelSaveSetting('doubao-seedance-2-0-260128', {
+      const videoSettings = await saveGlobalVideoModelSetting(globalRuntime, 'doubao-seedance-2-0-260128', {
         baseUrlOverride: 'https://videos.example.test/v1',
         requestModelIdOverride: 'custom-video-model',
         apiKey: 'sk-video'
@@ -963,18 +977,16 @@ describe('app-server', () => {
   it('rejects malformed media model setting saves instead of clearing overrides', async () => {
     const home = await mkdtemp(join(tmpdir(), 'debrute-media-model-invalid-save-home-'));
     const globalRuntime = new DebruteGlobalRuntimeServer({
-      globalConfigStore: new GlobalConfigStore({ debruteHome: home })
+      globalConfigStore: new GlobalConfigStore({ debruteHome: home }),
+      integrationEnvPath: ''
     });
     try {
-      await expect(globalRuntime.imageModelSaveSetting('gpt-image-2', {} as never)).rejects.toMatchObject({
-        code: 'invalid_input'
-      });
-      await expect(globalRuntime.videoModelSaveSetting('doubao-seedance-2-0-260128', {
+      await expect(saveGlobalImageModelSetting(globalRuntime, 'gpt-image-2', {} as never))
+        .rejects.toThrow('Image model baseUrlOverride must be a string or null.');
+      await expect(saveGlobalVideoModelSetting(globalRuntime, 'doubao-seedance-2-0-260128', {
         baseUrlOverride: null,
         requestModelIdOverride: '   '
-      })).rejects.toMatchObject({
-        code: 'invalid_input'
-      });
+      })).rejects.toThrow('Video model requestModelIdOverride must be null or a non-empty string.');
     } finally {
       globalRuntime.close();
       await rm(home, { recursive: true, force: true });
@@ -984,9 +996,9 @@ describe('app-server', () => {
   it('stores API-key-only media settings only in secrets', async () => {
     const home = await mkdtemp(join(tmpdir(), 'debrute-media-model-api-key-only-home-'));
     const configStore = new GlobalConfigStore({ debruteHome: home });
-    const globalRuntime = new DebruteGlobalRuntimeServer({ globalConfigStore: configStore });
+    const globalRuntime = new DebruteGlobalRuntimeServer({ globalConfigStore: configStore, integrationEnvPath: '' });
     try {
-      const settings = await globalRuntime.imageModelSaveSetting('gpt-image-2', {
+      const settings = await saveGlobalImageModelSetting(globalRuntime, 'gpt-image-2', {
         baseUrlOverride: null,
         requestModelIdOverride: null,
         apiKey: 'sk-image'
@@ -1006,9 +1018,9 @@ describe('app-server', () => {
         apiKeyPreview: 'sk****************************ge'
       });
       expect(imageModel as Record<string, unknown>).not.toHaveProperty('apiKey');
-      await expect(configStore.readImageModels()).resolves.toEqual({ imageModels: [] });
-      await expect(configStore.readSecrets()).resolves.toMatchObject({
-        imageModelApiKeys: { 'gpt-image-2': 'sk-image' }
+      await expect(configStore.readGlobalSnapshot()).resolves.toMatchObject({
+        settings: { models: { image: { imageModels: [] } } },
+        secrets: { imageModelApiKeys: { 'gpt-image-2': 'sk-image' } }
       });
     } finally {
       globalRuntime.close();
@@ -1019,15 +1031,15 @@ describe('app-server', () => {
   it('clears media model URL overrides without clearing configured API keys', async () => {
     const home = await mkdtemp(join(tmpdir(), 'debrute-media-model-clear-url-home-'));
     const configStore = new GlobalConfigStore({ debruteHome: home });
-    const globalRuntime = new DebruteGlobalRuntimeServer({ globalConfigStore: configStore });
+    const globalRuntime = new DebruteGlobalRuntimeServer({ globalConfigStore: configStore, integrationEnvPath: '' });
     try {
-      await globalRuntime.imageModelSaveSetting('gpt-image-2', {
+      await saveGlobalImageModelSetting(globalRuntime, 'gpt-image-2', {
         baseUrlOverride: 'https://images.example.test/v1',
         requestModelIdOverride: null,
         apiKey: 'sk-image'
       });
 
-      const settings = await globalRuntime.imageModelSaveSetting('gpt-image-2', {
+      const settings = await saveGlobalImageModelSetting(globalRuntime, 'gpt-image-2', {
         baseUrlOverride: null,
         requestModelIdOverride: null
       });
@@ -1039,9 +1051,9 @@ describe('app-server', () => {
         apiKeySet: true,
         apiKeyPreview: 'sk****************************ge'
       });
-      await expect(configStore.readImageModels()).resolves.toEqual({ imageModels: [] });
-      await expect(configStore.readSecrets()).resolves.toMatchObject({
-        imageModelApiKeys: { 'gpt-image-2': 'sk-image' }
+      await expect(configStore.readGlobalSnapshot()).resolves.toMatchObject({
+        settings: { models: { image: { imageModels: [] } } },
+        secrets: { imageModelApiKeys: { 'gpt-image-2': 'sk-image' } }
       });
     } finally {
       globalRuntime.close();
@@ -1052,14 +1064,24 @@ describe('app-server', () => {
   it('rejects malformed media model config records instead of filling missing fields', async () => {
     const home = await mkdtemp(join(tmpdir(), 'debrute-media-model-strict-config-home-'));
     const configStore = new GlobalConfigStore({ debruteHome: home });
-    const paths = configStore.paths();
+    const configDir = join(home, 'config');
+    const globalSettingsFile = join(configDir, 'global_settings.json');
     try {
-      await mkdir(paths.root, { recursive: true });
-      await writeFile(paths.imageModelsFile, JSON.stringify({
-        imageModels: [{ debruteModelId: 'gpt-image-2', requestModelIdOverride: null }]
+      await mkdir(configDir, { recursive: true });
+      await writeFile(globalSettingsFile, JSON.stringify({
+        workbench: { locale: 'en', themePreference: 'system', defaultFrontend: 'electron' },
+        chrome: { recentProjectRoots: [] },
+        models: {
+          image: {
+            imageModels: [{ debruteModelId: 'gpt-image-2', requestModelIdOverride: null }]
+          },
+          video: { videoModels: [] },
+          audio: { audioModels: [] }
+        },
+        adobeBridge: { enabled: true }
       }), 'utf8');
 
-      await expect(configStore.readImageModels()).rejects.toThrow('Image model baseUrlOverride must be a string or null.');
+      await expect(configStore.readGlobalSettings()).rejects.toThrow('Image model baseUrlOverride must be a string or null.');
     } finally {
       await rm(home, { recursive: true, force: true });
     }
@@ -1068,10 +1090,11 @@ describe('app-server', () => {
   it('rejects malformed media API key secret records', async () => {
     const home = await mkdtemp(join(tmpdir(), 'debrute-malformed-secret-home-'));
     const configStore = new GlobalConfigStore({ debruteHome: home });
-    const paths = configStore.paths();
+    const configDir = join(home, 'config');
+    const secretsFile = join(configDir, 'secrets.json');
     try {
-      await mkdir(paths.root, { recursive: true });
-      await writeFile(paths.secretsFile, JSON.stringify({
+      await mkdir(configDir, { recursive: true });
+      await writeFile(secretsFile, JSON.stringify({
         imageModelApiKeys: {
           'gpt-image-2': 42
         },
@@ -1079,7 +1102,7 @@ describe('app-server', () => {
         audioModelApiKeys: {}
       }), 'utf8');
 
-      await expect(configStore.readSecrets()).rejects.toThrow('Secrets config imageModelApiKeys values must be strings.');
+      await expect(configStore.readGlobalSnapshot()).rejects.toThrow('Secrets config imageModelApiKeys values must be strings.');
     } finally {
       await rm(home, { recursive: true, force: true });
     }
@@ -1091,10 +1114,24 @@ describe('app-server', () => {
     const configDir = join(home, 'config');
     const secretsFile = join(configDir, 'secrets.json');
     try {
-      await configStore.saveSecrets({
-        imageModelApiKeys: { 'gpt-image-2': 'sk-image' },
-        videoModelApiKeys: { 'doubao-seedance-2-0-260128': 'sk-video' },
-        audioModelApiKeys: { 'openai-gpt-4o-mini-tts': 'sk-audio' }
+      await configStore.mutateGlobalSettings({
+        kind: 'patch',
+        input: {
+          models: {
+            image: {
+              modelId: 'gpt-image-2',
+              setting: { baseUrlOverride: null, requestModelIdOverride: null, apiKey: 'sk-image' }
+            },
+            video: {
+              modelId: 'doubao-seedance-2-0-260128',
+              setting: { baseUrlOverride: null, requestModelIdOverride: null, apiKey: 'sk-video' }
+            },
+            audio: {
+              modelId: 'openai-gpt-4o-mini-tts',
+              setting: { baseUrlOverride: null, requestModelIdOverride: null, apiKey: 'sk-audio' }
+            }
+          }
+        }
       });
 
       expect((await stat(configDir)).mode & 0o777).toBe(0o700);
@@ -1103,10 +1140,16 @@ describe('app-server', () => {
       await chmod(secretsFile, 0o644);
       expect((await stat(secretsFile)).mode & 0o777).toBe(0o644);
 
-      await configStore.saveSecrets({
-        imageModelApiKeys: { 'gpt-image-2': 'sk-image-next' },
-        videoModelApiKeys: {},
-        audioModelApiKeys: {}
+      await configStore.mutateGlobalSettings({
+        kind: 'patch',
+        input: {
+          models: {
+            image: {
+              modelId: 'gpt-image-2',
+              setting: { baseUrlOverride: null, requestModelIdOverride: null, apiKey: 'sk-image-next' }
+            }
+          }
+        }
       });
 
       expect((await stat(configDir)).mode & 0o777).toBe(0o700);
@@ -1549,22 +1592,23 @@ describe('app-server', () => {
       const events: string[] = [];
       const unsubscribe = server.onEvent((event) => events.push(event.type));
       const layoutReadCountBeforeVisualUpdates = layoutReadCount;
+      const stackOrderPath = 'image-production';
 
       layoutReadsAllowed = false;
       const layout = await server.updateCanvasNodeLayouts({
         canvasId: 'canvas-1',
         nodeLayouts: [{ projectRelativePath: nodePath, x: 50, y: 60, width: 640, height: 360 }]
       });
-      const layer = await server.updateCanvasNodeLayers({
+      const stackOrder = await server.bringCanvasNodeToFront({
         canvasId: 'canvas-1',
-        nodeProjectRelativePathsTopFirst: ['image-production', 'image-production/generated', nodePath]
+        projectRelativePath: stackOrderPath
       });
       unsubscribe();
 
       expect(layout.canvas.nodeElements.find((node) => node.projectRelativePath === nodePath)).toMatchObject({ x: 50, y: 60, width: 640, height: 360, layoutMode: 'manual' });
-      expect(layer.canvas.nodeElements.find((node) => node.projectRelativePath === 'image-production')).toMatchObject({ z: 3 });
+      expect(canvasNodeStackOrderTopFirst(stackOrder.canvas)[0]).toBe(stackOrderPath);
       expect(layout.projection.canvasId).toBe('canvas-1');
-      expect(layer.projection.canvasId).toBe('canvas-1');
+      expect(stackOrder.projection.canvasId).toBe('canvas-1');
       expect(layoutReadCount).toBe(layoutReadCountBeforeVisualUpdates);
       expect(events).toEqual(['canvas.changed', 'canvas.changed']);
 
@@ -2388,7 +2432,8 @@ describe('app-server', () => {
     it('stores recent project roots in current runtime config', async () => {
       const debruteHome = await mkdtemp(join(tmpdir(), 'debrute-workbench-chrome-'));
       const server = new DebruteGlobalRuntimeServer({
-        globalConfigStore: new GlobalConfigStore({ debruteHome })
+        globalConfigStore: new GlobalConfigStore({ debruteHome }),
+        integrationEnvPath: ''
       });
       try {
         await server.rememberRecentProjectRoot('/projects/alpha');
@@ -2404,7 +2449,7 @@ describe('app-server', () => {
           recentProjectRoots: ['/projects/alpha', '/projects/beta'],
           presentation: { showWebMenus: false, trafficLightSpacer: true }
         });
-        await expect(readFile(join(debruteHome, 'config/workbench_chrome.json'), 'utf8')).resolves.toContain('/projects/alpha');
+        await expect(readFile(join(debruteHome, 'config/global_settings.json'), 'utf8')).resolves.toContain('/projects/alpha');
       } finally {
         server.close();
         await rm(debruteHome, { recursive: true, force: true });
@@ -2414,7 +2459,8 @@ describe('app-server', () => {
     it('clears recent project roots through runtime state only', async () => {
       const debruteHome = await mkdtemp(join(tmpdir(), 'debrute-workbench-chrome-clear-'));
       const server = new DebruteGlobalRuntimeServer({
-        globalConfigStore: new GlobalConfigStore({ debruteHome })
+        globalConfigStore: new GlobalConfigStore({ debruteHome }),
+        integrationEnvPath: ''
       });
       try {
         await server.rememberRecentProjectRoot('/projects/alpha');

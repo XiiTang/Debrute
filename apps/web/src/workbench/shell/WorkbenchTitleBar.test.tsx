@@ -1,7 +1,9 @@
-import { readFileSync } from 'node:fs';
-import React from 'react';
+// @vitest-environment jsdom
+
+import React, { act } from 'react';
+import { createRoot, type Root } from 'react-dom/client';
 import { renderToStaticMarkup } from 'react-dom/server';
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import { buildWorkbenchTitleBarState } from '@debrute/app-protocol';
 import { WorkbenchTitleBar } from './WorkbenchTitleBar';
 import { I18nProvider } from '../i18n';
@@ -53,8 +55,32 @@ describe('WorkbenchTitleBar', () => {
     expect(html).toContain('aria-controls="workbench-titlebar-menu-file"');
     expect(html).toContain('Restore window');
     expect(html).toContain('Close window');
+    expect(html.match(/db-icon-button--window(?:\s|")/g) ?? []).toHaveLength(3);
+    expect(html).toMatch(/aria-label="Close window"[^>]*db-icon-button--window-close/);
     expect(html).toContain('-webkit-app-region:drag');
     expect(html).toContain('-webkit-app-region:no-drag');
+  });
+
+  it('disables only maximize while native window state is unavailable', () => {
+    const html = renderToStaticMarkup(
+      <I18nProvider locale="en">
+        <WorkbenchTitleBar
+          state={buildWorkbenchTitleBarState({
+            platform: 'win32',
+            host: 'desktop',
+            projectTitle: 'Beta',
+            recentProjectRoots: []
+          })}
+          nativeWindowState={undefined}
+          onCommand={() => undefined}
+          onWindowCommand={() => undefined}
+        />
+      </I18nProvider>
+    );
+
+    expect(html).toMatch(/aria-label="Minimize window"(?![^>]*disabled)/);
+    expect(html).toMatch(/<button disabled=""[^>]*aria-label="Maximize window"/);
+    expect(html).toMatch(/aria-label="Close window"(?![^>]*disabled)/);
   });
 
   it('renders Web menus without native controls in browser host', () => {
@@ -79,33 +105,107 @@ describe('WorkbenchTitleBar', () => {
     expect(html).not.toContain('Close window');
   });
 
-  it('renders submenu items as interactive submenu triggers instead of disabled expanded groups', () => {
-    const source = readFileSync('apps/web/src/workbench/shell/WorkbenchTitleBar.tsx', 'utf8');
+  it('opens and selects recent-project submenu items through accessible menu controls', async () => {
+    const restoreActEnvironment = installReactActEnvironment();
+    const container = document.createElement('div');
+    document.body.append(container);
+    const root = createRoot(container);
+    const onCommand = vi.fn();
 
-    expect(source).toContain('workbench-titlebar__submenu-trigger');
-    expect(source).toContain('aria-haspopup="menu"');
-    expect(source).toContain('aria-controls={submenuId}');
-    expect(source).toContain('menuRef.current?.querySelector<HTMLButtonElement>');
-    expect(source).toContain('restoreMenuButtonFocus');
-    expect(source).not.toContain('role="group"');
-    expect(source).not.toContain('<Menu.Item disabled>{item.label}</Menu.Item>');
-  });
+    try {
+      await act(async () => {
+        root.render(
+          <I18nProvider locale="en">
+            <WorkbenchTitleBar
+              state={buildWorkbenchTitleBarState({
+                platform: 'linux',
+                host: 'web',
+                projectTitle: 'Alpha',
+                recentProjectRoots: ['/tmp/alpha']
+              })}
+              nativeWindowState={{ maximized: false }}
+              onCommand={onCommand}
+              onWindowCommand={() => undefined}
+            />
+          </I18nProvider>
+        );
+      });
 
-  it('fades the title-bar material before the bottom edge', () => {
-    const source = readFileSync('apps/web/src/workbench/styles/titlebar.css', 'utf8');
+      const fileButton = requireButton(container, 'File');
+      expect(fileButton.getAttribute('aria-haspopup')).toBe('menu');
+      expect(fileButton.getAttribute('aria-expanded')).toBe('false');
+      expect(fileButton.getAttribute('aria-controls')).toBe('workbench-titlebar-menu-file');
 
-    expect(source).toContain('.workbench-titlebar::before');
-    expect(source).toContain('transparent 86%');
-    expect(source).toContain('transparent 100%');
-    expect(source).not.toContain('inset 0 -1px 0');
-  });
+      await act(async () => {
+        fileButton.click();
+      });
 
-  it('keeps the project title optically centered inside the compact title bar', () => {
-    const source = readFileSync('apps/web/src/workbench/styles/titlebar.css', 'utf8');
+      const recentTrigger = requireButton(container, 'Open Recent');
+      expect(recentTrigger.getAttribute('role')).toBe('menuitem');
+      expect(recentTrigger.getAttribute('aria-haspopup')).toBe('menu');
+      expect(recentTrigger.getAttribute('aria-expanded')).toBe('false');
+      expect(recentTrigger.getAttribute('aria-controls')).toBe('workbench-titlebar-submenu-project.open-recent');
 
-    expect(source).toContain('top: 50%;');
-    expect(source).toContain('transform: translateY(calc(-50% - 2px));');
-    expect(source).toContain('line-height: 1;');
-    expect(source).not.toContain('transform: translateX(-50%);');
+      await act(async () => {
+        recentTrigger.dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowRight', bubbles: true }));
+      });
+
+      const submenuId = recentTrigger.getAttribute('aria-controls');
+      const submenu = submenuId ? document.getElementById(submenuId) : null;
+      expect(recentTrigger.getAttribute('aria-expanded')).toBe('true');
+      expect(submenu?.getAttribute('role')).toBe('menu');
+      expect(requireButton(container, '/tmp/alpha').getAttribute('role')).toBe('menuitem');
+
+      await act(async () => {
+        submenu?.dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowLeft', bubbles: true }));
+      });
+      expect(recentTrigger.getAttribute('aria-expanded')).toBe('false');
+      expect(document.activeElement).toBe(recentTrigger);
+
+      await act(async () => {
+        recentTrigger.dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowRight', bubbles: true }));
+      });
+
+      await act(async () => {
+        requireButton(container, '/tmp/alpha').click();
+      });
+      expect(onCommand).toHaveBeenCalledOnce();
+      expect(onCommand).toHaveBeenCalledWith(expect.objectContaining({
+        commandId: 'project.open-recent',
+        payload: { projectRoot: '/tmp/alpha' }
+      }));
+      expect(fileButton.getAttribute('aria-expanded')).toBe('false');
+    } finally {
+      await unmount(root, container);
+      restoreActEnvironment();
+    }
   });
 });
+
+function requireButton(container: HTMLElement, label: string): HTMLButtonElement {
+  const button = Array.from(container.querySelectorAll('button')).find((candidate) => candidate.textContent === label);
+  if (!(button instanceof HTMLButtonElement)) {
+    throw new Error(`Expected button ${label}.`);
+  }
+  return button;
+}
+
+function installReactActEnvironment(): () => void {
+  const globalWithAct = globalThis as typeof globalThis & { IS_REACT_ACT_ENVIRONMENT?: boolean };
+  const previous = globalWithAct.IS_REACT_ACT_ENVIRONMENT;
+  globalWithAct.IS_REACT_ACT_ENVIRONMENT = true;
+  return () => {
+    if (previous === undefined) {
+      delete globalWithAct.IS_REACT_ACT_ENVIRONMENT;
+    } else {
+      globalWithAct.IS_REACT_ACT_ENVIRONMENT = previous;
+    }
+  };
+}
+
+async function unmount(root: Root, container: HTMLElement): Promise<void> {
+  await act(async () => {
+    root.unmount();
+  });
+  container.remove();
+}

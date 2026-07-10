@@ -124,9 +124,9 @@ describe('CanvasRenderCoordinator', () => {
       'flow/selected.png',
       'flow/visible.png'
     ]);
-    expect(snapshot.nodeLayers.get('flow/visible.png')).toEqual({ domOrder: 'flow/visible.png', zIndex: 1 });
-    expect(snapshot.nodeLayers.get('flow/selected.png')).toEqual({ domOrder: 'flow/selected.png', zIndex: 2 });
-    expect(snapshot.nodeLayers.get('flow/active.png')).toEqual({ domOrder: 'flow/active.png', zIndex: 3 });
+    expect(snapshot.nodeRenderOrder.get('flow/visible.png')).toEqual({ domOrder: 'flow/visible.png', zIndex: 1 });
+    expect(snapshot.nodeRenderOrder.get('flow/selected.png')).toEqual({ domOrder: 'flow/selected.png', zIndex: 2 });
+    expect(snapshot.nodeRenderOrder.get('flow/active.png')).toEqual({ domOrder: 'flow/active.png', zIndex: 3 });
     expect(snapshot.culledNodePaths.has('flow/selected.png')).toBe(true);
     expect(snapshot.culledNodePaths.has('flow/active.png')).toBe(true);
   });
@@ -539,7 +539,7 @@ describe('CanvasRenderCoordinator', () => {
       activeNodePaths: []
     });
 
-    expect(next.nodeLayers.get('flow/a.png')).toEqual({ domOrder: 'flow/a.png', zIndex: 2 });
+    expect(next.nodeRenderOrder.get('flow/a.png')).toEqual({ domOrder: 'flow/a.png', zIndex: 2 });
     expect(counterNames(monitor.getTrace().events)).not.toContain('render-virtual-refresh');
   });
 });

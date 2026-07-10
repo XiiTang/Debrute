@@ -1,22 +1,15 @@
 import React, { useCallback, useEffect, useRef, useState } from 'react';
 import {
   AlertTriangle,
-  ArrowDown,
-  ArrowUp,
   CheckCircle2,
-  CircleDot,
   Loader2
 } from 'lucide-react';
-import {
-  canvasNodeLayerOrderTopFirst,
-  type Diagnostic
-} from '@debrute/canvas-core';
+import type { Diagnostic } from '@debrute/canvas-core';
 import type { GeneratedAssetMetadataLookup, GeneratedAssetRecord } from '@debrute/app-protocol';
 import type { WorkbenchActions, WorkbenchState } from '../../types';
-import { EmptyState, IconButton, Select } from '../ui';
+import { EmptyState, Select } from '../ui';
 import type { CanvasSelection } from '../canvas/runtime/canvasSelection';
 import {
-  getCanvasById,
   getSelectionContext,
   nodeStatusLabel,
   projectRelativeSource,
@@ -40,10 +33,6 @@ export function Inspector({
   const diagnostics = context.diagnostics.length > 0 ? context.diagnostics : state.snapshot?.diagnostics.slice(0, 5) ?? [];
   return (
     <aside className="inspector">
-      <div className="inspector-title">
-        <span>{i18n.t('inspector.title')}</span>
-        <CircleDot size={15} />
-      </div>
       <InspectorDetails context={context} state={state} actions={actions} i18n={i18n} />
       <div className="inspector-section">
         <h3>{i18n.t('inspector.diagnostics')}</h3>
@@ -78,7 +67,6 @@ function InspectorDetails({
             ))}
           </dl>
         </div>
-        <NodeVisualControls context={context} state={state} actions={actions} i18n={i18n} />
         {context.node.nodeKind === 'file' ? <NodeGeneratedMetadataSection node={context.node} actions={actions} i18n={i18n} /> : null}
       </>
     );
@@ -123,65 +111,12 @@ function selectedNodeRows(context: Extract<SelectionContext, { kind: 'node' }>, 
   const rows: Array<[string, string]> = [
     [i18n.t('inspector.type'), context.node.mediaKind ?? context.node.nodeKind],
     [i18n.t('inspector.position'), `${Math.round(context.node.x)}, ${Math.round(context.node.y)}`],
-    [i18n.t('inspector.size'), `${Math.round(context.node.width)} x ${Math.round(context.node.height)}`],
-    [i18n.t('inspector.layer'), String(context.node.z)]
+    [i18n.t('inspector.size'), `${Math.round(context.node.width)} x ${Math.round(context.node.height)}`]
   ];
   if (context.node.availability.state !== 'available') {
     rows.push([i18n.t('inspector.status'), nodeStatusLabel(context.node)]);
   }
   return rows;
-}
-
-function NodeVisualControls({
-  context,
-  state,
-  actions,
-  i18n
-}: {
-  context: Extract<SelectionContext, { kind: 'node' }>;
-  state: WorkbenchState;
-  actions: WorkbenchActions;
-  i18n: WorkbenchI18n;
-}): React.ReactElement {
-  const canvas = getCanvasById(state.snapshot, context.canvasId);
-  const nodePath = context.node.projectRelativePath;
-  const layerOrderTopFirst = canvas ? canvasNodeLayerOrderTopFirst(canvas) : [];
-  const layerIndex = layerOrderTopFirst.indexOf(nodePath);
-  const canMoveLayer = Boolean(canvas) && layerIndex >= 0;
-  const moveLayer = (direction: -1 | 1) => {
-    if (!canvas || !canMoveLayer) {
-      return;
-    }
-    const nextIndex = layerIndex + direction;
-    if (nextIndex < 0 || nextIndex >= layerOrderTopFirst.length) {
-      return;
-    }
-    const nextOrder = [...layerOrderTopFirst];
-    [nextOrder[layerIndex], nextOrder[nextIndex]] = [nextOrder[nextIndex]!, nextOrder[layerIndex]!];
-    void actions.updateCanvasNodeLayers(context.canvasId, {
-      nodeProjectRelativePathsTopFirst: nextOrder
-    });
-  };
-
-  return (
-    <div className="inspector-section">
-      <h3>{i18n.t('inspector.visual')}</h3>
-      <div className="inspector-node-controls" aria-label={i18n.t('inspector.nodeVisualControls')}>
-        <IconButton
-          label={i18n.t('inspector.moveForward')}
-          disabled={!canMoveLayer || layerIndex === 0}
-          icon={<ArrowUp size={14} />}
-          onClick={() => moveLayer(-1)}
-        />
-        <IconButton
-          label={i18n.t('inspector.moveBackward')}
-          disabled={!canMoveLayer || layerIndex === layerOrderTopFirst.length - 1}
-          icon={<ArrowDown size={14} />}
-          onClick={() => moveLayer(1)}
-        />
-      </div>
-    </div>
-  );
 }
 
 type NodeGeneratedMetadataState =

@@ -1,9 +1,9 @@
 import type {
   AddProjectPathToCanvasMapInput,
   AdobeBridgeStateView,
-  AudioModelSettingsView,
   CanvasTextPreviewSourceAvailabilityResponse,
   CanvasVideoPreviewSourceResponse,
+  DebruteGlobalSettingsView,
   DebruteProductState,
   DebruteRuntimeInfo,
   DebruteHttpErrorBody,
@@ -11,7 +11,6 @@ import type {
   GeneratedAssetView,
   GeneratedAssetsView,
   GeneratedAssetMetadataLookup,
-  ImageModelSettingsView,
   IntegrationSettingsView,
   RunIntegrationOperationInput,
   RunIntegrationOperationResult,
@@ -19,11 +18,7 @@ import type {
   ProjectHealthSummary,
   SaveCanvasTextPreviewSourceResult,
   SaveCanvasTextPreviewSourceInput,
-  SaveAdobeBridgeSettingsInput,
-  SaveAudioModelSettingInput,
-  SaveImageModelSettingInput,
-  SaveWorkbenchPreferencesInput,
-  SaveVideoModelSettingInput,
+  SaveDebruteGlobalSettingsInput,
   SendProjectFileToPhotoshopResult,
   TerminalEvent,
   TerminalEventSubscription,
@@ -31,7 +26,6 @@ import type {
   TerminalSessionResult,
   UpdateCanvasTextViewportStateInput,
   UpdateCanvasVideoPlaybackStateInput,
-  VideoModelSettingsView,
   WorkbenchEvent,
   WorkbenchApiClient,
   WorkbenchCanvasDocumentMutationResult,
@@ -48,7 +42,6 @@ import type {
   WorkbenchProjectTextFileWriteResult,
   WorkbenchProjectUploadImportInput,
   WorkbenchAddProjectPathToCanvasMapResult,
-  WorkbenchPreferencesView,
   WorkbenchTitleBarState
 } from '@debrute/app-protocol';
 import type {
@@ -67,6 +60,11 @@ interface RevisionedProjectResponse {
   projectRevision: number;
 }
 
+interface ProjectRequestScope {
+  projectId: string;
+  generation: number;
+}
+
 class DebruteHttpRequestError extends Error {
   constructor(
     readonly status: number,
@@ -75,6 +73,20 @@ class DebruteHttpRequestError extends Error {
     readonly details: Record<string, unknown> | undefined
   ) {
     super(message);
+  }
+}
+
+class ProjectChangedRequestError extends Error {}
+
+class ProjectResponseSupersededError extends Error {
+  readonly name = 'ProjectResponseSupersededError';
+
+  constructor(
+    readonly projectId: string,
+    readonly responseRevision: number,
+    readonly currentRevision: number
+  ) {
+    super(`Project response revision ${responseRevision} was superseded by revision ${currentRevision}.`);
   }
 }
 
@@ -116,6 +128,9 @@ export function createHttpWorkbenchApiClient(options: HttpWorkbenchApiClientOpti
 
   let currentProjectId: string | undefined;
   let currentProjectRevision: number | undefined;
+  let currentProjectGeneration = 0;
+  let projectOpenRequestSequence = 0;
+  let latestAcceptedProjectOpenRequestId = 0;
   let globalEventSource: EventSource | undefined;
   let projectEventSource: EventSource | undefined;
   let globalEventSourceRequestId = 0;
@@ -127,60 +142,146 @@ export function createHttpWorkbenchApiClient(options: HttpWorkbenchApiClientOpti
     }
     return projectPathFor(currentProjectId, path);
   };
-  const rememberProjectRevision = (result: RevisionedProjectResponse): void => {
-    currentProjectId = result.projectId;
+  const captureProjectScope = (): ProjectRequestScope => {
+    if (!currentProjectId) {
+      throw new Error('Debrute project is not open.');
+    }
+    return {
+      projectId: currentProjectId,
+      generation: currentProjectGeneration
+    };
+  };
+  const isCurrentProjectScope = (scope: ProjectRequestScope): boolean => (
+    scope.projectId === currentProjectId && scope.generation === currentProjectGeneration
+  );
+  const rememberProjectRevision = (scope: ProjectRequestScope, result: RevisionedProjectResponse): void => {
+    if (result.projectId !== scope.projectId) {
+      throw new Error(`Project response ${result.projectId} does not match request project ${scope.projectId}.`);
+    }
+    if (currentProjectRevision !== undefined && result.projectRevision < currentProjectRevision) {
+      throw new ProjectResponseSupersededError(scope.projectId, result.projectRevision, currentProjectRevision);
+    }
     currentProjectRevision = result.projectRevision;
   };
-  const rememberStaleProjectRevision = (error: unknown): void => {
+  const rememberStaleProjectRevision = (scope: ProjectRequestScope, error: unknown): void => {
     if (
       error instanceof DebruteHttpRequestError
       && error.code === 'stale_project_revision'
       && isRevisionedProjectResponse(error.details)
+      && error.details.projectId === scope.projectId
+      && (currentProjectRevision === undefined || error.details.projectRevision > currentProjectRevision)
     ) {
-      rememberProjectRevision(error.details);
+      currentProjectRevision = error.details.projectRevision;
     }
   };
-  const revisionedBody = (body: object = {}): Record<string, unknown> => {
-    if (currentProjectRevision === undefined) {
-      throw new Error('Debrute project revision is not loaded.');
-    }
+  const revisionedBody = (baseRevision: number, body: object = {}): Record<string, unknown> => {
     return {
-      baseRevision: currentProjectRevision,
+      baseRevision,
       ...body
     };
   };
-  const requestRevisioned = async <T extends RevisionedProjectResponse>(
+  let revisionedMutationQueue: Promise<void> = Promise.resolve();
+  const runRevisionedMutation = <T extends RevisionedProjectResponse>(
+    operation: (baseRevision: number) => Promise<T>
+  ): Promise<T> => {
+    const scope = captureProjectScope();
+    const queued = revisionedMutationQueue.then(async () => {
+      if (!isCurrentProjectScope(scope)) {
+        throw new ProjectChangedRequestError('Project changed before the request started.');
+      }
+      if (currentProjectRevision === undefined) {
+        throw new Error('Debrute project revision is not loaded.');
+      }
+      try {
+        const result = await operation(currentProjectRevision);
+        if (!isCurrentProjectScope(scope)) {
+          throw new ProjectChangedRequestError('Project changed while the request was in flight.');
+        }
+        rememberProjectRevision(scope, result);
+        return result;
+      } catch (error) {
+        if (!isCurrentProjectScope(scope)) {
+          throw error instanceof ProjectChangedRequestError
+            ? error
+            : new ProjectChangedRequestError('Project changed while the request was in flight.');
+        }
+        rememberStaleProjectRevision(scope, error);
+        throw error;
+      }
+    });
+    revisionedMutationQueue = queued.then(() => undefined, () => undefined);
+    return queued;
+  };
+  const requestRevisioned = <T extends RevisionedProjectResponse>(
     method: string,
     path: string,
     body?: object
   ): Promise<T> => {
+    return runRevisionedMutation((baseRevision) => request<T>(method, path, revisionedBody(baseRevision, body)));
+  };
+  const requestRevisionedProjectState = async <T extends RevisionedProjectResponse>(
+    method: string,
+    path: string
+  ): Promise<T> => {
+    const scope = captureProjectScope();
     try {
-      const result = await request<T>(method, path, revisionedBody(body));
-      rememberProjectRevision(result);
+      const result = await request<T>(method, path);
+      if (!isCurrentProjectScope(scope)) {
+        throw new ProjectChangedRequestError('Project changed while the request was in flight.');
+      }
+      rememberProjectRevision(scope, result);
       return result;
     } catch (error) {
-      rememberStaleProjectRevision(error);
+      if (!isCurrentProjectScope(scope)) {
+        throw error instanceof ProjectChangedRequestError
+          ? error
+          : new ProjectChangedRequestError('Project changed while the request was in flight.');
+      }
       throw error;
     }
   };
-  const setCurrentProject = async (projectId: string, projectRevision: number) => {
+  const commitCurrentProject = (projectId: string, projectRevision: number): void => {
+    currentProjectGeneration += 1;
     currentProjectId = projectId;
     currentProjectRevision = projectRevision;
+    revisionedMutationQueue = Promise.resolve();
     reconnectProjectEventSource();
-    await shell()?.bindProjectWindowToProject?.({ projectId });
+  };
+  let projectOpenCommitQueue: Promise<void> = Promise.resolve();
+  const acceptOpenedProject = <T extends RevisionedProjectResponse>(requestId: number, opened: T): Promise<T> => {
+    if (requestId < latestAcceptedProjectOpenRequestId) {
+      throw new ProjectChangedRequestError('Another project open request completed first.');
+    }
+    latestAcceptedProjectOpenRequestId = requestId;
+    const committed = projectOpenCommitQueue.then(async () => {
+      await shell()?.bindProjectWindowToProject?.({ projectId: opened.projectId });
+      commitCurrentProject(opened.projectId, opened.projectRevision);
+      return opened;
+    });
+    projectOpenCommitQueue = committed.then(() => undefined, () => undefined);
+    return committed;
   };
   const dispatchWorkbenchEvent = (event: WorkbenchEvent): void => {
     if ('projectId' in event && 'projectRevision' in event) {
-      rememberProjectRevision(event);
+      if (event.projectId !== currentProjectId) {
+        return;
+      }
+      if (currentProjectRevision !== undefined && event.projectRevision < currentProjectRevision) {
+        return;
+      }
+      currentProjectRevision = event.projectRevision;
     }
     for (const listener of eventListeners) {
       listener(event);
     }
   };
-  const openWorkbenchEventSource = (url: string): EventSource => {
+  const openWorkbenchEventSource = (
+    url: string,
+    onEvent: (event: WorkbenchEvent) => void = dispatchWorkbenchEvent
+  ): EventSource => {
     const source = new EventSource(url);
     source.onmessage = (event) => {
-      dispatchWorkbenchEvent(JSON.parse(event.data) as WorkbenchEvent);
+      onEvent(JSON.parse(event.data) as WorkbenchEvent);
     };
     return source;
   };
@@ -207,14 +308,18 @@ export function createHttpWorkbenchApiClient(options: HttpWorkbenchApiClientOpti
     }
     const eventUrl = new URL(projectPath('/events'), browserEventSourceBaseUrl());
     eventUrl.searchParams.set('clientId', eventClientId);
-    projectEventSource = openWorkbenchEventSource(relativeUrlString(eventUrl));
+    const scope = captureProjectScope();
+    projectEventSource = openWorkbenchEventSource(relativeUrlString(eventUrl), (event) => {
+      if (isCurrentProjectScope(scope) && 'projectId' in event && event.projectId === scope.projectId) {
+        dispatchWorkbenchEvent(event);
+      }
+    });
   };
 
   return {
     mode: 'web',
     clientId: eventClientId,
     adobeBridgeGetState: () => request<AdobeBridgeStateView>('GET', '/api/adobe-bridge'),
-    adobeBridgeSaveSettings: (input: SaveAdobeBridgeSettingsInput) => request<AdobeBridgeStateView>('PUT', '/api/adobe-bridge/settings', input),
     adobeBridgeLinkPhotoshop: (input) => request<AdobeBridgeStateView>('POST', projectPath('/adobe-bridge/links'), input),
     adobeBridgeUnlinkPhotoshop: (adobeClientId) => request<AdobeBridgeStateView>(
       'DELETE',
@@ -226,19 +331,21 @@ export function createHttpWorkbenchApiClient(options: HttpWorkbenchApiClientOpti
       input
     ),
     openProject: async (input) => {
+      const requestId = projectOpenRequestSequence + 1;
+      projectOpenRequestSequence = requestId;
       if ('projectId' in input) {
         const opened = await request<WorkbenchProjectOpenResult>('GET', projectPathFor(input.projectId, ''));
-        await setCurrentProject(opened.projectId, opened.projectRevision);
-        return opened;
+        return acceptOpenedProject(requestId, opened);
       }
       const opened = await request<WorkbenchProjectOpenResult>('POST', '/api/projects/open', { projectRoot: input.projectRoot });
-      await setCurrentProject(opened.projectId, opened.projectRevision);
-      return opened;
+      return acceptOpenedProject(requestId, opened);
     },
     openProjectFromPicker: async () => {
+      const requestId = projectOpenRequestSequence + 1;
+      projectOpenRequestSequence = requestId;
       const result = await request<WorkbenchProjectPickerOpenResult>('POST', '/api/projects/open-picker');
       if (result.opened) {
-        await setCurrentProject(result.projectId, result.projectRevision);
+        return acceptOpenedProject(requestId, result);
       }
       return result;
     },
@@ -253,13 +360,9 @@ export function createHttpWorkbenchApiClient(options: HttpWorkbenchApiClientOpti
     getProductState: () => request<DebruteProductState>('GET', '/api/runtime/product'),
     checkProductUpdate: () => request<DebruteProductState>('POST', '/api/runtime/product/update/check'),
     applyProductUpdate: () => request<ProductUpdateApplyResult>('POST', '/api/runtime/product/update/apply'),
-    workbenchPreferencesGet: () => request<WorkbenchPreferencesView>('GET', '/api/settings/workbench-preferences'),
-    workbenchPreferencesSave: (input: SaveWorkbenchPreferencesInput) => request<WorkbenchPreferencesView>('PUT', '/api/settings/workbench-preferences', input),
-    getSnapshot: async () => {
-      const result = await request<WorkbenchProjectRefreshResult>('GET', projectPath(''));
-      rememberProjectRevision(result);
-      return result;
-    },
+    globalSettingsGet: () => request<DebruteGlobalSettingsView>('GET', '/api/settings/global'),
+    globalSettingsSave: (input: SaveDebruteGlobalSettingsInput) => request<DebruteGlobalSettingsView>('PATCH', '/api/settings/global', input),
+    getSnapshot: () => requestRevisionedProjectState<WorkbenchProjectRefreshResult>('GET', projectPath('')),
     getProjectHealth: () => request<ProjectHealthSummary>('GET', projectPath('/health')),
     listTerminalSessions: () => request<TerminalSessionList>('GET', projectPath('/terminals')),
     createTerminalSession: (input = {}) => request<TerminalSessionResult>('POST', projectPath('/terminals'), input),
@@ -344,23 +447,13 @@ export function createHttpWorkbenchApiClient(options: HttpWorkbenchApiClientOpti
     ),
     deleteProjectPathsPermanently: (input) => requestRevisioned<WorkbenchProjectFileBatchOperationResult>('POST', projectPath('/files/batch/delete-permanently'), input),
     importExternalLocalProjectPaths: (input) => requestRevisioned<WorkbenchProjectFileBatchOperationResult>('POST', projectPath('/files/import/local'), input),
-    importExternalProjectUploads: async (input) => {
-      if (currentProjectRevision === undefined) {
-        throw new Error('Debrute project revision is not loaded.');
-      }
-      try {
-        const result = await requestFormData<WorkbenchProjectFileBatchOperationResult>(
-          'POST',
-          projectPath('/files/import/uploads'),
-          uploadImportFormData(input, currentProjectRevision)
-        );
-        rememberProjectRevision(result);
-        return result;
-      } catch (error) {
-        rememberStaleProjectRevision(error);
-        throw error;
-      }
-    },
+    importExternalProjectUploads: (input) => runRevisionedMutation((baseRevision) => (
+      requestFormData<WorkbenchProjectFileBatchOperationResult>(
+        'POST',
+        projectPath('/files/import/uploads'),
+        uploadImportFormData(input, baseRevision)
+      )
+    )),
     revealProjectPathInSystemFileManager: (input) => request<{ ok: true }>(
       'POST',
       projectPath(`/files/path/${encodeProjectPath(input.projectRelativePath)}/reveal`),
@@ -371,11 +464,7 @@ export function createHttpWorkbenchApiClient(options: HttpWorkbenchApiClientOpti
     readGeneratedAsset: (assetId) => request<GeneratedAssetView>('GET', projectPath(`/generated-assets/${encodeURIComponent(assetId)}`)),
     readCanvasFeedback: () => request<CanvasFeedbackDocument>('GET', projectPath('/canvas-feedback')),
     updateCanvasFeedbackEntry: (input) => requestRevisioned<WorkbenchCanvasFeedbackMutationResult>('PATCH', projectPath('/canvas-feedback'), input),
-    refreshProject: async () => {
-      const result = await request<WorkbenchProjectRefreshResult>('POST', projectPath('/refresh'));
-      rememberProjectRevision(result);
-      return result;
-    },
+    refreshProject: () => requestRevisionedProjectState<WorkbenchProjectRefreshResult>('POST', projectPath('/refresh')),
     createCanvas: () => requestRevisioned<WorkbenchCanvasManagementResult>('POST', projectPath('/canvases')),
     renameCanvas: (input) => requestRevisioned<WorkbenchCanvasManagementResult>(
       'PATCH',
@@ -405,36 +494,19 @@ export function createHttpWorkbenchApiClient(options: HttpWorkbenchApiClientOpti
       projectPath(`/canvases/${encodeURIComponent(input.canvasId)}/reset-layout`),
       'all' in input ? { all: true } : { pathRules: input.pathRules }
     ),
-    updateCanvasNodeLayers: (input) => requestRevisioned<WorkbenchCanvasDocumentMutationResult>('PATCH', projectPath(`/canvases/${encodeURIComponent(input.canvasId)}/node-layers`), {
-      nodeProjectRelativePathsTopFirst: input.nodeProjectRelativePathsTopFirst
+    bringCanvasNodeToFront: (input) => requestRevisioned<WorkbenchCanvasDocumentMutationResult>('POST', projectPath(`/canvases/${encodeURIComponent(input.canvasId)}/node-stack-order/bring-to-front`), {
+      projectRelativePath: input.projectRelativePath
     }),
     updateCanvasVideoPlaybackState: (input: UpdateCanvasVideoPlaybackStateInput) => requestRevisioned<WorkbenchCanvasDocumentMutationResult>(
       'PATCH',
       projectPath(`/canvases/${encodeURIComponent(input.canvasId)}/video-playback`),
       { updates: input.updates }
     ),
-    updateCanvasTextViewportState: async (input: UpdateCanvasTextViewportStateInput) => {
-      const result = await request<WorkbenchCanvasDocumentMutationResult>(
-        'PATCH',
-        projectPath(`/canvases/${encodeURIComponent(input.canvasId)}/text-viewport`),
-        { updates: input.updates }
-      );
-      rememberProjectRevision(result);
-      return result;
-    },
-    imageModelGetSettings: () => request<ImageModelSettingsView>('GET', '/api/models/image'),
-    imageModelSaveSetting: (modelId: string, input: SaveImageModelSettingInput) => (
-      request<ImageModelSettingsView>('PUT', `/api/models/image/${encodeURIComponent(modelId)}`, input)
+    updateCanvasTextViewportState: (input: UpdateCanvasTextViewportStateInput) => requestRevisioned<WorkbenchCanvasDocumentMutationResult>(
+      'PATCH',
+      projectPath(`/canvases/${encodeURIComponent(input.canvasId)}/text-viewport`),
+      { updates: input.updates }
     ),
-    videoModelGetSettings: () => request<VideoModelSettingsView>('GET', '/api/models/video'),
-    videoModelSaveSetting: (modelId: string, input: SaveVideoModelSettingInput) => (
-      request<VideoModelSettingsView>('PUT', `/api/models/video/${encodeURIComponent(modelId)}`, input)
-    ),
-    audioModelGetSettings: () => request<AudioModelSettingsView>('GET', '/api/models/audio'),
-    audioModelSaveSetting: (modelId: string, input: SaveAudioModelSettingInput) => (
-      request<AudioModelSettingsView>('PUT', `/api/models/audio/${encodeURIComponent(modelId)}`, input)
-    ),
-    integrationsListStatus: () => request<IntegrationSettingsView>('GET', '/api/integrations'),
     integrationsRescan: () => request<IntegrationSettingsView>('POST', '/api/integrations/rescan', {}),
     integrationsRunOperation: (input: RunIntegrationOperationInput) => request<RunIntegrationOperationResult>(
       'POST',
