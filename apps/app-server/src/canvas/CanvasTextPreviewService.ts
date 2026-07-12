@@ -27,11 +27,16 @@ export interface CanvasTextPreviewSaveSourceInput extends CanvasTextPreviewSourc
   sourceTemporaryPath: string;
 }
 
-export interface CanvasTextPreviewSourceView {
+export interface CanvasTextPreviewSourceTarget {
   projectRelativePath: string;
   fingerprint: string;
-  available: boolean;
 }
+
+export type CanvasTextPreviewSourceView = CanvasTextPreviewSourceTarget & (
+  | { status: 'available' }
+  | { status: 'missing' }
+  | { status: 'error'; message: string }
+);
 
 export interface CanvasTextPreviewReadSourcesInput {
   projectRoot: string;
@@ -49,7 +54,7 @@ export interface CanvasTextPreviewResolveVariantInput extends CanvasTextPreviewS
 export interface CanvasTextPreviewService {
   saveSource(input: CanvasTextPreviewSaveSourceInput): Promise<{
     ok: true;
-    source: CanvasTextPreviewSourceView & { available: true };
+    source: CanvasTextPreviewSourceTarget & { status: 'available' };
   }>;
   readSources(input: CanvasTextPreviewReadSourcesInput): Promise<{ sources: Record<string, CanvasTextPreviewSourceView> }>;
   resolveVariant(input: CanvasTextPreviewResolveVariantInput): Promise<{ absolutePath: string }>;
@@ -68,7 +73,7 @@ class LocalCanvasTextPreviewService implements CanvasTextPreviewService {
 
   async saveSource(input: CanvasTextPreviewSaveSourceInput): Promise<{
     ok: true;
-    source: CanvasTextPreviewSourceView & { available: true };
+    source: CanvasTextPreviewSourceTarget & { status: 'available' };
   }> {
     const absoluteSourcePath = await resolveNoSymlinkProjectPathForWrite(
       input.projectRoot,
@@ -80,24 +85,30 @@ class LocalCanvasTextPreviewService implements CanvasTextPreviewService {
       source: {
         projectRelativePath: input.projectRelativePath,
         fingerprint: input.fingerprint,
-        available: true
+        status: 'available'
       }
     };
   }
 
   async readSources(input: CanvasTextPreviewReadSourcesInput): Promise<{ sources: Record<string, CanvasTextPreviewSourceView> }> {
     const entries = await Promise.all(input.sources.map(async (source) => {
-      const sourcePath = canvasTextPreviewSourceProjectPath({
-        canvasId: input.canvasId,
+      const target = {
         projectRelativePath: source.projectRelativePath,
         fingerprint: source.fingerprint
-      });
-      const available = await existingFilePath(input.projectRoot, sourcePath) !== undefined;
-      return [source.projectRelativePath, {
-        projectRelativePath: source.projectRelativePath,
-        fingerprint: source.fingerprint,
-        available
-      }] as const;
+      };
+      try {
+        const sourcePath = canvasTextPreviewSourceProjectPath({ canvasId: input.canvasId, ...target });
+        const status = await existingFilePath(input.projectRoot, sourcePath) === undefined
+          ? 'missing' as const
+          : 'available' as const;
+        return [source.projectRelativePath, { ...target, status }] as const;
+      } catch (error) {
+        return [source.projectRelativePath, {
+          ...target,
+          status: 'error' as const,
+          message: errorMessage(error)
+        }] as const;
+      }
     }));
     return { sources: Object.fromEntries(entries) };
   }
@@ -184,4 +195,8 @@ async function existingFilePath(projectRoot: string, projectRelativePath: string
     }
     throw error;
   }
+}
+
+function errorMessage(error: unknown): string {
+  return error instanceof Error ? error.message : String(error);
 }

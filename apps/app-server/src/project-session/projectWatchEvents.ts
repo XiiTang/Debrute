@@ -1,15 +1,21 @@
-import { stat } from 'node:fs/promises';
+import { readFile, stat } from 'node:fs/promises';
 import {
+  projectContentHash,
   readJsonFile,
-  readTextFile,
   type NormalizedFileWatchEvent
 } from '@debrute/project-core';
 import type { CanvasDocument, Diagnostic } from '@debrute/canvas-core';
 import type { ProjectSessionSnapshot } from '@debrute/app-protocol';
+import { projectDiagnosticCounts } from './projectHealth.js';
 
-export interface InternalProjectFileWrite {
-  content?: string;
-  expiresAt: number;
+export type InternalProjectFileWriteReceipt =
+  | { kind: 'write'; contentHash: string }
+  | { kind: 'delete' };
+
+export function createInternalProjectFileWriteReceipt(content?: string): InternalProjectFileWriteReceipt {
+  return content === undefined
+    ? { kind: 'delete' }
+    : { kind: 'write', contentHash: projectContentHash(content) };
 }
 
 export async function shouldIgnoreStaleWatchedEvent(input: {
@@ -33,25 +39,10 @@ export async function shouldIgnoreStaleWatchedEvent(input: {
 export async function shouldIgnoreWatchedCanvasEvent(input: {
   current: ProjectSessionSnapshot | undefined;
   event: NormalizedFileWatchEvent;
-  internalProjectFileWrites: Map<string, InternalProjectFileWrite>;
 }): Promise<boolean> {
-  const { current, event, internalProjectFileWrites } = input;
+  const { current, event } = input;
   if (!current || event.affects.length !== 1 || event.affects[0] !== 'canvas') {
     return false;
-  }
-  const internalWrite = internalProjectFileWrites.get(event.absolutePath);
-  if (internalWrite) {
-    if (internalWrite.expiresAt <= Date.now()) {
-      internalProjectFileWrites.delete(event.absolutePath);
-    } else {
-      try {
-        if (await readTextFile(event.absolutePath) === internalWrite.content) {
-          return true;
-        }
-      } catch {
-        return false;
-      }
-    }
   }
   try {
     const watchedCanvas = await readJsonFile<CanvasDocument>(event.absolutePath);
@@ -62,27 +53,30 @@ export async function shouldIgnoreWatchedCanvasEvent(input: {
   }
 }
 
-export async function shouldIgnoreInternalProjectFileEvent(input: {
+export async function consumeInternalProjectFileWatchEvent(input: {
   event: NormalizedFileWatchEvent;
-  internalProjectFileWrites: Map<string, InternalProjectFileWrite>;
+  receipts: Map<string, InternalProjectFileWriteReceipt>;
 }): Promise<boolean> {
-  const { event, internalProjectFileWrites } = input;
-  const internalWrite = internalProjectFileWrites.get(event.absolutePath);
-  if (!internalWrite) {
+  const { event, receipts } = input;
+  const receipt = receipts.get(event.absolutePath);
+  if (!receipt) {
     return false;
   }
-  if (internalWrite.expiresAt <= Date.now()) {
-    internalProjectFileWrites.delete(event.absolutePath);
-    return false;
-  }
+  receipts.delete(event.absolutePath);
   try {
-    if (internalWrite.content === undefined) {
-      return true;
+    if (receipt.kind === 'delete') {
+      await stat(event.absolutePath);
+      return false;
     }
-    return await readTextFile(event.absolutePath) === internalWrite.content;
-  } catch {
-    return false;
+    return projectContentHash(await readFile(event.absolutePath)) === receipt.contentHash;
+  } catch (error) {
+    return receipt.kind === 'delete' && isMissingPathError(error);
   }
+}
+
+function isMissingPathError(error: unknown): boolean {
+  return typeof error === 'object' && error !== null && 'code' in error
+    && (error as NodeJS.ErrnoException).code === 'ENOENT';
 }
 
 export function projectWatchRefreshFailedSnapshot(input: {
@@ -99,15 +93,16 @@ export function projectWatchRefreshFailedSnapshot(input: {
     message: input.errorMessage,
     filePath: input.event.absolutePath
   };
+  const diagnostics = [
+    diagnostic,
+    ...input.current.diagnostics.filter((current) => current.id !== diagnostic.id)
+  ];
   return {
     ...input.current,
-    diagnostics: [diagnostic, ...input.current.diagnostics],
+    diagnostics,
     health: {
       ...input.current.health,
-      diagnosticCounts: {
-        ...input.current.health.diagnosticCounts,
-        errors: input.current.health.diagnosticCounts.errors + 1
-      },
+      diagnosticCounts: projectDiagnosticCounts(diagnostics),
       checkedAt: input.checkedAt
     }
   };

@@ -1,5 +1,4 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import type { Dispatch, SetStateAction } from 'react';
 import type {
   WorkbenchApiClient,
   WorkbenchProjectFileBatchOperationResult,
@@ -74,7 +73,7 @@ export function useProjectExplorerController(input: {
   api: WorkbenchApiClient;
   projectId: string | undefined;
   snapshot: WorkbenchProjectSessionSnapshot | undefined;
-  setSnapshot: Dispatch<SetStateAction<WorkbenchProjectSessionSnapshot | undefined>>;
+  commitSnapshot(snapshot: WorkbenchProjectSessionSnapshot): void;
   activeCanvasRuntime: CanvasEditorRuntime | undefined;
   locateProjectFileInCanvas(projectRelativePath: string): void;
   notify(message: string): void;
@@ -174,7 +173,7 @@ export function useProjectExplorerController(input: {
       if (!isCurrentProjectScope(scope, result.projectId)) {
         return;
       }
-      input.setSnapshot(result.snapshot);
+      input.commitSnapshot(result.snapshot);
       setSelectionState(projectTreeSelectionFromPaths([result.projectRelativePath]));
       setInlineEdit(undefined);
     } catch (error) {
@@ -182,7 +181,7 @@ export function useProjectExplorerController(input: {
         setInlineEdit({ ...current, submitting: false, error: errorMessage(error) });
       }
     }
-  }, [captureProjectScope, inlineEdit, input.api, input.i18n, input.setSnapshot, isCurrentProjectScope]);
+  }, [captureProjectScope, inlineEdit, input.api, input.commitSnapshot, input.i18n, isCurrentProjectScope]);
 
   const cancelEdit = useCallback(() => {
     setInlineEdit(undefined);
@@ -199,14 +198,14 @@ export function useProjectExplorerController(input: {
     if (!isCurrentProjectScope(scope, result.projectId)) {
       return false;
     }
-    input.setSnapshot(result.snapshot);
+    input.commitSnapshot(result.snapshot);
     setSelectionState(projectTreeSelectionFromPaths(batchResultSelectionPaths(result.results)));
     const locatedPath = singleFileBatchResultPath(result.results);
     if (locatedPath) {
       input.locateProjectFileInCanvas(locatedPath);
     }
     return true;
-  }, [input.locateProjectFileInCanvas, input.setSnapshot, isCurrentProjectScope]);
+  }, [input.commitSnapshot, input.locateProjectFileInCanvas, isCurrentProjectScope]);
 
   const copyPaths = useCallback(async (copyInput: {
     entries: WorkbenchProjectPathEntry[];
@@ -313,14 +312,14 @@ export function useProjectExplorerController(input: {
       if (!isCurrentProjectScope(scope, result.projectId)) {
         return;
       }
-      input.setSnapshot(result.snapshot);
+      input.commitSnapshot(result.snapshot);
       applyDeletedEntries(entries, result.snapshot);
     }).catch((error) => {
       if (isCurrentProjectScope(scope)) {
         input.notify(notificationMessageForFileCommandError(input.i18n.t('shell.notifications.deleteFailed'), error));
       }
     });
-  }, [applyDeletedEntries, captureProjectScope, input.api, input.i18n, input.notify, input.setSnapshot, isCurrentProjectScope]);
+  }, [applyDeletedEntries, captureProjectScope, input.api, input.commitSnapshot, input.i18n, input.notify, isCurrentProjectScope]);
 
   const trashEntries = useCallback((entries: WorkbenchProjectPathEntry[]) => {
     deleteEntries(entries, false);

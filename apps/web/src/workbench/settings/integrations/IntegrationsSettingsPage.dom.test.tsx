@@ -1,0 +1,489 @@
+import React from 'react';
+import { act } from 'react';
+import { createRoot } from 'react-dom/client';
+import { renderToStaticMarkup } from 'react-dom/server';
+import { describe, expect, it } from 'vitest';
+import { unavailableWorkbenchTitleBarState, type DebruteGlobalSettingsView, type IntegrationSettingsView } from '@debrute/app-protocol';
+import { SettingsPanel } from '../SettingsPanel';
+import { IntegrationsSettingsPage } from './IntegrationsSettingsPage';
+import { I18nProvider } from '../../i18n';
+import type { WorkbenchActions, WorkbenchState } from '../../../types';
+
+describe('web Integrations settings page', { tags: ['settings'] }, () => {
+  it('adds Integrations to the Settings directory', () => {
+    const html = renderWithI18n(React.createElement(SettingsPanel, {
+      state: createState(),
+      actions: createActions()
+    }));
+
+    expect(html).toContain('Integrations');
+    expect(html).toContain('db-nav-row');
+    expect(html).toContain('db-nav-row__icon');
+  });
+
+  it('renders ready, missing, failed, and Python CLI integration states', () => {
+    const html = renderWithI18n(React.createElement(IntegrationsSettingsPage, {
+      settings: integrationSettingsFixture(),
+      actions: createActions()
+    }));
+
+    expect(html).not.toContain('<h2');
+    expect(html).toContain('role="toolbar"');
+    expect(html).toContain('aria-label="Integration actions"');
+    expect(html).toContain('Homebrew, uv');
+    expect(html).toContain('<span>FFmpeg</span>');
+    expect(html).toContain('7.1.1');
+    expect(html).toContain('>8.0</span>');
+    expect(html).toContain('>Uninstall</span>');
+    expect(html).not.toContain('brew upgrade --formula ffmpeg');
+    expect(html).not.toContain('brew uninstall --formula ffmpeg');
+    expect(html).toContain('<span>ImageMagick</span>');
+    expect(html).toContain('Not found');
+    expect(html).toContain('>Install</span>');
+    expect(html).not.toContain('brew install --formula imagemagick');
+    expect(html).toContain('MediaInfo');
+    expect(html).toContain('Integration operations require a ready detected integration.');
+    expect(html).toContain('<span>Remove AI Watermarks</span>');
+    expect(html).toContain('0.5.4');
+    expect(html).not.toContain('uv tool upgrade remove-ai-watermarks');
+    expect(html).toContain('<span>FFmpeg</span>');
+    expect(html).toContain('db-status-pill--neutral');
+    expect(html).not.toContain('db-status-pill--success');
+  });
+
+  it('renders a ready empty state while keeping the rescan action available', () => {
+    const html = renderWithI18n(React.createElement(IntegrationsSettingsPage, {
+      settings: integrationSettingsFixture({ integrations: [], backends: [] }),
+      actions: createActions()
+    }));
+
+    expect(html).toContain('>Rescan</span>');
+    expect(html).toContain('class="db-empty-state"');
+    expect(html).toContain('No integrations are available.');
+    expect(html).not.toContain('No integration backends were detected.');
+  });
+
+  it('renders an explicit backend summary when integrations exist without a detected backend', () => {
+    const html = renderWithI18n(React.createElement(IntegrationsSettingsPage, {
+      settings: integrationSettingsFixture({ backends: [] }),
+      actions: createActions()
+    }));
+
+    expect(html).toContain('<span>FFmpeg</span>');
+    expect(html).toContain('class="db-record-summary"');
+    expect(html).toContain('No integration backends were detected.');
+    expect(html).not.toContain('No integrations are available.');
+  });
+
+  it('renders missing binaries as neutral rows with blank version cells', () => {
+    const html = renderWithI18n(React.createElement(IntegrationsSettingsPage, {
+      settings: integrationSettingsFixture({
+        backends: [{ kind: 'system-package-manager', backend: 'brew', available: true }],
+        integrations: [{
+          integrationId: 'imagemagick',
+          displayName: 'ImageMagick',
+          description: 'Image conversion toolkit.',
+          category: 'media',
+          status: 'not_found',
+          summary: 'magick is missing.',
+          binaries: [{
+            binaryId: 'magick',
+            displayName: 'magick',
+            status: 'not_found'
+          }]
+        }]
+      }),
+      actions: createActions()
+    }));
+
+    expect(html).toContain('<span>ImageMagick</span>');
+    expect(html).toContain('Not found');
+    expect(html).toContain('class="db-status-pill db-status-pill--neutral">Not found</span>');
+    expect(html).toContain('<small></small>');
+  });
+
+  it('renders query failure diagnostics without top-level operation diagnostics', () => {
+    const settings = integrationSettingsFixture();
+    const ffmpeg = settings.integrations[0]!;
+    ffmpeg.operationStatus = {
+      backendKind: 'system-package-manager',
+      backend: 'brew',
+      packageName: 'ffmpeg',
+      availableOperations: ['uninstall'],
+      queryDiagnostic: {
+        exitCode: 1,
+        errorKind: 'nonzero_exit',
+        stderrTail: 'brew exploded'
+      }
+    };
+    const html = renderWithI18n(React.createElement(IntegrationsSettingsPage, {
+      settings,
+      actions: createActions()
+    }));
+
+    expect(html).toContain('Unable to check updates.');
+    expect(html).toContain('nonzero_exit');
+    expect(html).toContain('brew exploded');
+    expect(html).not.toContain('brew outdated');
+  });
+
+  it('disables integration actions while an operation is running', () => {
+    const html = renderWithI18n(React.createElement(IntegrationsSettingsPage, {
+      settings: integrationSettingsFixture({
+        runningOperation: { integrationId: 'ffmpeg', operation: 'update' }
+      }),
+      actions: createActions()
+    }));
+
+    expect(html).toContain('disabled=""');
+    expect(html).toContain('8.0');
+    expect(html).not.toContain('brew upgrade');
+  });
+
+  it('renders operation failure diagnostics without command text after a failed click', async () => {
+    const container = document.createElement('div');
+    document.body.append(container);
+    const root = createRoot(container);
+    const actions = createActions({
+      runIntegrationOperation: async (input) => ({
+        ok: false,
+        integrationId: input.integrationId,
+        operation: input.operation,
+        settings: integrationSettingsFixture(),
+        diagnostic: { errorKind: 'nonzero_exit', stderrTail: 'install exploded' }
+      })
+    });
+
+    try {
+      await act(async () => {
+        root.render(withI18n(React.createElement(IntegrationsSettingsPage, {
+          settings: integrationSettingsFixture(),
+          actions
+        })));
+      });
+
+      const installButton = Array.from(container.querySelectorAll('button')).find((button) => button.textContent === 'Install');
+      expect(installButton).toBeTruthy();
+      await act(async () => {
+        installButton!.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+        await Promise.resolve();
+      });
+
+      expect(container.textContent).toContain('Install failed');
+      expect(container.textContent).toContain('install exploded');
+      expect(container.textContent).not.toContain('brew install');
+    } finally {
+      await act(async () => {
+        root.unmount();
+      });
+      container.remove();
+    }
+  });
+
+  it('renders action exceptions without fabricating runtime diagnostics', async () => {
+    const container = document.createElement('div');
+    document.body.append(container);
+    const root = createRoot(container);
+    const actions = createActions({
+      runIntegrationOperation: async () => {
+        throw new Error('request failed');
+      }
+    });
+
+    try {
+      await act(async () => {
+        root.render(withI18n(React.createElement(IntegrationsSettingsPage, {
+          settings: integrationSettingsFixture(),
+          actions
+        })));
+      });
+
+      const installButton = Array.from(container.querySelectorAll('button')).find((button) => button.textContent === 'Install');
+      expect(installButton).toBeTruthy();
+      await act(async () => {
+        installButton!.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+        await Promise.resolve();
+      });
+
+      expect(container.textContent).toContain('Install failed');
+      expect(container.textContent).toContain('request failed');
+      expect(container.textContent).not.toContain('spawn_error');
+      expect(container.textContent).not.toContain('brew install');
+    } finally {
+      await act(async () => {
+        root.unmount();
+      });
+      container.remove();
+    }
+  });
+
+  it('clears operation failure diagnostics after a successful rescan', async () => {
+    const container = document.createElement('div');
+    document.body.append(container);
+    const root = createRoot(container);
+    const actions = createActions({
+      runIntegrationOperation: async (input) => ({
+        ok: false,
+        integrationId: input.integrationId,
+        operation: input.operation,
+        settings: integrationSettingsFixture(),
+        diagnostic: { errorKind: 'nonzero_exit', stderrTail: 'install exploded' }
+      }),
+      rescanIntegrations: async () => integrationSettingsFixture()
+    });
+
+    try {
+      await act(async () => {
+        root.render(withI18n(React.createElement(IntegrationsSettingsPage, {
+          settings: integrationSettingsFixture(),
+          actions
+        })));
+      });
+
+      const installButton = Array.from(container.querySelectorAll('button')).find((button) => button.textContent === 'Install');
+      expect(installButton).toBeTruthy();
+      await act(async () => {
+        installButton!.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+        await Promise.resolve();
+      });
+      expect(container.textContent).toContain('Install failed');
+
+      const rescanButton = Array.from(container.querySelectorAll('button')).find((button) => button.textContent === 'Rescan');
+      expect(rescanButton).toBeTruthy();
+      await act(async () => {
+        rescanButton!.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+        await Promise.resolve();
+      });
+
+      expect(container.textContent).not.toContain('Install failed');
+      expect(container.textContent).not.toContain('install exploded');
+    } finally {
+      await act(async () => {
+        root.unmount();
+      });
+      container.remove();
+    }
+  });
+
+  it('clears operation failure diagnostics when refreshed settings change the integration row', async () => {
+    const container = document.createElement('div');
+    document.body.append(container);
+    const root = createRoot(container);
+    const actions = createActions({
+      runIntegrationOperation: async (input) => ({
+        ok: false,
+        integrationId: input.integrationId,
+        operation: input.operation,
+        settings: integrationSettingsFixture(),
+        diagnostic: { errorKind: 'nonzero_exit', stderrTail: 'install exploded' }
+      })
+    });
+
+    try {
+      await act(async () => {
+        root.render(withI18n(React.createElement(IntegrationsSettingsPage, {
+          settings: integrationSettingsFixture(),
+          actions
+        })));
+      });
+
+      const installButton = Array.from(container.querySelectorAll('button')).find((button) => button.textContent === 'Install');
+      expect(installButton).toBeTruthy();
+      await act(async () => {
+        installButton!.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+        await Promise.resolve();
+      });
+      expect(container.textContent).toContain('Install failed');
+
+      await act(async () => {
+        root.render(withI18n(React.createElement(IntegrationsSettingsPage, {
+          settings: installedImageMagickSettings(),
+          actions
+        })));
+        await Promise.resolve();
+      });
+
+      expect(container.textContent).not.toContain('Install failed');
+      expect(container.textContent).not.toContain('install exploded');
+      expect(container.textContent).toContain('7.1.2-23');
+    } finally {
+      await act(async () => {
+        root.unmount();
+      });
+      container.remove();
+    }
+  });
+});
+
+function renderWithI18n(element: React.ReactElement): string {
+  return renderToStaticMarkup(withI18n(element));
+}
+
+function withI18n(element: React.ReactElement): React.ReactElement {
+  return React.createElement(I18nProvider, { locale: 'en', children: element });
+}
+
+function createState(overrides: Partial<WorkbenchState> = {}): WorkbenchState {
+  return {
+    snapshot: undefined,
+    titleBarState: unavailableWorkbenchTitleBarState(),
+    explorerSelection: { selectedPaths: [], focusedPath: null, anchorPath: null },
+    globalSettings: { status: 'ready', value: globalSettingsFixture() },
+    resolvedTheme: 'dark',
+    projectOpen: { opening: false },
+    adobeBridge: { status: 'ready', value: { settings: { enabled: true, discoveryStatus: 'available' }, adobeClients: [], projects: [], links: [], transfers: [] } },
+    canvasFeedback: undefined,
+    textFileBuffers: {},
+    textEditorWindows: {},
+    notifications: [],
+    ...overrides
+  };
+}
+
+function createActions(overrides: Partial<WorkbenchActions> = {}): WorkbenchActions {
+  return {
+    rescanIntegrations: async () => integrationSettingsFixture(),
+    runIntegrationOperation: async (input: Parameters<WorkbenchActions['runIntegrationOperation']>[0]) => ({
+      ok: true,
+      integrationId: input.integrationId,
+      operation: input.operation,
+      settings: integrationSettingsFixture()
+    }),
+    ...overrides
+  } as unknown as WorkbenchActions;
+}
+
+function installedImageMagickSettings(): IntegrationSettingsView {
+  const settings = integrationSettingsFixture();
+  return {
+    ...settings,
+    integrations: settings.integrations.map((integration) => (
+      integration.integrationId === 'imagemagick'
+        ? {
+            ...integration,
+            status: 'ready',
+            summary: 'Ready.',
+            operationStatus: {
+              backendKind: 'system-package-manager',
+              backend: 'brew',
+              packageName: 'imagemagick',
+              installedVersion: '7.1.2-23',
+              availableOperations: ['uninstall']
+            },
+            binaries: [{
+              binaryId: 'magick',
+              displayName: 'magick',
+              status: 'ready',
+              version: '7.1.2-23'
+            }]
+          }
+        : integration
+    ))
+  };
+}
+
+function globalSettingsFixture(overrides: Partial<DebruteGlobalSettingsView> = {}): DebruteGlobalSettingsView {
+  return {
+    workbench: { locale: 'en', themePreference: 'system', defaultFrontend: 'electron' },
+    chrome: { recentProjectRoots: [] },
+    models: { image: { models: [] }, video: { models: [] }, audio: { models: [] } },
+    integrations: integrationSettingsFixture(),
+    adobeBridge: { enabled: true },
+    ...overrides
+  };
+}
+
+function integrationSettingsFixture(overrides: Partial<IntegrationSettingsView> = {}): IntegrationSettingsView {
+  return {
+    backends: [
+      { kind: 'system-package-manager', backend: 'brew', available: true },
+      { kind: 'python-cli-installer', backend: 'uv', available: true }
+    ],
+    integrations: [{
+      integrationId: 'ffmpeg',
+      displayName: 'FFmpeg',
+      description: 'Video and audio processing toolkit.',
+      category: 'media',
+      status: 'ready',
+      summary: 'Ready.',
+      operationStatus: {
+        backendKind: 'system-package-manager',
+        backend: 'brew',
+        packageName: 'ffmpeg',
+        installedVersion: '7.1.1',
+        latestVersion: '8.0',
+        availableOperations: ['update', 'uninstall']
+      },
+      binaries: [{
+        binaryId: 'ffmpeg',
+        displayName: 'ffmpeg',
+        status: 'ready',
+        version: '7.1.1'
+      }, {
+        binaryId: 'ffprobe',
+        displayName: 'ffprobe',
+        status: 'ready',
+        version: '7.1.1'
+      }]
+    }, {
+      integrationId: 'imagemagick',
+      displayName: 'ImageMagick',
+      description: 'Image conversion toolkit.',
+      category: 'media',
+      status: 'not_found',
+      summary: 'magick is missing.',
+      operationStatus: {
+        backendKind: 'system-package-manager',
+        backend: 'brew',
+        packageName: 'imagemagick',
+        latestVersion: '7.1.2-23',
+        availableOperations: ['install']
+      },
+      binaries: [{
+        binaryId: 'magick',
+        displayName: 'magick',
+        status: 'not_found'
+      }]
+    }, {
+      integrationId: 'mediainfo',
+      displayName: 'MediaInfo',
+      description: 'Media information reader.',
+      category: 'media',
+      status: 'probe_failed',
+      summary: 'mediainfo probe failed.',
+      operationStatus: {
+        backendKind: 'system-package-manager',
+        backend: 'brew',
+        packageName: 'media-info',
+        availableOperations: [],
+        unavailableReason: 'Integration operations require a ready detected integration.'
+      },
+      binaries: [{
+        binaryId: 'mediainfo',
+        displayName: 'mediainfo',
+        status: 'probe_failed',
+        probe: { errorKind: 'nonzero_exit', stderrTail: 'failed' }
+      }]
+    }, {
+      integrationId: 'remove-ai-watermarks',
+      displayName: 'Remove AI Watermarks',
+      description: 'Visible AI watermark removal and AI metadata cleanup CLI.',
+      category: 'image-cleanup',
+      status: 'ready',
+      summary: 'Ready.',
+      operationStatus: {
+        backendKind: 'python-cli-installer',
+        backend: 'uv',
+        packageName: 'remove-ai-watermarks',
+        availableOperations: ['update', 'uninstall']
+      },
+      binaries: [{
+        binaryId: 'remove-ai-watermarks',
+        displayName: 'remove-ai-watermarks',
+        status: 'ready',
+        version: '0.5.4'
+      }]
+    }],
+    ...overrides
+  };
+}

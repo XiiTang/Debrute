@@ -1,28 +1,41 @@
 import { describe, expect, it } from 'vitest';
 import {
   assertProjectTreeVisibleMutationPath,
-  isIgnoredProjectFilePath
+  isProjectVisiblePath
 } from './projectPaths';
 import { normalizeFileWatchEvent } from './index';
 
 describe('project path ignore rules', () => {
   it('ignores rendered Canvas feedback artifacts', () => {
-    expect(isIgnoredProjectFilePath('.debrute/reviews/rendered-feedback')).toBe(true);
-    expect(isIgnoredProjectFilePath('.debrute/reviews/rendered-feedback/assets/page.png.annotated.png')).toBe(true);
-    expect(isIgnoredProjectFilePath('.debrute/reviews/canvas-feedback.json')).toBe(false);
-    expect(isIgnoredProjectFilePath('assets/page.png')).toBe(false);
+    expect(isProjectVisiblePath('.debrute/reviews/rendered-feedback')).toBe(false);
+    expect(isProjectVisiblePath('.debrute/reviews/rendered-feedback/assets/page.png.annotated.png')).toBe(false);
+    expect(isProjectVisiblePath('.debrute/reviews/canvas-feedback.json')).toBe(true);
+    expect(isProjectVisiblePath('assets/page.png')).toBe(true);
   });
 
   it('ignores Canvas text preview artifacts', () => {
-    expect(isIgnoredProjectFilePath('.debrute/cache/canvas-text-previews')).toBe(true);
-    expect(isIgnoredProjectFilePath('.debrute/cache/canvas-text-previews/canvas-1/notes%2Fa.md--1234567890abcdef/source.png')).toBe(true);
-    expect(isIgnoredProjectFilePath('.debrute/cache/canvas-text-previews/canvas-1/notes%2Fa.md--1234567890abcdef/preview-w700.png')).toBe(true);
+    expect(isProjectVisiblePath('.debrute/cache/canvas-text-previews')).toBe(false);
+    expect(isProjectVisiblePath('.debrute/cache/canvas-text-previews/canvas-1/notes%2Fa.md--1234567890abcdef/source.png')).toBe(false);
+    expect(isProjectVisiblePath('.debrute/cache/canvas-text-previews/canvas-1/notes%2Fa.md--1234567890abcdef/preview-w700.png')).toBe(false);
   });
 
   it('ignores Canvas video preview artifacts', () => {
-    expect(isIgnoredProjectFilePath('.debrute/cache/canvas-video-previews')).toBe(true);
-    expect(isIgnoredProjectFilePath('.debrute/cache/canvas-video-previews/canvas-1/media%2Fclip.mp4--123/video-rev/initial-poster/source.jpg')).toBe(true);
-    expect(isIgnoredProjectFilePath('.debrute/cache/canvas-video-previews/canvas-1/media%2Fclip.mp4--123/video-rev/playback-frame/preview-w700.jpg')).toBe(true);
+    expect(isProjectVisiblePath('.debrute/cache/canvas-video-previews')).toBe(false);
+    expect(isProjectVisiblePath('.debrute/cache/canvas-video-previews/canvas-1/media%2Fclip.mp4--123/video-rev/initial-poster/source.jpg')).toBe(false);
+    expect(isProjectVisiblePath('.debrute/cache/canvas-video-previews/canvas-1/media%2Fclip.mp4--123/video-rev/playback-frame/preview-w700.jpg')).toBe(false);
+  });
+
+  it('ignores the complete Debrute cache and only Debrute-managed temporary files', () => {
+    expect(isProjectVisiblePath('.debrute/cache')).toBe(false);
+    expect(isProjectVisiblePath('.debrute/cache/file-fingerprints.json')).toBe(false);
+    expect(isProjectVisiblePath('notes/a.md.123e4567-e89b-42d3-a456-426614174000.tmp')).toBe(false);
+    expect(isProjectVisiblePath('notes/a.md.123e4567-e89b-42d3-a456-426614174000.restore.tmp')).toBe(false);
+    expect(isProjectVisiblePath('notes/.debrute-upload-123e4567-e89b-42d3-a456-426614174000.tmp')).toBe(false);
+    expect(isProjectVisiblePath('notes/.debrute-adobe-transfer-123e4567-e89b-42d3-a456-426614174000.tmp')).toBe(false);
+    expect(isProjectVisiblePath('.debrute/settings.lock/inside.md')).toBe(false);
+    expect(isProjectVisiblePath('notes/a.md.123e4567-e89b-42d3-a456-426614174000.tmp/inside.md')).toBe(false);
+    expect(isProjectVisiblePath('notes.tmp')).toBe(true);
+    expect(isProjectVisiblePath('notes/draft.tmp')).toBe(true);
   });
 
   it('reserves project-internal path namespaces case-insensitively', () => {
@@ -30,10 +43,10 @@ describe('project path ignore rules', () => {
       .toThrow('Project path is not visible in the Project Tree');
     expect(() => assertProjectTreeVisibleMutationPath('.DeBrute/canvases/index.json'))
       .toThrow('Project path is protected by the Project Document System');
-    expect(isIgnoredProjectFilePath('.DeBrute/cache/canvas-image-previews')).toBe(true);
-    expect(isIgnoredProjectFilePath('.DeBrute/cache/canvas-text-previews/canvas-1/preview.png')).toBe(true);
-    expect(isIgnoredProjectFilePath('.DeBrute/reviews/rendered-feedback/page.png.annotated.png')).toBe(true);
-    expect(isIgnoredProjectFilePath('.DeBrute/project.lock')).toBe(true);
+    expect(isProjectVisiblePath('.DeBrute/cache/canvas-image-previews')).toBe(false);
+    expect(isProjectVisiblePath('.DeBrute/cache/canvas-text-previews/canvas-1/preview.png')).toBe(false);
+    expect(isProjectVisiblePath('.DeBrute/reviews/rendered-feedback/page.png.annotated.png')).toBe(false);
+    expect(isProjectVisiblePath('.DeBrute/project.lock')).toBe(false);
     expect(() => assertProjectTreeVisibleMutationPath('.debrute-not-internal/file.md')).not.toThrow();
   });
 

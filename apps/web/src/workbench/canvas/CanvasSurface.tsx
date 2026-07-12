@@ -782,20 +782,29 @@ function CanvasSurfaceRuntime({
   }, [onOpenContextMenu, runtime]);
 
   const renderedNodes = [...renderSnapshot.nodesByPath.values()];
-  const selectedProjectRelativePathsForTextPreview = useMemo(
+  const selectedNodePathsForVideo = useMemo(
     () => selectedNodeProjectRelativePaths(selection),
     [selection]
   );
+  const activeInlineTextPath = useMemo(() => {
+    if (selection?.kind !== 'node') {
+      return undefined;
+    }
+    return projectedNodes.find((node) => (
+      node.projectRelativePath === selection.projectRelativePath
+      && node.mediaKind === 'text'
+    ))?.projectRelativePath;
+  }, [projectedNodes, selection]);
   const activeVideoPaths = useMemo(() => canvasActiveVideoPaths({
     nodes: projectedNodes,
-    selectedProjectRelativePaths: selectedProjectRelativePathsForTextPreview,
+    selectedProjectRelativePaths: selectedNodePathsForVideo,
     playingVideoPaths,
     requestedVideoPlayerPath
   }), [
     playingVideoPaths,
     projectedNodes,
     requestedVideoPlayerPath,
-    selectedProjectRelativePathsForTextPreview
+    selectedNodePathsForVideo
   ]);
   const handleVideoPlayerMounted = useCallback((projectRelativePath: string) => {
     setRequestedVideoPlayerPath((current) => current === projectRelativePath ? undefined : current);
@@ -1108,7 +1117,7 @@ function CanvasSurfaceRuntime({
           <CanvasTextPreviewProvider
             canvasId={canvas.id}
             nodes={projectedNodes}
-            selectedProjectRelativePaths={selectedProjectRelativePathsForTextPreview}
+            activeInlineTextPath={activeInlineTextPath}
             textFileBuffers={textFileBuffers}
             actions={actions}
             cameraState={cameraState}
@@ -1116,7 +1125,6 @@ function CanvasSurfaceRuntime({
             resourceZoom={resourceZoom}
             devicePixelRatio={devicePixelRatio}
             culledNodePaths={renderSnapshot.culledNodePaths}
-            previewResourceScheduler={previewResourceScheduler}
             styleDependencyKey={textPreviewStyleDependencyKey}
             perfMonitor={perfMonitor}
           >
@@ -1126,6 +1134,9 @@ function CanvasSurfaceRuntime({
                   key={node.projectRelativePath}
                   node={node}
                   selected={isCanvasItemSelected(selection, { kind: 'node', projectRelativePath: node.projectRelativePath })}
+                  textEditorActive={selection?.kind === 'node'
+                    && selection.projectRelativePath === node.projectRelativePath
+                    && node.mediaKind === 'text'}
                   hovered={hoveredNodePath === node.projectRelativePath}
                   culled={renderSnapshot.culledNodePaths.has(node.projectRelativePath)}
                   zIndex={renderSnapshot.nodeRenderOrder.get(node.projectRelativePath)?.zIndex ?? node.z}
@@ -1133,7 +1144,6 @@ function CanvasSurfaceRuntime({
                   actions={actions}
                   textBuffer={textFileBuffers[node.projectRelativePath]}
                   forceVideoPlayerMounted={requestedVideoPlayerPath === node.projectRelativePath}
-                  previewInteractionActive={cameraState !== 'idle' || dragState !== undefined}
                   feedbackEntry={canvasFeedback?.entries[node.projectRelativePath]}
                   localFeedbackMode={
                     (node.mediaKind === 'image' || node.mediaKind === 'video') && pendingFeedbackItem?.projectRelativePath === node.projectRelativePath
@@ -1184,6 +1194,7 @@ function CanvasSurfaceRuntime({
 function CanvasSurfaceNodeShell({
   node,
   selected,
+  textEditorActive,
   hovered,
   culled,
   zIndex,
@@ -1191,7 +1202,6 @@ function CanvasSurfaceNodeShell({
   actions,
   textBuffer,
   forceVideoPlayerMounted,
-  previewInteractionActive,
   feedbackEntry,
   localFeedbackMode,
   pendingFeedbackRegion,
@@ -1213,6 +1223,7 @@ function CanvasSurfaceNodeShell({
 }: {
   node: ProjectedCanvasNode;
   selected: boolean;
+  textEditorActive: boolean;
   hovered: boolean;
   culled: boolean;
   zIndex: number;
@@ -1220,7 +1231,6 @@ function CanvasSurfaceNodeShell({
   actions: WorkbenchActions;
   textBuffer: TextFileBuffer | undefined;
   forceVideoPlayerMounted: boolean;
-  previewInteractionActive: boolean;
   feedbackEntry?: CanvasFeedbackEntry | undefined;
   localFeedbackMode?: CanvasMediaFeedbackMode | undefined;
   pendingFeedbackRegion?: {
@@ -1248,8 +1258,8 @@ function CanvasSurfaceNodeShell({
 }): React.ReactElement {
   const textPreviewRuntime = useCanvasTextPreviewRuntime();
   const videoPreviewRuntime = useCanvasVideoPreviewRuntime();
-  const textPreview = node.mediaKind === 'text'
-    ? textPreviewRuntime.previewForNode({ node })
+  const textPreviewPresentation = node.mediaKind === 'text'
+    ? textPreviewRuntime.presentationForNode({ node })
     : undefined;
   const textPreviewError = node.mediaKind === 'text'
     ? textPreviewRuntime.previewErrorForNode({ node })
@@ -1276,18 +1286,20 @@ function CanvasSurfaceNodeShell({
     <CanvasNodeShell
       node={node}
       selected={selected}
+      textEditorActive={textEditorActive}
       hovered={hovered}
       culled={culled}
       zIndex={zIndex}
       stageRuntime={stageRuntime}
       actions={actions}
       textBuffer={textBuffer}
-      textPreview={textPreview}
+      textPreview={textPreviewPresentation?.visible}
+      pendingTextPreview={textPreviewPresentation?.pending}
+      textPreviewCommittedSourceKey={textPreviewPresentation?.visibleCommittedSourceKey}
       textPreviewError={textPreviewError}
       videoPreview={videoPreview}
       videoPreviewError={videoPreviewError}
       forceVideoPlayerMounted={forceVideoPlayerMounted}
-      previewInteractionActive={previewInteractionActive}
       feedbackEntry={feedbackEntry}
       localFeedbackMode={localFeedbackMode}
       pendingFeedbackRegion={pendingFeedbackRegion}

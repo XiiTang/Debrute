@@ -268,10 +268,17 @@ function packageJsonViolations(file, text) {
     return [];
   }
   const pkg = JSON.parse(text);
-  const dependencies = new Set(Object.keys(pkg.dependencies ?? {}));
-  return ['@debrute/project-core', '@debrute/canvas-map-core', '@debrute/canvas-core', '@debrute/capability-core']
-    .filter((dependency) => dependencies.has(dependency))
-    .map((dependency) => `cli stays behind app-server and protocol boundaries: ${file} depends on ${dependency}`);
+  const forbiddenDependencies = new Set([
+    '@debrute/daemon',
+    '@debrute/app-server',
+    '@debrute/project-core',
+    '@debrute/canvas-map-core',
+    '@debrute/canvas-core',
+    '@debrute/capability-core'
+  ]);
+  return packageDependencySections.flatMap((sectionName) => Object.keys(pkg[sectionName] ?? {})
+    .filter((dependency) => forbiddenDependencies.has(dependency))
+    .map((dependency) => `cli stays behind app-server and protocol boundaries: ${file} declares ${dependency} in ${sectionName}`));
 }
 
 function tsconfigViolations(file, text) {
@@ -297,7 +304,14 @@ function tsconfigViolations(file, text) {
   }
   const config = JSON.parse(text);
   const references = (config.references ?? []).map((reference) => reference.path);
-  return ['../../packages/project-core', '../../packages/canvas-map-core', '../../packages/canvas-core', '../../packages/capability-core']
+  return [
+    '../../apps/daemon',
+    '../../apps/app-server',
+    '../../packages/project-core',
+    '../../packages/canvas-map-core',
+    '../../packages/canvas-core',
+    '../../packages/capability-core'
+  ]
     .filter((reference) => references.includes(reference))
     .map((reference) => `cli stays behind app-server and protocol boundaries: ${file} references ${reference}`);
 }

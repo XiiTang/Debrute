@@ -299,7 +299,6 @@ class LocalCanvasFeedbackRenderScheduler implements CanvasFeedbackRenderSchedule
           diagnostics: [canvasFeedbackRenderDiagnostic(
             state.projectRoot,
             state.artifact,
-            state.artifactProjectPath,
             state.diagnosticProjectRelativePath,
             result.message
           )],
@@ -315,7 +314,6 @@ class LocalCanvasFeedbackRenderScheduler implements CanvasFeedbackRenderSchedule
         diagnostics: [canvasFeedbackRenderDiagnostic(
           state.projectRoot,
           state.artifact,
-          state.artifactProjectPath,
           state.diagnosticProjectRelativePath,
           error
         )],

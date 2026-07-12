@@ -5,12 +5,12 @@ import type { RuntimeSupervisor } from '../runtime/runtimeSupervisor.js';
 import { buildRuntimeTrayMenuTemplate, type RuntimeTrayActions } from './runtimeTrayMenu.js';
 
 export interface TrayControllerInput {
-  app: Electron.App;
   Tray: typeof electron.Tray;
   Menu: typeof electron.Menu;
   nativeImage: typeof electron.nativeImage;
   runtimeSupervisor: RuntimeSupervisor;
   readRecentProjectRoots(): Promise<string[]>;
+  onInteraction(): void;
   actions: RuntimeTrayActions;
 }
 
@@ -24,6 +24,8 @@ export class TrayController {
     this.input.runtimeSupervisor.on('change', () => {
       void this.refresh();
     });
+    this.tray.on('click', this.input.onInteraction);
+    this.tray.on('right-click', this.input.onInteraction);
     await this.refresh();
   }
 

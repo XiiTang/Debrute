@@ -57,7 +57,7 @@ export {
   isWorkbenchRuntimeOwnedBy,
   terminateManagedWorkbenchRuntime,
   terminateOwnedWorkbenchRuntime,
-  type WorkbenchRuntimeKill
+  type WorkbenchRuntimeProcessOperations
 } from './processControl.js';
 export {
   ensureRegisteredWorkbenchRuntime,

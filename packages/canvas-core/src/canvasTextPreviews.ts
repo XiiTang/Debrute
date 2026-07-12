@@ -17,7 +17,6 @@ export function canvasTextPreviewVariantProjectPath(input: CanvasTextPreviewPath
 
 function canvasTextPreviewBaseProjectPath(input: CanvasTextPreviewPathInput): string {
   const canvasId = normalizeCanvasTextPreviewCanvasId(input.canvasId);
-  assertCanvasTextPreviewProjectRelativePath(input.projectRelativePath);
   const sourceKey = projectRelativePathCacheKey(input.projectRelativePath);
   const fingerprintKey = normalizeCanvasTextPreviewFingerprint(input.fingerprint);
   return `.debrute/cache/canvas-text-previews/${canvasId}/${sourceKey}/${fingerprintKey}`;
@@ -28,12 +27,6 @@ function normalizeCanvasTextPreviewCanvasId(canvasId: string): string {
     throw new Error('Canvas text preview canvas id must be a valid id.');
   }
   return canvasId;
-}
-
-function assertCanvasTextPreviewProjectRelativePath(projectRelativePath: string): void {
-  if (projectRelativePath.split('/', 1)[0]?.toLowerCase() === '.debrute') {
-    throw new Error('Canvas text preview cannot target Debrute internal files.');
-  }
 }
 
 function normalizeCanvasTextPreviewFingerprint(fingerprint: string): string {

@@ -159,8 +159,7 @@ describe('text editor window state', () => {
         wordWrap: false,
         dirty: false,
         saving: false,
-        diskRevision: 'rev-a',
-        lastSavedRevision: 'rev-a',
+        baseRevision: 'rev-a',
         externalChange: false
       },
       statusLabels

@@ -2,7 +2,7 @@ import { describe, expect, it, vi } from 'vitest';
 import type { TerminalEvent } from '@debrute/app-protocol';
 import { createTerminalEventRenderer } from './terminalEventRendering';
 
-describe('terminal event rendering', () => {
+describe('terminal event rendering', { tags: ['terminal'] }, () => {
   it('does not write replay or data chunks that were already rendered', () => {
     const writes: string[] = [];
     const onSessionUpdate = vi.fn();

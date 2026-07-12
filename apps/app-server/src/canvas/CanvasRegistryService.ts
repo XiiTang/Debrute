@@ -1,7 +1,6 @@
-import { createHash } from 'node:crypto';
 import { readdir, readFile } from 'node:fs/promises';
 import { join } from 'node:path';
-import { getDebruteProjectPaths } from '@debrute/project-core';
+import { getDebruteProjectPaths, projectContentHash } from '@debrute/project-core';
 import {
   assertCanvasDocumentId,
   createCanvasDocument,
@@ -63,7 +62,7 @@ export class CanvasRegistryService {
         })
       ]
     });
-    this.canvasMapSourceHashByProjectCanvas.set(projectCanvasKey(projectRoot, canvas.id), rawContentHash(EMPTY_CANVAS_MAP_SOURCE));
+    this.canvasMapSourceHashByProjectCanvas.set(projectCanvasKey(projectRoot, canvas.id), projectContentHash(EMPTY_CANVAS_MAP_SOURCE));
   }
 
   async readRegistry(projectRoot: string): Promise<CanvasRegistryReadResult> {
@@ -113,7 +112,7 @@ export class CanvasRegistryService {
         })
       ]
     });
-    this.canvasMapSourceHashByProjectCanvas.set(projectCanvasKey(projectRoot, canvasId), rawContentHash(EMPTY_CANVAS_MAP_SOURCE));
+    this.canvasMapSourceHashByProjectCanvas.set(projectCanvasKey(projectRoot, canvasId), projectContentHash(EMPTY_CANVAS_MAP_SOURCE));
     return { canvasId };
   }
 
@@ -164,7 +163,7 @@ export class CanvasRegistryService {
     await this.writeStructuredDocuments(projectRoot, {
       reads: [
         { absolutePath: paths.canvasIndexFile, expectedHash: sourceHash },
-        { absolutePath: mapPath, expectedHash: rawContentHash(sourceMapContent) },
+        { absolutePath: mapPath, expectedHash: projectContentHash(sourceMapContent) },
         { absolutePath: jsonPath, expectedHash: jsonHash }
       ],
       writes: [
@@ -257,7 +256,7 @@ export class CanvasRegistryService {
 
     try {
       const document = normalizeCanvasRegistryDocument(JSON.parse(content));
-      const sourceHash = rawContentHash(content);
+      const sourceHash = projectContentHash(content);
       return {
         state: { status: 'ready', canvasOrder: document.canvasOrder },
         sourceHash,
@@ -283,7 +282,7 @@ export class CanvasRegistryService {
     });
     for (const write of input.writes ?? []) {
       if (write.absolutePath === getDebruteProjectPaths(projectRoot).canvasIndexFile) {
-        this.registrySourceHashByProjectRoot.set(projectRoot, rawContentHash(write.content));
+        this.registrySourceHashByProjectRoot.set(projectRoot, projectContentHash(write.content));
       }
     }
   }
@@ -308,14 +307,14 @@ export class CanvasRegistryService {
   private async recordCanvasMapHashes(projectRoot: string, canvasIds: string[]): Promise<void> {
     for (const canvasId of canvasIds) {
       const content = await readFile(join(getDebruteProjectPaths(projectRoot).canvasMapsDir, `${canvasId}.yaml`), 'utf8');
-      this.canvasMapSourceHashByProjectCanvas.set(projectCanvasKey(projectRoot, canvasId), rawContentHash(content));
+      this.canvasMapSourceHashByProjectCanvas.set(projectCanvasKey(projectRoot, canvasId), projectContentHash(content));
     }
   }
 
   private async assertCanvasMapHash(projectRoot: string, canvasId: string): Promise<string> {
     const path = join(getDebruteProjectPaths(projectRoot).canvasMapsDir, `${canvasId}.yaml`);
     const content = await readFile(path, 'utf8');
-    const current = rawContentHash(content);
+    const current = projectContentHash(content);
     const expected = this.canvasMapSourceHashByProjectCanvas.get(projectCanvasKey(projectRoot, canvasId));
     if (expected !== current) {
       throw serviceError('canvas_map_conflict', 'Canvas Map changed on disk. Push or refresh before retrying.', {
@@ -417,10 +416,6 @@ function canvasJsonWrite(projectRoot: string, canvasId: string, canvas: CanvasDo
     absolutePath: join(getDebruteProjectPaths(projectRoot).canvasesDir, `${canvasId}.json`),
     content: `${JSON.stringify(canvas, null, 2)}\n`
   };
-}
-
-function rawContentHash(content: string): string {
-  return `sha256:${createHash('sha256').update(content).digest('hex')}`;
 }
 
 function projectCanvasKey(projectRoot: string, canvasId: string): string {

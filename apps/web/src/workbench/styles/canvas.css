@@ -526,6 +526,20 @@
   transform-origin: top left;
 }
 
+.canvas-node-shell.fixed-presentation.text > .canvas-node-presentation {
+  position: relative;
+  left: calc(-1px * var(--canvas-chrome-scale, 1));
+  top: calc(-1px * var(--canvas-chrome-scale, 1));
+  width: calc(
+    (100% + 2px * var(--canvas-chrome-scale, 1)) /
+    var(--canvas-node-presentation-scale, 1)
+  );
+  height: calc(
+    (100% + 2px * var(--canvas-chrome-scale, 1)) /
+    var(--canvas-node-presentation-scale, 1)
+  );
+}
+
 .canvas-node-preview {
   position: relative;
   width: 100%;
@@ -852,11 +866,31 @@
 
 .canvas-text-preview-image {
   display: block;
+  position: absolute;
+  inset: 0;
   width: 100%;
   height: 100%;
   object-fit: fill;
   user-select: none;
   pointer-events: none;
+}
+
+.canvas-text-preview-layers {
+  position: absolute;
+  inset: 0;
+  z-index: 2;
+  width: 100%;
+  height: 100%;
+  pointer-events: none;
+}
+
+.canvas-text-preview-image--visible {
+  z-index: 1;
+}
+
+.canvas-text-preview-image--pending {
+  z-index: 0;
+  opacity: 0;
 }
 
 .canvas-text-preview-empty {
@@ -881,6 +915,8 @@
 }
 
 .canvas-text-editor {
+  position: relative;
+  z-index: 1;
   width: 100%;
   height: 100%;
   overflow: hidden;
@@ -994,6 +1030,7 @@
 .canvas-text-message--overlay {
   position: absolute;
   inset: 0;
+  z-index: 3;
   background: color-mix(in oklch, var(--db-danger-bg) 88%, transparent);
   pointer-events: none;
 }

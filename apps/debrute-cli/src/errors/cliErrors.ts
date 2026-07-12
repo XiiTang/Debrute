@@ -46,9 +46,10 @@ export class DebruteCliError extends Error {
   constructor(
     readonly code: DebruteCliErrorCode,
     message: string,
-    readonly fields: Record<string, string | number | boolean> = {}
+    readonly fields: Record<string, string | number | boolean> = {},
+    options?: ErrorOptions
   ) {
-    super(message);
+    super(message, options);
     this.name = 'DebruteCliError';
   }
 }
@@ -56,9 +57,10 @@ export class DebruteCliError extends Error {
 export function cliError(
   code: DebruteCliErrorCode,
   message: string,
-  fields: Record<string, string | number | boolean> = {}
+  fields: Record<string, string | number | boolean> = {},
+  options?: ErrorOptions
 ): DebruteCliError {
-  return new DebruteCliError(code, message, fields);
+  return new DebruteCliError(code, message, fields, options);
 }
 
 export function isDebruteCliError(error: unknown): error is DebruteCliError {

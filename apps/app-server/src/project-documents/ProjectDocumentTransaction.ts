@@ -1,7 +1,7 @@
-import { createHash, randomUUID } from 'node:crypto';
+import { randomUUID } from 'node:crypto';
 import { mkdir, open, readFile, realpath, rename, rm, writeFile, type FileHandle } from 'node:fs/promises';
 import { dirname, isAbsolute, relative } from 'node:path';
-import { resolveNoSymlinkProjectPathForWrite } from '@debrute/project-core';
+import { projectContentHash, resolveNoSymlinkProjectPathForWrite } from '@debrute/project-core';
 import { documentServiceError } from './ProjectDocumentDiagnostics.js';
 import { projectDocumentDescriptorForPath } from './documentDescriptors.js';
 
@@ -13,14 +13,14 @@ export interface ProjectDocumentReadParticipant {
 export interface ProjectDocumentWrite {
   absolutePath: string;
   content: string;
-  suppressInternalEvent?: (absolutePath: string, content: string) => void;
-  clearInternalEvent?: (absolutePath: string) => void;
+  recordInternalWrite?: (absolutePath: string, content: string) => void;
+  forgetInternalWrite?: (absolutePath: string) => void;
 }
 
 export interface ProjectDocumentDelete {
   absolutePath: string;
-  suppressInternalEvent?: (absolutePath: string) => void;
-  clearInternalEvent?: (absolutePath: string) => void;
+  recordInternalWrite?: (absolutePath: string) => void;
+  forgetInternalWrite?: (absolutePath: string) => void;
 }
 
 export interface ProjectDocumentTransactionInput {
@@ -51,7 +51,7 @@ interface ResolvedProjectDocumentDelete extends ProjectDocumentDelete {
 export async function projectDocumentFileHash(absolutePath: string): Promise<string | null> {
   try {
     const content = await readFile(absolutePath);
-    return projectDocumentBufferHash(content);
+    return projectContentHash(content);
   } catch (error) {
     if (isMissingPathError(error)) {
       return null;
@@ -61,7 +61,7 @@ export async function projectDocumentFileHash(absolutePath: string): Promise<str
 }
 
 export function projectDocumentTextHash(content: string): string {
-  return projectDocumentBufferHash(Buffer.from(content, 'utf8'));
+  return projectContentHash(content);
 }
 
 export async function commitProjectDocumentTransaction(input: ProjectDocumentTransactionInput): Promise<void> {
@@ -104,12 +104,12 @@ export async function commitProjectDocumentTransaction(input: ProjectDocumentTra
       }
 
       for (const [index, write] of resolvedWrites.entries()) {
-        write.suppressInternalEvent?.(write.resolvedAbsolutePath, write.content);
+        write.recordInternalWrite?.(write.resolvedAbsolutePath, write.content);
         await rename(stagedWrites[index]!.tempPath, write.resolvedAbsolutePath);
       }
 
       for (const deleteItem of resolvedDeletes) {
-        deleteItem.suppressInternalEvent?.(deleteItem.resolvedAbsolutePath);
+        deleteItem.recordInternalWrite?.(deleteItem.resolvedAbsolutePath);
         await rm(deleteItem.resolvedAbsolutePath, { force: true });
       }
     } catch (error) {
@@ -155,14 +155,14 @@ async function abortProjectDocumentTransaction(
   }
   for (const write of writes) {
     try {
-      write.clearInternalEvent?.(write.resolvedAbsolutePath);
+      write.forgetInternalWrite?.(write.resolvedAbsolutePath);
     } catch (error) {
       cleanupError ??= error;
     }
   }
   for (const deleteItem of deletes) {
     try {
-      deleteItem.clearInternalEvent?.(deleteItem.resolvedAbsolutePath);
+      deleteItem.forgetInternalWrite?.(deleteItem.resolvedAbsolutePath);
     } catch (error) {
       cleanupError ??= error;
     }
@@ -173,10 +173,6 @@ async function abortProjectDocumentTransaction(
     cleanupError ??= error;
   }
   return cleanupError;
-}
-
-function projectDocumentBufferHash(content: Buffer): string {
-  return `sha256:${createHash('sha256').update(content).digest('hex')}`;
 }
 
 async function resolveProjectDocumentWrites(
@@ -353,31 +349,31 @@ async function restoreProjectDocumentBackups(
   await Promise.all([...backups.entries()].map(async ([absolutePath, content]) => {
     const operation = operationByPath.get(absolutePath);
     if (content === null) {
-      suppressRollbackEvent(operation, absolutePath);
+      recordRollbackWrite(operation, absolutePath);
       await rm(absolutePath, { force: true });
       return;
     }
     await mkdir(dirname(absolutePath), { recursive: true });
     const tempPath = `${absolutePath}.${randomUUID()}.restore.tmp`;
     await writeFile(tempPath, content);
-    suppressRollbackEvent(operation, absolutePath, content.toString('utf8'));
+    recordRollbackWrite(operation, absolutePath, content.toString('utf8'));
     await rename(tempPath, absolutePath);
   }));
 }
 
-function suppressRollbackEvent(
+function recordRollbackWrite(
   operation: ResolvedProjectDocumentWrite | ResolvedProjectDocumentDelete | undefined,
   absolutePath: string,
   content?: string
 ): void {
-  if (!operation?.suppressInternalEvent) {
+  if (!operation?.recordInternalWrite) {
     return;
   }
   if (content === undefined) {
-    (operation.suppressInternalEvent as (path: string) => void)(absolutePath);
+    (operation.recordInternalWrite as (path: string) => void)(absolutePath);
     return;
   }
-  (operation.suppressInternalEvent as (path: string, content: string) => void)(absolutePath, content);
+  (operation.recordInternalWrite as (path: string, content: string) => void)(absolutePath, content);
 }
 
 async function projectRelativeDocumentPath(projectRoot: string, absolutePath: string): Promise<string> {

@@ -1,4 +1,4 @@
-import type { DebruteAppServer, CliAudioModelDetail, CliImageModelDetail, CliRuntimeDiagnostic, CliVideoModelDetail } from '@debrute/app-server';
+import type { DebruteAppServer, CliAudioModelDetail, CliImageModelDetail, CliVideoModelDetail } from '@debrute/app-server';
 import type { DebruteCapabilityResult } from '@debrute/capability-core';
 import type {
   DaemonCliCommandRequest,

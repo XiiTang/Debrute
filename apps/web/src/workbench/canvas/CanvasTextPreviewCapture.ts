@@ -1,28 +1,77 @@
 import { toBlob } from 'html-to-image';
 import type { ProjectTextLanguageId } from '@debrute/project-core';
+import {
+  canvasTextPreviewFailureFromUnknown,
+  type CanvasTextPreviewFailureFields
+} from './CanvasTextPreviewFailure';
+import {
+  assertCanvasTextPreviewSnapshot,
+  type CanvasTextPreviewSnapshot
+} from './CanvasTextPreviewSnapshot';
 
 export const CANVAS_TEXT_PREVIEW_SOURCE_SCALE = 4;
 
-const CANVAS_TEXT_PREVIEW_VISUAL_VERSION = 'canvas-text-preview-v11';
+const CANVAS_TEXT_PREVIEW_VISUAL_VERSION = 'canvas-text-preview-v13';
+
+export interface CanvasTextPreviewCandidate {
+  canvasId: string;
+  projectRelativePath: string;
+  content: string;
+  language: ProjectTextLanguageId;
+  wordWrap: boolean;
+  contentCssWidth: number;
+  contentCssHeight: number;
+  scrollTop: number;
+  scrollLeft: number;
+  styleKey: string;
+}
+
+export interface CanvasTextPreviewTarget extends CanvasTextPreviewCandidate {
+  fingerprint: string;
+}
+
+export interface CanvasTextPreviewRasterResult {
+  sourcePng: Blob;
+  snapshotWidth: number;
+  snapshotHeight: number;
+  snapshotBytes: number;
+  rasterDurationMs: number;
+}
 
 export async function captureCanvasTextPreviewSource(input: {
-  element: HTMLElement;
-}): Promise<Blob> {
-  const width = input.element.clientWidth;
-  const height = input.element.clientHeight;
-  if (!Number.isFinite(width) || width <= 0 || !Number.isFinite(height) || height <= 0) {
-    throw new Error('Canvas text preview source element must have positive dimensions.');
+  snapshot: CanvasTextPreviewSnapshot;
+  fields: CanvasTextPreviewFailureFields;
+}): Promise<CanvasTextPreviewRasterResult> {
+  assertCanvasTextPreviewSnapshot(input.snapshot, input.fields);
+  const startedAt = performance.now();
+  try {
+    const sourcePng = await toBlob(input.snapshot.root, {
+      pixelRatio: CANVAS_TEXT_PREVIEW_SOURCE_SCALE,
+      width: input.snapshot.width,
+      height: input.snapshot.height,
+      backgroundColor: 'transparent',
+      skipFonts: true,
+      includeStyleProperties: []
+    });
+    if (!sourcePng) {
+      throw new Error('Canvas text preview raster did not produce a PNG blob.');
+    }
+    return {
+      sourcePng,
+      snapshotWidth: input.snapshot.width,
+      snapshotHeight: input.snapshot.height,
+      snapshotBytes: input.snapshot.serializedBytes,
+      rasterDurationMs: performance.now() - startedAt
+    };
+  } catch (error) {
+    throw canvasTextPreviewFailureFromUnknown('raster_failed', {
+      ...input.fields,
+      snapshotWidth: input.snapshot.width,
+      snapshotHeight: input.snapshot.height,
+      snapshotBytes: input.snapshot.serializedBytes,
+      durationMs: performance.now() - startedAt
+    }, error);
   }
-  const blob = await toBlob(input.element, {
-    pixelRatio: CANVAS_TEXT_PREVIEW_SOURCE_SCALE,
-    width,
-    height,
-    backgroundColor: 'transparent'
-  });
-  if (!blob) {
-    throw new Error('Canvas text preview source capture did not produce a PNG blob.');
-  }
-  return blob;
 }
 
 export async function canvasTextPreviewFingerprint(input: {

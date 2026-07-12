@@ -32,7 +32,6 @@ export interface CanvasTextEditorCallbacks {
   onChange: (value: string) => void;
   onSave: () => void;
   onToggleWordWrap: () => void;
-  onCancel: () => void;
 }
 
 export interface CanvasTextEditorFocusRequest {
@@ -90,7 +89,6 @@ export function canvasTextEditorExternalValueSyncAnnotations() {
 }
 
 export function canvasTextEditorKeymap(callbacks: CanvasTextEditorCallbackRef): readonly KeyBinding[] {
-  const cancelInlineEdit = canvasTextEditorCancelInlineEditKeyBinding(callbacks);
   return [
     {
       key: 'Mod-s',
@@ -109,21 +107,9 @@ export function canvasTextEditorKeymap(callbacks: CanvasTextEditorCallbackRef): 
       }
     },
     ...searchKeymap,
-    cancelInlineEdit,
     ...defaultKeymap,
     ...historyKeymap
   ];
-}
-
-export function canvasTextEditorCancelInlineEditKeyBinding(callbacks: CanvasTextEditorCallbackRef): KeyBinding {
-  return {
-    key: 'Escape',
-    preventDefault: true,
-    run: () => {
-      callbacks.current.onCancel();
-      return true;
-    }
-  };
 }
 
 export function canvasTextEditorUpdateListener(

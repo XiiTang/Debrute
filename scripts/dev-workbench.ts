@@ -33,7 +33,7 @@ for (const signal of ['SIGINT', 'SIGTERM'] as const) {
 const result = await ensureRegisteredWorkbenchRuntime({
   paths,
   launch: launchSourceDevRuntime,
-  onRuntimeLaunchFailed: killChildren
+  onRuntimeLaunchFailed: stopChildren
 });
 currentRuntimeState = result.state;
 deleteOwnState = result.runtimeStarted;
@@ -139,20 +139,26 @@ function requirePid(child: ChildProcess, label: string): number {
 }
 
 async function shutdown(state: WorkbenchRuntimeState | undefined, shouldDeleteState: boolean): Promise<void> {
-  killChildren();
+  await stopChildren();
   if (!state || !shouldDeleteState) {
     return;
   }
-  const current = await readWorkbenchRuntimeState(paths.statePath).catch(() => undefined);
+  const current = await readWorkbenchRuntimeState(paths.statePath);
   if (current?.daemonUrl === state.daemonUrl && current.webUrl === state.webUrl && current.token === state.token) {
     await deleteWorkbenchRuntimeState(paths.statePath);
   }
 }
 
-function killChildren(): void {
-  for (const child of children) {
-    if (child.pid) {
-      child.kill('SIGTERM');
-    }
+async function stopChildren(): Promise<void> {
+  await Promise.all(children.map((child) => stopChild(child)));
+}
+
+async function stopChild(child: ChildProcess): Promise<void> {
+  if (child.exitCode !== null || child.signalCode !== null) {
+    return;
   }
+  await new Promise<void>((resolveExit) => {
+    child.once('exit', () => resolveExit());
+    child.kill('SIGTERM');
+  });
 }

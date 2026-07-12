@@ -2,7 +2,6 @@ import { mkdir, readdir, rm, writeFile } from 'node:fs/promises';
 import { dirname, join } from 'node:path';
 import sharp from 'sharp';
 import {
-  canvasFeedbackRenderedProjectPath,
   canvasFeedbackSpatialItemsForMoment,
   type CanvasFeedbackSpatialItem,
   type Diagnostic
@@ -94,7 +93,6 @@ export function createCanvasFeedbackOverlaySvg(input: {
 export function canvasFeedbackRenderDiagnostic(
   projectRoot: string,
   artifact: CanvasFeedbackArtifact,
-  artifactProjectPath: string,
   diagnosticProjectRelativePath: string,
   error: unknown
 ): Diagnostic {

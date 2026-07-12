@@ -116,26 +116,36 @@ export async function resolveNoSymlinkProjectPathForWrite(projectRoot: string, p
 }
 
 export function assertProjectTreeVisibleMutationPath(projectRelativePath: string): void {
-  const normalizedPath = normalizeProjectRelativePath(projectRelativePath);
-  if (isProjectGitMetadataPath(normalizedPath) || isIgnoredProjectFilePath(normalizedPath)) {
-    throw new Error(`Project path is not visible in the Project Tree: ${projectRelativePath}`);
-  }
+  const normalizedPath = assertProjectTreeVisiblePath(projectRelativePath);
   if (isProtectedProjectDocumentMutationPath(normalizedPath)) {
     throw new Error(`Project path is protected by the Project Document System: ${projectRelativePath}`);
   }
 }
 
-export function isProjectGitMetadataPath(projectRelativePath: string): boolean {
+export function assertProjectTreeVisiblePath(projectRelativePath: string): string {
+  const normalizedPath = normalizeProjectRelativePath(projectRelativePath);
+  if (!isProjectVisiblePath(normalizedPath)) {
+    throw new Error(`Project path is not visible in the Project Tree: ${projectRelativePath}`);
+  }
+  return normalizedPath;
+}
+
+export function isProjectVisiblePath(projectRelativePath: string): boolean {
+  return !isProjectGitMetadataPath(projectRelativePath)
+    && !isExcludedProjectPath(projectRelativePath);
+}
+
+function isProjectGitMetadataPath(projectRelativePath: string): boolean {
   return isProjectPathSameOrChild(projectReservedNamespacePolicyPath(projectRelativePath), '.git');
 }
 
-export function isIgnoredProjectFilePath(projectRelativePath: string): boolean {
+function isExcludedProjectPath(projectRelativePath: string): boolean {
   const policyPath = projectReservedNamespacePolicyPath(projectRelativePath);
-  return isProjectPathSameOrChild(policyPath, '.debrute/cache/canvas-image-previews')
-    || isProjectPathSameOrChild(policyPath, '.debrute/cache/canvas-text-previews')
-    || isProjectPathSameOrChild(policyPath, '.debrute/cache/canvas-video-previews')
+  const pathSegments = policyPath.split('/');
+  return isProjectPathSameOrChild(policyPath, '.debrute/cache')
     || isProjectPathSameOrChild(policyPath, '.debrute/reviews/rendered-feedback')
-    || (isProjectPathSameOrChild(policyPath, '.debrute') && policyPath.endsWith('.lock'));
+    || (pathSegments[0] === '.debrute' && pathSegments.slice(1).some((segment) => segment.endsWith('.lock')))
+    || pathSegments.some((segment) => MANAGED_TEMPORARY_BASENAME.test(segment));
 }
 
 export function isProtectedProjectDocumentMutationPath(projectRelativePath: string): boolean {
@@ -160,6 +170,12 @@ function isProjectPathSameOrChild(projectRelativePath: string, parentProjectRela
   return projectRelativePath === parentProjectRelativePath
     || projectRelativePath.startsWith(`${parentProjectRelativePath}/`);
 }
+
+const UUID_PATH_SEGMENT = '[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}';
+const MANAGED_TEMPORARY_BASENAME = new RegExp(
+  `^(?:.+\\.${UUID_PATH_SEGMENT}(?:\\.restore)?|\\.debrute-(?:upload|adobe-transfer)-${UUID_PATH_SEGMENT})\\.tmp$`,
+  'i'
+);
 
 async function nearestExistingParentRealPath(projectRoot: string, absoluteParentPath: string): Promise<string> {
   const root = resolve(projectRoot);

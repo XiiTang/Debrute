@@ -4,7 +4,7 @@ import {
   canvasTextSurfaceCssVariables
 } from './CanvasTextSurface';
 
-describe('CanvasTextSurface', () => {
+describe('CanvasTextSurface', { tags: ['canvas-text'] }, () => {
   it('emits all editor text metrics from one source', () => {
     expect(canvasTextSurfaceCssVariables()).toEqual({
       '--canvas-text-editor-font-family': CANVAS_TEXT_SURFACE_METRICS.fontFamily,

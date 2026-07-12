@@ -1,0 +1,53 @@
+import { describe, expect, it } from 'vitest';
+import { runtimePolicyForCommand } from './cliRuntimePolicy.js';
+
+describe('CLI runtime policy', { tags: ['runtime'] }, () => {
+  it('keeps metadata commands local', () => {
+    for (const command of ['commands', 'help']) {
+      expect(runtimePolicyForCommand(command)).toBe('no-runtime');
+    }
+  });
+
+  it('observes runtime status without starting runtime', () => {
+    for (const command of ['runtime.status', 'runtime.doctor']) {
+      expect(runtimePolicyForCommand(command)).toBe('observe-runtime');
+    }
+  });
+
+  it('ensures runtime for project, model, workbench, product, Skills, and generation commands', () => {
+    for (const command of [
+      'update',
+      'workbench.start',
+      'skills.status',
+      'models.image.list',
+      'models.image.describe',
+      'models.video.list',
+      'models.video.describe',
+      'models.tts.list',
+      'models.tts.describe',
+      'models.music.list',
+      'models.music.describe',
+      'models.sfx.list',
+      'models.sfx.describe',
+      'project.init',
+      'project.status',
+      'project.validate',
+      'canvas-map.push',
+      'canvas.create',
+      'canvas.rename',
+      'canvas.delete',
+      'canvas.reorder',
+      'canvas.repair-index',
+      'canvas.reset-layout',
+      'generated-asset.lookup',
+      'generate.image',
+      'generate.image-batch',
+      'generate.video',
+      'generate.tts',
+      'generate.music',
+      'generate.sfx'
+    ]) {
+      expect(runtimePolicyForCommand(command)).toBe('ensure-runtime');
+    }
+  });
+});

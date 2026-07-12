@@ -18,7 +18,7 @@ export interface EnsureRegisteredWorkbenchRuntimeInput {
   isHealthy?: (state: WorkbenchRuntimeState) => Promise<boolean>;
   launch: (paths: WorkbenchRuntimePaths) => Promise<WorkbenchRuntimeState>;
   shouldTerminateStaleRuntime?: (state: WorkbenchRuntimeState) => boolean;
-  onRuntimeLaunchFailed?: (state: WorkbenchRuntimeState) => void;
+  onRuntimeLaunchFailed?: (state: WorkbenchRuntimeState) => Promise<void>;
 }
 
 export interface EnsureRegisteredWorkbenchRuntimeResult {
@@ -44,7 +44,7 @@ export async function ensureRegisteredWorkbenchRuntime(
     }
     if (lockedExisting) {
       if (input.shouldTerminateStaleRuntime?.(lockedExisting) === true) {
-        terminateManagedWorkbenchRuntime(lockedExisting);
+        await terminateManagedWorkbenchRuntime(lockedExisting);
       }
       await deleteWorkbenchRuntimeState(paths.statePath);
     }
@@ -56,7 +56,7 @@ export async function ensureRegisteredWorkbenchRuntime(
       if (isWorkbenchRuntimeRegistryError(error)) {
         throw error;
       }
-      throw registryError('runtime_launch_failed', messageFromUnknown(error));
+      throw registryError('runtime_launch_failed', messageFromUnknown(error), { cause: error });
     }
     try {
       await waitForRuntimeHealth(launched, isHealthy);
@@ -67,7 +67,11 @@ export async function ensureRegisteredWorkbenchRuntime(
       }
       return { runtimeStarted: true, statePath: paths.statePath, state: launched };
     } catch (error) {
-      input.onRuntimeLaunchFailed?.(launched);
+      try {
+        await input.onRuntimeLaunchFailed?.(launched);
+      } catch (cleanupError) {
+        throw aggregateCleanupFailure(error, cleanupError);
+      }
       await deleteWorkbenchRuntimeState(paths.statePath);
       throw error;
     }
@@ -112,4 +116,12 @@ function isInvalidStateError(error: unknown): boolean {
 
 function messageFromUnknown(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
+}
+
+function aggregateCleanupFailure(primaryError: unknown, cleanupError: unknown): AggregateError {
+  return new AggregateError(
+    [primaryError, cleanupError],
+    messageFromUnknown(primaryError),
+    { cause: primaryError }
+  );
 }

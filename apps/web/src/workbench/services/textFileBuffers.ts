@@ -2,11 +2,10 @@ import type { WorkbenchProjectTextFile } from '@debrute/app-protocol';
 import type { TextFileBuffer } from '../../types';
 
 export function textBufferFromFile(file: WorkbenchProjectTextFile, current: TextFileBuffer | undefined): TextFileBuffer {
-  if (current?.dirty && current.diskRevision === file.revision) {
+  if (current?.dirty && current.baseRevision === file.revision) {
     return {
       ...current,
       projectRelativePath: file.projectRelativePath,
-      saving: false,
       externalChange: current.externalChange ?? false
     };
   }
@@ -17,9 +16,8 @@ export function textBufferFromFile(file: WorkbenchProjectTextFile, current: Text
       language: current.language,
       wordWrap: current.wordWrap,
       dirty: true,
-      saving: false,
-      diskRevision: file.revision,
-      ...(current.lastSavedRevision ? { lastSavedRevision: current.lastSavedRevision } : {}),
+      saving: current.saving,
+      ...(current.baseRevision ? { baseRevision: current.baseRevision } : {}),
       externalChange: true
     };
   }
@@ -30,8 +28,7 @@ export function textBufferFromFile(file: WorkbenchProjectTextFile, current: Text
     wordWrap: current?.wordWrap ?? false,
     dirty: false,
     saving: false,
-    diskRevision: file.revision,
-    lastSavedRevision: file.revision,
+    baseRevision: file.revision,
     externalChange: false
   };
 }

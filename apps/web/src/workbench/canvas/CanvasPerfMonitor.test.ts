@@ -185,18 +185,28 @@ describe('CanvasPerfMonitor', () => {
 
     monitor.recordCounter({ sessionId, timestamp: 1, source: 'CanvasTextPreviewRuntime', name: 'text-preview-source-check-requested' });
     monitor.recordCounter({ sessionId, timestamp: 2, source: 'CanvasTextPreviewRuntime', name: 'text-preview-source-availability-resolved' });
-    monitor.recordCounter({ sessionId, timestamp: 3, source: 'CanvasTextPreviewRuntime', name: 'text-preview-source-capture-saved' });
-    monitor.recordCounter({ sessionId, timestamp: 4, source: 'CanvasTextPreviewRuntime', name: 'text-preview-publish-critical' });
-    monitor.recordCounter({ sessionId, timestamp: 5, source: 'CanvasTextPreviewRuntime', name: 'text-preview-publish-deferred' });
+    monitor.recordCounter({ sessionId, timestamp: 3, source: 'CanvasTextPreviewRuntime', name: 'text-preview-capture-ready' });
+    monitor.recordCounter({ sessionId, timestamp: 4, source: 'CanvasTextPreviewRuntime', name: 'text-preview-snapshot-built' });
+    monitor.recordCounter({ sessionId, timestamp: 5, source: 'CanvasTextPreviewRuntime', name: 'text-preview-raster-completed' });
+    monitor.recordCounter({ sessionId, timestamp: 6, source: 'CanvasTextPreviewRuntime', name: 'text-preview-source-upload-completed' });
+    monitor.recordCounter({ sessionId, timestamp: 7, source: 'CanvasTextPreviewRuntime', name: 'text-preview-variant-fetched' });
+    monitor.recordCounter({ sessionId, timestamp: 8, source: 'CanvasTextPreviewRuntime', name: 'text-preview-pending-ready' });
+    monitor.recordCounter({ sessionId, timestamp: 9, source: 'CanvasTextPreviewRuntime', name: 'text-preview-published' });
+    monitor.recordCounter({ sessionId, timestamp: 10, source: 'CanvasTextPreviewRuntime', name: 'text-preview-failed' });
 
-    const summary = monitor.endSession({ sessionId, timestamp: 10, source: 'CanvasSurface' });
+    const summary = monitor.endSession({ sessionId, timestamp: 11, source: 'CanvasSurface' });
 
     expect(monitor.getCounterTotals()).toEqual({
       'text-preview-source-check-requested': 1,
       'text-preview-source-availability-resolved': 1,
-      'text-preview-source-capture-saved': 1,
-      'text-preview-publish-critical': 1,
-      'text-preview-publish-deferred': 1
+      'text-preview-capture-ready': 1,
+      'text-preview-snapshot-built': 1,
+      'text-preview-raster-completed': 1,
+      'text-preview-source-upload-completed': 1,
+      'text-preview-variant-fetched': 1,
+      'text-preview-pending-ready': 1,
+      'text-preview-published': 1,
+      'text-preview-failed': 1
     });
     expect(summary?.counters).toEqual(monitor.getCounterTotals());
   });

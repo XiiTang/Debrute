@@ -1,16 +1,16 @@
-import { mkdir, readFile, readdir, rename, stat, writeFile } from 'node:fs/promises';
+import { chmod, mkdir, readFile, readdir, rename, rm, stat, writeFile } from 'node:fs/promises';
 import { watch } from 'node:fs';
 import { dirname, join, relative } from 'node:path';
-import { randomUUID } from 'node:crypto';
+import { createHash, randomUUID } from 'node:crypto';
 import {
   assertProjectTreeVisibleMutationPath,
+  assertProjectTreeVisiblePath,
   debruteHomeDir,
-  isProjectGitMetadataPath,
-  isIgnoredProjectFilePath,
+  isProjectVisiblePath,
   normalizeProjectRelativePath,
   resolveExistingProjectPath,
-  resolveProjectPathForWrite,
-  resolveProjectPath
+  resolveNoSymlinkExistingProjectPath,
+  resolveProjectPathForWrite
 } from './projectPaths.js';
 import {
   projectTextLanguageFromPath,
@@ -56,6 +56,31 @@ export interface ProjectTextFile {
   revision: string;
   language: ProjectTextLanguageId;
   mimeType: string;
+}
+
+export interface WriteProjectTextFileInput {
+  projectRelativePath: string;
+  content: string;
+  expectedRevision: string;
+}
+
+export class ProjectTextFileRevisionConflictError extends Error {
+  readonly code = 'project_file_revision_conflict';
+  readonly fields: Record<string, string>;
+
+  constructor(
+    readonly projectRelativePath: string,
+    readonly expectedRevision: string,
+    readonly actualRevision: string
+  ) {
+    super(`Project text file revision is stale: ${projectRelativePath}`);
+    this.name = 'ProjectTextFileRevisionConflictError';
+    this.fields = {
+      file_path: projectRelativePath,
+      expected_revision: expectedRevision,
+      actual_revision: actualRevision
+    };
+  }
 }
 
 export interface ProjectFileWatchHandle {
@@ -116,8 +141,7 @@ export async function readProjectMetadata(projectRoot: string): Promise<DebruteP
 export async function listDebruteProjectFiles(projectRoot: string): Promise<ProjectFileEntry[]> {
   const entries = await walkEntries(projectRoot);
   return entries
-    .filter((entry) => !isProjectGitMetadataPath(entry.projectRelativePath))
-    .filter((entry) => !isIgnoredProjectFilePath(entry.projectRelativePath))
+    .filter((entry) => isProjectVisiblePath(entry.projectRelativePath))
     .sort((a, b) => a.projectRelativePath.localeCompare(b.projectRelativePath));
 }
 
@@ -133,7 +157,7 @@ export function watchProjectFiles(
       return;
     }
     const projectRelativePath = String(fileName).replaceAll('\\', '/');
-    if (isProjectGitMetadataPath(projectRelativePath) || isIgnoredProjectFilePath(projectRelativePath) || projectRelativePath.includes('.tmp')) {
+    if (!isProjectVisiblePath(projectRelativePath)) {
       return;
     }
     const observedAt = Date.now();
@@ -149,7 +173,6 @@ export function watchProjectFiles(
       onEvent(normalizeFileWatchEvent(projectRoot, absolutePath, type, observedAt));
     }, debounceMs));
   });
-
   return {
     close() {
       for (const timer of timers.values()) {
@@ -183,17 +206,13 @@ export async function readProjectTextFile(projectRoot: string, projectRelativePa
   if (content.includes('\uFFFD')) {
     throw new Error(`Project file is not valid UTF-8 text: ${projectRelativePath}`);
   }
-  const firstLine = firstLineOf(content);
-  return {
-    projectRelativePath: normalizeProjectRelativePath(projectRelativePath),
+  return projectTextFileFromContent({
+    projectRelativePath,
     absolutePath,
     content,
     size: fileStat.size,
-    mtimeMs: fileStat.mtimeMs,
-    revision: projectFileRevision(fileStat.size, fileStat.mtimeMs),
-    language: projectTextLanguageFromPath(projectRelativePath, firstLine),
-    mimeType: projectTextMimeTypeFromPath(projectRelativePath, firstLine)
-  };
+    mtimeMs: fileStat.mtimeMs
+  });
 }
 
 export async function readProjectFileBytes(projectRoot: string, projectRelativePath: string, options: { maxBytes?: number } = {}): Promise<Uint8Array> {
@@ -221,9 +240,34 @@ export async function writeProjectFile(
   return normalizeProjectRelativePath(projectRelativePath);
 }
 
-export async function writeProjectTextFile(projectRoot: string, projectRelativePath: string, content: string): Promise<ProjectTextFile> {
-  await writeProjectFile(projectRoot, projectRelativePath, content);
-  return readProjectTextFile(projectRoot, projectRelativePath);
+export async function writeProjectTextFile(projectRoot: string, input: WriteProjectTextFileInput): Promise<ProjectTextFile> {
+  const projectRelativePath = assertProjectTreeVisiblePath(input.projectRelativePath);
+  const absolutePath = await resolveNoSymlinkExistingProjectPath(projectRoot, projectRelativePath);
+  const fileStat = await stat(absolutePath);
+  if (!fileStat.isFile()) {
+    throw new Error(`Project path is not a file: ${projectRelativePath}`);
+  }
+  const actualRevision = projectContentHash(await readFile(absolutePath));
+  if (actualRevision !== input.expectedRevision) {
+    throw new ProjectTextFileRevisionConflictError(projectRelativePath, input.expectedRevision, actualRevision);
+  }
+
+  const tempPath = `${absolutePath}.${randomUUID()}.tmp`;
+  try {
+    await writeFile(tempPath, input.content, { encoding: 'utf8', mode: fileStat.mode });
+    await chmod(tempPath, fileStat.mode & 0o777);
+    await rename(tempPath, absolutePath);
+  } finally {
+    await rm(tempPath, { force: true });
+  }
+  const savedStat = await stat(absolutePath);
+  return projectTextFileFromContent({
+    projectRelativePath,
+    absolutePath,
+    content: input.content,
+    size: savedStat.size,
+    mtimeMs: savedStat.mtimeMs
+  });
 }
 
 export {
@@ -292,10 +336,10 @@ export {
 } from './projectTextFileTypes.js';
 
 export {
+  assertProjectTreeVisiblePath,
   assertProjectTreeVisibleMutationPath,
   debruteHomeDir,
-  isProjectGitMetadataPath,
-  isIgnoredProjectFilePath,
+  isProjectVisiblePath,
   isProtectedProjectDocumentMutationPath,
   joinProjectPath,
   normalizeProjectDirectoryPath,
@@ -330,7 +374,7 @@ export function normalizeFileWatchEvent(projectRoot: string, absolutePath: strin
   const projectRelativePath = relative(projectRoot, absolutePath).replaceAll('\\', '/');
   const affects: NormalizedFileWatchEvent['affects'] = [];
 
-  if (isIgnoredProjectFilePath(projectRelativePath)) {
+  if (!isProjectVisiblePath(projectRelativePath)) {
     return {
       type,
       absolutePath,
@@ -352,7 +396,6 @@ export function normalizeFileWatchEvent(projectRoot: string, absolutePath: strin
   } else if (
     projectRelativePath === '.debrute/assets/generated-assets-index.json'
     || projectRelativePath.startsWith('.debrute/assets/generated/')
-    || projectRelativePath === '.debrute/cache/file-fingerprints.json'
   ) {
     affects.push('generated-asset-metadata');
   } else {
@@ -411,7 +454,7 @@ async function walkEntries(root: string, prefix = ''): Promise<ProjectFileEntry[
   for (const entry of directoryEntries) {
     const projectRelativePath = prefix ? `${prefix}/${entry.name}` : entry.name;
     if (entry.isDirectory()) {
-      if (isIgnoredProjectFilePath(projectRelativePath)) {
+      if (!isProjectVisiblePath(projectRelativePath)) {
         continue;
       }
       collected.push({ projectRelativePath, kind: 'directory' });
@@ -430,6 +473,31 @@ function basenameFromPath(path: string): string {
 
 function firstLineOf(content: string): string {
   return content.split(/\r?\n/, 1)[0] ?? '';
+}
+
+function projectTextFileFromContent(input: {
+  projectRelativePath: string;
+  absolutePath: string;
+  content: string;
+  size: number;
+  mtimeMs: number;
+}): ProjectTextFile {
+  const projectRelativePath = normalizeProjectRelativePath(input.projectRelativePath);
+  const firstLine = firstLineOf(input.content);
+  return {
+    projectRelativePath,
+    absolutePath: input.absolutePath,
+    content: input.content,
+    size: input.size,
+    mtimeMs: input.mtimeMs,
+    revision: projectContentHash(input.content),
+    language: projectTextLanguageFromPath(projectRelativePath, firstLine),
+    mimeType: projectTextMimeTypeFromPath(projectRelativePath, firstLine)
+  };
+}
+
+export function projectContentHash(content: string | Uint8Array): string {
+  return `sha256:${createHash('sha256').update(content).digest('hex')}`;
 }
 
 function isProbablyBinary(bytes: Uint8Array): boolean {

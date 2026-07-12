@@ -2,6 +2,7 @@ import { randomUUID } from 'node:crypto';
 import { createReadStream, createWriteStream } from 'node:fs';
 import { mkdtemp, readFile, rm, stat } from 'node:fs/promises';
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from 'node:http';
+import type { Socket } from 'node:net';
 import { tmpdir } from 'node:os';
 import { extname, join as joinFileSystemPath, resolve } from 'node:path';
 import { pipeline } from 'node:stream/promises';
@@ -55,7 +56,10 @@ import {
   timingSafeStringEquals,
   verifyWorkbenchLaunchNonce
 } from '@debrute/workbench-runtime';
-import { createAdobeBridgeDiscoveryServer } from '../adobe-bridge/AdobeBridgeDiscoveryServer.js';
+import {
+  createAdobeBridgeDiscoveryServer,
+  type AdobeBridgeDiscoveryListenStatus
+} from '../adobe-bridge/AdobeBridgeDiscoveryServer.js';
 import {
   pruneAdobeBridgeTransferContents,
   routeAdobeBridgeHttp,
@@ -119,6 +123,7 @@ export interface DebruteDaemonHttpServer {
   listen(): Promise<DebruteDaemonRuntime>;
   close(): Promise<void>;
   runtime(): DebruteDaemonRuntime | undefined;
+  adobeBridgeDiscoveryStatus(): AdobeBridgeDiscoveryListenStatus | undefined;
   projectRootForProjectId(projectId: string): string | undefined;
 }
 
@@ -127,6 +132,7 @@ interface RequestContext {
   response: ServerResponse;
   url: URL;
   runtime: DebruteDaemonRuntime;
+  signal: AbortSignal;
 }
 
 interface ProjectRequestContext extends RequestContext {
@@ -200,6 +206,10 @@ export function createDebruteDaemonHttpServer(options: DebruteDaemonHttpServerOp
   });
   let runtime: DebruteDaemonRuntime | undefined;
   let server: Server | undefined;
+  let closing = false;
+  let closePromise: Promise<void> | undefined;
+  const httpSockets = new Set<Socket>();
+  const requestAbortControllers = new Set<AbortController>();
   const adobeBridgeDiscovery = createAdobeBridgeDiscoveryServer({
     ...(options.adobeBridgeDiscoveryPort !== undefined ? { port: options.adobeBridgeDiscoveryPort } : {}),
     snapshot: () => {
@@ -222,14 +232,33 @@ export function createDebruteDaemonHttpServer(options: DebruteDaemonHttpServerOp
     if (runtime) {
       return runtime;
     }
+    if (closing) {
+      throw new Error('Debrute daemon is closed.');
+    }
     assertLoopbackBindHost(host);
 
     server = createServer((request, response) => {
-      void handleRequest(request, response).catch((error) => {
+      const requestController = trackRequest(request, response);
+      void handleRequest(request, response, requestController.signal).catch((error) => {
+        if (closing && requestController.signal.aborted) {
+          response.destroy();
+          return;
+        }
         writeCaughtError(response, error);
       });
     });
+    server.on('connection', (socket) => {
+      httpSockets.add(socket);
+      socket.once('close', () => httpSockets.delete(socket));
+      if (closing) {
+        socket.destroy();
+      }
+    });
     server.on('upgrade', (request, socket, head) => {
+      if (closing) {
+        socket.destroy();
+        return;
+      }
       if (adobeBridgeWebSockets.handleUpgrade(request, socket, head)) {
         return;
       }
@@ -263,30 +292,129 @@ export function createDebruteDaemonHttpServer(options: DebruteDaemonHttpServerOp
     return runtime;
   }
 
-  async function close(): Promise<void> {
+  function close(): Promise<void> {
+    if (closePromise) {
+      return closePromise;
+    }
+    closing = true;
+    closePromise = closeOwnedResources();
+    return closePromise;
+  }
+
+  async function closeOwnedResources(): Promise<void> {
+    const closeErrors: unknown[] = [];
+    const closingServer = server;
+    const httpClose = closingServer ? new Promise<void>((resolveClose) => {
+      try {
+        closingServer.close((error) => {
+          if (error) {
+            closeErrors.push(error);
+          }
+          resolveClose();
+        });
+      } catch (error) {
+        closeErrors.push(error);
+        resolveClose();
+      }
+    }) : Promise.resolve();
+
+    for (const controller of requestAbortControllers) {
+      try {
+        controller.abort();
+      } catch (error) {
+        closeErrors.push(error);
+      }
+    }
     for (const release of electronWindowLeases.values()) {
-      release();
+      try {
+        release();
+      } catch (error) {
+        closeErrors.push(error);
+      }
     }
     electronWindowLeases.clear();
     webSessions.clear();
     usedLaunchNonces.clear();
-    globalRuntime.close();
-    unsubscribeAdobeBridgeTransferContentPrune();
-    await adobeBridgeWebSockets.close();
-    await adobeBridgeDiscovery.close();
-    adobeBridge.dispose();
-    await sessions.close();
-    if (!server) {
-      return;
+    try {
+      globalRuntime.close();
+    } catch (error) {
+      closeErrors.push(error);
     }
-    await new Promise<void>((resolveClose, rejectClose) => {
-      server!.close((error) => error ? rejectClose(error) : resolveClose());
-    });
+    try {
+      unsubscribeAdobeBridgeTransferContentPrune();
+    } catch (error) {
+      closeErrors.push(error);
+    }
+    try {
+      await adobeBridgeWebSockets.close();
+    } catch (error) {
+      closeErrors.push(error);
+    }
+    try {
+      await sessions.close();
+    } catch (error) {
+      closeErrors.push(error);
+    }
+    try {
+      adobeBridge.dispose();
+    } catch (error) {
+      closeErrors.push(error);
+    }
+    try {
+      await adobeBridgeDiscovery.close();
+    } catch (error) {
+      closeErrors.push(error);
+    }
+    for (const socket of httpSockets) {
+      try {
+        socket.destroy();
+      } catch (error) {
+        closeErrors.push(error);
+      }
+    }
+    await httpClose;
+
+    httpSockets.clear();
+    requestAbortControllers.clear();
     server = undefined;
     runtime = undefined;
+    if (closeErrors.length === 1) {
+      throw closeErrors[0];
+    }
+    if (closeErrors.length > 1) {
+      throw new AggregateError(closeErrors, 'Debrute daemon shutdown failed.');
+    }
   }
 
-  async function handleRequest(request: IncomingMessage, response: ServerResponse): Promise<void> {
+  function trackRequest(request: IncomingMessage, response: ServerResponse): AbortController {
+    const controller = new AbortController();
+    requestAbortControllers.add(controller);
+    const abort = () => controller.abort();
+    const close = () => {
+      if (!response.writableEnded) {
+        abort();
+      }
+      cleanup();
+    };
+    const cleanup = () => {
+      request.off('aborted', abort);
+      response.off('close', close);
+      requestAbortControllers.delete(controller);
+    };
+    request.once('aborted', abort);
+    response.once('close', close);
+    return controller;
+  }
+
+  async function handleRequest(
+    request: IncomingMessage,
+    response: ServerResponse,
+    signal: AbortSignal
+  ): Promise<void> {
+    if (closing) {
+      writeError(response, 503, 'daemon_closing', 'Debrute daemon is closing.');
+      return;
+    }
     if (!runtime) {
       writeError(response, 503, 'daemon_not_ready', 'Debrute daemon is not ready.');
       return;
@@ -313,7 +441,7 @@ export function createDebruteDaemonHttpServer(options: DebruteDaemonHttpServerOp
       return;
     }
 
-    const context = { request, response, url, runtime };
+    const context = { request, response, url, runtime, signal };
     response.setHeader('x-debrute-daemon-url', runtime.daemonUrl);
 
     const handled = await routeApi(context);
@@ -834,6 +962,7 @@ export function createDebruteDaemonHttpServer(options: DebruteDaemonHttpServerOp
     listen,
     close,
     runtime: () => runtime ? currentRuntime() : undefined,
+    adobeBridgeDiscoveryStatus: () => adobeBridgeDiscovery.status(),
     projectRootForProjectId: (projectId) => sessions.projectRootForProjectId(projectId)
   };
 }
@@ -893,8 +1022,13 @@ async function handleTextFileRoute(context: ProjectRequestContext, projectRelati
       writeError(context.response, 400, 'invalid_input', 'File content must be a string.');
       return;
     }
+    const expectedRevision = stringField(body.expectedRevision, 'expectedRevision');
     const result = await runRevisionedMutation(context, baseRevisionField(body), async () => ({
-      file: textFileForHttp(await daemonAppServer(context).writeProjectTextFile(projectRelativePath, body.content as string))
+      file: textFileForHttp(await daemonAppServer(context).writeProjectTextFile({
+        projectRelativePath,
+        content: body.content as string,
+        expectedRevision
+      }))
     }));
     writeJson(context.response, 200, result);
     return;
@@ -993,7 +1127,7 @@ async function handleExternalUploadImportRoute(context: ProjectRequestContext, s
     writeError(context.response, 405, 'method_not_allowed', 'Unsupported external upload import method.');
     return;
   }
-  const parts = await readMultipartUploadParts(context.request);
+  const parts = await readMultipartUploadParts(context.request, context.signal);
   try {
     const plan = daemonUploadImportPlan(parts.fields.get('plan'));
     const result = await runRevisionedMutation(context, plan.baseRevision, async () => (
@@ -1338,7 +1472,7 @@ async function handleCanvasImagePreviewRoute(context: ProjectRequestContext): Pr
     projectRelativePath,
     revision,
     width,
-    abortSignal: requestAbortSignal(context.request, context.response, 30_000)
+    abortSignal: abortSignalFromRequest(context.signal, 30_000)
   });
   await writeRevisionedFileResponse({
     request: context.request,
@@ -1353,7 +1487,7 @@ async function handleCanvasTextPreviewSourceRoute(context: ProjectRequestContext
     writeError(context.response, 405, 'method_not_allowed', 'Unsupported Canvas text preview source method.');
     return;
   }
-  const parts = await readMultipartUploadParts(context.request);
+  const parts = await readMultipartUploadParts(context.request, context.signal);
   try {
     const metadata = daemonCanvasTextPreviewMetadata(parts.fields.get('metadata'));
     const source = parts.files.get('source');
@@ -1572,31 +1706,11 @@ function writeTerminalEventStream(context: ProjectRequestContext, terminalId: st
       context.response.end();
     }
   };
-  context.request.once('close', cleanup);
+  context.signal.addEventListener('abort', closeStream, { once: true });
 }
 
-function requestAbortSignal(request: IncomingMessage, response: ServerResponse, timeoutMs: number): AbortSignal {
-  const controller = new AbortController();
-  const timeout = setTimeout(() => controller.abort(), timeoutMs);
-  const abort = () => {
-    controller.abort();
-  };
-  const abortIfResponseClosedEarly = () => {
-    if (!response.writableEnded) {
-      abort();
-    }
-  };
-  const cleanup = () => {
-    request.off('aborted', abort);
-    response.off('close', abortIfResponseClosedEarly);
-    response.off('finish', cleanup);
-    clearTimeout(timeout);
-  };
-  request.once('aborted', abort);
-  response.once('close', abortIfResponseClosedEarly);
-  response.once('finish', cleanup);
-  controller.signal.addEventListener('abort', cleanup, { once: true });
-  return controller.signal;
+function abortSignalFromRequest(requestSignal: AbortSignal, timeoutMs: number): AbortSignal {
+  return AbortSignal.any([requestSignal, AbortSignal.timeout(timeoutMs)]);
 }
 
 async function handleGeneratedAssetRoute(context: ProjectRequestContext, projectId: string, tail: string): Promise<void> {
@@ -1685,7 +1799,7 @@ async function handleSettingsRoute(context: GlobalRuntimeRequestContext): Promis
 }
 
 type GlobalWorkbenchEvent = Extract<WorkbenchEvent, {
-  type: 'globalSettings.changed'
+  type: 'globalSettings.changed' | 'recentProjects.changed'
 }>;
 
 function writeGlobalWorkbenchEventStream(
@@ -1718,7 +1832,12 @@ function writeGlobalWorkbenchEventStream(
     unsubscribeGlobal();
     unsubscribeBridge();
   };
-  context.request.once('close', cleanup);
+  context.signal.addEventListener('abort', () => {
+    cleanup();
+    if (!context.response.writableEnded) {
+      context.response.end();
+    }
+  }, { once: true });
 }
 
 function writeSseWorkbenchEvent(response: ServerResponse, event: WorkbenchEvent): void {
@@ -1726,7 +1845,7 @@ function writeSseWorkbenchEvent(response: ServerResponse, event: WorkbenchEvent)
 }
 
 function isGlobalWorkbenchEvent(event: AppServerEvent): event is GlobalWorkbenchEvent {
-  return event.type === 'globalSettings.changed';
+  return event.type === 'globalSettings.changed' || event.type === 'recentProjects.changed';
 }
 
 function writeEventStream(
@@ -1757,7 +1876,12 @@ function writeEventStream(
     unsubscribeProject();
     releaseClient?.();
   };
-  context.request.once('close', cleanup);
+  context.signal.addEventListener('abort', () => {
+    cleanup();
+    if (!context.response.writableEnded) {
+      context.response.end();
+    }
+  }, { once: true });
 }
 
 async function serveWebAsset(context: RequestContext, configuredWebDistDir: string | undefined): Promise<void> {
@@ -2040,7 +2164,7 @@ async function readJsonBody<T>(request: IncomingMessage): Promise<T> {
   }
 }
 
-async function readMultipartUploadParts(request: IncomingMessage): Promise<MultipartUploadParts> {
+async function readMultipartUploadParts(request: IncomingMessage, signal: AbortSignal): Promise<MultipartUploadParts> {
   const temporaryDirectory = await mkdtemp(joinFileSystemPath(tmpdir(), 'debrute-upload-'));
   const cleanup = async () => rm(temporaryDirectory, { recursive: true, force: true });
   const fields = new Map<string, string>();
@@ -2072,7 +2196,7 @@ async function readMultipartUploadParts(request: IncomingMessage): Promise<Multi
       files.set(name, {
         temporaryPath
       });
-      const write = pipeline(stream, createWriteStream(temporaryPath, { flags: 'wx' }));
+      const write = pipeline(stream, createWriteStream(temporaryPath, { flags: 'wx' }), { signal });
       writes.push(write);
       write.catch(rejectOnce);
     });
@@ -2292,7 +2416,9 @@ function isServiceError(error: unknown): error is Error & { code: string; fields
 }
 
 function serviceErrorStatusCode(code: string): number {
-  if (code === 'canvas_map_conflict' || code === 'canvas_registry_conflict') {
+  if (code === 'canvas_map_conflict'
+    || code === 'canvas_registry_conflict'
+    || code === 'project_file_revision_conflict') {
     return 409;
   }
   if (code === 'terminal_close_failed') {
@@ -2326,13 +2452,6 @@ function stringField(value: unknown, name: string): string {
 function numberField(value: unknown, name: string): number {
   if (typeof value !== 'number' || !Number.isInteger(value) || value < 1) {
     throw new DebruteDaemonHttpError(400, 'invalid_input', `${name} must be a positive integer.`);
-  }
-  return value;
-}
-
-function positiveFiniteNumberField(value: unknown, name: string): number {
-  if (typeof value !== 'number' || !Number.isFinite(value) || value <= 0) {
-    throw new DebruteDaemonHttpError(400, 'invalid_input', `${name} must be a positive finite number.`);
   }
   return value;
 }

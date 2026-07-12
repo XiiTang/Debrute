@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import {
+  CANVAS_FEEDBACK_MARKS,
   canvasFeedbackEntryHasFileSpatialItems,
   canvasFeedbackItemsForMoment,
   canvasFeedbackMomentRefs,
@@ -16,6 +17,104 @@ const NOW = '2026-06-21T12:00:00.000Z';
 const LATER = '2026-06-21T12:00:01.000Z';
 
 describe('Canvas feedback', () => {
+  it('normalizes Canvas feedback marks as selected-only fixed-order values', () => {
+    const normalized = normalizeCanvasFeedbackDocument({
+      updatedAt: '2026-05-26T12:00:00.000Z',
+      entries: {
+        'flow/a.png': {
+          projectRelativePath: 'flow/a.png',
+          marks: ['needs_revision', 'like', 'like', 'check'],
+          nextMomentLabel: 1,
+          nextSpatialLabel: 1,
+          items: [],
+          updatedAt: '2026-05-26T12:00:00.000Z'
+        }
+      }
+    });
+
+    expect(CANVAS_FEEDBACK_MARKS).toEqual([
+      'like', 'dislike', 'check', 'cross', 'pending', 'important', 'needs_revision'
+    ]);
+    expect(normalized.entries['flow/a.png']).toEqual({
+      projectRelativePath: 'flow/a.png',
+      marks: ['like', 'check', 'needs_revision'],
+      nextMomentLabel: 1,
+      nextSpatialLabel: 1,
+      items: [],
+      updatedAt: '2026-05-26T12:00:00.000Z'
+    });
+  });
+
+  it('updates and deletes Canvas feedback entries as current state', () => {
+    const empty = createEmptyCanvasFeedbackDocument('2026-05-26T12:00:00.000Z');
+    const added = updateCanvasFeedbackEntry(empty, {
+      operation: 'set-marks',
+      projectRelativePath: 'flow/a.png',
+      marks: ['cross', 'like']
+    }, '2026-05-26T12:01:00.000Z');
+
+    expect(added).toEqual({
+      updatedAt: '2026-05-26T12:01:00.000Z',
+      entries: {
+        'flow/a.png': {
+          projectRelativePath: 'flow/a.png',
+          marks: ['like', 'cross'],
+          nextMomentLabel: 1,
+          nextSpatialLabel: 1,
+          items: [],
+          updatedAt: '2026-05-26T12:01:00.000Z'
+        }
+      }
+    });
+
+    const cleared = updateCanvasFeedbackEntry(added, {
+      operation: 'set-marks',
+      projectRelativePath: 'flow/a.png',
+      marks: []
+    }, '2026-05-26T12:02:00.000Z');
+
+    expect(cleared).toEqual({
+      updatedAt: '2026-05-26T12:02:00.000Z',
+      entries: {}
+    });
+  });
+
+  it('rejects invalid Canvas feedback documents', () => {
+    expect(() => normalizeCanvasFeedbackDocument({
+      updatedAt: '2026-05-26T12:00:00.000Z',
+      entries: {
+        'flow/a.png': {
+          projectRelativePath: 'flow/a.png',
+          marks: ['unknown'],
+          nextMomentLabel: 1,
+          nextSpatialLabel: 1,
+          items: [],
+          updatedAt: '2026-05-26T12:00:00.000Z'
+        }
+      }
+    })).toThrow('Invalid Canvas feedback mark: unknown');
+
+    expect(() => normalizeCanvasFeedbackDocument({
+      updatedAt: '2026-05-26T12:00:00.000Z',
+      entries: {
+        'flow/a.png': {
+          projectRelativePath: 'flow/b.png',
+          marks: ['like'],
+          nextMomentLabel: 1,
+          nextSpatialLabel: 1,
+          items: [],
+          updatedAt: '2026-05-26T12:00:00.000Z'
+        }
+      }
+    })).toThrow('Canvas feedback entry key must match projectRelativePath: flow/a.png');
+
+    expect(() => updateCanvasFeedbackEntry(
+      createEmptyCanvasFeedbackDocument('2026-05-26T12:00:00.000Z'),
+      { operation: 'set-marks', projectRelativePath: '../outside.png', marks: ['like'] },
+      '2026-05-26T12:01:00.000Z'
+    )).toThrow('Invalid Canvas feedback project-relative path: ../outside.png');
+  });
+
   it('creates an empty feedback document', () => {
     expect(createEmptyCanvasFeedbackDocument(NOW)).toEqual({
       updatedAt: NOW,

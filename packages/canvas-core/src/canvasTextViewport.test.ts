@@ -7,7 +7,7 @@ import {
   type CanvasDocument
 } from './index';
 
-describe('Canvas text viewport state', () => {
+describe('Canvas text viewport state', { tags: ['canvas-text'] }, () => {
   it('stores text viewport only on matching text nodes', () => {
     const canvas = canvasWithNodes();
 

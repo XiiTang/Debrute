@@ -9,7 +9,7 @@ import {
   type TerminalPanelState
 } from './terminalPanelState';
 
-describe('terminalPanelState', () => {
+describe('terminalPanelState', { tags: ['terminal'] }, () => {
   it('selects the next session after closing the active session', () => {
     const sessions = [
       sessionFixture('one'),

@@ -42,7 +42,8 @@ import type {
   WorkbenchProjectTextFileWriteResult,
   WorkbenchProjectUploadImportInput,
   WorkbenchAddProjectPathToCanvasMapResult,
-  WorkbenchTitleBarState
+  WorkbenchTitleBarState,
+  WriteProjectTextFileInput
 } from '@debrute/app-protocol';
 import type {
   CanvasFeedbackDocument,
@@ -95,7 +96,7 @@ export function createHttpWorkbenchApiClient(options: HttpWorkbenchApiClientOpti
   const shell = () => options.shell ?? getDebruteShellApi();
   const eventClientId = browserEventClientId();
 
-  const request = async <T>(method: string, path: string, body?: unknown): Promise<T> => {
+  const request = async <T>(method: string, path: string, body?: unknown, signal?: AbortSignal): Promise<T> => {
     const headers: Record<string, string> = {};
     if (body !== undefined) {
       headers['content-type'] = 'application/json';
@@ -104,6 +105,7 @@ export function createHttpWorkbenchApiClient(options: HttpWorkbenchApiClientOpti
       method,
       headers,
       credentials: 'same-origin',
+      ...(signal === undefined ? {} : { signal }),
       ...(body === undefined ? {} : { body: JSON.stringify(body) })
     });
     if (!response.ok) {
@@ -114,11 +116,17 @@ export function createHttpWorkbenchApiClient(options: HttpWorkbenchApiClientOpti
     }
     return response.json() as Promise<T>;
   };
-  const requestFormData = async <T>(method: string, path: string, body: FormData): Promise<T> => {
+  const requestFormData = async <T>(
+    method: string,
+    path: string,
+    body: FormData,
+    signal?: AbortSignal
+  ): Promise<T> => {
     const response = await transportFetch(path, {
       method,
       body,
-      credentials: 'same-origin'
+      credentials: 'same-origin',
+      ...(signal === undefined ? {} : { signal })
     });
     if (!response.ok) {
       throw await responseError(response);
@@ -129,6 +137,7 @@ export function createHttpWorkbenchApiClient(options: HttpWorkbenchApiClientOpti
   let currentProjectId: string | undefined;
   let currentProjectRevision: number | undefined;
   let currentProjectGeneration = 0;
+  const projectRequestControllers = new Set<AbortController>();
   let projectOpenRequestSequence = 0;
   let latestAcceptedProjectOpenRequestId = 0;
   let globalEventSource: EventSource | undefined;
@@ -154,6 +163,27 @@ export function createHttpWorkbenchApiClient(options: HttpWorkbenchApiClientOpti
   const isCurrentProjectScope = (scope: ProjectRequestScope): boolean => (
     scope.projectId === currentProjectId && scope.generation === currentProjectGeneration
   );
+  const runProjectRequest = async <T>(
+    operation: (scope: ProjectRequestScope, signal: AbortSignal) => Promise<T>
+  ): Promise<T> => {
+    const scope = captureProjectScope();
+    const controller = new AbortController();
+    projectRequestControllers.add(controller);
+    try {
+      const result = await operation(scope, controller.signal);
+      if (!isCurrentProjectScope(scope)) {
+        throw new ProjectChangedRequestError('Project changed while the request was in flight.');
+      }
+      return result;
+    } catch (error) {
+      if (!isCurrentProjectScope(scope)) {
+        throw new ProjectChangedRequestError('Project changed while the request was in flight.');
+      }
+      throw error;
+    } finally {
+      projectRequestControllers.delete(controller);
+    }
+  };
   const rememberProjectRevision = (scope: ProjectRequestScope, result: RevisionedProjectResponse): void => {
     if (result.projectId !== scope.projectId) {
       throw new Error(`Project response ${result.projectId} does not match request project ${scope.projectId}.`);
@@ -241,6 +271,10 @@ export function createHttpWorkbenchApiClient(options: HttpWorkbenchApiClientOpti
     }
   };
   const commitCurrentProject = (projectId: string, projectRevision: number): void => {
+    for (const controller of projectRequestControllers) {
+      controller.abort();
+    }
+    projectRequestControllers.clear();
     currentProjectGeneration += 1;
     currentProjectId = projectId;
     currentProjectRevision = projectRevision;
@@ -408,17 +442,27 @@ export function createHttpWorkbenchApiClient(options: HttpWorkbenchApiClientOpti
       };
     },
     readProjectTextFile: (projectRelativePath) => request<WorkbenchProjectTextFile>('GET', projectPath(`/files/text/${encodeProjectPath(projectRelativePath)}`)),
-    writeProjectTextFile: (projectRelativePath, content) => requestRevisioned<WorkbenchProjectTextFileWriteResult>('PUT', projectPath(`/files/text/${encodeProjectPath(projectRelativePath)}`), { content }),
-    saveCanvasTextPreviewSource: (input) => requestFormData<SaveCanvasTextPreviewSourceResult>(
-      'POST',
-      projectPath('/canvas-text-previews/source'),
-      canvasTextPreviewSourceFormData(input)
+    writeProjectTextFile: (input: WriteProjectTextFileInput) => requestRevisioned<WorkbenchProjectTextFileWriteResult>(
+      'PUT',
+      projectPath(`/files/text/${encodeProjectPath(input.projectRelativePath)}`),
+      { content: input.content, expectedRevision: input.expectedRevision }
     ),
-  readCanvasTextPreviewSources: (input) => request<CanvasTextPreviewSourceAvailabilityResponse>(
-      'POST',
-      projectPath('/canvas-text-previews/sources'),
-      input
-    ),
+    saveCanvasTextPreviewSource: (input) => runProjectRequest((scope, signal) => (
+      requestFormData<SaveCanvasTextPreviewSourceResult>(
+        'POST',
+        projectPathFor(scope.projectId, '/canvas-text-previews/source'),
+        canvasTextPreviewSourceFormData(input),
+        signal
+      )
+    )),
+  readCanvasTextPreviewSources: (input) => runProjectRequest((scope, signal) => (
+      request<CanvasTextPreviewSourceAvailabilityResponse>(
+        'POST',
+        projectPathFor(scope.projectId, '/canvas-text-previews/sources'),
+        input,
+        signal
+      )
+    )),
     readCanvasVideoPreviewSources: (input) => request<CanvasVideoPreviewSourceResponse>(
       'POST',
       projectPath('/canvas-video-previews/sources'),

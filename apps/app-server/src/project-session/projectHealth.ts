@@ -12,12 +12,18 @@ export function createProjectHealthSummary(input: {
   return {
     projectName: input.metadata.project.name,
     canvasCount: input.canvasCount,
-    diagnosticCounts: {
-      errors: input.diagnostics.filter((diagnostic) => diagnostic.severity === 'error').length,
-      warnings: input.diagnostics.filter((diagnostic) => diagnostic.severity === 'warning').length,
-      infos: input.diagnostics.filter((diagnostic) => diagnostic.severity === 'info').length
-    },
+    diagnosticCounts: projectDiagnosticCounts(input.diagnostics),
     runtimeDataLocation: input.runtimeDataLocation,
     checkedAt: input.checkedAt
+  };
+}
+
+export function projectDiagnosticCounts(
+  diagnostics: Diagnostic[]
+): ProjectHealthSummary['diagnosticCounts'] {
+  return {
+    errors: diagnostics.filter((diagnostic) => diagnostic.severity === 'error').length,
+    warnings: diagnostics.filter((diagnostic) => diagnostic.severity === 'warning').length,
+    infos: diagnostics.filter((diagnostic) => diagnostic.severity === 'info').length
   };
 }

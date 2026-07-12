@@ -7,6 +7,50 @@ import {
 } from './projectTextFileTypes';
 
 describe('project text file types', () => {
+  it('classifies supported project text file formats through one registry', () => {
+    const cases: Array<{ path: string; language: string; mimeType: string; firstLine?: string }> = [
+      { path: 'batch/requests.jsonl', language: 'jsonl', mimeType: 'application/jsonl' },
+      { path: 'batch/results.ndjson', language: 'jsonl', mimeType: 'application/jsonl' },
+      { path: 'config/settings.jsonc', language: 'jsonc', mimeType: 'application/jsonc' },
+      { path: 'config/.eslintrc', language: 'jsonc', mimeType: 'application/jsonc' },
+      { path: 'docs/notes.mdown', language: 'markdown', mimeType: 'text/markdown' },
+      { path: 'skills/SKILL.md', language: 'markdown', mimeType: 'text/markdown' },
+      { path: 'compose.dev.yml', language: 'yaml', mimeType: 'application/yaml' },
+      { path: 'scripts/run.sh', language: 'shell', mimeType: 'text/x-shellscript' },
+      { path: '.zshrc', language: 'shell', mimeType: 'text/x-shellscript' },
+      { path: 'bin/run', firstLine: '#!/usr/bin/env bash', language: 'shell', mimeType: 'text/x-shellscript' },
+      { path: '.env.local', language: 'dotenv', mimeType: 'text/plain' },
+      { path: '.editorconfig', language: 'properties', mimeType: 'text/plain' },
+      { path: '.gitignore', language: 'plaintext', mimeType: 'text/plain' },
+      { path: '.npmrc', language: 'properties', mimeType: 'text/plain' },
+      { path: 'logs/debrute.log', language: 'log', mimeType: 'text/plain' },
+      { path: 'logs/debrute.log.1', language: 'log', mimeType: 'text/plain' },
+      { path: 'Dockerfile', language: 'dockerfile', mimeType: 'text/plain' },
+      { path: 'Containerfile.dev', language: 'dockerfile', mimeType: 'text/plain' },
+      { path: 'Makefile', language: 'makefile', mimeType: 'text/plain' },
+      { path: 'build/rules.mk', language: 'makefile', mimeType: 'text/plain' },
+      { path: 'patches/fix.patch', language: 'diff', mimeType: 'text/plain' },
+      { path: 'data/table.tsv', language: 'tsv', mimeType: 'text/tab-separated-values' },
+      { path: 'src/module.mts', language: 'typescript', mimeType: 'text/typescript' },
+      { path: 'scripts/build.py', language: 'python', mimeType: 'text/x-python' },
+      { path: 'LICENSE', language: 'plaintext', mimeType: 'text/plain' }
+    ];
+
+    for (const item of cases) {
+      expect(projectTextLanguageFromPath(item.path, item.firstLine)).toBe(item.language);
+      expect(projectTextMimeTypeFromPath(item.path, item.firstLine)).toBe(item.mimeType);
+      expect(isKnownProjectTextFilePath(item.path, item.firstLine)).toBe(true);
+      expect(projectTextFileTypeForPath(item.path, item.firstLine)).toMatchObject({
+        id: item.language,
+        mimeType: item.mimeType
+      });
+    }
+
+    expect(isKnownProjectTextFilePath('assets/cover.png')).toBe(false);
+    expect(isKnownProjectTextFilePath('assets/icon.svg')).toBe(false);
+    expect(isKnownProjectTextFilePath('archives/export.debrutebin')).toBe(false);
+  });
+
   it('detects Debrute text language ids without editor-specific metadata', () => {
     expect(projectTextLanguageFromPath('src/app.ts')).toBe('typescript');
 

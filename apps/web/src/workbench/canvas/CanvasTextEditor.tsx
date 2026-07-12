@@ -42,6 +42,7 @@ export function CanvasTextEditor({
   onToggleWordWrap,
   onFocusRequestConsumed,
   onScrollPositionCommit,
+  onReadOnlyTransition,
   onLayoutReady
 }: {
   value: string;
@@ -57,6 +58,7 @@ export function CanvasTextEditor({
   onToggleWordWrap: () => void;
   onFocusRequestConsumed?: ((requestId: number) => void) | undefined;
   onScrollPositionCommit?: ((position: CanvasTextEditorScrollPosition) => void) | undefined;
+  onReadOnlyTransition?: ((position: CanvasTextEditorScrollPosition) => void) | undefined;
   onLayoutReady?: (() => void) | undefined;
 }): React.ReactElement {
   const hostRef = React.useRef<HTMLDivElement | null>(null);
@@ -68,15 +70,14 @@ export function CanvasTextEditor({
   } | undefined>(undefined);
   const onLayoutReadyRef = React.useRef(onLayoutReady);
   const onScrollPositionCommitRef = React.useRef(onScrollPositionCommit);
-  const commitObservedScrollPositionRef = React.useRef<(() => void) | undefined>(undefined);
+  const commitObservedScrollPositionRef = React.useRef<(
+    () => CanvasTextEditorScrollPosition
+  ) | undefined>(undefined);
   const previousReadOnlyRef = React.useRef(Boolean(readOnly));
   const callbacksRef = React.useRef<CanvasTextEditorCallbacks>({
     onChange,
     onSave,
-    onToggleWordWrap,
-    onCancel: () => {
-      viewRef.current?.contentDOM.blur();
-    }
+    onToggleWordWrap
   });
   const compartmentsRef = React.useRef<CanvasTextEditorCompartments | null>(null);
 
@@ -92,10 +93,7 @@ export function CanvasTextEditor({
     callbacksRef.current = {
       onChange,
       onSave,
-      onToggleWordWrap,
-      onCancel: () => {
-        viewRef.current?.contentDOM.blur();
-      }
+      onToggleWordWrap
     };
   }, [onChange, onSave, onToggleWordWrap]);
 
@@ -151,10 +149,11 @@ export function CanvasTextEditor({
       if (lastCommittedScrollPosition
         && lastCommittedScrollPosition.scrollTop === position.scrollTop
         && lastCommittedScrollPosition.scrollLeft === position.scrollLeft) {
-        return;
+        return position;
       }
       lastCommittedScrollPosition = position;
       onScrollPositionCommitRef.current?.(position);
+      return position;
     };
     commitObservedScrollPositionRef.current = commitObservedScrollPosition;
     const commitScrollPosition = () => {
@@ -207,40 +206,33 @@ export function CanvasTextEditor({
         callback(time);
       });
     };
-    const scheduleSyntaxReadyCheck = () => {
-      scheduleFrame(() => {
-        if (cancelled) {
-          return;
-        }
-        if (!canvasTextEditorEnsureVisibleSyntaxReady(view)) {
-          scheduleSyntaxReadyCheck();
-          return;
-        }
-        scheduleFrame(() => {
-          if (!cancelled) {
-            onLayoutReadyRef.current?.();
-          }
-        });
-      });
+    const notifyWhenSyntaxReady = () => {
+      if (cancelled) {
+        return;
+      }
+      if (!canvasTextEditorEnsureVisibleSyntaxReady(view)) {
+        scheduleFrame(notifyWhenSyntaxReady);
+        return;
+      }
+      onLayoutReadyRef.current?.();
     };
-    scheduleFrame(() => {
+    if ((initialScrollTop ?? 0) === 0 && (initialScrollLeft ?? 0) === 0) {
+      queueMicrotask(notifyWhenSyntaxReady);
+    } else {
       view.requestMeasure({
         read: () => undefined,
         write: () => {
-          if (cancelled) {
-            return;
-          }
-          scheduleSyntaxReadyCheck();
+          queueMicrotask(notifyWhenSyntaxReady);
         }
       });
-    });
+    }
     return () => {
       cancelled = true;
       if (frame !== undefined) {
         window.cancelAnimationFrame(frame);
       }
     };
-  }, [visible]);
+  }, [initialScrollLeft, initialScrollTop, visible]);
 
   React.useEffect(() => {
     const view = viewRef.current;
@@ -301,9 +293,12 @@ export function CanvasTextEditor({
     const nextReadOnly = Boolean(readOnly);
     previousReadOnlyRef.current = nextReadOnly;
     if (!wasReadOnly && nextReadOnly) {
-      commitObservedScrollPositionRef.current?.();
+      const position = commitObservedScrollPositionRef.current?.();
+      if (position) {
+        onReadOnlyTransition?.(position);
+      }
     }
-  }, [readOnly]);
+  }, [onReadOnlyTransition, readOnly]);
 
   return (
     <div

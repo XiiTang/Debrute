@@ -15,7 +15,7 @@ function renderStaticWithI18n(element: React.ReactElement): string {
   );
 }
 
-describe('FloatingTextEditorWindow', () => {
+describe('FloatingTextEditorWindow', { tags: ['canvas-text'] }, () => {
   it('renders the shared CodeMirror text editor surface', () => {
     const html = renderStaticWithI18n(
       <FloatingTextEditorWindow
@@ -86,8 +86,7 @@ function textBuffer(): TextFileBuffer {
     wordWrap: false,
     dirty: false,
     saving: false,
-    diskRevision: 'rev-a',
-    lastSavedRevision: 'rev-a',
+    baseRevision: 'rev-a',
     externalChange: false
   };
 }

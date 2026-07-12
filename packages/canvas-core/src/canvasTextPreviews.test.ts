@@ -4,7 +4,7 @@ import {
   canvasTextPreviewVariantProjectPath
 } from './canvasTextPreviews';
 
-describe('Canvas text preview paths', () => {
+describe('Canvas text preview paths', { tags: ['canvas-text'] }, () => {
   it('scopes source cache paths by canvas, project path, and fingerprint', () => {
     expect(canvasTextPreviewSourceProjectPath({
       canvasId: 'canvas-1',
@@ -26,24 +26,22 @@ describe('Canvas text preview paths', () => {
     );
   });
 
-  it('rejects unsafe canvas ids and internal project paths', () => {
+  it('supports Debrute internal project paths through the canonical hashed cache layout', () => {
+    expect(canvasTextPreviewSourceProjectPath({
+      canvasId: 'canvas-1',
+      projectRelativePath: '.debrute/internal.md',
+      fingerprint: 'fingerprint-a'
+    })).toMatch(
+      /^\.debrute\/cache\/canvas-text-previews\/canvas-1\/\.debrute%2Finternal\.md--[a-f0-9]{16}\/fingerprint-a\/source\.png$/
+    );
+  });
+
+  it('rejects unsafe cache path inputs', () => {
     expect(() => canvasTextPreviewSourceProjectPath({
       canvasId: '../canvas',
       projectRelativePath: 'notes/scene.md',
       fingerprint: 'fingerprint-a'
     })).toThrow('Canvas text preview canvas id must be a valid id.');
-
-    expect(() => canvasTextPreviewSourceProjectPath({
-      canvasId: 'canvas-1',
-      projectRelativePath: '.debrute/cache/file.md',
-      fingerprint: 'fingerprint-a'
-    })).toThrow('Canvas text preview cannot target Debrute internal files.');
-
-    expect(() => canvasTextPreviewSourceProjectPath({
-      canvasId: 'canvas-1',
-      projectRelativePath: '.DeBrute/cache/file.md',
-      fingerprint: 'fingerprint-a'
-    })).toThrow('Canvas text preview cannot target Debrute internal files.');
 
     expect(() => canvasTextPreviewSourceProjectPath({
       canvasId: 'canvas-1',

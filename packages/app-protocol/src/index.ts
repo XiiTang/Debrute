@@ -12,7 +12,8 @@ import type {
   ProjectPathBatchEntry,
   ProjectPathBatchOperationResult,
   ProjectPathOperationResult,
-  ProjectTextFile
+  ProjectTextFile,
+  WriteProjectTextFileInput
 } from '@debrute/project-core';
 
 export {
@@ -37,6 +38,7 @@ import type {
 } from './workbenchChrome.js';
 
 export type { ProjectTextFile } from '@debrute/project-core';
+export type { WriteProjectTextFileInput } from '@debrute/project-core';
 
 export interface ProjectHealthSummary {
   projectName: string;
@@ -343,9 +345,11 @@ export interface CanvasTextPreviewSourceTarget {
   fingerprint: string;
 }
 
-export interface CanvasTextPreviewSourceAvailabilityView extends CanvasTextPreviewSourceTarget {
-  available: boolean;
-}
+export type CanvasTextPreviewSourceAvailabilityView = CanvasTextPreviewSourceTarget & (
+  | { status: 'available' }
+  | { status: 'missing' }
+  | { status: 'error'; message: string }
+);
 
 export interface SaveCanvasTextPreviewSourceInput extends CanvasTextPreviewSourceTarget {
   canvasId: string;
@@ -354,7 +358,7 @@ export interface SaveCanvasTextPreviewSourceInput extends CanvasTextPreviewSourc
 
 export interface SaveCanvasTextPreviewSourceResult {
   ok: true;
-  source: CanvasTextPreviewSourceAvailabilityView & { available: true };
+  source: CanvasTextPreviewSourceTarget & { status: 'available' };
 }
 
 export interface CanvasTextPreviewSourceAvailabilityRequest {
@@ -1092,6 +1096,7 @@ export type AppServerEvent =
   | { type: 'canvas.changed'; canvas: CanvasDocument; projection: CanvasProjection }
   | { type: 'canvas.feedback.changed'; feedback: CanvasFeedbackDocument }
   | { type: 'generatedAsset.metadata.changed'; record: GeneratedAssetRecord }
+  | { type: 'recentProjects.changed'; recentProjectRoots: string[] }
   | { type: 'globalSettings.changed'; settings: DebruteGlobalSettingsView };
 
 export type WorkbenchFileWatchEvent = Omit<NormalizedFileWatchEvent, 'absolutePath'>;
@@ -1103,6 +1108,7 @@ export type WorkbenchEvent =
   | { type: 'canvas.changed'; projectId: string; projectRevision: number; canvas: CanvasDocument; projection: CanvasProjection }
   | { type: 'canvas.feedback.changed'; projectId: string; projectRevision: number; feedback: CanvasFeedbackDocument }
   | { type: 'generatedAsset.metadata.changed'; projectId: string; projectRevision: number; record: GeneratedAssetRecord }
+  | { type: 'recentProjects.changed'; recentProjectRoots: string[] }
   | { type: 'globalSettings.changed'; settings: DebruteGlobalSettingsView }
   | { type: 'adobeBridge.state.changed'; state: AdobeBridgeStateView };
 
@@ -1135,7 +1141,7 @@ export interface WorkbenchApiClient {
     onError?: (error: Error) => void
   ): TerminalEventSubscription;
   readProjectTextFile(projectRelativePath: string): Promise<WorkbenchProjectTextFile>;
-  writeProjectTextFile(projectRelativePath: string, content: string): Promise<WorkbenchProjectTextFileWriteResult>;
+  writeProjectTextFile(input: WriteProjectTextFileInput): Promise<WorkbenchProjectTextFileWriteResult>;
   saveCanvasTextPreviewSource(input: SaveCanvasTextPreviewSourceInput): Promise<SaveCanvasTextPreviewSourceResult>;
   readCanvasTextPreviewSources(input: CanvasTextPreviewSourceAvailabilityRequest): Promise<CanvasTextPreviewSourceAvailabilityResponse>;
   readCanvasVideoPreviewSources(input: CanvasVideoPreviewSourceRequest): Promise<CanvasVideoPreviewSourceResponse>;

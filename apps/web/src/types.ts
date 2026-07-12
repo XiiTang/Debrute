@@ -25,7 +25,8 @@ import type {
   WorkbenchProjectSessionSnapshot,
   WorkbenchProjectTextFile,
   WorkbenchProjectTextFileWriteResult,
-  WorkbenchTitleBarState
+  WorkbenchTitleBarState,
+  WriteProjectTextFileInput
 } from '@debrute/app-protocol';
 import type {
   CanvasFeedbackDocument,
@@ -67,8 +68,7 @@ export interface TextFileBuffer {
   wordWrap: boolean;
   dirty: boolean;
   saving: boolean;
-  diskRevision?: string;
-  lastSavedRevision?: string;
+  baseRevision?: string;
   externalChange: boolean;
   error?: string;
 }
@@ -98,11 +98,11 @@ export interface WorkbenchActions {
   lookupGeneratedAssetMetadata: (input: { projectRelativePath: string }) => Promise<GeneratedAssetMetadataLookup>;
   readGeneratedAsset: (assetId: string) => Promise<GeneratedAssetView>;
   readProjectTextFile: (projectRelativePath: string) => Promise<WorkbenchProjectTextFile>;
-  writeProjectTextFile: (projectRelativePath: string, content: string) => Promise<WorkbenchProjectTextFileWriteResult>;
+  writeProjectTextFile: (input: WriteProjectTextFileInput) => Promise<WorkbenchProjectTextFileWriteResult>;
   saveCanvasTextPreviewSource: (input: SaveCanvasTextPreviewSourceInput) => Promise<SaveCanvasTextPreviewSourceResult>;
   readCanvasTextPreviewSources: (input: CanvasTextPreviewSourceAvailabilityRequest) => Promise<CanvasTextPreviewSourceAvailabilityResponse>;
   readCanvasVideoPreviewSources: (input: CanvasVideoPreviewSourceRequest) => Promise<CanvasVideoPreviewSourceResponse>;
-  ensureTextFileBuffer: (projectRelativePath: string, diskRevision?: string) => Promise<void>;
+  ensureTextFileBuffer: (projectRelativePath: string) => Promise<void>;
   updateTextFileBuffer: (projectRelativePath: string, content: string) => void;
   saveTextFileBuffer: (projectRelativePath: string) => Promise<void>;
   discardTextFileBuffer: (projectRelativePath: string) => Promise<void>;

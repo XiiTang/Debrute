@@ -8,18 +8,20 @@ export type WorkbenchRuntimeRegistryErrorCode =
 export class WorkbenchRuntimeRegistryError extends Error {
   constructor(
     readonly code: WorkbenchRuntimeRegistryErrorCode,
-    message: string
+    message: string,
+    options?: ErrorOptions
   ) {
-    super(message);
+    super(message, options);
     this.name = 'WorkbenchRuntimeRegistryError';
   }
 }
 
 export function registryError(
   code: WorkbenchRuntimeRegistryErrorCode,
-  message: string
+  message: string,
+  options?: ErrorOptions
 ): WorkbenchRuntimeRegistryError {
-  return new WorkbenchRuntimeRegistryError(code, message);
+  return new WorkbenchRuntimeRegistryError(code, message, options);
 }
 
 export function isWorkbenchRuntimeRegistryError(error: unknown): error is WorkbenchRuntimeRegistryError {

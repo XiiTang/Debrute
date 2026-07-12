@@ -18,7 +18,7 @@ export interface RuntimeHostServices {
     config: RuntimeHostConfig,
     managedCli: DebruteManagedCliService
   ) => DebruteProductUpdateService;
-  createDaemonServer?: (options: DebruteDaemonHttpServerOptions) => DebruteDaemonHttpServer;
+  createDaemonServer?: (options: DebruteDaemonHttpServerOptions) => Pick<DebruteDaemonHttpServer, 'listen' | 'close'>;
   registerProcessHandlers?: boolean;
 }
 

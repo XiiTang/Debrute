@@ -12,12 +12,11 @@ import {
   type ProjectBridgeClient
 } from '@debrute/app-protocol';
 import {
-  isProjectGitMetadataPath,
-  isIgnoredProjectFilePath,
+  isProjectVisiblePath,
   isProtectedProjectDocumentMutationPath,
   type ProjectFileEntry
 } from '@debrute/project-core';
-import { AdobeBridgeError, createAdobeBridgeError } from './AdobeBridgeErrors.js';
+import { createAdobeBridgeError } from './AdobeBridgeErrors.js';
 
 export { AdobeBridgeError, createAdobeBridgeError } from './AdobeBridgeErrors.js';
 
@@ -366,7 +365,6 @@ export class AdobeBridgeService {
 }
 
 function isAdobeBridgeVisibleProjectDirectory(projectRelativePath: string): boolean {
-  return !isProjectGitMetadataPath(projectRelativePath)
-    && !isIgnoredProjectFilePath(projectRelativePath)
+  return isProjectVisiblePath(projectRelativePath)
     && !isProtectedProjectDocumentMutationPath(projectRelativePath);
 }

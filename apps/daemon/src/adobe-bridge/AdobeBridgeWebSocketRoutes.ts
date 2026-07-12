@@ -120,9 +120,11 @@ export function createAdobeBridgeWebSocketRoutes(input: {
     },
     close: async () => {
       for (const socket of sockets) {
-        socket.close(1000, 'daemon closing');
+        socket.terminate();
       }
-      await new Promise<void>((resolve) => wss.close(() => resolve()));
+      await new Promise<void>((resolve, reject) => {
+        wss.close((error) => error ? reject(error) : resolve());
+      });
     }
   };
 }

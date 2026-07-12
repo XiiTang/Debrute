@@ -1,0 +1,83 @@
+import { describe, expect, it } from 'vitest';
+import {
+  adobeBridgeClientDisplayName,
+  isAdobeBridgeErrorCode,
+  type AdobeBridgeClient,
+  type AdobeBridgeStateView,
+  type PhotoshopBridgeHelloMessage
+} from '@debrute/app-protocol';
+
+describe('Adobe Bridge protocol', () => {
+  it('derives Photoshop client display names from host and document state', () => {
+    expect(adobeBridgeClientDisplayName({
+      hostApp: 'photoshop',
+      hostVersion: '2026',
+      activeDocumentTitle: 'poster.psd'
+    })).toBe('Photoshop 2026 · poster.psd');
+
+    expect(adobeBridgeClientDisplayName({
+      hostApp: 'photoshop',
+      hostVersion: '2026',
+      activeDocumentTitle: null
+    })).toBe('Photoshop 2026 · No document open');
+  });
+
+  it('keeps the bridge state shape stable', () => {
+    const client: AdobeBridgeClient = {
+      adobeClientId: 'ps-client-1',
+      hostApp: 'photoshop',
+      hostVersion: '2026',
+      displayName: 'Photoshop 2026 · No document open',
+      documentCount: 0,
+      activeDocumentTitle: null,
+      connectedAt: '2026-06-18T00:00:00.000Z',
+      lastSeenAt: '2026-06-18T00:00:01.000Z'
+    };
+
+    const state: AdobeBridgeStateView = {
+      settings: { enabled: true, discoveryStatus: 'available' },
+      adobeClients: [client],
+      projects: [],
+      links: [],
+      transfers: []
+    };
+
+    expect(state.adobeClients[0]?.displayName).toBe('Photoshop 2026 · No document open');
+    expect(state.settings.discoveryStatus).toBe('available');
+  });
+
+  it('allows Photoshop clients to report their plugin runtime without changing host identity', () => {
+    const client: AdobeBridgeClient = {
+      adobeClientId: 'ps-client-cep',
+      hostApp: 'photoshop',
+      hostVersion: '26.0.0',
+      clientRuntime: 'cep',
+      displayName: 'Photoshop 26.0.0 · No document open',
+      documentCount: 0,
+      activeDocumentTitle: null,
+      connectedAt: '2026-06-20T00:00:00.000Z',
+      lastSeenAt: '2026-06-20T00:00:01.000Z'
+    };
+
+    const hello: PhotoshopBridgeHelloMessage = {
+      type: 'hello',
+      adobeClientId: client.adobeClientId,
+      hostApp: 'photoshop',
+      hostVersion: client.hostVersion,
+      clientRuntime: 'cep',
+      documentCount: 0,
+      activeDocumentTitle: null
+    };
+
+    expect(client.hostApp).toBe('photoshop');
+    expect(client.clientRuntime).toBe('cep');
+    expect(hello.clientRuntime).toBe('cep');
+  });
+
+  it('recognizes only stable bridge error codes', () => {
+    expect(isAdobeBridgeErrorCode('project_not_linked')).toBe(true);
+    expect(isAdobeBridgeErrorCode('photoshop_place_failed')).toBe(true);
+    expect(isAdobeBridgeErrorCode('old_bridge_code')).toBe(false);
+  });
+
+});

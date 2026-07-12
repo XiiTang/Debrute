@@ -21,7 +21,7 @@ export async function launchPackagedDesktopRuntime(
   const token = randomUUID();
   await mkdir(paths.runtimeDir, { recursive: true, mode: 0o700 });
   await writeFile(paths.tokenPath, `${token}\n`, { encoding: 'utf8', mode: 0o600 });
-  const child = spawnRuntimeHost(paths, owner, daemonPort, product);
+  const child = spawnRuntimeHost(paths, daemonPort, product);
   const now = new Date().toISOString();
   return {
     runtimeKind: process.env.DEBRUTE_WORKBENCH_RUNTIME_KIND === 'desktop-dev' ? 'desktop-dev' : 'desktop-packaged',
@@ -40,7 +40,6 @@ export async function launchPackagedDesktopRuntime(
 
 function spawnRuntimeHost(
   paths: WorkbenchRuntimePaths,
-  owner: WorkbenchRuntimeOwner,
   daemonPort: number,
   product: DesktopProductRuntimeConfig
 ): ChildProcess {

@@ -45,13 +45,20 @@ export interface ProjectSessionRecord {
   closing: boolean;
 }
 
+interface OpeningProjectSession {
+  result: Promise<ProjectSessionRecord>;
+  completion: Promise<void>;
+}
+
 export class ProjectSessionRegistry {
   private readonly sessionsById = new Map<string, ProjectSessionRecord>();
   private readonly projectIdsByRoot = new Map<string, string>();
-  private readonly openingByRoot = new Map<string, Promise<ProjectSessionRecord>>();
+  private readonly openingByRoot = new Map<string, OpeningProjectSession>();
   private readonly idleTtlMs: number;
   private readonly createAppServer: () => DebruteAppServer;
   private readonly onChange: () => void;
+  private readonly lifetime = new AbortController();
+  private closePromise: Promise<void> | undefined;
   private closed = false;
 
   constructor(options: ProjectSessionRegistryOptions = {}) {
@@ -84,31 +91,65 @@ export class ProjectSessionRegistry {
 
     const opening = this.openingByRoot.get(canonicalRoot);
     if (opening) {
-      return opening;
+      return opening.result;
     }
 
-    const nextOpening = this.createSession(canonicalRoot);
+    const cleanupErrors: unknown[] = [];
+    const result = this.createSession(canonicalRoot, cleanupErrors);
+    const completion = result.then(
+      () => undefined,
+      () => {
+        if (cleanupErrors.length === 1) {
+          throw cleanupErrors[0];
+        }
+        if (cleanupErrors.length > 1) {
+          throw new AggregateError(cleanupErrors, 'Debrute opening project session cleanup failed.');
+        }
+      }
+    );
+    const nextOpening = { result, completion };
     this.openingByRoot.set(canonicalRoot, nextOpening);
-    try {
-      return await nextOpening;
-    } finally {
+    const removeOpening = () => {
       if (this.openingByRoot.get(canonicalRoot) === nextOpening) {
         this.openingByRoot.delete(canonicalRoot);
       }
-    }
+    };
+    void completion.then(removeOpening, removeOpening);
+    return result;
   }
 
-  private async createSession(canonicalRoot: string): Promise<ProjectSessionRecord> {
+  private async createSession(
+    canonicalRoot: string,
+    cleanupErrors: unknown[]
+  ): Promise<ProjectSessionRecord> {
     const appServer = this.createAppServer();
     let snapshot: ProjectSessionSnapshot;
     try {
-      snapshot = await appServer.openProject(canonicalRoot);
+      snapshot = await appServer.openProject(canonicalRoot, {
+        initializeIfMissing: true,
+        createDefaultCanvas: true,
+        signal: this.lifetime.signal
+      });
     } catch (error) {
-      appServer.close();
+      try {
+        appServer.close();
+      } catch (closeError) {
+        cleanupErrors.push(closeError);
+        if (!this.closed) {
+          throw new AggregateError(
+            [error, closeError],
+            'Debrute project session open and cleanup failed.'
+          );
+        }
+      }
       throw error;
     }
     if (this.closed) {
-      appServer.close();
+      try {
+        appServer.close();
+      } catch (error) {
+        cleanupErrors.push(error);
+      }
       throw new Error('Debrute project session registry is closed.');
     }
     const projectId = randomUUID();
@@ -251,17 +292,49 @@ export class ProjectSessionRegistry {
   }
 
   async close(): Promise<void> {
-    this.closed = true;
+    if (!this.closePromise) {
+      this.closed = true;
+      this.lifetime.abort();
+      this.closePromise = this.closeSessions();
+    }
+    return this.closePromise;
+  }
+
+  private async closeSessions(): Promise<void> {
     const records = [...this.sessionsById.values()];
+    const openings = [...this.openingByRoot.values()];
+    const closeErrors: unknown[] = [];
+    for (const record of records) {
+      record.closing = true;
+      if (record.cleanupTimer) {
+        clearTimeout(record.cleanupTimer);
+        record.cleanupTimer = undefined;
+      }
+      try {
+        record.unsubscribeAppServerEvents();
+      } catch (error) {
+        closeErrors.push(error);
+      }
+      try {
+        record.appServer.close();
+      } catch (error) {
+        closeErrors.push(error);
+      }
+    }
+    const openingResults = await Promise.allSettled(openings.map((opening) => opening.completion));
+    for (const result of openingResults) {
+      if (result.status === 'rejected') {
+        closeErrors.push(result.reason);
+      }
+    }
     this.sessionsById.clear();
     this.projectIdsByRoot.clear();
     this.openingByRoot.clear();
-    for (const record of records) {
-      if (record.cleanupTimer) {
-        clearTimeout(record.cleanupTimer);
-      }
-      record.unsubscribeAppServerEvents();
-      record.appServer.close();
+    if (closeErrors.length === 1) {
+      throw closeErrors[0];
+    }
+    if (closeErrors.length > 1) {
+      throw new AggregateError(closeErrors, 'Debrute project session registry shutdown failed.');
     }
   }
 

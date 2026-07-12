@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { terminalThemeForWorkbenchTheme } from './terminalTheme';
 
-describe('terminalThemeForWorkbenchTheme', () => {
+describe('terminalThemeForWorkbenchTheme', { tags: ['terminal'] }, () => {
   it('maps the dark Workbench theme to the dark terminal surface and ANSI palette', () => {
     expect(terminalThemeForWorkbenchTheme('dark')).toMatchObject({
       background: '#0c0e10',

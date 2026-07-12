@@ -57,7 +57,7 @@ const result = await ensureRegisteredWorkbenchRuntime({
   paths,
   isHealthy: async (state) => isDesktopDevRuntimeForCurrentSession(state) && await isWorkbenchRuntimeHealthy(state),
   launch: launchDesktopDevRuntime,
-  onRuntimeLaunchFailed: killRuntimeChildren
+  onRuntimeLaunchFailed: stopRuntimeChildren
 });
 currentRuntimeState = result.state;
 deleteOwnState = result.runtimeStarted;
@@ -174,7 +174,7 @@ async function shutdown(state: WorkbenchRuntimeState | undefined, shouldDeleteSt
   if (!state || !shouldDeleteState) {
     return;
   }
-  const current = await readWorkbenchRuntimeState(paths.statePath).catch(() => undefined);
+  const current = await readWorkbenchRuntimeState(paths.statePath);
   if (current?.daemonUrl === state.daemonUrl && current.webUrl === state.webUrl && current.token === state.token) {
     await deleteWorkbenchRuntimeState(paths.statePath);
   }
@@ -191,23 +191,8 @@ function deleteOwnRuntimeStateSync(): void {
   }
 }
 
-function killRuntimeChildren(): void {
-  for (const child of runtimeChildren) {
-    if (child.pid) {
-      terminateRuntimeChild(child);
-    }
-  }
-}
-
 async function stopRuntimeChildren(): Promise<void> {
   await Promise.all(runtimeChildren.map((child) => stopChild(child)));
-}
-
-function terminateRuntimeChild(child: ChildProcess): void {
-  if (!child.pid || child.exitCode !== null || child.signalCode !== null) {
-    return;
-  }
-  child.kill('SIGTERM');
 }
 
 async function stopElectron(child: ChildProcess): Promise<void> {
@@ -221,7 +206,6 @@ async function stopChild(child: ChildProcess): Promise<void> {
   await new Promise<void>((resolveExit) => {
     const timeout = setTimeout(() => {
       child.kill('SIGKILL');
-      resolveExit();
     }, CHILD_EXIT_GRACE_MS);
     child.once('exit', () => {
       clearTimeout(timeout);

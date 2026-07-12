@@ -6,7 +6,7 @@ import {
   type CanvasDocument
 } from './index';
 
-describe('Canvas video playback state', () => {
+describe('Canvas video playback state', { tags: ['canvas-video'] }, () => {
   it('stores playback time only on matching video nodes', () => {
     const canvas = canvasWithNodes();
 

@@ -25,6 +25,17 @@ export interface ProbeResult {
   errorKind?: IntegrationProbeErrorKind;
 }
 
+export interface IntegrationProcessAdapter {
+  resolveExecutable(
+    name: string,
+    envPath: string,
+    platform: NodeJS.Platform,
+    pathExt: string
+  ): Promise<string | undefined>;
+  runProbe(file: string, args: string[], timeoutMs: number): Promise<ProbeResult>;
+  runCommand(input: IntegrationCommandInput): Promise<IntegrationCommandResult>;
+}
+
 const COMMAND_OUTPUT_CAPTURE_LIMIT = 65_536;
 const DIAGNOSTIC_TAIL_LIMIT = 4096;
 
@@ -156,6 +167,12 @@ export function runProbe(file: string, args: string[], timeoutMs: number): Promi
     });
   });
 }
+
+export const nodeIntegrationProcessAdapter: IntegrationProcessAdapter = {
+  resolveExecutable,
+  runProbe,
+  runCommand: runIntegrationCommand
+};
 
 export function tail(value: string, limit = DIAGNOSTIC_TAIL_LIMIT): string {
   return value.length <= limit ? value : value.slice(value.length - limit);

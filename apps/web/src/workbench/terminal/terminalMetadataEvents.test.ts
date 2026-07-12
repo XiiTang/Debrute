@@ -2,7 +2,7 @@ import { describe, expect, it, vi } from 'vitest';
 import type { TerminalSessionView } from '@debrute/app-protocol';
 import { createTerminalMetadataEventHandler } from './terminalMetadataEvents';
 
-describe('terminalMetadataEvents', () => {
+describe('terminalMetadataEvents', { tags: ['terminal'] }, () => {
   it('updates terminal metadata without rendering terminal output', () => {
     const onSessionUpdate = vi.fn();
     const onSessionClose = vi.fn();

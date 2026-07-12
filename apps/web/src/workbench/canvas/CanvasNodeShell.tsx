@@ -15,6 +15,7 @@ const RESIZE_HANDLES: ResizeHandle[] = ['nw', 'n', 'ne', 'w', 'e', 'sw', 's', 's
 export interface CanvasNodeShellProps {
   node: ProjectedCanvasNode;
   selected: boolean;
+  textEditorActive: boolean;
   hovered: boolean;
   culled: boolean;
   zIndex: number;
@@ -22,11 +23,12 @@ export interface CanvasNodeShellProps {
   actions: WorkbenchActions;
   textBuffer: TextFileBuffer | undefined;
   textPreview?: CanvasTextPreviewSource | undefined;
+  pendingTextPreview?: CanvasTextPreviewSource | undefined;
+  textPreviewCommittedSourceKey?: string | undefined;
   textPreviewError?: string | undefined;
   videoPreview?: CanvasVideoPreviewSource | undefined;
   videoPreviewError?: string | undefined;
   forceVideoPlayerMounted?: boolean | undefined;
-  previewInteractionActive: boolean;
   feedbackEntry?: CanvasFeedbackEntry | undefined;
   localFeedbackMode?: CanvasMediaFeedbackMode | undefined;
   pendingFeedbackRegion?: CanvasMediaFeedbackDraftRegion | undefined;
@@ -54,6 +56,7 @@ export interface CanvasNodeShellProps {
 function CanvasNodeShellComponent({
   node,
   selected,
+  textEditorActive,
   hovered,
   culled,
   zIndex,
@@ -61,11 +64,12 @@ function CanvasNodeShellComponent({
   actions,
   textBuffer,
   textPreview,
+  pendingTextPreview,
+  textPreviewCommittedSourceKey,
   textPreviewError,
   videoPreview,
   videoPreviewError,
   forceVideoPlayerMounted,
-  previewInteractionActive,
   feedbackEntry,
   localFeedbackMode,
   pendingFeedbackRegion,
@@ -140,16 +144,17 @@ function CanvasNodeShellComponent({
         <div className="canvas-node-presentation">
           <CanvasNodeContent
             node={node}
-            selected={selected}
+            selected={node.mediaKind === 'text' ? textEditorActive : selected}
             culled={culled}
             actions={actions}
             textBuffer={textBuffer}
             textPreview={textPreview}
+            pendingTextPreview={pendingTextPreview}
+            textPreviewCommittedSourceKey={textPreviewCommittedSourceKey}
             textPreviewError={textPreviewError}
             videoPreview={videoPreview}
             videoPreviewError={videoPreviewError}
             forceVideoPlayerMounted={forceVideoPlayerMounted}
-            previewInteractionActive={previewInteractionActive}
             feedbackEntry={feedbackEntry}
             localFeedbackMode={localFeedbackMode}
             pendingFeedbackRegion={pendingFeedbackRegion}
@@ -170,16 +175,17 @@ function CanvasNodeShellComponent({
       ) : (
         <CanvasNodeContent
           node={node}
-          selected={selected}
+          selected={node.mediaKind === 'text' ? textEditorActive : selected}
           culled={culled}
           actions={actions}
           textBuffer={textBuffer}
           textPreview={textPreview}
+          pendingTextPreview={pendingTextPreview}
+          textPreviewCommittedSourceKey={textPreviewCommittedSourceKey}
           textPreviewError={textPreviewError}
           videoPreview={videoPreview}
           videoPreviewError={videoPreviewError}
           forceVideoPlayerMounted={forceVideoPlayerMounted}
-          previewInteractionActive={previewInteractionActive}
           feedbackEntry={feedbackEntry}
           localFeedbackMode={localFeedbackMode}
           pendingFeedbackRegion={pendingFeedbackRegion}
@@ -222,6 +228,7 @@ export function areCanvasNodeShellPropsEqual(
 ): boolean {
   return previous.node === next.node
     && previous.selected === next.selected
+    && previous.textEditorActive === next.textEditorActive
     && previous.hovered === next.hovered
     && previous.culled === next.culled
     && previous.zIndex === next.zIndex
@@ -229,11 +236,12 @@ export function areCanvasNodeShellPropsEqual(
     && (previous.node.mediaKind === 'text' ? previous.actions === next.actions : true)
     && previous.textBuffer === next.textBuffer
     && previous.textPreview === next.textPreview
+    && previous.pendingTextPreview === next.pendingTextPreview
+    && previous.textPreviewCommittedSourceKey === next.textPreviewCommittedSourceKey
     && previous.textPreviewError === next.textPreviewError
     && previous.videoPreview === next.videoPreview
     && previous.videoPreviewError === next.videoPreviewError
     && previous.forceVideoPlayerMounted === next.forceVideoPlayerMounted
-    && previous.previewInteractionActive === next.previewInteractionActive
     && previous.feedbackEntry === next.feedbackEntry
     && previous.localFeedbackMode === next.localFeedbackMode
     && previous.pendingFeedbackRegion === next.pendingFeedbackRegion

@@ -4,7 +4,7 @@ import {
   type CodeMirrorLanguageKind
 } from './textEditorCodeMirrorLanguages';
 
-describe('CodeMirror text editor language mapping', () => {
+describe('CodeMirror text editor language mapping', { tags: ['canvas-text'] }, () => {
   it.each([
     ['markdown', 'markdown'],
     ['json', 'json'],

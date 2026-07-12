@@ -22,16 +22,17 @@ import {
 import {
   GlobalConfigStore,
   GlobalSettingsValidationError,
-  type DebruteGlobalConfigSnapshot,
-  type GlobalConfigMutationResult
+  type DebruteGlobalConfigSnapshot
 } from '../config/GlobalConfigStore.js';
 import { IntegrationsService } from '../integrations/IntegrationsService.js';
+import type { IntegrationProcessAdapter } from '../integrations/IntegrationCommandRunner.js';
 
 export interface DebruteGlobalRuntimeServerOptions {
   globalConfigStore?: GlobalConfigStore;
   integrationEnvPath?: string;
   integrationPathExt?: string;
   integrationPlatform?: NodeJS.Platform;
+  integrationProcessAdapter?: IntegrationProcessAdapter;
 }
 
 export class DebruteGlobalRuntimeServer {
@@ -47,7 +48,10 @@ export class DebruteGlobalRuntimeServer {
     this.integrationsService = new IntegrationsService({
       ...(options.integrationEnvPath !== undefined ? { envPath: options.integrationEnvPath } : {}),
       ...(options.integrationPathExt !== undefined ? { pathExt: options.integrationPathExt } : {}),
-      ...(options.integrationPlatform !== undefined ? { platform: options.integrationPlatform } : {})
+      ...(options.integrationPlatform !== undefined ? { platform: options.integrationPlatform } : {}),
+      ...(options.integrationProcessAdapter !== undefined
+        ? { processAdapter: options.integrationProcessAdapter }
+        : {})
     });
   }
 
@@ -97,18 +101,26 @@ export class DebruteGlobalRuntimeServer {
   }
 
   async rememberRecentProjectRoot(projectRoot: string): Promise<void> {
-    const integrations = await this.integrationsService.listStatus();
-    this.emitChangedMutation(await this.configStore.mutateGlobalSettings({
+    const result = await this.configStore.mutateGlobalSettings({
       kind: 'rememberRecentProjectRoot',
       projectRoot
-    }), integrations);
+    });
+    if (result.changed) {
+      this.emit({
+        type: 'recentProjects.changed',
+        recentProjectRoots: result.snapshot.settings.chrome.recentProjectRoots
+      });
+    }
   }
 
   async clearRecentProjectRoots(): Promise<void> {
-    const integrations = await this.integrationsService.listStatus();
-    this.emitChangedMutation(await this.configStore.mutateGlobalSettings({
-      kind: 'clearRecentProjectRoots'
-    }), integrations);
+    const result = await this.configStore.mutateGlobalSettings({ kind: 'clearRecentProjectRoots' });
+    if (result.changed) {
+      this.emit({
+        type: 'recentProjects.changed',
+        recentProjectRoots: result.snapshot.settings.chrome.recentProjectRoots
+      });
+    }
   }
 
   async workbenchTitleBarState(input: {
@@ -160,19 +172,6 @@ export class DebruteGlobalRuntimeServer {
       integrations,
       adobeBridge: snapshot.settings.adobeBridge
     };
-  }
-
-  private emitChangedMutation(
-    result: GlobalConfigMutationResult,
-    integrations: IntegrationSettingsView
-  ): void {
-    if (!result.changed) {
-      return;
-    }
-    this.emit({
-      type: 'globalSettings.changed',
-      settings: this.globalSettingsView(result.snapshot, integrations)
-    });
   }
 
   private async emitIntegrationSettingsChanged(integrations: IntegrationSettingsView): Promise<void> {

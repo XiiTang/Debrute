@@ -1,11 +1,11 @@
-import { useCallback, type Dispatch, type MutableRefObject, type SetStateAction } from 'react';
+import { useCallback, useRef, type Dispatch, type MutableRefObject, type SetStateAction } from 'react';
 import type { WorkbenchApiClient } from '@debrute/app-protocol';
 import type { FloatingTextEditorWindowState, TextFileBuffer } from '../../types';
 import { textBufferFromFile } from './textFileBuffers';
 import { clearTextBufferError } from './textEditorWindows';
 
 export interface TextFileBufferActions {
-  ensureTextFileBuffer(projectRelativePath: string, diskRevision?: string): Promise<void>;
+  ensureTextFileBuffer(projectRelativePath: string): Promise<void>;
   updateTextFileBuffer(projectRelativePath: string, content: string): void;
   saveTextFileBuffer(projectRelativePath: string): Promise<void>;
   discardTextFileBuffer(projectRelativePath: string): Promise<void>;
@@ -13,48 +13,55 @@ export interface TextFileBufferActions {
   refreshTextFileBuffer(projectRelativePath: string): Promise<void>;
 }
 
+interface TextFileSaveCoordinator {
+  activeContentVersion: number;
+  contentVersion: number;
+  observedDiskRevision: string | undefined;
+  queued: boolean;
+  running: Promise<void>;
+}
+
 export function useTextFileBufferActions(input: {
   api: WorkbenchApiClient;
+  projectId: string | undefined;
   textFileBuffers: Record<string, TextFileBuffer>;
   setTextFileBuffers: Dispatch<SetStateAction<Record<string, TextFileBuffer>>>;
   textFileBuffersRef: MutableRefObject<Record<string, TextFileBuffer>>;
   textEditorWindowsRef: MutableRefObject<Record<string, FloatingTextEditorWindowState>>;
 }): TextFileBufferActions {
-  const { api, textFileBuffers, setTextFileBuffers, textFileBuffersRef, textEditorWindowsRef } = input;
+  const { api, projectId, textFileBuffers, setTextFileBuffers, textFileBuffersRef, textEditorWindowsRef } = input;
+  const projectIdRef = useRef(projectId);
+  const saveCoordinatorsRef = useRef(new Map<string, TextFileSaveCoordinator>());
+  projectIdRef.current = projectId;
 
-  const ensureTextFileBuffer = useCallback(async (projectRelativePath: string, diskRevision?: string) => {
+  const ensureTextFileBuffer = useCallback(async (projectRelativePath: string) => {
+    const ensureProjectId = projectIdRef.current;
     const current = textFileBuffers[projectRelativePath];
-    if (current && (!diskRevision || current.diskRevision === diskRevision)) {
-      return;
-    }
-    if (current?.dirty && diskRevision && current.diskRevision !== diskRevision) {
-      setTextFileBuffers((buffers) => ({
-        ...buffers,
-        [projectRelativePath]: {
-          ...buffers[projectRelativePath]!,
-          diskRevision,
-          externalChange: true
-        }
-      }));
+    if (current) {
       return;
     }
     try {
       const file = await api.readProjectTextFile(projectRelativePath);
+      if (projectIdRef.current !== ensureProjectId) {
+        return;
+      }
       setTextFileBuffers((buffers) => ({
         ...buffers,
         [projectRelativePath]: {
           projectRelativePath: file.projectRelativePath,
           content: file.content,
           language: file.language,
-          wordWrap: buffers[projectRelativePath]?.wordWrap ?? current?.wordWrap ?? false,
+          wordWrap: buffers[projectRelativePath]?.wordWrap ?? false,
           dirty: false,
           saving: false,
-          diskRevision: file.revision,
-          lastSavedRevision: file.revision,
+          baseRevision: file.revision,
           externalChange: false
         }
       }));
     } catch (error) {
+      if (projectIdRef.current !== ensureProjectId) {
+        return;
+      }
       setTextFileBuffers((buffers) => ({
         ...buffers,
         [projectRelativePath]: textBufferErrorState(projectRelativePath, current, error)
@@ -63,6 +70,13 @@ export function useTextFileBufferActions(input: {
   }, [api, setTextFileBuffers, textFileBuffers]);
 
   const updateTextFileBuffer = useCallback((projectRelativePath: string, content: string) => {
+    const currentProjectId = projectIdRef.current;
+    const activeSave = currentProjectId
+      ? saveCoordinatorsRef.current.get(textFileSaveCoordinatorKey(currentProjectId, projectRelativePath))
+      : undefined;
+    if (activeSave) {
+      activeSave.contentVersion += 1;
+    }
     setTextFileBuffers((buffers) => {
       const current = buffers[projectRelativePath];
       return {
@@ -73,56 +87,162 @@ export function useTextFileBufferActions(input: {
           language: current?.language ?? 'plaintext',
           wordWrap: current?.wordWrap ?? false,
           dirty: true,
-          saving: false,
-          ...(current?.diskRevision ? { diskRevision: current.diskRevision } : {}),
-          ...(current?.lastSavedRevision ? { lastSavedRevision: current.lastSavedRevision } : {}),
+          saving: current?.saving ?? false,
+          ...(current?.baseRevision ? { baseRevision: current.baseRevision } : {}),
           externalChange: current?.externalChange ?? false
         }
       };
     });
   }, [setTextFileBuffers]);
 
-  const saveTextFileBuffer = useCallback(async (projectRelativePath: string) => {
-    const current = textFileBuffers[projectRelativePath];
-    if (!current || current.saving) {
-      return;
+  const saveTextFileBuffer = useCallback((projectRelativePath: string): Promise<void> => {
+    const saveProjectId = projectIdRef.current;
+    if (!saveProjectId) {
+      return Promise.resolve();
     }
-    setTextFileBuffers((buffers) => ({
-      ...buffers,
-      [projectRelativePath]: clearTextBufferError({ ...current, saving: true })
-    }));
-    try {
-      const saved = (await api.writeProjectTextFile(projectRelativePath, current.content)).file;
-      setTextFileBuffers((buffers) => ({
-        ...buffers,
-        [projectRelativePath]: {
-          projectRelativePath: saved.projectRelativePath,
-          content: saved.content,
-          language: saved.language,
-          wordWrap: buffers[projectRelativePath]?.wordWrap ?? current.wordWrap,
-          dirty: false,
-          saving: false,
-          diskRevision: saved.revision,
-          lastSavedRevision: saved.revision,
-          externalChange: false
-        }
-      }));
-    } catch (error) {
-      setTextFileBuffers((buffers) => ({
-        ...buffers,
-        [projectRelativePath]: {
-          ...buffers[projectRelativePath]!,
-          saving: false,
-          dirty: true,
-          error: errorMessage(error)
-        }
-      }));
+    const coordinatorKey = textFileSaveCoordinatorKey(saveProjectId, projectRelativePath);
+    const active = saveCoordinatorsRef.current.get(coordinatorKey);
+    if (active) {
+      if (active.contentVersion !== active.activeContentVersion) {
+        active.queued = true;
+      }
+      return active.running;
     }
-  }, [api, setTextFileBuffers, textFileBuffers]);
+
+    const initial = textFileBuffersRef.current[projectRelativePath];
+    if (!initial) {
+      return Promise.resolve();
+    }
+    const coordinator: TextFileSaveCoordinator = {
+      activeContentVersion: 0,
+      contentVersion: 0,
+      observedDiskRevision: undefined,
+      queued: false,
+      running: Promise.resolve()
+    };
+    saveCoordinatorsRef.current.set(coordinatorKey, coordinator);
+
+    coordinator.running = (async () => {
+      let committedRevision: string | undefined;
+      try {
+        while (true) {
+          if (projectIdRef.current !== saveProjectId) {
+            return;
+          }
+          coordinator.queued = false;
+          coordinator.observedDiskRevision = undefined;
+          const current = textFileBuffersRef.current[projectRelativePath] ?? initial;
+          const savedContentVersion = coordinator.contentVersion;
+          coordinator.activeContentVersion = savedContentVersion;
+          const expectedRevision = committedRevision ?? current.baseRevision;
+
+          setTextFileBuffers((buffers) => {
+            const latest = buffers[projectRelativePath];
+            return latest
+              ? { ...buffers, [projectRelativePath]: clearTextBufferError({ ...latest, saving: true }) }
+              : buffers;
+          });
+
+          if (!expectedRevision) {
+            setTextFileBufferSaveError(
+              setTextFileBuffers,
+              projectRelativePath,
+              new Error(`Project text file base revision is required: ${projectRelativePath}`)
+            );
+            return;
+          }
+
+          let saved: Awaited<ReturnType<WorkbenchApiClient['writeProjectTextFile']>>['file'];
+          try {
+            saved = (await api.writeProjectTextFile({
+              projectRelativePath,
+              content: current.content,
+              expectedRevision
+            })).file;
+          } catch (error) {
+            if (projectIdRef.current !== saveProjectId) {
+              return;
+            }
+            const externalChangeObserved = coordinator.observedDiskRevision !== undefined
+              && coordinator.observedDiskRevision !== expectedRevision;
+            const continueSaving = coordinator.queued
+              && coordinator.contentVersion !== savedContentVersion
+              && !externalChangeObserved;
+            setTextFileBufferSaveError(setTextFileBuffers, projectRelativePath, error, continueSaving);
+            if (continueSaving) {
+              continue;
+            }
+            return;
+          }
+
+          if (projectIdRef.current !== saveProjectId) {
+            return;
+          }
+
+          committedRevision = saved.revision;
+          const contentChanged = coordinator.contentVersion !== savedContentVersion;
+          const externalChangeObserved = coordinator.observedDiskRevision !== undefined
+            && coordinator.observedDiskRevision !== expectedRevision
+            && coordinator.observedDiskRevision !== saved.revision;
+          const continueSaving = coordinator.queued && contentChanged && !externalChangeObserved;
+          setTextFileBuffers((buffers) => {
+            const latest = buffers[projectRelativePath];
+            if (!latest) {
+              return buffers;
+            }
+            if (contentChanged || externalChangeObserved) {
+              return {
+                ...buffers,
+                [projectRelativePath]: clearTextBufferError({
+                  ...latest,
+                  dirty: true,
+                  saving: continueSaving,
+                  ...(externalChangeObserved ? {} : { baseRevision: saved.revision }),
+                  externalChange: externalChangeObserved
+                })
+              };
+            }
+            return {
+              ...buffers,
+              [projectRelativePath]: {
+                projectRelativePath: saved.projectRelativePath,
+                content: saved.content,
+                language: saved.language,
+                wordWrap: latest.wordWrap,
+                dirty: false,
+                saving: false,
+                baseRevision: saved.revision,
+                externalChange: false
+              }
+            };
+          });
+          if (!continueSaving) {
+            return;
+          }
+        }
+      } finally {
+        saveCoordinatorsRef.current.delete(coordinatorKey);
+      }
+    })();
+    return coordinator.running;
+  }, [api, setTextFileBuffers, textFileBuffersRef]);
 
   const reloadTextFileBuffer = useCallback(async (projectRelativePath: string) => {
+    const reloadProjectId = projectIdRef.current;
+    if (!reloadProjectId) {
+      return;
+    }
+    await saveCoordinatorsRef.current.get(
+      textFileSaveCoordinatorKey(reloadProjectId, projectRelativePath)
+    )?.running;
+    if (projectIdRef.current !== reloadProjectId) {
+      return;
+    }
     try {
       const file = await api.readProjectTextFile(projectRelativePath);
+      if (projectIdRef.current !== reloadProjectId) {
+        return;
+      }
       setTextFileBuffers((buffers) => ({
         ...buffers,
         [projectRelativePath]: {
@@ -132,12 +252,14 @@ export function useTextFileBufferActions(input: {
           wordWrap: buffers[projectRelativePath]?.wordWrap ?? false,
           dirty: false,
           saving: false,
-          diskRevision: file.revision,
-          lastSavedRevision: file.revision,
+          baseRevision: file.revision,
           externalChange: false
         }
       }));
     } catch (error) {
+      if (projectIdRef.current !== reloadProjectId) {
+        return;
+      }
       setTextFileBuffers((buffers) => ({
         ...buffers,
         [projectRelativePath]: textBufferErrorState(projectRelativePath, buffers[projectRelativePath], error)
@@ -150,6 +272,7 @@ export function useTextFileBufferActions(input: {
   }, [reloadTextFileBuffer]);
 
   const refreshTextFileBuffer = useCallback(async (projectRelativePath: string) => {
+    const refreshProjectId = projectIdRef.current;
     const current = textFileBuffersRef.current[projectRelativePath];
     const windowState = textEditorWindowsRef.current[projectRelativePath];
     if (!current && !windowState?.open) {
@@ -157,11 +280,25 @@ export function useTextFileBufferActions(input: {
     }
     try {
       const file = await api.readProjectTextFile(projectRelativePath);
+      if (projectIdRef.current !== refreshProjectId) {
+        return;
+      }
+      if (refreshProjectId) {
+        const activeSave = saveCoordinatorsRef.current.get(
+          textFileSaveCoordinatorKey(refreshProjectId, projectRelativePath)
+        );
+        if (activeSave) {
+          activeSave.observedDiskRevision = file.revision;
+        }
+      }
       setTextFileBuffers((buffers) => ({
         ...buffers,
         [projectRelativePath]: textBufferFromFile(file, buffers[projectRelativePath])
       }));
     } catch (error) {
+      if (projectIdRef.current !== refreshProjectId) {
+        return;
+      }
       setTextFileBuffers((buffers) => {
         const currentBuffer = buffers[projectRelativePath];
         if (!currentBuffer && !windowState?.open) {
@@ -185,6 +322,10 @@ export function useTextFileBufferActions(input: {
   };
 }
 
+function textFileSaveCoordinatorKey(projectId: string, projectRelativePath: string): string {
+  return `${projectId}\u0000${projectRelativePath}`;
+}
+
 function textBufferErrorState(projectRelativePath: string, current: TextFileBuffer | undefined, error: unknown): TextFileBuffer {
   return {
     projectRelativePath,
@@ -193,11 +334,32 @@ function textBufferErrorState(projectRelativePath: string, current: TextFileBuff
     wordWrap: current?.wordWrap ?? false,
     dirty: current?.dirty ?? false,
     saving: false,
-    ...(current?.diskRevision ? { diskRevision: current.diskRevision } : {}),
-    ...(current?.lastSavedRevision ? { lastSavedRevision: current.lastSavedRevision } : {}),
+    ...(current?.baseRevision ? { baseRevision: current.baseRevision } : {}),
     externalChange: current?.externalChange ?? false,
     error: errorMessage(error)
   };
+}
+
+function setTextFileBufferSaveError(
+  setTextFileBuffers: Dispatch<SetStateAction<Record<string, TextFileBuffer>>>,
+  projectRelativePath: string,
+  error: unknown,
+  saving = false
+): void {
+  setTextFileBuffers((buffers) => {
+    const current = buffers[projectRelativePath];
+    return current
+      ? {
+          ...buffers,
+          [projectRelativePath]: {
+            ...current,
+            saving,
+            dirty: true,
+            error: errorMessage(error)
+          }
+        }
+      : buffers;
+  });
 }
 
 function errorMessage(error: unknown): string {

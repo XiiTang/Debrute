@@ -13,7 +13,7 @@ import {
   verifyWorkbenchLaunchNonce
 } from './browserSession.js';
 
-describe('workbench browser sessions', () => {
+describe('workbench browser sessions', { tags: ['runtime'] }, () => {
   it('creates launch URLs with signed nonces and no daemon token query', () => {
     const launchUrl = createWorkbenchLaunchUrl({
       webUrl: 'http://127.0.0.1:17322',

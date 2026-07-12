@@ -101,9 +101,9 @@ export class RuntimeSupervisor extends EventEmitter {
     if (!state || !this.statePath || !this.owns(state)) {
       return;
     }
-    const currentState = await this.readState(this.statePath).catch(() => undefined);
+    const currentState = await this.readState(this.statePath);
     if (currentState && runtimeIdentityMatches(currentState, state) && this.owns(currentState)) {
-      this.terminateOwned(currentState, this.owner);
+      await this.terminateOwned(currentState, this.owner);
       await this.deleteState(this.statePath);
       this.publish({ status: 'stopped', ownsRuntime: false });
     }

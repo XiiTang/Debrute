@@ -27,13 +27,18 @@ import {
   type ResolvedPythonCliInstallerStatus,
   type ResolvedSystemPackageManagerStatus
 } from './IntegrationBackends.js';
-import { resolveExecutable, runIntegrationCommand, runProbe, tail } from './IntegrationCommandRunner.js';
+import {
+  nodeIntegrationProcessAdapter,
+  tail,
+  type IntegrationProcessAdapter
+} from './IntegrationCommandRunner.js';
 
 export interface IntegrationsServiceOptions {
   envPath?: string;
   platform?: NodeJS.Platform;
   pathExt?: string;
   cacheTtlMs?: number;
+  processAdapter?: IntegrationProcessAdapter;
 }
 
 interface ResolvedBackends {
@@ -56,12 +61,14 @@ export interface IntegrationsServiceOperationCallbacks {
 
 export class IntegrationsService {
   private readonly cacheTtlMs: number;
+  private readonly processAdapter: IntegrationProcessAdapter;
   private cached: { createdAt: number; view: IntegrationSettingsView } | undefined;
   private operationLock: RunIntegrationOperationInput | undefined;
   private runningOperation: IntegrationOperationInFlight | undefined;
 
   constructor(private readonly options: IntegrationsServiceOptions) {
     this.cacheTtlMs = options.cacheTtlMs ?? 30_000;
+    this.processAdapter = options.processAdapter ?? nodeIntegrationProcessAdapter;
   }
 
   async listStatus(): Promise<IntegrationSettingsView> {
@@ -127,7 +134,7 @@ export class IntegrationsService {
 
       try {
         await callbacks.onStarted?.(settingsWithRunningOperation(inspected.view, this.runningOperation));
-        const result = await runIntegrationCommand({
+        const result = await this.processAdapter.runCommand({
           file: command.file,
           args: command.args,
           timeoutMs: operationTimeoutMs()
@@ -162,7 +169,8 @@ export class IntegrationsService {
     const backendOptions = {
       ...(this.options.platform ? { platform: this.options.platform } : {}),
       envPath: this.options.envPath ?? process.env.PATH ?? '',
-      pathExt: this.options.pathExt ?? process.env.PATHEXT ?? ''
+      pathExt: this.options.pathExt ?? process.env.PATHEXT ?? '',
+      processAdapter: this.processAdapter
     };
     const [systemPackageManager, pythonCliInstaller] = await Promise.all([
       detectSystemPackageManager(backendOptions),
@@ -308,7 +316,7 @@ export class IntegrationsService {
       return { updateAvailable: false };
     }
 
-    const result = await runIntegrationCommand({
+    const result = await this.processAdapter.runCommand({
       file: queryCommand.file,
       args: queryCommand.args,
       timeoutMs: queryTimeoutMs()
@@ -340,7 +348,7 @@ export class IntegrationsService {
       return { updateAvailable: false };
     }
 
-    const result = await runIntegrationCommand({
+    const result = await this.processAdapter.runCommand({
       file: queryCommand.file,
       args: queryCommand.args,
       timeoutMs: queryTimeoutMs()
@@ -372,7 +380,7 @@ export class IntegrationsService {
       };
     }
 
-    const probe = await runProbe(path, binary.probe.args, binary.probe.timeoutMs);
+    const probe = await this.processAdapter.runProbe(path, binary.probe.args, binary.probe.timeoutMs);
     if (!probe.ok) {
       return {
         binaryId: binary.id,
@@ -398,7 +406,12 @@ export class IntegrationsService {
   private async resolveDefaultBinaryPath(binary: IntegrationCatalogBinary): Promise<string | undefined> {
     const platform = this.options.platform ?? process.platform;
     for (const name of binary.names) {
-      const path = await resolveExecutable(name, this.options.envPath ?? process.env.PATH ?? '', platform, this.options.pathExt ?? process.env.PATHEXT ?? '');
+      const path = await this.processAdapter.resolveExecutable(
+        name,
+        this.options.envPath ?? process.env.PATH ?? '',
+        platform,
+        this.options.pathExt ?? process.env.PATHEXT ?? ''
+      );
       if (path) {
         return path;
       }

@@ -11,8 +11,7 @@ describe('text file buffer merge behavior', () => {
       wordWrap: true,
       dirty: false,
       saving: false,
-      diskRevision: 'rev-1',
-      lastSavedRevision: 'rev-1',
+      baseRevision: 'rev-1',
       externalChange: false
     };
 
@@ -27,8 +26,7 @@ describe('text file buffer merge behavior', () => {
     }, current)).toMatchObject({
       content: 'new',
       dirty: false,
-      diskRevision: 'rev-2',
-      lastSavedRevision: 'rev-2',
+      baseRevision: 'rev-2',
       externalChange: false,
       wordWrap: true
     });
@@ -42,8 +40,7 @@ describe('text file buffer merge behavior', () => {
       wordWrap: false,
       dirty: true,
       saving: false,
-      diskRevision: 'rev-1',
-      lastSavedRevision: 'rev-1',
+      baseRevision: 'rev-1',
       externalChange: false
     };
 
@@ -58,13 +55,12 @@ describe('text file buffer merge behavior', () => {
     }, current)).toMatchObject({
       content: 'local edit',
       dirty: true,
-      diskRevision: 'rev-2',
-      lastSavedRevision: 'rev-1',
+      baseRevision: 'rev-1',
       externalChange: true
     });
   });
 
-  it('keeps dirty buffers unconflicted when the disk revision has not changed', () => {
+  it('keeps an active save marked as saving while a file event is reconciled', () => {
     const current: TextFileBuffer = {
       projectRelativePath: 'briefs/concept.md',
       content: 'local edit',
@@ -72,8 +68,7 @@ describe('text file buffer merge behavior', () => {
       wordWrap: false,
       dirty: true,
       saving: true,
-      diskRevision: 'rev-1',
-      lastSavedRevision: 'rev-1',
+      baseRevision: 'rev-1',
       externalChange: false
     };
 
@@ -82,15 +77,15 @@ describe('text file buffer merge behavior', () => {
 	      content: 'disk content',
       size: 12,
       mtimeMs: 20,
-      revision: 'rev-1',
+	      revision: 'rev-2',
       language: 'markdown',
       mimeType: 'text/markdown'
     }, current)).toMatchObject({
       content: 'local edit',
       dirty: true,
-      saving: false,
-      diskRevision: 'rev-1',
-      externalChange: false
+      saving: true,
+      baseRevision: 'rev-1',
+      externalChange: true
     });
   });
 });

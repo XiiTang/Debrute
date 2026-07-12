@@ -7,12 +7,16 @@ import type {
   SystemPackageIntegrationCatalogItem,
   SystemPackageManagerId
 } from './IntegrationCatalog.js';
-import { resolveExecutable } from './IntegrationCommandRunner.js';
+import {
+  nodeIntegrationProcessAdapter,
+  type IntegrationProcessAdapter
+} from './IntegrationCommandRunner.js';
 
 export interface DetectIntegrationBackendOptions {
   platform?: NodeJS.Platform;
   envPath?: string;
   pathExt?: string;
+  processAdapter?: IntegrationProcessAdapter;
 }
 
 export interface ResolvedSystemPackageManagerStatus {
@@ -50,9 +54,10 @@ export async function detectSystemPackageManager(
   const platform = options.platform ?? process.platform;
   const envPath = options.envPath ?? process.env.PATH ?? '';
   const pathExt = options.pathExt ?? process.env.PATHEXT ?? '';
+  const processAdapter = options.processAdapter ?? nodeIntegrationProcessAdapter;
 
   if (platform === 'darwin') {
-    const brew = await resolveExecutable('brew', envPath, platform, pathExt);
+    const brew = await processAdapter.resolveExecutable('brew', envPath, platform, pathExt);
     return brew
       ? { kind: 'system-package-manager', backend: 'brew', manager: 'brew', path: brew, available: true }
       : {
@@ -64,7 +69,7 @@ export async function detectSystemPackageManager(
         };
   }
   if (platform === 'win32') {
-    const winget = await resolveExecutable('winget', envPath, platform, pathExt);
+    const winget = await processAdapter.resolveExecutable('winget', envPath, platform, pathExt);
     return winget
       ? { kind: 'system-package-manager', backend: 'winget', manager: 'winget', path: winget, available: true }
       : {
@@ -96,12 +101,13 @@ export async function detectPythonCliInstaller(
   const platform = options.platform ?? process.platform;
   const envPath = options.envPath ?? process.env.PATH ?? '';
   const pathExt = options.pathExt ?? process.env.PATHEXT ?? '';
+  const processAdapter = options.processAdapter ?? nodeIntegrationProcessAdapter;
 
-  const uv = await resolveExecutable('uv', envPath, platform, pathExt);
+  const uv = await processAdapter.resolveExecutable('uv', envPath, platform, pathExt);
   if (uv) {
     return { kind: 'python-cli-installer', backend: 'uv', installer: 'uv', path: uv, available: true };
   }
-  const pipx = await resolveExecutable('pipx', envPath, platform, pathExt);
+  const pipx = await processAdapter.resolveExecutable('pipx', envPath, platform, pathExt);
   if (pipx) {
     return { kind: 'python-cli-installer', backend: 'pipx', installer: 'pipx', path: pipx, available: true };
   }

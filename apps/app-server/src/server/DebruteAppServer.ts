@@ -6,15 +6,14 @@ import {
   assertProjectTreeVisibleMutationPath,
   getDebruteProjectPaths,
   initializeBlankProject,
+  normalizeFileWatchEvent,
   normalizeProjectRelativePath,
   readProjectMetadata,
   readProjectTextFile,
   resolveExistingProjectPath,
   resolveNoSymlinkProjectPathForWrite,
-  resolveProjectPath,
-  resolveProjectPathForWrite,
   watchProjectFiles,
-  writeProjectTextFile,
+  writeProjectTextFile as writeProjectTextFileAtomic,
   type CopyProjectPathsInput,
   type CreateProjectPathInput,
   type DeleteProjectPathsInput,
@@ -24,7 +23,8 @@ import {
   type NormalizedFileWatchEvent,
   type ProjectFileWatchHandle,
   type RenameProjectPathInput,
-  type ProjectTextFile
+  type ProjectTextFile,
+  type WriteProjectTextFileInput
 } from '@debrute/project-core';
 import {
   type CanvasDesiredNode,
@@ -100,6 +100,8 @@ import { GlobalConfigStore } from '../config/GlobalConfigStore.js';
 import {
   readCanvasNodeLayoutSize,
   readCanvasVideoMetadata,
+  type CanvasVideoMetadata,
+  type ReadCanvasVideoMetadataInput,
   type ReadCanvasNodeLayoutSizeInput
 } from '../canvas/CanvasNodeDimensionsService.js';
 import {
@@ -139,11 +141,13 @@ import {
   type CanvasVideoPreviewResolveVariantInput,
   type CanvasVideoPreviewService
 } from '../canvas/CanvasVideoPreviewService.js';
+import type { CanvasVideoFrameExtractor } from '../canvas/CanvasVideoFrameExtractor.js';
 import { CanvasProjectionService } from '../canvas/CanvasProjectionService.js';
 import { CanvasSessionService } from '../canvas/CanvasSessionService.js';
 import { CanvasRegistryService } from '../canvas/CanvasRegistryService.js';
 import { CanvasMapSessionService } from '../canvas-map/CanvasMapSessionService.js';
 import { loadProjectSnapshot, type ProjectDocumentPipelineMode } from '../project-session/projectSnapshot.js';
+import { projectDiagnosticCounts } from '../project-session/projectHealth.js';
 import {
   copyProjectPathsWithSnapshot,
   createProjectDirectoryWithSnapshot,
@@ -155,23 +159,20 @@ import {
   renameProjectPathWithSnapshot
 } from '../project-session/projectFileOperations.js';
 import {
+  consumeInternalProjectFileWatchEvent,
+  createInternalProjectFileWriteReceipt,
   projectWatchRefreshFailedSnapshot,
-  shouldIgnoreInternalProjectFileEvent,
   shouldIgnoreStaleWatchedEvent,
-  shouldIgnoreWatchedCanvasEvent
+  shouldIgnoreWatchedCanvasEvent,
+  type InternalProjectFileWriteReceipt
 } from '../project-session/projectWatchEvents.js';
 import { serviceError } from './ServiceErrors.js';
 import {
   commitProjectDocumentTransaction,
-  projectDocumentFileHash,
   type ProjectDocumentReadParticipant,
   type ProjectDocumentTransactionInput
 } from '../project-documents/ProjectDocumentTransaction.js';
-import { documentServiceError, projectDocumentDiagnostic } from '../project-documents/ProjectDocumentDiagnostics.js';
-import {
-  projectDocumentDescriptorForPath
-} from '../project-documents/documentDescriptors.js';
-import type { ProjectDocumentDescriptor } from '../project-documents/ProjectDocumentRegistry.js';
+import { projectDocumentDiagnostic } from '../project-documents/ProjectDocumentDiagnostics.js';
 import {
   runImageModelBatch as runNativeImageModelBatch,
   type ImageModelBatchRunOptions,
@@ -205,6 +206,7 @@ export interface OpenProjectOptions {
   initializeIfMissing?: boolean;
   createDefaultCanvas?: boolean;
   watchFiles?: boolean;
+  signal?: AbortSignal;
 }
 
 export interface DebruteAppServerOptions {
@@ -218,6 +220,8 @@ export interface DebruteAppServerOptions {
   integrationPathExt?: string;
   integrationPlatform?: NodeJS.Platform;
   canvasNodeLayoutSizeReader?: (input: ReadCanvasNodeLayoutSizeInput) => Promise<CanvasLayoutSize>;
+  canvasVideoMetadataReader?: (input: ReadCanvasVideoMetadataInput) => Promise<CanvasVideoMetadata>;
+  canvasVideoFrameExtractorFactory?: (input: { envPath?: string }) => CanvasVideoFrameExtractor;
   terminalPtyFactory?: TerminalPtyFactory;
   canvasFeedbackRenderRunner?: CanvasFeedbackRenderRunner;
   canvasFeedbackRenderMaxConcurrentArtifacts?: number;
@@ -238,7 +242,6 @@ interface AppServerImageModelRequestOptions {
   signal?: AbortSignal;
 }
 
-const INTERNAL_PROJECT_FILE_WRITE_SUPPRESSION_MS = 2000;
 const CANVAS_FEEDBACK_RENDER_DIAGNOSTIC_PREFIX = 'canvas-feedback.render_failed:';
 const CANVAS_FEEDBACK_DOCUMENT_INVALID_DIAGNOSTIC_ID = 'canvas-feedback.document_invalid';
 
@@ -258,7 +261,7 @@ export class DebruteAppServer {
   private snapshot: ProjectSessionSnapshot | undefined;
   private snapshotLoadedAt = 0;
   private fileWatchHandle: ProjectFileWatchHandle | undefined;
-  private readonly internalProjectFileWrites = new Map<string, { content?: string; expiresAt: number }>();
+  private readonly internalProjectFileWriteReceipts = new Map<string, InternalProjectFileWriteReceipt>();
   private sessionOperation: Promise<void> = Promise.resolve();
   private terminalService: TerminalService | undefined;
 
@@ -285,14 +288,22 @@ export class DebruteAppServer {
     });
     this.canvasImagePreviewService = createCanvasImagePreviewService();
     this.canvasTextPreviewService = createCanvasTextPreviewService();
+    const canvasVideoFrameExtractor = this.options.canvasVideoFrameExtractorFactory?.({
+      ...(this.options.integrationEnvPath !== undefined ? { envPath: this.options.integrationEnvPath } : {})
+    });
     this.canvasVideoPreviewService = createCanvasVideoPreviewService({
+      ...(canvasVideoFrameExtractor !== undefined
+        ? { frameExtractor: canvasVideoFrameExtractor }
+        : {}),
       ...(this.options.integrationEnvPath !== undefined ? { envPath: this.options.integrationEnvPath } : {})
     });
     this.canvasProjectionService = new CanvasProjectionService({
-      readCanvasVideoMetadata: (input) => readCanvasVideoMetadata({
-        ...input,
-        ...(this.options.integrationEnvPath !== undefined ? { envPath: this.options.integrationEnvPath } : {})
-      })
+      readCanvasVideoMetadata: (input) => this.options.canvasVideoMetadataReader
+        ? this.options.canvasVideoMetadataReader(input)
+        : readCanvasVideoMetadata({
+            ...input,
+            ...(this.options.integrationEnvPath !== undefined ? { envPath: this.options.integrationEnvPath } : {})
+          })
     });
     this.canvasSessionService = new CanvasSessionService({
       writeCanvasText: (projectRoot, canvasPath, content, expectedHash) => this.writeProjectDocumentText(
@@ -368,6 +379,7 @@ export class DebruteAppServer {
 
   async openProject(projectRoot: string, options: OpenProjectOptions = { initializeIfMissing: true, createDefaultCanvas: true }): Promise<ProjectSessionSnapshot> {
     return this.enqueueSessionOperation(async () => {
+      options.signal?.throwIfAborted();
       const paths = getDebruteProjectPaths(projectRoot);
       if (options.initializeIfMissing) {
         if (!await fileExists(paths.projectFile)) {
@@ -376,19 +388,23 @@ export class DebruteAppServer {
           await readProjectMetadata(projectRoot);
         }
       }
+      options.signal?.throwIfAborted();
 
       if (options.createDefaultCanvas) {
         await this.canvasRegistryService.ensureDefaultCanvas(projectRoot);
       }
+      options.signal?.throwIfAborted();
 
       if (this.snapshot && this.snapshot.projectRoot !== projectRoot) {
         this.canvasFeedbackRenderScheduler.cancelProject(this.snapshot.projectRoot);
       }
       let snapshot = await this.loadSnapshot(projectRoot);
+      options.signal?.throwIfAborted();
       await reconcileCanvasImagePreviewCache({
         projectRoot,
         files: snapshot.files
       });
+      options.signal?.throwIfAborted();
       this.snapshot = snapshot;
       this.snapshotLoadedAt = Date.now();
       try {
@@ -400,13 +416,16 @@ export class DebruteAppServer {
         }, error);
         this.snapshot = snapshot;
       }
+      options.signal?.throwIfAborted();
       this.terminalService?.closeAll();
       this.terminalService = new TerminalService({
         projectRoot: snapshot.projectRoot,
         ...(this.options.terminalPtyFactory ? { ptyFactory: this.options.terminalPtyFactory } : {})
       });
+      options.signal?.throwIfAborted();
       this.emit({ type: 'project.opened', snapshot });
       await mkdir(paths.globalRuntimeDir, { recursive: true });
+      options.signal?.throwIfAborted();
       if (options.watchFiles ?? true) {
         this.startWatchingProject(projectRoot);
       } else {
@@ -518,44 +537,20 @@ export class DebruteAppServer {
     }
   }
 
-  async writeProjectTextFile(projectRelativePath: string, content: string): Promise<ProjectTextFile> {
+  async writeProjectTextFile(input: WriteProjectTextFileInput): Promise<ProjectTextFile> {
     return this.enqueueSessionOperation(async () => {
-      if (typeof content !== 'string') {
-        throw new Error(`Project text content must be a string: ${projectRelativePath}`);
-      }
       const current = this.getSnapshot();
-      const structuredDocumentWrite = await this.writeProjectDocumentSourceTextFile(current.projectRoot, projectRelativePath, content);
-      const written = structuredDocumentWrite ?? await writeProjectTextFile(current.projectRoot, projectRelativePath, content);
-      await this.refreshProjectUnlocked();
+      const written = await writeProjectTextFileAtomic(current.projectRoot, input);
+      const eventAbsolutePath = join(current.projectRoot, written.projectRelativePath);
+      this.recordInternalProjectFileWrite(eventAbsolutePath, written.content);
+      await this.applyProjectFileEventUnlocked(normalizeFileWatchEvent(
+        current.projectRoot,
+        eventAbsolutePath,
+        'changed',
+        Date.now()
+      ), 'committed');
       return written;
     });
-  }
-
-  private async writeProjectDocumentSourceTextFile(
-    projectRoot: string,
-    projectRelativePath: string,
-    content: string
-  ): Promise<ProjectTextFile | undefined> {
-    const normalizedProjectRelativePath = normalizeProjectRelativePath(projectRelativePath);
-    const descriptor = projectDocumentDescriptorForPath(normalizedProjectRelativePath);
-    if (!descriptor) {
-      return undefined;
-    }
-    if (descriptor.role !== 'source') {
-      throw documentServiceError('document_descriptor_violation', 'Project document is not directly editable as source text.', {
-        file_path: normalizedProjectRelativePath,
-        document_type: descriptor.type
-      });
-    }
-    const absolutePath = await resolveProjectPathForWrite(projectRoot, normalizedProjectRelativePath);
-    const expectedHash = await projectDocumentFileHash(absolutePath);
-    await this.writeStructuredDocuments({
-      projectRoot,
-      owner: sourceProjectDocumentTextOwner(descriptor),
-      reads: [{ absolutePath, expectedHash }],
-      writes: [{ absolutePath, content }]
-    });
-    return readProjectTextFile(projectRoot, normalizedProjectRelativePath);
   }
 
   async createProjectFile(input: CreateProjectPathInput): Promise<ProjectFileOperationResult> {
@@ -1127,6 +1122,7 @@ export class DebruteAppServer {
     this.terminalService?.closeAll();
     this.terminalService = undefined;
     this.stopWatchingProject();
+    this.internalProjectFileWriteReceipts.clear();
   }
 
   private projectFileOperationContext(): { snapshot: ProjectSessionSnapshot; refreshProject: () => Promise<ProjectSessionSnapshot> } {
@@ -1194,16 +1190,15 @@ export class DebruteAppServer {
     };
   }
 
-  private suppressInternalProjectPathEvent(absolutePath: string, content?: string): void {
-    const expiresAt = Date.now() + INTERNAL_PROJECT_FILE_WRITE_SUPPRESSION_MS;
-    this.internalProjectFileWrites.set(absolutePath, {
-      ...(content !== undefined ? { content } : {}),
-      expiresAt
-    });
+  private recordInternalProjectFileWrite(absolutePath: string, content?: string): void {
+    this.internalProjectFileWriteReceipts.set(
+      absolutePath,
+      createInternalProjectFileWriteReceipt(content)
+    );
   }
 
-  private clearInternalProjectPathEvent(absolutePath: string): void {
-    this.internalProjectFileWrites.delete(absolutePath);
+  private forgetInternalProjectFileWrite(absolutePath: string): void {
+    this.internalProjectFileWriteReceipts.delete(absolutePath);
   }
 
   private async writeProjectDocumentText(
@@ -1236,15 +1231,15 @@ export class DebruteAppServer {
     if (input.writes) {
       transactionInput.writes = input.writes.map((write) => ({
         ...write,
-        suppressInternalEvent: (absolutePath, content) => this.suppressInternalProjectPathEvent(absolutePath, content),
-        clearInternalEvent: (absolutePath) => this.clearInternalProjectPathEvent(absolutePath)
+        recordInternalWrite: (absolutePath, content) => this.recordInternalProjectFileWrite(absolutePath, content),
+        forgetInternalWrite: (absolutePath) => this.forgetInternalProjectFileWrite(absolutePath)
       }));
     }
     if (input.deletes) {
       transactionInput.deletes = input.deletes.map((deleteItem) => ({
         ...deleteItem,
-        suppressInternalEvent: (absolutePath) => this.suppressInternalProjectPathEvent(absolutePath),
-        clearInternalEvent: (absolutePath) => this.clearInternalProjectPathEvent(absolutePath)
+        recordInternalWrite: (absolutePath) => this.recordInternalProjectFileWrite(absolutePath),
+        forgetInternalWrite: (absolutePath) => this.forgetInternalProjectFileWrite(absolutePath)
       }));
     }
     await commitProjectDocumentTransaction(transactionInput);
@@ -1299,31 +1294,39 @@ export class DebruteAppServer {
   }
 
   private async handleWatchedFileEventUnlocked(event: NormalizedFileWatchEvent): Promise<void> {
+    return this.applyProjectFileEventUnlocked(event, 'watched');
+  }
+
+  private async applyProjectFileEventUnlocked(
+    event: NormalizedFileWatchEvent,
+    origin: 'committed' | 'watched'
+  ): Promise<void> {
     try {
       if (event.affects.length === 0) {
         return;
       }
-      if (event.affects.length === 1 && event.affects[0] === 'generated-asset-metadata') {
-        return;
-      }
-      if (await shouldIgnoreStaleWatchedEvent({
-        snapshotLoadedAt: this.snapshotLoadedAt,
-        event
-      })) {
-        return;
-      }
-      if (await shouldIgnoreInternalProjectFileEvent({
-        event,
-        internalProjectFileWrites: this.internalProjectFileWrites
-      })) {
-        return;
-      }
-      if (await shouldIgnoreWatchedCanvasEvent({
-        current: this.snapshot,
-        event,
-        internalProjectFileWrites: this.internalProjectFileWrites
-      })) {
-        return;
+      if (origin === 'watched') {
+        if (event.affects.length === 1 && event.affects[0] === 'generated-asset-metadata') {
+          return;
+        }
+        if (await consumeInternalProjectFileWatchEvent({
+          event,
+          receipts: this.internalProjectFileWriteReceipts
+        })) {
+          return;
+        }
+        if (await shouldIgnoreStaleWatchedEvent({
+          snapshotLoadedAt: this.snapshotLoadedAt,
+          event
+        })) {
+          return;
+        }
+        if (await shouldIgnoreWatchedCanvasEvent({
+          current: this.snapshot,
+          event
+        })) {
+          return;
+        }
       }
       if (event.affects.includes('canvas-feedback')) {
         const current = this.getSnapshot();
@@ -1500,7 +1503,7 @@ function snapshotWithCanvasFeedbackRenderedDiagnostics(
     diagnostics,
     health: {
       ...snapshot.health,
-      diagnosticCounts: diagnosticCounts(diagnostics),
+      diagnosticCounts: projectDiagnosticCounts(diagnostics),
       checkedAt: new Date().toISOString()
     }
   };
@@ -1540,7 +1543,7 @@ function snapshotWithDiagnostics(snapshot: ProjectSessionSnapshot, diagnostics: 
     diagnostics,
     health: {
       ...snapshot.health,
-      diagnosticCounts: diagnosticCounts(diagnostics),
+      diagnosticCounts: projectDiagnosticCounts(diagnostics),
       checkedAt: new Date().toISOString()
     }
   };
@@ -1571,14 +1574,6 @@ function sameDiagnostics(left: Diagnostic[], right: Diagnostic[]): boolean {
   return JSON.stringify(left) === JSON.stringify(right);
 }
 
-function diagnosticCounts(diagnostics: Diagnostic[]): ProjectHealthSummary['diagnosticCounts'] {
-  return {
-    errors: diagnostics.filter((diagnostic) => diagnostic.severity === 'error').length,
-    warnings: diagnostics.filter((diagnostic) => diagnostic.severity === 'warning').length,
-    infos: diagnostics.filter((diagnostic) => diagnostic.severity === 'info').length
-  };
-}
-
 async function fileExists(absolutePath: string): Promise<boolean> {
   try {
     await access(absolutePath);
@@ -1606,14 +1601,4 @@ function canvasMapServiceError(error: CanvasMapError, canvasId: string): Error {
     ...(error.line !== undefined ? { line: error.line } : {}),
     ...(error.column !== undefined ? { column: error.column } : {})
   });
-}
-
-function sourceProjectDocumentTextOwner(descriptor: ProjectDocumentDescriptor): string {
-  const owner = descriptor.owners[0];
-  if (!owner) {
-    throw documentServiceError('document_descriptor_violation', 'Source project document has no owner.', {
-      document_type: descriptor.type
-    });
-  }
-  return owner;
 }

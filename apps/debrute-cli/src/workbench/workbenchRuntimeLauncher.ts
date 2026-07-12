@@ -1,5 +1,5 @@
 import { randomUUID } from 'node:crypto';
-import { closeSync, existsSync, openSync, readFileSync } from 'node:fs';
+import { closeSync, openSync, readFileSync } from 'node:fs';
 import { access, mkdir, writeFile } from 'node:fs/promises';
 import { dirname, resolve } from 'node:path';
 import { spawn, type ChildProcess } from 'node:child_process';
@@ -16,8 +16,10 @@ import {
   isWorkbenchRuntimeHealthy,
   isWorkbenchRuntimeRegistryError,
   resolveWorkbenchRuntimePaths,
+  terminateManagedWorkbenchRuntime,
   terminateOwnedWorkbenchRuntime,
   type EnsureRegisteredWorkbenchRuntimeResult,
+  type WorkbenchRuntimeRegistryError,
   type WorkbenchRuntimeOwner,
   type WorkbenchRuntimePaths,
   type WorkbenchRuntimeState
@@ -57,10 +59,14 @@ export async function ensureWorkbenchRuntime(
     if (isDebruteCliError(error)) {
       throw error;
     }
-    if (isWorkbenchRuntimeRegistryError(error)) {
-      throw cliError(error.code, error.message);
+    const registryPrimary = registryPrimaryError(error);
+    if (registryPrimary) {
+      const cause = error instanceof AggregateError
+        ? error
+        : registryPrimary.cause ?? registryPrimary;
+      throw cliError(registryPrimary.code, registryPrimary.message, {}, { cause });
     }
-    throw cliError('runtime_launch_failed', messageFromUnknown(error));
+    throw cliError('runtime_launch_failed', messageFromUnknown(error), {}, { cause: error });
   }
 }
 
@@ -86,57 +92,103 @@ async function launchSourceDevRuntime(
   const daemonUrl = `http://127.0.0.1:${daemonPort}`;
   const webUrl = `http://127.0.0.1:${webPort}`;
   const now = new Date().toISOString();
-  const daemonCommand = packageManagerCommand(sourceRoot, [
-    '--filter',
-    '@debrute/daemon',
-    'dev',
+  const daemon = spawnDetached(process.execPath, [
+    '--import',
+    'tsx',
+    resolve(sourceRoot, 'apps/daemon/src/cli.ts'),
     '--port',
     String(daemonPort),
     '--token-file',
     paths.tokenPath,
     '--web-base-url',
     webUrl
-  ]);
-  const daemon = spawnDetached(daemonCommand.command, daemonCommand.args, sourceRoot, paths.daemonLogPath, {
+  ], resolve(sourceRoot, 'apps/daemon'), paths.daemonLogPath, {
     DEBRUTE_DAEMON_PORT: String(daemonPort),
     DEBRUTE_DAEMON_TOKEN_FILE: paths.tokenPath,
     DEBRUTE_WEB_BASE_URL: webUrl,
     ...sourceDevProductEnv(sourceRoot)
   });
-  const webCommand = packageManagerCommand(sourceRoot, [
-    '--filter',
-    '@debrute/web',
-    'dev',
-    '--host',
-    '127.0.0.1',
-    '--port',
-    String(webPort),
-    '--strictPort'
-  ]);
-  const web = spawnDetached(webCommand.command, webCommand.args, sourceRoot, paths.webLogPath, {
-    DEBRUTE_DAEMON_URL: daemonUrl,
-    DEBRUTE_DAEMON_TOKEN_FILE: paths.tokenPath
-  });
   const daemonPid = requirePid(daemon, 'daemon');
-  const webPid = requirePid(web, 'web');
+  let webPid: number;
+  try {
+    const web = spawnDetached(process.execPath, [
+      resolve(sourceRoot, 'node_modules/vite/bin/vite.js'),
+      '--host',
+      '127.0.0.1',
+      '--port',
+      String(webPort),
+      '--strictPort'
+    ], resolve(sourceRoot, 'apps/web'), paths.webLogPath, {
+      DEBRUTE_DAEMON_URL: daemonUrl,
+      DEBRUTE_DAEMON_TOKEN_FILE: paths.tokenPath
+    });
+    webPid = requirePid(web, 'web');
+  } catch (error) {
+    return cleanupPartialSourceDevRuntime(error, sourceDevRuntimeState({
+      paths,
+      owner,
+      daemonUrl,
+      webUrl,
+      token,
+      daemonPid,
+      now
+    }));
+  }
 
-  return {
-    runtimeKind: 'source-dev',
-    processControl: 'managed',
-    owner: {
-      ...owner,
-      pid: daemonPid
-    },
+  return sourceDevRuntimeState({
+    paths,
+    owner,
     daemonUrl,
     webUrl,
     token,
     daemonPid,
     webPid,
-    daemonLogPath: paths.daemonLogPath,
-    webLogPath: paths.webLogPath,
-    startedAt: now,
-    updatedAt: now
+    now
+  });
+}
+
+function sourceDevRuntimeState(input: {
+  paths: WorkbenchRuntimePaths;
+  owner: WorkbenchRuntimeOwner;
+  daemonUrl: string;
+  webUrl: string;
+  token: string;
+  daemonPid: number;
+  webPid?: number;
+  now: string;
+}): WorkbenchRuntimeState {
+  const state: WorkbenchRuntimeState = {
+    runtimeKind: 'source-dev',
+    processControl: 'managed',
+    owner: {
+      ...input.owner,
+      pid: input.daemonPid
+    },
+    daemonUrl: input.daemonUrl,
+    webUrl: input.webUrl,
+    token: input.token,
+    daemonPid: input.daemonPid,
+    daemonLogPath: input.paths.daemonLogPath,
+    webLogPath: input.paths.webLogPath,
+    startedAt: input.now,
+    updatedAt: input.now
   };
+  if (input.webPid !== undefined) {
+    state.webPid = input.webPid;
+  }
+  return state;
+}
+
+async function cleanupPartialSourceDevRuntime(
+  launchError: unknown,
+  state: WorkbenchRuntimeState
+): Promise<never> {
+  try {
+    await terminateManagedWorkbenchRuntime(state);
+  } catch (cleanupError) {
+    throw aggregateCleanupFailure(launchError, cleanupError);
+  }
+  throw launchError;
 }
 
 async function launchPackagedRuntime(
@@ -334,48 +386,23 @@ export function resolveWorkbenchRuntimeEntryDir(
     : dirname(packagedExecutablePath(execPath));
 }
 
-interface PnpmCommand {
-  command: string;
-  args: string[];
+function aggregateCleanupFailure(primaryError: unknown, cleanupError: unknown): AggregateError {
+  return new AggregateError(
+    [primaryError, cleanupError],
+    messageFromUnknown(primaryError),
+    { cause: primaryError }
+  );
 }
 
-function packageManagerCommand(sourceRoot: string, args: string[]): PnpmCommand {
-  const packageManager = readDeclaredPackageManager(sourceRoot);
-  if (packageManager.name !== 'pnpm') {
-    throw cliError('runtime_launch_failed', `Unsupported package manager: ${packageManager.raw}. Debrute requires pnpm.`);
+function registryPrimaryError(error: unknown): WorkbenchRuntimeRegistryError | undefined {
+  if (isWorkbenchRuntimeRegistryError(error)) {
+    return error;
   }
-
-  const corepackEntrypoint = resolve(dirname(process.execPath), 'node_modules/corepack/dist/corepack.js');
-  if (existsSync(corepackEntrypoint)) {
-    return {
-      command: process.execPath,
-      args: [corepackEntrypoint, packageManager.name, ...args]
-    };
+  if (!(error instanceof AggregateError)) {
+    return undefined;
   }
-
-  if (process.platform === 'win32') {
-    throw cliError('runtime_launch_failed', 'Corepack is required to launch pnpm from Debrute on Windows.');
+  if (isWorkbenchRuntimeRegistryError(error.cause)) {
+    return error.cause;
   }
-
-  return {
-    command: packageManager.name,
-    args
-  };
-}
-
-function readDeclaredPackageManager(sourceRoot: string): { raw: string; name: string } {
-  const packageJsonPath = resolve(sourceRoot, 'package.json');
-  const packageJson = JSON.parse(readFileSync(packageJsonPath, 'utf8')) as { packageManager?: unknown };
-  const raw = packageJson.packageManager;
-  if (typeof raw !== 'string') {
-    throw cliError('runtime_launch_failed', `Missing packageManager in ${packageJsonPath}.`);
-  }
-  const match = /^([a-z0-9-]+)@/.exec(raw);
-  if (!match) {
-    throw cliError('runtime_launch_failed', `Invalid packageManager in ${packageJsonPath}: ${raw}`);
-  }
-  return {
-    raw,
-    name: match[1]!
-  };
+  return undefined;
 }

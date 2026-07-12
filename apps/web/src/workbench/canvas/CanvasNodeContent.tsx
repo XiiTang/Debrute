@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useReducer, useRef, useState } from 'react';
+import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { AlertTriangle, File, FileText, Folder, Image as ImageIcon, Maximize2, Music2, RefreshCw, Save } from 'lucide-react';
 import type { CanvasFeedbackEntry, CanvasFeedbackGeometry, CanvasFeedbackSpatialItem, CanvasTextViewportState, ProjectedCanvasNode } from '@debrute/canvas-core';
 import type { TextFileBuffer, WorkbenchActions } from '../../types';
@@ -8,12 +8,10 @@ import type { CanvasVideoPlayerHandle } from './CanvasVideoPlayerAdapter';
 import { useCanvasImageNodeAsset, type CanvasImageNodeAssetHookState } from './CanvasImageNodeAssetContext';
 import { CanvasMediaFeedbackLayer, type CanvasMediaFeedbackDraftRegion, type CanvasMediaFeedbackMode } from './CanvasMediaFeedbackLayer';
 import {
-  canvasTextPreviewImageReducer,
-  initialCanvasTextPreviewImageState,
   useCanvasTextPreviewRuntime,
-  type CanvasTextPreviewImageState,
   type CanvasTextPreviewSource
 } from './CanvasTextPreviewRuntime';
+import { CanvasTextPreviewImageHandoff } from './CanvasTextPreviewImageHandoff';
 import type { CanvasTextEditorFocusRequest } from './CanvasTextEditorRuntime';
 import type { CanvasVideoPreviewSource } from './canvasVideoPreviews';
 import { preloadCanvasImageForHandoff } from './CanvasMediaHandoff';
@@ -31,11 +29,12 @@ export interface CanvasNodeContentProps {
   actions: WorkbenchActions;
   textBuffer: TextFileBuffer | undefined;
   textPreview?: CanvasTextPreviewSource | undefined;
+  pendingTextPreview?: CanvasTextPreviewSource | undefined;
+  textPreviewCommittedSourceKey?: string | undefined;
   textPreviewError?: string | undefined;
   videoPreview?: CanvasVideoPreviewSource | undefined;
   videoPreviewError?: string | undefined;
   forceVideoPlayerMounted?: boolean | undefined;
-  previewInteractionActive?: boolean | undefined;
   feedbackEntry?: CanvasFeedbackEntry | undefined;
   localFeedbackMode?: CanvasMediaFeedbackMode | undefined;
   pendingFeedbackRegion?: CanvasMediaFeedbackDraftRegion | undefined;
@@ -63,11 +62,12 @@ export function CanvasNodeContent({
   actions,
   textBuffer,
   textPreview,
+  pendingTextPreview,
+  textPreviewCommittedSourceKey,
   textPreviewError,
   videoPreview,
   videoPreviewError,
   forceVideoPlayerMounted = false,
-  previewInteractionActive = false,
   feedbackEntry,
   localFeedbackMode,
   pendingFeedbackRegion,
@@ -89,7 +89,6 @@ export function CanvasNodeContent({
   const [mediaRetryNonce, setMediaRetryNonce] = useState(0);
   const requestedTextBufferKeyRef = useRef<string | undefined>(undefined);
   const ensureTextFileBufferRef = useRef(actions.ensureTextFileBuffer);
-  const nodeRevision = node.availability.state === 'available' ? node.availability.revision : undefined;
   const textBufferEnsureKey = canvasTextBufferEnsureKey(node, textBuffer);
   const mediaSrc = node.mediaKind === 'image'
     ? undefined
@@ -113,10 +112,9 @@ export function CanvasNodeContent({
       return;
     }
     requestedTextBufferKeyRef.current = textBufferEnsureKey;
-    void ensureTextFileBufferRef.current(node.projectRelativePath, nodeRevision);
+    void ensureTextFileBufferRef.current(node.projectRelativePath);
   }, [
     node.projectRelativePath,
-    nodeRevision,
     textBufferEnsureKey
   ]);
 
@@ -144,8 +142,9 @@ export function CanvasNodeContent({
         culled={culled}
         actions={actions}
         textPreview={textPreview}
+        pendingTextPreview={pendingTextPreview}
+        textPreviewCommittedSourceKey={textPreviewCommittedSourceKey}
         textPreviewError={textPreviewError}
-        previewInteractionActive={previewInteractionActive}
         onSelectNode={onSelectNode}
         onTitlePointerDown={onTitlePointerDown}
         onTitlePointerMove={onTitlePointerMove}
@@ -255,14 +254,10 @@ export function canvasTextBufferEnsureKey(
   if (node.mediaKind !== 'text' || node.availability.state !== 'available') {
     return undefined;
   }
-  if (
-    textBuffer
-    && textBuffer.projectRelativePath === node.projectRelativePath
-    && textBuffer.diskRevision === node.availability.revision
-  ) {
+  if (textBuffer?.projectRelativePath === node.projectRelativePath) {
     return undefined;
   }
-  return `${node.projectRelativePath}\u001f${node.availability.revision}`;
+  return node.projectRelativePath;
 }
 
 function CanvasImageNodeContent({
@@ -442,8 +437,9 @@ function CanvasTextNodeContent({
   culled,
   actions,
   textPreview,
+  pendingTextPreview,
+  textPreviewCommittedSourceKey,
   textPreviewError,
-  previewInteractionActive,
   onSelectNode,
   onTitlePointerDown,
   onTitlePointerMove,
@@ -458,8 +454,9 @@ function CanvasTextNodeContent({
   culled: boolean;
   actions: WorkbenchActions;
   textPreview?: CanvasTextPreviewSource | undefined;
+  pendingTextPreview?: CanvasTextPreviewSource | undefined;
+  textPreviewCommittedSourceKey?: string | undefined;
   textPreviewError?: string | undefined;
-  previewInteractionActive: boolean;
   onSelectNode: () => void;
   onTitlePointerDown: (event: React.PointerEvent<Element>) => void;
   onTitlePointerMove: (event: React.PointerEvent<Element>) => void;
@@ -467,29 +464,25 @@ function CanvasTextNodeContent({
   onUpdateTextViewport: (projectRelativePath: string, viewport: CanvasTextViewportState) => void | Promise<void>;
   i18n: WorkbenchI18n;
 }): React.ReactElement {
-  const { registerTextBody } = useCanvasTextPreviewRuntime();
+  const {
+    registerTextBody,
+    reportPendingReady,
+    reportPendingFailure,
+    reportVisibleFailure,
+    reportVisibleCommitted
+  } = useCanvasTextPreviewRuntime();
   const active = selected;
   const [visibleTextLayer, setVisibleTextLayer] = useState<'editor' | 'preview'>(() => active ? 'editor' : 'preview');
+  const [handoffViewport, setHandoffViewport] = useState<CanvasTextViewportState>();
   const nextFocusRequestIdRef = useRef(0);
   const [focusRequest, setFocusRequest] = useState<CanvasTextEditorFocusRequest>();
-  const [textPreviewImageError, setTextPreviewImageError] = useState<string>();
-  const [textPreviewUpgradeError, setTextPreviewUpgradeError] = useState<string>();
-  const textPreviewProblemMessage = textPreviewError ?? textPreviewImageError;
-  const textPreviewProblem = !active && textPreviewProblemMessage
-    ? { title: i18n.t('canvas.node.textPreviewError'), message: textPreviewProblemMessage }
+  const textPreviewProblem = !active && textPreviewError
+    ? { title: i18n.t('canvas.node.textPreviewError'), message: textPreviewError }
     : undefined;
-  const textPreviewUpgradeProblem = !active && textPreviewUpgradeError
-    ? { title: i18n.t('canvas.node.textPreviewError'), message: textPreviewUpgradeError }
-    : undefined;
-  const bodyProblem = problem ?? (visibleTextLayer === 'preview' ? textPreviewProblem : undefined);
-  const handoffProblem = visibleTextLayer === 'editor' ? textPreviewProblem : undefined;
-  const status = textBufferStatus(buffer, problem ?? textPreviewProblem ?? textPreviewUpgradeProblem, i18n);
-  const [textPreviewImageState, dispatchTextPreviewImage] = useReducer(
-    canvasTextPreviewImageReducer,
-    textPreview,
-    initialCanvasTextPreviewImageState
-  );
-  const nextTextPreview = textPreviewImageState.next;
+  const textPreviewBlockingProblem = textPreview ? undefined : textPreviewProblem;
+  const textPreviewOverlayProblem = textPreview ? textPreviewProblem : undefined;
+  const bodyProblem = problem ?? (visibleTextLayer === 'preview' ? textPreviewBlockingProblem : undefined);
+  const status = textBufferStatus(buffer, problem ?? textPreviewProblem, i18n);
   const bodyRef = useCallback((element: HTMLDivElement | null) => {
     registerTextBody(node.projectRelativePath, element);
   }, [node.projectRelativePath, registerTextBody]);
@@ -509,15 +502,6 @@ function CanvasTextNodeContent({
       clientY: event.clientY
     };
   };
-  const formatTextPreviewVariantError = useCallback(() => i18n.t('canvas.node.textPreviewVariantLoadError', {
-    path: node.projectRelativePath
-  }), [i18n, node.projectRelativePath]);
-  const reportTextPreviewImageError = useCallback(() => {
-    setTextPreviewImageError(formatTextPreviewVariantError());
-  }, [formatTextPreviewVariantError]);
-  const reportTextPreviewUpgradeError = useCallback(() => {
-    setTextPreviewUpgradeError(formatTextPreviewVariantError());
-  }, [formatTextPreviewVariantError]);
   const commitTextViewport = useCallback((viewport: CanvasTextViewportState) => {
     const current = node.textViewport ?? { scrollTop: 0, scrollLeft: 0 };
     if (current.scrollTop === viewport.scrollTop && current.scrollLeft === viewport.scrollLeft) {
@@ -531,84 +515,36 @@ function CanvasTextNodeContent({
   ]);
 
   useEffect(() => {
-    setTextPreviewImageError(undefined);
-    setTextPreviewUpgradeError(undefined);
-  }, [node.projectRelativePath, textPreview?.src]);
-
-  const textPreviewContentIdentityKey = canvasTextPreviewContentIdentityKey(node, buffer);
-  const textPreviewContentIdentityKeyRef = useRef(textPreviewContentIdentityKey);
-  useEffect(() => {
-    if (textPreviewContentIdentityKeyRef.current === textPreviewContentIdentityKey) {
-      return;
-    }
-    textPreviewContentIdentityKeyRef.current = textPreviewContentIdentityKey;
-    setTextPreviewImageError(undefined);
-    setTextPreviewUpgradeError(undefined);
-    dispatchTextPreviewImage({ type: 'source-invalidated' });
-  }, [textPreviewContentIdentityKey]);
-
-  useEffect(() => {
     if (active) {
       setVisibleTextLayer('editor');
+      setHandoffViewport(undefined);
     }
   }, [active]);
 
   useEffect(() => {
-    dispatchTextPreviewImage({ type: 'source-resolved', source: textPreview });
-  }, [textPreview]);
-
-  useEffect(() => {
-    if (previewInteractionActive) {
-      dispatchTextPreviewImage({ type: 'interaction-started' });
+    const currentViewport = node.textViewport ?? { scrollTop: 0, scrollLeft: 0 };
+    const handoffViewportIsCurrent = handoffViewport !== undefined
+      && handoffViewport.scrollTop === currentViewport.scrollTop
+      && handoffViewport.scrollLeft === currentViewport.scrollLeft;
+    if (!active
+      && visibleTextLayer === 'editor'
+      && handoffViewportIsCurrent
+      && (textPreviewError
+        || (textPreview !== undefined && textPreview.sourceKey === textPreviewCommittedSourceKey))) {
+      setVisibleTextLayer('preview');
     }
-  }, [previewInteractionActive]);
-
-  useEffect(() => {
-    if (!nextTextPreview || visibleTextLayer === 'editor') {
-      return undefined;
-    }
-    return preloadCanvasImageForHandoff({
-      image: nextTextPreview,
-      resolveLoaded: (loadKey) => dispatchTextPreviewImage({ type: 'next-loaded', loadKey }),
-      rejectLoaded: (loadKey) => {
-        dispatchTextPreviewImage({ type: 'next-failed', loadKey });
-        reportTextPreviewUpgradeError();
-      }
-    });
-  }, [nextTextPreview, reportTextPreviewUpgradeError, visibleTextLayer]);
-
-  useEffect(() => {
-    if (active || visibleTextLayer !== 'editor' || !textPreview || textPreviewProblemMessage) {
-      return undefined;
-    }
-    const loadKey = textPreview.src;
-    return preloadCanvasImageForHandoff({
-      image: {
-        ...textPreview,
-        loadKey
-      },
-      resolveLoaded: (resolvedLoadKey) => {
-        if (resolvedLoadKey === loadKey) {
-          dispatchTextPreviewImage({ type: 'next-loaded', loadKey: resolvedLoadKey });
-          setVisibleTextLayer('preview');
-        }
-      },
-      rejectLoaded: (rejectedLoadKey) => {
-        if (rejectedLoadKey === loadKey) {
-          dispatchTextPreviewImage({ type: 'next-failed', loadKey: rejectedLoadKey });
-          reportTextPreviewImageError();
-        }
-      }
-    });
   }, [
     active,
-    reportTextPreviewImageError,
+    handoffViewport,
+    node.textViewport,
     textPreview,
-    textPreviewProblemMessage,
+    textPreviewCommittedSourceKey,
+    textPreviewError,
     visibleTextLayer
   ]);
 
   const showTextEditor = Boolean(buffer && (active || visibleTextLayer === 'editor'));
+  const showTextPreviewHandoff = !active;
 
   return (
     <section className="canvas-text-node">
@@ -671,44 +607,42 @@ function CanvasTextNodeContent({
             <strong>{bodyProblem?.title ?? i18n.t('canvas.node.textError')}</strong>
             <span>{bodyProblem?.message ?? buffer?.error}</span>
           </div>
-        ) : buffer && showTextEditor ? (
-          <>
-            <CanvasTextEditor
-              value={buffer.content}
-              language={buffer.language}
-              wordWrap={buffer.wordWrap}
-              readOnly={!active}
-              visible={!culled || selected}
-              focusRequest={active ? focusRequest : undefined}
-              initialScrollTop={node.textViewport?.scrollTop}
-              initialScrollLeft={node.textViewport?.scrollLeft}
-              onChange={(content) => actions.updateTextFileBuffer(node.projectRelativePath, content)}
-              onSave={() => void actions.saveTextFileBuffer(node.projectRelativePath)}
-              onToggleWordWrap={() => actions.toggleTextFileWordWrap(node.projectRelativePath)}
-              onScrollPositionCommit={commitTextViewport}
-              onFocusRequestConsumed={(requestId) => {
-                setFocusRequest((current) => current?.requestId === requestId ? undefined : current);
-              }}
-            />
-            {handoffProblem ? (
-              <div className="canvas-text-message canvas-text-message--overlay">
-                <AlertTriangle size={18} />
-                <strong>{handoffProblem.title}</strong>
-                <span>{handoffProblem.message}</span>
-              </div>
-            ) : null}
-          </>
         ) : buffer ? (
           <>
-            <CanvasTextPreviewImage
-              state={textPreviewImageState}
-              onError={reportTextPreviewImageError}
-            />
-            {textPreviewUpgradeProblem ? (
+            {showTextEditor ? (
+              <CanvasTextEditor
+                value={buffer.content}
+                language={buffer.language}
+                wordWrap={buffer.wordWrap}
+                readOnly={!active}
+                visible={!culled || selected}
+                focusRequest={active ? focusRequest : undefined}
+                initialScrollTop={node.textViewport?.scrollTop}
+                initialScrollLeft={node.textViewport?.scrollLeft}
+                onChange={(content) => actions.updateTextFileBuffer(node.projectRelativePath, content)}
+                onSave={() => void actions.saveTextFileBuffer(node.projectRelativePath)}
+                onToggleWordWrap={() => actions.toggleTextFileWordWrap(node.projectRelativePath)}
+                onScrollPositionCommit={commitTextViewport}
+                onReadOnlyTransition={setHandoffViewport}
+                onFocusRequestConsumed={(requestId) => {
+                  setFocusRequest((current) => current?.requestId === requestId ? undefined : current);
+                }}
+              />
+            ) : null}
+            {showTextPreviewHandoff ? (
+              <CanvasTextPreviewImageHandoff
+                presentation={{ visible: textPreview, pending: pendingTextPreview }}
+                onPendingReady={(source) => reportPendingReady(node, source)}
+                onPendingFailure={(source, error) => reportPendingFailure(node, source, error)}
+                onVisibleFailure={(source, error) => reportVisibleFailure(node, source, error)}
+                onVisibleCommitted={(source) => reportVisibleCommitted(node, source)}
+              />
+            ) : null}
+            {!showTextEditor && textPreviewOverlayProblem ? (
               <div className="canvas-text-message canvas-text-message--overlay">
                 <AlertTriangle size={18} />
-                <strong>{textPreviewUpgradeProblem.title}</strong>
-                <span>{textPreviewUpgradeProblem.message}</span>
+                <strong>{textPreviewOverlayProblem.title}</strong>
+                <span>{textPreviewOverlayProblem.message}</span>
               </div>
             ) : null}
           </>
@@ -718,47 +652,6 @@ function CanvasTextNodeContent({
       </div>
     </section>
   );
-}
-
-function CanvasTextPreviewImage({
-  state,
-  onError
-}: {
-  state: CanvasTextPreviewImageState;
-  onError: () => void;
-}): React.ReactElement {
-  if (!state.loaded) {
-    return <div className="canvas-text-preview-empty" aria-hidden="true" />;
-  }
-
-  return (
-    <img
-      className="canvas-text-preview-image"
-      src={state.loaded.src}
-      alt=""
-      draggable={false}
-      data-preview-width={state.loaded.previewWidth}
-      onError={onError}
-    />
-  );
-}
-
-function canvasTextPreviewContentIdentityKey(
-  node: ProjectedCanvasNode,
-  buffer: TextFileBuffer | undefined
-): string {
-  return JSON.stringify([
-    node.projectRelativePath,
-    node.availability.state === 'available' ? node.availability.revision : node.availability.state,
-    node.width,
-    node.height,
-    node.textViewport?.scrollTop ?? 0,
-    node.textViewport?.scrollLeft ?? 0,
-    buffer?.content,
-    buffer?.language,
-    buffer?.wordWrap,
-    buffer?.error
-  ]);
 }
 
 function textBufferStatus(

@@ -5,7 +5,7 @@ import {
   canvasVideoPreviewWidthForNode
 } from './canvasVideoPreviews';
 
-describe('canvas video preview URLs', () => {
+describe('canvas video preview URLs', { tags: ['canvas-video'] }, () => {
   it('calculates preview width with the shared raster width ladder', () => {
     expect(canvasVideoPreviewWidthForNode({
       nodeDisplayWidth: 1200,

@@ -1,35 +1,49 @@
-import { defineConfig } from 'vitest/config';
-import { resolve } from 'node:path';
+import { globSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
+import { defineConfig } from 'vitest/config';
+
+import PerformanceReporter from './tests/config/performance-reporter.js';
 
 const workspaceRoot = fileURLToPath(new URL('.', import.meta.url));
 
+export function discoverTestProjectConfigs(root = workspaceRoot): string[] {
+  return [
+    ...globSync('apps/*/vitest.config.ts', { cwd: root }),
+    ...globSync('apps/*/vitest.*.config.ts', { cwd: root }),
+    ...globSync('packages/*/vitest.config.ts', { cwd: root }),
+    ...globSync('tests/config/vitest.*.config.ts', { cwd: root })
+  ].map((path) => path.replaceAll('\\', '/')).sort();
+}
+
 export default defineConfig({
   test: {
-    environment: 'node',
-    include: ['tests/**/*.test.ts', 'packages/**/*.test.ts', 'apps/**/*.test.ts', 'apps/**/*.test.tsx'],
-    maxWorkers: 1
-  },
-  resolve: {
-    alias: [
-      { find: /^react$/, replacement: resolve(workspaceRoot, 'node_modules/react/index.js') },
-      { find: /^react\/jsx-runtime$/, replacement: resolve(workspaceRoot, 'node_modules/react/jsx-runtime.js') },
-      { find: /^react\/jsx-dev-runtime$/, replacement: resolve(workspaceRoot, 'node_modules/react/jsx-dev-runtime.js') },
-      { find: /^react-dom$/, replacement: resolve(workspaceRoot, 'node_modules/react-dom/index.js') },
-      { find: /^react-dom\/server$/, replacement: resolve(workspaceRoot, 'node_modules/react-dom/server.node.js') },
-      { find: '@debrute/app-protocol', replacement: resolve(workspaceRoot, 'packages/app-protocol/src/index.ts') },
-      { find: '@debrute/capability-core', replacement: resolve(workspaceRoot, 'packages/capability-core/src/index.ts') },
-      { find: '@debrute/capability-runtime', replacement: resolve(workspaceRoot, 'packages/capability-runtime/src/index.ts') },
-      { find: '@debrute/project-core/projectCacheKeys', replacement: resolve(workspaceRoot, 'packages/project-core/src/projectCacheKeys.ts') },
-      { find: '@debrute/project-core/projectTextFileTypes', replacement: resolve(workspaceRoot, 'packages/project-core/src/projectTextFileTypes.ts') },
-      { find: '@debrute/project-core', replacement: resolve(workspaceRoot, 'packages/project-core/src/index.ts') },
-      { find: '@debrute/canvas-core', replacement: resolve(workspaceRoot, 'packages/canvas-core/src/index.ts') },
-      { find: '@debrute/canvas-map-core', replacement: resolve(workspaceRoot, 'packages/canvas-map-core/src/index.ts') },
-      { find: '@debrute/workbench-runtime', replacement: resolve(workspaceRoot, 'packages/workbench-runtime/src/index.ts') },
-      { find: '@debrute/photoshop-bridge-plugin-core', replacement: resolve(workspaceRoot, 'packages/photoshop-bridge-plugin-core/src/index.ts') },
-      { find: '@debrute/app-server', replacement: resolve(workspaceRoot, 'apps/app-server/src/index.ts') },
-      { find: '@debrute/daemon', replacement: resolve(workspaceRoot, 'apps/daemon/src/index.ts') },
-      { find: '@debrute/photoshop-uxp-plugin', replacement: resolve(workspaceRoot, 'apps/photoshop-uxp-plugin/src/main.ts') }
-    ]
+    projects: discoverTestProjectConfigs(),
+    sequence: {
+      shuffle: { files: true },
+      seed: 104729
+    },
+    reporters: ['default', new PerformanceReporter()],
+    coverage: {
+      provider: 'v8',
+      allowExternal: true,
+      reportsDirectory: '.test-results/coverage',
+      reporter: ['text-summary', 'json'],
+      include: ['src/**/*.{ts,tsx}'],
+      exclude: [
+        '**/*.test.{ts,tsx}',
+        '**/*.d.ts',
+        '**/generated/**',
+        '**/*.generated.{ts,tsx}',
+        '**/dist/**',
+        '**/dist-electron/**',
+        '**/build/**',
+        'apps/web/src/types.ts',
+        'apps/web/src/workbench/i18n/types.ts',
+        'apps/daemon/src/cli.ts',
+        'apps/runtime-host/src/cli.ts',
+        'apps/web/src/main.tsx'
+      ],
+      excludeAfterRemap: true
+    }
   }
 });
