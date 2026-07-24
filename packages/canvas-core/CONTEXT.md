@@ -57,6 +57,11 @@ A persisted node rectangle created by direct move or resize and preserved while
 the node remains a member of the Canvas.
 _Avoid_: Locked node, drag preview
 
+**Manual Layout Draft**:
+A not-yet-confirmed node rectangle produced by direct move or resize. It may be
+presented over a Canvas Projection, but it is not Canvas Document state.
+_Avoid_: Manual Layout, pending layout, optimistic Canvas Document
+
 **Stack Order**:
 The persisted back-to-front order of Canvas Nodes. It is independent of Project
 hierarchy and automatic placement.

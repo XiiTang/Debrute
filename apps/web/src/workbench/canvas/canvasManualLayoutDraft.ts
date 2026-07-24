@@ -1,4 +1,4 @@
-import type { CanvasProjection, ProjectedCanvasNode } from '@debrute/canvas-core';
+import type { ProjectedCanvasNode } from '@debrute/canvas-core';
 import { buildResizeGeometry } from '../services/canvasInteraction';
 import type { CanvasRuntimeDragState } from './runtime/CanvasEditorRuntime';
 import type { CanvasPoint } from './runtime/canvasGeometry';
@@ -11,16 +11,16 @@ export interface CanvasLayoutOverride {
   height: number;
 }
 
-export interface CanvasLocalLayoutDraft {
+export interface CanvasManualLayoutDraft {
   canvasId: string;
   nodeLayouts: CanvasLayoutOverride[];
 }
 
-export function canvasLocalLayoutDraftFromMoveState(input: {
+export function canvasManualLayoutDraftFromMoveState(input: {
   canvasId: string;
   dragState: Extract<CanvasRuntimeDragState, { kind: 'move-node' }>;
   point: CanvasPoint;
-}): CanvasLocalLayoutDraft {
+}): CanvasManualLayoutDraft {
   const delta = {
     x: input.point.x - input.dragState.start.x,
     y: input.point.y - input.dragState.start.y
@@ -37,11 +37,11 @@ export function canvasLocalLayoutDraftFromMoveState(input: {
   };
 }
 
-export function canvasLocalLayoutDraftFromResizeState(input: {
+export function canvasManualLayoutDraftFromResizeState(input: {
   canvasId: string;
   dragState: Extract<CanvasRuntimeDragState, { kind: 'resize-node' }>;
   point: CanvasPoint;
-}): CanvasLocalLayoutDraft {
+}): CanvasManualLayoutDraft {
   const delta = {
     x: input.point.x - input.dragState.start.x,
     y: input.point.y - input.dragState.start.y
@@ -64,39 +64,22 @@ export function canvasLocalLayoutDraftFromResizeState(input: {
   };
 }
 
-export function canvasLocalLayoutDraftFromDragState(input: {
+export function canvasManualLayoutDraftFromDragState(input: {
   canvasId: string;
   dragState: CanvasRuntimeDragState;
   point: CanvasPoint;
-}): CanvasLocalLayoutDraft {
+}): CanvasManualLayoutDraft {
   return input.dragState.kind === 'move-node'
-    ? canvasLocalLayoutDraftFromMoveState({
+    ? canvasManualLayoutDraftFromMoveState({
         canvasId: input.canvasId,
         dragState: input.dragState,
         point: input.point
       })
-    : canvasLocalLayoutDraftFromResizeState({
+    : canvasManualLayoutDraftFromResizeState({
         canvasId: input.canvasId,
         dragState: input.dragState,
         point: input.point
       });
-}
-
-export function canvasLayoutOverridesForCanvas(input: {
-  canvasId: string;
-  active?: CanvasLocalLayoutDraft | undefined;
-  pending?: CanvasLocalLayoutDraft | undefined;
-}): CanvasLayoutOverride[] {
-  const merged = new Map<string, CanvasLayoutOverride>();
-  for (const draft of [input.pending, input.active]) {
-    if (!draft || draft.canvasId !== input.canvasId) {
-      continue;
-    }
-    for (const layout of draft.nodeLayouts) {
-      merged.set(layout.projectRelativePath, layout);
-    }
-  }
-  return [...merged.values()];
 }
 
 export function canvasNodesWithLayoutOverrides(input: {
@@ -118,23 +101,5 @@ export function canvasNodesWithLayoutOverrides(input: {
           height: layout.height
         }
       : node;
-  });
-}
-
-export function canvasLocalLayoutDraftMatchesProjection(
-  draft: CanvasLocalLayoutDraft,
-  projection: CanvasProjection
-): boolean {
-  if (draft.canvasId !== projection.canvasId) {
-    return false;
-  }
-  const nodesByPath = new Map(projection.nodes.map((node) => [node.projectRelativePath, node]));
-  return draft.nodeLayouts.every((layout) => {
-    const node = nodesByPath.get(layout.projectRelativePath);
-    return Boolean(node)
-      && node!.x === layout.x
-      && node!.y === layout.y
-      && node!.width === layout.width
-      && node!.height === layout.height;
   });
 }

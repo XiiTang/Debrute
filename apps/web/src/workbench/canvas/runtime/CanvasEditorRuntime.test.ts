@@ -13,7 +13,7 @@ describe('CanvasEditorRuntime', () => {
   });
 
   it('binds surface size without owning stage transforms', () => {
-    const runtime = createCanvasEditorRuntime();
+    const runtime = createRuntime();
 
     runtime.bindSurface({
       surface: fakeElement({ left: 20, top: 10, width: 800, height: 600 }) as unknown as HTMLElement
@@ -28,7 +28,7 @@ describe('CanvasEditorRuntime', () => {
     vi.useFakeTimers();
     const restoreWindow = installBrowserRuntime();
     try {
-      const runtime = createCanvasEditorRuntime();
+      const runtime = createRuntime();
       runtime.bindSurface({
         surface: fakeElement({ left: 20, top: 10, width: 800, height: 600 }) as unknown as HTMLElement
       });
@@ -55,7 +55,7 @@ describe('CanvasEditorRuntime', () => {
       }
     });
     try {
-      const runtime = createCanvasEditorRuntime();
+      const runtime = createRuntime();
       runtime.bindSurface({
         surface: fakeElement({ left: 20, top: 10, width: 800, height: 600 }) as unknown as HTMLElement
       });
@@ -77,7 +77,7 @@ describe('CanvasEditorRuntime', () => {
     vi.useFakeTimers();
     const restoreWindow = installBrowserRuntime();
     try {
-      const runtime = createCanvasEditorRuntime();
+      const runtime = createRuntime();
       runtime.bindSurface({
         surface: fakeElement({ left: 0, top: 0, width: 800, height: 600 }) as unknown as HTMLElement
       });
@@ -102,7 +102,7 @@ describe('CanvasEditorRuntime', () => {
     vi.useFakeTimers();
     const restoreWindow = installBrowserRuntime();
     try {
-      const runtime = createCanvasEditorRuntime();
+      const runtime = createRuntime();
       runtime.bindSurface({
         surface: fakeElement({ left: 0, top: 0, width: 800, height: 600 }) as unknown as HTMLElement
       });
@@ -121,7 +121,7 @@ describe('CanvasEditorRuntime', () => {
   });
 
   it('notifies narrow runtime subscribers only when their field changes', () => {
-    const runtime = createCanvasEditorRuntime();
+    const runtime = createRuntime();
     const selections: unknown[] = [];
     const surfaceSizes: unknown[] = [];
 
@@ -146,7 +146,7 @@ describe('CanvasEditorRuntime', () => {
     vi.useFakeTimers();
     const restoreWindow = installBrowserRuntime();
     try {
-      const runtime = createCanvasEditorRuntime();
+      const runtime = createRuntime();
       runtime.getSnapshot();
       const snapshots: unknown[] = [];
 
@@ -174,7 +174,7 @@ describe('CanvasEditorRuntime', () => {
   });
 
   it('removes narrow runtime subscribers through their unsubscribe functions', () => {
-    const runtime = createCanvasEditorRuntime();
+    const runtime = createRuntime();
     const selections: unknown[] = [];
     const surfaceSizes: unknown[] = [];
 
@@ -194,7 +194,7 @@ describe('CanvasEditorRuntime', () => {
   });
 
   it('updates selection in the local runtime snapshot', () => {
-    const runtime = createCanvasEditorRuntime();
+    const runtime = createRuntime();
     const snapshots: unknown[] = [];
     runtime.subscribe((snapshot) => snapshots.push(snapshot.selection));
 
@@ -205,7 +205,7 @@ describe('CanvasEditorRuntime', () => {
   });
 
   it('converts screen points through the bound surface and live camera', () => {
-    const runtime = createCanvasEditorRuntime({ camera: { x: 40, y: 20, z: 2 } });
+    const runtime = createRuntime({ camera: { x: 40, y: 20, z: 2 } });
     runtime.bindSurface({
       surface: fakeElement({ left: 100, top: 50, width: 800, height: 600 }) as unknown as HTMLElement
     });
@@ -213,8 +213,8 @@ describe('CanvasEditorRuntime', () => {
     expect(runtime.coordinates.screenToCanvas({ x: 300, y: 250 })).toEqual({ x: 80, y: 90 });
   });
 
-  it('keeps node drag state in the runtime snapshot', () => {
-    const runtime = createCanvasEditorRuntime();
+  it('keeps node drag state in the runtime snapshot', async () => {
+    const runtime = createRuntime();
     const snapshots: unknown[] = [];
     const liveDragStates: unknown[] = [];
     runtime.subscribe((snapshot) => snapshots.push(snapshot.dragState));
@@ -222,16 +222,12 @@ describe('CanvasEditorRuntime', () => {
 
     runtime.input.beginNodeMove({
       pointerId: 7,
-      node: moveNode('flow/a.png', 10, 20),
+      projectRelativePath: 'flow/a.png',
       start: { x: 0, y: 0 },
-      selection: { kind: 'node', projectRelativePath: 'flow/a.png' },
-      nodes: [
-        moveNode('flow/a.png', 10, 20),
-        moveNode('flow/b.png', 30, 40)
-      ]
+      selection: { kind: 'node', projectRelativePath: 'flow/a.png' }
     });
     runtime.input.updatePointer({ pointerId: 7, point: { x: 5, y: 6 } });
-    const finished = runtime.input.finishPointer({ pointerId: 7 });
+    const finished = await runtime.input.finishPointer({ pointerId: 7 });
 
     expect(finished).toMatchObject({
       kind: 'move-node',
@@ -245,15 +241,14 @@ describe('CanvasEditorRuntime', () => {
   });
 
   it('does not notify broad snapshot subscribers for pointer move drag previews', () => {
-    const runtime = createCanvasEditorRuntime();
+    const runtime = createRuntime();
     const snapshots: unknown[] = [];
     runtime.subscribe((snapshot) => snapshots.push(snapshot));
     runtime.input.beginNodeMove({
       pointerId: 7,
       start: { x: 0, y: 0 },
-      node: moveNode('flow/a.png', 0, 0),
-      selection: { kind: 'node', projectRelativePath: 'flow/a.png' },
-      nodes: [moveNode('flow/a.png', 0, 0)]
+      projectRelativePath: 'flow/a.png',
+      selection: { kind: 'node', projectRelativePath: 'flow/a.png' }
     });
     snapshots.length = 0;
 
@@ -267,14 +262,13 @@ describe('CanvasEditorRuntime', () => {
   });
 
   it('updates directory resize aspect behavior from live modifiers', () => {
-    const runtime = createCanvasEditorRuntime();
+    const runtime = createRuntime();
 
     runtime.input.beginNodeResize({
       pointerId: 9,
       handle: 'se',
       start: { x: 0, y: 0 },
-      node: { projectRelativePath: 'assets', nodeKind: 'directory' },
-      origin: { x: 10, y: 20, width: 1800, height: 640 },
+      projectRelativePath: 'assets',
       modifiers: { shiftKey: false }
     });
 
@@ -295,7 +289,137 @@ describe('CanvasEditorRuntime', () => {
       preserveAspect: true
     });
   });
+
+  it('starts a later drag from the Manual Layout geometry currently presented to the user', async () => {
+    const runtime = createCanvasEditorRuntime({
+      canvasId: 'canvas-1',
+      initialProjection: canvasProjection('flow/a.png', 0),
+      submitManualLayout: async () => undefined
+    });
+
+    runtime.input.beginNodeMove({
+      pointerId: 1,
+      projectRelativePath: 'flow/a.png',
+      start: { x: 0, y: 0 },
+      selection: { kind: 'node', projectRelativePath: 'flow/a.png' }
+    });
+    runtime.input.updatePointer({ pointerId: 1, point: { x: 20, y: 0 } });
+    await runtime.input.finishPointer({ pointerId: 1 });
+
+    runtime.input.beginNodeMove({
+      pointerId: 2,
+      projectRelativePath: 'flow/a.png',
+      start: { x: 20, y: 0 },
+      selection: { kind: 'node', projectRelativePath: 'flow/a.png' }
+    });
+    expect(runtime.manualLayout.getPresentation().layoutOverrides).toEqual([
+      { projectRelativePath: 'flow/a.png', x: 20, y: 0, width: 100, height: 80 }
+    ]);
+
+    runtime.input.updatePointer({ pointerId: 2, point: { x: 25, y: 0 } });
+    expect(runtime.manualLayout.getPresentation().layoutOverrides).toEqual([
+      { projectRelativePath: 'flow/a.png', x: 25, y: 0, width: 100, height: 80 }
+    ]);
+  });
+
+  it('invalidates Manual Layout presentation when its Runtime submission rejects', async () => {
+    const request = deferred<void>();
+    const submitManualLayout = vi.fn(() => request.promise);
+    const runtime = createCanvasEditorRuntime({
+      canvasId: 'canvas-1',
+      initialProjection: canvasProjection('flow/a.png', 0),
+      submitManualLayout
+    });
+    const rejections: boolean[] = [];
+    runtime.manualLayout.subscribeRejection(() => rejections.push(true));
+    runtime.input.beginNodeMove({
+      pointerId: 1,
+      projectRelativePath: 'flow/a.png',
+      start: { x: 0, y: 0 },
+      selection: { kind: 'node', projectRelativePath: 'flow/a.png' }
+    });
+    runtime.input.updatePointer({ pointerId: 1, point: { x: 20, y: 0 } });
+
+    const submission = runtime.input.finishPointer({ pointerId: 1 });
+    expect(submitManualLayout).toHaveBeenCalledOnce();
+    expect(runtime.manualLayout.getPresentation().layoutOverrides).toHaveLength(1);
+
+    request.reject(new Error('layout write failed'));
+    await expect(submission).rejects.toThrow('layout write failed');
+    expect(rejections).toEqual([true]);
+    expect(runtime.manualLayout.getPresentation().layoutOverrides).toEqual([]);
+  });
 });
+
+function canvasProjection(projectRelativePath: string, x: number) {
+  return {
+    canvasId: 'canvas-1',
+    nodes: [{
+      projectRelativePath,
+      nodeKind: 'file' as const,
+      mediaKind: 'image' as const,
+      x,
+      y: 0,
+      width: 100,
+      height: 80,
+      z: 1,
+      availability: {
+        state: 'available' as const,
+        size: 100,
+        mimeType: 'image/png',
+        fileUrl: `/files/${projectRelativePath}`,
+        revision: 'rev'
+      }
+    }],
+    edges: [],
+    diagnostics: []
+  };
+}
+
+function createRuntime(input?: {
+  camera?: { x: number; y: number; z: number };
+}) {
+  return createCanvasEditorRuntime({
+    canvasId: 'canvas-1',
+    initialProjection: {
+      canvasId: 'canvas-1',
+      nodes: [
+        { ...canvasProjection('flow/a.png', 10).nodes[0]!, y: 20 },
+        { ...canvasProjection('flow/b.png', 30).nodes[0]!, y: 40 },
+        {
+          projectRelativePath: 'assets',
+          nodeKind: 'directory' as const,
+          x: 10,
+          y: 20,
+          width: 1800,
+          height: 640,
+          z: 1,
+          availability: {
+            state: 'available' as const,
+            size: 100,
+            mimeType: 'application/octet-stream',
+            fileUrl: '/files/assets',
+            revision: 'rev'
+          }
+        }
+      ],
+      edges: [],
+      diagnostics: []
+    },
+    submitManualLayout: async () => undefined,
+    ...input
+  });
+}
+
+function deferred<T>() {
+  let resolve!: (value: T | PromiseLike<T>) => void;
+  let reject!: (reason?: unknown) => void;
+  const promise = new Promise<T>((resolvePromise, rejectPromise) => {
+    resolve = resolvePromise;
+    reject = rejectPromise;
+  });
+  return { promise, resolve, reject };
+}
 
 function fakeElement(rect = { left: 0, top: 0, width: 1, height: 1 }): {
   style: {
@@ -314,16 +438,6 @@ function fakeElement(rect = { left: 0, top: 0, width: 1, height: 1 }): {
       }
     },
     getBoundingClientRect: () => rect
-  };
-}
-
-function moveNode(projectRelativePath: string, x: number, y: number) {
-  return {
-    projectRelativePath,
-    x,
-    y,
-    width: 100,
-    height: 80
   };
 }
 

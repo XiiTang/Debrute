@@ -235,7 +235,7 @@ describe('CanvasRenderCoordinator', () => {
     expect(backAtA.culledNodePaths.has('flow/b-notes.txt')).toBe(true);
   });
 
-  it('applies local layout overrides to rendered nodes and connected edges', () => {
+  it('applies Manual Layout overrides to rendered nodes and connected edges', () => {
     const coordinator = createCanvasRenderCoordinator({ projection: projection([
       imageNode('flow/source.png', 0, 0, 1),
       imageNode('flow/target.png', 300, 0, 2)

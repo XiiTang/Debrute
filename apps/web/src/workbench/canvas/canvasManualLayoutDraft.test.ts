@@ -1,18 +1,16 @@
 import { describe, expect, it } from 'vitest';
-import type { CanvasProjection, ProjectedCanvasNode } from '@debrute/canvas-core';
+import type { ProjectedCanvasNode } from '@debrute/canvas-core';
 import {
-  canvasLayoutOverridesForCanvas,
-  canvasLocalLayoutDraftFromDragState,
-  canvasLocalLayoutDraftFromMoveState,
-  canvasLocalLayoutDraftFromResizeState,
-  canvasLocalLayoutDraftMatchesProjection,
+  canvasManualLayoutDraftFromDragState,
+  canvasManualLayoutDraftFromMoveState,
+  canvasManualLayoutDraftFromResizeState,
   canvasNodesWithLayoutOverrides
-} from './canvasLocalLayoutDraft';
+} from './canvasManualLayoutDraft';
 import type { CanvasRuntimeDragState } from './runtime/CanvasEditorRuntime';
 
-describe('canvas local layout drafts', () => {
+describe('Canvas Manual Layout drafts', () => {
   it('creates move-node layout overrides from drag delta', () => {
-    const draft = canvasLocalLayoutDraftFromMoveState({
+    const draft = canvasManualLayoutDraftFromMoveState({
       canvasId: 'canvas-1',
       dragState: moveState([
         origin('flow/a.png', 10, 20, 200, 120),
@@ -31,7 +29,7 @@ describe('canvas local layout drafts', () => {
   });
 
   it('creates resize-node layout overrides from resize geometry', () => {
-    const draft = canvasLocalLayoutDraftFromResizeState({
+    const draft = canvasManualLayoutDraftFromResizeState({
       canvasId: 'canvas-1',
       dragState: resizeState({
         handle: 'se',
@@ -52,7 +50,7 @@ describe('canvas local layout drafts', () => {
   });
 
   it('creates resize-node layout overrides with aspect ratio preserved', () => {
-    const draft = canvasLocalLayoutDraftFromResizeState({
+    const draft = canvasManualLayoutDraftFromResizeState({
       canvasId: 'canvas-1',
       dragState: resizeState({
         handle: 'se',
@@ -74,7 +72,7 @@ describe('canvas local layout drafts', () => {
   });
 
   it('clamps resize-node layout overrides to the minimum size', () => {
-    const draft = canvasLocalLayoutDraftFromResizeState({
+    const draft = canvasManualLayoutDraftFromResizeState({
       canvasId: 'canvas-1',
       dragState: resizeState({
         handle: 'nw',
@@ -95,8 +93,8 @@ describe('canvas local layout drafts', () => {
     });
   });
 
-  it('creates local layout drafts for move and resize drag states', () => {
-    expect(canvasLocalLayoutDraftFromDragState({
+  it('creates Manual Layout drafts for move and resize drag states', () => {
+    expect(canvasManualLayoutDraftFromDragState({
       canvasId: 'canvas-1',
       dragState: moveState([origin('flow/a.png', 10, 20, 200, 120)], { x: 5, y: 6 }),
       point: { x: 25, y: 36 }
@@ -107,7 +105,7 @@ describe('canvas local layout drafts', () => {
       ]
     });
 
-    expect(canvasLocalLayoutDraftFromDragState({
+    expect(canvasManualLayoutDraftFromDragState({
       canvasId: 'canvas-1',
       dragState: resizeState({
         handle: 'e',
@@ -125,43 +123,7 @@ describe('canvas local layout drafts', () => {
     });
   });
 
-  it('merges pending and active drafts with active layout taking priority', () => {
-    const overrides = canvasLayoutOverridesForCanvas({
-      canvasId: 'canvas-1',
-      pending: {
-        canvasId: 'canvas-1',
-        nodeLayouts: [
-          { projectRelativePath: 'flow/a.png', x: 100, y: 100, width: 200, height: 120 },
-          { projectRelativePath: 'flow/b.png', x: 200, y: 100, width: 200, height: 120 }
-        ]
-      },
-      active: {
-        canvasId: 'canvas-1',
-        nodeLayouts: [
-          { projectRelativePath: 'flow/a.png', x: 140, y: 150, width: 200, height: 120 }
-        ]
-      }
-    });
-
-    expect(overrides).toEqual([
-      { projectRelativePath: 'flow/a.png', x: 140, y: 150, width: 200, height: 120 },
-      { projectRelativePath: 'flow/b.png', x: 200, y: 100, width: 200, height: 120 }
-    ]);
-  });
-
-  it('ignores drafts for other canvases', () => {
-    expect(canvasLayoutOverridesForCanvas({
-      canvasId: 'canvas-1',
-      active: {
-        canvasId: 'canvas-2',
-        nodeLayouts: [
-          { projectRelativePath: 'flow/a.png', x: 140, y: 150, width: 200, height: 120 }
-        ]
-      }
-    })).toEqual([]);
-  });
-
-  it('applies local layout overrides to all canvas nodes', () => {
+  it('applies Manual Layout overrides to all canvas nodes', () => {
     const nodes = [
       node('flow/a.png', 10, 20, 200, 120),
       node('flow/b.png', 400, 20, 100, 80)
@@ -184,24 +146,6 @@ describe('canvas local layout drafts', () => {
     ]);
   });
 
-  it('matches durable projection only when every pending layout is current', () => {
-    const draft = {
-      canvasId: 'canvas-1',
-      nodeLayouts: [
-        { projectRelativePath: 'flow/a.png', x: 30, y: 50, width: 200, height: 120 }
-      ]
-    };
-
-    expect(canvasLocalLayoutDraftMatchesProjection(draft, projection([
-      node('flow/a.png', 30, 50, 200, 120)
-    ]))).toBe(true);
-    expect(canvasLocalLayoutDraftMatchesProjection(draft, projection([
-      node('flow/a.png', 29, 50, 200, 120)
-    ]))).toBe(false);
-    expect(canvasLocalLayoutDraftMatchesProjection(draft, projection([
-      node('flow/other.png', 30, 50, 200, 120)
-    ]))).toBe(false);
-  });
 });
 
 function moveState(
@@ -248,15 +192,6 @@ function origin(
     y,
     width,
     height
-  };
-}
-
-function projection(nodes: ProjectedCanvasNode[]): CanvasProjection {
-  return {
-    canvasId: 'canvas-1',
-    nodes,
-    edges: [],
-    diagnostics: []
   };
 }
 

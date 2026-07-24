@@ -414,10 +414,15 @@ describe('WorkbenchApp preferences and project behavior', () => {
   });
 
   it('notifies when selection-driven stack-order synchronization fails', async () => {
-    canvasRuntimeState.runtime = createCanvasEditorRuntime();
     const failure = new Error('stack-order write failed');
     const bringCanvasNodeToFront = vi.fn().mockRejectedValue(failure);
     const projectSnapshot = stackOrderSnapshotFixture();
+    const projection = projectSnapshot.projections[0]!;
+    canvasRuntimeState.runtime = createCanvasEditorRuntime({
+      canvasId: projection.canvasId,
+      initialProjection: projection,
+      submitManualLayout: async () => undefined
+    });
     const { container, root } = await renderWorkbenchApp('/projects/project-1', {
       openProject: vi.fn(async () => ({
         projectId: 'project-1',

@@ -331,15 +331,39 @@ impl ModelCancellation {
 }
 
 pub(crate) trait ModelOperationExecutor: Send + Sync + 'static {
+    type ConfigSnapshot;
+    type ModelBinding: Send + Sync + 'static;
     type Prepared: Send + 'static;
     type Staged: Send + 'static;
 
-    /// Resolves and validates a request without performing its Model Run.
+    /// Captures the complete configuration used to accept one submission.
+    ///
+    /// # Errors
+    ///
+    /// Returns an internal validation error when configuration cannot be read.
+    fn read_config_snapshot(&self) -> Result<Self::ConfigSnapshot, ModelRunError>;
+
+    /// Resolves one unique Model from the submission configuration snapshot.
+    ///
+    /// # Errors
+    ///
+    /// Returns a closed validation error when the Model cannot be bound.
+    fn bind_model(
+        &self,
+        snapshot: &Self::ConfigSnapshot,
+        model_id: &str,
+    ) -> Result<(ModelKind, Self::ModelBinding), ModelRunError>;
+
+    /// Materializes and validates one request against its accepted Model binding.
     ///
     /// # Errors
     ///
     /// Returns a closed validation error when the request cannot be executed.
-    fn validate(&self, request: &mut ModelRequest) -> Result<ModelKind, ModelRunError>;
+    fn validate_request(
+        &self,
+        binding: &Self::ModelBinding,
+        request: &mut ModelRequest,
+    ) -> Result<(), ModelRunError>;
 
     /// Performs the interruptible Model Run without publishing artifacts.
     ///
@@ -348,6 +372,7 @@ pub(crate) trait ModelOperationExecutor: Send + Sync + 'static {
     /// Returns a model, timeout, transport, or cancellation error.
     fn run(
         &self,
+        binding: &Self::ModelBinding,
         project_root: &Path,
         request: &ModelRequest,
         timeout: Duration,
@@ -361,6 +386,7 @@ pub(crate) trait ModelOperationExecutor: Send + Sync + 'static {
     /// Returns an error when artifact publication or provenance recording fails.
     fn stage(
         &self,
+        binding: &Self::ModelBinding,
         project_capability: &ProjectCapabilityFs,
         operation_id: &str,
         request: &ModelRequest,
@@ -422,7 +448,12 @@ impl fmt::Display for ModelOperationError {
 
 impl std::error::Error for ModelOperationError {}
 
-struct OperationRecord {
+struct AcceptedModelRequest<ModelBinding> {
+    request: ModelRequest,
+    binding: Option<Arc<ModelBinding>>,
+}
+
+struct OperationRecord<ModelBinding> {
     sequence: u64,
     id: String,
     model_kind: ModelKind,
@@ -431,7 +462,7 @@ struct OperationRecord {
     project_capability: ProjectCapabilityFs,
     state: OperationState,
     accepted_at: String,
-    requests: Arc<[ModelRequest]>,
+    accepted_requests: Vec<AcceptedModelRequest<ModelBinding>>,
     shape: ExecutionShape,
     concurrency: usize,
     timeout_seconds: u64,
@@ -449,16 +480,16 @@ struct OperationRecord {
     change: u64,
 }
 
-impl OperationRecord {
+impl<ModelBinding> OperationRecord<ModelBinding> {
     fn snapshot(&self) -> ModelOperationSnapshot {
         let execution = match self.shape {
             ExecutionShape::Single => ModelOperationExecution::Single {
-                model: self.requests[0].model.clone(),
+                model: self.accepted_requests[0].request.model.clone(),
                 timeout_seconds: self.timeout_seconds,
                 artifacts: self.single_artifacts.clone(),
             },
             ExecutionShape::Batch => ModelOperationExecution::Batch {
-                item_count: self.requests.len(),
+                item_count: self.accepted_requests.len(),
                 concurrency: self.concurrency,
                 timeout_seconds: self.timeout_seconds,
                 active: self.active,
@@ -476,11 +507,17 @@ impl OperationRecord {
             log: self.log.clone(),
         }
     }
+
+    fn release_model_bindings(&mut self) {
+        for accepted in &mut self.accepted_requests {
+            accepted.binding = None;
+        }
+    }
 }
 
-struct RegistryState {
+struct RegistryState<ModelBinding> {
     next_sequence: u64,
-    operations: HashMap<String, OperationRecord>,
+    operations: HashMap<String, OperationRecord<ModelBinding>>,
     terminal_order: VecDeque<String>,
 }
 
@@ -488,29 +525,32 @@ struct RegistryState {
 pub struct ModelOperationService<Executor: ModelOperationExecutor> {
     executor: Arc<Executor>,
     runtime_id: String,
-    state: Mutex<RegistryState>,
+    state: Mutex<RegistryState<Executor::ModelBinding>>,
     changed: Condvar,
     workers: Mutex<HashMap<String, thread::JoinHandle<()>>>,
     lifecycle: Mutex<()>,
     shutting_down: AtomicBool,
 }
 
-struct ValidatedSubmission {
+struct ValidatedSubmission<ModelBinding> {
     project_root: PathBuf,
     project_id: String,
     project_capability: ProjectCapabilityFs,
     model_kind: ModelKind,
     timeout_seconds: u64,
     concurrency: usize,
+    accepted_requests: Vec<AcceptedModelRequest<ModelBinding>>,
 }
 
-type BatchItemExecutionContext = (
+type BatchItemExecutionContext<ModelBinding> = (
     PathBuf,
     String,
     ProjectCapabilityFs,
+    ModelRequest,
     Duration,
     Arc<Mutex<()>>,
     bool,
+    Arc<ModelBinding>,
 );
 
 #[allow(private_bounds)]
@@ -553,7 +593,6 @@ impl<Executor: ModelOperationExecutor> ModelOperationService<Executor> {
         let validated = self.validate_submission(&mut input)?;
         let id = Uuid::new_v4().to_string();
         let accepted_at = now_rfc3339();
-        let requests = Arc::<[ModelRequest]>::from(input.requests);
         let cancellation = ModelCancellation::default();
 
         let (start_sender, start_receiver) = std::sync::mpsc::sync_channel::<()>(0);
@@ -585,7 +624,7 @@ impl<Executor: ModelOperationExecutor> ModelOperationService<Executor> {
                 project_capability: validated.project_capability,
                 state: OperationState::Queued,
                 accepted_at,
-                requests,
+                accepted_requests: validated.accepted_requests,
                 shape: input.shape,
                 concurrency: validated.concurrency,
                 timeout_seconds: validated.timeout_seconds,
@@ -661,16 +700,48 @@ impl<Executor: ModelOperationExecutor> ModelOperationService<Executor> {
     fn validate_submission(
         &self,
         input: &mut SubmitModelOperation,
-    ) -> Result<ValidatedSubmission, ModelOperationError> {
+    ) -> Result<ValidatedSubmission<Executor::ModelBinding>, ModelOperationError> {
         let (project_root, project_id, project_capability) = validate_project(&input.project_root)?;
         validate_shape(input.shape, &input.requests, input.concurrency)?;
-        let mut model_kind = None;
         let mut output_names = HashSet::new();
-        for request in &mut input.requests {
+        for request in &input.requests {
             validate_model_request(request)?;
-            let kind = self
-                .executor
-                .validate(request)
+            if let Some(output) = &request.output
+                && let Some(filename) = &output.filename
+                && !output_names.insert((output.directory.clone(), filename.clone()))
+            {
+                return Err(ModelOperationError::new(
+                    "invalid_input",
+                    "Batch contains duplicate explicit output names.",
+                ));
+            }
+        }
+        let config_snapshot = self
+            .executor
+            .read_config_snapshot()
+            .map_err(|error| ModelOperationError::new(error.code(), error.log().to_owned()))?;
+        let mut bindings_by_model =
+            HashMap::<String, (ModelKind, Arc<Executor::ModelBinding>)>::new();
+        let mut model_kind = None;
+        let requests = std::mem::take(&mut input.requests);
+        let mut accepted_requests = Vec::with_capacity(requests.len());
+        for mut request in requests {
+            let model_id = request.model.clone();
+            let (kind, binding) = if let Some((kind, binding)) = bindings_by_model.get(&model_id) {
+                (*kind, Arc::clone(binding))
+            } else {
+                let (kind, binding) = self
+                    .executor
+                    .bind_model(&config_snapshot, &model_id)
+                    .map_err(|error| {
+                        ModelOperationError::new(error.code(), error.log().to_owned())
+                    })?;
+                let binding = Arc::new(binding);
+                bindings_by_model.insert(model_id, (kind, Arc::clone(&binding)));
+                (kind, binding)
+            };
+            self.executor
+                .validate_request(&binding, &mut request)
                 .map_err(|error| ModelOperationError::new(error.code(), error.log().to_owned()))?;
             if model_kind
                 .replace(kind)
@@ -681,15 +752,10 @@ impl<Executor: ModelOperationExecutor> ModelOperationService<Executor> {
                     "Every Batch Item must resolve to the same Model Kind.",
                 ));
             }
-            if let Some(output) = &request.output
-                && let Some(filename) = &output.filename
-                && !output_names.insert((output.directory.clone(), filename.clone()))
-            {
-                return Err(ModelOperationError::new(
-                    "invalid_input",
-                    "Batch contains duplicate explicit output names.",
-                ));
-            }
+            accepted_requests.push(AcceptedModelRequest {
+                request,
+                binding: Some(binding),
+            });
         }
         let model_kind = model_kind.ok_or_else(|| {
             ModelOperationError::new("invalid_input", "Model Request input must not be empty.")
@@ -712,7 +778,7 @@ impl<Executor: ModelOperationExecutor> ModelOperationService<Executor> {
             ExecutionShape::Batch => input
                 .concurrency
                 .unwrap_or(DEFAULT_BATCH_CONCURRENCY)
-                .min(input.requests.len()),
+                .min(accepted_requests.len()),
         };
         if concurrency == 0 {
             return Err(ModelOperationError::new(
@@ -727,6 +793,7 @@ impl<Executor: ModelOperationExecutor> ModelOperationService<Executor> {
             model_kind,
             timeout_seconds,
             concurrency,
+            accepted_requests,
         })
     }
 
@@ -814,6 +881,7 @@ impl<Executor: ModelOperationExecutor> ModelOperationService<Executor> {
                 OperationState::Queued => {
                     record.cancellation.cancel();
                     record.state = OperationState::Cancelled;
+                    record.release_model_bindings();
                     record.change = record.change.saturating_add(1);
                     retain_terminal = true;
                 }
@@ -931,20 +999,31 @@ impl<Executor: ModelOperationExecutor> ModelOperationService<Executor> {
             project_id,
             project_capability,
             request,
+            binding,
             timeout,
             cancellation,
             completion,
             replace,
         ) = {
-            let state = self.lock_state();
-            let Some(record) = state.operations.get(id) else {
+            let mut state = self.lock_state();
+            let Some(record) = state.operations.get_mut(id) else {
                 return;
             };
+            let accepted = record
+                .accepted_requests
+                .get_mut(0)
+                .expect("running Single Operation must own one accepted request");
+            let request = accepted.request.clone();
+            let binding = accepted
+                .binding
+                .take()
+                .expect("running Single Operation must own its accepted Model binding");
             (
                 record.project_root.clone(),
                 record.project_id.clone(),
                 record.project_capability.clone(),
-                record.requests[0].clone(),
+                request,
+                binding,
                 Duration::from_secs(record.timeout_seconds),
                 record.cancellation.clone(),
                 Arc::clone(&record.completion),
@@ -952,11 +1031,21 @@ impl<Executor: ModelOperationExecutor> ModelOperationService<Executor> {
             )
         };
         let staged = validate_project_identity(&root, &project_id)
-            .and_then(|()| self.executor.run(&root, &request, timeout, &cancellation))
-            .and_then(|prepared| {
+            .and_then(|()| {
                 self.executor
-                    .stage(&project_capability, id, &request, replace, prepared)
+                    .run(&binding, &root, &request, timeout, &cancellation)
+            })
+            .and_then(|prepared| {
+                self.executor.stage(
+                    &binding,
+                    &project_capability,
+                    id,
+                    &request,
+                    replace,
+                    prepared,
+                )
             });
+        drop(binding);
         match staged {
             Ok((staged, artifacts)) => {
                 let _completion = lock(&completion, "Model Operation completion");
@@ -976,6 +1065,7 @@ impl<Executor: ModelOperationExecutor> ModelOperationService<Executor> {
                         };
                         record.single_artifacts = artifacts;
                         record.state = OperationState::Succeeded;
+                        record.release_model_bindings();
                         record.change = record.change.saturating_add(1);
                         drop(state);
                         self.retain_terminal(id);
@@ -992,13 +1082,13 @@ impl<Executor: ModelOperationExecutor> ModelOperationService<Executor> {
     }
 
     fn execute_batch(self: &Arc<Self>, id: &str) {
-        let (requests, concurrency, cancellation) = {
+        let (item_count, concurrency, cancellation) = {
             let state = self.lock_state();
             let Some(record) = state.operations.get(id) else {
                 return;
             };
             (
-                Arc::clone(&record.requests),
+                record.accepted_requests.len(),
                 record.concurrency,
                 record.cancellation.clone(),
             )
@@ -1007,7 +1097,6 @@ impl<Executor: ModelOperationExecutor> ModelOperationService<Executor> {
         thread::scope(|scope| {
             for _ in 0..concurrency {
                 let service = Arc::clone(self);
-                let requests = Arc::clone(&requests);
                 let cancellation = cancellation.clone();
                 let next = &next;
                 scope.spawn(move || {
@@ -1016,28 +1105,35 @@ impl<Executor: ModelOperationExecutor> ModelOperationService<Executor> {
                             return;
                         }
                         let item_index = next.fetch_add(1, Ordering::AcqRel);
-                        let Some(request) = requests.get(item_index).cloned() else {
+                        if item_index >= item_count {
                             return;
-                        };
+                        }
                         let Some((
                             root,
                             project_id,
                             project_capability,
+                            request,
                             timeout,
                             completion,
                             replace,
-                        )) = service.begin_item(id)
+                            binding,
+                        )) = service.begin_item(id, item_index)
                         else {
                             return;
                         };
                         let staged = validate_project_identity(&root, &project_id)
                             .and_then(|()| {
-                                service
-                                    .executor
-                                    .run(&root, &request, timeout, &cancellation)
+                                service.executor.run(
+                                    &binding,
+                                    &root,
+                                    &request,
+                                    timeout,
+                                    &cancellation,
+                                )
                             })
                             .and_then(|prepared| {
                                 service.executor.stage(
+                                    &binding,
                                     &project_capability,
                                     id,
                                     &request,
@@ -1045,6 +1141,7 @@ impl<Executor: ModelOperationExecutor> ModelOperationService<Executor> {
                                     prepared,
                                 )
                             });
+                        drop(binding);
                         match staged {
                             Ok((staged, artifacts)) => service.commit_batch_item(
                                 id,
@@ -1082,21 +1179,33 @@ impl<Executor: ModelOperationExecutor> ModelOperationService<Executor> {
         }
     }
 
-    fn begin_item(&self, id: &str) -> Option<BatchItemExecutionContext> {
+    fn begin_item(
+        &self,
+        id: &str,
+        item_index: usize,
+    ) -> Option<BatchItemExecutionContext<Executor::ModelBinding>> {
         let mut state = self.lock_state();
         let record = state.operations.get_mut(id)?;
         if record.state != OperationState::Running || record.cancellation.is_cancelled() {
             return None;
         }
+        let binding = record
+            .accepted_requests
+            .get_mut(item_index)
+            .and_then(|accepted| accepted.binding.take())
+            .expect("running Batch Item must own its accepted Model binding");
+        let request = record.accepted_requests[item_index].request.clone();
         record.active = record.active.saturating_add(1);
         record.change = record.change.saturating_add(1);
         Some((
             record.project_root.clone(),
             record.project_id.clone(),
             record.project_capability.clone(),
+            request,
             Duration::from_secs(record.timeout_seconds),
             Arc::clone(&record.completion),
             record.replace,
+            binding,
         ))
     }
 
@@ -1210,6 +1319,7 @@ impl<Executor: ModelOperationExecutor> ModelOperationService<Executor> {
             };
             if record.state == OperationState::Running {
                 record.state = OperationState::Succeeded;
+                record.release_model_bindings();
                 record.change = record.change.saturating_add(1);
                 true
             } else {
@@ -1233,6 +1343,7 @@ impl<Executor: ModelOperationExecutor> ModelOperationService<Executor> {
             } else {
                 record.state = OperationState::Cancelled;
                 record.active = 0;
+                record.release_model_bindings();
                 record.change = record.change.saturating_add(1);
                 true
             }
@@ -1255,6 +1366,7 @@ impl<Executor: ModelOperationExecutor> ModelOperationService<Executor> {
                 record.state = OperationState::Failed;
                 record.active = 0;
                 record.log = Some(log.to_owned());
+                record.release_model_bindings();
                 record.change = record.change.saturating_add(1);
                 true
             }
@@ -1288,7 +1400,7 @@ impl<Executor: ModelOperationExecutor> ModelOperationService<Executor> {
         sequence.parse::<u64>().map_err(|_| invalid_cursor())
     }
 
-    fn lock_state(&self) -> MutexGuard<'_, RegistryState> {
+    fn lock_state(&self) -> MutexGuard<'_, RegistryState<Executor::ModelBinding>> {
         lock(&self.state, "Model Operation registry")
     }
 
@@ -1482,7 +1594,7 @@ mod tests {
         path::PathBuf,
         sync::{
             Arc, Mutex,
-            atomic::{AtomicBool, Ordering},
+            atomic::{AtomicBool, AtomicUsize, Ordering},
             mpsc,
         },
         time::{Duration, Instant},
@@ -1514,16 +1626,146 @@ mod tests {
         executed_request: Arc<Mutex<Option<ModelRequest>>>,
     }
 
-    impl ModelOperationExecutor for CancellableExecutor {
-        type Prepared = Vec<ArtifactPointer>;
-        type Staged = Vec<ArtifactPointer>;
+    struct BindingProbeExecutor {
+        snapshot_reads: AtomicUsize,
+        bind_attempts: AtomicUsize,
+        live_bindings: Arc<AtomicUsize>,
+        runs: Mutex<Vec<(String, usize)>>,
+        rejected_model: Option<String>,
+    }
 
-        fn validate(&self, _request: &mut ModelRequest) -> Result<ModelKind, ModelRunError> {
-            Ok(ModelKind::Image)
+    struct TrackedModelBinding {
+        revision: usize,
+        live_bindings: Arc<AtomicUsize>,
+    }
+
+    impl Drop for TrackedModelBinding {
+        fn drop(&mut self) {
+            self.live_bindings.fetch_sub(1, Ordering::AcqRel);
+        }
+    }
+
+    impl BindingProbeExecutor {
+        fn new(rejected_model: Option<&str>) -> Self {
+            Self {
+                snapshot_reads: AtomicUsize::new(0),
+                bind_attempts: AtomicUsize::new(0),
+                live_bindings: Arc::new(AtomicUsize::new(0)),
+                runs: Mutex::new(Vec::new()),
+                rejected_model: rejected_model.map(str::to_owned),
+            }
+        }
+    }
+
+    impl ModelOperationExecutor for BindingProbeExecutor {
+        type ConfigSnapshot = usize;
+        type ModelBinding = TrackedModelBinding;
+        type Prepared = ();
+        type Staged = ();
+
+        fn read_config_snapshot(&self) -> Result<Self::ConfigSnapshot, ModelRunError> {
+            self.snapshot_reads.fetch_add(1, Ordering::AcqRel);
+            Ok(42)
+        }
+
+        fn bind_model(
+            &self,
+            snapshot: &Self::ConfigSnapshot,
+            model_id: &str,
+        ) -> Result<(ModelKind, Self::ModelBinding), ModelRunError> {
+            self.bind_attempts.fetch_add(1, Ordering::AcqRel);
+            if self.rejected_model.as_deref() == Some(model_id) {
+                return Err(ModelRunError::validation(
+                    "model_unavailable",
+                    format!("Model is unavailable: {model_id}"),
+                ));
+            }
+            self.live_bindings.fetch_add(1, Ordering::AcqRel);
+            Ok((
+                ModelKind::Image,
+                TrackedModelBinding {
+                    revision: *snapshot,
+                    live_bindings: Arc::clone(&self.live_bindings),
+                },
+            ))
+        }
+
+        fn validate_request(
+            &self,
+            _binding: &Self::ModelBinding,
+            _request: &mut ModelRequest,
+        ) -> Result<(), ModelRunError> {
+            Ok(())
         }
 
         fn run(
             &self,
+            binding: &Self::ModelBinding,
+            _project_root: &Path,
+            request: &ModelRequest,
+            _timeout: Duration,
+            cancellation: &ModelCancellation,
+        ) -> Result<Self::Prepared, ModelRunError> {
+            cancellation.check()?;
+            self.runs
+                .lock()
+                .expect("probe runs")
+                .push((request.model.clone(), binding.revision));
+            Ok(())
+        }
+
+        fn stage(
+            &self,
+            _binding: &Self::ModelBinding,
+            _project_capability: &ProjectCapabilityFs,
+            _operation_id: &str,
+            _request: &ModelRequest,
+            _replace: bool,
+            _prepared: Self::Prepared,
+        ) -> Result<(Self::Staged, Vec<ArtifactPointer>), ModelRunError> {
+            Ok(((), Vec::new()))
+        }
+
+        fn commit(&self, _project_root: &Path, _staged: Self::Staged) -> Result<(), ModelRunError> {
+            Ok(())
+        }
+    }
+
+    macro_rules! unit_image_binding {
+        () => {
+            type ConfigSnapshot = ();
+            type ModelBinding = ();
+
+            fn read_config_snapshot(&self) -> Result<Self::ConfigSnapshot, ModelRunError> {
+                Ok(())
+            }
+
+            fn bind_model(
+                &self,
+                _snapshot: &Self::ConfigSnapshot,
+                _model_id: &str,
+            ) -> Result<(ModelKind, Self::ModelBinding), ModelRunError> {
+                Ok((ModelKind::Image, ()))
+            }
+
+            fn validate_request(
+                &self,
+                _binding: &Self::ModelBinding,
+                _request: &mut ModelRequest,
+            ) -> Result<(), ModelRunError> {
+                Ok(())
+            }
+        };
+    }
+
+    impl ModelOperationExecutor for CancellableExecutor {
+        unit_image_binding!();
+        type Prepared = Vec<ArtifactPointer>;
+        type Staged = Vec<ArtifactPointer>;
+
+        fn run(
+            &self,
+            _binding: &Self::ModelBinding,
             _project_root: &Path,
             _request: &ModelRequest,
             _timeout: Duration,
@@ -1538,6 +1780,7 @@ mod tests {
 
         fn stage(
             &self,
+            _binding: &Self::ModelBinding,
             _project_capability: &ProjectCapabilityFs,
             _operation_id: &str,
             _request: &ModelRequest,
@@ -1553,15 +1796,13 @@ mod tests {
     }
 
     impl ModelOperationExecutor for BlockingCommitExecutor {
+        unit_image_binding!();
         type Prepared = Vec<ArtifactPointer>;
         type Staged = Vec<ArtifactPointer>;
 
-        fn validate(&self, _request: &mut ModelRequest) -> Result<ModelKind, ModelRunError> {
-            Ok(ModelKind::Image)
-        }
-
         fn run(
             &self,
+            _binding: &Self::ModelBinding,
             _project_root: &Path,
             _request: &ModelRequest,
             _timeout: Duration,
@@ -1573,6 +1814,7 @@ mod tests {
 
         fn stage(
             &self,
+            _binding: &Self::ModelBinding,
             _project_capability: &ProjectCapabilityFs,
             _operation_id: &str,
             _request: &ModelRequest,
@@ -1592,15 +1834,13 @@ mod tests {
     }
 
     impl ModelOperationExecutor for CleanupFailureExecutor {
+        unit_image_binding!();
         type Prepared = Vec<ArtifactPointer>;
         type Staged = Vec<ArtifactPointer>;
 
-        fn validate(&self, _request: &mut ModelRequest) -> Result<ModelKind, ModelRunError> {
-            Ok(ModelKind::Image)
-        }
-
         fn run(
             &self,
+            _binding: &Self::ModelBinding,
             _project_root: &Path,
             _request: &ModelRequest,
             _timeout: Duration,
@@ -1615,6 +1855,7 @@ mod tests {
 
         fn stage(
             &self,
+            _binding: &Self::ModelBinding,
             _project_capability: &ProjectCapabilityFs,
             _operation_id: &str,
             _request: &ModelRequest,
@@ -1630,19 +1871,38 @@ mod tests {
     }
 
     impl ModelOperationExecutor for MaterializingExecutor {
+        type ConfigSnapshot = ();
+        type ModelBinding = ();
         type Prepared = ();
         type Staged = ();
 
-        fn validate(&self, request: &mut ModelRequest) -> Result<ModelKind, ModelRunError> {
+        fn read_config_snapshot(&self) -> Result<Self::ConfigSnapshot, ModelRunError> {
+            Ok(())
+        }
+
+        fn bind_model(
+            &self,
+            _snapshot: &Self::ConfigSnapshot,
+            _model_id: &str,
+        ) -> Result<(ModelKind, Self::ModelBinding), ModelRunError> {
+            Ok((ModelKind::Image, ()))
+        }
+
+        fn validate_request(
+            &self,
+            _binding: &Self::ModelBinding,
+            request: &mut ModelRequest,
+        ) -> Result<(), ModelRunError> {
             request
                 .arguments
                 .entry("delivery".to_owned())
                 .or_insert_with(|| json!("inline"));
-            Ok(ModelKind::Image)
+            Ok(())
         }
 
         fn run(
             &self,
+            _binding: &Self::ModelBinding,
             _project_root: &Path,
             request: &ModelRequest,
             _timeout: Duration,
@@ -1655,6 +1915,7 @@ mod tests {
 
         fn stage(
             &self,
+            _binding: &Self::ModelBinding,
             _project_capability: &ProjectCapabilityFs,
             _operation_id: &str,
             _request: &ModelRequest,
@@ -1670,19 +1931,39 @@ mod tests {
     }
 
     impl ModelOperationExecutor for FixtureExecutor {
+        type ConfigSnapshot = ();
+        type ModelBinding = ();
         type Prepared = Result<Vec<ArtifactPointer>, ModelRunError>;
         type Staged = ();
 
-        fn validate(&self, request: &mut ModelRequest) -> Result<ModelKind, ModelRunError> {
-            Ok(if request.model.starts_with("video-") {
+        fn read_config_snapshot(&self) -> Result<Self::ConfigSnapshot, ModelRunError> {
+            Ok(())
+        }
+
+        fn bind_model(
+            &self,
+            _snapshot: &Self::ConfigSnapshot,
+            model_id: &str,
+        ) -> Result<(ModelKind, Self::ModelBinding), ModelRunError> {
+            let kind = if model_id.starts_with("video-") {
                 ModelKind::Video
             } else {
                 ModelKind::Image
-            })
+            };
+            Ok((kind, ()))
+        }
+
+        fn validate_request(
+            &self,
+            _binding: &Self::ModelBinding,
+            _request: &mut ModelRequest,
+        ) -> Result<(), ModelRunError> {
+            Ok(())
         }
 
         fn run(
             &self,
+            _binding: &Self::ModelBinding,
             _project_root: &std::path::Path,
             _request: &ModelRequest,
             _timeout: Duration,
@@ -1699,6 +1980,7 @@ mod tests {
 
         fn stage(
             &self,
+            _binding: &Self::ModelBinding,
             _project_capability: &ProjectCapabilityFs,
             _operation_id: &str,
             _request: &ModelRequest,
@@ -1774,6 +2056,77 @@ mod tests {
             .clone()
             .expect("worker received request");
         assert_eq!(executed.arguments.get("delivery"), Some(&json!("inline")));
+    }
+
+    #[test]
+    fn submission_reads_one_snapshot_and_shares_each_unique_model_binding() {
+        let fixture = Fixture::new(Vec::new());
+        let executor = Arc::new(BindingProbeExecutor::new(None));
+        let service = Arc::new(ModelOperationService::new(Arc::clone(&executor)));
+        let accepted = service
+            .submit(SubmitModelOperation {
+                project_root: fixture.project.clone(),
+                shape: ExecutionShape::Batch,
+                requests: vec![
+                    request("image-one"),
+                    request("image-one"),
+                    request("image-two"),
+                ],
+                concurrency: Some(1),
+                timeout_seconds: None,
+                replace: false,
+            })
+            .expect("binding probe Batch should be accepted");
+        let terminal = service
+            .wait(&accepted.id, || true, |_| true, |_| true)
+            .unwrap()
+            .unwrap();
+
+        assert_eq!(terminal.state, OperationState::Succeeded);
+        assert_eq!(executor.snapshot_reads.load(Ordering::Acquire), 1);
+        assert_eq!(executor.bind_attempts.load(Ordering::Acquire), 2);
+        assert_eq!(
+            *executor.runs.lock().expect("probe runs"),
+            vec![
+                ("image-one".to_owned(), 42),
+                ("image-one".to_owned(), 42),
+                ("image-two".to_owned(), 42),
+            ]
+        );
+        assert_eq!(executor.live_bindings.load(Ordering::Acquire), 0);
+        assert!(service.inspect(&accepted.id).is_ok());
+        service.shutdown();
+    }
+
+    #[test]
+    fn binding_failure_rejects_the_complete_submission_and_releases_prior_bindings() {
+        let fixture = Fixture::new(Vec::new());
+        let executor = Arc::new(BindingProbeExecutor::new(Some("image-missing")));
+        let service = Arc::new(ModelOperationService::new(Arc::clone(&executor)));
+        let error = service
+            .submit(SubmitModelOperation {
+                project_root: fixture.project.clone(),
+                shape: ExecutionShape::Batch,
+                requests: vec![request("image-one"), request("image-missing")],
+                concurrency: Some(1),
+                timeout_seconds: None,
+                replace: false,
+            })
+            .expect_err("one unavailable Model must reject the complete Batch");
+
+        assert_eq!(error.code(), "model_unavailable");
+        assert_eq!(executor.snapshot_reads.load(Ordering::Acquire), 1);
+        assert_eq!(executor.bind_attempts.load(Ordering::Acquire), 2);
+        assert_eq!(executor.live_bindings.load(Ordering::Acquire), 0);
+        assert!(executor.runs.lock().expect("probe runs").is_empty());
+        assert!(
+            service
+                .list(&ModelOperationListQuery::default())
+                .unwrap()
+                .operations
+                .is_empty()
+        );
+        service.shutdown();
     }
 
     #[test]

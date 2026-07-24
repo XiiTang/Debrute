@@ -1,10 +1,8 @@
 import type React from 'react';
 import type {
   CanvasFeedbackEntry,
-  CanvasProjection,
   ProjectedCanvasNode
 } from '@debrute/canvas-core';
-import type { CanvasPoint } from '../services/canvasInteraction';
 import type { CanvasRuntimePointerModifiers } from './runtime/CanvasEditorRuntime';
 import {
   canvasFeedbackLocalToolsetForMediaKind,
@@ -34,11 +32,6 @@ import type {
 import type { CanvasStageRuntime } from './runtime/CanvasStageRuntime';
 import type { CanvasSelection } from './runtime/canvasSelection';
 import type { CanvasCamera } from './runtime/canvasCamera';
-import {
-  canvasLocalLayoutDraftFromDragState,
-  canvasLocalLayoutDraftMatchesProjection,
-  type CanvasLocalLayoutDraft
-} from './canvasLocalLayoutDraft';
 
 export function canvasMapProjectTreeDropEntry(
   dataTransfer: Pick<DataTransfer, 'getData'>
@@ -77,39 +70,6 @@ export function shouldClearFeedbackBarPlacementForFeedbackTarget(input: {
     return false;
   }
   return !input.hasRenderableFeedbackTarget;
-}
-
-export function canvasSurfaceLayoutDraftFromDragState(input: {
-  canvasId: string;
-  dragState: CanvasRuntimeDragState | undefined;
-  point: CanvasPoint | undefined;
-}): CanvasLocalLayoutDraft | undefined {
-  if (!input.point || !input.dragState) {
-    return undefined;
-  }
-  const draft = canvasLocalLayoutDraftFromDragState({
-    canvasId: input.canvasId,
-    dragState: input.dragState,
-    point: input.point
-  });
-  return draft.nodeLayouts.length > 0 ? draft : undefined;
-}
-
-export function canvasSurfaceShouldClearPendingLayoutDraft(input: {
-  pending: CanvasLocalLayoutDraft | undefined;
-  projection: CanvasProjection;
-}): boolean {
-  if (!input.pending) {
-    return false;
-  }
-  if (input.pending.canvasId !== input.projection.canvasId) {
-    return true;
-  }
-  if (canvasLocalLayoutDraftMatchesProjection(input.pending, input.projection)) {
-    return true;
-  }
-  const nodePaths = new Set(input.projection.nodes.map((node) => node.projectRelativePath));
-  return input.pending.nodeLayouts.some((layout) => !nodePaths.has(layout.projectRelativePath));
 }
 
 export function activeNodeProjectRelativePaths(state: CanvasRuntimeDragState | undefined): string[] {

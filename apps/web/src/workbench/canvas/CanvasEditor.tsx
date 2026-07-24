@@ -52,6 +52,18 @@ export function CanvasEditor({
   const runtimeKey = canvas && projection
     ? `${canvas.id}\u001f${projection.canvasId}\u001f${runtimeScopeKey ?? 0}`
     : undefined;
+  const actionsRef = React.useRef(actions);
+  actionsRef.current = actions;
+  const runtimeInputRef = React.useRef<Parameters<typeof createCanvasEditorRuntime>[0] | undefined>(undefined);
+  runtimeInputRef.current = canvas && projection
+    ? {
+        canvasId: canvas.id,
+        initialProjection: projection,
+        submitManualLayout: (nodeLayouts) => actionsRef.current.updateCanvasNodeLayouts(canvas.id, {
+          nodeLayouts: [...nodeLayouts]
+        })
+      }
+    : undefined;
   const [runtimeState, setRuntimeState] = React.useState<{
     key: string;
     runtime: CanvasEditorRuntime;
@@ -66,12 +78,13 @@ export function CanvasEditor({
   }, [canvas, onFeedbackBarTargetChange, onRuntimeChange, projection]);
 
   React.useEffect(() => {
-    if (!runtimeKey) {
+    const runtimeInput = runtimeInputRef.current;
+    if (!runtimeKey || !runtimeInput) {
       setRuntimeState(undefined);
       onRuntimeChange?.(undefined);
       return;
     }
-    const nextRuntime = createCanvasEditorRuntime();
+    const nextRuntime = createCanvasEditorRuntime(runtimeInput);
     setRuntimeState({
       key: runtimeKey,
       runtime: nextRuntime

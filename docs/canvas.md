@@ -161,11 +161,40 @@ items. Moving a selected node moves the selected node group from shared origin
 geometry; resizing acts on one node, clamps to a minimum size, and applies the
 media-aware aspect-ratio rule.
 
-During move and resize, a local layout draft is the visual geometry. Node
+During move and resize, a Manual Layout Draft is the visual geometry. Node
 shells, connected edges, culling retention, and overlays read that same draft.
-On pointer release, Workbench keeps the pending draft until the persisted
-projection confirms the same rectangles, preventing a release-time snap-back.
-A failed commit drops the pending draft and renders the durable projection.
+On pointer release, Workbench submits the draft immediately and keeps presenting
+it until the Canvas Projection confirms the same rectangles or a target node
+disappears. A submitted draft is presentation state, not Canvas Document state.
+A successful mutation outcome closes the Runtime command but does not itself
+confirm presentation. Confirmation requires exact rectangle equality in the
+already revision-ordered Canvas Projection; `projectRevision` orders authority
+but is not a substitute for that geometry check.
+
+Workbench accepts another move or resize while earlier Manual Layout Drafts are
+still awaiting confirmation. Presented geometry composes the newest Canvas
+Projection, every still-unconfirmed submitted draft in submission order, and
+then the active draft; a later draft wins for the same node. A new interaction
+starts from that presented geometry rather than from an older Canvas Projection.
+Each submission retains its own identity but is sent immediately: this ordering
+is not a delayed mutation queue, retry mechanism, or editable history.
+
+When Canvas Projections confirm submissions in stages, Workbench removes only
+the confirmed contributions and continues to present every later submitted or
+active draft. When one node's rectangle confirms a newer submission, every
+older submitted draft for that node is also obsolete and cannot reappear; drafts
+for other nodes remain independent. A failed commit removes only its own
+submitted draft. Later submissions remain valid because each carries final
+absolute rectangles rather than deltas that depend on an earlier commit
+succeeding. Workbench renders the latest Canvas Projection plus those remaining
+drafts and reports each failure once. Manual Layout Drafts never cross Canvas
+identity. Workbench does not retry, reload, or synthesize a full-document write.
+Switching Canvas, replacing the Project binding, or disposing the owning
+`CanvasEditorRuntime` drops all active and submitted drafts for that instance.
+An already-sent Runtime mutation is neither cancelled nor replayed; its late
+completion cannot republish disposed presentation. A later open starts only
+from the current authoritative Canvas Projection, and Manual Layout Drafts are
+not Working Copies or browser-persisted recovery state.
 
 Text scrolling uses the same authority distinction without treating a local
 copy of the Canvas Document as committed state. Workbench displays the newest
@@ -198,7 +227,7 @@ state.
 
 - `CanvasEditorRuntime` owns camera, coordinates, input, selection, and drag
   state.
-- `CanvasRenderCoordinator` combines projection, local layout drafts, selection,
+- `CanvasRenderCoordinator` combines projection, Manual Layout Drafts, selection,
   active nodes, and virtualization into one render snapshot.
 - `CanvasStageRuntime` performs cached stage-camera and node-shell DOM writes.
 - `CanvasOverlayRuntime` places screen-space overlays from Canvas geometry.
@@ -232,7 +261,7 @@ documented in [`canvas-feedback.md`](./canvas-feedback.md).
   `service.rs`.
 - Shared Canvas declarations and browser presentation values:
   `packages/canvas-core/src/`.
-- Camera, selection, local drafts, minimap, and rendering:
+- Camera, selection, Manual Layout Drafts, minimap, and rendering:
   `apps/web/src/workbench/canvas/`.
 - Pending Text Viewport display and Runtime-result reconciliation:
   `apps/web/src/workbench/services/canvasSnapshotUpdates.ts`.

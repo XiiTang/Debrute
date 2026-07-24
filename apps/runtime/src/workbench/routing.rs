@@ -16,9 +16,9 @@ use axum::{
 use serde::Serialize;
 
 use super::{
-    CliAuthorizationVerifier, RuntimeCliHttpService, RuntimeProductHttpService,
-    WORKBENCH_CONNECTION_HEADER, WORKBENCH_SESSION_COOKIE, WorkbenchLaunchService,
-    WorkbenchRuntimeServices, authority::is_opaque_value,
+    CliAuthorizationVerifier, ProjectBindingLease, RuntimeCliHttpService,
+    RuntimeProductHttpService, WORKBENCH_CONNECTION_HEADER, WORKBENCH_SESSION_COOKIE,
+    WorkbenchLaunchService, WorkbenchRuntimeServices, authority::is_opaque_value,
 };
 use crate::photoshop::{PHOTOSHOP_CEP_FILE_ORIGIN, PHOTOSHOP_UXP_ORIGIN};
 use crate::project::is_valid_stable_project_id;
@@ -50,6 +50,8 @@ pub(super) struct CliRequestAuthorization(pub String);
 #[derive(Debug, Clone)]
 pub(super) struct ProjectAuthorization {
     pub project_id: String,
+    _binding_generation: u64,
+    _lease: ProjectBindingLease,
 }
 
 #[derive(Debug, Clone)]
@@ -360,9 +362,18 @@ async fn authorize_workbench_api(
             // The first closed Terminal frame binds the Workbench connection
             // because browser WebSocket constructors cannot set custom headers.
         } else {
-            request
-                .extensions_mut()
-                .insert(ProjectAuthorization { project_id });
+            let Some(lease) = services.connections().acquire_project_binding(
+                &context.credential,
+                &project_id,
+                context.binding_generation,
+            ) else {
+                return forbidden();
+            };
+            request.extensions_mut().insert(ProjectAuthorization {
+                project_id,
+                _binding_generation: context.binding_generation,
+                _lease: lease,
+            });
         }
     }
     let supplied_origin = one_header(request.headers(), ORIGIN);

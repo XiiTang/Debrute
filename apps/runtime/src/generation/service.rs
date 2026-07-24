@@ -34,7 +34,11 @@ pub struct GenerationService {
 
 pub struct PreparedModelExecution {
     execution: ModelExecution,
-    configured_secrets: Vec<String>,
+}
+
+pub struct AcceptedModelBinding {
+    model: ResolvedGenerationModel,
+    schema: serde_json::Value,
 }
 
 impl GenerationService {
@@ -54,30 +58,51 @@ impl GenerationService {
 }
 
 impl ModelOperationExecutor for GenerationService {
+    type ConfigSnapshot = GlobalConfigSnapshot;
+    type ModelBinding = AcceptedModelBinding;
     type Prepared = PreparedModelExecution;
     type Staged = StagedModelExecution;
 
-    fn validate(&self, request: &mut ModelRequest) -> Result<ModelKind, ModelRunError> {
-        let snapshot = self
-            .global_config
+    fn read_config_snapshot(&self) -> Result<Self::ConfigSnapshot, ModelRunError> {
+        self.global_config
             .read_snapshot(&self.catalog)
             .map_err(|error| {
                 ModelRunError::validation(
                     "internal_error",
                     format!("Global settings are unavailable: {error}"),
                 )
-            })?;
-        let (model, schema) = resolve_model(&self.catalog, &snapshot, &request.model)
+            })
+    }
+
+    fn bind_model(
+        &self,
+        snapshot: &Self::ConfigSnapshot,
+        model_id: &str,
+    ) -> Result<(ModelKind, Self::ModelBinding), ModelRunError> {
+        let (model, schema) = resolve_model(&self.catalog, snapshot, model_id)
             .map_err(|error| ModelRunError::validation("model_unavailable", error.message()))?;
-        materialize_argument_defaults(&model.model_id, &schema, &mut request.arguments)
+        Ok((model.kind, AcceptedModelBinding { model, schema }))
+    }
+
+    fn validate_request(
+        &self,
+        binding: &Self::ModelBinding,
+        request: &mut ModelRequest,
+    ) -> Result<(), ModelRunError> {
+        materialize_argument_defaults(
+            &binding.model.model_id,
+            &binding.schema,
+            &mut request.arguments,
+        )
+        .map_err(|error| ModelRunError::validation("invalid_input", error.message()))?;
+        validate_arguments(&binding.model.model_id, &binding.schema, &request.arguments)
             .map_err(|error| ModelRunError::validation("invalid_input", error.message()))?;
-        validate_arguments(&model.model_id, &schema, &request.arguments)
-            .map_err(|error| ModelRunError::validation("invalid_input", error.message()))?;
-        Ok(model.kind)
+        Ok(())
     }
 
     fn run(
         &self,
+        binding: &Self::ModelBinding,
         project_root: &Path,
         request: &ModelRequest,
         timeout: Duration,
@@ -89,18 +114,8 @@ impl ModelOperationExecutor for GenerationService {
             .map_err(|error| generation_run_error(&error))?;
         let deadline =
             GenerationDeadline::after(timeout).map_err(|error| generation_run_error(&error))?;
-        let snapshot = self
-            .global_config
-            .read_snapshot(&self.catalog)
-            .map_err(|error| {
-                ModelRunError::failed(format!("Global settings are unavailable: {error}"))
-            })?;
-        let (model, schema) = resolve_model(&self.catalog, &snapshot, &request.model)
-            .map_err(|error| generation_run_error(&error))?;
-        validate_arguments(&model.model_id, &schema, &request.arguments)
-            .map_err(|error| generation_run_error(&error))?;
         let context = ExecutionContext::new(
-            &model,
+            &binding.model,
             &request.arguments,
             project_root,
             &cancellation,
@@ -108,20 +123,20 @@ impl ModelOperationExecutor for GenerationService {
             deadline,
         )
         .map_err(|error| generation_run_error(&error))?;
-        let execution = execute_model(model.kind, context)
-            .map_err(|error| redact_generation_error(&error, std::slice::from_ref(&model.api_key)))
+        let execution = execute_model(binding.model.kind, context)
+            .map_err(|error| {
+                redact_generation_error(&error, std::slice::from_ref(&binding.model.api_key))
+            })
             .map_err(|error| generation_run_error(&error))?;
         cancellation
             .check()
             .map_err(|error| generation_run_error(&error))?;
-        Ok(PreparedModelExecution {
-            execution,
-            configured_secrets: vec![model.api_key],
-        })
+        Ok(PreparedModelExecution { execution })
     }
 
     fn stage(
         &self,
+        binding: &Self::ModelBinding,
         project_capability: &crate::project::ProjectCapabilityFs,
         operation_id: &str,
         request: &ModelRequest,
@@ -134,7 +149,7 @@ impl ModelOperationExecutor for GenerationService {
             request,
             replace,
             prepared.execution,
-            &prepared.configured_secrets,
+            std::slice::from_ref(&binding.model.api_key),
         )
         .map_err(|error| generation_run_error(&error))
     }
@@ -281,20 +296,187 @@ fn validate_model_endpoint(value: &str) -> Result<(), GenerationError> {
 
 #[cfg(test)]
 mod tests {
-    use std::{collections::VecDeque, path::Path, sync::Mutex};
+    use std::{
+        collections::VecDeque,
+        path::{Path, PathBuf},
+        sync::{Arc, Condvar, Mutex},
+        time::Duration,
+    };
 
     use serde_json::{Map, Value, json};
 
     use super::*;
-    use crate::generation::{
-        common::ModelRequestResourceLimits,
-        types::{ModelHttpRequest, ModelHttpResponse, PreparedHttpBody as HttpBody},
-    };
     use crate::project::GeneratedArtifactRole;
+    use crate::{
+        generation::{
+            common::ModelRequestResourceLimits,
+            types::{ModelHttpRequest, ModelHttpResponse, PreparedHttpBody as HttpBody},
+        },
+        model_operation::{
+            ExecutionShape, ModelOperationService, OperationState, SubmitModelOperation,
+        },
+        project::GeneratedAssetMetadataService,
+    };
 
     struct FixtureTransport {
         responses: Mutex<VecDeque<ModelHttpResponse>>,
         requests: Mutex<Vec<ModelHttpRequest>>,
+    }
+
+    struct BlockingFixtureTransport {
+        responses: Mutex<VecDeque<ModelHttpResponse>>,
+        requests: Mutex<Vec<ModelHttpRequest>>,
+        first_started: (Mutex<bool>, Condvar),
+        release_first: (Mutex<bool>, Condvar),
+    }
+
+    struct AcceptedBindingFixture {
+        root: PathBuf,
+        catalog: Arc<ModelCatalog>,
+        global_config: Arc<GlobalConfigStore>,
+        transport: Arc<BlockingFixtureTransport>,
+        operations: Arc<ModelOperationService<GenerationService>>,
+        request: ModelRequest,
+    }
+
+    impl AcceptedBindingFixture {
+        fn new() -> Self {
+            let root = std::env::temp_dir().join(format!(
+                "debrute-accepted-model-binding-{}",
+                uuid::Uuid::new_v4()
+            ));
+            let project = root.join("project");
+            std::fs::create_dir_all(project.join(".debrute")).unwrap();
+            std::fs::write(
+                project.join(".debrute/project.json"),
+                serde_json::to_vec(&json!({
+                    "project": {
+                        "id": uuid::Uuid::new_v4().to_string(),
+                        "name": "Fixture",
+                        "createdAt": "2026-01-01T00:00:00.000Z",
+                        "updatedAt": "2026-01-01T00:00:00.000Z"
+                    }
+                }))
+                .unwrap(),
+            )
+            .unwrap();
+            let catalog = Arc::new(ModelCatalog::bundled().unwrap());
+            let global_config = Arc::new(GlobalConfigStore::new(root.join("home")));
+            let transport = Arc::new(BlockingFixtureTransport {
+                responses: Mutex::new(VecDeque::from([
+                    fixture_json(&json!({
+                        "data": [{"b64_json": "iVBORw0KGgo="}]
+                    })),
+                    fixture_json(&json!({
+                        "data": [{"b64_json": "iVBORw0KGgo="}]
+                    })),
+                    fixture_json(&json!({
+                        "data": [{"b64_json": "iVBORw0KGgo="}]
+                    })),
+                ])),
+                requests: Mutex::new(Vec::new()),
+                first_started: (Mutex::new(false), Condvar::new()),
+                release_first: (Mutex::new(false), Condvar::new()),
+            });
+            let executor = Arc::new(GenerationService {
+                catalog: Arc::clone(&catalog),
+                global_config: Arc::clone(&global_config),
+                metadata: Arc::new(GeneratedAssetMetadataService::new()),
+                transport: transport.clone(),
+            });
+            let fixture = Self {
+                root,
+                catalog,
+                global_config,
+                transport,
+                operations: Arc::new(ModelOperationService::new(executor)),
+                request: ModelRequest {
+                    model: "gpt-image-2".to_owned(),
+                    arguments: Map::from_iter([("prompt".to_owned(), json!("poster"))]),
+                    output: None,
+                },
+            };
+            fixture.set_model(
+                "accepted.example.test",
+                "accepted-request-model",
+                "accepted-secret",
+            );
+            fixture
+        }
+
+        fn project(&self) -> PathBuf {
+            self.root.join("project")
+        }
+
+        fn set_model(&self, host: &str, request_model_id: &str, api_key: &str) {
+            self.global_config
+                .patch(
+                    &json!({
+                        "modelSetting": {
+                            "modelId": "gpt-image-2",
+                            "setting": {
+                                "baseUrlOverride": format!("https://{host}/v1"),
+                                "requestModelIdOverride": request_model_id,
+                                "apiKey": api_key
+                            }
+                        }
+                    }),
+                    &self.catalog,
+                )
+                .unwrap();
+        }
+
+        fn assert_request_binding(
+            &self,
+            index: usize,
+            host: &str,
+            request_model_id: &str,
+            api_key: &str,
+        ) {
+            let requests = self.transport.requests.lock().expect("fixture requests");
+            let request = &requests[index];
+            assert_eq!(request.url, format!("https://{host}/v1/images/generations"));
+            assert_eq!(
+                request.headers.get("authorization").map(String::as_str),
+                Some(api_key)
+            );
+            let HttpBody::Json(body) = &request.body else {
+                panic!("expected JSON model request");
+            };
+            assert_eq!(body.get("model"), Some(&json!(request_model_id)));
+        }
+
+        fn request_count(&self) -> usize {
+            self.transport
+                .requests
+                .lock()
+                .expect("fixture requests")
+                .len()
+        }
+    }
+
+    impl Drop for AcceptedBindingFixture {
+        fn drop(&mut self) {
+            self.operations.shutdown();
+            let _ = std::fs::remove_dir_all(&self.root);
+        }
+    }
+
+    impl BlockingFixtureTransport {
+        fn wait_for_first_request(&self) {
+            let (started, changed) = &self.first_started;
+            let started = started.lock().expect("first request state");
+            let (started, _) = changed
+                .wait_timeout_while(started, Duration::from_secs(2), |started| !*started)
+                .expect("first request wait");
+            assert!(*started, "first model request did not start");
+        }
+
+        fn release_first_request(&self) {
+            let (released, changed) = &self.release_first;
+            *released.lock().expect("first request release") = true;
+            changed.notify_all();
+        }
     }
 
     impl ModelHttpTransport for FixtureTransport {
@@ -312,6 +494,44 @@ mod tests {
                     "Generation fixture response queue is empty.",
                 )
             })
+        }
+    }
+
+    impl ModelHttpTransport for BlockingFixtureTransport {
+        fn execute(
+            &self,
+            request: ModelHttpRequest,
+            cancellation: &GenerationCancellation,
+            deadline: GenerationDeadline,
+        ) -> Result<ModelHttpResponse, GenerationError> {
+            deadline.remaining(cancellation)?;
+            let first = {
+                let mut requests = self.requests.lock().expect("fixture requests");
+                let first = requests.is_empty();
+                requests.push(request);
+                first
+            };
+            if first {
+                let (started, changed) = &self.first_started;
+                *started.lock().expect("first request state") = true;
+                changed.notify_all();
+
+                let (released, changed) = &self.release_first;
+                let released = released.lock().expect("first request release");
+                let _released = changed
+                    .wait_while(released, |released| !*released)
+                    .expect("first request release wait");
+            }
+            self.responses
+                .lock()
+                .expect("fixture responses")
+                .pop_front()
+                .ok_or_else(|| {
+                    GenerationError::new(
+                        "fixture_exhausted",
+                        "Generation fixture response queue is empty.",
+                    )
+                })
         }
     }
 
@@ -500,6 +720,85 @@ mod tests {
             .expect("configured Model should resolve");
 
         assert_eq!(model.api_key, exact_api_key);
+    }
+
+    #[test]
+    fn accepted_batch_uses_one_model_binding_after_settings_change() {
+        let fixture = AcceptedBindingFixture::new();
+        let accepted = fixture
+            .operations
+            .submit(SubmitModelOperation {
+                project_root: fixture.project(),
+                shape: ExecutionShape::Batch,
+                requests: vec![fixture.request.clone(), fixture.request.clone()],
+                concurrency: Some(1),
+                timeout_seconds: Some(60),
+                replace: false,
+            })
+            .unwrap();
+        fixture.transport.wait_for_first_request();
+        fixture.set_model("later.example.test", "later-request-model", "later-secret");
+        fixture.transport.release_first_request();
+
+        let terminal = fixture
+            .operations
+            .wait(&accepted.id, || true, |_| true, |_| true)
+            .unwrap()
+            .unwrap();
+        assert_eq!(terminal.state, OperationState::Succeeded);
+        let terminal_json = serde_json::to_string(&terminal).unwrap();
+        assert!(!terminal_json.contains("accepted.example.test"));
+        assert!(!terminal_json.contains("accepted-request-model"));
+        assert!(!terminal_json.contains("accepted-secret"));
+        assert_eq!(fixture.request_count(), 2);
+        for index in 0..2 {
+            fixture.assert_request_binding(
+                index,
+                "accepted.example.test",
+                "accepted-request-model",
+                "Bearer accepted-secret",
+            );
+        }
+
+        let later = fixture
+            .operations
+            .submit(SubmitModelOperation {
+                project_root: fixture.project(),
+                shape: ExecutionShape::Single,
+                requests: vec![fixture.request.clone()],
+                concurrency: None,
+                timeout_seconds: Some(60),
+                replace: false,
+            })
+            .unwrap();
+        let later_terminal = fixture
+            .operations
+            .wait(&later.id, || true, |_| true, |_| true)
+            .unwrap()
+            .unwrap();
+        assert!(later_terminal.state.is_terminal());
+        assert_eq!(fixture.request_count(), 3);
+        fixture.assert_request_binding(
+            2,
+            "later.example.test",
+            "later-request-model",
+            "Bearer later-secret",
+        );
+
+        fixture.set_model("later.example.test", "later-request-model", "");
+        let rejected = fixture
+            .operations
+            .submit(SubmitModelOperation {
+                project_root: fixture.project(),
+                shape: ExecutionShape::Single,
+                requests: vec![fixture.request.clone()],
+                concurrency: None,
+                timeout_seconds: Some(60),
+                replace: false,
+            })
+            .expect_err("cleared key must affect later Operations");
+        assert_eq!(rejected.code(), "model_unavailable");
+        assert_eq!(fixture.request_count(), 3);
     }
 
     #[test]

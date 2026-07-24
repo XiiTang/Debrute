@@ -61,10 +61,8 @@ import {
   useCanvasSurfaceSize
 } from './runtime/useCanvasRuntimeSnapshot';
 import {
-  canvasLayoutOverridesForCanvas,
-  canvasNodesWithLayoutOverrides,
-  type CanvasLocalLayoutDraft
-} from './canvasLocalLayoutDraft';
+  canvasNodesWithLayoutOverrides
+} from './canvasManualLayoutDraft';
 import {
   activeNodeProjectRelativePaths,
   canvasActiveVideoPaths,
@@ -72,8 +70,6 @@ import {
   canvasMapProjectTreeDropInput,
   canvasPerfDebugSnapshot,
   canvasPerfFinalState,
-  canvasSurfaceLayoutDraftFromDragState,
-  canvasSurfaceShouldClearPendingLayoutDraft,
   createCanvasRenderSnapshotScheduler,
   devicePixelRatioValue,
   domRectToFloatingBarRect,
@@ -214,12 +210,6 @@ function CanvasSurfaceRuntime({
   const selectionRef = useRef<CanvasSelection | undefined>(selection);
   const surfaceSizeRef = useRef(surfaceSize);
   const renderSnapshotRef = useRef<CanvasRenderCoordinatorSnapshot | undefined>(undefined);
-  const activeLayoutDraftRef = useRef<CanvasLocalLayoutDraft | undefined>(canvasSurfaceLayoutDraftFromDragState({
-    canvasId: canvas.id,
-    dragState: initialDragState,
-    point: initialDragState?.current ?? initialDragState?.start
-  }));
-  const pendingLayoutDraftRef = useRef<CanvasLocalLayoutDraft | undefined>(undefined);
   const activeNodePathsRef = useRef<string[]>(activeNodeProjectRelativePaths(initialDragState));
   const activeNodePathKeyRef = useRef(activeNodePathsRef.current.join('\u001f'));
   const fittedCanvasIdRef = useRef<string | undefined>(undefined);
@@ -254,11 +244,9 @@ function CanvasSurfaceRuntime({
   const previewResourceScheduler = useMemo(() => createCanvasPreviewResourceScheduler({ perfMonitor: instrumentationMonitor }), [instrumentationMonitor]);
   const visibilityController = useMemo(() => createCanvasVisibilityController({ stageRuntime }), [stageRuntime]);
   const renderCoordinator = useMemo(() => createCanvasRenderCoordinator({ projection, perfMonitor: instrumentationMonitor }), [instrumentationMonitor]);
-  const currentLayoutOverrides = useCallback(() => canvasLayoutOverridesForCanvas({
-    canvasId: canvas.id,
-    active: activeLayoutDraftRef.current,
-    pending: pendingLayoutDraftRef.current
-  }), [canvas.id]);
+  const currentLayoutOverrides = useCallback(() => (
+    runtime.manualLayout.getPresentation().layoutOverrides
+  ), [runtime]);
   const initialRenderSnapshot = useMemo(() => renderCoordinator.update({
     camera: runtime.getSnapshot().camera,
     cameraState: runtime.getSnapshot().cameraState,
@@ -391,19 +379,8 @@ function CanvasSurfaceRuntime({
   }, []);
 
   useEffect(() => {
-    if (activeLayoutDraftRef.current && activeLayoutDraftRef.current.canvasId !== canvas.id) {
-      activeLayoutDraftRef.current = undefined;
-    }
-    if (pendingLayoutDraftRef.current && pendingLayoutDraftRef.current.canvasId !== canvas.id) {
-      pendingLayoutDraftRef.current = undefined;
-    }
-    if (canvasSurfaceShouldClearPendingLayoutDraft({
-      pending: pendingLayoutDraftRef.current,
-      projection
-    })) {
-      pendingLayoutDraftRef.current = undefined;
-    }
     renderCoordinator.setProjection(projection);
+    runtime.manualLayout.acceptProjection(projection);
     const snapshot = runtime.getSnapshot();
     commitRenderSnapshot({
       camera: snapshot.camera,
@@ -413,6 +390,17 @@ function CanvasSurfaceRuntime({
       activeNodePaths: activeNodePathsRef.current
     });
   }, [canvas.id, commitRenderSnapshot, projection, renderCoordinator, runtime]);
+
+  useEffect(() => runtime.manualLayout.subscribeRejection(() => {
+    const snapshot = runtime.getSnapshot();
+    commitRenderSnapshot({
+      camera: snapshot.camera,
+      cameraState: snapshot.cameraState,
+      surfaceSize: snapshot.surfaceSize,
+      selection: snapshot.selection,
+      activeNodePaths: activeNodePathsRef.current
+    });
+  }), [commitRenderSnapshot, runtime]);
 
   useEffect(() => {
     if (!onCurrentNodesChange) {
@@ -604,11 +592,6 @@ function CanvasSurfaceRuntime({
         dragState: nextDragState
       });
       setDragState(nextDragState);
-      activeLayoutDraftRef.current = canvasSurfaceLayoutDraftFromDragState({
-        canvasId: canvas.id,
-        dragState: nextDragState,
-        point: nextDragState?.current ?? nextDragState?.start
-      });
       syncCanvasPerfDragSessionState({
         perfMonitor,
         sessionRef: canvasPerfDragSessionRef,
@@ -648,7 +631,6 @@ function CanvasSurfaceRuntime({
     });
   }, [
     commitRenderSnapshot,
-    canvas.id,
     perfMonitor,
     previewResourceScheduler,
     renderSnapshot,
@@ -680,32 +662,20 @@ function CanvasSurfaceRuntime({
     runtime.setSelection(nextSelection);
     runtime.input.beginNodeMove({
       pointerId: event.pointerId,
-      node,
+      projectRelativePath: node.projectRelativePath,
       start: pointerCanvasPoint(event),
-      selection: nextSelection,
-      nodes: projectedNodes
+      selection: nextSelection
     });
-  }, [pointerCanvasPoint, projectedNodes, runtime]);
+  }, [pointerCanvasPoint, runtime]);
 
   const beginNodeResize = useCallback((node: ProjectedCanvasNode, handle: ResizeHandle, event: React.PointerEvent<HTMLButtonElement>) => {
     event.stopPropagation();
     event.currentTarget.setPointerCapture(event.pointerId);
-    const resizeNode = {
-      projectRelativePath: node.projectRelativePath,
-      nodeKind: node.nodeKind,
-      ...(node.mediaKind === undefined ? {} : { mediaKind: node.mediaKind })
-    };
     runtime.input.beginNodeResize({
       pointerId: event.pointerId,
       handle,
       start: pointerCanvasPoint(event),
-      node: resizeNode,
-      origin: {
-        x: node.x,
-        y: node.y,
-        width: node.width,
-        height: node.height
-      },
+      projectRelativePath: node.projectRelativePath,
       modifiers: pointerEventModifiers(event)
     });
     runtime.setSelection({ kind: 'node', projectRelativePath: node.projectRelativePath });
@@ -720,62 +690,12 @@ function CanvasSurfaceRuntime({
   }, [pointerCanvasPoint, runtime]);
 
   const handlePointerUp = useCallback(async (event: React.PointerEvent<Element>) => {
-    const point = pointerCanvasPoint(event);
-    const currentDragState = runtime.getSnapshot().dragState;
-    const pendingDraft = currentDragState?.pointerId === event.pointerId
-      ? canvasSurfaceLayoutDraftFromDragState({
-          canvasId: canvas.id,
-          dragState: currentDragState,
-          point
-        })
-      : undefined;
-    if (pendingDraft) {
-      pendingLayoutDraftRef.current = pendingDraft;
-    }
-    const activeDragState = runtime.input.finishPointer({
+    await runtime.input.finishPointer({
       pointerId: event.pointerId,
-      point,
+      point: pointerCanvasPoint(event),
       modifiers: pointerEventModifiers(event)
     });
-    if (!activeDragState) {
-      if (pendingDraft) {
-        pendingLayoutDraftRef.current = undefined;
-      }
-      return;
-    }
-    const nodeLayouts = pendingDraft?.nodeLayouts ?? [];
-    if (nodeLayouts.length === 0) {
-      if (pendingLayoutDraftRef.current === pendingDraft) {
-        pendingLayoutDraftRef.current = undefined;
-      }
-      return;
-    }
-    const currentNodePaths = new Set(
-      projectedNodesRef.current.map((node) => node.projectRelativePath)
-    );
-    if (nodeLayouts.some((layout) => !currentNodePaths.has(layout.projectRelativePath))) {
-      if (pendingLayoutDraftRef.current === pendingDraft) {
-        pendingLayoutDraftRef.current = undefined;
-      }
-      return;
-    }
-    try {
-      await actions.updateCanvasNodeLayouts(canvas.id, { nodeLayouts });
-    } catch (error) {
-      if (pendingLayoutDraftRef.current === pendingDraft) {
-        pendingLayoutDraftRef.current = undefined;
-      }
-      const snapshot = runtime.getSnapshot();
-      commitRenderSnapshot({
-        camera: snapshot.camera,
-        cameraState: snapshot.cameraState,
-        surfaceSize: surfaceSizeRef.current,
-        selection: selectionRef.current,
-        activeNodePaths: activeNodePathsRef.current
-      });
-      throw error;
-    }
-  }, [actions, canvas.id, commitRenderSnapshot, pointerCanvasPoint, runtime]);
+  }, [pointerCanvasPoint, runtime]);
 
   const handlePointerUpEvent = useCallback((event: React.PointerEvent<Element>) => {
     void handlePointerUp(event).catch(() => undefined);

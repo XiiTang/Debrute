@@ -270,6 +270,56 @@ fn one_post_stream_bootstraps_global_state_and_binds_a_project() {
 }
 
 #[test]
+fn replacement_publishes_the_prepared_project_and_releases_the_source_use() {
+    let runtime = TestRuntime::start();
+    let source = runtime.create_project("replacement-source");
+    let target = runtime.create_project("replacement-target");
+    let client = Client::new();
+    let (cookie, credential, mut events) = open_unbound_connection(&client, &runtime);
+    open_project(&client, &runtime, &source, &cookie, &credential);
+    assert_eq!(
+        events.next_of_type("project.bound")["project"]["projectId"],
+        source.id
+    );
+
+    let replacement = client
+        .post(format!("{}/api/projects/replace", runtime.origin()))
+        .header(ORIGIN, runtime.origin())
+        .header(COOKIE, &cookie)
+        .header(WORKBENCH_CONNECTION_HEADER, &credential)
+        .json(&json!({ "projectRoot": target.root }))
+        .send()
+        .expect("Project replacement should complete");
+    assert_eq!(replacement.status().as_u16(), 200);
+    assert_eq!(
+        replacement
+            .json::<Value>()
+            .expect("replacement response should be JSON"),
+        json!({"outcome": "bound", "projectId": target.id})
+    );
+    let bound = events.next_of_type("project.bound");
+    assert_eq!(bound["project"]["projectId"], target.id);
+    assert_eq!(
+        bound["workingCopies"],
+        json!({"text": {}, "feedback": null})
+    );
+
+    let stale_source_request = client
+        .get(format!(
+            "{}/api/projects/{}/files/text/missing.txt",
+            runtime.origin(),
+            source.id
+        ))
+        .header(COOKIE, &cookie)
+        .header(WORKBENCH_CONNECTION_HEADER, &credential)
+        .send()
+        .expect("stale source request should complete");
+    assert_eq!(stale_source_request.status().as_u16(), 403);
+    assert!(runtime.services.projects().get(&source.id).is_err());
+    assert!(runtime.services.projects().get(&target.id).is_ok());
+}
+
+#[test]
 fn ordinary_browser_tabs_share_one_session_without_sharing_connection_authority() {
     let runtime = TestRuntime::start();
     let first_project = runtime.create_project("first-tab");

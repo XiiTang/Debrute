@@ -630,6 +630,16 @@ impl ProjectUse {
     pub fn kind(&self) -> ProjectUseKind {
         self.kind
     }
+
+    #[cfg(test)]
+    pub(crate) fn detached_for_test(project_id: &str) -> Self {
+        Self {
+            registry: Weak::new(),
+            project_id: project_id.to_owned(),
+            use_id: Uuid::new_v4(),
+            kind: ProjectUseKind::Workbench,
+        }
+    }
 }
 
 impl Drop for ProjectUse {

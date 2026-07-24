@@ -4,7 +4,10 @@ An Operation moves only through `queued`, `running`, `cancelling`, and one of
 `succeeded`, `failed`, or `cancelled`. Submission is one atomic
 `SubmitModelOperation` request. Runtime validates the live CLI session
 credential, canonical Project root and id, current Model Request envelope, and
-output path rules before it creates a `queued` Operation with
+output path rules. One validated Global configuration and secret snapshot
+supplies one immutable Accepted Model Binding for each unique Model ID in the
+submission; repeated requests for one Model share its binding. Every binding
+and request validates before Runtime creates a `queued` Operation with
 a Runtime-issued canonical lowercase UUID v4 id and returns its first snapshot.
 The id has no prefix and encodes no time, Model Kind, Project, sequence, or
 Runtime instance; it is opaque control identity rather than a credential.
@@ -18,6 +21,13 @@ filesystem capability captured at acceptance rather than resolving the path
 again. A replacement observed before commit fails the affected work; a path
 replacement racing the noninterruptible commit cannot redirect writes into the
 replacement Project.
+
+Model execution likewise uses only the route and credential captured in its
+Accepted Model Binding. Runtime does not re-resolve Model Settings after
+acceptance, so later Settings changes affect only later Operations. Explicit
+Operation cancellation is the revocation boundary for accepted pending work.
+Bindings remain private Runtime memory while usable and are absent from public
+snapshots, logs, Project data, provenance, and retained terminal records.
 
 Submission rejection uses one closed caller-visible set. `invalid_input` covers
 CLI arguments, JSONL and Model Request validation, mixed Model Kinds, execution

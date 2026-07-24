@@ -18,7 +18,7 @@ use std::{
 use axum::http::StatusCode;
 use futures_core::Stream;
 use serde_json::{Value, json};
-use tokio::sync::broadcast;
+use tokio::sync::{broadcast, mpsc};
 
 use crate::{
     control::RuntimeControlState,
@@ -37,15 +37,16 @@ use crate::{
     project::{
         CanvasFeedbackArtifacts, GeneratedAssetMetadataService, MediaToolPaths,
         NativeProjectNodeAdapter, OpenProjectSession, ProjectNativeShellService, ProjectSession,
-        ProjectSessionRegistry, ProjectSyncSnapshot, ProjectUse, ProjectUseKind,
+        ProjectSessionRegistry, ProjectStreamItem, ProjectSubscription, ProjectSyncSnapshot,
+        ProjectUse, ProjectUseKind,
     },
     terminal::TerminalService,
     workers::RuntimeWorkerServices,
 };
 
 use super::{
-    FeedbackWorkingCopy, ProjectBindOutcome, ProjectWorkingCopies, TextWorkingCopy,
-    WorkbenchConnectionRegistry, WorkingCopyStore,
+    FeedbackWorkingCopy, ProjectBindError, ProjectBindOutcome, ProjectBindingCommit,
+    TextWorkingCopy, WorkbenchConnectionRegistry, WorkingCopyStore,
 };
 
 const GLOBAL_EVENT_CAPACITY: usize = 256;
@@ -135,6 +136,14 @@ pub enum WorkbenchProjectBindingOutcome {
     FocusedExistingDesktop { project_id: String },
 }
 
+struct PreparedWorkbenchProjectBinding {
+    project_use: ProjectUse,
+    response: Value,
+    bound_event: Value,
+    sender: mpsc::Sender<Value>,
+    subscription: ProjectSubscription,
+}
+
 pub struct WorkbenchRuntimeServices {
     runtime_state: Arc<RuntimeControlState>,
     models: Arc<ModelCatalog>,
@@ -149,7 +158,6 @@ pub struct WorkbenchRuntimeServices {
     photoshop_sockets: Arc<Mutex<PhotoshopSocketRegistry>>,
     connections: Arc<WorkbenchConnectionRegistry>,
     global_events: broadcast::Sender<GlobalRuntimeEvent>,
-    connection_project_uses: Mutex<HashMap<String, ProjectUse>>,
     working_copies: WorkingCopyStore,
 }
 
@@ -326,7 +334,6 @@ impl WorkbenchRuntimeServices {
             photoshop_sockets,
             connections: Arc::new(WorkbenchConnectionRegistry::new()),
             global_events,
-            connection_project_uses: Mutex::new(HashMap::new()),
             working_copies: WorkingCopyStore::new(&debrute_home),
         });
         let (recent_projects, theme_preference) = services
@@ -532,25 +539,21 @@ impl WorkbenchRuntimeServices {
         {
             return Ok(outcome);
         }
-        let sync = opened
-            .session
-            .sync_snapshot()
-            .map_err(RuntimeHttpServiceError::from_project)?;
-        let working_copies = self.working_copies.load(&target_project_id)?;
+        let prepared = self.prepare_project_binding(connection_credential, opened)?;
         let outcome = self
             .connections
             .replace_project(
                 connection_credential,
                 &source_project_id,
-                &target_project_id,
+                context.binding_generation,
+                ProjectBindingCommit {
+                    project_id: target_project_id.clone(),
+                    allow_preemption: context.desktop.is_none() || force_open_here,
+                    project_use: prepared.project_use,
+                    bound_event: prepared.bound_event,
+                },
             )
-            .map_err(|()| {
-                RuntimeHttpServiceError::new(
-                    StatusCode::CONFLICT,
-                    "project_binding_stale",
-                    "Workbench Project binding changed before replacement.",
-                )
-            })?;
+            .map_err(project_replacement_error)?;
         if outcome == ProjectBindOutcome::AlreadyBound {
             if let Some(binding) = context.desktop.as_ref() {
                 self.runtime_state.retarget_desktop_window(
@@ -563,19 +566,17 @@ impl WorkbenchRuntimeServices {
             return Ok(WorkbenchProjectBindingOutcome::Bound(
                 BoundWorkbenchProject {
                     project_id: target_project_id,
-                    response: public_project_sync(&sync)?,
+                    response: prepared.response,
                 },
             ));
         }
-        let ProjectBindOutcome::Bound { preempted } = outcome else {
+        let ProjectBindOutcome::Bound {
+            generation,
+            preempted,
+        } = outcome
+        else {
             unreachable!("already-bound replacement returned above")
         };
-        let mut project_uses = self.lock_connection_project_uses();
-        project_uses.insert(connection_credential.to_owned(), opened.project_use);
-        if let Some(preempted) = preempted.as_ref() {
-            project_uses.remove(&preempted.credential);
-        }
-        drop(project_uses);
         if let Some(binding) = context.desktop.as_ref() {
             self.runtime_state.retarget_desktop_window(
                 binding,
@@ -588,12 +589,12 @@ impl WorkbenchRuntimeServices {
             self.runtime_state
                 .retarget_desktop_window(&binding, crate::control::WorkbenchRoute::Root);
         }
-        let response = public_project_sync(&sync)?;
         if let Err(error) = self.start_connection_project_stream(
             connection_credential,
-            opened.session,
-            response.clone(),
-            working_copies,
+            &target_project_id,
+            generation,
+            prepared.sender,
+            prepared.subscription,
         ) {
             self.close_workbench_connection(connection_credential);
             return Err(error);
@@ -601,26 +602,17 @@ impl WorkbenchRuntimeServices {
         Ok(WorkbenchProjectBindingOutcome::Bound(
             BoundWorkbenchProject {
                 project_id: target_project_id,
-                response,
+                response: prepared.response,
             },
         ))
     }
 
     pub fn close_workbench_connection(&self, connection_credential: &str) {
         self.connections.close(connection_credential);
-        self.lock_connection_project_uses()
-            .remove(connection_credential);
     }
 
     pub fn close_all_workbench_connections(&self) {
         self.connections.close_all();
-        self.lock_connection_project_uses().clear();
-    }
-
-    fn lock_connection_project_uses(&self) -> MutexGuard<'_, HashMap<String, ProjectUse>> {
-        self.connection_project_uses
-            .lock()
-            .expect("Workbench Project Use lock poisoned")
     }
 
     pub fn shutdown_owned_work(&self) {
@@ -678,29 +670,26 @@ impl WorkbenchRuntimeServices {
         {
             return Ok(outcome);
         }
-        let sync = opened
-            .session
-            .sync_snapshot()
-            .map_err(RuntimeHttpServiceError::from_project)?;
-        let working_copies = self.working_copies.load(&project_id)?;
+        let prepared = self.prepare_project_binding(connection_credential, opened)?;
         let outcome = self
             .connections
-            .bind_project(connection_credential, &project_id)
-            .map_err(|()| {
-                RuntimeHttpServiceError::new(
-                    StatusCode::CONFLICT,
-                    "project_already_bound",
-                    "Workbench connection already has a Project.",
-                )
-            })?;
-        let mut project_uses = self.lock_connection_project_uses();
+            .bind_project(
+                connection_credential,
+                context.binding_generation,
+                ProjectBindingCommit {
+                    project_id: project_id.clone(),
+                    allow_preemption: context.desktop.is_none() || force_open_here,
+                    project_use: prepared.project_use,
+                    bound_event: prepared.bound_event,
+                },
+            )
+            .map_err(project_initial_binding_error)?;
         match outcome {
             ProjectBindOutcome::AlreadyBound => {}
-            ProjectBindOutcome::Bound { preempted } => {
-                project_uses.insert(connection_credential.to_owned(), opened.project_use);
-                if let Some(preempted) = preempted.as_ref() {
-                    project_uses.remove(&preempted.credential);
-                }
+            ProjectBindOutcome::Bound {
+                generation,
+                preempted,
+            } => {
                 if let Some(binding) = context.desktop.as_ref() {
                     self.runtime_state.retarget_desktop_window(
                         binding,
@@ -713,23 +702,22 @@ impl WorkbenchRuntimeServices {
                     self.runtime_state
                         .retarget_desktop_window(&binding, crate::control::WorkbenchRoute::Root);
                 }
+                if let Err(error) = self.start_connection_project_stream(
+                    connection_credential,
+                    &project_id,
+                    generation,
+                    prepared.sender,
+                    prepared.subscription,
+                ) {
+                    self.close_workbench_connection(connection_credential);
+                    return Err(error);
+                }
             }
-        }
-        drop(project_uses);
-        let response = public_project_sync(&sync)?;
-        if let Err(error) = self.start_connection_project_stream(
-            connection_credential,
-            opened.session,
-            response.clone(),
-            working_copies,
-        ) {
-            self.close_workbench_connection(connection_credential);
-            return Err(error);
         }
         Ok(WorkbenchProjectBindingOutcome::Bound(
             BoundWorkbenchProject {
                 project_id,
-                response,
+                response: prepared.response,
             },
         ))
     }
@@ -772,17 +760,6 @@ impl WorkbenchRuntimeServices {
                 },
             ));
         }
-        if let Some(binding) = requester.desktop.as_ref()
-            && !self
-                .runtime_state
-                .retarget_desktop_window(binding, crate::control::WorkbenchRoute::Root)
-        {
-            return Err(RuntimeHttpServiceError::new(
-                StatusCode::SERVICE_UNAVAILABLE,
-                "desktop_window_retarget_failed",
-                "Runtime no longer owns the requesting Desktop window.",
-            ));
-        }
         Err(RuntimeHttpServiceError::new(
             StatusCode::CONFLICT,
             "project_owned_by_web",
@@ -818,13 +795,11 @@ impl WorkbenchRuntimeServices {
         Ok(())
     }
 
-    fn start_connection_project_stream(
+    fn prepare_project_binding(
         &self,
         connection_credential: &str,
-        session: Arc<ProjectSession>,
-        response: Value,
-        working_copies: ProjectWorkingCopies,
-    ) -> Result<(), RuntimeHttpServiceError> {
+        opened: OpenProjectSession,
+    ) -> Result<PreparedWorkbenchProjectBinding, RuntimeHttpServiceError> {
         let sender = self
             .connections
             .event_sender(connection_credential)
@@ -835,50 +810,80 @@ impl WorkbenchRuntimeServices {
                     "Workbench connection ended before Project binding.",
                 )
             })?;
-        sender
-            .try_send(json!({
-                "type": "project.bound",
-                "project": response,
-                "workingCopies": working_copies
-            }))
-            .map_err(|_| {
-                RuntimeHttpServiceError::new(
-                    StatusCode::SERVICE_UNAVAILABLE,
-                    "workbench_connection_backpressure",
-                    "Workbench connection queue is unavailable.",
-                )
-            })?;
-        let mut subscription = session
+        let project_id = opened.session.project_id().to_owned();
+        let mut subscription = opened
+            .session
             .subscribe()
             .map_err(RuntimeHttpServiceError::from_project)?;
-        let _ = subscription.recv();
+        let ProjectStreamItem::Snapshot(sync) = subscription
+            .recv()
+            .map_err(RuntimeHttpServiceError::from_project)?
+        else {
+            unreachable!("Project subscription must begin with its snapshot barrier")
+        };
+        let response = public_project_sync(&sync)?;
+        let working_copies = self.working_copies.load(&project_id)?;
+        let bound_event = json!({
+            "type": "project.bound",
+            "project": response,
+            "workingCopies": working_copies
+        });
+        Ok(PreparedWorkbenchProjectBinding {
+            project_use: opened.project_use,
+            response,
+            bound_event,
+            sender,
+            subscription,
+        })
+    }
+
+    fn start_connection_project_stream(
+        &self,
+        connection_credential: &str,
+        project_id: &str,
+        binding_generation: u64,
+        sender: mpsc::Sender<Value>,
+        mut subscription: ProjectSubscription,
+    ) -> Result<(), RuntimeHttpServiceError> {
         let credential = connection_credential.to_owned();
-        let project_id = session.project_id().to_owned();
+        let project_id = project_id.to_owned();
         let connections = Arc::clone(&self.connections);
         thread::Builder::new()
             .name("debrute-workbench-project-stream".to_owned())
             .spawn(move || {
                 loop {
-                    if connections
-                        .context(&credential)
-                        .is_none_or(|context| context.project_id.as_deref() != Some(&project_id))
-                    {
+                    if connections.context(&credential).is_none_or(|context| {
+                        context.project_id.as_deref() != Some(&project_id)
+                            || context.binding_generation != binding_generation
+                    }) {
                         return;
                     }
                     match subscription.recv_timeout(Duration::from_millis(100)) {
                         Ok(Some(item)) => {
                             let Ok(value) = super::routes::project_stream_value(item) else {
-                                connections.close(&credential);
+                                connections.close_project_stream(
+                                    &credential,
+                                    &project_id,
+                                    binding_generation,
+                                );
                                 return;
                             };
                             if sender.try_send(value).is_err() {
-                                connections.close(&credential);
+                                connections.close_project_stream(
+                                    &credential,
+                                    &project_id,
+                                    binding_generation,
+                                );
                                 return;
                             }
                         }
                         Ok(None) => {}
                         Err(_) => {
-                            connections.close(&credential);
+                            connections.close_project_stream(
+                                &credential,
+                                &project_id,
+                                binding_generation,
+                            );
                             return;
                         }
                     }
@@ -969,6 +974,44 @@ impl WorkbenchRuntimeServices {
 impl Drop for WorkbenchRuntimeServices {
     fn drop(&mut self) {
         self.shutdown_owned_work();
+    }
+}
+
+fn project_initial_binding_error(error: ProjectBindError) -> RuntimeHttpServiceError {
+    project_binding_error(
+        error,
+        "project_already_bound",
+        "Workbench connection already has a Project.",
+    )
+}
+
+fn project_replacement_error(error: ProjectBindError) -> RuntimeHttpServiceError {
+    project_binding_error(
+        error,
+        "project_binding_stale",
+        "Workbench Project binding changed before replacement.",
+    )
+}
+
+fn project_binding_error(
+    error: ProjectBindError,
+    stale_code: &'static str,
+    stale_message: &'static str,
+) -> RuntimeHttpServiceError {
+    match error {
+        ProjectBindError::Stale => {
+            RuntimeHttpServiceError::new(StatusCode::CONFLICT, stale_code, stale_message)
+        }
+        ProjectBindError::TargetOwned => RuntimeHttpServiceError::new(
+            StatusCode::CONFLICT,
+            "project_binding_stale",
+            "Target Project gained another Workbench owner before binding.",
+        ),
+        ProjectBindError::EventQueueUnavailable => RuntimeHttpServiceError::new(
+            StatusCode::SERVICE_UNAVAILABLE,
+            "workbench_connection_backpressure",
+            "Workbench connection queue is unavailable.",
+        ),
     }
 }
 

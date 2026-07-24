@@ -8,6 +8,8 @@ import { CanvasMinimapBar, formatCanvasMinimapZoomLabel } from './CanvasMinimapB
 import { createCanvasOverlayRuntime } from './CanvasOverlayRuntime';
 import type { CanvasEditorRuntime } from './runtime/CanvasEditorRuntime';
 import { createCanvasEditorRuntime } from './runtime/CanvasEditorRuntime';
+import type { CanvasCamera } from './runtime/canvasCamera';
+import type { CanvasSelection } from './runtime/canvasSelection';
 import { CANVAS_MINIMAP_PANEL_SIZE, canvasMinimapButtonRect, placeCanvasMinimapPanel } from '../shell/floatingBars';
 import { I18nProvider } from '../i18n';
 
@@ -110,7 +112,7 @@ describe('CanvasMinimapBar', () => {
   it('renders current node geometry instead of durable projection geometry', () => {
     const canvas = createCanvasDocument({ id: 'minimap-draft-canvas' });
     const durableNode = nodeFixture('flow/a.png', 0, 0);
-    const runtime = createCanvasEditorRuntime({
+    const runtime = createRuntime({
       camera: { x: 0, y: 0, z: 1 },
       selection: { kind: 'node', projectRelativePath: durableNode.projectRelativePath }
     });
@@ -188,7 +190,7 @@ function nodeFixture(path: string, x: number, y: number): CanvasProjection['node
 }
 
 function runtimeFixture(): CanvasEditorRuntime {
-  const runtime = createCanvasEditorRuntime({
+  const runtime = createRuntime({
     camera: { x: -100, y: -50, z: 0.5 },
     selection: { kind: 'node', projectRelativePath: 'flow/selected.png' }
   });
@@ -196,6 +198,23 @@ function runtimeFixture(): CanvasEditorRuntime {
     surface: fakeElement({ left: 0, top: 0, width: 1000, height: 500 }) as unknown as HTMLElement
   });
   return runtime;
+}
+
+function createRuntime(input: {
+  camera: CanvasCamera;
+  selection: CanvasSelection;
+}): CanvasEditorRuntime {
+  return createCanvasEditorRuntime({
+    canvasId: 'minimap-canvas',
+    initialProjection: {
+      canvasId: 'minimap-canvas',
+      nodes: [],
+      edges: [],
+      diagnostics: []
+    },
+    submitManualLayout: async () => undefined,
+    ...input
+  });
 }
 
 async function withRenderedMinimap(

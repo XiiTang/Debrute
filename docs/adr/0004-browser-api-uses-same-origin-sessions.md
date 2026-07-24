@@ -54,13 +54,23 @@ ordered Project events. There are no duplicate snapshot or health GETs and no
 Workbench command that manually refreshes the Project; Runtime-owned filesystem
 watching and internal refreshes publish through the existing event authority.
 
+Runtime prepares `project.bound` from the initial snapshot of the same Project
+subscription that will deliver its later events. The frame is secured for
+delivery before the binding commit, so a preparation failure cannot expose a
+new binding, preempt another Workbench, or create a gap between the bound
+snapshot and subsequent Project revisions. The connection's command authority
+contains the committed Project id and binding generation; a request authorized
+by an earlier generation cannot commit after the connection changes Project.
+
 The connection is the command and Project-binding lifetime. Runtime closes it
 on Project-event backpressure, revision gaps, shutdown, or transport loss and
-revokes its credential and Workbench Project Use. There are no split Global and
-Project streams, EventSource reconnect, heartbeat, continuity deadline,
-attachment anchor, participant release, unload request, or automatic command
-replay. The loaded Workbench presents an ended-connection state; a manual page
-refresh creates a fresh browser connection and complete snapshots.
+revokes its credential and Workbench Project Use. The connection binding owns
+that Project Use directly, so every connection-close path releases it rather
+than depending on a separate service-side lifetime table. There are no split
+Global and Project streams, EventSource reconnect, heartbeat, continuity
+deadline, attachment anchor, participant release, unload request, or automatic
+command replay. The loaded Workbench presents an ended-connection state; a
+manual page refresh creates a fresh browser connection and complete snapshots.
 
 Passive Project media GETs require a live browser session with at least one
 live connection bound to the requested Project, but no JavaScript bearer. They

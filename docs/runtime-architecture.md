@@ -238,13 +238,23 @@ their own domain lifetimes and do not enter the Model Operation registry.
 
 Before acceptance, Runtime validates the live CLI credential, canonical
 Project identity, complete strict JSONL input, Model availability, execution
-options, and output paths. Rejection creates no
-Operation and starts no paid model work. Acceptance issues one opaque UUID and
-linearizes the Operation through `queued`, `running`, optional `cancelling`,
-and exactly one of `succeeded`, `failed`, or `cancelled`. Independent
+options, and output paths. It reads one validated Global configuration and
+secret snapshot, creates one immutable Accepted Model Binding per unique Model
+ID, and validates every request against its binding. Repeated requests for one
+Model share one binding. Rejection creates no Operation and starts no paid
+model work. Acceptance issues one opaque UUID and linearizes the Operation
+through `queued`, `running`, optional `cancelling`, and exactly one of
+`succeeded`, `failed`, or `cancelled`. Independent
 Operations start independently; only a Batch's own concurrency limits how many
 of its Items run at once. Runtime never automatically retries a failed Model
 Request.
+
+An accepted Operation never re-resolves Model Settings. Its bindings keep each
+effective route and credential atomic while later Settings changes affect only
+later Operations; explicit cancellation revokes pending use in an accepted
+Operation. Bindings remain private Runtime memory only while requests can use
+them and are absent from serialized snapshots, logs, Project data, and retained
+terminal records.
 
 Ordinary execution failures remain typed `Result` values and settle the
 Operation normally. An unexpected executor panic instead terminates Runtime; it

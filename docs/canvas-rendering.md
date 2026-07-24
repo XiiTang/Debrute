@@ -28,7 +28,7 @@ too broad. Geometry or edge membership changes rebuild the index once;
 availability, presentation, and stack-order-only changes update current node
 data without rebuilding spatial membership.
 
-Selection, active move/resize paths, and local layout drafts pin the affected
+Selection, active move/resize paths, and Manual Layout Drafts pin the affected
 nodes into the snapshot. Edges are queried independently of endpoint-node
 mounting and are rerouted from draft geometry when an endpoint moves or
 resizes.

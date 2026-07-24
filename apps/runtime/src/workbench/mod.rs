@@ -15,7 +15,10 @@ pub(crate) use authority::{DesktopLaunchBinding, SourceWorkbenchRegistrationErro
 pub use authority::{WORKBENCH_SESSION_COOKIE, WorkbenchLaunchError, WorkbenchLaunchService};
 pub use connections::WORKBENCH_CONNECTION_HEADER;
 pub use connections::WorkbenchConnectionRegistry;
-pub(crate) use connections::{ProjectBindOutcome, WorkbenchConnectionContext};
+pub(crate) use connections::{
+    ProjectBindError, ProjectBindOutcome, ProjectBindingCommit, ProjectBindingLease,
+    WorkbenchConnectionContext,
+};
 pub use http::{WorkbenchHttpServer, WorkbenchHttpServerError};
 pub use services::{
     ProductUpdateInitiator, RuntimeCliHttpService, RuntimeCliRecordStream, RuntimeHttpServiceError,

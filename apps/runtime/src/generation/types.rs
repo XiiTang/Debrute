@@ -122,7 +122,6 @@ impl GenerationDeadline {
     }
 }
 
-#[derive(Debug, Clone)]
 pub(crate) struct ResolvedGenerationModel {
     pub kind: ModelKind,
     pub model_id: String,

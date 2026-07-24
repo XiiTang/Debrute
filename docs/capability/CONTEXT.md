@@ -70,6 +70,11 @@ A Debrute Model with a locally stored API key, eligible for model discovery and
 execution; routing overrides are optional.
 _Avoid_: Enabled model, available provider
 
+**Accepted Model Binding**:
+The immutable effective route and credential bound to one Debrute Model for one
+accepted Model Operation.
+_Avoid_: Live model settings, per-request configuration copy
+
 **Model Run**:
 One execution of a Model Request whose redacted input and output can be shared
 by multiple resulting Generated Assets.

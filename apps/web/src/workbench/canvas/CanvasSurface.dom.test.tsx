@@ -23,8 +23,6 @@ import {
   isCanvasMapProjectTreeDragOver,
   canvasMapProjectTreeDropEntry,
   canvasMapProjectTreeDropInput,
-  canvasSurfaceLayoutDraftFromDragState,
-  canvasSurfaceShouldClearPendingLayoutDraft,
   createCanvasRenderSnapshotScheduler,
   recordCanvasPerfFrame,
   syncCanvasPerfDragSessionState,
@@ -173,82 +171,6 @@ describe('CanvasSurface', () => {
 
     expect(isCanvasMapProjectTreeDragOver(dataTransfer)).toBe(true);
     expect(dataTransfer.getData).not.toHaveBeenCalled();
-  });
-
-  it('creates a pending local layout draft from a finished move-node drag', () => {
-    expect(canvasSurfaceLayoutDraftFromDragState({
-      canvasId: 'canvas-1',
-      dragState: {
-        kind: 'move-node',
-        pointerId: 1,
-        start: { x: 5, y: 6 },
-        origins: [nodeFixture('flow/a.png', 10, 20)]
-      },
-      point: { x: 25, y: 36 }
-    })).toEqual({
-      canvasId: 'canvas-1',
-      nodeLayouts: [
-        { projectRelativePath: 'flow/a.png', x: 30, y: 50, width: 200, height: 120 }
-      ]
-    });
-  });
-
-  it('creates a pending local layout draft from a finished resize-node drag', () => {
-    expect(canvasSurfaceLayoutDraftFromDragState({
-      canvasId: 'canvas-1',
-      dragState: {
-        kind: 'resize-node',
-        pointerId: 1,
-        handle: 'se',
-        start: { x: 0, y: 0 },
-        node: { projectRelativePath: 'flow/a.png', nodeKind: 'file', mediaKind: 'image' },
-        origin: { x: 10, y: 20, width: 200, height: 120 },
-        preserveAspect: false
-      },
-      point: { x: 20, y: 10 }
-    })).toEqual({
-      canvasId: 'canvas-1',
-      nodeLayouts: [
-        { projectRelativePath: 'flow/a.png', x: 10, y: 20, width: 220, height: 130 }
-      ]
-    });
-  });
-
-  it('clears pending local layout only after durable projection matches it', () => {
-    const pending = {
-      canvasId: 'canvas-1',
-      nodeLayouts: [
-        { projectRelativePath: 'flow/a.png', x: 30, y: 50, width: 200, height: 120 }
-      ]
-    };
-
-    expect(canvasSurfaceShouldClearPendingLayoutDraft({
-      pending,
-      projection: {
-        canvasId: 'canvas-1',
-        nodes: [nodeFixture('flow/a.png', 30, 50)],
-        edges: [],
-        diagnostics: []
-      }
-    })).toBe(true);
-    expect(canvasSurfaceShouldClearPendingLayoutDraft({
-      pending,
-      projection: {
-        canvasId: 'canvas-1',
-        nodes: [nodeFixture('flow/a.png', 29, 50)],
-        edges: [],
-        diagnostics: []
-      }
-    })).toBe(false);
-    expect(canvasSurfaceShouldClearPendingLayoutDraft({
-      pending,
-      projection: {
-        canvasId: 'canvas-1',
-        nodes: [],
-        edges: [],
-        diagnostics: []
-      }
-    })).toBe(true);
   });
 
   it('renders projected nodes without delete controls', () => {
@@ -502,7 +424,7 @@ describe('CanvasSurface', () => {
       edges: [],
       diagnostics: []
     };
-    const runtime = createCanvasEditorRuntime({
+    const runtime = canvasRuntimeFixture(projection, {
       selection: { kind: 'node', projectRelativePath: videoNode.projectRelativePath }
     });
 
@@ -563,7 +485,7 @@ describe('CanvasSurface', () => {
             <CanvasSurface
               canvas={canvas}
               projection={projection}
-              runtime={createCanvasEditorRuntime()}
+              runtime={canvasRuntimeFixture(projection)}
               actions={{ ...actions, updateCanvasVideoPlaybackState }}
               textFileBuffers={{}}
               canvasFeedback={undefined}
@@ -620,7 +542,7 @@ describe('CanvasSurface', () => {
             <CanvasSurface
               canvas={canvas}
               projection={projection}
-              runtime={createCanvasEditorRuntime()}
+              runtime={canvasRuntimeFixture(projection)}
               actions={{ ...actions, updateCanvasVideoPlaybackState }}
               textFileBuffers={{}}
               canvasFeedback={undefined}
@@ -667,7 +589,7 @@ describe('CanvasSurface', () => {
       diagnostics: []
     };
     const targetChanges: Array<{ canStartVideoMomentFeedback: boolean } | undefined> = [];
-    const runtime = createCanvasEditorRuntime();
+    const runtime = canvasRuntimeFixture(projection);
     videoMockState.registerOnMount = false;
     videoMockState.lastPath = undefined;
     videoMockState.lastRegister = undefined;
@@ -759,7 +681,7 @@ describe('CanvasSurface', () => {
     const readCanvasTextPreviewSources = vi.fn(async (
       input: Parameters<WorkbenchActions['readCanvasTextPreviewSources']>[0]
     ) => canvasTextPreviewSourceAvailabilityResponse(input));
-    const runtime = createCanvasEditorRuntime();
+    const runtime = canvasRuntimeFixture(projection);
 
     try {
       await act(async () => {
@@ -1201,7 +1123,7 @@ describe('CanvasSurface', () => {
       edges: [],
       diagnostics: []
     };
-    const runtime = createCanvasEditorRuntime({
+    const runtime = canvasRuntimeFixture(projection, {
       camera: { x: 0, y: 0, z: 0.1 },
       selection: { kind: 'node', projectRelativePath: node.projectRelativePath }
     });
@@ -1724,10 +1646,7 @@ function surface(
     canvasFeedback?: CanvasFeedbackDocument;
   } = {}
 ): React.ReactElement {
-  const runtime = createCanvasEditorRuntime({
-    ...(input.camera ? { camera: input.camera } : {}),
-    selection: input.selection
-  });
+  const runtime = canvasRuntimeFixture(projection, input);
   return (
     <I18nProvider locale="en">
       <CanvasSurface
@@ -1743,6 +1662,22 @@ function surface(
       />
     </I18nProvider>
   );
+}
+
+function canvasRuntimeFixture(
+  projection: CanvasProjection,
+  input: {
+    selection?: CanvasSelection;
+    camera?: CanvasCamera;
+  } = {}
+) {
+  return createCanvasEditorRuntime({
+    canvasId: projection.canvasId,
+    initialProjection: projection,
+    submitManualLayout: async () => undefined,
+    ...(input.camera ? { camera: input.camera } : {}),
+    selection: input.selection
+  });
 }
 
 function feedbackPlacementContextFixture(): Parameters<typeof CanvasSurface>[0]['feedbackPlacementContext'] {

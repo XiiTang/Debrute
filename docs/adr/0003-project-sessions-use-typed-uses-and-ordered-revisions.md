@@ -19,8 +19,8 @@ failure remains the authoritative result for that root: another open and final
 Registry shutdown return the exact failure, and the root cannot reopen in the
 current Runtime. An unexpected panic terminates Runtime instead of leaving the
 process available to serve further requests.
-There is no 30-second retention, reconnect reservation, replacement
-preparation, grace worker, or arbitrary open-Project cap.
+There is no 30-second retention, reconnect reservation, grace worker, or
+arbitrary open-Project cap.
 
 Each Project mutation is serialized by the session, semantically validated,
 and assigned a monotonic `projectRevision` only when authoritative state
@@ -41,8 +41,29 @@ unrelated Project mutations into compare-and-swap operations.
 Every loaded Workbench has at most one current Project binding, and every
 Project has at most one Workbench owner. Opening is valid only from an unbound
 connection; replacing is valid only from a bound connection. Runtime validates
-the target before it atomically switches the binding. Selecting the already
-bound target is a no-op.
+and prepares the target before it atomically switches the binding. Preparation
+does not modify the source binding or preempt the target's current owner. It
+opens the target Workbench Project Use, creates the target subscription, uses
+the subscription's snapshot-first barrier to build the public Project
+projection, loads Working Copies, and secures delivery of the first
+`project.bound` frame. Any preparation failure leaves both Workbench owners
+unchanged. Selecting the already bound target is a no-op.
+
+The commit changes the connection's Project binding, the unique owner, and the
+owning Workbench Project Use as one Runtime transaction. It advances a
+connection-local binding generation so a Project-scoped mutation authorized by
+the old binding cannot commit after replacement. Preemption and derived Desktop
+routing follow that committed state. If Project streaming fails after commit,
+Runtime closes the exact Workbench connection and releases its current Project
+Use; it does not roll back to the source Project because the target binding may
+already be visible to the client.
+
+For example, suppose A is current, another Workbench owns B, and B's public
+projection cannot be serialized. Changing A's binding or preempting B before
+serialization would expose a half-completed replacement. The required ordering
+returns the preparation error while A and B retain their original owners. If
+serialization and first-frame delivery succeed, the later owner change is the
+single commit.
 
 When another Desktop window already owns the target, an ordinary Desktop open
 focuses that window. When Web owns the target, an ordinary Desktop open remains

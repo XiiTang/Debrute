@@ -13,6 +13,12 @@ without creating child Operations. An Artifact Pointer identifies a
 Project-relative committed output and may carry display metadata; it does not
 contain file bytes or an absolute path.
 
+Before acceptance, Runtime reads one Global configuration snapshot and creates
+one immutable Accepted Model Binding for each unique Model ID in the Operation.
+Repeated requests for the same Model share that binding. Every binding and
+request must validate before Runtime creates the Operation; rejection creates
+no Operation and starts no Model Run.
+
 Debrute currently exposes model generation for images, videos, TTS, music, and
 sound effects. It is not a generic text-LLM proxy and has no text-LLM catalog,
 configuration, executor, CLI command, or Workbench settings surface.
@@ -102,6 +108,14 @@ settings, events, logs, Project data, or durable browser state. A base URL
 override changes the endpoint used by that Debrute Model and its configured key;
 it is an explicit per-model setting, not an origin-preserving provider
 credential abstraction.
+
+An Accepted Model Binding keeps the effective base URL, request model ID, API
+key, and Model Kind together for the lifetime in which its accepted Operation
+can use them. Settings changes affect only later Operations; stopping pending
+use in an accepted Operation requires explicit Operation cancellation. The
+binding exists only in Runtime memory and never appears in public or terminal
+Operation data, logs, Agent Records, Project data, or generated-asset
+provenance.
 
 ## Image Generation
 

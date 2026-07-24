@@ -1,4 +1,4 @@
-import type { ProjectedCanvasNode } from '@debrute/canvas-core';
+import type { CanvasProjection, ProjectedCanvasNode } from '@debrute/canvas-core';
 import {
   getCanvasResizePreserveAspect,
   normalizeCanvasWheelDelta,
@@ -26,6 +26,11 @@ import {
 import type { CanvasPoint, CanvasRect, CanvasSize, ResizeHandle } from './canvasGeometry';
 import type { CanvasSelection } from './canvasSelection';
 import { selectedNodeProjectRelativePaths } from './canvasSelection';
+import {
+  createCanvasManualLayoutLifecycle,
+  type CanvasManualLayoutPresentation
+} from './CanvasManualLayoutLifecycle';
+import type { CanvasLayoutOverride } from '../canvasManualLayoutDraft';
 
 export interface CanvasSurfaceElements {
   surface: HTMLElement;
@@ -61,28 +66,33 @@ export interface CanvasInputController {
   screenToCanvasPoint(point: CanvasPoint): CanvasPoint;
   beginNodeMove(input: {
     pointerId: number;
-    node: CanvasRuntimeMoveOrigin;
+    projectRelativePath: string;
     start: CanvasPoint;
     selection: CanvasSelection;
-    nodes: CanvasRuntimeMoveOrigin[];
   }): void;
   beginNodeResize(input: {
     pointerId: number;
     handle: ResizeHandle;
-    node: CanvasRuntimeResizeNode;
+    projectRelativePath: string;
     start: CanvasPoint;
-    origin: CanvasRect;
     modifiers: CanvasRuntimePointerModifiers;
   }): void;
   updatePointer(input: { pointerId: number; point: CanvasPoint; modifiers?: CanvasRuntimePointerModifiers }): boolean;
-  finishPointer(input: { pointerId: number; point?: CanvasPoint; modifiers?: CanvasRuntimePointerModifiers }): CanvasRuntimeDragState | undefined;
+  finishPointer(input: { pointerId: number; point?: CanvasPoint; modifiers?: CanvasRuntimePointerModifiers }): Promise<CanvasRuntimeDragState | undefined>;
   cancelPointer(pointerId: number): void;
+}
+
+export interface CanvasManualLayoutController {
+  getPresentation(): CanvasManualLayoutPresentation;
+  acceptProjection(projection: CanvasProjection): void;
+  subscribeRejection(listener: () => void): () => void;
 }
 
 export interface CanvasEditorRuntime {
   readonly camera: CanvasCameraController;
   readonly coordinates: CanvasCoordinateSystem;
   readonly input: CanvasInputController;
+  readonly manualLayout: CanvasManualLayoutController;
   subscribe(listener: (snapshot: CanvasRuntimeSnapshot) => void): () => void;
   subscribeCamera(listener: (camera: CanvasCamera) => void): () => void;
   subscribeCameraState(listener: (state: CanvasCameraState) => void): () => void;
@@ -140,7 +150,10 @@ interface GestureState {
   origin: CanvasPoint;
 }
 
-export function createCanvasEditorRuntime(initial?: {
+export function createCanvasEditorRuntime(initial: {
+  canvasId: string;
+  initialProjection: CanvasProjection;
+  submitManualLayout(nodeLayouts: CanvasLayoutOverride[]): Promise<void>;
   camera?: CanvasCamera;
   selection?: CanvasSelection | undefined;
 }): CanvasEditorRuntime {
@@ -150,10 +163,16 @@ export function createCanvasEditorRuntime(initial?: {
   const selectionListeners = new Set<(selection: CanvasSelection | undefined) => void>();
   const surfaceSizeListeners = new Set<(size: CanvasSize | undefined) => void>();
   const dragStateListeners = new Set<(state: CanvasRuntimeDragState | undefined) => void>();
+  const manualLayoutListeners = new Set<() => void>();
+  const manualLayoutLifecycle = createCanvasManualLayoutLifecycle({
+    canvasId: initial.canvasId,
+    initialProjection: initial.initialProjection,
+    submitManualLayout: initial.submitManualLayout
+  });
   const state: RuntimeState = {
-    camera: initial?.camera ?? canvasCameraReset(),
+    camera: initial.camera ?? canvasCameraReset(),
     cameraState: 'idle',
-    selection: initial?.selection,
+    selection: initial.selection,
     dragState: undefined,
     surfaceSize: undefined
   };
@@ -325,6 +344,7 @@ export function createCanvasEditorRuntime(initial?: {
     options: { notifySnapshot: boolean }
   ) => {
     state.dragState = dragState;
+    manualLayoutLifecycle.setActiveDrag(dragState);
     invalidateSnapshot();
     flushDragStateListeners(dragState);
     if (options.notifySnapshot) {
@@ -336,6 +356,22 @@ export function createCanvasEditorRuntime(initial?: {
     state: Pick<Extract<CanvasRuntimeDragState, { kind: 'resize-node' }>, 'handle' | 'node'>,
     modifiers: CanvasRuntimePointerModifiers
   ): boolean => getCanvasResizePreserveAspect(state.handle, modifiers, state.node);
+
+  const presentedNode = (projectRelativePath: string): ProjectedCanvasNode => {
+    const node = manualLayoutLifecycle.getPresentedNodes().find((candidate) => (
+      candidate.projectRelativePath === projectRelativePath
+    ));
+    if (!node) {
+      throw new Error(`Canvas node ${projectRelativePath} is not present in ${initial.canvasId}.`);
+    }
+    return node;
+  };
+
+  const flushManualLayoutListeners = () => {
+    for (const listener of manualLayoutListeners) {
+      listener();
+    }
+  };
 
   const dragStateWithPointer = (
     active: CanvasRuntimeDragState,
@@ -433,29 +469,55 @@ export function createCanvasEditorRuntime(initial?: {
   const runtime: CanvasEditorRuntime = {
     camera: cameraController,
     coordinates,
+    manualLayout: {
+      getPresentation: () => manualLayoutLifecycle.getPresentation(),
+      acceptProjection: (projection) => {
+        manualLayoutLifecycle.acceptProjection(projection);
+      },
+      subscribeRejection: (listener) => {
+        manualLayoutListeners.add(listener);
+        return () => {
+          manualLayoutListeners.delete(listener);
+        };
+      }
+    },
     input: {
       screenToCanvasPoint: screenToCanvas,
       beginNodeMove: (input) => {
         const selectedPaths = new Set(selectedNodeProjectRelativePaths(input.selection));
-        if (!selectedPaths.has(input.node.projectRelativePath)) {
-          selectedPaths.add(input.node.projectRelativePath);
+        if (!selectedPaths.has(input.projectRelativePath)) {
+          selectedPaths.add(input.projectRelativePath);
         }
+        presentedNode(input.projectRelativePath);
         setDragState({
           kind: 'move-node',
           pointerId: input.pointerId,
           start: input.start,
-          origins: input.nodes.filter((node) => selectedPaths.has(node.projectRelativePath))
+          origins: manualLayoutLifecycle.getPresentedNodes().filter((node) => selectedPaths.has(node.projectRelativePath))
         }, { notifySnapshot: true });
       },
       beginNodeResize: (input) => {
+        const node = presentedNode(input.projectRelativePath);
         setDragState({
           kind: 'resize-node',
           pointerId: input.pointerId,
           handle: input.handle,
           start: input.start,
-          node: input.node,
-          origin: input.origin,
-          preserveAspect: resizePreserveAspect(input, input.modifiers)
+          node: {
+            projectRelativePath: node.projectRelativePath,
+            nodeKind: node.nodeKind,
+            ...(node.mediaKind === undefined ? {} : { mediaKind: node.mediaKind })
+          },
+          origin: {
+            x: node.x,
+            y: node.y,
+            width: node.width,
+            height: node.height
+          },
+          preserveAspect: resizePreserveAspect({
+            handle: input.handle,
+            node
+          }, input.modifiers)
         }, { notifySnapshot: true });
       },
       updatePointer: (input) => {
@@ -466,13 +528,20 @@ export function createCanvasEditorRuntime(initial?: {
         setDragState(dragStateWithPointer(active, input.point, input.modifiers), { notifySnapshot: false });
         return true;
       },
-      finishPointer: (input) => {
+      finishPointer: async (input) => {
         const active = state.dragState;
         if (!active || active.pointerId !== input.pointerId) {
           return undefined;
         }
         const finished = dragStateWithPointer(active, input.point, input.modifiers);
+        const submission = manualLayoutLifecycle.submitFinishedDrag(finished);
         setDragState(undefined, { notifySnapshot: true });
+        try {
+          await submission;
+        } catch (error) {
+          flushManualLayoutListeners();
+          throw error;
+        }
         return finished;
       },
       cancelPointer: (pointerId) => {
@@ -570,6 +639,7 @@ export function createCanvasEditorRuntime(initial?: {
     },
     dispose: () => {
       disposed = true;
+      manualLayoutLifecycle.dispose();
       clearIdleTimer();
       resizeObserver?.disconnect();
       resizeObserver = undefined;
@@ -581,6 +651,7 @@ export function createCanvasEditorRuntime(initial?: {
       selectionListeners.clear();
       surfaceSizeListeners.clear();
       dragStateListeners.clear();
+      manualLayoutListeners.clear();
       boundElements = undefined;
     }
   };

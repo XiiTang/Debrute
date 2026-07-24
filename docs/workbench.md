@@ -42,6 +42,29 @@ unbound or failed startup has no Project result; the Workbench does not split a
 successful binding into independently optional fields or reconstruct a partial
 Project from them.
 
+Replacing Project A with Project B is a prepared handoff on the same Workbench
+connection. Runtime first opens and validates B while A remains authoritative,
+then creates B's Project subscription and uses that subscription's initial
+snapshot to build the complete `project.bound` projection. It also loads B's
+Working Copies and secures delivery of the first bound frame before changing
+ownership. If any preparation fails, the connection remains bound to A and an
+existing owner of B is not preempted.
+
+Once preparation succeeds, one commit changes the connection binding, the
+unique Workbench owner, and the owning Workbench Project Use; invalidates work
+authorized by the old binding generation; and publishes the prepared
+`project.bound` result. Desktop route changes caused by ownership follow that
+commit. If the prepared Project stream fails after commit, Runtime ends the
+exact connection and releases B's Workbench Project Use. It does not roll back
+to A because the client may already have observed B. Selecting the already-bound
+Project remains a no-op.
+
+Every Project-scoped mutation is authorized against the connection's current
+binding generation as well as its Project id. Work begun for A cannot commit to
+A after the same connection has switched to B; this applies in particular to
+Working Copies, which are persistent Project data but do not have their own
+ordered Project event stream.
+
 The bound snapshot already contains current Project health and Project
 Diagnostics. Workbench does not
 follow binding with duplicate snapshot or health GETs and exposes no manual
@@ -134,10 +157,16 @@ Canvas floating bars use separate placement helpers because they are attached
 to Canvas objects or reserved screen edges. Their collision and viewport rules
 do not replace floating-panel geometry.
 
-Canvas camera, selection, pointer drag state, and local layout drafts are owned
-by `CanvasEditorRuntime` rather than React component state or Canvas JSON.
-Rendering combines durable projection state with the active or pending local
-draft so nodes, edges, culling, and overlays observe one interaction geometry.
+Canvas camera, selection, pointer drag state, and Manual Layout Drafts are owned
+by `CanvasEditorRuntime` rather than React component state or Canvas JSON. An
+internal Manual Layout lifecycle module owns active and submitted drafts,
+submission identity, confirmation, and rejection. `CanvasSurface` supplies DOM
+pointer facts and the latest Canvas Projection; `CanvasEditor` wires the existing
+Runtime mutation action into the lifecycle. Neither owns a parallel draft
+lifecycle. Rendering combines the
+Canvas Projection with submitted drafts in submission order and then the active
+draft, so nodes, edges, culling, and overlays observe one interaction geometry
+while earlier submissions await confirmation.
 See [`canvas.md`](./canvas.md) for the Canvas document, layout, registry, and
 interaction contract, and [`canvas-rendering.md`](./canvas-rendering.md) for
 render scheduling, virtualization, preview resources, and diagnostics.

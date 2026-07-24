@@ -9,6 +9,14 @@ model contract the runtime implements. The trade-off is that one upstream
 credential may need to be entered for multiple Model IDs and endpoint overrides
 explicitly change where that model's configured key is used.
 
+At Model Operation acceptance, Runtime reads one Global configuration snapshot
+and binds the complete effective route and credential once for every unique
+Model ID in the submission. Requests for the same Model share that Accepted
+Model Binding. The binding is not a credential reference: later Settings
+changes affect only later Operations, while explicit Operation cancellation
+revokes pending use already accepted. It remains private Runtime memory and is
+not retained with terminal Operation data.
+
 The same ownership boundary applies to implementation and documentation. Each
 Debrute Model owns one Catalog schema, one Agent manual contract, one request
 constructor, one response parser, and its exact fixtures. Two Models do not
