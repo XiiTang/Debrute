@@ -14,55 +14,58 @@ export interface ProjectPathEntry {
   kind: ProjectPathKind;
 }
 
-export type ProjectTextLanguageId =
-  | 'plaintext'
-  | 'markdown'
-  | 'json'
-  | 'jsonc'
-  | 'jsonl'
-  | 'yaml'
-  | 'shell'
-  | 'dotenv'
-  | 'ini'
-  | 'properties'
-  | 'log'
-  | 'html'
-  | 'css'
-  | 'scss'
-  | 'less'
-  | 'xml'
-  | 'javascript'
-  | 'javascriptreact'
-  | 'typescript'
-  | 'typescriptreact'
-  | 'python'
-  | 'ruby'
-  | 'php'
-  | 'sql'
-  | 'powershell'
-  | 'bat'
-  | 'go'
-  | 'rust'
-  | 'java'
-  | 'c'
-  | 'cpp'
-  | 'lua'
-  | 'perl'
-  | 'r'
-  | 'dockerfile'
-  | 'makefile'
-  | 'diff'
-  | 'csv'
-  | 'tsv'
-  | 'subtitle'
-  | 'webvtt'
-  | 'toml'
-  | 'tex'
-  | 'textile'
-  | 'protobuf'
-  | 'restructuredtext'
-  | 'asciidoc'
-  | 'org';
+export const PROJECT_TEXT_LANGUAGE_IDS = [
+  'plaintext',
+  'markdown',
+  'json',
+  'jsonc',
+  'jsonl',
+  'yaml',
+  'shell',
+  'dotenv',
+  'ini',
+  'properties',
+  'log',
+  'html',
+  'css',
+  'scss',
+  'less',
+  'xml',
+  'javascript',
+  'javascriptreact',
+  'typescript',
+  'typescriptreact',
+  'python',
+  'ruby',
+  'php',
+  'sql',
+  'powershell',
+  'bat',
+  'go',
+  'rust',
+  'java',
+  'c',
+  'cpp',
+  'lua',
+  'perl',
+  'r',
+  'dockerfile',
+  'makefile',
+  'diff',
+  'csv',
+  'tsv',
+  'subtitle',
+  'webvtt',
+  'toml',
+  'tex',
+  'textile',
+  'protobuf',
+  'restructuredtext',
+  'asciidoc',
+  'org'
+] as const;
+
+export type ProjectTextLanguageId = typeof PROJECT_TEXT_LANGUAGE_IDS[number];
 
 export interface ProjectTextFile {
   projectRelativePath: string;

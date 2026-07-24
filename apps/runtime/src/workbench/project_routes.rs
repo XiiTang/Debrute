@@ -54,7 +54,7 @@ use super::{
     multipart::read_multipart,
     routes::{json_body, service_error_response},
     routing::{ProjectAuthorization, WorkbenchRouterState},
-    services::{project_response, public_canvas_projection, public_project_snapshot},
+    services::project_response,
     websocket::{
         MAX_WEBSOCKET_FRAME_BYTES, WebSocketConnection, WebSocketMessage, WebSocketUpgrade,
         read_message, read_text, write_close, write_pong, write_text,
@@ -1630,7 +1630,7 @@ fn command_response(
     session: &ProjectSession,
     result: ProjectRevisionResult<ProjectCommandResult>,
 ) -> Response {
-    let body = match command_response_body(session, result.value) {
+    let body = match command_response_body(result.value) {
         Ok(body) => body,
         Err(error) => return service_error_response(error),
     };
@@ -1640,77 +1640,32 @@ fn command_response(
     }
 }
 
-fn command_response_body(
-    session: &ProjectSession,
-    result: ProjectCommandResult,
-) -> Result<Value, RuntimeHttpServiceError> {
+fn command_response_body(result: ProjectCommandResult) -> Result<Value, RuntimeHttpServiceError> {
     Ok(match result {
-        ProjectCommandResult::Snapshot(snapshot) => {
-            json!({"snapshot": public_project_snapshot(&snapshot, session.project_id())?})
-        }
-        ProjectCommandResult::CanvasCreated {
-            canvas_id,
-            snapshot,
-        } => json!({
-            "activeCanvasId": canvas_id,
-            "snapshot": public_project_snapshot(&snapshot, session.project_id())?
+        ProjectCommandResult::Snapshot(_)
+        | ProjectCommandResult::CanvasChanged { .. }
+        | ProjectCommandResult::CanvasMapPathAdded { .. }
+        | ProjectCommandResult::CanvasFeedbackUpdated { .. } => json!({}),
+        ProjectCommandResult::CanvasCreated { canvas_id, .. } => json!({
+            "activeCanvasId": canvas_id
         }),
         ProjectCommandResult::CanvasDeleted {
-            active_canvas_id,
-            snapshot,
+            active_canvas_id, ..
         }
         | ProjectCommandResult::CanvasRegistryRepaired {
-            active_canvas_id,
-            snapshot,
+            active_canvas_id, ..
         } => json!({
-            "activeCanvasId": active_canvas_id,
-            "snapshot": public_project_snapshot(&snapshot, session.project_id())?
+            "activeCanvasId": active_canvas_id
         }),
-        ProjectCommandResult::CanvasChanged {
-            canvas, projection, ..
-        } => json!({
-            "canvas": canvas,
-            "projection": public_canvas_projection(&projection, session.project_id())?
-        }),
-        ProjectCommandResult::CanvasMapPathAdded {
-            canvas,
-            projection,
-            project_relative_path,
-        } => {
-            let snapshot = session
-                .sync_snapshot()
-                .map_err(RuntimeHttpServiceError::from_project)?;
-            let snapshot = public_project_snapshot(&snapshot.snapshot, session.project_id())?;
-            json!({
-                "snapshot": snapshot,
-                "canvas": canvas,
-                "projection": public_canvas_projection(&projection, session.project_id())?,
-                "centerProjectRelativePath": project_relative_path
-            })
-        }
-        ProjectCommandResult::CanvasLayoutReset {
-            canvas,
-            projection,
-            reset_count,
-        } => json!({
-            "canvas": canvas,
-            "projection": public_canvas_projection(&projection, session.project_id())?,
+        ProjectCommandResult::CanvasLayoutReset { reset_count, .. } => json!({
             "resetCount": reset_count
         }),
-        ProjectCommandResult::CanvasFeedbackUpdated { feedback } => {
-            json!({"feedback": feedback})
-        }
         ProjectCommandResult::TextFileSaved { file, .. } => {
             json!({"file": public_text_file(file)})
         }
-        ProjectCommandResult::PathChanged { result, snapshot } => json!({
-            "result": result,
-            "snapshot": public_project_snapshot(&snapshot, session.project_id())?
-        }),
-        ProjectCommandResult::PathsChanged { results, snapshot } => json!({
-            "results": results,
-            "snapshot": public_project_snapshot(&snapshot, session.project_id())?
-        }),
+        ProjectCommandResult::PathChanged { result, .. } => serde_json::to_value(result)
+            .map_err(|error| RuntimeHttpServiceError::serialization(&error))?,
+        ProjectCommandResult::PathsChanged { results, .. } => json!({"results": results}),
     })
 }
 

@@ -266,13 +266,35 @@ batch conflicts before mutation. External drops use native local paths when the
 Electron shell exposes them; browser drops create upload entries and walk
 dropped directories. Whole batches are validated before the operation begins.
 
-One context-menu model describes Explorer and Canvas path targets. It enables
-actions from target kind, selection cardinality, clipboard state, active Canvas
-projection, host platform, and Adobe Bridge availability. File commands are
-dispatched through Explorer-owned semantic commands even when invoked from a
-Canvas target. Copy Path, reveal, and recoverable deletion cross Runtime's
-validated native-file boundary; project-relative paths remain the browser's
-normal identity.
+One Project Path Command model describes operations on the Project root and on
+single or multiple Project Path targets. Explorer pointer interaction, Project
+Tree keyboard shortcuts, and Canvas context menus only supply command intent;
+they do not define different command meanings. One Project-scoped coordinator
+owns availability, target interpretation, confirmation, stale-result rejection,
+and accepted follow-up selection, clipboard, and Canvas state.
+
+The coordinator delegates effects rather than absorbing their implementations:
+filesystem mutation and native path access cross Runtime's validated native-file
+boundary, Canvas navigation remains Canvas-owned, Terminal opening remains
+Terminal-owned, and Photoshop transfer remains integration-owned. Project Paths
+remain the browser's normal file identity across all invocation surfaces.
+
+The coordinator admits a Project Path Command only while its Project binding is
+current and no replacement Project is opening. Starting Project replacement
+closes that admission gate synchronously across Explorer, Canvas, keyboard,
+inline editing, and drag-and-drop entry points. Workbench closes unsubmitted
+context menus, inline edits, and Photoshop pickers, then shows that the target
+Project is opening. If target selection or preparation is cancelled or fails,
+the existing binding's command gate opens again.
+
+A command submitted before that boundary remains owned by its captured Project
+id and binding generation. Runtime's Project binding lease lets the accepted
+request finish before the replacement binding commits; switching does not
+retarget, retry, roll back, or imply cancellation of that command. Accepting the
+new binding may abort a remaining Web-side wait, but transport abort is not
+Runtime cancellation. After replacement, an old generation cannot update the
+new Project's selection, internal clipboard, Canvas presentation, dialogs, or
+notifications.
 
 Integrations Settings behavior and the Photoshop transfer boundary are
 documented in [`integrations.md`](./integrations.md) and

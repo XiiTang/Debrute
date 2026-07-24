@@ -199,11 +199,14 @@ not Working Copies or browser-persisted recovery state.
 Text scrolling uses the same authority distinction without treating a local
 copy of the Canvas Document as committed state. Workbench displays the newest
 pending Text Viewport immediately while Runtime remains the sole validator and
-writer. A response confirms only the submitted value: a newer pending viewport
-continues to win until its own response arrives, while newer authoritative
-Canvas fields remain intact. A failed commit drops the pending viewport,
-renders the latest Runtime snapshot, and surfaces the failure; Workbench does
-not retry the mutation automatically.
+writer. A successful mutation outcome closes the Runtime command but does not
+confirm presentation. Only an accepted, revision-ordered Canvas Projection
+whose Text Viewport exactly matches the submitted value confirms that local
+overlay. A newer pending viewport continues to win until its own exact Runtime
+state is accepted, while newer authoritative Canvas fields remain intact. A
+failed commit drops only its corresponding pending viewport, renders the latest
+Runtime projection plus any newer pending value, and surfaces the failure;
+Workbench does not retry the mutation automatically.
 
 Playback Position commits may overlap at media event boundaries. A failed older
 request cannot roll back or pause a newer submitted position; only the newest

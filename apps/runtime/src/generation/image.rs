@@ -11,6 +11,7 @@ use super::{
 };
 
 mod doubao_seedream_5_lite;
+mod doubao_seedream_5_pro;
 mod fal_flux_dev;
 mod fal_flux_dev_image_to_image;
 mod gemini_3_1_flash_image;
@@ -18,6 +19,8 @@ mod gemini_3_pro_image;
 mod gpt_image_1;
 mod gpt_image_2;
 mod minimax_image_01;
+mod qwen_image_2_0_2026_03_03;
+mod qwen_image_2_0_pro_2026_06_22;
 mod vydra_grok_imagine;
 mod wan_2_7_image;
 
@@ -25,23 +28,40 @@ pub(crate) fn execute(
     mut context: ExecutionContext<'_>,
 ) -> Result<ModelExecution, GenerationError> {
     let model = context.model.model_id.as_str();
-    let result = match model {
-        "gpt-image-1" => gpt_image_1::execute(&mut context),
-        "gpt-image-2" => gpt_image_2::execute(&mut context),
-        "doubao-seedream-5-0-lite-260128" => doubao_seedream_5_lite::execute(&mut context),
-        "wan2.7-image" => wan_2_7_image::execute(&mut context),
-        "gemini-3.1-flash-image" => gemini_3_1_flash_image::execute(&mut context),
-        "gemini-3-pro-image" => gemini_3_pro_image::execute(&mut context),
-        "fal-ai/flux/dev" => fal_flux_dev::execute(&mut context),
-        "fal-ai/flux/dev/image-to-image" => fal_flux_dev_image_to_image::execute(&mut context),
-        "image-01" => minimax_image_01::execute(&mut context),
-        "grok-imagine" => vydra_grok_imagine::execute(&mut context),
-        _ => Err(GenerationError::new(
+    let adapter = adapter_for(model).ok_or_else(|| {
+        GenerationError::new(
             "image_model_unavailable",
             format!("Image model adapter is unavailable: {model}"),
-        )),
-    }?;
+        )
+    })?;
+    let result = adapter(&mut context)?;
     execute_result(result.payloads, result.safe_request, context)
+}
+
+type ImageAdapter = for<'a> fn(&mut ExecutionContext<'a>) -> Result<ImageResult, GenerationError>;
+
+fn adapter_for(model: &str) -> Option<ImageAdapter> {
+    match model {
+        "gpt-image-1" => Some(gpt_image_1::execute),
+        "gpt-image-2" => Some(gpt_image_2::execute),
+        "doubao-seedream-5-0-lite-260128" => Some(doubao_seedream_5_lite::execute),
+        "doubao-seedream-5-0-pro-260628" => Some(doubao_seedream_5_pro::execute),
+        "qwen-image-2.0-pro-2026-06-22" => Some(qwen_image_2_0_pro_2026_06_22::execute),
+        "qwen-image-2.0-2026-03-03" => Some(qwen_image_2_0_2026_03_03::execute),
+        "wan2.7-image" => Some(wan_2_7_image::execute),
+        "gemini-3.1-flash-image" => Some(gemini_3_1_flash_image::execute),
+        "gemini-3-pro-image" => Some(gemini_3_pro_image::execute),
+        "fal-ai/flux/dev" => Some(fal_flux_dev::execute),
+        "fal-ai/flux/dev/image-to-image" => Some(fal_flux_dev_image_to_image::execute),
+        "image-01" => Some(minimax_image_01::execute),
+        "grok-imagine" => Some(vydra_grok_imagine::execute),
+        _ => None,
+    }
+}
+
+#[cfg(test)]
+pub(crate) fn has_adapter(model: &str) -> bool {
+    adapter_for(model).is_some()
 }
 
 struct ImageResult {

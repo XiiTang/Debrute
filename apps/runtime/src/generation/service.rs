@@ -310,7 +310,9 @@ mod tests {
     use crate::{
         generation::{
             common::ModelRequestResourceLimits,
-            types::{ModelHttpRequest, ModelHttpResponse, PreparedHttpBody as HttpBody},
+            types::{
+                HttpMethod, ModelHttpRequest, ModelHttpResponse, PreparedHttpBody as HttpBody,
+            },
         },
         model_operation::{
             ExecutionShape, ModelOperationService, OperationState, SubmitModelOperation,
@@ -669,7 +671,7 @@ mod tests {
     }
 
     #[test]
-    fn every_catalog_model_resolves_to_its_peer_kind() {
+    fn every_catalog_model_resolves_to_its_peer_kind_and_media_adapter() {
         let catalog = ModelCatalog::bundled().unwrap();
         let mut snapshot = GlobalConfigSnapshot::default();
         for entry in catalog.images() {
@@ -680,6 +682,11 @@ mod tests {
             let (model, _) = resolve_model(&catalog, &snapshot, &entry.debrute_model_id)
                 .expect("catalog Image Model should resolve");
             assert_eq!(model.kind, ModelKind::Image);
+            assert!(
+                crate::generation::image::has_adapter(&entry.debrute_model_id),
+                "Catalog Image Model {} has no exact Runtime adapter",
+                entry.debrute_model_id
+            );
         }
         for entry in catalog.videos() {
             snapshot
@@ -689,6 +696,11 @@ mod tests {
             let (model, _) = resolve_model(&catalog, &snapshot, &entry.debrute_model_id)
                 .expect("catalog Video Model should resolve");
             assert_eq!(model.kind, ModelKind::Video);
+            assert!(
+                crate::generation::video::has_adapter(&entry.debrute_model_id),
+                "Catalog Video Model {} has no exact Runtime adapter",
+                entry.debrute_model_id
+            );
         }
         for entry in catalog.audio() {
             snapshot
@@ -703,6 +715,59 @@ mod tests {
             let (model, _) = resolve_model(&catalog, &snapshot, &entry.debrute_model_id)
                 .expect("catalog Audio Model should resolve");
             assert_eq!(model.kind, expected_kind);
+        }
+    }
+
+    #[test]
+    fn new_model_catalog_defaults_materialize_exactly() {
+        let catalog = ModelCatalog::bundled().unwrap();
+        for (model_id, expected) in [
+            (
+                "doubao-seedream-5-0-pro-260628",
+                json!({
+                    "prompt": "make an image",
+                    "output_format": "png",
+                    "response_format": "url",
+                    "watermark": false
+                }),
+            ),
+            (
+                "qwen-image-2.0-pro-2026-06-22",
+                json!({"prompt": "make an image", "watermark": false}),
+            ),
+            (
+                "qwen-image-2.0-2026-03-03",
+                json!({"prompt": "make an image", "watermark": false}),
+            ),
+            (
+                "doubao-seedance-2-0-mini-260615",
+                json!({
+                    "prompt": "make a video",
+                    "intent": "generate",
+                    "watermark": false
+                }),
+            ),
+        ] {
+            let schema = catalog
+                .images()
+                .iter()
+                .find(|entry| entry.debrute_model_id == model_id)
+                .map(|entry| entry.arguments_schema.clone())
+                .or_else(|| {
+                    catalog
+                        .videos()
+                        .iter()
+                        .find(|entry| entry.debrute_model_id == model_id)
+                        .map(|entry| entry.arguments_schema.clone())
+                })
+                .expect("new Model schema");
+            let mut arguments =
+                Map::from_iter([("prompt".to_owned(), expected.get("prompt").unwrap().clone())]);
+
+            materialize_argument_defaults(model_id, &schema, &mut arguments).unwrap();
+            validate_arguments(model_id, &schema, &arguments).unwrap();
+
+            assert_eq!(Value::Object(arguments), expected, "{model_id}");
         }
     }
 
@@ -2069,6 +2134,188 @@ mod tests {
     }
 
     #[test]
+    fn seedream_5_pro_owns_ordered_editing_and_both_response_transports() {
+        let (url_execution, url_requests) = run_fixture(
+            ModelKind::Image,
+            "doubao-seedream-5-0-pro-260628",
+            &Map::from_iter([
+                (
+                    "prompt".to_owned(),
+                    json!("turn both references into a poster"),
+                ),
+                (
+                    "image".to_owned(),
+                    json!([
+                        "data:image/png;base64,iVBORw0KGgo=",
+                        "data:image/jpeg;base64,/9j/"
+                    ]),
+                ),
+                ("output_format".to_owned(), json!("png")),
+                ("response_format".to_owned(), json!("url")),
+                ("watermark".to_owned(), json!(false)),
+                ("future_parameter".to_owned(), json!("remote owns this")),
+            ]),
+            vec![
+                fixture_json(&json!({
+                    "data": [
+                        {"url": "https://media.example/pro-one.png"},
+                        {"url": "https://media.example/pro-two.png"}
+                    ]
+                })),
+                fixture_media("image/png", b"\x89PNG\r\n\x1a\n"),
+                fixture_media("image/png", b"\x89PNG\r\n\x1a\nsecond"),
+            ],
+        );
+        assert_eq!(url_execution.payloads.len(), 2);
+        assert_eq!(url_requests.len(), 3);
+        assert_eq!(url_requests[0].method, HttpMethod::Post);
+        assert_eq!(
+            url_requests[0].url,
+            "https://model.example/v1/images/generations"
+        );
+        assert_eq!(url_requests[1].url, "https://media.example/pro-one.png");
+        assert_eq!(url_requests[2].url, "https://media.example/pro-two.png");
+        let HttpBody::Json(url_body) = &url_requests[0].body else {
+            panic!("Seedream 5.0 Pro request must be JSON");
+        };
+        assert_eq!(
+            url_body.get("model"),
+            Some(&json!("doubao-seedream-5-0-pro-260628"))
+        );
+        assert_eq!(
+            url_body.get("image"),
+            Some(&json!([
+                "data:image/png;base64,iVBORw0KGgo=",
+                "data:image/jpeg;base64,/9j/"
+            ]))
+        );
+        assert_eq!(
+            url_body.get("future_parameter"),
+            Some(&json!("remote owns this"))
+        );
+
+        let (base64_execution, base64_requests) = run_fixture(
+            ModelKind::Image,
+            "doubao-seedream-5-0-pro-260628",
+            &Map::from_iter([
+                ("prompt".to_owned(), json!("make a transparent icon")),
+                ("response_format".to_owned(), json!("b64_json")),
+            ]),
+            vec![fixture_json(&json!({
+                "data": [{"b64_json": "iVBORw0KGgo="}]
+            }))],
+        );
+        assert_eq!(base64_execution.payloads.len(), 1);
+        assert_eq!(base64_execution.payloads[0].mime_type, "image/png");
+        assert_eq!(base64_requests.len(), 1);
+    }
+
+    #[test]
+    fn qwen_image_2_snapshots_own_independent_ordered_synchronous_contracts() {
+        let (pro, pro_requests) = run_fixture(
+            ModelKind::Image,
+            "qwen-image-2.0-pro-2026-06-22",
+            &Map::from_iter([
+                ("prompt".to_owned(), json!("combine Image 1 and Image 2")),
+                (
+                    "image".to_owned(),
+                    json!([
+                        "data:image/png;base64,iVBORw0KGgo=",
+                        "data:image/jpeg;base64,/9j/"
+                    ]),
+                ),
+                ("n".to_owned(), json!(2)),
+                ("watermark".to_owned(), json!(false)),
+                ("future_parameter".to_owned(), json!(7)),
+            ]),
+            vec![
+                fixture_json(&json!({
+                    "output": {"choices": [
+                        {"message": {"content": [
+                            {"image": "https://media.example/qwen-pro-one.png"}
+                        ]}},
+                        {"message": {"content": [
+                            {"image": "https://media.example/qwen-pro-two.png"}
+                        ]}}
+                    ]}
+                })),
+                fixture_media("image/png", b"\x89PNG\r\n\x1a\n"),
+                fixture_media("image/png", b"\x89PNG\r\n\x1a\nsecond"),
+            ],
+        );
+        assert_eq!(pro.payloads.len(), 2);
+        assert_eq!(pro_requests.len(), 3);
+        assert_eq!(pro_requests[0].method, HttpMethod::Post);
+        assert_eq!(
+            pro_requests[0].url,
+            "https://model.example/v1/services/aigc/multimodal-generation/generation"
+        );
+        assert_eq!(
+            pro_requests[1].url,
+            "https://media.example/qwen-pro-one.png"
+        );
+        assert_eq!(
+            pro_requests[2].url,
+            "https://media.example/qwen-pro-two.png"
+        );
+        assert!(!pro_requests[0].headers.contains_key("x-dashscope-async"));
+        let HttpBody::Json(pro_body) = &pro_requests[0].body else {
+            panic!("Qwen Image 2.0 Pro request must be JSON");
+        };
+        assert_eq!(
+            pro_body.get("model"),
+            Some(&json!("qwen-image-2.0-pro-2026-06-22"))
+        );
+        assert_eq!(
+            pro_body.pointer("/input/messages/0/content"),
+            Some(&json!([
+                {"image": "data:image/png;base64,iVBORw0KGgo="},
+                {"image": "data:image/jpeg;base64,/9j/"},
+                {"text": "combine Image 1 and Image 2"}
+            ]))
+        );
+        assert_eq!(pro_body.pointer("/parameters/n"), Some(&json!(2)));
+        assert_eq!(
+            pro_body.pointer("/parameters/future_parameter"),
+            Some(&json!(7))
+        );
+
+        let (fast, fast_requests) = run_fixture(
+            ModelKind::Image,
+            "qwen-image-2.0-2026-03-03",
+            &Map::from_iter([
+                ("prompt".to_owned(), json!("fast concept frame")),
+                ("watermark".to_owned(), json!(false)),
+            ]),
+            vec![
+                fixture_json(&json!({
+                    "output": {"choices": [{"message": {"content": [
+                        {"image": "https://media.example/qwen-fast.png"}
+                    ]}}]}
+                })),
+                fixture_media("image/png", b"\x89PNG\r\n\x1a\n"),
+            ],
+        );
+        assert_eq!(fast.payloads.len(), 1);
+        assert_eq!(fast_requests[0].method, HttpMethod::Post);
+        assert_eq!(
+            fast_requests[0].url,
+            "https://model.example/v1/services/aigc/multimodal-generation/generation"
+        );
+        let HttpBody::Json(fast_body) = &fast_requests[0].body else {
+            panic!("Qwen Image 2.0 request must be JSON");
+        };
+        assert_eq!(
+            fast_body.get("model"),
+            Some(&json!("qwen-image-2.0-2026-03-03"))
+        );
+        assert_eq!(
+            fast_body.pointer("/input/messages/0/content"),
+            Some(&json!([{"text": "fast concept frame"}]))
+        );
+    }
+
+    #[test]
     fn minimax_image_01_owns_both_formats_and_string_subject_references() {
         let (base64_execution, base64_requests) = run_fixture(
             ModelKind::Image,
@@ -2260,6 +2507,244 @@ mod tests {
         );
         assert!(fast_body.get("intent").is_none());
         assert!(fast_body.get("references").is_none());
+    }
+
+    #[test]
+    fn seedance_mini_owns_current_roles_passthrough_and_optional_last_frame() {
+        let (generate, generate_requests) = run_fixture(
+            ModelKind::Video,
+            "doubao-seedance-2-0-mini-260615",
+            &Map::from_iter([
+                ("prompt".to_owned(), json!("animate both keyframes")),
+                ("intent".to_owned(), json!("generate")),
+                (
+                    "references".to_owned(),
+                    json!([
+                        {
+                            "source": "data:image/png;base64,iVBORw0KGgo=",
+                            "media_type": "image"
+                        },
+                        {
+                            "source": "data:image/jpeg;base64,/9j/",
+                            "media_type": "image"
+                        }
+                    ]),
+                ),
+                ("tools".to_owned(), json!([{"type": "web_search"}])),
+                ("return_last_frame".to_owned(), json!(true)),
+                ("resolution".to_owned(), json!("720p")),
+                ("watermark".to_owned(), json!(false)),
+                ("future_parameter".to_owned(), json!("remote owns this")),
+            ]),
+            vec![
+                fixture_json(&json!({"id": "mini-generate-task"})),
+                fixture_json(&json!({
+                    "status": "succeeded",
+                    "content": {
+                        "video_url": "https://media.example/mini.mp4",
+                        "last_frame_url": "https://media.example/mini-last.png"
+                    }
+                })),
+                fixture_media("video/mp4", b"mini-video"),
+                fixture_media("image/png", b"\x89PNG\r\n\x1a\n"),
+            ],
+        );
+        assert_eq!(generate.payloads.len(), 2);
+        assert_eq!(generate_requests[0].method, HttpMethod::Post);
+        assert_eq!(
+            generate_requests[0].url,
+            "https://model.example/v1/contents/generations/tasks"
+        );
+        assert_eq!(generate_requests[1].method, HttpMethod::Get);
+        assert_eq!(
+            generate_requests[1].url,
+            "https://model.example/v1/contents/generations/tasks/mini-generate-task"
+        );
+        assert_eq!(
+            generate.payloads[0].role,
+            GeneratedArtifactRole::PrimaryVideo
+        );
+        assert_eq!(generate.payloads[1].role, GeneratedArtifactRole::LastFrame);
+        let HttpBody::Json(generate_body) = &generate_requests[0].body else {
+            panic!("Seedance Mini request must be JSON");
+        };
+        assert_eq!(
+            generate_body.get("model"),
+            Some(&json!("doubao-seedance-2-0-mini-260615"))
+        );
+        assert_eq!(
+            generate_body.pointer("/content/1/role"),
+            Some(&json!("first_frame"))
+        );
+        assert_eq!(
+            generate_body.pointer("/content/2/role"),
+            Some(&json!("last_frame"))
+        );
+        assert_eq!(
+            generate_body.get("tools"),
+            Some(&json!([{"type": "web_search"}]))
+        );
+        assert_eq!(
+            generate_body.get("future_parameter"),
+            Some(&json!("remote owns this"))
+        );
+        assert!(generate_body.get("intent").is_none());
+        assert!(generate_body.get("references").is_none());
+    }
+
+    #[test]
+    fn seedance_mini_accepts_inline_audio_and_model_reachable_video() {
+        let (_, audio_requests) = run_fixture(
+            ModelKind::Video,
+            "doubao-seedance-2-0-mini-260615",
+            &Map::from_iter([
+                ("prompt".to_owned(), json!("follow the supplied narration")),
+                ("intent".to_owned(), json!("audio_driven")),
+                (
+                    "references".to_owned(),
+                    json!([
+                        {
+                            "source": "data:audio/mpeg;base64,AQID",
+                            "media_type": "audio"
+                        },
+                        {
+                            "source": "asset://source-video",
+                            "media_type": "video"
+                        }
+                    ]),
+                ),
+            ]),
+            vec![
+                fixture_json(&json!({"id": "mini-audio-task"})),
+                fixture_json(&json!({
+                    "status": "succeeded",
+                    "content": {"video_url": "https://media.example/audio-driven.mp4"}
+                })),
+                fixture_media("video/mp4", b"audio-driven-video"),
+            ],
+        );
+        let HttpBody::Json(audio_body) = &audio_requests[0].body else {
+            panic!("Seedance Mini audio-driven request must be JSON");
+        };
+        assert_eq!(
+            audio_body.pointer("/content/1/role"),
+            Some(&json!("reference_audio"))
+        );
+        assert_eq!(
+            audio_body.pointer("/content/2/role"),
+            Some(&json!("reference_video"))
+        );
+    }
+
+    #[test]
+    fn seedance_mini_submits_web_search_with_references_and_preserves_remote_failure() {
+        let arguments = Map::from_iter([
+            ("prompt".to_owned(), json!("")),
+            ("intent".to_owned(), json!("generate")),
+            (
+                "references".to_owned(),
+                json!([{
+                    "source": "",
+                    "media_type": "audio"
+                }]),
+            ),
+            ("tools".to_owned(), json!([{"type": "web_search"}])),
+        ]);
+        let (result, requests, remaining) = execute_fixture(
+            ModelKind::Video,
+            "doubao-seedance-2-0-mini-260615",
+            &arguments,
+            vec![
+                fixture_json(&json!({"id": "mini-rejected-task"})),
+                fixture_json(&json!({
+                    "status": "failed",
+                    "error": {
+                        "code": "InvalidParameter",
+                        "message": "web_search requires a pure-text request"
+                    }
+                })),
+            ],
+        );
+
+        assert_eq!(remaining, 0);
+        assert_eq!(requests.len(), 2);
+        assert_eq!(requests[0].method, HttpMethod::Post);
+        assert_eq!(
+            requests[0].url,
+            "https://model.example/v1/contents/generations/tasks"
+        );
+        assert_eq!(requests[1].method, HttpMethod::Get);
+        assert_eq!(
+            requests[1].url,
+            "https://model.example/v1/contents/generations/tasks/mini-rejected-task"
+        );
+        let HttpBody::Json(body) = &requests[0].body else {
+            panic!("Seedance Mini rejected request must be JSON");
+        };
+        assert_eq!(body.get("tools"), Some(&json!([{"type": "web_search"}])));
+        assert_eq!(body.pointer("/content/0/text"), Some(&json!("")));
+        assert_eq!(body.pointer("/content/1/audio_url/url"), Some(&json!("")));
+        assert_eq!(
+            body.pointer("/content/1/role"),
+            Some(&json!("reference_audio"))
+        );
+        let error = result.expect_err("remote Mini rejection must remain an error");
+        assert_eq!(error.code(), "generation_task_failed");
+        assert!(error.message().contains("InvalidParameter"));
+        assert!(
+            error
+                .message()
+                .contains("web_search requires a pure-text request")
+        );
+    }
+
+    #[test]
+    fn seedance_mini_rejects_unreachable_local_video_and_unknown_reference_children() {
+        for (arguments, expected_code) in [
+            (
+                Map::from_iter([
+                    ("prompt".to_owned(), json!("extend this clip")),
+                    ("intent".to_owned(), json!("extend")),
+                    (
+                        "references".to_owned(),
+                        json!([{"source": "local/source.mp4", "media_type": "video"}]),
+                    ),
+                ]),
+                "video_reference_upload_unavailable",
+            ),
+            (
+                Map::from_iter([
+                    ("prompt".to_owned(), json!("animate this image")),
+                    ("intent".to_owned(), json!("generate")),
+                    (
+                        "references".to_owned(),
+                        json!([{
+                            "source": "data:image/png;base64,iVBORw0KGgo=",
+                            "media_type": "image",
+                            "label": "unsupported child"
+                        }]),
+                    ),
+                ]),
+                "generation_argument_invalid",
+            ),
+            (
+                Map::from_iter([
+                    ("prompt".to_owned(), json!("animate")),
+                    ("intent".to_owned(), json!("unknown-intent")),
+                ]),
+                "generation_argument_invalid",
+            ),
+        ] {
+            let (result, requests, remaining) = execute_fixture(
+                ModelKind::Video,
+                "doubao-seedance-2-0-mini-260615",
+                &arguments,
+                Vec::new(),
+            );
+            assert_eq!(result.unwrap_err().code(), expected_code);
+            assert!(requests.is_empty());
+            assert_eq!(remaining, 0);
+        }
     }
 
     #[test]

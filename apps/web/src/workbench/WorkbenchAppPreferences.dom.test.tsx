@@ -15,21 +15,48 @@ import {
   createCanvasEditorRuntime,
   type CanvasEditorRuntime
 } from './canvas/runtime/CanvasEditorRuntime';
+import {
+  createWorkbenchProjectProjection,
+  type WorkbenchProjectProjection
+} from './services/WorkbenchProjectProjection.js';
 
 type WorkbenchAppComponent = (typeof import('./WorkbenchApp'))['WorkbenchApp'];
 
 const apiState = vi.hoisted(() => {
   const state = {
     api: undefined as WorkbenchApiClient | undefined,
+    projectProjection: undefined as WorkbenchProjectProjection | undefined,
     listeners: new Set<(event: WorkbenchEvent) => void>(),
-    detachedListeners: new Set<() => void>()
+    connectionListeners: new Set<(error: Error) => void>()
   };
   const client = new Proxy({} as WorkbenchApiClient, {
     get(_target, property) {
       if (!state.api) {
         throw new Error('WorkbenchApp test API was not configured.');
       }
-      return Reflect.get(state.api, property, state.api);
+      if (property === 'projectProjection') {
+        if (!state.projectProjection) {
+          throw new Error('WorkbenchApp test Project Projection was not configured.');
+        }
+        return state.projectProjection;
+      }
+      const value = Reflect.get(state.api, property, state.api);
+      if ((property === 'openProject' || property === 'openProjectFromPicker') && typeof value === 'function') {
+        return async (...args: unknown[]) => {
+          const result = await Reflect.apply(value, state.api, args) as Record<string, unknown>;
+          if (
+            state.projectProjection
+            && typeof result.projectId === 'string'
+            && typeof result.projectRevision === 'number'
+            && result.snapshot
+            && result.workingCopies
+          ) {
+            state.projectProjection.acceptBoundProject(result as never);
+          }
+          return result;
+        };
+      }
+      return value;
     }
   });
   return Object.assign(state, { client });
@@ -83,9 +110,12 @@ describe('WorkbenchApp preferences and project behavior', () => {
   });
 
   beforeEach(() => {
+    apiState.projectProjection = createWorkbenchProjectProjection();
     apiState.listeners.clear();
-    apiState.detachedListeners.clear();
+    apiState.connectionListeners.clear();
     document.documentElement.removeAttribute('data-theme');
+    document.documentElement.style.setProperty('--db-text', '#ffffff');
+    document.documentElement.style.setProperty('--db-text-muted', 'rgb(255 255 255 / 72%)');
     window.sessionStorage.clear();
     delete window.debruteShell;
     vi.stubGlobal('matchMedia', () => ({
@@ -99,11 +129,13 @@ describe('WorkbenchApp preferences and project behavior', () => {
     vi.restoreAllMocks();
     vi.unstubAllGlobals();
     apiState.listeners.clear();
-    apiState.detachedListeners.clear();
     apiState.api = undefined;
+    apiState.projectProjection = undefined;
     canvasRuntimeState.runtime?.dispose();
     canvasRuntimeState.runtime = undefined;
     document.documentElement.removeAttribute('data-theme');
+    document.documentElement.style.removeProperty('--db-text');
+    document.documentElement.style.removeProperty('--db-text-muted');
     delete window.debruteShell;
   });
 
@@ -207,7 +239,7 @@ describe('WorkbenchApp preferences and project behavior', () => {
     await unmount(root, container);
   });
 
-  it('keeps one Workbench event subscription when the initial project opens', async () => {
+  it('replaces the Project-scoped event subscription when the initial generation opens', async () => {
     const { container, root } = await renderWorkbenchApp('/projects/project-1');
 
     await act(async () => {
@@ -216,7 +248,7 @@ describe('WorkbenchApp preferences and project behavior', () => {
     });
 
     expect(apiState.api!.openProject).toHaveBeenCalledWith({ projectId: 'project-1' });
-    expect(apiState.api!.onEvent).toHaveBeenCalledTimes(1);
+    expect(apiState.api!.onEvent).toHaveBeenCalledTimes(2);
     expect(apiState.listeners.size).toBe(1);
 
     await unmount(root, container);
@@ -244,14 +276,27 @@ describe('WorkbenchApp preferences and project behavior', () => {
     const { container, root } = await renderWorkbenchApp('/projects/project-1');
     await act(async () => {
       await Promise.resolve();
-      for (const listener of apiState.detachedListeners) listener();
+      detachCurrentProject();
     });
 
     expect(container.querySelector('[data-testid="workbench-detached-overlay"]')?.textContent)
       .toContain('active in another Workbench');
     expect(container.textContent).toContain('Demo');
     await unmount(root, container);
-    expect(apiState.detachedListeners.size).toBe(0);
+  });
+
+  it('keeps the last accepted Project visible when its connection fails', async () => {
+    const { container, root } = await renderWorkbenchApp('/projects/project-1');
+
+    await act(async () => {
+      endCurrentConnection(new Error('revision gap'));
+      await Promise.resolve();
+    });
+
+    expect(container.querySelector('[data-testid="workbench-connection-ended-overlay"]')?.textContent)
+      .toContain('revision gap');
+    expect(container.textContent).toContain('Demo');
+    await unmount(root, container);
   });
 
   it('requires an explicit Open Here action when Desktop opens a Project owned by Web', async () => {
@@ -304,7 +349,7 @@ describe('WorkbenchApp preferences and project behavior', () => {
     const { container, root } = await renderWorkbenchApp('/projects/project-1', { openProject });
 
     await act(async () => {
-      for (const listener of apiState.detachedListeners) listener();
+      detachCurrentProject();
       await Promise.resolve();
     });
     expect(container.querySelector('[data-testid="workbench-detached-overlay"]')).not.toBeNull();
@@ -317,6 +362,99 @@ describe('WorkbenchApp preferences and project behavior', () => {
 
     expect(openProject).toHaveBeenLastCalledWith({ projectRoot: '/projects/second' });
     expect(container.querySelector('[data-testid="workbench-detached-overlay"]')).toBeNull();
+    await unmount(root, container);
+  });
+
+  it('shows Project replacement opening and refuses new Canvas path drops', async () => {
+    let openProjectRequested: ((projectRoot: string) => void) | undefined;
+    const replacement = deferred<Awaited<ReturnType<WorkbenchApiClient['openProject']>>>();
+    const addProjectPathToCanvasMap = vi.fn(async () => ({
+      projectId: 'project-1',
+      projectRevision: 2,
+      canvasId: 'canvas-1',
+      projectRelativePath: 'flow/new.png'
+    }));
+    window.debruteShell = shellApiFixture({
+      onOpenProjectRequested: (listener) => {
+        openProjectRequested = listener;
+        return () => { openProjectRequested = undefined; };
+      }
+    });
+    const openProject = vi.fn<WorkbenchApiClient['openProject']>((input) => 'projectRoot' in input
+      ? replacement.promise
+      : Promise.resolve({
+          projectId: 'project-1',
+          projectRevision: 1,
+          snapshot: stackOrderSnapshotFixture(),
+          workingCopies: emptyWorkingCopies()
+        }));
+    const { container, root } = await renderWorkbenchApp('/projects/project-1', {
+      openProject,
+      addProjectPathToCanvasMap
+    });
+
+    await act(async () => {
+      openProjectRequested?.('/projects/second');
+      await Promise.resolve();
+    });
+
+    expect(container.querySelector('[data-testid="workbench-project-opening"]')?.textContent)
+      .toContain('Opening project');
+
+    const drop = new Event('drop', { bubbles: true, cancelable: true });
+    Object.defineProperty(drop, 'dataTransfer', {
+      value: {
+        getData: () => JSON.stringify([{
+          kind: 'file',
+          projectRelativePath: 'flow/new.png'
+        }])
+      }
+    });
+    await act(async () => {
+      container.querySelector('[data-testid="canvas-surface"]')?.dispatchEvent(drop);
+      await Promise.resolve();
+    });
+
+    expect(addProjectPathToCanvasMap).not.toHaveBeenCalled();
+
+    await act(async () => {
+      replacement.resolve({
+        projectId: 'project-2',
+        projectRevision: 1,
+        snapshot: snapshotFixture(),
+        workingCopies: emptyWorkingCopies()
+      });
+      await Promise.resolve();
+    });
+
+    expect(container.querySelector('[data-testid="workbench-project-opening"]')).toBeNull();
+    await unmount(root, container);
+  });
+
+  it('recreates Project-scoped presentation when a new binding generation is accepted', async () => {
+    const { container, root } = await renderWorkbenchApp('/projects/project-1');
+    await act(async () => {
+      requireButton(container, 'Terminal').click();
+    });
+    expect(container.querySelector('[data-testid="floating-panel-terminal"]')).not.toBeNull();
+
+    const secondSnapshot = snapshotFixture();
+    secondSnapshot.metadata.project = {
+      ...secondSnapshot.metadata.project,
+      id: 'project-2',
+      name: 'Second Project'
+    };
+    await act(async () => {
+      apiState.projectProjection?.acceptBoundProject({
+        projectId: 'project-2',
+        projectRevision: 1,
+        snapshot: secondSnapshot,
+        workingCopies: emptyWorkingCopies()
+      });
+    });
+
+    expect(container.querySelector('[data-testid="floating-panel-terminal"]')).toBeNull();
+    expect(container.querySelector('.workbench-titlebar__title')?.textContent).toBe('Second Project');
     await unmount(root, container);
   });
 
@@ -658,8 +796,25 @@ async function unmount(root: Root, container: HTMLDivElement): Promise<void> {
 }
 
 function emitWorkbenchEvent(event: WorkbenchEvent): void {
+  if ('projectId' in event && 'projectRevision' in event) {
+    apiState.projectProjection?.acceptProjectEvent(event);
+  }
   for (const listener of apiState.listeners) {
     listener(event);
+  }
+}
+
+function detachCurrentProject(): void {
+  const state = apiState.projectProjection?.getState();
+  if (state && state.status === 'bound') {
+    apiState.projectProjection?.detachProject(state.projectId);
+  }
+}
+
+function endCurrentConnection(error: Error): void {
+  apiState.projectProjection?.endConnection(error);
+  for (const listener of apiState.connectionListeners) {
+    listener(error);
   }
 }
 
@@ -704,11 +859,10 @@ function apiFixture(overrides: Partial<WorkbenchApiClient> = {}): WorkbenchApiCl
       listener({ type: 'product.changed', product: productStateFixture() });
       return () => apiState.listeners.delete(listener);
     }),
-    onProjectDetached: vi.fn((listener: () => void) => {
-      apiState.detachedListeners.add(listener);
-      return () => apiState.detachedListeners.delete(listener);
+    onConnectionEnded: vi.fn((listener: (error: Error) => void) => {
+      apiState.connectionListeners.add(listener);
+      return () => apiState.connectionListeners.delete(listener);
     }),
-    onConnectionEnded: vi.fn(() => () => undefined),
     checkProductUpdate: vi.fn(async () => ({ ok: true as const })),
     applyProductUpdate: vi.fn(async () => ({ ok: true as const })),
     integrationsRescan: vi.fn(async () => ({ ok: true as const })),

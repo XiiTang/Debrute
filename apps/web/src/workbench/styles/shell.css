@@ -36,6 +36,25 @@
   pointer-events: auto;
 }
 
+.workbench-project-opening-indicator {
+  position: fixed;
+  top: calc(var(--db-titlebar-height, 38px) + 10px);
+  left: 50%;
+  z-index: var(--db-z-overlays);
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  padding: 7px 11px;
+  border: 1px solid var(--db-border);
+  border-radius: var(--db-radius-lg);
+  background: color-mix(in srgb, var(--db-surface-2) 92%, transparent);
+  color: var(--db-text-muted);
+  font-size: 12px;
+  box-shadow: var(--db-shadow-floating);
+  pointer-events: none;
+  transform: translateX(-50%);
+}
+
 .workbench-detached-overlay {
   position: fixed;
   inset: var(--db-titlebar-height, 38px) 0 0;

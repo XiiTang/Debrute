@@ -12,20 +12,36 @@ use super::{
 
 mod seedance_2;
 mod seedance_2_fast;
+mod seedance_2_mini;
 
 pub(crate) fn execute(
     mut context: ExecutionContext<'_>,
 ) -> Result<ModelExecution, GenerationError> {
     let model = context.model.model_id.as_str();
-    let result = match model {
-        "doubao-seedance-2-0-260128" => seedance_2::execute(&mut context),
-        "doubao-seedance-2-0-fast-260128" => seedance_2_fast::execute(&mut context),
-        _ => Err(GenerationError::new(
+    let adapter = adapter_for(model).ok_or_else(|| {
+        GenerationError::new(
             "video_model_unavailable",
             format!("Video model adapter is unavailable: {model}"),
-        )),
-    }?;
+        )
+    })?;
+    let result = adapter(&mut context)?;
     execute_result(result.payloads, result.safe_request, context)
+}
+
+type VideoAdapter = for<'a> fn(&mut ExecutionContext<'a>) -> Result<VideoResult, GenerationError>;
+
+fn adapter_for(model: &str) -> Option<VideoAdapter> {
+    match model {
+        "doubao-seedance-2-0-260128" => Some(seedance_2::execute),
+        "doubao-seedance-2-0-fast-260128" => Some(seedance_2_fast::execute),
+        "doubao-seedance-2-0-mini-260615" => Some(seedance_2_mini::execute),
+        _ => None,
+    }
+}
+
+#[cfg(test)]
+pub(crate) fn has_adapter(model: &str) -> bool {
+    adapter_for(model).is_some()
 }
 
 struct VideoResult {

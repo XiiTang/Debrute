@@ -2,13 +2,13 @@ import { describe, expect, it, vi } from 'vitest';
 import type { WorkbenchProjectSessionSnapshot } from '@debrute/app-protocol';
 import type { CanvasProjection } from '@debrute/canvas-core';
 import type { CanvasEditorRuntime } from '../canvas/runtime/CanvasEditorRuntime';
-import type { WorkbenchContextMenuCommand } from '../shell/contextMenu';
-import { runWorkbenchContextMenuCommand } from './workbenchContextMenuCommands';
+import type { ProjectPathCommand } from '../shell/contextMenu';
+import { runProjectPathCommand } from './workbenchContextMenuCommands';
 
 describe('workbench context menu commands', () => {
   it('confirms permanent delete before deleting', () => {
     const deleteEntriesPermanently = vi.fn();
-    runWorkbenchContextMenuCommand(commandInput({
+    runProjectPathCommand(commandInput({
       command: 'delete-permanently',
       actions: {},
       explorerCommands: { deleteEntriesPermanently },
@@ -20,7 +20,7 @@ describe('workbench context menu commands', () => {
 
   it('runs trash delete for the visible Delete command', () => {
     const trashEntries = vi.fn();
-    runWorkbenchContextMenuCommand(commandInput({
+    runProjectPathCommand(commandInput({
       command: 'delete',
       actions: {},
       explorerCommands: { trashEntries }
@@ -35,13 +35,13 @@ describe('workbench context menu commands', () => {
     const copyEntries = vi.fn();
     const trashEntries = vi.fn();
 
-    runWorkbenchContextMenuCommand(commandInput({
+    runProjectPathCommand(commandInput({
       command: 'copy',
       target: rootTarget(),
       actions: {},
       explorerCommands: { copyEntries, trashEntries }
     }));
-    runWorkbenchContextMenuCommand(commandInput({
+    runProjectPathCommand(commandInput({
       command: 'delete',
       target: rootTarget(),
       actions: {},
@@ -59,7 +59,7 @@ describe('workbench context menu commands', () => {
       '/tmp/debrute-project/assets'
     ]);
 
-    runWorkbenchContextMenuCommand(commandInput({
+    runProjectPathCommand(commandInput({
       command: 'copy-path',
       actions: {},
       explorerCommands: { copyAbsolutePaths },
@@ -90,7 +90,7 @@ describe('workbench context menu commands', () => {
   it('opens terminal in a directory from the Explorer context menu', () => {
     const openTerminalPanel = vi.fn();
 
-    runWorkbenchContextMenuCommand(commandInput({
+    runProjectPathCommand(commandInput({
       command: 'open-terminal',
       actions: {
         openTerminalPanel
@@ -110,7 +110,7 @@ describe('workbench context menu commands', () => {
   it('opens terminal in a file parent directory from the Explorer context menu', () => {
     const openTerminalPanel = vi.fn();
 
-    runWorkbenchContextMenuCommand(commandInput({
+    runProjectPathCommand(commandInput({
       command: 'open-terminal',
       actions: {
         openTerminalPanel
@@ -130,7 +130,7 @@ describe('workbench context menu commands', () => {
   it('opens terminal in the project root from the Explorer root context menu', () => {
     const openTerminalPanel = vi.fn();
 
-    runWorkbenchContextMenuCommand(commandInput({
+    runProjectPathCommand(commandInput({
       command: 'open-terminal',
       actions: {
         openTerminalPanel
@@ -144,7 +144,7 @@ describe('workbench context menu commands', () => {
   it('does not paste when the internal clipboard has no entries', async () => {
     const pasteEntries = vi.fn();
 
-    runWorkbenchContextMenuCommand(commandInput({
+    runProjectPathCommand(commandInput({
       command: 'paste',
       actions: {},
       explorerCommands: { pasteEntries },
@@ -164,7 +164,7 @@ describe('workbench context menu commands', () => {
     const pasteEntries = vi.fn();
     const confirmMoveOverwrite = vi.fn(() => true);
 
-    runWorkbenchContextMenuCommand(commandInput({
+    runProjectPathCommand(commandInput({
       command: 'paste',
       actions: {},
       explorerCommands: { pasteEntries },
@@ -209,7 +209,7 @@ describe('workbench context menu commands', () => {
   it('sets the file clipboard from a Canvas Cut command', () => {
     const cutEntries = vi.fn();
 
-    runWorkbenchContextMenuCommand(commandInput({
+    runProjectPathCommand(commandInput({
       command: 'cut',
       target: { source: 'canvas', kind: 'file', projectRelativePath: 'flow/cover.png' },
       activeProjection: canvasProjectionFixture('canvas-1', {
@@ -232,7 +232,7 @@ describe('workbench context menu commands', () => {
     const copiedText: string[] = [];
     const copyAbsolutePaths = vi.fn(async () => ['/tmp/debrute-project/flow/cover.png']);
 
-    runWorkbenchContextMenuCommand(commandInput({
+    runProjectPathCommand(commandInput({
       command: 'copy-path',
       target: { source: 'canvas', kind: 'file', projectRelativePath: 'flow/cover.png' },
       actions: {},
@@ -253,7 +253,7 @@ describe('workbench context menu commands', () => {
   it('opens a terminal in a Canvas directory node', () => {
     const openTerminalPanel = vi.fn();
 
-    runWorkbenchContextMenuCommand(commandInput({
+    runProjectPathCommand(commandInput({
       command: 'open-terminal',
       target: { source: 'canvas', kind: 'directory', projectRelativePath: 'assets' },
       actions: {
@@ -267,7 +267,7 @@ describe('workbench context menu commands', () => {
   it('opens a terminal in a Canvas file parent directory', () => {
     const openTerminalPanel = vi.fn();
 
-    runWorkbenchContextMenuCommand(commandInput({
+    runProjectPathCommand(commandInput({
       command: 'open-terminal',
       target: { source: 'canvas', kind: 'file', projectRelativePath: 'flow/cover.png' },
       actions: {
@@ -285,7 +285,7 @@ describe('workbench context menu commands', () => {
       entries: [{ projectRelativePath: 'briefs/concept.md', kind: 'file' as const }]
     };
 
-    runWorkbenchContextMenuCommand(commandInput({
+    runProjectPathCommand(commandInput({
       command: 'paste',
       target: { source: 'canvas', kind: 'directory', projectRelativePath: 'assets' },
       actions: {},
@@ -304,7 +304,7 @@ describe('workbench context menu commands', () => {
   it('does not paste from a stale Canvas file target command', async () => {
     const pasteEntries = vi.fn();
 
-    runWorkbenchContextMenuCommand(commandInput({
+    runProjectPathCommand(commandInput({
       command: 'paste',
       target: { source: 'canvas', kind: 'file', projectRelativePath: 'flow/cover.png' },
       actions: {},
@@ -323,7 +323,7 @@ describe('workbench context menu commands', () => {
   it('reveals a Canvas path in the system file manager', async () => {
     const revealEntry = vi.fn();
 
-    runWorkbenchContextMenuCommand(commandInput({
+    runProjectPathCommand(commandInput({
       command: 'reveal-in-system-file-manager',
       target: { source: 'canvas', kind: 'file', projectRelativePath: 'flow/cover.png' },
       actions: {},
@@ -341,7 +341,7 @@ describe('workbench context menu commands', () => {
   it('deletes a Canvas path through the project trash flow', async () => {
     const trashEntries = vi.fn();
 
-    runWorkbenchContextMenuCommand(commandInput({
+    runProjectPathCommand(commandInput({
       command: 'delete',
       target: { source: 'canvas', kind: 'file', projectRelativePath: 'flow/cover.png' },
       actions: {},
@@ -372,7 +372,7 @@ describe('workbench context menu commands', () => {
     });
 
     for (const command of ['cut', 'copy', 'copy-relative-path', 'delete'] as const) {
-      runWorkbenchContextMenuCommand(commandInput({
+      runProjectPathCommand(commandInput({
         command,
         target: rootTarget,
         activeProjection: rootProjection,
@@ -395,7 +395,7 @@ describe('workbench context menu commands', () => {
     const openInspectorPanel = vi.fn();
     const setSelection = vi.fn<CanvasEditorRuntime['setSelection']>();
 
-    runWorkbenchContextMenuCommand(commandInput({
+    runProjectPathCommand(commandInput({
       command: 'show-details',
       target: {
         source: 'explorer',
@@ -443,7 +443,7 @@ describe('workbench context menu commands', () => {
       })
     }));
 
-    runWorkbenchContextMenuCommand(commandInput({
+    runProjectPathCommand(commandInput({
       command: 'reset-auto-layout',
       target: {
         source: 'explorer',
@@ -474,28 +474,12 @@ describe('workbench context menu commands', () => {
     const resetCanvasNodeLayouts = vi.fn(async () => ({
       projectId: 'project-live-id',
       projectRevision: 2,
-      resetCount: 1,
-      canvas: {
-        id: 'canvas-1',
-        name: 'canvas-1',
-        nodeElements: [],
-        annotations: [],
-        preferences: {
-          showDiagnostics: true
-        }
-      },
-      projection: canvasProjectionFixture('canvas-1', {
-        projectRelativePath: 'flow/cover.png',
-        x: 200,
-        y: 100,
-        width: 100,
-        height: 50
-      })
+      resetCount: 1
     }));
     const setCamera = vi.fn<CanvasEditorRuntime['camera']['setCamera']>();
     const setSelection = vi.fn<CanvasEditorRuntime['setSelection']>();
 
-    runWorkbenchContextMenuCommand(commandInput({
+    runProjectPathCommand(commandInput({
       command: 'reset-auto-layout',
       target: { source: 'canvas', kind: 'file', projectRelativePath: 'flow/cover.png' },
       activeProjection: canvasProjectionFixture('canvas-1', {
@@ -509,7 +493,16 @@ describe('workbench context menu commands', () => {
       activeCanvasRuntime: canvasRuntimeFixture({ setSelection, setCamera }),
       actions: {
         resetCanvasNodeLayouts
-      }
+      },
+      getProjectSnapshot: () => snapshotFixture({
+        projections: [canvasProjectionFixture('canvas-1', {
+          projectRelativePath: 'flow/cover.png',
+          x: 200,
+          y: 100,
+          width: 100,
+          height: 50
+        })]
+      })
     }));
 
     await Promise.resolve();
@@ -525,28 +518,11 @@ describe('workbench context menu commands', () => {
     const resetCanvasNodeLayouts = vi.fn(async () => ({
       projectId: 'project-live-id',
       projectRevision: 2,
-      resetCount: 1,
-      canvas: {
-        id: 'canvas-1',
-        name: 'canvas-1',
-        nodeElements: [],
-        annotations: [],
-        preferences: {
-          showDiagnostics: true
-        }
-      },
-      projection: canvasProjectionFixture('canvas-1', {
-        projectRelativePath: 'flow',
-        nodeKind: 'directory',
-        x: 200,
-        y: 100,
-        width: 120,
-        height: 80
-      })
+      resetCount: 1
     }));
     const setCamera = vi.fn<CanvasEditorRuntime['camera']['setCamera']>();
 
-    runWorkbenchContextMenuCommand(commandInput({
+    runProjectPathCommand(commandInput({
       command: 'reset-auto-layout',
       target: { source: 'canvas', kind: 'directory', projectRelativePath: 'flow' },
       activeProjection: canvasProjectionFixture('canvas-1', {
@@ -561,7 +537,17 @@ describe('workbench context menu commands', () => {
       activeCanvasRuntime: canvasRuntimeFixture({ setCamera }),
       actions: {
         resetCanvasNodeLayouts
-      }
+      },
+      getProjectSnapshot: () => snapshotFixture({
+        projections: [canvasProjectionFixture('canvas-1', {
+          projectRelativePath: 'flow',
+          nodeKind: 'directory',
+          x: 200,
+          y: 100,
+          width: 120,
+          height: 80
+        })]
+      })
     }));
 
     await Promise.resolve();
@@ -576,28 +562,11 @@ describe('workbench context menu commands', () => {
     const resetCanvasNodeLayouts = vi.fn(async () => ({
       projectId: 'project-live-id',
       projectRevision: 2,
-      resetCount: 1,
-      canvas: {
-        id: 'canvas-1',
-        name: 'canvas-1',
-        nodeElements: [],
-        annotations: [],
-        preferences: {
-          showDiagnostics: true
-        }
-      },
-      projection: canvasProjectionFixture('canvas-1', {
-        projectRelativePath: '',
-        nodeKind: 'directory',
-        x: 200,
-        y: 100,
-        width: 120,
-        height: 80
-      })
+      resetCount: 1
     }));
     const setCamera = vi.fn<CanvasEditorRuntime['camera']['setCamera']>();
 
-    runWorkbenchContextMenuCommand(commandInput({
+    runProjectPathCommand(commandInput({
       command: 'reset-auto-layout',
       target: { source: 'canvas', kind: 'directory', projectRelativePath: '' },
       activeProjection: canvasProjectionFixture('canvas-1', {
@@ -612,7 +581,17 @@ describe('workbench context menu commands', () => {
       activeCanvasRuntime: canvasRuntimeFixture({ setCamera }),
       actions: {
         resetCanvasNodeLayouts
-      }
+      },
+      getProjectSnapshot: () => snapshotFixture({
+        projections: [canvasProjectionFixture('canvas-1', {
+          projectRelativePath: '',
+          nodeKind: 'directory',
+          x: 200,
+          y: 100,
+          width: 120,
+          height: 80
+        })]
+      })
     }));
 
     await Promise.resolve();
@@ -625,23 +604,24 @@ describe('workbench context menu commands', () => {
 });
 
 function commandInput(overrides: {
-  command: WorkbenchContextMenuCommand;
-  actions?: Partial<Parameters<typeof runWorkbenchContextMenuCommand>[0]['actions']>;
-  explorerCommands?: Partial<Parameters<typeof runWorkbenchContextMenuCommand>[0]['explorerCommands']>;
-  target?: Parameters<typeof runWorkbenchContextMenuCommand>[0]['contextMenu'] extends infer T
+  command: ProjectPathCommand;
+  actions?: Partial<Parameters<typeof runProjectPathCommand>[0]['actions']>;
+  explorerCommands?: Partial<Parameters<typeof runProjectPathCommand>[0]['explorerCommands']>;
+  target?: Parameters<typeof runProjectPathCommand>[0]['contextMenu'] extends infer T
     ? T extends { target: infer U }
       ? U
       : never
       : never;
-  activeProjection?: Parameters<typeof runWorkbenchContextMenuCommand>[0]['activeProjection'];
-  activeCanvasRuntime?: Partial<Parameters<typeof runWorkbenchContextMenuCommand>[0]['activeCanvasRuntime']>;
-  fileClipboard?: Parameters<typeof runWorkbenchContextMenuCommand>[0]['fileClipboard'];
+  activeProjection?: Parameters<typeof runProjectPathCommand>[0]['activeProjection'];
+  activeCanvasRuntime?: Partial<Parameters<typeof runProjectPathCommand>[0]['activeCanvasRuntime']>;
+  fileClipboard?: Parameters<typeof runProjectPathCommand>[0]['fileClipboard'];
   snapshot?: WorkbenchProjectSessionSnapshot;
-  copyText?: Parameters<typeof runWorkbenchContextMenuCommand>[0]['copyText'];
-  openInspectorPanel?: Parameters<typeof runWorkbenchContextMenuCommand>[0]['openInspectorPanel'];
-  confirmPermanentDelete?: Parameters<typeof runWorkbenchContextMenuCommand>[0]['confirmPermanentDelete'];
+  getProjectSnapshot?: () => WorkbenchProjectSessionSnapshot | undefined;
+  copyText?: Parameters<typeof runProjectPathCommand>[0]['copyText'];
+  openInspectorPanel?: Parameters<typeof runProjectPathCommand>[0]['openInspectorPanel'];
+  confirmPermanentDelete?: Parameters<typeof runProjectPathCommand>[0]['confirmPermanentDelete'];
   confirmMoveOverwrite?: (input: { entries: Array<{ projectRelativePath: string; kind: 'file' | 'directory' }>; targetDirectoryProjectRelativePath: string }) => boolean;
-}): Parameters<typeof runWorkbenchContextMenuCommand>[0] {
+}): Parameters<typeof runProjectPathCommand>[0] {
   return {
     command: overrides.command,
     contextMenu: {
@@ -655,12 +635,12 @@ function commandInput(overrides: {
       position: { x: 0, y: 0 }
     },
     activeProjection: overrides.activeProjection,
-    activeCanvasRuntime: overrides.activeCanvasRuntime as Parameters<typeof runWorkbenchContextMenuCommand>[0]['activeCanvasRuntime'],
+    activeCanvasRuntime: overrides.activeCanvasRuntime as Parameters<typeof runProjectPathCommand>[0]['activeCanvasRuntime'],
     fileClipboard: overrides.fileClipboard,
     actions: {
       openTerminalPanel: () => undefined,
       ...overrides.actions
-    } as Parameters<typeof runWorkbenchContextMenuCommand>[0]['actions'],
+    } as Parameters<typeof runProjectPathCommand>[0]['actions'],
     explorerCommands: {
       beginCreateFile: () => undefined,
       beginCreateDirectory: () => undefined,
@@ -679,7 +659,7 @@ function commandInput(overrides: {
     closeContextMenu: () => undefined,
     openInspectorPanel: overrides.openInspectorPanel ?? (() => undefined),
     confirmPermanentDelete: overrides.confirmPermanentDelete ?? (() => true),
-    projectSnapshot: overrides.snapshot,
+    getProjectSnapshot: overrides.getProjectSnapshot ?? (() => overrides.snapshot),
     confirmMoveOverwrite: overrides.confirmMoveOverwrite ?? (() => true),
     errorLabels: {
       copyPathFailed: 'Copy Path failed',
@@ -756,7 +736,7 @@ function canvasProjectionFixture(
   };
 }
 
-function rootTarget(): NonNullable<Parameters<typeof runWorkbenchContextMenuCommand>[0]['contextMenu']>['target'] {
+function rootTarget(): NonNullable<Parameters<typeof runProjectPathCommand>[0]['contextMenu']>['target'] {
   return {
     source: 'explorer',
     targetKind: 'root',

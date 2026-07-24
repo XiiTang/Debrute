@@ -31,8 +31,8 @@ fn defaults_recent_projects_and_model_settings_match_the_final_global_contract()
     assert_eq!(initial.workbench.default_frontend, DefaultFrontend::Desktop);
     assert!(initial.chrome.recent_projects.is_empty());
     assert!(initial.adobe_bridge.enabled);
-    assert_eq!(initial.models.image.len(), 10);
-    assert_eq!(initial.models.video.len(), 2);
+    assert_eq!(initial.models.image.len(), 13);
+    assert_eq!(initial.models.video.len(), 3);
     assert_eq!(initial.models.audio.len(), 16);
 
     for index in 0..14 {
@@ -319,8 +319,8 @@ fn persisted_global_files_are_closed_and_are_never_repaired_on_read() {
 #[test]
 fn bundled_catalog_keeps_image_video_tts_music_and_sound_effect_as_closed_families() {
     let catalog = ModelCatalog::bundled().expect("bundled model catalog should parse");
-    assert_eq!(catalog.images().len(), 10);
-    assert_eq!(catalog.videos().len(), 2);
+    assert_eq!(catalog.images().len(), 13);
+    assert_eq!(catalog.videos().len(), 3);
     assert_eq!(
         catalog
             .audio()
@@ -346,7 +346,11 @@ fn bundled_catalog_keeps_image_video_tts_music_and_sound_effect_as_closed_famili
         2
     );
     assert!(catalog.contains_image("gpt-image-2"));
+    assert!(catalog.contains_image("doubao-seedream-5-0-pro-260628"));
+    assert!(catalog.contains_image("qwen-image-2.0-pro-2026-06-22"));
+    assert!(catalog.contains_image("qwen-image-2.0-2026-03-03"));
     assert!(catalog.contains_video("doubao-seedance-2-0-260128"));
+    assert!(catalog.contains_video("doubao-seedance-2-0-mini-260615"));
     assert!(catalog.contains_audio("openai-gpt-4o-mini-tts"));
     assert!(!catalog.contains_audio("gpt-image-2"));
     let image = catalog

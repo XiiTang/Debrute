@@ -1,8 +1,10 @@
 import type {
-  WorkbenchCanvasDocumentMutationResult,
-  WorkbenchProjectSessionSnapshot
+  WorkbenchCanvasDocumentMutationResult
 } from '@debrute/app-protocol';
-import type { CanvasTextViewportState } from '@debrute/canvas-core';
+import type {
+  WorkbenchProjectProjection,
+  WorkbenchTextViewportOverlayToken
+} from './WorkbenchProjectProjection.js';
 
 type CanvasTextViewportUpdateInput = {
   updates: Array<{
@@ -18,7 +20,7 @@ interface PendingCanvasTextViewportUpdate {
   scrollTop: number;
   scrollLeft: number;
   version: number;
-  scope: number;
+  overlayToken: WorkbenchTextViewportOverlayToken;
 }
 
 type CanvasTextViewportUpdateOutcome =
@@ -26,20 +28,11 @@ type CanvasTextViewportUpdateOutcome =
   | { status: 'error'; error: unknown };
 
 export interface CanvasTextViewportStateController {
-  reconcileSnapshot: (
-    snapshot: WorkbenchProjectSessionSnapshot | undefined
-  ) => WorkbenchProjectSessionSnapshot | undefined;
-  reset: () => void;
   update: (canvasId: string, input: CanvasTextViewportUpdateInput) => Promise<void>;
 }
 
 export function createCanvasTextViewportStateController(options: {
-  getAuthoritativeSnapshot: () => WorkbenchProjectSessionSnapshot | undefined;
-  commitAuthoritativeSnapshot: (
-    snapshot: WorkbenchProjectSessionSnapshot,
-    projectRevision: number
-  ) => boolean;
-  commitPresentedSnapshot: (snapshot: WorkbenchProjectSessionSnapshot) => void;
+  projectProjection: WorkbenchProjectProjection;
   updateCanvasTextViewportState: (
     canvasId: string,
     input: CanvasTextViewportUpdateInput
@@ -49,61 +42,35 @@ export function createCanvasTextViewportStateController(options: {
   const queuedUpdates = new Map<string, PendingCanvasTextViewportUpdate>();
   const outcomes = new Map<number, CanvasTextViewportUpdateOutcome>();
   let version = 0;
-  let scope = 0;
   let flushPromise: Promise<void> | undefined;
-
-  const reconcileSnapshot = (
-    snapshot: WorkbenchProjectSessionSnapshot | undefined
-  ): WorkbenchProjectSessionSnapshot | undefined => snapshot
-    ? applyCanvasTextViewportOverlays(snapshot, pendingUpdates.values())
-    : undefined;
 
   const flushPendingUpdates = async (): Promise<void> => {
     const batch = takeNextCanvasTextViewportUpdateBatch(queuedUpdates);
+    const currentState = options.projectProjection.getState();
+    const batchGeneration = batch.pending[0]?.overlayToken.generation;
+    if (currentState.status !== 'bound' || currentState.generation !== batchGeneration) {
+      completeCanvasTextViewportUpdateBatch(batch.pending, pendingUpdates, outcomes);
+      return;
+    }
     try {
-      const result = await options.updateCanvasTextViewportState(batch.canvasId, {
+      await options.updateCanvasTextViewportState(batch.canvasId, {
         updates: batch.pending.map(canvasTextViewportUpdateInput)
       });
-      if (batch.scope !== scope) {
-        return;
-      }
-      const current = options.getAuthoritativeSnapshot();
-      if (!current) {
-        throw new Error(`Cannot apply Canvas document ${result.canvas.id} without a current snapshot.`);
-      }
-      const confirmedSnapshot = applyConfirmedCanvasTextViewports(current, result, batch.pending);
+      completeCanvasTextViewportUpdateBatch(batch.pending, pendingUpdates, outcomes);
+    } catch (error) {
+      const currentState = options.projectProjection.getState();
+      const generationIsCurrent = currentState.status !== 'unbound'
+        && currentState.generation === batch.pending[0]?.overlayToken.generation;
       for (const sent of batch.pending) {
         const key = canvasTextViewportPendingUpdateKey(sent.canvasId, sent.projectRelativePath);
-        const pending = pendingUpdates.get(key);
-        if (pending?.version === sent.version) {
+        if (pendingUpdates.get(key)?.version === sent.version) {
           pendingUpdates.delete(key);
         }
-        outcomes.set(sent.version, { status: 'ok' });
-      }
-      if (!options.commitAuthoritativeSnapshot(confirmedSnapshot, result.projectRevision)) {
-        const latest = options.getAuthoritativeSnapshot();
-        if (latest) {
-          options.commitPresentedSnapshot(reconcileSnapshot(latest) as WorkbenchProjectSessionSnapshot);
-        }
-      }
-    } catch (error) {
-      if (batch.scope !== scope) {
-        return;
-      }
-      const current = options.getAuthoritativeSnapshot();
-      if (current) {
-        for (const sent of batch.pending) {
+        if (generationIsCurrent) {
           outcomes.set(sent.version, { status: 'error', error });
-          const key = canvasTextViewportPendingUpdateKey(sent.canvasId, sent.projectRelativePath);
-          if (pendingUpdates.get(key)?.version !== sent.version) {
-            continue;
-          }
-          pendingUpdates.delete(key);
-        }
-        options.commitPresentedSnapshot(reconcileSnapshot(current) as WorkbenchProjectSessionSnapshot);
-      } else {
-        for (const sent of batch.pending) {
-          outcomes.set(sent.version, { status: 'error', error });
+          options.projectProjection.rejectTextViewport(sent.overlayToken);
+        } else {
+          outcomes.set(sent.version, { status: 'ok' });
         }
       }
     }
@@ -119,11 +86,6 @@ export function createCanvasTextViewportStateController(options: {
   };
 
   const update = async (canvasId: string, input: CanvasTextViewportUpdateInput): Promise<void> => {
-    const updateScope = scope;
-    const current = options.getAuthoritativeSnapshot();
-    if (!current) {
-      throw new Error(`Cannot apply Canvas document ${canvasId} without a current snapshot.`);
-    }
     const submittedUpdates: PendingCanvasTextViewportUpdate[] = [];
     for (const update of input.updates) {
       const key = canvasTextViewportPendingUpdateKey(canvasId, update.projectRelativePath);
@@ -131,13 +93,16 @@ export function createCanvasTextViewportStateController(options: {
       if (superseded) {
         outcomes.set(superseded.version, { status: 'ok' });
       }
-      const pending = {
+      const pending: PendingCanvasTextViewportUpdate = {
         canvasId,
         projectRelativePath: update.projectRelativePath,
         scrollTop: update.scrollTop,
         scrollLeft: update.scrollLeft,
         version: version += 1,
-        scope: updateScope
+        overlayToken: options.projectProjection.presentTextViewport({
+          canvasId,
+          ...update
+        })
       };
       submittedUpdates.push(pending);
       pendingUpdates.set(key, pending);
@@ -146,12 +111,8 @@ export function createCanvasTextViewportStateController(options: {
     if (submittedUpdates.length === 0) {
       return;
     }
-    options.commitPresentedSnapshot(reconcileSnapshot(current) as WorkbenchProjectSessionSnapshot);
     try {
       for (;;) {
-        if (scope !== updateScope) {
-          return;
-        }
         const submittedOutcomes = submittedUpdates.map((update) => outcomes.get(update.version));
         const failure = submittedOutcomes.find(
           (outcome): outcome is Extract<CanvasTextViewportUpdateOutcome, { status: 'error' }> => (
@@ -174,20 +135,27 @@ export function createCanvasTextViewportStateController(options: {
   };
 
   return {
-    reconcileSnapshot,
-    reset() {
-      scope += 1;
-      pendingUpdates.clear();
-      queuedUpdates.clear();
-      outcomes.clear();
-    },
     update
   };
 }
 
+function completeCanvasTextViewportUpdateBatch(
+  pending: PendingCanvasTextViewportUpdate[],
+  pendingUpdates: Map<string, PendingCanvasTextViewportUpdate>,
+  outcomes: Map<number, CanvasTextViewportUpdateOutcome>
+): void {
+  for (const sent of pending) {
+    const key = canvasTextViewportPendingUpdateKey(sent.canvasId, sent.projectRelativePath);
+    if (pendingUpdates.get(key)?.version === sent.version) {
+      pendingUpdates.delete(key);
+    }
+    outcomes.set(sent.version, { status: 'ok' });
+  }
+}
+
 function takeNextCanvasTextViewportUpdateBatch(
   queuedUpdates: Map<string, PendingCanvasTextViewportUpdate>
-): { canvasId: string; scope: number; pending: PendingCanvasTextViewportUpdate[] } {
+): { canvasId: string; pending: PendingCanvasTextViewportUpdate[] } {
   const first = queuedUpdates.values().next().value;
   if (!first) {
     throw new Error('Cannot take a Canvas text viewport batch from an empty queue.');
@@ -198,84 +166,7 @@ function takeNextCanvasTextViewportUpdateBatch(
       queuedUpdates.delete(key);
       return update;
     });
-  return { canvasId: first.canvasId, scope: first.scope, pending };
-}
-
-function applyCanvasTextViewportOverlays(
-  snapshot: WorkbenchProjectSessionSnapshot,
-  updates: Iterable<Pick<PendingCanvasTextViewportUpdate, 'canvasId' | 'projectRelativePath' | 'scrollTop' | 'scrollLeft'>>
-): WorkbenchProjectSessionSnapshot {
-  const byKey = new Map<string, CanvasTextViewportState>();
-  for (const update of updates) {
-    byKey.set(canvasTextViewportPendingUpdateKey(update.canvasId, update.projectRelativePath), {
-      scrollTop: update.scrollTop,
-      scrollLeft: update.scrollLeft
-    });
-  }
-  if (byKey.size === 0) {
-    return snapshot;
-  }
-  return applyCanvasTextViewportValues(snapshot, byKey);
-}
-
-function applyConfirmedCanvasTextViewports(
-  snapshot: WorkbenchProjectSessionSnapshot,
-  result: WorkbenchCanvasDocumentMutationResult,
-  updates: PendingCanvasTextViewportUpdate[]
-): WorkbenchProjectSessionSnapshot {
-  const confirmed = new Map<string, CanvasTextViewportState | undefined>();
-  for (const update of updates) {
-    const node = result.canvas.nodeElements.find(
-      (candidate) => candidate.projectRelativePath === update.projectRelativePath
-    );
-    if (node) {
-      confirmed.set(
-        canvasTextViewportPendingUpdateKey(update.canvasId, update.projectRelativePath),
-        node.textViewport
-      );
-    }
-  }
-  return applyCanvasTextViewportValues(snapshot, confirmed);
-}
-
-function applyCanvasTextViewportValues(
-  snapshot: WorkbenchProjectSessionSnapshot,
-  byKey: Map<string, CanvasTextViewportState | undefined>
-): WorkbenchProjectSessionSnapshot {
-  return {
-    ...snapshot,
-    canvases: snapshot.canvases.map((canvas) => ({
-      ...canvas,
-      nodeElements: canvas.nodeElements.map((node) => applyCanvasTextViewportOverlay(
-        node,
-        byKey.has(canvasTextViewportPendingUpdateKey(canvas.id, node.projectRelativePath)),
-        byKey.get(canvasTextViewportPendingUpdateKey(canvas.id, node.projectRelativePath))
-      ))
-    })),
-    projections: snapshot.projections.map((projection) => ({
-      ...projection,
-      nodes: projection.nodes.map((node) => applyCanvasTextViewportOverlay(
-        node,
-        byKey.has(canvasTextViewportPendingUpdateKey(projection.canvasId, node.projectRelativePath)),
-        byKey.get(canvasTextViewportPendingUpdateKey(projection.canvasId, node.projectRelativePath))
-      ))
-    }))
-  };
-}
-
-function applyCanvasTextViewportOverlay<T extends { textViewport?: CanvasTextViewportState | undefined }>(
-  node: T,
-  hasViewport: boolean,
-  viewport: CanvasTextViewportState | undefined
-): T {
-  if (!hasViewport) {
-    return node;
-  }
-  if (viewport) {
-    return { ...node, textViewport: viewport };
-  }
-  const { textViewport: _textViewport, ...withoutViewport } = node;
-  return withoutViewport as T;
+  return { canvasId: first.canvasId, pending };
 }
 
 function canvasTextViewportUpdateInput(

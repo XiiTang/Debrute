@@ -61,7 +61,7 @@ function workbenchEventForType(
       type,
       projectId: 'project-live-id',
       projectRevision: 2,
-      event: { projectRelativePath: 'brief.md', type: 'changed', affects: ['content'] },
+      event: { projectRelativePath: 'brief.md' },
       snapshot
     };
   }
@@ -87,7 +87,7 @@ function snapshotFixture(projectName = 'Test Project'): WorkbenchProjectSessionS
   return {
     metadata: {
       project: {
-        id: 'project-record-id',
+        id: 'project-live-id',
         name: projectName,
         createdAt: '2026-06-12T00:00:00.000Z',
         updatedAt: '2026-06-12T00:00:00.000Z'

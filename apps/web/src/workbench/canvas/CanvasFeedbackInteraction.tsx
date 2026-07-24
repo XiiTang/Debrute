@@ -62,7 +62,6 @@ export interface CanvasFeedbackInteraction {
   handleDraft(draft: CanvasLocalFeedbackDraft): void;
   restoreWorkingCopies(workingCopies: Record<string, WorkbenchFeedbackWorkingCopy> | undefined): void;
   load(): Promise<void>;
-  reset(): void;
   applyEvent(event: WorkbenchEvent): void;
   canvas: CanvasFeedbackCanvasBinding;
 }
@@ -105,7 +104,6 @@ export function useCanvasFeedbackInteraction(input: {
   const hoveredRef = useRef(false);
   const loadEpochRef = useRef(0);
   const feedbackAcceptanceEpochRef = useRef(0);
-  const authoritativeRevisionRef = useRef<number | undefined>(undefined);
   const projectIdRef = useRef(input.projectId);
   const workingCopyCoordinatorsRef = useRef(new Map<string, {
     desired: WorkbenchFeedbackWorkingCopy | null | undefined;
@@ -187,32 +185,20 @@ export function useCanvasFeedbackInteraction(input: {
     return coordinator.running;
   }, [input.api]);
 
-  const acceptFeedback = useCallback((next: CanvasFeedbackDocument, projectRevision?: number) => {
-    if (
-      projectRevision !== undefined
-      && authoritativeRevisionRef.current !== undefined
-      && projectRevision < authoritativeRevisionRef.current
-    ) {
-      return false;
-    }
-    if (projectRevision !== undefined) {
-      authoritativeRevisionRef.current = projectRevision;
-    }
+  const acceptFeedback = useCallback((next: CanvasFeedbackDocument) => {
     feedbackAcceptanceEpochRef.current += 1;
     feedbackRef.current = next;
     setFeedback(next);
-    return true;
   }, []);
 
   const updateEntry = useCallback(async (updateInput: UpdateCanvasFeedbackEntryInput) => {
     try {
-      const result = await input.api.updateCanvasFeedbackEntry(updateInput);
-      acceptFeedback(result.feedback, result.projectRevision);
+      await input.api.updateCanvasFeedbackEntry(updateInput);
       return true;
     } catch {
       return false;
     }
-  }, [acceptFeedback, input.api]);
+  }, [input.api]);
 
   const deleteAcceptedItem = useCallback(async (itemId: string, projectRelativePath: string) => {
     const projectId = projectIdRef.current;
@@ -601,10 +587,10 @@ export function useCanvasFeedbackInteraction(input: {
       setLocalMode(draft.kind === 'pin' ? 'pin' : 'rect');
       return;
     }
-    const workingCopy: WorkbenchFeedbackWorkingCopy = {
-      ...nextComposition,
-      comment: reuseCurrent ? localValuesRef.current[itemId]?.comment ?? '' : ''
-    };
+    const workingCopy = workingCopyFromComposition(
+      nextComposition,
+      reuseCurrent ? localValuesRef.current[itemId]?.comment ?? '' : ''
+    );
     localValuesRef.current = { ...localValuesRef.current, [itemId]: workingCopy };
     setLocalValue(itemId, workingCopy);
     authoringItemIdRef.current = itemId;
@@ -643,33 +629,9 @@ export function useCanvasFeedbackInteraction(input: {
     }
   }, [acceptFeedback, input.api, input.notifyUnavailable]);
 
-  const reset = useCallback(() => {
-    loadEpochRef.current += 1;
-    feedbackAcceptanceEpochRef.current += 1;
-    authoritativeRevisionRef.current = undefined;
-    targetEpochRef.current += 1;
-    clearTargetTimer();
-    hoveredRef.current = false;
-    focusDeferredTargetRef.current = undefined;
-    focusedCapsuleIdRef.current = undefined;
-    compositionRef.current = undefined;
-    authoringItemIdRef.current = undefined;
-    feedbackRef.current = undefined;
-    localValuesRef.current = {};
-    versionsRef.current.clear();
-    input.overlayRuntime.clearFeedbackBarPlacement();
-    setFeedback(undefined);
-    setLocalValues({});
-    setTarget(undefined);
-    setLocalMode(undefined);
-    setComposition(undefined);
-    setAuthoringItemId(undefined);
-    setFocusedCapsuleId(undefined);
-  }, [clearTargetTimer, input.overlayRuntime]);
-
   const applyEvent = useCallback((event: WorkbenchEvent) => {
     if (event.type === 'canvas.feedback.changed') {
-      acceptFeedback(event.feedback, event.projectRevision);
+      acceptFeedback(event.feedback);
     }
   }, [acceptFeedback]);
 
@@ -749,7 +711,6 @@ export function useCanvasFeedbackInteraction(input: {
     handleDraft,
     restoreWorkingCopies,
     load,
-    reset,
     applyEvent,
     canvas
   }), [
@@ -774,7 +735,6 @@ export function useCanvasFeedbackInteraction(input: {
     localMode,
     authoringItemId,
     composition,
-    reset,
     restoreWorkingCopies,
     setMarks,
     target
@@ -857,16 +817,69 @@ function workingCopyFromItem(
   projectRelativePath: string,
   item: CanvasFeedbackItem
 ): WorkbenchFeedbackWorkingCopy {
-  return {
+  return workingCopyFromComposition({
     itemId: item.id,
     createdAt: item.createdAt,
     projectRelativePath,
     kind: item.kind,
     scope: item.scope,
     ...(item.scope === 'moment' ? { momentTimeSeconds: item.moment.currentTimeSeconds } : {}),
-    ...(item.kind === 'pin' || item.kind === 'region' ? { geometry: item.geometry } : {}),
-    comment: item.comment
+    ...(item.kind === 'pin' || item.kind === 'region' ? { geometry: item.geometry } : {})
+  }, item.comment);
+}
+
+function workingCopyFromComposition(
+  composition: CanvasFeedbackComposition,
+  comment: string
+): WorkbenchFeedbackWorkingCopy {
+  const base = {
+    itemId: composition.itemId,
+    createdAt: composition.createdAt,
+    projectRelativePath: composition.projectRelativePath,
+    comment
   };
+  if (composition.scope === 'file') {
+    if (composition.kind === 'comment') {
+      return { ...base, kind: 'comment', scope: 'file' };
+    }
+    if (composition.kind === 'pin' && composition.geometry?.type === 'point') {
+      return { ...base, kind: 'pin', scope: 'file', geometry: composition.geometry };
+    }
+    if (composition.kind === 'region' && composition.geometry?.type === 'rect') {
+      return { ...base, kind: 'region', scope: 'file', geometry: composition.geometry };
+    }
+    throw new Error(`Incomplete ${composition.kind} Feedback Working Copy composition.`);
+  }
+  if (composition.momentTimeSeconds === undefined) {
+    throw new Error('Moment Feedback Working Copy composition requires momentTimeSeconds.');
+  }
+  if (composition.kind === 'comment') {
+    return {
+      ...base,
+      kind: 'comment',
+      scope: 'moment',
+      momentTimeSeconds: composition.momentTimeSeconds
+    };
+  }
+  if (composition.kind === 'pin' && composition.geometry?.type === 'point') {
+    return {
+      ...base,
+      kind: 'pin',
+      scope: 'moment',
+      momentTimeSeconds: composition.momentTimeSeconds,
+      geometry: composition.geometry
+    };
+  }
+  if (composition.kind === 'region' && composition.geometry?.type === 'rect') {
+    return {
+      ...base,
+      kind: 'region',
+      scope: 'moment',
+      momentTimeSeconds: composition.momentTimeSeconds,
+      geometry: composition.geometry
+    };
+  }
+  throw new Error(`Incomplete ${composition.kind} Feedback Working Copy composition.`);
 }
 
 function addItemFromWorkingCopy(

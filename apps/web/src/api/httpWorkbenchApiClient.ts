@@ -32,19 +32,37 @@ import type {
   WorkbenchProjectTextFileWriteResult,
   WorkbenchFeedbackWorkingCopy,
   WorkbenchTextWorkingCopy,
-  WorkbenchWorkingCopies,
   WorkbenchProjectUploadImportInput,
   WorkbenchAddProjectPathToCanvasMapResult,
   WriteProjectTextFileInput
+} from '@debrute/app-protocol';
+import {
+  decodeWorkbenchEvent,
+  decodeWorkbenchProjectConnectionFrame,
+  isRecognizedWorkbenchEventFrame,
+  isRecognizedWorkbenchProjectConnectionFrame
 } from '@debrute/app-protocol';
 import type { CanvasFeedbackDocument } from '@debrute/canvas-core';
 import { readJsonSseStream } from './streamingSse.js';
 import { createTerminalHubClient } from './terminalHubClient.js';
 import { getDebruteShellApi } from './shellApi.js';
+import {
+  createWorkbenchProjectProjection,
+  type WorkbenchProjectProjection
+} from '../workbench/services/WorkbenchProjectProjection.js';
 
 interface ProjectRequestScope {
   projectId: string;
   generation: number;
+}
+
+interface RevisionedProjectCommandResult {
+  projectId: string;
+  projectRevision: number;
+}
+
+export interface HttpWorkbenchApiClient extends WorkbenchApiClient {
+  readonly projectProjection: WorkbenchProjectProjection;
 }
 
 class DebruteHttpRequestError extends Error {
@@ -70,18 +88,6 @@ interface GlobalSnapshotFrame {
   };
 }
 
-interface ProjectBoundFrame {
-  type: 'project.bound';
-  project: WorkbenchProjectOpenResult;
-  workingCopies: WorkbenchWorkingCopies;
-}
-
-interface ProjectOpenFailedFrame {
-  type: 'project.open_failed';
-  projectId: string;
-  error: { code: string; message: string };
-}
-
 interface ProjectBindingCommandResult {
   projectId: string;
   outcome: 'bound' | 'focused_existing_desktop';
@@ -91,8 +97,9 @@ type ProjectPickerCommandResult =
   | { opened: false }
   | ({ opened: true } & ProjectBindingCommandResult);
 
-export function createHttpWorkbenchApiClient(): WorkbenchApiClient {
+export function createHttpWorkbenchApiClient(): HttpWorkbenchApiClient {
   const terminalHub = createTerminalHubClient();
+  const projectProjection = createWorkbenchProjectProjection();
   let connectionCredential: string | undefined;
 
   const fetchResponse = async (method: string, path: string, body?: unknown, signal?: AbortSignal): Promise<Response> => {
@@ -151,16 +158,12 @@ export function createHttpWorkbenchApiClient(): WorkbenchApiClient {
     return response.json() as Promise<T>;
   };
 
-  let currentProjectId: string | undefined;
-  let currentProjectRevision: number | undefined;
-  let currentProjectGeneration = 0;
   const projectRequestControllers = new Set<AbortController>();
   let connectionAbort: AbortController | undefined;
   let connectionReady: Promise<void> | undefined;
   let initialProjectError: DebruteHttpRequestError | undefined;
   let connectionEndedError: Error | undefined;
   let disposed = false;
-  const boundProjects = new Map<string, WorkbenchProjectOpenResult>();
   const boundProjectWaiters = new Map<string, Array<{
     resolve(project: WorkbenchProjectOpenResult): void;
     reject(error: Error): void;
@@ -168,27 +171,33 @@ export function createHttpWorkbenchApiClient(): WorkbenchApiClient {
   const eventListeners = new Set<(event: WorkbenchEvent) => void>();
   const pendingInitialEvents: WorkbenchEvent[] = [];
   let eventListenerWasRegistered = false;
-  const projectDetachedListeners = new Set<() => void>();
   const connectionEndedListeners = new Set<(error: Error) => void>();
   const projectPathFor = (projectId: string, path: string) => `/api/projects/${encodeURIComponent(projectId)}${path}`;
+  const currentProjectBinding = () => {
+    const state = projectProjection.getState();
+    return state.status === 'bound' ? state : undefined;
+  };
   const projectPath = (path: string) => {
-    if (!currentProjectId) {
+    const binding = currentProjectBinding();
+    if (!binding) {
       throw new Error('Debrute project is not open.');
     }
-    return projectPathFor(currentProjectId, path);
+    return projectPathFor(binding.projectId, path);
   };
   const captureProjectScope = (): ProjectRequestScope => {
-    if (!currentProjectId) {
+    const binding = currentProjectBinding();
+    if (!binding) {
       throw new Error('Debrute project is not open.');
     }
     return {
-      projectId: currentProjectId,
-      generation: currentProjectGeneration
+      projectId: binding.projectId,
+      generation: binding.generation
     };
   };
-  const isCurrentProjectScope = (scope: ProjectRequestScope): boolean => (
-    scope.projectId === currentProjectId && scope.generation === currentProjectGeneration
-  );
+  const isCurrentProjectScope = (scope: ProjectRequestScope): boolean => {
+    const binding = currentProjectBinding();
+    return binding?.projectId === scope.projectId && binding.generation === scope.generation;
+  };
   const runProjectRequest = async <T>(
     operation: (scope: ProjectRequestScope, signal: AbortSignal) => Promise<T>
   ): Promise<T> => {
@@ -202,6 +211,9 @@ export function createHttpWorkbenchApiClient(): WorkbenchApiClient {
       }
       return result;
     } catch (error) {
+      if (connectionEndedError) {
+        throw connectionEndedError;
+      }
       if (!isCurrentProjectScope(scope)) {
         throw new ProjectChangedRequestError('Project changed while the request was in flight.');
       }
@@ -217,22 +229,36 @@ export function createHttpWorkbenchApiClient(): WorkbenchApiClient {
   ): Promise<T> => runProjectRequest((scope, signal) => (
     request<T>(method, projectPathFor(scope.projectId, path), body, signal)
   ));
-  const requestProjectMutation = <T>(
+  const requestProjectMutation = <T extends RevisionedProjectCommandResult>(
     method: string,
     path: string,
     body?: object
-  ): Promise<T> => {
-    return runProjectRequest((_scope, signal) => request<T>(method, path, body, signal));
-  };
+  ): Promise<T> => runProjectRequest(async (scope, signal) => {
+    const result = await request<T>(method, path, body, signal);
+    if (result.projectId !== scope.projectId) {
+      throw new Error(
+        `Project command returned ${result.projectId} while bound to ${scope.projectId}.`
+      );
+    }
+    await projectProjection.waitForRevision(scope.generation, result.projectRevision);
+    return result;
+  });
+  const requestProjectFormDataMutation = <T extends RevisionedProjectCommandResult>(
+    path: string,
+    body: FormData
+  ): Promise<T> => runProjectRequest(async (scope, signal) => {
+    const result = await requestFormData<T>('POST', path, body, signal);
+    if (result.projectId !== scope.projectId) {
+      throw new Error(
+        `Project command returned ${result.projectId} while bound to ${scope.projectId}.`
+      );
+    }
+    await projectProjection.waitForRevision(scope.generation, result.projectRevision);
+    return result;
+  });
   const dispatchWorkbenchEvent = (event: WorkbenchEvent): void => {
     if ('projectId' in event && 'projectRevision' in event) {
-      if (event.projectId !== currentProjectId) {
-        return;
-      }
-      if (currentProjectRevision !== undefined && event.projectRevision < currentProjectRevision) {
-        return;
-      }
-      currentProjectRevision = event.projectRevision;
+      projectProjection.acceptProjectEvent(event);
     }
     if (eventListeners.size === 0 && !eventListenerWasRegistered) {
       pendingInitialEvents.push(event);
@@ -242,49 +268,41 @@ export function createHttpWorkbenchApiClient(): WorkbenchApiClient {
       listener(event);
     }
   };
-  const markProjectDetached = (): void => {
-    if (!currentProjectId) {
-      return;
-    }
-    currentProjectId = undefined;
-    currentProjectRevision = undefined;
-    boundProjects.clear();
-    currentProjectGeneration += 1;
+  const markProjectDetached = (projectId: string): void => {
+    projectProjection.detachProject(projectId);
     for (const controller of projectRequestControllers) {
       controller.abort();
     }
     projectRequestControllers.clear();
     terminalHub.unbindProject();
-    for (const listener of projectDetachedListeners) {
-      listener();
-    }
   };
   const commitCurrentProject = (project: WorkbenchProjectOpenResult): void => {
     if (!connectionCredential) {
       throw new Error('Runtime bound a Project before opening the Workbench connection.');
     }
+    projectProjection.acceptBoundProject(project);
     for (const controller of projectRequestControllers) {
       controller.abort();
     }
     projectRequestControllers.clear();
-    currentProjectGeneration += 1;
-    currentProjectId = project.projectId;
-    currentProjectRevision = project.projectRevision;
     initialProjectError = undefined;
     terminalHub.bindProject(project.projectId, connectionCredential);
   };
   const acceptBoundProject = (project: WorkbenchProjectOpenResult): void => {
-    boundProjects.clear();
-    boundProjects.set(project.projectId, project);
     for (const waiter of boundProjectWaiters.get(project.projectId) ?? []) {
       waiter.resolve(project);
     }
     boundProjectWaiters.delete(project.projectId);
   };
   const waitForBoundProject = (projectId: string): Promise<WorkbenchProjectOpenResult> => {
-    const current = boundProjects.get(projectId);
-    if (current) {
-      return Promise.resolve(current);
+    const current = currentProjectBinding();
+    if (current?.projectId === projectId) {
+      return Promise.resolve({
+        projectId: current.projectId,
+        projectRevision: current.projectRevision,
+        snapshot: current.authoritativeSnapshot,
+        workingCopies: current.workingCopies
+      });
     }
     if (connectionEndedError) {
       return Promise.reject(connectionEndedError);
@@ -351,36 +369,51 @@ export function createHttpWorkbenchApiClient(): WorkbenchApiClient {
             settleReady();
             return;
           }
-          if (isProjectBoundFrame(value)) {
-            const project = { ...value.project, workingCopies: value.workingCopies };
-            commitCurrentProject(project);
-            acceptBoundProject(project);
-            if (project.projectId === requestedProjectId) {
+          const projectConnectionFrame = decodeWorkbenchProjectConnectionFrame(value);
+          if (projectConnectionFrame) {
+            if (projectConnectionFrame.type === 'project.bound') {
+              const project = {
+                ...projectConnectionFrame.project,
+                workingCopies: projectConnectionFrame.workingCopies
+              };
+              commitCurrentProject(project);
+              acceptBoundProject(project);
+              if (project.projectId === requestedProjectId) {
+                projectSynchronized = true;
+                settleReady();
+              }
+              return;
+            }
+            if (projectConnectionFrame.type === 'project.open_failed') {
+              initialProjectError = new DebruteHttpRequestError(
+                409,
+                projectConnectionFrame.error.code,
+                projectConnectionFrame.error.message,
+                { projectId: projectConnectionFrame.projectId }
+              );
               projectSynchronized = true;
               settleReady();
+              return;
             }
+            markProjectDetached(projectConnectionFrame.projectId);
             return;
           }
-          if (isProjectOpenFailedFrame(value)) {
-            initialProjectError = new DebruteHttpRequestError(
-              409,
-              value.error.code,
-              value.error.message,
-              { projectId: value.projectId }
-            );
-            projectSynchronized = true;
-            settleReady();
-            return;
-          }
-          if (isProjectPreemptedFrame(value)) {
-            markProjectDetached();
-            return;
+          if (isRecognizedWorkbenchProjectConnectionFrame(value)) {
+            throw new Error(`Runtime sent an invalid ${value.type} Workbench connection frame.`);
           }
           if (isConnectionEndedFrame(value)) {
             throw new Error(`Runtime ended the Workbench connection: ${value.code}`);
           }
-          if (isWorkbenchEvent(value)) {
-            dispatchWorkbenchEvent(value);
+          if (isRecognizedConnectionFrame(value)) {
+            throw new Error(`Runtime sent an invalid ${value.type} Workbench connection frame.`);
+          }
+          const workbenchEvent = decodeWorkbenchEvent(value);
+          if (workbenchEvent) {
+            dispatchWorkbenchEvent(workbenchEvent);
+            return;
+          }
+          if (isRecognizedWorkbenchEventFrame(value)) {
+            throw new Error(`Runtime sent an invalid ${value.type} Workbench event.`);
           }
         });
         if (!controller.signal.aborted && !disposed) {
@@ -391,6 +424,7 @@ export function createHttpWorkbenchApiClient(): WorkbenchApiClient {
           return;
         }
         connectionEndedError = error instanceof Error ? error : new Error(String(error));
+        projectProjection.endConnection(connectionEndedError);
         connectionCredential = undefined;
         terminalHub.unbindProject();
         for (const requestController of projectRequestControllers) {
@@ -416,6 +450,7 @@ export function createHttpWorkbenchApiClient(): WorkbenchApiClient {
   };
 
   return {
+    projectProjection,
     adobeBridgeGetState: () => request<AdobeBridgeStateView>('GET', '/api/adobe-bridge'),
     adobeBridgeCreatePairing: () => request<{ pairingId: string; code: string; expiresAt: string }>(
       'POST',
@@ -441,16 +476,13 @@ export function createHttpWorkbenchApiClient(): WorkbenchApiClient {
     ),
     openProject: async (input) => {
       await ensureConnection();
+      const currentProjectId = currentProjectBinding()?.projectId;
       if ('projectId' in input) {
         if (initialProjectError && !input.forceOpenHere) {
           throw initialProjectError;
         }
         if (currentProjectId === input.projectId) {
-          const current = boundProjects.get(input.projectId);
-          if (!current) {
-            throw new Error(`Runtime did not provide state for bound Project ${input.projectId}.`);
-          }
-          return current;
+          return waitForBoundProject(input.projectId);
         }
         if (!currentProjectId) {
           const opened = await request<ProjectBindingCommandResult>(
@@ -497,6 +529,7 @@ export function createHttpWorkbenchApiClient(): WorkbenchApiClient {
     },
     openProjectFromPicker: async () => {
       await ensureConnection();
+      const currentProjectId = currentProjectBinding()?.projectId;
       const result = await request<ProjectPickerCommandResult>('POST', '/api/projects/choose', {
         mode: currentProjectId ? 'replace' : 'open'
       });
@@ -597,14 +630,10 @@ export function createHttpWorkbenchApiClient(): WorkbenchApiClient {
     ),
     deleteProjectPathsPermanently: (input) => requestProjectMutation<WorkbenchProjectFileBatchOperationResult>('POST', projectPath('/files/batch/delete-permanently'), input),
     importExternalLocalProjectPaths: (input) => requestProjectMutation<WorkbenchProjectFileBatchOperationResult>('POST', projectPath('/files/import/local'), input),
-    importExternalProjectUploads: (input) => runProjectRequest((scope, signal) => (
-      requestFormData<WorkbenchProjectFileBatchOperationResult>(
-        'POST',
-        projectPathFor(scope.projectId, '/files/import/uploads'),
-        uploadImportFormData(input),
-        signal
-      )
-    )),
+    importExternalProjectUploads: (input) => requestProjectFormDataMutation<WorkbenchProjectFileBatchOperationResult>(
+      projectPath('/files/import/uploads'),
+      uploadImportFormData(input)
+    ),
     revealProjectPathInSystemFileManager: (input) => requestForCurrentProject<{ ok: true }>(
       'POST',
       `/files/path/${encodeProjectPath(input.projectRelativePath)}/reveal`,
@@ -674,12 +703,6 @@ export function createHttpWorkbenchApiClient(): WorkbenchApiClient {
         eventListeners.delete(listener);
       };
     },
-    onProjectDetached: (listener) => {
-      projectDetachedListeners.add(listener);
-      return () => {
-        projectDetachedListeners.delete(listener);
-      };
-    },
     onConnectionEnded: (listener) => {
       connectionEndedListeners.add(listener);
       if (connectionEndedError) {
@@ -704,6 +727,7 @@ export function createHttpWorkbenchApiClient(): WorkbenchApiClient {
       terminalHub.dispose();
       connectionCredential = undefined;
       const error = new Error('Workbench API client was disposed.');
+      projectProjection.endConnection(error);
       for (const waiters of boundProjectWaiters.values()) {
         for (const waiter of waiters) {
           waiter.reject(error);
@@ -714,25 +738,6 @@ export function createHttpWorkbenchApiClient(): WorkbenchApiClient {
   };
 }
 
-function isWorkbenchEvent(value: unknown): value is WorkbenchEvent {
-  if (!isObject(value) || typeof value.type !== 'string') {
-    return false;
-  }
-  return WORKBENCH_EVENT_TYPES.has(value.type as WorkbenchEvent['type']);
-}
-
-const WORKBENCH_EVENT_TYPES = new Set<WorkbenchEvent['type']>([
-  'project.changed',
-  'project.fileChanged',
-  'canvas.changed',
-  'canvas.feedback.changed',
-  'recentProjects.changed',
-  'globalSettings.changed',
-  'integrations.changed',
-  'adobeBridge.state.changed',
-  'product.changed'
-]);
-
 function isConnectionOpenedFrame(value: unknown): value is {
   type: 'connection.opened';
   connectionCredential: string;
@@ -742,45 +747,21 @@ function isConnectionOpenedFrame(value: unknown): value is {
     && typeof value.connectionCredential === 'string';
 }
 
+function isRecognizedConnectionFrame(value: unknown): value is Record<string, unknown> & { type: string } {
+  return isObject(value)
+    && (
+      value.type === 'connection.opened'
+      || value.type === 'global.snapshot'
+      || value.type === 'connection.ended'
+    );
+}
+
 function isGlobalSnapshotFrame(value: unknown): value is GlobalSnapshotFrame {
   return isObject(value)
     && value.type === 'global.snapshot'
     && typeof value.globalRevision === 'number'
     && isObject(value.snapshot)
     && isObject(value.snapshot.settings);
-}
-
-function isProjectBoundFrame(value: unknown): value is ProjectBoundFrame {
-  return isObject(value)
-    && value.type === 'project.bound'
-    && isObject(value.project)
-    && typeof value.project.projectId === 'string'
-    && typeof value.project.projectRevision === 'number'
-    && isWorkingCopies(value.workingCopies);
-}
-
-function isWorkingCopies(value: unknown): value is WorkbenchWorkingCopies {
-  return isObject(value)
-    && isObject(value.text)
-    && isObject(value.feedback);
-}
-
-function isProjectOpenFailedFrame(value: unknown): value is ProjectOpenFailedFrame {
-  return isObject(value)
-    && value.type === 'project.open_failed'
-    && typeof value.projectId === 'string'
-    && isObject(value.error)
-    && typeof value.error.code === 'string'
-    && typeof value.error.message === 'string';
-}
-
-function isProjectPreemptedFrame(value: unknown): value is {
-  type: 'project.preempted';
-  projectId: string;
-} {
-  return isObject(value)
-    && value.type === 'project.preempted'
-    && typeof value.projectId === 'string';
 }
 
 function isConnectionEndedFrame(value: unknown): value is {

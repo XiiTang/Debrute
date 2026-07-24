@@ -275,6 +275,12 @@ describe('CanvasFeedbackInteraction', () => {
     expect(updateCanvasFeedbackEntry).toHaveBeenCalledTimes(1);
 
     await act(async () => {
+      probe.current.applyEvent({
+        type: 'canvas.feedback.changed',
+        projectId: 'project-1',
+        projectRevision: 2,
+        feedback: feedbackFixtureWithout('feedback-a')
+      });
       pendingMutation.resolve(mutationResult(feedbackFixtureWithout('feedback-a')));
       await Promise.all([first, second]);
     });
@@ -844,11 +850,10 @@ function feedbackFixtureWithout(itemId: string): CanvasFeedbackDocument {
   };
 }
 
-function mutationResult(feedback: CanvasFeedbackDocument): WorkbenchCanvasFeedbackMutationResult {
+function mutationResult(_feedback: CanvasFeedbackDocument): WorkbenchCanvasFeedbackMutationResult {
   return {
     projectId: 'project-1',
-    projectRevision: 2,
-    feedback
+    projectRevision: 2
   };
 }
 

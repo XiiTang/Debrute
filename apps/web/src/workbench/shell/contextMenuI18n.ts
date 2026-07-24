@@ -1,8 +1,8 @@
 import type { DebruteProductPlatform } from '@debrute/app-protocol';
 import type { WorkbenchI18n, WorkbenchTranslationKey } from '../i18n';
-import type { WorkbenchContextMenuCommand } from './contextMenu';
+import type { ProjectPathCommand } from './contextMenu';
 
-const commandKeys: Record<WorkbenchContextMenuCommand, WorkbenchTranslationKey> = {
+const commandKeys: Record<ProjectPathCommand, WorkbenchTranslationKey> = {
   'send-to-photoshop': 'shell.contextMenu.sendToPhotoshop',
   'show-details': 'shell.contextMenu.showDetails',
   'reveal-in-canvas': 'shell.contextMenu.revealInCanvas',
@@ -21,7 +21,7 @@ const commandKeys: Record<WorkbenchContextMenuCommand, WorkbenchTranslationKey> 
   'copy-relative-path': 'shell.contextMenu.copyRelativePath'
 };
 
-export function workbenchContextMenuCommandLabel(command: WorkbenchContextMenuCommand, i18n: WorkbenchI18n): string {
+export function workbenchContextMenuCommandLabel(command: ProjectPathCommand, i18n: WorkbenchI18n): string {
   return i18n.t(commandKeys[command]);
 }
 

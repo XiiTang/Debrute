@@ -1,11 +1,9 @@
-import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react';
 import { Loader2 } from 'lucide-react';
 import type {
   DebruteProductPlatform,
   DebruteWorkbenchRoute,
   ProjectPathEntry,
-  WorkbenchCanvasDocumentMutationResult,
-  WorkbenchProjectOpenResult,
   WorkbenchProjectSessionSnapshot
 } from '@debrute/app-protocol';
 import type { ProjectedCanvasNode } from '@debrute/canvas-core';
@@ -21,10 +19,6 @@ import {
   useCanvasFeedbackInteraction
 } from './canvas/CanvasFeedbackInteraction';
 import type { CanvasEditorRuntime, CanvasRuntimeSnapshot } from './canvas/runtime/CanvasEditorRuntime';
-import {
-  isSnapshotAffectingWorkbenchEvent,
-  nextSnapshotFromWorkbenchEvent
-} from './services/workbenchEvents';
 import { getCanvasById } from './services/canvasState';
 import { createCanvasSelectionStackOrderSync } from './services/canvasStackOrderSelection';
 import { chooseInitialActiveCanvasId } from './canvas/canvasCardBarState';
@@ -45,7 +39,7 @@ import {
   resizeTextEditorWindowState
 } from './services/textEditorWindows';
 import { useTextFileBufferActions } from './services/textFileBufferActions';
-import { runWorkbenchContextMenuCommand } from './services/workbenchContextMenuCommands';
+import { createProjectPathCommandCoordinator } from './services/projectPathCommandCoordinator';
 import { SendToPhotoshopDialog } from './adobe-bridge/SendToPhotoshopDialog';
 import { WorkbenchContextMenu } from './shell/WorkbenchContextMenu';
 import { WorkbenchTitleBar } from './shell/WorkbenchTitleBar';
@@ -55,17 +49,16 @@ import {
   type WorkbenchMenuItem
 } from './shell/workbenchTitleBarState';
 import {
-  buildWorkbenchContextMenuItems,
   cameraCenteredOnNode,
-  type WorkbenchContextMenuCommand,
+  type ProjectPathCommand,
   type WorkbenchContextMenuPosition,
   type WorkbenchContextMenuTarget
 } from './shell/contextMenu';
 import type { ProjectTreeFileKeyboardCommand } from './project-explorer/projectTreeKeyboardCommands';
 import {
-  createCanvasTextViewportStateController,
-  type CanvasTextViewportStateController
+  createCanvasTextViewportStateController
 } from './services/canvasSnapshotUpdates';
+import type { WorkbenchProjectProjectionState } from './services/WorkbenchProjectProjection.js';
 import {
   permanentDeleteConfirmationMessageForEntries,
   projectTreeSelectionFromPaths
@@ -133,19 +126,220 @@ export function WorkbenchApp(): React.ReactElement {
 }
 
 function WorkbenchRuntimeApp({ initialRoute }: { initialRoute: Exclude<DebruteWorkbenchRoute, { kind: 'not-found' }> }): React.ReactElement {
-  const [snapshot, setSnapshot] = useState<WorkbenchProjectSessionSnapshot>();
-  const [runtimeProjectId, setRuntimeProjectId] = useState<string>();
-  const [activeCanvasId, setActiveCanvasId] = useState<string>();
+  const projectProjection = useSyncExternalStore(
+    api.projectProjection.subscribe,
+    api.projectProjection.getState
+  );
+  const acceptedProject = projectProjection.status === 'unbound' ? undefined : projectProjection;
+  const runtimeProjectId = acceptedProject?.projectId;
+  const [connectionEnded, setConnectionEnded] = useState<Error>();
+  const [notifications, setNotifications] = useState<string[]>([]);
+  const [isLoading, setIsLoading] = useState(() => shouldShowInitialProjectLoader(initialRoute));
+  const [projectOpenAttemptedPath, setProjectOpenAttemptedPath] = useState<string>();
+  const [projectOpenError, setProjectOpenError] = useState<string>();
+  const [projectOpenHereTargetId, setProjectOpenHereTargetId] = useState<string>();
+  const [isProjectOpening, setIsProjectOpening] = useState(false);
+  const initialProjectOpeningRef = useRef<ReturnType<typeof openInitialProject> | undefined>(undefined);
+  const announcedProjectGenerationsRef = useRef(new Set<number>());
+  const notify = useCallback((message: string) => {
+    setNotifications((current) => [message, ...current].slice(0, 4));
+  }, []);
+  const settingsController = useWorkbenchSettingsController({ api, projectId: runtimeProjectId, notify });
+  const i18n = useMemo(() => createI18n(settingsController.locale), [settingsController.locale]);
+  const announceProjectGeneration = useCallback((input: {
+    generation: number;
+    projectName: string;
+    viewStateInvalid: boolean;
+  }) => {
+    if (announcedProjectGenerationsRef.current.has(input.generation)) {
+      return;
+    }
+    announcedProjectGenerationsRef.current.add(input.generation);
+    const currentI18n = settingsController.getCurrentI18n();
+    if (input.viewStateInvalid) {
+      notify(currentI18n.t('shell.notifications.projectViewStateReset', {
+        name: input.projectName
+      }));
+    }
+    notify(currentI18n.t('shell.notifications.projectOpened', {
+      name: input.projectName
+    }));
+  }, [notify, settingsController.getCurrentI18n]);
+
+  useEffect(() => api.onConnectionEnded(setConnectionEnded), []);
+
+  useEffect(() => {
+    let disposed = false;
+    void (async () => {
+      try {
+        initialProjectOpeningRef.current ??= openInitialProject(api, initialRoute);
+        const result = await initialProjectOpeningRef.current;
+        if (disposed) {
+          return;
+        }
+        setProjectOpenAttemptedPath(result.projectOpen?.attemptedPath);
+        setProjectOpenError(localizedProjectOpenError(result.projectOpen?.error, settingsController.getCurrentI18n()));
+        setProjectOpenHereTargetId(
+          result.projectOpen?.error?.code === 'project-open-here-required'
+            ? result.projectOpen.error.projectId
+            : undefined
+        );
+      } catch (error) {
+        if (!disposed) {
+          notify(settingsController.getCurrentI18n().t('shell.notifications.projectStartupFailed', {
+            message: errorMessage(error)
+          }));
+        }
+      } finally {
+        if (!disposed) {
+          setIsLoading(false);
+        }
+      }
+    })();
+    return () => {
+      disposed = true;
+    };
+  }, [initialRoute, notify, settingsController.getCurrentI18n]);
+
+  const projectGenerationAppProps = {
+    projectProjection,
+    connectionEnded,
+    notifications,
+    setNotifications,
+    notify,
+    announceProjectGeneration,
+    settingsController,
+    i18n,
+    isLoading,
+    projectOpenAttemptedPath,
+    setProjectOpenAttemptedPath,
+    projectOpenError,
+    setProjectOpenError,
+    projectOpenHereTargetId,
+    setProjectOpenHereTargetId,
+    isProjectOpening,
+    setIsProjectOpening
+  };
+  const surface = projectProjection.status === 'unbound' ? (
+    <WorkbenchProjectGenerationApp {...projectGenerationAppProps} />
+  ) : (
+    <WorkbenchProjectGenerationApp
+      key={projectProjection.generation}
+      {...projectGenerationAppProps}
+    />
+  );
+  return (
+    <>
+      {surface}
+      <NotificationStack notifications={notifications} />
+    </>
+  );
+}
+
+function WorkbenchProjectGenerationApp({
+  projectProjection,
+  connectionEnded,
+  notifications,
+  setNotifications,
+  notify,
+  announceProjectGeneration,
+  settingsController,
+  i18n,
+  isLoading,
+  projectOpenAttemptedPath,
+  setProjectOpenAttemptedPath,
+  projectOpenError,
+  setProjectOpenError,
+  projectOpenHereTargetId,
+  setProjectOpenHereTargetId,
+  isProjectOpening,
+  setIsProjectOpening
+}: {
+  projectProjection: WorkbenchProjectProjectionState;
+  connectionEnded: Error | undefined;
+  notifications: string[];
+  setNotifications: React.Dispatch<React.SetStateAction<string[]>>;
+  notify(message: string): void;
+  announceProjectGeneration(input: {
+    generation: number;
+    projectName: string;
+    viewStateInvalid: boolean;
+  }): void;
+  settingsController: ReturnType<typeof useWorkbenchSettingsController>;
+  i18n: WorkbenchI18n;
+  isLoading: boolean;
+  projectOpenAttemptedPath: string | undefined;
+  setProjectOpenAttemptedPath: React.Dispatch<React.SetStateAction<string | undefined>>;
+  projectOpenError: string | undefined;
+  setProjectOpenError: React.Dispatch<React.SetStateAction<string | undefined>>;
+  projectOpenHereTargetId: string | undefined;
+  setProjectOpenHereTargetId: React.Dispatch<React.SetStateAction<string | undefined>>;
+  isProjectOpening: boolean;
+  setIsProjectOpening: React.Dispatch<React.SetStateAction<boolean>>;
+}): React.ReactElement {
+  const acceptedProject = projectProjection.status === 'unbound' ? undefined : projectProjection;
+  const snapshot = acceptedProject?.presentedSnapshot;
+  const runtimeProjectId = acceptedProject?.projectId;
+  const projectDetached = projectProjection.status === 'detached';
+  const projectPathCommandAdmissionRef = useRef(!isProjectOpening);
+  const retiredProjectPathCommandAdmissionRef = useRef(false);
+  useEffect(() => {
+    if (isProjectOpening) {
+      projectPathCommandAdmissionRef.current = false;
+      return;
+    }
+    if (!retiredProjectPathCommandAdmissionRef.current) {
+      projectPathCommandAdmissionRef.current = true;
+    }
+  }, [isProjectOpening]);
+  const canStartProjectPathCommand = useCallback(
+    () => projectPathCommandAdmissionRef.current,
+    []
+  );
+  const beginProjectOpening = useCallback(() => {
+    if (!projectPathCommandAdmissionRef.current) {
+      return false;
+    }
+    projectPathCommandAdmissionRef.current = false;
+    setIsProjectOpening(true);
+    return true;
+  }, [setIsProjectOpening]);
+  const finishProjectOpening = useCallback((restoreCommandAdmission: boolean) => {
+    retiredProjectPathCommandAdmissionRef.current = !restoreCommandAdmission;
+    projectPathCommandAdmissionRef.current = restoreCommandAdmission;
+    setIsProjectOpening(false);
+  }, [setIsProjectOpening]);
+  const didProjectBindingChange = useCallback(
+    () => api.projectProjection.getState().generation !== projectProjection.generation,
+    [projectProjection.generation]
+  );
+  const isCurrentProjectPathCommandScope = useCallback(() => {
+    const current = api.projectProjection.getState();
+    return current.status !== 'unbound'
+      && current.projectId === runtimeProjectId
+      && current.generation === projectProjection.generation;
+  }, [runtimeProjectId, projectProjection.generation]);
+  const initialProjectPresentation = useMemo(
+    () => createInitialProjectPresentation(acceptedProject),
+    []
+  );
+  const [activeCanvasId, setActiveCanvasId] = useState<string | undefined>(
+    initialProjectPresentation.activeCanvasId
+  );
   const [activeCanvasRuntime, setActiveCanvasRuntime] = useState<CanvasEditorRuntime>();
   const [activeCanvasRuntimeSnapshot, setActiveCanvasRuntimeSnapshot] = useState<CanvasRuntimeSnapshot>();
   const [activeCanvasCurrentNodes, setActiveCanvasCurrentNodes] = useState<{
     canvasId: string;
     nodes: ProjectedCanvasNode[];
   }>();
-  const [canvasRuntimeScopeKey, setCanvasRuntimeScopeKey] = useState(0);
-  const [floatingPanels, setFloatingPanels] = useState<FloatingPanelState>(DEFAULT_FLOATING_PANEL_STATE);
+  const canvasRuntimeScopeKey = projectProjection.generation;
+  const [floatingPanels, setFloatingPanels] = useState<FloatingPanelState>(
+    initialProjectPresentation.floatingPanels
+  );
   const [requestedTerminalCwd, setRequestedTerminalCwd] = useState<string | null>(null);
-  const [textFileBuffers, setTextFileBuffers] = useState<Record<string, TextFileBuffer>>({});
+  const [textFileBuffers, setTextFileBuffers] = useState<Record<string, TextFileBuffer>>(
+    initialProjectPresentation.textFileBuffers
+  );
   const [textEditorWindows, setTextEditorWindows] = useState<Record<string, FloatingTextEditorWindowState>>({});
   const [windowOrder, setWindowOrder] = useState<WorkbenchWindowOrderState>(DEFAULT_WORKBENCH_WINDOW_ORDER);
   const [canvasMinimapOpen, setCanvasMinimapOpen] = useState(false);
@@ -156,52 +350,13 @@ function WorkbenchRuntimeApp({ initialRoute }: { initialRoute: Exclude<DebruteWo
   const [sendToPhotoshopPath, setSendToPhotoshopPath] = useState<string>();
   const [sendingToPhotoshop, setSendingToPhotoshop] = useState(false);
   const [nativeWindowState, setNativeWindowState] = useState<NativeWindowState>();
-  const [projectDetached, setProjectDetached] = useState(false);
-  const [connectionEnded, setConnectionEnded] = useState<Error>();
-  const [notifications, setNotifications] = useState<string[]>([]);
-  const [isLoading, setIsLoading] = useState(() => shouldShowInitialProjectLoader(initialRoute));
-  const [projectOpenAttemptedPath, setProjectOpenAttemptedPath] = useState<string>();
-  const [projectOpenError, setProjectOpenError] = useState<string>();
-  const [projectOpenHereTargetId, setProjectOpenHereTargetId] = useState<string>();
-  const [isProjectOpening, setIsProjectOpening] = useState(false);
-  const [workbenchViewportRect, setWorkbenchViewportRect] = useState(readWorkbenchViewportRect);
+  const [workbenchViewportRect, setWorkbenchViewportRect] = useState(
+    initialProjectPresentation.viewportRect
+  );
   const canvasOverlayRuntime = useMemo(() => createCanvasOverlayRuntime(), []);
   const workbenchViewportRectRef = useRef(workbenchViewportRect);
-  const snapshotRef = useRef(snapshot);
-  const authoritativeSnapshotRef = useRef(snapshot);
-  const authoritativeProjectRevisionRef = useRef<number | undefined>(undefined);
-  const canvasTextViewportStateControllerRef = useRef<CanvasTextViewportStateController | undefined>(undefined);
   const textFileBuffersRef = useRef(textFileBuffers);
   const textEditorWindowsRef = useRef(textEditorWindows);
-  const initialProjectOpeningRef = useRef<ReturnType<typeof openInitialProject> | undefined>(undefined);
-  const initialProjectResultAppliedRef = useRef(false);
-  const commitPresentedProjectSnapshot = useCallback((next: WorkbenchProjectSessionSnapshot | undefined) => {
-    snapshotRef.current = next;
-    setSnapshot(next);
-  }, []);
-  const commitProjectSnapshot = useCallback((
-    next: WorkbenchProjectSessionSnapshot | undefined,
-    projectRevision?: number
-  ): boolean => {
-    if (
-      projectRevision !== undefined
-      && authoritativeProjectRevisionRef.current !== undefined
-      && projectRevision < authoritativeProjectRevisionRef.current
-    ) {
-      return false;
-    }
-    authoritativeProjectRevisionRef.current = next ? projectRevision : undefined;
-    authoritativeSnapshotRef.current = next;
-    commitPresentedProjectSnapshot(
-      canvasTextViewportStateControllerRef.current?.reconcileSnapshot(next) ?? next
-    );
-    return true;
-  }, [commitPresentedProjectSnapshot]);
-  const notify = useCallback((message: string) => {
-    setNotifications((current) => [message, ...current].slice(0, 4));
-  }, []);
-  const settingsController = useWorkbenchSettingsController({ api, projectId: runtimeProjectId, notify });
-  const i18n = useMemo(() => createI18n(settingsController.locale), [settingsController.locale]);
   const activeCanvas = getCanvasById(snapshot, activeCanvasId);
   const activeProjection = activeCanvas
     ? snapshot?.projections.find((item) => item.canvasId === activeCanvas.id)
@@ -223,19 +378,26 @@ function WorkbenchRuntimeApp({ initialRoute }: { initialRoute: Exclude<DebruteWo
     }));
   }, [activeCanvasRuntime]);
   const locateProjectFileInCanvas = useCallback((projectRelativePath: string) => {
+    if (!canStartProjectPathCommand()) {
+      return;
+    }
     centerCanvasProjectionNode(activeProjection, projectRelativePath);
-  }, [activeProjection, centerCanvasProjectionNode]);
+  }, [activeProjection, canStartProjectPathCommand, centerCanvasProjectionNode]);
+  const getAcceptedProjectSnapshot = useCallback(() => {
+    const state = api.projectProjection.getState();
+    return state.status === 'unbound' ? undefined : state.presentedSnapshot;
+  }, []);
   const explorerController = useProjectExplorerController({
     api,
     projectId: runtimeProjectId,
-    snapshot,
-    commitSnapshot: (result) => {
-      commitProjectSnapshot(result.snapshot, result.projectRevision);
-    },
+    projectGeneration: projectProjection.generation,
+    getSnapshot: getAcceptedProjectSnapshot,
     activeCanvasRuntime,
     locateProjectFileInCanvas,
     notify,
-    i18n
+    i18n,
+    canStartProjectPathCommand,
+    isCurrentProjectPathCommandScope
   });
   const { fileClipboard, inlineEdit: inlineProjectTreeEdit } = explorerController;
 
@@ -250,120 +412,67 @@ function WorkbenchRuntimeApp({ initialRoute }: { initialRoute: Exclude<DebruteWo
     notifyUnavailable: notifyCanvasFeedbackUnavailable
   });
 
-  const commitProjectSession = useCallback((opened: {
-    projectId: string;
-    projectRevision: number;
-    snapshot: WorkbenchProjectSessionSnapshot;
-  }) => {
-    const restoredViewState = restoreProjectViewState({
-      storage: window.sessionStorage,
-      projectId: opened.projectId
-    });
-    if (restoredViewState.status === 'invalid') {
-      notify(settingsController.getCurrentI18n().t('shell.notifications.projectViewStateReset', {
-        name: opened.snapshot.metadata.project.name
-      }));
+  useEffect(() => {
+    if (!acceptedProject) {
+      return;
     }
-    const viewState = restoredViewState.status === 'ready'
-      ? restoredViewState.state
-      : { floatingPanels: DEFAULT_FLOATING_PANEL_STATE };
-    const canvasOrder = opened.snapshot.canvasRegistry.status === 'ready'
-      ? opened.snapshot.canvasRegistry.canvasOrder
-      : [];
-    const nextActiveCanvasId = chooseInitialActiveCanvasId({
-      storedActiveCanvasId: viewState.activeCanvasId,
-      canvasOrder
+    announceProjectGeneration({
+      generation: acceptedProject.generation,
+      projectName: acceptedProject.presentedSnapshot.metadata.project.name,
+      viewStateInvalid: initialProjectPresentation.viewStateInvalid
     });
-    const nextFloatingPanels = constrainOpenFloatingPanelsToViewport(
-      viewState.floatingPanels,
-      workbenchViewportRectRef.current
-    );
-
-    canvasTextViewportStateControllerRef.current?.reset();
-    authoritativeProjectRevisionRef.current = undefined;
-    commitProjectSnapshot(opened.snapshot, opened.projectRevision);
-    setRuntimeProjectId(opened.projectId);
-    setFloatingPanels(nextFloatingPanels);
-    setActiveCanvasId(nextActiveCanvasId);
-    setActiveCanvasRuntime(undefined);
-    setCanvasRuntimeScopeKey((current) => current + 1);
-    setContextMenu(undefined);
-    setCanvasMinimapOpen(false);
-    explorerController.resetForProject(opened.projectId);
-    feedbackInteraction.reset();
-    void feedbackInteraction.load();
-  }, [
-    commitProjectSnapshot,
-    explorerController.resetForProject,
-    feedbackInteraction.load,
-    feedbackInteraction.reset,
-    notify,
-    settingsController.getCurrentI18n
-  ]);
-
-  const commitOpenedProject = useCallback((opened: WorkbenchProjectOpenResult) => {
-    setProjectDetached(false);
     setProjectOpenHereTargetId(undefined);
-    commitProjectSession(opened);
-    replaceWorkbenchProjectRoute(opened.projectId);
-    setTextFileBuffers(Object.fromEntries(
-      Object.values(opened.workingCopies.text).map((workingCopy) => [
-        workingCopy.projectRelativePath,
-        {
-          ...workingCopy,
-          wordWrap: false,
-          dirty: true,
-          saving: false,
-          externalChange: false
-        }
-      ])
-    ));
-    feedbackInteraction.restoreWorkingCopies(opened.workingCopies.feedback);
-    setTextEditorWindows({});
-    setWindowOrder(DEFAULT_WORKBENCH_WINDOW_ORDER);
     setProjectOpenAttemptedPath(undefined);
     setProjectOpenError(undefined);
-    const currentI18n = settingsController.getCurrentI18n();
-    setNotifications((current) => [currentI18n.t('shell.notifications.projectOpened', { name: opened.snapshot.metadata.project.name }), ...current].slice(0, 4));
-  }, [
-    commitProjectSession,
-    feedbackInteraction.restoreWorkingCopies,
-    settingsController.getCurrentI18n
-  ]);
+    replaceWorkbenchProjectRoute(acceptedProject.projectId);
+    feedbackInteraction.restoreWorkingCopies(acceptedProject.workingCopies.feedback);
+    void feedbackInteraction.load();
+  }, [acceptedProject?.generation]);
 
   const reopenDetachedProject = useCallback(async () => {
     if (!runtimeProjectId) {
       return;
     }
+    if (!beginProjectOpening()) {
+      return;
+    }
+    let projectBindingChanged = false;
     try {
       const opened = await api.openProject({ projectId: runtimeProjectId, forceOpenHere: true });
       if (!('outcome' in opened)) {
-        commitOpenedProject(opened);
+        projectBindingChanged = didProjectBindingChange();
+        replaceWorkbenchProjectRoute(opened.projectId);
       }
     } catch (error) {
       notify(errorMessage(error));
+    } finally {
+      finishProjectOpening(!projectBindingChanged);
     }
-  }, [commitOpenedProject, notify, runtimeProjectId]);
+  }, [beginProjectOpening, didProjectBindingChange, finishProjectOpening, notify, runtimeProjectId]);
 
   const openProjectHere = useCallback(async () => {
     if (!projectOpenHereTargetId) {
       return;
     }
-    setIsProjectOpening(true);
+    if (!beginProjectOpening()) {
+      return;
+    }
+    let projectBindingChanged = false;
     try {
       const opened = await api.openProject({
         projectId: projectOpenHereTargetId,
         forceOpenHere: true
       });
       if (!('outcome' in opened)) {
-        commitOpenedProject(opened);
+        projectBindingChanged = didProjectBindingChange();
+        replaceWorkbenchProjectRoute(opened.projectId);
       }
     } catch (error) {
       notify(errorMessage(error));
     } finally {
-      setIsProjectOpening(false);
+      finishProjectOpening(!projectBindingChanged);
     }
-  }, [commitOpenedProject, notify, projectOpenHereTargetId]);
+  }, [beginProjectOpening, didProjectBindingChange, finishProjectOpening, notify, projectOpenHereTargetId]);
 
   useEffect(() => {
     workbenchViewportRectRef.current = workbenchViewportRect;
@@ -376,18 +485,6 @@ function WorkbenchRuntimeApp({ initialRoute }: { initialRoute: Exclude<DebruteWo
   useEffect(() => {
     textEditorWindowsRef.current = textEditorWindows;
   }, [textEditorWindows]);
-
-  useEffect(() => {
-    const handleProjectDetached = () => {
-      setProjectDetached(true);
-    };
-    const removeApiDetachedHandler = api.onProjectDetached(handleProjectDetached);
-    const removeConnectionEndedHandler = api.onConnectionEnded(setConnectionEnded);
-    return () => {
-      removeApiDetachedHandler();
-      removeConnectionEndedHandler();
-    };
-  }, []);
 
   const reconcileCurrentWorkbenchViewportLayout = useCallback(() => {
     reconcileWorkbenchViewportLayout({
@@ -423,47 +520,6 @@ function WorkbenchRuntimeApp({ initialRoute }: { initialRoute: Exclude<DebruteWo
   }, [canvasOverlayRuntime]);
 
   useEffect(() => {
-    let disposed = false;
-    void (async () => {
-      try {
-        initialProjectOpeningRef.current ??= openInitialProject(api, initialRoute);
-        const result = await initialProjectOpeningRef.current;
-        if (disposed || initialProjectResultAppliedRef.current) {
-          return;
-        }
-        initialProjectResultAppliedRef.current = true;
-        setProjectOpenAttemptedPath(result.projectOpen?.attemptedPath);
-        setProjectOpenError(localizedProjectOpenError(result.projectOpen?.error, settingsController.getCurrentI18n()));
-        setProjectOpenHereTargetId(
-          result.projectOpen?.error?.code === 'project-open-here-required'
-            ? result.projectOpen.error.projectId
-            : undefined
-        );
-        if (!result.project) {
-          return;
-        }
-        commitOpenedProject(result.project);
-      } catch (error) {
-        if (!disposed) {
-          const currentI18n = settingsController.getCurrentI18n();
-          setNotifications((current) => [currentI18n.t('shell.notifications.projectStartupFailed', { message: errorMessage(error) }), ...current].slice(0, 4));
-        }
-      } finally {
-        if (!disposed) {
-          setIsLoading(false);
-        }
-      }
-    })();
-    return () => {
-      disposed = true;
-    };
-  }, [
-    commitOpenedProject,
-    initialRoute,
-    settingsController.getCurrentI18n
-  ]);
-
-  useEffect(() => {
     const shell = getDebruteShellApi();
     if (!shell) {
       return;
@@ -497,12 +553,17 @@ function WorkbenchRuntimeApp({ initialRoute }: { initialRoute: Exclude<DebruteWo
 
   const sendProjectFileToPhotoshop = useCallback<WorkbenchActions['sendProjectFileToPhotoshop']>(async (input) => {
     const result = await api.sendProjectFileToPhotoshop(input);
-    notify(i18n.t('shell.notifications.sentToPhotoshop', { path: input.projectRelativePath }));
+    if (isCurrentProjectPathCommandScope()) {
+      notify(i18n.t('shell.notifications.sentToPhotoshop', { path: input.projectRelativePath }));
+    }
     return result;
-  }, [i18n, notify]);
+  }, [i18n, isCurrentProjectPathCommandScope, notify]);
   const openSendToPhotoshopPicker = useCallback<WorkbenchActions['openSendToPhotoshopPicker']>((projectRelativePath) => {
+    if (!canStartProjectPathCommand()) {
+      return;
+    }
     setSendToPhotoshopPath(projectRelativePath);
-  }, []);
+  }, [canStartProjectPathCommand]);
 
   const {
     ensureTextFileBuffer,
@@ -525,14 +586,6 @@ function WorkbenchRuntimeApp({ initialRoute }: { initialRoute: Exclude<DebruteWo
       settingsController.applyEvent(event);
       feedbackInteraction.applyEvent(event);
 
-      if (isSnapshotAffectingWorkbenchEvent(event)) {
-        commitProjectSnapshot(
-          nextSnapshotFromWorkbenchEvent(event, authoritativeSnapshotRef.current),
-          event.projectRevision
-        );
-        setRuntimeProjectId(event.projectId);
-      }
-
       if (event.type === 'project.fileChanged') {
         void refreshTextFileBuffer(event.event.projectRelativePath);
         if (event.event.projectRelativePath === '.debrute/reviews/canvas-feedback.json') {
@@ -541,7 +594,6 @@ function WorkbenchRuntimeApp({ initialRoute }: { initialRoute: Exclude<DebruteWo
       }
     });
   }, [
-    commitProjectSnapshot,
     feedbackInteraction.applyEvent,
     feedbackInteraction.load,
     refreshTextFileBuffer,
@@ -580,15 +632,12 @@ function WorkbenchRuntimeApp({ initialRoute }: { initialRoute: Exclude<DebruteWo
   }, [ensureTextFileBuffer]);
 
   const canvasTextViewportStateController = useMemo(() => createCanvasTextViewportStateController({
-    getAuthoritativeSnapshot: () => authoritativeSnapshotRef.current,
-    commitAuthoritativeSnapshot: commitProjectSnapshot,
-    commitPresentedSnapshot: commitPresentedProjectSnapshot,
+    projectProjection: api.projectProjection,
     updateCanvasTextViewportState: (canvasId, input) => api.updateCanvasTextViewportState({
       canvasId,
       ...input
     })
-  }), [commitPresentedProjectSnapshot, commitProjectSnapshot]);
-  canvasTextViewportStateControllerRef.current = canvasTextViewportStateController;
+  }), []);
 
   const updateCanvasTextViewportState = useCallback<WorkbenchActions['updateCanvasTextViewportState']>(async (canvasId, input) => {
     try {
@@ -601,117 +650,125 @@ function WorkbenchRuntimeApp({ initialRoute }: { initialRoute: Exclude<DebruteWo
     }
   }, [canvasTextViewportStateController, i18n, notify]);
 
-  const commitCanvasDocumentMutation = useCallback((result: WorkbenchCanvasDocumentMutationResult) => {
-    const current = authoritativeSnapshotRef.current;
-    if (!current) {
-      throw new Error(`Cannot apply Canvas document ${result.canvas.id} without a current snapshot.`);
-    }
-    const next = replaceCanvasMutationInSnapshot(current, result);
-    commitProjectSnapshot(next, result.projectRevision);
-  }, [commitProjectSnapshot]);
-
   const updateCanvasNodeLayouts = useCallback<WorkbenchActions['updateCanvasNodeLayouts']>(async (canvasId, input) => {
     try {
-      const result = await api.updateCanvasNodeLayouts({
+      await api.updateCanvasNodeLayouts({
         canvasId,
         ...input
       });
-      commitCanvasDocumentMutation(result);
     } catch (error) {
       notify(i18n.t('shell.notifications.updateCanvasLayoutFailed', { message: errorMessage(error) }));
       throw error;
     }
-  }, [commitCanvasDocumentMutation, i18n, notify]);
+  }, [i18n, notify]);
 
   const resetCanvasNodeLayouts = useCallback<WorkbenchActions['resetCanvasNodeLayouts']>(async (canvasId, input) => {
     const result = await api.resetCanvasNodeLayouts({
       canvasId,
       ...input
     });
-    commitCanvasDocumentMutation(result);
     return result;
-  }, [commitCanvasDocumentMutation]);
+  }, []);
 
   const bringCanvasNodeToFront = useCallback<WorkbenchActions['bringCanvasNodeToFront']>(async (canvasId, input) => {
-    const result = await api.bringCanvasNodeToFront({
+    await api.bringCanvasNodeToFront({
       canvasId,
       ...input
     });
-    commitCanvasDocumentMutation(result);
-  }, [commitCanvasDocumentMutation]);
+  }, []);
 
   const updateCanvasVideoPlaybackState = useCallback<WorkbenchActions['updateCanvasVideoPlaybackState']>(async (canvasId, input) => {
     try {
-      const result = await api.updateCanvasVideoPlaybackState({
+      await api.updateCanvasVideoPlaybackState({
         canvasId,
         ...input
       });
-      commitCanvasDocumentMutation(result);
     } catch (error) {
       notify(i18n.t('shell.notifications.updateCanvasVideoPlaybackFailed', {
         message: errorMessage(error)
       }));
       throw error;
     }
-  }, [commitCanvasDocumentMutation, i18n, notify]);
+  }, [i18n, notify]);
 
   const addProjectPathToCanvasMap = useCallback<WorkbenchActions['addProjectPathToCanvasMap']>(async (input) => {
+    if (!canStartProjectPathCommand()) {
+      return;
+    }
     try {
-      const result = await api.addProjectPathToCanvasMap(input);
-      commitProjectSnapshot(result.snapshot, result.projectRevision);
-      setActiveCanvasId(result.canvas.id);
-      explorerController.setSelection(projectTreeSelectionFromPaths([result.centerProjectRelativePath]));
-      centerCanvasProjectionNode(result.projection, result.centerProjectRelativePath);
+      await api.addProjectPathToCanvasMap(input);
+      if (!isCurrentProjectPathCommandScope()) {
+        return;
+      }
+      const accepted = api.projectProjection.getState();
+      const projection = accepted.status === 'unbound'
+        ? undefined
+        : accepted.presentedSnapshot.projections.find((item) => item.canvasId === input.canvasId);
+      setActiveCanvasId(input.canvasId);
+      explorerController.setSelection(projectTreeSelectionFromPaths([input.projectRelativePath]));
+      centerCanvasProjectionNode(projection, input.projectRelativePath);
     } catch (error) {
+      if (!isCurrentProjectPathCommandScope()) {
+        return;
+      }
       notify(i18n.t('shell.notifications.addToCanvasMapFailed', { message: errorMessage(error) }));
     }
-  }, [centerCanvasProjectionNode, commitProjectSnapshot, explorerController.setSelection, i18n, notify]);
+  }, [
+    canStartProjectPathCommand,
+    centerCanvasProjectionNode,
+    explorerController.setSelection,
+    i18n,
+    isCurrentProjectPathCommandScope,
+    notify
+  ]);
 
   const createCanvas = useCallback<WorkbenchActions['createCanvas']>(async () => {
     const result = await api.createCanvas();
-    commitProjectSnapshot(result.snapshot, result.projectRevision);
     setActiveCanvasId(result.activeCanvasId);
     return result;
-  }, [commitProjectSnapshot]);
+  }, []);
 
   const renameCanvas = useCallback<WorkbenchActions['renameCanvas']>(async (input) => {
     const result = await api.renameCanvas(input);
-    commitProjectSnapshot(result.snapshot, result.projectRevision);
     return result;
-  }, [commitProjectSnapshot]);
+  }, []);
 
   const deleteCanvas = useCallback<WorkbenchActions['deleteCanvas']>(async (input) => {
     const result = await api.deleteCanvas(input);
-    commitProjectSnapshot(result.snapshot, result.projectRevision);
     if (activeCanvasId === input.canvasId) {
       setActiveCanvasId(result.activeCanvasId);
     }
     return result;
-  }, [activeCanvasId, commitProjectSnapshot]);
+  }, [activeCanvasId]);
 
   const reorderCanvases = useCallback<WorkbenchActions['reorderCanvases']>(async (input) => {
     const result = await api.reorderCanvases(input);
-    commitProjectSnapshot(result.snapshot, result.projectRevision);
     return result;
-  }, [commitProjectSnapshot]);
+  }, []);
 
   const repairCanvasIndex = useCallback<WorkbenchActions['repairCanvasIndex']>(async () => {
     const result = await api.repairCanvasIndex();
-    commitProjectSnapshot(result.snapshot, result.projectRevision);
-    const repairedOrder = result.snapshot.canvasRegistry.status === 'ready'
-      ? result.snapshot.canvasRegistry.canvasOrder
+    const accepted = api.projectProjection.getState();
+    const registry = accepted.status === 'unbound'
+      ? undefined
+      : accepted.presentedSnapshot.canvasRegistry;
+    const repairedOrder = registry?.status === 'ready'
+      ? registry.canvasOrder
       : [];
     const repairedActiveCanvasId = activeCanvasId && repairedOrder.includes(activeCanvasId)
       ? activeCanvasId
       : result.activeCanvasId ?? repairedOrder[0];
     setActiveCanvasId(repairedActiveCanvasId);
     return result;
-  }, [activeCanvasId, commitProjectSnapshot]);
+  }, [activeCanvasId]);
 
   const openProject = useCallback<WorkbenchActions['openProject']>(async () => {
-    setIsProjectOpening(true);
+    if (!beginProjectOpening()) {
+      return;
+    }
     setProjectOpenError(undefined);
     setProjectOpenAttemptedPath(undefined);
+    let projectBindingChanged = false;
     try {
       const result = await api.openProjectFromPicker();
       if (!result.opened) {
@@ -720,7 +777,8 @@ function WorkbenchRuntimeApp({ initialRoute }: { initialRoute: Exclude<DebruteWo
       if ('outcome' in result) {
         return;
       }
-      commitOpenedProject(result);
+      projectBindingChanged = didProjectBindingChange();
+      replaceWorkbenchProjectRoute(result.projectId);
     } catch (error) {
       const openHereProjectId = projectOpenHereProjectId(error);
       if (openHereProjectId) {
@@ -729,18 +787,22 @@ function WorkbenchRuntimeApp({ initialRoute }: { initialRoute: Exclude<DebruteWo
       }
       setProjectOpenError(i18n.t('projectOpen.openFailed', { message: errorMessage(error) }));
     } finally {
-      setIsProjectOpening(false);
+      finishProjectOpening(!projectBindingChanged);
     }
-  }, [commitOpenedProject, i18n]);
+  }, [beginProjectOpening, didProjectBindingChange, finishProjectOpening, i18n, setProjectOpenAttemptedPath, setProjectOpenError, setProjectOpenHereTargetId]);
 
   const openProjectRoot = useCallback(async (projectRoot: string): Promise<void> => {
-    setIsProjectOpening(true);
+    if (!beginProjectOpening()) {
+      return;
+    }
     setProjectOpenError(undefined);
     setProjectOpenAttemptedPath(projectRoot);
+    let projectBindingChanged = false;
     try {
       const opened = await api.openProject({ projectRoot });
       if (!('outcome' in opened)) {
-        commitOpenedProject(opened);
+        projectBindingChanged = didProjectBindingChange();
+        replaceWorkbenchProjectRoute(opened.projectId);
       }
     } catch (error) {
       const openHereProjectId = projectOpenHereProjectId(error);
@@ -750,9 +812,9 @@ function WorkbenchRuntimeApp({ initialRoute }: { initialRoute: Exclude<DebruteWo
       }
       throw error;
     } finally {
-      setIsProjectOpening(false);
+      finishProjectOpening(!projectBindingChanged);
     }
-  }, [commitOpenedProject]);
+  }, [beginProjectOpening, didProjectBindingChange, finishProjectOpening, setProjectOpenAttemptedPath, setProjectOpenError, setProjectOpenHereTargetId]);
 
   useEffect(() => {
     const shell = getDebruteShellApi();
@@ -767,12 +829,24 @@ function WorkbenchRuntimeApp({ initialRoute }: { initialRoute: Exclude<DebruteWo
   }, [i18n, notify, openProjectRoot]);
 
   const openWorkbenchContextMenu = useCallback((target: WorkbenchContextMenuTarget, position: WorkbenchContextMenuPosition) => {
+    if (!canStartProjectPathCommand()) {
+      return;
+    }
     setContextMenu({ target, position });
-  }, []);
+  }, [canStartProjectPathCommand]);
 
   const closeWorkbenchContextMenu = useCallback(() => {
     setContextMenu(undefined);
   }, []);
+
+  useEffect(() => {
+    if (!isProjectOpening) {
+      return;
+    }
+    closeWorkbenchContextMenu();
+    explorerController.cancelEdit();
+    setSendToPhotoshopPath(undefined);
+  }, [closeWorkbenchContextMenu, explorerController.cancelEdit, isProjectOpening]);
 
   const openInspectorPanel = useCallback(() => {
     setFloatingPanels((current) => openFloatingPanel(current, 'inspector', workbenchViewportRectRef.current));
@@ -786,9 +860,11 @@ function WorkbenchRuntimeApp({ initialRoute }: { initialRoute: Exclude<DebruteWo
       }
       await navigator.clipboard.writeText(projectRelativePath);
     } catch (error) {
-      setNotifications((current) => [i18n.t('shell.notifications.copyFailed', { message: errorMessage(error) }), ...current].slice(0, 4));
+      if (isCurrentProjectPathCommandScope()) {
+        setNotifications((current) => [i18n.t('shell.notifications.copyFailed', { message: errorMessage(error) }), ...current].slice(0, 4));
+      }
     }
-  }, [i18n]);
+  }, [i18n, isCurrentProjectPathCommandScope]);
 
   const currentNodesForActiveCanvas = activeCanvasCurrentNodes?.canvasId === activeCanvas?.id
     ? activeCanvasCurrentNodes
@@ -907,7 +983,10 @@ function WorkbenchRuntimeApp({ initialRoute }: { initialRoute: Exclude<DebruteWo
       return;
     }
     const stackOrderSync = createCanvasSelectionStackOrderSync({
-      getSnapshot: () => snapshotRef.current,
+      getSnapshot: () => {
+        const accepted = api.projectProjection.getState();
+        return accepted.status === 'unbound' ? undefined : accepted.presentedSnapshot;
+      },
       getActiveCanvasId: () => activeCanvasId,
       getSelection: () => activeCanvasRuntime.getSnapshot().selection,
       bringCanvasNodeToFront
@@ -1023,16 +1102,6 @@ function WorkbenchRuntimeApp({ initialRoute }: { initialRoute: Exclude<DebruteWo
   const readyAdobeBridge = settingsController.adobeBridge.status === 'ready'
     ? settingsController.adobeBridge.value
     : undefined;
-  const contextMenuItems = useMemo(() => contextMenu
-      ? buildWorkbenchContextMenuItems({
-          target: contextMenu.target,
-          projection: activeProjection,
-          canSelectCanvasNode: Boolean(activeCanvasRuntime),
-          canRevealInCanvas,
-          fileClipboard,
-          adobeBridgeEnabled: persistedAdobeBridgeEnabled
-        })
-    : [], [activeCanvasRuntime, activeProjection, canRevealInCanvas, contextMenu, fileClipboard, persistedAdobeBridgeEnabled]);
   const canvasOrder = snapshot?.canvasRegistry.status === 'ready'
     ? snapshot.canvasRegistry.canvasOrder
     : [];
@@ -1066,13 +1135,17 @@ function WorkbenchRuntimeApp({ initialRoute }: { initialRoute: Exclude<DebruteWo
     copyPathFailed: i18n.t('shell.notifications.copyPathFailed'),
     resetAutoLayoutFailed: i18n.t('shell.notifications.resetAutoLayoutFailed')
   }), [i18n]);
-  const executeWorkbenchContextMenuCommand = useCallback((
-    command: WorkbenchContextMenuCommand,
-    commandContextMenu: typeof contextMenu
-  ) => {
-    runWorkbenchContextMenuCommand({
-      command,
-      contextMenu: commandContextMenu,
+  const projectPathCommandCoordinator = useMemo(() => createProjectPathCommandCoordinator({
+    canStartCommand: canStartProjectPathCommand,
+    isCurrentScope: isCurrentProjectPathCommandScope,
+    menuContext: {
+      projection: activeProjection,
+      canSelectCanvasNode: Boolean(activeCanvasRuntime),
+      canRevealInCanvas,
+      fileClipboard,
+      adobeBridgeEnabled: persistedAdobeBridgeEnabled
+    },
+    commandContext: {
       activeProjection,
       activeCanvasRuntime,
       fileClipboard,
@@ -1083,35 +1156,42 @@ function WorkbenchRuntimeApp({ initialRoute }: { initialRoute: Exclude<DebruteWo
       closeContextMenu: closeWorkbenchContextMenu,
       openInspectorPanel,
       confirmPermanentDelete,
-      projectSnapshot: snapshot,
+      getProjectSnapshot: getAcceptedProjectSnapshot,
       confirmMoveOverwrite,
       errorLabels: contextMenuCommandErrorLabels
-    });
-  }, [
+    }
+  }), [
     actions,
     activeCanvasRuntime,
     activeProjection,
+    canRevealInCanvas,
+    canStartProjectPathCommand,
     closeWorkbenchContextMenu,
     confirmMoveOverwrite,
     contextMenuCommandErrorLabels,
     copyProjectRelativePath,
     confirmPermanentDelete,
     fileClipboard,
+    getAcceptedProjectSnapshot,
     explorerController,
+    isCurrentProjectPathCommandScope,
     notify,
     openInspectorPanel,
-    snapshot
+    persistedAdobeBridgeEnabled
   ]);
-  const handleWorkbenchContextMenuCommand = useCallback((command: WorkbenchContextMenuCommand) => {
-    executeWorkbenchContextMenuCommand(command, contextMenu);
-  }, [contextMenu, executeWorkbenchContextMenuCommand]);
+  const contextMenuItems = useMemo(() => contextMenu
+    ? projectPathCommandCoordinator.contextMenuItems(contextMenu.target)
+    : [], [contextMenu, projectPathCommandCoordinator]);
+  const handleProjectPathContextMenuCommand = useCallback((command: ProjectPathCommand) => {
+    projectPathCommandCoordinator.run(command, contextMenu);
+  }, [contextMenu, projectPathCommandCoordinator]);
   const handleProjectTreeKeyboardFileCommand = useCallback((command: ProjectTreeFileKeyboardCommand, target: WorkbenchContextMenuTarget) => {
-    executeWorkbenchContextMenuCommand(command, {
+    projectPathCommandCoordinator.run(command, {
       target,
       position: { x: 0, y: 0 }
     });
-  }, [executeWorkbenchContextMenuCommand]);
-  if (connectionEnded) {
+  }, [projectPathCommandCoordinator]);
+  if (connectionEnded && !acceptedProject) {
     return (
       <I18nProvider locale={settingsController.locale}>
         <WorkbenchIconProvider>
@@ -1164,7 +1244,24 @@ function WorkbenchRuntimeApp({ initialRoute }: { initialRoute: Exclude<DebruteWo
             onCommand={handleTitleBarCommand}
             onWindowCommand={handleTitleBarWindowCommand}
           />
-          {projectOpenHereTargetId ? (
+          {isProjectOpening && acceptedProject ? (
+            <div
+              className="workbench-project-opening-indicator"
+              role="status"
+              aria-live="polite"
+              data-testid="workbench-project-opening"
+            >
+              <Loader2 className="spin" size={14} />
+              <span>{i18n.t('shell.boot.openingProject')}</span>
+            </div>
+          ) : null}
+          {connectionEnded ? (
+            <div className="workbench-detached-overlay" role="alert" data-testid="workbench-connection-ended-overlay">
+              <strong>Debrute Runtime connection ended.</strong>
+              <span>{connectionEnded.message}</span>
+              <span>This Project is read-only. Refresh this page to start a new Workbench connection.</span>
+            </div>
+          ) : projectOpenHereTargetId ? (
             <div className="workbench-detached-overlay" role="status" data-testid="workbench-open-here-overlay">
               <strong>This Project is active in a Web Workbench.</strong>
               <span>Choose Open Here to move it to this Desktop window.</span>
@@ -1174,7 +1271,7 @@ function WorkbenchRuntimeApp({ initialRoute }: { initialRoute: Exclude<DebruteWo
             <div className="workbench-detached-overlay" role="status" data-testid="workbench-detached-overlay">
               <strong>This Project is active in another Workbench.</strong>
               <span>This window is read-only. Your local drafts remain visible here.</span>
-              <Button onClick={() => { void reopenDetachedProject(); }}>Open Here</Button>
+              <Button disabled={isProjectOpening} onClick={() => { void reopenDetachedProject(); }}>Open Here</Button>
             </div>
           ) : null}
           <div className="canvas-layer" data-testid="canvas-layer">
@@ -1327,7 +1424,7 @@ function WorkbenchRuntimeApp({ initialRoute }: { initialRoute: Exclude<DebruteWo
               items={contextMenuItems}
               position={contextMenu.position}
               productPlatform={productPlatform}
-              onCommand={handleWorkbenchContextMenuCommand}
+              onCommand={handleProjectPathContextMenuCommand}
               onClose={closeWorkbenchContextMenu}
             />
           ) : null}
@@ -1340,37 +1437,87 @@ function WorkbenchRuntimeApp({ initialRoute }: { initialRoute: Exclude<DebruteWo
               sending={sendingToPhotoshop}
               onClose={() => setSendToPhotoshopPath(undefined)}
               onSend={(pluginInstanceId) => {
+                if (!canStartProjectPathCommand()) {
+                  return;
+                }
                 setSendingToPhotoshop(true);
                 void actions.sendProjectFileToPhotoshop({
                   projectRelativePath: sendToPhotoshopPath,
                   pluginInstanceId
                 }).then(() => {
-                  setSendToPhotoshopPath(undefined);
+                  if (isCurrentProjectPathCommandScope()) {
+                    setSendToPhotoshopPath(undefined);
+                  }
                 }).catch((error) => {
-                  notify(i18n.t('shell.notifications.sendToPhotoshopFailed', { message: errorMessage(error) }));
+                  if (isCurrentProjectPathCommandScope()) {
+                    notify(i18n.t('shell.notifications.sendToPhotoshopFailed', { message: errorMessage(error) }));
+                  }
                 }).finally(() => {
-                  setSendingToPhotoshop(false);
+                  if (isCurrentProjectPathCommandScope()) {
+                    setSendingToPhotoshop(false);
+                  }
                 });
               }}
             />
           ) : null}
-          <NotificationStack notifications={notifications} />
         </div>
       </WorkbenchIconProvider>
     </I18nProvider>
   );
 }
 
-function replaceCanvasMutationInSnapshot(
-  snapshot: WorkbenchProjectSessionSnapshot,
-  result: WorkbenchCanvasDocumentMutationResult
-): WorkbenchProjectSessionSnapshot {
+function createInitialProjectPresentation(
+  project: Exclude<WorkbenchProjectProjectionState, { status: 'unbound' }> | undefined
+): {
+  viewportRect: ReturnType<typeof readWorkbenchViewportRect>;
+  activeCanvasId: string | undefined;
+  floatingPanels: FloatingPanelState;
+  textFileBuffers: Record<string, TextFileBuffer>;
+  viewStateInvalid: boolean;
+} {
+  const viewportRect = readWorkbenchViewportRect();
+  if (!project) {
+    return {
+      viewportRect,
+      activeCanvasId: undefined,
+      floatingPanels: DEFAULT_FLOATING_PANEL_STATE,
+      textFileBuffers: {},
+      viewStateInvalid: false
+    };
+  }
+  const restoredViewState = restoreProjectViewState({
+    storage: window.sessionStorage,
+    projectId: project.projectId
+  });
+  const viewState = restoredViewState.status === 'ready'
+    ? restoredViewState.state
+    : { floatingPanels: DEFAULT_FLOATING_PANEL_STATE };
+  const canvasOrder = project.presentedSnapshot.canvasRegistry.status === 'ready'
+    ? project.presentedSnapshot.canvasRegistry.canvasOrder
+    : [];
   return {
-    ...snapshot,
-    canvases: snapshot.canvases.map((canvas) => canvas.id === result.canvas.id ? result.canvas : canvas),
-    projections: snapshot.projections.map((projection) => (
-      projection.canvasId === result.projection.canvasId ? result.projection : projection
-    ))
+    viewportRect,
+    activeCanvasId: chooseInitialActiveCanvasId({
+      storedActiveCanvasId: viewState.activeCanvasId,
+      canvasOrder
+    }),
+    floatingPanels: constrainOpenFloatingPanelsToViewport(
+      viewState.floatingPanels,
+      viewportRect
+    ),
+    textFileBuffers: Object.fromEntries(
+      Object.values(project.workingCopies.text).map((workingCopy) => [
+        workingCopy.projectRelativePath,
+        {
+          ...workingCopy,
+          wordWrap: false,
+          dirty: true,
+          saving: false,
+          externalChange: false
+        }
+      ])
+    ),
+    viewStateInvalid: restoredViewState.status === 'invalid'
   };
 }
 

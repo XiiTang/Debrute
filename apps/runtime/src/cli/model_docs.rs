@@ -90,6 +90,17 @@ fn source_for(model_id: &str) -> Option<DocSource> {
                 "../../../../assets/model-docs/snapshots/image/volcengine-ark/seedream-5-lite.md"
             ),
         )),
+        "doubao-seedream-5-0-pro-260628" => Some(model_doc_at(
+            "model-docs/snapshots/image/volcengine-ark/seedream-5-pro.md",
+            &[
+                "https://www.volcengine.com/docs/82379/2582774",
+                "https://www.volcengine.com/docs/82379/1541523",
+            ],
+            "2026-07-23",
+            include_str!(
+                "../../../../assets/model-docs/snapshots/image/volcengine-ark/seedream-5-pro.md"
+            ),
+        )),
         "fal-ai/flux/dev" => Some(model_doc(
             "model-docs/snapshots/image/fal/flux-dev.md",
             &["https://fal.ai/models/fal-ai/flux/dev/api"],
@@ -156,6 +167,30 @@ fn source_for(model_id: &str) -> Option<DocSource> {
             ],
             include_str!("../../../../assets/model-docs/snapshots/image/minimax/image-01.md"),
         )),
+        "qwen-image-2.0-pro-2026-06-22" => Some(model_doc_at(
+            "model-docs/snapshots/image/dashscope/qwen-image-2.0-pro-2026-06-22.md",
+            &[
+                "https://help.aliyun.com/en/model-studio/qwen-image-api",
+                "https://help.aliyun.com/en/model-studio/qwen-image-edit-guide",
+                "https://help.aliyun.com/zh/model-studio/image-model/",
+            ],
+            "2026-07-23",
+            include_str!(
+                "../../../../assets/model-docs/snapshots/image/dashscope/qwen-image-2.0-pro-2026-06-22.md"
+            ),
+        )),
+        "qwen-image-2.0-2026-03-03" => Some(model_doc_at(
+            "model-docs/snapshots/image/dashscope/qwen-image-2.0-2026-03-03.md",
+            &[
+                "https://help.aliyun.com/en/model-studio/qwen-image-api",
+                "https://help.aliyun.com/en/model-studio/qwen-image-edit-guide",
+                "https://help.aliyun.com/zh/model-studio/image-model/",
+            ],
+            "2026-07-23",
+            include_str!(
+                "../../../../assets/model-docs/snapshots/image/dashscope/qwen-image-2.0-2026-03-03.md"
+            ),
+        )),
         "wan2.7-image" => Some(model_doc(
             "model-docs/snapshots/image/dashscope/wan2.7-image.md",
             &[
@@ -185,6 +220,20 @@ fn source_for(model_id: &str) -> Option<DocSource> {
             ],
             include_str!(
                 "../../../../assets/model-docs/snapshots/video/volcengine-ark/seedance-2-fast.md"
+            ),
+        )),
+        "doubao-seedance-2-0-mini-260615" => Some(model_doc_at(
+            "model-docs/snapshots/video/volcengine-ark/seedance-2-mini.md",
+            &[
+                "https://www.volcengine.com/docs/82379/2291680",
+                "https://www.volcengine.com/docs/82379/2298881",
+                "https://www.volcengine.com/docs/82379/1520757",
+                "https://www.volcengine.com/docs/82379/1521309",
+                "https://www.volcengine.com/docs/82379/1159178",
+            ],
+            "2026-07-23",
+            include_str!(
+                "../../../../assets/model-docs/snapshots/video/volcengine-ark/seedance-2-mini.md"
             ),
         )),
         "openai-gpt-4o-mini-tts" => Some(model_doc(
@@ -331,10 +380,19 @@ fn model_doc(
     urls: &'static [&'static str],
     snapshot: &'static str,
 ) -> DocSource {
+    model_doc_at(path, urls, "2026-07-21", snapshot)
+}
+
+fn model_doc_at(
+    path: &'static str,
+    urls: &'static [&'static str],
+    captured_at: &'static str,
+    snapshot: &'static str,
+) -> DocSource {
     DocSource {
         urls,
         path,
-        captured_at: "2026-07-21",
+        captured_at,
         snapshot,
     }
 }

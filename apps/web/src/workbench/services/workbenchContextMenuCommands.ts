@@ -12,13 +12,13 @@ import {
   explorerContextMenuPrimaryEntry,
   explorerContextMenuProjectRelativePaths,
   projectedContextMenuNode,
-  type WorkbenchContextMenuCommand,
+  type ProjectPathCommand,
   type WorkbenchContextMenuPosition,
   type WorkbenchContextMenuTarget,
   type WorkbenchFileClipboard
 } from '../shell/contextMenu';
 
-export interface WorkbenchContextMenuCommandErrorLabels {
+export interface ProjectPathCommandErrorLabels {
   copyPathFailed: string;
   resetAutoLayoutFailed: string;
 }
@@ -36,8 +36,8 @@ type ExplorerContextCommands = Pick<ProjectExplorerController,
   | 'deleteEntriesPermanently'
 >;
 
-export function runWorkbenchContextMenuCommand(input: {
-  command: WorkbenchContextMenuCommand;
+export function runProjectPathCommand(input: {
+  command: ProjectPathCommand;
   contextMenu: { target: WorkbenchContextMenuTarget; position: WorkbenchContextMenuPosition } | undefined;
   activeProjection: CanvasProjection | undefined;
   activeCanvasRuntime: CanvasEditorRuntime | undefined;
@@ -49,12 +49,12 @@ export function runWorkbenchContextMenuCommand(input: {
   closeContextMenu: () => void;
   openInspectorPanel: () => void;
   confirmPermanentDelete: (input: { entries: ProjectPathEntry[] }) => boolean;
-  projectSnapshot?: WorkbenchProjectSessionSnapshot | undefined;
+  getProjectSnapshot(): WorkbenchProjectSessionSnapshot | undefined;
   confirmMoveOverwrite: (input: {
     entries: ProjectPathEntry[];
     targetDirectoryProjectRelativePath: string;
   }) => boolean;
-  errorLabels: WorkbenchContextMenuCommandErrorLabels;
+  errorLabels: ProjectPathCommandErrorLabels;
 }): void {
   const target = input.contextMenu?.target;
   if (!target) {
@@ -117,8 +117,10 @@ export function runWorkbenchContextMenuCommand(input: {
     }
     const canvasId = input.activeProjection?.canvasId;
     if (canvasId) {
-      void input.actions.resetCanvasNodeLayouts(canvasId, canvasLayoutResetInputForTarget(primaryEntry)).then((result) => {
-        const updatedNode = projectedContextMenuNode(result.projection, projectRelativePath);
+      void input.actions.resetCanvasNodeLayouts(canvasId, canvasLayoutResetInputForTarget(primaryEntry)).then(() => {
+        const acceptedProjection = input.getProjectSnapshot()
+          ?.projections.find((projection) => projection.canvasId === canvasId);
+        const updatedNode = projectedContextMenuNode(acceptedProjection, projectRelativePath);
         const snapshot = input.activeCanvasRuntime?.getSnapshot();
         if (!updatedNode || !input.activeCanvasRuntime || !snapshot?.surfaceSize) {
           return;
@@ -151,7 +153,7 @@ function canvasLayoutResetInputForTarget(
 }
 
 function runSinglePathFileCommand(
-  input: Parameters<typeof runWorkbenchContextMenuCommand>[0],
+  input: Parameters<typeof runProjectPathCommand>[0],
   target: WorkbenchContextMenuTarget
 ): boolean {
   const primaryEntry = explorerContextMenuPrimaryEntry(target);
@@ -233,7 +235,7 @@ function runSinglePathFileCommand(
 }
 
 function runExplorerSpecificCommand(
-  input: Parameters<typeof runWorkbenchContextMenuCommand>[0],
+  input: Parameters<typeof runProjectPathCommand>[0],
   target: Extract<WorkbenchContextMenuTarget, { source: 'explorer' }>
 ): boolean {
   const entries = explorerContextMenuEntries(target);
@@ -316,7 +318,7 @@ function isCanvasProjectRootTarget(
 }
 
 function runPasteCommand(
-  input: Parameters<typeof runWorkbenchContextMenuCommand>[0],
+  input: Parameters<typeof runProjectPathCommand>[0],
   target: WorkbenchContextMenuTarget
 ): void {
   const fileClipboard = input.fileClipboard;
@@ -325,8 +327,9 @@ function runPasteCommand(
   }
   const targetDirectoryProjectRelativePath = projectTreePasteTargetDirectory(target);
   if (fileClipboard.operation === 'cut') {
-    const overwrite = input.projectSnapshot && projectTreeBatchMoveHasConflict({
-      existingProjectRelativePaths: new Set(input.projectSnapshot.files.map((file) => file.projectRelativePath)),
+    const snapshot = input.getProjectSnapshot();
+    const overwrite = snapshot && projectTreeBatchMoveHasConflict({
+      existingProjectRelativePaths: new Set(snapshot.files.map((file) => file.projectRelativePath)),
       entries: fileClipboard.entries,
       targetDirectoryProjectRelativePath
     });

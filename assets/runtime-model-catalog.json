@@ -94,6 +94,86 @@
       }
     },
     {
+      "debruteModelId": "doubao-seedream-5-0-pro-260628",
+      "summary": "Volcengine Ark Doubao Seedream 5.0 Pro image generation and precision editing.",
+      "chooseWhen": "high-precision text rendering, up to ten ordered image references, or point and bounding-box guided editing",
+      "avoidWhen": "you need Seedream Lite group generation, streaming, Web Search, or 3K/4K output",
+      "supportsTextRendering": true,
+      "supportsEditing": true,
+      "defaultBaseUrl": "https://ark.cn-beijing.volces.com/api/v3",
+      "defaultRequestModelId": "doubao-seedream-5-0-pro-260628",
+      "listParameters": {
+        "prompt": "required text instruction for generation or editing; point and bbox tags may express precise locations",
+        "image": "optional ordered image-reference string array; up to ten references under the current remote contract",
+        "size": "1K|2K or explicit dimensions supported by the service",
+        "output_format": "png|jpeg",
+        "response_format": "url|b64_json",
+        "watermark": "boolean",
+        "optimize_prompt_options.mode": "standard|fast prompt optimization"
+      },
+      "capabilities": {
+        "supports_image_inputs": true,
+        "supports_precision_editing": true,
+        "output_formats": [
+          "png",
+          "jpeg"
+        ]
+      },
+      "argumentsSchema": {
+        "type": "object",
+        "properties": {
+          "prompt": {
+            "type": "string"
+          },
+          "image": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "debruteImageInput": true,
+            "description": "Ordered Project-relative image paths, public http(s) URLs, or data:image URIs."
+          },
+          "size": {
+            "type": "string"
+          },
+          "output_format": {
+            "type": "string",
+            "default": "png"
+          },
+          "response_format": {
+            "type": "string",
+            "default": "url"
+          },
+          "watermark": {
+            "type": "boolean",
+            "default": false
+          },
+          "optimize_prompt_options": {
+            "type": "object",
+            "properties": {
+              "mode": {
+                "type": "string"
+              }
+            },
+            "additionalProperties": false
+          }
+        },
+        "required": [
+          "prompt"
+        ],
+        "additionalProperties": false
+      },
+      "requestExample": {
+        "command": "request.single",
+        "input": {
+          "model": "doubao-seedream-5-0-pro-260628",
+          "arguments": {
+            "prompt": "Create a bilingual campaign poster with precise small Chinese and English typography"
+          }
+        }
+      }
+    },
+    {
       "debruteModelId": "fal-ai/flux/dev",
       "summary": "Fal.ai FLUX.1 [dev] text-to-image.",
       "chooseWhen": "plain text-to-image with `seed`, `guidance_scale`, `num_inference_steps`",
@@ -695,6 +775,156 @@
       }
     },
     {
+      "debruteModelId": "qwen-image-2.0-pro-2026-06-22",
+      "summary": "Alibaba Cloud Model Studio Qwen Image 2.0 Pro fixed-snapshot generation and editing.",
+      "chooseWhen": "highest Qwen Image 2.0 quality, long instructions, text rendering, realism, or multi-image editing",
+      "avoidWhen": "you prefer the lower-cost faster Qwen Image 2.0 snapshot",
+      "supportsTextRendering": true,
+      "supportsEditing": true,
+      "defaultBaseUrl": "https://dashscope.aliyuncs.com/api/v1",
+      "defaultRequestModelId": "qwen-image-2.0-pro-2026-06-22",
+      "listParameters": {
+        "prompt": "required generation or editing instruction",
+        "image": "optional ordered image-reference string array; current remote editing contract accepts one to three images",
+        "negative_prompt": "optional text describing content to avoid",
+        "size": "output size whose total pixels satisfy the current remote contract",
+        "n": "requested output image count; current remote contract accepts one to six",
+        "prompt_extend": "boolean provider prompt-extension control",
+        "watermark": "boolean",
+        "seed": "integer seed"
+      },
+      "capabilities": {
+        "supports_image_inputs": true,
+        "output_formats": [
+          "png"
+        ],
+        "maximum_outputs": 6
+      },
+      "argumentsSchema": {
+        "type": "object",
+        "properties": {
+          "prompt": {
+            "type": "string"
+          },
+          "image": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "debruteImageInput": true,
+            "description": "Ordered Project-relative image paths, public http(s) URLs, or data:image URIs."
+          },
+          "negative_prompt": {
+            "type": "string"
+          },
+          "size": {
+            "type": "string"
+          },
+          "n": {
+            "type": "integer"
+          },
+          "prompt_extend": {
+            "type": "boolean"
+          },
+          "watermark": {
+            "type": "boolean",
+            "default": false
+          },
+          "seed": {
+            "type": "integer"
+          }
+        },
+        "required": [
+          "prompt"
+        ],
+        "additionalProperties": false
+      },
+      "requestExample": {
+        "command": "request.single",
+        "input": {
+          "model": "qwen-image-2.0-pro-2026-06-22",
+          "arguments": {
+            "prompt": "A premium editorial cover with exact bilingual typography and realistic materials"
+          }
+        }
+      }
+    },
+    {
+      "debruteModelId": "qwen-image-2.0-2026-03-03",
+      "summary": "Alibaba Cloud Model Studio Qwen Image 2.0 fixed fast-snapshot generation and editing.",
+      "chooseWhen": "fast lower-cost Qwen Image 2.0 generation or editing with the same current request surface as Pro",
+      "avoidWhen": "you need the highest Qwen Image 2.0 text, realism, and semantic-adherence quality",
+      "supportsTextRendering": true,
+      "supportsEditing": true,
+      "defaultBaseUrl": "https://dashscope.aliyuncs.com/api/v1",
+      "defaultRequestModelId": "qwen-image-2.0-2026-03-03",
+      "listParameters": {
+        "prompt": "required generation or editing instruction",
+        "image": "optional ordered image-reference string array; current remote editing contract accepts one to three images",
+        "negative_prompt": "optional text describing content to avoid",
+        "size": "output size whose total pixels satisfy the current remote contract",
+        "n": "requested output image count; current remote contract accepts one to six",
+        "prompt_extend": "boolean provider prompt-extension control",
+        "watermark": "boolean",
+        "seed": "integer seed"
+      },
+      "capabilities": {
+        "supports_image_inputs": true,
+        "output_formats": [
+          "png"
+        ],
+        "maximum_outputs": 6
+      },
+      "argumentsSchema": {
+        "type": "object",
+        "properties": {
+          "prompt": {
+            "type": "string"
+          },
+          "image": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "debruteImageInput": true,
+            "description": "Ordered Project-relative image paths, public http(s) URLs, or data:image URIs."
+          },
+          "negative_prompt": {
+            "type": "string"
+          },
+          "size": {
+            "type": "string"
+          },
+          "n": {
+            "type": "integer"
+          },
+          "prompt_extend": {
+            "type": "boolean"
+          },
+          "watermark": {
+            "type": "boolean",
+            "default": false
+          },
+          "seed": {
+            "type": "integer"
+          }
+        },
+        "required": [
+          "prompt"
+        ],
+        "additionalProperties": false
+      },
+      "requestExample": {
+        "command": "request.single",
+        "input": {
+          "model": "qwen-image-2.0-2026-03-03",
+          "arguments": {
+            "prompt": "Rapid concept art for a luminous product launch stage"
+          }
+        }
+      }
+    },
+    {
       "debruteModelId": "wan2.7-image",
       "summary": "Aliyun DashScope Wan 2.7 image generation.",
       "chooseWhen": "Chinese-first prompting, image-input generation or editing, simple reproducibility via `seed`, one endpoint for generation and editing",
@@ -1168,6 +1398,177 @@
             "duration": 5,
             "generate_audio": true,
             "watermark": false
+          }
+        }
+      }
+    },
+    {
+      "debruteModelId": "doubao-seedance-2-0-mini-260615",
+      "summary": "Volcengine Ark Doubao Seedance 2.0 Mini video generation.",
+      "chooseWhen": "lowest-cost Seedance 2.0 generation up to 720p with multimodal references, generated audio, or pure-text Web Search",
+      "avoidWhen": "you need 1080p or 4K output, first-class provider task controls, or Project-local video upload",
+      "supportsTextToVideo": true,
+      "supportsImageReferences": true,
+      "supportsVideoReferences": true,
+      "supportsAudioReferences": true,
+      "supportsGeneratedAudio": true,
+      "defaultBaseUrl": "https://ark.cn-beijing.volces.com/api/v3",
+      "defaultRequestModelId": "doubao-seedance-2-0-mini-260615",
+      "capabilities": {
+        "supports_multimodal_references": true,
+        "supports_generated_audio": true,
+        "supports_web_search_for_text_only": true,
+        "supports_local_video_upload_service": false,
+        "resolutions": [
+          "480p",
+          "720p"
+        ],
+        "ratios": [
+          "16:9",
+          "4:3",
+          "1:1",
+          "3:4",
+          "9:16",
+          "21:9",
+          "adaptive"
+        ],
+        "duration": {
+          "minimum": 4,
+          "maximum": 15,
+          "model_selected": -1
+        }
+      },
+      "listParameters": {
+        "prompt": "required text brief",
+        "intent": "generate|reference|audio_driven|extend|edit",
+        "references": "ordered Project paths, public http(s) URLs, asset:// URLs, or supported data URLs; Project-local video is not uploadable",
+        "generate_audio": "boolean provider audio-generation control",
+        "tools": "optional [{type: web_search}] for pure-text requests",
+        "return_last_frame": "boolean",
+        "resolution": "480p|720p",
+        "ratio": "16:9|4:3|1:1|3:4|9:16|21:9|adaptive",
+        "duration": "integer seconds or -1 for model-selected duration",
+        "watermark": "boolean"
+      },
+      "argumentsSchema": {
+        "type": "object",
+        "properties": {
+          "prompt": {
+            "type": "string",
+            "description": "Required video brief."
+          },
+          "intent": {
+            "type": "string",
+            "default": "generate",
+            "enum": [
+              "generate",
+              "reference",
+              "audio_driven",
+              "extend",
+              "edit"
+            ],
+            "description": "High-level Debrute video intent. Debrute derives the official Seedance content roles internally."
+          },
+          "references": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "source": {
+                  "type": "string"
+                },
+                "media_type": {
+                  "type": "string",
+                  "enum": [
+                    "image",
+                    "video",
+                    "audio"
+                  ]
+                }
+              },
+              "required": [
+                "source"
+              ],
+              "additionalProperties": false
+            }
+          },
+          "generate_audio": {
+            "type": "boolean"
+          },
+          "tools": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "type": {
+                  "type": "string",
+                  "enum": [
+                    "web_search"
+                  ]
+                }
+              },
+              "required": [
+                "type"
+              ],
+              "additionalProperties": false
+            }
+          },
+          "return_last_frame": {
+            "type": "boolean"
+          },
+          "resolution": {
+            "type": "string",
+            "enum": [
+              "480p",
+              "720p"
+            ]
+          },
+          "ratio": {
+            "type": "string",
+            "enum": [
+              "16:9",
+              "4:3",
+              "1:1",
+              "3:4",
+              "9:16",
+              "21:9",
+              "adaptive"
+            ]
+          },
+          "duration": {
+            "type": "integer",
+            "oneOf": [
+              {
+                "const": -1,
+                "description": "Let Seedance select the duration."
+              },
+              {
+                "minimum": 4,
+                "maximum": 15
+              }
+            ]
+          },
+          "watermark": {
+            "type": "boolean",
+            "default": false
+          }
+        },
+        "required": [
+          "prompt"
+        ],
+        "additionalProperties": false
+      },
+      "usageNotes": "Use Debrute-native prompt, intent, and references arguments. Debrute constructs official Seedance content roles internally. Project-local image and audio references may be encoded as supported data URLs. Project-local video references fail before submission; model-reachable http(s) and asset:// video references pass through. Web Search is documented only for pure-text requests, and the remote endpoint owns that cross-field rule.",
+      "requestExample": {
+        "command": "request.single",
+        "input": {
+          "model": "doubao-seedance-2-0-mini-260615",
+          "arguments": {
+            "prompt": "A low-cost product teaser with synchronized ambient audio",
+            "resolution": "720p",
+            "ratio": "16:9",
+            "duration": 5,
+            "generate_audio": true
           }
         }
       }

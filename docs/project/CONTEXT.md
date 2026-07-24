@@ -16,6 +16,11 @@ A normalized path relative to the Project root used to identify a file or
 directory without exposing an absolute host path across product boundaries.
 _Avoid_: File URL, absolute path
 
+**Project Path Command**:
+A user operation directed at the Project root or one or more Project Paths,
+with the same meaning whether invoked from Explorer, Canvas, or the keyboard.
+_Avoid_: Context-menu command, Explorer command, Canvas command
+
 **Project Document**:
 A structured Debrute-owned file under `.debrute/` whose registered role and
 owner determine how it participates in Project state.

@@ -16,7 +16,7 @@ import {
 } from 'lucide-react';
 import {
   clampWorkbenchContextMenuPosition,
-  type WorkbenchContextMenuCommand,
+  type ProjectPathCommand,
   type WorkbenchContextMenuItem,
   type WorkbenchContextMenuPosition
 } from './contextMenu';
@@ -40,7 +40,7 @@ export function WorkbenchContextMenu({
 }: {
   items: WorkbenchContextMenuItem[];
   position: WorkbenchContextMenuPosition;
-  onCommand: (command: WorkbenchContextMenuCommand) => void;
+  onCommand: (command: ProjectPathCommand) => void;
   onClose: () => void;
   productPlatform: DebruteProductPlatform;
 }): React.ReactElement | null {
@@ -132,7 +132,7 @@ export function WorkbenchContextMenu({
   );
 }
 
-function contextMenuIcon(command: WorkbenchContextMenuCommand): React.ReactElement {
+function contextMenuIcon(command: ProjectPathCommand): React.ReactElement {
   if (command === 'show-details') {
     return <Info size={14} />;
   }

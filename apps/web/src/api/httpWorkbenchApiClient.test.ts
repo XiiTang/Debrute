@@ -48,12 +48,13 @@ describe('Runtime Workbench connection', () => {
   it('becomes unbound when another Workbench preempts its Project', async () => {
     const harness = createHarness();
     const client = createHttpWorkbenchApiClient();
-    const detached = vi.fn();
-    client.onProjectDetached(detached);
 
     await client.openProject({ projectRoot: '/tmp/project-1' });
     harness.emit({ type: 'project.preempted', projectId: 'project-1' });
-    await vi.waitFor(() => expect(detached).toHaveBeenCalledOnce());
+    await vi.waitFor(() => expect(client.projectProjection.getState()).toMatchObject({
+      status: 'detached',
+      projectId: 'project-1'
+    }));
     await client.openProject({ projectRoot: '/tmp/project-2' });
 
     expect(harness.calls.at(-1)?.path).toBe('/api/projects/open');
@@ -172,6 +173,109 @@ describe('Runtime Workbench connection', () => {
     );
     client.dispose();
   });
+
+  it('completes a Project mutation only after its stream revision is accepted', async () => {
+    const harness = createHarness();
+    const client = createHttpWorkbenchApiClient();
+    await client.openProject({ projectRoot: '/tmp/project-1' });
+    const mutation = client.createCanvas();
+    let completed = false;
+    void mutation.then(() => { completed = true; });
+
+    await vi.waitFor(() => expect(harness.calls.at(-1)?.path).toBe('/api/projects/project-1/canvases'));
+    await Promise.resolve();
+    expect(completed).toBe(false);
+
+    harness.emit({
+      type: 'project.changed',
+      projectId: 'project-1',
+      projectRevision: 2,
+      snapshot: snapshotFixture('project-1')
+    });
+    await expect(mutation).resolves.toMatchObject({ projectRevision: 2 });
+    client.dispose();
+  });
+
+  it('rejects a Project mutation when the connection ends before its stream revision', async () => {
+    const harness = createHarness();
+    const client = createHttpWorkbenchApiClient();
+    await client.openProject({ projectRoot: '/tmp/project-1' });
+    const mutation = client.createCanvas();
+
+    await vi.waitFor(() => expect(harness.calls.at(-1)?.path).toBe('/api/projects/project-1/canvases'));
+    harness.close();
+
+    await expect(mutation).rejects.toThrow('ended unexpectedly');
+    client.dispose();
+  });
+
+  it('also waits for the accepted stream revision after a multipart Project mutation', async () => {
+    const harness = createHarness();
+    const client = createHttpWorkbenchApiClient();
+    await client.openProject({ projectRoot: '/tmp/project-1' });
+    const mutation = client.importExternalProjectUploads({
+      entries: [],
+      targetDirectoryProjectRelativePath: ''
+    });
+    let completed = false;
+    void mutation.then(() => { completed = true; });
+
+    await vi.waitFor(() => expect(harness.calls.at(-1)?.path).toBe('/api/projects/project-1/files/import/uploads'));
+    await Promise.resolve();
+    expect(completed).toBe(false);
+
+    harness.emit({
+      type: 'project.changed',
+      projectId: 'project-1',
+      projectRevision: 2,
+      snapshot: snapshotFixture('project-1')
+    });
+    await expect(mutation).resolves.toMatchObject({ projectRevision: 2 });
+    client.dispose();
+  });
+
+  it('ends the connection when a recognized Project event is malformed', async () => {
+    const harness = createHarness();
+    const client = createHttpWorkbenchApiClient();
+    const onConnectionEnded = vi.fn();
+    client.onConnectionEnded(onConnectionEnded);
+    await client.openProject({ projectRoot: '/tmp/project-1' });
+
+    harness.emit({
+      type: 'project.changed',
+      projectId: 'project-1',
+      snapshot: { source: 'missing-revision' }
+    });
+
+    await vi.waitFor(() => expect(onConnectionEnded).toHaveBeenCalledWith(
+      expect.objectContaining({ message: expect.stringContaining('invalid project.changed') })
+    ));
+    expect(client.projectProjection.getState()).toMatchObject({ status: 'failed' });
+    client.dispose();
+  });
+
+  it('ends the connection when a project.bound baseline is incomplete', async () => {
+    const harness = createHarness();
+    const client = createHttpWorkbenchApiClient();
+    const onConnectionEnded = vi.fn();
+    client.onConnectionEnded(onConnectionEnded);
+    await client.checkProductUpdate();
+
+    harness.emit({
+      type: 'project.bound',
+      project: {
+        projectId: 'project-1',
+        projectRevision: 1,
+        snapshot: {}
+      },
+      workingCopies: { text: {}, feedback: {} }
+    });
+
+    await vi.waitFor(() => expect(onConnectionEnded).toHaveBeenCalledWith(
+      expect.objectContaining({ message: expect.stringContaining('invalid project.bound') })
+    ));
+    client.dispose();
+  });
 });
 
 function createHarness() {
@@ -216,7 +320,7 @@ function createHarness() {
         project: {
           projectId,
           projectRevision: 1,
-          snapshot: { source: 'stream' }
+          snapshot: snapshotFixture(projectId)
         },
         workingCopies: {
           text: projectNumber === 1
@@ -236,6 +340,19 @@ function createHarness() {
     }
     if (path === '/api/runtime/product/update/check') {
       return Response.json({ ok: true });
+    }
+    if (path === '/api/projects/project-1/canvases') {
+      return Response.json({
+        projectId: 'project-1',
+        projectRevision: 2
+      });
+    }
+    if (path === '/api/projects/project-1/files/import/uploads') {
+      return Response.json({
+        projectId: 'project-1',
+        projectRevision: 2,
+        results: []
+      });
     }
     if (path === '/api/settings/models/api-key/reveal') {
       return Response.json({ apiKey: '  密钥🔑  ' });
@@ -265,6 +382,30 @@ function createHarness() {
     },
     focusNextProject() {
       focusNext = true;
+    }
+  };
+}
+
+function snapshotFixture(projectId: string) {
+  return {
+    metadata: {
+      project: {
+        id: projectId,
+        name: projectId,
+        createdAt: '2026-07-23T00:00:00.000Z',
+        updatedAt: '2026-07-23T00:00:00.000Z'
+      }
+    },
+    files: [],
+    canvases: [],
+    projections: [],
+    diagnostics: [],
+    canvasRegistry: { status: 'ready', canvasOrder: [] },
+    health: {
+      projectName: projectId,
+      canvasCount: 0,
+      diagnosticCounts: { errors: 0, warnings: 0 },
+      checkedAt: '2026-07-23T00:00:00.000Z'
     }
   };
 }

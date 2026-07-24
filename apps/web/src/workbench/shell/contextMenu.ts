@@ -6,7 +6,7 @@ import { cameraCenteredOnCanvasPoint } from '../canvas/runtime/canvasCamera';
 
 export type WorkbenchContextMenuTargetKind = 'file' | 'directory';
 
-export type WorkbenchContextMenuCommand =
+export type ProjectPathCommand =
   | 'send-to-photoshop'
   | 'show-details'
   | 'reveal-in-canvas'
@@ -61,7 +61,7 @@ export interface WorkbenchFileClipboard {
 export type WorkbenchContextMenuItem =
   | {
       kind: 'action';
-      command: WorkbenchContextMenuCommand;
+      command: ProjectPathCommand;
       disabled?: boolean;
     }
   | {
@@ -232,7 +232,7 @@ function clamp(value: number, min: number, max: number): number {
 }
 
 function action(
-  command: WorkbenchContextMenuCommand,
+  command: ProjectPathCommand,
   options: { disabled?: boolean } = {}
 ): WorkbenchContextMenuItem {
   return {

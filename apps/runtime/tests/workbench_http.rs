@@ -952,9 +952,17 @@ fn create_canvas(
         .send()
         .expect("Canvas create should complete");
     assert_eq!(response.status().as_u16(), 200);
-    response
+    let body = response
         .json::<Value>()
-        .expect("Canvas create response should be JSON")["activeCanvasId"]
+        .expect("Canvas create response should be JSON");
+    let object = body
+        .as_object()
+        .expect("Canvas create response should be an object");
+    assert_eq!(object.len(), 3);
+    assert!(object.contains_key("activeCanvasId"));
+    assert!(object.contains_key("projectId"));
+    assert!(object.contains_key("projectRevision"));
+    body["activeCanvasId"]
         .as_str()
         .expect("created Canvas id should be present")
         .to_owned()

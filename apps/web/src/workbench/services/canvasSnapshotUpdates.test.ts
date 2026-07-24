@@ -8,6 +8,12 @@ import {
   createCanvasTextViewportStateController,
   type CanvasTextViewportStateController
 } from './canvasSnapshotUpdates';
+import { createWorkbenchProjectProjection } from './WorkbenchProjectProjection.js';
+
+type SimulatedCanvasMutationResult = WorkbenchCanvasDocumentMutationResult & {
+  canvas: CanvasDocument;
+  projection: CanvasProjection;
+};
 
 describe('canvas snapshot updates', () => {
   it('serializes text viewport persistence while preserving the latest local viewport', async () => {
@@ -18,7 +24,7 @@ describe('canvas snapshot updates', () => {
     const requests: Array<{
       canvasId: string;
       updates: Array<{ projectRelativePath: string; scrollTop: number; scrollLeft: number }>;
-      resolve: (result: WorkbenchCanvasDocumentMutationResult) => void;
+      resolve: (result: SimulatedCanvasMutationResult) => void;
     }> = [];
     const harness = createViewportHarness(snapshot, async (canvasId, input) => new Promise((resolve) => {
         requests.push({
@@ -67,7 +73,7 @@ describe('canvas snapshot updates', () => {
     const requests: Array<{
       canvasId: string;
       updates: Array<{ projectRelativePath: string; scrollTop: number; scrollLeft: number }>;
-      resolve: (result: WorkbenchCanvasDocumentMutationResult) => void;
+      resolve: (result: SimulatedCanvasMutationResult) => void;
       reject: (error: unknown) => void;
     }> = [];
     const harness = createViewportHarness(snapshot, async (canvasId, input) => new Promise((resolve, reject) => {
@@ -105,7 +111,7 @@ describe('canvas snapshot updates', () => {
     const requests: Array<{
       canvasId: string;
       updates: Array<{ projectRelativePath: string; scrollTop: number; scrollLeft: number }>;
-      resolve: (result: WorkbenchCanvasDocumentMutationResult) => void;
+      resolve: (result: SimulatedCanvasMutationResult) => void;
       reject: (error: unknown) => void;
     }> = [];
     const harness = createViewportHarness(snapshot, async (canvasId, input) => new Promise((resolve, reject) => {
@@ -141,7 +147,7 @@ describe('canvas snapshot updates', () => {
       projections: [projectionFixture(confirmedCanvas, 'rev-a')]
     });
     const requests: Array<{
-      resolve: (result: WorkbenchCanvasDocumentMutationResult) => void;
+      resolve: (result: SimulatedCanvasMutationResult) => void;
       reject: (error: unknown) => void;
     }> = [];
     const harness = createViewportHarness(snapshot, async () => new Promise((resolve, reject) => {
@@ -197,9 +203,9 @@ describe('canvas snapshot updates', () => {
     expect(textViewport(harness.snapshot())).toEqual({ scrollTop: 33, scrollLeft: 4 });
   });
 
-  it('confirms only the viewport without replacing newer authoritative Canvas fields', async () => {
+  it('does not let the HTTP result replace newer accepted Canvas fields', async () => {
     const initialCanvas = textCanvasDocument('canvas-1', { scrollTop: 15, scrollLeft: 2 });
-    const requests: Array<{ resolve: (result: WorkbenchCanvasDocumentMutationResult) => void }> = [];
+    const requests: Array<{ resolve: (result: SimulatedCanvasMutationResult) => void }> = [];
     const harness = createViewportHarness(snapshotFixture({
       canvases: [initialCanvas],
       projections: [projectionFixture(initialCanvas, 'rev-1')]
@@ -210,14 +216,19 @@ describe('canvas snapshot updates', () => {
     const update = harness.controller.update('canvas-1', {
       updates: [{ projectRelativePath: 'notes/readme.md', scrollTop: 72, scrollLeft: 9 }]
     });
+    const confirmedCanvas = textCanvasDocument('canvas-1', { scrollTop: 72, scrollLeft: 9 });
+    harness.commitAuthoritativeSnapshot(snapshotFixture({
+      canvases: [confirmedCanvas],
+      projections: [projectionFixture(confirmedCanvas, 'rev-2')]
+    }));
     const newerCanvas = {
-      ...textCanvasDocument('canvas-1', { scrollTop: 15, scrollLeft: 2 }),
+      ...textCanvasDocument('canvas-1', { scrollTop: 72, scrollLeft: 9 }),
       name: 'renamed-by-newer-revision'
     };
     harness.commitAuthoritativeSnapshot(snapshotFixture({
       canvases: [newerCanvas],
       projections: [projectionFixture(newerCanvas, 'rev-3')]
-    }));
+    }), 3);
 
     requests[0]?.resolve(canvasTextViewportMutationResult('canvas-1', 72, 9, 2));
     await update;
@@ -228,7 +239,7 @@ describe('canvas snapshot updates', () => {
 
   it('discards an older viewport response after a newer authoritative revision', async () => {
     const initialCanvas = textCanvasDocument('canvas-1', { scrollTop: 15, scrollLeft: 2 });
-    const requests: Array<{ resolve: (result: WorkbenchCanvasDocumentMutationResult) => void }> = [];
+    const requests: Array<{ resolve: (result: SimulatedCanvasMutationResult) => void }> = [];
     const harness = createViewportHarness(snapshotFixture({
       canvases: [initialCanvas],
       projections: [projectionFixture(initialCanvas, 'rev-1')]
@@ -239,6 +250,11 @@ describe('canvas snapshot updates', () => {
     const update = harness.controller.update('canvas-1', {
       updates: [{ projectRelativePath: 'notes/readme.md', scrollTop: 72, scrollLeft: 9 }]
     });
+    const confirmedCanvas = textCanvasDocument('canvas-1', { scrollTop: 72, scrollLeft: 9 });
+    harness.commitAuthoritativeSnapshot(snapshotFixture({
+      canvases: [confirmedCanvas],
+      projections: [projectionFixture(confirmedCanvas, 'rev-2')]
+    }));
     const newerCanvas = {
       ...textCanvasDocument('canvas-1', { scrollTop: 33, scrollLeft: 4 }),
       name: 'authoritative-rev-3'
@@ -255,6 +271,70 @@ describe('canvas snapshot updates', () => {
     expect(textViewport(harness.authoritativeSnapshot())).toEqual({ scrollTop: 33, scrollLeft: 4 });
     expect(textViewport(harness.snapshot())).toEqual({ scrollTop: 33, scrollLeft: 4 });
   });
+
+  it('does not publish a disposed generation failure into the new Project binding', async () => {
+    const initialCanvas = textCanvasDocument('canvas-1', { scrollTop: 15, scrollLeft: 2 });
+    const requests: Array<{ reject: (error: unknown) => void }> = [];
+    const harness = createViewportHarness(snapshotFixture({
+      canvases: [initialCanvas],
+      projections: [projectionFixture(initialCanvas, 'rev-1')]
+    }), async () => new Promise((_resolve, reject) => {
+      requests.push({ reject });
+    }));
+    const update = harness.controller.update('canvas-1', {
+      updates: [{ projectRelativePath: 'notes/readme.md', scrollTop: 72, scrollLeft: 9 }]
+    });
+    const replacementCanvas = textCanvasDocument('canvas-1', { scrollTop: 5, scrollLeft: 1 });
+
+    harness.rebind(snapshotFixture({
+      canvases: [replacementCanvas],
+      projections: [projectionFixture(replacementCanvas, 'replacement')]
+    }));
+    requests[0]?.reject(new Error('old binding ended'));
+
+    await expect(update).resolves.toBeUndefined();
+    expect(textViewport(harness.snapshot())).toEqual({ scrollTop: 5, scrollLeft: 1 });
+  });
+
+  it('does not send an older generation queued viewport update through the new Project binding', async () => {
+    const firstCanvas = textCanvasDocument('canvas-1', { scrollTop: 15, scrollLeft: 2 });
+    const secondCanvas = textCanvasDocument('canvas-2', { scrollTop: 25, scrollLeft: 3 });
+    let requestCount = 0;
+    let rejectFirstRequest: ((error: unknown) => void) | undefined;
+    const harness = createViewportHarness(snapshotFixture({
+      canvases: [firstCanvas, secondCanvas],
+      projections: [
+        projectionFixture(firstCanvas, 'rev-1'),
+        projectionFixture(secondCanvas, 'rev-1')
+      ]
+    }), async (canvasId) => {
+      requestCount += 1;
+      if (requestCount === 1) {
+        return new Promise((_resolve, reject) => {
+          rejectFirstRequest = reject;
+        });
+      }
+      return canvasTextViewportMutationResult(canvasId, 84, 11, 2);
+    });
+
+    const first = harness.controller.update('canvas-1', {
+      updates: [{ projectRelativePath: 'notes/readme.md', scrollTop: 72, scrollLeft: 9 }]
+    });
+    const queued = harness.controller.update('canvas-2', {
+      updates: [{ projectRelativePath: 'notes/readme.md', scrollTop: 84, scrollLeft: 11 }]
+    });
+    const replacementCanvas = textCanvasDocument('canvas-1', { scrollTop: 5, scrollLeft: 1 });
+
+    harness.rebind(snapshotFixture({
+      canvases: [replacementCanvas],
+      projections: [projectionFixture(replacementCanvas, 'replacement')]
+    }));
+    rejectFirstRequest?.(new Error('old binding ended'));
+
+    await expect(Promise.all([first, queued])).resolves.toEqual([undefined, undefined]);
+    expect(requestCount).toBe(1);
+    expect(textViewport(harness.snapshot())).toEqual({ scrollTop: 5, scrollLeft: 1 });
+  });
 });
 
 function createViewportHarness(
@@ -262,7 +342,7 @@ function createViewportHarness(
   persist: (
     canvasId: string,
     input: Parameters<CanvasTextViewportStateController['update']>[1]
-  ) => Promise<WorkbenchCanvasDocumentMutationResult>
+  ) => Promise<SimulatedCanvasMutationResult>
 ): {
   controller: CanvasTextViewportStateController;
   snapshot: () => WorkbenchProjectSessionSnapshot;
@@ -271,37 +351,58 @@ function createViewportHarness(
     snapshot: WorkbenchProjectSessionSnapshot,
     projectRevision?: number
   ) => void;
+  rebind(snapshot: WorkbenchProjectSessionSnapshot): void;
 } {
-  let authoritativeSnapshot = initialSnapshot;
-  let authoritativeRevision = 1;
-  let presentedSnapshot = initialSnapshot;
-  let controller: CanvasTextViewportStateController;
-  const presentAuthoritativeSnapshot = (next: WorkbenchProjectSessionSnapshot) => {
-    authoritativeSnapshot = next;
-    presentedSnapshot = controller.reconcileSnapshot(next) ?? next;
-  };
-  controller = createCanvasTextViewportStateController({
-    getAuthoritativeSnapshot: () => authoritativeSnapshot,
-    commitAuthoritativeSnapshot: (next, projectRevision) => {
-      if (projectRevision < authoritativeRevision) {
-        return false;
-      }
-      authoritativeRevision = projectRevision;
-      presentAuthoritativeSnapshot(next);
-      return true;
-    },
-    commitPresentedSnapshot: (next) => {
-      presentedSnapshot = next;
-    },
-    updateCanvasTextViewportState: persist
+  const projectProjection = createWorkbenchProjectProjection();
+  projectProjection.acceptBoundProject({
+    projectId: 'project-1',
+    projectRevision: 1,
+    snapshot: initialSnapshot,
+    workingCopies: { text: {}, feedback: {} }
   });
+  const controller = createCanvasTextViewportStateController({
+    projectProjection,
+    updateCanvasTextViewportState: async (canvasId, input) => {
+      const result = await persist(canvasId, input);
+      const state = projectProjection.getState();
+      if (state.status === 'bound' && result.projectRevision === state.projectRevision + 1) {
+        projectProjection.acceptProjectEvent({
+          type: 'canvas.changed',
+          projectId: result.projectId,
+          projectRevision: result.projectRevision,
+          canvas: result.canvas,
+          projection: result.projection
+        });
+      }
+      return result;
+    }
+  });
+  const acceptedState = () => {
+    const state = projectProjection.getState();
+    if (state.status === 'unbound') {
+      throw new Error('Expected a bound Project fixture.');
+    }
+    return state;
+  };
   return {
     controller,
-    snapshot: () => presentedSnapshot,
-    authoritativeSnapshot: () => authoritativeSnapshot,
-    commitAuthoritativeSnapshot: (next, projectRevision = authoritativeRevision + 1) => {
-      authoritativeRevision = projectRevision;
-      presentAuthoritativeSnapshot(next);
+    snapshot: () => acceptedState().presentedSnapshot,
+    authoritativeSnapshot: () => acceptedState().authoritativeSnapshot,
+    commitAuthoritativeSnapshot: (next, projectRevision = acceptedState().projectRevision + 1) => {
+      projectProjection.acceptProjectEvent({
+        type: 'project.changed',
+        projectId: 'project-1',
+        projectRevision,
+        snapshot: next
+      });
+    },
+    rebind: (next) => {
+      projectProjection.acceptBoundProject({
+        projectId: 'project-2',
+        projectRevision: 1,
+        snapshot: next,
+        workingCopies: { text: {}, feedback: {} }
+      });
     }
   };
 }
@@ -369,7 +470,7 @@ function canvasTextViewportMutationResult(
   scrollTop: number,
   scrollLeft: number,
   projectRevision: number
-): WorkbenchCanvasDocumentMutationResult {
+): SimulatedCanvasMutationResult {
   const canvas = {
     ...textCanvasDocument(canvasId),
     nodeElements: textCanvasDocument(canvasId).nodeElements.map((node) => ({

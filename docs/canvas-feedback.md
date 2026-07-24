@@ -257,20 +257,31 @@ irreversible work when selected marks conflict or the review intent is unusual.
 ## Workbench Interaction Ownership
 
 Workbench coordinates Canvas Feedback through one deep
-`CanvasFeedbackInteraction` module. It owns the active Project binding, stable
-Capsule identities and order, current Workbench values and Working Copies,
-Feedback Bar focus and target locks, tool composition, video-moment locking,
-live overlay presentation, focus-loss mutations, and ordering between Runtime
-responses and Project events. This is one interaction lifecycle rather than
+`CanvasFeedbackInteraction` module per accepted Project binding generation.
+`WorkbenchProjectProjection`, not the Feedback module, owns the active Project
+identity, binding generation, and ordered Project revision acceptance. React
+mounts Project-scoped presentation beneath a generation-keyed subtree, so a
+replacement binding disposes the previous Feedback interaction and creates a
+new one from the replacement binding's Working Copies. The module does not
+reset itself for another binding or migrate arbitrary interaction state between
+generations, and completion from a disposed generation cannot publish into the
+new Project surface.
+
+Within one generation, `CanvasFeedbackInteraction` owns stable Capsule
+identities and order, current Workbench values and Working Copies, Feedback Bar
+focus and target locks, tool composition, video-moment locking, live overlay
+presentation, focus-loss mutations, and ordering between accepted Runtime
+events and local interaction. This is one interaction lifecycle rather than
 state redistributed through `WorkbenchApp`, `CanvasSurface`, and the Bar.
 
-`WorkbenchApp` binds the current Project without unpacking Feedback state into
-Bar props. `CanvasSurface` reports a target fact bundle containing the mounted
-node, media-content geometry, camera, player operations, and direct Canvas
+`WorkbenchApp` supplies the generation's accepted binding, Working Copies, and
+already-ordered Runtime events without unpacking Feedback state into Bar props.
+`CanvasSurface` reports a target fact bundle containing the mounted node,
+media-content geometry, camera, player operations, and direct Canvas
 interaction facts; it does not own target locking or Feedback persistence. The
-interaction module renders its Bar and overlay presentation from those facts.
-The Bar is controlled presentation and owns no Feedback value. Runtime remains
-authoritative and the module has no offline or retry subsystem.
+interaction module derives its controlled Bar and Canvas presentation from
+those facts. The Bar owns no Feedback value. Runtime remains authoritative and
+the module has no offline or retry subsystem.
 
 ## Executable Authorities
 
