@@ -260,7 +260,8 @@ pnpm test
 pnpm lint:arch
 pnpm build
 pnpm verify
-pnpm pack
+pnpm pack:local
+pnpm install:local
 pnpm dist
 pnpm dev
 pnpm dev:electron
@@ -330,7 +331,29 @@ builds the current-platform CLI against the locked native payload. Product
 assembly signs and declares that binary together with Runtime, Web assets,
 Skills, and model documentation.
 
-`pnpm pack` creates an unpacked desktop app under `apps/desktop/release/`. `pnpm dist` creates distributable Desktop artifacts when run on the matching platform.
+On macOS, `pnpm pack:local` rebuilds the current host Product and creates an
+unpacked `Debrute.app` under `apps/desktop/release/local/`. It ad-hoc signs the
+Runtime, CLI, native raster library, Electron helpers, and application, then
+verifies both the complete code-signature tree and the Product manifest after
+Electron packaging. This command does not read an Apple account, Developer ID
+certificate, App Store Connect key, or `notarytool` profile. Its output is a
+local development application, not a distributable release.
+
+`pnpm install:local` runs that complete build and a Runtime-owned eligibility
+Product preflight, requests Product Quit, verifies a staged copy before
+atomically replacing `/Applications/Debrute.app`, and invokes the installed
+seed's Runtime bootstrap. Bootstrap selects the built Product,
+rewrites the stable Runtime and CLI entrypoints under `~/.debrute/bin`, installs
+the matching official Skills, and starts Runtime. The command waits for Runtime
+Ready and runs an image-model-list smoke check; it does not open a Workbench
+window. Product version directories remain immutable and are materialized only
+by Runtime bootstrap. A source build whose version already exists with different
+bytes must first update the repository's version contract. A higher installed
+version or an active Product update transaction fails explicitly.
+
+`pnpm dist` remains the strict release path for distributable Desktop artifacts.
+On macOS it uses the Developer ID and notarization credentials documented in
+[`releases.md`](./releases.md); it never falls back to the local ad-hoc path.
 
 Packaged Desktop product assets are published from the public `XiiTang/Debrute` GitHub repository.
 

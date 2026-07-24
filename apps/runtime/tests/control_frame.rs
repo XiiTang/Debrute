@@ -12,12 +12,12 @@ fn handshake_encodes_as_one_big_endian_length_prefixed_json_frame() {
     let message = ClientMessage::Handshake {
         protocol: CONTROL_PROTOCOL.to_owned(),
         protocol_version: CONTROL_PROTOCOL_VERSION,
-        product_version: "0.0.3".to_owned(),
+        product_version: "0.0.4".to_owned(),
         role: ClientRole::Launcher,
     };
 
     let frame = encode_frame(&message).expect("handshake frame should encode");
-    let payload = br#"{"type":"handshake","protocol":"debrute-control","protocol_version":2,"product_version":"0.0.3","role":"launcher"}"#;
+    let payload = br#"{"type":"handshake","protocol":"debrute-control","protocol_version":2,"product_version":"0.0.4","role":"launcher"}"#;
     let mut expected = u32::try_from(payload.len())
         .expect("test payload length fits in u32")
         .to_be_bytes()
@@ -29,7 +29,7 @@ fn handshake_encodes_as_one_big_endian_length_prefixed_json_frame() {
 
 #[test]
 fn handshake_decodes_from_one_complete_frame() {
-    let payload = br#"{"type":"handshake","protocol":"debrute-control","protocol_version":2,"product_version":"0.0.3","role":"cli"}"#;
+    let payload = br#"{"type":"handshake","protocol":"debrute-control","protocol_version":2,"product_version":"0.0.4","role":"cli"}"#;
     let frame = frame(payload);
 
     let message = read_frame(&mut Cursor::new(frame)).expect("complete handshake should decode");
@@ -39,7 +39,7 @@ fn handshake_decodes_from_one_complete_frame() {
         ClientMessage::Handshake {
             protocol: "debrute-control".to_owned(),
             protocol_version: 2,
-            product_version: "0.0.3".to_owned(),
+            product_version: "0.0.4".to_owned(),
             role: ClientRole::Cli,
         }
     );
@@ -101,7 +101,7 @@ fn non_utf8_payload_is_rejected() {
 
 #[test]
 fn trailing_json_value_is_rejected() {
-    let payload = br#"{"type":"handshake","protocol":"debrute-control","protocol_version":2,"product_version":"0.0.3","role":"launcher"}{}"#;
+    let payload = br#"{"type":"handshake","protocol":"debrute-control","protocol_version":2,"product_version":"0.0.4","role":"launcher"}{}"#;
     let error = read_frame(&mut Cursor::new(frame(payload)))
         .expect_err("a second JSON value inside one frame must be rejected");
 
@@ -110,7 +110,7 @@ fn trailing_json_value_is_rejected() {
 
 #[test]
 fn unknown_handshake_fields_are_rejected() {
-    let payload = br#"{"type":"handshake","protocol":"debrute-control","protocol_version":2,"product_version":"0.0.3","role":"launcher","extra":true}"#;
+    let payload = br#"{"type":"handshake","protocol":"debrute-control","protocol_version":2,"product_version":"0.0.4","role":"launcher","extra":true}"#;
     let error = read_frame(&mut Cursor::new(frame(payload)))
         .expect_err("unknown handshake fields must be rejected");
 
@@ -119,7 +119,7 @@ fn unknown_handshake_fields_are_rejected() {
 
 #[test]
 fn unknown_client_roles_are_rejected_by_the_closed_decoder() {
-    let payload = br#"{"type":"handshake","protocol":"debrute-control","protocol_version":2,"product_version":"0.0.3","role":"web"}"#;
+    let payload = br#"{"type":"handshake","protocol":"debrute-control","protocol_version":2,"product_version":"0.0.4","role":"web"}"#;
     let error = read_frame(&mut Cursor::new(frame(payload)))
         .expect_err("unknown role must not decode as a current handshake");
 
@@ -128,21 +128,21 @@ fn unknown_client_roles_are_rejected_by_the_closed_decoder() {
 
 #[test]
 fn handshake_requires_exact_protocol_and_product_versions() {
-    assert_eq!(PRODUCT_VERSION, "0.0.3");
+    assert_eq!(PRODUCT_VERSION, "0.0.4");
     assert_eq!(
-        validate_handshake(&handshake("debrute-control", 2, "0.0.3")),
+        validate_handshake(&handshake("debrute-control", 2, "0.0.4")),
         Ok(ClientRole::Launcher)
     );
     assert_eq!(
-        validate_handshake(&handshake("other-control", 2, "0.0.3")),
+        validate_handshake(&handshake("other-control", 2, "0.0.4")),
         Err(HandshakeRejection::IncompatibleProtocol)
     );
     assert_eq!(
-        validate_handshake(&handshake("debrute-control", 1, "0.0.3")),
+        validate_handshake(&handshake("debrute-control", 1, "0.0.4")),
         Err(HandshakeRejection::IncompatibleProtocolVersion)
     );
     assert_eq!(
-        validate_handshake(&handshake("debrute-control", 2, "0.0.4")),
+        validate_handshake(&handshake("debrute-control", 2, "0.0.5")),
         Err(HandshakeRejection::IncompatibleProductVersion)
     );
 }
@@ -151,7 +151,7 @@ fn handshake_requires_exact_protocol_and_product_versions() {
 fn runtime_encodes_and_decodes_closed_handshake_responses() {
     let accepted = ServerMessage::handshake_accepted("runtime-instance", RuntimeStatus::Ready);
     let accepted_frame = encode_server_frame(&accepted).expect("accepted handshake should encode");
-    let accepted_payload = br#"{"type":"handshake_accepted","instance_id":"runtime-instance","protocol_version":2,"product_version":"0.0.3","status":"ready"}"#;
+    let accepted_payload = br#"{"type":"handshake_accepted","instance_id":"runtime-instance","protocol_version":2,"product_version":"0.0.4","status":"ready"}"#;
     assert_eq!(accepted_frame, frame(accepted_payload));
     assert_eq!(
         read_server_frame(&mut Cursor::new(accepted_frame))

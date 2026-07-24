@@ -342,6 +342,69 @@ fn materialization_retry_adopts_the_exact_published_version() {
 }
 
 #[test]
+fn desktop_seed_preflight_uses_the_runtime_owned_immutable_product_contract() {
+    let fixture = Fixture::new();
+    let installed_seed = fixture.write_seed("0.0.3", ReleaseArchitecture::Arm64);
+    fixture
+        .store
+        .activate_desktop_seed(&installed_seed)
+        .unwrap();
+
+    assert_eq!(
+        fixture
+            .store
+            .preflight_desktop_seed(&installed_seed)
+            .unwrap()
+            .product_version(),
+        "0.0.3"
+    );
+
+    let conflicting_seed = fixture.write_seed("0.0.4", ReleaseArchitecture::Arm64);
+    rewrite_seed_identity(&conflicting_seed, "0.0.3", "changed-local-source");
+    assert!(matches!(
+        fixture.store.preflight_desktop_seed(&conflicting_seed),
+        Err(super::store::ProductStoreError::MaterializedVersionConflict(version))
+            if version == "0.0.3"
+    ));
+    assert_eq!(
+        fs::read_to_string(fixture.store.version_path("0.0.3").join("web/index.html")).unwrap(),
+        "web"
+    );
+
+    let older_seed = fixture.write_seed("0.0.2", ReleaseArchitecture::Arm64);
+    fixture
+        .store
+        .activate_desktop_seed(&fixture.write_seed("0.0.4", ReleaseArchitecture::Arm64))
+        .unwrap();
+    assert!(matches!(
+        fixture.store.preflight_desktop_seed(&older_seed),
+        Err(super::store::ProductStoreError::DesktopSeedOlderThanCurrent { seed, current })
+            if seed == "0.0.2" && current == "0.0.4"
+    ));
+}
+
+#[test]
+fn desktop_seed_preflight_rejects_an_active_product_commit() {
+    let fixture = Fixture::new();
+    let current_seed = fixture.write_seed("0.0.3", ReleaseArchitecture::Arm64);
+    fixture.store.activate_desktop_seed(&current_seed).unwrap();
+    let target = fixture.materialize_product("0.0.4");
+    fixture
+        .coordinator(RecordingPlatform::new(&fixture.root, "0.0.3"))
+        .begin(&target, fixture.desktop_asset("0.0.4"), ResumeIntent::Cli)
+        .unwrap();
+    let pending = fixture.store.pending().unwrap().unwrap();
+    let current = fixture.store.current_version().unwrap();
+
+    assert!(matches!(
+        fixture.store.preflight_desktop_seed(&current_seed),
+        Err(super::store::ProductStoreError::ProductCommitInProgress)
+    ));
+    assert_eq!(fixture.store.pending().unwrap(), Some(pending));
+    assert_eq!(fixture.store.current_version().unwrap(), current);
+}
+
+#[test]
 fn product_entrypoint_and_architecture_contracts_are_closed() {
     let fixture = Fixture::new();
     let missing = fixture.write_seed("0.0.4", ReleaseArchitecture::Arm64);
@@ -751,6 +814,22 @@ fn installer_and_runtime_adapters_consume_the_verified_open_file_identity() {
 
     assert_eq!(platform.installer_bytes(), DESKTOP_ASSET_BYTES);
     assert_eq!(platform.runtime_bytes(), b"runtime");
+}
+
+fn rewrite_seed_identity(seed: &std::path::Path, version: &str, web_contents: &str) {
+    let manifest_path = seed.join("product-manifest.json");
+    let mut manifest: ProductManifest =
+        serde_json::from_slice(&fs::read(&manifest_path).unwrap()).unwrap();
+    manifest.product_version = version.to_owned();
+    fs::write(seed.join("web/index.html"), web_contents).unwrap();
+    let web = manifest
+        .files
+        .iter_mut()
+        .find(|file| file.path == "web/index.html")
+        .unwrap();
+    web.size_bytes = web_contents.len() as u64;
+    web.sha256 = format!("{:x}", Sha256::digest(web_contents.as_bytes()));
+    fs::write(manifest_path, serde_json::to_vec_pretty(&manifest).unwrap()).unwrap();
 }
 
 fn release_manifest_bytes(version: &str, duplicate: bool) -> Vec<u8> {

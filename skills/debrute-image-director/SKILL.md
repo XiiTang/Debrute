@@ -4,7 +4,7 @@ description: Use for any task related to image generation or image editing in a 
 metadata:
   debrute.managed: "true"
   debrute.package: "debrute"
-  debrute.version: 0.0.3
+  debrute.version: 0.0.4
 ---
 
 # Debrute Image Director

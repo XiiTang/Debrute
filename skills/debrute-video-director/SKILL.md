@@ -4,7 +4,7 @@ description: Use for any task related to video generation or video editing in a 
 metadata:
   debrute.managed: "true"
   debrute.package: "debrute"
-  debrute.version: 0.0.3
+  debrute.version: 0.0.4
 ---
 
 # Debrute Video Director

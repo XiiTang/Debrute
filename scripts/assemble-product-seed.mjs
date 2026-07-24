@@ -11,6 +11,21 @@ import {
 
 const workspaceRoot = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 const supportedPlatforms = new Set(['darwin', 'win32']);
+const releaseVersionPattern = /^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)$/;
+const manifestKeys = [
+  'architecture',
+  'controlProtocol',
+  'controlProtocolVersion',
+  'entrypoints',
+  'files',
+  'platform',
+  'product',
+  'productVersion',
+  'schemaVersion'
+];
+const entrypointKeys = ['cli', 'modelDocs', 'nativeWorkers', 'runtime', 'skills', 'web'];
+const manifestFileKeys = ['path', 'sha256', 'sizeBytes'];
+const requiredProductComponents = ['runtime', 'web', 'skills', 'model-docs', 'native-workers'];
 
 export async function assembleProductSeed(input = {}) {
   const root = resolve(input.workspaceRoot ?? workspaceRoot);
@@ -78,31 +93,9 @@ export async function assembleProductSeed(input = {}) {
     workers: []
   }, null, 2)}\n`, 'utf8');
 
-  const protocolSource = await readFile(join(root, 'apps/runtime/src/control/protocol.rs'), 'utf8');
-  const controlProtocol = capture(protocolSource, /pub const CONTROL_PROTOCOL: &str = "([^"]+)";/, 'Control protocol');
-  const controlProtocolVersion = Number(capture(
-    protocolSource,
-    /pub const CONTROL_PROTOCOL_VERSION: u32 = (\d+);/,
-    'Control protocol version'
-  ));
+  const { controlProtocol, controlProtocolVersion } = await readControlProtocol(root);
   const files = await inventory(destination);
-  const entrypoints = platform === 'win32'
-    ? {
-        runtime: 'runtime/debrute-runtime.exe',
-        web: 'web/index.html',
-        cli: 'runtime/debrute.exe',
-        skills: 'skills/debrute-core/SKILL.md',
-        modelDocs: 'model-docs/models.json',
-        nativeWorkers: 'native-workers/manifest.json'
-      }
-    : {
-        runtime: `runtime/${MACOS_RUNTIME_APP_NAME}/${MACOS_RUNTIME_EXECUTABLE}`,
-        web: 'web/index.html',
-        cli: 'runtime/debrute',
-        skills: 'skills/debrute-core/SKILL.md',
-        modelDocs: 'model-docs/models.json',
-        nativeWorkers: 'native-workers/manifest.json'
-      };
+  const entrypoints = productEntrypoints(platform === 'darwin' ? 'macos' : 'windows');
   for (const entrypoint of Object.values(entrypoints)) {
     if (!files.some((file) => file.path === entrypoint)) {
       throw new Error(`Product entrypoint is missing: ${entrypoint}`);
@@ -130,6 +123,131 @@ export async function refreshProductSeedManifest(destination) {
   manifest.files = await inventory(root);
   await writeFile(manifestPath, `${JSON.stringify(manifest, null, 2)}\n`, 'utf8');
   return manifest;
+}
+
+export async function validateProductSeed(destination, input = {}) {
+  const root = resolve(destination);
+  const manifest = JSON.parse(await readFile(join(root, 'product-manifest.json'), 'utf8'));
+  const invalid = (detail) => {
+    throw new Error(`Product seed manifest is invalid (${detail}): ${root}`);
+  };
+  assertExactKeys(manifest, manifestKeys, 'root fields', invalid);
+  if (manifest.schemaVersion !== 1) invalid('schemaVersion');
+  if (manifest.product !== 'debrute') invalid('product');
+  if (typeof manifest.productVersion !== 'string' || !releaseVersionPattern.test(manifest.productVersion)) {
+    invalid('productVersion');
+  }
+  const { controlProtocol, controlProtocolVersion } = await readControlProtocol(
+    resolve(input.workspaceRoot ?? workspaceRoot)
+  );
+  if (
+    manifest.controlProtocol !== controlProtocol
+    || manifest.controlProtocolVersion !== controlProtocolVersion
+  ) {
+    invalid('control protocol');
+  }
+  if (!['macos', 'windows'].includes(manifest.platform)) invalid('platform');
+  if (!['arm64', 'x64'].includes(manifest.architecture)) invalid('architecture');
+  if (manifest.platform === 'windows' && manifest.architecture !== 'x64') {
+    invalid('platform architecture');
+  }
+
+  assertExactKeys(manifest.entrypoints, entrypointKeys, 'entrypoints', invalid);
+  const expectedEntrypoints = productEntrypoints(manifest.platform);
+  if (entrypointKeys.some((key) => manifest.entrypoints[key] !== expectedEntrypoints[key])) {
+    invalid('entrypoints');
+  }
+  if (!Array.isArray(manifest.files) || manifest.files.length === 0) invalid('files');
+  const declaredPaths = new Set();
+  const components = new Set();
+  for (const file of manifest.files) {
+    assertExactKeys(file, manifestFileKeys, 'file fields', invalid);
+    if (!isProductPath(file.path) || declaredPaths.has(file.path)) invalid('file path');
+    if (!Number.isSafeInteger(file.sizeBytes) || file.sizeBytes <= 0) invalid('file size');
+    if (typeof file.sha256 !== 'string' || !/^[0-9a-f]{64}$/.test(file.sha256)) {
+      invalid('file digest');
+    }
+    declaredPaths.add(file.path);
+    components.add(file.path.split('/')[0]);
+  }
+  if (requiredProductComponents.some((component) => !components.has(component))) {
+    invalid('required components');
+  }
+  if (Object.values(manifest.entrypoints).some((entrypoint) => !declaredPaths.has(entrypoint))) {
+    invalid('missing entrypoint');
+  }
+  const files = await inventory(root);
+  const actualByPath = new Map(files.map((file) => [file.path, file]));
+  if (
+    files.length !== manifest.files.length
+    || manifest.files.some((file) => JSON.stringify(actualByPath.get(file.path)) !== JSON.stringify(file))
+  ) {
+    throw new Error(`Product seed inventory does not match its manifest: ${root}`);
+  }
+  if (manifest.platform === 'macos') {
+    for (const entrypoint of [manifest.entrypoints.runtime, manifest.entrypoints.cli]) {
+      if (((await stat(join(root, entrypoint))).mode & 0o111) === 0) {
+        invalid(`non-executable entrypoint ${entrypoint}`);
+      }
+    }
+  }
+  return manifest;
+}
+
+function productEntrypoints(platform) {
+  return platform === 'windows'
+    ? {
+        runtime: 'runtime/debrute-runtime.exe',
+        web: 'web/index.html',
+        cli: 'runtime/debrute.exe',
+        skills: 'skills/debrute-core/SKILL.md',
+        modelDocs: 'model-docs/models.json',
+        nativeWorkers: 'native-workers/manifest.json'
+      }
+    : {
+        runtime: `runtime/${MACOS_RUNTIME_APP_NAME}/${MACOS_RUNTIME_EXECUTABLE}`,
+        web: 'web/index.html',
+        cli: 'runtime/debrute',
+        skills: 'skills/debrute-core/SKILL.md',
+        modelDocs: 'model-docs/models.json',
+        nativeWorkers: 'native-workers/manifest.json'
+      };
+}
+
+function assertExactKeys(value, expected, label, invalid) {
+  if (
+    value === null
+    || typeof value !== 'object'
+    || Array.isArray(value)
+    || JSON.stringify(Object.keys(value).sort()) !== JSON.stringify(expected)
+  ) {
+    invalid(label);
+  }
+}
+
+function isProductPath(path) {
+  return typeof path === 'string'
+    && path.length > 0
+    && !path.startsWith('/')
+    && !path.includes('\\')
+    && path !== 'product-manifest.json'
+    && path.split('/').every((segment) => segment.length > 0 && segment !== '.' && segment !== '..');
+}
+
+async function readControlProtocol(root) {
+  const protocolSource = await readFile(join(root, 'apps/runtime/src/control/protocol.rs'), 'utf8');
+  return {
+    controlProtocol: capture(
+      protocolSource,
+      /pub const CONTROL_PROTOCOL: &str = "([^"]+)";/,
+      'Control protocol'
+    ),
+    controlProtocolVersion: Number(capture(
+      protocolSource,
+      /pub const CONTROL_PROTOCOL_VERSION: u32 = (\d+);/,
+      'Control protocol version'
+    ))
+  };
 }
 
 async function copyModelDocs(root, destination) {

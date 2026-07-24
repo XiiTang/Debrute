@@ -94,6 +94,9 @@ fn main() -> ExitCode {
     let result = if command.as_deref() == Some(std::ffi::OsStr::new("bootstrap")) {
         let arguments = std::env::args_os().skip(2).collect::<Vec<_>>();
         run_bootstrap(&arguments)
+    } else if command.as_deref() == Some(std::ffi::OsStr::new("preflight-desktop-seed")) {
+        let arguments = std::env::args_os().skip(2).collect::<Vec<_>>();
+        run_preflight_desktop_seed(&arguments)
     } else if command.as_deref() == Some(std::ffi::OsStr::new("complete-product-update")) {
         let arguments = std::env::args_os().skip(2).collect::<Vec<_>>();
         run_complete_product_update(&arguments)
@@ -108,6 +111,19 @@ fn main() -> ExitCode {
             ExitCode::FAILURE
         }
     }
+}
+
+#[cfg(any(target_os = "macos", target_os = "windows"))]
+fn run_preflight_desktop_seed(arguments: &[OsString]) -> Result<(), Box<dyn Error>> {
+    let parsed = SeedPreflightArguments::parse(arguments)?;
+    let store = ProductStore::new(
+        parsed.product_root,
+        current_commit_platform(),
+        current_release_architecture()?,
+    );
+    let identity = store.preflight_desktop_seed(&parsed.seed)?;
+    println!("product_version={}", identity.product_version());
+    Ok(())
 }
 
 fn install_runtime_panic_abort_hook() {
@@ -279,6 +295,43 @@ struct BootstrapArguments {
     product_root: PathBuf,
     bin_directory: PathBuf,
     desktop: Option<DesktopHostRegistration>,
+}
+
+#[cfg(any(target_os = "macos", target_os = "windows"))]
+struct SeedPreflightArguments {
+    seed: PathBuf,
+    product_root: PathBuf,
+}
+
+#[cfg(any(target_os = "macos", target_os = "windows"))]
+impl SeedPreflightArguments {
+    fn parse(arguments: &[OsString]) -> Result<Self, Box<dyn Error>> {
+        let mut seed = None;
+        let mut product_root = None;
+        let mut index = 0;
+        while index < arguments.len() {
+            let flag = arguments[index]
+                .to_str()
+                .ok_or("Product seed preflight option names must be UTF-8")?;
+            let value = arguments
+                .get(index + 1)
+                .ok_or_else(|| format!("Product seed preflight option {flag} requires a value"))?;
+            match flag {
+                "--seed" => seed = Some(PathBuf::from(value)),
+                "--product-root" => product_root = Some(PathBuf::from(value)),
+                _ => {
+                    return Err(format!("Unsupported Product seed preflight option: {flag}").into());
+                }
+            }
+            index += 2;
+        }
+        let seed = seed.ok_or("Product seed preflight requires --seed")?;
+        let product_root = product_root.ok_or("Product seed preflight requires --product-root")?;
+        if !seed.is_absolute() || !product_root.is_absolute() {
+            return Err("Product seed preflight paths must be absolute".into());
+        }
+        Ok(Self { seed, product_root })
+    }
 }
 
 #[cfg(any(target_os = "macos", target_os = "windows"))]

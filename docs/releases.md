@@ -161,6 +161,12 @@ behavior and plugin boundaries are documented in
 
 macOS Desktop release jobs require these GitHub Actions secrets: `CSC_LINK`, `CSC_KEY_PASSWORD`, `APPLE_API_KEY`, `APPLE_API_KEY_ID`, and `APPLE_API_ISSUER`.
 
+These credentials belong only to `pnpm dist` and the GitHub release workflow.
+The macOS source-development commands `pnpm pack:local` and
+`pnpm install:local` use verified ad-hoc signatures and do not use or configure
+Apple notarization credentials. Their application is intentionally not a
+publishable or notarized release.
+
 `CSC_LINK` contains the base64-encoded Developer ID Application `.p12` certificate. `APPLE_API_KEY` contains the App Store Connect `.p8` key material; the release workflow writes both credentials to temporary files before invoking Electron Builder and `notarytool`.
 
 Each application archive and DMG is submitted through `notarytool submit` with

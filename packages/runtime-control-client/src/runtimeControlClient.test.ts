@@ -19,7 +19,7 @@ import {
 } from './index.js';
 import { resolveRuntimeControlSocketPath } from './runtimeControlClient.js';
 
-const PRODUCT_VERSION = '0.0.3';
+const PRODUCT_VERSION = '0.0.4';
 
 describe('Runtime Control client', () => {
   it('resolves the exact per-user native endpoint on macOS and Windows', () => {

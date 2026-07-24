@@ -1,6 +1,6 @@
 {
   "name": "@debrute/desktop",
-  "version": "0.0.3",
+  "version": "0.0.4",
   "license": "Apache-2.0",
   "private": true,
   "type": "commonjs",
@@ -10,7 +10,8 @@
   "scripts": {
     "build": "pnpm --filter @debrute/web build && node ../../scripts/run-cargo-with-native-raster.mjs -- build -p debrute-runtime --release --bins && tsc -p tsconfig.json && node scripts/bundle-electron.mjs",
     "build:electron:dev": "node scripts/bundle-electron.mjs --skip-product-seed",
-    "pack": "pnpm build && electron-builder --dir",
+    "pack:local": "pnpm build && node scripts/package-local-macos.mjs",
+    "install:local": "pnpm pack:local && node ../../scripts/install-local-macos.mjs",
     "dist": "pnpm build && electron-builder",
     "dev:electron": "tsx ../../scripts/dev-electron-workbench.ts"
   },

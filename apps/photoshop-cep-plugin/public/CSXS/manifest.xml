@@ -2,7 +2,7 @@
 <ExtensionManifest
   Version="7.0"
   ExtensionBundleId="com.debrute.photoshop.bridge.cep"
-  ExtensionBundleVersion="0.0.3"
+  ExtensionBundleVersion="0.0.4"
   ExtensionBundleName="Debrute Bridge CEP"
   xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance">
   <ExtensionList>

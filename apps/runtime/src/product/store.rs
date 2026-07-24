@@ -302,29 +302,71 @@ impl ProductStore {
     /// active Product, or cannot be selected atomically.
     pub fn activate_desktop_seed(&self, seed: &Path) -> Result<PathBuf, ProductStoreError> {
         let _transaction = self.lock_transaction()?;
+        let seed_identity = self.validate_desktop_seed_candidate_unlocked(seed)?;
         let version_path = self.materialize_seed_unlocked(seed)?;
-        let seed_version = version_path
-            .file_name()
-            .and_then(|name| name.to_str())
-            .ok_or_else(|| ProductStoreError::InvalidVersionPath(version_path.clone()))?;
+        if self.current_version_unlocked()?.as_deref() == Some(seed_identity.product_version()) {
+            return Ok(version_path);
+        }
+        self.select_current_unlocked(&version_path)?;
+        Ok(version_path)
+    }
+
+    /// Validates whether one Desktop seed can be activated without materializing
+    /// or selecting it. Local source installers use this before replacing the
+    /// installed Desktop application. Acquiring the Product transaction may
+    /// perform the same interrupted-transaction cleanup as other store calls.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`ProductStoreError`] when an update is in progress, the seed or
+    /// current Product is invalid, the seed is older, or immutable bytes for
+    /// its version already differ.
+    pub fn preflight_desktop_seed(
+        &self,
+        seed: &Path,
+    ) -> Result<ProductIdentity, ProductStoreError> {
+        let _transaction = self.lock_transaction()?;
+        if self.pending_unlocked()?.is_some() {
+            return Err(ProductStoreError::ProductCommitInProgress);
+        }
+        self.validate_desktop_seed_candidate_unlocked(seed)
+    }
+
+    fn validate_desktop_seed_candidate_unlocked(
+        &self,
+        seed: &Path,
+    ) -> Result<ProductIdentity, ProductStoreError> {
+        let seed_identity = self.inspect_seed_identity_unlocked(seed)?;
+        let seed_version = seed_identity.product_version();
         if let Some(current_version) = self.current_version_unlocked()? {
+            self.product_identity_unlocked(&current_version)?;
             let current = semver::Version::parse(&current_version)
                 .map_err(|_| ProductStoreError::InvalidCurrentPointer(self.root.join("current")))?;
-            let seed = semver::Version::parse(seed_version)
-                .map_err(|_| ProductStoreError::InvalidVersionPath(version_path.clone()))?;
-            if seed < current {
+            let candidate = semver::Version::parse(seed_version).map_err(|_| {
+                ProductStoreError::InvalidVersionPath(self.version_path(seed_version))
+            })?;
+            if candidate < current {
                 return Err(ProductStoreError::DesktopSeedOlderThanCurrent {
                     seed: seed_version.to_owned(),
                     current: current_version,
                 });
             }
-            if seed == current {
-                self.validate_version_unlocked(seed_version)?;
-                return Ok(version_path);
-            }
         }
-        self.select_current_unlocked(&version_path)?;
-        Ok(version_path)
+
+        let destination = self.version_path(seed_version);
+        match fs::symlink_metadata(&destination) {
+            Ok(metadata) if metadata.file_type().is_dir() && !metadata.file_type().is_symlink() => {
+                if self.product_identity_unlocked(seed_version)? != seed_identity {
+                    return Err(ProductStoreError::MaterializedVersionConflict(
+                        seed_version.to_owned(),
+                    ));
+                }
+            }
+            Ok(_) => return Err(ProductStoreError::ManagedPathType(destination)),
+            Err(error) if error.kind() == io::ErrorKind::NotFound => {}
+            Err(error) => return Err(error.into()),
+        }
+        Ok(seed_identity)
     }
 
     /// Reads the selected product version from the native stable pointer.
@@ -1534,6 +1576,7 @@ pub enum ProductStoreError {
     ManagedPathType(PathBuf),
     ProductPlatformMismatch,
     ProductEntrypointNotExecutable(String),
+    ProductCommitInProgress,
     InvalidPendingCommit(String),
     InvalidResumeReceipt(String),
     InvalidStagedAsset(String),
