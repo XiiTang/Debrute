@@ -1,5 +1,5 @@
 import { createHash } from 'node:crypto';
-import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { copyFileSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
@@ -41,7 +41,7 @@ describe('native raster payload', () => {
       expect(payload.manifest.libvipsVersion).toBe('8.18.4');
       expect(payload.manifest.rasterFormats).toEqual(NATIVE_RASTER_PAYLOAD_LOCK.rasterFormats);
 
-      writeFileSync(join(root, 'runtime/libvips.test'), 'changed');
+      writeFileSync(join(root, 'runtime/libc++.dll'), 'changed');
       await expect(validateNativeRasterPayload({ root })).rejects.toThrow('checksum does not match');
     } finally {
       rmSync(root, { recursive: true, force: true });
@@ -69,6 +69,71 @@ describe('native raster payload', () => {
       }
     }
   });
+
+  it('rejects a payload outside the fixed link directory', async () => {
+    const root = fixture();
+    try {
+      mkdirSync(join(root, 'alternate'));
+      copyFileSync(join(root, 'link/libvips.test'), join(root, 'alternate/libvips.test'));
+      const path = join(root, 'manifest.json');
+      const manifest = JSON.parse(readFileSync(path, 'utf8')) as Record<string, unknown>;
+      manifest.linkDirectory = 'alternate';
+      writeFileSync(path, `${JSON.stringify(manifest)}\n`);
+
+      await expect(validateNativeRasterPayload({ root })).rejects.toThrow('identity is invalid');
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+
+  it('rejects files declared outside their fixed payload directories', async () => {
+    const root = fixture();
+    try {
+      copyFileSync(join(root, 'runtime/libc++.dll'), join(root, 'link/libc++.dll'));
+      copyFileSync(join(root, 'link/libvips.test'), join(root, 'runtime/libvips.test'));
+      const path = join(root, 'manifest.json');
+      const manifest = JSON.parse(readFileSync(path, 'utf8')) as {
+        runtimeFiles: Array<Record<string, unknown>>;
+        linkFiles: Array<Record<string, unknown>>;
+      };
+      const runtimeFile = manifest.runtimeFiles[0];
+      const linkFile = manifest.linkFiles[0];
+      manifest.runtimeFiles = [
+        { ...runtimeFile, path: 'link/libc++.dll' },
+        linkFile
+      ];
+      manifest.linkFiles = [
+        runtimeFile,
+        { ...linkFile, path: 'runtime/libvips.test' }
+      ];
+      writeFileSync(path, `${JSON.stringify(manifest)}\n`);
+
+      await expect(validateNativeRasterPayload({ root })).rejects.toThrow('declaration is invalid');
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+
+  it.each([
+    ['an absolute path', '/runtime/libc++.dll'],
+    ['a nested path', 'runtime/nested/libc++.dll'],
+    ['a backslash path', 'runtime\\libc++.dll'],
+    ['a traversal path', 'runtime/../libc++.dll']
+  ])('rejects %s', async (_case, invalidPath) => {
+    const root = fixture();
+    try {
+      const path = join(root, 'manifest.json');
+      const manifest = JSON.parse(readFileSync(path, 'utf8')) as {
+        runtimeFiles: Array<Record<string, unknown>>;
+      };
+      manifest.runtimeFiles[0].path = invalidPath;
+      writeFileSync(path, `${JSON.stringify(manifest)}\n`);
+
+      await expect(validateNativeRasterPayload({ root })).rejects.toThrow('declaration is invalid');
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
 });
 
 function fixture(): string {
@@ -77,7 +142,7 @@ function fixture(): string {
   mkdirSync(join(root, 'link'), { recursive: true });
   const runtime = Buffer.from('runtime');
   const link = Buffer.from('link');
-  writeFileSync(join(root, 'runtime/libvips.test'), runtime);
+  writeFileSync(join(root, 'runtime/libc++.dll'), runtime);
   writeFileSync(join(root, 'link/libvips.test'), link);
   const file = (path: string, bytes: Buffer) => ({
     path,
@@ -93,7 +158,7 @@ function fixture(): string {
     sourceArchiveSha256: nativeRasterTargetLock().sha256,
     rasterFormats: NATIVE_RASTER_PAYLOAD_LOCK.rasterFormats,
     linkDirectory: 'link',
-    runtimeFiles: [file('runtime/libvips.test', runtime)],
+    runtimeFiles: [file('runtime/libc++.dll', runtime)],
     linkFiles: [file('link/libvips.test', link)]
   })}\n`);
   return root;
