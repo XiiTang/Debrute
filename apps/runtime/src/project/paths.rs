@@ -10,7 +10,7 @@ use regex::Regex;
 use sha2::{Digest, Sha256};
 use uuid::Uuid;
 
-use super::{ProjectError, ProjectFileEntry, ProjectPathKind};
+use super::{ProjectError, ProjectPathEntry, ProjectPathKind};
 
 pub const PROJECT_FILE: &str = ".debrute/project.json";
 pub const CANVAS_INDEX_FILE: &str = ".debrute/canvases/index.json";
@@ -937,7 +937,7 @@ fn is_windows_absolute(path: &str) -> bool {
 ///
 /// # Errors
 /// Returns an error when the root cannot be traversed safely.
-pub fn list_project_files(root: &Path) -> Result<Vec<ProjectFileEntry>, ProjectError> {
+pub fn list_project_files(root: &Path) -> Result<Vec<ProjectPathEntry>, ProjectError> {
     let mut result = Vec::new();
     let project = ProjectCapabilityFs::open(root)?;
     walk_visible(&project.root, "", &mut result)?;
@@ -948,7 +948,7 @@ pub fn list_project_files(root: &Path) -> Result<Vec<ProjectFileEntry>, ProjectE
 fn walk_visible(
     current: &Dir,
     prefix: &str,
-    result: &mut Vec<ProjectFileEntry>,
+    result: &mut Vec<ProjectPathEntry>,
 ) -> Result<(), ProjectError> {
     let entries = match current.entries() {
         Ok(entries) => entries,
@@ -968,13 +968,13 @@ fn walk_visible(
             if !is_project_visible_path(&relative) {
                 continue;
             }
-            result.push(ProjectFileEntry {
+            result.push(ProjectPathEntry {
                 project_relative_path: relative.clone(),
                 kind: ProjectPathKind::Directory,
             });
             walk_visible(&entry.open_dir()?, &relative, result)?;
         } else if file_type.is_file() && is_project_visible_path(&relative) {
-            result.push(ProjectFileEntry {
+            result.push(ProjectPathEntry {
                 project_relative_path: relative,
                 kind: ProjectPathKind::File,
             });

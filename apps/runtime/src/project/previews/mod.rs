@@ -27,8 +27,8 @@ use crate::{process::ProcessCancellation, workers::RuntimeWorkerServices};
 use super::{
     CanvasDesiredNode, CanvasLayoutSize, CanvasMediaKind, CanvasNodeKind, CanvasVideoPresentation,
     CanvasVideoPresentationKind, CanvasVideoTextTrack, CanvasVideoTextTrackKind,
-    DefaultProjectNodeAdapter, ProjectCapabilityFs, ProjectError, ProjectFileEntry,
-    ProjectNodeAdapter, ProjectPathKind, assert_project_tree_visible_path,
+    DefaultProjectNodeAdapter, ProjectCapabilityFs, ProjectError, ProjectNodeAdapter,
+    ProjectPathEntry, ProjectPathKind, assert_project_tree_visible_path,
     normalize_project_relative_path, open_no_symlink_existing_project_file,
     project_file_revision_from_metadata, resolve_no_symlink_existing_project_path,
 };
@@ -241,7 +241,7 @@ impl ProjectPreviewService {
     pub fn reconcile_image_cache(
         &self,
         project_root: &Path,
-        files: &[ProjectFileEntry],
+        files: &[ProjectPathEntry],
     ) -> Result<(), ProjectError> {
         let mut expected = HashMap::new();
         for entry in files {
@@ -1374,7 +1374,7 @@ mod tests {
         service
             .reconcile_image_cache(
                 &root,
-                &[ProjectFileEntry {
+                &[ProjectPathEntry {
                     project_relative_path: "assets/source.png".to_owned(),
                     kind: ProjectPathKind::File,
                 }],

@@ -7,6 +7,26 @@ import { archiveProductSeed } from '../../scripts/archive-product-seed.mjs';
 import { assembleProductSeed } from '../../scripts/assemble-product-seed.mjs';
 
 describe('desktop fresh install product payload', () => {
+  it('requires an explicit Web root before changing the destination', async () => {
+    const root = mkdtempSync(join(tmpdir(), 'debrute-product-web-root-'));
+    try {
+      const destination = join(root, 'product-seed');
+      mkdirSync(destination, { recursive: true });
+      writeFileSync(join(destination, 'sentinel'), 'preserved');
+
+      await expect(assembleProductSeed({
+        workspaceRoot: root,
+        platform: 'darwin',
+        architecture: 'arm64',
+        destination
+      })).rejects.toThrow('Product Web root is required.');
+
+      expect(readFileSync(join(destination, 'sentinel'), 'utf8')).toBe('preserved');
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+
   it('validates the Product platform before changing the destination', async () => {
     const root = mkdtempSync(join(tmpdir(), 'debrute-product-platform-'));
     try {
@@ -16,6 +36,7 @@ describe('desktop fresh install product payload', () => {
 
       await expect(assembleProductSeed({
         workspaceRoot: root,
+        webRoot: join(root, 'apps/web/dist'),
         platform: 'freebsd',
         architecture: 'x64',
         destination
@@ -86,7 +107,12 @@ describe('desktop fresh install product payload', () => {
         'pub const CONTROL_PROTOCOL_VERSION: u32 = 1;'
       ].join('\n'));
 
-      const assembled = await assembleProductSeed({ workspaceRoot: root, platform: 'darwin', architecture: 'arm64' });
+      const assembled = await assembleProductSeed({
+        workspaceRoot: root,
+        webRoot: join(root, 'apps/web/dist'),
+        platform: 'darwin',
+        architecture: 'arm64'
+      });
       expect(existsSync(join(assembled.destination, 'web/assets/stale-hash.js'))).toBe(false);
       expect(assembled.manifest?.entrypoints).toMatchObject({
         runtime: 'runtime/Debrute Runtime.app/Contents/MacOS/debrute-runtime',

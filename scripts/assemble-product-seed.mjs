@@ -27,7 +27,10 @@ const entrypointKeys = ['cli', 'modelDocs', 'nativeWorkers', 'runtime', 'skills'
 const manifestFileKeys = ['path', 'sha256', 'sizeBytes'];
 const requiredProductComponents = ['runtime', 'web', 'skills', 'model-docs', 'native-workers'];
 
-export async function assembleProductSeed(input = {}) {
+export async function assembleProductSeed(input) {
+  if (!input || typeof input !== 'object') {
+    throw new Error('Product seed assembly input is required.');
+  }
   const root = resolve(input.workspaceRoot ?? workspaceRoot);
   const platform = input.platform ?? process.platform;
   const architecture = input.architecture ?? process.arch;
@@ -40,6 +43,10 @@ export async function assembleProductSeed(input = {}) {
   if (platform === 'win32' && architecture !== 'x64') {
     throw new Error(`Unsupported Windows Product architecture: ${architecture}`);
   }
+  if (typeof input.webRoot !== 'string' || input.webRoot.length === 0) {
+    throw new Error('Product Web root is required.');
+  }
+  const webRoot = resolve(input.webRoot);
   const destination = resolve(input.destination ?? join(root, 'apps/desktop/dist-electron/product-seed'));
   await rm(destination, { recursive: true, force: true });
 
@@ -81,7 +88,7 @@ export async function assembleProductSeed(input = {}) {
       await copyFile(join(nativeRasterRoot, entry.name), join(destination, 'runtime', entry.name));
     }
   }
-  await cp(resolve(input.webRoot ?? join(root, 'apps/web/dist')), join(destination, 'web'), {
+  await cp(webRoot, join(destination, 'web'), {
     recursive: true,
     dereference: true
   });
@@ -325,7 +332,7 @@ function isDirectCliInvocation(moduleUrl, argvPath) {
 }
 
 if (isDirectCliInvocation(import.meta.url, process.argv[1])) {
-  assembleProductSeed().catch((error) => {
+  assembleProductSeed({ webRoot: join(workspaceRoot, 'apps/web/dist') }).catch((error) => {
     console.error(error instanceof Error ? error.message : String(error));
     process.exit(1);
   });

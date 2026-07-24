@@ -444,6 +444,41 @@ fn passive_media_routes_reject_missing_or_empty_identity_values() {
 }
 
 #[test]
+fn project_path_entries_reject_unknown_fields_at_the_http_boundary() {
+    let runtime = TestRuntime::start();
+    let project = runtime.create_project("project-path-entry-contract");
+    let fixture = Path::new(&project.root).join("note.txt");
+    fs::write(&fixture, "note").expect("text fixture should be written");
+    let client = Client::new();
+    let (cookie, credential, _events) = open_unbound_connection(&client, &runtime);
+    open_project(&client, &runtime, &project, &cookie, &credential);
+
+    let response = client
+        .post(format!(
+            "{}/api/projects/{}/files/batch/delete-permanently",
+            runtime.origin(),
+            project.id
+        ))
+        .header(ORIGIN, runtime.origin())
+        .header(COOKIE, &cookie)
+        .header(WORKBENCH_CONNECTION_HEADER, &credential)
+        .json(&json!({
+            "entries": [{
+                "projectRelativePath": "note.txt",
+                "kind": "file",
+                "unexpectedField": true
+            }]
+        }))
+        .send()
+        .expect("invalid Project path entry should complete");
+
+    assert_eq!(response.status().as_u16(), 400);
+    let body: Value = response.json().expect("error should be JSON");
+    assert_eq!(body["error"]["code"], "invalid_json");
+    assert!(fixture.exists());
+}
+
+#[test]
 fn canvas_mutation_routes_require_exact_non_empty_collections() {
     let runtime = TestRuntime::start();
     let project = runtime.create_project("canvas-mutation-contract");

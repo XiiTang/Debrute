@@ -153,7 +153,7 @@ impl CanvasFeedbackArtifacts {
     pub(crate) fn reconcile_image_cache_for_source(
         &self,
         root: &Path,
-        files: &[crate::project::ProjectFileEntry],
+        files: &[crate::project::ProjectPathEntry],
         project_relative_path: &str,
     ) {
         let epoch = self.epoch(root);
@@ -168,7 +168,7 @@ impl CanvasFeedbackArtifacts {
     pub(crate) fn reconcile_image_cache(
         &self,
         root: &Path,
-        files: &[crate::project::ProjectFileEntry],
+        files: &[crate::project::ProjectPathEntry],
     ) {
         let epoch = self.epoch(root);
         if let Err(error) = self.previews.reconcile_image_cache(root, files)

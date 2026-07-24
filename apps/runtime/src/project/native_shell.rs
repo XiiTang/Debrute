@@ -13,17 +13,11 @@ use crate::{
 };
 
 use super::{
-    ProjectCapabilityFs, ProjectError, ProjectPathKind, assert_project_tree_visible_path,
-    resolve_no_symlink_existing_project_path,
+    ProjectCapabilityFs, ProjectError, ProjectPathEntry, ProjectPathKind,
+    assert_project_tree_visible_path, resolve_no_symlink_existing_project_path,
 };
 
 const NATIVE_SHELL_TIMEOUT: Duration = Duration::from_secs(30);
-
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct ProjectNativePathEntry {
-    pub project_relative_path: String,
-    pub kind: ProjectPathKind,
-}
 
 pub struct ProjectNativeShellService {
     supervisor: Arc<BoundedProcessSupervisor>,
@@ -78,7 +72,7 @@ impl ProjectNativeShellService {
     pub fn copy_absolute_paths(
         &self,
         project_root: &Path,
-        entries: &[ProjectNativePathEntry],
+        entries: &[ProjectPathEntry],
     ) -> Result<Vec<PathBuf>, ProjectError> {
         validate_entries(project_root, entries)
             .map(|entries| entries.into_iter().map(|entry| entry.absolute).collect())
@@ -91,7 +85,7 @@ impl ProjectNativeShellService {
     pub fn reveal(
         &self,
         project_root: &Path,
-        entry: &ProjectNativePathEntry,
+        entry: &ProjectPathEntry,
     ) -> Result<(), ProjectError> {
         let resolved = validate_entry(project_root, entry)?;
         let action = reveal_action(&resolved.absolute, entry.kind);
@@ -107,8 +101,8 @@ impl ProjectNativeShellService {
     pub fn trash(
         &self,
         project_root: &Path,
-        entries: &[ProjectNativePathEntry],
-    ) -> Result<Vec<ProjectNativePathEntry>, ProjectError> {
+        entries: &[ProjectPathEntry],
+    ) -> Result<Vec<ProjectPathEntry>, ProjectError> {
         let resolved = top_level_resolved_entries(validate_entries(project_root, entries)?)?;
         preflight_trash_staging(project_root, &resolved)?;
         for entry in &resolved {
@@ -130,7 +124,7 @@ impl ProjectNativeShellService {
         }
         Ok(resolved
             .into_iter()
-            .map(|entry| ProjectNativePathEntry {
+            .map(|entry| ProjectPathEntry {
                 project_relative_path: entry.relative,
                 kind: entry.kind,
             })
@@ -399,7 +393,7 @@ struct NativeAction {
 
 fn validate_entries(
     project_root: &Path,
-    entries: &[ProjectNativePathEntry],
+    entries: &[ProjectPathEntry],
 ) -> Result<Vec<ResolvedEntry>, ProjectError> {
     entries
         .iter()
@@ -409,7 +403,7 @@ fn validate_entries(
 
 fn validate_entry(
     project_root: &Path,
-    entry: &ProjectNativePathEntry,
+    entry: &ProjectPathEntry,
 ) -> Result<ResolvedEntry, ProjectError> {
     let relative = assert_project_tree_visible_path(&entry.project_relative_path)?;
     let absolute = resolve_no_symlink_existing_project_path(project_root, &relative)?;
@@ -574,11 +568,11 @@ mod tests {
         fs::create_dir_all(root.join("folder/child")).unwrap();
         fs::write(root.join("folder/child/file.txt"), "fixture").unwrap();
         let entries = vec![
-            ProjectNativePathEntry {
+            ProjectPathEntry {
                 project_relative_path: "folder/child/file.txt".to_owned(),
                 kind: ProjectPathKind::File,
             },
-            ProjectNativePathEntry {
+            ProjectPathEntry {
                 project_relative_path: "folder".to_owned(),
                 kind: ProjectPathKind::Directory,
             },
@@ -590,7 +584,7 @@ mod tests {
         assert_eq!(validate_entries(&root, &entries).unwrap().len(), 2);
         let invalid = [
             entries[0].clone(),
-            ProjectNativePathEntry {
+            ProjectPathEntry {
                 project_relative_path: "missing.txt".to_owned(),
                 kind: ProjectPathKind::File,
             },
@@ -598,7 +592,7 @@ mod tests {
         assert!(validate_entries(&root, &invalid).is_err());
         let invalid_nested = [
             entries[1].clone(),
-            ProjectNativePathEntry {
+            ProjectPathEntry {
                 project_relative_path: "folder/../outside".to_owned(),
                 kind: ProjectPathKind::File,
             },
@@ -615,7 +609,7 @@ mod tests {
         fs::write(root.join("folder/file.txt"), "fixture").unwrap();
         let entry = validate_entry(
             &root,
-            &ProjectNativePathEntry {
+            &ProjectPathEntry {
                 project_relative_path: "folder/file.txt".to_owned(),
                 kind: ProjectPathKind::File,
             },

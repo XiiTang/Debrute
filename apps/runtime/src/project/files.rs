@@ -14,7 +14,7 @@ use uuid::Uuid;
 use std::cell::RefCell;
 
 use super::{
-    ProjectError, ProjectPathBatchItemResult, ProjectPathKind, ProjectPathOperationResult,
+    ProjectError, ProjectPathBatchItemResult, ProjectPathEntry, ProjectPathKind,
     ProjectPathOperationStatus, ProjectTextFile, assert_project_tree_visible_mutation_path,
     assert_project_tree_visible_path, join_project_path, normalize_project_directory_path,
     normalize_project_path_basename, parent_project_path, project_content_hash, rename_no_replace,
@@ -27,12 +27,6 @@ const DEFAULT_MAX_TEXT_BYTES: u64 = 1024 * 1024;
 #[cfg(test)]
 thread_local! {
     static VISIBLE_REPLACEMENT_AFTER_CLAIM: RefCell<Option<(PathBuf, Vec<u8>)>> = const { RefCell::new(None) };
-}
-
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct ProjectPathBatchEntry {
-    pub project_relative_path: String,
-    pub kind: ProjectPathKind,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -174,7 +168,7 @@ pub(crate) fn create_project_path(
     parent: &str,
     name: &str,
     kind: ProjectPathKind,
-) -> Result<ProjectPathOperationResult, ProjectError> {
+) -> Result<ProjectPathEntry, ProjectError> {
     let relative = join_project_path(parent, name)?;
     assert_project_tree_visible_mutation_path(&relative)?;
     assert_directory(root, &normalize_project_directory_path(parent)?)?;
@@ -193,7 +187,7 @@ pub(crate) fn create_project_path(
         }
         ProjectPathKind::Directory => fs::create_dir(absolute)?,
     }
-    Ok(ProjectPathOperationResult {
+    Ok(ProjectPathEntry {
         project_relative_path: relative,
         kind,
     })
@@ -207,7 +201,7 @@ pub(crate) fn rename_project_path(
     root: &Path,
     relative: &str,
     name: &str,
-) -> Result<ProjectPathOperationResult, ProjectError> {
+) -> Result<ProjectPathEntry, ProjectError> {
     let source = normalize_project_directory_path(relative)?;
     assert_project_tree_visible_mutation_path(&source)?;
     let kind = project_path_kind(root, &source)?;
@@ -220,7 +214,7 @@ pub(crate) fn rename_project_path(
         )));
     }
     rename_no_replace(&resolve_project_path(root, &source)?, &target_absolute)?;
-    Ok(ProjectPathOperationResult {
+    Ok(ProjectPathEntry {
         project_relative_path: target,
         kind,
     })
@@ -232,7 +226,7 @@ pub(crate) fn rename_project_path(
 /// Returns an error for invalid batches, recursive copies, symbolic links, or I/O failure.
 pub(crate) fn copy_project_paths(
     root: &Path,
-    entries: &[ProjectPathBatchEntry],
+    entries: &[ProjectPathEntry],
     target_directory: &str,
 ) -> Result<Vec<ProjectPathBatchItemResult>, ProjectError> {
     let target_directory = normalize_project_directory_path(target_directory)?;
@@ -287,7 +281,7 @@ pub(crate) fn copy_project_paths(
 /// Returns an error for invalid batches, recursive moves, collisions, or I/O failure.
 pub(crate) fn move_project_paths(
     root: &Path,
-    entries: &[ProjectPathBatchEntry],
+    entries: &[ProjectPathEntry],
     target_directory: &str,
     overwrite: bool,
 ) -> Result<Vec<ProjectPathBatchItemResult>, ProjectError> {
@@ -360,7 +354,7 @@ pub(crate) fn move_project_paths(
 /// Returns an error if validation fails before deletion or any deletion fails.
 pub(crate) fn delete_project_paths(
     root: &Path,
-    entries: &[ProjectPathBatchEntry],
+    entries: &[ProjectPathEntry],
 ) -> Result<Vec<ProjectPathBatchItemResult>, ProjectError> {
     let entries = normalized_top_level_entries(root, entries)?;
     for entry in &entries {
@@ -978,8 +972,8 @@ fn cleanup_paths<'a>(paths: impl IntoIterator<Item = &'a PathBuf>) {
 
 fn normalized_top_level_entries(
     root: &Path,
-    entries: &[ProjectPathBatchEntry],
-) -> Result<Vec<ProjectPathBatchEntry>, ProjectError> {
+    entries: &[ProjectPathEntry],
+) -> Result<Vec<ProjectPathEntry>, ProjectError> {
     let mut normalized = Vec::new();
     let mut seen = HashSet::new();
     for entry in entries {
@@ -994,12 +988,12 @@ fn normalized_top_level_entries(
                 "Project path kind mismatch: {path}"
             )));
         }
-        normalized.push(ProjectPathBatchEntry {
+        normalized.push(ProjectPathEntry {
             project_relative_path: path,
             kind,
         });
     }
-    let mut top_level = Vec::<ProjectPathBatchEntry>::new();
+    let mut top_level = Vec::<ProjectPathEntry>::new();
     for entry in normalized {
         if top_level.iter().any(|candidate| {
             is_same_or_child(

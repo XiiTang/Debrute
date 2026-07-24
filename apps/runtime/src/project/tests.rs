@@ -789,7 +789,7 @@ fn canvas_map_parser_is_closed_and_expansion_uses_natural_order() {
     .expect("valid map should parse");
     let entries = ["shot10.png", "shot2.png", "shot1.png"]
         .into_iter()
-        .map(|path| ProjectFileEntry {
+        .map(|path| ProjectPathEntry {
             project_relative_path: path.to_owned(),
             kind: ProjectPathKind::File,
         })
@@ -1539,7 +1539,7 @@ fn project_file_mutations_validate_then_apply_closed_batches() {
     assert_eq!(renamed.project_relative_path, "target/note.txt");
     let copied = copy_project_paths(
         project.as_ref(),
-        &[ProjectPathBatchEntry {
+        &[ProjectPathEntry {
             project_relative_path: "source/one.txt".to_owned(),
             kind: ProjectPathKind::File,
         }],
@@ -1549,7 +1549,7 @@ fn project_file_mutations_validate_then_apply_closed_batches() {
     assert_eq!(copied[0].project_relative_path, "target/one.txt");
     let moved = move_project_paths(
         project.as_ref(),
-        &[ProjectPathBatchEntry {
+        &[ProjectPathEntry {
             project_relative_path: "target/one.txt".to_owned(),
             kind: ProjectPathKind::File,
         }],
@@ -1560,7 +1560,7 @@ fn project_file_mutations_validate_then_apply_closed_batches() {
     assert_eq!(moved[0].project_relative_path, "source/one.txt");
     delete_project_paths(
         project.as_ref(),
-        &[ProjectPathBatchEntry {
+        &[ProjectPathEntry {
             project_relative_path: "target/note.txt".to_owned(),
             kind: ProjectPathKind::File,
         }],
@@ -1680,11 +1680,11 @@ fn project_copy_rejects_nested_symlinks_before_copying_any_entry() {
     let error = copy_project_paths(
         project.as_ref(),
         &[
-            ProjectPathBatchEntry {
+            ProjectPathEntry {
                 project_relative_path: "source/first.txt".to_owned(),
                 kind: ProjectPathKind::File,
             },
-            ProjectPathBatchEntry {
+            ProjectPathEntry {
                 project_relative_path: "source/folder".to_owned(),
                 kind: ProjectPathKind::Directory,
             },

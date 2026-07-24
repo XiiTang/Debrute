@@ -2510,6 +2510,45 @@ mod tests {
     }
 
     #[test]
+    fn seedance_polling_rejects_incomplete_or_unknown_remote_states() {
+        for model_id in [
+            "doubao-seedance-2-0-260128",
+            "doubao-seedance-2-0-fast-260128",
+            "doubao-seedance-2-0-mini-260615",
+        ] {
+            for (poll, expected_code) in [
+                (
+                    json!({
+                        "status": "failed",
+                        "error": {"code": "OutputVideoSensitiveContentDetected"}
+                    }),
+                    "model_response_invalid",
+                ),
+                (json!({"status": "unexpected"}), "model_response_invalid"),
+                (json!({}), "model_response_invalid"),
+                (json!({"status": "cancelled"}), "generation_task_failed"),
+            ] {
+                let (result, requests, remaining) = execute_fixture(
+                    ModelKind::Video,
+                    model_id,
+                    &Map::from_iter([
+                        ("prompt".to_owned(), json!("slow pan")),
+                        ("intent".to_owned(), json!("generate")),
+                    ]),
+                    vec![
+                        fixture_json(&json!({"id": "poll-contract-task"})),
+                        fixture_json(&poll),
+                    ],
+                );
+
+                assert_eq!(result.unwrap_err().code(), expected_code);
+                assert_eq!(requests.len(), 2);
+                assert_eq!(remaining, 0);
+            }
+        }
+    }
+
+    #[test]
     fn seedance_mini_owns_current_roles_passthrough_and_optional_last_frame() {
         let (generate, generate_requests) = run_fixture(
             ModelKind::Video,

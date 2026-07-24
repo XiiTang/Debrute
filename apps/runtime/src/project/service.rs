@@ -20,7 +20,7 @@ use super::{
     DebruteProjectIdentity, DebruteProjectMetadata, DebruteProjectPaths, ExpandedCanvasMap,
     ProjectCapabilityFs, ProjectDiagnostic, ProjectDiagnosticCounts, ProjectDiagnosticSeverity,
     ProjectDocumentDelete, ProjectDocumentRead, ProjectDocumentTransaction, ProjectDocumentWrite,
-    ProjectError, ProjectFileEntry, ProjectHealthSummary, ProjectSnapshot,
+    ProjectError, ProjectHealthSummary, ProjectPathEntry, ProjectSnapshot,
     UpdateCanvasFeedbackEntryInput, bring_canvas_node_to_front, canvas_map_path,
     canvas_media_kind_from_path, clear_canvas_manual_layouts, commit_project_document_transaction,
     create_canvas_document, debrute_project_paths, expand_canvas_map, expand_canvas_map_path_rules,
@@ -1092,7 +1092,7 @@ impl ProjectService {
     fn synchronize_canvas_maps(
         &mut self,
         canvases: Vec<CanvasDocument>,
-        files: &[ProjectFileEntry],
+        files: &[ProjectPathEntry],
         write_changes: bool,
         diagnostics: &mut Vec<ProjectDiagnostic>,
     ) -> Result<Vec<CanvasDocument>, ProjectError> {
@@ -1196,7 +1196,7 @@ impl ProjectService {
         &self,
         canvas: &CanvasDocument,
         content: &str,
-        files: &[ProjectFileEntry],
+        files: &[ProjectPathEntry],
     ) -> Result<CanvasDocument, ProjectError> {
         let source_path = canvas_map_path(&canvas.id)?;
         let map = parse_canvas_map(&canvas.id, &source_path, content)?;

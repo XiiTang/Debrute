@@ -38,10 +38,10 @@ use crate::{
         CanvasMapPathRuleSet, CanvasNodeLayoutUpdate, CanvasTextPreviewSourceStatus,
         CanvasTextPreviewSourceTarget, CanvasTextViewportUpdate, CanvasVideoPlaybackUpdate,
         CanvasVideoPreviewSourceKind, CanvasVideoPreviewSourceStatus, CanvasVideoPreviewTarget,
-        PreviewCancellation, ProjectCommand, ProjectCommandResult, ProjectError,
-        ProjectNativePathEntry, ProjectPathBatchEntry, ProjectPathKind, ProjectRevisionResult,
-        ProjectSession, ProjectUploadEntry, RevisionedFilePlan, RevisionedFileResponse,
-        UpdateCanvasFeedbackEntryInput, open_revisioned_project_file, read_project_text_file,
+        PreviewCancellation, ProjectCommand, ProjectCommandResult, ProjectError, ProjectPathEntry,
+        ProjectPathKind, ProjectRevisionResult, ProjectSession, ProjectUploadEntry,
+        RevisionedFilePlan, RevisionedFileResponse, UpdateCanvasFeedbackEntryInput,
+        open_revisioned_project_file, read_project_text_file,
     },
     terminal::{
         TERMINAL_PROTOCOL_VERSION, TerminalClientFrame, TerminalEvent, TerminalObservation,
@@ -281,7 +281,7 @@ pub(super) async fn batch_copy(
         &state,
         &scope,
         ProjectCommand::CopyPaths {
-            entries: input.entries.into_iter().map(Into::into).collect(),
+            entries: input.entries,
             target_directory: input.target_directory_project_relative_path,
         },
     )
@@ -300,7 +300,7 @@ pub(super) async fn batch_move(
         &state,
         &scope,
         ProjectCommand::MovePaths {
-            entries: input.entries.into_iter().map(Into::into).collect(),
+            entries: input.entries,
             target_directory: input.target_directory_project_relative_path,
             overwrite: input.overwrite,
         },
@@ -320,7 +320,7 @@ pub(super) async fn batch_delete(
         &state,
         &scope,
         ProjectCommand::DeletePaths {
-            entries: input.entries.into_iter().map(Into::into).collect(),
+            entries: input.entries,
         },
     )
 }
@@ -333,7 +333,7 @@ pub(super) async fn copy_absolute_paths(
     #[derive(Deserialize)]
     #[serde(deny_unknown_fields)]
     struct Input {
-        entries: Vec<PathEntry>,
+        entries: Vec<ProjectPathEntry>,
     }
     let input: Input = match json_body(request).await {
         Ok(input) => input,
@@ -344,14 +344,9 @@ pub(super) async fn copy_absolute_paths(
         Ok(session) => session,
         Err(response) => return response,
     };
-    let entries = input
-        .entries
-        .into_iter()
-        .map(Into::into)
-        .collect::<Vec<ProjectNativePathEntry>>();
     match runtime
         .native_shell()
-        .copy_absolute_paths(session.root(), &entries)
+        .copy_absolute_paths(session.root(), &input.entries)
     {
         Ok(paths) => Json(json!({
             "paths": paths.into_iter().map(|path| path.to_string_lossy().into_owned()).collect::<Vec<_>>()
@@ -375,12 +370,7 @@ pub(super) async fn trash_paths(
         Ok(session) => session,
         Err(response) => return response,
     };
-    let entries = input
-        .entries
-        .into_iter()
-        .map(Into::into)
-        .collect::<Vec<ProjectNativePathEntry>>();
-    match session.trash_paths(runtime.native_shell(), &entries) {
+    match session.trash_paths(runtime.native_shell(), &input.entries) {
         Ok(result) => command_response(&session, result),
         Err(error) => project_error(error),
     }
@@ -443,7 +433,7 @@ async fn reveal_path(
     };
     match runtime.native_shell().reveal(
         session.root(),
-        &ProjectNativePathEntry {
+        &ProjectPathEntry {
             project_relative_path: path.to_owned(),
             kind: input.kind,
         },
@@ -1697,39 +1687,14 @@ fn with_project_root(
 
 #[derive(Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
-struct PathEntry {
-    project_relative_path: String,
-    kind: ProjectPathKind,
-}
-
-impl From<PathEntry> for ProjectPathBatchEntry {
-    fn from(value: PathEntry) -> Self {
-        Self {
-            project_relative_path: value.project_relative_path,
-            kind: value.kind,
-        }
-    }
-}
-
-impl From<PathEntry> for ProjectNativePathEntry {
-    fn from(value: PathEntry) -> Self {
-        Self {
-            project_relative_path: value.project_relative_path,
-            kind: value.kind,
-        }
-    }
-}
-
-#[derive(Deserialize)]
-#[serde(rename_all = "camelCase", deny_unknown_fields)]
 struct PathBatchInput {
-    entries: Vec<PathEntry>,
+    entries: Vec<ProjectPathEntry>,
 }
 
 #[derive(Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 struct PathBatchTargetInput {
-    entries: Vec<PathEntry>,
+    entries: Vec<ProjectPathEntry>,
     target_directory_project_relative_path: String,
     #[serde(default)]
     overwrite: bool,

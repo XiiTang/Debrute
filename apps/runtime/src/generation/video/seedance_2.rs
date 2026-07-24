@@ -69,11 +69,21 @@ pub(super) fn execute(context: &mut ExecutionContext<'_>) -> Result<VideoResult,
                     }),
                 });
             }
-            Some("queued" | "pending" | "running" | "in_progress") => {
+            Some("queued" | "running") => {
                 context.sleep(POLL_INTERVAL)?;
             }
-            Some("failed" | "expired" | "canceled" | "cancelled") => {
-                return Err(remote_task_error(&poll));
+            Some("failed") => {
+                let (code, message) = exact_task_failure(&poll)?;
+                return Err(GenerationError::new(
+                    "generation_task_failed",
+                    format!("doubao-seedance-2-0-260128 task failed ({code}): {message}"),
+                ));
+            }
+            Some("cancelled") => {
+                return Err(GenerationError::new(
+                    "generation_task_failed",
+                    "doubao-seedance-2-0-260128 task was cancelled by the remote endpoint.",
+                ));
             }
             Some(status) => {
                 return Err(GenerationError::new(
@@ -349,20 +359,35 @@ fn exact_video_url(response: &Value) -> Result<&str, GenerationError> {
         })
 }
 
-fn remote_task_error(response: &Value) -> GenerationError {
-    let status = response
-        .get("status")
-        .and_then(Value::as_str)
-        .unwrap_or("failed");
-    let detail = response
+fn exact_task_failure(response: &Value) -> Result<(&str, &str), GenerationError> {
+    let error = response
         .get("error")
-        .or_else(|| response.get("failure_reason"))
-        .map_or_else(
-            || "remote endpoint returned no detail".to_owned(),
-            Value::to_string,
-        );
-    GenerationError::new(
-        "generation_task_failed",
-        format!("doubao-seedance-2-0-260128 task {status}: {detail}"),
-    )
+        .and_then(Value::as_object)
+        .ok_or_else(|| {
+            GenerationError::new(
+                "model_response_invalid",
+                "doubao-seedance-2-0-260128 failed without error.",
+            )
+        })?;
+    let code = error
+        .get("code")
+        .and_then(Value::as_str)
+        .filter(|value| !value.is_empty())
+        .ok_or_else(|| {
+            GenerationError::new(
+                "model_response_invalid",
+                "doubao-seedance-2-0-260128 failed without error.code.",
+            )
+        })?;
+    let message = error
+        .get("message")
+        .and_then(Value::as_str)
+        .filter(|value| !value.is_empty())
+        .ok_or_else(|| {
+            GenerationError::new(
+                "model_response_invalid",
+                "doubao-seedance-2-0-260128 failed without error.message.",
+            )
+        })?;
+    Ok((code, message))
 }

@@ -1,4 +1,5 @@
 import { cp, rm } from 'node:fs/promises';
+import { fileURLToPath } from 'node:url';
 import { build } from 'esbuild';
 import { assembleProductSeed } from '../../../scripts/assemble-product-seed.mjs';
 
@@ -35,5 +36,7 @@ await cp('build/icon.png', 'dist-electron/icon.png');
 await cp('build/dock_icon.png', 'dist-electron/dock_icon.png');
 
 if (!skipProductSeed) {
-  await assembleProductSeed();
+  await assembleProductSeed({
+    webRoot: fileURLToPath(new URL('../../web/dist', import.meta.url))
+  });
 }

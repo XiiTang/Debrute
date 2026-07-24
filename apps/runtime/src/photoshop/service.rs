@@ -1413,7 +1413,7 @@ fn prune_challenges(state: &mut PhotoshopBridgeState) {
 }
 
 fn project_directories(
-    files: &[crate::project::ProjectFileEntry],
+    files: &[crate::project::ProjectPathEntry],
 ) -> Vec<PhotoshopProjectDirectoryView> {
     let mut directories = files
         .iter()

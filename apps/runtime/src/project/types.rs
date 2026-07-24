@@ -33,9 +33,9 @@ pub enum ProjectPathKind {
     Directory,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
-#[serde(rename_all = "camelCase")]
-pub struct ProjectFileEntry {
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct ProjectPathEntry {
     pub project_relative_path: String,
     pub kind: ProjectPathKind,
 }
@@ -285,7 +285,7 @@ pub struct ProjectHealthSummary {
 pub struct ProjectSnapshot {
     pub project_root: String,
     pub metadata: DebruteProjectMetadata,
-    pub files: Vec<ProjectFileEntry>,
+    pub files: Vec<ProjectPathEntry>,
     pub canvases: Vec<CanvasDocument>,
     pub projections: Vec<CanvasProjection>,
     pub diagnostics: Vec<ProjectDiagnostic>,
@@ -323,13 +323,6 @@ pub struct ProjectEvent {
     pub project_id: String,
     pub project_revision: u64,
     pub change: ProjectChange,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
-#[serde(rename_all = "camelCase")]
-pub struct ProjectPathOperationResult {
-    pub project_relative_path: String,
-    pub kind: ProjectPathKind,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]

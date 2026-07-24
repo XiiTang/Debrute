@@ -54,25 +54,25 @@ export async function syncBrandAssets({ root = defaultRoot } = {}) {
   ]);
   await removeStaleIconOutputs(root);
   await writePng(svg, resolve(root, desktopLogoTarget), 1024);
-  await writeAppIconPng(
-    svg,
-    cutPaperSvg,
-    resolve(root, desktopPngTarget),
-    1024,
-    appMascotOccupancy(1024)
-  );
-  await writeMacAppIconPng(svg, resolve(root, desktopDockTarget), 1024);
 
   const macIconPngs = new Map();
   const windowsIconPngs = new Map();
   await Promise.all(appIconSizes.map(async (size) => {
     const neutralPng = await appIconPng(svg, cutPaperSvg, size, appMascotOccupancy(size));
+    const macPng = await macAppIconPng(svg, size);
     const target = resolve(root, `${desktopBuildDir}/icons/${size}x${size}.png`);
     await mkdir(dirname(target), { recursive: true });
-    await writeFile(target, neutralPng);
-    macIconPngs.set(size, await macAppIconPng(svg, size));
+    const writes = [writeFile(target, neutralPng)];
+    if (size === 1024) {
+      writes.push(
+        writeFile(resolve(root, desktopPngTarget), neutralPng),
+        writeFile(resolve(root, desktopDockTarget), macPng)
+      );
+    }
+    await Promise.all(writes);
+    macIconPngs.set(size, macPng);
     if (icoIconSizes.includes(size)) {
-      windowsIconPngs.set(size, await appIconPng(svg, cutPaperSvg, size, appMascotOccupancy(size)));
+      windowsIconPngs.set(size, neutralPng);
     }
   }));
   await writeFile(resolve(root, desktopIcnsTarget), icnsBuffer(macIconPngs));
@@ -112,11 +112,6 @@ async function writeGeneratedSvg(target, svg) {
   await writeFile(target, svg, 'utf8');
 }
 
-async function writeAppIconPng(svg, cutPaperSvg, target, size, occupancy) {
-  await mkdir(dirname(target), { recursive: true });
-  await writeFile(target, await appIconPng(svg, cutPaperSvg, size, occupancy));
-}
-
 async function appIconPng(svg, cutPaperSvg, size, occupancy) {
   return maskedIconPng(
     profileSvg(svg, 'application', occupancy),
@@ -124,11 +119,6 @@ async function appIconPng(svg, cutPaperSvg, size, occupancy) {
     appIconInsetRatio,
     (contentSize) => cutPaperMask(cutPaperSvg, contentSize)
   );
-}
-
-async function writeMacAppIconPng(svg, target, size) {
-  await mkdir(dirname(target), { recursive: true });
-  await writeFile(target, await macAppIconPng(svg, size));
 }
 
 async function macAppIconPng(svg, size) {

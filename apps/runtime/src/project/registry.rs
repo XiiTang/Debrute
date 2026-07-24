@@ -14,11 +14,10 @@ use super::{
     CanvasDocument, CanvasFeedbackArtifacts, CanvasFeedbackDiagnosticUpdate,
     CanvasFeedbackDocument, CanvasMapPathRuleSet, CanvasNodeLayoutUpdate, CanvasProjection,
     CanvasTextViewportUpdate, CanvasVideoPlaybackUpdate, ProjectChange, ProjectError, ProjectEvent,
-    ProjectNativePathEntry, ProjectNativeShellService, ProjectNodeAdapter, ProjectPathBatchEntry,
-    ProjectPathBatchItemResult, ProjectPathKind, ProjectPathOperationResult,
-    ProjectPathOperationStatus, ProjectService, ProjectSnapshot, ProjectSyncSnapshot,
-    ProjectTextFile, ProjectUploadEntry, UpdateCanvasFeedbackEntryInput, copy_project_paths,
-    create_project_path, delete_project_paths, import_local_project_paths,
+    ProjectNativeShellService, ProjectNodeAdapter, ProjectPathBatchItemResult, ProjectPathEntry,
+    ProjectPathKind, ProjectPathOperationStatus, ProjectService, ProjectSnapshot,
+    ProjectSyncSnapshot, ProjectTextFile, ProjectUploadEntry, UpdateCanvasFeedbackEntryInput,
+    copy_project_paths, create_project_path, delete_project_paths, import_local_project_paths,
     import_upload_project_entries, move_project_paths, rename_project_path,
     watcher::{ProjectFileWatcher, ProjectWatchSignal},
     write_project_text_file,
@@ -144,16 +143,16 @@ pub enum ProjectCommand {
         name: String,
     },
     CopyPaths {
-        entries: Vec<ProjectPathBatchEntry>,
+        entries: Vec<ProjectPathEntry>,
         target_directory: String,
     },
     MovePaths {
-        entries: Vec<ProjectPathBatchEntry>,
+        entries: Vec<ProjectPathEntry>,
         target_directory: String,
         overwrite: bool,
     },
     DeletePaths {
-        entries: Vec<ProjectPathBatchEntry>,
+        entries: Vec<ProjectPathEntry>,
     },
     ImportLocalPaths {
         source_paths: Vec<PathBuf>,
@@ -206,7 +205,7 @@ pub enum ProjectCommandResult {
         snapshot: ProjectSnapshot,
     },
     PathChanged {
-        result: ProjectPathOperationResult,
+        result: ProjectPathEntry,
         snapshot: ProjectSnapshot,
     },
     PathsChanged {
@@ -860,7 +859,7 @@ impl ProjectSession {
     pub fn trash_paths(
         &self,
         native_shell: &ProjectNativeShellService,
-        entries: &[ProjectNativePathEntry],
+        entries: &[ProjectPathEntry],
     ) -> Result<ProjectRevisionResult<ProjectCommandResult>, ProjectError> {
         self.commit_mutation_with(
             |service| {
@@ -1511,7 +1510,7 @@ fn canvas_change_mutation(
 
 fn project_path_mutation(
     service: &mut ProjectService,
-    result: ProjectPathOperationResult,
+    result: ProjectPathEntry,
 ) -> Result<ProjectMutation<ProjectCommandResult>, ProjectError> {
     let path = result.project_relative_path.clone();
     let snapshot = service.finish_committed_change(&path)?;
@@ -1541,7 +1540,7 @@ fn project_paths_mutation(
     ))
 }
 
-fn entries_project_paths(entries: &[ProjectPathBatchEntry]) -> Vec<String> {
+fn entries_project_paths(entries: &[ProjectPathEntry]) -> Vec<String> {
     entries
         .iter()
         .map(|entry| entry.project_relative_path.clone())

@@ -7,7 +7,7 @@ use regex::Regex;
 use serde::{Deserialize, Serialize};
 use serde_yaml::{Mapping, Value};
 
-use super::{CanvasNodeKind, ProjectError, ProjectFileEntry, ProjectPathKind};
+use super::{CanvasNodeKind, ProjectError, ProjectPathEntry, ProjectPathKind};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum CanvasMapRuleKind {
@@ -176,7 +176,7 @@ pub fn parse_canvas_map(
 /// Returns a typed error for invalid rule targets, globs, or row conflicts.
 pub fn expand_canvas_map(
     map: &CanvasMapDocument,
-    entries: &[ProjectFileEntry],
+    entries: &[ProjectPathEntry],
 ) -> Result<ExpandedCanvasMap, ProjectError> {
     let entry_by_path: HashMap<_, _> = entries
         .iter()
@@ -270,7 +270,7 @@ pub fn expand_canvas_map(
 /// Returns a typed error for invalid paths, targets, or globs.
 pub fn expand_canvas_map_path_rules(
     rules: &CanvasMapPathRuleSet,
-    entries: &[ProjectFileEntry],
+    entries: &[ProjectPathEntry],
 ) -> Result<Vec<CanvasMapNodeProjection>, ProjectError> {
     let normalized = rules
         .paths

@@ -25,7 +25,6 @@ export type {
   ProjectTextLanguageId,
   WriteProjectTextFileInput
 } from './project.js';
-export { PROJECT_TEXT_LANGUAGE_IDS } from './project.js';
 
 export type { NativeMenuCommandId } from './workbenchChrome.js';
 
@@ -935,7 +934,7 @@ export type WorkbenchEvent =
   | { type: 'adobeBridge.state.changed'; state: AdobeBridgeStateView }
   | { type: 'product.changed'; product: DebruteProductState | null };
 
-export type WorkbenchProjectConnectionFrame =
+type WorkbenchProjectConnectionFrame =
   | {
       type: 'project.bound';
       project: Omit<WorkbenchProjectOpenResult, 'workingCopies'>;
@@ -1020,7 +1019,7 @@ export function decodeWorkbenchEvent(value: unknown): WorkbenchEvent | undefined
   return validator(value) ? value as unknown as WorkbenchEvent : undefined;
 }
 
-export function isWorkbenchProjectSessionSnapshot(
+function isWorkbenchProjectSessionSnapshot(
   value: unknown
 ): value is WorkbenchProjectSessionSnapshot {
   if (!isProtocolObject(value)
@@ -1094,7 +1093,7 @@ function hasClosedCanvasTopology(
     && canvasRegistry.canvasOrder.every((id) => typeof id === 'string' && canvasIdSet.has(id));
 }
 
-export function isWorkbenchWorkingCopies(value: unknown): value is WorkbenchWorkingCopies {
+function isWorkbenchWorkingCopies(value: unknown): value is WorkbenchWorkingCopies {
   return isProtocolObject(value)
     && isProtocolObject(value.text)
     && Object.entries(value.text).every(([projectRelativePath, workingCopy]) => (
