@@ -309,6 +309,10 @@ fn runtime_login_item(
 }
 
 #[cfg(target_os = "windows")]
+#[expect(
+    clippy::unnecessary_wraps,
+    reason = "both platforms share one fallible login-item construction contract"
+)]
 fn runtime_login_item(
     stable_runtime: &std::path::Path,
 ) -> Result<PlatformLoginItem, Box<dyn Error>> {

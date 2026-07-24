@@ -388,16 +388,23 @@ async function withControlServer(
   onConnection: (socket: Socket) => void,
   run: (socketPath: string) => Promise<void>
 ): Promise<void> {
-  const directory = join(tmpdir(), `dbrt-ts-${process.pid}-${randomUUID().slice(0, 8)}`);
-  const socketPath = join(directory, 'control.sock');
-  await mkdir(directory, { recursive: true });
+  const identifier = `dbrt-ts-${process.pid}-${randomUUID().slice(0, 8)}`;
+  const directory = process.platform === 'win32' ? undefined : join(tmpdir(), identifier);
+  const socketPath = process.platform === 'win32'
+    ? `\\\\.\\pipe\\${identifier}`
+    : join(directory!, 'control.sock');
+  if (directory) {
+    await mkdir(directory, { recursive: true });
+  }
   const server = createServer(onConnection);
   await listen(server, socketPath);
   try {
     await run(socketPath);
   } finally {
     await closeServer(server);
-    await rm(directory, { recursive: true, force: true });
+    if (directory) {
+      await rm(directory, { recursive: true, force: true });
+    }
   }
 }
 

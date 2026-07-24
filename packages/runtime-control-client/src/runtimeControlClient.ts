@@ -2,7 +2,7 @@ import { randomUUID } from 'node:crypto';
 import { execFileSync } from 'node:child_process';
 import { createConnection, type Socket } from 'node:net';
 import { tmpdir } from 'node:os';
-import { join, win32 } from 'node:path';
+import { posix, win32 } from 'node:path';
 import { TextDecoder } from 'node:util';
 
 import {
@@ -91,7 +91,7 @@ export function resolveRuntimeControlSocketPath(
 ): string {
   const platform = input.platform ?? process.platform;
   if (platform === 'darwin') {
-    return join(input.temporaryDirectory ?? tmpdir(), 'debrute', 'control.sock');
+    return posix.join(input.temporaryDirectory ?? tmpdir(), 'debrute', 'control.sock');
   }
   if (platform === 'win32') {
     const sid = input.windowsUserSid ?? readWindowsUserSid(input.windowsDirectory);

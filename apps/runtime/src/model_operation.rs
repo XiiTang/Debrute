@@ -2299,6 +2299,7 @@ mod tests {
             .unwrap();
         assert_eq!(terminal.state, OperationState::Failed);
         assert_eq!(terminal.log.as_deref(), Some("cleanup failed"));
+        drop(service);
         fs::remove_dir_all(root).unwrap();
     }
 

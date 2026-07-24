@@ -576,6 +576,7 @@ fn remove_capability_entry(
         for child_entry in entries {
             remove_capability_entry(&child, &child_entry)?;
         }
+        drop(child);
         directory.remove_dir(name)?;
     } else {
         directory.remove_file(name)?;

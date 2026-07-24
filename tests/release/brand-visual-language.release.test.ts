@@ -77,7 +77,7 @@ describe('brand visual language', () => {
     const webPackage = readFileSync(join(root, 'apps/web/package.json'), 'utf8');
     expect(webPackage).not.toContain('lucide-react');
 
-    for (const path of globSync('apps/web/src/**/*.{ts,tsx}', { cwd: root })) {
+    for (const path of globSync('apps/web/src/**/*.{ts,tsx}', { cwd: root }).map(portablePath)) {
       const source = readFileSync(join(root, path), 'utf8');
       expect(source, path).not.toContain('lucide-react');
       if (!path.endsWith('/ui/WorkbenchIconProvider.tsx')) {
@@ -118,7 +118,7 @@ describe('brand visual language', () => {
     expect(canvas.match(/\.canvas-feedback-add-comment\s*\{[\s\S]*?\}/)?.[0])
       .toContain('border: 0');
 
-    for (const path of globSync('apps/web/src/workbench/**/*.css', { cwd: root })) {
+    for (const path of globSync('apps/web/src/workbench/**/*.css', { cwd: root }).map(portablePath)) {
       if (path.endsWith('/ui/styles/base.css') || path.endsWith('/styles/canvas.css')) {
         continue;
       }
@@ -210,7 +210,7 @@ describe('brand visual language', () => {
 
   it('keeps owned surfaces flat while reserving gradients for functional guides', () => {
     const stylePaths = [
-      ...globSync('apps/web/src/**/*.css', { cwd: root }),
+      ...globSync('apps/web/src/**/*.css', { cwd: root }).map(portablePath),
       'apps/photoshop-cep-plugin/src/styles.css',
       'apps/photoshop-uxp-plugin/src/styles.css'
     ];
@@ -255,6 +255,10 @@ describe('brand visual language', () => {
     expect(uxpBuild).toContain("external: ['uxp']");
   });
 });
+
+function portablePath(path: string): string {
+  return path.replaceAll('\\', '/');
+}
 
 function contrastRatio(foreground: string, background: string): number {
   const foregroundLuminance = relativeLuminance(foreground);

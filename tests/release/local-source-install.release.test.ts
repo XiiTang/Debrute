@@ -84,6 +84,7 @@ describe('local source installation', () => {
       const manifestPath = join(seed, 'product-manifest.json');
       const manifest = JSON.parse(readFileSync(manifestPath, 'utf8'));
       manifest.platform = 'windows';
+      manifest.architecture = 'arm64';
       writeFileSync(manifestPath, `${JSON.stringify(manifest, null, 2)}\n`);
 
       await expect(validateProductSeed(seed)).rejects.toThrow(

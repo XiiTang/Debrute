@@ -275,6 +275,10 @@ fn validate_desktop_registration(
 }
 
 #[cfg(target_os = "windows")]
+#[expect(
+    clippy::unnecessary_wraps,
+    reason = "both platforms share one fallible Runtime entrypoint installation contract"
+)]
 fn install_runtime_entrypoint(
     _bin_directory: &Path,
     current_runtime: &Path,

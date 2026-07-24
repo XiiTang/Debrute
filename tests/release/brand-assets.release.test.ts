@@ -2,7 +2,7 @@ import { mkdtemp, mkdir, readFile, writeFile } from 'node:fs/promises';
 import { readFileSync } from 'node:fs';
 import { spawnSync } from 'node:child_process';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { join, relative, sep } from 'node:path';
 import sharp from 'sharp';
 import { describe, expect, it } from 'vitest';
 import { syncBrandAssets } from '../../scripts/sync-brand-assets.mjs';
@@ -69,7 +69,7 @@ describe('brand assets', () => {
     expect(desktopSvg).toContain('id="mascot"');
     expect(favicon).not.toBe(svg);
     expect(desktopSvg).not.toBe(svg);
-    expect(result.targets.map((target) => target.replace(`${root}/`, '')).sort()).toEqual([
+    expect(result.targets.map((target) => relative(root, target).split(sep).join('/')).sort()).toEqual([
       'apps/desktop/build/dock_icon.png',
       'apps/desktop/build/icon.icns',
       'apps/desktop/build/icon.ico',

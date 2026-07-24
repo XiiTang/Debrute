@@ -1423,6 +1423,7 @@ mod tests {
             std::fs::read(root.join("generated/covers_2.mp4")).unwrap(),
             b"video"
         );
+        drop(capability);
         std::fs::remove_dir_all(root).unwrap();
     }
 
@@ -1480,6 +1481,7 @@ mod tests {
             .filter(|entry| entry.file_name().to_string_lossy().ends_with(".tmp"))
             .count();
         assert_eq!(temporary, 0);
+        drop(capability);
         std::fs::remove_dir_all(root).unwrap();
     }
 
@@ -1539,9 +1541,11 @@ mod tests {
             panic!("final output must retain matching provenance");
         };
         assert_eq!(records.len(), 1);
+        drop(capability);
         std::fs::remove_dir_all(root).unwrap();
     }
 
+    #[cfg(target_os = "macos")]
     #[test]
     fn generated_commit_remains_anchored_when_the_ambient_project_path_is_replaced() {
         let container = std::env::temp_dir().join(format!("debrute-generation-{}", Uuid::new_v4()));

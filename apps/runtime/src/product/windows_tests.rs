@@ -45,7 +45,7 @@ fn windows_verified_runtime_handle_denies_path_replacement_until_launch_consumes
         .store
         .version_path("0.0.3")
         .join("runtime/debrute-runtime.exe");
-    let replacement = runtime.with_extension("replacement.exe");
+    let replacement = fixture.root.join("runtime-replacement.exe");
     fs::write(&replacement, b"replacement").unwrap();
     let verified = {
         let _transaction = fixture.store.lock_transaction().unwrap();
