@@ -83,6 +83,45 @@ describe('CanvasFeedbackInteraction', () => {
     await probe.unmount();
   });
 
+  it('forces a focused Feedback Bar target closed when its Project file disappears', async () => {
+    const probe = await renderInteraction(apiFixture());
+
+    await act(async () => {
+      await probe.current.load();
+      probe.current.handleTargetChange(feedbackTarget('image.png'));
+      probe.current.focusCapsule('feedback-a');
+      probe.current.changeCapsule('feedback-a', 'Protected draft');
+      probe.current.invalidateTarget('image.png');
+    });
+
+    expect(probe.current.currentTarget).toBeUndefined();
+    expect(probe.current.focusedCapsuleId).toBeUndefined();
+    expect(probe.current.capsulesForPath('image.png').find((capsule) => capsule.itemId === 'feedback-a')?.comment)
+      .toBe('Protected draft');
+    await probe.unmount();
+  });
+
+  it('does not carry Bar hover ownership across forced target invalidation', async () => {
+    vi.useFakeTimers();
+    const probe = await renderInteraction(apiFixture());
+    try {
+      await act(async () => {
+        probe.current.handleTargetChange(feedbackTarget('first.png'));
+        probe.current.handlePointerEnter();
+        probe.current.focusCapsule('feedback-a');
+        probe.current.invalidateTarget('first.png');
+        probe.current.handleTargetChange(feedbackTarget('second.png'));
+        probe.current.handleTargetChange(undefined);
+      });
+
+      await act(async () => vi.advanceTimersByTime(120));
+      expect(probe.current.currentTarget).toBeUndefined();
+    } finally {
+      await probe.unmount();
+      vi.useRealTimers();
+    }
+  });
+
   it('shows only the newly hovered file feedback after the previous file capsule loses focus', async () => {
     const probe = await renderInteraction(apiFixture({
       readCanvasFeedback: vi.fn(async () => multiFileFeedbackFixture())

@@ -56,6 +56,7 @@ export interface CanvasFeedbackInteraction {
   deleteCapsule(itemId: string): Promise<void>;
   setMarks(projectRelativePath: string, marks: CanvasFeedbackMark[]): Promise<void>;
   handleTargetChange(target: CanvasFeedbackBarTarget | undefined): void;
+  invalidateTarget(projectRelativePath: string): void;
   handlePointerEnter(): void;
   handlePointerLeave(): void;
   handleModeChange(mode: CanvasMediaFeedbackMode): void;
@@ -72,7 +73,9 @@ export interface CanvasFeedbackCanvasBinding {
   localSpatialItems: readonly CanvasFeedbackComposition[];
   suppressedSpatialItemIds: ReadonlySet<string>;
   focusedCapsuleId: string | undefined;
+  currentTargetProjectRelativePath: string | undefined;
   handleTargetChange(target: CanvasFeedbackBarTarget | undefined): void;
+  invalidateTarget(projectRelativePath: string): void;
   handleDraft(draft: CanvasLocalFeedbackDraft): void;
   activateCapsule(target: CanvasFeedbackBarTarget, itemId: string): void;
 }
@@ -91,6 +94,7 @@ export function useCanvasFeedbackInteraction(input: {
   const deletingItemKeysRef = useRef(new Set<string>());
   const mutatingMarksKeysRef = useRef(new Set<string>());
   const [target, setTarget] = useState<CanvasFeedbackBarTarget | undefined>(undefined);
+  const targetRef = useRef<CanvasFeedbackBarTarget | undefined>(undefined);
   const [localMode, setLocalMode] = useState<CanvasMediaFeedbackMode>(undefined);
   const [composition, setComposition] = useState<CanvasFeedbackComposition | undefined>(undefined);
   const compositionRef = useRef<CanvasFeedbackComposition | undefined>(undefined);
@@ -113,6 +117,7 @@ export function useCanvasFeedbackInteraction(input: {
   feedbackRef.current = feedback;
   localValuesRef.current = localValues;
   focusedCapsuleIdRef.current = focusedCapsuleId;
+  targetRef.current = target;
 
   const clearComposition = useCallback((itemId: string) => {
     if (compositionRef.current?.itemId !== itemId) {
@@ -305,12 +310,14 @@ export function useCanvasFeedbackInteraction(input: {
       setFocusedCapsuleId(undefined);
       if (deferredTarget) {
         targetEpochRef.current += 1;
+        targetRef.current = deferredTarget;
         setTarget((current) => (
           sameCanvasFeedbackBarTarget(current, deferredTarget) ? current : deferredTarget
         ));
       } else if (deferredTarget === null && !hoveredRef.current) {
         targetEpochRef.current += 1;
         input.overlayRuntime.clearFeedbackBarPlacement();
+        targetRef.current = undefined;
         setTarget(undefined);
       } else if (!hoveredRef.current && targetClearTimerRef.current === undefined) {
         const targetEpoch = targetEpochRef.current;
@@ -321,6 +328,7 @@ export function useCanvasFeedbackInteraction(input: {
             && !focusedCapsuleIdRef.current
           ) {
             input.overlayRuntime.clearFeedbackBarPlacement();
+            targetRef.current = undefined;
             setTarget(undefined);
           }
         }, 0);
@@ -476,6 +484,7 @@ export function useCanvasFeedbackInteraction(input: {
   const activateCapsule = useCallback((nextTarget: CanvasFeedbackBarTarget, itemId: string) => {
     clearTargetTimer();
     targetEpochRef.current += 1;
+    targetRef.current = nextTarget;
     setTarget(nextTarget);
     focusDeferredTargetRef.current = undefined;
     focusedCapsuleIdRef.current = itemId;
@@ -491,6 +500,7 @@ export function useCanvasFeedbackInteraction(input: {
       return;
     }
     input.overlayRuntime.clearFeedbackBarPlacement();
+    targetRef.current = undefined;
     setTarget(undefined);
   }, [input.overlayRuntime]);
 
@@ -513,6 +523,7 @@ export function useCanvasFeedbackInteraction(input: {
     focusDeferredTargetRef.current = undefined;
     targetEpochRef.current += 1;
     if (nextTarget) {
+      targetRef.current = nextTarget;
       setTarget((current) => (
         sameCanvasFeedbackBarTarget(current, nextTarget) ? current : nextTarget
       ));
@@ -520,6 +531,21 @@ export function useCanvasFeedbackInteraction(input: {
     }
     scheduleTargetClear();
   }, [clearTargetTimer, scheduleTargetClear]);
+
+  const invalidateTarget = useCallback((projectRelativePath: string) => {
+    if (targetRef.current?.projectRelativePath !== projectRelativePath) {
+      return;
+    }
+    clearTargetTimer();
+    targetEpochRef.current += 1;
+    focusDeferredTargetRef.current = undefined;
+    hoveredRef.current = false;
+    focusedCapsuleIdRef.current = undefined;
+    setFocusedCapsuleId(undefined);
+    targetRef.current = undefined;
+    input.overlayRuntime.clearFeedbackBarPlacement();
+    setTarget(undefined);
+  }, [clearTargetTimer, input.overlayRuntime]);
 
   const handlePointerEnter = useCallback(() => {
     hoveredRef.current = true;
@@ -559,6 +585,7 @@ export function useCanvasFeedbackInteraction(input: {
   const handleDraft = useCallback((draft: CanvasLocalFeedbackDraft) => {
     clearTargetTimer();
     targetEpochRef.current += 1;
+    targetRef.current = draft.feedbackBarTarget;
     setTarget(draft.feedbackBarTarget);
     const currentComposition = compositionRef.current;
     const reuseCurrent = currentComposition
@@ -674,7 +701,9 @@ export function useCanvasFeedbackInteraction(input: {
     localSpatialItems,
     suppressedSpatialItemIds,
     focusedCapsuleId,
+    currentTargetProjectRelativePath: currentTarget?.projectRelativePath,
     handleTargetChange,
+    invalidateTarget,
     handleDraft,
     activateCapsule
   }), [
@@ -682,8 +711,10 @@ export function useCanvasFeedbackInteraction(input: {
     focusedCapsuleId,
     handleDraft,
     handleTargetChange,
+    invalidateTarget,
     localMode,
     localSpatialItems,
+    currentTarget?.projectRelativePath,
     composition,
     suppressedSpatialItemIds
   ]);
@@ -705,6 +736,7 @@ export function useCanvasFeedbackInteraction(input: {
     deleteCapsule,
     setMarks,
     handleTargetChange,
+    invalidateTarget,
     handlePointerEnter,
     handlePointerLeave,
     handleModeChange,
@@ -731,6 +763,7 @@ export function useCanvasFeedbackInteraction(input: {
     handlePointerEnter,
     handlePointerLeave,
     handleTargetChange,
+    invalidateTarget,
     load,
     localMode,
     authoringItemId,

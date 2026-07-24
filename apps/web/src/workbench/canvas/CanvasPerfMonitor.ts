@@ -11,7 +11,7 @@ export type CanvasPerfEventSource =
   | 'CanvasImageNodeAsset'
   | 'CanvasTextPreviewRuntime'
   | 'CanvasPreviewResourceScheduler'
-  | 'CanvasRenderSnapshotScheduler'
+  | 'CanvasRenderLifecycle'
   | 'CanvasPerfBrowserAdapter';
 
 export type CanvasPerfCounterName =

@@ -94,7 +94,11 @@ export function CanvasMediaFeedbackLayer({
       onClick={mode ? stopCanvasFeedbackPointerEvent : undefined}
     >
       {items.map((item) => {
-        const label = <span className="canvas-media-feedback-label">{item.label}</span>;
+        const label = (
+          <span className="canvas-media-feedback-label">
+            <span className="canvas-feedback-label-number">{item.label}</span>
+          </span>
+        );
         if (item.geometry.type === 'point') {
           return (
             <span
@@ -157,7 +161,11 @@ function renderDraftRegion(input: {
   const { region } = input;
   const label = region.label === undefined
     ? <span className="canvas-media-feedback-label canvas-media-feedback-label--draft" aria-hidden="true" />
-    : <span className="canvas-media-feedback-label">{region.label}</span>;
+    : (
+        <span className="canvas-media-feedback-label">
+          <span className="canvas-feedback-label-number">{region.label}</span>
+        </span>
+      );
   const dataAttributes = region.label === undefined
     ? {}
     : { 'data-canvas-feedback-label': region.label };

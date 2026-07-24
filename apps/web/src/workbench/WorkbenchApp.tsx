@@ -1291,12 +1291,7 @@ function WorkbenchProjectGenerationApp({
                 state={state}
                 actions={actions}
                 runtimeScopeKey={canvasRuntimeScopeKey}
-                overlayRuntime={canvasOverlayRuntime}
                 minimapOpen={canvasMinimapOpen}
-                feedbackPlacementContext={{
-                  viewportRect: workbenchViewportRect,
-                  reservedRects: floatingBarReservedRects
-                }}
                 onCurrentNodesChange={handleActiveCanvasCurrentNodesChange}
                 feedbackInteraction={feedbackInteraction.canvas}
                 onRuntimeChange={setActiveCanvasRuntime}

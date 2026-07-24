@@ -3,10 +3,8 @@ import { Boxes } from '../ui/index.js';
 import type { ProjectedCanvasNode } from '@debrute/canvas-core';
 import type { WorkbenchActions, WorkbenchState } from '../../types';
 import type { WorkbenchContextMenuPosition, WorkbenchContextMenuTarget } from '../shell/contextMenu';
-import type { FloatingBarRect } from '../shell/floatingBars';
 import { getCanvasById } from '../services/canvasState';
 import { CanvasSurface } from './CanvasSurface';
-import type { CanvasOverlayRuntime } from './CanvasOverlayRuntime';
 import type { CanvasFeedbackCanvasBinding } from './CanvasFeedbackInteraction';
 import type { CanvasEditorRuntime } from './runtime/CanvasEditorRuntime';
 import { createCanvasEditorRuntime } from './runtime/CanvasEditorRuntime';
@@ -17,9 +15,7 @@ export function CanvasEditor({
   state,
   actions,
   runtimeScopeKey,
-  overlayRuntime,
   minimapOpen,
-  feedbackPlacementContext,
   onCurrentNodesChange,
   feedbackInteraction,
   onRuntimeChange,
@@ -29,12 +25,7 @@ export function CanvasEditor({
   state: WorkbenchState;
   actions: WorkbenchActions;
   runtimeScopeKey?: number;
-  overlayRuntime: CanvasOverlayRuntime;
   minimapOpen?: boolean | undefined;
-  feedbackPlacementContext: {
-    viewportRect: FloatingBarRect;
-    reservedRects: readonly FloatingBarRect[];
-  };
   onCurrentNodesChange?: ((canvasId: string, nodes: ProjectedCanvasNode[] | undefined) => void) | undefined;
   feedbackInteraction?: CanvasFeedbackCanvasBinding | undefined;
   onRuntimeChange?: ((runtime: CanvasEditorRuntime | undefined) => void) | undefined;
@@ -107,9 +98,7 @@ export function CanvasEditor({
         textFileBuffers={state.textFileBuffers}
         canvasFeedback={state.canvasFeedback}
         feedbackInteraction={feedbackInteraction}
-        overlayRuntime={overlayRuntime}
         minimapOpen={minimapOpen}
-        feedbackPlacementContext={feedbackPlacementContext}
         onCurrentNodesChange={onCurrentNodesChange}
         onOpenContextMenu={onOpenContextMenu}
         textPreviewStyleDependencyKey={state.resolvedTheme}

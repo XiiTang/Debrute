@@ -17,11 +17,6 @@ const MOMENT_PILL_COLORS = [
   'var(--db-canvas-moment-5)',
   'var(--db-canvas-moment-6)'
 ] as const;
-const FEEDBACK_TEXTAREA_MIN_WIDTH = 24;
-const FEEDBACK_TEXTAREA_MAX_WIDTH = 240;
-const FEEDBACK_TEXTAREA_MIN_HEIGHT = 18;
-const FEEDBACK_TEXTAREA_MAX_HEIGHT = 72;
-
 export interface CanvasFeedbackBarProps {
   projectRelativePath: string;
   capsules: readonly CanvasFeedbackCapsule[];
@@ -180,24 +175,27 @@ export function CanvasFeedbackBar({
         </div>
       </div>
 
-      <div className="canvas-feedback-comment-strip" aria-label={i18n.t('canvas.feedback.commentsForFile', { path: projectRelativePath })}>
-        {capsules.map((capsule) => (
-          <FeedbackCapsule
-            key={capsule.itemId}
-            capsule={capsule}
-            registerTextarea={(textarea) => {
-              if (textarea) {
-                textareaRefs.current.set(capsule.itemId, textarea);
-              } else {
-                textareaRefs.current.delete(capsule.itemId);
-              }
-            }}
-            onChange={onCapsuleChange}
-            onFocus={onCapsuleFocus}
-            onBlur={onCapsuleBlur}
-            onDelete={onCapsuleDelete}
-          />
-        ))}
+      <div className="canvas-feedback-comment-row">
+        <div className="canvas-feedback-comment-strip" aria-label={i18n.t('canvas.feedback.commentsForFile', { path: projectRelativePath })}>
+          {capsules.map((capsule) => (
+            <FeedbackCapsule
+              key={capsule.itemId}
+              capsule={capsule}
+              authoring={capsule.itemId === authoringItemId && capsule.comment.length === 0}
+              registerTextarea={(textarea) => {
+                if (textarea) {
+                  textareaRefs.current.set(capsule.itemId, textarea);
+                } else {
+                  textareaRefs.current.delete(capsule.itemId);
+                }
+              }}
+              onChange={onCapsuleChange}
+              onFocus={onCapsuleFocus}
+              onBlur={onCapsuleBlur}
+              onDelete={onCapsuleDelete}
+            />
+          ))}
+        </div>
         {!hideAddComment ? (
           <button
             type="button"
@@ -207,7 +205,7 @@ export function CanvasFeedbackBar({
             title={i18n.t('canvas.feedback.newFileComment')}
             onClick={() => onCreateFileCapsule()}
           >
-            + {i18n.t('canvas.feedback.commentPlaceholder')}
+            {i18n.t('canvas.feedback.commentPlaceholder')}
           </button>
         ) : null}
       </div>
@@ -217,6 +215,7 @@ export function CanvasFeedbackBar({
 
 function FeedbackCapsule({
   capsule,
+  authoring,
   registerTextarea,
   onChange,
   onFocus,
@@ -224,6 +223,7 @@ function FeedbackCapsule({
   onDelete
 }: {
   capsule: CanvasFeedbackCapsule;
+  authoring: boolean;
   registerTextarea(textarea: HTMLTextAreaElement | null): void;
   onChange(itemId: string, value: string): void;
   onFocus(itemId: string): void;
@@ -237,14 +237,9 @@ function FeedbackCapsule({
     'canvas-feedback-comment-pill',
     capsule.scope === 'file' ? 'canvas-feedback-comment-pill--file' : 'canvas-feedback-comment-pill--moment',
     spatial ? 'canvas-feedback-comment-pill--spatial' : undefined,
+    authoring ? 'canvas-feedback-comment-pill--authoring' : undefined,
     capsule.unsynchronized ? 'canvas-feedback-comment-pill--active-surface' : undefined
   ].filter(Boolean).join(' ');
-
-  useLayoutEffect(() => {
-    if (textareaRef.current) {
-      resizeFeedbackTextarea(textareaRef.current);
-    }
-  }, [capsule.comment]);
 
   return (
     <span
@@ -279,7 +274,6 @@ function FeedbackCapsule({
         value={capsule.comment}
         placeholder={i18n.t('canvas.feedback.commentPlaceholder')}
         onInput={(event) => {
-          resizeFeedbackTextarea(event.currentTarget);
           onChange(capsule.itemId, event.currentTarget.value);
         }}
         onFocus={() => onFocus(capsule.itemId)}
@@ -297,7 +291,9 @@ function FeedbackCapsule({
         }}
       />
       {spatial && capsule.label !== undefined ? (
-        <span className="canvas-feedback-comment-pill-badge" aria-hidden="true">{capsule.label}</span>
+        <span className="canvas-feedback-comment-pill-badge" aria-hidden="true">
+          <span className="canvas-feedback-label-number">{capsule.label}</span>
+        </span>
       ) : null}
       <CloseButton
         className="canvas-feedback-comment-pill-close"
@@ -328,24 +324,6 @@ function capsuleAriaLabel(
     return i18n.t('canvas.feedback.region', { index: capsule.label });
   }
   return i18n.t('canvas.feedback.fileLevelComment', { path: capsule.projectRelativePath });
-}
-
-function resizeFeedbackTextarea(textarea: HTMLTextAreaElement): void {
-  textarea.style.width = `${FEEDBACK_TEXTAREA_MIN_WIDTH}px`;
-  textarea.style.whiteSpace = 'pre';
-  textarea.style.overflowWrap = 'normal';
-  const contentWidth = textarea.scrollWidth;
-  textarea.style.removeProperty('white-space');
-  textarea.style.removeProperty('overflow-wrap');
-  textarea.style.width = `${Math.min(
-    FEEDBACK_TEXTAREA_MAX_WIDTH,
-    Math.max(FEEDBACK_TEXTAREA_MIN_WIDTH, Math.ceil(contentWidth))
-  )}px`;
-  textarea.style.height = 'auto';
-  textarea.style.height = `${Math.min(
-    FEEDBACK_TEXTAREA_MAX_HEIGHT,
-    Math.max(FEEDBACK_TEXTAREA_MIN_HEIGHT, textarea.scrollHeight)
-  )}px`;
 }
 
 function momentColor(label: string): string {

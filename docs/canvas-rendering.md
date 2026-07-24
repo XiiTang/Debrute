@@ -15,18 +15,33 @@ their shared scheduling, culling, and diagnostic boundaries only.
 ## Camera And Render Hot Path
 
 Camera movement is not a React geometry loop. `CanvasEditorRuntime` publishes
-the live camera, `CanvasStageRuntime` writes the stage transform directly, and
-the render-snapshot scheduler coalesces moving updates onto animation frames.
-When movement becomes idle, the pending moving update is cancelled and the
-final camera is flushed immediately.
+the live camera and `CanvasStageRuntime` writes the stage transform directly.
+Each mounted `CanvasSurface` has one `CanvasRenderLifecycle` bound to its
+`CanvasEditorRuntime`. The lifecycle owns the current accepted Canvas
+Projection, its `CanvasRenderCoordinator`, the published render snapshot,
+visibility synchronization, render-related Runtime subscriptions, and at most
+one pending animation-frame invalidation. React reads that snapshot through an
+external-store subscription; it does not coordinate the underlying input
+lifetimes.
 
-`CanvasRenderCoordinator` owns mounted render membership. It builds reusable
-spatial indexes for nodes and routed edge segments, queries an overscanned
-virtual rectangle, and refreshes a moving snapshot only when the live viewport
-approaches the retained margin or a zoom change makes the previous virtual area
-too broad. Geometry or edge membership changes rebuild the index once;
-availability, presentation, and stack-order-only changes update current node
-data without rebuilding spatial membership.
+Moving camera events update the stage immediately and coalesce render
+recomputation onto one animation frame. A pending frame captures no camera,
+selection, drag, surface, Projection, or Manual Layout value; when it runs, it
+re-reads the latest complete Runtime and lifecycle state. Projection changes,
+selection changes, surface-size changes, drag changes, and Manual Layout
+rejection cancel a pending moving frame and publish one current snapshot
+immediately. When camera movement becomes idle, the lifecycle likewise cancels
+pending work and flushes the final state. Detaching the last snapshot subscriber
+removes the Runtime subscriptions and cancels pending work, so a callback from
+an older mounted lifetime cannot publish later.
+
+Within that lifecycle, `CanvasRenderCoordinator` calculates mounted render
+membership. It builds reusable spatial indexes for nodes and routed edge
+segments, queries an overscanned virtual rectangle, and refreshes a moving
+snapshot only when the live viewport approaches the retained margin or a zoom
+change makes the previous virtual area too broad. Geometry or edge membership
+changes rebuild the index once; availability, presentation, and stack-order-
+only changes update current node data without rebuilding spatial membership.
 
 Selection, active move/resize paths, and Manual Layout Drafts pin the affected
 nodes into the snapshot. Edges are queried independently of endpoint-node

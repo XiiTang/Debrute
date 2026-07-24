@@ -15,6 +15,7 @@ describe('WorkbenchIconProvider', () => {
     expect(html).toContain('height="16"');
     expect(html).toContain('data-debrute-icon="folder-tree"');
     expect(html).toContain('fill="currentColor"');
+    expect(html).toContain('overflow="visible"');
     expect(html).not.toContain('stroke=');
   });
 

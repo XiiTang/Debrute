@@ -16,7 +16,7 @@ describe('CanvasFeedbackBar', () => {
 
     expect(view.container.querySelector('.canvas-feedback-primary-row textarea')).toBeNull();
     expect(view.container.querySelector('.canvas-feedback-comment-strip')).not.toBeNull();
-    expect(view.commentButton.textContent).toBe('+ Comment');
+    expect(view.commentButton.textContent).toBe('Comment');
     await view.unmount();
   });
 
@@ -101,11 +101,48 @@ describe('CanvasFeedbackBar', () => {
 
     await act(async () => textarea.blur());
     await view.rerender();
-    expect(view.commentButton.textContent).toBe('+ Comment');
+    expect(view.commentButton.textContent).toBe('Comment');
     await view.unmount();
   });
 
-  it('expresses an unsynchronized current value through capsule styling without status text', async () => {
+  it('returns empty authoring sizing to the Comment placeholder without fixed widths', async () => {
+    const view = await renderBar({
+      capsules: [capsule('feedback-new', '', { isNew: true })],
+      focusedCapsuleId: 'feedback-new',
+      authoringItemId: 'feedback-new'
+    });
+    const authoringCapsule = view.container.querySelector('[data-canvas-feedback-item-id="feedback-new"]')!;
+    const textarea = authoringCapsule.querySelector('textarea')!;
+
+    expect(canvasStyles).not.toContain('--canvas-feedback-empty-comment-width');
+    expect(cssRule('.canvas-feedback-comment-pill--authoring')).toContain('padding-inline: 12px;');
+    expect(cssRule('.canvas-feedback-comment-textarea')).toContain('field-sizing: content;');
+    expect(cssRule('.canvas-feedback-add-comment')).not.toMatch(/\b(?:min-)?width:/);
+    expect(cssRule('.canvas-feedback-add-comment')).toContain('padding: 0 12px;');
+    expect(cssRule('.canvas-feedback-comment-strip:empty')).toContain('padding-right: 0;');
+
+    expect(authoringCapsule.classList.contains('canvas-feedback-comment-pill--authoring')).toBe(true);
+    expect(textarea.style.width).toBe('');
+    expect(textarea.style.height).toBe('');
+    await view.unmount();
+  });
+
+  it('keeps the empty Comment label on the same vertical center across activation', () => {
+    const rowRule = cssRule('.canvas-feedback-comment-row');
+    const stripRule = cssRule('.canvas-feedback-comment-strip');
+    const addCommentRule = cssRule('.canvas-feedback-add-comment');
+    const authoringTextareaRule = cssRule(
+      '.canvas-feedback-comment-pill--authoring .canvas-feedback-comment-textarea'
+    );
+
+    expect(rowRule).toContain('top: -2px;');
+    expect(stripRule).toContain('padding: 5px 5px 3px 0;');
+    expect(addCommentRule).toContain('margin-top: 5px;');
+    expect(addCommentRule).toContain('line-height: 18px;');
+    expect(authoringTextareaRule).toContain('transform: none;');
+  });
+
+  it('exposes an unsynchronized current value without adding status text', async () => {
     const view = await renderBar({
       capsules: [capsule('feedback-a', 'Current value', { unsynchronized: true })]
     });
@@ -119,6 +156,16 @@ describe('CanvasFeedbackBar', () => {
 
   it('uses the Capsule surface instead of a rectangular textarea focus outline', () => {
     expect(canvasStyles).not.toContain('.canvas-feedback-comment-textarea:focus');
+  });
+
+  it('keeps the complete comment Capsule surface stable while editing', () => {
+    const capsuleRule = cssRule('.canvas-feedback-comment-pill');
+    const editingRule = cssRule('.canvas-feedback-comment-pill:focus-within');
+
+    expect(capsuleRule).toContain(
+      'box-shadow: var(--canvas-feedback-comment-underlayer);'
+    );
+    expect(editingRule).toBe('');
   });
 
   it('lets the comment row use its content height instead of the maximum reserved height', () => {
@@ -137,27 +184,23 @@ describe('CanvasFeedbackBar', () => {
     );
   });
 
-  it('sizes the Capsule input from 24px through the 240px maximum', async () => {
+  it('lets CSS size every Capsule input from 24px through the 240px maximum', async () => {
     const view = await renderBar({ capsules: [capsule('feedback-a', 'A')] });
     const textarea = view.container.querySelector('textarea')!;
-    let measuredWidth = 8;
-    Object.defineProperty(textarea, 'scrollWidth', {
-      configurable: true,
-      get: () => measuredWidth
-    });
+    const textareaRule = cssRule('.canvas-feedback-comment-textarea');
 
-    await act(async () => {
-      textarea.value = 'A';
-      textarea.dispatchEvent(new Event('input', { bubbles: true }));
-    });
-    expect(textarea.style.width).toBe('24px');
+    expect(textareaRule).toContain('field-sizing: content;');
+    expect(textareaRule).toContain('min-width: 24px;');
+    expect(textareaRule).toContain('max-width: 240px;');
+    expect(textareaRule).toContain('min-height: 18px;');
+    expect(textareaRule).toContain('max-height: 72px;');
 
-    measuredWidth = 500;
     await act(async () => {
       textarea.value = 'A much longer feedback comment';
       textarea.dispatchEvent(new Event('input', { bubbles: true }));
     });
-    expect(textarea.style.width).toBe('240px');
+    expect(textarea.style.width).toBe('');
+    expect(textarea.style.height).toBe('');
     await view.unmount();
   });
 
@@ -168,7 +211,7 @@ describe('CanvasFeedbackBar', () => {
       authoringItemId: undefined
     });
 
-    expect(view.commentButton.textContent).toBe('+ Comment');
+    expect(view.commentButton.textContent).toBe('Comment');
     await view.unmount();
   });
 
@@ -206,6 +249,61 @@ describe('CanvasFeedbackBar', () => {
     await view.unmount();
   });
 
+  it('slightly shrinks and insets only the visible Comment close control while preserving its hit area', () => {
+    const closeRule = cssRule('.canvas-feedback-comment-pill-close.db-workbench-close-button');
+    const visibleControlRule = cssRule(
+      '.canvas-feedback-comment-pill-close.db-workbench-close-button .db-icon-button__icon'
+    );
+    const visibleIconRule = cssRule(
+      '.canvas-feedback-comment-pill-close.db-workbench-close-button .db-icon-button__icon svg'
+    );
+
+    expect(closeRule).toContain('top: -3px;');
+    expect(closeRule).toContain('right: -3px;');
+    expect(closeRule).not.toMatch(/\b(?:width|height):/);
+    expect(visibleControlRule).toContain('width: 10px;');
+    expect(visibleControlRule).toContain('height: 10px;');
+    expect(visibleIconRule).toContain('width: 8px;');
+    expect(visibleIconRule).toContain('height: 8px;');
+  });
+
+  it('keeps a spatial Feedback label unclipped and optically centers its number', async () => {
+    const view = await renderBar({
+      capsules: [capsule('feedback-pin', 'Pinned detail', { kind: 'pin', label: 7 })]
+    });
+    const badge = view.container.querySelector('.canvas-feedback-comment-pill-badge');
+    const stripRule = cssRule('.canvas-feedback-comment-strip');
+    const mediaLabelRule = cssRule('.canvas-media-feedback-label');
+    const numberRule = cssRule('.canvas-feedback-label-number');
+
+    expect(badge?.textContent).toBe('7');
+    expect(badge?.querySelector('.canvas-feedback-label-number')).not.toBeNull();
+    expect(stripRule).toContain('padding: 5px 5px 3px 0;');
+    expect(mediaLabelRule).not.toContain('--canvas-feedback-label-number-offset');
+    expect(numberRule).toContain('display: block;');
+    expect(numberRule).toContain('text-box: trim-both cap alphabetic;');
+    expect(numberRule).not.toContain('transform:');
+    await view.unmount();
+  });
+
+  it('keeps the trailing Comment action beside rather than over the scrolling comments', async () => {
+    const view = await renderBar({
+      capsules: [capsule('feedback-a', 'First'), capsule('feedback-b', 'A much longer comment')]
+    });
+    const row = view.container.querySelector('.canvas-feedback-comment-row')!;
+    const strip = view.container.querySelector('.canvas-feedback-comment-strip')!;
+    const stripRule = cssRule('.canvas-feedback-comment-strip');
+    const rowRule = cssRule('.canvas-feedback-comment-row');
+
+    expect(row.contains(strip)).toBe(true);
+    expect(row.contains(view.commentButton)).toBe(true);
+    expect(strip.contains(view.commentButton)).toBe(false);
+    expect(rowRule).toContain('display: flex;');
+    expect(stripRule).toContain('overflow-x: auto;');
+    expect(stripRule).toContain('flex: 0 1 auto;');
+    await view.unmount();
+  });
+
   it('renders image and video toolsets in the action row', async () => {
     const image = await renderBar({ localToolset: 'image' });
     expect(image.container.querySelector('[aria-label="Image region feedback tools"]')).not.toBeNull();
@@ -217,6 +315,11 @@ describe('CanvasFeedbackBar', () => {
     await video.unmount();
   });
 });
+
+function cssRule(selector: string): string {
+  const escapedSelector = selector.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  return canvasStyles.match(new RegExp(`${escapedSelector}\\s*\\{[^}]*\\}`, 's'))?.[0] ?? '';
+}
 
 type BarOptions = {
   capsules?: CanvasFeedbackCapsule[];

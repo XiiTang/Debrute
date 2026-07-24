@@ -37,6 +37,7 @@ function makeIcon(name: string, artwork: React.ReactNode): CutoutIcon {
         height={dimension}
         viewBox="0 0 20 20"
         fill="currentColor"
+        overflow="visible"
         xmlns="http://www.w3.org/2000/svg"
         aria-hidden={props['aria-label'] ? undefined : true}
         focusable="false"

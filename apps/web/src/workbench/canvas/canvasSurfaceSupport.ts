@@ -3,7 +3,12 @@ import type {
   CanvasFeedbackEntry,
   ProjectedCanvasNode
 } from '@debrute/canvas-core';
-import type { CanvasRuntimePointerModifiers } from './runtime/CanvasEditorRuntime';
+import type {
+  CanvasEditorRuntime,
+  CanvasRuntimeDragState,
+  CanvasRuntimePointerModifiers,
+  CanvasRuntimeSnapshot
+} from './runtime/CanvasEditorRuntime';
 import {
   canvasFeedbackLocalToolsetForMediaKind,
   type CanvasFeedbackBarTarget,
@@ -20,16 +25,7 @@ import {
   type CanvasPerfSessionId
 } from './CanvasPerfMonitor';
 import type { CanvasPreviewResourceScheduler } from './CanvasPreviewResourceScheduler';
-import type {
-  CanvasRenderCoordinatorSnapshot,
-  CanvasRenderCoordinatorUpdateInput
-} from './CanvasRenderCoordinator';
-import type {
-  CanvasEditorRuntime,
-  CanvasRuntimeDragState,
-  CanvasRuntimeSnapshot
-} from './runtime/CanvasEditorRuntime';
-import type { CanvasStageRuntime } from './runtime/CanvasStageRuntime';
+import type { CanvasRenderCoordinatorSnapshot } from './CanvasRenderCoordinator';
 import type { CanvasSelection } from './runtime/canvasSelection';
 import type { CanvasCamera } from './runtime/canvasCamera';
 
@@ -55,30 +51,6 @@ export function canvasMapProjectTreeDropInput(
 
 export function isCanvasMapProjectTreeDragOver(dataTransfer: Pick<DataTransfer, 'types'>): boolean {
   return hasInternalProjectTreeDrag(dataTransfer);
-}
-
-export function shouldClearFeedbackBarPlacementForFeedbackTarget(input: {
-  hasFeedbackTargetHandler: boolean;
-  hasCanvasFeedback: boolean;
-  hoveredNodePath: string | undefined;
-  hasRenderableFeedbackTarget: boolean;
-}): boolean {
-  if (!input.hasFeedbackTargetHandler || !input.hasCanvasFeedback) {
-    return true;
-  }
-  if (!input.hoveredNodePath) {
-    return false;
-  }
-  return !input.hasRenderableFeedbackTarget;
-}
-
-export function activeNodeProjectRelativePaths(state: CanvasRuntimeDragState | undefined): string[] {
-  if (!state) {
-    return [];
-  }
-  return state.kind === 'move-node'
-    ? state.origins.map((origin) => origin.projectRelativePath)
-    : [state.node.projectRelativePath];
 }
 
 export function pointerEventModifiers(event: Pick<React.PointerEvent<Element>, 'shiftKey'>): CanvasRuntimePointerModifiers {
@@ -344,27 +316,6 @@ function canvasPerfTimestamp(): number {
   return performance.now();
 }
 
-export function syncCanvasMovingCameraFrame(input: {
-  liveCamera: CanvasRuntimeSnapshot['camera'];
-  stageRuntime: Pick<CanvasStageRuntime, 'setCamera'>;
-  surfaceSize: CanvasRuntimeSnapshot['surfaceSize'];
-  selection: CanvasRuntimeSnapshot['selection'];
-  activeNodePaths: readonly string[];
-  renderSnapshotScheduler: Pick<
-    ReturnType<typeof createCanvasRenderSnapshotScheduler<Omit<CanvasRenderCoordinatorUpdateInput, 'layoutOverrides'>>>,
-    'requestMoving'
-  >;
-}): void {
-  input.stageRuntime.setCamera(input.liveCamera);
-  input.renderSnapshotScheduler.requestMoving({
-    camera: input.liveCamera,
-    cameraState: 'moving',
-    surfaceSize: input.surfaceSize,
-    selection: input.selection,
-    activeNodePaths: input.activeNodePaths
-  });
-}
-
 export function syncCanvasPreviewResourceSchedulerForInteraction(input: {
   scheduler: Pick<CanvasPreviewResourceScheduler, 'setInteractionState'>;
   cameraState: CanvasRuntimeSnapshot['cameraState'];
@@ -374,82 +325,6 @@ export function syncCanvasPreviewResourceSchedulerForInteraction(input: {
     cameraState: input.cameraState,
     dragActive: input.dragState !== undefined
   });
-}
-
-export function createCanvasRenderSnapshotScheduler<T>(input: {
-  commit: (next: T) => void;
-  perfMonitor?: Pick<CanvasPerfMonitor, 'recordCounter'> | undefined;
-  requestFrame?: ((callback: FrameRequestCallback) => number) | undefined;
-  cancelFrame?: ((handle: number) => void) | undefined;
-}): {
-  requestMoving(next: T): void;
-  flush(next: T): void;
-  dispose(): void;
-} {
-  const requestFrame = input.requestFrame ?? window.requestAnimationFrame.bind(window);
-  const cancelFrame = input.cancelFrame ?? window.cancelAnimationFrame.bind(window);
-  let pendingFrame: number | undefined;
-  let pendingInput: T | undefined;
-  let frameEpoch = 0;
-
-  const run = (epoch: number) => {
-    if (epoch !== frameEpoch || pendingFrame === undefined) {
-      return;
-    }
-    pendingFrame = undefined;
-    const next = pendingInput;
-    pendingInput = undefined;
-    if (next !== undefined) {
-      input.commit(next);
-    }
-  };
-
-  return {
-    requestMoving(next) {
-      pendingInput = next;
-      if (pendingFrame !== undefined) {
-        return;
-      }
-      input.perfMonitor?.recordCounter({
-        sessionTypes: CANVAS_PERF_INTERACTION_SESSION_TYPES,
-        timestamp: canvasPerfTimestamp(),
-        source: 'CanvasRenderSnapshotScheduler',
-        name: 'render-moving-queued',
-        value: 1
-      });
-      if (!requestFrame) {
-        pendingInput = undefined;
-        input.commit(next);
-        return;
-      }
-      const epoch = frameEpoch;
-      pendingFrame = requestFrame(() => run(epoch));
-    },
-    flush(next) {
-      input.perfMonitor?.recordCounter({
-        sessionTypes: CANVAS_PERF_INTERACTION_SESSION_TYPES,
-        timestamp: canvasPerfTimestamp(),
-        source: 'CanvasRenderSnapshotScheduler',
-        name: 'render-idle-flush',
-        value: 1
-      });
-      pendingInput = undefined;
-      if (pendingFrame !== undefined) {
-        frameEpoch += 1;
-        cancelFrame?.(pendingFrame);
-        pendingFrame = undefined;
-      }
-      input.commit(next);
-    },
-    dispose() {
-      if (pendingFrame !== undefined) {
-        frameEpoch += 1;
-        cancelFrame?.(pendingFrame);
-      }
-      pendingFrame = undefined;
-      pendingInput = undefined;
-    }
-  };
 }
 
 export function domRectToFloatingBarRect(rect: DOMRect): FloatingBarRect {

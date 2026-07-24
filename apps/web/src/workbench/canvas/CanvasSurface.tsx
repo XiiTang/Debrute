@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
+import React, { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react';
 import type {
   CanvasDocument,
   CanvasFeedbackDocument,
@@ -16,12 +16,7 @@ import {
   type ResizeHandle
 } from '../services/canvasInteraction';
 import {
-  canvasFeedbackBarSizeForTarget,
-  canvasFeedbackLocalToolsetForMediaKind,
-  canvasNodeToViewportRect,
-  placeCanvasFeedbackBar,
-  type CanvasFeedbackBarTarget,
-  type FloatingBarRect
+  type CanvasFeedbackBarTarget
 } from '../shell/floatingBars';
 import { cameraForCanvasContent } from './CanvasCameraBounds';
 import { CanvasImageNodeAssetProvider, type CanvasImageNodeAssetContextValue } from './CanvasImageNodeAssetContext';
@@ -37,7 +32,6 @@ import {
 import { CanvasTextPreviewProvider, useCanvasTextPreviewRuntime } from './CanvasTextPreviewRuntime';
 import { CanvasVideoPreviewProvider, useCanvasVideoPreviewRuntime } from './CanvasVideoPreviewRuntime';
 import type { CanvasVideoPreviewSource } from './canvasVideoPreviews';
-import type { CanvasOverlayRuntime } from './CanvasOverlayRuntime';
 import type { CanvasFeedbackCanvasBinding } from './CanvasFeedbackInteraction';
 import { createCanvasPerfBrowserAdapter } from './CanvasPerfBrowserAdapter';
 import { createCanvasPerfDebugBridge } from './CanvasPerfDebugBridge';
@@ -45,7 +39,7 @@ import {
   createCanvasPerfMonitor,
   type CanvasPerfMonitor
 } from './CanvasPerfMonitor';
-import { createCanvasRenderCoordinator, type CanvasRenderCoordinatorSnapshot } from './CanvasRenderCoordinator';
+import { createCanvasRenderLifecycle } from './CanvasRenderLifecycle.js';
 import { createCanvasVisibilityController } from './CanvasVisibilityController';
 import type {
   CanvasEditorRuntime,
@@ -62,23 +56,18 @@ import {
   canvasNodesWithLayoutOverrides
 } from './canvasManualLayoutDraft';
 import {
-  activeNodeProjectRelativePaths,
   canvasActiveVideoPaths,
   canvasFeedbackBarTargetForProjectedNode,
   canvasMapProjectTreeDropInput,
   canvasPerfDebugSnapshot,
   canvasPerfFinalState,
-  createCanvasRenderSnapshotScheduler,
   devicePixelRatioValue,
   domRectToFloatingBarRect,
   isCanvasMapProjectTreeDragOver,
   isProjectedVideoNode,
-  nodeRectForFloatingBar,
   pointerEventModifiers,
   recordCanvasPerfFrame,
   selectedSingleVideoPath,
-  shouldClearFeedbackBarPlacementForFeedbackTarget,
-  syncCanvasMovingCameraFrame,
   syncCanvasPerfDragSessionState,
   syncCanvasPerfSessionState,
   syncCanvasPreviewResourceSchedulerForInteraction,
@@ -96,12 +85,7 @@ interface CanvasSurfaceProps {
   textFileBuffers: Record<string, TextFileBuffer>;
   canvasFeedback: CanvasFeedbackDocument | undefined;
   feedbackInteraction?: CanvasFeedbackCanvasBinding | undefined;
-  overlayRuntime: CanvasOverlayRuntime;
   minimapOpen?: boolean | undefined;
-  feedbackPlacementContext: {
-    viewportRect: FloatingBarRect;
-    reservedRects: readonly FloatingBarRect[];
-  };
   onCurrentNodesChange?: ((canvasId: string, nodes: ProjectedCanvasNode[] | undefined) => void) | undefined;
   onOpenContextMenu?: ((target: WorkbenchContextMenuTarget, position: WorkbenchContextMenuPosition) => void) | undefined;
   textPreviewStyleDependencyKey: string;
@@ -115,9 +99,7 @@ export function CanvasSurface({
   textFileBuffers,
   canvasFeedback,
   feedbackInteraction,
-  overlayRuntime,
   minimapOpen,
-  feedbackPlacementContext,
   onCurrentNodesChange,
   onOpenContextMenu,
   textPreviewStyleDependencyKey
@@ -155,9 +137,7 @@ export function CanvasSurface({
       canvasFeedback={canvasFeedback}
       feedbackInteraction={feedbackInteraction}
       perfMonitor={perfMonitor}
-      overlayRuntime={overlayRuntime}
       minimapOpen={minimapOpen}
-      feedbackPlacementContext={feedbackPlacementContext}
       onCurrentNodesChange={onCurrentNodesChange}
       onOpenContextMenu={onOpenContextMenu}
       textPreviewStyleDependencyKey={textPreviewStyleDependencyKey}
@@ -174,9 +154,7 @@ function CanvasSurfaceRuntime({
   canvasFeedback,
   feedbackInteraction,
   perfMonitor,
-  overlayRuntime,
   minimapOpen,
-  feedbackPlacementContext,
   onCurrentNodesChange,
   onOpenContextMenu,
   textPreviewStyleDependencyKey
@@ -202,10 +180,6 @@ function CanvasSurfaceRuntime({
   ));
   const resourceZoom = resourceZoomState.resourceZoom;
   const selectionRef = useRef<CanvasSelection | undefined>(selection);
-  const surfaceSizeRef = useRef(surfaceSize);
-  const renderSnapshotRef = useRef<CanvasRenderCoordinatorSnapshot | undefined>(undefined);
-  const activeNodePathsRef = useRef<string[]>(activeNodeProjectRelativePaths(initialDragState));
-  const activeNodePathKeyRef = useRef(activeNodePathsRef.current.join('\u001f'));
   const fittedCanvasIdRef = useRef<string | undefined>(undefined);
   const canvasPerfSessionRef = useRef<CanvasPerfRuntimeSession | undefined>(undefined);
   const canvasPerfDragSessionRef = useRef<CanvasPerfRuntimeSession | undefined>(undefined);
@@ -298,19 +272,21 @@ function CanvasSurfaceRuntime({
   const stageRuntime = useMemo(() => createCanvasStageRuntime({ perfMonitor: instrumentationMonitor }), [instrumentationMonitor]);
   const previewResourceScheduler = useMemo(() => createCanvasPreviewResourceScheduler({ perfMonitor: instrumentationMonitor }), [instrumentationMonitor]);
   const visibilityController = useMemo(() => createCanvasVisibilityController({ stageRuntime }), [stageRuntime]);
-  const renderCoordinator = useMemo(() => createCanvasRenderCoordinator({ projection, perfMonitor: instrumentationMonitor }), [instrumentationMonitor]);
+  const renderLifecycle = useMemo(() => createCanvasRenderLifecycle({
+    projection,
+    runtime,
+    stageRuntime,
+    visibilityController,
+    perfMonitor: instrumentationMonitor
+  }), [instrumentationMonitor, runtime, stageRuntime, visibilityController]);
+  const renderSnapshot = useSyncExternalStore(
+    renderLifecycle.subscribe,
+    renderLifecycle.getSnapshot,
+    renderLifecycle.getSnapshot
+  );
   const currentLayoutOverrides = useCallback(() => (
     runtime.manualLayout.getPresentation().layoutOverrides
   ), [runtime]);
-  const initialRenderSnapshot = useMemo(() => renderCoordinator.update({
-    camera: runtime.getSnapshot().camera,
-    cameraState: runtime.getSnapshot().cameraState,
-    surfaceSize: runtime.getSnapshot().surfaceSize,
-    selection: runtime.getSnapshot().selection,
-    activeNodePaths: activeNodePathsRef.current,
-    layoutOverrides: currentLayoutOverrides()
-  }), [currentLayoutOverrides, renderCoordinator, runtime]);
-  const [renderSnapshot, setRenderSnapshot] = useState(initialRenderSnapshot);
   const canvasPerfDebugContextRef = useRef<CanvasPerfDebugSnapshotContext | undefined>(undefined);
   const imageNodeAssetContext = useMemo<CanvasImageNodeAssetContextValue>(() => ({
     resourceZoom,
@@ -322,12 +298,11 @@ function CanvasSurfaceRuntime({
   }), [cameraState, devicePixelRatio, dragState, instrumentationMonitor, previewResourceScheduler, resourceZoom]);
 
   selectionRef.current = selection;
-  surfaceSizeRef.current = surfaceSize;
   canvasPerfDebugContextRef.current = {
     canvasId: canvas.id,
     runtime,
     resourceZoom,
-    renderSnapshot: renderSnapshotRef.current ?? renderSnapshot,
+    renderSnapshot,
     surfaceElement: surfaceRef.current
   };
 
@@ -384,48 +359,6 @@ function CanvasSurfaceRuntime({
     });
   }, [cameraState, dragState, previewResourceScheduler]);
 
-  const commitRenderSnapshot = useCallback((input: {
-    camera: CanvasRuntimeSnapshot['camera'];
-    cameraState: CanvasRuntimeSnapshot['cameraState'];
-    surfaceSize: CanvasRuntimeSnapshot['surfaceSize'];
-    selection: CanvasRuntimeSnapshot['selection'];
-    activeNodePaths: readonly string[];
-  }) => {
-    const next = renderCoordinator.update({
-      ...input,
-      layoutOverrides: currentLayoutOverrides()
-    });
-    if (next === renderSnapshotRef.current) {
-      return;
-    }
-    renderSnapshotRef.current = next;
-    visibilityController.sync({
-      nodesByPath: next.nodesByPath,
-      culledNodePaths: next.culledNodePaths,
-      selectedNodePaths: new Set(selectedNodeProjectRelativePaths(input.selection)),
-      activeNodePaths: new Set(input.activeNodePaths)
-    });
-    setRenderSnapshot(next);
-  }, [currentLayoutOverrides, renderCoordinator, visibilityController]);
-  const renderSnapshotScheduler = useMemo(() => createCanvasRenderSnapshotScheduler({
-    perfMonitor: instrumentationMonitor,
-    commit: commitRenderSnapshot
-  }), [commitRenderSnapshot, instrumentationMonitor]);
-
-  const syncVisibility = useCallback((input?: {
-    renderSnapshot?: CanvasRenderCoordinatorSnapshot;
-    selection?: CanvasSelection | undefined;
-    activeNodePaths?: readonly string[] | undefined;
-  }) => {
-    const snapshot = input?.renderSnapshot ?? renderSnapshotRef.current ?? renderSnapshot;
-    visibilityController.sync({
-      nodesByPath: snapshot.nodesByPath,
-      culledNodePaths: snapshot.culledNodePaths,
-      selectedNodePaths: new Set(selectedNodeProjectRelativePaths(input?.selection ?? selectionRef.current)),
-      activeNodePaths: new Set(input?.activeNodePaths ?? activeNodePathsRef.current)
-    });
-  }, [renderSnapshot, visibilityController]);
-
   const syncResourceZoomForSnapshot = useCallback((input: {
     cameraState: CanvasRuntimeSnapshot['cameraState'];
     cameraZoom: number;
@@ -433,29 +366,9 @@ function CanvasSurfaceRuntime({
     setResourceZoomState((current) => nextCanvasResourceZoomState(current, input));
   }, []);
 
-  useEffect(() => {
-    renderCoordinator.setProjection(projection);
-    runtime.manualLayout.acceptProjection(projection);
-    const snapshot = runtime.getSnapshot();
-    commitRenderSnapshot({
-      camera: snapshot.camera,
-      cameraState: snapshot.cameraState,
-      surfaceSize: snapshot.surfaceSize,
-      selection: snapshot.selection,
-      activeNodePaths: activeNodePathsRef.current
-    });
-  }, [canvas.id, commitRenderSnapshot, projection, renderCoordinator, runtime]);
-
-  useEffect(() => runtime.manualLayout.subscribeRejection(() => {
-    const snapshot = runtime.getSnapshot();
-    commitRenderSnapshot({
-      camera: snapshot.camera,
-      cameraState: snapshot.cameraState,
-      surfaceSize: snapshot.surfaceSize,
-      selection: snapshot.selection,
-      activeNodePaths: activeNodePathsRef.current
-    });
-  }), [commitRenderSnapshot, runtime]);
+  useLayoutEffect(() => {
+    renderLifecycle.acceptProjection(projection);
+  }, [projection, renderLifecycle]);
 
   useEffect(() => {
     if (!onCurrentNodesChange) {
@@ -473,18 +386,9 @@ function CanvasSurfaceRuntime({
     }));
   }, [canvas.id, currentLayoutOverrides, onCurrentNodesChange, projection.nodes, renderSnapshot]);
 
-  useEffect(() => {
-    renderSnapshotRef.current = initialRenderSnapshot;
-    setRenderSnapshot(initialRenderSnapshot);
-  }, [initialRenderSnapshot]);
-
   useEffect(() => () => {
     stageRuntime.dispose();
   }, [stageRuntime]);
-
-  useEffect(() => () => {
-    renderSnapshotScheduler.dispose();
-  }, [renderSnapshotScheduler]);
 
   useLayoutEffect(() => {
     const surface = surfaceRef.current;
@@ -494,7 +398,6 @@ function CanvasSurfaceRuntime({
     }
     const unbindSurface = runtime.bindSurface({ surface });
     const unbindStage = stageRuntime.bindStage(stage);
-    stageRuntime.setCamera(runtime.getSnapshot().camera);
     return () => {
       unbindStage();
       unbindSurface();
@@ -502,22 +405,8 @@ function CanvasSurfaceRuntime({
   }, [stageRuntime, runtime]);
 
   useLayoutEffect(() => {
-    syncVisibility({
-      renderSnapshot
-    });
     previewResourceScheduler.notifyVisibilityChanged();
-  }, [previewResourceScheduler, renderSnapshot, syncVisibility]);
-
-  useEffect(() => {
-    const snapshot = runtime.getSnapshot();
-    commitRenderSnapshot({
-      camera: snapshot.camera,
-      cameraState: snapshot.cameraState,
-      surfaceSize: snapshot.surfaceSize,
-      selection: snapshot.selection,
-      activeNodePaths: activeNodePathsRef.current
-    });
-  }, [commitRenderSnapshot, runtime, selection, surfaceSize]);
+  }, [previewResourceScheduler, renderSnapshot]);
 
   useEffect(() => {
     if (
@@ -549,26 +438,16 @@ function CanvasSurfaceRuntime({
       cameraState: snapshot.cameraState,
       cameraZoom: liveCamera.z
     });
-    syncCanvasMovingCameraFrame({
-      liveCamera,
-      stageRuntime,
-      surfaceSize: surfaceSizeRef.current,
-      selection: selectionRef.current,
-      activeNodePaths: activeNodePathsRef.current,
-      renderSnapshotScheduler
-    });
     recordCanvasPerfFrame({
       perfMonitor,
       sessionRef: canvasPerfSessionRef,
       cameraState: snapshot.cameraState,
-      renderSnapshot: renderSnapshotRef.current ?? renderSnapshot,
+      renderSnapshot: renderLifecycle.getSnapshot(),
       reactCommitCountRef
     });
   }), [
     perfMonitor,
-    stageRuntime,
-    renderSnapshot,
-    renderSnapshotScheduler,
+    renderLifecycle,
     runtime,
     previewResourceScheduler,
     syncResourceZoomForSnapshot
@@ -597,22 +476,11 @@ function CanvasSurfaceRuntime({
         },
         minimapOpen: minimapOpen === true
       });
-      if (cameraState !== 'idle') {
-        return;
-      }
-      renderSnapshotScheduler.flush({
-        camera: snapshot.camera,
-        cameraState,
-        surfaceSize: surfaceSizeRef.current,
-        selection: selectionRef.current,
-        activeNodePaths: activeNodePathsRef.current
-      });
     });
   }, [
     minimapOpen,
     perfMonitor,
     previewResourceScheduler,
-    renderSnapshotScheduler,
     runtime,
     syncResourceZoomForSnapshot
   ]);
@@ -627,7 +495,7 @@ function CanvasSurfaceRuntime({
       snapshot: initialSnapshot,
       finalState: canvasPerfFinalState({
         snapshot: initialSnapshot,
-        renderSnapshot: renderSnapshotRef.current ?? renderSnapshot
+        renderSnapshot: renderLifecycle.getSnapshot()
       })
     });
     if (initialSnapshot.dragState) {
@@ -635,7 +503,7 @@ function CanvasSurfaceRuntime({
         perfMonitor,
         sessionRef: canvasPerfDragSessionRef,
         cameraState: initialSnapshot.cameraState,
-        renderSnapshot: renderSnapshotRef.current ?? renderSnapshot,
+        renderSnapshot: renderLifecycle.getSnapshot(),
         reactCommitCountRef
       });
     }
@@ -655,7 +523,7 @@ function CanvasSurfaceRuntime({
         snapshot,
         finalState: canvasPerfFinalState({
           snapshot,
-          renderSnapshot: renderSnapshotRef.current ?? renderSnapshot
+          renderSnapshot: renderLifecycle.getSnapshot()
         })
       });
       if (nextDragState) {
@@ -663,33 +531,15 @@ function CanvasSurfaceRuntime({
           perfMonitor,
           sessionRef: canvasPerfDragSessionRef,
           cameraState: snapshot.cameraState,
-          renderSnapshot: renderSnapshotRef.current ?? renderSnapshot,
+          renderSnapshot: renderLifecycle.getSnapshot(),
           reactCommitCountRef
         });
       }
-      const nextActivePaths = activeNodeProjectRelativePaths(nextDragState);
-      const nextKey = nextActivePaths.join('\u001f');
-      if (nextKey !== activeNodePathKeyRef.current) {
-        activeNodePathKeyRef.current = nextKey;
-        activeNodePathsRef.current = nextActivePaths;
-        syncVisibility({
-          renderSnapshot: renderSnapshotRef.current ?? renderSnapshot
-        });
-      }
-      commitRenderSnapshot({
-        camera: snapshot.camera,
-        cameraState: snapshot.cameraState,
-        surfaceSize: surfaceSizeRef.current,
-        selection: selectionRef.current,
-        activeNodePaths: nextActivePaths
-      });
     });
   }, [
-    commitRenderSnapshot,
     perfMonitor,
     previewResourceScheduler,
-    renderSnapshot,
-    syncVisibility,
+    renderLifecycle,
     runtime
   ]);
 
@@ -885,31 +735,6 @@ function CanvasSurfaceRuntime({
     }
   }, [projectedNodes, requestedVideoPlayerPath]);
 
-  const syncFeedbackBarPlacement = useCallback((input: {
-    node: ProjectedCanvasNode;
-    surfaceRect: DOMRect;
-    camera: CanvasRuntimeSnapshot['camera'];
-  }) => {
-    const nodeViewportRect = canvasNodeToViewportRect({
-      nodeRect: nodeRectForFloatingBar(input.node),
-      surfaceRect: domRectToFloatingBarRect(input.surfaceRect),
-      camera: input.camera
-    });
-    const placement = placeCanvasFeedbackBar({
-      nodeViewportRect,
-      viewportRect: feedbackPlacementContext.viewportRect,
-      reservedRects: [...feedbackPlacementContext.reservedRects],
-      barSize: canvasFeedbackBarSizeForTarget({
-        localToolset: canvasFeedbackLocalToolsetForMediaKind(input.node.mediaKind)
-      })
-    });
-    if (placement) {
-      overlayRuntime.setFeedbackBarPlacement(placement);
-    } else {
-      overlayRuntime.clearFeedbackBarPlacement();
-    }
-  }, [canvasFeedback, feedbackPlacementContext.reservedRects, feedbackPlacementContext.viewportRect, overlayRuntime]);
-
   const feedbackBarTargetForNode = useCallback((input: {
     node: ProjectedCanvasNode;
     surfaceRect: DOMRect;
@@ -989,7 +814,6 @@ function CanvasSurfaceRuntime({
     if (localFeedbackMode !== 'pin' && localFeedbackMode !== 'rect') {
       return;
     }
-    syncFeedbackBarPlacement({ node, surfaceRect, camera });
     onLocalFeedbackDraft({
       projectRelativePath: draft.projectRelativePath,
       kind: localFeedbackMode === 'pin' ? 'pin' : 'region',
@@ -1004,8 +828,7 @@ function CanvasSurfaceRuntime({
     localFeedbackMode,
     onLocalFeedbackDraft,
     projectedNodes,
-    runtime,
-    syncFeedbackBarPlacement
+    runtime
   ]);
 
   const handleFeedbackItemActivate = useCallback((projectRelativePath: string, itemId: string) => {
@@ -1022,22 +845,12 @@ function CanvasSurfaceRuntime({
     if (!nextTarget) {
       return;
     }
-    syncFeedbackBarPlacement({ node, surfaceRect, camera });
     feedbackInteraction.activateCapsule(nextTarget, itemId);
-  }, [feedbackBarTargetForNode, feedbackInteraction, projectedNodes, runtime, syncFeedbackBarPlacement]);
+  }, [feedbackBarTargetForNode, feedbackInteraction, projectedNodes, runtime]);
 
   const emitFeedbackBarTarget = useCallback(() => {
-    const hasFeedbackTargetHandler = Boolean(onFeedbackBarTargetChange);
     if (!onFeedbackBarTargetChange || !canvasFeedback || !hoveredNodePath) {
       onFeedbackBarTargetChange?.(undefined);
-      if (shouldClearFeedbackBarPlacementForFeedbackTarget({
-        hasFeedbackTargetHandler,
-        hasCanvasFeedback: Boolean(canvasFeedback),
-        hoveredNodePath,
-        hasRenderableFeedbackTarget: false
-      })) {
-        overlayRuntime.clearFeedbackBarPlacement();
-      }
       return;
     }
 
@@ -1045,14 +858,6 @@ function CanvasSurfaceRuntime({
     const surfaceRect = surfaceRef.current?.getBoundingClientRect();
     if (!node || !surfaceRect) {
       onFeedbackBarTargetChange(undefined);
-      if (shouldClearFeedbackBarPlacementForFeedbackTarget({
-        hasFeedbackTargetHandler,
-        hasCanvasFeedback: true,
-        hoveredNodePath,
-        hasRenderableFeedbackTarget: false
-      })) {
-        overlayRuntime.clearFeedbackBarPlacement();
-      }
       return;
     }
 
@@ -1064,27 +869,16 @@ function CanvasSurfaceRuntime({
     });
     if (!feedbackBarTarget) {
       onFeedbackBarTargetChange(undefined);
-      if (shouldClearFeedbackBarPlacementForFeedbackTarget({
-        hasFeedbackTargetHandler,
-        hasCanvasFeedback: true,
-        hoveredNodePath,
-        hasRenderableFeedbackTarget: false
-      })) {
-        overlayRuntime.clearFeedbackBarPlacement();
-      }
       return;
     }
-    syncFeedbackBarPlacement({ node, surfaceRect, camera });
     onFeedbackBarTargetChange(feedbackBarTarget);
   }, [
     canvasFeedback,
     feedbackBarTargetForNode,
     hoveredNodePath,
     onFeedbackBarTargetChange,
-    overlayRuntime,
     projectedNodes,
-    runtime,
-    syncFeedbackBarPlacement
+    runtime
   ]);
 
   useEffect(() => {
@@ -1092,31 +886,21 @@ function CanvasSurfaceRuntime({
   }, [emitFeedbackBarTarget, surfaceSize]);
 
   useEffect(() => {
-    if (!hoveredNodePath || !onFeedbackBarTargetChange) {
+    const currentTargetPath = feedbackInteraction?.currentTargetProjectRelativePath;
+    if (!currentTargetPath) {
       return;
     }
-    return runtime.subscribeCamera((camera) => {
-      const node = projectedNodes.find((item) => item.projectRelativePath === hoveredNodePath);
-      const surfaceRect = surfaceRef.current?.getBoundingClientRect();
-      if (!node || node.nodeKind !== 'file' || !surfaceRect) {
-        overlayRuntime.clearFeedbackBarPlacement();
-        return;
-      }
-      syncFeedbackBarPlacement({ node, surfaceRect, camera });
-    });
-  }, [
-    hoveredNodePath,
-    onFeedbackBarTargetChange,
-    overlayRuntime,
-    projectedNodes,
-    runtime,
-    syncFeedbackBarPlacement
-  ]);
+    const targetStillExists = projectedNodes.some((node) => (
+      node.nodeKind === 'file' && node.projectRelativePath === currentTargetPath
+    ));
+    if (!targetStillExists) {
+      feedbackInteraction.invalidateTarget(currentTargetPath);
+    }
+  }, [feedbackInteraction, projectedNodes]);
 
   useEffect(() => () => {
     onFeedbackBarTargetChange?.(undefined);
-    overlayRuntime.clearFeedbackBarPlacement();
-  }, [onFeedbackBarTargetChange, overlayRuntime]);
+  }, [onFeedbackBarTargetChange]);
 
   return (
     <div

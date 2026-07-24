@@ -62,6 +62,16 @@ describe('CanvasMediaFeedbackLayer', () => {
     expect(rectHtml).toContain('height:40%');
   });
 
+  it('optically centers numbers inside Canvas spatial Feedback labels', () => {
+    expect(renderToStaticMarkup(
+      <CanvasMediaFeedbackLayer
+        items={spatialItemsFixture()}
+        mode={undefined}
+        onRegionDraft={() => undefined}
+      />
+    )).toContain('class="canvas-feedback-label-number"');
+  });
+
 });
 
 function spatialItemsFixture(): CanvasFeedbackSpatialItem[] {

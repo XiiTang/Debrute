@@ -24,16 +24,13 @@ import {
   isCanvasMapProjectTreeDragOver,
   canvasMapProjectTreeDropEntry,
   canvasMapProjectTreeDropInput,
-  createCanvasRenderSnapshotScheduler,
   recordCanvasPerfFrame,
   syncCanvasPerfDragSessionState,
-  syncCanvasMovingCameraFrame,
   syncCanvasPerfSessionState,
   syncCanvasPreviewResourceSchedulerForInteraction,
-  shouldClearFeedbackBarPlacementForFeedbackTarget,
   type CanvasPerfRuntimeSession
 } from './canvasSurfaceSupport';
-import { createCanvasPerfMonitor, type CanvasPerfTraceEvent } from './CanvasPerfMonitor';
+import { createCanvasPerfMonitor } from './CanvasPerfMonitor';
 import { CANVAS_CAMERA_IDLE_MS, type CanvasCamera } from './runtime/canvasCamera';
 import { createCanvasStageRuntime } from './runtime/CanvasStageRuntime';
 import type { CanvasSelection } from './runtime/canvasSelection';
@@ -440,8 +437,6 @@ describe('CanvasSurface', () => {
               actions={actions}
               textFileBuffers={{}}
               canvasFeedback={undefined}
-              overlayRuntime={createCanvasOverlayRuntime()}
-              feedbackPlacementContext={feedbackPlacementContextFixture()}
               textPreviewStyleDependencyKey="dark"
             />
           </I18nProvider>
@@ -490,8 +485,6 @@ describe('CanvasSurface', () => {
               actions={{ ...actions, updateCanvasVideoPlaybackState }}
               textFileBuffers={{}}
               canvasFeedback={undefined}
-              overlayRuntime={createCanvasOverlayRuntime()}
-              feedbackPlacementContext={feedbackPlacementContextFixture()}
               textPreviewStyleDependencyKey="dark"
             />
           </I18nProvider>
@@ -547,8 +540,6 @@ describe('CanvasSurface', () => {
               actions={{ ...actions, updateCanvasVideoPlaybackState }}
               textFileBuffers={{}}
               canvasFeedback={undefined}
-              overlayRuntime={createCanvasOverlayRuntime()}
-              feedbackPlacementContext={feedbackPlacementContextFixture()}
               textPreviewStyleDependencyKey="dark"
             />
           </I18nProvider>
@@ -609,15 +600,15 @@ describe('CanvasSurface', () => {
               actions={actions}
               textFileBuffers={{}}
               canvasFeedback={feedbackDocument({})}
-              overlayRuntime={createCanvasOverlayRuntime()}
-              feedbackPlacementContext={feedbackPlacementContextFixture()}
               feedbackInteraction={{
                 localMode: undefined,
                 composition: undefined,
                 localSpatialItems: [],
                 suppressedSpatialItemIds: new Set(),
                 focusedCapsuleId: undefined,
+                currentTargetProjectRelativePath: undefined,
                 handleTargetChange: (target) => targetChanges.push(target),
+                invalidateTarget: vi.fn(),
                 handleDraft: vi.fn(),
                 activateCapsule: vi.fn()
               }}
@@ -719,8 +710,6 @@ describe('CanvasSurface', () => {
                   [node.projectRelativePath]: textBufferFixture(node.projectRelativePath, '# Strict', 'rev-strict')
                 }}
                 canvasFeedback={undefined}
-                overlayRuntime={createCanvasOverlayRuntime()}
-                feedbackPlacementContext={feedbackPlacementContextFixture()}
                 textPreviewStyleDependencyKey="dark"
               />
             </I18nProvider>
@@ -1196,8 +1185,6 @@ describe('CanvasSurface', () => {
               actions={actions}
               textFileBuffers={{}}
               canvasFeedback={undefined}
-              overlayRuntime={createCanvasOverlayRuntime()}
-              feedbackPlacementContext={feedbackPlacementContextFixture()}
               textPreviewStyleDependencyKey="dark"
             />
           </I18nProvider>
@@ -1294,8 +1281,6 @@ describe('CanvasSurface', () => {
         canvasId={canvas.id}
         state={workbenchStateFixture(canvas, projection)}
         actions={actions}
-        overlayRuntime={createCanvasOverlayRuntime()}
-        feedbackPlacementContext={feedbackPlacementContextFixture()}
       />
     );
 
@@ -1305,36 +1290,119 @@ describe('CanvasSurface', () => {
     expect(html).not.toContain('debrute-project-file://');
   });
 
-  it('keeps feedback bar placement while node hover transfers to the floating bar', () => {
-    expect(shouldClearFeedbackBarPlacementForFeedbackTarget({
-      hasFeedbackTargetHandler: true,
-      hasCanvasFeedback: true,
-      hoveredNodePath: undefined,
-      hasRenderableFeedbackTarget: false
-    })).toBe(false);
+  it('does not move the Feedback Bar to another hovered node while a Capsule owns focus', async () => {
+    const container = document.createElement('div');
+    document.body.append(container);
+    const root = createRoot(container);
+    const canvas = createCanvasDocument({ id: 'focused-feedback-placement' });
+    const projection: CanvasProjection = {
+      canvasId: canvas.id,
+      nodes: [
+        nodeFixture('flow/first.png', 0, 0),
+        nodeFixture('flow/second.png', 700, 100)
+      ],
+      edges: [],
+      diagnostics: []
+    };
+    const overlayRuntime = createCanvasOverlayRuntime();
+    const handleTargetChange = vi.fn();
+    const feedbackBar = document.createElement('div');
+    const releaseFeedbackBar = overlayRuntime.bindFeedbackBar(feedbackBar);
+    overlayRuntime.setFeedbackBarPlacement({
+      x: 40,
+      y: 160,
+      width: 300,
+      height: 124,
+      placement: 'below'
+    });
+
+    try {
+      await act(async () => {
+        root.render(
+          <I18nProvider locale="en">
+            <CanvasSurface
+              canvas={canvas}
+              projection={projection}
+              runtime={canvasRuntimeFixture(projection)}
+              actions={actions}
+              textFileBuffers={{}}
+              canvasFeedback={feedbackDocument({})}
+              feedbackInteraction={feedbackInteractionFixture({
+                focusedCapsuleId: 'feedback-a',
+                handleTargetChange
+              })}
+              textPreviewStyleDependencyKey="dark"
+            />
+          </I18nProvider>
+        );
+      });
+
+      const surfaceElement = container.querySelector<HTMLElement>('[data-testid="canvas-surface"]');
+      const secondNode = container.querySelector<HTMLElement>('[data-canvas-node-path="flow/second.png"]');
+      expect(surfaceElement).toBeTruthy();
+      expect(secondNode).toBeTruthy();
+      Object.defineProperty(surfaceElement, 'getBoundingClientRect', {
+        configurable: true,
+        value: () => new DOMRect(0, 0, 1280, 720)
+      });
+
+      await act(async () => {
+        secondNode?.dispatchEvent(new PointerEvent('pointerover', { bubbles: true }));
+      });
+
+      expect(handleTargetChange).toHaveBeenLastCalledWith(expect.objectContaining({
+        projectRelativePath: 'flow/second.png'
+      }));
+      expect(feedbackBar.style.left).toBe('40px');
+      expect(feedbackBar.style.top).toBe('160px');
+    } finally {
+      await act(async () => root.unmount());
+      releaseFeedbackBar();
+      overlayRuntime.dispose();
+      container.remove();
+    }
   });
 
-  it('clears feedback bar placement when the feedback target cannot remain valid', () => {
-    expect(shouldClearFeedbackBarPlacementForFeedbackTarget({
-      hasFeedbackTargetHandler: false,
-      hasCanvasFeedback: true,
-      hoveredNodePath: undefined,
-      hasRenderableFeedbackTarget: false
-    })).toBe(true);
+  it('invalidates the current Feedback Bar target when its Project file disappears', async () => {
+    const container = document.createElement('div');
+    document.body.append(container);
+    const root = createRoot(container);
+    const canvas = createCanvasDocument({ id: 'missing-feedback-target' });
+    const projection: CanvasProjection = {
+      canvasId: canvas.id,
+      nodes: [],
+      edges: [],
+      diagnostics: []
+    };
+    const invalidateTarget = vi.fn();
 
-    expect(shouldClearFeedbackBarPlacementForFeedbackTarget({
-      hasFeedbackTargetHandler: true,
-      hasCanvasFeedback: false,
-      hoveredNodePath: 'flow/cover.png',
-      hasRenderableFeedbackTarget: false
-    })).toBe(true);
+    try {
+      await act(async () => {
+        root.render(
+          <I18nProvider locale="en">
+            <CanvasSurface
+              canvas={canvas}
+              projection={projection}
+              runtime={canvasRuntimeFixture(projection)}
+              actions={actions}
+              textFileBuffers={{}}
+              canvasFeedback={feedbackDocument({})}
+              feedbackInteraction={feedbackInteractionFixture({
+                focusedCapsuleId: 'feedback-a',
+                currentTargetProjectRelativePath: 'flow/removed.png',
+                invalidateTarget
+              })}
+              textPreviewStyleDependencyKey="dark"
+            />
+          </I18nProvider>
+        );
+      });
 
-    expect(shouldClearFeedbackBarPlacementForFeedbackTarget({
-      hasFeedbackTargetHandler: true,
-      hasCanvasFeedback: true,
-      hoveredNodePath: 'flow/cover.png',
-      hasRenderableFeedbackTarget: false
-    })).toBe(true);
+      expect(invalidateTarget).toHaveBeenCalledWith('flow/removed.png');
+    } finally {
+      await act(async () => root.unmount());
+      container.remove();
+    }
   });
 
   it('keeps image node shell props equal for unused action object changes but not event handler changes', () => {
@@ -1432,101 +1500,6 @@ describe('CanvasSurface', () => {
     frames[0]?.(16);
 
     expect(started).toEqual(['cover.png']);
-  });
-
-  it('coalesces moving render snapshot refreshes onto one animation frame', () => {
-    const frames: FrameRequestCallback[] = [];
-    const commits: unknown[] = [];
-    const scheduler = createCanvasRenderSnapshotScheduler({
-      commit: (input) => commits.push(input),
-      requestFrame: (callback) => {
-        frames.push(callback);
-        return frames.length;
-      },
-      cancelFrame: () => undefined
-    });
-
-    scheduler.requestMoving({ camera: { x: 1, y: 0, z: 1 } });
-    scheduler.requestMoving({ camera: { x: 2, y: 0, z: 1 } });
-
-    expect(commits).toEqual([]);
-    expect(frames).toHaveLength(1);
-
-    frames[0]?.(0);
-
-    expect(commits).toEqual([{ camera: { x: 2, y: 0, z: 1 } }]);
-  });
-
-  it('flushes idle render snapshot refreshes immediately and cancels pending moving refreshes', () => {
-    const frames: FrameRequestCallback[] = [];
-    const canceled: number[] = [];
-    const commits: unknown[] = [];
-    const scheduler = createCanvasRenderSnapshotScheduler({
-      commit: (input) => commits.push(input),
-      requestFrame: (callback) => {
-        frames.push(callback);
-        return frames.length;
-      },
-      cancelFrame: (handle) => canceled.push(handle)
-    });
-
-    scheduler.requestMoving({ camera: { x: 1, y: 0, z: 1 } });
-    scheduler.flush({ camera: { x: 5, y: 0, z: 1 } });
-    frames[0]?.(0);
-
-    expect(canceled).toEqual([1]);
-    expect(commits).toEqual([{ camera: { x: 5, y: 0, z: 1 } }]);
-  });
-
-  it('keeps moving camera sync limited to stage transform and render scheduling', () => {
-    const cameras: unknown[] = [];
-    const renderInputs: unknown[] = [];
-
-    syncCanvasMovingCameraFrame({
-      liveCamera: { x: -350, y: 0, z: 1 },
-      stageRuntime: {
-        setCamera: (camera) => cameras.push(camera)
-      },
-      surfaceSize: { width: 400, height: 300 },
-      selection: { kind: 'node', projectRelativePath: 'flow/live-visible.png' },
-      activeNodePaths: ['flow/live-visible.png'],
-      renderSnapshotScheduler: {
-        requestMoving: (input) => renderInputs.push(input)
-      }
-    });
-
-    expect(cameras).toEqual([{ x: -350, y: 0, z: 1 }]);
-    expect(renderInputs).toEqual([{
-      camera: { x: -350, y: 0, z: 1 },
-      cameraState: 'moving',
-      surfaceSize: { width: 400, height: 300 },
-      selection: { kind: 'node', projectRelativePath: 'flow/live-visible.png' },
-      activeNodePaths: ['flow/live-visible.png']
-    }]);
-  });
-
-  it('records render scheduler counters', () => {
-    const monitor = createCanvasPerfMonitor();
-    const renderFrames: FrameRequestCallback[] = [];
-    const renderScheduler = createCanvasRenderSnapshotScheduler({
-      perfMonitor: monitor,
-      commit: () => undefined,
-      requestFrame: (callback) => {
-        renderFrames.push(callback);
-        return renderFrames.length;
-      },
-      cancelFrame: () => undefined
-    });
-
-    renderScheduler.requestMoving({ cameraState: 'moving' });
-    renderScheduler.requestMoving({ cameraState: 'moving' });
-    renderFrames[0]?.(0);
-    renderScheduler.flush({ cameraState: 'idle' });
-
-    expect(counterNames(monitor.getTrace().events)).toEqual([
-      'render-moving-queued',
-      'render-idle-flush'
-    ]);
   });
 
   it('starts, frames, and ends a camera session from camera state changes', () => {
@@ -1687,12 +1660,6 @@ describe('CanvasSurface', () => {
   });
 });
 
-function counterNames(events: readonly CanvasPerfTraceEvent[]): string[] {
-  return events
-    .filter((event) => event.kind === 'counter')
-    .map((event) => event.name);
-}
-
 function surface(
   canvas: ReturnType<typeof createCanvasDocument>,
   projection: CanvasProjection,
@@ -1715,8 +1682,6 @@ function surface(
         textFileBuffers={input.textFileBuffers ?? {}}
         canvasFeedback={input.canvasFeedback}
         feedbackInteraction={input.feedbackInteraction}
-        overlayRuntime={createCanvasOverlayRuntime()}
-        feedbackPlacementContext={feedbackPlacementContextFixture()}
         textPreviewStyleDependencyKey="dark"
       />
     </I18nProvider>
@@ -1732,7 +1697,9 @@ function feedbackInteractionFixture(
     localSpatialItems: [],
     suppressedSpatialItemIds: new Set(),
     focusedCapsuleId: undefined,
+    currentTargetProjectRelativePath: undefined,
     handleTargetChange: vi.fn(),
+    invalidateTarget: vi.fn(),
     handleDraft: vi.fn(),
     activateCapsule: vi.fn(),
     ...overrides
@@ -1753,13 +1720,6 @@ function canvasRuntimeFixture(
     ...(input.camera ? { camera: input.camera } : {}),
     selection: input.selection
   });
-}
-
-function feedbackPlacementContextFixture(): Parameters<typeof CanvasSurface>[0]['feedbackPlacementContext'] {
-  return {
-    viewportRect: { x: 0, y: 0, width: 1280, height: 720 },
-    reservedRects: []
-  };
 }
 
 function installTextPreviewStyleVariables(): void {
