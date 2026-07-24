@@ -306,23 +306,53 @@ Shared layout without behavior stays a named CSS pattern. A React component exis
 
 ## Workbench Surfaces
 
-The Workbench uses one Canvas and floating-panel interaction model. `WorkbenchFloatingPanelShell` owns drag and resize geometry, placement, z-order, close placement, continuous background, and body overflow. The shell renders each panel name once.
+The Workbench uses one continuous Canvas background and floating-panel
+interaction model. Every valid Workbench page paints that background from the
+top of the window through the main viewport, including while no Project is
+bound, a Project is opening, no Canvas is available, or Canvas state needs
+repair. Sharing the Canvas background does not create a Canvas domain object or
+enable Canvas interaction in those states. The Not Found page remains outside
+the Workbench shell.
+
+The title bar is a transparent interaction layer over the Canvas. It does not
+paint a strip, gradient, texture, or duplicate Canvas background. Canvas Nodes
+remain visible beneath it, while its reserved hit area continues to own window
+dragging, menus, the title, and window controls. Resting title-bar chrome uses
+only local text and icon contrast treatment; hover, focus, and expanded controls
+may use a local control background.
+
+`WorkbenchFloatingPanelShell` owns drag and resize geometry, placement, z-order,
+close placement, continuous background, and body overflow. The shell renders
+each panel name once.
 
 Settings uses grouped General, Models, and Integrations navigation, one title per selected page, explicit loading/error/ready content, ordinary sections for General settings, and cards only for independent repeated records.
 
-Explorer owns tree geometry and editing. Inspector owns selection properties, metadata, and diagnostics. Terminal owns terminal tabs, sessions, status, and emulator geometry. Project Open owns one focused empty-state entry. Canvas owns node geometry, media presentation, annotations, handles, feedback, and overlay placement.
+Explorer owns tree geometry and editing. Inspector owns selection properties,
+metadata, and diagnostics. Terminal owns terminal tabs, sessions, status, and
+emulator geometry. Project Open owns one focused entry rendered directly over
+the Canvas background. Canvas owns node geometry, media presentation,
+annotations, handles, feedback, and overlay placement.
+
+Project Open, Project opening, failed Project opening, an unavailable Canvas,
+and Canvas repair render centered status content directly over the Canvas
+background without a page, card, or full-viewport surface. Content is centered
+within the main viewport below the title-bar hit area. A retained Project that
+has become read-only because it was preempted or because the Runtime connection
+ended keeps its last Canvas visible. A solid, non-dismissible dialog blocks the
+Canvas, floating bars, and panels without dimming or covering the Canvas; the
+title bar remains available.
 
 ## Surface Application Matrix
 
 | Surface | Visual treatment | Functional boundary |
 | --- | --- | --- |
-| Title bar and shell | Canvas field and exact grid continue behind floating title/menu/window controls; no separate title-bar edge | Drag region, menus, title, window controls, and height |
+| Title bar and shell | One exact Canvas background continues behind a transparent title bar; no separate fill, texture, gradient, or edge | The title-bar hit area owns drag, menus, title, and window controls while Canvas content remains visible beneath it |
 | Floating panels | Flat paper blocks with fixed cut edges and 4px hard underlayer | Drag, resize, z-order, overflow, and dimensions |
 | Menus and overlays | Opaque paper surface and 4px hard underlayer; no perimeter line | Commands, placement, keyboard behavior, and item density |
 | Buttons, fields, tabs | Solid block or small fixed cut mask with 2px offset underlayer; no perimeter or active underline | Control height, label wrapping, and hit target |
 | Tags, chips, status labels | Cut-paper label or rectangular underlayer; no capsule | Text, state meaning, and footprint |
 | Explorer, Settings, Inspector | Restrained grain and geometry at row scale | Information architecture and row geometry |
-| Project Open | Display title and paper blocks | Empty-state content contains no mascot |
+| Project Open | Centered title, status, error context, and action directly over the Canvas background | Opening replaces the entry with progress; content contains no page, card, or mascot |
 | Canvas viewport | Neutral audited field and exact grid; no grain | Content judgment, Canvas semantics, handles, feedback colors |
 | Canvas chrome | Brand panels, bars, menus, and cut controls | Canvas geometry and media presentation |
 | Terminal viewport | Warm-neutral field, coordinated high-contrast ANSI semantics, and precise mono typography | ANSI role distinctions; no texture, rough masks, ornament, or geometry changes |

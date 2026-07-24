@@ -36,6 +36,13 @@
     linear-gradient(90deg, var(--db-canvas-grid) 1px, transparent 1px),
     var(--db-canvas-bg);
   --db-canvas-grid-size: 34px 34px;
+  --db-titlebar-contrast-shadow:
+    -1px 0 0 var(--db-canvas-bg),
+    1px 0 0 var(--db-canvas-bg),
+    0 -1px 0 var(--db-canvas-bg),
+    0 1px 0 var(--db-canvas-bg);
+  --db-titlebar-icon-contrast-inset: 1px;
+  --db-titlebar-height: 28px;
   --db-duration-fast: 120ms;
   --db-ease-standard: cubic-bezier(0.2, 0, 0, 1);
   --db-terminal-tab-bar-bg: var(--db-surface-1);

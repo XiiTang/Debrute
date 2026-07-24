@@ -272,29 +272,54 @@ describe('WorkbenchApp preferences and project behavior', () => {
     await unmount(root, container);
   });
 
-  it('keeps the Project visible behind a read-only overlay when another Workbench preempts it', async () => {
-    const { container, root } = await renderWorkbenchApp('/projects/project-1');
+  it('keeps the Project visible behind a blocking dialog when another Workbench preempts it', async () => {
+    const { container, root } = await renderWorkbenchApp('/projects/project-1', {
+      openProject: vi.fn(async () => ({
+        projectId: 'project-1',
+        projectRevision: 1,
+        snapshot: stackOrderSnapshotFixture(),
+        workingCopies: emptyWorkingCopies()
+      }))
+    });
     await act(async () => {
       await Promise.resolve();
       detachCurrentProject();
     });
 
-    expect(container.querySelector('[data-testid="workbench-detached-overlay"]')?.textContent)
-      .toContain('active in another Workbench');
+    const dialogLayer = container.querySelector('[data-testid="workbench-detached-dialog-layer"]');
+    const dialog = dialogLayer?.querySelector('[role="dialog"]');
+    expect(dialog?.textContent).toContain('active in another Workbench');
+    expect(dialog?.hasAttribute('aria-modal')).toBe(false);
+    expect(dialogLayer?.getAttribute('role')).toBe('presentation');
+    expect(container.querySelector('[data-testid="canvas-surface"]')).not.toBeNull();
+    expect(container.querySelector('[data-testid="canvas-layer"]')?.hasAttribute('inert')).toBe(true);
+    expect(container.querySelector('[data-testid="floating-bar-layer"]')?.hasAttribute('inert')).toBe(true);
+    expect(container.querySelector('[data-testid="panel-layer"]')?.hasAttribute('inert')).toBe(true);
+    expect(container.querySelector('[data-testid="workbench-titlebar"]')?.hasAttribute('inert')).toBe(false);
     expect(container.textContent).toContain('Demo');
     await unmount(root, container);
   });
 
   it('keeps the last accepted Project visible when its connection fails', async () => {
-    const { container, root } = await renderWorkbenchApp('/projects/project-1');
+    const { container, root } = await renderWorkbenchApp('/projects/project-1', {
+      openProject: vi.fn(async () => ({
+        projectId: 'project-1',
+        projectRevision: 1,
+        snapshot: stackOrderSnapshotFixture(),
+        workingCopies: emptyWorkingCopies()
+      }))
+    });
 
     await act(async () => {
       endCurrentConnection(new Error('revision gap'));
       await Promise.resolve();
     });
 
-    expect(container.querySelector('[data-testid="workbench-connection-ended-overlay"]')?.textContent)
-      .toContain('revision gap');
+    const dialogLayer = container.querySelector('[data-testid="workbench-connection-ended-dialog-layer"]');
+    const dialog = dialogLayer?.querySelector('[role="dialog"]');
+    expect(dialog?.textContent).toContain('revision gap');
+    expect(dialog?.hasAttribute('aria-modal')).toBe(false);
+    expect(container.querySelector('[data-testid="canvas-surface"]')).not.toBeNull();
     expect(container.textContent).toContain('Demo');
     await unmount(root, container);
   });
@@ -317,8 +342,11 @@ describe('WorkbenchApp preferences and project behavior', () => {
     });
     const { container, root } = await renderWorkbenchApp('/projects/project-1', { openProject });
 
-    expect(container.querySelector('[data-testid="workbench-open-here-overlay"]')?.textContent)
-      .toContain('active in a Web Workbench');
+    const openHereStatus = container.querySelector('[data-testid="workbench-open-here-status"]');
+    expect(openHereStatus?.textContent).toContain('active in a Web Workbench');
+    expect(openHereStatus?.closest('[data-testid="canvas-layer"]')).not.toBeNull();
+    expect(openHereStatus?.getAttribute('role')).toBe('status');
+    expect(openHereStatus?.querySelector('[role="dialog"]')).toBeNull();
 
     await act(async () => {
       requireButton(container, 'Open Here').click();
@@ -327,8 +355,62 @@ describe('WorkbenchApp preferences and project behavior', () => {
     });
 
     expect(openProject).toHaveBeenLastCalledWith({ projectId: 'project-1', forceOpenHere: true });
-    expect(container.querySelector('[data-testid="workbench-open-here-overlay"]')).toBeNull();
+    expect(container.querySelector('[data-testid="workbench-open-here-status"]')).toBeNull();
     expect(container.textContent).toContain('Demo');
+    await unmount(root, container);
+  });
+
+  it('keeps an Open Here retry failure directly below the action', async () => {
+    const conflict = Object.assign(new Error('Project is active in Web.'), {
+      code: 'project_owned_by_web',
+      details: { projectId: 'project-1' }
+    });
+    const openProject = vi.fn(async (input: { forceOpenHere?: boolean }) => {
+      if (input.forceOpenHere) {
+        throw new Error('takeover failed');
+      }
+      throw conflict;
+    });
+    const { container, root } = await renderWorkbenchApp('/projects/project-1', { openProject });
+
+    await act(async () => {
+      requireButton(container, 'Open Here').click();
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+
+    const openHereStatus = container.querySelector('[data-testid="workbench-open-here-status"]');
+    const error = openHereStatus?.querySelector('[data-testid="workbench-open-here-error"]');
+    expect(error?.textContent).toContain('Open project failed: takeover failed');
+    expect(error?.previousElementSibling?.textContent).toContain('Open Here');
+    await unmount(root, container);
+  });
+
+  it('keeps a native Project-open failure on the unbound Canvas surface', async () => {
+    let openProjectRequested: ((projectRoot: string) => void) | undefined;
+    window.debruteShell = shellApiFixture({
+      onOpenProjectRequested: (listener) => {
+        openProjectRequested = listener;
+        return () => { openProjectRequested = undefined; };
+      }
+    });
+    const { container, root } = await renderWorkbenchApp('/', {
+      openProject: vi.fn(async () => {
+        throw new Error('native open failed');
+      })
+    });
+
+    await act(async () => {
+      openProjectRequested?.('/projects/missing');
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+
+    const openPanel = container.querySelector('.project-open-panel');
+    const error = openPanel?.querySelector('.project-open-panel__error');
+    expect(error?.textContent).toContain('Open project failed: native open failed');
+    expect(error?.previousElementSibling?.textContent).toContain('Open Project');
+    expect(openPanel?.textContent).toContain('/projects/missing');
     await unmount(root, container);
   });
 
@@ -352,7 +434,7 @@ describe('WorkbenchApp preferences and project behavior', () => {
       detachCurrentProject();
       await Promise.resolve();
     });
-    expect(container.querySelector('[data-testid="workbench-detached-overlay"]')).not.toBeNull();
+    expect(container.querySelector('[data-testid="workbench-detached-dialog-layer"]')).not.toBeNull();
 
     await act(async () => {
       openProjectRequested?.('/projects/second');
@@ -361,7 +443,7 @@ describe('WorkbenchApp preferences and project behavior', () => {
     });
 
     expect(openProject).toHaveBeenLastCalledWith({ projectRoot: '/projects/second' });
-    expect(container.querySelector('[data-testid="workbench-detached-overlay"]')).toBeNull();
+    expect(container.querySelector('[data-testid="workbench-detached-dialog-layer"]')).toBeNull();
     await unmount(root, container);
   });
 

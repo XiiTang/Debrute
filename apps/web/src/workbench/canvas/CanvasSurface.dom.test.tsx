@@ -455,6 +455,89 @@ describe('CanvasSurface', () => {
     }
   });
 
+  it('does not route video shortcuts while Canvas interaction is blocked', async () => {
+    const container = document.createElement('div');
+    document.body.append(container);
+    const root = createRoot(container);
+    const canvas = createCanvasDocument({ id: 'blocked-video-hotkeys' });
+    const videoNode = videoProjectionNode('media/clip.mp4', 0, 0);
+    const projection: CanvasProjection = {
+      canvasId: canvas.id,
+      nodes: [videoNode],
+      edges: [],
+      diagnostics: []
+    };
+    const runtime = canvasRuntimeFixture(projection, {
+      selection: { kind: 'node', projectRelativePath: videoNode.projectRelativePath }
+    });
+
+    try {
+      await act(async () => {
+        root.render(
+          <I18nProvider locale="en">
+            <CanvasSurface
+              canvas={canvas}
+              projection={projection}
+              runtime={runtime}
+              actions={actions}
+              textFileBuffers={{}}
+              canvasFeedback={undefined}
+              textPreviewStyleDependencyKey="dark"
+            />
+          </I18nProvider>
+        );
+      });
+
+      await act(async () => {
+        runtime.input.beginNodeMove({
+          pointerId: 7,
+          projectRelativePath: videoNode.projectRelativePath,
+          start: { x: 0, y: 0 },
+          selection: { kind: 'node', projectRelativePath: videoNode.projectRelativePath }
+        });
+      });
+      expect(runtime.getSnapshot().dragState).toBeDefined();
+
+      await act(async () => {
+        root.render(
+          <I18nProvider locale="en">
+            <CanvasSurface
+              canvas={canvas}
+              projection={projection}
+              runtime={runtime}
+              actions={actions}
+              textFileBuffers={{}}
+              canvasFeedback={undefined}
+              interactionBlocked
+              textPreviewStyleDependencyKey="dark"
+            />
+          </I18nProvider>
+        );
+      });
+
+      window.dispatchEvent(new KeyboardEvent('keydown', { key: ' ' }));
+
+      expect(videoTogglePlaybackSpy).not.toHaveBeenCalled();
+      expect(runtime.getSnapshot().dragState).toBeUndefined();
+
+      const cameraBeforeWheel = runtime.camera.getCamera();
+      container.querySelector('[data-testid="canvas-surface"]')?.dispatchEvent(new WheelEvent('wheel', {
+        bubbles: true,
+        cancelable: true,
+        clientX: 40,
+        clientY: 40,
+        deltaY: -100
+      }));
+      expect(runtime.camera.getCamera()).toEqual(cameraBeforeWheel);
+    } finally {
+      await act(async () => {
+        root.unmount();
+      });
+      container.remove();
+      videoTogglePlaybackSpy.mockClear();
+    }
+  });
+
   it('restores the durable video position when Runtime rejects persistence', async () => {
     const container = document.createElement('div');
     document.body.append(container);

@@ -54,6 +54,7 @@ describe('WorkbenchTitleBar', () => {
     expect(html).toContain('Restore window');
     expect(html).toContain('Close window');
     expect(html.match(/db-icon-button--window(?:\s|")/g) ?? []).toHaveLength(3);
+    expect(html.match(/db-icon-button--titlebar(?:\s|")/g) ?? []).toHaveLength(2);
     expect(html).toMatch(/aria-label="Close window"[^>]*db-icon-button--window-close/);
     expect(html).toContain('-webkit-app-region:drag');
     expect(html).toContain('-webkit-app-region:no-drag');

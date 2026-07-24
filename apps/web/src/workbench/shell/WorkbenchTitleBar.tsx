@@ -122,9 +122,9 @@ export function WorkbenchTitleBar({
       <div className="workbench-titlebar__right">
         {state.presentation.showWindowControls ? (
           <div className="workbench-titlebar__window-controls" style={{ WebkitAppRegion: 'no-drag' } as React.CSSProperties}>
-            <IconButton variant="chrome" size="window" label={i18n.t('shell.titleBar.minimizeWindow')} icon={<Minus />} onClick={() => onWindowCommand('minimize')} />
+            <IconButton variant="titlebar" size="window" label={i18n.t('shell.titleBar.minimizeWindow')} icon={<Minus />} onClick={() => onWindowCommand('minimize')} />
             <IconButton
-              variant="chrome"
+              variant="titlebar"
               size="window"
               label={nativeWindowState?.maximized ? i18n.t('shell.titleBar.restoreWindow') : i18n.t('shell.titleBar.maximizeWindow')}
               icon={nativeWindowState?.maximized ? <Square /> : <Maximize2 />}

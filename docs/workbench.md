@@ -31,9 +31,12 @@ ordered Global and Project revisions. Concurrent ordinary-browser tabs share
 their storage partition's HttpOnly browser session but retain independent
 connections, credentials, and Project bindings. The client never reconnects or
 automatically replays a command; unexpected connection end becomes a terminal
-page state and a manual page refresh creates a fresh connection. When an
-ordinary Desktop open targets a Project owned by Web, the root surface requires
-an explicit **Open Here** action before requesting preemption.
+connection state and a manual page refresh creates a fresh connection. An
+accepted Project retains its last Canvas beneath a blocking connection dialog;
+an unbound Workbench presents the connection error directly over its Canvas
+background. When an ordinary Desktop open targets a Project owned by Web, the
+root surface requires an explicit **Open Here** action before requesting
+preemption.
 
 A successful `project.bound` event is one complete Project-open result:
 Project id, ordered revision, snapshot, and current Working Copies travel
@@ -122,6 +125,29 @@ floating panels, title bar, notifications, overlays, and title-bar menus.
 Ordinary panel stacking inside the panel layer is controlled by
 `workbenchWindowOrder.ts`; floating text editors participate in the same
 back-to-front ordering.
+
+Every valid Workbench shell paints one Canvas background from the top of the
+window through the main viewport. The actual Canvas surface uses the same field
+and origin. The title bar is transparent: Canvas Nodes remain visible below its
+menus, title, and window controls instead of being covered by a second title-bar
+background. Its reserved top hit area still owns window dragging and title-bar
+controls, so Canvas interaction cannot begin there. Local text/icon contrast and
+control interaction fills preserve chrome legibility without forming a strip.
+
+An unbound Workbench, Project-opening progress, Project-open errors, an absent
+Canvas, and Canvas repair place their focused content directly over this
+background, centered below the title-bar hit area. Open failures remain visible
+below the corresponding Project action until another attempt begins. The shared
+appearance does not create a Canvas domain object or admit Canvas interaction
+before a real Canvas projection exists. The Not Found page is not a Workbench
+shell and keeps its independent error presentation.
+
+When a bound Project is preempted or its Runtime connection ends, the last
+accepted Canvas remains visible. A solid, non-dismissible dialog sits on a
+transparent blocking layer below the title bar. The Canvas, floating bars, and
+panels are inert, Canvas-owned global input is disabled, and transient Canvas
+menus are closed while the dialog is present; the title bar remains available
+for opening another Project or closing the window.
 
 The floating dock controls exactly four panel kinds: Explorer, Inspector,
 Settings, and Terminal. `WorkbenchFloatingPanelShell` is their single frame. It

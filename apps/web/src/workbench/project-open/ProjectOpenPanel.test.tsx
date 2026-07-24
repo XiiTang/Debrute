@@ -25,7 +25,7 @@ describe('ProjectOpenPanel', () => {
         <ProjectOpenPanel
           error="Could not open project"
           attemptedPath="/missing/project"
-          opening={true}
+          opening={false}
           onOpenProject={() => undefined}
         />
       </I18nProvider>
@@ -41,7 +41,22 @@ describe('ProjectOpenPanel', () => {
     expect(html).toContain('db-empty-state');
     expect(html).toContain('db-action-row');
     expect(html).toContain('db-button--primary');
-    expect(html).toContain('disabled=""');
     expect(html).not.toContain('<input');
+  });
+
+  it('replaces the open action with a direct Canvas loading state', () => {
+    const html = renderToStaticMarkup(
+      <I18nProvider locale="en">
+        <ProjectOpenPanel
+          opening
+          onOpenProject={() => undefined}
+        />
+      </I18nProvider>
+    );
+
+    expect(html).toContain('role="status"');
+    expect(html).toContain('Opening project');
+    expect(html).not.toContain('<form');
+    expect(html).not.toContain('<button');
   });
 });

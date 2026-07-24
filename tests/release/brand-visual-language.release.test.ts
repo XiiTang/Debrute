@@ -145,7 +145,9 @@ describe('brand visual language', () => {
       join(root, 'apps/web/src/workbench/canvas/CanvasFeedbackBar.tsx'),
       'utf8'
     );
+    const controls = readFileSync(join(root, 'apps/web/src/workbench/ui/styles/controls.css'), 'utf8');
     const titleBar = readFileSync(join(root, 'apps/web/src/workbench/styles/titlebar.css'), 'utf8');
+    const shell = readFileSync(join(root, 'apps/web/src/workbench/styles/shell.css'), 'utf8');
 
     expect(readThemeHex(tokens, 'light', '--db-canvas-bg')).toBe('#efd8c5');
     expect(readThemeHex(tokens, 'dark', '--db-canvas-bg')).toBe('#1a1815');
@@ -173,10 +175,14 @@ describe('brand visual language', () => {
     expect(canvas).toContain('var(--db-canvas-feedback-surface)');
     expect(canvas.match(/\.canvas-surface\s*\{[\s\S]*?\}/)?.[0])
       .toContain('background: var(--db-canvas-field)');
-    expect(titleBar.match(/\.workbench-titlebar::before\s*\{[\s\S]*?\}/)?.[0])
+    expect(shell.match(/\.workbench-shell\s*\{[\s\S]*?\}/)?.[0])
       .toContain('background: var(--db-canvas-field)');
-    expect(titleBar.match(/\.workbench-titlebar::before\s*\{[\s\S]*?\}/)?.[0])
-      .not.toContain('border-bottom');
+    expect(titleBar).not.toContain('.workbench-titlebar::before');
+    expect(controls).toContain('.db-icon-button--titlebar .db-icon-button__icon,');
+    expect(controls.match(/\.db-icon-button--window-close \.db-icon-button__icon\s*\{[\s\S]*?\}/)?.[0])
+      .toContain('background: var(--db-canvas-bg)');
+    expect(titleBar.match(/\.workbench-titlebar\s*\{[\s\S]*?\}/)?.[0])
+      .not.toMatch(/background|border-bottom/);
     expect(feedbackBar.match(/var\(--db-canvas-moment-[1-6]\)/g)).toHaveLength(6);
   });
 

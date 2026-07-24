@@ -27,7 +27,8 @@ export function CanvasMinimapBar({
   overlayRuntime,
   open,
   onOpenChange,
-  panelPlacement
+  panelPlacement,
+  interactionBlocked = false
 }: {
   canvas: CanvasDocument | undefined;
   nodes: CanvasProjection['nodes'] | undefined;
@@ -36,6 +37,7 @@ export function CanvasMinimapBar({
   open: boolean;
   onOpenChange: (open: boolean) => void;
   panelPlacement: FloatingBarRect;
+  interactionBlocked?: boolean | undefined;
 }): React.ReactElement {
   const i18n = useI18n();
   const barRef = React.useRef<HTMLButtonElement | null>(null);
@@ -52,7 +54,8 @@ export function CanvasMinimapBar({
     <Map />
   );
   const enabled = Boolean(
-    canvas
+    !interactionBlocked
+    && canvas
     && nodes
     && runtime
     && hasValidMinimapNodes(nodes)

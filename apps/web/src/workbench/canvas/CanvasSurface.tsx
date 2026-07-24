@@ -88,6 +88,7 @@ interface CanvasSurfaceProps {
   minimapOpen?: boolean | undefined;
   onCurrentNodesChange?: ((canvasId: string, nodes: ProjectedCanvasNode[] | undefined) => void) | undefined;
   onOpenContextMenu?: ((target: WorkbenchContextMenuTarget, position: WorkbenchContextMenuPosition) => void) | undefined;
+  interactionBlocked?: boolean | undefined;
   textPreviewStyleDependencyKey: string;
 }
 
@@ -102,6 +103,7 @@ export function CanvasSurface({
   minimapOpen,
   onCurrentNodesChange,
   onOpenContextMenu,
+  interactionBlocked = false,
   textPreviewStyleDependencyKey
 }: CanvasSurfaceProps): React.ReactElement {
   const perfMonitorRef = useRef<CanvasPerfMonitor | undefined>(undefined);
@@ -140,6 +142,7 @@ export function CanvasSurface({
       minimapOpen={minimapOpen}
       onCurrentNodesChange={onCurrentNodesChange}
       onOpenContextMenu={onOpenContextMenu}
+      interactionBlocked={interactionBlocked}
       textPreviewStyleDependencyKey={textPreviewStyleDependencyKey}
     />
   );
@@ -157,6 +160,7 @@ function CanvasSurfaceRuntime({
   minimapOpen,
   onCurrentNodesChange,
   onOpenContextMenu,
+  interactionBlocked = false,
   textPreviewStyleDependencyKey
 }: CanvasSurfaceProps & {
   perfMonitor: CanvasPerfMonitor | undefined;
@@ -314,6 +318,9 @@ function CanvasSurfaceRuntime({
 
   useEffect(() => {
     const handleKeyDown = (event: KeyboardEvent) => {
+      if (interactionBlocked) {
+        return;
+      }
       const selectedVideoPath = selectedSingleVideoPath(selectionRef.current, projectedNodes);
       videoHotkeyController.handleKeyDown({
         key: event.key,
@@ -325,7 +332,7 @@ function CanvasSurfaceRuntime({
     };
     window.addEventListener('keydown', handleKeyDown);
     return () => window.removeEventListener('keydown', handleKeyDown);
-  }, [projectedNodes, videoHotkeyController]);
+  }, [interactionBlocked, projectedNodes, videoHotkeyController]);
 
   const perfDebugBridge = useMemo(() => (
     __DEBRUTE_CANVAS_PERF__ && perfMonitor
@@ -396,13 +403,20 @@ function CanvasSurfaceRuntime({
     if (!surface || !stage) {
       return;
     }
-    const unbindSurface = runtime.bindSurface({ surface });
     const unbindStage = stageRuntime.bindStage(stage);
+    if (interactionBlocked) {
+      const dragState = runtime.getSnapshot().dragState;
+      if (dragState) {
+        runtime.input.cancelPointer(dragState.pointerId);
+      }
+      return unbindStage;
+    }
+    const unbindSurface = runtime.bindSurface({ surface });
     return () => {
       unbindStage();
       unbindSurface();
     };
-  }, [stageRuntime, runtime]);
+  }, [interactionBlocked, stageRuntime, runtime]);
 
   useLayoutEffect(() => {
     previewResourceScheduler.notifyVisibilityChanged();

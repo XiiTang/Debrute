@@ -278,9 +278,11 @@ function WorkbenchProjectGenerationApp({
   setIsProjectOpening: React.Dispatch<React.SetStateAction<boolean>>;
 }): React.ReactElement {
   const acceptedProject = projectProjection.status === 'unbound' ? undefined : projectProjection;
+  const hasAcceptedProject = acceptedProject !== undefined;
   const snapshot = acceptedProject?.presentedSnapshot;
   const runtimeProjectId = acceptedProject?.projectId;
   const projectDetached = projectProjection.status === 'detached';
+  const projectPresentationBlocked = Boolean(connectionEnded || projectDetached);
   const projectPathCommandAdmissionRef = useRef(!isProjectOpening);
   const retiredProjectPathCommandAdmissionRef = useRef(false);
   useEffect(() => {
@@ -293,8 +295,8 @@ function WorkbenchProjectGenerationApp({
     }
   }, [isProjectOpening]);
   const canStartProjectPathCommand = useCallback(
-    () => projectPathCommandAdmissionRef.current,
-    []
+    () => projectPathCommandAdmissionRef.current && !projectPresentationBlocked,
+    [projectPresentationBlocked]
   );
   const beginProjectOpening = useCallback(() => {
     if (!projectPathCommandAdmissionRef.current) {
@@ -436,6 +438,7 @@ function WorkbenchProjectGenerationApp({
     if (!beginProjectOpening()) {
       return;
     }
+    setProjectOpenError(undefined);
     let projectBindingChanged = false;
     try {
       const opened = await api.openProject({ projectId: runtimeProjectId, forceOpenHere: true });
@@ -444,11 +447,11 @@ function WorkbenchProjectGenerationApp({
         replaceWorkbenchProjectRoute(opened.projectId);
       }
     } catch (error) {
-      notify(errorMessage(error));
+      setProjectOpenError(i18n.t('projectOpen.openFailed', { message: errorMessage(error) }));
     } finally {
       finishProjectOpening(!projectBindingChanged);
     }
-  }, [beginProjectOpening, didProjectBindingChange, finishProjectOpening, notify, runtimeProjectId]);
+  }, [beginProjectOpening, didProjectBindingChange, finishProjectOpening, i18n, runtimeProjectId, setProjectOpenError]);
 
   const openProjectHere = useCallback(async () => {
     if (!projectOpenHereTargetId) {
@@ -457,6 +460,7 @@ function WorkbenchProjectGenerationApp({
     if (!beginProjectOpening()) {
       return;
     }
+    setProjectOpenError(undefined);
     let projectBindingChanged = false;
     try {
       const opened = await api.openProject({
@@ -468,11 +472,11 @@ function WorkbenchProjectGenerationApp({
         replaceWorkbenchProjectRoute(opened.projectId);
       }
     } catch (error) {
-      notify(errorMessage(error));
+      setProjectOpenError(i18n.t('projectOpen.openFailed', { message: errorMessage(error) }));
     } finally {
       finishProjectOpening(!projectBindingChanged);
     }
-  }, [beginProjectOpening, didProjectBindingChange, finishProjectOpening, notify, projectOpenHereTargetId]);
+  }, [beginProjectOpening, didProjectBindingChange, finishProjectOpening, i18n, projectOpenHereTargetId, setProjectOpenError]);
 
   useEffect(() => {
     workbenchViewportRectRef.current = workbenchViewportRect;
@@ -823,10 +827,15 @@ function WorkbenchProjectGenerationApp({
     }
     return shell.onOpenProjectRequested((projectRoot) => {
       void openProjectRoot(projectRoot).catch((error) => {
-        notify(i18n.t('projectOpen.openFailed', { message: errorMessage(error) }));
+        const message = i18n.t('projectOpen.openFailed', { message: errorMessage(error) });
+        if (hasAcceptedProject) {
+          notify(message);
+          return;
+        }
+        setProjectOpenError(message);
       });
     });
-  }, [i18n, notify, openProjectRoot]);
+  }, [hasAcceptedProject, i18n, notify, openProjectRoot, setProjectOpenError]);
 
   const openWorkbenchContextMenu = useCallback((target: WorkbenchContextMenuTarget, position: WorkbenchContextMenuPosition) => {
     if (!canStartProjectPathCommand()) {
@@ -840,13 +849,13 @@ function WorkbenchProjectGenerationApp({
   }, []);
 
   useEffect(() => {
-    if (!isProjectOpening) {
+    if (!isProjectOpening && !projectPresentationBlocked) {
       return;
     }
     closeWorkbenchContextMenu();
     explorerController.cancelEdit();
     setSendToPhotoshopPath(undefined);
-  }, [closeWorkbenchContextMenu, explorerController.cancelEdit, isProjectOpening]);
+  }, [closeWorkbenchContextMenu, explorerController.cancelEdit, isProjectOpening, projectPresentationBlocked]);
 
   const openInspectorPanel = useCallback(() => {
     setFloatingPanels((current) => openFloatingPanel(current, 'inspector', workbenchViewportRectRef.current));
@@ -1256,26 +1265,38 @@ function WorkbenchProjectGenerationApp({
             </div>
           ) : null}
           {connectionEnded ? (
-            <div className="workbench-detached-overlay" role="alert" data-testid="workbench-connection-ended-overlay">
-              <strong>Debrute Runtime connection ended.</strong>
+            <WorkbenchCanvasDialog
+              testId="workbench-connection-ended-dialog-layer"
+              titleId="workbench-connection-ended-dialog-title"
+              title="Debrute Runtime connection ended."
+            >
               <span>{connectionEnded.message}</span>
               <span>This Project is read-only. Refresh this page to start a new Workbench connection.</span>
-            </div>
-          ) : projectOpenHereTargetId ? (
-            <div className="workbench-detached-overlay" role="status" data-testid="workbench-open-here-overlay">
-              <strong>This Project is active in a Web Workbench.</strong>
-              <span>Choose Open Here to move it to this Desktop window.</span>
-              <Button disabled={isProjectOpening} onClick={() => { void openProjectHere(); }}>Open Here</Button>
-            </div>
+            </WorkbenchCanvasDialog>
           ) : projectDetached ? (
-            <div className="workbench-detached-overlay" role="status" data-testid="workbench-detached-overlay">
-              <strong>This Project is active in another Workbench.</strong>
+            <WorkbenchCanvasDialog
+              testId="workbench-detached-dialog-layer"
+              titleId="workbench-detached-dialog-title"
+              title="This Project is active in another Workbench."
+            >
               <span>This window is read-only. Your local drafts remain visible here.</span>
-              <Button disabled={isProjectOpening} onClick={() => { void reopenDetachedProject(); }}>Open Here</Button>
-            </div>
+              <Button autoFocus disabled={isProjectOpening} onClick={() => { void reopenDetachedProject(); }}>Open Here</Button>
+              {projectOpenError ? <span className="db-form-error" role="alert">{projectOpenError}</span> : null}
+            </WorkbenchCanvasDialog>
           ) : null}
-          <div className="canvas-layer" data-testid="canvas-layer">
-            {registryInvalid ? (
+          <div className="canvas-layer" data-testid="canvas-layer" inert={projectPresentationBlocked}>
+            {projectOpenHereTargetId ? (
+              <div className="empty-editor empty-project" role="status" data-testid="workbench-open-here-status">
+                <strong>This Project is active in a Web Workbench.</strong>
+                <span>Choose Open Here to move it to this Desktop window.</span>
+                <Button loading={isProjectOpening} disabled={isProjectOpening} onClick={() => { void openProjectHere(); }}>Open Here</Button>
+                {projectOpenError ? (
+                  <span className="db-form-error" role="alert" data-testid="workbench-open-here-error">
+                    {projectOpenError}
+                  </span>
+                ) : null}
+              </div>
+            ) : registryInvalid ? (
               <div className="empty-editor empty-project">
                 <strong>{i18n.t('canvas.registry.needsRepair')}</strong>
                 <span>{registryInvalid.message}</span>
@@ -1296,10 +1317,11 @@ function WorkbenchProjectGenerationApp({
                 feedbackInteraction={feedbackInteraction.canvas}
                 onRuntimeChange={setActiveCanvasRuntime}
                 onOpenContextMenu={openWorkbenchContextMenu}
+                interactionBlocked={projectPresentationBlocked}
               />
             )}
           </div>
-          <div className="floating-bar-layer" data-testid="floating-bar-layer">
+          <div className="floating-bar-layer" data-testid="floating-bar-layer" inert={projectPresentationBlocked}>
             <FloatingDock
               panelState={floatingPanels}
               disabledPanelIds={disabledFloatingPanelIds}
@@ -1324,6 +1346,7 @@ function WorkbenchProjectGenerationApp({
               open={canvasMinimapOpen}
               onOpenChange={setCanvasMinimapOpen}
               panelPlacement={minimapPanelPlacement}
+              interactionBlocked={projectPresentationBlocked}
             />
             {snapshot?.canvasRegistry.status === 'ready' ? (
               <CanvasResetLayoutButton
@@ -1365,7 +1388,7 @@ function WorkbenchProjectGenerationApp({
               />
             ))}
           </div>
-          <div className="panel-layer" data-testid="panel-layer">
+          <div className="panel-layer" data-testid="panel-layer" inert={projectPresentationBlocked}>
             {FLOATING_PANEL_IDS.map((panelId) => (
               floatingPanels.panels[panelId].open ? (
                 <WorkbenchFloatingPanelShell
@@ -1414,7 +1437,7 @@ function WorkbenchProjectGenerationApp({
               ) : null
             ))}
           </div>
-          {contextMenu ? (
+          {!projectPresentationBlocked && contextMenu ? (
             <WorkbenchContextMenu
               items={contextMenuItems}
               position={contextMenu.position}
@@ -1423,7 +1446,7 @@ function WorkbenchProjectGenerationApp({
               onClose={closeWorkbenchContextMenu}
             />
           ) : null}
-          {sendToPhotoshopPath && runtimeProjectId ? (
+          {!projectPresentationBlocked && sendToPhotoshopPath && runtimeProjectId ? (
             <SendToPhotoshopDialog
               projectId={runtimeProjectId}
               projectRelativePath={sendToPhotoshopPath}
@@ -1458,6 +1481,33 @@ function WorkbenchProjectGenerationApp({
         </div>
       </WorkbenchIconProvider>
     </I18nProvider>
+  );
+}
+
+function WorkbenchCanvasDialog({
+  testId,
+  titleId,
+  title,
+  children
+}: {
+  testId: string;
+  titleId: string;
+  title: string;
+  children: React.ReactNode;
+}): React.ReactElement {
+  const dialogRef = useRef<HTMLElement | null>(null);
+  useEffect(() => {
+    if (!dialogRef.current?.contains(document.activeElement)) {
+      dialogRef.current?.focus();
+    }
+  }, []);
+  return (
+    <div className="workbench-canvas-dialog-layer" role="presentation" data-testid={testId}>
+      <section ref={dialogRef} className="db-modal workbench-canvas-dialog" role="dialog" aria-labelledby={titleId} tabIndex={-1}>
+        <strong id={titleId}>{title}</strong>
+        {children}
+      </section>
+    </div>
   );
 }
 

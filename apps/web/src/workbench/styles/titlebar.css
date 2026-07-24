@@ -2,23 +2,13 @@
   position: fixed;
   inset: 0 0 auto 0;
   z-index: var(--db-z-titlebar);
-  height: 28px;
+  height: var(--db-titlebar-height);
   display: grid;
   grid-template-columns: minmax(180px, 1fr) minmax(160px, auto) minmax(180px, 1fr);
   align-items: center;
   color: var(--db-text);
   user-select: none;
   -webkit-user-select: none;
-}
-
-.workbench-titlebar::before {
-  content: "";
-  position: absolute;
-  inset: 0;
-  z-index: 0;
-  pointer-events: none;
-  background: var(--db-canvas-field);
-  background-size: var(--db-canvas-grid-size);
 }
 
 .workbench-titlebar__drag-region {
@@ -70,6 +60,7 @@
   color: var(--db-text-muted);
   font-size: var(--db-font-sm);
   line-height: 1;
+  text-shadow: var(--db-titlebar-contrast-shadow);
 }
 
 .workbench-titlebar__menubar,
@@ -93,6 +84,7 @@
   color: var(--db-text-muted);
   font: inherit;
   font-size: var(--db-font-sm);
+  text-shadow: var(--db-titlebar-contrast-shadow);
 }
 
 .workbench-titlebar__menu-button:hover,
@@ -109,7 +101,7 @@
 
 .workbench-titlebar__menu-popover {
   position: absolute;
-  top: 28px;
+  top: var(--db-titlebar-height);
   left: 8px;
   z-index: var(--db-z-titlebar-menu);
   min-width: 220px;

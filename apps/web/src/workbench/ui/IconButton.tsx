@@ -1,7 +1,7 @@
 import React from 'react';
 import { cx } from './cx';
 
-type IconButtonVariant = 'ghost' | 'danger' | 'chrome' | 'window-close';
+type IconButtonVariant = 'ghost' | 'danger' | 'chrome' | 'window-close' | 'titlebar';
 type IconButtonSize = 'xs' | 'sm' | 'window';
 
 export interface IconButtonProps extends Omit<React.ButtonHTMLAttributes<HTMLButtonElement>, 'children'> {

@@ -140,7 +140,8 @@
   box-shadow: none;
 }
 
-.db-icon-button--chrome {
+.db-icon-button--chrome,
+.db-icon-button--titlebar {
   border: 0;
   border-radius: 0;
   background: transparent;
@@ -149,7 +150,9 @@
 }
 
 .db-icon-button--chrome:hover:not(:disabled),
-.db-icon-button--chrome:focus-visible {
+.db-icon-button--chrome:focus-visible,
+.db-icon-button--titlebar:hover:not(:disabled),
+.db-icon-button--titlebar:focus-visible {
   border: 0;
   background: transparent;
   color: var(--db-text);
@@ -163,11 +166,22 @@
   box-shadow: none;
 }
 
+.db-icon-button--titlebar .db-icon-button__icon,
+.db-icon-button--window-close .db-icon-button__icon {
+  padding: var(--db-titlebar-icon-contrast-inset);
+  background: var(--db-canvas-bg);
+}
+
 .db-icon-button--window-close:hover:not(:disabled),
 .db-icon-button--window-close:focus-visible {
   border: 0;
   background: color-mix(in srgb, var(--db-danger) 72%, transparent);
   color: var(--db-text);
+}
+
+.db-icon-button--window-close:hover:not(:disabled) .db-icon-button__icon,
+.db-icon-button--window-close:focus-visible .db-icon-button__icon {
+  background: transparent;
 }
 
 .db-icon-button--danger {

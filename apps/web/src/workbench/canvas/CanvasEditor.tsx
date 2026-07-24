@@ -20,6 +20,7 @@ export function CanvasEditor({
   feedbackInteraction,
   onRuntimeChange,
   onOpenContextMenu,
+  interactionBlocked = false,
 }: {
   canvasId: string | undefined;
   state: WorkbenchState;
@@ -30,6 +31,7 @@ export function CanvasEditor({
   feedbackInteraction?: CanvasFeedbackCanvasBinding | undefined;
   onRuntimeChange?: ((runtime: CanvasEditorRuntime | undefined) => void) | undefined;
   onOpenContextMenu?: ((target: WorkbenchContextMenuTarget, position: WorkbenchContextMenuPosition) => void) | undefined;
+  interactionBlocked?: boolean | undefined;
 }): React.ReactElement {
   const canvas = getCanvasById(state.snapshot, canvasId);
   const projection = state.snapshot?.projections.find((item) => item.canvasId === canvas?.id);
@@ -101,6 +103,7 @@ export function CanvasEditor({
         minimapOpen={minimapOpen}
         onCurrentNodesChange={onCurrentNodesChange}
         onOpenContextMenu={onOpenContextMenu}
+        interactionBlocked={interactionBlocked}
         textPreviewStyleDependencyKey={state.resolvedTheme}
       />
     </section>

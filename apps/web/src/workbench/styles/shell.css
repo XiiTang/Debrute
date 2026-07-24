@@ -4,13 +4,12 @@
   width: 100vw;
   height: 100vh;
   overflow: hidden;
-  background: var(--db-bg);
+  background: var(--db-canvas-field);
+  background-size: var(--db-canvas-grid-size);
   color: var(--db-text);
 }
 
-.workbench-shell::before,
-.workbench-project-opening-indicator::before,
-.workbench-detached-overlay::before {
+.workbench-project-opening-indicator::before {
   content: "";
   position: absolute;
   inset: 0;
@@ -55,7 +54,7 @@
 
 .workbench-project-opening-indicator {
   position: fixed;
-  top: calc(var(--db-titlebar-height, 38px) + 10px);
+  top: calc(var(--db-titlebar-height) + 10px);
   left: 50%;
   z-index: var(--db-z-overlays);
   display: flex;
@@ -73,23 +72,23 @@
   isolation: isolate;
 }
 
-.workbench-detached-overlay {
+.workbench-canvas-dialog-layer {
   position: fixed;
-  inset: var(--db-titlebar-height, 38px) 0 0;
-  z-index: var(--db-z-overlays);
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  justify-content: center;
-  gap: 8px;
-  padding: 24px;
-  background: var(--db-bg);
-  text-align: center;
+  inset: var(--db-titlebar-height) 0 0;
+  z-index: calc(var(--db-z-overlays) + 1);
+  display: grid;
+  place-items: center;
+  padding: var(--db-space-5);
+  background: transparent;
   pointer-events: auto;
-  isolation: isolate;
 }
 
-.workbench-detached-overlay span {
+.workbench-canvas-dialog {
+  justify-items: center;
+  text-align: center;
+}
+
+.workbench-canvas-dialog span {
   color: var(--db-text-muted);
 }
 
@@ -112,7 +111,7 @@
 .floating-dock {
   position: absolute;
   left: 18px;
-  top: calc(28px + 13px);
+  top: calc(var(--db-titlebar-height) + 13px);
   display: flex;
   flex-direction: column;
   gap: var(--db-space-1);
@@ -302,12 +301,26 @@
 
 .boot-screen,
 .empty-editor {
-  height: 100vh;
   display: flex;
   align-items: center;
   justify-content: center;
   gap: 10px;
   color: var(--db-text-muted);
+}
+
+.boot-screen {
+  height: 100vh;
+}
+
+.boot-screen--with-titlebar {
+  box-sizing: border-box;
+  padding-block-start: var(--db-titlebar-height);
+}
+
+.empty-editor {
+  box-sizing: border-box;
+  height: 100%;
+  padding-block-start: var(--db-titlebar-height);
 }
 
 .empty-project {
