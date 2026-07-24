@@ -16,8 +16,8 @@ use debrute_runtime::control::endpoint::{
 };
 use debrute_runtime::control::{
     AcceptedHandshake, CONTROL_PROTOCOL_VERSION, ClientHandshakeError, ClientMessage, ClientRole,
-    FrameDecodeError, HandshakeRejection, HandshakeRole, RuntimeStatus, ServerHandshakeError,
-    ServerMessage, encode_frame, read_server_frame, request_handshake, serve_handshake,
+    FrameDecodeError, HandshakeRejection, RuntimeStatus, ServerHandshakeError, ServerMessage,
+    encode_frame, read_server_frame, request_handshake, serve_handshake,
 };
 use fs2::FileExt;
 use nix::fcntl::{FcntlArg, OFlag, fcntl};
@@ -115,7 +115,7 @@ fn incompatible_handshake_is_typed_and_then_disconnected() {
         protocol: "debrute-control".to_owned(),
         protocol_version: CONTROL_PROTOCOL_VERSION,
         product_version: "99.0.0".to_owned(),
-        role: ClientRole::Launcher.into(),
+        role: ClientRole::Launcher,
     };
     client
         .write_all(&encode_frame(&incompatible).expect("incompatible handshake should encode"))
@@ -266,42 +266,6 @@ fn product_message_before_handshake_is_rejected_by_closing_the_connection() {
             .expect("connection close should be observable"),
         0
     );
-}
-
-#[test]
-fn unknown_role_receives_a_typed_rejection() {
-    let temp = TestDirectory::new();
-    let endpoint = MacOsControlEndpoint::new(temp.path().join("debrute"));
-    let (owner, mut client) = owner_and_client(&endpoint, TEST_HANDSHAKE_TIMEOUT);
-
-    let server = std::thread::spawn(move || {
-        let mut connection = owner
-            .accept_current_user(TEST_HANDSHAKE_TIMEOUT)
-            .expect("same-user connection should be accepted");
-        serve_handshake(&mut connection, "runtime-instance", RuntimeStatus::Starting)
-    });
-    let unsupported = ClientMessage::Handshake {
-        protocol: "debrute-control".to_owned(),
-        protocol_version: CONTROL_PROTOCOL_VERSION,
-        product_version: "0.0.3".to_owned(),
-        role: HandshakeRole::Unsupported("web".to_owned()),
-    };
-    client
-        .write_all(&encode_frame(&unsupported).expect("unsupported handshake should encode"))
-        .expect("unsupported handshake should be written");
-
-    assert_eq!(
-        read_server_frame(&mut client).expect("typed rejection should be readable"),
-        ServerMessage::HandshakeRejected {
-            reason: HandshakeRejection::UnsupportedRole,
-        }
-    );
-    assert!(matches!(
-        server.join().expect("server thread should finish"),
-        Err(ServerHandshakeError::Rejected(
-            HandshakeRejection::UnsupportedRole
-        ))
-    ));
 }
 
 #[test]

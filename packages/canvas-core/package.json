@@ -8,8 +8,5 @@
   "scripts": {
     "build": "tsc -b",
     "check": "tsc -b --pretty false"
-  },
-  "dependencies": {
-    "@debrute/project-core": "workspace:*"
   }
 }

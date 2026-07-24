@@ -7,9 +7,7 @@ use regex::Regex;
 use serde::{Deserialize, Serialize};
 use serde_yaml::{Mapping, Value};
 
-use super::{
-    CanvasNodeKind, ProjectError, ProjectFileEntry, ProjectPathKind, project_content_hash,
-};
+use super::{CanvasNodeKind, ProjectError, ProjectFileEntry, ProjectPathKind};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum CanvasMapRuleKind {
@@ -114,11 +112,6 @@ pub fn validate_canvas_map_id(id: &str) -> Result<(), ProjectError> {
 pub fn canvas_map_path(canvas_id: &str) -> Result<String, ProjectError> {
     validate_canvas_map_id(canvas_id)?;
     Ok(format!(".debrute/canvas-maps/{canvas_id}.yaml"))
-}
-
-#[must_use]
-pub fn canvas_map_source_hash(content: &str) -> String {
-    project_content_hash(content)
 }
 
 /// Parses and strictly validates a closed Canvas Map YAML document.

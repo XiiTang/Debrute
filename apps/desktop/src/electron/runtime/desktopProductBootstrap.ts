@@ -1,4 +1,5 @@
 import { join } from 'node:path';
+import type { DebruteProductPlatform } from '@debrute/app-protocol';
 
 export interface DesktopRuntimeLaunchConfiguration {
   entrypoint: string;
@@ -8,26 +9,27 @@ export interface DesktopRuntimeLaunchConfiguration {
 
 export function desktopRuntimeLaunchConfiguration(input: {
   configuredEntrypoint?: string;
-  configuredArguments: string[];
   configuredWebAssetsDirectory?: string;
-  sourceWebAssetsDirectory: string;
   resourcesPath: string;
   homePath: string;
   executablePath: string;
-  applicationPath: string;
-  packaged: boolean;
-  platform: NodeJS.Platform;
+  platform: DebruteProductPlatform;
 }): DesktopRuntimeLaunchConfiguration {
-  if (input.configuredEntrypoint) {
+  if (Boolean(input.configuredEntrypoint) !== Boolean(input.configuredWebAssetsDirectory)) {
+    throw new Error('Configured Runtime entrypoint and Web assets directory must be provided together.');
+  }
+  if (input.configuredEntrypoint && input.configuredWebAssetsDirectory) {
     return {
       entrypoint: input.configuredEntrypoint,
-      arguments: input.configuredArguments,
-      webAssetsDirectory: input.configuredWebAssetsDirectory ?? input.sourceWebAssetsDirectory
+      arguments: input.platform === 'darwin'
+        ? []
+        : ['--stable-runtime-entrypoint', input.configuredEntrypoint],
+      webAssetsDirectory: input.configuredWebAssetsDirectory
     };
   }
-  const runtimeExecutable = input.platform === 'win32'
-    ? join('runtime', 'debrute-runtime.exe')
-    : join('runtime', 'Debrute Runtime.app', 'Contents', 'MacOS', 'debrute-runtime');
+  const runtimeExecutable = input.platform === 'darwin'
+    ? join('runtime', 'Debrute Runtime.app', 'Contents', 'MacOS', 'debrute-runtime')
+    : join('runtime', 'debrute-runtime.exe');
   const seed = join(input.resourcesPath, 'product-seed');
   const debruteHome = join(input.homePath, '.debrute');
   return {
@@ -38,7 +40,7 @@ export function desktopRuntimeLaunchConfiguration(input: {
       '--product-root', join(debruteHome, 'products'),
       '--bin-directory', join(debruteHome, 'bin'),
       '--desktop-entrypoint', input.executablePath,
-      '--desktop-arguments-json', JSON.stringify(input.packaged ? [] : [input.applicationPath])
+      '--desktop-arguments-json', '[]'
     ],
     webAssetsDirectory: join(seed, 'web')
   };

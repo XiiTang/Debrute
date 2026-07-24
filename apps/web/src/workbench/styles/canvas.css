@@ -841,8 +841,7 @@
   pointer-events: auto;
 }
 
-.canvas-feedback-comment-input,
-.canvas-feedback-region-comment {
+.canvas-feedback-comment-input {
   font-size: 12px;
 }
 

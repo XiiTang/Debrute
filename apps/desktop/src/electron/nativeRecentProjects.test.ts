@@ -1,17 +1,17 @@
 import { describe, expect, it, vi } from 'vitest';
-import { buildNativeRecentProjectSync, parseDesktopOpenIntent } from './nativeRecentProjects';
+import { parseDesktopOpenIntent, syncNativeRecentProjects } from './nativeRecentProjects';
 
 describe('native recent projects', () => {
   it('syncs macOS Dock recent documents from the stored project history', () => {
-    const sync = buildNativeRecentProjectSync({
-      platform: 'darwin',
-      execPath: '/Applications/Debrute.app/Contents/MacOS/Debrute',
-      recentProjectRoots: ['/projects/alpha', '/projects/beta']
-    });
     const addRecentDocument = vi.fn();
     const clearRecentDocuments = vi.fn();
 
-    sync.apply({ addRecentDocument, clearRecentDocuments });
+    syncNativeRecentProjects(
+      { addRecentDocument, clearRecentDocuments, setJumpList: vi.fn(() => 'ok' as const) },
+      'darwin',
+      '/Applications/Debrute.app/Contents/MacOS/Debrute',
+      ['/projects/alpha', '/projects/beta']
+    );
 
     expect(clearRecentDocuments).toHaveBeenCalledTimes(1);
     expect(addRecentDocument.mock.calls.map((call) => call[0])).toEqual([
@@ -21,14 +21,14 @@ describe('native recent projects', () => {
   });
 
   it('builds Windows Jump List tasks for new windows and recent projects', () => {
-    const sync = buildNativeRecentProjectSync({
-      platform: 'win32',
-      execPath: 'C:\\Program Files\\Debrute\\Debrute.exe',
-      recentProjectRoots: ['C:\\Projects\\Alpha Project']
-    });
-    const setJumpList = vi.fn();
+    const setJumpList = vi.fn(() => 'ok' as const);
 
-    sync.apply({ setJumpList });
+    syncNativeRecentProjects(
+      { setJumpList, addRecentDocument: vi.fn(), clearRecentDocuments: vi.fn() },
+      'win32',
+      'C:\\Program Files\\Debrute\\Debrute.exe',
+      ['C:\\Projects\\Alpha Project']
+    );
 
     expect(setJumpList).toHaveBeenCalledWith([
       {
@@ -48,6 +48,19 @@ describe('native recent projects', () => {
         })]
       }
     ]);
+  });
+
+  it('fails when Windows rejects the Jump List', () => {
+    expect(() => syncNativeRecentProjects(
+      {
+        setJumpList: vi.fn(() => 'fileTypeRegistrationError' as const),
+        addRecentDocument: vi.fn(),
+        clearRecentDocuments: vi.fn()
+      },
+      'win32',
+      'C:\\Program Files\\Debrute\\Debrute.exe',
+      []
+    )).toThrow('Windows rejected the Debrute Jump List: fileTypeRegistrationError');
   });
 
   it('parses desktop open intents from native launch arguments', () => {

@@ -1,5 +1,5 @@
 import React from 'react';
-import type { ProjectTextLanguageId } from '@debrute/project-core';
+import type { ProjectTextLanguageId } from '@debrute/app-protocol';
 import { Compartment } from '@codemirror/state';
 import { EditorView } from '@codemirror/view';
 import { codeMirrorLanguageExtensionForProjectTextLanguage } from './textEditorCodeMirrorLanguages';

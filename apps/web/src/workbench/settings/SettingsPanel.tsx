@@ -5,7 +5,7 @@ import type {
   DebruteGlobalAdobeBridgeSettings,
   DebruteGlobalSettingsView
 } from '@debrute/app-protocol';
-import type { SettingsResource, WorkbenchActions, WorkbenchState } from '../../types';
+import type { EventProjection, SettingsResource, WorkbenchActions, WorkbenchState } from '../../types';
 import { GeneralSettingsPage } from './general/GeneralSettingsPage';
 import { IntegrationsSettingsPage } from './integrations/IntegrationsSettingsPage';
 import { AdobeBridgeSettingsPage } from './adobe-bridge/AdobeBridgeSettingsPage';
@@ -47,9 +47,9 @@ export function SettingsPanel({ state, actions }: { state: WorkbenchState; actio
   const i18n = useI18n();
   const [activePage, setActivePage] = useState<SettingsPageId>('general');
   const adobeBridgePage = adobeBridgeSettingsPageResource(state.globalSettings, state.adobeBridge);
-  const retryAdobeBridgePage = state.globalSettings.status === 'error'
-    ? actions.reloadGlobalSettings
-    : actions.reloadAdobeBridge;
+  const retryAdobeBridgePage = state.adobeBridge.status === 'error'
+    ? actions.reloadAdobeBridge
+    : undefined;
   return (
     <div className="settings-panel">
       <nav className="settings-directory" aria-label={i18n.t('settings.nav.sections')}>
@@ -81,11 +81,11 @@ export function SettingsPanel({ state, actions }: { state: WorkbenchState; actio
           <SettingsResourcePanel
             title={i18n.t('settings.general.title')}
             resource={state.globalSettings}
-            onRetry={actions.reloadGlobalSettings}
           >
             {(settings) => (
               <GeneralSettingsPage
                 actions={actions}
+                product={state.product}
                 resolvedTheme={state.resolvedTheme}
                 settings={settings}
                 onSettingsChange={actions.saveGlobalSettings}
@@ -96,7 +96,6 @@ export function SettingsPanel({ state, actions }: { state: WorkbenchState; actio
           <SettingsResourcePanel
             title={i18n.t('settings.models.imageTitle')}
             resource={derivedSettingsResource(state.globalSettings, (settings) => settings.models.image)}
-            onRetry={actions.reloadGlobalSettings}
           >
             {(settings) => <ImageModelSettings settings={settings} actions={actions} />}
           </SettingsResourcePanel>
@@ -104,7 +103,6 @@ export function SettingsPanel({ state, actions }: { state: WorkbenchState; actio
           <SettingsResourcePanel
             title={i18n.t('settings.models.videoTitle')}
             resource={derivedSettingsResource(state.globalSettings, (settings) => settings.models.video)}
-            onRetry={actions.reloadGlobalSettings}
           >
             {(settings) => <VideoModelSettings settings={settings} actions={actions} />}
           </SettingsResourcePanel>
@@ -112,7 +110,6 @@ export function SettingsPanel({ state, actions }: { state: WorkbenchState; actio
           <SettingsResourcePanel
             title={i18n.t('settings.models.ttsTitle')}
             resource={derivedSettingsResource(state.globalSettings, (settings) => settings.models.audio)}
-            onRetry={actions.reloadGlobalSettings}
           >
             {(settings) => <AudioModelSettings settings={settings} actions={actions} kind="tts" />}
           </SettingsResourcePanel>
@@ -120,7 +117,6 @@ export function SettingsPanel({ state, actions }: { state: WorkbenchState; actio
           <SettingsResourcePanel
             title={i18n.t('settings.models.musicTitle')}
             resource={derivedSettingsResource(state.globalSettings, (settings) => settings.models.audio)}
-            onRetry={actions.reloadGlobalSettings}
           >
             {(settings) => <AudioModelSettings settings={settings} actions={actions} kind="music" />}
           </SettingsResourcePanel>
@@ -128,7 +124,6 @@ export function SettingsPanel({ state, actions }: { state: WorkbenchState; actio
           <SettingsResourcePanel
             title={i18n.t('settings.models.sfxTitle')}
             resource={derivedSettingsResource(state.globalSettings, (settings) => settings.models.audio)}
-            onRetry={actions.reloadGlobalSettings}
           >
             {(settings) => <AudioModelSettings settings={settings} actions={actions} kind="sound-effect" />}
           </SettingsResourcePanel>
@@ -136,7 +131,6 @@ export function SettingsPanel({ state, actions }: { state: WorkbenchState; actio
           <SettingsResourcePanel
             title={i18n.t('settings.integrations.title')}
             resource={derivedSettingsResource(state.globalSettings, (settings) => settings.integrations)}
-            onRetry={actions.reloadGlobalSettings}
           >
             {(settings) => <IntegrationsSettingsPage settings={settings} actions={actions} />}
           </SettingsResourcePanel>
@@ -144,7 +138,7 @@ export function SettingsPanel({ state, actions }: { state: WorkbenchState; actio
           <SettingsResourcePanel
             title={i18n.t('settings.adobeBridge.title')}
             resource={adobeBridgePage}
-            onRetry={retryAdobeBridgePage}
+            {...(retryAdobeBridgePage ? { onRetry: retryAdobeBridgePage } : {})}
           >
             {({ persistedSettings, bridge }) => (
               <AdobeBridgeSettingsPage
@@ -162,9 +156,9 @@ export function SettingsPanel({ state, actions }: { state: WorkbenchState; actio
 }
 
 function derivedSettingsResource<T>(
-  resource: SettingsResource<DebruteGlobalSettingsView>,
+  resource: EventProjection<DebruteGlobalSettingsView>,
   pick: (settings: DebruteGlobalSettingsView) => T
-): SettingsResource<T> {
+): EventProjection<T> {
   if (resource.status !== 'ready') {
     return resource;
   }
@@ -177,12 +171,9 @@ interface AdobeBridgeSettingsPageValue {
 }
 
 function adobeBridgeSettingsPageResource(
-  globalSettings: SettingsResource<DebruteGlobalSettingsView>,
+  globalSettings: EventProjection<DebruteGlobalSettingsView>,
   adobeBridge: SettingsResource<AdobeBridgeStateView>
 ): SettingsResource<AdobeBridgeSettingsPageValue> {
-  if (globalSettings.status === 'error') {
-    return globalSettings;
-  }
   if (adobeBridge.status === 'error') {
     return adobeBridge;
   }

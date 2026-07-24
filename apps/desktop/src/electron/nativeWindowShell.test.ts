@@ -50,7 +50,8 @@ describe('native window shell', () => {
     registerNativeWindowIpc({
       ipcMain: { handle: (channel, handler) => handlers.set(channel, handler) },
       browserWindow: { fromWebContents },
-      executeNativeMenuCommand
+      executeNativeMenuCommand,
+      takeDesktopLaunchTicket: () => undefined
     });
 
     await handlers.get(nativeWindowIpcChannels.getState)?.({ sender }, { commandId: 'window.new' });
@@ -73,7 +74,8 @@ describe('native window shell', () => {
     registerNativeWindowIpc({
       ipcMain: { handle: (channel, handler) => handlers.set(channel, handler) },
       browserWindow: { fromWebContents: vi.fn(() => null) },
-      executeNativeMenuCommand
+      executeNativeMenuCommand,
+      takeDesktopLaunchTicket: () => undefined
     });
 
     await expect(handlers.get(nativeWindowIpcChannels.executeMenuCommand)?.(

@@ -1,9 +1,9 @@
 import type { ReactElement } from 'react';
-import React, { act } from 'react';
+import { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { renderToStaticMarkup } from 'react-dom/server';
 import { describe, expect, it } from 'vitest';
-import { createCanvasDocument, type CanvasProjection } from '@debrute/canvas-core';
+import type { CanvasDocument, CanvasProjection } from '@debrute/canvas-core';
 import { CanvasMinimapBar, formatCanvasMinimapZoomLabel } from './CanvasMinimapBar';
 import { createCanvasOverlayRuntime } from './CanvasOverlayRuntime';
 import type { CanvasEditorRuntime } from './runtime/CanvasEditorRuntime';
@@ -17,6 +17,16 @@ function renderStaticWithI18n(element: ReactElement): string {
       {element}
     </I18nProvider>
   );
+}
+
+function createCanvasDocument(input: { id: string }): CanvasDocument {
+  return {
+    id: input.id,
+    name: input.id,
+    nodeElements: [],
+    annotations: [],
+    preferences: { showDiagnostics: true }
+  };
 }
 
 describe('CanvasMinimapBar', () => {
@@ -171,7 +181,7 @@ function nodeFixture(path: string, x: number, y: number): CanvasProjection['node
       state: 'available',
       size: 100,
       mimeType: 'image/png',
-      fileUrl: `http://127.0.0.1:17321/api/projects/123e4567-e89b-42d3-a456-426614174000/files/raw/${path}?v=rev`,
+      fileUrl: `/api/projects/123e4567-e89b-42d3-a456-426614174000/files/raw/${path}?v=rev`,
       revision: 'rev'
     }
   };

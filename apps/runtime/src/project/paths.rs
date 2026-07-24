@@ -267,14 +267,41 @@ pub(crate) struct ProjectCapabilityFs {
     root: Arc<Dir>,
 }
 
+pub(crate) struct ProjectCapabilityFileWrite {
+    pub(crate) project_relative_path: String,
+    pub(crate) content: Vec<u8>,
+    pub(crate) replace: bool,
+}
+
+pub(crate) struct ProjectCapabilityFileStage {
+    capability: ProjectCapabilityFs,
+    files: Vec<StagedCapabilityFile>,
+}
+
+struct StagedCapabilityFile {
+    stage: String,
+    target: String,
+    backup: Option<String>,
+    replace: bool,
+    published: bool,
+}
+
 static PROJECT_CAPABILITY_ROOTS: OnceLock<Mutex<std::collections::HashMap<PathBuf, Weak<Dir>>>> =
     OnceLock::new();
 
 impl ProjectCapabilityFs {
+    pub(crate) fn open_current(root: &Path) -> Result<Self, ProjectError> {
+        Ok(Self {
+            root: Arc::new(Dir::open_ambient_dir(root, ambient_authority())?),
+        })
+    }
+
     pub(crate) fn open(root: &Path) -> Result<Self, ProjectError> {
         let roots =
             PROJECT_CAPABILITY_ROOTS.get_or_init(|| Mutex::new(std::collections::HashMap::new()));
-        let mut roots = roots.lock().map_err(|_| ProjectError::StatePoisoned)?;
+        let mut roots = roots
+            .lock()
+            .expect("Project capability root registry lock poisoned");
         roots.retain(|_, root| root.strong_count() > 0);
         if let Some(root) = roots.get(root).and_then(Weak::upgrade) {
             return Ok(Self { root });
@@ -287,7 +314,9 @@ impl ProjectCapabilityFs {
     pub(crate) fn bind_session_root(root: &Path) -> Result<Self, ProjectError> {
         let roots =
             PROJECT_CAPABILITY_ROOTS.get_or_init(|| Mutex::new(std::collections::HashMap::new()));
-        let mut roots = roots.lock().map_err(|_| ProjectError::StatePoisoned)?;
+        let mut roots = roots
+            .lock()
+            .expect("Project capability root registry lock poisoned");
         roots.retain(|_, root| root.strong_count() > 0);
         let directory = Arc::new(Dir::open_ambient_dir(root, ambient_authority())?);
         roots.insert(root.to_path_buf(), Arc::downgrade(&directory));
@@ -298,27 +327,48 @@ impl ProjectCapabilityFs {
         let Some(roots) = PROJECT_CAPABILITY_ROOTS.get() else {
             return;
         };
-        if let Ok(mut roots) = roots.lock() {
-            if roots
-                .get(root)
-                .and_then(Weak::upgrade)
-                .is_some_and(|bound| Arc::ptr_eq(&bound, &self.root))
-            {
-                roots.remove(root);
-            }
-            roots.retain(|_, root| root.strong_count() > 0);
+        let mut roots = roots
+            .lock()
+            .expect("Project capability root registry lock poisoned");
+        if roots
+            .get(root)
+            .and_then(Weak::upgrade)
+            .is_some_and(|bound| Arc::ptr_eq(&bound, &self.root))
+        {
+            roots.remove(root);
         }
+        roots.retain(|_, root| root.strong_count() > 0);
     }
 
     pub(crate) fn open_directory(&self, relative: &str) -> Result<Dir, ProjectError> {
         let relative = normalize_project_directory_path(relative)?;
+        if relative.is_empty() {
+            return Ok(self.root.try_clone()?);
+        }
         Ok(self.root.open_dir(relative)?)
     }
 
     pub(crate) fn ensure_directory(&self, relative: &str) -> Result<Dir, ProjectError> {
         let relative = normalize_project_directory_path(relative)?;
+        if relative.is_empty() {
+            return Ok(self.root.try_clone()?);
+        }
         self.root.create_dir_all(&relative)?;
         Ok(self.root.open_dir(relative)?)
+    }
+
+    /// Stages a logical group of files through the already-open Project
+    /// directory capability without publishing any target paths.
+    pub(crate) fn stage_files(
+        &self,
+        writes: Vec<ProjectCapabilityFileWrite>,
+    ) -> Result<ProjectCapabilityFileStage, ProjectError> {
+        let mut staged = Vec::with_capacity(writes.len());
+        stage_capability_files(self, writes, &mut staged)?;
+        Ok(ProjectCapabilityFileStage {
+            capability: self.clone(),
+            files: staged,
+        })
     }
 
     pub(crate) fn atomic_write(&self, relative: &str, bytes: &[u8]) -> Result<(), ProjectError> {
@@ -335,8 +385,7 @@ impl ProjectCapabilityFs {
             directory.rename(&temporary, &directory, name)?;
             Ok(())
         })();
-        let _ = directory.remove_file(&temporary);
-        result
+        finish_atomic_write(result, &directory, &temporary)
     }
 
     pub(crate) fn atomic_write_checked<E, F>(
@@ -346,7 +395,7 @@ impl ProjectCapabilityFs {
         mut check: F,
     ) -> Result<(), E>
     where
-        E: From<ProjectError>,
+        E: From<ProjectError> + std::fmt::Display,
         F: FnMut() -> Result<(), E>,
     {
         let relative = normalize_project_relative_path(relative)?;
@@ -372,8 +421,7 @@ impl ProjectCapabilityFs {
                 .map_err(ProjectError::from)?;
             Ok(())
         })();
-        let _ = directory.remove_file(&temporary);
-        result
+        finish_atomic_write(result, &directory, &temporary)
     }
 
     pub(crate) fn atomic_write_stream_checked<E, R, F>(
@@ -383,7 +431,7 @@ impl ProjectCapabilityFs {
         mut check: F,
     ) -> Result<(), E>
     where
-        E: From<ProjectError>,
+        E: From<ProjectError> + std::fmt::Display,
         R: FnOnce(&mut std::fs::File) -> Result<(), E>,
         F: FnMut() -> Result<(), E>,
     {
@@ -409,8 +457,7 @@ impl ProjectCapabilityFs {
                 .map_err(ProjectError::from)?;
             Ok(())
         })();
-        let _ = directory.remove_file(&temporary);
-        result
+        finish_atomic_write(result, &directory, &temporary)
     }
 
     pub(crate) fn read_limited(
@@ -438,6 +485,11 @@ impl ProjectCapabilityFs {
             ));
         }
         Ok(bytes)
+    }
+
+    pub(crate) fn file_size(&self, relative: &str) -> Result<u64, ProjectError> {
+        let relative = normalize_project_relative_path(relative)?;
+        Ok(self.root.open(relative)?.metadata()?.len())
     }
 
     pub(crate) fn remove_file(&self, relative: &str) -> Result<(), ProjectError> {
@@ -468,6 +520,237 @@ impl ProjectCapabilityFs {
         normalize_project_path_basename(destination_name)?;
         self.root.hard_link(source, destination, destination_name)?;
         Ok(())
+    }
+}
+
+impl ProjectCapabilityFileStage {
+    pub(crate) fn capability(&self) -> &ProjectCapabilityFs {
+        &self.capability
+    }
+
+    pub(crate) fn commit_more(
+        mut self,
+        writes: Vec<ProjectCapabilityFileWrite>,
+    ) -> Result<(), ProjectError> {
+        stage_capability_files(&self.capability, writes, &mut self.files)?;
+        if let Err(error) = publish_capability_files(&self.capability.root, &mut self.files) {
+            let rollback = rollback_capability_files(&self.capability.root, &mut self.files);
+            let cleanup = cleanup_capability_files(&self.capability.root, &mut self.files);
+            return match (rollback, cleanup) {
+                (Ok(()), Ok(())) => Err(error.into()),
+                (Err(rollback_error), Ok(())) => Err(ProjectError::service(
+                    "project_file_commit_rollback_failed",
+                    format!("{error} Rollback also failed: {rollback_error}"),
+                )),
+                (Ok(()), Err(cleanup_error)) => Err(ProjectError::service(
+                    "project_file_commit_cleanup_failed",
+                    format!("{error} Cleanup also failed: {cleanup_error}"),
+                )),
+                (Err(rollback_error), Err(cleanup_error)) => Err(ProjectError::service(
+                    "project_file_commit_rollback_failed",
+                    format!(
+                        "{error} Rollback also failed: {rollback_error} Cleanup also failed: {cleanup_error}"
+                    ),
+                )),
+            };
+        }
+        if let Err(error) = cleanup_capability_files(&self.capability.root, &mut self.files) {
+            eprintln!("Debrute Project files were published but temporary cleanup failed: {error}");
+        }
+        Ok(())
+    }
+}
+
+impl Drop for ProjectCapabilityFileStage {
+    fn drop(&mut self) {
+        if let Err(error) = cleanup_capability_files(&self.capability.root, &mut self.files) {
+            eprintln!("Debrute Project staged file cleanup failed: {error}");
+        }
+    }
+}
+
+fn stage_capability_files(
+    capability: &ProjectCapabilityFs,
+    writes: Vec<ProjectCapabilityFileWrite>,
+    staged: &mut Vec<StagedCapabilityFile>,
+) -> Result<(), ProjectError> {
+    let mut targets = staged
+        .iter()
+        .map(|file| file.target.clone())
+        .collect::<std::collections::HashSet<_>>();
+    let mut normalized = Vec::with_capacity(writes.len());
+    for write in writes {
+        let target = normalize_project_relative_path(&write.project_relative_path)?;
+        if !targets.insert(target.clone()) {
+            return Err(ProjectError::Validation(format!(
+                "Project file commit contains a duplicate target: {target}"
+            )));
+        }
+        let (parent, name) = split_parent_name(&target)?;
+        let parent = parent.to_owned();
+        let name = name.to_owned();
+        normalized.push((target, parent, name, write.content, write.replace));
+    }
+
+    for (target, parent, name, content, replace) in normalized {
+        if let Err(error) = capability.ensure_directory(&parent) {
+            return match cleanup_capability_files(&capability.root, staged) {
+                Ok(()) => Err(error),
+                Err(cleanup_error) => Err(ProjectError::service(
+                    "project_file_stage_cleanup_failed",
+                    format!("{error} Cleanup also failed: {cleanup_error}"),
+                )),
+            };
+        }
+        let stage = if parent.is_empty() {
+            format!(".{name}.{}.tmp", Uuid::new_v4())
+        } else {
+            format!("{parent}/.{name}.{}.tmp", Uuid::new_v4())
+        };
+        let mut options = cap_std::fs::OpenOptions::new();
+        options.write(true).create_new(true);
+        let stage_result = (|| {
+            let mut file = capability.root.open_with(&stage, &options)?;
+            file.write_all(&content)?;
+            file.sync_all()?;
+            Ok::<(), std::io::Error>(())
+        })();
+        if let Err(error) = stage_result {
+            staged.push(StagedCapabilityFile {
+                stage,
+                target,
+                backup: None,
+                replace,
+                published: false,
+            });
+            return match cleanup_capability_files(&capability.root, staged) {
+                Ok(()) => Err(error.into()),
+                Err(cleanup_error) => Err(ProjectError::service(
+                    "project_file_stage_cleanup_failed",
+                    format!("{error} Cleanup also failed: {cleanup_error}"),
+                )),
+            };
+        }
+        staged.push(StagedCapabilityFile {
+            stage,
+            target,
+            backup: None,
+            replace,
+            published: false,
+        });
+    }
+    Ok(())
+}
+
+fn publish_capability_files(root: &Dir, files: &mut [StagedCapabilityFile]) -> std::io::Result<()> {
+    for file in files {
+        match root.symlink_metadata(&file.target) {
+            Ok(metadata) if metadata.file_type().is_symlink() || !metadata.is_file() => {
+                return Err(std::io::Error::other(format!(
+                    "Project commit target is not a regular file: {}",
+                    file.target
+                )));
+            }
+            Ok(_) if file.replace => {
+                let (parent, name) = split_parent_name(&file.target)
+                    .map_err(|error| std::io::Error::other(error.to_string()))?;
+                let backup = if parent.is_empty() {
+                    format!(".{name}.{}.restore.tmp", Uuid::new_v4())
+                } else {
+                    format!("{parent}/.{name}.{}.restore.tmp", Uuid::new_v4())
+                };
+                root.hard_link(&file.target, root, &backup)?;
+                file.backup = Some(backup);
+            }
+            Ok(_) => {
+                return Err(std::io::Error::new(
+                    std::io::ErrorKind::AlreadyExists,
+                    format!("Project commit target already exists: {}", file.target),
+                ));
+            }
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
+            Err(error) => return Err(error),
+        }
+        if file.replace {
+            root.rename(&file.stage, root, &file.target)?;
+            file.published = true;
+        } else {
+            root.hard_link(&file.stage, root, &file.target)?;
+            file.published = true;
+            root.remove_file(&file.stage)?;
+        }
+    }
+    Ok(())
+}
+
+fn rollback_capability_files(
+    root: &Dir,
+    files: &mut [StagedCapabilityFile],
+) -> std::io::Result<()> {
+    let mut first_error = None;
+    for file in files.iter_mut().rev() {
+        if file.published {
+            if let Some(backup) = file.backup.take() {
+                remember_capability_error(
+                    root.rename(&backup, root, &file.target),
+                    &mut first_error,
+                );
+            } else {
+                remember_missing_ok(root.remove_file(&file.target), &mut first_error);
+            }
+        }
+    }
+    first_error.map_or(Ok(()), Err)
+}
+
+fn cleanup_capability_files(
+    root: &Dir,
+    files: &mut Vec<StagedCapabilityFile>,
+) -> std::io::Result<()> {
+    let mut first_error = None;
+    for mut file in files.drain(..) {
+        remember_missing_ok(root.remove_file(&file.stage), &mut first_error);
+        if let Some(backup) = file.backup.take() {
+            remember_missing_ok(root.remove_file(backup), &mut first_error);
+        }
+    }
+    first_error.map_or(Ok(()), Err)
+}
+
+fn remember_capability_error(
+    result: std::io::Result<()>,
+    first_error: &mut Option<std::io::Error>,
+) {
+    if let Err(error) = result
+        && first_error.is_none()
+    {
+        *first_error = Some(error);
+    }
+}
+
+fn remember_missing_ok(result: std::io::Result<()>, first_error: &mut Option<std::io::Error>) {
+    if let Err(error) = result
+        && error.kind() != std::io::ErrorKind::NotFound
+        && first_error.is_none()
+    {
+        *first_error = Some(error);
+    }
+}
+
+fn finish_atomic_write<E>(result: Result<(), E>, directory: &Dir, temporary: &str) -> Result<(), E>
+where
+    E: From<ProjectError> + std::fmt::Display,
+{
+    let Err(error) = result else {
+        return Ok(());
+    };
+    match directory.remove_file(temporary) {
+        Ok(()) => Err(error),
+        Err(cleanup_error) if cleanup_error.kind() == std::io::ErrorKind::NotFound => Err(error),
+        Err(cleanup_error) => Err(E::from(ProjectError::service(
+            "project_atomic_write_cleanup_failed",
+            format!("{error} Temporary file cleanup also failed: {cleanup_error}"),
+        ))),
     }
 }
 
@@ -662,57 +945,6 @@ pub fn list_project_files(root: &Path) -> Result<Vec<ProjectFileEntry>, ProjectE
     Ok(result)
 }
 
-pub(crate) fn visit_project_files(
-    root: &Path,
-    visitor: &mut impl FnMut(ProjectFileEntry) -> Result<bool, ProjectError>,
-) -> Result<(), ProjectError> {
-    let project = ProjectCapabilityFs::open(root)?;
-    walk_visible_with_visitor(&project.root, "", visitor).map(|_| ())
-}
-
-fn walk_visible_with_visitor(
-    current: &Dir,
-    prefix: &str,
-    visitor: &mut impl FnMut(ProjectFileEntry) -> Result<bool, ProjectError>,
-) -> Result<bool, ProjectError> {
-    let entries = match current.entries() {
-        Ok(entries) => entries,
-        Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(true),
-        Err(error) => return Err(error.into()),
-    };
-    for entry in entries {
-        let entry = entry?;
-        let file_type = entry.file_type()?;
-        let name = entry.file_name().to_string_lossy().into_owned();
-        let relative = if prefix.is_empty() {
-            name
-        } else {
-            format!("{prefix}/{name}")
-        };
-        if file_type.is_dir() && !file_type.is_symlink() {
-            if !is_project_visible_path(&relative) {
-                continue;
-            }
-            if !visitor(ProjectFileEntry {
-                project_relative_path: relative.clone(),
-                kind: ProjectPathKind::Directory,
-            })? || !walk_visible_with_visitor(&entry.open_dir()?, &relative, visitor)?
-            {
-                return Ok(false);
-            }
-        } else if file_type.is_file()
-            && is_project_visible_path(&relative)
-            && !visitor(ProjectFileEntry {
-                project_relative_path: relative,
-                kind: ProjectPathKind::File,
-            })?
-        {
-            return Ok(false);
-        }
-    }
-    Ok(true)
-}
-
 fn walk_visible(
     current: &Dir,
     prefix: &str,
@@ -795,6 +1027,35 @@ mod tests {
         ] {
             assert!(normalize_project_relative_path(path).is_err(), "{path:?}");
         }
+    }
+
+    #[test]
+    fn dropping_staged_project_files_publishes_nothing_and_removes_temporary_files() {
+        let root = std::env::temp_dir().join(format!("debrute-cap-root-{}", Uuid::new_v4()));
+        fs::create_dir_all(&root).unwrap();
+        let capability = ProjectCapabilityFs::open(&root).unwrap();
+        let staged = capability
+            .stage_files(vec![ProjectCapabilityFileWrite {
+                project_relative_path: "generated/output.bin".to_owned(),
+                content: b"staged".to_vec(),
+                replace: false,
+            }])
+            .unwrap();
+
+        assert!(!root.join("generated/output.bin").exists());
+        assert!(list_project_files(&root).unwrap().iter().all(|entry| {
+            !Path::new(&entry.project_relative_path)
+                .extension()
+                .is_some_and(|extension| extension.eq_ignore_ascii_case("tmp"))
+        }));
+        drop(staged);
+        assert!(
+            fs::read_dir(root.join("generated"))
+                .unwrap()
+                .next()
+                .is_none()
+        );
+        fs::remove_dir_all(root).unwrap();
     }
 
     #[cfg(target_os = "macos")]

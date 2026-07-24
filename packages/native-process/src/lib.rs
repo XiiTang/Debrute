@@ -90,16 +90,6 @@ pub fn output_pipe_readiness(
     })
 }
 
-#[cfg(not(any(target_os = "macos", target_os = "windows")))]
-pub fn configure_output_pipe(_reader: &impl std::os::fd::AsRawFd) -> io::Result<()> {
-    Ok(())
-}
-
-#[cfg(not(any(target_os = "macos", target_os = "windows")))]
-pub fn output_pipe_readiness(_reader: &impl std::os::fd::AsRawFd) -> io::Result<PipeReadiness> {
-    Ok(PipeReadiness::Ready)
-}
-
 #[cfg(target_os = "macos")]
 pub fn configure_process_group(command: &mut Command) {
     use std::os::unix::process::CommandExt as _;
@@ -114,10 +104,6 @@ pub fn configure_process_group(command: &mut Command) {
 
     command.creation_flags(CREATE_NEW_PROCESS_GROUP | CREATE_SUSPENDED);
 }
-
-/// Linux is a best-effort distribution target and has no worker-tree contract.
-#[cfg(not(any(target_os = "macos", target_os = "windows")))]
-pub fn configure_process_group(_command: &mut Command) {}
 
 pub struct ChildProcessTree {
     #[cfg(target_os = "macos")]
@@ -246,15 +232,6 @@ impl ChildProcessTree {
         Ok(Self { job: job as isize })
     }
 
-    /// Linux is a best-effort distribution target and has no worker-tree contract.
-    #[cfg(not(any(target_os = "macos", target_os = "windows")))]
-    pub fn attach(_child: &Child) -> io::Result<Self> {
-        Err(io::Error::new(
-            io::ErrorKind::Unsupported,
-            "process-tree ownership is unsupported on this distribution target",
-        ))
-    }
-
     /// Requests owned process-group or Job Object termination.
     ///
     /// # Errors
@@ -271,15 +248,6 @@ impl ChildProcessTree {
     #[cfg(target_os = "windows")]
     pub fn terminate(&self) -> io::Result<()> {
         self.force_kill()
-    }
-
-    /// Linux is a best-effort distribution target and has no worker-tree contract.
-    #[cfg(not(any(target_os = "macos", target_os = "windows")))]
-    pub fn terminate(&self) -> io::Result<()> {
-        Err(io::Error::new(
-            io::ErrorKind::Unsupported,
-            "unsupported process tree",
-        ))
     }
 
     /// Force-kills the owned macOS process group.
@@ -304,15 +272,6 @@ impl ChildProcessTree {
         } else {
             Ok(())
         }
-    }
-
-    /// Linux is a best-effort distribution target and has no worker-tree contract.
-    #[cfg(not(any(target_os = "macos", target_os = "windows")))]
-    pub fn force_kill(&self) -> io::Result<()> {
-        Err(io::Error::new(
-            io::ErrorKind::Unsupported,
-            "unsupported process tree",
-        ))
     }
 }
 
@@ -490,7 +449,7 @@ fn signal_mac_owned_processes(tree: &MacProcessTree, signal: i32) -> io::Result<
     let tracked = tree
         .tracked
         .lock()
-        .map_err(|_| io::Error::other("macOS process ownership state is poisoned"))?
+        .expect("tracked process tree lock poisoned")
         .iter()
         .filter_map(|(process_id, identity)| {
             (process_identity(*process_id).ok().as_ref() == Some(identity))
@@ -528,17 +487,15 @@ fn signal_process(process_id: i32, signal: i32) -> io::Result<()> {
 fn refresh_descendant_set(
     tracked: &std::sync::Arc<std::sync::Mutex<std::collections::HashMap<i32, (u64, u64)>>>,
 ) {
-    let roots = match tracked.lock() {
-        Ok(mut tracked) => {
-            tracked.retain(|process_id, identity| {
-                process_identity(*process_id).ok().as_ref() == Some(identity)
-            });
-            tracked
-                .iter()
-                .map(|(process_id, identity)| (*process_id, *identity))
-                .collect::<Vec<_>>()
-        }
-        Err(_) => return,
+    let roots = {
+        let mut tracked = tracked.lock().expect("tracked process tree lock poisoned");
+        tracked.retain(|process_id, identity| {
+            process_identity(*process_id).ok().as_ref() == Some(identity)
+        });
+        tracked
+            .iter()
+            .map(|(process_id, identity)| (*process_id, *identity))
+            .collect::<Vec<_>>()
     };
     let mut discovered = std::collections::HashMap::new();
     let mut pending = roots;
@@ -565,9 +522,10 @@ fn refresh_descendant_set(
     discovered.retain(|process_id, identity| {
         process_identity(*process_id).ok().as_ref() == Some(identity)
     });
-    if let Ok(mut tracked) = tracked.lock() {
-        tracked.extend(discovered);
-    }
+    tracked
+        .lock()
+        .expect("tracked process tree lock poisoned")
+        .extend(discovered);
 }
 
 #[cfg(target_os = "macos")]
@@ -692,7 +650,9 @@ impl Drop for ChildProcessTree {
             .stop
             .store(true, std::sync::atomic::Ordering::Release);
         if let Some(monitor) = self.mac.monitor.take() {
-            let _ = monitor.join();
+            monitor
+                .join()
+                .expect("Child process monitor thread panicked");
         }
         let _ = self.force_kill();
     }

@@ -1038,7 +1038,7 @@ function videoNode(options: {
       state: 'available',
       size: 100,
       mimeType: 'video/mp4',
-      fileUrl: `http://127.0.0.1:17321/api/projects/p/files/raw/media/clip.mp4?v=${revision}`,
+      fileUrl: `/api/projects/p/files/raw/media/clip.mp4?v=${revision}`,
       revision
     },
     videoPresentation: {
@@ -1048,7 +1048,7 @@ function videoNode(options: {
       durationSeconds: 5,
       textTracks: [{
         projectRelativePath: 'media/clip.en.vtt',
-        fileUrl: 'http://127.0.0.1:17321/api/projects/p/files/raw/media/clip.en.vtt?v=track-rev',
+        fileUrl: '/api/projects/p/files/raw/media/clip.en.vtt?v=track-rev',
         revision: 'track-rev',
         kind: 'subtitles',
         label: 'English',

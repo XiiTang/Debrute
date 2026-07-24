@@ -1,7 +1,7 @@
 import React from 'react';
 import { cx } from './cx';
 
-export interface SwitchProps extends React.InputHTMLAttributes<HTMLInputElement> {
+interface SwitchProps extends React.InputHTMLAttributes<HTMLInputElement> {
   label: React.ReactNode;
 }
 

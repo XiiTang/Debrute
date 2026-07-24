@@ -49,28 +49,6 @@ export interface CanvasMinimapDragState {
 
 const DEFAULT_MINIMAP_PADDING = 10;
 
-export function buildCanvasMinimapModel(input: {
-  nodes: CanvasProjection['nodes'];
-  selection: CanvasSelection | undefined;
-  camera: CanvasCamera;
-  surfaceSize: CanvasSize | undefined;
-  minimapSize: CanvasSize;
-  padding?: number;
-}): CanvasMinimapModel | undefined {
-  const staticModel = buildCanvasMinimapStaticModel(input);
-  if (!staticModel) {
-    return undefined;
-  }
-  const viewportModel = buildCanvasMinimapViewportModel({
-    transform: staticModel.transform,
-    camera: input.camera,
-    surfaceSize: input.surfaceSize
-  });
-  return viewportModel
-    ? { ...staticModel, ...viewportModel }
-    : undefined;
-}
-
 export function buildCanvasMinimapStaticModel(input: {
   nodes: CanvasProjection['nodes'];
   selection: CanvasSelection | undefined;

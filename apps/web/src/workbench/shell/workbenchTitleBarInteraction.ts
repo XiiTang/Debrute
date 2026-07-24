@@ -1,4 +1,4 @@
-import type { WorkbenchMenuId } from '@debrute/app-protocol';
+import type { WorkbenchMenuId } from './workbenchTitleBarState';
 
 export type OpenTitleBarMenu = WorkbenchMenuId | undefined;
 export type TitleBarMenuKeyAction = 'close-menu' | 'open-submenu' | 'close-submenu';

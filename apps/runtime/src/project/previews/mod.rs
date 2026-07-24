@@ -25,7 +25,8 @@ pub use video::*;
 use crate::{process::ProcessCancellation, workers::RuntimeWorkerServices};
 
 use super::{
-    CanvasDesiredNode, CanvasLayoutSize, CanvasMediaKind, CanvasNodeKind,
+    CanvasDesiredNode, CanvasLayoutSize, CanvasMediaKind, CanvasNodeKind, CanvasVideoPresentation,
+    CanvasVideoPresentationKind, CanvasVideoTextTrack, CanvasVideoTextTrackKind,
     DefaultProjectNodeAdapter, ProjectCapabilityFs, ProjectError, ProjectFileEntry,
     ProjectNodeAdapter, ProjectPathKind, assert_project_tree_visible_path,
     normalize_project_relative_path, open_no_symlink_existing_project_file,
@@ -157,22 +158,19 @@ impl ProjectNodeAdapter for NativeProjectNodeAdapter {
         &self,
         project_root: &Path,
         project_relative_path: &str,
-    ) -> Result<Option<serde_json::Value>, ProjectError> {
+    ) -> Result<Option<CanvasVideoPresentation>, ProjectError> {
         let metadata = self.previews.video.read_metadata(
             project_root,
             project_relative_path,
             &PreviewCancellation::default(),
         )?;
-        let mut presentation = serde_json::json!({
-            "kind": "video",
-            "width": metadata.width,
-            "height": metadata.height,
-            "textTracks": video_text_tracks(project_root, project_relative_path)?
-        });
-        if let Some(duration) = metadata.duration_seconds {
-            presentation["durationSeconds"] = serde_json::json!(duration);
-        }
-        Ok(Some(presentation))
+        Ok(Some(CanvasVideoPresentation {
+            kind: CanvasVideoPresentationKind::Video,
+            width: metadata.width,
+            height: metadata.height,
+            duration_seconds: metadata.duration_seconds,
+            text_tracks: video_text_tracks(project_root, project_relative_path)?,
+        }))
     }
 
     fn image_preview_info(
@@ -301,21 +299,6 @@ impl ProjectPreviewService {
                     && !file_type.is_symlink();
                 if !current_revision {
                     remove_capability_entry(&source_directory, &revision)?;
-                    continue;
-                }
-                let revision_directory = revision.open_dir()?;
-                let expected_engine = format!("raster-engine-v{RASTER_PREVIEW_ENGINE_VERSION}");
-                for engine in revision_directory
-                    .entries()?
-                    .collect::<Result<Vec<_>, _>>()?
-                {
-                    let engine_type = engine.file_type()?;
-                    if engine.file_name() != std::ffi::OsStr::new(&expected_engine)
-                        || !engine_type.is_dir()
-                        || engine_type.is_symlink()
-                    {
-                        remove_capability_entry(&revision_directory, &engine)?;
-                    }
                 }
             }
         }
@@ -525,8 +508,6 @@ impl ProjectPreviewService {
         let metadata = self
             .raster
             .metadata_file(&source, &mut file, cancellation)?;
-        let preview_base = text_preview_base_project_path(canvas_id, target)?;
-        reconcile_raster_engine_directory(project_root, &preview_base)?;
         if width > metadata.width {
             return Err(ProjectError::service(
                 "canvas_preview_invalid_width",
@@ -598,34 +579,6 @@ fn remove_capability_entry(
         directory.remove_dir(name)?;
     } else {
         directory.remove_file(name)?;
-    }
-    Ok(())
-}
-
-pub(super) fn reconcile_raster_engine_directory(
-    project_root: &Path,
-    project_relative_directory: &str,
-) -> Result<(), ProjectError> {
-    let project = ProjectCapabilityFs::open(project_root)?;
-    let directory = match project.open_directory(project_relative_directory) {
-        Ok(directory) => directory,
-        Err(ProjectError::Io(error)) if error.kind() == std::io::ErrorKind::NotFound => {
-            return Ok(());
-        }
-        Err(error) => return Err(error),
-    };
-    let expected = format!("raster-engine-v{RASTER_PREVIEW_ENGINE_VERSION}");
-    for entry in directory.entries()?.collect::<Result<Vec<_>, _>>()? {
-        let Some(name) = entry.file_name().to_str().map(str::to_owned) else {
-            continue;
-        };
-        if !name.starts_with("raster-engine-v") {
-            continue;
-        }
-        let file_type = entry.file_type()?;
-        if name != expected || !file_type.is_dir() || file_type.is_symlink() {
-            remove_capability_entry(&directory, &entry)?;
-        }
     }
     Ok(())
 }
@@ -866,7 +819,7 @@ fn existing_file(project_root: &Path, relative: &str) -> Result<Option<PathBuf>,
 fn video_text_tracks(
     project_root: &Path,
     video_path: &str,
-) -> Result<Vec<serde_json::Value>, ProjectError> {
+) -> Result<Vec<CanvasVideoTextTrack>, ProjectError> {
     let video = normalize_project_relative_path(video_path)?;
     let (directory_relative, name) = video
         .rsplit_once('/')
@@ -898,35 +851,40 @@ fn video_text_tracks(
             Ok(VideoTrack {
                 project_relative_path: relative,
                 revision,
-                kind: parsed.kind,
+                kind: video_text_track_kind(&parsed.kind),
                 label: parsed.label,
                 srclang: parsed.srclang,
             })
         })
         .collect::<Result<Vec<_>, ProjectError>>()?;
     tracks.sort_by(|left, right| {
-        track_rank(&left.kind)
-            .cmp(&track_rank(&right.kind))
+        track_rank(left.kind)
+            .cmp(&track_rank(right.kind))
             .then(left.project_relative_path.cmp(&right.project_relative_path))
     });
     let caption_count = tracks
         .iter()
-        .filter(|track| matches!(track.kind.as_str(), "captions" | "subtitles"))
+        .filter(|track| {
+            matches!(
+                track.kind,
+                CanvasVideoTextTrackKind::Captions | CanvasVideoTextTrackKind::Subtitles
+            )
+        })
         .count();
     Ok(tracks
         .into_iter()
-        .map(|track| {
-            let mut value = serde_json::json!({
-                "projectRelativePath": track.project_relative_path,
-                "revision": track.revision,
-                "kind": track.kind,
-                "label": track.label,
-                "default": caption_count == 1 && matches!(track.kind.as_str(), "captions" | "subtitles")
-            });
-            if let Some(srclang) = track.srclang {
-                value["srclang"] = serde_json::Value::String(srclang);
-            }
-            value
+        .map(|track| CanvasVideoTextTrack {
+            project_relative_path: track.project_relative_path,
+            file_url: None,
+            revision: track.revision,
+            kind: track.kind,
+            label: track.label,
+            srclang: track.srclang,
+            default: caption_count == 1
+                && matches!(
+                    track.kind,
+                    CanvasVideoTextTrackKind::Captions | CanvasVideoTextTrackKind::Subtitles
+                ),
         })
         .collect())
 }
@@ -934,7 +892,7 @@ fn video_text_tracks(
 struct VideoTrack {
     project_relative_path: String,
     revision: String,
-    kind: String,
+    kind: CanvasVideoTextTrackKind,
     label: String,
     srclang: Option<String>,
 }
@@ -994,11 +952,20 @@ fn parse_video_track(video_path: &str, candidate: &str) -> Option<ParsedVideoTra
     })
 }
 
-fn track_rank(kind: &str) -> u8 {
+fn video_text_track_kind(kind: &str) -> CanvasVideoTextTrackKind {
     match kind {
-        "captions" | "subtitles" => 0,
-        "chapters" => 1,
-        _ => 2,
+        "captions" => CanvasVideoTextTrackKind::Captions,
+        "chapters" => CanvasVideoTextTrackKind::Chapters,
+        "metadata" => CanvasVideoTextTrackKind::Metadata,
+        _ => CanvasVideoTextTrackKind::Subtitles,
+    }
+}
+
+fn track_rank(kind: CanvasVideoTextTrackKind) -> u8 {
+    match kind {
+        CanvasVideoTextTrackKind::Captions | CanvasVideoTextTrackKind::Subtitles => 0,
+        CanvasVideoTextTrackKind::Chapters => 1,
+        CanvasVideoTextTrackKind::Metadata => 2,
     }
 }
 
@@ -1320,10 +1287,6 @@ mod tests {
         service
             .save_text_preview_source(&root, "canvas-1", &target, &root.join("assets/source.png"))
             .unwrap();
-        let old_engine = root
-            .join(text_preview_base_project_path("canvas-1", &target).unwrap())
-            .join("raster-engine-v0");
-        fs::create_dir_all(&old_engine).unwrap();
         let variant = service
             .resolve_text_preview_variant(
                 &root,
@@ -1344,7 +1307,6 @@ mod tests {
                 .absolute_path
                 .ends_with("raster-engine-v1/preview-w4.png")
         );
-        assert!(!old_engine.exists());
         fs::remove_dir_all(root).unwrap();
     }
 
@@ -1467,45 +1429,6 @@ mod tests {
                 )
                 .is_err()
         );
-        fs::remove_dir_all(root).unwrap();
-    }
-
-    #[test]
-    fn image_cache_reconcile_keeps_only_the_current_raster_engine_version() {
-        let root = fixture();
-        let source = File::open(root.join("assets/source.png")).unwrap();
-        let revision = project_file_revision_from_metadata(&source.metadata().unwrap()).unwrap();
-        let service = ProjectPreviewService::new(
-            &RuntimeWorkerServices::new(),
-            MediaToolPaths::unavailable(),
-        );
-        let preview = service
-            .resolve_image_preview(
-                &root,
-                "assets/source.png",
-                &revision,
-                4,
-                &PreviewCancellation::default(),
-            )
-            .unwrap();
-        let current_engine = preview.absolute_path.parent().unwrap().to_path_buf();
-        let revision_directory = current_engine.parent().unwrap();
-        let old_engine = revision_directory.join("raster-engine-v0");
-        fs::create_dir_all(&old_engine).unwrap();
-        fs::write(old_engine.join("preview-w4.png"), b"old").unwrap();
-
-        service
-            .reconcile_image_cache(
-                &root,
-                &[ProjectFileEntry {
-                    project_relative_path: "assets/source.png".to_owned(),
-                    kind: ProjectPathKind::File,
-                }],
-            )
-            .unwrap();
-
-        assert!(current_engine.is_dir());
-        assert!(!old_engine.exists());
         fs::remove_dir_all(root).unwrap();
     }
 

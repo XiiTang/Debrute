@@ -2,17 +2,17 @@ import type { WorkbenchProjectSessionSnapshot } from '@debrute/app-protocol';
 import {
   canvasNodeStackOrderTopFirst,
   type CanvasDocument,
-  type Diagnostic,
+  type ProjectDiagnostic,
   type ProjectedCanvasNode
 } from '@debrute/canvas-core';
 import type { WorkbenchState } from '../../types';
 import type { CanvasSelection, CanvasSelectionItem } from '../canvas/runtime/canvasSelection';
 
 export type SelectionContext =
-  | { kind: 'empty'; diagnostics: Diagnostic[] }
-  | { kind: 'node'; canvasId: string; node: ProjectedCanvasNode; diagnostics: Diagnostic[] }
-  | { kind: 'multi'; items: CanvasSelectionItem[]; diagnostics: Diagnostic[] }
-  | { kind: 'diagnostic'; diagnostic: Diagnostic; diagnostics: Diagnostic[] };
+  | { kind: 'empty'; diagnostics: ProjectDiagnostic[] }
+  | { kind: 'node'; canvasId: string; node: ProjectedCanvasNode; diagnostics: ProjectDiagnostic[] }
+  | { kind: 'multi'; items: CanvasSelectionItem[]; diagnostics: ProjectDiagnostic[] }
+  | { kind: 'diagnostic'; diagnostic: ProjectDiagnostic; diagnostics: ProjectDiagnostic[] };
 
 export function getSelectionContext(
   state: WorkbenchState,

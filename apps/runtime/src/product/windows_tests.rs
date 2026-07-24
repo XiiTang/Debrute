@@ -16,7 +16,7 @@ use super::{
 fn windows_product_uses_closed_exe_entrypoints_and_retargets_one_junction() {
     let fixture = WindowsFixture::new();
     let old_seed = fixture.write_seed("0.0.3");
-    fixture.store.bootstrap_seed(&old_seed).unwrap();
+    fixture.store.activate_desktop_seed(&old_seed).unwrap();
     assert_eq!(
         fixture.store.current_version().unwrap().as_deref(),
         Some("0.0.3")
@@ -40,7 +40,7 @@ fn windows_product_uses_closed_exe_entrypoints_and_retargets_one_junction() {
 fn windows_verified_runtime_handle_denies_path_replacement_until_launch_consumes_it() {
     let fixture = WindowsFixture::new();
     let seed = fixture.write_seed("0.0.3");
-    fixture.store.bootstrap_seed(&seed).unwrap();
+    fixture.store.activate_desktop_seed(&seed).unwrap();
     let runtime = fixture
         .store
         .version_path("0.0.3")

@@ -17,17 +17,12 @@ export interface TerminalHubClient {
   subscribe(
     terminalId: string,
     listener: (event: TerminalEvent) => void,
-    onError?: (error: Error) => void
+    onError: (error: Error) => void
   ): TerminalEventSubscription;
   dispose(): void;
 }
 
-export function createTerminalHubClient(input: {
-  WebSocket?: typeof WebSocket;
-  origin?: string;
-} = {}): TerminalHubClient {
-  const WebSocketImpl = input.WebSocket ?? WebSocket;
-  const origin = input.origin ?? globalThis.location?.origin ?? 'http://debrute.local';
+export function createTerminalHubClient(): TerminalHubClient {
   let binding: { projectId: string; connectionCredential: string } | undefined;
   let socket: WebSocket | undefined;
   let disposed = false;
@@ -64,9 +59,9 @@ export function createTerminalHubClient(input: {
     if (disposed || !binding || socket) {
       return;
     }
-    const url = new URL(`/api/projects/${encodeURIComponent(binding.projectId)}/terminals/ws`, origin);
+    const url = new URL(`/api/projects/${encodeURIComponent(binding.projectId)}/terminals/ws`, location.origin);
     url.protocol = url.protocol === 'https:' ? 'wss:' : 'ws:';
-    const next = new WebSocketImpl(url.toString());
+    const next = new WebSocket(url.toString());
     socket = next;
     next.addEventListener('open', () => {
       if (!binding || socket !== next) {
@@ -104,7 +99,7 @@ export function createTerminalHubClient(input: {
     });
   };
   const send = (frame: object) => {
-    if (!socket || socket.readyState !== WebSocketImpl.OPEN) {
+    if (!socket || socket.readyState !== WebSocket.OPEN) {
       throw new Error('Terminal connection is not ready.');
     }
     socket.send(JSON.stringify(frame));
@@ -231,27 +226,23 @@ export function createTerminalHubClient(input: {
       const wasEmpty = terminalListeners.size === 0;
       terminalListeners.add(listener);
       listeners.set(terminalId, terminalListeners);
-      if (onError) {
-        const current = errorListeners.get(terminalId) ?? new Set();
-        current.add(onError);
-        errorListeners.set(terminalId, current);
-      }
+      const current = errorListeners.get(terminalId) ?? new Set();
+      current.add(onError);
+      errorListeners.set(terminalId, current);
       const checkpoint = checkpoints.get(terminalId);
       if (checkpoint) {
         emitCheckpoint(checkpoint);
-      } else if (wasEmpty && socket?.readyState === WebSocketImpl.OPEN) {
+      } else if (wasEmpty && socket?.readyState === WebSocket.OPEN) {
         send({ type: 'observe', terminalId });
       }
       return {
         close() {
           listeners.get(terminalId)?.delete(listener);
-          if (onError) {
-            errorListeners.get(terminalId)?.delete(onError);
-          }
+          errorListeners.get(terminalId)?.delete(onError);
           if (listeners.get(terminalId)?.size === 0) {
             listeners.delete(terminalId);
             errorListeners.delete(terminalId);
-            if (socket?.readyState === WebSocketImpl.OPEN) {
+            if (socket?.readyState === WebSocket.OPEN) {
               send({ type: 'unobserve', terminalId });
             }
           }

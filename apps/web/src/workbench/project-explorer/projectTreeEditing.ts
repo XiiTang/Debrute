@@ -1,4 +1,4 @@
-import type { WorkbenchContextMenuTarget, WorkbenchContextMenuTargetKind } from '../shell/contextMenu';
+import type { WorkbenchContextMenuTarget } from '../shell/contextMenu';
 
 export type ProjectTreeInlineEditState =
   | {

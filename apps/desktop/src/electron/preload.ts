@@ -1,16 +1,11 @@
 import electron from 'electron';
+import type { DebruteShellApi } from '@debrute/app-protocol';
 import {
   createNativeWindowPreloadApi,
-  nativeWindowIpcChannels,
-  type NativeWindowPreloadApi
+  nativeWindowIpcChannels
 } from './nativeWindowShell.js';
 
 const { contextBridge, ipcRenderer, webUtils } = electron;
-
-interface DebruteShellApi extends NativeWindowPreloadApi {
-  onOpenProjectRequested(listener: (projectRoot: string) => void): () => void;
-  getDroppedFilePath(file: File): string | undefined;
-}
 
 const debruteShellApi: DebruteShellApi = {
   onOpenProjectRequested: (listener) => {

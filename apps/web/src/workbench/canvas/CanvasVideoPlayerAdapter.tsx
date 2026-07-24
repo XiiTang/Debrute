@@ -19,6 +19,7 @@ import { normalizeCanvasVideoPlaybackTime, type ProjectedCanvasNode } from '@deb
 export interface CanvasVideoPlayerHandle {
   readCurrentTimeSeconds(): number | undefined;
   pauseAt(seconds: number): void;
+  restorePersistedTime(seconds: number): void;
   togglePlayback(): void;
   seekBy(seconds: number): void;
   toggleMuted(): void;
@@ -173,6 +174,15 @@ export const CanvasVideoPlayerAdapter = forwardRef<CanvasVideoPlayerHandle, Canv
       video.pause();
       video.currentTime = currentTimeSeconds;
       publishPlaybackBoundary(currentTimeSeconds);
+      onPlayingChange(false);
+    },
+    restorePersistedTime: (seconds) => {
+      const video = videoRef.current;
+      if (!video) return;
+      const currentTimeSeconds = normalizeCanvasVideoPlaybackTime(Math.max(0, seconds));
+      video.pause();
+      lastPlaybackBoundaryRef.current = currentTimeSeconds;
+      video.currentTime = currentTimeSeconds;
       onPlayingChange(false);
     },
     togglePlayback: () => {

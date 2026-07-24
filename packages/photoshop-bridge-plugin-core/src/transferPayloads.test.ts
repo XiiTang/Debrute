@@ -6,7 +6,7 @@ import {
   downloadPhotoshopImportBytes,
   photoshopImportFailurePayload,
   PhotoshopBridgeTransferError
-} from './transferPayloads';
+} from './transferPayloads.js';
 
 describe('createPhotoshopUploadRequest', () => {
   it('creates a PNG upload request scoped to a linked project directory', () => {

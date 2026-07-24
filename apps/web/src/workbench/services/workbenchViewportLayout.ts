@@ -5,22 +5,22 @@ import {
 } from '../shell/floatingPanels';
 import {
   sameWindowRect,
-  type WorkbenchViewportRect
+  type WorkbenchWindowRect
 } from '../shell/windowBounds';
 import { constrainOpenTextEditorWindowsToViewport } from './textEditorWindows';
 
 type WorkbenchStateSetter<T> = (value: T | ((current: T) => T)) => void;
 
 export interface WorkbenchViewportLayoutController {
-  viewportRef: { current: WorkbenchViewportRect };
-  setViewportRect: WorkbenchStateSetter<WorkbenchViewportRect>;
+  viewportRef: { current: WorkbenchWindowRect };
+  setViewportRect: WorkbenchStateSetter<WorkbenchWindowRect>;
   setFloatingPanels: WorkbenchStateSetter<FloatingPanelState>;
   setTextEditorWindows: WorkbenchStateSetter<Record<string, FloatingTextEditorWindowState>>;
 }
 
 export function reconcileWorkbenchViewportLayout(
   controller: WorkbenchViewportLayoutController,
-  viewport: WorkbenchViewportRect
+  viewport: WorkbenchWindowRect
 ): void {
   controller.viewportRef.current = viewport;
   controller.setViewportRect((current) => (

@@ -5,7 +5,13 @@ use serde::{Deserialize, Serialize};
 use super::store::{GlobalConfigSnapshot, ModelConfig};
 
 const BUNDLED_MODEL_CATALOG: &str = include_str!("../../../../assets/runtime-model-catalog.json");
-const API_KEY_PREVIEW_MASK: &str = "****************************";
+
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct ModelRequestExample {
+    pub command: String,
+    pub input: serde_json::Value,
+}
 
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
@@ -21,7 +27,7 @@ pub struct ImageModelCatalogEntry {
     pub list_parameters: BTreeMap<String, String>,
     pub capabilities: serde_json::Value,
     pub arguments_schema: serde_json::Value,
-    pub request_example: serde_json::Value,
+    pub request_example: ModelRequestExample,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
@@ -46,7 +52,7 @@ pub struct VideoModelCatalogEntry {
     pub capabilities: serde_json::Value,
     pub arguments_schema: serde_json::Value,
     pub usage_notes: String,
-    pub request_example: serde_json::Value,
+    pub request_example: ModelRequestExample,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize, Serialize)]
@@ -71,7 +77,7 @@ pub struct AudioModelCatalogEntry {
     pub capabilities: serde_json::Value,
     pub arguments_schema: serde_json::Value,
     pub usage_notes: String,
-    pub request_example: serde_json::Value,
+    pub request_example: ModelRequestExample,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
@@ -110,21 +116,6 @@ impl ModelCatalog {
     }
 
     #[must_use]
-    pub fn tts(&self) -> Vec<&AudioModelCatalogEntry> {
-        self.audio_kind(AudioModelKind::Tts)
-    }
-
-    #[must_use]
-    pub fn music(&self) -> Vec<&AudioModelCatalogEntry> {
-        self.audio_kind(AudioModelKind::Music)
-    }
-
-    #[must_use]
-    pub fn sound_effects(&self) -> Vec<&AudioModelCatalogEntry> {
-        self.audio_kind(AudioModelKind::SoundEffect)
-    }
-
-    #[must_use]
     pub fn contains_image(&self, model_id: &str) -> bool {
         self.image
             .iter()
@@ -145,11 +136,11 @@ impl ModelCatalog {
             .any(|entry| entry.debrute_model_id == model_id)
     }
 
-    fn audio_kind(&self, kind: AudioModelKind) -> Vec<&AudioModelCatalogEntry> {
-        self.audio
-            .iter()
-            .filter(|entry| entry.kind == kind)
-            .collect()
+    #[must_use]
+    pub fn contains(&self, model_id: &str) -> bool {
+        self.contains_image(model_id)
+            || self.contains_video(model_id)
+            || self.contains_audio(model_id)
     }
 
     fn validate(&self) -> Result<(), std::io::Error> {
@@ -182,13 +173,6 @@ impl ModelCatalog {
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "camelCase")]
-pub struct ApiKeySettingState {
-    pub api_key_set: bool,
-    pub api_key_preview: Option<String>,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
-#[serde(rename_all = "camelCase")]
 pub struct ImageModelSettingRecord {
     pub debrute_model_id: String,
     pub summary: String,
@@ -199,7 +183,6 @@ pub struct ImageModelSettingRecord {
     pub base_url_override: Option<String>,
     pub request_model_id_override: Option<String>,
     pub api_key_set: bool,
-    pub api_key_preview: Option<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
@@ -221,7 +204,6 @@ pub struct VideoModelSettingRecord {
     pub base_url_override: Option<String>,
     pub request_model_id_override: Option<String>,
     pub api_key_set: bool,
-    pub api_key_preview: Option<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
@@ -235,29 +217,13 @@ pub struct AudioModelSettingRecord {
     pub base_url_override: Option<String>,
     pub request_model_id_override: Option<String>,
     pub api_key_set: bool,
-    pub api_key_preview: Option<String>,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
-pub struct ImageModelSettingsView {
-    pub models: Vec<ImageModelSettingRecord>,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
-pub struct VideoModelSettingsView {
-    pub models: Vec<VideoModelSettingRecord>,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
-pub struct AudioModelSettingsView {
-    pub models: Vec<AudioModelSettingRecord>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 pub struct ModelSettingsView {
-    pub image: ImageModelSettingsView,
-    pub video: VideoModelSettingsView,
-    pub audio: AudioModelSettingsView,
+    pub image: Vec<ImageModelSettingRecord>,
+    pub video: Vec<VideoModelSettingRecord>,
+    pub audio: Vec<AudioModelSettingRecord>,
 }
 
 pub(crate) fn settings_view(
@@ -265,104 +231,65 @@ pub(crate) fn settings_view(
     catalog: &ModelCatalog,
 ) -> ModelSettingsView {
     ModelSettingsView {
-        image: ImageModelSettingsView {
-            models: catalog
-                .image
-                .iter()
-                .map(|entry| {
-                    let configured = find_config(
-                        &snapshot.settings.models.image.image_models,
-                        &entry.debrute_model_id,
-                    );
-                    let key = preview_state(
-                        snapshot
-                            .secrets
-                            .image_model_api_keys
-                            .get(&entry.debrute_model_id),
-                    );
-                    ImageModelSettingRecord {
-                        debrute_model_id: entry.debrute_model_id.clone(),
-                        summary: entry.summary.clone(),
-                        supports_editing: entry.supports_editing,
-                        supports_text_rendering: entry.supports_text_rendering,
-                        default_base_url: entry.default_base_url.clone(),
-                        default_request_model_id: entry.default_request_model_id.clone(),
-                        base_url_override: configured
-                            .and_then(|value| value.base_url_override.clone()),
-                        request_model_id_override: configured
-                            .and_then(|value| value.request_model_id_override.clone()),
-                        api_key_set: key.api_key_set,
-                        api_key_preview: key.api_key_preview,
-                    }
-                })
-                .collect(),
-        },
-        video: VideoModelSettingsView {
-            models: catalog
-                .video
-                .iter()
-                .map(|entry| {
-                    let configured = find_config(
-                        &snapshot.settings.models.video.video_models,
-                        &entry.debrute_model_id,
-                    );
-                    let key = preview_state(
-                        snapshot
-                            .secrets
-                            .video_model_api_keys
-                            .get(&entry.debrute_model_id),
-                    );
-                    VideoModelSettingRecord {
-                        debrute_model_id: entry.debrute_model_id.clone(),
-                        summary: entry.summary.clone(),
-                        supports_text_to_video: entry.supports_text_to_video,
-                        supports_image_references: entry.supports_image_references,
-                        supports_video_references: entry.supports_video_references,
-                        supports_audio_references: entry.supports_audio_references,
-                        supports_generated_audio: entry.supports_generated_audio,
-                        default_base_url: entry.default_base_url.clone(),
-                        default_request_model_id: entry.default_request_model_id.clone(),
-                        base_url_override: configured
-                            .and_then(|value| value.base_url_override.clone()),
-                        request_model_id_override: configured
-                            .and_then(|value| value.request_model_id_override.clone()),
-                        api_key_set: key.api_key_set,
-                        api_key_preview: key.api_key_preview,
-                    }
-                })
-                .collect(),
-        },
-        audio: AudioModelSettingsView {
-            models: catalog
-                .audio
-                .iter()
-                .map(|entry| {
-                    let configured = find_config(
-                        &snapshot.settings.models.audio.audio_models,
-                        &entry.debrute_model_id,
-                    );
-                    let key = preview_state(
-                        snapshot
-                            .secrets
-                            .audio_model_api_keys
-                            .get(&entry.debrute_model_id),
-                    );
-                    AudioModelSettingRecord {
-                        debrute_model_id: entry.debrute_model_id.clone(),
-                        kind: entry.kind,
-                        summary: entry.summary.clone(),
-                        default_base_url: entry.default_base_url.clone(),
-                        default_request_model_id: entry.default_request_model_id.clone(),
-                        base_url_override: configured
-                            .and_then(|value| value.base_url_override.clone()),
-                        request_model_id_override: configured
-                            .and_then(|value| value.request_model_id_override.clone()),
-                        api_key_set: key.api_key_set,
-                        api_key_preview: key.api_key_preview,
-                    }
-                })
-                .collect(),
-        },
+        image: catalog
+            .image
+            .iter()
+            .map(|entry| {
+                let configured = find_config(&snapshot.settings.models, &entry.debrute_model_id);
+                ImageModelSettingRecord {
+                    debrute_model_id: entry.debrute_model_id.clone(),
+                    summary: entry.summary.clone(),
+                    supports_editing: entry.supports_editing,
+                    supports_text_rendering: entry.supports_text_rendering,
+                    default_base_url: entry.default_base_url.clone(),
+                    default_request_model_id: entry.default_request_model_id.clone(),
+                    base_url_override: configured.and_then(|value| value.base_url_override.clone()),
+                    request_model_id_override: configured
+                        .and_then(|value| value.request_model_id_override.clone()),
+                    api_key_set: api_key_is_set(snapshot, &entry.debrute_model_id),
+                }
+            })
+            .collect(),
+        video: catalog
+            .video
+            .iter()
+            .map(|entry| {
+                let configured = find_config(&snapshot.settings.models, &entry.debrute_model_id);
+                VideoModelSettingRecord {
+                    debrute_model_id: entry.debrute_model_id.clone(),
+                    summary: entry.summary.clone(),
+                    supports_text_to_video: entry.supports_text_to_video,
+                    supports_image_references: entry.supports_image_references,
+                    supports_video_references: entry.supports_video_references,
+                    supports_audio_references: entry.supports_audio_references,
+                    supports_generated_audio: entry.supports_generated_audio,
+                    default_base_url: entry.default_base_url.clone(),
+                    default_request_model_id: entry.default_request_model_id.clone(),
+                    base_url_override: configured.and_then(|value| value.base_url_override.clone()),
+                    request_model_id_override: configured
+                        .and_then(|value| value.request_model_id_override.clone()),
+                    api_key_set: api_key_is_set(snapshot, &entry.debrute_model_id),
+                }
+            })
+            .collect(),
+        audio: catalog
+            .audio
+            .iter()
+            .map(|entry| {
+                let configured = find_config(&snapshot.settings.models, &entry.debrute_model_id);
+                AudioModelSettingRecord {
+                    debrute_model_id: entry.debrute_model_id.clone(),
+                    kind: entry.kind,
+                    summary: entry.summary.clone(),
+                    default_base_url: entry.default_base_url.clone(),
+                    default_request_model_id: entry.default_request_model_id.clone(),
+                    base_url_override: configured.and_then(|value| value.base_url_override.clone()),
+                    request_model_id_override: configured
+                        .and_then(|value| value.request_model_id_override.clone()),
+                    api_key_set: api_key_is_set(snapshot, &entry.debrute_model_id),
+                }
+            })
+            .collect(),
     }
 }
 
@@ -372,38 +299,6 @@ fn find_config<'a>(configs: &'a [ModelConfig], model_id: &str) -> Option<&'a Mod
         .find(|config| config.debrute_model_id == model_id)
 }
 
-fn preview_state(api_key: Option<&String>) -> ApiKeySettingState {
-    let (api_key_set, api_key_preview) = api_key_preview(api_key.map(String::as_str));
-    ApiKeySettingState {
-        api_key_set,
-        api_key_preview,
-    }
-}
-
-#[must_use]
-pub fn api_key_preview(api_key: Option<&str>) -> (bool, Option<String>) {
-    let trimmed = api_key.map(str::trim).unwrap_or_default();
-    if trimmed.is_empty() {
-        return (false, None);
-    }
-    if trimmed.len() < 8 {
-        return (true, Some("****".to_owned()));
-    }
-    let prefix = trimmed.chars().take(2).collect::<String>();
-    let suffix = trimmed
-        .chars()
-        .rev()
-        .take(2)
-        .collect::<Vec<_>>()
-        .into_iter()
-        .rev()
-        .collect::<String>();
-    (
-        true,
-        Some(format!("{prefix}{API_KEY_PREVIEW_MASK}{suffix}")),
-    )
-}
-
-pub(crate) fn empty_secret_map() -> BTreeMap<String, String> {
-    BTreeMap::new()
+fn api_key_is_set(snapshot: &GlobalConfigSnapshot, model_id: &str) -> bool {
+    snapshot.secrets.model_api_keys.contains_key(model_id)
 }

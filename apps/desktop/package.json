@@ -8,9 +8,8 @@
   "author": "Debrute",
   "main": "dist-electron/main.js",
   "scripts": {
-    "build": "pnpm --filter @debrute/web build && node ../../scripts/run-cargo-with-native-raster.mjs -- build -p debrute-runtime --release --bins && tsc -p tsconfig.electron.json --noEmit && node scripts/bundle-electron.mjs",
-    "build:electron": "node ../../scripts/run-cargo-with-native-raster.mjs -- build -p debrute-runtime --release --bins && node scripts/bundle-electron.mjs",
-    "build:electron:dev": "node scripts/bundle-electron.mjs --skip-web-dist",
+    "build": "pnpm --filter @debrute/web build && node ../../scripts/run-cargo-with-native-raster.mjs -- build -p debrute-runtime --release --bins && tsc -p tsconfig.json && node scripts/bundle-electron.mjs",
+    "build:electron:dev": "node scripts/bundle-electron.mjs --skip-product-seed",
     "pack": "pnpm build && electron-builder --dir",
     "dist": "pnpm build && electron-builder",
     "dev:electron": "tsx ../../scripts/dev-electron-workbench.ts"
@@ -28,7 +27,6 @@
       "output": "release"
     },
     "files": [
-      "dist/**/*",
       "dist-electron/**/*",
       "!dist-electron/product-seed/**/*",
       "!dist-electron/**/*.map",
@@ -72,14 +70,6 @@
       "target": [
         "nsis"
       ]
-    },
-    "linux": {
-      "artifactName": "debrute-desktop-${version}-linux-x64.${ext}",
-      "target": [
-        "AppImage"
-      ],
-      "category": "Utility",
-      "syncDesktopName": true
     }
   },
   "dependencies": {
@@ -90,7 +80,6 @@
     "electron": "42.4.0",
     "electron-builder": "^26.15.3",
     "esbuild": "^0.28.1",
-    "typescript": "^6.0.3",
-    "vite": "^8.1.3"
+    "typescript": "^6.0.3"
   }
 }

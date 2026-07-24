@@ -3,8 +3,6 @@
 //! Runtime protocol, lifecycle, request authorization, and retry policy remain
 //! outside this native safety capsule. This crate owns only HANDLE/SID safety.
 
-#![cfg_attr(not(target_os = "windows"), allow(dead_code))]
-
 #[cfg(target_os = "windows")]
 mod windows {
     use std::{

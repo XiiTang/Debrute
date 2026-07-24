@@ -3,7 +3,7 @@
 use std::{
     collections::{BTreeSet, HashMap, VecDeque},
     path::{Path, PathBuf},
-    sync::{Arc, Mutex, Weak, mpsc},
+    sync::{Arc, Mutex, MutexGuard, Weak, mpsc},
     thread,
 };
 
@@ -17,8 +17,8 @@ use super::{
     validate_canvas_feedback_document,
 };
 use crate::project::{
-    CanvasMediaKind, Diagnostic, DiagnosticSeverity, DiagnosticSource, PreviewCancellation,
-    ProjectCapabilityFs, ProjectError, ProjectPreviewService, ProjectSession,
+    CanvasMediaKind, PreviewCancellation, ProjectCapabilityFs, ProjectDiagnostic,
+    ProjectDiagnosticSeverity, ProjectError, ProjectPreviewService, ProjectSession,
     canvas_media_kind_from_path,
     previews::raster::{composite_svg_overlay, encode_png},
 };
@@ -63,12 +63,10 @@ impl CanvasFeedbackArtifacts {
             CanvasFeedbackArtifactRenderer::new(Arc::clone(&previews)),
             None,
             Arc::new(move |root, epoch, update| {
-                let session = diagnostic_sessions.lock().ok().and_then(|sessions| {
-                    sessions
-                        .get(&root)
-                        .filter(|route| route.epoch == epoch)
-                        .and_then(|route| route.session.upgrade())
-                });
+                let session = lock(&diagnostic_sessions, "Canvas feedback session registry")
+                    .get(&root)
+                    .filter(|route| route.epoch == epoch)
+                    .and_then(|route| route.session.upgrade());
                 if let Some(session) = session {
                     let _ = session.apply_canvas_feedback_diagnostics(&update);
                 }
@@ -83,15 +81,13 @@ impl CanvasFeedbackArtifacts {
 
     pub(crate) fn attach(&self, session: &Arc<ProjectSession>) {
         let epoch = Uuid::new_v4();
-        if let Ok(mut sessions) = self.sessions.lock() {
-            sessions.insert(
-                session.root().to_path_buf(),
-                SessionRoute {
-                    epoch,
-                    session: Arc::downgrade(session),
-                },
-            );
-        }
+        lock(&self.sessions, "Canvas feedback session registry").insert(
+            session.root().to_path_buf(),
+            SessionRoute {
+                epoch,
+                session: Arc::downgrade(session),
+            },
+        );
         if let Ok(feedback) = session.canvas_feedback() {
             if let Ok(snapshot) = session.sync_snapshot()
                 && let Err(error) = self
@@ -187,10 +183,7 @@ impl CanvasFeedbackArtifacts {
         if let Some(epoch) = epoch {
             self.scheduler.cancel_project(root, epoch)?;
         }
-        let mut sessions = self
-            .sessions
-            .lock()
-            .map_err(|_| ProjectError::StatePoisoned)?;
+        let mut sessions = lock(&self.sessions, "Canvas feedback session registry");
         if sessions
             .get(root)
             .is_some_and(|route| Some(route.epoch) == epoch)
@@ -201,10 +194,9 @@ impl CanvasFeedbackArtifacts {
     }
 
     fn epoch(&self, root: &Path) -> Option<Uuid> {
-        self.sessions
-            .lock()
-            .ok()
-            .and_then(|sessions| sessions.get(root).map(|route| route.epoch))
+        lock(&self.sessions, "Canvas feedback session registry")
+            .get(root)
+            .map(|route| route.epoch)
     }
 
     pub(crate) fn report_dispatch_error(&self, dispatch: &CanvasFeedbackDispatchError) {
@@ -212,18 +204,15 @@ impl CanvasFeedbackArtifacts {
     }
 
     fn report_runtime_error_for_epoch(&self, root: &Path, epoch: Uuid, error: &ProjectError) {
-        let session = self.sessions.lock().ok().and_then(|sessions| {
-            sessions
-                .get(root)
-                .filter(|route| route.epoch == epoch)
-                .and_then(|route| route.session.upgrade())
-        });
+        let session = lock(&self.sessions, "Canvas feedback session registry")
+            .get(root)
+            .filter(|route| route.epoch == epoch)
+            .and_then(|route| route.session.upgrade());
         if let Some(session) = session {
             let _ = session.apply_canvas_feedback_diagnostics(&CanvasFeedbackDiagnosticUpdate {
-                diagnostics: vec![Diagnostic {
+                diagnostics: vec![ProjectDiagnostic {
                     id: RUNTIME_DIAGNOSTIC_ID.to_owned(),
-                    source: DiagnosticSource::Project,
-                    severity: DiagnosticSeverity::Error,
+                    severity: ProjectDiagnosticSeverity::Error,
                     code: "canvas-feedback.runtime_failed".to_owned(),
                     message: format!("Canvas feedback runtime failed: {error}"),
                     file_path: None,
@@ -270,7 +259,7 @@ impl CanvasFeedbackArtifact {
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct CanvasFeedbackDiagnosticUpdate {
-    pub diagnostics: Vec<Diagnostic>,
+    pub diagnostics: Vec<ProjectDiagnostic>,
     pub checked_project_relative_paths: Vec<String>,
     pub checked_all_entries: bool,
     pub retained_project_relative_paths: Vec<String>,
@@ -427,20 +416,17 @@ impl CanvasFeedbackArtifactScheduler {
 
     /// Stops the coordinator without waiting for active native rendering to drain.
     ///
-    /// # Errors
-    /// Returns an error when the scheduler actor cannot be joined.
-    pub fn close(&self) -> Result<(), ProjectError> {
-        let mut actor = self.actor.lock().map_err(|_| ProjectError::StatePoisoned)?;
+    /// # Panics
+    /// Panics if the scheduler thread panicked.
+    pub fn close(&self) {
+        let mut actor = lock(&self.actor, "Canvas feedback scheduler actor");
         let Some(actor) = actor.take() else {
-            return Ok(());
+            return;
         };
         let _ = self.sender.send(SchedulerCommand::Shutdown);
-        actor.join().map_err(|_| {
-            ProjectError::service(
-                "canvas_feedback_scheduler_failed",
-                "Canvas feedback scheduler thread panicked.",
-            )
-        })
+        actor
+            .join()
+            .expect("Canvas feedback scheduler thread panicked");
     }
 
     fn send(&self, command: SchedulerCommand) -> Result<(), ProjectError> {
@@ -455,6 +441,12 @@ impl CanvasFeedbackArtifactScheduler {
             ),
         })
     }
+}
+
+fn lock<'a, T>(mutex: &'a Mutex<T>, name: &str) -> MutexGuard<'a, T> {
+    mutex
+        .lock()
+        .unwrap_or_else(|_| panic!("{name} lock poisoned"))
 }
 
 fn validate_scheduler_document(document: &CanvasFeedbackDocument) -> Result<(), ProjectError> {
@@ -472,7 +464,7 @@ fn validate_scheduler_document(document: &CanvasFeedbackDocument) -> Result<(), 
 
 impl Drop for CanvasFeedbackArtifactScheduler {
     fn drop(&mut self) {
-        let _ = self.close();
+        self.close();
     }
 }
 
@@ -956,11 +948,9 @@ fn start_ready(
         let spawn = thread::Builder::new()
             .name("debrute-feedback-render".to_owned())
             .spawn(move || {
-                let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-                    renderer.render(&root, &artifact, &cancellation)
-                }))
-                .map_err(|_| "Canvas feedback renderer panicked.".to_owned())
-                .and_then(|result| result.map_err(|error| error.to_string()));
+                let result = renderer
+                    .render(&root, &artifact, &cancellation)
+                    .map_err(|error| error.to_string());
                 let _ = sender_for_worker.send(SchedulerCommand::Completed {
                     key: key_for_worker,
                     epoch: queued.epoch,
@@ -1295,15 +1285,14 @@ fn canvas_feedback_render_diagnostic(
     artifact: &CanvasFeedbackArtifact,
     diagnostic_path: &str,
     message: &str,
-) -> Diagnostic {
+) -> ProjectDiagnostic {
     let suffix = match artifact {
         CanvasFeedbackArtifact::VideoMoment { moment, .. } => format!(" at {}", moment.label),
         CanvasFeedbackArtifact::Image { .. } => String::new(),
     };
-    Diagnostic {
+    ProjectDiagnostic {
         id: format!("canvas-feedback.render_failed:{diagnostic_path}"),
-        source: DiagnosticSource::Project,
-        severity: DiagnosticSeverity::Error,
+        severity: ProjectDiagnosticSeverity::Error,
         code: "canvas-feedback.render_failed".to_owned(),
         message: format!(
             "Canvas feedback artifact could not be created for {}{suffix}: {message}",
@@ -1376,10 +1365,9 @@ fn publish_cleanup_failure(
         project_root.to_path_buf(),
         session_epoch,
         CanvasFeedbackDiagnosticUpdate {
-            diagnostics: vec![Diagnostic {
+            diagnostics: vec![ProjectDiagnostic {
                 id: CLEANUP_DIAGNOSTIC_ID.to_owned(),
-                source: DiagnosticSource::Project,
-                severity: DiagnosticSeverity::Error,
+                severity: ProjectDiagnosticSeverity::Error,
                 code: "canvas-feedback.cleanup_failed".to_owned(),
                 message: format!("Canvas feedback artifact cleanup failed: {message}"),
                 file_path: None,
@@ -1515,7 +1503,7 @@ mod tests {
             root.join(canvas_feedback_rendered_project_path("images/cover.png"))
                 .is_file()
         );
-        scheduler.close().expect("scheduler should close");
+        scheduler.close();
         let _ = fs::remove_dir_all(root);
     }
 

@@ -47,23 +47,14 @@ jobs:
             platform: darwin
             publicPlatform: macos
             arch: arm64
-            required: true
           - os: macos-15-intel
             platform: darwin
             publicPlatform: macos
             arch: x64
-            required: true
           - os: windows-latest
             platform: win32
             publicPlatform: windows
             arch: x64
-            required: true
-          - os: ubuntu-latest
-            platform: linux
-            publicPlatform: linux
-            arch: x64
-            required: false
-    continue-on-error: ${{ matrix.required == false }}
     runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v4
@@ -77,7 +68,6 @@ jobs:
           cache: pnpm
       - run: pnpm install --frozen-lockfile
       - name: Prepare pinned native raster payload
-        if: matrix.platform == 'darwin' || matrix.platform == 'win32'
         run: pnpm native:raster:prepare
       - name: Test Windows Rust product commit primitives
         if: matrix.platform == 'win32'
@@ -180,7 +170,6 @@ jobs:
           "WIN_CSC_KEY_PASSWORD=$env:WINDOWS_CSC_KEY_PASSWORD_SECRET" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
           node scripts/assemble-product-seed.mjs
       - name: Archive signed Product seed
-        if: matrix.platform == 'darwin' || matrix.platform == 'win32'
         shell: bash
         run: |
           VERSION="$(node -p "require('./package.json').version")"
@@ -201,50 +190,29 @@ jobs:
           node scripts/notarize-macos-artifact.cjs \
             --path "$DMG_PATH" \
             --label "debrute-desktop-${VERSION}-macos-${{ matrix.arch }}.dmg"
-      - name: Build Desktop assets
-        if: matrix.platform != 'darwin'
+      - name: Build signed Windows Desktop assets
+        if: matrix.platform == 'win32'
+        shell: bash
+        run: |
+          set -euo pipefail
+          pnpm --filter @debrute/desktop exec electron-builder --win nsis --x64 --publish never
+      - name: Smoke test signed packaged Desktop and Runtime
         shell: bash
         run: |
           set -euo pipefail
           if [ "${{ matrix.platform }}" = "win32" ]; then
-            pnpm --filter @debrute/desktop exec electron-builder --win nsis --x64 --publish never
+            DESKTOP="apps/desktop/release/win-unpacked/debrute.exe"
+            CLI="apps/desktop/release/win-unpacked/resources/product-seed/runtime/debrute.exe"
           else
-            pnpm --filter @debrute/desktop exec electron-builder --linux AppImage --x64 --publish never
+            DESKTOP="$(find apps/desktop/release -path '*/Debrute.app/Contents/MacOS/Debrute' -type f -print -quit)"
+            CLI="$(find apps/desktop/release -path '*/Debrute.app/Contents/Resources/product-seed/runtime/debrute' -type f -print -quit)"
           fi
-      - name: Smoke test packaged Windows Desktop and Runtime
-        if: matrix.platform == 'win32'
-        shell: pwsh
-        run: |
-          $desktop = Resolve-Path 'apps/desktop/release/win-unpacked/debrute.exe'
-          $cli = Resolve-Path 'apps/desktop/release/win-unpacked/resources/product-seed/runtime/debrute.exe'
-          $desktopProcess = Start-Process -FilePath $desktop -PassThru
-          $ready = $false
-          $lastStatus = ''
-          try {
-            $deadline = [DateTime]::UtcNow.AddSeconds(30)
-            while ([DateTime]::UtcNow -lt $deadline) {
-              Start-Sleep -Milliseconds 500
-              if ($desktopProcess.HasExited) {
-                throw "Packaged Desktop exited before Runtime became ready with code $($desktopProcess.ExitCode)."
-              }
-              $statusLines = & $cli runtime status 2>&1
-              $statusCode = $LASTEXITCODE
-              $lastStatus = $statusLines | Out-String
-              if ($statusCode -eq 0 -and $lastStatus.Contains('runtime_state=ready') -and $lastStatus.Contains('native_tray=active')) {
-                $ready = $true
-                break
-              }
-            }
-            if (-not $ready) {
-              throw "Packaged Runtime did not become ready with its notification-area item. Last status: $lastStatus"
-            }
-          } finally {
-            & $cli runtime stop *> $null
-            if (-not $desktopProcess.HasExited) {
-              Stop-Process -Id $desktopProcess.Id -Force
-            }
-            Get-Process -Name 'debrute-runtime' -ErrorAction SilentlyContinue | Stop-Process -Force
-          }
+          test -n "$DESKTOP"
+          test -n "$CLI"
+          node scripts/smoke-packaged-desktop.mjs \
+            --desktop "$DESKTOP" \
+            --cli "$CLI" \
+            --platform "${{ matrix.platform }}"
       - name: Verify Desktop assets
         shell: bash
         run: |
@@ -262,7 +230,6 @@ jobs:
           path: |
             apps/desktop/release/debrute-desktop-*-${{ matrix.publicPlatform }}-${{ matrix.arch }}.dmg
             apps/desktop/release/debrute-desktop-*-${{ matrix.publicPlatform }}-${{ matrix.arch }}.exe
-            apps/desktop/release/debrute-desktop-*-${{ matrix.publicPlatform }}-${{ matrix.arch }}.AppImage
             apps/desktop/release/debrute-product-*-${{ matrix.publicPlatform }}-${{ matrix.arch }}.zip
 
   publish-release:
@@ -300,7 +267,7 @@ jobs:
       - name: Verify expected assets
         run: |
           VERSION="$(node -p "require('./package.json').version")"
-          node -e "import('./scripts/release-asset-contract.mjs').then(({allowedReleaseAssets, expectedReleaseAssets}) => { const fs = require('fs'); const actual = fs.readdirSync('release-upload').sort(); const expected = expectedReleaseAssets(process.argv[1]).sort(); const allowed = allowedReleaseAssets(process.argv[1]); const missingAssets = expected.filter((name) => !actual.includes(name)); const unexpectedAssets = actual.filter((name) => !allowed.includes(name)); if (missingAssets.length) { console.error('Missing release assets:', missingAssets.join(', ')); process.exit(1); } if (unexpectedAssets.length) { console.error('Unexpected release assets:', unexpectedAssets.join(', ')); process.exit(1); } })" "$VERSION"
+          node -e "import('./scripts/release-asset-contract.mjs').then(({expectedReleaseAssets}) => { const fs = require('fs'); const actual = fs.readdirSync('release-upload').sort(); const expected = expectedReleaseAssets(process.argv[1]).sort(); const missingAssets = expected.filter((name) => !actual.includes(name)); const unexpectedAssets = actual.filter((name) => !expected.includes(name)); if (missingAssets.length) { console.error('Missing release assets:', missingAssets.join(', ')); process.exit(1); } if (unexpectedAssets.length) { console.error('Unexpected release assets:', unexpectedAssets.join(', ')); process.exit(1); } })" "$VERSION"
       - name: Write release notes
         run: |
           VERSION="$(node -p "require('./package.json').version")"
@@ -310,7 +277,6 @@ jobs:
           Desktop assets:
           - macOS: signed and notarized DMG installers for Apple Silicon and Intel Macs.
           - Windows: NSIS installer for x64.
-          - Linux: x64 AppImage when the best-effort build succeeds.
 
           Runtime update payloads for macOS and Windows are complete signed Product seeds; they are consumed by Debrute Runtime and are not separate user installers.
 

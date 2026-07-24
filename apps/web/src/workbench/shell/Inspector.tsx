@@ -1,10 +1,9 @@
 import React, { useCallback, useEffect, useRef, useState } from 'react';
 import {
   AlertTriangle,
-  CheckCircle2,
   Loader2
 } from 'lucide-react';
-import type { Diagnostic } from '@debrute/canvas-core';
+import type { ProjectDiagnostic } from '@debrute/canvas-core';
 import type { GeneratedAssetMetadataLookup, GeneratedAssetRecord } from '@debrute/app-protocol';
 import type { WorkbenchActions, WorkbenchState } from '../../types';
 import { EmptyState, Select } from '../ui';
@@ -94,7 +93,6 @@ function InspectorDetails({
       <div className="inspector-section">
         <h2>{context.diagnostic.code}</h2>
         <dl className="db-object-properties">
-          <dt>{i18n.t('inspector.source')}</dt><dd>{context.diagnostic.source}</dd>
           <dt>{i18n.t('inspector.severity')}</dt><dd>{context.diagnostic.severity}</dd>
           <dt>{i18n.t('inspector.entity')}</dt><dd>{context.diagnostic.entityId ?? 'project'}</dd>
           <dt>{i18n.t('inspector.file')}</dt><dd>{context.diagnostic.filePath ? projectRelativeSource(snapshot, context.diagnostic.filePath) : i18n.t('common.none')}</dd>
@@ -180,7 +178,7 @@ function NodeGeneratedMetadataSection({
 }
 
 function GeneratedAssetMetadataLookupView({ lookup, i18n }: { lookup: GeneratedAssetMetadataLookup; i18n: WorkbenchI18n }): React.ReactElement {
-  const diagnostics = lookup.diagnostics?.length
+  const diagnostics = lookup.diagnostics.length
     ? <GeneratedAssetMetadataDiagnosticsView diagnostics={lookup.diagnostics} i18n={i18n} />
     : null;
   if (lookup.status === 'unavailable') {
@@ -265,7 +263,7 @@ function GeneratedAssetMetadataDiagnosticsView({
   diagnostics,
   i18n
 }: {
-  diagnostics: NonNullable<GeneratedAssetMetadataLookup['diagnostics']>;
+  diagnostics: GeneratedAssetMetadataLookup['diagnostics'];
   i18n: WorkbenchI18n;
 }): React.ReactElement {
   return (
@@ -297,9 +295,9 @@ export function DiagnosticList({
   compact = false,
   onSelect
 }: {
-  diagnostics: Diagnostic[];
+  diagnostics: ProjectDiagnostic[];
   compact?: boolean;
-  onSelect?: (diagnostic: Diagnostic) => void;
+  onSelect?: (diagnostic: ProjectDiagnostic) => void;
 }): React.ReactElement {
   const i18n = useI18n();
   if (diagnostics.length === 0) {

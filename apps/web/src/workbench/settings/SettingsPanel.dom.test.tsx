@@ -1,15 +1,15 @@
-import React from 'react';
 import { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { renderToStaticMarkup } from 'react-dom/server';
 import { describe, expect, it, vi } from 'vitest';
-import { unavailableWorkbenchTitleBarState, type DebruteGlobalSettingsView, type DebruteProductState } from '@debrute/app-protocol';
+import type { DebruteGlobalSettingsView, DebruteProductState } from '@debrute/app-protocol';
 import type { SettingsResource, WorkbenchActions, WorkbenchState } from '../../types';
 import { I18nProvider } from '../i18n';
 import { createEmptyProjectTreeSelection } from '../project-explorer/projectTreeInteraction';
 import { SettingsPanel } from './SettingsPanel';
 import { AudioModelSettings, ImageModelSettings } from './MediaModelSettingsPage';
 import { GeneralSettingsPage } from './general/GeneralSettingsPage';
+import { buildWorkbenchTitleBarState } from '../shell/workbenchTitleBarState';
 
 describe('SettingsPanel shared UI composition', { tags: ['settings'] }, () => {
   it('groups Settings navigation into General, Models, and Integrations', () => {
@@ -54,20 +54,20 @@ describe('SettingsPanel shared UI composition', { tags: ['settings'] }, () => {
     expect(html).toContain('settings-api-key-summary');
     expect(html).toContain('aria-label="Delete API key"');
     expect(html).toContain('db-workbench-close-button');
-    expect(html).toContain('sk****************************aa');
-    expect(html).not.toContain('key sk****************************aa');
+    expect(html).toContain('Configured');
+    expect(html).not.toContain('sk****************************aa');
   });
 
   it('renders a ready empty state when a media category has no models', () => {
     const imageHtml = renderToStaticMarkup(
       <I18nProvider locale="en">
-        <ImageModelSettings settings={{ models: [] }} actions={actions()} />
+        <ImageModelSettings settings={[]} actions={actions()} />
       </I18nProvider>
     );
     const audioHtml = renderToStaticMarkup(
       <I18nProvider locale="en">
         <AudioModelSettings
-          settings={{ models: [] }}
+          settings={[]}
           actions={actions()}
           kind="tts"
         />
@@ -103,7 +103,7 @@ describe('SettingsPanel shared UI composition', { tags: ['settings'] }, () => {
         throw new Error('Expected API key input.');
       }
       await act(async () => {
-        setInputValue(keyInput, 'sk-new');
+        setInputValue(keyInput, ' sk-new ');
         keyInput.dispatchEvent(new Event('input', { bubbles: true }));
       });
       await act(async () => {
@@ -111,14 +111,12 @@ describe('SettingsPanel shared UI composition', { tags: ['settings'] }, () => {
       });
 
       expect(saveGlobalSettings).toHaveBeenCalledWith({
-        models: {
-          image: {
-            modelId: 'image/openai/gpt-image-1',
-            setting: {
-              baseUrlOverride: null,
-              requestModelIdOverride: null,
-              apiKey: 'sk-new'
-            }
+        modelSetting: {
+          modelId: 'image/openai/gpt-image-1',
+          setting: {
+            baseUrlOverride: null,
+            requestModelIdOverride: null,
+            apiKey: ' sk-new '
           }
         }
       });
@@ -127,7 +125,7 @@ describe('SettingsPanel shared UI composition', { tags: ['settings'] }, () => {
     }
   });
 
-  it('deletes a configured single media model API key from the preview pill', async () => {
+  it('deletes a configured single media model API key from its status pill', async () => {
     const container = document.createElement('div');
     document.body.append(container);
     const root = createRoot(container);
@@ -151,20 +149,238 @@ describe('SettingsPanel shared UI composition', { tags: ['settings'] }, () => {
       });
 
       expect(saveGlobalSettings).toHaveBeenCalledWith({
-        models: {
-          image: {
-            modelId: 'image/openai/gpt-image-1',
-            setting: {
-              baseUrlOverride: null,
-              requestModelIdOverride: null,
-              apiKey: ''
-            }
+        modelSetting: {
+          modelId: 'image/openai/gpt-image-1',
+          setting: {
+            baseUrlOverride: null,
+            requestModelIdOverride: null,
+            apiKey: ''
           }
         }
       });
     } finally {
       await unmount(root, container);
     }
+  });
+
+  it('reveals one configured API key transiently and clears it without saving', async () => {
+    const container = document.createElement('div');
+    document.body.append(container);
+    const root = createRoot(container);
+    const exactApiKey = '  密钥🔑  ';
+    const revealModelApiKey = vi.fn(async () => exactApiKey);
+    const saveGlobalSettings = vi.fn(async () => undefined);
+
+    try {
+      await act(async () => {
+        root.render(
+          <I18nProvider locale="en">
+            <ImageModelSettings
+              settings={readyResourceValue(stateWithSettings().globalSettings).models.image}
+              actions={{ ...actions(), revealModelApiKey, saveGlobalSettings } as WorkbenchActions}
+            />
+          </I18nProvider>
+        );
+      });
+
+      const keyInput = container.querySelector('input[aria-label="API Key"]');
+      if (!(keyInput instanceof HTMLInputElement)) {
+        throw new Error('Expected API key input.');
+      }
+      expect(keyInput.value).toBe('');
+
+      await act(async () => {
+        requireButton(container, 'Show API key').click();
+        await Promise.resolve();
+      });
+      expect(revealModelApiKey).toHaveBeenCalledWith('image/openai/gpt-image-1');
+      expect(keyInput.value).toBe(exactApiKey);
+
+      await act(async () => {
+        keyInput.dispatchEvent(new FocusEvent('focusout', { bubbles: true }));
+      });
+      expect(saveGlobalSettings).not.toHaveBeenCalled();
+
+      await act(async () => {
+        requireButton(container, 'Hide API key').click();
+      });
+      expect(keyInput.value).toBe('');
+    } finally {
+      await unmount(root, container);
+    }
+  });
+
+  it('clears a successfully saved replacement API key before another blur', async () => {
+    const container = document.createElement('div');
+    document.body.append(container);
+    const root = createRoot(container);
+    const save = deferred<void>();
+    const saveGlobalSettings = vi.fn(() => save.promise);
+
+    try {
+      await act(async () => {
+        root.render(
+          <I18nProvider locale="en">
+            <ImageModelSettings
+              settings={readyResourceValue(stateWithSettings().globalSettings).models.image}
+              actions={{ ...actions(), saveGlobalSettings } as WorkbenchActions}
+            />
+          </I18nProvider>
+        );
+      });
+      const keyInput = container.querySelector('input[aria-label="API Key"]');
+      if (!(keyInput instanceof HTMLInputElement)) {
+        throw new Error('Expected API key input.');
+      }
+
+      await act(async () => {
+        setInputValue(keyInput, 'replacement-key');
+        keyInput.dispatchEvent(new Event('input', { bubbles: true }));
+        keyInput.dispatchEvent(new FocusEvent('focusout', { bubbles: true }));
+      });
+      expect(saveGlobalSettings).toHaveBeenCalledTimes(1);
+
+      await act(async () => {
+        save.resolve(undefined);
+        await save.promise;
+      });
+      expect(keyInput.value).toBe('');
+
+      await act(async () => {
+        keyInput.dispatchEvent(new FocusEvent('focusout', { bubbles: true }));
+      });
+      expect(saveGlobalSettings).toHaveBeenCalledTimes(1);
+    } finally {
+      await unmount(root, container);
+    }
+  });
+
+  it('invalidates a pending stored-key reveal when the user starts typing', async () => {
+    const container = document.createElement('div');
+    document.body.append(container);
+    const root = createRoot(container);
+    const reveal = deferred<string>();
+    const revealModelApiKey = vi.fn(() => reveal.promise);
+
+    try {
+      await act(async () => {
+        root.render(
+          <I18nProvider locale="en">
+            <ImageModelSettings
+              settings={readyResourceValue(stateWithSettings().globalSettings).models.image}
+              actions={{ ...actions(), revealModelApiKey } as WorkbenchActions}
+            />
+          </I18nProvider>
+        );
+      });
+      const keyInput = container.querySelector('input[aria-label="API Key"]');
+      if (!(keyInput instanceof HTMLInputElement)) {
+        throw new Error('Expected API key input.');
+      }
+
+      await act(async () => {
+        requireButton(container, 'Show API key').click();
+        await Promise.resolve();
+      });
+      await act(async () => {
+        setInputValue(keyInput, 'new-draft');
+        keyInput.dispatchEvent(new Event('input', { bubbles: true }));
+      });
+      await act(async () => {
+        reveal.resolve('stored-secret');
+        await reveal.promise;
+      });
+      expect(keyInput.value).toBe('new-draft');
+      expect(requireButton(container, 'Show API key')).toBeInstanceOf(HTMLButtonElement);
+
+      await act(async () => {
+        setInputValue(keyInput, '');
+        keyInput.dispatchEvent(new Event('input', { bubbles: true }));
+      });
+      expect(keyInput.value).toBe('');
+      expect(container.textContent).not.toContain('stored-secret');
+    } finally {
+      await unmount(root, container);
+    }
+  });
+
+  it('discards a pending stored-key reveal when persisted settings reset the field', async () => {
+    const container = document.createElement('div');
+    document.body.append(container);
+    const root = createRoot(container);
+    const reveal = deferred<string>();
+    const revealModelApiKey = vi.fn(() => reveal.promise);
+    const configured = readyResourceValue(stateWithSettings().globalSettings).models.image;
+
+    try {
+      await act(async () => {
+        root.render(
+          <I18nProvider locale="en">
+            <ImageModelSettings
+              settings={configured}
+              actions={{ ...actions(), revealModelApiKey } as WorkbenchActions}
+            />
+          </I18nProvider>
+        );
+      });
+      await act(async () => {
+        requireButton(container, 'Show API key').click();
+        await Promise.resolve();
+      });
+      await act(async () => {
+        root.render(
+          <I18nProvider locale="en">
+            <ImageModelSettings
+              settings={configured.map((model) => ({ ...model, apiKeySet: false }))}
+              actions={{ ...actions(), revealModelApiKey } as WorkbenchActions}
+            />
+          </I18nProvider>
+        );
+      });
+      await act(async () => {
+        reveal.resolve('stored-secret');
+        await reveal.promise;
+      });
+
+      const keyInput = container.querySelector('input[aria-label="API Key"]');
+      expect(keyInput).toBeInstanceOf(HTMLInputElement);
+      expect((keyInput as HTMLInputElement).value).toBe('');
+      expect(container.textContent).not.toContain('stored-secret');
+    } finally {
+      await unmount(root, container);
+    }
+  });
+
+  it('discards a pending stored-key reveal when the settings component unmounts', async () => {
+    const container = document.createElement('div');
+    document.body.append(container);
+    const root = createRoot(container);
+    const reveal = deferred<string>();
+    const revealModelApiKey = vi.fn(() => reveal.promise);
+    const saveGlobalSettings = vi.fn(async () => undefined);
+
+    await act(async () => {
+      root.render(
+        <I18nProvider locale="en">
+          <ImageModelSettings
+            settings={readyResourceValue(stateWithSettings().globalSettings).models.image}
+            actions={{ ...actions(), revealModelApiKey, saveGlobalSettings } as WorkbenchActions}
+          />
+        </I18nProvider>
+      );
+    });
+    await act(async () => {
+      requireButton(container, 'Show API key').click();
+      await Promise.resolve();
+    });
+    await unmount(root, container);
+    await act(async () => {
+      reveal.resolve('stored-secret');
+      await reveal.promise;
+    });
+
+    expect(container.textContent).toBe('');
+    expect(saveGlobalSettings).not.toHaveBeenCalled();
   });
 
   it('preserves in-progress media model drafts when unchanged settings arrive as new objects', async () => {
@@ -231,20 +447,17 @@ describe('SettingsPanel shared UI composition', { tags: ['settings'] }, () => {
               value: globalSettingsFixture({
                 models: {
                   ...globalSettingsFixture().models,
-                  image: {
-                    models: [{
-                      debruteModelId: 'image/openai/gpt-image-1',
-                      summary: 'OpenAI gpt-image-1 image generation and edits.',
-                      supportsEditing: true,
-                      supportsTextRendering: true,
-                      defaultBaseUrl: 'https://api.openai.com/v1',
-                      defaultRequestModelId: 'gpt-image-1',
-                      baseUrlOverride: null,
-                      requestModelIdOverride: null,
-                      apiKeySet: false,
-                      apiKeyPreview: null
-                    }]
-                  }
+                  image: [{
+                    debruteModelId: 'image/openai/gpt-image-1',
+                    summary: 'OpenAI gpt-image-1 image generation and edits.',
+                    supportsEditing: true,
+                    supportsTextRendering: true,
+                    defaultBaseUrl: 'https://api.openai.com/v1',
+                    defaultRequestModelId: 'gpt-image-1',
+                    baseUrlOverride: null,
+                    requestModelIdOverride: null,
+                    apiKeySet: false
+                  }]
                 }
               })
             }
@@ -264,7 +477,7 @@ describe('SettingsPanel shared UI composition', { tags: ['settings'] }, () => {
       <I18nProvider locale="en">
         <GeneralSettingsPage
           actions={actions()}
-          initialProductState={productState()}
+          product={{ status: 'ready', value: productState() }}
           settings={readyResourceValue(stateWithSettings().globalSettings)}
           resolvedTheme="dark"
           onSettingsChange={async () => undefined}
@@ -280,7 +493,7 @@ describe('SettingsPanel shared UI composition', { tags: ['settings'] }, () => {
       <I18nProvider locale="en">
         <GeneralSettingsPage
           actions={actions()}
-          initialProductState={productState()}
+          product={{ status: 'ready', value: productState() }}
           settings={readyResourceValue(stateWithSettings().globalSettings)}
           resolvedTheme="dark"
           onSettingsChange={async () => undefined}
@@ -289,16 +502,13 @@ describe('SettingsPanel shared UI composition', { tags: ['settings'] }, () => {
     );
 
     expect(general).toContain('db-status-pill--neutral');
-    expect(general).not.toContain('db-status-pill--success');
   });
 
-  it('shows a retryable Product State error instead of a fabricated up-to-date state', async () => {
+  it('installs an available Product update from Install and Restart', async () => {
     const container = document.createElement('div');
     document.body.append(container);
     const root = createRoot(container);
-    const getProductState = vi.fn()
-      .mockRejectedValueOnce(new Error('runtime offline'))
-      .mockResolvedValueOnce(productState());
+    const applyProductUpdate = vi.fn(async () => undefined);
 
     try {
       await act(async () => {
@@ -306,31 +516,66 @@ describe('SettingsPanel shared UI composition', { tags: ['settings'] }, () => {
           <I18nProvider locale="en">
             <GeneralSettingsPage
               actions={{
-                getProductState,
-                checkProductUpdate: vi.fn(async () => productState()),
-                applyProductUpdate: vi.fn(async () => ({ state: productState() }))
+                checkProductUpdate: vi.fn(async () => undefined),
+                applyProductUpdate
               }}
+              product={{ status: 'ready', value: availableProductState() }}
               settings={readyResourceValue(stateWithSettings().globalSettings)}
               resolvedTheme="dark"
               onSettingsChange={async () => undefined}
             />
           </I18nProvider>
         );
-        await Promise.resolve();
       });
-
-      expect(container.textContent).toContain('Failed to load product state: runtime offline');
-      expect(container.textContent).not.toContain('Up to date');
-      expect(container.textContent).not.toContain('unknown');
 
       await act(async () => {
-        requireButton(container, 'Retry').click();
+        requireButton(container, 'Install and Restart').click();
         await Promise.resolve();
       });
 
-      expect(getProductState).toHaveBeenCalledTimes(2);
-      expect(container.textContent).toContain('0.2.0');
-      expect(container.textContent).toContain('Up to date');
+      expect(applyProductUpdate).toHaveBeenCalledOnce();
+    } finally {
+      await unmount(root, container);
+    }
+  });
+
+  it('shows the exact Product apply failure and allows one explicit retry', async () => {
+    const container = document.createElement('div');
+    document.body.append(container);
+    const root = createRoot(container);
+    const applyProductUpdate = vi.fn()
+      .mockRejectedValueOnce(new Error('checksum failed exactly'))
+      .mockResolvedValueOnce(undefined);
+
+    try {
+      await act(async () => {
+        root.render(
+          <I18nProvider locale="en">
+            <GeneralSettingsPage
+              actions={{
+                checkProductUpdate: vi.fn(async () => undefined),
+                applyProductUpdate
+              }}
+              product={{ status: 'ready', value: availableProductState() }}
+              settings={readyResourceValue(stateWithSettings().globalSettings)}
+              resolvedTheme="dark"
+              onSettingsChange={async () => undefined}
+            />
+          </I18nProvider>
+        );
+      });
+
+      await act(async () => {
+        requireButton(container, 'Install and Restart').click();
+        await Promise.resolve();
+      });
+      expect(container.textContent).toContain('checksum failed exactly');
+
+      await act(async () => {
+        requireButton(container, 'Install and Restart').click();
+        await Promise.resolve();
+      });
+      expect(applyProductUpdate).toHaveBeenCalledTimes(2);
     } finally {
       await unmount(root, container);
     }
@@ -342,11 +587,11 @@ describe('SettingsPanel shared UI composition', { tags: ['settings'] }, () => {
       <I18nProvider locale="zh-CN">
         <GeneralSettingsPage
           actions={actions()}
-          initialProductState={productState()}
+          product={{ status: 'ready', value: productState() }}
           settings={{
             workbench: { locale: 'zh-CN', themePreference: 'system', defaultFrontend: 'browser' },
             chrome: { recentProjects: [] },
-            models: { image: { models: [] }, video: { models: [] }, audio: { models: [] } },
+            models: { image: [], video: [], audio: [] },
             integrations: { integrations: [], backends: [] },
             adobeBridge: { enabled: true }
           }}
@@ -384,7 +629,7 @@ describe('SettingsPanel shared UI composition', { tags: ['settings'] }, () => {
           <I18nProvider locale="en">
             <GeneralSettingsPage
               actions={actions()}
-              initialProductState={productState()}
+              product={{ status: 'ready', value: productState() }}
               settings={readyResourceValue(stateWithSettings().globalSettings)}
               resolvedTheme="dark"
               onSettingsChange={onSettingsChange}
@@ -427,7 +672,7 @@ describe('SettingsPanel shared UI composition', { tags: ['settings'] }, () => {
           <I18nProvider locale="en">
             <GeneralSettingsPage
               actions={actions()}
-              initialProductState={productState()}
+              product={{ status: 'ready', value: productState() }}
               settings={readyResourceValue(stateWithSettings().globalSettings)}
               resolvedTheme="dark"
               onSettingsChange={onSettingsChange}
@@ -473,7 +718,7 @@ describe('SettingsPanel shared UI composition', { tags: ['settings'] }, () => {
           <I18nProvider locale="en">
             <GeneralSettingsPage
               actions={actions()}
-              initialProductState={productState()}
+              product={{ status: 'ready', value: productState() }}
               settings={readyResourceValue(stateWithSettings().globalSettings)}
               resolvedTheme="dark"
               onSettingsChange={() => save.promise}
@@ -516,7 +761,7 @@ describe('SettingsPanel shared UI composition', { tags: ['settings'] }, () => {
             <I18nProvider locale="en">
               <GeneralSettingsPage
                 actions={actions()}
-                initialProductState={productState()}
+                product={{ status: 'ready', value: productState() }}
                 settings={settings}
                 resolvedTheme="light"
                 onSettingsChange={async () => undefined}
@@ -613,45 +858,6 @@ describe('SettingsPanel shared UI composition', { tags: ['settings'] }, () => {
       expect(container.querySelector('.settings-page')?.textContent).not.toContain('audio/openai/gpt-4o-mini-tts');
       expect(container.querySelector('.settings-page')?.textContent).not.toContain('audio/elevenlabs/music');
       expect(container.querySelector('.settings-page')?.textContent).toContain('audio/elevenlabs/sfx');
-    } finally {
-      await unmount(root, container);
-    }
-  });
-
-  it('renders model settings load failures with retry instead of an empty model grid', async () => {
-    const container = document.createElement('div');
-    document.body.append(container);
-    const root = createRoot(container);
-    const reloadGlobalSettings = vi.fn(async () => undefined);
-
-    try {
-      await act(async () => {
-        root.render(
-          <I18nProvider locale="en">
-            <SettingsPanel
-              state={stateWithSettings({
-                globalSettings: { status: 'error', message: 'Secrets config imageModelApiKeys values must be strings.' }
-              })}
-              actions={{ ...actions(), reloadGlobalSettings } as WorkbenchActions}
-            />
-          </I18nProvider>
-        );
-      });
-
-      await act(async () => {
-        requireButton(container, 'Image Models').dispatchEvent(new MouseEvent('click', { bubbles: true }));
-      });
-
-      expect(container.querySelector('.settings-page')?.textContent).toContain('Failed to load settings: Secrets config imageModelApiKeys values must be strings.');
-      expect(container.querySelector('.settings-page')?.textContent).not.toContain('image/openai/gpt-image-1');
-      expect(container.querySelector('.settings-page .settings-model-card')).toBeNull();
-
-      await act(async () => {
-        requireButton(container, 'Retry').dispatchEvent(new MouseEvent('click', { bubbles: true }));
-        await Promise.resolve();
-      });
-
-      expect(reloadGlobalSettings).toHaveBeenCalledTimes(1);
     } finally {
       await unmount(root, container);
     }
@@ -791,8 +997,9 @@ describe('SettingsPanel shared UI composition', { tags: ['settings'] }, () => {
 function stateWithSettings(overrides: Partial<WorkbenchState> = {}): WorkbenchState {
   return {
     snapshot: undefined,
-    titleBarState: unavailableWorkbenchTitleBarState(),
+    titleBarState: buildWorkbenchTitleBarState({ platform: 'darwin', host: 'web', locale: 'en', recentProjectRoots: [] }),
     globalSettings: { status: 'ready', value: globalSettingsFixture() },
+    product: { status: 'ready', value: productState() },
     resolvedTheme: 'dark',
     projectOpen: { opening: false },
     explorerSelection: createEmptyProjectTreeSelection(),
@@ -807,73 +1014,62 @@ function stateWithSettings(overrides: Partial<WorkbenchState> = {}): WorkbenchSt
 
 function globalSettingsFixture(overrides: Partial<DebruteGlobalSettingsView> = {}): DebruteGlobalSettingsView {
   return {
-    workbench: { locale: 'en', themePreference: 'system', defaultFrontend: 'electron' },
+    workbench: { locale: 'en', themePreference: 'system', defaultFrontend: 'desktop' },
     chrome: { recentProjects: [] },
     models: {
-      image: {
-        models: [{
-          debruteModelId: 'image/openai/gpt-image-1',
-          summary: 'OpenAI gpt-image-1 image generation and edits.',
-          supportsEditing: true,
-          supportsTextRendering: true,
-          defaultBaseUrl: 'https://api.openai.com/v1',
-          defaultRequestModelId: 'gpt-image-1',
-          baseUrlOverride: null,
-          requestModelIdOverride: null,
-          apiKeySet: true,
-          apiKeyPreview: 'sk****************************aa'
-        }]
-      },
-      video: {
-        models: [{
-          debruteModelId: 'video/google/veo-3',
-          summary: 'Google Veo 3 video generation.',
-          supportsTextToVideo: true,
-          supportsImageReferences: true,
-          supportsVideoReferences: false,
-          supportsAudioReferences: false,
-          supportsGeneratedAudio: true,
-          defaultBaseUrl: 'https://generativelanguage.googleapis.com/v1beta',
-          defaultRequestModelId: 'veo-3.0-generate-preview',
-          baseUrlOverride: null,
-          requestModelIdOverride: null,
-          apiKeySet: false,
-          apiKeyPreview: null
-        }]
-      },
-      audio: {
-        models: [{
-          debruteModelId: 'audio/openai/gpt-4o-mini-tts',
-          kind: 'tts',
-          summary: 'OpenAI gpt-4o-mini-tts TTS generation.',
-          defaultBaseUrl: 'https://api.openai.com/v1',
-          defaultRequestModelId: 'gpt-4o-mini-tts',
-          baseUrlOverride: null,
-          requestModelIdOverride: null,
-          apiKeySet: false,
-          apiKeyPreview: null
-        }, {
-          debruteModelId: 'audio/elevenlabs/music',
-          kind: 'music',
-          summary: 'ElevenLabs music generation.',
-          defaultBaseUrl: 'https://api.elevenlabs.io/v1',
-          defaultRequestModelId: 'music',
-          baseUrlOverride: null,
-          requestModelIdOverride: null,
-          apiKeySet: false,
-          apiKeyPreview: null
-        }, {
-          debruteModelId: 'audio/elevenlabs/sfx',
-          kind: 'sound-effect',
-          summary: 'ElevenLabs sound effects generation.',
-          defaultBaseUrl: 'https://api.elevenlabs.io/v1',
-          defaultRequestModelId: 'sound-generation',
-          baseUrlOverride: null,
-          requestModelIdOverride: null,
-          apiKeySet: false,
-          apiKeyPreview: null
-        }]
-      }
+      image: [{
+        debruteModelId: 'image/openai/gpt-image-1',
+        summary: 'OpenAI gpt-image-1 image generation and edits.',
+        supportsEditing: true,
+        supportsTextRendering: true,
+        defaultBaseUrl: 'https://api.openai.com/v1',
+        defaultRequestModelId: 'gpt-image-1',
+        baseUrlOverride: null,
+        requestModelIdOverride: null,
+        apiKeySet: true
+      }],
+      video: [{
+        debruteModelId: 'video/google/veo-3',
+        summary: 'Google Veo 3 video generation.',
+        supportsTextToVideo: true,
+        supportsImageReferences: true,
+        supportsVideoReferences: false,
+        supportsAudioReferences: false,
+        supportsGeneratedAudio: true,
+        defaultBaseUrl: 'https://generativelanguage.googleapis.com/v1beta',
+        defaultRequestModelId: 'veo-3.0-generate-preview',
+        baseUrlOverride: null,
+        requestModelIdOverride: null,
+        apiKeySet: false
+      }],
+      audio: [{
+        debruteModelId: 'audio/openai/gpt-4o-mini-tts',
+        kind: 'tts',
+        summary: 'OpenAI gpt-4o-mini-tts TTS generation.',
+        defaultBaseUrl: 'https://api.openai.com/v1',
+        defaultRequestModelId: 'gpt-4o-mini-tts',
+        baseUrlOverride: null,
+        requestModelIdOverride: null,
+        apiKeySet: false
+      }, {
+        debruteModelId: 'audio/elevenlabs/music',
+        kind: 'music',
+        summary: 'ElevenLabs music generation.',
+        defaultBaseUrl: 'https://api.elevenlabs.io/v1',
+        defaultRequestModelId: 'music',
+        baseUrlOverride: null,
+        requestModelIdOverride: null,
+        apiKeySet: false
+      }, {
+        debruteModelId: 'audio/elevenlabs/sfx',
+        kind: 'sound-effect',
+        summary: 'ElevenLabs sound effects generation.',
+        defaultBaseUrl: 'https://api.elevenlabs.io/v1',
+        defaultRequestModelId: 'sound-generation',
+        baseUrlOverride: null,
+        requestModelIdOverride: null,
+        apiKeySet: false
+      }]
     },
     integrations: { integrations: [], backends: [] },
     adobeBridge: { enabled: true },
@@ -883,17 +1079,14 @@ function globalSettingsFixture(overrides: Partial<DebruteGlobalSettingsView> = {
 
 function actions(): WorkbenchActions {
   return {
-    getProductState: vi.fn(async () => productState()),
-    checkProductUpdate: vi.fn(async () => productState()),
-    applyProductUpdate: vi.fn(async () => ({ state: productState() })),
-    reloadGlobalSettings: vi.fn(async () => undefined),
+    checkProductUpdate: vi.fn(async () => undefined),
+    applyProductUpdate: vi.fn(async () => undefined),
     reloadAdobeBridge: vi.fn(async () => undefined),
     saveGlobalSettings: vi.fn(async () => undefined),
     runIntegrationOperation: vi.fn(async (input) => ({
       ok: true,
       integrationId: input.integrationId,
-      operation: input.operation,
-      settings: { integrations: [], backends: [] }
+      operation: input.operation
     }))
   } as unknown as WorkbenchActions;
 }
@@ -912,12 +1105,16 @@ async function unmount(root: Root, container: HTMLDivElement): Promise<void> {
   container.remove();
 }
 
-function requireButton(container: HTMLElement, label: string): HTMLButtonElement {
-  const button = Array.from(container.querySelectorAll('button')).find((candidate) => (
+function findButton(container: HTMLElement, label: string): HTMLButtonElement | undefined {
+  return Array.from(container.querySelectorAll('button')).find((candidate) => (
     candidate.textContent === label
     || candidate.getAttribute('aria-label') === label
     || candidate.getAttribute('title') === label
   ));
+}
+
+function requireButton(container: HTMLElement, label: string): HTMLButtonElement {
+  const button = findButton(container, label);
   if (!(button instanceof HTMLButtonElement)) {
     throw new Error(`Expected button ${label}.`);
   }
@@ -999,6 +1196,18 @@ function productState(): DebruteProductState {
       type: 'idle',
       currentVersion: '0.2.0',
       updateAvailable: false
+    }
+  };
+}
+
+function availableProductState(): DebruteProductState {
+  return {
+    ...productState(),
+    update: {
+      type: 'available',
+      currentVersion: '0.2.0',
+      updateVersion: '0.3.0',
+      releaseName: 'Debrute 0.3.0'
     }
   };
 }

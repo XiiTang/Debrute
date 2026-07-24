@@ -65,23 +65,34 @@ and timeout failures. Runtime never retries or replays a transfer.
 
 ## UXP And CEP Clients
 
-`packages/photoshop-bridge-plugin-core` owns discovery, key storage and signing,
-the WebSocket client, Project tree and selection state, and transfer
-orchestration without importing Photoshop APIs. Both plugin applications use
-this core and the same Runtime messages. `clientRuntime` is a closed `uxp` or
-`cep` identity fixed at pairing, not a caller-defined protocol fork.
+`packages/photoshop-bridge-plugin-core` owns the one plugin application state
+machine: discovery, key storage and signing, pairing, the WebSocket client,
+planned Runtime-replacement recovery, Project tree and selection state,
+transfer orchestration, and panel interaction. Both plugin applications are
+thin host entrypoints for this core and use the same Runtime messages.
+`clientRuntime` is a closed `uxp` or `cep` identity fixed at pairing, not a
+caller-defined protocol fork.
 
 The UXP adapter uses Photoshop UXP imaging and action APIs to export selected
 top-level layers and place received files. The CEP adapter performs the same
 host operations through CEP filesystem APIs and a small explicit ExtendScript
 bridge. Host-specific code does not own links, Project access, or transfer
-state.
+state. Both adapters expose the same asynchronous current-host snapshot. One
+shared observer updates the panel and sends document status only when that
+snapshot changes; it is host-state synchronization, not a heartbeat or retry.
+Messages from each WebSocket are handled in arrival order. Every asynchronous
+message operation rechecks that the originating socket is still current before
+publishing connection state or sending a result, so a completed identity write
+or transfer cannot revive a closed session. Link, unlink, and upload actions
+capture that same live socket and ignore any HTTP completion after it closes or
+is replaced; an old response cannot restore revoked links or overwrite a newer
+Runtime session.
 
 Unexpected disconnect revokes the bearer, links and active work. There is no
 automatic reconnect loop. A planned product replacement may send one bounded
 `runtime_replacing` notice so the plugin can rediscover after shutdown; the new
-Runtime proves the persisted key into a fresh session and does not migrate links
-or transfers.
+Runtime must have the announced instance identity, proves the persisted key
+into a fresh session, and does not migrate links or transfers.
 
 ## Packaging And Publication
 
@@ -93,7 +104,7 @@ Plugin package and manifest versions participate in the repository release
 version contract.
 
 These package artifacts are not currently part of the GitHub Release public
-asset contract. The tag-triggered release workflow publishes only the four
+asset contract. The tag-triggered release workflow publishes only the three
 Desktop installers plus the signed update manifest and signature described in
 [`releases.md`](./releases.md).
 

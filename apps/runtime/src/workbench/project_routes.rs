@@ -13,7 +13,7 @@ use std::{
     io::{Read as _, Seek as _, SeekFrom},
     pin::Pin,
     sync::{
-        Arc, Mutex, PoisonError,
+        Arc, Mutex,
         atomic::{AtomicBool, Ordering},
     },
     task::{Context, Poll},
@@ -41,19 +41,18 @@ use crate::{
         PreviewCancellation, ProjectCommand, ProjectCommandResult, ProjectError,
         ProjectNativePathEntry, ProjectPathBatchEntry, ProjectPathKind, ProjectRevisionResult,
         ProjectSession, ProjectUploadEntry, RevisionedFilePlan, RevisionedFileResponse,
-        UpdateCanvasFeedbackEntryInput, open_revisioned_project_file,
-        project_file_revision_from_metadata, read_project_text_file,
+        UpdateCanvasFeedbackEntryInput, open_revisioned_project_file, read_project_text_file,
     },
     terminal::{
-        CreateTerminalSession, TERMINAL_PROTOCOL_VERSION, TerminalClientFrame, TerminalEvent,
-        TerminalObservation, TerminalServerFrame,
+        TERMINAL_PROTOCOL_VERSION, TerminalClientFrame, TerminalEvent, TerminalObservation,
+        TerminalServerFrame,
     },
 };
 
 use super::{
     RuntimeHttpServiceError, WorkbenchConnectionContext, WorkbenchRuntimeServices,
     multipart::read_multipart,
-    routes::{json_body, service_error_response, services},
+    routes::{json_body, service_error_response},
     routing::{ProjectAuthorization, WorkbenchRouterState},
     services::{project_response, public_canvas_projection, public_project_snapshot},
     websocket::{
@@ -70,10 +69,7 @@ pub(super) async fn text_file(
     Path((_project_id, path)): Path<(String, String)>,
     request: Request,
 ) -> Response {
-    let runtime = match services(&state) {
-        Ok(runtime) => runtime,
-        Err(response) => return response,
-    };
+    let runtime = Arc::clone(&state.services);
     let session = match project_session(&runtime, &scope) {
         Ok(session) => session,
         Err(response) => return response,
@@ -112,15 +108,15 @@ pub(super) async fn raw_file(
     headers: HeaderMap,
     method: Method,
 ) -> Response {
-    let runtime = match services(&state) {
-        Ok(runtime) => runtime,
+    let revision = match required_query_value(&query, "v") {
+        Ok(revision) => revision,
         Err(response) => return response,
     };
+    let runtime = Arc::clone(&state.services);
     let session = match project_session(&runtime, &scope) {
         Ok(session) => session,
         Err(response) => return response,
     };
-    let revision = query.get("v").map(String::as_str).unwrap_or_default();
     let range = single_header(&headers, header::RANGE);
     let range = match range {
         Ok(value) => value,
@@ -343,10 +339,7 @@ pub(super) async fn copy_absolute_paths(
         Ok(input) => input,
         Err(response) => return response,
     };
-    let runtime = match services(&state) {
-        Ok(runtime) => runtime,
-        Err(response) => return response,
-    };
+    let runtime = Arc::clone(&state.services);
     let session = match project_session(&runtime, &scope) {
         Ok(session) => session,
         Err(response) => return response,
@@ -377,10 +370,7 @@ pub(super) async fn trash_paths(
         Ok(input) => input,
         Err(response) => return response,
     };
-    let runtime = match services(&state) {
-        Ok(runtime) => runtime,
-        Err(response) => return response,
-    };
+    let runtime = Arc::clone(&state.services);
     let session = match project_session(&runtime, &scope) {
         Ok(session) => session,
         Err(response) => return response,
@@ -446,10 +436,7 @@ async fn reveal_path(
         Err(response) => return response,
     };
     let path = path.strip_suffix("/reveal").unwrap_or(&path);
-    let runtime = match services(&state) {
-        Ok(runtime) => runtime,
-        Err(response) => return response,
-    };
+    let runtime = Arc::clone(&state.services);
     let session = match project_session(&runtime, &scope) {
         Ok(session) => session,
         Err(response) => return response,
@@ -464,19 +451,6 @@ async fn reveal_path(
         Ok(()) => Json(json!({"ok": true})).into_response(),
         Err(error) => project_error(error),
     }
-}
-
-pub(super) async fn generated_assets_list(
-    State(state): State<WorkbenchRouterState>,
-    Extension(scope): Extension<ProjectAuthorization>,
-) -> Response {
-    with_project_root(&state, &scope, |runtime, root| {
-        runtime
-            .generation()
-            .generated_assets()
-            .list(root)
-            .map(|records| json!({"records": records}))
-    })
 }
 
 pub(super) async fn generated_asset_lookup(
@@ -495,89 +469,17 @@ pub(super) async fn generated_asset_lookup(
     };
     with_project_root(&state, &scope, |runtime, root| {
         runtime
-            .generation()
             .generated_assets()
             .lookup(root, &input.project_relative_path)
             .map(|lookup| json!(lookup))
     })
 }
 
-pub(super) async fn generated_asset_read(
-    State(state): State<WorkbenchRouterState>,
-    Extension(scope): Extension<ProjectAuthorization>,
-    Path((_project_id, asset_id)): Path<(String, String)>,
-) -> Response {
-    with_project_root(&state, &scope, |runtime, root| {
-        runtime
-            .generation()
-            .generated_assets()
-            .read(root, &asset_id)
-            .map(|record| json!(record))
-    })
-}
-
-pub(super) async fn generated_asset_raw(
-    State(state): State<WorkbenchRouterState>,
-    Extension(scope): Extension<ProjectAuthorization>,
-    Path((_project_id, asset_id)): Path<(String, String)>,
-    headers: HeaderMap,
-    method: Method,
-) -> Response {
-    let runtime = match services(&state) {
-        Ok(runtime) => runtime,
-        Err(response) => return response,
-    };
-    let session = match project_session(&runtime, &scope) {
-        Ok(session) => session,
-        Err(response) => return response,
-    };
-    let relative = match runtime
-        .generation()
-        .generated_assets()
-        .resolve_current_path(session.root(), &asset_id)
-    {
-        Ok(Some(relative)) => relative,
-        Ok(None) => return project_error(ProjectError::ProjectNotFound(asset_id)),
-        Err(error) => return project_error(error),
-    };
-    let file =
-        match crate::project::open_no_symlink_existing_project_file(session.root(), &relative) {
-            Ok(file) => file,
-            Err(error) => return project_error(error),
-        };
-    let revision = match file
-        .metadata()
-        .map_err(ProjectError::from)
-        .and_then(|metadata| project_file_revision_from_metadata(&metadata))
-    {
-        Ok(revision) => revision,
-        Err(error) => return project_error(error),
-    };
-    let range = match single_header(&headers, header::RANGE) {
-        Ok(range) => range,
-        Err(()) => return invalid_input("Range header is ambiguous."),
-    };
-    match open_revisioned_project_file(session.root(), &relative, &revision, range) {
-        Ok(RevisionedFileResponse::File(plan)) => {
-            revisioned_file_response(plan, method == Method::HEAD)
-        }
-        Ok(RevisionedFileResponse::RangeNotSatisfiable { file_size }) => Response::builder()
-            .status(StatusCode::RANGE_NOT_SATISFIABLE)
-            .header(header::CONTENT_RANGE, format!("bytes */{file_size}"))
-            .body(Body::empty())
-            .unwrap(),
-        Err(error) => project_error(error),
-    }
-}
-
 pub(super) async fn feedback_get(
     State(state): State<WorkbenchRouterState>,
     Extension(scope): Extension<ProjectAuthorization>,
 ) -> Response {
-    let runtime = match services(&state) {
-        Ok(runtime) => runtime,
-        Err(response) => return response,
-    };
+    let runtime = Arc::clone(&state.services);
     match runtime
         .projects()
         .get(&scope.project_id)
@@ -649,10 +551,7 @@ pub(super) async fn canvas_item(
 ) -> Response {
     let method = request.method().clone();
     if method == Method::GET {
-        let runtime = match services(&state) {
-            Ok(runtime) => runtime,
-            Err(response) => return response,
-        };
+        let runtime = Arc::clone(&state.services);
         return match runtime
             .projects()
             .get(&scope.project_id)
@@ -728,10 +627,8 @@ pub(super) async fn canvas_reset(
     #[derive(Deserialize)]
     #[serde(rename_all = "camelCase", deny_unknown_fields)]
     struct RuleSet {
-        #[serde(default)]
-        path: Vec<String>,
-        #[serde(default)]
-        glob: Vec<String>,
+        paths: Vec<String>,
+        globs: Vec<String>,
     }
     #[derive(Deserialize)]
     #[serde(rename_all = "camelCase", deny_unknown_fields)]
@@ -747,10 +644,18 @@ pub(super) async fn canvas_reset(
     if input.all == input.path_rules.is_some() {
         return invalid_input("reset layout requires exactly one of all or pathRules.");
     }
-    let rules = input.path_rules.map(|rules| CanvasMapPathRuleSet {
-        paths: rules.path,
-        globs: rules.glob,
-    });
+    let rules = match input.path_rules {
+        Some(rules) => {
+            if rules.paths.is_empty() && rules.globs.is_empty() {
+                return invalid_input("selective reset layout requires at least one path or glob.");
+            }
+            Some(CanvasMapPathRuleSet {
+                paths: rules.paths,
+                globs: rules.globs,
+            })
+        }
+        None => None,
+    };
     command_for_scope(
         &state,
         &scope,
@@ -765,7 +670,7 @@ pub(super) async fn canvas_layouts(
     request: Request,
 ) -> Response {
     #[derive(Deserialize)]
-    #[serde(rename_all = "camelCase")]
+    #[serde(rename_all = "camelCase", deny_unknown_fields)]
     struct Update {
         project_relative_path: String,
         x: f64,
@@ -776,13 +681,15 @@ pub(super) async fn canvas_layouts(
     #[derive(Deserialize)]
     #[serde(rename_all = "camelCase", deny_unknown_fields)]
     struct Input {
-        #[serde(default)]
         node_layouts: Vec<Update>,
     }
     let input: Input = match json_body(request).await {
         Ok(input) => input,
         Err(response) => return response,
     };
+    if input.node_layouts.is_empty() {
+        return invalid_input("Canvas layout update requires at least one node layout.");
+    }
     command_for_scope(
         &state,
         &scope,
@@ -835,7 +742,7 @@ pub(super) async fn canvas_video_playback(
     request: Request,
 ) -> Response {
     #[derive(Deserialize)]
-    #[serde(rename_all = "camelCase")]
+    #[serde(rename_all = "camelCase", deny_unknown_fields)]
     struct Update {
         project_relative_path: String,
         current_time_seconds: f64,
@@ -849,6 +756,9 @@ pub(super) async fn canvas_video_playback(
         Ok(input) => input,
         Err(response) => return response,
     };
+    if input.updates.is_empty() {
+        return invalid_input("Canvas video playback update requires at least one target.");
+    }
     command_for_scope(
         &state,
         &scope,
@@ -873,7 +783,7 @@ pub(super) async fn canvas_text_viewport(
     request: Request,
 ) -> Response {
     #[derive(Deserialize)]
-    #[serde(rename_all = "camelCase")]
+    #[serde(rename_all = "camelCase", deny_unknown_fields)]
     struct Update {
         project_relative_path: String,
         scroll_top: f64,
@@ -888,6 +798,9 @@ pub(super) async fn canvas_text_viewport(
         Ok(input) => input,
         Err(response) => return response,
     };
+    if input.updates.is_empty() {
+        return invalid_input("Canvas text viewport update requires at least one target.");
+    }
     command_for_scope(
         &state,
         &scope,
@@ -916,12 +829,15 @@ pub(super) async fn image_preview(
         Ok(width) => width,
         Err(response) => return response,
     };
-    let path = query.get("path").map(String::as_str).unwrap_or_default();
-    let revision = query.get("v").map(String::as_str).unwrap_or_default();
-    let runtime = match services(&state) {
-        Ok(runtime) => runtime,
+    let path = match required_query_value(&query, "path") {
+        Ok(path) => path,
         Err(response) => return response,
     };
+    let revision = match required_query_value(&query, "v") {
+        Ok(revision) => revision,
+        Err(response) => return response,
+    };
+    let runtime = Arc::clone(&state.services);
     let session = match project_session(&runtime, &scope) {
         Ok(session) => session,
         Err(response) => return response,
@@ -971,10 +887,7 @@ pub(super) async fn text_preview_source_save(
     let Some(source) = parts.files.get("source") else {
         return invalid_input("Canvas text preview source file is required.");
     };
-    let runtime = match services(&state) {
-        Ok(runtime) => runtime,
-        Err(response) => return response,
-    };
+    let runtime = Arc::clone(&state.services);
     let session = match project_session(&runtime, &scope) {
         Ok(session) => session,
         Err(response) => return response,
@@ -1023,10 +936,7 @@ pub(super) async fn text_preview_sources(
         Ok(input) => input,
         Err(response) => return response,
     };
-    let runtime = match services(&state) {
-        Ok(runtime) => runtime,
-        Err(response) => return response,
-    };
+    let runtime = Arc::clone(&state.services);
     let session = match project_session(&runtime, &scope) {
         Ok(session) => session,
         Err(response) => return response,
@@ -1073,25 +983,29 @@ pub(super) async fn text_preview(
         Ok(width) => width,
         Err(response) => return response,
     };
-    let target = CanvasTextPreviewSourceTarget {
-        project_relative_path: query.get("path").cloned().unwrap_or_default(),
-        fingerprint: query.get("fingerprint").cloned().unwrap_or_default(),
-    };
-    let canvas_id = query
-        .get("canvasId")
-        .map(String::as_str)
-        .unwrap_or_default();
-    let runtime = match services(&state) {
-        Ok(runtime) => runtime,
+    let project_relative_path = match required_query_value(&query, "path") {
+        Ok(path) => path.to_owned(),
         Err(response) => return response,
     };
+    let fingerprint = match required_query_value(&query, "fingerprint") {
+        Ok(fingerprint) => fingerprint.to_owned(),
+        Err(response) => return response,
+    };
+    let canvas_id = match required_query_value(&query, "canvasId") {
+        Ok(canvas_id) => canvas_id.to_owned(),
+        Err(response) => return response,
+    };
+    let target = CanvasTextPreviewSourceTarget {
+        project_relative_path,
+        fingerprint,
+    };
+    let runtime = Arc::clone(&state.services);
     let session = match project_session(&runtime, &scope) {
         Ok(session) => session,
         Err(response) => return response,
     };
     let previews = Arc::clone(runtime.previews());
     let project_root = session.root().to_path_buf();
-    let canvas_id = canvas_id.to_owned();
     blocking_preview_response(method == Method::HEAD, move || {
         previews.resolve_text_preview_variant(
             &project_root,
@@ -1110,7 +1024,7 @@ pub(super) async fn video_preview_sources(
     request: Request,
 ) -> Response {
     #[derive(Deserialize)]
-    #[serde(rename_all = "camelCase")]
+    #[serde(rename_all = "camelCase", deny_unknown_fields)]
     struct Target {
         project_relative_path: String,
         video_revision: String,
@@ -1126,10 +1040,14 @@ pub(super) async fn video_preview_sources(
         Ok(input) => input,
         Err(response) => return response,
     };
-    let runtime = match services(&state) {
-        Ok(runtime) => runtime,
-        Err(response) => return response,
-    };
+    if input
+        .targets
+        .iter()
+        .any(|target| !target.current_time_seconds.is_finite() || target.current_time_seconds < 0.0)
+    {
+        return invalid_input("currentTimeSeconds must be a non-negative finite number.");
+    }
+    let runtime = Arc::clone(&state.services);
     let session = match project_session(&runtime, &scope) {
         Ok(session) => session,
         Err(response) => return response,
@@ -1155,13 +1073,15 @@ pub(super) async fn video_preview_sources(
         )
     })
     .await
+    .expect("Canvas video preview worker must complete")
     {
         Ok(sources) => sources,
-        Err(error) => return preview_worker_error(error),
+        Err(error) => return project_error(error),
     };
     let sources = sources
         .into_iter()
-        .map(|source| {
+        .map(|source| (source.target.project_relative_path.clone(), source))
+        .map(|(path, source)| {
             let mut value = json!({
                 "projectRelativePath": source.target.project_relative_path,
                 "videoRevision": source.target.video_revision,
@@ -1187,9 +1107,9 @@ pub(super) async fn video_preview_sources(
                     value["message"] = json!(message);
                 }
             }
-            value
+            (path, value)
         })
-        .collect::<Vec<_>>();
+        .collect::<serde_json::Map<String, Value>>();
     Json(json!({"sources": sources})).into_response()
 }
 
@@ -1211,23 +1131,34 @@ pub(super) async fn video_preview(
         Some(value) => value,
         None => return invalid_input("t must be a non-negative finite number."),
     };
-    let target = CanvasVideoPreviewTarget {
-        project_relative_path: query.get("path").cloned().unwrap_or_default(),
-        video_revision: query.get("videoRevision").cloned().unwrap_or_default(),
-        current_time_seconds,
-    };
-    let runtime = match services(&state) {
-        Ok(runtime) => runtime,
+    let project_relative_path = match required_query_value(&query, "path") {
+        Ok(path) => path.to_owned(),
         Err(response) => return response,
     };
+    let video_revision = match required_query_value(&query, "videoRevision") {
+        Ok(revision) => revision.to_owned(),
+        Err(response) => return response,
+    };
+    let canvas_id = match required_query_value(&query, "canvasId") {
+        Ok(canvas_id) => canvas_id.to_owned(),
+        Err(response) => return response,
+    };
+    let source_key = match required_query_value(&query, "sourceKey") {
+        Ok(source_key) => source_key.to_owned(),
+        Err(response) => return response,
+    };
+    let target = CanvasVideoPreviewTarget {
+        project_relative_path,
+        video_revision,
+        current_time_seconds,
+    };
+    let runtime = Arc::clone(&state.services);
     let session = match project_session(&runtime, &scope) {
         Ok(session) => session,
         Err(response) => return response,
     };
     let previews = Arc::clone(runtime.previews());
     let project_root = session.root().to_path_buf();
-    let canvas_id = query.get("canvasId").cloned().unwrap_or_default();
-    let source_key = query.get("sourceKey").cloned().unwrap_or_default();
     blocking_preview_response(method == Method::HEAD, move || {
         previews.video().resolve_variant(
             &project_root,
@@ -1246,10 +1177,7 @@ pub(super) async fn terminals(
     Extension(scope): Extension<ProjectAuthorization>,
     request: Request,
 ) -> Response {
-    let runtime = match services(&state) {
-        Ok(runtime) => runtime,
-        Err(response) => return response,
-    };
+    let runtime = Arc::clone(&state.services);
     if request.method() == Method::GET {
         return match runtime.terminals().list(&scope.project_id) {
             Ok(snapshot) => Json(json!({
@@ -1260,25 +1188,19 @@ pub(super) async fn terminals(
             Err(error) => terminal_error(error),
         };
     }
-    #[derive(Deserialize, Default)]
+    #[derive(Deserialize)]
     #[serde(rename_all = "camelCase", deny_unknown_fields)]
     struct Input {
-        cwd_project_relative_path: Option<String>,
-        cols: Option<u16>,
-        rows: Option<u16>,
+        cwd_project_relative_path: String,
     }
     let input: Input = match json_body(request).await {
         Ok(input) => input,
         Err(response) => return response,
     };
-    match runtime.terminals().create(
-        &scope.project_id,
-        CreateTerminalSession {
-            cwd_project_relative_path: input.cwd_project_relative_path,
-            cols: input.cols,
-            rows: input.rows,
-        },
-    ) {
+    match runtime
+        .terminals()
+        .create(&scope.project_id, &input.cwd_project_relative_path)
+    {
         Ok(session) => (StatusCode::CREATED, Json(json!({"session": session}))).into_response(),
         Err(error) => terminal_error(error),
     }
@@ -1289,10 +1211,7 @@ pub(super) async fn terminal_close(
     Extension(scope): Extension<ProjectAuthorization>,
     Path((_project_id, terminal_id)): Path<(String, String)>,
 ) -> Response {
-    let runtime = match services(&state) {
-        Ok(runtime) => runtime,
-        Err(response) => return response,
-    };
+    let runtime = Arc::clone(&state.services);
     match runtime.terminals().close(&scope.project_id, &terminal_id) {
         Ok(()) => Json(json!({"ok": true})).into_response(),
         Err(error) => terminal_error(error),
@@ -1305,10 +1224,7 @@ pub(super) async fn terminal_websocket(
     Path(project_id): Path<String>,
     request: Request,
 ) -> Response {
-    let runtime = match services(&state) {
-        Ok(runtime) => runtime,
-        Err(response) => return response,
-    };
+    let runtime = Arc::clone(&state.services);
     let upgrade = match WebSocketUpgrade::from_request(request) {
         Ok(upgrade) => upgrade,
         Err(response) => return response,
@@ -1467,7 +1383,7 @@ async fn run_terminal_websocket(
     topology_stop.store(true, Ordering::Release);
     for stop in observations
         .lock()
-        .unwrap_or_else(PoisonError::into_inner)
+        .expect("Terminal observation registry lock poisoned")
         .values()
     {
         stop.store(true, Ordering::Release);
@@ -1496,7 +1412,7 @@ fn handle_terminal_client_frame(
         TerminalClientFrame::Observe { terminal_id } => {
             if observations
                 .lock()
-                .unwrap_or_else(PoisonError::into_inner)
+                .expect("Terminal observation registry lock poisoned")
                 .contains_key(&terminal_id)
             {
                 return Ok(());
@@ -1534,7 +1450,7 @@ fn handle_terminal_client_frame(
         TerminalClientFrame::Unobserve { terminal_id } => {
             if let Some(stop) = observations
                 .lock()
-                .unwrap_or_else(PoisonError::into_inner)
+                .expect("Terminal observation registry lock poisoned")
                 .remove(&terminal_id)
             {
                 stop.store(true, Ordering::Release);
@@ -1611,7 +1527,7 @@ fn spawn_terminal_observation(
     let stop = Arc::new(AtomicBool::new(false));
     observations
         .lock()
-        .unwrap_or_else(PoisonError::into_inner)
+        .expect("Terminal observation registry lock poisoned")
         .insert(terminal_id.clone(), Arc::clone(&stop));
     thread::spawn(move || {
         while !stop.load(Ordering::Acquire) {
@@ -1628,7 +1544,7 @@ fn spawn_terminal_observation(
         }
         observations
             .lock()
-            .unwrap_or_else(PoisonError::into_inner)
+            .expect("Terminal observation registry lock poisoned")
             .remove(&terminal_id);
     });
 }
@@ -1695,10 +1611,7 @@ fn command_for_scope(
     scope: &ProjectAuthorization,
     command: ProjectCommand,
 ) -> Response {
-    let runtime = match services(state) {
-        Ok(runtime) => runtime,
-        Err(response) => return response,
-    };
+    let runtime = Arc::clone(&state.services);
     let session = match project_session(&runtime, scope) {
         Ok(session) => session,
         Err(response) => return response,
@@ -1721,7 +1634,10 @@ fn command_response(
         Ok(body) => body,
         Err(error) => return service_error_response(error),
     };
-    Json(project_response(session, result.project_revision, body)).into_response()
+    match project_response(session, result.project_revision, body) {
+        Ok(body) => Json(body).into_response(),
+        Err(error) => service_error_response(error),
+    }
 }
 
 fn command_response_body(
@@ -1813,10 +1729,7 @@ fn with_project_root(
     scope: &ProjectAuthorization,
     operation: impl FnOnce(&WorkbenchRuntimeServices, &std::path::Path) -> Result<Value, ProjectError>,
 ) -> Response {
-    let runtime = match services(state) {
-        Ok(runtime) => runtime,
-        Err(response) => return response,
-    };
+    let runtime = Arc::clone(&state.services);
     let session = match project_session(&runtime, scope) {
         Ok(session) => session,
         Err(response) => return response,
@@ -1880,7 +1793,11 @@ fn public_text_file(file: crate::project::ProjectTextFile) -> Value {
 }
 
 fn revisioned_file_response(mut plan: RevisionedFilePlan, head: bool) -> Response {
-    let status = StatusCode::from_u16(plan.status_code()).unwrap_or(StatusCode::OK);
+    let status = if plan.range.is_some() {
+        StatusCode::PARTIAL_CONTENT
+    } else {
+        StatusCode::OK
+    };
     let length = plan.content_length();
     let mut response = Response::builder()
         .status(status)
@@ -1903,11 +1820,14 @@ fn revisioned_file_response(mut plan: RevisionedFilePlan, head: bool) -> Respons
         .unwrap_or_else(|_| StatusCode::INTERNAL_SERVER_ERROR.into_response())
 }
 
-fn preview_file_response(preview: crate::project::CanvasPreviewFile, head: bool) -> Response {
+fn preview_file_response(mut preview: crate::project::CanvasPreviewFile, head: bool) -> Response {
     let length = match preview.file.metadata() {
         Ok(metadata) => metadata.len(),
         Err(error) => return project_error(ProjectError::from(error)),
     };
+    if let Err(error) = preview.file.rewind() {
+        return project_error(ProjectError::from(error));
+    }
     let builder = Response::builder()
         .status(StatusCode::OK)
         .header(header::CONTENT_TYPE, preview.content_type)
@@ -1925,19 +1845,13 @@ async fn blocking_preview_response(
     head: bool,
     task: impl FnOnce() -> Result<crate::project::CanvasPreviewFile, ProjectError> + Send + 'static,
 ) -> Response {
-    match tokio::task::spawn_blocking(task).await {
-        Ok(Ok(preview)) => preview_file_response(preview, head),
-        Ok(Err(error)) => project_error(error),
-        Err(error) => preview_worker_error(error),
+    match tokio::task::spawn_blocking(task)
+        .await
+        .expect("Canvas preview worker must complete")
+    {
+        Ok(preview) => preview_file_response(preview, head),
+        Err(error) => project_error(error),
     }
-}
-
-fn preview_worker_error(error: tokio::task::JoinError) -> Response {
-    service_error_response(RuntimeHttpServiceError::new(
-        500,
-        "preview_worker_failed",
-        format!("Canvas preview worker failed: {error}"),
-    ))
 }
 
 struct FileByteStream {
@@ -1980,14 +1894,18 @@ fn project_error(error: ProjectError) -> Response {
 
 fn terminal_error(error: crate::terminal::TerminalError) -> Response {
     service_error_response(RuntimeHttpServiceError::new(
-        400,
+        StatusCode::BAD_REQUEST,
         error.code(),
         error.to_string(),
     ))
 }
 
 fn invalid_input(message: impl Into<String>) -> Response {
-    service_error_response(RuntimeHttpServiceError::new(400, "invalid_input", message))
+    service_error_response(RuntimeHttpServiceError::new(
+        StatusCode::BAD_REQUEST,
+        "invalid_input",
+        message,
+    ))
 }
 
 fn single_header(headers: &HeaderMap, name: header::HeaderName) -> Result<Option<&str>, ()> {
@@ -2009,9 +1927,52 @@ fn positive_u32(query: &HashMap<String, String>, key: &str) -> Result<u32, Respo
         .ok_or_else(|| invalid_input(format!("{key} must be a positive integer.")))
 }
 
+fn required_query_value<'a>(
+    query: &'a HashMap<String, String>,
+    key: &str,
+) -> Result<&'a str, Response> {
+    query
+        .get(key)
+        .map(String::as_str)
+        .filter(|value| !value.is_empty())
+        .ok_or_else(|| invalid_input(format!("{key} is required and must not be empty.")))
+}
+
 fn preview_source_kind(kind: CanvasVideoPreviewSourceKind) -> &'static str {
     match kind {
         CanvasVideoPreviewSourceKind::InitialPoster => "initial-poster",
         CanvasVideoPreviewSourceKind::PlaybackFrame => "playback-frame",
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[tokio::test]
+    async fn preview_file_response_streams_the_complete_file_from_its_start() {
+        let path = std::env::temp_dir().join(format!(
+            "debrute-preview-response-{}.png",
+            uuid::Uuid::new_v4()
+        ));
+        let expected = b"complete preview bytes";
+        std::fs::write(&path, expected).unwrap();
+        let mut file = File::open(&path).unwrap();
+        file.seek(SeekFrom::Start(9)).unwrap();
+
+        let response = preview_file_response(
+            crate::project::CanvasPreviewFile {
+                absolute_path: path.clone(),
+                file,
+                content_type: "image/png",
+            },
+            false,
+        );
+        let body = axum::body::to_bytes(response.into_body(), expected.len())
+            .await
+            .unwrap();
+
+        assert_eq!(body.as_ref(), expected);
+        std::fs::remove_file(path).unwrap();
     }
 }

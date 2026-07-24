@@ -2,9 +2,10 @@ use std::{
     collections::BTreeMap,
     fs, io,
     path::{Path, PathBuf},
-    sync::{Mutex, MutexGuard, PoisonError},
+    sync::{Mutex, MutexGuard},
 };
 
+use axum::http::StatusCode;
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 use uuid::Uuid;
@@ -91,7 +92,7 @@ impl WorkingCopyStore {
     }
 
     pub fn load(&self, project_id: &str) -> Result<ProjectWorkingCopies, RuntimeHttpServiceError> {
-        let _io = self.lock()?;
+        let _io = self.lock();
         self.read(project_id)
     }
 
@@ -108,7 +109,7 @@ impl WorkingCopyStore {
                 "Text Working Copy requires language and baseRevision.",
             ));
         }
-        let _io = self.lock()?;
+        let _io = self.lock();
         let mut project = self.read(project_id)?;
         project.text.insert(
             working_copy.project_relative_path.clone(),
@@ -125,7 +126,7 @@ impl WorkingCopyStore {
     ) -> Result<(), RuntimeHttpServiceError> {
         let project_relative_path = normalize_project_relative_path(project_relative_path)
             .map_err(RuntimeHttpServiceError::from_project)?;
-        let _io = self.lock()?;
+        let _io = self.lock();
         let mut project = self.read(project_id)?;
         project.text.remove(&project_relative_path);
         self.write_or_remove(project_id, &project)
@@ -152,7 +153,7 @@ impl WorkingCopyStore {
         {
             return Err(invalid("Spatial Feedback Working Copy requires geometry."));
         }
-        let _io = self.lock()?;
+        let _io = self.lock();
         let mut project = self.read(project_id)?;
         project.feedback = Some(working_copy.clone());
         self.write(project_id, &project)?;
@@ -160,7 +161,7 @@ impl WorkingCopyStore {
     }
 
     pub fn clear_feedback(&self, project_id: &str) -> Result<(), RuntimeHttpServiceError> {
-        let _io = self.lock()?;
+        let _io = self.lock();
         let mut project = self.read(project_id)?;
         project.feedback = None;
         self.write_or_remove(project_id, &project)
@@ -170,7 +171,7 @@ impl WorkingCopyStore {
         match fs::read(self.path(project_id)) {
             Ok(bytes) => serde_json::from_slice(&bytes).map_err(|error| {
                 RuntimeHttpServiceError::new(
-                    500,
+                    StatusCode::INTERNAL_SERVER_ERROR,
                     "working_copy_invalid",
                     format!("Runtime Working Copy is invalid: {error}"),
                 )
@@ -208,7 +209,7 @@ impl WorkingCopyStore {
         let temporary = self.directory.join(format!(".{}.tmp", Uuid::new_v4()));
         let bytes = serde_json::to_vec_pretty(project).map_err(|error| {
             RuntimeHttpServiceError::new(
-                500,
+                StatusCode::INTERNAL_SERVER_ERROR,
                 "working_copy_serialization_failed",
                 error.to_string(),
             )
@@ -226,23 +227,21 @@ impl WorkingCopyStore {
         self.directory.join(format!("{digest:x}.json"))
     }
 
-    fn lock(&self) -> Result<MutexGuard<'_, ()>, RuntimeHttpServiceError> {
-        self.io.lock().map_err(|PoisonError { .. }| {
-            RuntimeHttpServiceError::new(
-                500,
-                "working_copy_state_poisoned",
-                "Runtime Working Copy state is unavailable.",
-            )
-        })
+    fn lock(&self) -> MutexGuard<'_, ()> {
+        self.io.lock().expect("Working Copy I/O lock poisoned")
     }
 }
 
 fn invalid(message: &'static str) -> RuntimeHttpServiceError {
-    RuntimeHttpServiceError::new(400, "working_copy_invalid", message)
+    RuntimeHttpServiceError::new(StatusCode::BAD_REQUEST, "working_copy_invalid", message)
 }
 
 fn persistence(error: &io::Error) -> RuntimeHttpServiceError {
-    RuntimeHttpServiceError::new(500, "working_copy_persistence_failed", error.to_string())
+    RuntimeHttpServiceError::new(
+        StatusCode::INTERNAL_SERVER_ERROR,
+        "working_copy_persistence_failed",
+        error.to_string(),
+    )
 }
 
 #[cfg(test)]

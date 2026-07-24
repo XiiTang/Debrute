@@ -315,7 +315,7 @@ function recordImageNodeCounter(
 ): void {
   context.perfMonitor?.recordCounter({
     sessionTypes: CANVAS_PERF_INTERACTION_SESSION_TYPES,
-    timestamp: globalThis.performance?.now?.() ?? Date.now(),
+    timestamp: performance.now(),
     source: 'CanvasImageNodeAsset',
     name,
     detail

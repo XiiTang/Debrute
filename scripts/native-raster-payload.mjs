@@ -88,7 +88,6 @@ export async function prepareNativeRasterPayload({ profile = 'debug' } = {}) {
 export async function validateNativeRasterPayload({ root: configuredRoot } = {}) {
   const root = resolve(
     configuredRoot
-      ?? process.env.DEBRUTE_NATIVE_RASTER_PAYLOAD
       ?? join(workspaceRoot, '.scratch/native-raster-payloads', platformIdentity())
   );
   const manifestPath = join(root, 'manifest.json');

@@ -7,10 +7,6 @@ export const desktopReleaseTargets = [
   { platform: 'windows', arch: 'x64', extension: 'exe' }
 ];
 
-export const optionalDesktopReleaseTargets = [
-  { platform: 'linux', arch: 'x64', extension: 'AppImage' }
-];
-
 export const productReleaseTargets = desktopReleaseTargets;
 
 export function desktopReleaseAssetName(version, platform, arch, extension) {
@@ -19,15 +15,6 @@ export function desktopReleaseAssetName(version, platform, arch, extension) {
 
 export function expectedDesktopReleaseAssets(version) {
   return desktopReleaseTargets.map((target) => desktopReleaseAssetName(
-    version,
-    target.platform,
-    target.arch,
-    target.extension
-  ));
-}
-
-export function optionalDesktopReleaseAssets(version) {
-  return optionalDesktopReleaseTargets.map((target) => desktopReleaseAssetName(
     version,
     target.platform,
     target.arch,
@@ -53,12 +40,5 @@ export function expectedReleaseAssets(version) {
     ...expectedProductReleaseAssets(version),
     updateManifestName,
     updateManifestSignatureName
-  ];
-}
-
-export function allowedReleaseAssets(version) {
-  return [
-    ...expectedReleaseAssets(version),
-    ...optionalDesktopReleaseAssets(version)
   ];
 }

@@ -7,11 +7,17 @@ Windows runs the held, signed NSIS installer through Runtime-owned platform
 adapters after Desktop exits. Neither platform needs a replacement helper:
 Runtime executes from an immutable versioned Product directory, so the old
 Runtime never replaces its own live executable. It selects the new `current`
-target and starts that target in a bounded Control-owner handoff mode; the new
-Runtime completes Ready, cleanup, and surface restoration. This follows the
-useful part of Codex, cc-switch, and Zed—the Rust owner coordinates the update—
-without copying a helper required by a different installation layout. Update
-authenticity remains governed by
+target and starts that target in a bounded Control-owner handoff mode. The
+running Runtime commit path and installed-Desktop pending recovery share one
+target launch contract that binds the held manifest-verified executable,
+selected Product identity and directories, stable Runtime entrypoint, and
+completion mode before the platform adapter launches it. macOS enters the exact
+target bundle through LaunchServices; Windows executes the exact verified
+binary. Ordinary first launch remains a separate stable-entrypoint acquisition
+path. The new Runtime completes Ready, cleanup, and surface restoration. The
+platform/update owner launches the selected replacement target directly;
+Debrute does not add a helper layer required only by a different installation
+layout. Update authenticity remains governed by
 [ADR 0008](./0008-signed-manifest-authenticates-product-updates.md).
 
 The Windows filesystem boundary is the in-process

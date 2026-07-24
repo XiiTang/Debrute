@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest';
 import {
   createPhotoshopStatusMessage,
   parsePhotoshopBridgeMessage
-} from './bridgeClient';
+} from './bridgeClient.js';
 
 describe('bridgeClient pure helpers', () => {
   it('parses challenge, ready and error messages and rejects unrelated payloads', () => {
@@ -25,6 +25,11 @@ describe('bridgeClient pure helpers', () => {
       message: 'not linked'
     }))).toMatchObject({ type: 'bridge.error', code: 'project_not_linked' });
 
+    expect(() => parsePhotoshopBridgeMessage(JSON.stringify({
+      type: 'bridge.error',
+      code: 'unknown_error',
+      message: 'unknown code'
+    }))).toThrow('Unsupported Photoshop Bridge message');
     expect(() => parsePhotoshopBridgeMessage(JSON.stringify({ type: 'unsupported' }))).toThrow('Unsupported Photoshop Bridge message');
   });
 

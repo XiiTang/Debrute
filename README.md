@@ -1,6 +1,10 @@
-# Debrute
+<p align="center">
+  <img src="./assets/project-icon/debrute.svg" width="128" alt="Debrute logo">
+</p>
 
-[中文版](./README.zh-CN.md)
+<h1 align="center">Debrute</h1>
+
+<p align="center"><a href="./README.zh-CN.md">中文版</a></p>
 
 Debrute is a local creative production workbench for the files that AI agents generate: images, videos, audio, documents, and design references.
 

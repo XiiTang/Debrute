@@ -1,4 +1,5 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
+import type { DebruteShellApi } from '@debrute/app-protocol';
 import type { WorkbenchApiClient } from '../../types';
 import { executeTitleBarMenuCommand } from './workbenchTitleBarCommands';
 
@@ -7,12 +8,11 @@ describe('executeTitleBarMenuCommand', () => {
     vi.unstubAllGlobals();
   });
 
-  it('reports unsupported browser edit commands instead of silently no-oping', async () => {
+  it('fails when a native-only command reaches a browser menu', async () => {
     const execCommand = vi.fn();
     vi.stubGlobal('document', { execCommand });
-    const notifications: string[] = [];
 
-    await executeTitleBarMenuCommand({
+    const execution = executeTitleBarMenuCommand({
       kind: 'command',
       id: 'edit.paste-and-match-style',
       label: 'Paste and Match Style',
@@ -21,15 +21,12 @@ describe('executeTitleBarMenuCommand', () => {
     }, {
       api: {} as WorkbenchApiClient,
       shell: undefined,
-      notify: (message) => notifications.push(message),
       openProjectFromPicker: async () => undefined,
-      openProjectRoot: async () => undefined,
-      refreshTitleBarState: async () => undefined,
-      commandUnavailableMessage: (label) => `${label} is not available in this host.`
+      openProjectRoot: async () => undefined
     });
 
+    await expect(execution).rejects.toThrow('Title-bar command requires the native Desktop shell');
     expect(execCommand).not.toHaveBeenCalled();
-    expect(notifications).toEqual(['Paste and Match Style is not available in this host.']);
   });
 
   it('keeps current-window Project opens in the renderer and delegates only new-window opens', async () => {
@@ -37,12 +34,9 @@ describe('executeTitleBarMenuCommand', () => {
     const openProjectFromPicker = vi.fn(async () => undefined);
     const context = {
       api: {} as WorkbenchApiClient,
-      shell: { executeNativeMenuCommand },
-      notify: vi.fn(),
+      shell: shellApiFixture({ executeNativeMenuCommand }),
       openProjectFromPicker,
-      openProjectRoot: vi.fn(async () => undefined),
-      refreshTitleBarState: vi.fn(async () => undefined),
-      commandUnavailableMessage: (label: string) => label
+      openProjectRoot: vi.fn(async () => undefined)
     };
 
     await executeTitleBarMenuCommand({
@@ -58,3 +52,18 @@ describe('executeTitleBarMenuCommand', () => {
     });
   });
 });
+
+function shellApiFixture(overrides: Partial<DebruteShellApi>): DebruteShellApi {
+  return {
+    getNativeWindowState: async () => ({ maximized: false }),
+    minimizeNativeWindow: async () => ({ maximized: false }),
+    toggleMaximizeNativeWindow: async () => ({ maximized: true }),
+    closeNativeWindow: async () => ({ ok: true }),
+    executeNativeMenuCommand: async () => ({ ok: true }),
+    takeDesktopLaunchTicket: async () => undefined,
+    onNativeWindowStateChanged: () => () => undefined,
+    onOpenProjectRequested: () => () => undefined,
+    getDroppedFilePath: () => undefined,
+    ...overrides
+  };
+}

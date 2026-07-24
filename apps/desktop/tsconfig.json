@@ -1,8 +1,13 @@
 {
   "extends": "../../tsconfig.base.json",
   "compilerOptions": {
+    "composite": true,
     "noEmit": true,
-    "rootDir": "."
+    "noUnusedLocals": true,
+    "noUnusedParameters": true,
+    "rootDir": "src/electron",
+    "module": "NodeNext",
+    "moduleResolution": "NodeNext"
   },
   "include": ["src/electron/**/*.ts"],
   "references": [

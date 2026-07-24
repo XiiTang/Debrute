@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import type { CanvasDocument, CanvasNodeElement } from '@debrute/canvas-core';
+import type { CanvasDocument } from '@debrute/canvas-core';
 import { selectedCanvasNodeNeedsStackOrderUpdate } from './canvasState';
 
 describe('canvas state stack-order helpers', () => {
@@ -47,6 +47,8 @@ describe('canvas state stack-order helpers', () => {
     })).toBe(false);
   });
 });
+
+type CanvasNodeElement = CanvasDocument['nodeElements'][number];
 
 function canvasFixture(nodeElements: CanvasNodeElement[]): CanvasDocument {
   return {

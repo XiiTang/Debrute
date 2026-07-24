@@ -3,11 +3,12 @@ import { act } from 'react';
 import { createRoot } from 'react-dom/client';
 import { renderToStaticMarkup } from 'react-dom/server';
 import { describe, expect, it } from 'vitest';
-import { unavailableWorkbenchTitleBarState, type DebruteGlobalSettingsView, type IntegrationSettingsView } from '@debrute/app-protocol';
+import type { DebruteGlobalSettingsView, IntegrationSettingsView } from '@debrute/app-protocol';
 import { SettingsPanel } from '../SettingsPanel';
 import { IntegrationsSettingsPage } from './IntegrationsSettingsPage';
 import { I18nProvider } from '../../i18n';
 import type { WorkbenchActions, WorkbenchState } from '../../../types';
+import { buildWorkbenchTitleBarState } from '../../shell/workbenchTitleBarState';
 
 describe('web Integrations settings page', { tags: ['settings'] }, () => {
   it('adds Integrations to the Settings directory', () => {
@@ -48,7 +49,6 @@ describe('web Integrations settings page', { tags: ['settings'] }, () => {
     expect(html).not.toContain('uv tool upgrade remove-ai-watermarks');
     expect(html).toContain('<span>FFmpeg</span>');
     expect(html).toContain('db-status-pill--neutral');
-    expect(html).not.toContain('db-status-pill--success');
   });
 
   it('renders a ready empty state while keeping the rescan action available', () => {
@@ -149,7 +149,6 @@ describe('web Integrations settings page', { tags: ['settings'] }, () => {
         ok: false,
         integrationId: input.integrationId,
         operation: input.operation,
-        settings: integrationSettingsFixture(),
         diagnostic: { errorKind: 'nonzero_exit', stderrTail: 'install exploded' }
       })
     });
@@ -226,10 +225,9 @@ describe('web Integrations settings page', { tags: ['settings'] }, () => {
         ok: false,
         integrationId: input.integrationId,
         operation: input.operation,
-        settings: integrationSettingsFixture(),
         diagnostic: { errorKind: 'nonzero_exit', stderrTail: 'install exploded' }
       }),
-      rescanIntegrations: async () => integrationSettingsFixture()
+      rescanIntegrations: async () => undefined
     });
 
     try {
@@ -274,7 +272,6 @@ describe('web Integrations settings page', { tags: ['settings'] }, () => {
         ok: false,
         integrationId: input.integrationId,
         operation: input.operation,
-        settings: integrationSettingsFixture(),
         diagnostic: { errorKind: 'nonzero_exit', stderrTail: 'install exploded' }
       })
     });
@@ -326,9 +323,10 @@ function withI18n(element: React.ReactElement): React.ReactElement {
 function createState(overrides: Partial<WorkbenchState> = {}): WorkbenchState {
   return {
     snapshot: undefined,
-    titleBarState: unavailableWorkbenchTitleBarState(),
+    titleBarState: buildWorkbenchTitleBarState({ platform: 'darwin', host: 'web', locale: 'en', recentProjectRoots: [] }),
     explorerSelection: { selectedPaths: [], focusedPath: null, anchorPath: null },
     globalSettings: { status: 'ready', value: globalSettingsFixture() },
+    product: { status: 'ready', value: null },
     resolvedTheme: 'dark',
     projectOpen: { opening: false },
     adobeBridge: { status: 'ready', value: { settings: { enabled: true, discoveryStatus: 'available' }, pairedPlugins: [], clients: [], projects: [], links: [], transfers: [] } },
@@ -342,12 +340,11 @@ function createState(overrides: Partial<WorkbenchState> = {}): WorkbenchState {
 
 function createActions(overrides: Partial<WorkbenchActions> = {}): WorkbenchActions {
   return {
-    rescanIntegrations: async () => integrationSettingsFixture(),
+    rescanIntegrations: async () => undefined,
     runIntegrationOperation: async (input: Parameters<WorkbenchActions['runIntegrationOperation']>[0]) => ({
       ok: true,
       integrationId: input.integrationId,
-      operation: input.operation,
-      settings: integrationSettingsFixture()
+      operation: input.operation
     }),
     ...overrides
   } as unknown as WorkbenchActions;
@@ -384,9 +381,9 @@ function installedImageMagickSettings(): IntegrationSettingsView {
 
 function globalSettingsFixture(overrides: Partial<DebruteGlobalSettingsView> = {}): DebruteGlobalSettingsView {
   return {
-    workbench: { locale: 'en', themePreference: 'system', defaultFrontend: 'electron' },
+    workbench: { locale: 'en', themePreference: 'system', defaultFrontend: 'desktop' },
     chrome: { recentProjects: [] },
-    models: { image: { models: [] }, video: { models: [] }, audio: { models: [] } },
+    models: { image: [], video: [], audio: [] },
     integrations: integrationSettingsFixture(),
     adobeBridge: { enabled: true },
     ...overrides

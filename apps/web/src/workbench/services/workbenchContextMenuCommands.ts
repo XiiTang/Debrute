@@ -1,4 +1,4 @@
-import type { WorkbenchProjectSessionSnapshot } from '@debrute/app-protocol';
+import type { ProjectPathEntry, WorkbenchProjectSessionSnapshot } from '@debrute/app-protocol';
 import type { CanvasProjection } from '@debrute/canvas-core';
 import type { WorkbenchActions } from '../../types';
 import type { CanvasEditorRuntime } from '../canvas/runtime/CanvasEditorRuntime';
@@ -15,7 +15,6 @@ import {
   type WorkbenchContextMenuCommand,
   type WorkbenchContextMenuPosition,
   type WorkbenchContextMenuTarget,
-  type WorkbenchProjectPathEntry,
   type WorkbenchFileClipboard
 } from '../shell/contextMenu';
 
@@ -49,10 +48,10 @@ export function runWorkbenchContextMenuCommand(input: {
   notify: (message: string) => void;
   closeContextMenu: () => void;
   openInspectorPanel: () => void;
-  confirmPermanentDelete: (input: { entries: WorkbenchProjectPathEntry[] }) => boolean;
+  confirmPermanentDelete: (input: { entries: ProjectPathEntry[] }) => boolean;
   projectSnapshot?: WorkbenchProjectSessionSnapshot | undefined;
   confirmMoveOverwrite: (input: {
-    entries: WorkbenchProjectPathEntry[];
+    entries: ProjectPathEntry[];
     targetDirectoryProjectRelativePath: string;
   }) => boolean;
   errorLabels: WorkbenchContextMenuCommandErrorLabels;
@@ -138,13 +137,16 @@ export function runWorkbenchContextMenuCommand(input: {
 }
 
 function canvasLayoutResetInputForTarget(
-  target: WorkbenchProjectPathEntry
+  target: ProjectPathEntry
 ): Parameters<WorkbenchActions['resetCanvasNodeLayouts']>[1] {
   if (target.kind === 'directory' && target.projectRelativePath === '') {
     return { all: true };
   }
   return {
-    pathRules: { paths: [target.kind === 'directory' ? `${target.projectRelativePath}/` : target.projectRelativePath] }
+    pathRules: {
+      paths: [target.kind === 'directory' ? `${target.projectRelativePath}/` : target.projectRelativePath],
+      globs: []
+    }
   };
 }
 
@@ -296,7 +298,7 @@ function runExplorerSpecificCommand(
   return false;
 }
 
-function terminalCwdForEntry(entry: WorkbenchProjectPathEntry): string {
+function terminalCwdForEntry(entry: ProjectPathEntry): string {
   if (entry.kind === 'directory') {
     return entry.projectRelativePath;
   }
@@ -306,7 +308,7 @@ function terminalCwdForEntry(entry: WorkbenchProjectPathEntry): string {
 
 function isCanvasProjectRootTarget(
   target: WorkbenchContextMenuTarget,
-  entry: WorkbenchProjectPathEntry
+  entry: ProjectPathEntry
 ): boolean {
   return target.source === 'canvas'
     && entry.kind === 'directory'

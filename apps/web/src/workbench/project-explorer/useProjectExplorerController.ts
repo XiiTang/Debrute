@@ -1,8 +1,8 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import type {
   WorkbenchApiClient,
+  ProjectPathEntry,
   WorkbenchProjectFileBatchOperationResult,
-  WorkbenchProjectPathEntry,
   WorkbenchProjectSessionSnapshot
 } from '@debrute/app-protocol';
 import { getDebruteShellApi } from '../../api/shellApi';
@@ -41,24 +41,24 @@ export interface ProjectExplorerController {
   setSelection(selection: ProjectTreeSelectionState): void;
   beginCreateFile(parentProjectRelativePath: string): void;
   beginCreateDirectory(parentProjectRelativePath: string): void;
-  beginRename(entry: WorkbenchProjectPathEntry): void;
-  copyEntries(entries: WorkbenchProjectPathEntry[]): void;
-  cutEntries(entries: WorkbenchProjectPathEntry[]): void;
+  beginRename(entry: ProjectPathEntry): void;
+  copyEntries(entries: ProjectPathEntry[]): void;
+  cutEntries(entries: ProjectPathEntry[]): void;
   pasteEntries(input: {
     clipboard: WorkbenchFileClipboard;
     targetDirectoryProjectRelativePath: string;
     overwrite?: boolean;
   }): void;
-  copyAbsolutePaths(entries: WorkbenchProjectPathEntry[]): Promise<string[] | undefined>;
-  revealEntry(entry: WorkbenchProjectPathEntry): void;
-  trashEntries(entries: WorkbenchProjectPathEntry[]): void;
-  deleteEntriesPermanently(entries: WorkbenchProjectPathEntry[]): void;
+  copyAbsolutePaths(entries: ProjectPathEntry[]): Promise<string[] | undefined>;
+  revealEntry(entry: ProjectPathEntry): void;
+  trashEntries(entries: ProjectPathEntry[]): void;
+  deleteEntriesPermanently(entries: ProjectPathEntry[]): void;
   updateEditValue(value: string): void;
   submitEdit(): Promise<void>;
   cancelEdit(): void;
   clearCut(): void;
   handleInternalDrop(input: {
-    entries: WorkbenchProjectPathEntry[];
+    entries: ProjectPathEntry[];
     targetDirectoryProjectRelativePath: string;
     operation: 'copy' | 'move';
   }): void;
@@ -73,7 +73,10 @@ export function useProjectExplorerController(input: {
   api: WorkbenchApiClient;
   projectId: string | undefined;
   snapshot: WorkbenchProjectSessionSnapshot | undefined;
-  commitSnapshot(snapshot: WorkbenchProjectSessionSnapshot): void;
+  commitSnapshot(result: {
+    projectRevision: number;
+    snapshot: WorkbenchProjectSessionSnapshot;
+  }): void;
   activeCanvasRuntime: CanvasEditorRuntime | undefined;
   locateProjectFileInCanvas(projectRelativePath: string): void;
   notify(message: string): void;
@@ -123,15 +126,15 @@ export function useProjectExplorerController(input: {
     setInlineEdit(createInlineEditState('creating-directory', parentProjectRelativePath));
   }, []);
 
-  const beginRename = useCallback((entry: WorkbenchProjectPathEntry) => {
+  const beginRename = useCallback((entry: ProjectPathEntry) => {
     setInlineEdit(createInlineEditState('renaming', entry.projectRelativePath));
   }, []);
 
-  const copyEntries = useCallback((entries: WorkbenchProjectPathEntry[]) => {
+  const copyEntries = useCallback((entries: ProjectPathEntry[]) => {
     setFileClipboard({ operation: 'copy', entries });
   }, []);
 
-  const cutEntries = useCallback((entries: WorkbenchProjectPathEntry[]) => {
+  const cutEntries = useCallback((entries: ProjectPathEntry[]) => {
     setFileClipboard({ operation: 'cut', entries });
   }, []);
 
@@ -173,7 +176,7 @@ export function useProjectExplorerController(input: {
       if (!isCurrentProjectScope(scope, result.projectId)) {
         return;
       }
-      input.commitSnapshot(result.snapshot);
+      input.commitSnapshot(result);
       setSelectionState(projectTreeSelectionFromPaths([result.projectRelativePath]));
       setInlineEdit(undefined);
     } catch (error) {
@@ -198,7 +201,7 @@ export function useProjectExplorerController(input: {
     if (!isCurrentProjectScope(scope, result.projectId)) {
       return false;
     }
-    input.commitSnapshot(result.snapshot);
+    input.commitSnapshot(result);
     setSelectionState(projectTreeSelectionFromPaths(batchResultSelectionPaths(result.results)));
     const locatedPath = singleFileBatchResultPath(result.results);
     if (locatedPath) {
@@ -208,7 +211,7 @@ export function useProjectExplorerController(input: {
   }, [input.commitSnapshot, input.locateProjectFileInCanvas, isCurrentProjectScope]);
 
   const copyPaths = useCallback(async (copyInput: {
-    entries: WorkbenchProjectPathEntry[];
+    entries: ProjectPathEntry[];
     targetDirectoryProjectRelativePath: string;
   }, scope: ProjectCommandScope): Promise<boolean> => {
     const result = await input.api.copyProjectPaths(copyInput);
@@ -216,7 +219,7 @@ export function useProjectExplorerController(input: {
   }, [applyBatchResult, input.api]);
 
   const movePaths = useCallback(async (moveInput: {
-    entries: WorkbenchProjectPathEntry[];
+    entries: ProjectPathEntry[];
     targetDirectoryProjectRelativePath: string;
     overwrite?: boolean;
   }, scope: ProjectCommandScope): Promise<boolean> => {
@@ -253,7 +256,7 @@ export function useProjectExplorerController(input: {
     });
   }, [captureProjectScope, copyPaths, input.i18n, input.notify, isCurrentProjectScope, movePaths]);
 
-  const copyAbsolutePaths = useCallback(async (entries: WorkbenchProjectPathEntry[]): Promise<string[] | undefined> => {
+  const copyAbsolutePaths = useCallback(async (entries: ProjectPathEntry[]): Promise<string[] | undefined> => {
     const scope = captureProjectScope();
     try {
       const result = await input.api.copyProjectAbsolutePaths({ entries });
@@ -266,7 +269,7 @@ export function useProjectExplorerController(input: {
     }
   }, [captureProjectScope, input.api, input.i18n, input.notify, isCurrentProjectScope]);
 
-  const revealEntry = useCallback((entry: WorkbenchProjectPathEntry) => {
+  const revealEntry = useCallback((entry: ProjectPathEntry) => {
     const scope = captureProjectScope();
     void input.api.revealProjectPathInSystemFileManager(entry).catch((error) => {
       if (isCurrentProjectScope(scope)) {
@@ -276,7 +279,7 @@ export function useProjectExplorerController(input: {
   }, [captureProjectScope, input.api, input.i18n, input.notify, isCurrentProjectScope]);
 
   const applyDeletedEntries = useCallback((
-    entries: WorkbenchProjectPathEntry[],
+    entries: ProjectPathEntry[],
     snapshot: WorkbenchProjectSessionSnapshot
   ) => {
     const deletedPaths = entries.map((entry) => entry.projectRelativePath);
@@ -303,7 +306,7 @@ export function useProjectExplorerController(input: {
     ));
   }, [input.activeCanvasRuntime]);
 
-  const deleteEntries = useCallback((entries: WorkbenchProjectPathEntry[], permanent: boolean) => {
+  const deleteEntries = useCallback((entries: ProjectPathEntry[], permanent: boolean) => {
     const scope = captureProjectScope();
     const request = permanent
       ? input.api.deleteProjectPathsPermanently({ entries })
@@ -312,7 +315,7 @@ export function useProjectExplorerController(input: {
       if (!isCurrentProjectScope(scope, result.projectId)) {
         return;
       }
-      input.commitSnapshot(result.snapshot);
+      input.commitSnapshot(result);
       applyDeletedEntries(entries, result.snapshot);
     }).catch((error) => {
       if (isCurrentProjectScope(scope)) {
@@ -321,16 +324,16 @@ export function useProjectExplorerController(input: {
     });
   }, [applyDeletedEntries, captureProjectScope, input.api, input.commitSnapshot, input.i18n, input.notify, isCurrentProjectScope]);
 
-  const trashEntries = useCallback((entries: WorkbenchProjectPathEntry[]) => {
+  const trashEntries = useCallback((entries: ProjectPathEntry[]) => {
     deleteEntries(entries, false);
   }, [deleteEntries]);
 
-  const deleteEntriesPermanently = useCallback((entries: WorkbenchProjectPathEntry[]) => {
+  const deleteEntriesPermanently = useCallback((entries: ProjectPathEntry[]) => {
     deleteEntries(entries, true);
   }, [deleteEntries]);
 
   const handleInternalDrop = useCallback((dropInput: {
-    entries: WorkbenchProjectPathEntry[];
+    entries: ProjectPathEntry[];
     targetDirectoryProjectRelativePath: string;
     operation: 'copy' | 'move';
   }) => {

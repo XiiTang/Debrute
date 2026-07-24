@@ -1,12 +1,12 @@
 import React from 'react';
 import { cx } from './cx';
 
-export interface CommentPillInputSizing {
+interface CommentPillInputSizing {
   minWidthPx?: number;
   maxWidthPx?: number;
 }
 
-export interface CommentPillInputProps extends Omit<React.InputHTMLAttributes<HTMLInputElement>, 'children'> {
+interface CommentPillInputProps extends Omit<React.InputHTMLAttributes<HTMLInputElement>, 'children'> {
   inputClassName?: string;
   sizing?: CommentPillInputSizing;
 }

@@ -9,48 +9,35 @@ metadata:
 
 # Debrute Video Director
 
-Use for any task related to video generation or video editing.
+Use `debrute` as the execution interface for video generation and editing.
 
-Use `debrute` as the Debrute execution interface. Debrute Skills describe how to call the CLI; they are standard Skills, not Debrute APIs.
+## Rules
 
-## Basic Rules
-
-- Do not assume a model, argument shape, or default output path from memory.
-- Run `debrute models video list` to compare configured video models by Debrute-native parameters and constraints.
-- Use only models returned by `debrute models video list`.
-- Before generation, run `debrute models video describe <model-id>` once for the selected model.
-- Inspect the returned official documentation URLs, repository snapshot path, `description_markdown`, Debrute examples, and `arguments_schema`.
-- Use `prompt`, `intent`, and `references`; do not assemble official Seedance `content` arrays.
-- Do not include model API keys in generation requests; Debrute reads configured keys locally.
-- Use the Debrute example command returned by `models video describe`; do not rely on source API curl or SDK snippets.
-- Project-local image and audio references can be normalized by Debrute when the selected model supports them.
-- Project-local video references require Debrute upload-server support unless the source is already `http(s)` or `asset://`.
-- Submit the request with `debrute generate video /path/to/project --input-json '<json>'`.
-- --timeout-ms defaults to 600000ms for video requests and covers task submission, polling, response reads, and artifact download.
-- When project artifacts should be created, use output arguments supported by the selected model so generated files are written inside the project.
-- Update the Canvas Map when planning video output paths. Add literal file/folder entries under `paths` in `.debrute/canvas-maps/<canvas-id>.yaml`; folder rules must end with `/`, and wildcard matching must use explicit `glob:` entries.
-- Use `layout.rows` when generated video siblings should compare horizontally by direct parent directory.
-- Push the Canvas Map with `debrute canvas-map push /path/to/project <canvas-id>`.
-- Surface structured CLI errors to the user when a command fails.
+- Run `debrute models video list`, choose only a returned configured Model, then
+  run `debrute models video describe <model-id>` once.
+- Build Model `arguments` from the returned Debrute schema and documentation.
+  For Seedance adapters use the documented `prompt`, `intent`, and `references`;
+  do not assemble provider `content` arrays or include API keys.
+- Submit strict JSONL with
+  `debrute request single /path/to/project --input video-request.jsonl` or use
+  `request batch` for multiple video requests.
+- Optional `output` is separate from `arguments`; specify a Project-relative
+  directory and extension-free filename. Runtime derives the actual extension.
+- Video Model Runs default to `30m`; `--timeout` accepts only positive `s`, `m`,
+  or `h` durations and covers active submission, polling, reads, and downloads.
+- The CLI waits by default. `--no-wait` returns an Operation id and does not
+  cancel work when the CLI exits.
+- Project-local image and audio references are normalized only when supported.
+  Project-local video references still require upload support unless already
+  represented by a supported remote or asset URL.
+- Use `--replace` only when replacing the file present at commit is intended.
+- Update and push the Canvas Map before generation when planned outputs should
+  appear on a Canvas, and report Artifact records and structured errors.
 
 ## Workflow
 
-1. Read or derive the user's video generation or video editing brief.
-2. Inspect project files or source media assets only when they are needed for the video task.
-3. Run `debrute models video list` and compare configured models by Debrute-native parameters and constraints.
-4. Choose a candidate from the returned models.
-5. Before generation, run `debrute models video describe <model-id>` once for the selected model.
-6. Build the request payload from `description_markdown`, the Debrute example, and `arguments_schema`.
-7. Use `prompt`, `intent`, and `references`; do not assemble official Seedance `content` arrays.
-8. When literal output paths or explicit `glob:` rules are planned, update `.debrute/canvas-maps/<canvas-id>.yaml` so the generated files appear on that Canvas.
-9. Push the Canvas Map with `debrute canvas-map push /path/to/project <canvas-id>`.
-10. Run `debrute generate video /path/to/project --input-json '<json>'`.
-11. Report artifact paths, generated asset metadata, and any structured errors.
-
-## Error Handling
-
-- If `models video list` returns no models, say Debrute returned no configured video models and do not invent one.
-- If the selected model cannot be used, run `models video list` again and choose from the returned models or ask the user how to proceed.
-- If a project-local video reference returns `video_reference_upload_unavailable`, report that the source must be `http(s)` or `asset://` until Debrute upload-server support is configured.
-- If the CLI returns configuration, authentication, model request, validation, filesystem, or generated asset errors, preserve the structured error code, message, model id, and relevant logs.
-- If request arguments do not match the selected model, fetch the model description again and rebuild the request from `description_markdown`, the Debrute example, and `arguments_schema`.
+1. Inspect the brief and only required source media.
+2. List, select, and describe a configured video Model.
+3. Write one or more schema-valid JSONL Model Requests.
+4. Update and push the Canvas Map when needed.
+5. Submit one Single or Batch Operation and report its settled results.

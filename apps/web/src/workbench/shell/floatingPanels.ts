@@ -1,8 +1,7 @@
 import {
   constrainDragHitAreaVisible,
   sameWindowRect,
-  type WorkbenchWindowRect,
-  type WorkbenchViewportRect
+  type WorkbenchWindowRect
 } from './windowBounds';
 
 export type FloatingPanelId = 'explorer' | 'inspector' | 'settings' | 'terminal';
@@ -34,8 +33,7 @@ export interface FloatingPanelState {
   panels: Record<FloatingPanelId, FloatingPanelLayout>;
 }
 
-export type FloatingPanelResizeRect = WorkbenchWindowRect;
-export interface FloatingPanelResizeInput extends FloatingPanelResizeRect {
+export interface FloatingPanelResizeInput extends WorkbenchWindowRect {
   direction: FloatingPanelResizeDirection;
 }
 
@@ -84,7 +82,7 @@ export const DEFAULT_FLOATING_PANEL_STATE: FloatingPanelState = {
 export function openFloatingPanel(
   state: FloatingPanelState,
   panelId: FloatingPanelId,
-  viewport: WorkbenchViewportRect
+  viewport: WorkbenchWindowRect
 ): FloatingPanelState {
   const panel = constrainFloatingPanelLayout(state.panels[panelId], viewport);
   return {
@@ -99,7 +97,7 @@ export function openFloatingPanel(
 export function toggleFloatingPanel(
   state: FloatingPanelState,
   panelId: FloatingPanelId,
-  viewport: WorkbenchViewportRect
+  viewport: WorkbenchWindowRect
 ): FloatingPanelState {
   const panel = state.panels[panelId];
   const nextOpen = !panel.open;
@@ -127,7 +125,7 @@ export function dragFloatingPanel(
   state: FloatingPanelState,
   panelId: FloatingPanelId,
   delta: { dx: number; dy: number },
-  viewport: WorkbenchViewportRect
+  viewport: WorkbenchWindowRect
 ): FloatingPanelState {
   const panel = state.panels[panelId];
   const nextPanel = constrainFloatingPanelLayout({
@@ -148,7 +146,7 @@ export function resizeFloatingPanel(
   state: FloatingPanelState,
   panelId: FloatingPanelId,
   input: FloatingPanelResizeInput,
-  viewport: WorkbenchViewportRect
+  viewport: WorkbenchWindowRect
 ): FloatingPanelState {
   const panel = state.panels[panelId];
   const definition = FLOATING_PANEL_DEFINITIONS[panelId];
@@ -172,7 +170,7 @@ export function resizeFloatingPanel(
 
 export function constrainOpenFloatingPanelsToViewport(
   state: FloatingPanelState,
-  viewport: WorkbenchViewportRect
+  viewport: WorkbenchWindowRect
 ): FloatingPanelState {
   let changed = false;
   const panels = { ...state.panels };
@@ -192,7 +190,7 @@ export function constrainOpenFloatingPanelsToViewport(
 
 function constrainFloatingPanelLayout(
   panel: FloatingPanelLayout,
-  viewport: WorkbenchViewportRect
+  viewport: WorkbenchWindowRect
 ): FloatingPanelLayout {
   return {
     ...panel,

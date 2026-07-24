@@ -31,7 +31,7 @@ describe('native raster payload', () => {
       expect(target.sha256).toMatch(/^[a-f0-9]{64}$/);
       expect(target.archiveFormat).toMatch(/^(nupkg|zip)$/);
     }
-    expect(() => nativeRasterTargetLock('linux-x64')).toThrow('unsupported');
+    expect(() => nativeRasterTargetLock('freebsd-x64')).toThrow('unsupported');
   });
 
   it('accepts only the exact platform payload with a closed checksum inventory', async () => {

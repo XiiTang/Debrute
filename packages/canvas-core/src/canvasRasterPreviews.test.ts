@@ -1,21 +1,7 @@
 import { describe, expect, it } from 'vitest';
-import {
-  CANVAS_RASTER_PREVIEW_MAX_SCALE,
-  CANVAS_RASTER_PREVIEW_MIN_SCALE,
-  canvasRasterPreviewSteppedScale,
-  canvasRasterPreviewWidth,
-  canvasRasterPreviewWidthsForSource
-} from './canvasRasterPreviews';
+import { canvasRasterPreviewWidth } from './canvasRasterPreviews';
 
 describe('Canvas raster preview sizing', () => {
-  it('uses the sqrt(2) scale ladder', () => {
-    expect(CANVAS_RASTER_PREVIEW_MIN_SCALE).toBe(1 / 32);
-    expect(CANVAS_RASTER_PREVIEW_MAX_SCALE).toBe(1);
-    expect(canvasRasterPreviewSteppedScale(0.18)).toBe(0.25);
-    expect(canvasRasterPreviewSteppedScale(0.26)).toBeCloseTo(Math.SQRT2 / 4);
-    expect(canvasRasterPreviewSteppedScale(0.51)).toBeCloseTo(Math.SQRT2 / 2);
-  });
-
   it('uses source width rather than a fixed cross-media maximum', () => {
     expect(canvasRasterPreviewWidth({
       nodeDisplayWidth: 8256,
@@ -23,10 +9,6 @@ describe('Canvas raster preview sizing', () => {
       resourceZoom: 1,
       devicePixelRatio: 2
     })).toBe(8256);
-    expect(canvasRasterPreviewWidthsForSource({
-      sourceWidth: 10_000,
-      devicePixelRatio: 2
-    }).at(-1)).toBe(10_000);
   });
 
   it('selects a preview width from displayed size, source width, zoom, and DPR', () => {
@@ -44,15 +26,7 @@ describe('Canvas raster preview sizing', () => {
     })).toBe(1698);
   });
 
-  it('returns the complete finite width set for one source', () => {
-    expect(canvasRasterPreviewWidthsForSource({
-      sourceWidth: 3200,
-      devicePixelRatio: 1
-    })).toEqual([100, 142, 200, 283, 400, 566, 800, 1132, 1600, 2263, 3200]);
-  });
-
   it('rejects invalid numeric inputs', () => {
-    expect(() => canvasRasterPreviewSteppedScale(0)).toThrow('Canvas raster preview screen scale must be a positive finite number.');
     expect(() => canvasRasterPreviewWidth({
       nodeDisplayWidth: 0,
       sourceWidth: 100,

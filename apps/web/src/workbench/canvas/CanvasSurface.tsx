@@ -31,10 +31,7 @@ import { createCanvasVideoHotkeyController } from './CanvasVideoHotkeyController
 import type { CanvasVideoPlayerHandle } from './CanvasVideoPlayerAdapter';
 import type { CanvasMediaFeedbackMode } from './CanvasMediaFeedbackLayer';
 import { CanvasNodeShell } from './CanvasNodeShell';
-import {
-  createCanvasPreviewResourceScheduler,
-  type CanvasPreviewResourceScheduler
-} from './CanvasPreviewResourceScheduler';
+import { createCanvasPreviewResourceScheduler } from './CanvasPreviewResourceScheduler';
 import {
   initialCanvasResourceZoomState,
   nextCanvasResourceZoomState
@@ -45,23 +42,15 @@ import type { CanvasVideoPreviewSource } from './canvasVideoPreviews';
 import type { CanvasOverlayRuntime } from './CanvasOverlayRuntime';
 import type { PendingCanvasFeedbackItem } from './canvasFeedbackDraft';
 import { createCanvasPerfBrowserAdapter } from './CanvasPerfBrowserAdapter';
-import { canvasPerfDiagnosticsEnabled } from './CanvasPerfDiagnostics';
-import { createCanvasPerfDebugBridge, type DebruteCanvasPerfCanvasSnapshot } from './CanvasPerfDebugBridge';
+import { createCanvasPerfDebugBridge } from './CanvasPerfDebugBridge';
 import {
-  CANVAS_PERF_INTERACTION_SESSION_TYPES,
   createCanvasPerfMonitor,
-  type CanvasPerfCounterName,
-  type CanvasPerfCounterTotals,
-  type CanvasPerfFinalState,
-  type CanvasPerfMonitor,
-  type CanvasPerfSessionId
+  type CanvasPerfMonitor
 } from './CanvasPerfMonitor';
-import { createCanvasRenderCoordinator, type CanvasRenderCoordinatorSnapshot, type CanvasRenderCoordinatorUpdateInput } from './CanvasRenderCoordinator';
+import { createCanvasRenderCoordinator, type CanvasRenderCoordinatorSnapshot } from './CanvasRenderCoordinator';
 import { createCanvasVisibilityController } from './CanvasVisibilityController';
 import type {
   CanvasEditorRuntime,
-  CanvasRuntimeDragState,
-  CanvasRuntimePointerModifiers,
   CanvasRuntimeSnapshot
 } from './runtime/CanvasEditorRuntime';
 import { createCanvasStageRuntime, type CanvasStageRuntime } from './runtime/CanvasStageRuntime';
@@ -71,15 +60,37 @@ import {
   useCanvasSelection,
   useCanvasSurfaceSize
 } from './runtime/useCanvasRuntimeSnapshot';
-import type { CanvasCamera } from './runtime/canvasCamera';
 import {
   canvasLayoutOverridesForCanvas,
-  canvasLocalLayoutDraftFromDragState,
-  canvasLocalLayoutDraftMatchesProjection,
   canvasNodesWithLayoutOverrides,
   type CanvasLocalLayoutDraft
 } from './canvasLocalLayoutDraft';
-import { hasInternalProjectTreeDrag, readInternalProjectTreeDragEntries } from '../project-explorer/ProjectTree';
+import {
+  activeNodeProjectRelativePaths,
+  canvasActiveVideoPaths,
+  canvasFeedbackBarTargetForProjectedNode,
+  canvasMapProjectTreeDropInput,
+  canvasPerfDebugSnapshot,
+  canvasPerfFinalState,
+  canvasSurfaceLayoutDraftFromDragState,
+  canvasSurfaceShouldClearPendingLayoutDraft,
+  createCanvasRenderSnapshotScheduler,
+  devicePixelRatioValue,
+  domRectToFloatingBarRect,
+  isCanvasMapProjectTreeDragOver,
+  isProjectedVideoNode,
+  nodeRectForFloatingBar,
+  pointerEventModifiers,
+  recordCanvasPerfFrame,
+  selectedSingleVideoPath,
+  shouldClearFeedbackBarPlacementForFeedbackTarget,
+  syncCanvasMovingCameraFrame,
+  syncCanvasPerfDragSessionState,
+  syncCanvasPerfSessionState,
+  syncCanvasPreviewResourceSchedulerForInteraction,
+  type CanvasPerfDebugSnapshotContext,
+  type CanvasPerfRuntimeSession
+} from './canvasSurfaceSupport';
 
 interface CanvasSurfaceProps {
   canvas: CanvasDocument;
@@ -121,21 +132,23 @@ export function CanvasSurface({
   onOpenContextMenu,
   textPreviewStyleDependencyKey
 }: CanvasSurfaceProps): React.ReactElement {
-  const perfMonitorEnabled = canvasPerfMonitorEnabled();
   const perfMonitorRef = useRef<CanvasPerfMonitor | undefined>(undefined);
   const perfBrowserAdapter = useMemo(() => (
-    perfMonitorEnabled
+    __DEBRUTE_CANVAS_PERF__
       ? createCanvasPerfBrowserAdapter({
         onLongAnimationFrame: (entry) => {
           perfMonitorRef.current?.recordLongAnimationFrame(entry);
         }
       })
       : undefined
-  ), [perfMonitorEnabled]);
-  const perfMonitor = useMemo(() => createCanvasPerfMonitor({
-    enabled: perfMonitorEnabled,
-    onEvent: (event) => perfBrowserAdapter?.recordEvent(event)
-  }), [perfBrowserAdapter, perfMonitorEnabled]);
+  ), []);
+  const perfMonitor = useMemo(() => (
+    __DEBRUTE_CANVAS_PERF__
+      ? createCanvasPerfMonitor({
+        onEvent: (event) => perfBrowserAdapter?.recordEvent(event)
+      })
+      : undefined
+  ), [perfBrowserAdapter]);
   perfMonitorRef.current = perfMonitor;
 
   useEffect(() => () => {
@@ -184,7 +197,7 @@ function CanvasSurfaceRuntime({
   onOpenContextMenu,
   textPreviewStyleDependencyKey
 }: CanvasSurfaceProps & {
-  perfMonitor: CanvasPerfMonitor;
+  perfMonitor: CanvasPerfMonitor | undefined;
 }): React.ReactElement {
   const surfaceRef = useRef<HTMLDivElement | null>(null);
   const stageRef = useRef<HTMLDivElement | null>(null);
@@ -219,10 +232,13 @@ function CanvasSurfaceRuntime({
   const [videoTargetRevision, setVideoTargetRevision] = useState(0);
 
   const projectedNodes = projection.nodes;
+  const projectedNodesRef = useRef(projectedNodes);
+  projectedNodesRef.current = projectedNodes;
   const videoHotkeyController = useMemo(() => createCanvasVideoHotkeyController({
     requestTargetMount: setRequestedVideoPlayerPath
   }), []);
   const videoTargetsRef = useRef(new Map<string, CanvasVideoPlayerHandle>());
+  const videoPlaybackUpdateVersionsRef = useRef(new Map<string, number>());
   const registerVideoTarget = useCallback((projectRelativePath: string, target: CanvasVideoPlayerHandle | undefined) => {
     videoHotkeyController.register(projectRelativePath, target);
     if (target) {
@@ -233,8 +249,7 @@ function CanvasSurfaceRuntime({
     setVideoTargetRevision((current) => current + 1);
   }, [videoHotkeyController]);
   const devicePixelRatio = devicePixelRatioValue();
-  const perfMonitorEnabled = canvasPerfMonitorEnabled();
-  const instrumentationMonitor = perfMonitorEnabled ? perfMonitor : undefined;
+  const instrumentationMonitor = perfMonitor;
   const stageRuntime = useMemo(() => createCanvasStageRuntime({ perfMonitor: instrumentationMonitor }), [instrumentationMonitor]);
   const previewResourceScheduler = useMemo(() => createCanvasPreviewResourceScheduler({ perfMonitor: instrumentationMonitor }), [instrumentationMonitor]);
   const visibilityController = useMemo(() => createCanvasVisibilityController({ stageRuntime }), [stageRuntime]);
@@ -274,7 +289,7 @@ function CanvasSurfaceRuntime({
   };
 
   useEffect(() => {
-    if (perfMonitorEnabled) {
+    if (perfMonitor) {
       reactCommitCountRef.current += 1;
     }
   });
@@ -294,22 +309,25 @@ function CanvasSurfaceRuntime({
     return () => window.removeEventListener('keydown', handleKeyDown);
   }, [projectedNodes, videoHotkeyController]);
 
-  const perfDebugBridge = useMemo(() => createCanvasPerfDebugBridge({
-    enabled: perfMonitorEnabled,
-    perfMonitor,
-    getCanvasSnapshot: () => {
-      const context = canvasPerfDebugContextRef.current;
-      if (!context) {
-        throw new Error('Canvas perf debug snapshot context is unavailable.');
-      }
-      return canvasPerfDebugSnapshot(context);
-    }
-  }), [perfMonitor, perfMonitorEnabled]);
+  const perfDebugBridge = useMemo(() => (
+    __DEBRUTE_CANVAS_PERF__ && perfMonitor
+      ? createCanvasPerfDebugBridge({
+        perfMonitor,
+        getCanvasSnapshot: () => {
+          const context = canvasPerfDebugContextRef.current;
+          if (!context) {
+            throw new Error('Canvas perf debug snapshot context is unavailable.');
+          }
+          return canvasPerfDebugSnapshot(context);
+        }
+      })
+      : undefined
+  ), [perfMonitor]);
 
   useEffect(() => {
-    perfDebugBridge.register();
+    perfDebugBridge?.register();
     return () => {
-      perfDebugBridge.unregister();
+      perfDebugBridge?.unregister();
     };
   }, [perfDebugBridge]);
 
@@ -497,7 +515,6 @@ function CanvasSurfaceRuntime({
       renderSnapshotScheduler
     });
     recordCanvasPerfFrame({
-      enabled: perfMonitorEnabled,
       perfMonitor,
       sessionRef: canvasPerfSessionRef,
       cameraState: snapshot.cameraState,
@@ -506,7 +523,6 @@ function CanvasSurfaceRuntime({
     });
   }), [
     perfMonitor,
-    perfMonitorEnabled,
     stageRuntime,
     renderSnapshot,
     renderSnapshotScheduler,
@@ -529,7 +545,6 @@ function CanvasSurfaceRuntime({
         cameraZoom: snapshot.camera.z
       });
       syncCanvasPerfSessionState({
-        enabled: perfMonitorEnabled,
         perfMonitor,
         sessionRef: canvasPerfSessionRef,
         reactCommitCountRef,
@@ -553,7 +568,6 @@ function CanvasSurfaceRuntime({
   }, [
     minimapOpen,
     perfMonitor,
-    perfMonitorEnabled,
     previewResourceScheduler,
     renderSnapshotScheduler,
     runtime,
@@ -563,7 +577,6 @@ function CanvasSurfaceRuntime({
   useEffect(() => {
     const initialSnapshot = runtime.getSnapshot();
     syncCanvasPerfDragSessionState({
-      enabled: perfMonitorEnabled,
       perfMonitor,
       sessionRef: canvasPerfDragSessionRef,
       reactCommitCountRef,
@@ -576,7 +589,6 @@ function CanvasSurfaceRuntime({
     });
     if (initialSnapshot.dragState) {
       recordCanvasPerfFrame({
-        enabled: perfMonitorEnabled,
         perfMonitor,
         sessionRef: canvasPerfDragSessionRef,
         cameraState: initialSnapshot.cameraState,
@@ -598,7 +610,6 @@ function CanvasSurfaceRuntime({
         point: nextDragState?.current ?? nextDragState?.start
       });
       syncCanvasPerfDragSessionState({
-        enabled: perfMonitorEnabled,
         perfMonitor,
         sessionRef: canvasPerfDragSessionRef,
         reactCommitCountRef,
@@ -611,7 +622,6 @@ function CanvasSurfaceRuntime({
       });
       if (nextDragState) {
         recordCanvasPerfFrame({
-          enabled: perfMonitorEnabled,
           perfMonitor,
           sessionRef: canvasPerfDragSessionRef,
           cameraState: snapshot.cameraState,
@@ -640,7 +650,6 @@ function CanvasSurfaceRuntime({
     commitRenderSnapshot,
     canvas.id,
     perfMonitor,
-    perfMonitorEnabled,
     previewResourceScheduler,
     renderSnapshot,
     syncVisibility,
@@ -736,6 +745,18 @@ function CanvasSurfaceRuntime({
     }
     const nodeLayouts = pendingDraft?.nodeLayouts ?? [];
     if (nodeLayouts.length === 0) {
+      if (pendingLayoutDraftRef.current === pendingDraft) {
+        pendingLayoutDraftRef.current = undefined;
+      }
+      return;
+    }
+    const currentNodePaths = new Set(
+      projectedNodesRef.current.map((node) => node.projectRelativePath)
+    );
+    if (nodeLayouts.some((layout) => !currentNodePaths.has(layout.projectRelativePath))) {
+      if (pendingLayoutDraftRef.current === pendingDraft) {
+        pendingLayoutDraftRef.current = undefined;
+      }
       return;
     }
     try {
@@ -757,7 +778,7 @@ function CanvasSurfaceRuntime({
   }, [actions, canvas.id, commitRenderSnapshot, pointerCanvasPoint, runtime]);
 
   const handlePointerUpEvent = useCallback((event: React.PointerEvent<Element>) => {
-    void handlePointerUp(event);
+    void handlePointerUp(event).catch(() => undefined);
   }, [handlePointerUp]);
 
   const selectNode = useCallback((node: ProjectedCanvasNode) => {
@@ -830,14 +851,47 @@ function CanvasSurfaceRuntime({
     });
   }, []);
   const handleUpdateVideoPlaybackTime = useCallback((projectRelativePath: string, currentTimeSeconds: number) => {
+    const node = projectedNodesRef.current.find((candidate) => (
+      candidate.projectRelativePath === projectRelativePath
+    ));
+    if (node?.mediaKind !== 'video') {
+      return;
+    }
+    const updateKey = `${canvas.id}\u0000${projectRelativePath}`;
+    const version = (videoPlaybackUpdateVersionsRef.current.get(updateKey) ?? 0) + 1;
+    videoPlaybackUpdateVersionsRef.current.set(updateKey, version);
     void actions.updateCanvasVideoPlaybackState(canvas.id, {
       updates: [{ projectRelativePath, currentTimeSeconds }]
+    }).then(() => {
+      if (videoPlaybackUpdateVersionsRef.current.get(updateKey) === version) {
+        videoPlaybackUpdateVersionsRef.current.delete(updateKey);
+      }
+    }, () => {
+      if (videoPlaybackUpdateVersionsRef.current.get(updateKey) !== version) {
+        return;
+      }
+      videoPlaybackUpdateVersionsRef.current.delete(updateKey);
+      const durableNode = projectedNodesRef.current.find((candidate) => (
+        candidate.projectRelativePath === projectRelativePath
+      ));
+      if (durableNode?.mediaKind !== 'video') {
+        return;
+      }
+      videoTargetsRef.current
+        .get(projectRelativePath)
+        ?.restorePersistedTime(durableNode.videoPlayback?.currentTimeSeconds ?? 0);
     });
   }, [actions, canvas.id]);
   const handleUpdateTextViewport = useCallback((projectRelativePath: string, viewport: CanvasTextViewportState) => {
+    const node = projectedNodesRef.current.find((candidate) => (
+      candidate.projectRelativePath === projectRelativePath
+    ));
+    if (node?.mediaKind !== 'text') {
+      return;
+    }
     void actions.updateCanvasTextViewportState(canvas.id, {
       updates: [{ projectRelativePath, ...viewport }]
-    });
+    }).catch(() => undefined);
   }, [actions, canvas.id]);
 
   useEffect(() => {
@@ -1327,548 +1381,4 @@ function CanvasSurfaceNodeShell({
       onVideoPreviewError={reportVideoPreviewError}
     />
   );
-}
-
-export function canvasMapProjectTreeDropEntry(
-  dataTransfer: Pick<DataTransfer, 'getData'>
-): ReturnType<typeof readInternalProjectTreeDragEntries>[number] | undefined {
-  const entries = readInternalProjectTreeDragEntries(dataTransfer);
-  return entries.length === 1 ? entries[0] : undefined;
-}
-
-export function canvasMapProjectTreeDropInput(
-  canvasId: string,
-  dataTransfer: Pick<DataTransfer, 'getData'>
-): { canvasId: string; projectRelativePath: string } | undefined {
-  const entry = canvasMapProjectTreeDropEntry(dataTransfer);
-  return entry
-    ? {
-        canvasId,
-        projectRelativePath: entry.projectRelativePath
-      }
-    : undefined;
-}
-
-export function isCanvasMapProjectTreeDragOver(dataTransfer: Pick<DataTransfer, 'types'>): boolean {
-  return hasInternalProjectTreeDrag(dataTransfer);
-}
-
-export function shouldClearFeedbackBarPlacementForFeedbackTarget(input: {
-  hasFeedbackTargetHandler: boolean;
-  hasCanvasFeedback: boolean;
-  hoveredNodePath: string | undefined;
-  hasRenderableFeedbackTarget: boolean;
-}): boolean {
-  if (!input.hasFeedbackTargetHandler || !input.hasCanvasFeedback) {
-    return true;
-  }
-  if (!input.hoveredNodePath) {
-    return false;
-  }
-  return !input.hasRenderableFeedbackTarget;
-}
-
-export function canvasSurfaceLayoutDraftFromDragState(input: {
-  canvasId: string;
-  dragState: CanvasRuntimeDragState | undefined;
-  point: CanvasPoint | undefined;
-}): CanvasLocalLayoutDraft | undefined {
-  if (!input.point || !input.dragState) {
-    return undefined;
-  }
-  const draft = canvasLocalLayoutDraftFromDragState({
-    canvasId: input.canvasId,
-    dragState: input.dragState,
-    point: input.point
-  });
-  return draft.nodeLayouts.length > 0 ? draft : undefined;
-}
-
-export function canvasSurfaceShouldClearPendingLayoutDraft(input: {
-  pending: CanvasLocalLayoutDraft | undefined;
-  projection: CanvasProjection;
-}): boolean {
-  if (!input.pending) {
-    return false;
-  }
-  if (input.pending.canvasId !== input.projection.canvasId) {
-    return true;
-  }
-  if (canvasLocalLayoutDraftMatchesProjection(input.pending, input.projection)) {
-    return true;
-  }
-  const nodePaths = new Set(input.projection.nodes.map((node) => node.projectRelativePath));
-  return input.pending.nodeLayouts.some((layout) => !nodePaths.has(layout.projectRelativePath));
-}
-
-function activeNodeProjectRelativePaths(state: CanvasRuntimeDragState | undefined): string[] {
-  if (!state) {
-    return [];
-  }
-  return state.kind === 'move-node'
-    ? state.origins.map((origin) => origin.projectRelativePath)
-    : [state.node.projectRelativePath];
-}
-
-function pointerEventModifiers(event: Pick<React.PointerEvent<Element>, 'shiftKey'>): CanvasRuntimePointerModifiers {
-  return {
-    shiftKey: event.shiftKey
-  };
-}
-
-export interface CanvasPerfRuntimeSession {
-  sessionId: CanvasPerfSessionId;
-  lastFrameTimestamp: number;
-  reactCommitCount: number;
-  counterTotals: CanvasPerfCounterTotals;
-}
-
-interface CanvasPerfDebugSnapshotContext {
-  canvasId: string;
-  runtime: Pick<CanvasEditorRuntime, 'getSnapshot'>;
-  resourceZoom: number;
-  renderSnapshot: CanvasRenderCoordinatorSnapshot;
-  surfaceElement: HTMLElement | null;
-}
-
-const STAGE_WRITE_COUNTERS = [
-  'stage-camera-write',
-  'stage-node-layout-write',
-  'stage-node-visibility-write'
-] as const satisfies readonly CanvasPerfCounterName[];
-
-const IMAGE_NODE_WORK_COUNTERS = [
-  'image-node-url-resolve',
-  'image-node-next-load-start',
-  'image-node-next-load-resolve',
-  'image-node-next-load-reject',
-  'image-node-handoff-promote',
-  'image-node-upgrade-skip-culled',
-  'image-node-upgrade-skip-moving',
-  'image-node-source-reset',
-  'image-node-retry'
-] as const satisfies readonly CanvasPerfCounterName[];
-
-export function syncCanvasPerfSessionState(input: {
-  enabled: boolean;
-  perfMonitor: CanvasPerfMonitor;
-  sessionRef: { current: CanvasPerfRuntimeSession | undefined };
-  reactCommitCountRef: { current: number };
-  snapshot: Pick<CanvasRuntimeSnapshot, 'cameraState' | 'camera'>;
-  minimapOpen: boolean;
-}): void {
-  if (!input.enabled) {
-    return;
-  }
-  const timestamp = canvasPerfTimestamp();
-  if (input.snapshot.cameraState === 'moving') {
-    if (!input.sessionRef.current) {
-      const sessionId = input.perfMonitor.startSession({
-        type: input.minimapOpen ? 'camera-minimap' : 'camera-pan',
-        timestamp,
-        source: 'CanvasSurface',
-        detail: {
-          minimapOpen: input.minimapOpen,
-          zoomLevel: input.snapshot.camera.z
-        }
-      });
-      if (sessionId) {
-        input.sessionRef.current = {
-          sessionId,
-          lastFrameTimestamp: timestamp,
-          reactCommitCount: input.reactCommitCountRef.current,
-          counterTotals: input.perfMonitor.getCounterTotals()
-        };
-      }
-    }
-    return;
-  }
-  const session = input.sessionRef.current;
-  if (session) {
-    input.perfMonitor.endSession({
-      sessionId: session.sessionId,
-      timestamp,
-      source: 'CanvasSurface',
-      finalState: {
-        zoomLevel: input.snapshot.camera.z,
-        cameraState: input.snapshot.cameraState
-      }
-    });
-    input.sessionRef.current = undefined;
-  }
-}
-
-export function syncCanvasPerfDragSessionState(input: {
-  enabled: boolean;
-  perfMonitor: CanvasPerfMonitor;
-  sessionRef: { current: CanvasPerfRuntimeSession | undefined };
-  reactCommitCountRef: { current: number };
-  dragState: CanvasRuntimeDragState | undefined;
-  snapshot: Pick<CanvasRuntimeSnapshot, 'cameraState' | 'camera'>;
-  finalState?: Partial<CanvasPerfFinalState> | undefined;
-}): void {
-  if (!input.enabled) {
-    return;
-  }
-  const timestamp = canvasPerfTimestamp();
-  if (input.dragState) {
-    if (!input.sessionRef.current) {
-      const sessionId = input.perfMonitor.startSession({
-        type: input.dragState.kind === 'move-node' ? 'drag-move-node' : 'drag-resize-node',
-        timestamp,
-        source: 'CanvasSurface',
-        detail: canvasPerfDragSessionDetail(input.dragState)
-      });
-      if (sessionId) {
-        input.sessionRef.current = {
-          sessionId,
-          lastFrameTimestamp: timestamp,
-          reactCommitCount: input.reactCommitCountRef.current,
-          counterTotals: input.perfMonitor.getCounterTotals()
-        };
-      }
-    }
-    return;
-  }
-  const session = input.sessionRef.current;
-  if (session) {
-    input.perfMonitor.endSession({
-      sessionId: session.sessionId,
-      timestamp,
-      source: 'CanvasSurface',
-      finalState: {
-        zoomLevel: input.snapshot.camera.z,
-        cameraState: input.snapshot.cameraState,
-        ...input.finalState
-      }
-    });
-    input.sessionRef.current = undefined;
-  }
-}
-
-export function recordCanvasPerfFrame(input: {
-  enabled: boolean;
-  perfMonitor: CanvasPerfMonitor;
-  sessionRef: { current: CanvasPerfRuntimeSession | undefined };
-  cameraState: CanvasRuntimeSnapshot['cameraState'];
-  renderSnapshot: CanvasRenderCoordinatorSnapshot;
-  reactCommitCountRef: { current: number };
-}): void {
-  if (!input.enabled || !input.sessionRef.current) {
-    return;
-  }
-  const timestamp = canvasPerfTimestamp();
-  const session = input.sessionRef.current;
-  const elapsedMs = Math.max(0, timestamp - session.lastFrameTimestamp);
-  const reactCommitCount = Math.max(0, input.reactCommitCountRef.current - session.reactCommitCount);
-  session.lastFrameTimestamp = timestamp;
-  session.reactCommitCount = input.reactCommitCountRef.current;
-  if (reactCommitCount > 0) {
-    input.perfMonitor.recordCounter({
-      timestamp,
-      source: 'CanvasSurface',
-      sessionTypes: CANVAS_PERF_INTERACTION_SESSION_TYPES,
-      name: 'react-commit',
-      value: reactCommitCount
-    });
-  }
-  const counterTotals = input.perfMonitor.getCounterTotals();
-  input.perfMonitor.recordFrame({
-    timestamp,
-    source: 'CanvasSurface',
-    elapsedMs,
-    cameraState: input.cameraState,
-    mountedNodeCount: input.renderSnapshot.nodesByPath.size,
-    visibleNodeCount: Math.max(0, input.renderSnapshot.nodesByPath.size - input.renderSnapshot.culledNodePaths.size),
-    culledNodeCount: input.renderSnapshot.culledNodePaths.size,
-    reactCommitCount,
-    renderSnapshotBuildCount: counterDelta(counterTotals, session.counterTotals, 'render-snapshot-build'),
-    renderSnapshotReuseCount: counterDelta(counterTotals, session.counterTotals, 'render-snapshot-reuse'),
-    stageWriteCount: counterDeltaSum(counterTotals, session.counterTotals, STAGE_WRITE_COUNTERS),
-    imageNodeWorkCount: counterDeltaSum(counterTotals, session.counterTotals, IMAGE_NODE_WORK_COUNTERS)
-  });
-  session.counterTotals = counterTotals;
-}
-
-function counterDelta(
-  current: CanvasPerfCounterTotals,
-  previous: CanvasPerfCounterTotals,
-  name: CanvasPerfCounterName
-): number {
-  return Math.max(0, (current[name] ?? 0) - (previous[name] ?? 0));
-}
-
-function counterDeltaSum(
-  current: CanvasPerfCounterTotals,
-  previous: CanvasPerfCounterTotals,
-  names: readonly CanvasPerfCounterName[]
-): number {
-  return names.reduce((total, name) => total + counterDelta(current, previous, name), 0);
-}
-
-function canvasPerfDragSessionDetail(state: CanvasRuntimeDragState): Record<string, unknown> {
-  if (state.kind === 'move-node') {
-    return {
-      pointerId: state.pointerId,
-      nodeCount: state.origins.length
-    };
-  }
-  return {
-    pointerId: state.pointerId,
-    projectRelativePath: state.node.projectRelativePath,
-    handle: state.handle
-  };
-}
-
-function canvasPerfFinalState(input: {
-  snapshot: Pick<CanvasRuntimeSnapshot, 'cameraState' | 'camera'>;
-  renderSnapshot: CanvasRenderCoordinatorSnapshot;
-}): CanvasPerfFinalState {
-  return {
-    mountedNodeCount: input.renderSnapshot.nodesByPath.size,
-    visibleNodeCount: Math.max(0, input.renderSnapshot.nodesByPath.size - input.renderSnapshot.culledNodePaths.size),
-    culledNodeCount: input.renderSnapshot.culledNodePaths.size,
-    zoomLevel: input.snapshot.camera.z,
-    cameraState: input.snapshot.cameraState
-  };
-}
-
-function canvasPerfDebugSnapshot(input: CanvasPerfDebugSnapshotContext): DebruteCanvasPerfCanvasSnapshot {
-  const snapshot = input.runtime.getSnapshot();
-  const mountedNodeCount = input.renderSnapshot.nodesByPath.size;
-  const culledNodeCount = input.renderSnapshot.culledNodePaths.size;
-  return {
-    canvasId: input.canvasId,
-    camera: { ...snapshot.camera },
-    cameraState: snapshot.cameraState,
-    mountedNodeCount,
-    visibleNodeCount: Math.max(0, mountedNodeCount - culledNodeCount),
-    culledNodeCount,
-    resourceZoom: input.resourceZoom,
-    imageLayers: canvasImageLayerDebugCounts(input.surfaceElement)
-  };
-}
-
-function canvasImageLayerDebugCounts(surfaceElement: HTMLElement | null): DebruteCanvasPerfCanvasSnapshot['imageLayers'] {
-  const counts = {
-    visible: 0,
-    next: 0,
-    previewSources: 0,
-    rawSources: 0
-  };
-  for (const image of surfaceElement?.querySelectorAll<HTMLImageElement>('[data-canvas-image-layer]') ?? []) {
-    const layer = image.getAttribute('data-canvas-image-layer');
-    if (layer === 'visible') {
-      counts.visible += 1;
-    } else if (layer === 'next') {
-      counts.next += 1;
-    }
-    const src = image.getAttribute('src') ?? '';
-    if (src.includes('/canvas-image-preview')) {
-      counts.previewSources += 1;
-    } else if (src.includes('/files/raw/')) {
-      counts.rawSources += 1;
-    }
-  }
-  return counts;
-}
-
-function canvasPerfTimestamp(): number {
-  return globalThis.performance?.now?.() ?? Date.now();
-}
-
-function canvasPerfMonitorEnabled(): boolean {
-  return canvasPerfDiagnosticsEnabled({
-    development: import.meta.env.DEV,
-    startupEnabled: import.meta.env.VITE_DEBRUTE_CANVAS_PERF === '1'
-  });
-}
-
-export function syncCanvasMovingCameraFrame(input: {
-  liveCamera: CanvasRuntimeSnapshot['camera'];
-  stageRuntime: Pick<CanvasStageRuntime, 'setCamera'>;
-  surfaceSize: CanvasRuntimeSnapshot['surfaceSize'];
-  selection: CanvasRuntimeSnapshot['selection'];
-  activeNodePaths: readonly string[];
-  renderSnapshotScheduler: Pick<ReturnType<typeof createCanvasRenderSnapshotScheduler<CanvasRenderCoordinatorUpdateInput>>, 'requestMoving'>;
-}): void {
-  input.stageRuntime.setCamera(input.liveCamera);
-  input.renderSnapshotScheduler.requestMoving({
-    camera: input.liveCamera,
-    cameraState: 'moving',
-    surfaceSize: input.surfaceSize,
-    selection: input.selection,
-    activeNodePaths: input.activeNodePaths
-  });
-}
-
-export function syncCanvasPreviewResourceSchedulerForInteraction(input: {
-  scheduler: Pick<CanvasPreviewResourceScheduler, 'setInteractionState'>;
-  cameraState: CanvasRuntimeSnapshot['cameraState'];
-  dragState: CanvasRuntimeSnapshot['dragState'];
-}): void {
-  input.scheduler.setInteractionState({
-    cameraState: input.cameraState,
-    dragActive: input.dragState !== undefined
-  });
-}
-
-export function createCanvasRenderSnapshotScheduler<T>(input: {
-  commit: (next: T) => void;
-  perfMonitor?: Pick<CanvasPerfMonitor, 'recordCounter'> | undefined;
-  requestFrame?: ((callback: FrameRequestCallback) => number) | undefined;
-  cancelFrame?: ((handle: number) => void) | undefined;
-}): {
-  requestMoving(next: T): void;
-  flush(next: T): void;
-  dispose(): void;
-} {
-  const requestFrame = input.requestFrame ?? globalThis.window?.requestAnimationFrame?.bind(globalThis.window);
-  const cancelFrame = input.cancelFrame ?? globalThis.window?.cancelAnimationFrame?.bind(globalThis.window);
-  let pendingFrame: number | undefined;
-  let pendingInput: T | undefined;
-  let frameEpoch = 0;
-
-  const run = (epoch: number) => {
-    if (epoch !== frameEpoch || pendingFrame === undefined) {
-      return;
-    }
-    pendingFrame = undefined;
-    const next = pendingInput;
-    pendingInput = undefined;
-    if (next !== undefined) {
-      input.commit(next);
-    }
-  };
-
-  return {
-    requestMoving(next) {
-      pendingInput = next;
-      if (pendingFrame !== undefined) {
-        return;
-      }
-      input.perfMonitor?.recordCounter({
-        sessionTypes: CANVAS_PERF_INTERACTION_SESSION_TYPES,
-        timestamp: canvasPerfTimestamp(),
-        source: 'CanvasRenderSnapshotScheduler',
-        name: 'render-moving-queued',
-        value: 1
-      });
-      if (!requestFrame) {
-        pendingInput = undefined;
-        input.commit(next);
-        return;
-      }
-      const epoch = frameEpoch;
-      pendingFrame = requestFrame(() => run(epoch));
-    },
-    flush(next) {
-      input.perfMonitor?.recordCounter({
-        sessionTypes: CANVAS_PERF_INTERACTION_SESSION_TYPES,
-        timestamp: canvasPerfTimestamp(),
-        source: 'CanvasRenderSnapshotScheduler',
-        name: 'render-idle-flush',
-        value: 1
-      });
-      pendingInput = undefined;
-      if (pendingFrame !== undefined) {
-        frameEpoch += 1;
-        cancelFrame?.(pendingFrame);
-        pendingFrame = undefined;
-      }
-      input.commit(next);
-    },
-    dispose() {
-      if (pendingFrame !== undefined) {
-        frameEpoch += 1;
-        cancelFrame?.(pendingFrame);
-      }
-      pendingFrame = undefined;
-      pendingInput = undefined;
-    }
-  };
-}
-
-function domRectToFloatingBarRect(rect: DOMRect): FloatingBarRect {
-  return {
-    x: rect.left,
-    y: rect.top,
-    width: rect.width,
-    height: rect.height
-  };
-}
-
-export function canvasFeedbackBarTargetForProjectedNode(input: {
-  node: ProjectedCanvasNode;
-  surfaceRect: FloatingBarRect;
-  camera: CanvasCamera;
-  entry: CanvasFeedbackEntry | undefined;
-  canStartVideoMomentFeedback?: boolean | undefined;
-  startVideoMomentFeedback?: ((mode: 'comment' | 'pin' | 'rect') => void) | undefined;
-  seekToMoment?: ((seconds: number) => void) | undefined;
-}): CanvasFeedbackBarTarget | undefined {
-  if (input.node.nodeKind !== 'file') {
-    return undefined;
-  }
-  return {
-    projectRelativePath: input.node.projectRelativePath,
-    nodeRect: nodeRectForFloatingBar(input.node),
-    surfaceRect: input.surfaceRect,
-    camera: input.camera,
-    entry: input.entry,
-    localToolset: canvasFeedbackLocalToolsetForMediaKind(input.node.mediaKind),
-    canStartVideoMomentFeedback: input.canStartVideoMomentFeedback ?? false,
-    startVideoMomentFeedback: input.startVideoMomentFeedback,
-    seekToMoment: input.seekToMoment
-  };
-}
-
-function nodeRectForFloatingBar(node: ProjectedCanvasNode): FloatingBarRect {
-  return {
-    x: node.x,
-    y: node.y,
-    width: node.width,
-    height: node.height
-  };
-}
-
-function devicePixelRatioValue(): number {
-  const value = globalThis.window?.devicePixelRatio;
-  return typeof value === 'number' && Number.isFinite(value) && value > 0 ? value : 1;
-}
-
-function selectedSingleVideoPath(selection: CanvasSelection | undefined, nodes: readonly ProjectedCanvasNode[]): string | undefined {
-  if (!selection || selection.kind !== 'node') {
-    return undefined;
-  }
-  const node = nodes.find((item) => item.projectRelativePath === selection.projectRelativePath);
-  return node && isProjectedVideoNode(node) ? node.projectRelativePath : undefined;
-}
-
-export function canvasActiveVideoPaths(input: {
-  nodes: readonly ProjectedCanvasNode[];
-  selectedProjectRelativePaths: readonly string[];
-  playingVideoPaths: ReadonlySet<string>;
-  requestedVideoPlayerPath: string | undefined;
-}): ReadonlySet<string> {
-  const videoPaths = new Set(input.nodes.filter(isProjectedVideoNode).map((node) => node.projectRelativePath));
-  const active = new Set<string>();
-  for (const projectRelativePath of input.selectedProjectRelativePaths) {
-    if (videoPaths.has(projectRelativePath)) {
-      active.add(projectRelativePath);
-    }
-  }
-  for (const projectRelativePath of input.playingVideoPaths) {
-    if (videoPaths.has(projectRelativePath)) {
-      active.add(projectRelativePath);
-    }
-  }
-  if (input.requestedVideoPlayerPath && videoPaths.has(input.requestedVideoPlayerPath)) {
-    active.add(input.requestedVideoPlayerPath);
-  }
-  return active;
-}
-
-function isProjectedVideoNode(node: ProjectedCanvasNode): boolean {
-  return node.nodeKind === 'file' && node.mediaKind === 'video';
 }

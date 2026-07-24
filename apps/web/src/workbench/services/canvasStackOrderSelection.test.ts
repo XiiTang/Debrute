@@ -1,10 +1,8 @@
 import { describe, expect, it } from 'vitest';
 import type { WorkbenchProjectSessionSnapshot } from '@debrute/app-protocol';
 import {
-  bringCanvasNodeToFront as bringCanvasNodeToFrontDocument,
   canvasNodeStackOrderTopFirst,
-  type CanvasDocument,
-  type CanvasNodeElement
+  type CanvasDocument
 } from '@debrute/canvas-core';
 import type { CanvasSelection } from '../canvas/runtime/canvasSelection';
 import { createCanvasSelectionStackOrderSync } from './canvasStackOrderSelection';
@@ -117,6 +115,8 @@ describe('canvas selection stack-order sync', () => {
   });
 });
 
+type CanvasNodeElement = CanvasDocument['nodeElements'][number];
+
 function snapshotFixture(nodeElements: CanvasNodeElement[]): WorkbenchProjectSessionSnapshot {
   const canvas: CanvasDocument = {
     id: 'canvas-1',
@@ -155,7 +155,6 @@ function snapshotFixture(nodeElements: CanvasNodeElement[]): WorkbenchProjectSes
       diagnosticCounts: {
         errors: 0,
         warnings: 0,
-        infos: 0
       },
     },
     diagnostics: []
@@ -171,7 +170,14 @@ function applyBringToFront(
     ...snapshot,
     canvases: snapshot.canvases.map((canvas) => (
       canvas.id === canvasId
-        ? bringCanvasNodeToFrontDocument(canvas, { projectRelativePath })
+        ? {
+            ...canvas,
+            nodeElements: canvas.nodeElements.map((nodeElement) => (
+              nodeElement.projectRelativePath === projectRelativePath
+                ? { ...nodeElement, z: Math.max(...canvas.nodeElements.map((node) => node.z)) + 1 }
+                : nodeElement
+            ))
+          }
         : canvas
     ))
   };

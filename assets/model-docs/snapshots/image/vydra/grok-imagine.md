@@ -4,7 +4,7 @@ models:
 source_urls:
   - https://www.vydra.ai/docs/models/grok-imagine
   - https://docs.x.ai/developers/model-capabilities/images/generation?campaign=imagine-ads-generation
-captured_at: 2026-05-31
+captured_at: 2026-07-21
 source_type: official_docs
 cleanup:
   - removed page chrome and unrelated model links
@@ -36,7 +36,10 @@ Official Vydra request fields used by Debrute:
 - `aspect_ratio`: output aspect ratio. Documented values include `16:9`, `9:16`, `4:3`, `3:4`, `1:1`, `3:2`, and `2:3`.
 - `duration`: video-only duration in seconds.
 
-Successful synchronous image generation responses include a completed status, credits charged, `imageUrl`, and `resultUrls`.
+Successful synchronous image generation responses include a completed status,
+credits charged, `imageUrl`, and `resultUrls`. Debrute consumes the documented
+top-level `imageUrl` directly; image generation does not enter the video job
+polling path.
 
 ## xAI image generation notes
 
@@ -49,4 +52,6 @@ Relevant xAI documented parameters include:
 - `n`: number of generated images.
 - `aspect_ratio`: output ratio. Documented ratios include `1:1`, `16:9`, `9:16`, `4:3`, `3:4`, `3:2`, `2:3`, `2:1`, `1:2`, `19.5:9`, `9:19.5`, `20:9`, `9:20`, and `auto`.
 
-For Debrute `grok-imagine`, the exposed control surface is the Vydra text-to-image shape with `prompt`, optional `aspect_ratio`, and optional `seed`.
+For Debrute `grok-imagine`, the exposed control surface is the documented Vydra
+text-to-image shape with `prompt` and optional `aspect_ratio`. Debrute does not
+expose xAI-upstream parameters that Vydra does not document for this endpoint.

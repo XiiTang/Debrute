@@ -22,6 +22,15 @@ uses the same push pipeline; read-only project status reports document drift
 instead of writing it. `debrute canvas-map push <project> <canvas-id>` provides
 the explicit Agent-facing command.
 
+Canvas Map, Canvas JSON, and the Canvas registry each have one closed current
+shape. Unknown fields at any persisted nesting level are invalid rather than
+ignored. An invalid Canvas JSON remains unchanged on disk, is excluded from the
+snapshot, and produces `document_invalid_pushed`; an invalid registry produces
+`canvas_registry_invalid`. Loading does not strip fields or rewrite either
+document. A later explicit push or registry repair may construct a valid current
+document as a new user-requested operation. These Canvas failures do not prevent
+Project files from being listed, read, or edited.
+
 Dragging an existing Project file or directory onto Canvas updates the active
 Canvas Map with an exact-file or recursive-directory rule and commits the map
 and reconciled Canvas JSON together. The drop point does not become persisted
@@ -59,11 +68,23 @@ documents. New Projects start with `canvas-1`; creating a Canvas writes an empty
 map, empty Canvas document, and new registry order atomically. A Canvas rename
 changes only its display name. Reordering requires a complete permutation, and
 the final Canvas cannot be deleted. Registry repair keeps valid pairs and
-rebuilds their order deterministically.
+rebuilds their order deterministically. Complete absence of Canvas registry,
+JSON, and map state creates a new default Canvas automatically. Partial Canvas
+state is preserved and reported as invalid instead of being guessed, deleted,
+or allowed to block access to Project files. An explicit repair keeps every
+valid pair and uses the ordinary Push semantics to rebuild missing or invalid
+Canvas JSON from each valid Canvas Map. It never derives a Map from Canvas JSON.
+Repair prepares every valid Map before it writes anything, then commits all
+rebuilt Canvas documents, deletions, and the registry in one transaction. It
+deletes orphan JSON, invalid Maps, and any remaining unrecoverable Canvas
+metadata; when no valid Map remains, it creates a new default Canvas. Repair
+does not create a backup, quarantine, migration, or compatibility copy, and it
+never changes ordinary Project files.
 
 Registry, map, and Canvas mutations use expected content hashes and structured
-Project Document transactions. Conflicting disk edits fail rather than being
-silently overwritten.
+Project Document transactions. Registry repair also validates the captured Map
+and Canvas directory membership at commit. Conflicting disk edits fail rather
+than being silently overwritten.
 
 ## Automatic And Manual Layout
 
@@ -91,6 +112,29 @@ still reaches automatic descendants of a manual directory, and an explicit row
 still reserves each member's theoretical slot even when its durable rectangle
 is manual. Reset Layout removes manual mode for selected path rules or all
 nodes, then runs the same map reconciliation.
+
+Interactive Canvas state commits are exact actions, not optional or
+best-effort batches. Before a request is sent, Workbench may discard a late
+local interaction whose target is no longer present in the current Canvas
+Projection. Once a request reaches Runtime, every target must identify one
+current Canvas Node of the required kind. Empty collections, duplicate targets,
+unknown input fields, missing nodes, wrong node kinds, and invalid numeric
+values reject the whole request without persisting any member.
+
+A discarded pre-request interaction is silent because it never became a commit
+attempt. A request rejected by Runtime or not written to disk is an observable
+commit failure: Workbench removes the corresponding optimistic state, renders
+the latest durable projection, and reports the failure once. The owning action
+handles and reports that rejection; an outer UI event boundary may consume the
+already-handled Promise rejection only to prevent an unhandled-rejection event.
+Workbench does not retry, reload, queue recovery work, or replace the failed
+mutation with a full-document write.
+
+A manual layout update contains at least one unique current node rectangle. A
+Playback Position update targets only current video file nodes, and a Text
+Viewport update targets only current text file nodes. A selective Reset Layout
+request contains explicit `paths` and `globs` arrays with at least one rule
+between them; a full reset uses the separate `all` shape.
 
 ## Stack Order
 
@@ -123,6 +167,28 @@ On pointer release, Workbench keeps the pending draft until the persisted
 projection confirms the same rectangles, preventing a release-time snap-back.
 A failed commit drops the pending draft and renders the durable projection.
 
+Text scrolling uses the same authority distinction without treating a local
+copy of the Canvas Document as committed state. Workbench displays the newest
+pending Text Viewport immediately while Runtime remains the sole validator and
+writer. A response confirms only the submitted value: a newer pending viewport
+continues to win until its own response arrives, while newer authoritative
+Canvas fields remain intact. A failed commit drops the pending viewport,
+renders the latest Runtime snapshot, and surfaces the failure; Workbench does
+not retry the mutation automatically.
+
+Playback Position commits may overlap at media event boundaries. A failed older
+request cannot roll back or pause a newer submitted position; only the newest
+still-pending request may restore the latest durable Runtime position.
+
+Runtime exposes every available Canvas file and video text track with the one
+relative URL shape
+`/api/projects/<project-id>/files/raw/<project-path>?v=<revision>`. Workbench
+preview builders consume that exact Runtime response; they do not accept an
+absolute URL, invent an origin, or preserve additional query parameters.
+Runtime adds these URLs to a typed projection before JSON serialization, so a
+missing path, revision, or video-track field cannot be skipped or converted to
+an empty value during public response construction.
+
 The minimap is derived from current node bounds, camera, surface size, and
 selection. Clicking or dragging its viewport recenters the existing camera
 without changing zoom. It is a navigation projection, not persisted Canvas
@@ -139,6 +205,14 @@ state.
 - React composes controls and node content; it does not become the per-pointer
   geometry store.
 
+`CanvasSurface` always composes the required image, video, and text-preview
+React providers around their consumers. Their hooks treat a missing provider as
+a component-composition error and fail immediately with a specific message;
+they do not substitute no-op functions, empty collections, or an absent preview
+runtime. Ordinary empty files, unavailable media, and typed preview failures
+remain normal feature states supplied by an installed provider. Tests that
+render a consumer in isolation install an explicit fixture provider.
+
 Rendering performance, image preview loading, resource scheduling, derived
 cache identity, and diagnostic tracing are documented in
 [`canvas-rendering.md`](./canvas-rendering.md). Text and video preview details
@@ -152,12 +226,15 @@ documented in [`canvas-feedback.md`](./canvas-feedback.md).
 
 ## Executable Authorities
 
-- Documents, reconciliation, projection, layout, and stack order:
+- Canvas documents, reconciliation, projection, layout, stack order, Canvas Map
+  parsing and expansion, feedback mutation, and persistence:
+  `apps/runtime/src/project/canvas_map.rs`, `canvas.rs`, `feedback.rs`, and
+  `service.rs`.
+- Shared Canvas declarations and browser presentation values:
   `packages/canvas-core/src/`.
-- Canvas Map parsing and expansion: `packages/canvas-map-core/src/`.
-- Push, registry, dimensions, and persistence:
-  `apps/runtime/src/project/canvas_map.rs`, `canvas.rs`, and `service.rs`.
 - Camera, selection, local drafts, minimap, and rendering:
   `apps/web/src/workbench/canvas/`.
-- Visible Project paths: `packages/project-core/src/projectPaths.ts`.
+- Pending Text Viewport display and Runtime-result reconciliation:
+  `apps/web/src/workbench/services/canvasSnapshotUpdates.ts`.
+- Visible Project paths: `apps/runtime/src/project/paths.rs`.
 - Protocol request and snapshot shapes: `packages/app-protocol/src/`.

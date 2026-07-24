@@ -23,14 +23,13 @@ pub use handshake::{
 pub use protocol::{
     ActivationIntent, ActivationOutcome, CONTROL_OUTBOUND_QUEUE_CAPACITY, CONTROL_PROTOCOL,
     CONTROL_PROTOCOL_VERSION, ClientMessage, ClientRole, ControlErrorCode, ControlEvent,
-    ControlRequest, ControlResponse, HandshakeRejection, HandshakeRole, PRODUCT_VERSION,
-    ProjectFrontend, RecentProject, RoleViolation, RuntimeStatus, ServerMessage, WorkbenchRoute,
-    authorize_request, validate_handshake,
+    ControlRequest, ControlResponse, HandshakeRejection, PRODUCT_VERSION, ProjectFrontend,
+    RecentProject, RoleViolation, RuntimeStatus, ServerMessage, WorkbenchRoute, authorize_request,
+    validate_handshake,
 };
 #[cfg(any(target_os = "macos", target_os = "windows"))]
 pub use server::{
-    ControlServerError, ControlTransport, DesktopPresentationError, RuntimeActionError,
-    RuntimeActivationService, RuntimeControlState, RuntimeShutdown, WorkbenchInstallError,
-    serve_control_connection,
+    ControlServerError, ControlTransport, RuntimeActionError, RuntimeActivationService,
+    RuntimeControlState, WorkbenchInstallError, serve_control_connection,
 };
 pub use writer::OutboundError;

@@ -11,7 +11,7 @@
     "pnpm": ">=11.2.2 <12"
   },
   "scripts": {
-    "build": "pnpm generate:control-protocol && tsc -b tsconfig.build.json && pnpm --filter @debrute/desktop build",
+    "build": "pnpm generate:control-protocol && tsc -b tsconfig.build.json && pnpm --filter @debrute/photoshop-bridge-plugin-core verify:esm && pnpm --filter @debrute/desktop build",
     "clean": "node scripts/clean.mjs",
     "icons:sync": "node scripts/sync-project-icons.mjs",
     "pack": "pnpm --filter @debrute/desktop pack",
@@ -25,7 +25,7 @@
     "dev:electron": "pnpm --filter @debrute/desktop dev:electron",
     "generate:control-protocol": "node scripts/run-cargo-with-native-raster.mjs -- test --workspace export_bindings",
     "preview": "pnpm --filter @debrute/web preview",
-    "test": "vitest run",
+    "test": "pnpm test:layout && vitest run",
     "test:rust": "node scripts/run-cargo-with-native-raster.mjs -- test --workspace",
     "test:unit": "vitest run --project=unit-* --project=contracts",
     "test:dom": "vitest run --project=dom-web",
@@ -37,7 +37,6 @@
     "test:canvas-text": "vitest run --tagsFilter=canvas-text",
     "test:layout": "tsx scripts/check-test-layout.ts",
     "verify:browser": "node scripts/verify-workbench-browser.mjs",
-    "diagnose:canvas-pan": "node scripts/canvas-pan-roundtrip-diagnostic.mjs",
     "lint:arch": "node scripts/check-architecture.mjs",
     "native:raster:prepare": "node scripts/prepare-native-raster.mjs",
     "doctor": "node scripts/doctor.mjs",
@@ -50,11 +49,8 @@
     "@debrute/architecture-rules": "workspace:*",
     "@types/adm-zip": "^0.5.8",
     "@types/node": "^24.13.1",
-    "@vitejs/plugin-react": "^6.0.3",
     "@vitest/coverage-v8": "^4.1.10",
     "adm-zip": "^0.5.18",
-    "electron-builder": "^26.15.3",
-    "esbuild": "^0.28.1",
     "jsdom": "^29.1.1",
     "playwright": "^1.61.1",
     "react": "^19.2.7",
@@ -62,7 +58,6 @@
     "sharp": "^0.35.3",
     "tsx": "^4.23.0",
     "typescript": "^6.0.3",
-    "vite": "^8.1.3",
     "vitest": "^4.1.10",
     "yaml": "^2.9.0"
   }

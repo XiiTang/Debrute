@@ -15,14 +15,16 @@ describe('CanvasRenderCoordinator', () => {
       cameraState: 'idle',
       surfaceSize: { width: 300, height: 200 },
       selection: undefined,
-      activeNodePaths: []
+      activeNodePaths: [],
+    layoutOverrides: []
     });
     const moving = coordinator.update({
       camera: { x: -40, y: 0, z: 1 },
       cameraState: 'moving',
       surfaceSize: { width: 300, height: 200 },
       selection: undefined,
-      activeNodePaths: []
+      activeNodePaths: [],
+    layoutOverrides: []
     });
 
     expect(moving).toBe(first);
@@ -39,14 +41,16 @@ describe('CanvasRenderCoordinator', () => {
       cameraState: 'idle',
       surfaceSize: { width: 800, height: 600 },
       selection: undefined,
-      activeNodePaths: []
+      activeNodePaths: [],
+    layoutOverrides: []
     });
     const moving = coordinator.update({
       camera: { x: -1800, y: 0, z: 1 },
       cameraState: 'moving',
       surfaceSize: { width: 800, height: 600 },
       selection: undefined,
-      activeNodePaths: []
+      activeNodePaths: [],
+    layoutOverrides: []
     });
 
     expect(moving).not.toBe(first);
@@ -64,14 +68,16 @@ describe('CanvasRenderCoordinator', () => {
       cameraState: 'idle',
       surfaceSize: { width: 800, height: 600 },
       selection: undefined,
-      activeNodePaths: []
+      activeNodePaths: [],
+    layoutOverrides: []
     });
     const moving = coordinator.update({
       camera: { x: 0, y: 0, z: 1 },
       cameraState: 'moving',
       surfaceSize: { width: 800, height: 600 },
       selection: undefined,
-      activeNodePaths: []
+      activeNodePaths: [],
+    layoutOverrides: []
     });
 
     expect(moving).not.toBe(first);
@@ -90,14 +96,16 @@ describe('CanvasRenderCoordinator', () => {
       cameraState: 'idle',
       surfaceSize: { width: 800, height: 600 },
       selection: undefined,
-      activeNodePaths: []
+      activeNodePaths: [],
+    layoutOverrides: []
     });
     const idle = coordinator.update({
       camera: { x: -900, y: 0, z: 1 },
       cameraState: 'idle',
       surfaceSize: { width: 800, height: 600 },
       selection: undefined,
-      activeNodePaths: []
+      activeNodePaths: [],
+    layoutOverrides: []
     });
 
     expect(idle).not.toBe(first);
@@ -116,7 +124,8 @@ describe('CanvasRenderCoordinator', () => {
       cameraState: 'idle',
       surfaceSize: { width: 300, height: 200 },
       selection: { kind: 'node', projectRelativePath: 'flow/selected.png' },
-      activeNodePaths: ['flow/active.png']
+      activeNodePaths: ['flow/active.png'],
+    layoutOverrides: []
     });
 
     expect([...snapshot.nodesByPath.keys()]).toEqual([
@@ -144,7 +153,8 @@ describe('CanvasRenderCoordinator', () => {
       cameraState: 'idle',
       surfaceSize: { width: 300, height: 200 },
       selection: undefined,
-      activeNodePaths: []
+      activeNodePaths: [],
+    layoutOverrides: []
     });
 
     expect(snapshot.nodesByPath.has('flow/visible.png')).toBe(true);
@@ -167,7 +177,8 @@ describe('CanvasRenderCoordinator', () => {
       cameraState: 'idle',
       surfaceSize: { width: 300, height: 200 },
       selection: undefined,
-      activeNodePaths: []
+      activeNodePaths: [],
+    layoutOverrides: []
     });
 
     expect(snapshot.nodesByPath.has('flow/near-image.png')).toBe(true);
@@ -188,21 +199,24 @@ describe('CanvasRenderCoordinator', () => {
       cameraState: 'idle',
       surfaceSize: { width: 800, height: 600 },
       selection: undefined,
-      activeNodePaths: []
+      activeNodePaths: [],
+    layoutOverrides: []
     });
     const atB = coordinator.update({
       camera: { x: 0, y: -2000, z: 1 },
       cameraState: 'idle',
       surfaceSize: { width: 800, height: 600 },
       selection: undefined,
-      activeNodePaths: []
+      activeNodePaths: [],
+    layoutOverrides: []
     });
     const backAtA = coordinator.update({
       camera: { x: 0, y: 0, z: 1 },
       cameraState: 'idle',
       surfaceSize: { width: 800, height: 600 },
       selection: undefined,
-      activeNodePaths: []
+      activeNodePaths: [],
+    layoutOverrides: []
     });
 
     for (const snapshot of [atA, atB, backAtA]) {
@@ -351,7 +365,8 @@ describe('CanvasRenderCoordinator', () => {
       cameraState: 'idle',
       surfaceSize: { width: 800, height: 600 },
       selection: undefined,
-      activeNodePaths: []
+      activeNodePaths: [],
+    layoutOverrides: []
     });
     const moved = coordinator.update({
       camera: { x: -40, y: 0, z: 1 },
@@ -369,7 +384,7 @@ describe('CanvasRenderCoordinator', () => {
   });
 
   it('records snapshot build, reuse, and virtual refresh counters', () => {
-    const monitor = createCanvasPerfMonitor({ enabled: true });
+    const monitor = createCanvasPerfMonitor();
     const coordinator = createCanvasRenderCoordinator({
       projection: projection([
         imageNode('flow/a.png', 0, 0, 1),
@@ -383,21 +398,24 @@ describe('CanvasRenderCoordinator', () => {
       cameraState: 'idle',
       surfaceSize: { width: 800, height: 600 },
       selection: undefined,
-      activeNodePaths: []
+      activeNodePaths: [],
+    layoutOverrides: []
     });
     coordinator.update({
       camera: { x: -40, y: 0, z: 1 },
       cameraState: 'moving',
       surfaceSize: { width: 800, height: 600 },
       selection: undefined,
-      activeNodePaths: []
+      activeNodePaths: [],
+    layoutOverrides: []
     });
     coordinator.update({
       camera: { x: -1800, y: 0, z: 1 },
       cameraState: 'moving',
       surfaceSize: { width: 800, height: 600 },
       selection: undefined,
-      activeNodePaths: []
+      activeNodePaths: [],
+    layoutOverrides: []
     });
 
     expect(counterNames(monitor.getTrace().events)).toEqual([
@@ -409,7 +427,7 @@ describe('CanvasRenderCoordinator', () => {
   });
 
   it('updates snapshot node data for prop-only projection changes without virtual refresh', () => {
-    const monitor = createCanvasPerfMonitor({ enabled: true });
+    const monitor = createCanvasPerfMonitor();
     const coordinator = createCanvasRenderCoordinator({
       projection: projection([imageNode('flow/a.png', 0, 0, 1)]),
       perfMonitor: monitor
@@ -419,7 +437,8 @@ describe('CanvasRenderCoordinator', () => {
       cameraState: 'idle',
       surfaceSize: { width: 800, height: 600 },
       selection: undefined,
-      activeNodePaths: []
+      activeNodePaths: [],
+    layoutOverrides: []
     });
     const updated = imageNode('flow/a.png', 0, 0, 1);
     updated.availability = {
@@ -439,7 +458,8 @@ describe('CanvasRenderCoordinator', () => {
       cameraState: 'moving',
       surfaceSize: { width: 800, height: 600 },
       selection: undefined,
-      activeNodePaths: []
+      activeNodePaths: [],
+    layoutOverrides: []
     });
 
     expect(second).not.toBe(first);
@@ -448,7 +468,7 @@ describe('CanvasRenderCoordinator', () => {
   });
 
   it('records one membership refresh for mixed geometry and prop-only projection changes', () => {
-    const monitor = createCanvasPerfMonitor({ enabled: true });
+    const monitor = createCanvasPerfMonitor();
     const coordinator = createCanvasRenderCoordinator({
       projection: projection([
         imageNode('flow/a.png', 0, 0, 1),
@@ -461,7 +481,8 @@ describe('CanvasRenderCoordinator', () => {
       cameraState: 'idle',
       surfaceSize: { width: 800, height: 600 },
       selection: undefined,
-      activeNodePaths: []
+      activeNodePaths: [],
+    layoutOverrides: []
     });
     const moved = imageNode('flow/a.png', 1200, 0, 1);
     const propOnly = imageNode('flow/b.png', 300, 0, 2);
@@ -481,7 +502,8 @@ describe('CanvasRenderCoordinator', () => {
       cameraState: 'moving',
       surfaceSize: { width: 800, height: 600 },
       selection: undefined,
-      activeNodePaths: []
+      activeNodePaths: [],
+    layoutOverrides: []
     });
 
     expect(next.nodesByPath.get('flow/a.png')?.x).toBe(1200);
@@ -490,7 +512,7 @@ describe('CanvasRenderCoordinator', () => {
   });
 
   it('records one membership refresh when projection layout changes', () => {
-    const monitor = createCanvasPerfMonitor({ enabled: true });
+    const monitor = createCanvasPerfMonitor();
     const coordinator = createCanvasRenderCoordinator({
       projection: projection([imageNode('flow/a.png', 0, 0, 1)]),
       perfMonitor: monitor
@@ -500,7 +522,8 @@ describe('CanvasRenderCoordinator', () => {
       cameraState: 'idle',
       surfaceSize: { width: 800, height: 600 },
       selection: undefined,
-      activeNodePaths: []
+      activeNodePaths: [],
+    layoutOverrides: []
     });
 
     coordinator.setProjection(projection([imageNode('flow/a.png', 1200, 0, 1)]));
@@ -509,7 +532,8 @@ describe('CanvasRenderCoordinator', () => {
       cameraState: 'idle',
       surfaceSize: { width: 800, height: 600 },
       selection: undefined,
-      activeNodePaths: []
+      activeNodePaths: [],
+    layoutOverrides: []
     });
 
     expect(next.nodesByPath.has('flow/a.png')).toBe(true);
@@ -517,7 +541,7 @@ describe('CanvasRenderCoordinator', () => {
   });
 
   it('updates z-only projection changes without rebuilding render membership', () => {
-    const monitor = createCanvasPerfMonitor({ enabled: true });
+    const monitor = createCanvasPerfMonitor();
     const coordinator = createCanvasRenderCoordinator({
       projection: projection([imageNode('flow/a.png', 0, 0, 1)]),
       perfMonitor: monitor
@@ -527,7 +551,8 @@ describe('CanvasRenderCoordinator', () => {
       cameraState: 'idle',
       surfaceSize: { width: 800, height: 600 },
       selection: undefined,
-      activeNodePaths: []
+      activeNodePaths: [],
+    layoutOverrides: []
     });
 
     coordinator.setProjection(projection([imageNode('flow/a.png', 0, 0, 2)]));
@@ -536,7 +561,8 @@ describe('CanvasRenderCoordinator', () => {
       cameraState: 'moving',
       surfaceSize: { width: 800, height: 600 },
       selection: undefined,
-      activeNodePaths: []
+      activeNodePaths: [],
+    layoutOverrides: []
     });
 
     expect(next.nodeRenderOrder.get('flow/a.png')).toEqual({ domOrder: 'flow/a.png', zIndex: 2 });

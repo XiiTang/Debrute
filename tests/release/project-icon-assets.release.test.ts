@@ -42,6 +42,8 @@ describe('project icon assets', () => {
       'apps/desktop/build/icons/512x512.png',
       'apps/desktop/build/icons/64x64.png',
       'apps/desktop/build/logo.png',
+      'apps/runtime/assets/tray-icon-macos-template.png',
+      'apps/runtime/assets/tray-icon-windows.png',
       'apps/web/public/debrute.svg'
     ]);
 
@@ -79,6 +81,14 @@ describe('project icon assets', () => {
     expect(await dockAlphaCoverage(join(root, 'apps/desktop/build/dock_icon.png'))).toBeCloseTo(0.635, 2);
     expect(await darkPixelCoverage(join(root, 'apps/desktop/build/dock_icon.png'))).toBeLessThan(0.3);
     expect(await brightPixelCoverage(join(root, 'apps/desktop/build/dock_icon.png'))).toBeGreaterThan(0.35);
+    await expectPngDimensions(join(root, 'apps/runtime/assets/tray-icon-macos-template.png'), 36, 36);
+    await expectPngDimensions(join(root, 'apps/runtime/assets/tray-icon-windows.png'), 66, 66);
+    expect(await alphaAt(join(root, 'apps/runtime/assets/tray-icon-macos-template.png'), 0, 0)).toBe(0);
+    expect(await alphaAt(join(root, 'apps/runtime/assets/tray-icon-windows.png'), 0, 0)).toBe(0);
+    expect(await opaqueRgbValues(join(root, 'apps/runtime/assets/tray-icon-macos-template.png'))).toEqual([
+      '255,255,255'
+    ]);
+    expect((await opaqueRgbValues(join(root, 'apps/runtime/assets/tray-icon-windows.png'))).length).toBeGreaterThan(1);
     const icns = await readFile(join(root, 'apps/desktop/build/icon.icns'));
     expect(icns.subarray(0, 4).toString('ascii')).toBe('icns');
     const ico = await readFile(join(root, 'apps/desktop/build/icon.ico'));
@@ -115,21 +125,14 @@ describe('project icon assets', () => {
       build: { icon?: string; directories: { buildResources: string } };
     };
     const webHtml = readFileSync(join(root, 'apps/web/index.html'), 'utf8');
-    const electronMain = readFileSync(join(root, 'apps/desktop/src/electron/main.ts'), 'utf8');
 
     expect(rootPackage.scripts['icons:sync']).toBe('node scripts/sync-project-icons.mjs');
     expect(rootPackage.scripts.build).not.toContain('icons:sync');
     expect(desktopPackage.scripts.build).not.toContain('icons:sync');
-    expect(desktopPackage.scripts['build:electron']).not.toContain('icons:sync');
     expect(desktopPackage.scripts['build:electron:dev']).not.toContain('icons:sync');
     expect(webHtml).toContain('<link rel="icon" type="image/svg+xml" href="/debrute.svg" />');
     expect(desktopPackage.build.directories.buildResources).toBe('build');
     expect(desktopPackage.build).not.toHaveProperty('icon');
-    expect(electronMain).toContain("const projectIconPath = join(__dirname, 'icon.png')");
-    expect(electronMain).toContain("const dockIconPath = join(__dirname, 'dock_icon.png')");
-    expect(electronMain).toContain('icon: projectIconPath');
-    expect(electronMain).toContain('app.dock?.setIcon(nativeImage.createFromPath(dockIconPath))');
-    expect(electronMain).toContain('nativeImage } = electron');
   });
 });
 
@@ -232,4 +235,18 @@ async function luminanceCoverage(path: string, predicate: (luminance: number) =>
     }
   }
   return pixels / (info.width * info.height);
+}
+
+async function opaqueRgbValues(path: string): Promise<string[]> {
+  const { data, info } = await sharp(path)
+    .ensureAlpha()
+    .raw()
+    .toBuffer({ resolveWithObject: true });
+  const values = new Set<string>();
+  for (let offset = 0; offset < data.length; offset += info.channels) {
+    if (data[offset + 3]! > 0) {
+      values.add(`${data[offset]},${data[offset + 1]},${data[offset + 2]}`);
+    }
+  }
+  return [...values].sort();
 }

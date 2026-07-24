@@ -53,15 +53,6 @@ pub fn file_identity(file: &File) -> io::Result<PathIdentity> {
     })
 }
 
-/// Linux is a best-effort distribution target and has no handle-identity contract.
-#[cfg(not(any(target_os = "macos", target_os = "windows")))]
-pub fn file_identity(_file: &File) -> io::Result<PathIdentity> {
-    Err(io::Error::new(
-        io::ErrorKind::Unsupported,
-        "stable file identity is unsupported on this distribution target",
-    ))
-}
-
 /// Returns the stable filesystem identity of an existing path without following policy.
 ///
 /// # Errors
@@ -117,15 +108,6 @@ pub fn path_identity(path: &Path) -> io::Result<PathIdentity> {
         volume: u64::from(information.dwVolumeSerialNumber),
         file: (u64::from(information.nFileIndexHigh) << 32) | u64::from(information.nFileIndexLow),
     })
-}
-
-/// Linux is a best-effort distribution target and has no Project mutation contract.
-#[cfg(not(any(target_os = "macos", target_os = "windows")))]
-pub fn path_identity(_path: &Path) -> io::Result<PathIdentity> {
-    Err(io::Error::new(
-        io::ErrorKind::Unsupported,
-        "stable path identity is unsupported on this distribution target",
-    ))
 }
 
 /// Atomically renames `source` to `destination` only when the destination is absent.
@@ -191,15 +173,6 @@ fn windows_path(path: &Path) -> io::Result<Vec<u16>> {
     }
     encoded.push(0);
     Ok(encoded)
-}
-
-/// Linux is a best-effort distribution target and has no Project mutation contract.
-#[cfg(not(any(target_os = "macos", target_os = "windows")))]
-pub fn rename_no_replace(_source: &Path, _destination: &Path) -> io::Result<()> {
-    Err(io::Error::new(
-        io::ErrorKind::Unsupported,
-        "atomic no-replace rename is unsupported on this distribution target",
-    ))
 }
 
 #[cfg(all(test, target_os = "macos"))]

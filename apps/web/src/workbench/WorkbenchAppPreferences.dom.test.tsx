@@ -3,8 +3,10 @@ import { createRoot, type Root } from 'react-dom/client';
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 import {
   type AdobeBridgeStateView,
+  type DebruteShellApi,
   type DebruteGlobalSettingsView,
-  type ImageModelSettingsView,
+  type DebruteProductState,
+  type ImageModelSettingRecord,
   type WorkbenchApiClient,
   type WorkbenchEvent,
   type WorkbenchProjectSessionSnapshot
@@ -37,8 +39,8 @@ const canvasRuntimeState = vi.hoisted(() => ({
 }));
 let WorkbenchApp: WorkbenchAppComponent;
 let WorkbenchAppWithMockedCanvas: WorkbenchAppComponent;
-vi.mock('./api/workbenchApiClient', () => ({
-  createWorkbenchApiClient: () => apiState.client
+vi.mock('../api/httpWorkbenchApiClient', () => ({
+  createHttpWorkbenchApiClient: () => apiState.client
 }));
 
 describe('WorkbenchApp preferences and project behavior', () => {
@@ -150,22 +152,22 @@ describe('WorkbenchApp preferences and project behavior', () => {
     await unmount(root, container);
   });
 
-  it('reports native window state failures and leaves only maximize unavailable', async () => {
-    window.debruteShell = {
+  it('reports native window state failures without inventing Windows controls on macOS', async () => {
+    window.debruteShell = shellApiFixture({
       getNativeWindowState: vi.fn().mockRejectedValue(new Error('native state unavailable'))
-    };
+    });
     const { container, root } = await renderWorkbenchApp('/');
 
     expect(container.textContent).toContain('Window state failed: native state unavailable');
-    expect(requireButton(container, 'Minimize window').disabled).toBe(false);
-    expect(requireButton(container, 'Maximize window').disabled).toBe(true);
-    expect(requireButton(container, 'Close window').disabled).toBe(false);
+    expect(findButton(container, 'Minimize window')).toBeUndefined();
+    expect(findButton(container, 'Maximize window')).toBeUndefined();
+    expect(findButton(container, 'Close window')).toBeUndefined();
 
     await unmount(root, container);
   });
 
   describe('global model settings', { tags: ['settings'] }, () => {
-    it('loads global model settings before a project is open', async () => {
+    it('renders global model settings from the initial connection snapshot before a project is open', async () => {
       const { container, root } = await renderWorkbenchApp('/');
 
       const settingsButton = requireButton(container, 'Settings');
@@ -184,41 +186,6 @@ describe('WorkbenchApp preferences and project behavior', () => {
       });
 
       expect(apiState.api!.openProject).not.toHaveBeenCalled();
-      expect(apiState.api!.globalSettingsGet).toHaveBeenCalledTimes(1);
-      expect(container.querySelector('.settings-page')?.textContent).toContain('image/openai/gpt-image-1');
-
-      await unmount(root, container);
-    });
-
-    it('renders model settings load errors with retry before a project is open', async () => {
-      const globalSettingsGet = vi.fn()
-        .mockRejectedValueOnce(new Error('Secrets config imageModelApiKeys values must be strings.'))
-        .mockResolvedValueOnce(globalSettingsFixture());
-      const { container, root } = await renderWorkbenchApp('/', {
-        globalSettingsGet
-      } as Partial<WorkbenchApiClient>);
-
-      const settingsButton = requireButton(container, 'Settings');
-      await act(async () => {
-        settingsButton.click();
-        await Promise.resolve();
-      });
-
-      await act(async () => {
-        requireButton(container, 'Image Models').click();
-        await Promise.resolve();
-      });
-
-      expect(container.querySelector('.settings-page')?.textContent).toContain('Failed to load settings: Secrets config imageModelApiKeys values must be strings.');
-      expect(container.querySelector('.settings-page')?.textContent).not.toContain('image/openai/gpt-image-1');
-
-      await act(async () => {
-        requireButton(container, 'Retry').click();
-        await Promise.resolve();
-        await Promise.resolve();
-      });
-
-      expect(globalSettingsGet).toHaveBeenCalledTimes(2);
       expect(container.querySelector('.settings-page')?.textContent).toContain('image/openai/gpt-image-1');
 
       await unmount(root, container);
@@ -235,7 +202,6 @@ describe('WorkbenchApp preferences and project behavior', () => {
     });
 
     expect(apiState.api!.openProject).toHaveBeenCalledWith({ projectId: 'project-1' });
-    expect(apiState.api!.globalSettingsGet).toHaveBeenCalledTimes(1);
     expect(adobeBridgeGetState).toHaveBeenCalledTimes(1);
 
     await unmount(root, container);
@@ -257,17 +223,28 @@ describe('WorkbenchApp preferences and project behavior', () => {
     expect(apiState.listeners.size).toBe(0);
   });
 
+  it('opens the Project with defaults after rejecting an invalid saved view state', async () => {
+    window.sessionStorage.setItem('debrute:project-view:project-1', JSON.stringify({
+      activeCanvasId: 'canvas-1',
+      legacyPanelMode: 'sidebar'
+    }));
+
+    const { container, root } = await renderWorkbenchApp('/projects/project-1');
+
+    expect(container.textContent).toContain('Saved view state for Demo was invalid and has been reset.');
+    expect(container.textContent).toContain('Opened project: Demo');
+    expect(JSON.parse(window.sessionStorage.getItem('debrute:project-view:project-1')!)).toEqual({
+      floatingPanels: expect.any(Object)
+    });
+
+    await unmount(root, container);
+  });
+
   it('keeps the Project visible behind a read-only overlay when another Workbench preempts it', async () => {
     const { container, root } = await renderWorkbenchApp('/projects/project-1');
     await act(async () => {
       await Promise.resolve();
       for (const listener of apiState.detachedListeners) listener();
-      emitWorkbenchEvent({
-        type: 'project.opened',
-        projectId: 'project-1',
-        projectRevision: 2,
-        snapshot: snapshotFixture()
-      });
     });
 
     expect(container.querySelector('[data-testid="workbench-detached-overlay"]')?.textContent)
@@ -289,7 +266,8 @@ describe('WorkbenchApp preferences and project behavior', () => {
       return {
         projectId: 'project-1',
         projectRevision: 1,
-        snapshot: snapshotFixture()
+        snapshot: snapshotFixture(),
+        workingCopies: emptyWorkingCopies()
       };
     });
     const { container, root } = await renderWorkbenchApp('/projects/project-1', { openProject });
@@ -311,16 +289,17 @@ describe('WorkbenchApp preferences and project behavior', () => {
 
   it('routes a native macOS Project-open intent through the current document replacement transaction', async () => {
     let openProjectRequested: ((projectRoot: string) => void) | undefined;
-    window.debruteShell = {
+    window.debruteShell = shellApiFixture({
       onOpenProjectRequested: (listener) => {
         openProjectRequested = listener;
         return () => { openProjectRequested = undefined; };
       }
-    };
+    });
     const openProject = vi.fn(async () => ({
       projectId: 'project-2',
       projectRevision: 1,
-      snapshot: snapshotFixture()
+      snapshot: snapshotFixture(),
+      workingCopies: emptyWorkingCopies()
     }));
     const { container, root } = await renderWorkbenchApp('/projects/project-1', { openProject });
 
@@ -342,17 +321,9 @@ describe('WorkbenchApp preferences and project behavior', () => {
   });
 
   it('derives current Project title and recent roots locally from ordered state', async () => {
-    const { container, root } = await renderWorkbenchApp('/');
-
-    expect(container.querySelector('.workbench-titlebar__title')?.textContent).toBe('Debrute');
+    const { container, root } = await renderWorkbenchApp('/projects/project-1');
 
     await act(async () => {
-      emitWorkbenchEvent({
-        type: 'project.opened',
-        projectId: 'project-b',
-        projectRevision: 2,
-        snapshot: snapshotFixture()
-      });
       emitWorkbenchEvent({
         type: 'recentProjects.changed',
         recentProjects: [{ projectId: 'current', projectRoot: '/projects/current' }]
@@ -381,7 +352,8 @@ describe('WorkbenchApp preferences and project behavior', () => {
       opening.resolve({
         projectId: 'project-1',
         projectRevision: 1,
-        snapshot: snapshotFixture()
+        snapshot: snapshotFixture(),
+        workingCopies: emptyWorkingCopies()
       });
       await opening.promise;
       await Promise.resolve();
@@ -403,7 +375,8 @@ describe('WorkbenchApp preferences and project behavior', () => {
     const openProject = vi.fn(async () => ({
       projectId: 'project-1',
       projectRevision: 1,
-      snapshot: snapshotFixture()
+      snapshot: snapshotFixture(),
+      workingCopies: emptyWorkingCopies()
     }));
     const StrictWorkbenchApp = () => (
       <React.StrictMode>
@@ -449,7 +422,8 @@ describe('WorkbenchApp preferences and project behavior', () => {
       openProject: vi.fn(async () => ({
         projectId: 'project-1',
         projectRevision: 1,
-        snapshot: projectSnapshot
+        snapshot: projectSnapshot,
+        workingCopies: emptyWorkingCopies()
       })),
       bringCanvasNodeToFront
     } as Partial<WorkbenchApiClient>, WorkbenchAppWithMockedCanvas);
@@ -569,7 +543,7 @@ describe('WorkbenchApp preferences and project behavior', () => {
       await unmount(root, container);
     });
 
-    it('does not replace a newer settings event when an older save succeeds', async () => {
+    it('does not replace a newer settings event when the save is acknowledged', async () => {
       const { save, container, root } = await startPendingDefaultFrontendSave();
 
       await act(async () => {
@@ -579,9 +553,7 @@ describe('WorkbenchApp preferences and project behavior', () => {
             workbench: { locale: 'zh-CN', themePreference: 'light', defaultFrontend: 'runtime-only' }
           })
         });
-        save.resolve(globalSettingsFixture({
-          workbench: { locale: 'en', themePreference: 'dark', defaultFrontend: 'browser' }
-        }));
+        save.resolve({ ok: true });
         await Promise.resolve();
         await Promise.resolve();
       });
@@ -595,11 +567,11 @@ describe('WorkbenchApp preferences and project behavior', () => {
 });
 
 async function startPendingDefaultFrontendSave(): Promise<{
-  save: ReturnType<typeof deferred<DebruteGlobalSettingsView>>;
+  save: ReturnType<typeof deferred<{ ok: true }>>;
   container: HTMLDivElement;
   root: Root;
 }> {
-  const save = deferred<DebruteGlobalSettingsView>();
+  const save = deferred<{ ok: true }>();
   const globalSettingsSave = vi.fn(() => save.promise);
   const { container, root } = await renderWorkbenchApp('/', { globalSettingsSave });
 
@@ -712,12 +684,19 @@ function findButton(container: HTMLElement, label: string): HTMLButtonElement | 
     .find((candidate) => candidate.textContent?.includes(label) || candidate.getAttribute('aria-label') === label);
 }
 
+function emptyWorkingCopies() {
+  return { text: {}, feedback: null };
+}
+
 function apiFixture(overrides: Partial<WorkbenchApiClient> = {}): WorkbenchApiClient {
   return {
-    globalSettingsGet: vi.fn(async () => globalSettingsFixture()),
-    globalSettingsSave: vi.fn(async () => globalSettingsFixture()),
+    globalSettingsSave: vi.fn(async () => ({ ok: true as const })),
     onEvent: vi.fn((listener: (event: WorkbenchEvent) => void) => {
       apiState.listeners.add(listener);
+      const settings = globalSettingsFixture();
+      listener({ type: 'globalSettings.changed', settings });
+      listener({ type: 'integrations.changed', integrations: settings.integrations });
+      listener({ type: 'product.changed', product: productStateFixture() });
       return () => apiState.listeners.delete(listener);
     }),
     onProjectDetached: vi.fn((listener: () => void) => {
@@ -725,33 +704,13 @@ function apiFixture(overrides: Partial<WorkbenchApiClient> = {}): WorkbenchApiCl
       return () => apiState.detachedListeners.delete(listener);
     }),
     onConnectionEnded: vi.fn(() => () => undefined),
-    getProductState: vi.fn(async () => ({
-      productVersion: 'test',
-      platform: 'darwin',
-      cli: { status: 'ready', version: 'test', path: '/tmp/debrute', skillsVersion: 'test' },
-      update: { type: 'idle', currentVersion: 'test', updateAvailable: false }
-    })),
-    checkProductUpdate: vi.fn(async () => ({
-      productVersion: 'test',
-      platform: 'darwin',
-      cli: { status: 'ready', version: 'test', path: '/tmp/debrute', skillsVersion: 'test' },
-      update: { type: 'idle', currentVersion: 'test', updateAvailable: false }
-    })),
-    applyProductUpdate: vi.fn(async () => ({
-      applied: false,
-      state: {
-        productVersion: 'test',
-        platform: 'darwin',
-        cli: { status: 'ready', version: 'test', path: '/tmp/debrute', skillsVersion: 'test' },
-        update: { type: 'idle', currentVersion: 'test', updateAvailable: false }
-      }
-    })),
-    integrationsRescan: vi.fn(async () => ({ integrations: [], backends: [] })),
+    checkProductUpdate: vi.fn(async () => ({ ok: true as const })),
+    applyProductUpdate: vi.fn(async () => ({ ok: true as const })),
+    integrationsRescan: vi.fn(async () => ({ ok: true as const })),
     integrationsRunOperation: vi.fn(async () => ({
       ok: true,
       integrationId: 'imagemagick',
-      operation: 'install',
-      settings: { integrations: [], backends: [] }
+      operation: 'install'
     })),
     adobeBridgeGetState: vi.fn(async () => adobeBridgeStateFixture()),
     adobeBridgeCreatePairing: vi.fn(async () => ({ pairingId: 'pairing-1', code: '123456', expiresAt: '2026-07-17T00:00:00Z' })),
@@ -760,7 +719,8 @@ function apiFixture(overrides: Partial<WorkbenchApiClient> = {}): WorkbenchApiCl
     openProject: vi.fn(async () => ({
       projectId: 'project-1',
       projectRevision: 1,
-      snapshot: snapshotFixture()
+      snapshot: snapshotFixture(),
+      workingCopies: emptyWorkingCopies()
     })),
     openProjectFromPicker: vi.fn(async () => ({ opened: false })),
     readCanvasFeedback: vi.fn(async () => ({ entries: {} })),
@@ -774,14 +734,29 @@ function apiFixture(overrides: Partial<WorkbenchApiClient> = {}): WorkbenchApiCl
   } as unknown as WorkbenchApiClient;
 }
 
+function productStateFixture(): DebruteProductState {
+  return {
+    productVersion: 'test',
+    platform: 'darwin',
+    cli: {
+      status: 'ready',
+      version: 'test',
+      path: '/tmp/debrute',
+      skillsVersion: 'test',
+      skillsRoot: '/tmp/debrute-skills'
+    },
+    update: { type: 'idle', currentVersion: 'test', updateAvailable: false }
+  };
+}
+
 function globalSettingsFixture(overrides: Partial<DebruteGlobalSettingsView> = {}): DebruteGlobalSettingsView {
   return {
-    workbench: { locale: 'en', themePreference: 'dark', defaultFrontend: 'electron' },
+    workbench: { locale: 'en', themePreference: 'dark', defaultFrontend: 'desktop' },
     chrome: { recentProjects: [] },
     models: {
       image: imageSettingsFixture(),
-      video: { models: [] },
-      audio: { models: [] }
+      video: [],
+      audio: []
     },
     integrations: { integrations: [], backends: [] },
     adobeBridge: { enabled: true },
@@ -789,21 +764,18 @@ function globalSettingsFixture(overrides: Partial<DebruteGlobalSettingsView> = {
   };
 }
 
-function imageSettingsFixture(): ImageModelSettingsView {
-  return {
-    models: [{
-      debruteModelId: 'image/openai/gpt-image-1',
-      summary: 'OpenAI image generation.',
-      supportsEditing: true,
-      supportsTextRendering: true,
-      defaultBaseUrl: 'https://api.openai.com/v1',
-      defaultRequestModelId: 'gpt-image-1',
-      baseUrlOverride: null,
-      requestModelIdOverride: null,
-      apiKeySet: false,
-      apiKeyPreview: null
-    }]
-  };
+function imageSettingsFixture(): ImageModelSettingRecord[] {
+  return [{
+    debruteModelId: 'image/openai/gpt-image-1',
+    summary: 'OpenAI image generation.',
+    supportsEditing: true,
+    supportsTextRendering: true,
+    defaultBaseUrl: 'https://api.openai.com/v1',
+    defaultRequestModelId: 'gpt-image-1',
+    baseUrlOverride: null,
+    requestModelIdOverride: null,
+    apiKeySet: false
+  }];
 }
 
 function adobeBridgeStateFixture(overrides: Partial<AdobeBridgeStateView> = {}): AdobeBridgeStateView {
@@ -874,10 +846,25 @@ function snapshotFixture(): WorkbenchProjectSessionSnapshot {
     health: {
       projectName: 'Demo',
       canvasCount: 0,
-      diagnosticCounts: { errors: 0, warnings: 0, infos: 0 },
+      diagnosticCounts: { errors: 0, warnings: 0 },
       checkedAt: '2026-06-28T00:00:00.000Z'
     },
     canvasRegistry: { status: 'ready', canvasOrder: [] }
+  };
+}
+
+function shellApiFixture(overrides: Partial<DebruteShellApi>): DebruteShellApi {
+  return {
+    getNativeWindowState: async () => ({ maximized: false }),
+    minimizeNativeWindow: async () => ({ maximized: false }),
+    toggleMaximizeNativeWindow: async () => ({ maximized: true }),
+    closeNativeWindow: async () => ({ ok: true }),
+    executeNativeMenuCommand: async () => ({ ok: true }),
+    takeDesktopLaunchTicket: async () => undefined,
+    onNativeWindowStateChanged: () => () => undefined,
+    onOpenProjectRequested: () => () => undefined,
+    getDroppedFilePath: () => undefined,
+    ...overrides
   };
 }
 

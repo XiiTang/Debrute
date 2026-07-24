@@ -23,9 +23,9 @@ import {
 export type RuntimeControlErrorCode =
   | 'client_closed'
   | 'handshake_rejected'
-  | 'handshake_timeout'
   | 'protocol_error'
   | 'runtime_lost'
+  | 'runtime_ready_timeout'
   | 'runtime_transitioning'
   | 'runtime_unavailable';
 
@@ -42,8 +42,8 @@ export class RuntimeControlError extends Error {
 export interface ConnectRuntimeControlOptions {
   role: ClientRole;
   productVersion: string;
+  readyDeadlineMs: number;
   socketPath?: string;
-  handshakeTimeoutMs?: number;
   platform?: NodeJS.Platform;
   temporaryDirectory?: string;
 }
@@ -77,8 +77,13 @@ export async function connectRuntimeControl(
 ): Promise<RuntimeControlClient> {
   const socketPath = options.socketPath ?? resolveRuntimeControlSocketPath(options);
   const socket = createConnection(socketPath);
-  const client = new NodeRuntimeControlClient(socket, options.role, options.productVersion);
-  return await client.connect(options.handshakeTimeoutMs ?? 5_000);
+  const client = new NodeRuntimeControlClient(
+    socket,
+    options.role,
+    options.productVersion,
+    options.readyDeadlineMs
+  );
+  return await client.connect();
 }
 
 export function resolveRuntimeControlSocketPath(
@@ -154,14 +159,28 @@ class NodeRuntimeControlClient implements RuntimeControlClient {
   private handshakeAccepted = false;
   private explicitlyClosed = false;
   private terminalError: RuntimeControlError | undefined;
+  private readyDeadlineTimer: NodeJS.Timeout | undefined;
+  private readonly readyDeadlineMs: number;
+  private readyObserved = false;
 
-  constructor(socket: Socket, role: ClientRole, productVersion: string) {
+  constructor(
+    socket: Socket,
+    role: ClientRole,
+    productVersion: string,
+    readyDeadlineMs: number
+  ) {
     this.socket = socket;
     this.role = role;
     this.productVersion = productVersion;
+    this.readyDeadlineMs = readyDeadlineMs;
+    const remaining = Math.max(0, readyDeadlineMs - Date.now());
+    this.readyDeadlineTimer = setTimeout(() => {
+      this.fail(runtimeReadyTimeout());
+    }, remaining);
+    this.socket.setTimeout(remaining);
   }
 
-  async connect(handshakeTimeoutMs: number): Promise<RuntimeControlClient> {
+  async connect(): Promise<RuntimeControlClient> {
     this.socket.on('data', (chunk: Buffer) => this.receive(chunk));
     this.socket.once('connect', () => {
       this.connected = true;
@@ -174,7 +193,10 @@ class NodeRuntimeControlClient implements RuntimeControlClient {
       }).catch((error: unknown) => this.fail(asRuntimeLost(error)));
     });
     this.socket.once('timeout', () => {
-      this.fail(new RuntimeControlError('handshake_timeout', 'Runtime Control handshake timed out'));
+      this.fail(new RuntimeControlError(
+        'runtime_ready_timeout',
+        'Runtime did not become Ready before the absolute deadline'
+      ));
     });
     this.socket.on('error', (error) => this.fail(asRuntimeLost(error, this.connected)));
     this.socket.once('close', () => {
@@ -182,14 +204,15 @@ class NodeRuntimeControlClient implements RuntimeControlClient {
         this.fail(new RuntimeControlError('runtime_lost', 'Runtime Control connection was lost'));
       }
     });
-    this.socket.setTimeout(handshakeTimeoutMs);
     return await this.handshake.promise;
   }
 
   async waitUntilReady(): Promise<void> {
     this.throwIfTerminal();
+    this.throwIfReadyDeadlineExpired();
     while (this.status === 'starting') {
       const response = await this.request({ command: 'inspect' }, false);
+      this.throwIfReadyDeadlineExpired();
       if (response.result !== 'inspection') {
         throw new RuntimeControlError('protocol_error', 'Runtime returned an invalid inspection response');
       }
@@ -199,11 +222,14 @@ class NodeRuntimeControlClient implements RuntimeControlClient {
       }
     }
     if (this.status !== 'ready') {
+      this.finishReadyWait();
       throw new RuntimeControlError(
         'runtime_transitioning',
         `Runtime is stopping: ${this.status}`
       );
     }
+    this.readyObserved = true;
+    this.finishReadyWait();
   }
 
   async inspect(): Promise<ControlResponse> {
@@ -254,6 +280,7 @@ class NodeRuntimeControlClient implements RuntimeControlClient {
       this.terminalError = error;
       this.rejectPending(error);
     }
+    this.finishReadyWait();
     this.socket.destroy();
   }
 
@@ -261,6 +288,7 @@ class NodeRuntimeControlClient implements RuntimeControlClient {
     this.throwIfTerminal();
     if (requiresReady) {
       await this.waitUntilReady();
+      this.throwIfReadyDeadlineExpired();
     }
     const requestId = randomUUID();
     const response = deferred<ControlResponse>();
@@ -365,6 +393,10 @@ class NodeRuntimeControlClient implements RuntimeControlClient {
   }
 
   private handleHandshake(message: ServerMessage): void {
+    if (Date.now() >= this.readyDeadlineMs) {
+      this.fail(runtimeReadyTimeout());
+      return;
+    }
     if (message.type === 'handshake_rejected') {
       this.fail(new RuntimeControlError(
         'handshake_rejected',
@@ -386,7 +418,10 @@ class NodeRuntimeControlClient implements RuntimeControlClient {
     this.handshakeAccepted = true;
     this.instanceId = message.instance_id;
     this.status = message.status;
-    this.socket.setTimeout(0);
+    if (this.status === 'ready') {
+      this.readyObserved = true;
+      this.finishReadyWait();
+    }
     this.handshake.resolve(this);
   }
 
@@ -395,6 +430,7 @@ class NodeRuntimeControlClient implements RuntimeControlClient {
       return;
     }
     this.terminalError = error;
+    this.finishReadyWait();
     this.handshake.reject(error);
     this.rejectPending(error);
     if (this.handshakeAccepted && error.code === 'runtime_lost') {
@@ -403,6 +439,14 @@ class NodeRuntimeControlClient implements RuntimeControlClient {
       }
     }
     this.socket.destroy();
+  }
+
+  private finishReadyWait(): void {
+    if (this.readyDeadlineTimer) {
+      clearTimeout(this.readyDeadlineTimer);
+      this.readyDeadlineTimer = undefined;
+    }
+    this.socket.setTimeout(0);
   }
 
   private rejectPending(error: RuntimeControlError): void {
@@ -417,6 +461,22 @@ class NodeRuntimeControlClient implements RuntimeControlClient {
       throw this.terminalError;
     }
   }
+
+  private throwIfReadyDeadlineExpired(): void {
+    if (this.readyObserved || Date.now() < this.readyDeadlineMs) {
+      return;
+    }
+    const error = runtimeReadyTimeout();
+    this.fail(error);
+    throw error;
+  }
+}
+
+function runtimeReadyTimeout(): RuntimeControlError {
+  return new RuntimeControlError(
+    'runtime_ready_timeout',
+    'Runtime did not become Ready before the absolute deadline'
+  );
 }
 
 interface Deferred<Value> {

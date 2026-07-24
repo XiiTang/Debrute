@@ -15,7 +15,7 @@ export interface PhotoshopSelectionSnapshot {
 
 export interface PhotoshopAdapter {
   hostVersion(): string;
-  currentSelectionSnapshot(): PhotoshopSelectionSnapshot;
+  selectionSnapshot(): Promise<PhotoshopSelectionSnapshot>;
   exportSelectedTopLevelPngs(): Promise<ExportedSelectionPng[]>;
   placeFileAsSmartObject(input: { fileName: string; bytes: Uint8Array }): Promise<void>;
 }

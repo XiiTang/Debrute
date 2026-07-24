@@ -1,11 +1,11 @@
-import type { ControlEvent, ControlResponse } from '@debrute/app-protocol';
+import type { ControlEvent, ControlResponse, WorkbenchThemePreference } from '@debrute/app-protocol';
 import type { RuntimeControlClient } from '@debrute/runtime-control-client';
 
 export interface DesktopNativeWindow {
   isDestroyed(): boolean;
   show(): void;
   focus(): void;
-  setLaunchTicket(ticket: string): void;
+  prepareLaunch(input: { ticket: string; themePreference: WorkbenchThemePreference }): void;
   load(url: string): Promise<void>;
   destroy(): void;
   onClosed(listener: () => void): () => void;
@@ -13,7 +13,12 @@ export interface DesktopNativeWindow {
 
 export interface DesktopWindowControlAdapterServices<Window extends DesktopNativeWindow> {
   control: RuntimeControlClient;
-  createWindow(input: { windowKey: string; ticket: string; url: string }): Promise<Window>;
+  createWindow(input: {
+    windowKey: string;
+    ticket: string;
+    url: string;
+    themePreference: WorkbenchThemePreference;
+  }): Promise<Window>;
   quitDesktop(): void | Promise<void>;
   onError(error: unknown): void;
 }
@@ -49,11 +54,13 @@ export class DesktopWindowControlAdapter<Window extends DesktopNativeWindow> {
     if (!window || window.isDestroyed()) {
       return false;
     }
-    const launch = requireResponse(
-      await this.control.createDesktopLaunchTicket(windowKey),
-      'desktop_launch_ticket'
+    const launch = requireDesktopLaunch(
+      await this.control.createDesktopLaunchTicket(windowKey)
     );
-    window.setLaunchTicket(launch.ticket);
+    window.prepareLaunch({
+      ticket: launch.ticket,
+      themePreference: launch.themePreference
+    });
     await window.load(launch.url);
     return true;
   }
@@ -102,14 +109,14 @@ export class DesktopWindowControlAdapter<Window extends DesktopNativeWindow> {
     }
     this.forgetWindow(windowKey);
     try {
-      const launch = requireResponse(
-        await this.control.createDesktopLaunchTicket(windowKey),
-        'desktop_launch_ticket'
+      const launch = requireDesktopLaunch(
+        await this.control.createDesktopLaunchTicket(windowKey)
       );
       const window = await this.createNativeWindow({
         windowKey,
         ticket: launch.ticket,
-        url: launch.url
+        url: launch.url,
+        themePreference: launch.themePreference
       });
       if (this.shuttingDown || window.isDestroyed()) {
         window.destroy();
@@ -127,10 +134,15 @@ export class DesktopWindowControlAdapter<Window extends DesktopNativeWindow> {
           throw new Error(`Runtime rejected failed Desktop window cleanup: ${response.result}`);
         }
       } catch (cleanupError) {
-        throw new AggregateError(
+        const aggregate = new AggregateError(
           [error, cleanupError],
           `Desktop window ${windowKey} could not open or be removed from Runtime topology.`
         );
+        await this.shutdown();
+        throw aggregate;
+      }
+      if (this.windows.size === 0) {
+        await this.exitDesktopOnly();
       }
       throw error;
     }
@@ -143,17 +155,21 @@ export class DesktopWindowControlAdapter<Window extends DesktopNativeWindow> {
           return;
         }
         this.forgetWindow(windowKey);
+        if (this.windows.size === 0) {
+          await this.exitDesktopOnly();
+          return;
+        }
         if (!this.shuttingDown) {
           const response = await this.control.desktopWindowClosed(windowKey);
           if (response.result !== 'ok') {
             throw new Error(`Runtime rejected Desktop window close: ${response.result}`);
           }
         }
-        if (this.windows.size === 0) {
-          await this.exitDesktopOnly();
-        }
       })
-      .catch((error: unknown) => this.onError(error));
+      .catch(async (error: unknown) => {
+        this.onError(error);
+        await this.shutdown();
+      });
   }
 
   private async shutdown(): Promise<void> {
@@ -193,4 +209,24 @@ function requireResponse<Result extends ControlResponse['result']>(
     throw new Error(`Runtime rejected Desktop action: ${response.result}`);
   }
   return response as Extract<ControlResponse, { result: Result }>;
+}
+
+function requireDesktopLaunch(response: ControlResponse): {
+  ticket: string;
+  url: string;
+  themePreference: WorkbenchThemePreference;
+} {
+  const launch = requireResponse(response, 'desktop_launch_ticket');
+  if (!isWorkbenchThemePreference(launch.theme_preference)) {
+    throw new Error('Runtime returned an invalid Desktop launch theme preference.');
+  }
+  return {
+    ticket: launch.ticket,
+    url: launch.url,
+    themePreference: launch.theme_preference
+  };
+}
+
+function isWorkbenchThemePreference(value: unknown): value is WorkbenchThemePreference {
+  return value === 'system' || value === 'dark' || value === 'light';
 }

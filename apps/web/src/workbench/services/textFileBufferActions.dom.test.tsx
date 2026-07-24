@@ -1,4 +1,4 @@
-import React, { act, useEffect, useRef, useState } from 'react';
+import { act, useEffect, useRef, useState } from 'react';
 import { createRoot } from 'react-dom/client';
 import { describe, expect, it, vi } from 'vitest';
 import type { WorkbenchApiClient } from '@debrute/app-protocol';

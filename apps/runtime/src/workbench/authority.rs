@@ -2,10 +2,12 @@ use std::{
     collections::HashMap,
     error::Error,
     fmt,
-    sync::{Mutex, MutexGuard, PoisonError},
+    sync::{Mutex, MutexGuard},
 };
 
 use url::Url;
+
+use crate::project::is_valid_stable_project_id;
 use uuid::Uuid;
 
 use crate::control::WorkbenchRoute;
@@ -61,10 +63,7 @@ impl WorkbenchLaunchService {
         origin: &str,
     ) -> Result<(), SourceWorkbenchRegistrationError> {
         let origin = normalize_source_workbench_origin(origin)?;
-        let mut registration = self
-            .source_workbench
-            .lock()
-            .unwrap_or_else(PoisonError::into_inner);
+        let mut registration = lock(&self.source_workbench, "source Workbench registration");
         if registration
             .as_ref()
             .is_some_and(|current| current.owner_id != owner_id)
@@ -79,10 +78,7 @@ impl WorkbenchLaunchService {
     }
 
     pub(crate) fn unregister_source_workbench(&self, owner_id: &str) {
-        let mut registration = self
-            .source_workbench
-            .lock()
-            .unwrap_or_else(PoisonError::into_inner);
+        let mut registration = lock(&self.source_workbench, "source Workbench registration");
         if registration
             .as_ref()
             .is_some_and(|current| current.owner_id == owner_id)
@@ -98,10 +94,7 @@ impl WorkbenchLaunchService {
     /// Returns an error when the route contains an invalid Project id.
     pub fn url_for_route(&self, route: &WorkbenchRoute) -> Result<String, WorkbenchLaunchError> {
         validate_route(route)?;
-        let registration = self
-            .source_workbench
-            .lock()
-            .unwrap_or_else(PoisonError::into_inner);
+        let registration = lock(&self.source_workbench, "source Workbench registration");
         let origin = registration
             .as_ref()
             .map_or(self.origin.as_str(), |registration| {
@@ -151,8 +144,14 @@ impl WorkbenchLaunchService {
     fn lock_tickets(&self) -> MutexGuard<'_, HashMap<String, DesktopTicket>> {
         self.desktop_tickets
             .lock()
-            .unwrap_or_else(PoisonError::into_inner)
+            .expect("Desktop launch ticket lock poisoned")
     }
+}
+
+fn lock<'a, T>(mutex: &'a Mutex<T>, name: &str) -> MutexGuard<'a, T> {
+    mutex
+        .lock()
+        .unwrap_or_else(|_| panic!("{name} lock poisoned"))
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -171,7 +170,7 @@ impl Error for WorkbenchLaunchError {}
 fn validate_route(route: &WorkbenchRoute) -> Result<(), WorkbenchLaunchError> {
     match route {
         WorkbenchRoute::Root => Ok(()),
-        WorkbenchRoute::Project { project_id } if is_opaque_value(project_id) => Ok(()),
+        WorkbenchRoute::Project { project_id } if is_valid_stable_project_id(project_id) => Ok(()),
         WorkbenchRoute::Project { .. } => Err(WorkbenchLaunchError::InvalidProjectId),
     }
 }

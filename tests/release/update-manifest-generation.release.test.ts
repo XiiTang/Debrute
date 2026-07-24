@@ -48,9 +48,6 @@ describe('update manifest generation', () => {
       kind: 'product',
       name: 'debrute-product-0.2.0-windows-x64.zip'
     }));
-    expect(manifest.assets).not.toContainEqual(expect.objectContaining({
-      platform: 'linux'
-    }));
   });
 
   it('fails when a required desktop asset is missing', async () => {
@@ -102,7 +99,6 @@ async function writeReleaseAssets(root: string, version: string): Promise<void> 
     writeFile(join(root, `debrute-desktop-${version}-macos-arm64.dmg`), 'macos arm64'),
     writeFile(join(root, `debrute-desktop-${version}-macos-x64.dmg`), 'macos x64'),
     writeFile(join(root, `debrute-desktop-${version}-windows-x64.exe`), 'windows x64'),
-    writeFile(join(root, `debrute-desktop-${version}-linux-x64.AppImage`), 'linux x64'),
     writeFile(join(root, `debrute-product-${version}-macos-arm64.zip`), 'macos arm64 product'),
     writeFile(join(root, `debrute-product-${version}-macos-x64.zip`), 'macos x64 product'),
     writeFile(join(root, `debrute-product-${version}-windows-x64.zip`), 'windows x64 product')

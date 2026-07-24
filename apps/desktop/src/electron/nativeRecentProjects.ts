@@ -1,5 +1,6 @@
 import { basename, win32 } from 'node:path';
 import type { JumpListCategory } from 'electron';
+import type { DebruteProductPlatform } from '@debrute/app-protocol';
 
 export type DesktopOpenIntent =
   | { kind: 'new-window' }
@@ -7,15 +8,9 @@ export type DesktopOpenIntent =
   | { kind: 'open-project-id'; projectId: string };
 
 export interface NativeRecentProjectHost {
-  addRecentDocument?(path: string): void;
-  clearRecentDocuments?(): void;
-  setJumpList?(categories: JumpListCategory[]): string | void;
-}
-
-export interface NativeRecentProjectSyncInput {
-  platform: NodeJS.Platform;
-  execPath: string;
-  recentProjectRoots: string[];
+  addRecentDocument(path: string): void;
+  clearRecentDocuments(): void;
+  setJumpList(categories: JumpListCategory[]): ReturnType<Electron.App['setJumpList']>;
 }
 
 export function parseDesktopOpenIntent(argv: string[]): DesktopOpenIntent | undefined {
@@ -44,31 +39,23 @@ export function parseDesktopOpenIntent(argv: string[]): DesktopOpenIntent | unde
   return undefined;
 }
 
-export function buildNativeRecentProjectSync(input: NativeRecentProjectSyncInput): { apply(host: NativeRecentProjectHost): void } {
-  return {
-    apply(host) {
-      if (input.platform === 'darwin') {
-        host.clearRecentDocuments?.();
-        for (const projectRoot of [...input.recentProjectRoots].reverse()) {
-          host.addRecentDocument?.(projectRoot);
-        }
-        return;
-      }
-
-      if (input.platform === 'win32') {
-        host.setJumpList?.(windowsJumpList(input.execPath, input.recentProjectRoots));
-      }
-    }
-  };
-}
-
 export function syncNativeRecentProjects(
   host: NativeRecentProjectHost,
-  platform: NodeJS.Platform,
+  platform: DebruteProductPlatform,
   execPath: string,
   recentProjectRoots: string[]
 ): void {
-  buildNativeRecentProjectSync({ platform, execPath, recentProjectRoots }).apply(host);
+  if (platform === 'darwin') {
+    host.clearRecentDocuments();
+    for (const projectRoot of [...recentProjectRoots].reverse()) {
+      host.addRecentDocument(projectRoot);
+    }
+    return;
+  }
+  const result = host.setJumpList(windowsJumpList(execPath, recentProjectRoots));
+  if (result !== 'ok') {
+    throw new Error(`Windows rejected the Debrute Jump List: ${result}`);
+  }
 }
 
 function windowsJumpList(execPath: string, recentProjectRoots: string[]): JumpListCategory[] {

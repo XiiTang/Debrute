@@ -1,13 +1,8 @@
 import {
-  CANVAS_RASTER_PREVIEW_MAX_SCALE,
-  CANVAS_RASTER_PREVIEW_MIN_SCALE,
-  canvasRasterPreviewSteppedScale,
   canvasRasterPreviewWidth,
   type ProjectedCanvasNode
 } from '@debrute/canvas-core';
-
-export const CANVAS_IMAGE_PREVIEW_MIN_SCALE = CANVAS_RASTER_PREVIEW_MIN_SCALE;
-export const CANVAS_IMAGE_PREVIEW_MAX_SCALE = CANVAS_RASTER_PREVIEW_MAX_SCALE;
+import { canvasRawFileProjectId } from './canvasRawFileUrls';
 
 export interface CanvasImageSource {
   src: string;
@@ -42,12 +37,7 @@ export function canvasImageSource(input: {
   };
 }
 
-export function canvasImagePreviewSteppedScale(screenScale: number): number {
-  assertPositiveFinite(screenScale, 'Canvas image preview screen scale must be a positive finite number.');
-  return canvasRasterPreviewSteppedScale(screenScale);
-}
-
-export function canvasImagePreviewWidth(input: {
+function canvasImagePreviewWidth(input: {
   nodeDisplayWidth: number;
   sourceWidth: number;
   resourceZoom: number;
@@ -65,7 +55,7 @@ export function canvasImagePreviewWidth(input: {
   return previewWidth;
 }
 
-export function canvasImagePreviewWidthForNode(
+function canvasImagePreviewWidthForNode(
   node: Pick<ProjectedCanvasNode, 'width' | 'availability'>,
   resourceZoom: number,
   devicePixelRatio: number
@@ -86,17 +76,13 @@ export function canvasImagePreviewWidthForNode(
 }
 
 function canvasImagePreviewUrl(fileUrl: string, projectRelativePath: string, revision: string, width: number): string {
-  const sourceUrl = new URL(fileUrl, 'http://debrute.local');
-  const projectMatch = sourceUrl.pathname.match(/^\/api\/projects\/([^/]+)\//);
-  if (!projectMatch?.[1]) {
-    throw new Error('Canvas preview file URL must include a project id.');
-  }
+  const projectId = canvasRawFileProjectId(fileUrl);
   const params = new URLSearchParams({
     path: projectRelativePath,
     v: revision,
     w: String(width)
   });
-  return `/api/projects/${projectMatch[1]}/canvas-image-preview?${params.toString()}`;
+  return `/api/projects/${projectId}/canvas-image-preview?${params.toString()}`;
 }
 
 function isPreviewableImageNode(node: ProjectedCanvasNode): boolean {

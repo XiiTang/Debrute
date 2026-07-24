@@ -26,19 +26,6 @@ pub enum RuntimeStatus {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
-#[serde(untagged)]
-pub enum HandshakeRole {
-    Supported(ClientRole),
-    Unsupported(String),
-}
-
-impl From<ClientRole> for HandshakeRole {
-    fn from(role: ClientRole) -> Self {
-        Self::Supported(role)
-    }
-}
-
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
 #[serde(tag = "type", rename_all = "snake_case", deny_unknown_fields)]
 #[ts(export, export_to = "runtime-control/")]
 pub enum ClientMessage {
@@ -46,8 +33,7 @@ pub enum ClientMessage {
         protocol: String,
         protocol_version: u32,
         product_version: String,
-        #[ts(as = "ClientRole")]
-        role: HandshakeRole,
+        role: ClientRole,
     },
     Request {
         request_id: String,
@@ -62,7 +48,7 @@ impl ClientMessage {
             protocol: CONTROL_PROTOCOL.to_owned(),
             protocol_version: CONTROL_PROTOCOL_VERSION,
             product_version: PRODUCT_VERSION.to_owned(),
-            role: role.into(),
+            role,
         }
     }
 
@@ -150,7 +136,6 @@ pub enum HandshakeRejection {
     IncompatibleProtocol,
     IncompatibleProtocolVersion,
     IncompatibleProductVersion,
-    UnsupportedRole,
     RuntimeStopping,
 }
 
@@ -183,6 +168,7 @@ pub enum ControlResponse {
     DesktopLaunchTicket {
         ticket: String,
         url: String,
+        theme_preference: String,
     },
     Rejected {
         code: ControlErrorCode,
@@ -302,10 +288,7 @@ pub fn validate_handshake(message: &ClientMessage) -> Result<ClientRole, Handsha
     if product_version != PRODUCT_VERSION {
         return Err(HandshakeRejection::IncompatibleProductVersion);
     }
-    match role {
-        HandshakeRole::Supported(role) => Ok(*role),
-        HandshakeRole::Unsupported(_) => Err(HandshakeRejection::UnsupportedRole),
-    }
+    Ok(*role)
 }
 
 /// Enforces requests available to each public native role. Desktop-host-only

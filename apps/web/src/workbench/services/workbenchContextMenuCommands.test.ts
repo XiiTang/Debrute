@@ -515,7 +515,7 @@ describe('workbench context menu commands', () => {
     await Promise.resolve();
 
     expect(resetCanvasNodeLayouts).toHaveBeenCalledWith('canvas-1', {
-      pathRules: { paths: ['flow/cover.png'] }
+      pathRules: { paths: ['flow/cover.png'], globs: [] }
     });
     expect(setSelection).toHaveBeenCalledWith({ kind: 'node', projectRelativePath: 'flow/cover.png' });
     expect(setCamera).toHaveBeenCalledWith({ x: 250, y: 175, z: 1 });
@@ -567,7 +567,7 @@ describe('workbench context menu commands', () => {
     await Promise.resolve();
 
     expect(resetCanvasNodeLayouts).toHaveBeenCalledWith('canvas-1', {
-      pathRules: { paths: ['flow/'] }
+      pathRules: { paths: ['flow/'], globs: [] }
     });
     expect(setCamera).toHaveBeenCalledWith({ x: 240, y: 160, z: 1 });
   });
@@ -790,7 +790,6 @@ function snapshotFixture(overrides: Partial<WorkbenchProjectSessionSnapshot> = {
       diagnosticCounts: {
         errors: 0,
         warnings: 0,
-        infos: 0
       },
       checkedAt: '2026-06-05T00:00:00.000Z'
     },

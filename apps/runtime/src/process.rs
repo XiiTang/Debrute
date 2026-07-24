@@ -309,10 +309,7 @@ impl BoundedProcessSupervisor {
         cancellation: &ProcessCancellation,
         request_timeout: Duration,
     ) -> Result<ProcessPermit<'a>, ProcessErrorKind> {
-        let mut state = self
-            .state
-            .lock()
-            .map_err(|_| ProcessErrorKind::SpawnError)?;
+        let mut state = self.state.lock().expect("process supervisor lock poisoned");
         if state.active >= self.capacity {
             if state.waiters >= MAX_PROCESS_ADMISSION_WAITERS {
                 return Err(ProcessErrorKind::Backpressure);
@@ -331,7 +328,7 @@ impl BoundedProcessSupervisor {
                 let (next, _) = self
                     .available
                     .wait_timeout(state, WAIT_POLL)
-                    .map_err(|_| ProcessErrorKind::SpawnError)?;
+                    .expect("process supervisor wait lock poisoned");
                 state = next;
             }
             state.waiters = state.waiters.saturating_sub(1);
@@ -354,7 +351,7 @@ impl Drop for ProcessPermit<'_> {
             .supervisor
             .state
             .lock()
-            .unwrap_or_else(std::sync::PoisonError::into_inner);
+            .expect("process supervisor lock poisoned");
         state.active = state.active.saturating_sub(1);
         self.supervisor.available.notify_one();
     }
@@ -460,28 +457,29 @@ fn spawn_output_reader(
                     Ok(debrute_native_process::PipeReadiness::Closed) => break,
                     Ok(debrute_native_process::PipeReadiness::Ready) => {}
                     Err(read_error) => {
-                        if let Ok(mut error) = reader_error.lock() {
-                            *error = Some(read_error.to_string());
-                        }
+                        *reader_error
+                            .lock()
+                            .expect("process output error lock poisoned") =
+                            Some(read_error.to_string());
                         break;
                     }
                 }
                 match reader.read(&mut buffer) {
                     Ok(0) => break,
                     Ok(read) => {
-                        if let Ok(mut tail) = reader_tail.lock() {
-                            tail.push(&buffer[..read]);
-                        } else {
-                            break;
-                        }
+                        reader_tail
+                            .lock()
+                            .expect("process output tail lock poisoned")
+                            .push(&buffer[..read]);
                     }
                     Err(read_error) if read_error.kind() == std::io::ErrorKind::WouldBlock => {
                         thread::sleep(WAIT_POLL);
                     }
                     Err(read_error) => {
-                        if let Ok(mut error) = reader_error.lock() {
-                            *error = Some(read_error.to_string());
-                        }
+                        *reader_error
+                            .lock()
+                            .expect("process output error lock poisoned") =
+                            Some(read_error.to_string());
                         break;
                     }
                 }
@@ -542,18 +540,19 @@ impl OutputCapture {
         }
         let drain_timed_out = !self.done.load(Ordering::Acquire);
         self.stop.store(true, Ordering::Release);
-        if let Some(reader) = self.reader.take()
-            && reader.join().is_err()
-            && let Ok(mut error) = self.error.lock()
-        {
-            *error = Some("worker output reader panicked".to_owned());
+        if let Some(reader) = self.reader.take() {
+            reader.join().expect("process output reader panicked");
         }
         let (tail, truncated) = self
             .tail
             .lock()
-            .map(|tail| tail.snapshot())
-            .unwrap_or_default();
-        let mut error = self.error.lock().ok().and_then(|error| error.clone());
+            .expect("process output tail lock poisoned")
+            .snapshot();
+        let mut error = self
+            .error
+            .lock()
+            .expect("process output error lock poisoned")
+            .clone();
         if drain_timed_out {
             let message = "worker output did not drain before the bounded deadline";
             error = Some(

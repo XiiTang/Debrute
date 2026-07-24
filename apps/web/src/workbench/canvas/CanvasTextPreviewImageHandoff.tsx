@@ -75,42 +75,9 @@ function CanvasTextPreviewImageLayer({
     cancelled: boolean;
     settled: boolean;
   } | undefined>(undefined);
+  const imageRef = useRef<HTMLImageElement | null>(null);
   const onVisibleCommittedRef = useRef(onVisibleCommitted);
   onVisibleCommittedRef.current = onVisibleCommitted;
-
-  useLayoutEffect(() => {
-    if (layer !== 'pending') {
-      pendingLifecycleRef.current = undefined;
-      return undefined;
-    }
-    const lifecycle = { cancelled: false, settled: false };
-    pendingLifecycleRef.current = lifecycle;
-    return () => {
-      lifecycle.cancelled = true;
-      if (pendingLifecycleRef.current === lifecycle) {
-        pendingLifecycleRef.current = undefined;
-      }
-    };
-  }, [layer, source.sourceKey]);
-
-  useLayoutEffect(() => {
-    if (layer !== 'visible') {
-      return undefined;
-    }
-    let secondFrame: number | undefined;
-    const firstFrame = window.requestAnimationFrame(() => {
-      secondFrame = window.requestAnimationFrame(() => {
-        secondFrame = undefined;
-        onVisibleCommittedRef.current(source);
-      });
-    });
-    return () => {
-      window.cancelAnimationFrame(firstFrame);
-      if (secondFrame !== undefined) {
-        window.cancelAnimationFrame(secondFrame);
-      }
-    };
-  }, [layer, source.sourceKey]);
 
   const finishPendingLoad = (image: HTMLImageElement) => {
     const lifecycle = pendingLifecycleRef.current;
@@ -139,8 +106,47 @@ function CanvasTextPreviewImageLayer({
     });
   };
 
+  useLayoutEffect(() => {
+    if (layer !== 'pending') {
+      pendingLifecycleRef.current = undefined;
+      return undefined;
+    }
+    const lifecycle = { cancelled: false, settled: false };
+    pendingLifecycleRef.current = lifecycle;
+    const image = imageRef.current;
+    if (image?.complete && image.naturalWidth > 0) {
+      finishPendingLoad(image);
+    }
+    return () => {
+      lifecycle.cancelled = true;
+      if (pendingLifecycleRef.current === lifecycle) {
+        pendingLifecycleRef.current = undefined;
+      }
+    };
+  }, [layer, source.sourceKey]);
+
+  useLayoutEffect(() => {
+    if (layer !== 'visible') {
+      return undefined;
+    }
+    let secondFrame: number | undefined;
+    const firstFrame = window.requestAnimationFrame(() => {
+      secondFrame = window.requestAnimationFrame(() => {
+        secondFrame = undefined;
+        onVisibleCommittedRef.current(source);
+      });
+    });
+    return () => {
+      window.cancelAnimationFrame(firstFrame);
+      if (secondFrame !== undefined) {
+        window.cancelAnimationFrame(secondFrame);
+      }
+    };
+  }, [layer, source.sourceKey]);
+
   return (
     <img
+      ref={imageRef}
       className={`canvas-text-preview-image canvas-text-preview-image--${layer}`}
       src={source.src}
       alt=""

@@ -18,7 +18,7 @@ export interface ProjectTreeExternalDropPlan {
 }
 
 export function hasProjectTreeExternalDrag(dataTransfer: DataTransfer): boolean {
-  return (dataTransfer.files?.length ?? 0) > 0 || Array.from(dataTransfer.types ?? []).includes('Files');
+  return dataTransfer.files.length > 0 || Array.from(dataTransfer.types).includes('Files');
 }
 
 export async function createProjectTreeExternalDropPlan(input: {
@@ -26,7 +26,7 @@ export async function createProjectTreeExternalDropPlan(input: {
   shell: DebruteShellApi | undefined;
   targetDirectoryProjectRelativePath: string;
 }): Promise<ProjectTreeExternalDropPlan> {
-  const files = Array.from(input.dataTransfer.files ?? []);
+  const files = Array.from(input.dataTransfer.files);
   const electronLocalPaths = electronLocalDropPaths(files, input.shell);
   if (electronLocalPaths) {
     return {
@@ -60,10 +60,10 @@ export async function createProjectTreeExternalDropPlan(input: {
 }
 
 function electronLocalDropPaths(files: File[], shell: DebruteShellApi | undefined): string[] | undefined {
-  if (!shell?.getDroppedFilePath || files.length === 0) {
+  if (!shell || files.length === 0) {
     return undefined;
   }
-  const paths = files.map((file) => shell.getDroppedFilePath?.(file));
+  const paths = files.map((file) => shell.getDroppedFilePath(file));
   const resolvedPaths = paths.filter((path): path is string => typeof path === 'string' && path.length > 0);
   if (resolvedPaths.length === 0) {
     return undefined;
@@ -94,7 +94,7 @@ async function browserEntryUploadEntries(
   dataTransfer: DataTransfer,
   targetDirectoryProjectRelativePath: string
 ): Promise<ProjectTreeExternalUploadEntry[]> {
-  const items = Array.from(dataTransfer.items ?? []).filter((item) => item.kind === 'file');
+  const items = Array.from(dataTransfer.items).filter((item) => item.kind === 'file');
   const entries: BrowserFileSystemEntry[] = [];
   for (const item of items) {
     const entry = browserEntryFromDataTransferItem(item);

@@ -1,8 +1,8 @@
 use debrute_runtime::control::{
     ActivationIntent, ActivationOutcome, CONTROL_PROTOCOL, CONTROL_PROTOCOL_VERSION, ClientMessage,
     ClientRole, ControlEvent, ControlRequest, ControlResponse, FrameDecodeError, FrameEncodeError,
-    HandshakeRejection, HandshakeRole, MAX_CONTROL_FRAME_BYTES, PRODUCT_VERSION, ProjectFrontend,
-    RuntimeStatus, ServerMessage, authorize_request, encode_frame, encode_server_frame, read_frame,
+    HandshakeRejection, MAX_CONTROL_FRAME_BYTES, PRODUCT_VERSION, ProjectFrontend, RuntimeStatus,
+    ServerMessage, authorize_request, encode_frame, encode_server_frame, read_frame,
     read_server_frame, validate_handshake,
 };
 use std::io::Cursor;
@@ -13,7 +13,7 @@ fn handshake_encodes_as_one_big_endian_length_prefixed_json_frame() {
         protocol: CONTROL_PROTOCOL.to_owned(),
         protocol_version: CONTROL_PROTOCOL_VERSION,
         product_version: "0.0.3".to_owned(),
-        role: ClientRole::Launcher.into(),
+        role: ClientRole::Launcher,
     };
 
     let frame = encode_frame(&message).expect("handshake frame should encode");
@@ -40,7 +40,7 @@ fn handshake_decodes_from_one_complete_frame() {
             protocol: "debrute-control".to_owned(),
             protocol_version: 2,
             product_version: "0.0.3".to_owned(),
-            role: ClientRole::Cli.into(),
+            role: ClientRole::Cli,
         }
     );
 }
@@ -118,22 +118,12 @@ fn unknown_handshake_fields_are_rejected() {
 }
 
 #[test]
-fn unknown_client_roles_remain_available_for_typed_handshake_rejection() {
+fn unknown_client_roles_are_rejected_by_the_closed_decoder() {
     let payload = br#"{"type":"handshake","protocol":"debrute-control","protocol_version":2,"product_version":"0.0.3","role":"web"}"#;
-    let message = read_frame(&mut Cursor::new(frame(payload)))
-        .expect("unknown role should decode only far enough for a typed rejection");
+    let error = read_frame(&mut Cursor::new(frame(payload)))
+        .expect_err("unknown role must not decode as a current handshake");
 
-    assert_eq!(
-        validate_handshake(&message),
-        Err(HandshakeRejection::UnsupportedRole)
-    );
-    assert!(matches!(
-        message,
-        ClientMessage::Handshake {
-            role: HandshakeRole::Unsupported(ref role),
-            ..
-        } if role == "web"
-    ));
+    assert!(matches!(error, FrameDecodeError::InvalidMessage(_)));
 }
 
 #[test]
@@ -154,17 +144,6 @@ fn handshake_requires_exact_protocol_and_product_versions() {
     assert_eq!(
         validate_handshake(&handshake("debrute-control", 2, "0.0.4")),
         Err(HandshakeRejection::IncompatibleProductVersion)
-    );
-    assert_eq!(
-        validate_handshake(
-            &(ClientMessage::Handshake {
-                protocol: "debrute-control".to_owned(),
-                protocol_version: 1,
-                product_version: "0.0.3".to_owned(),
-                role: HandshakeRole::Unsupported("future_role".to_owned()),
-            })
-        ),
-        Err(HandshakeRejection::IncompatibleProtocolVersion)
     );
 }
 
@@ -310,6 +289,6 @@ fn handshake(protocol: &str, protocol_version: u32, product_version: &str) -> Cl
         protocol: protocol.to_owned(),
         protocol_version,
         product_version: product_version.to_owned(),
-        role: ClientRole::Launcher.into(),
+        role: ClientRole::Launcher,
     }
 }

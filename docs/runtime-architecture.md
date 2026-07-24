@@ -6,6 +6,12 @@ integrations, product updates, Workbench connections, Photoshop links, and
 terminal processes. Web Workbench, Desktop, plugins, and the `debrute` CLI are
 clients; none owns a parallel backend or a copy of authoritative state.
 
+The downloaded Product has already selected macOS or Windows. Each native
+release job builds matching Workbench assets with one closed `darwin` or
+`win32` constant, so Runtime bootstrap does not transport a second platform
+value for renderer behavior. Workbench never infers the Product target from
+browser platform or User-Agent values.
+
 ## Discovery And Lifecycle
 
 Runtime owns the native single-instance endpoint. macOS uses a current-user
@@ -18,6 +24,15 @@ Desktop host; `desktop_host` is not a public wire role.
 Starting Desktop, the CLI, or a source-development command first connects to
 Control; only an absent owner may start Runtime. The same Runtime process owns
 the macOS menu-bar item or Windows notification-area icon; Desktop owns no tray.
+The complete acquire-or-connect, optional launch, handshake, and `Starting`
+polling sequence has one absolute fifteen-second deadline. Reaching Control or
+completing the handshake does not restart that budget. Expiry closes the
+launcher connection, reports `runtime_ready_timeout`, and sends no activation;
+it does not terminate or replace the Runtime owner, start a competing Runtime,
+or use another frontend. A Runtime which still reports `Starting` retains its
+independent lifecycle. `debrute runtime stop` is the explicit termination path:
+it connects only to an existing owner and requests Product Quit without a
+`Ready` wait.
 Runtime has no idle exit and no dependency on a frontend remaining open.
 Closing the final Desktop window exits Electron but leaves Runtime and its tray
 running. Runtime exits only after Product Quit, product replacement,
@@ -27,14 +42,61 @@ failure; it is not isolated in a helper process and does not trigger an
 automatic restart. A later explicit Desktop, CLI, or development launch starts
 a new Runtime normally.
 
+Expected operational failures are typed `Result` values and fail only their
+owning request or work item. An unexpected panic is a code defect and
+terminates Runtime immediately, before the process can continue with possibly
+inconsistent in-memory authority. Runtime does not catch a panic to fabricate a
+normal work failure, recover the inner value of a poisoned authoritative lock,
+advertise a degraded status, or run a panic-specific graceful-shutdown path.
+The ordinary Product Quit path remains only for controlled shutdown.
+
+The monotonic Global event revision and integration-projection generation remain
+ordering counters, not recoverable capacity budgets. Exhausting either counter
+means Runtime can no longer publish one authoritative ordered state, so it is a
+process-fatal invariant failure. Runtime does not preserve a successful command
+result while dropping its settled projection, return a degraded success, or
+continue with Workbenches observing different Global state.
+
+Control owns one internal lifecycle state: `Starting`, `Ready`, update
+preparation with its transaction id, `Exiting`, or replacement with its
+transaction id. The four public Runtime statuses are projections of that state;
+update preparation remains publicly `Ready`. The supervision loop observes the
+same state to begin controlled shutdown. A terminal state cannot be overwritten
+by later startup completion. Operating-system termination ends the process
+directly.
+
 The tray exposes Runtime status, explicit Desktop and browser entry points,
 Start at Login, and Product Quit. It does not expose update controls, recent
 Projects, diagnostics, restart, or copied launch URLs. macOS activation opens
 the menu; Windows primary activation opens Desktop and secondary activation
 opens the menu. A tray creation failure exits Runtime before services start or
 `Ready` is published, and the launcher reports the startup failure. There is
-no trayless fallback, retry loop, or degraded Runtime status. Linux tray
-behavior is outside the supported product design.
+no trayless fallback, retry loop, or degraded Runtime status.
+
+The Start at Login check item reflects the exact operating-system login
+registration last confirmed by Runtime. A user change performs one registration
+write using the selected check state. A successful write confirms that state;
+a failed write restores the previously confirmed check state and places the
+exact operating-system error in that menu item's label. Runtime does not leave
+an optimistic state, silently downgrade the failure to a log message, or retry
+through a different registration path.
+
+The login registration always names the explicit stable Runtime entrypoint
+provided by the Product or source-development launcher. That non-empty absolute
+path is required before Runtime creates its tray or publishes `Ready`. Runtime
+does not substitute its current version-selected or build-output executable;
+missing or invalid stable-entrypoint input is a startup failure rather than a
+degraded tray or fallback registration.
+
+Product replacement has one target-Runtime launch contract shared by the
+running Runtime's commit path and installed-Desktop recovery. It binds the
+manifest-verified target executable, selected Product version and directories,
+stable Runtime entrypoint, and update-completion mode before native launch.
+macOS launches the exact target application bundle through LaunchServices;
+Windows launches the exact verified target executable. Missing launch input,
+native launch failure, or target argument rejection fails the update handoff;
+neither caller reconstructs a partial command or selects another entrypoint.
+Ordinary first launch remains a separate stable-entrypoint acquisition path.
 
 On macOS, Runtime is packaged and launched as an `LSUIElement` application so
 the status item has a stable native application identity without a Dock icon.
@@ -49,6 +111,12 @@ LaunchServices; replacement may start the target bundle while the old process
 still owns Control, but only the target Rust process waits to claim that same
 single-instance endpoint.
 
+The canonical Project logo generates two Runtime-owned tray images. macOS uses
+one transparent monochrome template containing only the Debrute foreground;
+Windows uses one transparent colored foreground image. Runtime does not reuse a
+Desktop application icon, consume Desktop build resources, or retain separate
+status-badge images. Runtime status remains text in the tray menu.
+
 Product Quit is immediate product-level shutdown. Runtime rejects new work,
 notifies Desktop to close, stops accepting Workbench HTTP connections, ends
 every live Workbench stream and credential, terminates owned operations and
@@ -58,10 +126,30 @@ confirmation protocol. Unsaved text and feedback are already protected by
 Runtime Working Copies. In-process native components receive no separate drain
 or shutdown phase; process exit owns their final termination.
 
+An early Desktop Command-Q is still Product Quit. Desktop finishes its one
+in-progress Control acquisition and submits the request once before opening a
+window; it does not reinterpret the action as frontend exit, cancel or restart
+Runtime startup, or establish a second connection.
+
 Source development runs the same Rust Runtime plus Vite. Vite proxies relative
 Workbench HTTP and WebSocket traffic to the exact Runtime origin; it does not
 host privileged services or persist a discovery credential. Packaged Runtime
 serves the version-selected Web assets itself.
+
+Runtime finishes its in-process service composition before the Workbench HTTP
+listener starts. The immutable router state owns one required CLI adapter and,
+for a packaged Product, one Product adapter alongside the core Runtime
+authorities. Core services do not retain those adapters, and each adapter
+receives only the current authorities it calls. There are no late CLI/Product
+installers, temporarily empty service slots, adapter-to-container ownership
+cycles, or shutdown-time cycle breaking.
+
+Product capability is fixed by the process launch mode. A packaged Runtime
+starts with Product routes and Product state; a source-development Runtime
+starts without them and does not register Product HTTP routes. That absence is
+not a degraded or temporarily unavailable Product service. The required CLI is
+present in both modes, while its Product Update command reports the explicit
+source-development capability error rather than a service-availability error.
 
 Before publishing `Ready`, Runtime initializes and validates every required
 in-process native component, including the exact packaged Raster Preview
@@ -75,29 +163,125 @@ inside that process.
 
 Native Control is a narrow lifecycle and activation channel. Its request set is
 limited to activation, inspection, CLI authorization, source-development
-origin registration, one-use Desktop window tickets, Desktop-window close, and
-Product Quit. Recent Projects and Desktop open/focus/exit instructions are its
-only events. Project, Canvas, settings, generation, file, and terminal work
-does not travel over Control.
+origin registration, one-use Desktop window tickets, non-final Desktop-window
+close, and Product Quit. Closing the Desktop host connection unregisters that
+host and drains its complete remaining window topology; the final native window
+does not need a separate close request. Recent Projects and Desktop
+open/focus/exit instructions are Control's only events. Project, Canvas,
+settings, generation, file, and terminal work does not travel over Control.
+Publishing a new recent-Projects projection updates Runtime's ordered state and
+fans the event out to current Desktop hosts without returning a delivery result
+to the Global publisher. Failure to enqueue closes that Control connection under
+the existing outbound transport contract; it does not roll back the projection,
+fail Runtime composition, or retry through another connection.
+Runtime initializes this projection from Global state before becoming Ready; a
+launcher cannot become the Desktop host before that initialization. Control does
+not synthesize an empty revision-zero projection when the required snapshot is
+absent.
 
-Runtime exposes one dynamic loopback Workbench origin. A browser launch creates
-an HttpOnly, host-only, SameSite-Strict session. Desktop instead receives a
-one-use in-memory launch ticket over Control and passes it from Main to the
-renderer through one narrow preload call; the BrowserWindow loads a stable URL
-with no credential in its URL. A ticket has no disk persistence or timer-based
-lifetime and is removed atomically when consumed.
+Runtime exposes one dynamic loopback Workbench origin. One ordinary browser
+storage partition creates and reuses an HttpOnly, host-only, SameSite-Strict
+session across its concurrent tabs. Desktop instead receives a one-use
+in-memory launch ticket over Control together with the current Runtime-owned
+Workbench theme preference. The preference is a launch-time presentation
+snapshot, not a general settings API or Desktop-owned state. Main resolves it
+against Electron's native system theme before creating the window and passes
+only the ticket to the renderer through one narrow preload call; each
+BrowserWindow has an isolated storage partition and loads a stable URL with no
+credential in its URL. Missing or invalid launch presentation fails the window
+launch rather than falling back to another theme. A ticket has no disk
+persistence or timer-based lifetime and is removed atomically when consumed.
 
 Each loaded Workbench opens one POST SSE connection at
 `/api/workbench/connection`. Its first frames establish an in-memory connection
 credential, the complete Global snapshot, and either a Project binding or an
-explicit open failure. Commands send the credential in a same-origin header.
-There are no split Global/Project event streams, reconnect window, heartbeat,
-unload release, or automatic request replay. Unexpected connection end is a
-terminal page state; refreshing creates a new connection.
+explicit open failure. A browser session may contain multiple document
+connections; commands send one connection's credential in a same-origin header
+and Runtime validates the cookie and credential together. There are no split
+Global/Project event streams, reconnect window, heartbeat, unload release, or
+automatic request replay. Unexpected connection end is a terminal page state;
+refreshing creates a new connection.
 
-Passive Project media GETs remain authorized by the live browser session.
+That initial snapshot and the subsequent ordered Global change events are the
+Workbench's sole projections of Global settings, Integration settings, and
+packaged Product state. A connected Workbench does not issue a second read to
+initialize the same state. Mutating and action commands return only their
+closed command outcome and any action-specific diagnostic; they do not return
+another complete state for the initiating Workbench to apply. Command progress
+is local interaction state and ends with the command response, while displayed
+authoritative state changes only when its Global event is applied. Runtime does
+not add a command-response revision wait or use response state as a fallback if
+the event connection fails; unexpected connection end remains terminal for the
+page.
+
+Passive Project media GETs remain authorized when the live browser session has
+a live connection bound to the requested Project.
 CLI authorization and Photoshop pairing use separate, route-limited sessions
 and cannot be substituted for a Workbench connection.
+
+Project file plans remain transport-neutral: they express an optional byte
+range, not a numeric HTTP status. The Workbench HTTP adapter maps a complete
+file to typed `200 OK` and a range to typed `206 Partial Content`. HTTP service
+errors likewise own a valid typed status when they are created. Runtime does not
+round-trip either case through an arbitrary integer or replace an invalid status
+with a successful or generic fallback response.
+
+## Model Operation Lifetime
+
+The current Operation subsystem is deliberately narrow. It covers only CLI-
+submitted Model Requests for the five Model Kinds: image, video, TTS, music,
+and sound effect. Single and Batch are two execution shapes of one Model
+Operation; a Batch Item is a settled result inside its parent Operation rather
+than a child Operation. Integration install/update/uninstall, Product Update,
+terminal processes, Canvas preview work, and professional-tool transfers keep
+their own domain lifetimes and do not enter the Model Operation registry.
+
+Before acceptance, Runtime validates the live CLI credential, canonical
+Project identity, complete strict JSONL input, Model availability, execution
+options, and output paths. Rejection creates no
+Operation and starts no paid model work. Acceptance issues one opaque UUID and
+linearizes the Operation through `queued`, `running`, optional `cancelling`,
+and exactly one of `succeeded`, `failed`, or `cancelled`. Independent
+Operations start independently; only a Batch's own concurrency limits how many
+of its Items run at once. Runtime never automatically retries a failed Model
+Request.
+
+Ordinary execution failures remain typed `Result` values and settle the
+Operation normally. An unexpected executor panic instead terminates Runtime; it
+is not converted into a terminal `failed` snapshot. The accepted Operation is
+current-process coordination state, so Runtime loss ends its observation and a
+later Runtime does not reconstruct or replay it.
+
+Submission uses authenticated `/api/cli/model-operations`. Listing,
+inspection, and cancellation use the ordinary CLI request route, while one
+`operation wait` command observes one Operation through the command-scoped
+streaming route. A foreground request first receives and prints the accepted
+snapshot, then uses that same wait contract unless `--no-wait` was requested.
+Ending the waiting HTTP response or closing its credential-issuing Control
+connection ends only that observer; it does not cancel accepted work. A later
+CLI command obtains fresh credentials and can inspect or wait for the same
+Operation while the same Runtime instance remains alive. Browser, Desktop,
+Workbench, and Photoshop sessions receive no Model Operation control surface.
+
+The registry is current-process coordination state, not Project history. It
+keeps all active Operations and at most the 100 newest terminal records,
+including retained Batch Item Outcomes for wait replay. It is not persisted,
+reconstructed, resumed, or replayed after Runtime replacement. Successful
+outputs remain durable as ordinary Project files and Generated Asset
+provenance. Agent Records on CLI stdout are the single observation protocol;
+callers may redirect them if they need a file copy. Product Quit terminates
+active Model Operations with the rest of Runtime-owned work instead of running
+a separate drain or recovery protocol.
+
+Operation snapshots, execution variants, states, Artifact Pointers, Batch Item
+Outcomes, and list results are Runtime-produced response values. Their Rust
+types serialize outward but are not deserialization or persistence contracts.
+
+Exact CLI syntax and Agent Records are documented in [`cli.md`](./cli.md).
+Model Request, timeout, output, and commit behavior is documented in
+[`model-generation.md`](./model-generation.md), while the accepted lifecycle
+decisions are indexed under the
+[Model Operation subsystem](./adr/README.md#model-operation-subsystem).
 
 ## Global And Project State
 
@@ -106,17 +290,44 @@ preferences, recent Project roots, model overrides and API keys, and Photoshop
 bridge settings. Recent Projects persist only the mapping from stable Project
 id to canonical root. Non-secret settings and secrets use separate atomic
 files; public projections expose only whether a key is set and a non-secret
-preview. Global events carry an ordered `globalRevision` independent of Project
-state.
+preview. The typed default frontend is exactly `desktop`, `browser`, or
+`runtime-only`; invalid values do not enter Runtime state. Global events carry
+an ordered `globalRevision` independent of Project state.
+
+An absent global settings or secrets file uses the current first-launch
+defaults. An existing file must match the one closed current shape: unknown
+fields, unknown Model IDs, empty or duplicate entries, and non-canonical values
+fail the read. Runtime does not trim, filter, deduplicate, truncate, or rewrite
+persisted state while reading it. A settings patch may contain a declared
+subset, but every present object has a closed field set and the request must
+express at least one mutation. Repeating a valid current value succeeds without
+publishing a change; an empty or unknown-only patch fails without writing.
 
 The public stable Project identity is `.debrute/project.json.project.id`.
 Runtime rejects invalid or duplicate stable ids instead of deriving aliases
 from roots or generating compatibility identities. A loaded Project session
 owns one canonical root, snapshot, monotonic `projectRevision`, serialized
 mutation authority, watcher, terminals, and typed Project Uses. The use kinds
-are Workbench, request, operation, running terminal, transfer, and Photoshop
-link. Releasing the final use closes the session immediately; there is no idle
-retention, grace period, reservation worker, or fixed session cap.
+are Workbench, request, running terminal, transfer, and Photoshop link.
+
+Project metadata, Canvas JSON, the Canvas registry, Feedback, Generated Asset
+metadata, and Canvas Map source each deserialize as their one closed current
+document shape. Unknown nested fields are invalid and remain unchanged on disk.
+Invalid Project metadata prevents opening; invalid pushed Canvas documents and
+the registry use their existing snapshot diagnostic states so other valid
+Project content remains observable. Runtime does not strip unknown fields or
+rewrite those files while reading them. A later explicit push or repair is a
+new current operation, not an automatic migration.
+
+Releasing the final use atomically removes the live session and closes admission
+to that canonical root before cleanup begins. Project Use release itself is an
+ownership transition rather than a fallible cleanup response. Successful
+cleanup removes the root transition; failure is retained there, blocks reopening
+for the rest of the Runtime instance, and is returned by the next open or final
+Registry shutdown. It is not converted into success, retried, or wrapped in
+Workbench, Terminal, Transfer, Photoshop, or request-specific cleanup results.
+There is no idle retention, grace period, reservation worker, or fixed session
+cap.
 
 Opening from an unbound Workbench and replacing from a bound Workbench are the
 only binding operations. Target validation finishes before an atomic replace;
@@ -152,6 +363,12 @@ input is never replayed. Rebinding, preemption, or Workbench connection end
 closes that socket while the Runtime-owned PTY remains alive. Project or
 Runtime shutdown terminates owned PTYs.
 
+Every Workbench Terminal creation names its Project-relative working directory.
+Runtime starts the PTY at one internal initial size, then the mounted terminal
+sends its measured dimensions through the resize command. Creation does not
+accept dimension overrides, and every Web event subscription supplies the
+error handler that owns transport failures.
+
 ## Product Version Ownership
 
 Desktop, Runtime, CLI, Web assets, official Skills, and model documentation
@@ -172,6 +389,10 @@ Workbench connections, terminal sessions, or Project Uses. See
 - Global configuration: `apps/runtime/src/global/`.
 - Project sessions, typed uses, and revisions:
   `apps/runtime/src/project/registry.rs` and `service.rs`.
+- Model Operation registry, lifecycle, observation, and result shapes:
+  `apps/runtime/src/model_operation.rs` and `apps/runtime/src/cli/`.
+- Model execution, redaction, downloads, and output commit:
+  `apps/runtime/src/generation/`.
 - Desktop window host: `apps/desktop/src/electron/`.
 - Terminal ownership: `apps/runtime/src/terminal/`.
 - Product bootstrap and update: `apps/runtime/src/product/`.

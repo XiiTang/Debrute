@@ -11,7 +11,7 @@ use std::{
         mpsc,
     },
     thread,
-    time::Duration,
+    time::{Duration, Instant},
 };
 
 #[cfg(target_os = "macos")]
@@ -25,12 +25,14 @@ use debrute_runtime::{
         ActivationIntent, ActivationOutcome, CONTROL_OUTBOUND_QUEUE_CAPACITY, ClientRole,
         ControlErrorCode, ControlRequest, DesktopOpenError, DesktopOpenResult, NativeControlClient,
         ProjectFrontend, RuntimeActionError, RuntimeActivationService, RuntimeControlState,
-        RuntimeStatus, WorkbenchRoute,
+        WorkbenchRoute,
         endpoint::{
             ControlEndpointAdapter, ControlEndpointOwnerAdapter, EndpointClaim, EndpointError,
         },
         serve_control_connection,
     },
+    global::DefaultFrontend,
+    login::require_stable_runtime_entrypoint,
     photoshop::{
         PHOTOSHOP_BRIDGE_PROTOCOL_VERSION, PhotoshopDiscoveryPayload, PhotoshopDiscoveryServer,
     },
@@ -41,7 +43,10 @@ use debrute_runtime::{
         read_desktop_host_registration,
     },
     project::initialize_raster_preview_engine,
-    workbench::{RuntimeProductHttpService, WorkbenchHttpServer, WorkbenchRuntimeServices},
+    workbench::{
+        RuntimeCliHttpService, RuntimeProductHttpService, WorkbenchHttpServer,
+        WorkbenchRuntimeServices,
+    },
 };
 #[cfg(any(target_os = "macos", target_os = "windows"))]
 use uuid::Uuid;
@@ -54,11 +59,11 @@ const STARTUP_WAIT: Duration = Duration::from_secs(5);
 #[cfg(any(target_os = "macos", target_os = "windows"))]
 const HANDSHAKE_TIMEOUT: Duration = Duration::from_secs(5);
 #[cfg(any(target_os = "macos", target_os = "windows"))]
+const RUNTIME_READY_TIMEOUT: Duration = Duration::from_secs(15);
+#[cfg(any(target_os = "macos", target_os = "windows"))]
 const SUPERVISION_POLL_INTERVAL: Duration = Duration::from_millis(50);
 #[cfg(any(target_os = "macos", target_os = "windows"))]
 const WEB_ASSETS_DIRECTORY_ENV: &str = "DEBRUTE_RUNTIME_WEB_ASSETS_DIR";
-#[cfg(any(target_os = "macos", target_os = "windows"))]
-const STABLE_RUNTIME_ENTRYPOINT_ENV: &str = "DEBRUTE_RUNTIME_STABLE_ENTRYPOINT";
 #[cfg(any(target_os = "macos", target_os = "windows"))]
 const DESKTOP_ENTRYPOINT_ENV: &str = "DEBRUTE_DESKTOP_ENTRYPOINT";
 #[cfg(any(target_os = "macos", target_os = "windows"))]
@@ -74,6 +79,7 @@ type PlatformControlEndpoint = WindowsControlEndpoint;
 type PlatformControlOwner = WindowsControlOwner;
 
 fn main() -> ExitCode {
+    install_runtime_panic_abort_hook();
     #[cfg(target_os = "windows")]
     if let Some(result) = debrute_runtime::terminal::run_windows_terminal_bootstrap() {
         match result {
@@ -92,7 +98,8 @@ fn main() -> ExitCode {
         let arguments = std::env::args_os().skip(2).collect::<Vec<_>>();
         run_complete_product_update(&arguments)
     } else {
-        run()
+        let arguments = std::env::args_os().skip(1).collect::<Vec<_>>();
+        run(&arguments)
     };
     match result {
         Ok(()) => ExitCode::SUCCESS,
@@ -103,24 +110,35 @@ fn main() -> ExitCode {
     }
 }
 
+fn install_runtime_panic_abort_hook() {
+    let report = std::panic::take_hook();
+    std::panic::set_hook(Box::new(move |panic| {
+        report(panic);
+        std::process::abort();
+    }));
+}
+
 #[cfg(any(target_os = "macos", target_os = "windows"))]
-fn run() -> Result<(), Box<dyn Error>> {
+fn run(arguments: &[OsString]) -> Result<(), Box<dyn Error>> {
+    let stable_runtime_entrypoint = stable_runtime_entrypoint(arguments)?;
+    let ready_deadline = Instant::now() + RUNTIME_READY_TIMEOUT;
     let endpoint = platform_control_endpoint()?;
     match endpoint.claim_or_connect(STARTUP_WAIT, HANDSHAKE_TIMEOUT)? {
         EndpointClaim::Owner(owner) => {
             let state = Arc::new(RuntimeControlState::new_with_executable_identity(
                 Uuid::new_v4().to_string(),
-                RuntimeStatus::Starting,
                 runtime_executable_identity(),
             ));
-            serve_owned_runtime(owner, &state, &endpoint)
+            serve_owned_runtime(owner, &state, &endpoint, &stable_runtime_entrypoint)
         }
         EndpointClaim::Existing(connection) => {
             let mut client = NativeControlClient::handshake_and_clear_timeouts(
                 connection,
                 ClientRole::Launcher,
+                ready_deadline,
             )?;
-            let _response = client.wait_ready_and_request(
+            let _response = client.wait_ready_and_request_until(
+                ready_deadline,
                 Uuid::new_v4().to_string(),
                 ControlRequest::Activate {
                     intent: ActivationIntent::EnsureRuntime,
@@ -153,6 +171,7 @@ fn run_bootstrap(arguments: &[OsString]) -> Result<(), Box<dyn Error>> {
         user_home.join(".agents/skills"),
         debrute_home,
     );
+    let stable_runtime_entrypoint = bootstrap.stable_runtime_entrypoint();
     let activated = bootstrap.activate(&parsed.seed, parsed.desktop.as_ref())?;
     if let Some(pending) = store.pending()? {
         if pending.phase == CommitPhase::Staged && activated.product_version == pending.from_version
@@ -165,31 +184,35 @@ fn run_bootstrap(arguments: &[OsString]) -> Result<(), Box<dyn Error>> {
                 .desktop
                 .clone()
                 .ok_or("Pending Product recovery requires the installed Desktop identity")?;
-            if pending.phase == CommitPhase::RuntimeReady {
-                spawn_update_runtime(&activated, &pending.target_version)?;
-                return Ok(());
-            }
             let platform = NativeUpdatePlatform::for_desktop_seed(
                 Arc::clone(&store),
                 &parsed.seed,
                 desktop,
+                stable_runtime_entrypoint.clone(),
                 Arc::new(|_, _| {
                     Err(debrute_runtime::product::ProductCommitError::Platform(
                         "Bootstrap process cannot dispatch a Ready continuation".to_owned(),
                     ))
                 }),
             )?;
+            if pending.phase == CommitPhase::RuntimeReady {
+                platform.launch_selected_runtime(&pending.target_version)?;
+                return Ok(());
+            }
             ProductCommitCoordinator::new(store, platform).continue_commit()?;
             return Ok(());
         }
     }
     let mut command = Command::new(&activated.runtime_entrypoint);
+    #[cfg(target_os = "windows")]
+    command
+        .arg("--stable-runtime-entrypoint")
+        .arg(&stable_runtime_entrypoint);
     command
         .stdin(Stdio::null())
         .stdout(Stdio::null())
         .stderr(Stdio::null())
         .env(WEB_ASSETS_DIRECTORY_ENV, &activated.web_assets)
-        .env(STABLE_RUNTIME_ENTRYPOINT_ENV, &activated.runtime_entrypoint)
         .env("DEBRUTE_ACTIVE_PRODUCT_DIR", &activated.directory);
     if let Some(desktop) = parsed.desktop {
         command.env(DESKTOP_ENTRYPOINT_ENV, desktop.executable).env(
@@ -202,37 +225,19 @@ fn run_bootstrap(arguments: &[OsString]) -> Result<(), Box<dyn Error>> {
 }
 
 #[cfg(any(target_os = "macos", target_os = "windows"))]
-fn spawn_update_runtime(
-    activated: &debrute_runtime::product::ActivatedProduct,
-    product_version: &str,
-) -> Result<(), Box<dyn Error>> {
-    Command::new(&activated.runtime_entrypoint)
-        .arg("complete-product-update")
-        .arg("--product-version")
-        .arg(product_version)
-        .stdin(Stdio::null())
-        .stdout(Stdio::null())
-        .stderr(Stdio::null())
-        .env(WEB_ASSETS_DIRECTORY_ENV, &activated.web_assets)
-        .env(STABLE_RUNTIME_ENTRYPOINT_ENV, &activated.runtime_entrypoint)
-        .env("DEBRUTE_ACTIVE_PRODUCT_DIR", &activated.directory)
-        .env("DEBRUTE_COMPLETE_PRODUCT_UPDATE", product_version)
-        .spawn()?;
-    Ok(())
-}
-
-#[cfg(any(target_os = "macos", target_os = "windows"))]
 fn run_complete_product_update(arguments: &[OsString]) -> Result<(), Box<dyn Error>> {
-    let [flag, version] = arguments else {
-        return Err("Product update completion requires --product-version VERSION".into());
+    let [version_flag, version, entrypoint_flag, entrypoint] = arguments else {
+        return Err("Product update completion requires --product-version VERSION --stable-runtime-entrypoint PATH".into());
     };
-    if flag != "--product-version" {
+    if version_flag != "--product-version" {
         return Err("Product update completion requires --product-version".into());
     }
     let version = version
         .to_str()
         .ok_or("Product update version must be UTF-8")?;
     semver::Version::parse(version)?;
+    let stable_runtime_entrypoint =
+        stable_runtime_entrypoint(&[entrypoint_flag.clone(), entrypoint.clone()])?;
     // This is ownership handoff, not an automatic operation retry: the target
     // process waits only for the old Runtime to release the one Control owner.
     let deadline = std::time::Instant::now() + Duration::from_mins(2);
@@ -242,10 +247,9 @@ fn run_complete_product_update(arguments: &[OsString]) -> Result<(), Box<dyn Err
             Ok(EndpointClaim::Owner(owner)) => {
                 let state = Arc::new(RuntimeControlState::new_with_executable_identity(
                     Uuid::new_v4().to_string(),
-                    RuntimeStatus::Starting,
                     runtime_executable_identity(),
                 ));
-                return serve_owned_runtime(owner, &state, &endpoint);
+                return serve_owned_runtime(owner, &state, &endpoint, &stable_runtime_entrypoint);
             }
             Ok(EndpointClaim::Existing(connection)) => drop(connection),
             Err(EndpointError::StartupTimedOut) => {}
@@ -258,11 +262,6 @@ fn run_complete_product_update(arguments: &[OsString]) -> Result<(), Box<dyn Err
     }
 }
 
-#[cfg(not(any(target_os = "macos", target_os = "windows")))]
-fn run_complete_product_update(_arguments: &[OsString]) -> Result<(), Box<dyn Error>> {
-    Err("Debrute Product update completion is not implemented on this platform".into())
-}
-
 #[cfg(any(target_os = "macos", target_os = "windows"))]
 fn runtime_executable_identity() -> Option<String> {
     let metadata = std::fs::metadata(std::env::current_exe().ok()?).ok()?;
@@ -272,11 +271,6 @@ fn runtime_executable_identity() -> Option<String> {
         .duration_since(std::time::UNIX_EPOCH)
         .ok()?;
     Some(format!("{}:{}", metadata.len(), modified.as_nanos()))
-}
-
-#[cfg(not(any(target_os = "macos", target_os = "windows")))]
-fn run_bootstrap(_arguments: &[OsString]) -> Result<(), Box<dyn Error>> {
-    Err("Debrute Product bootstrap is not implemented on this platform".into())
 }
 
 #[cfg(any(target_os = "macos", target_os = "windows"))]
@@ -436,21 +430,46 @@ fn serve_owned_runtime(
     owner: PlatformControlOwner,
     state: &Arc<RuntimeControlState>,
     endpoint: &PlatformControlEndpoint,
+    stable_runtime_entrypoint: &std::path::Path,
 ) -> Result<(), Box<dyn Error>> {
     let stop_accepting = Arc::new(AtomicBool::new(false));
     let service_state = Arc::clone(state);
     let service_stop_accepting = Arc::clone(&stop_accepting);
     let service_endpoint = endpoint.clone();
-    let result = tray::run(state, move || {
+    let service_stable_runtime_entrypoint = stable_runtime_entrypoint.to_owned();
+    let result = tray::run(state, stable_runtime_entrypoint, move || {
         run_runtime_services(
             owner,
             &service_state,
             &service_stop_accepting,
             &service_endpoint,
+            &service_stable_runtime_entrypoint,
         )
     });
     state.close_connections();
     result.map_err(|error| -> Box<dyn Error> { error })
+}
+
+#[cfg(any(target_os = "macos", target_os = "windows"))]
+fn stable_runtime_entrypoint(arguments: &[OsString]) -> Result<PathBuf, Box<dyn Error>> {
+    let [flag, path] = arguments else {
+        return Err("Runtime requires --stable-runtime-entrypoint PATH".into());
+    };
+    if flag != "--stable-runtime-entrypoint" {
+        return Err("Runtime requires --stable-runtime-entrypoint".into());
+    }
+    require_stable_runtime_entrypoint(PathBuf::from(path)).map_err(Into::into)
+}
+
+#[cfg(any(target_os = "macos", target_os = "windows"))]
+struct RuntimeServicesShutdownGuard(Arc<WorkbenchRuntimeServices>);
+
+#[cfg(any(target_os = "macos", target_os = "windows"))]
+impl Drop for RuntimeServicesShutdownGuard {
+    fn drop(&mut self) {
+        self.0.close_all_workbench_connections();
+        self.0.shutdown_owned_work();
+    }
 }
 
 #[cfg(any(target_os = "macos", target_os = "windows"))]
@@ -460,6 +479,7 @@ fn run_runtime_services(
     state: &Arc<RuntimeControlState>,
     stop_accepting: &Arc<AtomicBool>,
     endpoint: &PlatformControlEndpoint,
+    stable_runtime_entrypoint: &std::path::Path,
 ) -> Result<(), Box<dyn Error + Send + Sync>> {
     let (endpoint_failure_sender, endpoint_failure_receiver) = mpsc::sync_channel(1);
     let accept_worker = spawn_control_accept_worker(
@@ -475,10 +495,7 @@ fn run_runtime_services(
         let active_product = active_product_directory(&debrute_home);
         let runtime_services = WorkbenchRuntimeServices::compose(&debrute_home, Arc::clone(state))
             .map_err(|error| io::Error::other(error.message))?;
-        runtime_services.install_cli(Arc::new(RuntimeCliService::with_active_product(
-            Arc::clone(&runtime_services),
-            active_product.clone(),
-        )));
+        let runtime_shutdown = RuntimeServicesShutdownGuard(Arc::clone(&runtime_services));
         let assets_directory = std::env::var_os(WEB_ASSETS_DIRECTORY_ENV)
             .map(PathBuf::from)
             .or_else(|| active_product.as_ref().map(|product| product.join("web")))
@@ -488,24 +505,7 @@ fn run_runtime_services(
                     format!("{WEB_ASSETS_DIRECTORY_ENV} is required"),
                 )
             })?;
-        let mut workbench = WorkbenchHttpServer::start_with_runtime(
-            assets_directory,
-            Arc::clone(state),
-            Arc::clone(&runtime_services),
-        )?;
-        state.install_workbench(workbench.launch_service())?;
-        let activation: Arc<dyn RuntimeActivationService> = Arc::new(PlatformRuntimeActivation {
-            state: Arc::clone(state),
-            services: Arc::clone(&runtime_services),
-            desktop_launch: Mutex::new(()),
-        });
-        if !state.install_activation_service(activation) {
-            return Err(io::Error::new(
-                io::ErrorKind::AlreadyExists,
-                "Runtime activation service was already installed",
-            )
-            .into());
-        }
+        let mut product: Option<Arc<dyn RuntimeProductHttpService>> = None;
         let mut update_platform = None;
         if let Some(active_product) = active_product.as_ref() {
             let store = Arc::new(ProductStore::new(
@@ -561,11 +561,12 @@ fn run_runtime_services(
                 Arc::clone(&store),
                 &running_version,
                 desktop,
+                stable_runtime_entrypoint.to_owned(),
                 Arc::new(move |transaction_id, intent| {
                     resume_product_surface(transaction_id, intent, &resume_state)
                 }),
             )?;
-            let product = RuntimeProductService::official(
+            let product_service = RuntimeProductService::official(
                 running_version,
                 current_release_platform(),
                 current_release_architecture()?,
@@ -573,24 +574,47 @@ fn run_runtime_services(
                 Arc::clone(&store),
                 native.clone(),
                 Arc::clone(state),
-                Arc::clone(&runtime_services),
+                Arc::clone(runtime_services.global()),
             )
             .map_err(|error| io::Error::other(error.message))?;
-            let product: Arc<dyn RuntimeProductHttpService> = product;
-            runtime_services.install_product(product);
+            product = Some(product_service);
             update_platform = Some((store, native));
+        }
+        let cli: Arc<dyn RuntimeCliHttpService> = Arc::new(RuntimeCliService::new(
+            Arc::clone(runtime_services.models()),
+            Arc::clone(runtime_services.global()),
+            runtime_services.projects().clone(),
+            Arc::clone(runtime_services.generated_assets()),
+            Arc::clone(runtime_services.model_operations()),
+            product.clone(),
+            active_product.clone(),
+        ));
+        let mut workbench = WorkbenchHttpServer::start(
+            assets_directory,
+            Arc::clone(state),
+            Arc::clone(&runtime_services),
+            cli,
+            product,
+        )?;
+        let _runtime_shutdown = runtime_shutdown;
+        state.install_workbench(workbench.launch_service())?;
+        let activation: Arc<dyn RuntimeActivationService> = Arc::new(PlatformRuntimeActivation {
+            state: Arc::clone(state),
+            services: Arc::clone(&runtime_services),
+            desktop_launch: Mutex::new(()),
+        });
+        if !state.install_activation_service(activation) {
+            return Err(io::Error::new(
+                io::ErrorKind::AlreadyExists,
+                "Runtime activation service was already installed",
+            )
+            .into());
         }
         workbench.check_running()?;
         let discovery = start_photoshop_discovery(state, &runtime_services, workbench.origin());
         runtime_services
             .photoshop()
-            .set_discovery_status(discovery.status())?;
-        let shutdown = state.take_shutdown_receiver().ok_or_else(|| {
-            io::Error::new(
-                io::ErrorKind::AlreadyExists,
-                "Runtime shutdown receiver was already installed",
-            )
-        })?;
+            .set_discovery_status(discovery.status());
         let requested_completion = std::env::var_os("DEBRUTE_COMPLETE_PRODUCT_UPDATE")
             .map(|expected_version| {
                 expected_version.into_string().map_err(|_| {
@@ -648,17 +672,18 @@ fn run_runtime_services(
                 debrute_home.clone(),
             )
             .finalize_current(None)?;
-            state.set_status(RuntimeStatus::Ready);
-            ProductCommitCoordinator::new(Arc::clone(store), native.clone()).complete_ready()?;
+            if state.finish_startup() {
+                ProductCommitCoordinator::new(Arc::clone(store), native.clone())
+                    .complete_ready()?;
+            }
         } else {
-            state.set_status(RuntimeStatus::Ready);
+            state.finish_startup();
         }
 
         loop {
             workbench.check_running()?;
-            if shutdown.try_recv().is_ok() {
+            if state.is_stopping() {
                 workbench.stop_accepting();
-                runtime_services.close_all_workbench_connections();
                 return Ok(());
             }
             match endpoint_failure_receiver.recv_timeout(SUPERVISION_POLL_INTERVAL) {
@@ -679,9 +704,9 @@ fn run_runtime_services(
     if !stop_control_accept_worker(endpoint, &accept_worker) {
         return Err("Debrute Control accept worker did not stop".into());
     }
-    if accept_worker.join().is_err() && service_result.is_ok() {
-        return Err("Debrute Control accept worker panicked".into());
-    }
+    accept_worker
+        .join()
+        .expect("Debrute Control accept worker panicked");
     service_result
 }
 
@@ -787,44 +812,28 @@ impl RuntimeActivationService for PlatformRuntimeActivation {
                 project_root,
                 frontend,
             } => {
-                let resolved_frontend = match frontend {
-                    ProjectFrontend::Default => self.configured_project_frontend()?,
-                    ProjectFrontend::Desktop => Some(ProjectFrontend::Desktop),
-                    ProjectFrontend::Browser => Some(ProjectFrontend::Browser),
-                };
-                let Some(resolved_frontend) = resolved_frontend else {
-                    return Ok(ActivationOutcome::Ensured);
-                };
                 let project_id = self
                     .services
                     .discover_project(project_root)
                     .map_err(|_| ControlErrorCode::InvalidActivation)?;
                 let target = WorkbenchRoute::Project { project_id };
-                match resolved_frontend {
+                match frontend {
+                    ProjectFrontend::Default => self.open_default(&target),
                     ProjectFrontend::Desktop => self.open_desktop(&target),
                     ProjectFrontend::Browser => self.open_browser(&target),
-                    ProjectFrontend::Default => unreachable!("default frontend was resolved"),
                 }
             }
             ActivationIntent::OpenKnownProject {
                 project_id,
                 frontend,
             } => {
-                let resolved_frontend = match frontend {
-                    ProjectFrontend::Default => self.configured_project_frontend()?,
-                    ProjectFrontend::Desktop => Some(ProjectFrontend::Desktop),
-                    ProjectFrontend::Browser => Some(ProjectFrontend::Browser),
-                };
-                let Some(resolved_frontend) = resolved_frontend else {
-                    return Ok(ActivationOutcome::Ensured);
-                };
                 let target = WorkbenchRoute::Project {
                     project_id: project_id.clone(),
                 };
-                match resolved_frontend {
+                match frontend {
+                    ProjectFrontend::Default => self.open_default(&target),
                     ProjectFrontend::Desktop => self.open_desktop(&target),
                     ProjectFrontend::Browser => self.open_browser(&target),
-                    ProjectFrontend::Default => unreachable!("default frontend was resolved"),
                 }
             }
         }
@@ -833,22 +842,6 @@ impl RuntimeActivationService for PlatformRuntimeActivation {
 
 #[cfg(any(target_os = "macos", target_os = "windows"))]
 impl PlatformRuntimeActivation {
-    fn configured_project_frontend(&self) -> Result<Option<ProjectFrontend>, ControlErrorCode> {
-        let frontend = self
-            .services
-            .global()
-            .settings_get()
-            .map_err(|_| ControlErrorCode::InvalidActivation)?
-            .workbench
-            .default_frontend;
-        match frontend.as_str() {
-            "electron" => Ok(Some(ProjectFrontend::Desktop)),
-            "browser" => Ok(Some(ProjectFrontend::Browser)),
-            "runtime-only" => Ok(None),
-            _ => Err(ControlErrorCode::InvalidActivation),
-        }
-    }
-
     fn open_default(&self, target: &WorkbenchRoute) -> Result<ActivationOutcome, ControlErrorCode> {
         let frontend = self
             .services
@@ -857,11 +850,10 @@ impl PlatformRuntimeActivation {
             .map_err(|_| ControlErrorCode::InvalidActivation)?
             .workbench
             .default_frontend;
-        match frontend.as_str() {
-            "electron" => self.open_desktop(target),
-            "browser" => self.open_browser(target),
-            "runtime-only" => Ok(ActivationOutcome::Ensured),
-            _ => Err(ControlErrorCode::InvalidActivation),
+        match frontend {
+            DefaultFrontend::Desktop => self.open_desktop(target),
+            DefaultFrontend::Browser => self.open_browser(target),
+            DefaultFrontend::RuntimeOnly => Ok(ActivationOutcome::Ensured),
         }
     }
 
@@ -869,7 +861,7 @@ impl PlatformRuntimeActivation {
         let _launch = self
             .desktop_launch
             .lock()
-            .unwrap_or_else(std::sync::PoisonError::into_inner);
+            .expect("Desktop launch lock poisoned");
         match self.state.open_desktop_window(target) {
             Err(DesktopOpenError::HostUnavailable) => {
                 Self::launch_desktop_host(target)?;
@@ -967,11 +959,6 @@ fn spawn_control_accept_worker(
                 });
             }
         })
-}
-
-#[cfg(not(any(target_os = "macos", target_os = "windows")))]
-fn run() -> Result<(), Box<dyn Error>> {
-    Err("Debrute native Runtime endpoint is not implemented on this platform".into())
 }
 
 #[cfg(target_os = "macos")]

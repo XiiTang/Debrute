@@ -14,7 +14,6 @@ describe('workbench context menu', () => {
       canSelectCanvasNode: true,
       canRevealInCanvas: true,
       fileClipboard: undefined,
-      desktopPlatform: 'darwin',
       adobeBridgeEnabled: true
     });
 
@@ -50,7 +49,6 @@ describe('workbench context menu', () => {
         operation: 'copy',
         entries: [{ projectRelativePath: 'briefs/concept.md', kind: 'file' }]
       },
-      desktopPlatform: 'linux'
     });
 
     expect(menuShape(items)).toEqual([
@@ -82,7 +80,6 @@ describe('workbench context menu', () => {
         operation: 'copy',
         entries: [{ projectRelativePath: 'briefs/concept.md', kind: 'file' }]
       },
-      desktopPlatform: 'darwin'
     });
 
     expect(menuShape(items)).toEqual([
@@ -115,7 +112,6 @@ describe('workbench context menu', () => {
       canSelectCanvasNode: true,
       canRevealInCanvas: true,
       fileClipboard: undefined,
-      desktopPlatform: 'win32'
     });
 
     expect(menuShape(items)).toEqual([
@@ -150,7 +146,6 @@ describe('workbench context menu', () => {
       canSelectCanvasNode: true,
       canRevealInCanvas: true,
       fileClipboard: undefined,
-      desktopPlatform: 'darwin'
     });
 
     expect(menuShape(items)).toEqual([
@@ -188,7 +183,6 @@ describe('workbench context menu', () => {
       canSelectCanvasNode: true,
       canRevealInCanvas: false,
       fileClipboard: undefined,
-      desktopPlatform: 'linux'
     });
 
     expect(menuShape(items).slice(0, 3)).toEqual([
@@ -213,7 +207,6 @@ describe('workbench context menu', () => {
         operation: 'copy',
         entries: [{ projectRelativePath: 'briefs/concept.md', kind: 'file' }]
       },
-      desktopPlatform: 'win32'
     });
 
     expect(actionCommands(items)).toContain('paste');
@@ -235,7 +228,6 @@ describe('workbench context menu', () => {
         operation: 'copy',
         entries: []
       },
-      desktopPlatform: 'linux'
     });
 
     expect(items.find((item) => item.kind === 'action' && item.command === 'paste')).toMatchObject({ disabled: true });
@@ -252,7 +244,6 @@ describe('workbench context menu', () => {
       },
       projection: projectionWithNodes([]),
       canRevealInCanvas: false,
-      desktopPlatform: 'linux',
       adobeBridgeEnabled: true
     });
 
@@ -270,7 +261,6 @@ describe('workbench context menu', () => {
       },
       projection: projectionWithNodes([]),
       canRevealInCanvas: false,
-      desktopPlatform: 'linux',
       adobeBridgeEnabled: true
     });
 
@@ -289,7 +279,6 @@ describe('workbench context menu', () => {
       projection: projectionWithNodes([]),
       canRevealInCanvas: false,
       fileClipboard: undefined,
-      desktopPlatform: 'linux'
     });
 
     expect(actionCommands(items)).toEqual(['create-file', 'create-directory', 'paste', 'open-terminal']);
@@ -311,7 +300,6 @@ describe('workbench context menu', () => {
       projection: projectionWithNodes([]),
       canRevealInCanvas: false,
       fileClipboard: undefined,
-      desktopPlatform: 'linux'
     });
 
     expect(actionCommands(items)).toEqual([
@@ -403,7 +391,7 @@ function projectionWithNodes(
           state: 'available',
           size: 100,
           mimeType: 'image/png',
-          fileUrl: `http://127.0.0.1:17321/api/projects/123e4567-e89b-42d3-a456-426614174000/files/raw/${node.projectRelativePath}?v=rev`,
+          fileUrl: `/api/projects/123e4567-e89b-42d3-a456-426614174000/files/raw/${node.projectRelativePath}?v=rev`,
           revision: 'rev'
         }
       };

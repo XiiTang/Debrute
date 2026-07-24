@@ -9,7 +9,6 @@ use std::{
     time::UNIX_EPOCH,
 };
 
-use serde_json::Value;
 use uuid::Uuid;
 
 use super::{
@@ -17,26 +16,40 @@ use super::{
     CanvasFeedbackDiagnosticUpdate, CanvasFeedbackDocument, CanvasLayoutSize, CanvasMapPathRuleSet,
     CanvasMediaKind, CanvasNodeAvailability, CanvasNodeElement, CanvasNodeKind,
     CanvasNodeLayoutUpdate, CanvasProjection, CanvasRegistryDocument, CanvasRegistryState,
-    CanvasTextViewportUpdate, CanvasVideoPlaybackUpdate, DebruteProjectIdentity,
-    DebruteProjectMetadata, Diagnostic, DiagnosticSeverity, DiagnosticSource, ExpandedCanvasMap,
-    ProjectCapabilityFs, ProjectDiagnosticCounts, ProjectDocumentDelete, ProjectDocumentRead,
-    ProjectDocumentTransaction, ProjectDocumentWrite, ProjectError, ProjectFileEntry,
-    ProjectHealthSummary, ProjectSnapshot, UpdateCanvasFeedbackEntryInput,
-    bring_canvas_node_to_front, canvas_map_path, canvas_map_source_hash,
+    CanvasTextViewportUpdate, CanvasVideoPlaybackUpdate, CanvasVideoPresentation,
+    DebruteProjectIdentity, DebruteProjectMetadata, DebruteProjectPaths, ExpandedCanvasMap,
+    ProjectCapabilityFs, ProjectDiagnostic, ProjectDiagnosticCounts, ProjectDiagnosticSeverity,
+    ProjectDocumentDelete, ProjectDocumentRead, ProjectDocumentTransaction, ProjectDocumentWrite,
+    ProjectError, ProjectFileEntry, ProjectHealthSummary, ProjectSnapshot,
+    UpdateCanvasFeedbackEntryInput, bring_canvas_node_to_front, canvas_map_path,
     canvas_media_kind_from_path, clear_canvas_manual_layouts, commit_project_document_transaction,
     create_canvas_document, debrute_project_paths, expand_canvas_map, expand_canvas_map_path_rules,
     is_valid_stable_project_id, list_project_files, normalize_canvas_name, parse_canvas_map,
     project_canvas, project_canvas_with_known_projection, project_content_hash,
-    project_file_revision, project_text_file_type_for_path, read_canvas_feedback_state,
-    reconcile_canvas_nodes, replace_file, resolve_existing_project_path,
-    resolve_no_symlink_project_path_for_write, serialize_canvas_map_with_rule,
-    update_canvas_feedback_document, update_canvas_node_layouts, update_canvas_text_viewports,
-    update_canvas_video_playback, validate_canvas_document, validate_canvas_feedback_document,
-    validate_canvas_id, validate_feedback_media_targets, write_canvas_feedback_document,
+    project_document_directory_hash, project_document_file_hash, project_file_revision,
+    project_text_file_type_for_path, read_canvas_feedback_state, reconcile_canvas_nodes,
+    replace_file, resolve_existing_project_path, resolve_no_symlink_project_path_for_write,
+    serialize_canvas_map_with_rule, update_canvas_feedback_document, update_canvas_node_layouts,
+    update_canvas_text_viewports, update_canvas_video_playback, validate_canvas_document,
+    validate_canvas_feedback_document, validate_canvas_id, validate_feedback_media_targets,
+    write_canvas_feedback_document,
 };
 
 const EMPTY_CANVAS_MAP: &str = "paths: []\n";
-type CanvasNodeAdapterData = (Option<(bool, Option<u64>)>, Option<Value>);
+type CanvasNodeAdapterData = (Option<(bool, Option<u64>)>, Option<CanvasVideoPresentation>);
+
+struct CanvasMetadataFile {
+    id: String,
+    path: PathBuf,
+    content: Vec<u8>,
+}
+
+struct CanvasRegistryRepairInventory {
+    map_files: Vec<CanvasMetadataFile>,
+    canvas_files: Vec<CanvasMetadataFile>,
+    map_directory_hash: Option<String>,
+    canvas_directory_hash: Option<String>,
+}
 
 pub trait ProjectNodeAdapter: Send + Sync {
     /// Resolves the initial layout size for a projected Canvas node.
@@ -59,7 +72,7 @@ pub trait ProjectNodeAdapter: Send + Sync {
         &self,
         _project_root: &Path,
         _project_relative_path: &str,
-    ) -> Result<Option<Value>, ProjectError> {
+    ) -> Result<Option<CanvasVideoPresentation>, ProjectError> {
         Ok(None)
     }
 
@@ -123,7 +136,7 @@ pub struct ProjectService {
     feedback_document: CanvasFeedbackDocument,
     feedback_hash: Option<String>,
     feedback_valid: bool,
-    feedback_render_diagnostics: HashMap<String, Diagnostic>,
+    feedback_render_diagnostics: HashMap<String, ProjectDiagnostic>,
 }
 
 impl ProjectService {
@@ -141,7 +154,7 @@ impl ProjectService {
         let debrute_home = debrute_home.as_ref().to_path_buf();
         initialize_project_if_missing(&root, &debrute_home)?;
         ensure_default_canvas(&root, &debrute_home)?;
-        let feedback_document = CanvasFeedbackDocument::empty(now_iso())?;
+        let feedback_document = CanvasFeedbackDocument::empty(crate::now_rfc3339())?;
         let empty = ProjectSnapshot {
             project_root: root.to_string_lossy().into_owned(),
             metadata: read_project_metadata(&root, &debrute_home)?,
@@ -159,10 +172,9 @@ impl ProjectService {
                 diagnostic_counts: ProjectDiagnosticCounts {
                     errors: 0,
                     warnings: 0,
-                    infos: 0,
                 },
                 runtime_data_location: debrute_home.join("runtime").to_string_lossy().into_owned(),
-                checked_at: now_iso(),
+                checked_at: crate::now_rfc3339(),
             },
         };
         let mut service = Self {
@@ -292,7 +304,7 @@ impl ProjectService {
         input: &UpdateCanvasFeedbackEntryInput,
     ) -> Result<CanvasFeedbackDocument, ProjectError> {
         let current = self.canvas_feedback()?.clone();
-        let next = update_canvas_feedback_document(&current, input, now_iso())?;
+        let next = update_canvas_feedback_document(&current, input, crate::now_rfc3339())?;
         validate_feedback_media_targets(&next)?;
         write_canvas_feedback_document(&self.root, &next, self.feedback_hash.as_deref())?;
         self.finish_committed_change(super::CANVAS_FEEDBACK_PROJECT_PATH)?;
@@ -313,10 +325,9 @@ impl ProjectService {
             .retain(|diagnostic| diagnostic.id != id);
         snapshot.diagnostics.insert(
             0,
-            Diagnostic {
+            ProjectDiagnostic {
                 id,
-                source: DiagnosticSource::Project,
-                severity: DiagnosticSeverity::Error,
+                severity: ProjectDiagnosticSeverity::Error,
                 code: "project.watch.refresh_failed".to_owned(),
                 message: error_message.to_owned(),
                 file_path: Some(
@@ -530,38 +541,82 @@ impl ProjectService {
         Ok((active, self.snapshot.clone()))
     }
 
-    /// Rebuilds registry order from valid Canvas JSON/YAML pairs.
+    /// Rebuilds Canvas metadata from valid Canvas Maps.
     ///
     /// # Errors
-    /// Returns an error when no valid pair exists or the repair cannot commit.
+    /// Returns an error when a valid Map cannot be pushed or the repair cannot commit.
     pub fn repair_canvas_registry(&mut self) -> Result<(String, ProjectSnapshot), ProjectError> {
-        let (canvases, _) = self.load_canvas_documents()?;
-        let maps = current_canvas_map_ids(&self.root, &self.debrute_home)?;
-        let mut ids: Vec<_> = canvases
-            .iter()
-            .map(|canvas| canvas.id.clone())
-            .filter(|id| maps.contains(id))
-            .collect();
-        ids.sort();
-        if ids.is_empty() {
-            return Err(ProjectError::service(
-                "canvas_registry_repair_failed",
-                "Canvas registry repair found no valid canvas pairs.",
-            ));
-        }
         let paths = debrute_project_paths(&self.root, &self.debrute_home);
-        commit_project_document_transaction(&ProjectDocumentTransaction {
-            project_root: self.root.clone(),
-            owner: "canvas-registry".to_owned(),
-            reads: Vec::new(),
-            writes: vec![ProjectDocumentWrite {
-                absolute_path: paths.canvas_index_file,
-                content: json_pretty(&CanvasRegistryDocument {
-                    canvas_order: ids.clone(),
-                })?,
-            }],
-            deletes: Vec::new(),
-        })?;
+        let inventory = CanvasRegistryRepairInventory {
+            map_directory_hash: project_document_directory_hash(&paths.canvas_maps_dir)?,
+            canvas_directory_hash: project_document_directory_hash(&paths.canvases_dir)?,
+            map_files: read_canvas_metadata_files(&paths.canvas_maps_dir, ".yaml", None)?,
+            canvas_files: read_canvas_metadata_files(
+                &paths.canvases_dir,
+                ".json",
+                Some("index.json"),
+            )?,
+        };
+        let project_files = list_project_files(&self.root)?;
+
+        let valid_canvases = inventory
+            .canvas_files
+            .iter()
+            .filter_map(|file| {
+                let canvas = serde_json::from_slice::<CanvasDocument>(&file.content).ok()?;
+                (canvas.id == file.id && validate_canvas_document(&canvas).is_ok())
+                    .then_some((file.id.clone(), canvas))
+            })
+            .collect::<HashMap<_, _>>();
+        let valid_maps = inventory
+            .map_files
+            .iter()
+            .filter_map(|file| {
+                let content = std::str::from_utf8(&file.content).ok()?;
+                let source_path = canvas_map_path(&file.id).ok()?;
+                let map = parse_canvas_map(&file.id, &source_path, content).ok()?;
+                expand_canvas_map(&map, &project_files).ok()?;
+                Some((file.id.clone(), content.to_owned()))
+            })
+            .collect::<HashMap<_, _>>();
+
+        let mut ids: Vec<_> = valid_maps.keys().cloned().collect();
+        ids.sort();
+        let mut writes = Vec::new();
+        for id in &ids {
+            let base = valid_canvases
+                .get(id)
+                .cloned()
+                .unwrap_or(create_canvas_document(id)?);
+            let rebuilt = self.prepare_canvas_map(&base, &valid_maps[id], &project_files)?;
+            if valid_canvases.get(id) != Some(&rebuilt) {
+                writes.push(ProjectDocumentWrite {
+                    absolute_path: paths.canvases_dir.join(format!("{id}.json")),
+                    content: json_pretty(&rebuilt)?,
+                });
+            }
+        }
+        if ids.is_empty() {
+            ids.push("canvas-1".to_owned());
+            writes.extend([
+                ProjectDocumentWrite {
+                    absolute_path: paths.canvas_maps_dir.join("canvas-1.yaml"),
+                    content: EMPTY_CANVAS_MAP.to_owned(),
+                },
+                ProjectDocumentWrite {
+                    absolute_path: paths.canvases_dir.join("canvas-1.json"),
+                    content: json_pretty(&create_canvas_document("canvas-1")?)?,
+                },
+            ]);
+        }
+        writes.push(ProjectDocumentWrite {
+            absolute_path: paths.canvas_index_file.clone(),
+            content: json_pretty(&CanvasRegistryDocument {
+                canvas_order: ids.clone(),
+            })?,
+        });
+
+        commit_canvas_registry_repair(&self.root, &paths, &inventory, &valid_maps, writes)?;
         self.finish_committed_change(".debrute/canvases/index.json")?;
         Ok((ids[0].clone(), self.snapshot.clone()))
     }
@@ -576,7 +631,7 @@ impl ProjectService {
         updates: &[CanvasNodeLayoutUpdate],
     ) -> Result<(CanvasDocument, CanvasProjection, bool), ProjectError> {
         self.update_visual_canvas(canvas_id, |canvas| {
-            Ok(update_canvas_node_layouts(canvas, updates))
+            update_canvas_node_layouts(canvas, updates)
         })
     }
 
@@ -638,7 +693,7 @@ impl ProjectService {
             reads: vec![
                 ProjectDocumentRead {
                     absolute_path: source_path,
-                    expected_hash: Some(canvas_map_source_hash(&content)),
+                    expected_hash: Some(project_content_hash(&content)),
                 },
                 ProjectDocumentRead {
                     absolute_path: canvas_path.clone(),
@@ -679,7 +734,7 @@ impl ProjectService {
             ));
         }
         let (source_path, content) = self.read_canvas_map(canvas_id)?;
-        let current_source_hash = canvas_map_source_hash(&content);
+        let current_source_hash = project_content_hash(&content);
         if self.required_canvas_map_hash(canvas_id)? != current_source_hash {
             return Err(ProjectError::service(
                 "canvas_map_conflict",
@@ -762,7 +817,7 @@ impl ProjectService {
             reads: vec![
                 ProjectDocumentRead {
                     absolute_path: source_path,
-                    expected_hash: Some(canvas_map_source_hash(&content)),
+                    expected_hash: Some(project_content_hash(&content)),
                 },
                 ProjectDocumentRead {
                     absolute_path: canvas_path.clone(),
@@ -832,7 +887,7 @@ impl ProjectService {
         let files = list_project_files(&self.root)?;
         let (canvases, document_diagnostics) = self.load_canvas_documents()?;
         let mut feedback_diagnostics = Vec::new();
-        match read_canvas_feedback_state(&self.root, now_iso()).and_then(|state| {
+        match read_canvas_feedback_state(&self.root, crate::now_rfc3339()).and_then(|state| {
             validate_canvas_feedback_document(&state.document)?;
             validate_feedback_media_targets(&state.document)?;
             Ok(state)
@@ -851,14 +906,19 @@ impl ProjectService {
                     error.to_string(),
                     &self.root.join(super::CANVAS_FEEDBACK_PROJECT_PATH),
                     Some(super::CANVAS_FEEDBACK_PROJECT_PATH.to_owned()),
-                    DiagnosticSeverity::Error,
+                    ProjectDiagnosticSeverity::Error,
                 ));
             }
         }
         let mut canvas_map_diagnostics = Vec::new();
         let registry = self.read_registry()?;
-        let maps = current_canvas_map_ids(&self.root, &self.debrute_home)?;
-        let registry = validate_registry_pairs(registry, &canvases, &maps);
+        let registry = match current_canvas_map_ids(&self.root, &self.debrute_home) {
+            Ok(maps) => validate_registry_pairs(registry, &canvases, &maps),
+            Err(error) => CanvasRegistryState::Invalid {
+                code: "canvas_registry_invalid".to_owned(),
+                message: error.to_string(),
+            },
+        };
         let mut ordered = Vec::new();
         if let CanvasRegistryState::Ready { canvas_order } = &registry {
             let by_id: HashMap<_, _> = canvases
@@ -939,29 +999,34 @@ impl ProjectService {
 
     fn load_canvas_documents(
         &mut self,
-    ) -> Result<(Vec<CanvasDocument>, Vec<Diagnostic>), ProjectError> {
+    ) -> Result<(Vec<CanvasDocument>, Vec<ProjectDiagnostic>), ProjectError> {
         let mut files: Vec<_> = list_project_files(&self.root)?
             .into_iter()
-            .filter(|entry| {
-                entry
+            .filter_map(|entry| {
+                if entry.project_relative_path == CANVAS_INDEX_FILE {
+                    return None;
+                }
+                let id = entry
                     .project_relative_path
-                    .strip_prefix(".debrute/canvases/")
-                    .and_then(|path| path.strip_suffix(".json"))
-                    .is_some_and(|id| !id.contains('/'))
-                    && entry.project_relative_path != CANVAS_INDEX_FILE
+                    .strip_prefix(".debrute/canvases/")?
+                    .strip_suffix(".json")?
+                    .to_owned();
+                if id.contains('/') {
+                    return None;
+                }
+                Some((entry, id))
             })
             .collect();
-        files.sort_by(|left, right| left.project_relative_path.cmp(&right.project_relative_path));
+        files.sort_by(|left, right| {
+            left.0
+                .project_relative_path
+                .cmp(&right.0.project_relative_path)
+        });
         self.canvas_hashes.clear();
         let mut canvases = Vec::new();
         let mut diagnostics = Vec::new();
-        for file in files {
+        for (file, id) in files {
             let path = self.root.join(&file.project_relative_path);
-            let id = Path::new(&file.project_relative_path)
-                .file_stem()
-                .and_then(|id| id.to_str())
-                .unwrap_or_default()
-                .to_owned();
             match fs::read_to_string(&path)
                 .map_err(ProjectError::from)
                 .and_then(|content| {
@@ -984,7 +1049,7 @@ impl ProjectService {
                     error.to_string(),
                     &path,
                     Some(id),
-                    DiagnosticSeverity::Error,
+                    ProjectDiagnosticSeverity::Error,
                 )),
             }
         }
@@ -1029,7 +1094,7 @@ impl ProjectService {
         canvases: Vec<CanvasDocument>,
         files: &[ProjectFileEntry],
         write_changes: bool,
-        diagnostics: &mut Vec<Diagnostic>,
+        diagnostics: &mut Vec<ProjectDiagnostic>,
     ) -> Result<Vec<CanvasDocument>, ProjectError> {
         let mut result = Vec::new();
         let mut next_map_hashes = HashMap::new();
@@ -1046,14 +1111,14 @@ impl ProjectService {
                     "Canvas Map source could not be read.".to_owned(),
                     &source_path,
                     Some(canvas.id.clone()),
-                    DiagnosticSeverity::Error,
+                    ProjectDiagnosticSeverity::Error,
                 ));
                 result.push(canvas);
                 continue;
             };
             match self.prepare_canvas_map(&canvas, &content, files) {
                 Ok(next) => {
-                    let source_hash = canvas_map_source_hash(&content);
+                    let source_hash = project_content_hash(&content);
                     next_map_hashes.insert(canvas.id.clone(), source_hash.clone());
                     if next.node_elements == canvas.node_elements {
                         result.push(canvas);
@@ -1088,7 +1153,7 @@ impl ProjectService {
                             ),
                             &source_path,
                             Some(canvas.id.clone()),
-                            DiagnosticSeverity::Warning,
+                            ProjectDiagnosticSeverity::Warning,
                         ));
                         result.push(canvas);
                     }
@@ -1100,7 +1165,7 @@ impl ProjectService {
                         error.to_string(),
                         &source_path,
                         Some(canvas.id.clone()),
-                        DiagnosticSeverity::Error,
+                        ProjectDiagnosticSeverity::Error,
                     );
                     diagnostic.line = error.field("line").and_then(|line| line.parse().ok());
                     diagnostic.column =
@@ -1163,7 +1228,7 @@ impl ProjectService {
     fn project_canvas_document(
         &self,
         canvas: &CanvasDocument,
-        diagnostics: Vec<Diagnostic>,
+        diagnostics: Vec<ProjectDiagnostic>,
     ) -> CanvasProjection {
         let mut inspections = HashMap::new();
         for node in &canvas.node_elements {
@@ -1208,7 +1273,7 @@ impl ProjectService {
     fn inspect_canvas_node(
         &self,
         node: &CanvasNodeElement,
-    ) -> (CanvasNodeAvailability, Option<Value>) {
+    ) -> (CanvasNodeAvailability, Option<CanvasVideoPresentation>) {
         let (metadata, mtime_ms) = match self.inspect_canvas_metadata(node) {
             Ok(inspected) => inspected,
             Err(availability) => return (availability, None),
@@ -1485,7 +1550,7 @@ fn initialize_project_if_missing(root: &Path, debrute_home: &Path) -> Result<(),
                 root,
                 ".debrute/canvases",
             )?)?;
-            let now = now_iso();
+            let now = crate::now_rfc3339();
             let name = root
                 .file_name()
                 .and_then(|name| name.to_str())
@@ -1508,14 +1573,14 @@ fn initialize_project_if_missing(root: &Path, debrute_home: &Path) -> Result<(),
 fn ensure_default_canvas(root: &Path, debrute_home: &Path) -> Result<(), ProjectError> {
     let paths = debrute_project_paths(root, debrute_home);
     resolve_no_symlink_project_path_for_write(root, ".debrute/canvases")?;
-    let has_canvas = fs::read_dir(&paths.canvases_dir).is_ok_and(|entries| {
-        entries.filter_map(Result::ok).any(|entry| {
-            let name = entry.file_name();
-            let name = name.to_string_lossy();
-            name.strip_suffix(".json").is_some() && name != "index.json"
-        })
-    });
-    if has_canvas || paths.canvas_index_file.exists() {
+    let has_canvas = has_canvas_metadata_file(&paths.canvases_dir, ".json", Some("index.json"))?;
+    let has_map = has_canvas_metadata_file(&paths.canvas_maps_dir, ".yaml", None)?;
+    let has_registry = match fs::symlink_metadata(&paths.canvas_index_file) {
+        Ok(_) => true,
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => false,
+        Err(error) => return Err(error.into()),
+    };
+    if has_canvas || has_map || has_registry {
         return Ok(());
     }
     let canvas = create_canvas_document("canvas-1")?;
@@ -1553,6 +1618,140 @@ fn ensure_default_canvas(root: &Path, debrute_home: &Path) -> Result<(), Project
             },
         ],
         deletes: Vec::new(),
+    })
+}
+
+fn has_canvas_metadata_file(
+    directory: &Path,
+    suffix: &str,
+    excluded_name: Option<&str>,
+) -> Result<bool, ProjectError> {
+    let entries = match fs::read_dir(directory) {
+        Ok(entries) => entries,
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(false),
+        Err(error) => return Err(error.into()),
+    };
+    for entry in entries {
+        let entry = entry?;
+        if !entry.file_type()?.is_file() {
+            continue;
+        }
+        let name = entry.file_name();
+        let Some(name) = name.to_str() else {
+            continue;
+        };
+        if name.ends_with(suffix) && excluded_name != Some(name) {
+            return Ok(true);
+        }
+    }
+    Ok(false)
+}
+
+fn read_canvas_metadata_files(
+    directory: &Path,
+    suffix: &str,
+    excluded_name: Option<&str>,
+) -> Result<Vec<CanvasMetadataFile>, ProjectError> {
+    let entries = match fs::read_dir(directory) {
+        Ok(entries) => entries,
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(Vec::new()),
+        Err(error) => return Err(error.into()),
+    };
+    let mut result = Vec::new();
+    for entry in entries {
+        let entry = entry?;
+        if !entry.file_type()?.is_file() {
+            continue;
+        }
+        let name = entry.file_name();
+        let Some(name) = name.to_str() else {
+            continue;
+        };
+        if excluded_name == Some(name) {
+            continue;
+        }
+        let Some(id) = name.strip_suffix(suffix) else {
+            continue;
+        };
+        let path = entry.path();
+        result.push(CanvasMetadataFile {
+            id: id.to_owned(),
+            content: fs::read(&path)?,
+            path,
+        });
+    }
+    result.sort_by(|left, right| left.path.cmp(&right.path));
+    Ok(result)
+}
+
+fn commit_canvas_registry_repair(
+    project_root: &Path,
+    paths: &DebruteProjectPaths,
+    inventory: &CanvasRegistryRepairInventory,
+    valid_maps: &HashMap<String, String>,
+    writes: Vec<ProjectDocumentWrite>,
+) -> Result<(), ProjectError> {
+    let write_paths = writes
+        .iter()
+        .map(|write| write.absolute_path.clone())
+        .collect::<HashSet<_>>();
+    let deletes = inventory
+        .map_files
+        .iter()
+        .filter(|file| !valid_maps.contains_key(&file.id))
+        .map(|file| file.path.clone())
+        .chain(
+            inventory
+                .canvas_files
+                .iter()
+                .filter(|file| !valid_maps.contains_key(&file.id))
+                .map(|file| file.path.clone()),
+        )
+        .filter(|path| !write_paths.contains(path))
+        .map(|absolute_path| ProjectDocumentDelete { absolute_path })
+        .collect::<Vec<_>>();
+    let mut reads = inventory
+        .map_files
+        .iter()
+        .chain(&inventory.canvas_files)
+        .map(|file| ProjectDocumentRead {
+            absolute_path: file.path.clone(),
+            expected_hash: Some(project_content_hash(&file.content)),
+        })
+        .collect::<Vec<_>>();
+    reads.push(ProjectDocumentRead {
+        absolute_path: paths.canvas_index_file.clone(),
+        expected_hash: project_document_file_hash(&paths.canvas_index_file)?,
+    });
+    reads.extend([
+        ProjectDocumentRead {
+            absolute_path: paths.canvas_maps_dir.clone(),
+            expected_hash: inventory.map_directory_hash.clone(),
+        },
+        ProjectDocumentRead {
+            absolute_path: paths.canvases_dir.clone(),
+            expected_hash: inventory.canvas_directory_hash.clone(),
+        },
+    ]);
+    let existing_reads = reads
+        .iter()
+        .map(|read| read.absolute_path.clone())
+        .collect::<HashSet<_>>();
+    reads.extend(
+        write_paths
+            .iter()
+            .filter(|path| !existing_reads.contains(*path))
+            .map(|absolute_path| ProjectDocumentRead {
+                absolute_path: absolute_path.clone(),
+                expected_hash: None,
+            }),
+    );
+    commit_project_document_transaction(&ProjectDocumentTransaction {
+        project_root: project_root.to_owned(),
+        owner: "canvas-registry".to_owned(),
+        reads,
+        writes,
+        deletes,
     })
 }
 
@@ -1635,13 +1834,21 @@ fn current_canvas_map_ids(
         Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(HashSet::new()),
         Err(error) => return Err(error.into()),
     };
-    Ok(entries
-        .filter_map(Result::ok)
-        .filter_map(|entry| {
-            let name = entry.file_name().to_string_lossy().into_owned();
-            name.strip_suffix(".yaml").map(str::to_owned)
-        })
-        .collect())
+    let mut result = HashSet::new();
+    for entry in entries {
+        let entry = entry?;
+        if !entry.file_type()?.is_file() {
+            continue;
+        }
+        let name = entry.file_name();
+        let Some(name) = name.to_str() else {
+            continue;
+        };
+        if let Some(id) = name.strip_suffix(".yaml") {
+            result.insert(id.to_owned());
+        }
+    }
+    Ok(result)
 }
 
 fn desired_canvas_map_projection(
@@ -1732,7 +1939,7 @@ fn next_canvas_id(ids: &[String]) -> String {
 fn project_health(
     metadata: &DebruteProjectMetadata,
     canvas_count: usize,
-    diagnostics: &[Diagnostic],
+    diagnostics: &[ProjectDiagnostic],
     debrute_home: &Path,
 ) -> ProjectHealthSummary {
     ProjectHealthSummary {
@@ -1741,19 +1948,15 @@ fn project_health(
         diagnostic_counts: ProjectDiagnosticCounts {
             errors: diagnostics
                 .iter()
-                .filter(|diagnostic| diagnostic.severity == DiagnosticSeverity::Error)
+                .filter(|diagnostic| diagnostic.severity == ProjectDiagnosticSeverity::Error)
                 .count(),
             warnings: diagnostics
                 .iter()
-                .filter(|diagnostic| diagnostic.severity == DiagnosticSeverity::Warning)
-                .count(),
-            infos: diagnostics
-                .iter()
-                .filter(|diagnostic| diagnostic.severity == DiagnosticSeverity::Info)
+                .filter(|diagnostic| diagnostic.severity == ProjectDiagnosticSeverity::Warning)
                 .count(),
         },
         runtime_data_location: debrute_home.join("runtime").to_string_lossy().into_owned(),
-        checked_at: now_iso(),
+        checked_at: crate::now_rfc3339(),
     }
 }
 
@@ -1763,11 +1966,10 @@ fn document_diagnostic(
     message: String,
     file_path: &Path,
     entity_id: Option<String>,
-    severity: DiagnosticSeverity,
-) -> Diagnostic {
-    Diagnostic {
+    severity: ProjectDiagnosticSeverity,
+) -> ProjectDiagnostic {
+    ProjectDiagnostic {
         id,
-        source: DiagnosticSource::Project,
         severity,
         code: code.to_owned(),
         message,
@@ -1802,10 +2004,6 @@ fn write_json_atomic(path: &Path, value: &impl serde::Serialize) -> Result<(), P
         let _ = fs::remove_file(temporary);
     }
     result
-}
-
-fn now_iso() -> String {
-    crate::now_rfc3339()
 }
 
 fn generic_layout_size(path: &str) -> CanvasLayoutSize {

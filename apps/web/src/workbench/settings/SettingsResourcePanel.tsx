@@ -12,7 +12,7 @@ export function SettingsResourcePanel<T>({
 }: {
   title: string;
   resource: SettingsResource<T>;
-  onRetry: () => Promise<void>;
+  onRetry?: () => Promise<void>;
   children: (value: T) => React.ReactElement;
 }): React.ReactElement {
   const i18n = useI18n();
@@ -29,9 +29,11 @@ export function SettingsResourcePanel<T>({
         ) : (
           <div className="settings-resource-state settings-resource-state--error" role="alert">
             <small>{i18n.t('settings.resource.loadFailed', { message: resource.message })}</small>
-            <Button type="button" iconStart={<RefreshCw size={14} />} onClick={() => void onRetry()}>
-              {i18n.t('settings.resource.retry')}
-            </Button>
+            {onRetry ? (
+              <Button type="button" iconStart={<RefreshCw size={14} />} onClick={() => void onRetry()}>
+                {i18n.t('settings.resource.retry')}
+              </Button>
+            ) : null}
           </div>
         )}
       </div>

@@ -13,5 +13,7 @@ started in parallel. There is no public Preparing status, blocker-collection
 phase, cancellation back to Ready after a quit request, degraded serving state,
 or deferred quit.
 
-Operating-system termination enters direct cleanup without prompting or
-inventing another status.
+One internal lifecycle state owns startup, update preparation, exit, and
+replacement; the four public statuses and the supervision loop observe that
+same state. Startup completion cannot overwrite an already accepted exit.
+Operating-system termination ends the process directly.

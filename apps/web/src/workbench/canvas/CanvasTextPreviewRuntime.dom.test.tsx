@@ -1,5 +1,6 @@
 import React, { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
+import { renderToStaticMarkup } from 'react-dom/server';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { ProjectedCanvasNode } from '@debrute/canvas-core';
 import type { TextFileBuffer, WorkbenchActions } from '../../types';
@@ -20,8 +21,7 @@ import {
   canvasTextPreviewTargetsForNodes,
   useCanvasTextPreviewRuntime,
   type CanvasTextPreviewMeasuredBody,
-  type CanvasTextPreviewRuntimeValue,
-  type CanvasTextPreviewSource
+  type CanvasTextPreviewRuntimeValue
 } from './CanvasTextPreviewRuntime';
 
 const laneMock = vi.hoisted(() => ({
@@ -44,6 +44,15 @@ vi.mock('./CanvasTextPreviewCaptureLane', async () => {
     }
   };
 });
+
+it('requires CanvasTextPreviewProvider', () => {
+  expect(() => renderToStaticMarkup(<TextRuntimeConsumer />)).toThrow('CanvasTextPreviewProvider is required.');
+});
+
+function TextRuntimeConsumer(): React.ReactElement {
+  useCanvasTextPreviewRuntime();
+  return <div />;
+}
 
 vi.mock('./CanvasTextPreviewStyleKey', () => ({
   canvasTextPreviewStyleSnapshotForDocument: () => ({ color: '#fff' }),
@@ -501,6 +510,37 @@ describe('CanvasTextPreviewRuntime', { tags: ['canvas-text'] }, () => {
     expect(latest(observed)?.visibleCommittedSourceKey).toBeUndefined();
   });
 
+  it('can revisit a previously published resolution after a high-low-high roundtrip', async () => {
+    const actions = actionsFixture({ available: true });
+    const observed: CanvasTextPreviewPresentation[] = [];
+    let runtimeValue: CanvasTextPreviewRuntimeValue | undefined;
+    const node = nodeFixture('a.md', 0);
+    const probe = (runtime: CanvasTextPreviewRuntimeValue) => {
+      runtimeValue = runtime;
+      observed.push(runtime.presentationForNode({ node }));
+    };
+    const settlePending = async (expectedWidth: number) => {
+      await runFramesUntil(frames, () => latest(observed)?.pending?.previewWidth === expectedWidth);
+      const pending = latest(observed)?.pending;
+      await act(async () => runtimeValue?.reportPendingReady(node, pending!));
+      await runFramesUntil(frames, () => latest(observed)?.visible?.sourceKey === pending?.sourceKey);
+      const visible = latest(observed)?.visible;
+      await act(async () => runtimeValue?.reportVisibleCommitted(node, visible!));
+      await runFramesUntil(frames, () => latest(observed)?.visibleCommittedSourceKey === visible?.sourceKey);
+    };
+
+    await renderProvider({ root, nodes: [node], actions, cameraState: 'idle', resourceZoom: 0.1, probe });
+    await settlePending(640);
+    await renderProvider({ root, nodes: [node], actions, cameraState: 'idle', resourceZoom: 0.2, probe });
+    await settlePending(1280);
+    await renderProvider({ root, nodes: [node], actions, cameraState: 'idle', resourceZoom: 0.1, probe });
+    await settlePending(640);
+    await renderProvider({ root, nodes: [node], actions, cameraState: 'idle', resourceZoom: 0.2, probe });
+    await settlePending(1280);
+
+    expect(latest(observed)?.visible?.previewWidth).toBe(1280);
+  });
+
   it('mounts pending text previews through the shared resource start scheduler', async () => {
     const starts: CanvasPreviewResourceRequest[] = [];
     const controlledScheduler: CanvasPreviewResourceScheduler = {
@@ -753,6 +793,7 @@ async function renderProvider(input: {
   nodes: ProjectedCanvasNode[];
   actions: WorkbenchActions;
   cameraState: 'idle' | 'moving';
+  resourceZoom?: number | undefined;
   probe?: ((runtime: CanvasTextPreviewRuntimeValue) => void) | undefined;
   content?: string | undefined;
   activeInlineTextPath?: string | undefined;
@@ -781,7 +822,7 @@ async function renderProvider(input: {
         actions={input.actions}
         cameraState={input.cameraState}
         dragState={undefined}
-        resourceZoom={0.1}
+        resourceZoom={input.resourceZoom ?? 0.1}
         devicePixelRatio={2}
         culledNodePaths={input.culledNodePaths ?? new Set()}
         styleDependencyKey="dark"
@@ -846,7 +887,7 @@ function nodeFixture(projectRelativePath: string, y: number): ProjectedCanvasNod
       state: 'available',
       size: 32,
       mimeType: 'text/markdown',
-      fileUrl: `http://127.0.0.1:17321/api/projects/p/files/raw/${projectRelativePath}`,
+      fileUrl: `/api/projects/p/files/raw/${projectRelativePath}?v=rev-a`,
       revision: 'rev-a'
     }
   };

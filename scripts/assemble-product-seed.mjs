@@ -16,16 +16,8 @@ export async function assembleProductSeed(input = {}) {
   const root = resolve(input.workspaceRoot ?? workspaceRoot);
   const platform = input.platform ?? process.platform;
   const architecture = input.architecture ?? process.arch;
-  const destination = resolve(input.destination ?? join(root, 'apps/desktop/dist-electron/product-seed'));
-  await rm(destination, { recursive: true, force: true });
   if (!supportedPlatforms.has(platform)) {
-    await mkdir(destination, { recursive: true });
-    await writeFile(
-      join(destination, 'UNSUPPORTED_PLATFORM.txt'),
-      'Debrute Runtime Product is supported only on macOS and Windows.\n',
-      'utf8'
-    );
-    return { supported: false, destination };
+    throw new Error(`Unsupported Product platform: ${platform}`);
   }
   if (architecture !== 'arm64' && architecture !== 'x64') {
     throw new Error(`Unsupported Product architecture: ${architecture}`);
@@ -33,6 +25,8 @@ export async function assembleProductSeed(input = {}) {
   if (platform === 'win32' && architecture !== 'x64') {
     throw new Error(`Unsupported Windows Product architecture: ${architecture}`);
   }
+  const destination = resolve(input.destination ?? join(root, 'apps/desktop/dist-electron/product-seed'));
+  await rm(destination, { recursive: true, force: true });
 
   const packageJson = JSON.parse(await readFile(join(root, 'package.json'), 'utf8'));
   const version = requiredString(packageJson.version, 'root package version');
@@ -72,7 +66,7 @@ export async function assembleProductSeed(input = {}) {
       await copyFile(join(nativeRasterRoot, entry.name), join(destination, 'runtime', entry.name));
     }
   }
-  await cp(resolve(input.webRoot ?? join(root, 'apps/desktop/dist')), join(destination, 'web'), {
+  await cp(resolve(input.webRoot ?? join(root, 'apps/web/dist')), join(destination, 'web'), {
     recursive: true,
     dereference: true
   });
@@ -126,7 +120,7 @@ export async function assembleProductSeed(input = {}) {
     files
   };
   await writeFile(join(destination, 'product-manifest.json'), `${JSON.stringify(manifest, null, 2)}\n`, 'utf8');
-  return { supported: true, destination, manifest };
+  return { destination, manifest };
 }
 
 export async function refreshProductSeedManifest(destination) {

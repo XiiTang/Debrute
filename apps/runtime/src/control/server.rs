@@ -3,11 +3,7 @@ use std::{
     error::Error,
     fmt,
     io::{self, Read, Write},
-    sync::{
-        Arc, Mutex, MutexGuard, PoisonError,
-        atomic::{AtomicBool, Ordering},
-        mpsc,
-    },
+    sync::{Arc, Mutex, MutexGuard},
     thread,
     time::{Duration, Instant},
 };
@@ -40,11 +36,9 @@ use super::{
 pub struct RuntimeControlState {
     inner: Mutex<RuntimeControlInner>,
     desktop: DesktopWindowTopology,
-    lifecycle: Mutex<Option<LifecycleTransition>>,
-    shutdown_sender: mpsc::SyncSender<RuntimeShutdown>,
-    shutdown_receiver: Mutex<Option<mpsc::Receiver<RuntimeShutdown>>>,
+    lifecycle: Mutex<RuntimeLifecycle>,
+    product_commit: Mutex<()>,
     activation_service: Mutex<Option<Arc<dyn RuntimeActivationService>>>,
-    accepting_connections: AtomicBool,
 }
 
 pub trait RuntimeActivationService: Send + Sync {
@@ -57,20 +51,21 @@ pub trait RuntimeActivationService: Send + Sync {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
-enum LifecycleTransition {
+enum RuntimeLifecycle {
+    Starting,
+    Ready,
     UpdatePreparing(String),
     Exiting,
     Replacing(String),
-    SystemTermination,
 }
 
 struct RuntimeControlInner {
     instance_id: String,
     executable_identity: Option<String>,
-    status: RuntimeStatus,
     workbench: Option<Arc<WorkbenchLaunchService>>,
-    recent_projects_revision: u64,
+    recent_projects_revision: Option<u64>,
     recent_projects: Vec<RecentProject>,
+    theme_preference: Option<String>,
     connections: HashMap<ConnectionId, ConnectionRecord>,
     cli_authorizations: HashMap<CliAuthorization, ConnectionId>,
 }
@@ -89,61 +84,44 @@ pub(super) struct ConnectionId(String);
 struct CliAuthorization(String);
 
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub enum RuntimeShutdown {
-    ProductQuit,
-    ProductUpdate { transaction_id: String },
-    SystemTermination,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq)]
 pub enum RuntimeActionError {
     RuntimeNotReady { status: RuntimeStatus },
     WorkbenchUnavailable,
     WorkbenchLaunch(WorkbenchLaunchError),
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub enum DesktopPresentationError {
-    RevisionExhausted,
-    Outbound(OutboundError),
-}
-
 impl RuntimeControlState {
     #[must_use]
-    pub fn new(instance_id: impl Into<String>, status: RuntimeStatus) -> Self {
-        Self::new_with_executable_identity(instance_id, status, None)
+    pub fn new(instance_id: impl Into<String>) -> Self {
+        Self::new_with_executable_identity(instance_id, None)
     }
 
     #[must_use]
     pub fn new_with_executable_identity(
         instance_id: impl Into<String>,
-        status: RuntimeStatus,
         executable_identity: Option<String>,
     ) -> Self {
-        let (shutdown_sender, shutdown_receiver) = mpsc::sync_channel(1);
         Self {
             inner: Mutex::new(RuntimeControlInner {
                 instance_id: instance_id.into(),
                 executable_identity,
-                status,
                 workbench: None,
-                recent_projects_revision: 0,
+                recent_projects_revision: None,
                 recent_projects: Vec::new(),
+                theme_preference: None,
                 connections: HashMap::new(),
                 cli_authorizations: HashMap::new(),
             }),
             desktop: DesktopWindowTopology::new(),
-            lifecycle: Mutex::new(None),
-            shutdown_sender,
-            shutdown_receiver: Mutex::new(Some(shutdown_receiver)),
+            lifecycle: Mutex::new(RuntimeLifecycle::Starting),
+            product_commit: Mutex::new(()),
             activation_service: Mutex::new(None),
-            accepting_connections: AtomicBool::new(true),
         }
     }
 
     #[must_use]
     pub fn status(&self) -> RuntimeStatus {
-        self.lock_inner().status
+        self.lock_lifecycle().status()
     }
 
     #[must_use]
@@ -151,69 +129,55 @@ impl RuntimeControlState {
         self.lock_inner().instance_id.clone()
     }
 
-    #[must_use]
-    pub fn take_shutdown_receiver(&self) -> Option<mpsc::Receiver<RuntimeShutdown>> {
-        self.shutdown_receiver
-            .lock()
-            .unwrap_or_else(PoisonError::into_inner)
-            .take()
+    pub fn finish_startup(&self) -> bool {
+        let mut lifecycle = self.lock_lifecycle();
+        if *lifecycle != RuntimeLifecycle::Starting {
+            return false;
+        }
+        *lifecycle = RuntimeLifecycle::Ready;
+        true
     }
 
-    pub fn set_status(&self, status: RuntimeStatus) {
-        self.lock_inner().status = status;
+    #[must_use]
+    pub fn is_stopping(&self) -> bool {
+        matches!(
+            *self.lock_lifecycle(),
+            RuntimeLifecycle::Exiting | RuntimeLifecycle::Replacing(_)
+        )
     }
 
     /// Replaces the Desktop recent-Project projection when the revision advances.
-    ///
-    /// # Errors
-    ///
-    /// Returns an error if the new projection cannot be delivered to a connected
-    /// Desktop host.
-    pub fn set_recent_projects(
-        &self,
-        global_revision: u64,
-        recent_projects: Vec<RecentProject>,
-    ) -> Result<bool, DesktopPresentationError> {
+    pub fn set_recent_projects(&self, global_revision: u64, recent_projects: Vec<RecentProject>) {
         let mut inner = self.lock_inner();
-        if global_revision < inner.recent_projects_revision {
-            return Ok(false);
-        }
-        if global_revision == inner.recent_projects_revision
-            && inner.recent_projects == recent_projects
+        if inner
+            .recent_projects_revision
+            .is_some_and(|current_revision| global_revision <= current_revision)
         {
-            return Ok(false);
+            return;
         }
-        inner.recent_projects_revision = global_revision;
+        inner.recent_projects_revision = Some(global_revision);
         inner.recent_projects = recent_projects;
         let event = ControlEvent::DesktopRecentProjectsChanged {
             global_revision,
             recent_projects: inner.recent_projects.clone(),
         };
-        let senders = inner
+        // Queue projection events under the same lock that advances the revision. This makes
+        // concurrent updates and Desktop promotion observe one monotonic enqueue order.
+        for connection in inner
             .connections
             .values()
             .filter(|connection| connection.desktop_host)
-            .map(|connection| connection.sender.clone())
-            .collect::<Vec<_>>();
-        drop(inner);
-        let mut first_error = None;
-        for sender in senders {
-            if let Err(error) = sender.send(ServerMessage::event(event.clone()))
-                && first_error.is_none()
-            {
-                first_error = Some(error);
-            }
+        {
+            let _ = connection.sender.send(ServerMessage::event(event.clone()));
         }
-        first_error.map_or(Ok(true), |error| {
-            Err(DesktopPresentationError::Outbound(error))
-        })
+    }
+
+    pub fn set_theme_preference(&self, theme_preference: &str) {
+        self.lock_inner().theme_preference = Some(theme_preference.to_owned());
     }
 
     pub fn install_activation_service(&self, service: Arc<dyn RuntimeActivationService>) -> bool {
-        let mut current = self
-            .activation_service
-            .lock()
-            .unwrap_or_else(PoisonError::into_inner);
+        let mut current = self.lock_activation_service();
         if current.is_some() {
             return false;
         }
@@ -293,12 +257,11 @@ impl RuntimeControlState {
     ///
     /// Returns [`RuntimeActionError`] while Runtime is not Ready or Workbench is absent.
     pub fn workbench_url(&self, route: &WorkbenchRoute) -> Result<String, RuntimeActionError> {
-        let inner = self.lock_inner();
-        if inner.status != RuntimeStatus::Ready {
-            return Err(RuntimeActionError::RuntimeNotReady {
-                status: inner.status,
-            });
+        let status = self.status();
+        if status != RuntimeStatus::Ready {
+            return Err(RuntimeActionError::RuntimeNotReady { status });
         }
+        let inner = self.lock_inner();
         let workbench = inner
             .workbench
             .clone()
@@ -317,76 +280,51 @@ impl RuntimeControlState {
         commit: Box<dyn FnOnce() -> Result<(), String> + Send>,
         on_cancel: Box<dyn FnOnce(&str) + Send>,
     ) -> bool {
-        let mut lifecycle = self
-            .lifecycle
-            .lock()
-            .unwrap_or_else(PoisonError::into_inner);
-        if lifecycle.is_some()
-            || self.status() != RuntimeStatus::Ready
-            || Uuid::parse_str(transaction_id).is_err()
-        {
+        let mut lifecycle = self.lock_lifecycle();
+        if *lifecycle != RuntimeLifecycle::Ready || Uuid::parse_str(transaction_id).is_err() {
             return false;
         }
-        *lifecycle = Some(LifecycleTransition::UpdatePreparing(
-            transaction_id.to_owned(),
-        ));
+        *lifecycle = RuntimeLifecycle::UpdatePreparing(transaction_id.to_owned());
         let state = Arc::clone(self);
         let transaction_id = transaction_id.to_owned();
         if thread::Builder::new()
             .name("debrute-product-update".to_owned())
             .spawn(move || {
-                let mut lifecycle = state
-                    .lifecycle
-                    .lock()
-                    .unwrap_or_else(PoisonError::into_inner);
+                let commit_guard = state.lock_product_commit();
+                let lifecycle = state.lock_lifecycle();
                 if !matches!(
-                    lifecycle.as_ref(),
-                    Some(LifecycleTransition::UpdatePreparing(current)) if current == &transaction_id
+                    &*lifecycle,
+                    RuntimeLifecycle::UpdatePreparing(current) if current == &transaction_id
                 ) {
                     drop(lifecycle);
+                    drop(commit_guard);
                     on_cancel("Product Quit won before the update commit boundary.");
                     return;
                 }
-                *lifecycle = Some(LifecycleTransition::Replacing(transaction_id.clone()));
-                state.accepting_connections.store(false, Ordering::Release);
-                state.lock_inner().status = RuntimeStatus::Replacing;
                 drop(lifecycle);
+                if let Err(error) = commit() {
+                    let mut lifecycle = state.lock_lifecycle();
+                    *lifecycle = RuntimeLifecycle::Ready;
+                    drop(lifecycle);
+                    drop(commit_guard);
+                    on_cancel(&error);
+                    return;
+                }
+                let mut lifecycle = state.lock_lifecycle();
+                *lifecycle = RuntimeLifecycle::Replacing(transaction_id);
+                drop(lifecycle);
+                drop(commit_guard);
                 state.broadcast_event_with_flush_budget(
                     &ControlEvent::ProductReplacing,
                     Duration::from_millis(250),
                 );
-                if let Err(error) = commit() {
-                    on_cancel(&error);
-                }
-                let _ = state
-                    .shutdown_sender
-                    .send(RuntimeShutdown::ProductUpdate { transaction_id });
             })
             .is_err()
         {
-            *lifecycle = None;
+            *lifecycle = RuntimeLifecycle::Ready;
             return false;
         }
         true
-    }
-
-    pub fn request_system_termination(&self) {
-        let mut lifecycle = self
-            .lifecycle
-            .lock()
-            .unwrap_or_else(PoisonError::into_inner);
-        if matches!(
-            lifecycle.as_ref(),
-            Some(LifecycleTransition::SystemTermination)
-        ) {
-            return;
-        }
-        *lifecycle = Some(LifecycleTransition::SystemTermination);
-        self.accepting_connections.store(false, Ordering::Release);
-        self.lock_inner().status = RuntimeStatus::Exiting;
-        let _ = self
-            .shutdown_sender
-            .try_send(RuntimeShutdown::SystemTermination);
     }
 
     /// Requests the same one-shot Product Quit used by native Control.
@@ -417,30 +355,23 @@ impl RuntimeControlState {
         if matches!(intent, ActivationIntent::EnsureRuntime) {
             return Ok(ActivationOutcome::Ensured);
         }
-        let service = self
-            .activation_service
-            .lock()
-            .unwrap_or_else(PoisonError::into_inner)
-            .clone();
+        let service = self.lock_activation_service().clone();
         service.map_or(Err(ControlErrorCode::InvalidActivation), |service| {
             service.activate(intent)
         })
     }
 
     fn begin_product_quit(&self) -> QuitAdmission {
-        let mut lifecycle = self
-            .lifecycle
-            .lock()
-            .unwrap_or_else(PoisonError::into_inner);
-        let status = self.status();
-        match status {
-            RuntimeStatus::Exiting => return QuitAdmission::AlreadyAccepted,
-            RuntimeStatus::Replacing => return QuitAdmission::UpdateWon,
-            RuntimeStatus::Starting | RuntimeStatus::Ready => {}
+        let _commit = self.lock_product_commit();
+        let mut lifecycle = self.lock_lifecycle();
+        match &*lifecycle {
+            RuntimeLifecycle::Exiting => return QuitAdmission::AlreadyAccepted,
+            RuntimeLifecycle::Replacing(_) => return QuitAdmission::UpdateWon,
+            RuntimeLifecycle::Starting
+            | RuntimeLifecycle::Ready
+            | RuntimeLifecycle::UpdatePreparing(_) => {}
         }
-        *lifecycle = Some(LifecycleTransition::Exiting);
-        self.accepting_connections.store(false, Ordering::Release);
-        self.lock_inner().status = RuntimeStatus::Exiting;
+        *lifecycle = RuntimeLifecycle::Exiting;
         QuitAdmission::Started
     }
 
@@ -449,7 +380,6 @@ impl RuntimeControlState {
             &ControlEvent::ProductExiting,
             Duration::from_millis(250),
         );
-        let _ = self.shutdown_sender.try_send(RuntimeShutdown::ProductQuit);
     }
 
     fn register_connection(
@@ -457,7 +387,9 @@ impl RuntimeControlState {
         sender: &ControlSender,
         role: ClientRole,
     ) -> Result<ConnectionLease, ControlServerError> {
-        if !self.accepting_connections.load(Ordering::Acquire) {
+        let lifecycle = self.lock_lifecycle();
+        let status = lifecycle.status();
+        if matches!(status, RuntimeStatus::Exiting | RuntimeStatus::Replacing) {
             sender
                 .send(ServerMessage::handshake_rejected(
                     HandshakeRejection::RuntimeStopping,
@@ -478,11 +410,13 @@ impl RuntimeControlState {
         );
         if let Err(error) = sender.send(ServerMessage::handshake_accepted(
             &inner.instance_id,
-            inner.status,
+            status,
         )) {
             inner.connections.remove(&connection_id);
             return Err(ControlServerError::Outbound(error));
         }
+        drop(inner);
+        drop(lifecycle);
         Ok(ConnectionLease {
             state: Arc::clone(self),
             connection_id,
@@ -510,10 +444,11 @@ impl RuntimeControlState {
             };
         }
         if matches!(request, ControlRequest::Inspect) {
+            let status = self.status();
             let inner = self.lock_inner();
             return ControlResponse::Inspection {
                 instance_id: inner.instance_id.clone(),
-                status: inner.status,
+                status,
                 executable_identity: inner.executable_identity.clone(),
             };
         }
@@ -584,32 +519,7 @@ impl RuntimeControlState {
                 }
             }
             ControlRequest::CreateDesktopLaunchTicket { window_key } => {
-                let inner = self.lock_inner();
-                let Some(connection) = inner.connections.get(connection_id) else {
-                    return ControlResponse::Rejected {
-                        code: ControlErrorCode::RoleDenied,
-                    };
-                };
-                if !connection.desktop_host {
-                    return ControlResponse::Rejected {
-                        code: ControlErrorCode::RoleDenied,
-                    };
-                }
-                let Some(workbench) = inner.workbench.clone() else {
-                    return ControlResponse::Rejected {
-                        code: ControlErrorCode::RuntimeStarting,
-                    };
-                };
-                drop(inner);
-                match self
-                    .desktop
-                    .create_launch_ticket(&connection_id.0, window_key, &workbench)
-                {
-                    Ok((ticket, url)) => ControlResponse::DesktopLaunchTicket { ticket, url },
-                    Err(_) => ControlResponse::Rejected {
-                        code: ControlErrorCode::InvalidDesktopWindow,
-                    },
-                }
+                self.desktop_launch_ticket_response(connection_id, window_key)
             }
             ControlRequest::DesktopWindowClosed { window_key } => {
                 let workbench = self.lock_inner().workbench.clone();
@@ -627,6 +537,48 @@ impl RuntimeControlState {
             ControlRequest::Inspect | ControlRequest::QuitProduct => {
                 unreachable!("request was dispatched earlier")
             }
+        }
+    }
+
+    fn desktop_launch_ticket_response(
+        &self,
+        connection_id: &ConnectionId,
+        window_key: &str,
+    ) -> ControlResponse {
+        let inner = self.lock_inner();
+        let Some(connection) = inner.connections.get(connection_id) else {
+            return ControlResponse::Rejected {
+                code: ControlErrorCode::RoleDenied,
+            };
+        };
+        if !connection.desktop_host {
+            return ControlResponse::Rejected {
+                code: ControlErrorCode::RoleDenied,
+            };
+        }
+        let Some(workbench) = inner.workbench.clone() else {
+            return ControlResponse::Rejected {
+                code: ControlErrorCode::RuntimeStarting,
+            };
+        };
+        let Some(theme_preference) = inner.theme_preference.clone() else {
+            return ControlResponse::Rejected {
+                code: ControlErrorCode::DesktopUnavailable,
+            };
+        };
+        drop(inner);
+        match self
+            .desktop
+            .create_launch_ticket(&connection_id.0, window_key, &workbench)
+        {
+            Ok((ticket, url)) => ControlResponse::DesktopLaunchTicket {
+                ticket,
+                url,
+                theme_preference,
+            },
+            Err(_) => ControlResponse::Rejected {
+                code: ControlErrorCode::InvalidDesktopWindow,
+            },
         }
     }
 
@@ -653,12 +605,17 @@ impl RuntimeControlState {
                     Err(code) => ControlResponse::Rejected { code },
                 };
             }
-            let sender = self
-                .lock_inner()
+            let mut inner = self.lock_inner();
+            let Some(revision) = inner.recent_projects_revision else {
+                return ControlResponse::Rejected {
+                    code: ControlErrorCode::DesktopUnavailable,
+                };
+            };
+            let Some(sender) = inner
                 .connections
                 .get(connection_id)
-                .map(|connection| connection.sender.clone());
-            let Some(sender) = sender else {
+                .map(|connection| connection.sender.clone())
+            else {
                 return ControlResponse::Rejected {
                     code: ControlErrorCode::RoleDenied,
                 };
@@ -671,22 +628,18 @@ impl RuntimeControlState {
                     code: ControlErrorCode::DesktopUnavailable,
                 };
             }
-            let (revision, projects) = {
-                let mut inner = self.lock_inner();
-                if let Some(connection) = inner.connections.get_mut(connection_id) {
-                    connection.desktop_host = true;
-                }
-                (
-                    inner.recent_projects_revision,
-                    inner.recent_projects.clone(),
-                )
-            };
+            inner
+                .connections
+                .get_mut(connection_id)
+                .expect("The promoting connection remains registered for its request")
+                .desktop_host = true;
             let _ = sender.send(ServerMessage::event(
                 ControlEvent::DesktopRecentProjectsChanged {
                     global_revision: revision,
-                    recent_projects: projects,
+                    recent_projects: inner.recent_projects.clone(),
                 },
             ));
+            drop(inner);
             return match self.activate_intent(intent) {
                 Ok(_) => ControlResponse::Activation {
                     outcome: ActivationOutcome::PromotedToDesktopHost,
@@ -752,7 +705,38 @@ impl RuntimeControlState {
     }
 
     fn lock_inner(&self) -> MutexGuard<'_, RuntimeControlInner> {
-        self.inner.lock().unwrap_or_else(PoisonError::into_inner)
+        self.inner
+            .lock()
+            .expect("Runtime Control state lock poisoned")
+    }
+
+    fn lock_lifecycle(&self) -> MutexGuard<'_, RuntimeLifecycle> {
+        self.lifecycle
+            .lock()
+            .expect("Runtime lifecycle lock poisoned")
+    }
+
+    fn lock_product_commit(&self) -> MutexGuard<'_, ()> {
+        self.product_commit
+            .lock()
+            .expect("Product commit lock poisoned")
+    }
+
+    fn lock_activation_service(&self) -> MutexGuard<'_, Option<Arc<dyn RuntimeActivationService>>> {
+        self.activation_service
+            .lock()
+            .expect("Runtime activation service lock poisoned")
+    }
+}
+
+impl RuntimeLifecycle {
+    fn status(&self) -> RuntimeStatus {
+        match self {
+            Self::Starting => RuntimeStatus::Starting,
+            Self::Ready | Self::UpdatePreparing(_) => RuntimeStatus::Ready,
+            Self::Exiting => RuntimeStatus::Exiting,
+            Self::Replacing(_) => RuntimeStatus::Replacing,
+        }
     }
 }
 
@@ -826,24 +810,6 @@ impl fmt::Display for WorkbenchInstallError {
 
 impl Error for WorkbenchInstallError {}
 
-impl fmt::Display for DesktopPresentationError {
-    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
-        match self {
-            Self::RevisionExhausted => formatter.write_str("Global revision is exhausted"),
-            Self::Outbound(error) => write!(formatter, "{error}"),
-        }
-    }
-}
-
-impl Error for DesktopPresentationError {
-    fn source(&self) -> Option<&(dyn Error + 'static)> {
-        match self {
-            Self::Outbound(error) => Some(error),
-            Self::RevisionExhausted => None,
-        }
-    }
-}
-
 impl fmt::Display for RuntimeActionError {
     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
@@ -869,6 +835,13 @@ impl Error for RuntimeActionError {
 }
 
 pub trait ControlTransport: Read + Write + Send + Sync + 'static {
+    /// Sets the bounded I/O wait used while waiting for Runtime readiness.
+    ///
+    /// # Errors
+    ///
+    /// Returns an operating-system error when transport configuration fails.
+    fn set_io_timeout(&mut self, timeout: Option<Duration>) -> io::Result<()>;
+
     /// Removes the initial bounded handshake I/O settings.
     ///
     /// # Errors
@@ -889,9 +862,13 @@ pub trait ControlTransport: Read + Write + Send + Sync + 'static {
 
 #[cfg(target_os = "macos")]
 impl ControlTransport for UnixStream {
+    fn set_io_timeout(&mut self, timeout: Option<Duration>) -> io::Result<()> {
+        self.set_read_timeout(timeout)?;
+        self.set_write_timeout(timeout)
+    }
+
     fn clear_handshake_timeouts(&mut self) -> io::Result<()> {
-        self.set_read_timeout(None)?;
-        self.set_write_timeout(None)
+        self.set_io_timeout(None)
     }
 
     fn try_clone_transport(&self) -> io::Result<Self> {
@@ -905,9 +882,13 @@ impl ControlTransport for UnixStream {
 
 #[cfg(target_os = "windows")]
 impl ControlTransport for WindowsControlConnection {
-    fn clear_handshake_timeouts(&mut self) -> io::Result<()> {
-        self.set_read_timeout(None);
+    fn set_io_timeout(&mut self, timeout: Option<Duration>) -> io::Result<()> {
+        self.set_read_timeout(timeout);
         Ok(())
+    }
+
+    fn clear_handshake_timeouts(&mut self) -> io::Result<()> {
+        self.set_io_timeout(None)
     }
 
     fn try_clone_transport(&self) -> io::Result<Self> {

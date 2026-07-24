@@ -2,7 +2,7 @@ use std::{
     collections::HashMap,
     error::Error,
     fmt,
-    sync::{Mutex, MutexGuard, PoisonError},
+    sync::{Mutex, MutexGuard},
 };
 
 use uuid::Uuid;
@@ -218,7 +218,7 @@ impl DesktopWindowTopology {
     }
 
     fn lock_inner(&self) -> MutexGuard<'_, DesktopTopologyInner> {
-        self.inner.lock().unwrap_or_else(PoisonError::into_inner)
+        self.inner.lock().expect("Desktop topology lock poisoned")
     }
 }
 

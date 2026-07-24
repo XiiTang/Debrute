@@ -81,11 +81,14 @@ key, variant failure, or image load failure is surfaced as a preview error. It
 does not fall back to the initial poster, a Generated Asset last frame, another
 timestamp, or the raw video.
 
-Source readiness is returned per video target. The first current, visible
-preview may publish immediately. Later width changes share the image/video
-preview start scheduler, which pauses deferred starts during interaction and
-rejects stale or culled work. Active and culled videos are not new preview
-targets.
+Source readiness is returned as a Project-path-keyed record with exactly one
+entry per requested video target; it is not an ordered array. A missing or
+identity-mismatched entry is a preview protocol error rather than an empty
+preview. The first current, visible preview may publish immediately. Later
+width changes share the image/video preview start scheduler, which pauses
+deferred starts during interaction, rejects stale work, and retains current
+culled work until visibility changes. Active and culled videos are not new
+preview targets.
 
 Cache identity includes Canvas ID, Project path key, video revision, source
 kind, and source key. The source key includes the `Canvas Video Preview Source
@@ -109,10 +112,11 @@ no Raster Preview Pool slot.
 
 The requested width uses the same raster-preview width model as Canvas images.
 Cache paths are derived state and are excluded from Project-visible content.
-Runtime removes old video revisions, engine versions, and source identities
-that no longer match the persisted Playback Position or selected initial
-poster. It retains the current identity's requested width variants without a
-byte quota, LRU, or TTL.
+Runtime removes superseded video revisions and source identities that no longer
+match the persisted Playback Position or selected initial poster. Under the
+current source identity it reads and writes only the exact current Raster Engine
+path; it neither enumerates nor removes sibling engine-version directories. It
+retains requested width variants without a byte quota, LRU, or TTL.
 
 ## Player Metadata And Raw Media
 
@@ -124,9 +128,11 @@ metadata. A single subtitle or caption track is the default; multiple language
 tracks are not auto-selected.
 
 Runtime's revisioned raw-file endpoint serves video, audio, and WebVTT MIME
-types and supports single byte ranges. Valid ranges return `206` with range
-headers; unsatisfiable ranges return `416`. Stale revisions remain errors rather
-than being replaced with a newly invented URL.
+types and supports single byte ranges. A complete response returns `200`; a
+valid range returns `206` with range headers; an unsatisfiable range returns
+`416`. These are closed route outcomes rather than numeric statuses repaired by
+a fallback. Stale revisions remain errors rather than being replaced with a
+newly invented URL.
 
 ## Error Ownership
 
@@ -148,7 +154,7 @@ presentation and are not multiplied by that text scale.
 - Media classification, projection, MIME types, dimensions, video presentation,
   preview sources, cache paths, and frame extraction:
   `apps/runtime/src/project/media.rs` and `apps/runtime/src/project/previews/`.
-- Playback and feedback document types and mutations:
+- Playback and feedback declarations and browser presentation values:
   `packages/canvas-core/src/`.
 - Raw revisioned media and range responses:
   `apps/runtime/src/workbench/project_routes.rs`.

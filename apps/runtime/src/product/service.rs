@@ -1,9 +1,10 @@
 use std::{
     fs,
     path::PathBuf,
-    sync::{Arc, Mutex, PoisonError},
+    sync::{Arc, Mutex, MutexGuard, TryLockError},
 };
 
+use axum::http::StatusCode;
 use semver::Version;
 use serde::Serialize;
 use serde_json::{Value, json};
@@ -11,10 +12,8 @@ use uuid::Uuid;
 
 use crate::{
     control::RuntimeControlState,
-    workbench::{
-        ProductUpdateInitiator, RuntimeHttpServiceError, RuntimeProductHttpService,
-        WorkbenchRuntimeServices,
-    },
+    global::GlobalRuntimeService,
+    workbench::{ProductUpdateInitiator, RuntimeHttpServiceError, RuntimeProductHttpService},
 };
 
 use super::{
@@ -32,7 +31,7 @@ pub struct RuntimeProductService {
     store: Arc<ProductStore>,
     native: NativeUpdatePlatform,
     runtime: Arc<RuntimeControlState>,
-    services: Arc<WorkbenchRuntimeServices>,
+    global: Arc<GlobalRuntimeService>,
     source: Arc<dyn ProductReleaseSource>,
     operation: Mutex<()>,
     projection: Arc<Mutex<ProductProjection>>,
@@ -48,7 +47,12 @@ enum ProductResumeSource {
     Desktop { target: ResumeTarget },
     Browser { target: ResumeTarget },
     Cli,
-    Bootstrap,
+}
+
+fn resume_target(project_id: Option<String>) -> ResumeTarget {
+    project_id.map_or(ResumeTarget::Root, |project_id| ResumeTarget::Project {
+        project_id,
+    })
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -108,13 +112,21 @@ impl RuntimeProductService {
         store: Arc<ProductStore>,
         native: NativeUpdatePlatform,
         runtime: Arc<RuntimeControlState>,
-        services: Arc<WorkbenchRuntimeServices>,
+        global: Arc<GlobalRuntimeService>,
     ) -> Result<Arc<Self>, RuntimeHttpServiceError> {
         let source = Arc::new(GitHubProductReleaseSource::new().map_err(|error| {
-            RuntimeHttpServiceError::new(500, "product_update_unavailable", error.to_string())
+            RuntimeHttpServiceError::new(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "product_update_unavailable",
+                error.to_string(),
+            )
         })?);
         let initial_update = match store.pending().map_err(|error| {
-            RuntimeHttpServiceError::new(500, "product_update_unavailable", error.to_string())
+            RuntimeHttpServiceError::new(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "product_update_unavailable",
+                error.to_string(),
+            )
         })? {
             Some(pending) => UpdateState::Error {
                 current_version: current_version.clone(),
@@ -137,7 +149,7 @@ impl RuntimeProductService {
             store,
             native,
             runtime,
-            services,
+            global,
             source,
             initial_update,
         ))
@@ -152,11 +164,11 @@ impl RuntimeProductService {
         store: Arc<ProductStore>,
         native: NativeUpdatePlatform,
         runtime: Arc<RuntimeControlState>,
-        services: Arc<WorkbenchRuntimeServices>,
+        global: Arc<GlobalRuntimeService>,
         source: Arc<dyn ProductReleaseSource>,
         initial_update: UpdateState,
     ) -> Arc<Self> {
-        Arc::new(Self {
+        let service = Arc::new(Self {
             projection: Arc::new(Mutex::new(ProductProjection {
                 update: initial_update,
                 available: None,
@@ -168,10 +180,12 @@ impl RuntimeProductService {
             store,
             native,
             runtime,
-            services,
+            global,
             source,
             operation: Mutex::new(()),
-        })
+        });
+        service.publish_state();
+        service
     }
 
     fn product_state(&self) -> Value {
@@ -182,17 +196,14 @@ impl RuntimeProductService {
             &self
                 .projection
                 .lock()
-                .unwrap_or_else(PoisonError::into_inner)
+                .expect("Product projection lock poisoned")
                 .update,
         )
     }
 
     fn publish_state(&self) -> Value {
         let state = self.product_state();
-        let _ = self
-            .services
-            .global()
-            .publish_product_changed(state.clone());
+        self.global.publish_product_changed(state.clone());
         state
     }
 
@@ -201,7 +212,7 @@ impl RuntimeProductService {
             let mut projection = self
                 .projection
                 .lock()
-                .unwrap_or_else(PoisonError::into_inner);
+                .expect("Product projection lock poisoned");
             projection.available = None;
             projection.update = UpdateState::Checking {
                 current_version: self.current_version.clone(),
@@ -212,7 +223,7 @@ impl RuntimeProductService {
         let mut projection = self
             .projection
             .lock()
-            .unwrap_or_else(PoisonError::into_inner);
+            .expect("Product projection lock poisoned");
         match result {
             Ok(Some(release)) => {
                 let current = Version::parse(&self.current_version);
@@ -250,7 +261,7 @@ impl RuntimeProductService {
                     (Ok(_), Ok(_)) => {
                         projection.update = UpdateState::Idle {
                             current_version: self.current_version.clone(),
-                            last_checked_at: Some(now()),
+                            last_checked_at: Some(crate::now_rfc3339()),
                             update_available: false,
                         };
                     }
@@ -267,7 +278,7 @@ impl RuntimeProductService {
             Ok(None) => {
                 projection.update = UpdateState::Idle {
                     current_version: self.current_version.clone(),
-                    last_checked_at: Some(now()),
+                    last_checked_at: Some(crate::now_rfc3339()),
                     update_available: false,
                 };
             }
@@ -340,34 +351,21 @@ impl RuntimeProductService {
         result
     }
 
-    fn resolve_resume_source(
-        &self,
-        initiator: ProductUpdateInitiator,
-    ) -> Result<ProductResumeSource, RuntimeHttpServiceError> {
+    fn resolve_resume_source(initiator: ProductUpdateInitiator) -> ProductResumeSource {
         match initiator {
-            ProductUpdateInitiator::Cli => Ok(ProductResumeSource::Cli),
-            ProductUpdateInitiator::Bootstrap => Ok(ProductResumeSource::Bootstrap),
-            ProductUpdateInitiator::Frontend { browser_session }
-                if self.services.is_desktop_browser_session(&browser_session) =>
-            {
-                Ok(ProductResumeSource::Desktop {
-                    target: self.services.resume_target_for_browser(&browser_session)?,
-                })
-            }
-            ProductUpdateInitiator::Frontend { browser_session } => {
-                Ok(ProductResumeSource::Browser {
-                    target: self.services.resume_target_for_browser(&browser_session)?,
-                })
-            }
+            ProductUpdateInitiator::Cli => ProductResumeSource::Cli,
+            ProductUpdateInitiator::Desktop { project_id } => ProductResumeSource::Desktop {
+                target: resume_target(project_id),
+            },
+            ProductUpdateInitiator::Browser { project_id } => ProductResumeSource::Browser {
+                target: resume_target(project_id),
+            },
         }
     }
 
     fn resume_intent(source: ProductResumeSource) -> ResumeIntent {
         match source {
             ProductResumeSource::Cli => ResumeIntent::Cli,
-            ProductResumeSource::Bootstrap => ResumeIntent::Bootstrap {
-                target: ResumeTarget::Root,
-            },
             ProductResumeSource::Desktop { target } => ResumeIntent::Desktop { target },
             ProductResumeSource::Browser { target } => ResumeIntent::Browser { target },
         }
@@ -376,7 +374,7 @@ impl RuntimeProductService {
     fn set_apply_error(&self, message: String, update_version: Option<String>) -> Value {
         self.projection
             .lock()
-            .unwrap_or_else(PoisonError::into_inner)
+            .expect("Product projection lock poisoned")
             .update = UpdateState::Error {
             current_version: self.current_version.clone(),
             operation: "apply",
@@ -390,17 +388,29 @@ impl RuntimeProductService {
         if matches!(
             self.projection
                 .lock()
-                .unwrap_or_else(PoisonError::into_inner)
+                .expect("Product projection lock poisoned")
                 .update,
             UpdateState::Installing { .. }
         ) {
             Err(RuntimeHttpServiceError::new(
-                409,
+                StatusCode::CONFLICT,
                 "product_update_busy",
                 "A Product update transition is active.",
             ))
         } else {
             Ok(())
+        }
+    }
+
+    fn lock_operation(&self) -> Result<MutexGuard<'_, ()>, RuntimeHttpServiceError> {
+        match self.operation.try_lock() {
+            Ok(operation) => Ok(operation),
+            Err(TryLockError::WouldBlock) => Err(RuntimeHttpServiceError::new(
+                StatusCode::CONFLICT,
+                "product_update_busy",
+                "A Product operation is active.",
+            )),
+            Err(TryLockError::Poisoned(_)) => panic!("Product operation lock poisoned"),
         }
     }
 
@@ -411,27 +421,26 @@ impl RuntimeProductService {
     ) -> Result<Value, RuntimeHttpServiceError> {
         self.projection
             .lock()
-            .unwrap_or_else(PoisonError::into_inner)
+            .expect("Product projection lock poisoned")
             .update = UpdateState::Installing {
             current_version: self.current_version.clone(),
             update_version: target_version.clone(),
         };
         self.publish_state();
         let transition_id = Uuid::new_v4().to_string();
-        let services = Arc::clone(&self.services);
+        let global = Arc::clone(&self.global);
         let cancel_projection = Arc::clone(&self.projection);
         let cancel_current_version = self.current_version.clone();
         let cancel_platform = self.platform;
         let cancel_debrute_home = self.debrute_home.clone();
         let cancel_update_version = target_version.clone();
-        let cancel_services = Arc::clone(&services);
         let accepted = self.runtime.request_product_update(
             &transition_id,
             commit,
             Box::new(move |message| {
                 cancel_projection
                     .lock()
-                    .unwrap_or_else(PoisonError::into_inner)
+                    .expect("Product projection lock poisoned")
                     .update = UpdateState::Error {
                     current_version: cancel_current_version.clone(),
                     operation: "apply",
@@ -444,10 +453,10 @@ impl RuntimeProductService {
                     &cancel_debrute_home,
                     &cancel_projection
                         .lock()
-                        .unwrap_or_else(PoisonError::into_inner)
+                        .expect("Product projection lock poisoned")
                         .update,
                 );
-                let _ = cancel_services.global().publish_product_changed(state);
+                global.publish_product_changed(state);
             }),
         );
         if !accepted {
@@ -456,7 +465,7 @@ impl RuntimeProductService {
                 Some(target_version),
             );
             return Err(RuntimeHttpServiceError::new(
-                409,
+                StatusCode::CONFLICT,
                 "product_update_busy",
                 "Runtime cannot enter the Product update transition.",
             ));
@@ -471,13 +480,7 @@ impl RuntimeProductHttpService for RuntimeProductService {
     }
 
     fn check(&self) -> Result<Value, RuntimeHttpServiceError> {
-        let _operation = self.operation.try_lock().map_err(|_| {
-            RuntimeHttpServiceError::new(
-                409,
-                "product_update_busy",
-                "A Product operation is active.",
-            )
-        })?;
+        let _operation = self.lock_operation()?;
         self.reject_active_install()?;
         Ok(self.perform_check())
     }
@@ -489,13 +492,7 @@ impl RuntimeProductHttpService for RuntimeProductService {
         initiator: ProductUpdateInitiator,
     ) -> Result<Value, RuntimeHttpServiceError> {
         require_empty_object(input)?;
-        let _operation = self.operation.try_lock().map_err(|_| {
-            RuntimeHttpServiceError::new(
-                409,
-                "product_update_busy",
-                "A Product operation is active.",
-            )
-        })?;
+        let _operation = self.lock_operation()?;
         self.reject_active_install()?;
         if let Some(pending) = self
             .store
@@ -516,7 +513,7 @@ impl RuntimeProductHttpService for RuntimeProductService {
         let needs_check = !matches!(
             self.projection
                 .lock()
-                .unwrap_or_else(PoisonError::into_inner)
+                .expect("Product projection lock poisoned")
                 .update,
             UpdateState::Available { .. }
         );
@@ -526,17 +523,17 @@ impl RuntimeProductHttpService for RuntimeProductService {
         let release = self
             .projection
             .lock()
-            .unwrap_or_else(PoisonError::into_inner)
+            .expect("Product projection lock poisoned")
             .available
             .clone();
         let Some(release) = release else {
             return Ok(json!({ "state": self.product_state() }));
         };
-        let resume_source = self.resolve_resume_source(initiator)?;
+        let resume_source = Self::resolve_resume_source(initiator);
         let target_version = release.version().to_owned();
         self.projection
             .lock()
-            .unwrap_or_else(PoisonError::into_inner)
+            .expect("Product projection lock poisoned")
             .update = UpdateState::Installing {
             current_version: self.current_version.clone(),
             update_version: target_version.clone(),
@@ -562,25 +559,6 @@ impl RuntimeProductHttpService for RuntimeProductService {
                     .map_err(|error| error.to_string())
             }),
         )
-    }
-
-    fn quit(&self, input: &Value) -> Result<Value, RuntimeHttpServiceError> {
-        require_empty_object(input)?;
-        self.runtime
-            .request_product_quit()
-            .map(|()| json!({ "accepted": true }))
-            .map_err(|code| {
-                RuntimeHttpServiceError::new(
-                    409,
-                    match code {
-                        crate::control::ControlErrorCode::UpdateCommitInProgress => {
-                            "update_commit_in_progress"
-                        }
-                        _ => "product_quit_failed",
-                    },
-                    "Runtime cannot enter Product Quit.",
-                )
-            })
     }
 }
 
@@ -615,7 +593,7 @@ fn require_empty_object(input: &Value) -> Result<(), RuntimeHttpServiceError> {
         Ok(())
     } else {
         Err(RuntimeHttpServiceError::new(
-            400,
+            StatusCode::BAD_REQUEST,
             "invalid_product_request",
             "Product request contains unsupported fields.",
         ))
@@ -623,9 +601,55 @@ fn require_empty_object(input: &Value) -> Result<(), RuntimeHttpServiceError> {
 }
 
 fn update_error(message: &str) -> RuntimeHttpServiceError {
-    RuntimeHttpServiceError::new(500, "product_update_failed", message)
+    RuntimeHttpServiceError::new(
+        StatusCode::INTERNAL_SERVER_ERROR,
+        "product_update_failed",
+        message,
+    )
 }
 
-fn now() -> String {
-    crate::now_rfc3339()
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn update_initiator_freezes_the_authorized_frontend_resume_target() {
+        for (initiator, expected) in [
+            (
+                ProductUpdateInitiator::Desktop {
+                    project_id: Some("desktop-project".to_owned()),
+                },
+                ResumeIntent::Desktop {
+                    target: ResumeTarget::Project {
+                        project_id: "desktop-project".to_owned(),
+                    },
+                },
+            ),
+            (
+                ProductUpdateInitiator::Desktop { project_id: None },
+                ResumeIntent::Desktop {
+                    target: ResumeTarget::Root,
+                },
+            ),
+            (
+                ProductUpdateInitiator::Browser {
+                    project_id: Some("browser-project".to_owned()),
+                },
+                ResumeIntent::Browser {
+                    target: ResumeTarget::Project {
+                        project_id: "browser-project".to_owned(),
+                    },
+                },
+            ),
+            (
+                ProductUpdateInitiator::Browser { project_id: None },
+                ResumeIntent::Browser {
+                    target: ResumeTarget::Root,
+                },
+            ),
+        ] {
+            let source = RuntimeProductService::resolve_resume_source(initiator);
+            assert_eq!(RuntimeProductService::resume_intent(source), expected);
+        }
+    }
 }

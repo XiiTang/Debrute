@@ -16,13 +16,16 @@ use axum::{
 use serde::Serialize;
 
 use super::{
-    CliAuthorizationVerifier, WORKBENCH_CONNECTION_HEADER, WORKBENCH_SESSION_COOKIE,
-    WorkbenchLaunchService, WorkbenchRuntimeServices, authority::is_opaque_value,
+    CliAuthorizationVerifier, RuntimeCliHttpService, RuntimeProductHttpService,
+    WORKBENCH_CONNECTION_HEADER, WORKBENCH_SESSION_COOKIE, WorkbenchLaunchService,
+    WorkbenchRuntimeServices, authority::is_opaque_value,
 };
 use crate::photoshop::{PHOTOSHOP_CEP_FILE_ORIGIN, PHOTOSHOP_UXP_ORIGIN};
+use crate::project::is_valid_stable_project_id;
 
 use super::routes::{
     browser_api_router, cli_api_router, plugin_api_router, plugin_transfer_router,
+    product_api_router,
 };
 
 #[derive(Clone)]
@@ -30,14 +33,19 @@ pub(super) struct WorkbenchRouterState {
     pub origin: String,
     authority: String,
     pub(super) launch_service: Arc<WorkbenchLaunchService>,
-    cli_authorization: Arc<dyn CliAuthorizationVerifier>,
-    pub services: Option<Arc<WorkbenchRuntimeServices>>,
+    pub(super) cli_authorization: Arc<dyn CliAuthorizationVerifier>,
+    pub(super) cli: Arc<dyn RuntimeCliHttpService>,
+    pub(super) product: Option<Arc<dyn RuntimeProductHttpService>>,
+    pub services: Arc<WorkbenchRuntimeServices>,
     assets_directory: PathBuf,
     index_path: PathBuf,
 }
 
 #[derive(Debug, Clone)]
 pub(super) struct BrowserSession(pub String);
+
+#[derive(Debug, Clone)]
+pub(super) struct CliRequestAuthorization(pub String);
 
 #[derive(Debug, Clone)]
 pub(super) struct ProjectAuthorization {
@@ -55,7 +63,9 @@ pub(super) fn workbench_router(
     index_path: PathBuf,
     launch_service: Arc<WorkbenchLaunchService>,
     cli_authorization: Arc<dyn CliAuthorizationVerifier>,
-    services: Option<Arc<WorkbenchRuntimeServices>>,
+    services: Arc<WorkbenchRuntimeServices>,
+    cli: Arc<dyn RuntimeCliHttpService>,
+    product: Option<Arc<dyn RuntimeProductHttpService>>,
 ) -> Router {
     let origin = launch_service.origin().to_owned();
     let authority = origin
@@ -67,6 +77,8 @@ pub(super) fn workbench_router(
         authority,
         launch_service,
         cli_authorization,
+        cli,
+        product,
         services,
         assets_directory,
         index_path,
@@ -77,8 +89,12 @@ pub(super) fn workbench_router(
             state.clone(),
             authorize_cli_api,
         ));
+    let mut browser_routes = browser_api_router();
+    if state.product.is_some() {
+        browser_routes = browser_routes.merge(product_api_router());
+    }
     let workbench_api =
-        browser_api_router()
+        browser_routes
             .fallback(route_not_found)
             .layer(middleware::from_fn_with_state(
                 state.clone(),
@@ -133,15 +149,17 @@ async fn serve_web_asset(State(state): State<WorkbenchRouterState>, request: Req
     }) {
         return route_not_found_response();
     }
-    let requested = if path.is_empty() {
+    let selected = if is_workbench_page_route(request.uri().path(), request.uri().query()) {
         state.index_path.clone()
     } else {
-        state.assets_directory.join(path)
-    };
-    let selected = match tokio::fs::metadata(&requested).await {
-        Ok(metadata) if metadata.is_file() => requested,
-        _ if std::path::Path::new(path).extension().is_none() => state.index_path.clone(),
-        _ => return route_not_found_response(),
+        if path == "index.html" {
+            return route_not_found_response();
+        }
+        let requested = state.assets_directory.join(path);
+        match tokio::fs::metadata(&requested).await {
+            Ok(metadata) if metadata.is_file() => requested,
+            _ => return route_not_found_response(),
+        }
     };
     let root = match tokio::fs::canonicalize(&state.assets_directory).await {
         Ok(root) => root,
@@ -173,7 +191,65 @@ async fn serve_web_asset(State(state): State<WorkbenchRouterState>, request: Req
         } else {
             axum::body::Body::from(bytes)
         })
-        .unwrap_or_else(|_| StatusCode::INTERNAL_SERVER_ERROR.into_response())
+        .expect("Workbench asset response headers are valid")
+}
+
+fn is_workbench_page_route(path: &str, query: Option<&str>) -> bool {
+    match path {
+        "/" => query.is_none(),
+        "/open" => query.is_none_or(valid_open_query),
+        _ => {
+            query.is_none()
+                && path
+                    .strip_prefix("/projects/")
+                    .is_some_and(is_valid_stable_project_id)
+        }
+    }
+}
+
+fn valid_open_query(query: &str) -> bool {
+    let Some(value) = query.strip_prefix("path=") else {
+        return false;
+    };
+    !value.is_empty() && !value.contains('&') && has_valid_percent_encoded_utf8(value)
+}
+
+fn has_valid_percent_encoded_utf8(value: &str) -> bool {
+    let bytes = value.as_bytes();
+    let mut decoded = Vec::with_capacity(bytes.len());
+    let mut index = 0;
+    while index < bytes.len() {
+        if bytes[index] == b'%' {
+            if index + 2 >= bytes.len() {
+                return false;
+            }
+            let Some(high) = hex_value(bytes[index + 1]) else {
+                return false;
+            };
+            let Some(low) = hex_value(bytes[index + 2]) else {
+                return false;
+            };
+            decoded.push(high << 4 | low);
+            index += 3;
+        } else {
+            decoded.push(if bytes[index] == b'+' {
+                b' '
+            } else {
+                bytes[index]
+            });
+            index += 1;
+        }
+    }
+    String::from_utf8(decoded).is_ok_and(|value| !value.is_empty())
+}
+
+const fn hex_value(byte: u8) -> Option<u8> {
+    match byte {
+        b'0'..=b'9' => Some(byte - b'0'),
+        b'a'..=b'f' => Some(byte - b'a' + 10),
+        b'A'..=b'F' => Some(byte - b'A' + 10),
+        _ => None,
+    }
 }
 
 fn web_asset_content_type(path: &std::path::Path) -> &'static str {
@@ -250,16 +326,18 @@ async fn authorize_workbench_api(
     let Ok(project_id) = project_id else {
         return forbidden();
     };
-    let Some(services) = state.services.as_ref() else {
-        return forbidden();
-    };
+    let services = &state.services;
     let passive_media = matches!(*request.method(), Method::GET | Method::HEAD)
         && is_passive_project_media_route(original_path);
     let is_websocket =
         has_exact_header(request.headers(), axum::http::header::UPGRADE, "websocket");
     let is_terminal_websocket = request.uri().path().ends_with("/terminals/ws") && is_websocket;
     let context = if passive_media || is_terminal_websocket {
-        services.connections().context_for_browser_session(&session)
+        project_id.as_deref().and_then(|project_id| {
+            services
+                .connections()
+                .context_for_browser_session_project(&session, project_id)
+        })
     } else {
         let Ok(Some(credential)) = one_header(request.headers(), connection_header) else {
             return forbidden();
@@ -306,7 +384,7 @@ async fn authorize_workbench_api(
 
 async fn authorize_cli_api(
     State(state): State<WorkbenchRouterState>,
-    request: Request,
+    mut request: Request,
     next: Next,
 ) -> Response {
     if request.headers().contains_key(ORIGIN) {
@@ -321,6 +399,10 @@ async fn authorize_cli_api(
     if authorization.is_empty() || !state.cli_authorization.is_cli_authorized(authorization) {
         return forbidden();
     }
+    let authorization = authorization.to_owned();
+    request
+        .extensions_mut()
+        .insert(CliRequestAuthorization(authorization));
     next.run(request).await
 }
 
@@ -387,9 +469,7 @@ async fn authorize_plugin_api(
             return forbidden();
         };
         let bearer = bearer.to_owned();
-        let Some(services) = state.services.as_ref() else {
-            return forbidden();
-        };
+        let services = &state.services;
         let plugin_instance_id = match services.photoshop().state_for_bearer(&bearer) {
             Ok(view) => view
                 .paired_plugins
@@ -516,7 +596,7 @@ struct ErrorBody {
     message: String,
 }
 
-fn browser_session_cookie(headers: &HeaderMap) -> Result<Option<&str>, ()> {
+pub(super) fn browser_session_cookie(headers: &HeaderMap) -> Result<Option<&str>, ()> {
     let mut session = None;
     for cookie_header in headers.get_all(COOKIE) {
         let cookie_header = cookie_header.to_str().map_err(|_| ())?;
@@ -565,7 +645,7 @@ fn scoped_project_id(path: &str) -> Result<Option<&str>, ()> {
         return Ok(None);
     };
     let project_id = tail.split('/').next().ok_or(())?;
-    if !is_opaque_value(project_id) {
+    if !is_valid_stable_project_id(project_id) {
         return Err(());
     }
     Ok(Some(project_id))
@@ -573,7 +653,6 @@ fn scoped_project_id(path: &str) -> Result<Option<&str>, ()> {
 
 fn is_passive_project_media_route(path: &str) -> bool {
     path.contains("/files/raw/")
-        || path.contains("/generated-assets/") && path.ends_with("/raw")
         || path.ends_with("/canvas-image-preview")
         || path.ends_with("/canvas-text-preview")
         || path.ends_with("/canvas-video-preview")
@@ -613,6 +692,37 @@ mod tests {
         )));
         assert!(!is_hashed_asset(std::path::Path::new("index.html")));
         assert!(!is_hashed_asset(std::path::Path::new("assets/runtime.js")));
+    }
+
+    #[test]
+    fn workbench_pages_have_one_closed_route_contract() {
+        assert!(is_workbench_page_route("/", None));
+        assert!(is_workbench_page_route("/open", None));
+        assert!(is_workbench_page_route(
+            "/open",
+            Some("path=%2FUsers%2Fme%2FProject%20A")
+        ));
+        assert!(is_workbench_page_route("/projects/project-1._~", None));
+
+        for (path, query) in [
+            ("/settings", None),
+            ("/", Some("view=canvas")),
+            ("/open/", None),
+            ("/open", Some("path=")),
+            ("/open", Some("path=%")),
+            ("/open", Some("path=%FF")),
+            ("/open", Some("path=%2Ftmp&path=%2Fother")),
+            ("/projects/.", None),
+            ("/projects/..", None),
+            ("/projects/project-1/", None),
+            ("/projects/project-1/files/a", None),
+            ("/projects/project%201", None),
+            ("/projects/project-1", Some("view=canvas")),
+        ] {
+            assert!(!is_workbench_page_route(path, query), "{path}?{query:?}");
+        }
+        let oversized = format!("/projects/{}", "a".repeat(257));
+        assert!(!is_workbench_page_route(&oversized, None));
     }
 
     #[test]

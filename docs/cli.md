@@ -1,172 +1,164 @@
 # CLI
 
-The CLI is Agent-facing and writes structured Agent Records on stdout. There is no JSON output mode; JSON is used only as an input encoding for request payloads.
+The Rust `debrute` CLI is an Agent-facing client of the local Runtime. It always
+writes unversioned Agent Records on stdout; JSON is an input encoding, not an
+alternate output mode.
 
-Model catalog, configuration, execution, redaction, and Generated Asset
-contracts are documented in [`model-generation.md`](./model-generation.md) and
-[`generated-assets.md`](./generated-assets.md).
+## Agent Records And Exit Status
 
-## Command And Output Contract
-
-`apps/runtime/src/cli/spec.rs` is the executable inventory of
-public commands. `debrute commands`, `debrute help <command-path>`, `--help`, and
-parser validation all use that inventory; Skills and prose are consumers rather
-than an alternate command registry.
-
-Every result begins with one stable Agent Record:
+Every result starts with exactly one final header:
 
 ```text
-debrute/1 ok cmd=<command>
-debrute/1 error cmd=<command> code=<error-code>
-debrute/1 progress cmd=<command> ...
+debrute ok cmd=<command>
+debrute error cmd=<command> code=<error-code>
 ```
 
-Named records and fields follow on separate lines. Values containing whitespace,
-quotes, backslashes, control characters, or `=` are quoted and escaped. Standard
-output is the command contract; commands do not emit ANSI tables or a second JSON
-output shape. Parse and input failures, runtime/configuration failures,
-model/network failures, and unexpected failures map to stable nonzero exit-code
-classes.
+A waiting Model Request may first emit sparse blocks beginning with:
 
-Commands have one of five runtime policies:
+```text
+debrute progress cmd=<command> event=<event>
+```
 
-- `commands` and `help` run without a Workbench runtime;
-- `runtime status` and `runtime doctor` inspect an existing runtime without
-  starting one, including whether its native tray is active or unavailable;
-- `workbench start` ensures Runtime and sends only a native Control activation;
-- non-streaming operational commands ensure Runtime, create a connection-bound
-  CLI authorization, and call `/api/cli/run`;
-- `generate image-batch` uses the same connection-bound authorization with the
-  NDJSON `/api/cli/run-stream` route.
+Named `operation`, `batch_item`, `artifact`, `model`, and diagnostic records
+follow on separate lines. Error records may contain a redacted `log`; they do
+not have a generic message field. Exit status is deliberately coarse: `0`
+means success, `2` means CLI syntax or input is invalid, and `1` means every
+other failure. An invalid Project is caller input and also exits `2`. A Batch
+whose accepted Items all settled is successful even when
+some Items failed, so its final Operation record exits `0` and reports the Item
+failures in progress records.
 
-Both Runtime observation commands report `runtime_state` and `native_tray`.
-`native_tray=active` is emitted only from a Ready Runtime, whose startup gate
-has already created the required macOS menu-bar or Windows notification-area
-item; stopped and transitional states report it as unavailable.
+A diagnostic record presents one Project Diagnostic through its `error` or
+`warning` severity, code, message, and optional Project path. Project health
+counts only errors and warnings. The record has no source field: its name and
+command-scoped Project already identify its owner, and Debrute has no generic
+cross-domain diagnostic-source taxonomy.
 
-Project commands resolve the supplied Project root to an absolute path before
-crossing that bridge. They use Rust Runtime semantic operations; the CLI does not
-duplicate generic filesystem access or Project persistence.
+`apps/runtime/src/cli/spec.rs` is the executable public-command inventory used
+by `debrute commands`, `debrute help`, the parser, and official Skills. Each
+entry is also the single parser contract for positional bounds, the optional
+Project positional, options and their value/flag/repeatable form, required
+options, Project-path values, simple allowed-value sets, and command-specific
+public errors. The exported error inventory merges those entries with the
+acquisition, transport, and lifecycle errors shared by each command policy.
+The parser does not repeat syntax facts in command-name switches or infer them
+from the human-readable input synopsis. Every Runtime-backed policy publishes
+`product_update_failed` because a Product replacement can win before its
+Control authorization or request; the CLI does not retry that race.
 
-## Official Skills
+## Runtime Connections
 
-The repository owns four standard external-Agent Skills under `skills/`:
+Local and observation commands keep their existing policies. Operational
+commands ensure Runtime, create authorization bound to one native Control
+connection, and keep that connection open for the command. Model Request
+submission uses authenticated `/api/cli/model-operations`; observation uses
+`/api/cli/run` and `/api/cli/run-stream`. Closing the CLI connection never
+cancels an accepted Operation; it ends only that command-scoped wait observer.
+Runtime acquisition, optional launch, handshake, and Ready polling share one
+absolute fifteen-second deadline. Expiry emits `runtime_ready_timeout` without
+submitting the command, terminating or replacing Runtime, starting another
+Runtime, or retrying. `debrute runtime stop` is different: it never starts
+Runtime and sends Product Quit to an existing owner without waiting for Ready,
+including while the owner reports `Starting`. Because Stop has no Ready gate,
+a stalled or invalid handshake remains `runtime_health_failed`; it is never
+relabeled as `runtime_ready_timeout`.
 
-- `debrute-core`
-- `debrute-image-director`
-- `debrute-video-director`
-- `debrute-audio-director`
+The CLI adapter is a required part of every ready Runtime. Product Update is a
+separate launch-mode capability: `debrute update` uses it in a packaged Product,
+while a source-development Runtime returns `product_update_unavailable` because
+that mode has no Product updater. The CLI does not retry the request through
+another backend.
 
-Each package has a matching directory and frontmatter name plus
-`debrute.managed: "true"`, `debrute.package: "debrute"`, and the product version.
-Skills teach an external Agent to call `debrute`; they are not callable Debrute
-APIs and are not generated from model or Project state.
+## Model Requests
 
-The Desktop product bundle contains the official Skills payload. Before the
-packaged Runtime starts, it validates that payload and materializes it into
-`~/.agents/skills` together with the matching Product version. Existing
-directories carrying Debrute's managed metadata are replaced through temporary
-sibling directories; unrelated Skills are ignored. Source development uses the
-same materializer against the repository payload.
+Single and Batch use the same strict UTF-8 JSONL record:
 
-`debrute skills status` is read-only. It reports the runtime-owned managed CLI
-and Skills version/path diagnostic established during materialization. There is
-no public `skills sync`, `skills install`, `skills update`, Skill-content browser,
-standalone CLI installer, PATH repair, or Desktop CLI-management page. Repair and
-refresh happen by starting the current product runtime or updating the whole
-Debrute product.
+```json
+{"model":"gpt-image-2","arguments":{"prompt":"Cover image"},"output":{"directory":"generated","filename":"cover"}}
+```
 
-## Common Commands
+`model` is a globally unique Debrute Model id. `arguments` contains only the
+selected Model's arguments. Optional `output.directory` and `output.filename`
+are separate Project-relative naming fields; `filename` has no generated-file
+extension. Runtime derives the extension from the actual Artifact MIME type.
 
 ```sh
-debrute --version
-debrute runtime status
-debrute runtime doctor
-debrute skills status
-debrute project init path/to/project
-debrute project validate path/to/project
-debrute workbench start
-debrute canvas-map push path/to/project canvas-1
-debrute canvas create path/to/project
-debrute canvas rename path/to/project canvas-2 故事板
-debrute canvas reorder path/to/project canvas-2 canvas-1
-debrute canvas delete path/to/project canvas-2
-debrute canvas repair-index path/to/project
-debrute generated-asset lookup path/to/project --path generated/example.png
+debrute request single /path/to/project --input request.jsonl
+debrute request batch /path/to/project --input requests.jsonl --concurrency 3
+cat request.jsonl | debrute request single /path/to/project --input - --timeout 10m
+```
+
+Input is exactly one JSONL record for `single` and one or more records for
+`batch`. Blank lines, comments, a UTF-8 BOM, JSON spanning multiple lines, and
+input above 16 MiB are rejected. All Batch records must resolve to the same
+Model Kind. Batch concurrency defaults to `1` and controls only that Batch;
+Runtime has no additional global request-count capacity.
+
+The CLI waits by default. `--no-wait` returns after acceptance; use the returned
+Operation id with:
+
+```sh
+debrute operation inspect <operation-id>
+debrute operation wait <operation-id>
+debrute operation cancel <operation-id>
+debrute operation list --state active --model-kind image --limit 25
+```
+
+A standalone wait on an active Operation first emits
+`event=operation.observed` with its current snapshot. A foreground request has
+already emitted `operation.accepted`, so its follow-up wait does not repeat that
+snapshot. Either wait then replays retained Batch Item Outcomes and follows new
+ones until the Operation is terminal.
+
+`--timeout` is a positive integer followed by `s`, `m`, or `h`. It bounds each
+active Model Run, not queue time or output commit. The default is 30 minutes for
+video and 10 minutes for image, TTS, music, and sound-effect. There is no
+automatic retry. `--replace` applies only when actual generated files commit;
+without it, an occupied target fails that Single or Batch Item.
+
+When `output.directory` is absent, Runtime uses an Operation-unique directory.
+When `output.filename` is absent, it generates a unique basename. One Artifact
+named `covers` becomes `covers.<actual-extension>`; multiple Artifacts become
+`covers_1.<ext>`, `covers_2.<ext>`, and so on. Runtime imposes no generic
+Artifact-count ceiling.
+
+Agent Records on stdout are the only CLI observation stream. A caller may
+redirect a foreground request or `operation wait` when it needs to retain that
+stream; the redirected bytes remain ordinary caller-owned command output.
+
+## Models And Projects
+
+Use the matching list and describe commands before building a request:
+
+```sh
 debrute models image list
 debrute models image describe gpt-image-2
-debrute generate image path/to/project --input-json '{"model":"gpt-image-2","arguments":{"prompt":"Cover image","output_path":"generated/cover.png"}}' --timeout-ms 600000
-debrute generate image-batch path/to/project --manifest image-requests.json --concurrency 8 --timeout-ms 900000 --log image-results.jsonl --summary image-summary.json
 debrute models video list
-debrute models video describe doubao-seedance-2-0-260128
-debrute generate video path/to/project --input-json '{"model":"doubao-seedance-2-0-260128","arguments":{"prompt":"Short video brief","intent":"generate"}}' --timeout-ms 600000
 debrute models tts list
-debrute models tts describe openai-gpt-4o-mini-tts
-debrute generate tts path/to/project --input-json '{"model":"openai-gpt-4o-mini-tts","arguments":{"text":"Welcome to Debrute.","voice":"alloy","output_path":"generated/welcome.mp3"}}' --timeout-ms 600000
 debrute models music list
-debrute models music describe elevenlabs-music
-debrute generate music path/to/project --input-json '{"model":"elevenlabs-music","arguments":{"prompt":"Warm ambient electronic music for a product demo.","output_path":"generated/demo-music.mp3"}}' --timeout-ms 600000
 debrute models sfx list
-debrute models sfx describe elevenlabs-sound-effects
-debrute generate sfx path/to/project --input-json '{"model":"elevenlabs-sound-effects","arguments":{"prompt":"Short glass chime.","output_path":"generated/chime.wav"}}' --timeout-ms 600000
+```
+
+Descriptions provide official source URLs, repository snapshots, Debrute
+examples, and the authoritative `arguments_schema`. API keys remain in local
+Runtime settings and must not be included in Model Request input.
+
+Other common commands include:
+
+```sh
+debrute runtime status
+debrute runtime doctor
+debrute runtime stop
+debrute skills status
+debrute project init /path/to/project
+debrute project validate /path/to/project
+debrute workbench start /path/to/project --frontend desktop
+debrute canvas-map push /path/to/project canvas-1
+debrute generated-asset lookup /path/to/project --path generated/example.png
 debrute commands
 ```
 
-## Image Generation
-
-Use `generate image-batch` for multiple image requests; do not loop over
-`generate image` for a batch.
-
-`--manifest` expects:
-
-```json
-{ "requests": [] }
-```
-
-Each item is shaped like a `generate image` input. Batch item outcomes are written to `--log`; stdout emits sparse progress records and the final aggregate record.
-
-Use `models image list` to compare configured image models by original model parameters and constraints. Before image generation, run `models image describe <model-id>` once for the selected model. Model descriptions return official documentation URLs, a repository snapshot path, official-documentation-backed `description_markdown`, Debrute examples, and the machine-readable `arguments_schema`.
-
-Single image `--timeout-ms` defaults to 600000ms. Image batch `--timeout-ms` defaults to 900000ms per item.
-
-Use `--overwrite-existing` to regenerate batch outputs that would otherwise be skipped.
-
-Debrute resolves project files, data URLs, and safe public `http(s)` URLs for image inputs. Model-specific file format, size, dimension, alpha, and mask constraints are left to the upstream model.
-
-## Video Generation
-
-Use `models video list` to compare configured video models by Debrute-native parameters and constraints. Before video generation, run `models video describe <model-id>` once for the selected model. Video model descriptions return official documentation URLs, a repository snapshot path, official-documentation-backed `description_markdown`, Debrute examples, and the machine-readable `arguments_schema`.
-
-Video `--timeout-ms` defaults to 600000ms and covers task submission, polling, response reads, and artifact download.
-
-Video generation uses `prompt`, `intent`, and `references`; Debrute constructs Seedance `content` internally.
-
-Project-local image and audio references can be normalized by Debrute when the selected model supports them. Project-local video references require Debrute upload-server support unless the source is already `http(s)` or `asset://`.
-
-Do not include model API keys in generation requests; Debrute reads configured keys locally. Use the original model parameter names shown by `models image list` and confirmed by `models image describe`.
-
-Model request failures keep the stable CLI error code and include the Debrute model id, message, and structured logs when available.
-
-## Audio Generation
-
-Audio is exposed as three separate CLI surfaces:
-
-- TTS: `models tts list`, `models tts describe <model-id>`, and `generate tts`.
-- Music: `models music list`, `models music describe <model-id>`, and `generate music`.
-- Sound effects: `models sfx list`, `models sfx describe <model-id>`, and `generate sfx`.
-
-Use the matching list command to compare configured models for that use case. Before generation, run the matching describe command once for the selected model. Descriptions return official documentation URLs, a repository snapshot path, official-documentation-backed `description_markdown`, Debrute examples, and the machine-readable `arguments_schema`.
-
-Audio `--timeout-ms` defaults to 600000ms and covers task submission, polling when the official API is task-based, response reads, artifact download, and artifact write.
-
-Do not include model API keys in generation requests; Debrute reads configured keys locally. Use the original model parameter names shown by the matching `models ... list` command and confirmed by the matching `models ... describe` command.
-
-## Minimal Canvas Map
-
-```yaml
-paths:
-  - outputs/gpt/
-  - prompts/cover.md
-```
-
-See [Product model](./product-model.md) for Canvas Map semantics.
+Project commands resolve the supplied root before crossing the local bridge.
+Generic filesystem reads and writes remain the external Agent's responsibility.
+See [Model generation](./model-generation.md), [Generated Assets](./generated-assets.md),
+and [Product model](./product-model.md) for the underlying contracts.

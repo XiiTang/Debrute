@@ -1,6 +1,6 @@
 import React, { useEffect, useRef, useState } from 'react';
 import { ChevronRight, Maximize2, Minus, Square, X } from 'lucide-react';
-import type { WorkbenchMenuId, WorkbenchMenuItem, WorkbenchTitleBarState } from '@debrute/app-protocol';
+import type { WorkbenchMenuId, WorkbenchMenuItem, WorkbenchTitleBarState } from './workbenchTitleBarState';
 import { IconButton, Menu } from '../ui';
 import {
   closeTitleBarMenu,
@@ -10,7 +10,6 @@ import {
   type OpenTitleBarMenu
 } from './workbenchTitleBarInteraction';
 import { useI18n, type WorkbenchI18n } from '../i18n';
-import { localizedWorkbenchMenus } from './titleBarI18n';
 
 type WorkbenchMenuCommandItem = Extract<WorkbenchMenuItem, { kind: 'command' }>;
 
@@ -33,8 +32,7 @@ export function WorkbenchTitleBar({
   const rootRef = useRef<HTMLElement | null>(null);
   const menuRef = useRef<HTMLDivElement | null>(null);
   const menuButtonRefs = useRef(new Map<WorkbenchMenuId, HTMLButtonElement>());
-  const menus = localizedWorkbenchMenus(state.menus, i18n);
-  const currentMenu = menus.find((menu) => menu.id === openMenu);
+  const currentMenu = state.menus.find((menu) => menu.id === openMenu);
 
   useEffect(() => {
     if (!openMenu) {
@@ -91,7 +89,7 @@ export function WorkbenchTitleBar({
             aria-label={i18n.t('shell.titleBar.applicationMenu')}
             style={{ WebkitAppRegion: 'no-drag' } as React.CSSProperties}
           >
-            {menus.map((menu) => (
+            {state.menus.map((menu) => (
               <button
                 key={menu.id}
                 ref={(element) => setMenuButtonRef(menuButtonRefs.current, menu.id, element)}

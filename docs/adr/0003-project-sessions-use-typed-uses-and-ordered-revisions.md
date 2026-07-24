@@ -7,13 +7,20 @@ already-live id. It does not derive aliases from paths, generate replacement
 ids, or preserve an old identity format.
 
 A session remains open only while at least one typed Project Use exists. The
-closed use vocabulary is Workbench, request, operation, running terminal,
-transfer, and Photoshop link. Uses express actual ownership of live Project
+closed use vocabulary is Workbench, request, running terminal, transfer, and
+Photoshop link. Uses express actual ownership of live Project
 resources; they are not client sessions, transport credentials, idle timers, or
 generic reference counts exposed on the wire. Releasing the last use closes the
-watcher and Project state immediately. There is no 30-second retention,
-reconnect reservation, replacement preparation, grace worker, or arbitrary
-open-Project cap.
+live session immediately and installs a closing transition for its canonical
+root before watcher and Project-state cleanup begins. Ending a Project Use is
+an ownership event, not a fallible cleanup command and not a claim that final
+session cleanup succeeded. Cleanup success removes the transition. Cleanup
+failure remains the authoritative result for that root: another open and final
+Registry shutdown return the exact failure, and the root cannot reopen in the
+current Runtime. An unexpected panic terminates Runtime instead of leaving the
+process available to serve further requests.
+There is no 30-second retention, reconnect reservation, replacement
+preparation, grace worker, or arbitrary open-Project cap.
 
 Each Project mutation is serialized by the session, semantically validated,
 and assigned a monotonic `projectRevision` only when authoritative state
@@ -21,6 +28,10 @@ changes. The ordered Project stream carries complete current projections or
 typed events with that revision. HTTP commands return their closed outcome;
 the stream, not a duplicated mutation response, advances renderer state. A
 missing response is never permission to replay a state-changing request.
+An exact mutation or refresh failure is returned to its caller but does not
+install a second session-poison or later-command rejection state. Runtime does
+not replay the failed effect; a later explicit refresh or new observed
+filesystem change operates on the current filesystem state.
 
 Project-wide optimistic `baseRevision` locks are not part of this protocol.
 File-specific revisions may still be inputs where the domain needs them—for

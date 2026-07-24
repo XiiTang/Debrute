@@ -1,5 +1,4 @@
 import { describe, expect, it } from 'vitest';
-import React from 'react';
 import { renderToStaticMarkup } from 'react-dom/server';
 import { FolderTree } from 'lucide-react';
 import { IconButton } from './IconButton';

@@ -5,7 +5,6 @@ import { desktopReleaseAssetName } from './release-asset-contract.mjs';
 export function electronBuilderPlatformName(platform) {
   if (platform === 'darwin') return 'macos';
   if (platform === 'win32') return 'windows';
-  if (platform === 'linux') return 'linux';
   throw new Error(`Unsupported Desktop release platform: ${platform}`);
 }
 
@@ -18,9 +17,12 @@ export function requiredDesktopReleaseAssets(version, platform = process.platfor
     return [desktopReleaseAssetName(version, publicPlatform, arch, 'dmg')];
   }
   if (platform === 'win32') {
+    if (arch !== 'x64') {
+      throw new Error(`Unsupported Windows release arch: ${arch}`);
+    }
     return [desktopReleaseAssetName(version, publicPlatform, arch, 'exe')];
   }
-  return [desktopReleaseAssetName(version, publicPlatform, arch, 'AppImage')];
+  throw new Error(`Unsupported Desktop release platform: ${platform}`);
 }
 
 export async function verifyDesktopReleaseAssets({

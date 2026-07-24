@@ -4,8 +4,6 @@
 //! network, release selection, signature verification, product policy, or
 //! update transaction state.
 
-#![cfg_attr(not(target_os = "windows"), allow(dead_code))]
-
 #[cfg(target_os = "windows")]
 mod windows {
     use std::{

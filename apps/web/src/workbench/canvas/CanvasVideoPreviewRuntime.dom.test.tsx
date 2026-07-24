@@ -1,6 +1,7 @@
 import React from 'react';
 import { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
+import { renderToStaticMarkup } from 'react-dom/server';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import type { ProjectedCanvasNode } from '@debrute/canvas-core';
 import type { CanvasVideoPreviewSourceRequest } from '@debrute/app-protocol';
@@ -25,6 +26,10 @@ afterEach(() => {
 });
 
 describe('CanvasVideoPreviewRuntime', { tags: ['canvas-video'] }, () => {
+  it('requires CanvasVideoPreviewProvider', () => {
+    expect(() => renderToStaticMarkup(<VideoRuntimeConsumer />)).toThrow('CanvasVideoPreviewProvider is required.');
+  });
+
   it('targets inactive available video nodes and excludes active video nodes', () => {
     expect(canvasVideoPreviewTargetsForNodes({
       canvasId: 'canvas-1',
@@ -96,6 +101,23 @@ describe('CanvasVideoPreviewRuntime', { tags: ['canvas-video'] }, () => {
     expect(container?.querySelector('[data-preview-error]')?.getAttribute('data-preview-error')).toBe('poster is broken');
   });
 
+  it('exposes a protocol error when source readiness omits a requested video target', async () => {
+    const node = videoNode('media/a.mp4', 'rev-a');
+    await renderVideoPreviewProvider({
+      nodes: [node],
+      actions: {
+        readCanvasVideoPreviewSources: async () => ({ sources: {} })
+      } as unknown as WorkbenchActions,
+      children: <PreviewProbe node={node} />
+    });
+
+    await act(async () => undefined);
+
+    expect(container?.querySelector('[data-preview-error]')?.getAttribute('data-preview-error')).toBe(
+      'Canvas video preview source response is missing media/a.mp4.'
+    );
+  });
+
   it('rechecks source readiness when the Canvas projection refreshes with the same video revision and timestamp', async () => {
     const node = videoNode('media/a.mp4', 'rev-a');
     const readCanvasVideoPreviewSources = vi.fn(async (input: CanvasVideoPreviewSourceRequest) => ({
@@ -162,6 +184,11 @@ describe('CanvasVideoPreviewRuntime', { tags: ['canvas-video'] }, () => {
     expect(container?.querySelector('[data-preview-error]')?.getAttribute('data-preview-error')).toBe('Video preview image failed to load.');
   });
 });
+
+function VideoRuntimeConsumer(): React.ReactElement {
+  useCanvasVideoPreviewRuntime();
+  return <div />;
+}
 
 async function renderVideoPreviewProvider(input: {
   nodes: ProjectedCanvasNode[];
@@ -267,7 +294,7 @@ function videoNode(projectRelativePath: string, revision: string): ProjectedCanv
       state: 'available',
       size: 100,
       mimeType: 'video/mp4',
-      fileUrl: `http://127.0.0.1:17321/api/projects/p/files/raw/${projectRelativePath}?v=${revision}`,
+      fileUrl: `/api/projects/p/files/raw/${projectRelativePath}?v=${revision}`,
       revision
     },
     videoPresentation: {

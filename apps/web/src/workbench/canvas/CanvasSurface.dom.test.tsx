@@ -3,20 +3,21 @@ import { createRoot } from 'react-dom/client';
 import { renderToStaticMarkup } from 'react-dom/server';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import {
-  createCanvasDocument,
+  type CanvasDocument,
   type CanvasFeedbackDocument,
   type CanvasProjection
 } from '@debrute/canvas-core';
-import { buildWorkbenchTitleBarState } from '@debrute/app-protocol';
-import type { IntegrationSettingsView } from '@debrute/app-protocol';
+import { buildWorkbenchTitleBarState } from '../shell/workbenchTitleBarState';
 import type { TextFileBuffer, WorkbenchActions, WorkbenchState } from '../../types';
 import { CanvasEditor } from './CanvasEditor';
 import { preloadCanvasImageForHandoff, scheduleCanvasImageHandoffAfterPaint } from './CanvasMediaHandoff';
 import { createCanvasOverlayRuntime } from './CanvasOverlayRuntime';
 import { createCanvasPreviewResourceScheduler } from './CanvasPreviewResourceScheduler';
-import { areCanvasNodeShellPropsEqual, CanvasNodeShell, type CanvasNodeShellProps } from './CanvasNodeShell';
+import { areCanvasNodeShellPropsEqual, type CanvasNodeShellProps } from './CanvasNodeShell';
 import {
-  CanvasSurface,
+  CanvasSurface
+} from './CanvasSurface';
+import {
   canvasActiveVideoPaths,
   canvasFeedbackBarTargetForProjectedNode,
   isCanvasMapProjectTreeDragOver,
@@ -32,34 +33,47 @@ import {
   syncCanvasPreviewResourceSchedulerForInteraction,
   shouldClearFeedbackBarPlacementForFeedbackTarget,
   type CanvasPerfRuntimeSession
-} from './CanvasSurface';
+} from './canvasSurfaceSupport';
 import { createCanvasPerfMonitor, type CanvasPerfTraceEvent } from './CanvasPerfMonitor';
 import { CANVAS_CAMERA_IDLE_MS, type CanvasCamera } from './runtime/canvasCamera';
 import { createCanvasStageRuntime } from './runtime/CanvasStageRuntime';
 import type { CanvasSelection } from './runtime/canvasSelection';
-import { createCanvasEditorRuntime, type CanvasEditorRuntime } from './runtime/CanvasEditorRuntime';
+import { createCanvasEditorRuntime } from './runtime/CanvasEditorRuntime';
 import { I18nProvider } from '../i18n';
 
 const {
   videoTogglePlaybackSpy,
   videoPauseAtSpy,
+  videoRestorePersistedTimeSpy,
   videoReadCurrentTimeSecondsSpy,
   videoMockState
 } = vi.hoisted(() => ({
   videoTogglePlaybackSpy: vi.fn(),
   videoPauseAtSpy: vi.fn(),
+  videoRestorePersistedTimeSpy: vi.fn(),
   videoReadCurrentTimeSecondsSpy: vi.fn(() => 4.25),
   videoMockState: {
     registerOnMount: true,
     lastPath: undefined as string | undefined,
-    lastRegister: undefined as undefined | ((projectRelativePath: string, target: unknown | undefined) => void)
+    lastRegister: undefined as undefined | ((projectRelativePath: string, target: unknown | undefined) => void),
+    lastUpdatePlaybackTime: undefined as undefined | ((projectRelativePath: string, currentTimeSeconds: number) => void | Promise<void>)
   }
 }));
+
+function createCanvasDocument(input: { id: string }): CanvasDocument {
+  return {
+    id: input.id,
+    name: input.id,
+    nodeElements: [],
+    annotations: [],
+    preferences: { showDiagnostics: true }
+  };
+}
 
 vi.mock('./CanvasVideoNodeContent', async () => {
   const ReactModule = await import('react');
   return {
-    CanvasVideoNodeContent: ({ node, onRegisterVideoTarget }: {
+    CanvasVideoNodeContent: ({ node, onRegisterVideoTarget, onUpdatePlaybackTime }: {
       node: CanvasProjection['nodes'][number];
       onRegisterVideoTarget: (projectRelativePath: string, target: {
         togglePlayback: () => void;
@@ -71,7 +85,9 @@ vi.mock('./CanvasVideoNodeContent', async () => {
         togglePictureInPicture: () => void;
         readCurrentTimeSeconds: () => number | undefined;
         pauseAt: (seconds: number) => void;
+        restorePersistedTime: (seconds: number) => void;
       } | undefined) => void;
+      onUpdatePlaybackTime: (projectRelativePath: string, currentTimeSeconds: number) => void | Promise<void>;
     }) => {
       ReactModule.useEffect(() => {
         const target = {
@@ -83,15 +99,17 @@ vi.mock('./CanvasVideoNodeContent', async () => {
           enterFullscreen: vi.fn(),
           togglePictureInPicture: vi.fn(),
           readCurrentTimeSeconds: videoReadCurrentTimeSecondsSpy,
-          pauseAt: videoPauseAtSpy
+          pauseAt: videoPauseAtSpy,
+          restorePersistedTime: videoRestorePersistedTimeSpy
         };
         videoMockState.lastPath = node.projectRelativePath;
         videoMockState.lastRegister = onRegisterVideoTarget as typeof videoMockState.lastRegister;
+        videoMockState.lastUpdatePlaybackTime = onUpdatePlaybackTime;
         if (videoMockState.registerOnMount) {
           onRegisterVideoTarget(node.projectRelativePath, target);
         }
         return () => onRegisterVideoTarget(node.projectRelativePath, undefined);
-      }, [node.projectRelativePath, onRegisterVideoTarget]);
+      }, [node.projectRelativePath, onRegisterVideoTarget, onUpdatePlaybackTime]);
       return <div data-testid="mock-video-node">{node.projectRelativePath}</div>;
     }
   };
@@ -100,6 +118,8 @@ vi.mock('./CanvasVideoNodeContent', async () => {
 describe('CanvasSurface', () => {
   beforeEach(() => {
     installTextPreviewStyleVariables();
+    videoRestorePersistedTimeSpy.mockReset();
+    videoMockState.lastUpdatePlaybackTime = undefined;
   });
 
   afterEach(() => {
@@ -297,7 +317,7 @@ describe('CanvasSurface', () => {
             state: 'available',
             size: 100,
             mimeType: 'text/plain',
-            fileUrl: 'http://127.0.0.1:17321/api/projects/123e4567-e89b-42d3-a456-426614174000/files/raw/flow/offscreen.txt?v=rev-text',
+            fileUrl: '/api/projects/123e4567-e89b-42d3-a456-426614174000/files/raw/flow/offscreen.txt?v=rev-text',
             revision: 'rev-text'
           }
         },
@@ -359,7 +379,7 @@ describe('CanvasSurface', () => {
             state: 'available',
             size: 100,
             mimeType: 'text/markdown',
-            fileUrl: 'http://127.0.0.1:17321/api/projects/123e4567-e89b-42d3-a456-426614174000/files/raw/flow/notes/offscreen.md?v=rev-text',
+            fileUrl: '/api/projects/123e4567-e89b-42d3-a456-426614174000/files/raw/flow/notes/offscreen.md?v=rev-text',
             revision: 'rev-text'
           }
         }
@@ -517,6 +537,123 @@ describe('CanvasSurface', () => {
     }
   });
 
+  it('restores the durable video position when Runtime rejects persistence', async () => {
+    const container = document.createElement('div');
+    document.body.append(container);
+    const root = createRoot(container);
+    const canvas = createCanvasDocument({ id: 'video-persistence-failure' });
+    const videoNode = {
+      ...videoProjectionNode('media/clip.mp4', 0, 0),
+      videoPlayback: { currentTimeSeconds: 2.5 }
+    };
+    const projection: CanvasProjection = {
+      canvasId: canvas.id,
+      nodes: [videoNode],
+      edges: [],
+      diagnostics: []
+    };
+    const updateCanvasVideoPlaybackState = vi.fn(async () => {
+      throw new Error('persistence failed');
+    });
+
+    try {
+      await act(async () => {
+        root.render(
+          <I18nProvider locale="en">
+            <CanvasSurface
+              canvas={canvas}
+              projection={projection}
+              runtime={createCanvasEditorRuntime()}
+              actions={{ ...actions, updateCanvasVideoPlaybackState }}
+              textFileBuffers={{}}
+              canvasFeedback={undefined}
+              overlayRuntime={createCanvasOverlayRuntime()}
+              feedbackPlacementContext={feedbackPlacementContextFixture()}
+              textPreviewStyleDependencyKey="dark"
+            />
+          </I18nProvider>
+        );
+      });
+
+      await act(async () => {
+        videoMockState.lastUpdatePlaybackTime?.(videoNode.projectRelativePath, 8.25);
+        await Promise.resolve();
+      });
+
+      expect(updateCanvasVideoPlaybackState).toHaveBeenCalledWith(canvas.id, {
+        updates: [{ projectRelativePath: videoNode.projectRelativePath, currentTimeSeconds: 8.25 }]
+      });
+      expect(videoRestorePersistedTimeSpy).toHaveBeenCalledWith(2.5);
+    } finally {
+      await act(async () => {
+        root.unmount();
+      });
+      container.remove();
+    }
+  });
+
+  it('does not roll back a newer persisted video position when an older request fails', async () => {
+    const container = document.createElement('div');
+    document.body.append(container);
+    const root = createRoot(container);
+    const canvas = createCanvasDocument({ id: 'video-persistence-order' });
+    const videoNode = {
+      ...videoProjectionNode('media/clip.mp4', 0, 0),
+      videoPlayback: { currentTimeSeconds: 2.5 }
+    };
+    const projection: CanvasProjection = {
+      canvasId: canvas.id,
+      nodes: [videoNode],
+      edges: [],
+      diagnostics: []
+    };
+    const firstUpdate = deferred<void>();
+    const secondUpdate = deferred<void>();
+    const updateCanvasVideoPlaybackState = vi.fn()
+      .mockImplementationOnce(() => firstUpdate.promise)
+      .mockImplementationOnce(() => secondUpdate.promise);
+
+    try {
+      await act(async () => {
+        root.render(
+          <I18nProvider locale="en">
+            <CanvasSurface
+              canvas={canvas}
+              projection={projection}
+              runtime={createCanvasEditorRuntime()}
+              actions={{ ...actions, updateCanvasVideoPlaybackState }}
+              textFileBuffers={{}}
+              canvasFeedback={undefined}
+              overlayRuntime={createCanvasOverlayRuntime()}
+              feedbackPlacementContext={feedbackPlacementContextFixture()}
+              textPreviewStyleDependencyKey="dark"
+            />
+          </I18nProvider>
+        );
+      });
+
+      await act(async () => {
+        videoMockState.lastUpdatePlaybackTime?.(videoNode.projectRelativePath, 8.25);
+        videoMockState.lastUpdatePlaybackTime?.(videoNode.projectRelativePath, 9.5);
+        secondUpdate.resolve(undefined);
+        await secondUpdate.promise;
+        firstUpdate.reject(new Error('older persistence failed'));
+        await firstUpdate.promise.catch(() => undefined);
+        await Promise.resolve();
+      });
+
+      expect(updateCanvasVideoPlaybackState).toHaveBeenNthCalledWith(2, canvas.id, {
+        updates: [{ projectRelativePath: videoNode.projectRelativePath, currentTimeSeconds: 9.5 }]
+      });
+      expect(videoRestorePersistedTimeSpy).not.toHaveBeenCalled();
+    } finally {
+      await act(async () => {
+        root.unmount();
+      });
+      container.remove();
+    }
+  });
+
   it('refreshes a hovered video feedback target when the video handle registers', async () => {
     const container = document.createElement('div');
     document.body.append(container);
@@ -576,7 +713,8 @@ describe('CanvasSurface', () => {
           enterFullscreen: vi.fn(),
           togglePictureInPicture: vi.fn(),
           readCurrentTimeSeconds: videoReadCurrentTimeSecondsSpy,
-          pauseAt: videoPauseAtSpy
+          pauseAt: videoPauseAtSpy,
+          restorePersistedTime: videoRestorePersistedTimeSpy
         });
       });
 
@@ -883,7 +1021,7 @@ describe('CanvasSurface', () => {
         state: 'available',
         size: 100,
         mimeType: 'audio/wav',
-        fileUrl: 'http://127.0.0.1:17321/api/projects/123e4567-e89b-42d3-a456-426614174000/files/raw/flow/sound.wav?v=rev',
+        fileUrl: '/api/projects/123e4567-e89b-42d3-a456-426614174000/files/raw/flow/sound.wav?v=rev',
         revision: 'rev'
       }
     };
@@ -894,7 +1032,7 @@ describe('CanvasSurface', () => {
         state: 'available',
         size: 100,
         mimeType: 'application/octet-stream',
-        fileUrl: 'http://127.0.0.1:17321/api/projects/123e4567-e89b-42d3-a456-426614174000/files/raw/flow/archive.bin?v=rev',
+        fileUrl: '/api/projects/123e4567-e89b-42d3-a456-426614174000/files/raw/flow/archive.bin?v=rev',
         revision: 'rev'
       }
     };
@@ -1389,7 +1527,7 @@ describe('CanvasSurface', () => {
   });
 
   it('records render scheduler counters', () => {
-    const monitor = createCanvasPerfMonitor({ enabled: true });
+    const monitor = createCanvasPerfMonitor();
     const renderFrames: FrameRequestCallback[] = [];
     const renderScheduler = createCanvasRenderSnapshotScheduler({
       perfMonitor: monitor,
@@ -1413,12 +1551,11 @@ describe('CanvasSurface', () => {
   });
 
   it('starts, frames, and ends a camera session from camera state changes', () => {
-    const monitor = createCanvasPerfMonitor({ enabled: true });
+    const monitor = createCanvasPerfMonitor();
     const sessionRef = { current: undefined as CanvasPerfRuntimeSession | undefined };
     const reactCommitCountRef = { current: 0 };
 
     syncCanvasPerfSessionState({
-      enabled: true,
       perfMonitor: monitor,
       sessionRef,
       reactCommitCountRef,
@@ -1431,7 +1568,6 @@ describe('CanvasSurface', () => {
     monitor.recordCounter({ timestamp: 8, source: 'CanvasImageNodeAsset', name: 'image-node-url-resolve' });
     reactCommitCountRef.current = 1;
     recordCanvasPerfFrame({
-      enabled: true,
       perfMonitor: monitor,
       sessionRef,
       cameraState: 'moving',
@@ -1449,7 +1585,6 @@ describe('CanvasSurface', () => {
       reactCommitCountRef
     });
     syncCanvasPerfSessionState({
-      enabled: true,
       perfMonitor: monitor,
       sessionRef,
       reactCommitCountRef,
@@ -1474,12 +1609,11 @@ describe('CanvasSurface', () => {
   });
 
   it('records moving camera frames without image node work when no image node counter fired', () => {
-    const monitor = createCanvasPerfMonitor({ enabled: true });
+    const monitor = createCanvasPerfMonitor();
     const sessionRef = { current: undefined as CanvasPerfRuntimeSession | undefined };
     const reactCommitCountRef = { current: 0 };
 
     syncCanvasPerfSessionState({
-      enabled: true,
       perfMonitor: monitor,
       sessionRef,
       reactCommitCountRef,
@@ -1490,7 +1624,6 @@ describe('CanvasSurface', () => {
       minimapOpen: false
     });
     recordCanvasPerfFrame({
-      enabled: true,
       perfMonitor: monitor,
       sessionRef,
       cameraState: 'moving',
@@ -1517,13 +1650,12 @@ describe('CanvasSurface', () => {
   });
 
   it('starts, frames, and ends a move drag session with render commits', () => {
-    const monitor = createCanvasPerfMonitor({ enabled: true });
+    const monitor = createCanvasPerfMonitor();
     const sessionRef = { current: undefined as CanvasPerfRuntimeSession | undefined };
     const reactCommitCountRef = { current: 0 };
     const activeNode = nodeFixture('flow/a.png', 0, 0);
 
     syncCanvasPerfDragSessionState({
-      enabled: true,
       perfMonitor: monitor,
       sessionRef,
       reactCommitCountRef,
@@ -1538,7 +1670,6 @@ describe('CanvasSurface', () => {
     });
     reactCommitCountRef.current = 1;
     recordCanvasPerfFrame({
-      enabled: true,
       perfMonitor: monitor,
       sessionRef,
       cameraState: 'idle',
@@ -1553,7 +1684,6 @@ describe('CanvasSurface', () => {
       reactCommitCountRef
     });
     syncCanvasPerfDragSessionState({
-      enabled: true,
       perfMonitor: monitor,
       sessionRef,
       reactCommitCountRef,
@@ -1648,7 +1778,7 @@ function nodeFixture(path: string, x: number, y: number): CanvasProjection['node
       mimeType: 'image/png',
       canvasImagePreviewable: true,
       canvasImagePreviewSourceWidth: 200,
-      fileUrl: `http://127.0.0.1:17321/api/projects/123e4567-e89b-42d3-a456-426614174000/files/raw/${path}?v=rev`,
+      fileUrl: `/api/projects/123e4567-e89b-42d3-a456-426614174000/files/raw/${path}?v=rev`,
       revision: 'rev'
     }
   };
@@ -1662,7 +1792,7 @@ function textProjectionNode(path: string, x: number, y: number, revision: string
       state: 'available',
       size: 100,
       mimeType: 'text/markdown',
-      fileUrl: `http://127.0.0.1:17321/api/projects/123e4567-e89b-42d3-a456-426614174000/files/raw/${path}?v=${revision}`,
+      fileUrl: `/api/projects/123e4567-e89b-42d3-a456-426614174000/files/raw/${path}?v=${revision}`,
       revision
     }
   };
@@ -1678,7 +1808,7 @@ function videoProjectionNode(path: string, x: number, y: number): CanvasProjecti
       state: 'available',
       size: 100,
       mimeType: 'video/mp4',
-      fileUrl: `http://127.0.0.1:17321/api/projects/123e4567-e89b-42d3-a456-426614174000/files/raw/${path}?v=rev`,
+      fileUrl: `/api/projects/123e4567-e89b-42d3-a456-426614174000/files/raw/${path}?v=rev`,
       revision: 'rev'
     },
     videoPresentation: {
@@ -1875,13 +2005,13 @@ function workbenchStateFixture(
       health: {
         projectName: 'Project',
         canvasCount: 1,
-        diagnosticCounts: { errors: 0, warnings: 0, infos: 0 },
+        diagnosticCounts: { errors: 0, warnings: 0 },
         checkedAt: '2026-05-26T00:00:00.000Z'
       }
     },
     titleBarState: buildWorkbenchTitleBarState({
-      platform: 'linux',
-      host: 'web',
+      platform: 'win32',
+      host: 'web', locale: 'en',
       projectTitle: 'Project',
       recentProjectRoots: []
     }),
@@ -1892,17 +2022,18 @@ function workbenchStateFixture(
     globalSettings: {
       status: 'ready',
       value: {
-        workbench: { locale: 'en', themePreference: 'system', defaultFrontend: 'electron' },
+        workbench: { locale: 'en', themePreference: 'system', defaultFrontend: 'desktop' },
         chrome: { recentProjects: [] },
         models: {
-          image: { models: [] },
-          video: { models: [] },
-          audio: { models: [] }
+          image: [],
+          video: [],
+          audio: []
         },
         integrations: { integrations: [], backends: [] },
         adobeBridge: { enabled: true }
       }
     },
+    product: { status: 'ready', value: productState() },
     adobeBridge: { status: 'ready', value: { settings: { enabled: true, discoveryStatus: 'available' }, pairedPlugins: [], clients: [], projects: [], links: [], transfers: [] } },
     resolvedTheme: 'dark',
     canvasFeedback: undefined,
@@ -1913,18 +2044,18 @@ function workbenchStateFixture(
 }
 
 const actions: WorkbenchActions = {
-  getProductState: async () => productState(),
-  checkProductUpdate: async () => productState(),
-  applyProductUpdate: async () => ({ state: productState() }),
-  reloadGlobalSettings: async () => undefined,
+  checkProductUpdate: async () => undefined,
+  applyProductUpdate: async () => undefined,
   reloadAdobeBridge: async () => undefined,
   saveGlobalSettings: async () => undefined,
-  rescanIntegrations: async () => emptyIntegrationsSettings,
+  revealModelApiKey: async () => {
+    throw new Error('not used');
+  },
+  rescanIntegrations: async () => undefined,
   runIntegrationOperation: async (input) => ({
     ok: true,
     integrationId: input.integrationId,
-    operation: input.operation,
-    settings: emptyIntegrationsSettings
+    operation: input.operation
   }),
   createAdobeBridgePairing: async () => ({ pairingId: 'pairing-1', code: '123456', expiresAt: '2026-07-17T00:00:00Z' }),
   cancelAdobeBridgePairing: async () => undefined,
@@ -1936,9 +2067,6 @@ const actions: WorkbenchActions = {
   },
   openSendToPhotoshopPicker: () => undefined,
   lookupGeneratedAssetMetadata: async () => {
-    throw new Error('not used');
-  },
-  readGeneratedAsset: async () => {
     throw new Error('not used');
   },
   readProjectTextFile: async () => {
@@ -1990,7 +2118,7 @@ const actions: WorkbenchActions = {
 function productState() {
   return {
     productVersion: '0.2.0',
-    platform: 'linux' as const,
+    platform: 'win32' as const,
     cli: {
       status: 'ready' as const,
       version: '0.2.0',
@@ -2005,11 +2133,6 @@ function productState() {
     }
   };
 }
-
-const emptyIntegrationsSettings: IntegrationSettingsView = {
-  integrations: [],
-  backends: []
-};
 
 function projectTreeDragDataTransfer(entries: Array<{ kind: 'file' | 'directory'; projectRelativePath: string }>): Pick<DataTransfer, 'getData'> {
   return {
@@ -2046,6 +2169,20 @@ function fakePreloadImage(): {
       }
     }
   };
+}
+
+function deferred<T>(): {
+  promise: Promise<T>;
+  resolve: (value: T | PromiseLike<T>) => void;
+  reject: (reason?: unknown) => void;
+} {
+  let resolve!: (value: T | PromiseLike<T>) => void;
+  let reject!: (reason?: unknown) => void;
+  const promise = new Promise<T>((promiseResolve, promiseReject) => {
+    resolve = promiseResolve;
+    reject = promiseReject;
+  });
+  return { promise, resolve, reject };
 }
 
 type FakePreloadImageElement = Omit<HTMLImageElement, 'complete' | 'naturalWidth'> & {

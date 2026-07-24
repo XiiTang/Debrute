@@ -10,8 +10,8 @@ use std::{
 use tokio::{runtime::Builder, sync::oneshot};
 
 use super::{
-    CliAuthorizationVerifier, WorkbenchLaunchService, WorkbenchRuntimeServices,
-    routing::workbench_router,
+    CliAuthorizationVerifier, RuntimeCliHttpService, RuntimeProductHttpService,
+    WorkbenchLaunchService, WorkbenchRuntimeServices, routing::workbench_router,
 };
 
 pub struct WorkbenchHttpServer {
@@ -30,38 +30,15 @@ impl WorkbenchHttpServer {
     ///
     /// Returns [`WorkbenchHttpServerError`] when assets are absent, the loopback
     /// listener cannot bind, or the server thread/runtime cannot start.
+    ///
+    /// # Panics
+    /// Panics if the Workbench HTTP server thread panics during startup.
     pub fn start<Authorization>(
         assets_directory: PathBuf,
         authorization: Arc<Authorization>,
-    ) -> Result<Self, WorkbenchHttpServerError>
-    where
-        Authorization: CliAuthorizationVerifier + 'static,
-    {
-        Self::start_configured(assets_directory, authorization, None)
-    }
-
-    /// Starts the final product listener with every Rust Runtime service
-    /// composed behind the same admission layer.
-    ///
-    /// # Errors
-    ///
-    /// Returns a startup error when the listener, assets, or launch authority
-    /// cannot be installed.
-    pub fn start_with_runtime<Authorization>(
-        assets_directory: PathBuf,
-        authorization: Arc<Authorization>,
         services: Arc<WorkbenchRuntimeServices>,
-    ) -> Result<Self, WorkbenchHttpServerError>
-    where
-        Authorization: CliAuthorizationVerifier + 'static,
-    {
-        Self::start_configured(assets_directory, authorization, Some(services))
-    }
-
-    fn start_configured<Authorization>(
-        assets_directory: PathBuf,
-        authorization: Arc<Authorization>,
-        services: Option<Arc<WorkbenchRuntimeServices>>,
+        cli: Arc<dyn RuntimeCliHttpService>,
+        product: Option<Arc<dyn RuntimeProductHttpService>>,
     ) -> Result<Self, WorkbenchHttpServerError>
     where
         Authorization: CliAuthorizationVerifier + 'static,
@@ -87,6 +64,8 @@ impl WorkbenchHttpServer {
             Arc::clone(&launch_service),
             authorization,
             services,
+            cli,
+            product,
         );
         let (startup_sender, startup_receiver) = mpsc::sync_channel(0);
         let (terminal_sender, terminal) = mpsc::sync_channel(1);
@@ -132,11 +111,15 @@ impl WorkbenchHttpServer {
         match startup_receiver.recv() {
             Ok(Ok(())) => {}
             Ok(Err(error)) => {
-                let _ = server_thread.join();
+                server_thread
+                    .join()
+                    .expect("Workbench HTTP server thread panicked");
                 return Err(error);
             }
             Err(_) => {
-                let _ = server_thread.join();
+                server_thread
+                    .join()
+                    .expect("Workbench HTTP server thread panicked");
                 return Err(WorkbenchHttpServerError::StoppedUnexpectedly);
             }
         }
@@ -188,7 +171,9 @@ impl Drop for WorkbenchHttpServer {
     fn drop(&mut self) {
         self.stop_accepting();
         if let Some(server_thread) = self.thread.take() {
-            let _ = server_thread.join();
+            server_thread
+                .join()
+                .expect("Workbench HTTP server thread panicked");
         }
     }
 }

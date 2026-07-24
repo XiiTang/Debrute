@@ -6,20 +6,28 @@ use std::{
     sync::Mutex,
 };
 
-use serde::{Deserialize, Serialize};
+use serde::{Deserialize, Deserializer, Serialize};
 use serde_json::{Map, Value};
 use uuid::Uuid;
 
-use super::models::{ModelCatalog, ModelSettingsView, empty_secret_map, settings_view};
+use super::models::{ModelCatalog, ModelSettingsView, settings_view};
 
 const RECENT_PROJECT_LIMIT: usize = 12;
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "kebab-case")]
+pub enum DefaultFrontend {
+    Desktop,
+    Browser,
+    RuntimeOnly,
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct WorkbenchSettings {
     pub locale: String,
     pub theme_preference: String,
-    pub default_frontend: String,
+    pub default_frontend: DefaultFrontend,
 }
 
 impl Default for WorkbenchSettings {
@@ -27,7 +35,7 @@ impl Default for WorkbenchSettings {
         Self {
             locale: "en".to_owned(),
             theme_preference: "system".to_owned(),
-            default_frontend: "electron".to_owned(),
+            default_frontend: DefaultFrontend::Desktop,
         }
     }
 }
@@ -46,39 +54,17 @@ pub struct RecentProjectEntry {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct ModelConfig {
     pub debrute_model_id: String,
+    #[serde(deserialize_with = "deserialize_nullable_string")]
     pub base_url_override: Option<String>,
+    #[serde(deserialize_with = "deserialize_nullable_string")]
     pub request_model_id_override: Option<String>,
 }
 
-#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub struct ImageModelsConfig {
-    pub image_models: Vec<ModelConfig>,
-}
-
-#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub struct VideoModelsConfig {
-    pub video_models: Vec<ModelConfig>,
-}
-
-#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub struct AudioModelsConfig {
-    pub audio_models: Vec<ModelConfig>,
-}
-
-#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
-pub struct ModelsConfig {
-    pub image: ImageModelsConfig,
-    pub video: VideoModelsConfig,
-    pub audio: AudioModelsConfig,
-}
-
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct AdobeBridgeSettings {
     pub enabled: bool,
 }
@@ -90,39 +76,24 @@ impl Default for AdobeBridgeSettings {
 }
 
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct GlobalSettingsConfig {
     pub workbench: WorkbenchSettings,
     pub chrome: ChromeSettings,
-    pub models: ModelsConfig,
+    pub models: Vec<ModelConfig>,
     pub adobe_bridge: AdobeBridgeSettings,
 }
 
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct SecretsConfig {
-    pub image_model_api_keys: BTreeMap<String, String>,
-    pub video_model_api_keys: BTreeMap<String, String>,
-    pub audio_model_api_keys: BTreeMap<String, String>,
+    pub model_api_keys: BTreeMap<String, String>,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct GlobalConfigSnapshot {
     pub settings: GlobalSettingsConfig,
     pub secrets: SecretsConfig,
-}
-
-impl Default for GlobalConfigSnapshot {
-    fn default() -> Self {
-        Self {
-            settings: GlobalSettingsConfig::default(),
-            secrets: SecretsConfig {
-                image_model_api_keys: empty_secret_map(),
-                video_model_api_keys: empty_secret_map(),
-                audio_model_api_keys: empty_secret_map(),
-            },
-        }
-    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
@@ -172,23 +143,29 @@ impl GlobalConfigStore {
         &self,
         catalog: &ModelCatalog,
     ) -> Result<GlobalSettingsView, GlobalSettingsError> {
-        let _guard = self.lock()?;
+        let _guard = self.lock();
         let snapshot = self.read_snapshot_unlocked()?;
-        validate_snapshot(&snapshot)?;
+        validate_snapshot(&snapshot, catalog)?;
         Ok(project_view(&snapshot, catalog))
     }
 
-    /// Reads only the persisted recent-Project projection needed by native
-    /// Runtime presentation during startup.
+    /// Reads only the persisted fields needed by native Runtime presentation
+    /// during startup.
     ///
     /// # Errors
     ///
     /// Returns [`GlobalSettingsError`] for malformed or unreadable state.
-    pub fn read_recent_projects(&self) -> Result<Vec<RecentProjectEntry>, GlobalSettingsError> {
-        let _guard = self.lock()?;
+    pub fn read_desktop_presentation(
+        &self,
+        catalog: &ModelCatalog,
+    ) -> Result<(Vec<RecentProjectEntry>, String), GlobalSettingsError> {
+        let _guard = self.lock();
         let snapshot = self.read_snapshot_unlocked()?;
-        validate_snapshot(&snapshot)?;
-        Ok(snapshot.settings.chrome.recent_projects)
+        validate_snapshot(&snapshot, catalog)?;
+        Ok((
+            snapshot.settings.chrome.recent_projects,
+            snapshot.settings.workbench.theme_preference,
+        ))
     }
 
     /// Reads the validated Runtime-owned settings and secret snapshot.
@@ -196,11 +173,40 @@ impl GlobalConfigStore {
     /// This crate-visible form is intentionally unavailable to HTTP clients;
     /// model executors need the unredacted key while every public projection
     /// continues to use [`Self::read_view`].
-    pub(crate) fn read_snapshot(&self) -> Result<GlobalConfigSnapshot, GlobalSettingsError> {
-        let _guard = self.lock()?;
+    pub(crate) fn read_snapshot(
+        &self,
+        catalog: &ModelCatalog,
+    ) -> Result<GlobalConfigSnapshot, GlobalSettingsError> {
+        let _guard = self.lock();
         let snapshot = self.read_snapshot_unlocked()?;
-        validate_snapshot(&snapshot)?;
+        validate_snapshot(&snapshot, catalog)?;
         Ok(snapshot)
+    }
+
+    pub(crate) fn read_model_api_key(
+        &self,
+        model_id: &str,
+        catalog: &ModelCatalog,
+    ) -> Result<String, GlobalSettingsError> {
+        if model_id.is_empty() || model_id.trim() != model_id {
+            return validation("Model id must be a canonical non-empty string.");
+        }
+        if !catalog.contains(model_id) {
+            return validation(format!("Unknown model: {model_id}"));
+        }
+        let _guard = self.lock();
+        let snapshot = self.read_snapshot_unlocked()?;
+        validate_snapshot(&snapshot, catalog)?;
+        snapshot
+            .secrets
+            .model_api_keys
+            .get(model_id)
+            .cloned()
+            .ok_or_else(|| {
+                GlobalSettingsError::Validation(format!(
+                    "Model API key is not configured: {model_id}"
+                ))
+            })
     }
 
     /// Applies one validated partial settings patch atomically per file.
@@ -214,10 +220,11 @@ impl GlobalConfigStore {
         input: &Value,
         catalog: &ModelCatalog,
     ) -> Result<GlobalMutationResult, GlobalSettingsError> {
-        let _guard = self.lock()?;
+        let _guard = self.lock();
         let current = self.read_snapshot_unlocked()?;
-        validate_snapshot(&current)?;
+        validate_snapshot(&current, catalog)?;
         let next = apply_patch(current.clone(), input, catalog)?;
+        validate_snapshot(&next, catalog)?;
         let settings_changed = next.settings != current.settings;
         let secrets_changed = next.secrets != current.secrets;
         if secrets_changed {
@@ -242,21 +249,25 @@ impl GlobalConfigStore {
         &self,
         project_id: &str,
         project_root: &str,
+        catalog: &ModelCatalog,
     ) -> Result<RecentProjectsMutationResult, GlobalSettingsError> {
-        let project_id = project_id.trim();
-        let root = project_root.trim();
-        if project_id.is_empty() || root.is_empty() || !Path::new(root).is_absolute() {
+        if project_id.is_empty()
+            || project_id.trim() != project_id
+            || project_root.is_empty()
+            || project_root.trim() != project_root
+            || !Path::new(project_root).is_absolute()
+        {
             return validation("Recent Project requires a stable id and absolute canonical root.");
         }
-        let _guard = self.lock()?;
+        let _guard = self.lock();
         let mut snapshot = self.read_snapshot_unlocked()?;
-        validate_snapshot(&snapshot)?;
+        validate_snapshot(&snapshot, catalog)?;
         if snapshot
             .settings
             .chrome
             .recent_projects
             .iter()
-            .any(|entry| entry.project_root == root && entry.project_id != project_id)
+            .any(|entry| entry.project_root == project_root && entry.project_id != project_id)
         {
             return validation("Recent Project root is already associated with another id.");
         }
@@ -265,7 +276,7 @@ impl GlobalConfigStore {
             .chrome
             .recent_projects
             .iter()
-            .any(|entry| entry.project_id == project_id && entry.project_root != root)
+            .any(|entry| entry.project_id == project_id && entry.project_root != project_root)
         {
             return validation("Recent Project id is already associated with another root.");
         }
@@ -279,7 +290,7 @@ impl GlobalConfigStore {
             0,
             RecentProjectEntry {
                 project_id: project_id.to_owned(),
-                project_root: root.to_owned(),
+                project_root: project_root.to_owned(),
             },
         );
         snapshot
@@ -305,10 +316,11 @@ impl GlobalConfigStore {
     /// be persisted.
     pub fn clear_recent_projects(
         &self,
+        catalog: &ModelCatalog,
     ) -> Result<RecentProjectsMutationResult, GlobalSettingsError> {
-        let _guard = self.lock()?;
+        let _guard = self.lock();
         let mut snapshot = self.read_snapshot_unlocked()?;
-        validate_snapshot(&snapshot)?;
+        validate_snapshot(&snapshot, catalog)?;
         if snapshot.settings.chrome.recent_projects.is_empty() {
             return Ok(RecentProjectsMutationResult {
                 recent_projects: Vec::new(),
@@ -323,14 +335,14 @@ impl GlobalConfigStore {
         })
     }
 
-    fn lock(&self) -> Result<std::sync::MutexGuard<'_, ()>, GlobalSettingsError> {
-        self.operation.lock().map_err(|_| {
-            GlobalSettingsError::Persistence("Global settings lock is poisoned.".to_owned())
-        })
+    fn lock(&self) -> std::sync::MutexGuard<'_, ()> {
+        self.operation
+            .lock()
+            .expect("Global settings operation lock poisoned")
     }
 
     fn read_snapshot_unlocked(&self) -> Result<GlobalConfigSnapshot, GlobalSettingsError> {
-        normalize_snapshot(GlobalConfigSnapshot {
+        Ok(GlobalConfigSnapshot {
             settings: read_json_or_default(&self.settings_path)?,
             secrets: read_json_or_default(&self.secrets_path)?,
         })
@@ -351,9 +363,17 @@ fn apply_patch(
     input: &Value,
     catalog: &ModelCatalog,
 ) -> Result<GlobalConfigSnapshot, GlobalSettingsError> {
-    let patch = record(input, "Global settings patch")?;
+    let patch = closed_patch_record(
+        input,
+        "Global settings patch",
+        &["workbench", "modelSetting", "adobeBridge"],
+    )?;
     if let Some(value) = patch.get("workbench") {
-        let workbench = record(value, "Global settings workbench")?;
+        let workbench = closed_patch_record(
+            value,
+            "Global settings workbench",
+            &["locale", "themePreference", "defaultFrontend"],
+        )?;
         if let Some(locale) = workbench.get("locale") {
             string(locale, "Workbench locale")?.clone_into(&mut snapshot.settings.workbench.locale);
         }
@@ -362,43 +382,20 @@ fn apply_patch(
                 .clone_into(&mut snapshot.settings.workbench.theme_preference);
         }
         if let Some(frontend) = workbench.get("defaultFrontend") {
-            string(frontend, "Global settings defaultFrontend")?
-                .clone_into(&mut snapshot.settings.workbench.default_frontend);
+            snapshot.settings.workbench.default_frontend = parse_default_frontend(frontend)?;
         }
         validate_workbench(&snapshot.settings.workbench)?;
     }
-    if let Some(value) = patch.get("models") {
-        let models = record(value, "Global settings models")?;
-        if let Some(value) = models.get("image") {
-            apply_model_patch(
-                value,
-                "Image",
-                |id| catalog.contains_image(id),
-                &mut snapshot.settings.models.image.image_models,
-                &mut snapshot.secrets.image_model_api_keys,
-            )?;
-        }
-        if let Some(value) = models.get("video") {
-            apply_model_patch(
-                value,
-                "Video",
-                |id| catalog.contains_video(id),
-                &mut snapshot.settings.models.video.video_models,
-                &mut snapshot.secrets.video_model_api_keys,
-            )?;
-        }
-        if let Some(value) = models.get("audio") {
-            apply_model_patch(
-                value,
-                "Audio",
-                |id| catalog.contains_audio(id),
-                &mut snapshot.settings.models.audio.audio_models,
-                &mut snapshot.secrets.audio_model_api_keys,
-            )?;
-        }
+    if let Some(value) = patch.get("modelSetting") {
+        apply_model_patch(
+            value,
+            catalog,
+            &mut snapshot.settings.models,
+            &mut snapshot.secrets.model_api_keys,
+        )?;
     }
     if let Some(value) = patch.get("adobeBridge") {
-        let bridge = record(value, "Global settings adobeBridge")?;
+        let bridge = closed_patch_record(value, "Global settings adobeBridge", &["enabled"])?;
         let Some(enabled) = bridge.get("enabled").and_then(Value::as_bool) else {
             return validation("Adobe Bridge config must contain enabled.");
         };
@@ -409,44 +406,40 @@ fn apply_patch(
 
 fn apply_model_patch(
     value: &Value,
-    label: &str,
-    known: impl Fn(&str) -> bool,
+    catalog: &ModelCatalog,
     configs: &mut Vec<ModelConfig>,
     secrets: &mut BTreeMap<String, String>,
 ) -> Result<(), GlobalSettingsError> {
-    let patch = record(
+    let patch = closed_patch_record(
         value,
-        &format!("Global settings models.{}", label.to_lowercase()),
+        "Global settings modelSetting",
+        &["modelId", "setting"],
     )?;
     let raw_model_id = string(
         patch.get("modelId").ok_or_else(|| {
-            GlobalSettingsError::Validation(format!("{label} model id must be a string."))
+            GlobalSettingsError::Validation("Model id must be a string.".to_owned())
         })?,
-        &format!("{label} model id"),
+        "Model id",
     )?;
-    if raw_model_id.trim().is_empty() {
-        return validation(format!("{label} model id must be a non-empty string."));
+    if raw_model_id.is_empty() || raw_model_id.trim() != raw_model_id {
+        return validation("Model id must be a canonical non-empty string.");
     }
-    if !known(raw_model_id) {
-        return validation(format!(
-            "Unknown {} model: {raw_model_id}",
-            label.to_lowercase()
-        ));
+    if !catalog.contains(raw_model_id) {
+        return validation(format!("Unknown model: {raw_model_id}"));
     }
-    let model_id = raw_model_id.trim();
-    let setting = record(
+    let model_id = raw_model_id;
+    let setting = closed_patch_record(
         patch.get("setting").ok_or_else(|| {
-            GlobalSettingsError::Validation(format!("{label} model setting must be an object."))
+            GlobalSettingsError::Validation("Model setting must be an object.".to_owned())
         })?,
-        &format!("{label} model setting"),
+        "Model setting",
+        &["baseUrlOverride", "requestModelIdOverride", "apiKey"],
     )?;
-    let base_url_override = nullable_non_empty_string(
-        setting.get("baseUrlOverride"),
-        &format!("{label} model baseUrlOverride"),
-    )?;
+    let base_url_override =
+        nullable_non_empty_string(setting.get("baseUrlOverride"), "Model baseUrlOverride")?;
     let request_model_id_override = nullable_non_empty_string(
         setting.get("requestModelIdOverride"),
-        &format!("{label} model requestModelIdOverride"),
+        "Model requestModelIdOverride",
     )?;
     configs.retain(|config| config.debrute_model_id != model_id);
     if base_url_override.is_some() || request_model_id_override.is_some() {
@@ -458,7 +451,7 @@ fn apply_model_patch(
         configs.sort_by(|left, right| left.debrute_model_id.cmp(&right.debrute_model_id));
     }
     if let Some(api_key) = setting.get("apiKey") {
-        let api_key = string(api_key, &format!("{label} model apiKey"))?.trim();
+        let api_key = string(api_key, "Model apiKey")?;
         if api_key.is_empty() {
             secrets.remove(model_id);
         } else {
@@ -468,104 +461,109 @@ fn apply_model_patch(
     Ok(())
 }
 
-fn validate_snapshot(snapshot: &GlobalConfigSnapshot) -> Result<(), GlobalSettingsError> {
+fn validate_snapshot(
+    snapshot: &GlobalConfigSnapshot,
+    catalog: &ModelCatalog,
+) -> Result<(), GlobalSettingsError> {
     validate_workbench(&snapshot.settings.workbench)?;
-    if snapshot.settings.chrome.recent_projects.len() > RECENT_PROJECT_LIMIT {
+    validate_recent_projects(&snapshot.settings.chrome.recent_projects)?;
+    validate_model_configs(&snapshot.settings.models, catalog)?;
+    validate_secret_map(&snapshot.secrets.model_api_keys, catalog)?;
+    Ok(())
+}
+
+fn validate_recent_projects(
+    recent_projects: &[RecentProjectEntry],
+) -> Result<(), GlobalSettingsError> {
+    if recent_projects.len() > RECENT_PROJECT_LIMIT {
         return validation("Workbench chrome recentProjects contains more than 12 entries.");
+    }
+    for (index, entry) in recent_projects.iter().enumerate() {
+        if entry.project_id.is_empty()
+            || entry.project_id.trim() != entry.project_id
+            || entry.project_root.is_empty()
+            || entry.project_root.trim() != entry.project_root
+            || !Path::new(&entry.project_root).is_absolute()
+        {
+            return validation(
+                "Workbench chrome recentProjects entries require canonical ids and absolute roots.",
+            );
+        }
+        if recent_projects[..index].iter().any(|current| {
+            current.project_id == entry.project_id || current.project_root == entry.project_root
+        }) {
+            return validation("Workbench chrome recentProjects contains a duplicate id or root.");
+        }
     }
     Ok(())
 }
 
-fn normalize_snapshot(
-    mut snapshot: GlobalConfigSnapshot,
-) -> Result<GlobalConfigSnapshot, GlobalSettingsError> {
-    validate_workbench(&snapshot.settings.workbench)?;
-    let mut recent = Vec::new();
-    for entry in &snapshot.settings.chrome.recent_projects {
-        let project_id = entry.project_id.trim();
-        let project_root = entry.project_root.trim();
-        if !project_id.is_empty()
-            && Path::new(project_root).is_absolute()
-            && !recent.iter().any(|current: &RecentProjectEntry| {
-                current.project_id == project_id || current.project_root == project_root
-            })
-        {
-            recent.push(RecentProjectEntry {
-                project_id: project_id.to_owned(),
-                project_root: project_root.to_owned(),
-            });
-        }
-        if recent.len() == RECENT_PROJECT_LIMIT {
-            break;
-        }
-    }
-    snapshot.settings.chrome.recent_projects = recent;
-    normalize_model_configs(&mut snapshot.settings.models.image.image_models, "Image")?;
-    normalize_model_configs(&mut snapshot.settings.models.video.video_models, "Video")?;
-    normalize_model_configs(&mut snapshot.settings.models.audio.audio_models, "Audio")?;
-    snapshot.secrets.image_model_api_keys =
-        normalize_secret_map(snapshot.secrets.image_model_api_keys, "imageModelApiKeys")?;
-    snapshot.secrets.video_model_api_keys =
-        normalize_secret_map(snapshot.secrets.video_model_api_keys, "videoModelApiKeys")?;
-    snapshot.secrets.audio_model_api_keys =
-        normalize_secret_map(snapshot.secrets.audio_model_api_keys, "audioModelApiKeys")?;
-    Ok(snapshot)
-}
-
-fn normalize_model_configs(
-    configs: &mut [ModelConfig],
-    label: &str,
+fn validate_model_configs(
+    configs: &[ModelConfig],
+    catalog: &ModelCatalog,
 ) -> Result<(), GlobalSettingsError> {
-    for config in configs {
-        config.debrute_model_id = config.debrute_model_id.trim().to_owned();
-        if config.debrute_model_id.is_empty() {
+    for (index, config) in configs.iter().enumerate() {
+        if config.debrute_model_id.is_empty()
+            || config.debrute_model_id.trim() != config.debrute_model_id
+        {
+            return validation("Model debruteModelId must be a canonical non-empty string.");
+        }
+        if !catalog.contains(&config.debrute_model_id) {
+            return validation(format!("Unknown model: {}", config.debrute_model_id));
+        }
+        if configs[..index]
+            .iter()
+            .any(|current| current.debrute_model_id == config.debrute_model_id)
+        {
             return validation(format!(
-                "{label} model debruteModelId must be a non-empty string."
+                "Model config contains duplicate debruteModelId: {}",
+                config.debrute_model_id
             ));
         }
-        normalize_persisted_override(&mut config.base_url_override, label, "baseUrlOverride")?;
-        normalize_persisted_override(
-            &mut config.request_model_id_override,
-            label,
+        validate_persisted_override(config.base_url_override.as_deref(), "baseUrlOverride")?;
+        validate_persisted_override(
+            config.request_model_id_override.as_deref(),
             "requestModelIdOverride",
         )?;
     }
     Ok(())
 }
 
-fn normalize_persisted_override(
-    value: &mut Option<String>,
-    label: &str,
+fn validate_persisted_override(
+    value: Option<&str>,
     field: &str,
 ) -> Result<(), GlobalSettingsError> {
     let Some(current) = value else {
         return Ok(());
     };
-    let trimmed = current.trim();
-    if trimmed.is_empty() {
+    if current.is_empty() || current.trim() != current {
         return validation(format!(
-            "{label} model {field} must be null or a non-empty string."
+            "Model {field} must be null or a canonical non-empty string."
         ));
     }
-    *current = trimmed.to_owned();
     Ok(())
 }
 
-fn normalize_secret_map(
-    secrets: BTreeMap<String, String>,
-    field: &str,
-) -> Result<BTreeMap<String, String>, GlobalSettingsError> {
-    let mut normalized = BTreeMap::new();
+fn validate_secret_map(
+    secrets: &BTreeMap<String, String>,
+    catalog: &ModelCatalog,
+) -> Result<(), GlobalSettingsError> {
     for (key, secret) in secrets {
-        let key = key.trim();
-        if key.is_empty() {
+        if key.is_empty() || key.trim() != key {
+            return validation(
+                "Secrets config modelApiKeys keys must be canonical non-empty strings.",
+            );
+        }
+        if !catalog.contains(key) {
             return validation(format!(
-                "Secrets config {field} keys must be non-empty strings."
+                "Secrets config modelApiKeys contains unknown model: {key}"
             ));
         }
-        normalized.insert(key.to_owned(), secret);
+        if secret.is_empty() {
+            return validation("Secrets config modelApiKeys values must be non-empty.");
+        }
     }
-    Ok(normalized)
+    Ok(())
 }
 
 fn validate_workbench(settings: &WorkbenchSettings) -> Result<(), GlobalSettingsError> {
@@ -580,15 +578,18 @@ fn validate_workbench(settings: &WorkbenchSettings) -> Result<(), GlobalSettings
             "Workbench theme preference must be \"system\", \"dark\", or \"light\".",
         );
     }
-    if !matches!(
-        settings.default_frontend.as_str(),
-        "electron" | "browser" | "runtime-only"
-    ) {
-        return validation(
-            "Global settings defaultFrontend must be \"electron\", \"browser\", or \"runtime-only\".",
-        );
-    }
     Ok(())
+}
+
+fn parse_default_frontend(value: &Value) -> Result<DefaultFrontend, GlobalSettingsError> {
+    match string(value, "Global settings defaultFrontend")? {
+        "desktop" => Ok(DefaultFrontend::Desktop),
+        "browser" => Ok(DefaultFrontend::Browser),
+        "runtime-only" => Ok(DefaultFrontend::RuntimeOnly),
+        _ => validation(
+            "Global settings defaultFrontend must be \"desktop\", \"browser\", or \"runtime-only\".",
+        ),
+    }
 }
 
 fn record<'a>(
@@ -598,6 +599,24 @@ fn record<'a>(
     value
         .as_object()
         .ok_or_else(|| GlobalSettingsError::Validation(format!("{label} must be an object.")))
+}
+
+fn closed_patch_record<'a>(
+    value: &'a Value,
+    label: &str,
+    allowed_fields: &[&str],
+) -> Result<&'a Map<String, Value>, GlobalSettingsError> {
+    let record = record(value, label)?;
+    if record.is_empty() {
+        return validation(format!("{label} must contain at least one mutation."));
+    }
+    if let Some(field) = record
+        .keys()
+        .find(|field| !allowed_fields.contains(&field.as_str()))
+    {
+        return validation(format!("{label} contains unexpected field: {field}"));
+    }
+    Ok(record)
 }
 
 fn string<'a>(value: &'a Value, label: &str) -> Result<&'a str, GlobalSettingsError> {
@@ -616,11 +635,20 @@ fn nullable_non_empty_string(
     if value.is_null() {
         return Ok(None);
     }
-    let value = string(value, label)?.trim();
-    if value.is_empty() {
-        return validation(format!("{label} must be null or a non-empty string."));
+    let value = string(value, label)?;
+    if value.is_empty() || value.trim() != value {
+        return validation(format!(
+            "{label} must be null or a canonical non-empty string."
+        ));
     }
     Ok(Some(value.to_owned()))
+}
+
+fn deserialize_nullable_string<'de, D>(deserializer: D) -> Result<Option<String>, D::Error>
+where
+    D: Deserializer<'de>,
+{
+    Option::<String>::deserialize(deserializer)
 }
 
 fn validation<T>(message: impl Into<String>) -> Result<T, GlobalSettingsError> {

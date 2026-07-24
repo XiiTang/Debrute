@@ -22,6 +22,10 @@ Control requests are limited to:
 - report a Desktop window closed; and
 - request Product Quit.
 
+Product Quit requests from external product surfaces use this Control request.
+They are not duplicated as a Workbench HTTP business command; Runtime's own tray
+may invoke the same internal transition directly.
+
 Its events are limited to Desktop recent-Project snapshots, Desktop window
 open/focus instructions, and Product exiting/replacing. Runtime internally
 promotes the Desktop launcher connection after Desktop activation. There is no

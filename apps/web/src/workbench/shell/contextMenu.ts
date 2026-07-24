@@ -1,11 +1,10 @@
+import type { ProjectPathEntry } from '@debrute/app-protocol';
 import type { CanvasProjection, ProjectedCanvasNode } from '@debrute/canvas-core';
 import { isSupportedAdobeBridgeWorkbenchFile } from '../adobe-bridge/adobeBridgeLabels';
 import type { CanvasCamera } from '../canvas/runtime/canvasCamera';
 import { cameraCenteredOnCanvasPoint } from '../canvas/runtime/canvasCamera';
 
-export type WorkbenchContextMenuSource = 'canvas' | 'explorer';
 export type WorkbenchContextMenuTargetKind = 'file' | 'directory';
-export type WorkbenchExplorerContextMenuTargetKind = 'root' | 'item' | 'selection';
 
 export type WorkbenchContextMenuCommand =
   | 'send-to-photoshop'
@@ -25,11 +24,6 @@ export type WorkbenchContextMenuCommand =
   | 'open-terminal'
   | 'copy-relative-path';
 
-export interface WorkbenchProjectPathEntry {
-  projectRelativePath: string;
-  kind: WorkbenchContextMenuTargetKind;
-}
-
 export interface WorkbenchCanvasContextMenuTarget {
   source: 'canvas';
   kind: WorkbenchContextMenuTargetKind;
@@ -47,7 +41,7 @@ export type WorkbenchExplorerContextMenuTarget =
   | {
       source: 'explorer';
       targetKind: 'item' | 'selection';
-      paths: WorkbenchProjectPathEntry[];
+      paths: ProjectPathEntry[];
       primaryPath: string;
       targetDirectoryPath: string;
     };
@@ -61,7 +55,7 @@ export interface WorkbenchContextMenuPosition {
 
 export interface WorkbenchFileClipboard {
   operation: 'copy' | 'cut';
-  entries: WorkbenchProjectPathEntry[];
+  entries: ProjectPathEntry[];
 }
 
 export type WorkbenchContextMenuItem =
@@ -81,7 +75,6 @@ export function buildWorkbenchContextMenuItems(input: {
   canSelectCanvasNode?: boolean | undefined;
   canRevealInCanvas: boolean;
   fileClipboard?: WorkbenchFileClipboard | undefined;
-  desktopPlatform?: NodeJS.Platform | undefined;
   adobeBridgeEnabled?: boolean | undefined;
 }): WorkbenchContextMenuItem[] {
   if (input.target.source === 'explorer' && input.target.targetKind === 'root') {
@@ -118,12 +111,11 @@ export function buildWorkbenchContextMenuItems(input: {
 
 function buildSinglePathContextMenuItems(input: {
   target: WorkbenchContextMenuTarget;
-  targetEntry: WorkbenchProjectPathEntry;
+  targetEntry: ProjectPathEntry;
   node: ProjectedCanvasNode | undefined;
   canSelectCanvasNode?: boolean | undefined;
   canRevealInCanvas: boolean;
   fileClipboard?: WorkbenchFileClipboard | undefined;
-  desktopPlatform?: NodeJS.Platform | undefined;
   adobeBridgeEnabled?: boolean | undefined;
 }): WorkbenchContextMenuItem[] {
   const explorerItem = input.target.source === 'explorer';
@@ -184,14 +176,14 @@ function groupedMenuItems(groups: Array<{ id: string; items: WorkbenchContextMen
   ));
 }
 
-export function explorerContextMenuEntries(target: WorkbenchContextMenuTarget): WorkbenchProjectPathEntry[] {
+export function explorerContextMenuEntries(target: WorkbenchContextMenuTarget): ProjectPathEntry[] {
   return target.source === 'explorer' ? target.paths : [{
     projectRelativePath: target.projectRelativePath,
     kind: target.kind
   }];
 }
 
-export function explorerContextMenuPrimaryEntry(target: WorkbenchContextMenuTarget): WorkbenchProjectPathEntry | undefined {
+export function explorerContextMenuPrimaryEntry(target: WorkbenchContextMenuTarget): ProjectPathEntry | undefined {
   return explorerContextMenuEntries(target)[0];
 }
 

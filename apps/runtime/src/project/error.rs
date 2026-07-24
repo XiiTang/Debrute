@@ -11,7 +11,6 @@ pub enum ProjectError {
     ProjectNotFound(String),
     ProjectNotOpen(String),
     RevisionExhausted,
-    StatePoisoned,
 }
 
 #[derive(Debug)]
@@ -34,7 +33,6 @@ impl ProjectError {
             Self::ProjectNotFound(_) => "project_not_found",
             Self::ProjectNotOpen(_) => "project_not_open",
             Self::RevisionExhausted => "project_revision_exhausted",
-            Self::StatePoisoned => "project_state_poisoned",
             Self::Io(_) | Self::Json(_) | Self::Yaml(_) | Self::Validation(_) => "project_invalid",
         }
     }
@@ -97,7 +95,6 @@ impl fmt::Display for ProjectError {
                 write!(formatter, "Debrute Project is not open: {project_id}")
             }
             Self::RevisionExhausted => formatter.write_str("Project revision is exhausted."),
-            Self::StatePoisoned => formatter.write_str("Project state lock is poisoned."),
         }
     }
 }
@@ -113,8 +110,7 @@ impl Error for ProjectError {
             | Self::RegistryClosed
             | Self::ProjectNotFound(_)
             | Self::ProjectNotOpen(_)
-            | Self::RevisionExhausted
-            | Self::StatePoisoned => None,
+            | Self::RevisionExhausted => None,
         }
     }
 }

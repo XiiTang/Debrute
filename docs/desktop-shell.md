@@ -7,20 +7,42 @@ picking, and Product packaging. Project sessions, global settings, integrations,
 Adobe Bridge, file mutation, terminals, and process lifecycle remain
 Runtime-owned.
 
+Each Desktop artifact is built on its matching native release target together
+with Workbench assets containing the same closed `darwin` or `win32` build
+constant. Desktop validates its native entrypoint once and continues only for
+that target. Runtime paths, native chrome, menus, and recent-Project integration
+consume the typed build target; renderer code does not infer it again from
+browser APIs or receive it through Runtime bootstrap.
+
 ## Runtime And Window Ownership
 
 Desktop acquires Electron's application single-instance lock and connects to
 Runtime as a native launcher. Only an absent Runtime owner may be started. Its
 launcher connection is promoted internally to the one Desktop host when
 Desktop activates; there is no public `desktop_host` Control role or second
-Desktop backend.
+Desktop backend. Control acquisition, optional Runtime launch, handshake, and
+Ready polling share one absolute fifteen-second startup deadline. Timeout
+closes the client, shows the startup failure, and exits Desktop without opening
+a window, terminating or replacing Runtime, retrying activation, or launching
+another Runtime.
+
+Main resolves the Runtime entrypoint, its complete argument list, the Desktop
+entrypoint and argument list, the Workbench asset directory, the log path, and
+the inherited process environment before entering that connect-or-launch
+sequence. The internal launcher consumes those resolved values exactly; it
+does not synthesize missing argument arrays or an alternate environment.
 
 Runtime assigns every BrowserWindow an opaque window key and a root-or-Project
-route. Main requests one in-memory, single-use launch ticket for that key, loads
-the stable Workbench URL, and exposes the ticket once through preload so the
-renderer can open its POST SSE connection. Runtime records only the live window
-key and route. It does not persist window bounds, focus, recovery topology, or
-renderer acknowledgements.
+route. Main requests one in-memory, single-use launch ticket for that key. The
+same response carries the current Runtime-owned Workbench theme preference as
+a launch-time presentation snapshot. Main resolves `system` with Electron's
+native theme, applies the matching pre-render background, loads the stable
+Workbench URL, and exposes only the ticket once through preload so the renderer
+can open its POST SSE connection. Runtime records only the live window key and
+route. Desktop does not persist a settings copy. Missing or invalid launch
+presentation fails the window launch instead of selecting a default background.
+Runtime does not persist window bounds, focus, recovery topology, or renderer
+acknowledgements.
 
 Opening an already-open Project from Electron focuses its existing window.
 Opening another Project replaces the current window's binding after target
@@ -33,17 +55,53 @@ preserved presentation is frontend-local context, not Project command
 authority. **Open Here** explicitly preempts another Workbench instead of
 focusing it.
 
-The red close button closes one window. Closing the last window exits Electron
-and leaves Runtime and its tray running. Electron suppresses its default last-window quit
-until the window adapter has reported that close to Runtime; it then performs a
-Desktop-only exit. `Command-Q`, the application-menu Quit command, and `debrute
-runtime stop` request Product Quit: Runtime closes Desktop and directly
-terminates its owned work. There is no Desktop-owned resident process or tray,
-close confirmation, unload handshake, or automatic window recovery.
+The red close button closes one window. A non-final close reports that window
+key to Runtime. The final close instead closes the Desktop Control connection
+and exits Electron immediately; Runtime removes the Desktop host and its final
+topology entry when that connection ends. It does not wait for a redundant
+final-window acknowledgement. Runtime and its tray remain running. `Command-Q`,
+the application-menu Quit command, and `debrute runtime stop` request Product
+Quit: Runtime closes Desktop and directly terminates its owned work. There is
+no Desktop-owned resident process or tray, close confirmation, unload
+handshake, fallback exit, or automatic window recovery.
+
+If Runtime rejects or cannot receive a non-final window-close report, the local
+window is already gone and Desktop's topology can no longer agree with Runtime.
+Desktop reports the failure, destroys its remaining windows, closes Control,
+and exits locally. Connection teardown drains the complete Desktop-host
+topology; Desktop does not continue with the remaining windows, retry the
+report, or open another Control connection. Runtime remains available for a
+later fresh Desktop launch.
+
+On Windows, File > Close Window, `Ctrl+W`, the title-bar close button, and
+`Alt+F4` retain that window-close meaning. File > Quit Debrute and `Ctrl+Q`
+instead request Product Quit. Both surfaces use the same `Quit Debrute` product
+term; Windows does not introduce a separate Exit command.
+
+Command-Q received during Desktop startup retains that Product Quit meaning.
+Desktop completes its already-running Control acquisition, installs the Product
+exit event path, and sends Product Quit once before opening any Workbench
+window. Absence of an assigned Control client is not permission to downgrade
+the action to a Desktop-only exit; Desktop does not cancel startup, create a
+second connection, or retry the request.
 
 If the Control connection ends unexpectedly, Desktop shows a native startup or
 runtime-loss error and exits. It does not reconnect, restart Runtime, or replay
 the request. A later user launch performs a fresh ensure-and-connect sequence.
+
+A BrowserWindow is hidden until its Workbench document loads. If loading fails,
+Desktop destroys that local window and asks Runtime to remove its window key.
+When no successfully loaded window remains, Desktop shows the failure, closes
+its Control connection, and exits locally; Runtime remains alive for a later
+fresh Desktop launch. A failed additional window does not close other loaded
+windows. Desktop does not retain the hidden window, retry, reload it, or use a
+different URL.
+
+If Runtime also rejects or cannot receive the failed-window cleanup, Desktop
+reports both failures, destroys its remaining windows, closes Control, and exits
+locally. The connection teardown drains Runtime's complete Desktop-host
+topology. Desktop does not continue with divergent topology, retry the cleanup,
+open another Control connection, or restart itself.
 
 ## Renderer Boundary
 
@@ -66,9 +124,27 @@ implement undo, redo, cut, copy, paste, paste-and-match-style, delete, select
 all, and speech commands; supported semantic commands are forwarded to the
 focused Workbench window.
 
+The Windows Web title bar forwards its closed native edit-command subset,
+including Delete and Paste and Match Style, to Electron for actual execution.
+The executor is exhaustive: a successful IPC response means the requested
+command ran, while an unknown or unsupported command is rejected. macOS Start
+Speaking and Stop Speaking remain native application-menu roles only; because
+macOS Desktop does not render the Web menus, those roles are not duplicated in
+the Web-to-Electron command protocol.
+
 Runtime sends Desktop a snapshot-first recent-Projects projection over Control.
 Electron mirrors it into native recent-document and menu affordances but does
-not persist a separate recent-project store.
+not persist a separate recent-project store. A host which cannot accept a later
+projection event loses its Control connection; Runtime continues with the
+ordered projection and any other hosts rather than reporting a Global update
+failure or retrying delivery.
+
+Each projection change is applied directly through the current platform's
+required Electron API: macOS clears and repopulates recent documents, while
+Windows replaces the Jump List. The sync path does not build a deferred
+`apply` object for production to invoke immediately, and required platform
+methods are not optional no-op calls. A missing current-platform API is an
+explicit Desktop integration failure.
 
 ## Explorer And Native File Operations
 
@@ -85,7 +161,8 @@ commands, so browser and Desktop Workbenches share the same behavior.
 - Desktop lifecycle and command execution: `apps/desktop/src/electron/main.ts`.
 - Runtime window coordination: `apps/runtime/src/control/desktop/`.
 - Desktop Control adapter: `apps/desktop/src/electron/desktopWindowControlAdapter.ts`.
-- Native application menu and single-instance lifecycle: `apps/desktop/src/electron/main.ts`.
+- Native application menu: `apps/desktop/src/electron/desktopApplicationMenu.ts`.
+- Desktop single-instance lifecycle: `apps/desktop/src/electron/main.ts`.
 - Narrow renderer bridge: `apps/desktop/src/electron/preload.ts` and
   `apps/desktop/src/electron/nativeWindowShell.ts`.
 - Workbench launch and connection authority: `apps/runtime/src/workbench/`.

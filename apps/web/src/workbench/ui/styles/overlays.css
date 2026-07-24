@@ -11,10 +11,6 @@
   font-size: var(--db-font-xs);
 }
 
-.db-status-pill--success {
-  color: var(--db-success);
-}
-
 .db-status-pill--warning {
   color: var(--db-warning);
 }

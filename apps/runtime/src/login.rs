@@ -1,29 +1,41 @@
-//! Platform Start-at-Login registration with an ensure-only activation contract.
+//! Platform Start-at-Login registration.
 
 use std::{
     error::Error,
-    fmt, fs, io,
+    fmt, io,
     path::{Path, PathBuf},
 };
 
+#[cfg(target_os = "macos")]
+use std::fs;
+#[cfg(target_os = "macos")]
 use uuid::Uuid;
 
-use crate::control::ActivationIntent;
-
+#[cfg(target_os = "macos")]
 const MACOS_LAUNCH_AGENT_NAME: &str = "com.debrute.runtime.plist";
 #[cfg(target_os = "windows")]
 const WINDOWS_RUN_VALUE_NAME: &str = "Debrute Runtime";
 
-#[must_use]
-pub const fn login_activation_intent() -> ActivationIntent {
-    ActivationIntent::EnsureRuntime
+/// Validates the stable Runtime path supplied by a launcher.
+///
+/// # Errors
+///
+/// Returns [`LoginItemError`] when the path is not absolute.
+pub fn require_stable_runtime_entrypoint(path: PathBuf) -> Result<PathBuf, LoginItemError> {
+    if path.is_absolute() {
+        Ok(path)
+    } else {
+        Err(LoginItemError::InvalidStableEntrypoint)
+    }
 }
 
+#[cfg(target_os = "macos")]
 pub struct MacOsLoginItem {
     path: PathBuf,
     stable_runtime: PathBuf,
 }
 
+#[cfg(target_os = "macos")]
 impl MacOsLoginItem {
     #[must_use]
     pub fn new(home: impl AsRef<Path>, stable_runtime: impl AsRef<Path>) -> Self {
@@ -56,8 +68,8 @@ impl MacOsLoginItem {
 
     /// Installs or removes the next-login `LaunchAgent` atomically.
     ///
-    /// The executable has no frontend or Project arguments. Starting the Runtime
-    /// therefore exercises the normal single-instance `ensure_runtime` path.
+    /// The executable has no frontend or Project arguments. It starts Runtime
+    /// without opening a Workbench frontend.
     ///
     /// # Errors
     ///
@@ -118,13 +130,16 @@ impl MacOsLoginItem {
 ///
 /// # Errors
 ///
-/// Returns [`LoginItemError`] when the path is not Unicode or contains a quote.
+/// Returns [`LoginItemError`] when the path cannot be represented safely in the
+/// one Windows startup command.
 pub fn windows_run_value(stable_runtime: &Path) -> Result<String, LoginItemError> {
     let value = stable_runtime.to_str().ok_or(LoginItemError::NonUtf8Path)?;
     if value.contains('"') {
-        return Err(LoginItemError::QuotedPath);
+        return Err(LoginItemError::InvalidWindowsCommandPath);
     }
-    Ok(format!("\"{value}\""))
+    Ok(format!(
+        "\"{value}\" --stable-runtime-entrypoint \"{value}\""
+    ))
 }
 
 #[cfg(target_os = "windows")]
@@ -191,6 +206,7 @@ impl WindowsLoginItem {
     }
 }
 
+#[cfg(target_os = "macos")]
 fn xml_escape(value: &str) -> String {
     value
         .replace('&', "&amp;")
@@ -200,32 +216,35 @@ fn xml_escape(value: &str) -> String {
         .replace('\'', "&apos;")
 }
 
-#[cfg(unix)]
+#[cfg(target_os = "macos")]
 fn set_private_file_permissions(path: &Path) -> Result<(), LoginItemError> {
     use std::os::unix::fs::PermissionsExt;
     fs::set_permissions(path, fs::Permissions::from_mode(0o600)).map_err(LoginItemError::Io)
 }
 
-#[cfg(not(unix))]
-fn set_private_file_permissions(_path: &Path) -> Result<(), LoginItemError> {
-    Ok(())
-}
-
 #[derive(Debug)]
 pub enum LoginItemError {
     Io(io::Error),
+    #[cfg(target_os = "macos")]
     MissingParent,
     NonUtf8Path,
-    QuotedPath,
+    InvalidWindowsCommandPath,
+    InvalidStableEntrypoint,
 }
 
 impl fmt::Display for LoginItemError {
     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             Self::Io(error) => error.fmt(formatter),
+            #[cfg(target_os = "macos")]
             Self::MissingParent => formatter.write_str("Login item path has no parent."),
             Self::NonUtf8Path => formatter.write_str("Login Runtime path is not valid Unicode."),
-            Self::QuotedPath => formatter.write_str("Login Runtime path contains a quote."),
+            Self::InvalidWindowsCommandPath => {
+                formatter.write_str("Login Runtime path is not safe for a Windows startup command.")
+            }
+            Self::InvalidStableEntrypoint => {
+                formatter.write_str("Stable Runtime entrypoint must be an absolute path.")
+            }
         }
     }
 }
@@ -234,7 +253,11 @@ impl Error for LoginItemError {
     fn source(&self) -> Option<&(dyn Error + 'static)> {
         match self {
             Self::Io(error) => Some(error),
-            Self::MissingParent | Self::NonUtf8Path | Self::QuotedPath => None,
+            #[cfg(target_os = "macos")]
+            Self::MissingParent => None,
+            Self::NonUtf8Path | Self::InvalidWindowsCommandPath | Self::InvalidStableEntrypoint => {
+                None
+            }
         }
     }
 }

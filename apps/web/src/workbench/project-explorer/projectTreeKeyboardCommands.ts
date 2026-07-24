@@ -19,7 +19,7 @@ export interface ProjectTreeKeyboardEventLike {
 
 export function projectTreeKeyboardCommandFromEvent(
   event: ProjectTreeKeyboardEventLike,
-  platform: NodeJS.Platform
+  platform: DebruteProductPlatform
 ): ProjectTreeKeyboardCommand | undefined {
   if (isEditableKeyboardTarget(event.target)) {
     return undefined;
@@ -77,3 +77,4 @@ function isEditableKeyboardTarget(target: unknown): boolean {
   const tagName = record.tagName.toLowerCase();
   return tagName === 'input' || tagName === 'textarea' || tagName === 'select';
 }
+import type { DebruteProductPlatform } from '@debrute/app-protocol';

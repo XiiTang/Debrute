@@ -34,12 +34,9 @@ export function createCanvasPreviewResourceScheduler(input: {
   requestFrame?: ((callback: FrameRequestCallback) => number) | undefined;
   cancelFrame?: ((handle: number) => void) | undefined;
 } = {}): CanvasPreviewResourceScheduler {
-  const requestFrame = input.requestFrame ?? globalThis.window?.requestAnimationFrame?.bind(globalThis.window);
-  const cancelFrame = input.cancelFrame ?? globalThis.window?.cancelAnimationFrame?.bind(globalThis.window);
-  if (!requestFrame || !cancelFrame) {
-    throw new Error('Canvas preview resource scheduling requires animation frame support.');
-  }
-  const now = input.now ?? (() => globalThis.performance?.now?.() ?? Date.now());
+  const requestFrame = input.requestFrame ?? window.requestAnimationFrame.bind(window);
+  const cancelFrame = input.cancelFrame ?? window.cancelAnimationFrame.bind(window);
+  const now = input.now ?? (() => performance.now());
   const queuedStarts = new Map<string, CanvasPreviewResourceRequest>();
   const queuedPublications = new Map<string, CanvasPreviewResourceRequest>();
   let cameraState: CanvasCameraState = 'idle';
@@ -65,16 +62,15 @@ export function createCanvasPreviewResourceScheduler(input: {
 
   const interactionActive = (): boolean => cameraState !== 'idle' || dragActive;
 
-  const publicationNeedsFrame = (request: CanvasPreviewResourceRequest): boolean => (
+  const requestNeedsFrame = (request: CanvasPreviewResourceRequest): boolean => (
     !request.isCurrent() || !request.isCulled()
   );
 
   const cancelPendingFrame = (): void => {
-    if (frameHandle === undefined) {
-      return;
+    if (frameHandle !== undefined) {
+      cancelFrame(frameHandle);
+      frameHandle = undefined;
     }
-    cancelFrame(frameHandle);
-    frameHandle = undefined;
   };
 
   const scheduleFrame = (): void => {
@@ -85,8 +81,8 @@ export function createCanvasPreviewResourceScheduler(input: {
       record('preview-resource-paused-moving');
       return;
     }
-    if (![...queuedPublications.values()].some(publicationNeedsFrame)
-      && queuedStarts.size === 0) {
+    if (![...queuedPublications.values()].some(requestNeedsFrame)
+      && ![...queuedStarts.values()].some(requestNeedsFrame)) {
       return;
     }
     frameHandle = requestFrame(() => {
@@ -115,9 +111,6 @@ export function createCanvasPreviewResourceScheduler(input: {
           continue;
         }
         if (request.isCulled()) {
-          if (phase === 'start') {
-            queue.delete(key);
-          }
           record('preview-resource-skip-culled', request);
           continue;
         }
@@ -154,6 +147,9 @@ export function createCanvasPreviewResourceScheduler(input: {
     const key = previewResourceRequestKey(kind, nodeId);
     queuedStarts.delete(key);
     queuedPublications.delete(key);
+    if (queuedStarts.size === 0 && queuedPublications.size === 0) {
+      cancelPendingFrame();
+    }
   };
 
   return {

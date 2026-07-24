@@ -14,7 +14,7 @@ mod working_copy;
 pub(crate) use authority::{DesktopLaunchBinding, SourceWorkbenchRegistrationError};
 pub use authority::{WORKBENCH_SESSION_COOKIE, WorkbenchLaunchError, WorkbenchLaunchService};
 pub use connections::WORKBENCH_CONNECTION_HEADER;
-pub(crate) use connections::WorkbenchConnectionRegistry;
+pub use connections::WorkbenchConnectionRegistry;
 pub(crate) use connections::{ProjectBindOutcome, WorkbenchConnectionContext};
 pub use http::{WorkbenchHttpServer, WorkbenchHttpServerError};
 pub use services::{

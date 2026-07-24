@@ -65,6 +65,10 @@ impl PhotoshopTransferStore {
         &mut self,
         input: NewPhotoshopDownload<'_>,
     ) -> Result<PhotoshopTransferView, PhotoshopBridgeError> {
+        assert!(
+            !self.records.contains_key(input.transfer.transfer_id),
+            "Runtime-generated Photoshop download transfer id must be unique"
+        );
         let NewPhotoshopDownload {
             transfer,
             token,
@@ -143,12 +147,10 @@ impl PhotoshopTransferStore {
                 project_use: Some(input.project_use),
             },
         );
-        self.records.get_mut(&id).ok_or_else(|| {
-            PhotoshopBridgeError::new(
-                PhotoshopBridgeErrorCode::StatePoisoned,
-                "Photoshop transfer state is unavailable.",
-            )
-        })
+        Ok(self
+            .records
+            .get_mut(&id)
+            .expect("new Photoshop transfer record must remain present"))
     }
 
     pub(crate) fn take_download(

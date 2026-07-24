@@ -7,7 +7,6 @@ export const architectureScopes = [
   'packages',
   'apps/desktop/package.json',
   'apps/desktop/tsconfig.json',
-  'apps/desktop/tsconfig.electron.json',
   'apps/desktop/src',
   'apps/web/src',
   'apps/web/vite.config.ts',
@@ -26,22 +25,7 @@ export const importMatrix = [
   {
     name: 'app-protocol stays free of orchestration and runtime execution',
     match: (file) => file.startsWith('packages/app-protocol/src/'),
-    forbiddenImports: [/^@debrute\/capability-core$/, /^electron$/, /^react$/, /^node:/]
-  },
-  {
-    name: 'project-core stays independent of app and runtime layers',
-    match: (file) => file.startsWith('packages/project-core/src/'),
-    forbiddenImports: [/^@debrute\/app-protocol$/, /apps\//, /^electron$/, /^react$/]
-  },
-  {
-    name: 'canvas-map-core stays independent of app and runtime layers',
-    match: (file) => file.startsWith('packages/canvas-map-core/src/'),
-    forbiddenImports: [/^@debrute\/app-protocol$/, /apps\//, /^electron$/, /^react$/]
-  },
-  {
-    name: 'capability-core stays dependency-light',
-    match: (file) => file.startsWith('packages/capability-core/src/'),
-    forbiddenImports: [/^@debrute\/app-protocol$/, /apps\//, /^electron$/, /^react$/]
+    forbiddenImports: [/^electron$/, /^react$/, /^node:/]
   },
   {
     name: 'canvas-core does not depend on renderer applications',
@@ -54,14 +38,25 @@ export const importMatrix = [
     forbiddenImports: [/^electron$/, /^react$/]
   },
   {
-    name: 'web workbench does not import capability execution',
-    match: (file) => file.startsWith('apps/web/src/'),
-    forbiddenImports: [/^@debrute\/capability-core$/]
-  },
-  {
     name: 'web workbench does not import electron',
     match: (file) => file.startsWith('apps/web/src/'),
     forbiddenImports: [/^electron$/]
+  },
+  {
+    name: 'web features use the owned Workbench UI surface',
+    match: (file) => file.startsWith('apps/web/src/workbench/')
+      && !file.startsWith('apps/web/src/workbench/ui/')
+      && !isTestSourceFile(file),
+    forbiddenImports: [
+      /^@radix-ui(?:\/|$)/,
+      /^antd(?:\/|$)/,
+      /^@mui(?:\/|$)/,
+      /^@chakra-ui(?:\/|$)/,
+      /^@mantine(?:\/|$)/,
+      /^@fluentui(?:\/|$)/,
+      /^bootstrap(?:\/|$)/,
+      /^react-bootstrap(?:\/|$)/
+    ]
   },
   {
     name: 'web workbench runtime does not import node filesystem',
@@ -72,16 +67,10 @@ export const importMatrix = [
     name: 'desktop electron stays a native host and client',
     match: (file) => file.startsWith('apps/desktop/src/electron/'),
     forbiddenImports: [
-      /^@debrute\/capability-core(?:\/|$)/,
-      /^@debrute\/project-core(?:\/|$)/,
       /^@debrute\/canvas-core(?:\/|$)/,
-      /^@debrute\/canvas-map-core(?:\/|$)/,
       /^@debrute\/web(?:\/|$)/,
       /^apps\/web\//,
-      /^packages\/capability-core\/src\//,
-      /^packages\/project-core\/src\//,
       /^packages\/canvas-core\/src\//,
-      /^packages\/canvas-map-core\/src\//,
       /^\.\.\/\.\.\/\.\.\/web\//,
       /^react(?:\/|$)/,
       /^react-dom(?:\/|$)/
@@ -89,18 +78,8 @@ export const importMatrix = [
   }
 ];
 
-export const exportRules = [
-  {
-    name: 'app-protocol does not export runtime-owned config entries',
-    match: (file) => file === 'packages/app-protocol/src/index.ts',
-    forbiddenExportNames: ['ImageModelConfig', 'VideoModelConfig']
-  }
-];
-
-export const publicBarrelRules = [];
-
 export function architectureRuleKinds() {
-  return ['imports', 'exports', 'package-json', 'tsconfig', 'vite-alias', 'public-barrel'];
+  return ['imports', 'package-json', 'tsconfig', 'vite-alias'];
 }
 
 export function rgFiles(root, scopes = architectureScopes) {
@@ -129,13 +108,9 @@ export async function architectureBoundaryViolations(root = process.cwd(), files
 
   return [
     ...contents.flatMap(([file, text]) => importViolations(file, text)),
-    ...contents.flatMap(([file, text]) => exportViolations(file, text)),
     ...contents.flatMap(([file, text]) => packageJsonViolations(file, text)),
     ...contents.flatMap(([file, text]) => tsconfigViolations(file, text)),
-    ...contents.flatMap(([file, text]) => viteAliasViolations(file, text)),
-    ...contents.flatMap(([file, text]) => publicBarrelRules
-      .filter((rule) => rule.file === file)
-      .flatMap((rule) => barrelViolations(rule, file, text)))
+    ...contents.flatMap(([file, text]) => viteAliasViolations(file, text))
   ];
 }
 
@@ -182,26 +157,6 @@ export function importedSpecifiers(text) {
   return specifiers;
 }
 
-export function exportedDeclarationNames(text) {
-  const names = [];
-  const declarationPattern = /\bexport\s+(?:declare\s+)?(?:abstract\s+)?(?:interface|type|class|function|const|let|var|enum)\s+([A-Za-z_$][\w$]*)/g;
-  for (const match of text.matchAll(declarationPattern)) {
-    if (match[1]) {
-      names.push(match[1]);
-    }
-  }
-  return names;
-}
-
-function exportViolations(file, text) {
-  const exportedNames = new Set(exportedDeclarationNames(text));
-  return exportRules
-    .filter((rule) => rule.match(file))
-    .flatMap((rule) => rule.forbiddenExportNames
-      .filter((name) => exportedNames.has(name))
-      .map((name) => `${rule.name}: ${file} exports ${name}`));
-}
-
 function packageJsonViolations(file, text) {
   if (file === 'apps/desktop/package.json') {
     const pkg = JSON.parse(text);
@@ -210,23 +165,38 @@ function packageJsonViolations(file, text) {
         '@debrute/app-protocol',
         '@debrute/runtime-control-client'
       ]),
-      devDependencies: new Set(['electron', 'electron-builder', 'esbuild', 'typescript', 'vite']),
+      devDependencies: new Set(['electron', 'electron-builder', 'esbuild', 'typescript']),
       optionalDependencies: new Set(),
       peerDependencies: new Set()
     });
+  }
+  if (file === 'apps/web/package.json') {
+    const pkg = JSON.parse(text);
+    const disallowed = new Set([
+      'tailwindcss',
+      'shadcn',
+      'shadcn-ui',
+      'antd',
+      '@mui/material',
+      '@chakra-ui/react',
+      '@mantine/core',
+      '@fluentui/react-components',
+      'bootstrap',
+      'react-bootstrap'
+    ]);
+    return packageDependencySections.flatMap((sectionName) => Object.keys(pkg[sectionName] ?? {})
+      .filter((dependency) => disallowed.has(dependency))
+      .map((dependency) => `web package uses the owned Workbench UI surface: ${file} declares ${dependency} in ${sectionName}`));
   }
   return [];
 }
 
 function tsconfigViolations(file, text) {
-  if (file === 'apps/desktop/tsconfig.json' || file === 'apps/desktop/tsconfig.electron.json') {
+  if (file === 'apps/desktop/tsconfig.json') {
     const config = JSON.parse(text);
     const references = (config.references ?? []).map((reference) => reference.path);
     return [
-      '../../packages/capability-core',
-      '../../packages/project-core',
       '../../packages/canvas-core',
-      '../../packages/canvas-map-core',
       '../../apps/web'
     ]
       .filter((reference) => references.includes(reference))
@@ -253,25 +223,9 @@ function viteAliasViolations(file, text) {
   const aliases = [...text.matchAll(/['"](@debrute\/[^'"]+)['"]\s*:/g)].map((match) => match[1]);
   const allowedAliases = new Set([
     '@debrute/app-protocol',
-    '@debrute/project-core',
-    '@debrute/project-core/projectCacheKeys',
-    '@debrute/project-core/projectTextFileTypes',
     '@debrute/canvas-core'
   ]);
   return aliases
     .filter((alias) => !allowedAliases.has(alias))
     .map((alias) => `web workbench Vite aliases stay renderer-safe: ${file} aliases ${alias}`);
-}
-
-function barrelViolations(rule, file, text) {
-  const nonEmptyLines = text.split('\n').filter((line) => line.trim().length > 0);
-  const exportSources = importedSpecifiers(text);
-  return [
-    ...(nonEmptyLines.length > rule.maxNonEmptyLines
-      ? [`${rule.name}: ${file} has ${nonEmptyLines.length} non-empty lines, max ${rule.maxNonEmptyLines}`]
-      : []),
-    ...exportSources
-      .filter((source) => !rule.allowedExportSources.includes(source))
-      .map((source) => `${rule.name}: ${file} exports from ${source}`)
-  ];
 }

@@ -10,6 +10,10 @@ const packageJson = JSON.parse(
 ) as { scripts: Record<string, string> };
 
 describe('local test command surface', () => {
+  it('runs the layout gate before the default Vitest suite', () => {
+    expect(packageJson.scripts.test).toBe('pnpm test:layout && vitest run');
+  });
+
   it('declares exactly the five approved functional tags', () => {
     expect(testTags.map(({ name }) => name)).toEqual([
       'canvas-text',

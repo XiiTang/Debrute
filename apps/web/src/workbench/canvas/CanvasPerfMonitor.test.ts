@@ -1,4 +1,4 @@
-import { describe, expect, it, vi } from 'vitest';
+import { describe, expect, it } from 'vitest';
 import {
   createCanvasPerfMonitor,
   type CanvasPerfCounterName,
@@ -10,7 +10,6 @@ describe('CanvasPerfMonitor', () => {
   it('records ordered session, counter, frame, mark, LoAF, and summary data', () => {
     const emitted: CanvasPerfTraceEvent[] = [];
     const monitor = createCanvasPerfMonitor({
-      enabled: true,
       onEvent: (event) => emitted.push(event)
     });
 
@@ -20,9 +19,6 @@ describe('CanvasPerfMonitor', () => {
       source: 'CanvasSurface',
       detail: { minimapOpen: false }
     });
-    if (!sessionId) {
-      throw new Error('Expected enabled monitor to start a session.');
-    }
 
     monitor.recordCounter({ timestamp: 108, source: 'CanvasStageRuntime', name: 'stage-camera-write' });
     monitor.recordFrame(frame(116, 16, { reactCommitCount: 0 }));
@@ -102,12 +98,9 @@ describe('CanvasPerfMonitor', () => {
   });
 
   it('targets an explicit counter session instead of all active sessions', () => {
-    const monitor = createCanvasPerfMonitor({ enabled: true });
+    const monitor = createCanvasPerfMonitor();
     const camera = monitor.startSession({ type: 'camera-pan', timestamp: 0, source: 'CanvasSurface' });
     const drag = monitor.startSession({ type: 'drag-move-node', timestamp: 5, source: 'CanvasSurface' });
-    if (!camera || !drag) {
-      throw new Error('Expected enabled monitor to start sessions.');
-    }
 
     monitor.recordCounter({
       sessionId: drag,
@@ -125,12 +118,9 @@ describe('CanvasPerfMonitor', () => {
   });
 
   it('targets an explicit session plus matching active session types', () => {
-    const monitor = createCanvasPerfMonitor({ enabled: true });
+    const monitor = createCanvasPerfMonitor();
     const camera = monitor.startSession({ type: 'camera-pan', timestamp: 0, source: 'CanvasSurface' });
     const drag = monitor.startSession({ type: 'drag-move-node', timestamp: 2, source: 'CanvasSurface' });
-    if (!camera || !drag) {
-      throw new Error('Expected enabled monitor to start sessions.');
-    }
 
     monitor.recordCounter({
       sessionId: drag,
@@ -148,11 +138,8 @@ describe('CanvasPerfMonitor', () => {
   });
 
   it('records image node asset counters in totals and summaries', () => {
-    const monitor = createCanvasPerfMonitor({ enabled: true });
+    const monitor = createCanvasPerfMonitor();
     const sessionId = monitor.startSession({ type: 'camera-pan', timestamp: 0, source: 'CanvasSurface' });
-    if (!sessionId) {
-      throw new Error('Expected enabled monitor to start a session.');
-    }
 
     monitor.recordCounter({ sessionId, timestamp: 1, source: 'CanvasImageNodeAsset', name: 'image-node-url-resolve' });
     monitor.recordCounter({ sessionId, timestamp: 2, source: 'CanvasImageNodeAsset', name: 'image-node-next-load-start' });
@@ -177,11 +164,8 @@ describe('CanvasPerfMonitor', () => {
   });
 
   it('records text preview counters in totals and summaries', () => {
-    const monitor = createCanvasPerfMonitor({ enabled: true });
+    const monitor = createCanvasPerfMonitor();
     const sessionId = monitor.startSession({ type: 'camera-pan', timestamp: 0, source: 'CanvasSurface' });
-    if (!sessionId) {
-      throw new Error('Expected enabled monitor to start a session.');
-    }
 
     monitor.recordCounter({ sessionId, timestamp: 1, source: 'CanvasTextPreviewRuntime', name: 'text-preview-source-check-requested' });
     monitor.recordCounter({ sessionId, timestamp: 2, source: 'CanvasTextPreviewRuntime', name: 'text-preview-source-availability-resolved' });
@@ -209,39 +193,16 @@ describe('CanvasPerfMonitor', () => {
     expect(summary?.counters).toEqual(monitor.getCounterTotals());
   });
 
-  it('is inert when disabled', () => {
-    const listener = vi.fn();
-    const monitor = createCanvasPerfMonitor({ enabled: false, onEvent: listener });
-
-    const sessionId = monitor.startSession({ type: 'camera-pan', timestamp: 0, source: 'CanvasSurface' });
-    monitor.recordCounter({ timestamp: 1, source: 'CanvasStageRuntime', name: 'stage-camera-write' });
-    monitor.recordFrame(frame(2, 16));
-    monitor.recordLongAnimationFrame({
-      timestamp: 3,
-      source: 'CanvasPerfBrowserAdapter',
-      entry: { startTime: 0, duration: 80, blockingDuration: 50, scripts: [] }
-    });
-
-    expect(sessionId).toBeUndefined();
-    expect(monitor.endSession({ sessionId: 'camera-pan:1', timestamp: 20, source: 'CanvasSurface' })).toBeUndefined();
-    expect(monitor.getLastSession()).toBeUndefined();
-    expect(monitor.getTrace()).toEqual({ enabled: false, events: [], sessions: [] });
-    expect(listener).not.toHaveBeenCalled();
-  });
-
   it('returns undefined when ending a missing session', () => {
-    const monitor = createCanvasPerfMonitor({ enabled: true });
+    const monitor = createCanvasPerfMonitor();
 
     expect(monitor.endSession({ sessionId: 'camera-pan:999', timestamp: 10, source: 'CanvasSurface' })).toBeUndefined();
     expect(monitor.getTrace().events).toEqual([]);
   });
 
   it('attaches explicit late LoAF entries to completed sessions', () => {
-    const monitor = createCanvasPerfMonitor({ enabled: true });
+    const monitor = createCanvasPerfMonitor();
     const sessionId = monitor.startSession({ type: 'camera-pan', timestamp: 100, source: 'CanvasSurface' });
-    if (!sessionId) {
-      throw new Error('Expected enabled monitor to start a session.');
-    }
 
     monitor.endSession({ sessionId, timestamp: 150, source: 'CanvasSurface' });
     monitor.recordLongAnimationFrame({
@@ -261,11 +222,8 @@ describe('CanvasPerfMonitor', () => {
   });
 
   it('does not invent final canvas state when a session has no frame or final state', () => {
-    const monitor = createCanvasPerfMonitor({ enabled: true });
+    const monitor = createCanvasPerfMonitor();
     const sessionId = monitor.startSession({ type: 'drag-resize-node', timestamp: 0, source: 'CanvasSurface' });
-    if (!sessionId) {
-      throw new Error('Expected enabled monitor to start a session.');
-    }
 
     const summary = monitor.endSession({ sessionId, timestamp: 10, source: 'CanvasSurface' });
 

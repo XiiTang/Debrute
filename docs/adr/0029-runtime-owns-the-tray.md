@@ -14,8 +14,7 @@ menu.
 Tray creation is a required startup step on macOS and Windows. If the platform
 cannot create it, Runtime exits before starting its services or publishing
 `Ready`; the launcher reports the startup failure. There is no invisible
-trayless Runtime mode, degraded lifecycle state, or retry loop. Linux tray
-behavior is outside the supported product design.
+trayless Runtime mode, degraded lifecycle state, or retry loop.
 
 On macOS, the Runtime executable is packaged and launched inside an
 `LSUIElement` application bundle so the status item has a stable native

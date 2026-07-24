@@ -122,6 +122,37 @@ function CanvasNodeShellComponent({
     node.nodeKind,
     usesFixedNodePresentation(node) ? 'fixed-presentation' : ''
   ].filter(Boolean).join(' ');
+  const content = (
+    <CanvasNodeContent
+      node={node}
+      selected={node.mediaKind === 'text' ? textEditorActive : selected}
+      culled={culled}
+      actions={actions}
+      textBuffer={textBuffer}
+      textPreview={textPreview}
+      pendingTextPreview={pendingTextPreview}
+      textPreviewCommittedSourceKey={textPreviewCommittedSourceKey}
+      textPreviewError={textPreviewError}
+      videoPreview={videoPreview}
+      videoPreviewError={videoPreviewError}
+      forceVideoPlayerMounted={forceVideoPlayerMounted}
+      feedbackEntry={feedbackEntry}
+      localFeedbackMode={localFeedbackMode}
+      pendingFeedbackRegion={pendingFeedbackRegion}
+      activeFeedbackMomentTimeSeconds={activeFeedbackMomentTimeSeconds}
+      onLocalFeedbackDraft={onLocalFeedbackDraft}
+      onVideoPlayerMounted={onVideoPlayerMounted}
+      onVideoPlayingChange={onVideoPlayingChange}
+      onRegisterVideoTarget={onRegisterVideoTarget}
+      onUpdateVideoPlaybackTime={onUpdateVideoPlaybackTime}
+      onUpdateTextViewport={onUpdateTextViewport}
+      onVideoPreviewError={onVideoPreviewError}
+      onSelectNode={() => onSelectNode(node)}
+      onTitlePointerDown={(event) => onPointerDown(node, event)}
+      onTitlePointerMove={onPointerMove}
+      onTitlePointerUp={onPointerUp}
+    />
+  );
 
   return (
     <div
@@ -140,69 +171,9 @@ function CanvasNodeShellComponent({
       onPointerLeave={(event) => onPointerLeave(node, event)}
       onContextMenu={(event) => onContextMenu(node, event)}
     >
-      {usesFixedNodePresentation(node) ? (
-        <div className="canvas-node-presentation">
-          <CanvasNodeContent
-            node={node}
-            selected={node.mediaKind === 'text' ? textEditorActive : selected}
-            culled={culled}
-            actions={actions}
-            textBuffer={textBuffer}
-            textPreview={textPreview}
-            pendingTextPreview={pendingTextPreview}
-            textPreviewCommittedSourceKey={textPreviewCommittedSourceKey}
-            textPreviewError={textPreviewError}
-            videoPreview={videoPreview}
-            videoPreviewError={videoPreviewError}
-            forceVideoPlayerMounted={forceVideoPlayerMounted}
-            feedbackEntry={feedbackEntry}
-            localFeedbackMode={localFeedbackMode}
-            pendingFeedbackRegion={pendingFeedbackRegion}
-            activeFeedbackMomentTimeSeconds={activeFeedbackMomentTimeSeconds}
-            onLocalFeedbackDraft={onLocalFeedbackDraft}
-            onVideoPlayerMounted={onVideoPlayerMounted}
-            onVideoPlayingChange={onVideoPlayingChange}
-            onRegisterVideoTarget={onRegisterVideoTarget}
-            onUpdateVideoPlaybackTime={onUpdateVideoPlaybackTime}
-            onUpdateTextViewport={onUpdateTextViewport}
-            onVideoPreviewError={onVideoPreviewError}
-            onSelectNode={() => onSelectNode(node)}
-            onTitlePointerDown={(event) => onPointerDown(node, event)}
-            onTitlePointerMove={onPointerMove}
-            onTitlePointerUp={onPointerUp}
-          />
-        </div>
-      ) : (
-        <CanvasNodeContent
-          node={node}
-          selected={node.mediaKind === 'text' ? textEditorActive : selected}
-          culled={culled}
-          actions={actions}
-          textBuffer={textBuffer}
-          textPreview={textPreview}
-          pendingTextPreview={pendingTextPreview}
-          textPreviewCommittedSourceKey={textPreviewCommittedSourceKey}
-          textPreviewError={textPreviewError}
-          videoPreview={videoPreview}
-          videoPreviewError={videoPreviewError}
-          forceVideoPlayerMounted={forceVideoPlayerMounted}
-          feedbackEntry={feedbackEntry}
-          localFeedbackMode={localFeedbackMode}
-          pendingFeedbackRegion={pendingFeedbackRegion}
-          activeFeedbackMomentTimeSeconds={activeFeedbackMomentTimeSeconds}
-          onLocalFeedbackDraft={onLocalFeedbackDraft}
-          onVideoPlayerMounted={onVideoPlayerMounted}
-          onVideoPlayingChange={onVideoPlayingChange}
-          onRegisterVideoTarget={onRegisterVideoTarget}
-          onUpdateVideoPlaybackTime={onUpdateVideoPlaybackTime}
-          onUpdateTextViewport={onUpdateTextViewport}
-          onVideoPreviewError={onVideoPreviewError}
-          onSelectNode={() => onSelectNode(node)}
-          onTitlePointerDown={(event) => onPointerDown(node, event)}
-          onTitlePointerMove={onPointerMove}
-          onTitlePointerUp={onPointerUp}
-        />
-      )}
+      {usesFixedNodePresentation(node)
+        ? <div className="canvas-node-presentation">{content}</div>
+        : content}
       <CanvasFeedbackFrame entry={feedbackEntry} />
       {selected ? RESIZE_HANDLES.map((handle) => (
         <button

@@ -65,7 +65,6 @@ export interface CanvasPerfDebugBridge {
 }
 
 export function createCanvasPerfDebugBridge(input: {
-  enabled: boolean;
   globalObject?: DebruteCanvasPerfDebugGlobal | undefined;
   perfMonitor: Pick<CanvasPerfMonitor, 'getTrace' | 'getCounterTotals' | 'reset'>;
   getCanvasSnapshot: () => DebruteCanvasPerfCanvasSnapshot;
@@ -81,7 +80,7 @@ export function createCanvasPerfDebugBridge(input: {
   let lastExport: DebruteCanvasPerfCapture | undefined;
 
   const currentState = (): DebruteCanvasPerfCaptureState => ({
-    enabled: input.enabled,
+    enabled: true,
     capturing,
     ...(label !== undefined ? { label } : {}),
     ...(startedAt !== undefined ? { startedAt } : {}),
@@ -104,7 +103,7 @@ export function createCanvasPerfDebugBridge(input: {
     return captureWithSnapshot({
       startedAt: endedAt,
       endedAt,
-      trace: { enabled: input.enabled, events: [], sessions: [] },
+      trace: { enabled: true, events: [], sessions: [] },
       counterTotals: {}
     });
   };
@@ -181,9 +180,6 @@ export function createCanvasPerfDebugBridge(input: {
   return {
     api,
     register() {
-      if (!input.enabled) {
-        return;
-      }
       globalObject.__debruteCanvasPerf = api;
     },
     unregister() {
@@ -318,5 +314,5 @@ function errorMessage(error: unknown): string {
 }
 
 function canvasPerfDebugTimestamp(): number {
-  return globalThis.performance?.now?.() ?? Date.now();
+  return performance.now();
 }

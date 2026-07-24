@@ -1,4 +1,4 @@
-import React, { act, useEffect } from 'react';
+import { act, useEffect } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { describe, expect, it, vi } from 'vitest';
 import type {
@@ -15,19 +15,23 @@ import {
 } from './useWorkbenchSettingsController';
 
 describe('useWorkbenchSettingsController', { tags: ['settings'] }, () => {
-  it('loads global settings and Adobe Bridge state as explicit resources', async () => {
+  it('loads Global settings from the connection event and Adobe Bridge from its API', async () => {
     const api = apiFixture();
     const probe = await renderController(api);
 
+    expect(probe.current.globalSettings.status).toBe('loading');
+    await act(async () => {
+      probe.current.applyEvent({ type: 'globalSettings.changed', settings: settingsFixture() });
+    });
+
     expect(probe.current.globalSettings.status).toBe('ready');
     expect(probe.current.adobeBridge.status).toBe('ready');
-    expect(api.globalSettingsGet).toHaveBeenCalledTimes(1);
     expect(api.adobeBridgeGetState).toHaveBeenCalledTimes(1);
     await probe.unmount();
   });
 
-  it('applies a newer settings event and ignores an older save result', async () => {
-    const save = deferred<DebruteGlobalSettingsView>();
+  it('keeps command acknowledgement separate from the settings event', async () => {
+    const save = deferred<{ ok: true }>();
     const api = apiFixture({ globalSettingsSave: vi.fn(() => save.promise) });
     const probe = await renderController(api);
 
@@ -38,7 +42,7 @@ describe('useWorkbenchSettingsController', { tags: ['settings'] }, () => {
         type: 'globalSettings.changed',
         settings: settingsFixture({ locale: 'zh-CN', themePreference: 'light', defaultFrontend: 'runtime-only' })
       });
-      save.resolve(settingsFixture({ locale: 'en', themePreference: 'dark', defaultFrontend: 'browser' }));
+      save.resolve({ ok: true });
       await pending;
     });
 
@@ -48,6 +52,18 @@ describe('useWorkbenchSettingsController', { tags: ['settings'] }, () => {
       status: 'ready',
       value: { workbench: { defaultFrontend: 'runtime-only' } }
     });
+    await probe.unmount();
+  });
+
+  it('returns the exact API key from the explicit reveal command', async () => {
+    const revealModelApiKey = vi.fn(async () => ({ apiKey: '  密钥🔑  ' }));
+    const probe = await renderController(apiFixture({ revealModelApiKey }));
+
+    await expect(
+      probe.current.actions.revealModelApiKey('image/openai/gpt-image-1')
+    ).resolves.toBe('  密钥🔑  ');
+    expect(revealModelApiKey).toHaveBeenCalledWith('image/openai/gpt-image-1');
+
     await probe.unmount();
   });
 
@@ -261,19 +277,25 @@ describe('useWorkbenchSettingsController', { tags: ['settings'] }, () => {
     await probe.unmount();
   });
 
-  it('keeps a newer settings event when an older integration rescan resolves', async () => {
-    const rescan = deferred<IntegrationSettingsView>();
+  it('applies integration state only from an integrations event', async () => {
+    const rescan = deferred<{ ok: true }>();
     const api = apiFixture({ integrationsRescan: vi.fn(() => rescan.promise) });
     const probe = await renderController(api);
+    await act(async () => {
+      probe.current.applyEvent({
+        type: 'globalSettings.changed',
+        settings: settingsWithIntegrationSummary('Initial settings')
+      });
+    });
 
-    let pending!: Promise<IntegrationSettingsView>;
+    let pending!: Promise<void>;
     await act(async () => {
       pending = probe.current.actions.rescanIntegrations();
       probe.current.applyEvent({
-        type: 'globalSettings.changed',
-        settings: settingsWithIntegrationSummary('Event settings')
+        type: 'integrations.changed',
+        integrations: integrationSettingsFixture('Event settings')
       });
-      rescan.resolve(integrationSettingsFixture('Stale rescan'));
+      rescan.resolve({ ok: true });
       await pending;
     });
 
@@ -281,35 +303,38 @@ describe('useWorkbenchSettingsController', { tags: ['settings'] }, () => {
     await probe.unmount();
   });
 
-  it('keeps a newer settings save when an older integration operation resolves', async () => {
+  it('keeps integration operation diagnostics separate from event-owned state', async () => {
     const operation = deferred<RunIntegrationOperationResult>();
-    const save = deferred<DebruteGlobalSettingsView>();
     const api = apiFixture({
-      integrationsRunOperation: vi.fn(() => operation.promise),
-      globalSettingsSave: vi.fn(() => save.promise)
+      integrationsRunOperation: vi.fn(() => operation.promise)
     });
     const probe = await renderController(api);
+    await act(async () => {
+      probe.current.applyEvent({
+        type: 'globalSettings.changed',
+        settings: settingsWithIntegrationSummary('Initial settings')
+      });
+    });
 
     let pendingOperation!: Promise<RunIntegrationOperationResult>;
-    let pendingSave!: Promise<void>;
     await act(async () => {
       pendingOperation = probe.current.actions.runIntegrationOperation({
         integrationId: 'ffmpeg',
         operation: 'update'
       });
-      pendingSave = probe.current.actions.saveGlobalSettings({ workbench: { defaultFrontend: 'browser' } });
-      save.resolve(settingsWithIntegrationSummary('Saved settings'));
-      await pendingSave;
+      probe.current.applyEvent({
+        type: 'integrations.changed',
+        integrations: integrationSettingsFixture('Settled event')
+      });
       operation.resolve({
         ok: true,
         integrationId: 'ffmpeg',
-        operation: 'update',
-        settings: integrationSettingsFixture('Stale operation')
+        operation: 'update'
       });
       await pendingOperation;
     });
 
-    expect(readyGlobalSettings(probe).integrations.integrations[0]?.summary).toBe('Saved settings');
+    expect(readyGlobalSettings(probe).integrations.integrations[0]?.summary).toBe('Settled event');
     await probe.unmount();
   });
 });
@@ -355,13 +380,11 @@ async function renderController(api: WorkbenchApiClient, initialProjectId = 'pro
 
 function apiFixture(overrides: Partial<WorkbenchApiClient> = {}): WorkbenchApiClient {
   return {
-    globalSettingsGet: vi.fn(async () => settingsFixture()),
-    globalSettingsSave: vi.fn(async () => settingsFixture()),
+    globalSettingsSave: vi.fn(async () => ({ ok: true as const })),
     adobeBridgeGetState: vi.fn(async () => adobeBridgeFixture()),
-    getProductState: vi.fn(),
-    checkProductUpdate: vi.fn(),
-    applyProductUpdate: vi.fn(),
-    integrationsRescan: vi.fn(async () => ({ integrations: [], backends: [] })),
+    checkProductUpdate: vi.fn(async () => ({ ok: true as const })),
+    applyProductUpdate: vi.fn(async () => ({ ok: true as const })),
+    integrationsRescan: vi.fn(async () => ({ ok: true as const })),
     integrationsRunOperation: vi.fn(),
     adobeBridgeLinkPhotoshop: vi.fn(async () => adobeBridgeFixture()),
     adobeBridgeUnlinkPhotoshop: vi.fn(async () => adobeBridgeFixture()),
@@ -372,16 +395,16 @@ function apiFixture(overrides: Partial<WorkbenchApiClient> = {}): WorkbenchApiCl
 function settingsFixture(workbench: {
   locale: WorkbenchLocale;
   themePreference: 'system' | 'dark' | 'light';
-  defaultFrontend: 'electron' | 'browser' | 'runtime-only';
+  defaultFrontend: 'desktop' | 'browser' | 'runtime-only';
 } = {
   locale: 'en',
   themePreference: 'dark',
-  defaultFrontend: 'electron'
+  defaultFrontend: 'desktop'
 }): DebruteGlobalSettingsView {
   return {
     workbench,
     chrome: { recentProjects: [] },
-    models: { image: { models: [] }, video: { models: [] }, audio: { models: [] } },
+    models: { image: [], video: [], audio: [] },
     integrations: { integrations: [], backends: [] },
     adobeBridge: { enabled: true }
   };

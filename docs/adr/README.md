@@ -25,11 +25,11 @@ glossaries instead.
 
 ### Runtime, Desktop And Web Final State
 
-These decisions define the current architecture initiative. Its implementation
-scope ends at ADR-0033. The packaged connection topology is defined jointly by
-ADR-0004, ADR-0009, and ADR-0020: deterministic private native control, one
-dynamic same-origin Workbench listener, and one narrow fixed Photoshop
-discovery listener.
+This section groups Runtime, Desktop, and Web decisions. Model Operation and
+Agent Model Request decisions are grouped in the following sections. The
+packaged connection topology is defined jointly by ADR-0004, ADR-0009, and
+ADR-0020: deterministic private native control, one dynamic same-origin
+Workbench listener, and one narrow fixed Photoshop discovery listener.
 
 - [Runtime Lifetime Is Independent Of Frontends](./0014-runtime-lifetime-is-independent-of-frontends.md)
 - [Runtime Uses One Process](./0015-runtime-uses-one-process.md)
@@ -47,60 +47,51 @@ discovery listener.
 - [Workbench Working Copies Protect Unsaved Values](./0027-workbench-working-copies-protect-unsaved-values.md)
 - [Runtime Exposes Four Statuses](./0028-runtime-exposes-four-statuses.md)
 - [Runtime Owns The Tray](./0029-runtime-owns-the-tray.md)
-- [Linux Is Best-Effort Distribution Only](./0030-linux-is-best-effort-distribution-only.md)
+- [Product Supports macOS And Windows](./0030-product-supports-macos-and-windows.md)
 - [Desktop Windows Use One-Use Launch Tickets](./0031-desktop-windows-use-one-use-launches.md)
 - [Desktop Does Not Recover Lost Connections](./0032-desktop-does-not-recover-lost-connections.md)
 - [Workbench Connection Lifetime Follows Its Document](./0033-workbench-session-lifetime-follows-its-container.md)
+- [Unexpected Runtime Panics Fail The Process](./0056-unexpected-runtime-panics-fail-the-process.md)
+- [Model API Key Reveal Is Explicit And Transient](./0057-model-api-key-reveal-is-explicit-and-transient.md)
 
-### Deferred Operation Subsystem
+### Model Operation Subsystem
 
-These accepted decisions belong to a separate follow-up initiative and are not
-acceptance criteria for the Runtime, Desktop and Web refactor.
-When implemented, exact request, result, and event shapes belong to
-`packages/app-protocol` source and contract tests rather than these ADRs.
+These accepted decisions define the implemented current-Runtime Operation
+boundary. Exact request, result, and command-record shapes belong to Rust source,
+`docs/cli.md`, and their contract tests rather than these ADRs.
 
-Recorded follow-up: the existing Integration service currently owns one
-domain-specific install, update, or uninstall command through completion even
-when its initiating Workbench disconnects. The Operation initiative must
-replace that boundary with the closed Operation model or deliberately retain
-the exception before it is considered complete. The lifecycle refactor does
-not add an interim generic registry or detached-job protocol.
+The Operation subsystem currently covers only the five Model Kinds, with both
+Single and Batch execution. The existing Integration service retains
+its domain-specific install, update, or uninstall boundary; Product Update and
+professional-tool transfers also retain their own lifecycle contracts. Those
+subsystems intentionally remain outside the Operation registry. The
+lifecycle refactor adds no interim generic registry or detached-job protocol.
 
 - [Asynchronous Work Has Three Lifetime Classes](./0034-asynchronous-work-has-three-lifetime-classes.md)
 - [Operations Have Linearized Submission And Cancellation](./0035-operations-have-linearized-submission-and-cancellation.md)
 - [Operation Control State Is Not Domain History](./0036-operation-control-state-is-not-domain-history.md)
-- [Operation Observation Uses Client Snapshot Streams](./0037-operation-observation-uses-client-snapshot-streams.md)
-- [Operation Snapshots Are Closed By Kind](./0038-operation-snapshots-are-closed-by-kind.md)
-- [Operation Admission Is Resource Scoped](./0039-operation-admission-is-resource-scoped.md)
-- [Operations Have Kind-Specific Deadlines](./0040-operations-have-kind-specific-deadlines.md)
-- [Operation Queue Pressure Rejects Before Acceptance](./0041-operation-queue-pressure-rejects-before-acceptance.md)
+- [Operation Observation Uses Command-Scoped Waits](./0037-operation-observation-uses-command-scoped-waits.md)
+- [Model Operation Snapshots Use One Closed Schema](./0038-model-operation-snapshots-use-one-closed-schema.md)
 - [Operations Are Not Automatically Retried](./0042-operations-are-not-automatically-retried.md)
 - [Operation Registry Retention Is Capacity Bounded](./0043-operation-registry-retention-is-capacity-bounded.md)
-- [Operation Authority Is Capability Scoped](./0044-operation-authority-is-capability-scoped.md)
 
-### Deferred Agent Generation CLI
+### Agent Model Request Operations
 
-These accepted decisions describe a later Operation-backed Agent generation
-initiative. The current Rust CLI already owns its direct command spelling,
-Agent Records and caller-bounded generation timeout. Image-batch executes each
-item once; Runtime never automatically retries generation.
-It does not implement the deferred generic Operation reserve, start, observe,
-list, or cancel model. When that model is implemented, its exact request,
-result, and event shapes belong to `docs/cli.md`, `packages/app-protocol`, and
-their contract tests rather than these ADRs.
+The Rust CLI and Runtime implement these decisions through the shared Single
+and Batch Model Request surface. Exact commands, JSONL input, Agent Records,
+output naming, and current-runtime observation are documented in `docs/cli.md`
+and enforced by Rust and contract tests.
 
-- [Model Generation Operations Are CLI Only](./0045-model-generation-operations-are-cli-only.md)
-- [Generation Kind Is Independent Of Execution Shape](./0046-generation-kind-is-independent-of-execution-shape.md)
+- [Model Operations Are CLI Only](./0045-model-operations-are-cli-only.md)
+- [Model Kind Is Independent Of Execution Shape](./0046-model-kind-is-independent-of-execution-shape.md)
 - [Batch Operation Success Means All Items Settled](./0047-batch-operation-success-means-all-items-settled.md)
-- [Generation CLI Is An Agent Operation Client](./0048-generation-cli-is-an-agent-operation-client.md)
+- [Model Request CLI Is An Agent Operation Client](./0048-model-request-cli-is-an-agent-operation-client.md)
 - [CLI Exit Status Is Coarse](./0049-cli-exit-status-is-coarse.md)
-- [Agent Operation Streams Use Full Snapshot Records](./0050-agent-operation-streams-use-full-snapshot-records.md)
 - [Operation Listing Is Live And Bounded](./0051-operation-listing-is-live-and-bounded.md)
 - [Operation Cancellation Reports Whether Cancellation Won](./0052-operation-cancellation-reports-whether-cancellation-won.md)
-- [CLI Generation Timeout Bounds Active Generation](./0053-cli-generation-timeout-bounds-active-generation.md)
-- [Explicit Generation Outputs Are Claimed And Version Checked](./0054-explicit-generation-outputs-are-claimed-and-version-checked.md)
-- [Generated Results Use Recoverable Item Commits](./0055-generated-results-use-recoverable-item-commits.md)
-- [Batch Results Use One Recoverable JSONL](./0056-batch-results-use-one-recoverable-jsonl.md)
+- [CLI Model Request Timeout Bounds Active Model Execution](./0053-cli-model-request-timeout-bounds-active-model-execution.md)
+- [Model Output Replacement Is Applied At Commit](./0054-model-output-replacement-is-applied-at-commit.md)
+- [Generated Results Use In-Process Item Commits](./0055-generated-results-use-in-process-item-commits.md)
 
 ## Canvas Decisions
 
@@ -112,9 +103,9 @@ their contract tests rather than these ADRs.
 
 ## Capability Decisions
 
-- [Generated Assets Follow Content Fingerprints](../../packages/capability-core/docs/adr/0001-generated-assets-follow-content-fingerprints.md)
-- [Model Configuration Is Per Debrute Model](../../packages/capability-core/docs/adr/0002-model-configuration-is-per-debrute-model.md)
-- [Model Runs Are Redacted Before Project Storage](../../packages/capability-core/docs/adr/0003-model-runs-are-redacted-before-project-storage.md)
+- [Generated Assets Follow Content Fingerprints](../capability/adr/0001-generated-assets-follow-content-fingerprints.md)
+- [Model Configuration Is Per Debrute Model](../capability/adr/0002-model-configuration-is-per-debrute-model.md)
+- [Model Runs Are Redacted Before Project Storage](../capability/adr/0003-model-runs-are-redacted-before-project-storage.md)
 
 Project currently has no context-only ADR. Its qualifying decisions cross
 application or context boundaries and therefore live in the system-wide set.

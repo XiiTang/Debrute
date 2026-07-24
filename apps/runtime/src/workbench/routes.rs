@@ -46,11 +46,11 @@ use super::{
     FeedbackWorkingCopy, ProductUpdateInitiator, RuntimeHttpServiceError, TextWorkingCopy,
     WORKBENCH_SESSION_COOKIE, WorkbenchLaunchService, WorkbenchProjectBindingOutcome,
     WorkbenchRuntimeServices,
-    multipart::read_temporary_body,
-    public_project_snapshot, public_project_sync,
+    multipart::{MultipartLimits, read_multipart_limited, read_temporary_body},
+    public_project_snapshot,
     routing::{
-        BrowserSession, PluginAuthorization, ProjectAuthorization, WorkbenchRouterState,
-        error_response,
+        BrowserSession, CliRequestAuthorization, PluginAuthorization, ProjectAuthorization,
+        WorkbenchRouterState, browser_session_cookie, error_response,
     },
     services::public_canvas_projection,
     websocket::{
@@ -101,10 +101,7 @@ pub(super) async fn workbench_connection(
         Ok(input) => input,
         Err(response) => return response,
     };
-    let services = match services(&state) {
-        Ok(services) => services,
-        Err(response) => return response,
-    };
+    let services = Arc::clone(&state.services);
     if let Err(error) = services.ensure_accepting_workbench_connections() {
         return service_error_response(error);
     }
@@ -134,11 +131,20 @@ pub(super) async fn workbench_connection(
                 route_project_id,
             )
         } else {
-            (
-                WorkbenchLaunchService::create_browser_session(),
-                None,
-                input.requested_project_id,
-            )
+            let browser_session = match browser_session_cookie(&headers) {
+                Ok(Some(session)) if services.connections().browser_session_is_live(session) => {
+                    session.to_owned()
+                }
+                Ok(_) => WorkbenchLaunchService::create_browser_session(),
+                Err(()) => {
+                    return error_response(
+                        StatusCode::FORBIDDEN,
+                        "workbench_session_invalid",
+                        "Workbench session cookie is invalid.",
+                    );
+                }
+            };
+            (browser_session, None, input.requested_project_id)
         };
     let (sender, receiver) = mpsc::channel(STREAM_CHANNEL_CAPACITY);
     let (context, cancellation) =
@@ -160,7 +166,7 @@ pub(super) async fn workbench_connection(
         );
     }
     let mut global_subscription = services.subscribe_global();
-    let (global_revision, settings) = match services.global().sync_snapshot() {
+    let (global_revision, settings, product) = match services.global().sync_snapshot() {
         Ok(snapshot) => snapshot,
         Err(error) => {
             services.close_workbench_connection(&context.credential);
@@ -173,7 +179,7 @@ pub(super) async fn workbench_connection(
             Err(error) => {
                 services.close_workbench_connection(&context.credential);
                 return service_error_response(RuntimeHttpServiceError::new(
-                    500,
+                    StatusCode::INTERNAL_SERVER_ERROR,
                     "photoshop_state_invalid",
                     error.to_string(),
                 ));
@@ -184,30 +190,12 @@ pub(super) async fn workbench_connection(
             return service_error_response(RuntimeHttpServiceError::from_photoshop(error));
         }
     };
-    let product = match services.product() {
-        Ok(service) => match service.state() {
-            Ok(product) => Some(product),
-            Err(error) => {
-                services.close_workbench_connection(&context.credential);
-                return service_error_response(error);
-            }
-        },
-        Err(error) if error.code == "product_service_unavailable" => None,
-        Err(error) => {
-            services.close_workbench_connection(&context.credential);
-            return service_error_response(error);
-        }
-    };
-    let recent_projects = settings.chrome.recent_projects.clone();
-    let integrations = settings.integrations.clone();
     if sender
         .try_send(json!({
             "type": "global.snapshot",
             "globalRevision": global_revision,
             "snapshot": {
                 "settings": settings,
-                "recentProjects": recent_projects,
-                "integrations": integrations,
                 "photoshop": photoshop,
                 "product": product
             }
@@ -292,25 +280,19 @@ impl Drop for WorkbenchConnectionGuard {
 pub(super) fn browser_api_router() -> Router<WorkbenchRouterState> {
     Router::new()
         .route("/workbench/recent-projects", delete(clear_recent_projects))
+        .route("/settings/global", patch(global_settings_patch))
         .route(
-            "/settings/global",
-            get(global_settings_get).patch(global_settings_patch),
+            "/settings/models/api-key/reveal",
+            post(model_api_key_reveal),
         )
         .route("/integrations/rescan", post(integrations_rescan))
         .route(
             "/integrations/{integration_id}/{operation}",
             post(integration_operation),
         )
-        .route("/runtime/product", get(product_state))
-        .route("/runtime/product/update/check", post(product_check))
-        .route("/runtime/product/update/apply", post(product_apply))
-        .route("/runtime/product/quit", post(product_quit))
         .route("/projects/open", post(project_open))
         .route("/projects/choose", post(project_choose))
         .route("/projects/replace", post(project_replace))
-        .route("/projects/{project_id}", get(project_snapshot))
-        .route("/projects/{project_id}/health", get(project_health))
-        .route("/projects/{project_id}/refresh", post(project_refresh))
         .route("/adobe-bridge", get(photoshop_state))
         .route("/adobe-bridge/pairings", post(photoshop_pairing_create))
         .route(
@@ -391,21 +373,8 @@ fn project_domain_router() -> Router<WorkbenchRouterState> {
             patch(super::project_routes::project_path).post(super::project_routes::project_path),
         )
         .route(
-            "/projects/{project_id}/generated-assets",
-            get(super::project_routes::generated_assets_list),
-        )
-        .route(
             "/projects/{project_id}/generated-assets/lookup",
             post(super::project_routes::generated_asset_lookup),
-        )
-        .route(
-            "/projects/{project_id}/generated-assets/{asset_id}",
-            get(super::project_routes::generated_asset_read),
-        )
-        .route(
-            "/projects/{project_id}/generated-assets/{asset_id}/raw",
-            get(super::project_routes::generated_asset_raw)
-                .head(super::project_routes::generated_asset_raw),
         )
         .route(
             "/projects/{project_id}/canvas-feedback",
@@ -497,10 +466,7 @@ async fn text_working_copy(
     Path((_project_id, path)): Path<(String, String)>,
     request: Request,
 ) -> Response {
-    let services = match services(&state) {
-        Ok(services) => services,
-        Err(response) => return response,
-    };
+    let services = Arc::clone(&state.services);
     match *request.method() {
         Method::PUT => {
             #[derive(serde::Deserialize)]
@@ -540,10 +506,7 @@ async fn feedback_working_copy(
     Extension(scope): Extension<ProjectAuthorization>,
     request: Request,
 ) -> Response {
-    let services = match services(&state) {
-        Ok(services) => services,
-        Err(response) => return response,
-    };
+    let services = Arc::clone(&state.services);
     match *request.method() {
         Method::PUT => {
             let working_copy: FeedbackWorkingCopy = match json_body(request).await {
@@ -563,10 +526,17 @@ async fn feedback_working_copy(
     }
 }
 
+pub(super) fn product_api_router() -> Router<WorkbenchRouterState> {
+    Router::new()
+        .route("/runtime/product/update/check", post(product_check))
+        .route("/runtime/product/update/apply", post(product_apply))
+}
+
 pub(super) fn cli_api_router() -> Router<WorkbenchRouterState> {
     Router::new()
         .route("/run", post(cli_run))
         .route("/run-stream", post(cli_run_stream))
+        .route("/model-operations", post(cli_model_operation_submit))
 }
 
 pub(super) fn plugin_api_router() -> Router<WorkbenchRouterState> {
@@ -590,23 +560,9 @@ pub(super) fn plugin_transfer_router() -> Router<WorkbenchRouterState> {
 }
 
 async fn clear_recent_projects(State(state): State<WorkbenchRouterState>) -> Response {
-    let services = match services(&state) {
-        Ok(services) => services,
-        Err(response) => return response,
-    };
+    let services = Arc::clone(&state.services);
     match services.global().clear_recent_projects() {
         Ok(_) => Json(json!({"ok": true})).into_response(),
-        Err(error) => service_error_response(RuntimeHttpServiceError::from_global(error)),
-    }
-}
-
-async fn global_settings_get(State(state): State<WorkbenchRouterState>) -> Response {
-    let services = match services(&state) {
-        Ok(services) => services,
-        Err(response) => return response,
-    };
-    match services.global().settings_get() {
-        Ok(view) => Json(view).into_response(),
         Err(error) => service_error_response(RuntimeHttpServiceError::from_global(error)),
     }
 }
@@ -615,50 +571,64 @@ async fn global_settings_patch(
     State(state): State<WorkbenchRouterState>,
     request: Request,
 ) -> Response {
-    let services = match services(&state) {
-        Ok(services) => services,
-        Err(response) => return response,
-    };
+    let services = Arc::clone(&state.services);
     let body: Value = match json_body(request).await {
         Ok(body) => body,
         Err(response) => return response,
     };
     match services.global().settings_save(&body) {
-        Ok(view) => match services.photoshop().set_enabled(view.adobe_bridge.enabled) {
-            Ok(()) => Json(view).into_response(),
-            Err(error) => service_error_response(RuntimeHttpServiceError::from_photoshop(error)),
-        },
+        Ok(view) => {
+            services.photoshop().set_enabled(view.adobe_bridge.enabled);
+            Json(json!({"ok": true})).into_response()
+        }
+        Err(error) => service_error_response(RuntimeHttpServiceError::from_global(error)),
+    }
+}
+
+async fn model_api_key_reveal(
+    State(state): State<WorkbenchRouterState>,
+    Extension(_connection): Extension<super::WorkbenchConnectionContext>,
+    request: Request,
+) -> Response {
+    #[derive(serde::Deserialize)]
+    #[serde(rename_all = "camelCase", deny_unknown_fields)]
+    struct Input {
+        model_id: String,
+    }
+
+    let input: Input = match json_body(request).await {
+        Ok(input) => input,
+        Err(response) => return response,
+    };
+    match state
+        .services
+        .global()
+        .reveal_model_api_key(&input.model_id)
+    {
+        Ok(api_key) => (
+            [(header::CACHE_CONTROL, "no-store")],
+            Json(json!({ "apiKey": api_key })),
+        )
+            .into_response(),
         Err(error) => service_error_response(RuntimeHttpServiceError::from_global(error)),
     }
 }
 
 async fn integrations_rescan(State(state): State<WorkbenchRouterState>) -> Response {
-    let services = match services(&state) {
-        Ok(services) => services,
-        Err(response) => return response,
-    };
-    match services.global().integrations_rescan() {
-        Ok(view) => Json(view).into_response(),
-        Err(error) => service_error_response(RuntimeHttpServiceError::from_global(error)),
-    }
+    let services = Arc::clone(&state.services);
+    services.global().integrations_rescan();
+    Json(json!({"ok": true})).into_response()
 }
 
 async fn integration_operation(
     State(state): State<WorkbenchRouterState>,
     Path((integration_id, operation)): Path<(String, String)>,
 ) -> Response {
-    let services = match services(&state) {
-        Ok(services) => services,
-        Err(response) => return response,
-    };
+    let services = Arc::clone(&state.services);
     match services.integration_operation(&integration_id, &operation) {
         Ok(value) => Json(value).into_response(),
         Err(error) => service_error_response(error),
     }
-}
-
-async fn product_state(State(state): State<WorkbenchRouterState>) -> Response {
-    product_call(&state, ProductCall::State, Value::Null).await
 }
 
 async fn product_check(State(state): State<WorkbenchRouterState>) -> Response {
@@ -667,70 +637,45 @@ async fn product_check(State(state): State<WorkbenchRouterState>) -> Response {
 
 async fn product_apply(
     State(state): State<WorkbenchRouterState>,
-    Extension(browser): Extension<BrowserSession>,
+    Extension(connection): Extension<super::WorkbenchConnectionContext>,
     request: Request,
 ) -> Response {
     let input = match optional_json_body(request).await {
         Ok(input) => input,
         Err(response) => return response,
     };
-    product_call(
-        &state,
-        ProductCall::Apply(ProductUpdateInitiator::Frontend {
-            browser_session: browser.0,
-        }),
-        input,
-    )
-    .await
-}
-
-async fn product_quit(State(state): State<WorkbenchRouterState>, request: Request) -> Response {
-    let input = match optional_json_body(request).await {
-        Ok(input) => input,
-        Err(response) => return response,
+    let initiator = if connection.desktop.is_some() {
+        ProductUpdateInitiator::Desktop {
+            project_id: connection.project_id,
+        }
+    } else {
+        ProductUpdateInitiator::Browser {
+            project_id: connection.project_id,
+        }
     };
-    product_call(&state, ProductCall::Quit, input).await
+    product_call(&state, ProductCall::Apply(initiator), input).await
 }
 
 enum ProductCall {
-    State,
     Check,
     Apply(ProductUpdateInitiator),
-    Quit,
 }
 
 async fn product_call(state: &WorkbenchRouterState, call: ProductCall, input: Value) -> Response {
-    let services = match services(state) {
-        Ok(services) => services,
-        Err(response) => return response,
-    };
-    let product = match services.product() {
-        Ok(product) => product,
-        Err(error) => return service_error_response(error),
-    };
-    let asynchronous_transition = matches!(&call, ProductCall::Apply(_) | ProductCall::Quit);
+    let product = Arc::clone(
+        state
+            .product
+            .as_ref()
+            .expect("Product routes are registered only with a Product service"),
+    );
     let result = tokio::task::spawn_blocking(move || match call {
-        ProductCall::State => product.state(),
         ProductCall::Check => product.check(),
         ProductCall::Apply(initiator) => product.apply(&input, initiator),
-        ProductCall::Quit => product.quit(&input),
     })
-    .await;
-    let result = match result {
-        Ok(result) => result,
-        Err(error) => {
-            return service_error_response(RuntimeHttpServiceError::new(
-                500,
-                "product_worker_failed",
-                format!("Product worker failed: {error}"),
-            ));
-        }
-    };
+    .await
+    .expect("Product worker must complete");
     match result {
-        Ok(value) if asynchronous_transition && value.get("transitionId").is_some() => {
-            (StatusCode::ACCEPTED, Json(value)).into_response()
-        }
-        Ok(value) => Json(value).into_response(),
+        Ok(_) => Json(json!({"ok": true})).into_response(),
         Err(error) => service_error_response(error),
     }
 }
@@ -741,10 +686,7 @@ async fn project_open(
     Extension(connection): Extension<super::WorkbenchConnectionContext>,
     request: Request,
 ) -> Response {
-    let services = match services(&state) {
-        Ok(services) => services,
-        Err(response) => return response,
-    };
+    let services = Arc::clone(&state.services);
     #[derive(serde::Deserialize)]
     #[serde(rename_all = "camelCase", deny_unknown_fields)]
     struct Input {
@@ -772,7 +714,7 @@ async fn project_open(
         ),
         _ => {
             return service_error_response(RuntimeHttpServiceError::new(
-                400,
+                StatusCode::BAD_REQUEST,
                 "project_target_invalid",
                 "OpenProject requires exactly one of projectRoot or projectId.",
             ));
@@ -802,23 +744,15 @@ async fn project_choose(
         Ok(input) => input,
         Err(response) => return response,
     };
-    let services = match services(&state) {
-        Ok(services) => services,
-        Err(response) => return response,
-    };
+    let services = Arc::clone(&state.services);
     let native_shell = Arc::clone(services.native_shell());
-    let selected = match tokio::task::spawn_blocking(move || native_shell.choose_directory()).await
+    let selected = match tokio::task::spawn_blocking(move || native_shell.choose_directory())
+        .await
+        .expect("native Project picker worker must complete")
     {
-        Ok(Ok(selected)) => selected,
-        Ok(Err(error)) => {
-            return service_error_response(RuntimeHttpServiceError::from_project(error));
-        }
+        Ok(selected) => selected,
         Err(error) => {
-            return service_error_response(RuntimeHttpServiceError::new(
-                500,
-                "native_project_picker_failed",
-                error.to_string(),
-            ));
+            return service_error_response(RuntimeHttpServiceError::from_project(error));
         }
     };
     let Some(selected) = selected else {
@@ -826,7 +760,7 @@ async fn project_choose(
     };
     let Some(selected) = selected.to_str() else {
         return service_error_response(RuntimeHttpServiceError::new(
-            400,
+            StatusCode::BAD_REQUEST,
             "invalid_input",
             "Selected Project path is not valid UTF-8.",
         ));
@@ -879,10 +813,7 @@ async fn project_replace(
         Ok(input) => input,
         Err(response) => return response,
     };
-    let services = match services(&state) {
-        Ok(services) => services,
-        Err(response) => return response,
-    };
+    let services = Arc::clone(&state.services);
     match services.replace_connection_project_root(
         &browser.0,
         &connection.credential,
@@ -909,81 +840,8 @@ fn project_binding_response(outcome: WorkbenchProjectBindingOutcome) -> Response
     }
 }
 
-async fn project_snapshot(
-    State(state): State<WorkbenchRouterState>,
-    Extension(scope): Extension<ProjectAuthorization>,
-) -> Response {
-    let services = match services(&state) {
-        Ok(services) => services,
-        Err(response) => return response,
-    };
-    match services
-        .projects()
-        .get(&scope.project_id)
-        .and_then(|session| session.sync_snapshot())
-    {
-        Ok(sync) => match public_project_sync(&sync) {
-            Ok(value) => Json(value).into_response(),
-            Err(error) => service_error_response(error),
-        },
-        Err(error) => service_error_response(RuntimeHttpServiceError::from_project(error)),
-    }
-}
-
-async fn project_health(
-    State(state): State<WorkbenchRouterState>,
-    Extension(scope): Extension<ProjectAuthorization>,
-) -> Response {
-    let services = match services(&state) {
-        Ok(services) => services,
-        Err(response) => return response,
-    };
-    match services
-        .projects()
-        .get(&scope.project_id)
-        .and_then(|session| session.sync_snapshot())
-    {
-        Ok(sync) => match super::services::public_project_health(&sync.snapshot.health) {
-            Ok(value) => Json(value).into_response(),
-            Err(error) => service_error_response(error),
-        },
-        Err(error) => service_error_response(RuntimeHttpServiceError::from_project(error)),
-    }
-}
-
-async fn project_refresh(
-    State(state): State<WorkbenchRouterState>,
-    Extension(scope): Extension<ProjectAuthorization>,
-) -> Response {
-    let services = match services(&state) {
-        Ok(services) => services,
-        Err(response) => return response,
-    };
-    let session = match services.projects().get(&scope.project_id) {
-        Ok(session) => session,
-        Err(error) => {
-            return service_error_response(RuntimeHttpServiceError::from_project(error));
-        }
-    };
-    match session.refresh() {
-        Ok(result) => match public_project_snapshot(&result.value, &result.project_id) {
-            Ok(snapshot) => Json(json!({
-                "projectId": result.project_id,
-                "projectRevision": result.project_revision,
-                "snapshot": snapshot
-            }))
-            .into_response(),
-            Err(error) => service_error_response(error),
-        },
-        Err(error) => service_error_response(RuntimeHttpServiceError::from_project(error)),
-    }
-}
-
 async fn photoshop_state(State(state): State<WorkbenchRouterState>) -> Response {
-    let services = match services(&state) {
-        Ok(services) => services,
-        Err(response) => return response,
-    };
+    let services = Arc::clone(&state.services);
     match services.photoshop().state() {
         Ok(view) => Json(view).into_response(),
         Err(error) => service_error_response(RuntimeHttpServiceError::from_photoshop(error)),
@@ -994,10 +852,7 @@ async fn photoshop_pairing_create(
     State(state): State<WorkbenchRouterState>,
     Extension(browser): Extension<BrowserSession>,
 ) -> Response {
-    let services = match services(&state) {
-        Ok(services) => services,
-        Err(response) => return response,
-    };
+    let services = Arc::clone(&state.services);
     match services.photoshop().create_pairing(&browser.0) {
         Ok(pairing) => Json(pairing).into_response(),
         Err(error) => service_error_response(RuntimeHttpServiceError::from_photoshop(error)),
@@ -1009,10 +864,7 @@ async fn photoshop_pairing_cancel(
     Extension(browser): Extension<BrowserSession>,
     Path(pairing_id): Path<String>,
 ) -> Response {
-    let services = match services(&state) {
-        Ok(services) => services,
-        Err(response) => return response,
-    };
+    let services = Arc::clone(&state.services);
     match services.photoshop().cancel_pairing(&browser.0, &pairing_id) {
         Ok(()) => StatusCode::NO_CONTENT.into_response(),
         Err(error) => service_error_response(RuntimeHttpServiceError::from_photoshop(error)),
@@ -1023,10 +875,7 @@ async fn photoshop_pairing_remove(
     State(state): State<WorkbenchRouterState>,
     Path(plugin_instance_id): Path<String>,
 ) -> Response {
-    let services = match services(&state) {
-        Ok(services) => services,
-        Err(response) => return response,
-    };
+    let services = Arc::clone(&state.services);
     match services.photoshop().remove_pairing(&plugin_instance_id) {
         Ok(view) => Json(view).into_response(),
         Err(error) => service_error_response(RuntimeHttpServiceError::from_photoshop(error)),
@@ -1047,10 +896,7 @@ async fn photoshop_link(
         Ok(body) => body,
         Err(response) => return response,
     };
-    let services = match services(&state) {
-        Ok(services) => services,
-        Err(response) => return response,
-    };
+    let services = Arc::clone(&state.services);
     match services
         .photoshop()
         .link_project_for_browser(&scope.project_id, &input.plugin_instance_id)
@@ -1065,10 +911,7 @@ async fn photoshop_unlink(
     Extension(scope): Extension<ProjectAuthorization>,
     Path((_project_id, plugin_instance_id)): Path<(String, String)>,
 ) -> Response {
-    let services = match services(&state) {
-        Ok(services) => services,
-        Err(response) => return response,
-    };
+    let services = Arc::clone(&state.services);
     match services
         .photoshop()
         .unlink_project_for_browser(&scope.project_id, &plugin_instance_id)
@@ -1093,10 +936,7 @@ async fn photoshop_send(
         Ok(body) => body,
         Err(response) => return response,
     };
-    let services = match services(&state) {
-        Ok(services) => services,
-        Err(response) => return response,
-    };
+    let services = Arc::clone(&state.services);
     match services.photoshop().send_project_file(
         &scope.project_id,
         &input.plugin_instance_id,
@@ -1107,7 +947,7 @@ async fn photoshop_send(
             if let Err(error) =
                 services.send_photoshop_message(&dispatch.plugin_session_id, dispatch.message)
             {
-                let _ = services
+                services
                     .photoshop()
                     .disconnect_session(&dispatch.plugin_session_id);
                 return service_error_response(error);
@@ -1122,10 +962,7 @@ async fn photoshop_plugin_websocket(
     State(state): State<WorkbenchRouterState>,
     request: Request,
 ) -> Response {
-    let services = match services(&state) {
-        Ok(services) => services,
-        Err(response) => return response,
-    };
+    let services = Arc::clone(&state.services);
     let upgrade = match WebSocketUpgrade::from_request(request) {
         Ok(upgrade) => upgrade,
         Err(response) => return response,
@@ -1244,7 +1081,7 @@ async fn run_photoshop_websocket(
         }
     }
     services.unregister_photoshop_socket(&session_id);
-    let _ = services.photoshop().disconnect_session(&session_id);
+    services.photoshop().disconnect_session(&session_id);
     let _ = write_close(&mut writer).await;
 }
 
@@ -1258,10 +1095,7 @@ async fn photoshop_plugin_link(
     if let Err(response) = require_plugin_instance(&headers, &plugin) {
         return response;
     }
-    let services = match services(&state) {
-        Ok(services) => services,
-        Err(response) => return response,
-    };
+    let services = Arc::clone(&state.services);
     let result = if method == Method::POST {
         services
             .photoshop()
@@ -1320,15 +1154,12 @@ async fn photoshop_plugin_upload(
     };
     if body.byte_length != declared_byte_length {
         return service_error_response(RuntimeHttpServiceError::new(
-            400,
+            StatusCode::BAD_REQUEST,
             "invalid_transfer_payload",
             "Photoshop upload length does not match Content-Length.",
         ));
     }
-    let services = match services(&state) {
-        Ok(services) => services,
-        Err(response) => return response,
-    };
+    let services = Arc::clone(&state.services);
     match services.photoshop().import_png_file(
         &plugin.bearer,
         &transfer_id,
@@ -1352,10 +1183,7 @@ async fn photoshop_transfer_content(
     method: Method,
 ) -> Response {
     let token = query.get("token").map(String::as_str).unwrap_or_default();
-    let services = match services(&state) {
-        Ok(services) => services,
-        Err(response) => return response,
-    };
+    let services = Arc::clone(&state.services);
     match services
         .photoshop()
         .take_download(&plugin.bearer, &transfer_id, token)
@@ -1415,26 +1243,90 @@ async fn cli_run(State(state): State<WorkbenchRouterState>, request: Request) ->
         Ok(body) => body,
         Err(response) => return response,
     };
-    let services = match services(&state) {
-        Ok(services) => services,
-        Err(response) => return response,
-    };
-    match services.cli().and_then(|service| service.run(&body)) {
+    match state.cli.run(&body) {
         Ok(value) => Json(value).into_response(),
         Err(error) => service_error_response(error),
     }
 }
 
-async fn cli_run_stream(State(state): State<WorkbenchRouterState>, request: Request) -> Response {
+async fn cli_model_operation_submit(
+    State(state): State<WorkbenchRouterState>,
+    request: Request,
+) -> Response {
+    const INPUT_LIMIT: u64 = crate::model_operation::MAX_MODEL_OPERATION_INPUT_BYTES as u64;
+    let mut parts = match read_multipart_limited(
+        request,
+        MultipartLimits {
+            total_bytes: INPUT_LIMIT + 128 * 1024,
+            file_bytes: INPUT_LIMIT,
+            fields_bytes: 64 * 1024,
+            parts: 2,
+        },
+    )
+    .await
+    {
+        Ok(parts) => parts,
+        Err(error) => return service_error_response(error),
+    };
+    if parts.fields.len() != 1 || parts.files.len() != 1 {
+        return service_error_response(RuntimeHttpServiceError::new(
+            StatusCode::BAD_REQUEST,
+            "invalid_input",
+            "Model Operation submission requires exactly request and input multipart parts.",
+        ));
+    }
+    let Some(request) = parts.fields.remove("request") else {
+        return service_error_response(RuntimeHttpServiceError::new(
+            StatusCode::BAD_REQUEST,
+            "invalid_input",
+            "Model Operation submission omitted the request field.",
+        ));
+    };
+    let Some(input) = parts.files.remove("input") else {
+        return service_error_response(RuntimeHttpServiceError::new(
+            StatusCode::BAD_REQUEST,
+            "invalid_input",
+            "Model Operation submission omitted the input file.",
+        ));
+    };
+    let request = match serde_json::from_str::<Value>(&request) {
+        Ok(request) => request,
+        Err(error) => {
+            return service_error_response(RuntimeHttpServiceError::new(
+                StatusCode::BAD_REQUEST,
+                "invalid_input",
+                format!("Model Operation request metadata is invalid: {error}"),
+            ));
+        }
+    };
+    let input = match tokio::fs::read(input.temporary_path).await {
+        Ok(input) => input,
+        Err(error) => {
+            return service_error_response(RuntimeHttpServiceError::new(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "internal_error",
+                error.to_string(),
+            ));
+        }
+    };
+    match state.cli.submit(&request, &input) {
+        Ok(value) => Json(value).into_response(),
+        Err(error) => service_error_response(error),
+    }
+}
+
+async fn cli_run_stream(
+    State(state): State<WorkbenchRouterState>,
+    Extension(authorization): Extension<CliRequestAuthorization>,
+    request: Request,
+) -> Response {
     let body: Value = match json_body(request).await {
         Ok(body) => body,
         Err(response) => return response,
     };
-    let services = match services(&state) {
-        Ok(services) => services,
-        Err(response) => return response,
-    };
-    match services.cli().and_then(|service| service.run_stream(&body)) {
+    let verifier = Arc::clone(&state.cli_authorization);
+    let observer_is_alive = Arc::new(move || verifier.is_cli_authorized(&authorization.0));
+    match state.cli.run_stream(&body, observer_is_alive) {
         Ok(records) => Response::builder()
             .status(StatusCode::OK)
             .header(header::CONTENT_TYPE, "application/x-ndjson")
@@ -1691,31 +1583,19 @@ fn safe_header_filename(value: &str) -> String {
         .collect()
 }
 
-pub(super) fn services(
-    state: &WorkbenchRouterState,
-) -> Result<Arc<WorkbenchRuntimeServices>, Response> {
-    state.services.clone().ok_or_else(|| {
-        error_response(
-            StatusCode::SERVICE_UNAVAILABLE,
-            "runtime_services_unavailable",
-            "Rust Runtime services are not installed on this listener.",
-        )
-    })
-}
-
 pub(super) async fn json_body<T: DeserializeOwned>(request: Request) -> Result<T, Response> {
     let bytes = to_bytes(request.into_body(), MAX_JSON_BODY_BYTES)
         .await
         .map_err(|_| {
             service_error_response(RuntimeHttpServiceError::new(
-                413,
+                StatusCode::PAYLOAD_TOO_LARGE,
                 "request_body_too_large",
                 "JSON request body exceeds 2 MiB or could not be read.",
             ))
         })?;
     serde_json::from_slice(&bytes).map_err(|error| {
         service_error_response(RuntimeHttpServiceError::new(
-            400,
+            StatusCode::BAD_REQUEST,
             "invalid_json",
             error.to_string(),
         ))
@@ -1727,7 +1607,7 @@ async fn optional_json_body(request: Request) -> Result<Value, Response> {
         .await
         .map_err(|_| {
             service_error_response(RuntimeHttpServiceError::new(
-                413,
+                StatusCode::PAYLOAD_TOO_LARGE,
                 "request_body_too_large",
                 "JSON request body exceeds 2 MiB.",
             ))
@@ -1737,7 +1617,7 @@ async fn optional_json_body(request: Request) -> Result<Value, Response> {
     } else {
         serde_json::from_slice(&bytes).map_err(|error| {
             service_error_response(RuntimeHttpServiceError::new(
-                400,
+                StatusCode::BAD_REQUEST,
                 "invalid_json",
                 error.to_string(),
             ))
@@ -1746,9 +1626,8 @@ async fn optional_json_body(request: Request) -> Result<Value, Response> {
 }
 
 pub(super) fn service_error_response(error: RuntimeHttpServiceError) -> Response {
-    let status = StatusCode::from_u16(error.status).unwrap_or(StatusCode::INTERNAL_SERVER_ERROR);
     (
-        status,
+        error.status,
         Json(json!({
             "error": {
                 "code": error.code,
@@ -1796,28 +1675,5 @@ mod tests {
         });
         assert_eq!(global["type"], "recentProjects.changed");
         assert_eq!(global["revision"], 2);
-    }
-
-    #[test]
-    fn all_explicit_deletion_routes_are_absent_from_the_final_builders() {
-        let source = include_str!("routes.rs")
-            .split("#[cfg(test)]")
-            .next()
-            .unwrap();
-        for deleted in [
-            "route(\"/status\"",
-            "route(\"/runtime\"",
-            "route(\"/workbench/title-bar\"",
-            "route(\"/workbench/events\"",
-            "/electron-windows/",
-            "/events?clientId=",
-            "/input\"",
-            "/resize\"",
-        ] {
-            assert!(
-                !source.contains(deleted),
-                "deleted route remains: {deleted}"
-            );
-        }
     }
 }

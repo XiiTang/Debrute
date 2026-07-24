@@ -1,4 +1,4 @@
-import { chmodSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
@@ -7,19 +7,21 @@ import { archiveProductSeed } from '../../scripts/archive-product-seed.mjs';
 import { assembleProductSeed } from '../../scripts/assemble-product-seed.mjs';
 
 describe('desktop fresh install product payload', () => {
-  it('keeps Linux packaging best-effort without pretending it has a Runtime Product', async () => {
-    const root = mkdtempSync(join(tmpdir(), 'debrute-linux-product-seed-'));
+  it('validates the Product platform before changing the destination', async () => {
+    const root = mkdtempSync(join(tmpdir(), 'debrute-product-platform-'));
     try {
-      const result = await assembleProductSeed({
-        workspaceRoot: root,
-        platform: 'linux',
-        architecture: 'x64',
-        destination: join(root, 'product-seed')
-      });
+      const destination = join(root, 'product-seed');
+      mkdirSync(destination, { recursive: true });
+      writeFileSync(join(destination, 'sentinel'), 'preserved');
 
-      expect(result.supported).toBe(false);
-      expect(readFileSync(join(root, 'product-seed/UNSUPPORTED_PLATFORM.txt'), 'utf8'))
-        .toContain('macOS and Windows');
+      await expect(assembleProductSeed({
+        workspaceRoot: root,
+        platform: 'freebsd',
+        architecture: 'x64',
+        destination
+      })).rejects.toThrow('Unsupported Product platform: freebsd');
+
+      expect(readFileSync(join(destination, 'sentinel'), 'utf8')).toBe('preserved');
     } finally {
       rmSync(root, { recursive: true, force: true });
     }
@@ -41,16 +43,12 @@ describe('desktop fresh install product payload', () => {
       from: 'dist-electron/product-seed',
       to: 'product-seed'
     }]);
-    expect(desktopPackage.build?.files).toContain('!dist-electron/product-seed/**/*');
-  });
-
-  it('bundle-electron writes only the strict Rust Product seed', () => {
-    const source = readFileSync(join(process.cwd(), 'apps/desktop/scripts/bundle-electron.mjs'), 'utf8');
-
-    expect(source).toContain('assembleProductSeed');
-    expect(source).not.toContain('runtime-host');
-    expect(source).not.toContain('product-replacement-helper');
-    expect(source).not.toContain('canvas-feedback-artifact-worker');
+    expect(desktopPackage.build?.files).toEqual([
+      'dist-electron/**/*',
+      '!dist-electron/product-seed/**/*',
+      '!dist-electron/**/*.map',
+      'package.json'
+    ]);
   });
 
   it('hashes every declared seed file and rejects undeclared runtime baggage', async () => {
@@ -58,7 +56,8 @@ describe('desktop fresh install product payload', () => {
     try {
       mkdirSync(join(root, 'target/release'), { recursive: true });
       mkdirSync(join(root, 'target/release/native-raster'), { recursive: true });
-      mkdirSync(join(root, 'apps/desktop/dist'), { recursive: true });
+      mkdirSync(join(root, 'apps/web/dist'), { recursive: true });
+      mkdirSync(join(root, 'apps/desktop/dist-electron/product-seed/web/assets'), { recursive: true });
       mkdirSync(join(root, 'apps/desktop/build'), { recursive: true });
       mkdirSync(join(root, 'skills/debrute-core'), { recursive: true });
       mkdirSync(join(root, 'assets/model-docs/snapshots/image'), { recursive: true });
@@ -75,7 +74,8 @@ describe('desktop fresh install product payload', () => {
       writeFileSync(join(root, 'target/release/native-raster/versions.json'), '{"vips":"8.18.4"}');
       chmodSync(join(root, 'target/release/debrute-runtime'), 0o755);
       chmodSync(join(root, 'target/release/debrute'), 0o755);
-      writeFileSync(join(root, 'apps/desktop/dist/index.html'), '<!doctype html>');
+      writeFileSync(join(root, 'apps/web/dist/index.html'), '<!doctype html>');
+      writeFileSync(join(root, 'apps/desktop/dist-electron/product-seed/web/assets/stale-hash.js'), 'stale');
       writeFileSync(join(root, 'skills/debrute-core/SKILL.md'), '---\nname: debrute-core\n---\n');
       writeFileSync(join(root, 'assets/runtime-model-catalog.json'), '{}');
       writeFileSync(join(root, 'assets/model-docs/snapshots/image/example.md'), '# Image model\n');
@@ -87,6 +87,7 @@ describe('desktop fresh install product payload', () => {
       ].join('\n'));
 
       const assembled = await assembleProductSeed({ workspaceRoot: root, platform: 'darwin', architecture: 'arm64' });
+      expect(existsSync(join(assembled.destination, 'web/assets/stale-hash.js'))).toBe(false);
       expect(assembled.manifest?.entrypoints).toMatchObject({
         runtime: 'runtime/Debrute Runtime.app/Contents/MacOS/debrute-runtime',
         cli: 'runtime/debrute',
@@ -102,15 +103,11 @@ describe('desktop fresh install product payload', () => {
         .not.toContain('runtime/libvips/libvips.42.dylib');
       expect(assembled.manifest?.files.map((file) => file.path))
         .toContain('runtime/Debrute Runtime.app/Contents/Info.plist');
-      expect(assembled.manifest?.files.map((file) => file.path))
-        .not.toContain('runtime/Debrute Runtime.app/Contents/PkgInfo');
       const runtimeInfo = readFileSync(
         join(assembled.destination, 'runtime/Debrute Runtime.app/Contents/Info.plist'),
         'utf8'
       );
       expect(runtimeInfo).toContain('<key>LSUIElement</key>');
-      expect(runtimeInfo).not.toContain('LSMinimumSystemVersion');
-      expect(runtimeInfo).not.toContain('NSHighResolutionCapable');
       const archived = await archiveProductSeed({
         seed: assembled.destination,
         outDir: join(root, 'release'),

@@ -5,12 +5,12 @@ not process boundaries or workspace package count.
 
 ## Contexts
 
-- [Project](./packages/project-core/CONTEXT.md) — the local filesystem-backed
+- [Project](./docs/project/CONTEXT.md) — the local filesystem-backed
   creative workspace and its Debrute-owned project metadata.
 - [Canvas](./packages/canvas-core/CONTEXT.md) — the visual organization, review,
   comparison, and feedback surface projected from Project paths. Canvas-owned
   decisions live under `packages/canvas-core/docs/adr/`.
-- [Capability](./packages/capability-core/CONTEXT.md) — runtime-backed operations
+- [Capability](./docs/capability/CONTEXT.md) — runtime-backed operations
   and their structured results, including model generation and artifact pointers.
 
 ## Relationships

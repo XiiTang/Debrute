@@ -66,11 +66,8 @@ describe('CanvasStageRuntime', () => {
   });
 
   it('records camera write and no-op counters', () => {
-    const monitor = createCanvasPerfMonitor({ enabled: true });
+    const monitor = createCanvasPerfMonitor();
     const sessionId = monitor.startSession({ type: 'camera-pan', timestamp: 0, source: 'CanvasSurface' });
-    if (!sessionId) {
-      throw new Error('Expected enabled monitor session.');
-    }
     const runtime = createCanvasStageRuntime({ perfMonitor: monitor });
     const stage = fakeElement();
 
@@ -91,11 +88,8 @@ describe('CanvasStageRuntime', () => {
   });
 
   it('records layout and visibility counters', () => {
-    const monitor = createCanvasPerfMonitor({ enabled: true });
+    const monitor = createCanvasPerfMonitor();
     const sessionId = monitor.startSession({ type: 'drag-move-node', timestamp: 0, source: 'CanvasSurface' });
-    if (!sessionId) {
-      throw new Error('Expected enabled monitor session.');
-    }
     const runtime = createCanvasStageRuntime({ perfMonitor: monitor });
     const element = fakeElement();
 

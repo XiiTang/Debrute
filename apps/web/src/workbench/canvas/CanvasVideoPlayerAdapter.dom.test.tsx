@@ -517,6 +517,48 @@ describe('CanvasVideoPlayerAdapter', { tags: ['canvas-video'] }, () => {
     }
   });
 
+  it('restores the persisted time after a failed commit without publishing another update', async () => {
+    const container = document.createElement('div');
+    document.body.append(container);
+    const root = createRoot(container);
+    const ref = React.createRef<CanvasVideoPlayerHandle>();
+    const onPlaybackBoundary = vi.fn();
+    const onPlayingChange = vi.fn();
+
+    try {
+      await act(async () => {
+        root.render(
+          <TestCanvasVideoPlayerAdapter
+            ref={ref}
+            node={videoNode()}
+            initialTimeSeconds={0}
+            onPointerInside={() => undefined}
+            onFocusInside={() => undefined}
+            onError={() => undefined}
+            onPlayingChange={onPlayingChange}
+            onPlaybackBoundary={onPlaybackBoundary}
+          />
+        );
+      });
+      const video = requiredVideo(container);
+      Object.defineProperty(video, 'pause', { configurable: true, value: vi.fn() });
+
+      act(() => {
+        ref.current?.restorePersistedTime(3.25);
+        video.dispatchEvent(new Event('seeked', { bubbles: true }));
+      });
+
+      expect(video.currentTime).toBe(3.25);
+      expect(onPlayingChange).toHaveBeenLastCalledWith(false);
+      expect(onPlaybackBoundary).not.toHaveBeenCalled();
+    } finally {
+      await act(async () => {
+        root.unmount();
+      });
+      container.remove();
+    }
+  });
+
   it('reports a playback error when the initial time is outside the projected duration', async () => {
     const container = document.createElement('div');
     document.body.append(container);
@@ -642,7 +684,7 @@ function videoNode(options: { durationSeconds?: number } = {}): ProjectedCanvasN
       state: 'available',
       size: 100,
       mimeType: 'video/mp4',
-      fileUrl: 'http://127.0.0.1:17321/api/projects/p/files/raw/media/clip.mp4?v=rev',
+      fileUrl: '/api/projects/p/files/raw/media/clip.mp4?v=rev',
       revision: 'rev'
     },
     videoPresentation

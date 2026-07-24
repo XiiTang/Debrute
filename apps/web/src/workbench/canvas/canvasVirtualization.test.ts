@@ -4,7 +4,6 @@ import {
   CANVAS_VIRTUAL_REFRESH_MARGIN_SCREEN_PX,
   CANVAS_VIRTUAL_MAX_STALE_AREA_RATIO,
   CANVAS_VIRTUAL_OVERSCAN_SCREEN_PX,
-  buildVirtualizedCanvasRenderState,
   canvasEdgeSegmentsForProjectionEdges,
   canvasRectContainsRect,
   canvasVirtualRenderRect,
@@ -103,9 +102,10 @@ describe('canvas virtualization geometry', () => {
       textNodeFixture('flow/far.txt', 7000, 7000)
     ]);
 
-    const state = buildVirtualizedCanvasRenderState({
+    const state = createCanvasVirtualizationIndex({
       nodes: projection.nodes,
-      edges: [],
+      edges: []
+    }).render({
       camera: { x: 0, y: 0, z: 1 },
       surfaceSize: undefined,
       selection: { kind: 'node', projectRelativePath: 'flow/selected-offscreen.png' },
@@ -161,9 +161,10 @@ describe('canvas virtualization geometry', () => {
       nodeFixture('flow/visible.png', 300, 0)
     ]);
 
-    const state = buildVirtualizedCanvasRenderState({
+    const state = createCanvasVirtualizationIndex({
       nodes: projection.nodes,
-      edges: [],
+      edges: []
+    }).render({
       camera: { x: 0, y: 0, z: 1 },
       surfaceSize: undefined,
       selection: undefined,
@@ -198,9 +199,10 @@ describe('canvas virtualization geometry', () => {
       targetProjectRelativePath: 'flow/outside-b.txt'
     }]);
 
-    const state = buildVirtualizedCanvasRenderState({
+    const state = createCanvasVirtualizationIndex({
       nodes: projection.nodes,
-      edges: projection.edges,
+      edges: projection.edges
+    }).render({
       camera: { x: 0, y: 0, z: 1 },
       surfaceSize: undefined,
       selection: undefined,
@@ -227,9 +229,10 @@ describe('canvas virtualization geometry', () => {
       targetProjectRelativePath: 'flow/target.png'
     }]);
 
-    const state = buildVirtualizedCanvasRenderState({
+    const state = createCanvasVirtualizationIndex({
       nodes: projection.nodes,
-      edges: projection.edges,
+      edges: projection.edges
+    }).render({
       camera: { x: 0, y: 0, z: 0.03 },
       surfaceSize: { width: 1440, height: 1000 },
       selection: undefined,
@@ -256,9 +259,10 @@ describe('canvas virtualization geometry', () => {
       targetProjectRelativePath: 'flow/child-b.png'
     }]);
 
-    const state = buildVirtualizedCanvasRenderState({
+    const state = createCanvasVirtualizationIndex({
       nodes: projection.nodes,
-      edges: projection.edges,
+      edges: projection.edges
+    }).render({
       camera: { x: 0, y: 0, z: 1 },
       surfaceSize: { width: 900, height: 500 },
       selection: undefined,
@@ -315,9 +319,10 @@ describe('canvas virtualization geometry', () => {
       targetProjectRelativePath: 'flow/target.txt'
     }]);
 
-    const state = buildVirtualizedCanvasRenderState({
+    const state = createCanvasVirtualizationIndex({
       nodes: projection.nodes,
-      edges: projection.edges,
+      edges: projection.edges
+    }).render({
       camera: { x: -29600, y: 0, z: 100 },
       surfaceSize: { width: 100, height: 100 },
       selection: undefined,
@@ -388,9 +393,10 @@ describe('canvas virtualization geometry', () => {
       selection: undefined,
       activeNodeProjectRelativePaths: []
     });
-    const fresh = buildVirtualizedCanvasRenderState({
+    const fresh = createCanvasVirtualizationIndex({
       nodes: projection.nodes,
-      edges: [],
+      edges: []
+    }).render({
       camera: { x: -900, y: 0, z: 1 },
       surfaceSize: { width: 800, height: 600 },
       selection: undefined,
@@ -433,7 +439,7 @@ function nodeFixture(projectRelativePath: string, x: number, y: number): CanvasP
       mimeType: 'image/png',
       canvasImagePreviewable: true,
       canvasImagePreviewSourceWidth: 200,
-      fileUrl: `http://127.0.0.1:17321/api/projects/123e4567-e89b-42d3-a456-426614174000/files/raw/${projectRelativePath}?v=rev`,
+      fileUrl: `/api/projects/123e4567-e89b-42d3-a456-426614174000/files/raw/${projectRelativePath}?v=rev`,
       revision: 'rev'
     }
   };
@@ -453,7 +459,7 @@ function textNodeFixture(projectRelativePath: string, x: number, y: number): Can
       state: 'available',
       size: 100,
       mimeType: 'text/plain',
-      fileUrl: `http://127.0.0.1:17321/api/projects/123e4567-e89b-42d3-a456-426614174000/files/raw/${projectRelativePath}?v=rev`,
+      fileUrl: `/api/projects/123e4567-e89b-42d3-a456-426614174000/files/raw/${projectRelativePath}?v=rev`,
       revision: 'rev'
     }
   };

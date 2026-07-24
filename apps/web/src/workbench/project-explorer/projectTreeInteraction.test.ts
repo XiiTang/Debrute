@@ -1,7 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { buildProjectFileTree, expandedProjectTreePaths } from './projectFileTree';
 import {
-  clearProjectTreeSelection,
   createEmptyProjectTreeSelection,
   flattenProjectTree,
   projectTreeDropOperation,
@@ -98,7 +97,7 @@ describe('project tree interaction', () => {
       },
       visibleItems,
       path: 'briefs/concept.md',
-      platform: 'linux',
+      platform: 'win32',
       event: { shiftKey: true }
     })).toEqual({
       selectedPaths: ['assets', 'assets/pages', 'assets/cover.png', 'briefs', 'briefs/concept.md'],
@@ -132,17 +131,9 @@ describe('project tree interaction', () => {
     });
   });
 
-  it('clears selection from blank tree space', () => {
-    expect(clearProjectTreeSelection()).toEqual({
-      selectedPaths: [],
-      focusedPath: null,
-      anchorPath: null
-    });
-  });
-
   it('uses the VS Code internal copy modifier by platform', () => {
     expect(projectTreeDropOperation({ platform: 'darwin', event: { altKey: true } })).toBe('copy');
-    expect(projectTreeDropOperation({ platform: 'linux', event: { ctrlKey: true } })).toBe('copy');
+    expect(projectTreeDropOperation({ platform: 'win32', event: { ctrlKey: true } })).toBe('copy');
     expect(projectTreeDropOperation({ platform: 'darwin', event: { ctrlKey: true } })).toBe('move');
   });
 

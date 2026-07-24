@@ -1,4 +1,4 @@
-import type { PhotoshopSelectionSnapshot } from './adapter';
+import type { PhotoshopSelectionSnapshot } from './adapter.js';
 
 export interface SelectionCard {
   id: string;

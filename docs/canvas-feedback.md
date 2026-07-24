@@ -142,15 +142,16 @@ irreversible work when selected marks conflict or the review intent is unusual.
 
 ## Executable Authorities
 
-- Feedback model, normalization, mutation, labels, moments, geometry, and
-  artifact paths: `packages/canvas-core/src/`.
-- Feedback persistence, media-scope validation, artifact scheduling, rendering,
-  diagnostics, and video-frame extraction:
+- Shared feedback declarations and browser presentation values:
+  `packages/canvas-core/src/`.
+- Feedback normalization, mutation, labels, moments, geometry, artifact paths,
+  persistence, media-scope validation, scheduling, rendering, diagnostics, and
+  video-frame extraction:
   `apps/runtime/src/project/feedback/` and `apps/runtime/src/project/previews/`.
 - Feedback controller, floating bar, frame, media overlays, and video moment
   interaction: `apps/web/src/workbench/canvas/` and
   `apps/web/src/workbench/shell/floatingBars.ts`.
-- Visibility policy: `packages/project-core/src/projectPaths.ts`.
+- Visibility policy: `apps/runtime/src/project/paths.rs`.
 - Agent-facing consumption contract: `skills/debrute-core/SKILL.md`.
-- Browser-free coverage: `packages/canvas-core/src/canvasFeedback.test.ts`,
-  colocated Workbench tests, and `apps/runtime/src/project/tests.rs`.
+- Browser-free coverage: colocated Workbench tests,
+  `apps/runtime/src/project/feedback/`, and `apps/runtime/src/project/tests.rs`.

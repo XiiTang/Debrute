@@ -18,12 +18,11 @@ import {
 } from '../services/workbenchTheme';
 
 export type WorkbenchSettingsActions = Pick<WorkbenchActions,
-  | 'getProductState'
   | 'checkProductUpdate'
   | 'applyProductUpdate'
-  | 'reloadGlobalSettings'
   | 'reloadAdobeBridge'
   | 'saveGlobalSettings'
+  | 'revealModelApiKey'
   | 'rescanIntegrations'
   | 'runIntegrationOperation'
   | 'createAdobeBridgePairing'
@@ -35,6 +34,7 @@ export type WorkbenchSettingsActions = Pick<WorkbenchActions,
 
 export interface WorkbenchSettingsController {
   globalSettings: WorkbenchState['globalSettings'];
+  product: WorkbenchState['product'];
   adobeBridge: WorkbenchState['adobeBridge'];
   locale: WorkbenchLocale;
   resolvedTheme: WorkbenchResolvedTheme;
@@ -58,13 +58,13 @@ export function useWorkbenchSettingsController(input: {
   notify(message: string): void;
 }): WorkbenchSettingsController {
   const [globalSettings, setGlobalSettings] = useState<WorkbenchState['globalSettings']>({ status: 'loading' });
+  const [product, setProduct] = useState<WorkbenchState['product']>({ status: 'loading' });
   const [adobeBridge, setAdobeBridge] = useState<WorkbenchState['adobeBridge']>({ status: 'loading' });
   const [locale, setLocale] = useState<WorkbenchLocale>(DEFAULT_GLOBAL_WORKBENCH_SETTINGS.locale);
   const [themePreference, setThemePreference] = useState<WorkbenchThemePreference>(DEFAULT_GLOBAL_WORKBENCH_SETTINGS.themePreference);
   const [resolvedTheme, setResolvedTheme] = useState<WorkbenchResolvedTheme>(() => (
     resolveWorkbenchThemePreference(DEFAULT_GLOBAL_WORKBENCH_SETTINGS.themePreference)
   ));
-  const globalSettingsLoadVersionRef = useRef(0);
   const adobeBridgeLoadVersionRef = useRef(0);
   const adobeBridgeValueRef = useRef<AdobeBridgeStateView | undefined>(undefined);
   const adobeClientCommandTokenRef = useRef(0);
@@ -132,7 +132,6 @@ export function useWorkbenchSettingsController(input: {
   }, []);
 
   const applyLoadedGlobalSettings = useCallback((settings: DebruteGlobalSettingsView) => {
-    globalSettingsLoadVersionRef.current += 1;
     setGlobalSettings({ status: 'ready', value: applyGlobalSettingsEffects(settings) });
   }, [applyGlobalSettingsEffects]);
 
@@ -145,24 +144,6 @@ export function useWorkbenchSettingsController(input: {
   useLayoutEffect(() => {
     setDocumentTheme(resolvedTheme);
   }, [resolvedTheme]);
-
-  const reloadGlobalSettings = useCallback(async () => {
-    const loadVersion = globalSettingsLoadVersionRef.current + 1;
-    globalSettingsLoadVersionRef.current = loadVersion;
-    setGlobalSettings({ status: 'loading' });
-    try {
-      const settings = await input.api.globalSettingsGet();
-      if (globalSettingsLoadVersionRef.current !== loadVersion) {
-        return;
-      }
-      setGlobalSettings({ status: 'ready', value: applyGlobalSettingsEffects(settings) });
-    } catch (error) {
-      if (globalSettingsLoadVersionRef.current !== loadVersion) {
-        return;
-      }
-      setGlobalSettings({ status: 'error', message: errorMessage(error) });
-    }
-  }, [applyGlobalSettingsEffects, input.api]);
 
   const reloadAdobeBridge = useCallback(async () => {
     const loadVersion = adobeBridgeLoadVersionRef.current + 1;
@@ -183,57 +164,33 @@ export function useWorkbenchSettingsController(input: {
   }, [applyAdobeBridgeState, input.api]);
 
   useEffect(() => {
-    void reloadGlobalSettings();
     void reloadAdobeBridge();
     return () => {
-      globalSettingsLoadVersionRef.current += 1;
       adobeBridgeLoadVersionRef.current += 1;
       pendingAdobeClientCommandsRef.current.clear();
       adobeBridgeValueRef.current = undefined;
     };
-  }, [reloadAdobeBridge, reloadGlobalSettings]);
-
-  const applyIntegrationSettings = useCallback((
-    version: number,
-    integrations: DebruteGlobalSettingsView['integrations']
-  ) => {
-    setGlobalSettings((current) => {
-      if (globalSettingsLoadVersionRef.current !== version || current.status !== 'ready') {
-        return current;
-      }
-      return { status: 'ready', value: { ...current.value, integrations } };
-    });
-  }, []);
+  }, [reloadAdobeBridge]);
 
   const getCurrentI18n = useCallback(() => createI18n(localeRef.current), []);
 
   const actions = useMemo<WorkbenchSettingsActions>(() => ({
-    getProductState: () => input.api.getProductState(),
-    checkProductUpdate: () => input.api.checkProductUpdate(),
-    applyProductUpdate: () => input.api.applyProductUpdate(),
-    reloadGlobalSettings,
+    checkProductUpdate: async () => { await input.api.checkProductUpdate(); },
+    applyProductUpdate: async () => { await input.api.applyProductUpdate(); },
     reloadAdobeBridge,
     saveGlobalSettings: async (saveInput) => {
-      const saveVersion = globalSettingsLoadVersionRef.current + 1;
-      globalSettingsLoadVersionRef.current = saveVersion;
-      const settings = await input.api.globalSettingsSave(saveInput);
-      if (globalSettingsLoadVersionRef.current === saveVersion) {
-        applyLoadedGlobalSettings(settings);
-      }
+      await input.api.globalSettingsSave(saveInput);
+    },
+    revealModelApiKey: async (modelId) => {
+      const response = await input.api.revealModelApiKey(modelId);
+      return response.apiKey;
     },
     rescanIntegrations: async () => {
-      const rescanVersion = globalSettingsLoadVersionRef.current + 1;
-      globalSettingsLoadVersionRef.current = rescanVersion;
-      const settings = await input.api.integrationsRescan();
-      applyIntegrationSettings(rescanVersion, settings);
-      return settings;
+      await input.api.integrationsRescan();
     },
     runIntegrationOperation: async (operationInput) => {
-      const operationVersion = globalSettingsLoadVersionRef.current + 1;
-      globalSettingsLoadVersionRef.current = operationVersion;
       const result = await input.api.integrationsRunOperation(operationInput);
-      applyIntegrationSettings(operationVersion, result.settings);
-      if (globalSettingsLoadVersionRef.current === operationVersion && !result.ok) {
+      if (!result.ok) {
         const currentI18n = getCurrentI18n();
         const diagnostic = result.diagnostic?.stderrTail
           ?? result.diagnostic?.stdoutTail
@@ -286,7 +243,6 @@ export function useWorkbenchSettingsController(input: {
       }
     }
   }), [
-    applyLoadedGlobalSettings,
     applyAdobeBridgeState,
     beginAdobeClientCommand,
     completeAdobeClientCommand,
@@ -294,14 +250,34 @@ export function useWorkbenchSettingsController(input: {
     input.api,
     input.notify,
     reloadAdobeBridge,
-    reloadGlobalSettings,
-    applyIntegrationSettings,
     shouldSuppressAdobeClientCommandError
   ]);
 
   const applyEvent = useCallback((event: WorkbenchEvent) => {
     if (event.type === 'globalSettings.changed') {
       applyLoadedGlobalSettings(event.settings);
+      return;
+    }
+    if (event.type === 'integrations.changed') {
+      setGlobalSettings((current) => current.status === 'ready'
+        ? { status: 'ready', value: { ...current.value, integrations: event.integrations } }
+        : current);
+      return;
+    }
+    if (event.type === 'recentProjects.changed') {
+      setGlobalSettings((current) => current.status === 'ready'
+        ? {
+            status: 'ready',
+            value: {
+              ...current.value,
+              chrome: { ...current.value.chrome, recentProjects: event.recentProjects }
+            }
+          }
+        : current);
+      return;
+    }
+    if (event.type === 'product.changed') {
+      setProduct({ status: 'ready', value: event.product });
       return;
     }
     if (event.type === 'adobeBridge.state.changed') {
@@ -312,13 +288,14 @@ export function useWorkbenchSettingsController(input: {
 
   return useMemo(() => ({
     globalSettings,
+    product,
     adobeBridge,
     locale,
     resolvedTheme,
     actions,
     getCurrentI18n,
     applyEvent
-  }), [actions, adobeBridge, applyEvent, getCurrentI18n, globalSettings, locale, resolvedTheme]);
+  }), [actions, adobeBridge, applyEvent, getCurrentI18n, globalSettings, locale, product, resolvedTheme]);
 }
 
 function errorMessage(error: unknown): string {

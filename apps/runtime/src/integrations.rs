@@ -4,7 +4,7 @@ use std::{
     error::Error,
     fmt,
     path::{Path, PathBuf},
-    sync::{Arc, Mutex},
+    sync::{Arc, Mutex, MutexGuard},
     time::{Duration, Instant},
 };
 
@@ -519,26 +519,8 @@ pub struct IntegrationOperationResult {
     pub ok: bool,
     pub integration_id: String,
     pub operation: IntegrationOperation,
-    pub settings: IntegrationSettingsView,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub diagnostic: Option<IntegrationDiagnostic>,
-}
-
-pub struct ObservedIntegrationOperation<E> {
-    pub result: IntegrationOperationResult,
-    pub settled_observer_error: Option<E>,
-}
-
-#[derive(Debug)]
-pub enum IntegrationObservationError<E> {
-    Service(IntegrationError),
-    Started(E),
-}
-
-impl<E> From<IntegrationError> for IntegrationObservationError<E> {
-    fn from(error: IntegrationError) -> Self {
-        Self::Service(error)
-    }
 }
 
 pub struct IntegrationService {
@@ -583,21 +565,19 @@ impl IntegrationService {
     /// Returns the cached integration projection for at most thirty seconds,
     /// overlaid with the current in-flight operation.
     ///
-    /// # Errors
+    /// # Panics
     ///
-    /// Returns [`IntegrationError`] only for poisoned in-process state.
-    pub fn list_status(&self) -> Result<IntegrationSettingsView, IntegrationError> {
-        let running_operation = self.running_operation()?;
-        let cached = self
-            .cache
-            .lock()
-            .map_err(|_| IntegrationError::StatePoisoned)?;
+    /// Panics when the monotonic scan sequence is exhausted.
+    #[must_use]
+    pub fn list_status(&self) -> IntegrationSettingsView {
+        let running_operation = self.running_operation();
+        let cached = lock(&self.cache, "integration cache");
         if let Some(cached) = cached.as_ref()
             && cached.created_at.elapsed() < STATUS_CACHE_TTL
         {
             let mut view = cached.view.clone();
             view.running_operation = running_operation;
-            return Ok(view);
+            return view;
         }
         drop(cached);
         self.rescan()
@@ -605,18 +585,16 @@ impl IntegrationService {
 
     /// Probes every closed integration and installation backend once.
     ///
-    /// # Errors
+    /// # Panics
     ///
-    /// Returns [`IntegrationError`] only for poisoned in-process state.
-    pub fn rescan(&self) -> Result<IntegrationSettingsView, IntegrationError> {
+    /// Panics when the monotonic scan sequence is exhausted.
+    #[must_use]
+    pub fn rescan(&self) -> IntegrationSettingsView {
         let generation = {
-            let mut sequence = self
-                .scan_sequence
-                .lock()
-                .map_err(|_| IntegrationError::StatePoisoned)?;
+            let mut sequence = lock(&self.scan_sequence, "integration scan sequence");
             *sequence = sequence
                 .checked_add(1)
-                .ok_or(IntegrationError::ScanGenerationExhausted)?;
+                .expect("integration scan sequence exhausted");
             *sequence
         };
         let (system, system_view) = self.resolve_system_backend();
@@ -632,10 +610,7 @@ impl IntegrationService {
             backends: vec![system_view, python_view],
             running_operation: None,
         };
-        let mut cache = self
-            .cache
-            .lock()
-            .map_err(|_| IntegrationError::StatePoisoned)?;
+        let mut cache = lock(&self.cache, "integration cache");
         if cache
             .as_ref()
             .is_none_or(|cached| cached.generation <= generation)
@@ -648,131 +623,70 @@ impl IntegrationService {
         }
         drop(cache);
         let mut view = base;
-        view.running_operation = self.running_operation()?;
-        Ok(view)
+        view.running_operation = self.running_operation();
+        view
     }
 
-    /// Runs one catalog-defined install/update/uninstall operation without
-    /// retrying or accepting generic command input.
+    /// Runs an operation and publishes its in-flight and settled projections
+    /// exactly once around process execution.
     ///
-    /// # Errors
-    ///
-    /// Returns [`IntegrationError`] only when the in-process state lock is
-    /// poisoned. Expected operation failures are returned as typed diagnostics.
-    pub fn run_operation(
+    /// Projection callbacks are authoritative Runtime commits; an invariant
+    /// failure in either callback is process-fatal.
+    #[must_use]
+    pub fn run_operation_observed(
         &self,
         integration_id: &str,
         operation: IntegrationOperation,
-    ) -> Result<IntegrationOperationResult, IntegrationError> {
-        match self.run_operation_observed(
-            integration_id,
-            operation,
-            |_| Ok::<(), std::convert::Infallible>(()),
-            |_| Ok::<(), std::convert::Infallible>(()),
-        ) {
-            Ok(observed) => Ok(observed.result),
-            Err(IntegrationObservationError::Service(error)) => Err(error),
-            Err(IntegrationObservationError::Started(never)) => match never {},
-        }
-    }
-
-    /// Runs an operation and exposes the in-flight state exactly once before
-    /// process execution, allowing the Global stream to publish it.
-    ///
-    /// # Errors
-    ///
-    /// Returns [`IntegrationObservationError::Started`] before command
-    /// execution when the started transition cannot be committed.
-    pub fn run_operation_observed<E>(
-        &self,
-        integration_id: &str,
-        operation: IntegrationOperation,
-        on_started: impl FnOnce(&IntegrationSettingsView) -> Result<(), E>,
-        on_settled: impl FnOnce(&IntegrationSettingsView) -> Result<(), E>,
-    ) -> Result<ObservedIntegrationOperation<E>, IntegrationObservationError<E>> {
-        let _gate = match self.operation_gate.try_lock() {
-            Ok(gate) => gate,
-            Err(std::sync::TryLockError::WouldBlock) => {
-                return Ok(ObservedIntegrationOperation {
-                    result: IntegrationOperationResult {
-                        ok: false,
-                        integration_id: integration_id.to_owned(),
-                        operation,
-                        settings: self.list_status()?,
-                        diagnostic: Some(diagnostic("operation_already_running")),
-                    },
-                    settled_observer_error: None,
-                });
-            }
-            Err(std::sync::TryLockError::Poisoned(_)) => {
-                return Err(IntegrationError::StatePoisoned.into());
-            }
+        on_started: impl FnOnce(&IntegrationSettingsView),
+        on_settled: impl FnOnce(&IntegrationSettingsView),
+    ) -> IntegrationOperationResult {
+        let Some(_gate) = self.try_operation_gate() else {
+            return IntegrationOperationResult {
+                ok: false,
+                integration_id: integration_id.to_owned(),
+                operation,
+                diagnostic: Some(diagnostic("operation_already_running")),
+            };
         };
 
         let command = match self.plan_operation(integration_id, operation) {
             Ok(command) => command,
             Err(diagnostic) => {
-                return Ok(ObservedIntegrationOperation {
-                    result: IntegrationOperationResult {
-                        ok: false,
-                        integration_id: integration_id.to_owned(),
-                        operation,
-                        settings: self.rescan()?,
-                        diagnostic: Some(diagnostic),
-                    },
-                    settled_observer_error: None,
-                });
+                return IntegrationOperationResult {
+                    ok: false,
+                    integration_id: integration_id.to_owned(),
+                    operation,
+                    diagnostic: Some(diagnostic),
+                };
             }
         };
-        *self
-            .operation
-            .lock()
-            .map_err(|_| IntegrationError::StatePoisoned)? = Some(IntegrationOperationInFlight {
-            integration_id: integration_id.to_owned(),
-            operation,
-        });
-
-        let started = match self.rescan() {
-            Ok(started) => started,
-            Err(error) => {
-                self.clear_running_operation()?;
-                return Err(IntegrationObservationError::Service(error));
-            }
-        };
-        if let Err(error) = on_started(&started) {
-            self.clear_running_operation()?;
-            return Err(IntegrationObservationError::Started(error));
-        }
-
-        let command_result = self.adapter.run_command(&command);
-        self.clear_running_operation()?;
-        let settings = self.rescan()?;
-        let settled_observer_error = on_settled(&settings).err();
-        Ok(ObservedIntegrationOperation {
-            result: IntegrationOperationResult {
-                ok: command_result.ok,
+        *lock(&self.operation, "integration operation state") =
+            Some(IntegrationOperationInFlight {
                 integration_id: integration_id.to_owned(),
                 operation,
-                settings,
-                diagnostic: (!command_result.ok).then_some(command_result.diagnostic),
-            },
-            settled_observer_error,
-        })
+            });
+
+        let started = self.rescan();
+        on_started(&started);
+
+        let command_result = self.adapter.run_command(&command);
+        self.clear_running_operation();
+        let settings = self.rescan();
+        on_settled(&settings);
+        IntegrationOperationResult {
+            ok: command_result.ok,
+            integration_id: integration_id.to_owned(),
+            operation,
+            diagnostic: (!command_result.ok).then_some(command_result.diagnostic),
+        }
     }
 
-    fn clear_running_operation(&self) -> Result<(), IntegrationError> {
-        self.operation
-            .lock()
-            .map_err(|_| IntegrationError::StatePoisoned)?
-            .take();
-        Ok(())
+    fn clear_running_operation(&self) {
+        lock(&self.operation, "integration operation state").take();
     }
 
-    fn running_operation(&self) -> Result<Option<IntegrationOperationInFlight>, IntegrationError> {
-        self.operation
-            .lock()
-            .map_err(|_| IntegrationError::StatePoisoned)
-            .map(|operation| operation.clone())
+    fn running_operation(&self) -> Option<IntegrationOperationInFlight> {
+        lock(&self.operation, "integration operation state").clone()
     }
 
     fn plan_operation(
@@ -1140,6 +1054,22 @@ impl IntegrationService {
             },
         )
     }
+
+    fn try_operation_gate(&self) -> Option<MutexGuard<'_, ()>> {
+        match self.operation_gate.try_lock() {
+            Ok(gate) => Some(gate),
+            Err(std::sync::TryLockError::WouldBlock) => None,
+            Err(std::sync::TryLockError::Poisoned(_)) => {
+                panic!("integration operation gate lock poisoned");
+            }
+        }
+    }
+}
+
+fn lock<'a, T>(mutex: &'a Mutex<T>, name: &str) -> MutexGuard<'a, T> {
+    mutex
+        .lock()
+        .unwrap_or_else(|_| panic!("{name} lock poisoned"))
 }
 
 fn first_binary_with_status<'a>(
@@ -1287,18 +1217,12 @@ fn version_like(value: &str) -> bool {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum IntegrationError {
     Parse(String),
-    ScanGenerationExhausted,
-    StatePoisoned,
 }
 
 impl fmt::Display for IntegrationError {
     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             Self::Parse(message) => formatter.write_str(message),
-            Self::ScanGenerationExhausted => {
-                formatter.write_str("Integration scan generation is exhausted.")
-            }
-            Self::StatePoisoned => formatter.write_str("Integration state lock is poisoned."),
         }
     }
 }

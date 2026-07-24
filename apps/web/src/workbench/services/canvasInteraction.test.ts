@@ -85,7 +85,7 @@ describe('canvas interaction', () => {
       ctrlKey: false,
       metaKey: false,
       shiftKey: true
-    }, 'linux')).toEqual({ x: -25, y: 0, z: 0 });
+    }, 'win32')).toEqual({ x: -25, y: 0, z: 0 });
 
     expect(normalizeCanvasWheelDelta({
       deltaX: 0,

@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'vitest';
+import type { DebruteShellApi } from '@debrute/app-protocol';
 import { createProjectTreeExternalDropPlan, hasProjectTreeExternalDrag } from './projectTreeExternalDrop';
 
 describe('project tree external drop', () => {
@@ -7,9 +8,9 @@ describe('project tree external drop', () => {
 
     await expect(createProjectTreeExternalDropPlan({
       dataTransfer: dataTransferWithFiles([file]),
-      shell: {
+      shell: shellApiFixture({
         getDroppedFilePath: () => '/external/cover.png'
-      },
+      }),
       targetDirectoryProjectRelativePath: 'assets'
     })).resolves.toEqual({
       localPaths: ['/external/cover.png'],
@@ -24,9 +25,9 @@ describe('project tree external drop', () => {
 
     await expect(createProjectTreeExternalDropPlan({
       dataTransfer: dataTransferWithFiles([cover, notes]),
-      shell: {
+      shell: shellApiFixture({
         getDroppedFilePath: (file) => file.name === 'cover.png' ? '/external/cover.png' : undefined
-      },
+      }),
       targetDirectoryProjectRelativePath: 'assets'
     })).rejects.toThrow('Electron external drop did not expose every dropped file path.');
   });
@@ -34,15 +35,18 @@ describe('project tree external drop', () => {
   it('detects browser external drags before files are exposed on dragover', () => {
     expect(hasProjectTreeExternalDrag({
       files: [],
-      types: ['Files']
+      types: ['Files'],
+      items: []
     } as unknown as DataTransfer)).toBe(true);
     expect(hasProjectTreeExternalDrag({
       files: [new File(['cover'], 'cover.png')],
-      types: []
+      types: [],
+      items: []
     } as unknown as DataTransfer)).toBe(true);
     expect(hasProjectTreeExternalDrag({
       files: [],
-      types: ['text/plain']
+      types: ['text/plain'],
+      items: []
     } as unknown as DataTransfer)).toBe(false);
   });
 
@@ -70,6 +74,7 @@ describe('project tree external drop', () => {
     await expect(createProjectTreeExternalDropPlan({
       dataTransfer: {
         files: [],
+        types: ['Files'],
         items: [{
           kind: 'file',
           webkitGetAsEntry: () => directoryEntry('pages', [
@@ -102,6 +107,7 @@ describe('project tree external drop', () => {
     await expect(createProjectTreeExternalDropPlan({
       dataTransfer: {
         files: [cover, new File(['notes'], 'notes.md')],
+        types: ['Files'],
         items: [
           {
             kind: 'file',
@@ -122,6 +128,7 @@ describe('project tree external drop', () => {
     await expect(createProjectTreeExternalDropPlan({
       dataTransfer: {
         files: [],
+        types: ['Files'],
         items: [{
           kind: 'file',
           webkitGetAsEntry: () => directoryEntry('pages', [
@@ -154,6 +161,7 @@ describe('project tree external drop', () => {
     await expect(createProjectTreeExternalDropPlan({
       dataTransfer: {
         files: [],
+        types: ['Files'],
         items: [{
           kind: 'file',
           webkitGetAsEntry: () => chunkedDirectoryEntry('pages', [
@@ -189,7 +197,26 @@ describe('project tree external drop', () => {
 });
 
 function dataTransferWithFiles(files: File[]): DataTransfer {
-  return { files } as unknown as DataTransfer;
+  return {
+    files,
+    types: files.length > 0 ? ['Files'] : [],
+    items: files.map(() => ({ kind: 'file' }))
+  } as unknown as DataTransfer;
+}
+
+function shellApiFixture(overrides: Partial<DebruteShellApi>): DebruteShellApi {
+  return {
+    getNativeWindowState: async () => ({ maximized: false }),
+    minimizeNativeWindow: async () => ({ maximized: false }),
+    toggleMaximizeNativeWindow: async () => ({ maximized: true }),
+    closeNativeWindow: async () => ({ ok: true }),
+    executeNativeMenuCommand: async () => ({ ok: true }),
+    takeDesktopLaunchTicket: async () => undefined,
+    onNativeWindowStateChanged: () => () => undefined,
+    onOpenProjectRequested: () => () => undefined,
+    getDroppedFilePath: () => undefined,
+    ...overrides
+  };
 }
 
 function fileEntry(name: string, file: File) {

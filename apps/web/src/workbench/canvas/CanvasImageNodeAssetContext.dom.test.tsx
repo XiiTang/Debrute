@@ -131,7 +131,7 @@ function imageNode(): ProjectedCanvasNode {
       revision: 'rev-a',
       size: 1000,
       mimeType: 'image/png',
-      fileUrl: 'http://127.0.0.1:17321/api/projects/project-1/files/raw/flow/cover.png?v=rev-a',
+      fileUrl: '/api/projects/project-1/files/raw/flow/cover.png?v=rev-a',
       canvasImagePreviewable: true,
       canvasImagePreviewSourceWidth: 2400
     }

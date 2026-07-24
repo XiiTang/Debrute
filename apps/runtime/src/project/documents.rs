@@ -115,22 +115,6 @@ pub fn project_document_descriptor(path: &str) -> Option<ProjectDocumentDescript
             &["canvas-feedback"],
         ));
     }
-    if path == ".debrute/assets/generated-assets-index.json" {
-        return Some(descriptor(
-            "generated-asset-index",
-            ".debrute/assets/generated-assets-index.json",
-            ProjectDocumentRole::Metadata,
-            &["generated-assets"],
-        ));
-    }
-    if match_record_document(&path) {
-        return Some(descriptor(
-            "generated-asset-record",
-            ".debrute/assets/generated/<record-id>.json",
-            ProjectDocumentRole::Metadata,
-            &["generated-assets"],
-        ));
-    }
     None
 }
 
@@ -163,19 +147,6 @@ fn match_canvas_document(path: &str, prefix: &str, suffix: &str, allow_dot: bool
         })
 }
 
-fn match_record_document(path: &str) -> bool {
-    let Some(id) = path
-        .strip_prefix(".debrute/assets/generated/")
-        .and_then(|value| value.strip_suffix(".json"))
-    else {
-        return false;
-    };
-    !id.is_empty()
-        && id.bytes().enumerate().all(|(index, byte)| {
-            byte.is_ascii_alphanumeric() || (index > 0 && matches!(byte, b'_' | b'-' | b'.'))
-        })
-}
-
 /// Reads the current content hash of a registered document candidate.
 ///
 /// # Errors
@@ -186,6 +157,31 @@ pub fn project_document_file_hash(path: &Path) -> Result<Option<String>, Project
         Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(None),
         Err(error) => Err(error.into()),
     }
+}
+
+pub(crate) fn project_document_directory_hash(path: &Path) -> Result<Option<String>, ProjectError> {
+    let entries = match fs::read_dir(path) {
+        Ok(entries) => entries,
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(None),
+        Err(error) => return Err(error.into()),
+    };
+    let mut members = Vec::new();
+    for entry in entries {
+        let entry = entry?;
+        let file_type = entry.file_type()?;
+        let kind = if file_type.is_file() {
+            "file"
+        } else if file_type.is_dir() {
+            "directory"
+        } else if file_type.is_symlink() {
+            "symlink"
+        } else {
+            "other"
+        };
+        members.push(format!("{kind}:{}", entry.file_name().to_string_lossy()));
+    }
+    members.sort();
+    Ok(Some(project_content_hash(members.join("\0"))))
 }
 
 /// Commits a locked, compare-and-swap Project document transaction atomically.
@@ -199,44 +195,21 @@ pub(crate) fn commit_project_document_transaction(
     let mut locks = Vec::new();
     let mut staged = Vec::new();
     let result = execute_document_transaction(&prepared, &mut locks, &mut staged);
-    for (temporary, _) in &staged {
-        let _ = fs::remove_file(temporary);
+    let cleanup = cleanup_document_transaction(&staged, locks);
+    match (result, cleanup) {
+        (Ok(()), Ok(())) => Ok(()),
+        (Err(error), Ok(())) => Err(normalize_document_error(error)),
+        (Ok(()), Err(cleanup_error)) => {
+            eprintln!(
+                "Debrute Project document transaction committed but cleanup failed: {cleanup_error}"
+            );
+            Ok(())
+        }
+        (Err(error), Err(cleanup_error)) => {
+            eprintln!("Debrute Project document transaction cleanup also failed: {cleanup_error}");
+            Err(normalize_document_error(error))
+        }
     }
-    for handle in locks.into_iter().rev() {
-        let _ = handle.unlock();
-        drop(handle);
-    }
-    result.map_err(normalize_document_error)?;
-    Ok(())
-}
-
-/// Stages one Project document transaction while observing a caller control,
-/// then uses the final replacement sequence as the non-interruptible commit point.
-pub(crate) fn commit_project_document_transaction_checked<E, F>(
-    input: &ProjectDocumentTransaction,
-    mut check: F,
-) -> Result<(), E>
-where
-    E: From<ProjectError>,
-    F: FnMut() -> Result<(), E>,
-{
-    check()?;
-    let prepared = prepare_document_transaction(input)
-        .map_err(normalize_document_error)
-        .map_err(E::from)?;
-    check()?;
-    let mut locks = Vec::new();
-    let mut staged = Vec::new();
-    let result =
-        execute_document_transaction_checked(&prepared, &mut locks, &mut staged, &mut check);
-    for (temporary, _) in &staged {
-        let _ = fs::remove_file(temporary);
-    }
-    for handle in locks.into_iter().rev() {
-        let _ = handle.unlock();
-        drop(handle);
-    }
-    result
 }
 
 fn normalize_document_error(error: ProjectError) -> ProjectError {
@@ -335,7 +308,12 @@ fn execute_document_transaction(
     acquire_document_locks(&prepared.project_root, &prepared.lock_targets, locks)?;
     let backups = read_document_backups(&prepared.targets)?;
     for (path, expected) in &prepared.reads {
-        if &project_document_file_hash(path)? != expected {
+        let actual = if path.is_dir() {
+            project_document_directory_hash(path)?
+        } else {
+            project_document_file_hash(path)?
+        };
+        if &actual != expected {
             return Err(document_error(
                 "document_push_conflict",
                 "Project document changed on disk before push commit.",
@@ -375,78 +353,6 @@ fn execute_document_transaction(
     Ok(())
 }
 
-fn execute_document_transaction_checked<E, F>(
-    prepared: &PreparedDocumentTransaction,
-    locks: &mut Vec<fs::File>,
-    staged: &mut Vec<(PathBuf, PathBuf)>,
-    check: &mut F,
-) -> Result<(), E>
-where
-    E: From<ProjectError>,
-    F: FnMut() -> Result<(), E>,
-{
-    check()?;
-    acquire_document_locks(&prepared.project_root, &prepared.lock_targets, locks)
-        .map_err(E::from)?;
-    check()?;
-    let backups = read_document_backups(&prepared.targets).map_err(E::from)?;
-    check()?;
-    for (path, expected) in &prepared.reads {
-        check()?;
-        if &project_document_file_hash(path).map_err(E::from)? != expected {
-            return Err(E::from(document_error(
-                "document_push_conflict",
-                "Project document changed on disk before push commit.",
-                path,
-            )));
-        }
-    }
-    for (path, content) in &prepared.writes {
-        check()?;
-        if let Some(parent) = path.parent() {
-            fs::create_dir_all(parent)
-                .map_err(ProjectError::from)
-                .map_err(E::from)?;
-        }
-        let temporary = sibling_temporary(path, "tmp").map_err(E::from)?;
-        let mut file = fs::OpenOptions::new()
-            .create_new(true)
-            .write(true)
-            .open(&temporary)
-            .map_err(ProjectError::from)
-            .map_err(E::from)?;
-        staged.push((temporary, path.clone()));
-        for chunk in content.as_bytes().chunks(1024 * 1024) {
-            check()?;
-            file.write_all(chunk)
-                .map_err(ProjectError::from)
-                .map_err(E::from)?;
-        }
-        check()?;
-        file.sync_all()
-            .map_err(ProjectError::from)
-            .map_err(E::from)?;
-    }
-    check()?;
-    if let Err(commit_error) = commit_staged_documents(staged, &prepared.deletes) {
-        if let Err(rollback_error) = restore_backups(&backups) {
-            return Err(E::from(ProjectError::service_with_fields(
-                "document_push_rollback_failed",
-                format!("{commit_error} Rollback cleanup failed: {rollback_error}"),
-                [
-                    ("commit_error".to_owned(), commit_error.to_string()),
-                    ("rollback_error".to_owned(), rollback_error.to_string()),
-                ],
-            )));
-        }
-        return Err(E::from(ProjectError::service(
-            "document_push_failed",
-            commit_error.to_string(),
-        )));
-    }
-    Ok(())
-}
-
 fn acquire_document_locks(
     project_root: &Path,
     targets: &BTreeSet<PathBuf>,
@@ -479,6 +385,29 @@ fn acquire_document_locks(
         }
     }
     Ok(())
+}
+
+fn cleanup_document_transaction(
+    staged: &[(PathBuf, PathBuf)],
+    locks: Vec<fs::File>,
+) -> std::io::Result<()> {
+    let mut first_error = None;
+    for (temporary, _) in staged {
+        if let Err(error) = fs::remove_file(temporary)
+            && error.kind() != std::io::ErrorKind::NotFound
+            && first_error.is_none()
+        {
+            first_error = Some(error);
+        }
+    }
+    for handle in locks.into_iter().rev() {
+        if let Err(error) = FileExt::unlock(&handle)
+            && first_error.is_none()
+        {
+            first_error = Some(error);
+        }
+    }
+    first_error.map_or(Ok(()), Err)
 }
 
 pub(super) fn project_document_lock_path(project_root: &Path, target: &Path) -> PathBuf {
@@ -560,6 +489,14 @@ fn resolve_document_path(
             )
         })?;
     let relative = relative.to_string_lossy().replace('\\', "/");
+    if owner.is_none()
+        && matches!(
+            relative.as_str(),
+            ".debrute/canvas-maps" | ".debrute/canvases"
+        )
+    {
+        return resolve_no_symlink_project_path_for_write(canonical_root, &relative);
+    }
     let descriptor = project_document_descriptor(&relative).ok_or_else(|| {
         document_error(
             "document_descriptor_violation",

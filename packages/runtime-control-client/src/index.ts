@@ -1,9 +1,5 @@
 export {
   RuntimeControlError,
   connectRuntimeControl,
-  resolveRuntimeControlSocketPath,
-  type ConnectRuntimeControlOptions,
-  type RuntimeControlEndpointOptions,
-  type RuntimeControlClient,
-  type RuntimeControlErrorCode
+  type RuntimeControlClient
 } from './runtimeControlClient.js';

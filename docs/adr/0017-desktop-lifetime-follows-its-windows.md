@@ -1,8 +1,11 @@
 # Desktop Lifetime Follows Its Windows
 
-Electron Desktop exits after its last BrowserWindow closes. Closing a window
-reports its opaque key to Runtime, which removes that live route and any bound
-Workbench connection. Closing the last window affects Electron only; the
+Electron Desktop exits after its last BrowserWindow closes. Closing a
+non-final window reports its opaque key to Runtime, which removes that live
+route. Closing the final window instead closes the promoted Desktop Control
+connection and exits Electron; Runtime unregisters that host and drains its
+remaining window topology as part of connection teardown. There is no final
+window-close request, acknowledgement wait, timeout, or fallback exit. The
 independent Runtime keeps running.
 
 Runtime and Desktop remain separate single-instance applications. Runtime's

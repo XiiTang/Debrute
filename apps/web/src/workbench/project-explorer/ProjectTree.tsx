@@ -1,11 +1,14 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import { File, FilePlus2, Folder, FolderOpen, FolderPlus } from 'lucide-react';
-import type { WorkbenchProjectSessionSnapshot } from '@debrute/app-protocol';
+import type {
+  DebruteProductPlatform,
+  ProjectPathEntry,
+  WorkbenchProjectSessionSnapshot
+} from '@debrute/app-protocol';
 import type {
   WorkbenchContextMenuPosition,
   WorkbenchContextMenuTarget,
-  WorkbenchExplorerContextMenuTarget,
-  WorkbenchProjectPathEntry
+  WorkbenchExplorerContextMenuTarget
 } from '../shell/contextMenu';
 import { EmptyState, Input, cx } from '../ui';
 import { useI18n } from '../i18n';
@@ -17,7 +20,7 @@ import {
   type ProjectTreeKeyboardEventLike
 } from './projectTreeKeyboardCommands';
 import {
-  clearProjectTreeSelection,
+  createEmptyProjectTreeSelection,
   flattenProjectTree,
   normalizeProjectTreeSelection,
   isProjectTreeDropRejected,
@@ -52,7 +55,7 @@ export function ProjectTree({
   onEditSubmit,
   onEditCancel,
   onClearCut,
-  desktopPlatform,
+  productPlatform,
   onKeyboardFileCommand
 }: {
   snapshot: WorkbenchProjectSessionSnapshot | undefined;
@@ -62,7 +65,7 @@ export function ProjectTree({
   onSelectionChange: (selection: ProjectTreeSelectionState) => void;
   onLocateFileInCanvas?: ((projectRelativePath: string) => void) | undefined;
   onInternalDrop?: ((input: {
-    entries: WorkbenchProjectPathEntry[];
+    entries: ProjectPathEntry[];
     targetDirectoryProjectRelativePath: string;
     operation: 'copy' | 'move';
   }) => void) | undefined;
@@ -76,7 +79,7 @@ export function ProjectTree({
   onEditSubmit?: (() => void) | undefined;
   onEditCancel?: (() => void) | undefined;
   onClearCut?: (() => void) | undefined;
-  desktopPlatform?: NodeJS.Platform | undefined;
+  productPlatform: DebruteProductPlatform;
   onKeyboardFileCommand?: ((command: ProjectTreeFileKeyboardCommand, target: WorkbenchContextMenuTarget) => void) | undefined;
 }): React.ReactElement {
   const i18n = useI18n();
@@ -112,7 +115,7 @@ export function ProjectTree({
           if (!isRootBlankAreaEventTarget(event)) {
             return;
           }
-          onSelectionChange(clearProjectTreeSelection());
+          onSelectionChange(createEmptyProjectTreeSelection());
         }}
         onDoubleClick={(event) => {
           if (isRootBlankAreaEventTarget(event)) {
@@ -139,7 +142,7 @@ export function ProjectTree({
             if (!isAcceptedInternalProjectTreeDrop({
               entries,
               targetDirectoryProjectRelativePath,
-              operation: projectTreeDropOperation({ platform: desktopPlatform ?? 'linux', event })
+              operation: projectTreeDropOperation({ platform: productPlatform, event })
             })) {
               return;
             }
@@ -169,7 +172,7 @@ export function ProjectTree({
             return;
           }
           const entries = readInternalProjectTreeDragEntries(event.dataTransfer);
-          const operation = projectTreeDropOperation({ platform: desktopPlatform ?? 'linux', event });
+          const operation = projectTreeDropOperation({ platform: productPlatform, event });
           if (entries.length > 0 && isAcceptedInternalProjectTreeDrop({
             entries,
             targetDirectoryProjectRelativePath,
@@ -188,7 +191,7 @@ export function ProjectTree({
           selection: normalizedSelection,
           visibleItems,
           expanded,
-          desktopPlatform: desktopPlatform ?? 'linux',
+          productPlatform,
           onEditCancel,
           onClearCut,
           onSelectionChange,
@@ -216,7 +219,7 @@ export function ProjectTree({
             visibleItems={visibleItems}
             editing={editing}
             expanded={expanded}
-            desktopPlatform={desktopPlatform ?? 'linux'}
+            productPlatform={productPlatform}
             dragOverPath={dragOverPath}
             onToggle={(path) => setExpanded((current) => {
               const next = new Set(current);
@@ -252,7 +255,7 @@ export function handleProjectTreeKeyboardEvent(input: {
   selection: ProjectTreeSelectionState;
   visibleItems: ProjectTreeVisibleItem[];
   expanded?: Set<string> | undefined;
-  desktopPlatform: NodeJS.Platform;
+  productPlatform: DebruteProductPlatform;
   onEditCancel?: (() => void) | undefined;
   onClearCut?: (() => void) | undefined;
   onSelectionChange?: ((selection: ProjectTreeSelectionState) => void) | undefined;
@@ -282,7 +285,7 @@ export function handleProjectTreeKeyboardEvent(input: {
       return;
     }
   }
-  const command = projectTreeKeyboardCommandFromEvent(input.event, input.desktopPlatform);
+  const command = projectTreeKeyboardCommandFromEvent(input.event, input.productPlatform);
   if (!command) {
     return;
   }
@@ -303,7 +306,7 @@ export function handleProjectTreeKeyboardEvent(input: {
 
 export function projectTreeRowClickAction(input: {
   kind: ProjectFileTreeNode['kind'];
-  platform: NodeJS.Platform;
+  platform: DebruteProductPlatform;
   event: ProjectTreePointerModifiers;
 }): { toggleDirectory: boolean; locateFileInCanvas: boolean } {
   const selectionModifier = isSelectionModifierEvent(input.event, input.platform);
@@ -339,7 +342,7 @@ export function handleProjectTreeRootContextMenuEvent(input: {
     return false;
   }
   input.event.preventDefault();
-  input.onSelectionChange(clearProjectTreeSelection());
+  input.onSelectionChange(createEmptyProjectTreeSelection());
   input.onOpenContextMenu?.(rootExplorerTarget(), {
     x: input.event.clientX,
     y: input.event.clientY
@@ -416,7 +419,7 @@ function ProjectTreeRow({
   visibleItems,
   editing,
   expanded,
-  desktopPlatform,
+  productPlatform,
   dragOverPath,
   onToggle,
   onSelectionChange,
@@ -436,13 +439,13 @@ function ProjectTreeRow({
   visibleItems: ProjectTreeVisibleItem[];
   editing: ProjectTreeInlineEditState | undefined;
   expanded: Set<string>;
-  desktopPlatform: NodeJS.Platform;
+  productPlatform: DebruteProductPlatform;
   dragOverPath: string | null;
   onToggle: (path: string) => void;
   onSelectionChange: (selection: ProjectTreeSelectionState) => void;
   onLocateFileInCanvas?: ((projectRelativePath: string) => void) | undefined;
   onInternalDrop?: ((input: {
-    entries: WorkbenchProjectPathEntry[];
+    entries: ProjectPathEntry[];
     targetDirectoryProjectRelativePath: string;
     operation: 'copy' | 'move';
   }) => void) | undefined;
@@ -489,14 +492,14 @@ function ProjectTreeRow({
     event.stopPropagation();
     const action = projectTreeRowClickAction({
       kind: node.kind,
-      platform: desktopPlatform,
+      platform: productPlatform,
       event
     });
     const nextSelection = updateProjectTreeSelection({
       state: selection,
       visibleItems,
       path: node.path,
-      platform: desktopPlatform,
+      platform: productPlatform,
       event
     });
     onSelectionChange(nextSelection);
@@ -523,7 +526,7 @@ function ProjectTreeRow({
         state: selection,
         visibleItems,
         path: node.path,
-        platform: desktopPlatform,
+        platform: productPlatform,
         event: {}
       }));
     }
@@ -543,7 +546,7 @@ function ProjectTreeRow({
       if (!isAcceptedInternalProjectTreeDrop({
         entries,
         targetDirectoryProjectRelativePath,
-        operation: projectTreeDropOperation({ platform: desktopPlatform, event })
+        operation: projectTreeDropOperation({ platform: productPlatform, event })
       })) {
         return;
       }
@@ -574,7 +577,7 @@ function ProjectTreeRow({
     if (entries.length === 0) {
       return;
     }
-    const operation = projectTreeDropOperation({ platform: desktopPlatform, event });
+    const operation = projectTreeDropOperation({ platform: productPlatform, event });
     if (!isAcceptedInternalProjectTreeDrop({
       entries,
       targetDirectoryProjectRelativePath,
@@ -644,7 +647,7 @@ function ProjectTreeRow({
                 visibleItems={visibleItems}
                 editing={editing}
                 expanded={expanded}
-                desktopPlatform={desktopPlatform}
+                productPlatform={productPlatform}
                 dragOverPath={dragOverPath}
                 onToggle={onToggle}
                 onSelectionChange={onSelectionChange}
@@ -705,19 +708,19 @@ export function hasInternalProjectTreeDrag(dataTransfer: Pick<DataTransfer, 'typ
   return Array.from(dataTransfer.types).includes(PROJECT_TREE_DRAG_MIME);
 }
 
-export function readInternalProjectTreeDragEntries(dataTransfer: Pick<DataTransfer, 'getData'>): WorkbenchProjectPathEntry[] {
+export function readInternalProjectTreeDragEntries(dataTransfer: Pick<DataTransfer, 'getData'>): ProjectPathEntry[] {
   const raw = dataTransfer.getData(PROJECT_TREE_DRAG_MIME);
   if (!raw) {
     return [];
   }
-  const parsed = JSON.parse(raw) as WorkbenchProjectPathEntry[];
+  const parsed = JSON.parse(raw) as ProjectPathEntry[];
   return parsed.filter((entry) => (
     typeof entry.projectRelativePath === 'string' && (entry.kind === 'file' || entry.kind === 'directory')
   ));
 }
 
 function isAcceptedInternalProjectTreeDrop(input: {
-  entries: WorkbenchProjectPathEntry[];
+  entries: ProjectPathEntry[];
   targetDirectoryProjectRelativePath: string;
   operation: 'copy' | 'move';
 }): boolean {
@@ -756,7 +759,7 @@ function explorerTargetFromSelection(
   };
 }
 
-function itemExplorerTarget(entry: WorkbenchProjectPathEntry): WorkbenchExplorerContextMenuTarget {
+function itemExplorerTarget(entry: ProjectPathEntry): WorkbenchExplorerContextMenuTarget {
   return {
     source: 'explorer',
     targetKind: 'item',
@@ -776,7 +779,7 @@ function rootExplorerTarget(): WorkbenchExplorerContextMenuTarget {
   };
 }
 
-function isSelectionModifierEvent(event: ProjectTreePointerModifiers, platform: NodeJS.Platform): boolean {
+function isSelectionModifierEvent(event: ProjectTreePointerModifiers, platform: DebruteProductPlatform): boolean {
   return event.shiftKey === true || (platform === 'darwin' ? event.metaKey === true : event.ctrlKey === true);
 }
 

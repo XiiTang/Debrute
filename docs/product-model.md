@@ -6,7 +6,7 @@ Canonical domain vocabulary and context relationships are indexed in the
 
 ## Project
 
-A project is the local file workspace plus `.debrute/` metadata, generated assets, and health diagnostics.
+A project is the local file workspace plus `.debrute/` metadata, generated assets, and current Project Diagnostics.
 
 The local folder remains the source of truth for project files. Debrute stores its own metadata under `.debrute/`; Rust Runtime is the privileged persistence and operation boundary.
 
@@ -90,7 +90,9 @@ The Desktop Product seed includes the official `skills/debrute-*` bundle. Runtim
 
 Project metadata and canvas state live under `.debrute/`.
 
-Generated asset metadata is Project-owned structured state under `.debrute/assets/`. Generation model settings and API-key secrets are runtime-global state under the Debrute home directory.
+Generated asset metadata is Project-owned structured state under
+`.debrute/assets/`. Debrute Model settings and API-key secrets are
+runtime-global state under the Debrute home directory.
 
 Renderer code does not read or write Project files, generated asset metadata, model secret files, or Skills directories directly. Project and settings operations use Runtime's role-partitioned transport, while official Skills materialization is owned by Runtime bootstrap.
 
@@ -103,4 +105,8 @@ whole-product versioning.
 
 `debrute workbench start [<project>] --frontend default|desktop|browser` sends one native Control activation and reports the accepted target as an Agent Record. It does not print or persist an authenticated URL. Interactive users can also open Projects through the Workbench picker.
 
-Project, Canvas Map, and generation commands are Runtime-backed. During a command, the CLI keeps its native Control connection alive so the corresponding HTTP authorization cannot outlive that command. Project state, settings, generated asset metadata, CLI diagnostics, and official Skills status remain behind Runtime authority.
+Project, Canvas Map, and Model Request commands are Runtime-backed. During a
+command, the CLI keeps its native Control connection alive so the corresponding
+HTTP authorization cannot outlive that command. Project state, settings,
+Generated Asset metadata, CLI diagnostics, and official Skills status remain
+behind Runtime authority.

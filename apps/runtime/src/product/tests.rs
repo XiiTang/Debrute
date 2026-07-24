@@ -5,7 +5,7 @@ use std::{
     fs,
     io::{Read as _, Seek as _, SeekFrom, Write as _},
     path::PathBuf,
-    sync::{Arc, Mutex, PoisonError, mpsc},
+    sync::{Arc, Mutex, mpsc},
     time::Duration,
 };
 
@@ -824,7 +824,7 @@ impl Fixture {
 
     fn bootstrap_product(&self, version: &str) -> PathBuf {
         let seed = self.write_seed(version, ReleaseArchitecture::Arm64);
-        self.store.bootstrap_seed(&seed).unwrap()
+        self.store.activate_desktop_seed(&seed).unwrap()
     }
 
     fn write_seed(&self, version: &str, architecture: ReleaseArchitecture) -> PathBuf {
@@ -986,12 +986,15 @@ impl RecordingPlatform {
     fn set_installed(&self, identity: InstalledDesktopIdentity) {
         self.state
             .lock()
-            .unwrap_or_else(PoisonError::into_inner)
+            .expect("test Product platform lock poisoned")
             .installed = identity;
     }
 
     fn restarted(&self) -> Self {
-        let state = self.state.lock().unwrap_or_else(PoisonError::into_inner);
+        let state = self
+            .state
+            .lock()
+            .expect("test Product platform lock poisoned");
         Self {
             state: Arc::new(Mutex::new(RecordingPlatformState {
                 installed: state.installed.clone(),
@@ -1010,7 +1013,7 @@ impl RecordingPlatform {
     fn launched_versions(&self) -> Vec<String> {
         self.state
             .lock()
-            .unwrap_or_else(PoisonError::into_inner)
+            .expect("test Product platform lock poisoned")
             .launched_versions
             .clone()
     }
@@ -1019,7 +1022,7 @@ impl RecordingPlatform {
         let directory = self
             .state
             .lock()
-            .unwrap_or_else(PoisonError::into_inner)
+            .expect("test Product platform lock poisoned")
             .resume_receipts
             .clone();
         let mut receipts = match fs::read_dir(directory) {
@@ -1039,7 +1042,7 @@ impl RecordingPlatform {
     fn resume_attempt_ids(&self) -> Vec<String> {
         self.state
             .lock()
-            .unwrap_or_else(PoisonError::into_inner)
+            .expect("test Product platform lock poisoned")
             .resume_attempt_ids
             .clone()
     }
@@ -1047,14 +1050,14 @@ impl RecordingPlatform {
     fn install_calls(&self) -> usize {
         self.state
             .lock()
-            .unwrap_or_else(PoisonError::into_inner)
+            .expect("test Product platform lock poisoned")
             .install_calls
     }
 
     fn fail_next_resume_after_persist(&self) {
         self.state
             .lock()
-            .unwrap_or_else(PoisonError::into_inner)
+            .expect("test Product platform lock poisoned")
             .resume_fail_after_persist_remaining = 1;
     }
 }
@@ -1068,7 +1071,7 @@ impl UpdatePlatformAdapter for RecordingPlatform {
     ) -> Result<(), ProductCommitError> {
         self.state
             .lock()
-            .unwrap_or_else(PoisonError::into_inner)
+            .expect("test Product platform lock poisoned")
             .install_calls += 1;
         Ok(())
     }
@@ -1077,7 +1080,7 @@ impl UpdatePlatformAdapter for RecordingPlatform {
         Ok(self
             .state
             .lock()
-            .unwrap_or_else(PoisonError::into_inner)
+            .expect("test Product platform lock poisoned")
             .installed
             .clone())
     }
@@ -1093,7 +1096,7 @@ impl UpdatePlatformAdapter for RecordingPlatform {
     ) -> Result<(), ProductCommitError> {
         self.state
             .lock()
-            .unwrap_or_else(PoisonError::into_inner)
+            .expect("test Product platform lock poisoned")
             .launched_versions
             .push(product_version.to_owned());
         Ok(())
@@ -1105,7 +1108,10 @@ impl UpdatePlatformAdapter for RecordingPlatform {
         intent: &ResumeIntent,
     ) -> Result<(), ProductCommitError> {
         let (directory, should_fail) = {
-            let mut state = self.state.lock().unwrap_or_else(PoisonError::into_inner);
+            let mut state = self
+                .state
+                .lock()
+                .expect("test Product platform lock poisoned");
             state.resume_attempt_ids.push(transaction_id.to_owned());
             let should_fail = state.resume_failures_remaining > 0;
             state.resume_failures_remaining = state.resume_failures_remaining.saturating_sub(1);
@@ -1140,7 +1146,10 @@ impl UpdatePlatformAdapter for RecordingPlatform {
                 return Err(ProductCommitError::Platform(error.to_string()));
             }
         }
-        let mut state = self.state.lock().unwrap_or_else(PoisonError::into_inner);
+        let mut state = self
+            .state
+            .lock()
+            .expect("test Product platform lock poisoned");
         if state.resume_fail_after_persist_remaining > 0 {
             state.resume_fail_after_persist_remaining -= 1;
             return Err(ProductCommitError::Platform(
@@ -1180,7 +1189,7 @@ impl ReplacingPathPlatform {
     fn installer_bytes(&self) -> Vec<u8> {
         self.state
             .lock()
-            .unwrap_or_else(PoisonError::into_inner)
+            .expect("test Product platform lock poisoned")
             .installer_bytes
             .clone()
     }
@@ -1188,7 +1197,7 @@ impl ReplacingPathPlatform {
     fn runtime_bytes(&self) -> Vec<u8> {
         self.state
             .lock()
-            .unwrap_or_else(PoisonError::into_inner)
+            .expect("test Product platform lock poisoned")
             .runtime_bytes
             .clone()
     }
@@ -1211,7 +1220,10 @@ impl UpdatePlatformAdapter for ReplacingPathPlatform {
         let restored = installer.path().with_extension("restored");
         fs::write(&restored, DESKTOP_ASSET_BYTES).unwrap();
         fs::rename(&restored, installer.path()).unwrap();
-        let mut state = self.state.lock().unwrap_or_else(PoisonError::into_inner);
+        let mut state = self
+            .state
+            .lock()
+            .expect("test Product platform lock poisoned");
         state.installer_bytes = bytes;
         state.installed = state.target_installed.clone();
         Ok(())
@@ -1221,7 +1233,7 @@ impl UpdatePlatformAdapter for ReplacingPathPlatform {
         Ok(self
             .state
             .lock()
-            .unwrap_or_else(PoisonError::into_inner)
+            .expect("test Product platform lock poisoned")
             .installed
             .clone())
     }
@@ -1244,7 +1256,7 @@ impl UpdatePlatformAdapter for ReplacingPathPlatform {
         file.read_to_end(&mut bytes).unwrap();
         self.state
             .lock()
-            .unwrap_or_else(PoisonError::into_inner)
+            .expect("test Product platform lock poisoned")
             .runtime_bytes = bytes;
         Ok(())
     }

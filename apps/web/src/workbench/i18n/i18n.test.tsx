@@ -12,6 +12,10 @@ describe('Workbench i18n', () => {
 
   it('interpolates parameters', () => {
     expect(createI18n('zh-CN').t('shell.notifications.projectOpened', { name: 'Demo' })).toBe('已打开项目：Demo');
+    expect(createI18n('en').t('shell.notifications.projectViewStateReset', { name: 'Demo' }))
+      .toBe('Saved view state for Demo was invalid and has been reset.');
+    expect(createI18n('zh-CN').t('shell.notifications.projectViewStateReset', { name: 'Demo' }))
+      .toBe('Demo 的已保存视图状态无效，已重置。');
   });
 
   it('provides field-specific General preference save failures in both locales', () => {
@@ -27,7 +31,7 @@ describe('Workbench i18n', () => {
 
   it('throws for missing translations instead of falling back to English', () => {
     const incompleteZh = { ...zhCN };
-    delete (incompleteZh as Partial<WorkbenchDictionary>)['common.save'];
+    delete (incompleteZh as Partial<WorkbenchDictionary>)['common.close'];
     const i18n = createI18n('zh-CN', {
       dictionaries: {
         ...dictionaries,
@@ -35,7 +39,7 @@ describe('Workbench i18n', () => {
       }
     });
 
-    expect(() => i18n.t('common.save')).toThrow('[debrute:i18n] Missing translation for common.save in zh-CN.');
+    expect(() => i18n.t('common.close')).toThrow('[debrute:i18n] Missing translation for common.close in zh-CN.');
   });
 
   it('throws for missing interpolation parameters', () => {
@@ -47,13 +51,13 @@ describe('Workbench i18n', () => {
   it('provides i18n through React context', () => {
     function Probe(): React.ReactElement {
       const i18n = useI18n();
-      return <span>{i18n.t('common.delete')}</span>;
+      return <span>{i18n.t('common.close')}</span>;
     }
 
     expect(renderToStaticMarkup(
       <I18nProvider locale="zh-CN">
         <Probe />
       </I18nProvider>
-    )).toContain('删除');
+    )).toContain('关闭');
   });
 });

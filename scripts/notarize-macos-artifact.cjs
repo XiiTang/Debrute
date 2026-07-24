@@ -1,17 +1,21 @@
 #!/usr/bin/env node
 const { execFileSync } = require('node:child_process');
 
-async function notarizeAndStaple({
+const NOTARIZATION_TIMEOUT = '2h';
+
+function notarizeAndStaple({
   submitPath,
   staplePath = submitPath,
-  label = submitPath,
-  pollSeconds = 30
+  label = submitPath
 }) {
   const credentials = notarizationCredentials();
   const submission = JSON.parse(runNotarytool([
     'submit',
     submitPath,
     ...credentials,
+    '--wait',
+    '--timeout',
+    NOTARIZATION_TIMEOUT,
     '--output-format',
     'json'
   ]));
@@ -19,35 +23,16 @@ async function notarizeAndStaple({
   if (!submissionId) {
     throw new Error(`Notary submission for ${label} did not return an id.`);
   }
-
-  while (true) {
-    const info = await submissionInfo(submissionId, credentials, label);
-    if (info?.status === 'Accepted') {
-      run('xcrun', ['stapler', 'staple', staplePath]);
-      run('xcrun', ['stapler', 'validate', staplePath]);
-      return submissionId;
-    }
-    if (info?.status === 'Invalid' || info?.status === 'Rejected') {
-      printNotaryLog(submissionId, credentials);
-      throw new Error(`Notary submission ${submissionId} for ${label} finished with ${info.status}.`);
-    }
-    await sleep(pollSeconds * 1000);
+  if (submission.status !== 'Accepted') {
+    printNotaryLog(submissionId, credentials);
+    throw new Error(
+      `Notary submission ${submissionId} for ${label} finished with ${submission.status ?? 'an unknown status'}.`
+    );
   }
-}
 
-async function submissionInfo(submissionId, credentials, label) {
-  try {
-    return JSON.parse(runNotarytool([
-      'info',
-      submissionId,
-      ...credentials,
-      '--output-format',
-      'json'
-    ]));
-  } catch (error) {
-    console.warn(`Notary status check for ${label} failed; retrying: ${error.message}`);
-    return undefined;
-  }
+  run('xcrun', ['stapler', 'staple', staplePath]);
+  run('xcrun', ['stapler', 'validate', staplePath]);
+  return submissionId;
 }
 
 function printNotaryLog(submissionId, credentials) {
@@ -91,16 +76,13 @@ function run(command, args, options = {}) {
   }
 }
 
-function sleep(ms) {
-  return new Promise((resolve) => setTimeout(resolve, ms));
-}
-
 function parseArgs(argv) {
   const values = new Map();
+  const allowed = new Set(['--path', '--staple-path', '--label']);
   for (let index = 0; index < argv.length; index += 2) {
     const key = argv[index];
     const value = argv[index + 1];
-    if (!key?.startsWith('--') || value === undefined) {
+    if (!allowed.has(key) || value === undefined) {
       throw new Error(`Invalid argument list: ${argv.join(' ')}`);
     }
     values.set(key, value);
@@ -115,15 +97,16 @@ if (require.main === module) {
     console.error('--path is required');
     process.exit(1);
   }
-  notarizeAndStaple({
-    submitPath,
-    staplePath: args.get('--staple-path') ?? submitPath,
-    label: args.get('--label') ?? submitPath,
-    pollSeconds: Number(args.get('--poll-seconds') ?? '30')
-  }).catch((error) => {
+  try {
+    notarizeAndStaple({
+      submitPath,
+      staplePath: args.get('--staple-path') ?? submitPath,
+      label: args.get('--label') ?? submitPath
+    });
+  } catch (error) {
     console.error(error instanceof Error ? error.message : String(error));
     process.exit(1);
-  });
+  }
 }
 
 module.exports = {

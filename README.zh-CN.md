@@ -1,6 +1,10 @@
-# Debrute
+<p align="center">
+  <img src="./assets/project-icon/debrute.svg" width="128" alt="Debrute 标志">
+</p>
 
-[English](./README.md)
+<h1 align="center">Debrute</h1>
+
+<p align="center"><a href="./README.md">English</a></p>
 
 Debrute 是一个本地创意生产工作台，面向 AI agent 生成的图片、视频、音频、文档和设计参考文件。
 

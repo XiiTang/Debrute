@@ -1,8 +1,7 @@
 #![allow(clippy::too_many_lines)]
 
-use serde_json::Value;
-
 use super::service::CliFailure;
+use crate::global::ModelRequestExample;
 
 pub(super) struct ModelDocumentation {
     pub(super) source_urls: &'static [&'static str],
@@ -21,7 +20,7 @@ struct DocSource {
 pub(super) fn describe_model(
     model_id: &str,
     command: &str,
-    request_example: &Value,
+    request_example: &ModelRequestExample,
 ) -> Result<ModelDocumentation, CliFailure> {
     let source = source_for(model_id).ok_or_else(|| {
         CliFailure::new(
@@ -37,18 +36,14 @@ pub(super) fn describe_model(
         .map(|url| format!("- {url}"))
         .collect::<Vec<_>>()
         .join("\n");
-    let input = request_example
-        .get("input")
-        .cloned()
-        .unwrap_or_else(|| request_example.clone());
-    let example = serde_json::to_string(&input)
+    let example = serde_json::to_string(&request_example.input)
         .map_err(|error| CliFailure::new("runtime_config_error", error.to_string()))?;
-    let command = match command {
-        "models.image.describe" => "generate image",
-        "models.video.describe" => "generate video",
-        "models.tts.describe" => "generate tts",
-        "models.music.describe" => "generate music",
-        "models.sfx.describe" => "generate sfx",
+    let model_kind = match command {
+        "models.image.describe" => "image",
+        "models.video.describe" => "video",
+        "models.tts.describe" => "tts",
+        "models.music.describe" => "music",
+        "models.sfx.describe" => "sound-effect",
         other => {
             return Err(CliFailure::new(
                 "internal_error",
@@ -56,19 +51,19 @@ pub(super) fn describe_model(
             ));
         }
     };
-    let timeout_note = if command == "generate image" {
-        "Single image generation timeout covers the complete request and artifact write."
-    } else if command == "generate video" {
-        "Video generation timeout covers task submission, polling, response reads, download, and artifact write."
+    let timeout_note = if model_kind == "image" {
+        "The default active image Model Run timeout is 10 minutes."
+    } else if model_kind == "video" {
+        "The default active video Model Run timeout is 30 minutes."
     } else {
-        "Audio generation timeout covers task submission, polling when applicable, response reads, download, and artifact write."
+        "The default active audio Model Run timeout is 10 minutes."
     };
     Ok(ModelDocumentation {
         source_urls: source.urls,
         snapshot_path: source.path,
         captured_at: source.captured_at,
         description_markdown: format!(
-            "# {model_id}\n\nOfficial documentation:\n{urls}\n\nRepository snapshot:\n- {}\n\n{body}\n\n## Debrute command\n\n{timeout_note} Use `--timeout-ms <ms>` to override it for this command.\n\n```sh\ndebrute {command} <project> --input-json '{example}' --timeout-ms 600000\n```",
+            "# {model_id}\n\nOfficial documentation:\n{urls}\n\nRepository snapshot:\n- {}\n\n{body}\n\n## Debrute command\n\n{timeout_note} Save the following one-line JSON object as UTF-8 JSONL, then submit it with `debrute request single <project> --input request.jsonl`; use `--timeout <Ns|Nm|Nh>` when an override is needed.\n\n```json\n{example}\n```",
             source.path,
         ),
     })
@@ -85,7 +80,7 @@ fn strip_frontmatter(markdown: &str) -> &str {
 
 fn source_for(model_id: &str) -> Option<DocSource> {
     match model_id {
-        "doubao-seedream-5-0-lite-260128" => Some(image_doc(
+        "doubao-seedream-5-0-lite-260128" => Some(model_doc(
             "model-docs/snapshots/image/volcengine-ark/seedream-5-lite.md",
             &[
                 "https://www.volcengine.com/docs/82379/1541523",
@@ -95,41 +90,56 @@ fn source_for(model_id: &str) -> Option<DocSource> {
                 "../../../../assets/model-docs/snapshots/image/volcengine-ark/seedream-5-lite.md"
             ),
         )),
-        "fal-ai/flux/dev" => Some(image_doc(
+        "fal-ai/flux/dev" => Some(model_doc(
             "model-docs/snapshots/image/fal/flux-dev.md",
             &["https://fal.ai/models/fal-ai/flux/dev/api"],
             include_str!("../../../../assets/model-docs/snapshots/image/fal/flux-dev.md"),
         )),
-        "fal-ai/flux/dev/image-to-image" => Some(image_doc(
+        "fal-ai/flux/dev/image-to-image" => Some(model_doc(
             "model-docs/snapshots/image/fal/flux-dev-image-to-image.md",
             &["https://fal.ai/models/fal-ai/flux/dev/image-to-image/api"],
             include_str!(
                 "../../../../assets/model-docs/snapshots/image/fal/flux-dev-image-to-image.md"
             ),
         )),
-        "gemini-3-pro-image-preview"
-        | "gemini-3.1-flash-image"
-        | "gemini-3.1-flash-image-preview" => Some(image_doc(
-            "model-docs/snapshots/image/google-gemini/image-generation.md",
+        "gemini-3.1-flash-image" => Some(model_doc(
+            "model-docs/snapshots/image/google-gemini/gemini-3.1-flash-image.md",
             &[
                 "https://ai.google.dev/gemini-api/docs/image-generation",
                 "https://deepmind.google/models/model-cards/gemini-3-1-flash-image/",
+                "https://ai.google.dev/api/interactions-api",
             ],
             include_str!(
-                "../../../../assets/model-docs/snapshots/image/google-gemini/image-generation.md"
+                "../../../../assets/model-docs/snapshots/image/google-gemini/gemini-3.1-flash-image.md"
             ),
         )),
-        "gpt-image-1" | "gpt-image-2" => Some(image_doc(
-            "model-docs/snapshots/image/openai/image-generation.md",
+        "gemini-3-pro-image" => Some(model_doc(
+            "model-docs/snapshots/image/google-gemini/gemini-3-pro-image.md",
+            &[
+                "https://ai.google.dev/gemini-api/docs/image-generation",
+                "https://ai.google.dev/api/interactions-api",
+            ],
+            include_str!(
+                "../../../../assets/model-docs/snapshots/image/google-gemini/gemini-3-pro-image.md"
+            ),
+        )),
+        "gpt-image-1" => Some(model_doc(
+            "model-docs/snapshots/image/openai/gpt-image-1.md",
+            &[
+                "https://developers.openai.com/api/docs/guides/image-generation",
+                "https://developers.openai.com/api/docs/models/gpt-image-1",
+            ],
+            include_str!("../../../../assets/model-docs/snapshots/image/openai/gpt-image-1.md"),
+        )),
+        "gpt-image-2" => Some(model_doc(
+            "model-docs/snapshots/image/openai/gpt-image-2.md",
             &[
                 "https://developers.openai.com/api/docs/guides/image-generation",
                 "https://developers.openai.com/api/docs/models/gpt-image-2",
             ],
-            include_str!(
-                "../../../../assets/model-docs/snapshots/image/openai/image-generation.md"
-            ),
+            include_str!("../../../../assets/model-docs/snapshots/image/openai/gpt-image-2.md"),
         )),
-        "grok-imagine" => Some(image_doc(
+        "grok-imagine" => Some(model_doc(
             "model-docs/snapshots/image/vydra/grok-imagine.md",
             &[
                 "https://www.vydra.ai/docs/models/grok-imagine",
@@ -137,7 +147,7 @@ fn source_for(model_id: &str) -> Option<DocSource> {
             ],
             include_str!("../../../../assets/model-docs/snapshots/image/vydra/grok-imagine.md"),
         )),
-        "image-01" => Some(image_doc(
+        "image-01" => Some(model_doc(
             "model-docs/snapshots/image/minimax/image-01.md",
             &[
                 "https://platform.minimax.io/docs/api-reference/image-generation-t2i",
@@ -146,14 +156,14 @@ fn source_for(model_id: &str) -> Option<DocSource> {
             ],
             include_str!("../../../../assets/model-docs/snapshots/image/minimax/image-01.md"),
         )),
-        "wan2.7-image" => Some(image_doc(
+        "wan2.7-image" => Some(model_doc(
             "model-docs/snapshots/image/dashscope/wan2.7-image.md",
             &[
                 "https://help.aliyun.com/zh/model-studio/wan-image-generation-and-editing-api-reference",
             ],
             include_str!("../../../../assets/model-docs/snapshots/image/dashscope/wan2.7-image.md"),
         )),
-        "doubao-seedance-2-0-260128" | "doubao-seedance-2-0-fast-260128" => Some(video_doc(
+        "doubao-seedance-2-0-260128" => Some(model_doc(
             "model-docs/snapshots/video/volcengine-ark/seedance-2.md",
             &[
                 "https://www.volcengine.com/docs/82379/2291680",
@@ -165,90 +175,158 @@ fn source_for(model_id: &str) -> Option<DocSource> {
                 "../../../../assets/model-docs/snapshots/video/volcengine-ark/seedance-2.md"
             ),
         )),
-        "openai-gpt-4o-mini-tts" | "openai-tts-1" | "openai-tts-1-hd" => Some(audio_doc(
-            "model-docs/snapshots/audio/openai/tts.md",
+        "doubao-seedance-2-0-fast-260128" => Some(model_doc(
+            "model-docs/snapshots/video/volcengine-ark/seedance-2-fast.md",
+            &[
+                "https://www.volcengine.com/docs/82379/2291680",
+                "https://www.volcengine.com/docs/82379/1520757",
+                "https://www.volcengine.com/docs/82379/1521309",
+                "https://www.volcengine.com/docs/82379/1159178",
+            ],
+            include_str!(
+                "../../../../assets/model-docs/snapshots/video/volcengine-ark/seedance-2-fast.md"
+            ),
+        )),
+        "openai-gpt-4o-mini-tts" => Some(model_doc(
+            "model-docs/snapshots/audio/openai/gpt-4o-mini-tts.md",
             &[
                 "https://developers.openai.com/api/docs/guides/text-to-speech",
                 "https://developers.openai.com/api/docs/models/gpt-4o-mini-tts",
             ],
-            include_str!("../../../../assets/model-docs/snapshots/audio/openai/tts.md"),
+            include_str!("../../../../assets/model-docs/snapshots/audio/openai/gpt-4o-mini-tts.md"),
         )),
-        "elevenlabs-v3-tts" | "elevenlabs-multilingual-v2" => Some(audio_doc(
-            "model-docs/snapshots/audio/elevenlabs/tts.md",
-            &["https://elevenlabs.io/docs/api-reference/text-to-speech/convert"],
-            include_str!("../../../../assets/model-docs/snapshots/audio/elevenlabs/tts.md"),
+        "openai-tts-1" => Some(model_doc(
+            "model-docs/snapshots/audio/openai/tts-1.md",
+            &["https://developers.openai.com/api/docs/guides/text-to-speech"],
+            include_str!("../../../../assets/model-docs/snapshots/audio/openai/tts-1.md"),
         )),
-        "elevenlabs-music" => Some(audio_doc(
-            "model-docs/snapshots/audio/elevenlabs/music.md",
-            &["https://elevenlabs.io/docs/api-reference/music/compose"],
-            include_str!("../../../../assets/model-docs/snapshots/audio/elevenlabs/music.md"),
+        "openai-tts-1-hd" => Some(model_doc(
+            "model-docs/snapshots/audio/openai/tts-1-hd.md",
+            &["https://developers.openai.com/api/docs/guides/text-to-speech"],
+            include_str!("../../../../assets/model-docs/snapshots/audio/openai/tts-1-hd.md"),
         )),
-        "elevenlabs-sound-effects" => Some(audio_doc(
-            "model-docs/snapshots/audio/elevenlabs/sound-effects.md",
-            &["https://elevenlabs.io/docs/api-reference/text-to-sound-effects/convert"],
+        "elevenlabs-v3-tts" => Some(model_doc(
+            "model-docs/snapshots/audio/elevenlabs/eleven-v3.md",
+            &[
+                "https://elevenlabs.io/docs/overview/models",
+                "https://elevenlabs.io/docs/api-reference/text-to-speech/convert",
+                "https://elevenlabs.io/docs/overview/capabilities/text-to-speech/best-practices",
+            ],
+            include_str!("../../../../assets/model-docs/snapshots/audio/elevenlabs/eleven-v3.md"),
+        )),
+        "elevenlabs-multilingual-v2" => Some(model_doc(
+            "model-docs/snapshots/audio/elevenlabs/multilingual-v2.md",
+            &[
+                "https://elevenlabs.io/docs/overview/models",
+                "https://elevenlabs.io/docs/api-reference/text-to-speech/convert",
+            ],
             include_str!(
-                "../../../../assets/model-docs/snapshots/audio/elevenlabs/sound-effects.md"
+                "../../../../assets/model-docs/snapshots/audio/elevenlabs/multilingual-v2.md"
             ),
         )),
-        "gemini-tts" => Some(audio_doc(
-            "model-docs/snapshots/audio/google-gemini/tts.md",
+        "elevenlabs-music" => Some(model_doc(
+            "model-docs/snapshots/audio/elevenlabs/music-v2.md",
             &[
+                "https://elevenlabs.io/docs/api-reference/music/compose",
+                "https://elevenlabs.io/docs/eleven-api/guides/how-to/music/composition-plans",
+            ],
+            include_str!("../../../../assets/model-docs/snapshots/audio/elevenlabs/music-v2.md"),
+        )),
+        "elevenlabs-sound-effects" => Some(model_doc(
+            "model-docs/snapshots/audio/elevenlabs/sound-effects-v2.md",
+            &["https://elevenlabs.io/docs/api-reference/text-to-sound-effects/convert"],
+            include_str!(
+                "../../../../assets/model-docs/snapshots/audio/elevenlabs/sound-effects-v2.md"
+            ),
+        )),
+        "gemini-3-1-flash-tts-preview" => Some(model_doc(
+            "model-docs/snapshots/audio/google-gemini/gemini-3.1-flash-tts-preview.md",
+            &[
+                "https://ai.google.dev/gemini-api/docs/models/gemini-3.1-flash-tts-preview",
                 "https://ai.google.dev/gemini-api/docs/speech-generation",
                 "https://ai.google.dev/api/interactions-api",
             ],
-            include_str!("../../../../assets/model-docs/snapshots/audio/google-gemini/tts.md"),
+            include_str!(
+                "../../../../assets/model-docs/snapshots/audio/google-gemini/gemini-3.1-flash-tts-preview.md"
+            ),
         )),
-        "google-lyria-3-clip-preview" | "google-lyria-3-pro-preview" => Some(audio_doc(
-            "model-docs/snapshots/audio/google-gemini/lyria.md",
+        "google-lyria-3-clip-preview" => Some(model_doc(
+            "model-docs/snapshots/audio/google-gemini/lyria-3-clip-preview.md",
             &[
                 "https://ai.google.dev/gemini-api/docs/music-generation",
                 "https://ai.google.dev/api/interactions-api",
             ],
-            include_str!("../../../../assets/model-docs/snapshots/audio/google-gemini/lyria.md"),
-        )),
-        "minimax-speech-2-8-hd" => Some(audio_doc(
-            "model-docs/snapshots/audio/minimax/t2a-http.md",
-            &["https://platform.minimax.io/docs/api-reference/speech-t2a-http"],
-            include_str!("../../../../assets/model-docs/snapshots/audio/minimax/t2a-http.md"),
-        )),
-        "minimax-music-2-6" => Some(audio_doc(
-            "model-docs/snapshots/audio/minimax/music-generation.md",
-            &["https://platform.minimax.io/docs/api-reference/music-generation"],
             include_str!(
-                "../../../../assets/model-docs/snapshots/audio/minimax/music-generation.md"
+                "../../../../assets/model-docs/snapshots/audio/google-gemini/lyria-3-clip-preview.md"
             ),
         )),
-        "dashscope-qwen3-tts-flash" => Some(audio_doc(
-            "model-docs/snapshots/audio/dashscope/qwen-tts.md",
+        "google-lyria-3-pro-preview" => Some(model_doc(
+            "model-docs/snapshots/audio/google-gemini/lyria-3-pro-preview.md",
+            &[
+                "https://ai.google.dev/gemini-api/docs/music-generation",
+                "https://ai.google.dev/api/interactions-api",
+            ],
+            include_str!(
+                "../../../../assets/model-docs/snapshots/audio/google-gemini/lyria-3-pro-preview.md"
+            ),
+        )),
+        "minimax-speech-2-8-hd" => Some(model_doc(
+            "model-docs/snapshots/audio/minimax/speech-2.8-hd.md",
+            &[
+                "https://platform.minimax.io/docs/api-reference/speech-t2a-http",
+                "https://platform.minimax.io/docs/guides/models-intro",
+            ],
+            include_str!("../../../../assets/model-docs/snapshots/audio/minimax/speech-2.8-hd.md"),
+        )),
+        "minimax-music-3-0" => Some(model_doc(
+            "model-docs/snapshots/audio/minimax/music-3.0.md",
+            &["https://platform.minimax.io/docs/api-reference/music-generation"],
+            include_str!("../../../../assets/model-docs/snapshots/audio/minimax/music-3.0.md"),
+        )),
+        "dashscope-qwen3-tts-flash" => Some(model_doc(
+            "model-docs/snapshots/audio/dashscope/qwen3-tts-flash.md",
             &[
                 "https://www.alibabacloud.com/help/en/model-studio/qwen-tts-api",
                 "https://www.alibabacloud.com/help/en/model-studio/non-realtime-tts-user-guide",
             ],
-            include_str!("../../../../assets/model-docs/snapshots/audio/dashscope/qwen-tts.md"),
+            include_str!(
+                "../../../../assets/model-docs/snapshots/audio/dashscope/qwen3-tts-flash.md"
+            ),
         )),
-        "doubao-seed-tts-2-0" => Some(audio_doc(
-            "model-docs/snapshots/audio/volcengine/seed-tts.md",
+        "doubao-seed-tts-2-0" => Some(model_doc(
+            "model-docs/snapshots/audio/volcengine/seed-tts-2.0.md",
             &[
                 "https://www.volcengine.com/docs/82379/2516286",
-                "https://www.volcengine.com/docs/6561/1329505",
+                "https://www.volcengine.com/docs/6561/1598757",
+                "https://www.volcengine.com/docs/6561/1257544",
             ],
-            include_str!("../../../../assets/model-docs/snapshots/audio/volcengine/seed-tts.md"),
+            include_str!(
+                "../../../../assets/model-docs/snapshots/audio/volcengine/seed-tts-2.0.md"
+            ),
         )),
-        "fal-stable-audio-text-to-audio" | "fal-stable-audio-sfx" => Some(audio_doc(
-            "model-docs/snapshots/audio/fal/stable-audio.md",
+        "fal-stable-audio-text-to-audio" => Some(model_doc(
+            "model-docs/snapshots/audio/fal/stable-audio-2.5.md",
             &[
-                "https://fal.ai/models/fal-ai/stable-audio-25/text-to-audio",
                 "https://fal.ai/models/fal-ai/stable-audio-25/text-to-audio/api",
-                "https://fal.ai/models/fal-ai/stable-audio-3/medium/base/text-to-audio/api",
                 "https://fal.ai/docs/documentation/model-apis/inference/queue",
             ],
-            include_str!("../../../../assets/model-docs/snapshots/audio/fal/stable-audio.md"),
+            include_str!("../../../../assets/model-docs/snapshots/audio/fal/stable-audio-2.5.md"),
+        )),
+        "fal-stable-audio-3-small-sfx" => Some(model_doc(
+            "model-docs/snapshots/audio/fal/stable-audio-3-small-sfx.md",
+            &[
+                "https://fal.ai/models/fal-ai/stable-audio-3/small/sfx/text-to-audio/api",
+                "https://fal.ai/docs/documentation/model-apis/inference/queue",
+            ],
+            include_str!(
+                "../../../../assets/model-docs/snapshots/audio/fal/stable-audio-3-small-sfx.md"
+            ),
         )),
         _ => None,
     }
 }
 
-fn image_doc(
+fn model_doc(
     path: &'static str,
     urls: &'static [&'static str],
     snapshot: &'static str,
@@ -256,33 +334,48 @@ fn image_doc(
     DocSource {
         urls,
         path,
-        captured_at: "2026-05-31",
+        captured_at: "2026-07-21",
         snapshot,
     }
 }
 
-fn video_doc(
-    path: &'static str,
-    urls: &'static [&'static str],
-    snapshot: &'static str,
-) -> DocSource {
-    DocSource {
-        urls,
-        path,
-        captured_at: "2026-06-09",
-        snapshot,
-    }
-}
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::global::ModelCatalog;
 
-fn audio_doc(
-    path: &'static str,
-    urls: &'static [&'static str],
-    snapshot: &'static str,
-) -> DocSource {
-    DocSource {
-        urls,
-        path,
-        captured_at: "2026-07-06",
-        snapshot,
+    #[test]
+    fn every_catalog_model_has_one_model_specific_manual() {
+        let catalog = ModelCatalog::bundled().unwrap();
+        let mut paths = std::collections::HashSet::new();
+        for model_id in catalog
+            .images()
+            .iter()
+            .map(|entry| entry.debrute_model_id.as_str())
+            .chain(
+                catalog
+                    .videos()
+                    .iter()
+                    .map(|entry| entry.debrute_model_id.as_str()),
+            )
+            .chain(
+                catalog
+                    .audio()
+                    .iter()
+                    .map(|entry| entry.debrute_model_id.as_str()),
+            )
+        {
+            let source = source_for(model_id)
+                .unwrap_or_else(|| panic!("Catalog model {model_id} has no manual"));
+            assert!(
+                source.snapshot.contains(model_id),
+                "Catalog model {model_id} manual does not identify that model"
+            );
+            assert!(
+                paths.insert(source.path),
+                "Catalog model {model_id} shares manual {} with another model",
+                source.path
+            );
+        }
     }
 }

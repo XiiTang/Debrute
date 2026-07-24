@@ -1,12 +1,10 @@
 {
   "files": [],
   "references": [
-    { "path": "packages/capability-core" },
-    { "path": "packages/project-core" },
     { "path": "packages/canvas-core" },
     { "path": "packages/app-protocol" },
-    { "path": "packages/canvas-map-core" },
     { "path": "packages/runtime-control-client" },
+    { "path": "apps/desktop" },
     { "path": "apps/web" },
     { "path": "packages/photoshop-bridge-plugin-core" },
     { "path": "apps/photoshop-uxp-plugin" },

@@ -113,8 +113,6 @@ export const CANVAS_MINIMAP_PANEL_SIZE = {
   height: 150
 } as const;
 
-export type CanvasMinimapPanelPlacement = FloatingBarRect;
-
 const FLOATING_BAR_GAP_PX = 3;
 const VIEWPORT_PADDING_PX = 8;
 
@@ -287,7 +285,7 @@ export function canvasCardBarRect(viewportRect: FloatingBarRect): FloatingBarRec
 export function placeCanvasMinimapPanel(input: {
   buttonRect: FloatingBarRect;
   viewportRect: FloatingBarRect;
-}): CanvasMinimapPanelPlacement {
+}): FloatingBarRect {
   return {
     x: Math.round(clamp(
       input.buttonRect.x,

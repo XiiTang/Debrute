@@ -16,15 +16,13 @@ describe('Debrute repository Skill', () => {
     expect(skill).toContain('debrute workbench start /absolute/path/to/project --frontend browser');
     expect(skill).toContain('debrute workbench start /absolute/path/to/project --frontend desktop');
     expect(skill).toContain('Interactive users can also open projects from the Workbench `Open Project` picker.');
-    expect(skill).not.toContain('Read `launch_url` from stdout.');
-    expect(skill).not.toContain('project_url=<web_url>/open?path=<encodeURIComponent(absProjectPath)>');
     expect(skill).toContain('`--frontend browser` opens the Project in the system browser.');
     expect(skill).toContain('Qoder: use /browser to inspect the opened Debrute Workbench tab');
     expect(skill).toContain('Antigravity: use /browser to inspect the opened Debrute Workbench tab');
     expect(skill).toContain('Cline: use the browser to inspect the opened Debrute Workbench tab');
     expect(skill).toContain('Codex app:');
     expect(skill).toContain('use Browser for Web or Computer Use for Desktop');
-    expect(skill).toContain('generate image-batch --manifest');
+    expect(skill).toContain('debrute request batch /path/to/project --input');
     expect(skill).toContain('debrute models tts describe openai-gpt-4o-mini-tts');
     expect(skill).toContain('debrute models music describe elevenlabs-music');
     expect(skill).toContain('debrute models sfx describe elevenlabs-sound-effects');

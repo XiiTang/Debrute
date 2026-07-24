@@ -26,6 +26,7 @@ const runtimeBinary = join(
   process.platform === 'win32' ? 'debrute-runtime.exe' : 'debrute-runtime'
 );
 const runtimeApplication = join(developmentDirectory, MACOS_RUNTIME_APP_NAME);
+const runtimeApplicationBinaryIdentityPath = join(developmentDirectory, 'runtime-app-binary-identity');
 const runtimeExecutable = process.platform === 'darwin'
   ? join(runtimeApplication, MACOS_RUNTIME_EXECUTABLE)
   : runtimeBinary;
@@ -34,7 +35,7 @@ const runtimeEntrypoint = process.platform === 'darwin'
   : runtimeBinary;
 const runtimeAssetsDirectory = join(developmentDirectory, 'assets');
 const runtimeLogPath = join(developmentDirectory, 'runtime.log');
-const RUNTIME_STARTUP_TIMEOUT_MS = 10_000;
+const RUNTIME_READY_TIMEOUT_MS = 15_000;
 
 export interface RustRuntimeDevelopmentOptions {
   desktopEntrypoint?: string;
@@ -62,8 +63,16 @@ export async function buildRustRuntime(): Promise<boolean> {
   if (exitCode !== 0) {
     throw new Error(`Debrute Runtime build failed with code ${exitCode ?? 'unknown'}.`);
   }
-  const rebuilt = fileIdentity(runtimeBinary) !== previousCompiledRuntime;
-  if (process.platform === 'darwin' && (rebuilt || fileIdentity(runtimeExecutable) === undefined)) {
+  const compiledRuntimeIdentity = fileIdentity(runtimeBinary);
+  if (compiledRuntimeIdentity === undefined) {
+    throw new Error('Debrute Runtime build did not produce its development binary.');
+  }
+  const rebuilt = compiledRuntimeIdentity !== previousCompiledRuntime;
+  if (process.platform === 'darwin' && macosRuntimeApplicationNeedsAssembly({
+    compiledRuntimeIdentity,
+    installedRuntimeIdentity: optionalFileText(runtimeApplicationBinaryIdentityPath),
+    runtimeExecutableExists: fileIdentity(runtimeExecutable) !== undefined
+  })) {
     await assembleMacosRuntimeApplication({
       destination: runtimeApplication,
       runtimeBinary,
@@ -76,23 +85,33 @@ export async function buildRustRuntime(): Promise<boolean> {
       runtimeEntrypoint,
       [
         '#!/bin/sh',
-        `exec /usr/bin/open -g -n --env ${shellQuote(`DEBRUTE_RUNTIME_STABLE_ENTRYPOINT=${runtimeEntrypoint}`)}`
-          + ` --env ${shellQuote(`DEBRUTE_RUNTIME_WEB_ASSETS_DIR=${runtimeAssetsDirectory}`)}`
-          + ` ${shellQuote(runtimeApplication)} --args "$@"`,
+        `exec /usr/bin/open -g -n --env ${shellQuote(`DEBRUTE_RUNTIME_WEB_ASSETS_DIR=${runtimeAssetsDirectory}`)}`
+          + ` ${shellQuote(runtimeApplication)} --args "$@" --stable-runtime-entrypoint ${shellQuote(runtimeEntrypoint)}`,
         ''
       ].join('\n'),
       'utf8'
     );
     await chmod(runtimeEntrypoint, 0o755);
+    await writeFile(runtimeApplicationBinaryIdentityPath, `${compiledRuntimeIdentity}\n`, 'utf8');
   }
   return rebuilt;
+}
+
+export function macosRuntimeApplicationNeedsAssembly(input: {
+  compiledRuntimeIdentity: string;
+  installedRuntimeIdentity: string | undefined;
+  runtimeExecutableExists: boolean;
+}): boolean {
+  return !input.runtimeExecutableExists
+    || input.installedRuntimeIdentity !== input.compiledRuntimeIdentity;
 }
 
 export async function ensureRustRuntime(
   options: RustRuntimeDevelopmentOptions = {}
 ): Promise<RuntimeControlClient> {
+  const readyDeadlineMs = Date.now() + RUNTIME_READY_TIMEOUT_MS;
   try {
-    const existing = await connectLauncher();
+    const existing = await connectLauncher(readyDeadlineMs);
     const inspection = await existing.inspect();
     const currentExecutableIdentity = runtimeBinaryIdentity();
     if (
@@ -101,7 +120,7 @@ export async function ensureRustRuntime(
       && currentExecutableIdentity !== undefined
       && inspection.executable_identity === currentExecutableIdentity
     ) {
-      await waitForRuntimeReady(existing);
+      await existing.waitUntilReady();
       return existing;
     }
     await stopRustRuntime(existing);
@@ -112,17 +131,16 @@ export async function ensureRustRuntime(
   }
   await prepareRuntimeAssets();
   const child = spawnRuntime(options);
-  const deadline = Date.now() + RUNTIME_STARTUP_TIMEOUT_MS;
   let lastError: unknown;
-  while (Date.now() < deadline) {
+  while (Date.now() < readyDeadlineMs) {
     if (child.exitCode !== null && child.exitCode !== 0) {
       throw new Error(
         `Debrute Runtime exited during startup with code ${child.exitCode}. See ${runtimeLogPath}.`
       );
     }
     try {
-      const control = await connectLauncher();
-      await waitForRuntimeReady(control);
+      const control = await connectLauncher(readyDeadlineMs);
+      await control.waitUntilReady();
       child.unref();
       return control;
     } catch (error) {
@@ -133,38 +151,11 @@ export async function ensureRustRuntime(
       await new Promise((resolveDelay) => setTimeout(resolveDelay, 50));
     }
   }
-  throw new Error('Debrute Runtime did not publish its Control endpoint in time.', {
-    cause: lastError
-  });
-}
-
-async function waitForRuntimeReady(control: RuntimeControlClient): Promise<void> {
-  let timeout: NodeJS.Timeout | undefined;
-  try {
-    await Promise.race([
-      control.waitUntilReady(),
-      new Promise<never>((_, reject) => {
-        timeout = setTimeout(
-          () => reject(new Error(
-            `Debrute Runtime did not become ready in time. See ${runtimeLogPath}.`
-          )),
-          RUNTIME_STARTUP_TIMEOUT_MS
-        );
-      })
-    ]);
-  } catch (error) {
-    control.close();
-    if (error instanceof RuntimeControlError && error.code === 'runtime_lost') {
-      throw new Error(`Debrute Runtime exited before becoming ready. See ${runtimeLogPath}.`, {
-        cause: error
-      });
-    }
-    throw error;
-  } finally {
-    if (timeout) {
-      clearTimeout(timeout);
-    }
-  }
+  throw new RuntimeControlError(
+    'runtime_ready_timeout',
+    `Debrute Runtime did not become Ready before the absolute deadline. See ${runtimeLogPath}.`,
+    { cause: lastError }
+  );
 }
 
 function runtimeBinaryIdentity(): string | undefined {
@@ -175,6 +166,14 @@ function fileIdentity(path: string): string | undefined {
   try {
     const metadata = statSync(path, { bigint: true });
     return `${metadata.size}:${metadata.mtimeNs}`;
+  } catch {
+    return undefined;
+  }
+}
+
+function optionalFileText(path: string): string | undefined {
+  try {
+    return readFileSync(path, 'utf8').trim() || undefined;
   } catch {
     return undefined;
   }
@@ -196,7 +195,7 @@ export async function stopRustRuntime(control: RuntimeControlClient): Promise<vo
       new Promise<never>((_, reject) => {
         timeout = setTimeout(
           () => reject(new Error('Existing Debrute Runtime did not stop for the development rebuild.')),
-          RUNTIME_STARTUP_TIMEOUT_MS
+          RUNTIME_READY_TIMEOUT_MS
         );
       })
     ]);
@@ -236,11 +235,11 @@ export function productVersion(): string {
 
 export { runtimeAssetsDirectory, runtimeEntrypoint, workspaceRoot };
 
-async function connectLauncher(): Promise<RuntimeControlClient> {
+async function connectLauncher(readyDeadlineMs: number): Promise<RuntimeControlClient> {
   return await connectRuntimeControl({
     role: 'launcher',
     productVersion: productVersion(),
-    handshakeTimeoutMs: 5_000
+    readyDeadlineMs
   });
 }
 
@@ -264,7 +263,6 @@ function spawnRuntime(options: RustRuntimeDevelopmentOptions): ChildProcess {
       : {};
     const environment = {
       DEBRUTE_RUNTIME_WEB_ASSETS_DIR: runtimeAssetsDirectory,
-      DEBRUTE_RUNTIME_STABLE_ENTRYPOINT: runtimeEntrypoint,
       ...desktopEnvironment
     };
     const arguments_ = [
@@ -273,7 +271,10 @@ function spawnRuntime(options: RustRuntimeDevelopmentOptions): ChildProcess {
       '--stdout', runtimeLogPath,
       '--stderr', runtimeLogPath,
       ...Object.entries(environment).flatMap(([name, value]) => ['--env', `${name}=${value}`]),
-      runtimeApplication
+      runtimeApplication,
+      '--args',
+      '--stable-runtime-entrypoint',
+      runtimeEntrypoint
     ];
     return spawn('/usr/bin/open', arguments_, {
       cwd: workspaceRoot,
@@ -289,14 +290,13 @@ function spawnRuntime(options: RustRuntimeDevelopmentOptions): ChildProcess {
       }
     : {};
   try {
-    return spawn(runtimeEntrypoint, [], {
+    return spawn(runtimeEntrypoint, ['--stable-runtime-entrypoint', runtimeEntrypoint], {
       cwd: workspaceRoot,
       detached: process.env.DEBRUTE_DEV_STOP_RUNTIME_ON_EXIT !== '1',
       stdio: ['ignore', log, log],
       env: {
         ...process.env,
         DEBRUTE_RUNTIME_WEB_ASSETS_DIR: runtimeAssetsDirectory,
-        DEBRUTE_RUNTIME_STABLE_ENTRYPOINT: runtimeEntrypoint,
         ...desktopEnvironment
       }
     });

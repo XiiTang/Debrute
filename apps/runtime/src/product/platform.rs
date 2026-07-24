@@ -7,6 +7,8 @@ use std::{
 };
 
 #[cfg(target_os = "macos")]
+use std::ffi::{OsStr, OsString};
+#[cfg(target_os = "macos")]
 use std::fs;
 #[cfg(target_os = "macos")]
 use uuid::Uuid;
@@ -33,6 +35,7 @@ pub struct NativeUpdatePlatform {
     store: Arc<ProductStore>,
     running: RunningProductIdentity,
     desktop: DesktopHostRegistration,
+    stable_runtime_entrypoint: PathBuf,
     resume: ResumeHandler,
 }
 
@@ -47,6 +50,7 @@ impl NativeUpdatePlatform {
         store: Arc<ProductStore>,
         running_version: &str,
         desktop: DesktopHostRegistration,
+        stable_runtime_entrypoint: PathBuf,
         resume: ResumeHandler,
     ) -> Result<Self, ProductCommitError> {
         let identity = store.product_identity(running_version)?;
@@ -54,6 +58,7 @@ impl NativeUpdatePlatform {
             store,
             running: RunningProductIdentity::Runtime(identity),
             desktop,
+            stable_runtime_entrypoint,
             resume,
         })
     }
@@ -67,6 +72,7 @@ impl NativeUpdatePlatform {
         store: Arc<ProductStore>,
         seed: &Path,
         desktop: DesktopHostRegistration,
+        stable_runtime_entrypoint: PathBuf,
         resume: ResumeHandler,
     ) -> Result<Self, ProductCommitError> {
         let identity = store.inspect_seed_identity(seed)?;
@@ -74,6 +80,7 @@ impl NativeUpdatePlatform {
             store,
             running: RunningProductIdentity::DesktopSeed(identity),
             desktop,
+            stable_runtime_entrypoint,
             resume,
         })
     }
@@ -85,6 +92,24 @@ impl NativeUpdatePlatform {
                 self.desktop.executable.display()
             ))
         })
+    }
+
+    /// Launches the exact manifest-verified selected Runtime for pending update
+    /// recovery through the same target launch contract as a running Runtime.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`ProductCommitError`] when the selected Product or native launch
+    /// contract is invalid.
+    pub fn launch_selected_runtime(&self, product_version: &str) -> Result<(), ProductCommitError> {
+        let _transaction = self.store.lock_transaction()?;
+        let entrypoint = self.store.open_verified_runtime_unlocked(product_version)?;
+        launch_target_runtime_update(
+            &self.store,
+            product_version,
+            entrypoint,
+            &self.stable_runtime_entrypoint,
+        )
     }
 }
 
@@ -115,22 +140,12 @@ impl UpdatePlatformAdapter for NativeUpdatePlatform {
         product_version: &str,
         entrypoint: VerifiedRuntimeEntrypoint,
     ) -> Result<(), ProductCommitError> {
-        let directory = self.store.version_path(product_version);
-        let mut command = Command::new(entrypoint.path());
-        command
-            .arg("complete-product-update")
-            .arg("--product-version")
-            .arg(product_version)
-            .env(ACTIVE_PRODUCT_DIRECTORY_ENV, &directory)
-            .env(WEB_ASSETS_DIRECTORY_ENV, directory.join("web"))
-            .env("DEBRUTE_COMPLETE_PRODUCT_UPDATE", product_version)
-            .stdin(Stdio::null())
-            .stdout(Stdio::null())
-            .stderr(Stdio::null());
-        command
-            .spawn()
-            .map(|_| ())
-            .map_err(|error| ProductCommitError::Platform(error.to_string()))
+        launch_target_runtime_update(
+            &self.store,
+            product_version,
+            entrypoint,
+            &self.stable_runtime_entrypoint,
+        )
     }
 
     fn resume(
@@ -143,6 +158,138 @@ impl UpdatePlatformAdapter for NativeUpdatePlatform {
         }
         (self.resume)(transaction_id, intent)
     }
+}
+
+struct TargetRuntimeUpdateLaunch {
+    product_version: String,
+    product_directory: PathBuf,
+    web_assets_directory: PathBuf,
+    stable_runtime_entrypoint: PathBuf,
+    entrypoint: VerifiedRuntimeEntrypoint,
+}
+
+impl TargetRuntimeUpdateLaunch {
+    fn new(
+        store: &ProductStore,
+        product_version: &str,
+        entrypoint: VerifiedRuntimeEntrypoint,
+        stable_runtime_entrypoint: &Path,
+    ) -> Result<Self, ProductCommitError> {
+        if !stable_runtime_entrypoint.is_absolute() {
+            return Err(ProductCommitError::Platform(
+                "target Runtime update launch requires an absolute stable entrypoint".to_owned(),
+            ));
+        }
+        let product_directory = store.version_path(product_version);
+        if !entrypoint.path().starts_with(&product_directory) {
+            return Err(ProductCommitError::Platform(
+                "verified target Runtime is outside the selected Product".to_owned(),
+            ));
+        }
+        Ok(Self {
+            product_version: product_version.to_owned(),
+            web_assets_directory: product_directory.join("web"),
+            product_directory,
+            stable_runtime_entrypoint: stable_runtime_entrypoint.to_owned(),
+            entrypoint,
+        })
+    }
+
+    #[cfg(target_os = "macos")]
+    fn application(&self) -> Result<&Path, ProductCommitError> {
+        self.entrypoint
+            .path()
+            .ancestors()
+            .find(|path| path.extension().is_some_and(|extension| extension == "app"))
+            .ok_or_else(|| {
+                ProductCommitError::Platform(
+                    "verified target Runtime is outside a macOS application bundle".to_owned(),
+                )
+            })
+    }
+}
+
+fn launch_target_runtime_update(
+    store: &ProductStore,
+    product_version: &str,
+    entrypoint: VerifiedRuntimeEntrypoint,
+    stable_runtime_entrypoint: &Path,
+) -> Result<(), ProductCommitError> {
+    let launch = TargetRuntimeUpdateLaunch::new(
+        store,
+        product_version,
+        entrypoint,
+        stable_runtime_entrypoint,
+    )?;
+    #[cfg(target_os = "macos")]
+    let mut command = {
+        let mut command = Command::new("/usr/bin/open");
+        command
+            .arg("-g")
+            .arg("-n")
+            .arg("--env")
+            .arg(macos_environment_argument(
+                ACTIVE_PRODUCT_DIRECTORY_ENV,
+                launch.product_directory.as_os_str(),
+            ))
+            .arg("--env")
+            .arg(macos_environment_argument(
+                WEB_ASSETS_DIRECTORY_ENV,
+                launch.web_assets_directory.as_os_str(),
+            ))
+            .arg("--env")
+            .arg(macos_environment_argument(
+                "DEBRUTE_COMPLETE_PRODUCT_UPDATE",
+                OsStr::new(&launch.product_version),
+            ))
+            .arg(launch.application()?)
+            .arg("--args");
+        command
+    };
+    #[cfg(target_os = "windows")]
+    let mut command = Command::new(launch.entrypoint.path());
+    command
+        .arg("complete-product-update")
+        .arg("--product-version")
+        .arg(&launch.product_version)
+        .arg("--stable-runtime-entrypoint")
+        .arg(&launch.stable_runtime_entrypoint);
+    #[cfg(target_os = "windows")]
+    command
+        .env(ACTIVE_PRODUCT_DIRECTORY_ENV, &launch.product_directory)
+        .env(WEB_ASSETS_DIRECTORY_ENV, &launch.web_assets_directory)
+        .env("DEBRUTE_COMPLETE_PRODUCT_UPDATE", &launch.product_version);
+    command
+        .stdin(Stdio::null())
+        .stdout(Stdio::null())
+        .stderr(Stdio::null());
+    #[cfg(target_os = "macos")]
+    {
+        let status = command
+            .status()
+            .map_err(|error| ProductCommitError::Platform(error.to_string()))?;
+        if !status.success() {
+            return Err(ProductCommitError::Platform(format!(
+                "LaunchServices rejected the target Runtime launch with status {status}"
+            )));
+        }
+        Ok(())
+    }
+    #[cfg(target_os = "windows")]
+    {
+        command
+            .spawn()
+            .map(|_| ())
+            .map_err(|error| ProductCommitError::Platform(error.to_string()))
+    }
+}
+
+#[cfg(target_os = "macos")]
+fn macos_environment_argument(name: &str, value: &OsStr) -> OsString {
+    let mut argument = OsString::from(name);
+    argument.push("=");
+    argument.push(value);
+    argument
 }
 
 #[cfg(target_os = "macos")]
@@ -160,11 +307,6 @@ fn installed_product_seed(executable: &Path) -> Option<PathBuf> {
     executable
         .parent()
         .map(|directory| directory.join("resources/product-seed"))
-}
-
-#[cfg(not(any(target_os = "macos", target_os = "windows")))]
-fn installed_product_seed(_executable: &Path) -> Option<PathBuf> {
-    None
 }
 
 #[cfg(target_os = "macos")]
@@ -186,20 +328,7 @@ fn install_desktop_native(
         .map(PathBuf::from)
         .ok_or(NativeInstallError::InvalidDmgMount)?;
     let result = (|| {
-        let applications = fs::read_dir(&mount)?
-            .filter_map(Result::ok)
-            .filter(|entry| {
-                entry.file_type().is_ok_and(|kind| kind.is_dir())
-                    && entry
-                        .path()
-                        .extension()
-                        .is_some_and(|extension| extension == "app")
-            })
-            .map(|entry| entry.path())
-            .collect::<Vec<_>>();
-        let [source_application] = applications.as_slice() else {
-            return Err(NativeInstallError::InvalidApplicationInventory);
-        };
+        let source_application = mounted_desktop_application(&mount)?;
         let info = source_application.join("Contents/Info.plist");
         let bundle_id = command_output(
             "/usr/bin/plutil",
@@ -217,16 +346,16 @@ fn install_desktop_native(
                 "--deep",
                 "--strict",
                 "--verbose=2",
-                path_text(source_application)?,
+                path_text(&source_application)?,
             ],
         )?;
         command_success(
             "/usr/sbin/spctl",
-            &["-a", "-t", "exec", "-vv", path_text(source_application)?],
+            &["-a", "-t", "exec", "-vv", path_text(&source_application)?],
         )?;
         command_success(
             "/usr/bin/xcrun",
-            &["stapler", "validate", path_text(source_application)?],
+            &["stapler", "validate", path_text(&source_application)?],
         )?;
         store.inspect_seed_identity_unlocked(
             &source_application.join("Contents/Resources/product-seed"),
@@ -248,7 +377,7 @@ fn install_desktop_native(
         let retired = parent.join(format!(".Debrute-retired-{}.app", Uuid::new_v4()));
         command_success(
             "/usr/bin/ditto",
-            &[path_text(source_application)?, path_text(&staged)?],
+            &[path_text(&source_application)?, path_text(&staged)?],
         )?;
         store.inspect_seed_identity_unlocked(&staged.join("Contents/Resources/product-seed"))?;
         command_success(
@@ -272,6 +401,17 @@ fn install_desktop_native(
     })();
     let detach = command_success("/usr/bin/hdiutil", &["detach", path_text(&mount)?]);
     result.and(detach)
+}
+
+#[cfg(target_os = "macos")]
+fn mounted_desktop_application(mount: &Path) -> Result<PathBuf, NativeInstallError> {
+    let application = mount.join("Debrute.app");
+    let metadata = fs::symlink_metadata(&application)
+        .map_err(|_| NativeInstallError::InvalidApplicationBundle)?;
+    if metadata.file_type().is_symlink() || !metadata.is_dir() {
+        return Err(NativeInstallError::InvalidApplicationBundle);
+    }
+    Ok(application)
 }
 
 #[cfg(target_os = "macos")]
@@ -301,15 +441,6 @@ fn install_desktop_native(
     installer: &VerifiedDesktopInstaller,
 ) -> Result<(), NativeInstallError> {
     command_success(path_text(installer.path())?, &["/S"])
-}
-
-#[cfg(not(any(target_os = "macos", target_os = "windows")))]
-fn install_desktop_native(
-    _store: &ProductStore,
-    _desktop: &DesktopHostRegistration,
-    _installer: &VerifiedDesktopInstaller,
-) -> Result<(), NativeInstallError> {
-    Err(NativeInstallError::UnsupportedPlatform)
 }
 
 fn command_success(executable: &str, arguments: &[&str]) -> Result<(), NativeInstallError> {
@@ -349,7 +480,7 @@ enum NativeInstallError {
     #[cfg(target_os = "macos")]
     InvalidDmgMount,
     #[cfg(target_os = "macos")]
-    InvalidApplicationInventory,
+    InvalidApplicationBundle,
     #[cfg(target_os = "macos")]
     InvalidInstalledApplication,
     #[cfg(target_os = "macos")]
@@ -362,8 +493,6 @@ enum NativeInstallError {
     #[cfg(target_os = "macos")]
     NonUtf8Output,
     NonUtf8Path,
-    #[cfg(not(any(target_os = "macos", target_os = "windows")))]
-    UnsupportedPlatform,
 }
 
 impl fmt::Display for NativeInstallError {
@@ -375,8 +504,8 @@ impl fmt::Display for NativeInstallError {
             #[cfg(target_os = "macos")]
             Self::InvalidDmgMount => formatter.write_str("DMG mount point is invalid"),
             #[cfg(target_os = "macos")]
-            Self::InvalidApplicationInventory => {
-                formatter.write_str("DMG must contain exactly one application")
+            Self::InvalidApplicationBundle => {
+                formatter.write_str("DMG must contain a real Debrute.app directory at its root")
             }
             #[cfg(target_os = "macos")]
             Self::InvalidInstalledApplication => {
@@ -394,8 +523,6 @@ impl fmt::Display for NativeInstallError {
             #[cfg(target_os = "macos")]
             Self::NonUtf8Output => formatter.write_str("native command output is not UTF-8"),
             Self::NonUtf8Path => formatter.write_str("native install path is not UTF-8"),
-            #[cfg(not(any(target_os = "macos", target_os = "windows")))]
-            Self::UnsupportedPlatform => formatter.write_str("platform is unsupported"),
         }
     }
 }
@@ -444,6 +571,36 @@ mod tests {
                 "/Applications/Debrute.app/Contents/Resources/product-seed"
             ))
         );
+    }
+
+    #[test]
+    fn mounted_dmg_requires_the_fixed_real_debrute_application() {
+        let root = std::env::temp_dir().join(format!("debrute-dmg-test-{}", Uuid::new_v4()));
+        fs::create_dir_all(root.join("Other.app")).unwrap();
+        assert!(matches!(
+            mounted_desktop_application(&root),
+            Err(NativeInstallError::InvalidApplicationBundle)
+        ));
+        fs::create_dir(root.join("Debrute.app")).unwrap();
+        assert_eq!(
+            mounted_desktop_application(&root).unwrap(),
+            root.join("Debrute.app")
+        );
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn mounted_dmg_rejects_a_debrute_application_symlink() {
+        use std::os::unix::fs::symlink;
+
+        let root = std::env::temp_dir().join(format!("debrute-dmg-link-{}", Uuid::new_v4()));
+        fs::create_dir_all(root.join("actual.app")).unwrap();
+        symlink(root.join("actual.app"), root.join("Debrute.app")).unwrap();
+        assert!(matches!(
+            mounted_desktop_application(&root),
+            Err(NativeInstallError::InvalidApplicationBundle)
+        ));
+        fs::remove_dir_all(root).unwrap();
     }
 
     #[cfg(target_os = "macos")]

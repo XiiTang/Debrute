@@ -153,7 +153,7 @@ function snapshotWithFiles(paths: string[]): WorkbenchProjectSessionSnapshot {
     health: {
       projectName: 'Demo',
       canvasCount: 0,
-      diagnosticCounts: { errors: 0, warnings: 0, infos: 0 },
+      diagnosticCounts: { errors: 0, warnings: 0 },
       checkedAt: '2026-07-10T00:00:00.000Z'
     }
   };

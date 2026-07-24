@@ -7,14 +7,9 @@ import type {
   DebruteProductState,
   DebruteHttpErrorBody,
   RuntimeProjectUploadImportPlan,
-  GeneratedAssetView,
-  GeneratedAssetsView,
   GeneratedAssetMetadataLookup,
-  IntegrationSettingsView,
   RunIntegrationOperationInput,
   RunIntegrationOperationResult,
-  ProductUpdateApplyResult,
-  WorkbenchProjectHealthSummary,
   SaveCanvasTextPreviewSourceResult,
   SaveCanvasTextPreviewSourceInput,
   SaveDebruteGlobalSettingsInput,
@@ -33,8 +28,6 @@ import type {
   WorkbenchProjectOpenResult,
   WorkbenchProjectFileBatchOperationResult,
   WorkbenchProjectFileOperationResult,
-  WorkbenchProjectRefreshResult,
-  WorkbenchProjectSessionSnapshot,
   WorkbenchProjectTextFile,
   WorkbenchProjectTextFileWriteResult,
   WorkbenchFeedbackWorkingCopy,
@@ -44,19 +37,10 @@ import type {
   WorkbenchAddProjectPathToCanvasMapResult,
   WriteProjectTextFileInput
 } from '@debrute/app-protocol';
-import type {
-  CanvasFeedbackDocument,
-  UpdateCanvasFeedbackEntryInput
-} from '@debrute/canvas-core';
-import { readJsonSseStream } from './streamingSse';
-import { createTerminalHubClient } from './terminalHubClient';
-import { getDebruteShellApi } from './shellApi';
-
-export interface HttpWorkbenchApiClientOptions {
-  fetch?: typeof fetch;
-  WebSocket?: typeof WebSocket;
-  origin?: string;
-}
+import type { CanvasFeedbackDocument } from '@debrute/canvas-core';
+import { readJsonSseStream } from './streamingSse.js';
+import { createTerminalHubClient } from './terminalHubClient.js';
+import { getDebruteShellApi } from './shellApi.js';
 
 interface ProjectRequestScope {
   projectId: string;
@@ -81,8 +65,6 @@ interface GlobalSnapshotFrame {
   globalRevision: number;
   snapshot: {
     settings: DebruteGlobalSettingsView;
-    recentProjects: Array<{ projectId: string; projectRoot: string }>;
-    integrations: IntegrationSettingsView;
     photoshop: AdobeBridgeStateView;
     product: DebruteProductState | null;
   };
@@ -109,12 +91,8 @@ type ProjectPickerCommandResult =
   | { opened: false }
   | ({ opened: true } & ProjectBindingCommandResult);
 
-export function createHttpWorkbenchApiClient(options: HttpWorkbenchApiClientOptions = {}): WorkbenchApiClient {
-  const transportFetch = options.fetch ?? fetch;
-  const terminalHub = createTerminalHubClient({
-    ...(options.WebSocket ? { WebSocket: options.WebSocket } : {}),
-    ...(options.origin ? { origin: options.origin } : {})
-  });
+export function createHttpWorkbenchApiClient(): WorkbenchApiClient {
+  const terminalHub = createTerminalHubClient();
   let connectionCredential: string | undefined;
 
   const fetchResponse = async (method: string, path: string, body?: unknown, signal?: AbortSignal): Promise<Response> => {
@@ -129,7 +107,7 @@ export function createHttpWorkbenchApiClient(options: HttpWorkbenchApiClientOpti
     if (connectionCredential) {
       headers['x-debrute-workbench-connection'] = connectionCredential;
     }
-    const response = await transportFetch(path, {
+    const response = await fetch(path, {
       method,
       headers,
       credentials: 'same-origin',
@@ -158,7 +136,7 @@ export function createHttpWorkbenchApiClient(options: HttpWorkbenchApiClientOpti
     if (connectionEndedError) {
       throw connectionEndedError;
     }
-    const response = await transportFetch(path, {
+    const response = await fetch(path, {
       method,
       body,
       headers: {
@@ -179,7 +157,6 @@ export function createHttpWorkbenchApiClient(options: HttpWorkbenchApiClientOpti
   const projectRequestControllers = new Set<AbortController>();
   let connectionAbort: AbortController | undefined;
   let connectionReady: Promise<void> | undefined;
-  let initialProject: WorkbenchProjectOpenResult | undefined;
   let initialProjectError: DebruteHttpRequestError | undefined;
   let connectionEndedError: Error | undefined;
   let disposed = false;
@@ -189,6 +166,8 @@ export function createHttpWorkbenchApiClient(options: HttpWorkbenchApiClientOpti
     reject(error: Error): void;
   }>>();
   const eventListeners = new Set<(event: WorkbenchEvent) => void>();
+  const pendingInitialEvents: WorkbenchEvent[] = [];
+  let eventListenerWasRegistered = false;
   const projectDetachedListeners = new Set<() => void>();
   const connectionEndedListeners = new Set<(error: Error) => void>();
   const projectPathFor = (projectId: string, path: string) => `/api/projects/${encodeURIComponent(projectId)}${path}`;
@@ -255,6 +234,10 @@ export function createHttpWorkbenchApiClient(options: HttpWorkbenchApiClientOpti
       }
       currentProjectRevision = event.projectRevision;
     }
+    if (eventListeners.size === 0 && !eventListenerWasRegistered) {
+      pendingInitialEvents.push(event);
+      return;
+    }
     for (const listener of eventListeners) {
       listener(event);
     }
@@ -265,7 +248,6 @@ export function createHttpWorkbenchApiClient(options: HttpWorkbenchApiClientOpti
     }
     currentProjectId = undefined;
     currentProjectRevision = undefined;
-    initialProject = undefined;
     boundProjects.clear();
     currentProjectGeneration += 1;
     for (const controller of projectRequestControllers) {
@@ -338,8 +320,9 @@ export function createHttpWorkbenchApiClient(options: HttpWorkbenchApiClientOpti
     };
     void (async () => {
       try {
-        const desktopLaunchTicket = await getDebruteShellApi()?.takeDesktopLaunchTicket?.();
-        const response = await transportFetch('/api/workbench/connection', {
+        const shell = getDebruteShellApi();
+        const desktopLaunchTicket = shell ? await shell.takeDesktopLaunchTicket() : undefined;
+        const response = await fetch('/api/workbench/connection', {
           method: 'POST',
           headers: {
             accept: 'text/event-stream',
@@ -363,15 +346,8 @@ export function createHttpWorkbenchApiClient(options: HttpWorkbenchApiClientOpti
           if (isGlobalSnapshotFrame(value)) {
             globalSynchronized = true;
             dispatchWorkbenchEvent({ type: 'globalSettings.changed', settings: value.snapshot.settings });
-            dispatchWorkbenchEvent({
-              type: 'recentProjects.changed',
-              recentProjects: value.snapshot.recentProjects
-            });
-            dispatchWorkbenchEvent({ type: 'integrations.changed', integrations: value.snapshot.integrations });
             dispatchWorkbenchEvent({ type: 'adobeBridge.state.changed', state: value.snapshot.photoshop });
-            if (value.snapshot.product) {
-              dispatchWorkbenchEvent({ type: 'product.changed', product: value.snapshot.product });
-            }
+            dispatchWorkbenchEvent({ type: 'product.changed', product: value.snapshot.product });
             settleReady();
             return;
           }
@@ -380,7 +356,6 @@ export function createHttpWorkbenchApiClient(options: HttpWorkbenchApiClientOpti
             commitCurrentProject(project);
             acceptBoundProject(project);
             if (project.projectId === requestedProjectId) {
-              initialProject = project;
               projectSynchronized = true;
               settleReady();
             }
@@ -467,9 +442,6 @@ export function createHttpWorkbenchApiClient(options: HttpWorkbenchApiClientOpti
     openProject: async (input) => {
       await ensureConnection();
       if ('projectId' in input) {
-        if (initialProject?.projectId === input.projectId) {
-          return initialProject;
-        }
         if (initialProjectError && !input.forceOpenHere) {
           throw initialProjectError;
         }
@@ -541,15 +513,12 @@ export function createHttpWorkbenchApiClient(options: HttpWorkbenchApiClientOpti
       return { opened: true, ...await waitForBoundProject(result.projectId) };
     },
     clearRecentProjectRoots: () => request<{ ok: true }>('DELETE', '/api/workbench/recent-projects'),
-    getProductState: () => request<DebruteProductState>('GET', '/api/runtime/product'),
-    checkProductUpdate: () => request<DebruteProductState>('POST', '/api/runtime/product/update/check'),
-    applyProductUpdate: () => request<ProductUpdateApplyResult>('POST', '/api/runtime/product/update/apply'),
-    globalSettingsGet: () => request<DebruteGlobalSettingsView>('GET', '/api/settings/global'),
-    globalSettingsSave: (input: SaveDebruteGlobalSettingsInput) => request<DebruteGlobalSettingsView>('PATCH', '/api/settings/global', input),
-    getSnapshot: () => requestForCurrentProject<WorkbenchProjectRefreshResult>('GET', ''),
-    getProjectHealth: () => requestForCurrentProject<WorkbenchProjectHealthSummary>('GET', '/health'),
+    checkProductUpdate: () => request<{ ok: true }>('POST', '/api/runtime/product/update/check'),
+    applyProductUpdate: () => request<{ ok: true }>('POST', '/api/runtime/product/update/apply'),
+    globalSettingsSave: (input: SaveDebruteGlobalSettingsInput) => request<{ ok: true }>('PATCH', '/api/settings/global', input),
+    revealModelApiKey: (modelId: string) => request('POST', '/api/settings/models/api-key/reveal', { modelId }),
     listTerminalSessions: () => requestForCurrentProject<TerminalSessionList>('GET', '/terminals'),
-    createTerminalSession: (input = {}) => requestForCurrentProject<TerminalSessionResult>('POST', '/terminals', input),
+    createTerminalSession: (input) => requestForCurrentProject<TerminalSessionResult>('POST', '/terminals', input),
     writeTerminalInput: (input) => terminalHub.writeInput(input.terminalId, input.data),
     resizeTerminal: (input) => terminalHub.resize(input.terminalId, input.cols, input.rows),
     closeTerminalSession: (input) => requestForCurrentProject<{ ok: true }>(
@@ -642,11 +611,8 @@ export function createHttpWorkbenchApiClient(options: HttpWorkbenchApiClientOpti
       { kind: input.kind }
     ),
     lookupGeneratedAssetMetadata: (input) => requestForCurrentProject<GeneratedAssetMetadataLookup>('POST', '/generated-assets/lookup', input),
-    listGeneratedAssets: () => requestForCurrentProject<GeneratedAssetsView>('GET', '/generated-assets'),
-    readGeneratedAsset: (assetId) => requestForCurrentProject<GeneratedAssetView>('GET', `/generated-assets/${encodeURIComponent(assetId)}`),
     readCanvasFeedback: () => requestForCurrentProject<CanvasFeedbackDocument>('GET', '/canvas-feedback'),
     updateCanvasFeedbackEntry: (input) => requestProjectMutation<WorkbenchCanvasFeedbackMutationResult>('PATCH', projectPath('/canvas-feedback'), input),
-    refreshProject: () => requestProjectMutation<WorkbenchProjectRefreshResult>('POST', projectPath('/refresh')),
     createCanvas: () => requestProjectMutation<WorkbenchCanvasManagementResult>('POST', projectPath('/canvases')),
     renameCanvas: (input) => requestProjectMutation<WorkbenchCanvasManagementResult>(
       'PATCH',
@@ -689,7 +655,7 @@ export function createHttpWorkbenchApiClient(options: HttpWorkbenchApiClientOpti
       projectPath(`/canvases/${encodeURIComponent(input.canvasId)}/text-viewport`),
       { updates: input.updates }
     ),
-    integrationsRescan: () => request<IntegrationSettingsView>('POST', '/api/integrations/rescan', {}),
+    integrationsRescan: () => request<{ ok: true }>('POST', '/api/integrations/rescan', {}),
     integrationsRunOperation: (input: RunIntegrationOperationInput) => request<RunIntegrationOperationResult>(
       'POST',
       `/api/integrations/${encodeURIComponent(input.integrationId)}/${encodeURIComponent(input.operation)}`,
@@ -697,6 +663,12 @@ export function createHttpWorkbenchApiClient(options: HttpWorkbenchApiClientOpti
     ),
     onEvent: (listener: (event: WorkbenchEvent) => void) => {
       eventListeners.add(listener);
+      if (!eventListenerWasRegistered) {
+        eventListenerWasRegistered = true;
+        for (const event of pendingInitialEvents.splice(0)) {
+          listener(event);
+        }
+      }
       void ensureConnection().catch(() => undefined);
       return () => {
         eventListeners.delete(listener);
@@ -727,6 +699,7 @@ export function createHttpWorkbenchApiClient(options: HttpWorkbenchApiClientOpti
         controller.abort();
       }
       projectRequestControllers.clear();
+      pendingInitialEvents.length = 0;
       terminalHub.unbindProject();
       terminalHub.dispose();
       connectionCredential = undefined;
@@ -749,12 +722,10 @@ function isWorkbenchEvent(value: unknown): value is WorkbenchEvent {
 }
 
 const WORKBENCH_EVENT_TYPES = new Set<WorkbenchEvent['type']>([
-  'project.opened',
   'project.changed',
   'project.fileChanged',
   'canvas.changed',
   'canvas.feedback.changed',
-  'generatedAsset.metadata.changed',
   'recentProjects.changed',
   'globalSettings.changed',
   'integrations.changed',
@@ -776,7 +747,7 @@ function isGlobalSnapshotFrame(value: unknown): value is GlobalSnapshotFrame {
     && value.type === 'global.snapshot'
     && typeof value.globalRevision === 'number'
     && isObject(value.snapshot)
-    && Array.isArray(value.snapshot.recentProjects);
+    && isObject(value.snapshot.settings);
 }
 
 function isProjectBoundFrame(value: unknown): value is ProjectBoundFrame {
@@ -826,7 +797,7 @@ function isObject(value: unknown): value is Record<string, unknown> {
 }
 
 function requestedProjectIdFromLocation(): string | undefined {
-  const match = globalThis.location?.pathname.match(/^\/projects\/([^/]+)$/);
+  const match = location.pathname.match(/^\/projects\/([^/]+)$/);
   return match?.[1] ? decodeURIComponent(match[1]) : undefined;
 }
 

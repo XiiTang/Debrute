@@ -3,7 +3,7 @@ import { createCepPhotoshopAdapter } from './cepPhotoshopAdapter';
 import type { CepHost } from './cepHost';
 
 describe('CEP Photoshop adapter', () => {
-  it('returns cached selection snapshots synchronously', () => {
+  it('reads selection snapshots through one asynchronous host contract', async () => {
     const host = hostWithResponses({
       'debruteBridge.hostVersion()': '26.0.0',
       'debruteBridge.currentSelectionSnapshot()': {
@@ -14,31 +14,12 @@ describe('CEP Photoshop adapter', () => {
     });
     const adapter = createCepPhotoshopAdapter({ host });
 
-    expect(adapter.hostVersion()).toBe('CEP');
-    expect(adapter.currentSelectionSnapshot()).toEqual({
-      documentTitle: null,
-      documentCount: 0,
-      selectedItems: []
+    await expect(adapter.selectionSnapshot()).resolves.toEqual({
+      documentTitle: 'poster.psd',
+      documentCount: 1,
+      selectedItems: [{ layerId: 9, name: 'Hero', kind: 'layer' }]
     });
-  });
-
-  it('refreshes selection snapshots through one ExtendScript command', async () => {
-    const host = hostWithResponses({
-      'debruteBridge.hostVersion()': '26.0.0',
-      'debruteBridge.currentSelectionSnapshot()': {
-        documentTitle: 'poster.psd',
-        documentCount: 1,
-        selectedItems: [{ layerId: 9, name: 'Hero', kind: 'layer' }]
-      }
-    });
-    const adapter = createCepPhotoshopAdapter({ host });
-
-    await adapter.refreshSelectionSnapshot();
-
     expect(adapter.hostVersion()).toBe('26.0.0');
-    expect(adapter.currentSelectionSnapshot().selectedItems).toEqual([
-      { layerId: 9, name: 'Hero', kind: 'layer' }
-    ]);
     expect(host.evalJson).toHaveBeenCalledWith('debruteBridge.hostVersion()');
     expect(host.evalJson).toHaveBeenCalledWith('debruteBridge.currentSelectionSnapshot()');
   });

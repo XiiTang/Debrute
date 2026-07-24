@@ -28,8 +28,7 @@ import type {
 import type { CanvasCameraState } from './runtime/canvasCamera';
 import {
   canvasTextPreviewStyleKey,
-  canvasTextPreviewStyleSnapshotForDocument,
-  type CanvasTextPreviewStyleKey
+  canvasTextPreviewStyleSnapshotForDocument
 } from './CanvasTextPreviewStyleKey';
 import {
   CANVAS_PERF_INTERACTION_SESSION_TYPES,
@@ -37,6 +36,7 @@ import {
   type CanvasPerfMonitor
 } from './CanvasPerfMonitor';
 import type { CanvasPreviewResourceScheduler } from './CanvasPreviewResourceScheduler';
+import { canvasRawFileProjectId } from './canvasRawFileUrls';
 
 export interface CanvasTextPreviewSource {
   projectRelativePath: string;
@@ -117,20 +117,14 @@ export interface CanvasTextPreviewRuntimeValue {
   reportVisibleCommitted(node: ProjectedCanvasNode, source: CanvasTextPreviewSource): void;
 }
 
-const defaultRuntimeValue: CanvasTextPreviewRuntimeValue = {
-  registerTextBody: () => undefined,
-  presentationForNode: () => ({}),
-  previewErrorForNode: () => undefined,
-  reportPendingReady: () => undefined,
-  reportPendingFailure: () => undefined,
-  reportVisibleFailure: () => undefined,
-  reportVisibleCommitted: () => undefined
-};
-
-const CanvasTextPreviewRuntimeContext = createContext<CanvasTextPreviewRuntimeValue>(defaultRuntimeValue);
+const CanvasTextPreviewRuntimeContext = createContext<CanvasTextPreviewRuntimeValue | undefined>(undefined);
 
 export function useCanvasTextPreviewRuntime(): CanvasTextPreviewRuntimeValue {
-  return useContext(CanvasTextPreviewRuntimeContext);
+  const runtime = useContext(CanvasTextPreviewRuntimeContext);
+  if (!runtime) {
+    throw new Error('CanvasTextPreviewProvider is required.');
+  }
+  return runtime;
 }
 
 export function CanvasTextPreviewProvider({
@@ -173,7 +167,7 @@ export function CanvasTextPreviewProvider({
   const [previewPresentations, setPreviewPresentations] = useState<Record<string, CanvasTextPreviewPresentationState>>({});
   const [availabilityCheckedTargetKeys, setAvailabilityCheckedTargetKeys] = useState<ReadonlySet<string>>(() => new Set());
   const [styleKeyState, setStyleKeyState] = useState<{
-    key?: CanvasTextPreviewStyleKey | undefined;
+    key?: string | undefined;
     error?: Error | undefined;
   }>({});
   const currentTargetKeysRef = useRef(new Map<string, string>());
@@ -519,11 +513,9 @@ export function CanvasTextPreviewProvider({
     }
     const commit = () => commitTextBodyMeasurement(projectRelativePath, element);
     const cleanup: Array<() => void> = [];
-    if (typeof ResizeObserver !== 'undefined') {
-      const observer = new ResizeObserver(commit);
-      observer.observe(element);
-      cleanup.push(() => observer.disconnect());
-    }
+    const observer = new ResizeObserver(commit);
+    observer.observe(element);
+    cleanup.push(() => observer.disconnect());
     const frame = window.requestAnimationFrame(commit);
     cleanup.push(() => window.cancelAnimationFrame(frame));
     commit();
@@ -1207,18 +1199,14 @@ function canvasTextPreviewUrl(input: {
   fingerprint: string;
   width: number;
 }): string {
-  const sourceUrl = new URL(input.fileUrl, 'http://debrute.local');
-  const projectMatch = sourceUrl.pathname.match(/^\/api\/projects\/([^/]+)\//);
-  if (!projectMatch?.[1]) {
-    throw new Error('Canvas text preview file URL must include a project id.');
-  }
+  const projectId = canvasRawFileProjectId(input.fileUrl);
   const params = new URLSearchParams({
     canvasId: input.canvasId,
     path: input.projectRelativePath,
     fingerprint: input.fingerprint,
     w: String(input.width)
   });
-  return `/api/projects/${projectMatch[1]}/canvas-text-preview?${params.toString()}`;
+  return `/api/projects/${projectId}/canvas-text-preview?${params.toString()}`;
 }
 
 function canvasTextPreviewSourcesWithAvailability(input: {

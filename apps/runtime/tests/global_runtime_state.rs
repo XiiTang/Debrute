@@ -7,8 +7,8 @@ use std::{
 };
 
 use debrute_runtime::global::{
-    GlobalConfigStore, GlobalRuntimeChange, GlobalRuntimeService, GlobalSettingsError,
-    ModelCatalog, api_key_preview,
+    AudioModelKind, DefaultFrontend, GlobalConfigStore, GlobalRuntimeChange, GlobalRuntimeService,
+    GlobalSettingsError, ModelCatalog,
 };
 use debrute_runtime::integrations::{
     CommandResult, IntegrationCommand, IntegrationOperation, IntegrationProcessAdapter,
@@ -28,20 +28,24 @@ fn defaults_recent_projects_and_model_settings_match_the_final_global_contract()
         .expect("default settings should load");
     assert_eq!(initial.workbench.locale, "en");
     assert_eq!(initial.workbench.theme_preference, "system");
-    assert_eq!(initial.workbench.default_frontend, "electron");
+    assert_eq!(initial.workbench.default_frontend, DefaultFrontend::Desktop);
     assert!(initial.chrome.recent_projects.is_empty());
     assert!(initial.adobe_bridge.enabled);
-    assert_eq!(initial.models.image.models.len(), 11);
-    assert_eq!(initial.models.video.models.len(), 2);
-    assert_eq!(initial.models.audio.models.len(), 16);
+    assert_eq!(initial.models.image.len(), 10);
+    assert_eq!(initial.models.video.len(), 2);
+    assert_eq!(initial.models.audio.len(), 16);
 
     for index in 0..14 {
         store
-            .remember_recent_project(&format!("project-{index}"), &format!(" /projects/{index} "))
+            .remember_recent_project(
+                &format!("project-{index}"),
+                &format!("/projects/{index}"),
+                &catalog,
+            )
             .expect("recent Project should persist");
     }
     store
-        .remember_recent_project("project-5", "/projects/5")
+        .remember_recent_project("project-5", "/projects/5", &catalog)
         .expect("duplicate should move to the front");
     let recent = store
         .read_view(&catalog)
@@ -69,10 +73,10 @@ fn stable_project_id_cannot_be_remapped_to_another_recent_root() {
     let store = GlobalConfigStore::new(&home);
 
     store
-        .remember_recent_project("project-alpha", "/projects/alpha")
+        .remember_recent_project("project-alpha", "/projects/alpha", &catalog)
         .expect("initial stable Project mapping should persist");
     let error = store
-        .remember_recent_project("project-alpha", "/projects/copied-alpha")
+        .remember_recent_project("project-alpha", "/projects/copied-alpha", &catalog)
         .expect_err("one stable Project id must not move to another root");
     assert!(matches!(error, GlobalSettingsError::Validation(_)));
 
@@ -89,7 +93,7 @@ fn stable_project_id_cannot_be_remapped_to_another_recent_root() {
 }
 
 #[test]
-fn patch_persists_normalized_settings_and_redacts_model_secrets() {
+fn patch_persists_canonical_settings_and_redacts_model_secrets() {
     let home = temporary_home("patch");
     let catalog = ModelCatalog::bundled().expect("bundled model catalog should parse");
     let store = GlobalConfigStore::new(&home);
@@ -102,14 +106,12 @@ fn patch_persists_normalized_settings_and_redacts_model_secrets() {
                     "themePreference": "light",
                     "defaultFrontend": "browser"
                 },
-                "models": {
-                    "image": {
-                        "modelId": "gpt-image-2",
-                        "setting": {
-                            "baseUrlOverride": " https://images.example.test/v1 ",
-                            "requestModelIdOverride": null,
-                            "apiKey": " sk-image-123456fg "
-                        }
+                "modelSetting": {
+                    "modelId": "gpt-image-2",
+                    "setting": {
+                        "baseUrlOverride": "https://images.example.test/v1",
+                        "requestModelIdOverride": null,
+                        "apiKey": "sk-image-123456fg"
                     }
                 },
                 "adobeBridge": { "enabled": false }
@@ -124,7 +126,6 @@ fn patch_persists_normalized_settings_and_redacts_model_secrets() {
         .view
         .models
         .image
-        .models
         .iter()
         .find(|model| model.debrute_model_id == "gpt-image-2")
         .expect("catalog model should exist");
@@ -133,13 +134,10 @@ fn patch_persists_normalized_settings_and_redacts_model_secrets() {
         Some("https://images.example.test/v1")
     );
     assert!(model.api_key_set);
-    assert_eq!(
-        model.api_key_preview.as_deref(),
-        Some("sk****************************fg")
-    );
 
     let public_json = serde_json::to_string(&result.view).expect("view should serialize");
     assert!(!public_json.contains("sk-image-123456fg"));
+    assert!(!public_json.contains("apiKeyPreview"));
     let settings = fs::read_to_string(home.join("config/global_settings.json"))
         .expect("settings should be written");
     assert!(settings.contains("\"defaultFrontend\": \"browser\""));
@@ -170,6 +168,18 @@ fn invalid_and_unknown_model_patches_are_rejected_without_partial_writes() {
     let catalog = ModelCatalog::bundled().expect("bundled model catalog should parse");
     let store = GlobalConfigStore::new(&home);
 
+    for input in [
+        json!({}),
+        json!({ "workbench": {} }),
+        json!({ "unexpectedField": true }),
+        json!({ "workbench": { "unexpectedField": true } }),
+    ] {
+        assert!(matches!(
+            store.patch(&input, &catalog),
+            Err(GlobalSettingsError::Validation(_))
+        ));
+    }
+
     let invalid = store
         .patch(&json!({ "workbench": { "locale": "fr" } }), &catalog)
         .expect_err("invalid locale should fail");
@@ -177,43 +187,49 @@ fn invalid_and_unknown_model_patches_are_rejected_without_partial_writes() {
         invalid.to_string(),
         "Workbench locale must be \"en\" or \"zh-CN\"."
     );
+    let invalid_frontend = store
+        .patch(
+            &json!({ "workbench": { "defaultFrontend": "unsupported" } }),
+            &catalog,
+        )
+        .expect_err("unsupported frontend should fail");
+    assert_eq!(
+        invalid_frontend.to_string(),
+        "Global settings defaultFrontend must be \"desktop\", \"browser\", or \"runtime-only\"."
+    );
     let unknown = store
         .patch(
             &json!({
-                "models": {
-                    "audio": {
-                        "modelId": "missing-audio-model",
-                        "setting": {
-                            "baseUrlOverride": null,
-                            "requestModelIdOverride": null
-                        }
+                "modelSetting": {
+                    "modelId": "missing-audio-model",
+                    "setting": {
+                        "baseUrlOverride": null,
+                        "requestModelIdOverride": null
                     }
                 }
             }),
             &catalog,
         )
         .expect_err("unknown model should fail");
-    assert_eq!(
-        unknown.to_string(),
-        "Unknown audio model: missing-audio-model"
-    );
+    assert_eq!(unknown.to_string(), "Unknown model: missing-audio-model");
     let padded = store
         .patch(
             &json!({
-                "models": {
-                    "image": {
-                        "modelId": " gpt-image-2 ",
-                        "setting": {
-                            "baseUrlOverride": null,
-                            "requestModelIdOverride": null
-                        }
+                "modelSetting": {
+                    "modelId": " gpt-image-2 ",
+                    "setting": {
+                        "baseUrlOverride": null,
+                        "requestModelIdOverride": null
                     }
                 }
             }),
             &catalog,
         )
         .expect_err("catalog validation must use the raw model id");
-    assert_eq!(padded.to_string(), "Unknown image model:  gpt-image-2 ");
+    assert_eq!(
+        padded.to_string(),
+        "Model id must be a canonical non-empty string."
+    );
     assert!(!home.join("config/global_settings.json").exists());
     assert!(!home.join("config/secrets.json").exists());
 
@@ -226,13 +242,109 @@ fn invalid_and_unknown_model_patches_are_rejected_without_partial_writes() {
 }
 
 #[test]
+fn persisted_global_files_are_closed_and_are_never_repaired_on_read() {
+    let home = temporary_home("strict-persistence");
+    let catalog = ModelCatalog::bundled().expect("bundled model catalog should parse");
+    let store = GlobalConfigStore::new(&home);
+    store
+        .patch(
+            &json!({
+                "workbench": { "locale": "zh-CN" },
+                "modelSetting": {
+                    "modelId": "gpt-image-2",
+                    "setting": {
+                        "baseUrlOverride": "https://images.example.test/v1",
+                        "requestModelIdOverride": null,
+                        "apiKey": "  sk-opaque  "
+                    }
+                }
+            }),
+            &catalog,
+        )
+        .expect("canonical model patch should persist");
+
+    let settings_path = home.join("config/global_settings.json");
+    let secrets_path = home.join("config/secrets.json");
+    let settings_source = fs::read_to_string(&settings_path).expect("settings should exist");
+    let secrets_source = fs::read_to_string(&secrets_path).expect("secrets should exist");
+    assert!(secrets_source.contains("  sk-opaque  "));
+
+    let mut settings: serde_json::Value =
+        serde_json::from_str(&settings_source).expect("settings should parse as JSON");
+    settings["unexpectedField"] = json!(true);
+    fs::write(
+        &settings_path,
+        serde_json::to_string_pretty(&settings).expect("settings should serialize"),
+    )
+    .expect("invalid settings fixture should write");
+    assert!(matches!(
+        store.read_view(&catalog),
+        Err(GlobalSettingsError::Json(_))
+    ));
+
+    fs::write(&settings_path, &settings_source).expect("settings fixture should restore");
+    let mut settings: serde_json::Value =
+        serde_json::from_str(&settings_source).expect("settings should parse as JSON");
+    let models = settings["models"]
+        .as_array_mut()
+        .expect("model configs should be an array");
+    models.push(models[0].clone());
+    fs::write(
+        &settings_path,
+        serde_json::to_string_pretty(&settings).expect("settings should serialize"),
+    )
+    .expect("duplicate settings fixture should write");
+    assert!(matches!(
+        store.read_view(&catalog),
+        Err(GlobalSettingsError::Validation(_))
+    ));
+
+    fs::write(&settings_path, &settings_source).expect("settings fixture should restore");
+    let mut secrets: serde_json::Value =
+        serde_json::from_str(&secrets_source).expect("secrets should parse as JSON");
+    secrets["modelApiKeys"]["gpt-image-2"] = json!("");
+    fs::write(
+        &secrets_path,
+        serde_json::to_string_pretty(&secrets).expect("secrets should serialize"),
+    )
+    .expect("empty secret fixture should write");
+    assert!(matches!(
+        store.read_view(&catalog),
+        Err(GlobalSettingsError::Validation(_))
+    ));
+
+    fs::remove_dir_all(home).expect("temporary home should be removed");
+}
+
+#[test]
 fn bundled_catalog_keeps_image_video_tts_music_and_sound_effect_as_closed_families() {
     let catalog = ModelCatalog::bundled().expect("bundled model catalog should parse");
-    assert_eq!(catalog.images().len(), 11);
+    assert_eq!(catalog.images().len(), 10);
     assert_eq!(catalog.videos().len(), 2);
-    assert_eq!(catalog.tts().len(), 9);
-    assert_eq!(catalog.music().len(), 5);
-    assert_eq!(catalog.sound_effects().len(), 2);
+    assert_eq!(
+        catalog
+            .audio()
+            .iter()
+            .filter(|entry| entry.kind == AudioModelKind::Tts)
+            .count(),
+        9
+    );
+    assert_eq!(
+        catalog
+            .audio()
+            .iter()
+            .filter(|entry| entry.kind == AudioModelKind::Music)
+            .count(),
+        5
+    );
+    assert_eq!(
+        catalog
+            .audio()
+            .iter()
+            .filter(|entry| entry.kind == AudioModelKind::SoundEffect)
+            .count(),
+        2
+    );
     assert!(catalog.contains_image("gpt-image-2"));
     assert!(catalog.contains_video("doubao-seedance-2-0-260128"));
     assert!(catalog.contains_audio("openai-gpt-4o-mini-tts"));
@@ -244,13 +356,7 @@ fn bundled_catalog_keeps_image_video_tts_music_and_sound_effect_as_closed_famili
         .expect("full image catalog entry should exist");
     assert!(!image.choose_when.is_empty());
     assert!(image.arguments_schema.is_object());
-    assert_eq!(image.request_example["input"]["model"], "gpt-image-2");
-
-    assert_eq!(api_key_preview(None), (false, None));
-    assert_eq!(
-        api_key_preview(Some("short")),
-        (true, Some("****".to_owned()))
-    );
+    assert_eq!(image.request_example.input["model"], "gpt-image-2");
 }
 
 #[test]
@@ -283,9 +389,7 @@ fn global_runtime_publishes_one_monotonic_event_per_effective_change() {
     service
         .remember_recent_project("project-alpha", "/projects/alpha")
         .expect("recent Project should persist");
-    service
-        .integrations_rescan()
-        .expect("explicit integration rescan should publish");
+    service.integrations_rescan();
 
     let events = events.lock().expect("event recorder should lock");
     assert_eq!(events.len(), 3);
@@ -313,7 +417,80 @@ fn global_runtime_publishes_one_monotonic_event_per_effective_change() {
 }
 
 #[test]
-fn recent_project_startup_snapshot_does_not_probe_integrations() {
+fn model_api_key_reveal_returns_the_exact_secret_without_publishing_global_state() {
+    let home = temporary_home("api-key-reveal");
+    let service = GlobalRuntimeService::new(
+        GlobalConfigStore::new(&home),
+        ModelCatalog::bundled().expect("bundled model catalog should parse"),
+        IntegrationService::new(Platform::MacOs, "", "", Arc::new(MissingAdapter)),
+    );
+    let events = Arc::new(Mutex::new(Vec::new()));
+    let observer_events = Arc::clone(&events);
+    assert!(service.install_observer(Arc::new(move |event| {
+        observer_events
+            .lock()
+            .expect("event recorder should lock")
+            .push(event);
+    })));
+    let exact_api_key = "  密钥🔑 \n";
+    service
+        .settings_save(&json!({
+            "modelSetting": {
+                "modelId": "gpt-image-2",
+                "setting": {
+                    "baseUrlOverride": null,
+                    "requestModelIdOverride": null,
+                    "apiKey": exact_api_key
+                }
+            }
+        }))
+        .expect("model API key should persist");
+    events.lock().expect("event recorder should lock").clear();
+    let revision = service.revision();
+
+    assert_eq!(
+        service
+            .reveal_model_api_key("gpt-image-2")
+            .expect("configured model API key should reveal"),
+        exact_api_key
+    );
+    assert_eq!(service.revision(), revision);
+    assert!(
+        events
+            .lock()
+            .expect("event recorder should lock")
+            .is_empty()
+    );
+    assert!(service.reveal_model_api_key("openai-tts-1").is_err());
+    assert!(service.reveal_model_api_key("unknown-model").is_err());
+
+    fs::remove_dir_all(home).expect("temporary home should be removed");
+}
+
+#[test]
+fn global_snapshot_captures_product_projection_at_its_revision_barrier() {
+    let home = temporary_home("product-snapshot-barrier");
+    let service = GlobalRuntimeService::new(
+        GlobalConfigStore::new(&home),
+        ModelCatalog::bundled().expect("bundled model catalog should parse"),
+        IntegrationService::new(Platform::MacOs, "", "", Arc::new(MissingAdapter)),
+    );
+
+    service.publish_product_changed(json!({ "update": { "type": "checking" } }));
+    let (snapshot_revision, _, product) = service
+        .sync_snapshot()
+        .expect("global snapshot should load");
+    service.publish_product_changed(json!({ "update": { "type": "available" } }));
+
+    assert_eq!(snapshot_revision, 1);
+    assert_eq!(product, Some(json!({ "update": { "type": "checking" } })));
+    assert_eq!(service.revision(), 2);
+
+    fs::remove_dir_all(home).expect("temporary home should be removed");
+}
+
+#[test]
+fn desktop_presentation_startup_snapshot_does_not_probe_integrations() {
     let home = temporary_home("startup-recents");
     let adapter = Arc::new(BlockingScanAdapter::default());
     let service = GlobalRuntimeService::new(
@@ -322,11 +499,12 @@ fn recent_project_startup_snapshot_does_not_probe_integrations() {
         IntegrationService::new(Platform::MacOs, "", "", adapter.clone()),
     );
 
-    let recent = service
-        .recent_projects_snapshot()
-        .expect("startup recent Projects should load");
+    let (recent, theme) = service
+        .desktop_presentation_snapshot()
+        .expect("startup Desktop presentation should load");
 
     assert!(recent.is_empty());
+    assert_eq!(theme, "system");
     assert!(!adapter.started());
     fs::remove_dir_all(home).expect("temporary home should be removed");
 }
@@ -501,9 +679,7 @@ fn rejected_integration_operations_do_not_publish_transition_events() {
         .settings_get()
         .expect("integration cache should load");
 
-    let unknown = service
-        .integrations_run_operation("missing", IntegrationOperation::Install)
-        .expect("unknown operation should return a typed result");
+    let unknown = service.integrations_run_operation("missing", IntegrationOperation::Install);
     assert_eq!(
         unknown
             .diagnostic
@@ -511,9 +687,7 @@ fn rejected_integration_operations_do_not_publish_transition_events() {
             .and_then(|diagnostic| diagnostic.error_kind.as_deref()),
         Some("integration_not_found")
     );
-    let unavailable = service
-        .integrations_run_operation("ffmpeg", IntegrationOperation::Install)
-        .expect("unavailable backend should return a typed result");
+    let unavailable = service.integrations_run_operation("ffmpeg", IntegrationOperation::Install);
     assert_eq!(
         unavailable
             .diagnostic

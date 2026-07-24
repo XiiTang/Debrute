@@ -1,66 +1,8 @@
 import { describe, expect, it } from 'vitest';
 import type { ProjectedCanvasNode } from '@debrute/canvas-core';
-import {
-  canvasImagePreviewSteppedScale,
-  canvasImagePreviewWidth,
-  canvasImageSource
-} from './canvasImagePreviews';
+import { canvasImageSource } from './canvasImagePreviews';
 
 describe('canvas image preview URLs', () => {
-  it('rounds screen scale up to the local sqrt(2) preview scale ladder', () => {
-    expect(canvasImagePreviewSteppedScale(0.18)).toBe(0.25);
-    expect(canvasImagePreviewSteppedScale(0.25)).toBe(0.25);
-    expect(canvasImagePreviewSteppedScale(0.26)).toBeCloseTo(Math.SQRT2 / 4);
-    expect(canvasImagePreviewSteppedScale(0.5)).toBe(0.5);
-    expect(canvasImagePreviewSteppedScale(0.51)).toBeCloseTo(Math.SQRT2 / 2);
-  });
-
-  it('calculates dynamic preview widths from source width, display width, zoom, and DPR', () => {
-    expect(canvasImagePreviewWidth({
-      nodeDisplayWidth: 2400,
-      sourceWidth: 2400,
-      resourceZoom: 0.1,
-      devicePixelRatio: 1
-    })).toBe(300);
-
-    expect(canvasImagePreviewWidth({
-      nodeDisplayWidth: 2400,
-      sourceWidth: 2400,
-      resourceZoom: 0.1,
-      devicePixelRatio: 2
-    })).toBe(600);
-
-    expect(canvasImagePreviewWidth({
-      nodeDisplayWidth: 2400,
-      sourceWidth: 2400,
-      resourceZoom: 1,
-      devicePixelRatio: 2
-    })).toBe(2400);
-
-    expect(canvasImagePreviewWidth({
-      nodeDisplayWidth: 2400,
-      sourceWidth: 2400,
-      resourceZoom: 0.51,
-      devicePixelRatio: 1
-    })).toBe(1698);
-  });
-
-  it('clamps preview scale to the tldraw minimum and source width maximum', () => {
-    expect(canvasImagePreviewWidth({
-      nodeDisplayWidth: 2400,
-      sourceWidth: 2400,
-      resourceZoom: 0.001,
-      devicePixelRatio: 1
-    })).toBe(75);
-
-    expect(canvasImagePreviewWidth({
-      nodeDisplayWidth: 1200,
-      sourceWidth: 300,
-      resourceZoom: 2,
-      devicePixelRatio: 2
-    })).toBe(300);
-  });
-
   it('uses dynamic preview URLs without falling back to original files by screen width', () => {
     const node = nodeFixture('flow/cover.png', 2400, 'image/png');
 
@@ -124,23 +66,6 @@ describe('canvas image preview URLs', () => {
     })).toEqual({ src: previewUrl('flow/small.png', 300), previewWidth: 300 });
   });
 
-  it('rejects invalid dynamic preview inputs', () => {
-    expect(() => canvasImagePreviewSteppedScale(0)).toThrow('Canvas image preview screen scale must be a positive finite number.');
-    expect(() => canvasImagePreviewSteppedScale(Number.NaN)).toThrow('Canvas image preview screen scale must be a positive finite number.');
-    expect(() => canvasImagePreviewWidth({
-      nodeDisplayWidth: 0,
-      sourceWidth: 2400,
-      resourceZoom: 1,
-      devicePixelRatio: 1
-    })).toThrow('Canvas image preview node display width must be a positive finite number.');
-    expect(() => canvasImagePreviewWidth({
-      nodeDisplayWidth: 2400,
-      sourceWidth: 0,
-      resourceZoom: 1,
-      devicePixelRatio: 1
-    })).toThrow('Canvas image preview source width must be a positive finite number.');
-  });
-
   it('keeps preview URLs limited to path, revision, and dynamic width', () => {
     expect(canvasImageSource({
       node: nodeFixture('flow/cover art.png', 1000, 'image/png'),
@@ -152,21 +77,18 @@ describe('canvas image preview URLs', () => {
     });
   });
 
-  it('does not copy source file query params into preview URLs', () => {
+  it('rejects raw-file URLs outside the exact Runtime response shape', () => {
     const path = '阿咕/阿咕-形象总览.png';
-    const node = nodeFixture(path, 5120, 'image/png', true, 5120, rawUrl(path, 'test-token'));
-
-    const source = canvasImageSource({
-      node,
+    expect(() => canvasImageSource({
+      node: nodeFixture(path, 5120, 'image/png', true, 5120, `https://elsewhere.invalid${rawUrl(path)}`),
       resourceZoom: 0.1,
       devicePixelRatio: 1
-    });
-
-    expect(source).toEqual({
-      src: previewUrl(path, 640),
-      previewWidth: 640
-    });
-    expect(source!.src).not.toContain('test-token');
+    })).toThrow('Canvas file URL must be a relative Runtime raw-file URL.');
+    expect(() => canvasImageSource({
+      node: nodeFixture(path, 5120, 'image/png', true, 5120, `${rawUrl(path)}&ignored=test-token`),
+      resourceZoom: 0.1,
+      devicePixelRatio: 1
+    })).toThrow('Canvas file URL must be a relative Runtime raw-file URL.');
   });
 
 });
@@ -200,13 +122,9 @@ function nodeFixture(
   };
 }
 
-function rawUrl(path: string, ignoredToken?: string): string {
-  const url = new URL(`http://127.0.0.1:17321/api/projects/123e4567-e89b-42d3-a456-426614174000/files/raw/${path.split('/').map(encodeURIComponent).join('/')}`);
-  url.searchParams.set('v', 'rev');
-  if (ignoredToken) {
-    url.searchParams.set('ignored', ignoredToken);
-  }
-  return url.toString();
+function rawUrl(path: string): string {
+  const encodedPath = path.split('/').map(encodeURIComponent).join('/');
+  return `/api/projects/123e4567-e89b-42d3-a456-426614174000/files/raw/${encodedPath}?v=rev`;
 }
 
 function previewUrl(path: string, width: number): string {

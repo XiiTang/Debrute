@@ -1,4 +1,5 @@
 import React, { useEffect, useMemo, useRef } from 'react';
+import type { DebruteProductPlatform } from '@debrute/app-protocol';
 import {
   Clipboard,
   Copy,
@@ -35,13 +36,13 @@ export function WorkbenchContextMenu({
   position,
   onCommand,
   onClose,
-  desktopPlatform
+  productPlatform
 }: {
   items: WorkbenchContextMenuItem[];
   position: WorkbenchContextMenuPosition;
   onCommand: (command: WorkbenchContextMenuCommand) => void;
   onClose: () => void;
-  desktopPlatform?: NodeJS.Platform | undefined;
+  productPlatform: DebruteProductPlatform;
 }): React.ReactElement | null {
   const i18n = useI18n();
   const menuRef = useRef<HTMLDivElement | null>(null);
@@ -54,8 +55,8 @@ export function WorkbenchContextMenu({
       height: CONTEXT_MENU_VERTICAL_PADDING + actionCount * CONTEXT_MENU_ROW_HEIGHT + separatorCount * 9
     },
     viewportSize: {
-      width: globalThis.window?.innerWidth ?? 1280,
-      height: globalThis.window?.innerHeight ?? 720
+      width: window.innerWidth,
+      height: window.innerHeight
     }
   }), [actionCount, separatorCount, position]);
 
@@ -122,7 +123,7 @@ export function WorkbenchContextMenu({
             }}
           >
             {item.command === 'reveal-in-system-file-manager'
-              ? projectSystemFileManagerLabelForLocale(desktopPlatform ?? 'linux', i18n)
+              ? projectSystemFileManagerLabelForLocale(productPlatform, i18n)
               : workbenchContextMenuCommandLabel(item.command, i18n)}
           </Menu.Item>
         )

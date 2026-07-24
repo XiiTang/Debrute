@@ -641,10 +641,13 @@ fn upload_stage_path(
     roots: &BTreeMap<String, (PathBuf, PathBuf)>,
 ) -> Result<PathBuf, ProjectError> {
     let top = upload_top_level(target_directory, path)?;
-    let stage = &roots.get(&top).ok_or(ProjectError::StatePoisoned)?.0;
+    let stage = &roots
+        .get(&top)
+        .expect("upload stage must exist for every accepted top-level path")
+        .0;
     let suffix = path
         .strip_prefix(&top)
-        .unwrap_or_default()
+        .expect("upload path must start with its derived top-level path")
         .trim_start_matches('/');
     Ok(if suffix.is_empty() {
         stage.clone()

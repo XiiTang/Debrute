@@ -1,5 +1,5 @@
 import { toBlob } from 'html-to-image';
-import type { ProjectTextLanguageId } from '@debrute/project-core';
+import type { ProjectTextLanguageId } from '@debrute/app-protocol';
 import {
   canvasTextPreviewFailureFromUnknown,
   type CanvasTextPreviewFailureFields

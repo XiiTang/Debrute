@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import { RefreshCw, RotateCw } from 'lucide-react';
 import type {
   DebruteDefaultFrontend,
@@ -10,7 +10,7 @@ import type {
   WorkbenchLocale,
   WorkbenchThemePreference
 } from '@debrute/app-protocol';
-import type { SettingsResource, WorkbenchActions } from '../../../types';
+import type { EventProjection, WorkbenchActions } from '../../../types';
 import { useI18n, type WorkbenchI18n } from '../../i18n';
 import type { WorkbenchResolvedTheme } from '../../services/workbenchTheme';
 import { Button, Field, Select, StatusPill, Toolbar, type StatusTone } from '../../ui';
@@ -22,27 +22,22 @@ type OperationState =
 
 type ProductUpdateAction = 'none' | 'check' | 'apply';
 
-type ProductActions = Pick<WorkbenchActions, 'getProductState' | 'checkProductUpdate' | 'applyProductUpdate'>;
+type ProductActions = Pick<WorkbenchActions, 'checkProductUpdate' | 'applyProductUpdate'>;
 
 export function GeneralSettingsPage({
   actions,
-  initialProductState,
+  product,
   settings,
   resolvedTheme,
   onSettingsChange
 }: {
   actions: ProductActions;
-  initialProductState?: DebruteProductState;
+  product: EventProjection<DebruteProductState | null>;
   settings: DebruteGlobalSettingsView;
   resolvedTheme: WorkbenchResolvedTheme;
   onSettingsChange: (settings: SaveDebruteGlobalSettingsInput) => Promise<void>;
 }): React.ReactElement {
   const i18n = useI18n();
-  const [productState, setProductState] = useState<SettingsResource<DebruteProductState>>(() => (
-    initialProductState
-      ? { status: 'ready', value: initialProductState }
-      : { status: 'loading' }
-  ));
   const [operation, setOperation] = useState<OperationState>({ status: 'idle' });
   const [themeDraft, setThemeDraft] = useState(settings.workbench.themePreference);
   const [localeDraft, setLocaleDraft] = useState(settings.workbench.locale);
@@ -63,26 +58,10 @@ export function GeneralSettingsPage({
     setDefaultFrontendDraft(settings.workbench.defaultFrontend);
   }, [settings.workbench.defaultFrontend]);
 
-  const loadProductState = useCallback(async () => {
-    setProductState({ status: 'loading' });
-    try {
-      setProductState({ status: 'ready', value: await actions.getProductState() });
-    } catch (error) {
-      setProductState({ status: 'error', message: errorMessage(error) });
-    }
-  }, [actions]);
-
-  useEffect(() => {
-    if (!initialProductState) {
-      void loadProductState();
-    }
-  }, [initialProductState, loadProductState]);
-
-  const run = async (action: () => Promise<DebruteProductState | { state: DebruteProductState }>) => {
+  const run = async (action: () => Promise<void>) => {
     setOperation({ status: 'loading' });
     try {
-      const result = await action();
-      setProductState({ status: 'ready', value: 'state' in result ? result.state : result });
+      await action();
       setOperation({ status: 'idle' });
     } catch (error) {
       setOperation({ status: 'error', message: errorMessage(error) });
@@ -187,7 +166,7 @@ export function GeneralSettingsPage({
               void saveDefaultFrontend(defaultFrontend);
             }}
           >
-            <option value="electron">{i18n.t('settings.general.defaultFrontend.electron')}</option>
+            <option value="desktop">{i18n.t('settings.general.defaultFrontend.desktop')}</option>
             <option value="browser">{i18n.t('settings.general.defaultFrontend.browser')}</option>
             <option value="runtime-only">{i18n.t('settings.general.defaultFrontend.runtimeOnly')}</option>
           </Select>
@@ -200,40 +179,31 @@ export function GeneralSettingsPage({
         <div className="settings-property-grid">
           <small><span>{i18n.t('settings.general.name')}</span>Debrute</small>
           <small><span>{i18n.t('settings.general.surface')}</span>{i18n.t('settings.general.surface.desktopPackaged')}</small>
-          {productState.status === 'ready' ? (
+          {product.status === 'ready' && product.value ? (
             <>
-              <small><span>{i18n.t('settings.general.currentVersion')}</span>{productState.value.productVersion}</small>
-              <small><span>{i18n.t('settings.general.platform')}</span>{productState.value.platform}</small>
-              <small><span>{i18n.t('settings.general.cliDiagnostic')}</span>{cliDiagnosticLabel(productState.value.cli, i18n)}</small>
+              <small><span>{i18n.t('settings.general.currentVersion')}</span>{product.value.productVersion}</small>
+              <small><span>{i18n.t('settings.general.platform')}</span>{product.value.platform}</small>
+              <small><span>{i18n.t('settings.general.cliDiagnostic')}</span>{cliDiagnosticLabel(product.value.cli, i18n)}</small>
             </>
           ) : null}
         </div>
       </section>
-      {productState.status === 'ready' ? (
+      {product.status === 'ready' && product.value ? (
         <ProductUpdateSection
-          state={productState.value.update}
+          state={product.value.update}
           operation={operation}
           actions={actions}
           run={run}
           i18n={i18n}
         />
-      ) : (
+      ) : product.status === 'loading' ? (
         <section className="settings-group">
           <h3>{i18n.t('settings.general.updates')}</h3>
-          {productState.status === 'loading' ? (
-            <div className="settings-resource-state" aria-busy="true">
-              <small>{i18n.t('settings.general.productState.loading')}</small>
-            </div>
-          ) : (
-            <div className="settings-resource-state settings-resource-state--error" role="alert">
-              <small>{i18n.t('settings.general.productState.loadFailed', { message: productState.message })}</small>
-              <Button type="button" iconStart={<RefreshCw size={14} />} onClick={() => void loadProductState()}>
-                {i18n.t('settings.resource.retry')}
-              </Button>
-            </div>
-          )}
+          <div className="settings-resource-state" aria-busy="true">
+            <small>{i18n.t('settings.general.productState.loading')}</small>
+          </div>
         </section>
-      )}
+      ) : null}
     </div>
   );
 }
@@ -263,7 +233,7 @@ function ProductUpdateSection({
   state: ProductUpdateState;
   operation: OperationState;
   actions: ProductActions;
-  run: (action: () => Promise<DebruteProductState | { state: DebruteProductState }>) => Promise<void>;
+  run: (action: () => Promise<void>) => Promise<void>;
   i18n: WorkbenchI18n;
 }): React.ReactElement {
   const action = productUpdateActionForState(state);

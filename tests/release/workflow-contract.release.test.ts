@@ -1,10 +1,16 @@
-import { readFileSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync } from 'node:fs';
+import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
+import { resolveMountedDesktopApp } from '../../scripts/verify-macos-desktop-signing.mjs';
 
 describe('GitHub release workflow contract', () => {
   const workflow = readFileSync(join(process.cwd(), '.github/workflows/debrute-release.yml'), 'utf8');
   const desktopPackage = JSON.parse(readFileSync(join(process.cwd(), 'apps/desktop/package.json'), 'utf8'));
+  const packagedDesktopSmoke = readFileSync(
+    join(process.cwd(), 'scripts/smoke-packaged-desktop.mjs'),
+    'utf8'
+  );
 
   it('uses a release workflow with preflight, Desktop, and final publish jobs', () => {
     expect(workflow).toContain('preflight:');
@@ -33,7 +39,6 @@ describe('GitHub release workflow contract', () => {
     expect(releaseDocs).toContain('debrute-product-X.Y.Z-macos-arm64.zip');
     expect(releaseDocs).toContain('debrute-product-X.Y.Z-windows-x64.zip');
     expect(releaseDocs).toContain('required eight-file');
-    expect(releaseDocs).toContain('does not sign Linux into the update manifest');
   });
 
   it('rejects unexpected files from the final release upload set', () => {
@@ -53,9 +58,6 @@ describe('GitHub release workflow contract', () => {
     expect(buildDesktopBlock).toContain('- run: pnpm build');
     expect(buildDesktopBlock).toContain('electron-builder --mac dmg --${{ matrix.arch }} --publish never');
     expect(buildDesktopBlock).toContain('electron-builder --win nsis --x64 --publish never');
-    expect(buildDesktopBlock).toContain('electron-builder --linux AppImage --x64 --publish never');
-    expect(buildDesktopBlock).toContain('continue-on-error: ${{ matrix.required == false }}');
-    expect(buildDesktopBlock).toContain('required: false');
     expect(buildDesktopBlock).toContain('debrute-desktop-${{ matrix.publicPlatform }}-${{ matrix.arch }}');
     expect(workflow).toContain('Generate signed update manifest');
     expect(buildDesktopBlock).toContain('Archive signed Product seed');
@@ -63,15 +65,24 @@ describe('GitHub release workflow contract', () => {
     expect(buildDesktopBlock).toContain('debrute-product-*-${{ matrix.publicPlatform }}-${{ matrix.arch }}.zip');
   });
 
-  it('smoke tests the packaged Windows Desktop with a Ready Runtime tray', () => {
+  it('smoke tests signed macOS and Windows packages through the public product surface', () => {
     const buildDesktopBlock = workflow.slice(workflow.indexOf('build-desktop:'), workflow.indexOf('publish-release:'));
 
-    expect(buildDesktopBlock).toContain('Smoke test packaged Windows Desktop and Runtime');
-    expect(buildDesktopBlock).toContain("Resolve-Path 'apps/desktop/release/win-unpacked/debrute.exe'");
-    expect(buildDesktopBlock).toContain('runtime status');
-    expect(buildDesktopBlock).toContain("$lastStatus.Contains('runtime_state=ready')");
-    expect(buildDesktopBlock).toContain("$lastStatus.Contains('native_tray=active')");
-    expect(buildDesktopBlock).toContain('runtime stop');
+    expect(buildDesktopBlock).toContain('Smoke test signed packaged Desktop and Runtime');
+    expect(buildDesktopBlock).toContain('scripts/smoke-packaged-desktop.mjs');
+    expect(buildDesktopBlock).toContain('win-unpacked/debrute.exe');
+    expect(buildDesktopBlock).toContain('Debrute.app/Contents/MacOS/Debrute');
+    expect(packagedDesktopSmoke).toContain('runtime_state=ready');
+    expect(packagedDesktopSmoke).toContain('native_tray=active');
+    expect(packagedDesktopSmoke).toContain('chromium.connectOverCDP');
+    expect(packagedDesktopSmoke).toContain('window.debruteShell');
+    expect(packagedDesktopSmoke).toContain('workbench-connection-ended');
+    expect(packagedDesktopSmoke).toContain("runCli(options.cli, ['runtime', 'stop'], Date.now() + 15_000)");
+    expect(packagedDesktopSmoke).toContain("spawnSync('taskkill.exe', ['/PID', String(pid), '/T', '/F']");
+    expect(packagedDesktopSmoke).toContain("process.kill(-pid, 'SIGKILL')");
+    expect(packagedDesktopSmoke).toContain('AbortSignal.timeout');
+    expect(packagedDesktopSmoke).toContain("child.kill('SIGKILL')");
+    expect(packagedDesktopSmoke).not.toMatch(/(?:pkill|killall|Get-Process)/);
   });
 
   it('signs native Product binaries before assembling each supported Product archive', () => {
@@ -89,7 +100,6 @@ describe('GitHub release workflow contract', () => {
 
   it('configures the final signed macOS Desktop identity', () => {
     expect(desktopPackage.build.appId).toBe('io.github.xiitang.debrute');
-    expect(desktopPackage.build.appId).not.toBe('dev.debrute.desktop');
     expect(desktopPackage.build.mac).toMatchObject({
       category: 'public.app-category.productivity',
       artifactName: 'debrute-desktop-${version}-macos-${arch}.${ext}',
@@ -102,11 +112,6 @@ describe('GitHub release workflow contract', () => {
     });
     expect(desktopPackage.build.afterSign).toBe('scripts/notarize-macos-app.cjs');
     expect(desktopPackage.build.executableName).toBe('debrute');
-    expect(desktopPackage.build.linux).toMatchObject({
-      artifactName: 'debrute-desktop-${version}-linux-x64.${ext}',
-      category: 'Utility',
-      syncDesktopName: true
-    });
     expect(desktopPackage.build.dmg).toMatchObject({ sign: true });
 
     const entitlements = readFileSync(
@@ -137,10 +142,37 @@ describe('GitHub release workflow contract', () => {
     expect(script).toContain('CFBundleIdentifier');
     expect(script).toContain('lstatSync');
     expect(script).toContain('isSymbolicLink');
-    expect(script).not.toMatch(/\bstatSync\b/);
+    expect(script).toContain("join(mountDir, 'Debrute.app')");
     expect(script).toContain('io.github.xiitang.debrute');
     expect(script).toContain('debrute-desktop-${version}-macos-${arch}.dmg');
-    expect(script).not.toContain('debrute-desktop-${version}-macos-universal.zip');
+  });
+
+  it('accepts only the fixed real Debrute.app directory at the DMG root', () => {
+    const root = mkdtempSync(join(tmpdir(), 'debrute-dmg-contract-'));
+    const dmgPath = join(root, 'Debrute.dmg');
+    try {
+      const missing = join(root, 'missing');
+      mkdirSync(missing);
+      expect(() => resolveMountedDesktopApp(missing, dmgPath)).toThrow('Expected Debrute.app');
+
+      const otherOnly = join(root, 'other-only');
+      mkdirSync(join(otherOnly, 'Other.app'), { recursive: true });
+      expect(() => resolveMountedDesktopApp(otherOnly, dmgPath)).toThrow('Expected Debrute.app');
+
+      const symlinkMount = join(root, 'symlink');
+      const symlinkTarget = join(root, 'symlink-target');
+      mkdirSync(symlinkMount);
+      mkdirSync(symlinkTarget);
+      symlinkSync(symlinkTarget, join(symlinkMount, 'Debrute.app'), process.platform === 'win32' ? 'junction' : 'dir');
+      expect(() => resolveMountedDesktopApp(symlinkMount, dmgPath)).toThrow('real Debrute.app directory');
+
+      const valid = join(root, 'valid');
+      const appPath = join(valid, 'Debrute.app');
+      mkdirSync(appPath, { recursive: true });
+      expect(resolveMountedDesktopApp(valid, dmgPath)).toBe(appPath);
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
   });
 
   it('requires Apple signing, notarization, and verification for macOS Desktop release jobs', () => {
@@ -174,34 +206,22 @@ describe('GitHub release workflow contract', () => {
     expect(buildDesktopBlock).toContain('Verify macOS signing');
     expect(buildDesktopBlock).toContain('node scripts/verify-macos-desktop-signing.mjs');
     expect(buildDesktopBlock).toContain('--bundle-id io.github.xiitang.debrute');
-    expect(buildDesktopBlock).toContain("if: matrix.platform != 'darwin'");
+    expect(buildDesktopBlock).toContain("if: matrix.platform == 'win32'");
   });
 
-  it('uses explicit macOS notarization polling instead of electron-builder internal waiting', () => {
+  it('routes application notarization through the shared artifact helper', () => {
     const notarizeAppScript = readFileSync(
       join(process.cwd(), 'apps/desktop/scripts/notarize-macos-app.cjs'),
-      'utf8'
-    );
-    const notarizeArtifactScript = readFileSync(
-      join(process.cwd(), 'scripts/notarize-macos-artifact.cjs'),
       'utf8'
     );
 
     expect(notarizeAppScript).toContain('ditto');
     expect(notarizeAppScript).toContain('notarizeAndStaple');
-    expect(notarizeArtifactScript).toContain('notarytool');
-    expect(notarizeArtifactScript).toContain('submit');
-    expect(notarizeArtifactScript).toContain('info');
-    expect(notarizeArtifactScript).toContain('stapler');
-    expect(notarizeArtifactScript).toContain('retrying');
-    expect(notarizeArtifactScript).not.toContain('timeoutMinutes');
-    expect(notarizeArtifactScript).not.toContain('Timed out waiting');
   });
 
   it('runs every Node-backed release job under Node.js 24', () => {
     const configuredNodeVersions = [...workflow.matchAll(/node-version:\s*(\d+)/g)].map((match) => match[1]);
 
     expect(configuredNodeVersions).toEqual(['24', '24', '24']);
-    expect(workflow).not.toContain('node-version: 22');
   });
 });

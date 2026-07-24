@@ -31,11 +31,6 @@ impl RevisionedFilePlan {
     }
 
     #[must_use]
-    pub fn status_code(&self) -> u16 {
-        if self.range.is_some() { 206 } else { 200 }
-    }
-
-    #[must_use]
     pub fn content_range(&self) -> Option<String> {
         self.range
             .map(|range| format!("bytes {}-{}/{}", range.start, range.end, self.file_size))

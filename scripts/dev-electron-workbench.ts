@@ -19,7 +19,7 @@ const developmentOptions = parseWorkbenchDevelopmentOptions(process.argv.slice(2
 const desktopRoot = join(workspaceRoot, 'apps/desktop');
 const desktopRequire = createRequire(join(desktopRoot, 'package.json'));
 const electronEntrypoint = desktopRequire('electron') as string;
-const electronArguments = developmentElectronArguments(process.env.DEBRUTE_ELECTRON_REMOTE_DEBUGGING_PORT);
+const electronArguments = ['.'];
 let vite: ChildProcess | undefined;
 let electron: ChildProcess | undefined;
 let shutdown: Promise<void> | undefined;
@@ -111,20 +111,6 @@ function requestShutdown(): Promise<void> {
     control.close();
   });
   return shutdown;
-}
-
-function developmentElectronArguments(remoteDebuggingPort: string | undefined): string[] {
-  if (remoteDebuggingPort === undefined) {
-    return ['.'];
-  }
-  if (!/^\d+$/.test(remoteDebuggingPort) || Number(remoteDebuggingPort) < 1 || Number(remoteDebuggingPort) > 65_535) {
-    throw new Error('DEBRUTE_ELECTRON_REMOTE_DEBUGGING_PORT must be a TCP port from 1 to 65535.');
-  }
-  return [
-    '.',
-    '--remote-debugging-address=127.0.0.1',
-    `--remote-debugging-port=${remoteDebuggingPort}`
-  ];
 }
 
 function ensureDevelopmentElectronIsSigned(): void {

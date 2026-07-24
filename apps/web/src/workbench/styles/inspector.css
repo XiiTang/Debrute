@@ -84,11 +84,6 @@
   font-size: var(--db-font-xs);
 }
 
-.inspector-node-controls {
-  display: flex;
-  gap: 8px;
-}
-
 .asset-ai-metadata summary {
   cursor: pointer;
   color: var(--db-text);

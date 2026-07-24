@@ -3,7 +3,6 @@ import type { CanvasProjection } from '@debrute/canvas-core';
 import {
   beginCanvasMinimapDrag,
   buildCanvasMinimapStaticModel,
-  buildCanvasMinimapModel,
   buildCanvasMinimapViewportModel,
   canvasPointToMinimapPoint,
   canvasCameraForMinimapCenter,
@@ -14,7 +13,7 @@ import {
 
 describe('canvasMinimap geometry', () => {
   it('builds content bounds from valid nodes and the current camera', () => {
-    const model = buildCanvasMinimapModel({
+    const staticModel = buildCanvasMinimapStaticModel({
       nodes: [
         nodeFixture('flow/a.png', 0, 0, 100, 100),
         nodeFixture('flow/selected.png', 800, 400, 200, 100),
@@ -27,18 +26,23 @@ describe('canvasMinimap geometry', () => {
       padding: 10
     });
 
-    expect(model).toBeDefined();
-    expect(model?.transform.contentBounds).toEqual({ x: 0, y: 0, width: 2200, height: 1100 });
-    expect(model?.nodeRects.map((node) => node.projectRelativePath)).toEqual([
+    expect(staticModel).toBeDefined();
+    expect(staticModel?.transform.contentBounds).toEqual({ x: 0, y: 0, width: 2200, height: 1100 });
+    expect(staticModel?.nodeRects.map((node) => node.projectRelativePath)).toEqual([
       'flow/a.png',
       'flow/selected.png'
     ]);
-    expect(model?.nodeRects.find((node) => node.projectRelativePath === 'flow/selected.png')?.selected).toBe(true);
-    expect(model?.transform.scale).toBeCloseTo(0.090909, 5);
-    expect(model?.viewportRect.x).toBeCloseTo(28.1818, 4);
-    expect(model?.viewportRect.y).toBeCloseTo(34.0909, 4);
-    expect(model?.viewportRect.width).toBeCloseTo(181.8182, 4);
-    expect(model?.viewportRect.height).toBeCloseTo(90.9091, 4);
+    expect(staticModel?.nodeRects.find((node) => node.projectRelativePath === 'flow/selected.png')?.selected).toBe(true);
+    expect(staticModel?.transform.scale).toBeCloseTo(0.090909, 5);
+    const viewport = buildCanvasMinimapViewportModel({
+      transform: staticModel!.transform,
+      camera: { x: -100, y: -50, z: 0.5 },
+      surfaceSize: { width: 1000, height: 500 }
+    });
+    expect(viewport?.viewportRect.x).toBeCloseTo(28.1818, 4);
+    expect(viewport?.viewportRect.y).toBeCloseTo(34.0909, 4);
+    expect(viewport?.viewportRect.width).toBeCloseTo(181.8182, 4);
+    expect(viewport?.viewportRect.height).toBeCloseTo(90.9091, 4);
   });
 
   it('splits static node geometry from dynamic viewport geometry', () => {
@@ -72,7 +76,7 @@ describe('canvasMinimap geometry', () => {
   });
 
   it('round trips Canvas and minimap points through the model transform', () => {
-    const model = buildCanvasMinimapModel({
+    const model = buildCanvasMinimapStaticModel({
       nodes: [nodeFixture('flow/a.png', 0, 0, 100, 100)],
       selection: undefined,
       camera: { x: -100, y: -50, z: 0.5 },
@@ -98,7 +102,7 @@ describe('canvasMinimap geometry', () => {
   });
 
   it('preserves pointer offset when dragging from inside the current visible rectangle', () => {
-    const model = buildCanvasMinimapModel({
+    const staticModel = buildCanvasMinimapStaticModel({
       nodes: [nodeFixture('flow/a.png', 0, 0, 100, 100)],
       selection: undefined,
       camera: { x: -100, y: -50, z: 0.5 },
@@ -106,6 +110,12 @@ describe('canvasMinimap geometry', () => {
       minimapSize: { width: 220, height: 150 },
       padding: 10
     })!;
+    const viewport = buildCanvasMinimapViewportModel({
+      transform: staticModel.transform,
+      camera: { x: -100, y: -50, z: 0.5 },
+      surfaceSize: { width: 1000, height: 500 }
+    })!;
+    const model = { ...staticModel, ...viewport };
     const startPoint = canvasPointToMinimapPoint({ x: 1200, y: 600 }, model.transform);
     const drag = beginCanvasMinimapDrag({
       pointerId: 7,
@@ -128,7 +138,7 @@ describe('canvasMinimap geometry', () => {
   it('keeps using the drag-start transform when camera updates change minimap bounds', () => {
     const surfaceSize = { width: 1000, height: 500 };
     const camera = { x: 0, y: 0, z: 1 };
-    const initialModel = buildCanvasMinimapModel({
+    const initialStaticModel = buildCanvasMinimapStaticModel({
       nodes: [nodeFixture('flow/a.png', 0, 0, 100, 100)],
       selection: undefined,
       camera,
@@ -136,6 +146,12 @@ describe('canvasMinimap geometry', () => {
       minimapSize: { width: 220, height: 150 },
       padding: 10
     })!;
+    const initialViewport = buildCanvasMinimapViewportModel({
+      transform: initialStaticModel.transform,
+      camera,
+      surfaceSize
+    })!;
+    const initialModel = { ...initialStaticModel, ...initialViewport };
     const startPoint = {
       x: initialModel.viewportRect.x + initialModel.viewportRect.width / 2,
       y: initialModel.viewportRect.y + initialModel.viewportRect.height / 2
@@ -153,7 +169,7 @@ describe('canvasMinimap geometry', () => {
       camera,
       surfaceSize
     });
-    const updatedModel = buildCanvasMinimapModel({
+    const updatedModel = buildCanvasMinimapStaticModel({
       nodes: [nodeFixture('flow/a.png', 0, 0, 100, 100)],
       selection: undefined,
       camera: firstCamera,
@@ -183,7 +199,7 @@ describe('canvasMinimap geometry', () => {
   });
 
   it('returns undefined when there are no valid nodes or camera z is invalid', () => {
-    expect(buildCanvasMinimapModel({
+    expect(buildCanvasMinimapStaticModel({
       nodes: [nodeFixture('flow/invalid.png', 0, 0, 0, 100)],
       selection: undefined,
       camera: { x: 0, y: 0, z: 1 },
@@ -191,12 +207,15 @@ describe('canvasMinimap geometry', () => {
       minimapSize: { width: 220, height: 150 }
     })).toBeUndefined();
 
-    expect(buildCanvasMinimapModel({
-      nodes: [nodeFixture('flow/a.png', 0, 0, 100, 100)],
-      selection: undefined,
+    expect(buildCanvasMinimapViewportModel({
+      transform: {
+        contentBounds: { x: 0, y: 0, width: 100, height: 100 },
+        scale: 1,
+        offsetX: 0,
+        offsetY: 0
+      },
       camera: { x: 0, y: 0, z: 0 },
-      surfaceSize: { width: 1000, height: 500 },
-      minimapSize: { width: 220, height: 150 }
+      surfaceSize: { width: 1000, height: 500 }
     })).toBeUndefined();
   });
 });
@@ -221,7 +240,7 @@ function nodeFixture(
       state: 'available',
       size: 100,
       mimeType: 'image/png',
-      fileUrl: `http://127.0.0.1:17321/api/projects/123e4567-e89b-42d3-a456-426614174000/files/raw/${path}?v=rev`,
+      fileUrl: `/api/projects/123e4567-e89b-42d3-a456-426614174000/files/raw/${path}?v=rev`,
       revision: 'rev'
     }
   };

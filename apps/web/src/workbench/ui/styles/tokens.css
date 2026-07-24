@@ -53,7 +53,6 @@
   --db-danger: oklch(0.66 0.2 26);
   --db-danger-bg: color-mix(in oklch, var(--db-danger) 16%, var(--db-bg));
   --db-info: oklch(0.72 0.12 235);
-  --db-success: oklch(0.74 0.13 155);
   --db-shadow-menu: 0 16px 42px rgb(0 0 0 / 32%);
   --db-shadow-panel: 0 22px 62px rgb(0 0 0 / 38%);
   --db-shadow-floating: 0 14px 38px rgb(0 0 0 / 28%);
@@ -86,7 +85,6 @@
   --db-danger: oklch(0.58 0.2 26);
   --db-danger-bg: color-mix(in oklch, var(--db-danger) 12%, var(--db-bg));
   --db-info: oklch(0.58 0.12 235);
-  --db-success: oklch(0.58 0.13 155);
   --db-shadow-menu: 0 16px 42px rgb(17 24 39 / 16%);
   --db-shadow-panel: 0 22px 62px rgb(17 24 39 / 18%);
   --db-shadow-floating: 0 14px 38px rgb(17 24 39 / 14%);

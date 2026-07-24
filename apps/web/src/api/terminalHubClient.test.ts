@@ -1,4 +1,4 @@
-import { describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { createTerminalHubClient } from './terminalHubClient';
 
 class FakeWebSocket extends EventTarget {
@@ -26,12 +26,18 @@ class FakeWebSocket extends EventTarget {
 }
 
 describe('multiplexed Terminal hub client', () => {
-  it('binds one Project socket, renders checkpoints, and acknowledges ordered input', async () => {
+  beforeEach(() => {
     FakeWebSocket.instances = [];
-    const client = createTerminalHubClient({
-      WebSocket: FakeWebSocket as unknown as typeof WebSocket,
-      origin: 'http://127.0.0.1:41001'
-    });
+    vi.stubGlobal('WebSocket', FakeWebSocket);
+    vi.stubGlobal('location', { origin: 'http://127.0.0.1:41001' });
+  });
+
+  afterEach(() => {
+    vi.unstubAllGlobals();
+  });
+
+  it('binds one Project socket, renders checkpoints, and acknowledges ordered input', async () => {
+    const client = createTerminalHubClient();
     client.bindProject('project-1', 'connection-1');
     const socket = FakeWebSocket.instances[0]!;
     socket.emit('open');
@@ -43,7 +49,7 @@ describe('multiplexed Terminal hub client', () => {
     });
 
     const events: unknown[] = [];
-    client.subscribe('terminal-1', (event) => events.push(event));
+    client.subscribe('terminal-1', (event) => events.push(event), vi.fn());
     socket.emit('message', {
       type: 'sync',
       protocolVersion: 1,
@@ -83,15 +89,19 @@ describe('multiplexed Terminal hub client', () => {
   });
 
   it('rejects pending input on loss and does not reconnect', async () => {
-    FakeWebSocket.instances = [];
-    const client = createTerminalHubClient({ WebSocket: FakeWebSocket as unknown as typeof WebSocket });
+    const client = createTerminalHubClient();
     client.bindProject('project-1', 'connection-1');
     const socket = FakeWebSocket.instances[0]!;
     socket.emit('open');
+    const onError = vi.fn();
+    client.subscribe('terminal-1', vi.fn(), onError);
     const pending = client.writeInput('terminal-1', 'x');
     socket.emit('close');
     await expect(pending).rejects.toThrow('not replayed');
     await Promise.resolve();
+    expect(onError).toHaveBeenCalledWith(expect.objectContaining({
+      message: 'Terminal connection was lost.'
+    }));
     expect(FakeWebSocket.instances).toHaveLength(1);
     client.dispose();
   });

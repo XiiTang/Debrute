@@ -20,9 +20,8 @@ invalidates the cache.
 
 ## Install Backends
 
-Media integrations use Homebrew on macOS and winget on Windows. System-package
-operations are currently unsupported on Linux. The Python CLI integration
-prefers `uv` and falls back to `pipx` when `uv` is unavailable.
+Media integrations use Homebrew on macOS and winget on Windows. The Python CLI
+integration prefers `uv` and falls back to `pipx` when `uv` is unavailable.
 
 Available install, update, and uninstall actions are derived from the detected
 integration state, backend availability, and package-manager query. The
@@ -48,12 +47,23 @@ The UI disables all integration actions and rescanning while an operation is in
 flight. Runtime events publish the running and settled settings views. After an
 attempt completes, the runtime performs a fresh status scan; expected failures
 return structured diagnostics instead of being converted into successful state.
+Rescan and operation command responses contain only their closed outcome and any
+operation diagnostic. The initiating Workbench does not apply a second settings
+view from that response: like every other open Workbench, it updates from the
+ordered Global Integration event. UI command progress is independent of that
+authoritative projection, with no response-revision wait or response-state
+fallback.
+The settled projection is part of completing the operation result: Runtime does
+not return a successful command result after failing to publish that projection.
+Exhausting the internal Global revision or integration generation is an
+unrecoverable Runtime invariant failure rather than an Integration diagnostic;
+the process exits instead of continuing with Workbenches observing different
+states. A later explicit launch performs the ordinary fresh status scan.
 
-This remains a domain-specific operation boundary for the current
-Runtime/Desktop/Web lifecycle refactor. A follow-up Operation initiative must
-either replace it with the closed Runtime Operation model or explicitly retain
-it as an exception; the current refactor must not grow a partial generic
-registry, detached-job API, or compatibility layer around it.
+This remains a domain-specific operation boundary. The initial Runtime
+Operation initiative covers only model generation and explicitly retains this
+Integration exception; it must not wrap the service in a partial generic
+registry, detached-job API, or compatibility layer.
 
 This catalog-defined execution boundary is recorded in
 [`0010-integration-operations-are-catalog-defined.md`](./adr/0010-integration-operations-are-catalog-defined.md).

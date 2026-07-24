@@ -16,5 +16,4 @@ Update releases therefore include a complete Product archive beside each
 supported macOS/Windows Desktop installer. Runtime authenticates both through
 the same signed release manifest, fully materializes the archive before
 starting the commit, installs Desktop first, advances `current` second, and
-retires the previous version only after the target Runtime is Ready. Linux is a
-best-effort Desktop artifact and is not a supported Product/update target.
+retires the previous version only after the target Runtime is Ready.

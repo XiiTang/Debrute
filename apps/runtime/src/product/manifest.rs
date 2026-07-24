@@ -153,7 +153,6 @@ impl ProductManifest {
 pub enum ReleasePlatform {
     Macos,
     Windows,
-    Linux,
 }
 
 impl ReleasePlatform {
@@ -161,7 +160,6 @@ impl ReleasePlatform {
         match self {
             Self::Macos => "macos",
             Self::Windows => "windows",
-            Self::Linux => "linux",
         }
     }
 
@@ -169,7 +167,6 @@ impl ReleasePlatform {
         match self {
             Self::Macos => "dmg",
             Self::Windows => "exe",
-            Self::Linux => "AppImage",
         }
     }
 }
@@ -349,17 +346,8 @@ impl TrustedReleaseAsset {
             && self.url == format!("{GITHUB_RELEASE_ROOT}/v{version}/{expected_name}")
             && is_lower_hex_sha256(&self.sha256)
             && self.size_bytes > 0
-            && match self.kind {
-                ReleaseAssetKind::Desktop => {
-                    self.platform == ReleasePlatform::Macos
-                        || self.architecture == ReleaseArchitecture::X64
-                }
-                ReleaseAssetKind::Product => {
-                    self.platform != ReleasePlatform::Linux
-                        && (self.platform == ReleasePlatform::Macos
-                            || self.architecture == ReleaseArchitecture::X64)
-                }
-            }
+            && (self.platform == ReleasePlatform::Macos
+                || self.architecture == ReleaseArchitecture::X64)
     }
 }
 
@@ -521,9 +509,6 @@ fn validate_release_wire(
         validate_release_asset(asset, &wire.version, &wire.release_tag)?;
     }
     for (kind, platform, architecture) in targets.clone() {
-        if platform == ReleasePlatform::Linux {
-            continue;
-        }
         let companion = match kind {
             ReleaseAssetKind::Desktop => ReleaseAssetKind::Product,
             ReleaseAssetKind::Product => ReleaseAssetKind::Desktop,
@@ -550,9 +535,7 @@ fn validate_release_asset(
     version: &str,
     release_tag: &str,
 ) -> Result<(), SignedManifestError> {
-    if (asset.platform != ReleasePlatform::Macos && asset.architecture != ReleaseArchitecture::X64)
-        || (asset.kind == ReleaseAssetKind::Product && asset.platform == ReleasePlatform::Linux)
-    {
+    if asset.platform != ReleasePlatform::Macos && asset.architecture != ReleaseArchitecture::X64 {
         return Err(SignedManifestError::UnsupportedTarget {
             platform: asset.platform,
             architecture: asset.architecture,

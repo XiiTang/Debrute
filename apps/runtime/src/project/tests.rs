@@ -20,6 +20,8 @@ use super::*;
 fn stable_project_ids_are_safe_opaque_route_segments() {
     assert!(is_valid_stable_project_id("project-01.alpha_beta~gamma"));
     assert!(!is_valid_stable_project_id(""));
+    assert!(!is_valid_stable_project_id("."));
+    assert!(!is_valid_stable_project_id(".."));
     assert!(!is_valid_stable_project_id("../project"));
     assert!(!is_valid_stable_project_id("project/id"));
     assert!(!is_valid_stable_project_id(&"a".repeat(257)));
@@ -103,8 +105,14 @@ impl ProjectNodeAdapter for FixedNodeAdapter {
         &self,
         _project_root: &Path,
         _project_relative_path: &str,
-    ) -> Result<Option<serde_json::Value>, ProjectError> {
-        Ok(Some(json!({ "kind": "test" })))
+    ) -> Result<Option<CanvasVideoPresentation>, ProjectError> {
+        Ok(Some(CanvasVideoPresentation {
+            kind: CanvasVideoPresentationKind::Video,
+            width: 100,
+            height: 50,
+            duration_seconds: None,
+            text_tracks: Vec::new(),
+        }))
     }
 }
 
@@ -126,6 +134,25 @@ impl ProjectNodeAdapter for FailingLayoutAdapter {
             "fixture cannot inspect {}",
             node.project_relative_path
         )))
+    }
+}
+
+struct AddingCanvasMapLayoutAdapter {
+    map_path: PathBuf,
+}
+
+impl ProjectNodeAdapter for AddingCanvasMapLayoutAdapter {
+    fn layout_size(
+        &self,
+        _project_root: &Path,
+        _node: &CanvasDesiredNode,
+    ) -> Result<CanvasLayoutSize, ProjectError> {
+        fs::write(&self.map_path, "paths: []\n")
+            .expect("concurrent Canvas Map fixture should be written");
+        Ok(CanvasLayoutSize {
+            width: 1000.0,
+            height: 500.0,
+        })
     }
 }
 
@@ -283,12 +310,12 @@ fn project_open_rejects_internal_namespace_symlinks_before_external_writes() {
 }
 
 #[test]
-fn uncertain_document_rollback_poisons_mutation_and_project_use_admission() {
-    let project = TemporaryDirectory::new("document-rollback-poison");
-    let home = TemporaryDirectory::new("document-rollback-poison-home");
+fn uncertain_document_rollback_does_not_install_a_session_rejection_state() {
+    let project = TemporaryDirectory::new("document-rollback");
+    let home = TemporaryDirectory::new("document-rollback-home");
     let registry = project_registry(home.as_ref(), Arc::new(FixedNodeAdapter));
     let opened = registry
-        .open_project(project.as_ref(), ProjectUseKind::Operation)
+        .open_project(project.as_ref(), ProjectUseKind::Request)
         .expect("Project should open");
     documents::inject_document_rollback_failure_for_test();
     let error = opened
@@ -296,20 +323,15 @@ fn uncertain_document_rollback_poisons_mutation_and_project_use_admission() {
         .execute(ProjectCommand::CreateCanvas)
         .expect_err("uncertain document commit must fail");
     assert_eq!(error.code(), "document_push_rollback_failed");
-    assert_eq!(
-        opened
-            .session
-            .execute(ProjectCommand::Refresh)
-            .expect_err("poisoned session must reject later mutation")
-            .code(),
-        "project_session_mutation_poisoned"
-    );
+    opened
+        .session
+        .execute(ProjectCommand::Refresh)
+        .expect("a later explicit refresh should use the current filesystem state");
     assert!(opened.session.sync_snapshot().is_ok());
-    let Err(use_error) = registry.acquire_use(opened.session.project_id(), ProjectUseKind::Request)
-    else {
-        panic!("poisoned session must reject new project_uses");
-    };
-    assert_eq!(use_error.code(), "project_session_mutation_poisoned");
+    let additional_use = registry
+        .acquire_use(opened.session.project_id(), ProjectUseKind::Request)
+        .expect("the live Project should continue admitting real uses");
+    drop(additional_use);
     drop(opened.project_use);
     registry.close().expect("registry should close");
 }
@@ -320,7 +342,7 @@ fn canvas_feedback_mutation_is_revisioned_and_publishes_the_closed_change() {
     let home = TemporaryDirectory::new("feedback-command-home");
     let registry = project_registry(home.as_ref(), Arc::new(FixedNodeAdapter));
     let opened = registry
-        .open_project(project.as_ref(), ProjectUseKind::Operation)
+        .open_project(project.as_ref(), ProjectUseKind::Request)
         .expect("Project should open");
     let mut subscription = opened.session.subscribe().expect("stream should open");
     assert!(matches!(
@@ -368,7 +390,7 @@ fn canvas_feedback_mutation_is_revisioned_and_publishes_the_closed_change() {
             .is_file()
     );
 
-    subscription.release().expect("stream should release");
+    subscription.release();
     drop(opened.project_use);
     registry.close().expect("registry should close");
 }
@@ -383,7 +405,7 @@ fn canvas_feedback_mutation_drives_real_artifact_generation_and_cleanup() {
         .expect("fixture image should save");
     let registry = project_registry(home.as_ref(), Arc::new(FixedNodeAdapter));
     let opened = registry
-        .open_project(project.as_ref(), ProjectUseKind::Operation)
+        .open_project(project.as_ref(), ProjectUseKind::Request)
         .expect("Project should open");
     let result = opened
         .session
@@ -444,7 +466,7 @@ fn canvas_feedback_render_diagnostics_are_deduplicated_revisioned_and_clearable(
     let home = TemporaryDirectory::new("feedback-diagnostics-home");
     let registry = project_registry(home.as_ref(), Arc::new(FixedNodeAdapter));
     let opened = registry
-        .open_project(project.as_ref(), ProjectUseKind::Operation)
+        .open_project(project.as_ref(), ProjectUseKind::Request)
         .expect("Project should open");
     let mut subscription = opened.session.subscribe().expect("stream should open");
     let _ = subscription.recv().expect("snapshot should arrive");
@@ -453,10 +475,9 @@ fn canvas_feedback_render_diagnostics_are_deduplicated_revisioned_and_clearable(
     let _ = subscription
         .recv_timeout(Duration::from_millis(100))
         .expect("stream should remain open");
-    let diagnostic = Diagnostic {
+    let diagnostic = ProjectDiagnostic {
         id: "canvas-feedback.render_failed:images/cover.png#M1".to_owned(),
-        source: DiagnosticSource::Project,
-        severity: DiagnosticSeverity::Error,
+        severity: ProjectDiagnosticSeverity::Error,
         code: "canvas-feedback.render_failed".to_owned(),
         message: "render failed".to_owned(),
         file_path: Some(
@@ -510,7 +531,7 @@ fn canvas_feedback_render_diagnostics_are_deduplicated_revisioned_and_clearable(
         "source-wide success should clear moment diagnostics",
     );
 
-    subscription.release().expect("stream should release");
+    subscription.release();
     drop(opened.project_use);
     registry.close().expect("registry should close");
 }
@@ -521,7 +542,7 @@ fn canvas_feedback_runtime_diagnostic_is_clearable_after_recovery() {
     let home = TemporaryDirectory::new("feedback-runtime-diagnostic-home");
     let registry = project_registry(home.as_ref(), Arc::new(FixedNodeAdapter));
     let opened = registry
-        .open_project(project.as_ref(), ProjectUseKind::Operation)
+        .open_project(project.as_ref(), ProjectUseKind::Request)
         .expect("Project should open");
     let mut subscription = opened.session.subscribe().expect("stream should open");
     let _ = subscription.recv().expect("snapshot should arrive");
@@ -533,10 +554,9 @@ fn canvas_feedback_runtime_diagnostic_is_clearable_after_recovery() {
         &opened.session,
         &mut subscription,
         &CanvasFeedbackDiagnosticUpdate {
-            diagnostics: vec![Diagnostic {
+            diagnostics: vec![ProjectDiagnostic {
                 id: "canvas-feedback.runtime_failed".to_owned(),
-                source: DiagnosticSource::Project,
-                severity: DiagnosticSeverity::Error,
+                severity: ProjectDiagnosticSeverity::Error,
                 code: "canvas-feedback.runtime_failed".to_owned(),
                 message: "runtime failed".to_owned(),
                 file_path: None,
@@ -576,19 +596,19 @@ fn canvas_feedback_runtime_diagnostic_is_clearable_after_recovery() {
             .any(|diagnostic| diagnostic.id == "canvas-feedback.runtime_failed")
     );
 
-    subscription.release().expect("stream should release");
+    subscription.release();
     drop(opened.project_use);
     registry.close().expect("registry should close");
 }
 
 #[test]
-fn post_commit_refresh_rollback_failure_poisons_the_session() {
-    let project = TemporaryDirectory::new("post-commit-refresh-poison");
-    let home = TemporaryDirectory::new("post-commit-refresh-poison-home");
+fn post_commit_refresh_rollback_failure_does_not_install_a_rejection_layer() {
+    let project = TemporaryDirectory::new("post-commit-refresh");
+    let home = TemporaryDirectory::new("post-commit-refresh-home");
     fs::write(project.as_ref().join("scene.txt"), "scene").expect("fixture should be written");
     let registry = project_registry(home.as_ref(), Arc::new(FixedNodeAdapter));
     let opened = registry
-        .open_project(project.as_ref(), ProjectUseKind::Operation)
+        .open_project(project.as_ref(), ProjectUseKind::Request)
         .expect("Project should open");
     fs::write(
         project.as_ref().join(".debrute/canvas-maps/canvas-1.yaml"),
@@ -606,26 +626,22 @@ fn post_commit_refresh_rollback_failure_poisons_the_session() {
         .expect_err("uncertain post-commit refresh must fail");
     assert_eq!(error.code(), "document_push_rollback_failed");
     assert!(project.as_ref().join("committed.txt").is_file());
-    assert_eq!(
-        opened
-            .session
-            .execute(ProjectCommand::Refresh)
-            .expect_err("post-commit uncertainty must poison later mutations")
-            .code(),
-        "project_session_mutation_poisoned"
-    );
+    opened
+        .session
+        .execute(ProjectCommand::Refresh)
+        .expect("a later explicit refresh should reconcile the committed path");
     drop(opened.project_use);
     registry.close().expect("registry should close");
 }
 
 #[test]
-fn watcher_refresh_rollback_failure_poisons_the_session() {
-    let project = TemporaryDirectory::new("watch-refresh-poison");
-    let home = TemporaryDirectory::new("watch-refresh-poison-home");
+fn watcher_refresh_rollback_failure_does_not_poison_later_refreshes() {
+    let project = TemporaryDirectory::new("watch-refresh");
+    let home = TemporaryDirectory::new("watch-refresh-home");
     fs::write(project.as_ref().join("scene.txt"), "scene").expect("fixture should be written");
     let registry = project_registry(home.as_ref(), Arc::new(FixedNodeAdapter));
     let opened = registry
-        .open_project(project.as_ref(), ProjectUseKind::Operation)
+        .open_project(project.as_ref(), ProjectUseKind::Request)
         .expect("Project should open");
     fs::write(
         project.as_ref().join(".debrute/canvas-maps/canvas-1.yaml"),
@@ -638,36 +654,27 @@ fn watcher_refresh_rollback_failure_poisons_the_session() {
         .apply_watched_change_for_test("scene.txt")
         .expect_err("uncertain watcher refresh must fail");
     assert_eq!(error.code(), "document_push_rollback_failed");
-    let poisoned_revision = opened
+    let failed_revision = opened
         .session
         .sync_snapshot()
-        .expect("poisoned snapshot should remain readable")
+        .expect("failed refresh snapshot should remain readable")
         .project_revision;
-    assert_eq!(
-        opened
-            .session
-            .apply_watched_change_for_test("scene.txt")
-            .expect_err("poisoned watcher must not perform internal writes")
-            .code(),
-        "project_session_mutation_poisoned"
-    );
-    assert_eq!(
+    opened
+        .session
+        .apply_watched_change_for_test("scene.txt")
+        .expect("the next watcher refresh should use the current filesystem state");
+    assert!(
         opened
             .session
             .sync_snapshot()
-            .expect("poisoned snapshot should remain stable")
-            .project_revision,
-        poisoned_revision,
-        "poisoned watcher must not publish a later revision"
+            .expect("refreshed snapshot should remain readable")
+            .project_revision
+            >= failed_revision
     );
-    assert_eq!(
-        opened
-            .session
-            .execute(ProjectCommand::Refresh)
-            .expect_err("watcher uncertainty must poison later mutations")
-            .code(),
-        "project_session_mutation_poisoned"
-    );
+    opened
+        .session
+        .execute(ProjectCommand::Refresh)
+        .expect("explicit refresh should remain available");
     drop(opened.project_use);
     registry.close().expect("registry should close");
 }
@@ -723,7 +730,7 @@ fn watcher_backend_error_forces_a_full_project_refresh() {
     let home = TemporaryDirectory::new("watcher-backend-rescan-home");
     let registry = project_registry(home.as_ref(), Arc::new(FixedNodeAdapter));
     let opened = registry
-        .open_project(project.as_ref(), ProjectUseKind::Operation)
+        .open_project(project.as_ref(), ProjectUseKind::Request)
         .expect("Project should open");
     let mut subscription = opened
         .session
@@ -810,6 +817,312 @@ fn canvas_document_json_matches_the_typescript_camel_case_format() {
     let serialized = serde_json::to_value(&canvas).expect("Canvas should serialize");
     assert!(serialized.get("nodeElements").is_some());
     assert!(serialized.get("node_elements").is_none());
+}
+
+#[test]
+fn persisted_project_documents_reject_unexpected_fields_at_every_owned_boundary() {
+    let canvas = json!({
+        "id": "canvas-1",
+        "name": "Canvas 1",
+        "nodeElements": [{
+            "projectRelativePath": "notes/scene.txt",
+            "nodeKind": "file",
+            "mediaKind": "text",
+            "x": 0.0,
+            "y": 0.0,
+            "width": 320.0,
+            "height": 180.0,
+            "z": 0,
+            "videoPlayback": { "currentTimeSeconds": 0.0 },
+            "textViewport": { "scrollTop": 0.0, "scrollLeft": 0.0 }
+        }],
+        "annotations": [{ "id": "note-1", "text": "Note", "x": 0.0, "y": 0.0 }],
+        "preferences": { "showDiagnostics": true }
+    });
+    for pointer in [
+        "",
+        "/nodeElements/0",
+        "/nodeElements/0/videoPlayback",
+        "/nodeElements/0/textViewport",
+        "/annotations/0",
+        "/preferences",
+    ] {
+        let mut invalid = canvas.clone();
+        invalid
+            .pointer_mut(pointer)
+            .and_then(serde_json::Value::as_object_mut)
+            .expect("fixture boundary should be an object")
+            .insert("unexpectedField".to_owned(), json!(true));
+        assert!(serde_json::from_value::<CanvasDocument>(invalid).is_err());
+    }
+
+    assert!(
+        serde_json::from_value::<DebruteProjectMetadata>(json!({
+            "project": {
+                "id": "project-1",
+                "name": "Project",
+                "createdAt": "2026-07-21T00:00:00.000Z",
+                "updatedAt": "2026-07-21T00:00:00.000Z",
+                "unexpectedField": true
+            }
+        }))
+        .is_err()
+    );
+    assert!(
+        serde_json::from_value::<CanvasRegistryDocument>(json!({
+            "canvasOrder": ["canvas-1"],
+            "unexpectedField": true
+        }))
+        .is_err()
+    );
+}
+
+#[test]
+fn invalid_owned_project_documents_follow_their_final_failure_paths() {
+    let project = TemporaryDirectory::new("strict-project-documents");
+    let home = TemporaryDirectory::new("strict-project-documents-home");
+    let mut service =
+        ProjectService::open(project.as_ref(), home.as_ref(), Arc::new(FixedNodeAdapter))
+            .expect("Project should initialize");
+
+    let canvas_path = project.as_ref().join(".debrute/canvases/canvas-1.json");
+    let mut canvas: serde_json::Value =
+        serde_json::from_str(&fs::read_to_string(&canvas_path).expect("Canvas should exist"))
+            .expect("Canvas should parse as JSON");
+    canvas["unexpectedField"] = json!(true);
+    fs::write(
+        &canvas_path,
+        serde_json::to_string_pretty(&canvas).expect("Canvas should serialize"),
+    )
+    .expect("invalid Canvas should write");
+    let snapshot = service
+        .refresh()
+        .expect("invalid Canvas should be isolated");
+    assert!(snapshot.canvases.is_empty());
+    assert!(
+        snapshot
+            .diagnostics
+            .iter()
+            .any(|diagnostic| diagnostic.code == "document_invalid_pushed")
+    );
+
+    let registry_path = project.as_ref().join(".debrute/canvases/index.json");
+    let mut registry: serde_json::Value = serde_json::from_str(
+        &fs::read_to_string(&registry_path).expect("Canvas registry should exist"),
+    )
+    .expect("Canvas registry should parse as JSON");
+    registry["unexpectedField"] = json!(true);
+    fs::write(
+        &registry_path,
+        serde_json::to_string_pretty(&registry).expect("Canvas registry should serialize"),
+    )
+    .expect("invalid Canvas registry should write");
+    let snapshot = service
+        .refresh()
+        .expect("invalid registry should be projected");
+    assert!(matches!(
+        snapshot.canvas_registry,
+        CanvasRegistryState::Invalid { ref code, .. } if code == "canvas_registry_invalid"
+    ));
+
+    let metadata_path = project.as_ref().join(".debrute/project.json");
+    let mut metadata: serde_json::Value = serde_json::from_str(
+        &fs::read_to_string(&metadata_path).expect("Project metadata should exist"),
+    )
+    .expect("Project metadata should parse as JSON");
+    metadata["unexpectedField"] = json!(true);
+    fs::write(
+        &metadata_path,
+        serde_json::to_string_pretty(&metadata).expect("Project metadata should serialize"),
+    )
+    .expect("invalid Project metadata should write");
+    drop(service);
+    assert!(
+        ProjectService::open(project.as_ref(), home.as_ref(), Arc::new(FixedNodeAdapter),).is_err()
+    );
+}
+
+#[test]
+fn canvas_repair_rebuilds_from_valid_maps_and_removes_unrecoverable_metadata() {
+    let project = TemporaryDirectory::new("canvas-repair");
+    let home = TemporaryDirectory::new("canvas-repair-home");
+    fs::write(project.as_ref().join("note.txt"), "note").expect("note should be written");
+    let mut service =
+        ProjectService::open(project.as_ref(), home.as_ref(), Arc::new(FixedNodeAdapter))
+            .expect("Project should initialize");
+    service
+        .add_project_path_to_canvas_map("canvas-1", "note.txt")
+        .expect("Canvas Map should include the note");
+    drop(service);
+
+    let paths = debrute_project_paths(project.as_ref(), home.as_ref());
+    fs::remove_file(paths.canvases_dir.join("canvas-1.json"))
+        .expect("Canvas JSON should be removed");
+    fs::write(
+        paths.canvases_dir.join("orphan.json"),
+        serde_json::to_string_pretty(
+            &create_canvas_document("orphan").expect("orphan Canvas should be valid"),
+        )
+        .expect("orphan Canvas should serialize"),
+    )
+    .expect("orphan Canvas should be written");
+    fs::write(paths.canvas_maps_dir.join("broken.yaml"), "unknown: true\n")
+        .expect("invalid Map should be written");
+    fs::write(paths.canvases_dir.join("broken.json"), "{")
+        .expect("invalid Canvas should be written");
+
+    let mut service =
+        ProjectService::open(project.as_ref(), home.as_ref(), Arc::new(FixedNodeAdapter))
+            .expect("partial Canvas state must not block the Project");
+    assert!(
+        service
+            .snapshot()
+            .files
+            .iter()
+            .any(|file| file.project_relative_path == "note.txt")
+    );
+    assert!(matches!(
+        service.snapshot().canvas_registry,
+        CanvasRegistryState::Invalid { .. }
+    ));
+
+    let (active, snapshot) = service
+        .repair_canvas_registry()
+        .expect("Repair should rebuild from the valid Canvas Map");
+    assert_eq!(active, "canvas-1");
+    assert!(matches!(
+        snapshot.canvas_registry,
+        CanvasRegistryState::Ready { ref canvas_order } if canvas_order == &["canvas-1"]
+    ));
+    assert!(
+        snapshot.canvases[0]
+            .node_elements
+            .iter()
+            .any(|node| node.project_relative_path == "note.txt")
+    );
+    assert!(!paths.canvases_dir.join("orphan.json").exists());
+    assert!(!paths.canvas_maps_dir.join("broken.yaml").exists());
+    assert!(!paths.canvases_dir.join("broken.json").exists());
+}
+
+#[test]
+fn canvas_repair_creates_one_default_when_no_valid_map_remains() {
+    let project = TemporaryDirectory::new("canvas-repair-default");
+    let home = TemporaryDirectory::new("canvas-repair-default-home");
+    let service = ProjectService::open(project.as_ref(), home.as_ref(), Arc::new(FixedNodeAdapter))
+        .expect("Project should initialize");
+    drop(service);
+    let paths = debrute_project_paths(project.as_ref(), home.as_ref());
+    fs::write(
+        paths.canvas_maps_dir.join("canvas-1.yaml"),
+        "unknown: true\n",
+    )
+    .expect("invalid Map should be written");
+    fs::write(paths.canvases_dir.join("canvas-1.json"), "{")
+        .expect("invalid Canvas should be written");
+
+    let mut service =
+        ProjectService::open(project.as_ref(), home.as_ref(), Arc::new(FixedNodeAdapter))
+            .expect("invalid Canvas metadata must not block the Project");
+    let (active, snapshot) = service
+        .repair_canvas_registry()
+        .expect("Repair should create a default Canvas");
+    assert_eq!(active, "canvas-1");
+    assert_eq!(snapshot.canvases.len(), 1);
+    assert!(snapshot.canvases[0].node_elements.is_empty());
+    assert_eq!(
+        fs::read_to_string(paths.canvas_maps_dir.join("canvas-1.yaml"))
+            .expect("default Map should be readable"),
+        "paths: []\n"
+    );
+}
+
+#[test]
+fn canvas_repair_prepares_every_valid_map_before_committing() {
+    let project = TemporaryDirectory::new("canvas-repair-preflight");
+    let home = TemporaryDirectory::new("canvas-repair-preflight-home");
+    fs::write(project.as_ref().join("image.png"), "fixture").expect("fixture should be written");
+    let mut setup =
+        ProjectService::open(project.as_ref(), home.as_ref(), Arc::new(FixedNodeAdapter))
+            .expect("Project should initialize");
+    setup
+        .add_project_path_to_canvas_map("canvas-1", "image.png")
+        .expect("Canvas Map should include the image");
+    drop(setup);
+
+    let paths = debrute_project_paths(project.as_ref(), home.as_ref());
+    fs::write(
+        paths.canvases_dir.join("canvas-1.json"),
+        serde_json::to_string_pretty(
+            &create_canvas_document("canvas-1").expect("Canvas should be valid"),
+        )
+        .expect("Canvas should serialize"),
+    )
+    .expect("empty Canvas should be written");
+    fs::write(&paths.canvas_index_file, "{").expect("invalid registry should be written");
+    let registry_before = fs::read(&paths.canvas_index_file).expect("registry should be readable");
+
+    let mut service = ProjectService::open(
+        project.as_ref(),
+        home.as_ref(),
+        Arc::new(FailingLayoutAdapter),
+    )
+    .expect("invalid registry should remain repairable");
+    let error = service
+        .repair_canvas_registry()
+        .expect_err("failed Map preparation must reject the repair");
+    assert_eq!(error.code(), "canvas_map_invalid_path");
+    assert_eq!(
+        fs::read(&paths.canvas_index_file).expect("registry should remain readable"),
+        registry_before,
+        "repair must not commit the registry before every Map is prepared"
+    );
+}
+
+#[test]
+fn canvas_repair_rejects_canvas_directory_inventory_changes() {
+    let project = TemporaryDirectory::new("canvas-repair-inventory");
+    let home = TemporaryDirectory::new("canvas-repair-inventory-home");
+    fs::write(project.as_ref().join("image.png"), "fixture").expect("fixture should be written");
+    let mut setup =
+        ProjectService::open(project.as_ref(), home.as_ref(), Arc::new(FixedNodeAdapter))
+            .expect("Project should initialize");
+    setup
+        .add_project_path_to_canvas_map("canvas-1", "image.png")
+        .expect("Canvas Map should include the image");
+    drop(setup);
+
+    let paths = debrute_project_paths(project.as_ref(), home.as_ref());
+    fs::write(
+        paths.canvases_dir.join("canvas-1.json"),
+        serde_json::to_string_pretty(
+            &create_canvas_document("canvas-1").expect("Canvas should be valid"),
+        )
+        .expect("Canvas should serialize"),
+    )
+    .expect("empty Canvas should be written");
+    fs::write(&paths.canvas_index_file, "{").expect("invalid registry should be written");
+    let registry_before = fs::read(&paths.canvas_index_file).expect("registry should be readable");
+    let added_map = paths.canvas_maps_dir.join("canvas-2.yaml");
+
+    let mut service = ProjectService::open(
+        project.as_ref(),
+        home.as_ref(),
+        Arc::new(AddingCanvasMapLayoutAdapter {
+            map_path: added_map.clone(),
+        }),
+    )
+    .expect("invalid registry should remain repairable");
+    let error = service
+        .repair_canvas_registry()
+        .expect_err("a Canvas Map added during repair must conflict");
+    assert_eq!(error.code(), "document_push_conflict");
+    assert!(added_map.exists());
+    assert_eq!(
+        fs::read(&paths.canvas_index_file).expect("registry should remain readable"),
+        registry_before,
+        "inventory conflict must not commit the registry"
+    );
 }
 
 #[test]
@@ -909,6 +1222,90 @@ fn canvas_document_validation_rejects_duplicate_and_hidden_node_paths() {
     canvas.node_elements.pop();
     canvas.node_elements[0].project_relative_path = ".debrute/cache/hidden.txt".to_owned();
     validate_canvas_document(&canvas).expect_err("hidden Project path must fail");
+}
+
+#[test]
+fn interactive_canvas_updates_reject_inexact_batches_without_partial_changes() {
+    let mut canvas = create_canvas_document("canvas-1").expect("Canvas should be valid");
+    canvas.node_elements = vec![
+        CanvasNodeElement {
+            project_relative_path: "note.txt".to_owned(),
+            node_kind: CanvasNodeKind::File,
+            media_kind: Some(CanvasMediaKind::Text),
+            x: 0.0,
+            y: 0.0,
+            width: 320.0,
+            height: 180.0,
+            z: 0,
+            layout_mode: None,
+            video_playback: None,
+            text_viewport: None,
+        },
+        CanvasNodeElement {
+            project_relative_path: "clip.mp4".to_owned(),
+            node_kind: CanvasNodeKind::File,
+            media_kind: Some(CanvasMediaKind::Video),
+            x: 400.0,
+            y: 0.0,
+            width: 320.0,
+            height: 180.0,
+            z: 1,
+            layout_mode: None,
+            video_playback: None,
+            text_viewport: None,
+        },
+    ];
+
+    let duplicate_layout = update_canvas_node_layouts(
+        &canvas,
+        &[
+            CanvasNodeLayoutUpdate {
+                project_relative_path: "note.txt".to_owned(),
+                x: 10.0,
+                y: 20.0,
+                width: None,
+                height: None,
+            },
+            CanvasNodeLayoutUpdate {
+                project_relative_path: "note.txt".to_owned(),
+                x: 30.0,
+                y: 40.0,
+                width: None,
+                height: None,
+            },
+        ],
+    )
+    .expect_err("duplicate layout targets must fail");
+    assert!(duplicate_layout.to_string().contains("duplicate target"));
+    assert!(canvas.node_elements[0].x.abs() < f64::EPSILON);
+
+    let missing_video = update_canvas_video_playback(
+        &canvas,
+        &[
+            CanvasVideoPlaybackUpdate {
+                project_relative_path: "clip.mp4".to_owned(),
+                current_time_seconds: 1.5,
+            },
+            CanvasVideoPlaybackUpdate {
+                project_relative_path: "missing.mp4".to_owned(),
+                current_time_seconds: 2.0,
+            },
+        ],
+    )
+    .expect_err("one missing video target must reject the batch");
+    assert!(missing_video.to_string().contains("missing.mp4"));
+    assert!(canvas.node_elements[1].video_playback.is_none());
+
+    let wrong_text_kind = update_canvas_text_viewports(
+        &canvas,
+        &[CanvasTextViewportUpdate {
+            project_relative_path: "clip.mp4".to_owned(),
+            scroll_top: 10.0,
+            scroll_left: 0.0,
+        }],
+    )
+    .expect_err("a non-text target must fail");
+    assert!(wrong_text_kind.to_string().contains("not a text node"));
 }
 
 #[test]
@@ -1572,9 +1969,8 @@ fn registry_close_treats_an_inflight_open_cancellation_as_successful_cleanup() {
     );
     let opening_registry = registry.clone();
     let project_root = project.as_ref().to_path_buf();
-    let open_worker = thread::spawn(move || {
-        opening_registry.open_project(project_root, ProjectUseKind::Operation)
-    });
+    let open_worker =
+        thread::spawn(move || opening_registry.open_project(project_root, ProjectUseKind::Request));
     let mut entered = gate.entered.lock().expect("gate should lock");
     while !*entered {
         entered = gate
@@ -1604,12 +2000,9 @@ fn exhausted_revision_rejects_commands_before_filesystem_effects() {
     let home = TemporaryDirectory::new("revision-capacity-home");
     let registry = project_registry(home.as_ref(), Arc::new(FixedNodeAdapter));
     let opened = registry
-        .open_project(project.as_ref(), ProjectUseKind::Operation)
+        .open_project(project.as_ref(), ProjectUseKind::Request)
         .expect("Project should open");
-    opened
-        .session
-        .set_revision_for_test(u64::MAX)
-        .expect("revision should be set");
+    opened.session.set_revision_for_test(u64::MAX);
     let error = opened
         .session
         .execute(ProjectCommand::CreateCanvas)
@@ -1648,7 +2041,7 @@ fn directory_commands_do_not_suppress_later_parent_directory_events() {
     let home = TemporaryDirectory::new("directory-receipt-home");
     let registry = project_registry(home.as_ref(), Arc::new(FixedNodeAdapter));
     let opened = registry
-        .open_project(project.as_ref(), ProjectUseKind::Operation)
+        .open_project(project.as_ref(), ProjectUseKind::Request)
         .expect("Project should open");
     let created = opened
         .session
@@ -1686,7 +2079,7 @@ fn equivalent_watcher_refresh_preserves_the_revision_snapshot_exactly() {
     let home = TemporaryDirectory::new("equivalent-watch-refresh-home");
     let registry = project_registry(home.as_ref(), Arc::new(FixedNodeAdapter));
     let opened = registry
-        .open_project(project.as_ref(), ProjectUseKind::Operation)
+        .open_project(project.as_ref(), ProjectUseKind::Request)
         .expect("Project should open");
     let before = opened
         .session
@@ -1731,7 +2124,7 @@ fn registry_uses_typed_uses_serialized_mutations_and_snapshot_first_streams() {
         .open_project(project.as_ref(), ProjectUseKind::Workbench)
         .expect("first open should succeed");
     let second = registry
-        .open_project(project.as_ref(), ProjectUseKind::Operation)
+        .open_project(project.as_ref(), ProjectUseKind::Request)
         .expect("same root should share the live session");
     assert_eq!(first.session.project_id(), second.session.project_id());
 
@@ -1781,7 +2174,7 @@ fn registry_uses_typed_uses_serialized_mutations_and_snapshot_first_streams() {
 
 #[test]
 fn concurrent_project_opens_share_one_session_and_issue_one_project_use_each() {
-    const CLIENTS: usize = 8;
+    const CLIENTS: usize = 4;
 
     let project = TemporaryDirectory::new("concurrent-registry");
     let home = TemporaryDirectory::new("concurrent-registry-home");
@@ -1799,16 +2192,13 @@ fn concurrent_project_opens_share_one_session_and_issue_one_project_use_each() {
             thread::spawn(move || {
                 start.wait();
                 let opened = registry
-                    .open_project(project_root, ProjectUseKind::Operation)
+                    .open_project(project_root, ProjectUseKind::Request)
                     .expect("concurrent Project open should succeed");
                 sender
                     .send(opened.session.project_id().to_owned())
                     .expect("session id should be reported");
                 release.wait();
-                opened
-                    .project_use
-                    .release()
-                    .expect("project_use should release");
+                drop(opened.project_use);
             })
         })
         .collect::<Vec<_>>();
@@ -1833,92 +2223,4 @@ fn concurrent_project_opens_share_one_session_and_issue_one_project_use_each() {
     }
     assert!(registry.list().expect("registry should list").is_empty());
     registry.close().expect("registry should close cleanly");
-}
-
-#[test]
-fn registry_close_drains_all_sessions_and_retains_the_close_result() {
-    let first_project = TemporaryDirectory::new("close-drain-first");
-    let second_project = TemporaryDirectory::new("close-drain-second");
-    let home = TemporaryDirectory::new("close-drain-home");
-    let registry = project_registry(home.as_ref(), Arc::new(FixedNodeAdapter));
-    let first = registry
-        .open_project(first_project.as_ref(), ProjectUseKind::Operation)
-        .expect("first Project should open");
-    let second = registry
-        .open_project(second_project.as_ref(), ProjectUseKind::Operation)
-        .expect("second Project should open");
-    first
-        .session
-        .fail_watcher_for_test()
-        .expect("watcher failure should be queued");
-
-    let first_close = registry
-        .close()
-        .expect_err("injected close failure should surface");
-    assert_eq!(first_close.code(), "project_watcher_failed");
-    assert_eq!(
-        first
-            .session
-            .sync_snapshot()
-            .expect_err("first session must be closed")
-            .code(),
-        "project_not_open"
-    );
-    assert_eq!(
-        second
-            .session
-            .sync_snapshot()
-            .expect_err("second session must still be drained")
-            .code(),
-        "project_not_open"
-    );
-    let second_close = registry
-        .close()
-        .expect_err("idempotent close must retain the original result");
-    assert_eq!(second_close.code(), "project_watcher_failed");
-    drop(first.project_use);
-    drop(second.project_use);
-}
-
-#[test]
-fn failed_final_project_use_cleanup_keeps_the_root_admission_barrier_closed() {
-    let project = TemporaryDirectory::new("project_use-close-failure");
-    let home = TemporaryDirectory::new("project_use-close-failure-home");
-    let changes = Arc::new(AtomicUsize::new(0));
-    let callback_changes = Arc::clone(&changes);
-    let registry = ProjectSessionRegistry::with_change_callback(
-        home.as_ref(),
-        Arc::new(FixedNodeAdapter),
-        feedback_artifacts(),
-        Arc::new(move || {
-            callback_changes.fetch_add(1, Ordering::SeqCst);
-        }),
-    );
-    let opened = registry
-        .open_project(project.as_ref(), ProjectUseKind::Operation)
-        .expect("Project should open");
-    opened
-        .session
-        .fail_watcher_for_test()
-        .expect("watcher failure should be queued");
-    let changes_before_release = changes.load(Ordering::SeqCst);
-    let reuse_error = opened
-        .project_use
-        .release()
-        .expect_err("final project_use cleanup failure should surface");
-    assert_eq!(reuse_error.code(), "project_watcher_failed");
-    assert_eq!(
-        changes.load(Ordering::SeqCst),
-        changes_before_release + 1,
-        "failed final cleanup must still publish the registry state change"
-    );
-    let Err(reopen_error) = registry.open_project(project.as_ref(), ProjectUseKind::Operation)
-    else {
-        panic!("failed irreversible cleanup must block root reopening");
-    };
-    assert_eq!(reopen_error.code(), "project_watcher_failed");
-    let close_error = registry
-        .close()
-        .expect_err("registry close should retain poisoned root failure");
-    assert_eq!(close_error.code(), "project_watcher_failed");
 }

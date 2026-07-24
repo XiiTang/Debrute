@@ -4,32 +4,126 @@ use base64::{Engine as _, engine::general_purpose::STANDARD as BASE64};
 use serde_json::{Map, Value};
 use uuid::Uuid;
 
+use crate::model_operation::{ArtifactPointer, ModelRequest};
 use crate::project::{
-    GeneratedArtifactRole, GeneratedAssetMetadataService, GeneratedModelRun, ProjectCapabilityFs,
-    RecordGeneratedAssetInput, assert_project_tree_visible_mutation_path,
-    assert_project_tree_visible_path, project_content_type,
+    CommitGeneratedAssetFile, GeneratedArtifactRole, GeneratedAssetMetadataService,
+    GeneratedModelRun, ProjectCapabilityFs, RecordGeneratedAssetInput, StagedGeneratedAssetFiles,
+    assert_project_tree_visible_mutation_path, assert_project_tree_visible_path,
+    project_content_type,
 };
 
 use super::{
-    http::validate_public_url,
+    http::{validate_public_url, validate_request_size},
     redaction::redact_model_run_value,
     types::{
-        GeneratedPayload, GenerationArtifact, GenerationCancellation, GenerationDeadline,
-        GenerationError, HttpBody, HttpMethod, HttpTargetPolicy, ModelExecution, ModelHttpRequest,
-        ModelHttpResponse, ModelHttpTransport, ResolvedGenerationModel,
+        GeneratedPayload, GenerationCancellation, GenerationDeadline, GenerationError, HttpBody,
+        HttpMethod, HttpTargetPolicy, ModelExecution, ModelHttpRequest, ModelHttpResponse,
+        ModelHttpTransport, PreparedHttpBody, ResolvedGenerationModel,
     },
 };
 
-pub(crate) const DEFAULT_GENERATION_TIMEOUT: Duration = Duration::from_mins(10);
 pub(crate) const MAX_MODEL_JSON_BYTES: usize = 16 * 1024 * 1024;
 pub(crate) const MAX_GENERATED_MEDIA_BYTES: usize = 256 * 1024 * 1024;
 const MAX_GENERATED_MEDIA_TOTAL_BYTES: usize = 512 * 1024 * 1024;
-const MAX_GENERATED_ARTIFACTS: usize = 16;
-const MAX_INPUT_MEDIA_BYTES: usize = 64 * 1024 * 1024;
+pub(crate) const MAX_INPUT_MEDIA_ITEM_BYTES: usize = 128 * 1024 * 1024;
+pub(crate) const MAX_MODEL_REQUEST_BYTES: usize = 256 * 1024 * 1024;
 const MAX_MODEL_RUN_RESPONSE_LOGS: usize = 64;
 const MAX_MODEL_RUN_RESPONSE_LOG_BYTES: usize = 2 * 1024 * 1024;
+const MAX_AGENT_REMOTE_ERROR_BYTES: usize = 8 * 1024;
 const MAX_GENERATED_IMAGE_DIMENSION: u32 = 50_000;
 const MAX_GENERATED_IMAGE_ALLOCATION: u64 = 64 * 1024 * 1024;
+
+#[derive(Debug, Clone, Copy)]
+pub(crate) struct ModelRequestResourceLimits {
+    pub input_media_item_bytes: usize,
+    pub model_request_bytes: usize,
+}
+
+pub(crate) enum ResolvedMediaReference {
+    PublicUrl(String),
+    Inline {
+        mime_type: String,
+        bytes: Vec<u8>,
+        request_bytes_reserved: usize,
+    },
+}
+
+impl ResolvedMediaReference {
+    pub(crate) fn is_public_url(&self) -> bool {
+        matches!(self, Self::PublicUrl(_))
+    }
+
+    pub(crate) fn accounted_public_url<'b>(
+        &'b self,
+        context: &mut ExecutionContext<'_>,
+    ) -> Result<Option<&'b str>, GenerationError> {
+        match self {
+            Self::PublicUrl(url) => {
+                context.reserve_request_bytes(url.len())?;
+                Ok(Some(url))
+            }
+            Self::Inline { .. } => Ok(None),
+        }
+    }
+
+    pub(crate) fn into_reference_string(
+        self,
+        context: &mut ExecutionContext<'_>,
+    ) -> Result<String, GenerationError> {
+        match self {
+            Self::PublicUrl(url) => {
+                context.reserve_request_bytes(url.len())?;
+                Ok(url)
+            }
+            Self::Inline {
+                mime_type,
+                bytes,
+                request_bytes_reserved,
+            } => {
+                let encoded_bytes = encoded_base64_len(bytes.len())?;
+                let request_bytes = "data:"
+                    .len()
+                    .saturating_add(mime_type.len())
+                    .saturating_add(";base64,".len())
+                    .saturating_add(encoded_bytes);
+                context.replace_request_bytes(request_bytes_reserved, request_bytes)?;
+                Ok(format!("data:{mime_type};base64,{}", BASE64.encode(bytes)))
+            }
+        }
+    }
+
+    pub(crate) fn into_inline_base64(
+        self,
+        context: &mut ExecutionContext<'_>,
+    ) -> Result<(String, String), GenerationError> {
+        match self {
+            Self::PublicUrl(_) => Err(GenerationError::new(
+                "generation_input_invalid",
+                "Public media URL cannot be encoded as inline media.",
+            )),
+            Self::Inline {
+                mime_type,
+                bytes,
+                request_bytes_reserved,
+            } => {
+                let request_bytes = encoded_base64_len(bytes.len())?
+                    .checked_add(mime_type.len())
+                    .ok_or_else(model_request_too_large)?;
+                context.replace_request_bytes(request_bytes_reserved, request_bytes)?;
+                Ok((mime_type, BASE64.encode(bytes)))
+            }
+        }
+    }
+}
+
+impl Default for ModelRequestResourceLimits {
+    fn default() -> Self {
+        Self {
+            input_media_item_bytes: MAX_INPUT_MEDIA_ITEM_BYTES,
+            model_request_bytes: MAX_MODEL_REQUEST_BYTES,
+        }
+    }
+}
 
 pub(crate) struct ExecutionContext<'a> {
     pub model: &'a ResolvedGenerationModel,
@@ -39,10 +133,11 @@ pub(crate) struct ExecutionContext<'a> {
     pub transport: &'a dyn ModelHttpTransport,
     deadline: GenerationDeadline,
     pub safe_responses: Vec<Value>,
-    pub logs: Vec<Value>,
     generated_media_bytes: usize,
     response_log_bytes: usize,
     response_log_truncated: bool,
+    limits: ModelRequestResourceLimits,
+    request_bytes_reserved: usize,
 }
 
 impl<'a> ExecutionContext<'a> {
@@ -54,6 +149,26 @@ impl<'a> ExecutionContext<'a> {
         transport: &'a dyn ModelHttpTransport,
         deadline: GenerationDeadline,
     ) -> Result<Self, GenerationError> {
+        Self::new_with_limits(
+            model,
+            arguments,
+            project_root,
+            cancellation,
+            transport,
+            deadline,
+            ModelRequestResourceLimits::default(),
+        )
+    }
+
+    pub(crate) fn new_with_limits(
+        model: &'a ResolvedGenerationModel,
+        arguments: &'a Map<String, Value>,
+        project_root: &'a Path,
+        cancellation: &'a GenerationCancellation,
+        transport: &'a dyn ModelHttpTransport,
+        deadline: GenerationDeadline,
+        limits: ModelRequestResourceLimits,
+    ) -> Result<Self, GenerationError> {
         deadline.remaining(cancellation)?;
         Ok(Self {
             model,
@@ -63,10 +178,11 @@ impl<'a> ExecutionContext<'a> {
             transport,
             deadline,
             safe_responses: Vec::new(),
-            logs: Vec::new(),
             generated_media_bytes: 0,
             response_log_bytes: 0,
             response_log_truncated: false,
+            limits,
+            request_bytes_reserved: 0,
         })
     }
 
@@ -106,23 +222,22 @@ impl<'a> ExecutionContext<'a> {
         let parsed = if response.body.is_empty() {
             Value::Object(Map::new())
         } else {
-            serde_json::from_slice(&response.body).map_err(|error| {
-                GenerationError::new(
-                    "model_response_invalid",
-                    format!("Model response was not valid JSON: {error}"),
-                )
-            })?
+            match serde_json::from_slice(&response.body) {
+                Ok(parsed) => parsed,
+                Err(_) if !(200..300).contains(&response.status) => {
+                    return Err(remote_endpoint_error_bytes(response.status, &response.body));
+                }
+                Err(error) => {
+                    return Err(GenerationError::new(
+                        "model_response_invalid",
+                        format!("Model response was not valid JSON: {error}"),
+                    ));
+                }
+            }
         };
         self.push_response_log(response_log(&response, &parsed));
         if !(200..300).contains(&response.status) {
-            return Err(GenerationError::new(
-                "model_request_failed",
-                format!("Model endpoint returned HTTP {}.", response.status),
-            )
-            .with_details(serde_json::json!({
-                "status": response.status,
-                "body": summarize_json(&parsed),
-            })));
+            return Err(remote_endpoint_error_json(response.status, &parsed));
         }
         Ok(parsed)
     }
@@ -150,14 +265,21 @@ impl<'a> ExecutionContext<'a> {
         if !(200..300).contains(&response.status) {
             return Err(GenerationError::new(
                 "model_request_failed",
-                format!("Model endpoint returned HTTP {}.", response.status),
+                format!(
+                    "Model endpoint rejected request (HTTP {}): {}",
+                    response.status,
+                    bounded_remote_text(String::from_utf8_lossy(&response.body).into_owned())
+                ),
             ));
         }
         self.record_generated_media(response.body.len())?;
         Ok(response)
     }
 
-    pub(crate) fn download(&mut self, url: &str) -> Result<ModelHttpResponse, GenerationError> {
+    pub(crate) fn download_generated_media(
+        &mut self,
+        url: &str,
+    ) -> Result<ModelHttpResponse, GenerationError> {
         let response = self.request(
             HttpMethod::Get,
             url.to_owned(),
@@ -179,15 +301,159 @@ impl<'a> ExecutionContext<'a> {
         Ok(response)
     }
 
-    pub(crate) fn resolve_media_reference(
-        &self,
-        reference: &str,
-    ) -> Result<String, GenerationError> {
-        let resolved = resolve_media_reference_value(self.project_root, reference)?;
-        if resolved.starts_with("http://") || resolved.starts_with("https://") {
-            validate_public_url(&resolved, self.cancellation, self.deadline)?;
+    pub(crate) fn download_input_media(
+        &mut self,
+        url: &str,
+    ) -> Result<ModelHttpResponse, GenerationError> {
+        let request_bytes_remaining = self
+            .limits
+            .model_request_bytes
+            .saturating_sub(self.request_bytes_reserved);
+        let input_media_item_bytes = self.limits.input_media_item_bytes;
+        let request_budget_is_tighter = request_bytes_remaining < input_media_item_bytes;
+        let maximum_response_bytes = input_media_item_bytes.min(request_bytes_remaining);
+        let response_too_large = || {
+            if request_budget_is_tighter {
+                model_request_too_large()
+            } else {
+                input_media_too_large(input_media_item_bytes)
+            }
+        };
+        let response = self
+            .request(
+                HttpMethod::Get,
+                url.to_owned(),
+                BTreeMap::new(),
+                HttpBody::Empty,
+                maximum_response_bytes,
+                HttpTargetPolicy::PublicMedia,
+            )
+            .map_err(|error| {
+                if error.code() == "model_response_too_large" {
+                    response_too_large()
+                } else {
+                    error
+                }
+            })?;
+        if !(200..300).contains(&response.status) {
+            return Err(GenerationError::new(
+                "input_media_download_failed",
+                format!("Input media download returned HTTP {}.", response.status),
+            ));
         }
-        Ok(resolved)
+        if response.body.len() > maximum_response_bytes {
+            return Err(response_too_large());
+        }
+        self.reserve_request_bytes(response.body.len())?;
+        Ok(response)
+    }
+
+    pub(crate) fn resolve_media_reference(
+        &mut self,
+        reference: &str,
+    ) -> Result<ResolvedMediaReference, GenerationError> {
+        if reference.starts_with("http://") || reference.starts_with("https://") {
+            validate_public_url(reference, self.cancellation, self.deadline)?;
+            return Ok(ResolvedMediaReference::PublicUrl(reference.to_owned()));
+        }
+        if reference.starts_with("data:") {
+            let (decoded_bytes, mime_type_bytes) =
+                input_data_url_layout(reference, self.limits.input_media_item_bytes)?;
+            let mut request_bytes_reserved = decoded_bytes
+                .checked_add(mime_type_bytes)
+                .ok_or_else(model_request_too_large)?;
+            self.reserve_request_bytes(request_bytes_reserved)?;
+            let (mime_type, bytes) =
+                decode_data_url(reference, self.limits.input_media_item_bytes)?;
+            if bytes.len() != decoded_bytes {
+                let replacement = bytes
+                    .len()
+                    .checked_add(mime_type.len())
+                    .ok_or_else(model_request_too_large)?;
+                self.replace_request_bytes(request_bytes_reserved, replacement)?;
+                request_bytes_reserved = replacement;
+            }
+            return Ok(ResolvedMediaReference::Inline {
+                mime_type,
+                bytes,
+                request_bytes_reserved,
+            });
+        }
+
+        let path = assert_project_tree_visible_path(reference)?;
+        let project = ProjectCapabilityFs::open(self.project_root)?;
+        let file_size = usize::try_from(project.file_size(&path)?)
+            .map_err(|_| input_media_too_large(self.limits.input_media_item_bytes))?;
+        if file_size > self.limits.input_media_item_bytes {
+            return Err(input_media_too_large(self.limits.input_media_item_bytes));
+        }
+        self.reserve_request_bytes(file_size)?;
+        let bytes = project
+            .read_limited(&path, self.limits.input_media_item_bytes)
+            .map_err(|error| {
+                if error.code() == "project_document_too_large" {
+                    input_media_too_large(self.limits.input_media_item_bytes)
+                } else {
+                    error.into()
+                }
+            })?;
+        if bytes.len() != file_size {
+            self.replace_request_bytes(file_size, bytes.len())?;
+        }
+        let mime_type = mime_from_path_or_bytes(&path, &bytes)
+            .ok_or_else(|| {
+                GenerationError::new(
+                    "generation_input_invalid",
+                    format!("Project media input has an unsupported type: {path}"),
+                )
+            })?
+            .to_owned();
+        self.reserve_request_bytes(mime_type.len())?;
+        let request_bytes_reserved = bytes
+            .len()
+            .checked_add(mime_type.len())
+            .ok_or_else(model_request_too_large)?;
+        Ok(ResolvedMediaReference::Inline {
+            mime_type,
+            bytes,
+            request_bytes_reserved,
+        })
+    }
+
+    fn reserve_request_bytes(&mut self, bytes: usize) -> Result<(), GenerationError> {
+        let next = self.ensure_request_bytes(bytes)?;
+        self.request_bytes_reserved = next;
+        Ok(())
+    }
+
+    fn ensure_request_bytes(&self, bytes: usize) -> Result<usize, GenerationError> {
+        let next = self
+            .request_bytes_reserved
+            .checked_add(bytes)
+            .ok_or_else(model_request_too_large)?;
+        if next > self.limits.model_request_bytes {
+            return Err(model_request_too_large());
+        }
+        Ok(next)
+    }
+
+    fn replace_request_bytes(
+        &mut self,
+        previous: usize,
+        replacement: usize,
+    ) -> Result<(), GenerationError> {
+        let retained = self
+            .request_bytes_reserved
+            .checked_sub(previous)
+            .ok_or_else(model_request_too_large)?;
+        let next = retained
+            .checked_add(replacement)
+            .ok_or_else(model_request_too_large)?;
+        if next > self.limits.model_request_bytes {
+            return Err(model_request_too_large());
+        }
+        self.request_bytes_reserved = next;
+        Ok(())
     }
 
     fn request(
@@ -199,6 +465,8 @@ impl<'a> ExecutionContext<'a> {
         maximum_response_bytes: usize,
         target_policy: HttpTargetPolicy,
     ) -> Result<ModelHttpResponse, GenerationError> {
+        let body = PreparedHttpBody::try_from(body)?;
+        validate_request_size(&body, self.limits.model_request_bytes)?;
         self.transport.execute(
             ModelHttpRequest {
                 method,
@@ -244,6 +512,44 @@ impl<'a> ExecutionContext<'a> {
     }
 }
 
+fn remote_endpoint_error_json(status: u16, body: &Value) -> GenerationError {
+    let safe = redact_model_run_value(body, std::iter::empty());
+    let body = serde_json::to_string(&safe).unwrap_or_else(|_| "<unserializable body>".to_owned());
+    GenerationError::new(
+        "model_request_failed",
+        format!(
+            "Model endpoint rejected request (HTTP {status}): {}",
+            bounded_remote_text(body)
+        ),
+    )
+}
+
+fn remote_endpoint_error_bytes(status: u16, body: &[u8]) -> GenerationError {
+    if let Ok(body) = serde_json::from_slice::<Value>(body) {
+        return remote_endpoint_error_json(status, &body);
+    }
+    GenerationError::new(
+        "model_request_failed",
+        format!(
+            "Model endpoint rejected request (HTTP {status}): {}",
+            bounded_remote_text(String::from_utf8_lossy(body).into_owned())
+        ),
+    )
+}
+
+fn bounded_remote_text(mut text: String) -> String {
+    if text.len() <= MAX_AGENT_REMOTE_ERROR_BYTES {
+        return text;
+    }
+    let mut end = MAX_AGENT_REMOTE_ERROR_BYTES;
+    while !text.is_char_boundary(end) {
+        end -= 1;
+    }
+    text.truncate(end);
+    text.push_str("...[truncated]");
+    text
+}
+
 fn push_bounded_response_log(
     responses: &mut Vec<Value>,
     response_bytes: &mut usize,
@@ -276,7 +582,6 @@ pub(crate) fn execute_result(
             "Model response did not include generated media.",
         ));
     }
-    validate_generated_artifact_count(payloads.len())?;
     let total = payloads
         .iter()
         .try_fold(0_usize, |total, payload| {
@@ -300,19 +605,7 @@ pub(crate) fn execute_result(
         payloads,
         safe_request,
         safe_responses: context.safe_responses,
-        logs: context.logs,
     })
-}
-
-pub(crate) fn validate_generated_artifact_count(count: usize) -> Result<(), GenerationError> {
-    if count > MAX_GENERATED_ARTIFACTS {
-        Err(GenerationError::new(
-            "model_response_too_large",
-            format!("Model returned more than {MAX_GENERATED_ARTIFACTS} artifacts."),
-        ))
-    } else {
-        Ok(())
-    }
 }
 
 pub(crate) fn validate_arguments(
@@ -329,20 +622,9 @@ pub(crate) fn validate_arguments(
                 format!("Model {model_id} has no arguments properties."),
             )
         })?;
-    for key in arguments.keys() {
-        if !properties.contains_key(key) {
-            return Err(GenerationError::new(
-                "generation_argument_invalid",
-                format!("Unsupported generation argument for {model_id}: {key}."),
-            ));
-        }
-    }
     if let Some(required) = schema.get("required").and_then(Value::as_array) {
         for key in required.iter().filter_map(Value::as_str) {
-            let missing = arguments.get(key).is_none_or(|value| {
-                value.is_null() || value.as_str().is_some_and(|value| value.trim().is_empty())
-            });
-            if missing {
+            if !arguments.contains_key(key) {
                 return Err(GenerationError::new(
                     "generation_argument_invalid",
                     format!("Model {model_id} requires argument: {key}."),
@@ -351,7 +633,80 @@ pub(crate) fn validate_arguments(
         }
     }
     for (key, value) in arguments {
-        validate_argument_schema(model_id, key, value, &properties[key])?;
+        if let Some(property_schema) = properties.get(key) {
+            validate_argument_schema(model_id, key, value, property_schema)?;
+        }
+    }
+    Ok(())
+}
+
+pub(crate) fn materialize_argument_defaults(
+    model_id: &str,
+    schema: &Value,
+    arguments: &mut Map<String, Value>,
+) -> Result<(), GenerationError> {
+    materialize_object_defaults(model_id, "arguments", schema, arguments)
+}
+
+fn materialize_object_defaults(
+    model_id: &str,
+    path: &str,
+    schema: &Value,
+    object: &mut Map<String, Value>,
+) -> Result<(), GenerationError> {
+    let properties = schema
+        .get("properties")
+        .and_then(Value::as_object)
+        .ok_or_else(|| {
+            GenerationError::new(
+                "model_catalog_invalid",
+                format!("Model {model_id} schema {path} has no properties."),
+            )
+        })?;
+    for (key, child_schema) in properties {
+        if let Some(value) = object.get_mut(key) {
+            materialize_nested_defaults(model_id, &format!("{path}.{key}"), child_schema, value)?;
+            continue;
+        }
+        if let Some(default) = child_schema.get("default") {
+            object.insert(key.clone(), default.clone());
+            continue;
+        }
+        if child_schema.get("type").and_then(Value::as_str) == Some("object")
+            && child_schema.get("properties").is_some()
+        {
+            let mut child = Map::new();
+            materialize_object_defaults(
+                model_id,
+                &format!("{path}.{key}"),
+                child_schema,
+                &mut child,
+            )?;
+            if !child.is_empty() {
+                object.insert(key.clone(), Value::Object(child));
+            }
+        }
+    }
+    Ok(())
+}
+
+fn materialize_nested_defaults(
+    model_id: &str,
+    path: &str,
+    schema: &Value,
+    value: &mut Value,
+) -> Result<(), GenerationError> {
+    if let Some(object) = value.as_object_mut()
+        && schema.get("properties").is_some()
+    {
+        materialize_object_defaults(model_id, path, schema, object)?;
+    }
+    if let Some(items) = value.as_array_mut()
+        && let Some(item_schema) = schema.get("items")
+    {
+        for (index, item) in items.iter_mut().enumerate() {
+            materialize_nested_defaults(model_id, &format!("{path}[{index}]"), item_schema, item)?;
+        }
     }
     Ok(())
 }
@@ -370,13 +725,11 @@ fn validate_argument_schema(
         return invalid_argument(model_id, path, "does not match any supported shape");
     }
     if let Some(branches) = schema.get("oneOf").and_then(Value::as_array)
-        && branches
+        && !branches
             .iter()
-            .filter(|branch| validate_argument_schema(model_id, path, value, branch).is_ok())
-            .count()
-            != 1
+            .any(|branch| validate_argument_schema(model_id, path, value, branch).is_ok())
     {
-        return invalid_argument(model_id, path, "does not match exactly one supported shape");
+        return invalid_argument(model_id, path, "does not match any supported shape");
     }
     let type_matches = |kind: &str| match kind {
         "null" => value.is_null(),
@@ -397,66 +750,7 @@ fn validate_argument_schema(
     if !valid {
         return invalid_argument(model_id, path, "has the wrong type");
     }
-    if let Some(values) = schema.get("enum").and_then(Value::as_array)
-        && !values.contains(value)
-    {
-        return invalid_argument(model_id, path, "is not supported");
-    }
-    if let Some(constant) = schema.get("const")
-        && constant != value
-    {
-        return invalid_argument(model_id, path, "does not match the required value");
-    }
-    validate_string_constraint(model_id, path, value, schema)?;
-    validate_number_constraint(model_id, path, value, schema)?;
     validate_nested_constraint(model_id, path, value, schema)?;
-    Ok(())
-}
-
-fn validate_string_constraint(
-    model_id: &str,
-    path: &str,
-    value: &Value,
-    schema: &Value,
-) -> Result<(), GenerationError> {
-    if let Some(string) = value.as_str()
-        && let Some(pattern) = schema.get("pattern").and_then(Value::as_str)
-    {
-        let pattern = regex::Regex::new(pattern).map_err(|error| {
-            GenerationError::new(
-                "model_catalog_invalid",
-                format!("Model {model_id} argument {path} has an invalid pattern: {error}"),
-            )
-        })?;
-        if !pattern.is_match(string) {
-            return invalid_argument(model_id, path, "does not match the required format");
-        }
-    }
-    Ok(())
-}
-
-fn validate_number_constraint(
-    model_id: &str,
-    path: &str,
-    value: &Value,
-    schema: &Value,
-) -> Result<(), GenerationError> {
-    if let Some(number) = value.as_f64() {
-        if schema
-            .get("minimum")
-            .and_then(Value::as_f64)
-            .is_some_and(|minimum| number < minimum)
-        {
-            return invalid_argument(model_id, path, "is below the supported minimum");
-        }
-        if schema
-            .get("maximum")
-            .and_then(Value::as_f64)
-            .is_some_and(|maximum| number > maximum)
-        {
-            return invalid_argument(model_id, path, "exceeds the supported maximum");
-        }
-    }
     Ok(())
 }
 
@@ -476,23 +770,12 @@ fn validate_nested_constraint(
     if let Some(object) = value.as_object() {
         if let Some(required) = schema.get("required").and_then(Value::as_array) {
             for key in required.iter().filter_map(Value::as_str) {
-                if object.get(key).is_none_or(Value::is_null) {
+                if !object.contains_key(key) {
                     return invalid_argument(model_id, &format!("{path}.{key}"), "is required");
                 }
             }
         }
         let properties = schema.get("properties").and_then(Value::as_object);
-        if schema.get("additionalProperties") == Some(&Value::Bool(false))
-            && let Some(unsupported) = object
-                .keys()
-                .find(|key| properties.is_none_or(|properties| !properties.contains_key(*key)))
-        {
-            return invalid_argument(
-                model_id,
-                &format!("{path}.{unsupported}"),
-                "is not supported",
-            );
-        }
         if let Some(properties) = properties {
             for (key, child) in object {
                 if let Some(child_schema) = properties.get(key) {
@@ -531,20 +814,6 @@ pub(crate) fn join_url(base: &str, suffix: &str) -> Result<String, GenerationErr
         .map_err(|error| GenerationError::new("model_configuration_invalid", error.to_string()))
 }
 
-pub(crate) fn required_string(value: &Value, pointer: &str) -> Result<String, GenerationError> {
-    value
-        .pointer(pointer)
-        .and_then(Value::as_str)
-        .filter(|value| !value.is_empty())
-        .map(str::to_owned)
-        .ok_or_else(|| {
-            GenerationError::new(
-                "model_response_invalid",
-                format!("Model response omitted {pointer}."),
-            )
-        })
-}
-
 pub(crate) fn decode_base64(value: &str, label: &str) -> Result<Vec<u8>, GenerationError> {
     if value.len() > MAX_GENERATED_MEDIA_BYTES.saturating_mul(4) / 3 + 8 {
         return Err(GenerationError::new(
@@ -567,27 +836,70 @@ pub(crate) fn decode_base64(value: &str, label: &str) -> Result<Vec<u8>, Generat
     Ok(bytes)
 }
 
-fn resolve_media_reference_value(
-    project_root: &Path,
-    reference: &str,
-) -> Result<String, GenerationError> {
-    if reference.starts_with("http://") || reference.starts_with("https://") {
-        return Ok(reference.to_owned());
-    }
-    if reference.starts_with("data:") {
-        decode_data_url(reference, MAX_INPUT_MEDIA_BYTES)?;
-        return Ok(reference.to_owned());
-    }
-    let path = assert_project_tree_visible_path(reference)?;
-    let bytes =
-        ProjectCapabilityFs::open(project_root)?.read_limited(&path, MAX_INPUT_MEDIA_BYTES)?;
-    let mime = mime_from_path_or_bytes(&path, &bytes).ok_or_else(|| {
-        GenerationError::new(
-            "generation_input_invalid",
-            format!("Project media input has an unsupported type: {path}"),
-        )
+fn encoded_base64_len(bytes: usize) -> Result<usize, GenerationError> {
+    bytes
+        .checked_add(2)
+        .and_then(|bytes| bytes.checked_div(3))
+        .and_then(|groups| groups.checked_mul(4))
+        .ok_or_else(model_request_too_large)
+}
+
+fn input_data_url_layout(
+    value: &str,
+    maximum_bytes: usize,
+) -> Result<(usize, usize), GenerationError> {
+    let payload = value.strip_prefix("data:").ok_or_else(|| {
+        GenerationError::new("generation_input_invalid", "Media data URL is malformed.")
     })?;
-    Ok(format!("data:{mime};base64,{}", BASE64.encode(bytes)))
+    let (header, encoded) = payload.split_once(',').ok_or_else(|| {
+        GenerationError::new("generation_input_invalid", "Media data URL is malformed.")
+    })?;
+    let mime_type = header
+        .strip_suffix(";base64")
+        .filter(|mime| !mime.is_empty())
+        .ok_or_else(|| {
+            GenerationError::new(
+                "generation_input_invalid",
+                "Media data URL must use base64 encoding.",
+            )
+        })?;
+    if encoded.len() % 4 != 0 {
+        return Err(GenerationError::new(
+            "generation_input_invalid",
+            "Media data URL has an invalid base64 length.",
+        ));
+    }
+    let padding = encoded
+        .as_bytes()
+        .iter()
+        .rev()
+        .take_while(|byte| **byte == b'=')
+        .count()
+        .min(2);
+    let decoded = encoded
+        .len()
+        .checked_div(4)
+        .and_then(|groups| groups.checked_mul(3))
+        .and_then(|bytes| bytes.checked_sub(padding))
+        .ok_or_else(|| input_media_too_large(maximum_bytes))?;
+    if decoded > maximum_bytes {
+        return Err(input_media_too_large(maximum_bytes));
+    }
+    Ok((decoded, mime_type.len()))
+}
+
+fn model_request_too_large() -> GenerationError {
+    GenerationError::new(
+        "model_request_too_large",
+        "Model request exceeds the Runtime request-size limit.",
+    )
+}
+
+fn input_media_too_large(maximum_bytes: usize) -> GenerationError {
+    GenerationError::new(
+        "generation_input_too_large",
+        format!("Input media exceeds the {maximum_bytes}-byte item limit."),
+    )
 }
 
 pub(crate) fn decode_data_url(
@@ -709,37 +1021,53 @@ pub(crate) fn extension_for_mime(mime: &str) -> Result<&'static str, GenerationE
     }
 }
 
-pub(crate) struct GenerationControl<'a> {
-    cancellation: &'a GenerationCancellation,
-    deadline: GenerationDeadline,
+struct OutputNaming {
+    directory: String,
+    basename: String,
+    artifact_count: usize,
 }
 
-impl<'a> GenerationControl<'a> {
-    pub(crate) fn new(
-        cancellation: &'a GenerationCancellation,
-        deadline: GenerationDeadline,
-    ) -> Self {
+impl OutputNaming {
+    fn new(operation_id: &str, request: &ModelRequest, artifact_count: usize) -> Self {
+        let output = request.output.as_ref();
         Self {
-            cancellation,
-            deadline,
+            directory: output
+                .and_then(|output| output.directory.as_deref())
+                .map_or_else(|| format!("generated/{operation_id}"), str::to_owned),
+            basename: output
+                .and_then(|output| output.filename.clone())
+                .unwrap_or_else(|| Uuid::new_v4().to_string()),
+            artifact_count,
         }
     }
 
-    fn check(&self) -> Result<(), GenerationError> {
-        self.deadline.remaining(self.cancellation).map(|_| ())
+    fn path(&self, index: usize, extension: &str) -> Result<String, GenerationError> {
+        let filename = if self.artifact_count == 1 {
+            format!("{}.{extension}", self.basename)
+        } else {
+            format!("{}_{}.{extension}", self.basename, index + 1)
+        };
+        let path = if self.directory == "." {
+            filename
+        } else {
+            format!("{}/{filename}", self.directory)
+        };
+        assert_project_tree_visible_mutation_path(&path).map_err(GenerationError::from)
     }
 }
 
-pub(crate) fn store_execution(
-    project_root: &Path,
-    invocation_id: &str,
-    arguments: &Map<String, Value>,
+pub(crate) struct StagedModelExecution {
+    files: StagedGeneratedAssetFiles,
+}
+
+pub(crate) fn stage_execution(
+    capability: &ProjectCapabilityFs,
+    operation_id: &str,
+    request: &ModelRequest,
+    replace: bool,
     execution: ModelExecution,
-    metadata: &GeneratedAssetMetadataService,
     configured_secrets: &[String],
-    control: &GenerationControl<'_>,
-) -> Result<(Vec<GenerationArtifact>, Vec<Value>), GenerationError> {
-    control.check()?;
+) -> Result<(StagedModelExecution, Vec<ArtifactPointer>), GenerationError> {
     let model_run_id = Uuid::new_v4().to_string();
     let safe_request =
         redact_model_run_value(&execution.safe_request, configured_secrets.iter().cloned());
@@ -747,37 +1075,24 @@ pub(crate) fn store_execution(
         &Value::Array(execution.safe_responses),
         configured_secrets.iter().cloned(),
     );
-    let mut artifacts = Vec::with_capacity(execution.payloads.len());
+    let artifact_count = execution.payloads.len();
+    let naming = OutputNaming::new(operation_id, request, artifact_count);
+    let mut committed_files = Vec::with_capacity(artifact_count);
+    let mut artifacts = Vec::with_capacity(artifact_count);
     for (index, payload) in execution.payloads.into_iter().enumerate() {
-        control.check()?;
+        let artifact_index = u64::try_from(index).map_err(|_| {
+            GenerationError::new(
+                "model_response_too_large",
+                "Generated Artifact count exceeds the supported index range.",
+            )
+        })?;
         let dimensions = if payload.role == GeneratedArtifactRole::PrimaryImage {
             generated_image_dimensions(&payload.bytes)?
         } else {
             (None, None)
         };
-        let artifact_id = Uuid::new_v4().to_string();
-        let output_path = if index == 0 {
-            string_argument(arguments, "output_path")
-        } else {
-            None
-        };
-        let output_directory = string_argument(arguments, "output_directory")
-            .unwrap_or_else(|| format!("generated/{invocation_id}"));
-        let path = output_path.unwrap_or_else(|| {
-            format!(
-                "{}/{}.{}",
-                output_directory.trim_end_matches('/'),
-                artifact_id,
-                payload.suggested_extension
-            )
-        });
-        let path = assert_project_tree_visible_mutation_path(&path)?;
-        ProjectCapabilityFs::open(project_root)?.atomic_write_checked(
-            &path,
-            &payload.bytes,
-            || control.check(),
-        )?;
-        control.check()?;
+        let extension = extension_for_mime(&payload.mime_type)?;
+        let path = naming.path(index, extension)?;
         let output = redact_model_run_value(
             &serde_json::json!({
                 "responses": safe_responses,
@@ -786,36 +1101,73 @@ pub(crate) fn store_execution(
             }),
             configured_secrets.iter().cloned(),
         );
-        metadata.record_checked(
-            project_root,
-            RecordGeneratedAssetInput {
+        committed_files.push(CommitGeneratedAssetFile {
+            input: RecordGeneratedAssetInput {
                 model_run_id: model_run_id.clone(),
                 project_relative_path: path.clone(),
                 artifact_role: payload.role,
-                artifact_index: u64::try_from(index).unwrap_or(u64::MAX),
+                artifact_index,
                 model_run: GeneratedModelRun {
                     request: safe_request.clone(),
                     output,
                 },
             },
-            || control.check(),
-        )?;
-        control.check()?;
+            content: payload.bytes,
+            replace,
+        });
         let (width, height) = dimensions;
-        let title = path.rsplit('/').next().unwrap_or(&path).to_owned();
-        artifacts.push(GenerationArtifact {
-            artifact_id,
-            title,
+        artifacts.push(ArtifactPointer {
+            artifact_index,
+            role: payload.role,
             project_relative_path: path,
             mime_type: payload.mime_type,
-            role: payload.role,
-            artifact_index: u64::try_from(index).unwrap_or(u64::MAX),
             width,
             height,
         });
     }
-    control.check()?;
-    Ok((artifacts, execution.logs))
+    let files = GeneratedAssetMetadataService::stage_generated_files(capability, committed_files)?;
+    Ok((StagedModelExecution { files }, artifacts))
+}
+
+pub(crate) fn commit_staged_execution(
+    project_root: &Path,
+    staged: StagedModelExecution,
+    metadata: &GeneratedAssetMetadataService,
+) -> Result<(), GenerationError> {
+    let StagedModelExecution { files } = staged;
+    metadata.with_project_commit(project_root, |commit| {
+        commit
+            .commit_staged_generated_files(files)
+            .map_err(GenerationError::from)
+    })?;
+    Ok(())
+}
+
+#[cfg(test)]
+#[allow(
+    clippy::too_many_arguments,
+    reason = "test and non-Operation callers use the same stage-and-commit path"
+)]
+pub(crate) fn commit_execution(
+    project_root: &Path,
+    capability: &ProjectCapabilityFs,
+    operation_id: &str,
+    request: &ModelRequest,
+    replace: bool,
+    execution: ModelExecution,
+    metadata: &GeneratedAssetMetadataService,
+    configured_secrets: &[String],
+) -> Result<Vec<ArtifactPointer>, GenerationError> {
+    let (staged, artifacts) = stage_execution(
+        capability,
+        operation_id,
+        request,
+        replace,
+        execution,
+        configured_secrets,
+    )?;
+    commit_staged_execution(project_root, staged, metadata)?;
+    Ok(artifacts)
 }
 
 fn generated_image_dimensions(bytes: &[u8]) -> Result<(Option<u32>, Option<u32>), GenerationError> {
@@ -858,23 +1210,6 @@ fn generated_image_dimensions(bytes: &[u8]) -> Result<(Option<u32>, Option<u32>)
     Ok((Some(width), Some(height)))
 }
 
-pub(crate) fn string_argument(arguments: &Map<String, Value>, key: &str) -> Option<String> {
-    arguments
-        .get(key)
-        .and_then(Value::as_str)
-        .map(str::trim)
-        .filter(|value| !value.is_empty())
-        .map(str::to_owned)
-}
-
-pub(crate) fn strip_output_arguments(arguments: &Map<String, Value>) -> Map<String, Value> {
-    arguments
-        .iter()
-        .filter(|(key, _)| !matches!(key.as_str(), "output_path" | "output_directory"))
-        .map(|(key, value)| (key.clone(), value.clone()))
-        .collect()
-}
-
 pub(crate) fn response_log(response: &ModelHttpResponse, parsed: &Value) -> Value {
     serde_json::json!({
         "status": response.status,
@@ -914,11 +1249,13 @@ pub(crate) fn summarize_json(value: &Value) -> Value {
 
 #[cfg(test)]
 mod tests {
+    use std::sync::{Arc, Barrier};
+
     use super::*;
-    use crate::project::GeneratedArtifactRole;
+    use crate::project::{GeneratedArtifactRole, GeneratedAssetMetadataLookup};
 
     #[test]
-    fn recursive_catalog_validation_rejects_wrong_array_and_object_shapes() {
+    fn recursive_catalog_validation_checks_known_shapes_only() {
         let schema = serde_json::json!({
             "type": "object",
             "properties": {
@@ -948,16 +1285,72 @@ mod tests {
             )
             .is_err()
         );
+        validate_arguments(
+            "fixture",
+            &schema,
+            &Map::from_iter([
+                (
+                    "items".to_owned(),
+                    serde_json::json!([{"url":"file:///private", "extra": true}]),
+                ),
+                (
+                    "unknown".to_owned(),
+                    serde_json::json!({"sent": "to provider"}),
+                ),
+            ]),
+        )
+        .unwrap();
         assert!(
             validate_arguments(
                 "fixture",
                 &schema,
-                &Map::from_iter([(
-                    "items".to_owned(),
-                    serde_json::json!([{"url":"file:///private", "extra": true}]),
-                )]),
+                &Map::from_iter([("items".to_owned(), serde_json::json!([{"url": 42}]),)]),
             )
             .is_err()
+        );
+    }
+
+    #[test]
+    fn catalog_defaults_materialize_recursively_without_replacing_explicit_values() {
+        let schema = serde_json::json!({
+            "type": "object",
+            "properties": {
+                "delivery": {"type": "string", "default": "uri"},
+                "explicit": {"type": ["string", "null"], "default": "default"},
+                "options": {
+                    "type": "object",
+                    "properties": {
+                        "format": {"type": "string", "default": "png"}
+                    }
+                },
+                "items": {
+                    "type": "array",
+                    "items": {
+                        "type": "object",
+                        "properties": {
+                            "enabled": {"type": "boolean", "default": false}
+                        }
+                    }
+                }
+            }
+        });
+        let mut arguments = Map::from_iter([
+            ("explicit".to_owned(), Value::Null),
+            ("items".to_owned(), serde_json::json!([{}])),
+        ]);
+
+        materialize_argument_defaults("fixture", &schema, &mut arguments).unwrap();
+
+        assert_eq!(arguments.get("delivery"), Some(&serde_json::json!("uri")));
+        assert_eq!(arguments.get("explicit"), Some(&Value::Null));
+        let materialized = Value::Object(arguments);
+        assert_eq!(
+            materialized.pointer("/options/format"),
+            Some(&serde_json::json!("png"))
+        );
+        assert_eq!(
+            materialized.pointer("/items/0/enabled"),
+            Some(&serde_json::json!(false))
         );
     }
 
@@ -974,45 +1367,224 @@ mod tests {
     }
 
     #[test]
-    fn generated_output_cannot_replace_protected_project_documents() {
+    fn model_output_uses_real_extensions_and_actual_artifact_count() {
         let root = std::env::temp_dir().join(format!("debrute-generation-{}", Uuid::new_v4()));
-        std::fs::create_dir_all(root.join(".debrute")).unwrap();
-        std::fs::write(root.join(".debrute/project.json"), b"keep").unwrap();
-        let cancellation = GenerationCancellation::default();
+        std::fs::create_dir_all(&root).unwrap();
+        let execution = ModelExecution {
+            payloads: vec![
+                GeneratedPayload {
+                    bytes: b"jpeg".to_vec(),
+                    mime_type: "image/jpeg".to_owned(),
+                    role: GeneratedArtifactRole::Other,
+                    model_output: Value::Null,
+                },
+                GeneratedPayload {
+                    bytes: b"video".to_vec(),
+                    mime_type: "video/mp4".to_owned(),
+                    role: GeneratedArtifactRole::Other,
+                    model_output: Value::Null,
+                },
+            ],
+            safe_request: Value::Null,
+            safe_responses: Vec::new(),
+        };
+        let request = ModelRequest {
+            model: "fixture".to_owned(),
+            arguments: Map::new(),
+            output: Some(crate::model_operation::ModelOutput {
+                directory: Some("generated".to_owned()),
+                filename: Some("covers".to_owned()),
+            }),
+        };
+        let capability = ProjectCapabilityFs::open(&root).unwrap();
+        let artifacts = commit_execution(
+            &root,
+            &capability,
+            "operation",
+            &request,
+            false,
+            execution,
+            &GeneratedAssetMetadataService::new(),
+            &[],
+        )
+        .unwrap();
+        assert_eq!(
+            artifacts
+                .iter()
+                .map(|artifact| artifact.project_relative_path.as_str())
+                .collect::<Vec<_>>(),
+            vec!["generated/covers_1.jpg", "generated/covers_2.mp4"]
+        );
+        assert_eq!(
+            std::fs::read(root.join("generated/covers_1.jpg")).unwrap(),
+            b"jpeg"
+        );
+        assert_eq!(
+            std::fs::read(root.join("generated/covers_2.mp4")).unwrap(),
+            b"video"
+        );
+        std::fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn failed_item_commit_restores_the_output_present_at_commit_time() {
+        let root = std::env::temp_dir().join(format!("debrute-generation-{}", Uuid::new_v4()));
+        std::fs::create_dir_all(root.join("generated")).unwrap();
+        std::fs::create_dir_all(root.join(".debrute/assets")).unwrap();
+        std::fs::write(root.join("generated/covers.mp3"), b"old").unwrap();
+        std::fs::write(
+            root.join(crate::project::GENERATED_ASSET_INDEX_PROJECT_PATH),
+            b"invalid metadata",
+        )
+        .unwrap();
         let execution = ModelExecution {
             payloads: vec![GeneratedPayload {
-                bytes: b"replace".to_vec(),
-                mime_type: "application/octet-stream".to_owned(),
+                bytes: b"new".to_vec(),
+                mime_type: "audio/mpeg".to_owned(),
                 role: GeneratedArtifactRole::Other,
-                suggested_extension: "bin",
                 model_output: Value::Null,
             }],
             safe_request: Value::Null,
             safe_responses: Vec::new(),
-            logs: Vec::new(),
         };
-        let error = store_execution(
+        let request = ModelRequest {
+            model: "fixture".to_owned(),
+            arguments: Map::new(),
+            output: Some(crate::model_operation::ModelOutput {
+                directory: Some("generated".to_owned()),
+                filename: Some("covers".to_owned()),
+            }),
+        };
+
+        let capability = ProjectCapabilityFs::open(&root).unwrap();
+        let error = commit_execution(
             &root,
-            "invocation",
-            &Map::from_iter([(
-                "output_path".to_owned(),
-                Value::String(".debrute/project.json".to_owned()),
-            )]),
+            &capability,
+            "operation",
+            &request,
+            true,
             execution,
             &GeneratedAssetMetadataService::new(),
             &[],
-            &GenerationControl::new(
-                &cancellation,
-                GenerationDeadline::after(Duration::from_secs(1)).unwrap(),
-            ),
         )
         .unwrap_err();
+
         assert_eq!(error.code(), "generation_project_failed");
         assert_eq!(
-            std::fs::read(root.join(".debrute/project.json")).unwrap(),
-            b"keep"
+            std::fs::read(root.join("generated/covers.mp3")).unwrap(),
+            b"old"
         );
+        let temporary = std::fs::read_dir(root.join("generated"))
+            .unwrap()
+            .filter_map(Result::ok)
+            .filter(|entry| entry.file_name().to_string_lossy().ends_with(".tmp"))
+            .count();
+        assert_eq!(temporary, 0);
         std::fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn replacing_model_commits_serialize_files_with_their_provenance() {
+        let root = std::env::temp_dir().join(format!("debrute-generation-{}", Uuid::new_v4()));
+        std::fs::create_dir_all(root.join("generated")).unwrap();
+        std::fs::write(root.join("generated/shared.mp3"), b"original").unwrap();
+        let metadata = Arc::new(GeneratedAssetMetadataService::new());
+        let capability = ProjectCapabilityFs::open(&root).unwrap();
+        let barrier = Arc::new(Barrier::new(2));
+        let request = ModelRequest {
+            model: "fixture".to_owned(),
+            arguments: Map::new(),
+            output: Some(crate::model_operation::ModelOutput {
+                directory: Some("generated".to_owned()),
+                filename: Some("shared".to_owned()),
+            }),
+        };
+        let threads = [b"first".to_vec(), b"second".to_vec()].map(|bytes| {
+            let root = root.clone();
+            let metadata = Arc::clone(&metadata);
+            let capability = capability.clone();
+            let barrier = Arc::clone(&barrier);
+            let request = request.clone();
+            std::thread::spawn(move || {
+                barrier.wait();
+                commit_execution(
+                    &root,
+                    &capability,
+                    &Uuid::new_v4().to_string(),
+                    &request,
+                    true,
+                    ModelExecution {
+                        payloads: vec![GeneratedPayload {
+                            bytes,
+                            mime_type: "audio/mpeg".to_owned(),
+                            role: GeneratedArtifactRole::Other,
+                            model_output: Value::Null,
+                        }],
+                        safe_request: Value::Null,
+                        safe_responses: Vec::new(),
+                    },
+                    &metadata,
+                    &[],
+                )
+            })
+        });
+        for thread in threads {
+            thread.join().unwrap().unwrap();
+        }
+        let final_bytes = std::fs::read(root.join("generated/shared.mp3")).unwrap();
+        assert!(final_bytes == b"first" || final_bytes == b"second");
+        let GeneratedAssetMetadataLookup::Matched { records, .. } =
+            metadata.lookup(&root, "generated/shared.mp3").unwrap()
+        else {
+            panic!("final output must retain matching provenance");
+        };
+        assert_eq!(records.len(), 1);
+        std::fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn generated_commit_remains_anchored_when_the_ambient_project_path_is_replaced() {
+        let container = std::env::temp_dir().join(format!("debrute-generation-{}", Uuid::new_v4()));
+        let root = container.join("project");
+        let accepted_root = container.join("accepted-project");
+        std::fs::create_dir_all(&root).unwrap();
+        let capability = ProjectCapabilityFs::open_current(&root).unwrap();
+        std::fs::rename(&root, &accepted_root).unwrap();
+        std::fs::create_dir_all(&root).unwrap();
+        let request = ModelRequest {
+            model: "fixture".to_owned(),
+            arguments: Map::new(),
+            output: Some(crate::model_operation::ModelOutput {
+                directory: Some("generated".to_owned()),
+                filename: Some("anchored".to_owned()),
+            }),
+        };
+        commit_execution(
+            &root,
+            &capability,
+            "operation",
+            &request,
+            false,
+            ModelExecution {
+                payloads: vec![GeneratedPayload {
+                    bytes: b"anchored".to_vec(),
+                    mime_type: "audio/mpeg".to_owned(),
+                    role: GeneratedArtifactRole::Other,
+                    model_output: Value::Null,
+                }],
+                safe_request: Value::Null,
+                safe_responses: Vec::new(),
+            },
+            &GeneratedAssetMetadataService::new(),
+            &[],
+        )
+        .unwrap();
+        assert_eq!(
+            std::fs::read(accepted_root.join("generated/anchored.mp3")).unwrap(),
+            b"anchored"
+        );
+        assert!(!root.join("generated/anchored.mp3").exists());
+        std::fs::remove_dir_all(container).unwrap();
     }
 
     #[test]

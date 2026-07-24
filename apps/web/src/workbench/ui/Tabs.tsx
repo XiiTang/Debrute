@@ -1,7 +1,7 @@
 import React from 'react';
 import { cx } from './cx';
 
-export type TabFocusDirection = 'next' | 'previous';
+type TabFocusDirection = 'next' | 'previous';
 
 export function getNextTabIndex({
   currentIndex,

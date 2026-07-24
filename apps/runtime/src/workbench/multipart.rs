@@ -1,6 +1,10 @@
 use std::{collections::HashMap, path::PathBuf};
 
-use axum::{body::Bytes, extract::Request, http::header};
+use axum::{
+    body::Bytes,
+    extract::Request,
+    http::{StatusCode, header},
+};
 use futures_util::{Stream, StreamExt};
 use tokio::{fs::File, io::AsyncWriteExt as _};
 use uuid::Uuid;
@@ -11,6 +15,21 @@ const MAX_MULTIPART_BYTES: u64 = 16 * 1024 * 1024 * 1024;
 const MAX_MULTIPART_PARTS: usize = 10_000;
 const MAX_MULTIPART_FIELDS_BYTES: usize = 64 * 1024;
 const MAX_MULTIPART_HEADERS_BYTES: usize = 16 * 1024;
+
+#[derive(Debug, Clone, Copy)]
+pub(super) struct MultipartLimits {
+    pub total_bytes: u64,
+    pub file_bytes: u64,
+    pub fields_bytes: usize,
+    pub parts: usize,
+}
+
+const GENERAL_MULTIPART_LIMITS: MultipartLimits = MultipartLimits {
+    total_bytes: MAX_MULTIPART_BYTES,
+    file_bytes: MAX_MULTIPART_BYTES,
+    fields_bytes: MAX_MULTIPART_FIELDS_BYTES,
+    parts: MAX_MULTIPART_PARTS,
+};
 
 #[derive(Debug)]
 pub(super) struct MultipartFile {
@@ -46,12 +65,19 @@ impl Drop for MultipartParts {
 pub(super) async fn read_multipart(
     request: Request,
 ) -> Result<MultipartParts, RuntimeHttpServiceError> {
+    read_multipart_limited(request, GENERAL_MULTIPART_LIMITS).await
+}
+
+pub(super) async fn read_multipart_limited(
+    request: Request,
+    limits: MultipartLimits,
+) -> Result<MultipartParts, RuntimeHttpServiceError> {
     if request
         .headers()
         .get(header::CONTENT_LENGTH)
         .and_then(|value| value.to_str().ok())
         .and_then(|value| value.parse::<u64>().ok())
-        .is_some_and(|length| length > MAX_MULTIPART_BYTES)
+        .is_some_and(|length| length > limits.total_bytes)
     {
         return Err(too_large());
     }
@@ -60,7 +86,7 @@ pub(super) async fn read_multipart(
     tokio::fs::create_dir(&directory)
         .await
         .map_err(|error| multipart_error(error.to_string()))?;
-    let result = parse_body(request, &boundary, directory.clone()).await;
+    let result = parse_body(request, &boundary, directory.clone(), limits).await;
     if result.is_err() {
         let _ = tokio::fs::remove_dir_all(&directory).await;
     }
@@ -126,15 +152,17 @@ async fn parse_body(
     request: Request,
     boundary: &[u8],
     directory: PathBuf,
+    limits: MultipartLimits,
 ) -> Result<MultipartParts, RuntimeHttpServiceError> {
-    let mut reader = MultipartReader::new(request.into_body().into_data_stream());
+    let mut reader =
+        MultipartReader::new(request.into_body().into_data_stream(), limits.total_bytes);
     let initial = [b"--".as_slice(), boundary, b"\r\n"].concat();
     reader.require_prefix(&initial).await?;
     let marker = [b"\r\n--".as_slice(), boundary].concat();
     let mut fields = HashMap::new();
     let mut files = HashMap::new();
     let mut fields_bytes = 0usize;
-    for part_index in 0..MAX_MULTIPART_PARTS {
+    for part_index in 0..limits.parts {
         let headers = reader
             .take_until(b"\r\n\r\n", MAX_MULTIPART_HEADERS_BYTES)
             .await?;
@@ -148,7 +176,9 @@ async fn parse_body(
             let mut file = File::create_new(&temporary_path)
                 .await
                 .map_err(|error| multipart_error(error.to_string()))?;
-            reader.copy_until(&marker, &mut file).await?;
+            reader
+                .copy_until(&marker, &mut file, limits.file_bytes)
+                .await?;
             file.flush()
                 .await
                 .map_err(|error| multipart_error(error.to_string()))?;
@@ -157,7 +187,7 @@ async fn parse_body(
                 .map_err(|error| multipart_error(error.to_string()))?;
             files.insert(name, MultipartFile { temporary_path });
         } else {
-            let remaining = MAX_MULTIPART_FIELDS_BYTES.saturating_sub(fields_bytes);
+            let remaining = limits.fields_bytes.saturating_sub(fields_bytes);
             let value = reader.take_part(&marker, remaining).await?;
             fields_bytes = fields_bytes
                 .checked_add(value.len())
@@ -187,6 +217,7 @@ struct MultipartReader<S> {
     stream: S,
     buffer: Vec<u8>,
     received: u64,
+    maximum_bytes: u64,
     ended: bool,
 }
 
@@ -195,11 +226,12 @@ where
     S: Stream<Item = Result<Bytes, E>> + Unpin,
     E: std::fmt::Display,
 {
-    fn new(stream: S) -> Self {
+    fn new(stream: S, maximum_bytes: u64) -> Self {
         Self {
             stream,
             buffer: Vec::new(),
             received: 0,
+            maximum_bytes,
             ended: false,
         }
     }
@@ -214,7 +246,7 @@ where
                     .received
                     .checked_add(u64::try_from(chunk.len()).unwrap_or(u64::MAX))
                     .ok_or_else(too_large)?;
-                if self.received > MAX_MULTIPART_BYTES {
+                if self.received > self.maximum_bytes {
                     return Err(too_large());
                 }
                 self.buffer.extend_from_slice(&chunk);
@@ -293,6 +325,7 @@ where
         &mut self,
         marker: &[u8],
         output: &mut File,
+        limit: u64,
     ) -> Result<u64, RuntimeHttpServiceError> {
         let mut written = 0u64;
         loop {
@@ -304,6 +337,9 @@ where
                 written = written
                     .checked_add(u64::try_from(index).unwrap_or(u64::MAX))
                     .ok_or_else(too_large)?;
+                if written > limit {
+                    return Err(too_large());
+                }
                 self.buffer.drain(..index);
                 return Ok(written);
             }
@@ -317,6 +353,9 @@ where
                 written = written
                     .checked_add(u64::try_from(flush).unwrap_or(u64::MAX))
                     .ok_or_else(too_large)?;
+                if written > limit {
+                    return Err(too_large());
+                }
                 self.buffer.drain(..flush);
             }
             if !self.fill().await? {
@@ -406,19 +445,19 @@ fn find_bytes(haystack: &[u8], needle: &[u8]) -> Option<usize> {
 }
 
 fn invalid_input(message: impl Into<String>) -> RuntimeHttpServiceError {
-    RuntimeHttpServiceError::new(400, "invalid_input", message)
+    RuntimeHttpServiceError::new(StatusCode::BAD_REQUEST, "invalid_input", message)
 }
 
 fn too_large() -> RuntimeHttpServiceError {
     RuntimeHttpServiceError::new(
-        413,
+        StatusCode::PAYLOAD_TOO_LARGE,
         "request_body_too_large",
         "Multipart request exceeds the Runtime upload limits.",
     )
 }
 
 fn multipart_error(message: impl Into<String>) -> RuntimeHttpServiceError {
-    RuntimeHttpServiceError::new(400, "invalid_multipart", message)
+    RuntimeHttpServiceError::new(StatusCode::BAD_REQUEST, "invalid_multipart", message)
 }
 
 #[cfg(test)]
@@ -472,6 +511,36 @@ mod tests {
             )
             .body(Body::from(body))
             .unwrap();
-        assert_eq!(read_multipart(request).await.unwrap_err().status, 400);
+        assert_eq!(
+            read_multipart(request).await.unwrap_err().status,
+            StatusCode::BAD_REQUEST
+        );
+    }
+
+    #[tokio::test]
+    async fn endpoint_limits_are_applied_while_streaming_a_file_part() {
+        let boundary = "bounded";
+        let body = format!(
+            "--{boundary}\r\nContent-Disposition: form-data; name=\"input\"; filename=\"input.jsonl\"\r\n\r\n12345\r\n--{boundary}--\r\n"
+        );
+        let request = Request::builder()
+            .header(
+                header::CONTENT_TYPE,
+                format!("multipart/form-data; boundary={boundary}"),
+            )
+            .body(Body::from(body))
+            .unwrap();
+        let error = read_multipart_limited(
+            request,
+            MultipartLimits {
+                total_bytes: 1024,
+                file_bytes: 4,
+                fields_bytes: 16,
+                parts: 1,
+            },
+        )
+        .await
+        .unwrap_err();
+        assert_eq!(error.status, StatusCode::PAYLOAD_TOO_LARGE);
     }
 }

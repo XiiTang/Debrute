@@ -1,8 +1,8 @@
-import React, { act } from 'react';
+import { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { renderToStaticMarkup } from 'react-dom/server';
 import { describe, expect, it, vi } from 'vitest';
-import { buildWorkbenchTitleBarState } from '@debrute/app-protocol';
+import { buildWorkbenchTitleBarState } from './workbenchTitleBarState';
 import { WorkbenchTitleBar } from './WorkbenchTitleBar';
 import { I18nProvider } from '../i18n';
 
@@ -13,7 +13,7 @@ describe('WorkbenchTitleBar', () => {
         <WorkbenchTitleBar
           state={buildWorkbenchTitleBarState({
             platform: 'darwin',
-            host: 'desktop',
+            host: 'desktop', locale: 'en',
             projectTitle: 'Alpha',
             recentProjectRoots: ['/tmp/alpha']
           })}
@@ -36,7 +36,7 @@ describe('WorkbenchTitleBar', () => {
         <WorkbenchTitleBar
           state={buildWorkbenchTitleBarState({
             platform: 'win32',
-            host: 'desktop',
+            host: 'desktop', locale: 'en',
             projectTitle: 'Beta',
             recentProjectRoots: ['/tmp/beta']
           })}
@@ -65,7 +65,7 @@ describe('WorkbenchTitleBar', () => {
         <WorkbenchTitleBar
           state={buildWorkbenchTitleBarState({
             platform: 'win32',
-            host: 'desktop',
+            host: 'desktop', locale: 'en',
             projectTitle: 'Beta',
             recentProjectRoots: []
           })}
@@ -86,8 +86,8 @@ describe('WorkbenchTitleBar', () => {
       <I18nProvider locale="en">
         <WorkbenchTitleBar
           state={buildWorkbenchTitleBarState({
-            platform: 'linux',
-            host: 'web',
+            platform: 'win32',
+            host: 'web', locale: 'en',
             projectTitle: undefined,
             recentProjectRoots: []
           })}
@@ -115,8 +115,8 @@ describe('WorkbenchTitleBar', () => {
           <I18nProvider locale="en">
             <WorkbenchTitleBar
               state={buildWorkbenchTitleBarState({
-                platform: 'linux',
-                host: 'web',
+                platform: 'win32',
+                host: 'web', locale: 'en',
                 projectTitle: 'Alpha',
                 recentProjectRoots: ['/tmp/alpha']
               })}

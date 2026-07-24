@@ -174,7 +174,7 @@ export interface CanvasPerfSessionSummary extends Partial<CanvasPerfFinalState> 
 }
 
 export interface CanvasPerfMonitor {
-  startSession(input: CanvasPerfSessionStartInput): CanvasPerfSessionId | undefined;
+  startSession(input: CanvasPerfSessionStartInput): CanvasPerfSessionId;
   endSession(input: CanvasPerfSessionEndInput): CanvasPerfSessionSummary | undefined;
   recordFrame(input: CanvasPerfFrameInput): void;
   recordCounter(input: CanvasPerfCounterInput): void;
@@ -197,9 +197,8 @@ interface ActiveCanvasPerfSession {
 }
 
 export function createCanvasPerfMonitor(input: {
-  enabled: boolean;
   onEvent?: ((event: CanvasPerfTraceEvent) => void) | undefined;
-}): CanvasPerfMonitor {
+} = {}): CanvasPerfMonitor {
   let nextSessionNumber = 1;
   let activeSessions = new Map<CanvasPerfSessionId, ActiveCanvasPerfSession>();
   let events: CanvasPerfTraceEvent[] = [];
@@ -239,9 +238,6 @@ export function createCanvasPerfMonitor(input: {
 
   return {
     startSession(start) {
-      if (!input.enabled) {
-        return undefined;
-      }
       const sessionId = `${start.type}:${nextSessionNumber++}` as CanvasPerfSessionId;
       activeSessions.set(sessionId, {
         sessionId,
@@ -256,9 +252,6 @@ export function createCanvasPerfMonitor(input: {
       return sessionId;
     },
     endSession(end) {
-      if (!input.enabled) {
-        return undefined;
-      }
       const active = activeSessions.get(end.sessionId);
       if (!active) {
         return undefined;
@@ -270,18 +263,12 @@ export function createCanvasPerfMonitor(input: {
       return lastSession;
     },
     recordFrame(frame) {
-      if (!input.enabled) {
-        return;
-      }
       for (const active of activeSessions.values()) {
         active.frames.push(frame);
       }
       emit({ kind: 'frame', ...frame });
     },
     recordCounter(counter) {
-      if (!input.enabled) {
-        return;
-      }
       const value = counter.value ?? 1;
       incrementCounter(counterTotals, counter.name, value);
       for (const active of activeTargets(counter.sessionId, counter.sessionTypes)) {
@@ -290,15 +277,9 @@ export function createCanvasPerfMonitor(input: {
       emit({ kind: 'counter', ...counter, value });
     },
     recordMark(mark) {
-      if (!input.enabled) {
-        return;
-      }
       emit({ kind: 'mark', ...mark });
     },
     recordLongAnimationFrame(entry) {
-      if (!input.enabled) {
-        return;
-      }
       let attached = false;
       for (const active of activeTargets(entry.sessionId, undefined)) {
         active.longAnimationFrames.push(entry.entry);
@@ -312,9 +293,6 @@ export function createCanvasPerfMonitor(input: {
       emit({ kind: 'long-animation-frame', ...entry });
     },
     getTrace() {
-      if (!input.enabled) {
-        return { enabled: false, events: [], sessions: [] };
-      }
       return {
         enabled: true,
         events: [...events],

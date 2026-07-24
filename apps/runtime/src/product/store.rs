@@ -5,7 +5,7 @@ use std::{
     fs::{self, File},
     io::{self, Read as _, Seek as _, SeekFrom, Write as _},
     path::{Path, PathBuf},
-    sync::{Mutex, MutexGuard, PoisonError},
+    sync::{Mutex, MutexGuard},
 };
 
 use fs2::FileExt as _;
@@ -292,24 +292,6 @@ impl ProductStore {
         self.validate_version_unlocked(product_version)
     }
 
-    /// Materializes and selects the first complete product when no current
-    /// product exists. Later pointer changes remain owned by the update
-    /// coordinator and are not exposed as a raw store operation.
-    ///
-    /// # Errors
-    ///
-    /// Returns [`ProductStoreError`] when a product is already active or the
-    /// seed cannot be materialized and selected exactly.
-    pub fn bootstrap_seed(&self, seed: &Path) -> Result<PathBuf, ProductStoreError> {
-        let _transaction = self.lock_transaction()?;
-        if self.current_version_unlocked()?.is_some() {
-            return Err(ProductStoreError::CurrentProductAlreadySelected);
-        }
-        let version_path = self.materialize_seed_unlocked(seed)?;
-        self.select_current_unlocked(&version_path)?;
-        Ok(version_path)
-    }
-
     /// Materializes the exact seed carried by an already installed Desktop and
     /// selects it only when it is the same as, or newer than, the active
     /// Product. A signed older Desktop can never downgrade `current`.
@@ -418,7 +400,7 @@ impl ProductStore {
         let process_guard = self
             .transaction
             .lock()
-            .unwrap_or_else(PoisonError::into_inner);
+            .expect("Product transaction lock poisoned");
         if !self.root.is_absolute() {
             return Err(ProductStoreError::InvalidProductRoot(self.root.clone()));
         }
@@ -1558,7 +1540,6 @@ pub enum ProductStoreError {
     InvalidStagedAssetPath(PathBuf),
     CannotRemoveCurrentVersion(String),
     DesktopSeedOlderThanCurrent { seed: String, current: String },
-    CurrentProductAlreadySelected,
     InvalidProductRoot(PathBuf),
 }
 

@@ -1,6 +1,6 @@
 use std::{
-    collections::HashMap,
-    sync::{Mutex, MutexGuard, PoisonError},
+    collections::{HashMap, HashSet},
+    sync::{Mutex, MutexGuard},
 };
 
 use serde_json::{Value, json};
@@ -11,14 +11,14 @@ use super::DesktopLaunchBinding;
 
 pub const WORKBENCH_CONNECTION_HEADER: &str = "x-debrute-workbench-connection";
 
-pub(crate) struct WorkbenchConnectionRegistry {
+pub struct WorkbenchConnectionRegistry {
     inner: Mutex<ConnectionRegistryInner>,
 }
 
 #[derive(Default)]
 struct ConnectionRegistryInner {
     records: HashMap<String, ConnectionRecord>,
-    credential_by_browser_session: HashMap<String, String>,
+    credentials_by_browser_session: HashMap<String, HashSet<String>>,
     owner_by_project: HashMap<String, String>,
 }
 
@@ -55,13 +55,13 @@ pub(crate) struct PreemptedConnection {
 
 impl WorkbenchConnectionRegistry {
     #[must_use]
-    pub fn new() -> Self {
+    pub(crate) fn new() -> Self {
         Self {
             inner: Mutex::new(ConnectionRegistryInner::default()),
         }
     }
 
-    pub fn open(
+    pub(crate) fn open(
         &self,
         browser_session: String,
         desktop: Option<DesktopLaunchBinding>,
@@ -80,8 +80,10 @@ impl WorkbenchConnectionRegistry {
         };
         let mut inner = self.lock_inner();
         inner
-            .credential_by_browser_session
-            .insert(browser_session.clone(), credential.clone());
+            .credentials_by_browser_session
+            .entry(browser_session.clone())
+            .or_default()
+            .insert(credential.clone());
         inner.records.insert(credential.clone(), record);
         (
             WorkbenchConnectionContext {
@@ -95,16 +97,16 @@ impl WorkbenchConnectionRegistry {
     }
 
     #[must_use]
-    pub fn authorize(
+    pub(crate) fn authorize(
         &self,
         browser_session: &str,
         credential: &str,
     ) -> Option<WorkbenchConnectionContext> {
         let inner = self.lock_inner();
         if inner
-            .credential_by_browser_session
+            .credentials_by_browser_session
             .get(browser_session)
-            .is_none_or(|current| current != credential)
+            .is_none_or(|credentials| !credentials.contains(credential))
         {
             return None;
         }
@@ -118,7 +120,7 @@ impl WorkbenchConnectionRegistry {
     }
 
     #[must_use]
-    pub fn context(&self, credential: &str) -> Option<WorkbenchConnectionContext> {
+    pub(crate) fn context(&self, credential: &str) -> Option<WorkbenchConnectionContext> {
         let inner = self.lock_inner();
         let record = inner.records.get(credential)?;
         Some(WorkbenchConnectionContext {
@@ -130,16 +132,33 @@ impl WorkbenchConnectionRegistry {
     }
 
     #[must_use]
-    pub fn context_for_browser_session(
+    pub(crate) fn context_for_browser_session_project(
         &self,
         browser_session: &str,
+        project_id: &str,
     ) -> Option<WorkbenchConnectionContext> {
-        let credential = self
-            .lock_inner()
-            .credential_by_browser_session
+        let inner = self.lock_inner();
+        let credential = inner.owner_by_project.get(project_id)?;
+        let record = inner.records.get(credential)?;
+        if record.browser_session != browser_session
+            || record.project_id.as_deref() != Some(project_id)
+        {
+            return None;
+        }
+        Some(WorkbenchConnectionContext {
+            credential: credential.clone(),
+            browser_session: record.browser_session.clone(),
+            project_id: record.project_id.clone(),
+            desktop: record.desktop.clone(),
+        })
+    }
+
+    #[must_use]
+    pub(crate) fn browser_session_is_live(&self, browser_session: &str) -> bool {
+        self.lock_inner()
+            .credentials_by_browser_session
             .get(browser_session)
-            .cloned()?;
-        self.context(&credential)
+            .is_some_and(|credentials| !credentials.is_empty())
     }
 
     #[must_use]
@@ -151,7 +170,7 @@ impl WorkbenchConnectionRegistry {
     }
 
     #[must_use]
-    pub fn project_owner(&self, project_id: &str) -> Option<WorkbenchConnectionContext> {
+    pub(crate) fn project_owner(&self, project_id: &str) -> Option<WorkbenchConnectionContext> {
         let credential = self
             .lock_inner()
             .owner_by_project
@@ -169,9 +188,9 @@ impl WorkbenchConnectionRegistry {
     ) -> Option<broadcast::Receiver<()>> {
         let inner = self.lock_inner();
         if inner
-            .credential_by_browser_session
+            .credentials_by_browser_session
             .get(browser_session)
-            .is_none_or(|current| current != credential)
+            .is_none_or(|credentials| !credentials.contains(credential))
         {
             return None;
         }
@@ -182,7 +201,7 @@ impl WorkbenchConnectionRegistry {
         Some(record.project_cancellation.subscribe())
     }
 
-    pub fn bind_project(
+    pub(crate) fn bind_project(
         &self,
         credential: &str,
         project_id: &str,
@@ -229,7 +248,7 @@ impl WorkbenchConnectionRegistry {
         Ok(ProjectBindOutcome::Bound { preempted })
     }
 
-    pub fn replace_project(
+    pub(crate) fn replace_project(
         &self,
         credential: &str,
         source_project_id: &str,
@@ -278,12 +297,20 @@ impl WorkbenchConnectionRegistry {
         Ok(ProjectBindOutcome::Bound { preempted })
     }
 
-    pub fn close(&self, credential: &str) -> Option<WorkbenchConnectionContext> {
+    pub(crate) fn close(&self, credential: &str) -> Option<WorkbenchConnectionContext> {
         let mut inner = self.lock_inner();
         let mut record = inner.records.remove(credential)?;
-        inner
-            .credential_by_browser_session
-            .remove(&record.browser_session);
+        if let Some(credentials) = inner
+            .credentials_by_browser_session
+            .get_mut(&record.browser_session)
+        {
+            credentials.remove(credential);
+            if credentials.is_empty() {
+                inner
+                    .credentials_by_browser_session
+                    .remove(&record.browser_session);
+            }
+        }
         if let Some(project_id) = record.project_id.as_ref()
             && inner
                 .owner_by_project
@@ -304,10 +331,10 @@ impl WorkbenchConnectionRegistry {
         })
     }
 
-    pub fn close_all(&self) {
+    pub(crate) fn close_all(&self) {
         let records = {
             let mut inner = self.lock_inner();
-            inner.credential_by_browser_session.clear();
+            inner.credentials_by_browser_session.clear();
             inner.owner_by_project.clear();
             std::mem::take(&mut inner.records)
         };
@@ -320,7 +347,9 @@ impl WorkbenchConnectionRegistry {
     }
 
     fn lock_inner(&self) -> MutexGuard<'_, ConnectionRegistryInner> {
-        self.inner.lock().unwrap_or_else(PoisonError::into_inner)
+        self.inner
+            .lock()
+            .expect("Workbench connection registry lock poisoned")
     }
 }
 
@@ -393,5 +422,30 @@ mod tests {
         assert!(registry.context(&second.credential).is_none());
         assert!(registry.project_owner("project-1").is_none());
         assert!(registry.project_owner("project-2").is_none());
+    }
+
+    #[test]
+    fn browser_session_keeps_each_document_connection_live_until_the_last_closes() {
+        let registry = WorkbenchConnectionRegistry::new();
+        let (first_events, _first_receiver) = mpsc::channel::<Value>(4);
+        let (first, _first_closed) = registry.open("browser-1".to_owned(), None, first_events);
+        let (second_events, _second_receiver) = mpsc::channel::<Value>(4);
+        let (second, _second_closed) = registry.open("browser-1".to_owned(), None, second_events);
+
+        assert!(registry.authorize("browser-1", &first.credential).is_some());
+        assert!(
+            registry
+                .authorize("browser-1", &second.credential)
+                .is_some()
+        );
+
+        registry.close(&second.credential);
+
+        assert!(registry.authorize("browser-1", &first.credential).is_some());
+        assert!(registry.browser_session_is_live("browser-1"));
+
+        registry.close(&first.credential);
+
+        assert!(!registry.browser_session_is_live("browser-1"));
     }
 }

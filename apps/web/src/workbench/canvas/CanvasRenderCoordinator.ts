@@ -34,7 +34,7 @@ export interface CanvasRenderCoordinatorUpdateInput {
   surfaceSize: CanvasSize | undefined;
   selection: CanvasSelection | undefined;
   activeNodePaths: readonly string[];
-  layoutOverrides?: readonly CanvasLayoutOverride[];
+  layoutOverrides: readonly CanvasLayoutOverride[];
 }
 
 export interface CanvasRenderCoordinator {
@@ -75,7 +75,7 @@ export function createCanvasRenderCoordinator(input: CanvasRenderCoordinatorInpu
       selection: input.selection,
       activeNodeProjectRelativePaths: input.activeNodePaths
     });
-    const layoutOverrides = input.layoutOverrides ?? [];
+    const layoutOverrides = input.layoutOverrides;
     const draftAwareNodes = canvasNodesWithLayoutOverrides({
       nodes: [...latestNodesByPath.values()],
       layoutOverrides
@@ -189,9 +189,9 @@ function canvasRenderCoordinatorMountedInputKey(input: CanvasRenderCoordinatorUp
   const mountedPaths = [...new Set([
     ...selectedNodeProjectRelativePaths(input.selection),
     ...input.activeNodePaths,
-    ...(input.layoutOverrides ?? []).map((layout) => layout.projectRelativePath)
+    ...input.layoutOverrides.map((layout) => layout.projectRelativePath)
   ])].sort().join('\u001f');
-  const layoutKey = [...(input.layoutOverrides ?? [])]
+  const layoutKey = [...input.layoutOverrides]
     .map((layout) => [
       layout.projectRelativePath,
       layout.x,
@@ -258,5 +258,5 @@ function nodeRenderOrderFor(nodes: ProjectedCanvasNode[]): Map<string, CanvasNod
 }
 
 function canvasRenderPerfTimestamp(): number {
-  return globalThis.performance?.now?.() ?? Date.now();
+  return performance.now();
 }

@@ -85,6 +85,43 @@ describe('TerminalPanel rendering', { tags: ['terminal'] }, () => {
     expect(html).toContain('disabled=""');
   });
 
+  it('creates an empty Project-root Terminal with the one current input shape', async () => {
+    const container = document.createElement('div');
+    document.body.append(container);
+    const root = createRoot(container);
+    const created = sessionFixture('one');
+    const api = {
+      listTerminalSessions: vi.fn(async () => ({ sessions: [] })),
+      createTerminalSession: vi.fn(async () => ({ session: created })),
+      closeTerminalSession: vi.fn(async () => ({ ok: true as const })),
+      subscribeTerminalEvents: vi.fn(() => ({ close: vi.fn() })),
+      writeTerminalInput: vi.fn(async () => ({ ok: true as const })),
+      resizeTerminal: vi.fn(async () => ({ session: created }))
+    } as unknown as WorkbenchApiClient;
+
+    try {
+      await act(async () => {
+        root.render(
+          <I18nProvider locale="en">
+            <TerminalPanel
+              api={api}
+              resolvedTheme="light"
+              requestedCwdProjectRelativePath={null}
+              onRequestedCwdConsumed={() => undefined}
+            />
+          </I18nProvider>
+        );
+      });
+
+      expect(api.createTerminalSession).toHaveBeenCalledOnce();
+      expect(api.createTerminalSession).toHaveBeenCalledWith({ cwdProjectRelativePath: '' });
+      expect(container.textContent).toContain('one');
+    } finally {
+      await unmount(root, container);
+      terminalHookState.activeInput = null;
+    }
+  });
+
   it('keeps a closing terminal visible until the backend reports closed', async () => {
     const container = document.createElement('div');
     document.body.append(container);

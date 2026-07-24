@@ -225,10 +225,6 @@ export function createCanvasEditorRuntime(initial?: {
   };
 
   const scheduleIdle = () => {
-    if (typeof window === 'undefined') {
-      setCameraState('idle');
-      return;
-    }
     clearIdleTimer();
     idleTimer = window.setTimeout(() => {
       idleTimer = undefined;
@@ -420,9 +416,6 @@ export function createCanvasEditorRuntime(initial?: {
   };
 
   const attachWindowInput = () => {
-    if (typeof window === 'undefined') {
-      return () => undefined;
-    }
     window.addEventListener('wheel', handleWheel, { capture: true, passive: false });
     window.addEventListener('gesturestart', handleGestureStart, { capture: true, passive: false });
     window.addEventListener('gesturechange', handleGestureChange, { capture: true, passive: false });
@@ -537,27 +530,25 @@ export function createCanvasEditorRuntime(initial?: {
       notify();
       detachWindowInput();
       detachWindowInput = attachWindowInput();
-      if (typeof ResizeObserver !== 'undefined') {
-        resizeObserver?.disconnect();
-        resizeObserver = new ResizeObserver((entries) => {
-          const entry = entries[0];
-          if (!entry) {
-            return;
-          }
-          const size = {
-            width: entry.contentRect.width,
-            height: entry.contentRect.height
-          };
-          if (state.surfaceSize?.width === size.width && state.surfaceSize.height === size.height) {
-            return;
-          }
-          state.surfaceSize = size;
-          invalidateSnapshot();
-          flushSurfaceSizeListeners(size);
-          notify();
-        });
-        resizeObserver.observe(elements.surface);
-      }
+      resizeObserver?.disconnect();
+      resizeObserver = new ResizeObserver((entries) => {
+        const entry = entries[0];
+        if (!entry) {
+          return;
+        }
+        const size = {
+          width: entry.contentRect.width,
+          height: entry.contentRect.height
+        };
+        if (state.surfaceSize?.width === size.width && state.surfaceSize.height === size.height) {
+          return;
+        }
+        state.surfaceSize = size;
+        invalidateSnapshot();
+        flushSurfaceSizeListeners(size);
+        notify();
+      });
+      resizeObserver.observe(elements.surface);
       return () => {
         if (boundElements === elements) {
           boundElements = undefined;

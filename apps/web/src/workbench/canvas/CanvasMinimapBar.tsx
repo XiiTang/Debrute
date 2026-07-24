@@ -1,8 +1,7 @@
 import React from 'react';
 import { Map } from 'lucide-react';
 import type { CanvasDocument, CanvasProjection } from '@debrute/canvas-core';
-import type { CanvasMinimapPanelPlacement } from '../shell/floatingBars';
-import { CANVAS_MINIMAP_PANEL_SIZE } from '../shell/floatingBars';
+import { CANVAS_MINIMAP_PANEL_SIZE, type FloatingBarRect } from '../shell/floatingBars';
 import type { CanvasPoint, CanvasRect } from '../services/canvasInteraction';
 import type { CanvasMinimapDragState, CanvasSize } from './canvasMinimap';
 import {
@@ -36,7 +35,7 @@ export function CanvasMinimapBar({
   overlayRuntime: CanvasOverlayRuntime;
   open: boolean;
   onOpenChange: (open: boolean) => void;
-  panelPlacement: CanvasMinimapPanelPlacement;
+  panelPlacement: FloatingBarRect;
 }): React.ReactElement {
   const i18n = useI18n();
   const barRef = React.useRef<HTMLButtonElement | null>(null);
@@ -153,7 +152,7 @@ const CanvasMinimapPanel = React.forwardRef<HTMLDivElement, {
   initialViewportRect: CanvasRect;
   runtime: CanvasEditorRuntime;
   overlayRuntime: CanvasOverlayRuntime;
-  panelPlacement: CanvasMinimapPanelPlacement;
+  panelPlacement: FloatingBarRect;
   overviewLabel: string;
 }>(function CanvasMinimapPanel({
   staticModel,

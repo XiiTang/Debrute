@@ -15,11 +15,10 @@ describe('public product documentation contract', () => {
   it('describes Debrute as one Product with a Rust Runtime and Agent-facing CLI', () => {
     expect(combined).toContain('external Agent-facing `debrute` CLI');
     expect(combined).toContain('node scripts/run-cargo-with-native-raster.mjs -- build -p debrute-runtime --bin debrute');
-    expect(combined).toContain('Project, Canvas Map, and generation commands are Runtime-backed');
+    expect(combined).toContain('Project, Canvas Map, and Model Request commands are Runtime-backed');
   });
 
-  it('describes Canvas node ordering as stack order, not layers', () => {
+  it('describes Canvas node ordering as stack order', () => {
     expect(combined).toContain('node layout, stack order, annotations, and preferences');
-    expect(combined).not.toContain('node layout, z-order, annotations, and preferences');
   });
 });

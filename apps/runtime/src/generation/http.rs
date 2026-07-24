@@ -15,12 +15,14 @@ use reqwest::{
 };
 
 use super::types::{
-    GenerationCancellation, GenerationDeadline, GenerationError, HttpBody, HttpMethod,
-    HttpTargetPolicy, ModelHttpRequest, ModelHttpResponse, ModelHttpTransport,
+    GenerationCancellation, GenerationDeadline, GenerationError, HttpMethod, HttpTargetPolicy,
+    ModelHttpRequest, ModelHttpResponse, ModelHttpTransport, PreparedHttpBody,
 };
 
 const MAX_PUBLIC_REDIRECTS: usize = 5;
-const MAX_REQUEST_BODY_BYTES: usize = 256 * 1024 * 1024;
+const MULTIPART_FIELD_OVERHEAD_BYTES: usize = 512;
+const MULTIPART_FILE_OVERHEAD_BYTES: usize = 1024;
+const MULTIPART_CLOSING_OVERHEAD_BYTES: usize = 128;
 const MAX_ACTIVE_DNS_RESOLUTIONS: usize = 8;
 const CANCEL_POLL: Duration = Duration::from_millis(50);
 static ACTIVE_DNS_RESOLUTIONS: AtomicUsize = AtomicUsize::new(0);
@@ -57,12 +59,7 @@ impl ModelHttpTransport for NativeModelHttpTransport {
                         })
                 })
                 .join()
-                .unwrap_or_else(|_| {
-                    Err(GenerationError::new(
-                        "model_request_failed",
-                        "Generation HTTP worker terminated unexpectedly.",
-                    ))
-                })
+                .expect("Generation HTTP worker panicked")
         })
     }
 }
@@ -118,7 +115,7 @@ async fn execute_public(
             })?
             .to_string();
         request.method = HttpMethod::Get;
-        request.body = HttpBody::Empty;
+        request.body = PreparedHttpBody::Empty;
         request.headers.remove("authorization");
         request.headers.remove("x-api-key");
     }
@@ -136,7 +133,7 @@ async fn execute_once(
     cancellation: &GenerationCancellation,
     deadline: GenerationDeadline,
 ) -> Result<ModelHttpResponse, GenerationError> {
-    validate_request_size(&request.body)?;
+    validate_request_size(&request.body, super::common::MAX_MODEL_REQUEST_BYTES)?;
     let request_timeout = deadline.remaining(cancellation)?;
     let mut builder = Client::builder()
         .redirect(Policy::none())
@@ -155,29 +152,9 @@ async fn execute_once(
         HttpMethod::Get => reqwest::Method::GET,
         HttpMethod::Post => reqwest::Method::POST,
     };
-    let mut outbound = client
-        .request(method, url)
-        .headers(header_map(&request.headers)?);
-    outbound = match request.body {
-        HttpBody::Empty => outbound,
-        HttpBody::Json(value) => outbound.json(&value),
-        HttpBody::Multipart { fields, files } => {
-            let mut form = multipart::Form::new();
-            for (name, value) in fields {
-                form = form.text(name, value);
-            }
-            for file in files {
-                let part = multipart::Part::bytes(file.bytes)
-                    .file_name(file.filename)
-                    .mime_str(&file.content_type)
-                    .map_err(|error| {
-                        GenerationError::new("model_request_invalid", error.to_string())
-                    })?;
-                form = form.part(file.name, part);
-            }
-            outbound.multipart(form)
-        }
-    };
+    let request_headers = outbound_headers(&request)?;
+    let outbound = client.request(method, url).headers(request_headers);
+    let outbound = attach_body(outbound, request.body)?;
     let mut response = cancellable(outbound.send(), cancellation, deadline)
         .await?
         .map_err(|error| map_request_error(request_timeout, &error))?;
@@ -228,6 +205,45 @@ async fn execute_once(
         status,
         headers,
         body,
+    })
+}
+
+fn outbound_headers(request: &ModelHttpRequest) -> Result<HeaderMap, GenerationError> {
+    let mut headers = header_map(&request.headers)?;
+    if matches!(&request.body, PreparedHttpBody::Json(_))
+        && !headers.contains_key(reqwest::header::CONTENT_TYPE)
+    {
+        headers.insert(
+            reqwest::header::CONTENT_TYPE,
+            HeaderValue::from_static("application/json"),
+        );
+    }
+    Ok(headers)
+}
+
+fn attach_body(
+    outbound: reqwest::RequestBuilder,
+    body: PreparedHttpBody,
+) -> Result<reqwest::RequestBuilder, GenerationError> {
+    Ok(match body {
+        PreparedHttpBody::Empty => outbound,
+        PreparedHttpBody::Json(body) => outbound.body(body.into_serialized()),
+        PreparedHttpBody::Multipart { fields, files } => {
+            let mut form = multipart::Form::new();
+            for (name, value) in fields {
+                form = form.text(name, value);
+            }
+            for file in files {
+                let part = multipart::Part::bytes(file.bytes)
+                    .file_name(file.filename)
+                    .mime_str(&file.content_type)
+                    .map_err(|error| {
+                        GenerationError::new("model_request_invalid", error.to_string())
+                    })?;
+                form = form.part(file.name, part);
+            }
+            outbound.multipart(form)
+        }
     })
 }
 
@@ -425,26 +441,41 @@ fn is_public_ip(ip: IpAddr) -> bool {
     }
 }
 
-fn validate_request_size(body: &HttpBody) -> Result<(), GenerationError> {
+pub(crate) fn validate_request_size(
+    body: &PreparedHttpBody,
+    maximum_bytes: usize,
+) -> Result<(), GenerationError> {
     let bytes = match body {
-        HttpBody::Empty => 0,
-        HttpBody::Json(value) => serde_json::to_vec(value)
-            .map_err(|error| GenerationError::new("model_request_invalid", error.to_string()))?
-            .len(),
-        HttpBody::Multipart { fields, files } => fields
+        PreparedHttpBody::Empty => 0,
+        PreparedHttpBody::Json(body) => body.serialized().len(),
+        PreparedHttpBody::Multipart { fields, files } => fields
             .iter()
-            .map(|(key, value)| key.len().saturating_add(value.len()))
-            .chain(files.iter().map(|file| file.bytes.len()))
-            .fold(0_usize, usize::saturating_add),
+            .map(|(key, value)| {
+                MULTIPART_FIELD_OVERHEAD_BYTES
+                    .saturating_add(multipart_quoted_header_upper_bound(key))
+                    .saturating_add(value.len())
+            })
+            .chain(files.iter().map(|file| {
+                MULTIPART_FILE_OVERHEAD_BYTES
+                    .saturating_add(multipart_quoted_header_upper_bound(&file.name))
+                    .saturating_add(multipart_quoted_header_upper_bound(&file.filename))
+                    .saturating_add(file.content_type.len())
+                    .saturating_add(file.bytes.len())
+            }))
+            .fold(MULTIPART_CLOSING_OVERHEAD_BYTES, usize::saturating_add),
     };
-    if bytes > MAX_REQUEST_BODY_BYTES {
+    if bytes > maximum_bytes {
         Err(GenerationError::new(
             "model_request_too_large",
-            format!("Model request exceeds {MAX_REQUEST_BODY_BYTES} bytes."),
+            format!("Model request exceeds {maximum_bytes} bytes."),
         ))
     } else {
         Ok(())
     }
+}
+
+fn multipart_quoted_header_upper_bound(value: &str) -> usize {
+    value.len().saturating_mul(3)
 }
 
 fn header_map(headers: &BTreeMap<String, String>) -> Result<HeaderMap, GenerationError> {
@@ -498,17 +529,17 @@ mod tests {
 
     #[test]
     fn request_bodies_are_bounded_before_network_access() {
-        let body = HttpBody::Multipart {
+        let body = PreparedHttpBody::Multipart {
             fields: BTreeMap::new(),
             files: vec![crate::generation::types::MultipartFile {
                 name: "image".to_owned(),
                 filename: "large.png".to_owned(),
                 content_type: "image/png".to_owned(),
-                bytes: vec![0_u8; MAX_REQUEST_BODY_BYTES + 1],
+                bytes: vec![0_u8; 4],
             }],
         };
         assert_eq!(
-            validate_request_size(&body).unwrap_err().code(),
+            validate_request_size(&body, 3).unwrap_err().code(),
             "model_request_too_large"
         );
     }
@@ -540,7 +571,7 @@ mod tests {
                     method: HttpMethod::Get,
                     url: format!("http://{address}/stalled"),
                     headers: BTreeMap::new(),
-                    body: HttpBody::Empty,
+                    body: PreparedHttpBody::Empty,
                     maximum_response_bytes: 1024,
                     target_policy: HttpTargetPolicy::ModelEndpoint,
                 },

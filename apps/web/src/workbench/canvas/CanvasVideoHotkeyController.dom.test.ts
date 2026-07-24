@@ -167,7 +167,8 @@ function videoHandle(): CanvasVideoPlayerHandle {
     enterFullscreen: vi.fn(),
     togglePictureInPicture: vi.fn(),
     readCurrentTimeSeconds: vi.fn(() => 0),
-    pauseAt: vi.fn()
+    pauseAt: vi.fn(),
+    restorePersistedTime: vi.fn()
   };
 }
 

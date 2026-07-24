@@ -7,10 +7,7 @@ import type {
   CanvasTextPreviewSourceAvailabilityResponse,
   CanvasVideoPreviewSourceRequest,
   CanvasVideoPreviewSourceResponse,
-  GeneratedAssetView,
   GeneratedAssetMetadataLookup,
-  IntegrationSettingsView,
-  ProductUpdateApplyResult,
   RunIntegrationOperationInput,
   RunIntegrationOperationResult,
   SaveCanvasTextPreviewSourceInput,
@@ -25,7 +22,6 @@ import type {
   WorkbenchProjectSessionSnapshot,
   WorkbenchProjectTextFile,
   WorkbenchProjectTextFileWriteResult,
-  WorkbenchTitleBarState,
   WriteProjectTextFileInput
 } from '@debrute/app-protocol';
 import type {
@@ -34,17 +30,22 @@ import type {
 } from '@debrute/canvas-core';
 import type { ProjectTreeSelectionState } from './workbench/project-explorer/projectTreeInteraction';
 import type { WorkbenchResolvedTheme } from './workbench/services/workbenchTheme';
+import type { WorkbenchTitleBarState } from './workbench/shell/workbenchTitleBarState';
+
+export type EventProjection<T> =
+  | { status: 'loading' }
+  | { status: 'ready'; value: T };
 
 export type SettingsResource<T> =
-  | { status: 'loading' }
-  | { status: 'ready'; value: T }
+  | EventProjection<T>
   | { status: 'error'; message: string };
 
 export interface WorkbenchState {
   snapshot: WorkbenchProjectSessionSnapshot | undefined;
   projectId?: string | undefined;
   titleBarState: WorkbenchTitleBarState;
-  globalSettings: SettingsResource<DebruteGlobalSettingsView>;
+  globalSettings: EventProjection<DebruteGlobalSettingsView>;
+  product: EventProjection<DebruteProductState | null>;
   resolvedTheme: WorkbenchResolvedTheme;
   projectOpen: ProjectOpenState;
   explorerSelection: ProjectTreeSelectionState;
@@ -55,7 +56,7 @@ export interface WorkbenchState {
   notifications: string[];
 }
 
-export interface ProjectOpenState {
+interface ProjectOpenState {
   attemptedPath?: string;
   error?: string;
   opening: boolean;
@@ -83,13 +84,12 @@ export interface FloatingTextEditorWindowState {
 }
 
 export interface WorkbenchActions {
-  getProductState: () => Promise<DebruteProductState>;
-  checkProductUpdate: () => Promise<DebruteProductState>;
-  applyProductUpdate: () => Promise<ProductUpdateApplyResult>;
-  reloadGlobalSettings: () => Promise<void>;
+  checkProductUpdate: () => Promise<void>;
+  applyProductUpdate: () => Promise<void>;
   reloadAdobeBridge: () => Promise<void>;
   saveGlobalSettings: (input: SaveDebruteGlobalSettingsInput) => Promise<void>;
-  rescanIntegrations: () => Promise<IntegrationSettingsView>;
+  revealModelApiKey: (modelId: string) => Promise<string>;
+  rescanIntegrations: () => Promise<void>;
   runIntegrationOperation: (input: RunIntegrationOperationInput) => Promise<RunIntegrationOperationResult>;
   createAdobeBridgePairing: () => Promise<{ pairingId: string; code: string; expiresAt: string }>;
   cancelAdobeBridgePairing: (pairingId: string) => Promise<void>;
@@ -99,7 +99,6 @@ export interface WorkbenchActions {
   sendProjectFileToPhotoshop: (input: SendProjectFileToPhotoshopInput) => Promise<SendProjectFileToPhotoshopResult>;
   openSendToPhotoshopPicker: (projectRelativePath: string) => void;
   lookupGeneratedAssetMetadata: (input: { projectRelativePath: string }) => Promise<GeneratedAssetMetadataLookup>;
-  readGeneratedAsset: (assetId: string) => Promise<GeneratedAssetView>;
   readProjectTextFile: (projectRelativePath: string) => Promise<WorkbenchProjectTextFile>;
   writeProjectTextFile: (input: WriteProjectTextFileInput) => Promise<WorkbenchProjectTextFileWriteResult>;
   saveCanvasTextPreviewSource: (input: SaveCanvasTextPreviewSourceInput) => Promise<SaveCanvasTextPreviewSourceResult>;
@@ -113,9 +112,9 @@ export interface WorkbenchActions {
   openTextEditorWindow: (projectRelativePath: string) => void;
   toggleTextFileWordWrap: (projectRelativePath: string) => void;
   updateCanvasNodeLayouts: (canvasId: string, input: {
-    nodeLayouts?: Array<{ projectRelativePath: string; x: number; y: number; width?: number; height?: number }>;
+    nodeLayouts: Array<{ projectRelativePath: string; x: number; y: number; width?: number; height?: number }>;
   }) => Promise<void>;
-  resetCanvasNodeLayouts: (canvasId: string, input: { all: true } | { pathRules: { paths?: string[]; globs?: string[] } }) => Promise<WorkbenchCanvasResetLayoutResult>;
+  resetCanvasNodeLayouts: (canvasId: string, input: { all: true } | { pathRules: { paths: string[]; globs: string[] } }) => Promise<WorkbenchCanvasResetLayoutResult>;
   bringCanvasNodeToFront: (canvasId: string, input: {
     projectRelativePath: string;
   }) => Promise<void>;
@@ -133,10 +132,9 @@ export interface WorkbenchActions {
 }
 
 export type {
-  WorkbenchEvent,
   WorkbenchApiClient
 } from '@debrute/app-protocol';
-import type { DebruteShellApi } from './api/shellApi';
+import type { DebruteShellApi } from '@debrute/app-protocol';
 
 declare global {
   interface Window {

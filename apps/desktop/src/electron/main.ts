@@ -4,19 +4,23 @@ import { join } from 'node:path';
 import type {
   ActivationIntent,
   ControlEvent,
-  RecentProject
+  RecentProject,
+  WorkbenchThemePreference
 } from '@debrute/app-protocol';
 import type { RuntimeControlClient } from '@debrute/runtime-control-client';
 
+import { buildDesktopApplicationMenu } from './desktopApplicationMenu.js';
+import { requireDesktopPlatform } from './desktopPlatform.js';
 import {
   DesktopWindowControlAdapter,
   type DesktopNativeWindow
 } from './desktopWindowControlAdapter.js';
+import { DesktopProductQuit } from './desktopProductQuit.js';
 import {
   desktopBrowserWindowChromeOptions,
   nativeWindowIpcChannels,
-  nativeWindowState,
-  registerNativeWindowIpc
+  registerNativeWindowIpc,
+  type ApplicationMenuCommand
 } from './nativeWindowShell.js';
 import {
   parseDesktopOpenIntent,
@@ -26,14 +30,15 @@ import {
 import { connectOrLaunchDesktopRuntime } from './runtime/desktopRuntimeLauncher.js';
 import { desktopRuntimeLaunchConfiguration } from './runtime/desktopProductBootstrap.js';
 
-const { app, BrowserWindow, dialog, ipcMain, Menu, nativeImage } = electron;
+const { app, BrowserWindow, dialog, ipcMain, Menu, nativeImage, nativeTheme } = electron;
 const projectIconPath = join(__dirname, 'icon.png');
 const dockIconPath = join(__dirname, 'dock_icon.png');
+const desktopPlatform = requireDesktopPlatform(process.platform);
 
 let control: RuntimeControlClient | undefined;
 let windows: DesktopWindowControlAdapter<ElectronDesktopWindow> | undefined;
 let appQuitAllowed = false;
-let productQuitRequested = false;
+const productQuit = new DesktopProductQuit();
 let runtimeLossReported = false;
 let recentProjects: RecentProject[] = [];
 const pendingOpenIntents: DesktopOpenIntent[] = [];
@@ -66,8 +71,7 @@ function registerDesktopLifecycle(): void {
   });
 
   app.on('window-all-closed', () => {
-    // DesktopWindowControlAdapter reports the final close to Runtime before
-    // performing the Desktop-only app exit.
+    // DesktopWindowControlAdapter closes Control and exits Desktop locally.
   });
 
   app.on('before-quit', (event) => {
@@ -75,7 +79,7 @@ function registerDesktopLifecycle(): void {
       return;
     }
     event.preventDefault();
-    void requestProductQuit();
+    requestProductQuit();
   });
 
   void app.whenReady().then(startDesktop).catch((error: unknown) => {
@@ -86,7 +90,7 @@ function registerDesktopLifecycle(): void {
 }
 
 async function startDesktop(): Promise<void> {
-  if (process.platform === 'darwin') {
+  if (desktopPlatform === 'darwin') {
     app.dock?.setIcon(nativeImage.createFromPath(dockIconPath));
   }
   registerNativeWindowIpc<Electron.WebContents, Electron.BrowserWindow>({
@@ -121,7 +125,7 @@ async function startDesktop(): Promise<void> {
   });
   activeControl.onEvent(handleControlEvent);
   activeControl.onRuntimeLost((error) => {
-    if (appQuitAllowed || productQuitRequested || runtimeLossReported) {
+    if (appQuitAllowed || productQuit.requested || runtimeLossReported) {
       return;
     }
     runtimeLossReported = true;
@@ -129,16 +133,13 @@ async function startDesktop(): Promise<void> {
     appQuitAllowed = true;
     app.quit();
   });
+  if (await productQuit.sendRecordedRequest(activeControl)) {
+    return;
+  }
   installApplicationMenu();
 
   const initialIntent = parseDesktopOpenIntent(process.argv) ?? { kind: 'new-window' };
-  const handledElsewhere = await dispatchOpenIntent(initialIntent);
-  if (handledElsewhere) {
-    appQuitAllowed = true;
-    activeControl.close();
-    app.quit();
-    return;
-  }
+  await dispatchOpenIntent(initialIntent);
   while (pendingOpenIntents.length > 0) {
     await dispatchOpenIntent(pendingOpenIntents.shift());
   }
@@ -148,6 +149,7 @@ async function createNativeWindow(input: {
   windowKey: string;
   ticket: string;
   url: string;
+  themePreference: WorkbenchThemePreference;
 }): Promise<ElectronDesktopWindow> {
   const browserWindow = new BrowserWindow({
     width: 1440,
@@ -155,8 +157,11 @@ async function createNativeWindow(input: {
     minWidth: 1100,
     minHeight: 720,
     show: false,
-    ...desktopBrowserWindowChromeOptions(process.platform),
-    backgroundColor: '#111318',
+    ...desktopBrowserWindowChromeOptions(desktopPlatform),
+    backgroundColor: desktopWindowBackgroundColor(
+      input.themePreference,
+      nativeTheme.shouldUseDarkColors
+    ),
     icon: projectIconPath,
     webPreferences: {
       preload: join(__dirname, 'preload.js'),
@@ -179,9 +184,15 @@ async function createNativeWindow(input: {
       `The window renderer ended (${details.reason}). Use View > Reload Workbench to start a fresh connection.`
     );
   });
-  await nativeWindow.load(input.url);
-  nativeWindow.show();
-  return nativeWindow;
+  try {
+    await nativeWindow.load(input.url);
+    nativeWindow.show();
+    return nativeWindow;
+  } catch (error) {
+    nativeWindows.delete(input.windowKey);
+    nativeWindow.destroy();
+    throw error;
+  }
 }
 
 class ElectronDesktopWindow implements DesktopNativeWindow {
@@ -207,8 +218,15 @@ class ElectronDesktopWindow implements DesktopNativeWindow {
     this.window.focus();
   }
 
-  setLaunchTicket(ticket: string): void {
-    this.launchTicket = ticket;
+  prepareLaunch(input: {
+    ticket: string;
+    themePreference: WorkbenchThemePreference;
+  }): void {
+    this.launchTicket = input.ticket;
+    this.window.setBackgroundColor(desktopWindowBackgroundColor(
+      input.themePreference,
+      nativeTheme.shouldUseDarkColors
+    ));
   }
 
   takeDesktopLaunchTicket(): string | undefined {
@@ -234,13 +252,22 @@ class ElectronDesktopWindow implements DesktopNativeWindow {
   }
 }
 
-async function dispatchOpenIntent(intent: DesktopOpenIntent | undefined): Promise<boolean> {
+function desktopWindowBackgroundColor(
+  themePreference: WorkbenchThemePreference,
+  systemUsesDarkColors: boolean
+): string {
+  const dark = themePreference === 'dark'
+    || (themePreference === 'system' && systemUsesDarkColors);
+  return dark ? '#181818' : '#f4f5f7';
+}
+
+async function dispatchOpenIntent(intent: DesktopOpenIntent | undefined): Promise<void> {
   if (!intent) {
-    return false;
+    return;
   }
   if (!control) {
     pendingOpenIntents.push(intent);
-    return false;
+    return;
   }
   const activation: ActivationIntent = intent.kind === 'open-project-path'
     ? { kind: 'open_project', project_root: intent.projectRoot, frontend: 'desktop' }
@@ -254,7 +281,6 @@ async function dispatchOpenIntent(intent: DesktopOpenIntent | undefined): Promis
   if (response.result !== 'activation') {
     throw new Error(`Runtime returned an unexpected activation response: ${response.result}`);
   }
-  return response.outcome === 'handled_by_existing_desktop';
 }
 
 function handleControlEvent(event: ControlEvent): void {
@@ -262,12 +288,16 @@ function handleControlEvent(event: ControlEvent): void {
     return;
   }
   recentProjects = event.recent_projects;
-  syncNativeRecentProjects(
-    app,
-    process.platform,
-    process.execPath,
-    recentProjects.map((project) => project.projectRoot)
-  );
+  try {
+    syncNativeRecentProjects(
+      app,
+      desktopPlatform,
+      process.execPath,
+      recentProjects.map((project) => project.projectRoot)
+    );
+  } catch (error) {
+    reportDesktopError(error);
+  }
   installApplicationMenu();
 }
 
@@ -281,62 +311,19 @@ function installApplicationMenu(): void {
           project
         )
       }));
-  Menu.setApplicationMenu(Menu.buildFromTemplate([
-    ...(process.platform === 'darwin' ? [{
-      label: 'Debrute',
-      submenu: [
-        { role: 'about' as const },
-        { type: 'separator' as const },
-        { role: 'services' as const },
-        { type: 'separator' as const },
-        { role: 'hide' as const },
-        { role: 'hideOthers' as const },
-        { role: 'unhide' as const },
-        { type: 'separator' as const },
-        { role: 'quit' as const }
-      ]
-    }] : []),
-    {
-      label: 'File',
-      submenu: [
-        { label: 'New Window', accelerator: 'CmdOrCtrl+N', click: () => void dispatchOpenIntent({ kind: 'new-window' }) },
-        { type: 'separator' },
-        { label: 'Open Project…', accelerator: 'CmdOrCtrl+O', click: (_item, window) => void chooseProject(window as Electron.BrowserWindow | undefined) },
-        { label: 'Open Project in New Window…', accelerator: 'CmdOrCtrl+Shift+O', click: () => void chooseProject(undefined, true) },
-        { label: 'Open Recent', submenu: recentItems },
-        { type: 'separator' },
-        { role: 'close' }
-      ]
+  Menu.setApplicationMenu(Menu.buildFromTemplate(buildDesktopApplicationMenu({
+    platform: desktopPlatform,
+    recentItems,
+    newWindow: () => void dispatchOpenIntent({ kind: 'new-window' }),
+    openProject: (window) => void chooseProject(window as Electron.BrowserWindow | undefined),
+    openProjectInNewWindow: () => void chooseProject(undefined, true),
+    reloadWorkbench: (window) => {
+      if (window instanceof BrowserWindow && !window.isDestroyed()) {
+        void reloadWindow(window).catch(reportDesktopError);
+      }
     },
-    {
-      label: 'Edit',
-      submenu: [
-        { role: 'undo' }, { role: 'redo' }, { type: 'separator' },
-        { role: 'cut' }, { role: 'copy' }, { role: 'paste' },
-        ...(process.platform === 'darwin' ? [{ role: 'pasteAndMatchStyle' as const }] : []),
-        { role: 'delete' }, { role: 'selectAll' },
-        ...(process.platform === 'darwin' ? [
-          { type: 'separator' as const },
-          {
-            label: 'Speech',
-            submenu: [
-              { role: 'startSpeaking' as const },
-              { role: 'stopSpeaking' as const }
-            ]
-          }
-        ] : [])
-      ]
-    },
-    {
-      label: 'View',
-      submenu: [
-        { label: 'Reload Workbench', accelerator: 'CmdOrCtrl+R', click: (_item, window) => void reloadWindow(window as Electron.BrowserWindow | undefined) },
-        { role: 'toggleDevTools' }, { type: 'separator' }, { role: 'resetZoom' },
-        { role: 'zoomIn' }, { role: 'zoomOut' }, { role: 'togglefullscreen' }
-      ]
-    },
-    { role: 'windowMenu' }
-  ]));
+    quitProduct: requestProductQuit
+  })));
 }
 
 async function chooseProject(
@@ -370,53 +357,49 @@ async function openProjectInWindow(
     : { kind: 'open-project-path', projectRoot: project.projectRoot });
 }
 
-async function reloadWindow(window: Electron.BrowserWindow | undefined): Promise<void> {
+async function reloadWindow(window: Electron.BrowserWindow): Promise<void> {
   const nativeWindow = findNativeWindow(window);
-  if (nativeWindow) {
-    await windows?.reloadWindow(nativeWindow.windowKey);
+  if (!nativeWindow) {
+    throw new Error('Debrute native window mapping is not available.');
+  }
+  if (!windows) {
+    throw new Error('Debrute window control adapter is not available.');
+  }
+  if (!await windows.reloadWindow(nativeWindow.windowKey)) {
+    throw new Error('Debrute native window could not be reloaded.');
   }
 }
 
 async function executeNativeMenuCommand(
-  window: Electron.BrowserWindow | undefined,
-  command: { commandId: string }
+  window: Electron.BrowserWindow,
+  command: ApplicationMenuCommand
 ): Promise<void> {
-  if (!window || window.isDestroyed()) {
-    return;
+  if (window.isDestroyed()) {
+    throw new Error('Debrute native window is not available.');
   }
-  if (command.commandId === 'window.new') await dispatchOpenIntent({ kind: 'new-window' });
-  else if (command.commandId === 'project.open-picker-new-window') await chooseProject(undefined, true);
-  else if (command.commandId === 'window.close') window.close();
-  else if (command.commandId === 'view.reload') await reloadWindow(window);
-  else if (command.commandId === 'view.toggle-devtools') window.webContents.toggleDevTools();
-  else if (command.commandId === 'edit.undo') window.webContents.undo();
-  else if (command.commandId === 'edit.redo') window.webContents.redo();
-  else if (command.commandId === 'edit.cut') window.webContents.cut();
-  else if (command.commandId === 'edit.copy') window.webContents.copy();
-  else if (command.commandId === 'edit.paste') window.webContents.paste();
-  else if (command.commandId === 'edit.select-all') window.webContents.selectAll();
+  switch (command.commandId) {
+    case 'window.new': await dispatchOpenIntent({ kind: 'new-window' }); return;
+    case 'project.open-picker-new-window': await chooseProject(undefined, true); return;
+    case 'window.close': window.close(); return;
+    case 'view.reload': await reloadWindow(window); return;
+    case 'view.toggle-devtools': window.webContents.toggleDevTools(); return;
+    case 'edit.undo': window.webContents.undo(); return;
+    case 'edit.redo': window.webContents.redo(); return;
+    case 'edit.cut': window.webContents.cut(); return;
+    case 'edit.copy': window.webContents.copy(); return;
+    case 'edit.paste': window.webContents.paste(); return;
+    case 'edit.paste-and-match-style': window.webContents.pasteAndMatchStyle(); return;
+    case 'edit.delete': window.webContents.delete(); return;
+    case 'edit.select-all': window.webContents.selectAll(); return;
+    default: throw new Error('Unsupported native menu command.');
+  }
 }
 
-async function requestProductQuit(): Promise<void> {
-  if (productQuitRequested || appQuitAllowed) {
+function requestProductQuit(): void {
+  if (productQuit.requested || appQuitAllowed) {
     return;
   }
-  productQuitRequested = true;
-  try {
-    const response = await control?.quitProduct();
-    if (!response) {
-      appQuitAllowed = true;
-      app.quit();
-    } else if (response.result === 'rejected') {
-      productQuitRequested = false;
-      dialog.showErrorBox('Debrute could not quit', `Runtime rejected Product Quit: ${response.code}`);
-    } else if (response.result !== 'ok') {
-      throw new Error(`Runtime returned an unexpected Product Quit response: ${response.result}`);
-    }
-  } catch (error) {
-    productQuitRequested = false;
-    reportDesktopError(error);
-  }
+  void productQuit.request(control).catch(reportDesktopError);
 }
 
 function findNativeWindow(
@@ -434,30 +417,14 @@ function runtimeLaunchConfiguration(): {
     ...(process.env.DEBRUTE_RUNTIME_ENTRYPOINT
       ? { configuredEntrypoint: process.env.DEBRUTE_RUNTIME_ENTRYPOINT }
       : {}),
-    configuredArguments: environmentArguments('DEBRUTE_RUNTIME_ARGUMENTS_JSON'),
     ...(process.env.DEBRUTE_RUNTIME_WEB_ASSETS_DIR
       ? { configuredWebAssetsDirectory: process.env.DEBRUTE_RUNTIME_WEB_ASSETS_DIR }
       : {}),
-    sourceWebAssetsDirectory: join(__dirname, '../dist'),
     resourcesPath: process.resourcesPath,
     homePath: app.getPath('home'),
     executablePath: process.execPath,
-    applicationPath: app.getAppPath(),
-    packaged: app.isPackaged,
-    platform: process.platform
+    platform: desktopPlatform
   });
-}
-
-function environmentArguments(name: string): string[] {
-  const value = process.env[name];
-  if (!value) {
-    return [];
-  }
-  const parsed: unknown = JSON.parse(value);
-  if (!Array.isArray(parsed) || parsed.some((argument) => typeof argument !== 'string')) {
-    throw new Error(`${name} must be a JSON array of strings.`);
-  }
-  return parsed;
 }
 
 function rewriteRuntimeUrlForDevelopment(url: string): string {

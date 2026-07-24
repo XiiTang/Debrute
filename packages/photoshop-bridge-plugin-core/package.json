@@ -6,8 +6,9 @@
   "main": "dist/index.js",
   "types": "dist/index.d.ts",
   "scripts": {
-    "build": "tsc -b",
-    "check": "tsc -b --pretty false"
+    "build": "tsc -b && pnpm verify:esm",
+    "check": "tsc -b --pretty false",
+    "verify:esm": "node -e \"import('./dist/index.js')\""
   },
   "dependencies": {
     "@debrute/app-protocol": "workspace:*"

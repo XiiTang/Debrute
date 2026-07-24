@@ -31,7 +31,6 @@ const PROJECT_STREAM_CAPACITY: usize = 256;
 pub enum ProjectUseKind {
     Workbench,
     Request,
-    Operation,
     RunningTerminal,
     Transfer,
     PhotoshopLink,
@@ -282,17 +281,19 @@ impl RootTransition {
         &self,
         failure: Option<RootTransitionFailure>,
         cleanup_failure: Option<RootTransitionFailure>,
-    ) -> Result<(), ProjectError> {
-        let mut state = lock(&self.state)?;
+    ) {
+        let mut state = self
+            .state
+            .lock()
+            .expect("Project close transition lock poisoned");
         state.failure = failure;
         state.cleanup_failure = cleanup_failure;
         state.complete = true;
         self.ready.notify_all();
-        Ok(())
     }
 
     fn wait(&self) -> Result<(), ProjectError> {
-        let state = self.wait_complete()?;
+        let state = self.wait_complete();
         if let Some(failure) = &state.failure {
             return Err(ProjectError::service(failure.code, &failure.message));
         }
@@ -300,22 +301,22 @@ impl RootTransition {
     }
 
     fn wait_cleanup(&self) -> Result<(), ProjectError> {
-        let state = self.wait_complete()?;
+        let state = self.wait_complete();
         if let Some(failure) = &state.cleanup_failure {
             return Err(ProjectError::service(failure.code, &failure.message));
         }
         Ok(())
     }
 
-    fn wait_complete(&self) -> Result<MutexGuard<'_, RootTransitionState>, ProjectError> {
-        let mut state = lock(&self.state)?;
+    fn wait_complete(&self) -> MutexGuard<'_, RootTransitionState> {
+        let mut state = lock(&self.state);
         while !state.complete {
             state = self
                 .ready
                 .wait(state)
-                .map_err(|_| ProjectError::StatePoisoned)?;
+                .expect("Project close transition wait lock poisoned");
         }
-        Ok(state)
+        state
     }
 }
 
@@ -373,14 +374,13 @@ impl ProjectSessionRegistry {
         })?;
         loop {
             let transition = {
-                let mut state = lock(&self.inner.state)?;
+                let mut state = lock(&self.inner.state);
                 if state.closed {
                     return Err(ProjectError::RegistryClosed);
                 }
                 if let Some(project_id) = state.project_ids_by_root.get(&canonical_root).cloned()
                     && let Some(session) = state.sessions_by_id.get(&project_id).cloned()
                 {
-                    session.require_use_admission()?;
                     let project_use = add_use(&self.inner, &mut state, &project_id, use_kind)?;
                     drop(state);
                     (self.inner.on_change)();
@@ -428,11 +428,11 @@ impl ProjectSessionRegistry {
             session.prepare_for_publication()?;
             Ok(session)
         });
-        let mut state = lock(&self.inner.state)?;
+        let mut state = lock(&self.inner.state);
         let transition = state
             .transitions_by_root
             .remove(&canonical_root)
-            .ok_or(ProjectError::StatePoisoned)?;
+            .expect("Project open transition must exist when loading finishes");
         match opened {
             Ok(session) if !state.closed => {
                 let project_id = session.project_id.clone();
@@ -449,7 +449,7 @@ impl ProjectSessionRegistry {
                     transition.finish(
                         Some(RootTransitionFailure::from_error(&error)),
                         cleanup_failure,
-                    )?;
+                    );
                     return Err(error);
                 }
                 state
@@ -459,10 +459,10 @@ impl ProjectSessionRegistry {
                     .sessions_by_id
                     .insert(project_id.clone(), Arc::clone(&session));
                 let project_use = add_use(&self.inner, &mut state, &project_id, use_kind)?;
-                session.publish()?;
+                session.publish();
                 self.inner.feedback_artifacts.attach(&session);
                 drop(state);
-                transition.finish(None, None)?;
+                transition.finish(None, None);
                 (self.inner.on_change)();
                 Ok(OpenProjectSession {
                     session,
@@ -481,14 +481,14 @@ impl ProjectSessionRegistry {
                         &ProjectError::RegistryClosed,
                     )),
                     cleanup_failure,
-                )?;
+                );
                 close_result?;
                 Err(ProjectError::RegistryClosed)
             }
             Err(error) => {
                 let failure = RootTransitionFailure::from_error(&error);
                 drop(state);
-                transition.finish(Some(failure), None)?;
+                transition.finish(Some(failure), None);
                 Err(error)
             }
         }
@@ -504,15 +504,13 @@ impl ProjectSessionRegistry {
         project_id: &str,
         kind: ProjectUseKind,
     ) -> Result<ProjectUse, ProjectError> {
-        let mut state = lock(&self.inner.state)?;
+        let mut state = lock(&self.inner.state);
         if state.closed {
             return Err(ProjectError::RegistryClosed);
         }
-        let session = state
-            .sessions_by_id
-            .get(project_id)
-            .ok_or_else(|| ProjectError::ProjectNotOpen(project_id.to_owned()))?;
-        session.require_use_admission()?;
+        if !state.sessions_by_id.contains_key(project_id) {
+            return Err(ProjectError::ProjectNotOpen(project_id.to_owned()));
+        }
         let project_use = add_use(&self.inner, &mut state, project_id, kind)?;
         drop(state);
         (self.inner.on_change)();
@@ -525,7 +523,7 @@ impl ProjectSessionRegistry {
     ///
     /// Returns an error if the registry is closed or the Project is not open.
     pub fn get(&self, project_id: &str) -> Result<Arc<ProjectSession>, ProjectError> {
-        let state = lock(&self.inner.state)?;
+        let state = lock(&self.inner.state);
         if state.closed {
             return Err(ProjectError::RegistryClosed);
         }
@@ -542,7 +540,7 @@ impl ProjectSessionRegistry {
     ///
     /// Returns an error if the registry is closed or a session cannot be read.
     pub fn list(&self) -> Result<Vec<ProjectSessionSummary>, ProjectError> {
-        let state = lock(&self.inner.state)?;
+        let state = lock(&self.inner.state);
         if state.closed {
             return Err(ProjectError::RegistryClosed);
         }
@@ -562,7 +560,7 @@ impl ProjectSessionRegistry {
     /// Returns an error if a session, watcher, or concurrent opening fails to close.
     pub fn close(&self) -> Result<(), ProjectError> {
         let (close_transition, sessions, transitions) = {
-            let mut state = lock(&self.inner.state)?;
+            let mut state = lock(&self.inner.state);
             if let Some(transition) = &state.close_transition {
                 (Arc::clone(transition), None, Vec::new())
             } else {
@@ -601,7 +599,7 @@ impl ProjectSessionRegistry {
                 }
             }
         }
-        close_transition.finish(failure.clone(), failure)?;
+        close_transition.finish(failure.clone(), failure);
         (self.inner.on_change)();
         close_transition.wait()
     }
@@ -620,7 +618,6 @@ pub struct ProjectUse {
     project_id: String,
     use_id: Uuid,
     kind: ProjectUseKind,
-    released: bool,
 }
 
 impl ProjectUse {
@@ -633,31 +630,13 @@ impl ProjectUse {
     pub fn kind(&self) -> ProjectUseKind {
         self.kind
     }
-
-    /// Explicitly releases this Project use; dropping it has the same effect.
-    ///
-    /// # Errors
-    ///
-    /// Returns an error if final Project-use cleanup fails.
-    pub fn release(mut self) -> Result<(), ProjectError> {
-        self.release_once()
-    }
-
-    fn release_once(&mut self) -> Result<(), ProjectError> {
-        if self.released {
-            return Ok(());
-        }
-        self.released = true;
-        let Some(registry) = self.registry.upgrade() else {
-            return Ok(());
-        };
-        release_use(&registry, &self.project_id, self.use_id)
-    }
 }
 
 impl Drop for ProjectUse {
     fn drop(&mut self) {
-        let _ = self.release_once();
+        if let Some(registry) = self.registry.upgrade() {
+            release_use(&registry, &self.project_id, self.use_id);
+        }
     }
 }
 
@@ -676,7 +655,6 @@ struct ProjectSessionState {
     service: ProjectService,
     project_revision: u64,
     observers: HashMap<Uuid, mpsc::SyncSender<ProjectEvent>>,
-    mutation_poisoned: bool,
     closed: bool,
 }
 
@@ -698,7 +676,6 @@ impl ProjectSession {
                 service,
                 project_revision: 1,
                 observers: HashMap::new(),
-                mutation_poisoned: false,
                 closed: false,
             }),
         }
@@ -756,16 +733,13 @@ impl ProjectSession {
     /// Applies one asynchronous derived-artifact diagnostic delta as a Project revision.
     ///
     /// # Errors
-    /// Returns an error when the Project session is closed, poisoned, or revision-exhausted.
+    /// Returns an error when the Project session is closed or revision-exhausted.
     pub fn apply_canvas_feedback_diagnostics(
         &self,
         update: &CanvasFeedbackDiagnosticUpdate,
     ) -> Result<(), ProjectError> {
-        let _delivery = lock(&self.delivery)?;
+        let _delivery = lock(&self.delivery);
         let mut state = self.open_state()?;
-        if state.mutation_poisoned {
-            return Err(mutation_poisoned_error());
-        }
         let next_revision = state
             .project_revision
             .checked_add(1)
@@ -792,27 +766,13 @@ impl ProjectSession {
         mutation: impl FnOnce(&mut ProjectService) -> Result<ProjectMutation<T>, ProjectError>,
         post_commit: impl FnOnce(&ProjectRevisionResult<T>),
     ) -> Result<ProjectRevisionResult<T>, ProjectError> {
-        let _delivery = lock(&self.delivery)?;
+        let _delivery = lock(&self.delivery);
         let mut state = self.open_state()?;
-        if state.mutation_poisoned {
-            return Err(mutation_poisoned_error());
-        }
         let next_revision = state
             .project_revision
             .checked_add(1)
             .ok_or(ProjectError::RevisionExhausted)?;
-        let result = match mutation(&mut state.service) {
-            Ok(result) => result,
-            Err(error) => {
-                if error.leaves_mutation_outcome_uncertain() {
-                    // The visible filesystem outcome is no longer knowable. Keep the exact
-                    // failure for this command and reject every later mutation in this session;
-                    // Releasing its final Project use is the only recovery boundary.
-                    state.mutation_poisoned = true;
-                }
-                return Err(error);
-            }
-        };
+        let result = mutation(&mut state.service)?;
         let event = if let Some(change) = result.change {
             state.project_revision = next_revision;
             Some(ProjectEvent {
@@ -886,8 +846,7 @@ impl ProjectSession {
     ///
     /// # Errors
     /// Returns a stale revision before any native effect, or the exact native
-    /// shell/refresh error. An outcome-unknown native failure poisons the
-    /// session instead of permitting an automatic retry.
+    /// shell/refresh error. Runtime does not automatically retry a native effect.
     pub fn trash_paths(
         &self,
         native_shell: &ProjectNativeShellService,
@@ -924,7 +883,7 @@ impl ProjectSession {
     ///
     /// Returns an error if the Project has closed or its state is unavailable.
     pub fn subscribe(self: &Arc<Self>) -> Result<ProjectSubscription, ProjectError> {
-        let _delivery = lock(&self.delivery)?;
+        let _delivery = lock(&self.delivery);
         let mut state = self.open_state()?;
         let id = Uuid::new_v4();
         let (sender, receiver) = mpsc::sync_channel(PROJECT_STREAM_CAPACITY);
@@ -938,52 +897,17 @@ impl ProjectSession {
         })
     }
 
-    /// Explicitly refreshes the Project as one revisioned mutation.
-    ///
-    /// # Errors
-    /// Returns a stale-revision, closed-session, filesystem, or validation error.
-    pub fn refresh(&self) -> Result<ProjectRevisionResult<ProjectSnapshot>, ProjectError> {
-        let result = self.execute(ProjectCommand::Refresh)?;
-        let ProjectCommandResult::Snapshot(snapshot) = result.value else {
-            return Err(ProjectError::StatePoisoned);
-        };
-        Ok(ProjectRevisionResult {
-            value: snapshot,
-            project_id: result.project_id,
-            project_revision: result.project_revision,
-        })
-    }
-
     fn open_state(&self) -> Result<MutexGuard<'_, ProjectSessionState>, ProjectError> {
-        let state = lock(&self.state)?;
+        let state = lock(&self.state);
         if state.closed {
             return Err(ProjectError::ProjectNotOpen(self.project_id.clone()));
         }
         Ok(state)
     }
 
-    fn require_use_admission(&self) -> Result<(), ProjectError> {
-        let state = self.open_state()?;
-        if state.mutation_poisoned {
-            return Err(mutation_poisoned_error());
-        }
-        Ok(())
-    }
-
     #[cfg(test)]
-    pub(super) fn set_revision_for_test(&self, revision: u64) -> Result<(), ProjectError> {
-        lock(&self.state)?.project_revision = revision;
-        Ok(())
-    }
-
-    #[cfg(test)]
-    pub(super) fn fail_watcher_for_test(&self) -> Result<(), ProjectError> {
-        lock(&self.watcher)?
-            .as_ref()
-            .ok_or_else(|| {
-                ProjectError::service("project_watcher_failed", "Project watcher is not running.")
-            })?
-            .fail_worker_for_test()
+    pub(super) fn set_revision_for_test(&self, revision: u64) {
+        lock(&self.state).project_revision = revision;
     }
 
     #[cfg(test)]
@@ -996,7 +920,7 @@ impl ProjectSession {
         &self,
         message: &str,
     ) -> Result<(), ProjectError> {
-        lock(&self.watcher)?
+        lock(&self.watcher)
             .as_ref()
             .ok_or_else(|| {
                 ProjectError::service("project_watcher_failed", "Project watcher is not running.")
@@ -1010,9 +934,7 @@ impl ProjectSession {
             &self.root,
             Arc::new(move |signal| {
                 if let Some(session) = weak.upgrade() {
-                    if session.wait_until_published().is_err() {
-                        return;
-                    }
+                    session.wait_until_published();
                     let _ = match signal {
                         ProjectWatchSignal::Path(path) => session.apply_watched_file_change(path),
                         ProjectWatchSignal::RescanRequired(message) => {
@@ -1022,38 +944,36 @@ impl ProjectSession {
                 }
             }),
         )?;
-        *lock(&self.watcher)? = Some(watcher);
+        *lock(&self.watcher) = Some(watcher);
         let refresh_result = (|| {
-            let _delivery = lock(&self.delivery)?;
+            let _delivery = lock(&self.delivery);
             let mut state = self.open_state()?;
             state.service.refresh()?;
             state.project_revision = 1;
             Ok(())
         })();
         if let Err(error) = refresh_result {
-            let _ = self.publish();
-            let _ = self.close_watcher();
+            self.publish();
+            self.close_watcher();
             return Err(error);
         }
         Ok(())
     }
 
-    fn publish(&self) -> Result<(), ProjectError> {
-        let mut published = lock(&self.published)?;
+    fn publish(&self) {
+        let mut published = lock(&self.published);
         *published = true;
         self.publication_ready.notify_all();
-        Ok(())
     }
 
-    fn wait_until_published(&self) -> Result<(), ProjectError> {
-        let mut published = lock(&self.published)?;
+    fn wait_until_published(&self) {
+        let mut published = lock(&self.published);
         while !*published {
             published = self
                 .publication_ready
                 .wait(published)
-                .map_err(|_| ProjectError::StatePoisoned)?;
+                .expect("Project publication wait lock poisoned");
         }
-        Ok(())
     }
 
     fn apply_watched_file_change(&self, path: String) -> Result<(), ProjectError> {
@@ -1072,11 +992,8 @@ impl ProjectSession {
             }
             ProjectWatchSignal::Path(_) | ProjectWatchSignal::RescanRequired(_) => None,
         };
-        let delivery = lock(&self.delivery)?;
+        let delivery = lock(&self.delivery);
         let mut state = self.open_state()?;
-        if state.mutation_poisoned {
-            return Err(mutation_poisoned_error());
-        }
         let next_revision = state
             .project_revision
             .checked_add(1)
@@ -1096,7 +1013,6 @@ impl ProjectSession {
                     }
                 };
                 if error.leaves_mutation_outcome_uncertain() {
-                    state.mutation_poisoned = true;
                     let snapshot = state
                         .service
                         .watch_refresh_failed(diagnostic_path, &message);
@@ -1185,45 +1101,41 @@ impl ProjectSession {
         Ok(())
     }
 
-    fn unsubscribe(&self, id: Uuid) -> Result<(), ProjectError> {
-        let mut state = lock(&self.state)?;
+    fn unsubscribe(&self, id: Uuid) {
+        let mut state = lock(&self.state);
         state.observers.remove(&id);
-        Ok(())
     }
 
     fn close(&self) -> Result<(), ProjectError> {
-        let delivery = lock(&self.delivery)?;
-        let mut state = lock(&self.state)?;
+        let delivery = lock(&self.delivery);
+        let mut state = lock(&self.state);
         if state.closed {
             drop(state);
             drop(delivery);
-            self.publish()?;
+            self.publish();
             return self.finalize_close();
         }
         state.closed = true;
         state.observers.clear();
         drop(state);
         drop(delivery);
-        self.publish()?;
+        self.publish();
         self.finalize_close()
     }
 
     fn finalize_close(&self) -> Result<(), ProjectError> {
-        let watcher_result = self.close_watcher();
+        self.close_watcher();
         let detach_result = self.feedback_artifacts.detach(&self.root);
-        if detach_result.is_ok()
-            && let Ok(state) = self.state.lock()
-        {
-            state.service.release_capability_binding();
+        if detach_result.is_ok() {
+            lock(&self.state).service.release_capability_binding();
         }
-        watcher_result.and(detach_result)
+        detach_result
     }
 
-    fn close_watcher(&self) -> Result<(), ProjectError> {
-        if let Some(mut watcher) = lock(&self.watcher)?.take() {
-            watcher.close()?;
+    fn close_watcher(&self) {
+        if let Some(mut watcher) = lock(&self.watcher).take() {
+            watcher.close();
         }
-        Ok(())
     }
 }
 
@@ -1273,22 +1185,18 @@ impl ProjectSubscription {
 
     /// Explicitly removes this observer; dropping it has the same effect.
     ///
-    /// # Errors
-    ///
-    /// Returns an error if the session state is unavailable.
-    pub fn release(mut self) -> Result<(), ProjectError> {
-        self.release_once()
+    pub fn release(mut self) {
+        self.release_once();
     }
 
-    fn release_once(&mut self) -> Result<(), ProjectError> {
+    fn release_once(&mut self) {
         if self.released {
-            return Ok(());
+            return;
         }
         self.released = true;
         if let Some(session) = self.session.upgrade() {
-            session.unsubscribe(self.id)?;
+            session.unsubscribe(self.id);
         }
-        Ok(())
     }
 }
 
@@ -1380,7 +1288,7 @@ fn execute_canvas_registry_command(
                 ProjectChange::ProjectChanged(snapshot),
             ))
         }
-        _ => Err(ProjectError::StatePoisoned),
+        _ => unreachable!("non-registry command reached the registry command executor"),
     }
 }
 
@@ -1402,7 +1310,7 @@ fn execute_visual_canvas_command(
         ProjectCommand::UpdateCanvasTextViewports { canvas_id, updates } => {
             service.update_canvas_text_viewports(&canvas_id, &updates)?
         }
-        _ => return Err(ProjectError::StatePoisoned),
+        _ => unreachable!("non-visual command reached the visual Canvas executor"),
     };
     Ok(canvas_change_mutation(canvas, projection, changed))
 }
@@ -1443,7 +1351,7 @@ fn execute_canvas_map_command(
                 ProjectChange::CanvasChanged { canvas, projection },
             ))
         }
-        _ => Err(ProjectError::StatePoisoned),
+        _ => unreachable!("non-Canvas-Map command reached the Canvas Map executor"),
     }
 }
 
@@ -1499,7 +1407,7 @@ fn execute_single_file_command(
                 ProjectChange::ProjectChanged(snapshot),
             ))
         }
-        _ => Err(ProjectError::StatePoisoned),
+        _ => unreachable!("non-file command reached the single-file executor"),
     }
 }
 
@@ -1562,7 +1470,7 @@ fn execute_file_batch_command(
             let paths = result_project_paths(&results).collect();
             (results, paths)
         }
-        _ => return Err(ProjectError::StatePoisoned),
+        _ => unreachable!("non-batch command reached the file batch executor"),
     };
     project_paths_mutation(service, results, paths)
 }
@@ -1654,7 +1562,7 @@ fn publish_event(state: &mut ProjectSessionState, event: &ProjectEvent) {
 
 impl Drop for ProjectSubscription {
     fn drop(&mut self) {
-        let _ = self.release_once();
+        self.release_once();
     }
 }
 
@@ -1678,26 +1586,24 @@ fn add_use(
         project_id: project_id.to_owned(),
         use_id,
         kind,
-        released: false,
     })
 }
 
-fn release_use(
-    registry: &Arc<ProjectSessionRegistryInner>,
-    project_id: &str,
-    use_id: Uuid,
-) -> Result<(), ProjectError> {
+fn release_use(registry: &Arc<ProjectSessionRegistryInner>, project_id: &str, use_id: Uuid) {
     let closing = {
-        let mut state = lock(&registry.state)?;
+        let mut state = registry
+            .state
+            .lock()
+            .expect("Project registry lock poisoned");
         let Some(project_uses) = state.uses_by_project.get_mut(project_id) else {
-            return Ok(());
+            return;
         };
         if project_uses.remove(&use_id).is_none() || !project_uses.is_empty() {
-            return Ok(());
+            return;
         }
         state.uses_by_project.remove(project_id);
         let Some(session) = state.sessions_by_id.remove(project_id) else {
-            return Ok(());
+            return;
         };
         state.project_ids_by_root.remove(session.root());
         let transition = Arc::new(RootTransition::new());
@@ -1706,26 +1612,23 @@ fn release_use(
             .insert(session.root().to_path_buf(), Arc::clone(&transition));
         Some((session, transition))
     };
-    let result = if let Some((session, transition)) = closing {
+    if let Some((session, transition)) = closing {
         let close_result = session.close();
         let failure = close_result
             .as_ref()
             .err()
             .map(RootTransitionFailure::from_error);
-        let finish_result = (|| {
-            if failure.is_none() {
-                lock(&registry.state)?
-                    .transitions_by_root
-                    .remove(session.root());
-            }
-            transition.finish(failure.clone(), failure)
-        })();
-        finish_result.and(close_result)
-    } else {
-        Ok(())
-    };
+        if failure.is_none() {
+            registry
+                .state
+                .lock()
+                .expect("Project registry lock poisoned")
+                .transitions_by_root
+                .remove(session.root());
+        }
+        transition.finish(failure.clone(), failure);
+    }
     (registry.on_change)();
-    result
 }
 
 fn sync_snapshot(project_id: &str, state: &ProjectSessionState) -> ProjectSyncSnapshot {
@@ -1750,13 +1653,6 @@ fn snapshots_equivalent(left: &ProjectSnapshot, right: &ProjectSnapshot) -> bool
         && left.health.runtime_data_location == right.health.runtime_data_location
 }
 
-fn mutation_poisoned_error() -> ProjectError {
-    ProjectError::service(
-        "project_session_mutation_poisoned",
-        "Project mutation outcome is uncertain. Release the session's remaining Project uses and reopen the Project.",
-    )
-}
-
-fn lock<T>(mutex: &Mutex<T>) -> Result<MutexGuard<'_, T>, ProjectError> {
-    mutex.lock().map_err(|_| ProjectError::StatePoisoned)
+fn lock<T>(mutex: &Mutex<T>) -> MutexGuard<'_, T> {
+    mutex.lock().expect("Project session lock poisoned")
 }

@@ -199,5 +199,5 @@ function transformForRect(rect: Pick<CanvasRect, 'x' | 'y'>): string {
 }
 
 function canvasStagePerfTimestamp(): number {
-  return globalThis.performance?.now?.() ?? Date.now();
+  return performance.now();
 }

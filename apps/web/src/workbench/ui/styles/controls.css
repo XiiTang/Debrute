@@ -45,21 +45,6 @@
   background: color-mix(in oklch, var(--db-accent) 28%, var(--db-surface-3));
 }
 
-.db-button--subtle {
-  background: color-mix(in oklch, var(--db-surface-2) 76%, transparent);
-}
-
-.db-button--ghost {
-  border-color: transparent;
-  background: transparent;
-  color: var(--db-text);
-}
-
-.db-button--danger {
-  border-color: color-mix(in oklch, var(--db-danger) 64%, var(--db-border));
-  color: color-mix(in oklch, var(--db-danger) 82%, white);
-}
-
 .db-button:hover:not(:disabled),
 .db-icon-button:hover:not(:disabled) {
   border-color: color-mix(in oklch, var(--db-accent) 42%, var(--db-border));
@@ -113,11 +98,6 @@
 .db-icon-button--sm {
   width: var(--db-control-sm);
   height: var(--db-control-sm);
-}
-
-.db-icon-button--md {
-  width: var(--db-control-md);
-  height: var(--db-control-md);
 }
 
 .db-icon-button--window {
@@ -253,12 +233,4 @@
   display: flex;
   align-items: center;
   gap: var(--db-space-2);
-}
-
-.db-toolbar--vertical {
-  flex-direction: column;
-}
-
-.db-toolbar--normal {
-  gap: var(--db-space-3);
 }

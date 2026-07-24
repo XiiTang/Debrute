@@ -79,6 +79,37 @@ describe('CanvasPreviewResourceScheduler', () => {
     expect(published).toEqual(['notes.md']);
   });
 
+  it('retains a current culled start until a later visibility check makes it eligible', () => {
+    const frames: FrameRequestCallback[] = [];
+    const started: string[] = [];
+    let culled = true;
+    const scheduler = createCanvasPreviewResourceScheduler({
+      requestFrame: (callback) => {
+        frames.push(callback);
+        return frames.length;
+      },
+      cancelFrame: vi.fn()
+    });
+
+    scheduler.enqueue({
+      kind: 'text',
+      nodeId: 'notes.md',
+      sourceKey: 'notes:source',
+      targetWidth: 640,
+      isCurrent: () => true,
+      isCulled: () => culled,
+      run: () => started.push('notes.md')
+    });
+    expect(frames).toEqual([]);
+    expect(started).toEqual([]);
+
+    culled = false;
+    scheduler.notifyVisibilityChanged();
+    frames[0]?.(16);
+
+    expect(started).toEqual(['notes.md']);
+  });
+
   it('cancels a pending publication frame when interaction resumes', () => {
     const frames: FrameRequestCallback[] = [];
     const canceled: number[] = [];

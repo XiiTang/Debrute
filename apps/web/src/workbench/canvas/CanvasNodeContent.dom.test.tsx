@@ -13,9 +13,47 @@ import {
 } from './CanvasNodeContent';
 import type { CanvasImageNodeAssetHookState } from './CanvasImageNodeAssetContext';
 import {
+  CanvasTextPreviewProvider,
   type CanvasTextPreviewSource
 } from './CanvasTextPreviewRuntime';
+import type { CanvasPreviewResourceScheduler } from './CanvasPreviewResourceScheduler';
 import { I18nProvider } from '../i18n';
+
+vi.mock('./CanvasTextPreviewStyleKey', () => ({
+  canvasTextPreviewStyleSnapshotForDocument: () => ({ color: '#fff' }),
+  canvasTextPreviewStyleKey: async () => 'sha256:style'
+}));
+
+const previewResourceScheduler: CanvasPreviewResourceScheduler = {
+  enqueue: () => undefined,
+  enqueuePublication: () => undefined,
+  cancel: () => undefined,
+  setInteractionState: () => undefined,
+  notifyVisibilityChanged: () => undefined,
+  dispose: () => undefined
+};
+
+function TestProviders({ children }: { children: React.ReactNode }): React.ReactElement {
+  return (
+    <I18nProvider locale="en">
+      <CanvasTextPreviewProvider
+        canvasId="canvas-test"
+        nodes={[]}
+        textFileBuffers={{}}
+        actions={actionsFixture()}
+        cameraState="idle"
+        dragState={undefined}
+        resourceZoom={1}
+        devicePixelRatio={1}
+        culledNodePaths={new Set()}
+        styleDependencyKey="test"
+        previewResourceScheduler={previewResourceScheduler}
+      >
+        {children}
+      </CanvasTextPreviewProvider>
+    </I18nProvider>
+  );
+}
 
 afterEach(() => {
   vi.restoreAllMocks();
@@ -24,9 +62,9 @@ afterEach(() => {
 
 function renderStaticWithI18n(element: React.ReactElement): string {
   return renderToStaticMarkup(
-    <I18nProvider locale="en">
+    <TestProviders>
       {element}
-    </I18nProvider>
+    </TestProviders>
   );
 }
 
@@ -258,7 +296,7 @@ describe('CanvasNodeContent', () => {
       try {
         await act(async () => {
           root.render(
-            <I18nProvider locale="en">
+            <TestProviders>
               <CanvasNodeContent
                 node={videoNode('media/clip.mp4', 'rev-a')}
                 selected={false}
@@ -279,7 +317,7 @@ describe('CanvasNodeContent', () => {
                 onTitlePointerMove={() => undefined}
                 onTitlePointerUp={() => undefined}
               />
-            </I18nProvider>
+            </TestProviders>
           );
         });
 
@@ -360,7 +398,7 @@ describe('CanvasNodeContent', () => {
       const renderNode = async (selected: boolean) => {
         await act(async () => {
           root.render(
-            <I18nProvider locale="en">
+            <TestProviders>
               <CanvasNodeContent
                 node={textNode('flow/readme.md', 'rev-a')}
                 selected={selected}
@@ -378,7 +416,7 @@ describe('CanvasNodeContent', () => {
                 onTitlePointerMove={() => undefined}
                 onTitlePointerUp={() => undefined}
               />
-            </I18nProvider>
+            </TestProviders>
           );
         });
       };
@@ -705,7 +743,7 @@ describe('CanvasNodeContent', () => {
       try {
         await act(async () => {
           root.render(
-            <I18nProvider locale="en">
+            <TestProviders>
               <CanvasNodeContent
                 node={node}
                 selected
@@ -722,7 +760,7 @@ describe('CanvasNodeContent', () => {
                 onTitlePointerMove={() => undefined}
                 onTitlePointerUp={() => undefined}
               />
-            </I18nProvider>
+            </TestProviders>
           );
         });
 
@@ -747,7 +785,7 @@ describe('CanvasNodeContent', () => {
       try {
         await act(async () => {
           root.render(
-            <I18nProvider locale="en">
+            <TestProviders>
               <CanvasNodeContent
                 node={node}
                 selected
@@ -764,7 +802,7 @@ describe('CanvasNodeContent', () => {
                 onTitlePointerMove={() => undefined}
                 onTitlePointerUp={() => undefined}
               />
-            </I18nProvider>
+            </TestProviders>
           );
         });
 
@@ -786,7 +824,7 @@ describe('CanvasNodeContent', () => {
 
         await act(async () => {
           root.render(
-            <I18nProvider locale="en">
+            <TestProviders>
               <CanvasNodeContent
                 node={node}
                 selected={false}
@@ -803,7 +841,7 @@ describe('CanvasNodeContent', () => {
                 onTitlePointerMove={() => undefined}
                 onTitlePointerUp={() => undefined}
               />
-            </I18nProvider>
+            </TestProviders>
           );
         });
 
@@ -816,7 +854,7 @@ describe('CanvasNodeContent', () => {
 
         await act(async () => {
           root.render(
-            <I18nProvider locale="en">
+            <TestProviders>
               <CanvasNodeContent
                 node={persistedNode}
                 selected
@@ -833,7 +871,7 @@ describe('CanvasNodeContent', () => {
                 onTitlePointerMove={() => undefined}
                 onTitlePointerUp={() => undefined}
               />
-            </I18nProvider>
+            </TestProviders>
           );
         });
 
@@ -852,7 +890,7 @@ describe('CanvasNodeContent', () => {
         });
         await act(async () => {
           root.render(
-            <I18nProvider locale="en">
+            <TestProviders>
               <CanvasNodeContent
                 node={persistedNode}
                 selected={false}
@@ -869,7 +907,7 @@ describe('CanvasNodeContent', () => {
                 onTitlePointerMove={() => undefined}
                 onTitlePointerUp={() => undefined}
               />
-            </I18nProvider>
+            </TestProviders>
           );
         });
 
@@ -892,7 +930,7 @@ describe('CanvasNodeContent', () => {
       const renderNode = async (selected: boolean) => {
         await act(async () => {
           root.render(
-            <I18nProvider locale="en">
+            <TestProviders>
               <CanvasNodeContent
                 node={node}
                 selected={selected}
@@ -909,7 +947,7 @@ describe('CanvasNodeContent', () => {
                 onTitlePointerMove={() => undefined}
                 onTitlePointerUp={() => undefined}
               />
-            </I18nProvider>
+            </TestProviders>
           );
         });
       };
@@ -977,7 +1015,7 @@ describe('CanvasNodeContent', () => {
             revision: 'rev-a',
             size: 10_000,
             mimeType: 'audio/mpeg',
-            fileUrl: 'http://127.0.0.1:17321/api/projects/p/files/raw/audio/theme.mp3?v=rev-a'
+            fileUrl: '/api/projects/p/files/raw/audio/theme.mp3?v=rev-a'
           }
         }}
         selected
@@ -1046,7 +1084,6 @@ describe('CanvasNodeContent', () => {
       );
 
       expect(html).not.toContain('Saved');
-      expect(html).not.toContain('db-status-pill--success');
     });
   });
 });
@@ -1076,7 +1113,7 @@ function textNode(path: string, revision: string): ProjectedCanvasNode {
       state: 'available',
       size: 64,
       mimeType: 'text/markdown',
-      fileUrl: `http://127.0.0.1:17321/api/projects/p/files/raw/${path}?v=${revision}`,
+      fileUrl: `/api/projects/p/files/raw/${path}?v=${revision}`,
       revision
     }
   };
@@ -1096,7 +1133,7 @@ function videoNode(path: string, revision: string): ProjectedCanvasNode {
       state: 'available',
       size: 10_000,
       mimeType: 'video/mp4',
-      fileUrl: `http://127.0.0.1:17321/api/projects/p/files/raw/${path}?v=${revision}`,
+      fileUrl: `/api/projects/p/files/raw/${path}?v=${revision}`,
       revision
     },
     videoPresentation: {
@@ -1136,7 +1173,7 @@ async function renderTextPreviewNode(
 ): Promise<void> {
   await act(async () => {
     root.render(
-      <I18nProvider locale="en">
+      <TestProviders>
         <CanvasNodeContent
           node={options?.node ?? textNode('flow/readme.md', 'rev-a')}
           selected={options?.selected ?? false}
@@ -1157,7 +1194,7 @@ async function renderTextPreviewNode(
           onTitlePointerMove={() => undefined}
           onTitlePointerUp={() => undefined}
         />
-      </I18nProvider>
+      </TestProviders>
     );
   });
 }
@@ -1247,7 +1284,7 @@ function imageNode(path: string, revision: string): ProjectedCanvasNode {
       revision,
       size: 10_000,
       mimeType: 'image/png',
-      fileUrl: `http://127.0.0.1:17321/api/projects/p/files/raw/${path}?v=${revision}`,
+      fileUrl: `/api/projects/p/files/raw/${path}?v=${revision}`,
       canvasImagePreviewable: true,
       canvasImagePreviewSourceWidth: 1600
     }

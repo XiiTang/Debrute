@@ -2,60 +2,49 @@ import type {
   CanvasDocument,
   CanvasFeedbackDocument,
   CanvasProjection,
-  Diagnostic,
+  ProjectDiagnostic,
   UpdateCanvasFeedbackEntryInput
 } from '@debrute/canvas-core';
 import type {
   DebruteProjectMetadata,
   NormalizedFileWatchEvent,
-  ProjectFileEntry,
-  ProjectPathBatchEntry,
+  ProjectPathEntry,
   ProjectPathBatchOperationResult,
-  ProjectPathOperationResult,
   ProjectTextFile,
   WriteProjectTextFileInput
-} from '@debrute/project-core';
+} from './project.js';
+import type { DebruteProductPlatform } from './productPlatform.js';
 
 export * from './runtimeControl.js';
+export { parseDebruteWorkbenchPath, type DebruteWorkbenchRoute } from './workbenchRoute.js';
+export type { DebruteShellApi, NativeWindowState } from './desktopShell.js';
+export type { DebruteProductPlatform } from './productPlatform.js';
+export type {
+  ProjectPathEntry,
+  ProjectTextLanguageId,
+  WriteProjectTextFileInput
+} from './project.js';
 
-export {
-  buildWorkbenchMenus,
-  buildWorkbenchTitleBarState,
-  menuLabels,
-  titleBarPresentationForPlatform,
-  unavailableWorkbenchTitleBarState,
-  type WorkbenchChromePlatform,
-  type WorkbenchHostKind,
-  type WorkbenchMenu,
-  type WorkbenchMenuCommandId,
-  type WorkbenchMenuId,
-  type WorkbenchMenuItem,
-  type WorkbenchTitleBarPresentation,
-  type WorkbenchTitleBarState
-} from './workbenchChrome.js';
+export type { NativeMenuCommandId } from './workbenchChrome.js';
 
-export type { ProjectTextFile } from '@debrute/project-core';
-export type { WriteProjectTextFileInput } from '@debrute/project-core';
-
-export interface ProjectHealthSummary {
+interface ProjectHealthSummary {
   projectName: string;
   canvasCount: number;
   diagnosticCounts: {
     errors: number;
     warnings: number;
-    infos: number;
   };
   runtimeDataLocation: string;
   checkedAt: string;
 }
 
-export type CanvasRegistryErrorCode =
+type CanvasRegistryErrorCode =
   | 'canvas_registry_missing'
   | 'canvas_registry_invalid'
   | 'canvas_registry_conflict'
   | 'canvas_registry_repair_failed';
 
-export type CanvasRegistryState =
+type CanvasRegistryState =
   | {
       status: 'ready';
       canvasOrder: string[];
@@ -66,13 +55,13 @@ export type CanvasRegistryState =
       message: string;
     };
 
-export interface ProjectSessionSnapshot {
+interface ProjectSessionSnapshot {
   projectRoot: string;
   metadata: DebruteProjectMetadata;
-  files: ProjectFileEntry[];
+  files: ProjectPathEntry[];
   canvases: CanvasDocument[];
   projections: CanvasProjection[];
-  diagnostics: Diagnostic[];
+  diagnostics: ProjectDiagnostic[];
   canvasRegistry: CanvasRegistryState;
   health: ProjectHealthSummary;
 }
@@ -83,33 +72,11 @@ export type WorkbenchProjectSessionSnapshot = Omit<ProjectSessionSnapshot, 'proj
 };
 export type WorkbenchProjectTextFile = Omit<ProjectTextFile, 'absolutePath'>;
 
-export interface RevisionedProjectResult {
+interface RevisionedProjectResult {
   projectId: string;
   projectRevision: number;
 }
 
-
-export interface LiveProjectView extends RevisionedProjectResult {
-  snapshot: WorkbenchProjectSessionSnapshot;
-  clients: {
-    liveCount: number;
-  };
-}
-
-export interface LiveProjectsView {
-  projects: LiveProjectView[];
-}
-
-export type DebruteWorkbenchRoute =
-  | { kind: 'workbench' }
-  | {
-      kind: 'project-open';
-      projectRoot?: string;
-    }
-  | {
-      kind: 'project';
-      projectId: string;
-    };
 
 export interface DebruteHttpErrorBody {
   error: {
@@ -121,20 +88,20 @@ export interface DebruteHttpErrorBody {
 
 export type WorkbenchLocale = 'en' | 'zh-CN';
 export type WorkbenchThemePreference = 'system' | 'dark' | 'light';
-export type DebruteDefaultFrontend = 'electron' | 'browser' | 'runtime-only';
+export type DebruteDefaultFrontend = 'desktop' | 'browser' | 'runtime-only';
 
-export interface RecentProjectView {
+interface RecentProjectView {
   projectId: string;
   projectRoot: string;
 }
 
-export interface DebruteGlobalWorkbenchSettings {
+interface DebruteGlobalWorkbenchSettings {
   locale: WorkbenchLocale;
   themePreference: WorkbenchThemePreference;
   defaultFrontend: DebruteDefaultFrontend;
 }
 
-export interface DebruteGlobalChromeSettings {
+interface DebruteGlobalChromeSettings {
   recentProjects: RecentProjectView[];
 }
 
@@ -146,9 +113,9 @@ export interface DebruteGlobalSettingsView {
   workbench: DebruteGlobalWorkbenchSettings;
   chrome: DebruteGlobalChromeSettings;
   models: {
-    image: ImageModelSettingsView;
-    video: VideoModelSettingsView;
-    audio: AudioModelSettingsView;
+    image: ImageModelSettingRecord[];
+    video: VideoModelSettingRecord[];
+    audio: AudioModelSettingRecord[];
   };
   integrations: IntegrationSettingsView;
   adobeBridge: DebruteGlobalAdobeBridgeSettings;
@@ -156,74 +123,16 @@ export interface DebruteGlobalSettingsView {
 
 export interface SaveDebruteGlobalSettingsInput {
   workbench?: Partial<DebruteGlobalWorkbenchSettings>;
-  models?: {
-    image?: { modelId: string; setting: SaveImageModelSettingInput };
-    video?: { modelId: string; setting: SaveVideoModelSettingInput };
-    audio?: { modelId: string; setting: SaveAudioModelSettingInput };
-  };
+  modelSetting?: { modelId: string; setting: SaveModelSettingInput };
   adobeBridge?: SaveAdobeBridgeSettingsInput;
 }
 
-export type DebruteAgentFieldValue = string | number | boolean | null;
-
-export interface DebruteAgentNamedRecord {
-  name: string;
-  fields: Record<string, DebruteAgentFieldValue>;
-}
-
-export interface DebruteAgentCommandResult {
-  status: 'ok' | 'error';
-  command: string;
-  code?: string;
-  message?: string;
-  records?: DebruteAgentNamedRecord[];
-  fields?: Record<string, DebruteAgentFieldValue>;
-}
-
-export function isDebruteMutatingMethod(method: string): boolean {
-  const normalized = method.toUpperCase();
-  return normalized === 'POST' || normalized === 'PUT' || normalized === 'PATCH' || normalized === 'DELETE';
-}
-
-export function parseDebruteWorkbenchPath(pathname: string, search = ''): DebruteWorkbenchRoute {
-  const segments = pathname
-    .split('/')
-    .filter((segment) => segment.length > 0)
-    .map(decodeURIComponent);
-  if (segments.length === 1 && segments[0] === 'open') {
-    const projectRoot = new URLSearchParams(search).get('path') ?? undefined;
-    return projectRoot ? { kind: 'project-open', projectRoot } : { kind: 'project-open' };
-  }
-  if (segments.length === 2 && segments[0] === 'projects' && segments[1]) {
-    return {
-      kind: 'project',
-      projectId: segments[1]
-    };
-  }
-  return { kind: 'workbench' };
-}
-
-export interface ProjectFileOperationResult extends ProjectPathOperationResult {
-  snapshot: ProjectSessionSnapshot;
-}
-
-export interface WorkbenchProjectFileOperationResult extends ProjectPathOperationResult, RevisionedProjectResult {
+export interface WorkbenchProjectFileOperationResult extends ProjectPathEntry, RevisionedProjectResult {
   snapshot: WorkbenchProjectSessionSnapshot;
-}
-
-export type WorkbenchProjectPathEntry = ProjectPathBatchEntry;
-
-export interface ProjectFileBatchOperationResult extends ProjectPathBatchOperationResult {
-  snapshot: ProjectSessionSnapshot;
 }
 
 export interface WorkbenchProjectFileBatchOperationResult extends ProjectPathBatchOperationResult, RevisionedProjectResult {
   snapshot: WorkbenchProjectSessionSnapshot;
-}
-
-export interface ProjectCanvasManagementResult {
-  snapshot: ProjectSessionSnapshot;
-  activeCanvasId?: string;
 }
 
 export interface WorkbenchCanvasManagementResult extends RevisionedProjectResult {
@@ -231,30 +140,30 @@ export interface WorkbenchCanvasManagementResult extends RevisionedProjectResult
   activeCanvasId?: string;
 }
 
-export interface WorkbenchProjectCopyPathsInput {
-  entries: WorkbenchProjectPathEntry[];
+interface WorkbenchProjectCopyPathsInput {
+  entries: ProjectPathEntry[];
   targetDirectoryProjectRelativePath: string;
 }
 
-export interface WorkbenchProjectMovePathsInput extends WorkbenchProjectCopyPathsInput {
+interface WorkbenchProjectMovePathsInput extends WorkbenchProjectCopyPathsInput {
   overwrite?: boolean;
 }
 
-export interface WorkbenchProjectDeletePathsInput {
-  entries: WorkbenchProjectPathEntry[];
+interface WorkbenchProjectDeletePathsInput {
+  entries: ProjectPathEntry[];
 }
 
-export interface WorkbenchProjectAbsolutePathsResult {
+interface WorkbenchProjectAbsolutePathsResult {
   paths: string[];
 }
 
-export interface WorkbenchProjectExternalLocalImportInput {
+interface WorkbenchProjectExternalLocalImportInput {
   sources: string[];
   targetDirectoryProjectRelativePath: string;
   overwrite?: boolean;
 }
 
-export type WorkbenchProjectUploadImportEntry =
+type WorkbenchProjectUploadImportEntry =
   | {
       kind: 'directory';
       projectRelativePath: string;
@@ -289,10 +198,10 @@ export interface RuntimeProjectUploadImportPlan {
 
 export interface WorkbenchProjectOpenResult extends RevisionedProjectResult {
   snapshot: WorkbenchProjectSessionSnapshot;
-  workingCopies?: WorkbenchWorkingCopies;
+  workingCopies: WorkbenchWorkingCopies;
 }
 
-export type WorkbenchProjectOpenOutcome =
+type WorkbenchProjectOpenOutcome =
   | WorkbenchProjectOpenResult
   | { outcome: 'focused_existing_desktop'; projectId: string };
 
@@ -321,24 +230,20 @@ export interface WorkbenchWorkingCopies {
   feedback: WorkbenchFeedbackWorkingCopy | null;
 }
 
-export type WorkbenchProjectPickerOpenResult =
+type WorkbenchProjectPickerOpenResult =
   | { opened: false }
   | ({ opened: true } & WorkbenchProjectOpenOutcome);
-
-export interface WorkbenchProjectRefreshResult extends RevisionedProjectResult {
-  snapshot: WorkbenchProjectSessionSnapshot;
-}
 
 export interface WorkbenchProjectTextFileWriteResult extends RevisionedProjectResult {
   file: WorkbenchProjectTextFile;
 }
 
-export interface CanvasTextPreviewSourceTarget {
+interface CanvasTextPreviewSourceTarget {
   projectRelativePath: string;
   fingerprint: string;
 }
 
-export type CanvasTextPreviewSourceAvailabilityView = CanvasTextPreviewSourceTarget & (
+type CanvasTextPreviewSourceAvailabilityView = CanvasTextPreviewSourceTarget & (
   | { status: 'available' }
   | { status: 'missing' }
   | { status: 'error'; message: string }
@@ -363,11 +268,11 @@ export interface CanvasTextPreviewSourceAvailabilityResponse {
   sources: Record<string, CanvasTextPreviewSourceAvailabilityView>;
 }
 
-export type CanvasVideoPreviewSourceKind =
+type CanvasVideoPreviewSourceKind =
   | 'initial-poster'
   | 'playback-frame';
 
-export interface CanvasVideoPreviewSourceTarget {
+interface CanvasVideoPreviewSourceTarget {
   projectRelativePath: string;
   videoRevision: string;
   currentTimeSeconds: number;
@@ -413,9 +318,9 @@ export interface UpdateCanvasTextViewportStateInput {
   }>;
 }
 
-export type ApiKeySettingState =
-  | { apiKeySet: false; apiKeyPreview: null }
-  | { apiKeySet: true; apiKeyPreview: string };
+interface ApiKeySettingState {
+  apiKeySet: boolean;
+}
 
 export type ImageModelSettingRecord = {
   debruteModelId: string;
@@ -428,14 +333,14 @@ export type ImageModelSettingRecord = {
   requestModelIdOverride: string | null;
 } & ApiKeySettingState;
 
-export interface ImageModelSettingsView {
-  models: ImageModelSettingRecord[];
-}
-
-export interface SaveImageModelSettingInput {
+export interface SaveModelSettingInput {
   baseUrlOverride: string | null;
   requestModelIdOverride: string | null;
   apiKey?: string;
+}
+
+export interface RevealModelApiKeyResponse {
+  apiKey: string;
 }
 
 export type VideoModelSettingRecord = {
@@ -452,16 +357,6 @@ export type VideoModelSettingRecord = {
   requestModelIdOverride: string | null;
 } & ApiKeySettingState;
 
-export interface VideoModelSettingsView {
-  models: VideoModelSettingRecord[];
-}
-
-export interface SaveVideoModelSettingInput {
-  baseUrlOverride: string | null;
-  requestModelIdOverride: string | null;
-  apiKey?: string;
-}
-
 export type AudioModelKind = 'tts' | 'music' | 'sound-effect';
 
 export type AudioModelSettingRecord = {
@@ -474,32 +369,21 @@ export type AudioModelSettingRecord = {
   requestModelIdOverride: string | null;
 } & ApiKeySettingState;
 
-export interface AudioModelSettingsView {
-  models: AudioModelSettingRecord[];
-}
-
-export interface SaveAudioModelSettingInput {
-  baseUrlOverride: string | null;
-  requestModelIdOverride: string | null;
-  apiKey?: string;
-}
-
-export type IntegrationId = 'ffmpeg' | 'imagemagick' | 'mediainfo' | 'exiftool' | 'remove-ai-watermarks';
-export type IntegrationBinaryId = 'ffmpeg' | 'ffprobe' | 'magick' | 'mediainfo' | 'exiftool' | 'remove-ai-watermarks';
-export type IntegrationStatusKind = 'ready' | 'not_found' | 'probe_failed';
-export type IntegrationBinaryStatusKind = IntegrationStatusKind;
-export type IntegrationProbeErrorKind = 'spawn_error' | 'timeout' | 'nonzero_exit' | 'parse_error';
-export type IntegrationOperationFailureKind =
+type IntegrationId = 'ffmpeg' | 'imagemagick' | 'mediainfo' | 'exiftool' | 'remove-ai-watermarks';
+type IntegrationBinaryId = 'ffmpeg' | 'ffprobe' | 'magick' | 'mediainfo' | 'exiftool' | 'remove-ai-watermarks';
+type IntegrationStatusKind = 'ready' | 'not_found' | 'probe_failed';
+type IntegrationProbeErrorKind = 'spawn_error' | 'timeout' | 'nonzero_exit' | 'parse_error';
+type IntegrationOperationFailureKind =
   | IntegrationProbeErrorKind
   | 'operation_already_running'
   | 'backend_unavailable'
   | 'integration_not_found'
   | 'operation_unavailable'
   | 'command_unavailable';
-export type SystemPackageManagerId = 'brew' | 'winget';
-export type PythonCliInstallerId = 'uv' | 'pipx';
+type SystemPackageManagerId = 'brew' | 'winget';
+type PythonCliInstallerId = 'uv' | 'pipx';
 export type IntegrationBackendId = SystemPackageManagerId | PythonCliInstallerId;
-export type IntegrationInstallBackendKind = 'system-package-manager' | 'python-cli-installer';
+type IntegrationInstallBackendKind = 'system-package-manager' | 'python-cli-installer';
 export type IntegrationOperationKind = 'install' | 'update' | 'uninstall';
 
 export interface IntegrationOperationDiagnostic {
@@ -523,7 +407,6 @@ export interface RunIntegrationOperationResult {
   ok: boolean;
   integrationId: IntegrationId;
   operation: IntegrationOperationKind;
-  settings: IntegrationSettingsView;
   diagnostic?: IntegrationOperationDiagnostic;
 }
 
@@ -534,7 +417,7 @@ export interface IntegrationBackendStatus {
   unavailableReason?: string;
 }
 
-export interface IntegrationOperationStatus {
+interface IntegrationOperationStatus {
   backendKind: IntegrationInstallBackendKind;
   backend?: IntegrationBackendId;
   packageName?: string;
@@ -545,10 +428,10 @@ export interface IntegrationOperationStatus {
   queryDiagnostic?: IntegrationOperationDiagnostic;
 }
 
-export interface IntegrationBinaryStatus {
+interface IntegrationBinaryStatus {
   binaryId: IntegrationBinaryId;
   displayName: string;
-  status: IntegrationBinaryStatusKind;
+  status: IntegrationStatusKind;
   version?: string;
   probe?: {
     exitCode?: number;
@@ -574,43 +457,6 @@ export interface IntegrationSettingsView {
   runningOperation?: IntegrationOperationInFlight;
 }
 
-export type SkillSourceKind = 'shared-agents' | 'debrute-repository';
-
-export interface SkillRecord {
-  name: string;
-  description: string;
-  shortDescription?: string;
-  source: SkillSourceKind;
-  root: string;
-  skillDir: string;
-  skillPath: string;
-  debruteVersion?: string;
-}
-
-export interface DebruteSkillsDiagnostic {
-  source?: SkillSourceKind | 'debrute-materialize';
-  root?: string;
-  path?: string;
-  code: string;
-  severity: 'info' | 'warning' | 'error';
-  message: string;
-}
-
-export interface OfficialDebruteSkillsStatusSnapshot {
-  sources: Array<{ source: SkillSourceKind; root: string }>;
-  skills: SkillRecord[];
-  diagnostics: DebruteSkillsDiagnostic[];
-  currentDebruteVersion: string;
-  sharedSkillsRoot: string;
-  payloadSkillsRoot?: string;
-  payloadRootAvailable: boolean;
-  payloadSkills: string[];
-}
-
-export interface OfficialDebruteSkillsMaterializeSnapshot extends OfficialDebruteSkillsStatusSnapshot {
-  materializedSkills: SkillRecord[];
-}
-
 export type ManagedCliDiagnostic =
   | {
       status: 'ready';
@@ -627,7 +473,7 @@ export type ManagedCliDiagnostic =
       logPath?: string;
     };
 
-export type ProductUpdateOperation = 'check' | 'apply';
+type ProductUpdateOperation = 'check' | 'apply';
 
 export type ProductUpdateState =
   | {
@@ -663,16 +509,12 @@ export type ProductUpdateState =
 
 export interface DebruteProductState {
   productVersion: string;
-  platform: NodeJS.Platform;
+  platform: DebruteProductPlatform;
   cli: ManagedCliDiagnostic;
   update: ProductUpdateState;
 }
 
-export interface ProductUpdateApplyResult {
-  state: DebruteProductState;
-}
-
-export type GeneratedArtifactRole =
+type GeneratedArtifactRole =
   | 'primary-image'
   | 'primary-video'
   | 'last-frame'
@@ -698,7 +540,7 @@ export interface GeneratedAssetRecord {
   };
 }
 
-export interface GeneratedAssetMetadataDiagnostic {
+interface GeneratedAssetMetadataDiagnostic {
   code: string;
   message: string;
   recordId?: string;
@@ -713,7 +555,7 @@ export type GeneratedAssetMetadataLookup =
         hash: string;
       };
       records: GeneratedAssetRecord[];
-      diagnostics?: GeneratedAssetMetadataDiagnostic[];
+      diagnostics: GeneratedAssetMetadataDiagnostic[];
     }
   | {
       status: 'unmatched';
@@ -721,27 +563,16 @@ export type GeneratedAssetMetadataLookup =
         algorithm: 'sha256';
         hash: string;
       };
-      diagnostics?: GeneratedAssetMetadataDiagnostic[];
+      diagnostics: GeneratedAssetMetadataDiagnostic[];
     }
   | {
       status: 'unavailable';
       reason: 'missing' | 'unreadable' | 'metadata_unreadable';
       message: string;
-      diagnostics?: GeneratedAssetMetadataDiagnostic[];
+      diagnostics: GeneratedAssetMetadataDiagnostic[];
     };
 
-export interface GeneratedAssetView {
-  assetId: string;
-  projectRelativePath: string;
-  rawUrl: string;
-  record: GeneratedAssetRecord;
-}
-
-export interface GeneratedAssetsView {
-  assets: GeneratedAssetView[];
-}
-
-export type TerminalSessionStatus = 'starting' | 'running' | 'terminating' | 'exited' | 'failed';
+type TerminalSessionStatus = 'starting' | 'running' | 'terminating' | 'exited' | 'failed';
 
 export interface TerminalSessionView {
   id: string;
@@ -756,10 +587,8 @@ export interface TerminalSessionView {
   updatedAt: string;
 }
 
-export interface CreateTerminalSessionInput {
-  cwdProjectRelativePath?: string;
-  cols?: number;
-  rows?: number;
+interface CreateTerminalSessionInput {
+  cwdProjectRelativePath: string;
 }
 
 export interface TerminalSessionList {
@@ -770,22 +599,22 @@ export interface TerminalSessionResult {
   session: TerminalSessionView;
 }
 
-export interface TerminalInputWrite {
+interface TerminalInputWrite {
   terminalId: string;
   data: string;
 }
 
-export interface TerminalResize {
+interface TerminalResize {
   terminalId: string;
   cols: number;
   rows: number;
 }
 
-export interface CloseTerminalSessionInput {
+interface CloseTerminalSessionInput {
   terminalId: string;
 }
 
-export interface TerminalDataChunk {
+interface TerminalDataChunk {
   sequence: number;
   data: string;
 }
@@ -863,19 +692,12 @@ export interface AddProjectPathToCanvasMapInput {
   projectRelativePath: string;
 }
 
-export type ResetCanvasNodeLayoutsInput = {
+type ResetCanvasNodeLayoutsInput = {
   canvasId: string;
 } & (
   | { all: true }
-  | { pathRules: { paths?: string[]; globs?: string[] } }
+  | { pathRules: { paths: string[]; globs: string[] } }
 );
-
-export interface ProjectAddProjectPathToCanvasMapResult {
-  snapshot: ProjectSessionSnapshot;
-  canvas: CanvasDocument;
-  projection: CanvasProjection;
-  centerProjectRelativePath: string;
-}
 
 export interface WorkbenchAddProjectPathToCanvasMapResult extends RevisionedProjectResult {
   snapshot: WorkbenchProjectSessionSnapshot;
@@ -1014,11 +836,6 @@ export interface PhotoshopBridgeImportResultMessage {
   message?: string;
 }
 
-export type PhotoshopBridgeClientMessage =
-  | PhotoshopBridgeHelloMessage
-  | PhotoshopBridgeStatusMessage
-  | PhotoshopBridgeImportResultMessage;
-
 export interface PhotoshopBridgeChallengeMessage {
   type: 'bridge.challenge';
   bridgeVersion: number;
@@ -1084,7 +901,6 @@ export const adobeBridgeErrorCodes = [
   'photoshop_place_failed',
   'transfer_url_expired',
   'transfer_timeout',
-  'state_poisoned',
   'persistence_failed'
 ] as const;
 
@@ -1094,29 +910,18 @@ export function isAdobeBridgeErrorCode(value: string): value is AdobeBridgeError
   return (adobeBridgeErrorCodes as readonly string[]).includes(value);
 }
 
-export function adobeBridgeClientDisplayName(input: {
-  hostApp: AdobeBridgeHostApp;
-  hostVersion: string;
-  activeDocumentTitle: string | null;
-}): string {
-  const hostLabel = input.hostApp === 'photoshop' ? 'Photoshop' : input.hostApp;
-  return `${hostLabel} ${input.hostVersion} · ${input.activeDocumentTitle ?? 'No document open'}`;
-}
-
-export type WorkbenchFileWatchEvent = Omit<NormalizedFileWatchEvent, 'absolutePath'>;
+type WorkbenchFileWatchEvent = Omit<NormalizedFileWatchEvent, 'absolutePath'>;
 
 export type WorkbenchEvent =
-  | { type: 'project.opened'; projectId: string; projectRevision: number; snapshot: WorkbenchProjectSessionSnapshot }
   | { type: 'project.changed'; projectId: string; projectRevision: number; snapshot: WorkbenchProjectSessionSnapshot }
   | { type: 'project.fileChanged'; projectId: string; projectRevision: number; event: WorkbenchFileWatchEvent; snapshot: WorkbenchProjectSessionSnapshot }
   | { type: 'canvas.changed'; projectId: string; projectRevision: number; canvas: CanvasDocument; projection: CanvasProjection }
   | { type: 'canvas.feedback.changed'; projectId: string; projectRevision: number; feedback: CanvasFeedbackDocument }
-  | { type: 'generatedAsset.metadata.changed'; projectId: string; projectRevision: number; record: GeneratedAssetRecord }
   | { type: 'recentProjects.changed'; recentProjects: RecentProjectView[] }
   | { type: 'globalSettings.changed'; settings: DebruteGlobalSettingsView }
   | { type: 'integrations.changed'; integrations: IntegrationSettingsView }
   | { type: 'adobeBridge.state.changed'; state: AdobeBridgeStateView }
-  | { type: 'product.changed'; product: DebruteProductState };
+  | { type: 'product.changed'; product: DebruteProductState | null };
 
 export interface WorkbenchApiClient {
   adobeBridgeGetState(): Promise<AdobeBridgeStateView>;
@@ -1131,22 +936,19 @@ export interface WorkbenchApiClient {
   ): Promise<WorkbenchProjectOpenOutcome>;
   openProjectFromPicker(): Promise<WorkbenchProjectPickerOpenResult>;
   clearRecentProjectRoots(): Promise<{ ok: true }>;
-  getProductState(): Promise<DebruteProductState>;
-  checkProductUpdate(): Promise<DebruteProductState>;
-  applyProductUpdate(): Promise<ProductUpdateApplyResult>;
-  globalSettingsGet(): Promise<DebruteGlobalSettingsView>;
-  globalSettingsSave(input: SaveDebruteGlobalSettingsInput): Promise<DebruteGlobalSettingsView>;
-  getSnapshot(): Promise<WorkbenchProjectRefreshResult>;
-  getProjectHealth(): Promise<WorkbenchProjectHealthSummary>;
+  checkProductUpdate(): Promise<{ ok: true }>;
+  applyProductUpdate(): Promise<{ ok: true }>;
+  globalSettingsSave(input: SaveDebruteGlobalSettingsInput): Promise<{ ok: true }>;
+  revealModelApiKey(modelId: string): Promise<RevealModelApiKeyResponse>;
   listTerminalSessions(): Promise<TerminalSessionList>;
-  createTerminalSession(input?: CreateTerminalSessionInput): Promise<TerminalSessionResult>;
+  createTerminalSession(input: CreateTerminalSessionInput): Promise<TerminalSessionResult>;
   writeTerminalInput(input: TerminalInputWrite): Promise<{ ok: true }>;
   resizeTerminal(input: TerminalResize): Promise<TerminalSessionResult>;
   closeTerminalSession(input: CloseTerminalSessionInput): Promise<{ ok: true }>;
   subscribeTerminalEvents(
     terminalId: string,
     listener: (event: TerminalEvent) => void,
-    onError?: (error: Error) => void
+    onError: (error: Error) => void
   ): TerminalEventSubscription;
   readProjectTextFile(projectRelativePath: string): Promise<WorkbenchProjectTextFile>;
   writeProjectTextFile(input: WriteProjectTextFileInput): Promise<WorkbenchProjectTextFileWriteResult>;
@@ -1169,11 +971,8 @@ export interface WorkbenchApiClient {
   importExternalProjectUploads(input: WorkbenchProjectUploadImportInput): Promise<WorkbenchProjectFileBatchOperationResult>;
   revealProjectPathInSystemFileManager(input: { projectRelativePath: string; kind: 'file' | 'directory' }): Promise<{ ok: true }>;
   lookupGeneratedAssetMetadata(input: { projectRelativePath: string }): Promise<GeneratedAssetMetadataLookup>;
-  listGeneratedAssets(): Promise<GeneratedAssetsView>;
-  readGeneratedAsset(assetId: string): Promise<GeneratedAssetView>;
   readCanvasFeedback(): Promise<CanvasFeedbackDocument>;
   updateCanvasFeedbackEntry(input: UpdateCanvasFeedbackEntryInput): Promise<WorkbenchCanvasFeedbackMutationResult>;
-  refreshProject(): Promise<WorkbenchProjectRefreshResult>;
   createCanvas(): Promise<WorkbenchCanvasManagementResult>;
   renameCanvas(input: { canvasId: string; name: string }): Promise<WorkbenchCanvasManagementResult>;
   deleteCanvas(input: { canvasId: string }): Promise<WorkbenchCanvasManagementResult>;
@@ -1182,7 +981,7 @@ export interface WorkbenchApiClient {
   addProjectPathToCanvasMap(input: AddProjectPathToCanvasMapInput): Promise<WorkbenchAddProjectPathToCanvasMapResult>;
   updateCanvasNodeLayouts(input: {
     canvasId: string;
-    nodeLayouts?: Array<{ projectRelativePath: string; x: number; y: number; width?: number; height?: number }>;
+    nodeLayouts: Array<{ projectRelativePath: string; x: number; y: number; width?: number; height?: number }>;
   }): Promise<WorkbenchCanvasDocumentMutationResult>;
   updateCanvasVideoPlaybackState(input: UpdateCanvasVideoPlaybackStateInput): Promise<WorkbenchCanvasDocumentMutationResult>;
   updateCanvasTextViewportState(input: UpdateCanvasTextViewportStateInput): Promise<WorkbenchCanvasDocumentMutationResult>;
@@ -1191,7 +990,7 @@ export interface WorkbenchApiClient {
     canvasId: string;
     projectRelativePath: string;
   }): Promise<WorkbenchCanvasDocumentMutationResult>;
-  integrationsRescan(): Promise<IntegrationSettingsView>;
+  integrationsRescan(): Promise<{ ok: true }>;
   integrationsRunOperation(input: RunIntegrationOperationInput): Promise<RunIntegrationOperationResult>;
   onEvent(listener: (event: WorkbenchEvent) => void): () => void;
   onProjectDetached(listener: () => void): () => void;

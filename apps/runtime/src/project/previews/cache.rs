@@ -36,14 +36,14 @@ impl Semaphore {
         cancellation: &PreviewCancellation,
     ) -> Result<SemaphorePermit<'_>, ProjectError> {
         cancellation.check()?;
-        let mut state = self.state.lock().map_err(|_| ProjectError::StatePoisoned)?;
+        let mut state = self.state.lock().expect("preview semaphore lock poisoned");
         if state.active >= self.capacity {
             while state.active >= self.capacity {
                 cancellation.check()?;
                 state = self
                     .available
                     .wait_timeout(state, PREVIEW_ADMISSION_POLL)
-                    .map_err(|_| ProjectError::StatePoisoned)?
+                    .expect("preview semaphore wait lock poisoned")
                     .0;
             }
         }
@@ -63,7 +63,7 @@ impl Drop for SemaphorePermit<'_> {
             .semaphore
             .state
             .lock()
-            .unwrap_or_else(std::sync::PoisonError::into_inner);
+            .expect("preview semaphore lock poisoned");
         state.active = state.active.saturating_sub(1);
         self.semaphore.available.notify_one();
     }
@@ -82,7 +82,7 @@ impl KeyedLocks {
     ) -> Result<KeyedLock<'_>, ProjectError> {
         cancellation.check()?;
         let reservation = {
-            let mut locks = self.locks.lock().map_err(|_| ProjectError::StatePoisoned)?;
+            let mut locks = self.locks.lock().expect("preview keyed lock map poisoned");
             let state = locks
                 .get(key)
                 .cloned()
@@ -98,7 +98,7 @@ impl KeyedLocks {
             .state
             .activity
             .lock()
-            .map_err(|_| ProjectError::StatePoisoned)?;
+            .expect("preview keyed activity lock poisoned");
         if activity.active {
             activity.waiters += 1;
             while activity.active {
@@ -110,7 +110,7 @@ impl KeyedLocks {
                     .state
                     .available
                     .wait_timeout(activity, PREVIEW_ADMISSION_POLL)
-                    .map_err(|_| ProjectError::StatePoisoned)?
+                    .expect("preview keyed wait lock poisoned")
                     .0;
             }
             activity.waiters = activity.waiters.saturating_sub(1);
@@ -138,7 +138,7 @@ impl Drop for KeyReservation<'_> {
             .owner
             .locks
             .lock()
-            .unwrap_or_else(std::sync::PoisonError::into_inner);
+            .expect("preview keyed lock map poisoned");
         let current = locks
             .get(&self.key)
             .filter(|state| Arc::ptr_eq(state, &self.state));
@@ -148,7 +148,7 @@ impl Drop for KeyReservation<'_> {
         let activity = current
             .activity
             .lock()
-            .unwrap_or_else(std::sync::PoisonError::into_inner);
+            .expect("preview keyed activity lock poisoned");
         let removable =
             !activity.active && activity.waiters == 0 && Arc::strong_count(current) == 2;
         drop(activity);
@@ -190,7 +190,7 @@ impl Drop for KeyedLock<'_> {
             .state
             .activity
             .lock()
-            .unwrap_or_else(std::sync::PoisonError::into_inner);
+            .expect("preview keyed activity lock poisoned");
         activity.active = false;
         self.state.available.notify_one();
         drop(activity);
@@ -198,7 +198,7 @@ impl Drop for KeyedLock<'_> {
             .owner
             .locks
             .lock()
-            .unwrap_or_else(std::sync::PoisonError::into_inner);
+            .expect("preview keyed lock map poisoned");
         if Arc::strong_count(&self.state) == 2
             && locks
                 .get(&self.key)

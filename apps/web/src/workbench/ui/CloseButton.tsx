@@ -3,7 +3,7 @@ import { X } from 'lucide-react';
 import { IconButton, type IconButtonProps } from './IconButton';
 import { cx } from './cx';
 
-export type CloseButtonProps = Omit<IconButtonProps, 'icon'>;
+type CloseButtonProps = Omit<IconButtonProps, 'icon'>;
 
 export function CloseButton({
   className,

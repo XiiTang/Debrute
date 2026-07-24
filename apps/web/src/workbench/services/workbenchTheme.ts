@@ -8,7 +8,7 @@ export type WorkbenchResolvedTheme = 'dark' | 'light';
 export const DEFAULT_GLOBAL_WORKBENCH_SETTINGS: DebruteGlobalSettingsView['workbench'] = {
   locale: 'en',
   themePreference: 'system',
-  defaultFrontend: 'electron'
+  defaultFrontend: 'desktop'
 };
 
 export function resolveWorkbenchThemePreference(
@@ -21,18 +21,15 @@ export function resolveWorkbenchThemePreference(
   return systemPrefersDark ? 'dark' : 'light';
 }
 
-export function systemPrefersDarkColorScheme(win: Window | undefined = globalThis.window): boolean {
-  return Boolean(win?.matchMedia?.('(prefers-color-scheme: dark)').matches);
+export function systemPrefersDarkColorScheme(win: Window = window): boolean {
+  return win.matchMedia('(prefers-color-scheme: dark)').matches;
 }
 
 export function subscribeSystemThemeChanges(
   listener: (theme: WorkbenchResolvedTheme) => void,
-  win: Window | undefined = globalThis.window
+  win: Window = window
 ): () => void {
-  const query = win?.matchMedia?.('(prefers-color-scheme: dark)');
-  if (!query) {
-    return () => undefined;
-  }
+  const query = win.matchMedia('(prefers-color-scheme: dark)');
   const handleChange = (event: MediaQueryListEvent) => {
     listener(event.matches ? 'dark' : 'light');
   };
@@ -42,7 +39,7 @@ export function subscribeSystemThemeChanges(
 
 export function setDocumentTheme(
   theme: WorkbenchResolvedTheme,
-  doc: Document | undefined = globalThis.document
+  doc: Document = document
 ): void {
-  doc?.documentElement.setAttribute('data-theme', theme);
+  doc.documentElement.setAttribute('data-theme', theme);
 }

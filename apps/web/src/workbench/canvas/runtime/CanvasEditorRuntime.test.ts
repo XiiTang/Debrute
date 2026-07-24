@@ -1,7 +1,17 @@
-import { describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { createCanvasEditorRuntime } from './CanvasEditorRuntime';
 
 describe('CanvasEditorRuntime', () => {
+  let restoreBrowserRuntime: () => void;
+
+  beforeEach(() => {
+    restoreBrowserRuntime = installBrowserRuntime();
+  });
+
+  afterEach(() => {
+    restoreBrowserRuntime();
+  });
+
   it('binds surface size without owning stage transforms', () => {
     const runtime = createCanvasEditorRuntime();
 
@@ -321,6 +331,7 @@ function installBrowserRuntime(input: {
   requestAnimationFrame?: (callback: FrameRequestCallback) => number;
 } = {}): () => void {
   const originalWindow = globalThis.window;
+  const originalResizeObserver = globalThis.ResizeObserver;
   Object.defineProperty(globalThis, 'window', {
     configurable: true,
     writable: true,
@@ -337,15 +348,32 @@ function installBrowserRuntime(input: {
       removeEventListener: () => undefined
     }
   });
+  Object.defineProperty(globalThis, 'ResizeObserver', {
+    configurable: true,
+    writable: true,
+    value: class {
+      observe(): void {}
+      disconnect(): void {}
+    }
+  });
   return () => {
     if (originalWindow === undefined) {
       Reflect.deleteProperty(globalThis, 'window');
-      return;
+    } else {
+      Object.defineProperty(globalThis, 'window', {
+        configurable: true,
+        writable: true,
+        value: originalWindow
+      });
     }
-    Object.defineProperty(globalThis, 'window', {
-      configurable: true,
-      writable: true,
-      value: originalWindow
-    });
+    if (originalResizeObserver === undefined) {
+      Reflect.deleteProperty(globalThis, 'ResizeObserver');
+    } else {
+      Object.defineProperty(globalThis, 'ResizeObserver', {
+        configurable: true,
+        writable: true,
+        value: originalResizeObserver
+      });
+    }
   };
 }

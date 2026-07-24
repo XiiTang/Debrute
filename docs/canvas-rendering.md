@@ -69,6 +69,11 @@ and SVG/SVGZ remain derived variants because they require browser conversion
 or Runtime-controlled safe rasterization. Unsupported or invalid preview state
 is explicit and does not treat the raw file as an error fallback.
 
+A lower tier is still sized for the current device pixel ratio. On a Retina
+display it should remain visually sharp at its smaller on-screen size; tier
+changes are verified from the requested and decoded pixel width, not from an
+intentional blur or visible loss of quality.
+
 Resource zoom follows the live camera while idle, freezes at the last idle zoom
 for the whole movement, and catches up to the final camera zoom when movement
 settles. This keeps camera transforms independent from preview-resolution churn.
@@ -124,15 +129,17 @@ image, video, or text-preview tiers are already suppressed without a second
 post-idle timer.
 Once idle, current visible starts and ready publications share the next-frame
 budget. Publications enter React as low-priority transitions so new input can
-preempt them. Stale publications are discarded. Culled publications stay
-deferred until a later idle visibility check rather than committing offscreen
-or restarting already completed decode work.
+preempt them. Stale publications are discarded. Culled publications and
+still-current request starts stay deferred until a later idle visibility check
+rather than committing offscreen, losing eligible work, or restarting already
+completed decode work.
 
 Immediate first loads, source revision changes, explicit retries, and
 not-eligible transitions remain node-owned. A direct-source image is immediate
 when it is the first eligible resource; a later quality replacement starts from
 the shared next-frame budget after interaction becomes idle. Scheduled request
-starts are discarded when stale or culled instead of being run speculatively.
+starts are discarded when stale. A current culled start is retained without
+scheduling an animation-frame loop until visibility changes.
 
 ## Local Image Preview Service And Cache
 
@@ -157,9 +164,9 @@ backend. SVG/SVGZ remains owned by `resvg` and outside the detailed scope of
 this backend design.
 
 The required libvips runtime and license notices ship with supported macOS and
-Windows packages. Linux packaging is not part of this design. A Node App
-Server, Sharp wrapper, child process, pure-Rust production fallback, operating-
-system-specific image backend, or compatibility backend is not permitted. Once
+Windows packages. A Node App Server, Sharp wrapper, child process, pure-Rust
+production fallback, operating-system-specific image backend, or compatibility
+backend is not permitted. Once
 the libvips path satisfies the contract, superseded custom JPEG decode, colour
 conversion, resize, and encode product paths are deleted rather than retained
 as alternatives.
@@ -324,14 +331,17 @@ The source key combines a readable encoded path prefix with a stable hash so
 long or similar paths remain distinct. The direct-source tier has no entry in
 this cache. Derived-variant cache hits must be regular non-symlink files.
 Project open and refresh reconcile the cache against current visible,
-metadata-previewable image files: removed or unsupported sources and old
-revision or engine-version directories are deleted. The entire cache tree is
-excluded from Project visibility, so previews cannot recursively become Canvas
-inputs.
+metadata-previewable image files: removed or unsupported sources and superseded
+file revisions are deleted. Runtime reads and writes only the exact current
+`raster-engine-v<version>` path; it does not enumerate sibling engine-version
+directories or delete data attributed to an earlier engine contract. The
+entire cache tree is excluded from Project visibility, so previews cannot
+recursively become Canvas inputs.
 
 Preview caches use structural reconciliation rather than a byte quota, LRU,
 TTL, or background cleanup timer. Image caches retain requested quantized-width
-variants only for the current visible source, file revision, and engine version.
+variants only for the current visible source and file revision under the exact
+current engine path.
 Text caches retain the current source identity for each Canvas and Project path;
 video caches retain the current video revision and the source identity implied
 by its persisted Playback Position or initial poster. Source-identity changes
@@ -374,7 +384,11 @@ builds.
 Default tests assert deterministic ownership and work boundaries rather than
 FPS, CPU, heap, decode time, or absolute benchmark thresholds. Live browser
 capture is a requested diagnostic workflow, not a normal documentation or CI
-gate.
+gate. The workflow uses the in-page capture API and an explicit user
+interaction; Debrute does not retain a second CDP pan driver, hidden Electron
+remote-debugging switch, fixed-settle script, or DOM/network scraper. Pan-away
+and pan-back image retention is already a deterministic image-state contract
+and test rather than a duplicate live-script assertion.
 
 ## Executable Authorities
 
@@ -385,7 +399,8 @@ gate.
 - Image projection, preview rendering, and cache cleanup:
   `apps/runtime/src/project/service.rs` and
   `apps/runtime/src/project/previews/`.
-- Filesystem-safe cache identity: `packages/project-core/src/projectCacheKeys.ts`.
+- Filesystem-safe preview cache identity:
+  `apps/runtime/src/project/previews/cache.rs`.
 - Runtime preview route: `apps/runtime/src/workbench/project_routes.rs`.
 - Deterministic browser-free coverage: colocated Canvas tests and
   `apps/runtime/src/project/tests.rs`.

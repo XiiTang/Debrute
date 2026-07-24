@@ -2,25 +2,22 @@ import { readdir, rm } from 'node:fs/promises';
 import { join } from 'node:path';
 
 const paths = [
-  'apps/desktop/dist',
+  'apps/web/dist',
   'apps/desktop/dist-electron',
   'apps/desktop/release',
   'packages/app-protocol/dist',
-  'packages/capability-core/dist',
   'packages/canvas-core/dist',
-  'packages/canvas-map-core/dist',
-  'packages/project-core/dist',
   'packages/photoshop-bridge-plugin-core/dist',
   'packages/runtime-control-client/dist'
 ];
 
 for (const path of paths) {
-  await rm(path, { recursive: true, force: true });
+  await removePath(path, { recursive: true });
 }
 
 const tsBuildInfoFiles = await findFiles(process.cwd(), (file) => file.endsWith('.tsbuildinfo'));
 
-await Promise.all(tsBuildInfoFiles.map((file) => rm(file, { force: true })));
+await Promise.all(tsBuildInfoFiles.map((file) => removePath(file)));
 
 console.log(`Removed ${paths.length} build output paths and ${tsBuildInfoFiles.length} TypeScript build info files.`);
 
@@ -34,8 +31,9 @@ async function findFiles(root, predicate) {
     let entries;
     try {
       entries = await readdir(directory, { withFileTypes: true });
-    } catch {
-      return;
+    } catch (error) {
+      if (error?.code === 'ENOENT') return;
+      throw error;
     }
     for (const entry of entries) {
       if (entry.isDirectory()) {
@@ -49,5 +47,14 @@ async function findFiles(root, predicate) {
         found.push(file);
       }
     }
+  }
+}
+
+async function removePath(path, options = {}) {
+  try {
+    await rm(path, options);
+  } catch (error) {
+    if (error?.code === 'ENOENT') return;
+    throw error;
   }
 }

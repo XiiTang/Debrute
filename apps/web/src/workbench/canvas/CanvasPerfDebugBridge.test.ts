@@ -7,47 +7,35 @@ import {
 import type { CanvasPerfCounterTotals, CanvasPerfMonitor, CanvasPerfTrace } from './CanvasPerfMonitor';
 
 describe('CanvasPerfDebugBridge', () => {
-  it('registers only when enabled and unregisters only its own API', () => {
+  it('registers and unregisters only its own API', () => {
     const globalObject: DebruteCanvasPerfDebugGlobal = {};
     const first = createCanvasPerfDebugBridge({
-      enabled: false,
       globalObject,
       perfMonitor: monitor(),
       getCanvasSnapshot: snapshot
     });
     first.register();
-    expect(globalObject.__debruteCanvasPerf).toBeUndefined();
+    const firstApi = globalObject.__debruteCanvasPerf;
+    expect(firstApi).toBeDefined();
 
     const second = createCanvasPerfDebugBridge({
-      enabled: true,
       globalObject,
       perfMonitor: monitor(),
       getCanvasSnapshot: snapshot
     });
     second.register();
-    const secondApi = globalObject.__debruteCanvasPerf;
-    expect(secondApi).toBeDefined();
+    expect(globalObject.__debruteCanvasPerf).not.toBe(firstApi);
 
-    const third = createCanvasPerfDebugBridge({
-      enabled: true,
-      globalObject,
-      perfMonitor: monitor(),
-      getCanvasSnapshot: snapshot
-    });
-    third.register();
-    expect(globalObject.__debruteCanvasPerf).not.toBe(secondApi);
-
-    second.unregister();
+    first.unregister();
     expect(globalObject.__debruteCanvasPerf).toBeDefined();
 
-    third.unregister();
+    second.unregister();
     expect(globalObject.__debruteCanvasPerf).toBeUndefined();
   });
 
   it('starts a clean capture by resetting the monitor and setting state metadata', () => {
     const fakeMonitor = monitor();
     const bridge = createCanvasPerfDebugBridge({
-      enabled: true,
       globalObject: {},
       perfMonitor: fakeMonitor,
       getCanvasSnapshot: snapshot,
@@ -69,7 +57,6 @@ describe('CanvasPerfDebugBridge', () => {
   it('restarts capture cleanly when startCapture is called while active', () => {
     const fakeMonitor = monitor();
     const bridge = createCanvasPerfDebugBridge({
-      enabled: true,
       globalObject: {},
       perfMonitor: fakeMonitor,
       getCanvasSnapshot: snapshot,
@@ -91,7 +78,6 @@ describe('CanvasPerfDebugBridge', () => {
   it('stops capture and returns trace, counters, duration, label, and canvas snapshot', () => {
     const fakeMonitor = monitor();
     const bridge = createCanvasPerfDebugBridge({
-      enabled: true,
       globalObject: {},
       perfMonitor: fakeMonitor,
       getCanvasSnapshot: snapshot,
@@ -134,7 +120,6 @@ describe('CanvasPerfDebugBridge', () => {
   it('exports clean hot-path counters without requiring image runtime work counters', () => {
     const fakeMonitor = monitor();
     const bridge = createCanvasPerfDebugBridge({
-      enabled: true,
       globalObject: {},
       perfMonitor: fakeMonitor,
       getCanvasSnapshot: snapshot,
@@ -173,7 +158,6 @@ describe('CanvasPerfDebugBridge', () => {
 
   it('returns the latest export when stopCapture is called while inactive', () => {
     const bridge = createCanvasPerfDebugBridge({
-      enabled: true,
       globalObject: {},
       perfMonitor: monitor(),
       getCanvasSnapshot: snapshot,
@@ -191,7 +175,6 @@ describe('CanvasPerfDebugBridge', () => {
   it('keeps the stopped capture frozen while the process-level monitor continues', () => {
     const fakeMonitor = monitor();
     const bridge = createCanvasPerfDebugBridge({
-      enabled: true,
       globalObject: {},
       perfMonitor: fakeMonitor,
       getCanvasSnapshot: snapshot,
@@ -212,7 +195,6 @@ describe('CanvasPerfDebugBridge', () => {
 
   it('returns an empty capture when stopCapture is called before any capture started', () => {
     const bridge = createCanvasPerfDebugBridge({
-      enabled: true,
       globalObject: {},
       perfMonitor: monitor({
         trace: {
@@ -244,7 +226,6 @@ describe('CanvasPerfDebugBridge', () => {
 
   it('exports a live capture without changing capture state', () => {
     const bridge = createCanvasPerfDebugBridge({
-      enabled: true,
       globalObject: {},
       perfMonitor: monitor(),
       getCanvasSnapshot: snapshot,
@@ -272,7 +253,6 @@ describe('CanvasPerfDebugBridge', () => {
   it('reset clears monitor state, capture metadata, and latest export', () => {
     const fakeMonitor = monitor();
     const bridge = createCanvasPerfDebugBridge({
-      enabled: true,
       globalObject: {},
       perfMonitor: fakeMonitor,
       getCanvasSnapshot: snapshot,
@@ -291,7 +271,6 @@ describe('CanvasPerfDebugBridge', () => {
   it('returns JSON-safe export copies that future events cannot mutate', () => {
     const fakeMonitor = monitor();
     const bridge = createCanvasPerfDebugBridge({
-      enabled: true,
       globalObject: {},
       perfMonitor: fakeMonitor,
       getCanvasSnapshot: snapshot,
@@ -329,7 +308,6 @@ describe('CanvasPerfDebugBridge', () => {
 
   it('captures snapshot errors in the payload instead of throwing', () => {
     const bridge = createCanvasPerfDebugBridge({
-      enabled: true,
       globalObject: {},
       perfMonitor: monitor(),
       getCanvasSnapshot: () => {

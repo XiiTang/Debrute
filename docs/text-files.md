@@ -6,7 +6,7 @@ capture budgets, and cache algorithms remain source-owned.
 
 ## Text Classification
 
-Project Core owns one editor-independent text format registry. It classifies
+Runtime owns one editor-independent text format registry. It classifies
 paths by exact filename, path or filename pattern, extension, and selected
 first-line signatures, and returns a Debrute text language ID plus MIME type.
 The registry covers plain text, Markdown and prompt files, structured data,
@@ -17,8 +17,8 @@ archive, and media formats are not classified as text.
 Canvas uses this registry to decide whether a Project file is a text node.
 CodeMirror maps the Debrute language ID to an available parser or an explicit
 plain-text mode; editor-library names and extensions are not Project metadata.
-The executable registry in `projectTextFileTypes.ts` is the authority for exact
-coverage.
+The executable registry in `apps/runtime/src/project/files.rs` is the authority
+for exact coverage.
 
 Text-file access is broader than Canvas classification. A Project-visible file
 with an unfamiliar suffix can still be opened through the text API when it is a
@@ -84,8 +84,12 @@ of inline Canvas selection and Canvas preview handoff.
 Each Canvas text node may persist a Text Viewport containing non-negative
 `scrollTop` and `scrollLeft`. Top-left is represented by the absence of the
 field. Reconciliation preserves the viewport for a surviving text node, and
-Workbench applies local viewport updates immediately while serializing the
-matching Canvas Document writes.
+Runtime is the sole validator and writer of the persisted value. Workbench
+displays a separate pending viewport immediately while serializing Runtime
+mutations. A Runtime response confirms only the submitted value, so a newer
+pending viewport remains visible until its own response arrives. Failure drops
+the pending value, restores the last Runtime-confirmed viewport, and is surfaced
+without automatic retry.
 
 The editor tracks its viewport on scroll and commits the last observation on
 blur, unmount, or the active-to-read-only transition. Deselecting an inline text node does not
@@ -145,8 +149,10 @@ The cache tree is not Project-visible. A project-visible `.debrute` text file,
 including a Canvas Map or Canvas JSON document, remains eligible as a source;
 the hidden derived cache cannot recursively become one. Once a new fingerprint
 becomes the current source identity for the same Canvas and Project path,
-Runtime removes superseded fingerprint and engine-version directories without
-applying a byte quota, LRU, or TTL to the current identity's width variants.
+Runtime removes superseded fingerprint directories. Within the current
+fingerprint it reads and writes only the exact current Raster Engine path and
+does not enumerate or remove sibling engine-version directories. No byte quota,
+LRU, or TTL applies to the current identity's width variants.
 
 ## Capture Pipeline
 
@@ -207,18 +213,22 @@ resource scheduler and diagnostic capture surface.
 
 ## Executable Authorities
 
-- Text classification and safe file access: `packages/project-core/src/`.
+- Text classification and safe file access: `apps/runtime/src/project/files.rs`
+  and `apps/runtime/src/project/paths.rs`.
 - Browser protocol views and mutations: `packages/app-protocol/src/` and
   `apps/runtime/src/workbench/project_routes.rs`.
 - Buffer and save coordination: `apps/web/src/workbench/services/textFile*.ts`.
 - CodeMirror language and editor ownership:
   `apps/web/src/workbench/canvas/CanvasTextEditor*.ts*` and
   `textEditorCodeMirrorLanguages.ts`.
-- Text Viewport persistence: `packages/canvas-core/src/index.ts` and
+- Text Viewport validation and persistence:
+  `apps/runtime/src/project/canvas.rs`, `service.rs`, and
+  `apps/runtime/src/workbench/project_routes.rs`.
+- Pending Text Viewport display and Runtime-result reconciliation:
   `apps/web/src/workbench/services/canvasSnapshotUpdates.ts`.
 - Preview identity, capture, runtime, handoff, and typed failures:
   `apps/web/src/workbench/canvas/CanvasTextPreview*.ts*`.
-- Source and variant storage: `packages/canvas-core/src/canvasTextPreviews.ts`
-  and `apps/runtime/src/project/previews/mod.rs`.
+- Source capture and identity: `apps/web/src/workbench/canvas/CanvasTextPreview*.ts*`.
+- Uploaded source and variant storage: `apps/runtime/src/project/previews/mod.rs`.
 - Integration coverage: `apps/runtime/src/project/tests.rs` and
   `apps/runtime/tests/runtime_lifecycle.rs`.

@@ -1,4 +1,4 @@
-import type { ProjectTextLanguageId } from '@debrute/project-core';
+import type { ProjectTextLanguageId } from '@debrute/app-protocol';
 import type { Extension } from '@codemirror/state';
 import { StreamLanguage } from '@codemirror/language';
 import { markdown } from '@codemirror/lang-markdown';

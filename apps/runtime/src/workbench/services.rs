@@ -9,12 +9,13 @@ use std::{
     env,
     path::{Path, PathBuf},
     pin::Pin,
-    sync::{Arc, Mutex, PoisonError, RwLock, Weak},
+    sync::{Arc, Mutex, MutexGuard, Weak},
     task::{Context, Poll},
     thread,
     time::Duration,
 };
 
+use axum::http::StatusCode;
 use futures_core::Stream;
 use serde_json::{Value, json};
 use tokio::sync::broadcast;
@@ -27,8 +28,10 @@ use crate::{
         ModelCatalog,
     },
     integrations::{IntegrationOperation, Platform},
+    model_operation::ModelOperationService,
     photoshop::{
-        PhotoshopBridgeService, PhotoshopDiscoveryStatus, PhotoshopPairingAuthority,
+        PhotoshopBridgeError, PhotoshopBridgeErrorCode, PhotoshopBridgeService,
+        PhotoshopBridgeStateView, PhotoshopDiscoveryStatus, PhotoshopPairingAuthority,
         RuntimePhotoshopMessage,
     },
     project::{
@@ -47,6 +50,8 @@ use super::{
 
 const GLOBAL_EVENT_CAPACITY: usize = 256;
 
+type PhotoshopSocketRegistry = HashMap<String, tokio::sync::mpsc::Sender<RuntimePhotoshopMessage>>;
+
 pub trait RuntimeProductHttpService: Send + Sync {
     fn state(&self) -> Result<Value, RuntimeHttpServiceError>;
     fn check(&self) -> Result<Value, RuntimeHttpServiceError>;
@@ -55,21 +60,22 @@ pub trait RuntimeProductHttpService: Send + Sync {
         input: &Value,
         initiator: ProductUpdateInitiator,
     ) -> Result<Value, RuntimeHttpServiceError>;
-    fn quit(&self, input: &Value) -> Result<Value, RuntimeHttpServiceError>;
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum ProductUpdateInitiator {
-    Frontend { browser_session: String },
+    Desktop { project_id: Option<String> },
+    Browser { project_id: Option<String> },
     Cli,
-    Bootstrap,
 }
 
 pub trait RuntimeCliHttpService: Send + Sync {
     fn run(&self, request: &Value) -> Result<Value, RuntimeHttpServiceError>;
+    fn submit(&self, request: &Value, input: &[u8]) -> Result<Value, RuntimeHttpServiceError>;
     fn run_stream(
         &self,
         request: &Value,
+        observer_is_alive: Arc<dyn Fn() -> bool + Send + Sync>,
     ) -> Result<RuntimeCliRecordStream, RuntimeHttpServiceError>;
 }
 
@@ -95,7 +101,7 @@ impl Stream for RuntimeCliRecordStream {
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct RuntimeHttpServiceError {
-    pub status: u16,
+    pub status: StatusCode,
     pub code: &'static str,
     pub message: String,
     pub details: Option<Value>,
@@ -103,7 +109,7 @@ pub struct RuntimeHttpServiceError {
 
 impl RuntimeHttpServiceError {
     #[must_use]
-    pub fn new(status: u16, code: &'static str, message: impl Into<String>) -> Self {
+    pub fn new(status: StatusCode, code: &'static str, message: impl Into<String>) -> Self {
         Self {
             status,
             code,
@@ -137,16 +143,14 @@ pub struct WorkbenchRuntimeServices {
     previews: Arc<crate::project::ProjectPreviewService>,
     native_shell: Arc<ProjectNativeShellService>,
     terminals: TerminalService,
-    generation: Arc<GenerationService>,
+    generated_assets: Arc<GeneratedAssetMetadataService>,
+    model_operations: Arc<ModelOperationService<GenerationService>>,
     photoshop: Arc<PhotoshopBridgeService>,
-    photoshop_sockets:
-        Arc<Mutex<HashMap<String, tokio::sync::mpsc::Sender<RuntimePhotoshopMessage>>>>,
+    photoshop_sockets: Arc<Mutex<PhotoshopSocketRegistry>>,
     connections: Arc<WorkbenchConnectionRegistry>,
     global_events: broadcast::Sender<GlobalRuntimeEvent>,
     connection_project_uses: Mutex<HashMap<String, ProjectUse>>,
     working_copies: WorkingCopyStore,
-    product: RwLock<Option<Arc<dyn RuntimeProductHttpService>>>,
-    cli: RwLock<Option<Arc<dyn RuntimeCliHttpService>>>,
 }
 
 impl WorkbenchRuntimeServices {
@@ -158,6 +162,10 @@ impl WorkbenchRuntimeServices {
     ///
     /// Returns a typed startup error when a catalog, pairing registry, feedback
     /// scheduler, or initial global projection cannot start.
+    ///
+    /// # Panics
+    ///
+    /// Panics when an authoritative in-process lock is poisoned.
     pub fn compose(
         debrute_home: impl AsRef<Path>,
         runtime_state: Arc<RuntimeControlState>,
@@ -184,7 +192,11 @@ impl WorkbenchRuntimeServices {
         let terminals = TerminalService::new(projects.clone());
         let native_shell = Arc::new(ProjectNativeShellService::new(&workers));
         let catalog = Arc::new(ModelCatalog::bundled().map_err(|error| {
-            RuntimeHttpServiceError::new(500, "model_catalog_invalid", error.to_string())
+            RuntimeHttpServiceError::new(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "model_catalog_invalid",
+                error.to_string(),
+            )
         })?);
         let global_store = Arc::new(GlobalConfigStore::new(&debrute_home));
         let integrations = workers.integration_service(
@@ -201,18 +213,16 @@ impl WorkbenchRuntimeServices {
         let generation = Arc::new(GenerationService::new(
             Arc::clone(&catalog),
             global_store,
-            generated_assets,
+            Arc::clone(&generated_assets),
         ));
+        let model_operations = Arc::new(ModelOperationService::new(Arc::clone(&generation)));
         let pairings = Arc::new(
             PhotoshopPairingAuthority::open(&debrute_home)
                 .map_err(RuntimeHttpServiceError::from_photoshop)?,
         );
         let photoshop_holder = Arc::new(Mutex::new(Weak::<PhotoshopBridgeService>::new()));
         let callback_holder = Arc::clone(&photoshop_holder);
-        let photoshop_sockets = Arc::new(Mutex::new(HashMap::<
-            String,
-            tokio::sync::mpsc::Sender<RuntimePhotoshopMessage>,
-        >::new()));
+        let photoshop_sockets = Arc::new(Mutex::new(PhotoshopSocketRegistry::new()));
         let callback_sockets = Arc::clone(&photoshop_sockets);
         let callback_global = Arc::clone(&global);
         let photoshop = Arc::new(PhotoshopBridgeService::with_change_callback(
@@ -225,41 +235,41 @@ impl WorkbenchRuntimeServices {
             Arc::new(move || {
                 let service = callback_holder
                     .lock()
-                    .unwrap_or_else(PoisonError::into_inner)
+                    .expect("Photoshop service holder lock poisoned")
                     .upgrade();
-                if let Some(service) = service
-                    && let Ok(state) = service.state()
-                {
-                    let _ = callback_global
+                if let Some(service) = service {
+                    let state = service.state().unwrap_or_else(|error| {
+                        panic!(
+                            "Photoshop global projection failed after a committed change ({}): {error}",
+                            error.code().as_str()
+                        )
+                    });
+                    callback_global
                         .publish_external(GlobalRuntimeChange::PhotoshopBridgeChanged(state));
-                    let sockets = callback_sockets
-                        .lock()
-                        .unwrap_or_else(PoisonError::into_inner)
+                    let sockets = lock_photoshop_socket_registry(&callback_sockets)
                         .iter()
                         .map(|(session_id, sender)| (session_id.clone(), sender.clone()))
                         .collect::<Vec<_>>();
-                    let mut stale = Vec::new();
+                    let mut stale_session_ids = Vec::new();
                     for (session_id, sender) in sockets {
-                        let message = service
-                            .state_for_session(&session_id)
-                            .map(|state| RuntimePhotoshopMessage::BridgeState { state });
-                        if match message {
-                            Ok(message) => sender.try_send(message).is_err(),
-                            Err(_) => true,
+                        if match photoshop_socket_projection(service.state_for_session(&session_id))
+                        {
+                            PhotoshopSocketProjection::Message(message) => {
+                                sender.try_send(message).is_err()
+                            }
+                            PhotoshopSocketProjection::Stale => true,
                         } {
-                            stale.push(session_id);
+                            stale_session_ids.push(session_id);
                         }
                     }
-                    if !stale.is_empty() {
-                        let mut sockets = callback_sockets
-                            .lock()
-                            .unwrap_or_else(PoisonError::into_inner);
-                        for session_id in &stale {
+                    if !stale_session_ids.is_empty() {
+                        let mut sockets = lock_photoshop_socket_registry(&callback_sockets);
+                        for session_id in &stale_session_ids {
                             sockets.remove(session_id);
                         }
                         drop(sockets);
-                        for session_id in stale {
-                            let _ = service.disconnect_session(&session_id);
+                        for session_id in stale_session_ids {
+                            service.disconnect_session(&session_id);
                         }
                     }
                 }
@@ -267,28 +277,36 @@ impl WorkbenchRuntimeServices {
         ));
         *photoshop_holder
             .lock()
-            .unwrap_or_else(PoisonError::into_inner) = Arc::downgrade(&photoshop);
+            .expect("Photoshop service holder lock poisoned") = Arc::downgrade(&photoshop);
 
         let (global_events, _) = broadcast::channel(GLOBAL_EVENT_CAPACITY);
         let event_sender = global_events.clone();
         let presentation_state = Arc::clone(&runtime_state);
         if !global.install_observer(Arc::new(move |event| {
-            if let GlobalRuntimeChange::RecentProjectsChanged(projects) = &event.change {
-                let _ = presentation_state.set_recent_projects(
-                    event.revision,
-                    projects
-                        .iter()
-                        .map(|project| crate::control::RecentProject {
-                            project_id: project.project_id.clone(),
-                            project_root: project.project_root.clone(),
-                        })
-                        .collect(),
-                );
+            match &event.change {
+                GlobalRuntimeChange::RecentProjectsChanged(projects) => {
+                    presentation_state.set_recent_projects(
+                        event.revision,
+                        projects
+                            .iter()
+                            .map(|project| crate::control::RecentProject {
+                                project_id: project.project_id.clone(),
+                                project_root: project.project_root.clone(),
+                            })
+                            .collect(),
+                    );
+                }
+                GlobalRuntimeChange::GlobalSettingsChanged(settings) => {
+                    presentation_state.set_theme_preference(&settings.workbench.theme_preference);
+                }
+                GlobalRuntimeChange::IntegrationsChanged(_)
+                | GlobalRuntimeChange::PhotoshopBridgeChanged(_)
+                | GlobalRuntimeChange::ProductChanged(_) => {}
             }
             let _ = event_sender.send(event);
         })) {
             return Err(RuntimeHttpServiceError::new(
-                500,
+                StatusCode::INTERNAL_SERVER_ERROR,
                 "global_observer_unavailable",
                 "Global Runtime observer is already installed.",
             ));
@@ -302,44 +320,33 @@ impl WorkbenchRuntimeServices {
             previews,
             native_shell,
             terminals,
-            generation,
+            generated_assets,
+            model_operations,
             photoshop,
             photoshop_sockets,
             connections: Arc::new(WorkbenchConnectionRegistry::new()),
             global_events,
             connection_project_uses: Mutex::new(HashMap::new()),
             working_copies: WorkingCopyStore::new(&debrute_home),
-            product: RwLock::new(None),
-            cli: RwLock::new(None),
         });
-        let recent_projects = services
+        let (recent_projects, theme_preference) = services
             .global
-            .recent_projects_snapshot()
+            .desktop_presentation_snapshot()
             .map_err(RuntimeHttpServiceError::from_global)?;
+        services.runtime_state.set_recent_projects(
+            services.global.revision(),
+            recent_projects
+                .iter()
+                .map(|project| crate::control::RecentProject {
+                    project_id: project.project_id.clone(),
+                    project_root: project.project_root.clone(),
+                })
+                .collect(),
+        );
         services
             .runtime_state
-            .set_recent_projects(
-                services.global.revision(),
-                recent_projects
-                    .iter()
-                    .map(|project| crate::control::RecentProject {
-                        project_id: project.project_id.clone(),
-                        project_root: project.project_root.clone(),
-                    })
-                    .collect(),
-            )
-            .map_err(|error| {
-                RuntimeHttpServiceError::new(500, "runtime_state_unavailable", error.to_string())
-            })?;
+            .set_theme_preference(&theme_preference);
         Ok(services)
-    }
-
-    pub fn install_product(&self, product: Arc<dyn RuntimeProductHttpService>) {
-        *self.product.write().unwrap_or_else(PoisonError::into_inner) = Some(product);
-    }
-
-    pub fn install_cli(&self, cli: Arc<dyn RuntimeCliHttpService>) {
-        *self.cli.write().unwrap_or_else(PoisonError::into_inner) = Some(cli);
     }
 
     #[must_use]
@@ -373,8 +380,13 @@ impl WorkbenchRuntimeServices {
     }
 
     #[must_use]
-    pub fn generation(&self) -> &Arc<GenerationService> {
-        &self.generation
+    pub fn generated_assets(&self) -> &Arc<GeneratedAssetMetadataService> {
+        &self.generated_assets
+    }
+
+    #[must_use]
+    pub fn model_operations(&self) -> &Arc<ModelOperationService<GenerationService>> {
+        &self.model_operations
     }
 
     #[must_use]
@@ -388,10 +400,7 @@ impl WorkbenchRuntimeServices {
         replaced_session_id: Option<&str>,
         sender: tokio::sync::mpsc::Sender<RuntimePhotoshopMessage>,
     ) {
-        let mut sockets = self
-            .photoshop_sockets
-            .lock()
-            .unwrap_or_else(PoisonError::into_inner);
+        let mut sockets = lock_photoshop_socket_registry(&self.photoshop_sockets);
         if let Some(replaced) = replaced_session_id
             && let Some(replaced_sender) = sockets.remove(replaced)
         {
@@ -400,14 +409,11 @@ impl WorkbenchRuntimeServices {
                 message: "Photoshop plugin session was replaced.".to_owned(),
             });
         }
-        sockets.insert(session_id, sender);
+        insert_photoshop_socket(&mut sockets, session_id, sender);
     }
 
     pub fn unregister_photoshop_socket(&self, session_id: &str) {
-        self.photoshop_sockets
-            .lock()
-            .unwrap_or_else(PoisonError::into_inner)
-            .remove(session_id);
+        lock_photoshop_socket_registry(&self.photoshop_sockets).remove(session_id);
     }
 
     pub fn send_photoshop_message(
@@ -415,22 +421,19 @@ impl WorkbenchRuntimeServices {
         session_id: &str,
         message: RuntimePhotoshopMessage,
     ) -> Result<(), RuntimeHttpServiceError> {
-        let sender = self
-            .photoshop_sockets
-            .lock()
-            .unwrap_or_else(PoisonError::into_inner)
+        let sender = lock_photoshop_socket_registry(&self.photoshop_sockets)
             .get(session_id)
             .cloned()
             .ok_or_else(|| {
                 RuntimeHttpServiceError::new(
-                    409,
+                    StatusCode::CONFLICT,
                     "adobe_client_offline",
                     "Photoshop plugin is not connected.",
                 )
             })?;
         sender.try_send(message).map_err(|_| {
             RuntimeHttpServiceError::new(
-                503,
+                StatusCode::SERVICE_UNAVAILABLE,
                 "photoshop_socket_backpressure",
                 "Photoshop plugin outbound queue is unavailable.",
             )
@@ -438,7 +441,7 @@ impl WorkbenchRuntimeServices {
     }
 
     #[must_use]
-    pub(crate) fn connections(&self) -> &Arc<WorkbenchConnectionRegistry> {
+    pub fn connections(&self) -> &Arc<WorkbenchConnectionRegistry> {
         &self.connections
     }
 
@@ -447,7 +450,7 @@ impl WorkbenchRuntimeServices {
             return Ok(());
         }
         Err(RuntimeHttpServiceError::new(
-            503,
+            StatusCode::SERVICE_UNAVAILABLE,
             "runtime_not_ready",
             "Runtime is not accepting new Workbench connections.",
         ))
@@ -465,14 +468,14 @@ impl WorkbenchRuntimeServices {
             .authorize(browser_session, connection_credential)
             .ok_or_else(|| {
                 RuntimeHttpServiceError::new(
-                    403,
+                    StatusCode::FORBIDDEN,
                     "workbench_connection_invalid",
                     "Workbench connection is not live.",
                 )
             })?;
         if context.project_id.is_some() {
             return Err(RuntimeHttpServiceError::new(
-                409,
+                StatusCode::CONFLICT,
                 "project_already_bound",
                 "OpenProject requires an unbound Workbench connection.",
             ));
@@ -508,14 +511,14 @@ impl WorkbenchRuntimeServices {
             .authorize(browser_session, connection_credential)
             .ok_or_else(|| {
                 RuntimeHttpServiceError::new(
-                    403,
+                    StatusCode::FORBIDDEN,
                     "workbench_connection_invalid",
                     "Workbench connection is not live.",
                 )
             })?;
         let source_project_id = context.project_id.clone().ok_or_else(|| {
             RuntimeHttpServiceError::new(
-                409,
+                StatusCode::CONFLICT,
                 "project_not_bound",
                 "ReplaceProject requires a bound Workbench connection.",
             )
@@ -543,7 +546,7 @@ impl WorkbenchRuntimeServices {
             )
             .map_err(|()| {
                 RuntimeHttpServiceError::new(
-                    409,
+                    StatusCode::CONFLICT,
                     "project_binding_stale",
                     "Workbench Project binding changed before replacement.",
                 )
@@ -567,10 +570,7 @@ impl WorkbenchRuntimeServices {
         let ProjectBindOutcome::Bound { preempted } = outcome else {
             unreachable!("already-bound replacement returned above")
         };
-        let mut project_uses = self
-            .connection_project_uses
-            .lock()
-            .map_err(|_| RuntimeHttpServiceError::state_poisoned())?;
+        let mut project_uses = self.lock_connection_project_uses();
         project_uses.insert(connection_credential.to_owned(), opened.project_use);
         if let Some(preempted) = preempted.as_ref() {
             project_uses.remove(&preempted.credential);
@@ -608,35 +608,46 @@ impl WorkbenchRuntimeServices {
 
     pub fn close_workbench_connection(&self, connection_credential: &str) {
         self.connections.close(connection_credential);
-        self.connection_project_uses
-            .lock()
-            .unwrap_or_else(PoisonError::into_inner)
+        self.lock_connection_project_uses()
             .remove(connection_credential);
     }
 
     pub fn close_all_workbench_connections(&self) {
         self.connections.close_all();
+        self.lock_connection_project_uses().clear();
+    }
+
+    fn lock_connection_project_uses(&self) -> MutexGuard<'_, HashMap<String, ProjectUse>> {
         self.connection_project_uses
             .lock()
-            .unwrap_or_else(PoisonError::into_inner)
-            .clear();
+            .expect("Workbench Project Use lock poisoned")
+    }
+
+    pub fn shutdown_owned_work(&self) {
+        self.model_operations.shutdown();
+        if let Err(error) = self.terminals.close_all() {
+            eprintln!("Debrute Runtime Terminal shutdown failed: {error}");
+        }
+        if let Err(error) = self.projects.close() {
+            eprintln!("Debrute Runtime Project shutdown failed: {error}");
+        }
     }
 
     pub fn project_root_for_stable_id(
         &self,
         project_id: &str,
     ) -> Result<String, RuntimeHttpServiceError> {
-        self.global
-            .settings_get()
-            .map_err(RuntimeHttpServiceError::from_global)?
-            .chrome
-            .recent_projects
+        let (recent_projects, _) = self
+            .global
+            .desktop_presentation_snapshot()
+            .map_err(RuntimeHttpServiceError::from_global)?;
+        recent_projects
             .into_iter()
             .find(|project| project.project_id == project_id)
             .map(|project| project.project_root)
             .ok_or_else(|| {
                 RuntimeHttpServiceError::new(
-                    404,
+                    StatusCode::NOT_FOUND,
                     "project_not_discovered",
                     "Project id is not present in Recent Projects.",
                 )
@@ -654,7 +665,7 @@ impl WorkbenchRuntimeServices {
             .context(connection_credential)
             .ok_or_else(|| {
                 RuntimeHttpServiceError::new(
-                    409,
+                    StatusCode::CONFLICT,
                     "workbench_connection_invalid",
                     "Workbench connection ended before Project binding.",
                 )
@@ -677,15 +688,12 @@ impl WorkbenchRuntimeServices {
             .bind_project(connection_credential, &project_id)
             .map_err(|()| {
                 RuntimeHttpServiceError::new(
-                    409,
+                    StatusCode::CONFLICT,
                     "project_already_bound",
                     "Workbench connection already has a Project.",
                 )
             })?;
-        let mut project_uses = self
-            .connection_project_uses
-            .lock()
-            .map_err(|_| RuntimeHttpServiceError::state_poisoned())?;
+        let mut project_uses = self.lock_connection_project_uses();
         match outcome {
             ProjectBindOutcome::AlreadyBound => {}
             ProjectBindOutcome::Bound { preempted } => {
@@ -746,14 +754,14 @@ impl WorkbenchRuntimeServices {
                 .focus_desktop_window(&binding)
                 .map_err(|error| {
                     RuntimeHttpServiceError::new(
-                        503,
+                        StatusCode::SERVICE_UNAVAILABLE,
                         "desktop_window_focus_failed",
                         error.to_string(),
                     )
                 })?;
             if !focused {
                 return Err(RuntimeHttpServiceError::new(
-                    503,
+                    StatusCode::SERVICE_UNAVAILABLE,
                     "desktop_window_focus_failed",
                     "Runtime no longer owns the target Desktop window.",
                 ));
@@ -770,13 +778,13 @@ impl WorkbenchRuntimeServices {
                 .retarget_desktop_window(binding, crate::control::WorkbenchRoute::Root)
         {
             return Err(RuntimeHttpServiceError::new(
-                503,
+                StatusCode::SERVICE_UNAVAILABLE,
                 "desktop_window_retarget_failed",
                 "Runtime no longer owns the requesting Desktop window.",
             ));
         }
         Err(RuntimeHttpServiceError::new(
-            409,
+            StatusCode::CONFLICT,
             "project_owned_by_web",
             "This Project is active in a Web Workbench. Choose Open Here to move it to Desktop.",
         )
@@ -799,7 +807,7 @@ impl WorkbenchRuntimeServices {
     ) -> Result<(), RuntimeHttpServiceError> {
         let project_root = session.root().to_str().ok_or_else(|| {
             RuntimeHttpServiceError::new(
-                400,
+                StatusCode::BAD_REQUEST,
                 "project_root_invalid",
                 "Project root is not valid UTF-8.",
             )
@@ -822,7 +830,7 @@ impl WorkbenchRuntimeServices {
             .event_sender(connection_credential)
             .ok_or_else(|| {
                 RuntimeHttpServiceError::new(
-                    409,
+                    StatusCode::CONFLICT,
                     "workbench_connection_invalid",
                     "Workbench connection ended before Project binding.",
                 )
@@ -835,7 +843,7 @@ impl WorkbenchRuntimeServices {
             }))
             .map_err(|_| {
                 RuntimeHttpServiceError::new(
-                    503,
+                    StatusCode::SERVICE_UNAVAILABLE,
                     "workbench_connection_backpressure",
                     "Workbench connection queue is unavailable.",
                 )
@@ -877,7 +885,11 @@ impl WorkbenchRuntimeServices {
                 }
             })
             .map_err(|error| {
-                RuntimeHttpServiceError::new(500, "workbench_stream_unavailable", error.to_string())
+                RuntimeHttpServiceError::new(
+                    StatusCode::INTERNAL_SERVER_ERROR,
+                    "workbench_stream_unavailable",
+                    error.to_string(),
+                )
             })?;
         Ok(())
     }
@@ -919,54 +931,6 @@ impl WorkbenchRuntimeServices {
         self.global_events.subscribe()
     }
 
-    pub fn product(&self) -> Result<Arc<dyn RuntimeProductHttpService>, RuntimeHttpServiceError> {
-        self.product
-            .read()
-            .unwrap_or_else(PoisonError::into_inner)
-            .clone()
-            .ok_or_else(|| {
-                RuntimeHttpServiceError::new(
-                    503,
-                    "product_service_unavailable",
-                    "Product update service is unavailable.",
-                )
-            })
-    }
-
-    pub fn resume_target_for_browser(
-        &self,
-        browser_session: &str,
-    ) -> Result<crate::product::ResumeTarget, RuntimeHttpServiceError> {
-        Ok(self
-            .connections
-            .context_for_browser_session(browser_session)
-            .and_then(|connection| connection.project_id)
-            .map_or(crate::product::ResumeTarget::Root, |project_id| {
-                crate::product::ResumeTarget::Project { project_id }
-            }))
-    }
-
-    #[must_use]
-    pub fn is_desktop_browser_session(&self, browser_session: &str) -> bool {
-        self.connections
-            .context_for_browser_session(browser_session)
-            .is_some_and(|connection| connection.desktop.is_some())
-    }
-
-    pub fn cli(&self) -> Result<Arc<dyn RuntimeCliHttpService>, RuntimeHttpServiceError> {
-        self.cli
-            .read()
-            .unwrap_or_else(PoisonError::into_inner)
-            .clone()
-            .ok_or_else(|| {
-                RuntimeHttpServiceError::new(
-                    503,
-                    "cli_service_unavailable",
-                    "Runtime CLI command service is unavailable.",
-                )
-            })
-    }
-
     pub fn discover_project(&self, project_root: &str) -> Result<String, RuntimeHttpServiceError> {
         let opened = self
             .projects
@@ -988,7 +952,7 @@ impl WorkbenchRuntimeServices {
             "uninstall" => IntegrationOperation::Uninstall,
             _ => {
                 return Err(RuntimeHttpServiceError::new(
-                    400,
+                    StatusCode::BAD_REQUEST,
                     "invalid_integration_operation",
                     "Integration operation is not registered.",
                 ));
@@ -996,8 +960,7 @@ impl WorkbenchRuntimeServices {
         };
         serde_json::to_value(
             self.global
-                .integrations_run_operation(integration_id, operation)
-                .map_err(RuntimeHttpServiceError::from_global)?,
+                .integrations_run_operation(integration_id, operation),
         )
         .map_err(|error| RuntimeHttpServiceError::serialization(&error))
     }
@@ -1005,8 +968,7 @@ impl WorkbenchRuntimeServices {
 
 impl Drop for WorkbenchRuntimeServices {
     fn drop(&mut self) {
-        let _ = self.terminals.close_all();
-        let _ = self.projects.close();
+        self.shutdown_owned_work();
     }
 }
 
@@ -1018,9 +980,9 @@ impl RuntimeHttpServiceError {
                 crate::project::ProjectError::ProjectNotFound(_)
                     | crate::project::ProjectError::ProjectNotOpen(_)
             ) {
-                404
+                StatusCode::NOT_FOUND
             } else {
-                400
+                StatusCode::BAD_REQUEST
             },
             code: error.code(),
             message: error.to_string(),
@@ -1028,28 +990,38 @@ impl RuntimeHttpServiceError {
         }
     }
 
-    pub(crate) fn from_global(error: crate::global::GlobalRuntimeError) -> Self {
-        Self::new(400, "global_runtime_error", error.to_string())
+    pub(crate) fn from_global(error: crate::global::GlobalSettingsError) -> Self {
+        Self::new(
+            StatusCode::BAD_REQUEST,
+            "global_runtime_error",
+            error.to_string(),
+        )
     }
 
     pub(crate) fn from_photoshop(error: crate::photoshop::PhotoshopBridgeError) -> Self {
         use crate::photoshop::PhotoshopBridgeErrorCode as Code;
 
         let status = match error.code() {
-            Code::AdobeBridgeDisabled | Code::AdobeDiscoveryUnavailable => 503,
+            Code::AdobeBridgeDisabled | Code::AdobeDiscoveryUnavailable => {
+                StatusCode::SERVICE_UNAVAILABLE
+            }
             Code::AdobeClientOffline
             | Code::ProjectOffline
             | Code::PairingNotFound
             | Code::PairingExpired
             | Code::TargetDirectoryMissing
-            | Code::TransferUrlExpired => 404,
-            Code::ProjectNotLinked => 403,
-            Code::PluginSessionInvalid => 401,
-            Code::PluginSessionReplaced | Code::PairingAttemptsExceeded => 409,
-            Code::UploadTooLarge => 413,
-            Code::PairingCapacityReached | Code::TransferCapacityReached => 429,
-            Code::TransferTimeout => 504,
-            Code::PairingRegistryInvalid | Code::StatePoisoned | Code::PersistenceFailed => 500,
+            | Code::TransferUrlExpired => StatusCode::NOT_FOUND,
+            Code::ProjectNotLinked => StatusCode::FORBIDDEN,
+            Code::PluginSessionInvalid => StatusCode::UNAUTHORIZED,
+            Code::PluginSessionReplaced | Code::PairingAttemptsExceeded => StatusCode::CONFLICT,
+            Code::UploadTooLarge => StatusCode::PAYLOAD_TOO_LARGE,
+            Code::PairingCapacityReached | Code::TransferCapacityReached => {
+                StatusCode::TOO_MANY_REQUESTS
+            }
+            Code::TransferTimeout => StatusCode::GATEWAY_TIMEOUT,
+            Code::PairingRegistryInvalid | Code::PersistenceFailed => {
+                StatusCode::INTERNAL_SERVER_ERROR
+            }
             Code::PairingCodeInvalid
             | Code::PairingKeyInvalid
             | Code::PairingSignatureInvalid
@@ -1057,7 +1029,7 @@ impl RuntimeHttpServiceError {
             | Code::UnsupportedFileType
             | Code::NoActiveDocument
             | Code::PhotoshopPlaceFailed
-            | Code::InvalidTransferPayload => 400,
+            | Code::InvalidTransferPayload => StatusCode::BAD_REQUEST,
         };
         let fields = error.fields().clone();
         let mapped = Self::new(status, error.code().as_str(), error.to_string());
@@ -1068,16 +1040,12 @@ impl RuntimeHttpServiceError {
         }
     }
 
-    pub(crate) fn state_poisoned() -> Self {
-        Self::new(
-            500,
-            "runtime_state_poisoned",
-            "Runtime service state is unavailable.",
-        )
-    }
-
     pub(crate) fn serialization(error: &serde_json::Error) -> Self {
-        Self::new(500, "serialization_failed", error.to_string())
+        Self::new(
+            StatusCode::INTERNAL_SERVER_ERROR,
+            "serialization_failed",
+            error.to_string(),
+        )
     }
 }
 
@@ -1090,39 +1058,37 @@ pub fn public_project_sync(sync: &ProjectSyncSnapshot) -> Result<Value, RuntimeH
     }))
 }
 
-pub fn public_project_health(
-    health: &crate::project::ProjectHealthSummary,
-) -> Result<Value, RuntimeHttpServiceError> {
-    let mut value = serde_json::to_value(health)
-        .map_err(|error| RuntimeHttpServiceError::serialization(&error))?;
-    if let Some(object) = value.as_object_mut() {
-        object.remove("runtimeDataLocation");
-    }
-    Ok(value)
-}
-
 pub fn public_project_snapshot(
     snapshot: &crate::project::ProjectSnapshot,
     project_id: &str,
 ) -> Result<Value, RuntimeHttpServiceError> {
+    let projections = snapshot
+        .projections
+        .iter()
+        .map(|projection| public_canvas_projection(projection, project_id))
+        .collect::<Result<Vec<_>, _>>()?;
     let mut value = serde_json::to_value(snapshot)
         .map_err(|error| RuntimeHttpServiceError::serialization(&error))?;
     let Some(object) = value.as_object_mut() else {
         return Err(RuntimeHttpServiceError::new(
-            500,
+            StatusCode::INTERNAL_SERVER_ERROR,
             "serialization_failed",
             "Project snapshot did not serialize to an object.",
         ));
     };
     object.remove("projectRoot");
-    if let Some(health) = object.get_mut("health").and_then(Value::as_object_mut) {
-        health.remove("runtimeDataLocation");
-    }
-    if let Some(projections) = object.get_mut("projections").and_then(Value::as_array_mut) {
-        for projection in projections {
-            expose_project_media_urls(projection, project_id);
-        }
-    }
+    let health = object
+        .get_mut("health")
+        .and_then(Value::as_object_mut)
+        .ok_or_else(|| {
+            RuntimeHttpServiceError::new(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "serialization_failed",
+                "Project snapshot health did not serialize to an object.",
+            )
+        })?;
+    health.remove("runtimeDataLocation");
+    object.insert("projections".to_owned(), Value::Array(projections));
     Ok(value)
 }
 
@@ -1130,50 +1096,26 @@ pub(crate) fn public_canvas_projection(
     projection: &crate::project::CanvasProjection,
     project_id: &str,
 ) -> Result<Value, RuntimeHttpServiceError> {
-    let mut value = serde_json::to_value(projection)
-        .map_err(|error| RuntimeHttpServiceError::serialization(&error))?;
-    expose_project_media_urls(&mut value, project_id);
-    Ok(value)
-}
-
-fn expose_project_media_urls(projection: &mut Value, project_id: &str) {
-    let Some(nodes) = projection.get_mut("nodes").and_then(Value::as_array_mut) else {
-        return;
-    };
-    for node in nodes {
-        let path = node
-            .get("projectRelativePath")
-            .and_then(Value::as_str)
-            .map(str::to_owned);
-        let availability = node.get_mut("availability");
-        let (Some(path), Some(availability)) = (path, availability) else {
-            continue;
-        };
-        if availability.get("state").and_then(Value::as_str) != Some("available") {
-            continue;
-        }
-        let revision = availability
-            .get("revision")
-            .and_then(Value::as_str)
-            .unwrap_or_default();
-        availability["fileUrl"] = Value::String(project_file_url(project_id, &path, revision));
-        if let Some(tracks) = node
-            .get_mut("videoPresentation")
-            .and_then(|value| value.get_mut("textTracks"))
-            .and_then(Value::as_array_mut)
+    let mut public_projection = projection.clone();
+    for node in &mut public_projection.nodes {
+        if let crate::project::CanvasNodeAvailability::Available {
+            file_url, revision, ..
+        } = &mut node.availability
         {
-            for track in tracks {
-                let Some(path) = track.get("projectRelativePath").and_then(Value::as_str) else {
-                    continue;
-                };
-                let revision = track
-                    .get("revision")
-                    .and_then(Value::as_str)
-                    .unwrap_or_default();
-                track["fileUrl"] = Value::String(project_file_url(project_id, path, revision));
+            *file_url = project_file_url(project_id, &node.node.project_relative_path, revision);
+        }
+        if let Some(presentation) = &mut node.video_presentation {
+            for track in &mut presentation.text_tracks {
+                track.file_url = Some(project_file_url(
+                    project_id,
+                    &track.project_relative_path,
+                    &track.revision,
+                ));
             }
         }
     }
+    serde_json::to_value(public_projection)
+        .map_err(|error| RuntimeHttpServiceError::serialization(&error))
 }
 
 fn project_file_url(project_id: &str, project_relative_path: &str, revision: &str) -> String {
@@ -1185,14 +1127,24 @@ fn project_file_url(project_id: &str, project_relative_path: &str, revision: &st
     )
 }
 
-pub(crate) fn project_response(session: &ProjectSession, revision: u64, body: Value) -> Value {
-    let mut object = body.as_object().cloned().unwrap_or_default();
+pub(crate) fn project_response(
+    session: &ProjectSession,
+    revision: u64,
+    body: Value,
+) -> Result<Value, RuntimeHttpServiceError> {
+    let Value::Object(mut object) = body else {
+        return Err(RuntimeHttpServiceError::new(
+            StatusCode::INTERNAL_SERVER_ERROR,
+            "serialization_failed",
+            "Project command response did not serialize to an object.",
+        ));
+    };
     object.insert(
         "projectId".to_owned(),
         Value::String(session.project_id().to_owned()),
     );
     object.insert("projectRevision".to_owned(), Value::from(revision));
-    Value::Object(object)
+    Ok(Value::Object(object))
 }
 
 #[must_use]
@@ -1218,13 +1170,13 @@ pub fn encode_project_path(path: &str) -> String {
 }
 
 fn current_platform() -> Platform {
+    #[cfg(target_os = "macos")]
+    {
+        Platform::MacOs
+    }
     #[cfg(target_os = "windows")]
     {
         Platform::Windows
-    }
-    #[cfg(not(target_os = "windows"))]
-    {
-        Platform::MacOs
     }
 }
 
@@ -1233,4 +1185,112 @@ fn resolve_executable(name: &str) -> Option<PathBuf> {
         let candidate = directory.join(name);
         candidate.is_file().then_some(candidate)
     })
+}
+
+fn lock_photoshop_socket_registry(
+    registry: &Mutex<PhotoshopSocketRegistry>,
+) -> MutexGuard<'_, PhotoshopSocketRegistry> {
+    registry
+        .lock()
+        .expect("Photoshop socket registry lock poisoned")
+}
+
+fn insert_photoshop_socket(
+    registry: &mut PhotoshopSocketRegistry,
+    session_id: String,
+    sender: tokio::sync::mpsc::Sender<RuntimePhotoshopMessage>,
+) {
+    assert!(
+        registry.insert(session_id, sender).is_none(),
+        "Photoshop socket session must register exactly once"
+    );
+}
+
+enum PhotoshopSocketProjection {
+    Message(RuntimePhotoshopMessage),
+    Stale,
+}
+
+fn photoshop_socket_projection(
+    state: Result<PhotoshopBridgeStateView, PhotoshopBridgeError>,
+) -> PhotoshopSocketProjection {
+    match state {
+        Ok(state) => {
+            PhotoshopSocketProjection::Message(RuntimePhotoshopMessage::BridgeState { state })
+        }
+        Err(error) if error.code() == PhotoshopBridgeErrorCode::PluginSessionInvalid => {
+            PhotoshopSocketProjection::Stale
+        }
+        Err(error) => PhotoshopSocketProjection::Message(RuntimePhotoshopMessage::BridgeError {
+            code: error.code(),
+            message: error.to_string(),
+        }),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn poisoned_photoshop_socket_registry_panics() {
+        let registry = Arc::new(Mutex::new(PhotoshopSocketRegistry::new()));
+        let poison = Arc::clone(&registry);
+        assert!(
+            thread::spawn(move || {
+                let _registry = poison.lock().unwrap();
+                panic!("poison Photoshop socket registry");
+            })
+            .join()
+            .is_err()
+        );
+
+        let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+            drop(lock_photoshop_socket_registry(&registry));
+        }));
+        assert!(
+            result.is_err(),
+            "Workbench must not recover a poisoned Photoshop socket registry"
+        );
+    }
+
+    #[test]
+    fn duplicate_photoshop_socket_registration_panics() {
+        let mut registry = PhotoshopSocketRegistry::new();
+        let (first, _) = tokio::sync::mpsc::channel(1);
+        insert_photoshop_socket(&mut registry, "session-1".to_owned(), first);
+        let (replacement, _) = tokio::sync::mpsc::channel(1);
+
+        let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+            insert_photoshop_socket(&mut registry, "session-1".to_owned(), replacement);
+        }));
+        assert!(
+            result.is_err(),
+            "Workbench must not replace an already registered Photoshop socket"
+        );
+    }
+
+    #[test]
+    fn only_an_invalid_plugin_session_makes_a_photoshop_socket_stale() {
+        let invalid = PhotoshopBridgeError::new(
+            PhotoshopBridgeErrorCode::PluginSessionInvalid,
+            "invalid session",
+        );
+        assert!(matches!(
+            photoshop_socket_projection(Err(invalid)),
+            PhotoshopSocketProjection::Stale
+        ));
+
+        let project_race = PhotoshopBridgeError::new(
+            PhotoshopBridgeErrorCode::ProjectOffline,
+            "Project closed while projecting state",
+        );
+        assert!(matches!(
+            photoshop_socket_projection(Err(project_race)),
+            PhotoshopSocketProjection::Message(RuntimePhotoshopMessage::BridgeError {
+                code: PhotoshopBridgeErrorCode::ProjectOffline,
+                ..
+            })
+        ));
+    }
 }

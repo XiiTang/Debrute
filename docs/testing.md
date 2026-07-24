@@ -20,7 +20,21 @@ Tests are classified by their owning boundary:
 | Contract | `tests/contracts/**/*.contract.test.ts` | public shapes, assets, architecture, and repository contracts |
 | Release | `tests/release/**/*.release.test.ts` | packaging, manifests, installers, assets, and release scripts without publication |
 
-`pnpm test:layout` proves that each test belongs to exactly one named project,
+A test must execute production behavior or inspect a produced artifact or
+boundary. A file that only constructs values annotated with production types,
+asserts its own literals, or casts an empty object to an interface is not a
+test. Production TypeScript declarations and their real consumers are checked
+by `pnpm check`; Vitest does not duplicate that responsibility with type-only
+fixtures.
+
+Each repository-wiring fact has one owning assertion. Release projects may
+inspect a workflow or build script when that boundary cannot be executed
+locally, but another test does not repeat the same source-spelling assertion;
+artifact and behavior tests remain separate evidence.
+
+Root `pnpm test` runs `pnpm test:layout` before Vitest, so verification and
+release preflight cannot bypass repository layout validation. The focused
+`pnpm test:layout` command proves that each test belongs to exactly one named project,
 directory and suffix agree, project names/configs are unique, and no top-level
 `tests/*.test.*` files or file-level environment directives remain. Committed
 skip, todo, conditional-run, and retry syntax is rejected.
@@ -60,13 +74,61 @@ loopback listeners, workers, and child processes. Runtime shutdown closes
 Workbench connections and their Project Uses, Global/Project streams,
 WebSockets, Photoshop discovery, PTYs, and HTTP sockets, then joins its owned
 workers. Cleanup errors remain visible instead of being converted into
-successful teardown. Tests that exercise process-global native initialization,
-including libvips startup, use an isolated Runtime process; they do not call a
-native shutdown function and attempt to reinitialize it in the same test
-process.
+successful teardown. Project-use lifetime tests end ownership through the same
+drop or owner-removal path used by Workbench, requests, Terminals, Transfers,
+and Photoshop links. An injected final-session cleanup failure must close root
+admission, make the next open return the exact failure, and remain visible to
+Registry shutdown; tests do not call a special fallible Project Use release API
+that production owners bypass. Tests that exercise process-global native
+initialization, including libvips startup, use an isolated Runtime process; they
+do not call a native shutdown function and attempt to reinitialize it in the
+same test process.
 
 The resource-ownership rationale is recorded in
 [`0013-tests-own-their-external-resources.md`](./adr/0013-tests-own-their-external-resources.md).
+
+## CLI Registry Acceptance
+
+The final public command-matrix test keeps the closed CLI inventory explicit.
+Parser behavior tests cover each distinct syntax form: positional bounds,
+required and duplicate options, flags, repeatable values, simple allowed-value
+sets, Project positional and option path resolution, unknown options, and the
+`canvas.reset-layout` cross-option rule. They do not copy one canonical argv
+form for every command or inspect parser source for command-name switches; the
+registered syntax is the parser's input.
+
+## Workbench UI Acceptance
+
+DOM tests exercise the current rendered state and the action a user can perform.
+Settings coverage verifies the current navigation groups and default page, and
+Product update behavior by invoking the visible action and observing its result
+or exact failure. It does not enumerate
+retired navigation keys, button labels, commands, or page counts as a blacklist,
+and it does not inspect source text to prove that an old UI path is absent. Once
+a pre-release UI path is removed, its removal-only assertions are removed too;
+absence assertions remain only when absence is itself part of the current state
+being exercised, such as hiding ready content while a resource is loading.
+
+## Model Generation Acceptance
+
+Catalog-validation tests prove that Doubao Seed TTS 2.0 accepts omission and
+each documented integer `sample_rate`, while fractional, negative, and
+unsupported values fail before the transport receives a request. Adapter tests
+prove that omission sends `24000`, an explicit supported rate is preserved in
+the upstream body, and PCM output writes that same rate into its WAV header.
+There is no invalid-value coercion or default fallback to preserve with a test.
+Exact-adapter fixtures also dispatch TTS, music, and sound-effect through the
+shared internal audio execution family and verify their distinct Artifact
+Roles. Tests do not preserve empty per-Kind forwarding modules through source
+text or file-existence assertions.
+
+## Workbench HTTP Acceptance
+
+Revisioned-file route tests verify `200` for a complete file, `206` plus exact
+range headers for a satisfiable single range, and `416` for an unsatisfiable
+range. Service-error tests verify the typed status selected at error creation is
+the status returned by the adapter. Tests exercise those outcomes; they do not
+inject impossible numeric statuses or preserve an invalid-status fallback.
 
 ## Raster Preview Engine Acceptance
 
@@ -86,7 +148,8 @@ equivalent requests share one job, consumerless queued work is removed, active
 native work has no request timeout or force-cancel path, and a stale source or
 engine identity cannot publish its temporary output. Cache tests exercise the
 current Source Identity, Source Version, Raster Preview Engine Version, and
-Variant Key only; no test preserves a retired cache shape, quota, LRU, TTL,
+Variant Key only. They do not manufacture a retired engine-version directory or
+test cleanup of one; no test preserves a retired cache shape, quota, LRU, TTL,
 migration, compatibility reader, fallback renderer, or automatic retry.
 
 Native-payload contract and release tests verify the repository lock's URL,
@@ -95,16 +158,24 @@ altered, wrong-target, and wrong-version payloads fail preparation or Product
 assembly. Product tests inventory license and notice files and native libraries,
 validate the fixed platform layout, and release workflow contracts require
 macOS library code signing.
-Linux is not an acceptance target.
 
 Requested live acceptance runs on macOS arm64 in both a real browser and
-Electron. `pnpm verify:browser` owns an isolated Project with a large raster and
-text document. It inspects actual preview responses and the rendered image's
-`naturalWidth` while zooming from a derived tier to intrinsic width, then proves
-that the direct tier returns the revision-bound source without an equal-width
-cache artifact. Project-specific image regressions may additionally be checked
-against their real Project, but those user-local files are not presented as a
-committed fixture.
+Electron. `pnpm verify:browser` owns an isolated Project with a large raster,
+text document, and real video plus explicit poster. Its browser context uses a
+Retina-equivalent device pixel ratio of 2. It requires image, inactive text, and
+inactive video previews to decode, then observes every media kind switch from
+the initial tier to a lower tier, a higher tier, a repeated lower tier, and a
+restored higher tier. Each settled DOM image must report the requested `w`
+value as both its `naturalWidth` and declared preview width. Project-specific
+regressions may additionally be checked against their real Project, but those
+user-local files are not presented as a committed fixture.
+
+The Runtime HTTP integration suite also opens two ordinary-browser Workbench
+connections under one cookie, binds them to different Projects, and proves that
+each connection can still issue commands and read its own passive media after
+the other connection opens. Closing either connection must not revoke the
+other; closing the final connection retires the browser session so a retained
+cookie cannot recover it.
 
 The reusable live Workbench acceptance sequence is:
 
@@ -114,6 +185,11 @@ Canvas performance probe. When a requested live diagnostic needs
 `pnpm dev -- --canvas-perf` or `pnpm dev:electron -- --canvas-perf` before
 opening the final Project route. Starting without the flag keeps development
 Canvas instrumentation off, and production builds do not expose the probe.
+The instrumentation implementation is likewise absent from the production
+Workbench bundle: it contains no performance monitor, browser adapter, debug
+bridge, or registration effect. A development process without `--canvas-perf`
+also creates none of those objects; the flag is the single boundary that admits
+the diagnostic chain.
 
 1. Start `pnpm dev:electron`, open a real Project in Desktop, and wait for its
    Project tree and Canvas rather than treating the initial loading shell as
@@ -138,12 +214,37 @@ Canvas instrumentation off, and production builds do not expose the probe.
 The Electron run also verifies that the single Rust process launched from the
 Runtime's `LSUIElement` application bundle reaches `Ready` only after creating
 its required `tao`-backed macOS menu-bar item. Desktop creates no second tray,
-and closing the last Desktop window leaves Runtime alive. Automated checks use
-that startup gate; release acceptance additionally checks the icon and its menu
-visually because macOS does not expose every third-party status item through a
-stable test API. Windows x64 release automation runs Rust, Product assembly,
-and Electron startup smoke coverage. These live checks remain explicit
+and closing the last Desktop window leaves Runtime alive. Desktop adapter tests
+prove that a non-final close reports its window key, while the final close sends
+no redundant window request, closes Control, and exits Electron without an
+acknowledgement or timeout path. Automated checks use that startup gate. Shared
+TypeScript and Rust Control-client tests use injected
+short budgets to prove that a responsive Control endpoint which remains
+`Starting` ends as `runtime_ready_timeout`, sends no activation, and does not
+restart its absolute deadline after endpoint acquisition or handshake. The
+timeout closes only the test client and sends neither Product Quit nor a second
+launch; separate CLI coverage proves that `runtime stop` sends Product Quit to
+an existing `Starting` owner without a readiness wait. Release
+acceptance additionally checks the icon and its menu visually because macOS
+does not expose every third-party status item through a stable test API.
+Required macOS arm64, macOS x64, and Windows x64 release jobs run one shared
+packaged-product smoke check against the signed unpacked Electron Builder
+application. It requires Runtime `Ready`, the native tray, a loopback-only CDP
+page target with the packaged Workbench shell and preload API, and no
+`workbench-connection-ended` state. The CDP launch switch belongs only to that
+CI process; the smoke check adds no public Runtime inspection field or product
+test hook. It then requires the bundled CLI's single Product Quit request to
+succeed, Runtime to become stopped, and Desktop to exit on its own. An exact
+failure-cleanup kill of the spawned Desktop process tree cannot turn a failure
+into success; each CLI/CDP probe is bounded, and there is no ignored quit result
+or Runtime-wide process-name kill. These live checks remain explicit
 diagnostics rather than part of ordinary `pnpm verify`.
+
+Desktop lifecycle tests also issue Command-Q before Control acquisition
+finishes. They prove that Desktop opens no window, completes only the existing
+acquisition, registers the Product event path, and sends exactly one Product
+Quit request; it never performs an early Desktop-only exit or starts another
+connection.
 
 ## Commands And Reports
 

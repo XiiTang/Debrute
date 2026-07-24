@@ -1,10 +1,16 @@
 import { globSync } from 'node:fs';
 import { readFile } from 'node:fs/promises';
-import { join, relative } from 'node:path';
+import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
 
 interface CatalogModel {
   debruteModelId: string;
+  listParameters: Record<string, string>;
+  argumentsSchema: { properties: Record<string, unknown> };
+  requestExample: {
+    command: string;
+    input: { arguments: Record<string, unknown>; output?: Record<string, string> };
+  };
 }
 
 type ModelKind = 'image' | 'video' | 'audio';
@@ -47,13 +53,20 @@ describe('Runtime model documentation assets', () => {
     }
   });
 
-  it('embeds every stable snapshot in the Rust CLI model description surface', async () => {
-    const source = await readFile(join(root, 'apps/runtime/src/cli/model_docs.rs'), 'utf8');
-    const paths = globSync('{image,video,audio}/**/*.md', { cwd: snapshotsRoot }).sort();
+  it('uses the shared Model Request envelope for every bundled example', async () => {
+    const catalog = JSON.parse(
+      await readFile(join(root, 'assets/runtime-model-catalog.json'), 'utf8')
+    ) as Record<ModelKind, CatalogModel[]>;
 
-    for (const path of paths) {
-      const repositoryPath = relative(root, join(snapshotsRoot, path)).replaceAll('\\', '/');
-      expect(source, repositoryPath).toContain(repositoryPath);
+    for (const model of [...catalog.image, ...catalog.video, ...catalog.audio]) {
+      expect(model.requestExample.command, model.debruteModelId).toBe('request.single');
+      expect(model.requestExample.input.model, model.debruteModelId).toBe(model.debruteModelId);
+      expect(model.requestExample.input.arguments, model.debruteModelId).toEqual(expect.any(Object));
+      if (model.requestExample.input.output !== undefined) {
+        const outputFields = Object.keys(model.requestExample.input.output);
+        expect(outputFields.length, model.debruteModelId).toBeGreaterThan(0);
+        expect(outputFields.every((field) => field === 'directory' || field === 'filename')).toBe(true);
+      }
     }
   });
 });

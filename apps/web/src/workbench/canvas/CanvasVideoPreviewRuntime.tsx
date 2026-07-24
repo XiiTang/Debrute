@@ -32,18 +32,14 @@ export interface CanvasVideoPreviewRuntimeValue {
   }): void;
 }
 
-const defaultRuntimeValue: CanvasVideoPreviewRuntimeValue = {
-  previewForNode: () => undefined,
-  previewErrorForNode: () => undefined,
-  reportPreviewError: () => {
-    throw new Error('Canvas video preview runtime is not available.');
-  }
-};
-
-const CanvasVideoPreviewRuntimeContext = createContext<CanvasVideoPreviewRuntimeValue>(defaultRuntimeValue);
+const CanvasVideoPreviewRuntimeContext = createContext<CanvasVideoPreviewRuntimeValue | undefined>(undefined);
 
 export function useCanvasVideoPreviewRuntime(): CanvasVideoPreviewRuntimeValue {
-  return useContext(CanvasVideoPreviewRuntimeContext);
+  const runtime = useContext(CanvasVideoPreviewRuntimeContext);
+  if (!runtime) {
+    throw new Error('CanvasVideoPreviewProvider is required.');
+  }
+  return runtime;
 }
 
 export function CanvasVideoPreviewProvider({
@@ -141,6 +137,24 @@ export function CanvasVideoPreviewProvider({
         targets,
         sources: result.sources
       }));
+      const missingTargets = targets.filter((target) => {
+        const source = result.sources[target.projectRelativePath];
+        return !source
+          || source.videoRevision !== target.videoRevision
+          || source.currentTimeSeconds !== target.currentTimeSeconds;
+      });
+      if (missingTargets.length > 0) {
+        setPreviewErrors((current) => ({
+          ...current,
+          ...Object.fromEntries(missingTargets.map((target) => [
+            target.projectRelativePath,
+            {
+              targetKey: canvasVideoPreviewTargetKey(target),
+              message: `Canvas video preview source response is missing ${target.projectRelativePath}.`
+            }
+          ]))
+        }));
+      }
       for (const target of targets) {
         checkedTargetKeysRef.current.add(canvasVideoPreviewTargetKey(target));
       }

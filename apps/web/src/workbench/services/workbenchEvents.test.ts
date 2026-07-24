@@ -9,14 +9,12 @@ describe('workbenchEvents', () => {
   it('routes only project snapshot and Canvas document events to snapshot state', () => {
     const snapshot = snapshotFixture();
     const snapshotEventTypes: WorkbenchEvent['type'][] = [
-      'project.opened',
       'project.changed',
       'project.fileChanged',
       'canvas.changed'
     ];
     const nonSnapshotEventTypes: WorkbenchEvent['type'][] = [
       'canvas.feedback.changed',
-      'generatedAsset.metadata.changed',
       'recentProjects.changed',
       'globalSettings.changed',
       'adobeBridge.state.changed'
@@ -33,10 +31,10 @@ describe('workbenchEvents', () => {
   it('replaces the current snapshot from a project snapshot event', () => {
     const current = snapshotFixture();
     const next = snapshotFixture('Next Project');
-    const event = workbenchEventForType('project.opened', next);
+    const event = workbenchEventForType('project.changed', next);
 
-    if (event.type !== 'project.opened') {
-      throw new Error('Expected a project.opened fixture.');
+    if (event.type !== 'project.changed') {
+      throw new Error('Expected a project.changed fixture.');
     }
     expect(nextSnapshotFromWorkbenchEvent(event, current)).toBe(next);
   });
@@ -55,7 +53,7 @@ function workbenchEventForType(
   type: WorkbenchEvent['type'],
   snapshot: WorkbenchProjectSessionSnapshot
 ): WorkbenchEvent {
-  if (type === 'project.opened' || type === 'project.changed') {
+  if (type === 'project.changed') {
     return { type, projectId: 'project-live-id', projectRevision: 2, snapshot };
   }
   if (type === 'project.fileChanged') {
@@ -103,7 +101,7 @@ function snapshotFixture(projectName = 'Test Project'): WorkbenchProjectSessionS
     health: {
       projectName,
       canvasCount: 0,
-      diagnosticCounts: { errors: 0, warnings: 0, infos: 0 },
+      diagnosticCounts: { errors: 0, warnings: 0 },
       checkedAt: '2026-06-12T00:00:00.000Z'
     }
   };

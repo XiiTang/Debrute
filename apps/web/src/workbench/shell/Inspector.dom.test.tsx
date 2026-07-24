@@ -2,7 +2,7 @@ import React, { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { renderToStaticMarkup } from 'react-dom/server';
 import { describe, expect, it, vi } from 'vitest';
-import type { Diagnostic } from '@debrute/canvas-core';
+import type { ProjectDiagnostic } from '@debrute/canvas-core';
 import type { WorkbenchActions, WorkbenchState } from '../../types';
 import { DiagnosticList, Inspector } from './Inspector';
 import { I18nProvider } from '../i18n';
@@ -19,12 +19,11 @@ describe('DiagnosticList', () => {
   it('exposes selectable diagnostics as buttons and reports the selected diagnostic', async () => {
     const diagnostic = {
       id: 'diag-1',
-      source: 'project',
       severity: 'warning',
       code: 'missing_asset',
       message: 'Missing asset',
       filePath: 'briefs/scene.md'
-    } satisfies Diagnostic;
+    } satisfies ProjectDiagnostic;
     const onSelect = vi.fn();
     const container = document.createElement('div');
     document.body.append(container);
@@ -128,6 +127,34 @@ describe('Inspector property density', () => {
     expect(html).not.toContain('<dt>Visible</dt>');
     expect(html).not.toContain('<dt>Locked</dt>');
     expect(html).not.toContain('<dt>Status</dt>');
+  });
+
+  it('shows Project Diagnostic fields without a redundant source taxonomy', () => {
+    const diagnostic = {
+      id: 'diag-1',
+      severity: 'warning',
+      code: 'missing_asset',
+      message: 'Missing asset',
+      filePath: 'briefs/scene.md'
+    } satisfies ProjectDiagnostic;
+    const html = renderStaticWithI18n(
+      <Inspector
+        activeCanvasId={undefined}
+        selection={{ kind: 'diagnostic', id: diagnostic.id }}
+        state={{
+          snapshot: {
+            diagnostics: [diagnostic],
+            canvases: [],
+            projections: []
+          }
+        } as unknown as WorkbenchState}
+        actions={{} as WorkbenchActions}
+      />
+    );
+
+    expect(html).toContain('<dt>Severity</dt><dd>warning</dd>');
+    expect(html).toContain('<dt>File</dt><dd>briefs/scene.md</dd>');
+    expect(html).not.toContain('<dt>Source</dt>');
   });
 });
 

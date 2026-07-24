@@ -4,7 +4,6 @@ import { join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import {
   desktopReleaseTargets,
-  optionalDesktopReleaseAssets,
   expectedDesktopReleaseAssets,
   expectedProductReleaseAssets,
   productReleaseAssetName,
@@ -28,7 +27,6 @@ export async function generateUpdateManifest(input) {
   const releaseFiles = await readdir(resolvedReleaseDir);
   const allowedInputFiles = new Set([
     ...expectedDesktopAssets,
-    ...optionalDesktopReleaseAssets(version),
     ...expectedProductAssets,
     updateManifestName,
     updateManifestSignatureName

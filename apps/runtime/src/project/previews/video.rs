@@ -167,34 +167,34 @@ impl CanvasVideoPreviewService {
         })()
     }
 
+    /// Resolves the requested video preview sources independently.
+    ///
+    /// # Errors
+    /// Returns an error when a target has an invalid playback timestamp.
     pub fn read_sources(
         &self,
         project_root: &Path,
         canvas_id: &str,
         targets: &[CanvasVideoPreviewTarget],
         cancellation: &PreviewCancellation,
-    ) -> Vec<CanvasVideoPreviewSourceView> {
-        targets
-            .iter()
-            .cloned()
-            .map(|target| {
-                let source_kind = source_kind(target.current_time_seconds)
-                    .unwrap_or(CanvasVideoPreviewSourceKind::PlaybackFrame);
-                let status =
-                    match self.resolve_source(project_root, canvas_id, &target, cancellation) {
-                        Ok(source) => CanvasVideoPreviewSourceStatus::Available {
-                            source_kind,
-                            source_key: source.source_key,
-                            source_width: source.source_width,
-                        },
-                        Err(error) => CanvasVideoPreviewSourceStatus::Error {
-                            source_kind,
-                            message: error.to_string(),
-                        },
-                    };
-                CanvasVideoPreviewSourceView { target, status }
-            })
-            .collect()
+    ) -> Result<Vec<CanvasVideoPreviewSourceView>, ProjectError> {
+        let mut result = Vec::with_capacity(targets.len());
+        for target in targets.iter().cloned() {
+            let source_kind = source_kind(target.current_time_seconds)?;
+            let status = match self.resolve_source(project_root, canvas_id, &target, cancellation) {
+                Ok(source) => CanvasVideoPreviewSourceStatus::Available {
+                    source_kind,
+                    source_key: source.source_key,
+                    source_width: source.source_width,
+                },
+                Err(error) => CanvasVideoPreviewSourceStatus::Error {
+                    source_kind,
+                    message: error.to_string(),
+                },
+            };
+            result.push(CanvasVideoPreviewSourceView { target, status });
+        }
+        Ok(result)
     }
 
     /// Resolves one revision-bound JPEG variant from an accepted source key.
@@ -244,7 +244,6 @@ impl CanvasVideoPreviewService {
         let metadata = self
             .raster
             .metadata_file(&source, &mut file, cancellation)?;
-        super::reconcile_raster_engine_directory(project_root, &directory)?;
         if width > metadata.width {
             return Err(ProjectError::service(
                 "canvas_preview_invalid_width",
@@ -1251,17 +1250,6 @@ mod tests {
         let source = service
             .resolve_source(&root, "canvas-1", &target, &PreviewCancellation::default())
             .unwrap();
-        let source_directory = video_source_directory(
-            "canvas-1",
-            &target.project_relative_path,
-            &target.video_revision,
-            CanvasVideoPreviewSourceKind::InitialPoster,
-            &source.source_key,
-        )
-        .unwrap();
-        let old_engine = root.join(&source_directory).join("raster-engine-v0");
-        fs::create_dir_all(&old_engine).unwrap();
-
         let direct = service
             .resolve_variant(
                 &root,
@@ -1289,7 +1277,6 @@ mod tests {
                 .absolute_path
                 .ends_with("raster-engine-v1/preview-w1.jpg")
         );
-        assert!(!old_engine.exists());
         fs::remove_dir_all(root).unwrap();
     }
 }

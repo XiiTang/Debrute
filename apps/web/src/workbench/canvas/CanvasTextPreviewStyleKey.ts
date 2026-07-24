@@ -10,8 +10,6 @@ export const CANVAS_TEXT_PREVIEW_STYLE_CSS_VARIABLES = [
 
 export type CanvasTextPreviewStyleCssVariable = typeof CANVAS_TEXT_PREVIEW_STYLE_CSS_VARIABLES[number];
 
-export type CanvasTextPreviewStyleKey = string;
-
 export interface CanvasTextPreviewStyleSnapshot {
   styleSnapshotVersion: typeof CANVAS_TEXT_PREVIEW_STYLE_SNAPSHOT_VERSION;
   textSurfaceMetrics: typeof CANVAS_TEXT_SURFACE_METRICS;
@@ -53,7 +51,7 @@ export function canvasTextPreviewStyleSnapshotForDocument(
 
 export async function canvasTextPreviewStyleKey(
   snapshot: CanvasTextPreviewStyleSnapshot
-): Promise<CanvasTextPreviewStyleKey> {
+): Promise<string> {
   const digest = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(JSON.stringify(snapshot)));
   return `sha256:${[...new Uint8Array(digest)].map((byte) => byte.toString(16).padStart(2, '0')).join('')}`;
 }

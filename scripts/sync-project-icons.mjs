@@ -16,6 +16,8 @@ const desktopDockTarget = `${desktopBuildDir}/dock_icon.png`;
 const desktopLogoTarget = `${desktopBuildDir}/logo.png`;
 const desktopIcnsTarget = `${desktopBuildDir}/icon.icns`;
 const desktopIcoTarget = `${desktopBuildDir}/icon.ico`;
+const runtimeTrayMacosTarget = 'apps/runtime/assets/tray-icon-macos-template.png';
+const runtimeTrayWindowsTarget = 'apps/runtime/assets/tray-icon-windows.png';
 const appIconSizes = [16, 24, 32, 48, 64, 128, 256, 512, 1024];
 const icoIconSizes = [16, 32, 48, 256];
 const neutralIconRadiusRatio = 0.2;
@@ -34,6 +36,8 @@ export async function syncProjectIcons({ root = defaultRoot } = {}) {
     desktopDockTarget,
     desktopIcnsTarget,
     desktopIcoTarget,
+    runtimeTrayMacosTarget,
+    runtimeTrayWindowsTarget,
     ...appIconSizes.map((size) => `${desktopBuildDir}/icons/${size}x${size}.png`)
   ];
 
@@ -61,6 +65,14 @@ export async function syncProjectIcons({ root = defaultRoot } = {}) {
   }));
   await writeFile(resolve(root, desktopIcnsTarget), icnsBuffer(macIconPngs));
   await writeFile(resolve(root, desktopIcoTarget), icoBuffer(windowsIconPngs));
+  await writeGeneratedPng(
+    resolve(root, runtimeTrayMacosTarget),
+    await trayTemplateIconPng(svg, 36, 32)
+  );
+  await writeGeneratedPng(
+    resolve(root, runtimeTrayWindowsTarget),
+    await trayForegroundIconPng(svg, 66, 60)
+  );
 
   return {
     source,
@@ -168,6 +180,48 @@ async function foregroundIconPng(svg, size) {
     .resize(size, size, { fit: 'inside' })
     .png()
     .toBuffer();
+}
+
+async function trayTemplateIconPng(svg, size, contentSize) {
+  const content = await foregroundIconPng(svg, contentSize);
+  const { data, info } = await sharp(content)
+    .ensureAlpha()
+    .raw()
+    .toBuffer({ resolveWithObject: true });
+  const pixels = Buffer.alloc(info.width * info.height * 4);
+  for (let source = 0, target = 0; source < data.length; source += info.channels, target += 4) {
+    pixels[target] = 255;
+    pixels[target + 1] = 255;
+    pixels[target + 2] = 255;
+    pixels[target + 3] = data[source + 3];
+  }
+  const template = await sharp(pixels, {
+    raw: { width: info.width, height: info.height, channels: 4 }
+  }).png().toBuffer();
+  return centerOnTransparentCanvas(template, size);
+}
+
+async function trayForegroundIconPng(svg, size, contentSize) {
+  return centerOnTransparentCanvas(await foregroundIconPng(svg, contentSize), size);
+}
+
+async function centerOnTransparentCanvas(content, size) {
+  return sharp({
+    create: {
+      width: size,
+      height: size,
+      channels: 4,
+      background: { r: 0, g: 0, b: 0, alpha: 0 }
+    }
+  })
+    .composite([{ input: content, gravity: 'center' }])
+    .png()
+    .toBuffer();
+}
+
+async function writeGeneratedPng(target, png) {
+  await mkdir(dirname(target), { recursive: true });
+  await writeFile(target, png);
 }
 
 async function roundedRectangleMask(size, radiusRatio) {

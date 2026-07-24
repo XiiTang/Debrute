@@ -8,6 +8,10 @@ const domConfig = domTestConfig('dom-web');
 
 export default defineConfig({
   ...domConfig,
+  define: {
+    __DEBRUTE_PLATFORM__: JSON.stringify('darwin'),
+    __DEBRUTE_CANVAS_PERF__: JSON.stringify(false)
+  },
   root: fileURLToPath(new URL('.', import.meta.url)),
   test: {
     ...domConfig.test,

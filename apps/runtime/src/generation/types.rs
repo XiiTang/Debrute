@@ -1,67 +1,21 @@
 use std::{
     collections::BTreeMap,
     fmt,
-    sync::Arc,
     time::{Duration, Instant},
 };
 
-use serde::{Deserialize, Serialize};
+use serde::Serialize;
 
-use crate::project::GeneratedArtifactRole;
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "kebab-case")]
-pub enum GenerationKind {
-    Image,
-    Video,
-    Tts,
-    Music,
-    SoundEffect,
-}
-
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase", deny_unknown_fields)]
-pub struct GenerationRequest {
-    pub model: String,
-    pub arguments: serde_json::Map<String, serde_json::Value>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub timeout_ms: Option<u64>,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
-#[serde(rename_all = "camelCase")]
-pub struct GenerationArtifact {
-    pub artifact_id: String,
-    pub title: String,
-    pub project_relative_path: String,
-    pub mime_type: String,
-    pub role: GeneratedArtifactRole,
-    pub artifact_index: u64,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub width: Option<u32>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub height: Option<u32>,
-}
-
-#[derive(Debug, Clone, PartialEq, Serialize)]
-#[serde(rename_all = "camelCase")]
-pub struct GenerationSuccess {
-    pub kind: GenerationKind,
-    pub model: String,
-    pub content: String,
-    pub artifacts: Vec<GenerationArtifact>,
-    pub logs: Vec<serde_json::Value>,
-}
+use crate::{
+    model_operation::{ModelCancellation, ModelKind},
+    project::GeneratedArtifactRole,
+};
 
 #[derive(Debug, Clone, PartialEq, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct GenerationError {
     code: &'static str,
     message: String,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    details: Option<serde_json::Value>,
-    #[serde(skip_serializing_if = "Vec::is_empty")]
-    logs: Vec<serde_json::Value>,
 }
 
 impl GenerationError {
@@ -70,21 +24,7 @@ impl GenerationError {
         Self {
             code,
             message: message.into(),
-            details: None,
-            logs: Vec::new(),
         }
-    }
-
-    #[must_use]
-    pub(crate) fn with_details(mut self, details: serde_json::Value) -> Self {
-        self.details = Some(details);
-        self
-    }
-
-    #[must_use]
-    pub fn with_logs(mut self, logs: Vec<serde_json::Value>) -> Self {
-        self.logs = logs;
-        self
     }
 
     #[must_use]
@@ -93,18 +33,8 @@ impl GenerationError {
     }
 
     #[must_use]
-    pub fn details(&self) -> Option<&serde_json::Value> {
-        self.details.as_ref()
-    }
-
-    #[must_use]
     pub fn message(&self) -> &str {
         &self.message
-    }
-
-    #[must_use]
-    pub fn logs(&self) -> &[serde_json::Value] {
-        &self.logs
     }
 }
 
@@ -118,21 +48,34 @@ impl std::error::Error for GenerationError {}
 
 impl From<crate::project::ProjectError> for GenerationError {
     fn from(error: crate::project::ProjectError) -> Self {
+        Self::new(
+            "generation_project_failed",
+            format!("{} ({})", error, error.code()),
+        )
+    }
+}
+
+impl From<std::io::Error> for GenerationError {
+    fn from(error: std::io::Error) -> Self {
         Self::new("generation_project_failed", error.to_string())
-            .with_details(serde_json::json!({"projectCode": error.code()}))
     }
 }
 
 #[derive(Debug, Clone, Default)]
-pub struct GenerationCancellation(Arc<std::sync::atomic::AtomicBool>);
+pub(crate) struct GenerationCancellation(ModelCancellation);
 
 impl GenerationCancellation {
-    pub fn cancel(&self) {
-        self.0.store(true, std::sync::atomic::Ordering::Release);
+    pub(crate) fn from_model(cancellation: &ModelCancellation) -> Self {
+        Self(cancellation.clone())
+    }
+
+    #[cfg(test)]
+    pub(crate) fn cancel(&self) {
+        self.0.cancel();
     }
 
     pub(crate) fn check(&self) -> Result<(), GenerationError> {
-        if self.0.load(std::sync::atomic::Ordering::Acquire) {
+        if self.0.is_cancelled() {
             Err(GenerationError::new(
                 "generation_cancelled",
                 "Generation was cancelled.",
@@ -165,10 +108,6 @@ impl GenerationDeadline {
             })
     }
 
-    pub(crate) fn instant(self) -> Instant {
-        self.0
-    }
-
     pub(crate) fn remaining(
         self,
         cancellation: &GenerationCancellation,
@@ -185,7 +124,7 @@ impl GenerationDeadline {
 
 #[derive(Debug, Clone)]
 pub(crate) struct ResolvedGenerationModel {
-    pub kind: GenerationKind,
+    pub kind: ModelKind,
     pub model_id: String,
     pub request_model_id: String,
     pub base_url: String,
@@ -197,7 +136,6 @@ pub(crate) struct GeneratedPayload {
     pub bytes: Vec<u8>,
     pub mime_type: String,
     pub role: GeneratedArtifactRole,
-    pub suggested_extension: &'static str,
     pub model_output: serde_json::Value,
 }
 
@@ -206,7 +144,6 @@ pub(crate) struct ModelExecution {
     pub payloads: Vec<GeneratedPayload>,
     pub safe_request: serde_json::Value,
     pub safe_responses: Vec<serde_json::Value>,
-    pub logs: Vec<serde_json::Value>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -223,6 +160,57 @@ pub(crate) enum HttpBody {
         fields: BTreeMap<String, String>,
         files: Vec<MultipartFile>,
     },
+}
+
+#[derive(Debug, Clone)]
+pub(crate) enum PreparedHttpBody {
+    Empty,
+    Json(PreparedJsonBody),
+    Multipart {
+        fields: BTreeMap<String, String>,
+        files: Vec<MultipartFile>,
+    },
+}
+
+#[derive(Debug, Clone)]
+pub(crate) struct PreparedJsonBody {
+    value: serde_json::Value,
+    serialized: Vec<u8>,
+}
+
+impl PreparedJsonBody {
+    pub(crate) fn serialized(&self) -> &[u8] {
+        &self.serialized
+    }
+
+    pub(crate) fn into_serialized(self) -> Vec<u8> {
+        self.serialized
+    }
+}
+
+impl std::ops::Deref for PreparedJsonBody {
+    type Target = serde_json::Value;
+
+    fn deref(&self) -> &Self::Target {
+        &self.value
+    }
+}
+
+impl TryFrom<HttpBody> for PreparedHttpBody {
+    type Error = GenerationError;
+
+    fn try_from(body: HttpBody) -> Result<Self, Self::Error> {
+        Ok(match body {
+            HttpBody::Empty => Self::Empty,
+            HttpBody::Json(value) => {
+                let serialized = serde_json::to_vec(&value).map_err(|error| {
+                    GenerationError::new("model_request_invalid", error.to_string())
+                })?;
+                Self::Json(PreparedJsonBody { value, serialized })
+            }
+            HttpBody::Multipart { fields, files } => Self::Multipart { fields, files },
+        })
+    }
 }
 
 #[derive(Debug, Clone)]
@@ -244,7 +232,7 @@ pub(crate) struct ModelHttpRequest {
     pub method: HttpMethod,
     pub url: String,
     pub headers: BTreeMap<String, String>,
-    pub body: HttpBody,
+    pub body: PreparedHttpBody,
     pub maximum_response_bytes: usize,
     pub target_policy: HttpTargetPolicy,
 }

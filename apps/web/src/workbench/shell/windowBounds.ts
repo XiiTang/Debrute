@@ -5,8 +5,6 @@ export interface WorkbenchWindowRect {
   height: number;
 }
 
-export type WorkbenchViewportRect = WorkbenchWindowRect;
-
 export const FLOATING_PANEL_DRAG_HIT_AREA_HEIGHT = 18;
 export const FLOATING_PANEL_DRAG_HIT_AREA_CSS_PROPERTY = '--db-floating-panel-drag-hit-area-height';
 export const FLOATING_PANEL_DRAG_HIT_AREA_CSS_VALUE = `${FLOATING_PANEL_DRAG_HIT_AREA_HEIGHT}px`;
@@ -15,21 +13,18 @@ export const FLOATING_TEXT_EDITOR_TITLEBAR_CSS_PROPERTY = '--db-floating-text-ed
 export const FLOATING_TEXT_EDITOR_TITLEBAR_CSS_VALUE = `${FLOATING_TEXT_EDITOR_TITLEBAR_HEIGHT}px`;
 export const FLOATING_PANEL_FRAME_INSET = 1;
 
-export function readWorkbenchViewportRect(): WorkbenchViewportRect {
-  if (!globalThis.window) {
-    throw new Error('Workbench viewport requires a browser window.');
-  }
+export function readWorkbenchViewportRect(): WorkbenchWindowRect {
   return {
     x: 0,
     y: 0,
-    width: globalThis.window.innerWidth,
-    height: globalThis.window.innerHeight
+    width: window.innerWidth,
+    height: window.innerHeight
   };
 }
 
 export function constrainDragHitAreaVisible(
   rect: WorkbenchWindowRect,
-  viewport: WorkbenchViewportRect,
+  viewport: WorkbenchWindowRect,
   dragHitAreaHeight = FLOATING_PANEL_DRAG_HIT_AREA_HEIGHT,
   frameInset = FLOATING_PANEL_FRAME_INSET
 ): WorkbenchWindowRect {
@@ -51,7 +46,7 @@ export function constrainDragHitAreaVisible(
 
 export function constrainContainedRect(
   rect: WorkbenchWindowRect,
-  viewport: WorkbenchViewportRect
+  viewport: WorkbenchWindowRect
 ): WorkbenchWindowRect {
   const width = Math.min(rect.width, Math.max(0, viewport.width));
   const height = Math.min(rect.height, Math.max(0, viewport.height));

@@ -61,6 +61,21 @@ impl ProductBootstrap {
         }
     }
 
+    /// Returns the one stable Runtime entrypoint for the selected Product.
+    #[must_use]
+    pub fn stable_runtime_entrypoint(&self) -> PathBuf {
+        #[cfg(target_os = "macos")]
+        {
+            self.bin_directory.join("debrute-runtime")
+        }
+        #[cfg(target_os = "windows")]
+        {
+            self.store
+                .root()
+                .join("current/runtime/debrute-runtime.exe")
+        }
+    }
+
     /// Validates and activates one Desktop-carried Product seed, then installs
     /// stable user entrypoints and the matching official Skills.
     ///
@@ -121,16 +136,14 @@ impl ProductBootstrap {
         directory: PathBuf,
         desktop: Option<&DesktopHostRegistration>,
     ) -> Result<ActivatedProduct, ProductBootstrapError> {
-        let runtime_relative = if cfg!(target_os = "windows") {
-            "runtime/debrute-runtime.exe"
-        } else {
-            "runtime/Debrute Runtime.app/Contents/MacOS/debrute-runtime"
-        };
-        let cli_relative = if cfg!(target_os = "windows") {
-            "runtime/debrute.exe"
-        } else {
-            "runtime/debrute"
-        };
+        #[cfg(target_os = "macos")]
+        let (runtime_relative, cli_relative) = (
+            "runtime/Debrute Runtime.app/Contents/MacOS/debrute-runtime",
+            "runtime/debrute",
+        );
+        #[cfg(target_os = "windows")]
+        let (runtime_relative, cli_relative) =
+            ("runtime/debrute-runtime.exe", "runtime/debrute.exe");
         let current = self.store.root().join("current");
         let current_runtime = current.join(runtime_relative);
         let current_cli = current.join(cli_relative);
@@ -156,7 +169,18 @@ impl ProductBootstrap {
     }
 
     fn activated_product(&self, directory: PathBuf) -> ActivatedProduct {
+        #[cfg(target_os = "windows")]
         let current = self.store.root().join("current");
+        #[cfg(target_os = "macos")]
+        let (runtime_entrypoint, cli_entrypoint) = (
+            self.bin_directory.join("debrute-runtime"),
+            self.bin_directory.join("debrute"),
+        );
+        #[cfg(target_os = "windows")]
+        let (runtime_entrypoint, cli_entrypoint) = (
+            current.join("runtime/debrute-runtime.exe"),
+            self.bin_directory.join("debrute.cmd"),
+        );
         ActivatedProduct {
             product_version: directory
                 .file_name()
@@ -165,16 +189,8 @@ impl ProductBootstrap {
                 .to_owned(),
             web_assets: directory.join("web"),
             directory,
-            runtime_entrypoint: if cfg!(target_os = "windows") {
-                current.join("runtime/debrute-runtime.exe")
-            } else {
-                self.bin_directory.join("debrute-runtime")
-            },
-            cli_entrypoint: if cfg!(target_os = "windows") {
-                self.bin_directory.join("debrute.cmd")
-            } else {
-                self.bin_directory.join("debrute")
-            },
+            runtime_entrypoint,
+            cli_entrypoint,
         }
     }
 }
@@ -228,6 +244,7 @@ fn write_desktop_host_registration(
         .open(&temporary)?;
     file.write_all(&bytes)?;
     file.sync_all()?;
+    #[cfg(target_os = "macos")]
     set_private_file_permissions(&temporary)?;
     replace_file(&temporary, &destination)?;
     sync_directory(debrute_home)?;
@@ -269,18 +286,22 @@ fn install_runtime_entrypoint(
 fn install_cli_entrypoint(
     bin_directory: &Path,
     current_cli: &Path,
-    _runtime_entrypoint: &Path,
+    runtime_entrypoint: &Path,
 ) -> Result<PathBuf, ProductBootstrapError> {
     let destination = bin_directory.join("debrute.cmd");
     let path = current_cli.to_string_lossy().replace('%', "%%");
+    let runtime = runtime_entrypoint.to_string_lossy().replace('%', "%%");
     write_file_atomic(
         &destination,
-        format!("@echo off\r\n\"{path}\" %*\r\n").as_bytes(),
+        format!(
+            "@echo off\r\nset \"DEBRUTE_RUNTIME_STABLE_ENTRYPOINT={runtime}\"\r\n\"{path}\" %*\r\n"
+        )
+        .as_bytes(),
     )?;
     Ok(destination)
 }
 
-#[cfg(not(target_os = "windows"))]
+#[cfg(target_os = "macos")]
 fn install_cli_entrypoint(
     bin_directory: &Path,
     current_cli: &Path,
@@ -314,34 +335,20 @@ fn install_runtime_entrypoint(
     write_unix_script(
         &destination,
         &format!(
-            "#!/bin/sh\nexec /usr/bin/open -g -n --env 'DEBRUTE_RUNTIME_STABLE_ENTRYPOINT={stable}' '{application}' --args \"$@\"\n"
+            "#!/bin/sh\nexec /usr/bin/open -g -n '{application}' --args \"$@\" --stable-runtime-entrypoint '{stable}'\n"
         ),
     )?;
     Ok(destination)
 }
 
-#[cfg(all(not(target_os = "windows"), not(target_os = "macos")))]
-fn install_runtime_entrypoint(
-    bin_directory: &Path,
-    current_runtime: &Path,
-) -> Result<PathBuf, ProductBootstrapError> {
-    let destination = bin_directory.join("debrute-runtime");
-    let target = shell_escaped_path(current_runtime)?;
-    write_unix_script(
-        &destination,
-        &format!("#!/bin/sh\nexec '{target}' \"$@\"\n"),
-    )?;
-    Ok(destination)
-}
-
-#[cfg(not(target_os = "windows"))]
+#[cfg(target_os = "macos")]
 fn shell_escaped_path(path: &Path) -> Result<String, ProductBootstrapError> {
     path.to_str()
         .map(|path| path.replace('\'', "'\\''"))
         .ok_or_else(|| ProductBootstrapError::InvalidEntrypoint(path.to_owned()))
 }
 
-#[cfg(not(target_os = "windows"))]
+#[cfg(target_os = "macos")]
 fn write_unix_script(destination: &Path, source: &str) -> Result<(), ProductBootstrapError> {
     use std::os::unix::fs::PermissionsExt as _;
 
@@ -374,7 +381,7 @@ fn replace_file(source: &Path, destination: &Path) -> io::Result<()> {
     debrute_windows_product_fs::replace_file_atomic(source, destination)
 }
 
-#[cfg(not(target_os = "windows"))]
+#[cfg(target_os = "macos")]
 fn replace_file(source: &Path, destination: &Path) -> io::Result<()> {
     fs::rename(source, destination)
 }
@@ -384,14 +391,9 @@ fn sync_directory(path: &Path) -> io::Result<()> {
     debrute_windows_product_fs::sync_directory(path)
 }
 
-#[cfg(unix)]
+#[cfg(target_os = "macos")]
 fn sync_directory(path: &Path) -> io::Result<()> {
     fs::File::open(path)?.sync_all()
-}
-
-#[cfg(not(any(unix, target_os = "windows")))]
-fn sync_directory(_path: &Path) -> io::Result<()> {
-    Ok(())
 }
 
 fn materialize_official_skills(
@@ -467,17 +469,12 @@ fn require_plain_directory(path: &Path) -> Result<(), ProductBootstrapError> {
     Ok(())
 }
 
-#[cfg(unix)]
+#[cfg(target_os = "macos")]
 fn set_private_file_permissions(path: &Path) -> Result<(), ProductBootstrapError> {
     use std::os::unix::fs::PermissionsExt as _;
     let mut permissions = fs::metadata(path)?.permissions();
     permissions.set_mode(0o600);
     fs::set_permissions(path, permissions)?;
-    Ok(())
-}
-
-#[cfg(not(unix))]
-fn set_private_file_permissions(_path: &Path) -> Result<(), ProductBootstrapError> {
     Ok(())
 }
 

@@ -495,7 +495,7 @@ function imageNode(
       revision,
       size: 10_000,
       mimeType: 'image/png',
-      fileUrl: `http://127.0.0.1:17321/api/projects/p/files/raw/${projectRelativePath}?v=${revision}`,
+      fileUrl: `/api/projects/p/files/raw/${projectRelativePath}?v=${revision}`,
       canvasImagePreviewable: true,
       canvasImagePreviewSourceWidth: sourceWidth
     }

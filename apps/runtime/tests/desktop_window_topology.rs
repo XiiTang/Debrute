@@ -6,19 +6,20 @@ use std::{
     io::{BufRead, BufReader},
     os::unix::net::UnixStream,
     path::Path,
-    sync::{Arc, Weak},
+    sync::{Arc, Barrier, Weak},
     time::Duration,
 };
 
+use debrute_runtime::cli::RuntimeCliService;
 use debrute_runtime::control::{
     ActivationIntent, ActivationOutcome, ClientMessage, ClientRole, ControlErrorCode, ControlEvent,
     ControlRequest, ControlResponse, DesktopOpenError, DesktopOpenResult, ProjectFrontend,
-    RuntimeActivationService, RuntimeControlState, RuntimeStatus, ServerMessage, WorkbenchRoute,
+    RecentProject, RuntimeActivationService, RuntimeControlState, ServerMessage, WorkbenchRoute,
     encode_frame, read_server_frame, request_handshake, serve_control_connection,
 };
 use debrute_runtime::workbench::{
-    WORKBENCH_CONNECTION_HEADER, WORKBENCH_SESSION_COOKIE, WorkbenchHttpServer,
-    WorkbenchRuntimeServices,
+    RuntimeCliHttpService, WORKBENCH_CONNECTION_HEADER, WORKBENCH_SESSION_COOKIE,
+    WorkbenchHttpServer, WorkbenchRuntimeServices,
 };
 use reqwest::{
     blocking::{Client, Response},
@@ -59,11 +60,203 @@ impl RuntimeActivationService for DesktopActivation {
 }
 
 #[test]
+fn desktop_promotion_requires_the_initial_recent_project_projection() {
+    let state = Arc::new(RuntimeControlState::new("runtime-instance"));
+    assert!(state.finish_startup());
+    assert!(
+        state.install_activation_service(Arc::new(DesktopActivation {
+            state: Arc::downgrade(&state),
+        }))
+    );
+    let (mut desktop, server_stream) = UnixStream::pair().expect("stream pair should open");
+    desktop
+        .set_read_timeout(Some(Duration::from_secs(1)))
+        .expect("read should be bounded");
+    let server_state = Arc::clone(&state);
+    let server = std::thread::spawn(move || {
+        serve_control_connection(server_stream, &server_state, 8)
+            .expect("connection should close cleanly");
+    });
+    request_handshake(&mut desktop, ClientRole::Launcher).expect("handshake should succeed");
+    send_request(
+        &mut desktop,
+        "promote",
+        ControlRequest::Activate {
+            intent: ActivationIntent::OpenDesktop,
+        },
+    );
+
+    assert_eq!(
+        read_server_frame(&mut desktop).expect("promotion rejection should arrive"),
+        ServerMessage::response(
+            "promote",
+            ControlResponse::Rejected {
+                code: ControlErrorCode::DesktopUnavailable,
+            },
+        )
+    );
+    drop(desktop);
+    server.join().expect("server should finish");
+}
+
+#[test]
+fn recent_project_projection_ignores_stale_revisions_without_a_delivery_result() {
+    let state = Arc::new(RuntimeControlState::new("runtime-instance"));
+    let current_projects = vec![RecentProject {
+        project_id: "project-2".to_owned(),
+        project_root: "/projects/current".to_owned(),
+    }];
+    state.set_recent_projects(2, current_projects.clone());
+    state.set_recent_projects(
+        2,
+        vec![RecentProject {
+            project_id: "project-equal".to_owned(),
+            project_root: "/projects/equal".to_owned(),
+        }],
+    );
+    state.set_recent_projects(
+        1,
+        vec![RecentProject {
+            project_id: "project-1".to_owned(),
+            project_root: "/projects/stale".to_owned(),
+        }],
+    );
+    assert!(state.finish_startup());
+    assert!(
+        state.install_activation_service(Arc::new(DesktopActivation {
+            state: Arc::downgrade(&state),
+        }))
+    );
+
+    let (mut desktop, server_stream) = UnixStream::pair().expect("stream pair should open");
+    desktop
+        .set_read_timeout(Some(Duration::from_secs(1)))
+        .expect("read should be bounded");
+    let server_state = Arc::clone(&state);
+    let server = std::thread::spawn(move || {
+        serve_control_connection(server_stream, &server_state, 8)
+            .expect("connection should close cleanly");
+    });
+    request_handshake(&mut desktop, ClientRole::Launcher).expect("handshake should succeed");
+    send_request(
+        &mut desktop,
+        "promote",
+        ControlRequest::Activate {
+            intent: ActivationIntent::OpenDesktop,
+        },
+    );
+
+    assert_eq!(
+        read_server_frame(&mut desktop).expect("recent projects should arrive"),
+        ServerMessage::event(ControlEvent::DesktopRecentProjectsChanged {
+            global_revision: 2,
+            recent_projects: current_projects,
+        })
+    );
+    let _ = expect_open_event(&mut desktop, &WorkbenchRoute::Root);
+    expect_activation(
+        &mut desktop,
+        "promote",
+        ActivationOutcome::PromotedToDesktopHost,
+    );
+
+    drop(desktop);
+    server.join().expect("server should finish");
+}
+
+#[test]
+fn desktop_promotion_and_projection_update_enqueue_monotonic_revisions() {
+    for iteration in 0..64 {
+        let state = Arc::new(RuntimeControlState::new(format!(
+            "runtime-instance-{iteration}"
+        )));
+        state.set_recent_projects(0, Vec::new());
+        assert!(state.finish_startup());
+        assert!(
+            state.install_activation_service(Arc::new(DesktopActivation {
+                state: Arc::downgrade(&state),
+            }))
+        );
+
+        let (mut desktop, server_stream) = UnixStream::pair().expect("stream pair should open");
+        desktop
+            .set_read_timeout(Some(Duration::from_secs(1)))
+            .expect("read should be bounded");
+        let server_state = Arc::clone(&state);
+        let server = std::thread::spawn(move || {
+            serve_control_connection(server_stream, &server_state, 8)
+                .expect("connection should close cleanly");
+        });
+        request_handshake(&mut desktop, ClientRole::Launcher).expect("handshake should succeed");
+
+        let start = Arc::new(Barrier::new(3));
+        let mut promotion_stream = desktop.try_clone().expect("promotion stream should clone");
+        let promotion_start = Arc::clone(&start);
+        let promotion = std::thread::spawn(move || {
+            promotion_start.wait();
+            send_request(
+                &mut promotion_stream,
+                "promote",
+                ControlRequest::Activate {
+                    intent: ActivationIntent::OpenDesktop,
+                },
+            );
+        });
+        let update_state = Arc::clone(&state);
+        let update_start = Arc::clone(&start);
+        let update = std::thread::spawn(move || {
+            update_start.wait();
+            update_state.set_recent_projects(
+                1,
+                vec![RecentProject {
+                    project_id: "project-1".to_owned(),
+                    project_root: "/projects/current".to_owned(),
+                }],
+            );
+        });
+        start.wait();
+        promotion.join().expect("promotion request should finish");
+        update.join().expect("projection update should finish");
+
+        let mut revisions = Vec::new();
+        let mut opened = false;
+        let mut activated = false;
+        while !opened || !activated || !revisions.contains(&1) {
+            match read_server_frame(&mut desktop).expect("Desktop message should arrive") {
+                ServerMessage::Event {
+                    event:
+                        ControlEvent::DesktopRecentProjectsChanged {
+                            global_revision, ..
+                        },
+                } => revisions.push(global_revision),
+                ServerMessage::Event {
+                    event: ControlEvent::DesktopWindowOpenRequested { .. },
+                } => opened = true,
+                ServerMessage::Response {
+                    request_id,
+                    response:
+                        ControlResponse::Activation {
+                            outcome: ActivationOutcome::PromotedToDesktopHost,
+                        },
+                } if request_id == "promote" => activated = true,
+                message => panic!("unexpected Desktop message: {message:?}"),
+            }
+        }
+        assert!(
+            revisions == [1] || revisions == [0, 1],
+            "projection revisions must be monotonic, got {revisions:?}"
+        );
+
+        drop(desktop);
+        server.join().expect("server should finish");
+    }
+}
+
+#[test]
 fn launcher_is_promoted_then_project_open_focus_and_close_are_single_instance() {
-    let state = Arc::new(RuntimeControlState::new(
-        "runtime-instance",
-        RuntimeStatus::Ready,
-    ));
+    let state = Arc::new(RuntimeControlState::new("runtime-instance"));
+    state.set_recent_projects(0, Vec::new());
+    assert!(state.finish_startup());
     assert!(
         state.install_activation_service(Arc::new(DesktopActivation {
             state: Arc::downgrade(&state),
@@ -177,10 +370,7 @@ fn desktop_route_tracks_in_window_replacement_and_web_preemption() {
         &json!({"canvasOrder": []}),
     );
 
-    let state = Arc::new(RuntimeControlState::new(
-        "runtime-instance",
-        RuntimeStatus::Starting,
-    ));
+    let state = Arc::new(RuntimeControlState::new("runtime-instance"));
     assert!(
         state.install_activation_service(Arc::new(DesktopActivation {
             state: Arc::downgrade(&state),
@@ -188,12 +378,21 @@ fn desktop_route_tracks_in_window_replacement_and_web_preemption() {
     );
     let services = WorkbenchRuntimeServices::compose(root.join("home"), Arc::clone(&state))
         .expect("Runtime services should compose");
-    let http = WorkbenchHttpServer::start_with_runtime(assets, Arc::clone(&state), services)
+    let cli: Arc<dyn RuntimeCliHttpService> = Arc::new(RuntimeCliService::new(
+        Arc::clone(services.models()),
+        Arc::clone(services.global()),
+        services.projects().clone(),
+        Arc::clone(services.generated_assets()),
+        Arc::clone(services.model_operations()),
+        None,
+        None,
+    ));
+    let http = WorkbenchHttpServer::start(assets, Arc::clone(&state), services, cli, None)
         .expect("Workbench server should start");
     state
         .install_workbench(http.launch_service())
         .expect("Workbench authority should install");
-    state.set_status(RuntimeStatus::Ready);
+    assert!(state.finish_startup());
 
     let (mut desktop, server_stream) = UnixStream::pair().expect("stream pair should open");
     desktop
@@ -261,12 +460,18 @@ fn bind_desktop_project(
     );
     let ServerMessage::Response {
         request_id,
-        response: ControlResponse::DesktopLaunchTicket { ticket, .. },
+        response:
+            ControlResponse::DesktopLaunchTicket {
+                ticket,
+                theme_preference,
+                ..
+            },
     } = read_server_frame(desktop).expect("ticket response should arrive")
     else {
         panic!("expected Desktop launch ticket");
     };
     assert_eq!(request_id, "ticket");
+    assert_eq!(theme_preference, "system");
 
     let client = Client::new();
     let (cookie, credential, mut events) =

@@ -1,11 +1,7 @@
 import { useSyncExternalStore } from 'react';
-import type { CanvasEditorRuntime, CanvasRuntimeSnapshot } from './CanvasEditorRuntime';
+import type { CanvasEditorRuntime } from './CanvasEditorRuntime';
 import type { CanvasSize } from './canvasGeometry';
 import type { CanvasSelection } from './canvasSelection';
-
-export function useCanvasRuntimeSnapshot(runtime: CanvasEditorRuntime): CanvasRuntimeSnapshot {
-  return useSyncExternalStore(runtime.subscribe, runtime.getSnapshot, runtime.getSnapshot);
-}
 
 export function useCanvasSelection(runtime: CanvasEditorRuntime): CanvasSelection | undefined {
   return useSyncExternalStore(

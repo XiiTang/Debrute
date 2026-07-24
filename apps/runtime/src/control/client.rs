@@ -3,7 +3,7 @@ use std::{
     fmt,
     io::{self, Read, Write},
     thread,
-    time::Duration,
+    time::{Duration, Instant},
 };
 
 use super::{
@@ -18,6 +18,7 @@ pub struct NativeControlClient<Stream> {
     role: ClientRole,
     instance_id: String,
     status: RuntimeStatus,
+    ready_observed: bool,
 }
 
 impl<Stream: Read + Write> NativeControlClient<Stream> {
@@ -37,6 +38,7 @@ impl<Stream: Read + Write> NativeControlClient<Stream> {
             role,
             instance_id: accepted.instance_id,
             status: accepted.status,
+            ready_observed: accepted.status == RuntimeStatus::Ready,
         })
     }
 
@@ -48,26 +50,6 @@ impl<Stream: Read + Write> NativeControlClient<Stream> {
     #[must_use]
     pub const fn status(&self) -> RuntimeStatus {
         self.status
-    }
-
-    /// Waits for `Ready`, writes `request` once, and waits for its response.
-    ///
-    /// Transport failure after the write is an unknown outcome. This method
-    /// never reconnects or writes the request again.
-    ///
-    /// # Errors
-    ///
-    /// Returns [`NativeControlClientError`] when the role is not authorized,
-    /// Runtime cannot reach `Ready`, framing fails, or the connection is lost.
-    pub fn wait_ready_and_request(
-        &mut self,
-        request_id: impl Into<String>,
-        request: ControlRequest,
-    ) -> Result<ControlResponse, NativeControlClientError> {
-        authorize_request(self.role, &request).map_err(NativeControlClientError::Role)?;
-        self.wait_until_ready()?;
-        let request_id = request_id.into();
-        self.send_request(&request_id, request)
     }
 
     /// Requests the closed Runtime inspection snapshot without waiting for
@@ -82,6 +64,22 @@ impl<Stream: Read + Write> NativeControlClient<Stream> {
         request_id: impl Into<String>,
     ) -> Result<ControlResponse, NativeControlClientError> {
         let request = ControlRequest::Inspect;
+        authorize_request(self.role, &request).map_err(NativeControlClientError::Role)?;
+        let request_id = request_id.into();
+        self.send_request(&request_id, request)
+    }
+
+    /// Sends Product Quit without waiting for Runtime readiness.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`NativeControlClientError`] when framing fails or the
+    /// connection is lost. The request is never replayed.
+    pub fn quit_product(
+        &mut self,
+        request_id: impl Into<String>,
+    ) -> Result<ControlResponse, NativeControlClientError> {
+        let request = ControlRequest::QuitProduct;
         authorize_request(self.role, &request).map_err(NativeControlClientError::Role)?;
         let request_id = request_id.into();
         self.send_request(&request_id, request)
@@ -103,28 +101,6 @@ impl<Stream: Read + Write> NativeControlClient<Stream> {
             return Err(NativeControlClientError::Write(error));
         }
         self.read_response(request_id)
-    }
-
-    fn wait_until_ready(&mut self) -> Result<(), NativeControlClientError> {
-        while self.status == RuntimeStatus::Starting {
-            let request_id = uuid::Uuid::new_v4().to_string();
-            match self.send_request(&request_id, ControlRequest::Inspect)? {
-                ControlResponse::Inspection { status, .. } => self.status = status,
-                _ => return Err(NativeControlClientError::UnexpectedMessage),
-            }
-            if self.status == RuntimeStatus::Starting {
-                thread::sleep(Duration::from_millis(25));
-            }
-        }
-        match self.status {
-            RuntimeStatus::Ready => Ok(()),
-            RuntimeStatus::Exiting | RuntimeStatus::Replacing => {
-                Err(NativeControlClientError::RuntimeStopping {
-                    status: self.status,
-                })
-            }
-            RuntimeStatus::Starting => unreachable!("Starting loop ended"),
-        }
     }
 
     fn read_response(
@@ -175,8 +151,92 @@ impl<Stream: Read + Write> NativeControlClient<Stream> {
 
 #[cfg(any(target_os = "macos", target_os = "windows"))]
 impl<Stream: super::ControlTransport> NativeControlClient<Stream> {
-    /// Completes the bounded handshake and then removes the transport timeout
-    /// before any product request can be issued.
+    /// Waits for `Ready` until one absolute deadline, writes `request` once,
+    /// and then waits for its response without the readiness timeout.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`NativeControlClientError`] when the role is not authorized,
+    /// Runtime misses the deadline, framing fails, or the connection is lost.
+    pub fn wait_ready_and_request_until(
+        &mut self,
+        deadline: Instant,
+        request_id: impl Into<String>,
+        request: ControlRequest,
+    ) -> Result<ControlResponse, NativeControlClientError> {
+        authorize_request(self.role, &request).map_err(NativeControlClientError::Role)?;
+        self.wait_until_ready(deadline)?;
+        let request_id = request_id.into();
+        self.send_request(&request_id, request)
+    }
+
+    fn wait_until_ready(&mut self, deadline: Instant) -> Result<(), NativeControlClientError> {
+        loop {
+            if self.ready_observed {
+                self.configure_io_timeout(None)?;
+                return Ok(());
+            }
+            let remaining = deadline
+                .checked_duration_since(Instant::now())
+                .filter(|remaining| !remaining.is_zero())
+                .ok_or(NativeControlClientError::RuntimeReadyTimeout)?;
+            match self.status {
+                RuntimeStatus::Ready => {
+                    self.ready_observed = true;
+                    self.configure_io_timeout(None)?;
+                    return Ok(());
+                }
+                RuntimeStatus::Exiting | RuntimeStatus::Replacing => {
+                    return Err(NativeControlClientError::RuntimeStopping {
+                        status: self.status,
+                    });
+                }
+                RuntimeStatus::Starting => {}
+            }
+            self.configure_io_timeout(Some(remaining))?;
+            let request_id = uuid::Uuid::new_v4().to_string();
+            match self.send_request(&request_id, ControlRequest::Inspect) {
+                Ok(ControlResponse::Inspection { status, .. }) => {
+                    self.status = status;
+                    if status == RuntimeStatus::Ready {
+                        deadline
+                            .checked_duration_since(Instant::now())
+                            .filter(|remaining| !remaining.is_zero())
+                            .ok_or(NativeControlClientError::RuntimeReadyTimeout)?;
+                        self.ready_observed = true;
+                        self.configure_io_timeout(None)?;
+                        return Ok(());
+                    }
+                }
+                Ok(_) => return Err(NativeControlClientError::UnexpectedMessage),
+                Err(error) if is_timeout_error(&error) => {
+                    return Err(NativeControlClientError::RuntimeReadyTimeout);
+                }
+                Err(error) => return Err(error),
+            }
+            if self.status == RuntimeStatus::Starting {
+                let remaining = deadline
+                    .checked_duration_since(Instant::now())
+                    .filter(|remaining| !remaining.is_zero())
+                    .ok_or(NativeControlClientError::RuntimeReadyTimeout)?;
+                thread::sleep(Duration::from_millis(25).min(remaining));
+            }
+        }
+    }
+
+    fn configure_io_timeout(
+        &mut self,
+        timeout: Option<Duration>,
+    ) -> Result<(), NativeControlClientError> {
+        self.stream
+            .as_mut()
+            .ok_or(NativeControlClientError::RuntimeLost)?
+            .set_io_timeout(timeout)
+            .map_err(NativeControlClientError::ConnectionConfiguration)
+    }
+
+    /// Completes the handshake within one absolute deadline and then removes
+    /// the transport timeout before any product request can be issued.
     ///
     /// # Errors
     ///
@@ -185,9 +245,26 @@ impl<Stream: super::ControlTransport> NativeControlClient<Stream> {
     pub fn handshake_and_clear_timeouts(
         mut stream: Stream,
         role: ClientRole,
+        deadline: Instant,
     ) -> Result<Self, NativeControlClientError> {
-        let accepted =
-            request_handshake(&mut stream, role).map_err(NativeControlClientError::Handshake)?;
+        let remaining = deadline
+            .checked_duration_since(Instant::now())
+            .filter(|remaining| !remaining.is_zero())
+            .ok_or(NativeControlClientError::HandshakeDeadlineExceeded)?;
+        stream
+            .set_io_timeout(Some(remaining))
+            .map_err(NativeControlClientError::ConnectionConfiguration)?;
+        let accepted = request_handshake(&mut stream, role).map_err(|error| {
+            if is_handshake_timeout(&error) && Instant::now() >= deadline {
+                NativeControlClientError::HandshakeDeadlineExceeded
+            } else {
+                NativeControlClientError::Handshake(error)
+            }
+        })?;
+        deadline
+            .checked_duration_since(Instant::now())
+            .filter(|remaining| !remaining.is_zero())
+            .ok_or(NativeControlClientError::HandshakeDeadlineExceeded)?;
         stream
             .clear_handshake_timeouts()
             .map_err(NativeControlClientError::ConnectionConfiguration)?;
@@ -196,6 +273,7 @@ impl<Stream: super::ControlTransport> NativeControlClient<Stream> {
             role,
             instance_id: accepted.instance_id,
             status: accepted.status,
+            ready_observed: accepted.status == RuntimeStatus::Ready,
         })
     }
 }
@@ -209,6 +287,8 @@ pub enum NativeControlClientError {
     Write(io::Error),
     Decode(FrameDecodeError),
     RuntimeStopping { status: RuntimeStatus },
+    HandshakeDeadlineExceeded,
+    RuntimeReadyTimeout,
     RuntimeLost,
     UnexpectedMessage,
     MismatchedResponse { expected: String, actual: String },
@@ -227,6 +307,12 @@ impl fmt::Display for NativeControlClientError {
             Self::Decode(error) => write!(formatter, "Control response is invalid: {error}"),
             Self::RuntimeStopping { status } => {
                 write!(formatter, "Runtime is stopping: {status:?}")
+            }
+            Self::HandshakeDeadlineExceeded => {
+                formatter.write_str("Control handshake missed its absolute deadline")
+            }
+            Self::RuntimeReadyTimeout => {
+                formatter.write_str("Runtime did not become Ready before the absolute deadline")
             }
             Self::RuntimeLost => formatter.write_str("Runtime connection was lost"),
             Self::UnexpectedMessage => formatter.write_str("Runtime sent an unexpected message"),
@@ -247,9 +333,44 @@ impl Error for NativeControlClientError {
             Self::Encode(error) => Some(error),
             Self::Decode(error) => Some(error),
             Self::RuntimeStopping { .. }
+            | Self::HandshakeDeadlineExceeded
+            | Self::RuntimeReadyTimeout
             | Self::RuntimeLost
             | Self::UnexpectedMessage
             | Self::MismatchedResponse { .. } => None,
         }
     }
+}
+
+impl NativeControlClientError {
+    #[must_use]
+    pub fn is_handshake_timeout(&self) -> bool {
+        matches!(self, Self::HandshakeDeadlineExceeded)
+            || matches!(self, Self::Handshake(error) if is_handshake_timeout(error))
+    }
+}
+
+fn is_timeout_error(error: &NativeControlClientError) -> bool {
+    matches!(
+        error,
+        NativeControlClientError::Decode(FrameDecodeError::Read(error))
+            | NativeControlClientError::Write(error)
+            if is_io_timeout(error)
+    )
+}
+
+fn is_handshake_timeout(error: &ClientHandshakeError) -> bool {
+    matches!(
+        error,
+        ClientHandshakeError::Decode(FrameDecodeError::Read(error))
+            | ClientHandshakeError::Write(error)
+            if is_io_timeout(error)
+    )
+}
+
+fn is_io_timeout(error: &io::Error) -> bool {
+    matches!(
+        error.kind(),
+        io::ErrorKind::TimedOut | io::ErrorKind::WouldBlock
+    )
 }

@@ -1,10 +1,8 @@
 import { describe, expect, expectTypeOf, it } from 'vitest';
 import {
-  CANVAS_CARD_BAR_SIZE,
   CANVAS_FEEDBACK_BAR_LAYOUT,
   CANVAS_MINIMAP_BUTTON_SIZE,
   CANVAS_MINIMAP_PANEL_SIZE,
-  CANVAS_RESET_LAYOUT_BUTTON_SIZE,
   canvasCardBarRect,
   canvasFeedbackBarSizeForTarget,
   canvasFeedbackBarTargetWithCurrentEntry,

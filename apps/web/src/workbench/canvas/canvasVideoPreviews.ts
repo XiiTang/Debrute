@@ -2,6 +2,7 @@ import {
   canvasRasterPreviewWidth,
   type ProjectedCanvasNode
 } from '@debrute/canvas-core';
+import { canvasRawFileProjectId } from './canvasRawFileUrls';
 
 export interface CanvasVideoPreviewSource {
   src: string;
@@ -58,11 +59,7 @@ export function canvasVideoPreviewUrl(input: {
   sourceKey: string;
   width: number;
 }): string {
-  const sourceUrl = new URL(input.fileUrl, 'http://debrute.local');
-  const projectMatch = sourceUrl.pathname.match(/^\/api\/projects\/([^/]+)\//);
-  if (!projectMatch?.[1]) {
-    throw new Error('Canvas video preview file URL must include a project id.');
-  }
+  const projectId = canvasRawFileProjectId(input.fileUrl);
   const params = new URLSearchParams({
     canvasId: input.canvasId,
     path: input.projectRelativePath,
@@ -71,5 +68,5 @@ export function canvasVideoPreviewUrl(input: {
     sourceKey: input.sourceKey,
     w: String(input.width)
   });
-  return `/api/projects/${projectMatch[1]}/canvas-video-preview?${params.toString()}`;
+  return `/api/projects/${projectId}/canvas-video-preview?${params.toString()}`;
 }

@@ -13,7 +13,7 @@ impl fmt::Display for AgentRecordError {
 
 impl Error for AgentRecordError {}
 
-/// Renders one terminal CLI result using the stable `debrute/1` protocol.
+/// Renders one terminal CLI result using the stable unversioned Agent Record protocol.
 ///
 /// # Errors
 /// Returns an error when the result envelope or a field is not in the closed
@@ -26,23 +26,20 @@ pub fn agent_record(result: &Value) -> Result<String, AgentRecordError> {
     let command = string_field(object, "command")?;
     let mut lines = match status {
         "ok" => vec![format!(
-            "debrute/1 ok cmd={}",
+            "debrute ok cmd={}",
             format_value(&Value::String(command.to_owned()))?
         )],
         "error" => {
             let code = string_field(object, "code")?;
-            let message = string_field(object, "message")?;
-            vec![
-                format!(
-                    "debrute/1 error cmd={} code={}",
-                    format_value(&Value::String(command.to_owned()))?,
-                    format_value(&Value::String(code.to_owned()))?
-                ),
-                format!(
-                    "message={}",
-                    format_value(&Value::String(message.to_owned()))?
-                ),
-            ]
+            let mut lines = vec![format!(
+                "debrute error cmd={} code={}",
+                format_value(&Value::String(command.to_owned()))?,
+                format_value(&Value::String(code.to_owned()))?
+            )];
+            if let Some(log) = object.get("log").filter(|value| !value.is_null()) {
+                lines.push(format!("log={}", format_value(log)?));
+            }
+            lines
         }
         _ => return Err(AgentRecordError("CLI result status is invalid.")),
     };
@@ -75,7 +72,7 @@ pub fn agent_record(result: &Value) -> Result<String, AgentRecordError> {
     Ok(lines.join("\n"))
 }
 
-/// Renders one streaming progress line using the stable `debrute/1` protocol.
+/// Renders one streaming progress block using the stable Agent Record protocol.
 ///
 /// # Errors
 /// Returns an error when progress fields are not a primitive object.
@@ -83,11 +80,29 @@ pub fn progress_record(command: &str, fields: &Value) -> Result<String, AgentRec
     let fields = fields
         .as_object()
         .ok_or(AgentRecordError("CLI progress fields must be an object."))?;
-    Ok(format!(
-        "debrute/1 progress cmd={}{}",
+    let event = string_field(fields, "event")?;
+    let mut lines = vec![format!(
+        "debrute progress cmd={} event={}",
         format_value(&Value::String(command.to_owned()))?,
-        format_fields(fields, PROGRESS_FIELD_ORDER)?
-    ))
+        format_value(&Value::String(event.to_owned()))?
+    )];
+    if let Some(records) = fields.get("records") {
+        for record in records
+            .as_array()
+            .ok_or(AgentRecordError("CLI progress records must be an array."))?
+        {
+            let record = record
+                .as_object()
+                .ok_or(AgentRecordError("CLI progress record must be an object."))?;
+            let name = string_field(record, "name")?;
+            let record_fields = object_field(record, "fields")?;
+            lines.push(format!(
+                "{name}{}",
+                format_fields(record_fields, record_field_order(name))?
+            ));
+        }
+    }
+    Ok(lines.join("\n"))
 }
 
 fn format_fields(
@@ -188,25 +203,36 @@ fn object_field<'a>(
         .ok_or(AgentRecordError("CLI result object field is missing."))
 }
 
-const PROGRESS_FIELD_ORDER: &[&str] = &[
-    "total",
-    "done",
-    "ok",
-    "failed",
-    "skipped",
-    "active",
-    "timeout_ms",
-    "log",
-    "concurrency",
-    "summary",
-];
-
 fn record_field_order(name: &str) -> &'static [&'static str] {
     match name {
         "model" => &["id", "kind", "parameters"],
         "official_doc" => &["urls", "snapshot", "captured_at"],
-        "artifact" => &["id", "path", "title", "mime", "width", "height"],
-        "diagnostic" => &["id", "source", "severity", "code", "message", "path"],
+        "operation" => &[
+            "id",
+            "model_kind",
+            "project_root",
+            "state",
+            "accepted_at",
+            "shape",
+            "model",
+            "item_count",
+            "concurrency",
+            "timeout_seconds",
+            "active",
+            "succeeded",
+            "failed",
+            "log",
+        ],
+        "batch_item" => &["item_index", "model", "status", "log"],
+        "artifact" => &[
+            "artifact_index",
+            "role",
+            "project_relative_path",
+            "mime_type",
+            "width",
+            "height",
+        ],
+        "diagnostic" => &["id", "severity", "code", "message", "path"],
         "command" => &[
             "name", "scope", "risk", "requires", "writes", "input", "output", "errors",
         ],
@@ -222,23 +248,12 @@ fn result_field_order(command: &str) -> &'static [&'static str] {
             "runtime_instance",
             "diagnostics",
         ],
-        "generate.image-batch" => &[
-            "total",
-            "ok",
-            "failed",
-            "skipped",
-            "log",
-            "concurrency",
-            "duration_seconds",
-            "summary",
-        ],
         "project.init" | "project.status" | "project.validate" => &[
             "project_root",
             "project_name",
             "canvases",
             "errors",
             "warnings",
-            "infos",
         ],
         "workbench.start" => &["frontend", "target", "outcome"],
         _ => &[],

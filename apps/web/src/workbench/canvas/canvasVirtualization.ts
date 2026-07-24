@@ -109,25 +109,6 @@ export function canvasEdgeSegmentsForProjectionEdges(input: {
     .map(({ order: _order, ...edge }) => edge);
 }
 
-export function buildVirtualizedCanvasRenderState(input: {
-  nodes: ProjectedCanvasNode[];
-  edges: CanvasProjection['edges'];
-  camera: CanvasCamera;
-  surfaceSize: Partial<CanvasSize> | undefined;
-  selection: CanvasSelection | undefined;
-  activeNodeProjectRelativePaths: Iterable<string>;
-}): VirtualizedCanvasRenderState {
-  return createCanvasVirtualizationIndex({
-    nodes: input.nodes,
-    edges: input.edges
-  }).render({
-    camera: input.camera,
-    surfaceSize: input.surfaceSize,
-    selection: input.selection,
-    activeNodeProjectRelativePaths: input.activeNodeProjectRelativePaths
-  });
-}
-
 function buildVirtualizedCanvasRenderStateFromIndex(input: CanvasVirtualizationQueryInput & {
   nodeByPath: Map<string, ProjectedCanvasNode>;
   retainedNodes: readonly ProjectedCanvasNode[];

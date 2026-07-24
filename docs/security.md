@@ -13,22 +13,26 @@ route group, and role-specific credential before business dispatch. Native CLI
 authorization is issued through its live Control connection and becomes invalid
 when that connection ends; it is never persisted or accepted in a URL.
 
-An ordinary browser launch establishes an in-memory `debrute_web_session`
-cookie marked HttpOnly, host-only, and SameSite-Strict. Desktop obtains a
-single-use in-memory launch ticket through its live Control connection and
-passes it once to the renderer through preload; the BrowserWindow URL contains
-no credential. Consuming a launch ticket creates the same browser session and
-removes the ticket atomically.
+An ordinary browser storage partition establishes one in-memory
+`debrute_web_session` cookie marked HttpOnly, host-only, and SameSite-Strict.
+Concurrent tabs reuse that live session instead of replacing one another's
+cookie. Desktop obtains a single-use in-memory launch ticket through its live
+Control connection and passes it once to the renderer through preload; the
+BrowserWindow URL contains no credential. Consuming a launch ticket creates the
+browser session in that window's isolated storage partition and removes the
+ticket atomically.
 
-One POST SSE Workbench connection issues a separate in-memory connection
-credential to JavaScript. Project and global commands send it in a custom
-same-origin header; it is never written to a URL, cookie, file, Web Storage,
-environment variable, or log. Ending the connection revokes the credential and
-its Project binding. A Terminal WebSocket is valid only while that same
+Every loaded document's POST SSE Workbench connection issues a separate
+in-memory connection credential to JavaScript. Project and global commands send
+it in a custom same-origin header and Runtime validates it together with the
+shared browser session; it is never written to a URL, cookie, file, Web Storage,
+environment variable, or log. Ending one connection revokes only its credential
+and Project binding. A Terminal WebSocket is valid only while that same
 connection owns the same Project, and closes when either lifetime ends. Passive
-media reads require the live browser session, but cannot mutate Project state.
-Source development sends the same relative requests through Vite to the exact
-Runtime origin without a token file or a second authentication system.
+media reads require the browser session to contain a live connection bound to
+the requested Project, but cannot mutate Project state. Source development
+sends the same relative requests through Vite to the exact Runtime origin
+without a token file or a second authentication system.
 
 Photoshop routes have their own narrow origin, plugin identity, pairing, and
 client-scoped protocol rather than inheriting Workbench or CLI authority. See
@@ -41,7 +45,7 @@ drive-letter paths, backslash escapes, empty segments, and `.` or `..` traversal
 are not Project path identities. Normalization alone is not sufficient because
 an in-project symlink can still resolve outside the Project.
 
-Project Core therefore distinguishes:
+Runtime Project filesystem services therefore distinguish:
 
 - existing targets, whose full real path must remain under the canonical
   Project root;
@@ -57,7 +61,7 @@ are not converted into a successful fallback.
 The same boundary protects Project Tree mutations, Project Document
 transactions and their lock/temporary/rollback files, generated-asset records,
 Canvas preview caches, terminal working directories, native reveal/trash
-operations, Adobe Bridge transfers, and image-batch inputs and output logs.
+operations, professional-tool transfers, and Model Request inputs.
 Project Tree commands cannot mutate protected `.debrute/` documents, while
 their owning services use registered Project Document paths.
 
@@ -92,14 +96,26 @@ The DNS-binding rationale is recorded in
 Model API keys are stored separately from non-secret settings. The configuration
 directory is forced to mode `0700`, and secret-file temporary and final writes
 use mode `0600` with atomic replacement. A settings read exposes only
-`apiKeySet` and a fixed-length non-credential preview; the plaintext input is
-write-only. Omitting a key preserves the stored value, a non-empty key replaces
-it, and an empty key clears it.
+`apiKeySet`; it contains neither plaintext nor a credential-derived preview.
+Omitting a key preserves the stored value, a non-empty key replaces it, and an
+empty key clears it.
+
+An explicit reveal command may return the exact stored key only to the
+requesting authenticated Workbench connection. Its response is non-cacheable,
+does not publish a Global event, and does not change the ordinary settings
+projection. Workbench retains the response only in the requesting settings
+component while the value is visibly revealed, then clears it when hidden or
+unmounted. This boundary protects routine settings reads and other live
+connections; it does not claim to hide a deliberately revealed value from an
+already-compromised renderer. The decision is recorded in
+[`0057-model-api-key-reveal-is-explicit-and-transient.md`](./adr/0057-model-api-key-reveal-is-explicit-and-transient.md).
 
 Full keys belong only in secret storage, the server-side execution state that
-is making an upstream request, the outbound request itself, or a new settings
-write. They do not belong in Workbench state or events, CLI and batch output,
-Runtime error details, Project files, Generated Asset records, or Model Runs.
+is making an upstream request, the outbound request itself, a new settings
+write, or one explicit reveal response and its requesting component's transient
+visible state. They do not belong in ordinary Workbench settings or events,
+CLI and batch output, Runtime error details, Project files, Generated Asset
+records, or Model Runs.
 
 Model execution redacts outward-facing copies before they cross the runtime
 boundary. The shared redactor removes sensitive object fields, exact active
@@ -128,6 +144,6 @@ state, and short-lived transfer URLs define that separate boundary.
 - Project containment and structured document writes:
   `apps/runtime/src/project/paths.rs` and `documents.rs`.
 - DNS-pinned public HTTP(S) media policy: `apps/runtime/src/generation/http.rs`.
-- Secret settings and public previews: `apps/runtime/src/global/store.rs`.
+- Secret settings and public settings projections: `apps/runtime/src/global/store.rs`.
 - Runtime output redaction: `apps/runtime/src/generation/redaction.rs`.
 - Signed Product updates: `apps/runtime/src/product/`.

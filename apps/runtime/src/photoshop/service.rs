@@ -13,10 +13,10 @@ use url::Url;
 use uuid::Uuid;
 
 use crate::project::{
-    ProjectCommand, ProjectCommandResult, ProjectPathKind, ProjectSession, ProjectSessionRegistry,
-    ProjectUploadEntry, ProjectUse, ProjectUseKind, assert_project_tree_visible_mutation_path,
-    join_project_path, normalize_project_directory_path, normalize_project_relative_path,
-    open_no_symlink_existing_project_file,
+    ProjectCommand, ProjectCommandResult, ProjectError, ProjectPathKind, ProjectSession,
+    ProjectSessionRegistry, ProjectSyncSnapshot, ProjectUploadEntry, ProjectUse, ProjectUseKind,
+    assert_project_tree_visible_mutation_path, join_project_path, normalize_project_directory_path,
+    normalize_project_relative_path, open_no_symlink_existing_project_file,
 };
 
 use super::{
@@ -153,9 +153,13 @@ impl PhotoshopBridgeService {
     /// Creates a short-lived, one-use WebSocket challenge.
     ///
     /// # Errors
-    /// Returns an error when the Bridge is disabled, saturated, or unavailable.
+    /// Returns an error when the Bridge is disabled, saturated, or randomness fails.
+    ///
+    /// # Panics
+    /// Panics when authoritative Bridge state is poisoned or a Runtime-generated challenge id
+    /// collides with live state.
     pub fn begin_handshake(&self) -> Result<PhotoshopHandshakeChallenge, PhotoshopBridgeError> {
-        let mut state = self.lock_state()?;
+        let mut state = self.lock_state();
         require_enabled(&state)?;
         prune_challenges(&mut state);
         if state.challenges.len() >= MAX_CHALLENGES {
@@ -166,12 +170,18 @@ impl PhotoshopBridgeService {
         }
         let challenge = random_bytes::<32>()?;
         let challenge_id = Uuid::new_v4().to_string();
-        state.challenges.insert(
-            challenge_id.clone(),
-            ChallengeRecord {
-                challenge,
-                expires_at: Instant::now() + CHALLENGE_TTL,
-            },
+        assert!(
+            state
+                .challenges
+                .insert(
+                    challenge_id.clone(),
+                    ChallengeRecord {
+                        challenge,
+                        expires_at: Instant::now() + CHALLENGE_TTL,
+                    },
+                )
+                .is_none(),
+            "new Photoshop challenge id must be unique"
         );
         Ok(PhotoshopHandshakeChallenge {
             challenge_id,
@@ -187,15 +197,20 @@ impl PhotoshopBridgeService {
     /// Consumes a challenge, proves the persisted/first-pairing key and creates one live session.
     ///
     /// # Errors
-    /// Returns an error for an expired challenge, failed proof, or unavailable state.
+    /// Returns an error for an expired challenge, failed proof, disabled Bridge, persistence, or
+    /// unreadable Project state.
+    ///
+    /// # Panics
+    /// Panics when authoritative Bridge state is poisoned or its session indexes are
+    /// inconsistent.
     pub fn complete_handshake(
         &self,
         challenge_id: &str,
         hello: &PhotoshopHelloMessage,
     ) -> Result<PhotoshopSessionAdmission, PhotoshopBridgeError> {
-        let admission = self.lock_admission()?;
+        let admission = self.lock_admission();
         let challenge = {
-            let mut state = self.lock_state()?;
+            let mut state = self.lock_state();
             require_enabled(&state)?;
             prune_challenges(&mut state);
             state.challenges.remove(challenge_id).ok_or_else(|| {
@@ -221,7 +236,7 @@ impl PhotoshopBridgeService {
             last_seen_at: timestamp,
         };
         let replaced_session_id = {
-            let mut state = self.lock_state()?;
+            let mut state = self.lock_state();
             require_enabled(&state)?;
             let replaced = state
                 .session_by_instance
@@ -234,31 +249,46 @@ impl PhotoshopBridgeService {
                     PhotoshopBridgeErrorCode::PluginSessionReplaced,
                 );
             }
-            state
-                .session_by_instance
-                .insert(verified.plugin_instance_id.clone(), session_id.clone());
-            state
-                .session_by_bearer
-                .insert(bearer.clone(), session_id.clone());
-            state.sessions.insert(
-                session_id.clone(),
-                PluginSessionRecord {
-                    bearer: bearer.clone(),
-                    client,
-                },
+            assert!(
+                state
+                    .session_by_instance
+                    .insert(verified.plugin_instance_id.clone(), session_id.clone())
+                    .is_none(),
+                "new Photoshop session instance index must be unique"
             );
+            assert!(
+                state
+                    .session_by_bearer
+                    .insert(bearer.clone(), session_id.clone())
+                    .is_none(),
+                "new Photoshop session bearer index must be unique"
+            );
+            assert!(
+                state
+                    .sessions
+                    .insert(
+                        session_id.clone(),
+                        PluginSessionRecord {
+                            bearer: bearer.clone(),
+                            client,
+                        },
+                    )
+                    .is_none(),
+                "new Photoshop session id must be unique"
+            );
+            assert_session_indexes(&state);
             replaced
         };
         let state = match self.state_for_session(&session_id) {
             Ok(state) => state,
             Err(error) => {
-                if let Ok(mut state) = self.state.lock() {
-                    revoke_session(
-                        &mut state,
-                        &session_id,
-                        PhotoshopBridgeErrorCode::PluginSessionInvalid,
-                    );
-                }
+                let mut state = self.lock_state();
+                revoke_session(
+                    &mut state,
+                    &session_id,
+                    PhotoshopBridgeErrorCode::PluginSessionInvalid,
+                );
+                drop(state);
                 drop(admission);
                 (self.on_change)();
                 return Err(error);
@@ -279,18 +309,11 @@ impl PhotoshopBridgeService {
 
     /// Revokes a still-current plugin session and all authority derived from it.
     ///
-    /// # Errors
-    /// Returns an error when Bridge state is unavailable.
-    pub fn disconnect_session(&self, session_id: &str) -> Result<(), PhotoshopBridgeError> {
-        let admission = self.lock_admission()?;
+    pub fn disconnect_session(&self, session_id: &str) {
+        let admission = self.lock_admission();
         let changed = {
-            let mut state = self.lock_state()?;
-            let current = state.sessions.get(session_id).is_some_and(|session| {
-                state
-                    .session_by_instance
-                    .get(&session.client.plugin_instance_id)
-                    .is_some_and(|current| current == session_id)
-            });
+            let mut state = self.lock_state();
+            let current = checked_session_for_id(&state, session_id).is_some();
             if current {
                 revoke_session(
                     &mut state,
@@ -304,7 +327,6 @@ impl PhotoshopBridgeService {
         if changed {
             (self.on_change)();
         }
-        Ok(())
     }
 
     /// Creates a browser-session-bound first-pairing code.
@@ -315,8 +337,8 @@ impl PhotoshopBridgeService {
         &self,
         browser_session: &str,
     ) -> Result<PhotoshopPairingCreated, PhotoshopBridgeError> {
-        let _admission = self.lock_admission()?;
-        let state = self.lock_state()?;
+        let _admission = self.lock_admission();
+        let state = self.lock_state();
         require_enabled(&state)?;
         drop(state);
         self.pairings.create_pairing(browser_session)
@@ -325,7 +347,7 @@ impl PhotoshopBridgeService {
     /// Cancels an outstanding code owned by one browser session.
     ///
     /// # Errors
-    /// Returns an error for foreign, expired, consumed, or unavailable state.
+    /// Returns an error for a foreign, expired, or consumed pairing code.
     pub fn cancel_pairing(
         &self,
         browser_session: &str,
@@ -342,10 +364,10 @@ impl PhotoshopBridgeService {
         &self,
         plugin_instance_id: &str,
     ) -> Result<PhotoshopBridgeStateView, PhotoshopBridgeError> {
-        let admission = self.lock_admission()?;
+        let admission = self.lock_admission();
         self.pairings.remove_pairing(plugin_instance_id)?;
         {
-            let mut state = self.lock_state()?;
+            let mut state = self.lock_state();
             if let Some(session_id) = state.session_by_instance.get(plugin_instance_id).cloned() {
                 revoke_session(
                     &mut state,
@@ -361,15 +383,13 @@ impl PhotoshopBridgeService {
 
     /// Changes Bridge availability, revoking all memory authority when disabled.
     ///
-    /// # Errors
-    /// Returns an error when state or admission authority is unavailable.
-    pub fn set_enabled(&self, enabled: bool) -> Result<(), PhotoshopBridgeError> {
-        let admission = self.lock_admission()?;
+    pub fn set_enabled(&self, enabled: bool) {
+        let admission = self.lock_admission();
         if !enabled {
-            self.pairings.clear_outstanding()?;
+            self.pairings.clear_outstanding();
         }
         let changed = {
-            let mut state = self.lock_state()?;
+            let mut state = self.lock_state();
             if state.enabled == enabled {
                 false
             } else {
@@ -392,19 +412,12 @@ impl PhotoshopBridgeService {
         if changed {
             (self.on_change)();
         }
-        Ok(())
     }
 
     /// Records whether the optional fixed discovery listener is available.
-    ///
-    /// # Errors
-    /// Returns an error when Bridge state is unavailable.
-    pub fn set_discovery_status(
-        &self,
-        discovery_status: PhotoshopDiscoveryStatus,
-    ) -> Result<(), PhotoshopBridgeError> {
+    pub fn set_discovery_status(&self, discovery_status: PhotoshopDiscoveryStatus) {
         let changed = {
-            let mut state = self.lock_state()?;
+            let mut state = self.lock_state();
             if state.discovery_status == discovery_status {
                 false
             } else {
@@ -415,20 +428,22 @@ impl PhotoshopBridgeService {
         if changed {
             (self.on_change)();
         }
-        Ok(())
     }
 
     /// Applies one bounded message from the current plugin socket.
     ///
     /// # Errors
     /// Returns an error for a replaced session or invalid message/transfer.
+    ///
+    /// # Panics
+    /// Panics when the validated authoritative session indexes are inconsistent.
     pub fn update_plugin_message(
         &self,
         session_id: &str,
         message: PhotoshopRuntimeMessage,
     ) -> Result<Option<PhotoshopTransferView>, PhotoshopBridgeError> {
         let result = {
-            let mut state = self.lock_state()?;
+            let mut state = self.lock_state();
             let instance = current_instance_for_session(&state, session_id)?.to_owned();
             match message {
                 PhotoshopRuntimeMessage::PhotoshopStatus {
@@ -449,7 +464,7 @@ impl PhotoshopBridgeService {
                     let session = state
                         .sessions
                         .get_mut(session_id)
-                        .ok_or_else(invalid_session)?;
+                        .expect("validated Photoshop session must remain present");
                     session.client.document_count = document_count;
                     session.client.active_document_title = active_document_title;
                     session.client.last_seen_at = timestamp;
@@ -504,7 +519,7 @@ impl PhotoshopBridgeService {
         bearer: &str,
         project_id: &str,
     ) -> Result<PhotoshopBridgeStateView, PhotoshopBridgeError> {
-        let admission = self.lock_admission()?;
+        let admission = self.lock_admission();
         let instance = self.instance_for_bearer(bearer)?;
         let changed = self.link_project(project_id, &instance)?;
         drop(admission);
@@ -521,7 +536,7 @@ impl PhotoshopBridgeService {
     ) -> Result<bool, PhotoshopBridgeError> {
         validate_opaque(plugin_instance_id, "plugin instance id")?;
         {
-            let state = self.lock_state()?;
+            let state = self.lock_state();
             require_enabled(&state)?;
             require_live_instance(&state, plugin_instance_id)?;
             if state
@@ -544,16 +559,14 @@ impl PhotoshopBridgeService {
             },
             _project_use: project_use,
         };
-        {
-            let mut state = self.lock_state()?;
-            require_enabled(&state)?;
-            require_live_instance(&state, plugin_instance_id)?;
-            state
-                .links
-                .entry((plugin_instance_id.to_owned(), project_id.to_owned()))
-                .or_insert(link);
-        }
-        Ok(true)
+        let mut state = self.lock_state();
+        require_enabled(&state)?;
+        require_live_instance(&state, plugin_instance_id)?;
+        Ok(insert_project_link(
+            &mut state,
+            (plugin_instance_id.to_owned(), project_id.to_owned()),
+            link,
+        ))
     }
 
     /// Releases a browser-selected Project link when it exists.
@@ -565,7 +578,7 @@ impl PhotoshopBridgeService {
         project_id: &str,
         plugin_instance_id: &str,
     ) -> Result<PhotoshopBridgeStateView, PhotoshopBridgeError> {
-        if self.unlink_project(project_id, plugin_instance_id)? {
+        if self.unlink_project(project_id, plugin_instance_id) {
             (self.on_change)();
         }
         self.state()
@@ -574,15 +587,15 @@ impl PhotoshopBridgeService {
     /// Releases a bearer-owned Project link when it exists.
     ///
     /// # Errors
-    /// Returns an error for invalid bearer or unavailable state.
+    /// Returns an error for an invalid bearer or unreadable Project state.
     pub fn unlink_project_for_plugin(
         &self,
         bearer: &str,
         project_id: &str,
     ) -> Result<PhotoshopBridgeStateView, PhotoshopBridgeError> {
-        let admission = self.lock_admission()?;
+        let admission = self.lock_admission();
         let instance = self.instance_for_bearer(bearer)?;
-        let changed = self.unlink_project(project_id, &instance)?;
+        let changed = self.unlink_project(project_id, &instance);
         drop(admission);
         if changed {
             (self.on_change)();
@@ -590,22 +603,22 @@ impl PhotoshopBridgeService {
         self.state_for_bearer(bearer)
     }
 
-    fn unlink_project(
-        &self,
-        project_id: &str,
-        plugin_instance_id: &str,
-    ) -> Result<bool, PhotoshopBridgeError> {
+    fn unlink_project(&self, project_id: &str, plugin_instance_id: &str) -> bool {
         let removed = self
-            .lock_state()?
+            .lock_state()
             .links
             .remove(&(plugin_instance_id.to_owned(), project_id.to_owned()));
-        Ok(removed.is_some())
+        removed.is_some()
     }
 
     /// Creates a one-use download and import request for a linked Photoshop session.
     ///
     /// # Errors
     /// Returns an error for invalid file, missing link, capacity, or Project I/O.
+    ///
+    /// # Panics
+    /// Panics when validated session indexes change within the same locked operation or a
+    /// Runtime-generated transfer id collides.
     pub fn send_project_file(
         &self,
         project_id: &str,
@@ -613,12 +626,12 @@ impl PhotoshopBridgeService {
         project_relative_path: &str,
         api_base_url: &str,
     ) -> Result<PhotoshopImportDispatch, PhotoshopBridgeError> {
-        let admission = self.lock_admission()?;
+        let admission = self.lock_admission();
         let relative = normalize_project_relative_path(project_relative_path)?;
         assert_project_tree_visible_mutation_path(&relative)?;
         let mime_type = photoshop_mime_type(&relative)?;
         let project_use = {
-            let state = self.lock_state()?;
+            let state = self.lock_state();
             require_transfer_link(&state, project_id, plugin_instance_id)?;
             drop(state);
             self.projects
@@ -651,13 +664,13 @@ impl PhotoshopBridgeService {
         ));
         base.set_query(Some(&format!("token={token}")));
         let (session_id, transfer) = {
-            let mut state = self.lock_state()?;
+            let mut state = self.lock_state();
             require_transfer_link(&state, project_id, plugin_instance_id)?;
             let session_id = state
                 .session_by_instance
                 .get(plugin_instance_id)
                 .cloned()
-                .ok_or_else(client_offline)?;
+                .expect("validated Photoshop instance index must remain present");
             let transfer = state.transfers.begin_download(NewPhotoshopDownload {
                 transfer: NewPhotoshopTransfer {
                     transfer_id: &transfer_id,
@@ -702,11 +715,11 @@ impl PhotoshopBridgeService {
         transfer_id: &str,
         token: &str,
     ) -> Result<PhotoshopDownloadPlan, PhotoshopBridgeError> {
-        let _admission = self.lock_admission()?;
+        let _admission = self.lock_admission();
         validate_opaque(transfer_id, "transfer id")?;
         validate_download_token(token)?;
         let instance = self.instance_for_bearer(bearer)?;
-        let mut state = self.lock_state()?;
+        let mut state = self.lock_state();
         let project_id = state
             .transfers
             .active_download_project(&instance, transfer_id)?;
@@ -730,7 +743,7 @@ impl PhotoshopBridgeService {
         declared_byte_length: u64,
         content: Vec<u8>,
     ) -> Result<PhotoshopUploadResult, PhotoshopBridgeError> {
-        let admission = self.lock_admission()?;
+        let admission = self.lock_admission();
         let prepared = self.prepare_png_import(PhotoshopUploadInput {
             bearer,
             transfer_id,
@@ -765,7 +778,7 @@ impl PhotoshopBridgeService {
         declared_byte_length: u64,
         temporary_path: PathBuf,
     ) -> Result<PhotoshopUploadResult, PhotoshopBridgeError> {
-        let admission = self.lock_admission()?;
+        let admission = self.lock_admission();
         let prepared = self.prepare_png_import(PhotoshopUploadInput {
             bearer,
             transfer_id,
@@ -789,7 +802,7 @@ impl PhotoshopBridgeService {
         validate_png_upload(&input)?;
         let instance = self.instance_for_bearer(input.bearer)?;
         {
-            let state = self.lock_state()?;
+            let state = self.lock_state();
             require_transfer_link(&state, input.project_id, &instance)?;
         }
         let target = normalize_project_directory_path(input.target_directory).map_err(|_| {
@@ -850,7 +863,7 @@ impl PhotoshopBridgeService {
             .projects
             .acquire_use(input.project_id, ProjectUseKind::Transfer)?;
         {
-            let mut state = self.lock_state()?;
+            let mut state = self.lock_state();
             require_transfer_link(&state, input.project_id, &instance)?;
             state.transfers.begin_upload(NewPhotoshopTransfer {
                 transfer_id: input.transfer_id,
@@ -899,20 +912,18 @@ impl PhotoshopBridgeService {
                         .map(|entry| entry.project_relative_path.clone()),
                     _ => None,
                 }
-                .ok_or_else(|| {
-                    PhotoshopBridgeError::new(
-                        PhotoshopBridgeErrorCode::StatePoisoned,
-                        "Photoshop upload returned an unexpected Project result.",
+                .expect("Photoshop upload must return one changed Project path");
+                self.lock_state()
+                    .transfers
+                    .complete(
+                        &prepared.instance,
+                        &prepared.transfer_id,
+                        true,
+                        None,
+                        None,
+                        Some(imported.clone()),
                     )
-                })?;
-                self.lock_state()?.transfers.complete(
-                    &prepared.instance,
-                    &prepared.transfer_id,
-                    true,
-                    None,
-                    None,
-                    Some(imported.clone()),
-                )?;
+                    .expect("successful Photoshop upload transfer must settle");
                 Ok(PhotoshopUploadResult {
                     transfer_id: prepared.transfer_id,
                     project_id: prepared.project_id,
@@ -923,15 +934,18 @@ impl PhotoshopBridgeService {
             }
             Err(error) => {
                 let message = error.to_string();
-                let mut state = self.lock_state()?;
-                let _ = state.transfers.complete(
-                    &prepared.instance,
-                    &prepared.transfer_id,
-                    false,
-                    Some(PhotoshopBridgeErrorCode::PersistenceFailed),
-                    Some(message),
-                    None,
-                );
+                let mut state = self.lock_state();
+                state
+                    .transfers
+                    .complete(
+                        &prepared.instance,
+                        &prepared.transfer_id,
+                        false,
+                        Some(PhotoshopBridgeErrorCode::PersistenceFailed),
+                        Some(message),
+                        None,
+                    )
+                    .expect("failed Photoshop upload transfer must settle");
                 drop(state);
                 Err(error.into())
             }
@@ -941,7 +955,7 @@ impl PhotoshopBridgeService {
     /// Captures the browser-visible Bridge state.
     ///
     /// # Errors
-    /// Returns an error when Bridge, pairing, or Project state is unavailable.
+    /// Returns an error when Project state cannot be read.
     pub fn state(&self) -> Result<PhotoshopBridgeStateView, PhotoshopBridgeError> {
         self.build_state(None)
     }
@@ -949,13 +963,13 @@ impl PhotoshopBridgeService {
     /// Captures state scoped to the current socket session.
     ///
     /// # Errors
-    /// Returns an error for a replaced session or unavailable state.
+    /// Returns an error for a replaced session or unreadable Project state.
     pub fn state_for_session(
         &self,
         session_id: &str,
     ) -> Result<PhotoshopBridgeStateView, PhotoshopBridgeError> {
         let instance = {
-            let state = self.lock_state()?;
+            let state = self.lock_state();
             current_instance_for_session(&state, session_id)?.to_owned()
         };
         self.build_state(Some(&instance))
@@ -964,12 +978,12 @@ impl PhotoshopBridgeService {
     /// Captures state scoped to the bearer-owning plugin.
     ///
     /// # Errors
-    /// Returns an error for an invalid bearer or unavailable state.
+    /// Returns an error for an invalid bearer or unreadable Project state.
     pub fn state_for_bearer(
         &self,
         bearer: &str,
     ) -> Result<PhotoshopBridgeStateView, PhotoshopBridgeError> {
-        let _admission = self.lock_admission()?;
+        let _admission = self.lock_admission();
         let instance = self.instance_for_bearer(bearer)?;
         self.build_state(Some(&instance))
     }
@@ -979,7 +993,8 @@ impl PhotoshopBridgeService {
         filter_instance: Option<&str>,
     ) -> Result<PhotoshopBridgeStateView, PhotoshopBridgeError> {
         let (settings, clients, links, transfers, connected, linked_projects) = {
-            let state = self.lock_state()?;
+            let state = self.lock_state();
+            assert_session_indexes(&state);
             let settings = PhotoshopBridgeSettingsView {
                 enabled: state.enabled,
                 discovery_status: if state.enabled {
@@ -1033,7 +1048,7 @@ impl PhotoshopBridgeService {
                 linked_projects,
             )
         };
-        let mut paired_plugins = self.pairings.pairing_views(&connected)?;
+        let mut paired_plugins = self.pairings.pairing_views(&connected);
         if let Some(instance) = filter_instance {
             paired_plugins.retain(|pairing| pairing.plugin_instance_id == instance);
         }
@@ -1046,7 +1061,9 @@ impl PhotoshopBridgeService {
                 }
                 Err(error) => return Err(error.into()),
             };
-            let snapshot = session.sync_snapshot()?;
+            let Some(snapshot) = bridge_project_snapshot(session.sync_snapshot())? else {
+                continue;
+            };
             let directories =
                 if filter_instance.is_none() || linked_projects.contains(&summary.project_id) {
                     project_directories(&snapshot.snapshot.files)
@@ -1072,13 +1089,10 @@ impl PhotoshopBridgeService {
 
     fn instance_for_bearer(&self, bearer: &str) -> Result<String, PhotoshopBridgeError> {
         validate_session_token(bearer)?;
-        let state = self.lock_state()?;
+        let state = self.lock_state();
         require_enabled(&state)?;
-        let session_id = state
-            .session_by_bearer
-            .get(bearer)
-            .ok_or_else(invalid_session)?;
-        current_instance_for_session(&state, session_id).map(str::to_owned)
+        current_session_for_bearer(&state, bearer)
+            .map(|(_, session)| session.client.plugin_instance_id.clone())
     }
 
     /// Builds the bounded rediscovery notice used only for planned replacement.
@@ -1105,51 +1119,41 @@ impl PhotoshopBridgeService {
 
     /// Applies transfer deadlines and releases timed-out Project uses.
     ///
-    /// # Errors
-    /// Returns an error when Bridge state is unavailable.
-    pub fn expire_due_transfers(&self) -> Result<(), PhotoshopBridgeError> {
-        let changed = self.lock_state()?.transfers.expire_due();
+    pub fn expire_due_transfers(&self) {
+        let changed = self.lock_state().transfers.expire_due();
         if changed {
             (self.on_change)();
         }
-        Ok(())
     }
 
     /// Returns the wait until the next active transfer deadline.
-    ///
-    /// # Errors
-    /// Returns an error when Bridge state is unavailable.
-    pub fn next_transfer_expiry(&self) -> Result<Option<Duration>, PhotoshopBridgeError> {
-        Ok(self
-            .lock_state()?
+    #[must_use]
+    pub fn next_transfer_expiry(&self) -> Option<Duration> {
+        self.lock_state()
             .transfers
             .next_deadline()
-            .map(|deadline| deadline.saturating_duration_since(Instant::now())))
+            .map(|deadline| deadline.saturating_duration_since(Instant::now()))
     }
 
     #[cfg(test)]
     pub(crate) fn expire_transfers_for_test(&self) {
-        if let Ok(mut state) = self.state.lock() {
-            state.transfers.expire_all_for_test();
-        }
+        self.state
+            .lock()
+            .expect("Photoshop Bridge state lock poisoned")
+            .transfers
+            .expire_all_for_test();
     }
 
-    fn lock_state(&self) -> Result<MutexGuard<'_, PhotoshopBridgeState>, PhotoshopBridgeError> {
-        self.state.lock().map_err(|_| {
-            PhotoshopBridgeError::new(
-                PhotoshopBridgeErrorCode::StatePoisoned,
-                "Photoshop Bridge state is poisoned.",
-            )
-        })
+    fn lock_state(&self) -> MutexGuard<'_, PhotoshopBridgeState> {
+        self.state
+            .lock()
+            .expect("Photoshop Bridge state lock poisoned")
     }
 
-    fn lock_admission(&self) -> Result<MutexGuard<'_, ()>, PhotoshopBridgeError> {
-        self.admission.lock().map_err(|_| {
-            PhotoshopBridgeError::new(
-                PhotoshopBridgeErrorCode::StatePoisoned,
-                "Photoshop Bridge admission state is poisoned.",
-            )
-        })
+    fn lock_admission(&self) -> MutexGuard<'_, ()> {
+        self.admission
+            .lock()
+            .expect("Photoshop Bridge admission lock poisoned")
     }
 }
 
@@ -1168,11 +1172,71 @@ fn require_live_instance(
     state: &PhotoshopBridgeState,
     instance: &str,
 ) -> Result<(), PhotoshopBridgeError> {
-    if state.session_by_instance.contains_key(instance) {
-        Ok(())
-    } else {
-        Err(client_offline())
-    }
+    current_session_for_instance(state, instance).map(|_| ())
+}
+
+fn current_session_for_instance<'a>(
+    state: &'a PhotoshopBridgeState,
+    instance: &str,
+) -> Result<(&'a str, &'a PluginSessionRecord), PhotoshopBridgeError> {
+    let Some(session_id) = state.session_by_instance.get(instance) else {
+        assert!(
+            !state
+                .sessions
+                .values()
+                .any(|session| session.client.plugin_instance_id == instance),
+            "Photoshop primary session must not exist without its instance index"
+        );
+        return Err(client_offline());
+    };
+    let session = checked_session_for_id(state, session_id)
+        .expect("Photoshop instance index must reference a live session");
+    assert_eq!(
+        session.client.plugin_instance_id, instance,
+        "Photoshop instance index must match its session"
+    );
+    assert_eq!(
+        state
+            .sessions
+            .values()
+            .filter(|session| session.client.plugin_instance_id == instance)
+            .count(),
+        1,
+        "Photoshop instance must own exactly one primary session"
+    );
+    Ok((session_id, session))
+}
+
+fn current_session_for_bearer<'a>(
+    state: &'a PhotoshopBridgeState,
+    bearer: &str,
+) -> Result<(&'a str, &'a PluginSessionRecord), PhotoshopBridgeError> {
+    let Some(session_id) = state.session_by_bearer.get(bearer) else {
+        assert!(
+            !state
+                .sessions
+                .values()
+                .any(|session| session.bearer == bearer),
+            "Photoshop primary session must not exist without its bearer index"
+        );
+        return Err(invalid_session());
+    };
+    let session = checked_session_for_id(state, session_id)
+        .expect("Photoshop bearer index must reference a live session");
+    assert_eq!(
+        session.bearer, bearer,
+        "Photoshop bearer index must match its session"
+    );
+    assert_eq!(
+        state
+            .sessions
+            .values()
+            .filter(|session| session.bearer == bearer)
+            .count(),
+        1,
+        "Photoshop bearer must own exactly one primary session"
+    );
+    Ok((session_id, session))
 }
 
 fn require_transfer_link(
@@ -1199,16 +1263,115 @@ fn current_instance_for_session<'a>(
     state: &'a PhotoshopBridgeState,
     session_id: &str,
 ) -> Result<&'a str, PhotoshopBridgeError> {
-    let session = state.sessions.get(session_id).ok_or_else(invalid_session)?;
-    if state
-        .session_by_instance
-        .get(&session.client.plugin_instance_id)
-        .is_some_and(|current| current == session_id)
-    {
-        Ok(&session.client.plugin_instance_id)
-    } else {
-        Err(invalid_session())
+    checked_session_for_id(state, session_id)
+        .map(|session| session.client.plugin_instance_id.as_str())
+        .ok_or_else(invalid_session)
+}
+
+fn checked_session_for_id<'a>(
+    state: &'a PhotoshopBridgeState,
+    session_id: &str,
+) -> Option<&'a PluginSessionRecord> {
+    let Some(session) = state.sessions.get(session_id) else {
+        assert!(
+            !state
+                .session_by_instance
+                .values()
+                .any(|indexed| indexed == session_id),
+            "Photoshop instance index must not reference a missing session"
+        );
+        assert!(
+            !state
+                .session_by_bearer
+                .values()
+                .any(|indexed| indexed == session_id),
+            "Photoshop bearer index must not reference a missing session"
+        );
+        return None;
+    };
+    assert_eq!(
+        state
+            .session_by_instance
+            .get(&session.client.plugin_instance_id)
+            .map(String::as_str),
+        Some(session_id),
+        "Photoshop session must have an exact instance index"
+    );
+    assert_eq!(
+        state
+            .session_by_bearer
+            .get(&session.bearer)
+            .map(String::as_str),
+        Some(session_id),
+        "Photoshop session must have an exact bearer index"
+    );
+    assert_eq!(
+        state
+            .session_by_instance
+            .values()
+            .filter(|indexed| indexed.as_str() == session_id)
+            .count(),
+        1,
+        "Photoshop session must have exactly one instance index"
+    );
+    assert_eq!(
+        state
+            .session_by_bearer
+            .values()
+            .filter(|indexed| indexed.as_str() == session_id)
+            .count(),
+        1,
+        "Photoshop session must have exactly one bearer index"
+    );
+    Some(session)
+}
+
+fn assert_session_indexes(state: &PhotoshopBridgeState) {
+    assert_eq!(
+        state.sessions.len(),
+        state.session_by_instance.len(),
+        "Photoshop sessions and instance indexes must have equal cardinality"
+    );
+    assert_eq!(
+        state.sessions.len(),
+        state.session_by_bearer.len(),
+        "Photoshop sessions and bearer indexes must have equal cardinality"
+    );
+    for session_id in state.sessions.keys() {
+        assert!(
+            checked_session_for_id(state, session_id).is_some(),
+            "Photoshop session index validation must retain every primary session"
+        );
     }
+}
+
+fn bridge_project_snapshot(
+    snapshot: Result<ProjectSyncSnapshot, ProjectError>,
+) -> Result<Option<ProjectSyncSnapshot>, PhotoshopBridgeError> {
+    match snapshot {
+        Ok(snapshot) => Ok(Some(snapshot)),
+        Err(error) if matches!(error.code(), "project_not_open" | "project_not_found") => Ok(None),
+        Err(error) => Err(error.into()),
+    }
+}
+
+fn insert_project_link(
+    state: &mut PhotoshopBridgeState,
+    key: (String, String),
+    link: ProjectLinkRecord,
+) -> bool {
+    if state.links.contains_key(&key) {
+        return false;
+    }
+    assert!(
+        !state
+            .links
+            .values()
+            .any(|existing| existing.view.link_id == link.view.link_id),
+        "Runtime-generated Photoshop Project link id must be unique"
+    );
+    assert!(state.links.insert(key, link).is_none());
+    true
 }
 
 fn revoke_session(
@@ -1216,27 +1379,30 @@ fn revoke_session(
     session_id: &str,
     failure_code: PhotoshopBridgeErrorCode,
 ) {
-    let Some(session) = state.sessions.remove(session_id) else {
-        return;
+    let (bearer, instance) = {
+        let session = checked_session_for_id(state, session_id)
+            .expect("revoked Photoshop session must exist");
+        (
+            session.bearer.clone(),
+            session.client.plugin_instance_id.clone(),
+        )
     };
-    state.session_by_bearer.remove(&session.bearer);
-    if state
-        .session_by_instance
-        .get(&session.client.plugin_instance_id)
-        .is_some_and(|current| current == session_id)
-    {
-        state
-            .session_by_instance
-            .remove(&session.client.plugin_instance_id);
-    }
+    assert!(state.sessions.remove(session_id).is_some());
+    assert_eq!(
+        state.session_by_bearer.remove(&bearer).as_deref(),
+        Some(session_id)
+    );
+    assert_eq!(
+        state.session_by_instance.remove(&instance).as_deref(),
+        Some(session_id)
+    );
     state
         .links
-        .retain(|(instance, _), _| instance != &session.client.plugin_instance_id);
-    state.transfers.fail_for_plugin(
-        &session.client.plugin_instance_id,
-        failure_code,
-        "Photoshop plugin session ended.",
-    );
+        .retain(|(linked_instance, _), _| linked_instance != &instance);
+    state
+        .transfers
+        .fail_for_plugin(&instance, failure_code, "Photoshop plugin session ended.");
+    assert_session_indexes(state);
 }
 
 fn prune_challenges(state: &mut PhotoshopBridgeState) {
@@ -1629,7 +1795,7 @@ mod tests {
         let first = connect(&fixture.service, &key, "plugin-1", Some(code));
         let opened = fixture
             .registry
-            .open_project(fixture.project.as_ref(), ProjectUseKind::Operation)
+            .open_project(fixture.project.as_ref(), ProjectUseKind::Request)
             .unwrap();
         let project_id = opened.session.project_id().to_owned();
         fixture
@@ -1656,8 +1822,7 @@ mod tests {
         assert!(fixture.registry.get(&project_id).is_err());
         fixture
             .service
-            .disconnect_session(&first.grant.plugin_session_id)
-            .unwrap();
+            .disconnect_session(&first.grant.plugin_session_id);
         assert!(
             fixture
                 .service
@@ -1675,7 +1840,7 @@ mod tests {
         let connected = connect(&fixture.service, &key, "plugin-1", Some(code));
         let opened = fixture
             .registry
-            .open_project(fixture.project.as_ref(), ProjectUseKind::Operation)
+            .open_project(fixture.project.as_ref(), ProjectUseKind::Request)
             .unwrap();
         let project_id = opened.session.project_id().to_owned();
         fixture
@@ -1800,7 +1965,7 @@ mod tests {
                 ..
             } if runtime_instance_id == "runtime-2"
         ));
-        fixture.service.set_enabled(false).unwrap();
+        fixture.service.set_enabled(false);
         assert_eq!(
             fixture
                 .service
@@ -1820,8 +1985,8 @@ mod tests {
         let fixture = fixture();
         let key = signing_key();
         let code = fixture.service.create_pairing("browser-1").unwrap().code;
-        fixture.service.set_enabled(false).unwrap();
-        fixture.service.set_enabled(true).unwrap();
+        fixture.service.set_enabled(false);
+        fixture.service.set_enabled(true);
         let challenge = fixture.service.begin_handshake().unwrap();
         let RuntimePhotoshopMessage::BridgeChallenge {
             challenge: value, ..
@@ -1851,11 +2016,11 @@ mod tests {
         fs::create_dir(other_project.as_ref().join("private-assets")).unwrap();
         let first = fixture
             .registry
-            .open_project(fixture.project.as_ref(), ProjectUseKind::Operation)
+            .open_project(fixture.project.as_ref(), ProjectUseKind::Request)
             .unwrap();
         let second = fixture
             .registry
-            .open_project(other_project.as_ref(), ProjectUseKind::Operation)
+            .open_project(other_project.as_ref(), ProjectUseKind::Request)
             .unwrap();
         let first_id = first.session.project_id().to_owned();
         let second_id = second.session.project_id().to_owned();
@@ -1899,7 +2064,7 @@ mod tests {
         let connected = connect(&fixture.service, &key, "plugin-1", Some(code));
         let opened = fixture
             .registry
-            .open_project(fixture.project.as_ref(), ProjectUseKind::Operation)
+            .open_project(fixture.project.as_ref(), ProjectUseKind::Request)
             .unwrap();
         let project_id = opened.session.project_id().to_owned();
         fixture
@@ -1995,5 +2160,405 @@ mod tests {
                 .code(),
             PhotoshopBridgeErrorCode::ProjectNotLinked
         );
+    }
+
+    #[test]
+    fn poisoned_bridge_state_panics_instead_of_becoming_an_operational_error() {
+        let fixture = fixture();
+        std::thread::scope(|scope| {
+            assert!(
+                scope
+                    .spawn(|| {
+                        let _state = fixture.service.state.lock().unwrap();
+                        panic!("poison bridge state");
+                    })
+                    .join()
+                    .is_err()
+            );
+        });
+
+        let result =
+            std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| fixture.service.state()));
+        assert!(
+            result.is_err(),
+            "authoritative lock poisoning must remain an unexpected panic"
+        );
+    }
+
+    #[test]
+    #[allow(clippy::too_many_lines)]
+    fn inconsistent_session_indexes_panic_instead_of_becoming_protocol_errors() {
+        let first_fixture = fixture();
+        let key = signing_key();
+        let code = first_fixture
+            .service
+            .create_pairing("browser-1")
+            .unwrap()
+            .code;
+        let connected = connect(&first_fixture.service, &key, "plugin-1", Some(code));
+        first_fixture
+            .service
+            .state
+            .lock()
+            .unwrap()
+            .session_by_instance
+            .remove("plugin-1");
+
+        let read = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+            first_fixture
+                .service
+                .state_for_session(&connected.grant.plugin_session_id)
+        }));
+        assert!(
+            read.is_err(),
+            "a primary session without its instance index must panic"
+        );
+
+        let second_fixture = fixture();
+        let key = signing_key();
+        let code = second_fixture
+            .service
+            .create_pairing("browser-1")
+            .unwrap()
+            .code;
+        let connected = connect(&second_fixture.service, &key, "plugin-1", Some(code));
+        second_fixture
+            .service
+            .state
+            .lock()
+            .unwrap()
+            .session_by_bearer
+            .remove(&connected.grant.bearer);
+
+        let disconnect = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+            second_fixture
+                .service
+                .disconnect_session(&connected.grant.plugin_session_id);
+        }));
+        assert!(
+            disconnect.is_err(),
+            "a primary session without its bearer index must panic"
+        );
+
+        let third_fixture = fixture();
+        let key = signing_key();
+        let code = third_fixture
+            .service
+            .create_pairing("browser-1")
+            .unwrap()
+            .code;
+        connect(&third_fixture.service, &key, "plugin-1", Some(code));
+        third_fixture
+            .service
+            .state
+            .lock()
+            .unwrap()
+            .session_by_instance
+            .insert("phantom-plugin".to_owned(), "missing-session".to_owned());
+
+        let projection = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+            third_fixture.service.state()
+        }));
+        assert!(
+            projection.is_err(),
+            "a dangling session index must panic at the projection boundary"
+        );
+
+        let fourth_fixture = fixture();
+        let key = signing_key();
+        let code = fourth_fixture
+            .service
+            .create_pairing("browser-1")
+            .unwrap()
+            .code;
+        connect(&fourth_fixture.service, &key, "plugin-1", Some(code));
+        let opened = fourth_fixture
+            .registry
+            .open_project(fourth_fixture.project.as_ref(), ProjectUseKind::Request)
+            .unwrap();
+        let project_id = opened.session.project_id().to_owned();
+        fourth_fixture
+            .service
+            .state
+            .lock()
+            .unwrap()
+            .session_by_instance
+            .remove("plugin-1");
+        let instance_lookup = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+            fourth_fixture
+                .service
+                .link_project_for_browser(&project_id, "plugin-1")
+        }));
+        assert!(
+            instance_lookup.is_err(),
+            "a missing instance index for a primary session must panic"
+        );
+
+        let fifth_fixture = fixture();
+        let key = signing_key();
+        let code = fifth_fixture
+            .service
+            .create_pairing("browser-1")
+            .unwrap()
+            .code;
+        let connected = connect(&fifth_fixture.service, &key, "plugin-1", Some(code));
+        fifth_fixture
+            .service
+            .state
+            .lock()
+            .unwrap()
+            .session_by_bearer
+            .remove(&connected.grant.bearer);
+        let bearer_lookup = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+            fifth_fixture
+                .service
+                .state_for_bearer(&connected.grant.bearer)
+        }));
+        assert!(
+            bearer_lookup.is_err(),
+            "a missing bearer index for a primary session must panic"
+        );
+    }
+
+    #[test]
+    fn failed_project_import_settles_the_transfer_and_releases_its_project_use() {
+        let fixture = fixture();
+        fs::create_dir(fixture.project.as_ref().join("uploads")).unwrap();
+        let key = signing_key();
+        let code = fixture.service.create_pairing("browser-1").unwrap().code;
+        let connected = connect(&fixture.service, &key, "plugin-1", Some(code));
+        let opened = fixture
+            .registry
+            .open_project(fixture.project.as_ref(), ProjectUseKind::Request)
+            .unwrap();
+        let project_id = opened.session.project_id().to_owned();
+        fixture
+            .service
+            .link_project_for_browser(&project_id, "plugin-1")
+            .unwrap();
+        let png = png_fixture();
+        let prepared = fixture
+            .service
+            .prepare_png_import(PhotoshopUploadInput {
+                bearer: &connected.grant.bearer,
+                transfer_id: "upload-failure",
+                project_id: &project_id,
+                target_directory: "uploads",
+                suggested_name: "Layer.png",
+                mime_type: "image/png",
+                declared_byte_length: u64::try_from(png.len()).unwrap(),
+                content: PhotoshopUploadContent::Bytes(png),
+            })
+            .unwrap();
+        fs::remove_dir(fixture.project.as_ref().join("uploads")).unwrap();
+        fs::write(fixture.project.as_ref().join("uploads"), b"not-a-directory").unwrap();
+        fixture.service.commit_png_import(prepared).unwrap_err();
+        let transfer = fixture
+            .service
+            .lock_state()
+            .transfers
+            .views()
+            .into_iter()
+            .find(|transfer| transfer.transfer_id == "upload-failure")
+            .unwrap();
+        assert_eq!(
+            transfer.status,
+            super::super::PhotoshopTransferStatus::Failed
+        );
+        assert_eq!(
+            transfer.error_code,
+            Some(PhotoshopBridgeErrorCode::PersistenceFailed)
+        );
+
+        fixture
+            .service
+            .unlink_project_for_plugin(&connected.grant.bearer, &project_id)
+            .unwrap();
+        drop(opened);
+        assert!(fixture.registry.get(&project_id).is_err());
+    }
+
+    #[test]
+    fn impossible_transfer_resettlement_panics() {
+        let fixture = fixture();
+        fs::write(fixture.project.as_ref().join("Existing.png"), b"existing").unwrap();
+        let key = signing_key();
+        let code = fixture.service.create_pairing("browser-1").unwrap().code;
+        let connected = connect(&fixture.service, &key, "plugin-1", Some(code));
+        let opened = fixture
+            .registry
+            .open_project(fixture.project.as_ref(), ProjectUseKind::Request)
+            .unwrap();
+        let project_id = opened.session.project_id().to_owned();
+        fixture
+            .service
+            .link_project_for_browser(&project_id, "plugin-1")
+            .unwrap();
+        let png = png_fixture();
+        let prepared = fixture
+            .service
+            .prepare_png_import(PhotoshopUploadInput {
+                bearer: &connected.grant.bearer,
+                transfer_id: "upload-corrupt",
+                project_id: &project_id,
+                target_directory: "",
+                suggested_name: "Existing.png",
+                mime_type: "image/png",
+                declared_byte_length: u64::try_from(png.len()).unwrap(),
+                content: PhotoshopUploadContent::Bytes(png),
+            })
+            .unwrap();
+        fixture
+            .service
+            .lock_state()
+            .transfers
+            .complete("plugin-1", "upload-corrupt", true, None, None, None)
+            .unwrap();
+
+        let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+            fixture.service.commit_png_import(prepared)
+        }));
+        assert!(
+            result.is_err(),
+            "a prepared transfer that cannot settle must panic"
+        );
+    }
+
+    #[test]
+    fn runtime_generated_download_id_collision_panics_but_upload_duplicate_is_typed() {
+        let fixture = fixture();
+        let opened = fixture
+            .registry
+            .open_project(fixture.project.as_ref(), ProjectUseKind::Request)
+            .unwrap();
+        let project_id = opened.session.project_id().to_owned();
+        let mut state = fixture.service.lock_state();
+        let download = |project_use| NewPhotoshopDownload {
+            transfer: NewPhotoshopTransfer {
+                transfer_id: "runtime-download",
+                direction: PhotoshopTransferDirection::DebruteToPhotoshop,
+                project_id: &project_id,
+                plugin_instance_id: "plugin-1",
+                project_relative_path: Some("source.png".to_owned()),
+                project_use,
+            },
+            token: "token".to_owned(),
+            file: fs::File::open(fixture.project.as_ref().join("source.png")).unwrap(),
+            byte_length: 10,
+            mime_type: "image/png",
+            file_name: "source.png".to_owned(),
+        };
+        state
+            .transfers
+            .begin_download(download(
+                fixture
+                    .registry
+                    .acquire_use(&project_id, ProjectUseKind::Transfer)
+                    .unwrap(),
+            ))
+            .unwrap();
+
+        let collision = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+            state.transfers.begin_download(download(
+                fixture
+                    .registry
+                    .acquire_use(&project_id, ProjectUseKind::Transfer)
+                    .unwrap(),
+            ))
+        }));
+        assert!(
+            collision.is_err(),
+            "a Runtime-generated download id collision must panic"
+        );
+
+        let upload = state
+            .transfers
+            .begin_upload(NewPhotoshopTransfer {
+                transfer_id: "runtime-download",
+                direction: PhotoshopTransferDirection::PhotoshopToDebrute,
+                project_id: &project_id,
+                plugin_instance_id: "plugin-1",
+                project_relative_path: None,
+                project_use: fixture
+                    .registry
+                    .acquire_use(&project_id, ProjectUseKind::Transfer)
+                    .unwrap(),
+            })
+            .unwrap_err();
+        assert_eq!(
+            upload.code(),
+            PhotoshopBridgeErrorCode::InvalidTransferPayload
+        );
+    }
+
+    #[test]
+    fn runtime_generated_project_link_id_collision_panics_but_same_link_is_idempotent() {
+        let fixture = fixture();
+        let opened = fixture
+            .registry
+            .open_project(fixture.project.as_ref(), ProjectUseKind::Request)
+            .unwrap();
+        let project_id = opened.session.project_id().to_owned();
+        let project_link = |plugin_instance_id: &str, project_use| ProjectLinkRecord {
+            view: PhotoshopProjectLinkView {
+                link_id: "runtime-link".to_owned(),
+                project_id: project_id.clone(),
+                plugin_instance_id: plugin_instance_id.to_owned(),
+                created_at: "2026-07-22T00:00:00Z".to_owned(),
+                status: "active",
+            },
+            _project_use: project_use,
+        };
+        let first_use = fixture
+            .registry
+            .acquire_use(&project_id, ProjectUseKind::PhotoshopLink)
+            .unwrap();
+        let idempotent_use = fixture
+            .registry
+            .acquire_use(&project_id, ProjectUseKind::PhotoshopLink)
+            .unwrap();
+        let collision_use = fixture
+            .registry
+            .acquire_use(&project_id, ProjectUseKind::PhotoshopLink)
+            .unwrap();
+        let mut state = fixture.service.lock_state();
+        let key = ("plugin-1".to_owned(), project_id.clone());
+        assert!(insert_project_link(
+            &mut state,
+            key.clone(),
+            project_link("plugin-1", first_use),
+        ));
+        assert!(!insert_project_link(
+            &mut state,
+            key,
+            project_link("plugin-1", idempotent_use),
+        ));
+
+        let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+            insert_project_link(
+                &mut state,
+                ("plugin-2".to_owned(), project_id.clone()),
+                project_link("plugin-2", collision_use),
+            )
+        }));
+        assert!(
+            result.is_err(),
+            "a duplicate Runtime-generated Project link id must panic"
+        );
+    }
+
+    #[test]
+    fn project_close_race_is_absent_from_bridge_projection() {
+        let snapshot = bridge_project_snapshot(Err(ProjectError::ProjectNotOpen(
+            "closing-project".to_owned(),
+        )))
+        .unwrap();
+        assert!(snapshot.is_none());
+
+        let error = bridge_project_snapshot(Err(ProjectError::Validation(
+            "invalid project state".to_owned(),
+        )))
+        .unwrap_err();
+        assert_eq!(error.code(), PhotoshopBridgeErrorCode::PersistenceFailed);
     }
 }

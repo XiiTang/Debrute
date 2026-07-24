@@ -130,9 +130,7 @@ fn version_and_package_query_parsers_match_current_fixtures() {
 fn rescan_reports_all_integrations_and_closed_backend_state() {
     let adapter = Arc::new(MissingProcessAdapter);
     let service = IntegrationService::new(Platform::MacOs, "", "", adapter);
-    let view = service
-        .rescan()
-        .expect("missing integrations are a valid view");
+    let view = service.rescan();
     assert_eq!(view.integrations.len(), 5);
     assert!(
         view.integrations
@@ -159,10 +157,10 @@ fn rescan_reports_all_integrations_and_closed_backend_state() {
 }
 
 #[test]
-fn install_operation_is_catalog_checked_and_returns_the_settled_state() {
+fn install_operation_is_catalog_checked_and_publishes_the_settled_state() {
     let adapter = Arc::new(RecordingProcessAdapter::default());
     let service = IntegrationService::new(Platform::MacOs, "", "", adapter.clone());
-    let initial = service.rescan().expect("state should scan");
+    let initial = service.rescan();
     let ffmpeg = initial
         .integrations
         .iter()
@@ -177,13 +175,12 @@ fn install_operation_is_catalog_checked_and_returns_the_settled_state() {
         [IntegrationOperation::Install]
     );
 
-    let result = service
-        .run_operation("ffmpeg", IntegrationOperation::Install)
-        .expect("operation engine should remain available");
+    let result =
+        service.run_operation_observed("ffmpeg", IntegrationOperation::Install, |_| {}, |_| {});
     assert!(result.ok);
     assert_eq!(result.integration_id, "ffmpeg");
     assert_eq!(result.operation, IntegrationOperation::Install);
-    assert!(result.settings.running_operation.is_none());
+    assert!(service.list_status().running_operation.is_none());
     assert!(adapter.commands().iter().any(|command| {
         command.file == std::path::Path::new("/opt/homebrew/bin/brew")
             && command.args == ["install", "--formula", "ffmpeg"]
@@ -195,16 +192,12 @@ fn list_status_caches_detection_until_an_explicit_rescan() {
     let adapter = Arc::new(RecordingProcessAdapter::default());
     let service = IntegrationService::new(Platform::MacOs, "", "", adapter.clone());
 
-    service.list_status().expect("first status should scan");
+    let _first = service.list_status();
     let first_resolution_count = adapter.resolution_count();
-    service
-        .list_status()
-        .expect("second status should use cache");
+    let _cached = service.list_status();
     assert_eq!(adapter.resolution_count(), first_resolution_count);
 
-    service
-        .rescan()
-        .expect("explicit rescan should probe again");
+    let _rescanned = service.rescan();
     assert!(adapter.resolution_count() > first_resolution_count);
 }
 
@@ -218,14 +211,10 @@ fn an_older_scan_cannot_replace_a_newer_cached_result() {
         adapter.clone(),
     ));
     let older_service = Arc::clone(&service);
-    let older = thread::spawn(move || {
-        older_service
-            .rescan()
-            .expect("older scan should eventually complete")
-    });
+    let older = thread::spawn(move || older_service.rescan());
     adapter.wait_until_older_scan_started();
 
-    let newer = service.rescan().expect("newer scan should complete first");
+    let newer = service.rescan();
     assert!(
         newer
             .backends
@@ -237,9 +226,7 @@ fn an_older_scan_cannot_replace_a_newer_cached_result() {
     let older = older.join().expect("older scan thread should join");
     assert!(older.backends.iter().all(|backend| !backend.available));
 
-    let cached = service
-        .list_status()
-        .expect("the cache should retain the newer scan");
+    let cached = service.list_status();
     assert!(
         cached
             .backends
@@ -259,15 +246,17 @@ fn a_second_operation_is_rejected_while_the_first_command_is_running() {
     ));
     let first_service = Arc::clone(&service);
     let first = thread::spawn(move || {
-        first_service
-            .run_operation("ffmpeg", IntegrationOperation::Install)
-            .expect("first operation should complete")
+        first_service.run_operation_observed(
+            "ffmpeg",
+            IntegrationOperation::Install,
+            |_| {},
+            |_| {},
+        )
     });
     adapter.wait_until_install_started();
 
-    let second = service
-        .run_operation("ffmpeg", IntegrationOperation::Install)
-        .expect("second operation should return a typed rejection");
+    let second =
+        service.run_operation_observed("ffmpeg", IntegrationOperation::Install, |_| {}, |_| {});
     assert!(!second.ok);
     assert_eq!(
         second
@@ -277,8 +266,8 @@ fn a_second_operation_is_rejected_while_the_first_command_is_running() {
         Some("operation_already_running")
     );
     assert_eq!(
-        second
-            .settings
+        service
+            .list_status()
             .running_operation
             .as_ref()
             .map(|running| (running.integration_id.as_str(), running.operation,)),
@@ -299,21 +288,21 @@ fn a_second_operation_is_rejected_while_the_first_is_still_validating() {
         "",
         adapter.clone(),
     ));
-    service
-        .list_status()
-        .expect("status cache should be warm before validation blocks");
+    let _warm = service.list_status();
     adapter.enable_blocking();
 
     let first_service = Arc::clone(&service);
     let first = thread::spawn(move || {
-        first_service
-            .run_operation("ffmpeg", IntegrationOperation::Install)
-            .expect("first operation should complete")
+        first_service.run_operation_observed(
+            "ffmpeg",
+            IntegrationOperation::Install,
+            |_| {},
+            |_| {},
+        )
     });
     adapter.wait_until_validation_started();
-    let second = service
-        .run_operation("ffmpeg", IntegrationOperation::Install)
-        .expect("second operation should return a typed rejection");
+    let second =
+        service.run_operation_observed("ffmpeg", IntegrationOperation::Install, |_| {}, |_| {});
     assert_eq!(
         second
             .diagnostic
@@ -338,9 +327,12 @@ fn unavailable_backends_return_the_existing_platform_diagnostic() {
         ),
     ] {
         let service = IntegrationService::new(platform, "", "", Arc::new(MissingProcessAdapter));
-        let result = service
-            .run_operation(integration_id, IntegrationOperation::Install)
-            .expect("unavailable backend should be a typed result");
+        let result = service.run_operation_observed(
+            integration_id,
+            IntegrationOperation::Install,
+            |_| {},
+            |_| {},
+        );
         assert_eq!(
             result
                 .diagnostic
@@ -356,66 +348,6 @@ fn unavailable_backends_return_the_existing_platform_diagnostic() {
             Some(expected)
         );
     }
-}
-
-#[test]
-fn a_failed_started_observer_clears_running_state_without_executing_the_command() {
-    let adapter = Arc::new(RecordingProcessAdapter::default());
-    let service = IntegrationService::new(Platform::MacOs, "", "", adapter.clone());
-
-    let result = service.run_operation_observed(
-        "ffmpeg",
-        IntegrationOperation::Install,
-        |_| Err::<(), _>("started event failed"),
-        |_| Ok::<(), &str>(()),
-    );
-    assert!(matches!(
-        result,
-        Err(
-            debrute_runtime::integrations::IntegrationObservationError::Started(
-                "started event failed"
-            )
-        )
-    ));
-    assert!(
-        !adapter
-            .commands()
-            .iter()
-            .any(|command| { command.args.first().is_some_and(|value| value == "install") })
-    );
-    assert!(
-        service
-            .list_status()
-            .expect("state should remain inspectable")
-            .running_operation
-            .is_none()
-    );
-}
-
-#[test]
-fn a_failed_settled_observer_does_not_erase_the_known_command_result() {
-    let adapter = Arc::new(RecordingProcessAdapter::default());
-    let service = IntegrationService::new(Platform::MacOs, "", "", adapter.clone());
-
-    let observed = service
-        .run_operation_observed(
-            "ffmpeg",
-            IntegrationOperation::Install,
-            |_| Ok::<(), &str>(()),
-            |_| Err::<(), _>("settled event failed"),
-        )
-        .expect("settled observer failure should preserve the operation outcome");
-    assert!(observed.result.ok);
-    assert_eq!(
-        observed.settled_observer_error,
-        Some("settled event failed")
-    );
-    assert!(
-        adapter
-            .commands()
-            .iter()
-            .any(|command| { command.args.first().is_some_and(|value| value == "install") })
-    );
 }
 
 struct MissingProcessAdapter;

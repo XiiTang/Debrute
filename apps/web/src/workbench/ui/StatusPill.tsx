@@ -1,7 +1,7 @@
 import React from 'react';
 import { cx } from './cx';
 
-export type StatusTone = 'neutral' | 'success' | 'warning' | 'danger' | 'info' | 'loading';
+export type StatusTone = 'neutral' | 'warning' | 'danger' | 'info' | 'loading';
 
 export function StatusPill({
   tone = 'neutral',

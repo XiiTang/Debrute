@@ -7,6 +7,7 @@ import { validateNativeRasterLock } from './native-raster-payload.mjs';
 
 const root = process.cwd();
 const desktopRequire = createRequire(join(root, 'apps/desktop/package.json'));
+const webRequire = createRequire(join(root, 'apps/web/package.json'));
 const requiredPaths = [
   'pnpm-lock.yaml',
   'Cargo.toml',
@@ -18,10 +19,12 @@ const requiredPaths = [
   'apps/desktop/src/electron/preload.ts'
 ];
 const requiredPackages = [
-  'electron/package.json',
-  'electron-builder/package.json',
-  'vite/package.json',
-  'typescript/package.json'
+  [desktopRequire, 'electron/package.json', 'electron'],
+  [desktopRequire, 'electron-builder/package.json', 'electron-builder'],
+  [desktopRequire, 'esbuild/package.json', 'esbuild'],
+  [desktopRequire, 'typescript/package.json', 'typescript'],
+  [webRequire, '@vitejs/plugin-react', '@vitejs/plugin-react'],
+  [webRequire, 'vite/package.json', 'vite']
 ];
 
 const failures = [];
@@ -37,11 +40,11 @@ for (const path of requiredPaths) {
   }
 }
 
-for (const packageName of requiredPackages) {
+for (const [packageRequire, packageName, displayName] of requiredPackages) {
   try {
-    desktopRequire.resolve(packageName);
+    packageRequire.resolve(packageName);
   } catch {
-    failures.push(`Missing workspace dependency: ${packageName.replace('/package.json', '')}`);
+    failures.push(`Missing workspace dependency: ${displayName}`);
   }
 }
 
@@ -109,8 +112,8 @@ try {
   failures.push(`Native raster payload lock is invalid. ${message}`);
 }
 
-if (process.platform !== 'darwin') {
-  console.warn(`Debrute packaging is currently configured for macOS. Current platform: ${process.platform}`);
+if (process.platform !== 'darwin' && process.platform !== 'win32') {
+  failures.push(`Debrute supports only darwin and win32. Current platform: ${process.platform}`);
 }
 
 if (failures.length > 0) {

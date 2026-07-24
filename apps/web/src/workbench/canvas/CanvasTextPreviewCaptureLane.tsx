@@ -278,8 +278,7 @@ export function CanvasTextPreviewCaptureLane({
     if (!job || job.disposed || job.phase !== 'waiting-layout') {
       return;
     }
-    const fontsReady = typeof document !== 'undefined' ? document.fonts?.ready : undefined;
-    void (fontsReady ?? Promise.resolve()).then(() => {
+    void document.fonts.ready.then(() => {
       if (jobRef.current !== job || job.disposed || job.phase !== 'waiting-layout') {
         return;
       }

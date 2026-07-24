@@ -49,6 +49,31 @@ describe('CanvasTextPreviewImageHandoff', { tags: ['canvas-text'] }, () => {
     expect(first?.isConnected).toBe(false);
   });
 
+  it('promotes a cached pending image whose load completed before the layout effect', async () => {
+    const pending = source(640);
+    const onPendingReady = vi.fn();
+    const decode = vi.fn(async () => undefined);
+    const completeDescriptor = Object.getOwnPropertyDescriptor(HTMLImageElement.prototype, 'complete');
+    const naturalWidthDescriptor = Object.getOwnPropertyDescriptor(HTMLImageElement.prototype, 'naturalWidth');
+    const decodeDescriptor = Object.getOwnPropertyDescriptor(HTMLImageElement.prototype, 'decode');
+    Object.defineProperties(HTMLImageElement.prototype, {
+      complete: { configurable: true, get: () => true },
+      naturalWidth: { configurable: true, get: () => 640 },
+      decode: { configurable: true, value: decode }
+    });
+
+    try {
+      await renderHandoff(root, { pending }, { onPendingReady });
+
+      expect(decode).toHaveBeenCalledTimes(1);
+      expect(onPendingReady).toHaveBeenCalledWith(pending);
+    } finally {
+      restoreProperty(HTMLImageElement.prototype, 'complete', completeDescriptor);
+      restoreProperty(HTMLImageElement.prototype, 'naturalWidth', naturalWidthDescriptor);
+      restoreProperty(HTMLImageElement.prototype, 'decode', decodeDescriptor);
+    }
+  });
+
   it('ignores a stale pending decode after a newer width replaces its DOM element', async () => {
     const visible = source(320);
     const stale = source(480);
@@ -246,4 +271,16 @@ function installAnimationFrameQueue(callbacks: FrameRequestCallback[]): () => vo
     window.requestAnimationFrame = originalRequestAnimationFrame;
     window.cancelAnimationFrame = originalCancelAnimationFrame;
   };
+}
+
+function restoreProperty(
+  target: object,
+  property: PropertyKey,
+  descriptor: PropertyDescriptor | undefined
+): void {
+  if (descriptor) {
+    Object.defineProperty(target, property, descriptor);
+  } else {
+    Reflect.deleteProperty(target, property);
+  }
 }

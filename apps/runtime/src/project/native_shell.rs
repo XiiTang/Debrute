@@ -43,7 +43,7 @@ impl ProjectNativeShellService {
     /// Returns an error when the native picker cannot be started or reports a
     /// failure distinct from an explicit user cancellation.
     pub fn choose_directory(&self) -> Result<Option<PathBuf>, ProjectError> {
-        let (executable, args) = directory_picker_command()?;
+        let (executable, args) = directory_picker_command();
         let output = self.supervisor.run(
             ProcessRequest::new(
                 WorkerKind::NativeShell,
@@ -94,7 +94,7 @@ impl ProjectNativeShellService {
         entry: &ProjectNativePathEntry,
     ) -> Result<(), ProjectError> {
         let resolved = validate_entry(project_root, entry)?;
-        let action = reveal_action(&resolved.absolute, entry.kind)?;
+        let action = reveal_action(&resolved.absolute, entry.kind);
         self.run(action, Some(&resolved))
     }
 
@@ -109,13 +109,12 @@ impl ProjectNativeShellService {
         project_root: &Path,
         entries: &[ProjectNativePathEntry],
     ) -> Result<Vec<ProjectNativePathEntry>, ProjectError> {
-        ensure_trash_supported()?;
         let resolved = top_level_resolved_entries(validate_entries(project_root, entries)?)?;
         preflight_trash_staging(project_root, &resolved)?;
         for entry in &resolved {
             let quarantined = QuarantinedEntry::claim(entry)?;
             quarantined.revalidate()?;
-            if let Err(error) = self.run(trash_action(&quarantined.absolute)?, None) {
+            if let Err(error) = self.run(trash_action(&quarantined.absolute), None) {
                 return Err(ProjectError::service_with_fields(
                     "native_shell_trash_quarantined",
                     format!(
@@ -167,21 +166,19 @@ impl ProjectNativeShellService {
 }
 
 #[cfg(target_os = "macos")]
-#[allow(clippy::unnecessary_wraps)]
-fn directory_picker_command() -> Result<(PathBuf, Vec<String>), ProjectError> {
-    Ok((
+fn directory_picker_command() -> (PathBuf, Vec<String>) {
+    (
         PathBuf::from("/usr/bin/osascript"),
         vec![
             "-e".to_owned(),
             "POSIX path of (choose folder with prompt \"Open Debrute Project\")".to_owned(),
         ],
-    ))
+    )
 }
 
 #[cfg(target_os = "windows")]
-#[allow(clippy::unnecessary_wraps)]
-fn directory_picker_command() -> Result<(PathBuf, Vec<String>), ProjectError> {
-    Ok((
+fn directory_picker_command() -> (PathBuf, Vec<String>) {
+    (
         PathBuf::from("powershell.exe"),
         vec![
             "-NoProfile".to_owned(),
@@ -189,15 +186,7 @@ fn directory_picker_command() -> Result<(PathBuf, Vec<String>), ProjectError> {
             "-Command".to_owned(),
             "Add-Type -AssemblyName System.Windows.Forms; $d = New-Object System.Windows.Forms.FolderBrowserDialog; $d.Description = 'Open Debrute Project'; if ($d.ShowDialog() -eq [System.Windows.Forms.DialogResult]::OK) { [Console]::Out.Write($d.SelectedPath) }".to_owned(),
         ],
-    ))
-}
-
-#[cfg(not(any(target_os = "macos", target_os = "windows")))]
-fn directory_picker_command() -> Result<(PathBuf, Vec<String>), ProjectError> {
-    Err(ProjectError::service(
-        "native_project_picker_unsupported",
-        "The native Project picker is supported on macOS and Windows.",
-    ))
+    )
 }
 
 fn preflight_trash_staging(
@@ -333,7 +322,7 @@ impl QuarantinedEntry {
         let capability = self
             .staging_capability
             .as_ref()
-            .ok_or(ProjectError::StatePoisoned)?;
+            .expect("trash staging capability must exist before revalidation");
         let staged = match self.kind {
             ProjectPathKind::File => capability.open(&self.basename)?.into_std(),
             ProjectPathKind::Directory => capability.open_dir(&self.basename)?.into_std_file(),
@@ -355,7 +344,7 @@ impl QuarantinedEntry {
         let capability = self
             .staging_capability
             .as_ref()
-            .ok_or(ProjectError::StatePoisoned)?;
+            .expect("trash staging capability must exist before consumption confirmation");
         match capability.symlink_metadata(&self.basename) {
             Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(()),
             Err(error) => Err(ProjectError::Io(error)),
@@ -376,20 +365,6 @@ impl Drop for QuarantinedEntry {
         self.staging_capability.take();
         let _ = fs::remove_dir(&self.staging_directory);
     }
-}
-
-#[cfg(any(target_os = "macos", target_os = "windows"))]
-#[allow(clippy::unnecessary_wraps)]
-fn ensure_trash_supported() -> Result<(), ProjectError> {
-    Ok(())
-}
-
-#[cfg(not(any(target_os = "macos", target_os = "windows")))]
-fn ensure_trash_supported() -> Result<(), ProjectError> {
-    Err(ProjectError::service(
-        "native_shell_unsupported",
-        "Native Project shell actions are unsupported on this distribution target.",
-    ))
 }
 
 struct ResolvedEntry {
@@ -528,45 +503,34 @@ fn is_resolved_same_or_child(
 }
 
 #[cfg(target_os = "macos")]
-#[allow(clippy::unnecessary_wraps)] // Uniform fallible platform-adapter signature across cfgs.
-fn reveal_action(path: &Path, kind: ProjectPathKind) -> Result<NativeAction, ProjectError> {
+fn reveal_action(path: &Path, kind: ProjectPathKind) -> NativeAction {
     let mut args = Vec::new();
     if kind == ProjectPathKind::File {
         args.push("-R".to_owned());
     }
     args.push(path.to_string_lossy().into_owned());
-    Ok(NativeAction {
+    NativeAction {
         executable: PathBuf::from("/usr/bin/open"),
         args,
-    })
+    }
 }
 
 #[cfg(target_os = "windows")]
-#[allow(clippy::unnecessary_wraps)] // Uniform fallible platform-adapter signature across cfgs.
-fn reveal_action(path: &Path, kind: ProjectPathKind) -> Result<NativeAction, ProjectError> {
+fn reveal_action(path: &Path, kind: ProjectPathKind) -> NativeAction {
     let path = path.to_string_lossy().into_owned();
-    Ok(NativeAction {
+    NativeAction {
         executable: PathBuf::from("explorer.exe"),
         args: if kind == ProjectPathKind::File {
             vec![format!("/select,{path}")]
         } else {
             vec![path]
         },
-    })
-}
-
-#[cfg(not(any(target_os = "macos", target_os = "windows")))]
-fn reveal_action(_path: &Path, _kind: ProjectPathKind) -> Result<NativeAction, ProjectError> {
-    Err(ProjectError::service(
-        "native_shell_unsupported",
-        "Native Project shell actions are unsupported on this distribution target.",
-    ))
+    }
 }
 
 #[cfg(target_os = "macos")]
-#[allow(clippy::unnecessary_wraps)] // Uniform fallible platform-adapter signature across cfgs.
-fn trash_action(path: &Path) -> Result<NativeAction, ProjectError> {
-    Ok(NativeAction {
+fn trash_action(path: &Path) -> NativeAction {
+    NativeAction {
         executable: PathBuf::from("/usr/bin/osascript"),
         args: vec![
             "-e".to_owned(),
@@ -578,14 +542,13 @@ fn trash_action(path: &Path) -> Result<NativeAction, ProjectError> {
             "--".to_owned(),
             path.to_string_lossy().into_owned(),
         ],
-    })
+    }
 }
 
 #[cfg(target_os = "windows")]
-#[allow(clippy::unnecessary_wraps)] // Uniform fallible platform-adapter signature across cfgs.
-fn trash_action(path: &Path) -> Result<NativeAction, ProjectError> {
+fn trash_action(path: &Path) -> NativeAction {
     const SCRIPT: &str = "Add-Type -AssemblyName Microsoft.VisualBasic; $path = $args[0]; if ([System.IO.Directory]::Exists($path)) { [Microsoft.VisualBasic.FileIO.FileSystem]::DeleteDirectory($path, 'OnlyErrorDialogs', 'SendToRecycleBin') } else { [Microsoft.VisualBasic.FileIO.FileSystem]::DeleteFile($path, 'OnlyErrorDialogs', 'SendToRecycleBin') }";
-    Ok(NativeAction {
+    NativeAction {
         executable: PathBuf::from("powershell.exe"),
         args: vec![
             "-NoProfile".to_owned(),
@@ -594,15 +557,7 @@ fn trash_action(path: &Path) -> Result<NativeAction, ProjectError> {
             SCRIPT.to_owned(),
             path.to_string_lossy().into_owned(),
         ],
-    })
-}
-
-#[cfg(not(any(target_os = "macos", target_os = "windows")))]
-fn trash_action(_path: &Path) -> Result<NativeAction, ProjectError> {
-    Err(ProjectError::service(
-        "native_shell_unsupported",
-        "Native Project shell actions are unsupported on this distribution target.",
-    ))
+    }
 }
 
 #[cfg(test)]
@@ -688,7 +643,7 @@ mod tests {
     #[cfg(target_os = "macos")]
     #[test]
     fn mac_trash_passes_the_path_as_an_argument_not_script_source() {
-        let action = trash_action(Path::new("/tmp/brief \"draft\".md")).unwrap();
+        let action = trash_action(Path::new("/tmp/brief \"draft\".md"));
         assert_eq!(action.executable, Path::new("/usr/bin/osascript"));
         assert_eq!(action.args.last().unwrap(), "/tmp/brief \"draft\".md");
         assert!(!action.args[3].contains("draft"));

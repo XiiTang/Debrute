@@ -1,15 +1,13 @@
-import type { WorkbenchMenuCommandId, WorkbenchMenuItem } from '@debrute/app-protocol';
+import type { NativeMenuCommandId } from '@debrute/app-protocol';
 import type { DebruteShellApi } from '../../api/shellApi';
 import type { WorkbenchApiClient } from '../../types';
+import type { WorkbenchMenuCommandId, WorkbenchMenuItem } from './workbenchTitleBarState';
 
 export interface TitleBarCommandContext {
   api: WorkbenchApiClient;
   shell: DebruteShellApi | undefined;
-  notify(message: string): void;
   openProjectFromPicker(): Promise<void>;
   openProjectRoot(projectRoot: string): Promise<void>;
-  refreshTitleBarState(): Promise<void>;
-  commandUnavailableMessage(commandLabel: string): string;
 }
 
 export async function executeTitleBarMenuCommand(
@@ -19,27 +17,16 @@ export async function executeTitleBarMenuCommand(
   if (!item.enabled) {
     return;
   }
-  if (
-    context.shell?.executeNativeMenuCommand
-    && (
-      !item.commandId.startsWith('project.')
-      || item.commandId === 'project.open-picker-new-window'
-    )
-  ) {
-    await context.shell.executeNativeMenuCommand({
-      commandId: item.commandId,
-      ...(item.payload ? { payload: item.payload } : {})
-    });
-    await context.refreshTitleBarState();
+  if (context.shell && isNativeMenuCommand(item.commandId)) {
+    await context.shell.executeNativeMenuCommand({ commandId: item.commandId });
     return;
   }
-  await executeBrowserMenuCommand(item.commandId, item.payload, item.label, context);
+  await executeBrowserMenuCommand(item.commandId, item.payload, context);
 }
 
 async function executeBrowserMenuCommand(
   commandId: WorkbenchMenuCommandId,
   payload: Record<string, string | boolean> | undefined,
-  label: string,
   context: TitleBarCommandContext
 ): Promise<void> {
   switch (commandId) {
@@ -56,7 +43,6 @@ async function executeBrowserMenuCommand(
     }
     case 'project.clear-recent':
       await context.api.clearRecentProjectRoots();
-      await context.refreshTitleBarState();
       return;
     case 'edit.undo':
     case 'edit.redo':
@@ -68,12 +54,14 @@ async function executeBrowserMenuCommand(
       executeDocumentEditCommand(commandId);
       return;
     default:
-      context.notify(context.commandUnavailableMessage(label));
+      throw new Error(`Title-bar command requires the native Desktop shell: ${commandId}`);
   }
 }
 
-function executeDocumentEditCommand(commandId: WorkbenchMenuCommandId): void {
-  const commandById: Partial<Record<WorkbenchMenuCommandId, string>> = {
+function executeDocumentEditCommand(
+  commandId: 'edit.undo' | 'edit.redo' | 'edit.cut' | 'edit.copy' | 'edit.paste' | 'edit.delete' | 'edit.select-all'
+): void {
+  const commandById = {
     'edit.undo': 'undo',
     'edit.redo': 'redo',
     'edit.cut': 'cut',
@@ -81,9 +69,12 @@ function executeDocumentEditCommand(commandId: WorkbenchMenuCommandId): void {
     'edit.paste': 'paste',
     'edit.delete': 'delete',
     'edit.select-all': 'selectAll'
-  };
-  const browserCommand = commandById[commandId];
-  if (browserCommand) {
-    document.execCommand(browserCommand);
-  }
+  } as const;
+  document.execCommand(commandById[commandId]);
+}
+
+function isNativeMenuCommand(commandId: WorkbenchMenuCommandId): commandId is NativeMenuCommandId {
+  return commandId !== 'project.open-picker'
+    && commandId !== 'project.open-recent'
+    && commandId !== 'project.clear-recent';
 }

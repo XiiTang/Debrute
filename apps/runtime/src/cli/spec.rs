@@ -5,7 +5,24 @@ pub enum CliCommandPolicy {
     Activate,
     Stop,
     Run,
+    Submit,
     Stream,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum CliOptionKind {
+    Value,
+    Flag,
+    Repeatable,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct CliOptionSpec {
+    pub name: &'static str,
+    pub kind: CliOptionKind,
+    pub required: bool,
+    pub project_path: bool,
+    pub allowed_values: &'static [&'static str],
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -19,6 +36,136 @@ pub struct CliCommandSpec {
     pub writes: &'static str,
     pub input: &'static str,
     pub output: &'static str,
+    pub minimum_positionals: usize,
+    pub maximum_positionals: usize,
+    pub project_positional: Option<usize>,
+    pub options: &'static [CliOptionSpec],
+    pub errors: &'static [&'static str],
+}
+
+const NO_OPTIONS: &[CliOptionSpec] = &[];
+const WORKBENCH_OPTIONS: &[CliOptionSpec] = &[option(
+    "frontend",
+    CliOptionKind::Value,
+    false,
+    false,
+    &["default", "desktop", "browser"],
+)];
+const RESET_LAYOUT_OPTIONS: &[CliOptionSpec] = &[
+    option("all", CliOptionKind::Flag, false, false, &[]),
+    option("path", CliOptionKind::Repeatable, false, false, &[]),
+    option("glob", CliOptionKind::Repeatable, false, false, &[]),
+];
+const GENERATED_ASSET_OPTIONS: &[CliOptionSpec] =
+    &[option("path", CliOptionKind::Value, true, false, &[])];
+const REQUEST_SINGLE_OPTIONS: &[CliOptionSpec] = &[
+    option("input", CliOptionKind::Value, true, false, &[]),
+    option("timeout", CliOptionKind::Value, false, false, &[]),
+    option("replace", CliOptionKind::Flag, false, false, &[]),
+    option("no-wait", CliOptionKind::Flag, false, false, &[]),
+];
+const REQUEST_BATCH_OPTIONS: &[CliOptionSpec] = &[
+    option("input", CliOptionKind::Value, true, false, &[]),
+    option("concurrency", CliOptionKind::Value, false, false, &[]),
+    option("timeout", CliOptionKind::Value, false, false, &[]),
+    option("replace", CliOptionKind::Flag, false, false, &[]),
+    option("no-wait", CliOptionKind::Flag, false, false, &[]),
+];
+const OPERATION_LIST_OPTIONS: &[CliOptionSpec] = &[
+    option(
+        "state",
+        CliOptionKind::Value,
+        false,
+        false,
+        &[
+            "active",
+            "terminal",
+            "queued",
+            "running",
+            "cancelling",
+            "succeeded",
+            "failed",
+            "cancelled",
+        ],
+    ),
+    option(
+        "model-kind",
+        CliOptionKind::Value,
+        false,
+        false,
+        &["image", "video", "tts", "music", "sound-effect"],
+    ),
+    option("project", CliOptionKind::Value, false, true, &[]),
+    option("limit", CliOptionKind::Value, false, false, &[]),
+    option("cursor", CliOptionKind::Value, false, false, &[]),
+];
+const RUNTIME_CONFIG_ERRORS: &[&str] = &["runtime_config_error"];
+const AUDIO_MODEL_ERRORS: &[&str] = &[
+    "audio_model_unavailable",
+    "audio_model_kind_mismatch",
+    "runtime_config_error",
+];
+const PROJECT_READ_ERRORS: &[&str] = &["project_not_found", "project_invalid"];
+const CANVAS_REGISTRY_ERRORS: &[&str] = &[
+    "project_not_found",
+    "project_invalid",
+    "canvas_registry_missing",
+    "canvas_registry_invalid",
+    "canvas_registry_conflict",
+    "canvas_registry_repair_failed",
+    "canvas_map_conflict",
+];
+const MODEL_REQUEST_ERRORS: &[&str] = &[
+    "project_invalid",
+    "model_unavailable",
+    "submission_outcome_unknown",
+    "runtime_lost",
+];
+const OPERATION_OBSERVE_ERRORS: &[&str] = &[
+    "operation_not_found",
+    "operation_failed",
+    "operation_cancelled",
+    "runtime_lost",
+];
+const OBSERVE_ERRORS: &[&str] = &[
+    "runtime_ready_timeout",
+    "runtime_health_failed",
+    "runtime_lost",
+    "product_update_failed",
+];
+const ACTIVATE_ERRORS: &[&str] = &[
+    "runtime_launch_failed",
+    "runtime_ready_timeout",
+    "runtime_health_failed",
+    "product_update_failed",
+];
+const STOP_ERRORS: &[&str] = &[
+    "runtime_not_running",
+    "runtime_health_failed",
+    "product_update_failed",
+];
+const RUNTIME_COMMAND_ERRORS: &[&str] = &[
+    "runtime_launch_failed",
+    "runtime_ready_timeout",
+    "runtime_health_failed",
+    "runtime_lost",
+    "product_update_failed",
+];
+
+const fn option(
+    name: &'static str,
+    kind: CliOptionKind,
+    required: bool,
+    project_path: bool,
+    allowed_values: &'static [&'static str],
+) -> CliOptionSpec {
+    CliOptionSpec {
+        name,
+        kind,
+        required,
+        project_path,
+        allowed_values,
+    }
 }
 
 const SPECS: &[CliCommandSpec] = &[
@@ -32,6 +179,11 @@ const SPECS: &[CliCommandSpec] = &[
         "logs",
         "no args",
         "product update record",
+        0,
+        0,
+        None,
+        NO_OPTIONS,
+        &["product_update_unavailable"],
     ),
     spec(
         "runtime.status",
@@ -43,6 +195,11 @@ const SPECS: &[CliCommandSpec] = &[
         "none",
         "no args",
         "runtime status record",
+        0,
+        0,
+        None,
+        NO_OPTIONS,
+        &[],
     ),
     spec(
         "runtime.doctor",
@@ -54,6 +211,11 @@ const SPECS: &[CliCommandSpec] = &[
         "none",
         "no args",
         "diagnostic records",
+        0,
+        0,
+        None,
+        NO_OPTIONS,
+        RUNTIME_CONFIG_ERRORS,
     ),
     spec(
         "runtime.stop",
@@ -65,6 +227,11 @@ const SPECS: &[CliCommandSpec] = &[
         "runtime-lifecycle",
         "no args",
         "accepted Product Quit record",
+        0,
+        0,
+        None,
+        NO_OPTIONS,
+        &[],
     ),
     spec(
         "skills.status",
@@ -76,6 +243,15 @@ const SPECS: &[CliCommandSpec] = &[
         "none",
         "no args",
         "Runtime-owned Skills diagnostic",
+        0,
+        0,
+        None,
+        NO_OPTIONS,
+        &[
+            "skills_bundle_unavailable",
+            "skills_bundle_invalid",
+            "skills_state_unreadable",
+        ],
     ),
     spec(
         "models.image.list",
@@ -87,6 +263,11 @@ const SPECS: &[CliCommandSpec] = &[
         "none",
         "no args",
         "image model records",
+        0,
+        0,
+        None,
+        NO_OPTIONS,
+        RUNTIME_CONFIG_ERRORS,
     ),
     spec(
         "models.image.describe",
@@ -98,6 +279,11 @@ const SPECS: &[CliCommandSpec] = &[
         "none",
         "<model-id>",
         "image model detail record",
+        1,
+        1,
+        None,
+        NO_OPTIONS,
+        &["model_unavailable", "runtime_config_error"],
     ),
     spec(
         "models.video.list",
@@ -109,6 +295,11 @@ const SPECS: &[CliCommandSpec] = &[
         "none",
         "no args",
         "video model records",
+        0,
+        0,
+        None,
+        NO_OPTIONS,
+        RUNTIME_CONFIG_ERRORS,
     ),
     spec(
         "models.video.describe",
@@ -120,6 +311,11 @@ const SPECS: &[CliCommandSpec] = &[
         "none",
         "<model-id>",
         "video model detail record",
+        1,
+        1,
+        None,
+        NO_OPTIONS,
+        &["model_unavailable", "runtime_config_error"],
     ),
     spec(
         "models.tts.list",
@@ -131,6 +327,11 @@ const SPECS: &[CliCommandSpec] = &[
         "none",
         "no args",
         "TTS model records",
+        0,
+        0,
+        None,
+        NO_OPTIONS,
+        RUNTIME_CONFIG_ERRORS,
     ),
     spec(
         "models.tts.describe",
@@ -142,6 +343,11 @@ const SPECS: &[CliCommandSpec] = &[
         "none",
         "<model-id>",
         "TTS model detail record",
+        1,
+        1,
+        None,
+        NO_OPTIONS,
+        AUDIO_MODEL_ERRORS,
     ),
     spec(
         "models.music.list",
@@ -153,6 +359,11 @@ const SPECS: &[CliCommandSpec] = &[
         "none",
         "no args",
         "music model records",
+        0,
+        0,
+        None,
+        NO_OPTIONS,
+        RUNTIME_CONFIG_ERRORS,
     ),
     spec(
         "models.music.describe",
@@ -164,6 +375,11 @@ const SPECS: &[CliCommandSpec] = &[
         "none",
         "<model-id>",
         "music model detail record",
+        1,
+        1,
+        None,
+        NO_OPTIONS,
+        AUDIO_MODEL_ERRORS,
     ),
     spec(
         "models.sfx.list",
@@ -175,6 +391,11 @@ const SPECS: &[CliCommandSpec] = &[
         "none",
         "no args",
         "sound effect model records",
+        0,
+        0,
+        None,
+        NO_OPTIONS,
+        RUNTIME_CONFIG_ERRORS,
     ),
     spec(
         "models.sfx.describe",
@@ -186,6 +407,11 @@ const SPECS: &[CliCommandSpec] = &[
         "none",
         "<model-id>",
         "sound effect model detail record",
+        1,
+        1,
+        None,
+        NO_OPTIONS,
+        AUDIO_MODEL_ERRORS,
     ),
     spec(
         "project.init",
@@ -197,6 +423,11 @@ const SPECS: &[CliCommandSpec] = &[
         "debrute-project",
         "<project>",
         "project status record",
+        1,
+        1,
+        Some(0),
+        NO_OPTIONS,
+        &["project_invalid"],
     ),
     spec(
         "project.status",
@@ -208,6 +439,11 @@ const SPECS: &[CliCommandSpec] = &[
         "none",
         "<project>",
         "project status record",
+        1,
+        1,
+        Some(0),
+        NO_OPTIONS,
+        PROJECT_READ_ERRORS,
     ),
     spec(
         "project.validate",
@@ -219,6 +455,15 @@ const SPECS: &[CliCommandSpec] = &[
         "none",
         "<project>",
         "validation problem records",
+        1,
+        1,
+        Some(0),
+        NO_OPTIONS,
+        &[
+            "project_not_found",
+            "project_invalid",
+            "project_validation_failed",
+        ],
     ),
     spec(
         "workbench.start",
@@ -230,6 +475,11 @@ const SPECS: &[CliCommandSpec] = &[
         "none",
         "[<project>] [--frontend default|desktop|browser]",
         "accepted frontend and target record",
+        0,
+        1,
+        Some(0),
+        WORKBENCH_OPTIONS,
+        &[],
     ),
     spec(
         "canvas-map.push",
@@ -241,6 +491,20 @@ const SPECS: &[CliCommandSpec] = &[
         "canvas-map",
         "<project> <canvas-id>",
         "Canvas Map push record",
+        2,
+        2,
+        Some(0),
+        NO_OPTIONS,
+        &[
+            "project_not_found",
+            "project_invalid",
+            "canvas_map_invalid_canvas_id",
+            "canvas_map_invalid_path",
+            "canvas_map_layout_conflict",
+            "canvas_map_read_failed",
+            "canvas_map_invalid_yaml",
+            "canvas_map_canvas_missing",
+        ],
     ),
     spec(
         "canvas.create",
@@ -252,6 +516,11 @@ const SPECS: &[CliCommandSpec] = &[
         "canvas-registry",
         "<project>",
         "Canvas create record",
+        1,
+        1,
+        Some(0),
+        NO_OPTIONS,
+        CANVAS_REGISTRY_ERRORS,
     ),
     spec(
         "canvas.rename",
@@ -263,6 +532,11 @@ const SPECS: &[CliCommandSpec] = &[
         "canvas-registry",
         "<project> <canvas-id> <name>",
         "Canvas rename record",
+        3,
+        3,
+        Some(0),
+        NO_OPTIONS,
+        CANVAS_REGISTRY_ERRORS,
     ),
     spec(
         "canvas.delete",
@@ -274,6 +548,11 @@ const SPECS: &[CliCommandSpec] = &[
         "canvas-registry",
         "<project> <canvas-id>",
         "Canvas delete record",
+        2,
+        2,
+        Some(0),
+        NO_OPTIONS,
+        CANVAS_REGISTRY_ERRORS,
     ),
     spec(
         "canvas.reorder",
@@ -285,6 +564,11 @@ const SPECS: &[CliCommandSpec] = &[
         "canvas-registry",
         "<project> <canvas-id...>",
         "Canvas reorder record",
+        2,
+        usize::MAX,
+        Some(0),
+        NO_OPTIONS,
+        CANVAS_REGISTRY_ERRORS,
     ),
     spec(
         "canvas.repair-index",
@@ -296,6 +580,11 @@ const SPECS: &[CliCommandSpec] = &[
         "canvas-registry",
         "<project>",
         "Canvas registry repair record",
+        1,
+        1,
+        Some(0),
+        NO_OPTIONS,
+        CANVAS_REGISTRY_ERRORS,
     ),
     spec(
         "canvas.reset-layout",
@@ -307,6 +596,22 @@ const SPECS: &[CliCommandSpec] = &[
         "canvas-map",
         "<project> <canvas-id> --all | <project> <canvas-id> [--path <literal...>] [--glob <pattern...>]",
         "Canvas layout reset record",
+        2,
+        2,
+        Some(0),
+        RESET_LAYOUT_OPTIONS,
+        &[
+            "project_not_found",
+            "project_invalid",
+            "canvas_registry_missing",
+            "canvas_registry_invalid",
+            "canvas_registry_conflict",
+            "canvas_registry_repair_failed",
+            "canvas_map_conflict",
+            "canvas_map_invalid_path",
+            "canvas_map_invalid_yaml",
+            "canvas_map_canvas_missing",
+        ],
     ),
     spec(
         "generated-asset.lookup",
@@ -318,72 +623,111 @@ const SPECS: &[CliCommandSpec] = &[
         "none",
         "<project> --path <project-relative-path>",
         "generated asset metadata record",
+        1,
+        1,
+        Some(0),
+        GENERATED_ASSET_OPTIONS,
+        PROJECT_READ_ERRORS,
     ),
     spec(
-        "generate.image",
-        &["generate", "image"],
-        CliCommandPolicy::Run,
-        "generation",
-        "generate",
-        "project-session",
+        "request.single",
+        &["request", "single"],
+        CliCommandPolicy::Submit,
+        "model-operation",
+        "execute",
+        "project",
         "assets",
-        "<project> --input-json <json> [--timeout-ms <ms>]",
-        "generated image artifact records",
+        "<project> --input <request.jsonl|-> [--timeout <Ns|Nm|Nh>] [--replace] [--no-wait]",
+        "accepted or terminal Model Operation record",
+        1,
+        1,
+        Some(0),
+        REQUEST_SINGLE_OPTIONS,
+        MODEL_REQUEST_ERRORS,
     ),
     spec(
-        "generate.image-batch",
-        &["generate", "image-batch"],
+        "request.batch",
+        &["request", "batch"],
+        CliCommandPolicy::Submit,
+        "model-operation",
+        "execute",
+        "project",
+        "assets",
+        "<project> --input <requests.jsonl|-> [--concurrency <n>] [--timeout <Ns|Nm|Nh>] [--replace] [--no-wait]",
+        "accepted, Item outcome, and terminal Model Operation records",
+        1,
+        1,
+        Some(0),
+        REQUEST_BATCH_OPTIONS,
+        MODEL_REQUEST_ERRORS,
+    ),
+    spec(
+        "operation.list",
+        &["operation", "list"],
+        CliCommandPolicy::Run,
+        "model-operation",
+        "read",
+        "runtime",
+        "none",
+        "[--state <state>] [--model-kind <kind>] [--project <path>] [--limit <1..100>] [--cursor <cursor>]",
+        "current Runtime Model Operation records",
+        0,
+        0,
+        None,
+        OPERATION_LIST_OPTIONS,
+        &["invalid_cursor", "runtime_lost"],
+    ),
+    spec(
+        "operation.inspect",
+        &["operation", "inspect"],
+        CliCommandPolicy::Run,
+        "model-operation",
+        "read",
+        "runtime",
+        "none",
+        "<operation-id>",
+        "current Model Operation record",
+        1,
+        1,
+        None,
+        NO_OPTIONS,
+        OPERATION_OBSERVE_ERRORS,
+    ),
+    spec(
+        "operation.wait",
+        &["operation", "wait"],
         CliCommandPolicy::Stream,
-        "generation",
-        "generate",
-        "project-session",
-        "assets",
-        "<project> (--manifest <path> | --input-jsonl <path>) --log <path> [--summary <path>] [--concurrency <n>] [--timeout-ms <ms>] [--overwrite-existing]",
-        "batch progress and summary records",
+        "model-operation",
+        "read",
+        "runtime",
+        "none",
+        "<operation-id>",
+        "Item outcomes and terminal Model Operation record",
+        1,
+        1,
+        None,
+        NO_OPTIONS,
+        OPERATION_OBSERVE_ERRORS,
     ),
     spec(
-        "generate.video",
-        &["generate", "video"],
+        "operation.cancel",
+        &["operation", "cancel"],
         CliCommandPolicy::Run,
-        "generation",
-        "generate",
-        "project-session",
-        "assets",
-        "<project> --input-json <json> [--timeout-ms <ms>]",
-        "generated video artifact records",
-    ),
-    spec(
-        "generate.tts",
-        &["generate", "tts"],
-        CliCommandPolicy::Run,
-        "generation",
-        "generate",
-        "project-session",
-        "assets",
-        "<project> --input-json <json> [--timeout-ms <ms>]",
-        "generated TTS artifact records",
-    ),
-    spec(
-        "generate.music",
-        &["generate", "music"],
-        CliCommandPolicy::Run,
-        "generation",
-        "generate",
-        "project-session",
-        "assets",
-        "<project> --input-json <json> [--timeout-ms <ms>]",
-        "generated music artifact records",
-    ),
-    spec(
-        "generate.sfx",
-        &["generate", "sfx"],
-        CliCommandPolicy::Run,
-        "generation",
-        "generate",
-        "project-session",
-        "assets",
-        "<project> --input-json <json> [--timeout-ms <ms>]",
-        "generated sound effect artifact records",
+        "model-operation",
+        "write",
+        "runtime",
+        "operation-state",
+        "<operation-id>",
+        "latest Model Operation record",
+        1,
+        1,
+        None,
+        NO_OPTIONS,
+        &[
+            "operation_not_found",
+            "operation_already_terminal",
+            "runtime_lost",
+        ],
     ),
     spec(
         "commands",
@@ -395,6 +739,11 @@ const SPECS: &[CliCommandSpec] = &[
         "none",
         "no args",
         "command spec records",
+        0,
+        0,
+        None,
+        NO_OPTIONS,
+        &[],
     ),
     spec(
         "help",
@@ -406,6 +755,11 @@ const SPECS: &[CliCommandSpec] = &[
         "none",
         "<command-path>",
         "one command spec record",
+        1,
+        3,
+        None,
+        NO_OPTIONS,
+        &[],
     ),
 ];
 
@@ -420,6 +774,11 @@ const fn spec(
     writes: &'static str,
     input: &'static str,
     output: &'static str,
+    minimum_positionals: usize,
+    maximum_positionals: usize,
+    project_positional: Option<usize>,
+    options: &'static [CliOptionSpec],
+    errors: &'static [&'static str],
 ) -> CliCommandSpec {
     CliCommandSpec {
         command,
@@ -431,6 +790,11 @@ const fn spec(
         writes,
         input,
         output,
+        minimum_positionals,
+        maximum_positionals,
+        project_positional,
+        options,
+        errors,
     }
 }
 
@@ -460,97 +824,24 @@ pub fn command_errors(command: &str) -> String {
         "invalid_input",
         "internal_error",
     ];
-    errors.extend_from_slice(match command {
-        "update" => &[
-            "runtime_launch_failed",
-            "runtime_health_failed",
-            "product_update_failed",
-        ],
-        "runtime.doctor" | "models.image.list" | "models.video.list" | "models.tts.list"
-        | "models.music.list" | "models.sfx.list" => &["runtime_config_error"],
-        "skills.status" => &[
-            "skills_bundle_unavailable",
-            "skills_bundle_invalid",
-            "skills_state_unreadable",
-        ],
-        "models.image.describe" | "models.video.describe" => {
-            &["model_unavailable", "runtime_config_error"]
+    if let Some(spec) = SPECS.iter().find(|spec| spec.command == command) {
+        for error in policy_errors(spec.policy).iter().chain(spec.errors) {
+            if !errors.contains(error) {
+                errors.push(error);
+            }
         }
-        "models.tts.describe" | "models.music.describe" | "models.sfx.describe" => &[
-            "audio_model_unavailable",
-            "audio_model_kind_mismatch",
-            "runtime_config_error",
-        ],
-        "project.init" => &["project_invalid"],
-        "project.status" | "generated-asset.lookup" => &["project_not_found", "project_invalid"],
-        "project.validate" => &[
-            "project_not_found",
-            "project_invalid",
-            "project_validation_failed",
-        ],
-        "canvas-map.push" => &[
-            "project_not_found",
-            "project_invalid",
-            "canvas_map_invalid_canvas_id",
-            "canvas_map_invalid_path",
-            "canvas_map_layout_conflict",
-            "canvas_map_read_failed",
-            "canvas_map_invalid_yaml",
-            "canvas_map_canvas_missing",
-        ],
-        "canvas.create"
-        | "canvas.rename"
-        | "canvas.delete"
-        | "canvas.reorder"
-        | "canvas.repair-index" => &[
-            "project_not_found",
-            "project_invalid",
-            "canvas_registry_missing",
-            "canvas_registry_invalid",
-            "canvas_registry_conflict",
-            "canvas_registry_repair_failed",
-            "canvas_map_conflict",
-        ],
-        "canvas.reset-layout" => &[
-            "project_not_found",
-            "project_invalid",
-            "canvas_registry_missing",
-            "canvas_registry_invalid",
-            "canvas_registry_conflict",
-            "canvas_registry_repair_failed",
-            "canvas_map_conflict",
-            "canvas_map_invalid_path",
-            "canvas_map_invalid_yaml",
-            "canvas_map_canvas_missing",
-        ],
-        "generate.image" | "generate.video" | "generate.image-batch" => &[
-            "project_not_found",
-            "project_invalid",
-            "invalid_json_input",
-            "model_not_configured",
-            "model_unavailable",
-            "model_request_failed",
-        ],
-        "generate.tts" | "generate.music" | "generate.sfx" => &[
-            "project_not_found",
-            "project_invalid",
-            "invalid_json_input",
-            "audio_model_not_configured",
-            "audio_model_unavailable",
-            "audio_model_kind_mismatch",
-            "audio_argument_invalid",
-            "audio_request_failed",
-            "audio_artifact_download_failed",
-            "audio_task_failed",
-            "audio_task_timeout",
-        ],
-        "workbench.start" => &[
-            "runtime_launch_failed",
-            "runtime_health_failed",
-            "invalid_activation",
-            "desktop_unavailable",
-        ],
-        _ => &[],
-    });
+    }
     errors.join(",")
+}
+
+const fn policy_errors(policy: CliCommandPolicy) -> &'static [&'static str] {
+    match policy {
+        CliCommandPolicy::Local => &[],
+        CliCommandPolicy::Observe => OBSERVE_ERRORS,
+        CliCommandPolicy::Activate => ACTIVATE_ERRORS,
+        CliCommandPolicy::Stop => STOP_ERRORS,
+        CliCommandPolicy::Run | CliCommandPolicy::Submit | CliCommandPolicy::Stream => {
+            RUNTIME_COMMAND_ERRORS
+        }
+    }
 }

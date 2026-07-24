@@ -1,4 +1,7 @@
-import type { WorkbenchProjectSessionSnapshot } from '@debrute/app-protocol';
+import type {
+  DebruteProductPlatform,
+  ProjectPathEntry
+} from '@debrute/app-protocol';
 import type { ProjectFileTreeNode } from './projectFileTree';
 
 export interface ProjectTreeSelectionState {
@@ -21,17 +24,8 @@ export interface ProjectTreePointerModifiers {
   altKey?: boolean;
 }
 
-export interface WorkbenchProjectPathEntry {
-  projectRelativePath: string;
-  kind: 'file' | 'directory';
-}
-
 export function createEmptyProjectTreeSelection(): ProjectTreeSelectionState {
   return { selectedPaths: [], focusedPath: null, anchorPath: null };
-}
-
-export function clearProjectTreeSelection(): ProjectTreeSelectionState {
-  return createEmptyProjectTreeSelection();
 }
 
 export function flattenProjectTree(tree: ProjectFileTreeNode[], expanded: Set<string>): ProjectTreeVisibleItem[] {
@@ -59,7 +53,7 @@ export function updateProjectTreeSelection(input: {
   state: ProjectTreeSelectionState;
   visibleItems: ProjectTreeVisibleItem[];
   path: string;
-  platform: NodeJS.Platform;
+  platform: DebruteProductPlatform;
   event: ProjectTreePointerModifiers;
 }): ProjectTreeSelectionState {
   const normalizedState = normalizeProjectTreeSelection(input.state, input.visibleItems);
@@ -111,19 +105,17 @@ export function updateProjectTreeContextSelection(input: {
   if (normalizedState.selectedPaths.includes(path)) {
     return normalizedState;
   }
-  return updateProjectTreeSelection({
-    state: normalizedState,
-    visibleItems: input.visibleItems,
-    path,
-    platform: 'linux',
-    event: {}
-  });
+  return {
+    selectedPaths: [path],
+    focusedPath: path,
+    anchorPath: path
+  };
 }
 
 export function projectTreePathEntriesFromSelection(input: {
   selection: ProjectTreeSelectionState;
   visibleItems: ProjectTreeVisibleItem[];
-}): WorkbenchProjectPathEntry[] {
+}): ProjectPathEntry[] {
   const selected = new Set(input.selection.selectedPaths);
   return input.visibleItems
     .filter((item) => selected.has(item.path))
@@ -133,15 +125,8 @@ export function projectTreePathEntriesFromSelection(input: {
     }));
 }
 
-export function projectTreeFileKindFromSnapshot(
-  snapshot: WorkbenchProjectSessionSnapshot | undefined,
-  projectRelativePath: string
-): 'file' | 'directory' | undefined {
-  return snapshot?.files.find((file) => file.projectRelativePath === projectRelativePath)?.kind;
-}
-
 export function projectTreeDropOperation(input: {
-  platform: NodeJS.Platform;
+  platform: DebruteProductPlatform;
   event: ProjectTreePointerModifiers;
 }): 'copy' | 'move' {
   return input.platform === 'darwin'
@@ -153,7 +138,7 @@ export function projectTreeDragEntries(input: {
   selection: ProjectTreeSelectionState;
   visibleItems: ProjectTreeVisibleItem[];
   path: string;
-}): WorkbenchProjectPathEntry[] {
+}): ProjectPathEntry[] {
   const path = normalizeProjectTreePath(input.path);
   if (input.selection.selectedPaths.includes(path)) {
     return projectTreePathEntriesFromSelection({
@@ -181,7 +166,7 @@ export function projectTreeDropTargetDirectory(input: {
 }
 
 export function isProjectTreeMoveNoop(input: {
-  entries: WorkbenchProjectPathEntry[];
+  entries: ProjectPathEntry[];
   targetDirectoryProjectRelativePath: string;
 }): boolean {
   const targetDirectoryPath = normalizeProjectTreePath(input.targetDirectoryProjectRelativePath);
@@ -192,7 +177,7 @@ export function isProjectTreeMoveNoop(input: {
 }
 
 export function isProjectTreeDropRejected(input: {
-  entries: WorkbenchProjectPathEntry[];
+  entries: ProjectPathEntry[];
   targetDirectoryProjectRelativePath: string;
 }): boolean {
   const targetDirectoryPath = normalizeProjectTreePath(input.targetDirectoryProjectRelativePath);
@@ -207,7 +192,7 @@ export function isProjectTreeDropRejected(input: {
 
 export function projectTreeBatchMoveHasConflict(input: {
   existingProjectRelativePaths: Set<string>;
-  entries: WorkbenchProjectPathEntry[];
+  entries: ProjectPathEntry[];
   targetDirectoryProjectRelativePath: string;
 }): boolean {
   const targetDirectoryPath = normalizeProjectTreePath(input.targetDirectoryProjectRelativePath);
@@ -253,7 +238,7 @@ function appendVisibleProjectTreeNode(
   }
 }
 
-function isToggleSelectionEvent(event: ProjectTreePointerModifiers, platform: NodeJS.Platform): boolean {
+function isToggleSelectionEvent(event: ProjectTreePointerModifiers, platform: DebruteProductPlatform): boolean {
   return platform === 'darwin' ? event.metaKey === true : event.ctrlKey === true;
 }
 

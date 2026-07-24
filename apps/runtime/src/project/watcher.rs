@@ -18,8 +18,6 @@ enum WatchMessage {
     Event(notify::Result<Event>),
     Stop,
     #[cfg(test)]
-    Panic,
-    #[cfg(test)]
     BackendError(String),
 }
 
@@ -65,24 +63,12 @@ impl ProjectFileWatcher {
 
     /// Stops observation and joins the delivery worker.
     ///
-    /// # Errors
-    /// Returns an error if the worker panicked.
-    pub(super) fn close(&mut self) -> Result<(), ProjectError> {
+    pub(super) fn close(&mut self) {
         self.watcher.take();
         let _ = self.sender.send(WatchMessage::Stop);
         if let Some(worker) = self.worker.take() {
-            worker.join().map_err(|_| {
-                ProjectError::service("project_watcher_failed", "Project watcher thread panicked.")
-            })?;
+            worker.join().expect("Project watcher thread panicked");
         }
-        Ok(())
-    }
-
-    #[cfg(test)]
-    pub(super) fn fail_worker_for_test(&self) -> Result<(), ProjectError> {
-        self.sender
-            .send(WatchMessage::Panic)
-            .map_err(|error| ProjectError::service("project_watcher_failed", error.to_string()))
     }
 
     #[cfg(test)]
@@ -95,7 +81,7 @@ impl ProjectFileWatcher {
 
 impl Drop for ProjectFileWatcher {
     fn drop(&mut self) {
-        let _ = self.close();
+        self.close();
     }
 }
 
@@ -120,8 +106,6 @@ fn watch_worker(
             }
             Err(mpsc::RecvTimeoutError::Timeout) => {}
             Ok(WatchMessage::Stop) | Err(mpsc::RecvTimeoutError::Disconnected) => return,
-            #[cfg(test)]
-            Ok(WatchMessage::Panic) => panic!("injected Project watcher failure"),
             #[cfg(test)]
             Ok(WatchMessage::BackendError(message)) => {
                 on_change(ProjectWatchSignal::RescanRequired(message));

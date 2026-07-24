@@ -6,7 +6,7 @@ use std::{
     io::{Read, Write},
     path::{Path, PathBuf},
     sync::{
-        Arc, Condvar, Mutex, Weak,
+        Arc, Condvar, Mutex, MutexGuard, Weak,
         atomic::{AtomicBool, Ordering},
         mpsc,
     },
@@ -55,13 +55,6 @@ const TERMINAL_OUTPUT_DRAIN_GRACE: Duration = Duration::from_secs(1);
 const TERMINAL_BOOTSTRAP_FLAG: &str = "--internal-terminal-bootstrap";
 #[cfg(target_os = "windows")]
 const TERMINAL_SPAWN_BARRIER_ENV: &str = "DEBRUTE_INTERNAL_TERMINAL_SPAWN_BARRIER";
-
-#[derive(Debug, Clone, Default, PartialEq, Eq)]
-pub struct CreateTerminalSession {
-    pub cwd_project_relative_path: Option<String>,
-    pub cols: Option<u16>,
-    pub rows: Option<u16>,
-}
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct TerminalError {
@@ -208,9 +201,11 @@ impl Drop for TerminalTopologySubscription {
         let Some(service) = self.service.upgrade() else {
             return;
         };
-        if let Ok(mut projects) = service.projects.lock()
-            && let Some(project) = projects.get_mut(&self.project_id)
-        {
+        let mut projects = service
+            .projects
+            .lock()
+            .expect("Terminal project registry lock poisoned");
+        if let Some(project) = projects.get_mut(&self.project_id) {
             project.observers.remove(&self.observer_id);
         }
     }
@@ -231,13 +226,13 @@ impl Drop for TerminalServiceInner {
         let projects = self
             .projects
             .get_mut()
-            .unwrap_or_else(std::sync::PoisonError::into_inner);
+            .expect("Terminal project registry lock poisoned");
         let terminals = projects
             .values()
             .flat_map(|project| project.sessions.values().cloned())
             .collect::<Vec<_>>();
         for terminal in terminals {
-            terminal.shutdown_with_fallback();
+            let _ = terminal.shutdown_owned();
         }
         projects.clear();
     }
@@ -281,24 +276,19 @@ impl TerminalService {
     ///
     /// # Errors
     /// Returns a typed error for an invalid Project/cwd, PTY failure, or exhausted topology.
-    #[allow(clippy::needless_pass_by_value)] // Creation consumes one command DTO at the boundary.
     pub fn create(
         &self,
         project_id: &str,
-        input: CreateTerminalSession,
+        cwd_project_relative_path: &str,
     ) -> Result<TerminalSessionView, TerminalError> {
         let session = self
             .inner
             .registry
             .get(project_id)
             .map_err(project_terminal_error)?;
-        let cwd = resolve_terminal_cwd(
-            session.root(),
-            input.cwd_project_relative_path.as_deref().unwrap_or(""),
-        )?;
-        let cols = input.cols.unwrap_or(DEFAULT_COLS);
-        let rows = input.rows.unwrap_or(DEFAULT_ROWS);
-        validate_dimensions(cols, rows)?;
+        let cwd = resolve_terminal_cwd(session.root(), cwd_project_relative_path)?;
+        let cols = DEFAULT_COLS;
+        let rows = DEFAULT_ROWS;
         let mut reservation = self.reserve_terminal(project_id)?;
         let project_use = self
             .inner
@@ -306,7 +296,7 @@ impl TerminalService {
             .acquire_use(project_id, ProjectUseKind::RunningTerminal)
             .map_err(project_terminal_error)?;
         let id = Uuid::new_v4().to_string();
-        let now = now_iso();
+        let now = crate::now_rfc3339();
         let view = TerminalSessionView {
             id: id.clone(),
             title: cwd
@@ -325,10 +315,8 @@ impl TerminalService {
             updated_at: now,
         };
         let terminal = spawn_terminal(view, cwd, project_use)?;
-        let result = terminal.view()?;
-        let mut projects = self.inner.projects.lock().map_err(|_| {
-            TerminalError::new("terminal_state_poisoned", "Terminal state is poisoned.")
-        })?;
+        let result = terminal.view();
+        let mut projects = lock(&self.inner.projects, "Terminal project registry");
         let project = projects.entry(project_id.to_owned()).or_default();
         reservation.commit(project);
         project.sessions.insert(id, terminal);
@@ -344,16 +332,18 @@ impl TerminalService {
     }
 
     fn reserve_terminal(&self, project_id: &str) -> Result<TerminalReservation, TerminalError> {
-        let mut projects = self.inner.projects.lock().map_err(|_| {
-            TerminalError::new("terminal_state_poisoned", "Terminal state is poisoned.")
-        })?;
+        let mut projects = self
+            .inner
+            .projects
+            .lock()
+            .expect("Terminal project registry lock poisoned");
         let mut retired = Vec::new();
         loop {
             let project = projects.entry(project_id.to_owned()).or_default();
             if project.sessions.len() + project.reservations < MAX_TERMINALS_PER_PROJECT {
                 break;
             }
-            let Some(terminal_id) = oldest_retired_terminal_id(project)? else {
+            let Some(terminal_id) = oldest_retired_terminal_id(project) else {
                 return Err(TerminalError::new(
                     "terminal_project_limit_reached",
                     format!(
@@ -375,7 +365,7 @@ impl TerminalService {
                 break;
             }
             let Some((retired_project_id, terminal_id)) =
-                oldest_runtime_retired_terminal(&projects)?
+                oldest_runtime_retired_terminal(&projects)
             else {
                 return Err(TerminalError::new(
                     "terminal_runtime_limit_reached",
@@ -404,15 +394,13 @@ impl TerminalService {
     /// Lists the current memory-only Terminal entities for one open Project.
     ///
     /// # Errors
-    /// Returns an error when the Project is not open or Terminal state is poisoned.
+    /// Returns an error when the Project is not open.
     pub fn list(&self, project_id: &str) -> Result<TerminalTopologySnapshot, TerminalError> {
         self.inner
             .registry
             .get(project_id)
             .map_err(project_terminal_error)?;
-        let projects = self.inner.projects.lock().map_err(|_| {
-            TerminalError::new("terminal_state_poisoned", "Terminal state is poisoned.")
-        })?;
+        let projects = lock(&self.inner.projects, "Terminal project registry");
         projects.get(project_id).map_or_else(
             || {
                 Ok(TerminalTopologySnapshot {
@@ -420,7 +408,7 @@ impl TerminalService {
                     sessions: Vec::new(),
                 })
             },
-            snapshot,
+            |project| Ok(snapshot(project)),
         )
     }
 
@@ -440,7 +428,7 @@ impl TerminalService {
         let observation_id = Uuid::new_v4();
         let active = Arc::new(AtomicBool::new(true));
         let (events, receiver) = mpsc::sync_channel(TERMINAL_EVENT_CAPACITY);
-        if let Some(checkpoint) = terminal.final_checkpoint()? {
+        if let Some(checkpoint) = terminal.final_checkpoint() {
             drop(events);
             return Ok(TerminalObservation {
                 checkpoint: checkpoint?,
@@ -560,13 +548,7 @@ impl TerminalService {
         observer_id: &str,
     ) -> Result<(), TerminalError> {
         validate_observer_id(observer_id)?;
-        let terminals = self
-            .inner
-            .projects
-            .lock()
-            .map_err(|_| {
-                TerminalError::new("terminal_state_poisoned", "Terminal state is poisoned.")
-            })?
+        let terminals = lock(&self.inner.projects, "Terminal project registry")
             .get(project_id)
             .map(|project| project.sessions.values().cloned().collect::<Vec<_>>())
             .unwrap_or_default();
@@ -596,9 +578,7 @@ impl TerminalService {
     pub fn close(&self, project_id: &str, terminal_id: &str) -> Result<(), TerminalError> {
         let terminal = self.terminal(project_id, terminal_id)?;
         terminal.close()?;
-        let mut projects = self.inner.projects.lock().map_err(|_| {
-            TerminalError::new("terminal_state_poisoned", "Terminal state is poisoned.")
-        })?;
+        let mut projects = lock(&self.inner.projects, "Terminal project registry");
         if let Some(project) = projects.get_mut(project_id) {
             project.sessions.remove(terminal_id);
             publish_topology(project)?;
@@ -609,7 +589,7 @@ impl TerminalService {
     /// Subscribes to independently revisioned create/close topology.
     ///
     /// # Errors
-    /// Returns an error when the Project is not open or state is poisoned.
+    /// Returns an error when the Project is not open.
     pub fn subscribe_topology(
         &self,
         project_id: &str,
@@ -618,9 +598,7 @@ impl TerminalService {
             .registry
             .get(project_id)
             .map_err(project_terminal_error)?;
-        let mut projects = self.inner.projects.lock().map_err(|_| {
-            TerminalError::new("terminal_state_poisoned", "Terminal state is poisoned.")
-        })?;
+        let mut projects = lock(&self.inner.projects, "Terminal project registry");
         let project = projects.entry(project_id.to_owned()).or_default();
         if project.observers.len() >= MAX_TERMINAL_TOPOLOGY_OBSERVERS {
             return Err(TerminalError::new(
@@ -628,7 +606,7 @@ impl TerminalService {
                 "Terminal topology observer limit reached.",
             ));
         }
-        let snapshot = snapshot(project)?;
+        let snapshot = snapshot(project);
         let observer_id = Uuid::new_v4();
         let (sender, receiver) = mpsc::sync_channel(TERMINAL_TOPOLOGY_CAPACITY);
         project.observers.insert(observer_id, sender);
@@ -644,37 +622,27 @@ impl TerminalService {
     /// Closes every Terminal before Runtime shutdown.
     ///
     /// # Errors
-    /// Returns the first close, topology, or state error while retaining every
+    /// Returns the first close or topology error while retaining every
     /// Terminal that did not close for an explicit shutdown decision.
     pub fn close_all(&self) -> Result<(), TerminalError> {
-        let terminals = self
-            .inner
-            .projects
-            .lock()
-            .map(|projects| {
-                projects
-                    .iter()
-                    .flat_map(|(project_id, project)| {
-                        project.sessions.iter().map(|(terminal_id, terminal)| {
-                            (
-                                project_id.clone(),
-                                terminal_id.clone(),
-                                Arc::clone(terminal),
-                            )
-                        })
-                    })
-                    .collect::<Vec<_>>()
+        let terminals = lock(&self.inner.projects, "Terminal project registry")
+            .iter()
+            .flat_map(|(project_id, project)| {
+                project.sessions.iter().map(|(terminal_id, terminal)| {
+                    (
+                        project_id.clone(),
+                        terminal_id.clone(),
+                        Arc::clone(terminal),
+                    )
+                })
             })
-            .map_err(|_| {
-                TerminalError::new("terminal_state_poisoned", "Terminal state is poisoned.")
-            })?;
+            .collect::<Vec<_>>();
         let mut first_error = None;
         for (project_id, terminal_id, terminal) in terminals {
             match terminal.close() {
                 Ok(()) => {
-                    if let Ok(mut projects) = self.inner.projects.lock()
-                        && let Some(project) = projects.get_mut(&project_id)
-                    {
+                    let mut projects = lock(&self.inner.projects, "Terminal project registry");
+                    if let Some(project) = projects.get_mut(&project_id) {
                         project.sessions.remove(&terminal_id);
                         if let Err(error) = publish_topology(project)
                             && first_error.is_none()
@@ -695,9 +663,11 @@ impl TerminalService {
         project_id: &str,
         terminal_id: &str,
     ) -> Result<Arc<TerminalHandle>, TerminalError> {
-        let projects = self.inner.projects.lock().map_err(|_| {
-            TerminalError::new("terminal_state_poisoned", "Terminal state is poisoned.")
-        })?;
+        let projects = self
+            .inner
+            .projects
+            .lock()
+            .expect("Terminal project registry lock poisoned");
         projects
             .get(project_id)
             .and_then(|project| project.sessions.get(terminal_id))
@@ -711,53 +681,59 @@ impl TerminalService {
     }
 }
 
-fn snapshot(project: &ProjectTerminals) -> Result<TerminalTopologySnapshot, TerminalError> {
+fn lock<'a, T>(mutex: &'a Mutex<T>, name: &str) -> MutexGuard<'a, T> {
+    mutex
+        .lock()
+        .unwrap_or_else(|_| panic!("{name} lock poisoned"))
+}
+
+fn snapshot(project: &ProjectTerminals) -> TerminalTopologySnapshot {
     let mut sessions = project
         .sessions
         .values()
         .map(|terminal| terminal.view())
-        .collect::<Result<Vec<_>, _>>()?;
+        .collect::<Vec<_>>();
     sessions.sort_by(|left, right| {
         left.created_at
             .cmp(&right.created_at)
             .then(left.id.cmp(&right.id))
     });
-    Ok(TerminalTopologySnapshot {
+    TerminalTopologySnapshot {
         revision: project.revision,
         sessions,
-    })
+    }
 }
 
-fn oldest_retired_terminal_id(project: &ProjectTerminals) -> Result<Option<String>, TerminalError> {
+fn oldest_retired_terminal_id(project: &ProjectTerminals) -> Option<String> {
     let mut retired = project
         .sessions
         .values()
-        .filter_map(|terminal| match terminal.retired_sort_key() {
-            Ok(Some(key)) => Some(Ok((key, terminal.id.clone()))),
-            Ok(None) => None,
-            Err(error) => Some(Err(error)),
+        .filter_map(|terminal| {
+            terminal
+                .retired_sort_key()
+                .map(|key| (key, terminal.id.clone()))
         })
-        .collect::<Result<Vec<_>, _>>()?;
+        .collect::<Vec<_>>();
     retired.sort_by(|left, right| left.0.cmp(&right.0).then(left.1.cmp(&right.1)));
-    Ok(retired.into_iter().next().map(|(_, id)| id))
+    retired.into_iter().next().map(|(_, id)| id)
 }
 
 fn oldest_runtime_retired_terminal(
     projects: &HashMap<String, ProjectTerminals>,
-) -> Result<Option<(String, String)>, TerminalError> {
+) -> Option<(String, String)> {
     let mut retired = Vec::new();
     for (project_id, project) in projects {
         for terminal in project.sessions.values() {
-            if let Some(key) = terminal.retired_sort_key()? {
+            if let Some(key) = terminal.retired_sort_key() {
                 retired.push((key, project_id.clone(), terminal.id.clone()));
             }
         }
     }
     retired.sort();
-    Ok(retired
+    retired
         .into_iter()
         .next()
-        .map(|(_, project_id, terminal_id)| (project_id, terminal_id)))
+        .map(|(_, project_id, terminal_id)| (project_id, terminal_id))
 }
 
 fn publish_topology(project: &mut ProjectTerminals) -> Result<(), TerminalError> {
@@ -767,7 +743,7 @@ fn publish_topology(project: &mut ProjectTerminals) -> Result<(), TerminalError>
             "Terminal topology revision is exhausted.",
         )
     })?;
-    let mut snapshot = snapshot(project)?;
+    let mut snapshot = snapshot(project);
     snapshot.revision = revision;
     project.revision = revision;
     project
@@ -777,10 +753,11 @@ fn publish_topology(project: &mut ProjectTerminals) -> Result<(), TerminalError>
 }
 
 impl TerminalHandle {
-    fn view(&self) -> Result<TerminalSessionView, TerminalError> {
-        self.view.lock().map(|view| view.clone()).map_err(|_| {
-            TerminalError::new("terminal_state_poisoned", "Terminal state is poisoned.")
-        })
+    fn view(&self) -> TerminalSessionView {
+        self.view
+            .lock()
+            .expect("Terminal view lock poisoned")
+            .clone()
     }
 
     fn send(&self, command: ActorCommand) -> Result<(), TerminalError> {
@@ -795,22 +772,16 @@ impl TerminalHandle {
             })
     }
 
-    fn final_checkpoint(
-        &self,
-    ) -> Result<Option<Result<TerminalCheckpoint, TerminalError>>, TerminalError> {
+    fn final_checkpoint(&self) -> Option<Result<TerminalCheckpoint, TerminalError>> {
         self.final_checkpoint
             .lock()
-            .map(|checkpoint| checkpoint.clone())
-            .map_err(|_| {
-                TerminalError::new("terminal_state_poisoned", "Terminal state is poisoned.")
-            })
+            .expect("Terminal checkpoint lock poisoned")
+            .clone()
     }
 
-    fn retired_sort_key(&self) -> Result<Option<String>, TerminalError> {
-        if self.final_checkpoint()?.is_none() {
-            return Ok(None);
-        }
-        self.view().map(|view| Some(view.created_at))
+    fn retired_sort_key(&self) -> Option<String> {
+        let _checkpoint = self.final_checkpoint()?;
+        Some(self.view().created_at)
     }
 
     fn close(&self) -> Result<(), TerminalError> {
@@ -822,8 +793,9 @@ impl TerminalHandle {
     }
 
     fn request_close(&self, shutdown: bool) -> Result<(), TerminalError> {
-        if self.final_checkpoint()?.is_some() {
-            return self.join_actor();
+        if self.final_checkpoint().is_some() {
+            self.join_actor();
+            return Ok(());
         }
         let (reply, result) = mpsc::channel();
         let mut command = if shutdown {
@@ -862,65 +834,39 @@ impl TerminalHandle {
         if !shutdown {
             close_result.clone()?;
         }
-        self.join_actor()?;
+        self.join_actor();
         close_result
     }
 
-    fn join_actor(&self) -> Result<(), TerminalError> {
+    fn join_actor(&self) {
         let actor = self
             .actor
             .lock()
-            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .expect("Terminal actor lock poisoned")
             .take();
-        if let Some(actor) = actor
-            && actor.join().is_err()
-        {
-            return Err(TerminalError::new(
-                "terminal_actor_panicked",
-                format!("Terminal actor panicked: {}", self.id),
-            ));
+        if let Some(actor) = actor {
+            actor.join().expect("Terminal actor panicked");
         }
-        Ok(())
     }
 
-    fn shutdown_with_fallback(&self) {
-        if self.shutdown().is_ok() {
-            return;
-        }
-        let tree = self
+    fn shutdown_owned(&self) -> Result<(), TerminalError> {
+        let Err(shutdown_error) = self.shutdown() else {
+            return Ok(());
+        };
+        let force_error = self
             .tree
             .lock()
-            .unwrap_or_else(std::sync::PoisonError::into_inner)
-            .clone();
-        if let Some(tree) = tree {
-            let _ = tree.force_kill();
+            .expect("Terminal process tree lock poisoned")
+            .clone()
+            .and_then(|tree| tree.force_kill().err());
+        self.join_actor();
+        if let Some(error) = force_error {
+            return Err(TerminalError::new(
+                "terminal_close_failed",
+                format!("Terminal process-tree cleanup failed: {error}"),
+            ));
         }
-        let (reply, result) = mpsc::channel();
-        let mut command = ActorCommand::Shutdown { reply };
-        let deadline = Instant::now() + TERMINAL_CLOSE_REQUEST_TIMEOUT;
-        let sent = loop {
-            match self.commands.try_send(command) {
-                Ok(()) => break true,
-                Err(mpsc::TrySendError::Full(returned)) if Instant::now() < deadline => {
-                    command = returned;
-                    thread::sleep(Duration::from_millis(5));
-                }
-                Err(mpsc::TrySendError::Full(_) | mpsc::TrySendError::Disconnected(_)) => {
-                    break false;
-                }
-            }
-        };
-        if sent && result.recv_timeout(TERMINAL_CLOSE_ACK_TIMEOUT).is_ok() {
-            let _ = self.join_actor();
-        } else {
-            // The process tree has already been force-killed. Rust cannot cancel a
-            // wedged platform call safely, so detach the thread instead of turning
-            // Runtime destruction into an unbounded wait.
-            self.actor
-                .lock()
-                .unwrap_or_else(std::sync::PoisonError::into_inner)
-                .take();
-        }
+        Err(shutdown_error)
     }
 }
 
@@ -942,7 +888,7 @@ impl Drop for TerminalReservation {
         let mut projects = service
             .projects
             .lock()
-            .unwrap_or_else(std::sync::PoisonError::into_inner);
+            .expect("Terminal project registry lock poisoned");
         if let Some(project) = projects.get_mut(&self.project_id) {
             project.reservations = project.reservations.saturating_sub(1);
         }
@@ -955,10 +901,10 @@ impl Drop for TerminalHandle {
         if self
             .actor
             .get_mut()
-            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .expect("Terminal actor lock poisoned")
             .is_some()
         {
-            self.shutdown_with_fallback();
+            let _ = self.shutdown_owned();
         }
     }
 }
@@ -1107,14 +1053,16 @@ fn spawn_terminal(
                     .recv_timeout(TERMINAL_START_TIMEOUT)
                     .is_err()
             {
-                handle.shutdown_with_fallback();
+                let _ = handle.shutdown_owned();
                 return Err(actor_unavailable(&id));
             }
             Ok(handle)
         }
         Ok(Err(error)) => {
             if let Some(actor) = actor.take() {
-                let _ = actor.join();
+                actor
+                    .join()
+                    .expect("Terminal actor panicked during startup");
             }
             Err(error)
         }
@@ -1124,7 +1072,9 @@ fn spawn_terminal(
         )),
         Err(mpsc::RecvTimeoutError::Disconnected) => {
             if let Some(actor) = actor.take() {
-                let _ = actor.join();
+                actor
+                    .join()
+                    .expect("Terminal actor panicked during startup");
             }
             Err(actor_unavailable(&id))
         }
@@ -1173,7 +1123,7 @@ fn start_terminal_actor(
     };
     *tree_owner
         .lock()
-        .unwrap_or_else(std::sync::PoisonError::into_inner) = Some(Arc::clone(&tree));
+        .expect("Terminal process tree lock poisoned") = Some(Arc::clone(&tree));
     #[cfg(target_os = "windows")]
     if let Err(error) = spawn_barrier.release() {
         let _ = tree.force_kill();
@@ -1240,10 +1190,11 @@ fn start_terminal_actor(
         .name(format!("debrute-terminal-wait-{}", view.id))
         .spawn(move || {
             let status = child.wait().map_err(|error| error.to_string());
-            if let Ok(mut notice) = exit_state.status.lock() {
-                *notice = Some(status.clone());
-                exit_state.ready.notify_all();
-            }
+            *exit_state
+                .status
+                .lock()
+                .expect("Terminal exit notice lock poisoned") = Some(status.clone());
+            exit_state.ready.notify_all();
             let _ = exit_commands.send(ActorCommand::ChildExited(status));
         })
     {
@@ -1255,10 +1206,8 @@ fn start_terminal_actor(
     }
 
     view.status = TerminalSessionStatus::Running;
-    view.updated_at = now_iso();
-    if let Ok(mut shared) = shared_view.lock() {
-        *shared = view.clone();
-    }
+    view.updated_at = crate::now_rfc3339();
+    *shared_view.lock().expect("Terminal view lock poisoned") = view.clone();
     Ok(TerminalActor {
         emulator: TerminalEmulator::new(view.id.clone(), view.rows, view.cols),
         view,
@@ -1495,7 +1444,7 @@ impl TerminalActor {
         let title = self.emulator.title(&self.view.title);
         if title != self.view.title {
             self.view.title = title;
-            self.view.updated_at = now_iso();
+            self.view.updated_at = crate::now_rfc3339();
             self.publish(TerminalEvent::Status(self.view.clone()));
             self.sync_shared_view();
         }
@@ -1611,7 +1560,7 @@ impl TerminalActor {
         self.emulator.resize(rows, cols);
         self.view.rows = rows;
         self.view.cols = cols;
-        self.view.updated_at = now_iso();
+        self.view.updated_at = crate::now_rfc3339();
         self.sync_shared_view();
         self.publish(TerminalEvent::Status(self.view.clone()));
         Ok(self.view.clone())
@@ -1633,7 +1582,7 @@ impl TerminalActor {
         ) {
             (_, Some(error), _) => {
                 self.view.status = TerminalSessionStatus::Failed;
-                self.view.updated_at = now_iso();
+                self.view.updated_at = crate::now_rfc3339();
                 self.sync_shared_view();
                 self.publish(TerminalEvent::Error {
                     terminal_id: self.view.id.clone(),
@@ -1644,7 +1593,7 @@ impl TerminalActor {
             }
             (_, None, true) => {
                 self.view.status = TerminalSessionStatus::Failed;
-                self.view.updated_at = now_iso();
+                self.view.updated_at = crate::now_rfc3339();
                 self.sync_shared_view();
                 self.publish(TerminalEvent::Error {
                     terminal_id: self.view.id.clone(),
@@ -1657,7 +1606,7 @@ impl TerminalActor {
                 self.view.status = TerminalSessionStatus::Exited;
                 self.view.exit_code = Some(status.exit_code());
                 self.view.signal = status.signal().map(str::to_owned);
-                self.view.updated_at = now_iso();
+                self.view.updated_at = crate::now_rfc3339();
                 self.sync_shared_view();
                 self.publish(TerminalEvent::Exit {
                     terminal_id: self.view.id.clone(),
@@ -1668,7 +1617,7 @@ impl TerminalActor {
             }
             (Err(message), None, false) => {
                 self.view.status = TerminalSessionStatus::Failed;
-                self.view.updated_at = now_iso();
+                self.view.updated_at = crate::now_rfc3339();
                 self.sync_shared_view();
                 self.publish(TerminalEvent::Error {
                     terminal_id: self.view.id.clone(),
@@ -1685,11 +1634,11 @@ impl TerminalActor {
         *self
             .final_checkpoint
             .lock()
-            .unwrap_or_else(std::sync::PoisonError::into_inner) = Some(checkpoint);
+            .expect("Terminal checkpoint lock poisoned") = Some(checkpoint);
         self.project_use.take();
         self.tree_owner
             .lock()
-            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .expect("Terminal process tree lock poisoned")
             .take();
         self.observers.clear();
         true
@@ -1701,7 +1650,7 @@ impl TerminalActor {
             TerminalSessionStatus::Exited | TerminalSessionStatus::Failed
         ) {
             self.view.status = TerminalSessionStatus::Terminating;
-            self.view.updated_at = now_iso();
+            self.view.updated_at = crate::now_rfc3339();
             self.sync_shared_view();
             self.publish(TerminalEvent::Status(self.view.clone()));
             let _terminate_error = self.pty.tree.terminate().err();
@@ -1747,9 +1696,10 @@ impl TerminalActor {
     }
 
     fn sync_shared_view(&self) {
-        if let Ok(mut shared) = self.shared_view.lock() {
-            *shared = self.view.clone();
-        }
+        *self
+            .shared_view
+            .lock()
+            .expect("Terminal view lock poisoned") = self.view.clone();
     }
 }
 
@@ -1757,11 +1707,17 @@ fn wait_for_exit(
     notice: &ExitNotice,
     timeout: Duration,
 ) -> Option<Result<portable_pty::ExitStatus, String>> {
-    let status = notice.status.lock().ok()?;
+    let status = notice
+        .status
+        .lock()
+        .expect("Terminal exit notice lock poisoned");
     if status.is_some() {
         return status.clone();
     }
-    let (status, _) = notice.ready.wait_timeout(status, timeout).ok()?;
+    let (status, _) = notice
+        .ready
+        .wait_timeout(status, timeout)
+        .expect("Terminal exit notice wait lock poisoned");
     status.clone()
 }
 
@@ -1932,16 +1888,6 @@ fn attach_terminal_tree(
         .map_err(|error| TerminalError::new("terminal_spawn_failed", error.to_string()))
 }
 
-#[cfg(not(any(target_os = "macos", target_os = "windows")))]
-fn attach_terminal_tree(
-    _child: &dyn portable_pty::Child,
-) -> Result<debrute_native_process::ChildProcessTree, TerminalError> {
-    Err(TerminalError::new(
-        "terminal_spawn_failed",
-        "Terminal process-tree ownership is unsupported on this distribution target.",
-    ))
-}
-
 #[allow(clippy::needless_pass_by_value)] // map_err transfers source-error ownership here.
 fn project_terminal_error(error: crate::project::ProjectError) -> TerminalError {
     TerminalError::new(error.code(), error.to_string())
@@ -1952,10 +1898,6 @@ fn actor_unavailable(terminal_id: &str) -> TerminalError {
         "terminal_unavailable",
         format!("Terminal actor is unavailable: {terminal_id}"),
     )
-}
-
-fn now_iso() -> String {
-    crate::now_rfc3339()
 }
 
 #[cfg(all(test, target_os = "macos"))]
@@ -2000,9 +1942,11 @@ mod tests {
         let (root, registry, project_id, open_use) = project_service();
         let service = TerminalService::new(registry.clone());
         let session = service
-            .create(&project_id, CreateTerminalSession::default())
+            .create(&project_id, "")
             .expect("terminal should start");
         assert_eq!(session.status, TerminalSessionStatus::Running);
+        assert_eq!(session.cwd_project_relative_path, "");
+        assert_eq!((session.cols, session.rows), (DEFAULT_COLS, DEFAULT_ROWS));
         assert_eq!(
             service
                 .write_input(&project_id, &session.id, "hub", 1, "echo no\n".to_owned())
@@ -2061,7 +2005,7 @@ mod tests {
         let (root, registry, project_id, open_use) = project_service();
         let service = TerminalService::new(registry.clone());
         let session = service
-            .create(&project_id, CreateTerminalSession::default())
+            .create(&project_id, "")
             .expect("terminal should start");
         let observation = service
             .observe(&project_id, &session.id, "hub")
@@ -2104,7 +2048,7 @@ mod tests {
         let (root, registry, project_id, open_use) = project_service();
         let service = TerminalService::new(registry.clone());
         let session = service
-            .create(&project_id, CreateTerminalSession::default())
+            .create(&project_id, "")
             .expect("terminal should start");
         let _observation = service
             .observe(&project_id, &session.id, "hub")
@@ -2165,7 +2109,7 @@ mod tests {
             .expect("topology should subscribe");
         assert_eq!(topology.snapshot.revision, 0);
         let session = service
-            .create(&project_id, CreateTerminalSession::default())
+            .create(&project_id, "")
             .expect("terminal should start");
         let created = topology.recv().expect("create topology should publish");
         assert_eq!(created.revision, 1);
@@ -2186,7 +2130,7 @@ mod tests {
         let (root, registry, project_id, open_use) = project_service();
         let service = TerminalService::new(registry.clone());
         let session = service
-            .create(&project_id, CreateTerminalSession::default())
+            .create(&project_id, "")
             .expect("terminal should start");
         let first = service
             .observe(&project_id, &session.id, "hub")
@@ -2246,12 +2190,12 @@ mod tests {
         let service = TerminalService::new(registry.clone());
         assert_eq!(
             service
-                .create(
+                .resize(
                     &project_id,
-                    CreateTerminalSession {
-                        cols: Some(MAX_TERMINAL_COLS + 1),
-                        ..CreateTerminalSession::default()
-                    },
+                    "missing",
+                    "hub",
+                    MAX_TERMINAL_COLS + 1,
+                    DEFAULT_ROWS,
                 )
                 .expect_err("oversized terminal should be rejected")
                 .code(),
@@ -2280,7 +2224,7 @@ mod tests {
         let (root, registry, project_id, open_use) = project_service();
         let service = TerminalService::new(registry.clone());
         service
-            .create(&project_id, CreateTerminalSession::default())
+            .create(&project_id, "")
             .expect("terminal should start");
         drop(service);
         drop(open_use);

@@ -15,9 +15,9 @@ import { describe, expect, it } from 'vitest';
 
 import {
   RuntimeControlError,
-  connectRuntimeControl,
-  resolveRuntimeControlSocketPath
+  connectRuntimeControl
 } from './index.js';
+import { resolveRuntimeControlSocketPath } from './runtimeControlClient.js';
 
 const PRODUCT_VERSION = '0.0.3';
 
@@ -106,6 +106,93 @@ describe('Runtime Control client', () => {
         authorization: 'connection-secret'
       });
       expect(inspectCount).toBe(2);
+      client.close();
+    });
+  });
+
+  it('uses one absolute Ready deadline and never sends the gated request after it expires', async () => {
+    const requests: ClientMessage[] = [];
+    await withControlServer((socket) => {
+      readFrames(socket, (message) => {
+        if (message.type === 'handshake') {
+          acceptHandshake(socket, 'starting');
+          return;
+        }
+        requests.push(message);
+        if (requests.length === 1) {
+          respond(socket, message.request_id, {
+            result: 'inspection',
+            instance_id: 'runtime-instance',
+            status: 'starting',
+            executable_identity: null
+          });
+        }
+      });
+    }, async (socketPath) => {
+      const client = await connectRuntimeControl({
+        socketPath,
+        role: 'launcher',
+        productVersion: PRODUCT_VERSION,
+        readyDeadlineMs: Date.now() + 80
+      });
+
+      await expect(client.activate({ kind: 'open_browser' })).rejects.toMatchObject({
+        code: 'runtime_ready_timeout'
+      });
+      expect(requests.length).toBeGreaterThan(0);
+      expect(requests.every((message) => (
+        message.type === 'request' && message.request.command === 'inspect'
+      ))).toBe(true);
+    });
+  });
+
+  it('rejects a Ready handshake delivered after the absolute deadline', async () => {
+    await withControlServer((socket) => {
+      readFrames(socket, (message) => {
+        if (message.type !== 'handshake') {
+          return;
+        }
+        acceptHandshake(socket, 'ready');
+        const blockedUntil = Date.now() + 100;
+        while (Date.now() < blockedUntil) {
+          // Hold the event loop so the already-buffered handshake and deadline
+          // become observable in the same turn.
+        }
+      });
+    }, async (socketPath) => {
+      await expect(connectRuntimeControl({
+        socketPath,
+        role: 'launcher',
+        productVersion: PRODUCT_VERSION,
+        readyDeadlineMs: Date.now() + 50
+      })).rejects.toMatchObject({ code: 'runtime_ready_timeout' });
+    });
+  });
+
+  it('retires the startup deadline after Ready is observed', async () => {
+    await withControlServer((socket) => {
+      readFrames(socket, (message) => {
+        if (message.type === 'handshake') {
+          acceptHandshake(socket, 'ready');
+          return;
+        }
+        respond(socket, message.request_id, {
+          result: 'cli_authorization',
+          origin: 'http://127.0.0.1:41000',
+          authorization: 'connection-secret'
+        });
+      });
+    }, async (socketPath) => {
+      const client = await connectRuntimeControl({
+        socketPath,
+        role: 'cli',
+        productVersion: PRODUCT_VERSION,
+        readyDeadlineMs: Date.now() + 100
+      });
+      await new Promise((resolve) => setTimeout(resolve, 120));
+      await expect(client.createCliAuthorization()).resolves.toMatchObject({
+        result: 'cli_authorization'
+      });
       client.close();
     });
   });
@@ -275,7 +362,7 @@ function connectClient(socketPath: string, role: 'launcher' | 'cli') {
     socketPath,
     role,
     productVersion: PRODUCT_VERSION,
-    handshakeTimeoutMs: 500
+    readyDeadlineMs: Date.now() + 500
   });
 }
 

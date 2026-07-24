@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest';
 import {
   connectionStatusForBridgeError,
   photoshopBridgeConnectionPresentation
-} from './connectionPresentation';
+} from './connectionPresentation.js';
 
 describe('Photoshop Bridge connection presentation', () => {
   it('offers Pair only after Runtime asks for pairing', () => {

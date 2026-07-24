@@ -1,10 +1,7 @@
-import { parseDebruteWorkbenchPath, type DebruteWorkbenchRoute, type WorkbenchApiClient, type WorkbenchProjectSessionSnapshot, type WorkbenchWorkingCopies } from '@debrute/app-protocol';
+import { parseDebruteWorkbenchPath, type DebruteWorkbenchRoute, type WorkbenchApiClient, type WorkbenchProjectOpenResult } from '@debrute/app-protocol';
 
 export interface OpenInitialProjectResult {
-  projectId?: string;
-  projectRevision?: number;
-  snapshot: WorkbenchProjectSessionSnapshot | undefined;
-  workingCopies?: WorkbenchWorkingCopies;
+  project: WorkbenchProjectOpenResult | undefined;
   route: DebruteWorkbenchRoute;
   projectOpen?: {
     attemptedPath?: string;
@@ -27,20 +24,17 @@ export async function openInitialProject(
     try {
       const opened = await api.openProject({ projectId: route.projectId });
       if ('outcome' in opened) {
-        return { snapshot: undefined, route };
+        return { project: undefined, route };
       }
       replaceWorkbenchProjectRoute(opened.projectId);
       return {
-        projectId: opened.projectId,
-        projectRevision: opened.projectRevision,
-        snapshot: opened.snapshot,
-        ...(opened.workingCopies ? { workingCopies: opened.workingCopies } : {}),
+        project: opened,
         route
       };
     } catch (error) {
       const openHereProjectId = projectOpenHereProjectId(error) ?? route.projectId;
       return {
-        snapshot: undefined,
+        project: undefined,
         route,
         projectOpen: {
           error: {
@@ -53,17 +47,17 @@ export async function openInitialProject(
     }
   }
   if (route.kind === 'project-open') {
-    const projectRoot = route.projectRoot?.trim() ?? '';
-    if (!projectRoot) {
+    const projectRoot = route.projectRoot;
+    if (projectRoot === undefined || projectRoot === '') {
       return {
-        snapshot: undefined,
+        project: undefined,
         route,
         projectOpen: { error: { code: 'project-path-required' } }
       };
     }
     if (!isAbsoluteLocalProjectPath(projectRoot)) {
       return {
-        snapshot: undefined,
+        project: undefined,
         route,
         projectOpen: { attemptedPath: projectRoot, error: { code: 'project-path-must-be-absolute' } }
       };
@@ -72,24 +66,21 @@ export async function openInitialProject(
       const opened = await api.openProject({ projectRoot });
       if ('outcome' in opened) {
         return {
-          snapshot: undefined,
+          project: undefined,
           route,
           projectOpen: { attemptedPath: projectRoot }
         };
       }
-      replaceWorkbenchProjectRoute(opened.projectId, { search: '', hash: '' });
+      replaceWorkbenchProjectRoute(opened.projectId);
       return {
-        projectId: opened.projectId,
-        projectRevision: opened.projectRevision,
-        snapshot: opened.snapshot,
-        ...(opened.workingCopies ? { workingCopies: opened.workingCopies } : {}),
+        project: opened,
         route,
         projectOpen: { attemptedPath: projectRoot }
       };
     } catch (error) {
       const openHereProjectId = projectOpenHereProjectId(error);
       return {
-        snapshot: undefined,
+        project: undefined,
         route,
         projectOpen: {
           attemptedPath: projectRoot,
@@ -101,13 +92,13 @@ export async function openInitialProject(
     }
   }
   return {
-    snapshot: undefined,
+    project: undefined,
     route
   };
 }
 
 export function shouldShowInitialProjectLoader(route: DebruteWorkbenchRoute): boolean {
-  return route.kind !== 'workbench';
+  return route.kind === 'project' || route.kind === 'project-open';
 }
 
 export function errorMessage(error: unknown): string {
@@ -136,27 +127,19 @@ function isProjectOwnedByWebError(error: unknown): boolean {
 }
 
 export function currentDebruteWorkbenchRoute(): DebruteWorkbenchRoute {
-  if (typeof window === 'undefined') {
-    return { kind: 'workbench' };
-  }
-  return parseDebruteWorkbenchPath(window.location.pathname, window.location.search);
+  return parseDebruteWorkbenchPath(
+    window.location.pathname,
+    window.location.search,
+    window.location.hash
+  );
 }
 
-export function replaceWorkbenchProjectRoute(
-  projectId: string,
-  options: { search?: string; hash?: string } = {}
-): void {
-  if (typeof window === 'undefined') {
-    return;
-  }
+export function replaceWorkbenchProjectRoute(projectId: string): void {
   const nextPath = `/projects/${encodeURIComponent(projectId)}`;
-  const nextSearch = options.search ?? window.location.search;
-  const nextHash = options.hash ?? window.location.hash;
-  const nextUrl = `${nextPath}${nextSearch}${nextHash}`;
-  if (`${window.location.pathname}${window.location.search}${window.location.hash}` === nextUrl) {
+  if (`${window.location.pathname}${window.location.search}${window.location.hash}` === nextPath) {
     return;
   }
-  window.history.replaceState(window.history.state ?? null, '', nextUrl);
+  window.history.replaceState(window.history.state ?? null, '', nextPath);
 }
 
 export function isAbsoluteLocalProjectPath(value: string): boolean {

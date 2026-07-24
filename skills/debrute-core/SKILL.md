@@ -13,12 +13,12 @@ Use `debrute` as the Debrute execution interface. Debrute Skills describe how to
 
 ## Basic Rules
 
-- Read Debrute CLI stdout as `debrute/1` Agent Records.
+- Read Debrute CLI stdout as unversioned `debrute` Agent Records.
 - Treat command path inputs as project-relative unless a command explicitly asks for an absolute project root.
 - Use the external Agent's filesystem tools for generic file reads, directory listings, writes, and deletes.
 - Do not edit files under `~/.agents/skills` directly.
 - Use the external Agent's Skills system to discover and read Skills.
-- Surface structured CLI errors to the user when a command returns `debrute/1 error`.
+- Surface structured CLI errors to the user when a command returns `debrute error`.
 
 ## Common Commands
 
@@ -33,24 +33,32 @@ debrute canvas-map push /path/to/project canvas-1
 debrute generated-asset lookup /path/to/project --path generated/example.png
 debrute models image list
 debrute models image describe gpt-image-2
-debrute generate image /path/to/project --input-json '{"model":"gpt-image-2","arguments":{"prompt":"Cover image","output_path":"generated/cover.png"}}' --timeout-ms 600000
-debrute generate image-batch /path/to/project --manifest image-requests.json --timeout-ms 900000 --log image-results.jsonl --summary image-summary.json
+debrute request single /path/to/project --input image-request.jsonl --timeout 10m
+debrute request batch /path/to/project --input image-requests.jsonl --concurrency 3
 debrute models video list
 debrute models video describe doubao-seedance-2-0-260128
-debrute generate video /path/to/project --input-json '{"model":"doubao-seedance-2-0-260128","arguments":{"prompt":"Short video brief","intent":"generate"}}' --timeout-ms 600000
+debrute request single /path/to/project --input video-request.jsonl --timeout 30m
 debrute models tts list
 debrute models tts describe openai-gpt-4o-mini-tts
-debrute generate tts /path/to/project --input-json '{"model":"openai-gpt-4o-mini-tts","arguments":{"text":"Welcome to Debrute.","voice":"alloy","output_path":"generated/welcome.mp3"}}' --timeout-ms 600000
+debrute request single /path/to/project --input tts-request.jsonl
 debrute models music list
 debrute models music describe elevenlabs-music
-debrute generate music /path/to/project --input-json '{"model":"elevenlabs-music","arguments":{"prompt":"Warm ambient electronic music for a product demo.","output_path":"generated/demo-music.mp3"}}' --timeout-ms 600000
+debrute request single /path/to/project --input music-request.jsonl
 debrute models sfx list
 debrute models sfx describe elevenlabs-sound-effects
-debrute generate sfx /path/to/project --input-json '{"model":"elevenlabs-sound-effects","arguments":{"prompt":"Short glass chime.","output_path":"generated/chime.wav"}}' --timeout-ms 600000
+debrute request single /path/to/project --input sound-effect-request.jsonl
+debrute operation list --state active
+debrute operation wait <operation-id>
+debrute operation cancel <operation-id>
 debrute commands
 ```
 
-`generate image-batch --manifest` reads a canonical JSON object with a `requests` array.
+Model Request input is strict JSONL. Each record is
+`{"model":"...","arguments":{...},"output":{"directory":"generated","filename":"name"}}`.
+The output filename is extension-free; Runtime derives actual extensions. Use
+`request batch` for any peer Model Kind instead of looping over Single commands.
+Redirect the Agent Record stdout stream when a retained file copy is needed;
+for detached work, use the returned Operation id with `operation wait`.
 
 ## Visual Workbench
 

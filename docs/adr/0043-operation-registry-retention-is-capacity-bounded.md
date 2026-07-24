@@ -1,24 +1,28 @@
 # Operation Registry Retention Is Capacity Bounded
 
-Runtime applies separate count and retained-byte budgets to terminal Operation
-summaries and reservations that have not created an Operation, including
-reservations bound by a rejected `StartOperation`. Neither budget contains a
-time-to-live or last-access component. Reading a record never refreshes or pins
-it, and clients are not required to acknowledge or release records.
+Runtime retains at most `100` terminal Operation observation records. Each
+record owns its terminal snapshot and, for Batch, settled Item Outcomes in
+settlement order so a later wait can replay them without a Project log. It uses
+no retained-byte budget, time-to-live, last-access component, configuration
+value, environment override, or CLI override. This bounds retained record
+count, not an independently calculated byte total; Runtime adds no second retention policy
+for Batch Item, Artifact Pointer, or serialized record size. Reading a record
+never refreshes or pins it, and clients are not required to acknowledge or
+release records.
 
-An Operation becomes reclaimable only after it reaches a terminal state,
-finishes cleanup, and releases all Project Uses and lane permits. Under terminal
-summary pressure, Runtime retains the newest completion and retires older
-summaries in completion order until both budgets are satisfied. Under
-reservation pressure, it retires reservations in issue order. Active
-Operations are never evicted for registry capacity. The closed Operation
-schemas and Runtime budgets must ensure that at least one maximum-sized newest
-record can be retained.
+An Operation becomes reclaimable only after it reaches a terminal state and
+finishes cleanup. Model Operations never hold Project Uses. Under terminal
+record pressure, Runtime retains the newest completion and retires older
+records and their Item Outcomes in completion order until the count limit is
+satisfied. Active Operations are never evicted for registry capacity and do not
+consume the 100 terminal-record slots. This retention count is not an execution
+admission or concurrency limit.
 
-Retiring a terminal summary emits `operation.retired` to authorized connected
-connections; later access returns `operation_retired`. A disconnected client
-has no guarantee that a terminal summary will still exist when it reconnects,
-because durable outcomes belong to the owning domain rather than the Operation
-registry. This was chosen over elapsed-time retention, access-based LRU, and
-client acknowledgements so memory use is bounded without arbitrary clocks or
-client-controlled lifetime.
+Retiring a terminal record is silent; later access returns
+`operation_not_found`, the same as every id absent from the current registry. A
+disconnected client has no guarantee that a terminal record will still exist
+when it reconnects, because durable outcomes belong to the owning domain rather
+than the Operation registry. Runtime adds no tombstone, retirement event, or
+acknowledgement protocol. This was chosen over elapsed-time retention,
+access-based LRU, and client acknowledgements so retained-record count has one
+clear bound without arbitrary clocks or client-controlled lifetime.

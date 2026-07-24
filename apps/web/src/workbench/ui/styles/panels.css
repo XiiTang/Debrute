@@ -13,19 +13,6 @@
   box-shadow: var(--db-shadow-inset-subtle);
 }
 
-.db-card--interactive {
-  cursor: pointer;
-}
-
-.db-card--selected {
-  border-color: color-mix(in oklch, var(--db-accent) 52%, var(--db-border));
-  background: color-mix(in oklch, var(--db-accent) 10%, var(--db-surface-2));
-}
-
-.db-card--danger {
-  border-color: color-mix(in oklch, var(--db-danger) 58%, var(--db-border));
-}
-
 .db-panel {
   overflow: hidden;
   border-radius: var(--db-radius-lg);

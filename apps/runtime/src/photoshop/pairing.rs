@@ -110,7 +110,7 @@ impl PhotoshopPairingAuthority {
         now: OffsetDateTime,
     ) -> Result<PhotoshopPairingCreated, PhotoshopBridgeError> {
         validate_opaque(browser_session, "browser session")?;
-        let mut state = self.lock()?;
+        let mut state = self.lock();
         prune_expired(&mut state.outstanding, now);
         state
             .outstanding
@@ -124,14 +124,17 @@ impl PhotoshopPairingAuthority {
         let code = unique_pairing_code(&state.outstanding)?;
         let expires_at = now + PAIRING_CODE_TTL;
         let pairing_id = Uuid::new_v4().to_string();
-        state.outstanding.push(OutstandingPairing {
-            pairing_id: pairing_id.clone(),
-            browser_session: browser_session.to_owned(),
-            code_tag: code[..4].to_owned(),
-            code_hash: sha256(code.as_bytes()),
-            expires_at,
-            failed_attempts: 0,
-        });
+        push_outstanding_pairing(
+            &mut state.outstanding,
+            OutstandingPairing {
+                pairing_id: pairing_id.clone(),
+                browser_session: browser_session.to_owned(),
+                code_tag: code[..4].to_owned(),
+                code_hash: sha256(code.as_bytes()),
+                expires_at,
+                failed_attempts: 0,
+            },
+        );
         Ok(PhotoshopPairingCreated {
             pairing_id,
             code: grouped_code(&code),
@@ -159,7 +162,7 @@ impl PhotoshopPairingAuthority {
     ) -> Result<(), PhotoshopBridgeError> {
         validate_opaque(browser_session, "browser session")?;
         validate_opaque(pairing_id, "pairing id")?;
-        let mut state = self.lock()?;
+        let mut state = self.lock();
         prune_expired(&mut state.outstanding, now);
         let before = state.outstanding.len();
         state.outstanding.retain(|entry| {
@@ -193,7 +196,7 @@ impl PhotoshopPairingAuthority {
         now: OffsetDateTime,
     ) -> Result<VerifiedPhotoshopPairing, PhotoshopBridgeError> {
         validate_hello_identity(hello)?;
-        let mut state = self.lock()?;
+        let mut state = self.lock();
         if let Some(pairing) = state
             .registry
             .pairings
@@ -215,7 +218,7 @@ impl PhotoshopPairingAuthority {
         plugin_instance_id: &str,
     ) -> Result<(), PhotoshopBridgeError> {
         validate_opaque(plugin_instance_id, "plugin instance id")?;
-        let mut state = self.lock()?;
+        let mut state = self.lock();
         let mut next = state.registry.clone();
         let before = next.pairings.len();
         next.pairings
@@ -231,17 +234,16 @@ impl PhotoshopPairingAuthority {
         Ok(())
     }
 
-    pub(crate) fn clear_outstanding(&self) -> Result<(), PhotoshopBridgeError> {
-        self.lock()?.outstanding.clear();
-        Ok(())
+    pub(crate) fn clear_outstanding(&self) {
+        self.lock().outstanding.clear();
     }
 
     pub(crate) fn pairing_views(
         &self,
         connected: &BTreeSet<String>,
-    ) -> Result<Vec<PairedPhotoshopPluginView>, PhotoshopBridgeError> {
-        let state = self.lock()?;
-        Ok(state
+    ) -> Vec<PairedPhotoshopPluginView> {
+        let state = self.lock();
+        state
             .registry
             .pairings
             .iter()
@@ -251,16 +253,13 @@ impl PhotoshopPairingAuthority {
                 created_at: pairing.created_at.clone(),
                 connected: connected.contains(&pairing.plugin_instance_id),
             })
-            .collect())
+            .collect()
     }
 
-    fn lock(&self) -> Result<MutexGuard<'_, PairingState>, PhotoshopBridgeError> {
-        self.state.lock().map_err(|_| {
-            PhotoshopBridgeError::new(
-                PhotoshopBridgeErrorCode::StatePoisoned,
-                "Photoshop pairing state is poisoned.",
-            )
-        })
+    fn lock(&self) -> MutexGuard<'_, PairingState> {
+        self.state
+            .lock()
+            .expect("Photoshop pairing state lock poisoned")
     }
 }
 
@@ -558,6 +557,19 @@ fn grouped_code(code: &str) -> String {
 
 fn prune_expired(outstanding: &mut Vec<OutstandingPairing>, now: OffsetDateTime) {
     outstanding.retain(|entry| entry.expires_at > now);
+}
+
+fn push_outstanding_pairing(
+    outstanding: &mut Vec<OutstandingPairing>,
+    pairing: OutstandingPairing,
+) {
+    assert!(
+        !outstanding
+            .iter()
+            .any(|existing| existing.pairing_id == pairing.pairing_id),
+        "Runtime-generated Photoshop pairing id must be unique"
+    );
+    outstanding.push(pairing);
 }
 
 fn sha256(bytes: &[u8]) -> [u8; 32] {
@@ -866,5 +878,52 @@ mod tests {
             PhotoshopBridgeErrorCode::PairingSignatureInvalid
         );
         fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn poisoned_pairing_state_panics_instead_of_becoming_an_operational_error() {
+        let (root, authority) = fixture();
+        std::thread::scope(|scope| {
+            assert!(
+                scope
+                    .spawn(|| {
+                        let _state = authority.state.lock().unwrap();
+                        panic!("poison pairing state");
+                    })
+                    .join()
+                    .is_err()
+            );
+        });
+
+        let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+            authority.pairing_views(&BTreeSet::new())
+        }));
+        assert!(
+            result.is_err(),
+            "authoritative lock poisoning must remain an unexpected panic"
+        );
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn duplicate_runtime_pairing_id_panics() {
+        let pairing = OutstandingPairing {
+            pairing_id: "pairing-1".to_owned(),
+            browser_session: "browser-1".to_owned(),
+            code_tag: "ABCD".to_owned(),
+            code_hash: [1; 32],
+            expires_at: OffsetDateTime::now_utc() + PAIRING_CODE_TTL,
+            failed_attempts: 0,
+        };
+        let mut outstanding = Vec::new();
+        push_outstanding_pairing(&mut outstanding, pairing.clone());
+
+        let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+            push_outstanding_pairing(&mut outstanding, pairing);
+        }));
+        assert!(
+            result.is_err(),
+            "a duplicate Runtime-generated pairing id must panic"
+        );
     }
 }

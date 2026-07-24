@@ -7,6 +7,7 @@ pub mod global;
 mod integration_process;
 pub mod integrations;
 pub mod login;
+pub mod model_operation;
 pub mod photoshop;
 mod process;
 pub mod product;

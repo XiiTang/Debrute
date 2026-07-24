@@ -1,28 +1,32 @@
 #!/usr/bin/env node
 import { execFileSync } from 'node:child_process';
-import { lstatSync, mkdtempSync, readdirSync, rmSync } from 'node:fs';
+import { lstatSync, mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
+import { pathToFileURL } from 'node:url';
 
 const defaultBundleId = 'io.github.xiitang.debrute';
-const options = parseArgs(process.argv.slice(2));
-const releaseDir = resolve(requiredValue(options, '--release-dir'));
-const version = requiredValue(options, '--version');
-const arch = requiredValue(options, '--arch');
-const bundleId = options.get('--bundle-id') ?? defaultBundleId;
-
-if (process.platform !== 'darwin') {
-  throw new Error('macOS signing verification must run on macOS.');
+if (process.argv[1] && import.meta.url === pathToFileURL(resolve(process.argv[1])).href) {
+  main(process.argv.slice(2));
 }
 
-if (bundleId !== defaultBundleId) {
-  throw new Error(`Unsupported macOS bundle id: ${bundleId}`);
-}
+function main(argv) {
+  const options = parseArgs(argv);
+  const releaseDir = resolve(requiredValue(options, '--release-dir'));
+  const version = requiredValue(options, '--version');
+  const arch = requiredValue(options, '--arch');
+  const bundleId = options.get('--bundle-id') ?? defaultBundleId;
 
-if (arch === 'arm64' || arch === 'x64') {
+  if (process.platform !== 'darwin') {
+    throw new Error('macOS signing verification must run on macOS.');
+  }
+  if (bundleId !== defaultBundleId) {
+    throw new Error(`Unsupported macOS bundle id: ${bundleId}`);
+  }
+  if (arch !== 'arm64' && arch !== 'x64') {
+    throw new Error(`Unsupported macOS release arch: ${arch}`);
+  }
   verifyDmg(join(releaseDir, `debrute-desktop-${version}-macos-${arch}.dmg`), bundleId);
-} else {
-  throw new Error(`Unsupported macOS release arch: ${arch}`);
 }
 
 function verifyDmg(dmgPath, expectedBundleId) {
@@ -33,15 +37,29 @@ function verifyDmg(dmgPath, expectedBundleId) {
   const mountDir = mkdtempSync(join(tmpdir(), 'debrute-dmg-'));
   try {
     run('hdiutil', ['attach', dmgPath, '-nobrowse', '-readonly', '-mountpoint', mountDir]);
-    const [appPath] = collectApps(mountDir);
-    if (!appPath) {
-      throw new Error(`No .app bundle found inside ${dmgPath}`);
-    }
+    const appPath = resolveMountedDesktopApp(mountDir, dmgPath);
     verifyApp(appPath, expectedBundleId);
   } finally {
     run('hdiutil', ['detach', mountDir], { allowFailure: true });
     rmSync(mountDir, { recursive: true, force: true });
   }
+}
+
+export function resolveMountedDesktopApp(mountDir, dmgPath) {
+  const appPath = join(mountDir, 'Debrute.app');
+  let appStat;
+  try {
+    appStat = lstatSync(appPath);
+  } catch (error) {
+    if (error && typeof error === 'object' && 'code' in error && error.code === 'ENOENT') {
+      throw new Error(`Expected Debrute.app inside ${dmgPath}`);
+    }
+    throw error;
+  }
+  if (appStat.isSymbolicLink() || !appStat.isDirectory()) {
+    throw new Error(`Expected a real Debrute.app directory inside ${dmgPath}`);
+  }
+  return appPath;
 }
 
 function verifyApp(appPath, expectedBundleId) {
@@ -58,27 +76,6 @@ function verifyApp(appPath, expectedBundleId) {
   run('codesign', ['--verify', '--deep', '--strict', '--verbose=2', appPath]);
   run('spctl', ['-a', '-t', 'exec', '-vv', appPath]);
   run('xcrun', ['stapler', 'validate', appPath]);
-}
-
-function collectApps(root) {
-  const apps = [];
-  visit(root);
-  return apps;
-
-  function visit(dir) {
-    for (const entry of readdirSync(dir)) {
-      const entryPath = join(dir, entry);
-      const entryStat = lstatSync(entryPath);
-      if (entryStat.isSymbolicLink() || !entryStat.isDirectory()) {
-        continue;
-      }
-      if (entry.endsWith('.app')) {
-        apps.push(entryPath);
-        continue;
-      }
-      visit(entryPath);
-    }
-  }
 }
 
 function run(command, args, options = {}) {

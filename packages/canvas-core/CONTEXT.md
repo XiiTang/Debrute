@@ -7,7 +7,9 @@ Project files.
 
 **Canvas**:
 A visual workspace whose nodes represent selected Project files and directories,
-with stored layout, stack order, annotations, feedback, and preferences.
+with stored layout, stack order, annotations, feedback, and preferences. Canvas
+state is secondary to Project files: missing or invalid Canvas state never makes
+the Project files unavailable.
 _Avoid_: Board, document layer
 
 **Canvas Map**:
@@ -36,8 +38,8 @@ _Avoid_: Canvas Map, live editor state
 
 **Canvas Projection**:
 The runtime view produced from a Canvas Document and current Project state. It
-adds current availability, derived file-tree edges, and diagnostics without
-making them persisted Canvas state.
+adds current availability, derived file-tree edges, and Project Diagnostics
+without making them persisted Canvas state.
 _Avoid_: Canvas Document
 
 **Canvas Registry**:
@@ -61,14 +63,21 @@ hierarchy and automatic placement.
 _Avoid_: Layer tree, z-order panel
 
 **Text Viewport**:
-The persisted scroll position shared by a Canvas text node's editor and derived
-preview.
+The persisted scroll position confirmed in a Canvas Document and shared by a
+Canvas text node's editor and derived preview. An unconfirmed local scroll
+position is transient interaction state rather than a Text Viewport.
 _Avoid_: Editor focus, capture viewport
 
 **Playback Position**:
 The persisted video timestamp shared by an active player and the derived still
 preview used when that player is inactive.
 _Avoid_: Player time, playback session
+
+**Canvas Maintenance Job**:
+An automatic, rebuildable attempt to derive a preview, fill a cache, or update
+an index from authoritative Project and Canvas state. It has no public identity,
+history, or Operation lifecycle and may be cancelled, coalesced, or superseded.
+_Avoid_: Runtime Operation, user task, source data
 
 **Feedback Mark**:
 A selected categorical review signal that applies to one Project file as a

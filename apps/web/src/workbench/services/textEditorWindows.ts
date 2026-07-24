@@ -3,7 +3,7 @@ import type { FloatingPanelResizeInput } from '../shell/floatingPanels';
 import {
   constrainContainedRect,
   sameWindowRect,
-  type WorkbenchViewportRect
+  type WorkbenchWindowRect
 } from '../shell/windowBounds';
 
 const DEFAULT_TEXT_EDITOR_WINDOW_RECT = {
@@ -18,7 +18,7 @@ const TEXT_EDITOR_WINDOW_MIN_HEIGHT = 260;
 export function openTextEditorWindowState(
   windows: Record<string, FloatingTextEditorWindowState>,
   projectRelativePath: string,
-  viewport: WorkbenchViewportRect
+  viewport: WorkbenchWindowRect
 ): Record<string, FloatingTextEditorWindowState> {
   const existing = windows[projectRelativePath];
   const next = constrainTextEditorWindowState(existing
@@ -55,7 +55,7 @@ export function dragTextEditorWindowState(
   windows: Record<string, FloatingTextEditorWindowState>,
   projectRelativePath: string,
   delta: { dx: number; dy: number },
-  viewport: WorkbenchViewportRect
+  viewport: WorkbenchWindowRect
 ): Record<string, FloatingTextEditorWindowState> {
   const existing = windows[projectRelativePath];
   if (!existing) {
@@ -75,7 +75,7 @@ export function resizeTextEditorWindowState(
   windows: Record<string, FloatingTextEditorWindowState>,
   projectRelativePath: string,
   input: FloatingPanelResizeInput,
-  viewport: WorkbenchViewportRect
+  viewport: WorkbenchWindowRect
 ): Record<string, FloatingTextEditorWindowState> {
   const existing = windows[projectRelativePath];
   if (!existing) {
@@ -97,7 +97,7 @@ export function resizeTextEditorWindowState(
 
 export function constrainOpenTextEditorWindowsToViewport(
   windows: Record<string, FloatingTextEditorWindowState>,
-  viewport: WorkbenchViewportRect
+  viewport: WorkbenchWindowRect
 ): Record<string, FloatingTextEditorWindowState> {
   let changed = false;
   const nextWindows = { ...windows };
@@ -116,7 +116,7 @@ export function constrainOpenTextEditorWindowsToViewport(
 
 function constrainTextEditorWindowState(
   windowState: FloatingTextEditorWindowState,
-  viewport: WorkbenchViewportRect
+  viewport: WorkbenchWindowRect
 ): FloatingTextEditorWindowState {
   return {
     ...windowState,

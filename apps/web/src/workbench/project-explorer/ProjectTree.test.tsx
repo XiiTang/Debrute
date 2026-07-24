@@ -27,6 +27,7 @@ describe('ProjectTree', () => {
   it('renders selected project files', () => {
     const html = renderStaticWithI18n(
       <ProjectTree
+        productPlatform="win32"
         snapshot={{
           files: [
             { kind: 'file', projectRelativePath: 'briefs/concept.md' },
@@ -48,7 +49,7 @@ describe('ProjectTree', () => {
   it('activates directories on a plain click without requiring a prior selection', () => {
     expect(projectTreeRowClickAction({
       kind: 'directory',
-      platform: 'linux',
+      platform: 'win32',
       event: {}
     })).toEqual({
       toggleDirectory: true,
@@ -59,7 +60,7 @@ describe('ProjectTree', () => {
   it('keeps modified directory clicks available for selection without expanding', () => {
     expect(projectTreeRowClickAction({
       kind: 'directory',
-      platform: 'linux',
+      platform: 'win32',
       event: { ctrlKey: true }
     })).toEqual({
       toggleDirectory: false,
@@ -81,6 +82,7 @@ describe('ProjectTree', () => {
   it('renders the empty Project Tree state through shared UI classes', () => {
     const html = renderStaticWithI18n(
       <ProjectTree
+        productPlatform="win32"
         snapshot={{ files: [] } as unknown as WorkbenchProjectSessionSnapshot}
         selection={selection([])}
         cutPaths={[]}
@@ -95,6 +97,7 @@ describe('ProjectTree', () => {
   it('renders known binary files as project tree rows', () => {
     const html = renderStaticWithI18n(
       <ProjectTree
+        productPlatform="win32"
         snapshot={{
           files: [
             { kind: 'file', projectRelativePath: 'archive.bin' }
@@ -112,6 +115,7 @@ describe('ProjectTree', () => {
   it('marks file and directory rows as context menu targets', () => {
     const html = renderStaticWithI18n(
       <ProjectTree
+        productPlatform="win32"
         snapshot={{
           files: [
             { kind: 'file', projectRelativePath: 'briefs/concept.md' },
@@ -133,6 +137,7 @@ describe('ProjectTree', () => {
   it('renders cut rows and inline edit rows', () => {
     const html = renderStaticWithI18n(
       <ProjectTree
+        productPlatform="win32"
         snapshot={{
           files: [
             { kind: 'file', projectRelativePath: 'assets/cover.png' },
@@ -167,7 +172,7 @@ describe('ProjectTree', () => {
       visibleItems: flattenProjectTree(buildProjectFileTree([
         { kind: 'file', projectRelativePath: 'assets/cover.png' }
       ]), new Set(['assets'])),
-      desktopPlatform: 'linux',
+      productPlatform: 'win32',
       onKeyboardFileCommand: (command, target) => commands.push({ command, target })
     });
 
@@ -201,7 +206,7 @@ describe('ProjectTree', () => {
         { kind: 'file', projectRelativePath: 'assets/cover.png' },
         { kind: 'file', projectRelativePath: 'briefs/concept.md' }
       ]), new Set(['assets', 'briefs'])),
-      desktopPlatform: 'linux',
+      productPlatform: 'win32',
       onKeyboardFileCommand: (command, target) => commands.push({ command, target })
     });
 
@@ -275,7 +280,7 @@ describe('ProjectTree', () => {
       visibleItems: flattenProjectTree(buildProjectFileTree([
         { kind: 'file', projectRelativePath: 'assets/cover.png' }
       ]), new Set(['assets'])),
-      desktopPlatform: 'linux',
+      productPlatform: 'win32',
       onKeyboardFileCommand: (command, target) => commands.push({ command, target })
     });
 
@@ -295,7 +300,7 @@ describe('ProjectTree', () => {
       visibleItems: flattenProjectTree(buildProjectFileTree([
         { kind: 'file', projectRelativePath: 'assets/cover.png' }
       ]), new Set(['assets'])),
-      desktopPlatform: 'linux',
+      productPlatform: 'win32',
       onKeyboardFileCommand: (command, target) => commands.push({ command, target })
     });
 
@@ -354,7 +359,7 @@ describe('ProjectTree', () => {
       selection: selection(['assets']),
       visibleItems,
       expanded,
-      desktopPlatform: 'linux',
+      productPlatform: 'win32',
       onSelectionChange: (next) => selections.push(next),
       onExpandedChange: (next) => expandedChanges.push(next)
     });
@@ -364,7 +369,7 @@ describe('ProjectTree', () => {
       selection: selection(['assets']),
       visibleItems: collapsedVisibleItems,
       expanded: collapsed,
-      desktopPlatform: 'linux',
+      productPlatform: 'win32',
       onSelectionChange: (next) => selections.push(next),
       onExpandedChange: (next) => expandedChanges.push(next)
     });
@@ -374,7 +379,7 @@ describe('ProjectTree', () => {
       selection: selection(['assets']),
       visibleItems,
       expanded,
-      desktopPlatform: 'linux',
+      productPlatform: 'win32',
       onSelectionChange: (next) => selections.push(next),
       onExpandedChange: (next) => expandedChanges.push(next)
     });
@@ -401,7 +406,7 @@ describe('ProjectTree', () => {
       visibleItems: flattenProjectTree(buildProjectFileTree([
         { kind: 'directory', projectRelativePath: 'assets' }
       ]), new Set(['assets'])),
-      desktopPlatform: 'darwin',
+      productPlatform: 'darwin',
       onClearCut,
       onKeyboardFileCommand: (command, target) => commands.push({ command, target })
     });

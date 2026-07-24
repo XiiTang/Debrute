@@ -11,7 +11,7 @@ describe('Workbench theme helpers', () => {
     expect(DEFAULT_GLOBAL_WORKBENCH_SETTINGS).toEqual({
       locale: 'en',
       themePreference: 'system',
-      defaultFrontend: 'electron'
+      defaultFrontend: 'desktop'
     });
   });
 

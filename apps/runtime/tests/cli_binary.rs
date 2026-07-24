@@ -19,8 +19,9 @@ fn rust_cli_local_commands_use_the_stable_agent_protocol() {
         .expect("CLI should run");
     assert!(commands.status.success());
     let stdout = String::from_utf8(commands.stdout).unwrap();
-    assert!(stdout.starts_with("debrute/1 ok cmd=commands\ncommand name=update"));
-    assert!(stdout.contains("command name=generate.image-batch"));
+    assert!(stdout.starts_with("debrute ok cmd=commands\ncommand name=update"));
+    assert!(stdout.contains("command name=request.single"));
+    assert!(stdout.contains("command name=operation.wait"));
     assert!(stdout.ends_with("count=35\n"));
 }
 
@@ -34,9 +35,6 @@ fn rust_cli_parse_failures_are_agent_records_with_exit_two() {
     assert!(output.stderr.is_empty());
     assert_eq!(
         String::from_utf8(output.stdout).unwrap().trim(),
-        concat!(
-            "debrute/1 error cmd=workbench.start code=invalid_argument\n",
-            "message=\"Unknown option for workbench.start: --next\""
-        )
+        "debrute error cmd=workbench.start code=invalid_argument\nlog=\"Unknown option for workbench.start: --next\""
     );
 }

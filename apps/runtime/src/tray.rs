@@ -1,6 +1,7 @@
 use std::{
     error::Error,
     io,
+    path::Path,
     sync::{Arc, mpsc},
     thread,
     time::{Duration, Instant},
@@ -36,6 +37,7 @@ const QUIT_ID: &str = "quit-debrute";
 
 pub fn run(
     state: &Arc<RuntimeControlState>,
+    stable_runtime_entrypoint: &Path,
     service: impl FnOnce() -> ServiceResult + Send + 'static,
 ) -> ServiceResult {
     let mut event_loop = EventLoopBuilder::<RuntimeEvent>::with_user_event().build();
@@ -81,19 +83,21 @@ pub fn run(
     event_loop.run_return(|event, _target, control_flow| {
         *control_flow = ControlFlow::WaitUntil(Instant::now() + Duration::from_millis(100));
         match event {
-            Event::NewEvents(StartCause::Init) => match RuntimeTray::new() {
-                Ok(tray) => {
-                    application.tray = Some(tray);
-                    send_tray_result(&mut tray_ready_sender, Ok(()));
+            Event::NewEvents(StartCause::Init) => {
+                match RuntimeTray::new(stable_runtime_entrypoint) {
+                    Ok(tray) => {
+                        application.tray = Some(tray);
+                        send_tray_result(&mut tray_ready_sender, Ok(()));
+                    }
+                    Err(error) => {
+                        send_tray_result(
+                            &mut tray_ready_sender,
+                            Err(format!("Debrute Runtime tray is unavailable: {error}")),
+                        );
+                        *control_flow = ControlFlow::Exit;
+                    }
                 }
-                Err(error) => {
-                    send_tray_result(
-                        &mut tray_ready_sender,
-                        Err(format!("Debrute Runtime tray is unavailable: {error}")),
-                    );
-                    *control_flow = ControlFlow::Exit;
-                }
-            },
+            }
             Event::UserEvent(event) => {
                 if application.handle_runtime_event(event) {
                     *control_flow = ControlFlow::Exit;
@@ -114,7 +118,7 @@ pub fn run(
     }
     service_worker
         .join()
-        .map_err(|_| io::Error::other("Runtime services thread panicked"))?
+        .expect("Runtime services thread panicked")
 }
 
 fn send_tray_result(
@@ -206,12 +210,14 @@ struct RuntimeTray {
     status: MenuItem,
     start_at_login: CheckMenuItem,
     login_item: PlatformLoginItem,
+    last_confirmed_start_at_login: bool,
     last_status: RuntimeStatus,
 }
 
 impl RuntimeTray {
-    fn new() -> Result<Self, Box<dyn Error>> {
-        let login_item = runtime_login_item()?;
+    fn new(stable_runtime_entrypoint: &std::path::Path) -> Result<Self, Box<dyn Error>> {
+        let login_item = runtime_login_item(stable_runtime_entrypoint)?;
+        let login_enabled = login_item.is_enabled()?;
         let status = MenuItem::with_id("runtime-status", "Runtime: Starting", false, None);
         let open_desktop = MenuItem::with_id(OPEN_DESKTOP_ID, "Open Desktop", true, None);
         let open_browser = MenuItem::with_id(OPEN_BROWSER_ID, "Open in Browser", true, None);
@@ -219,7 +225,7 @@ impl RuntimeTray {
             START_AT_LOGIN_ID,
             "Start at Login",
             true,
-            login_item.is_enabled()?,
+            login_enabled,
             None,
         );
         let separator = PredefinedMenuItem::separator();
@@ -232,7 +238,12 @@ impl RuntimeTray {
             &separator,
             &quit,
         ])?;
-        let image = image::load_from_memory(include_bytes!("../../desktop/build/icons/32x32.png"))?
+        #[cfg(target_os = "macos")]
+        let image =
+            image::load_from_memory(include_bytes!("../assets/tray-icon-macos-template.png"))?
+                .into_rgba8();
+        #[cfg(target_os = "windows")]
+        let image = image::load_from_memory(include_bytes!("../assets/tray-icon-windows.png"))?
             .into_rgba8();
         let (width, height) = image.dimensions();
         let icon = Icon::from_rgba(image.into_raw(), width, height)?;
@@ -249,6 +260,7 @@ impl RuntimeTray {
             status,
             start_at_login,
             login_item,
+            last_confirmed_start_at_login: login_enabled,
             last_status: RuntimeStatus::Starting,
         })
     }
@@ -270,27 +282,75 @@ impl RuntimeTray {
     }
 
     fn toggle_start_at_login(&mut self) {
-        let enabled = !self.start_at_login.is_checked();
-        match self.login_item.set_enabled(enabled) {
-            Ok(()) => self.start_at_login.set_checked(enabled),
-            Err(error) => eprintln!("Debrute Runtime could not update Start at Login: {error}"),
+        let requested = self.start_at_login.is_checked();
+        let login_item = &self.login_item;
+        match commit_start_at_login_request(
+            &mut self.last_confirmed_start_at_login,
+            requested,
+            |enabled| login_item.set_enabled(enabled),
+        ) {
+            Ok(()) => self.start_at_login.set_text("Start at Login"),
+            Err(error) => {
+                self.start_at_login
+                    .set_checked(self.last_confirmed_start_at_login);
+                self.start_at_login
+                    .set_text(format!("Start at Login — Failed: {error}"));
+            }
         }
     }
 }
 
 #[cfg(target_os = "macos")]
-fn runtime_login_item() -> Result<PlatformLoginItem, Box<dyn Error>> {
+fn runtime_login_item(
+    stable_runtime: &std::path::Path,
+) -> Result<PlatformLoginItem, Box<dyn Error>> {
     let home = std::env::var_os("HOME").ok_or_else(|| io::Error::other("HOME is unavailable"))?;
-    Ok(PlatformLoginItem::new(home, stable_runtime_entrypoint()?))
+    Ok(PlatformLoginItem::new(home, stable_runtime))
 }
 
 #[cfg(target_os = "windows")]
-fn runtime_login_item() -> Result<PlatformLoginItem, Box<dyn Error>> {
-    Ok(PlatformLoginItem::new(stable_runtime_entrypoint()?))
+fn runtime_login_item(
+    stable_runtime: &std::path::Path,
+) -> Result<PlatformLoginItem, Box<dyn Error>> {
+    Ok(PlatformLoginItem::new(stable_runtime))
 }
 
-fn stable_runtime_entrypoint() -> Result<std::path::PathBuf, io::Error> {
-    std::env::var_os("DEBRUTE_RUNTIME_STABLE_ENTRYPOINT")
-        .map(std::path::PathBuf::from)
-        .map_or_else(std::env::current_exe, Ok)
+fn commit_start_at_login_request<E>(
+    confirmed: &mut bool,
+    requested: bool,
+    apply: impl FnOnce(bool) -> Result<(), E>,
+) -> Result<(), E> {
+    apply(requested)?;
+    *confirmed = requested;
+    Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::commit_start_at_login_request;
+
+    #[test]
+    fn start_at_login_uses_the_post_click_state_and_confirms_success() {
+        let mut confirmed = false;
+        let mut written = None;
+
+        commit_start_at_login_request(&mut confirmed, true, |requested| {
+            written = Some(requested);
+            Ok::<(), ()>(())
+        })
+        .expect("registration write should succeed");
+
+        assert_eq!(written, Some(true));
+        assert!(confirmed);
+    }
+
+    #[test]
+    fn failed_start_at_login_write_preserves_the_last_confirmed_state() {
+        let mut confirmed = true;
+
+        let result = commit_start_at_login_request(&mut confirmed, false, |_| Err("denied"));
+
+        assert_eq!(result, Err("denied"));
+        assert!(confirmed);
+    }
 }

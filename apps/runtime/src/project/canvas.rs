@@ -6,7 +6,7 @@ use std::{
 use super::{
     CanvasDocument, CanvasMediaKind, CanvasNodeAvailability, CanvasNodeElement, CanvasNodeKind,
     CanvasPreferences, CanvasProjection, CanvasStructureEdgeProjection, CanvasTextViewportState,
-    CanvasVideoPlaybackState, Diagnostic, ProjectError, ProjectedCanvasNode,
+    CanvasVideoPlaybackState, ProjectDiagnostic, ProjectError, ProjectedCanvasNode,
     assert_project_tree_visible_path, project_text_file_type_for_path,
 };
 
@@ -178,7 +178,7 @@ pub fn validate_canvas_document(canvas: &CanvasDocument) -> Result<(), ProjectEr
 
 pub fn project_canvas(
     canvas: &CanvasDocument,
-    diagnostics: Vec<Diagnostic>,
+    diagnostics: Vec<ProjectDiagnostic>,
     mut availability: impl FnMut(&CanvasNodeElement) -> CanvasNodeAvailability,
 ) -> CanvasProjection {
     let mut elements = canvas.node_elements.clone();
@@ -262,18 +262,59 @@ pub fn project_canvas_with_known_projection(
     Ok(result)
 }
 
-#[must_use]
+/// Applies exact manual layout updates to current Canvas nodes.
+///
+/// # Errors
+/// Returns a validation error for an empty batch, duplicate or missing targets,
+/// or invalid geometry.
 pub fn update_canvas_node_layouts(
     canvas: &CanvasDocument,
     updates: &[CanvasNodeLayoutUpdate],
-) -> CanvasDocument {
-    let updates: HashMap<_, _> = updates
-        .iter()
-        .map(|update| (update.project_relative_path.as_str(), update))
-        .collect();
+) -> Result<CanvasDocument, ProjectError> {
+    if updates.is_empty() {
+        return Err(ProjectError::Validation(
+            "Canvas layout update requires at least one node.".to_owned(),
+        ));
+    }
+    let mut by_path = HashMap::new();
+    for update in updates {
+        if !update.x.is_finite()
+            || !update.y.is_finite()
+            || update
+                .width
+                .is_some_and(|width| !width.is_finite() || width <= 0.0)
+            || update
+                .height
+                .is_some_and(|height| !height.is_finite() || height <= 0.0)
+        {
+            return Err(ProjectError::Validation(
+                "Canvas layout geometry must contain finite positions and positive finite sizes."
+                    .to_owned(),
+            ));
+        }
+        if by_path
+            .insert(update.project_relative_path.as_str(), update)
+            .is_some()
+        {
+            return Err(ProjectError::Validation(format!(
+                "Canvas layout update contains a duplicate target: {}",
+                update.project_relative_path
+            )));
+        }
+        if !canvas
+            .node_elements
+            .iter()
+            .any(|node| node.project_relative_path == update.project_relative_path)
+        {
+            return Err(ProjectError::Validation(format!(
+                "Canvas node not found: {}",
+                update.project_relative_path
+            )));
+        }
+    }
     let mut result = canvas.clone();
     for node in &mut result.node_elements {
-        if let Some(update) = updates.get(node.project_relative_path.as_str()) {
+        if let Some(update) = by_path.get(node.project_relative_path.as_str()) {
             node.x = update.x;
             node.y = update.y;
             node.width = update.width.unwrap_or(node.width);
@@ -281,7 +322,7 @@ pub fn update_canvas_node_layouts(
             node.layout_mode = Some("manual".to_owned());
         }
     }
-    result
+    Ok(result)
 }
 
 #[must_use]
@@ -310,6 +351,11 @@ pub fn update_canvas_video_playback(
     canvas: &CanvasDocument,
     updates: &[CanvasVideoPlaybackUpdate],
 ) -> Result<CanvasDocument, ProjectError> {
+    if updates.is_empty() {
+        return Err(ProjectError::Validation(
+            "Canvas video playback update requires at least one target.".to_owned(),
+        ));
+    }
     let mut by_path = HashMap::new();
     for update in updates {
         if !update.current_time_seconds.is_finite() || update.current_time_seconds < 0.0 {
@@ -317,20 +363,41 @@ pub fn update_canvas_video_playback(
                 "Canvas video playback time must be a non-negative finite number.".to_owned(),
             ));
         }
-        by_path.insert(
-            update.project_relative_path.as_str(),
-            (update.current_time_seconds * 1000.0).round() / 1000.0,
-        );
+        if by_path
+            .insert(
+                update.project_relative_path.as_str(),
+                (update.current_time_seconds * 1000.0).round() / 1000.0,
+            )
+            .is_some()
+        {
+            return Err(ProjectError::Validation(format!(
+                "Canvas video playback update contains a duplicate target: {}",
+                update.project_relative_path
+            )));
+        }
+        let Some(node) = canvas
+            .node_elements
+            .iter()
+            .find(|node| node.project_relative_path == update.project_relative_path)
+        else {
+            return Err(ProjectError::Validation(format!(
+                "Canvas node not found: {}",
+                update.project_relative_path
+            )));
+        };
+        if node.node_kind != CanvasNodeKind::File || node.media_kind != Some(CanvasMediaKind::Video)
+        {
+            return Err(ProjectError::Validation(format!(
+                "Canvas video playback target is not a video node: {}",
+                update.project_relative_path
+            )));
+        }
     }
     let mut result = canvas.clone();
     for node in &mut result.node_elements {
         let Some(time) = by_path.get(node.project_relative_path.as_str()) else {
             continue;
         };
-        if node.node_kind != CanvasNodeKind::File || node.media_kind != Some(CanvasMediaKind::Video)
-        {
-            continue;
-        }
         node.video_playback = (*time != 0.0).then_some(CanvasVideoPlaybackState {
             current_time_seconds: *time,
         });
@@ -346,6 +413,11 @@ pub fn update_canvas_text_viewports(
     canvas: &CanvasDocument,
     updates: &[CanvasTextViewportUpdate],
 ) -> Result<CanvasDocument, ProjectError> {
+    if updates.is_empty() {
+        return Err(ProjectError::Validation(
+            "Canvas text viewport update requires at least one target.".to_owned(),
+        ));
+    }
     let mut by_path = HashMap::new();
     for update in updates {
         if !update.scroll_top.is_finite()
@@ -358,17 +430,38 @@ pub fn update_canvas_text_viewports(
                     .to_owned(),
             ));
         }
-        by_path.insert(update.project_relative_path.as_str(), update);
+        if by_path
+            .insert(update.project_relative_path.as_str(), update)
+            .is_some()
+        {
+            return Err(ProjectError::Validation(format!(
+                "Canvas text viewport update contains a duplicate target: {}",
+                update.project_relative_path
+            )));
+        }
+        let Some(node) = canvas
+            .node_elements
+            .iter()
+            .find(|node| node.project_relative_path == update.project_relative_path)
+        else {
+            return Err(ProjectError::Validation(format!(
+                "Canvas node not found: {}",
+                update.project_relative_path
+            )));
+        };
+        if node.node_kind != CanvasNodeKind::File || node.media_kind != Some(CanvasMediaKind::Text)
+        {
+            return Err(ProjectError::Validation(format!(
+                "Canvas text viewport target is not a text node: {}",
+                update.project_relative_path
+            )));
+        }
     }
     let mut result = canvas.clone();
     for node in &mut result.node_elements {
         let Some(update) = by_path.get(node.project_relative_path.as_str()) else {
             continue;
         };
-        if node.node_kind != CanvasNodeKind::File || node.media_kind != Some(CanvasMediaKind::Text)
-        {
-            continue;
-        }
         node.text_viewport = (update.scroll_top != 0.0 || update.scroll_left != 0.0).then_some(
             CanvasTextViewportState {
                 scroll_top: update.scroll_top,

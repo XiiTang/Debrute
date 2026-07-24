@@ -7,7 +7,7 @@ type FieldControlProps = {
   'aria-invalid'?: boolean | 'true' | 'false';
 };
 
-export interface FieldProps {
+interface FieldProps {
   label: React.ReactNode;
   description?: React.ReactNode;
   error?: React.ReactNode;

@@ -19,9 +19,14 @@ const fixtureTemporaryDirectory = join(fixtureRoot, '.tmp');
 const fixtureProjectId = randomUUID();
 const fixtureTextPath = 'notes/browser-verification.md';
 const fixtureImagePath = 'images/browser-verification.png';
+const fixtureVideoPath = 'media/browser-verification.mp4';
+const fixtureVideoPosterPath = 'media/browser-verification.poster.png';
 const fixtureCanvasId = 'canvas-1';
 const fixtureImageWidth = 4096;
 const fixtureImageHeight = 3072;
+const fixtureVideoWidth = 1920;
+const fixtureVideoHeight = 1080;
+const fixtureVideoBase64 = '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';
 const productVersion = JSON.parse(await readFile(join(workspaceRoot, 'package.json'), 'utf8')).version;
 
 async function main() {
@@ -35,7 +40,7 @@ async function main() {
     const launchUrl = await runtime.launchUrl;
     const projectOpenUrl = projectOpenUrlForOrigin(launchUrl, fixtureRoot);
     browser = await chromium.launch();
-    context = await browser.newContext();
+    context = await browser.newContext({ deviceScaleFactor: 2 });
     page = await context.newPage();
     await runViewportVerification(context, page, { launchUrl, projectOpenUrl }, { width: 1440, height: 900 }, 'desktop', 420, true);
     await page.close();
@@ -70,6 +75,7 @@ async function writeFixtureProject() {
   await rm(fixtureRoot, { recursive: true, force: true });
   await mkdir(join(fixtureRoot, 'notes'), { recursive: true });
   await mkdir(join(fixtureRoot, 'images'), { recursive: true });
+  await mkdir(join(fixtureRoot, 'media'), { recursive: true });
   await mkdir(fixtureHome, { recursive: true });
   await mkdir(fixtureTemporaryDirectory, { recursive: true });
   await mkdir(join(fixtureRoot, '.debrute', 'canvases'), { recursive: true });
@@ -89,6 +95,15 @@ async function writeFixtureProject() {
       background: { r: 32, g: 160, b: 224, alpha: 1 }
     }
   }).png().toFile(join(fixtureRoot, fixtureImagePath));
+  await sharp({
+    create: {
+      width: fixtureVideoWidth,
+      height: fixtureVideoHeight,
+      channels: 4,
+      background: { r: 232, g: 112, b: 48, alpha: 1 }
+    }
+  }).png().toFile(join(fixtureRoot, fixtureVideoPosterPath));
+  await writeFile(join(fixtureRoot, fixtureVideoPath), Buffer.from(fixtureVideoBase64, 'base64'));
   await writeJson(join(fixtureRoot, '.debrute', 'project.json'), {
     project: {
       id: fixtureProjectId,
@@ -123,6 +138,16 @@ async function writeFixtureProject() {
         width: 512,
         height: 384,
         z: 1
+      },
+      {
+        projectRelativePath: fixtureVideoPath,
+        nodeKind: 'file',
+        mediaKind: 'video',
+        x: 600,
+        y: 500,
+        width: 480,
+        height: 270,
+        z: 2
       }
     ],
     annotations: [],
@@ -132,7 +157,7 @@ async function writeFixtureProject() {
   });
   await writeFile(
     join(fixtureRoot, '.debrute', 'canvas-maps', `${fixtureCanvasId}.yaml`),
-    `paths:\n  - ${fixtureTextPath}\n  - ${fixtureImagePath}\n`,
+    `paths:\n  - ${fixtureTextPath}\n  - ${fixtureImagePath}\n  - ${fixtureVideoPath}\n`,
     'utf8'
   );
   await writeJson(join(fixtureRoot, '.debrute', 'reviews', 'canvas-feedback.json'), {
@@ -223,7 +248,7 @@ async function stopIsolatedRuntime() {
       role: 'launcher',
       productVersion,
       temporaryDirectory: fixtureTemporaryDirectory,
-      handshakeTimeoutMs: 5000
+      readyDeadlineMs: Date.now() + 15000
     });
   } catch (error) {
     if (error instanceof RuntimeControlError && error.code === 'runtime_unavailable') {
@@ -331,6 +356,12 @@ async function runViewportVerification(context, page, urls, viewport, label, tar
     pendingPreviewRequests.delete(response.request());
     if (isWorkbenchVerificationRequest(response.url())) {
       requestLog.push(`< ${response.status()} ${response.request().method()} ${response.url()}`);
+      if (response.request().method() === 'POST'
+        && response.url().includes('/canvas-video-previews/sources')) {
+        void response.text().then((body) => {
+          requestLog.push(`= ${body}`);
+        }).catch(() => undefined);
+      }
     }
     if (
       response.status() >= 400
@@ -356,10 +387,11 @@ async function runViewportVerification(context, page, urls, viewport, label, tar
     await assertWorkbenchChrome(page, label);
     await assertIconButtonsHaveNames(page, label);
     await assertCanvasImageWorkflow(page, label);
+    await assertCanvasVideoWorkflow(page, label);
     if (fullCanvasWorkflow) {
       await assertCanvasTextWorkflow(page, label, targetScrollTop, requestLog);
       await assertCanvasHoverSurface(page, label, requestLog, canvasFeedbackLoad);
-      await assertCanvasImageResolutionWorkflow(page, label);
+      await assertCanvasPreviewResolutionWorkflow(page, label);
       await waitForPendingPreviewRequests(pendingPreviewRequests, label);
     } else {
       await assertCanvasTextNodeVisible(page, label);
@@ -405,7 +437,9 @@ function isCanvasPreviewRequest(request) {
     return false;
   }
   const path = new URL(request.url()).pathname;
-  return path.endsWith('/canvas-text-preview') || path.endsWith('/canvas-image-preview');
+  return path.endsWith('/canvas-text-preview')
+    || path.endsWith('/canvas-image-preview')
+    || path.endsWith('/canvas-video-preview');
 }
 
 async function waitForPendingPreviewRequests(pending, label) {
@@ -422,7 +456,11 @@ function isExpectedAbortedPreviewRequest(request) {
   const path = new URL(request.url()).pathname;
   return request.failure()?.errorText === 'net::ERR_ABORTED'
     && request.method() === 'GET'
-    && (path.endsWith('/canvas-text-preview') || path.endsWith('/canvas-image-preview'));
+    && (
+      path.endsWith('/canvas-text-preview')
+      || path.endsWith('/canvas-image-preview')
+      || path.endsWith('/canvas-video-preview')
+    );
 }
 
 function isExpectedUnavailableCapabilityResponse(response) {
@@ -442,7 +480,8 @@ function isWorkbenchVerificationRequest(url) {
     || url.includes('/canvas-feedback')
     || url.includes('/canvas-image-preview')
     || url.includes('/canvas-text-preview')
-    || url.includes('/canvas-text-previews/');
+    || url.includes('/canvas-text-previews/')
+    || url.includes('/canvas-video-preview');
 }
 
 function browserStartupDiagnostics(page) {
@@ -471,65 +510,144 @@ async function assertCanvasImageWorkflow(page, label) {
   console.log(`[${label}] Canvas image preview loaded through the Runtime Project media route.`);
 }
 
-async function assertCanvasImageResolutionWorkflow(page, label) {
-  const imageNode = page.locator(
-    `[data-canvas-node-kind="file"][data-canvas-media-kind="image"][data-project-relative-path="${fixtureImagePath}"]`
+async function assertCanvasVideoWorkflow(page, label) {
+  const videoNode = page.locator(
+    `[data-canvas-node-kind="file"][data-canvas-media-kind="video"][data-project-relative-path="${fixtureVideoPath}"]`
   );
-  const preview = imageNode.locator('img[data-canvas-image-layer="visible"]');
-  const initial = await readCanvasImageResolution(preview);
-  if (initial.previewWidth >= fixtureImageWidth || initial.naturalWidth !== initial.previewWidth) {
-    throw new Error(
-      `[${label}] Initial Canvas image tier was invalid: ${JSON.stringify(initial)}.`
-    );
+  await videoNode.waitFor({ state: 'visible', timeout: 60000 });
+  const preview = videoNode.locator('img[data-canvas-video-layer="preview"]');
+  await preview.waitFor({ state: 'visible', timeout: 60000 });
+  const loaded = await preview.evaluate((image) => image.complete && image.naturalWidth > 0);
+  if (!loaded) {
+    throw new Error(`[${label}] Canvas video preview did not decode.`);
   }
-
-  await imageNode.evaluate((node) => {
-    const rect = node.getBoundingClientRect();
-    for (let index = 0; index < 32; index += 1) {
-      node.dispatchEvent(new WheelEvent('wheel', {
-        bubbles: true,
-        cancelable: true,
-        clientX: rect.left + rect.width / 2,
-        clientY: rect.top + rect.height / 2,
-        ctrlKey: true,
-        deltaY: -10
-      }));
-    }
-  });
-  await page.waitForFunction(
-    ({ selector, width }) => {
-      const image = document.querySelector(selector);
-      return image instanceof HTMLImageElement
-        && image.complete
-        && image.naturalWidth === width
-        && image.dataset.previewWidth === String(width);
-    },
-    {
-      selector: `[data-project-relative-path="${fixtureImagePath}"] img[data-canvas-image-layer="visible"]`,
-      width: fixtureImageWidth
-    },
-    { timeout: 60000 }
-  );
-  const source = await readCanvasImageResolution(preview);
-  if (
-    source.previewWidth !== fixtureImageWidth
-    || source.naturalWidth !== fixtureImageWidth
-    || new URL(source.src).searchParams.get('w') !== String(fixtureImageWidth)
-  ) {
-    throw new Error(`[${label}] Canvas image did not reach its direct source tier: ${JSON.stringify(source)}.`);
+  if (await videoNode.getByText('Canvas video preview', { exact: false }).count() > 0) {
+    throw new Error(`[${label}] Canvas video preview exposed an error state.`);
   }
-  console.log(
-    `[${label}] Canvas image resolution changed from ${initial.naturalWidth}px to the ${source.naturalWidth}px direct source tier.`
-  );
+  console.log(`[${label}] Canvas video poster loaded through the Runtime preview contract.`);
 }
 
-async function readCanvasImageResolution(preview) {
-  await preview.waitFor({ state: 'visible', timeout: 60000 });
-  return await preview.evaluate((image) => ({
-    naturalWidth: image.naturalWidth,
-    previewWidth: Number(image.dataset.previewWidth),
-    src: image.currentSrc || image.src
-  }));
+async function assertCanvasPreviewResolutionWorkflow(page, label) {
+  const selectors = {
+    image: `[data-project-relative-path="${fixtureImagePath}"] img[data-canvas-image-layer="visible"]`,
+    text: `[data-project-relative-path="${fixtureTextPath}"] img[data-canvas-text-preview-layer="visible"]`,
+    video: `[data-project-relative-path="${fixtureVideoPath}"] img[data-canvas-video-layer="preview"]`
+  };
+  await waitForCanvasPreviewImages(page, selectors);
+  const initial = await readCanvasPreviewResolutions(page, selectors);
+  assertCanvasPreviewResolutionRequests(label, 'initial', initial);
+  const initialLow = await zoomCanvasAndWait(page, selectors, 'initial-low', initial, 10, 4, (current) => (
+    Object.keys(selectors).every((kind) => current[kind].previewWidth < initial[kind].previewWidth)
+  ));
+  assertCanvasPreviewResolutionRequests(label, 'initial-low', initialLow);
+  const high = await zoomCanvasAndWait(page, selectors, 'high', initial, -10, 9, (current) => (
+    Object.keys(selectors).every((kind) => current[kind].previewWidth > initial[kind].previewWidth)
+  ));
+  assertCanvasPreviewResolutionRequests(label, 'high', high);
+  const low = await zoomCanvasAndWait(page, selectors, 'low', high, 10, 4, (current) => (
+    Object.keys(selectors).every((kind) => current[kind].previewWidth < high[kind].previewWidth)
+  ));
+  assertCanvasPreviewResolutionRequests(label, 'low', low);
+  const restored = await zoomCanvasAndWait(page, selectors, 'restored', low, -10, 8, (current) => (
+    Object.keys(selectors).every((kind) => current[kind].previewWidth > low[kind].previewWidth)
+  ));
+  assertCanvasPreviewResolutionRequests(label, 'restored', restored);
+
+  console.log(`[${label}] Canvas image/text/video resolution tiers switched initial -> low -> high -> low -> high: ${JSON.stringify({ initial, initialLow, high, low, restored })}.`);
+}
+
+function assertCanvasPreviewResolutionRequests(label, stage, resolutions) {
+  for (const [kind, resolution] of Object.entries(resolutions)) {
+    if (resolution.naturalWidth !== resolution.previewWidth
+      || new URL(resolution.src).searchParams.get('w') !== String(resolution.previewWidth)) {
+      throw new Error(`[${label}] Canvas ${kind} ${stage} preview did not publish its requested width: ${JSON.stringify(resolution)}.`);
+    }
+  }
+}
+
+async function zoomCanvasAndWait(page, selectors, stage, baseline, deltaY, stepCount, predicate) {
+  for (let step = 0; step < stepCount; step += 1) {
+    await dispatchCanvasZoom(page, deltaY);
+    await page.waitForTimeout(20);
+  }
+  await page.waitForTimeout(150);
+  const current = await waitForCanvasPreviewResolutionCondition(page, selectors, predicate, 60000);
+  if (current !== undefined) {
+    return current;
+  }
+  const final = await readCanvasPreviewResolutions(page, selectors);
+  throw new Error(`Canvas preview resolution condition did not settle for ${stage}: baseline=${JSON.stringify(baseline)} final=${JSON.stringify(final)}.`);
+}
+
+async function waitForCanvasPreviewResolutionCondition(page, selectors, predicate, timeoutMs) {
+  const deadline = Date.now() + timeoutMs;
+  let candidateKey;
+  let candidateSince = 0;
+  do {
+    try {
+      const current = await readCanvasPreviewResolutions(page, selectors);
+      if (predicate(current)) {
+        const currentKey = JSON.stringify(Object.fromEntries(
+          Object.entries(current).map(([kind, resolution]) => [kind, resolution.previewWidth])
+        ));
+        if (currentKey !== candidateKey) {
+          candidateKey = currentKey;
+          candidateSince = Date.now();
+        } else if (Date.now() - candidateSince >= 500) {
+          return current;
+        }
+      } else {
+        candidateKey = undefined;
+        candidateSince = 0;
+      }
+    } catch {
+      // A tier handoff may briefly expose an image before it has decoded.
+      candidateKey = undefined;
+      candidateSince = 0;
+    }
+    await page.waitForTimeout(100);
+  } while (Date.now() < deadline);
+  return undefined;
+}
+
+async function dispatchCanvasZoom(page, deltaY) {
+  await page.getByTestId('canvas-surface').evaluate((surface, wheelDeltaY) => {
+    const rect = surface.getBoundingClientRect();
+    surface.dispatchEvent(new WheelEvent('wheel', {
+      bubbles: true,
+      cancelable: true,
+      clientX: rect.left + rect.width / 2,
+      clientY: rect.top + rect.height / 2,
+      ctrlKey: true,
+      deltaY: wheelDeltaY
+    }));
+  }, deltaY);
+}
+
+async function waitForCanvasPreviewImages(page, selectors) {
+  for (const selector of Object.values(selectors)) {
+    await page.locator(selector).waitFor({ state: 'visible', timeout: 60000 });
+  }
+  await page.waitForFunction((previewSelectors) => Object.values(previewSelectors).every((selector) => {
+    const image = document.querySelector(selector);
+    return image instanceof HTMLImageElement && image.complete && image.naturalWidth > 0;
+  }), selectors, { timeout: 60000 });
+}
+
+async function readCanvasPreviewResolutions(page, selectors) {
+  return await page.evaluate((previewSelectors) => Object.fromEntries(
+    Object.entries(previewSelectors).map(([kind, selector]) => {
+      const image = document.querySelector(selector);
+      if (!(image instanceof HTMLImageElement) || !image.complete || image.naturalWidth <= 0) {
+        throw new Error(`Canvas ${kind} preview is not decoded.`);
+      }
+      return [kind, {
+        naturalWidth: image.naturalWidth,
+        previewWidth: Number(image.dataset.previewWidth),
+        src: image.currentSrc || image.src
+      }];
+    })
+  ), selectors);
 }
 
 async function assertCanvasTextNodeVisible(page, label) {

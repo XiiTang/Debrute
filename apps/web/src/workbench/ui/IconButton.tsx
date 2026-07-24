@@ -1,12 +1,14 @@
 import React from 'react';
-import type { ButtonSize, ButtonVariant } from './Button';
 import { cx } from './cx';
+
+type IconButtonVariant = 'ghost' | 'danger' | 'chrome' | 'window-close';
+type IconButtonSize = 'xs' | 'sm' | 'window';
 
 export interface IconButtonProps extends Omit<React.ButtonHTMLAttributes<HTMLButtonElement>, 'children'> {
   label: string;
   icon: React.ReactNode;
-  variant?: Exclude<ButtonVariant, 'primary'> | 'chrome' | 'window-close';
-  size?: ButtonSize | 'window';
+  variant?: IconButtonVariant;
+  size?: IconButtonSize;
   pressed?: boolean;
 }
 

@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from 'vitest';
-import { discoverDebruteBridge } from './discoveryClient';
+import { discoverDebruteBridge } from './discoveryClient.js';
 
 describe('discoverDebruteBridge', () => {
   it('reads the fixed discovery endpoint', async () => {

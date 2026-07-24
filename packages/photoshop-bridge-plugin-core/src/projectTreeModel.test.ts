@@ -1,6 +1,6 @@
 import type { AdobeBridgeStateView } from '@debrute/app-protocol';
 import { describe, expect, it } from 'vitest';
-import { availableProjectLinks, linkedProjectTrees } from './projectTreeModel';
+import { availableProjectLinks, linkedProjectTrees } from './projectTreeModel.js';
 
 describe('linkedProjectTrees', () => {
   it('returns directory-only trees linked to the current Photoshop client', () => {

@@ -1,7 +1,7 @@
 import React from 'react';
 import { cx } from './cx';
 
-export type MenuFocusDirection = 'next' | 'previous' | 'first' | 'last';
+type MenuFocusDirection = 'next' | 'previous' | 'first' | 'last';
 
 export function getNextMenuItemIndex({
   currentIndex,

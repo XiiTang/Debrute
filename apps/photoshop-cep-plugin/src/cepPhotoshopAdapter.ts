@@ -10,33 +10,21 @@ interface CepExportedPng {
   path: string;
 }
 
-export interface CepPhotoshopAdapter extends PhotoshopAdapter {
-  refreshSelectionSnapshot(): Promise<void>;
-}
-
-const emptySnapshot: PhotoshopSelectionSnapshot = {
-  documentTitle: null,
-  documentCount: 0,
-  selectedItems: []
-};
+export type CepPhotoshopAdapter = PhotoshopAdapter;
 
 export function createCepPhotoshopAdapter(input: {
   host?: CepHost;
 } = {}): CepPhotoshopAdapter {
   const host = input.host ?? createBrowserCepHost();
   let hostVersionValue = 'CEP';
-  let snapshot: PhotoshopSelectionSnapshot = emptySnapshot;
 
   return {
     hostVersion() {
       return hostVersionValue;
     },
-    currentSelectionSnapshot() {
-      return snapshot;
-    },
-    async refreshSelectionSnapshot() {
+    async selectionSnapshot() {
       hostVersionValue = await host.evalJson<string>('debruteBridge.hostVersion()');
-      snapshot = await host.evalJson<PhotoshopSelectionSnapshot>('debruteBridge.currentSelectionSnapshot()');
+      return host.evalJson<PhotoshopSelectionSnapshot>('debruteBridge.currentSelectionSnapshot()');
     },
     async exportSelectedTopLevelPngs(): Promise<ExportedSelectionPng[]> {
       const exports = await host.evalJson<CepExportedPng[]>('debruteBridge.exportSelectedTopLevelPngs()');

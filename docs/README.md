@@ -10,9 +10,9 @@ when prose and implementation differ.
   boundaries.
 - [Context map](../CONTEXT-MAP.md) — relationships among the Project, Canvas,
   and Capability contexts.
-- [Project glossary](../packages/project-core/CONTEXT.md)
+- [Project glossary](./project/CONTEXT.md)
 - [Canvas glossary](../packages/canvas-core/CONTEXT.md)
-- [Capability glossary](../packages/capability-core/CONTEXT.md)
+- [Capability glossary](./capability/CONTEXT.md)
 - [Architecture decision index](./adr/README.md)
 
 ## Runtime And Trust

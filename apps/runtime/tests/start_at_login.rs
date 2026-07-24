@@ -1,18 +1,26 @@
-use std::{fs, path::PathBuf};
+use std::path::PathBuf;
 
-use debrute_runtime::{
-    control::ActivationIntent,
-    login::{MacOsLoginItem, login_activation_intent, windows_run_value},
-};
+#[cfg(target_os = "macos")]
+use debrute_runtime::login::MacOsLoginItem;
+use debrute_runtime::login::{require_stable_runtime_entrypoint, windows_run_value};
+#[cfg(target_os = "macos")]
+use std::fs;
+#[cfg(target_os = "macos")]
 use uuid::Uuid;
 
 #[test]
-fn login_activation_can_only_ensure_runtime() {
-    assert_eq!(login_activation_intent(), ActivationIntent::EnsureRuntime);
+fn stable_runtime_entrypoint_must_be_absolute() {
+    assert_eq!(
+        require_stable_runtime_entrypoint(PathBuf::from("/stable/debrute-runtime"))
+            .expect("absolute stable entrypoint should be accepted"),
+        PathBuf::from("/stable/debrute-runtime")
+    );
+    assert!(require_stable_runtime_entrypoint(PathBuf::from("debrute-runtime")).is_err());
 }
 
 #[test]
-fn macos_login_item_is_atomic_and_never_restores_a_frontend() {
+#[cfg(target_os = "macos")]
+fn macos_login_item_roundtrips_the_exact_stable_runtime() {
     let home = temporary_home();
     let runtime = PathBuf::from("/Users/cq/.debrute/bin/debrute-runtime");
     let item = MacOsLoginItem::new(&home, &runtime);
@@ -23,9 +31,10 @@ fn macos_login_item_is_atomic_and_never_restores_a_frontend() {
     let plist = fs::read_to_string(item.path()).expect("launch agent should be readable");
     assert!(plist.contains(runtime.to_str().expect("runtime path should be UTF-8")));
     assert!(plist.contains("<key>RunAtLoad</key>"));
-    assert!(!plist.contains("open_desktop"));
-    assert!(!plist.contains("open_browser"));
-    assert!(!plist.contains("project"));
+    assert!(plist.contains(&format!(
+        "<key>ProgramArguments</key>\n<array><string>{}</string></array>",
+        runtime.display()
+    )));
 
     item.set_enabled(false).expect("login item should disable");
     assert!(!item.path().exists());
@@ -39,10 +48,16 @@ fn windows_run_value_invokes_only_the_stable_runtime_entrypoint() {
             PathBuf::from(r"C:\Users\cq\Debrute Runtime\debrute-runtime.exe").as_path()
         )
         .expect("Windows path should serialize"),
-        r#""C:\Users\cq\Debrute Runtime\debrute-runtime.exe""#
+        r#""C:\Users\cq\Debrute Runtime\debrute-runtime.exe" --stable-runtime-entrypoint "C:\Users\cq\Debrute Runtime\debrute-runtime.exe""#
+    );
+    assert_eq!(
+        windows_run_value(PathBuf::from(r"C:\Users\%name%\debrute-runtime.exe").as_path())
+            .expect("legal Windows path characters should remain literal"),
+        r#""C:\Users\%name%\debrute-runtime.exe" --stable-runtime-entrypoint "C:\Users\%name%\debrute-runtime.exe""#
     );
 }
 
+#[cfg(target_os = "macos")]
 fn temporary_home() -> PathBuf {
     let path = std::env::temp_dir().join(format!("debrute-runtime-login-{}", Uuid::new_v4()));
     fs::create_dir_all(&path).expect("temporary home should be created");

@@ -10,7 +10,6 @@
     "check": "tsc -b --pretty false"
   },
   "dependencies": {
-    "@debrute/canvas-core": "workspace:*",
-    "@debrute/project-core": "workspace:*"
+    "@debrute/canvas-core": "workspace:*"
   }
 }

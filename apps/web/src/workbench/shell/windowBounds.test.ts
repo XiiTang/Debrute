@@ -4,10 +4,10 @@ import {
   constrainContainedRect,
   constrainDragHitAreaVisible,
   readWorkbenchViewportRect,
-  type WorkbenchViewportRect
+  type WorkbenchWindowRect
 } from './windowBounds';
 
-const viewport: WorkbenchViewportRect = { x: 0, y: 0, width: 1000, height: 700 };
+const viewport: WorkbenchWindowRect = { x: 0, y: 0, width: 1000, height: 700 };
 
 describe('window bounds', () => {
   const originalWindow = (globalThis as { window?: unknown }).window;
@@ -122,9 +122,4 @@ describe('window bounds', () => {
     });
   });
 
-  it('requires a browser window when reading the Workbench viewport', () => {
-    delete (globalThis as { window?: unknown }).window;
-
-    expect(() => readWorkbenchViewportRect()).toThrow('Workbench viewport requires a browser window');
-  });
 });

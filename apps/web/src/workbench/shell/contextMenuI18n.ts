@@ -1,3 +1,4 @@
+import type { DebruteProductPlatform } from '@debrute/app-protocol';
 import type { WorkbenchI18n, WorkbenchTranslationKey } from '../i18n';
 import type { WorkbenchContextMenuCommand } from './contextMenu';
 
@@ -24,12 +25,9 @@ export function workbenchContextMenuCommandLabel(command: WorkbenchContextMenuCo
   return i18n.t(commandKeys[command]);
 }
 
-export function projectSystemFileManagerLabelForLocale(platform: NodeJS.Platform, i18n: WorkbenchI18n): string {
+export function projectSystemFileManagerLabelForLocale(platform: DebruteProductPlatform, i18n: WorkbenchI18n): string {
   if (platform === 'darwin') {
     return i18n.t('shell.contextMenu.revealInFinder');
   }
-  if (platform === 'win32') {
-    return i18n.t('shell.contextMenu.revealInFileExplorer');
-  }
-  return i18n.t('shell.contextMenu.openContainingFolder');
+  return i18n.t('shell.contextMenu.revealInFileExplorer');
 }

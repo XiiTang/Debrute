@@ -34,7 +34,7 @@ export function createCanvasPerfBrowserAdapter(input: {
   highVolumeMarks?: boolean | undefined;
   onLongAnimationFrame?: ((input: CanvasPerfLongAnimationFrameInput) => void) | undefined;
 } = {}): CanvasPerfBrowserAdapter {
-  const performanceApi = input.performanceApi ?? globalThis.performance;
+  const performanceApi = input.performanceApi ?? performance;
   const observerConstructor = canvasPerfObserverConstructor();
   const observerFactory = input.performanceObserverFactory
     ?? (observerConstructor ? (callback: CanvasPerfLongAnimationFrameObserverCallback) => new observerConstructor(callback) : undefined);
@@ -208,5 +208,5 @@ function stringField(value: unknown): string {
 }
 
 function canvasPerfBrowserTimestamp(): number {
-  return globalThis.performance?.now?.() ?? Date.now();
+  return performance.now();
 }

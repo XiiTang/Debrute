@@ -36,15 +36,5 @@ export function consumeSseEvents(
       onMessage(JSON.parse(data));
     }
   }
-  if (flush && pieces.length === 0 && normalized.trim()) {
-    const data = normalized
-      .split('\n')
-      .filter((line) => line.startsWith('data:'))
-      .map((line) => line.slice(5).replace(/^ /, ''))
-      .join('\n');
-    if (data) {
-      onMessage(JSON.parse(data));
-    }
-  }
   return pending;
 }

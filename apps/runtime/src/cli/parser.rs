@@ -1,6 +1,6 @@
 use std::{collections::BTreeMap, error::Error, fmt, path::PathBuf};
 
-use super::spec::{CliCommandPolicy, CliCommandSpec, command_spec, command_specs};
+use super::spec::{CliCommandPolicy, CliCommandSpec, CliOptionKind, command_spec, command_specs};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ParsedCliCommand {
@@ -58,13 +58,6 @@ impl Error for CliParseError {}
 /// Returns a typed parse failure for unknown commands/options, missing values,
 /// ambiguous forms, or a Project path that cannot be made absolute.
 pub fn parse_cli_args(argv: &[String]) -> Result<ParsedCliCommand, CliParseError> {
-    if argv.iter().any(|argument| argument == "--json") {
-        return Err(CliParseError::new(
-            "invalid_argument",
-            "--json is not supported. Debrute CLI always emits debrute/1 Agent Records.",
-            command_name(argv),
-        ));
-    }
     let normalized = normalize_help(argv);
     let spec = matching_spec(&normalized).ok_or_else(|| {
         let command = command_name(&normalized);
@@ -75,12 +68,18 @@ pub fn parse_cli_args(argv: &[String]) -> Result<ParsedCliCommand, CliParseError
         )
     })?;
     let rest = &normalized[spec.path.len()..];
-    let (positional, options) = parse_values(spec, rest)?;
+    let (positional, mut options) = parse_values(spec, rest)?;
     validate(spec, &positional, &options)?;
-    let project_root = project_positional_index(spec.command)
+    let project_root = spec
+        .project_positional
         .and_then(|index| positional.get(index))
         .map(absolute_path)
         .transpose()?;
+    for option in spec.options.iter().filter(|option| option.project_path) {
+        if let Some(value) = options.get_mut(option.name) {
+            *value = absolute_path(value)?.to_string_lossy().into_owned();
+        }
+    }
     Ok(ParsedCliCommand {
         command: spec.command,
         policy: spec.policy,
@@ -123,7 +122,6 @@ fn parse_values(
     spec: &CliCommandSpec,
     arguments: &[String],
 ) -> Result<(Vec<String>, BTreeMap<String, String>), CliParseError> {
-    let allowed = allowed_options(spec.command);
     let mut positional = Vec::new();
     let mut options = BTreeMap::new();
     let mut repeated = BTreeMap::<String, Vec<String>>::new();
@@ -131,14 +129,14 @@ fn parse_values(
     while index < arguments.len() {
         let argument = &arguments[index];
         if let Some(key) = argument.strip_prefix("--") {
-            if !allowed.contains(&key) {
+            let Some(option) = spec.options.iter().find(|option| option.name == key) else {
                 return Err(CliParseError::new(
                     "invalid_argument",
                     format!("Unknown option for {}: --{key}", spec.command),
                     spec.command,
                 ));
-            }
-            if boolean_options(spec.command).contains(&key) {
+            };
+            if option.kind == CliOptionKind::Flag {
                 if options.insert(key.to_owned(), "true".to_owned()).is_some() {
                     return Err(duplicate_option(spec.command, key));
                 }
@@ -155,7 +153,18 @@ fn parse_values(
                     spec.command,
                 ));
             };
-            if repeatable_options(spec.command).contains(&key) {
+            if !option.allowed_values.is_empty() && !option.allowed_values.contains(&value.as_str())
+            {
+                return Err(CliParseError::new(
+                    "invalid_input",
+                    format!(
+                        "--{key} must be one of {}.",
+                        option.allowed_values.join(", ")
+                    ),
+                    spec.command,
+                ));
+            }
+            if option.kind == CliOptionKind::Repeatable {
                 let values = repeated.entry(key.to_owned()).or_default();
                 values.push(value.clone());
                 options.insert(
@@ -179,8 +188,7 @@ fn validate(
     positional: &[String],
     options: &BTreeMap<String, String>,
 ) -> Result<(), CliParseError> {
-    let (minimum, maximum) = positional_count(spec.command);
-    if positional.len() < minimum {
+    if positional.len() < spec.minimum_positionals {
         return Err(CliParseError::new(
             "missing_argument",
             format!(
@@ -191,12 +199,12 @@ fn validate(
             spec.command,
         ));
     }
-    if positional.len() > maximum {
+    if positional.len() > spec.maximum_positionals {
         return Err(CliParseError::new(
             "invalid_argument",
             format!(
                 "Unexpected argument for {}: {}",
-                spec.command, positional[maximum]
+                spec.command, positional[spec.maximum_positionals]
             ),
             spec.command,
         ));
@@ -208,15 +216,12 @@ fn validate(
             positional.join("."),
         ));
     }
-    if matches!(
-        spec.command,
-        "generate.image" | "generate.video" | "generate.tts" | "generate.music" | "generate.sfx"
-    ) && !options.contains_key("input-json")
+    if let Some(option) = spec
+        .options
+        .iter()
+        .find(|option| option.required && !options.contains_key(option.name))
     {
-        return Err(required_option(spec.command, "input-json"));
-    }
-    if spec.command == "generated-asset.lookup" && !options.contains_key("path") {
-        return Err(required_option(spec.command, "path"));
+        return Err(required_option(spec.command, option.name));
     }
     if spec.command == "canvas.reset-layout" {
         let all = options.get("all").is_some_and(|value| value == "true");
@@ -229,48 +234,14 @@ fn validate(
             ));
         }
     }
-    if spec.command == "workbench.start"
-        && let Some(frontend) = options.get("frontend")
-        && !matches!(frontend.as_str(), "default" | "desktop" | "browser")
-    {
-        return Err(CliParseError::new(
-            "invalid_input",
-            "--frontend must be one of default, desktop, or browser.",
-            spec.command,
-        ));
-    }
-    if spec.command == "generate.image-batch" {
-        let source_count = usize::from(options.contains_key("manifest"))
-            + usize::from(options.contains_key("input-jsonl"));
-        if source_count != 1 {
-            return Err(CliParseError::new(
-                "invalid_input",
-                "generate.image-batch requires exactly one of --manifest or --input-jsonl.",
-                spec.command,
-            ));
-        }
-        if !options.contains_key("log") {
-            return Err(required_option(spec.command, "log"));
-        }
-    }
     Ok(())
 }
 
 fn command_name(argv: &[String]) -> String {
-    let filtered = argv
-        .iter()
-        .filter(|argument| !matches!(argument.as_str(), "--help" | "-h" | "--json"))
-        .collect::<Vec<_>>();
-    matching_spec(
-        &filtered
-            .iter()
-            .map(|value| (*value).clone())
-            .collect::<Vec<_>>(),
-    )
-    .map_or_else(
-        || match filtered.as_slice() {
+    matching_spec(argv).map_or_else(
+        || match argv {
             [first, second, ..] if !second.starts_with("--") => format!("{first}.{second}"),
-            [first, ..] => (*first).clone(),
+            [first, ..] => first.clone(),
             [] => "commands".to_owned(),
         },
         |spec| spec.command.to_owned(),
@@ -293,100 +264,11 @@ fn absolute_path(value: &String) -> Result<PathBuf, CliParseError> {
         })
 }
 
-fn project_positional_index(command: &str) -> Option<usize> {
-    matches!(
-        command,
-        "project.init"
-            | "project.status"
-            | "project.validate"
-            | "canvas-map.push"
-            | "canvas.create"
-            | "canvas.rename"
-            | "canvas.delete"
-            | "canvas.reorder"
-            | "canvas.repair-index"
-            | "canvas.reset-layout"
-            | "generated-asset.lookup"
-            | "generate.image"
-            | "generate.image-batch"
-            | "generate.video"
-            | "generate.tts"
-            | "generate.music"
-            | "generate.sfx"
-    )
-    .then_some(0)
-    .or_else(|| (command == "workbench.start").then_some(0))
-}
-
-fn positional_count(command: &str) -> (usize, usize) {
-    match command {
-        "models.image.describe"
-        | "models.video.describe"
-        | "models.tts.describe"
-        | "models.music.describe"
-        | "models.sfx.describe"
-        | "project.init"
-        | "project.status"
-        | "project.validate"
-        | "canvas.create"
-        | "canvas.repair-index"
-        | "generated-asset.lookup"
-        | "generate.image"
-        | "generate.image-batch"
-        | "generate.video"
-        | "generate.tts"
-        | "generate.music"
-        | "generate.sfx" => (1, 1),
-        "workbench.start" => (0, 1),
-        "canvas-map.push" | "canvas.delete" | "canvas.reset-layout" => (2, 2),
-        "canvas.rename" => (3, 3),
-        "canvas.reorder" => (2, usize::MAX),
-        "help" => (1, 3),
-        _ => (0, 0),
-    }
-}
-
 fn required_positionals(command: &str) -> &'static str {
     command_specs()
         .iter()
         .find(|spec| spec.command == command)
         .map_or("arguments", |spec| spec.input)
-}
-
-fn allowed_options(command: &str) -> &'static [&'static str] {
-    match command {
-        "workbench.start" => &["frontend"],
-        "canvas.reset-layout" => &["all", "path", "glob"],
-        "generated-asset.lookup" => &["path"],
-        "generate.image" | "generate.video" | "generate.tts" | "generate.music"
-        | "generate.sfx" => &["input-json", "timeout-ms"],
-        "generate.image-batch" => &[
-            "manifest",
-            "input-jsonl",
-            "log",
-            "summary",
-            "concurrency",
-            "timeout-ms",
-            "overwrite-existing",
-        ],
-        _ => &[],
-    }
-}
-
-fn boolean_options(command: &str) -> &'static [&'static str] {
-    match command {
-        "canvas.reset-layout" => &["all"],
-        "generate.image-batch" => &["overwrite-existing"],
-        _ => &[],
-    }
-}
-
-fn repeatable_options(command: &str) -> &'static [&'static str] {
-    if command == "canvas.reset-layout" {
-        &["path", "glob"]
-    } else {
-        &[]
-    }
 }
 
 fn required_option(command: &str, key: &str) -> CliParseError {

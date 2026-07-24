@@ -97,6 +97,7 @@ fn extract_into(archive_path: &Path, destination: &Path) -> Result<(), ProductAr
     if !destination.join("product-manifest.json").is_file() {
         return Err(ProductArchiveError::ManifestMissing);
     }
+    #[cfg(target_os = "macos")]
     set_native_entrypoint_permissions(destination)?;
     Ok(())
 }
@@ -119,7 +120,7 @@ fn is_unsupported_unix_mode(mode: u32) -> bool {
     file_type != 0 && file_type != 0o040_000 && file_type != 0o100_000
 }
 
-#[cfg(unix)]
+#[cfg(target_os = "macos")]
 fn set_native_entrypoint_permissions(root: &Path) -> Result<(), ProductArchiveError> {
     use std::os::unix::fs::PermissionsExt as _;
     for relative in [
@@ -133,11 +134,6 @@ fn set_native_entrypoint_permissions(root: &Path) -> Result<(), ProductArchiveEr
             fs::set_permissions(path, permissions)?;
         }
     }
-    Ok(())
-}
-
-#[cfg(not(unix))]
-fn set_native_entrypoint_permissions(_root: &Path) -> Result<(), ProductArchiveError> {
     Ok(())
 }
 

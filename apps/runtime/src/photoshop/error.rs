@@ -32,7 +32,6 @@ pub enum PhotoshopBridgeErrorCode {
     TransferCapacityReached,
     TransferUrlExpired,
     TransferTimeout,
-    StatePoisoned,
     PersistenceFailed,
 }
 
@@ -65,7 +64,6 @@ impl PhotoshopBridgeErrorCode {
             Self::TransferCapacityReached => "transfer_capacity_reached",
             Self::TransferUrlExpired => "transfer_url_expired",
             Self::TransferTimeout => "transfer_timeout",
-            Self::StatePoisoned => "state_poisoned",
             Self::PersistenceFailed => "persistence_failed",
         }
     }

@@ -88,6 +88,7 @@ export function IntegrationsSettingsPage({
               operationFailure={operationFailure?.integrationId === integration.integrationId ? operationFailure : undefined}
               onRunOperation={async (operation) => {
                 const localOperation = { integrationId: integration.integrationId, operation };
+                const stateKey = integrationFailureStateKey(settings, integration.integrationId);
                 setLocalRunningOperation(localOperation);
                 setOperationFailure(undefined);
                 try {
@@ -96,7 +97,7 @@ export function IntegrationsSettingsPage({
                     setOperationFailure({
                       integrationId: result.integrationId,
                       operation: result.operation,
-                      stateKey: integrationFailureStateKey(result.settings, result.integrationId),
+                      stateKey,
                       ...(result.diagnostic ? { diagnostic: result.diagnostic } : {})
                     });
                   }

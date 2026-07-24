@@ -4,7 +4,7 @@ import {
   selectionCardsFromSnapshot,
   selectionDragPayloadFromCard,
   selectionDragPayloadMimeType
-} from './selectionModel';
+} from './selectionModel.js';
 
 describe('selectionCardsFromSnapshot', () => {
   it('creates one draggable card for a single top-level layer and a batch card for multiple selections', () => {

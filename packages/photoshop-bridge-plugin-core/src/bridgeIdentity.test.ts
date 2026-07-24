@@ -4,7 +4,7 @@ import {
   loadOrCreatePhotoshopBridgeIdentity,
   setPhotoshopBridgeIdentityPaired,
   type PhotoshopBridgeIdentityStore
-} from './bridgeIdentity';
+} from './bridgeIdentity.js';
 
 describe('Photoshop Bridge persisted proof identity', () => {
   it('persists one P-256 identity and signs the exact Runtime challenge transcript', async () => {

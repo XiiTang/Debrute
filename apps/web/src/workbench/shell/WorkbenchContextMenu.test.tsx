@@ -1,13 +1,19 @@
 import { renderToStaticMarkup } from 'react-dom/server';
-import { describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import { WorkbenchContextMenu } from './WorkbenchContextMenu';
 import { I18nProvider } from '../i18n';
 
 describe('WorkbenchContextMenu', () => {
+  afterEach(() => {
+    vi.unstubAllGlobals();
+  });
+
   it('renders separators and disabled menu items', () => {
+    vi.stubGlobal('window', { innerWidth: 1280, innerHeight: 720 });
     const html = renderToStaticMarkup(
       <I18nProvider locale="en">
         <WorkbenchContextMenu
+          productPlatform="win32"
           items={[
             { kind: 'action', command: 'copy' },
             { kind: 'separator', id: 'cut-copy' },

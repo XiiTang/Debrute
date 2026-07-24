@@ -1,6 +1,6 @@
+import type { DebruteProductPlatform } from '@debrute/app-protocol';
 import type { CanvasMediaKind, CanvasNodeKind } from '@debrute/canvas-core';
-import type { CanvasPoint, CanvasRect, ResizeHandle } from '../canvas/runtime/canvasGeometry';
-import { rectsIntersect } from '../canvas/runtime/canvasGeometry';
+import type { CanvasRect, ResizeHandle } from '../canvas/runtime/canvasGeometry';
 
 export type { CanvasPoint, CanvasRect, ResizeHandle } from '../canvas/runtime/canvasGeometry';
 export type { CanvasSelection, CanvasSelectionItem } from '../canvas/runtime/canvasSelection';
@@ -34,7 +34,7 @@ export function normalizeCanvasWheelDelta(
     deltaZ?: number;
     shiftKey?: boolean;
   },
-  platform = currentPlatform()
+  platform: DebruteProductPlatform = __DEBRUTE_PLATFORM__
 ): NormalizedCanvasWheelDelta {
   let deltaX = event.deltaX;
   let deltaY = event.deltaY;
@@ -164,10 +164,6 @@ function elementMatches(element: unknown, selector: string): boolean {
 function containsTarget(container: EventTarget | null, target: EventTarget | null): boolean {
   const maybeContainer = container as { contains?: (target: EventTarget | null) => boolean } | null;
   return Boolean(maybeContainer && typeof maybeContainer.contains === 'function' && maybeContainer.contains(target));
-}
-
-function currentPlatform(): string {
-  return globalThis.navigator?.platform?.toLowerCase().includes('mac') ? 'darwin' : 'linux';
 }
 
 function invertWheelDelta(value: number): number {

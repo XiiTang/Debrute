@@ -73,13 +73,11 @@ export function useXtermTerminal(input: UseXtermTerminalInput): void {
     });
     const subscription = input.api.subscribeTerminalEvents(session.id, renderTerminalEvent, input.onError);
 
-    const resizeObserver = typeof ResizeObserver === 'undefined'
-      ? undefined
-      : new ResizeObserver(resizeToFit);
-    resizeObserver?.observe(container);
+    const resizeObserver = new ResizeObserver(resizeToFit);
+    resizeObserver.observe(container);
 
     return () => {
-      resizeObserver?.disconnect();
+      resizeObserver.disconnect();
       subscription.close();
       dataDisposable.dispose();
       terminal.dispose();

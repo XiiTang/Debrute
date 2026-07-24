@@ -2,8 +2,6 @@ import type { ProjectedCanvasNode } from '@debrute/canvas-core';
 import { canvasImageSource, type CanvasLoadedImage } from './canvasImagePreviews';
 import type { CanvasCameraState } from './runtime/canvasCamera';
 
-export type CanvasPendingImage = CanvasLoadedImage;
-
 export interface CanvasImageNodeAssetError {
   message: string;
   loadKey: string;
@@ -15,7 +13,7 @@ export type CanvasImageNodeRenderState =
   | {
       kind: 'image';
       visible?: CanvasLoadedImage | undefined;
-      next?: CanvasPendingImage | undefined;
+      next?: CanvasLoadedImage | undefined;
       error?: CanvasImageNodeAssetError | undefined;
       retry: () => void;
     };
@@ -24,7 +22,7 @@ export interface CanvasImageNodeAssetState {
   sourceRevisionKey: string | undefined;
   retryKey: number;
   loaded: CanvasLoadedImage | undefined;
-  next: CanvasPendingImage | undefined;
+  next: CanvasLoadedImage | undefined;
   error: CanvasImageNodeAssetError | undefined;
 }
 

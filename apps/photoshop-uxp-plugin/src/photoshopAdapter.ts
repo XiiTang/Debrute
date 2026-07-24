@@ -102,11 +102,11 @@ export function createPhotoshopAdapter(): PhotoshopAdapter {
     hostVersion() {
       return photoshopHostVersion(photoshop);
     },
-    currentSelectionSnapshot() {
+    async selectionSnapshot() {
       return photoshopSelectionSnapshot(photoshop);
     },
     async exportSelectedTopLevelPngs() {
-      const snapshot = this.currentSelectionSnapshot();
+      const snapshot = photoshopSelectionSnapshot(photoshop);
       const document = currentPhotoshopDocument(photoshop);
       if (!document) {
         return [];

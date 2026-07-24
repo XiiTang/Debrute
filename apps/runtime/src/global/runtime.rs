@@ -1,15 +1,10 @@
-use std::{
-    error::Error,
-    fmt,
-    sync::{Arc, Mutex, PoisonError},
-};
+use std::sync::{Arc, Mutex};
 
 use serde::Serialize;
 use serde_json::Value;
 
 use crate::integrations::{
-    IntegrationError, IntegrationObservationError, IntegrationOperation,
-    IntegrationOperationResult, IntegrationService, IntegrationSettingsView,
+    IntegrationOperation, IntegrationOperationResult, IntegrationService, IntegrationSettingsView,
 };
 use crate::photoshop::PhotoshopBridgeStateView;
 
@@ -62,6 +57,7 @@ pub struct GlobalRuntimeService {
 struct GlobalEventState {
     revision: u64,
     observer: Option<GlobalRuntimeObserver>,
+    product: Option<Value>,
 }
 
 #[derive(Default)]
@@ -91,17 +87,13 @@ impl GlobalRuntimeService {
     /// Publishes the Runtime-owned Product projection through the same ordered
     /// Global stream as settings and integration changes.
     ///
-    /// # Errors
-    ///
-    /// Returns [`GlobalRuntimeError`] if the event revision is exhausted or the
-    /// event state is unavailable.
-    pub fn publish_product_changed(&self, product: Value) -> Result<(), GlobalRuntimeError> {
-        let _delivery = self.lock_delivery()?;
-        self.publish(GlobalRuntimeChange::ProductChanged(product))
+    pub fn publish_product_changed(&self, product: Value) {
+        let _delivery = self.lock_delivery();
+        self.publish(GlobalRuntimeChange::ProductChanged(product));
     }
 
     pub fn install_observer(&self, observer: GlobalRuntimeObserver) -> bool {
-        let mut events = self.events.lock().unwrap_or_else(PoisonError::into_inner);
+        let mut events = self.lock_events();
         if events.observer.is_some() {
             return false;
         }
@@ -111,20 +103,19 @@ impl GlobalRuntimeService {
 
     #[must_use]
     pub fn revision(&self) -> u64 {
-        self.events
-            .lock()
-            .unwrap_or_else(PoisonError::into_inner)
-            .revision
+        self.lock_events().revision
     }
 
-    /// Reads the native launcher's recent-Project projection without probing
-    /// optional integration tools.
+    /// Reads the native Desktop presentation without probing optional
+    /// integration tools.
     ///
     /// # Errors
     ///
-    /// Returns [`GlobalRuntimeError`] when persisted global state is invalid.
-    pub fn recent_projects_snapshot(&self) -> Result<Vec<RecentProjectEntry>, GlobalRuntimeError> {
-        Ok(self.store.read_recent_projects()?)
+    /// Returns [`GlobalSettingsError`] when persisted global state is invalid.
+    pub fn desktop_presentation_snapshot(
+        &self,
+    ) -> Result<(Vec<RecentProjectEntry>, String), GlobalSettingsError> {
+        self.store.read_desktop_presentation(&self.catalog)
     }
 
     /// Captures a complete settings projection and its exact event barrier.
@@ -135,26 +126,23 @@ impl GlobalRuntimeService {
     ///
     /// # Errors
     ///
-    /// Returns [`GlobalRuntimeError`] when settings, integrations, or in-process
-    /// synchronization state cannot be read.
-    pub fn sync_snapshot(&self) -> Result<(u64, DebruteGlobalSettingsView), GlobalRuntimeError> {
-        let _delivery = self.lock_delivery()?;
+    /// Returns [`GlobalSettingsError`] when persisted settings cannot be read.
+    pub fn sync_snapshot(
+        &self,
+    ) -> Result<(u64, DebruteGlobalSettingsView, Option<Value>), GlobalSettingsError> {
+        let _delivery = self.lock_delivery();
         let view = self.settings_get()?;
-        Ok((self.revision(), view))
+        let events = self.lock_events();
+        Ok((events.revision, view, events.product.clone()))
     }
 
     /// Publishes one Runtime-owned projection that is not stored by the global
     /// settings module, while retaining the same monotonic Global revision.
     ///
-    /// # Errors
-    ///
-    /// Returns [`GlobalRuntimeError`] when revision or delivery state is
-    /// unavailable.
-    pub fn publish_external(&self, change: GlobalRuntimeChange) -> Result<(), GlobalRuntimeError> {
-        let _delivery = self.lock_delivery()?;
-        let _commit = self.lock_commit()?;
-        self.ensure_revision_available()?;
-        self.publish(change)
+    pub fn publish_external(&self, change: GlobalRuntimeChange) {
+        let _delivery = self.lock_delivery();
+        let _commit = self.lock_commit();
+        self.publish(change);
     }
 
     /// Returns the complete settings view with a cached or freshly scanned
@@ -162,14 +150,24 @@ impl GlobalRuntimeService {
     ///
     /// # Errors
     ///
-    /// Returns [`GlobalRuntimeError`] when persisted settings, catalog-backed
-    /// projection, or integration state cannot be read.
-    pub fn settings_get(&self) -> Result<DebruteGlobalSettingsView, GlobalRuntimeError> {
-        let candidate = self.integration_candidate(false)?;
-        let _commit = self.lock_commit()?;
-        let integrations = self.adopt_integration_candidate(candidate)?;
+    /// Returns [`GlobalSettingsError`] when persisted settings cannot be read.
+    pub fn settings_get(&self) -> Result<DebruteGlobalSettingsView, GlobalSettingsError> {
+        let candidate = self.integration_candidate(false);
+        let _commit = self.lock_commit();
+        let integrations = self.adopt_integration_candidate(candidate);
         let projection = self.store.read_view(&self.catalog)?;
         Ok(complete_view(projection, integrations))
+    }
+
+    /// Returns one exact configured Model API key without changing or
+    /// publishing Global state.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`GlobalSettingsError`] when the Model is unknown, has no key,
+    /// or persisted Global state cannot be read.
+    pub fn reveal_model_api_key(&self, model_id: &str) -> Result<String, GlobalSettingsError> {
+        self.store.read_model_api_key(model_id, &self.catalog)
     }
 
     /// Applies one settings patch and publishes exactly one revision only when
@@ -177,17 +175,16 @@ impl GlobalRuntimeService {
     ///
     /// # Errors
     ///
-    /// Returns [`GlobalRuntimeError`] for invalid input or state failures.
+    /// Returns [`GlobalSettingsError`] for invalid input or state failures.
     pub fn settings_save(
         &self,
         input: &Value,
-    ) -> Result<DebruteGlobalSettingsView, GlobalRuntimeError> {
-        let candidate = self.integration_candidate(false)?;
-        let _delivery = self.lock_delivery()?;
+    ) -> Result<DebruteGlobalSettingsView, GlobalSettingsError> {
+        let candidate = self.integration_candidate(false);
+        let _delivery = self.lock_delivery();
         let (view, change) = {
-            let _commit = self.lock_commit()?;
-            self.ensure_revision_available()?;
-            let integrations = self.adopt_integration_candidate(candidate)?;
+            let _commit = self.lock_commit();
+            let integrations = self.adopt_integration_candidate(candidate);
             let result = self.store.patch(input, &self.catalog)?;
             let view = complete_view(result.view, integrations);
             let change = result
@@ -196,7 +193,7 @@ impl GlobalRuntimeService {
             (view, change)
         };
         if let Some(change) = change {
-            self.publish(change)?;
+            self.publish(change);
         }
         Ok(view)
     }
@@ -205,19 +202,18 @@ impl GlobalRuntimeService {
     ///
     /// # Errors
     ///
-    /// Returns [`GlobalRuntimeError`] for persistence or revision failures.
+    /// Returns [`GlobalSettingsError`] for persistence failures.
     pub fn remember_recent_project(
         &self,
         project_id: &str,
         project_root: &str,
-    ) -> Result<bool, GlobalRuntimeError> {
-        let _delivery = self.lock_delivery()?;
+    ) -> Result<bool, GlobalSettingsError> {
+        let _delivery = self.lock_delivery();
         let (changed, change) = {
-            let _commit = self.lock_commit()?;
-            self.ensure_revision_available()?;
-            let result = self
-                .store
-                .remember_recent_project(project_id, project_root)?;
+            let _commit = self.lock_commit();
+            let result =
+                self.store
+                    .remember_recent_project(project_id, project_root, &self.catalog)?;
             let change = result
                 .changed
                 .then_some(GlobalRuntimeChange::RecentProjectsChanged(
@@ -226,7 +222,7 @@ impl GlobalRuntimeService {
             (result.changed, change)
         };
         if let Some(change) = change {
-            self.publish(change)?;
+            self.publish(change);
         }
         Ok(changed)
     }
@@ -235,13 +231,12 @@ impl GlobalRuntimeService {
     ///
     /// # Errors
     ///
-    /// Returns [`GlobalRuntimeError`] for persistence or revision failures.
-    pub fn clear_recent_projects(&self) -> Result<bool, GlobalRuntimeError> {
-        let _delivery = self.lock_delivery()?;
+    /// Returns [`GlobalSettingsError`] for persistence failures.
+    pub fn clear_recent_projects(&self) -> Result<bool, GlobalSettingsError> {
+        let _delivery = self.lock_delivery();
         let (changed, change) = {
-            let _commit = self.lock_commit()?;
-            self.ensure_revision_available()?;
-            let result = self.store.clear_recent_projects()?;
+            let _commit = self.lock_commit();
+            let result = self.store.clear_recent_projects(&self.catalog)?;
             let change = result
                 .changed
                 .then_some(GlobalRuntimeChange::RecentProjectsChanged(
@@ -250,155 +245,118 @@ impl GlobalRuntimeService {
             (result.changed, change)
         };
         if let Some(change) = change {
-            self.publish(change)?;
+            self.publish(change);
         }
         Ok(changed)
     }
 
     /// Forces one integration rescan and publishes its complete projection.
     ///
-    /// # Errors
+    /// # Panics
     ///
-    /// Returns [`GlobalRuntimeError`] when integration state cannot be read.
-    pub fn integrations_rescan(&self) -> Result<IntegrationSettingsView, GlobalRuntimeError> {
-        let candidate = self.integration_candidate(true)?;
-        let _delivery = self.lock_delivery()?;
+    /// Panics when a monotonic Runtime ordering counter is exhausted.
+    pub fn integrations_rescan(&self) {
+        let candidate = self.integration_candidate(true);
+        let _delivery = self.lock_delivery();
         let view = {
-            let _commit = self.lock_commit()?;
-            self.ensure_revision_available()?;
-            self.adopt_integration_candidate(candidate)?
+            let _commit = self.lock_commit();
+            self.adopt_integration_candidate(candidate)
         };
-        self.publish(GlobalRuntimeChange::IntegrationsChanged(view.clone()))?;
-        Ok(view)
+        self.publish(GlobalRuntimeChange::IntegrationsChanged(view));
     }
 
     /// Runs one closed integration operation with start and settled revisions.
     ///
-    /// # Errors
-    ///
-    /// Returns [`GlobalRuntimeError`] for integration or revision-state failures.
+    #[must_use]
     pub fn integrations_run_operation(
         &self,
         integration_id: &str,
         operation: IntegrationOperation,
-    ) -> Result<IntegrationOperationResult, GlobalRuntimeError> {
-        let observed = self
-            .integrations
-            .run_operation_observed(
-                integration_id,
-                operation,
-                |started| self.commit_integration_view(started.clone()),
-                |settled| self.commit_integration_view(settled.clone()),
-            )
-            .map_err(|error| match error {
-                IntegrationObservationError::Service(error) => {
-                    GlobalRuntimeError::Integrations(error)
-                }
-                IntegrationObservationError::Started(error) => error,
-            })?;
-        if let Some(error) = observed.settled_observer_error {
-            eprintln!("Debrute integration settled event failed: {error}");
-        }
-        Ok(observed.result)
+    ) -> IntegrationOperationResult {
+        self.integrations.run_operation_observed(
+            integration_id,
+            operation,
+            |started| self.commit_integration_view(started.clone()),
+            |settled| self.commit_integration_view(settled.clone()),
+        )
     }
 
-    fn integration_candidate(
-        &self,
-        force: bool,
-    ) -> Result<(u64, IntegrationSettingsView), GlobalRuntimeError> {
+    fn integration_candidate(&self, force: bool) -> (u64, IntegrationSettingsView) {
         let generation = self
             .integration_projection
             .lock()
-            .map_err(|_| GlobalRuntimeError::StatePoisoned)?
+            .expect("integration projection lock poisoned")
             .generation;
         let view = if force {
-            self.integrations.rescan()?
+            self.integrations.rescan()
         } else {
-            self.integrations.list_status()?
+            self.integrations.list_status()
         };
-        Ok((generation, view))
+        (generation, view)
     }
 
     fn adopt_integration_candidate(
         &self,
         candidate: (u64, IntegrationSettingsView),
-    ) -> Result<IntegrationSettingsView, GlobalRuntimeError> {
+    ) -> IntegrationSettingsView {
         let (generation, view) = candidate;
         let mut projection = self
             .integration_projection
             .lock()
-            .map_err(|_| GlobalRuntimeError::StatePoisoned)?;
+            .expect("integration projection lock poisoned");
         if projection.generation == generation || projection.view.is_none() {
             projection.generation = projection
                 .generation
                 .checked_add(1)
-                .ok_or(GlobalRuntimeError::IntegrationGenerationExhausted)?;
+                .expect("Global integration projection generation exhausted");
             projection.view = Some(view.clone());
-            return Ok(view);
+            return view;
         }
         projection
             .view
             .clone()
-            .ok_or(GlobalRuntimeError::StatePoisoned)
+            .expect("integration projection must exist after adoption")
     }
 
-    fn commit_integration_view(
-        &self,
-        view: IntegrationSettingsView,
-    ) -> Result<(), GlobalRuntimeError> {
-        let _delivery = self.lock_delivery()?;
+    fn commit_integration_view(&self, view: IntegrationSettingsView) {
+        let _delivery = self.lock_delivery();
         let change = {
-            let _commit = self.lock_commit()?;
-            self.ensure_revision_available()?;
+            let _commit = self.lock_commit();
             let mut projection = self
                 .integration_projection
                 .lock()
-                .map_err(|_| GlobalRuntimeError::StatePoisoned)?;
+                .expect("integration projection lock poisoned");
             projection.generation = projection
                 .generation
                 .checked_add(1)
-                .ok_or(GlobalRuntimeError::IntegrationGenerationExhausted)?;
+                .expect("Global integration projection generation exhausted");
             projection.view = Some(view.clone());
             drop(projection);
             GlobalRuntimeChange::IntegrationsChanged(view)
         };
-        self.publish(change)?;
-        Ok(())
+        self.publish(change);
     }
 
-    fn lock_commit(&self) -> Result<std::sync::MutexGuard<'_, ()>, GlobalRuntimeError> {
-        self.commit
-            .lock()
-            .map_err(|_| GlobalRuntimeError::StatePoisoned)
+    fn lock_commit(&self) -> std::sync::MutexGuard<'_, ()> {
+        self.commit.lock().expect("Global commit lock poisoned")
     }
 
-    fn lock_delivery(&self) -> Result<std::sync::MutexGuard<'_, ()>, GlobalRuntimeError> {
-        self.delivery
-            .lock()
-            .map_err(|_| GlobalRuntimeError::StatePoisoned)
+    fn lock_delivery(&self) -> std::sync::MutexGuard<'_, ()> {
+        self.delivery.lock().expect("Global delivery lock poisoned")
     }
 
-    fn ensure_revision_available(&self) -> Result<(), GlobalRuntimeError> {
-        let events = self
-            .events
-            .lock()
-            .map_err(|_| GlobalRuntimeError::StatePoisoned)?;
-        if events.revision == u64::MAX {
-            Err(GlobalRuntimeError::RevisionExhausted)
-        } else {
-            Ok(())
-        }
-    }
-
-    fn publish(&self, change: GlobalRuntimeChange) -> Result<(), GlobalRuntimeError> {
+    fn publish(&self, change: GlobalRuntimeChange) {
         let mut events = self
             .events
             .lock()
-            .map_err(|_| GlobalRuntimeError::StatePoisoned)?;
+            .expect("Global event state lock poisoned");
+        if let GlobalRuntimeChange::ProductChanged(product) = &change {
+            events.product = Some(product.clone());
+        }
         events.revision = events
             .revision
             .checked_add(1)
-            .ok_or(GlobalRuntimeError::RevisionExhausted)?;
+            .expect("Global Runtime revision exhausted");
         let event = GlobalRuntimeEvent {
             revision: events.revision,
             change,
@@ -408,7 +366,12 @@ impl GlobalRuntimeService {
         if let Some(observer) = observer {
             observer(event);
         }
-        Ok(())
+    }
+
+    fn lock_events(&self) -> std::sync::MutexGuard<'_, GlobalEventState> {
+        self.events
+            .lock()
+            .expect("Global event state lock poisoned")
     }
 }
 
@@ -422,52 +385,5 @@ fn complete_view(
         models: projection.models,
         integrations,
         adobe_bridge: projection.adobe_bridge,
-    }
-}
-
-#[derive(Debug)]
-pub enum GlobalRuntimeError {
-    Settings(GlobalSettingsError),
-    Integrations(IntegrationError),
-    StatePoisoned,
-    RevisionExhausted,
-    IntegrationGenerationExhausted,
-}
-
-impl fmt::Display for GlobalRuntimeError {
-    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
-        match self {
-            Self::Settings(error) => error.fmt(formatter),
-            Self::Integrations(error) => error.fmt(formatter),
-            Self::StatePoisoned => formatter.write_str("Global Runtime state lock is poisoned."),
-            Self::RevisionExhausted => formatter.write_str("Global Runtime revision is exhausted."),
-            Self::IntegrationGenerationExhausted => {
-                formatter.write_str("Global Runtime integration generation is exhausted.")
-            }
-        }
-    }
-}
-
-impl Error for GlobalRuntimeError {
-    fn source(&self) -> Option<&(dyn Error + 'static)> {
-        match self {
-            Self::Settings(error) => Some(error),
-            Self::Integrations(error) => Some(error),
-            Self::StatePoisoned
-            | Self::RevisionExhausted
-            | Self::IntegrationGenerationExhausted => None,
-        }
-    }
-}
-
-impl From<GlobalSettingsError> for GlobalRuntimeError {
-    fn from(error: GlobalSettingsError) -> Self {
-        Self::Settings(error)
-    }
-}
-
-impl From<IntegrationError> for GlobalRuntimeError {
-    fn from(error: IntegrationError) -> Self {
-        Self::Integrations(error)
     }
 }

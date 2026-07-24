@@ -1,6 +1,10 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import type { WorkbenchApiClient, WorkbenchProjectSessionSnapshot } from '@debrute/app-protocol';
+import type { WorkbenchApiClient, WorkbenchProjectSessionSnapshot, WorkbenchWorkingCopies } from '@debrute/app-protocol';
 import { openInitialProject, replaceWorkbenchProjectRoute, shouldShowInitialProjectLoader } from './projectSessionState';
+
+function emptyWorkingCopies(): WorkbenchWorkingCopies {
+  return { text: {}, feedback: null };
+}
 
 describe('project session startup', () => {
   const originalWindow = (globalThis as { window?: unknown }).window;
@@ -10,12 +14,21 @@ describe('project session startup', () => {
   });
 
   it('opens the project addressed by the project Workbench route', async () => {
+    (globalThis as { window?: unknown }).window = {
+      location: { pathname: '/projects/123e4567-e89b-42d3-a456-426614174000', search: '', hash: '' },
+      history: { state: null, replaceState: vi.fn() }
+    };
     const calls: unknown[] = [];
     const snapshot = { canvases: [{ id: 'canvas-1', name: 'canvas-1' }] } as WorkbenchProjectSessionSnapshot;
     const api = {
       openProject: async (input: unknown) => {
         calls.push(input);
-        return { projectId: '123e4567-e89b-42d3-a456-426614174000', snapshot };
+        return {
+          projectId: '123e4567-e89b-42d3-a456-426614174000',
+          projectRevision: 1,
+          snapshot,
+          workingCopies: emptyWorkingCopies()
+        };
       }
     } as unknown as WorkbenchApiClient;
 
@@ -23,8 +36,12 @@ describe('project session startup', () => {
       kind: 'project',
       projectId: '123e4567-e89b-42d3-a456-426614174000'
     })).resolves.toEqual({
-      projectId: '123e4567-e89b-42d3-a456-426614174000',
-      snapshot,
+      project: {
+        projectId: '123e4567-e89b-42d3-a456-426614174000',
+        projectRevision: 1,
+        snapshot,
+        workingCopies: emptyWorkingCopies()
+      },
       route: {
         kind: 'project',
         projectId: '123e4567-e89b-42d3-a456-426614174000'
@@ -47,7 +64,7 @@ describe('project session startup', () => {
       kind: 'project',
       projectId: 'missing-project'
     })).resolves.toEqual({
-      snapshot: undefined,
+      project: undefined,
       route: {
         kind: 'project',
         projectId: 'missing-project'
@@ -75,7 +92,7 @@ describe('project session startup', () => {
       kind: 'project',
       projectId: 'project-in-web'
     })).resolves.toMatchObject({
-      snapshot: undefined,
+      project: undefined,
       projectOpen: {
         error: {
           code: 'project-open-here-required',
@@ -95,7 +112,7 @@ describe('project session startup', () => {
     } as unknown as WorkbenchApiClient;
 
     await expect(openInitialProject(api, { kind: 'workbench' })).resolves.toEqual({
-      snapshot: undefined,
+      project: undefined,
       route: { kind: 'workbench' }
     });
 
@@ -128,14 +145,22 @@ describe('project session startup', () => {
     const api = {
       openProject: async (input: unknown) => {
         calls.push(input);
-        return { projectId: 'project-live-id', projectRevision: 1, snapshot };
+        return {
+          projectId: 'project-live-id',
+          projectRevision: 1,
+          snapshot,
+          workingCopies: emptyWorkingCopies()
+        };
       }
     } as unknown as WorkbenchApiClient;
 
     await expect(openInitialProject(api)).resolves.toEqual({
-      projectId: 'project-live-id',
-      projectRevision: 1,
-      snapshot,
+      project: {
+        projectId: 'project-live-id',
+        projectRevision: 1,
+        snapshot,
+        workingCopies: emptyWorkingCopies()
+      },
       route: { kind: 'project-open', projectRoot: '/Users/me/Project A' },
       projectOpen: { attemptedPath: '/Users/me/Project A' }
     });
@@ -145,6 +170,29 @@ describe('project session startup', () => {
       '',
       '/projects/project-live-id'
     );
+  });
+
+  it('passes an absolute project path with a trailing space through unchanged', async () => {
+    const calls: unknown[] = [];
+    const snapshot = { canvases: [] } as unknown as WorkbenchProjectSessionSnapshot;
+    const api = {
+      openProject: async (input: unknown) => {
+        calls.push(input);
+        return {
+          projectId: 'project-spaced-path',
+          projectRevision: 1,
+          snapshot,
+          workingCopies: emptyWorkingCopies()
+        };
+      }
+    } as unknown as WorkbenchApiClient;
+
+    await openInitialProject(api, {
+      kind: 'project-open',
+      projectRoot: '/Users/me/Project '
+    });
+
+    expect(calls).toEqual([{ projectRoot: '/Users/me/Project ' }]);
   });
 
   it('rejects a relative project-open path without calling Runtime', async () => {
@@ -157,7 +205,7 @@ describe('project session startup', () => {
     } as unknown as WorkbenchApiClient;
 
     await expect(openInitialProject(api, { kind: 'project-open', projectRoot: 'relative/project' })).resolves.toMatchObject({
-      snapshot: undefined,
+      project: undefined,
       projectOpen: {
         attemptedPath: 'relative/project',
         error: { code: 'project-path-must-be-absolute' }
@@ -176,7 +224,7 @@ describe('project session startup', () => {
     } as unknown as WorkbenchApiClient;
 
     await expect(openInitialProject(api, { kind: 'project-open' })).resolves.toMatchObject({
-      snapshot: undefined,
+      project: undefined,
       projectOpen: {
         error: { code: 'project-path-required' }
       }
@@ -192,7 +240,7 @@ describe('project session startup', () => {
     } as unknown as WorkbenchApiClient;
 
     await expect(openInitialProject(api, { kind: 'project-open', projectRoot: '/missing/project' })).resolves.toMatchObject({
-      snapshot: undefined,
+      project: undefined,
       projectOpen: {
         attemptedPath: '/missing/project',
         error: {
@@ -220,7 +268,7 @@ describe('project session startup', () => {
     expect(replaceState).not.toHaveBeenCalled();
   });
 
-  it('preserves browser history state when replacing the active project route', () => {
+  it('preserves browser history state while removing stale search and hash state', () => {
     const replaceState = vi.fn();
     const state = { preserved: true };
     (globalThis as { window?: unknown }).window = {
@@ -233,7 +281,11 @@ describe('project session startup', () => {
     expect(replaceState).toHaveBeenCalledWith(
       state,
       '',
-      '/projects/123e4567-e89b-42d3-a456-426614174000?view=canvas#selection'
+      '/projects/123e4567-e89b-42d3-a456-426614174000'
     );
+  });
+
+  it('does not show a Project loader for Not Found routes', () => {
+    expect(shouldShowInitialProjectLoader({ kind: 'not-found' })).toBe(false);
   });
 });

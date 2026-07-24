@@ -1,8 +1,12 @@
-import type { WorkbenchMenuCommandId } from '@debrute/app-protocol';
+import type {
+  DebruteProductPlatform,
+  DebruteShellApi,
+  NativeWindowState,
+  NativeMenuCommandId
+} from '@debrute/app-protocol';
 
 export interface ApplicationMenuCommand {
-  commandId: WorkbenchMenuCommandId;
-  payload?: Record<string, string | boolean>;
+  commandId: NativeMenuCommandId;
 }
 
 export const nativeWindowIpcChannels = {
@@ -16,26 +20,24 @@ export const nativeWindowIpcChannels = {
   openProjectRequested: 'debrute-shell:openProjectRequested'
 } as const;
 
-export interface NativeWindowPreloadApi {
-  getNativeWindowState(): Promise<{ maximized: boolean }>;
-  minimizeNativeWindow(): Promise<{ maximized: boolean }>;
-  toggleMaximizeNativeWindow(): Promise<{ maximized: boolean }>;
-  closeNativeWindow(): Promise<{ ok: true }>;
-  executeNativeMenuCommand(input: {
-    commandId: WorkbenchMenuCommandId;
-    payload?: Record<string, string | boolean>;
-  }): Promise<{ ok: true }>;
-  takeDesktopLaunchTicket(): Promise<string | undefined>;
-  onNativeWindowStateChanged(listener: (state: { maximized: boolean }) => void): () => void;
-}
+export type NativeWindowPreloadApi = Pick<
+  DebruteShellApi,
+  | 'getNativeWindowState'
+  | 'minimizeNativeWindow'
+  | 'toggleMaximizeNativeWindow'
+  | 'closeNativeWindow'
+  | 'executeNativeMenuCommand'
+  | 'takeDesktopLaunchTicket'
+  | 'onNativeWindowStateChanged'
+>;
 
 interface NativeWindowIpcInvoker {
   invoke(channel: string, ...args: unknown[]): Promise<unknown>;
 }
 
 interface NativeWindowIpcRenderer<Event> extends NativeWindowIpcInvoker {
-  on(channel: string, listener: (event: Event, state: { maximized: boolean }) => void): unknown;
-  removeListener(channel: string, listener: (event: Event, state: { maximized: boolean }) => void): unknown;
+  on(channel: string, listener: (event: Event, state: NativeWindowState) => void): unknown;
+  removeListener(channel: string, listener: (event: Event, state: NativeWindowState) => void): unknown;
 }
 
 interface NativeWindow {
@@ -54,7 +56,7 @@ interface NativeWindowIpcMain<Sender> {
   ): unknown;
 }
 
-export function desktopBrowserWindowChromeOptions(platform: NodeJS.Platform): {
+export function desktopBrowserWindowChromeOptions(platform: DebruteProductPlatform): {
   frame?: false;
   titleBarStyle: 'hiddenInset' | 'hidden';
 } {
@@ -68,14 +70,14 @@ export function createNativeWindowPreloadApi<Event>(
   ipcRenderer: NativeWindowIpcRenderer<Event>
 ): NativeWindowPreloadApi {
   return {
-    getNativeWindowState: () => invoke<{ maximized: boolean }>(ipcRenderer, nativeWindowIpcChannels.getState),
-    minimizeNativeWindow: () => invoke<{ maximized: boolean }>(ipcRenderer, nativeWindowIpcChannels.minimize),
-    toggleMaximizeNativeWindow: () => invoke<{ maximized: boolean }>(ipcRenderer, nativeWindowIpcChannels.toggleMaximize),
+    getNativeWindowState: () => invoke<NativeWindowState>(ipcRenderer, nativeWindowIpcChannels.getState),
+    minimizeNativeWindow: () => invoke<NativeWindowState>(ipcRenderer, nativeWindowIpcChannels.minimize),
+    toggleMaximizeNativeWindow: () => invoke<NativeWindowState>(ipcRenderer, nativeWindowIpcChannels.toggleMaximize),
     closeNativeWindow: () => invoke<{ ok: true }>(ipcRenderer, nativeWindowIpcChannels.close),
     executeNativeMenuCommand: (input) => invoke<{ ok: true }>(ipcRenderer, nativeWindowIpcChannels.executeMenuCommand, input),
     takeDesktopLaunchTicket: () => invoke<string | undefined>(ipcRenderer, nativeWindowIpcChannels.takeDesktopLaunchTicket),
     onNativeWindowStateChanged: (listener) => {
-      const wrapped = (_event: Event, state: { maximized: boolean }) => listener(state);
+      const wrapped = (_event: Event, state: NativeWindowState) => listener(state);
       ipcRenderer.on(nativeWindowIpcChannels.stateChanged, wrapped);
       return () => {
         ipcRenderer.removeListener(nativeWindowIpcChannels.stateChanged, wrapped);
@@ -88,7 +90,7 @@ export function registerNativeWindowIpc<Sender, Window extends NativeWindow>(inp
   ipcMain: NativeWindowIpcMain<Sender>;
   browserWindow: { fromWebContents(sender: Sender): Window | null };
   executeNativeMenuCommand(window: Window, command: ApplicationMenuCommand): Promise<void>;
-  takeDesktopLaunchTicket?(window: Window): string | undefined;
+  takeDesktopLaunchTicket(window: Window): string | undefined;
 }): void {
   input.ipcMain.handle(nativeWindowIpcChannels.getState, (event) => (
     nativeWindowState(requireSenderWindow(input.browserWindow, event.sender))
@@ -116,11 +118,11 @@ export function registerNativeWindowIpc<Sender, Window extends NativeWindow>(inp
     return { ok: true };
   });
   input.ipcMain.handle(nativeWindowIpcChannels.takeDesktopLaunchTicket, (event) => (
-    input.takeDesktopLaunchTicket?.(requireSenderWindow(input.browserWindow, event.sender))
+    input.takeDesktopLaunchTicket(requireSenderWindow(input.browserWindow, event.sender))
   ));
 }
 
-export function nativeWindowState(window: Pick<NativeWindow, 'isMaximized'>): { maximized: boolean } {
+function nativeWindowState(window: Pick<NativeWindow, 'isMaximized'>): NativeWindowState {
   return { maximized: window.isMaximized() };
 }
 

@@ -1,4 +1,4 @@
-import React, { act, useEffect, useState } from 'react';
+import { act, useEffect, useState } from 'react';
 import { createRoot } from 'react-dom/client';
 import { describe, expect, it, vi } from 'vitest';
 import type { WorkbenchApiClient, WorkbenchProjectSessionSnapshot } from '@debrute/app-protocol';
@@ -92,7 +92,7 @@ function ControllerProbe({ api, onValue }: {
     api: api as WorkbenchApiClient,
     projectId: 'project-1',
     snapshot,
-    commitSnapshot: setSnapshot,
+    commitSnapshot: (result) => setSnapshot(result.snapshot),
     activeCanvasRuntime: undefined,
     locateProjectFileInCanvas: vi.fn(),
     notify: vi.fn(),
@@ -150,7 +150,7 @@ function snapshotWithFiles(paths: string[]): WorkbenchProjectSessionSnapshot {
     health: {
       projectName: 'Demo',
       canvasCount: 0,
-      diagnosticCounts: { errors: 0, warnings: 0, infos: 0 },
+      diagnosticCounts: { errors: 0, warnings: 0 },
       checkedAt: '2026-07-10T00:00:00.000Z'
     }
   };

@@ -1,4 +1,3 @@
-import React from 'react';
 import { renderToStaticMarkup } from 'react-dom/server';
 import { describe, expect, it } from 'vitest';
 import {
@@ -28,14 +27,14 @@ describe('Workbench UI primitives', () => {
     const html = renderToStaticMarkup(
       <Toolbar ariaLabel="Example actions">
         <Button variant="primary" size="sm" iconStart={<span data-icon="save" />}>Save</Button>
-        <Button variant="danger" size="sm">Delete</Button>
+        <Button size="sm">Cancel</Button>
         <IconButton label="Close panel" icon={<span data-icon="close" />} />
       </Toolbar>
     );
 
     expect(html).toContain('db-toolbar');
     expect(html).toContain('db-button--primary');
-    expect(html).toContain('db-button--danger');
+    expect(html).toContain('db-button--default');
     expect(html).toContain('aria-label="Close panel"');
     expect(html).toContain('db-icon-button');
   });
@@ -52,7 +51,7 @@ describe('Workbench UI primitives', () => {
 
   it('renders fields, cards, menus, pills, and empty states through shared classes', () => {
     const html = renderToStaticMarkup(
-      <Card variant="selected">
+      <Card>
         <Field label="API Key" description="Used by model requests" error="Required">
           <Input value="sk-test" readOnly />
         </Field>
@@ -61,17 +60,17 @@ describe('Workbench UI primitives', () => {
           <Menu.Separator />
           <Menu.Item variant="danger" disabled>Delete</Menu.Item>
         </Menu>
-        <StatusPill tone="success">configured</StatusPill>
+        <StatusPill tone="warning">update available</StatusPill>
         <EmptyState title="No files" description="Create a file to begin." />
       </Card>
     );
 
-    expect(html).toContain('db-card--selected');
+    expect(html).toContain('db-card');
     expect(html).toContain('db-field');
     expect(html).toContain('db-input');
     expect(html).toContain('db-menu');
     expect(html).toContain('role="separator"');
-    expect(html).toContain('db-status-pill--success');
+    expect(html).toContain('db-status-pill--warning');
     expect(html).toContain('db-empty-state');
     expect(html).toContain('aria-invalid="true"');
   });
@@ -142,7 +141,7 @@ describe('Workbench UI primitives', () => {
 
   it('renders final primitive states through shared classes and ARIA state', () => {
     const html = renderToStaticMarkup(
-      <Card variant="interactive">
+      <Card>
         <Toolbar ariaLabel="Primitive states">
           <Button loading>Saving</Button>
           <Button pressed>Pressed</Button>
@@ -166,7 +165,7 @@ describe('Workbench UI primitives', () => {
       </Card>
     );
 
-    expect(html).toContain('db-card--interactive');
+    expect(html).toContain('db-card');
     expect(html).toContain('aria-busy="true"');
     expect(html).toContain('aria-pressed="true"');
     expect(html).toContain('db-input--invalid');

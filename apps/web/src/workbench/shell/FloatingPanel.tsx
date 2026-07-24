@@ -1,16 +1,15 @@
 import React from 'react';
+import type { DebruteProductPlatform } from '@debrute/app-protocol';
 import { SettingsPanel } from '../settings/SettingsPanel';
 import { ProjectTree } from '../project-explorer/ProjectTree';
 import { CloseButton, Panel, PanelBody } from '../ui';
 import type { ProjectTreeInlineEditState } from '../project-explorer/projectTreeEditing';
 import type { ProjectTreeFileKeyboardCommand } from '../project-explorer/projectTreeKeyboardCommands';
 import {
-  FLOATING_PANEL_DEFINITIONS,
   FLOATING_PANEL_RESIZE_DIRECTIONS,
   type FloatingPanelId,
   type FloatingPanelResizeDirection,
   type FloatingPanelResizeInput,
-  type FloatingPanelResizeRect,
   type FloatingPanelState
 } from './floatingPanels';
 import {
@@ -20,7 +19,8 @@ import {
 } from './workbenchWindowOrder';
 import {
   FLOATING_PANEL_DRAG_HIT_AREA_CSS_PROPERTY,
-  FLOATING_PANEL_DRAG_HIT_AREA_CSS_VALUE
+  FLOATING_PANEL_DRAG_HIT_AREA_CSS_VALUE,
+  type WorkbenchWindowRect
 } from './windowBounds';
 import type {
   WorkbenchContextMenuPosition,
@@ -39,7 +39,7 @@ const floatingPanelTitleKeys: Record<FloatingPanelId, WorkbenchTranslationKey> =
   terminal: 'shell.panels.terminal'
 };
 
-interface FloatingPanelResizeStart extends FloatingPanelResizeRect {
+interface FloatingPanelResizeStart extends WorkbenchWindowRect {
   pointerX: number;
   pointerY: number;
   direction: FloatingPanelResizeDirection;
@@ -114,7 +114,7 @@ export function FloatingPanelResizeHandles({
   onBringToFront,
   onResize
 }: {
-  layout: FloatingPanelResizeRect;
+  layout: WorkbenchWindowRect;
   onBringToFront: () => void;
   onResize: (input: FloatingPanelResizeInput) => void;
 }): React.ReactElement {
@@ -161,7 +161,7 @@ export function FloatingPanelContent({
   onProjectTreeInternalDrop,
   onProjectTreeExternalDrop,
   onCreateRootFile,
-  desktopPlatform,
+  productPlatform,
   onKeyboardFileCommand,
   terminalPanel
 }: {
@@ -189,7 +189,7 @@ export function FloatingPanelContent({
     targetDirectoryProjectRelativePath: string;
   }) => void) | undefined;
   onCreateRootFile?: (() => void) | undefined;
-  desktopPlatform?: NodeJS.Platform | undefined;
+  productPlatform: DebruteProductPlatform;
   onKeyboardFileCommand?: ((command: ProjectTreeFileKeyboardCommand, target: WorkbenchContextMenuTarget) => void) | undefined;
   terminalPanel: React.ReactElement;
 }): React.ReactElement {
@@ -210,7 +210,7 @@ export function FloatingPanelContent({
         onEditSubmit={onEditSubmit}
         onEditCancel={onEditCancel}
         onClearCut={onClearCut}
-        desktopPlatform={desktopPlatform}
+        productPlatform={productPlatform}
         onKeyboardFileCommand={onKeyboardFileCommand}
       />
     );
@@ -263,7 +263,7 @@ export function floatingPanelResizeHandleProps({
 }: {
   direction: FloatingPanelResizeDirection;
   resizeStart: React.MutableRefObject<FloatingPanelResizeStart | undefined>;
-  layout: FloatingPanelResizeRect;
+  layout: WorkbenchWindowRect;
   onBringToFront: () => void;
   onResize: (input: FloatingPanelResizeInput) => void;
 }): React.HTMLAttributes<HTMLElement> {
@@ -302,7 +302,7 @@ function resizeFloatingPanelRect(
   start: FloatingPanelResizeStart,
   pointerX: number,
   pointerY: number
-): FloatingPanelResizeRect {
+): WorkbenchWindowRect {
   const dx = pointerX - start.pointerX;
   const dy = pointerY - start.pointerY;
   return {

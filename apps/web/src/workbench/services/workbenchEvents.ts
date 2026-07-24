@@ -1,14 +1,13 @@
 import type { WorkbenchEvent, WorkbenchProjectSessionSnapshot } from '@debrute/app-protocol';
 
 export type SnapshotAffectingWorkbenchEvent = Extract<WorkbenchEvent, {
-  type: 'project.opened' | 'project.changed' | 'project.fileChanged' | 'canvas.changed';
+  type: 'project.changed' | 'project.fileChanged' | 'canvas.changed';
 }>;
 
 export function isSnapshotAffectingWorkbenchEvent(
   event: WorkbenchEvent
 ): event is SnapshotAffectingWorkbenchEvent {
-  return event.type === 'project.opened'
-    || event.type === 'project.changed'
+  return event.type === 'project.changed'
     || event.type === 'project.fileChanged'
     || event.type === 'canvas.changed';
 }

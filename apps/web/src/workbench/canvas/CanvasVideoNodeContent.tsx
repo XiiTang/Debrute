@@ -174,9 +174,6 @@ export function CanvasVideoNodeContent({
       setPlayerShellSize((current) => sameFrameSize(current, nextSize) ? current : nextSize);
     };
     syncSize();
-    if (typeof ResizeObserver === 'undefined') {
-      return;
-    }
     const resizeObserver = new ResizeObserver(syncSize);
     resizeObserver.observe(element);
     return () => resizeObserver.disconnect();
