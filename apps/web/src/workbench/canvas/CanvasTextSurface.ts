@@ -1,5 +1,5 @@
 export const CANVAS_TEXT_SURFACE_METRICS = {
-  fontFamily: 'ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", monospace',
+  fontFamily: '"Noto Sans Mono CJK SC", ui-monospace, monospace',
   fontSizePx: 12,
   lineHeightPx: 16.8,
   linePaddingInlinePx: 8,

@@ -691,7 +691,7 @@ async function assertIconButtonsHaveNames(page, label) {
   if (unnamed.length > 0) {
     throw new Error(`[${label}] icon-only buttons missing accessible names: ${unnamed.join(', ')}`);
   }
-  console.log(`[${label}] Lucide icon-only controls expose accessible names.`);
+  console.log(`[${label}] Cutout icon-only controls expose accessible names.`);
 }
 
 async function assertCanvasTextWorkflow(page, label, targetScrollTop, requestLog) {

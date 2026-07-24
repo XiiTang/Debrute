@@ -109,15 +109,18 @@ normally; Runtime does not replay it.
 
 ## Product Icon Assets
 
-`assets/project-icon/debrute.svg` is the only human-edited product icon source.
-Run `pnpm icons:sync` to deterministically regenerate the Web favicon and Desktop
-PNG, ICNS, ICO, and Dock assets. The generator source is authoritative for
-the current output matrix and platform profiles; generated consumer assets are
-not independent design sources and should not be edited by hand.
+`assets/brand/debrute-mascot.svg` is the only human-edited identity source. Its
+`paper` group is independently addressable, while its `mascot` group always
+contains the complete character. Run `pnpm brand:sync` to deterministically
+regenerate the responsive Web favicon, Desktop PNG, ICNS, ICO, Dock, and Runtime
+tray assets. The generator source is authoritative for the output matrix;
+generated consumer assets are not independent design sources and are not edited
+by hand. Artwork proportions, platform containers, and tray treatments are
+defined in [the brand contract](./brand.md).
 
-The Web build invokes icon sync before compilation, and the Desktop Electron
-bundle copies the generated runtime assets from `apps/desktop/build/`. A missing
-or invalid canonical SVG is a build-time error rather than a runtime fallback.
+The Web build invokes brand asset sync before compilation, and the Desktop
+Electron bundle copies the generated runtime assets from `apps/desktop/build/`.
+The build requires a valid canonical SVG.
 
 ## Public Assets
 

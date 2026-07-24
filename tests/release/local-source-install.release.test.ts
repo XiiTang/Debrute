@@ -65,7 +65,7 @@ describe('local source installation', () => {
       writeProduct(seed, '0.0.3', 'source');
       const manifestPath = join(seed, 'product-manifest.json');
       const manifest = JSON.parse(readFileSync(manifestPath, 'utf8'));
-      manifest.legacyFallback = true;
+      manifest.unexpectedManifestField = true;
       writeFileSync(manifestPath, `${JSON.stringify(manifest, null, 2)}\n`);
 
       await expect(validateProductSeed(seed)).rejects.toThrow(

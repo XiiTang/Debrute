@@ -15,6 +15,11 @@ when prose and implementation differ.
 - [Capability glossary](./capability/CONTEXT.md)
 - [Architecture decision index](./adr/README.md)
 
+## Brand And Visual Design
+
+- [Brand identity](./brand.md)
+- [Front-end design system](./design-system.md)
+
 ## Runtime And Trust
 
 - [Runtime architecture](./runtime-architecture.md)
@@ -24,7 +29,6 @@ when prose and implementation differ.
 
 ## Workbench And Canvas
 
-- [Front-end design system](../DESIGN.md)
 - [Workbench front-end](./workbench.md)
 - [Canvas architecture](./canvas.md)
 - [Canvas rendering and preview resources](./canvas-rendering.md)

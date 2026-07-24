@@ -89,7 +89,7 @@ The resource-ownership rationale is recorded in
 
 ## CLI Registry Acceptance
 
-The final public command-matrix test keeps the closed CLI inventory explicit.
+The public command-matrix test keeps the closed CLI inventory explicit.
 Parser behavior tests cover each distinct syntax form: positional bounds,
 required and duplicate options, flags, repeatable values, simple allowed-value
 sets, Project positional and option path resolution, unknown options, and the
@@ -99,15 +99,11 @@ registered syntax is the parser's input.
 
 ## Workbench UI Acceptance
 
-DOM tests exercise the current rendered state and the action a user can perform.
-Settings coverage verifies the current navigation groups and default page, and
-Product update behavior by invoking the visible action and observing its result
-or exact failure. It does not enumerate
-retired navigation keys, button labels, commands, or page counts as a blacklist,
-and it does not inspect source text to prove that an old UI path is absent. Once
-a pre-release UI path is removed, its removal-only assertions are removed too;
-absence assertions remain only when absence is itself part of the current state
-being exercised, such as hiding ready content while a resource is loading.
+DOM tests exercise rendered state and the action a user can perform. Settings
+coverage verifies the navigation groups and default page, and Product update
+behavior by invoking the visible action and observing its result or exact
+failure. Absence assertions are used when absence is part of the rendered
+contract, such as hiding ready content while a resource is loading.
 
 ## Model Generation Acceptance
 
@@ -116,19 +112,15 @@ each documented integer `sample_rate`, while fractional, negative, and
 unsupported values fail before the transport receives a request. Adapter tests
 prove that omission sends `24000`, an explicit supported rate is preserved in
 the upstream body, and PCM output writes that same rate into its WAV header.
-There is no invalid-value coercion or default fallback to preserve with a test.
-Exact-adapter fixtures also dispatch TTS, music, and sound-effect through the
-shared internal audio execution family and verify their distinct Artifact
-Roles. Tests do not preserve empty per-Kind forwarding modules through source
-text or file-existence assertions.
+Exact-adapter fixtures dispatch TTS, music, and sound-effect through the shared
+internal audio execution family and verify their distinct Artifact Roles.
 
 ## Workbench HTTP Acceptance
 
 Revisioned-file route tests verify `200` for a complete file, `206` plus exact
 range headers for a satisfiable single range, and `416` for an unsatisfiable
 range. Service-error tests verify the typed status selected at error creation is
-the status returned by the adapter. Tests exercise those outcomes; they do not
-inject impossible numeric statuses or preserve an invalid-status fallback.
+the status returned by the adapter.
 
 ## Raster Preview Engine Acceptance
 
@@ -148,9 +140,8 @@ equivalent requests share one job, consumerless queued work is removed, active
 native work has no request timeout or force-cancel path, and a stale source or
 engine identity cannot publish its temporary output. Cache tests exercise the
 current Source Identity, Source Version, Raster Preview Engine Version, and
-Variant Key only. They do not manufacture a retired engine-version directory or
-test cleanup of one; no test preserves a retired cache shape, quota, LRU, TTL,
-migration, compatibility reader, fallback renderer, or automatic retry.
+Variant Key, plus structural reconciliation within the exact current engine
+path.
 
 Native-payload contract and release tests verify the repository lock's URL,
 SHA-256, target, enabled format surface, and libvips 8.18.4 identity. Missing,
@@ -264,9 +255,8 @@ connection.
 Normal runs print the resolved worker plan, group and total durations, slowest
 files and cases, and exceeded diagnostic thresholds. Profile output is written atomically to
 `.test-results/timing.json` and `.test-results/slow-tests.json`. Coverage lives
-under `.test-results/coverage`; it is a local diagnostic without a historical
-baseline or arbitrary global threshold. Generated reports and temporary homes
-are not committed.
+under `.test-results/coverage`; it is a local diagnostic. Generated reports and
+temporary homes are not committed.
 
 `pnpm verify:browser` remains an explicit live-browser diagnostic outside
 `pnpm verify` and the normal local test suite.

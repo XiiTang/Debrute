@@ -1,5 +1,5 @@
 import React from 'react';
-import { Map } from 'lucide-react';
+import { Map } from '../ui/index.js';
 import type { CanvasDocument, CanvasProjection } from '@debrute/canvas-core';
 import { CANVAS_MINIMAP_PANEL_SIZE, type FloatingBarRect } from '../shell/floatingBars';
 import type { CanvasPoint, CanvasRect } from '../services/canvasInteraction';
@@ -17,7 +17,7 @@ import {
 import type { CanvasEditorRuntime, CanvasRuntimeSnapshot } from './runtime/CanvasEditorRuntime';
 import { DEFAULT_CANVAS_CAMERA } from './runtime/canvasCamera';
 import type { CanvasOverlayRuntime } from './CanvasOverlayRuntime';
-import { IconButton } from '../ui';
+import { IconButton } from '../ui/index.js';
 import { useI18n } from '../i18n';
 
 export function CanvasMinimapBar({

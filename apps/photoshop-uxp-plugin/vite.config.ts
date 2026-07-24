@@ -11,6 +11,7 @@ export default defineConfig({
     license: true,
     rolldownOptions: {
       input: resolve(import.meta.dirname, 'src/index.html'),
+      external: ['uxp'],
       output: {
         entryFileNames: 'assets/[name].js',
         chunkFileNames: 'assets/[name].js',

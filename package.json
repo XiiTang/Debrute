@@ -13,7 +13,7 @@
   "scripts": {
     "build": "pnpm generate:control-protocol && tsc -b tsconfig.build.json && pnpm --filter @debrute/photoshop-bridge-plugin-core verify:esm && pnpm --filter @debrute/desktop build",
     "clean": "node scripts/clean.mjs",
-    "icons:sync": "node scripts/sync-project-icons.mjs",
+    "brand:sync": "node scripts/sync-brand-assets.mjs",
     "pack:local": "pnpm --filter @debrute/desktop pack:local",
     "install:local": "pnpm --filter @debrute/desktop install:local",
     "package:photoshop-uxp-plugin": "node scripts/package-photoshop-uxp-plugin.mjs",

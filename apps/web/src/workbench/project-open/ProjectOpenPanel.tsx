@@ -1,6 +1,6 @@
 import React from 'react';
-import { FolderOpen } from 'lucide-react';
-import { Button, EmptyState, Toolbar } from '../ui';
+import { FolderOpen } from '../ui/index.js';
+import { Button, EmptyState, Toolbar } from '../ui/index.js';
 import { useI18n } from '../i18n';
 
 export interface ProjectOpenPanelProps {

@@ -65,12 +65,11 @@ remain optional because some failures do not identify either value.
 
 ## Model Run Safety
 
-Model executors create the safe persistent Model Run copy while staging their
-generated files. Active API keys, credential fields, secret query parameters,
-and inline media payloads are already redacted. Image-specific large-payload
-compaction may further preserve shape without storing encoded media. The
-metadata service stores the supplied safe request and output; it is not a
-fallback credential scrubber.
+Model executors own the safe persistent Model Run copy while staging their
+generated files. They redact active API keys, credential fields, secret query
+parameters, and inline media payloads. Image-specific large-payload compaction
+may further preserve shape without storing encoded media. The metadata service
+stores the supplied safe request and output unchanged.
 
 Generation failure publishes neither output files nor Generated Asset records.
 

@@ -2,7 +2,7 @@ import React from 'react';
 import type { DebruteProductPlatform } from '@debrute/app-protocol';
 import { SettingsPanel } from '../settings/SettingsPanel';
 import { ProjectTree } from '../project-explorer/ProjectTree';
-import { CloseButton, Panel, PanelBody } from '../ui';
+import { CloseButton, Panel, PanelBody } from '../ui/index.js';
 import type { ProjectTreeInlineEditState } from '../project-explorer/projectTreeEditing';
 import type { ProjectTreeFileKeyboardCommand } from '../project-explorer/projectTreeKeyboardCommands';
 import {

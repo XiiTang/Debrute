@@ -2,11 +2,11 @@ import React, { useCallback, useEffect, useRef, useState } from 'react';
 import {
   AlertTriangle,
   Loader2
-} from 'lucide-react';
+} from '../ui/index.js';
 import type { ProjectDiagnostic } from '@debrute/canvas-core';
 import type { GeneratedAssetMetadataLookup, GeneratedAssetRecord } from '@debrute/app-protocol';
 import type { WorkbenchActions, WorkbenchState } from '../../types';
-import { EmptyState, Select } from '../ui';
+import { EmptyState, Select } from '../ui/index.js';
 import type { CanvasSelection } from '../canvas/runtime/canvasSelection';
 import {
   getSelectionContext,

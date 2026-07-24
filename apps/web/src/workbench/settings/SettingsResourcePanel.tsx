@@ -1,7 +1,7 @@
 import React from 'react';
-import { RefreshCw } from 'lucide-react';
+import { RefreshCw } from '../ui/index.js';
 import type { SettingsResource } from '../../types';
-import { Button } from '../ui';
+import { Button } from '../ui/index.js';
 import { useI18n } from '../i18n';
 
 export function SettingsResourcePanel<T>({

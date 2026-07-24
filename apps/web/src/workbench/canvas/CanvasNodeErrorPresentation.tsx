@@ -1,7 +1,7 @@
 import React from 'react';
-import { AlertTriangle, RefreshCw } from 'lucide-react';
+import { AlertTriangle, RefreshCw } from '../ui/index.js';
 import { useI18n } from '../i18n';
-import { Button } from '../ui';
+import { Button } from '../ui/index.js';
 
 export interface CanvasNodeErrorPresentationProps {
   message: string;

@@ -1,11 +1,10 @@
 import { describe, expect, it } from 'vitest';
 import { renderToStaticMarkup } from 'react-dom/server';
-import { FolderTree } from 'lucide-react';
 import { IconButton } from './IconButton';
-import { WorkbenchIconProvider } from './WorkbenchIconProvider';
+import { FolderTree, WorkbenchIconProvider } from './WorkbenchIconProvider.js';
 
 describe('WorkbenchIconProvider', () => {
-  it('applies Workbench chrome defaults to Lucide icons', () => {
+  it('applies the solid 16px Debrute Cutout icon contract', () => {
     const html = renderToStaticMarkup(
       <WorkbenchIconProvider>
         <FolderTree />
@@ -14,7 +13,9 @@ describe('WorkbenchIconProvider', () => {
 
     expect(html).toContain('width="16"');
     expect(html).toContain('height="16"');
-    expect(html).toContain('stroke-width="2.625"');
+    expect(html).toContain('data-debrute-icon="folder-tree"');
+    expect(html).toContain('fill="currentColor"');
+    expect(html).not.toContain('stroke=');
   });
 
   it('keeps icon-only button labels on the button', () => {

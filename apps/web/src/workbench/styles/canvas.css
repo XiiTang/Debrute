@@ -1,15 +1,46 @@
 .db-floating-bar {
-  border: 1px solid var(--db-border-muted);
+  isolation: isolate;
+  border: 0;
   border-radius: var(--db-radius-lg);
-  background: var(--db-floating-bg);
+  background: transparent;
   box-shadow: var(--db-shadow-floating);
-  backdrop-filter: blur(14px);
+}
+
+.db-floating-bar::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  z-index: -2;
+  border: 0;
+  background: var(--db-floating-bg);
+  pointer-events: none;
+  -webkit-mask-image: var(--db-paper-mask-medium);
+  mask-image: var(--db-paper-mask-medium);
+  -webkit-mask-size: 100% 100%;
+  mask-size: 100% 100%;
+  -webkit-mask-repeat: no-repeat;
+  mask-repeat: no-repeat;
+}
+
+.db-floating-bar::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  z-index: -1;
+  background: var(--db-paper-grain-tint);
+  opacity: var(--db-paper-grain-opacity);
+  pointer-events: none;
+  -webkit-mask-image: var(--db-paper-grain-mask);
+  mask-image: var(--db-paper-grain-mask);
+  -webkit-mask-repeat: repeat;
+  mask-repeat: repeat;
 }
 
 .db-canvas-control {
   border: 0;
   background: transparent;
   color: var(--db-text-muted);
+  box-shadow: none;
 }
 
 .db-canvas-control:hover:not(:disabled),
@@ -179,8 +210,8 @@
   height: 100%;
   display: block;
   overflow: hidden;
-  border-radius: 6px;
-  background: color-mix(in oklch, var(--db-bg) 86%, black);
+  border-radius: 0;
+  background: var(--db-bg);
   touch-action: none;
   cursor: grab;
 }
@@ -195,13 +226,13 @@
 }
 
 .canvas-minimap-node.selected {
-  fill: color-mix(in oklch, var(--db-accent) 84%, white);
+  fill: var(--db-canvas-selection);
   opacity: 0.95;
 }
 
 .canvas-minimap-viewport {
-  fill: color-mix(in oklch, var(--db-accent) 18%, transparent);
-  stroke: color-mix(in oklch, var(--db-accent) 78%, white);
+  fill: color-mix(in srgb, var(--db-canvas-selection) 20%, transparent);
+  stroke: var(--db-canvas-edge);
   stroke-width: 1.5;
   vector-effect: non-scaling-stroke;
 }
@@ -226,11 +257,8 @@
   min-height: 0;
   height: 100%;
   overflow: hidden;
-  background:
-    linear-gradient(var(--db-canvas-grid) 1px, transparent 1px),
-    linear-gradient(90deg, var(--db-canvas-grid) 1px, transparent 1px),
-    var(--db-canvas-bg);
-  background-size: 34px 34px;
+  background: var(--db-canvas-field);
+  background-size: var(--db-canvas-grid-size);
   cursor: crosshair;
   user-select: none;
   -webkit-user-select: none;
@@ -254,14 +282,14 @@
 }
 
 .canvas-edge {
-  stroke: color-mix(in oklch, var(--db-accent) 72%, white);
+  stroke: var(--db-canvas-edge);
   stroke-width: calc(2px / var(--canvas-zoom, 1));
   fill: none;
   opacity: 0.72;
 }
 
 .canvas-edge-layer marker path {
-  fill: color-mix(in oklch, var(--db-accent) 72%, white);
+  fill: var(--db-canvas-edge);
 }
 
 .canvas-empty-state {
@@ -275,9 +303,9 @@
   display: grid;
   place-items: center;
   padding: 0 18px;
-  border: 1px solid var(--db-border);
-  border-radius: 7px;
-  background: color-mix(in oklch, var(--db-surface-1) 92%, transparent);
+  border: 0;
+  border-radius: 0;
+  background: var(--db-surface-1);
   color: var(--db-text-muted);
   box-shadow: var(--db-shadow-menu);
   pointer-events: none;
@@ -285,8 +313,9 @@
 
 .canvas-empty-state strong {
   color: var(--db-text-muted);
-  font-size: 13px;
+  font-size: var(--db-font-lg);
   font-weight: 700;
+  font-family: var(--db-font-display);
 }
 
 .db-canvas-node-frame {
@@ -301,14 +330,14 @@
 .db-canvas-node-frame:hover,
 .db-canvas-node-frame.hovered,
 .db-canvas-node-frame.selected {
-  outline: calc(1px * var(--canvas-chrome-scale, 1)) solid var(--db-selection);
+  outline: calc(1px * var(--canvas-chrome-scale, 1)) solid var(--db-canvas-selection);
 }
 
 .db-canvas-node-frame.video,
 .db-canvas-node-frame.text,
 .db-canvas-node-frame:not(.image) {
   border: calc(1px * var(--canvas-chrome-scale, 1)) solid var(--db-border-muted);
-  background: color-mix(in oklch, var(--db-bg) 66%, transparent);
+  background: var(--db-bg);
 }
 
 .db-canvas-node-frame.video:hover,
@@ -320,7 +349,7 @@
 .db-canvas-node-frame:not(.image):hover,
 .db-canvas-node-frame:not(.image).hovered,
 .db-canvas-node-frame:not(.image).selected {
-  border-color: var(--db-selection);
+  border-color: var(--db-canvas-selection);
 }
 
 .db-canvas-node-placeholder {
@@ -369,10 +398,11 @@
   align-items: center;
   gap: 7px;
   padding: 6px var(--db-space-3);
-  border: 1px solid color-mix(in oklch, var(--db-danger) 64%, var(--db-border));
+  border: 0;
   border-radius: var(--db-radius-md);
   background: var(--db-danger-bg);
   color: var(--db-text);
+  box-shadow: 2px 2px 0 var(--db-danger);
 }
 
 .db-canvas-node-error-overlay svg {
@@ -406,7 +436,7 @@
 .db-canvas-node-generic svg {
   grid-column: 1;
   grid-row: 1;
-  color: color-mix(in oklch, var(--db-accent) 64%, white);
+  color: var(--db-info);
   width: 20px;
   height: 20px;
 }
@@ -455,7 +485,7 @@
   display: flex;
   align-items: center;
   padding: 0 var(--db-space-4);
-  background: color-mix(in oklch, var(--db-bg) 72%, transparent);
+  background: var(--db-bg);
   color: var(--db-text-muted);
   font-size: var(--db-font-sm);
 }
@@ -477,7 +507,7 @@
   align-items: center;
   gap: var(--db-space-2);
   padding: 0 7px;
-  background: color-mix(in oklch, var(--db-surface-1) 94%, transparent);
+  background: var(--db-surface-1);
   color: var(--db-text);
   cursor: grab;
 }
@@ -569,7 +599,7 @@
 }
 
 .canvas-feedback-frame {
-  --canvas-feedback-frame-border: color-mix(in oklch, var(--db-accent) 58%, var(--db-border));
+  --canvas-feedback-frame-border: var(--db-canvas-edge);
   position: absolute;
   inset: calc(-1px * var(--canvas-chrome-scale, 1));
   z-index: 3;
@@ -599,7 +629,7 @@
 .canvas-media-feedback-region {
   position: absolute;
   box-sizing: border-box;
-  color: #101010;
+  color: var(--db-canvas-feedback-ink);
   pointer-events: auto;
   cursor: pointer;
 }
@@ -609,7 +639,7 @@
 }
 
 .canvas-media-feedback-label--draft {
-  background: color-mix(in oklch, #ffcc00 35%, transparent);
+  background: color-mix(in oklch, var(--db-canvas-feedback-surface) 35%, transparent);
 }
 
 .canvas-media-feedback-pin {
@@ -617,13 +647,14 @@
 }
 
 .canvas-media-feedback-region {
-  border: calc(2px * var(--canvas-chrome-scale, 1)) solid #ffcc00;
-  box-shadow: 0 0 0 calc(1px * var(--canvas-chrome-scale, 1)) #101010;
+  border: calc(2px * var(--canvas-chrome-scale, 1)) solid var(--db-canvas-feedback-surface);
+  box-shadow: 0 0 0 calc(1px * var(--canvas-chrome-scale, 1)) var(--db-canvas-feedback-border);
 }
 
 .canvas-media-feedback-pin.active .canvas-media-feedback-label,
 .canvas-media-feedback-region.active {
-  filter: drop-shadow(0 0 5px color-mix(in oklch, #ffcc00 72%, white));
+  outline: calc(2px * var(--canvas-chrome-scale, 1)) solid var(--db-canvas-feedback-active);
+  outline-offset: calc(1px * var(--canvas-chrome-scale, 1));
 }
 
 .canvas-media-feedback-label {
@@ -631,10 +662,10 @@
   height: calc(24px * var(--canvas-chrome-scale, 1));
   display: inline-grid;
   place-items: center;
-  border: calc(2px * var(--canvas-chrome-scale, 1)) solid #101010;
+  border: calc(2px * var(--canvas-chrome-scale, 1)) solid var(--db-canvas-feedback-border);
   border-radius: 999px;
-  background: #ffcc00;
-  color: #101010;
+  background: var(--db-canvas-feedback-surface);
+  color: var(--db-canvas-feedback-ink);
   font-size: calc(12px * var(--canvas-chrome-scale, 1));
   font-weight: 700;
   line-height: 1;
@@ -749,6 +780,7 @@
   padding: 0;
   border: 0;
   flex: 0 0 auto;
+  box-shadow: none;
 }
 
 .canvas-feedback-mark .db-icon-button__icon {
@@ -761,7 +793,7 @@
   gap: 2px;
   margin-left: 2px;
   padding-left: 6px;
-  border-left: 1px solid color-mix(in oklch, var(--db-border) 72%, transparent);
+  background: var(--db-surface-2);
 }
 
 .canvas-feedback-comment-strip {
@@ -783,14 +815,14 @@
   align-items: center;
   flex: 0 0 auto;
   padding: 2px 10px;
-  border: 1px solid color-mix(in oklch, var(--db-border) 88%, transparent);
-  border-radius: 999px;
-  background: color-mix(in oklch, var(--db-bg) 86%, transparent);
+  border: 0;
+  border-radius: 0;
+  background: var(--db-surface-1);
   color: var(--db-text);
   font-size: 12px;
   line-height: 18px;
+  box-shadow: var(--db-shadow-control);
   transition:
-    border-color var(--db-duration-fast) var(--db-ease-standard),
     background var(--db-duration-fast) var(--db-ease-standard);
 }
 
@@ -822,7 +854,7 @@
   height: 18px;
   display: grid;
   place-items: center;
-  border: 1px solid color-mix(in oklch, var(--db-border) 72%, transparent);
+  border: 0;
   border-radius: 999px;
   font-size: 10px;
   font-weight: 700;
@@ -830,22 +862,21 @@
   transition:
     opacity var(--db-duration-fast) var(--db-ease-standard),
     background var(--db-duration-fast) var(--db-ease-standard),
-    border-color var(--db-duration-fast) var(--db-ease-standard),
     color var(--db-duration-fast) var(--db-ease-standard);
 }
 
 .canvas-feedback-comment-pill-moment-badge {
   flex: 0 0 auto;
   margin-right: 6px;
-  color: color-mix(in oklch, var(--canvas-feedback-moment-color, #2563eb) 78%, var(--db-text));
+  color: color-mix(in oklch, var(--canvas-feedback-moment-color, var(--db-canvas-moment-1)) 78%, var(--db-text));
   font-size: 10px;
   font-weight: 700;
   line-height: 18px;
 }
 
 .canvas-feedback-comment-pill-badge {
-  background: #ffcc00;
-  color: #101010;
+  background: var(--db-canvas-feedback-surface);
+  color: var(--db-canvas-feedback-ink);
   pointer-events: none;
 }
 
@@ -858,14 +889,14 @@
 }
 
 .canvas-feedback-comment-pill--moment {
-  border-color: color-mix(in oklch, var(--canvas-feedback-moment-color, #2563eb) 44%, var(--db-border));
-  background: color-mix(in oklch, var(--canvas-feedback-moment-color, #2563eb) 18%, var(--db-bg));
+  background: color-mix(in oklch, var(--canvas-feedback-moment-color, var(--db-canvas-moment-1)) 18%, var(--db-bg));
+  box-shadow: 2px 2px 0 color-mix(in oklch, var(--canvas-feedback-moment-color, var(--db-canvas-moment-1)) 58%, var(--db-border));
 }
 
 .canvas-feedback-comment-pill:focus-within,
 .canvas-feedback-comment-pill--active-surface {
-  border-color: color-mix(in oklch, var(--db-accent) 66%, var(--db-border));
-  background: color-mix(in oklch, var(--db-accent) 14%, var(--db-bg));
+  background: var(--db-selection);
+  box-shadow: var(--db-focus-ring);
 }
 
 .canvas-feedback-comment-pill--spatial:hover .canvas-feedback-comment-pill-badge,
@@ -875,7 +906,7 @@
 
 .canvas-feedback-comment-pill:hover .canvas-feedback-comment-pill-close.db-workbench-close-button,
 .canvas-feedback-comment-pill:focus-within .canvas-feedback-comment-pill-close.db-workbench-close-button {
-  background: color-mix(in oklch, var(--db-surface-3) 82%, var(--db-accent));
+  background: var(--db-surface-3);
   color: var(--db-text);
   opacity: 1;
   pointer-events: auto;
@@ -886,18 +917,18 @@
   height: 30px;
   flex: 0 0 auto;
   padding: 0 12px;
-  border: 1px dashed color-mix(in oklch, var(--db-border) 88%, transparent);
-  border-radius: 999px;
-  background: color-mix(in oklch, var(--db-bg) 70%, transparent);
+  border: 0;
+  border-radius: 0;
+  background: var(--db-surface-2);
   color: var(--db-text-muted);
   font: inherit;
   font-size: 12px;
   cursor: pointer;
+  box-shadow: var(--db-shadow-control);
 }
 
 .canvas-feedback-add-comment:hover,
 .canvas-feedback-add-comment:focus-visible {
-  border-color: color-mix(in oklch, var(--db-accent) 60%, var(--db-border));
   color: var(--db-text);
 }
 
@@ -906,7 +937,7 @@
   height: 100%;
   display: grid;
   grid-template-rows: 32px minmax(0, 1fr);
-  background: color-mix(in oklch, var(--db-bg) 94%, transparent);
+  background: var(--db-bg);
   color: var(--db-text);
 }
 
@@ -1099,7 +1130,7 @@
   position: absolute;
   inset: 0;
   z-index: 3;
-  background: color-mix(in oklch, var(--db-danger-bg) 88%, transparent);
+  background: var(--db-danger-bg);
   pointer-events: none;
 }
 
@@ -1127,9 +1158,9 @@
   width: calc(8px * var(--canvas-chrome-scale, 1));
   height: calc(8px * var(--canvas-chrome-scale, 1));
   padding: 0;
-  border: calc(2px * var(--canvas-chrome-scale, 1)) solid var(--db-selection);
+  border: calc(2px * var(--canvas-chrome-scale, 1)) solid var(--db-canvas-selection);
   border-radius: 999px;
-  background: var(--db-selection);
+  background: var(--db-canvas-selection);
 }
 
 .canvas-node-resize.n {

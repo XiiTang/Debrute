@@ -13,16 +13,17 @@
 }
 
 .db-tree-row.selected {
-  background: color-mix(in oklch, var(--db-accent) 20%, transparent);
+  background: var(--db-selection);
+  box-shadow: inset 3px 0 0 var(--db-brand-clay);
 }
 
 .db-tree-row.focused {
-  outline: 1px solid color-mix(in oklch, var(--db-accent) 45%, transparent);
-  outline-offset: -1px;
+  outline: 2px solid var(--db-focus);
+  outline-offset: -2px;
 }
 
 .db-tree-row.drag-over {
-  background: color-mix(in oklch, var(--db-accent) 28%, transparent);
+  background: var(--db-selection);
 }
 
 .db-tree-row.cut {

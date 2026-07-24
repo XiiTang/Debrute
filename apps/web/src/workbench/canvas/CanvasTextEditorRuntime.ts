@@ -304,7 +304,7 @@ export function canvasTextEditorTheme(): Extension {
       color: 'var(--db-text)',
       backgroundColor: 'var(--db-bg)',
       border: '1px solid var(--db-border)',
-      borderRadius: '4px',
+      borderRadius: '0',
       minWidth: '96px',
       maxWidth: '160px'
     },
@@ -312,7 +312,7 @@ export function canvasTextEditorTheme(): Extension {
       color: 'var(--db-text)',
       backgroundColor: 'var(--db-surface-3)',
       border: '1px solid var(--db-border)',
-      borderRadius: '4px'
+      borderRadius: '0'
     }
   }, { dark: true });
 }

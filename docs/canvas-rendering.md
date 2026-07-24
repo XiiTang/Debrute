@@ -157,19 +157,15 @@ The Runtime-owned Raster Preview Engine uses bounded metadata, target-output
 allocation, and working-set admission. Runtime owns its path, revision, cache,
 cancellation, and resource contracts. Its still-raster implementation calls a
 pinned, packaged libvips build in-process through a narrow Rust boundary;
-libvips is an implementation detail of the existing Runtime rather than a
-process, service, or alternate owner. JPEG, PNG, WebP, AVIF, TIFF, text-preview
+libvips is a Runtime implementation detail rather than a process, service, or
+alternate owner. JPEG, PNG, WebP, AVIF, TIFF, text-preview
 rasters, extracted video frames, and Feedback Artifact raster work use this
 backend. SVG/SVGZ remains owned by `resvg` and outside the detailed scope of
 this backend design.
 
 The required libvips runtime and license notices ship with supported macOS and
-Windows packages. A Node App Server, Sharp wrapper, child process, pure-Rust
-production fallback, operating-system-specific image backend, or compatibility
-backend is not permitted. Once
-the libvips path satisfies the contract, superseded custom JPEG decode, colour
-conversion, resize, and encode product paths are deleted rather than retained
-as alternatives.
+Windows packages. Raster preview has one production backend: in-process libvips
+through the private Runtime adapter.
 
 Runtime reaches libvips through the exact `rs-vips` 0.7.0 Rust dependency and a
 private Runtime adapter. The adapter owns initialization and exposes only
@@ -221,13 +217,11 @@ Runtime never calls generic ImageMagick, PDF, OpenSlide, camera-raw, GIF, PSD,
 JPEG 2000, or other foreign loaders, never consults machine-installed codecs,
 and never tries a second loader after a format mismatch. Known Runtime-produced
 PNG or JPEG intermediates use the same explicit PNG or JPEG loaders. Format
-mismatch and unsupported input remain typed per-node failures rather than
-compatibility fallback.
+mismatch and unsupported input are typed per-node failures.
 
 SVG and SVGZ remain on the separate `resvg` path. Their parsing, external and
 embedded resource, font, cache-identity, and detailed resource-limit contracts
-are intentionally deferred to a dedicated design and are not expanded by this
-Raster Preview Engine refactor.
+belong to a dedicated design outside the Raster Preview Engine contract.
 
 Image, text, and video variant rendering share one global Raster Preview Pool
 with capacity three. Feedback Artifact rendering may retain its own latest-only
@@ -246,10 +240,9 @@ buffers, shrink-on-load, and SIMD remain enabled, and a completed job releases
 its libvips image graph and source handles. There is no user setting, per-media
 setting, or adaptive Runtime policy for libvips worker count or operation cache.
 
-The target-area budget replaces the former fixed source-dimension and
-pure-Rust full-decode working-set limits. libvips streams from the resolved
-source to an atomic temporary output rather than materializing the encoded
-result or complete uncompressed source in a Rust buffer. With three admitted
+The target-area budget is the raster admission limit. libvips streams from the
+resolved source to an atomic temporary output rather than materializing the
+encoded result or complete uncompressed source in a Rust buffer. With three admitted
 jobs, their combined target-area allowance is at most 768 MiB; Runtime does not
 add a weighted global memory queue or inspect machine memory. Direct-source
 tiers perform no derived-target admission. A derived TIFF tier can be
@@ -331,10 +324,10 @@ The source key combines a readable encoded path prefix with a stable hash so
 long or similar paths remain distinct. The direct-source tier has no entry in
 this cache. Derived-variant cache hits must be regular non-symlink files.
 Project open and refresh reconcile the cache against current visible,
-metadata-previewable image files: removed or unsupported sources and superseded
-file revisions are deleted. Runtime reads and writes only the exact current
-`raster-engine-v<version>` path; it does not enumerate sibling engine-version
-directories or delete data attributed to an earlier engine contract. The
+metadata-previewable image files: unavailable sources and superseded file
+revisions are deleted. Runtime reads and writes only the exact current
+`raster-engine-v<version>` path and does not enumerate or delete sibling
+engine-version directories. The
 entire cache tree is excluded from Project visibility, so previews cannot
 recursively become Canvas inputs.
 
@@ -366,7 +359,7 @@ machine-dependent timing promises.
 `CanvasPerfBrowserAdapter` maps session boundaries to browser performance marks
 and measures and observes non-buffered Long Animation Frames only when supported
 and while a session needs them. Ended sessions are removed immediately, so a
-later observer cannot replay historical frame entries into a new capture.
+later observer cannot replay their frame entries into another capture.
 Browser performance API failures are isolated from Canvas interaction.
 High-volume marks are opt-in.
 

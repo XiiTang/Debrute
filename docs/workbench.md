@@ -7,7 +7,7 @@ compact creative-tool interface.
 
 ## Design And Source Authority
 
-[`DESIGN.md`](../DESIGN.md) is the durable human-readable design contract.
+[`design-system.md`](./design-system.md) is the durable human-readable design contract.
 `apps/web/src/workbench/ui/styles/tokens.css` is the executable authority for
 theme colors, spacing, type sizes, control sizes, radii, motion, focus, shadows,
 and layer roles. `apps/web/src/styles.css` is only the ordered stylesheet import
@@ -134,13 +134,9 @@ viewport resize keep a usable drag area visible rather than forcing the entire
 panel inside the viewport. Open panel geometry and active Canvas are stored in
 tab-local session storage keyed by Project id. Each entry is one complete,
 closed current view snapshot containing only the active Canvas id and floating
-panel state. Saving replaces that snapshot; it does not preserve unknown fields,
-version the entry, or migrate an earlier shape. Accepted HTTP Project opens
-restore that Project's view state and reset unrelated transient window state.
-Restoring this current snapshot is an intentional Workbench presentation feature,
-not compatibility retention: returning to a Project in the same tab restores its
-active Canvas and floating-panel layout instead of replacing them with first-open
-defaults.
+panel state. Saving writes that exact snapshot. Accepted HTTP Project opens
+restore that Project's active Canvas and floating-panel layout and reset
+unrelated transient window state.
 The snapshot is accepted only as one complete closed value. Invalid JSON,
 unknown fields, missing panel entries, non-finite geometry, and incorrect field
 types reject the whole snapshot rather than preserving valid-looking fields.
@@ -198,8 +194,8 @@ native application-menu roles rather than unused Web title-bar command ids.
 
 Presentation is host-aware: macOS Desktop reserves traffic-light space and uses
 native menus, Windows Desktop renders window controls, and the browser renders
-Web menus without native window controls. There is no asynchronous title-bar
-refresh, unavailable fallback model, or stale derived-state reconciliation.
+Web menus without native window controls. Title-bar presentation is derived
+synchronously from the host-fixed platform.
 
 Desktop lifecycle, native menu execution, preload scope, and Runtime connection
 are documented in [`desktop-shell.md`](./desktop-shell.md).
@@ -302,7 +298,7 @@ documented in [`integrations.md`](./integrations.md) and
 
 ## Executable Authorities
 
-- Design rules: `DESIGN.md`.
+- Design rules: [`design-system.md`](./design-system.md).
 - Tokens and primitives: `apps/web/src/workbench/ui/`.
 - Shell and placement: `apps/web/src/workbench/shell/` and
   `apps/web/src/workbench/services/workbenchViewportLayout.ts`.

@@ -1900,7 +1900,7 @@ mod tests {
             vec![fixture_json(&json!({
                 "data": [
                     {"b64_json": "iVBORw0KGgo="},
-                    {"url": "https://media.example/old-fallback.png"}
+                    {"url": "https://media.example/url-only.png"}
                 ]
             }))],
         );

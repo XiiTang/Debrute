@@ -1,5 +1,5 @@
 import React, { useEffect, useMemo, useState } from 'react';
-import { File, FilePlus2, Folder, FolderOpen, FolderPlus } from 'lucide-react';
+import { File, FilePlus2, Folder, FolderOpen, FolderPlus } from '../ui/index.js';
 import type {
   DebruteProductPlatform,
   ProjectPathEntry,
@@ -10,7 +10,7 @@ import type {
   WorkbenchContextMenuTarget,
   WorkbenchExplorerContextMenuTarget
 } from '../shell/contextMenu';
-import { EmptyState, Input, cx } from '../ui';
+import { EmptyState, Input, cx } from '../ui/index.js';
 import { useI18n } from '../i18n';
 import { buildProjectFileTree, expandedProjectTreePaths, type ProjectFileTreeNode } from './projectFileTree';
 import type { ProjectTreeInlineEditState } from './projectTreeEditing';

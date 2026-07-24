@@ -23,6 +23,11 @@ glossaries instead.
 - [Project Paths Are Realpath-Bound](./0012-project-paths-are-realpath-bound.md)
 - [Tests Own Their External Resources](./0013-tests-own-their-external-resources.md)
 
+### Product Identity
+
+- [Product Identity Uses One Complete Mascot](./0058-product-identity-uses-one-complete-mascot.md)
+- [Expressive Brand Chrome Surrounds Neutral Creative Content](./0059-expressive-brand-chrome-surrounds-neutral-creative-content.md)
+
 ### Runtime, Desktop And Web Final State
 
 This section groups Runtime, Desktop, and Web decisions. Model Operation and

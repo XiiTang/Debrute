@@ -27,11 +27,12 @@
 .db-textarea {
   width: 100%;
   min-width: 0;
-  border: 1px solid color-mix(in oklch, var(--db-border) 90%, transparent);
+  border: 0;
   border-radius: var(--db-radius-md);
-  background: color-mix(in oklch, var(--db-bg) 88%, transparent);
+  background: var(--db-bg);
   color: var(--db-text);
   outline: 0;
+  box-shadow: var(--db-shadow-control);
 }
 
 .db-input,
@@ -56,7 +57,6 @@
 .db-input:focus,
 .db-select:focus,
 .db-textarea:focus {
-  border-color: color-mix(in oklch, var(--db-accent) 58%, var(--db-border));
   box-shadow: var(--db-focus-ring);
 }
 
@@ -69,7 +69,19 @@
 .db-field--invalid .db-input,
 .db-field--invalid .db-select,
 .db-field--invalid .db-textarea {
-  border-color: color-mix(in oklch, var(--db-danger) 68%, var(--db-border));
+  box-shadow: 2px 2px 0 var(--db-danger);
+}
+
+.db-input[aria-invalid="true"]:focus,
+.db-select[aria-invalid="true"]:focus,
+.db-textarea[aria-invalid="true"]:focus,
+.db-input--invalid:focus,
+.db-select--invalid:focus,
+.db-textarea--invalid:focus,
+.db-field--invalid .db-input:focus,
+.db-field--invalid .db-select:focus,
+.db-field--invalid .db-textarea:focus {
+  box-shadow: var(--db-focus-ring), 2px 2px 0 var(--db-danger);
 }
 
 .db-input--secret {
@@ -94,15 +106,16 @@
   width: 100%;
   height: 100%;
   min-width: 0;
-  border: 1px solid color-mix(in oklch, var(--db-border) 88%, transparent);
-  border-radius: 999px;
+  border: 0;
+  border-radius: 0;
   padding: 5px 12px;
-  background: color-mix(in oklch, var(--db-bg) 86%, transparent);
+  background: var(--db-bg);
   color: var(--db-text);
   font: inherit;
   font-size: var(--db-font-sm);
   line-height: 18px;
   outline: 0;
+  box-shadow: var(--db-shadow-control);
 }
 
 .db-comment-pill-input__field::placeholder {
@@ -111,7 +124,6 @@
 }
 
 .db-comment-pill-input:focus-within .db-comment-pill-input__field {
-  border-color: color-mix(in oklch, var(--db-accent) 58%, var(--db-border));
   box-shadow: var(--db-focus-ring);
 }
 
@@ -136,14 +148,14 @@
 .db-switch__track {
   width: 30px;
   height: 16px;
-  border: 1px solid var(--db-border);
+  border: 0;
   border-radius: 999px;
   background: var(--db-surface-2);
+  box-shadow: var(--db-shadow-control);
 }
 
 .db-switch__input:checked + .db-switch__track {
-  border-color: var(--db-accent);
-  background: color-mix(in oklch, var(--db-accent) 35%, var(--db-surface-2));
+  background: var(--db-selection);
 }
 
 .db-switch__input:focus-visible + .db-switch__track {

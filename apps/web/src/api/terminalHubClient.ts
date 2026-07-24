@@ -22,6 +22,20 @@ export interface TerminalHubClient {
   dispose(): void;
 }
 
+interface PendingTerminalResize {
+  cols: number;
+  rows: number;
+  waiters: Array<{
+    resolve(value: TerminalSessionResult): void;
+    reject(error: Error): void;
+  }>;
+}
+
+interface TerminalResizeState {
+  inFlight: PendingTerminalResize;
+  queued?: PendingTerminalResize;
+}
+
 export function createTerminalHubClient(): TerminalHubClient {
   let binding: { projectId: string; connectionCredential: string } | undefined;
   let socket: WebSocket | undefined;
@@ -32,7 +46,7 @@ export function createTerminalHubClient(): TerminalHubClient {
   const checkpoints = new Map<string, TerminalCheckpoint>();
   const inputSequences = new Map<string, number>();
   const inputAcks = new Map<string, { resolve(value: { ok: true }): void; reject(error: Error): void }>();
-  const resizeAcks = new Map<string, { resolve(value: TerminalSessionResult): void; reject(error: Error): void }>();
+  const resizeStates = new Map<string, TerminalResizeState>();
 
   const notify = (terminalId: string, event: TerminalEvent) => {
     for (const listener of listeners.get(terminalId) ?? []) {
@@ -49,11 +63,12 @@ export function createTerminalHubClient(): TerminalHubClient {
     for (const pending of inputAcks.values()) {
       pending.reject(error);
     }
-    for (const pending of resizeAcks.values()) {
-      pending.reject(error);
+    for (const state of resizeStates.values()) {
+      state.inFlight.waiters.forEach((waiter) => waiter.reject(error));
+      state.queued?.waiters.forEach((waiter) => waiter.reject(error));
     }
     inputAcks.clear();
-    resizeAcks.clear();
+    resizeStates.clear();
   };
   const connect = () => {
     if (disposed || !binding || socket) {
@@ -104,6 +119,17 @@ export function createTerminalHubClient(): TerminalHubClient {
     }
     socket.send(JSON.stringify(frame));
   };
+  const sendResize = (terminalId: string, pending: PendingTerminalResize) => {
+    try {
+      send({ type: 'resize', terminalId, cols: pending.cols, rows: pending.rows });
+    } catch (error) {
+      const failure = error instanceof Error ? error : new Error(String(error));
+      const state = resizeStates.get(terminalId);
+      resizeStates.delete(terminalId);
+      state?.inFlight.waiters.forEach((waiter) => waiter.reject(failure));
+      state?.queued?.waiters.forEach((waiter) => waiter.reject(failure));
+    }
+  };
   const emitCheckpoint = (checkpoint: TerminalCheckpoint) => {
     checkpoints.set(checkpoint.terminalId, checkpoint);
     notify(checkpoint.terminalId, {
@@ -140,15 +166,28 @@ export function createTerminalHubClient(): TerminalHubClient {
     }
     if (frame.type === 'resized') {
       const current = sessions.get(frame.terminalId);
-      const pending = resizeAcks.get(frame.terminalId);
-      if (pending && current) {
+      const state = resizeStates.get(frame.terminalId);
+      if (!state) {
+        return;
+      }
+      if (current) {
         const session = { ...current, cols: frame.cols, rows: frame.rows };
         sessions.set(frame.terminalId, session);
-        pending.resolve({ session });
-      } else if (pending) {
-        pending.reject(new Error(`Terminal session is unavailable: ${frame.terminalId}`));
+        state.inFlight.waiters.forEach((waiter) => waiter.resolve({ session }));
+      } else {
+        const error = new Error(`Terminal session is unavailable: ${frame.terminalId}`);
+        state.inFlight.waiters.forEach((waiter) => waiter.reject(error));
+        state.queued?.waiters.forEach((waiter) => waiter.reject(error));
+        resizeStates.delete(frame.terminalId);
+        return;
       }
-      resizeAcks.delete(frame.terminalId);
+      if (state.queued) {
+        state.inFlight = state.queued;
+        delete state.queued;
+        sendResize(frame.terminalId, state.inFlight);
+      } else {
+        resizeStates.delete(frame.terminalId);
+      }
       return;
     }
     if (frame.type === 'output') {
@@ -211,13 +250,24 @@ export function createTerminalHubClient(): TerminalHubClient {
     },
     resize(terminalId, cols, rows) {
       return new Promise((resolve, reject) => {
-        resizeAcks.get(terminalId)?.reject(new Error('Terminal resize was superseded.'));
-        resizeAcks.set(terminalId, { resolve, reject });
-        try {
-          send({ type: 'resize', terminalId, cols, rows });
-        } catch (error) {
-          resizeAcks.delete(terminalId);
-          reject(error);
+        const waiter = { resolve, reject };
+        const state = resizeStates.get(terminalId);
+        if (!state) {
+          const pending = { cols, rows, waiters: [waiter] };
+          resizeStates.set(terminalId, { inFlight: pending });
+          sendResize(terminalId, pending);
+          return;
+        }
+        if (!state.queued && state.inFlight.cols === cols && state.inFlight.rows === rows) {
+          state.inFlight.waiters.push(waiter);
+          return;
+        }
+        if (state.queued) {
+          state.queued.cols = cols;
+          state.queued.rows = rows;
+          state.queued.waiters.push(waiter);
+        } else {
+          state.queued = { cols, rows, waiters: [waiter] };
         }
       });
     },

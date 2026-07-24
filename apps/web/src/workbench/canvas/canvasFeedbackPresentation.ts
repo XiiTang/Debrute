@@ -6,14 +6,14 @@ import {
   Star,
   ThumbsDown,
   X,
-  type LucideIcon
-} from 'lucide-react';
+  type CutoutIcon
+} from '../ui/index.js';
 import type { CanvasFeedbackMark } from '@debrute/canvas-core';
 import type { WorkbenchTranslationKey } from '../i18n';
 
 export const CANVAS_FEEDBACK_MARK_PRESENTATION: Record<CanvasFeedbackMark, {
   labelKey: WorkbenchTranslationKey;
-  Icon: LucideIcon;
+  Icon: CutoutIcon;
 }> = {
   like: { labelKey: 'canvas.feedback.like', Icon: Heart },
   dislike: { labelKey: 'canvas.feedback.dislike', Icon: ThumbsDown },

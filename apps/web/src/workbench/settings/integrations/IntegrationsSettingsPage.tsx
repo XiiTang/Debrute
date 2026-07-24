@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from 'react';
-import { Download, Loader2, RefreshCw, Trash2, Upload } from 'lucide-react';
+import { Download, Loader2, RefreshCw, Trash2, Upload } from '../../ui/index.js';
 import type {
   IntegrationBackendId,
   IntegrationBackendStatus,
@@ -10,7 +10,7 @@ import type {
   IntegrationStatus
 } from '@debrute/app-protocol';
 import type { WorkbenchActions } from '../../../types';
-import { Button, EmptyState, StatusPill, Toolbar } from '../../ui';
+import { Button, EmptyState, StatusPill, Toolbar } from '../../ui/index.js';
 import { useI18n, type WorkbenchI18n } from '../../i18n';
 
 export function IntegrationsSettingsPage({

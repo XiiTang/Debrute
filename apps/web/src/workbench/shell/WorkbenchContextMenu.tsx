@@ -13,14 +13,14 @@ import {
   Send,
   Scissors,
   Trash2
-} from 'lucide-react';
+} from '../ui/index.js';
 import {
   clampWorkbenchContextMenuPosition,
   type ProjectPathCommand,
   type WorkbenchContextMenuItem,
   type WorkbenchContextMenuPosition
 } from './contextMenu';
-import { Menu } from '../ui';
+import { Menu } from '../ui/index.js';
 import { useI18n } from '../i18n';
 import {
   projectSystemFileManagerLabelForLocale,

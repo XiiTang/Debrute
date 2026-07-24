@@ -1,5 +1,5 @@
 import React, { useCallback, useEffect, useRef, useState } from 'react';
-import { AlertTriangle, File, FileText, Folder, Image as ImageIcon, Maximize2, Music2, RefreshCw, Save } from 'lucide-react';
+import { AlertTriangle, File, FileText, Folder, Image as ImageIcon, Maximize2, Music2, RefreshCw, Save } from '../ui/index.js';
 import type { CanvasFeedbackEntry, CanvasFeedbackGeometry, CanvasFeedbackSpatialItem, CanvasTextViewportState, ProjectedCanvasNode } from '@debrute/canvas-core';
 import type { TextFileBuffer, WorkbenchActions } from '../../types';
 import { CanvasTextEditor } from './CanvasTextEditor';
@@ -17,7 +17,7 @@ import type { CanvasVideoPreviewSource } from './canvasVideoPreviews';
 import { preloadCanvasImageForHandoff } from './CanvasMediaHandoff';
 import { CanvasNodeTitleBar } from './CanvasNodeTitleBar';
 import { CanvasNodeErrorPresentation } from './CanvasNodeErrorPresentation';
-import { Button, DiscardChangesIcon, IconButton, StatusPill } from '../ui';
+import { Button, DiscardChangesIcon, IconButton, StatusPill } from '../ui/index.js';
 import { useI18n, type WorkbenchI18n } from '../i18n';
 
 const FIXED_NODE_PRESENTATION_SCALE = 10;

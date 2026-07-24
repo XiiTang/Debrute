@@ -20,9 +20,8 @@ subsystem. macOS and Windows pass the closed host-platform check; Linux and
 other hosts fail explicitly because they have no current source-development or
 Product build contract.
 
-Exact dependency versions live in package manifests and the lockfile, not in a
-historical upgrade guide. Current build contracts that depend on those versions
-remain executable:
+Exact dependency versions live in package manifests and the lockfile. The build
+contracts that depend on those versions are executable:
 
 - Web and Photoshop Vite builds emit license artifacts; Photoshop configs use
   `build.rolldownOptions` for their fixed output contract.
@@ -38,7 +37,7 @@ remain executable:
 - the inline Canvas text editor uses the current CodeMirror stack while durable
   scroll position remains the Canvas-owned Text Viewport described in
   [`text-files.md`](./text-files.md);
-- Workbench applies its repository-owned Lucide policy and accessibility rules
+- Workbench applies its repository-owned Debrute Cutout icon policy and accessibility rules
   described in [`workbench.md`](./workbench.md);
 - CLI and Photoshop packaging validate the generated payload or archive after
   writing it.
@@ -71,8 +70,7 @@ dependency rules. `scripts/check-architecture.mjs` and the architecture contract
 tests call the same scanner, so command-line lint and test expectations cannot
 drift into separate rule sets. Rules resolve relative imports before matching
 and inspect imports, package dependencies, TypeScript references, and Vite
-aliases. They enforce current ownership rather than maintaining empty export
-frameworks or a denylist of retired names.
+aliases. They enforce the declared ownership graph.
 
 Build-tool dependencies follow the same ownership rule. The Web workspace owns
 Vite and its React plugin; the Desktop workspace owns esbuild and
@@ -108,21 +106,18 @@ shutdown-time cycle breaking.
 ## Current-State Contract
 
 Debrute is prelaunch, so internal persisted documents and implementation APIs
-describe one current shape. Removed fields, paths, services, command aliases,
-and UI state do not receive compatibility readers, migrations, fallback success
-paths, transitional re-exports, or dedicated historical rejectors. Invalid
-current data fails its owning current-shape validation.
+expose exactly one current shape. Readers accept canonical current values only;
+there are no compatibility readers, migrations, fallback success paths,
+transitional re-exports, or historical rejection layers. Invalid data fails its
+owning current-shape validation.
 
 TypeScript package roots export only declarations and values named by current
 production consumers. A declaration used solely to compose an exported current
 contract remains module-private; generated or handwritten leaf types are not
-separately re-exported without such a consumer. Removing an accidental public
-name is an immediate compile-time break: packages do not retain transitional
-re-exports, deprecated aliases, or dedicated rejection shims for old imports.
-A test-only import does not make a name part of the package-root contract.
-Tests may exercise an internal current behavior through its owning source module,
-but a helper with no production path is removed together with tests that only
-preserve that helper.
+separately re-exported without such a consumer. A test-only import does not make
+a name part of the package-root contract. Tests may exercise internal behavior
+through its owning source module; helpers without a production path have no
+public contract.
 Workbench visual primitives follow the same consumer-owned rule. A variant,
 layout mode, slot, CSS branch, or primitive test exists only when a current
 production surface uses it; a primitive's self-test is not a consumer and does
@@ -136,25 +131,19 @@ mutation inputs likewise accept only their declared fields and must express at
 least one mutation. Repeating a valid current value is an idempotent no-op;
 empty objects and unknown-only inputs are invalid requests.
 
-Internal Project documents and runtime state therefore do not carry a generic
-`schemaVersion` merely to support old internal formats. Explicitly exchanged or
-distributed contracts may remain versioned when the version is part of their
-current trust or interoperability boundary: product payload/update manifests,
-Adobe Bridge discovery, package and host versions, release tags, and third-party
-protocols are examples.
+Internal Project documents and runtime state carry no generic `schemaVersion`.
+Explicitly exchanged or distributed contracts are versioned when the version is
+part of their trust or interoperability boundary: product payload/update
+manifests, Adobe Bridge discovery, package and host versions, release tags, and
+third-party protocols are examples.
 
-Negative tests remain appropriate for current security, ownership, and public
-contract invariants. They are not kept solely as a museum of removed
-implementation names. Current fallback and error-isolation behavior belongs at
-the narrow owning boundary: for example, optional cache absence and diagnostic
-API failure may be isolated, while security, persistence, and required-input
-errors remain visible. A rejected tab-local Workbench view snapshot is likewise
-reported and discarded as one disposable presentation value before current
-first-open defaults are used; its fields are never salvaged or rewritten as a
-migration. Expected Runtime failures use typed results; an
-unexpected panic terminates the Runtime process instead of being caught as an
-ordinary work failure, recovered through a poisoned lock, or represented as a
-degraded service state.
+Negative tests express current security, ownership, and public contract
+invariants. Error isolation belongs at the narrow owning boundary: optional
+cache absence and diagnostic API failure may be isolated, while security,
+persistence, and required-input errors remain visible. A rejected tab-local
+Workbench view snapshot is reported and discarded as one disposable
+presentation value before first-open defaults are used. Expected Runtime
+failures use typed results; an unexpected panic terminates the Runtime process.
 
 Cross-surface trust boundaries are documented in
 [`security.md`](./security.md). Local test classification, scheduling,
@@ -172,13 +161,13 @@ value shapes and pure renderer algorithms, not persistence authority.
 
 Every persisted Project Document and its nested persisted values use one closed
 current shape. Unknown fields fail deserialization and remain untouched on disk;
-Runtime does not discard them and later rewrite the document as an implicit
-migration. This strictness belongs only to persistence DTOs. Project snapshots,
-projections, file listings, diagnostics, and other response-only values are not
-made into persistence schemas merely because they share component types. Model
-Operation snapshots, states, execution variants, Artifact Pointers, Batch Item
-Outcomes, and list results likewise serialize outward only; Runtime does not
-derive a synthetic input contract for values it exclusively constructs.
+Runtime does not rewrite invalid documents. This strictness belongs only to
+persistence DTOs. Project snapshots, projections, file listings, diagnostics,
+and other response-only values are not persistence schemas merely because they
+share component types. Model Operation snapshots, states, execution variants,
+Artifact Pointers, Batch Item Outcomes, and list results likewise serialize
+outward only; Runtime defines no input contract for values it exclusively
+constructs.
 
 Ordinary service-owned multi-document writes use the Project Document
 transaction boundary. It validates registered owners and participant hashes,
@@ -195,9 +184,8 @@ instead of silently repairing it.
 Invalid `.debrute/project.json` prevents Project opening. An invalid Canvas JSON
 is excluded while the snapshot reports `document_invalid_pushed`; an invalid
 Canvas registry reports `canvas_registry_invalid`. These are the owning current
-error paths, not compatibility rejectors. An explicit Canvas push or registry
-repair may construct a new valid current document, but reading never repairs or
-rewrites the invalid file.
+error paths. An explicit Canvas push or registry repair may construct a valid
+current document, but reading never repairs or rewrites the invalid file.
 
 Project snapshots aggregate metadata, visible files, Canvas documents and
 projections, diagnostics, Canvas registry state, and health. Workbench protocol
@@ -229,9 +217,9 @@ UXP and CEP adapters are documented in
 The current UI source hierarchy, shell and layer ownership, asynchronous state
 boundaries, Settings composition, theme and language flow, Explorer interaction
 model, and shared context-menu behavior are documented in
-[`workbench.md`](./workbench.md). Durable visual rules remain in the root
-[`DESIGN.md`](../DESIGN.md); exact token values and component behavior remain
-source-owned.
+[`workbench.md`](./workbench.md). Durable visual rules live in
+[`design-system.md`](./design-system.md); exact token values and component
+behavior remain source-owned.
 
 ## Canvas
 

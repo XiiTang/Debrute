@@ -1,5 +1,5 @@
 import React, { useEffect, useRef, useState } from 'react';
-import { Eye, EyeOff } from 'lucide-react';
+import { Eye, EyeOff } from '../ui/index.js';
 import type {
   AudioModelKind,
   AudioModelSettingRecord,
@@ -8,7 +8,7 @@ import type {
   VideoModelSettingRecord
 } from '@debrute/app-protocol';
 import type { WorkbenchActions } from '../../types';
-import { Card, CloseButton, EmptyState, Field, IconButton, Input, SecretInput } from '../ui';
+import { Card, CloseButton, EmptyState, Field, IconButton, Input, SecretInput } from '../ui/index.js';
 import { useI18n } from '../i18n';
 
 export interface ModelDraft {

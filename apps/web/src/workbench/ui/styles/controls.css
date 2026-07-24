@@ -1,14 +1,14 @@
 .db-button,
 .db-icon-button {
-  border: 1px solid color-mix(in oklch, var(--db-border) 82%, transparent);
+  border: 0;
   border-radius: var(--db-radius-md);
-  background: color-mix(in oklch, var(--db-surface-2) 86%, transparent);
+  background: var(--db-surface-2);
   color: var(--db-text);
   cursor: pointer;
   line-height: 1;
+  box-shadow: var(--db-shadow-control);
   transition:
     background var(--db-duration-fast) var(--db-ease-standard),
-    border-color var(--db-duration-fast) var(--db-ease-standard),
     color var(--db-duration-fast) var(--db-ease-standard),
     opacity var(--db-duration-fast) var(--db-ease-standard);
 }
@@ -41,15 +41,39 @@
 }
 
 .db-button--primary {
-  border-color: color-mix(in oklch, var(--db-accent) 68%, var(--db-border));
-  background: color-mix(in oklch, var(--db-accent) 28%, var(--db-surface-3));
+  --db-primary-surface-bg: var(--db-primary-bg);
+  position: relative;
+  isolation: isolate;
+  background: transparent;
+  color: var(--db-primary-fg);
+  box-shadow: var(--db-paper-edge-sm) var(--db-paper-edge);
+}
+
+.db-button--primary::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  z-index: -1;
+  background: var(--db-primary-surface-bg);
+  pointer-events: none;
+  -webkit-mask-image: var(--db-paper-mask-small);
+  mask-image: var(--db-paper-mask-small);
+  -webkit-mask-size: 100% 100%;
+  mask-size: 100% 100%;
+  -webkit-mask-repeat: no-repeat;
+  mask-repeat: no-repeat;
 }
 
 .db-button:hover:not(:disabled),
 .db-icon-button:hover:not(:disabled) {
-  border-color: color-mix(in oklch, var(--db-accent) 42%, var(--db-border));
-  background: color-mix(in oklch, var(--db-surface-3) 82%, var(--db-accent));
+  background: var(--db-surface-3);
   color: var(--db-text);
+}
+
+.db-button--primary:hover:not(:disabled) {
+  --db-primary-surface-bg: color-mix(in srgb, var(--db-primary-bg) 88%, var(--db-brand-ink-deep));
+  background: transparent;
+  color: var(--db-primary-fg);
 }
 
 .db-button:disabled,
@@ -60,9 +84,13 @@
 
 .db-button[aria-pressed="true"],
 .db-icon-button[aria-pressed="true"] {
-  border-color: color-mix(in oklch, var(--db-selection) 58%, var(--db-border));
   background: var(--db-selection-muted);
   color: var(--db-text);
+}
+
+.db-button--primary[aria-pressed="true"] {
+  --db-primary-surface-bg: var(--db-selection-muted);
+  background: transparent;
 }
 
 .db-button__icon,
@@ -106,9 +134,10 @@
 }
 
 .db-icon-button--ghost {
-  border-color: transparent;
+  border: 0;
   background: transparent;
   color: var(--db-text);
+  box-shadow: none;
 }
 
 .db-icon-button--chrome {
@@ -116,6 +145,7 @@
   border-radius: 0;
   background: transparent;
   color: var(--db-text-muted);
+  box-shadow: none;
 }
 
 .db-icon-button--chrome:hover:not(:disabled),
@@ -130,6 +160,7 @@
   border-radius: 0;
   background: transparent;
   color: var(--db-text-muted);
+  box-shadow: none;
 }
 
 .db-icon-button--window-close:hover:not(:disabled),
@@ -140,14 +171,14 @@
 }
 
 .db-icon-button--danger {
-  border-color: transparent;
+  border: 0;
   background: transparent;
   color: color-mix(in oklch, var(--db-danger) 84%, white);
+  box-shadow: none;
 }
 
 .db-icon-button--danger:hover:not(:disabled),
 .db-icon-button--danger:focus-visible {
-  border-color: color-mix(in oklch, var(--db-danger) 74%, var(--db-border));
   background: color-mix(in oklch, var(--db-danger-bg) 76%, var(--db-surface-3));
   color: color-mix(in oklch, var(--db-danger) 88%, white);
 }
@@ -162,7 +193,7 @@
 .db-tab {
   min-width: 0;
   min-height: var(--db-control-xs);
-  border: 1px solid transparent;
+  border: 0;
   border-radius: var(--db-radius-md);
   background: transparent;
   color: var(--db-text-muted);
@@ -171,8 +202,7 @@
 
 .db-tab:hover,
 .db-tab--active {
-  border-color: color-mix(in oklch, var(--db-border) 78%, transparent);
-  background: color-mix(in oklch, var(--db-surface-1) 86%, transparent);
+  background: var(--db-surface-1);
   color: var(--db-text);
 }
 
@@ -186,31 +216,34 @@
   letter-spacing: 0;
 }
 
-.db-tab--strip:hover,
-.db-tab--strip.db-tab--active {
+.db-tab--strip:hover {
   border: 0;
-  background: transparent;
   color: var(--db-text);
+  background: var(--db-surface-2);
 }
 
 .db-tab--strip.db-tab--active {
-  box-shadow: inset 0 -1px 0 var(--db-tab-strip-active-line, var(--db-accent));
+  border: 0;
+  background: var(--db-selection);
+  color: var(--db-text);
+  box-shadow: none;
 }
 
 .db-workbench-close-button.db-icon-button {
   width: 12px;
   height: 12px;
   border: 0;
-  border-radius: 999px;
+  border-radius: 0;
   background: transparent;
   color: var(--db-text-muted);
   opacity: 0.42;
+  box-shadow: none;
 }
 
 .db-workbench-close-button.db-icon-button:hover:not(:disabled),
 .db-workbench-close-button.db-icon-button:focus-visible {
   border: 0;
-  background: color-mix(in oklch, var(--db-surface-3) 82%, var(--db-accent));
+  background: var(--db-surface-3);
   color: var(--db-text);
   opacity: 1;
 }
@@ -225,7 +258,6 @@
   position: absolute;
   top: -4px;
   right: -5px;
-  stroke-width: 3;
 }
 
 .db-toolbar {

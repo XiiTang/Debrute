@@ -42,7 +42,7 @@
   grid-template-columns: var(--db-control-sm) minmax(0, 1fr);
   align-items: center;
   gap: var(--db-space-4);
-  border: 1px solid transparent;
+  border: 0;
   border-radius: var(--db-radius-md);
   padding: var(--db-space-3);
   background: transparent;
@@ -51,7 +51,6 @@
   text-align: left;
   transition:
     background var(--db-duration-fast) var(--db-ease-standard),
-    border-color var(--db-duration-fast) var(--db-ease-standard),
     color var(--db-duration-fast) var(--db-ease-standard);
 }
 
@@ -70,22 +69,20 @@
   height: var(--db-control-sm);
   display: grid;
   place-items: center;
-  border: 1px solid color-mix(in oklch, var(--db-border) 70%, transparent);
+  border: 0;
   border-radius: var(--db-radius-md);
-  background: color-mix(in oklch, var(--db-bg) 72%, transparent);
+  background: var(--db-surface-2);
 }
 
 .db-nav-row:hover,
 .db-nav-row--active {
-  border-color: color-mix(in oklch, var(--db-accent) 42%, var(--db-border));
-  background: color-mix(in oklch, var(--db-surface-3) 76%, transparent);
+  background: var(--db-selection);
   color: var(--db-text);
 }
 
 .db-nav-row--active .db-nav-row__icon {
-  border-color: color-mix(in oklch, var(--db-accent) 58%, var(--db-border));
-  color: var(--db-accent);
-  background: color-mix(in oklch, var(--db-accent) 14%, var(--db-bg));
+  color: var(--db-brand-clay);
+  background: var(--db-surface-1);
 }
 
 .settings-page {
@@ -136,11 +133,9 @@
   display: grid;
   gap: var(--db-space-4);
   padding-bottom: var(--db-space-6);
-  border-bottom: 1px solid var(--db-border-muted);
 }
 
 .settings-group:last-child {
-  border-bottom: 0;
   padding-bottom: 0;
 }
 
@@ -229,10 +224,11 @@
   max-width: 100%;
   min-height: var(--db-control-xs);
   padding: 0 var(--db-space-2);
-  border: 1px solid var(--db-border-muted);
+  border: 0;
   border-radius: var(--db-radius-md);
   color: var(--db-text-muted);
   font-size: var(--db-font-xs);
+  background: var(--db-surface-2);
 }
 
 .settings-api-key-summary__text {

@@ -1,21 +1,21 @@
 import React, { useLayoutEffect, useRef } from 'react';
-import { Clock3, MapPin, Square } from 'lucide-react';
+import { Clock3, MapPin, Square } from '../ui/index.js';
 import { CANVAS_FEEDBACK_MARKS, type CanvasFeedbackMark } from '@debrute/canvas-core';
 import type { CanvasOverlayRuntime } from './CanvasOverlayRuntime';
 import type { CanvasFeedbackLocalToolset } from '../shell/floatingBars';
 import type { CanvasMediaFeedbackMode } from './CanvasMediaFeedbackLayer';
 import type { CanvasFeedbackCapsule } from './CanvasFeedbackInteraction';
 import { CANVAS_FEEDBACK_MARK_PRESENTATION } from './canvasFeedbackPresentation';
-import { CloseButton, IconButton } from '../ui';
+import { CloseButton, IconButton } from '../ui/index.js';
 import { useI18n } from '../i18n';
 
 const MOMENT_PILL_COLORS = [
-  '#2563eb',
-  '#16a34a',
-  '#dc2626',
-  '#9333ea',
-  '#0891b2',
-  '#ca8a04'
+  'var(--db-canvas-moment-1)',
+  'var(--db-canvas-moment-2)',
+  'var(--db-canvas-moment-3)',
+  'var(--db-canvas-moment-4)',
+  'var(--db-canvas-moment-5)',
+  'var(--db-canvas-moment-6)'
 ] as const;
 const FEEDBACK_TEXTAREA_MIN_WIDTH = 24;
 const FEEDBACK_TEXTAREA_MAX_WIDTH = 240;

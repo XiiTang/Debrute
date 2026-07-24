@@ -1,7 +1,7 @@
 import React from 'react';
-import { Plus } from 'lucide-react';
+import { Plus } from '../ui/index.js';
 import { reorderCanvasIds } from './canvasCardBarState';
-import { Button, CloseButton, IconButton } from '../ui';
+import { Button, CloseButton, IconButton } from '../ui/index.js';
 import { useI18n } from '../i18n';
 
 export interface CanvasCardBarItem {

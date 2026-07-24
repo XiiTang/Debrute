@@ -1,5 +1,5 @@
 import React from 'react';
-import { X } from 'lucide-react';
+import { X } from './WorkbenchIconProvider.js';
 import { IconButton, type IconButtonProps } from './IconButton';
 import { cx } from './cx';
 

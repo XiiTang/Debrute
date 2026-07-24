@@ -4,6 +4,7 @@ import { join } from 'node:path';
 import type { DebruteProductPlatform, WorkbenchThemePreference } from '@debrute/app-protocol';
 
 import type { DesktopHostedWindow } from './desktopWindowHost.js';
+import { desktopWindowBackgroundColor } from './desktopLaunchPresentation.js';
 import { desktopBrowserWindowChromeOptions } from './nativeWindowShell.js';
 
 const { BrowserWindow, nativeTheme } = electron;
@@ -81,15 +82,6 @@ export class ElectronDesktopWindow implements DesktopHostedWindow<Electron.Brows
     this.identity.once('closed', listener);
     return () => this.identity.removeListener('closed', listener);
   }
-}
-
-function desktopWindowBackgroundColor(
-  themePreference: WorkbenchThemePreference,
-  systemUsesDarkColors: boolean
-): string {
-  const dark = themePreference === 'dark'
-    || (themePreference === 'system' && systemUsesDarkColors);
-  return dark ? '#181818' : '#f4f5f7';
 }
 
 function rewriteRuntimeUrlForDevelopment(

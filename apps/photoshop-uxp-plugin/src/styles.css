@@ -1,22 +1,42 @@
 :root {
   --bridge-bg: var(--uxp-host-background-color);
-  --bridge-surface: color-mix(in srgb, var(--bridge-bg) 88%, var(--bridge-text) 12%);
-  --bridge-surface-2: color-mix(in srgb, var(--bridge-bg) 78%, var(--bridge-text) 22%);
+  --bridge-surface: color-mix(in srgb, var(--bridge-bg) 86%, #d76522 14%);
+  --bridge-surface-2: color-mix(in srgb, var(--bridge-bg) 72%, #d76522 28%);
   --bridge-text: var(--uxp-host-text-color);
-  --bridge-text-muted: color-mix(in srgb, var(--bridge-text) 72%, transparent);
-  --bridge-border: var(--uxp-host-border-color);
+  --bridge-text-muted: color-mix(in srgb, var(--bridge-text) 76%, #8d755f 24%);
+  --bridge-border: color-mix(in srgb, var(--uxp-host-border-color) 76%, #8d755f 24%);
   --bridge-error: var(--uxp-host-error-color);
-  --bridge-focus: var(--uxp-host-link-color);
+  --bridge-focus: color-mix(in srgb, var(--uxp-host-link-color) 72%, #8bc9c6 28%);
+  --bridge-edge: color-mix(in srgb, var(--bridge-text) 58%, var(--bridge-bg));
+  --bridge-grain-tint: color-mix(in srgb, var(--bridge-text) 45%, #d76522 55%);
+  --bridge-grain-opacity: 0.025;
   --bridge-control-height: 28px;
   --bridge-font-size: 12px;
-  --bridge-radius: 6px;
+  --bridge-radius: 0;
 }
 
 body {
+  position: relative;
+  isolation: isolate;
   margin: 0;
-  background: var(--bridge-bg);
+  background-color: var(--bridge-bg);
   color: var(--bridge-text);
-  font: var(--bridge-font-size) Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  font-size: var(--bridge-font-size);
+  font-family: inherit;
+}
+
+body::before {
+  content: "";
+  position: fixed;
+  inset: 0;
+  z-index: -1;
+  background: var(--bridge-grain-tint);
+  opacity: var(--bridge-grain-opacity);
+  pointer-events: none;
+  -webkit-mask-image: url("../../../assets/brand/materials/paper-grain.svg");
+  mask-image: url("../../../assets/brand/materials/paper-grain.svg");
+  -webkit-mask-repeat: repeat;
+  mask-repeat: repeat;
 }
 
 .bridge-panel {
@@ -64,7 +84,8 @@ body {
 
 .bridge-selection-card,
 .bridge-action-button,
-.bridge-drop-target {
+.bridge-drop-target,
+.bridge-connection-actions input {
   min-height: var(--bridge-control-height);
   border: 1px solid var(--bridge-border);
   border-radius: var(--bridge-radius);
@@ -72,6 +93,7 @@ body {
   color: var(--bridge-text);
   font: inherit;
   text-align: left;
+  box-shadow: 2px 2px 0 var(--bridge-edge);
 }
 
 .bridge-selection-card,
@@ -83,10 +105,29 @@ body {
   padding: 5px 8px;
 }
 
+.bridge-connection-actions {
+  display: grid;
+  gap: 6px;
+}
+
+.bridge-connection-actions input {
+  width: 100%;
+  padding: 5px 8px;
+}
+
 .bridge-selection-card:hover,
 .bridge-action-button:hover,
-.bridge-drop-target:hover {
+.bridge-drop-target:hover,
+.bridge-connection-actions input:hover {
   background: var(--bridge-surface-2);
+}
+
+.bridge-selection-card:focus-visible,
+.bridge-action-button:focus-visible,
+.bridge-drop-target:focus-visible,
+.bridge-connection-actions input:focus-visible {
+  outline: 2px solid var(--bridge-focus);
+  outline-offset: 2px;
 }
 
 .bridge-drop-target.is-drop-active {

@@ -1,7 +1,7 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { Plus } from 'lucide-react';
+import { Plus } from '../ui/index.js';
 import type { TerminalSessionView, WorkbenchApiClient } from '@debrute/app-protocol';
-import { CloseButton, EmptyState, IconButton, Tab, TabList, Toolbar } from '../ui';
+import { CloseButton, EmptyState, IconButton, Tab, TabList, Toolbar } from '../ui/index.js';
 import { useI18n, type WorkbenchI18n } from '../i18n';
 import type { WorkbenchResolvedTheme } from '../services/workbenchTheme';
 import { useXtermTerminal } from './useXtermTerminal';

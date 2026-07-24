@@ -95,14 +95,48 @@ describe('multiplexed Terminal hub client', () => {
     socket.emit('open');
     const onError = vi.fn();
     client.subscribe('terminal-1', vi.fn(), onError);
-    const pending = client.writeInput('terminal-1', 'x');
+    const pendingInput = client.writeInput('terminal-1', 'x');
+    const inFlightResize = client.resize('terminal-1', 100, 30);
+    const queuedResize = client.resize('terminal-1', 120, 40);
     socket.emit('close');
-    await expect(pending).rejects.toThrow('not replayed');
+    await expect(pendingInput).rejects.toThrow('not replayed');
+    await expect(inFlightResize).rejects.toThrow('not replayed');
+    await expect(queuedResize).rejects.toThrow('not replayed');
     await Promise.resolve();
     expect(onError).toHaveBeenCalledWith(expect.objectContaining({
       message: 'Terminal connection was lost.'
     }));
     expect(FakeWebSocket.instances).toHaveLength(1);
+    client.dispose();
+  });
+
+  it('serializes rapid resizes and coalesces the latest pending dimensions', async () => {
+    const client = createTerminalHubClient();
+    client.bindProject('project-1', 'connection-1');
+    const socket = FakeWebSocket.instances[0]!;
+    socket.emit('open');
+    socket.emit('message', {
+      type: 'sync',
+      protocolVersion: 1,
+      topologyRevision: 1,
+      sessions: [session()],
+      checkpoints: []
+    });
+
+    const first = client.resize('terminal-1', 100, 30);
+    const second = client.resize('terminal-1', 110, 35);
+    const third = client.resize('terminal-1', 120, 40);
+
+    socket.emit('message', { type: 'resized', terminalId: 'terminal-1', cols: 100, rows: 30 });
+    await expect(first).resolves.toEqual({ session: { ...session(), cols: 100, rows: 30 } });
+    socket.emit('message', { type: 'resized', terminalId: 'terminal-1', cols: 120, rows: 40 });
+    await expect(second).resolves.toEqual({ session: { ...session(), cols: 120, rows: 40 } });
+    await expect(third).resolves.toEqual({ session: { ...session(), cols: 120, rows: 40 } });
+
+    expect(socket.sent.slice(1).map((value) => JSON.parse(value))).toEqual([
+      { type: 'resize', terminalId: 'terminal-1', cols: 100, rows: 30 },
+      { type: 'resize', terminalId: 'terminal-1', cols: 120, rows: 40 }
+    ]);
     client.dispose();
   });
 });

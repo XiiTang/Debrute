@@ -17,19 +17,8 @@
   inset: 0;
   z-index: 0;
   pointer-events: none;
-  background:
-    linear-gradient(
-      to bottom,
-      color-mix(in srgb, var(--db-bg) 90%, transparent) 0%,
-      color-mix(in srgb, var(--db-bg) 58%, transparent) 54%,
-      color-mix(in srgb, var(--db-bg) 20%, transparent) 72%,
-      transparent 86%,
-      transparent 100%
-    );
-  backdrop-filter: blur(18px);
-  -webkit-mask-image: linear-gradient(to bottom, #000 0%, #000 70%, transparent 86%, transparent 100%);
-  mask-image: linear-gradient(to bottom, #000 0%, #000 70%, transparent 86%, transparent 100%);
-  border-top: 1px solid color-mix(in oklch, var(--db-text) 5%, transparent);
+  background: var(--db-canvas-field);
+  background-size: var(--db-canvas-grid-size);
 }
 
 .workbench-titlebar__drag-region {
@@ -78,7 +67,7 @@
   white-space: nowrap;
   text-overflow: ellipsis;
   text-align: center;
-  color: color-mix(in srgb, var(--db-text) 82%, transparent);
+  color: var(--db-text-muted);
   font-size: var(--db-font-sm);
   line-height: 1;
 }
@@ -101,14 +90,14 @@
   border: 0;
   border-radius: var(--db-radius-sm);
   background: transparent;
-  color: color-mix(in srgb, var(--db-text) 82%, transparent);
+  color: var(--db-text-muted);
   font: inherit;
   font-size: var(--db-font-sm);
 }
 
 .workbench-titlebar__menu-button:hover,
 .workbench-titlebar__menu-button[aria-expanded="true"] {
-  background: color-mix(in srgb, var(--db-text) 10%, transparent);
+  background: color-mix(in srgb, var(--db-canvas-selection) 18%, transparent);
   color: var(--db-text);
 }
 

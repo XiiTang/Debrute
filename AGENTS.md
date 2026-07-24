@@ -50,7 +50,8 @@ Recent history mostly uses `feat:`, `fix:`, and `docs:` prefixes with specific s
 
 ### Issue tracker
 
-Work is tracked as local Markdown under `.scratch/<feature>/`. See `docs/agents/issue-tracker.md`.
+Work is tracked as synchronized Markdown under `.scratch/work/<feature>/` in a
+separate private repository. See `docs/agents/issue-tracker.md`.
 
 ### Triage labels
 
@@ -62,4 +63,4 @@ Domain documentation uses a multi-context layout rooted at `CONTEXT-MAP.md`, wit
 
 ## Agent-Specific Instructions
 
-This repository is public. Publish durable, source-backed product and technical knowledge through `docs/README.md`, the Context Map and context glossaries, or a qualifying ADR. Keep temporary implementation plans and working notes under `.scratch/`; they are disposable workflow state rather than product documentation. `debrute-docs-private/` is a separate private Git repository for genuinely sensitive assessments and compact permanent audits, not a parallel product-design knowledge base. Generated file assets are implemented per model, with no provider concept.
+This repository is public. Publish durable, source-backed product and technical knowledge through `docs/README.md`, the Context Map and context glossaries, or a qualifying ADR. Current product and technical documentation states the current contract directly; decision history belongs only in a qualifying ADR. Keep implementation plans and working notes under `.scratch/work/`; they are synchronized but disposable workflow state rather than product documentation. Other `.scratch/` content remains local build or tooling state. `debrute-docs-private/` is a separate private Git repository for genuinely sensitive assessments and compact permanent audits, not a parallel product-design knowledge base. Generated file assets are implemented per model, with no provider concept.

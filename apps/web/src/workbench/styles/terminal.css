@@ -13,6 +13,7 @@
   padding: 0 var(--db-space-1);
   gap: var(--db-space-1);
   align-items: center;
+  background: var(--db-terminal-tab-bar-bg);
 }
 
 .db-terminal-tabs {
@@ -22,8 +23,7 @@
   gap: var(--db-space-1);
   height: var(--db-floating-panel-drag-hit-area-height);
   min-width: 0;
-  background: var(--db-terminal-bg);
-  --db-tab-strip-active-line: var(--db-terminal-tab-active-line);
+  background: var(--db-terminal-tab-bar-bg);
   overflow-x: auto;
   overflow-y: hidden;
 }
@@ -45,7 +45,17 @@
   height: var(--db-floating-panel-drag-hit-area-height);
   min-height: var(--db-floating-panel-drag-hit-area-height);
   padding: 0 var(--db-space-7) 0 var(--db-space-3);
+  background: var(--db-terminal-tab-bar-bg);
   white-space: nowrap;
+}
+
+.db-terminal-tab.db-tab--strip:hover:not(.db-tab--active) {
+  background: var(--db-surface-2);
+}
+
+.db-terminal-tab.db-tab--strip.db-tab--active {
+  background: var(--db-terminal-bg);
+  color: var(--db-text);
 }
 
 .db-terminal-tab span {
@@ -70,7 +80,7 @@
   align-items: center;
   height: var(--db-floating-panel-drag-hit-area-height);
   padding-left: 1px;
-  background: transparent;
+  background: var(--db-terminal-tab-bar-bg);
 }
 
 .floating-panel-terminal .terminal-panel__toolbar {
@@ -79,7 +89,7 @@
   right: calc(var(--db-floating-panel-drag-hit-area-height) + 2px);
   left: var(--db-floating-panel-title-slot-width);
   z-index: 3;
-  background: transparent;
+  background: var(--db-terminal-tab-bar-bg);
   pointer-events: none;
 }
 

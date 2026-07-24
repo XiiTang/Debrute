@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from 'react';
-import { AlertTriangle, Cable, KeyRound, Link2, Trash2, Unlink, X } from 'lucide-react';
+import { AlertTriangle, Cable, KeyRound, Link2, Trash2, Unlink, X } from '../../ui/index.js';
 import type {
   AdobeBridgeDiscoveryStatus,
   AdobeBridgeStateView,
@@ -8,7 +8,7 @@ import type {
 } from '@debrute/app-protocol';
 import type { WorkbenchActions } from '../../../types';
 import { adobeBridgeErrorLabel } from '../../adobe-bridge/adobeBridgeLabels';
-import { Button, StatusPill, Switch, Toolbar } from '../../ui';
+import { Button, StatusPill, Switch, Toolbar } from '../../ui/index.js';
 import { useI18n, type WorkbenchI18n } from '../../i18n';
 
 type ClientOperation =

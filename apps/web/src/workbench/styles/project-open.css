@@ -5,6 +5,10 @@
   gap: var(--db-space-3);
 }
 
+.project-open-panel .db-empty-state strong {
+  font-family: var(--db-font-display);
+}
+
 .project-open-panel__meta {
   max-width: 100%;
   overflow-wrap: anywhere;

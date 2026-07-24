@@ -130,9 +130,8 @@ tracks are not auto-selected.
 Runtime's revisioned raw-file endpoint serves video, audio, and WebVTT MIME
 types and supports single byte ranges. A complete response returns `200`; a
 valid range returns `206` with range headers; an unsatisfiable range returns
-`416`. These are closed route outcomes rather than numeric statuses repaired by
-a fallback. Stale revisions remain errors rather than being replaced with a
-newly invented URL.
+`416`. A stale revision returns its typed error and retains the requested
+revisioned URL.
 
 ## Error Ownership
 
@@ -140,8 +139,8 @@ Missing or unreadable source media is node availability. Preview discovery,
 frame extraction, variant, and preview-image failures are preview errors.
 Browser loading, play, and initial-seek failures are player errors. During a
 handoff, failure leaves the current visible layer intact and places the target
-layer's error above it. Retry reloads only the current player source; there is no
-alternate-source or compatibility path.
+layer's error above it. Retry reloads only the current player source; source
+selection has no alternate path.
 
 Node-availability and media-load error titles and messages use the same
 Canvas-scaled semantic presentation as other Canvas text. They remain attached

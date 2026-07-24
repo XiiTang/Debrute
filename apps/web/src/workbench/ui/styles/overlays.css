@@ -3,12 +3,14 @@
   display: inline-flex;
   align-items: center;
   min-height: 20px;
-  border: 1px solid color-mix(in oklch, var(--db-border) 78%, transparent);
-  border-radius: 999px;
+  border: 0;
+  border-radius: 0;
   padding: 0 var(--db-space-2);
-  background: color-mix(in oklch, var(--db-bg) 72%, transparent);
+  background: var(--db-surface-2);
   color: var(--db-text-muted);
   font-size: var(--db-font-xs);
+  mask-image: var(--db-paper-mask-small);
+  mask-size: 100% 100%;
 }
 
 .db-status-pill--warning {
@@ -40,7 +42,8 @@
 
 .db-empty-state strong {
   color: var(--db-text);
-  font-size: var(--db-font-md);
+  font-size: var(--db-font-lg);
+  font-family: var(--db-font-display);
 }
 
 .db-modal-backdrop {
@@ -59,7 +62,7 @@
   display: grid;
   gap: var(--db-space-4);
   overflow: auto;
-  border: 1px solid var(--db-border);
+  border: 0;
   border-radius: var(--db-radius-lg);
   padding: var(--db-space-5);
   background: var(--db-surface-1);

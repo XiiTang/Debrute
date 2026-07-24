@@ -51,7 +51,7 @@ describe('projectViewState', () => {
     ['an unknown top-level field', JSON.stringify({
       activeCanvasId: 'canvas-2',
       floatingPanels: DEFAULT_FLOATING_PANEL_STATE,
-      legacyPanelMode: 'sidebar'
+      unexpectedField: 'sidebar'
     })],
     ['a missing panel', JSON.stringify({
       floatingPanels: {
@@ -66,7 +66,7 @@ describe('projectViewState', () => {
       floatingPanels: {
         panels: {
           ...DEFAULT_FLOATING_PANEL_STATE.panels,
-          legacy: DEFAULT_FLOATING_PANEL_STATE.panels.explorer
+          unexpectedPanel: DEFAULT_FLOATING_PANEL_STATE.panels.explorer
         }
       }
     })],

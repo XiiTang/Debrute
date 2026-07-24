@@ -1,6 +1,6 @@
 import React from 'react';
-import { RotateCcw } from 'lucide-react';
-import { IconButton } from '../ui';
+import { RotateCcw } from '../ui/index.js';
+import { IconButton } from '../ui/index.js';
 import { useI18n } from '../i18n';
 
 export interface CanvasResetLayoutButtonProps {

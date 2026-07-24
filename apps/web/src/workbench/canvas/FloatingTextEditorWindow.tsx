@@ -5,7 +5,7 @@ import {
   RefreshCw,
   Save,
   X
-} from 'lucide-react';
+} from '../ui/index.js';
 import { CanvasTextEditor } from './CanvasTextEditor';
 import type { FloatingTextEditorWindowState, TextFileBuffer, WorkbenchActions } from '../../types';
 import {
@@ -16,7 +16,7 @@ import {
 import { FloatingPanelResizeHandles, floatingPanelDragHandleProps } from '../shell/FloatingPanel';
 import type { FloatingPanelResizeInput } from '../shell/floatingPanels';
 import { basenameFromProjectPath, textBufferStatus } from '../services/textEditorWindows';
-import { DiscardChangesIcon, IconButton, Panel, PanelBody, PanelHeader, PanelTitle, StatusPill } from '../ui';
+import { DiscardChangesIcon, IconButton, Panel, PanelBody, PanelHeader, PanelTitle, StatusPill } from '../ui/index.js';
 import {
   FLOATING_TEXT_EDITOR_TITLEBAR_CSS_PROPERTY,
   FLOATING_TEXT_EDITOR_TITLEBAR_CSS_VALUE

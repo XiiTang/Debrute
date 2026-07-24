@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { AudioLines, Cable, Image as ImageIcon, Music, Settings, Video, WandSparkles, Wrench } from 'lucide-react';
+import { AudioLines, Cable, Image as ImageIcon, Music, Settings, Video, WandSparkles, Wrench } from '../ui/index.js';
 import type {
   AdobeBridgeStateView,
   DebruteGlobalAdobeBridgeSettings,

@@ -1,8 +1,28 @@
 .db-card,
 .db-panel {
+  position: relative;
+  isolation: isolate;
   min-width: 0;
-  border: 1px solid var(--db-border-muted);
+}
+
+.db-card {
+  border: 0;
   background: var(--db-panel-bg);
+}
+
+.db-card::before,
+.db-panel::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  z-index: -1;
+  background: var(--db-paper-grain-tint);
+  opacity: var(--db-paper-grain-opacity);
+  pointer-events: none;
+  -webkit-mask-image: var(--db-paper-grain-mask);
+  mask-image: var(--db-paper-grain-mask);
+  -webkit-mask-repeat: repeat;
+  mask-repeat: repeat;
 }
 
 .db-card {
@@ -10,13 +30,33 @@
   gap: var(--db-space-4);
   padding: var(--db-space-5);
   border-radius: var(--db-radius-lg);
-  box-shadow: var(--db-shadow-inset-subtle);
+  box-shadow: var(--db-shadow-control);
+  mask-image: var(--db-paper-mask-medium);
+  mask-size: 100% 100%;
 }
 
 .db-panel {
+  border: 0;
+  background: transparent;
   overflow: hidden;
   border-radius: var(--db-radius-lg);
   box-shadow: var(--db-shadow-panel);
+}
+
+.db-panel::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  z-index: -2;
+  border: 0;
+  background: var(--db-panel-bg);
+  pointer-events: none;
+  -webkit-mask-image: var(--db-paper-mask-large);
+  mask-image: var(--db-paper-mask-large);
+  -webkit-mask-size: 100% 100%;
+  mask-size: 100% 100%;
+  -webkit-mask-repeat: no-repeat;
+  mask-repeat: no-repeat;
 }
 
 .db-panel__header {
@@ -27,7 +67,7 @@
   justify-content: space-between;
   gap: var(--db-space-4);
   padding: 0 var(--db-space-5);
-  border-bottom: 1px solid var(--db-border);
+  background: var(--db-surface-2);
   color: var(--db-text-muted);
 }
 

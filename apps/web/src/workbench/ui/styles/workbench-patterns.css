@@ -11,6 +11,7 @@
   margin: 0;
   color: var(--db-text);
   font-size: var(--db-font-lg);
+  font-family: var(--db-font-display);
   line-height: 1.15;
 }
 
@@ -40,9 +41,9 @@
   gap: var(--db-space-3);
   align-items: center;
   padding: var(--db-space-3);
-  border: 1px solid color-mix(in oklch, var(--db-border) 72%, transparent);
+  border: 0;
   border-radius: var(--db-radius-lg);
-  background: color-mix(in oklch, var(--db-bg) 72%, transparent);
+  background: var(--db-surface-2);
 }
 
 .db-record-row:is(button) {
@@ -92,7 +93,10 @@
 .db-record-summary {
   display: block;
   padding: var(--db-space-4) var(--db-space-5);
-  border: 1px solid color-mix(in oklch, var(--db-border) 72%, transparent);
+  border: 0;
   border-radius: var(--db-radius-lg);
-  background: color-mix(in oklch, var(--db-bg) 68%, transparent);
+  background: var(--db-surface-2);
+  box-shadow: var(--db-shadow-control);
+  mask-image: var(--db-paper-mask-medium);
+  mask-size: 100% 100%;
 }

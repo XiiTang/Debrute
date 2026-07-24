@@ -1,5 +1,5 @@
 import React from 'react';
-import { Boxes } from 'lucide-react';
+import { Boxes } from '../ui/index.js';
 import type { ProjectedCanvasNode } from '@debrute/canvas-core';
 import type { WorkbenchActions, WorkbenchState } from '../../types';
 import type { WorkbenchContextMenuPosition, WorkbenchContextMenuTarget } from '../shell/contextMenu';

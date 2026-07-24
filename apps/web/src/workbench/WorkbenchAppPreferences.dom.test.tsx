@@ -258,7 +258,7 @@ describe('WorkbenchApp preferences and project behavior', () => {
   it('opens the Project with defaults after rejecting an invalid saved view state', async () => {
     window.sessionStorage.setItem('debrute:project-view:project-1', JSON.stringify({
       activeCanvasId: 'canvas-1',
-      legacyPanelMode: 'sidebar'
+      unexpectedField: 'sidebar'
     }));
 
     const { container, root } = await renderWorkbenchApp('/projects/project-1');

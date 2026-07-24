@@ -1,5 +1,5 @@
 import React from 'react';
-import { Card } from '../ui';
+import { Card } from '../ui/index.js';
 
 export function NotificationStack({ notifications }: { notifications: string[] }): React.ReactElement | null {
   if (notifications.length === 0) {

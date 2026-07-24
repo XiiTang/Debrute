@@ -1,7 +1,7 @@
 import React from 'react';
-import { Send, X } from 'lucide-react';
+import { Send, X } from '../ui/index.js';
 import type { AdobeBridgeClient, AdobeBridgeStateView } from '@debrute/app-protocol';
-import { Button, EmptyState, StatusPill, Toolbar } from '../ui';
+import { Button, EmptyState, StatusPill, Toolbar } from '../ui/index.js';
 import { useI18n } from '../i18n';
 
 export function SendToPhotoshopDialog({

@@ -1,7 +1,7 @@
 import React, { useEffect, useRef, useState } from 'react';
-import { ChevronRight, Maximize2, Minus, Square, X } from 'lucide-react';
+import { ChevronRight, Maximize2, Minus, Square, X } from '../ui/index.js';
 import type { WorkbenchMenuId, WorkbenchMenuItem, WorkbenchTitleBarState } from './workbenchTitleBarState';
-import { IconButton, Menu } from '../ui';
+import { IconButton, Menu } from '../ui/index.js';
 import {
   closeTitleBarMenu,
   openTitleBarMenu,

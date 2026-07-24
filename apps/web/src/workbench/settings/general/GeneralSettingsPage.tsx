@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from 'react';
-import { RefreshCw, RotateCw } from 'lucide-react';
+import { RefreshCw, RotateCw } from '../../ui/index.js';
 import type {
   DebruteDefaultFrontend,
   DebruteGlobalSettingsView,
@@ -13,7 +13,7 @@ import type {
 import type { EventProjection, WorkbenchActions } from '../../../types';
 import { useI18n, type WorkbenchI18n } from '../../i18n';
 import type { WorkbenchResolvedTheme } from '../../services/workbenchTheme';
-import { Button, Field, Select, StatusPill, Toolbar, type StatusTone } from '../../ui';
+import { Button, Field, Select, StatusPill, Toolbar, type StatusTone } from '../../ui/index.js';
 
 type OperationState =
   | { status: 'idle' }

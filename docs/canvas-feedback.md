@@ -20,12 +20,11 @@ Documents so the same Project file keeps one review state across Canvas views
 and can be read by external Agents through ordinary filesystem or generic
 Project-file access.
 
-Runtime validates the complete document on read, serializes overlapping
-writes per Project file, and commits against the content hash it read. Invalid
-JSON, unexpected fields, invalid paths, invalid item combinations, or concurrent
-external edits fail instead of being normalized through an old schema or
-silently overwritten. Accepted changes are broadcast as shared Project-state
-events.
+Runtime validates the complete document on read, serializes overlapping writes
+per Project file, and commits against the content hash it read. Invalid JSON,
+unexpected fields, invalid paths, invalid item combinations, and concurrent
+external edits fail validation or concurrency checks. Accepted changes are
+broadcast as shared Project-state events.
 
 ## Marks, Items, And Moments
 

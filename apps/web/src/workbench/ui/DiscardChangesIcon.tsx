@@ -1,5 +1,5 @@
 import React from 'react';
-import { Save, X } from 'lucide-react';
+import { Save, X } from './WorkbenchIconProvider.js';
 
 export function DiscardChangesIcon({ size }: { size: number }): React.ReactElement {
   return (

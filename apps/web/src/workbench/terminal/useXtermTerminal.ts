@@ -31,7 +31,7 @@ export function useXtermTerminal(input: UseXtermTerminalInput): void {
 
     const terminal = new Terminal({
       cursorBlink: true,
-      fontFamily: 'Menlo, Monaco, "SFMono-Regular", Consolas, monospace',
+      fontFamily: '"Noto Sans Mono CJK SC", ui-monospace, monospace',
       fontSize: 13,
       lineHeight: 1.2,
       scrollback: 10_000,

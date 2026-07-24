@@ -111,11 +111,13 @@ LaunchServices; replacement may start the target bundle while the old process
 still owns Control, but only the target Rust process waits to claim that same
 single-instance endpoint.
 
-The canonical Project logo generates two Runtime-owned tray images. macOS uses
-one transparent monochrome template containing only the Debrute foreground;
-Windows uses one transparent colored foreground image. Runtime does not reuse a
-Desktop application icon, consume Desktop build resources, or retain separate
-status-badge images. Runtime status remains text in the tray menu.
+The canonical Complete Mascot Mark generates two Runtime-owned tray images.
+macOS uses one transparent monochrome template containing the whole character;
+cream facial features are transparent negative space. Windows uses one
+transparent full-color image of the same whole character. Runtime does not
+reuse a Desktop application icon, consume Desktop build resources, retain a
+partial mascot, or retain separate status-badge images. Runtime status remains
+text in the tray menu.
 
 Product Quit is immediate product-level shutdown. Runtime rejects new work,
 notifies Desktop to close, stops accepting Workbench HTTP connections, ends
@@ -387,8 +389,12 @@ Runtime shutdown terminates owned PTYs.
 Every Workbench Terminal creation names its Project-relative working directory.
 Runtime starts the PTY at one internal initial size, then the mounted terminal
 sends its measured dimensions through the resize command. Creation does not
-accept dimension overrides, and every Web event subscription supplies the
-error handler that owns transport failures.
+accept dimension overrides. Because resize replies carry terminal identity and
+dimensions rather than a request identity, Web keeps at most one resize in
+flight per terminal and coalesces further measurements into one latest pending
+resize. Every caller settles without treating ordinary measurement replacement
+as a transport failure. Every Web event subscription supplies the error handler
+that owns actual transport failures.
 
 ## Product Version Ownership
 

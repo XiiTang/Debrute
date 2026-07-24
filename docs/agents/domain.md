@@ -35,7 +35,7 @@ mechanically.
 | Cross-surface security and trust boundaries | `docs/security.md` and their owning source modules |
 | Local test architecture and resource ownership | `docs/testing.md` and `tests/config/` |
 | Agent-facing commands and structured output | `docs/cli.md` |
-| Workbench visual and component ownership | `DESIGN.md` |
+| Workbench visual and component ownership | `docs/design-system.md` |
 | Packaging, signing, update, and release behavior | `docs/releases.md` |
 
 Context glossaries contain domain language only. Do not duplicate

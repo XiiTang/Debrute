@@ -1,5 +1,5 @@
 <p align="center">
-  <img src="./assets/project-icon/debrute.svg" width="128" alt="Debrute logo">
+  <img src="./assets/brand/debrute-mascot.svg" width="128" alt="Debrute complete mascot">
 </p>
 
 <h1 align="center">Debrute</h1>

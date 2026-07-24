@@ -1,5 +1,5 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react';
-import { Loader2 } from 'lucide-react';
+import { Loader2 } from './ui/index.js';
 import type {
   DebruteProductPlatform,
   DebruteWorkbenchRoute,
@@ -88,7 +88,7 @@ import { FloatingPanelContent, WorkbenchFloatingPanelShell } from './shell/Float
 import { FloatingTextEditorWindow } from './canvas/FloatingTextEditorWindow';
 import { NotificationStack } from './shell/NotificationStack';
 import { TerminalPanel } from './terminal/TerminalPanel';
-import { Button, WorkbenchIconProvider } from './ui';
+import { Button, WorkbenchIconProvider } from './ui/index.js';
 import { FIXED_TOP_FLOATING_BAR_RECTS, TITLE_BAR_RESERVED_RECT } from './shell/workbenchLayers';
 import {
   DEFAULT_WORKBENCH_WINDOW_ORDER,

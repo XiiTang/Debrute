@@ -4,13 +4,13 @@ import {
   FolderTree,
   Settings,
   Terminal
-} from 'lucide-react';
+} from '../ui/index.js';
 import {
   FLOATING_PANEL_IDS,
   type FloatingPanelId,
   type FloatingPanelState
 } from './floatingPanels';
-import { IconButton } from '../ui';
+import { IconButton } from '../ui/index.js';
 import { useI18n, type WorkbenchTranslationKey } from '../i18n';
 
 const floatingPanelTitleKeys: Record<FloatingPanelId, WorkbenchTranslationKey> = {
