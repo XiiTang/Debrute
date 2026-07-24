@@ -202,6 +202,11 @@ version, payload revision, and Debrute's five-format adapter contract form one
 repository-owned lock. A missing or mismatched payload stops the build or
 development launch instead of selecting another image backend.
 
+The Windows link payload carries the exact libvips, GLib, and GObject import
+libraries required by the pinned `rs-vips` binding. That link-library closure is
+part of the payload identity; an incomplete declaration is rejected before
+Cargo builds Runtime.
+
 Runtime initializes the adapter once before publishing `Ready` and verifies
 that the loaded library reports libvips 8.18.4. Missing libraries,
 initialization failure, or a different reported version is a Runtime startup

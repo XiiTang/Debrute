@@ -1,6 +1,6 @@
 {
   "schemaVersion": 1,
-  "payloadRevision": 2,
+  "payloadRevision": 3,
   "rsVipsVersion": "0.7.0",
   "libvipsVersion": "8.18.4",
   "rasterFormats": [
@@ -36,7 +36,11 @@
       "sha256": "30d8abb04ee686557dffd19e05364c555733a99adf3eab7325696e68f24bff4d",
       "archiveFormat": "zip",
       "runtimeDirectory": "vips-dev-8.18/bin",
-      "importLibraryPath": "vips-dev-8.18/lib/libvips.lib",
+      "importLibraryPaths": [
+        "vips-dev-8.18/lib/libvips.lib",
+        "vips-dev-8.18/lib/libglib-2.0.lib",
+        "vips-dev-8.18/lib/libgobject-2.0.lib"
+      ],
       "licensePath": "vips-dev-8.18/LICENSE",
       "versionsPath": "vips-dev-8.18/versions.json"
     }

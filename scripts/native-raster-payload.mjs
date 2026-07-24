@@ -20,12 +20,19 @@ export function nativeRasterTargetLock(identity = platformIdentity()) {
   return target;
 }
 
+export function nativeRasterLinkFileNames(identity = platformIdentity()) {
+  const target = nativeRasterTargetLock(identity);
+  return target.platform === 'windows'
+    ? target.importLibraryPaths.map((path) => basename(path))
+    : ['libvips.dylib', 'libglib-2.0.dylib', 'libgobject-2.0.dylib'];
+}
+
 export function validateNativeRasterLock() {
   const lock = NATIVE_RASTER_PAYLOAD_LOCK;
   const expectedTargets = ['macos-arm64', 'macos-x64', 'windows-x64'];
   if (
     lock.schemaVersion !== 1
-    || lock.payloadRevision !== 2
+    || lock.payloadRevision !== 3
     || lock.rsVipsVersion !== '0.7.0'
     || lock.libvipsVersion !== '8.18.4'
     || JSON.stringify(lock.rasterFormats) !== JSON.stringify(['jpeg', 'png', 'webp', 'avif', 'tiff'])
@@ -43,6 +50,13 @@ export function validateNativeRasterLock() {
     ) {
       throw new Error(`Native raster payload lock target is invalid: ${identity}`);
     }
+  }
+  if (JSON.stringify(lock.targets['windows-x64'].importLibraryPaths) !== JSON.stringify([
+    'vips-dev-8.18/lib/libvips.lib',
+    'vips-dev-8.18/lib/libglib-2.0.lib',
+    'vips-dev-8.18/lib/libgobject-2.0.lib'
+  ])) {
+    throw new Error('Native raster payload Windows import-library closure is invalid.');
   }
   return lock;
 }
@@ -139,6 +153,11 @@ export async function validateNativeRasterPayload({ root: configuredRoot } = {})
         throw new Error(`Native raster payload checksum does not match its lock: ${path}`);
       }
     }
+  }
+  const expectedLinkPaths = nativeRasterLinkFileNames().map((name) => `link/${name}`).sort();
+  const declaredLinkPaths = manifest.linkFiles.map((file) => file.path).sort();
+  if (JSON.stringify(declaredLinkPaths) !== JSON.stringify(expectedLinkPaths)) {
+    throw new Error(`Native raster payload identity is invalid: ${manifestPath}`);
   }
   await assertClosedInventory(root, 'runtime', manifest.runtimeFiles, manifestPath);
   await assertClosedInventory(root, 'link', manifest.linkFiles, manifestPath);

@@ -15,7 +15,7 @@ describe('native raster payload', () => {
   it('locks one archive and the same explicit format surface for every supported target', () => {
     expect(NATIVE_RASTER_PAYLOAD_LOCK).toMatchObject({
       schemaVersion: 1,
-      payloadRevision: 2,
+      payloadRevision: 3,
       rsVipsVersion: '0.7.0',
       libvipsVersion: '8.18.4',
       rasterFormats: ['jpeg', 'png', 'webp', 'avif', 'tiff']
@@ -32,6 +32,36 @@ describe('native raster payload', () => {
       expect(target.archiveFormat).toMatch(/^(nupkg|zip)$/);
     }
     expect(() => nativeRasterTargetLock('freebsd-x64')).toThrow('unsupported');
+  });
+
+  it('owns the complete Windows rs-vips import-library closure', () => {
+    expect(nativeRasterTargetLock('windows-x64').importLibraryPaths).toEqual([
+      'vips-dev-8.18/lib/libvips.lib',
+      'vips-dev-8.18/lib/libglib-2.0.lib',
+      'vips-dev-8.18/lib/libgobject-2.0.lib'
+    ]);
+
+    const runtimeBuild = readFileSync(join(process.cwd(), 'apps/runtime/build.rs'), 'utf8');
+    expect(runtimeBuild).toContain('cargo::rustc-link-lib=dylib=libglib-2.0');
+    expect(runtimeBuild).toContain('cargo::rustc-link-lib=dylib=libgobject-2.0');
+  });
+
+  it('rejects an incomplete target link-library closure', async () => {
+    const root = fixture();
+    try {
+      const path = join(root, 'manifest.json');
+      const manifest = JSON.parse(readFileSync(path, 'utf8')) as {
+        linkFiles: Array<{ path: string }>;
+      };
+      const removed = manifest.linkFiles.pop();
+      if (!removed) throw new Error('Fixture must declare target link libraries.');
+      rmSync(join(root, removed.path));
+      writeFileSync(path, `${JSON.stringify(manifest)}\n`);
+
+      await expect(validateNativeRasterPayload({ root })).rejects.toThrow('identity is invalid');
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
   });
 
   it('accepts only the exact platform payload with a closed checksum inventory', async () => {
@@ -74,9 +104,13 @@ describe('native raster payload', () => {
     const root = fixture();
     try {
       mkdirSync(join(root, 'alternate'));
-      copyFileSync(join(root, 'link/libvips.test'), join(root, 'alternate/libvips.test'));
       const path = join(root, 'manifest.json');
-      const manifest = JSON.parse(readFileSync(path, 'utf8')) as Record<string, unknown>;
+      const manifest = JSON.parse(readFileSync(path, 'utf8')) as {
+        linkDirectory: string;
+        linkFiles: Array<{ path: string }>;
+      };
+      const linkName = manifest.linkFiles[0].path.slice('link/'.length);
+      copyFileSync(join(root, manifest.linkFiles[0].path), join(root, 'alternate', linkName));
       manifest.linkDirectory = 'alternate';
       writeFileSync(path, `${JSON.stringify(manifest)}\n`);
 
@@ -90,7 +124,6 @@ describe('native raster payload', () => {
     const root = fixture();
     try {
       copyFileSync(join(root, 'runtime/libc++.dll'), join(root, 'link/libc++.dll'));
-      copyFileSync(join(root, 'link/libvips.test'), join(root, 'runtime/libvips.test'));
       const path = join(root, 'manifest.json');
       const manifest = JSON.parse(readFileSync(path, 'utf8')) as {
         runtimeFiles: Array<Record<string, unknown>>;
@@ -98,13 +131,15 @@ describe('native raster payload', () => {
       };
       const runtimeFile = manifest.runtimeFiles[0];
       const linkFile = manifest.linkFiles[0];
+      const linkName = String(linkFile.path).slice('link/'.length);
+      copyFileSync(join(root, String(linkFile.path)), join(root, 'runtime', linkName));
       manifest.runtimeFiles = [
         { ...runtimeFile, path: 'link/libc++.dll' },
         linkFile
       ];
       manifest.linkFiles = [
         runtimeFile,
-        { ...linkFile, path: 'runtime/libvips.test' }
+        { ...linkFile, path: `runtime/${linkName}` }
       ];
       writeFileSync(path, `${JSON.stringify(manifest)}\n`);
 
@@ -143,7 +178,10 @@ function fixture(): string {
   const runtime = Buffer.from('runtime');
   const link = Buffer.from('link');
   writeFileSync(join(root, 'runtime/libc++.dll'), runtime);
-  writeFileSync(join(root, 'link/libvips.test'), link);
+  const linkNames = process.platform === 'win32'
+    ? ['libvips.lib', 'libglib-2.0.lib', 'libgobject-2.0.lib']
+    : ['libvips.dylib', 'libglib-2.0.dylib', 'libgobject-2.0.dylib'];
+  for (const name of linkNames) writeFileSync(join(root, 'link', name), link);
   const file = (path: string, bytes: Buffer) => ({
     path,
     sizeBytes: bytes.byteLength,
@@ -159,7 +197,7 @@ function fixture(): string {
     rasterFormats: NATIVE_RASTER_PAYLOAD_LOCK.rasterFormats,
     linkDirectory: 'link',
     runtimeFiles: [file('runtime/libc++.dll', runtime)],
-    linkFiles: [file('link/libvips.test', link)]
+    linkFiles: linkNames.map((name) => file(`link/${name}`, link))
   })}\n`);
   return root;
 }

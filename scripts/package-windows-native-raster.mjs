@@ -31,7 +31,10 @@ const runtimeEntries = zip.getEntries().filter((entry) => (
 if (!runtimeEntries.some((entry) => basename(entry.entryName).toLowerCase() === 'libvips-42.dll')) {
   throw new Error('Windows native raster archive has no Runtime library.');
 }
-const importLibrary = requiredEntry(zip, target.importLibraryPath);
+const importLibraries = target.importLibraryPaths.map((path) => ({
+  name: basename(path),
+  bytes: requiredEntry(zip, path)
+}));
 const license = requiredEntry(zip, target.licensePath);
 const versions = requiredEntry(zip, target.versionsPath);
 const versionsValue = JSON.parse(versions.toString('utf8'));
@@ -53,7 +56,9 @@ await writeFile(
   await readFile(join(workspaceRoot, 'assets/licenses/libvips-THIRD-PARTY-NOTICES.md'))
 );
 await writeFile(join(runtimeDirectory, 'versions.json'), versions);
-await writeFile(join(linkDirectory, 'libvips.lib'), importLibrary);
+for (const library of importLibraries) {
+  await writeFile(join(linkDirectory, library.name), library.bytes);
+}
 
 const runtimeFiles = await Promise.all((await readdir(runtimeDirectory))
   .sort().map(async (name) => lockedFile(
@@ -70,7 +75,7 @@ await writeFile(join(destination, 'manifest.json'), `${JSON.stringify({
   sourceArchiveSha256: target.sha256,
   linkDirectory: 'link',
   runtimeFiles,
-  linkFiles: [lockedFile('link/libvips.lib', importLibrary)]
+  linkFiles: importLibraries.map((library) => lockedFile(`link/${library.name}`, library.bytes))
 }, null, 2)}\n`);
 
 function requiredEntry(zip, path) {
