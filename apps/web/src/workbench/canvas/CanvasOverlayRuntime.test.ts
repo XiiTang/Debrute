@@ -22,26 +22,39 @@ describe('CanvasOverlayRuntime', () => {
     const element = fakeElement();
 
     runtime.bindFeedbackBar(element as unknown as HTMLElement);
-    runtime.setFeedbackBarPlacement({ x: 10, y: 20, width: 240, height: 32 });
+    runtime.setFeedbackBarPlacement({ x: 10, y: 20, width: 240, height: 124, placement: 'below' });
 
     expect(element.style.left).toBe('10px');
     expect(element.style.top).toBe('20px');
     expect(element.style.width).toBe('240px');
-    expect(element.style.height).toBe('32px');
+    expect(element.style.height).toBe('');
+    expect(element.style.transform).toBe('');
     expect(element.style.visibility).toBe('visible');
+  });
+
+  it('anchors an auto-height feedback bar above the node by its bottom edge', () => {
+    const runtime = createCanvasOverlayRuntime();
+    const element = fakeElement();
+
+    runtime.bindFeedbackBar(element as unknown as HTMLElement);
+    runtime.setFeedbackBarPlacement({ x: 10, y: 20, width: 240, height: 124, placement: 'above' });
+
+    expect(element.style.top).toBe('144px');
+    expect(element.style.height).toBe('');
+    expect(element.style.transform).toBe('translateY(-100%)');
   });
 
   it('applies an existing feedback bar placement when the element binds', () => {
     const runtime = createCanvasOverlayRuntime();
     const element = fakeElement();
 
-    runtime.setFeedbackBarPlacement({ x: 10, y: 20, width: 240, height: 32 });
+    runtime.setFeedbackBarPlacement({ x: 10, y: 20, width: 240, height: 124, placement: 'below' });
     runtime.bindFeedbackBar(element as unknown as HTMLElement);
 
     expect(element.style.left).toBe('10px');
     expect(element.style.top).toBe('20px');
     expect(element.style.width).toBe('240px');
-    expect(element.style.height).toBe('32px');
+    expect(element.style.height).toBe('');
     expect(element.style.visibility).toBe('visible');
   });
 
@@ -54,7 +67,7 @@ describe('CanvasOverlayRuntime', () => {
 
     expect(element.style.visibility).toBe('hidden');
 
-    runtime.setFeedbackBarPlacement({ x: 10, y: 20, width: 240, height: 32 });
+    runtime.setFeedbackBarPlacement({ x: 10, y: 20, width: 240, height: 124, placement: 'below' });
     expect(element.style.visibility).toBe('visible');
 
     runtime.clearFeedbackBarPlacement();
@@ -62,6 +75,7 @@ describe('CanvasOverlayRuntime', () => {
     expect(element.style.top).toBe('');
     expect(element.style.width).toBe('');
     expect(element.style.height).toBe('');
+    expect(element.style.transform).toBe('');
     expect(element.style.visibility).toBe('hidden');
   });
 });
@@ -87,6 +101,7 @@ function fakeElement(): {
     top: string;
     width: string;
     height: string;
+    transform: string;
     visibility: string;
     removeProperty(name: string): void;
   };
@@ -97,9 +112,10 @@ function fakeElement(): {
       top: '',
       width: '',
       height: '',
+      transform: '',
       visibility: '',
       removeProperty(name) {
-        if (name === 'left' || name === 'top' || name === 'width' || name === 'height' || name === 'visibility') {
+        if (name === 'left' || name === 'top' || name === 'width' || name === 'height' || name === 'transform' || name === 'visibility') {
           this[name] = '';
         }
       }

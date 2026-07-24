@@ -193,10 +193,10 @@ export type UpdateCanvasFeedbackEntryInput =
       operation: 'add-item';
       projectRelativePath: string;
       item:
-        | { kind: 'comment'; scope: 'file'; comment: string }
-        | { kind: 'comment'; scope: 'moment'; momentTimeSeconds: number; comment: string }
-        | { kind: 'pin' | 'region'; scope: 'file'; geometry: CanvasFeedbackGeometry; comment: string }
-        | { kind: 'pin' | 'region'; scope: 'moment'; momentTimeSeconds: number; geometry: CanvasFeedbackGeometry; comment: string };
+        | { id: string; createdAt: string; kind: 'comment'; scope: 'file'; comment: string }
+        | { id: string; createdAt: string; kind: 'comment'; scope: 'moment'; momentTimeSeconds: number; comment: string }
+        | { id: string; createdAt: string; kind: 'pin' | 'region'; scope: 'file'; geometry: CanvasFeedbackGeometry; comment: string }
+        | { id: string; createdAt: string; kind: 'pin' | 'region'; scope: 'moment'; momentTimeSeconds: number; geometry: CanvasFeedbackGeometry; comment: string };
     }
   | {
       operation: 'update-item';

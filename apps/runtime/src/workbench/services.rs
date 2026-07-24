@@ -927,8 +927,9 @@ impl WorkbenchRuntimeServices {
     pub fn clear_feedback_working_copy(
         &self,
         project_id: &str,
+        item_id: &str,
     ) -> Result<(), RuntimeHttpServiceError> {
-        self.working_copies.clear_feedback(project_id)
+        self.working_copies.clear_feedback(project_id, item_id)
     }
 
     #[must_use]

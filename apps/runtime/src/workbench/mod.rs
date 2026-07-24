@@ -26,10 +26,7 @@ pub use services::{
     encode_project_path, public_project_snapshot, public_project_sync,
 };
 pub(crate) use working_copy::WorkingCopyStore;
-pub use working_copy::{
-    FeedbackDraftKind, FeedbackDraftLabel, FeedbackDraftScope, FeedbackLocalMode,
-    FeedbackWorkingCopy, FeedbackWorkingCopyItem, ProjectWorkingCopies, TextWorkingCopy,
-};
+pub use working_copy::{FeedbackWorkingCopy, ProjectWorkingCopies, TextWorkingCopy};
 
 pub trait CliAuthorizationVerifier: Send + Sync {
     fn is_cli_authorized(&self, authorization: &str) -> bool;

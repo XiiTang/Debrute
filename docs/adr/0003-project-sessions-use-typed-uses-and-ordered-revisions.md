@@ -73,12 +73,15 @@ Workbench. Runtime sends `project.preempted`, clears the old binding and Project
 Use, and retargets a preempted Desktop window to the root route. It does not
 close the native window or transfer frontend state.
 
-Runtime Working Copies protect unsaved text values and the current feedback
-draft independently of a Workbench connection. They are private, persistent,
-keyed by stable Project id, and restored in `project.bound`. A successful
-matching save or explicit discard clears the relevant value. They have no TTL
-or count cap. Reconstructible view state, live terminal state, and arbitrary
-component memory are not Working Copies.
+Runtime Working Copies protect unsaved text values and the latest Canvas
+Feedback values not yet reflected in accepted Runtime state independently of a
+Workbench connection. They are private, persistent, keyed by stable Project id,
+and restored in `project.bound`. Feedback Working Copies are additionally keyed
+by stable Feedback Capsule identity, so editing one comment never replaces
+another comment's unsynchronized value. A successful matching save, accepted
+feedback mutation, explicit discard, or feedback deletion clears only the
+corresponding value. They have no TTL or count cap. Reconstructible view state,
+live terminal state, and arbitrary component memory are not Working Copies.
 
 Terminals hold their own `running-terminal` Project Use, so closing or
 preempting a Workbench does not imply that a long-lived terminal has ended.

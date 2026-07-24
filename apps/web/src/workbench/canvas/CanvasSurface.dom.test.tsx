@@ -10,6 +10,7 @@ import {
 import { buildWorkbenchTitleBarState } from '../shell/workbenchTitleBarState';
 import type { TextFileBuffer, WorkbenchActions, WorkbenchState } from '../../types';
 import { CanvasEditor } from './CanvasEditor';
+import type { CanvasFeedbackCanvasBinding } from './CanvasFeedbackInteraction';
 import { preloadCanvasImageForHandoff, scheduleCanvasImageHandoffAfterPaint } from './CanvasMediaHandoff';
 import { createCanvasOverlayRuntime } from './CanvasOverlayRuntime';
 import { createCanvasPreviewResourceScheduler } from './CanvasPreviewResourceScheduler';
@@ -588,7 +589,10 @@ describe('CanvasSurface', () => {
       edges: [],
       diagnostics: []
     };
-    const targetChanges: Array<{ canStartVideoMomentFeedback: boolean } | undefined> = [];
+    const targetChanges: Array<{
+      canStartVideoMomentFeedback: boolean;
+      seekToMoment?: ((seconds: number) => void) | undefined;
+    } | undefined> = [];
     const runtime = canvasRuntimeFixture(projection);
     videoMockState.registerOnMount = false;
     videoMockState.lastPath = undefined;
@@ -607,7 +611,16 @@ describe('CanvasSurface', () => {
               canvasFeedback={feedbackDocument({})}
               overlayRuntime={createCanvasOverlayRuntime()}
               feedbackPlacementContext={feedbackPlacementContextFixture()}
-              onFeedbackBarTargetChange={(target) => targetChanges.push(target)}
+              feedbackInteraction={{
+                localMode: undefined,
+                composition: undefined,
+                localSpatialItems: [],
+                suppressedSpatialItemIds: new Set(),
+                focusedCapsuleId: undefined,
+                handleTargetChange: (target) => targetChanges.push(target),
+                handleDraft: vi.fn(),
+                activateCapsule: vi.fn()
+              }}
               textPreviewStyleDependencyKey="dark"
             />
           </I18nProvider>
@@ -624,6 +637,11 @@ describe('CanvasSurface', () => {
         canStartVideoMomentFeedback: false
       });
       expect(videoMockState.lastPath).toBe(videoNode.projectRelativePath);
+
+      await act(async () => {
+        targetChanges.at(-1)?.seekToMoment?.(12.5);
+      });
+      expect(videoPauseAtSpy).not.toHaveBeenCalledWith(12.5);
 
       await act(async () => {
         videoMockState.lastRegister?.(videoNode.projectRelativePath, {
@@ -643,6 +661,7 @@ describe('CanvasSurface', () => {
       expect(targetChanges.at(-1)).toMatchObject({
         canStartVideoMomentFeedback: true
       });
+      expect(videoPauseAtSpy).toHaveBeenCalledWith(12.5);
     } finally {
       await act(async () => {
         root.unmount();
@@ -813,6 +832,44 @@ describe('CanvasSurface', () => {
     expect(html).toContain('data-canvas-feedback-frame-kinds="regions"');
     expect(html).not.toContain('region note hidden');
     expect(html).not.toContain('class="canvas-feedback-bar"');
+  });
+
+  it('omits accepted spatial geometry while its current Working Copy is empty', () => {
+    const canvas = createCanvasDocument({ id: 'suppressed-image-feedback-layer' });
+    const projection: CanvasProjection = {
+      canvasId: canvas.id,
+      nodes: [nodeFixture('flow/cover.png', 120, 80)],
+      edges: [],
+      diagnostics: []
+    };
+
+    const html = renderToStaticMarkup(surface(canvas, projection, {
+      canvasFeedback: feedbackDocument({
+        'flow/cover.png': {
+          projectRelativePath: 'flow/cover.png',
+          marks: [],
+          nextMomentLabel: 1,
+          nextSpatialLabel: 2,
+          items: [{
+            id: 'region-1',
+            label: 1,
+            kind: 'pin',
+            scope: 'file',
+            geometry: { type: 'point', x: 0.2, y: 0.3 },
+            comment: 'accepted note',
+            createdAt: '2026-05-26T12:00:00.000Z',
+            updatedAt: '2026-05-26T12:00:00.000Z'
+          }],
+          updatedAt: '2026-05-26T12:00:00.000Z'
+        }
+      }),
+      feedbackInteraction: feedbackInteractionFixture({
+        suppressedSpatialItemIds: new Set(['region-1'])
+      })
+    }));
+
+    expect(html).not.toContain('data-canvas-feedback-label="1"');
+    expect(html).not.toContain('data-canvas-feedback-frame="true"');
   });
 
   it('renders persistent feedback frames for file-level marks and comments without comment text', () => {
@@ -1644,6 +1701,7 @@ function surface(
     camera?: CanvasCamera;
     textFileBuffers?: Parameters<typeof CanvasSurface>[0]['textFileBuffers'];
     canvasFeedback?: CanvasFeedbackDocument;
+    feedbackInteraction?: CanvasFeedbackCanvasBinding;
   } = {}
 ): React.ReactElement {
   const runtime = canvasRuntimeFixture(projection, input);
@@ -1656,12 +1714,29 @@ function surface(
         actions={actions}
         textFileBuffers={input.textFileBuffers ?? {}}
         canvasFeedback={input.canvasFeedback}
+        feedbackInteraction={input.feedbackInteraction}
         overlayRuntime={createCanvasOverlayRuntime()}
         feedbackPlacementContext={feedbackPlacementContextFixture()}
         textPreviewStyleDependencyKey="dark"
       />
     </I18nProvider>
   );
+}
+
+function feedbackInteractionFixture(
+  overrides: Partial<CanvasFeedbackCanvasBinding> = {}
+): CanvasFeedbackCanvasBinding {
+  return {
+    localMode: undefined,
+    composition: undefined,
+    localSpatialItems: [],
+    suppressedSpatialItemIds: new Set(),
+    focusedCapsuleId: undefined,
+    handleTargetChange: vi.fn(),
+    handleDraft: vi.fn(),
+    activateCapsule: vi.fn(),
+    ...overrides
+  };
 }
 
 function canvasRuntimeFixture(
@@ -2029,7 +2104,6 @@ const actions: WorkbenchActions = {
   bringCanvasNodeToFront: async () => undefined,
   updateCanvasVideoPlaybackState: async () => undefined,
   updateCanvasTextViewportState: async () => undefined,
-  updateCanvasFeedbackEntry: async () => true,
   addProjectPathToCanvasMap: async () => undefined,
   createCanvas: async () => {
     throw new Error('not used');

@@ -3,7 +3,7 @@ import type { WorkbenchApiClient, WorkbenchProjectSessionSnapshot, WorkbenchWork
 import { openInitialProject, replaceWorkbenchProjectRoute, shouldShowInitialProjectLoader } from './projectSessionState';
 
 function emptyWorkingCopies(): WorkbenchWorkingCopies {
-  return { text: {}, feedback: null };
+  return { text: {}, feedback: {} };
 }
 
 describe('project session startup', () => {

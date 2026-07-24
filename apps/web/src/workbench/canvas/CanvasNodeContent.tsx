@@ -37,13 +37,15 @@ export interface CanvasNodeContentProps {
   videoPreviewError?: string | undefined;
   forceVideoPlayerMounted?: boolean | undefined;
   feedbackEntry?: CanvasFeedbackEntry | undefined;
+  activeFeedbackItemId?: string | undefined;
   localFeedbackMode?: CanvasMediaFeedbackMode | undefined;
-  pendingFeedbackRegion?: CanvasMediaFeedbackDraftRegion | undefined;
+  localFeedbackRegions?: readonly CanvasMediaFeedbackDraftRegion[] | undefined;
   activeFeedbackMomentTimeSeconds?: number | undefined;
   onLocalFeedbackDraft?: ((input: {
     projectRelativePath: string;
     geometry: CanvasFeedbackGeometry;
   }) => void) | undefined;
+  onFeedbackItemActivate?: ((projectRelativePath: string, itemId: string) => void) | undefined;
   onVideoPlayerMounted: (projectRelativePath: string) => void;
   onVideoPlayingChange: (projectRelativePath: string, playing: boolean) => void;
   onRegisterVideoTarget: (projectRelativePath: string, target: CanvasVideoPlayerHandle | undefined) => void;
@@ -70,10 +72,12 @@ export function CanvasNodeContent({
   videoPreviewError,
   forceVideoPlayerMounted = false,
   feedbackEntry,
+  activeFeedbackItemId,
   localFeedbackMode,
-  pendingFeedbackRegion,
+  localFeedbackRegions,
   activeFeedbackMomentTimeSeconds,
   onLocalFeedbackDraft,
+  onFeedbackItemActivate,
   onVideoPlayerMounted,
   onVideoPlayingChange,
   onRegisterVideoTarget,
@@ -171,13 +175,15 @@ export function CanvasNodeContent({
         onUpdatePlaybackTime={onUpdateVideoPlaybackTime}
         onVideoPreviewError={onVideoPreviewError}
         feedbackEntry={feedbackEntry}
+        activeFeedbackItemId={activeFeedbackItemId}
         localFeedbackMode={localFeedbackMode}
-        pendingFeedbackRegion={pendingFeedbackRegion}
+        localFeedbackRegions={localFeedbackRegions}
         activeFeedbackMomentTimeSeconds={activeFeedbackMomentTimeSeconds}
         onTitlePointerDown={onTitlePointerDown}
         onTitlePointerMove={onTitlePointerMove}
         onTitlePointerUp={onTitlePointerUp}
         onLocalFeedbackDraft={(input) => onLocalFeedbackDraft?.(input)}
+        onFeedbackItemActivate={(itemId) => onFeedbackItemActivate?.(node.projectRelativePath, itemId)}
       />
     );
   }
@@ -196,7 +202,9 @@ export function CanvasNodeContent({
               <CanvasMediaFeedbackLayer
                 items={imageSpatialFeedbackItems(feedbackEntry)}
                 mode={localFeedbackMode}
-                draftRegion={pendingFeedbackRegion}
+                draftRegions={localFeedbackRegions}
+                activeItemId={activeFeedbackItemId}
+                onItemActivate={(itemId) => onFeedbackItemActivate?.(node.projectRelativePath, itemId)}
                 onRegionDraft={(geometry) => onLocalFeedbackDraft?.({
                   projectRelativePath: node.projectRelativePath,
                   geometry

@@ -325,7 +325,7 @@ fn project_domain_router() -> Router<WorkbenchRouterState> {
             put(text_working_copy).delete(text_working_copy),
         )
         .route(
-            "/projects/{project_id}/working-copies/feedback",
+            "/projects/{project_id}/working-copies/feedback/{item_id}",
             put(feedback_working_copy).delete(feedback_working_copy),
         )
         .route(
@@ -504,6 +504,7 @@ async fn text_working_copy(
 async fn feedback_working_copy(
     State(state): State<WorkbenchRouterState>,
     Extension(scope): Extension<ProjectAuthorization>,
+    Path((_project_id, item_id)): Path<(String, String)>,
     request: Request,
 ) -> Response {
     let services = Arc::clone(&state.services);
@@ -513,12 +514,19 @@ async fn feedback_working_copy(
                 Ok(input) => input,
                 Err(response) => return response,
             };
+            if working_copy.item_id != item_id {
+                return error_response(
+                    StatusCode::BAD_REQUEST,
+                    "working_copy_invalid",
+                    "Feedback Working Copy itemId must match the request path.",
+                );
+            }
             match services.put_feedback_working_copy(&scope.project_id, working_copy) {
                 Ok(working_copy) => Json(working_copy).into_response(),
                 Err(error) => service_error_response(error),
             }
         }
-        Method::DELETE => match services.clear_feedback_working_copy(&scope.project_id) {
+        Method::DELETE => match services.clear_feedback_working_copy(&scope.project_id, &item_id) {
             Ok(()) => StatusCode::NO_CONTENT.into_response(),
             Err(error) => service_error_response(error),
         },

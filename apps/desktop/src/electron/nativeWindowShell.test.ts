@@ -47,11 +47,12 @@ describe('native window shell', () => {
     const sender = {};
     const fromWebContents = vi.fn(() => window);
     const executeNativeMenuCommand = vi.fn(async () => undefined);
+    const takeDesktopLaunchTicket = vi.fn(() => 'ticket-1');
     registerNativeWindowIpc({
       ipcMain: { handle: (channel, handler) => handlers.set(channel, handler) },
       browserWindow: { fromWebContents },
       executeNativeMenuCommand,
-      takeDesktopLaunchTicket: () => undefined
+      takeDesktopLaunchTicket
     });
 
     await handlers.get(nativeWindowIpcChannels.getState)?.({ sender }, { commandId: 'window.new' });
@@ -59,13 +60,19 @@ describe('native window shell', () => {
     await handlers.get(nativeWindowIpcChannels.toggleMaximize)?.({ sender }, { commandId: 'window.new' });
     await handlers.get(nativeWindowIpcChannels.close)?.({ sender }, { commandId: 'window.new' });
     await handlers.get(nativeWindowIpcChannels.executeMenuCommand)?.({ sender }, { commandId: 'window.new' });
+    const ticket = await handlers.get(nativeWindowIpcChannels.takeDesktopLaunchTicket)?.(
+      { sender },
+      { commandId: 'window.new' }
+    );
 
-    expect(fromWebContents).toHaveBeenCalledTimes(5);
+    expect(fromWebContents).toHaveBeenCalledTimes(6);
     expect(fromWebContents).toHaveBeenCalledWith(sender);
     expect(window.minimize).toHaveBeenCalledOnce();
     expect(window.maximize).toHaveBeenCalledOnce();
     expect(window.close).toHaveBeenCalledOnce();
     expect(executeNativeMenuCommand).toHaveBeenCalledWith(window, { commandId: 'window.new' });
+    expect(takeDesktopLaunchTicket).toHaveBeenCalledWith(window);
+    expect(ticket).toBe('ticket-1');
   });
 
   it('rejects native menu commands without a sender window', async () => {

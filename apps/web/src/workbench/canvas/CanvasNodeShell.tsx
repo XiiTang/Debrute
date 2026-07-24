@@ -30,13 +30,15 @@ export interface CanvasNodeShellProps {
   videoPreviewError?: string | undefined;
   forceVideoPlayerMounted?: boolean | undefined;
   feedbackEntry?: CanvasFeedbackEntry | undefined;
+  activeFeedbackItemId?: string | undefined;
   localFeedbackMode?: CanvasMediaFeedbackMode | undefined;
-  pendingFeedbackRegion?: CanvasMediaFeedbackDraftRegion | undefined;
+  localFeedbackRegions?: readonly CanvasMediaFeedbackDraftRegion[] | undefined;
   activeFeedbackMomentTimeSeconds?: number | undefined;
   onLocalFeedbackDraft?: ((input: {
     projectRelativePath: string;
     geometry: CanvasFeedbackGeometry;
   }) => void) | undefined;
+  onFeedbackItemActivate?: ((projectRelativePath: string, itemId: string) => void) | undefined;
   onPointerDown: (node: ProjectedCanvasNode, event: React.PointerEvent<Element>) => void;
   onPointerMove: (event: React.PointerEvent<Element>) => void;
   onPointerUp: (event: React.PointerEvent<Element>) => void;
@@ -71,10 +73,12 @@ function CanvasNodeShellComponent({
   videoPreviewError,
   forceVideoPlayerMounted,
   feedbackEntry,
+  activeFeedbackItemId,
   localFeedbackMode,
-  pendingFeedbackRegion,
+  localFeedbackRegions,
   activeFeedbackMomentTimeSeconds,
   onLocalFeedbackDraft,
+  onFeedbackItemActivate,
   onPointerDown,
   onPointerMove,
   onPointerUp,
@@ -137,10 +141,12 @@ function CanvasNodeShellComponent({
       videoPreviewError={videoPreviewError}
       forceVideoPlayerMounted={forceVideoPlayerMounted}
       feedbackEntry={feedbackEntry}
+      activeFeedbackItemId={activeFeedbackItemId}
       localFeedbackMode={localFeedbackMode}
-      pendingFeedbackRegion={pendingFeedbackRegion}
+      localFeedbackRegions={localFeedbackRegions}
       activeFeedbackMomentTimeSeconds={activeFeedbackMomentTimeSeconds}
       onLocalFeedbackDraft={onLocalFeedbackDraft}
+      onFeedbackItemActivate={onFeedbackItemActivate}
       onVideoPlayerMounted={onVideoPlayerMounted}
       onVideoPlayingChange={onVideoPlayingChange}
       onRegisterVideoTarget={onRegisterVideoTarget}
@@ -214,10 +220,12 @@ export function areCanvasNodeShellPropsEqual(
     && previous.videoPreviewError === next.videoPreviewError
     && previous.forceVideoPlayerMounted === next.forceVideoPlayerMounted
     && previous.feedbackEntry === next.feedbackEntry
+    && previous.activeFeedbackItemId === next.activeFeedbackItemId
     && previous.localFeedbackMode === next.localFeedbackMode
-    && previous.pendingFeedbackRegion === next.pendingFeedbackRegion
+    && previous.localFeedbackRegions === next.localFeedbackRegions
     && previous.activeFeedbackMomentTimeSeconds === next.activeFeedbackMomentTimeSeconds
     && previous.onLocalFeedbackDraft === next.onLocalFeedbackDraft
+    && previous.onFeedbackItemActivate === next.onFeedbackItemActivate
     && previous.onPointerDown === next.onPointerDown
     && previous.onPointerMove === next.onPointerMove
     && previous.onPointerUp === next.onPointerUp

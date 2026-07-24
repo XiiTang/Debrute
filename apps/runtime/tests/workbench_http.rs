@@ -263,10 +263,7 @@ fn one_post_stream_bootstraps_global_state_and_binds_a_project() {
     let bound = events.next();
     assert_eq!(bound["type"], "project.bound");
     assert_eq!(bound["project"]["projectId"], project.id);
-    assert_eq!(
-        bound["workingCopies"],
-        json!({"text": {}, "feedback": null})
-    );
+    assert_eq!(bound["workingCopies"], json!({"text": {}, "feedback": {}}));
 }
 
 #[test]
@@ -299,10 +296,7 @@ fn replacement_publishes_the_prepared_project_and_releases_the_source_use() {
     );
     let bound = events.next_of_type("project.bound");
     assert_eq!(bound["project"]["projectId"], target.id);
-    assert_eq!(
-        bound["workingCopies"],
-        json!({"text": {}, "feedback": null})
-    );
+    assert_eq!(bound["workingCopies"], json!({"text": {}, "feedback": {}}));
 
     let stale_source_request = client
         .get(format!(
@@ -729,7 +723,99 @@ fn working_copy_survives_connection_close_and_clears_without_retention() {
     open_project(&client, &runtime, &project, &cookie, &credential);
     assert_eq!(
         events.next()["workingCopies"],
-        json!({"text": {}, "feedback": null})
+        json!({"text": {}, "feedback": {}})
+    );
+}
+
+#[test]
+fn feedback_working_copies_are_independent_by_stable_item_id() {
+    let runtime = TestRuntime::start();
+    let project = runtime.create_project("feedback-working-copies");
+    let client = Client::new();
+    let (cookie, credential, mut events) = open_unbound_connection(&client, &runtime);
+    open_project(&client, &runtime, &project, &cookie, &credential);
+    assert_eq!(events.next()["type"], "project.bound");
+
+    for (item_id, project_relative_path, comment) in [
+        ("feedback-a", "images/a.png", "First local value"),
+        ("feedback-b", "images/b.png", "Second local value"),
+    ] {
+        let response = client
+            .put(format!(
+                "{}/api/projects/{}/working-copies/feedback/{item_id}",
+                runtime.origin(),
+                project.id
+            ))
+            .header(ORIGIN, runtime.origin())
+            .header(COOKIE, &cookie)
+            .header(WORKBENCH_CONNECTION_HEADER, &credential)
+            .json(&json!({
+                "itemId": item_id,
+                "createdAt": "2026-07-23T00:00:00.000Z",
+                "projectRelativePath": project_relative_path,
+                "kind": "comment",
+                "scope": "file",
+                "comment": comment
+            }))
+            .send()
+            .expect("Feedback Working Copy put should complete");
+        assert_eq!(response.status().as_u16(), 200);
+    }
+    drop(events);
+
+    let (cookie, credential, mut events) = open_unbound_connection(&client, &runtime);
+    open_project(&client, &runtime, &project, &cookie, &credential);
+    let restored = events.next();
+    assert_eq!(
+        restored["workingCopies"]["feedback"],
+        json!({
+            "feedback-a": {
+                "itemId": "feedback-a",
+                "createdAt": "2026-07-23T00:00:00.000Z",
+                "projectRelativePath": "images/a.png",
+                "kind": "comment",
+                "scope": "file",
+                "comment": "First local value"
+            },
+            "feedback-b": {
+                "itemId": "feedback-b",
+                "createdAt": "2026-07-23T00:00:00.000Z",
+                "projectRelativePath": "images/b.png",
+                "kind": "comment",
+                "scope": "file",
+                "comment": "Second local value"
+            }
+        })
+    );
+
+    let cleared = client
+        .delete(format!(
+            "{}/api/projects/{}/working-copies/feedback/feedback-a",
+            runtime.origin(),
+            project.id
+        ))
+        .header(ORIGIN, runtime.origin())
+        .header(COOKIE, &cookie)
+        .header(WORKBENCH_CONNECTION_HEADER, &credential)
+        .send()
+        .expect("Feedback Working Copy clear should complete");
+    assert_eq!(cleared.status().as_u16(), 204);
+    drop(events);
+
+    let (cookie, credential, mut events) = open_unbound_connection(&client, &runtime);
+    open_project(&client, &runtime, &project, &cookie, &credential);
+    assert_eq!(
+        events.next()["workingCopies"]["feedback"],
+        json!({
+            "feedback-b": {
+                "itemId": "feedback-b",
+                "createdAt": "2026-07-23T00:00:00.000Z",
+                "projectRelativePath": "images/b.png",
+                "kind": "comment",
+                "scope": "file",
+                "comment": "Second local value"
+            }
+        })
     );
 }
 

@@ -8,17 +8,23 @@ use std::{
 use axum::http::StatusCode;
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
+use time::{OffsetDateTime, format_description::well_known::Rfc3339};
 use uuid::Uuid;
 
-use crate::project::{CanvasFeedbackGeometry, normalize_project_relative_path, replace_file};
+use crate::project::{
+    CanvasFeedbackGeometry, CanvasFeedbackItemKind, CanvasFeedbackScope,
+    normalize_project_relative_path, normalized_geometry, replace_file, validate_spatial_geometry,
+};
 
 use super::RuntimeHttpServiceError;
+
+const MAX_FEEDBACK_WORKING_COPY_ITEM_ID_BYTES: usize = 128;
 
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct ProjectWorkingCopies {
     pub text: BTreeMap<String, TextWorkingCopy>,
-    pub feedback: Option<FeedbackWorkingCopy>,
+    pub feedback: BTreeMap<String, FeedbackWorkingCopy>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -33,49 +39,16 @@ pub struct TextWorkingCopy {
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct FeedbackWorkingCopy {
-    pub pending_item: FeedbackWorkingCopyItem,
-    pub pending_comment: String,
-    pub local_mode: Option<FeedbackLocalMode>,
-}
-
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase", deny_unknown_fields)]
-pub struct FeedbackWorkingCopyItem {
+    pub item_id: String,
+    pub created_at: String,
     pub project_relative_path: String,
-    pub kind: FeedbackDraftKind,
-    pub scope: FeedbackDraftScope,
+    pub kind: CanvasFeedbackItemKind,
+    pub scope: CanvasFeedbackScope,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub moment_time_seconds: Option<f64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub geometry: Option<CanvasFeedbackGeometry>,
-    pub label: Option<FeedbackDraftLabel>,
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "snake_case")]
-pub enum FeedbackDraftKind {
-    Comment,
-    Pin,
-    Region,
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "snake_case")]
-pub enum FeedbackDraftScope {
-    File,
-    Moment,
-}
-
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-#[serde(untagged)]
-pub enum FeedbackDraftLabel {
-    Number(f64),
-    Text(String),
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "snake_case")]
-pub enum FeedbackLocalMode {
-    Pin,
-    Rect,
+    pub comment: String,
 }
 
 pub struct WorkingCopyStore {
@@ -137,33 +110,80 @@ impl WorkingCopyStore {
         project_id: &str,
         mut working_copy: FeedbackWorkingCopy,
     ) -> Result<FeedbackWorkingCopy, RuntimeHttpServiceError> {
-        working_copy.pending_item.project_relative_path =
-            normalize_project_relative_path(&working_copy.pending_item.project_relative_path)
+        working_copy.project_relative_path =
+            normalize_project_relative_path(&working_copy.project_relative_path)
                 .map_err(RuntimeHttpServiceError::from_project)?;
-        let item = &working_copy.pending_item;
-        if item.scope == FeedbackDraftScope::Moment && item.moment_time_seconds.is_none() {
+        if working_copy.item_id.is_empty()
+            || working_copy.item_id != working_copy.item_id.trim()
+            || working_copy.item_id.len() > MAX_FEEDBACK_WORKING_COPY_ITEM_ID_BYTES
+        {
+            return Err(invalid(
+                "Feedback Working Copy itemId must be non-empty, trimmed, and within the byte limit.",
+            ));
+        }
+        if OffsetDateTime::parse(&working_copy.created_at, &Rfc3339).is_err() {
+            return Err(invalid(
+                "Feedback Working Copy createdAt must be an RFC 3339 timestamp.",
+            ));
+        }
+        if working_copy
+            .moment_time_seconds
+            .is_some_and(|seconds| !seconds.is_finite() || seconds < 0.0)
+        {
+            return Err(invalid(
+                "Feedback Working Copy momentTimeSeconds must be finite and non-negative.",
+            ));
+        }
+        if working_copy.scope == CanvasFeedbackScope::Moment
+            && working_copy.moment_time_seconds.is_none()
+        {
             return Err(invalid(
                 "Moment Feedback Working Copy requires momentTimeSeconds.",
             ));
         }
+        if working_copy.scope == CanvasFeedbackScope::File
+            && working_copy.moment_time_seconds.is_some()
+        {
+            return Err(invalid(
+                "File Feedback Working Copy cannot include momentTimeSeconds.",
+            ));
+        }
         if matches!(
-            item.kind,
-            FeedbackDraftKind::Pin | FeedbackDraftKind::Region
-        ) && item.geometry.is_none()
+            working_copy.kind,
+            CanvasFeedbackItemKind::Pin | CanvasFeedbackItemKind::Region
+        ) && working_copy.geometry.is_none()
         {
             return Err(invalid("Spatial Feedback Working Copy requires geometry."));
         }
+        if working_copy.kind == CanvasFeedbackItemKind::Comment && working_copy.geometry.is_some() {
+            return Err(invalid(
+                "Comment Feedback Working Copy cannot include geometry.",
+            ));
+        }
+        if let Some(geometry) = &working_copy.geometry {
+            let normalized =
+                normalized_geometry(geometry).map_err(RuntimeHttpServiceError::from_project)?;
+            validate_spatial_geometry(working_copy.kind, &normalized)
+                .map_err(RuntimeHttpServiceError::from_project)?;
+            working_copy.geometry = Some(normalized);
+        }
         let _io = self.lock();
         let mut project = self.read(project_id)?;
-        project.feedback = Some(working_copy.clone());
+        project
+            .feedback
+            .insert(working_copy.item_id.clone(), working_copy.clone());
         self.write(project_id, &project)?;
         Ok(working_copy)
     }
 
-    pub fn clear_feedback(&self, project_id: &str) -> Result<(), RuntimeHttpServiceError> {
+    pub fn clear_feedback(
+        &self,
+        project_id: &str,
+        item_id: &str,
+    ) -> Result<(), RuntimeHttpServiceError> {
         let _io = self.lock();
         let mut project = self.read(project_id)?;
-        project.feedback = None;
+        project.feedback.remove(item_id);
         self.write_or_remove(project_id, &project)
     }
 
@@ -188,7 +208,7 @@ impl WorkingCopyStore {
         project_id: &str,
         project: &ProjectWorkingCopies,
     ) -> Result<(), RuntimeHttpServiceError> {
-        if project.text.is_empty() && project.feedback.is_none() {
+        if project.text.is_empty() && project.feedback.is_empty() {
             match fs::remove_file(self.path(project_id)) {
                 Ok(()) => Ok(()),
                 Err(error) if error.kind() == io::ErrorKind::NotFound => Ok(()),
@@ -300,5 +320,35 @@ mod tests {
             1
         );
         fs::remove_dir_all(home).unwrap();
+    }
+
+    #[test]
+    fn feedback_working_copy_rejects_geometry_that_cannot_become_the_same_item_kind() {
+        let home = std::env::temp_dir().join(format!("dbrt-working-copy-{}", Uuid::new_v4()));
+        let store = WorkingCopyStore::new(&home);
+        let invalid_pin = FeedbackWorkingCopy {
+            item_id: "feedback-a".to_owned(),
+            created_at: "2026-07-23T00:00:00.000Z".to_owned(),
+            project_relative_path: "image.png".to_owned(),
+            kind: CanvasFeedbackItemKind::Pin,
+            scope: CanvasFeedbackScope::File,
+            moment_time_seconds: None,
+            geometry: Some(CanvasFeedbackGeometry::Rect {
+                x: 0.1,
+                y: 0.2,
+                width: 0.3,
+                height: 0.4,
+            }),
+            comment: "Pin".to_owned(),
+        };
+
+        assert!(store.put_feedback("project-1", invalid_pin).is_err());
+        assert_eq!(
+            store.load("project-1").unwrap(),
+            ProjectWorkingCopies::default()
+        );
+        if home.exists() {
+            fs::remove_dir_all(home).unwrap();
+        }
     }
 }

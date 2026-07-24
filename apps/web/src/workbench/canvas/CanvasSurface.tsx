@@ -17,19 +17,17 @@ import {
 } from '../services/canvasInteraction';
 import {
   canvasFeedbackBarSizeForTarget,
-  canvasFeedbackEntryHasItemRow,
   canvasFeedbackLocalToolsetForMediaKind,
   canvasNodeToViewportRect,
   placeCanvasFeedbackBar,
   type CanvasFeedbackBarTarget,
-  type CanvasLocalFeedbackDraft,
   type FloatingBarRect
 } from '../shell/floatingBars';
 import { cameraForCanvasContent } from './CanvasCameraBounds';
 import { CanvasImageNodeAssetProvider, type CanvasImageNodeAssetContextValue } from './CanvasImageNodeAssetContext';
 import { createCanvasVideoHotkeyController } from './CanvasVideoHotkeyController';
 import type { CanvasVideoPlayerHandle } from './CanvasVideoPlayerAdapter';
-import type { CanvasMediaFeedbackMode } from './CanvasMediaFeedbackLayer';
+import type { CanvasMediaFeedbackDraftRegion, CanvasMediaFeedbackMode } from './CanvasMediaFeedbackLayer';
 import { CanvasNodeShell } from './CanvasNodeShell';
 import { createCanvasPreviewResourceScheduler } from './CanvasPreviewResourceScheduler';
 import {
@@ -40,7 +38,7 @@ import { CanvasTextPreviewProvider, useCanvasTextPreviewRuntime } from './Canvas
 import { CanvasVideoPreviewProvider, useCanvasVideoPreviewRuntime } from './CanvasVideoPreviewRuntime';
 import type { CanvasVideoPreviewSource } from './canvasVideoPreviews';
 import type { CanvasOverlayRuntime } from './CanvasOverlayRuntime';
-import type { PendingCanvasFeedbackItem } from './canvasFeedbackDraft';
+import type { CanvasFeedbackCanvasBinding } from './CanvasFeedbackInteraction';
 import { createCanvasPerfBrowserAdapter } from './CanvasPerfBrowserAdapter';
 import { createCanvasPerfDebugBridge } from './CanvasPerfDebugBridge';
 import {
@@ -88,6 +86,8 @@ import {
   type CanvasPerfRuntimeSession
 } from './canvasSurfaceSupport';
 
+const EMPTY_FEEDBACK_ITEM_IDS: ReadonlySet<string> = new Set();
+
 interface CanvasSurfaceProps {
   canvas: CanvasDocument;
   projection: CanvasProjection;
@@ -95,9 +95,7 @@ interface CanvasSurfaceProps {
   actions: WorkbenchActions;
   textFileBuffers: Record<string, TextFileBuffer>;
   canvasFeedback: CanvasFeedbackDocument | undefined;
-  localFeedbackMode?: CanvasMediaFeedbackMode | undefined;
-  pendingFeedbackItem?: PendingCanvasFeedbackItem | undefined;
-  onLocalFeedbackDraft?: ((input: CanvasLocalFeedbackDraft) => void) | undefined;
+  feedbackInteraction?: CanvasFeedbackCanvasBinding | undefined;
   overlayRuntime: CanvasOverlayRuntime;
   minimapOpen?: boolean | undefined;
   feedbackPlacementContext: {
@@ -105,7 +103,6 @@ interface CanvasSurfaceProps {
     reservedRects: readonly FloatingBarRect[];
   };
   onCurrentNodesChange?: ((canvasId: string, nodes: ProjectedCanvasNode[] | undefined) => void) | undefined;
-  onFeedbackBarTargetChange?: ((target: CanvasFeedbackBarTarget | undefined) => void) | undefined;
   onOpenContextMenu?: ((target: WorkbenchContextMenuTarget, position: WorkbenchContextMenuPosition) => void) | undefined;
   textPreviewStyleDependencyKey: string;
 }
@@ -117,14 +114,11 @@ export function CanvasSurface({
   actions,
   textFileBuffers,
   canvasFeedback,
-  localFeedbackMode,
-  pendingFeedbackItem,
-  onLocalFeedbackDraft,
+  feedbackInteraction,
   overlayRuntime,
   minimapOpen,
   feedbackPlacementContext,
   onCurrentNodesChange,
-  onFeedbackBarTargetChange,
   onOpenContextMenu,
   textPreviewStyleDependencyKey
 }: CanvasSurfaceProps): React.ReactElement {
@@ -159,15 +153,12 @@ export function CanvasSurface({
       actions={actions}
       textFileBuffers={textFileBuffers}
       canvasFeedback={canvasFeedback}
-      localFeedbackMode={localFeedbackMode}
-      pendingFeedbackItem={pendingFeedbackItem}
-      onLocalFeedbackDraft={onLocalFeedbackDraft}
+      feedbackInteraction={feedbackInteraction}
       perfMonitor={perfMonitor}
       overlayRuntime={overlayRuntime}
       minimapOpen={minimapOpen}
       feedbackPlacementContext={feedbackPlacementContext}
       onCurrentNodesChange={onCurrentNodesChange}
-      onFeedbackBarTargetChange={onFeedbackBarTargetChange}
       onOpenContextMenu={onOpenContextMenu}
       textPreviewStyleDependencyKey={textPreviewStyleDependencyKey}
     />
@@ -181,20 +172,23 @@ function CanvasSurfaceRuntime({
   actions,
   textFileBuffers,
   canvasFeedback,
-  localFeedbackMode,
-  pendingFeedbackItem,
-  onLocalFeedbackDraft,
+  feedbackInteraction,
   perfMonitor,
   overlayRuntime,
   minimapOpen,
   feedbackPlacementContext,
   onCurrentNodesChange,
-  onFeedbackBarTargetChange,
   onOpenContextMenu,
   textPreviewStyleDependencyKey
 }: CanvasSurfaceProps & {
   perfMonitor: CanvasPerfMonitor | undefined;
 }): React.ReactElement {
+  const localFeedbackMode = feedbackInteraction?.localMode;
+  const feedbackComposition = feedbackInteraction?.composition;
+  const localSpatialFeedbackItems = feedbackInteraction?.localSpatialItems ?? [];
+  const suppressedSpatialItemIds = feedbackInteraction?.suppressedSpatialItemIds ?? EMPTY_FEEDBACK_ITEM_IDS;
+  const onLocalFeedbackDraft = feedbackInteraction?.handleDraft;
+  const onFeedbackBarTargetChange = feedbackInteraction?.handleTargetChange;
   const surfaceRef = useRef<HTMLDivElement | null>(null);
   const stageRef = useRef<HTMLDivElement | null>(null);
   const selection = useCanvasSelection(runtime);
@@ -220,6 +214,61 @@ function CanvasSurfaceRuntime({
   const [playingVideoPaths, setPlayingVideoPaths] = useState<ReadonlySet<string>>(() => new Set());
   const [requestedVideoPlayerPath, setRequestedVideoPlayerPath] = useState<string>();
   const [videoTargetRevision, setVideoTargetRevision] = useState(0);
+  const localFeedbackRegionsByPath = useMemo(() => {
+    const byPath = new Map<string, CanvasMediaFeedbackDraftRegion[]>();
+    for (const item of localSpatialFeedbackItems) {
+      if (!item.geometry) {
+        continue;
+      }
+      const regions = byPath.get(item.projectRelativePath) ?? [];
+      regions.push({
+        itemId: item.itemId,
+        geometry: item.geometry,
+        ...(item.momentTimeSeconds === undefined ? {} : { momentTimeSeconds: item.momentTimeSeconds })
+      });
+      byPath.set(item.projectRelativePath, regions);
+    }
+    return byPath;
+  }, [localSpatialFeedbackItems]);
+  const canvasFeedbackEntries = useMemo(() => {
+    const entries = canvasFeedback?.entries;
+    if (!entries || suppressedSpatialItemIds.size === 0) {
+      return entries;
+    }
+    let filtered: CanvasFeedbackDocument['entries'] | undefined;
+    for (const [path, entry] of Object.entries(entries)) {
+      const items = entry.items.filter((item) => !suppressedSpatialItemIds.has(item.id));
+      if (items.length === entry.items.length) {
+        continue;
+      }
+      filtered ??= { ...entries };
+      filtered[path] = { ...entry, items };
+    }
+    return filtered ?? entries;
+  }, [canvasFeedback, suppressedSpatialItemIds]);
+  const activeFeedbackMomentTimeSecondsByPath = useMemo(() => {
+    const byPath = new Map<string, number>();
+    if (feedbackComposition?.scope === 'moment' && feedbackComposition.momentTimeSeconds !== undefined) {
+      byPath.set(feedbackComposition.projectRelativePath, feedbackComposition.momentTimeSeconds);
+    }
+    const activeItemId = feedbackInteraction?.focusedCapsuleId;
+    if (!activeItemId) {
+      return byPath;
+    }
+    const local = localSpatialFeedbackItems.find((item) => item.itemId === activeItemId);
+    if (local?.scope === 'moment' && local.momentTimeSeconds !== undefined) {
+      byPath.set(local.projectRelativePath, local.momentTimeSeconds);
+      return byPath;
+    }
+    for (const [path, entry] of Object.entries(canvasFeedback?.entries ?? {})) {
+      const item = entry.items.find((candidate) => candidate.id === activeItemId);
+      if (item?.scope === 'moment') {
+        byPath.set(path, item.moment.currentTimeSeconds);
+        break;
+      }
+    }
+    return byPath;
+  }, [canvasFeedback, feedbackComposition, feedbackInteraction?.focusedCapsuleId, localSpatialFeedbackItems]);
 
   const projectedNodes = projection.nodes;
   const projectedNodesRef = useRef(projectedNodes);
@@ -228,11 +277,17 @@ function CanvasSurfaceRuntime({
     requestTargetMount: setRequestedVideoPlayerPath
   }), []);
   const videoTargetsRef = useRef(new Map<string, CanvasVideoPlayerHandle>());
+  const pendingFeedbackSeekRef = useRef(new Map<string, number>());
   const videoPlaybackUpdateVersionsRef = useRef(new Map<string, number>());
   const registerVideoTarget = useCallback((projectRelativePath: string, target: CanvasVideoPlayerHandle | undefined) => {
     videoHotkeyController.register(projectRelativePath, target);
     if (target) {
       videoTargetsRef.current.set(projectRelativePath, target);
+      const pendingFeedbackSeek = pendingFeedbackSeekRef.current.get(projectRelativePath);
+      if (pendingFeedbackSeek !== undefined) {
+        pendingFeedbackSeekRef.current.delete(projectRelativePath);
+        target.pauseAt(pendingFeedbackSeek);
+      }
     } else {
       videoTargetsRef.current.delete(projectRelativePath);
     }
@@ -816,6 +871,11 @@ function CanvasSurfaceRuntime({
 
   useEffect(() => {
     const videoPaths = new Set(projectedNodes.filter(isProjectedVideoNode).map((node) => node.projectRelativePath));
+    for (const path of pendingFeedbackSeekRef.current.keys()) {
+      if (!videoPaths.has(path)) {
+        pendingFeedbackSeekRef.current.delete(path);
+      }
+    }
     setPlayingVideoPaths((current) => {
       const next = new Set([...current].filter((path) => videoPaths.has(path)));
       return next.size === current.size ? current : next;
@@ -840,8 +900,7 @@ function CanvasSurfaceRuntime({
       viewportRect: feedbackPlacementContext.viewportRect,
       reservedRects: [...feedbackPlacementContext.reservedRects],
       barSize: canvasFeedbackBarSizeForTarget({
-        localToolset: canvasFeedbackLocalToolsetForMediaKind(input.node.mediaKind),
-        hasItemRow: canvasFeedbackEntryHasItemRow(canvasFeedback?.entries[input.node.projectRelativePath])
+        localToolset: canvasFeedbackLocalToolsetForMediaKind(input.node.mediaKind)
       })
     });
     if (placement) {
@@ -884,7 +943,17 @@ function CanvasSurfaceRuntime({
       entry: canvasFeedback?.entries[input.node.projectRelativePath],
       canStartVideoMomentFeedback: Boolean(startVideoMomentFeedback),
       startVideoMomentFeedback,
-      seekToMoment: videoTarget ? ((seconds) => videoTarget.pauseAt(seconds)) : undefined
+      seekToMoment: input.node.mediaKind === 'video'
+        ? ((seconds) => {
+            const mountedTarget = videoTargetsRef.current.get(input.node.projectRelativePath);
+            if (mountedTarget) {
+              mountedTarget.pauseAt(seconds);
+              return;
+            }
+            pendingFeedbackSeekRef.current.set(input.node.projectRelativePath, seconds);
+            setRequestedVideoPlayerPath(input.node.projectRelativePath);
+          })
+        : undefined
     });
     return feedbackBarTarget;
   }, [canvasFeedback, onLocalFeedbackDraft, videoTargetRevision]);
@@ -912,7 +981,7 @@ function CanvasSurfaceRuntime({
     }
     const scope = node.mediaKind === 'video' ? 'moment' : 'file';
     const momentTimeSeconds = scope === 'moment'
-      ? pendingFeedbackItem?.momentTimeSeconds
+      ? feedbackComposition?.momentTimeSeconds
       : undefined;
     if (scope === 'moment' && momentTimeSeconds === undefined) {
       return;
@@ -931,13 +1000,31 @@ function CanvasSurfaceRuntime({
     });
   }, [
     feedbackBarTargetForNode,
+    feedbackComposition?.momentTimeSeconds,
     localFeedbackMode,
     onLocalFeedbackDraft,
-    pendingFeedbackItem?.momentTimeSeconds,
     projectedNodes,
     runtime,
     syncFeedbackBarPlacement
   ]);
+
+  const handleFeedbackItemActivate = useCallback((projectRelativePath: string, itemId: string) => {
+    if (!feedbackInteraction) {
+      return;
+    }
+    const node = projectedNodes.find((item) => item.projectRelativePath === projectRelativePath);
+    const surfaceRect = surfaceRef.current?.getBoundingClientRect();
+    if (!node || !surfaceRect) {
+      return;
+    }
+    const camera = runtime.getSnapshot().camera;
+    const nextTarget = feedbackBarTargetForNode({ node, surfaceRect, camera });
+    if (!nextTarget) {
+      return;
+    }
+    syncFeedbackBarPlacement({ node, surfaceRect, camera });
+    feedbackInteraction.activateCapsule(nextTarget, itemId);
+  }, [feedbackBarTargetForNode, feedbackInteraction, projectedNodes, runtime, syncFeedbackBarPlacement]);
 
   const emitFeedbackBarTarget = useCallback(() => {
     const hasFeedbackTargetHandler = Boolean(onFeedbackBarTargetChange);
@@ -1124,25 +1211,23 @@ function CanvasSurfaceRuntime({
                   actions={actions}
                   textBuffer={textFileBuffers[node.projectRelativePath]}
                   forceVideoPlayerMounted={requestedVideoPlayerPath === node.projectRelativePath}
-                  feedbackEntry={canvasFeedback?.entries[node.projectRelativePath]}
+                  feedbackEntry={canvasFeedbackEntries?.[node.projectRelativePath]}
+                  activeFeedbackItemId={feedbackInteraction?.focusedCapsuleId}
                   localFeedbackMode={
-                    (node.mediaKind === 'image' || node.mediaKind === 'video') && pendingFeedbackItem?.projectRelativePath === node.projectRelativePath
+                    (node.mediaKind === 'image' || node.mediaKind === 'video') && feedbackComposition?.projectRelativePath === node.projectRelativePath
                       ? localFeedbackMode
                       : node.mediaKind === 'image'
                         ? localFeedbackMode
                         : undefined
                   }
-                  pendingFeedbackRegion={
-                    (node.mediaKind === 'image' || node.mediaKind === 'video') && pendingFeedbackItem?.projectRelativePath === node.projectRelativePath && pendingFeedbackItem.geometry && typeof pendingFeedbackItem.label === 'number'
-                      ? { label: pendingFeedbackItem.label, geometry: pendingFeedbackItem.geometry }
-                      : undefined
-                  }
+                  localFeedbackRegions={localFeedbackRegionsByPath.get(node.projectRelativePath)}
                   activeFeedbackMomentTimeSeconds={
-                    node.mediaKind === 'video' && pendingFeedbackItem?.projectRelativePath === node.projectRelativePath
-                      ? pendingFeedbackItem.momentTimeSeconds
+                    node.mediaKind === 'video'
+                      ? activeFeedbackMomentTimeSecondsByPath.get(node.projectRelativePath)
                       : undefined
                   }
                   onLocalFeedbackDraft={handleLocalFeedbackDraft}
+                  onFeedbackItemActivate={handleFeedbackItemActivate}
                   onPointerDown={beginNodeMove}
                   onPointerMove={handlePointerMove}
                   onPointerUp={handlePointerUpEvent}
@@ -1183,10 +1268,12 @@ function CanvasSurfaceNodeShell({
   textBuffer,
   forceVideoPlayerMounted,
   feedbackEntry,
+  activeFeedbackItemId,
   localFeedbackMode,
-  pendingFeedbackRegion,
+  localFeedbackRegions,
   activeFeedbackMomentTimeSeconds,
   onLocalFeedbackDraft,
+  onFeedbackItemActivate,
   onPointerDown,
   onPointerMove,
   onPointerUp,
@@ -1212,16 +1299,15 @@ function CanvasSurfaceNodeShell({
   textBuffer: TextFileBuffer | undefined;
   forceVideoPlayerMounted: boolean;
   feedbackEntry?: CanvasFeedbackEntry | undefined;
+  activeFeedbackItemId?: string | undefined;
   localFeedbackMode?: CanvasMediaFeedbackMode | undefined;
-  pendingFeedbackRegion?: {
-    label: number;
-    geometry: CanvasFeedbackGeometry;
-  } | undefined;
+  localFeedbackRegions?: readonly CanvasMediaFeedbackDraftRegion[] | undefined;
   activeFeedbackMomentTimeSeconds?: number | undefined;
   onLocalFeedbackDraft?: ((input: {
     projectRelativePath: string;
     geometry: CanvasFeedbackGeometry;
   }) => void) | undefined;
+  onFeedbackItemActivate?: ((projectRelativePath: string, itemId: string) => void) | undefined;
   onPointerDown: (node: ProjectedCanvasNode, event: React.PointerEvent<Element>) => void;
   onPointerMove: (event: React.PointerEvent<Element>) => void;
   onPointerUp: (event: React.PointerEvent<Element>) => void;
@@ -1281,10 +1367,12 @@ function CanvasSurfaceNodeShell({
       videoPreviewError={videoPreviewError}
       forceVideoPlayerMounted={forceVideoPlayerMounted}
       feedbackEntry={feedbackEntry}
+      activeFeedbackItemId={activeFeedbackItemId}
       localFeedbackMode={localFeedbackMode}
-      pendingFeedbackRegion={pendingFeedbackRegion}
+      localFeedbackRegions={localFeedbackRegions}
       activeFeedbackMomentTimeSeconds={activeFeedbackMomentTimeSeconds}
       onLocalFeedbackDraft={onLocalFeedbackDraft}
+      onFeedbackItemActivate={onFeedbackItemActivate}
       onPointerDown={onPointerDown}
       onPointerMove={onPointerMove}
       onPointerUp={onPointerUp}

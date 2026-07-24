@@ -13,11 +13,13 @@ import { createHttpWorkbenchApiClient } from '../api/httpWorkbenchApiClient';
 import { getDebruteShellApi, type NativeWindowState } from '../api/shellApi';
 import { CanvasEditor } from './canvas/CanvasEditor';
 import { CanvasCardBar } from './canvas/CanvasCardBar';
-import { CanvasFeedbackBar } from './canvas/CanvasFeedbackBar';
 import { CanvasMinimapBar } from './canvas/CanvasMinimapBar';
 import { CanvasResetLayoutButton } from './canvas/CanvasResetLayoutButton';
 import { createCanvasOverlayRuntime } from './canvas/CanvasOverlayRuntime';
-import { useCanvasFeedbackController } from './canvas/useCanvasFeedbackController';
+import {
+  CanvasFeedbackInteractionBar,
+  useCanvasFeedbackInteraction
+} from './canvas/CanvasFeedbackInteraction';
 import type { CanvasEditorRuntime, CanvasRuntimeSnapshot } from './canvas/runtime/CanvasEditorRuntime';
 import {
   isSnapshotAffectingWorkbenchEvent,
@@ -241,7 +243,7 @@ function WorkbenchRuntimeApp({ initialRoute }: { initialRoute: Exclude<DebruteWo
     const currentI18n = settingsController.getCurrentI18n();
     setNotifications((current) => [currentI18n.t('canvas.feedback.unavailable', { message }), ...current].slice(0, 4));
   }, [settingsController.getCurrentI18n]);
-  const feedbackController = useCanvasFeedbackController({
+  const feedbackInteraction = useCanvasFeedbackInteraction({
     api,
     projectId: runtimeProjectId,
     overlayRuntime: canvasOverlayRuntime,
@@ -288,13 +290,13 @@ function WorkbenchRuntimeApp({ initialRoute }: { initialRoute: Exclude<DebruteWo
     setContextMenu(undefined);
     setCanvasMinimapOpen(false);
     explorerController.resetForProject(opened.projectId);
-    feedbackController.reset();
-    void feedbackController.load();
+    feedbackInteraction.reset();
+    void feedbackInteraction.load();
   }, [
     commitProjectSnapshot,
     explorerController.resetForProject,
-    feedbackController.load,
-    feedbackController.reset,
+    feedbackInteraction.load,
+    feedbackInteraction.reset,
     notify,
     settingsController.getCurrentI18n
   ]);
@@ -316,7 +318,7 @@ function WorkbenchRuntimeApp({ initialRoute }: { initialRoute: Exclude<DebruteWo
         }
       ])
     ));
-    feedbackController.restoreWorkingCopy(opened.workingCopies.feedback);
+    feedbackInteraction.restoreWorkingCopies(opened.workingCopies.feedback);
     setTextEditorWindows({});
     setWindowOrder(DEFAULT_WORKBENCH_WINDOW_ORDER);
     setProjectOpenAttemptedPath(undefined);
@@ -325,7 +327,7 @@ function WorkbenchRuntimeApp({ initialRoute }: { initialRoute: Exclude<DebruteWo
     setNotifications((current) => [currentI18n.t('shell.notifications.projectOpened', { name: opened.snapshot.metadata.project.name }), ...current].slice(0, 4));
   }, [
     commitProjectSession,
-    feedbackController.restoreWorkingCopy,
+    feedbackInteraction.restoreWorkingCopies,
     settingsController.getCurrentI18n
   ]);
 
@@ -521,7 +523,7 @@ function WorkbenchRuntimeApp({ initialRoute }: { initialRoute: Exclude<DebruteWo
   useEffect(() => {
     return api.onEvent((event) => {
       settingsController.applyEvent(event);
-      feedbackController.applyEvent(event);
+      feedbackInteraction.applyEvent(event);
 
       if (isSnapshotAffectingWorkbenchEvent(event)) {
         commitProjectSnapshot(
@@ -534,14 +536,14 @@ function WorkbenchRuntimeApp({ initialRoute }: { initialRoute: Exclude<DebruteWo
       if (event.type === 'project.fileChanged') {
         void refreshTextFileBuffer(event.event.projectRelativePath);
         if (event.event.projectRelativePath === '.debrute/reviews/canvas-feedback.json') {
-          void feedbackController.load();
+          void feedbackInteraction.load();
         }
       }
     });
   }, [
     commitProjectSnapshot,
-    feedbackController.applyEvent,
-    feedbackController.load,
+    feedbackInteraction.applyEvent,
+    feedbackInteraction.load,
     refreshTextFileBuffer,
     settingsController.applyEvent
   ]);
@@ -832,7 +834,7 @@ function WorkbenchRuntimeApp({ initialRoute }: { initialRoute: Exclude<DebruteWo
     },
     explorerSelection: explorerController.selection,
     adobeBridge: settingsController.adobeBridge,
-    canvasFeedback: feedbackController.feedback,
+    canvasFeedback: feedbackInteraction.feedback,
     textFileBuffers,
     textEditorWindows,
     notifications
@@ -866,7 +868,6 @@ function WorkbenchRuntimeApp({ initialRoute }: { initialRoute: Exclude<DebruteWo
     bringCanvasNodeToFront,
     updateCanvasVideoPlaybackState,
     updateCanvasTextViewportState,
-    updateCanvasFeedbackEntry: feedbackController.updateEntry,
     addProjectPathToCanvasMap,
     createCanvas,
     renameCanvas,
@@ -877,7 +878,6 @@ function WorkbenchRuntimeApp({ initialRoute }: { initialRoute: Exclude<DebruteWo
     openTerminalPanel
   }), [
     settingsController.actions,
-    feedbackController.updateEntry,
     sendProjectFileToPhotoshop,
     openSendToPhotoshopPicker,
     ensureTextFileBuffer,
@@ -982,7 +982,7 @@ function WorkbenchRuntimeApp({ initialRoute }: { initialRoute: Exclude<DebruteWo
     ...(cardBarRect ? [cardBarRect] : [])
   ];
   useEffect(() => {
-    const target = feedbackController.currentTarget;
+    const target = feedbackInteraction.currentTarget;
     if (!activeCanvasRuntime || !target) {
       return;
     }
@@ -1004,7 +1004,7 @@ function WorkbenchRuntimeApp({ initialRoute }: { initialRoute: Exclude<DebruteWo
   }, [
     activeCanvasRuntime,
     canvasOverlayRuntime,
-    feedbackController.currentTarget,
+    feedbackInteraction.currentTarget,
     floatingBarReservedRects,
     workbenchViewportRect
   ]);
@@ -1201,12 +1201,9 @@ function WorkbenchRuntimeApp({ initialRoute }: { initialRoute: Exclude<DebruteWo
                   reservedRects: floatingBarReservedRects
                 }}
                 onCurrentNodesChange={handleActiveCanvasCurrentNodesChange}
-                onFeedbackBarTargetChange={feedbackController.handleTargetChange}
+                feedbackInteraction={feedbackInteraction.canvas}
                 onRuntimeChange={setActiveCanvasRuntime}
                 onOpenContextMenu={openWorkbenchContextMenu}
-                localFeedbackMode={feedbackController.localMode}
-                pendingFeedbackItem={feedbackController.pendingItem}
-                onLocalFeedbackDraft={feedbackController.handleDraft}
               />
             )}
           </div>
@@ -1242,52 +1239,10 @@ function WorkbenchRuntimeApp({ initialRoute }: { initialRoute: Exclude<DebruteWo
                 onResetCanvasLayout={resetActiveCanvasLayout}
               />
             ) : null}
-            {feedbackController.currentTarget ? (
-              <CanvasFeedbackBar
-                projectRelativePath={feedbackController.currentTarget.projectRelativePath}
-                entry={feedbackController.currentTarget.entry}
-                onUpdate={actions.updateCanvasFeedbackEntry}
-                overlayRuntime={canvasOverlayRuntime}
-                localToolset={feedbackController.currentTarget.localToolset}
-                localFeedbackMode={feedbackController.currentTarget.localToolset !== 'none' ? feedbackController.localMode : undefined}
-                onLocalFeedbackModeChange={feedbackController.currentTarget.localToolset === 'image' ? feedbackController.handleModeChange : undefined}
-                canStartVideoMomentFeedback={feedbackController.currentTarget.canStartVideoMomentFeedback}
-                onStartVideoMomentFeedback={feedbackController.currentTarget.startVideoMomentFeedback}
-                onSeekToMoment={feedbackController.currentTarget.seekToMoment}
-                pendingItemComment={
-                  feedbackController.pendingItem?.projectRelativePath === feedbackController.currentTarget.projectRelativePath
-                    ? feedbackController.pendingComment
-                    : undefined
-                }
-                pendingItemLabel={
-                  feedbackController.pendingItem?.projectRelativePath === feedbackController.currentTarget.projectRelativePath
-                    ? feedbackController.pendingItem.label
-                    : undefined
-                }
-                pendingItemReadyForComment={
-                  feedbackController.pendingItem?.projectRelativePath === feedbackController.currentTarget.projectRelativePath
-                    ? feedbackController.pendingItem.kind === 'comment' || feedbackController.pendingItem.geometry !== undefined
-                    : undefined
-                }
-                onPendingItemCommentChange={
-                  feedbackController.pendingItem?.projectRelativePath === feedbackController.currentTarget.projectRelativePath
-                    ? feedbackController.setPendingComment
-                    : undefined
-                }
-                onSavePendingItem={
-                  feedbackController.pendingItem?.projectRelativePath === feedbackController.currentTarget.projectRelativePath
-                    ? feedbackController.savePending
-                    : undefined
-                }
-                onCancelPendingItem={
-                  feedbackController.pendingItem?.projectRelativePath === feedbackController.currentTarget.projectRelativePath
-                    ? feedbackController.cancelPending
-                    : undefined
-                }
-                onPointerEnter={feedbackController.handlePointerEnter}
-                onPointerLeave={feedbackController.handlePointerLeave}
-              />
-            ) : null}
+            <CanvasFeedbackInteractionBar
+              interaction={feedbackInteraction}
+              overlayRuntime={canvasOverlayRuntime}
+            />
             {snapshot?.canvasRegistry.status === 'ready' ? (
               <CanvasCardBar
                 canvases={canvasCards}

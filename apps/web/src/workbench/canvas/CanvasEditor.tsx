@@ -3,12 +3,11 @@ import { Boxes } from 'lucide-react';
 import type { ProjectedCanvasNode } from '@debrute/canvas-core';
 import type { WorkbenchActions, WorkbenchState } from '../../types';
 import type { WorkbenchContextMenuPosition, WorkbenchContextMenuTarget } from '../shell/contextMenu';
-import type { CanvasFeedbackBarTarget, CanvasLocalFeedbackDraft, FloatingBarRect } from '../shell/floatingBars';
+import type { FloatingBarRect } from '../shell/floatingBars';
 import { getCanvasById } from '../services/canvasState';
 import { CanvasSurface } from './CanvasSurface';
 import type { CanvasOverlayRuntime } from './CanvasOverlayRuntime';
-import type { PendingCanvasFeedbackItem } from './canvasFeedbackDraft';
-import type { CanvasMediaFeedbackMode } from './CanvasMediaFeedbackLayer';
+import type { CanvasFeedbackCanvasBinding } from './CanvasFeedbackInteraction';
 import type { CanvasEditorRuntime } from './runtime/CanvasEditorRuntime';
 import { createCanvasEditorRuntime } from './runtime/CanvasEditorRuntime';
 import { ProjectOpenPanel } from '../project-open/ProjectOpenPanel';
@@ -22,12 +21,9 @@ export function CanvasEditor({
   minimapOpen,
   feedbackPlacementContext,
   onCurrentNodesChange,
-  onFeedbackBarTargetChange,
+  feedbackInteraction,
   onRuntimeChange,
   onOpenContextMenu,
-  localFeedbackMode,
-  pendingFeedbackItem,
-  onLocalFeedbackDraft
 }: {
   canvasId: string | undefined;
   state: WorkbenchState;
@@ -40,12 +36,9 @@ export function CanvasEditor({
     reservedRects: readonly FloatingBarRect[];
   };
   onCurrentNodesChange?: ((canvasId: string, nodes: ProjectedCanvasNode[] | undefined) => void) | undefined;
-  onFeedbackBarTargetChange?: ((target: CanvasFeedbackBarTarget | undefined) => void) | undefined;
+  feedbackInteraction?: CanvasFeedbackCanvasBinding | undefined;
   onRuntimeChange?: ((runtime: CanvasEditorRuntime | undefined) => void) | undefined;
   onOpenContextMenu?: ((target: WorkbenchContextMenuTarget, position: WorkbenchContextMenuPosition) => void) | undefined;
-  localFeedbackMode?: CanvasMediaFeedbackMode | undefined;
-  pendingFeedbackItem?: PendingCanvasFeedbackItem | undefined;
-  onLocalFeedbackDraft?: ((input: CanvasLocalFeedbackDraft) => void) | undefined;
 }): React.ReactElement {
   const canvas = getCanvasById(state.snapshot, canvasId);
   const projection = state.snapshot?.projections.find((item) => item.canvasId === canvas?.id);
@@ -72,10 +65,10 @@ export function CanvasEditor({
 
   React.useEffect(() => {
     if (!canvas || !projection) {
-      onFeedbackBarTargetChange?.(undefined);
+      feedbackInteraction?.handleTargetChange(undefined);
       onRuntimeChange?.(undefined);
     }
-  }, [canvas, onFeedbackBarTargetChange, onRuntimeChange, projection]);
+  }, [canvas, feedbackInteraction, onRuntimeChange, projection]);
 
   React.useEffect(() => {
     const runtimeInput = runtimeInputRef.current;
@@ -113,14 +106,11 @@ export function CanvasEditor({
         actions={actions}
         textFileBuffers={state.textFileBuffers}
         canvasFeedback={state.canvasFeedback}
-        localFeedbackMode={localFeedbackMode}
-        pendingFeedbackItem={pendingFeedbackItem}
-        onLocalFeedbackDraft={onLocalFeedbackDraft}
+        feedbackInteraction={feedbackInteraction}
         overlayRuntime={overlayRuntime}
         minimapOpen={minimapOpen}
         feedbackPlacementContext={feedbackPlacementContext}
         onCurrentNodesChange={onCurrentNodesChange}
-        onFeedbackBarTargetChange={onFeedbackBarTargetChange}
         onOpenContextMenu={onOpenContextMenu}
         textPreviewStyleDependencyKey={state.resolvedTheme}
       />

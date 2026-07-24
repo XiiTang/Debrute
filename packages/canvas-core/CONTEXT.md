@@ -89,6 +89,11 @@ A selected categorical review signal that applies to one Project file as a
 whole.
 _Avoid_: Reaction event, approval state
 
+**Feedback Composition**:
+Transient Workbench state that combines a target, Feedback kind, scope, and any
+selected moment or geometry before a non-empty comment forms a Feedback Item.
+_Avoid_: Pending Item, Draft Item
+
 **Feedback Item**:
 A durable non-empty review comment, optionally paired with normalized spatial
 geometry, and scoped either to a file or a Feedback Moment.

@@ -166,6 +166,10 @@ describe('Runtime Workbench connection', () => {
     expect(harness.calls.at(-1)?.path).toBe(
       '/api/projects/project-1/working-copies/text/draft.md'
     );
+    await client.clearFeedbackWorkingCopy('project-1', 'feedback-a');
+    expect(harness.calls.at(-1)?.path).toBe(
+      '/api/projects/project-1/working-copies/feedback/feedback-a'
+    );
     client.dispose();
   });
 });
@@ -225,7 +229,7 @@ function createHarness() {
                 }
               }
             : {},
-          feedback: null
+          feedback: {}
         }
       }));
       return Response.json({ outcome: 'bound', projectId });

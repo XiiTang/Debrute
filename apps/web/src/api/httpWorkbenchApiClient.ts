@@ -549,12 +549,12 @@ export function createHttpWorkbenchApiClient(): WorkbenchApiClient {
     ),
     putFeedbackWorkingCopy: (projectId: string, input: WorkbenchFeedbackWorkingCopy) => request<WorkbenchFeedbackWorkingCopy>(
       'PUT',
-      projectPathFor(projectId, '/working-copies/feedback'),
+      projectPathFor(projectId, `/working-copies/feedback/${encodeURIComponent(input.itemId)}`),
       input
     ),
-    clearFeedbackWorkingCopy: (projectId) => request<void>(
+    clearFeedbackWorkingCopy: (projectId, itemId) => request<void>(
       'DELETE',
-      projectPathFor(projectId, '/working-copies/feedback')
+      projectPathFor(projectId, `/working-copies/feedback/${encodeURIComponent(itemId)}`)
     ),
     saveCanvasTextPreviewSource: (input) => runProjectRequest((scope, signal) => (
       requestFormData<SaveCanvasTextPreviewSourceResult>(
@@ -762,7 +762,7 @@ function isProjectBoundFrame(value: unknown): value is ProjectBoundFrame {
 function isWorkingCopies(value: unknown): value is WorkbenchWorkingCopies {
   return isObject(value)
     && isObject(value.text)
-    && (value.feedback === null || isObject(value.feedback));
+    && isObject(value.feedback);
 }
 
 function isProjectOpenFailedFrame(value: unknown): value is ProjectOpenFailedFrame {

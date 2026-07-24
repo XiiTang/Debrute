@@ -213,21 +213,19 @@ export interface WorkbenchTextWorkingCopy {
 }
 
 export interface WorkbenchFeedbackWorkingCopy {
-  pendingItem: {
-    projectRelativePath: string;
-    kind: 'comment' | 'pin' | 'region';
-    scope: 'file' | 'moment';
-    momentTimeSeconds?: number | undefined;
-    geometry?: import('@debrute/canvas-core').CanvasFeedbackGeometry | undefined;
-    label?: number | string | undefined;
-  };
-  pendingComment: string;
-  localMode: 'pin' | 'rect' | null;
+  itemId: string;
+  createdAt: string;
+  projectRelativePath: string;
+  kind: 'comment' | 'pin' | 'region';
+  scope: 'file' | 'moment';
+  momentTimeSeconds?: number | undefined;
+  geometry?: import('@debrute/canvas-core').CanvasFeedbackGeometry | undefined;
+  comment: string;
 }
 
 export interface WorkbenchWorkingCopies {
   text: Record<string, WorkbenchTextWorkingCopy>;
-  feedback: WorkbenchFeedbackWorkingCopy | null;
+  feedback: Record<string, WorkbenchFeedbackWorkingCopy>;
 }
 
 type WorkbenchProjectPickerOpenResult =
@@ -955,7 +953,7 @@ export interface WorkbenchApiClient {
   putTextWorkingCopy(projectId: string, input: WorkbenchTextWorkingCopy): Promise<WorkbenchTextWorkingCopy>;
   clearTextWorkingCopy(projectId: string, projectRelativePath: string): Promise<void>;
   putFeedbackWorkingCopy(projectId: string, input: WorkbenchFeedbackWorkingCopy): Promise<WorkbenchFeedbackWorkingCopy>;
-  clearFeedbackWorkingCopy(projectId: string): Promise<void>;
+  clearFeedbackWorkingCopy(projectId: string, itemId: string): Promise<void>;
   saveCanvasTextPreviewSource(input: SaveCanvasTextPreviewSourceInput): Promise<SaveCanvasTextPreviewSourceResult>;
   readCanvasTextPreviewSources(input: CanvasTextPreviewSourceAvailabilityRequest): Promise<CanvasTextPreviewSourceAvailabilityResponse>;
   readCanvasVideoPreviewSources(input: CanvasVideoPreviewSourceRequest): Promise<CanvasVideoPreviewSourceResponse>;

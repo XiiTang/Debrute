@@ -33,8 +33,9 @@ export interface CanvasVideoNodeContentProps {
   onUpdatePlaybackTime: (projectRelativePath: string, currentTimeSeconds: number) => void | Promise<void>;
   onVideoPreviewError?: ((projectRelativePath: string, preview: CanvasVideoPreviewSource, message: string) => void) | undefined;
   feedbackEntry?: CanvasFeedbackEntry | undefined;
+  activeFeedbackItemId?: string | undefined;
   localFeedbackMode?: CanvasMediaFeedbackMode | undefined;
-  pendingFeedbackRegion?: CanvasMediaFeedbackDraftRegion | undefined;
+  localFeedbackRegions?: readonly CanvasMediaFeedbackDraftRegion[] | undefined;
   activeFeedbackMomentTimeSeconds?: number | undefined;
   onTitlePointerDown?: ((event: React.PointerEvent<Element>) => void) | undefined;
   onTitlePointerMove?: ((event: React.PointerEvent<Element>) => void) | undefined;
@@ -43,6 +44,7 @@ export interface CanvasVideoNodeContentProps {
     projectRelativePath: string;
     geometry: CanvasFeedbackGeometry;
   }) => void) | undefined;
+  onFeedbackItemActivate?: ((itemId: string) => void) | undefined;
 }
 
 function canvasVideoPreviewLoadKey(preview: CanvasVideoPreviewSource): string {
@@ -62,13 +64,15 @@ export function CanvasVideoNodeContent({
   onUpdatePlaybackTime,
   onVideoPreviewError,
   feedbackEntry,
+  activeFeedbackItemId,
   localFeedbackMode,
-  pendingFeedbackRegion,
+  localFeedbackRegions,
   activeFeedbackMomentTimeSeconds,
   onTitlePointerDown,
   onTitlePointerMove,
   onTitlePointerUp,
-  onLocalFeedbackDraft
+  onLocalFeedbackDraft,
+  onFeedbackItemActivate
 }: CanvasVideoNodeContentProps): React.ReactElement {
   const i18n = useI18n();
   const [error, setError] = useState<string>();
@@ -372,7 +376,11 @@ export function CanvasVideoNodeContent({
               currentTimeSeconds: feedbackMomentTimeSeconds
             })}
             mode={localFeedbackMode}
-            draftRegion={pendingFeedbackRegion}
+            draftRegions={localFeedbackRegions?.filter((region) => (
+              region.momentTimeSeconds === feedbackMomentTimeSeconds
+            ))}
+            activeItemId={activeFeedbackItemId}
+            onItemActivate={onFeedbackItemActivate}
             onRegionDraft={(geometry) => onLocalFeedbackDraft?.({
               projectRelativePath: node.projectRelativePath,
               geometry

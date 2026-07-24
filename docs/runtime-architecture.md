@@ -122,9 +122,11 @@ notifies Desktop to close, stops accepting Workbench HTTP connections, ends
 every live Workbench stream and credential, terminates owned operations and
 terminals, releases native endpoints and workers, removes its tray, and exits.
 It does not ask Workbenches to save or submit state and has no blocker or
-confirmation protocol. Unsaved text and feedback are already protected by
-Runtime Working Copies. In-process native components receive no separate drain
-or shutdown phase; process exit owns their final termination.
+confirmation protocol. Unsaved text and not-yet-accepted Canvas Feedback values
+are already protected by Runtime Working Copies; accepted Canvas Feedback is
+Runtime state, while composition without non-empty text is disposable. In-process
+native components receive no separate drain or shutdown phase; process exit
+owns their final termination.
 
 An early Desktop Command-Q is still Product Quit. Desktop finishes its one
 in-progress Control acquisition and submits the request once before opening a
@@ -283,6 +285,14 @@ callers may redirect them if they need a file copy. Product Quit terminates
 active Model Operations with the rest of Runtime-owned work instead of running
 a separate drain or recovery protocol.
 
+One monotonic issued sequence orders the current Runtime's Operation listing and
+cursor positions. Exhausting it is a process-fatal invariant failure, not a
+recoverable submission error. Per-Operation progress counts are bounded by the
+accepted Item collection; an impossible underflow or contradictory settlement
+also fails the Runtime instead of saturating to a plausible value. Invalid
+input, cancellation, Provider failure, and every other ordinary execution
+failure retain their typed request or Operation outcomes.
+
 Operation snapshots, execution variants, states, Artifact Pointers, Batch Item
 Outcomes, and list results are Runtime-produced response values. Their Rust
 types serialize outward but are not deserialization or persistence contracts.
@@ -357,13 +367,14 @@ missing response is never permission to replay a state-changing command.
 
 ## Working Copies And Terminal Lifetime
 
-Runtime persists unsaved text values and the current feedback draft as Working
-Copies under its private state directory, keyed by the stable Project id.
-Editing writes the complete current value; a successful matching save or an
-explicit discard clears it. Working Copies have no time-to-live or arbitrary
-count cap and are restored in the next Project binding. Reconstructible Canvas
-camera, selection, and panel state remains frontend-local and is not a Working
-Copy.
+Runtime persists unsaved text values and not-yet-accepted Canvas Feedback values
+as Working Copies under its private state directory, keyed by the stable Project
+id. Feedback values are additionally keyed by stable Feedback Capsule identity.
+Editing writes the complete current value; a successful matching save, accepted
+feedback mutation, explicit discard, or feedback deletion clears only the
+corresponding value. Working Copies have no time-to-live or arbitrary count cap
+and are restored in the next Project binding. Reconstructible Canvas camera,
+selection, and panel state remains frontend-local and is not a Working Copy.
 
 Runtime owns PTYs and holds a `running-terminal` Project Use independently of a
 Workbench connection. One Project-scoped WebSocket transports terminal

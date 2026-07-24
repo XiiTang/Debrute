@@ -4,20 +4,16 @@ import { join } from 'node:path';
 import type {
   ActivationIntent,
   ControlEvent,
-  RecentProject,
-  WorkbenchThemePreference
+  RecentProject
 } from '@debrute/app-protocol';
 import type { RuntimeControlClient } from '@debrute/runtime-control-client';
 
 import { buildDesktopApplicationMenu } from './desktopApplicationMenu.js';
 import { requireDesktopPlatform } from './desktopPlatform.js';
-import {
-  DesktopWindowControlAdapter,
-  type DesktopNativeWindow
-} from './desktopWindowControlAdapter.js';
+import { DesktopWindowHost } from './desktopWindowHost.js';
 import { DesktopProductQuit } from './desktopProductQuit.js';
+import { ElectronDesktopWindow } from './electronDesktopWindow.js';
 import {
-  desktopBrowserWindowChromeOptions,
   nativeWindowIpcChannels,
   registerNativeWindowIpc,
   type ApplicationMenuCommand
@@ -30,19 +26,18 @@ import {
 import { connectOrLaunchDesktopRuntime } from './runtime/desktopRuntimeLauncher.js';
 import { desktopRuntimeLaunchConfiguration } from './runtime/desktopProductBootstrap.js';
 
-const { app, BrowserWindow, dialog, ipcMain, Menu, nativeImage, nativeTheme } = electron;
+const { app, BrowserWindow, dialog, ipcMain, Menu, nativeImage } = electron;
 const projectIconPath = join(__dirname, 'icon.png');
 const dockIconPath = join(__dirname, 'dock_icon.png');
 const desktopPlatform = requireDesktopPlatform(process.platform);
 
 let control: RuntimeControlClient | undefined;
-let windows: DesktopWindowControlAdapter<ElectronDesktopWindow> | undefined;
+let windowHost: DesktopWindowHost<Electron.BrowserWindow, ElectronDesktopWindow> | undefined;
 let appQuitAllowed = false;
 const productQuit = new DesktopProductQuit();
 let runtimeLossReported = false;
 let recentProjects: RecentProject[] = [];
 const pendingOpenIntents: DesktopOpenIntent[] = [];
-const nativeWindows = new Map<string, ElectronDesktopWindow>();
 
 if (app.requestSingleInstanceLock()) {
   registerDesktopLifecycle();
@@ -71,7 +66,7 @@ function registerDesktopLifecycle(): void {
   });
 
   app.on('window-all-closed', () => {
-    // DesktopWindowControlAdapter closes Control and exits Desktop locally.
+    // DesktopWindowHost closes Control and exits Desktop locally.
   });
 
   app.on('before-quit', (event) => {
@@ -98,7 +93,7 @@ async function startDesktop(): Promise<void> {
     browserWindow: BrowserWindow,
     executeNativeMenuCommand,
     takeDesktopLaunchTicket: (browserWindow) => (
-      findNativeWindow(browserWindow)?.takeDesktopLaunchTicket()
+      windowHost?.takeDesktopLaunchTicket(browserWindow)
     )
   });
   const runtime = runtimeLaunchConfiguration();
@@ -113,12 +108,25 @@ async function startDesktop(): Promise<void> {
     environment: process.env
   });
   const activeControl = control;
-  windows = new DesktopWindowControlAdapter({
+  windowHost = new DesktopWindowHost({
     control: activeControl,
-    createWindow: createNativeWindow,
+    createWindow: ({ windowKey }) => new ElectronDesktopWindow({
+      windowKey,
+      platform: desktopPlatform,
+      projectIconPath,
+      preloadDirectory: __dirname,
+      developmentOrigin: process.env.DEBRUTE_DESKTOP_VITE_ORIGIN,
+      onRendererGone: (reason) => {
+        dialog.showErrorBox(
+          'Debrute Workbench stopped',
+          `The window renderer ended (${reason}). Use View > Reload Workbench to start a fresh connection.`
+        );
+      }
+    }),
     quitDesktop: () => {
       appQuitAllowed = true;
       control = undefined;
+      windowHost = undefined;
       app.quit();
     },
     onError: reportDesktopError
@@ -143,122 +151,6 @@ async function startDesktop(): Promise<void> {
   while (pendingOpenIntents.length > 0) {
     await dispatchOpenIntent(pendingOpenIntents.shift());
   }
-}
-
-async function createNativeWindow(input: {
-  windowKey: string;
-  ticket: string;
-  url: string;
-  themePreference: WorkbenchThemePreference;
-}): Promise<ElectronDesktopWindow> {
-  const browserWindow = new BrowserWindow({
-    width: 1440,
-    height: 940,
-    minWidth: 1100,
-    minHeight: 720,
-    show: false,
-    ...desktopBrowserWindowChromeOptions(desktopPlatform),
-    backgroundColor: desktopWindowBackgroundColor(
-      input.themePreference,
-      nativeTheme.shouldUseDarkColors
-    ),
-    icon: projectIconPath,
-    webPreferences: {
-      preload: join(__dirname, 'preload.js'),
-      contextIsolation: true,
-      nodeIntegration: false,
-      sandbox: false,
-      partition: `debrute-${input.windowKey}`
-    }
-  });
-  const nativeWindow = new ElectronDesktopWindow(
-    input.windowKey,
-    browserWindow,
-    input.ticket
-  );
-  nativeWindows.set(input.windowKey, nativeWindow);
-  nativeWindow.onClosed(() => nativeWindows.delete(input.windowKey));
-  browserWindow.webContents.on('render-process-gone', (_event, details) => {
-    dialog.showErrorBox(
-      'Debrute Workbench stopped',
-      `The window renderer ended (${details.reason}). Use View > Reload Workbench to start a fresh connection.`
-    );
-  });
-  try {
-    await nativeWindow.load(input.url);
-    nativeWindow.show();
-    return nativeWindow;
-  } catch (error) {
-    nativeWindows.delete(input.windowKey);
-    nativeWindow.destroy();
-    throw error;
-  }
-}
-
-class ElectronDesktopWindow implements DesktopNativeWindow {
-  private launchTicket: string | undefined;
-
-  constructor(
-    readonly windowKey: string,
-    readonly window: Electron.BrowserWindow,
-    launchTicket: string
-  ) {
-    this.launchTicket = launchTicket;
-  }
-
-  isDestroyed(): boolean {
-    return this.window.isDestroyed();
-  }
-
-  show(): void {
-    this.window.show();
-  }
-
-  focus(): void {
-    this.window.focus();
-  }
-
-  prepareLaunch(input: {
-    ticket: string;
-    themePreference: WorkbenchThemePreference;
-  }): void {
-    this.launchTicket = input.ticket;
-    this.window.setBackgroundColor(desktopWindowBackgroundColor(
-      input.themePreference,
-      nativeTheme.shouldUseDarkColors
-    ));
-  }
-
-  takeDesktopLaunchTicket(): string | undefined {
-    const ticket = this.launchTicket;
-    this.launchTicket = undefined;
-    return ticket;
-  }
-
-  async load(url: string): Promise<void> {
-    await this.window.loadURL(rewriteRuntimeUrlForDevelopment(url));
-  }
-
-  destroy(): void {
-    this.launchTicket = undefined;
-    if (!this.window.isDestroyed()) {
-      this.window.destroy();
-    }
-  }
-
-  onClosed(listener: () => void): () => void {
-    this.window.once('closed', listener);
-    return () => this.window.removeListener('closed', listener);
-  }
-}
-
-function desktopWindowBackgroundColor(
-  themePreference: WorkbenchThemePreference,
-  systemUsesDarkColors: boolean
-): string {
-  const dark = themePreference === 'dark'
-    || (themePreference === 'system' && systemUsesDarkColors);
-  return dark ? '#181818' : '#f4f5f7';
 }
 
 async function dispatchOpenIntent(intent: DesktopOpenIntent | undefined): Promise<void> {
@@ -358,16 +250,10 @@ async function openProjectInWindow(
 }
 
 async function reloadWindow(window: Electron.BrowserWindow): Promise<void> {
-  const nativeWindow = findNativeWindow(window);
-  if (!nativeWindow) {
-    throw new Error('Debrute native window mapping is not available.');
+  if (!windowHost) {
+    throw new Error('Debrute window host is not available.');
   }
-  if (!windows) {
-    throw new Error('Debrute window control adapter is not available.');
-  }
-  if (!await windows.reloadWindow(nativeWindow.windowKey)) {
-    throw new Error('Debrute native window could not be reloaded.');
-  }
+  await windowHost.reload(window);
 }
 
 async function executeNativeMenuCommand(
@@ -402,12 +288,6 @@ function requestProductQuit(): void {
   void productQuit.request(control).catch(reportDesktopError);
 }
 
-function findNativeWindow(
-  browserWindow: Electron.BrowserWindow | undefined
-): ElectronDesktopWindow | undefined {
-  return [...nativeWindows.values()].find((candidate) => candidate.window === browserWindow);
-}
-
 function runtimeLaunchConfiguration(): {
   entrypoint: string;
   arguments: string[];
@@ -425,17 +305,6 @@ function runtimeLaunchConfiguration(): {
     executablePath: process.execPath,
     platform: desktopPlatform
   });
-}
-
-function rewriteRuntimeUrlForDevelopment(url: string): string {
-  const developmentOrigin = process.env.DEBRUTE_DESKTOP_VITE_ORIGIN;
-  if (!developmentOrigin) {
-    return url;
-  }
-  const source = new URL(url);
-  const target = new URL(developmentOrigin);
-  target.pathname = source.pathname;
-  return target.toString();
 }
 
 function reportDesktopError(error: unknown): void {

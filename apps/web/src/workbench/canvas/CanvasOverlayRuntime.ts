@@ -1,11 +1,11 @@
-import type { FloatingBarRect } from '../shell/floatingBars';
+import type { FloatingBarPlacement } from '../shell/floatingBars';
 import type { CanvasRect } from './runtime/canvasGeometry';
 
 export interface CanvasOverlayRuntime {
   bindMinimapViewport(element: SVGRectElement): () => void;
   setMinimapViewport(rect: CanvasRect): void;
   bindFeedbackBar(element: HTMLElement): () => void;
-  setFeedbackBarPlacement(rect: FloatingBarRect): void;
+  setFeedbackBarPlacement(rect: FloatingBarPlacement): void;
   clearFeedbackBarPlacement(): void;
   dispose(): void;
 }
@@ -14,7 +14,7 @@ export function createCanvasOverlayRuntime(): CanvasOverlayRuntime {
   let minimapViewport: SVGRectElement | undefined;
   let feedbackBar: HTMLElement | undefined;
   let currentMinimapRect: CanvasRect | undefined;
-  let currentFeedbackRect: FloatingBarRect | undefined;
+  let currentFeedbackRect: FloatingBarPlacement | undefined;
   let lastMinimapRect = '';
   let lastFeedbackRect = '';
 
@@ -83,6 +83,7 @@ export function createCanvasOverlayRuntime(): CanvasOverlayRuntime {
       feedbackBar.style.removeProperty('top');
       feedbackBar.style.removeProperty('width');
       feedbackBar.style.removeProperty('height');
+      feedbackBar.style.removeProperty('transform');
       hideFeedbackBar(feedbackBar);
     },
     dispose() {
@@ -96,8 +97,8 @@ export function createCanvasOverlayRuntime(): CanvasOverlayRuntime {
   };
 }
 
-function rectSignature(rect: CanvasRect | FloatingBarRect): string {
-  return `${rect.x}:${rect.y}:${rect.width}:${rect.height}`;
+function rectSignature(rect: CanvasRect | FloatingBarPlacement): string {
+  return `${rect.x}:${rect.y}:${rect.width}:${rect.height}:${'placement' in rect ? rect.placement : ''}`;
 }
 
 function writeMinimapViewport(element: SVGRectElement, rect: CanvasRect): void {
@@ -107,11 +108,17 @@ function writeMinimapViewport(element: SVGRectElement, rect: CanvasRect): void {
   element.setAttribute('height', String(Math.max(2, rect.height)));
 }
 
-function writeFeedbackBarPlacement(element: HTMLElement, rect: FloatingBarRect): void {
+function writeFeedbackBarPlacement(element: HTMLElement, rect: FloatingBarPlacement): void {
   element.style.left = `${rect.x}px`;
-  element.style.top = `${rect.y}px`;
   element.style.width = `${rect.width}px`;
-  element.style.height = `${rect.height}px`;
+  element.style.removeProperty('height');
+  if (rect.placement === 'above') {
+    element.style.top = `${rect.y + rect.height}px`;
+    element.style.transform = 'translateY(-100%)';
+  } else {
+    element.style.top = `${rect.y}px`;
+    element.style.removeProperty('transform');
+  }
 }
 
 function showFeedbackBar(element: HTMLElement): void {

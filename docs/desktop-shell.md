@@ -33,16 +33,27 @@ sequence. The internal launcher consumes those resolved values exactly; it
 does not synthesize missing argument arrays or an alternate environment.
 
 Runtime assigns every BrowserWindow an opaque window key and a root-or-Project
-route. Main requests one in-memory, single-use launch ticket for that key. The
-same response carries the current Runtime-owned Workbench theme preference as
-a launch-time presentation snapshot. Main resolves `system` with Electron's
-native theme, applies the matching pre-render background, loads the stable
-Workbench URL, and exposes only the ticket once through preload so the renderer
-can open its POST SSE connection. Runtime records only the live window key and
-route. Desktop does not persist a settings copy. Missing or invalid launch
-presentation fails the window launch instead of selecting a default background.
-Runtime does not persist window bounds, focus, recovery topology, or renderer
-acknowledgements.
+route. One `DesktopWindowHost` owns the complete local record for that window:
+the Runtime key, BrowserWindow identity, `opening` or `live` phase, current
+one-use launch ticket, deferred focus intent, and native close listener. Main
+does not keep a second BrowserWindow map, and the Electron adapter does not own
+the ticket or Runtime identity.
+
+The Host requests one in-memory, single-use launch ticket for the Runtime key.
+The same response carries the current Runtime-owned Workbench theme preference
+as a launch-time presentation snapshot. Window construction is synchronous and
+hidden. The Host inserts its record and close listener before applying the
+background and calling `loadURL`, so preload can resolve the real
+BrowserWindow to that record and consume the ticket while the document is
+loading. Only a successful load changes the record to `live` and shows the
+window. A focus request received during `opening` is remembered and applied
+after that transition instead of showing a partial Workbench.
+
+The Host resolves `system` with Electron's native theme and loads the stable
+Workbench URL. Runtime records only the live window key and route. Desktop does
+not persist a settings copy. Missing or invalid launch presentation fails the
+window launch instead of selecting a default background. Runtime does not
+persist window bounds, focus, recovery topology, or renderer acknowledgements.
 
 Opening an already-open Project from Electron focuses its existing window.
 Opening another Project replaces the current window's binding after target
@@ -103,6 +114,24 @@ locally. The connection teardown drains Runtime's complete Desktop-host
 topology. Desktop does not continue with divergent topology, retry the cleanup,
 open another Control connection, or restart itself.
 
+View > Reload Workbench and its semantic menu equivalent identify the target by
+the real BrowserWindow, not by exposing the Runtime key to Main. The Host
+serializes explicit reloads. Each request obtains its own fresh ticket, installs
+that ticket and the current launch presentation on the existing record, and
+loads the stable URL once. Requests are not coalesced or retried. If the target
+closes before a queued reload begins, that reload is discarded without asking
+Runtime for a ticket. If a live reload fails while the window still exists, the
+Host clears any unconsumed ticket and reports the failure once, but keeps the
+window record so a later manual reload can try again.
+
+A native close invalidates its Host record immediately, even if an initial load
+or reload is still pending. A non-final close reports its Runtime key exactly
+once; the final close closes Control and exits Electron without the redundant
+request. Product exit or replacement synchronously marks the Host as shutting
+down, removes close listeners, destroys every local window, closes Control, and
+exits Electron. Results arriving from preempted ticket or load operations cannot
+show a window, perform topology cleanup, or report a late error.
+
 ## Renderer Boundary
 
 Desktop windows use context isolation with Node integration disabled. Preload
@@ -158,9 +187,12 @@ commands, so browser and Desktop Workbenches share the same behavior.
 
 ## Executable Authorities
 
-- Desktop lifecycle and command execution: `apps/desktop/src/electron/main.ts`.
+- Desktop composition and native command execution: `apps/desktop/src/electron/main.ts`.
 - Runtime window coordination: `apps/runtime/src/control/desktop/`.
-- Desktop Control adapter: `apps/desktop/src/electron/desktopWindowControlAdapter.ts`.
+- Desktop window identity and lifecycle host:
+  `apps/desktop/src/electron/desktopWindowHost.ts`.
+- BrowserWindow construction and native operations:
+  `apps/desktop/src/electron/electronDesktopWindow.ts`.
 - Native application menu: `apps/desktop/src/electron/desktopApplicationMenu.ts`.
 - Desktop single-instance lifecycle: `apps/desktop/src/electron/main.ts`.
 - Narrow renderer bridge: `apps/desktop/src/electron/preload.ts` and

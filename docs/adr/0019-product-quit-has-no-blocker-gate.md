@@ -7,10 +7,11 @@ terminated as part of shutdown. Runtime first stops accepting Workbench HTTP
 connections and cancels every live Workbench stream so shutdown cannot wait on
 a frontend connection.
 
-Unsaved text values and the active feedback draft are not exit blockers because
-Workbench persists their complete Working Copies to Runtime as they change. A
-later Project binding restores them. Runtime does not ask a connected Workbench
-to submit a checkpoint during quit, and a Workbench is not required to exist.
+Unsaved text values and Canvas Feedback values not yet reflected in accepted
+Runtime state are not exit blockers because Workbench persists their complete
+Working Copies to Runtime as they change, and a later Project binding restores
+them. Runtime does not ask a connected Workbench to submit a checkpoint during
+quit, and a Workbench is not required to exist.
 
 This deliberately favors simple, deterministic product shutdown over trying to
 make every asynchronous task finish perfectly. Product update has one separate

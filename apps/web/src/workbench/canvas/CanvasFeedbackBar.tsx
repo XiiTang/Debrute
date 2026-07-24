@@ -1,21 +1,12 @@
-import React, { useEffect, useLayoutEffect, useRef, useState } from 'react';
-import {
-  Clock3,
-  MapPin,
-  Square
-} from 'lucide-react';
-import {
-  CANVAS_FEEDBACK_MARKS,
-  type CanvasFeedbackEntry,
-  type CanvasFeedbackItem,
-  type CanvasFeedbackMark
-} from '@debrute/canvas-core';
-import type { WorkbenchActions } from '../../types';
+import React, { useLayoutEffect, useRef } from 'react';
+import { Clock3, MapPin, Square } from 'lucide-react';
+import { CANVAS_FEEDBACK_MARKS, type CanvasFeedbackMark } from '@debrute/canvas-core';
 import type { CanvasOverlayRuntime } from './CanvasOverlayRuntime';
 import type { CanvasFeedbackLocalToolset } from '../shell/floatingBars';
 import type { CanvasMediaFeedbackMode } from './CanvasMediaFeedbackLayer';
+import type { CanvasFeedbackCapsule } from './CanvasFeedbackInteraction';
 import { CANVAS_FEEDBACK_MARK_PRESENTATION } from './canvasFeedbackPresentation';
-import { CloseButton, CommentPillInput, IconButton } from '../ui';
+import { CloseButton, IconButton } from '../ui';
 import { useI18n } from '../i18n';
 
 const MOMENT_PILL_COLORS = [
@@ -26,83 +17,60 @@ const MOMENT_PILL_COLORS = [
   '#0891b2',
   '#ca8a04'
 ] as const;
+const FEEDBACK_TEXTAREA_MIN_WIDTH = 24;
+const FEEDBACK_TEXTAREA_MAX_WIDTH = 240;
+const FEEDBACK_TEXTAREA_MIN_HEIGHT = 18;
+const FEEDBACK_TEXTAREA_MAX_HEIGHT = 72;
 
-export function CanvasFeedbackBar({
-  projectRelativePath,
-  entry,
-  onUpdate,
-  overlayRuntime,
-  localToolset = 'none',
-  localFeedbackMode,
-  onLocalFeedbackModeChange,
-  canStartVideoMomentFeedback = false,
-  onStartVideoMomentFeedback,
-  pendingItemLabel,
-  pendingItemComment,
-  pendingItemReadyForComment = true,
-  onPendingItemCommentChange,
-  onSavePendingItem,
-  onCancelPendingItem,
-  onSeekToMoment,
-  onPointerEnter,
-  onPointerLeave
-}: {
+export interface CanvasFeedbackBarProps {
   projectRelativePath: string;
-  entry: CanvasFeedbackEntry | undefined;
-  onUpdate: WorkbenchActions['updateCanvasFeedbackEntry'];
+  capsules: readonly CanvasFeedbackCapsule[];
+  focusedCapsuleId?: string | undefined;
+  authoringItemId?: string | undefined;
+  marks: readonly CanvasFeedbackMark[];
+  onSetMarks(marks: CanvasFeedbackMark[]): void;
   overlayRuntime: CanvasOverlayRuntime;
   localToolset?: CanvasFeedbackLocalToolset | undefined;
   localFeedbackMode?: CanvasMediaFeedbackMode | undefined;
   onLocalFeedbackModeChange?: ((mode: CanvasMediaFeedbackMode) => void) | undefined;
   canStartVideoMomentFeedback?: boolean | undefined;
   onStartVideoMomentFeedback?: ((mode: 'comment' | 'pin' | 'rect') => void) | undefined;
-  pendingItemLabel?: number | string | undefined;
-  pendingItemComment?: string | undefined;
-  pendingItemReadyForComment?: boolean | undefined;
-  onPendingItemCommentChange?: ((comment: string) => void) | undefined;
-  onSavePendingItem?: (() => boolean | Promise<boolean> | undefined) | undefined;
-  onCancelPendingItem?: (() => void) | undefined;
-  onSeekToMoment?: ((seconds: number) => void) | undefined;
-  onPointerEnter?: () => void;
-  onPointerLeave?: () => void;
-}): React.ReactElement {
+  onCreateFileCapsule(): string;
+  onCapsuleChange(itemId: string, value: string): void;
+  onCapsuleFocus(itemId: string): void;
+  onCapsuleBlur(itemId: string): Promise<void>;
+  onCapsuleDelete(itemId: string): Promise<void>;
+  onPointerEnter?: (() => void) | undefined;
+  onPointerLeave?: (() => void) | undefined;
+}
+
+export function CanvasFeedbackBar({
+  projectRelativePath,
+  capsules,
+  focusedCapsuleId,
+  authoringItemId,
+  marks,
+  onSetMarks,
+  overlayRuntime,
+  localToolset = 'none',
+  localFeedbackMode,
+  onLocalFeedbackModeChange,
+  canStartVideoMomentFeedback = false,
+  onStartVideoMomentFeedback,
+  onCreateFileCapsule,
+  onCapsuleChange,
+  onCapsuleFocus,
+  onCapsuleBlur,
+  onCapsuleDelete,
+  onPointerEnter,
+  onPointerLeave
+}: CanvasFeedbackBarProps): React.ReactElement {
   const i18n = useI18n();
   const elementRef = useRef<HTMLDivElement | null>(null);
-  const creatorInputRef = useRef<HTMLInputElement | null>(null);
-  const pendingItemFocusTimerRef = useRef<number | undefined>(undefined);
-  const [draftComment, setDraftComment] = useState('');
-  const [marks, setMarks] = useState<CanvasFeedbackMark[]>(entry?.marks ?? []);
-  const draftCommentRef = useRef('');
-  const pendingItemCommentRef = useRef(pendingItemComment ?? '');
-  const creatorSaveInFlightRef = useRef<string | undefined>(undefined);
-  const pendingItemSaveInFlightRef = useRef<string | undefined>(undefined);
-  const hasPendingItemDraft = Boolean(onSavePendingItem && pendingItemReadyForComment);
-  const hasItemRow = Boolean((entry?.items.length ?? 0) > 0);
-  const creatorValue = hasPendingItemDraft ? pendingItemComment ?? '' : draftComment;
-  const creatorLabel = hasPendingItemDraft
-    ? i18n.t('canvas.feedback.newAnnotationCommentForFile', { path: projectRelativePath })
-    : i18n.t('canvas.feedback.newFileCommentForFile', { path: projectRelativePath });
-  const creatorTitle = hasPendingItemDraft ? i18n.t('canvas.feedback.newAnnotationComment') : i18n.t('canvas.feedback.newFileComment');
-  const pendingItemFocusKey = hasPendingItemDraft
-    ? `${projectRelativePath}:${pendingItemLabel ?? 'pending'}`
-    : undefined;
-
-  useEffect(() => {
-    setMarks(entry?.marks ?? []);
-  }, [entry]);
-
-  useEffect(() => {
-    draftCommentRef.current = '';
-    setDraftComment('');
-  }, [projectRelativePath]);
-
-  useEffect(() => {
-    pendingItemCommentRef.current = pendingItemComment ?? '';
-  }, [pendingItemComment]);
-
-  useEffect(() => {
-    pendingItemSaveInFlightRef.current = undefined;
-  }, [pendingItemFocusKey, pendingItemComment]);
+  const textareaRefs = useRef(new Map<string, HTMLTextAreaElement>());
+  const hideAddComment = Boolean(
+    authoringItemId && capsules.some((capsule) => capsule.itemId === authoringItemId)
+  );
 
   useLayoutEffect(() => {
     if (!elementRef.current) {
@@ -112,88 +80,29 @@ export function CanvasFeedbackBar({
   }, [overlayRuntime]);
 
   useLayoutEffect(() => {
-    if (pendingItemFocusTimerRef.current !== undefined) {
-      window.clearTimeout(pendingItemFocusTimerRef.current);
-      pendingItemFocusTimerRef.current = undefined;
+    if (!focusedCapsuleId) {
+      return;
     }
-    if (!pendingItemFocusKey) {
-      return undefined;
+    const textarea = textareaRefs.current.get(focusedCapsuleId);
+    if (!textarea || document.activeElement === textarea) {
+      return;
     }
-    pendingItemFocusTimerRef.current = window.setTimeout(() => {
-      pendingItemFocusTimerRef.current = undefined;
-      creatorInputRef.current?.focus();
-    }, 0);
-    return () => {
-      if (pendingItemFocusTimerRef.current !== undefined) {
-        window.clearTimeout(pendingItemFocusTimerRef.current);
-        pendingItemFocusTimerRef.current = undefined;
-      }
-    };
-  }, [pendingItemFocusKey]);
+    textarea.scrollIntoView?.({ block: 'nearest', inline: 'nearest' });
+    textarea.focus({ preventScroll: true });
+    textarea.setSelectionRange(textarea.value.length, textarea.value.length);
+  }, [capsules, focusedCapsuleId]);
 
   const toggleMark = (mark: CanvasFeedbackMark) => {
     const nextMarks = marks.includes(mark)
       ? marks.filter((item) => item !== mark)
       : CANVAS_FEEDBACK_MARKS.filter((item) => item === mark || marks.includes(item));
-    setMarks(nextMarks);
-    void onUpdate({
-      operation: 'set-marks',
-      projectRelativePath,
-      marks: nextMarks
-    });
-  };
-
-  const saveFileDraftComment = async () => {
-    const comment = draftCommentRef.current.trim();
-    if (!comment) {
-      draftCommentRef.current = '';
-      setDraftComment('');
-      return;
-    }
-    if (creatorSaveInFlightRef.current === comment) {
-      return;
-    }
-    creatorSaveInFlightRef.current = comment;
-    const saved = await onUpdate({
-      operation: 'add-item',
-      projectRelativePath,
-      item: {
-        kind: 'comment',
-        scope: 'file',
-        comment
-      }
-    });
-    if (creatorSaveInFlightRef.current === comment) {
-      creatorSaveInFlightRef.current = undefined;
-    }
-    if (saved && draftCommentRef.current.trim() === comment) {
-      draftCommentRef.current = '';
-      setDraftComment('');
-    }
-  };
-
-  const saveCreatorComment = async () => {
-    if (hasPendingItemDraft) {
-      const comment = pendingItemCommentRef.current.trim();
-      if (comment) {
-        if (pendingItemSaveInFlightRef.current === comment) {
-          return;
-        }
-        pendingItemSaveInFlightRef.current = comment;
-        const saved = await onSavePendingItem?.();
-        if (saved === false && pendingItemSaveInFlightRef.current === comment) {
-          pendingItemSaveInFlightRef.current = undefined;
-        }
-      }
-      return;
-    }
-    await saveFileDraftComment();
+    onSetMarks(nextMarks);
   };
 
   return (
     <div
       ref={elementRef}
-      className={`db-floating-bar canvas-feedback-bar${hasItemRow ? ' canvas-feedback-bar--has-comment-row' : ''}`}
+      className="db-floating-bar canvas-feedback-bar canvas-feedback-bar--has-comment-row"
       data-canvas-feedback-bar="true"
       onPointerDown={stopCanvasFeedbackBarEvent}
       onPointerMove={stopCanvasFeedbackBarEvent}
@@ -211,14 +120,13 @@ export function CanvasFeedbackBar({
       <div className="canvas-feedback-primary-row">
         <div className="canvas-feedback-actions" role="group" aria-label={i18n.t('canvas.feedback.actions')}>
           {CANVAS_FEEDBACK_MARKS.map((mark) => {
-            const pressed = marks.includes(mark);
             const { labelKey, Icon } = CANVAS_FEEDBACK_MARK_PRESENTATION[mark];
             return (
               <IconButton
                 key={mark}
                 className="canvas-feedback-mark"
                 label={i18n.t(labelKey)}
-                pressed={pressed}
+                pressed={marks.includes(mark)}
                 icon={<Icon />}
                 onClick={() => toggleMark(mark)}
               />
@@ -270,123 +178,174 @@ export function CanvasFeedbackBar({
             </div>
           ) : null}
         </div>
-        <CommentPillInput
-          ref={creatorInputRef}
-          className="canvas-feedback-comment-creator"
-          inputClassName="canvas-feedback-comment-input"
-          data-canvas-local-wheel="focus"
-          aria-label={creatorLabel}
-          title={creatorTitle}
-          value={creatorValue}
-          placeholder={i18n.t('canvas.feedback.commentPlaceholder')}
-          autoFocus={hasPendingItemDraft}
-          sizing={{ minWidthPx: 110, maxWidthPx: 110 }}
-          onChange={(event) => {
-            if (hasPendingItemDraft) {
-              pendingItemCommentRef.current = event.currentTarget.value;
-              onPendingItemCommentChange?.(event.currentTarget.value);
-              return;
-            }
-            draftCommentRef.current = event.currentTarget.value;
-            setDraftComment(event.currentTarget.value);
-          }}
-          onKeyDown={(event) => {
-            if (event.key === 'Enter') {
-              event.preventDefault();
-              void saveCreatorComment();
-            }
-            if (event.key === 'Escape') {
-              if (hasPendingItemDraft) {
-                pendingItemCommentRef.current = '';
-                onCancelPendingItem?.();
-                return;
-              }
-              draftCommentRef.current = '';
-              setDraftComment('');
-            }
-          }}
-          onBlur={() => { void saveCreatorComment(); }}
-        />
       </div>
 
-      {hasItemRow ? (
-        <div className="canvas-feedback-comment-strip" aria-label={i18n.t('canvas.feedback.commentsForFile', { path: projectRelativePath })}>
-          {entry?.items.map((item) => (
-            <FeedbackItemPill
-              key={item.id}
-              item={item}
-              projectRelativePath={projectRelativePath}
-              onUpdate={onUpdate}
-              onSeekToMoment={onSeekToMoment}
-            />
-          ))}
-        </div>
-      ) : null}
+      <div className="canvas-feedback-comment-strip" aria-label={i18n.t('canvas.feedback.commentsForFile', { path: projectRelativePath })}>
+        {capsules.map((capsule) => (
+          <FeedbackCapsule
+            key={capsule.itemId}
+            capsule={capsule}
+            registerTextarea={(textarea) => {
+              if (textarea) {
+                textareaRefs.current.set(capsule.itemId, textarea);
+              } else {
+                textareaRefs.current.delete(capsule.itemId);
+              }
+            }}
+            onChange={onCapsuleChange}
+            onFocus={onCapsuleFocus}
+            onBlur={onCapsuleBlur}
+            onDelete={onCapsuleDelete}
+          />
+        ))}
+        {!hideAddComment ? (
+          <button
+            type="button"
+            className="canvas-feedback-add-comment"
+            data-canvas-feedback-add-comment="true"
+            aria-label={i18n.t('canvas.feedback.newFileCommentForFile', { path: projectRelativePath })}
+            title={i18n.t('canvas.feedback.newFileComment')}
+            onClick={() => onCreateFileCapsule()}
+          >
+            + {i18n.t('canvas.feedback.commentPlaceholder')}
+          </button>
+        ) : null}
+      </div>
     </div>
   );
 }
 
-function FeedbackItemPill({
-  item,
-  projectRelativePath,
-  onUpdate,
-  onSeekToMoment
+function FeedbackCapsule({
+  capsule,
+  registerTextarea,
+  onChange,
+  onFocus,
+  onBlur,
+  onDelete
 }: {
-  item: CanvasFeedbackItem;
-  projectRelativePath: string;
-  onUpdate: WorkbenchActions['updateCanvasFeedbackEntry'];
-  onSeekToMoment?: ((seconds: number) => void) | undefined;
+  capsule: CanvasFeedbackCapsule;
+  registerTextarea(textarea: HTMLTextAreaElement | null): void;
+  onChange(itemId: string, value: string): void;
+  onFocus(itemId: string): void;
+  onBlur(itemId: string): Promise<void>;
+  onDelete(itemId: string): Promise<void>;
 }): React.ReactElement {
   const i18n = useI18n();
-  const spatial = item.kind === 'pin' || item.kind === 'region';
-  const moment = item.scope === 'moment' ? item.moment : undefined;
+  const textareaRef = useRef<HTMLTextAreaElement | null>(null);
+  const spatial = capsule.kind === 'pin' || capsule.kind === 'region';
   const className = [
     'canvas-feedback-comment-pill',
-    item.scope === 'file' ? 'canvas-feedback-comment-pill--file' : 'canvas-feedback-comment-pill--moment',
-    spatial ? 'canvas-feedback-comment-pill--spatial' : undefined
+    capsule.scope === 'file' ? 'canvas-feedback-comment-pill--file' : 'canvas-feedback-comment-pill--moment',
+    spatial ? 'canvas-feedback-comment-pill--spatial' : undefined,
+    capsule.unsynchronized ? 'canvas-feedback-comment-pill--active-surface' : undefined
   ].filter(Boolean).join(' ');
+
+  useLayoutEffect(() => {
+    if (textareaRef.current) {
+      resizeFeedbackTextarea(textareaRef.current);
+    }
+  }, [capsule.comment]);
+
   return (
     <span
       className={className}
-      title={pillTitle(item, i18n, projectRelativePath)}
-      data-canvas-local-wheel="true"
-      data-canvas-feedback-moment={moment?.label}
-      data-canvas-feedback-region-label={spatial ? item.label : undefined}
-      style={moment ? { '--canvas-feedback-moment-color': momentColor(moment.label) } as React.CSSProperties : undefined}
-      onClick={() => {
-        if (moment) {
-          onSeekToMoment?.(moment.currentTimeSeconds);
+      data-canvas-feedback-item-id={capsule.itemId}
+      data-canvas-feedback-moment={capsule.momentLabel}
+      data-canvas-feedback-region-label={spatial ? capsule.label : undefined}
+      data-unsynchronized={capsule.unsynchronized ? 'true' : undefined}
+      style={capsule.momentLabel
+        ? { '--canvas-feedback-moment-color': momentColor(capsule.momentLabel) } as React.CSSProperties
+        : undefined}
+      onPointerDown={(event) => {
+        if (event.target instanceof HTMLTextAreaElement || event.target instanceof HTMLButtonElement) {
+          return;
         }
+        event.preventDefault();
+        textareaRef.current?.focus();
       }}
     >
-      <span className="canvas-feedback-comment-pill-text">{item.comment}</span>
-      {spatial ? <span className="canvas-feedback-comment-pill-badge" aria-hidden="true">{item.label}</span> : null}
+      {capsule.momentLabel ? (
+        <span className="canvas-feedback-comment-pill-moment-badge" aria-hidden="true">{capsule.momentLabel}</span>
+      ) : null}
+      <textarea
+        ref={(textarea) => {
+          textareaRef.current = textarea;
+          registerTextarea(textarea);
+        }}
+        className="canvas-feedback-comment-textarea"
+        data-canvas-local-wheel="focus"
+        aria-label={capsuleAriaLabel(capsule, i18n)}
+        rows={1}
+        value={capsule.comment}
+        placeholder={i18n.t('canvas.feedback.commentPlaceholder')}
+        onInput={(event) => {
+          resizeFeedbackTextarea(event.currentTarget);
+          onChange(capsule.itemId, event.currentTarget.value);
+        }}
+        onFocus={() => onFocus(capsule.itemId)}
+        onBlur={() => { void onBlur(capsule.itemId); }}
+        onKeyDown={(event) => {
+          if (event.key === 'Enter' && !event.shiftKey) {
+            event.preventDefault();
+            event.currentTarget.blur();
+            return;
+          }
+          if (event.key === 'Escape') {
+            event.preventDefault();
+            event.currentTarget.blur();
+          }
+        }}
+      />
+      {spatial && capsule.label !== undefined ? (
+        <span className="canvas-feedback-comment-pill-badge" aria-hidden="true">{capsule.label}</span>
+      ) : null}
       <CloseButton
         className="canvas-feedback-comment-pill-close"
         label={i18n.t('canvas.feedback.deleteItem')}
         title={i18n.t('canvas.feedback.deleteItem')}
+        onPointerDown={(event) => {
+          event.preventDefault();
+          event.stopPropagation();
+        }}
         onClick={(event) => {
           event.preventDefault();
           event.stopPropagation();
-          void onUpdate({
-            operation: 'delete-item',
-            projectRelativePath,
-            itemId: item.id
-          });
+          void onDelete(capsule.itemId);
         }}
       />
     </span>
   );
 }
 
-function pillTitle(item: CanvasFeedbackItem, i18n: ReturnType<typeof useI18n>, projectRelativePath: string): string {
-  if (item.scope === 'moment') {
-    return i18n.t('canvas.feedback.videoMomentItem', { seconds: item.moment.currentTimeSeconds });
+function capsuleAriaLabel(
+  capsule: CanvasFeedbackCapsule,
+  i18n: ReturnType<typeof useI18n>
+): string {
+  if (capsule.scope === 'moment' && capsule.momentTimeSeconds !== undefined) {
+    return i18n.t('canvas.feedback.videoMomentItem', { seconds: capsule.momentTimeSeconds });
   }
-  if (item.kind === 'pin' || item.kind === 'region') {
-    return i18n.t('canvas.feedback.region', { index: item.label });
+  if ((capsule.kind === 'pin' || capsule.kind === 'region') && capsule.label !== undefined) {
+    return i18n.t('canvas.feedback.region', { index: capsule.label });
   }
-  return i18n.t('canvas.feedback.fileLevelComment', { path: projectRelativePath });
+  return i18n.t('canvas.feedback.fileLevelComment', { path: capsule.projectRelativePath });
+}
+
+function resizeFeedbackTextarea(textarea: HTMLTextAreaElement): void {
+  textarea.style.width = `${FEEDBACK_TEXTAREA_MIN_WIDTH}px`;
+  textarea.style.whiteSpace = 'pre';
+  textarea.style.overflowWrap = 'normal';
+  const contentWidth = textarea.scrollWidth;
+  textarea.style.removeProperty('white-space');
+  textarea.style.removeProperty('overflow-wrap');
+  textarea.style.width = `${Math.min(
+    FEEDBACK_TEXTAREA_MAX_WIDTH,
+    Math.max(FEEDBACK_TEXTAREA_MIN_WIDTH, Math.ceil(contentWidth))
+  )}px`;
+  textarea.style.height = 'auto';
+  textarea.style.height = `${Math.min(
+    FEEDBACK_TEXTAREA_MAX_HEIGHT,
+    Math.max(FEEDBACK_TEXTAREA_MIN_HEIGHT, textarea.scrollHeight)
+  )}px`;
 }
 
 function momentColor(label: string): string {

@@ -24,10 +24,7 @@ import type {
   WorkbenchProjectTextFileWriteResult,
   WriteProjectTextFileInput
 } from '@debrute/app-protocol';
-import type {
-  CanvasFeedbackDocument,
-  UpdateCanvasFeedbackEntryInput
-} from '@debrute/canvas-core';
+import type { CanvasFeedbackDocument } from '@debrute/canvas-core';
 import type { ProjectTreeSelectionState } from './workbench/project-explorer/projectTreeInteraction';
 import type { WorkbenchResolvedTheme } from './workbench/services/workbenchTheme';
 import type { WorkbenchTitleBarState } from './workbench/shell/workbenchTitleBarState';
@@ -120,7 +117,6 @@ export interface WorkbenchActions {
   }) => Promise<void>;
   updateCanvasVideoPlaybackState: (canvasId: string, input: Omit<UpdateCanvasVideoPlaybackStateInput, 'canvasId'>) => Promise<void>;
   updateCanvasTextViewportState: (canvasId: string, input: Omit<UpdateCanvasTextViewportStateInput, 'canvasId'>) => Promise<void>;
-  updateCanvasFeedbackEntry: (input: UpdateCanvasFeedbackEntryInput) => Promise<boolean>;
   addProjectPathToCanvasMap: (input: AddProjectPathToCanvasMapInput) => Promise<void>;
   createCanvas: () => Promise<WorkbenchCanvasManagementResult>;
   renameCanvas: (input: { canvasId: string; name: string }) => Promise<WorkbenchCanvasManagementResult>;

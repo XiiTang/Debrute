@@ -413,6 +413,8 @@ fn canvas_feedback_mutation_drives_real_artifact_generation_and_cleanup() {
             input: UpdateCanvasFeedbackEntryInput::AddItem {
                 project_relative_path: "images/cover.png".to_owned(),
                 item: NewCanvasFeedbackItem {
+                    id: "feedback-cover-pin".to_owned(),
+                    created_at: "2026-07-15T01:02:03.004Z".to_owned(),
                     kind: CanvasFeedbackItemKind::Pin,
                     scope: CanvasFeedbackScope::File,
                     moment_time_seconds: None,

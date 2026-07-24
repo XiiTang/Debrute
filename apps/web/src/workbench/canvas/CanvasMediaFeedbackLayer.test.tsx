@@ -29,10 +29,10 @@ describe('CanvasMediaFeedbackLayer', () => {
       <CanvasMediaFeedbackLayer
         items={[]}
         mode={undefined}
-        draftRegion={{
+        draftRegions={[{
           label: 3,
           geometry: { type: 'point', x: 0.4, y: 0.6 }
-        }}
+        }]}
         onRegionDraft={() => undefined}
       />
     );
@@ -40,10 +40,10 @@ describe('CanvasMediaFeedbackLayer', () => {
       <CanvasMediaFeedbackLayer
         items={[]}
         mode={undefined}
-        draftRegion={{
+        draftRegions={[{
           label: 4,
           geometry: { type: 'rect', x: 0.1, y: 0.2, width: 0.3, height: 0.4 }
-        }}
+        }]}
         onRegionDraft={() => undefined}
       />
     );

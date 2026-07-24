@@ -146,6 +146,8 @@ impl CanvasFeedbackDocument {
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct NewCanvasFeedbackItem {
+    pub id: String,
+    pub created_at: String,
     pub kind: CanvasFeedbackItemKind,
     pub scope: CanvasFeedbackScope,
     #[serde(
@@ -327,7 +329,24 @@ pub(crate) fn update_canvas_feedback_document(
             entry.marks = normalized_marks(marks);
         }
         UpdateCanvasFeedbackEntryInput::AddItem { item, .. } => {
-            let id = next_item_id(&entry.items, &updated_at);
+            let id = item.id.trim().to_owned();
+            if id.is_empty() || id != item.id || id.len() > MAX_CANVAS_FEEDBACK_ITEM_ID_BYTES {
+                return Err(ProjectError::Validation(
+                    "Canvas feedback item id must be non-empty, trimmed, and within the byte limit."
+                        .to_owned(),
+                ));
+            }
+            if document
+                .entries
+                .values()
+                .flat_map(|existing_entry| &existing_entry.items)
+                .any(|existing| existing.id == id)
+            {
+                return Err(ProjectError::Validation(format!(
+                    "Canvas feedback item id already exists: {id}"
+                )));
+            }
+            validate_iso_timestamp(&item.created_at)?;
             let comment = normalized_comment(&item.comment)?;
             let geometry = item
                 .geometry
@@ -342,7 +361,7 @@ pub(crate) fn update_canvas_feedback_document(
                 geometry,
                 moment: None,
                 comment,
-                created_at: updated_at.clone(),
+                created_at: item.created_at.clone(),
                 updated_at: updated_at.clone(),
             };
             if item.scope == CanvasFeedbackScope::Moment {
@@ -383,6 +402,11 @@ pub(crate) fn update_canvas_feedback_document(
                 }
             }
             entry.items.push(next_item);
+            entry.items.sort_by(|left, right| {
+                left.created_at
+                    .cmp(&right.created_at)
+                    .then_with(|| left.id.cmp(&right.id))
+            });
         }
         UpdateCanvasFeedbackEntryInput::UpdateItem {
             item_id,
@@ -471,6 +495,7 @@ pub fn validate_canvas_feedback_document(
         )));
     }
     let mut total_items = 0_usize;
+    let mut document_item_ids = BTreeSet::new();
     for (path, entry) in &document.entries {
         total_items = total_items.saturating_add(entry.items.len());
         if total_items > MAX_CANVAS_FEEDBACK_ITEMS {
@@ -485,6 +510,13 @@ pub fn validate_canvas_feedback_document(
             )));
         }
         validate_entry(entry)?;
+        for item in &entry.items {
+            if !document_item_ids.insert(item.id.clone()) {
+                return Err(ProjectError::Validation(
+                    "Canvas feedback item ids must be unique across the document.".to_owned(),
+                ));
+            }
+        }
         if entry.marks.is_empty() && entry.items.is_empty() {
             return Err(ProjectError::Validation(
                 "Canvas feedback document cannot retain an empty entry.".to_owned(),
@@ -521,6 +553,11 @@ fn normalize_canvas_feedback_document(
                     normalized_playback_time(moment.current_time_seconds)?;
             }
         }
+        entry.items.sort_by(|left, right| {
+            left.created_at
+                .cmp(&right.created_at)
+                .then_with(|| left.id.cmp(&right.id))
+        });
         validate_entry(&entry)?;
         if !entry.marks.is_empty() || !entry.items.is_empty() {
             entries.insert(key, entry);
@@ -612,11 +649,6 @@ fn validate_item(item: &CanvasFeedbackItem) -> Result<(), ProjectError> {
         )));
     }
     normalized_comment(&item.comment)?;
-    if item.comment != item.comment.trim() {
-        return Err(ProjectError::Validation(
-            "Canvas feedback comment must be trimmed.".to_owned(),
-        ));
-    }
     validate_iso_timestamp(&item.created_at)?;
     validate_iso_timestamp(&item.updated_at)?;
     match (item.kind, item.scope) {
@@ -666,7 +698,7 @@ fn validate_item(item: &CanvasFeedbackItem) -> Result<(), ProjectError> {
     Ok(())
 }
 
-fn validate_spatial_geometry(
+pub(crate) fn validate_spatial_geometry(
     kind: CanvasFeedbackItemKind,
     geometry: &CanvasFeedbackGeometry,
 ) -> Result<(), ProjectError> {
@@ -757,24 +789,13 @@ fn normalized_comment(comment: &str) -> Result<String, ProjectError> {
         Err(ProjectError::Validation(
             "Canvas feedback comment must be non-empty.".to_owned(),
         ))
-    } else if trimmed.len() > MAX_CANVAS_FEEDBACK_COMMENT_BYTES {
+    } else if comment.len() > MAX_CANVAS_FEEDBACK_COMMENT_BYTES {
         Err(ProjectError::Validation(format!(
             "Canvas feedback comment exceeds {MAX_CANVAS_FEEDBACK_COMMENT_BYTES} bytes."
         )))
     } else {
-        Ok(trimmed.to_owned())
+        Ok(comment.to_owned())
     }
-}
-
-fn next_item_id(items: &[CanvasFeedbackItem], updated_at: &str) -> String {
-    let timestamp: String = updated_at.chars().filter(char::is_ascii_digit).collect();
-    let prefix = format!("item-{timestamp}-");
-    let max = items
-        .iter()
-        .filter_map(|item| item.id.strip_prefix(&prefix)?.parse::<u64>().ok())
-        .max()
-        .unwrap_or(0);
-    format!("{prefix}{}", max.saturating_add(1))
 }
 
 fn moment_ref_for_time(
@@ -822,7 +843,7 @@ fn normalized_playback_time(value: f64) -> Result<f64, ProjectError> {
     })
 }
 
-fn normalized_geometry(
+pub(crate) fn normalized_geometry(
     geometry: &CanvasFeedbackGeometry,
 ) -> Result<CanvasFeedbackGeometry, ProjectError> {
     let canonical_zero = |value: f64| {
@@ -964,6 +985,8 @@ mod tests {
             &UpdateCanvasFeedbackEntryInput::AddItem {
                 project_relative_path: "images/a.png".to_owned(),
                 item: NewCanvasFeedbackItem {
+                    id: "feedback-a".to_owned(),
+                    created_at: T0.to_owned(),
                     kind: CanvasFeedbackItemKind::Pin,
                     scope: CanvasFeedbackScope::File,
                     moment_time_seconds: None,
@@ -976,8 +999,57 @@ mod tests {
         .expect("item should update");
         let item = &with_item.entries["images/a.png"].items[0];
         assert_eq!(item.label, Some(1));
-        assert_eq!(item.comment, "Fix this");
-        assert!(item.id.starts_with("item-20260715010204005-"));
+        assert_eq!(item.comment, "  Fix this  ");
+        assert_eq!(item.id, "feedback-a");
+        assert_eq!(item.created_at, T0);
+    }
+
+    #[test]
+    fn add_item_persists_user_creation_order_instead_of_mutation_arrival_order() {
+        let empty = CanvasFeedbackDocument::empty(T0.to_owned()).expect("valid fixture");
+        let later_created = update_canvas_feedback_document(
+            &empty,
+            &UpdateCanvasFeedbackEntryInput::AddItem {
+                project_relative_path: "images/a.png".to_owned(),
+                item: NewCanvasFeedbackItem {
+                    id: "feedback-later".to_owned(),
+                    created_at: T1.to_owned(),
+                    kind: CanvasFeedbackItemKind::Comment,
+                    scope: CanvasFeedbackScope::File,
+                    moment_time_seconds: None,
+                    geometry: None,
+                    comment: "Later".to_owned(),
+                },
+            },
+            T1.to_owned(),
+        )
+        .expect("later item should update");
+        let reordered = update_canvas_feedback_document(
+            &later_created,
+            &UpdateCanvasFeedbackEntryInput::AddItem {
+                project_relative_path: "images/a.png".to_owned(),
+                item: NewCanvasFeedbackItem {
+                    id: "feedback-earlier".to_owned(),
+                    created_at: T0.to_owned(),
+                    kind: CanvasFeedbackItemKind::Comment,
+                    scope: CanvasFeedbackScope::File,
+                    moment_time_seconds: None,
+                    geometry: None,
+                    comment: "Earlier".to_owned(),
+                },
+            },
+            T1.to_owned(),
+        )
+        .expect("earlier item should update");
+
+        assert_eq!(
+            reordered.entries["images/a.png"]
+                .items
+                .iter()
+                .map(|item| item.id.as_str())
+                .collect::<Vec<_>>(),
+            vec!["feedback-earlier", "feedback-later"]
+        );
     }
 
     #[test]

@@ -67,7 +67,7 @@ export const CANVAS_FEEDBACK_BAR_LAYOUT = {
   containerBorderWidth: 1,
   containerPadding: 3,
   primaryRowHeight: 30,
-  itemRowHeight: 36,
+  itemRowHeight: 84,
   rowGap: 2,
   actionButtonSize: 28,
   actionGap: 4,
@@ -75,10 +75,7 @@ export const CANVAS_FEEDBACK_BAR_LAYOUT = {
   localModeMarginLeft: 2,
   localModePaddingLeft: 6,
   localModeBorderWidth: 1,
-  primaryRowGap: 6,
-  creatorWidth: 110,
-  oneRowHeight: 38,
-  twoRowHeight: 76
+  twoRowHeight: 124
 } as const;
 
 export const CANVAS_MINIMAP_BUTTON_SIZE = {
@@ -130,7 +127,7 @@ export function canvasNodeToViewportRect(input: {
 }
 
 export function feedbackBarPlacementForCanvasTarget(input: {
-  target: Pick<CanvasFeedbackBarTarget, 'nodeRect' | 'surfaceRect' | 'localToolset' | 'entry'>;
+  target: Pick<CanvasFeedbackBarTarget, 'nodeRect' | 'surfaceRect' | 'localToolset'>;
   camera: CanvasCamera;
   viewportRect: FloatingBarRect;
   reservedRects: readonly FloatingBarRect[];
@@ -144,8 +141,7 @@ export function feedbackBarPlacementForCanvasTarget(input: {
     viewportRect: input.viewportRect,
     reservedRects: [...input.reservedRects],
     barSize: canvasFeedbackBarSizeForTarget({
-      localToolset: input.target.localToolset,
-      hasItemRow: canvasFeedbackEntryHasItemRow(input.target.entry)
+      localToolset: input.target.localToolset
     })
   });
 }
@@ -182,12 +178,6 @@ export function placeCanvasFeedbackBar(input: {
   ));
 }
 
-export function canvasFeedbackEntryHasItemRow(
-  entry: CanvasFeedbackEntry | undefined
-): boolean {
-  return Boolean((entry?.items.length ?? 0) > 0);
-}
-
 export function canvasFeedbackBarTargetWithCurrentEntry(
   target: CanvasFeedbackBarTarget,
   canvasFeedback: CanvasFeedbackDocument | undefined
@@ -198,7 +188,6 @@ export function canvasFeedbackBarTargetWithCurrentEntry(
 
 export function canvasFeedbackBarSizeForTarget(input: {
   localToolset: CanvasFeedbackLocalToolset;
-  hasItemRow: boolean;
   extraActionCount?: number | undefined;
 }): Pick<FloatingBarRect, 'width' | 'height'> {
   const baseActionCount = CANVAS_FEEDBACK_MARKS.length + Math.max(0, input.extraActionCount ?? 0);
@@ -211,16 +200,11 @@ export function canvasFeedbackBarSizeForTarget(input: {
         + CANVAS_FEEDBACK_BAR_LAYOUT.localModePaddingLeft
         + feedbackActionGroupWidth(localActionCount, CANVAS_FEEDBACK_BAR_LAYOUT.localActionGap)
       : 0);
-  const rowWidth = actionWidth
-    + CANVAS_FEEDBACK_BAR_LAYOUT.primaryRowGap
-    + CANVAS_FEEDBACK_BAR_LAYOUT.creatorWidth;
   return {
-    width: rowWidth
+    width: actionWidth
       + CANVAS_FEEDBACK_BAR_LAYOUT.containerPadding * 2
       + CANVAS_FEEDBACK_BAR_LAYOUT.containerBorderWidth * 2,
-    height: input.hasItemRow
-      ? CANVAS_FEEDBACK_BAR_LAYOUT.twoRowHeight
-      : CANVAS_FEEDBACK_BAR_LAYOUT.oneRowHeight
+    height: CANVAS_FEEDBACK_BAR_LAYOUT.twoRowHeight
   };
 }
 

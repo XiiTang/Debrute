@@ -64,7 +64,7 @@ describe('feedback bar target equality', () => {
 
 describe('floating bar placement', () => {
   it('places feedback below a node by default', () => {
-    const barSize = canvasFeedbackBarSizeForTarget({ localToolset: 'image', hasItemRow: true });
+    const barSize = canvasFeedbackBarSizeForTarget({ localToolset: 'image' });
     const placement = placeCanvasFeedbackBar({
       nodeViewportRect: { x: 300, y: 200, width: 200, height: 120 },
       viewportRect: { x: 0, y: 0, width: 1000, height: 700 },
@@ -73,7 +73,7 @@ describe('floating bar placement', () => {
     });
 
     expect(placement).toEqual({
-      x: 193,
+      x: 251,
       y: 323,
       width: barSize.width,
       height: barSize.height,
@@ -87,7 +87,7 @@ describe('floating bar placement', () => {
       nodeViewportRect,
       viewportRect: { x: 0, y: 0, width: 1000, height: 700 },
       reservedRects: [],
-      barSize: canvasFeedbackBarSizeForTarget({ localToolset: 'image', hasItemRow: true })
+      barSize: canvasFeedbackBarSizeForTarget({ localToolset: 'image' })
     });
 
     expect(placement?.placement).toBe('below');
@@ -99,11 +99,11 @@ describe('floating bar placement', () => {
       nodeViewportRect: { x: 300, y: 650, width: 200, height: 40 },
       viewportRect: { x: 0, y: 0, width: 1000, height: 700 },
       reservedRects: [],
-      barSize: canvasFeedbackBarSizeForTarget({ localToolset: 'image', hasItemRow: true })
+      barSize: canvasFeedbackBarSizeForTarget({ localToolset: 'image' })
     });
 
     expect(placement?.placement).toBe('above');
-    expect(placement?.y).toBe(571);
+    expect(placement?.y).toBe(523);
   });
 
   it('clamps feedback horizontally inside the viewport', () => {
@@ -111,7 +111,7 @@ describe('floating bar placement', () => {
       nodeViewportRect: { x: 8, y: 200, width: 80, height: 80 },
       viewportRect: { x: 0, y: 0, width: 1000, height: 700 },
       reservedRects: [],
-      barSize: canvasFeedbackBarSizeForTarget({ localToolset: 'image', hasItemRow: true })
+      barSize: canvasFeedbackBarSizeForTarget({ localToolset: 'image' })
     });
 
     expect(placement?.x).toBe(8);
@@ -122,7 +122,7 @@ describe('floating bar placement', () => {
       nodeViewportRect: { x: 300, y: 200, width: 200, height: 120 },
       viewportRect: { x: 0, y: 0, width: 1000, height: 700 },
       reservedRects: [{ x: 190, y: 320, width: 420, height: 48 }],
-      barSize: canvasFeedbackBarSizeForTarget({ localToolset: 'image', hasItemRow: true })
+      barSize: canvasFeedbackBarSizeForTarget({ localToolset: 'image' })
     });
 
     expect(placement?.placement).toBe('above');
@@ -146,61 +146,50 @@ describe('floating bar placement', () => {
       target: {
         nodeRect: { x: 100, y: 50, width: 200, height: 100 },
         surfaceRect: { x: 10, y: 20, width: 900, height: 600 },
-        localToolset: 'image',
-        entry: undefined
+        localToolset: 'image'
       },
       camera: { x: 30, y: 40, z: 2 },
       viewportRect: { x: 0, y: 0, width: 1000, height: 700 },
       reservedRects: []
     })).toEqual({
-      x: 233,
+      x: 291,
       y: 363,
-      width: 415,
-      height: CANVAS_FEEDBACK_BAR_LAYOUT.oneRowHeight,
+      width: 299,
+      height: CANVAS_FEEDBACK_BAR_LAYOUT.twoRowHeight,
       placement: 'below'
     });
   });
 
   it('sizes feedback bars from fixed controls and visible action counts', () => {
     expect(canvasFeedbackBarSizeForTarget({
-      localToolset: 'none',
-      hasItemRow: false
-    })).toEqual({ width: 344, height: 38 });
+      localToolset: 'none'
+    })).toEqual({ width: 228, height: 124 });
     expect(canvasFeedbackBarSizeForTarget({
-      localToolset: 'none',
-      hasItemRow: true
-    })).toEqual({ width: 344, height: 76 });
+      localToolset: 'image'
+    })).toEqual({ width: 299, height: 124 });
     expect(canvasFeedbackBarSizeForTarget({
-      localToolset: 'image',
-      hasItemRow: false
-    })).toEqual({ width: 415, height: 38 });
-    expect(canvasFeedbackBarSizeForTarget({
-      localToolset: 'video',
-      hasItemRow: true
-    })).toEqual({ width: 445, height: 76 });
+      localToolset: 'video'
+    })).toEqual({ width: 329, height: 124 });
   });
 
   it('adds width for extra visible feedback actions without media width buckets', () => {
     expect(canvasFeedbackBarSizeForTarget({
       localToolset: 'none',
-      hasItemRow: false,
       extraActionCount: 1
     }).width).toBe(
       canvasFeedbackBarSizeForTarget({
-        localToolset: 'none',
-        hasItemRow: false
+        localToolset: 'none'
       }).width
       + CANVAS_FEEDBACK_BAR_LAYOUT.actionButtonSize
       + CANVAS_FEEDBACK_BAR_LAYOUT.actionGap
     );
   });
 
-  it('places feedback bars using their visible action rows and comment rows', () => {
+  it('places the always-present editable comment row for each toolset', () => {
     const baseTarget = {
       nodeRect: { x: 100, y: 50, width: 200, height: 100 },
       surfaceRect: { x: 10, y: 20, width: 900, height: 600 },
-      camera: { x: 30, y: 40, z: 2 },
-      entry: undefined
+      camera: { x: 30, y: 40, z: 2 }
     };
 
     const fileOnlyPlacement = feedbackBarPlacementForCanvasTarget({
@@ -215,31 +204,16 @@ describe('floating bar placement', () => {
     const imagePlacement = feedbackBarPlacementForCanvasTarget({
       target: {
         ...baseTarget,
-        localToolset: 'image',
-        entry: {
-          projectRelativePath: 'flow/cover.png',
-          marks: [],
-          nextMomentLabel: 1,
-          nextSpatialLabel: 1,
-          items: [{
-            id: 'comment-1',
-            kind: 'comment',
-            scope: 'file',
-            comment: 'overall direction',
-            createdAt: '2026-05-26T12:00:00.000Z',
-            updatedAt: '2026-05-26T12:00:00.000Z'
-          }],
-          updatedAt: '2026-05-26T12:00:00.000Z'
-        }
+        localToolset: 'image'
       },
       camera: baseTarget.camera,
       viewportRect: { x: 0, y: 0, width: 1000, height: 700 },
       reservedRects: []
     });
 
-    expect(fileOnlyPlacement?.width).toBe(344);
-    expect(imagePlacement?.width).toBe(415);
-    expect(fileOnlyPlacement?.height).toBe(CANVAS_FEEDBACK_BAR_LAYOUT.oneRowHeight);
+    expect(fileOnlyPlacement?.width).toBe(228);
+    expect(imagePlacement?.width).toBe(299);
+    expect(fileOnlyPlacement?.height).toBe(CANVAS_FEEDBACK_BAR_LAYOUT.twoRowHeight);
     expect(imagePlacement?.height).toBe(CANVAS_FEEDBACK_BAR_LAYOUT.twoRowHeight);
   });
 

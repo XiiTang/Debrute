@@ -578,6 +578,10 @@ impl<Executor: ModelOperationExecutor> ModelOperationService<Executor> {
     ///
     /// Returns a closed input, Project, executor-validation, or task-start error before
     /// acceptance. An execution task that cannot start after acceptance is recorded as failed.
+    ///
+    /// # Panics
+    ///
+    /// Panics if the Runtime exhausts its process-local Operation sequence.
     pub fn submit(
         self: &Arc<Self>,
         mut input: SubmitModelOperation,
@@ -612,9 +616,10 @@ impl<Executor: ModelOperationExecutor> ModelOperationService<Executor> {
         let snapshot = {
             let mut state = self.lock_state();
             let sequence = state.next_sequence;
-            state.next_sequence = state.next_sequence.checked_add(1).ok_or_else(|| {
-                ModelOperationError::new("internal_error", "Operation sequence is exhausted.")
-            })?;
+            state.next_sequence = state
+                .next_sequence
+                .checked_add(1)
+                .expect("Model Operation sequence exhausted");
             let record = OperationRecord {
                 sequence,
                 id: id.clone(),
@@ -882,13 +887,13 @@ impl<Executor: ModelOperationExecutor> ModelOperationService<Executor> {
                     record.cancellation.cancel();
                     record.state = OperationState::Cancelled;
                     record.release_model_bindings();
-                    record.change = record.change.saturating_add(1);
+                    record.change += 1;
                     retain_terminal = true;
                 }
                 OperationState::Running => {
                     record.cancellation.cancel();
                     record.state = OperationState::Cancelling;
-                    record.change = record.change.saturating_add(1);
+                    record.change += 1;
                 }
                 OperationState::Cancelling | OperationState::Cancelled => {}
                 OperationState::Succeeded | OperationState::Failed => {
@@ -983,7 +988,7 @@ impl<Executor: ModelOperationExecutor> ModelOperationService<Executor> {
                 return;
             }
             record.state = OperationState::Running;
-            record.change = record.change.saturating_add(1);
+            record.change += 1;
             record.shape
         };
         self.changed.notify_all();
@@ -1066,7 +1071,7 @@ impl<Executor: ModelOperationExecutor> ModelOperationService<Executor> {
                         record.single_artifacts = artifacts;
                         record.state = OperationState::Succeeded;
                         record.release_model_bindings();
-                        record.change = record.change.saturating_add(1);
+                        record.change += 1;
                         drop(state);
                         self.retain_terminal(id);
                         self.changed.notify_all();
@@ -1195,8 +1200,8 @@ impl<Executor: ModelOperationExecutor> ModelOperationService<Executor> {
             .and_then(|accepted| accepted.binding.take())
             .expect("running Batch Item must own its accepted Model binding");
         let request = record.accepted_requests[item_index].request.clone();
-        record.active = record.active.saturating_add(1);
-        record.change = record.change.saturating_add(1);
+        record.active += 1;
+        record.change += 1;
         Some((
             record.project_root.clone(),
             record.project_id.clone(),
@@ -1274,10 +1279,13 @@ impl<Executor: ModelOperationExecutor> ModelOperationService<Executor> {
             let Some(record) = state.operations.get_mut(id) else {
                 return;
             };
-            record.active = record.active.saturating_sub(1);
+            record.active = record
+                .active
+                .checked_sub(1)
+                .expect("settled Batch Item was not active");
             let outcome = match result {
                 Ok(artifacts) => {
-                    record.succeeded = record.succeeded.saturating_add(1);
+                    record.succeeded += 1;
                     Some(BatchItemOutcome {
                         item_index,
                         model,
@@ -1293,7 +1301,7 @@ impl<Executor: ModelOperationExecutor> ModelOperationService<Executor> {
                     None
                 }
                 Err(error) => {
-                    record.failed = record.failed.saturating_add(1);
+                    record.failed += 1;
                     Some(BatchItemOutcome {
                         item_index,
                         model,
@@ -1306,7 +1314,7 @@ impl<Executor: ModelOperationExecutor> ModelOperationService<Executor> {
             if let Some(outcome) = outcome {
                 record.outcomes.push(outcome);
             }
-            record.change = record.change.saturating_add(1);
+            record.change += 1;
         }
         self.changed.notify_all();
     }
@@ -1320,7 +1328,7 @@ impl<Executor: ModelOperationExecutor> ModelOperationService<Executor> {
             if record.state == OperationState::Running {
                 record.state = OperationState::Succeeded;
                 record.release_model_bindings();
-                record.change = record.change.saturating_add(1);
+                record.change += 1;
                 true
             } else {
                 false
@@ -1344,7 +1352,7 @@ impl<Executor: ModelOperationExecutor> ModelOperationService<Executor> {
                 record.state = OperationState::Cancelled;
                 record.active = 0;
                 record.release_model_bindings();
-                record.change = record.change.saturating_add(1);
+                record.change += 1;
                 true
             }
         };
@@ -1367,7 +1375,7 @@ impl<Executor: ModelOperationExecutor> ModelOperationService<Executor> {
                 record.active = 0;
                 record.log = Some(log.to_owned());
                 record.release_model_bindings();
-                record.change = record.change.saturating_add(1);
+                record.change += 1;
                 true
             }
         };
@@ -2024,6 +2032,57 @@ mod tests {
             .expect("test observer remains connected");
         assert_eq!(observed.state, OperationState::Succeeded);
         assert_eq!(observed.execution.single_artifacts().len(), 1);
+    }
+
+    #[test]
+    #[should_panic(expected = "Model Operation sequence exhausted")]
+    fn exhausted_operation_sequence_is_process_fatal() {
+        let fixture = Fixture::new(Vec::new());
+        fixture.service.lock_state().next_sequence = u64::MAX;
+
+        let _ = fixture.service.submit(SubmitModelOperation {
+            project_root: fixture.project.clone(),
+            shape: ExecutionShape::Single,
+            requests: vec![request("image-model")],
+            concurrency: None,
+            timeout_seconds: None,
+            replace: false,
+        });
+    }
+
+    #[test]
+    #[should_panic(expected = "settled Batch Item was not active")]
+    fn impossible_batch_active_underflow_is_process_fatal() {
+        let fixture = Fixture::new(vec![Ok(Vec::new())]);
+        let accepted = fixture
+            .service
+            .submit(SubmitModelOperation {
+                project_root: fixture.project.clone(),
+                shape: ExecutionShape::Batch,
+                requests: vec![request("image-model")],
+                concurrency: Some(1),
+                timeout_seconds: None,
+                replace: false,
+            })
+            .expect("Batch should be accepted");
+        fixture
+            .service
+            .wait(&accepted.id, || true, |_| true, |_| true)
+            .expect("Batch should remain observable")
+            .expect("test observer remains connected");
+        {
+            let mut state = fixture.service.lock_state();
+            let record = state
+                .operations
+                .get_mut(&accepted.id)
+                .expect("accepted Batch record");
+            record.state = OperationState::Running;
+            record.active = 0;
+        }
+
+        fixture
+            .service
+            .finish_item(&accepted.id, 0, "image-model".to_owned(), Ok(Vec::new()));
     }
 
     #[test]

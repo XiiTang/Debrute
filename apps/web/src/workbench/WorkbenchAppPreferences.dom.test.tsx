@@ -690,7 +690,7 @@ function findButton(container: HTMLElement, label: string): HTMLButtonElement | 
 }
 
 function emptyWorkingCopies() {
-  return { text: {}, feedback: null };
+  return { text: {}, feedback: {} };
 }
 
 function apiFixture(overrides: Partial<WorkbenchApiClient> = {}): WorkbenchApiClient {
