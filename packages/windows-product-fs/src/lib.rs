@@ -36,6 +36,12 @@ mod windows {
         file_index: u64,
     }
 
+    /// Creates and durably flushes a junction at `pointer` targeting `target`.
+    ///
+    /// # Errors
+    ///
+    /// Returns an operating-system error when junction creation or the
+    /// durability flush fails. A failed creation is cleaned up before return.
     pub fn create_junction(target: &Path, pointer: &Path) -> io::Result<()> {
         if let Err(error) = junction::create(target, pointer) {
             let _cleanup_result = fs::remove_dir(pointer);
@@ -48,10 +54,22 @@ mod windows {
         Ok(())
     }
 
+    /// Reads the target stored in an existing junction.
+    ///
+    /// # Errors
+    ///
+    /// Returns an operating-system error when `pointer` is not a readable
+    /// junction or its target cannot be decoded.
     pub fn junction_target(pointer: &Path) -> io::Result<PathBuf> {
         junction::get_target(pointer)
     }
 
+    /// Reads the stable filesystem identity of the junction itself.
+    ///
+    /// # Errors
+    ///
+    /// Returns an operating-system error when the reparse point cannot be
+    /// opened or queried.
     pub fn junction_identity(pointer: &Path) -> io::Result<FileIdentity> {
         let file = open_directory(pointer, true)?;
         let mut information = BY_HANDLE_FILE_INFORMATION::default();
@@ -60,7 +78,7 @@ mod windows {
         let success = unsafe {
             GetFileInformationByHandle(
                 file.as_raw_handle().cast::<core::ffi::c_void>() as HANDLE,
-                &mut information,
+                &raw mut information,
             )
         };
         if success == 0 {
@@ -73,17 +91,24 @@ mod windows {
         })
     }
 
+    /// Retargets an existing junction in place and durably flushes the result.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error when the target cannot be made absolute, its encoded
+    /// reparse data is too large, or Windows cannot open, retarget, or flush the
+    /// junction.
     pub fn retarget_junction(pointer: &Path, target: &Path) -> io::Result<()> {
         let absolute_target = std::path::absolute(target)?;
         let mut target_wide = absolute_target
             .as_os_str()
             .encode_wide()
             .collect::<Vec<_>>();
-        let verbatim_prefix = [b'\\' as u16, b'\\' as u16, b'?' as u16, b'\\' as u16];
+        let verbatim_prefix = b"\\\\?\\".map(u16::from);
         if target_wide.starts_with(&verbatim_prefix) {
             target_wide.drain(..verbatim_prefix.len());
         }
-        let nt_prefix = [b'\\' as u16, b'?' as u16, b'?' as u16, b'\\' as u16];
+        let nt_prefix = b"\\??\\".map(u16::from);
         let substitute = nt_prefix.into_iter().chain(target_wide).collect::<Vec<_>>();
         let substitute_bytes = substitute
             .len()
@@ -99,6 +124,7 @@ mod windows {
         let print_name_offset = substitute_bytes.checked_add(2).ok_or_else(|| {
             io::Error::new(io::ErrorKind::InvalidInput, "junction target is too long")
         })?;
+        let buffer_length = u32::from(reparse_data_length) + 8;
         write_u32(&mut buffer, 0, IO_REPARSE_TAG_MOUNT_POINT);
         write_u16(&mut buffer, 4, reparse_data_length);
         write_u16(&mut buffer, 10, substitute_bytes);
@@ -117,10 +143,10 @@ mod windows {
                 file.as_raw_handle().cast::<core::ffi::c_void>() as HANDLE,
                 FSCTL_SET_REPARSE_POINT,
                 buffer.as_ptr().cast::<core::ffi::c_void>(),
-                u32::try_from(buffer.len()).expect("reparse buffer is bounded by u16"),
+                buffer_length,
                 ptr::null_mut(),
                 0,
-                &mut returned,
+                &raw mut returned,
                 ptr::null_mut(),
             )
         };
@@ -130,11 +156,23 @@ mod windows {
         flush_file(&file)
     }
 
+    /// Durably flushes directory metadata.
+    ///
+    /// # Errors
+    ///
+    /// Returns an operating-system error when the directory cannot be opened
+    /// or flushed.
     pub fn sync_directory(path: &Path) -> io::Result<()> {
         let file = open_directory(path, false)?;
         flush_file(&file)
     }
 
+    /// Atomically replaces `destination` with `source` and requests write-through.
+    ///
+    /// # Errors
+    ///
+    /// Returns an operating-system error when Windows cannot perform the
+    /// same-volume replacement and durability operation.
     pub fn replace_file_atomic(source: &Path, destination: &Path) -> io::Result<()> {
         let source = wide_path(source);
         let destination = wide_path(destination);
